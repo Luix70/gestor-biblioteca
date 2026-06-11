@@ -1,5 +1,5 @@
 import dns from 'node:dns';
-dns.setServers(['8.8.8.8', '8.8.4.4']); // Blindaje DNS para redes privadas
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 import chokidar from 'chokidar';
 import path from 'path';
@@ -8,9 +8,24 @@ import dotenv from 'dotenv';
 import { analizarImagenesRecurso } from './agente.js'; 
 import { optimizarImagenRecurso } from './procesador-imagenes.js';
 import { conectarDB, guardarRecurso } from './database.js';
-import { extraerDatosEpub } from './procesador-epub.js'; // Importación del nuevo pipeline
+import { extraerDatosEpub } from './procesador-epub.js'; 
 
 dotenv.config();
+
+// --- INTERCEPTOR DE CONSOLA (Marcas de tiempo de alta precisión) ---
+const logOriginal = console.log;
+const errorOriginal = console.error;
+
+function obtenerMarcaTiempo() {
+    const d = new Date();
+    // Genera formato: [HH:MM:SS.mmm]
+    return `[${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}.${d.getMilliseconds().toString().padStart(3, '0')}]`;
+}
+
+console.log = (...args) => logOriginal(obtenerMarcaTiempo(), ...args);
+console.error = (...args) => errorOriginal(obtenerMarcaTiempo(), ...args);
+// -------------------------------------------------------------------
+
 
 const INBOX = path.resolve(process.env.PATH_INBOX);
 const CDU = path.resolve(process.env.PATH_CDU);
@@ -23,17 +38,16 @@ const INTERVALOS_REINTENTO_MIN = [5, 10, 20, 60, 360, 1440];
 
 let colaDeArchivosActual = new Set();
 let temporizadorDeBatching = null;
+let procesandoLoteActualmente = false; // MUTEX: Cerrojo de concurrencia
 
 async function asegurarDirectorios() {
-    for (const dir of [INBOX, CDU, CUARENTENA, REINTENTOS]) {
-        await fs.mkdir(dir, { recursive: true });
-    }
+    for (const dir of [INBOX, CDU, CUARENTENA, REINTENTOS]) await fs.mkdir(dir, { recursive: true });
 }
 
 async function buscarDuplicado(recurso) {
     const base = await conectarDB();
     if (recurso.isbn) {
-        return await base.collection('biblioteca').findOne({ isbn: resource => recurso.isbn, formatos: { $in: recurso.formatos } });
+        return await base.collection('biblioteca').findOne({ isbn: recurso.isbn, formatos: { $in: recurso.formatos } });
     }
     return await base.collection('biblioteca').findOne({
         titulo: { $regex: `^${recurso.titulo}$`, $options: 'i' },
@@ -50,7 +64,7 @@ function sanitizarParaMongoDB(obj) {
 }
 
 /**
- * PIPELINE DE ENRUTAMIENTO LOGÍSTICO (Polimorfismo estructural)
+ * MOTOR PRINCIPAL: Pipeline polimórfico
  */
 async function procesarTrabajo(rutasArchivos, metadataExistente = null) {
     let metadata = metadataExistente || {
@@ -61,7 +75,6 @@ async function procesarTrabajo(rutasArchivos, metadataExistente = null) {
         archivos: rutasArchivos.map(r => path.basename(r))
     };
 
-    // Evaluamos si el lote corresponde a un documento digital unitario
     const esEpub = rutasArchivos.length === 1 && rutasArchivos[0].toLowerCase().endsWith('.epub');
 
     try {
@@ -69,34 +82,36 @@ async function procesarTrabajo(rutasArchivos, metadataExistente = null) {
 
         if (!metadata.datos_extraidos) {
             if (esEpub) {
-                // FLUJO DIGITAL DIRECTO
                 const { info, bufferPortada } = await extraerDatosEpub(rutasArchivos[0]);
+                info.formatos = ["digital"];
                 
-                if (bufferPortada) {
-                    const bufferOpt = await optimizarImagenRecurso(bufferPortada);
-                    buffersOptimizados.push(bufferOpt);
+                // 🛡️ DEFENSA TEMPRANA: Consultamos Atlas antes de consumir API de Gemini
+                if (info.isbn || info.titulo) {
+                    const posibleDuplicado = await buscarDuplicado(info);
+                    if (posibleDuplicado) {
+                        console.log(`🛑 DUPLICADO ENCONTRADO EN ANÁLISIS LOCAL. Abortando llamadas a IA.`);
+                        const carpetaJob = path.join(CUARENTENA, `DUPLICADO_${metadata.jobId}`);
+                        await fs.mkdir(carpetaJob, { recursive: true });
+                        await fs.rename(rutasArchivos[0], path.join(carpetaJob, path.basename(rutasArchivos[0])));
+                        return true; 
+                    }
                 }
-                
-                // Ejecución cruzada: Metadatos nativos + Imagen de portada enviada a Gemini
+
+                if (bufferPortada) buffersOptimizados.push(await optimizarImagenRecurso(bufferPortada));
                 const rawRecurso = await analizarImagenesRecurso(buffersOptimizados, info);
                 
-                // Forzado de reglas e inyección del índice de capítulos nativo
                 rawRecurso.formatos = ["digital"];
                 if (info.tabla_contenidos) rawRecurso.tabla_contenidos = info.tabla_contenidos;
-                
                 metadata.datos_extraidos = sanitizarParaMongoDB(rawRecurso);
+                
             } else {
-                // FLUJO FÍSICO TRADICIONAL (Imágenes analizadas por visión)
-                for (const ruta of rutasArchivos) {
-                    const bufferInicial = await fs.readFile(ruta);
-                    buffersOptimizados.push(await optimizarImagenRecurso(bufferInicial));
-                }
+                for (const ruta of rutasArchivos) buffersOptimizados.push(await optimizarImagenRecurso(await fs.readFile(ruta)));
                 const rawRecurso = await analizarImagenesRecurso(buffersOptimizados);
                 metadata.datos_extraidos = sanitizarParaMongoDB(rawRecurso);
             }
-            console.log(`\n📋 FICHA EXTRAÍDA CON ÉXITO: "${metadata.datos_extraidos.titulo}"`);
+            console.log(`\n📋 FICHA EXTRAÍDA: "${metadata.datos_extraidos.titulo}"`);
         } else {
-            console.log(`   🧠 [Caché] Reutilizando ficha técnica guardada. Reconstruyendo recursos físicos...`);
+            console.log(`   🧠 [Caché] Reutilizando ficha técnica guardada.`);
             if (esEpub) {
                 const { bufferPortada } = await extraerDatosEpub(rutasArchivos[0]);
                 if (bufferPortada) buffersOptimizados.push(await optimizarImagenRecurso(bufferPortada));
@@ -106,7 +121,6 @@ async function procesarTrabajo(rutasArchivos, metadataExistente = null) {
         const recursoDB = metadata.datos_extraidos;
         recursoDB.fecha_ingreso = new Date(recursoDB.fecha_ingreso || Date.now());
 
-        // Verificación de existencia previa en base de datos
         const duplicado = await buscarDuplicado(recursoDB);
         if (duplicado) {
             console.log(`🛑 Recurso duplicado detectado en Atlas. Cancelando inserción.`);
@@ -117,22 +131,14 @@ async function procesarTrabajo(rutasArchivos, metadataExistente = null) {
         }
 
         const resultadoDB = await guardarRecurso(recursoDB);
-        
-        // Construcción de la arquitectura definitiva en el árbol CDU
         const subEntorno = esEpub ? "digital" : "fisico";
         const carpetaDestinoCDU = path.join(CDU, recursoDB.cdu || "000", "libros", recursoDB.isbn || resultadoDB.insertedId.toString(), subEntorno);
         await fs.mkdir(carpetaDestinoCDU, { recursive: true });
 
         if (esEpub) {
-            // Archivamos la portada optimizada si se logró extraer del libro
-            if (buffersOptimizados.length > 0) {
-                await fs.writeFile(path.join(carpetaDestinoCDU, "portada.jpg"), buffersOptimizados[0]);
-            }
-            // Salvaguardamos el archivo ejecutable EPUB original moviéndolo a la biblioteca permanente
+            if (buffersOptimizados.length > 0) await fs.writeFile(path.join(carpetaDestinoCDU, "portada.jpg"), buffersOptimizados[0]);
             await fs.rename(rutasArchivos[0], path.join(carpetaDestinoCDU, "libro.epub"));
-            console.log(`📂 Almacenamiento completado. Libro electrónico y portada ubicados en árbol CDU.`);
         } else {
-            // Conservación tradicional de fotografías optimizadas
             for (let i = 0; i < rutasArchivos.length; i++) {
                 const bufferOpt = await optimizarImagenRecurso(await fs.readFile(rutasArchivos[i]));
                 await fs.writeFile(path.join(carpetaDestinoCDU, `portada_${i}.jpg`), bufferOpt);
@@ -140,40 +146,56 @@ async function procesarTrabajo(rutasArchivos, metadataExistente = null) {
             }
         }
         
-        console.log(`🚀 PROCESO DE CATALOGACIÓN CONCLUIDO SANO Y SALVO.`);
+        console.log(`🚀 CATALOGACIÓN COMPLETADA.`);
         return true;
     } catch (error) {
-        console.error(`\n⚠️  Interrupción en el pipeline: ${error.message}`);
+        console.error(`\n⚠️ Interrupción: ${error.message}`);
         metadata.ultimo_error = error.message;
         return metadata;
     }
 }
 
 /**
- * GESTIÓN DE ENTRADA (Bandeja de entrada Inbox)
+ * GESTIÓN DE ENTRADA CON MUTEX
  */
 async function encolarNuevoLote() {
+    // 🔒 Si ya estamos procesando un lote, postergamos la ejecución para no solapar hilos
+    if (procesandoLoteActualmente) {
+        if (!temporizadorDeBatching) temporizadorDeBatching = setTimeout(encolarNuevoLote, TIEMPO_ESPERA_AGRUPACION_MS);
+        return;
+    }
+
+    if (colaDeArchivosActual.size === 0) return;
+
     temporizadorDeBatching = null;
     const archivosAProcesar = Array.from(colaDeArchivosActual);
     colaDeArchivosActual.clear();
-
-    if (archivosAProcesar.length === 0) return;
+    procesandoLoteActualmente = true; // Bloqueamos la entrada a nuevos hilos
     
-    const resultado = await procesarTrabajo(archivosAProcesar);
+    try {
+        const resultado = await procesarTrabajo(archivosAProcesar);
 
-    if (resultado !== true) {
-        const metadata = resultado;
-        const carpetaJob = path.join(REINTENTOS, metadata.jobId);
-        await fs.mkdir(carpetaJob, { recursive: true });
-        
-        for (const ruta of archivosAProcesar) {
-            await fs.rename(ruta, path.join(carpetaJob, path.basename(ruta)));
+        if (resultado !== true) {
+            const metadata = resultado;
+            const carpetaJob = path.join(REINTENTOS, metadata.jobId);
+            await fs.mkdir(carpetaJob, { recursive: true });
+            
+            for (const ruta of archivosAProcesar) {
+                try {
+                    await fs.rename(ruta, path.join(carpetaJob, path.basename(ruta)));
+                } catch(e) { console.error(`Error moviendo a Reintentos: ${e.message}`); }
+            }
+            
+            metadata.archivos = archivosAProcesar.map(r => path.basename(r));
+            metadata.proximo_intento_ms = Date.now() + (INTERVALOS_REINTENTO_MIN[0] * 60000);
+            await fs.writeFile(path.join(carpetaJob, 'metadata.json'), JSON.stringify(metadata, null, 2));
+            console.log(`📦 Fallo gestionado. Persistido en cola: ${metadata.jobId}`);
         }
-        
-        metadata.archivos = archivosAProcesar.map(r => path.basename(r));
-        metadata.proximo_intento_ms = Date.now() + (INTERVALOS_REINTENTO_MIN[0] * 60000);
-        await fs.writeFile(path.join(carpetaJob, 'metadata.json'), JSON.stringify(metadata, null, 2));
-        console.log(`📦 Fallo de red detectado. Trabajo persistido de forma segura en cola: ${metadata.jobId}`);
+    } finally {
+        procesandoLoteActualmente = false; // Liberamos el cerrojo
+        if (colaDeArchivosActual.size > 0 && !temporizadorDeBatching) {
+            temporizadorDeBatching = setTimeout(encolarNuevoLote, TIEMPO_ESPERA_AGRUPACION_MS);
+        }
     }
 }
 
@@ -194,24 +216,24 @@ async function daemonReintentos() {
 
             if (Date.now() < metadata.proximo_intento_ms) continue; 
 
-            console.log(`\n🔄 [Daemon] Despertando proceso postergado: ${metadata.jobId}...`);
+            console.log(`\n🔄 [Daemon] Despertando proceso: ${metadata.jobId}...`);
             const rutasAbsolutas = metadata.archivos.map(n => path.join(rutaJob, n));
             
             const resultado = await procesarTrabajo(rutasAbsolutas, metadata);
             
             if (resultado === true) {
                 await fs.rm(rutaJob, { recursive: true, force: true });
-                console.log(`   ✨ [Daemon] Trabajo resuelto con éxito. Cola liberada.`);
+                console.log(`   ✨ [Daemon] Trabajo resuelto. Cola liberada.`);
             } else {
                 resultado.intentos += 1;
                 if (resultado.intentos >= INTERVALOS_REINTENTO_MIN.length) {
-                    console.log(`   🚨 [Daemon] Agotados intentos máximos. Moviendo bloque íntegro a Cuarentena.`);
+                    console.log(`   🚨 [Daemon] Agotados intentos. Moviendo a Cuarentena.`);
                     await fs.rename(rutaJob, path.join(CUARENTENA, resultado.jobId));
                 } else {
                     const minEspera = INTERVALOS_REINTENTO_MIN[resultado.intentos];
                     resultado.proximo_intento_ms = Date.now() + (minEspera * 60000);
                     await fs.writeFile(rutaMetadata, JSON.stringify(resultado, null, 2));
-                    console.log(`   ⏳ [Daemon] Error persistente. Postergado de nuevo por ${minEspera} min.`);
+                    console.log(`   ⏳ [Daemon] Postergado por ${minEspera} min.`);
                 }
             }
         }
@@ -226,7 +248,7 @@ async function loopDaemon() {
 async function iniciarSistema() {
     await asegurarDirectorios();
     console.log(`\n=================================================`);
-    console.log(`👁️  SISTEMA INTEGRAL DE CATALOGACIÓN MULTIMODAL`);
+    console.log(`👁️  SISTEMA ACTIVO CON CONTROL DE CONCURRENCIA`);
     console.log(`📍 Vigilando ruta activa: ${INBOX}`);
     console.log(`=================================================\n`);
     
