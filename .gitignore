@@ -10,3 +10,11 @@ node_modules/
 /Cuarentena/
 /Reintentos/
 /Source Repo/
+
+# Archivos temporales de procesamiento (Importante)
+/temp/
+
+# Carpetas de log o basura del sistema
+*.log
+.DS_Store
+Thumbs.db
