@@ -1,0 +1,11 @@
+# Dependencias de Node
+node_modules/
+
+# Variables de entorno y credenciales
+.env
+
+# Carpetas locales de la aplicación
+/Inbox/
+/CDU/
+/Cuarentena/
+/Reintentos/
