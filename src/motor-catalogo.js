@@ -1,56 +1,65 @@
-// src/motor-catalogo.js
+import { conectarDB, guardarRecurso } from './database.js';
 import axios from 'axios';
-import { guardarRecurso } from './database.js';
 
-// src/motor-catalogo.js
-
-async function obtenerMetadataPublica(isbn) {
-    if (!isbn) return null;
-    try {
-        const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`;
-        const res = await axios.get(url);
-        // ... (tu lógica de extracción)
-    } catch (e) {
-        if (e.response?.status === 429) {
-            console.warn("⚠️ Límite de Google alcanzado. Saltando enriquecimiento.");
-        } else {
-            console.error(`[API Externa] Error con ISBN ${isbn}:`, e.message);
-        }
-    }
-    return null; // Retorna null para que el motor siga trabajando sin datos externos
+async function obtenerOcrearEntidad(coleccionNombre, nombre) {
+    if (!nombre || nombre.trim() === "") return null;
+    const nombreNormalizado = nombre.includes(',') ? nombre.split(',').reverse().map(s => s.trim()).join(' ') : nombre.trim();
+    const db = await conectarDB();
+    const coleccion = db.collection(coleccionNombre);
+    const resultado = await coleccion.findOneAndUpdate(
+        { nombre: { $regex: new RegExp(`^${nombreNormalizado}$`, 'i') } },
+        { $setOnInsert: { nombre: nombreNormalizado } },
+        { upsert: true, returnDocument: 'after' }
+    );
+    return resultado._id;
 }
 
-export async function procesarCatalogo(datos, ubicacion = null) {
-    const ubicacionFinal = ubicacion || { ambito: "Sin Ubicación", estanteria: "E0" };
+async function obtenerMetadataPublica(datos) {
+    const url = datos.isbn 
+        ? `https://www.googleapis.com/books/v1/volumes?q=isbn:${datos.isbn}`
+        : `https://www.googleapis.com/books/v1/volumes?q=intitle:"${encodeURIComponent(datos.titulo)}"&maxResults=1`;
+    try {
+        const res = await axios.get(url);
+        if (res.data.items?.[0]) {
+            const vol = res.data.items[0].volumeInfo;
+            return {
+                titulo: vol.title,
+                sinopsis: vol.description || "",
+                editorial: vol.publisher || "",
+                año_edicion: vol.publishedDate ? parseInt(vol.publishedDate.substring(0, 4)) : null,
+                isbn: vol.industryIdentifiers?.find(id => id.type.startsWith('ISBN'))?.identifier
+            };
+        }
+    } catch (e) { return {}; }
+    return {};
+}
 
-    // 1. Enriquecimiento Determinista (API Pública)
-    const datosPublicos = await obtenerMetadataPublica(datos.isbn);
-    
-    // 2. Fusionamos datos: La API pública sobrescribe lo que ya sabíamos
-    const recursoEnriquecido = { ...datos, ...datosPublicos };
+export async function procesarCatalogo(datos) {
+    const externo = await obtenerMetadataPublica(datos);
+    const autores = externo.autores || datos.autores || [];
+    const idsAutores = await Promise.all(autores.map(a => obtenerOcrearEntidad('autores', a)));
+    const editorialId = await obtenerOcrearEntidad('editoriales', externo.editorial || datos.editorial);
 
-    // 3. Construcción del objeto final
-
-    const nuevoLibro = {
-        tipo_recurso: recursoEnriquecido.tipo_recurso || 'libro',
-        titulo: recursoEnriquecido.titulo || 'Sin título',
-        cdu: recursoEnriquecido.cdu || '000',
-        idioma: recursoEnriquecido.idioma || 'es',
-        formatos: recursoEnriquecido.formatos || ['papel'],
-        ubicacion: ubicacionFinal,
-        sinopsis: recursoEnriquecido.sinopsis || "",
-        editorial: recursoEnriquecido.editorial || "",
-        estado_verificacion: 'pendiente',
+    // ... dentro de procesarCatalogo
+    const doc = {
+        tipo_recurso: 'libro',
+        titulo: externo.titulo || datos.titulo || 'Sin título',
+        cdu: datos.cdu || '000',
+        idioma: datos.idioma || 'es',
+        formatos: datos.formatos,
+        autores: idsAutores.filter(id => id !== null),
+        editorial_id: editorialId,
+        sinopsis: externo.sinopsis || datos.sinopsis || "",
         fecha_ingreso: new Date(),
-        isbn: recursoEnriquecido.isbn || datos.isbn,
-        rutas_imagenes: recursoEnriquecido.rutas_imagenes || []
+        estado_verificacion: 'pendiente',
+        ubicacion: { ambito: 'Sin Ubicación', estanteria: 'E0' }
     };
 
-    // MAGIA AQUÍ: Solo añadimos el año si es un número válido
-    if (recursoEnriquecido.año_edicion) {
-        nuevoLibro.año_edicion = recursoEnriquecido.año_edicion;
+    // ELIMINACIÓN DEFENSIVA: Solo añadimos el ISBN si existe y no es nulo
+    const isbnFinal = externo.isbn || datos.isbn;
+    if (isbnFinal && typeof isbnFinal === 'string' && isbnFinal.trim() !== "") {
+        doc.isbn = isbnFinal;
     }
 
-    console.log("📦 Documento final a insertar:", JSON.stringify(nuevoLibro, null, 2));
-    return await guardarRecurso(nuevoLibro);
+    return await guardarRecurso(doc);
 }
