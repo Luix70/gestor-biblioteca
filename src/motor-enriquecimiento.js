@@ -1,70 +1,117 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
 
+// "Editoriales" que en realidad son grupos de difusión/maquetación, no casas editoriales.
+// Si el archivo trae una de estas, NO es autoritativa: una editorial real de las APIs prevalece.
+const EDITORIALES_NO_VALIDAS = [
+    /epub\s*libre/i,
+    /lectulandia/i,
+    /oz\s*epub/i,
+    /todo\s*epub/i,
+];
+
+function esEditorialFalsa(nombre) {
+    return !!nombre && EDITORIALES_NO_VALIDAS.some(re => re.test(String(nombre)));
+}
+
 /**
- * Nivel 2: Toma los datos crudos del lector y los enriquece
- * usando nuestro proveedor de metadatos externo (Google -> OpenLibrary -> Gemini).
+ * Devuelve el primer valor "con contenido" de la lista.
+ * Trata null, undefined, '' y arrays vacíos como ausencia de dato.
  */
-export async function enriquecerMetadatos(datosBase) {
-    // 1. Clonamos el objeto con los campos estructurales básicos
-    let documento = { 
-        ...datosBase,
-        tipo_recurso: 'libro',
-        formatos: ['epub'],
-        estado_verificacion: 'pendiente',
-        alertas_agente: [],
-        ubicacion: {
-            ambito: "Biblioteca Digital",
-            estanteria: "NAS"
-        }
-    };
-
-    console.log(`[Enriquecedor] Buscando datos extra para: "${documento.titulo}"...`);
-
-    // 2. Llamamos a nuestra nueva maquinaria pesada (APIs + IA)
-    const autorPrincipal = documento.autores && documento.autores.length > 0 ? documento.autores[0] : '';
-    const datosExtra = await buscarMetadatosExternos(documento.titulo, autorPrincipal);
-
-    // 3. Fusionamos los datos descubiertos
-    // Priorizamos lo que ya traía el EPUB, si no lo tiene, usamos lo de la API
-   
-    documento.sinopsis = documento.sinopsis || datosExtra.sinopsis;
-    documento.editorial = documento.editorial || datosExtra.editorial;
-    documento.cdu = datosExtra.cdu; // La CDU viene validada por la caché o la IA
-    
-    // Asignación segura del ISBN para no romper el esquema
-    const isbnDescubierto = documento.isbn || datosExtra.isbn;
-    if (isbnDescubierto) {
-        documento.isbn = isbnDescubierto;
-    } else {
-        delete documento.isbn; // Eliminamos la clave para que MongoDB la ignore
+function primerValido(...valores) {
+    for (const v of valores) {
+        if (v === null || v === undefined) continue;
+        if (typeof v === 'string' && v.trim() === '') continue;
+        if (Array.isArray(v) && v.length === 0) continue;
+        return v;
     }
+    return undefined;
+}
 
-    // Traspasamos las alertas generadas por el proveedor
+/**
+ * Nivel 2: enriquece los datos crudos de un lector (EPUB/PDF/visión) con fuentes externas.
+ *
+ * PRINCIPIO RECTOR — CONSERVADURISMO: el archivo es la fuente de verdad. Todo dato que el
+ * archivo ya aporta NUNCA se sobrescribe con datos de Internet/IA; las fuentes externas solo
+ * rellenan huecos.
+ *
+ * @param datosBase  datos crudos del lector (titulo, autores, isbn, editorial, sinopsis, ...)
+ * @param contexto   { tipo_recurso, formatos, ubicacion } que el orquestador fija según el tipo
+ */
+export async function enriquecerMetadatos(datosBase, contexto = {}) {
+    // Sinopsis nativa: puede llegar como 'sinopsis' (lector-epub) o 'sinopsis_nativa' (procesador-epub).
+    const sinopsisEpub = primerValido(datosBase.sinopsis, datosBase.sinopsis_nativa);
+
+    let documento = {
+        ...datosBase,
+        tipo_recurso: primerValido(datosBase.tipo_recurso, contexto.tipo_recurso) || 'libro',
+        formatos: primerValido(datosBase.formatos, contexto.formatos) || ['digital'],
+        estado_verificacion: 'pendiente',
+        alertas_agente: Array.isArray(datosBase.alertas_agente) ? [...datosBase.alertas_agente] : [],
+        ubicacion: primerValido(datosBase.ubicacion, contexto.ubicacion)
+            || { ambito: 'Biblioteca Digital', estanteria: 'NAS' }
+    };
+    if (sinopsisEpub) documento.sinopsis = sinopsisEpub;
+    delete documento.sinopsis_nativa;
+
+    console.log(`[Enriquecedor] Datos nativos para: "${documento.titulo}"`);
+
+    // Qué falta (solo eso justifica tocar la red / la IA).
+    const faltaSinopsis = !primerValido(documento.sinopsis);
+    const faltaCdu = !primerValido(documento.cdu);
+
+    const autorPrincipal = (documento.autores && documento.autores.length > 0) ? documento.autores[0] : '';
+    const imagen = primerValido(datosBase.cubierta_base64, datosBase.imagen_adicional) || null;
+
+    const datosExtra = await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
+        incluirSinopsis: faltaSinopsis,
+        incluirCdu: faltaCdu
+    });
+
+    // Fusión CONSERVADORA: el dato del archivo manda; lo externo solo rellena huecos.
+    documento.sinopsis    = primerValido(documento.sinopsis, datosExtra.sinopsis);
+
+    // Editorial: excepción al conservadurismo. Si el archivo trae un grupo de difusión
+    // (ePubLibre, etc.), una editorial real encontrada en las APIs tiene prioridad.
+    if (esEditorialFalsa(documento.editorial)) {
+        const editorialReal = primerValido(datosExtra.editorial);
+        if (editorialReal) {
+            documento.alertas_agente.push(`Editorial "${documento.editorial}" sustituida por la editorial real: "${editorialReal}".`);
+            documento.editorial = editorialReal;
+        }
+        // Si las APIs no aportan una editorial real, se conserva la del archivo.
+    } else {
+        documento.editorial = primerValido(documento.editorial, datosExtra.editorial);
+    }
+    documento.año_edicion = primerValido(documento.año_edicion, datosExtra.año_edicion);
+    documento.idioma      = primerValido(documento.idioma, datosExtra.idioma) || 'es';
+    documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
+    documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
+
+    // ISBN: el del archivo es preferente; si no hay ninguno, se elimina (no romper el esquema).
+    const isbnFinal = primerValido(documento.isbn, datosExtra.isbn);
+    if (isbnFinal) documento.isbn = String(isbnFinal).replace(/-/g, '');
+    else delete documento.isbn;
+
+    // Candidatos de portada remota para que el orquestador construya imagenes[] (campo interno).
+    documento._portadas_remotas = datosExtra.portadas_remotas || [];
+
+    // Trazabilidad.
     if (datosExtra.alertas && datosExtra.alertas.length > 0) {
         documento.alertas_agente.push(...datosExtra.alertas);
     }
-
-    if (datosBase.cubierta_base64 || datosBase.imagen_adicional) {
-    const img = datosBase.cubierta_base64 || datosBase.imagen_adicional;
-    const infoVisual = await analizarImagenConIA(img);
-    
-    if (infoVisual) {
-        documento.isbn = infoVisual.isbn || documento.isbn;
-        documento.editorial = infoVisual.editorial || documento.editorial;
-        documento.año_edicion = infoVisual.año_edicion || documento.año_edicion;
-        documento.alertas_agente.push("Datos extraídos mediante IA multimodal de imágenes internas.");
+    if (sinopsisEpub) {
+        documento.alertas_agente.push("Sinopsis conservada del archivo original (no sobrescrita).");
     }
-    if (documento.isbn) {
-        console.log("🔍 ISBN detectado. Consultando base de datos global...");
-        const datosGlobales = await buscarPorISBN(documento.isbn);
-        if (datosGlobales) {
-            documento = { ...documento, ...datosGlobales };
-            documento.alertas_agente.push("Datos validados vía ISBN en base de datos global.");
-        }
-}
 
-}
+    // Estado de verificación: completado solo si la identificación es sólida.
+    documento.estado_verificacion =
+        (documento.titulo && documento.cdu && documento.isbn) ? 'completado' : 'pendiente';
+    if (documento.estado_verificacion === 'pendiente') {
+        documento.alertas_agente.push("Identificación incompleta (sin ISBN o sin CDU): requiere revisión humana.");
+    }
 
+    // Limpieza: ningún campo opcional debe quedar como undefined.
+    Object.keys(documento).forEach(k => documento[k] === undefined && delete documento[k]);
 
     return documento;
 }

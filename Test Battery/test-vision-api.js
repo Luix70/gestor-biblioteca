@@ -1,13 +1,17 @@
 import 'dotenv/config';
 import fs from 'fs/promises';
-import { buscarMetadatosExternos } from './src/utils/proveedor-metadatos.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { buscarMetadatosExternos } from '../src/utils/proveedor-metadatos.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function testIntegracion() {
     console.log("🚀 Iniciando Test de Integración: Visión + API...");
 
     try {
         // 1. Cargamos tu imagen de prueba
-        const imageBuffer = await fs.readFile('./content.jfif');
+        const imageBuffer = await fs.readFile(path.join(__dirname, 'content.jfif'));
         const base64Image = imageBuffer.toString('base64');
 
         // 2. Simulamos los datos que extraeríamos del EPUB (título/autor)

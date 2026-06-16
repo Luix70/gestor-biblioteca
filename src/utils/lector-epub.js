@@ -25,10 +25,17 @@ export async function extraerMetadatosEpub(rutaArchivo) {
         return null;
     }
 
-// Dentro del try, después de la sección 3 (cubierta), añadimos:
-if (!metadatos.cubierta_base64) {
-    metadatos.imagen_adicional = buscarPaginaCreditos(zip);
-}
+    // Limpia HTML/entidades de un texto (las descripciones EPUB suelen traer <p>…</p>).
+    function limpiarTexto(t) {
+        if (!t) return null;
+        const limpio = t
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return limpio || null;
+    }
 
     return new Promise(async (resolve) => {
         try {
@@ -60,9 +67,12 @@ if (!metadatos.cubierta_base64) {
                 isbn: metadata.find('dc\\:identifier[opf\\:scheme="ISBN"]').first().text().trim() || null,
                 editorial: metadata.find('dc\\:publisher').first().text().trim() || null,
                 idioma: metadata.find('dc\\:language').first().text().trim().substring(0, 2).toLowerCase() || 'es',
-                sinopsis: metadata.find('dc\\:description').text().trim() || null,
+                sinopsis: limpiarTexto(metadata.find('dc\\:description').text()),
                 año_edicion: parseInt(metadata.find('dc\\:date').first().text().substring(0, 4)) || null,
-                palabras_clave: metadata.find('dc\\:subject').map((i, el) => $(el).text().trim()).get(),
+                palabras_clave: metadata.find('dc\\:subject')
+                    .map((i, el) => $(el).text().trim()).get()
+                    .flatMap(s => s.split(',').map(x => x.trim()))
+                    .filter(Boolean),
                 cubierta_base64: null // Reservado para la imagen que enviaremos a Gemini
             };
 
@@ -80,6 +90,11 @@ if (!metadatos.cubierta_base64) {
                         metadatos.cubierta_base64 = imageEntry.getData().toString('base64');
                     }
                 }
+            }
+
+            // 3b. Si no hay cubierta declarada, intentamos la página de créditos como imagen adicional.
+            if (!metadatos.cubierta_base64) {
+                metadatos.imagen_adicional = buscarPaginaCreditos(zip);
             }
 
             // 4. Limpieza para evitar violaciones de esquema en MongoDB

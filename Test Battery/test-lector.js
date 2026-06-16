@@ -1,10 +1,14 @@
 import 'dotenv/config'; // <-- ¡Esta es la clave! Carga las variables de entorno
-import { extraerMetadatosEpub } from './src/utils/lector-epub.js';
-import { enriquecerMetadatos } from './src/motor-enriquecimiento.js';
-import { procesarCatalogo } from './src/motor-catalogo.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { extraerMetadatosEpub } from '../src/utils/lector-epub.js';
+import { enriquecerMetadatos } from '../src/motor-enriquecimiento.js';
+import { procesarCatalogo } from '../src/motor-catalogo.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function probarCadenaCompleta() {
-    const rutaAbsoluta = 'D:\\gestor-biblioteca\\Inbox\\Adrian Escudero, Jesus - El lenguaje de Heidegger [24563] (r1.2).epub'; 
+    const rutaAbsoluta = path.join(__dirname, '3.BatchOf10Epubs', 'Adrian Escudero, Jesus - El lenguaje de Heidegger [24563] (r1.2).epub');
 
     console.log(`🧪 Iniciando Cadena de Ingesta Completa...`);
     

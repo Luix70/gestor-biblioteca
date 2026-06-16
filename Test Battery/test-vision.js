@@ -1,13 +1,17 @@
 import 'dotenv/config';
 import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function testVision() {
     console.log("👁️ Probando capacidad de visión de Gemini...");
 
     try {
         // 1. Cargamos tu imagen de créditos
-        const imageBuffer = await fs.readFile('./content.jfif');
+        const imageBuffer = await fs.readFile(path.join(__dirname, 'content.jfif'));
         const base64Image = imageBuffer.toString('base64');
 
         // 2. Inicializamos Gemini

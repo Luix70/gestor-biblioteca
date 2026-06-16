@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
+import { buscarEnGoogleBooks } from './buscador-google-books.js';
 
 /**
  * Analiza una imagen en base64 para extraer metadatos bibliográficos.
@@ -45,7 +46,7 @@ async function obtenerCdu(titulo, sinopsis, categoria_origen, fuente_categoria) 
             2. Prohibido usar subdivisiones alfabéticas (ej: "(HEIDEGGER, M.)").
             3. Si necesitas cruzar materias, usa ":" una sola vez.
             4. Responde SOLO con el código (ej: "141.78:81'37").
-            Datos: Título: "${titulo}", Sinopsis: "${sinopsis || 'N/A'}", Cat. Origen: "${categoria_origen || 'N/A'}"
+            Datos: Título: "${titulo}", Sinopsis: "${sinopsis || 'N/A'}", Cat. Origen: "${categoria_origen || 'N/A'}" (fuente: ${fuente_categoria || 'N/A'})
         `;
 
         const result = await model.generateContent(prompt);
@@ -59,41 +60,96 @@ async function obtenerCdu(titulo, sinopsis, categoria_origen, fuente_categoria) 
 /**
  * Flujo maestro de enriquecimiento.
  */
-export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null) {
+export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null, opciones = {}) {
+    const { incluirSinopsis = true, incluirCdu = true } = opciones;
     let datosExtra = {
         isbn: null,
         sinopsis: null,
         editorial: null,
+        año_edicion: null,
+        idioma: null,
+        categorias: [],
+        portadas_remotas: [], // candidatos de cubierta (se usan solo si el archivo no aporta una)
         cdu: null,
         alertas: []
     };
 
-    // 1. Visión Multimodal (si hay imagen)
+    // Rellena un campo de datosExtra solo si sigue vacío (gana la primera fuente consultada).
+    const rellenar = (campo, valor) => {
+        if (valor === null || valor === undefined || valor === '') return;
+        if (Array.isArray(valor) && valor.length === 0) return;
+        const actual = datosExtra[campo];
+        const vacio = actual === null || actual === undefined || actual === ''
+            || (Array.isArray(actual) && actual.length === 0);
+        if (vacio) datosExtra[campo] = valor;
+    };
+
+    // TIER 3a · Visión Multimodal: produce solo PISTAS (la IA es la fuente menos fiable;
+    // su ISBN se usa para consultar las APIs, pero estas tendrán prioridad sobre ella).
+    let pistasIA = null;
     if (imagenBase64) {
-        const infoIA = await analizarImagenConIA(imagenBase64);
-        if (infoIA) {
-            datosExtra.isbn = infoIA.isbn;
-            datosExtra.editorial = infoIA.editorial;
-            datosExtra.alertas.push("IA extrajo metadatos de la imagen.");
-        }
+        pistasIA = await analizarImagenConIA(imagenBase64);
+        if (pistasIA) datosExtra.alertas.push("IA extrajo pistas de la imagen.");
     }
+    const isbnHint = pistasIA ? pistasIA.isbn : null;
 
-    // 2. Validación cruzada en base de datos global
-    const infoValidada = await buscarPorCriterios({ 
-        isbn: datosExtra.isbn, 
-        titulo: titulo, 
-        editorial: datosExtra.editorial 
+    // TIER 2a · OpenLibrary (autoridad principal). Si el ISBN-pista es erróneo y da 404,
+    // el buscador ya recae en una búsqueda por título/autor y lo autocorrige.
+    const infoOL = await buscarPorCriterios({
+        isbn: isbnHint,
+        titulo: titulo,
+        autor: autor,
+        incluirSinopsis: incluirSinopsis
     });
-
-    if (infoValidada) {
-        datosExtra.isbn = infoValidada.isbn || datosExtra.isbn;
-        datosExtra.editorial = infoValidada.editorial || datosExtra.editorial;
-        datosExtra.sinopsis = infoValidada.sinopsis || datosExtra.sinopsis;
+    if (infoOL) {
+        rellenar('isbn', infoOL.isbn);
+        rellenar('editorial', infoOL.editorial);
+        rellenar('sinopsis', infoOL.sinopsis);
+        rellenar('año_edicion', infoOL.año_edicion);
         datosExtra.alertas.push("Datos validados contra OpenLibrary.");
     }
 
-    // 3. Resolución final de la CDU
-    datosExtra.cdu = await obtenerCdu(titulo, datosExtra.sinopsis, null, "IA + API");
+    // TIER 2b · Google Books (segunda autoridad; rellena huecos: sinopsis, categorías, portada).
+    const infoGB = await buscarEnGoogleBooks({
+        isbn: datosExtra.isbn || isbnHint,
+        titulo: titulo,
+        autor: autor
+    });
+    if (infoGB) {
+        rellenar('isbn', infoGB.isbn);
+        rellenar('editorial', infoGB.editorial);
+        if (incluirSinopsis) rellenar('sinopsis', infoGB.sinopsis);
+        rellenar('año_edicion', infoGB.año_edicion);
+        rellenar('idioma', infoGB.idioma);
+        rellenar('categorias', infoGB.categorias);
+        if (infoGB.portada_url) {
+            datosExtra.portadas_remotas.push({ origen: 'google_books', url: infoGB.portada_url });
+        }
+        datosExtra.alertas.push("Datos complementados con Google Books.");
+    }
+
+    // Candidato de portada de OpenLibrary (construible desde el ISBN, sin llamada extra).
+    if (datosExtra.isbn) {
+        const isbnLimpio = datosExtra.isbn.replace(/-/g, '');
+        datosExtra.portadas_remotas.push({
+            origen: 'openlibrary',
+            url: `https://covers.openlibrary.org/b/isbn/${isbnLimpio}-L.jpg`
+        });
+    }
+
+    // TIER 3a (fallback) · Las pistas de la IA solo rellenan lo que NINGUNA API pudo aportar.
+    if (pistasIA) {
+        rellenar('isbn', pistasIA.isbn);
+        rellenar('editorial', pistasIA.editorial);
+        rellenar('año_edicion', pistasIA.año_edicion);
+    }
+
+    // TIER 3c · Resolución final de la CDU (sembrada con la categoría de Google Books).
+    // Se omite la llamada a la IA si el llamante ya dispone de una CDU.
+    if (incluirCdu) {
+        const categoriaSemilla = datosExtra.categorias.length > 0 ? datosExtra.categorias[0] : null;
+        datosExtra.cdu = await obtenerCdu(titulo, datosExtra.sinopsis, categoriaSemilla, "Google Books");
+    }
 
     return datosExtra;
 }

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { buscarMetadatosExternos } from './src/utils/proveedor-metadatos.js';
+import { buscarMetadatosExternos } from '../src/utils/proveedor-metadatos.js';
 
 async function probarMotorAPIs() {
     console.log("🧪 Iniciando prueba aislada del proveedor de metadatos...\n");
