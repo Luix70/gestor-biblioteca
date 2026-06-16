@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ErrorInfraestructura, esErrorDeRed } from '../errores.js';
 
 const BASE = 'https://openlibrary.org';
 
@@ -92,6 +93,7 @@ export async function buscarPorCriterios(criterios) {
             const norm = normalizar(res.data);
             if (norm) return await finalizar(norm, incluirSinopsis);
         } catch (e) {
+            if (esErrorDeRed(e)) throw new ErrorInfraestructura('OpenLibrary inalcanzable', e);
             // 404 (ISBN inexistente o mal leído por la IA) -> caemos al buscador por texto
         }
     }
@@ -107,6 +109,7 @@ export async function buscarPorCriterios(criterios) {
                 return await finalizar(await buscarPorTexto(criterios.titulo, null), incluirSinopsis);
             }
         } catch (e) {
+            if (esErrorDeRed(e)) throw new ErrorInfraestructura('OpenLibrary inalcanzable', e);
             return null;
         }
     }

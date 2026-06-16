@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ErrorInfraestructura, esErrorDeRed } from '../errores.js';
 
 const BASE = 'https://www.googleapis.com/books/v1/volumes';
 
@@ -51,6 +52,7 @@ async function consultar(query) {
         const item = res.data && Array.isArray(res.data.items) ? res.data.items[0] : null;
         return normalizar(item);
     } catch (e) {
+        if (esErrorDeRed(e)) throw new ErrorInfraestructura('Google Books inalcanzable', e);
         return null;
     }
 }

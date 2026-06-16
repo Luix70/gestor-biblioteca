@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { extractText, getDocumentProxy } from 'unpdf';
+import { extraerISSN } from './identificadores.js';
 
 /**
  * Busca un ISBN-10 o ISBN-13 en texto libre. Tolera prefijos "ISBN:", guiones y espacios.
@@ -71,6 +72,7 @@ export async function extraerMetadatosPdf(rutaArchivo) {
 
         datos.texto_legible = texto.replace(/\s/g, '').length > 200;
         datos.isbn = extraerISBN(texto);
+        datos.issn = extraerISSN(texto); // relevante para revistas/publicaciones periódicas
 
         // 3. Respaldo por nombre de archivo si no hubo título en metadatos
         if (!datos.titulo) {

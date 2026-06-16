@@ -1,4 +1,5 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
+import { validarISBN, validarISSN } from './utils/identificadores.js';
 
 // "Editoriales" que en realidad son grupos de difusión/maquetación, no casas editoriales.
 // Si el archivo trae una de estas, NO es autoritativa: una editorial real de las APIs prevalece.
@@ -87,10 +88,29 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
     documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
 
-    // ISBN: el del archivo es preferente; si no hay ninguno, se elimina (no romper el esquema).
-    const isbnFinal = primerValido(documento.isbn, datosExtra.isbn);
-    if (isbnFinal) documento.isbn = String(isbnFinal).replace(/-/g, '');
-    else delete documento.isbn;
+    // ISBN: el del archivo es preferente; se valida el dígito de control y, si es inválido
+    // (típico de una mala lectura por visión/OCR), se descarta para no almacenar basura.
+    const isbnCandidato = primerValido(documento.isbn, datosExtra.isbn);
+    if (isbnCandidato) {
+        const isbnValido = validarISBN(isbnCandidato);
+        if (isbnValido) documento.isbn = isbnValido;
+        else {
+            documento.alertas_agente.push(`ISBN descartado por dígito de control inválido: "${isbnCandidato}".`);
+            delete documento.isbn;
+        }
+    } else {
+        delete documento.isbn;
+    }
+
+    // ISSN (revistas): misma validación.
+    if (documento.issn) {
+        const issnValido = validarISSN(documento.issn);
+        if (issnValido) documento.issn = issnValido;
+        else {
+            documento.alertas_agente.push(`ISSN descartado por dígito de control inválido: "${documento.issn}".`);
+            delete documento.issn;
+        }
+    }
 
     // Candidatos de portada remota para que el orquestador construya imagenes[] (campo interno).
     documento._portadas_remotas = datosExtra.portadas_remotas || [];
@@ -103,11 +123,13 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         documento.alertas_agente.push("Sinopsis conservada del archivo original (no sobrescrita).");
     }
 
-    // Estado de verificación: completado solo si la identificación es sólida.
+    // Estado de verificación: completado solo si hay título, CDU y un identificador válido
+    // (ISBN para libros, ISSN para revistas).
+    const tieneIdentificador = !!(documento.isbn || documento.issn);
     documento.estado_verificacion =
-        (documento.titulo && documento.cdu && documento.isbn) ? 'completado' : 'pendiente';
+        (documento.titulo && documento.cdu && tieneIdentificador) ? 'completado' : 'pendiente';
     if (documento.estado_verificacion === 'pendiente') {
-        documento.alertas_agente.push("Identificación incompleta (sin ISBN o sin CDU): requiere revisión humana.");
+        documento.alertas_agente.push("Identificación incompleta (sin ISBN/ISSN o sin CDU): requiere revisión humana.");
     }
 
     // Limpieza: ningún campo opcional debe quedar como undefined.
