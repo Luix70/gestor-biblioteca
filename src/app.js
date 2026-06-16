@@ -10,8 +10,6 @@ process.env.PATH_INBOX = path.resolve(__dirname, '..', process.env.PATH_INBOX);
 import express from 'express';
 import multer from 'multer';
 import { procesarIngesta } from './controlador-ingesta.js';
-import { iniciarVigilante } from './vigilante.js'; // Importamos el vigilante
-
 
 
 const app = express();
@@ -34,6 +32,5 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
 // Iniciamos ambos sistemas
 app.listen(3000, () => {
     console.log('🚀 API REST activa en puerto 3000');
-    iniciarVigilante(); // <- Lanzamos el vigilante
-    console.log('👁️ Vigilante de archivos activo en /Inbox');
+
 });
