@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { extraerISSN } from './identificadores.js';
+import { parsearNombre } from './parsear-nombre.js';
 
 /**
  * Busca un ISBN-10 o ISBN-13 en texto libre. Tolera prefijos "ISBN:", guiones y espacios.
@@ -17,21 +18,6 @@ function extraerISBN(texto) {
         if (limpio.length === 10 || limpio.length === 13) candidatos.push(limpio);
     }
     return candidatos.find(c => c.length === 13) || candidatos[0] || null;
-}
-
-/**
- * Heurística de respaldo: del nombre de archivo "Título - Autor1- Autor2.pdf"
- * separa un título y una lista de autores. Solo se usa si el PDF no trae metadatos.
- */
-function parsearNombreArchivo(nombre) {
-    const base = nombre.replace(/\.pdf$/i, '');
-    const partes = base.split(' - ');
-    const titulo = partes[0].trim();
-    let autores = [];
-    if (partes.length > 1) {
-        autores = partes.slice(1).join(' - ').split(/\s*-\s*/).map(s => s.trim()).filter(Boolean);
-    }
-    return { titulo, autores };
 }
 
 /**
@@ -74,22 +60,26 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         datos.isbn = extraerISBN(texto);
         datos.issn = extraerISSN(texto); // relevante para revistas/publicaciones periódicas
 
-        // 3. Respaldo por nombre de archivo si no hubo título en metadatos
-        if (!datos.titulo) {
-            const parsed = parsearNombreArchivo(nombre);
-            datos.titulo = parsed.titulo;
-            if (datos.autores.length === 0) datos.autores = parsed.autores;
+        // 3. Pistas del nombre de archivo. Si está fechado (revista), la fecha es el AÑO
+        //    y el idioma del mes — nunca autores. Si no, separa título/autores (libro).
+        const parsed = parsearNombre(nombre);
+        if (!datos.titulo) datos.titulo = parsed.titulo;
+        if (datos.autores.length === 0) datos.autores = parsed.autores;
+        if (parsed.esFechada) {
+            datos.año_edicion = parsed.año_edicion; // fecha del archivo, fiable para revistas
+            datos.idioma = parsed.idioma;           // idioma inferido del nombre del mes
         }
 
         return datos;
     } catch (e) {
         // PDF ilegible: devolvemos lo mínimo viable para no romper la cadena
-        const parsed = parsearNombreArchivo(nombre);
+        const parsed = parsearNombre(nombre);
         return {
             titulo: parsed.titulo,
             autores: parsed.autores,
+            año_edicion: parsed.año_edicion || null,
             isbn: null,
-            idioma: null,
+            idioma: parsed.idioma || null,
             texto_legible: false,
             _error: e.message
         };

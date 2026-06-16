@@ -47,7 +47,9 @@ export function validarISSN(valor) {
 /** Extrae un ISSN válido de texto libre (p. ej. capa de texto de un PDF de revista). */
 export function extraerISSN(texto) {
     if (!texto) return null;
-    const re = /ISSN[:\s]*?(\d{4}-?\d{3}[\dX])/gi;
+    // Tolerante a separadores raros entre "ISSN" y el número (p. ej. el espacio fino
+    // francés U+202F antes de ':' → "ISSN : 2267-4284"). \D = cualquier no-dígito.
+    const re = /ISSN\D{0,6}(\d{4}[-\s]?\d{3}[\dXx])/gi;
     let m;
     while ((m = re.exec(texto)) !== null) {
         const v = validarISSN(m[1]);

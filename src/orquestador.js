@@ -6,6 +6,7 @@ import { analizarImagenesRecurso } from './agente.js';
 import { optimizarImagenRecurso } from './procesador-imagenes.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura } from './errores.js';
+import { parsearNombre } from './utils/parsear-nombre.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -26,19 +27,24 @@ export function detectarTipo(ruta) {
     return 'desconocido';
 }
 
-// Título/autores de respaldo a partir del nombre de archivo "Título - Autor1- Autor2.ext".
+// Metadatos de respaldo a partir del nombre de archivo (delega en el parser compartido,
+// que distingue libros con autores de revistas fechadas).
 function metadatosDesdeNombre(ruta) {
-    const base = path.basename(ruta, path.extname(ruta));
-    const partes = base.split(' - ');
-    const autores = partes.length > 1
-        ? partes.slice(1).join(' - ').split(/\s*-\s*/).map(s => s.trim()).filter(Boolean)
-        : [];
-    return { titulo: partes[0].trim(), autores };
+    const p = parsearNombre(path.basename(ruta));
+    const datos = { titulo: p.titulo, autores: p.autores };
+    if (p.esFechada) { datos.año_edicion = p.año_edicion; datos.idioma = p.idioma; }
+    return datos;
 }
 
 // Heurística: ¿el título parece el de una publicación periódica?
+// Señales: marcadores de número/año, palabras clave, "review/magazine", o un mes + año
+// (es/en/fr), patrón muy típico de revistas (p. ej. "… Février-Mars 2017").
+const MESES = '(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec|janv|févr|fevr|avr|mai|juin|juil|aoû|aou|déc|dec|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|january|february|march|april|june|july|august|september|october|november|december|janvier|février|fevrier|mars|avril|juillet|septembre|octobre|novembre|décembre)';
 function pareceRevista(titulo) {
-    return /n[úu]m(?:ero)?\.?\s*[\wIVXLC]+|a[ñn]o\s+[IVXLC0-9]+|revista|bolet[íi]n|índice literario/i.test(titulo || '');
+    const t = titulo || '';
+    if (/n[úu]m(?:ero)?\.?\s*[\wIVXLC]+|a[ñn]o\s+[IVXLC0-9]+|revista|bolet[íi]n|índice literario|magazine|review|gazette|journal/i.test(t)) return true;
+    if (new RegExp(`${MESES}[a-zé]*[-\\s/]*${MESES}?[a-zé]*\\s*[-,]?\\s*(19|20)\\d{2}`, 'i').test(t)) return true;
+    return false;
 }
 
 /**

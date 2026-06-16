@@ -1,0 +1,35 @@
+// Parser de nombres de archivo. Distingue:
+//   - libros: "Título - Autor1- Autor2"  → autores
+//   - revistas fechadas: "Título - <Mes>-<Mes> <Año>" → año_edicion + idioma (NO son autores)
+
+const MESES = {
+    fr: ['janvier', 'février', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'aout', 'septembre', 'octobre', 'novembre', 'décembre', 'decembre', 'janv', 'févr', 'fevr', 'avr', 'juil', 'sept', 'oct', 'nov', 'déc'],
+    es: ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre', 'ene', 'feb', 'abr', 'ago', 'dic'],
+    en: ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'jan', 'apr', 'jun', 'jul', 'aug', 'sept', 'dec'],
+};
+
+/**
+ * @returns { titulo, autores, año_edicion?, idioma?, esFechada }
+ */
+export function parsearNombre(nombreArchivo) {
+    const base = String(nombreArchivo).replace(/\.[^.]+$/, '');
+
+    // ¿Bloque de fecha "Mes[-Mes] Año" (señal fuerte de publicación periódica)?
+    for (const [lang, meses] of Object.entries(MESES)) {
+        const grupo = meses.join('|');
+        const re = new RegExp(`(?:${grupo})[a-zà-ÿ]*(?:[-/\\s]+(?:${grupo})[a-zà-ÿ]*)?[\\s,.–-]*((?:19|20)\\d{2})`, 'i');
+        const m = base.match(re);
+        if (m) {
+            let titulo = base.slice(0, m.index).replace(/[-–_\s]+$/, '').trim();
+            if (!titulo) titulo = base.replace(re, '').replace(/[-–_\s]+$/, '').trim();
+            return { titulo, autores: [], año_edicion: parseInt(m[1]), idioma: lang, esFechada: true };
+        }
+    }
+
+    // Libro: separar título y autores por " - ".
+    const partes = base.split(' - ');
+    const autores = partes.length > 1
+        ? partes.slice(1).join(' - ').split(/\s*-\s*/).map(s => s.trim()).filter(Boolean)
+        : [];
+    return { titulo: partes[0].trim(), autores, esFechada: false };
+}

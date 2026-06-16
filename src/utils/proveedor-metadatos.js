@@ -2,6 +2,7 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
+import { resolverCDU } from '../clasificador-cdu.js';
 
 /**
  * Analiza una imagen en base64 para extraer metadatos bibliográficos.
@@ -32,32 +33,6 @@ async function analizarImagenConIA(base64Image) {
 }
 
 /**
- * Determina la CDU basándose en metadatos y contexto.
- */
-async function obtenerCdu(titulo, sinopsis, categoria_origen, fuente_categoria) {
-    try {
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY.trim());
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-        const prompt = `
-            Actúa como un bibliotecario catalogador experto. Asigna la Clasificación Decimal Universal (CDU) al libro.
-            REGLAS:
-            1. Precisión máxima, máximo 12 caracteres.
-            2. Prohibido usar subdivisiones alfabéticas (ej: "(HEIDEGGER, M.)").
-            3. Si necesitas cruzar materias, usa ":" una sola vez.
-            4. Responde SOLO con el código (ej: "141.78:81'37").
-            Datos: Título: "${titulo}", Sinopsis: "${sinopsis || 'N/A'}", Cat. Origen: "${categoria_origen || 'N/A'}" (fuente: ${fuente_categoria || 'N/A'})
-        `;
-
-        const result = await model.generateContent(prompt);
-        return result.response.text().trim();
-    } catch (error) {
-        console.error(`❌ [Error IA CDU]: ${error.message}`);
-        return '000';
-    }
-}
-
-/**
  * Flujo maestro de enriquecimiento.
  */
 export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null, opciones = {}) {
@@ -69,6 +44,8 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         año_edicion: null,
         idioma: null,
         categorias: [],
+        dewey: null,
+        lcc: null,
         portadas_remotas: [], // candidatos de cubierta (se usan solo si el archivo no aporta una)
         cdu: null,
         alertas: []
@@ -95,26 +72,33 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
 
     // TIER 2a · OpenLibrary (autoridad principal). Si el ISBN-pista es erróneo y da 404,
     // el buscador ya recae en una búsqueda por título/autor y lo autocorrige.
-    const infoOL = await buscarPorCriterios({
-        isbn: isbnHint,
-        titulo: titulo,
-        autor: autor,
-        incluirSinopsis: incluirSinopsis
-    });
+    // Un fallo de RED en una API no aborta la ingesta: se degrada con una alerta y se sigue.
+    // (Sin conexión real, será MongoDB Atlas quien falle → Reintentos.)
+    let infoOL = null;
+    try {
+        infoOL = await buscarPorCriterios({ isbn: isbnHint, titulo, autor, incluirSinopsis });
+    } catch (e) {
+        if (e.tipo === 'infraestructura') datosExtra.alertas.push('OpenLibrary inalcanzable: omitida.');
+        else throw e;
+    }
     if (infoOL) {
         rellenar('isbn', infoOL.isbn);
         rellenar('editorial', infoOL.editorial);
         rellenar('sinopsis', infoOL.sinopsis);
         rellenar('año_edicion', infoOL.año_edicion);
+        rellenar('dewey', infoOL.dewey);   // para derivar/aprender la CDU
+        rellenar('lcc', infoOL.lcc);
         datosExtra.alertas.push("Datos validados contra OpenLibrary.");
     }
 
     // TIER 2b · Google Books (segunda autoridad; rellena huecos: sinopsis, categorías, portada).
-    const infoGB = await buscarEnGoogleBooks({
-        isbn: datosExtra.isbn || isbnHint,
-        titulo: titulo,
-        autor: autor
-    });
+    let infoGB = null;
+    try {
+        infoGB = await buscarEnGoogleBooks({ isbn: datosExtra.isbn || isbnHint, titulo, autor });
+    } catch (e) {
+        if (e.tipo === 'infraestructura') datosExtra.alertas.push('Google Books inalcanzable: omitida.');
+        else throw e;
+    }
     if (infoGB) {
         rellenar('isbn', infoGB.isbn);
         rellenar('editorial', infoGB.editorial);
@@ -144,11 +128,18 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('año_edicion', pistasIA.año_edicion);
     }
 
-    // TIER 3c · Resolución final de la CDU (sembrada con la categoría de Google Books).
-    // Se omite la llamada a la IA si el llamante ya dispone de una CDU.
+    // TIER 3c · Resolución de la CDU vía clasificador con equivalencias aprendidas
+    // (Dewey/LC en caché → API externa → IA, aprendiendo la equivalencia).
     if (incluirCdu) {
-        const categoriaSemilla = datosExtra.categorias.length > 0 ? datosExtra.categorias[0] : null;
-        datosExtra.cdu = await obtenerCdu(titulo, datosExtra.sinopsis, categoriaSemilla, "Google Books");
+        const { cdu, fuente } = await resolverCDU({
+            dewey: datosExtra.dewey,
+            lcc: datosExtra.lcc,
+            categoria: datosExtra.categorias.length > 0 ? datosExtra.categorias[0] : null,
+            titulo,
+            sinopsis: datosExtra.sinopsis,
+        });
+        datosExtra.cdu = cdu;
+        if (fuente.startsWith('cache')) datosExtra.alertas.push(`CDU por equivalencia aprendida (${fuente}).`);
     }
 
     return datosExtra;

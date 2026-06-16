@@ -23,11 +23,19 @@ function normalizar(data) {
     const workKey = data.key && data.key.startsWith('/works/') ? data.key
         : (Array.isArray(data.works) && data.works[0] ? data.works[0].key : null);
 
+    // Códigos de clasificación para derivar/aprender la CDU (Dewey y Library of Congress).
+    const dewey = (Array.isArray(data.dewey_decimal_class) && data.dewey_decimal_class[0])
+        || (Array.isArray(data.ddc) && data.ddc[0]) || null;
+    const lcc = (Array.isArray(data.lc_classifications) && data.lc_classifications[0])
+        || (Array.isArray(data.lcc) && data.lcc[0]) || null;
+
     return {
         isbn: isbnFinal,
         titulo: data.title || null,
         editorial: editorial,
         año_edicion: data.first_publish_year || parseInt(data.publish_date) || null,
+        dewey: dewey,
+        lcc: lcc,
         workKey: workKey
     };
 }
@@ -55,7 +63,7 @@ async function buscarPorTexto(titulo, autor) {
     const params = new URLSearchParams({
         title: titulo,
         limit: '1',
-        fields: 'key,title,isbn,publisher,first_publish_year'
+        fields: 'key,title,isbn,publisher,first_publish_year,ddc,lcc'
     });
     if (autor) params.set('author', autor);
 

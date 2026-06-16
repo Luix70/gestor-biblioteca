@@ -1,36 +1,96 @@
-// src/app.js
-import 'dotenv/config'; // <--- ESTO DEBE IR AQUÍ, ARRIBA DEL TODO
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-process.env.PATH_CDU = path.resolve(__dirname, '..', process.env.PATH_CDU);
-process.env.PATH_INBOX = path.resolve(__dirname, '..', process.env.PATH_INBOX);
-
+// src/app.js — API REST de ingesta + vigilante del Inbox.
+import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
-import { procesarIngesta } from './controlador-ingesta.js';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { ingestarRecurso } from './servicio-ingesta.js';
+import { agrupar } from './utils/agrupador.js';
+import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
+import { iniciarVigilante } from './vigilante.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const RAIZ = path.resolve(__dirname, '..');
+const resolver = (p, def) => {
+    const v = p || def;
+    return path.isAbsolute(v) ? v : path.resolve(RAIZ, v);
+};
 
-const app = express();
-const upload = multer({ dest: 'temp/' });
+const DIR_CDU = resolver(process.env.PATH_CDU, 'CDU');
+const DIR_TMP = path.join(RAIZ, 'temp');
+const PUERTO = Number(process.env.PORT || 3000);
 
-// Servir la carpeta CDU como estática
-app.use('/recursos', express.static(process.env.PATH_CDU));
+await fs.mkdir(DIR_TMP, { recursive: true });
 
-// Endpoint API
-app.post('/api/ingestar', upload.array('files'), async (req, res) => {
-    try {
-        const resultado = await procesarIngesta(req.body, req.files);
-        res.status(200).json({ status: "success", data: resultado });
-    } catch (err) {
-        console.error("❌ ERROR CRÍTICO 500:", err); // <-- Añade esta línea
-        res.status(500).json({ status: "error", message: err.message });
-    }
+// Guardamos las subidas conservando el nombre original (la extensión guía la detección de tipo).
+const upload = multer({
+    storage: multer.diskStorage({
+        destination: (req, file, cb) => cb(null, DIR_TMP),
+        filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+    }),
 });
 
-// Iniciamos ambos sistemas
-app.listen(3000, () => {
-    console.log('🚀 API REST activa en puerto 3000');
+const app = express();
+app.use(express.json());
 
+// Servir el catálogo (portadas e imágenes) como estático para el front-end.
+app.use('/recursos', express.static(DIR_CDU));
+
+/** Extrae la ubicación física del cuerpo de la petición (para libros/revistas en papel). */
+function ubicacionDe(body) {
+    if (!body) return undefined;
+    if (body.ubicacion) {
+        try { return typeof body.ubicacion === 'string' ? JSON.parse(body.ubicacion) : body.ubicacion; }
+        catch { /* ignore */ }
+    }
+    if (body.ambito && body.estanteria) return { ambito: body.ambito, estanteria: body.estanteria };
+    return undefined;
+}
+
+app.post('/api/ingestar', upload.array('files'), async (req, res) => {
+    const archivos = (req.files || []).map(f => f.path);
+    if (archivos.length === 0) {
+        return res.status(400).json({ status: 'error', message: 'No se recibieron archivos.' });
+    }
+
+    const ubicacion = ubicacionDe(req.body);
+    const contexto = ubicacion ? { ubicacion } : {};
+    const unidades = agrupar(archivos);
+    const resultados = [];
+
+    for (const unidad of unidades) {
+        const ctx = unidad.esImagenes ? contexto : (ubicacion ? { ubicacion } : {});
+        try {
+            const r = await ingestarRecurso({ rutas: unidad.rutas, contexto: ctx });
+            resultados.push({
+                ok: true, operacion: r.operacion, estado: r.estado,
+                id: String(r._id), isbn: r.isbn, issn: r.issn,
+                titulo: r.documento.titulo, ruta: r.rutaWeb,
+            });
+        } catch (e) {
+            if (e.tipo === 'infraestructura') {
+                await enviarAReintentos(unidad.rutas, { error: { tipo: e.tipo, mensaje: e.message }, documento: e.documentoParcial || null });
+                resultados.push({ ok: false, destino: 'reintentos', error: e.message });
+            } else {
+                await enviarACuarentena(unidad.rutas, { error: { tipo: e.tipo || 'desconocido', mensaje: e.message } });
+                resultados.push({ ok: false, destino: 'cuarentena', error: e.message });
+            }
+        }
+    }
+
+    // Limpieza de los temporales de subida (el servicio ya copió lo necesario al catálogo).
+    for (const f of archivos) await fs.rm(f, { force: true }).catch(() => {});
+
+    const huboError = resultados.some(r => !r.ok);
+    res.status(huboError ? 207 : 200).json({ status: huboError ? 'partial' : 'success', resultados });
+});
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+app.listen(PUERTO, () => {
+    console.log(`🚀 API REST de ingesta activa en el puerto ${PUERTO}`);
+    if (process.env.DESACTIVAR_VIGILANTE !== '1') {
+        iniciarVigilante().catch(e => console.error('No se pudo iniciar el vigilante:', e.message));
+    }
 });

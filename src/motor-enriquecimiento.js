@@ -132,8 +132,17 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         documento.alertas_agente.push("Identificación incompleta (sin ISBN/ISSN o sin CDU): requiere revisión humana.");
     }
 
-    // Limpieza: ningún campo opcional debe quedar como undefined.
-    Object.keys(documento).forEach(k => documento[k] === undefined && delete documento[k]);
+    // Limpieza 1: descartar campos internos de los lectores que no deben persistirse
+    // (evita guardar la portada base64 completa o banderas de proceso en MongoDB).
+    // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
+    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error'];
+    for (const k of CAMPOS_INTERNOS) delete documento[k];
+
+    // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).
+    Object.keys(documento).forEach(k => {
+        const v = documento[k];
+        if (v === undefined || v === null || v === '') delete documento[k];
+    });
 
     return documento;
 }

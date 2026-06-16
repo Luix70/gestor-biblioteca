@@ -119,3 +119,19 @@ export async function procesarCatalogo(documentoEnriquecido) {
         throw new Error(`Error en base de datos: ${error.message}`);
     }
 }
+
+/**
+ * Actualiza campos de un documento ya insertado (p. ej. ruta_base / imagenes / portada
+ * tras copiar los archivos a la estructura CDU). Best-effort: los fallos de Mongo se elevan
+ * como ErrorInfraestructura para que el llamante decida.
+ */
+export async function actualizarDocumento(_id, campos) {
+    let db;
+    try {
+        db = await conectarDB();
+        await db.collection('biblioteca').updateOne({ _id }, { $set: campos });
+    } catch (e) {
+        if (esErrorDeMongo(e)) throw new ErrorInfraestructura('Operación MongoDB fallida', e);
+        throw e;
+    }
+}
