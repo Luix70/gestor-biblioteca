@@ -1,20 +1,16 @@
-FROM node:22-bookworm-slim
+# Usamos una base estable y activa
+FROM node:18-bullseye-slim
 
-# Instalar dependencias del sistema necesarias para procesamiento de imágenes y PDF
+# Los repositorios de bullseye sí están activos
 RUN apt-get update && apt-get install -y \
-    vips-dev fftw-dev build-essential python3 \
+    python3 \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-# Copiar archivos de dependencias primero
 COPY package*.json ./
-
-# Instalar dependencias dentro del contenedor
 RUN npm install
-
-# Copiar el resto del código
 COPY . .
 
-# Comando de inicio
-CMD ["npm", "start"]
+# Usamos la bandera --no-warnings para evitar colisiones con el procesador viejo
+CMD ["node", "--no-warnings", "src/app.js"]

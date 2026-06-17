@@ -21,6 +21,9 @@ services:
       - PATH_CDU=/app/CDU
       - PATH_CUARENTENA=/app/Cuarentena
       - PATH_REINTENTOS=/app/Reintentos
+      - NODE_OPTIONS=--no-warnings
+      # Esto desactiva ciertas optimizaciones del motor V8 que causan el crash
+      - V8_FLAGS=--no-wasm --no-jit
     # CAMBIA ESTO PARA QUE EJECUTE TU APP:
     working_dir: /app
     command: ["npm", "start"]
