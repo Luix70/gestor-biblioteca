@@ -1,0 +1,33 @@
+services:
+  biblioteca:
+    image: node:24-alpine
+    container_name: gestor-biblioteca
+    restart: unless-stopped
+    # Ajustamos el entorno y los volúmenes para el NAS
+    volumes:
+      # Código fuente (Lógica de la aplicación)
+      - /volume1/docker/GestorBiblioteca:/app
+      
+      # Datos de la biblioteca (Almacenamiento en volume3)
+      - /volume3/BIBLIOTECA\ DIGITAL/Inbox:/app/Inbox
+      - /volume3/BIBLIOTECA\ DIGITAL/CDU:/app/CDU
+      - /volume3/BIBLIOTECA\ DIGITAL/Cuarentena:/app/Cuarentena
+      - /volume3/BIBLIOTECA\ DIGITAL/Reintentos:/app/Reintentos
+    
+    # Mapeo del puerto de la API REST
+    ports:
+      - "3000:3000"
+    
+    # Variables de entorno críticas
+    environment:
+    
+      - MONGO_URI=${MONGO_URI}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY}
+      - PATH_INBOX=/app/Inbox
+      - PATH_CDU=/app/CDU
+      - PATH_CUARENTENA=/app/Cuarentena
+      - PATH_REINTENTOS=/app/Reintentos
+    
+    # Ejecutar con privilegios de usuario estándar (cambia 1026 por tu UID real)
+    user: "1026:100"
