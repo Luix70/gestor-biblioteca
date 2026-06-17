@@ -5,14 +5,11 @@ services:
     restart: unless-stopped
     # Ajustamos el entorno y los volúmenes para el NAS
     volumes:
-      # Código fuente (Lógica de la aplicación)
       - /volume1/docker/GestorBiblioteca:/app
-      
-      # Datos de la biblioteca (Almacenamiento en volume3)
-      - /volume3/BIBLIOTECA\ DIGITAL/Inbox:/app/Inbox
-      - /volume3/BIBLIOTECA\ DIGITAL/CDU:/app/CDU
-      - /volume3/BIBLIOTECA\ DIGITAL/Cuarentena:/app/Cuarentena
-      - /volume3/BIBLIOTECA\ DIGITAL/Reintentos:/app/Reintentos
+      - "/volume3/BIBLIOTECA DIGITAL/Inbox:/app/Inbox"
+      - "/volume3/BIBLIOTECA DIGITAL/CDU:/app/CDU"
+      - "/volume3/BIBLIOTECA DIGITAL/Cuarentena:/app/Cuarentena"
+      - "/volume3/BIBLIOTECA DIGITAL/Reintentos:/app/Reintentos"
     
     # Mapeo del puerto de la API REST
     ports:
