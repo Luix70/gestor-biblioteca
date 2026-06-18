@@ -1,8 +1,35 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { extractText, getDocumentProxy } from 'unpdf';
+import { getDocumentProxy } from 'unpdf';
 import { extraerISSN, validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre } from './parsear-nombre.js';
+
+// Solo se extrae texto de las primeras/últimas páginas: ISBN/ISSN/título viven en las
+// páginas iniciales (portada, créditos, colofón). Extraer las ~1500 páginas de un libro
+// entero saturaba CPU/memoria en el NAS (Atom D525). Configurable por si hiciera falta.
+const PAG_FRENTE = Number(process.env.PDF_PAGINAS_FRENTE || 15);
+const PAG_FONDO  = Number(process.env.PDF_PAGINAS_FONDO  || 5);
+
+/**
+ * Extrae texto solo de las primeras PAG_FRENTE y últimas PAG_FONDO páginas, vía el API por
+ * página de pdf.js (carga el contenido de cada página bajo demanda, no el libro entero).
+ */
+async function extraerTextoCabeceraYpie(pdf) {
+    const total = pdf.numPages;
+    const indices = new Set();
+    for (let i = 1; i <= Math.min(PAG_FRENTE, total); i++) indices.add(i);
+    for (let i = Math.max(1, total - PAG_FONDO + 1); i <= total; i++) indices.add(i);
+
+    let texto = '';
+    for (const i of [...indices].sort((a, b) => a - b)) {
+        try {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            texto += content.items.map(it => it.str).join(' ') + '\n';
+        } catch { /* página ilegible: continuar con las demás */ }
+    }
+    return texto;
+}
 
 /**
  * Busca TODOS los ISBN-10/13 válidos en texto libre. Tolera prefijos "ISBN:", guiones y
@@ -50,11 +77,11 @@ export async function extraerMetadatosPdf(rutaArchivo) {
             if (info.Author && String(info.Author).trim()) datos.autores = [String(info.Author).trim()];
         } catch { /* sin info-dict */ }
 
-        // 2. Capa de texto (para ISBN y para detectar si está escaneado)
+        // 2. Capa de texto (para ISBN y para detectar si está escaneado). Solo cabecera y
+        //    pie: ahí están ISBN/ISSN/título y evita procesar libros enteros en el Atom.
         let texto = '';
         try {
-            const res = await extractText(pdf, { mergePages: true });
-            texto = Array.isArray(res.text) ? res.text.join('\n') : (res.text || '');
+            texto = await extraerTextoCabeceraYpie(pdf);
         } catch { /* sin capa de texto */ }
 
         datos.texto_legible = texto.replace(/\s/g, '').length > 200;

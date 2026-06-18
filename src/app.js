@@ -1,5 +1,10 @@
 // src/app.js — API REST de ingesta + vigilante del Inbox.
 import 'dotenv/config';
+import axios from 'axios';
+// Timeout global para TODA llamada HTTP (APIs bibliográficas). Sin él, una petición que no
+// responde bloquea el pipeline indefinidamente y el Inbox parece colgado (CPU al ralentí).
+// Un timeout se clasifica como error de red → degradación elegante / Reintentos.
+axios.defaults.timeout = Number(process.env.HTTP_TIMEOUT_MS || 20000);
 import express from 'express';
 import multer from 'multer';
 import fs from 'fs/promises';

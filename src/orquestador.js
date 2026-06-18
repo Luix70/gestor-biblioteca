@@ -69,6 +69,7 @@ export async function procesarRecurso(entrada) {
     if (!rutas || rutas.length === 0) throw new Error("procesarRecurso: 'rutas' vacío");
 
     const tipo = detectarTipo(rutas[0]);
+    console.log(`[Orquestador] ${path.basename(rutas[0])} · tipo=${tipo} · extrayendo metadatos del archivo...`);
     let datosBase, formatos, tipo_recurso;
     let activos = [];
     let escaneadoSinTexto = false;

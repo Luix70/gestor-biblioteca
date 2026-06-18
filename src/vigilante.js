@@ -1,4 +1,8 @@
 import 'dotenv/config';
+import axios from 'axios';
+// Timeout global para TODA llamada HTTP (ver app.js): evita que una API que no responde
+// cuelgue el procesado del Inbox. Necesario también aquí por si se ejecuta en solitario.
+axios.defaults.timeout = Number(process.env.HTTP_TIMEOUT_MS || 20000);
 import chokidar from 'chokidar';
 import fs from 'fs/promises';
 import path from 'path';
