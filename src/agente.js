@@ -44,17 +44,15 @@ ESTRUCTURA JSON REQUERIDA:
 `;
 
 /**
- * Procesa un array de buffers de imagen optimizados y extrae la ficha técnica unificada.
+ * Procesa un grupo de imágenes (`{ data: Buffer, mimeType: string }`) del mismo recurso y
+ * extrae la ficha técnica unificada. Asimila metadatos de texto nativos si provienen de un EPUB.
  */
-/**
- * Procesa buffers de imágenes y asimila metadatos de texto nativos si provienen de un EPUB.
- */
-export async function analizarImagenesRecurso(arrayBuffers, datosEpub = null) {
+export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
     try {
-        const imageParts = arrayBuffers.map((buffer) => ({
+        const imageParts = imagenes.map(({ data, mimeType }) => ({
             inlineData: {
-                data: buffer.toString("base64"),
-                mimeType: "image/jpeg"
+                data: data.toString("base64"),
+                mimeType: mimeType || "image/jpeg"
             }
         }));
 

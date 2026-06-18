@@ -1,16 +1,12 @@
-# Usamos una base estable y activa
+# Base estable y activa. Node 18 por compatibilidad con CPUs antiguas (Intel Atom D525).
 FROM node:18-bullseye-slim
 
-# Los repositorios de bullseye sí están activos
-RUN apt-get update && apt-get install -y \
-    python3 \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
+# Sin dependencias nativas (se eliminó sharp): no hace falta toolchain de compilación
+# (python3/build-essential). npm install solo trae JavaScript puro, sin instrucciones SIMD
+# que el Atom D525 (hasta SSSE3, sin SSE4.2/AVX) no soporta.
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm install --omit=dev
 COPY . .
 
-# Usamos la bandera --no-warnings para evitar colisiones con el procesador viejo
 CMD ["node", "--no-warnings", "src/app.js"]

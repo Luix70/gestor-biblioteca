@@ -3,12 +3,19 @@ import path from 'path';
 import { extraerMetadatosEpub } from './utils/lector-epub.js';
 import { extraerMetadatosPdf } from './utils/lector-pdf.js';
 import { analizarImagenesRecurso } from './agente.js';
-import { optimizarImagenRecurso } from './procesador-imagenes.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
+
+// Tipo MIME real de cada imagen (Gemini soporta jpeg/png/webp/heic de forma nativa).
+// Ya no reprocesamos con sharp: enviamos los bytes originales etiquetados con su MIME correcto.
+const MIME_IMAGEN = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.png': 'image/png', '.webp': 'image/webp', '.heic': 'image/heic',
+};
+const mimeDeImagen = (ruta) => MIME_IMAGEN[path.extname(ruta).toLowerCase()] || 'image/jpeg';
 
 // Formato (enum del esquema) según extensión. Puerta abierta a nuevos formatos:
 // epub/pdf/imágenes tienen lector propio; el resto se catalogan por nombre + APIs (sin leer
@@ -87,14 +94,15 @@ export async function procesarRecurso(entrada) {
         // No podemos rasterizar el PDF (sin Ghostscript): la portada vendrá de fuentes remotas.
 
     } else if (tipo === 'imagen') {
-        // TIER 3 · libro físico: visión multimodal sobre el grupo de imágenes
-        const buffers = [];
+        // TIER 3 · libro físico: visión multimodal sobre el grupo de imágenes.
+        // Sin reprocesado local (sin sharp): se envían los bytes originales con su MIME real.
+        // El redimensionado/orientación de fotos escaneadas se delega al front-end emisor.
+        const imagenes = [];
         for (const r of rutas) {
-            const bruto = await fs.readFile(r);
-            buffers.push(await optimizarImagenRecurso(bruto));
+            imagenes.push({ data: await fs.readFile(r), mimeType: mimeDeImagen(r) });
         }
         try {
-            datosBase = await analizarImagenesRecurso(buffers);
+            datosBase = await analizarImagenesRecurso(imagenes);
         } catch (e) {
             // Sin texto ni metadatos, si la visión falla no hay forma de identificar el libro.
             throw new ErrorIdentificacion(`Visión IA falló sobre el grupo de imágenes: ${e.message}`);

@@ -39,7 +39,7 @@ function primerValido(...valores) {
  * @param contexto   { tipo_recurso, formatos, ubicacion } que el orquestador fija según el tipo
  */
 export async function enriquecerMetadatos(datosBase, contexto = {}) {
-    // Sinopsis nativa: puede llegar como 'sinopsis' (lector-epub) o 'sinopsis_nativa' (procesador-epub).
+    // Sinopsis nativa del archivo: puede llegar como 'sinopsis' o 'sinopsis_nativa' (lector-epub).
     const sinopsisEpub = primerValido(datosBase.sinopsis, datosBase.sinopsis_nativa);
 
     let documento = {
