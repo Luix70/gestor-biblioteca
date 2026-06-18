@@ -7,6 +7,7 @@ import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
 import { resolverPortada } from './utils/resolver-portada.js';
+import { ocrPdfEscaneado } from './utils/ocr-pdf.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -37,6 +38,27 @@ export function detectarTipo(ruta) {
 
 // Metadatos de respaldo a partir del nombre de archivo (delega en el parser compartido,
 // que distingue libros con autores de revistas fechadas).
+// Funde el resultado del OCR de visión sobre un PDF escaneado. El nombre del archivo NO es
+// fiable en estos casos (basura tipo "(ebook - pdf) Título"), así que la visión MANDA: se
+// descartan título/autores del nombre y se conservan de 'base' solo los campos técnicos. Las
+// APIs rellenarán los huecos después, usando el ISBN leído por OCR como pivote.
+function fusionarOcr(base, ocr) {
+    const arr = (v) => (Array.isArray(v) ? v : []);
+    return {
+        paginas: base.paginas,
+        texto_legible: base.texto_legible,
+        titulo: ocr.titulo || null,
+        autores: arr(ocr.autores),
+        isbn: ocr.isbn || null,
+        editorial: ocr.editorial || null,
+        año_edicion: ocr.año_edicion || null,
+        idioma: ocr.idioma || null,
+        cdu: ocr.cdu || null,
+        sinopsis: ocr.sinopsis || null,
+        palabras_clave: arr(ocr.palabras_clave),
+    };
+}
+
 function metadatosDesdeNombre(ruta) {
     const p = parsearNombre(path.basename(ruta));
     const datos = { titulo: p.titulo, autores: p.autores };
@@ -90,11 +112,22 @@ export async function procesarRecurso(entrada) {
         formatos = ['pdf'];
         tipo_recurso = pareceRevista(datosBase.titulo) ? 'revista' : 'libro';
         isbnDelArchivo = !!datosBase.isbn; // ISBN leído del propio PDF (fiable)
+
         if (!datosBase.texto_legible) {
             escaneadoSinTexto = true;
-            datosBase.alertas_agente = ["PDF sin capa de texto (escaneado): identificación por título de archivo + APIs."];
+            // TIER 3 · PDF escaneado: el nombre del archivo suele ser basura (p. ej.
+            // "(ebook - pdf) Título") y arrastra a las APIs a un libro equivocado. La única
+            // fuente fiable es la imagen de las páginas frontales → OCR por visión.
+            const ocr = await ocrPdfEscaneado(rutas[0], datosBase.paginas);
+            if (ocr && (ocr.titulo || ocr.isbn)) {
+                datosBase = fusionarOcr(datosBase, ocr);
+                isbnDelArchivo = !!ocr.isbn;                 // ISBN leído del documento: fiable
+                if (ocr.tipo_recurso) tipo_recurso = ocr.tipo_recurso;
+                datosBase.alertas_agente = ["PDF escaneado identificado por OCR de visión de las páginas frontales."];
+            } else {
+                datosBase.alertas_agente = ["PDF sin capa de texto (escaneado) y OCR no concluyente: identificación por nombre de archivo + APIs."];
+            }
         }
-        // No podemos rasterizar el PDF (sin Ghostscript): la portada vendrá de fuentes remotas.
 
     } else if (tipo === 'imagen') {
         // TIER 3 · libro físico: visión multimodal sobre el grupo de imágenes.

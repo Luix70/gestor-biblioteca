@@ -19,25 +19,30 @@ function paginasObjetivo(numPaginas) {
     return [...set].sort((a, b) => a - b);
 }
 
-async function rasterizarUna(ruta, pagina, dir) {
+async function rasterizarUna(ruta, pagina, dir, ancho) {
     const prefijo = path.join(dir, `pag-${pagina}`);
     await execFileP('pdftoppm', [
         '-jpeg', '-singlefile',
         '-f', String(pagina), '-l', String(pagina),
-        '-scale-to-x', String(ANCHO), '-scale-to-y', '-1',
+        '-scale-to-x', String(ancho), '-scale-to-y', '-1',
         ruta, prefijo,
     ], { timeout: 60000 });
     return fs.readFile(`${prefijo}.jpg`);
 }
 
 /**
- * Rasteriza páginas clave de un PDF a JPEG (~ANCHO px de ancho) con poppler/pdftoppm.
+ * Rasteriza páginas de un PDF a JPEG con poppler/pdftoppm.
+ *   - { numPaginas }      → páginas clave para portada (1, 2 y la última).
+ *   - { paginas: [..] }   → lista explícita (p. ej. la portadilla/créditos para OCR).
+ *   - { ancho }           → ancho objetivo en px (1024 portada; más alto para OCR legible).
  * Devuelve [{ buffer, pagina, etiqueta }] (la 1ª = 'portada'). Si pdftoppm no está instalado
- * (ENOENT, p. ej. en desarrollo local) o algo falla, devuelve [] → degradación elegante: se
- * usará una portada remota.
+ * (ENOENT, p. ej. en desarrollo local) o algo falla, devuelve [] → degradación elegante.
  */
-export async function rasterizarPaginas(ruta, { numPaginas = 2 } = {}) {
-    const paginas = paginasObjetivo(numPaginas);
+export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, ancho = ANCHO } = {}) {
+    const total = paginas && paginas.length ? Math.max(...paginas) : numPaginas;
+    const objetivo = (paginas && paginas.length)
+        ? [...new Set(paginas)].filter(p => p >= 1).sort((a, b) => a - b)
+        : paginasObjetivo(numPaginas);
     let dir;
     try {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), 'raster-'));
@@ -47,10 +52,10 @@ export async function rasterizarPaginas(ruta, { numPaginas = 2 } = {}) {
 
     const salida = [];
     try {
-        for (const p of paginas) {
+        for (const p of objetivo) {
             try {
-                const buffer = await rasterizarUna(ruta, p, dir);
-                const etiqueta = p === 1 ? 'portada' : (p === numPaginas ? 'contraportada' : `pagina-${p}`);
+                const buffer = await rasterizarUna(ruta, p, dir, ancho);
+                const etiqueta = p === 1 ? 'portada' : (p === total ? 'contraportada' : `pagina-${p}`);
                 salida.push({ buffer, pagina: p, etiqueta });
             } catch (e) {
                 if (e.code === 'ENOENT') {
