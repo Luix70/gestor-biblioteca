@@ -32,6 +32,41 @@ export function validarISBN(valor) {
     return null;
 }
 
+/** Convierte un ISBN-10 válido a su ISBN-13 equivalente (prefijo 978), o null. */
+export function isbn10a13(valor) {
+    const n = normalizarIdentificador(valor);
+    if (!(n.length === 10 && validarISBN10(n))) return null;
+    const cuerpo = '978' + n.slice(0, 9);
+    let suma = 0;
+    for (let i = 0; i < 12; i++) suma += Number(cuerpo[i]) * (i % 2 === 0 ? 1 : 3);
+    return cuerpo + String((10 - (suma % 10)) % 10);
+}
+
+/** Convierte un ISBN-13 con prefijo 978 a su ISBN-10 equivalente, o null (979 no tiene ISBN-10). */
+export function isbn13a10(valor) {
+    const n = normalizarIdentificador(valor);
+    if (!(n.length === 13 && validarISBN13(n)) || !n.startsWith('978')) return null;
+    const cuerpo = n.slice(3, 12);
+    let suma = 0;
+    for (let i = 0; i < 9; i++) suma += Number(cuerpo[i]) * (10 - i);
+    const control = (11 - (suma % 11)) % 11;
+    return cuerpo + (control === 10 ? 'X' : String(control));
+}
+
+/**
+ * Dado un ISBN válido devuelve sus formas equivalentes (10 y 13) normalizadas y sin duplicar.
+ * Un libro suele estar indexado en las APIs por una de sus dos formas, no necesariamente
+ * por la que trae el archivo; probar ambas evita falsos 404. Devuelve [] si no es válido.
+ */
+export function variantesISBN(valor) {
+    const v = validarISBN(valor);
+    if (!v) return [];
+    const set = new Set([v]);
+    const otro = v.length === 10 ? isbn10a13(v) : isbn13a10(v);
+    if (otro) set.add(otro);
+    return [...set];
+}
+
 /** Devuelve el ISSN normalizado "NNNN-NNNC" si es válido, o null. */
 export function validarISSN(valor) {
     const n = normalizarIdentificador(valor);

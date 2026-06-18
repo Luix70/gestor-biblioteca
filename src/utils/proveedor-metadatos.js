@@ -36,9 +36,11 @@ async function analizarImagenConIA(base64Image) {
  * Flujo maestro de enriquecimiento.
  */
 export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null, opciones = {}) {
-    const { incluirSinopsis = true, incluirCdu = true } = opciones;
+    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [] } = opciones;
     let datosExtra = {
         isbn: null,
+        titulo: null,        // título de la autoridad (solo se usa si el archivo no aporta uno fiable)
+        autores: [],         // autores de la autoridad (idem)
         sinopsis: null,
         editorial: null,
         año_edicion: null,
@@ -70,19 +72,26 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     }
     const isbnHint = pistasIA ? pistasIA.isbn : null;
 
-    // TIER 2a · OpenLibrary (autoridad principal). Si el ISBN-pista es erróneo y da 404,
-    // el buscador ya recae en una búsqueda por título/autor y lo autocorrige.
+    // ISBN es el pivote: se consulta a las APIs con los identificadores que el ARCHIVO ya
+    // aporta (preferentes), y luego con la pista de la IA. Sin esto, un PDF cuyo ISBN está
+    // en el texto/nombre nunca se resolvía por identificador (solo por título). Ver case 14.
+    const isbnsLookup = [...isbnsArchivo, ...(isbnHint ? [isbnHint] : [])];
+
+    // TIER 2a · OpenLibrary (autoridad principal). Si los ISBN dan 404, el buscador recae
+    // en una búsqueda por título/autor.
     // Un fallo de RED en una API no aborta la ingesta: se degrada con una alerta y se sigue.
     // (Sin conexión real, será MongoDB Atlas quien falle → Reintentos.)
     let infoOL = null;
     try {
-        infoOL = await buscarPorCriterios({ isbn: isbnHint, titulo, autor, incluirSinopsis });
+        infoOL = await buscarPorCriterios({ isbns: isbnsLookup, titulo, autor, incluirSinopsis });
     } catch (e) {
         if (e.tipo === 'infraestructura') datosExtra.alertas.push('OpenLibrary inalcanzable: omitida.');
         else throw e;
     }
     if (infoOL) {
         rellenar('isbn', infoOL.isbn);
+        rellenar('titulo', infoOL.titulo);
+        rellenar('autores', infoOL.autores);
         rellenar('editorial', infoOL.editorial);
         rellenar('sinopsis', infoOL.sinopsis);
         rellenar('año_edicion', infoOL.año_edicion);
@@ -94,13 +103,16 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // TIER 2b · Google Books (segunda autoridad; rellena huecos: sinopsis, categorías, portada).
     let infoGB = null;
     try {
-        infoGB = await buscarEnGoogleBooks({ isbn: datosExtra.isbn || isbnHint, titulo, autor });
+        const isbnsGB = datosExtra.isbn ? [datosExtra.isbn] : isbnsLookup;
+        infoGB = await buscarEnGoogleBooks({ isbns: isbnsGB, titulo, autor });
     } catch (e) {
         if (e.tipo === 'infraestructura') datosExtra.alertas.push('Google Books inalcanzable: omitida.');
         else throw e;
     }
     if (infoGB) {
         rellenar('isbn', infoGB.isbn);
+        rellenar('titulo', infoGB.titulo);
+        rellenar('autores', infoGB.autores);
         rellenar('editorial', infoGB.editorial);
         if (incluirSinopsis) rellenar('sinopsis', infoGB.sinopsis);
         rellenar('año_edicion', infoGB.año_edicion);
@@ -135,7 +147,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             dewey: datosExtra.dewey,
             lcc: datosExtra.lcc,
             categoria: datosExtra.categorias.length > 0 ? datosExtra.categorias[0] : null,
-            titulo,
+            titulo: datosExtra.titulo || titulo,   // el del archivo puede ser un ISBN: usa el resuelto
             sinopsis: datosExtra.sinopsis,
         });
         datosExtra.cdu = cdu;

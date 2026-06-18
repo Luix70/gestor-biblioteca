@@ -29,6 +29,13 @@ function normalizar(data) {
     const lcc = (Array.isArray(data.lc_classifications) && data.lc_classifications[0])
         || (Array.isArray(data.lcc) && data.lcc[0]) || null;
 
+    // Autores: /search.json los da ya resueltos en author_name; /isbn solo da claves
+    // (/authors/OLxxxA) que hay que resolver con una llamada extra (lo hace finalizar()).
+    const autoresNombres = Array.isArray(data.author_name) ? data.author_name : null;
+    const autoresClaves = Array.isArray(data.authors)
+        ? data.authors.map(a => (a && a.key) || null).filter(Boolean)
+        : null;
+
     return {
         isbn: isbnFinal,
         titulo: data.title || null,
@@ -36,8 +43,27 @@ function normalizar(data) {
         año_edicion: data.first_publish_year || parseInt(data.publish_date) || null,
         dewey: dewey,
         lcc: lcc,
-        workKey: workKey
+        workKey: workKey,
+        autoresNombres: autoresNombres,
+        autoresClaves: autoresClaves
     };
+}
+
+/**
+ * Resuelve claves /authors/OLxxxA a nombres legibles (una llamada por autor, acotado a 5).
+ * Best-effort: un fallo deja ese autor fuera (nunca rompe la ingesta).
+ */
+async function resolverAutores(claves) {
+    if (!Array.isArray(claves) || claves.length === 0) return [];
+    const nombres = [];
+    for (const k of claves.slice(0, 5)) {
+        try {
+            const res = await axios.get(`${BASE}${k}.json`);
+            const n = res.data && (res.data.name || res.data.personal_name);
+            if (n) nombres.push(String(n).trim());
+        } catch { /* autor irrecuperable: se omite */ }
+    }
+    return nombres;
 }
 
 /**
@@ -85,24 +111,31 @@ async function buscarPorTexto(titulo, autor) {
  */
 async function finalizar(norm, incluirSinopsis) {
     if (!norm) return null;
-    const { workKey, ...resto } = norm;
+    const { workKey, autoresNombres, autoresClaves, ...resto } = norm;
     resto.sinopsis = incluirSinopsis ? await obtenerSinopsis(workKey) : null;
+    // Autores: usa los ya resueltos (search.json) o resuelve las claves (registro /isbn).
+    resto.autores = autoresNombres || await resolverAutores(autoresClaves);
     return resto;
 }
 
 export async function buscarPorCriterios(criterios) {
     const incluirSinopsis = criterios.incluirSinopsis !== false; // por defecto, sí
 
-    // 1. Intento preferente: lookup directo por ISBN
-    if (criterios.isbn) {
+    // 1. Intento preferente: lookup directo por ISBN. Se admite una lista de candidatos
+    //    (variantes 10/13, ediciones, lectura del archivo) y se prueba cada uno: un libro
+    //    suele estar indexado por solo una de sus formas, así que el primer 404 no es el final.
+    const isbns = (criterios.isbns && criterios.isbns.length)
+        ? criterios.isbns
+        : (criterios.isbn ? [criterios.isbn] : []);
+    for (const isbn of isbns) {
         try {
-            const isbnLimpio = criterios.isbn.replace(/-/g, '');
+            const isbnLimpio = String(isbn).replace(/-/g, '');
             const res = await axios.get(`${BASE}/isbn/${isbnLimpio}.json`);
             const norm = normalizar(res.data);
             if (norm) return await finalizar(norm, incluirSinopsis);
         } catch (e) {
             if (esErrorDeRed(e)) throw new ErrorInfraestructura('OpenLibrary inalcanzable', e);
-            // 404 (ISBN inexistente o mal leído por la IA) -> caemos al buscador por texto
+            // 404 (ISBN inexistente o de otra edición) -> probar el siguiente candidato
         }
     }
 

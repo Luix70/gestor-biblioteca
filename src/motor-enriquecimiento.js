@@ -1,5 +1,5 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
-import { validarISBN, validarISSN } from './utils/identificadores.js';
+import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 
 // "Editoriales" que en realidad son grupos de difusión/maquetación, no casas editoriales.
 // Si el archivo trae una de estas, NO es autoritativa: una editorial real de las APIs prevalece.
@@ -63,10 +63,34 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     const autorPrincipal = (documento.autores && documento.autores.length > 0) ? documento.autores[0] : '';
     const imagen = primerValido(datosBase.cubierta_base64, datosBase.imagen_adicional) || null;
 
+    // ISBN como pivote: reunimos todos los candidatos del archivo (lectura del texto/nombre
+    // ya recolectados por el lector, más las formas 10/13 del isbn principal) para que las
+    // APIs los prueben uno a uno. El ISBN es la clave de búsqueda más fiable del archivo.
+    const isbnsArchivo = new Set();
+    for (const x of (datosBase.isbn_candidatos || [])) for (const v of variantesISBN(x)) isbnsArchivo.add(v);
+    for (const v of variantesISBN(documento.isbn)) isbnsArchivo.add(v);
+
     const datosExtra = await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
         incluirSinopsis: faltaSinopsis,
-        incluirCdu: faltaCdu
+        incluirCdu: faltaCdu,
+        isbnsArchivo: [...isbnsArchivo]
     });
+
+    // Título y autores: el archivo manda, SALVO que su "título" no sea fiable, es decir,
+    // que falte o sea en realidad un identificador (p. ej. un PDF llamado "0071769234.pdf",
+    // cuyo nombre-ISBN se guardó como título). En ese caso la autoridad lo sustituye.
+    const tituloEsIdentificador = !!(validarISBN(documento.titulo) || validarISSN(documento.titulo));
+    if (!primerValido(documento.titulo) || tituloEsIdentificador) {
+        if (datosExtra.titulo) {
+            if (tituloEsIdentificador) {
+                documento.alertas_agente.push(`Título "${documento.titulo}" era un identificador; sustituido por el de la autoridad: "${datosExtra.titulo}".`);
+            }
+            documento.titulo = datosExtra.titulo;
+        }
+    }
+    if ((!documento.autores || documento.autores.length === 0) && datosExtra.autores && datosExtra.autores.length > 0) {
+        documento.autores = datosExtra.autores;
+    }
 
     // Fusión CONSERVADORA: el dato del archivo manda; lo externo solo rellena huecos.
     documento.sinopsis    = primerValido(documento.sinopsis, datosExtra.sinopsis);
@@ -88,9 +112,10 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
     documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
 
-    // ISBN: el del archivo es preferente; se valida el dígito de control y, si es inválido
-    // (típico de una mala lectura por visión/OCR), se descarta para no almacenar basura.
-    const isbnCandidato = primerValido(documento.isbn, datosExtra.isbn);
+    // ISBN: si una autoridad resolvió un registro, su ISBN es el canónico/indexado y manda
+    // (el archivo puede traer el de otra edición no indexada — case 14). Si ninguna API
+    // resolvió, vale el del archivo. Se valida el dígito de control y se descarta si es basura.
+    const isbnCandidato = primerValido(datosExtra.isbn, documento.isbn);
     if (isbnCandidato) {
         const isbnValido = validarISBN(isbnCandidato);
         if (isbnValido) documento.isbn = isbnValido;
@@ -135,7 +160,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Limpieza 1: descartar campos internos de los lectores que no deben persistirse
     // (evita guardar la portada base64 completa o banderas de proceso en MongoDB).
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
-    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error'];
+    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).

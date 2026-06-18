@@ -1,6 +1,9 @@
 // Parser de nombres de archivo. Distingue:
 //   - libros: "Título - Autor1- Autor2"  → autores
 //   - revistas fechadas: "Título - <Mes>-<Mes> <Año>" → año_edicion + idioma (NO son autores)
+//   - el nombre ES un ISBN (p. ej. "0071769234.pdf") → identificador, NO título
+
+import { validarISBN } from './identificadores.js';
 
 const MESES = {
     fr: ['janvier', 'février', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'aout', 'septembre', 'octobre', 'novembre', 'décembre', 'decembre', 'janv', 'févr', 'fevr', 'avr', 'juil', 'sept', 'oct', 'nov', 'déc'],
@@ -13,6 +16,13 @@ const MESES = {
  */
 export function parsearNombre(nombreArchivo) {
     const base = String(nombreArchivo).replace(/\.[^.]+$/, '');
+
+    // ¿El nombre del archivo ES en sí un ISBN válido? Entonces NO es un título: es un
+    // identificador para consultar las APIs (el título real lo aportarán ellas).
+    const isbnNombre = validarISBN(base);
+    if (isbnNombre) {
+        return { titulo: null, autores: [], isbn: isbnNombre, esFechada: false };
+    }
 
     // ¿Bloque de fecha "Mes[-Mes] Año" (señal fuerte de publicación periódica)?
     for (const [lang, meses] of Object.entries(MESES)) {

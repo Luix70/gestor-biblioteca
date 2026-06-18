@@ -39,6 +39,7 @@ export function detectarTipo(ruta) {
 function metadatosDesdeNombre(ruta) {
     const p = parsearNombre(path.basename(ruta));
     const datos = { titulo: p.titulo, autores: p.autores };
+    if (p.isbn) datos.isbn = p.isbn;   // el nombre era un ISBN: que las APIs resuelvan el resto
     if (p.esFechada) { datos.año_edicion = p.año_edicion; datos.idioma = p.idioma; }
     return datos;
 }

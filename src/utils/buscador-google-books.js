@@ -65,9 +65,12 @@ async function consultar(query) {
  *   3. Fallback final por título solo.
  */
 export async function buscarEnGoogleBooks(criterios) {
-    // 1. Por ISBN
-    if (criterios.isbn) {
-        const porIsbn = await consultar(`isbn:${criterios.isbn.replace(/-/g, '')}`);
+    // 1. Por ISBN (se prueban todos los candidatos: variantes 10/13 / ediciones).
+    const isbns = (criterios.isbns && criterios.isbns.length)
+        ? criterios.isbns
+        : (criterios.isbn ? [criterios.isbn] : []);
+    for (const isbn of isbns) {
+        const porIsbn = await consultar(`isbn:${String(isbn).replace(/-/g, '')}`);
         if (porIsbn) return porIsbn;
     }
 
