@@ -111,10 +111,19 @@ function programarScan() {
 export async function iniciarVigilante() {
     await fs.mkdir(INBOX, { recursive: true }).catch(() => {});
     console.log(`👁️  Vigilante observando: ${INBOX}`);
+    const sondeoMs = Number(process.env.VIGILANTE_POLL_MS || 1500);
     const watcher = chokidar.watch(INBOX, {
         ignoreInitial: false,
         awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 200 },
         depth: 2,
+        // En NAS/Docker los eventos inotify del host no siempre cruzan el bind mount
+        // (sobre todo si el archivo se suelta por SMB/AFP): el evento 'add' nunca llega y
+        // el Inbox parece "muerto". El sondeo recorre el Inbox cada VIGILANTE_POLL_MS y SÍ
+        // detecta archivos nuevos. Activo por defecto; VIGILANTE_POLLING=0 lo desactiva
+        // (p. ej. en local con inotify fiable, para no gastar CPU).
+        usePolling: process.env.VIGILANTE_POLLING !== '0',
+        interval: sondeoMs,
+        binaryInterval: sondeoMs,
     });
     watcher.on('add', programarScan).on('addDir', programarScan);
     return watcher;
