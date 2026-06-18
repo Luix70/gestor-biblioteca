@@ -21,6 +21,7 @@ const resolver = (p, def) => {
 const INBOX = resolver(process.env.PATH_INBOX, 'Inbox');
 const PAUSA_MS = Number(process.env.PAUSA_INGESTA_MS || 1500);   // ritmo entre recursos (no saturar APIs)
 const REPOSO_MS = Number(process.env.REPOSO_INBOX_MS || 2500);   // espera tras el último cambio antes de procesar
+const ESTABILIDAD_MS = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse
 const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
 // Ubicación por defecto para libros/revistas físicos llegados por Inbox (sin POST que la fije).
 const UBICACION_INBOX = { ambito: 'Sin asignar', estanteria: 'Sin asignar (Inbox)' };
@@ -29,6 +30,21 @@ let temporizador = null;
 let procesando = false;
 
 const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
+
+/**
+ * ¿Han terminado de escribirse TODOS los archivos de la unidad? Un archivo aún en copia (SMB)
+ * puede leerse con 0 bytes o a medias: procesarlo daría metadatos basura y, peor, una copia
+ * corrupta en el árbol CDU. Se mide el tamaño dos veces con una pausa: si no cambia y es > 0,
+ * el archivo está estable. (El escaneo periódico lo reintentará si aún no lo está.)
+ */
+async function unidadEstable(rutas) {
+    const tam = () => Promise.all(rutas.map(r => fs.stat(r).then(s => s.size).catch(() => -1)));
+    const a = await tam();
+    if (a.some(s => s <= 0)) return false;                 // 0 bytes o ilegible = aún escribiéndose
+    await new Promise(res => setTimeout(res, ESTABILIDAD_MS));
+    const b = await tam();
+    return a.every((s, i) => s === b[i] && s > 0);          // tamaño estable y no vacío
+}
 
 /**
  * Construye las unidades de trabajo del Inbox:
@@ -71,7 +87,14 @@ async function procesarUnidad(unidad) {
     try {
         const r = await ingestarRecurso({ rutas: unidad.rutas, contexto });
         console.log(`  ✅ ${etiqueta} → ${r.operacion} (${r.estado}) · ${r.rutaWeb}`);
-        await limpiarInbox(unidad);
+        // SOLO se borra del Inbox si la copia al árbol CDU se verificó íntegra (tamaño origen ===
+        // destino). Si no, se conserva el original para no perder datos; el próximo escaneo lo
+        // reintentará (la copia es idempotente: sobrescribe el destino corrupto).
+        if (r.copiaIntegra) {
+            await limpiarInbox(unidad);
+        } else {
+            console.error(`  ⛔ ${etiqueta}: copia a CDU NO verificada → se CONSERVA el original en el Inbox (se reintentará).`);
+        }
     } catch (e) {
         if (e.tipo === 'infraestructura') {
             const destino = await enviarAReintentos(unidad.rutas, {
@@ -96,10 +119,20 @@ async function procesarCola() {
         let unidades = await listarUnidades();
         while (unidades.length) {
             console.log(`\n📥 Procesando ${unidades.length} unidad(es) del Inbox...`);
+            let procesadas = 0;
             for (const u of unidades) {
+                // No tocar un archivo que aún se está escribiendo (evita copias de 0 bytes).
+                if (!(await unidadEstable(u.rutas))) {
+                    console.log(`  ⏳ ${path.basename(u.rutas[0])}: aún escribiéndose; se reintenta en el próximo escaneo.`);
+                    continue;
+                }
                 await procesarUnidad(u);
+                procesadas++;
                 await new Promise(res => setTimeout(res, PAUSA_MS)); // ritmo
             }
+            // Si en una pasada completa no se procesó nada (todo inestable), salir y esperar al
+            // próximo escaneo periódico — así no entramos en un bucle re-listando lo inestable.
+            if (procesadas === 0) break;
             unidades = await listarUnidades(); // recoger lo que llegó mientras procesábamos
         }
     } finally {

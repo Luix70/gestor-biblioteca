@@ -19,10 +19,22 @@ const DIR_CDU = resolver(process.env.PATH_CDU, 'CDU');
 async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
     await fs.mkdir(carpetaFs, { recursive: true });
 
-    // 1. Copiar los archivos originales del recurso (epub/pdf/jpgs).
+    // 1. Copiar los archivos originales (epub/pdf/jpgs) y VERIFICAR la integridad: el destino
+    //    debe tener el mismo tamaño (>0) que el origen. Solo los verificados se devuelven en
+    //    'originalesOk'; el llamante NO borrará del Inbox los que falten (evita perder datos).
+    //    Una copia no íntegra se elimina del CDU para no dejar un archivo de 0 bytes/corrupto.
+    const originalesOk = [];
     for (const r of rutasOriginales) {
+        const destino = path.join(carpetaFs, path.basename(r));
         try {
-            await fs.copyFile(r, path.join(carpetaFs, path.basename(r)));
+            await fs.copyFile(r, destino);
+            const [src, dst] = await Promise.all([fs.stat(r), fs.stat(destino)]);
+            if (src.size > 0 && src.size === dst.size) {
+                originalesOk.push(r);
+            } else {
+                console.warn(`   ⚠️  Copia NO íntegra de ${path.basename(r)} (origen ${src.size}B / destino ${dst.size}B): se descarta.`);
+                await fs.rm(destino, { force: true }).catch(() => {});
+            }
         } catch (e) {
             console.warn(`   ⚠️  No se pudo copiar ${path.basename(r)}: ${e.message}`);
         }
@@ -50,7 +62,7 @@ async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
             console.warn(`   ⚠️  Imagen (${a.origen}) no materializada: ${e.message}`);
         }
     }
-    return { imagenes, portada };
+    return { imagenes, portada, originalesOk };
 }
 
 /**
@@ -84,15 +96,21 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         id: resultado._id,
     });
     const carpetaFs = path.join(DIR_CDU, rc.relativa);
-    let imagenes = [], portada = null;
+    let imagenes = [], portada = null, originalesOk = [];
     try {
-        ({ imagenes, portada } = await copiarArchivos(carpetaFs, rc.web, rutas, activos));
+        ({ imagenes, portada, originalesOk } = await copiarArchivos(carpetaFs, rc.web, rutas, activos));
     } catch (e) {
         console.warn(`[Servicio] Gestión de archivos incompleta: ${e.message}`);
     }
+    // La copia es íntegra solo si TODOS los originales se copiaron y verificaron (tamaño).
+    // El vigilante solo borra del Inbox cuando esto es true (no perder originales).
+    const copiaIntegra = originalesOk.length === rutas.length;
 
-    // 4. Enlazar rutas en el documento (best-effort; el doc ya está catalogado).
-    const campos = { ruta_base: rc.web };
+    // 4. Enlazar rutas en el documento (best-effort; el doc ya está catalogado). Se guarda el
+    //    nombre real del archivo original (para recuperarlo/descargarlo; el título normalizado
+    //    no basta). Para grupos de imágenes, la lista completa de nombres.
+    const campos = { ruta_base: rc.web, nombre_archivo: path.basename(rutas[0]) };
+    if (rutas.length > 1) campos.archivos_originales = rutas.map(r => path.basename(r));
     if (imagenes.length) campos.imagenes = imagenes;
     if (portada) campos.portada = portada;
     try {
@@ -128,6 +146,7 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         issn: resultado.issn || null,
         carpeta: carpetaFs,
         rutaWeb: rc.web,
+        copiaIntegra,          // el vigilante solo borra del Inbox si esto es true
         documento: documentoLegible,
     };
 }
