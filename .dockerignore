@@ -1,0 +1,26 @@
+# Dependencias: se instalan dentro de la imagen (npm install), nunca copiar las del host
+# (evita pisar node_modules de la imagen con binarios de otra plataforma).
+node_modules
+
+# Control de versiones y metadatos
+.git
+.gitignore
+*.md
+
+# Secretos y entorno (se inyectan vía compose / .env del host)
+.env
+.env.*
+
+# Datos en ejecución y árboles montados como volúmenes (no deben ir en la imagen)
+CDU/
+Inbox/
+Cuarentena/
+Reintentos/
+temp/
+
+# Batería de pruebas y fixtures pesados (epub/pdf/imágenes): no son de producción
+Test Battery/
+
+# Ruido del sistema operativo
+Thumbs.db
+.DS_Store

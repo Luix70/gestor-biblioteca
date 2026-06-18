@@ -1,7 +1,6 @@
 services:
   biblioteca:
     build: .
-    image: node:24-alpine
     container_name: gestor-biblioteca
     restart: unless-stopped
     volumes:
@@ -15,6 +14,7 @@ services:
       - "3000:3000"
     environment:
       - MONGO_URI=${MONGO_URI}
+      - MONGO_DB_NAME=${MONGO_DB_NAME}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY}
       - PATH_INBOX=/app/Inbox
@@ -22,9 +22,7 @@ services:
       - PATH_CUARENTENA=/app/Cuarentena
       - PATH_REINTENTOS=/app/Reintentos
       - NODE_OPTIONS=--no-warnings
-      # Esto desactiva ciertas optimizaciones del motor V8 que causan el crash
-      - V8_FLAGS=--no-wasm --no-jit
-    # CAMBIA ESTO PARA QUE EJECUTE TU APP:
+
     working_dir: /app
     command: ["npm", "start"]
 
