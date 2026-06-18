@@ -119,13 +119,28 @@ export async function procesarRecurso(entrada) {
             // "(ebook - pdf) Título") y arrastra a las APIs a un libro equivocado. La única
             // fuente fiable es la imagen de las páginas frontales → OCR por visión.
             const ocr = await ocrPdfEscaneado(rutas[0], datosBase.paginas);
-            if (ocr && (ocr.titulo || ocr.isbn)) {
-                datosBase = fusionarOcr(datosBase, ocr);
-                isbnDelArchivo = !!ocr.isbn;                 // ISBN leído del documento: fiable
-                if (ocr.tipo_recurso) tipo_recurso = ocr.tipo_recurso;
-                datosBase.alertas_agente = ["PDF escaneado identificado por OCR de visión de las páginas frontales."];
+            if (ocr) {
+                // Conservar las páginas rasterizadas como sidecars (quedan referenciadas en
+                // imagenes[]): la 1ª es la portada; el resto, muestras (créditos/contraportada).
+                // Al marcar ya una 'portada', resolverPortada no re-rasteriza más abajo.
+                for (const r of ocr.renders) {
+                    activos.push({
+                        tipo: r.etiqueta === 'portada' ? 'portada' : 'otra',
+                        origen: `pdf:${r.etiqueta}`,
+                        base64: r.buffer.toString('base64'),
+                    });
+                }
+                const v = ocr.datos;
+                if (v && (v.titulo || v.isbn)) {
+                    datosBase = fusionarOcr(datosBase, v);
+                    isbnDelArchivo = !!v.isbn;               // ISBN leído del documento: fiable
+                    if (v.tipo_recurso) tipo_recurso = v.tipo_recurso;
+                    datosBase.alertas_agente = ["PDF escaneado identificado por OCR de visión; páginas guardadas como sidecars."];
+                } else {
+                    datosBase.alertas_agente = ["PDF escaneado, OCR no concluyente: páginas guardadas como sidecars para revisión manual."];
+                }
             } else {
-                datosBase.alertas_agente = ["PDF sin capa de texto (escaneado) y OCR no concluyente: identificación por nombre de archivo + APIs."];
+                datosBase.alertas_agente = ["PDF sin capa de texto (escaneado): identificación por nombre de archivo + APIs."];
             }
         }
 
