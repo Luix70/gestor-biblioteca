@@ -6,6 +6,7 @@ import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
+import { resolverPortada } from './utils/resolver-portada.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -80,8 +81,8 @@ export async function procesarRecurso(entrada) {
         datosBase = await extraerMetadatosEpub(rutas[0]);
         formatos = ['epub'];
         tipo_recurso = 'libro';
-        const cubierta = datosBase.cubierta_base64 || datosBase.imagen_adicional;
-        if (cubierta) activos.push({ tipo: 'portada', origen: 'epub', base64: cubierta });
+        // La cubierta embebida se resuelve más abajo (resolverPortada), midiéndola frente a las
+        // portadas remotas; aquí solo se conserva en datosBase para la pista de visión.
 
     } else if (tipo === 'pdf') {
         // TIER 1 · capa de texto + info-dict
@@ -136,13 +137,19 @@ export async function procesarRecurso(entrada) {
         ubicacion: contexto.ubicacion
     });
 
-    // Si no hay portada local, usar candidatos remotos (OpenLibrary / Google Books).
-    const tienePortadaLocal = activos.some(a => a.tipo === 'portada');
-    if (!tienePortadaLocal && Array.isArray(documento._portadas_remotas)) {
-        for (const cand of documento._portadas_remotas) {
-            activos.push({ tipo: 'portada', origen: cand.origen, url: cand.url });
-            break; // basta la primera como portada; el resto quedan como respaldo
-        }
+    // Portada de calidad (las imágenes escaneadas ya son su propia portada; no se tocan).
+    // Mide la cubierta embebida y las remotas, descarta las degeneradas (1x1 de OpenLibrary)
+    // y, si ninguna llega al ancho objetivo y es un PDF, rasteriza páginas clave con poppler.
+    if (tipo !== 'imagen' && !activos.some(a => a.tipo === 'portada')) {
+        const { portada, extras } = await resolverPortada({
+            tipo,
+            rutas,
+            numPaginas: datosBase.paginas || 2,
+            embebidaBase64: datosBase.cubierta_base64 || datosBase.imagen_adicional || null,
+            remotos: Array.isArray(documento._portadas_remotas) ? documento._portadas_remotas : [],
+        });
+        if (portada) activos.push({ tipo: 'portada', origen: portada.origen, base64: portada.base64 });
+        for (const ex of extras) activos.push({ tipo: 'otra', origen: ex.origen, base64: ex.base64 });
     }
     delete documento._portadas_remotas;
 

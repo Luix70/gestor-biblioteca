@@ -129,7 +129,9 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         const isbnLimpio = datosExtra.isbn.replace(/-/g, '');
         datosExtra.portadas_remotas.push({
             origen: 'openlibrary',
-            url: `https://covers.openlibrary.org/b/isbn/${isbnLimpio}-L.jpg`
+            // default=false → si no hay cubierta real, OpenLibrary responde 404 en vez de servir
+            // su marcador 1x1; así la descarga falla limpiamente y no se cuela una portada falsa.
+            url: `https://covers.openlibrary.org/b/isbn/${isbnLimpio}-L.jpg?default=false`
         });
     }
 
