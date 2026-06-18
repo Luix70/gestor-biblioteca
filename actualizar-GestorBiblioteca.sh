@@ -105,7 +105,8 @@ rm -rf "$STAGE"
 
 echo "==> Estado del contenedor:"
 $COMPOSE ps
-echo "==> Últimas líneas de log:"
-$COMPOSE logs --tail=40
 
-echo "==> Listo. Sigue el arranque con:  docker-compose -f $APP_DIR/docker-compose.yml logs -f"
+# Logs en vivo: muestra las últimas líneas y SIGUE el arranque. Ctrl+C para salir;
+# el contenedor seguirá corriendo (logs -f no lo detiene).
+echo "==> Logs en vivo (Ctrl+C para salir; el contenedor seguirá corriendo):"
+$COMPOSE logs -f --tail=40
