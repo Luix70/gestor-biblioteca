@@ -1,0 +1,13 @@
+# El proyecto se despliega en Linux/Docker: TODO el texto se guarda y se extrae con LF.
+# Un CRLF en un script shell rompe el intérprete ("set: pipefail: invalid option name"),
+# por eso forzamos LF explícitamente (independiente de core.autocrlf de cada máquina).
+* text=auto eol=lf
+
+# Binarios: nunca tocar saltos de línea.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.heic binary
+*.pdf binary
+*.epub binary
