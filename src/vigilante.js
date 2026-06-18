@@ -130,6 +130,18 @@ export async function iniciarVigilante() {
         binaryInterval: sondeoMs,
     });
     watcher.on('add', programarScan).on('addDir', programarScan);
+
+    // Red de seguridad: en bind mounts de Synology los eventos de chokidar pueden no dispararse
+    // nunca (el Inbox parece inerte aunque el archivo ya esté dentro del contenedor). Un escaneo
+    // periódico llama a procesarCola directamente —que hace su propio fs.readdir— y garantiza la
+    // recogida pase lo que pase con los eventos. El guard 'procesando' evita solapes con el
+    // disparo por evento de chokidar. Ajustable con VIGILANTE_ESCANEO_MS.
+    const escaneoMs = Number(process.env.VIGILANTE_ESCANEO_MS || 10000);
+    setInterval(() => procesarCola().catch(e => console.error('Vigilante (escaneo periódico):', e)), escaneoMs);
+
+    // Y un primer barrido inmediato de lo que ya hubiera en el Inbox al arrancar.
+    procesarCola().catch(e => console.error('Vigilante (escaneo inicial):', e));
+
     return watcher;
 }
 
