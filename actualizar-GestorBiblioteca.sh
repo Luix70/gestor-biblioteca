@@ -7,19 +7,30 @@
 #
 #     bash /volume1/docker/actualizar-GestorBiblioteca.sh
 #
-# Repo privado: exporta un token antes de lanzarlo ->  GITHUB_TOKEN=ghp_xxx bash ...
+# Requiere ROOT (los ficheros del app y los datos los crea el contenedor como root):
+#
+#     sudo bash /volume1/docker/actualizar-GestorBiblioteca.sh
+#
+# Repo privado: exporta un token antes de lanzarlo ->  sudo GITHUB_TOKEN=ghp_xxx bash ...
 #
 # Qué hace, en orden:
 #   1. Descarga main.tar.gz de GitHub (wget+tar; sin git, sin Alpine).
-#   2. Sincroniza el código en GestorBiblioteca PRESERVANDO .env y node_modules.
-#   3. down -v  (para + elimina el volumen anónimo de node_modules, que es el
-#      que "ensombrecía" módulos viejos tras rebuilds — sharp/undici@7).
+#   2. down -v: para el contenedor (libera los montajes Inbox/CDU/... ) y elimina el
+#      volumen anónimo de node_modules, que "ensombrecía" módulos viejos (sharp/undici@7).
+#   3. Sincroniza el código PRESERVANDO .env, node_modules y los datos del host.
 #   4. up -d --build  (reinstala dependencias limpias dentro de la imagen).
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 # Binarios de Docker de Synology no siempre están en el PATH de un shell no interactivo.
 export PATH="$PATH:/usr/local/bin:/usr/bin"
+
+# Sin root no se pueden sobrescribir los ficheros (los creó el contenedor) ni gestionar
+# los puntos de montaje de datos. Fallar pronto con una instrucción clara.
+if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: ejecuta este script como root:  sudo bash $0" >&2
+    exit 1
+fi
 
 # --- Configuración --------------------------------------------------------
 REPO="Luix70/gestor-biblioteca"
@@ -60,20 +71,32 @@ if [ -z "$SRC_DIR" ] || [ ! -f "$SRC_DIR/package.json" ]; then
 fi
 echo "==> Código extraído en $SRC_DIR"
 
-# --- 2. Sincronizar el código (preservando .env y node_modules) -----------
-# --delete elimina del destino lo que ya no exista en el repo (módulos borrados).
-echo "==> Sincronizando código en $APP_DIR"
-rsync -a --delete \
-    --exclude='.env' \
-    --exclude='node_modules' \
-    --exclude='.git' \
-    "$SRC_DIR"/ "$APP_DIR"/
-
-# --- 3 y 4. Parar, eliminar volumen anónimo y reconstruir -----------------
+# --- 2. Parar el contenedor ANTES de sincronizar -------------------------
+# Imprescindible: con el contenedor en marcha, Inbox/CDU/Cuarentena/Reintentos son
+# puntos de montaje OCUPADOS dentro de $APP_DIR y bloquean el rsync. Además, down -v
+# elimina el volumen anónimo de node_modules (el que ensombrecía dependencias viejas).
 cd "$APP_DIR"
 echo "==> Parando contenedor y eliminando volumen de node_modules"
 $COMPOSE down -v
 
+# --- 3. Sincronizar el código -------------------------------------------
+# --delete borra del destino lo que ya no exista en el repo (módulos eliminados), PERO
+# se excluyen (anclados con '/' a la raíz del transfer) los ficheros y carpetas del host
+# que NUNCA están en el repo y no deben tocarse: secretos, dependencias y datos/montajes
+# (Docker recrea Inbox/CDU/... al levantar).
+echo "==> Sincronizando código en $APP_DIR"
+rsync -a --delete \
+    --exclude='/.env' \
+    --exclude='/node_modules' \
+    --exclude='/.git' \
+    --exclude='/Inbox' \
+    --exclude='/CDU' \
+    --exclude='/Cuarentena' \
+    --exclude='/Reintentos' \
+    --exclude='/temp' \
+    "$SRC_DIR"/ "$APP_DIR"/
+
+# --- 4. Reconstruir e iniciar -------------------------------------------
 echo "==> Reconstruyendo e iniciando (esto reinstala dependencias; en el Atom tarda un poco)"
 $COMPOSE up -d --build
 
