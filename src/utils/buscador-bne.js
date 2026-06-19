@@ -13,6 +13,7 @@
 import axios from 'axios';
 import { esErrorDeRed } from '../errores.js';
 import { conectarDB } from '../database.js';
+import { variantesISBN } from './identificadores.js';
 
 const SPARQL_BNE = 'https://datos.bne.es/sparql';
 const TIMEOUT = Number(process.env.BNE_TIMEOUT_MS || 12000);
@@ -54,7 +55,16 @@ LIMIT 10`;
 
 async function buscarEnLocal(isbnLimpio) {
     const db = await conectarDB();
-    const doc = await db.collection(COL_LOCAL).findOne({ isbn: isbnLimpio });
+    const col = db.collection(COL_LOCAL);
+    // Primero intento exacto (aprovecha el índice único); luego la variante 10↔13.
+    let doc = await col.findOne({ isbn: isbnLimpio });
+    if (!doc) {
+        const variantes = variantesISBN(isbnLimpio).filter(v => v !== isbnLimpio);
+        for (const v of variantes) {
+            doc = await col.findOne({ isbn: v });
+            if (doc) break;
+        }
+    }
     if (!doc || !doc.cdus?.length) return null;
     return {
         cdus:         doc.cdus,

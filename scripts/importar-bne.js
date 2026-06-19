@@ -32,7 +32,13 @@ const BATCH = 500;
 
 function limpiarISBN(raw) {
     if (!raw) return null;
-    return raw.replace(/[- ]/g, '').trim() || null;
+    // La BNE puede almacenar varios ISBNs separados por espacio; tomamos el primero con
+    // longitud válida (10 o 13 dígitos). Así evitamos importar concatenaciones.
+    for (const parte of raw.trim().split(/\s+/)) {
+        const limpio = parte.replace(/-/g, '').trim();
+        if (/^\d{13}$/.test(limpio) || /^\d{9}[\dX]$/.test(limpio)) return limpio;
+    }
+    return null;
 }
 
 /**
