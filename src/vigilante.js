@@ -1,3 +1,4 @@
+import './utils/consola-timestamp.js'; // marca de tiempo en todos los logs (debe ir lo primero)
 import 'dotenv/config';
 import axios from 'axios';
 // Timeout global para TODA llamada HTTP (ver app.js): evita que una API que no responde
@@ -41,14 +42,14 @@ let hayBacklogMant = true;          // ¿quedan documentos por conformar? (al ar
 
 const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
 
-/** Comprobación ligera: ¿hay algún archivo/carpeta procesable en el Inbox ahora mismo? */
+// Entradas a ignorar SIEMPRE en el Inbox: ocultos y carpetas de sistema de Synology
+// (@eaDir con miniaturas/metadatos, @tmp, #recycle). Sin esto, @eaDir hace creer que el Inbox
+// tiene contenido (bloquea el mantenimiento) y hasta intentaría catalogar sus miniaturas.
+const ignorarEntrada = (nombre) => nombre.startsWith('.') || nombre.startsWith('@') || nombre.startsWith('#');
+
+/** ¿Hay alguna unidad real de trabajo en el Inbox ahora mismo? (Misma lógica que listarUnidades.) */
 async function inboxTieneArchivos() {
-    try {
-        const e = await fs.readdir(INBOX, { withFileTypes: true });
-        return e.some(x => !x.name.startsWith('.') && (x.isDirectory() || esValida(x.name)));
-    } catch {
-        return false;
-    }
+    return (await listarUnidades()).length > 0;
 }
 
 /**
@@ -80,7 +81,7 @@ async function listarUnidades() {
     const sueltos = [];
 
     for (const e of entradas) {
-        if (e.name.startsWith('.')) continue;
+        if (ignorarEntrada(e.name)) continue; // ocultos + carpetas de sistema (@eaDir, #recycle...)
         const ruta = path.join(INBOX, e.name);
         if (e.isDirectory()) {
             const dentro = (await fs.readdir(ruta)).map(n => path.join(ruta, n)).filter(esValida);
