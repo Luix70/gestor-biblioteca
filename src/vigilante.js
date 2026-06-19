@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
+import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -26,10 +27,29 @@ const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic',
 // Ubicación por defecto para libros/revistas físicos llegados por Inbox (sin POST que la fije).
 const UBICACION_INBOX = { ambito: 'Sin asignar', estanteria: 'Sin asignar (Inbox)' };
 
+// Mantenimiento (Conformador): proceso durmiente que, tras un periodo de inactividad del Inbox,
+// repasa la base de datos y conforma los documentos (portadas, nombres, sidecars...). Cede
+// siempre a la ingesta. MANTENIMIENTO_ACTIVO=0 lo desactiva.
+const MANTENIMIENTO_ACTIVO = process.env.MANTENIMIENTO_ACTIVO !== '0';
+const MANTENIMIENTO_REPOSO_MS = Number(process.env.MANTENIMIENTO_REPOSO_MS || 300000); // 5 min de Inbox inactivo
+
 let temporizador = null;
-let procesando = false;
+let procesando = false;             // lock compartido: ingesta Y mantenimiento (nunca solapan)
+let ultimaActividad = Date.now();   // último momento con actividad de ingesta
+let ultimaRevisionMant = 0;         // última pasada de mantenimiento
+let hayBacklogMant = true;          // ¿quedan documentos por conformar? (al arrancar, asumimos que sí)
 
 const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
+
+/** Comprobación ligera: ¿hay algún archivo/carpeta procesable en el Inbox ahora mismo? */
+async function inboxTieneArchivos() {
+    try {
+        const e = await fs.readdir(INBOX, { withFileTypes: true });
+        return e.some(x => !x.name.startsWith('.') && (x.isDirectory() || esValida(x.name)));
+    } catch {
+        return false;
+    }
+}
 
 /**
  * ¿Han terminado de escribirse TODOS los archivos de la unidad? Un archivo aún en copia (SMB)
@@ -117,6 +137,7 @@ async function procesarCola() {
     procesando = true;
     try {
         let unidades = await listarUnidades();
+        if (unidades.length) ultimaActividad = Date.now(); // hay trabajo: posponer el mantenimiento
         while (unidades.length) {
             console.log(`\n📥 Procesando ${unidades.length} unidad(es) del Inbox...`);
             let procesadas = 0;
@@ -141,8 +162,33 @@ async function procesarCola() {
 }
 
 function programarScan() {
+    ultimaActividad = Date.now(); // llegó algo: reinicia el reloj de inactividad del mantenimiento
     clearTimeout(temporizador);
     temporizador = setTimeout(() => procesarCola().catch(e => console.error('Vigilante:', e)), REPOSO_MS);
+}
+
+/**
+ * Lanza una pasada de mantenimiento si el Inbox lleva inactivo lo suficiente y nada más corre.
+ * Comparte el lock 'procesando' con la ingesta (no solapan) y cede el turno en cuanto algo
+ * llega al Inbox (debeAbortar). Procesa por lotes: si quedan pendientes, el siguiente tick sigue.
+ */
+async function quizasMantenimiento() {
+    if (!MANTENIMIENTO_ACTIVO || procesando) return;
+    const inactivo = Date.now() - ultimaActividad >= MANTENIMIENTO_REPOSO_MS;
+    const toca = hayBacklogMant || (Date.now() - ultimaRevisionMant >= MANTENIMIENTO_REPOSO_MS);
+    if (!inactivo || !toca) return;
+    if (await inboxTieneArchivos()) return; // prioridad absoluta a la ingesta
+
+    procesando = true;
+    try {
+        const r = await ejecutarMantenimiento({ debeAbortar: inboxTieneArchivos });
+        hayBacklogMant = !r.abortado && r.pendientes > 0;
+        ultimaRevisionMant = Date.now();
+    } catch (e) {
+        console.error('Mantenimiento:', e.message);
+    } finally {
+        procesando = false;
+    }
 }
 
 export async function iniciarVigilante() {
@@ -170,10 +216,18 @@ export async function iniciarVigilante() {
     // recogida pase lo que pase con los eventos. El guard 'procesando' evita solapes con el
     // disparo por evento de chokidar. Ajustable con VIGILANTE_ESCANEO_MS.
     const escaneoMs = Number(process.env.VIGILANTE_ESCANEO_MS || 10000);
-    setInterval(() => procesarCola().catch(e => console.error('Vigilante (escaneo periódico):', e)), escaneoMs);
+    setInterval(async () => {
+        await procesarCola().catch(e => console.error('Vigilante (escaneo periódico):', e));
+        // Si el Inbox queda inactivo, aprovechar para una pasada de mantenimiento (cede a la ingesta).
+        await quizasMantenimiento().catch(e => console.error('Vigilante (mantenimiento):', e));
+    }, escaneoMs);
 
     // Y un primer barrido inmediato de lo que ya hubiera en el Inbox al arrancar.
     procesarCola().catch(e => console.error('Vigilante (escaneo inicial):', e));
+
+    if (MANTENIMIENTO_ACTIVO) {
+        console.log(`🧹 Conformador activo: mantenimiento tras ${Math.round(MANTENIMIENTO_REPOSO_MS / 1000)}s de Inbox inactivo.`);
+    }
 
     return watcher;
 }
