@@ -1,5 +1,6 @@
 import './utils/consola-timestamp.js'; // marca de tiempo en todos los logs (debe ir lo primero)
 import 'dotenv/config';
+import './config.js';                  // ajustes por defecto (env > config); debe ir tras dotenv
 import axios from 'axios';
 // Timeout global para TODA llamada HTTP (ver app.js): evita que una API que no responde
 // cuelgue el procesado del Inbox. Necesario también aquí por si se ejecuta en solitario.
@@ -137,6 +138,7 @@ async function procesarCola() {
     if (procesando) return;
     procesando = true;
     try {
+        let totalProcesadas = 0;
         let unidades = await listarUnidades();
         if (unidades.length) ultimaActividad = Date.now(); // hay trabajo: posponer el mantenimiento
         while (unidades.length) {
@@ -152,10 +154,16 @@ async function procesarCola() {
                 procesadas++;
                 await new Promise(res => setTimeout(res, PAUSA_MS)); // ritmo
             }
+            totalProcesadas += procesadas;
             // Si en una pasada completa no se procesó nada (todo inestable), salir y esperar al
             // próximo escaneo periódico — así no entramos en un bucle re-listando lo inestable.
             if (procesadas === 0) break;
             unidades = await listarUnidades(); // recoger lo que llegó mientras procesábamos
+        }
+        // Anuncio de reposo: solo en la TRANSICIÓN (tras procesar algo y quedar el Inbox vacío),
+        // no en cada escaneo en vacío (evita spam cada VIGILANTE_ESCANEO_MS).
+        if (totalProcesadas > 0 && !(await inboxTieneArchivos())) {
+            console.log(`📭 Inbox vacío — ${totalProcesadas} unidad(es) procesada(s); la app queda en reposo.`);
         }
     } finally {
         procesando = false;

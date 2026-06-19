@@ -20,7 +20,7 @@ An automated library-cataloguing agent: it ingests book/magazine files (EPUB, PD
 
 `MONGO_URI`, `MONGO_DB_NAME`, `GEMINI_API_KEY`, `GOOGLE_BOOKS_API_KEY`, and the path vars `PATH_INBOX` / `PATH_CDU` / `PATH_CUARENTENA` / `PATH_REINTENTOS` (relative to repo root). Modules resolve these paths relative to the repo root themselves — **do not** re-mutate `process.env.PATH_*` in new code.
 
-All the tuning knobs (timeouts, watcher intervals, maintenance cadence, cover/PDF/OCR sizes…) are `process.env.X || <default>` — see **[`.env.example`](.env.example)** for the full annotated list. The container reads `.env` directly (bind mount → `/app/.env` + `dotenv/config`), so adding a line there and restarting suffices; only the secrets + `PATH_*` are *also* injected via the compose `environment:` block (which wins over dotenv for those).
+All the numeric tuning knobs (timeouts, watcher intervals, maintenance cadence, cover/PDF/OCR sizes…) live in **[`src/config.js`](src/config.js)** — the committed single source of defaults. It seeds `process.env` (imported right after `dotenv/config`), so modules still read `process.env.X` and **`.env` overrides config** (env > config). Edit `config.js` for a permanent/shared change (travels with git, editable in the repo *and* the deployed `/app/src/config.js`); use `.env` only for a per-machine override that must survive deploys. Secrets/paths/toggles live in `.env` (see [`.env.example`](.env.example)); the secrets + `PATH_*` are *also* injected via the compose `environment:` block (which wins over dotenv for those).
 
 ## Architecture — the ingest pipeline
 
