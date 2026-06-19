@@ -14,7 +14,7 @@ import 'dotenv/config';
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { buscarCDUsEnBNE } from '../src/utils/buscador-bne.js';
-import { buscarEnLOC } from '../src/utils/buscador-loc.js';
+import { buscarEnDNB } from '../src/utils/buscador-dnb.js';
 import { resolverCDU } from '../src/clasificador-cdu.js';
 
 const args = Object.fromEntries(
@@ -52,13 +52,13 @@ async function reclasificarLibro(doc) {
         }
     }
 
-    // 2. LOC para Dewey/LCC (si el doc no tiene ya)
+    // 2. DNB para Dewey/DDC (si el doc no tiene ya)
     let dewey = doc.dewey || null;
     let lcc = doc.lcc || null;
     if (!dewey && !lcc && isbn) {
-        const infoLOC = await buscarEnLOC({ isbn });
-        if (infoLOC) { dewey = infoLOC.dewey; lcc = infoLOC.lcc; }
-        if (dewey || lcc) result.alertas.push('Dewey/LCC de LOC.');
+        const infoDNB = await buscarEnDNB({ isbn });
+        if (infoDNB) { dewey = infoDNB.dewey; lcc = infoDNB.lcc; }
+        if (dewey || lcc) result.alertas.push('Dewey/DDC de DNB.');
     }
 
     // 3. Clasificador (caché + IA)

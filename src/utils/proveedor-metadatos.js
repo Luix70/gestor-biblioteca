@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { buscarCDUsEnBNE } from './buscador-bne.js';
-import { buscarEnLOC } from './buscador-loc.js';
+import { buscarEnDNB } from './buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 
 // Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
@@ -181,15 +181,16 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         }
     }
 
-    // TIER 2d · LOC — Dewey/LCC de la Library of Congress para libros en inglés.
+    // TIER 2d · DNB — Dewey/DDC de la Deutsche Nationalbibliothek para libros europeos.
     // Complementa OpenLibrary cuando ésta no dio Dewey (p.ej. ISBN no indexado en OL).
+    // La DNB es SRU público, sin bloqueos: funciona para alemán, inglés y muchos otros idiomas.
     if (!datosExtra.dewey && !datosExtra.lcc && isbnParaBusquedas) {
-        const infoLOC = await buscarEnLOC({ isbn: isbnParaBusquedas });
-        if (infoLOC) {
-            rellenar('dewey', infoLOC.dewey);
-            rellenar('lcc', infoLOC.lcc);
-            if (infoLOC.dewey || infoLOC.lcc)
-                datosExtra.alertas.push('Dewey/LCC complementados desde Library of Congress.');
+        const infoDNB = await buscarEnDNB({ isbn: isbnParaBusquedas });
+        if (infoDNB) {
+            rellenar('dewey', infoDNB.dewey);
+            rellenar('lcc', infoDNB.lcc);
+            if (infoDNB.dewey || infoDNB.lcc)
+                datosExtra.alertas.push('Dewey/LCC complementados desde DNB (Deutsche Nationalbibliothek).');
         }
     }
 

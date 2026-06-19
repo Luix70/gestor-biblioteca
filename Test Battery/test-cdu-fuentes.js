@@ -1,6 +1,7 @@
 /**
- * Diagnóstico de fuentes CDU: muestra exactamente qué responden BNE y LOC
- * para un ISBN conocido, antes de parsear nada.
+ * Diagnóstico de fuentes CDU — segunda ronda.
+ * Prueba BNE Primo (nuevo sistema desde 2021), SPARQL vía POST, DNB SRU,
+ * y LOC con timeout mayor y User-Agent de navegador.
  *
  * Uso:  node "Test Battery/test-cdu-fuentes.js" [isbn]
  * Ej:   node "Test Battery/test-cdu-fuentes.js" 9788491041795
@@ -11,6 +12,7 @@ import axios from 'axios';
 
 const ISBN = process.argv[2] || '9788491041795';
 const ISBN_LIMPIO = ISBN.replace(/-/g, '');
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
 async function probar(nombre, fn) {
     console.log(`\n${'─'.repeat(60)}`);
@@ -20,90 +22,101 @@ async function probar(nombre, fn) {
         const inicio = Date.now();
         const resultado = await fn();
         console.log(`✔ OK en ${Date.now() - inicio} ms`);
-        console.log(typeof resultado === 'string'
-            ? resultado.slice(0, 1000)
-            : JSON.stringify(resultado, null, 2).slice(0, 1000));
+        const texto = typeof resultado === 'string' ? resultado : JSON.stringify(resultado, null, 2);
+        console.log(texto.slice(0, 1500));
     } catch (e) {
         console.log(`✘ ERROR: ${e.message} (${e.code || e.response?.status || ''})`);
+        if (e.response?.data) console.log('  body:', String(e.response.data).slice(0, 300));
     }
 }
 
-// ── BNE ────────────────────────────────────────────────────────────────────
+// ── BNE Primo (Ex Libris Alma — sistema actual desde 2021) ─────────────────
 
-await probar('BNE SPARQL — predicate P1001/P4020', async () => {
-    const query = `
-PREFIX bnedef: <http://datos.bne.es/def/>
-SELECT DISTINCT ?cdu WHERE {
-  ?rec bnedef:P1001 "${ISBN_LIMPIO}" .
-  ?rec bnedef:P4020 ?cdu .
-} LIMIT 5`;
-    const r = await axios.get('http://datos.bne.es/sparql', {
-        params: { query, format: 'application/sparql-results+json' },
-        timeout: 15000,
-        headers: { Accept: 'application/sparql-results+json' },
+await probar('BNE Primo API — vid 34BNE_BNE1', async () => {
+    const r = await axios.get('https://api-eu.hosted.exlibrisgroup.com/primo/v1/search', {
+        params: { vid: '34BNE_BNE1', q: `isbn,contains,${ISBN_LIMPIO}`, limit: 1, offset: 0 },
+        timeout: 20000, headers: { 'User-Agent': UA },
     });
     return r.data;
 });
 
-await probar('BNE SPARQL — buscar cualquier triple con el ISBN (descubrir predicado)', async () => {
-    const query = `SELECT ?s ?p ?o WHERE { ?s ?p "${ISBN_LIMPIO}" . } LIMIT 10`;
-    const r = await axios.get('http://datos.bne.es/sparql', {
-        params: { query, format: 'application/sparql-results+json' },
-        timeout: 15000,
-        headers: { Accept: 'application/sparql-results+json' },
+await probar('BNE Primo API — vid 34BNE_VU1', async () => {
+    const r = await axios.get('https://api-eu.hosted.exlibrisgroup.com/primo/v1/search', {
+        params: { vid: '34BNE_VU1', q: `isbn,contains,${ISBN_LIMPIO}`, limit: 1, offset: 0 },
+        timeout: 20000, headers: { 'User-Agent': UA },
     });
     return r.data;
 });
 
-await probar('BNE SPARQL — buscar con bibo:isbn13', async () => {
-    const query = `
-PREFIX bibo: <http://purl.org/ontology/bibo/>
-SELECT ?s ?p ?o WHERE {
-  ?s bibo:isbn13 "${ISBN_LIMPIO}" .
-  ?s ?p ?o .
-} LIMIT 20`;
-    const r = await axios.get('http://datos.bne.es/sparql', {
-        params: { query, format: 'application/sparql-results+json' },
-        timeout: 15000,
-        headers: { Accept: 'application/sparql-results+json' },
+await probar('BNE Primo — URL pública del catálogo (descubrir VID)', async () => {
+    // Si redirige a Primo, la URL final revelará el VID real
+    const r = await axios.get('https://catalogo.bne.es', {
+        timeout: 15000, headers: { 'User-Agent': UA },
+        maxRedirects: 5,
     });
+    // Buscar menciones de vid= o exlibrisgroup en el HTML
+    const menciones = (r.data.match(/(vid=[^&"'\s]+|exlibrisgroup[^"'\s]*)/g) || []).slice(0, 5);
+    return { status: r.status, url_final: r.request?.res?.responseUrl || '(no redirect)', menciones };
+});
+
+// ── BNE SPARQL vía POST ────────────────────────────────────────────────────
+
+await probar('BNE SPARQL vía POST (no GET)', async () => {
+    const query = `SELECT ?s ?p WHERE { ?s ?p "${ISBN_LIMPIO}" . } LIMIT 5`;
+    const r = await axios.post('http://datos.bne.es/sparql',
+        new URLSearchParams({ query, format: 'application/sparql-results+json' }).toString(),
+        { timeout: 15000, headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/sparql-results+json', 'User-Agent': UA } }
+    );
     return r.data;
 });
 
-await probar('BNE SRU (Sierra) — búsqueda por ISBN', async () => {
-    const url = `https://catalogo.bne.es/sru?version=1.1&operation=searchRetrieve&query=dc.identifier="${ISBN_LIMPIO}"&recordSchema=marcxml&maximumRecords=1`;
-    const r = await axios.get(url, { timeout: 15000 });
-    return r.data.slice(0, 2000);
-});
+// ── DNB (Deutsche Nationalbibliothek) — SRU público ───────────────────────
 
-await probar('BNE catalog — URL clásica SirsiDynix por ISBN', async () => {
-    const url = `https://catalogo.bne.es/uhtbin/cgisirsi/?searchdata1=${ISBN_LIMPIO}&srchfield1=020`;
-    const r = await axios.get(url, { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-    return r.data.slice(0, 2000);
-});
-
-// ── LOC ────────────────────────────────────────────────────────────────────
-
-await probar('LOC — catalog JSON search por ISBN', async () => {
-    const r = await axios.get('https://catalog.loc.gov/vwebv/search', {
-        params: { searchCode: 'ISAB', searchArg: ISBN_LIMPIO, searchType: '1', recCount: '1' },
-        timeout: 15000,
-        headers: { 'User-Agent': 'Mozilla/5.0' },
+await probar('DNB SRU — MARCXML por ISBN (DDC en campo 082)', async () => {
+    const r = await axios.get('https://services.dnb.de/sru/dnb', {
+        params: {
+            version: '1.1',
+            operation: 'searchRetrieve',
+            query: `isbn=${ISBN_LIMPIO}`,
+            recordSchema: 'MARC21-xml',
+            maximumRecords: '1',
+        },
+        timeout: 20000, headers: { 'User-Agent': UA },
     });
     return r.data.slice(0, 3000);
 });
 
-await probar('LOC — www.loc.gov/search JSON', async () => {
-    const r = await axios.get('https://www.loc.gov/search/', {
+// ── LOC con timeout mayor y User-Agent ────────────────────────────────────
+
+await probar('LOC — www.loc.gov/books JSON (timeout 30 s)', async () => {
+    const r = await axios.get('https://www.loc.gov/books/', {
         params: { q: `isbn:${ISBN_LIMPIO}`, fo: 'json' },
-        timeout: 15000,
+        timeout: 30000, headers: { 'User-Agent': UA },
     });
-    return r.data;
+    const d = r.data;
+    // Mostrar solo los primeros resultados
+    if (d.results) d.results = d.results.slice(0, 2);
+    return d;
 });
 
-await probar('LOC — lccn.loc.gov MODS directo (requiere lccn conocido; usando ISBN como fallback)', async () => {
-    const r = await axios.get(`https://lccn.loc.gov/${ISBN_LIMPIO}.mods.xml`, { timeout: 15000 });
-    return r.data.slice(0, 2000);
+await probar('LOC — www.loc.gov/search JSON (timeout 30 s)', async () => {
+    const r = await axios.get('https://www.loc.gov/search/', {
+        params: { q: `isbn:${ISBN_LIMPIO}`, fo: 'json' },
+        timeout: 30000, headers: { 'User-Agent': UA },
+    });
+    const d = r.data;
+    if (d.results) d.results = d.results.slice(0, 2);
+    return d;
+});
+
+// ── VIAF (Virtual International Authority File) ────────────────────────────
+
+await probar('VIAF — búsqueda por ISBN (enlaza registros de múltiples bibliotecas)', async () => {
+    const r = await axios.get('https://www.viaf.org/viaf/search', {
+        params: { query: `local.isbn all "${ISBN_LIMPIO}"`, maximumRecords: 1, httpAccept: 'application/json' },
+        timeout: 15000, headers: { 'User-Agent': UA },
+    });
+    return r.data;
 });
 
 console.log('\n✅ Diagnóstico completo.');

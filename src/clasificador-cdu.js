@@ -82,24 +82,65 @@ async function iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis }) {
         const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
         const esLiteratura = esFiccionLiteratura({ dewey, lcc, categorias });
         const categoria = Array.isArray(categorias) && categorias.length > 0 ? categorias[0] : null;
+
+        // Tabla de nacionalidades literarias conocidas, para el prompt
+        const tablaLit = [
+            'Rusa/soviética → 821.161.1',
+            'Española       → 821.134.2',
+            'Latinoamer.    → 821.134.2-* (o código del país: ARG 821.134.2(82), MEX 821.134.2(72)…)',
+            'Inglesa/bri.   → 821.111',
+            'Norteamer.     → 821.111(73)',
+            'Francesa       → 821.133.1',
+            'Alemana/aust.  → 821.112.2',
+            'Italiana       → 821.131.1',
+            'Portuguesa     → 821.134.3',
+            'Griega antigua → 821.14',
+            'Latina clásica → 821.124',
+            'Árabe          → 821.411.21',
+            'Japonesa       → 821.521',
+            'China          → 821.581',
+        ].join('\n  ');
+
         const prompt = `
-Actúa como bibliotecario catalogador experto en Clasificación Decimal Universal (CDU).
-Devuelve SOLO el código CDU (máx. 12 caracteres, sin subdivisiones alfabéticas, ":" como máximo una vez).
+Eres un bibliotecario catalogador experto en Clasificación Decimal Universal (CDU).
+Devuelve SOLO el código CDU, sin explicación. Máx. 12 caracteres, sin subdivisiones alfabéticas,
+":" como separador de materias como máximo una vez.
 
-REGLA CRÍTICA — OBRAS DE FICCIÓN Y LITERATURA:
-Si la obra es ficción (novela, cuento, poesía, teatro) o literatura en general, DEBES clasificarla
-bajo 82x según la TRADICIÓN LITERARIA DEL AUTOR, NO por el tema de la obra.
-  Literatura rusa   → 821.161.1
-  Literatura española → 821.134.2
-  Literatura inglesa  → 821.111
-  Literatura francesa → 821.133.1
-  Literatura alemana  → 821.112.2
-  Literatura italiana → 821.131.1
-Un cuento sobre un manicomio escrito por un autor ruso es "literatura rusa" (821.161.1), NO "psiquiatría" (616.89).
-Un poema de amor es literatura de la lengua del autor, no "amor" (159.9).
-${esLiteratura ? 'ESTA OBRA ES LITERATURA/FICCIÓN: aplica obligatoriamente la regla anterior.' : ''}
+═══ REGLAS (en orden de prioridad) ═══
 
-${dewey ? `Código Dewey (DDC): "${dewey}". Conviértelo a CDU.` : ''}
+REGLA A — FICCIÓN Y LITERATURA (solo si ESTÁS SEGURO de que es ficción):
+  Si la obra es novela, cuento, poesía, teatro o ensayo literario, clasifícala por la
+  TRADICIÓN LITERARIA DEL AUTOR (82x), NUNCA por el tema de la obra.
+  Tabla de naciones:
+  ${tablaLit}
+  IMPORTANTE: Aplica esta regla SOLO si sabes la nacionalidad del autor con certeza.
+  Si el nombre no indica claramente el idioma, ve a la REGLA D.
+  Ejemplos CORRECTOS:
+    Chéjov (ruso)         → 821.161.1
+    Zweig (austriaco)     → 821.112.2  (NOT 821.161.1 — Zweig es austríaco, no ruso)
+    García Márquez (col.) → 821.134.2
+    Shakespeare (inglés)  → 821.111
+  Ejemplos INCORRECTOS (nunca hagas esto):
+    Cuento de un manicomio por autor ruso → 616.89 (¡INCORRECTO! Debe ser 821.161.1)
+    Poema de amor en español              → 159.9  (¡INCORRECTO! Debe ser 821.134.2)
+    Novela médica por autor inglés        → 610    (¡INCORRECTO! Debe ser 821.111)
+
+REGLA B — TEXTOS CLÁSICOS GRECOLATINOS:
+  Si el autor es de la Antigüedad griega o latina, clasifica siempre como literatura clásica:
+    Griego antiguo → 821.14
+    Latín clásico  → 821.124
+
+REGLA C — NO FICCIÓN:
+  Clasifica por el tema principal de la obra. Usa el Dewey/LCC como guía si se proporciona.
+
+REGLA D — INCERTIDUMBRE (aplícala antes de inventar una clasificación):
+  Si no puedes determinar la tradición literaria del autor con confianza razonable,
+  usa el código genérico de literatura: 82 (o 82-3 para novela, 82-1 para poesía, etc.)
+  NUNCA inventes una nacionalidad — un error es peor que un código genérico.
+
+═══ DATOS DE LA OBRA ═══
+${esLiteratura ? '⚑ FICCIÓN/LITERATURA detectada: aplica REGLA A (o D si no conoces la nacionalidad).' : ''}
+${dewey ? `Dewey (DDC): "${dewey}" → convierte a CDU.` : ''}
 ${lcc ? `Library of Congress: "${lcc}".` : ''}
 ${categoria ? `Categoría: "${categoria}".` : ''}
 ${autor ? `Autor: "${autor}".` : ''}
