@@ -2,6 +2,8 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
+import { buscarCDUsEnBNE } from './buscador-bne.js';
+import { buscarEnLOC } from './buscador-loc.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 
 // Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
@@ -57,6 +59,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         lcc: null,
         portadas_remotas: [], // candidatos de cubierta (se usan solo si el archivo no aporta una)
         cdu: null,
+        cdu_adicionales: [],   // CDUs secundarios de fuentes autoritativas (BNE, etc.)
         alertas: []
     };
 
@@ -165,9 +168,34 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('año_edicion', pistasIA.año_edicion);
     }
 
-    // TIER 3c · Resolución de la CDU vía clasificador con equivalencias aprendidas
-    // (Dewey/LC en caché → API externa → IA, aprendiendo la equivalencia).
-    if (incluirCdu) {
+    // TIER 2c · BNE — códigos CDU directos de catalogadores profesionales (autoridad para
+    // obras en español). Si la BNE localiza el ISBN, su primera CDU se usa como primaria y
+    // las demás se guardan en cdu_adicionales. Si la BNE no lo localiza, se sigue al clasificador.
+    const isbnParaBusquedas = datosExtra.isbn || isbnsLookup[0] || null;
+    if (incluirCdu && isbnParaBusquedas) {
+        const cdusBNE = await buscarCDUsEnBNE(isbnParaBusquedas);
+        if (cdusBNE && cdusBNE.length > 0) {
+            datosExtra.cdu = cdusBNE[0];
+            if (cdusBNE.length > 1) datosExtra.cdu_adicionales = cdusBNE.slice(1);
+            datosExtra.alertas.push(`CDU de la BNE: ${cdusBNE.join(' / ')}.`);
+        }
+    }
+
+    // TIER 2d · LOC — Dewey/LCC de la Library of Congress para libros en inglés.
+    // Complementa OpenLibrary cuando ésta no dio Dewey (p.ej. ISBN no indexado en OL).
+    if (!datosExtra.dewey && !datosExtra.lcc && isbnParaBusquedas) {
+        const infoLOC = await buscarEnLOC({ isbn: isbnParaBusquedas });
+        if (infoLOC) {
+            rellenar('dewey', infoLOC.dewey);
+            rellenar('lcc', infoLOC.lcc);
+            if (infoLOC.dewey || infoLOC.lcc)
+                datosExtra.alertas.push('Dewey/LCC complementados desde Library of Congress.');
+        }
+    }
+
+    // TIER 3c · Resolución de la CDU vía clasificador (solo si BNE no la resolvió ya).
+    // Dewey/LC en caché → API externa → IA, aprendiendo la equivalencia.
+    if (incluirCdu && !datosExtra.cdu) {
         const { cdu, fuente } = await resolverCDU({
             dewey: datosExtra.dewey,
             lcc: datosExtra.lcc,

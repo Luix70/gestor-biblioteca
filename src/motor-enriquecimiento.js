@@ -110,6 +110,8 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.año_edicion = primerValido(documento.año_edicion, datosExtra.año_edicion);
     documento.idioma      = primerValido(documento.idioma, datosExtra.idioma) || 'es';
     documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
+    if (datosExtra.cdu_adicionales && datosExtra.cdu_adicionales.length > 0)
+        documento.cdu_adicionales = datosExtra.cdu_adicionales;
     documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
 
     // ISBN: si una autoridad resolvió un registro, su ISBN es el canónico/indexado y manda
