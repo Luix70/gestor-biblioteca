@@ -42,7 +42,9 @@ export const TAREAS = [
         id: 'revisar-portada',
         version: 1,
         descripcion: 'Si la portada falta o es de baja calidad, la re-resuelve (embebida / remota / rasterizado).',
-        aplica: () => true,
+        // No se tocan los libros escaneados (formato 'papel'): su portada es la foto auténtica
+        // que escaneó el usuario; no la sustituimos por una imagen remota.
+        aplica: (doc) => !(doc.formatos || []).includes('papel'),
         async ejecutar(doc) {
             const carpeta = carpetaDeDoc(doc);
 
