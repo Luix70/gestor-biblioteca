@@ -171,8 +171,9 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         const { cdu, fuente } = await resolverCDU({
             dewey: datosExtra.dewey,
             lcc: datosExtra.lcc,
-            categoria: datosExtra.categorias.length > 0 ? datosExtra.categorias[0] : null,
+            categorias: datosExtra.categorias,     // lista completa para detectar ficción
             titulo: datosExtra.titulo || titulo,   // el del archivo puede ser un ISBN: usa el resuelto
+            autor: (datosExtra.autores && datosExtra.autores[0]) || autor || null,
             sinopsis: datosExtra.sinopsis,
         });
         datosExtra.cdu = cdu;
