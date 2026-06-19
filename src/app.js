@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
-import { iniciarVigilante, mantenimientoManual } from './vigilante.js';
+import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -93,11 +93,25 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
     res.status(huboError ? 207 : 200).json({ status: huboError ? 'partial' : 'success', resultados });
 });
 
-// Dispara el Conformador a mano (no espera a los 5 min de inactividad). Vacía el backlog en
-// segundo plano y cede a la ingesta; el progreso se ve en los logs. 409 si ya hay algo en curso.
+// Dispara el Conformador inmediatamente (sin esperar reposo). Vacía el backlog en segundo plano
+// y cede a la ingesta entre lotes. 409 si ya hay algo en curso.
 app.post('/api/mantenimiento', (req, res) => {
     const r = mantenimientoManual();
     res.status(r.ok ? 202 : 409).json(r);
+});
+
+// Estado actual del Conformador: modo, si está dormido, cuándo expira un apagado, última revisión.
+app.get('/api/mantenimiento/estado', (req, res) => {
+    res.json(estadoConformador());
+});
+
+// Cambia el modo del Conformador en caliente.
+// Body: { "modo": "diferido"|"apagado"|"apagado-hasta", "hasta": "proxima-hora"|"proximo-dia"|"proxima-semana" }
+// "hasta" solo es necesario cuando modo="apagado-hasta".
+app.post('/api/mantenimiento/modo', (req, res) => {
+    const { modo, hasta } = req.body || {};
+    const r = configurarConformador({ modo, hasta });
+    res.status(r.ok ? 200 : 400).json(r);
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));

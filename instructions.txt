@@ -1,0 +1,522 @@
+================================================================================
+  GESTOR BIBLIOTECA — Manual de instalación y uso
+  (gestor-biblioteca · github.com/Luix70/gestor-biblioteca)
+================================================================================
+
+Agente de catalogación automática de biblioteca personal. Ingiere libros y
+revistas en formato EPUB, PDF o imágenes escaneadas, extrae y enriquece sus
+metadatos (ISBN, título, autores, editorial, CDU…) usando APIs gratuitas y
+IA (Gemini), y los persiste en MongoDB Atlas con portada, sidecars y árbol
+de ficheros clasificado por CDU.
+
+
+────────────────────────────────────────────────────────────────────────────────
+1. REQUISITOS PREVIOS
+────────────────────────────────────────────────────────────────────────────────
+
+  · MongoDB Atlas          — base de datos en la nube (tier M0 gratuito sirve).
+                             La colección "biblioteca" se valida con $jsonSchema;
+                             créala antes o deja que la app la cree sola al
+                             insertar el primer documento.
+  · Gemini API Key         — console.cloud.google.com · "Generative Language API"
+  · Google Books API Key   — console.cloud.google.com · "Books API"
+  · Docker + docker-compose en el NAS (Synology: Compose v1, "docker-compose").
+  · Node.js 18 en local si se quiere desarrollo o batería de tests.
+
+
+────────────────────────────────────────────────────────────────────────────────
+2. ESTRUCTURA DE DIRECTORIOS EN EL NAS
+────────────────────────────────────────────────────────────────────────────────
+
+  /volume1/docker/
+    GestorBiblioteca/          ← código de la app (bind-mount en el contenedor)
+      .env                     ← secretos y overrides (NUNCA en git)
+      docker-compose.yml
+      actualizar-GestorBiblioteca.sh  ← script de actualización (ver sección 5)
+      src/
+      ...
+
+  /volume3/BIBLIOTECA DIGITAL/
+    Inbox/        ← carpeta vigilada; deposita aquí los ficheros a catalogar
+    CDU/          ← árbol de ficheros catalogados (por código CDU)
+    Cuarentena/   ← documentos que no se pudieron identificar (revisión manual)
+    Reintentos/   ← fallos de infraestructura (red, BD); se reintentarán
+
+
+────────────────────────────────────────────────────────────────────────────────
+3. PRIMERA INSTALACIÓN EN EL NAS
+────────────────────────────────────────────────────────────────────────────────
+
+  3.1  Conectar por SSH al NAS
+       ssh usuario@ip-del-nas
+
+  3.2  Crear directorios de datos
+       mkdir -p "/volume3/BIBLIOTECA DIGITAL/Inbox"
+       mkdir -p "/volume3/BIBLIOTECA DIGITAL/CDU"
+       mkdir -p "/volume3/BIBLIOTECA DIGITAL/Cuarentena"
+       mkdir -p "/volume3/BIBLIOTECA DIGITAL/Reintentos"
+
+  3.3  Crear el directorio de la app y descargar el código
+       mkdir -p /volume1/docker/GestorBiblioteca
+       cd /volume1/docker/GestorBiblioteca
+       wget -qO- https://github.com/Luix70/gestor-biblioteca/archive/refs/heads/main.tar.gz \
+           | tar -xz --strip-components=1
+
+       (Si el repo es privado, añade el token de GitHub:)
+       wget --header="Authorization: token ghp_TU_TOKEN" -qO- \
+           https://github.com/Luix70/gestor-biblioteca/archive/refs/heads/main.tar.gz \
+           | tar -xz --strip-components=1
+
+  3.4  Crear el fichero .env  (NO va a git; es la única fuente de secretos)
+       cat > /volume1/docker/GestorBiblioteca/.env << 'EOF'
+       MONGO_URI=mongodb+srv://USUARIO:PASSWORD@cluster.mongodb.net/?retryWrites=true
+       MONGO_DB_NAME=Biblioteca
+       GEMINI_API_KEY=tu_clave_gemini
+       GOOGLE_BOOKS_API_KEY=tu_clave_google_books
+       TZ=Europe/Madrid
+       EOF
+       chmod 600 /volume1/docker/GestorBiblioteca/.env
+
+  3.5  Copiar el script de actualización fuera del directorio de la app
+       cp /volume1/docker/GestorBiblioteca/actualizar-GestorBiblioteca.sh \
+          /volume1/docker/actualizar-GestorBiblioteca.sh
+       chmod +x /volume1/docker/actualizar-GestorBiblioteca.sh
+
+  3.6  Construir e iniciar el contenedor
+       cd /volume1/docker/GestorBiblioteca
+       docker-compose up -d --build
+
+  3.7  Comprobar que arrancó bien
+       docker-compose logs -f --tail=50
+       # Debes ver algo como:
+       #   🚀 API REST de ingesta activa en el puerto 3000
+       #   👁️  Vigilante observando: /app/Inbox
+       #   🧹 Conformador activo: mantenimiento tras 300s de Inbox inactivo.
+
+
+────────────────────────────────────────────────────────────────────────────────
+4. CONFIGURACIÓN
+────────────────────────────────────────────────────────────────────────────────
+
+  4.1  Secretos y rutas (.env — no va a git, sobrevive a actualizaciones)
+  ─────────────────────────────────────────────────────────────────────────
+  Variable               Descripción
+  ─────────────────────  ────────────────────────────────────────────────────
+  MONGO_URI              URI de conexión a MongoDB Atlas
+  MONGO_DB_NAME          Nombre de la base de datos (p.ej. "Biblioteca")
+  GEMINI_API_KEY         Clave de la API de Google Gemini
+  GOOGLE_BOOKS_API_KEY   Clave de la API de Google Books
+  TZ                     Zona horaria del contenedor (p.ej. "Europe/Madrid")
+
+  Variables opcionales:
+  DESACTIVAR_VIGILANTE=1    Arranca solo la API REST, sin vigilar el Inbox
+  VIGILANTE_POLLING=0       Desactiva el sondeo por intervalos (solo donde
+                            inotify funciona; NUNCA poner en el NAS Synology)
+  MANTENIMIENTO_ACTIVO=0    Arranca el Conformador en modo "apagado"
+  MANTENIMIENTO_FORZAR=1    Fuerza el Conformador fuera de Docker (desarrollo)
+
+  4.2  Ajustes numéricos (src/config.js — va a git, se edita en el repo)
+  ─────────────────────────────────────────────────────────────────────────
+  Variable                      Por defecto  Descripción
+  ────────────────────────────  ───────────  ────────────────────────────────
+  PORT                          3000         Puerto de la API REST
+  HTTP_TIMEOUT_MS               20000        Timeout de llamadas HTTP (APIs)
+  PAUSA_INGESTA_MS              1500         Pausa entre recursos del Inbox
+  REPOSO_INBOX_MS               2500         Espera tras el último evento
+                                             antes de procesar el Inbox
+  VIGILANTE_POLL_MS             1500         Intervalo de sondeo de chokidar
+  VIGILANTE_ESCANEO_MS          10000        Reescaneo periódico del Inbox
+  VIGILANTE_ESTABILIDAD_MS      1500         Ventana para confirmar que un
+                                             archivo terminó de escribirse
+  MANTENIMIENTO_REPOSO_MS       300000       Inbox inactivo necesario antes
+                                             de una pasada del Conformador (5 min)
+  MANTENIMIENTO_LOTE            25           Documentos por pasada
+  MANTENIMIENTO_PAUSA_MS        800          Pausa entre documentos
+  PORTADA_ANCHO_OBJETIVO        1000         Ancho ideal de portada (px)
+  PORTADA_ANCHO_DECENTE         500          Si ya hay algo así, no se busca
+  PORTADA_ANCHO_MINIMO          100          Por debajo = imagen degenerada
+  PDF_PAGINAS_FRENTE            15           Páginas iniciales para extraer texto
+  PDF_PAGINAS_FONDO             5            Páginas finales para extraer texto
+  PDF_RASTER_ANCHO              1024         Ancho del rasterizado de portada
+  PDF_OCR_PAGINAS               5            Páginas a OCR-ear si es escaneado
+  PDF_OCR_ANCHO                 1600         Ancho del rasterizado para OCR
+
+  Para un cambio permanente: editar src/config.js y actualizar.
+  Para un override puntual en el NAS: añadir la variable al .env.
+
+
+────────────────────────────────────────────────────────────────────────────────
+5. ACTUALIZAR LA APP EN EL NAS
+────────────────────────────────────────────────────────────────────────────────
+
+  Desde el NAS (o vía SSH):
+
+      sudo bash /volume1/docker/actualizar-GestorBiblioteca.sh
+
+  El script:
+    1. Descarga el tarball de la rama main de GitHub
+    2. Para el contenedor y elimina el volumen de node_modules
+       (esto evita que dependencias viejas "ensombrezcan" las nuevas)
+    3. Sincroniza el código preservando .env, node_modules y los datos
+    4. Reconstruye la imagen e inicia el contenedor
+    5. Muestra los logs en tiempo real (Ctrl+C para salir; el contenedor sigue)
+
+  Si el repo es privado, exporta el token antes:
+      sudo GITHUB_TOKEN=ghp_TU_TOKEN bash /volume1/docker/actualizar-GestorBiblioteca.sh
+
+  ROLLBACK: la etiqueta git "nas-estable" marca el último commit bueno
+  desplegado. Para revertir:
+      git reset --hard nas-estable && git push --force origin main
+      sudo bash /volume1/docker/actualizar-GestorBiblioteca.sh
+
+
+────────────────────────────────────────────────────────────────────────────────
+6. CÓMO CATALOGAR LIBROS (EL INBOX)
+────────────────────────────────────────────────────────────────────────────────
+
+  El vigilante del Inbox monitoriza continuamente la carpeta Inbox.
+  Deposita ficheros en cualquiera de estas carpetas por SMB/SFTP y la app
+  los catalogará automáticamente:
+
+    /volume3/BIBLIOTECA DIGITAL/Inbox/
+
+  Formatos soportados:
+    · .epub               Libros electrónicos
+    · .pdf                Libros/revistas PDF (con texto o escaneados)
+    · .jpg .jpeg .png     Imágenes de páginas escaneadas
+    · .webp .heic         Otros formatos de imagen
+    · .mobi .cbr .djvu    Catalogados por nombre de archivo (sin lector)
+    · .zip .rar           Catalogados por nombre de archivo (sin lector)
+
+  Agrupación de imágenes:
+    · Varias imágenes en la MISMA CARPETA dentro de Inbox se tratan como
+      UN SOLO libro (páginas escaneadas de la misma obra).
+    · Imágenes sueltas en la raíz del Inbox también se agrupan como un libro.
+    · Cada EPUB o PDF es siempre una unidad independiente.
+
+  Pipeline de catalogación (automático):
+    1. Extracción de metadatos del fichero (título, ISBN, autor…)
+    2. Enriquecimiento con APIs gratuitas: OpenLibrary, Google Books
+    3. Si faltan datos: Gemini (visión IA) extrae lo que no se encontró
+    4. Clasificación CDU (caché aprendida → API → IA)
+    5. Guardado en MongoDB Atlas
+    6. Copia de ficheros al árbol CDU + portada + sidecars (registro.json,
+       registro.marc.xml)
+    7. Eliminación del Inbox (solo si la copia se verificó íntegra)
+
+  Resultado por fichero:
+    · Éxito     → desaparece del Inbox, aparece en CDU/ con todos sus datos
+    · Error de identificación → va a Cuarentena/ con un estado.json descriptivo
+    · Error de red/BD        → va a Reintentos/ (el Conformador lo reintentará)
+
+
+────────────────────────────────────────────────────────────────────────────────
+7. API REST — REFERENCIA DE ENDPOINTS
+────────────────────────────────────────────────────────────────────────────────
+
+  Base URL: http://ip-del-nas:3000  (o http://localhost:3000 en local)
+
+  ──────────────────────────────────────────────────────────────────────────────
+  GET /health
+  ──────────────────────────────────────────────────────────────────────────────
+  Comprueba que la app está en marcha.
+
+  Respuesta 200:
+    { "status": "ok" }
+
+  ──────────────────────────────────────────────────────────────────────────────
+  GET /recursos/<ruta>
+  ──────────────────────────────────────────────────────────────────────────────
+  Sirve ficheros del árbol CDU (portadas, imágenes, EPUBs, PDFs…).
+  La ruta relativa coincide con el campo "portada" o "imagenes[].ruta" del
+  documento en MongoDB.
+
+  Ejemplo:
+    GET /recursos/141.78/libros/978-84-1234-567-8/portada.jpg
+
+  ──────────────────────────────────────────────────────────────────────────────
+  POST /api/ingestar
+  ──────────────────────────────────────────────────────────────────────────────
+  Ingesta uno o varios ficheros enviados directamente (sin pasar por el Inbox).
+  Útil para integración con otras apps o para subidas manuales puntuales.
+
+  Tipo de petición: multipart/form-data
+  Campo de archivo: "files"  (uno o varios)
+  Campos opcionales (form fields):
+    ubicacion    JSON con { "ambito": "...", "estanteria": "..." }
+                 Indica la ubicación física del libro (para libros en papel).
+    ambito       Alternativa a ubicacion (junto con estanteria)
+    estanteria   Alternativa a ubicacion (junto con ambito)
+
+  Ejemplo con curl:
+    curl -X POST http://localhost:3000/api/ingestar \
+         -F "files=@/ruta/al/libro.epub" \
+         -F 'ubicacion={"ambito":"Salón","estanteria":"A-3"}'
+
+  Respuesta 200 (todo OK):
+    {
+      "status": "success",
+      "resultados": [
+        {
+          "ok": true,
+          "operacion": "insercion"|"actualizacion",
+          "estado": "completado"|"pendiente",
+          "id": "objectid",
+          "isbn": "978-...",
+          "titulo": "El título del libro",
+          "ruta": "/recursos/..."
+        }
+      ]
+    }
+
+  Respuesta 207 (parcial — algunos fallaron):
+    {
+      "status": "partial",
+      "resultados": [
+        { "ok": true,  ... },
+        { "ok": false, "destino": "cuarentena"|"reintentos", "error": "..." }
+      ]
+    }
+
+  ──────────────────────────────────────────────────────────────────────────────
+  POST /api/mantenimiento
+  ──────────────────────────────────────────────────────────────────────────────
+  Dispara el Conformador INMEDIATAMENTE (sin esperar los 5 min de inactividad).
+  Vacía todo el backlog de documentos pendientes de conformar, lote a lote, en
+  segundo plano. Cede a la ingesta del Inbox entre lotes.
+  El progreso se sigue en los logs del contenedor.
+
+  No lleva body.
+
+  Respuesta 202 (iniciado):
+    { "ok": true, "mensaje": "Mantenimiento iniciado en segundo plano; sigue el progreso en los logs." }
+
+  Respuesta 409 (ya hay algo en curso):
+    { "ok": false, "motivo": "ocupado: hay ingesta o mantenimiento en curso" }
+
+  ──────────────────────────────────────────────────────────────────────────────
+  GET /api/mantenimiento/estado
+  ──────────────────────────────────────────────────────────────────────────────
+  Devuelve el estado actual del Conformador.
+
+  Respuesta 200:
+    {
+      "modo":          "diferido"|"apagado"|"apagado-hasta",
+      "dormido":       true|false,
+      "apagadoHasta":  "2026-06-20T00:00:00.000Z"|null,
+      "ultimaRevision":"2026-06-19T14:32:10.000Z"|null
+    }
+
+  Campos:
+    modo          Modo de funcionamiento actual (ver sección 8)
+    dormido       true = la cola está vacía; el Conformador no consulta la BD
+                  hasta la próxima ingesta
+    apagadoHasta  ISO 8601 del momento en que expira el apagado temporal
+                  (solo presente en modo "apagado-hasta")
+    ultimaRevision ISO 8601 de la última pasada completada (null si nunca corrió)
+
+  ──────────────────────────────────────────────────────────────────────────────
+  POST /api/mantenimiento/modo
+  ──────────────────────────────────────────────────────────────────────────────
+  Cambia el modo del Conformador en caliente (sin reiniciar la app).
+
+  Body: application/json
+    {
+      "modo":  "diferido"|"apagado"|"apagado-hasta",
+      "hasta": "proxima-hora"|"proximo-dia"|"proxima-semana"
+    }
+
+  "hasta" solo es necesario cuando modo="apagado-hasta".
+
+  Modos disponibles:
+  ─────────────────
+  "diferido"        Modo por defecto. El Conformador corre automáticamente
+                    tras MANTENIMIENTO_REPOSO_MS de Inbox inactivo.
+                    Si estaba apagado, lo reactiva.
+
+  "apagado"         Desactiva el Conformador indefinidamente.
+                    Solo vuelve a correr si se cambia el modo manualmente
+                    o se llama a POST /api/mantenimiento.
+
+  "apagado-hasta"   Desactiva el Conformador hasta el hito indicado en "hasta",
+                    tras el cual vuelve automáticamente a modo "diferido".
+
+  Valores de "hasta":
+  ───────────────────
+  "proxima-hora"    Hasta el inicio de la próxima hora en punto.
+                    (Ej.: si son las 14:37, hasta las 15:00)
+  "proximo-dia"     Hasta mañana a las 00:00.
+  "proxima-semana"  Hasta dentro de 7 días a las 00:00.
+
+  Para disparo INMEDIATO: usar POST /api/mantenimiento (ver arriba).
+
+  Ejemplos con curl:
+
+    # Desactivar el Conformador hasta mañana:
+    curl -X POST http://localhost:3000/api/mantenimiento/modo \
+         -H "Content-Type: application/json" \
+         -d '{"modo":"apagado-hasta","hasta":"proximo-dia"}'
+
+    # Volver al modo automático:
+    curl -X POST http://localhost:3000/api/mantenimiento/modo \
+         -H "Content-Type: application/json" \
+         -d '{"modo":"diferido"}'
+
+    # Apagar indefinidamente:
+    curl -X POST http://localhost:3000/api/mantenimiento/modo \
+         -H "Content-Type: application/json" \
+         -d '{"modo":"apagado"}'
+
+  Respuesta 200 (OK):
+    {
+      "ok": true,
+      "modo": "apagado-hasta",
+      "dormido": false,
+      "apagadoHasta": "2026-06-20T00:00:00.000Z",
+      "ultimaRevision": "..."
+    }
+
+  Respuesta 400 (parámetros inválidos):
+    { "ok": false, "motivo": "Modo inválido: \"xyz\". Valores: diferido, apagado, apagado-hasta." }
+
+
+────────────────────────────────────────────────────────────────────────────────
+8. EL CONFORMADOR — PROCESO DE MANTENIMIENTO
+────────────────────────────────────────────────────────────────────────────────
+
+  El Conformador es un proceso durmiente que revisa periódicamente los
+  documentos de la base de datos y les aplica "tareas de mantenimiento"
+  (completar datos, mejorar portadas, regenerar sidecars…).
+
+  Comportamiento por defecto:
+    · Espera a que el Inbox lleve inactivo ≥ MANTENIMIENTO_REPOSO_MS (5 min)
+    · Procesa hasta MANTENIMIENTO_LOTE (25) documentos por pasada
+    · Cede el turno a la ingesta si llega algo al Inbox
+    · Cuando la cola queda vacía, entra en "reposo" (no vuelve a consultar
+      la BD hasta que se ingeste un nuevo documento)
+    · Solo corre dentro del contenedor Docker (donde están los ficheros);
+      un arranque local no "conforma" documentos del NAS por error
+
+  Tareas actuales (en src/mantenimiento/tareas.js):
+    completar-nombre-archivo   Rellena nombre_archivo si falta
+    revisar-portada            Mejora portadas de baja calidad o ausentes
+                               (no toca libros en papel/escaneados)
+    generar-sidecars-pdf       Genera registro.json y registro.marc.xml
+
+  Firmas: cada tarea tiene una versión; subir la versión fuerza que todos
+  los documentos vuelvan a pasar por esa tarea en la próxima pasada.
+
+  Modos de funcionamiento (cambiables en caliente vía API):
+    diferido      Auto, tras MANTENIMIENTO_REPOSO_MS de inactividad (defecto)
+    apagado       No corre hasta cambio manual
+    apagado-hasta Pausa temporal hasta una hora/día/semana
+
+
+────────────────────────────────────────────────────────────────────────────────
+9. GESTIÓN DE FALLOS
+────────────────────────────────────────────────────────────────────────────────
+
+  9.1  Cuarentena
+       Destino: /volume3/BIBLIOTECA DIGITAL/Cuarentena/
+
+       Contiene documentos que no se pudieron identificar después de agotar
+       todos los métodos (texto, APIs, OCR, IA). Requieren revisión manual.
+
+       Cada entrada tiene:
+         · El fichero original
+         · estado.json con el error y los datos parciales obtenidos
+
+       Acción: revisar manualmente, renombrar el fichero con título/autor/ISBN
+       si es posible, y volver a depositarlo en el Inbox para reintentar.
+
+  9.2  Reintentos
+       Destino: /volume3/BIBLIOTECA DIGITAL/Reintentos/
+
+       Contiene documentos que fallaron por causas de infraestructura
+       (red caída, MongoDB Atlas inaccesible…). Se reintentarán automáticamente
+       en la próxima pasada del Conformador.
+
+       Cada entrada tiene:
+         · El fichero original (o copia íntegra)
+         · estado.json con el error y los datos parciales
+
+
+────────────────────────────────────────────────────────────────────────────────
+10. DESARROLLO LOCAL
+────────────────────────────────────────────────────────────────────────────────
+
+  10.1  Arrancar la app
+        npm start                          API + vigilante del Inbox
+        DESACTIVAR_VIGILANTE=1 npm start   Solo la API REST
+
+  10.2  El Conformador NO corre en local por defecto (solo dentro del
+        contenedor Docker, donde están los ficheros). Para forzarlo:
+        MANTENIMIENTO_FORZAR=1 npm start
+
+  10.3  Verificar sintaxis de un fichero modificado
+        node --check src/nombre-del-fichero.js
+
+  10.4  Batería de pruebas (12 casos reales: EPUB, PDF, imágenes, revistas)
+        node "Test Battery/run-battery.js"          Todos los casos
+        node "Test Battery/run-battery.js" 1,3,12   Casos específicos
+        Los resultados se escriben en Test Battery/_resultado/
+
+  10.5  Otros scripts de diagnóstico (en Test Battery/)
+        test-credenciales.js    Verifica claves de Gemini y Google Books
+        test-conservador.js     Prueba la lógica de fusión conservadora
+        test-vision-api.js      Prueba visión + APIs bibliográficas
+        test-endpoint.js        Prueba POST /api/ingestar (requiere npm start)
+        test-inbox.js           Prueba el Inbox (requiere npm start)
+
+  10.6  Regenerar sidecars para todos los documentos catalogados
+        node "Test Battery/regenerar-registros.js"
+
+
+────────────────────────────────────────────────────────────────────────────────
+11. COMANDOS DE DOCKER ÚTILES EN EL NAS
+────────────────────────────────────────────────────────────────────────────────
+
+  # Ver logs en tiempo real
+  docker-compose logs -f --tail=100
+
+  # Ver estado del contenedor
+  docker-compose ps
+
+  # Reiniciar la app (sin reconstruir)
+  docker-compose restart
+
+  # Parar y volver a arrancar (sin reconstruir ni tocar datos)
+  docker-compose down && docker-compose up -d
+
+  # Reconstruir (tras cambiar dependencias en package.json)
+  docker-compose down -v && docker-compose up -d --build
+
+  # Entrar en el contenedor para inspección
+  docker exec -it gestor-biblioteca sh
+
+  # Ver uso de recursos
+  docker stats gestor-biblioteca
+
+
+────────────────────────────────────────────────────────────────────────────────
+12. NOTAS IMPORTANTES SOBRE EL NAS SYNOLOGY
+────────────────────────────────────────────────────────────────────────────────
+
+  · El NAS usa Compose v1: el comando es "docker-compose" (con guion), no
+    "docker compose".
+
+  · Los eventos de fichero de chokidar NO se propagan por el bind mount
+    al soltar ficheros por SMB. La app lo compensa con un escaneo periódico
+    (VIGILANTE_ESCANEO_MS). Por eso no pongas VIGILANTE_POLLING=0 en el NAS.
+
+  · La carpeta @eaDir que crea Synology dentro del Inbox (miniaturas/metadatos)
+    es ignorada automáticamente por el vigilante.
+
+  · El contenedor corre como root (necesario para leer/escribir los ficheros
+    aunque SMB los entregue con permisos restrictivos).
+
+  · El volumen anónimo de node_modules persiste entre reinicios pero se
+    elimina con "down -v". Tras cambiar dependencias en package.json, siempre
+    usar "down -v" antes de "up --build".
+
+================================================================================

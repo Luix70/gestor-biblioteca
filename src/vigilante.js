@@ -31,15 +31,26 @@ const UBICACION_INBOX = { ambito: 'Sin asignar', estanteria: 'Sin asignar (Inbox
 
 // Mantenimiento (Conformador): proceso durmiente que, tras un periodo de inactividad del Inbox,
 // repasa la base de datos y conforma los documentos (portadas, nombres, sidecars...). Cede
-// siempre a la ingesta. MANTENIMIENTO_ACTIVO=0 lo desactiva.
-const MANTENIMIENTO_ACTIVO = process.env.MANTENIMIENTO_ACTIVO !== '0';
+// siempre a la ingesta.
+//
+// Modos (cambiables en caliente vía API):
+//   'diferido'     — auto, tras MANTENIMIENTO_REPOSO_MS de inactividad del Inbox (por defecto)
+//   'apagado'      — desactivado hasta cambio manual
+//   'apagado-hasta'— desactivado hasta conformadorApagadoHasta (ms epoch), luego vuelve a 'diferido'
+//
+// El disparo inmediato se hace con POST /api/mantenimiento (ya existía; no es un "modo" persistente).
+// MANTENIMIENTO_ACTIVO=0 en .env arranca en modo 'apagado'.
 const MANTENIMIENTO_REPOSO_MS = Number(process.env.MANTENIMIENTO_REPOSO_MS || 300000); // 5 min de Inbox inactivo
 
 let temporizador = null;
-let procesando = false;             // lock compartido: ingesta Y mantenimiento (nunca solapan)
-let ultimaActividad = Date.now();   // último momento con actividad de ingesta
-let ultimaRevisionMant = 0;         // última pasada de mantenimiento
-let hayBacklogMant = true;          // ¿quedan documentos por conformar? (al arrancar, asumimos que sí)
+let procesando = false;              // lock compartido: ingesta Y mantenimiento (nunca solapan)
+let ultimaActividad = Date.now();    // último momento con actividad de ingesta
+let ultimaRevisionMant = 0;          // última pasada de mantenimiento
+
+// --- Estado del Conformador ---
+let modoConformador = (process.env.MANTENIMIENTO_ACTIVO !== '0') ? 'diferido' : 'apagado';
+let conformadorApagadoHasta = null;  // ms epoch; solo para modo 'apagado-hasta'
+let conformadorDormido = false;      // true cuando la cola está vacía; evita polls innecesarios a Mongo
 
 const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
 
@@ -164,6 +175,7 @@ async function procesarCola() {
         // no en cada escaneo en vacío (evita spam cada VIGILANTE_ESCANEO_MS).
         if (totalProcesadas > 0 && !(await inboxTieneArchivos())) {
             console.log(`📭 Inbox vacío — ${totalProcesadas} unidad(es) procesada(s); la app queda en reposo.`);
+            conformadorDormido = false; // nueva(s) ingesta(s) → el Conformador puede tener trabajo
         }
     } finally {
         procesando = false;
@@ -182,8 +194,12 @@ async function ejecutarPasadaMantenimiento() {
     procesando = true;
     try {
         const r = await ejecutarMantenimiento({ debeAbortar: inboxTieneArchivos });
-        hayBacklogMant = !r.abortado && r.pendientes > 0;
         ultimaRevisionMant = Date.now();
+        if (!r.abortado && r.pendientes === 0) {
+            conformadorDormido = true;
+            if (r.revisados > 0)
+                console.log('🧹 Conformador: cola vacía — en reposo hasta la próxima ingesta.');
+        }
         return { ok: true, ...r };
     } catch (e) {
         console.error('Mantenimiento:', e.message);
@@ -198,10 +214,16 @@ async function ejecutarPasadaMantenimiento() {
  * turno en cuanto algo llega al Inbox (debeAbortar). Por lotes: el siguiente tick continúa.
  */
 async function quizasMantenimiento() {
-    if (!MANTENIMIENTO_ACTIVO || procesando) return;
-    const inactivo = Date.now() - ultimaActividad >= MANTENIMIENTO_REPOSO_MS;
-    const toca = hayBacklogMant || (Date.now() - ultimaRevisionMant >= MANTENIMIENTO_REPOSO_MS);
-    if (!inactivo || !toca) return;
+    // ¿Expiró un apagado temporal?
+    if (modoConformador === 'apagado-hasta' && Date.now() >= conformadorApagadoHasta) {
+        modoConformador = 'diferido';
+        conformadorApagadoHasta = null;
+        conformadorDormido = false;
+        console.log('🧹 Conformador: pausa temporal expirada → modo diferido.');
+    }
+    if (modoConformador === 'apagado' || modoConformador === 'apagado-hasta') return;
+    if (procesando || conformadorDormido) return; // dormido = cola vacía, no gastar Mongo
+    if (Date.now() - ultimaActividad < MANTENIMIENTO_REPOSO_MS) return;
     if (await inboxTieneArchivos()) return; // prioridad absoluta a la ingesta
     await ejecutarPasadaMantenimiento();
 }
@@ -212,6 +234,7 @@ async function quizasMantenimiento() {
  */
 export function mantenimientoManual() {
     if (procesando) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
+    conformadorDormido = false; // forzar aunque la cola pareciera vacía
     (async () => {
         console.log('🧹 Mantenimiento lanzado MANUALMENTE.');
         let r;
@@ -220,6 +243,61 @@ export function mantenimientoManual() {
         console.log(`🧹 Mantenimiento manual finalizado${r.abortado ? ' (cedió a la ingesta; quedan pendientes)' : ''}.`);
     })().catch(e => console.error('Mantenimiento manual:', e.message));
     return { ok: true, mensaje: 'Mantenimiento iniciado en segundo plano; sigue el progreso en los logs.' };
+}
+
+/** Calcula el ms-epoch del siguiente hito temporal para 'apagado-hasta'. */
+function calcularHasta(hasta) {
+    const d = new Date();
+    switch (hasta) {
+        case 'proxima-hora':
+            return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours() + 1, 0, 0, 0).getTime();
+        case 'proximo-dia':
+            return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0).getTime();
+        case 'proxima-semana':
+            return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7, 0, 0, 0, 0).getTime();
+        default:
+            return null;
+    }
+}
+
+/**
+ * Cambia el modo del Conformador en caliente.
+ * @param {object} opts
+ * @param {'diferido'|'apagado'|'apagado-hasta'} opts.modo
+ * @param {'proxima-hora'|'proximo-dia'|'proxima-semana'} [opts.hasta] — requerido si modo='apagado-hasta'
+ */
+export function configurarConformador({ modo, hasta } = {}) {
+    const MODOS = ['diferido', 'apagado', 'apagado-hasta'];
+    if (!MODOS.includes(modo))
+        return { ok: false, motivo: `Modo inválido: "${modo}". Valores: diferido, apagado, apagado-hasta.` };
+
+    if (modo === 'apagado-hasta') {
+        const ts = calcularHasta(hasta);
+        if (!ts)
+            return { ok: false, motivo: `Periodo inválido: "${hasta}". Valores: proxima-hora, proximo-dia, proxima-semana.` };
+        conformadorApagadoHasta = ts;
+    } else {
+        conformadorApagadoHasta = null;
+    }
+
+    modoConformador = modo;
+    if (modo === 'diferido') conformadorDormido = false; // permitir que el auto compruebe pronto
+
+    const info = modo === 'apagado-hasta'
+        ? `apagado hasta ${new Date(conformadorApagadoHasta).toLocaleString('es-ES')}`
+        : modo;
+    console.log(`🧹 Conformador: modo → ${info}`);
+    return { ok: true, ...estadoConformador() };
+}
+
+/** Devuelve el estado actual del Conformador (para GET /api/mantenimiento/estado). */
+export function estadoConformador() {
+    return {
+        modo: modoConformador,
+        dormido: conformadorDormido,
+        apagadoHasta: conformadorApagadoHasta ? new Date(conformadorApagadoHasta).toISOString() : null,
+        ultimaRevision: ultimaRevisionMant ? new Date(ultimaRevisionMant).toISOString() : null,
+    };
 }
 
 export async function iniciarVigilante() {
@@ -256,8 +334,10 @@ export async function iniciarVigilante() {
     // Y un primer barrido inmediato de lo que ya hubiera en el Inbox al arrancar.
     procesarCola().catch(e => console.error('Vigilante (escaneo inicial):', e));
 
-    if (MANTENIMIENTO_ACTIVO) {
+    if (modoConformador === 'diferido') {
         console.log(`🧹 Conformador activo: mantenimiento tras ${Math.round(MANTENIMIENTO_REPOSO_MS / 1000)}s de Inbox inactivo.`);
+    } else if (modoConformador === 'apagado') {
+        console.log('🧹 Conformador desactivado (MANTENIMIENTO_ACTIVO=0).');
     }
 
     return watcher;
