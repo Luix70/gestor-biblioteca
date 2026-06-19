@@ -18,7 +18,7 @@ export const AJUSTES = {
     // --- General ---
     PORT: 3000,                     // puerto de la API REST
     HTTP_TIMEOUT_MS: 20000,         // timeout de TODA llamada HTTP a las APIs bibliográficas
-    OL_TIMEOUT_MS: 45000,           // timeout específico de OpenLibrary (API lenta; puede tardar 30–40 s)
+    OL_TIMEOUT_MS: 20000,           // timeout de OpenLibrary; el circuit-breaker evita esperar en cada fallo
 
     // --- Vigilante del Inbox ---
     PAUSA_INGESTA_MS: 1500,         // pausa entre recursos (no saturar APIs)

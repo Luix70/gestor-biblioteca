@@ -4,6 +4,13 @@ import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 
+// Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
+// para no bloquear cada ingesta con un timeout largo. Se reinicia solo.
+const OL_MAX_FALLOS = 3;
+const OL_PAUSA_MS = 30 * 60 * 1000; // 30 minutos
+let olFallosConsecutivos = 0;
+let olBloqueadoHasta = 0;
+
 /**
  * Analiza una imagen en base64 para extraer metadatos bibliográficos.
  */
@@ -82,14 +89,27 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // Un fallo de RED en una API no aborta la ingesta: se degrada con una alerta y se sigue.
     // (Sin conexión real, será MongoDB Atlas quien falle → Reintentos.)
     let infoOL = null;
-    try {
-        infoOL = await buscarPorCriterios({ isbns: isbnsLookup, titulo, autor, incluirSinopsis });
-    } catch (e) {
-        if (e.tipo === 'infraestructura') {
-            const detalle = e.causa?.code || e.causa?.response?.status || e.message;
-            console.warn(`⚠️  OpenLibrary inalcanzable (${detalle}): omitida.`);
-            datosExtra.alertas.push('OpenLibrary inalcanzable: omitida.');
-        } else throw e;
+    if (Date.now() < olBloqueadoHasta) {
+        const minutos = Math.ceil((olBloqueadoHasta - Date.now()) / 60000);
+        console.warn(`⚠️  OpenLibrary: circuit-breaker abierto — omitida (${minutos} min restantes).`);
+        datosExtra.alertas.push('OpenLibrary pausada (circuit-breaker): omitida.');
+    } else {
+        try {
+            infoOL = await buscarPorCriterios({ isbns: isbnsLookup, titulo, autor, incluirSinopsis });
+            olFallosConsecutivos = 0; // éxito → resetear contador
+        } catch (e) {
+            if (e.tipo === 'infraestructura') {
+                olFallosConsecutivos++;
+                const detalle = e.causa?.code || e.causa?.response?.status || e.message;
+                if (olFallosConsecutivos >= OL_MAX_FALLOS) {
+                    olBloqueadoHasta = Date.now() + OL_PAUSA_MS;
+                    console.warn(`⚠️  OpenLibrary: ${OL_MAX_FALLOS} fallos seguidos (${detalle}) → pausada 30 min.`);
+                } else {
+                    console.warn(`⚠️  OpenLibrary inalcanzable (${detalle}): omitida. [${olFallosConsecutivos}/${OL_MAX_FALLOS}]`);
+                }
+                datosExtra.alertas.push('OpenLibrary inalcanzable: omitida.');
+            } else throw e;
+        }
     }
     if (infoOL) {
         rellenar('isbn', infoOL.isbn);
