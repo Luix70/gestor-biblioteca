@@ -85,8 +85,11 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     try {
         infoOL = await buscarPorCriterios({ isbns: isbnsLookup, titulo, autor, incluirSinopsis });
     } catch (e) {
-        if (e.tipo === 'infraestructura') datosExtra.alertas.push('OpenLibrary inalcanzable: omitida.');
-        else throw e;
+        if (e.tipo === 'infraestructura') {
+            const detalle = e.causa?.code || e.causa?.response?.status || e.message;
+            console.warn(`⚠️  OpenLibrary inalcanzable (${detalle}): omitida.`);
+            datosExtra.alertas.push('OpenLibrary inalcanzable: omitida.');
+        } else throw e;
     }
     if (infoOL) {
         rellenar('isbn', infoOL.isbn);

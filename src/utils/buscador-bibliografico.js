@@ -3,6 +3,10 @@ import { ErrorInfraestructura, esErrorDeRed } from '../errores.js';
 
 const BASE = 'https://openlibrary.org';
 
+// OpenLibrary es significativamente más lento que otras APIs (30–40 s en búsquedas de texto).
+// Se le da su propio timeout en vez de depender del global HTTP_TIMEOUT_MS (20 s).
+const olAxios = axios.create({ timeout: Number(process.env.OL_TIMEOUT_MS || 45000) });
+
 /**
  * Normaliza la respuesta de OpenLibrary a nuestro esquema interno.
  * Funciona tanto para la respuesta de /isbn/*.json como para los docs de /search.json,
@@ -58,7 +62,7 @@ async function resolverAutores(claves) {
     const nombres = [];
     for (const k of claves.slice(0, 5)) {
         try {
-            const res = await axios.get(`${BASE}${k}.json`);
+            const res = await olAxios.get(`${BASE}${k}.json`);
             const n = res.data && (res.data.name || res.data.personal_name);
             if (n) nombres.push(String(n).trim());
         } catch { /* autor irrecuperable: se omite */ }
@@ -73,7 +77,7 @@ async function resolverAutores(claves) {
 async function obtenerSinopsis(workKey) {
     if (!workKey) return null;
     try {
-        const res = await axios.get(`${BASE}${workKey}.json`);
+        const res = await olAxios.get(`${BASE}${workKey}.json`);
         const desc = res.data && res.data.description;
         if (!desc) return null;
         return typeof desc === 'string' ? desc : (desc.value || null);
@@ -93,7 +97,7 @@ async function buscarPorTexto(titulo, autor) {
     });
     if (autor) params.set('author', autor);
 
-    const res = await axios.get(`${BASE}/search.json?${params.toString()}`);
+    const res = await olAxios.get(`${BASE}/search.json?${params.toString()}`);
     const doc = res.data && Array.isArray(res.data.docs) ? res.data.docs[0] : null;
     return normalizar(doc);
 }
@@ -130,7 +134,7 @@ export async function buscarPorCriterios(criterios) {
     for (const isbn of isbns) {
         try {
             const isbnLimpio = String(isbn).replace(/-/g, '');
-            const res = await axios.get(`${BASE}/isbn/${isbnLimpio}.json`);
+            const res = await olAxios.get(`${BASE}/isbn/${isbnLimpio}.json`);
             const norm = normalizar(res.data);
             if (norm) return await finalizar(norm, incluirSinopsis);
         } catch (e) {
