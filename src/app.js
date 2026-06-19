@@ -1,4 +1,5 @@
 // src/app.js — API REST de ingesta + vigilante del Inbox.
+import './utils/consola-timestamp.js'; // marca de tiempo en todos los logs (debe ir lo primero)
 import 'dotenv/config';
 import axios from 'axios';
 // Timeout global para TODA llamada HTTP (APIs bibliográficas). Sin él, una petición que no
