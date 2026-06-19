@@ -110,7 +110,14 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.año_edicion = primerValido(documento.año_edicion, datosExtra.año_edicion);
     documento.idioma      = primerValido(documento.idioma, datosExtra.idioma) || 'es';
     documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
+    if (datosExtra.cdu_adicionales && datosExtra.cdu_adicionales.length > 0)
+        documento.cdu_adicionales = datosExtra.cdu_adicionales;
     documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
+    // Campos físicos de la BNE: el archivo digital no los tiene; las APIs tampoco los aportan.
+    if (datosExtra.paginas_bne && !documento.paginas)
+        documento.paginas = datosExtra.paginas_bne;
+    if (datosExtra.dimensiones_bne && !documento.dimensiones)
+        documento.dimensiones = datosExtra.dimensiones_bne;
 
     // ISBN: si una autoridad resolvió un registro, su ISBN es el canónico/indexado y manda
     // (el archivo puede traer el de otra edición no indexada — case 14). Si ninguna API

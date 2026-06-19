@@ -108,10 +108,25 @@ export async function extraerMetadatosEpub(rutaArchivo) {
         return null;
     }
 
+    // Repara el "mojibake" habitual en metadatos EPUB de ePubLibre/Lectulandia: el OPF fue
+    // generado con una herramienta que grabó los bytes UTF-8 como si fueran Latin-1 y luego
+    // los re-codificó como UTF-8, dejando "Ã©" en vez de "é". La reparación re-interpreta
+    // cada carácter JS como un byte Latin-1 y vuelve a decodificar como UTF-8.
+    // Solo se aplica si el resultado no contiene caracteres de sustitución (U+FFFD),
+    // lo que indicaría que el original ya era UTF-8 correcto.
+    function repararMojibake(str) {
+        if (!str || typeof str !== 'string') return str;
+        if (!/[\xC0-\xC6\xC3]/.test(str)) return str; // sin Ã-range → casi seguro limpio
+        try {
+            const reparado = Buffer.from(str, 'latin1').toString('utf8');
+            return reparado.includes('�') ? str : reparado;
+        } catch { return str; }
+    }
+
     // Limpia HTML/entidades de un texto (las descripciones EPUB suelen traer <p>…</p>).
     function limpiarTexto(t) {
         if (!t) return null;
-        const limpio = t
+        const limpio = repararMojibake(t)
             .replace(/<[^>]+>/g, ' ')
             .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
             .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"')
@@ -142,18 +157,18 @@ export async function extraerMetadatosEpub(rutaArchivo) {
 
             // 2. Extracción de metadatos básicos
             const metadatos = {
-                titulo: metadata.find('dc\\:title').first().text().trim(),
+                titulo: repararMojibake(metadata.find('dc\\:title').first().text().trim()),
                 autores: metadata.find('dc\\:creator').map((i, el) => {
                     const normalizado = $(el).attr('opf:file-as');
-                    return normalizado ? normalizado.trim() : $(el).text().trim();
+                    return repararMojibake(normalizado ? normalizado.trim() : $(el).text().trim());
                 }).get(),
                 isbn: extraerIsbnDublinCore($, metadata),
-                editorial: metadata.find('dc\\:publisher').first().text().trim() || null,
+                editorial: repararMojibake(metadata.find('dc\\:publisher').first().text().trim()) || null,
                 idioma: metadata.find('dc\\:language').first().text().trim().substring(0, 2).toLowerCase() || 'es',
                 sinopsis: limpiarTexto(metadata.find('dc\\:description').text()),
                 año_edicion: parseInt(metadata.find('dc\\:date').first().text().substring(0, 4)) || null,
                 palabras_clave: metadata.find('dc\\:subject')
-                    .map((i, el) => $(el).text().trim()).get()
+                    .map((i, el) => repararMojibake($(el).text().trim())).get()
                     .flatMap(s => s.split(',').map(x => x.trim()))
                     .filter(Boolean),
                 cubierta_base64: null // Reservado para la imagen que enviaremos a Gemini

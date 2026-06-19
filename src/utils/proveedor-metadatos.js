@@ -2,6 +2,8 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
+import { buscarEnBNE } from './buscador-bne.js';
+import { buscarEnDNB } from './buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 
 // Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
@@ -57,6 +59,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         lcc: null,
         portadas_remotas: [], // candidatos de cubierta (se usan solo si el archivo no aporta una)
         cdu: null,
+        cdu_adicionales: [],   // CDUs secundarios de fuentes autoritativas (BNE, etc.)
         alertas: []
     };
 
@@ -165,14 +168,55 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('año_edicion', pistasIA.año_edicion);
     }
 
-    // TIER 3c · Resolución de la CDU vía clasificador con equivalencias aprendidas
-    // (Dewey/LC en caché → API externa → IA, aprendiendo la equivalencia).
-    if (incluirCdu) {
+    // TIER 2c · BNE — autoridad para obras en español.
+    // Aporta CDU profesional + campos que las APIs externas no cubren (páginas, dimensiones,
+    // lengua, tema). Si BNE resuelve la CDU, el clasificador AI no se ejecuta.
+    const isbnParaBusquedas = datosExtra.isbn || isbnsLookup[0] || null;
+    let bneTieneCDU = false;
+    if (isbnParaBusquedas) {
+        const recBNE = await buscarEnBNE(isbnParaBusquedas);
+        if (recBNE) {
+            if (recBNE.cdus?.length > 0) {
+                datosExtra.cdu = recBNE.cdus[0];
+                if (recBNE.cdus.length > 1) datosExtra.cdu_adicionales = recBNE.cdus.slice(1);
+                datosExtra.alertas.push(`CDU de la BNE: ${recBNE.cdus.join(' / ')}.`);
+                bneTieneCDU = true;
+            }
+            // BNE complementa campos que las APIs externas rara vez tienen
+            rellenar('idioma',  recBNE.lengua);
+            if (!datosExtra.categorias?.length && recBNE.tema) {
+                // tema BNE → se usa como palabras_clave si no hay nada mejor
+                rellenar('categorias', recBNE.tema.split(/\s*-\s*/).map(s => s.trim()).filter(Boolean));
+            }
+            // paginas y dimensiones se pasan como alertas para que motor-enriquecimiento
+            // los capture (los lectores de archivo no siempre los tienen)
+            if (recBNE.paginas) datosExtra.paginas_bne = recBNE.paginas;
+            if (recBNE.dimensiones) datosExtra.dimensiones_bne = recBNE.dimensiones;
+        }
+    }
+
+    // TIER 2d · DNB — Dewey/DDC de la Deutsche Nationalbibliothek para libros europeos.
+    // Complementa OpenLibrary cuando ésta no dio Dewey (p.ej. ISBN no indexado en OL).
+    // La DNB es SRU público, sin bloqueos: funciona para alemán, inglés y muchos otros idiomas.
+    if (!datosExtra.dewey && !datosExtra.lcc && isbnParaBusquedas) {
+        const infoDNB = await buscarEnDNB({ isbn: isbnParaBusquedas });
+        if (infoDNB) {
+            rellenar('dewey', infoDNB.dewey);
+            rellenar('lcc', infoDNB.lcc);
+            if (infoDNB.dewey || infoDNB.lcc)
+                datosExtra.alertas.push('Dewey/LCC complementados desde DNB (Deutsche Nationalbibliothek).');
+        }
+    }
+
+    // TIER 3c · Resolución de la CDU vía clasificador (solo si BNE no la resolvió ya).
+    // Dewey/LC en caché → API externa → IA, aprendiendo la equivalencia.
+    if (incluirCdu && !datosExtra.cdu) {
         const { cdu, fuente } = await resolverCDU({
             dewey: datosExtra.dewey,
             lcc: datosExtra.lcc,
-            categoria: datosExtra.categorias.length > 0 ? datosExtra.categorias[0] : null,
+            categorias: datosExtra.categorias,     // lista completa para detectar ficción
             titulo: datosExtra.titulo || titulo,   // el del archivo puede ser un ISBN: usa el resuelto
+            autor: (datosExtra.autores && datosExtra.autores[0]) || autor || null,
             sinopsis: datosExtra.sinopsis,
         });
         datosExtra.cdu = cdu;
