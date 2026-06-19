@@ -4,7 +4,11 @@ import { medirImagen } from '../utils/medir-imagen.js';
 import { resolverPortada } from '../utils/resolver-portada.js';
 import { rasterizarPaginas } from '../utils/rasterizar-pdf.js';
 import { extraerMetadatosEpub } from '../utils/lector-epub.js';
-import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC } from './util-mantenimiento.js';
+import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion } from './util-mantenimiento.js';
+import { rutaCatalogo } from '../utils/rutas.js';
+import { buscarEnBNE } from '../utils/buscador-bne.js';
+import { buscarEnDNB } from '../utils/buscador-dnb.js';
+import { resolverCDU } from '../clasificador-cdu.js';
 
 const ANCHO_OBJETIVO = Number(process.env.PORTADA_ANCHO_OBJETIVO || 1000);
 
@@ -21,10 +25,118 @@ const urlPortadaOpenLibrary = (isbn) =>
 /**
  * REGISTRO DE TAREAS DE MANTENIMIENTO.
  * Cada tarea: { id, version, descripcion, aplica(doc), ejecutar(doc, ctx) -> cambio|null }.
- * 'cambio' = { set?, imagenesNuevas?, alertas? }. Subir 'version' fuerza re-pasar la tarea
- * por todos los documentos. Añadir una tarea futura = agregar un objeto a este array.
+ * 'cambio' = { set?, imagenesNuevas?, alertas?, carpetaNueva? }.
+ *   carpetaNueva: si la tarea movió la carpeta CDU, indicar la ruta nueva para que
+ *   aplicarCambio escriba registro.json en el sitio correcto.
+ * Subir 'version' fuerza re-pasar la tarea por todos los documentos.
+ * Las tareas se ejecutan EN ORDEN: re-clasificar-cdu va primera para que portada y
+ * sidecars trabajen ya sobre la carpeta final.
  */
 export const TAREAS = [
+
+    {
+        id: 're-clasificar-cdu',
+        version: 1,
+        descripcion: 'Re-clasifica la CDU con el pipeline BNE→DNB→caché→IA y mueve los ficheros al nuevo árbol si cambió.',
+        aplica: (_doc) => true,
+
+        async ejecutar(doc, { db }) {
+            const isbn = doc.isbn || null;
+
+            // ── Paso 1: BNE (autoridad más fiable para fondos hispanos) ──────────────
+            let cduNueva = null, cduAdicionales = [], fuente = null;
+            if (isbn) {
+                const recBNE = await buscarEnBNE(isbn);
+                if (recBNE?.cdus?.length > 0) {
+                    [cduNueva] = recBNE.cdus;
+                    cduAdicionales = recBNE.cdus.slice(1);
+                    fuente = 'BNE';
+                }
+            }
+
+            // ── Paso 2: DNB → equivalencias_cdu cache/IA (si BNE no resolvió) ──────
+            if (!cduNueva) {
+                let dewey = doc.dewey || null;
+                let lcc   = doc.lcc   || null;
+                if (!dewey && !lcc && isbn) {
+                    const infoDNB = await buscarEnDNB({ isbn });
+                    if (infoDNB) { dewey = infoDNB.dewey; lcc = infoDNB.lcc; }
+                }
+                if (dewey || lcc) {
+                    // Resolver autor: un único lookup indexado mejora la clasificación de ficción.
+                    let autorNombre = null;
+                    if (doc.autores?.length > 0) {
+                        const autorDoc = await db.collection('autores')
+                            .findOne({ _id: doc.autores[0] }, { projection: { nombre: 1 } });
+                        if (autorDoc) autorNombre = autorDoc.nombre;
+                    }
+                    const { cdu, fuente: f } = await resolverCDU({
+                        dewey, lcc,
+                        categorias: doc.palabras_clave || [],
+                        titulo: doc.titulo,
+                        autor: autorNombre,
+                        sinopsis: doc.sinopsis,
+                    });
+                    if (cdu && cdu !== '000') { cduNueva = cdu; fuente = `clasificador:${f}`; }
+                }
+            }
+
+            // ── Sin resolución: mantener CDU actual ──────────────────────────────────
+            if (!cduNueva) return null;
+
+            // ── Misma CDU: solo actualizar adicionales si cambiaron ──────────────────
+            if (cduNueva === doc.cdu) {
+                const mismos = JSON.stringify(cduAdicionales) === JSON.stringify(doc.cdu_adicionales || []);
+                if (mismos) return null;
+                return { set: { cdu_adicionales: cduAdicionales } };
+            }
+
+            // ── CDU cambió: mover la carpeta ─────────────────────────────────────────
+            const carpetaVieja = carpetaDeDoc(doc);
+            const existeVieja  = await carpetaExiste(carpetaVieja);
+
+            const rcNueva     = rutaCatalogo({ cdu: cduNueva, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id });
+            const carpetaNueva = path.join(DIR_CDU, rcNueva.relativa);
+
+            if (existeVieja && carpetaNueva !== carpetaVieja) {
+                // Colisión: el destino ya existe (otro registro con el mismo CDU+ISBN)
+                if (await carpetaExiste(carpetaNueva)) {
+                    console.warn(`   ⚠️  re-clasificar-cdu: colisión en "${rcNueva.relativa}"; CDU actualizada en BD pero ficheros NO movidos.`);
+                    const set = { cdu: cduNueva };
+                    if (cduAdicionales.length) set.cdu_adicionales = cduAdicionales;
+                    return { set, alertas: [`CDU actualizada a "${cduNueva}" [${fuente}]; carpeta destino ya existía — ficheros no movidos.`] };
+                }
+
+                // Archivos enlazados en la BD: basenames para verificación tras copia.
+                const archivosEnBD = [
+                    doc.portada   ? path.basename(doc.portada)   : null,
+                    ...(doc.imagenes || []).map(im => path.basename(im.ruta)),
+                ].filter(Boolean);
+
+                await moverCarpetaConVerificacion(carpetaVieja, carpetaNueva, archivosEnBD);
+            }
+
+            // ── Recalcular todas las rutas internas que llevaban el prefijo viejo ────
+            const rutaBaseVieja = webDeDoc(doc);      // '/recursos/old_cdu/libros/isbn'
+            const rutaBaseNueva = rcNueva.web;         // '/recursos/new_cdu/libros/isbn'
+            const remap = (p) => p && p.startsWith(rutaBaseVieja)
+                ? rutaBaseNueva + p.slice(rutaBaseVieja.length)
+                : p;
+
+            const set = { cdu: cduNueva, ruta_base: rutaBaseNueva };
+            if (cduAdicionales.length)    set.cdu_adicionales = cduAdicionales;
+            if (doc.portada)              set.portada  = remap(doc.portada);
+            if (doc.imagenes?.length)     set.imagenes = doc.imagenes.map(im => ({ ...im, ruta: remap(im.ruta) }));
+
+            return {
+                set,
+                carpetaNueva: existeVieja ? carpetaNueva : null,
+                alertas: [`CDU actualizada: "${doc.cdu}" → "${cduNueva}" [${fuente}]${existeVieja ? '; ficheros movidos.' : ' (sin carpeta — solo BD).'}`],
+            };
+        },
+    },
+
+
     {
         id: 'completar-nombre-archivo',
         version: 1,

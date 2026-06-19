@@ -53,7 +53,9 @@ export async function ejecutarMantenimiento({ debeAbortar = async () => false } 
                     if (tarea.aplica(doc)) {
                         const cambio = await tarea.ejecutar(doc, { db });
                         if (cambio) {
-                            await aplicarCambio(col, doc, carpeta, cambio);
+                            // re-clasificar-cdu mueve la carpeta: registro.json va al nuevo destino
+                            const carpetaEfectiva = cambio.carpetaNueva || carpeta;
+                            await aplicarCambio(col, doc, carpetaEfectiva, cambio);
                             Object.assign(doc, cambio.set || {});                 // reflejar para tareas posteriores
                             if (cambio.imagenesNuevas) doc.imagenes = [...(doc.imagenes || []), ...cambio.imagenesNuevas];
                             cambios++;
