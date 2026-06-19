@@ -7,7 +7,7 @@ import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
 import { resolverPortada } from './utils/resolver-portada.js';
-import { ocrPdfEscaneado } from './utils/ocr-pdf.js';
+import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -113,34 +113,31 @@ export async function procesarRecurso(entrada) {
         tipo_recurso = pareceRevista(datosBase.titulo) ? 'revista' : 'libro';
         isbnDelArchivo = !!datosBase.isbn; // ISBN leído del propio PDF (fiable)
 
+        // Sidecars de TODO PDF: rasteriza las 5 primeras + la última (preview + OCR de datos/
+        // código de barras). La 1ª hace de portada → resolverPortada no re-rasteriza más abajo.
+        // (Si no hay poppler, renders=[] y la portada vendrá de fuentes remotas.)
+        const renders = await rasterizarFrontalesPdf(rutas[0], datosBase.paginas);
+        for (const r of renders) {
+            activos.push({
+                tipo: r.etiqueta === 'portada' ? 'portada' : 'otra',
+                origen: `pdf:${r.etiqueta}`,
+                base64: r.buffer.toString('base64'),
+            });
+        }
+
         if (!datosBase.texto_legible) {
             escaneadoSinTexto = true;
             // TIER 3 · PDF escaneado: el nombre del archivo suele ser basura (p. ej.
             // "(ebook - pdf) Título") y arrastra a las APIs a un libro equivocado. La única
-            // fuente fiable es la imagen de las páginas frontales → OCR por visión.
-            const ocr = await ocrPdfEscaneado(rutas[0], datosBase.paginas);
-            if (ocr) {
-                // Conservar las páginas rasterizadas como sidecars (quedan referenciadas en
-                // imagenes[]): la 1ª es la portada; el resto, muestras (créditos/contraportada).
-                // Al marcar ya una 'portada', resolverPortada no re-rasteriza más abajo.
-                for (const r of ocr.renders) {
-                    activos.push({
-                        tipo: r.etiqueta === 'portada' ? 'portada' : 'otra',
-                        origen: `pdf:${r.etiqueta}`,
-                        base64: r.buffer.toString('base64'),
-                    });
-                }
-                const v = ocr.datos;
-                if (v && (v.titulo || v.isbn)) {
-                    datosBase = fusionarOcr(datosBase, v);
-                    isbnDelArchivo = !!v.isbn;               // ISBN leído del documento: fiable
-                    if (v.tipo_recurso) tipo_recurso = v.tipo_recurso;
-                    datosBase.alertas_agente = ["PDF escaneado identificado por OCR de visión; páginas guardadas como sidecars."];
-                } else {
-                    datosBase.alertas_agente = ["PDF escaneado, OCR no concluyente: páginas guardadas como sidecars para revisión manual."];
-                }
+            // fuente fiable es la imagen de esas páginas → OCR por visión (reusa los renders).
+            const v = await ocrDesdeRenders(renders);
+            if (v && (v.titulo || v.isbn)) {
+                datosBase = fusionarOcr(datosBase, v);
+                isbnDelArchivo = !!v.isbn;                   // ISBN leído del documento: fiable
+                if (v.tipo_recurso) tipo_recurso = v.tipo_recurso;
+                datosBase.alertas_agente = ["PDF escaneado identificado por OCR de visión; páginas guardadas como sidecars."];
             } else {
-                datosBase.alertas_agente = ["PDF sin capa de texto (escaneado): identificación por nombre de archivo + APIs."];
+                datosBase.alertas_agente = ["PDF escaneado, OCR no concluyente: páginas guardadas como sidecars para revisión manual."];
             }
         }
 

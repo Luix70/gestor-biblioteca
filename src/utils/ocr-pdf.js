@@ -9,29 +9,28 @@ const PAGINAS_FRENTE = Number(process.env.PDF_OCR_PAGINAS || 5);
 const ANCHO_OCR = Number(process.env.PDF_OCR_ANCHO || 1600);
 
 /**
- * Identifica un PDF escaneado por OCR de visión sobre sus primeras 5 páginas + la última.
- * Es la única fuente fiable cuando no hay capa de texto y el nombre del archivo es basura.
- *
- * @returns { datos, renders } — 'datos' = ficha de la visión (o null si no concluyó) y
- *          'renders' = [{ buffer, pagina, etiqueta }] de las páginas rasterizadas (para
- *          guardarlas como sidecars). Devuelve null solo si no se pudo rasterizar nada
- *          (sin poppler o PDF ilegible) → el llamante seguirá con el nombre de archivo.
+ * Rasteriza las primeras PAGINAS_FRENTE páginas + la última de un PDF (a alta resolución).
+ * Son los sidecars de TODO PDF (preview + OCR de datos/código de barras). Devuelve
+ * [{ buffer, pagina, etiqueta }] (la 1ª = 'portada') o [] si no hay poppler / PDF ilegible.
  */
-export async function ocrPdfEscaneado(ruta, numPaginas = PAGINAS_FRENTE) {
+export async function rasterizarFrontalesPdf(ruta, numPaginas = PAGINAS_FRENTE) {
     const n = Math.min(PAGINAS_FRENTE, numPaginas || PAGINAS_FRENTE);
     const paginas = Array.from({ length: n }, (_, i) => i + 1);
     if (numPaginas > PAGINAS_FRENTE) paginas.push(numPaginas); // + contraportada (código de barras)
+    return rasterizarPaginas(ruta, { paginas, ancho: ANCHO_OCR });
+}
 
-    const renders = await rasterizarPaginas(ruta, { paginas, ancho: ANCHO_OCR });
-    if (!renders.length) return null; // sin poppler o PDF ilegible
-
-    console.log(`[OCR-PDF] ${renders.length} página(s) rasterizada(s) → visión para identificar el escaneado.`);
+/**
+ * Identifica por visión a partir de páginas YA rasterizadas (sin volver a rasterizar). Para PDF
+ * escaneado sin capa de texto, cuyo nombre de archivo suele ser basura. Devuelve la ficha o null.
+ */
+export async function ocrDesdeRenders(renders) {
+    if (!renders || !renders.length) return null;
+    console.log(`[OCR-PDF] ${renders.length} página(s) → visión para identificar el escaneado.`);
     const imagenes = renders.map(r => ({ data: r.buffer, mimeType: 'image/jpeg' }));
-    let datos = null;
     try {
-        datos = await analizarImagenesRecurso(imagenes);
+        return await analizarImagenesRecurso(imagenes);
     } catch {
-        datos = null; // visión caída: aún devolvemos los renders para conservarlos como sidecars
+        return null; // visión caída: el llamante seguirá con el nombre de archivo + APIs
     }
-    return { datos, renders };
 }
