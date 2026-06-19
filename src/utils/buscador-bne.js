@@ -2,12 +2,13 @@
  * Buscador en la Biblioteca Nacional de España (BNE).
  *
  * Estrategia (en orden de prioridad):
- *   1. Consulta SPARQL al nuevo endpoint oficial: https://bne.es
- *      Propiedades: bne:P3013 = ISBN, bne:P3011 = CDU, bne:P3001 = título.
- *   2. Si el SPARQL falla (403/timeout) → consulta la colección local `bne_cdus`
- *      (importada desde el volcado MARC21 de datos abiertos de la BNE).
+ *   1. SPARQL online (datos.bne.es) — si está disponible y no bloqueado.
+ *   2. Colección local `bne_cdus` (MongoDB) — volcado importado con
+ *      node scripts/importar-bne.js desde monomodernas-JSON.json.
  *
- * Para importar el volcado MARC21: node scripts/importar-bne.js
+ * Devuelve un objeto BneResultado con CDU(s) y los campos adicionales
+ * que BNE conoce y que no siempre están en las APIs externas:
+ *   paginas, dimensiones, lengua, tema, genero_forma, fecha.
  */
 import axios from 'axios';
 import { esErrorDeRed } from '../errores.js';
@@ -17,18 +18,15 @@ const SPARQL_BNE = 'https://datos.bne.es/sparql';
 const TIMEOUT = Number(process.env.BNE_TIMEOUT_MS || 12000);
 const COL_LOCAL = 'bne_cdus';
 
-// Circuit-breaker de sesión: tras la primera respuesta no-JSON del SPARQL
-// (p.ej. Cloudflare devuelve HTML) se desactiva para no desperdiciar una
-// petición HTTP en cada búsqueda.
+// Circuit-breaker de sesión: desactiva SPARQL tras la primera respuesta no-JSON.
 let sparqlDesactivado = false;
 
 function normalizarCDU(raw) {
     return String(raw || '').trim().replace(/^\(|\)$/g, '').trim();
 }
 
-/** Búsqueda SPARQL contra el endpoint de la BNE (puede estar bloqueado por Cloudflare). */
 async function buscarEnSPARQL(isbnLimpio) {
-    if (sparqlDesactivado) return [];
+    if (sparqlDesactivado) return null;
     const query = `
 PREFIX bne: <http://datos.bne.es/def/>
 SELECT DISTINCT ?cdu WHERE {
@@ -45,48 +43,67 @@ LIMIT 10`;
     });
     const ct = res.headers['content-type'] || '';
     if (!ct.includes('json')) {
-        // El endpoint devuelve HTML (Cloudflare o web normal): desactivar para esta sesión.
         sparqlDesactivado = true;
         console.warn('⚠️  BNE SPARQL: respuesta no-JSON — usando solo caché local (MongoDB).');
-        return [];
+        return null;
     }
     const bindings = res.data?.results?.bindings || [];
-    return bindings.map(b => normalizarCDU(b.cdu?.value || '')).filter(Boolean);
+    const cdus = bindings.map(b => normalizarCDU(b.cdu?.value || '')).filter(Boolean);
+    return cdus.length > 0 ? { cdus } : null;
 }
 
-/** Búsqueda en la colección MongoDB local importada del volcado BNE. */
 async function buscarEnLocal(isbnLimpio) {
     const db = await conectarDB();
     const doc = await db.collection(COL_LOCAL).findOne({ isbn: isbnLimpio });
-    return doc?.cdus || [];
+    if (!doc || !doc.cdus?.length) return null;
+    return {
+        cdus:         doc.cdus,
+        paginas:      doc.paginas      || null,
+        dimensiones:  doc.dimensiones  || null,
+        lengua:       doc.lengua       || null,
+        tema:         doc.tema         || null,
+        genero_forma: doc.genero_forma || null,
+        fecha:        doc.fecha        || null,
+    };
 }
 
 /**
- * Busca los códigos CDU que la BNE asigna a un ISBN.
- * Estrategia: SPARQL online (si disponible) → MongoDB local (volcado BNE importado).
- * @returns {Promise<string[]|null>} Array de CDUs, vacío si no encontrado, null en error.
+ * Busca el registro BNE para un ISBN.
+ *
+ * @returns {Promise<BneResultado|null>}
+ *   null  → no encontrado o error
+ *   objeto → { cdus: string[], paginas?, dimensiones?, lengua?, tema?, genero_forma?, fecha? }
+ *
+ * @typedef {{ cdus: string[], paginas?: number, dimensiones?: string,
+ *             lengua?: string, tema?: string, genero_forma?: string, fecha?: string }} BneResultado
  */
-export async function buscarCDUsEnBNE(isbn) {
+export async function buscarEnBNE(isbn) {
     if (!isbn) return null;
     const isbnLimpio = String(isbn).replace(/-/g, '');
 
-    // Intento 1: SPARQL (se desactiva solo tras primer fallo no-JSON)
     try {
-        const cdus = await buscarEnSPARQL(isbnLimpio);
-        if (cdus.length > 0) return cdus;
+        const r = await buscarEnSPARQL(isbnLimpio);
+        if (r) return r;
     } catch (e) {
         if (!esErrorDeRed(e) && e.response?.status && e.response.status < 500) {
             sparqlDesactivado = true;
             console.warn(`⚠️  BNE SPARQL HTTP ${e.response.status}: desactivado, usando caché local.`);
         }
-        // Errores de red: silencioso, caemos a local
     }
 
-    // Intento 2: caché local (volcado BNE importado en MongoDB)
     try {
         return await buscarEnLocal(isbnLimpio);
     } catch (eMongo) {
         console.warn(`⚠️  BNE local: error Mongo (${eMongo.message}): omitida.`);
         return null;
     }
+}
+
+/**
+ * Compatibilidad con código anterior que espera string[].
+ * Preferir buscarEnBNE() para acceder a todos los campos.
+ */
+export async function buscarCDUsEnBNE(isbn) {
+    const r = await buscarEnBNE(isbn);
+    return r ? r.cdus : (r === null ? null : []);
 }

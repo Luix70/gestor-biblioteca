@@ -2,7 +2,7 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
-import { buscarCDUsEnBNE } from './buscador-bne.js';
+import { buscarEnBNE } from './buscador-bne.js';
 import { buscarEnDNB } from './buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 
@@ -168,16 +168,30 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('año_edicion', pistasIA.año_edicion);
     }
 
-    // TIER 2c · BNE — códigos CDU directos de catalogadores profesionales (autoridad para
-    // obras en español). Si la BNE localiza el ISBN, su primera CDU se usa como primaria y
-    // las demás se guardan en cdu_adicionales. Si la BNE no lo localiza, se sigue al clasificador.
+    // TIER 2c · BNE — autoridad para obras en español.
+    // Aporta CDU profesional + campos que las APIs externas no cubren (páginas, dimensiones,
+    // lengua, tema). Si BNE resuelve la CDU, el clasificador AI no se ejecuta.
     const isbnParaBusquedas = datosExtra.isbn || isbnsLookup[0] || null;
-    if (incluirCdu && isbnParaBusquedas) {
-        const cdusBNE = await buscarCDUsEnBNE(isbnParaBusquedas);
-        if (cdusBNE && cdusBNE.length > 0) {
-            datosExtra.cdu = cdusBNE[0];
-            if (cdusBNE.length > 1) datosExtra.cdu_adicionales = cdusBNE.slice(1);
-            datosExtra.alertas.push(`CDU de la BNE: ${cdusBNE.join(' / ')}.`);
+    let bneTieneCDU = false;
+    if (isbnParaBusquedas) {
+        const recBNE = await buscarEnBNE(isbnParaBusquedas);
+        if (recBNE) {
+            if (recBNE.cdus?.length > 0) {
+                datosExtra.cdu = recBNE.cdus[0];
+                if (recBNE.cdus.length > 1) datosExtra.cdu_adicionales = recBNE.cdus.slice(1);
+                datosExtra.alertas.push(`CDU de la BNE: ${recBNE.cdus.join(' / ')}.`);
+                bneTieneCDU = true;
+            }
+            // BNE complementa campos que las APIs externas rara vez tienen
+            rellenar('idioma',  recBNE.lengua);
+            if (!datosExtra.categorias?.length && recBNE.tema) {
+                // tema BNE → se usa como palabras_clave si no hay nada mejor
+                rellenar('categorias', recBNE.tema.split(/\s*-\s*/).map(s => s.trim()).filter(Boolean));
+            }
+            // paginas y dimensiones se pasan como alertas para que motor-enriquecimiento
+            // los capture (los lectores de archivo no siempre los tienen)
+            if (recBNE.paginas) datosExtra.paginas_bne = recBNE.paginas;
+            if (recBNE.dimensiones) datosExtra.dimensiones_bne = recBNE.dimensiones;
         }
     }
 
