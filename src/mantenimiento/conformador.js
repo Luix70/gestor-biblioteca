@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { conectarDB } from '../database.js';
 import { TAREAS } from './tareas.js';
 import { carpetaDeDoc, carpetaExiste, aplicarCambio } from './util-mantenimiento.js';
@@ -9,6 +10,12 @@ const FIRMA = TAREAS.map(t => `${t.id}:${t.version}`).join('|');
 const LOTE = Number(process.env.MANTENIMIENTO_LOTE || 25);     // documentos por pasada
 const PAUSA_MS = Number(process.env.MANTENIMIENTO_PAUSA_MS || 800); // ritmo entre documentos
 
+// El mantenimiento SOLO debe correr donde viven los ficheros: el contenedor del NAS. Fuera de
+// Docker (p. ej. un `npm start` local contra el mismo Atlas) "conformaría" en falso documentos
+// cuyos ficheros están en el NAS y no aquí. /.dockerenv existe en todo contenedor Docker.
+const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
+const PUEDE_MANTENER = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
+
 /**
  * Una pasada de mantenimiento: toma un lote de documentos aún no conformes a la firma actual,
  * ejecuta sobre cada uno las tareas que le falten (a su versión) y los sella. Cede el turno
@@ -17,6 +24,8 @@ const PAUSA_MS = Number(process.env.MANTENIMIENTO_PAUSA_MS || 800); // ritmo ent
  * @returns { revisados, cambios, pendientes, abortado }
  */
 export async function ejecutarMantenimiento({ debeAbortar = async () => false } = {}) {
+    if (!PUEDE_MANTENER) return { revisados: 0, cambios: 0, pendientes: 0, abortado: false };
+
     let db;
     try { db = await conectarDB(); } catch { return { revisados: 0, cambios: 0, pendientes: -1, abortado: true }; }
     const col = db.collection('biblioteca');
@@ -34,29 +43,32 @@ export async function ejecutarMantenimiento({ debeAbortar = async () => false } 
         }
 
         const carpeta = carpetaDeDoc(doc);
-        // Si la carpeta no está en esta máquina, NO sellar: lo hará la que tenga los ficheros
-        // (el NAS). Evita que un arranque local "conforme" en falso documentos del NAS.
-        if (!(await carpetaExiste(carpeta))) continue;
-
+        const existe = await carpetaExiste(carpeta);
         const sello = { ...(doc.mantenimiento || {}) };
 
-        for (const tarea of TAREAS) {
-            if (sello[tarea.id] === tarea.version) continue; // ya hecha a esta versión
-            try {
-                if (tarea.aplica(doc)) {
-                    const cambio = await tarea.ejecutar(doc, { db });
-                    if (cambio) {
-                        await aplicarCambio(col, doc, carpeta, cambio);
-                        Object.assign(doc, cambio.set || {});                 // reflejar para tareas posteriores
-                        if (cambio.imagenesNuevas) doc.imagenes = [...(doc.imagenes || []), ...cambio.imagenesNuevas];
-                        cambios++;
-                        console.log(`   ✔ ${tarea.id} · ${doc.titulo || doc._id}`);
+        if (existe) {
+            for (const tarea of TAREAS) {
+                if (sello[tarea.id] === tarea.version) continue; // ya hecha a esta versión
+                try {
+                    if (tarea.aplica(doc)) {
+                        const cambio = await tarea.ejecutar(doc, { db });
+                        if (cambio) {
+                            await aplicarCambio(col, doc, carpeta, cambio);
+                            Object.assign(doc, cambio.set || {});                 // reflejar para tareas posteriores
+                            if (cambio.imagenesNuevas) doc.imagenes = [...(doc.imagenes || []), ...cambio.imagenesNuevas];
+                            cambios++;
+                            console.log(`   ✔ ${tarea.id} · ${doc.titulo || doc._id}`);
+                        }
                     }
+                } catch (e) {
+                    console.warn(`   ⚠️ ${tarea.id} falló en "${doc.titulo || doc._id}": ${e.message}`);
                 }
-            } catch (e) {
-                console.warn(`   ⚠️ ${tarea.id} falló en "${doc.titulo || doc._id}": ${e.message}`);
+                sello[tarea.id] = tarea.version; // se sella aunque no aplicara/fallara (sin bucles)
             }
-            sello[tarea.id] = tarea.version; // se sella aunque no aplicara/fallara (sin bucles)
+        } else {
+            // Huérfano: el documento existe en Atlas pero su carpeta CDU no (ficheros borrados).
+            // No hay nada que conformar; se sella IGUAL para no revisitarlo en cada pasada.
+            console.warn(`   🗁  ${doc.titulo || doc._id}: sin carpeta CDU (huérfano); se sella sin acción.`);
         }
 
         await col.updateOne({ _id: doc._id }, { $set: { mantenimiento: sello, mantenimiento_firma: FIRMA } });
