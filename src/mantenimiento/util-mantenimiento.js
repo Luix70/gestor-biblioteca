@@ -9,7 +9,7 @@ import { aMARCXML } from '../marc21.js';
 const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..', '..');
-const DIR_CDU = (() => {
+export const DIR_CDU = (() => {
     const v = process.env.PATH_CDU || 'CDU';
     return path.isAbsolute(v) ? v : path.resolve(RAIZ, v);
 })();
@@ -69,6 +69,74 @@ export async function escribirImagen(carpeta, web, buffer, nombreBase) {
     }
     await fs.writeFile(path.join(carpeta, nombre), buffer);
     return { archivo: path.join(carpeta, nombre), web: `${web}/${nombre}` };
+}
+
+/**
+ * Mueve una carpeta CDU de forma transaccional.
+ *
+ * Estrategia:
+ *   1. Intenta fs.rename (atómico en el mismo sistema de ficheros, sin estado intermedio).
+ *   2. Si el SO devuelve EXDEV (volúmenes distintos), usa el camino seguro:
+ *      a. Copia cada archivo al destino.
+ *      b. Verifica que el tamaño del destino coincide exactamente con el origen.
+ *      c. Verifica que los archivos referenciados por la BD (portada + imágenes) están presentes.
+ *      d. Solo si TODO es correcto, elimina la carpeta origen.
+ *
+ * @param {string}   origen          - Ruta absoluta de la carpeta actual.
+ * @param {string}   destino         - Ruta absoluta de la carpeta destino (no debe existir).
+ * @param {string[]} archivosEnBD    - Lista de basenames referenciados en MongoDB (portada, imágenes).
+ *                                    Se usan para la verificación de integridad en el paso (c).
+ */
+export async function moverCarpetaConVerificacion(origen, destino, archivosEnBD = []) {
+    // Asegurar que el padre del destino existe.
+    await fs.mkdir(path.dirname(destino), { recursive: true });
+
+    // ── Intento 1: rename atómico (no hay estado intermedio que verificar) ─────────────────
+    try {
+        await fs.rename(origen, destino);
+        return; // atómico: si no lanzó, el movimiento está completo y correcto
+    } catch (e) {
+        if (e.code !== 'EXDEV') throw e; // solo EXDEV nos empuja al camino largo
+    }
+
+    // ── Intento 2: copia + verificación + borrado (cross-device) ─────────────────────────
+    await fs.mkdir(destino, { recursive: true });
+    const archivos = await fs.readdir(origen);
+
+    // a) Copiar
+    for (const archivo of archivos) {
+        await fs.copyFile(path.join(origen, archivo), path.join(destino, archivo));
+    }
+
+    // b) Verificar tamaños
+    for (const archivo of archivos) {
+        const [stOrig, stDest] = await Promise.all([
+            fs.stat(path.join(origen, archivo)),
+            fs.stat(path.join(destino, archivo)),
+        ]);
+        if (stOrig.size !== stDest.size) {
+            await fs.rm(destino, { recursive: true, force: true });
+            throw new Error(
+                `Verificación fallida al mover "${archivo}": ` +
+                `tamaño origen ${stOrig.size} B ≠ destino ${stDest.size} B. ` +
+                `Carpeta origen conservada en "${origen}".`
+            );
+        }
+    }
+
+    // c) Verificar que todos los archivos enlazados en la BD están en el destino
+    const nombresDestino = new Set(archivos);
+    const faltantes = archivosEnBD.filter(n => n && !nombresDestino.has(n));
+    if (faltantes.length) {
+        await fs.rm(destino, { recursive: true, force: true });
+        throw new Error(
+            `Verificación fallida: archivos referenciados en BD no encontrados en destino: ` +
+            `${faltantes.join(', ')}. Carpeta origen conservada en "${origen}".`
+        );
+    }
+
+    // d) Todo correcto: borrar origen
+    await fs.rm(origen, { recursive: true, force: true });
 }
 
 const union = (a, b, clave) => {
