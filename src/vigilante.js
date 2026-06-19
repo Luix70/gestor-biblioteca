@@ -168,10 +168,26 @@ function programarScan() {
     temporizador = setTimeout(() => procesarCola().catch(e => console.error('Vigilante:', e)), REPOSO_MS);
 }
 
+/** Una pasada (un lote) de mantenimiento bajo el lock compartido. No solapa con la ingesta. */
+async function ejecutarPasadaMantenimiento() {
+    if (procesando) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
+    procesando = true;
+    try {
+        const r = await ejecutarMantenimiento({ debeAbortar: inboxTieneArchivos });
+        hayBacklogMant = !r.abortado && r.pendientes > 0;
+        ultimaRevisionMant = Date.now();
+        return { ok: true, ...r };
+    } catch (e) {
+        console.error('Mantenimiento:', e.message);
+        return { ok: false, motivo: e.message };
+    } finally {
+        procesando = false;
+    }
+}
+
 /**
- * Lanza una pasada de mantenimiento si el Inbox lleva inactivo lo suficiente y nada más corre.
- * Comparte el lock 'procesando' con la ingesta (no solapan) y cede el turno en cuanto algo
- * llega al Inbox (debeAbortar). Procesa por lotes: si quedan pendientes, el siguiente tick sigue.
+ * Pasada AUTOMÁTICA: solo si el Inbox lleva inactivo lo suficiente y nada más corre. Cede el
+ * turno en cuanto algo llega al Inbox (debeAbortar). Por lotes: el siguiente tick continúa.
  */
 async function quizasMantenimiento() {
     if (!MANTENIMIENTO_ACTIVO || procesando) return;
@@ -179,17 +195,23 @@ async function quizasMantenimiento() {
     const toca = hayBacklogMant || (Date.now() - ultimaRevisionMant >= MANTENIMIENTO_REPOSO_MS);
     if (!inactivo || !toca) return;
     if (await inboxTieneArchivos()) return; // prioridad absoluta a la ingesta
+    await ejecutarPasadaMantenimiento();
+}
 
-    procesando = true;
-    try {
-        const r = await ejecutarMantenimiento({ debeAbortar: inboxTieneArchivos });
-        hayBacklogMant = !r.abortado && r.pendientes > 0;
-        ultimaRevisionMant = Date.now();
-    } catch (e) {
-        console.error('Mantenimiento:', e.message);
-    } finally {
-        procesando = false;
-    }
+/**
+ * Disparo MANUAL del Conformador (vía API): vacía TODO el backlog en segundo plano, lote a lote,
+ * saltándose la espera de inactividad. Cede a la ingesta entre lotes. Devuelve de inmediato.
+ */
+export function mantenimientoManual() {
+    if (procesando) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
+    (async () => {
+        console.log('🧹 Mantenimiento lanzado MANUALMENTE.');
+        let r;
+        do { r = await ejecutarPasadaMantenimiento(); }
+        while (r.ok && r.pendientes > 0 && !r.abortado);
+        console.log(`🧹 Mantenimiento manual finalizado${r.abortado ? ' (cedió a la ingesta; quedan pendientes)' : ''}.`);
+    })().catch(e => console.error('Mantenimiento manual:', e.message));
+    return { ok: true, mensaje: 'Mantenimiento iniciado en segundo plano; sigue el progreso en los logs.' };
 }
 
 export async function iniciarVigilante() {

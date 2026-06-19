@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
-import { iniciarVigilante } from './vigilante.js';
+import { iniciarVigilante, mantenimientoManual } from './vigilante.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -90,6 +90,13 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
 
     const huboError = resultados.some(r => !r.ok);
     res.status(huboError ? 207 : 200).json({ status: huboError ? 'partial' : 'success', resultados });
+});
+
+// Dispara el Conformador a mano (no espera a los 5 min de inactividad). Vacía el backlog en
+// segundo plano y cede a la ingesta; el progreso se ve en los logs. 409 si ya hay algo en curso.
+app.post('/api/mantenimiento', (req, res) => {
+    const r = mantenimientoManual();
+    res.status(r.ok ? 202 : 409).json(r);
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
