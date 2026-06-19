@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An automated library-cataloguing agent: it ingests book/magazine files (EPUB, PDF, scanned image sets — pre- or post-ISBN), extracts and enriches their metadata, classifies them by **CDU** (Universal Decimal Classification), and persists schema-validated documents to **MongoDB Atlas**. It is meant to run in Docker on a NAS with an `Inbox` folder mapped under the app root. Code, comments, and identifiers are in **Spanish** — match that convention.
 
+> **Durable project context lives in [`docs/contexto-proyecto.md`](docs/contexto-proyecto.md)** — the accumulated *why* behind decisions, the non-obvious **NAS/Atom deployment constraints** (no sharp/SIMD, no Alpine, Node 18/cheerio 1.0.0, Compose v1, chokidar-over-bind-mount, LF endings, the `down -v` gotcha, the deploy script + `nas-estable` rollback tag), the governing principles (conservative merge, ISBN pivot), and the subsystem history (covers, scanned-PDF OCR, transactional copy, the Conformador). Read it before non-trivial work or any deploy.
+
 ## Commands
 
 - **Run the app** (REST API on port 3000 **+** Inbox watcher): `npm start`. Set `DESACTIVAR_VIGILANTE=1` to run the API only. ⚠️ Run **one instance at a time** — two watchers race on the Inbox and cause ENOENT mid-copy.
