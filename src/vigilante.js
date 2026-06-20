@@ -21,7 +21,8 @@ const resolver = (p, def) => {
     return path.isAbsolute(v) ? v : path.resolve(RAIZ, v);
 };
 
-const INBOX = resolver(process.env.PATH_INBOX, 'Inbox');
+const INBOX   = resolver(process.env.PATH_INBOX,   'Inbox');
+const ER_ROOM = resolver(process.env.PATH_ER_ROOM, '_ER Room');
 const PAUSA_MS = Number(process.env.PAUSA_INGESTA_MS || 1500);   // ritmo entre recursos (no saturar APIs)
 const REPOSO_MS = Number(process.env.REPOSO_INBOX_MS || 2500);   // espera tras el último cambio antes de procesar
 const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse
@@ -128,6 +129,22 @@ async function listarUnidades() {
     return unidades;
 }
 
+/** Mueve los archivos fantasma (0 bytes) al _ER Room preservando el nombre de fichero. */
+async function moverAErRoom(rutas) {
+    await fs.mkdir(ER_ROOM, { recursive: true });
+    for (const ruta of rutas) {
+        const nombre = path.basename(ruta);
+        let destino = path.join(ER_ROOM, nombre);
+        // Evitar colisión si ya existe un archivo con el mismo nombre en el _ER Room.
+        if (await fs.access(destino).then(() => true).catch(() => false)) {
+            const ext  = path.extname(nombre);
+            const base = path.basename(nombre, ext);
+            destino = path.join(ER_ROOM, `${base}.${Date.now()}${ext}`);
+        }
+        await fs.rename(ruta, destino).catch(() => fs.rm(ruta, { force: true }));
+    }
+}
+
 async function limpiarInbox(unidad) {
     for (const r of unidad.rutas) {
         await fs.chmod(r, 0o666).catch(() => {});
@@ -182,8 +199,9 @@ async function procesarCola() {
                 const estabilidad = await verificarEstabilidad(u.rutas);
                 if (estabilidad === 'fantasma') {
                     const nombre = `${path.basename(u.rutas[0])}${u.rutas.length > 1 ? ` (+${u.rutas.length - 1})` : ''}`;
-                    console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min — eliminado del Inbox (sin contenido que preservar).`);
-                    await limpiarInbox(u);
+                    console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min → _ER Room (redescargar manualmente).`);
+                    await moverAErRoom(u.rutas);
+                    if (u.carpeta) await fs.rmdir(u.carpeta).catch(() => {});
                     for (const r of u.rutas) huerfanosVistos.delete(r);
                     continue;
                 }
