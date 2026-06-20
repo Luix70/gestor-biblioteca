@@ -24,7 +24,8 @@ const resolver = (p, def) => {
 const INBOX = resolver(process.env.PATH_INBOX, 'Inbox');
 const PAUSA_MS = Number(process.env.PAUSA_INGESTA_MS || 1500);   // ritmo entre recursos (no saturar APIs)
 const REPOSO_MS = Number(process.env.REPOSO_INBOX_MS || 2500);   // espera tras el último cambio antes de procesar
-const ESTABILIDAD_MS = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse
+const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse
+const HUERFANO_TIMEOUT_MS = Number(process.env.INBOX_HUERFANO_MS || 600000);  // 10 min a 0 bytes → fantasma
 const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
 // Ubicación por defecto para libros/revistas físicos llegados por Inbox (sin POST que la fije).
 const UBICACION_INBOX = { ambito: 'Sin asignar', estanteria: 'Sin asignar (Inbox)' };
@@ -44,6 +45,9 @@ const MANTENIMIENTO_REPOSO_MS = Number(process.env.MANTENIMIENTO_REPOSO_MS || 30
 
 let temporizador = null;
 let procesando = false;              // lock compartido: ingesta Y mantenimiento (nunca solapan)
+// ruta → timestamp (ms) de la primera vez que se vio el archivo con 0 bytes.
+// Si supera HUERFANO_TIMEOUT_MS el archivo se trata como transferencia fallida y va a Cuarentena.
+const huerfanosVistos = new Map();
 let ultimaActividad = Date.now();    // último momento con actividad de ingesta
 let ultimaRevisionMant = 0;          // última pasada de mantenimiento
 
@@ -65,18 +69,36 @@ async function inboxTieneArchivos() {
 }
 
 /**
- * ¿Han terminado de escribirse TODOS los archivos de la unidad? Un archivo aún en copia (SMB)
- * puede leerse con 0 bytes o a medias: procesarlo daría metadatos basura y, peor, una copia
- * corrupta en el árbol CDU. Se mide el tamaño dos veces con una pausa: si no cambia y es > 0,
- * el archivo está estable. (El escaneo periódico lo reintentará si aún no lo está.)
+ * Analiza el estado de escritura de una unidad del Inbox.
+ *
+ * Devuelve:
+ *   'estable'    — tamaño > 0 y sin cambios: lista para procesar.
+ *   'escribiendo'— tamaño 0 o aún cambiando: esperar el siguiente escaneo.
+ *   'fantasma'   — lleva ≥ HUERFANO_TIMEOUT_MS con 0 bytes: transferencia fallida.
+ *                  El llamante debe enviarla a Cuarentena y limpiar el Inbox.
  */
-async function unidadEstable(rutas) {
-    const tam = () => Promise.all(rutas.map(r => fs.stat(r).then(s => s.size).catch(() => -1)));
-    const a = await tam();
-    if (a.some(s => s <= 0)) return false;                 // 0 bytes o ilegible = aún escribiéndose
+async function verificarEstabilidad(rutas) {
+    const medir = () => Promise.all(rutas.map(r => fs.stat(r).then(s => s.size).catch(() => -1)));
+    const a = await medir();
+
+    if (a.some(s => s <= 0)) {
+        // Registrar la primera vez que se ve el archivo a 0 bytes.
+        const ahora = Date.now();
+        for (const r of rutas) {
+            if (!huerfanosVistos.has(r)) huerfanosVistos.set(r, ahora);
+        }
+        const primerVisto = Math.min(...rutas.map(r => huerfanosVistos.get(r) ?? ahora));
+        if (ahora - primerVisto >= HUERFANO_TIMEOUT_MS) return 'fantasma';
+        return 'escribiendo';
+    }
+
+    // Tamaño > 0: ya no es huérfano (la transferencia arrancó bien).
+    for (const r of rutas) huerfanosVistos.delete(r);
+
+    // Segunda medida para confirmar que el tamaño no está cambiando.
     await new Promise(res => setTimeout(res, ESTABILIDAD_MS));
-    const b = await tam();
-    return a.every((s, i) => s === b[i] && s > 0);          // tamaño estable y no vacío
+    const b = await medir();
+    return a.every((s, i) => s === b[i] && s > 0) ? 'estable' : 'escribiendo';
 }
 
 /**
@@ -156,8 +178,19 @@ async function procesarCola() {
             console.log(`\n📥 Procesando ${unidades.length} unidad(es) del Inbox...`);
             let procesadas = 0;
             for (const u of unidades) {
-                // No tocar un archivo que aún se está escribiendo (evita copias de 0 bytes).
-                if (!(await unidadEstable(u.rutas))) {
+                // Comprobar si el archivo terminó de escribirse (o es un fantasma de 0 bytes).
+                const estabilidad = await verificarEstabilidad(u.rutas);
+                if (estabilidad === 'fantasma') {
+                    const nombre = `${path.basename(u.rutas[0])}${u.rutas.length > 1 ? ` (+${u.rutas.length - 1})` : ''}`;
+                    console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min (transferencia fallida) → Cuarentena.`);
+                    await enviarACuarentena(u.rutas, {
+                        error: { tipo: 'identificacion', mensaje: 'Archivo vacío (0 bytes): transferencia incompleta o fallida.' },
+                    }).catch(e => console.error(`  Error al mover fantasma a Cuarentena: ${e.message}`));
+                    if (u.carpeta) await fs.rmdir(u.carpeta).catch(() => {});
+                    for (const r of u.rutas) huerfanosVistos.delete(r);
+                    continue;
+                }
+                if (estabilidad !== 'estable') {
                     console.log(`  ⏳ ${path.basename(u.rutas[0])}: aún escribiéndose; se reintenta en el próximo escaneo.`);
                     continue;
                 }
