@@ -23,6 +23,7 @@ services:
       - PATH_CUARENTENA=/app/Cuarentena
       - PATH_REINTENTOS=/app/Reintentos
       - PATH_ER_ROOM=/app/_ER Room
+      - TZ=${TZ:-Europe/Madrid}
       - NODE_OPTIONS=--no-warnings
 
     working_dir: /app
