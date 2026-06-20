@@ -182,11 +182,8 @@ async function procesarCola() {
                 const estabilidad = await verificarEstabilidad(u.rutas);
                 if (estabilidad === 'fantasma') {
                     const nombre = `${path.basename(u.rutas[0])}${u.rutas.length > 1 ? ` (+${u.rutas.length - 1})` : ''}`;
-                    console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min (transferencia fallida) → Cuarentena.`);
-                    await enviarACuarentena(u.rutas, {
-                        error: { tipo: 'identificacion', mensaje: 'Archivo vacío (0 bytes): transferencia incompleta o fallida.' },
-                    }).catch(e => console.error(`  Error al mover fantasma a Cuarentena: ${e.message}`));
-                    if (u.carpeta) await fs.rmdir(u.carpeta).catch(() => {});
+                    console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min — eliminado del Inbox (sin contenido que preservar).`);
+                    await limpiarInbox(u);
                     for (const r of u.rutas) huerfanosVistos.delete(r);
                     continue;
                 }
