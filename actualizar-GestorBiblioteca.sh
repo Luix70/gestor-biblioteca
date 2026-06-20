@@ -22,6 +22,12 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
+# Anclar el CWD a un directorio estable ANTES de cualquier otra cosa.
+# Protege contra el caso en que la ejecución anterior dejó el shell dentro de
+# $STAGE y luego lo borró: bash arranca con un $PWD inexistente y todos los
+# getcwd() subsiguientes fallan con "cannot access parent directories".
+cd /volume1/docker
+
 # Binarios de Docker de Synology no siempre están en el PATH de un shell no interactivo.
 export PATH="$PATH:/usr/local/bin:/usr/bin"
 
@@ -93,6 +99,7 @@ rsync -a --delete \
     --exclude='/CDU' \
     --exclude='/Cuarentena' \
     --exclude='/Reintentos' \
+    --exclude='/_ER Room' \
     --exclude='/temp' \
     "$SRC_DIR"/ "$APP_DIR"/
 
