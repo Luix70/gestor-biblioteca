@@ -24,6 +24,20 @@ export function parsearNombre(nombreArchivo) {
         return { titulo: null, autores: [], isbn: isbnNombre, esFechada: false };
     }
 
+    // Prefijo de fecha ISO: "2017-10-01 Direction Espagne" o "2017-10 Title"
+    // Señal inequívoca de publicación periódica (el SO añade esta fecha para ordenar).
+    const isoPrefix = base.match(/^((?:19|20)\d{2})[-_](\d{2})(?:[-_]\d{2})?\s+(.+)/);
+    if (isoPrefix) {
+        return {
+            titulo: isoPrefix[3].trim(),
+            autores: [],
+            año_edicion: parseInt(isoPrefix[1]),
+            mes_publicacion: parseInt(isoPrefix[2]),
+            idioma: null,
+            esFechada: true,
+        };
+    }
+
     // ¿Bloque de fecha "Mes[-Mes] Año" (señal fuerte de publicación periódica)?
     for (const [lang, meses] of Object.entries(MESES)) {
         const grupo = meses.join('|');
@@ -32,7 +46,7 @@ export function parsearNombre(nombreArchivo) {
         if (m) {
             let titulo = base.slice(0, m.index).replace(/[-–_\s]+$/, '').trim();
             if (!titulo) titulo = base.replace(re, '').replace(/[-–_\s]+$/, '').trim();
-            return { titulo, autores: [], año_edicion: parseInt(m[1]), idioma: lang, esFechada: true };
+            return { titulo, autores: [], año_edicion: parseInt(m[1]), idioma: lang, esFechada: true, mes_publicacion: null };
         }
     }
 

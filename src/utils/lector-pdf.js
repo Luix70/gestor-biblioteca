@@ -57,6 +57,16 @@ async function pdfText(ruta, desde, hasta) {
  * espacios, y valida el dígito de control (un número de 13 cifras cualquiera NO es un ISBN).
  * Devuelve un array sin duplicados, ya normalizado.
  */
+/**
+ * Intenta extraer el número de issue del texto de la revista.
+ * Patrones: "N°2", "Nº 3", "Issue 12", "Numéro 4", "Número 5".
+ */
+function extraerNumeroIssue(texto) {
+    if (!texto) return null;
+    const m = texto.match(/N[°º]\s*(\d+)|(?:issue|num[eé]ro?|n[úu]mero)\s*[#°º]?\s*(\d+)/i);
+    return m ? parseInt(m[1] ?? m[2]) : null;
+}
+
 function extraerISBNs(texto) {
     if (!texto) return [];
     const re = /(?:ISBN(?:-1[03])?:?\s*)?((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])/g;
@@ -82,8 +92,13 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // 1. Info-dict + número de páginas vía pdfinfo
         const info = await pdfInfo(rutaArchivo);
 
+        // Descartar títulos que son artefactos de metadatos mal formados: campo vacío,
+        // solo espacio, o el nombre de otro campo seguido de ":" (ej. "Subject:").
+        const tituloInfo = info.title && !info.title.trim().endsWith(':') && info.title.trim().length > 1
+            ? info.title.trim() : null;
+
         const datos = {
-            titulo:       info.title  || null,
+            titulo:       tituloInfo,
             autores:      info.author ? [info.author] : [],
             isbn:         null,
             idioma:       null,
@@ -115,9 +130,15 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         if (!datos.titulo)         datos.titulo  = parsed.titulo;
         if (!datos.autores.length) datos.autores = parsed.autores;
         if (parsed.esFechada) {
-            datos.año_edicion = parsed.año_edicion;
-            datos.idioma      = parsed.idioma;
+            datos.esFechada       = true;
+            datos.año_edicion     = parsed.año_edicion;
+            datos.idioma          = parsed.idioma;
+            if (parsed.mes_publicacion) datos.mes_publicacion = parsed.mes_publicacion;
         }
+
+        // Número de issue extraído del texto (p. ej. "N°2", "Issue 12").
+        const numIssue = extraerNumeroIssue(texto);
+        if (numIssue) datos.numero_issue = numIssue;
 
         // ISBN: candidatos del texto + del nombre de archivo, ampliados a sus formas 10/13.
         const candidatos = new Set();

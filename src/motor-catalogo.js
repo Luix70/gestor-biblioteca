@@ -90,10 +90,24 @@ export async function procesarCatalogo(documentoEnriquecido) {
             }
         }
 
-        // 3. Deduplicación: ISBN → ISSN → título.
-        const filtro = docFinal.isbn ? { isbn: docFinal.isbn }
-            : docFinal.issn ? { issn: docFinal.issn }
-            : { titulo: docFinal.titulo };
+        // 3. Deduplicación: revistas por número de issue; libros por ISBN → ISSN → título.
+        // Para revistas el ISSN identifica la CABECERA (la publicación), no el número concreto.
+        // Usamos issn + año + mes (del nombre de archivo) para distinguir cada número.
+        // Si faltan esos campos, caemos al título para no mezclar revistas distintas entre sí.
+        let filtro;
+        if (docFinal.tipo_recurso === 'revista') {
+            if (docFinal.issn && docFinal.año_edicion && docFinal.mes_publicacion) {
+                filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion, mes_publicacion: docFinal.mes_publicacion };
+            } else if (docFinal.issn && docFinal.año_edicion) {
+                filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion };
+            } else {
+                filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
+            }
+        } else {
+            filtro = docFinal.isbn ? { isbn: docFinal.isbn }
+                : docFinal.issn ? { issn: docFinal.issn }
+                : { titulo: docFinal.titulo };
+        }
 
         const existente = await coleccionBiblioteca.findOne(filtro);
 

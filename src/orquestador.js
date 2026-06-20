@@ -110,7 +110,10 @@ export async function procesarRecurso(entrada) {
         // TIER 1 · capa de texto + info-dict
         datosBase = await extraerMetadatosPdf(rutas[0]);
         formatos = ['pdf'];
-        tipo_recurso = pareceRevista(datosBase.titulo) ? 'revista' : 'libro';
+        // Señales de revista: prefijo de fecha ISO en nombre (esFechada), ISSN encontrado en
+        // el texto, o título con patrones de publicación periódica.
+        tipo_recurso = (datosBase.esFechada || datosBase.issn || pareceRevista(datosBase.titulo))
+            ? 'revista' : 'libro';
         isbnDelArchivo = !!datosBase.isbn; // ISBN leído del propio PDF (fiable)
 
         // Sidecars de TODO PDF: rasteriza las 5 primeras + la última (preview + OCR de datos/

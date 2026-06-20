@@ -66,9 +66,16 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // ISBN como pivote: reunimos todos los candidatos del archivo (lectura del texto/nombre
     // ya recolectados por el lector, más las formas 10/13 del isbn principal) para que las
     // APIs los prueben uno a uno. El ISBN es la clave de búsqueda más fiable del archivo.
+    // EXCEPCIÓN: revistas con ISSN no usan ISBN para las APIs — el ISBN extraído del texto
+    // de una revista suele ser un número de catálogo o suscripción, no el identificador del
+    // número concreto, y provoca lookups incorrectos (datos de un libro ajeno).
+    const esRevistaConISSN = documento.tipo_recurso === 'revista' && !!(documento.issn || datosBase.issn);
     const isbnsArchivo = new Set();
-    for (const x of (datosBase.isbn_candidatos || [])) for (const v of variantesISBN(x)) isbnsArchivo.add(v);
-    for (const v of variantesISBN(documento.isbn)) isbnsArchivo.add(v);
+    if (!esRevistaConISSN) {
+        for (const x of (datosBase.isbn_candidatos || [])) for (const v of variantesISBN(x)) isbnsArchivo.add(v);
+        for (const v of variantesISBN(documento.isbn)) isbnsArchivo.add(v);
+    }
+    if (esRevistaConISSN) { delete documento.isbn; }
 
     const datosExtra = await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
         incluirSinopsis: faltaSinopsis,
@@ -167,7 +174,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Limpieza 1: descartar campos internos de los lectores que no deben persistirse
     // (evita guardar la portada base64 completa o banderas de proceso en MongoDB).
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
-    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos'];
+    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos', 'esFechada'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).
