@@ -10,6 +10,8 @@ import { buscarEnBNE } from '../utils/buscador-bne.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { calcularHashArchivo } from '../utils/hash-archivo.js';
+import { parsearNombre } from '../utils/parsear-nombre.js';
+import { resolverColeccion } from '../utils/colecciones.js';
 
 const ANCHO_OBJETIVO = Number(process.env.PORTADA_ANCHO_OBJETIVO || 1000);
 
@@ -182,6 +184,23 @@ export const TAREAS = [
             if (otro) {
                 alertas.push(`Contenido idéntico (hash) al documento ${otro._id} ("${otro.titulo}"): duplicado exacto preexistente — revisar.`);
             }
+            return { set, alertas };
+        },
+    },
+
+    {
+        id: 'completar-coleccion',
+        version: 1,
+        descripcion: 'Detecta la colección/volumen en el nombre de archivo (estilo ePubLibre) y la registra en colecciones.',
+        aplica: (doc) => !doc.coleccion && !!doc.nombre_archivo,
+        async ejecutar(doc, { db }) {
+            const p = parsearNombre(doc.nombre_archivo);
+            if (!p.coleccion_nombre) return null;
+            const edId = (doc.editorial && typeof doc.editorial !== 'string') ? doc.editorial : null;
+            const { _id, creada } = await resolverColeccion(db, p.coleccion_nombre, edId);
+            const set = { coleccion: _id, coleccion_nombre: p.coleccion_nombre };
+            if (p.coleccion_numero) set.coleccion_numero = String(p.coleccion_numero);
+            const alertas = creada ? [`Nueva colección registrada: ${p.coleccion_nombre}`] : [];
             return { set, alertas };
         },
     },

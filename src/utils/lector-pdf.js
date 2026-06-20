@@ -125,10 +125,15 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         datos.texto_legible = texto.replace(/\s/g, '').length > 200;
         datos.issn = extraerISSN(texto);
 
-        // 3. Pistas del nombre de archivo (revista fechada, ISBN en el nombre, etc.)
+        // 3. Pistas del nombre de archivo (revista fechada, ISBN en el nombre, colección, etc.)
         const parsed = parsearNombre(nombre);
         if (!datos.titulo)         datos.titulo  = parsed.titulo;
         if (!datos.autores.length) datos.autores = parsed.autores;
+        if (parsed.coleccion_nombre) {
+            datos.coleccion_nombre = parsed.coleccion_nombre;
+            if (parsed.coleccion_numero) datos.coleccion_numero = parsed.coleccion_numero;
+        }
+        if (parsed.editorial) datos.editorial = parsed.editorial; // editorial del corchete ePubLibre
         if (parsed.esFechada) {
             datos.esFechada       = true;
             datos.año_edicion     = parsed.año_edicion;

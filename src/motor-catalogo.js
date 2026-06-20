@@ -1,5 +1,6 @@
 import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
+import { resolverColeccion } from './utils/colecciones.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -12,7 +13,7 @@ const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'isbn', 'issn', 'idioma', 'cdu', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue'];
+    const CAMPOS = ['titulo', 'isbn', 'issn', 'idioma', 'cdu', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'coleccion', 'coleccion_nombre', 'coleccion_numero'];
 
     // (1) Rellenar huecos.
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
@@ -88,6 +89,15 @@ export async function procesarCatalogo(documentoEnriquecido) {
                 docFinal.editorial = nueva.insertedId;
                 docFinal.alertas_agente.push(`Nueva editorial registrada: ${documentoEnriquecido.editorial}`);
             }
+        }
+
+        // 2b. Colección/serie (nombre → ObjectId en 'colecciones'; crea si no existe, enlazando
+        // la editorial ya resuelta). Se conserva coleccion_nombre denormalizado para MARC/registro.
+        if (docFinal.coleccion_nombre && typeof docFinal.coleccion_nombre === 'string') {
+            const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
+            const { _id, creada } = await resolverColeccion(db, docFinal.coleccion_nombre, edId);
+            if (creada) docFinal.alertas_agente.push(`Nueva colección registrada: ${docFinal.coleccion_nombre}`);
+            docFinal.coleccion = _id;
         }
 
         // 3. Deduplicación en tres niveles:

@@ -28,6 +28,37 @@ function extraerIsbnDublinCore($, metadata) {
     return isbn;
 }
 
+/**
+ * Extrae la serie/colección del OPF. Soporta dos convenciones:
+ *   - Calibre (EPUB2/3):  <meta name="calibre:series" content="…"> + calibre:series_index
+ *   - EPUB3:              <meta property="belongs-to-collection" id="x">…</meta>
+ *                         + <meta refines="#x" property="group-position">N</meta>
+ * Normaliza el índice "10.0" → "10". Devuelve { nombre, numero } (ambos pueden ser null).
+ */
+function extraerSerieEpub($, metadata) {
+    const normNum = (v) => {
+        if (!v) return null;
+        const s = String(v).trim();
+        return s.replace(/\.0+$/, '') || null; // "10.0" → "10"; deja romanos/otros intactos
+    };
+
+    let nombre = $('meta[name="calibre:series"]').attr('content') || null;
+    let numero = normNum($('meta[name="calibre:series_index"]').attr('content'));
+
+    if (!nombre) {
+        const bt = metadata.find('meta[property="belongs-to-collection"]').first();
+        if (bt && bt.length) {
+            nombre = bt.text().trim() || null;
+            const id = bt.attr('id');
+            if (id && !numero) {
+                const pos = metadata.find(`meta[refines="#${id}"][property="group-position"]`).first().text().trim();
+                if (pos) numero = normNum(pos);
+            }
+        }
+    }
+    return { nombre: nombre ? String(nombre).trim() : null, numero };
+}
+
 /** Resuelve un href (relativo al OPF) a una entrada del zip, tolerando #fragment, ?query y %xx. */
 function entradaPorHref(zip, opfDir, href) {
     if (!href) return null;
@@ -155,6 +186,10 @@ export async function extraerMetadatosEpub(rutaArchivo) {
             const $ = cheerio.load(opfXml, { xmlMode: true });
             const metadata = $('metadata');
 
+            // Colección/serie: fuente estructurada fiable. Calibre escribe calibre:series /
+            // calibre:series_index; EPUB3 usa belongs-to-collection + group-position.
+            const serie = extraerSerieEpub($, metadata);
+
             // 2. Extracción de metadatos básicos
             const metadatos = {
                 titulo: repararMojibake(metadata.find('dc\\:title').first().text().trim()),
@@ -171,6 +206,8 @@ export async function extraerMetadatosEpub(rutaArchivo) {
                     .map((i, el) => repararMojibake($(el).text().trim())).get()
                     .flatMap(s => s.split(',').map(x => x.trim()))
                     .filter(Boolean),
+                coleccion_nombre: serie.nombre ? repararMojibake(serie.nombre) : null,
+                coleccion_numero: serie.numero || null,
                 cubierta_base64: null // Reservado para la imagen que enviaremos a Gemini
             };
 

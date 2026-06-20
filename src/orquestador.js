@@ -64,6 +64,11 @@ function metadatosDesdeNombre(ruta) {
     const datos = { titulo: p.titulo, autores: p.autores };
     if (p.isbn) datos.isbn = p.isbn;   // el nombre era un ISBN: que las APIs resuelvan el resto
     if (p.esFechada) { datos.año_edicion = p.año_edicion; datos.idioma = p.idioma; }
+    if (p.coleccion_nombre) {
+        datos.coleccion_nombre = p.coleccion_nombre;
+        if (p.coleccion_numero) datos.coleccion_numero = p.coleccion_numero;
+    }
+    if (p.editorial) datos.editorial = p.editorial;
     return datos;
 }
 

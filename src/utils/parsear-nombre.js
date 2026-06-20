@@ -12,7 +12,43 @@ const MESES = {
 };
 
 /**
- * @returns { titulo, autores, año_edicion?, idioma?, esFechada }
+ * Extrae editorial/colección de los corchetes iniciales al estilo ePubLibre/Lectulandia:
+ *   "[Catedra] [Letras Universales 10] Autor - Título [8092] (r1.0)"
+ *   "[Ancora _ Delfin 467] Autor - Título [71431] (r1.0)"
+ * El corchete que ACABA en un número (árabe o romano en mayúsculas) es la colección + su
+ * volumen; un corchete previo SIN número es la editorial. El " _ " se interpreta como " & ".
+ *
+ * @returns { coleccion_nombre, coleccion_numero, editorial, resto } — resto = base sin los
+ *          corchetes de cabecera ni la coletilla final "[id] (rX.X)" de ePubLibre.
+ */
+function extraerColeccion(base) {
+    const out = { coleccion_nombre: null, coleccion_numero: null, editorial: null, resto: base };
+
+    const cabecera = base.match(/^(\s*\[[^\]]+\]\s*)+/);
+    if (!cabecera) return out;
+
+    const corchetes = cabecera[0].match(/\[[^\]]+\]/g).map(b => b.slice(1, -1).trim());
+    let resto = base.slice(cabecera[0].length).trim();
+    // Quitar la coletilla final de ePubLibre: "[8092] (r1.0)" / "(r1.0)".
+    resto = resto.replace(/\s*\[\d+\]\s*(\(r[\d.]+\))?\s*$/i, '').replace(/\s*\(r[\d.]+\)\s*$/i, '').trim();
+    out.resto = resto;
+
+    for (const c of corchetes) {
+        const limpio = c.replace(/\s+_\s+/g, ' & ').trim();
+        // Número final: dígitos (1-4) o numeral romano en MAYÚSCULAS (evita falsos positivos).
+        const m = limpio.match(/^(.*\S)\s+(\d{1,4}|[IVXLCDM]{1,7})$/);
+        if (m) {
+            out.coleccion_nombre = m[1].trim();
+            out.coleccion_numero = m[2];
+        } else if (!out.editorial) {
+            out.editorial = limpio; // corchete sin número → candidato a editorial
+        }
+    }
+    return out;
+}
+
+/**
+ * @returns { titulo, autores, año_edicion?, idioma?, esFechada, coleccion_nombre?, coleccion_numero?, editorial? }
  */
 export function parsearNombre(nombreArchivo) {
     const base = String(nombreArchivo).replace(/\.[^.]+$/, '');
@@ -24,9 +60,18 @@ export function parsearNombre(nombreArchivo) {
         return { titulo: null, autores: [], isbn: isbnNombre, esFechada: false };
     }
 
+    // Corchetes de cabecera (editorial/colección al estilo ePubLibre). Devuelve también el
+    // 'resto' del nombre ya sin esos corchetes ni la coletilla "[id] (rX.X)".
+    const col = extraerColeccion(base);
+    const colExtra = {};
+    if (col.coleccion_nombre) colExtra.coleccion_nombre = col.coleccion_nombre;
+    if (col.coleccion_numero) colExtra.coleccion_numero = col.coleccion_numero;
+    if (col.editorial)        colExtra.editorial = col.editorial;
+    const trabajo = col.resto || base;
+
     // Prefijo de fecha ISO: "2017-10-01 Direction Espagne" o "2017-10 Title"
     // Señal inequívoca de publicación periódica (el SO añade esta fecha para ordenar).
-    const isoPrefix = base.match(/^((?:19|20)\d{2})[-_](\d{2})(?:[-_]\d{2})?\s+(.+)/);
+    const isoPrefix = trabajo.match(/^((?:19|20)\d{2})[-_](\d{2})(?:[-_]\d{2})?\s+(.+)/);
     if (isoPrefix) {
         return {
             titulo: isoPrefix[3].trim(),
@@ -35,6 +80,7 @@ export function parsearNombre(nombreArchivo) {
             mes_publicacion: parseInt(isoPrefix[2]),
             idioma: null,
             esFechada: true,
+            ...colExtra,
         };
     }
 
@@ -42,18 +88,18 @@ export function parsearNombre(nombreArchivo) {
     for (const [lang, meses] of Object.entries(MESES)) {
         const grupo = meses.join('|');
         const re = new RegExp(`(?:${grupo})[a-zà-ÿ]*(?:[-/\\s]+(?:${grupo})[a-zà-ÿ]*)?[\\s,.–-]*((?:19|20)\\d{2})`, 'i');
-        const m = base.match(re);
+        const m = trabajo.match(re);
         if (m) {
-            let titulo = base.slice(0, m.index).replace(/[-–_\s]+$/, '').trim();
-            if (!titulo) titulo = base.replace(re, '').replace(/[-–_\s]+$/, '').trim();
-            return { titulo, autores: [], año_edicion: parseInt(m[1]), idioma: lang, esFechada: true, mes_publicacion: null };
+            let titulo = trabajo.slice(0, m.index).replace(/[-–_\s]+$/, '').trim();
+            if (!titulo) titulo = trabajo.replace(re, '').replace(/[-–_\s]+$/, '').trim();
+            return { titulo, autores: [], año_edicion: parseInt(m[1]), idioma: lang, esFechada: true, mes_publicacion: null, ...colExtra };
         }
     }
 
     // Libro: separar título y autores por " - ".
-    const partes = base.split(' - ');
+    const partes = trabajo.split(' - ');
     const autores = partes.length > 1
         ? partes.slice(1).join(' - ').split(/\s*-\s*/).map(s => s.trim()).filter(Boolean)
         : [];
-    return { titulo: partes[0].trim(), autores, esFechada: false };
+    return { titulo: partes[0].trim(), autores, esFechada: false, ...colExtra };
 }

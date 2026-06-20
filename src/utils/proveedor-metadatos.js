@@ -73,6 +73,8 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         portadas_remotas: [], // candidatos de cubierta (se usan solo si el archivo no aporta una)
         cdu: null,
         cdu_adicionales: [],   // CDUs secundarios de fuentes autoritativas (BNE, etc.)
+        coleccion_nombre: null,   // serie/colección leída de la portada (rellena hueco)
+        coleccion_numero: null,
         alertas: []
     };
 
@@ -182,6 +184,8 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('isbn', pistasIA.isbn);
         rellenar('editorial', pistasIA.editorial);
         rellenar('año_edicion', pistasIA.año_edicion);
+        rellenar('coleccion_nombre', pistasIA.coleccion);
+        rellenar('coleccion_numero', pistasIA.numero_coleccion != null ? String(pistasIA.numero_coleccion) : null);
     }
 
     // TIER 2c · BNE — autoridad para obras en español.

@@ -124,6 +124,12 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     if (datosExtra.cdu_adicionales && datosExtra.cdu_adicionales.length > 0)
         documento.cdu_adicionales = datosExtra.cdu_adicionales;
     documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
+
+    // Colección/serie: el archivo (metadatos Calibre / nombre) manda; la visión rellena el hueco.
+    // El número se guarda como cadena (preserva romanos como "XLVII" y árabes por igual).
+    documento.coleccion_nombre = primerValido(documento.coleccion_nombre, datosExtra.coleccion_nombre);
+    documento.coleccion_numero = primerValido(documento.coleccion_numero, datosExtra.coleccion_numero);
+    if (documento.coleccion_numero != null) documento.coleccion_numero = String(documento.coleccion_numero);
     // Campos físicos de la BNE: el archivo digital no los tiene; las APIs tampoco los aportan.
     if (datosExtra.paginas_bne && !documento.paginas)
         documento.paginas = datosExtra.paginas_bne;

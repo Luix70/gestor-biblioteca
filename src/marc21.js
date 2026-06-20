@@ -69,6 +69,7 @@ export function aMARCXML(doc) {
         (autores.length && !esRevista) ? datafield('100', '1', ' ', [['a', autores[0]]]) : '', // autor principal
         datafield('245', (autores.length && !esRevista) ? '1' : '0', '0', [['a', doc.titulo], ['c', sor || null]]), // título
         datafield('264', ' ', '1', [['b', editorial], ['c', año]]),          // publicación
+        datafield('490', '0', ' ', [['a', typeof doc.coleccion_nombre === 'string' ? doc.coleccion_nombre : null], ['v', doc.coleccion_numero]]), // mención de serie/colección
         datafield('520', ' ', ' ', [['a', doc.sinopsis]]),                   // sinopsis/resumen
         ...(Array.isArray(doc.palabras_clave) ? doc.palabras_clave.map(k => datafield('653', ' ', ' ', [['a', k]])) : []), // materias libres
         ...autores.slice(1).map(a => datafield('700', '1', ' ', [['a', a]])), // coautores
