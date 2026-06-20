@@ -4,7 +4,7 @@ import { medirImagen } from '../utils/medir-imagen.js';
 import { resolverPortada } from '../utils/resolver-portada.js';
 import { rasterizarPaginas } from '../utils/rasterizar-pdf.js';
 import { extraerMetadatosEpub } from '../utils/lector-epub.js';
-import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion } from './util-mantenimiento.js';
+import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion, restaurarOriginalSiFalta } from './util-mantenimiento.js';
 import { sanitizarSegmento } from '../utils/rutas.js';
 import { buscarEnBNE } from '../utils/buscador-bne.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
@@ -71,11 +71,31 @@ async function resolverEditorialRef(db, nombre) {
  *   aplicarCambio escriba registro.json en el sitio correcto.
  * Subir 'version' fuerza re-pasar la tarea por todos los documentos.
  * Las tareas se ejecutan EN ORDEN. La cadena importa:
- *   re-enriquecer-degradados (arregla el título) → re-clasificar-cdu (re-clasifica con el
- *   título ya bueno y mueve la carpeta) → … → regenerar-registros (reescribe los sidecars
- *   legibles al final, ya con la metadata y la carpeta finales).
+ *   restaurar-original (devuelve el .epub/.pdf a la carpeta si faltaba) → re-enriquecer-degradados
+ *   (arregla el título) → re-clasificar-cdu (re-clasifica con el título ya bueno y mueve la carpeta,
+ *   llevándose el original ya restaurado) → completar-hash-contenido (ya hay fichero que hashear)
+ *   → … → regenerar-registros (reescribe los sidecars legibles al final).
  */
 export const TAREAS = [
+
+    {
+        id: 'restaurar-original',
+        version: 1,
+        descripcion: 'Si a la carpeta le falta el .epub/.pdf, lo restaura desde Reintentos/Cuarentena/_ER Room antes de que las demás tareas trabajen sobre la carpeta.',
+        // No aplica a escaneos ('papel': solo imágenes) ni a docs sin carpeta.
+        aplica: (doc) => !!doc.ruta_base && !(doc.formatos || []).includes('papel'),
+        async ejecutar(doc) {
+            const carpeta = carpetaDeDoc(doc);
+            let entradas;
+            try { entradas = await fs.readdir(carpeta); } catch { return null; }
+            if (entradas.some(n => EXT_DOC.includes(path.extname(n).toLowerCase()))) return null; // ya tiene original
+
+            const nombres = [doc.nombre_archivo, ...(doc.archivos_originales || [])].filter(Boolean);
+            const r = await restaurarOriginalSiFalta(carpeta, nombres);
+            if (!r) return null; // no localizado: las demás tareas siguen con lo disponible (ISBN)
+            return { alertas: [`Original restaurado por mantenimiento (${path.basename(r.origen)}).`] };
+        },
+    },
 
     {
         id: 're-enriquecer-degradados',

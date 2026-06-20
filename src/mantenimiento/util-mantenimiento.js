@@ -17,6 +17,76 @@ export const DIR_CDU = (() => {
 // Extensiones del archivo "original" del recurso (no las imágenes/sidecars que generamos).
 export const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
 
+// Zonas "aparcadas" donde puede sobrevivir un original que desapareció de su carpeta CDU.
+// NO incluye el Inbox (zona viva: la vigila el watcher) ni el árbol CDU.
+const resolverZona = (envVar, def) => {
+    const v = process.env[envVar] || def;
+    return path.isAbsolute(v) ? v : path.resolve(RAIZ, v);
+};
+const ZONAS_RESPALDO = [
+    resolverZona('PATH_REINTENTOS', 'Reintentos'),
+    resolverZona('PATH_CUARENTENA', 'Cuarentena'),
+    resolverZona('PATH_ER_ROOM', '_ER Room'),
+];
+
+// Índice cacheado nombreBase → rutaAbsoluta de las zonas de respaldo. Se reconstruye cada
+// INDICE_TTL_MS (la restauración COPIA, no mueve, así que el índice no se invalida en la pasada).
+const INDICE_TTL_MS = 5 * 60 * 1000;
+let _indiceRespaldo = null;
+let _indiceTS = 0;
+
+async function indexarDir(raiz, indice) {
+    let entradas;
+    try { entradas = await fs.readdir(raiz, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+        const ruta = path.join(raiz, e.name);
+        if (e.isDirectory()) { await indexarDir(ruta, indice); continue; }
+        if (!EXT_DOC.includes(path.extname(e.name).toLowerCase())) continue;
+        if (!indice.has(e.name)) indice.set(e.name, ruta); // gana la primera zona (prioridad por orden)
+    }
+}
+
+async function indiceRespaldo() {
+    if (_indiceRespaldo && Date.now() - _indiceTS < INDICE_TTL_MS) return _indiceRespaldo;
+    const idx = new Map();
+    for (const dir of ZONAS_RESPALDO) await indexarDir(dir, idx);
+    _indiceRespaldo = idx;
+    _indiceTS = Date.now();
+    return idx;
+}
+
+/**
+ * Si a la carpeta le falta el fichero original, lo localiza por nombre en las zonas de respaldo
+ * y lo copia de vuelta (NO destructivo: temporal → verifica tamaño → rename; deja el respaldo
+ * intacto). Devuelve { origen, bytes } si restauró algo, o null.
+ *
+ * @param carpeta  carpeta CDU del documento
+ * @param nombres  nombres candidatos del original (doc.nombre_archivo + archivos_originales)
+ */
+export async function restaurarOriginalSiFalta(carpeta, nombres) {
+    const cands = (nombres || []).filter(Boolean);
+    if (!cands.length) return null;
+    const idx = await indiceRespaldo();
+    const origen = cands.map(n => idx.get(n)).find(Boolean);
+    if (!origen) return null;
+
+    const st = await fs.stat(origen).catch(() => null);
+    if (!st || st.size <= 0) return null;
+
+    const destino = path.join(carpeta, path.basename(origen));
+    const tmp = path.join(carpeta, `.tmp-restore-${Date.now()}-${path.basename(origen)}`);
+    try {
+        await fs.copyFile(origen, tmp);
+        const stTmp = await fs.stat(tmp);
+        if (stTmp.size !== st.size) { await fs.rm(tmp, { force: true }).catch(() => {}); return null; }
+        await fs.rename(tmp, destino);
+        return { origen, bytes: st.size };
+    } catch {
+        await fs.rm(tmp, { force: true }).catch(() => {});
+        return null;
+    }
+}
+
 /** Carpeta del recurso en el árbol CDU. Usa ruta_base si existe; si no, la re-deriva. */
 export function carpetaDeDoc(doc) {
     if (doc.ruta_base && doc.ruta_base.startsWith('/recursos/')) {
