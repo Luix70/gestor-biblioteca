@@ -34,6 +34,25 @@ const VALIDADOR_COLECCIONES = {
     },
 };
 
+const VALIDADOR_CDU_DESC = {
+    $jsonSchema: {
+        bsonType: 'object',
+        required: ['codigo'],
+        properties: {
+            codigo:         { bsonType: 'string', description: 'Código CDU limpio (clave única).' },
+            clase:          { bsonType: 'string' },
+            division:       { bsonType: 'string' },
+            titulo_es:      { bsonType: ['string', 'null'] },
+            descripcion_es: { bsonType: ['string', 'null'] },
+            titulo_en:      { bsonType: ['string', 'null'] },
+            descripcion_en: { bsonType: ['string', 'null'] },
+            fuente:         { bsonType: 'string' },
+            verificado:     { bsonType: 'bool' },
+            fecha:          { bsonType: 'date' },
+        },
+    },
+};
+
 async function main() {
     const db = await conectarDB();
     console.log(`\nConfigurando MongoDB (db: ${db.databaseName})\n`);
@@ -59,6 +78,20 @@ async function main() {
     const colecciones = db.collection('colecciones');
     await asegurarIndice(colecciones, { nombre: 1 },    { unique: true, name: 'idx_nombre_unico' });
     await asegurarIndice(colecciones, { editorial: 1 }, { sparse: true, name: 'idx_editorial' });
+
+    // ── cdu_descripciones: descripciones bilingües ES/EN de cada código CDU ────
+    console.log('\ncdu_descripciones:');
+    const existeDesc = await db.listCollections({ name: 'cdu_descripciones' }).toArray();
+    if (existeDesc.length === 0) {
+        await db.createCollection('cdu_descripciones', { validator: VALIDADOR_CDU_DESC, validationLevel: 'moderate' });
+        console.log('  ✅ colección creada con validador.');
+    } else {
+        await db.command({ collMod: 'cdu_descripciones', validator: VALIDADOR_CDU_DESC, validationLevel: 'moderate' });
+        console.log('  ✅ validador aplicado (collMod).');
+    }
+    const cduDesc = db.collection('cdu_descripciones');
+    await asegurarIndice(cduDesc, { codigo: 1 }, { unique: true, name: 'idx_codigo_unico' });
+    await asegurarIndice(cduDesc, { clase: 1 },  { sparse: true, name: 'idx_clase' });
 
     console.log('\nListo.\n');
     process.exit(0);

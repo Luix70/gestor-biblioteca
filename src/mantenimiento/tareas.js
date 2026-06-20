@@ -15,6 +15,7 @@ import { resolverColeccion } from '../utils/colecciones.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
 import { validarISBN, validarISSN, variantesISBN } from '../utils/identificadores.js';
 import { aRegistroLegible, escribirSidecars, resolverNombres } from '../utils/registro.js';
+import { describirCDU } from '../utils/descripcion-cdu.js';
 
 const ANCHO_OBJETIVO = Number(process.env.PORTADA_ANCHO_OBJETIVO || 1000);
 
@@ -248,6 +249,17 @@ export const TAREAS = [
         },
     },
 
+
+    {
+        id: 'describir-cdu',
+        version: 1,
+        descripcion: 'Asegura la descripción bilingüe (ES/EN, extensa) del CDU del documento en cdu_descripciones (IA, cacheada).',
+        aplica: (doc) => !!doc.cdu,
+        async ejecutar(doc, { db }) {
+            await describirCDU(db, doc.cdu); // cacheado y best-effort; no modifica el libro
+            return null;
+        },
+    },
 
     {
         id: 'completar-hash-contenido',
