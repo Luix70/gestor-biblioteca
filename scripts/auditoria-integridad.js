@@ -1,10 +1,12 @@
 /**
  * Auditoría de integridad del archivo digital.
  *
- * Detecta tres clases de problemas:
+ * Detecta cuatro clases de problemas:
  *   A. Documentos MongoDB sin carpeta en disco  (doc huérfano)
  *   B. Carpetas en el árbol CDU sin documento MongoDB (carpeta huérfana)
  *   C. Documentos duplicados por hash_contenido (copias exactas ya en BD)
+ *   D. Documentos cuya carpeta existe pero le FALTA el fichero original (.epub/.pdf
+ *      desaparecido). Localiza el original por nombre en Inbox/Cuarentena/Reintentos/_ER Room.
  *
  * Solo informa — no modifica nada. Ejecutar:
  *   node scripts/auditoria-integridad.js [--fix-rutas]
@@ -27,12 +29,35 @@ function resolverDir(envVar, defecto) {
     return path.isAbsolute(v) ? v : path.resolve(RAIZ, v);
 }
 const DIR_CDU = resolverDir('PATH_CDU', 'CDU');
+const DIR_INBOX = resolverDir('PATH_INBOX', 'Inbox');
+const DIR_CUARENTENA = resolverDir('PATH_CUARENTENA', 'Cuarentena');
+const DIR_REINTENTOS = resolverDir('PATH_REINTENTOS', 'Reintentos');
+const DIR_ER_ROOM = resolverDir('PATH_ER_ROOM', '_ER Room');
 const FIX_RUTAS = process.argv.includes('--fix-rutas');
+
+// Extensiones del fichero "original" (no las imágenes/sidecars que genera el sistema).
+const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function existeDir(p) {
     return fs.access(p).then(() => true).catch(() => false);
+}
+
+/** Indexa recursivamente los ficheros de un directorio: Map<nombreBase, [rutas...]>. */
+async function indexarFicheros(raiz, indice, etiqueta) {
+    async function walk(dir) {
+        let entradas;
+        try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of entradas) {
+            const ruta = path.join(dir, e.name);
+            if (e.isDirectory()) { await walk(ruta); continue; }
+            if (!EXT_DOC.includes(path.extname(e.name).toLowerCase())) continue;
+            if (!indice.has(e.name)) indice.set(e.name, []);
+            indice.get(e.name).push(`${etiqueta}: ${ruta}`);
+        }
+    }
+    if (await existeDir(raiz)) await walk(raiz);
 }
 
 /** Camina recursivamente el árbol CDU y devuelve todas las hojas (carpetas con registro.json). */
@@ -76,7 +101,7 @@ async function main() {
     // ── A. Docs sin carpeta ──────────────────────────────────────────────────
     console.log('\n── A. Documentos sin carpeta en disco ──────────────────────────────');
     const todos = await col.find({}, {
-        projection: { _id: 1, titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, tipo_recurso: 1 }
+        projection: { _id: 1, titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, tipo_recurso: 1, formatos: 1, archivos_originales: 1 }
     }).toArray();
 
     const sinCarpeta = [];
@@ -187,15 +212,54 @@ async function main() {
         }
     }
 
+    // ── D. Carpeta presente pero SIN el fichero original ─────────────────────
+    console.log('\n── D. Documentos cuya carpeta existe pero falta el fichero original ─');
+    // Índice de ficheros en las zonas donde un original "desaparecido" puede sobrevivir.
+    const indice = new Map();
+    await indexarFicheros(DIR_INBOX, indice, 'Inbox');
+    await indexarFicheros(DIR_CUARENTENA, indice, 'Cuarentena');
+    await indexarFicheros(DIR_REINTENTOS, indice, 'Reintentos');
+    await indexarFicheros(DIR_ER_ROOM, indice, '_ER Room');
+
+    const sinFichero = [];
+    for (const doc of todos) {
+        // Solo recursos con fichero digital propio: los escaneos ('papel') solo tienen imágenes.
+        const formatos = Array.isArray(doc.formatos) ? doc.formatos : [];
+        if (formatos.includes('papel')) continue;
+        if (!doc.ruta_base) continue; // ya contabilizado en A
+        const rel = doc.ruta_base.startsWith('/recursos/') ? doc.ruta_base.slice('/recursos/'.length) : doc.ruta_base;
+        const carpeta = path.join(DIR_CDU, ...rel.split('/'));
+        let entradas;
+        try { entradas = await fs.readdir(carpeta); } catch { continue; } // sin carpeta → ya está en A
+        const tieneDoc = entradas.some(n => EXT_DOC.includes(path.extname(n).toLowerCase()));
+        if (tieneDoc) continue;
+
+        // Falta el original: intentar localizarlo por nombre en las zonas de respaldo.
+        const nombres = [doc.nombre_archivo, ...(doc.archivos_originales || [])].filter(Boolean);
+        const ubicaciones = [];
+        for (const n of nombres) if (indice.has(n)) ubicaciones.push(...indice.get(n));
+        sinFichero.push({ doc, carpeta, ubicaciones });
+    }
+    console.log(`Documentos sin fichero original: ${sinFichero.length}`);
+    const localizables = sinFichero.filter(x => x.ubicaciones.length);
+    console.log(`  · localizables (original hallado en otra zona): ${localizables.length}`);
+    console.log(`  · sin rastro del original:                      ${sinFichero.length - localizables.length}`);
+    for (const { doc, ubicaciones } of sinFichero.slice(0, 30)) {
+        console.log(`  ${ubicaciones.length ? '🔎' : '❓'} [${doc._id}] "${doc.titulo}" (${doc.nombre_archivo || 'sin nombre'})`);
+        for (const u of ubicaciones) console.log(`       ↳ ${u}`);
+    }
+    if (sinFichero.length > 30) console.log(`  … y ${sinFichero.length - 30} más`);
+
     // ── Resumen ──────────────────────────────────────────────────────────────
     console.log('\n══════════════════════════════════════════════════════════════════════');
     console.log('RESUMEN');
-    console.log(`  Total docs en BD:            ${todos.length}`);
+    console.log(`  Total docs en BD:             ${todos.length}`);
     console.log(`  Docs sin carpeta:             ${sinCarpeta.length}`);
     console.log(`  Docs sin ruta_base:           ${sinRutaBase.length}`);
     console.log(`  Carpetas sin doc:             ${carpetasHuerfanas.length}`);
     console.log(`  ruta_base desactualizada:     ${carpetasConDocErroneo.length}`);
     console.log(`  Grupos de duplicados exactos: ${hashDups.length}`);
+    console.log(`  Docs sin fichero original:    ${sinFichero.length} (localizables: ${localizables.length})`);
 
     await client.close();
 }

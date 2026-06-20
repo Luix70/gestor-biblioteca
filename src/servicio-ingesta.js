@@ -38,20 +38,26 @@ async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
     // 1. Copiar los archivos originales (epub/pdf/jpgs) y VERIFICAR la integridad: el destino
     //    debe tener el mismo tamaño (>0) que el origen. Solo los verificados se devuelven en
     //    'originalesOk'; el llamante NO borrará del Inbox los que falten (evita perder datos).
-    //    Una copia no íntegra se elimina del CDU para no dejar un archivo de 0 bytes/corrupto.
+    //    COPIA NO DESTRUCTIVA: se escribe a un temporal oculto y solo se sustituye el destino
+    //    (rename atómico) si la copia es íntegra. Así una re-ingesta con copia defectuosa NUNCA
+    //    destruye un fichero bueno que ya estuviera en la carpeta (bug histórico: copyFile directo
+    //    sobre el destino + rm en fallo borraba el original ya catalogado).
     const originalesOk = [];
     for (const r of rutasOriginales) {
         const destino = path.join(carpetaFs, path.basename(r));
+        const tmp = path.join(carpetaFs, `.tmp-${process.pid}-${Date.now()}-${path.basename(r)}`);
         try {
-            await fs.copyFile(r, destino);
-            const [src, dst] = await Promise.all([fs.stat(r), fs.stat(destino)]);
+            await fs.copyFile(r, tmp);
+            const [src, dst] = await Promise.all([fs.stat(r), fs.stat(tmp)]);
             if (src.size > 0 && src.size === dst.size) {
+                await fs.rename(tmp, destino); // sustituye el destino solo tras verificar la copia
                 originalesOk.push(r);
             } else {
-                console.warn(`   ⚠️  Copia NO íntegra de ${path.basename(r)} (origen ${src.size}B / destino ${dst.size}B): se descarta.`);
-                await fs.rm(destino, { force: true }).catch(() => {});
+                console.warn(`   ⚠️  Copia NO íntegra de ${path.basename(r)} (origen ${src.size}B / temp ${dst.size}B): se descarta el temporal; se conserva el original y cualquier copia previa.`);
+                await fs.rm(tmp, { force: true }).catch(() => {});
             }
         } catch (e) {
+            await fs.rm(tmp, { force: true }).catch(() => {});
             console.warn(`   ⚠️  No se pudo copiar ${path.basename(r)}: ${e.message}`);
         }
     }
