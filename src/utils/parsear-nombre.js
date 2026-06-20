@@ -12,38 +12,49 @@ const MESES = {
 };
 
 /**
- * Extrae editorial/colección de los corchetes iniciales al estilo ePubLibre/Lectulandia:
+ * Extrae editorial/colección de los corchetes iniciales al estilo ePubLibre/Lectulandia y
+ * detecta la firma del formato:
  *   "[Catedra] [Letras Universales 10] Autor - Título [8092] (r1.0)"
  *   "[Ancora _ Delfin 467] Autor - Título [71431] (r1.0)"
+ *   "Autor - Título [612] (r2.7)"
  * El corchete que ACABA en un número (árabe o romano en mayúsculas) es la colección + su
  * volumen; un corchete previo SIN número es la editorial. El " _ " se interpreta como " & ".
  *
- * @returns { coleccion_nombre, coleccion_numero, editorial, resto } — resto = base sin los
- *          corchetes de cabecera ni la coletilla final "[id] (rX.X)" de ePubLibre.
+ * @returns { coleccion_nombre, coleccion_numero, editorial, resto, esEpl } — resto = base sin
+ *          los corchetes de cabecera ni la coletilla final "[id] (rX.X)"; esEpl = true si se
+ *          reconoce el formato ePubLibre (orden Autor - Título).
  */
 function extraerColeccion(base) {
-    const out = { coleccion_nombre: null, coleccion_numero: null, editorial: null, resto: base };
+    const out = { coleccion_nombre: null, coleccion_numero: null, editorial: null, resto: base, esEpl: false };
 
-    const cabecera = base.match(/^(\s*\[[^\]]+\]\s*)+/);
-    if (!cabecera) return out;
+    // Firma ePubLibre/Lectulandia: marca de revisión final "(rX.X)" (con o sin "[idEPL]" delante).
+    const revMarker = /\s*\[\d+\]\s*\(r[\d.]+\)\s*$|\s*\(r[\d.]+\)\s*$/i;
+    let resto = base;
+    let firmaRev = false;
+    if (revMarker.test(resto)) { firmaRev = true; resto = resto.replace(revMarker, '').trim(); }
 
-    const corchetes = cabecera[0].match(/\[[^\]]+\]/g).map(b => b.slice(1, -1).trim());
-    let resto = base.slice(cabecera[0].length).trim();
-    // Quitar la coletilla final de ePubLibre: "[8092] (r1.0)" / "(r1.0)".
-    resto = resto.replace(/\s*\[\d+\]\s*(\(r[\d.]+\))?\s*$/i, '').replace(/\s*\(r[\d.]+\)\s*$/i, '').trim();
-    out.resto = resto;
-
-    for (const c of corchetes) {
-        const limpio = c.replace(/\s+_\s+/g, ' & ').trim();
-        // Número final: dígitos (1-4) o numeral romano en MAYÚSCULAS (evita falsos positivos).
-        const m = limpio.match(/^(.*\S)\s+(\d{1,4}|[IVXLCDM]{1,7})$/);
-        if (m) {
-            out.coleccion_nombre = m[1].trim();
-            out.coleccion_numero = m[2];
-        } else if (!out.editorial) {
-            out.editorial = limpio; // corchete sin número → candidato a editorial
+    // Corchetes de cabecera.
+    const cabecera = resto.match(/^(\s*\[[^\]]+\]\s*)+/);
+    if (cabecera) {
+        const corchetes = cabecera[0].match(/\[[^\]]+\]/g).map(b => b.slice(1, -1).trim());
+        resto = resto.slice(cabecera[0].length).trim();
+        for (const c of corchetes) {
+            const limpio = c.replace(/\s+_\s+/g, ' & ').trim();
+            // Número final: dígitos (1-4) o numeral romano en MAYÚSCULAS (evita falsos positivos).
+            const m = limpio.match(/^(.*\S)\s+(\d{1,4}|[IVXLCDM]{1,7})$/);
+            if (m) { out.coleccion_nombre = m[1].trim(); out.coleccion_numero = m[2]; }
+            else if (!out.editorial) out.editorial = limpio; // corchete sin número → editorial
         }
     }
+
+    // Es ePubLibre si hay marca de revisión o un corchete de colección con volumen (señal
+    // fuerte). Un simple "[2023]" no basta (no produce coleccion_nombre) → no se confunde.
+    out.esEpl = firmaRev || out.coleccion_nombre != null;
+
+    // Si es ePubLibre, retira también un "[idEPL]" final que hubiera quedado sin (rX.X).
+    if (out.esEpl) resto = resto.replace(/\s*\[\d+\]\s*$/, '').trim();
+
+    out.resto = resto;
     return out;
 }
 
@@ -68,6 +79,19 @@ export function parsearNombre(nombreArchivo) {
     if (col.coleccion_numero) colExtra.coleccion_numero = col.coleccion_numero;
     if (col.editorial)        colExtra.editorial = col.editorial;
     const trabajo = col.resto || base;
+
+    // ePubLibre: el orden es "Autor[ & Autor2] - Título" (al revés que el formato genérico).
+    // Los autores van en cabecera separados por " & "; el título es todo lo posterior al
+    // primer " - " (tolera guiones dentro del título).
+    if (col.esEpl) {
+        const idx = trabajo.indexOf(' - ');
+        if (idx >= 0) {
+            const autores = trabajo.slice(0, idx).split(/\s*&\s*/).map(s => s.trim()).filter(Boolean);
+            const titulo = trabajo.slice(idx + 3).trim();
+            return { titulo, autores, esFechada: false, ...colExtra };
+        }
+        return { titulo: trabajo.trim(), autores: [], esFechada: false, ...colExtra };
+    }
 
     // Prefijo de fecha ISO: "2017-10-01 Direction Espagne" o "2017-10 Title"
     // Señal inequívoca de publicación periódica (el SO añade esta fecha para ordenar).
