@@ -9,6 +9,7 @@ import { sanitizarSegmento } from '../utils/rutas.js';
 import { buscarEnBNE } from '../utils/buscador-bne.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
+import { calcularHashArchivo } from '../utils/hash-archivo.js';
 
 const ANCHO_OBJETIVO = Number(process.env.PORTADA_ANCHO_OBJETIVO || 1000);
 
@@ -143,6 +144,47 @@ export const TAREAS = [
         },
     },
 
+
+    {
+        id: 'completar-hash-contenido',
+        version: 1,
+        descripcion: 'Calcula y guarda el SHA-256 del fichero original (identidad de contenido 1:1) y avisa de duplicados exactos preexistentes.',
+        // Solo recursos de un único fichero: los libros escaneados (papel = varias imágenes)
+        // no tienen un "original" único que hashear. Se omite si ya tiene hash.
+        aplica: (doc) => !doc.hash_contenido && !(doc.formatos || []).includes('papel'),
+        async ejecutar(doc, { db }) {
+            const carpeta = carpetaDeDoc(doc);
+            let docsEnCarpeta;
+            try {
+                const entradas = await fs.readdir(carpeta);
+                docsEnCarpeta = entradas.filter(n => EXT_DOC.includes(path.extname(n).toLowerCase()));
+            } catch {
+                return null; // sin carpeta legible
+            }
+            if (docsEnCarpeta.length === 0) return null;
+            // Carpeta multi-documento: pendiente de reingesta; hashear sería ambiguo.
+            if (docsEnCarpeta.length > 1) {
+                return { alertas: [`Carpeta con ${docsEnCarpeta.length} documentos: pendiente de reingesta (hash no calculado).`] };
+            }
+
+            const original = path.join(carpeta, docsEnCarpeta[0]);
+            const hash = await calcularHashArchivo(original);
+
+            // ¿Otro documento ya tiene este hash? → copia exacta preexistente en la biblioteca.
+            const otro = await db.collection('biblioteca').findOne(
+                { hash_contenido: hash, _id: { $ne: doc._id } },
+                { projection: { _id: 1, titulo: 1 } }
+            );
+
+            const set = { hash_contenido: hash };
+            if (!doc.nombre_archivo) set.nombre_archivo = docsEnCarpeta[0]; // de paso, fija el nombre
+            const alertas = [];
+            if (otro) {
+                alertas.push(`Contenido idéntico (hash) al documento ${otro._id} ("${otro.titulo}"): duplicado exacto preexistente — revisar.`);
+            }
+            return { set, alertas };
+        },
+    },
 
     {
         id: 'completar-nombre-archivo',
