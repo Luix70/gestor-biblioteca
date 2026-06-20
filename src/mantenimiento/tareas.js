@@ -12,6 +12,9 @@ import { resolverCDU } from '../clasificador-cdu.js';
 import { calcularHashArchivo } from '../utils/hash-archivo.js';
 import { parsearNombre } from '../utils/parsear-nombre.js';
 import { resolverColeccion } from '../utils/colecciones.js';
+import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
+import { validarISBN, validarISSN, variantesISBN } from '../utils/identificadores.js';
+import { aRegistroLegible, escribirSidecars, resolverNombres } from '../utils/registro.js';
 
 const ANCHO_OBJETIVO = Number(process.env.PORTADA_ANCHO_OBJETIVO || 1000);
 
@@ -25,6 +28,41 @@ const tipoDeArchivo = (ruta) => {
 const urlPortadaOpenLibrary = (isbn) =>
     `https://covers.openlibrary.org/b/isbn/${String(isbn).replace(/-/g, '')}-L.jpg?default=false`;
 
+// ── Detección de documentos "degradados" (ingestados con APIs caídas) ──────────────────────
+const normTit = (s) => String(s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '');
+
+/** ¿El título es en realidad basura (nombre de archivo, identificador o un código)? */
+function tituloNoFiable(doc) {
+    const t = doc.titulo || '';
+    if (!t.trim()) return true;
+    if (validarISBN(t) || validarISSN(t)) return true;
+    if (doc.nombre_archivo && normTit(t) === normTit(doc.nombre_archivo)) return true;
+    if (!/\s/.test(t) && /\d/.test(t) && /[_\-.]/.test(t) && t.length > 8) return true; // "code-like"
+    return false;
+}
+
+/** ¿El documento parece degradado y merece re-enriquecerse? (requiere ISBN como ancla). */
+function esDegradado(doc) {
+    if (!doc.isbn) return false;
+    const cduMala = ['00', '0', '000'].includes(String(doc.cdu || ''));
+    const apisCaidas = (doc.alertas_agente || []).some(a => /inalcanzable/i.test(a));
+    const pendiente = doc.estado_verificacion === 'pendiente';
+    return tituloNoFiable(doc) || cduMala || apisCaidas || pendiente;
+}
+
+async function resolverAutoresRef(db, nombres) {
+    const out = [];
+    for (const n of nombres) {
+        const ex = await db.collection('autores').findOne({ nombre: n });
+        out.push(ex ? ex._id : (await db.collection('autores').insertOne({ nombre: n })).insertedId);
+    }
+    return out;
+}
+async function resolverEditorialRef(db, nombre) {
+    const ex = await db.collection('editoriales').findOne({ nombre });
+    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
+}
+
 /**
  * REGISTRO DE TAREAS DE MANTENIMIENTO.
  * Cada tarea: { id, version, descripcion, aplica(doc), ejecutar(doc, ctx) -> cambio|null }.
@@ -32,14 +70,56 @@ const urlPortadaOpenLibrary = (isbn) =>
  *   carpetaNueva: si la tarea movió la carpeta CDU, indicar la ruta nueva para que
  *   aplicarCambio escriba registro.json en el sitio correcto.
  * Subir 'version' fuerza re-pasar la tarea por todos los documentos.
- * Las tareas se ejecutan EN ORDEN: re-clasificar-cdu va primera para que portada y
- * sidecars trabajen ya sobre la carpeta final.
+ * Las tareas se ejecutan EN ORDEN. La cadena importa:
+ *   re-enriquecer-degradados (arregla el título) → re-clasificar-cdu (re-clasifica con el
+ *   título ya bueno y mueve la carpeta) → … → regenerar-registros (reescribe los sidecars
+ *   legibles al final, ya con la metadata y la carpeta finales).
  */
 export const TAREAS = [
 
     {
-        id: 're-clasificar-cdu',
+        id: 're-enriquecer-degradados',
         version: 1,
+        descripcion: 'Documentos con ISBN pero metadata pobre (lote con APIs caídas): re-busca por ISBN y sobrescribe título/autores/editorial basura; rellena huecos.',
+        aplica: (doc) => esDegradado(doc),
+        async ejecutar(doc, { db }) {
+            const isbnVar = variantesISBN(doc.isbn);
+            if (!isbnVar.length) return null;
+
+            let datos;
+            try {
+                // CDU la resuelve re-clasificar-cdu (que corre justo después con el título ya bueno).
+                datos = await buscarMetadatosExternos(doc.titulo || '', '', null, {
+                    incluirSinopsis: true, incluirCdu: false, isbnsArchivo: isbnVar, idioma: doc.idioma || null,
+                });
+            } catch { return null; }
+
+            const garbage = tituloNoFiable(doc);
+            const set = {};
+            // Sobrescribe SOLO si el título actual es basura (sabemos que el registro es degradado).
+            if (garbage && datos.titulo)        set.titulo    = datos.titulo;
+            if (garbage && datos.editorial)     set.editorial = await resolverEditorialRef(db, datos.editorial);
+            if (garbage && datos.autores?.length) set.autores  = await resolverAutoresRef(db, datos.autores);
+            // Huecos (rellenar si faltan).
+            if (datos.sinopsis && !doc.sinopsis)        set.sinopsis = datos.sinopsis;
+            if (datos.año_edicion && !doc.año_edicion)  set.año_edicion = datos.año_edicion;
+            if (datos.idioma && !doc.idioma)            set.idioma = datos.idioma;
+            if (datos.categorias?.length && !(doc.palabras_clave?.length)) set.palabras_clave = datos.categorias;
+            if (datos.coleccion_nombre && !doc.coleccion) {
+                const ed = set.editorial || (typeof doc.editorial !== 'string' ? doc.editorial : null);
+                const { _id } = await resolverColeccion(db, datos.coleccion_nombre, ed);
+                set.coleccion = _id; set.coleccion_nombre = datos.coleccion_nombre;
+                if (datos.coleccion_numero) set.coleccion_numero = String(datos.coleccion_numero);
+            }
+
+            if (Object.keys(set).length === 0) return null;
+            return { set, alertas: ['Metadatos re-enriquecidos desde ISBN (lote degradado).'] };
+        },
+    },
+
+    {
+        id: 're-clasificar-cdu',
+        version: 2,
         descripcion: 'Re-clasifica la CDU con el pipeline BNE→DNB→caché→IA y mueve los ficheros al nuevo árbol si cambió.',
         aplica: (_doc) => true,
 
@@ -303,6 +383,23 @@ export const TAREAS = [
             }
             if (!imagenesNuevas.length) return null;
             return { imagenesNuevas, alertas: [`${imagenesNuevas.length} página(s) PDF añadidas como sidecar por mantenimiento.`] };
+        },
+    },
+
+    {
+        id: 'regenerar-registros',
+        version: 1,
+        descripcion: 'Reescribe registro.json y registro.marc.xml desde la BD (autores/editorial por nombre); va el último para reflejar la metadata y la carpeta ya finales.',
+        aplica: (doc) => !!doc.ruta_base,
+        async ejecutar(doc, { db }) {
+            // doc ya refleja los cambios de las tareas anteriores (Object.assign en el conformador),
+            // incluida la ruta_base nueva si re-clasificar-cdu movió la carpeta.
+            const carpeta = carpetaDeDoc(doc);
+            if (!await carpetaExiste(carpeta)) return null;
+            const { autores, editorial } = await resolverNombres(db, doc);
+            const legible = aRegistroLegible(doc, { autores, editorial });
+            try { await escribirSidecars(carpeta, legible); } catch { /* best-effort */ }
+            return null; // no cambia la BD; solo sincroniza los sidecars en disco
         },
     },
 ];

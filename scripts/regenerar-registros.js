@@ -17,7 +17,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { conectarDB } from '../src/database.js';
-import { aMARCXML } from '../src/marc21.js';
+import { aRegistroLegible, escribirSidecars } from '../src/utils/registro.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -35,26 +35,6 @@ function carpetaDeDoc(doc) {
     if (!doc.ruta_base) return null;
     const rel = doc.ruta_base.startsWith('/recursos/') ? doc.ruta_base.slice('/recursos/'.length) : doc.ruta_base;
     return path.join(DIR_CDU, ...rel.split('/'));
-}
-
-/** Construye la versión legible (autores/editorial por NOMBRE) para el sidecar. */
-function aLegible(doc, autorMap, editorialMap) {
-    const legible = { ...doc };
-    legible._id = String(doc._id);
-    legible.autores = (doc.autores || []).map(id => autorMap.get(String(id)) || String(id));
-    if (doc.editorial) legible.editorial = editorialMap.get(String(doc.editorial)) || undefined;
-    // La colección se muestra por su nombre denormalizado; se descarta el ObjectId crudo.
-    delete legible.coleccion;
-    // Campos internos que no van al sidecar.
-    delete legible.mantenimiento;
-    delete legible.mantenimiento_firma;
-    delete legible._portadas_remotas;
-    // Limpia claves con valor nulo/indefinido.
-    for (const k of Object.keys(legible)) {
-        const v = legible[k];
-        if (v === undefined || v === null || v === '') delete legible[k];
-    }
-    return legible;
 }
 
 async function main() {
@@ -80,11 +60,12 @@ async function main() {
         const carpeta = carpetaDeDoc(doc);
         if (!carpeta || !await existe(carpeta)) { sinCarpeta++; continue; }
 
-        const legible = aLegible(doc, autorMap, editorialMap);
+        const autores = (doc.autores || []).map(id => autorMap.get(String(id)) || String(id));
+        const editorial = doc.editorial ? (editorialMap.get(String(doc.editorial)) || null) : null;
+        const legible = aRegistroLegible(doc, { autores, editorial });
         if (!EJECUTAR) { escritos++; continue; }
         try {
-            await fs.writeFile(path.join(carpeta, 'registro.json'), JSON.stringify(legible, null, 2), 'utf8');
-            await fs.writeFile(path.join(carpeta, 'registro.marc.xml'), aMARCXML(legible), 'utf8');
+            await escribirSidecars(carpeta, legible);
             escritos++;
         } catch (e) {
             console.error(`  ⛔ [${doc._id}] "${doc.titulo}": ${e.message}`);
