@@ -243,6 +243,7 @@ async function ejecutarPasadaMantenimiento() {
     try {
         const r = await ejecutarMantenimiento({ debeAbortar: inboxTieneArchivos });
         ultimaRevisionMant = Date.now();
+        ultimaActividad = Date.now(); // reinicia el reloj: esperar REPOSO antes del siguiente lote
         if (!r.abortado && r.pendientes === 0) {
             conformadorDormido = true;
             if (r.revisados > 0)
