@@ -17,6 +17,20 @@ const resolver = (p, def) => {
 };
 const DIR_CDU = resolver(process.env.PATH_CDU, 'CDU');
 
+/**
+ * ¿La carpeta destino ya pertenece a OTRO documento? (mismo ISBN, edición/versión distinta).
+ * Lee el registro.json de la carpeta y compara su _id con el nuestro. Si difiere, hay colisión
+ * y el llamante debe disambiguar la hoja para no pisar los ficheros del documento existente.
+ */
+async function carpetaOcupadaPorOtroDoc(carpeta, miId) {
+    try {
+        const reg = JSON.parse(await fs.readFile(path.join(carpeta, 'registro.json'), 'utf8'));
+        return !!reg._id && String(reg._id) !== String(miId);
+    } catch {
+        return false; // no existe la carpeta o no hay registro.json legible
+    }
+}
+
 /** Copia los archivos del recurso y materializa las imágenes en la carpeta CDU destino. */
 async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
     await fs.mkdir(carpetaFs, { recursive: true });
@@ -129,7 +143,7 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     }
 
     // 3. Gestión de archivos: copiar a <CDU>/<libros|revistas>/.../.
-    const rc = rutaCatalogo({
+    const argsRuta = {
         cdu: resultado.cdu || documento.cdu,
         tipo_recurso: documento.tipo_recurso,
         isbn: resultado.isbn,
@@ -138,8 +152,18 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         año_edicion: resultado.año_edicion || documento.año_edicion,
         mes_publicacion: resultado.mes_publicacion || documento.mes_publicacion,
         titulo: resultado.titulo || documento.titulo,
-    });
-    const carpetaFs = path.join(DIR_CDU, rc.relativa);
+    };
+    let rc = rutaCatalogo(argsRuta);
+    let carpetaFs = path.join(DIR_CDU, rc.relativa);
+
+    // Colisión de carpeta (libros): si esto es un documento NUEVO (otra versión del mismo ISBN)
+    // y la carpeta destino ya la ocupa OTRO documento, disambiguamos la hoja con un sufijo del
+    // _id. Así dos revisiones del mismo ISBN viven en carpetas distintas (1 doc ↔ 1 carpeta).
+    if (resultado.operacion === 'insercion' && documento.tipo_recurso !== 'revista'
+        && await carpetaOcupadaPorOtroDoc(carpetaFs, resultado._id)) {
+        rc = rutaCatalogo({ ...argsRuta, discriminador: String(resultado._id).slice(-6) });
+        carpetaFs = path.join(DIR_CDU, rc.relativa);
+    }
     let imagenes = [], portada = null, originalesOk = [];
     try {
         ({ imagenes, portada, originalesOk } = await copiarArchivos(carpetaFs, rc.web, rutas, activos));

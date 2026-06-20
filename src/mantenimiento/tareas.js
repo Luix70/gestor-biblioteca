@@ -5,7 +5,7 @@ import { resolverPortada } from '../utils/resolver-portada.js';
 import { rasterizarPaginas } from '../utils/rasterizar-pdf.js';
 import { extraerMetadatosEpub } from '../utils/lector-epub.js';
 import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion } from './util-mantenimiento.js';
-import { rutaCatalogo } from '../utils/rutas.js';
+import { sanitizarSegmento } from '../utils/rutas.js';
 import { buscarEnBNE } from '../utils/buscador-bne.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
@@ -95,13 +95,22 @@ export const TAREAS = [
             const carpetaVieja = carpetaDeDoc(doc);
             const existeVieja  = await carpetaExiste(carpetaVieja);
 
-            const rcNueva     = rutaCatalogo({ cdu: cduNueva, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id, año_edicion: doc.año_edicion, mes_publicacion: doc.mes_publicacion, titulo: doc.titulo });
-            const carpetaNueva = path.join(DIR_CDU, rcNueva.relativa);
+            // La ruta nueva conserva TODO menos el segmento CDU: así se preservan el
+            // discriminador de versión (libros) y la subcarpeta año-mes (revistas), que se
+            // perderían al recomputar la hoja solo desde isbn/issn.
+            //   vieja: /recursos/<cduSeg>/<tipo>/<resto...>
+            //   nueva: /recursos/<cduSegNueva>/<tipo>/<resto...>
+            const rutaBaseVieja = webDeDoc(doc);
+            const segsViejos    = rutaBaseVieja.replace(/^\/recursos\//, '').split('/');
+            const segsNuevos    = [sanitizarSegmento(cduNueva), ...segsViejos.slice(1)];
+            const rutaBaseNueva = '/recursos/' + segsNuevos.join('/');
+            const relativaNueva = segsNuevos.join('/');
+            const carpetaNueva  = path.join(DIR_CDU, ...segsNuevos);
 
             if (existeVieja && carpetaNueva !== carpetaVieja) {
                 // Colisión: el destino ya existe (otro registro con el mismo CDU+ISBN)
                 if (await carpetaExiste(carpetaNueva)) {
-                    console.warn(`   ⚠️  re-clasificar-cdu: colisión en "${rcNueva.relativa}"; CDU actualizada en BD pero ficheros NO movidos.`);
+                    console.warn(`   ⚠️  re-clasificar-cdu: colisión en "${relativaNueva}"; CDU actualizada en BD pero ficheros NO movidos.`);
                     const set = { cdu: cduNueva };
                     if (cduAdicionales.length) set.cdu_adicionales = cduAdicionales;
                     return { set, alertas: [`CDU actualizada a "${cduNueva}" [${fuente}]; carpeta destino ya existía — ficheros no movidos.`] };
@@ -117,8 +126,6 @@ export const TAREAS = [
             }
 
             // ── Recalcular todas las rutas internas que llevaban el prefijo viejo ────
-            const rutaBaseVieja = webDeDoc(doc);      // '/recursos/old_cdu/libros/isbn'
-            const rutaBaseNueva = rcNueva.web;         // '/recursos/new_cdu/libros/isbn'
             const remap = (p) => p && p.startsWith(rutaBaseVieja)
                 ? rutaBaseNueva + p.slice(rutaBaseVieja.length)
                 : p;
