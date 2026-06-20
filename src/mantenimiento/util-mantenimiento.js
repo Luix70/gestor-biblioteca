@@ -23,14 +23,14 @@ export function carpetaDeDoc(doc) {
         const rel = doc.ruta_base.slice('/recursos/'.length).split('/');
         return path.join(DIR_CDU, ...rel);
     }
-    const rc = rutaCatalogo({ cdu: doc.cdu, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id });
+    const rc = rutaCatalogo({ cdu: doc.cdu, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id, año_edicion: doc.año_edicion, mes_publicacion: doc.mes_publicacion, titulo: doc.titulo });
     return path.join(DIR_CDU, rc.relativa);
 }
 
 /** Base web (/recursos/...) de la carpeta del recurso, para construir rutas de imagen. */
 export function webDeDoc(doc) {
     if (doc.ruta_base) return doc.ruta_base;
-    return rutaCatalogo({ cdu: doc.cdu, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id }).web;
+    return rutaCatalogo({ cdu: doc.cdu, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id, año_edicion: doc.año_edicion, mes_publicacion: doc.mes_publicacion, titulo: doc.titulo }).web;
 }
 
 /** ¿Existe la carpeta del recurso en ESTA máquina? (Los ficheros viven donde corre la app —

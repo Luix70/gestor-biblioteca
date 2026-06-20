@@ -66,16 +66,17 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // ISBN como pivote: reunimos todos los candidatos del archivo (lectura del texto/nombre
     // ya recolectados por el lector, más las formas 10/13 del isbn principal) para que las
     // APIs los prueben uno a uno. El ISBN es la clave de búsqueda más fiable del archivo.
-    // EXCEPCIÓN: revistas con ISSN no usan ISBN para las APIs — el ISBN extraído del texto
-    // de una revista suele ser un número de catálogo o suscripción, no el identificador del
-    // número concreto, y provoca lookups incorrectos (datos de un libro ajeno).
-    const esRevistaConISSN = documento.tipo_recurso === 'revista' && !!(documento.issn || datosBase.issn);
+    // EXCEPCIÓN: ninguna revista usa ISBN para las APIs — el ISBN extraído del texto de una
+    // revista suele ser un código de barras de un producto anunciado, un catálogo editorial o
+    // una suscripción, nunca el identificador del número concreto, y provoca lookups incorrectos
+    // (datos de un libro ajeno, como se comprobó con "Direction Italie" → Renacimiento italiano).
+    const esRevista = documento.tipo_recurso === 'revista';
     const isbnsArchivo = new Set();
-    if (!esRevistaConISSN) {
+    if (!esRevista) {
         for (const x of (datosBase.isbn_candidatos || [])) for (const v of variantesISBN(x)) isbnsArchivo.add(v);
         for (const v of variantesISBN(documento.isbn)) isbnsArchivo.add(v);
     }
-    if (esRevistaConISSN) { delete documento.isbn; }
+    if (esRevista) { delete documento.isbn; }
 
     const datosExtra = await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
         incluirSinopsis: faltaSinopsis,
@@ -129,16 +130,20 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // ISBN: si una autoridad resolvió un registro, su ISBN es el canónico/indexado y manda
     // (el archivo puede traer el de otra edición no indexada — case 14). Si ninguna API
     // resolvió, vale el del archivo. Se valida el dígito de control y se descarta si es basura.
-    const isbnCandidato = primerValido(datosExtra.isbn, documento.isbn);
-    if (isbnCandidato) {
-        const isbnValido = validarISBN(isbnCandidato);
-        if (isbnValido) documento.isbn = isbnValido;
-        else {
-            documento.alertas_agente.push(`ISBN descartado por dígito de control inválido: "${isbnCandidato}".`);
+    // Las revistas no tienen ISBN propio; cualquier ISBN que retorne la API para una búsqueda
+    // por título de revista es de un libro homónimo, no del número de la publicación.
+    if (!esRevista) {
+        const isbnCandidato = primerValido(datosExtra.isbn, documento.isbn);
+        if (isbnCandidato) {
+            const isbnValido = validarISBN(isbnCandidato);
+            if (isbnValido) documento.isbn = isbnValido;
+            else {
+                documento.alertas_agente.push(`ISBN descartado por dígito de control inválido: "${isbnCandidato}".`);
+                delete documento.isbn;
+            }
+        } else {
             delete documento.isbn;
         }
-    } else {
-        delete documento.isbn;
     }
 
     // ISSN (revistas): misma validación.

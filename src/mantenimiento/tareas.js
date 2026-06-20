@@ -95,7 +95,7 @@ export const TAREAS = [
             const carpetaVieja = carpetaDeDoc(doc);
             const existeVieja  = await carpetaExiste(carpetaVieja);
 
-            const rcNueva     = rutaCatalogo({ cdu: cduNueva, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id });
+            const rcNueva     = rutaCatalogo({ cdu: cduNueva, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id, año_edicion: doc.año_edicion, mes_publicacion: doc.mes_publicacion, titulo: doc.titulo });
             const carpetaNueva = path.join(DIR_CDU, rcNueva.relativa);
 
             if (existeVieja && carpetaNueva !== carpetaVieja) {

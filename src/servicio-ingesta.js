@@ -87,13 +87,16 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         throw e;
     }
 
-    // 3. Gestión de archivos: copiar a <CDU>/<libros|revistas>/<isbn|issn|id>/.
+    // 3. Gestión de archivos: copiar a <CDU>/<libros|revistas>/.../.
     const rc = rutaCatalogo({
         cdu: resultado.cdu || documento.cdu,
         tipo_recurso: documento.tipo_recurso,
         isbn: resultado.isbn,
         issn: resultado.issn,
         id: resultado._id,
+        año_edicion: resultado.año_edicion || documento.año_edicion,
+        mes_publicacion: resultado.mes_publicacion || documento.mes_publicacion,
+        titulo: resultado.titulo || documento.titulo,
     });
     const carpetaFs = path.join(DIR_CDU, rc.relativa);
     let imagenes = [], portada = null, originalesOk = [];
