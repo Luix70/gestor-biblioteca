@@ -33,12 +33,28 @@ function nuevaRuta(rutaBase, cdu) {
     return { viejos: segs, nuevos: [...arbolCDU(cdu || '').segmentos, ...resto] };
 }
 
-/** Borra de abajo a arriba las carpetas que hayan quedado vacías (no toca las que tienen algo). */
+// Entradas que NO cuentan como contenido real (metadatos de Synology, ocultos).
+const soloMetadatos = (n) => n.startsWith('@') || n.startsWith('#') || n.startsWith('.');
+
+/**
+ * Borra de abajo a arriba las carpetas sin contenido real. Si tras vaciarse solo quedan
+ * metadatos de Synology (@eaDir, @tmp, #recycle) u ocultos, se elimina la carpeta entera
+ * (con esos metadatos) — esos @eaDir son la causa de que rmdir dejara "cáscaras" en la raíz.
+ */
 async function limpiarVacios(raiz) {
     let entradas;
     try { entradas = await fs.readdir(raiz, { withFileTypes: true }); } catch { return; }
-    for (const e of entradas) if (e.isDirectory()) await limpiarVacios(path.join(raiz, e.name));
-    await fs.rmdir(raiz).catch(() => {}); // falla si no está vacía → se conserva
+    for (const e of entradas) if (e.isDirectory() && !soloMetadatos(e.name)) await limpiarVacios(path.join(raiz, e.name));
+
+    // Re-leer: ¿queda algo que NO sea metadatos?
+    let restantes;
+    try { restantes = await fs.readdir(raiz); } catch { return; }
+    const real = restantes.filter(n => !soloMetadatos(n));
+    if (real.length === 0 && restantes.length > 0) {
+        await fs.rm(raiz, { recursive: true, force: true }).catch(() => {}); // solo metadatos → fuera
+    } else {
+        await fs.rmdir(raiz).catch(() => {}); // vacía del todo → fuera; con contenido real → se conserva
+    }
 }
 
 async function main() {
