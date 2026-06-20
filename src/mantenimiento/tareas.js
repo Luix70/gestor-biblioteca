@@ -5,7 +5,7 @@ import { resolverPortada } from '../utils/resolver-portada.js';
 import { rasterizarPaginas } from '../utils/rasterizar-pdf.js';
 import { extraerMetadatosEpub } from '../utils/lector-epub.js';
 import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion, restaurarOriginalSiFalta } from './util-mantenimiento.js';
-import { sanitizarSegmento } from '../utils/rutas.js';
+import { arbolCDU } from '../utils/cdu-arbol.js';
 import { buscarEnBNE } from '../utils/buscador-bne.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
@@ -198,14 +198,16 @@ export const TAREAS = [
             const carpetaVieja = carpetaDeDoc(doc);
             const existeVieja  = await carpetaExiste(carpetaVieja);
 
-            // La ruta nueva conserva TODO menos el segmento CDU: así se preservan el
-            // discriminador de versión (libros) y la subcarpeta año-mes (revistas), que se
-            // perderían al recomputar la hoja solo desde isbn/issn.
-            //   vieja: /recursos/<cduSeg>/<tipo>/<resto...>
-            //   nueva: /recursos/<cduSegNueva>/<tipo>/<resto...>
+            // La ruta nueva sustituye SOLO la parte CDU (lo anterior a libros/revistas) por el
+            // árbol nuevo <clase>/<division>/<cdu>, conservando tipo + resto (isbn/discriminador,
+            // o issn/año-mes en revistas). Robusto tanto si la ruta vieja es plana como en árbol.
+            //   vieja: /recursos/<…cdu…>/<tipo>/<resto...>
+            //   nueva: /recursos/<clase>/<division>/<cdu>/<tipo>/<resto...>
             const rutaBaseVieja = webDeDoc(doc);
             const segsViejos    = rutaBaseVieja.replace(/^\/recursos\//, '').split('/');
-            const segsNuevos    = [sanitizarSegmento(cduNueva), ...segsViejos.slice(1)];
+            const iTipo         = segsViejos.findIndex(s => s === 'libros' || s === 'revistas');
+            const resto         = iTipo >= 0 ? segsViejos.slice(iTipo) : segsViejos.slice(-2);
+            const segsNuevos    = [...arbolCDU(cduNueva).segmentos, ...resto];
             const rutaBaseNueva = '/recursos/' + segsNuevos.join('/');
             const relativaNueva = segsNuevos.join('/');
             const carpetaNueva  = path.join(DIR_CDU, ...segsNuevos);
