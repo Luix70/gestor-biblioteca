@@ -24,7 +24,7 @@ services:
       - PATH_REINTENTOS=/app/Reintentos
       - PATH_ER_ROOM=/app/_ER Room
       - TZ=${TZ:-Europe/Madrid}
-      - NODE_OPTIONS=--no-warnings
+      - NODE_OPTIONS=--max-old-space-size=512 --no-warnings
 
     working_dir: /app
     command: ["npm", "start"]
