@@ -10,6 +10,7 @@ services:
       - "/volume3/BIBLIOTECA DIGITAL/CDU:/app/CDU"
       - "/volume3/BIBLIOTECA DIGITAL/Cuarentena:/app/Cuarentena"
       - "/volume3/BIBLIOTECA DIGITAL/Reintentos:/app/Reintentos"
+      - "/volume3/BIBLIOTECA DIGITAL/_ER Room:/app/_ER Room"
     ports:
       - "3000:3000"
     environment:
@@ -21,6 +22,7 @@ services:
       - PATH_CDU=/app/CDU
       - PATH_CUARENTENA=/app/Cuarentena
       - PATH_REINTENTOS=/app/Reintentos
+      - PATH_ER_ROOM=/app/_ER Room
       - NODE_OPTIONS=--no-warnings
 
     working_dir: /app
