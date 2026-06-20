@@ -78,10 +78,13 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     }
     if (esRevista) { delete documento.isbn; }
 
+    // Pasar el idioma del archivo para filtrar la búsqueda por lengua: da con la edición en
+    // español/inglés/etc. antes que con ediciones en otras lenguas (caso Anna Karenina).
     const datosExtra = await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
         incluirSinopsis: faltaSinopsis,
         incluirCdu: faltaCdu,
-        isbnsArchivo: [...isbnsArchivo]
+        isbnsArchivo: [...isbnsArchivo],
+        idioma: documento.idioma || null,
     });
 
     // Título y autores: el archivo manda, SALVO que su "título" no sea fiable, es decir,

@@ -6,6 +6,8 @@ import { procesarRecurso } from './orquestador.js';
 import { procesarCatalogo, actualizarDocumento } from './motor-catalogo.js';
 import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
+import { calcularHashArchivo } from './utils/hash-archivo.js';
+import { enviarACuarentena } from './gestor-fallos.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -78,6 +80,19 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     // 1. Extracción + enriquecimiento.
     const { documento, activos } = await procesarRecurso({ rutas, contexto });
 
+    // Añadir nombre_archivo y hash antes de catalogar.
+    // El nombre_archivo permite detectar re-procesamientos del mismo fichero (vs nuevas versiones);
+    // el hash_contenido detecta copias exactas aunque el nombre difiera (ej. "X (1).epub").
+    // Solo para recursos de un solo archivo (el hash de un grupo de imágenes no tiene sentido).
+    if (rutas.length === 1) {
+        documento.nombre_archivo = path.basename(rutas[0]);
+        try {
+            documento.hash_contenido = await calcularHashArchivo(rutas[0]);
+        } catch (e) {
+            console.warn(`[Servicio] Hash no calculado para ${path.basename(rutas[0])}: ${e.message}`);
+        }
+    }
+
     // 2. Persistencia (insertar/actualizar). Adjuntamos el doc a fallos de infra para reanudar.
     let resultado;
     try {
@@ -85,6 +100,32 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     } catch (e) {
         if (e.tipo === 'infraestructura') e.documentoParcial = documento;
         throw e;
+    }
+
+    // Copia exacta detectada por hash: mover el archivo a Cuarentena con nota al documento existente.
+    if (resultado.operacion === 'duplicado_exacto') {
+        await enviarACuarentena(rutas, {
+            titulo: documento.titulo,
+            identificador: documento.isbn || documento.issn || documento.titulo,
+            error: {
+                tipo: 'duplicado_exacto',
+                mensaje: `Contenido idéntico a documento ya catalogado (id: ${resultado._id}, ` +
+                         `archivo: ${resultado.nombre_archivo || 'desconocido'}).`,
+            },
+            documento_existente_id: String(resultado._id),
+            fase: 'catalogo',
+        });
+        return {
+            _id: resultado._id,
+            operacion: 'duplicado_exacto',
+            estado: resultado.estado_verificacion,
+            isbn: resultado.isbn || null,
+            issn: resultado.issn || null,
+            carpeta: null,
+            rutaWeb: resultado.ruta_base || null,
+            copiaIntegra: false,
+            documento: { ...resultado },
+        };
     }
 
     // 3. Gestión de archivos: copiar a <CDU>/<libros|revistas>/.../.

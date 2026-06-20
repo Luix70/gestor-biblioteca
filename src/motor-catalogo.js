@@ -12,7 +12,7 @@ const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'isbn', 'issn', 'idioma', 'cdu', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion'];
+    const CAMPOS = ['titulo', 'isbn', 'issn', 'idioma', 'cdu', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue'];
 
     // (1) Rellenar huecos.
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
@@ -90,11 +90,36 @@ export async function procesarCatalogo(documentoEnriquecido) {
             }
         }
 
-        // 3. Deduplicación: revistas por número de issue; libros por ISBN → ISSN → título.
-        // Para revistas el ISSN identifica la CABECERA (la publicación), no el número concreto.
-        // Usamos issn + año + mes (del nombre de archivo) para distinguir cada número.
-        // Si faltan esos campos, caemos al título para no mezclar revistas distintas entre sí.
-        let filtro;
+        // 3. Deduplicación en tres niveles:
+        //
+        // NIVEL A — Hash de contenido (SHA-256): detecta copias exactas del mismo archivo.
+        //   • Mismo hash + mismo nombre_archivo → re-proceso del mismo fichero → ACTUALIZAR.
+        //   • Mismo hash + nombre distinto → copia exacta con otro nombre → DUPLICADO_EXACTO.
+        //
+        // NIVEL B — Revistas: dedup por número de issue (ISSN + año + mes).
+        //
+        // NIVEL C — Libros con ISBN: solo actualiza si el nombre_archivo coincide (o el doc
+        //   existente aún no tiene nombre_archivo — compatibilidad con docs pre-hash).
+        //   Versiones distintas del mismo ISBN (ej. ePubLibre r2.7 vs r2.9) son docs distintos.
+
+        // — Nivel A: hash
+        if (docFinal.hash_contenido) {
+            const hashDoc = await coleccionBiblioteca.findOne({ hash_contenido: docFinal.hash_contenido });
+            if (hashDoc) {
+                if (hashDoc.nombre_archivo === docFinal.nombre_archivo) {
+                    // Mismo fichero reprocesado (vuelta del Inbox, re-ingesta manual, etc.)
+                    const cambios = calcularActualizacion(hashDoc, docFinal);
+                    await coleccionBiblioteca.updateOne({ _id: hashDoc._id }, { $set: cambios });
+                    const actualizado = await coleccionBiblioteca.findOne({ _id: hashDoc._id });
+                    return { ...actualizado, operacion: 'actualizacion' };
+                }
+                // Mismo contenido, nombre distinto → el llamante envía a Cuarentena
+                return { ...hashDoc, operacion: 'duplicado_exacto' };
+            }
+        }
+
+        // — Nivel B: revistas por número de issue
+        let filtro = null;
         if (docFinal.tipo_recurso === 'revista') {
             if (docFinal.issn && docFinal.año_edicion && docFinal.mes_publicacion) {
                 filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion, mes_publicacion: docFinal.mes_publicacion };
@@ -103,13 +128,23 @@ export async function procesarCatalogo(documentoEnriquecido) {
             } else {
                 filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
             }
-        } else {
-            filtro = docFinal.isbn ? { isbn: docFinal.isbn }
-                : docFinal.issn ? { issn: docFinal.issn }
-                : { titulo: docFinal.titulo };
+        } else if (docFinal.isbn) {
+            // — Nivel C: libros con ISBN — solo actualizar si es el mismo fichero
+            const candidato = await coleccionBiblioteca.findOne({ isbn: docFinal.isbn });
+            if (candidato) {
+                const mismoArchivo = !candidato.nombre_archivo
+                    || candidato.nombre_archivo === docFinal.nombre_archivo;
+                if (mismoArchivo) {
+                    filtro = { _id: candidato._id };
+                }
+                // else: mismo ISBN pero distinto nombre_archivo → versión diferente → insertar
+            }
+        } else if (docFinal.issn) {
+            filtro = { issn: docFinal.issn };
         }
+        // Sin filtro → siempre insertar
 
-        const existente = await coleccionBiblioteca.findOne(filtro);
+        const existente = filtro ? await coleccionBiblioteca.findOne(filtro) : null;
 
         // 4. Actualización inteligente o inserción.
         if (existente) {

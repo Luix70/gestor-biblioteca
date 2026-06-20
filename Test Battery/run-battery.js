@@ -49,6 +49,7 @@ const CASOS = [
     { id: 11, dir: '11.Scanned Magazine',           modo: 'imagenes-grupo',      ubicacion: UBICACION_FISICA },
     { id: 12, dir: '12.PDF Magazine',               modo: 'archivo' },
     { id: 20, dir: '20. Magazines as books',        modo: 'revistas' },
+    { id: 21, dir: '21.Legit Duplicates',           modo: 'archivo' },
 ];
 
 const EXT_SOPORTADAS = ['.epub', '.pdf'];

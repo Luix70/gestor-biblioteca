@@ -86,16 +86,26 @@ async function obtenerSinopsis(workKey) {
     }
 }
 
+// ISO 639-1 → código MARC de 3 letras para el filtro de idioma de OpenLibrary.
+const ISO_MARC = {
+    es: 'spa', en: 'eng', fr: 'fre', de: 'ger', it: 'ita',
+    pt: 'por', ru: 'rus', ca: 'cat', gl: 'glg', eu: 'baq',
+    zh: 'chi', ja: 'jpn', ar: 'ara', nl: 'dut', pl: 'pol',
+};
+
 /**
  * Ejecuta una búsqueda por texto en /search.json y devuelve el primer resultado normalizado.
+ * Si se proporciona idioma (ISO 639-1), se añade el parámetro `lang` de OpenLibrary.
  */
-async function buscarPorTexto(titulo, autor) {
+async function buscarPorTexto(titulo, autor, idioma = null) {
     const params = new URLSearchParams({
         title: titulo,
         limit: '1',
         fields: 'key,title,isbn,publisher,first_publish_year,ddc,lcc'
     });
     if (autor) params.set('author', autor);
+    const marcLang = idioma ? ISO_MARC[idioma] : null;
+    if (marcLang) params.set('lang', marcLang);
 
     const res = await olAxios.get(`${BASE}/search.json?${params.toString()}`);
     const doc = res.data && Array.isArray(res.data.docs) ? res.data.docs[0] : null;
@@ -144,14 +154,23 @@ export async function buscarPorCriterios(criterios) {
     }
 
     // 2 y 3. Fallback por texto
+    // Estrategia: intentar primero con filtro de idioma (da con la edición en la lengua del
+    // archivo); si no hay resultado, repetir sin filtro (cubre ISBNs no indexados por idioma).
     if (criterios.titulo) {
+        const idioma = criterios.idioma || null;
         try {
+            // 2a. Con idioma (preferente, si se conoce)
+            if (idioma) {
+                const conIdioma = await buscarPorTexto(criterios.titulo, criterios.autor, idioma);
+                if (conIdioma) return await finalizar(conIdioma, incluirSinopsis);
+            }
+
+            // 2b. Sin filtro de idioma
             const conAutor = await buscarPorTexto(criterios.titulo, criterios.autor);
             if (conAutor) return await finalizar(conAutor, incluirSinopsis);
 
-            // Si el autor no devolvió nada, reintentamos solo con el título
             if (criterios.autor) {
-                return await finalizar(await buscarPorTexto(criterios.titulo, null), incluirSinopsis);
+                return await finalizar(await buscarPorTexto(criterios.titulo, null, idioma || null), incluirSinopsis);
             }
         } catch (e) {
             if (esErrorDeRed(e)) throw new ErrorInfraestructura('OpenLibrary inalcanzable', e);

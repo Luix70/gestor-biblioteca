@@ -14,19 +14,32 @@ let olFallosConsecutivos = 0;
 let olBloqueadoHasta = 0;
 
 /**
- * Analiza una imagen en base64 para extraer metadatos bibliográficos.
+ * Analiza la portada de un libro para extraer metadatos bibliográficos visibles.
+ * Además del ISBN clásico, extrae la colección/serie editorial (ej. "Clásica Maior",
+ * "Austral") que permite localizar la edición exacta de obras con miles de versiones.
  */
 async function analizarImagenConIA(base64Image) {
     try {
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY.trim());
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-        const prompt = `
-                Eres un bibliotecario experto. Analiza la imagen y busca el ISBN (identificador bibliográfico internacional). 
-                No asumas que empieza por 978; puede tener 10 o 13 dígitos y distintos prefijos.
-                Responde ÚNICAMENTE en JSON: {"isbn": "valor", "editorial": "valor", "año_edicion": 20XX}. 
-                Si no encuentras el ISBN, búscalo en el texto. ¡NO devuelvas null si el número está en la imagen!
-                `;
+        const prompt = `Eres un bibliotecario experto analizando la portada de un libro.
+Extrae TODOS los datos bibliográficos visibles. Presta especial atención a:
+- ISBN (10 o 13 dígitos, puede aparecer en el lomo, la contraportada o como código de barras)
+- Sello editorial (el nombre del sello concreto, no el grupo empresarial)
+- Colección o serie editorial (ej. "Clásica Maior", "Austral", "El Libro de Bolsillo",
+  "Biblioteca Universal", "Grandes Clásicos") — muy útil para identificar ediciones concretas
+- Número en la colección (si aparece un número de colección)
+- Año de publicación visible en la portada
+
+Responde ÚNICAMENTE en JSON (null para los campos que no puedas leer):
+{
+  "isbn": "valor o null",
+  "editorial": "valor o null",
+  "coleccion": "nombre exacto de la colección/serie o null",
+  "numero_coleccion": número_entero_o_null,
+  "año_edicion": número_entero_o_null
+}`;
 
         const result = await model.generateContent([
             prompt,
@@ -45,7 +58,7 @@ async function analizarImagenConIA(base64Image) {
  * Flujo maestro de enriquecimiento.
  */
 export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null, opciones = {}) {
-    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [] } = opciones;
+    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [], idioma = null } = opciones;
     let datosExtra = {
         isbn: null,
         titulo: null,        // título de la autoridad (solo se usa si el archivo no aporta uno fiable)
@@ -81,6 +94,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         if (pistasIA) datosExtra.alertas.push("IA extrajo pistas de la imagen.");
     }
     const isbnHint = pistasIA ? pistasIA.isbn : null;
+    const coleccionHint = pistasIA ? pistasIA.coleccion : null;   // serie editorial de la portada
 
     // ISBN es el pivote: se consulta a las APIs con los identificadores que el ARCHIVO ya
     // aporta (preferentes), y luego con la pista de la IA. Sin esto, un PDF cuyo ISBN está
@@ -88,9 +102,9 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     const isbnsLookup = [...isbnsArchivo, ...(isbnHint ? [isbnHint] : [])];
 
     // TIER 2a · OpenLibrary (autoridad principal). Si los ISBN dan 404, el buscador recae
-    // en una búsqueda por título/autor.
+    // en una búsqueda por título/autor filtrada por idioma (da con la edición en la lengua
+    // del archivo antes que con ediciones en otras lenguas).
     // Un fallo de RED en una API no aborta la ingesta: se degrada con una alerta y se sigue.
-    // (Sin conexión real, será MongoDB Atlas quien falle → Reintentos.)
     let infoOL = null;
     if (Date.now() < olBloqueadoHasta) {
         const minutos = Math.ceil((olBloqueadoHasta - Date.now()) / 60000);
@@ -98,7 +112,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         datosExtra.alertas.push('OpenLibrary pausada (circuit-breaker): omitida.');
     } else {
         try {
-            infoOL = await buscarPorCriterios({ isbns: isbnsLookup, titulo, autor, incluirSinopsis });
+            infoOL = await buscarPorCriterios({ isbns: isbnsLookup, titulo, autor, incluirSinopsis, idioma });
             olFallosConsecutivos = 0; // éxito → resetear contador
         } catch (e) {
             if (e.tipo === 'infraestructura') {
@@ -127,10 +141,12 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     }
 
     // TIER 2b · Google Books (segunda autoridad; rellena huecos: sinopsis, categorías, portada).
+    // Pasa el idioma para filtrar por lengua en búsquedas de título, y la colección extraída
+    // de la portada para localizar la edición exacta (ej. "Clásica Maior" de Anna Karenina).
     let infoGB = null;
     try {
         const isbnsGB = datosExtra.isbn ? [datosExtra.isbn] : isbnsLookup;
-        infoGB = await buscarEnGoogleBooks({ isbns: isbnsGB, titulo, autor });
+        infoGB = await buscarEnGoogleBooks({ isbns: isbnsGB, titulo, autor, idioma, coleccion: coleccionHint });
     } catch (e) {
         if (e.tipo === 'infraestructura') datosExtra.alertas.push('Google Books inalcanzable: omitida.');
         else throw e;

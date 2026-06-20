@@ -44,10 +44,12 @@ function clave() {
 
 /**
  * Ejecuta una consulta y devuelve el primer volumen normalizado (o null).
+ * Si se proporciona idioma (ISO 639-1), se añade langRestrict para filtrar por lengua.
  */
-async function consultar(query) {
+async function consultar(query, idioma = null) {
     try {
-        const url = `${BASE}?q=${encodeURIComponent(query)}&maxResults=1&country=ES${clave()}`;
+        const lang = idioma ? `&langRestrict=${idioma}` : '';
+        const url = `${BASE}?q=${encodeURIComponent(query)}&maxResults=1&country=ES${lang}${clave()}`;
         const res = await axios.get(url);
         const item = res.data && Array.isArray(res.data.items) ? res.data.items[0] : null;
         return normalizar(item);
@@ -61,10 +63,14 @@ async function consultar(query) {
  * Busca metadatos en Google Books con la misma estrategia tolerante a fallos
  * que el buscador de OpenLibrary:
  *   1. Por ISBN (preferente).
- *   2. Fallback por título + autor.
- *   3. Fallback final por título solo.
+ *   2. Por título + colección (edición exacta) con filtro de idioma.
+ *   3. Por título + autor con filtro de idioma; fallback sin filtro.
+ *   4. Por título solo.
  */
 export async function buscarEnGoogleBooks(criterios) {
+    const idioma  = criterios.idioma  || null;
+    const coleccion = criterios.coleccion || null;
+
     // 1. Por ISBN (se prueban todos los candidatos: variantes 10/13 / ediciones).
     const isbns = (criterios.isbns && criterios.isbns.length)
         ? criterios.isbns
@@ -74,17 +80,33 @@ export async function buscarEnGoogleBooks(criterios) {
         if (porIsbn) return porIsbn;
     }
 
-    // 2 y 3. Por texto
-    if (criterios.titulo) {
-        const q = criterios.autor
-            ? `intitle:${criterios.titulo}+inauthor:${criterios.autor}`
-            : `intitle:${criterios.titulo}`;
-        const conAutor = await consultar(q);
-        if (conAutor) return conAutor;
+    if (!criterios.titulo) return null;
 
-        if (criterios.autor) {
-            return await consultar(`intitle:${criterios.titulo}`);
-        }
+    // 2. Edición exacta vía colección (nombre de serie) + idioma.
+    // La IA extrae la colección de la portada (ej. "Clásica Maior") → búsqueda muy específica.
+    if (coleccion && idioma) {
+        const qCol = `intitle:${criterios.titulo} "${coleccion}"`;
+        const conColeccion = await consultar(qCol, idioma);
+        if (conColeccion) return conColeccion;
+    }
+
+    // 3. Por texto con filtro de idioma (intentar primero con idioma para dar con la edición
+    //    en la lengua del archivo; si no hay resultados, caer sin filtro).
+    const qAutor = criterios.autor
+        ? `intitle:${criterios.titulo}+inauthor:${criterios.autor}`
+        : `intitle:${criterios.titulo}`;
+
+    if (idioma) {
+        const conIdioma = await consultar(qAutor, idioma);
+        if (conIdioma) return conIdioma;
+    }
+
+    const sinFiltro = await consultar(qAutor);
+    if (sinFiltro) return sinFiltro;
+
+    // 4. Solo título (sin autor) como último recurso.
+    if (criterios.autor) {
+        return await consultar(`intitle:${criterios.titulo}`, idioma || null);
     }
 
     return null;
