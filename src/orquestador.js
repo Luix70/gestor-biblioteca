@@ -213,9 +213,20 @@ export async function procesarRecurso(entrada) {
         documento.alertas_agente.push("Identificación NO verificada (PDF escaneado, sin OCR): requiere revisión humana.");
     }
 
-    // Identificación imposible: ni siquiera hay un título. El recurso debe ir a Cuarentena.
+    // Sin título: pero un ISBN/ISSN válido ES un identificador fuerte. No se descarta a Cuarentena
+    // solo porque las APIs no resolvieran el título ahora (caídas, o ISBN no indexado en las libres):
+    // se cataloga como PENDIENTE con el identificador de título provisional, y el Conformador
+    // (re-enriquecer-degradados) recuperará el título real buscando por ISBN cuando se pueda.
+    // Solo va a Cuarentena lo que NO tiene ni título ni identificador (irreconocible de verdad).
     if (!documento.titulo || !String(documento.titulo).trim()) {
-        throw new ErrorIdentificacion(`No se pudo identificar ningún título para: ${path.basename(rutas[0])}`);
+        const identificador = documento.isbn || documento.issn;
+        if (identificador) {
+            documento.titulo = String(identificador);
+            documento.estado_verificacion = 'pendiente';
+            documento.alertas_agente.push(`Sin título resoluble ahora; catalogado como pendiente con ${documento.isbn ? 'ISBN' : 'ISSN'} ${identificador} (se reintentará por identificador).`);
+        } else {
+            throw new ErrorIdentificacion(`No se pudo identificar ni título ni ISBN/ISSN para: ${path.basename(rutas[0])}`);
+        }
     }
 
     return { documento, activos };
