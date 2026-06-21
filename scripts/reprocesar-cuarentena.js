@@ -66,6 +66,34 @@ async function destinoLibre(nombre) {
     return destino;
 }
 
+/**
+ * Mueve un fichero al Inbox. rename directo si es el mismo dispositivo; si no (EXDEV: Cuarentena
+ * e Inbox son bind mounts distintos en el contenedor), copia a un temporal OCULTO del Inbox
+ * (el vigilante ignora los '.'), verifica el tamaño, hace rename atómico (mismo dispositivo) y
+ * borra el origen. NO destructivo.
+ */
+async function moverAlInbox(origen) {
+    await fs.mkdir(DIR_INBOX, { recursive: true });
+    const destinoFinal = await destinoLibre(path.basename(origen));
+    try {
+        await fs.rename(origen, destinoFinal);
+        return destinoFinal;
+    } catch (e) {
+        if (e.code !== 'EXDEV') throw e;
+    }
+    const st = await fs.stat(origen);
+    const tmp = path.join(DIR_INBOX, `.reproc-tmp-${Date.now()}-${path.basename(origen)}`);
+    await fs.copyFile(origen, tmp);
+    const stTmp = await fs.stat(tmp);
+    if (st.size === 0 || stTmp.size !== st.size) {
+        await fs.rm(tmp, { force: true }).catch(() => {});
+        throw new Error(`copia no íntegra (${st.size}→${stTmp.size})`);
+    }
+    await fs.rename(tmp, destinoFinal); // mismo dispositivo → atómico
+    await fs.rm(origen, { force: true });
+    return destinoFinal;
+}
+
 async function main() {
     const raiz = CATEGORIA ? path.join(DIR_CUARENTENA, CATEGORIA) : DIR_CUARENTENA;
     console.log(`\nReprocesar Cuarentena → Inbox  [${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'}]`);
@@ -95,11 +123,9 @@ async function main() {
         reprocesados++;
         if (!EJECUTAR) continue;
 
-        await fs.mkdir(DIR_INBOX, { recursive: true });
         let todos = true;
         for (const f of ficheros) {
-            const destino = await destinoLibre(path.basename(f));
-            try { await fs.rename(path.join(dep, f), destino); movidos++; }
+            try { await moverAlInbox(path.join(dep, f)); movidos++; }
             catch (e) { console.warn(`     ⚠️ ${f}: ${e.message}`); todos = false; }
         }
         // Solo se elimina el depósito si TODOS sus ficheros salieron (anti-pérdida).
