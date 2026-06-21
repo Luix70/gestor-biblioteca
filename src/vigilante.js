@@ -59,21 +59,56 @@ let conformadorDormido = false;      // true cuando la cola está vacía; evita 
 
 const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
 
-// Portada pre-extraída opcional: dentro de una carpeta-colección puede haber una subcarpeta
-// "covers/" con la portada de cada fichero (mismo nombre, extensión de imagen). Se ofrece como
-// CANDIDATA a resolverPortada (compite por tamaño con la embebida/remota/rasterizada).
+// Portada pre-extraída opcional: junto al documento (Book.jpg), o en una subcarpeta "covers"/
+// "Covers" (la del drop o la del propio documento). Se ofrece como CANDIDATA a resolverPortada
+// (compite por tamaño con la embebida/remota/rasterizada).
 const EXT_PORTADA = ['.jpg', '.jpeg', '.png', '.webp'];
-async function buscarPortadaPreextraida(carpeta, ficheroRuta) {
-    if (!carpeta) return null;
+
+/** Subcarpeta "covers"/"Covers" (insensible a mayúsculas) dentro de 'carpeta', o null. */
+async function subcarpetaCovers(carpeta) {
+    try {
+        const entradas = await fs.readdir(carpeta, { withFileTypes: true });
+        const c = entradas.find(e => e.isDirectory() && /^covers$/i.test(e.name));
+        return c ? path.join(carpeta, c.name) : null;
+    } catch { return null; }
+}
+
+async function buscarPortadaPreextraida(carpetaTop, ficheroRuta) {
+    if (!carpetaTop) return null;
     const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
-    // Junto al documento (Book.jpg para Book.epub) o en la subcarpeta covers/.
-    for (const dir of [carpeta, path.join(carpeta, 'covers')]) {
+    const dirDoc = path.dirname(ficheroRuta);
+    // Dónde buscar: junto al doc, en la raíz del drop, y en una subcarpeta Covers/ (del doc o del drop).
+    const dirs = [dirDoc, carpetaTop, await subcarpetaCovers(carpetaTop), await subcarpetaCovers(dirDoc)];
+    for (const dir of dirs) {
+        if (!dir) continue;
         for (const ext of EXT_PORTADA) {
             const p = path.join(dir, base + ext);
             if (await fs.access(p).then(() => true).catch(() => false)) return p;
         }
     }
     return null;
+}
+
+/**
+ * Documentos bibliográficos de un drop: los directos y los de sus subcarpetas (hasta 'nivel'
+ * niveles), excluyendo cualquier carpeta "covers"/"Covers". Así un drop con la estructura
+ *   60 Revistas/ { Magazines/*.pdf, Covers/*.jpg }
+ * reúne los PDF de Magazines/ como miembros de la colección "60 Revistas".
+ */
+async function recopilarDocumentos(dir, nivel) {
+    const out = [];
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
+    for (const e of entradas) {
+        if (ignorarEntrada(e.name)) continue;
+        const p = path.join(dir, e.name);
+        if (e.isFile()) {
+            if (esValida(e.name) && !esImagen(e.name)) out.push(p);
+        } else if (e.isDirectory() && nivel > 0 && !/^covers$/i.test(e.name)) {
+            out.push(...await recopilarDocumentos(p, nivel - 1));
+        }
+    }
+    return out;
 }
 
 // Entradas a ignorar SIEMPRE en el Inbox: ocultos y carpetas de sistema de Synology
@@ -136,24 +171,25 @@ async function listarUnidades() {
         if (ignorarEntrada(e.name)) continue; // ocultos + carpetas de sistema (@eaDir, #recycle...)
         const ruta = path.join(INBOX, e.name);
         if (e.isDirectory()) {
-            const todo = (await fs.readdir(ruta)).map(n => path.join(ruta, n));
-            const documentos = filtrarDuplicadosNombre(todo.filter(p => esValida(p) && !esImagen(p)));
-            const imagenes = todo.filter(esImagen);
+            // Documentos del drop: directos o en subcarpetas (Books/, Magazines/…; se excluye
+            // covers/). Las imágenes son PORTADAS (no libros), y .txt/.url/etc. se descartan. La
+            // COLECCIÓN y la carpeta persistente son el nombre del DROP (carpeta superior).
+            // 2+ docs = colección; 1 solo doc NO es colección (la carpeta se descarta).
+            const documentos = filtrarDuplicadosNombre(await recopilarDocumentos(ruta, 1));
             if (documentos.length > 0) {
-                // Carpeta con documento(s) bibliográficos. Las imágenes son PORTADAS (no libros
-                // escaneados) y .txt/.url/etc. son sidecars que se descartan. 2+ docs = COLECCIÓN
-                // (carpeta persistente); 1 solo doc NO es colección (carpeta se descarta).
                 const esColeccion = documentos.length >= 2;
                 for (const d of documentos) unidades.push({
                     rutas: [d], esImagenes: false, carpeta: ruta,
                     conservarCarpeta: esColeccion,
                     coleccion: esColeccion ? e.name : undefined,
                 });
-            } else if (imagenes.length > 0) {
-                // Solo imágenes (sin documento): un libro escaneado (comportamiento de siempre).
-                unidades.push({ rutas: filtrarDuplicadosNombre(imagenes), esImagenes: true, carpeta: ruta, conservarCarpeta: false });
+            } else {
+                // Sin documentos: imágenes DIRECTAS en la carpeta = un libro escaneado.
+                const imagenes = (await fs.readdir(ruta)).map(n => path.join(ruta, n)).filter(esImagen);
+                if (imagenes.length > 0) {
+                    unidades.push({ rutas: filtrarDuplicadosNombre(imagenes), esImagenes: true, carpeta: ruta, conservarCarpeta: false });
+                }
             }
-            // Carpeta vacía o solo sidecars (.txt/.url): nada que procesar.
         } else if (esValida(e.name)) {
             sueltos.push(ruta);
         }
@@ -409,7 +445,7 @@ export async function iniciarVigilante() {
     const watcher = chokidar.watch(INBOX, {
         ignoreInitial: false,
         awaitWriteFinish: { stabilityThreshold: 1500, pollInterval: 200 },
-        depth: 2,
+        depth: Number(process.env.VIGILANTE_DEPTH || 3), // Inbox/Colección/Subcarpeta/fichero = 3 niveles
         // En NAS/Docker los eventos inotify del host no siempre cruzan el bind mount
         // (sobre todo si el archivo se suelta por SMB/AFP): el evento 'add' nunca llega y
         // el Inbox parece "muerto". El sondeo recorre el Inbox cada VIGILANTE_POLL_MS y SÍ
