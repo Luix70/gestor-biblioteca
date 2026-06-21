@@ -10,7 +10,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
-import { agrupar } from './utils/agrupador.js';
+import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 
@@ -65,11 +65,13 @@ const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
 const EXT_PORTADA = ['.jpg', '.jpeg', '.png', '.webp'];
 async function buscarPortadaPreextraida(carpeta, ficheroRuta) {
     if (!carpeta) return null;
-    const dir = path.join(carpeta, 'covers');
     const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
-    for (const ext of EXT_PORTADA) {
-        const p = path.join(dir, base + ext);
-        if (await fs.access(p).then(() => true).catch(() => false)) return p;
+    // Junto al documento (Book.jpg para Book.epub) o en la subcarpeta covers/.
+    for (const dir of [carpeta, path.join(carpeta, 'covers')]) {
+        for (const ext of EXT_PORTADA) {
+            const p = path.join(dir, base + ext);
+            if (await fs.access(p).then(() => true).catch(() => false)) return p;
+        }
     }
     return null;
 }
@@ -134,20 +136,24 @@ async function listarUnidades() {
         if (ignorarEntrada(e.name)) continue; // ocultos + carpetas de sistema (@eaDir, #recycle...)
         const ruta = path.join(INBOX, e.name);
         if (e.isDirectory()) {
-            const dentro = (await fs.readdir(ruta)).map(n => path.join(ruta, n)).filter(esValida);
-            const grupos = agrupar(dentro);
-            // Subcarpeta con 2+ documentos (epub/pdf/cbr/djvu…) = COLECCIÓN: cada documento se
-            // cataloga por separado pero ligado a la colección = nombre de la carpeta; la carpeta
-            // NO se borra (zona de depósito persistente). Un ÚNICO documento NO es colección: se
-            // cataloga normal y la carpeta se descarta. Subcarpeta solo con imágenes = libro escaneado.
-            const documentos = grupos.filter(u => !u.esImagenes);
-            const esColeccion = documentos.length >= 2;
-            for (const u of grupos) unidades.push({
-                ...u,
-                carpeta: ruta,
-                conservarCarpeta: esColeccion,
-                coleccion: (esColeccion && !u.esImagenes) ? e.name : undefined,
-            });
+            const todo = (await fs.readdir(ruta)).map(n => path.join(ruta, n));
+            const documentos = filtrarDuplicadosNombre(todo.filter(p => esValida(p) && !esImagen(p)));
+            const imagenes = todo.filter(esImagen);
+            if (documentos.length > 0) {
+                // Carpeta con documento(s) bibliográficos. Las imágenes son PORTADAS (no libros
+                // escaneados) y .txt/.url/etc. son sidecars que se descartan. 2+ docs = COLECCIÓN
+                // (carpeta persistente); 1 solo doc NO es colección (carpeta se descarta).
+                const esColeccion = documentos.length >= 2;
+                for (const d of documentos) unidades.push({
+                    rutas: [d], esImagenes: false, carpeta: ruta,
+                    conservarCarpeta: esColeccion,
+                    coleccion: esColeccion ? e.name : undefined,
+                });
+            } else if (imagenes.length > 0) {
+                // Solo imágenes (sin documento): un libro escaneado (comportamiento de siempre).
+                unidades.push({ rutas: filtrarDuplicadosNombre(imagenes), esImagenes: true, carpeta: ruta, conservarCarpeta: false });
+            }
+            // Carpeta vacía o solo sidecars (.txt/.url): nada que procesar.
         } else if (esValida(e.name)) {
             sueltos.push(ruta);
         }
@@ -173,12 +179,24 @@ async function moverAErRoom(rutas) {
 }
 
 async function limpiarInbox(unidad) {
+    // Carpeta de un único documento (o de imágenes escaneadas): se descarta ENTERA tras catalogar
+    // — el documento ya está copiado al CDU; sidecars (.txt/.url) y portada suelta sobran.
+    // Las carpetas de COLECCIÓN no se tocan (zona de depósito persistente): solo se borra el doc.
+    if (unidad.carpeta && !unidad.conservarCarpeta) {
+        await fs.rm(unidad.carpeta, { recursive: true, force: true }).catch(() => {});
+        return;
+    }
     for (const r of unidad.rutas) {
         await fs.chmod(r, 0o666).catch(() => {});
         await fs.rm(r, { force: true }).catch(() => {});
+        // En colección: borrar también la portada SUELTA del doc (Book.jpg) para que no quede
+        // como imagen huérfana y se procese luego como "libro escaneado". La subcarpeta covers/
+        // se conserva (nunca se confunde con un libro).
+        if (unidad.carpeta) {
+            const base = path.basename(r, path.extname(r));
+            for (const ext of EXT_PORTADA) await fs.rm(path.join(unidad.carpeta, base + ext), { force: true }).catch(() => {});
+        }
     }
-    // Las carpetas de colección NO se borran (zona de depósito persistente).
-    if (unidad.carpeta && !unidad.conservarCarpeta) await fs.rmdir(unidad.carpeta).catch(() => {});
 }
 
 async function procesarUnidad(unidad) {
