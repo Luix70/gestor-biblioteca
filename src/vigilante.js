@@ -64,6 +64,9 @@ const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
 // (compite por tamaño con la embebida/remota/rasterizada).
 const EXT_PORTADA = ['.jpg', '.jpeg', '.png', '.webp'];
 
+// Entradas que NO cuentan como contenido real (metadatos de Synology, ocultos).
+const soloMetadatos = (n) => n.startsWith('@') || n.startsWith('#') || n.startsWith('.');
+
 /** Subcarpeta "covers"/"Covers" (insensible a mayúsculas) dentro de 'carpeta', o null. */
 async function subcarpetaCovers(carpeta) {
     try {
@@ -73,11 +76,9 @@ async function subcarpetaCovers(carpeta) {
     } catch { return null; }
 }
 
-async function buscarPortadaPreextraida(carpetaTop, ficheroRuta) {
-    if (!carpetaTop) return null;
-    const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
-    // Subir desde la carpeta del documento hasta la raíz del drop, probando en cada nivel el
-    // propio directorio y su subcarpeta Covers/ (insensible a mayúsculas). Gana el más cercano.
+/** Directorios donde puede vivir la portada de un documento: subiendo desde su carpeta hasta la
+ *  raíz del drop, en cada nivel el propio dir y su subcarpeta Covers/ (insensible a mayúsculas). */
+async function dirsCandidatosPortada(carpetaTop, ficheroRuta) {
     const topAbs = path.resolve(carpetaTop);
     const dirs = [];
     let d = path.dirname(ficheroRuta);
@@ -90,13 +91,51 @@ async function buscarPortadaPreextraida(carpetaTop, ficheroRuta) {
         if (padre === d) break; // raíz del sistema de ficheros
         d = padre;
     }
-    for (const dir of dirs) {
+    return dirs;
+}
+
+async function buscarPortadaPreextraida(carpetaTop, ficheroRuta) {
+    if (!carpetaTop) return null;
+    const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
+    for (const dir of await dirsCandidatosPortada(carpetaTop, ficheroRuta)) {
         for (const ext of EXT_PORTADA) {
             const p = path.join(dir, base + ext);
-            if (await fs.access(p).then(() => true).catch(() => false)) return p;
+            if (await fs.access(p).then(() => true).catch(() => false)) return p; // gana la más cercana
         }
     }
     return null;
+}
+
+/** Borra TODAS las portadas candidatas de un documento (se haya usado o no), tras catalogarlo. */
+async function eliminarPortadasCandidatas(carpetaTop, ficheroRuta) {
+    if (!carpetaTop) return;
+    const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
+    for (const dir of await dirsCandidatosPortada(carpetaTop, ficheroRuta)) {
+        for (const ext of EXT_PORTADA) await fs.rm(path.join(dir, base + ext), { force: true }).catch(() => {});
+    }
+}
+
+/** Poda (bottom-up) las SUBcarpetas de 'top' que quedaron vacías o solo con metadatos Synology.
+ *  No toca 'top' (la carpeta-colección persiste como buzón de depósito). */
+async function podarSubcarpetasVacias(top) {
+    let entradas;
+    try { entradas = await fs.readdir(top, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+        if (!e.isDirectory() || soloMetadatos(e.name)) continue;
+        const sub = path.join(top, e.name);
+        await podarSubcarpetasVacias(sub); // primero las anidadas
+        let restantes; try { restantes = await fs.readdir(sub); } catch { continue; }
+        if (restantes.every(soloMetadatos)) await fs.rm(sub, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
+/** Tras una pasada: poda subcarpetas vacías dentro de cada carpeta-colección del Inbox. */
+async function podarVaciosInbox() {
+    let entradas;
+    try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+        if (e.isDirectory() && !ignorarEntrada(e.name)) await podarSubcarpetasVacias(path.join(INBOX, e.name));
+    }
 }
 
 /**
@@ -238,13 +277,10 @@ async function limpiarInbox(unidad) {
     for (const r of unidad.rutas) {
         await fs.chmod(r, 0o666).catch(() => {});
         await fs.rm(r, { force: true }).catch(() => {});
-        // En colección: borrar también la portada SUELTA del doc (Book.jpg) para que no quede
-        // como imagen huérfana y se procese luego como "libro escaneado". La subcarpeta covers/
-        // se conserva (nunca se confunde con un libro).
-        if (unidad.carpeta) {
-            const base = path.basename(r, path.extname(r));
-            for (const ext of EXT_PORTADA) await fs.rm(path.join(unidad.carpeta, base + ext), { force: true }).catch(() => {});
-        }
+        // Documento procesado → se borra su portada candidata (usada o no), esté junto al doc o
+        // en una subcarpeta Covers/. Así no quedan imágenes huérfanas y la zona de depósito se
+        // mantiene limpia (las subcarpetas que se vacíen las poda podarVaciosInbox tras la pasada).
+        if (unidad.carpeta) await eliminarPortadasCandidatas(unidad.carpeta, r);
     }
 }
 
@@ -321,6 +357,9 @@ async function procesarCola() {
             if (procesadas === 0) break;
             unidades = await listarUnidades(); // recoger lo que llegó mientras procesábamos
         }
+        // Tras procesar: poda subcarpetas vacías (docs ya catalogados, covers/ ya consumidas)
+        // dentro de las carpetas-colección persistentes; los buzones (carpeta raíz) se conservan.
+        if (totalProcesadas > 0) await podarVaciosInbox().catch(() => {});
         // Anuncio de reposo: solo en la TRANSICIÓN (tras procesar algo y quedar el Inbox vacío),
         // no en cada escaneo en vacío (evita spam cada VIGILANTE_ESCANEO_MS).
         if (totalProcesadas > 0 && !(await inboxTieneArchivos())) {
