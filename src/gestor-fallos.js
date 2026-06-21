@@ -18,6 +18,19 @@ function nombreSeguro(s) {
 }
 
 /**
+ * Categoría de un depósito de Cuarentena, para agruparlos en subcarpetas:
+ *   duplicados       — copia exacta de algo ya catalogado.
+ *   no-identificados — no se pudo identificar (sin título/ISBN tras agotar archivo/APIs/IA).
+ *   otros            — cualquier otro motivo.
+ */
+export function categoriaCuarentena(estado) {
+    const tipo = (estado && (estado.error?.tipo || estado.motivo)) || '';
+    if (tipo === 'duplicado_exacto') return 'duplicados';
+    if (tipo === 'identificacion') return 'no-identificados';
+    return 'otros';
+}
+
+/**
  * Deposita un recurso fallido en una subcarpeta propia, junto a un estado.json con TODO
  * el trabajo realizado, de modo que un reintento pueda reanudar sin rehacer lo ya hecho.
  *
@@ -26,9 +39,10 @@ function nombreSeguro(s) {
  * @param estado   { documento?, fase?, error?, identificador?, titulo?, motivo }
  * @param mover    true = mover (sacar del inbox); false = copiar (conservar original)
  */
-async function depositar(dirBase, rutas, estado, mover) {
+async function depositar(dirBase, rutas, estado, mover, categoria = null) {
     const etiqueta = nombreSeguro(estado.identificador || estado.titulo || (rutas[0] && path.basename(rutas[0])) || 'recurso');
-    const destino = path.join(dirBase, etiqueta);
+    const base = categoria ? path.join(dirBase, categoria) : dirBase;
+    const destino = path.join(base, etiqueta);
     await fs.mkdir(destino, { recursive: true });
 
     const archivos = [];
@@ -48,6 +62,7 @@ async function depositar(dirBase, rutas, estado, mover) {
 
     const estadoCompleto = {
         ...estado,
+        categoria,
         archivos,
         rutas_originales: rutas,
         fecha: new Date().toISOString(),
@@ -56,9 +71,10 @@ async function depositar(dirBase, rutas, estado, mover) {
     return destino;
 }
 
-/** Identificación imposible → Cuarentena (se MUEVE; requiere intervención manual). */
+/** Identificación imposible / duplicado → Cuarentena (se MUEVE; agrupado por categoría). */
 export async function enviarACuarentena(rutas, estado) {
-    return depositar(DIR_CUARENTENA, rutas, { motivo: 'identificacion', ...estado }, true);
+    const e = { motivo: 'identificacion', ...estado };
+    return depositar(DIR_CUARENTENA, rutas, e, true, categoriaCuarentena(e));
 }
 
 /** Fallo transitorio (APIs/MongoDB inalcanzables) → Reintentos (se COPIA; se reprocesará). */
