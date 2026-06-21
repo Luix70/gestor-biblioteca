@@ -175,6 +175,21 @@ export async function procesarCatalogo(documentoEnriquecido) {
             console.error(JSON.stringify(error.errInfo?.details, null, 2));
             throw new Error("El documento no cumple con el $jsonSchema de 'biblioteca'.");
         }
+        // Clave duplicada (E11000): existe un índice ÚNICO (p. ej. isbn_1) y ya hay un documento
+        // con esa clave. En vez de fallar a Cuarentena, FUSIONAMOS con el existente (la mayoría
+        // son re-ingestas del mismo libro). El identificador conflictivo viene en error.keyValue.
+        if (error.code === 11000) {
+            const clave = error.keyValue || {};
+            const existente = Object.keys(clave).length
+                ? await coleccionBiblioteca.findOne(clave) : null;
+            if (existente) {
+                const cambios = calcularActualizacion(existente, docFinal);
+                await coleccionBiblioteca.updateOne({ _id: existente._id }, { $set: cambios });
+                const actualizado = await coleccionBiblioteca.findOne({ _id: existente._id });
+                console.warn(`   ↔ ISBN/ISSN ya catalogado (${JSON.stringify(clave)}): fusionado con ${existente._id}.`);
+                return { ...actualizado, operacion: 'actualizacion' };
+            }
+        }
         throw new Error(`Error en base de datos: ${error.message}`);
     }
 }
