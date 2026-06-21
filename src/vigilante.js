@@ -76,11 +76,21 @@ async function subcarpetaCovers(carpeta) {
 async function buscarPortadaPreextraida(carpetaTop, ficheroRuta) {
     if (!carpetaTop) return null;
     const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
-    const dirDoc = path.dirname(ficheroRuta);
-    // Dónde buscar: junto al doc, en la raíz del drop, y en una subcarpeta Covers/ (del doc o del drop).
-    const dirs = [dirDoc, carpetaTop, await subcarpetaCovers(carpetaTop), await subcarpetaCovers(dirDoc)];
+    // Subir desde la carpeta del documento hasta la raíz del drop, probando en cada nivel el
+    // propio directorio y su subcarpeta Covers/ (insensible a mayúsculas). Gana el más cercano.
+    const topAbs = path.resolve(carpetaTop);
+    const dirs = [];
+    let d = path.dirname(ficheroRuta);
+    for (let i = 0; i < 12; i++) {
+        dirs.push(d);
+        const cov = await subcarpetaCovers(d);
+        if (cov) dirs.push(cov);
+        if (path.resolve(d) === topAbs) break;
+        const padre = path.dirname(d);
+        if (padre === d) break; // raíz del sistema de ficheros
+        d = padre;
+    }
     for (const dir of dirs) {
-        if (!dir) continue;
         for (const ext of EXT_PORTADA) {
             const p = path.join(dir, base + ext);
             if (await fs.access(p).then(() => true).catch(() => false)) return p;
@@ -90,13 +100,16 @@ async function buscarPortadaPreextraida(carpetaTop, ficheroRuta) {
 }
 
 /**
- * Documentos bibliográficos de un drop: los directos y los de sus subcarpetas (hasta 'nivel'
- * niveles), excluyendo cualquier carpeta "covers"/"Covers". Así un drop con la estructura
- *   60 Revistas/ { Magazines/*.pdf, Covers/*.jpg }
- * reúne los PDF de Magazines/ como miembros de la colección "60 Revistas".
+ * Documentos bibliográficos de un drop: TODOS los de la carpeta y sus subcarpetas a cualquier
+ * profundidad, excluyendo cualquier carpeta "covers"/"Covers". Así, sea cual sea la estructura
+ * interna, todos los documentos pertenecen a la colección = nombre de la carpeta del DROP:
+ *   60 Revistas/ { Magazines/*.pdf, Covers/*.jpg }              → colección "60 Revistas"
+ *   Mathematical Books Collection/ 20 Math books/ *.pdf         → se FUSIONA en "Mathematical…"
+ * (cap de 8 niveles por seguridad; los symlinks no se siguen).
  */
-async function recopilarDocumentos(dir, nivel) {
+async function recopilarDocumentos(dir, nivel = 8) {
     const out = [];
+    if (nivel < 0) return out;
     let entradas;
     try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
     for (const e of entradas) {
@@ -104,7 +117,7 @@ async function recopilarDocumentos(dir, nivel) {
         const p = path.join(dir, e.name);
         if (e.isFile()) {
             if (esValida(e.name) && !esImagen(e.name)) out.push(p);
-        } else if (e.isDirectory() && nivel > 0 && !/^covers$/i.test(e.name)) {
+        } else if (e.isDirectory() && !/^covers$/i.test(e.name)) {
             out.push(...await recopilarDocumentos(p, nivel - 1));
         }
     }
@@ -175,7 +188,7 @@ async function listarUnidades() {
             // covers/). Las imágenes son PORTADAS (no libros), y .txt/.url/etc. se descartan. La
             // COLECCIÓN y la carpeta persistente son el nombre del DROP (carpeta superior).
             // 2+ docs = colección; 1 solo doc NO es colección (la carpeta se descarta).
-            const documentos = filtrarDuplicadosNombre(await recopilarDocumentos(ruta, 1));
+            const documentos = filtrarDuplicadosNombre(await recopilarDocumentos(ruta));
             if (documentos.length > 0) {
                 const esColeccion = documentos.length >= 2;
                 for (const d of documentos) unidades.push({
