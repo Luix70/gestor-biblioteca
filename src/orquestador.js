@@ -195,11 +195,17 @@ export async function procesarRecurso(entrada) {
     // Mide la cubierta embebida y las remotas, descarta las degeneradas (1x1 de OpenLibrary)
     // y, si ninguna llega al ancho objetivo y es un PDF, rasteriza páginas clave con poppler.
     if (tipo !== 'imagen' && !activos.some(a => a.tipo === 'portada')) {
+        // Portada pre-extraída (covers/ del drop por carpeta): otra candidata que compite por tamaño.
+        let preextraidaBase64 = null;
+        if (contexto.portadaLocal) {
+            try { preextraidaBase64 = (await fs.readFile(contexto.portadaLocal)).toString('base64'); } catch { /* ilegible: se ignora */ }
+        }
         const { portada, extras } = await resolverPortada({
             tipo,
             rutas,
             numPaginas: datosBase.paginas || 2,
             embebidaBase64: datosBase.cubierta_base64 || datosBase.imagen_adicional || null,
+            preextraidaBase64,
             remotos: Array.isArray(documento._portadas_remotas) ? documento._portadas_remotas : [],
         });
         if (portada) activos.push({ tipo: 'portada', origen: portada.origen, base64: portada.base64 });

@@ -59,6 +59,21 @@ let conformadorDormido = false;      // true cuando la cola está vacía; evita 
 
 const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
 
+// Portada pre-extraída opcional: dentro de una carpeta-colección puede haber una subcarpeta
+// "covers/" con la portada de cada fichero (mismo nombre, extensión de imagen). Se ofrece como
+// CANDIDATA a resolverPortada (compite por tamaño con la embebida/remota/rasterizada).
+const EXT_PORTADA = ['.jpg', '.jpeg', '.png', '.webp'];
+async function buscarPortadaPreextraida(carpeta, ficheroRuta) {
+    if (!carpeta) return null;
+    const dir = path.join(carpeta, 'covers');
+    const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
+    for (const ext of EXT_PORTADA) {
+        const p = path.join(dir, base + ext);
+        if (await fs.access(p).then(() => true).catch(() => false)) return p;
+    }
+    return null;
+}
+
 // Entradas a ignorar SIEMPRE en el Inbox: ocultos y carpetas de sistema de Synology
 // (@eaDir con miniaturas/metadatos, @tmp, #recycle). Sin esto, @eaDir hace creer que el Inbox
 // tiene contenido (bloquea el mantenimiento) y hasta intentaría catalogar sus miniaturas.
@@ -121,11 +136,12 @@ async function listarUnidades() {
         if (e.isDirectory()) {
             const dentro = (await fs.readdir(ruta)).map(n => path.join(ruta, n)).filter(esValida);
             const grupos = agrupar(dentro);
-            // Subcarpeta CON documentos (epub/pdf/cbr/djvu…) = COLECCIÓN: cada documento se cataloga
-            // por separado pero ligado a la colección = nombre de la carpeta; la carpeta NO se borra
-            // (zona de depósito persistente, se puede seguir soltando ahí). Subcarpeta solo con
-            // imágenes = un libro escaneado: comportamiento de siempre (se limpia la carpeta).
-            const esColeccion = grupos.some(u => !u.esImagenes);
+            // Subcarpeta con 2+ documentos (epub/pdf/cbr/djvu…) = COLECCIÓN: cada documento se
+            // cataloga por separado pero ligado a la colección = nombre de la carpeta; la carpeta
+            // NO se borra (zona de depósito persistente). Un ÚNICO documento NO es colección: se
+            // cataloga normal y la carpeta se descarta. Subcarpeta solo con imágenes = libro escaneado.
+            const documentos = grupos.filter(u => !u.esImagenes);
+            const esColeccion = documentos.length >= 2;
             for (const u of grupos) unidades.push({
                 ...u,
                 carpeta: ruta,
@@ -170,6 +186,11 @@ async function procesarUnidad(unidad) {
     const contexto = unidad.esImagenes ? { ubicacion: UBICACION_INBOX } : {};
     // Drop por carpeta: ligar el recurso a la colección (nombre de carpeta) y autonumerar la serie.
     if (unidad.coleccion) { contexto.coleccion = unidad.coleccion; contexto.serieAuto = true; }
+    // Portada pre-extraída en covers/ (si existe): candidata para la resolución de portada.
+    if (!unidad.esImagenes && unidad.carpeta) {
+        const portadaLocal = await buscarPortadaPreextraida(unidad.carpeta, unidad.rutas[0]);
+        if (portadaLocal) contexto.portadaLocal = portadaLocal;
+    }
     try {
         const r = await ingestarRecurso({ rutas: unidad.rutas, contexto });
         console.log(`  ✅ ${etiqueta} → ${r.operacion} (${r.estado}) · ${r.rutaWeb}`);

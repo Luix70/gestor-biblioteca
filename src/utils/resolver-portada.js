@@ -31,7 +31,7 @@ async function descargar(url) {
  *
  * @returns {{ portada: {base64,origen,ancho,alto}|null, extras: Array }}
  */
-export async function resolverPortada({ tipo, rutas = [], numPaginas = 2, embebidaBase64 = null, remotos = [] }) {
+export async function resolverPortada({ tipo, rutas = [], numPaginas = 2, embebidaBase64 = null, preextraidaBase64 = null, remotos = [] }) {
     const candidatas = [];
     const extras = [];
     const mejor = () => candidatas.slice().sort((a, b) => b.ancho - a.ancho)[0] || null;
@@ -39,6 +39,12 @@ export async function resolverPortada({ tipo, rutas = [], numPaginas = 2, embebi
     // 1. Cubierta embebida en el archivo (EPUB): la fuente preferida y gratis.
     if (embebidaBase64) {
         const c = evaluar(Buffer.from(embebidaBase64, 'base64'), 'archivo');
+        if (c) candidatas.push(c);
+    }
+
+    // 1b. Portada pre-extraída (covers/ del drop por carpeta): compite por tamaño con las demás.
+    if (preextraidaBase64) {
+        const c = evaluar(Buffer.from(preextraidaBase64, 'base64'), 'covers');
         if (c) candidatas.push(c);
     }
 
