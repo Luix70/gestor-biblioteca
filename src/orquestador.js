@@ -1,7 +1,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { extraerMetadatosEpub } from './utils/lector-epub.js';
-import { extraerMetadatosPdf } from './utils/lector-pdf.js';
+import { extraerMetadatosPdf, textoPagina } from './utils/lector-pdf.js';
+import { medirImagen } from './utils/medir-imagen.js';
 import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura } from './errores.js';
@@ -10,6 +11,11 @@ import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
+
+// Portada: ancho mínimo legible (igual que resolverPortada) y nº de caracteres a partir del cual
+// se considera que la página 1 de un PDF es texto (no cubierta).
+const PORTADA_ANCHO_MINIMO = Number(process.env.PORTADA_ANCHO_MINIMO || 100);
+const PAG1_TEXTO_UMBRAL = Number(process.env.PORTADA_PAG1_TEXTO_UMBRAL || 250);
 
 // Tipo MIME real de cada imagen (Gemini soporta jpeg/png/webp/heic de forma nativa).
 // Ya no reprocesamos con sharp: enviamos los bytes originales etiquetados con su MIME correcto.
@@ -210,6 +216,32 @@ export async function procesarRecurso(entrada) {
         });
         if (portada) activos.push({ tipo: 'portada', origen: portada.origen, base64: portada.base64 });
         for (const ex of extras) activos.push({ tipo: 'otra', origen: ex.origen, base64: ex.base64 });
+    }
+
+    // PDF + candidata externa de portada (covers/ o fichero suelto): algunos digitalizadores
+    // extraen la cubierta a un fichero aparte, así que la página 1 del PDF que rasterizamos es en
+    // realidad la primera página de TEXTO, no la cubierta. Solo cuando HAY candidata externa lo
+    // evaluamos: si la página 1 parece texto, la candidata ES la cubierta; si no, gana la más
+    // ancha ("widest wins" también para PDF). El raster desplazado queda como sidecar.
+    if (tipo === 'pdf' && contexto.portadaLocal) {
+        try {
+            const candBuf = await fs.readFile(contexto.portadaLocal);
+            const candM = medirImagen(candBuf);
+            if (candM && candM.width >= PORTADA_ANCHO_MINIMO) {
+                const idx = activos.findIndex(a => a.tipo === 'portada');
+                const rasterM = idx >= 0 ? medirImagen(Buffer.from(activos[idx].base64, 'base64')) : null;
+                const texto1 = await textoPagina(rutas[0], 1);
+                const pag1EsTexto = texto1.replace(/\s/g, '').length > PAG1_TEXTO_UMBRAL;
+                const usarCandidata = !rasterM || pag1EsTexto || candM.width > rasterM.width;
+                if (usarCandidata) {
+                    if (idx >= 0) activos[idx].tipo = 'otra'; // el raster de la pág.1 pasa a sidecar
+                    activos.unshift({ tipo: 'portada', origen: 'covers', base64: candBuf.toString('base64') });
+                    documento.alertas_agente.push(pag1EsTexto
+                        ? 'Portada tomada del fichero externo (la página 1 del PDF es texto, no cubierta).'
+                        : 'Portada tomada del fichero externo (mayor resolución que la página 1).');
+                }
+            }
+        } catch { /* candidata ilegible: se conserva la portada rasterizada */ }
     }
     delete documento._portadas_remotas;
 

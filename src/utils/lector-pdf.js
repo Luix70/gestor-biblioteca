@@ -53,6 +53,15 @@ async function pdfText(ruta, desde, hasta) {
 }
 
 /**
+ * Texto de UNA página concreta (1-indexada). Útil para evaluar si la página 1 de un PDF es la
+ * cubierta (poco/ningún texto) o ya la primera página de texto (el digitalizador extrajo la
+ * cubierta a un fichero aparte). Cadena vacía ante cualquier error.
+ */
+export async function textoPagina(rutaArchivo, n) {
+    return pdfText(rutaArchivo, n, n);
+}
+
+/**
  * Busca TODOS los ISBN-10/13 válidos en texto libre. Tolera prefijos "ISBN:", guiones y
  * espacios, y valida el dígito de control (un número de 13 cifras cualquiera NO es un ISBN).
  * Devuelve un array sin duplicados, ya normalizado.
