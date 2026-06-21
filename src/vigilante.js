@@ -267,20 +267,21 @@ async function moverAErRoom(rutas) {
 }
 
 async function limpiarInbox(unidad) {
-    // Carpeta de un único documento (o de imágenes escaneadas): se descarta ENTERA tras catalogar
-    // — el documento ya está copiado al CDU; sidecars (.txt/.url) y portada suelta sobran.
-    // Las carpetas de COLECCIÓN no se tocan (zona de depósito persistente): solo se borra el doc.
-    if (unidad.carpeta && !unidad.conservarCarpeta) {
-        await fs.rm(unidad.carpeta, { recursive: true, force: true }).catch(() => {});
-        return;
-    }
+    // Se borran los documentos procesados y SU portada candidata (usada o no), esté junto al doc
+    // o en una subcarpeta Covers/. La CARPETA (siempre un buzón de primer nivel del Inbox) NUNCA
+    // se borra: las subcarpetas que queden vacías las poda podarVaciosInbox tras la pasada.
     for (const r of unidad.rutas) {
         await fs.chmod(r, 0o666).catch(() => {});
         await fs.rm(r, { force: true }).catch(() => {});
-        // Documento procesado → se borra su portada candidata (usada o no), esté junto al doc o
-        // en una subcarpeta Covers/. Así no quedan imágenes huérfanas y la zona de depósito se
-        // mantiene limpia (las subcarpetas que se vacíen las poda podarVaciosInbox tras la pasada).
         if (unidad.carpeta) await eliminarPortadasCandidatas(unidad.carpeta, r);
+    }
+    // Drop puntual (no colección): además se descartan los sidecars sueltos (.txt/.url…) que
+    // hayan quedado en la raíz de la carpeta. La carpeta vacía permanece (buzón).
+    if (unidad.carpeta && !unidad.conservarCarpeta) {
+        let entradas; try { entradas = await fs.readdir(unidad.carpeta, { withFileTypes: true }); } catch { return; }
+        for (const e of entradas) {
+            if (e.isFile() && !soloMetadatos(e.name)) await fs.rm(path.join(unidad.carpeta, e.name), { force: true }).catch(() => {});
+        }
     }
 }
 
@@ -317,7 +318,7 @@ async function procesarUnidad(unidad) {
             // identificación imposible u otro error no recuperable → Cuarentena (manual).
             await enviarACuarentena(unidad.rutas, { error: { tipo: e.tipo || 'desconocido', mensaje: e.message } });
             console.error(`  🚫 ${etiqueta} → Cuarentena (${e.message})`);
-            if (unidad.carpeta && !unidad.conservarCarpeta) await fs.rmdir(unidad.carpeta).catch(() => {});
+            // La carpeta (buzón de primer nivel) no se borra; sus subcarpetas vacías las poda el barrido.
         }
     }
 }
@@ -339,7 +340,7 @@ async function procesarCola() {
                     const nombre = `${path.basename(u.rutas[0])}${u.rutas.length > 1 ? ` (+${u.rutas.length - 1})` : ''}`;
                     console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min → _ER Room (redescargar manualmente).`);
                     await moverAErRoom(u.rutas);
-                    if (u.carpeta && !u.conservarCarpeta) await fs.rmdir(u.carpeta).catch(() => {});
+                    // La carpeta (buzón de primer nivel) no se borra.
                     for (const r of u.rutas) huerfanosVistos.delete(r);
                     continue;
                 }
