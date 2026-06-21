@@ -130,6 +130,13 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.coleccion_nombre = primerValido(documento.coleccion_nombre, datosExtra.coleccion_nombre);
     documento.coleccion_numero = primerValido(documento.coleccion_numero, datosExtra.coleccion_numero);
     if (documento.coleccion_numero != null) documento.coleccion_numero = String(documento.coleccion_numero);
+
+    // Drop por CARPETA: el nombre de la carpeta es una agrupación EXPLÍCITA del usuario y manda
+    // sobre cualquier colección deducida del archivo. El número de serie del archivo (si lo hay)
+    // se conserva; si no, motor-catalogo asignará el siguiente incremental.
+    if (contexto.coleccion) {
+        documento.coleccion_nombre = contexto.coleccion;
+    }
     // Campos físicos de la BNE: el archivo digital no los tiene; las APIs tampoco los aportan.
     if (datosExtra.paginas_bne && !documento.paginas)
         documento.paginas = datosExtra.paginas_bne;

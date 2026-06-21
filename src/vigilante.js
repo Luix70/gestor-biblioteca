@@ -120,7 +120,18 @@ async function listarUnidades() {
         const ruta = path.join(INBOX, e.name);
         if (e.isDirectory()) {
             const dentro = (await fs.readdir(ruta)).map(n => path.join(ruta, n)).filter(esValida);
-            for (const u of agrupar(dentro)) unidades.push({ ...u, carpeta: ruta });
+            const grupos = agrupar(dentro);
+            // Subcarpeta CON documentos (epub/pdf/cbr/djvu…) = COLECCIÓN: cada documento se cataloga
+            // por separado pero ligado a la colección = nombre de la carpeta; la carpeta NO se borra
+            // (zona de depósito persistente, se puede seguir soltando ahí). Subcarpeta solo con
+            // imágenes = un libro escaneado: comportamiento de siempre (se limpia la carpeta).
+            const esColeccion = grupos.some(u => !u.esImagenes);
+            for (const u of grupos) unidades.push({
+                ...u,
+                carpeta: ruta,
+                conservarCarpeta: esColeccion,
+                coleccion: (esColeccion && !u.esImagenes) ? e.name : undefined,
+            });
         } else if (esValida(e.name)) {
             sueltos.push(ruta);
         }
@@ -150,12 +161,15 @@ async function limpiarInbox(unidad) {
         await fs.chmod(r, 0o666).catch(() => {});
         await fs.rm(r, { force: true }).catch(() => {});
     }
-    if (unidad.carpeta) await fs.rmdir(unidad.carpeta).catch(() => {});
+    // Las carpetas de colección NO se borran (zona de depósito persistente).
+    if (unidad.carpeta && !unidad.conservarCarpeta) await fs.rmdir(unidad.carpeta).catch(() => {});
 }
 
 async function procesarUnidad(unidad) {
     const etiqueta = `${path.basename(unidad.rutas[0])}${unidad.rutas.length > 1 ? ` (+${unidad.rutas.length - 1})` : ''}`;
     const contexto = unidad.esImagenes ? { ubicacion: UBICACION_INBOX } : {};
+    // Drop por carpeta: ligar el recurso a la colección (nombre de carpeta) y autonumerar la serie.
+    if (unidad.coleccion) { contexto.coleccion = unidad.coleccion; contexto.serieAuto = true; }
     try {
         const r = await ingestarRecurso({ rutas: unidad.rutas, contexto });
         console.log(`  ✅ ${etiqueta} → ${r.operacion} (${r.estado}) · ${r.rutaWeb}`);
@@ -179,7 +193,7 @@ async function procesarUnidad(unidad) {
             // identificación imposible u otro error no recuperable → Cuarentena (manual).
             await enviarACuarentena(unidad.rutas, { error: { tipo: e.tipo || 'desconocido', mensaje: e.message } });
             console.error(`  🚫 ${etiqueta} → Cuarentena (${e.message})`);
-            if (unidad.carpeta) await fs.rmdir(unidad.carpeta).catch(() => {});
+            if (unidad.carpeta && !unidad.conservarCarpeta) await fs.rmdir(unidad.carpeta).catch(() => {});
         }
     }
 }
@@ -201,7 +215,7 @@ async function procesarCola() {
                     const nombre = `${path.basename(u.rutas[0])}${u.rutas.length > 1 ? ` (+${u.rutas.length - 1})` : ''}`;
                     console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min → _ER Room (redescargar manualmente).`);
                     await moverAErRoom(u.rutas);
-                    if (u.carpeta) await fs.rmdir(u.carpeta).catch(() => {});
+                    if (u.carpeta && !u.conservarCarpeta) await fs.rmdir(u.carpeta).catch(() => {});
                     for (const r of u.rutas) huerfanosVistos.delete(r);
                     continue;
                 }

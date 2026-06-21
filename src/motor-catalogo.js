@@ -48,7 +48,7 @@ function calcularActualizacion(existente, nuevo) {
  * Inserta si es nuevo; si ya existe (por ISBN, ISSN o título), fusiona la información.
  * Los fallos de conexión/operación de MongoDB se elevan como ErrorInfraestructura (→ Reintentos).
  */
-export async function procesarCatalogo(documentoEnriquecido) {
+export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     let db;
     try {
         db = await conectarDB();
@@ -97,6 +97,18 @@ export async function procesarCatalogo(documentoEnriquecido) {
             const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
             const { _id, creada } = await resolverColeccion(db, docFinal.coleccion_nombre, edId);
             if (creada) docFinal.alertas_agente.push(`Nueva colección registrada: ${docFinal.coleccion_nombre}`);
+
+            // Serie automática (drop por carpeta): si el documento no trae número de serie, se le
+            // asigna el siguiente incremental dentro de la colección (max numérico existente + 1).
+            if (opciones.serieAuto && !docFinal.coleccion_numero) {
+                const miembros = await coleccionBiblioteca
+                    .find({ coleccion: _id }, { projection: { coleccion_numero: 1 } }).toArray();
+                const maxN = miembros.reduce((m, d) => {
+                    const n = parseInt(d.coleccion_numero, 10);
+                    return Number.isFinite(n) && n > m ? n : m;
+                }, 0);
+                docFinal.coleccion_numero = String(maxN + 1);
+            }
             docFinal.coleccion = _id;
         }
 

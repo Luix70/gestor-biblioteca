@@ -114,9 +114,11 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     }
 
     // 2. Persistencia (insertar/actualizar). Adjuntamos el doc a fallos de infra para reanudar.
+    //    serieAuto (drop por carpeta): si el doc no trae número de serie, motor-catalogo le asigna
+    //    el siguiente incremental dentro de su colección.
     let resultado;
     try {
-        resultado = await procesarCatalogo(documento);
+        resultado = await procesarCatalogo(documento, { serieAuto: !!contexto.serieAuto });
     } catch (e) {
         if (e.tipo === 'infraestructura') e.documentoParcial = documento;
         throw e;

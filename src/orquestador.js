@@ -187,7 +187,8 @@ export async function procesarRecurso(entrada) {
     const documento = await enriquecerMetadatos(datosBase, {
         tipo_recurso,
         formatos,
-        ubicacion: contexto.ubicacion
+        ubicacion: contexto.ubicacion,
+        coleccion: contexto.coleccion,   // drop por carpeta: colección autoritativa
     });
 
     // Portada de calidad (las imágenes escaneadas ya son su propia portada; no se tocan).
