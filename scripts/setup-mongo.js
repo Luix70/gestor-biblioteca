@@ -44,6 +44,7 @@ const VALIDADOR_OBRAS = {
             editorial:       { bsonType: ['objectId', 'null'] },
             coleccion:       { bsonType: ['objectId', 'null'], description: 'Serie a la que pertenece la obra (opcional).' },
             cdu:             { bsonType: ['string', 'null'], description: 'CDU común a todos los tomos.' },
+            descripcion:     { bsonType: ['string', 'null'], description: 'Descripción/sinopsis general de la obra.' },
             total_volumenes: { bsonType: ['int', 'null'], description: 'Nº total de tomos, si se conoce.' },
             volumenes_presentes: { bsonType: ['int', 'null'], description: 'Nº de tomos ya catalogados.' },
             completa:        { bsonType: ['bool', 'null'], description: 'true si están todos los tomos.' },
