@@ -78,7 +78,11 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         // lo identifica obra+volumen_numero).
         const isbnVolRol = numVol != null ? rolVol.find(x => x.numero === numVol) : null;
         if (isbnVolRol) documento.isbn = isbnVolRol.isbn;
-        else if (rolVol.length > 0) delete documento.isbn;
+        // Sin ISBN de rol para este tomo: NO heredar un ISBN arbitrario del texto (set, otro tomo, o
+        // un código de barras espurio) — haría colisionar/fusionar los tomos. Un tomo confirmado por
+        // carpeta (contexto.obra) o con otros ISBN de tomo en los créditos va SIN isbn (lo identifica
+        // obra+volumen_numero); su ISBN propio se rellenará si más tarde aparece uno fiable.
+        else if (rolVol.length > 0 || contexto.obra) delete documento.isbn;
         if (documento.volumen_numero != null && documento.obra_titulo) {
             documento.titulo = `${documento.obra_titulo} — Vol. ${documento.volumen_numero}${documento.volumen_titulo ? `: ${documento.volumen_titulo}` : ''}`;
         }
