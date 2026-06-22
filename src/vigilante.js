@@ -277,7 +277,7 @@ async function moverAErRoom(rutas) {
     }
 }
 
-async function limpiarInbox(unidad) {
+export async function limpiarInbox(unidad) {
     // Se borran los documentos procesados y SU portada candidata (usada o no), esté junto al doc
     // o en una subcarpeta Covers/. La CARPETA (siempre un buzón de primer nivel del Inbox) NUNCA
     // se borra: las subcarpetas que queden vacías las poda podarVaciosInbox tras la pasada.
@@ -286,12 +286,18 @@ async function limpiarInbox(unidad) {
         await fs.rm(r, { force: true }).catch(() => {});
         if (unidad.carpeta) await eliminarPortadasCandidatas(unidad.carpeta, r);
     }
-    // Drop puntual (no colección): además se descartan los sidecars sueltos (.txt/.url…) que
-    // hayan quedado en la raíz de la carpeta. La carpeta vacía permanece (buzón).
+    // Drop puntual (no colección): se descartan los sidecars sueltos (.txt/.url…) que hayan
+    // quedado en la raíz de la carpeta. La carpeta vacía permanece (buzón).
+    // CRÍTICO: NUNCA borrar un documento bibliográfico válido (.pdf/.epub/imagen). Una obra
+    // multivolumen reparte N tomos VÁLIDOS en la MISMA carpeta y se catalogan en unidades
+    // distintas: barrer "todo lo que no sea metadato" borraba los tomos 2..N aún sin procesar
+    // al limpiar el tomo 1 (pérdida de datos). Solo se barren extensiones NO bibliográficas.
     if (unidad.carpeta && !unidad.conservarCarpeta) {
         let entradas; try { entradas = await fs.readdir(unidad.carpeta, { withFileTypes: true }); } catch { return; }
         for (const e of entradas) {
-            if (e.isFile() && !soloMetadatos(e.name)) await fs.rm(path.join(unidad.carpeta, e.name), { force: true }).catch(() => {});
+            if (e.isFile() && !soloMetadatos(e.name) && !esValida(e.name)) {
+                await fs.rm(path.join(unidad.carpeta, e.name), { force: true }).catch(() => {});
+            }
         }
     }
 }
