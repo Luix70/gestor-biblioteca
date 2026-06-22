@@ -288,6 +288,27 @@ export const TAREAS = [
     },
 
     {
+        id: 'completar-descripcion-obra',
+        version: 1,
+        descripcion: 'Da a la obra multivolumen una descripción general (sinopsis por su ISBN de obra), si le falta.',
+        // Solo tomos de obra. Modifica la OBRA (no el tomo); el primer tomo que la resuelva la rellena.
+        aplica: (doc) => !!doc.obra && doc.volumen_numero != null,
+        async ejecutar(doc, { db }) {
+            const obra = await db.collection('obras').findOne({ _id: doc.obra });
+            if (!obra || obra.descripcion || !obra.isbn_obra) return null; // ya tiene, o no hay ancla
+            let datos;
+            try {
+                datos = await buscarMetadatosExternos(obra.titulo || '', '', null, {
+                    incluirSinopsis: true, incluirCdu: false, isbnsArchivo: variantesISBN(obra.isbn_obra),
+                });
+            } catch { return null; }
+            if (!datos.sinopsis) return null;
+            await db.collection('obras').updateOne({ _id: obra._id }, { $set: { descripcion: datos.sinopsis } });
+            return { alertas: [`Descripción de la obra "${obra.titulo}" añadida desde su ISBN de obra.`] };
+        },
+    },
+
+    {
         id: 'completar-hash-contenido',
         version: 1,
         descripcion: 'Calcula y guarda el SHA-256 del fichero original (identidad de contenido 1:1) y avisa de duplicados exactos preexistentes.',
