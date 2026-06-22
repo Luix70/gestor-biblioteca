@@ -130,6 +130,22 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   Tareas iniciales: `completar-nombre-archivo`, `revisar-portada` (re-resuelve si falta/baja calidad;
   NO toca libros 'papel'/escaneados), `generar-sidecars-pdf`. Futuras (slot listo): revisar CDU,
   duplicados, colecciones, completar datos.
+- **Obras multivolumen** (`utils/multivolumen.js`, `utils/obras.js`): UNA obra en N tomos con
+  **ISBN de obra** propio además del de cada tomo (distinta de una colección/serie). El vigilante
+  discrimina por drop de carpeta de tomos (`discriminarMultivolumen`: ≥2 ficheros "Vol. N" que
+  dominan y comparten carpeta) y/o por ISBN-con-rol en los créditos (`extraerISBNsConRol`:
+  "(obra completa)" vs "(tomo I)"). Colección `obras { titulo, isbn_obra (único sparse), editorial,
+  coleccion, cdu }`; los tomos llevan `obra`(ObjectId)/`volumen_numero`/`volumen_titulo`/`isbn_obra`
+  y **comparten la CDU de la obra** (un classmark → se archivan juntos en `<cdu>/obras/<obra>/vol-N/`).
+  Dedup de tomo por `(obra, volumen_numero)`. Probado con Worldmark Encyclopedia (6 tomos).
+- **Bloque CIP** (`utils/cip.js` · `parsearBloqueCatalogacion`): el registro casi-MARC que muchos
+  libros imprimen en créditos (Library of Congress / British Library CIP). Leído del texto del PDF
+  (`lector-pdf` → `datos.cip`), es **fuente de archivo** (máxima confianza): rellena huecos de
+  título/subtítulo/autor/serie/ISBN(s) y aporta **materias LCSH** (→ `palabras_clave`). Lo más
+  valioso: su **Dewey/LC se siembran ANTES que cualquier API** (`proveedor-metadatos`) y clasifican
+  la CDU **sin IA** vía el mapeo aprendido (`equivalencias_cdu`). El `dewey`/`lcc`/`lccn` fiables
+  (CIP o API) se **persisten** en el documento (procedencia + re-derivación/auditoría de la CDU).
+  Probado con el CIP de Loy, *A Buddhist history of the West* → CDU `930.85:24` sin gasto de IA.
 
 ---
 

@@ -4,6 +4,7 @@ import path from 'path';
 import { extraerISSN, validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre } from './parsear-nombre.js';
 import { extraerISBNsConRol } from './multivolumen.js';
+import { parsearBloqueCatalogacion } from './cip.js';
 
 const execFileP = promisify(execFile);
 
@@ -162,6 +163,12 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // ISBN con ROL (créditos de obra multivolumen): "(obra completa)" vs "(tomo I)".
         const isbnsRol = extraerISBNsConRol(texto);
         if (isbnsRol.length) datos.isbns_rol = isbnsRol;
+
+        // BLOQUE CIP (Catalogación en Publicación): registro casi-MARC impreso en la página de
+        // créditos. Aporta Dewey/LC (→ CDU SIN IA), ISBN(s) con rol, materias LCSH y autor/título
+        // fiables, todo leído del propio fichero (fuente de archivo, máxima confianza).
+        const cip = parsearBloqueCatalogacion(texto);
+        if (cip) datos.cip = cip;
 
         // ISBN: candidatos del texto + del nombre de archivo, ampliados a sus formas 10/13.
         const candidatos = new Set();
