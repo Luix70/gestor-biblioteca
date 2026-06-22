@@ -11,6 +11,10 @@ const execFileP = promisify(execFile);
 // así que funciona en el Atom D525 — al contrario que sharp/libvips (SIMD AVX en un .node).
 const ANCHO = Number(process.env.PDF_RASTER_ANCHO || 1024);
 
+// Errores de poppler que indican que el PDF ENTERO es ilegible (xref dañado, sin árbol de
+// páginas…), no que falle una página suelta: ante esto no tiene sentido probar más páginas.
+const PDF_ILEGIBLE = /pages object is wrong type|xref\b.*not found|after the last page \(0\)|May not be a PDF|Couldn't read xref|Document stream is empty/i;
+
 // Páginas clave: las 2 primeras (portada/portadilla) y la última (contraportada).
 function paginasObjetivo(numPaginas) {
     const set = new Set([1]);
@@ -60,6 +64,11 @@ export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, 
             } catch (e) {
                 if (e.code === 'ENOENT') {
                     console.warn('[Raster] pdftoppm (poppler-utils) no disponible: se omite el rasterizado del PDF.');
+                    break;
+                }
+                if (PDF_ILEGIBLE.test(e.message || '')) {
+                    // El PDF está estructuralmente dañado: las demás páginas fallarían igual.
+                    console.warn(`[Raster] PDF ilegible (estructura dañada, p. ej. xref): se omite el rasterizado de "${path.basename(ruta)}". Requiere una copia mejor.`);
                     break;
                 }
                 console.warn(`[Raster] página ${p} no rasterizada: ${e.message}`);
