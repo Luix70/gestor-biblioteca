@@ -62,15 +62,23 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // El ISBN del tomo manda sobre el genérico del fichero; el título compuesto es autoritativo.
     const isbnsRol = Array.isArray(datosBase.isbns_rol) ? datosBase.isbns_rol : [];
     const isbnObraRol = isbnsRol.find(x => x.rol === 'obra');
-    const isbnVolRol = isbnsRol.find(x => x.rol === 'volumen');
+    const rolVol = isbnsRol.filter(x => x.rol === 'volumen');
     if (contexto.obra || isbnObraRol) {
         documento.obra_titulo = contexto.obra?.titulo || documento.obra_titulo || documento.titulo;
         if (contexto.obra?.total) documento.obra_total = contexto.obra.total; // nº de tomos declarado
-        const numVol = contexto.obra?.numero ?? isbnVolRol?.numero ?? documento.volumen_numero ?? null;
+        // Número del tomo: del drop de carpeta o del documento; si no, el primer rol-volumen.
+        const numVol = contexto.obra?.numero ?? documento.volumen_numero ?? rolVol[0]?.numero ?? null;
         if (numVol != null) documento.volumen_numero = numVol;
         if (contexto.obra?.titulo_volumen) documento.volumen_titulo = contexto.obra.titulo_volumen;
         if (isbnObraRol) documento.isbn_obra = isbnObraRol.isbn;
+        // ISBN del tomo = el de SU número. La página de créditos de CADA tomo lista TODOS los ISBN
+        // del set ("ISBN … (Vol. 1)", "(Vol. 2)"…); coger el PRIMER rol-volumen hacía que todos los
+        // tomos heredaran el ISBN del tomo 1 → colisión en el índice único `isbn` y fusión de tomos.
+        // Se elige por número; si no hay match, NO se hereda un ISBN ajeno (el tomo va sin isbn:
+        // lo identifica obra+volumen_numero).
+        const isbnVolRol = numVol != null ? rolVol.find(x => x.numero === numVol) : null;
         if (isbnVolRol) documento.isbn = isbnVolRol.isbn;
+        else if (rolVol.length > 0) delete documento.isbn;
         if (documento.volumen_numero != null && documento.obra_titulo) {
             documento.titulo = `${documento.obra_titulo} — Vol. ${documento.volumen_numero}${documento.volumen_titulo ? `: ${documento.volumen_titulo}` : ''}`;
         }
@@ -111,11 +119,19 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // una suscripción, nunca el identificador del número concreto, y provoca lookups incorrectos
     // (datos de un libro ajeno, como se comprobó con "Direction Italie" → Renacimiento italiano).
     const esRevista = documento.tipo_recurso === 'revista';
+    const esTomo = !!(documento.obra_titulo || documento.isbn_obra);
     const isbnsArchivo = new Set();
     if (!esRevista) {
-        for (const x of (datosBase.isbn_candidatos || [])) for (const v of variantesISBN(x)) isbnsArchivo.add(v);
-        for (const v of variantesISBN(documento.isbn)) isbnsArchivo.add(v);
-        for (const c of (cip?.isbns || [])) for (const v of variantesISBN(c.isbn)) isbnsArchivo.add(v);
+        if (esTomo && documento.isbn) {
+            // Tomo de obra: la API se consulta SOLO con el ISBN PROPIO del tomo, no con los del set
+            // ni los de los otros tomos (todos aparecen en sus créditos). Si no, la API podría
+            // devolver datos de otro tomo y acabarían todos con el mismo ISBN (colisión/fusión).
+            for (const v of variantesISBN(documento.isbn)) isbnsArchivo.add(v);
+        } else {
+            for (const x of (datosBase.isbn_candidatos || [])) for (const v of variantesISBN(x)) isbnsArchivo.add(v);
+            for (const v of variantesISBN(documento.isbn)) isbnsArchivo.add(v);
+            for (const c of (cip?.isbns || [])) for (const v of variantesISBN(c.isbn)) isbnsArchivo.add(v);
+        }
     }
     if (esRevista) { delete documento.isbn; }
 
@@ -201,7 +217,12 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Las revistas no tienen ISBN propio; cualquier ISBN que retorne la API para una búsqueda
     // por título de revista es de un libro homónimo, no del número de la publicación.
     if (!esRevista) {
-        const isbnCandidato = primerValido(datosExtra.isbn, documento.isbn);
+        // TOMO de obra: manda el ISBN de ROL del propio fichero ("… (Vol. N)"), NO la API. Las
+        // autoridades suelen fundir todos los tomos en una sola edición y devuelven SIEMPRE el mismo
+        // ISBN (el del set o el del tomo 1), lo que volvería a colisionar/fusionar los tomos.
+        const isbnCandidato = esTomo
+            ? primerValido(documento.isbn, datosExtra.isbn)
+            : primerValido(datosExtra.isbn, documento.isbn);
         if (isbnCandidato) {
             const isbnValido = validarISBN(isbnCandidato);
             if (isbnValido) documento.isbn = isbnValido;
