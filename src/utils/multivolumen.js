@@ -66,7 +66,10 @@ export function extraerISBNsConRol(texto) {
         if (/obra\s*completa|o\.?\s*c\.?\b|complete\s*(work|set)?|\bset\b|colecci[óo]n completa/i.test(etq)) {
             rol = 'obra';
         } else {
-            const mv = etq.match(/(?:tomo|vols?|vol[úu]men|volume|tome|t|band|parte?)\.?\s*([0-9]{1,3}|[ivxlcdm]{1,7})/i);
+            // Incluye la forma abreviada "v. N" / "v N" (créditos de Gale: "ISBN … (v. 1 : alk. paper)"),
+            // además de tomo/vol/volume/tome/band/parte y "t." . El separador (espacio, ":", "-") puede
+            // faltar; exige límite tras la palabra para no casar dentro de otra (p. ej. la "v" de "vol").
+            const mv = etq.match(/\b(?:tomo|vol[úu]men|volume|vols?|tome|band|teil|parte?|[tv])\b\.?\s*([0-9]{1,3}|[ivxlcdm]{1,7})\b/i);
             if (mv) { rol = 'volumen'; numero = aArabigo(mv[1]); }
         }
         out.push({ isbn, rol, numero, etiqueta: etq });
