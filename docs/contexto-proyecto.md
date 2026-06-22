@@ -145,3 +145,80 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   reprocesar crea un registro NUEVO (otra clave) y deja el viejo → hay que borrar el viejo a mano.
 - **Secretos:** el `.env` es la única fuente; las env vars son visibles en el panel Docker de DSM
   (inherente a Docker) — la defensa es restringir acceso al NAS + usuario Atlas con IP allowlist.
+
+---
+
+## Plano del próximo ciclo — STREAMLINE de la discriminación (2026-06)
+
+> *Por qué:* el desarrollo caso-a-caso dejó la decisión "¿qué es esto?" desperdigada
+> (`detectarTipo` por extensión, `pareceRevista`, `esFechada`, rama de PDF escaneado, `parsearNombre`,
+> el enriquecedor). La mayor inversión es un **discriminador** limpio. El mismo rastro estructurado
+> que produce sirve de feedback en tiempo real para el futuro front-end → ordenar AHORA y construir
+> el front-end LUEGO son el mismo trabajo.
+
+### Fases explícitas (contrato entre etapas)
+```
+unidad (carpeta Inbox / subida API)
+  → NORMALIZE     quita ruido: desanida (A/A/x), separa carga útil / sidecars / portadas,
+                  IGNORA nombres-basura de carpeta (timestamps, hashes, "New folder", scanner)
+  → DISCRIMINATE  ¿qué TIPO es?  (libro / revista / colección / audiolibro / obra multivolumen)
+  → IDENTIFY      consigue el identificador (ISBN / ISSN / ISBN-de-obra)
+  → CLASSIFY      CDU (ya sólido)
+  → ENRICH+FILE   rellena huecos, persiste, copia al árbol
+```
+Cada fase emite una **ficha de identificación** estructurada (`{ tipo, confianza, señal_decisiva,
+identificador, fuente }`), que se PERSISTE en el documento (catálogo auto-documentado + permite que
+el Conformador revisite los de baja confianza) y se EMITE como evento (feed para el front-end).
+
+### Escalera de proveedores (más barato/fiable primero; parar al estar seguro)
+- **DISCRIMINATE:** estructural (audio→audiolibro; varios docs→colección; imágenes→escaneado;
+  2 ISBN + "Tomo N"→obra) → metadatos de fichero (OPF, info-dict, ffprobe) → señales de contenido
+  (ISSN/fecha→revista) → **agente IA que lee portada/créditos/índice/prefacio** (último recurso).
+- **IDENTIFY:** metadatos embebidos → **nombre de fichero** (convenciones: ePubLibre, LibGen
+  `Autor-Título-Editorial (Año)`, fecha, ISBN-suelto) → **BD local BNE/OL** (volcado en NAS;
+  rápida/offline) → APIs externas (OL/GB/BNE/DNB) → OCR (visión) → agente IA.
+La escalera debe ser una **lista ordenada de "proveedores"** (cada uno con coste/fiabilidad/
+aplicabilidad), no secuencias hardcodeadas. Añadir la BD local o reordenar = config, no cirugía.
+
+### Obra multivolumen (concepto NUEVO, distinto de colección)
+- **colección** = serie editorial de obras independientes (abierta, sin "ISBN de la serie",
+  la completitud no aplica). Ya existe (`colecciones` + `coleccion`/`coleccion_numero`).
+- **obra multivolumen** = UNA obra en N tomos, con **ISBN de obra** propio, extensión fija y
+  **completitud relevante**. NUEVA colección `obras { titulo, isbn_obra (único), editorial,
+  total_volumenes, coleccion? }`. Cada tomo es un doc `biblioteca` normal (`tipo_recurso:"libro"`)
+  con `obra` (ObjectId) + `volumen_numero` + `volumen_titulo` + `isbn_obra` denormalizado.
+- Composición: `coleccion ⊃ obra ⊃ volumen` (resuelve "una colección de enciclopedias").
+- Ejemplo real (Sartre, Aguilar, créditos): serie "biblioteca de autores modernos";
+  obra "Obras Completas" `ISBN 84-03-04989-7 (obra completa)`; tomo "I — Teatro"
+  `ISBN 84-03-04071-7 (tomo I)`. → hay que extraer DOS ISBN **con su rol**.
+- Extracción con rol: `ISBN … (obra completa|o.c.|complete|set)` → obra; `ISBN …
+  (tomo|vol|volumen|t.) <I/II/3…>` → tomo + número (romano→árabe). Multiidioma ES/EN/FR.
+- Almacenamiento: tratar la obra como una cabecera de revista →
+  `<cdu_obra>/obras/<isbn_obra|titulo>/<volumen-N>/` (los tomos juntos, bajo la CDU de la OBRA).
+- **Completitud:** huecos internos (presentes 1,2,4 → falta 3) detectables SIN saber el total;
+  "falta el final" necesita `total_volumenes` (de la BD/API por el ISBN de obra, o los créditos).
+  → informe `obras-incompletas` (misma forma que los huecos de números de revista).
+
+### Audiolibros (discriminar por CONTENIDO, no por la carpeta)
+Una carpeta cuyo contenido es AUDIO = un audiolibro (todas las pistas = capítulos de una obra),
+igual que imágenes-en-carpeta = un libro escaneado. Extensiones amplias
+(.m4b/.mp3/.m4a/.aac/.ogg/.opus/.flac/.wav/.aax/.wma…). Metadatos vía **ffprobe** (añadir ffmpeg
+al Dockerfile). Suele no tener ISBN (ASIN como mucho) → va por la vía sin-ISBN ya existente.
+Schema: añadir `audiolibro` al enum `tipo_recurso` y formatos de audio al enum `formatos` (estos
+DOS sí están constreñidos); nuevo segmento de árbol `audiolibros/`.
+
+### Secuencia recomendada
+1. **Refactor a fases + escalera de proveedores** del orquestador (núcleo: hacerlo con la batería
+   de 12 casos como red, añadiendo antes casos de "anidado-con-ruido" y "dos-ISBN").
+2. **BD local BNE/OL** como primer gran proveedor de IDENTIFY.
+3. **Obras multivolumen** y **audiolibros** como discriminadores/proveedores sobre la espina limpia.
+4. **Front-end** consumiendo la ficha/eventos que las fases ya emiten; la ingesta por API tiene
+   PRECEDENCIA → unificar Inbox + API en UNA cola priorizada (el Conformador ya cede al vigilante;
+   mismo patrón un nivel arriba).
+
+### Ruido en el Inbox (caso real)
+`_SIN CLASIFICAR/25012015-1743/25012015-1743/{cover.jpg, "Prabhakar Gondhalekar-The Grip of
+Gravity-Cambridge University Press (200…).pdf"}` → NORMALIZE desanida el `X/X`, ignora el nombre
+timestamp, separa `cover.jpg` (candidata a portada) del PDF (1 doc → libro suelto). El nombre del
+PDF es convención **LibGen** (`Autor-Título-Editorial (Año)`) → identifica casi solo (título+autor
+→ ISBN por BD local/API). Parser de nombre multi-convención = de los wins más baratos.
