@@ -41,7 +41,10 @@ export function parsearVolumen(nombre) {
     const numero = aArabigo(m[1]);
     if (!numero) return null;
     const resto = base.slice(m.index + m[0].length).replace(/^[\s\-–—:._·]+/, '').trim();
-    return { numero, titulo: resto || null, etiqueta: m[0].trim() };
+    // 'prefijo' = título de la OBRA (lo que va ANTES de "Vol. N"), útil cuando un tomo se cataloga
+    // suelto (sin contexto de carpeta): da nombre a la obra sin el sufijo del tomo.
+    const prefijo = base.slice(0, m.index).replace(/[\s\-–—:._·,]+$/, '').trim();
+    return { numero, titulo: resto || null, etiqueta: m[0].trim(), prefijo: prefijo || null };
 }
 
 // ISBN seguido (misma línea) de un rol entre paréntesis: "ISBN 84-03-04989-7 (obra completa)".

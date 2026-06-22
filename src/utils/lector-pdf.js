@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import path from 'path';
 import { extraerISSN, validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre, esTituloArtefacto, esAutorArtefacto } from './parsear-nombre.js';
-import { extraerISBNsConRol } from './multivolumen.js';
+import { extraerISBNsConRol, parsearVolumen } from './multivolumen.js';
 import { parsearBloqueCatalogacion } from './cip.js';
 
 const execFileP = promisify(execFile);
@@ -173,6 +173,17 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // fiables, todo leído del propio fichero (fuente de archivo, máxima confianza).
         const cip = parsearBloqueCatalogacion(texto);
         if (cip) datos.cip = cip;
+
+        // Número de tomo desde el NOMBRE DE ARCHIVO ("… Vol. 4 - S-Z"): fuente fiable y propia de
+        // ESTE fichero. Imprescindible cuando un tomo se cataloga SUELTO (llegó/estabilizó antes que
+        // los demás y la discriminación por carpeta no lo agrupa): así no se le asigna un número
+        // ajeno. El prefijo da nombre a la obra sin el sufijo del tomo.
+        const vol = parsearVolumen(nombre);
+        if (vol) {
+            datos.volumen_numero = vol.numero;
+            if (vol.titulo)  datos.volumen_titulo = vol.titulo;
+            if (vol.prefijo) datos.obra_titulo = vol.prefijo;
+        }
 
         // ISBN: candidatos del texto + del nombre de archivo, ampliados a sus formas 10/13.
         const candidatos = new Set();

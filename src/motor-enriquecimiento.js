@@ -66,8 +66,10 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     if (contexto.obra || isbnObraRol) {
         documento.obra_titulo = contexto.obra?.titulo || documento.obra_titulo || documento.titulo;
         if (contexto.obra?.total) documento.obra_total = contexto.obra.total; // nº de tomos declarado
-        // Número del tomo: del drop de carpeta o del documento; si no, el primer rol-volumen.
-        const numVol = contexto.obra?.numero ?? documento.volumen_numero ?? rolVol[0]?.numero ?? null;
+        // Número del tomo: del drop de carpeta (contexto) o del propio fichero (nombre de archivo).
+        // NUNCA del "primer rol-volumen" de los créditos: ese número es del tomo 1, no de ESTE tomo
+        // → un tomo suelto (sin contexto de carpeta) se catalogaba como Vol. 1 (caso real Vol 4→1).
+        const numVol = contexto.obra?.numero ?? documento.volumen_numero ?? null;
         if (numVol != null) documento.volumen_numero = numVol;
         if (contexto.obra?.titulo_volumen) documento.volumen_titulo = contexto.obra.titulo_volumen;
         if (isbnObraRol) documento.isbn_obra = isbnObraRol.isbn;
