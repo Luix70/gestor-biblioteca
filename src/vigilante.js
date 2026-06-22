@@ -11,7 +11,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js';
-import { discriminarMultivolumen } from './utils/multivolumen.js';
+import { discriminarMultivolumenes } from './utils/multivolumen.js';
+import { reciclar } from './utils/papelera.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 
@@ -52,6 +53,10 @@ let procesando = false;              // lock compartido: ingesta Y mantenimiento
 const huerfanosVistos = new Map();
 let ultimaActividad = Date.now();    // último momento con actividad de ingesta
 let ultimaRevisionMant = 0;          // última pasada de mantenimiento
+// Carpetas-buzón de primer nivel que contienen obra(s) multivolumen: a diferencia de una colección
+// (buzón persistente al que se añaden números), una obra es finita → su carpeta se ELIMINA cuando
+// se vacía (último tomo catalogado y movido a su destino).
+const dropsMultiparte = new Set();
 
 // --- Estado del Conformador ---
 let modoConformador = (process.env.MANTENIMIENTO_ACTIVO !== '0') ? 'diferido' : 'apagado';
@@ -107,13 +112,18 @@ async function buscarPortadaPreextraida(carpetaTop, ficheroRuta) {
     return null;
 }
 
-/** Borra TODAS las portadas candidatas de un documento (se haya usado o no), tras catalogarlo. */
-async function eliminarPortadasCandidatas(carpetaTop, ficheroRuta) {
-    if (!carpetaTop) return;
+/** Rutas de TODAS las portadas candidatas EXISTENTES de un documento (para reciclarlas tras catalogarlo). */
+async function rutasPortadasCandidatas(carpetaTop, ficheroRuta) {
+    if (!carpetaTop) return [];
+    const out = [];
     const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
     for (const dir of await dirsCandidatosPortada(carpetaTop, ficheroRuta)) {
-        for (const ext of EXT_PORTADA) await fs.rm(path.join(dir, base + ext), { force: true }).catch(() => {});
+        for (const ext of EXT_PORTADA) {
+            const p = path.join(dir, base + ext);
+            if (await fs.access(p).then(() => true).catch(() => false)) out.push(p);
+        }
     }
+    return out;
 }
 
 /** Poda (bottom-up) las SUBcarpetas de 'top' que quedaron vacías o solo con metadatos Synology.
@@ -136,6 +146,25 @@ async function podarVaciosInbox() {
     try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
     for (const e of entradas) {
         if (e.isDirectory() && !ignorarEntrada(e.name)) await podarSubcarpetasVacias(path.join(INBOX, e.name));
+    }
+}
+
+/**
+ * Elimina las carpetas-buzón de primer nivel que contenían obra(s) multivolumen y ya están vacías
+ * (todos los tomos catalogados y movidos a su destino). A diferencia de una colección —buzón que
+ * persiste para añadir números—, una obra es finita: su carpeta se retira al completarse. Solo se
+ * borra si no queda ningún documento (solo metadatos de Synology @eaDir, etc.).
+ */
+async function eliminarDropsMultiparteVacios() {
+    for (const carpeta of [...dropsMultiparte]) {
+        let restantes;
+        try { restantes = await fs.readdir(carpeta); }
+        catch { dropsMultiparte.delete(carpeta); continue; } // ya no existe
+        if (restantes.every(soloMetadatos)) {
+            await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
+            dropsMultiparte.delete(carpeta);
+            console.log(`  🗑️  Obra multivolumen completa: retirada la carpeta «${path.basename(carpeta)}» del Inbox.`);
+        }
     }
 }
 
@@ -230,17 +259,21 @@ async function listarUnidades() {
             // 2+ docs = colección; 1 solo doc NO es colección (la carpeta se descarta).
             const documentos = filtrarDuplicadosNombre(await recopilarDocumentos(ruta));
             if (documentos.length > 0) {
-                const multi = discriminarMultivolumen(documentos);
-                if (multi) {
-                    // OBRA MULTIVOLUMEN: los ficheros "Vol. N" son tomos de UNA obra (no una colección
-                    // de libros sueltos). Cada tomo se cataloga ligado a la obra (nombre de la carpeta).
-                    for (const v of multi.volumenes) unidades.push({
-                        rutas: [v.ruta], esImagenes: false, carpeta: ruta, conservarCarpeta: false,
-                        obra: { titulo: multi.titulo_obra, numero: v.numero, titulo_volumen: v.titulo },
+                // OBRAS MULTIVOLUMEN: cada subcarpeta con tomos "Vol. N" es UNA obra independiente
+                // (no se funden las distintas obras de un mismo drop). Sus ficheros son tomos ligados
+                // a la obra (nombre de la carpeta), no una colección de libros sueltos.
+                const { obras, resto } = discriminarMultivolumenes(documentos);
+                for (const obra of obras) {
+                    dropsMultiparte.add(ruta); // drop de obra(s): la carpeta-buzón se elimina al vaciarse
+                    for (const v of obra.volumenes) unidades.push({
+                        rutas: [v.ruta], esImagenes: false, carpeta: ruta, conservarCarpeta: false, esObra: true,
+                        obra: { titulo: obra.titulo_obra, numero: v.numero, titulo_volumen: v.titulo, total: obra.total },
                     });
-                } else {
-                    const esColeccion = documentos.length >= 2;
-                    for (const d of documentos) unidades.push({
+                }
+                // Resto (no son tomos): 2+ docs = colección; 1 solo = documento suelto.
+                if (resto.length > 0) {
+                    const esColeccion = resto.length >= 2;
+                    for (const d of resto) unidades.push({
                         rutas: [d], esImagenes: false, carpeta: ruta,
                         conservarCarpeta: esColeccion,
                         coleccion: esColeccion ? e.name : undefined,
@@ -273,33 +306,35 @@ async function moverAErRoom(rutas) {
             const base = path.basename(nombre, ext);
             destino = path.join(ER_ROOM, `${base}.${Date.now()}${ext}`);
         }
-        await fs.rename(ruta, destino).catch(() => fs.rm(ruta, { force: true }));
+        // _ER Room es un bind mount DISTINTO del Inbox → fs.rename siempre da EXDEV y caía en el
+        // borrado del original (el fantasma se perdía en vez de moverse). Copiar y borrar origen.
+        try { await fs.rename(ruta, destino); }
+        catch { try { await fs.copyFile(ruta, destino); await fs.rm(ruta, { force: true }).catch(() => {}); } catch { /* best-effort */ } }
     }
 }
 
 export async function limpiarInbox(unidad) {
-    // Se borran los documentos procesados y SU portada candidata (usada o no), esté junto al doc
-    // o en una subcarpeta Covers/. La CARPETA (siempre un buzón de primer nivel del Inbox) NUNCA
-    // se borra: las subcarpetas que queden vacías las poda podarVaciosInbox tras la pasada.
-    for (const r of unidad.rutas) {
-        await fs.chmod(r, 0o666).catch(() => {});
-        await fs.rm(r, { force: true }).catch(() => {});
-        if (unidad.carpeta) await eliminarPortadasCandidatas(unidad.carpeta, r);
-    }
-    // Drop puntual (no colección): se descartan los sidecars sueltos (.txt/.url…) que hayan
-    // quedado en la raíz de la carpeta. La carpeta vacía permanece (buzón).
-    // CRÍTICO: NUNCA borrar un documento bibliográfico válido (.pdf/.epub/imagen). Una obra
-    // multivolumen reparte N tomos VÁLIDOS en la MISMA carpeta y se catalogan en unidades
-    // distintas: barrer "todo lo que no sea metadato" borraba los tomos 2..N aún sin procesar
-    // al limpiar el tomo 1 (pérdida de datos). Solo se barren extensiones NO bibliográficas.
-    if (unidad.carpeta && !unidad.conservarCarpeta) {
-        let entradas; try { entradas = await fs.readdir(unidad.carpeta, { withFileTypes: true }); } catch { return; }
-        for (const e of entradas) {
-            if (e.isFile() && !soloMetadatos(e.name) && !esValida(e.name)) {
-                await fs.rm(path.join(unidad.carpeta, e.name), { force: true }).catch(() => {});
+    // Política "nunca borrar": en vez de eliminar, se MUEVE todo a la Papelera (Recycling) en una
+    // subcarpeta serializada. Se recicla el/los documento(s) ya catalogados, SUS portadas candidatas
+    // (usadas o no, junto al doc o en covers/) y los sidecars NO bibliográficos sueltos de la carpeta.
+    // La CARPETA (buzón de primer nivel del Inbox) NUNCA se toca; las subcarpetas vacías las poda
+    // podarVaciosInbox tras la pasada.
+    const aReciclar = [...unidad.rutas];
+    if (unidad.carpeta) {
+        for (const r of unidad.rutas) aReciclar.push(...await rutasPortadasCandidatas(unidad.carpeta, r));
+        // Drop puntual (no colección): sidecars sueltos (.txt/.url…) de la raíz de la carpeta.
+        // CRÍTICO: NUNCA reciclar un documento bibliográfico válido (.pdf/.epub/imagen). Una obra
+        // multivolumen reparte N tomos VÁLIDOS en la MISMA carpeta y se catalogan en unidades
+        // distintas: retirar "todo lo que no sea metadato" se llevaba los tomos 2..N aún sin
+        // procesar al limpiar el tomo 1 (pérdida de datos). Solo extensiones NO bibliográficas.
+        if (!unidad.conservarCarpeta) {
+            let entradas; try { entradas = await fs.readdir(unidad.carpeta, { withFileTypes: true }); } catch { entradas = []; }
+            for (const e of entradas) {
+                if (e.isFile() && !soloMetadatos(e.name) && !esValida(e.name)) aReciclar.push(path.join(unidad.carpeta, e.name));
             }
         }
     }
+    await reciclar(aReciclar, path.basename(unidad.rutas[0]));
 }
 
 async function procesarUnidad(unidad) {
@@ -377,8 +412,12 @@ async function procesarCola() {
             unidades = await listarUnidades(); // recoger lo que llegó mientras procesábamos
         }
         // Tras procesar: poda subcarpetas vacías (docs ya catalogados, covers/ ya consumidas)
-        // dentro de las carpetas-colección persistentes; los buzones (carpeta raíz) se conservan.
-        if (totalProcesadas > 0) await podarVaciosInbox().catch(() => {});
+        // dentro de las carpetas-colección persistentes; los buzones (carpeta raíz) se conservan,
+        // SALVO los de obras multivolumen ya completas, que sí se retiran.
+        if (totalProcesadas > 0) {
+            await podarVaciosInbox().catch(() => {});
+            await eliminarDropsMultiparteVacios().catch(() => {});
+        }
         // Anuncio de reposo: solo en la TRANSICIÓN (tras procesar algo y quedar el Inbox vacío),
         // no en cada escaneo en vacío (evita spam cada VIGILANTE_ESCANEO_MS).
         if (totalProcesadas > 0 && !(await inboxTieneArchivos())) {

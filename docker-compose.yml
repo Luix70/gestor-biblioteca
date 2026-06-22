@@ -11,6 +11,7 @@ services:
       - "/volume3/BIBLIOTECA DIGITAL/Cuarentena:/app/Cuarentena"
       - "/volume3/BIBLIOTECA DIGITAL/Reintentos:/app/Reintentos"
       - "/volume3/BIBLIOTECA DIGITAL/_ER Room:/app/_ER Room"
+      - "/volume3/BIBLIOTECA DIGITAL/Recycling:/app/Recycling"
     ports:
       - "3000:3000"
     environment:
@@ -23,6 +24,7 @@ services:
       - PATH_CUARENTENA=/app/Cuarentena
       - PATH_REINTENTOS=/app/Reintentos
       - PATH_ER_ROOM=/app/_ER Room
+      - PATH_RECICLAJE=/app/Recycling
       - TZ=${TZ:-Europe/Madrid}
       - NODE_OPTIONS=--max-old-space-size=512 --no-warnings
 

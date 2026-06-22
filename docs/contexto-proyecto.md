@@ -91,10 +91,16 @@ Host de despliegue: Synology **DS1511+**, CPU Intel **Atom D525**, DSM/kernel an
 que persiste entre rebuilds. Tras cambiar dependencias hay que **`docker-compose down -v`** antes de
 `up -d --build`, o el volumen viejo ensombrece los módulos nuevos.
 
+**Nuevo mount `Recycling` (papelera):** `docker-compose.yml` monta
+`/volume3/BIBLIOTECA DIGITAL/Recycling:/app/Recycling` (+ `PATH_RECICLAJE=/app/Recycling`). Hay que
+**crear la carpeta en el host** y **recrear el contenedor** (`down -v` + `up -d --build`) para que el
+nuevo bind mount tome efecto; si no existe, la papelera no podrá mover y **conservará los originales**
+en su sitio (nunca se pierde nada, pero el Inbox no se limpiará).
+
 **Despliegue:** script `actualizar-GestorBiblioteca.sh` (en `/volume1/docker/`, ejecutar con **sudo**):
 pull del tarball de `main` → `down -v` → `rsync -a --delete` con exclusiones ancladas (`.env`,
 `node_modules`, dirs de datos) → `up -d --build` → `logs -f`. Datos en
-`/volume3/BIBLIOTECA DIGITAL/{Inbox,CDU,Cuarentena,Reintentos}`. `.env` (MONGO_URI, MONGO_DB_NAME,
+`/volume3/BIBLIOTECA DIGITAL/{Inbox,CDU,Cuarentena,Reintentos,Recycling}`. `.env` (MONGO_URI, MONGO_DB_NAME,
 GEMINI_API_KEY, GOOGLE_BOOKS_API_KEY) junto al `docker-compose.yml`, `chmod 600`, nunca en git/imagen.
 **Rollback:** la etiqueta git **`nas-estable`** marca el último commit bueno desplegado;
 revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
@@ -132,12 +138,27 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   duplicados, colecciones, completar datos.
 - **Obras multivolumen** (`utils/multivolumen.js`, `utils/obras.js`): UNA obra en N tomos con
   **ISBN de obra** propio además del de cada tomo (distinta de una colección/serie). El vigilante
-  discrimina por drop de carpeta de tomos (`discriminarMultivolumen`: ≥2 ficheros "Vol. N" que
-  dominan y comparten carpeta) y/o por ISBN-con-rol en los créditos (`extraerISBNsConRol`:
-  "(obra completa)" vs "(tomo I)"). Colección `obras { titulo, isbn_obra (único sparse), editorial,
-  coleccion, cdu }`; los tomos llevan `obra`(ObjectId)/`volumen_numero`/`volumen_titulo`/`isbn_obra`
-  y **comparten la CDU de la obra** (un classmark → se archivan juntos en `<cdu>/obras/<obra>/vol-N/`).
-  Dedup de tomo por `(obra, volumen_numero)`. Probado con Worldmark Encyclopedia (6 tomos).
+  discrimina **agrupando por subcarpeta** (`discriminarMultivolumenes`: cada carpeta con ≥2 ficheros
+  "Vol. N" de números distintos que la dominan es UNA obra) y/o por ISBN-con-rol en los créditos
+  (`extraerISBNsConRol`: "(obra completa)" vs "(tomo I)"). **Por qué agrupar por carpeta:** dos obras
+  soltadas en subcarpetas de un mismo drop se fundían en una sola con números duplicados
+  (`1,1,2,2,3,3,4`) → el dedup `(obra, volumen_numero)` colapsaba los tomos homónimos y se perdían
+  ficheros. Colección `obras { titulo, isbn_obra (único sparse), editorial, coleccion, cdu,
+  total_volumenes, volumenes_presentes, completa, volumenes:[{numero,_id|null}] }`: **inventario
+  1..total** que muestra qué tomos hay y cuáles faltan (`registrarVolumenEnObra` lo refresca al
+  catalogar cada tomo; `total` se declara del nombre "Vol 1-3" o del máximo visto). Los tomos llevan
+  `obra`(ObjectId)/`volumen_numero`/`volumen_titulo`/`isbn_obra` y **comparten la CDU de la obra**
+  (un classmark → juntos en `<cdu>/obras/<obra>/vol-N/`). Dedup de tomo por `(obra, volumen_numero)`.
+  A diferencia de una colección (buzón persistente), la **carpeta-drop de una obra se ELIMINA del
+  Inbox al completarse** (último tomo movido a su destino). Probado: Worldmark (6 tomos) y dos obras
+  Gale en un mismo drop.
+- **Papelera de reciclaje** (`utils/papelera.js` · `reciclar`): política **"nunca borrar"**. Toda
+  retirada de un fichero de datos (limpieza del Inbox tras catalogar, portadas candidatas, sidecars,
+  temporales de subida API, fantasmas a `_ER Room`) **mueve** a `Recycling/<serial>_<fecha>[_etq]/`
+  en vez de `fs.rm`. Mueve con **copia+verificación+borrado** (los destinos son bind mounts distintos
+  del Inbox → `fs.rename` daría EXDEV) y **nunca borra el origen si la copia no quedó íntegra** → es
+  imposible perder datos. El usuario vacía `Recycling/` a mano. Motivado por el incidente multivolumen
+  (el barrido de sidecars se llevó tomos válidos sin procesar).
 - **Bloque CIP** (`utils/cip.js` · `parsearBloqueCatalogacion`): el registro casi-MARC que muchos
   libros imprimen en créditos (Library of Congress / British Library CIP). Leído del texto del PDF
   (`lector-pdf` → `datos.cip`), es **fuente de archivo** (máxima confianza): rellena huecos de

@@ -1,7 +1,7 @@
 import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
 import { resolverColeccion } from './utils/colecciones.js';
-import { resolverObra } from './utils/obras.js';
+import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -120,12 +120,19 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             const colId = (docFinal.coleccion && typeof docFinal.coleccion !== 'string') ? docFinal.coleccion : null;
             const { _id, cdu: cduObra, creada } = await resolverObra(db, {
                 titulo: docFinal.obra_titulo, isbn_obra: docFinal.isbn_obra,
-                editorialId: edId, coleccionId: colId, cdu: docFinal.cdu,
+                editorialId: edId, coleccionId: colId, cdu: docFinal.cdu, total: docFinal.obra_total,
             });
             if (creada) docFinal.alertas_agente.push(`Nueva obra multivolumen registrada: ${docFinal.obra_titulo}`);
             if (_id) docFinal.obra = _id;
             if (cduObra) docFinal.cdu = cduObra; // todos los tomos comparten la CDU de la obra
         }
+
+        // Tras fijar el _id final del tomo, registrarlo en el inventario de la obra (qué tomos hay
+        // y cuáles faltan). Se aplica en TODA salida (inserción/actualización/fusión).
+        const registrarTomo = async (idFinal) => {
+            if (docFinal.obra && docFinal.volumen_numero != null && idFinal)
+                await registrarVolumenEnObra(db, docFinal.obra, docFinal.volumen_numero, idFinal, docFinal.obra_total);
+        };
 
         // 3. Deduplicación en tres niveles:
         //
@@ -148,6 +155,7 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                     const cambios = calcularActualizacion(hashDoc, docFinal);
                     await coleccionBiblioteca.updateOne({ _id: hashDoc._id }, { $set: cambios });
                     const actualizado = await coleccionBiblioteca.findOne({ _id: hashDoc._id });
+                    await registrarTomo(hashDoc._id);
                     return { ...actualizado, operacion: 'actualizacion' };
                 }
                 // Mismo contenido, nombre distinto → el llamante envía a Cuarentena
@@ -190,11 +198,13 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             const cambios = calcularActualizacion(existente, docFinal);
             await coleccionBiblioteca.updateOne({ _id: existente._id }, { $set: cambios });
             const actualizado = await coleccionBiblioteca.findOne({ _id: existente._id });
+            await registrarTomo(existente._id);
             return { ...actualizado, operacion: 'actualizacion' };
         }
 
         docFinal.fecha_ingreso = new Date();
         const resultado = await coleccionBiblioteca.insertOne(docFinal);
+        await registrarTomo(resultado.insertedId);
         return { ...docFinal, _id: resultado.insertedId, operacion: 'insercion' };
 
     } catch (error) {
@@ -215,6 +225,7 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 const cambios = calcularActualizacion(existente, docFinal);
                 await coleccionBiblioteca.updateOne({ _id: existente._id }, { $set: cambios });
                 const actualizado = await coleccionBiblioteca.findOne({ _id: existente._id });
+                await registrarTomo(existente._id);
                 console.warn(`   ↔ ISBN/ISSN ya catalogado (${JSON.stringify(clave)}): fusionado con ${existente._id}.`);
                 return { ...actualizado, operacion: 'actualizacion' };
             }

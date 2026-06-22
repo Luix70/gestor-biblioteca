@@ -43,8 +43,20 @@ const VALIDADOR_OBRAS = {
             isbn_obra:       { bsonType: ['string', 'null'], description: 'ISBN de la obra completa.' },
             editorial:       { bsonType: ['objectId', 'null'] },
             coleccion:       { bsonType: ['objectId', 'null'], description: 'Serie a la que pertenece la obra (opcional).' },
+            cdu:             { bsonType: ['string', 'null'], description: 'CDU común a todos los tomos.' },
             total_volumenes: { bsonType: ['int', 'null'], description: 'Nº total de tomos, si se conoce.' },
-            fecha_creacion:  { bsonType: 'date' },
+            volumenes_presentes: { bsonType: ['int', 'null'], description: 'Nº de tomos ya catalogados.' },
+            completa:        { bsonType: ['bool', 'null'], description: 'true si están todos los tomos.' },
+            // Inventario 1..total: el _id del tomo presente o null si falta.
+            volumenes: {
+                bsonType: ['array', 'null'],
+                items: {
+                    bsonType: 'object',
+                    properties: { numero: { bsonType: 'int' }, _id: { bsonType: ['objectId', 'null'] } },
+                },
+            },
+            fecha_creacion:     { bsonType: 'date' },
+            fecha_actualizacion:{ bsonType: ['date', 'null'] },
         },
     },
 };

@@ -15,6 +15,7 @@ import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
+import { reciclar } from './utils/papelera.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
 import { obtenerEstadisticas } from './estadisticas.js';
 
@@ -87,8 +88,9 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
         }
     }
 
-    // Limpieza de los temporales de subida (el servicio ya copió lo necesario al catálogo).
-    for (const f of archivos) await fs.rm(f, { force: true }).catch(() => {});
+    // Política "nunca borrar": los temporales de subida (ya copiados al catálogo) se MUEVEN a la
+    // Papelera de Reciclaje en vez de eliminarse, por si hiciera falta recuperarlos.
+    await reciclar(archivos, 'subida-api');
 
     const huboError = resultados.some(r => !r.ok);
     res.status(huboError ? 207 : 200).json({ status: huboError ? 'partial' : 'success', resultados });
