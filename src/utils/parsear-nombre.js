@@ -5,6 +5,40 @@
 
 import { validarISBN } from './identificadores.js';
 
+// Extensiones de ficheros de maquetación/composición/fuente que delatan un título-artefacto: el
+// productor del PDF grabó como "Title" el nombre del fichero fuente (TeX/DVI, InDesign, Quark,
+// Word…) en vez del título real. Caso real: "C:\TARANTOLABOOK.DVI" (Creator: DVIPSONE).
+const EXT_ARTEFACTO = /\.(dvi|tex|aux|log|toc|idx|indd|idml|qx[dpb]|pmd|fm|cdr|ai|psd|docx?|rtf|odt|sxw|wpd|pages|pub|p65|ppt x?|key|sla)$/i;
+
+/**
+ * ¿El "título" es en realidad un ARTEFACTO del productor (ruta/nombre de fichero fuente, "Microsoft
+ * Word - …", "untitled"…) y NO un título real? Conservador: solo señales inequívocas, para no
+ * descartar títulos legítimos. Quien lo detecta debe caer al nombre de archivo o a la autoridad.
+ */
+export function esTituloArtefacto(s) {
+    const t = String(s || '').trim();
+    if (!t) return false;
+    if (EXT_ARTEFACTO.test(t)) return true;                         // termina en extensión de fichero fuente
+    if (/[\\]/.test(t)) return true;                                // contiene barra invertida → es una ruta
+    if (/^[a-z]:[\\/]?/i.test(t) && /\.[a-z0-9]{2,4}$/i.test(t)) return true; // "C:…algo.ext" (ruta Windows)
+    if (/^microsoft\s+(word|powerpoint|excel|publisher)\b/i.test(t)) return true; // "Microsoft Word - documento1"
+    if (/^(untitled|sin\s*t[íi]tulo|documento?\s*\d*|document\s*\d+|presentaci[óo]n\s*\d*)$/i.test(t)) return true;
+    return false;
+}
+
+/**
+ * ¿El campo "autor" del info-dict del PDF es en realidad un metadato de PRODUCCIÓN (crédito de
+ * composición tipográfica con fecha/hora, nombre de herramienta) y NO un autor real? Caso real:
+ * "Pat Hufnagle (Sherman Typography) 893 1998 May 29 10:37:50". Conservador: solo señales claras.
+ */
+export function esAutorArtefacto(s) {
+    const t = String(s || '').trim();
+    if (!t) return false;
+    if (/\d{1,2}:\d{2}/.test(t)) return true; // lleva una hora (HH:MM[:SS]) → sello de build
+    if (/\b(typesett|typograph|composici[óo]n|compositor|dvips|distiller|quark|indesign|pdftex|latex|acrobat|ghostscript|framemaker)\b/i.test(t)) return true;
+    return false;
+}
+
 const MESES = {
     fr: ['janvier', 'février', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'aout', 'septembre', 'octobre', 'novembre', 'décembre', 'decembre', 'janv', 'févr', 'fevr', 'avr', 'juil', 'sept', 'oct', 'nov', 'déc'],
     es: ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre', 'ene', 'feb', 'abr', 'ago', 'dic'],

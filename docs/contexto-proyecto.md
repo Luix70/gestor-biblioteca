@@ -159,6 +159,17 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   del Inbox → `fs.rename` daría EXDEV) y **nunca borra el origen si la copia no quedó íntegra** → es
   imposible perder datos. El usuario vacía `Recycling/` a mano. Motivado por el incidente multivolumen
   (el barrido de sidecars se llevó tomos válidos sin procesar).
+- **Títulos-artefacto del productor** (`utils/parsear-nombre.js` · `esTituloArtefacto`/`esAutorArtefacto`):
+  muchos PDF traen en el info-dict, como "Title", el nombre del fichero FUENTE en vez del título real
+  (caso real: `C:\TARANTOLABOOK.DVI`, `Creator: DVIPSONE`; o `…​.indd`, `Microsoft Word - …`, `Untitled`),
+  y como "Author" un crédito de composición con fecha/hora. Antes pasaban el filtro y, con las APIs
+  caídas (sin poder corregir por ISBN), se persistía el artefacto como título. Ahora los lectores
+  (PDF/EPUB) los **descartan y caen al título del NOMBRE DE ARCHIVO**; el enriquecedor los trata como
+  "no fiables" (la autoridad por ISBN prevalece). Para lo ya catalogado, el Conformador los corrige:
+  `re-enriquecer-degradados` (v2, con `tituloNoFiable` ampliado + fallback al nombre de archivo) para
+  los que tienen ISBN, y la tarea `corregir-titulo-artefacto` (del nombre de archivo, o recupera el
+  ISBN si el nombre lo es) para los que no — antes de `re-clasificar-cdu`, que re-deriva la CDU con el
+  título ya bueno. Detectados 58 casos en el catálogo (≈1,2%), sin falsos positivos.
 - **Bloque CIP** (`utils/cip.js` · `parsearBloqueCatalogacion`): el registro casi-MARC que muchos
   libros imprimen en créditos (Library of Congress / British Library CIP). Leído del texto del PDF
   (`lector-pdf` → `datos.cip`), es **fuente de archivo** (máxima confianza): rellena huecos de

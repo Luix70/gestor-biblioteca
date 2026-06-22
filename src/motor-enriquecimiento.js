@@ -1,5 +1,6 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
+import { esTituloArtefacto } from './utils/parsear-nombre.js';
 
 // "Editoriales" que en realidad son grupos de difusión/maquetación, no casas editoriales.
 // Si el archivo trae una de estas, NO es autoritativa: una editorial real de las APIs prevalece.
@@ -133,11 +134,13 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Título y autores: el archivo manda, SALVO que su "título" no sea fiable, es decir,
     // que falte o sea en realidad un identificador (p. ej. un PDF llamado "0071769234.pdf",
     // cuyo nombre-ISBN se guardó como título). En ese caso la autoridad lo sustituye.
-    const tituloEsIdentificador = !!(validarISBN(documento.titulo) || validarISSN(documento.titulo));
-    if (!primerValido(documento.titulo) || tituloEsIdentificador) {
+    // Título NO fiable = falta, es un identificador (ISBN/ISSN) o un artefacto del productor
+    // ("C:\X.DVI", "…​.indd", "Microsoft Word - …"). En esos casos la autoridad lo sustituye.
+    const tituloNoFiable = !!(validarISBN(documento.titulo) || validarISSN(documento.titulo) || esTituloArtefacto(documento.titulo));
+    if (!primerValido(documento.titulo) || tituloNoFiable) {
         if (datosExtra.titulo) {
-            if (tituloEsIdentificador) {
-                documento.alertas_agente.push(`Título "${documento.titulo}" era un identificador; sustituido por el de la autoridad: "${datosExtra.titulo}".`);
+            if (tituloNoFiable) {
+                documento.alertas_agente.push(`Título "${documento.titulo}" no fiable (identificador/artefacto); sustituido por el de la autoridad: "${datosExtra.titulo}".`);
             }
             documento.titulo = datosExtra.titulo;
         }

@@ -10,7 +10,7 @@ import { buscarEnBNE } from '../utils/buscador-bne.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { calcularHashArchivo } from '../utils/hash-archivo.js';
-import { parsearNombre } from '../utils/parsear-nombre.js';
+import { parsearNombre, esTituloArtefacto } from '../utils/parsear-nombre.js';
 import { resolverColeccion } from '../utils/colecciones.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
 import { validarISBN, validarISSN, variantesISBN } from '../utils/identificadores.js';
@@ -32,11 +32,12 @@ const urlPortadaOpenLibrary = (isbn) =>
 // ── Detección de documentos "degradados" (ingestados con APIs caídas) ──────────────────────
 const normTit = (s) => String(s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '');
 
-/** ¿El título es en realidad basura (nombre de archivo, identificador o un código)? */
+/** ¿El título es en realidad basura (nombre de archivo, identificador, artefacto o un código)? */
 function tituloNoFiable(doc) {
     const t = doc.titulo || '';
     if (!t.trim()) return true;
     if (validarISBN(t) || validarISSN(t)) return true;
+    if (esTituloArtefacto(t)) return true; // "C:\X.DVI", "…​.indd", "Microsoft Word - …", "Untitled"
     if (doc.nombre_archivo && normTit(t) === normTit(doc.nombre_archivo)) return true;
     if (!/\s/.test(t) && /\d/.test(t) && /[_\-.]/.test(t) && t.length > 8) return true; // "code-like"
     return false;
@@ -99,9 +100,27 @@ export const TAREAS = [
     },
 
     {
-        id: 're-enriquecer-degradados',
+        id: 'corregir-titulo-artefacto',
         version: 1,
-        descripcion: 'Documentos con ISBN pero metadata pobre (lote con APIs caídas): re-busca por ISBN y sobrescribe título/autores/editorial basura; rellena huecos.',
+        descripcion: 'Título-artefacto (C:\\…\\x.dvi, "…​.indd", "Microsoft Word - …", "Untitled") SIN ISBN: lo sustituye por el del nombre de archivo; si el nombre ES un ISBN, lo fija para que re-enriquecer-degradados (que corre después) busque el título real por autoridad en la MISMA pasada.',
+        // Solo sin ISBN: los que SÍ tienen ISBN los arregla re-enriquecer-degradados (autoridad).
+        aplica: (doc) => esTituloArtefacto(doc.titulo || '') && !doc.isbn && !!doc.nombre_archivo,
+        async ejecutar(doc) {
+            const p = parsearNombre(doc.nombre_archivo);
+            const set = {};
+            if (p.isbn) set.isbn = p.isbn;                                   // nombre que ES un ISBN
+            else if (p.titulo && !esTituloArtefacto(p.titulo)) set.titulo = p.titulo;
+            if (!set.titulo && !set.isbn) return null;
+            return { set, alertas: [set.titulo
+                ? `Título-artefacto "${doc.titulo}" corregido desde el nombre de archivo: "${set.titulo}".`
+                : `ISBN ${set.isbn} recuperado del nombre de archivo (título "${doc.titulo}" pendiente de re-enriquecer).`] };
+        },
+    },
+
+    {
+        id: 're-enriquecer-degradados',
+        version: 2,
+        descripcion: 'Documentos con ISBN pero metadata pobre (lote con APIs caídas) o título-artefacto: re-busca por ISBN y sobrescribe título/autores/editorial basura; cae al nombre de archivo si la autoridad no responde; rellena huecos.',
         aplica: (doc) => esDegradado(doc),
         async ejecutar(doc, { db }) {
             const isbnVar = variantesISBN(doc.isbn);
@@ -113,12 +132,17 @@ export const TAREAS = [
                 datos = await buscarMetadatosExternos(doc.titulo || '', '', null, {
                     incluirSinopsis: true, incluirCdu: false, isbnsArchivo: isbnVar, idioma: doc.idioma || null,
                 });
-            } catch { return null; }
+            } catch { datos = {}; }
 
             const garbage = tituloNoFiable(doc);
             const set = {};
-            // Sobrescribe SOLO si el título actual es basura (sabemos que el registro es degradado).
+            // Sobrescribe SOLO si el título actual es basura (sabemos que el registro es degradado):
+            // autoridad (mejor) y, si no respondió, el título del NOMBRE DE ARCHIVO (siempre disponible).
             if (garbage && datos.titulo)        set.titulo    = datos.titulo;
+            else if (garbage && doc.nombre_archivo) {
+                const p = parsearNombre(doc.nombre_archivo);
+                if (p.titulo && !esTituloArtefacto(p.titulo)) set.titulo = p.titulo;
+            }
             if (garbage && datos.editorial)     set.editorial = await resolverEditorialRef(db, datos.editorial);
             if (garbage && datos.autores?.length) set.autores  = await resolverAutoresRef(db, datos.autores);
             // Huecos (rellenar si faltan).
