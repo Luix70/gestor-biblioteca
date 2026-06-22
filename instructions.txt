@@ -38,9 +38,10 @@ de ficheros clasificado por CDU.
 
   /volume3/BIBLIOTECA DIGITAL/
     Inbox/        ← carpeta vigilada; deposita aquí los ficheros a catalogar
-    CDU/          ← árbol de ficheros catalogados (por código CDU)
-    Cuarentena/   ← documentos que no se pudieron identificar (revisión manual)
+    CDU/          ← árbol jerárquico: <clase>/<division>/<cdu>/<libros|revistas>/…
+    Cuarentena/   ← fallos, por categoría: duplicados/ no-identificados/ ilegibles/ otros/
     Reintentos/   ← fallos de infraestructura (red, BD); se reintentarán
+    _ER Room/     ← transferencias fallidas (ficheros de 0 bytes > 10 min): redescargar
 
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -193,6 +194,16 @@ de ficheros clasificado por CDU.
       UN SOLO libro (páginas escaneadas de la misma obra).
     · Imágenes sueltas en la raíz del Inbox también se agrupan como un libro.
     · Cada EPUB o PDF es siempre una unidad independiente.
+
+  Soltar una CARPETA = COLECCIÓN:
+    · Una subcarpeta del Inbox con 2+ documentos (a cualquier profundidad) se
+      cataloga como una colección con el NOMBRE de la carpeta; cada documento va
+      bajo su propia CDU pero queda ligado (coleccion + nº de serie autoincremental
+      o el del nombre de fichero). La carpeta NO se borra (buzón persistente): se
+      puede seguir soltando ahí y se FUSIONA con la colección previa.
+    · Una subcarpeta "Covers/" (o un Book.jpg junto al doc) aporta portadas
+      candidatas (compiten por tamaño con la embebida/remota; "gana la más ancha").
+    · 1 solo documento = NO es colección; los .txt/.url sueltos se descartan.
 
   Pipeline de catalogación (automático):
     1. Extracción de metadatos del fichero (título, ISBN, autor…)
@@ -379,6 +390,49 @@ de ficheros clasificado por CDU.
   Respuesta 400 (parámetros inválidos):
     { "ok": false, "motivo": "Modo inválido: \"xyz\". Valores: diferido, apagado, apagado-hasta." }
 
+  ──────────────────────────────────────────────────────────────────────────────
+  GET /api/estadisticas
+  ──────────────────────────────────────────────────────────────────────────────
+  Estadísticas del catálogo (para un panel/front-end).
+
+  Query opcional:
+    detalle=0   Devuelve solo los recuentos (omite las listas largas de revistas
+                y de CDU). Útil cuando el catálogo es grande.
+
+  Respuesta 200:
+    {
+      "generado": "2026-06-22T05:33:13.579Z",
+      "total": 4858,                 // documentos totales
+      "libros": 4762,
+      "revistas_total": 96,          // nº de números de revista catalogados
+      "revistas": {
+        "cabeceras": 75,             // revistas DISTINTAS (por ISSN, o título)
+        "total_numeros": 96,
+        "detalle": [                 // (omitido si detalle=0)
+          { "titulo": "...", "issn": "2494-4831", "numeros": 12 }, ...
+        ]
+      },
+      "cdu": {
+        "distintos": 2350,
+        "detalle": [                 // (omitido si detalle=0)
+          { "cdu": "821.111", "titulo_es": "...", "titulo_en": "...", "documentos": 89 }, ...
+        ]
+      },
+      "colecciones": 448,
+      "defectos": {                  // faltas a vigilar
+        "libros_sin_isbn": 2166,
+        "sin_hash": 12,
+        "sin_portada": 12,
+        "cdu_generica": 14,          // CDU "00"/"0"/"000"
+        "pendientes": 2234,          // estado_verificacion = "pendiente"
+        "sin_coleccion": 2879
+      }
+    }
+
+  Ejemplos:
+    curl http://localhost:3000/api/estadisticas
+    curl "http://localhost:3000/api/estadisticas?detalle=0"
+
 
 ────────────────────────────────────────────────────────────────────────────────
 8. EL CONFORMADOR — PROCESO DE MANTENIMIENTO
@@ -397,11 +451,23 @@ de ficheros clasificado por CDU.
     · Solo corre dentro del contenedor Docker (donde están los ficheros);
       un arranque local no "conforma" documentos del NAS por error
 
-  Tareas actuales (en src/mantenimiento/tareas.js):
+  Tareas actuales (en src/mantenimiento/tareas.js), EN ORDEN (la cadena importa):
+    restaurar-original         Repone el .epub/.pdf si falta en la carpeta, desde
+                               Reintentos/Cuarentena/_ER Room
+    re-enriquecer-degradados   Docs con ISBN pero metadata pobre (lote con APIs
+                               caídas): re-busca por ISBN y corrige título/autor
+    re-clasificar-cdu          Re-clasifica la CDU (BNE→DNB→caché→IA) y mueve la
+                               carpeta al árbol nuevo si cambió
+    describir-cdu              Asegura la descripción bilingüe (ES/EN) del CDU en
+                               la colección cdu_descripciones
+    completar-hash-contenido   Calcula el SHA-256 del fichero (identidad 1:1)
+    completar-coleccion        Detecta la colección/volumen del nombre de archivo
     completar-nombre-archivo   Rellena nombre_archivo si falta
     revisar-portada            Mejora portadas de baja calidad o ausentes
                                (no toca libros en papel/escaneados)
-    generar-sidecars-pdf       Genera registro.json y registro.marc.xml
+    generar-sidecars-pdf       Rasteriza páginas clave como sidecars de imagen
+    regenerar-registros        Reescribe registro.json y registro.marc.xml desde
+                               la BD (autores/editorial por nombre)
 
   Firmas: cada tarea tiene una versión; subir la versión fuerza que todos
   los documentos vuelvan a pasar por esa tarea en la próxima pasada.
@@ -419,15 +485,19 @@ de ficheros clasificado por CDU.
   9.1  Cuarentena
        Destino: /volume3/BIBLIOTECA DIGITAL/Cuarentena/
 
-       Contiene documentos que no se pudieron identificar después de agotar
-       todos los métodos (texto, APIs, OCR, IA). Requieren revisión manual.
+       Ficheros que no se pudieron catalogar. Se organizan en SUBCARPETAS por
+       categoría (cada depósito lleva su estado.json con el error):
+         duplicados        Copia exacta (mismo hash) de algo ya catalogado.
+         no-identificados  Sin título/ISBN tras agotar texto/APIs/OCR/IA.
+         ilegibles         Fichero DEFECTUOSO (p. ej. PDF con el xref dañado /
+                           sin páginas, EPUB con el ZIP roto). Necesita una
+                           copia mejor. Se detecta en el primer paso y NO se
+                           cataloga (no deja registro en la BD).
+         otros             Cualquier otro error.
 
-       Cada entrada tiene:
-         · El fichero original
-         · estado.json con el error y los datos parciales obtenidos
-
-       Acción: revisar manualmente, renombrar el fichero con título/autor/ISBN
-       si es posible, y volver a depositarlo en el Inbox para reintentar.
+       Acción: revisar; para 'ilegibles' conseguir una copia buena y soltarla en
+       el Inbox; para 'no-identificados' renombrar con título/autor/ISBN si se
+       puede y reintentar; 'duplicados' se pueden borrar (ya están en el catálogo).
 
   9.2  Reintentos
        Destino: /volume3/BIBLIOTECA DIGITAL/Reintentos/
@@ -468,8 +538,24 @@ de ficheros clasificado por CDU.
         test-endpoint.js        Prueba POST /api/ingestar (requiere npm start)
         test-inbox.js           Prueba el Inbox (requiere npm start)
 
-  10.6  Regenerar sidecars para todos los documentos catalogados
-        node "Test Battery/regenerar-registros.js"
+  10.6  Scripts de mantenimiento / recuperación (en scripts/, SÍ se despliegan
+        al NAS; ejecutar dentro del contenedor con docker-compose run --rm):
+          docker-compose run --rm biblioteca node scripts/<script>.js
+        ─────────────────────────────────────────────────────────────────────
+        setup-mongo.js            Crea colecciones/validadores/índices en Atlas
+        regenerar-registros.js    Reescribe registro.json/.marc.xml desde la BD
+        auditoria-integridad.js   Docs↔carpetas, huérfanos, duplicados por hash
+        recolector-cdu.js         GC del árbol: borra duplicados, cuarentena huérfanos
+        restaurar-originales.js   Repone ficheros desaparecidos desde Reintentos…
+        re-enriquecer-degradados  Recupera metadata de lotes con APIs caídas
+        describir-cdus.js         Rellena la tabla cdu_descripciones (ES/EN)
+        organizar-cuarentena.js   Agrupa la Cuarentena por categoría (+ hash)
+        purgar-duplicados.js      Borra Cuarentena/duplicados ya en el catálogo
+        purgar-ilegibles.js       Mueve PDFs ilegibles a Cuarentena/ilegibles y
+                                  borra su registro
+        reprocesar-cuarentena.js  Devuelve depósitos al Inbox para recatalogar
+        migrar-arbol-cdu.js       (Hecho) Migración al árbol CDU jerárquico
+        Todos aceptan DRY-RUN por defecto; --ejecutar aplica.
 
 
 ────────────────────────────────────────────────────────────────────────────────
