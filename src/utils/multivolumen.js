@@ -75,28 +75,71 @@ export function extraerISBNsConRol(texto) {
 }
 
 /**
- * Decide si un conjunto de documentos (rutas) es UNA obra multivolumen y, en tal caso, devuelve
- *   { titulo_obra, carpeta, volumenes: [{ ruta, numero, titulo }] }
- * Criterio: ≥2 documentos con patrón "Vol. N" que DOMINAN el conjunto (≥ mitad) y comparten la
- * carpeta que los contiene (esa carpeta da el título de la obra). null si no aplica.
+ * Total de tomos DECLARADO en el nombre de la obra/carpeta, si lo indica: "Vol 1-3", "Vols. 1-4",
+ * "(3 vols)", "in 4 volumes", "obra completa en 5 tomos". Devuelve el entero o null.
+ */
+export function totalDeclarado(nombre) {
+    const s = String(nombre || '');
+    let m = s.match(/\b(?:vols?|vol[úu]menes|tomos?|volumes?)\.?\s*\d{1,3}\s*[-–—/]\s*(\d{1,3})\b/i);
+    if (m) return parseInt(m[1], 10) || null;
+    m = s.match(/\b(\d{1,3})\s*(?:vol[úu]menes|vols?|tomos?|volumes?)\b/i)
+        || s.match(/\ben\s+(\d{1,3})\s+(?:tomos?|vol[úu]menes)\b/i);
+    if (m) return parseInt(m[1], 10) || null;
+    return null;
+}
+
+/**
+ * Discrimina TODAS las obras multivolumen presentes en un conjunto de documentos, AGRUPÁNDOLAS POR
+ * SU CARPETA INMEDIATA. Cada carpeta con ≥2 tomos de números DISTINTOS que la dominan (≥ mitad de
+ * sus documentos) es UNA obra independiente — así dos obras soltadas en subcarpetas distintas del
+ * mismo drop NO se funden en una sola con números duplicados (bug real: 1,1,2,2,3,3,4).
+ *
+ * @returns {{ obras: Array<{titulo_obra, carpeta, total, volumenes: [{ruta,numero,titulo}]}>,
+ *             resto: string[] }}  'resto' = documentos que no pertenecen a ninguna obra.
+ */
+export function discriminarMultivolumenes(rutas) {
+    const lista = rutas || [];
+    const conVol = [];
+    const resto = [];
+    for (const r of lista) {
+        const v = parsearVolumen(path.basename(r));
+        if (v && v.numero != null) conVol.push({ ruta: r, ...v });
+        else resto.push(r);
+    }
+
+    // Agrupar los candidatos por su carpeta inmediata.
+    const porCarpeta = new Map();
+    for (const v of conVol) {
+        const c = path.dirname(v.ruta);
+        if (!porCarpeta.has(c)) porCarpeta.set(c, []);
+        porCarpeta.get(c).push(v);
+    }
+
+    const obras = [];
+    for (const [carpeta, vols] of porCarpeta) {
+        const numeros = new Set(vols.map(v => v.numero));
+        const docsEnCarpeta = lista.filter(r => path.dirname(r) === carpeta).length;
+        const esObra = vols.length >= 2 && numeros.size >= 2 && vols.length >= docsEnCarpeta / 2;
+        if (esObra) {
+            const ordenados = vols.sort((a, b) => a.numero - b.numero);
+            obras.push({
+                titulo_obra: path.basename(carpeta),
+                carpeta,
+                total: totalDeclarado(path.basename(carpeta)) || Math.max(...numeros),
+                volumenes: ordenados.map(v => ({ ruta: v.ruta, numero: v.numero, titulo: v.titulo })),
+            });
+        } else {
+            for (const v of vols) resto.push(v.ruta); // no es obra: vuelven al resto
+        }
+    }
+    return { obras, resto };
+}
+
+/**
+ * Compat: una sola obra (la primera detectada) o null. La discriminación real, que separa varias
+ * obras por carpeta, es discriminarMultivolumenes().
  */
 export function discriminarMultivolumen(rutas) {
-    const vols = (rutas || [])
-        .map(r => ({ ruta: r, ...(parsearVolumen(path.basename(r)) || {}) }))
-        .filter(v => v.numero != null);
-    if (vols.length < 2 || vols.length < (rutas.length / 2)) return null;
-
-    // Números distintos (evita que 3 ficheros "Vol. 1" cuenten como 3 volúmenes).
-    const numeros = new Set(vols.map(v => v.numero));
-    if (numeros.size < 2) return null;
-
-    // La carpeta que contiene a los volúmenes da el título de la obra (la más profunda común).
-    const carpetas = [...new Set(vols.map(v => path.dirname(v.ruta)))];
-    const carpeta = carpetas.length === 1 ? carpetas[0] : carpetas.sort((a, b) => b.length - a.length)[0];
-
-    return {
-        titulo_obra: path.basename(carpeta),
-        carpeta,
-        volumenes: vols.sort((a, b) => a.numero - b.numero).map(v => ({ ruta: v.ruta, numero: v.numero, titulo: v.titulo })),
-    };
+    const { obras } = discriminarMultivolumenes(rutas);
+    return obras[0] || null;
 }

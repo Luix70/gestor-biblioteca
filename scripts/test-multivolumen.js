@@ -1,6 +1,6 @@
 /** Test offline del parseo de obras multivolumen. node scripts/test-multivolumen.js */
 import path from 'path';
-import { parsearVolumen, extraerISBNsConRol, discriminarMultivolumen, aArabigo } from '../src/utils/multivolumen.js';
+import { parsearVolumen, extraerISBNsConRol, discriminarMultivolumen, discriminarMultivolumenes, totalDeclarado, aArabigo } from '../src/utils/multivolumen.js';
 
 let ok = 0, fail = 0;
 const eq = (cond, msg) => { if (cond) ok++; else { fail++; console.log('  ❌', msg); } };
@@ -38,6 +38,32 @@ eq(d && d.volumenes.length === 6, `discrimina 6 volúmenes → ${d?.volumenes.le
 eq(d && d.titulo_obra === 'Worldmark Encyclopedia of the Nations. 11th ed', `título obra → "${d?.titulo_obra}"`);
 // Una colección normal (no volúmenes) NO debe discriminarse como obra.
 eq(discriminarMultivolumen(['a/Libro uno.epub', 'a/Otro libro.epub']) === null, 'colección normal no es obra');
+
+// ── discriminarMultivolumenes: DOS obras en subcarpetas distintas NO se funden (bug real) ──
+const drop = '/Inbox/31.Multipart Inconsistent';
+const dosObras = [
+    `${drop}/Encyclopedia Of Alternative Medicine/The Gale Encyclopedia Of Alternative Medicine, Vol 1 - A-C - 2005 2Ed.pdf`,
+    `${drop}/Encyclopedia Of Alternative Medicine/The Gale Encyclopedia Of Alternative Medicine, Vol 2 - D-K - 2005 2Ed.pdf`,
+    `${drop}/Encyclopedia Of Alternative Medicine/The Gale Encyclopedia Of Alternative Medicine, Vol 3 - L-R - 2005 2Ed.pdf`,
+    `${drop}/Encyclopedia Of Alternative Medicine/The Gale Encyclopedia Of Alternative Medicine, Vol 4 - S-Z - 2005 2Ed.pdf`,
+    `${drop}/Unusual and Unexplained Vol 1-3/Gale, Unusual and Unexplained Vol. 1.pdf`,
+    `${drop}/Unusual and Unexplained Vol 1-3/Gale, Unusual and Unexplained Vol. 2.pdf`,
+    `${drop}/Unusual and Unexplained Vol 1-3/Gale, Unusual and Unexplained Vol. 3.pdf`,
+];
+const { obras, resto } = discriminarMultivolumenes(dosObras);
+eq(obras.length === 2, `dos subcarpetas → 2 obras (no 1) → ${obras.length}`);
+const alt = obras.find(o => /Alternative/.test(o.titulo_obra));
+const unu = obras.find(o => /Unusual/.test(o.titulo_obra));
+eq(alt && alt.volumenes.length === 4 && alt.total === 4, `Alternative Medicine → 4 tomos, total 4`);
+eq(unu && unu.volumenes.length === 3 && unu.total === 3, `Unusual (carpeta "Vol 1-3") → total declarado 3`);
+eq(resto.length === 0, `sin resto suelto → ${resto.length}`);
+// Números NO duplicados dentro de cada obra (el bug daba 1,1,2,2,3,3,4).
+eq(alt && new Set(alt.volumenes.map(v => v.numero)).size === 4, 'Alternative: 4 números distintos');
+
+// ── totalDeclarado ──
+eq(totalDeclarado('Algo Vol 1-3') === 3, 'totalDeclarado "Vol 1-3" → 3');
+eq(totalDeclarado('Obra en 5 tomos') === 5, 'totalDeclarado "en 5 tomos" → 5');
+eq(totalDeclarado('Sin pista') === null, 'totalDeclarado sin pista → null');
 
 console.log(`\n${ok} OK · ${fail} fallos`);
 process.exit(fail ? 1 : 0);

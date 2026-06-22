@@ -64,6 +64,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     const isbnVolRol = isbnsRol.find(x => x.rol === 'volumen');
     if (contexto.obra || isbnObraRol) {
         documento.obra_titulo = contexto.obra?.titulo || documento.obra_titulo || documento.titulo;
+        if (contexto.obra?.total) documento.obra_total = contexto.obra.total; // nº de tomos declarado
         const numVol = contexto.obra?.numero ?? isbnVolRol?.numero ?? documento.volumen_numero ?? null;
         if (numVol != null) documento.volumen_numero = numVol;
         if (contexto.obra?.titulo_volumen) documento.volumen_titulo = contexto.obra.titulo_volumen;

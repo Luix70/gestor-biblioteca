@@ -6,7 +6,7 @@
  * La obra guarda su CDU: TODOS sus tomos comparten ese classmark (así se archivan juntos), igual
  * que una colección de varios volúmenes en una biblioteca física.
  */
-export async function resolverObra(db, { titulo, isbn_obra = null, editorialId = null, coleccionId = null, cdu = null }) {
+export async function resolverObra(db, { titulo, isbn_obra = null, editorialId = null, coleccionId = null, cdu = null, total = null }) {
     const col = db.collection('obras');
     const t = titulo ? String(titulo).trim() : null;
 
@@ -19,6 +19,8 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
         if (editorialId && !existente.editorial) set.editorial = editorialId;
         if (coleccionId && !existente.coleccion) set.coleccion = coleccionId;
         if (cdu && !existente.cdu) set.cdu = cdu;
+        // total_volumenes: solo sube (nunca degrada un total ya conocido a uno menor).
+        if (total && total > (existente.total_volumenes || 0)) set.total_volumenes = total;
         if (Object.keys(set).length) await col.updateOne({ _id: existente._id }, { $set: set });
         return { _id: existente._id, cdu: existente.cdu || cdu || null, creada: false };
     }
@@ -28,6 +30,7 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
     if (editorialId) nueva.editorial = editorialId;
     if (coleccionId) nueva.coleccion = coleccionId;
     if (cdu)         nueva.cdu = cdu;
+    if (total)       nueva.total_volumenes = total;
     try {
         const r = await col.insertOne(nueva);
         return { _id: r.insertedId, cdu: cdu || null, creada: true };
@@ -36,4 +39,37 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
         const ya = isbn_obra ? await col.findOne({ isbn_obra }) : await col.findOne({ titulo: t });
         return ya ? { _id: ya._id, cdu: ya.cdu || cdu || null, creada: false } : { _id: null, cdu: null, creada: false };
     }
+}
+
+/**
+ * Registra (o actualiza) en la obra el tomo `numero` → `docId` del documento de biblioteca, y
+ * recalcula su inventario de tomos. Deja `volumenes` como un array 1..total con el _id de cada tomo
+ * presente o null si falta, de modo que se vea de un vistazo qué tomos hay y cuáles faltan:
+ *   volumenes: [ {numero:1,_id:ObjectId}, {numero:2,_id:null}, {numero:3,_id:ObjectId} ]
+ * Idempotente: re-catalogar un tomo solo refresca su _id. Best-effort (no rompe la ingesta).
+ */
+export async function registrarVolumenEnObra(db, obraId, numero, docId, total = null) {
+    if (!obraId || numero == null) return;
+    try {
+        const col = db.collection('obras');
+        const obra = await col.findOne({ _id: obraId });
+        if (!obra) return;
+
+        const presentes = new Map(
+            (obra.volumenes || []).filter(v => v && v._id).map(v => [v.numero, v._id])
+        );
+        presentes.set(numero, docId);
+
+        const maxNum = Math.max(numero, ...presentes.keys(), total || 0, obra.total_volumenes || 0);
+        const volumenes = [];
+        for (let n = 1; n <= maxNum; n++) volumenes.push({ numero: n, _id: presentes.get(n) || null });
+
+        await col.updateOne({ _id: obraId }, { $set: {
+            volumenes,
+            total_volumenes: maxNum,
+            volumenes_presentes: presentes.size,
+            completa: presentes.size === maxNum,
+            fecha_actualizacion: new Date(),
+        } });
+    } catch { /* el inventario de la obra no debe romper la ingesta del tomo */ }
 }
