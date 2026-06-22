@@ -34,6 +34,21 @@ const VALIDADOR_COLECCIONES = {
     },
 };
 
+const VALIDADOR_OBRAS = {
+    $jsonSchema: {
+        bsonType: 'object',
+        required: ['titulo'],
+        properties: {
+            titulo:          { bsonType: 'string', description: 'Título de la obra multivolumen.' },
+            isbn_obra:       { bsonType: ['string', 'null'], description: 'ISBN de la obra completa.' },
+            editorial:       { bsonType: ['objectId', 'null'] },
+            coleccion:       { bsonType: ['objectId', 'null'], description: 'Serie a la que pertenece la obra (opcional).' },
+            total_volumenes: { bsonType: ['int', 'null'], description: 'Nº total de tomos, si se conoce.' },
+            fecha_creacion:  { bsonType: 'date' },
+        },
+    },
+};
+
 const VALIDADOR_CDU_DESC = {
     $jsonSchema: {
         bsonType: 'object',
@@ -92,6 +107,24 @@ async function main() {
     const cduDesc = db.collection('cdu_descripciones');
     await asegurarIndice(cduDesc, { codigo: 1 }, { unique: true, name: 'idx_codigo_unico' });
     await asegurarIndice(cduDesc, { clase: 1 },  { sparse: true, name: 'idx_clase' });
+
+    // ── obras: obras multivolumen (padre abstracto; los tomos son docs de biblioteca) ──
+    console.log('\nobras:');
+    const existeObras = await db.listCollections({ name: 'obras' }).toArray();
+    if (existeObras.length === 0) {
+        await db.createCollection('obras', { validator: VALIDADOR_OBRAS, validationLevel: 'moderate' });
+        console.log('  ✅ colección creada con validador.');
+    } else {
+        await db.command({ collMod: 'obras', validator: VALIDADOR_OBRAS, validationLevel: 'moderate' });
+        console.log('  ✅ validador aplicado (collMod).');
+    }
+    const obras = db.collection('obras');
+    await asegurarIndice(obras, { isbn_obra: 1 }, { unique: true, sparse: true, name: 'idx_isbn_obra_unico' });
+    await asegurarIndice(obras, { titulo: 1 },    { name: 'idx_titulo' });
+    await asegurarIndice(obras, { coleccion: 1 }, { sparse: true, name: 'idx_coleccion' });
+
+    // biblioteca: índice para localizar tomos por obra (y detectar obras incompletas).
+    await asegurarIndice(biblioteca, { obra: 1, volumen_numero: 1 }, { sparse: true, name: 'idx_obra_volumen' });
 
     console.log('\nListo.\n');
     process.exit(0);

@@ -56,6 +56,24 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
 
     console.log(`[Enriquecedor] Datos nativos para: "${documento.titulo}"`);
 
+    // OBRA MULTIVOLUMEN: por drop de carpeta de tomos (contexto.obra) o por ISBN con rol en los
+    // créditos. El nombre de carpeta / "(obra completa)" identifica la OBRA; "(tomo N)" el tomo.
+    // El ISBN del tomo manda sobre el genérico del fichero; el título compuesto es autoritativo.
+    const isbnsRol = Array.isArray(datosBase.isbns_rol) ? datosBase.isbns_rol : [];
+    const isbnObraRol = isbnsRol.find(x => x.rol === 'obra');
+    const isbnVolRol = isbnsRol.find(x => x.rol === 'volumen');
+    if (contexto.obra || isbnObraRol) {
+        documento.obra_titulo = contexto.obra?.titulo || documento.obra_titulo || documento.titulo;
+        const numVol = contexto.obra?.numero ?? isbnVolRol?.numero ?? documento.volumen_numero ?? null;
+        if (numVol != null) documento.volumen_numero = numVol;
+        if (contexto.obra?.titulo_volumen) documento.volumen_titulo = contexto.obra.titulo_volumen;
+        if (isbnObraRol) documento.isbn_obra = isbnObraRol.isbn;
+        if (isbnVolRol) documento.isbn = isbnVolRol.isbn;
+        if (documento.volumen_numero != null && documento.obra_titulo) {
+            documento.titulo = `${documento.obra_titulo} — Vol. ${documento.volumen_numero}${documento.volumen_titulo ? `: ${documento.volumen_titulo}` : ''}`;
+        }
+    }
+
     // Qué falta (solo eso justifica tocar la red / la IA).
     const faltaSinopsis = !primerValido(documento.sinopsis);
     const faltaCdu = !primerValido(documento.cdu);
@@ -195,7 +213,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Limpieza 1: descartar campos internos de los lectores que no deben persistirse
     // (evita guardar la portada base64 completa o banderas de proceso en MongoDB).
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
-    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos', 'esFechada'];
+    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos', 'esFechada', 'isbns_rol'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).

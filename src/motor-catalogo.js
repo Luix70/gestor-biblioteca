@@ -1,6 +1,7 @@
 import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
 import { resolverColeccion } from './utils/colecciones.js';
+import { resolverObra } from './utils/obras.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -13,7 +14,7 @@ const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'isbn', 'issn', 'idioma', 'cdu', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'coleccion', 'coleccion_nombre', 'coleccion_numero'];
+    const CAMPOS = ['titulo', 'isbn', 'issn', 'idioma', 'cdu', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra'];
 
     // (1) Rellenar huecos.
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
@@ -112,6 +113,20 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             docFinal.coleccion = _id;
         }
 
+        // 2c. Obra multivolumen (tras editorial/colección, que se enlazan a la obra). Todos los
+        // tomos comparten la CDU de la obra (un solo classmark → se archivan juntos).
+        if (docFinal.obra_titulo && typeof docFinal.obra_titulo === 'string') {
+            const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
+            const colId = (docFinal.coleccion && typeof docFinal.coleccion !== 'string') ? docFinal.coleccion : null;
+            const { _id, cdu: cduObra, creada } = await resolverObra(db, {
+                titulo: docFinal.obra_titulo, isbn_obra: docFinal.isbn_obra,
+                editorialId: edId, coleccionId: colId, cdu: docFinal.cdu,
+            });
+            if (creada) docFinal.alertas_agente.push(`Nueva obra multivolumen registrada: ${docFinal.obra_titulo}`);
+            if (_id) docFinal.obra = _id;
+            if (cduObra) docFinal.cdu = cduObra; // todos los tomos comparten la CDU de la obra
+        }
+
         // 3. Deduplicación en tres niveles:
         //
         // NIVEL A — Hash de contenido (SHA-256): detecta copias exactas del mismo archivo.
@@ -140,9 +155,11 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             }
         }
 
-        // — Nivel B: revistas por número de issue
+        // — Nivel B0: tomo de obra multivolumen → (obra, volumen_numero) lo identifica.
         let filtro = null;
-        if (docFinal.tipo_recurso === 'revista') {
+        if (docFinal.obra && docFinal.volumen_numero != null) {
+            filtro = { obra: docFinal.obra, volumen_numero: docFinal.volumen_numero };
+        } else if (docFinal.tipo_recurso === 'revista') {
             if (docFinal.issn && docFinal.año_edicion && docFinal.mes_publicacion) {
                 filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion, mes_publicacion: docFinal.mes_publicacion };
             } else if (docFinal.issn && docFinal.año_edicion) {

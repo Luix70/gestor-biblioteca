@@ -142,7 +142,9 @@ export const TAREAS = [
         id: 're-clasificar-cdu',
         version: 2,
         descripcion: 'Re-clasifica la CDU con el pipeline BNE→DNB→caché→IA y mueve los ficheros al nuevo árbol si cambió.',
-        aplica: (_doc) => true,
+        // Los tomos de una obra multivolumen NO se re-clasifican por separado: comparten la CDU de
+        // la obra (un solo classmark). Su ruta va por <cdu>/obras/… y este movimiento no la entiende.
+        aplica: (doc) => !doc.obra,
 
         async ejecutar(doc, { db }) {
             const isbn = doc.isbn || null;

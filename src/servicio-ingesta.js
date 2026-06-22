@@ -160,6 +160,11 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         año_edicion: resultado.año_edicion || documento.año_edicion,
         mes_publicacion: resultado.mes_publicacion || documento.mes_publicacion,
         titulo: resultado.titulo || documento.titulo,
+        // Tomo de obra multivolumen: agrupa los tomos bajo la obra (isbn_obra | título | id).
+        obra: (resultado.obra || documento.obra)
+            ? (resultado.isbn_obra || documento.isbn_obra || resultado.obra_titulo || documento.obra_titulo || String(resultado.obra || documento.obra))
+            : null,
+        volumen_numero: resultado.volumen_numero != null ? resultado.volumen_numero : documento.volumen_numero,
     };
     let rc = rutaCatalogo(argsRuta);
     let carpetaFs = path.join(DIR_CDU, rc.relativa);

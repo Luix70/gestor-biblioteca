@@ -11,6 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js';
+import { discriminarMultivolumen } from './utils/multivolumen.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 
@@ -229,12 +230,22 @@ async function listarUnidades() {
             // 2+ docs = colección; 1 solo doc NO es colección (la carpeta se descarta).
             const documentos = filtrarDuplicadosNombre(await recopilarDocumentos(ruta));
             if (documentos.length > 0) {
-                const esColeccion = documentos.length >= 2;
-                for (const d of documentos) unidades.push({
-                    rutas: [d], esImagenes: false, carpeta: ruta,
-                    conservarCarpeta: esColeccion,
-                    coleccion: esColeccion ? e.name : undefined,
-                });
+                const multi = discriminarMultivolumen(documentos);
+                if (multi) {
+                    // OBRA MULTIVOLUMEN: los ficheros "Vol. N" son tomos de UNA obra (no una colección
+                    // de libros sueltos). Cada tomo se cataloga ligado a la obra (nombre de la carpeta).
+                    for (const v of multi.volumenes) unidades.push({
+                        rutas: [v.ruta], esImagenes: false, carpeta: ruta, conservarCarpeta: false,
+                        obra: { titulo: multi.titulo_obra, numero: v.numero, titulo_volumen: v.titulo },
+                    });
+                } else {
+                    const esColeccion = documentos.length >= 2;
+                    for (const d of documentos) unidades.push({
+                        rutas: [d], esImagenes: false, carpeta: ruta,
+                        conservarCarpeta: esColeccion,
+                        coleccion: esColeccion ? e.name : undefined,
+                    });
+                }
             } else {
                 // Sin documentos: imágenes DIRECTAS en la carpeta = un libro escaneado.
                 const imagenes = (await fs.readdir(ruta)).map(n => path.join(ruta, n)).filter(esImagen);
@@ -290,6 +301,7 @@ async function procesarUnidad(unidad) {
     const contexto = unidad.esImagenes ? { ubicacion: UBICACION_INBOX } : {};
     // Drop por carpeta: ligar el recurso a la colección (nombre de carpeta) y autonumerar la serie.
     if (unidad.coleccion) { contexto.coleccion = unidad.coleccion; contexto.serieAuto = true; }
+    if (unidad.obra) contexto.obra = unidad.obra; // tomo de obra multivolumen
     // Portada pre-extraída en covers/ (si existe): candidata para la resolución de portada.
     if (!unidad.esImagenes && unidad.carpeta) {
         const portadaLocal = await buscarPortadaPreextraida(unidad.carpeta, unidad.rutas[0]);
