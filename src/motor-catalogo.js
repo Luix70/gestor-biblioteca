@@ -2,6 +2,7 @@ import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
 import { resolverColeccion } from './utils/colecciones.js';
 import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
+import { variantesISBN } from './utils/identificadores.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -62,6 +63,14 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     const coleccionEditoriales = db.collection('editoriales');
 
     let docFinal = { ...documentoEnriquecido };
+
+    // Registra el tomo en el inventario de su obra (qué tomos hay y cuáles faltan). Declarada ANTES
+    // del try para ser accesible también desde el manejador de E11000 (catch). Lee docFinal en el
+    // momento de la llamada (ya tendrá .obra/.volumen_numero fijados por el paso 2c).
+    const registrarTomo = async (idFinal) => {
+        if (docFinal.obra && docFinal.volumen_numero != null && idFinal)
+            await registrarVolumenEnObra(db, docFinal.obra, docFinal.volumen_numero, idFinal, docFinal.obra_total);
+    };
 
     try {
         // 1. Autores (string → ObjectId; crea si no existe).
@@ -127,12 +136,16 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             if (cduObra) docFinal.cdu = cduObra; // todos los tomos comparten la CDU de la obra
         }
 
-        // Tras fijar el _id final del tomo, registrarlo en el inventario de la obra (qué tomos hay
-        // y cuáles faltan). Se aplica en TODA salida (inserción/actualización/fusión).
-        const registrarTomo = async (idFinal) => {
-            if (docFinal.obra && docFinal.volumen_numero != null && idFinal)
-                await registrarVolumenEnObra(db, docFinal.obra, docFinal.volumen_numero, idFinal, docFinal.obra_total);
-        };
+        // Un TOMO no puede llevar como `isbn` el de la OBRA completa (set): colisionaría con los
+        // demás tomos en el índice único `isbn` (E11000) y los fusionaría en uno. Si solo se conoce
+        // el ISBN de obra, el tomo va SIN isbn (lo identifica obra+volumen_numero); un isbn propio
+        // distinto sí se conserva. Comparación por todas las variantes 10/13.
+        if (docFinal.obra && docFinal.isbn && docFinal.isbn_obra) {
+            const variantesObra = new Set(variantesISBN(docFinal.isbn_obra));
+            if (variantesISBN(docFinal.isbn).some(v => variantesObra.has(v))) {
+                delete docFinal.isbn;
+            }
+        }
 
         // 3. Deduplicación en tres niveles:
         //
