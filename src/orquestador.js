@@ -205,6 +205,7 @@ export async function procesarRecurso(entrada) {
         formatos,
         ubicacion: contexto.ubicacion,
         coleccion: contexto.coleccion,   // drop por carpeta: colección autoritativa
+        obra: contexto.obra,             // tomo de obra multivolumen (titulo, numero, titulo_volumen)
     });
 
     // Portada de calidad (las imágenes escaneadas ya son su propia portada; no se tocan).

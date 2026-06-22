@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import path from 'path';
 import { extraerISSN, validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre } from './parsear-nombre.js';
+import { extraerISBNsConRol } from './multivolumen.js';
 
 const execFileP = promisify(execFile);
 
@@ -157,6 +158,10 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // Número de issue extraído del texto (p. ej. "N°2", "Issue 12").
         const numIssue = extraerNumeroIssue(texto);
         if (numIssue) datos.numero_issue = numIssue;
+
+        // ISBN con ROL (créditos de obra multivolumen): "(obra completa)" vs "(tomo I)".
+        const isbnsRol = extraerISBNsConRol(texto);
+        if (isbnsRol.length) datos.isbns_rol = isbnsRol;
 
         // ISBN: candidatos del texto + del nombre de archivo, ampliados a sus formas 10/13.
         const candidatos = new Set();
