@@ -74,6 +74,26 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         }
     }
 
+    // BLOQUE CIP (Catalogación en Publicación) leído del propio fichero: registro casi-MARC de
+    // alta confianza. Es FUENTE DE ARCHIVO (no Internet), así que rellena huecos con prioridad
+    // sobre las APIs y —lo más valioso— aporta Dewey/LC para clasificar la CDU SIN IA.
+    const cip = datosBase.cip || null;
+    if (cip) {
+        const tituloEsId = !!(validarISBN(documento.titulo) || validarISSN(documento.titulo));
+        if ((!primerValido(documento.titulo) || tituloEsId) && cip.titulo) documento.titulo = cip.titulo;
+        if (cip.subtitulo && !primerValido(documento.subtitulo)) documento.subtitulo = cip.subtitulo;
+        if ((!documento.autores || documento.autores.length === 0) && cip.autor) documento.autores = [cip.autor];
+        if (!primerValido(documento.coleccion_nombre) && cip.serie) documento.coleccion_nombre = cip.serie;
+        if (!primerValido(documento.isbn) && cip.isbns?.length) documento.isbn = cip.isbns[0].isbn;
+        if (cip.lccn) documento.lccn = cip.lccn;
+        // Materias LCSH → palabras_clave (se fusionan; no se pierden las del archivo).
+        if (cip.materias?.length) {
+            const previas = Array.isArray(documento.palabras_clave) ? documento.palabras_clave : [];
+            documento.palabras_clave = [...new Set([...previas, ...cip.materias])];
+        }
+        documento.alertas_agente.push('Datos del bloque CIP del propio fichero.');
+    }
+
     // Qué falta (solo eso justifica tocar la red / la IA).
     const faltaSinopsis = !primerValido(documento.sinopsis);
     const faltaCdu = !primerValido(documento.cdu);
@@ -93,16 +113,20 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     if (!esRevista) {
         for (const x of (datosBase.isbn_candidatos || [])) for (const v of variantesISBN(x)) isbnsArchivo.add(v);
         for (const v of variantesISBN(documento.isbn)) isbnsArchivo.add(v);
+        for (const c of (cip?.isbns || [])) for (const v of variantesISBN(c.isbn)) isbnsArchivo.add(v);
     }
     if (esRevista) { delete documento.isbn; }
 
     // Pasar el idioma del archivo para filtrar la búsqueda por lengua: da con la edición en
     // español/inglés/etc. antes que con ediciones en otras lenguas (caso Anna Karenina).
+    // El Dewey/LC del CIP (del propio fichero) se siembra como autoridad antes que las APIs.
     const datosExtra = await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
         incluirSinopsis: faltaSinopsis,
         incluirCdu: faltaCdu,
         isbnsArchivo: [...isbnsArchivo],
         idioma: documento.idioma || null,
+        cipDewey: cip?.dewey || null,
+        cipLcc: cip?.lc || null,
     });
 
     // Título y autores: el archivo manda, SALVO que su "título" no sea fiable, es decir,
@@ -141,6 +165,12 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
     if (datosExtra.cdu_adicionales && datosExtra.cdu_adicionales.length > 0)
         documento.cdu_adicionales = datosExtra.cdu_adicionales;
+
+    // Persistir los códigos de clasificación de origen (Dewey/LC) cuando son fiables: del CIP
+    // del propio fichero o de una autoridad (OpenLibrary/DNB). Conservan la procedencia de la
+    // CDU y permiten re-derivarla o auditarla sin volver a consultar. El archivo manda.
+    documento.dewey = primerValido(documento.dewey, datosExtra.dewey);
+    documento.lcc   = primerValido(documento.lcc, datosExtra.lcc);
     documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
 
     // Colección/serie: el archivo (metadatos Calibre / nombre) manda; la visión rellena el hueco.
@@ -213,7 +243,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Limpieza 1: descartar campos internos de los lectores que no deben persistirse
     // (evita guardar la portada base64 completa o banderas de proceso en MongoDB).
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
-    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos', 'esFechada', 'isbns_rol'];
+    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos', 'esFechada', 'isbns_rol', 'cip'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).

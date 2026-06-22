@@ -58,7 +58,7 @@ Responde ÚNICAMENTE en JSON (null para los campos que no puedas leer):
  * Flujo maestro de enriquecimiento.
  */
 export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null, opciones = {}) {
-    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [], idioma = null } = opciones;
+    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [], idioma = null, cipDewey = null, cipLcc = null } = opciones;
     let datosExtra = {
         isbn: null,
         titulo: null,        // título de la autoridad (solo se usa si el archivo no aporta uno fiable)
@@ -87,6 +87,13 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             || (Array.isArray(actual) && actual.length === 0);
         if (vacio) datosExtra[campo] = valor;
     };
+
+    // CIP del propio fichero: Dewey/LC autoritativos (leídos del libro). Se siembran ANTES que
+    // cualquier API para que ganen (rellenar = "gana la primera fuente") — clasifican la CDU sin
+    // gastar IA ni llamadas externas, y quedan disponibles para persistirlos en el documento.
+    if (cipDewey) rellenar('dewey', cipDewey);
+    if (cipLcc) rellenar('lcc', cipLcc);
+    if (cipDewey || cipLcc) datosExtra.alertas.push('Dewey/LC del bloque CIP del propio fichero.');
 
     // TIER 3a · Visión Multimodal: produce solo PISTAS (la IA es la fuente menos fiable;
     // su ISBN se usa para consultar las APIs, pero estas tendrán prioridad sobre ella).
