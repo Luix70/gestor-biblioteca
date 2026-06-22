@@ -25,6 +25,19 @@ export class ErrorIdentificacion extends Error {
 }
 
 /**
+ * ErrorRecursoIlegible: el fichero está estructuralmente dañado y no se puede leer (p. ej. un
+ * PDF con el xref roto / sin árbol de páginas). No se cataloga: el fichero va a Cuarentena bajo
+ * la categoría 'ilegibles' para conseguir una copia mejor.
+ */
+export class ErrorRecursoIlegible extends Error {
+    constructor(mensaje) {
+        super(mensaje);
+        this.name = 'ErrorRecursoIlegible';
+        this.tipo = 'ilegible';
+    }
+}
+
+/**
  * Clasifica un error de axios: distingue un fallo de RED/transporte (sin respuesta del
  * servidor, timeout, DNS, 5xx, 429) de una respuesta legítima "no encontrado" (4xx).
  * Devuelve true si es un problema de infraestructura (reintentable).

@@ -16,6 +16,7 @@ import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
+import { obtenerEstadisticas } from './estadisticas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -112,6 +113,17 @@ app.post('/api/mantenimiento/modo', (req, res) => {
     const { modo, hasta } = req.body || {};
     const r = configurarConformador({ modo, hasta });
     res.status(r.ok ? 200 : 400).json(r);
+});
+
+// Estadísticas del catálogo: totales libros/revistas, cabeceras de revista con nº de números,
+// CDU con descripción y recuento, y defectos (sin ISBN/hash/portada…). ?detalle=0 → solo resumen.
+app.get('/api/estadisticas', async (req, res) => {
+    try {
+        const detalle = req.query.detalle !== '0' && req.query.detalle !== 'false';
+        res.json(await obtenerEstadisticas({ detalle }));
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));

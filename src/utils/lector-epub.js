@@ -240,7 +240,8 @@ export async function extraerMetadatosEpub(rutaArchivo) {
             resolve({
                 titulo: path.basename(rutaArchivo, '.epub'),
                 autores: [],
-                idioma: 'es'
+                idioma: 'es',
+                recurso_ilegible: true // ZIP/OPF dañado: no se pudo abrir el EPUB → fichero defectuoso
             });
         }
     });

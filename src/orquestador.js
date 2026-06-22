@@ -5,7 +5,7 @@ import { extraerMetadatosPdf, textoPagina } from './utils/lector-pdf.js';
 import { medirImagen } from './utils/medir-imagen.js';
 import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
-import { ErrorIdentificacion, ErrorInfraestructura } from './errores.js';
+import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
@@ -114,6 +114,10 @@ export async function procesarRecurso(entrada) {
         datosBase = await extraerMetadatosEpub(rutas[0]);
         formatos = ['epub'];
         tipo_recurso = 'libro';
+        // FICHERO DEFECTUOSO: EPUB con ZIP/OPF dañado → a Cuarentena/ilegibles (no se cataloga).
+        if (datosBase.recurso_ilegible) {
+            throw new ErrorRecursoIlegible(`EPUB ilegible (ZIP/OPF dañado): ${path.basename(rutas[0])}. Requiere una copia mejor.`);
+        }
         // La cubierta embebida se resuelve más abajo (resolverPortada), midiéndola frente a las
         // portadas remotas; aquí solo se conserva en datosBase para la pista de visión.
 
@@ -121,6 +125,12 @@ export async function procesarRecurso(entrada) {
         // TIER 1 · capa de texto + info-dict
         datosBase = await extraerMetadatosPdf(rutas[0]);
         formatos = ['pdf'];
+
+        // FICHERO DEFECTUOSO detectado en el PRIMER paso: PDF estructuralmente ilegible (xref
+        // dañado / sin páginas). No se cataloga ni se rasteriza: a Cuarentena/ilegibles.
+        if (datosBase.pdf_ilegible) {
+            throw new ErrorRecursoIlegible(`PDF ilegible (estructura dañada): ${path.basename(rutas[0])}. Requiere una copia mejor.`);
+        }
         // Señales de revista: prefijo de fecha ISO en nombre (esFechada), ISSN encontrado en
         // el texto, o título con patrones de publicación periódica.
         tipo_recurso = (datosBase.esFechada || datosBase.issn || pareceRevista(datosBase.titulo))

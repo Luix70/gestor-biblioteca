@@ -132,6 +132,10 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         }
 
         datos.texto_legible = texto.replace(/\s/g, '').length > 200;
+        // PDF estructuralmente ILEGIBLE: pdfinfo no halló páginas (0) y no hay texto extraíble.
+        // Un PDF válido (incl. escaneado) siempre tiene ≥1 página; 0 = xref/estructura dañada.
+        // Se marca aquí, en el primer paso, para descartarlo a Cuarentena cuanto antes.
+        if ((info.pages || 0) === 0 && !datos.texto_legible) datos.pdf_ilegible = true;
         datos.issn = extraerISSN(texto);
 
         // 3. Pistas del nombre de archivo (revista fechada, ISBN en el nombre, colección, etc.)
@@ -174,6 +178,7 @@ export async function extraerMetadatosPdf(rutaArchivo) {
             isbn_candidatos: candidatos,
             idioma:        parsed.idioma || null,
             texto_legible: false,
+            pdf_ilegible:  true, // ni pdfinfo ni pdftotext pudieron leerlo → fichero dañado
             _error:        e.message,
         };
     }
