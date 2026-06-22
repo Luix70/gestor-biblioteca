@@ -288,23 +288,33 @@ export const TAREAS = [
     },
 
     {
-        id: 'completar-descripcion-obra',
+        id: 'completar-obra-por-isbn',
         version: 1,
-        descripcion: 'Da a la obra multivolumen una descripción general (sinopsis por su ISBN de obra), si le falta.',
+        descripcion: 'Resuelve la obra multivolumen por su ISBN de obra (set): fija el TÍTULO de autoridad (mejor que el nombre de la carpeta del drop) y una DESCRIPCIÓN general. Una sola vez por obra.',
         // Solo tomos de obra. Modifica la OBRA (no el tomo); el primer tomo que la resuelva la rellena.
         aplica: (doc) => !!doc.obra && doc.volumen_numero != null,
         async ejecutar(doc, { db }) {
             const obra = await db.collection('obras').findOne({ _id: doc.obra });
-            if (!obra || obra.descripcion || !obra.isbn_obra) return null; // ya tiene, o no hay ancla
+            if (!obra || obra.resuelta_isbn || !obra.isbn_obra) return null; // ya resuelta, o sin ancla
             let datos;
             try {
                 datos = await buscarMetadatosExternos(obra.titulo || '', '', null, {
                     incluirSinopsis: true, incluirCdu: false, isbnsArchivo: variantesISBN(obra.isbn_obra),
                 });
             } catch { return null; }
-            if (!datos.sinopsis) return null;
-            await db.collection('obras').updateOne({ _id: obra._id }, { $set: { descripcion: datos.sinopsis } });
-            return { alertas: [`Descripción de la obra "${obra.titulo}" añadida desde su ISBN de obra.`] };
+
+            const set = {};
+            // El ISBN de obra es la autoridad del título: prevalece sobre el nombre de la carpeta
+            // (que suele traer ruido: "… Vol 1-3 (2003); OCR …"). La dedup de obra es por isbn_obra,
+            // así que renombrar es seguro (no rompe el enlace de los tomos).
+            if (datos.titulo)   set.titulo = datos.titulo;
+            if (datos.sinopsis) set.descripcion = datos.sinopsis;
+            if (!set.titulo && !set.descripcion) return null; // nada (API caída): otro tomo reintentará
+
+            set.resuelta_isbn = true; // marca: no repetir el lookup en los demás tomos
+            await db.collection('obras').updateOne({ _id: obra._id }, { $set: set });
+            const partes = [set.titulo && 'título', set.descripcion && 'descripción'].filter(Boolean);
+            return { alertas: [`Obra resuelta por su ISBN de obra (${partes.join(' + ')})${set.titulo ? `: "${set.titulo}"` : ''}.`] };
         },
     },
 
