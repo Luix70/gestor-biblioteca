@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio';
 import fs from 'fs/promises';
 import path from 'path';
 import { validarISBN } from './identificadores.js';
+import { esTituloArtefacto } from './parsear-nombre.js';
 
 const RE_PORTADA = /cover|portada|caratula|cubierta|frontcover/i;
 const RE_RUIDO = /logo|ex_?libris|fuente|epl|brand|banner|sello/i;
@@ -227,6 +228,10 @@ export async function extraerMetadatosEpub(rutaArchivo) {
                     delete metadatos[key];
                 }
             });
+
+            // Título-artefacto del OPF (p. ej. dc:title = "…​.indd" o "Untitled"): descartarlo para
+            // caer al nombre de archivo, mucho más fiable.
+            if (metadatos.titulo && esTituloArtefacto(metadatos.titulo)) delete metadatos.titulo;
 
             // Fallback obligatorio para el título
             if (!metadatos.titulo) {

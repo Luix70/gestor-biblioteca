@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'path';
 import { extraerISSN, validarISBN, variantesISBN } from './identificadores.js';
-import { parsearNombre } from './parsear-nombre.js';
+import { parsearNombre, esTituloArtefacto, esAutorArtefacto } from './parsear-nombre.js';
 import { extraerISBNsConRol } from './multivolumen.js';
 import { parsearBloqueCatalogacion } from './cip.js';
 
@@ -103,14 +103,18 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // 1. Info-dict + número de páginas vía pdfinfo
         const info = await pdfInfo(rutaArchivo);
 
-        // Descartar títulos que son artefactos de metadatos mal formados: campo vacío,
-        // solo espacio, o el nombre de otro campo seguido de ":" (ej. "Subject:").
+        // Descartar títulos que son artefactos de metadatos mal formados: campo vacío, solo
+        // espacio, el nombre de otro campo seguido de ":" (ej. "Subject:"), o un artefacto del
+        // productor (ruta/nombre de fichero fuente "C:\X.DVI", "…​.indd", "Microsoft Word - …").
+        // Si se descarta, más abajo se cae al título del NOMBRE DE ARCHIVO (mucho más fiable).
         const tituloInfo = info.title && !info.title.trim().endsWith(':') && info.title.trim().length > 1
-            ? info.title.trim() : null;
+            && !esTituloArtefacto(info.title) ? info.title.trim() : null;
+        // Igual con el autor: descartar créditos de composición/sello de build (no es un autor).
+        const autorInfo = info.author && !esAutorArtefacto(info.author) ? [info.author] : [];
 
         const datos = {
             titulo:       tituloInfo,
-            autores:      info.author ? [info.author] : [],
+            autores:      autorInfo,
             isbn:         null,
             idioma:       null,
             año_edicion:  null,
