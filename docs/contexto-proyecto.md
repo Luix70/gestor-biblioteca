@@ -205,7 +205,12 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   `better-sqlite3` es C puro (sin AVX) → corre en el Atom como la excepción de poppler; va en
   `dependencies` (el build del NAS baja el binario precompilado linux-x64/node18). En el orquestador:
   un acierto local **omite OpenLibrary online** (evita su timeout de 20-45 s) y la **BNE online solo se
-  consulta si aún no hay CDU** (evita los 403 de SPARQL). **Próxima reconstrucción** (columnas a añadir,
+  consulta si aún no hay CDU** (evita los 403 de SPARQL). **Tweak futuro candidato:** como el volcado ya
+  contiene TODA la BNE (2,37 M registros) más la caché `bne_cdus` (Mongo), la llamada online a la BNE
+  SPARQL (que da 403 crónico y se auto-desactiva al primer fallo) es prácticamente redundante → se puede
+  **retirar del todo** (`buscador-bne.js` quedaría solo con la caché local), dejando el Fichero como única
+  fuente BNE. No urge: hoy ya solo se invoca para libros sin CDU local, y un 403 la apaga por sesión.
+  **Próxima reconstrucción** (columnas a añadir,
   el `.db` se rehace desde cero, sin migraciones): `edicion` (OL `edition_name`/BNE `edicion` — caso
   "Eleventh Edition"), rellenar `dimensiones` desde OL `physical_dimensions` y `lengua_original` desde
   OL `translated_from`, materias OL `subject_*`, y una **tabla de autoridad de autores** (OL aporta
