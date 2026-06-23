@@ -55,6 +55,26 @@ export async function obtenerEstadisticas({ detalle = true } = {}) {
         sin_coleccion:    await col.countDocuments(ausente('coleccion')),
     };
 
+    // ── Anomalías de obras multivolumen (a vigilar en ejecuciones desatendidas) ──
+    // "obras incompletas" es esperable (hay obras que llegan a medias); pero revision_requerida y
+    // los tomos sin número señalan que algo se guardó "desordenado" para NO perderlo → revisar.
+    const obrasCol = db.collection('obras');
+    const obrasRevision = await obrasCol.find(
+        { revision_requerida: true },
+        { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1 } }
+    ).toArray();
+    const anomalias = {
+        obras_total:          await obrasCol.countDocuments(),
+        obras_incompletas:    await obrasCol.countDocuments({ completa: false }),
+        obras_revision:       obrasRevision.length,
+        tomos_sin_numero:     await obrasCol.countDocuments({ 'volumenes_sin_numero.0': { $exists: true } }),
+        docs_revision:        await col.countDocuments({ revision_requerida: true }),
+        ...(detalle ? { obras_revision_detalle: obrasRevision.map(o => ({
+            titulo: o.titulo, isbn_obra: o.isbn_obra || null,
+            tomos: `${o.volumenes_presentes || 0}/${o.total_volumenes || '?'}`,
+        })) } : {}),
+    };
+
     return {
         generado: new Date().toISOString(),
         total,
@@ -64,5 +84,6 @@ export async function obtenerEstadisticas({ detalle = true } = {}) {
         cdu: { distintos: cduDetalle.length, ...(detalle ? { detalle: cduDetalle } : {}) },
         colecciones: await db.collection('colecciones').countDocuments(),
         defectos,
+        anomalias,
     };
 }

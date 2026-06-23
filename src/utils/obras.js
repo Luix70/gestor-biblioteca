@@ -49,11 +49,24 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
  * Idempotente: re-catalogar un tomo solo refresca su _id. Best-effort (no rompe la ingesta).
  */
 export async function registrarVolumenEnObra(db, obraId, numero, docId, total = null) {
-    if (!obraId || numero == null) return;
+    if (!obraId || !docId) return;
     try {
         const col = db.collection('obras');
         const obra = await col.findOne({ _id: obraId });
         if (!obra) return;
+
+        // Tomo SIN número ("?"): nunca se descarta. Se guarda en una lista aparte (sin_numero) y se
+        // marca la obra para revisión — preferible una obra "desordenada" a un tomo perdido.
+        if (numero == null) {
+            const sin = (obra.volumenes_sin_numero || []).map(String);
+            if (!sin.includes(String(docId))) sin.push(String(docId));
+            await col.updateOne({ _id: obraId }, { $set: {
+                volumenes_sin_numero: [...new Set([...(obra.volumenes_sin_numero || []), docId])],
+                revision_requerida: true,
+                fecha_actualizacion: new Date(),
+            } });
+            return;
+        }
 
         const presentes = new Map(
             (obra.volumenes || []).filter(v => v && v._id).map(v => [v.numero, v._id])
@@ -63,12 +76,14 @@ export async function registrarVolumenEnObra(db, obraId, numero, docId, total = 
         const maxNum = Math.max(numero, ...presentes.keys(), total || 0, obra.total_volumenes || 0);
         const volumenes = [];
         for (let n = 1; n <= maxNum; n++) volumenes.push({ numero: n, _id: presentes.get(n) || null });
+        const sinNumero = (obra.volumenes_sin_numero || []).length;
 
         await col.updateOne({ _id: obraId }, { $set: {
             volumenes,
             total_volumenes: maxNum,
             volumenes_presentes: presentes.size,
-            completa: presentes.size === maxNum,
+            // 'completa' solo si están todos los numerados Y no quedan tomos sin numerar pendientes.
+            completa: presentes.size === maxNum && sinNumero === 0,
             fecha_actualizacion: new Date(),
         } });
     } catch { /* el inventario de la obra no debe romper la ingesta del tomo */ }

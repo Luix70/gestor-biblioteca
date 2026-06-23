@@ -247,6 +247,30 @@ aplicabilidad), no secuencias hardcodeadas. Añadir la BD local o reordenar = co
   "falta el final" necesita `total_volumenes` (de la BD/API por el ISBN de obra, o los créditos).
   → informe `obras-incompletas` (misma forma que los huecos de números de revista).
 
+### Multivolumen: SEGURIDAD ante todo (principio "nunca perder/fusionar un tomo")
+Una ingesta de cientos de docs corre DESATENDIDA en el NAS: descubrir semanas después que faltan
+tomos es carísimo de arreglar. Principio: **vale más una obra desordenada que un tomo perdido.**
+- **HECHO (red de seguridad):** un tomo (`doc.obra`) **jamás se deduplica/fusiona por ISBN** (su
+  identidad es `obra`+`volumen_numero`, índice `idx_obra_volumen`). Si el `isbn` de un tomo es el
+  del set, o ya pertenece a OTRO documento (otro tomo, una variante de formato print/epub/tapa, un
+  código espurio), se **descarta del tomo** (que va SIN isbn) y se marca `revision_requerida`. El nº
+  de tomo sale del **nombre de archivo** (`parsearVolumen`) o del contexto de carpeta — NUNCA del
+  "primer ISBN-volumen" de los créditos (eso convertía el Vol 4 suelto en Vol 1). Un tomo sin número
+  determinable se guarda **igual**, con `volumen_numero` ausente, en `obras.volumenes_sin_numero[]`,
+  y marca la obra a revisión (tomo "?"). `GET /api/estadisticas` → `anomalias` (obras incompletas,
+  `obras_revision`, `tomos_sin_numero`, `docs_revision`) para vigilar ejecuciones desatendidas.
+- **PENDIENTE (inteligencia de ISBN — el siguiente gran salto):** el CIP de un set lista TODOS los
+  ISBN (set + cada tomo + variantes de formato) y NO dice cuál es ESTE tomo; hay que mirar a otra
+  parte (página 2/3, pie de página, nombre de archivo). Plan: al ver una carpeta con un tomo,
+  entrar en **modo conservador y enfocado** y tratar TODOS sus docs como tomos. Extraer de cada doc
+  **todos** los ISBN con su rol; clasificarlos consultando NUESTRA BD/APIs (¿cuál es el set? ¿cuáles
+  son variantes de formato del MISMO tomo: ISBN-10/13, print/epub, rústica/tapa dura?). Con 2 ISBN:
+  uno suele ser el set y el otro el tomo (descartando la pareja de formato). Con muchos: **acumular
+  el orden EN MEMORIA**, ampliando la búsqueda de pistas hasta situar cada tomo, y **commitear en
+  lote** (la obra + todos los tomos). Tolerar huecos (obras incompletas existen); **nunca descartar**
+  (en el peor caso, `volumen:"?"`). El módulo de ISBN/ISSN es el punto de mayor apalancamiento del
+  pipeline: ahí conviene invertir más lógica y más redes de seguridad.
+
 ### Audiolibros (discriminar por CONTENIDO, no por la carpeta)
 Una carpeta cuyo contenido es AUDIO = un audiolibro (todas las pistas = capítulos de una obra),
 igual que imágenes-en-carpeta = un libro escaneado. Extensiones amplias

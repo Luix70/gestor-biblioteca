@@ -96,10 +96,14 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
     res.status(huboError ? 207 : 200).json({ status: huboError ? 'partial' : 'success', resultados });
 });
 
-// Dispara el Conformador inmediatamente (sin esperar reposo). Vacía el backlog en segundo plano
-// y cede a la ingesta entre lotes. 409 si ya hay algo en curso.
+// Dispara el Conformador inmediatamente (sin esperar reposo). Vacía el backlog en rondas de
+// MANTENIMIENTO_LOTE (25) en segundo plano, cediendo a la ingesta y reintentando hasta vaciarlo.
+// `intervalo` (segundos, query o body) pausa entre rondas; 0 = continuo. Detén con modo=apagado.
+//   POST /api/mantenimiento?intervalo=30   ó   body { "intervalo": 30 }
+// 409 si ya hay un mantenimiento manual en curso.
 app.post('/api/mantenimiento', (req, res) => {
-    const r = mantenimientoManual();
+    const intervaloSegundos = Number(req.query.intervalo ?? req.body?.intervalo ?? 0) || 0;
+    const r = mantenimientoManual({ intervaloSegundos });
     res.status(r.ok ? 202 : 409).json(r);
 });
 

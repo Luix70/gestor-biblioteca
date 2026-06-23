@@ -57,6 +57,9 @@ const VALIDADOR_OBRAS = {
                     properties: { numero: { bsonType: 'int' }, _id: { bsonType: ['objectId', 'null'] } },
                 },
             },
+            // Tomos sin número determinable ("?"): se guardan igual (nunca se descartan) y marcan revisión.
+            volumenes_sin_numero: { bsonType: ['array', 'null'], items: { bsonType: 'objectId' } },
+            revision_requerida:   { bsonType: ['bool', 'null'], description: 'Algo se guardó desordenado (tomo sin nº / ISBN en conflicto): revisar.' },
             fecha_creacion:     { bsonType: 'date' },
             fecha_actualizacion:{ bsonType: ['date', 'null'] },
         },
