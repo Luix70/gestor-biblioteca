@@ -1,4 +1,5 @@
 import express from 'express';
+import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
 import { configurarVigilante, estadoVigilante, estadoConformador } from './vigilante.js';
 import {
@@ -6,6 +7,8 @@ import {
     listarCuarentena, reingestarCuarentena, ingestaPorDia,
 } from './utils/inspeccion.js';
 import { purgarObra } from './utils/purga.js';
+import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
+import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 
 /**
  * Rutas del PANEL DE CONTROL (montadas bajo /api). Acciones de operación: vigilante, papelera,
@@ -63,6 +66,24 @@ export function rutasPanel() {
             const db = await conectarDB();
             res.json(await purgarObra(db, String(clave), { ejecutar: ejecutar === true }));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Re-consultar a la autoridad el título/sinopsis de una obra por su isbn_obra (botón del panel).
+    r.post('/obras/requery', async (req, res) => {
+        try {
+            const id = req.body?.id;
+            if (!id || !ObjectId.isValid(id)) return res.status(400).json({ ok: false, motivo: 'falta { id } válido' });
+            const db = await conectarDB();
+            res.json(await resolverObraPorIsbn(db, new ObjectId(id), { force: true }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ── Logs (vista en vivo + tamaño + purga) ──
+    r.get('/logs', (req, res) => res.json({ lineas: ultimasLineas(Math.min(2000, Math.max(20, Number(req.query.n) || 400))) }));
+    r.get('/logs/info', (req, res) => res.json(infoLog()));
+    r.post('/logs/purgar', (req, res) => {
+        const { dias, todo } = req.body || {};
+        res.json(purgarLog({ dias, todo: todo === true }));
     });
 
     // Lista de obras (con su estado de completitud) para el panel.

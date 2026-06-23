@@ -13,6 +13,7 @@ import { calcularHashArchivo } from '../utils/hash-archivo.js';
 import { parsearNombre, esTituloArtefacto } from '../utils/parsear-nombre.js';
 import { resolverColeccion } from '../utils/colecciones.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
+import { resolverObraPorIsbn } from '../utils/obra-autoridad.js';
 import { validarISBN, validarISSN, variantesISBN } from '../utils/identificadores.js';
 import { aRegistroLegible, escribirSidecars, resolverNombres } from '../utils/registro.js';
 import { describirCDU } from '../utils/descripcion-cdu.js';
@@ -294,27 +295,11 @@ export const TAREAS = [
         // Solo tomos de obra. Modifica la OBRA (no el tomo); el primer tomo que la resuelva la rellena.
         aplica: (doc) => !!doc.obra && doc.volumen_numero != null,
         async ejecutar(doc, { db }) {
-            const obra = await db.collection('obras').findOne({ _id: doc.obra });
-            if (!obra || obra.resuelta_isbn || !obra.isbn_obra) return null; // ya resuelta, o sin ancla
-            let datos;
-            try {
-                datos = await buscarMetadatosExternos(obra.titulo || '', '', null, {
-                    incluirSinopsis: true, incluirCdu: false, isbnsArchivo: variantesISBN(obra.isbn_obra),
-                });
-            } catch { return null; }
-
-            const set = {};
-            // El ISBN de obra es la autoridad del título: prevalece sobre el nombre de la carpeta
-            // (que suele traer ruido: "… Vol 1-3 (2003); OCR …"). La dedup de obra es por isbn_obra,
-            // así que renombrar es seguro (no rompe el enlace de los tomos).
-            if (datos.titulo)   set.titulo = datos.titulo;
-            if (datos.sinopsis) set.descripcion = datos.sinopsis;
-            if (!set.titulo && !set.descripcion) return null; // nada (API caída): otro tomo reintentará
-
-            set.resuelta_isbn = true; // marca: no repetir el lookup en los demás tomos
-            await db.collection('obras').updateOne({ _id: obra._id }, { $set: set });
-            const partes = [set.titulo && 'título', set.descripcion && 'descripción'].filter(Boolean);
-            return { alertas: [`Obra resuelta por su ISBN de obra (${partes.join(' + ')})${set.titulo ? `: "${set.titulo}"` : ''}.`] };
+            // El isbn_obra es la autoridad del título (prevalece sobre el nombre de carpeta/fichero;
+            // renombrar es seguro: la dedup de obra es por isbn_obra). Lógica compartida con la ingesta.
+            const r = await resolverObraPorIsbn(db, doc.obra);
+            if (!r.ok) return null; // ya resuelta, sin ancla, o API caída → otro tomo/pasada reintenta
+            return { alertas: [`Obra resuelta por su ISBN de obra: "${r.titulo}".`] };
         },
     },
 

@@ -112,6 +112,24 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .rol{font-size:10px;padding:2px 7px;border-radius:6px;font-weight:700;text-transform:uppercase}
 .rol.admin{background:rgba(40,217,168,.16);color:var(--acc)}.rol.guest{background:var(--card2);color:var(--mut)}
 body.guest .admin-only{display:none!important}
+/* logs */
+.logview{background:#0a0d12;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.55;height:62vh;overflow:auto;white-space:pre-wrap;word-break:break-word;color:#cfe3da}
+.logview .w{color:var(--warn)}.logview .e{color:var(--bad)}.logview .k{color:var(--acc)}
+/* mockup */
+.mock{text-align:center;padding:46px 18px}.mock .big{font-size:46px;margin-bottom:12px}
+.mock h2{font-size:22px;margin-bottom:8px}.mock p{color:var(--mut);max-width:460px;margin:0 auto 6px}
+.mock .chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:20px}
+.mock .chip{background:var(--card2);border:1px solid var(--line);padding:9px 15px;border-radius:30px;font-size:13px}
+/* mobile-first refinements */
+@media(max-width:640px){
+  .top .pill{display:none}.userbox .who{display:none}.top h1{font-size:16px}
+  .wrap{padding:14px}.top{padding:11px 14px;gap:9px}
+  .card{overflow-x:auto}.stat .v{font-size:24px}.loginbox{width:min(330px,92vw)}
+  .g4{grid-template-columns:1fr 1fr}
+  .grid.g3>div[style*="span 2"],.grid.g2>div[style*="span 2"]{grid-column:1/-1!important}
+  .row>div{min-width:100%}.row .btn{flex:1}
+  .logview{height:56vh}
+}
 @media(max-width:900px){
   .sidebar{transform:translateX(-100%)}.sidebar.open{transform:none}
   .main{margin-left:0}.burger{display:block}.scrim.open{display:block}
@@ -130,6 +148,8 @@ body.guest .admin-only{display:none!important}
       <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
       <button data-p="pap"><span class="ic">♻</span> Papelera</button>
       <button data-p="obras"><span class="ic">📖</span> Obras</button>
+      <button data-p="logs" class="admin-only"><span class="ic">📜</span> Logs</button>
+      <button data-p="inbox"><span class="ic">📥</span> Inbox <span class="soon">MAQUETA</span></button>
       <button data-p="search" disabled><span class="ic">🔍</span> Búsqueda <span class="soon">PRONTO</span></button>
     </nav>
     <div class="sb-foot">v1 · cuadro de mando<br><span id="clock"></span></div>
@@ -222,6 +242,35 @@ body.guest .admin-only{display:none!important}
         </div>
         <div class="card"><h3>Inventario</h3><div id="obrasBody"></div></div>
       </section>
+
+      <!-- LOGS -->
+      <section class="page" id="p-logs">
+        <div class="sec-h"><h2>Logs</h2><span class="muted" id="logInfo"></span></div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="row" style="align-items:center">
+            <label class="switch" style="flex:0 0 auto"><input type="checkbox" id="logAuto" checked><span class="slider"></span></label>
+            <span class="muted">Auto-refresco</span>
+            <div style="flex:1"></div>
+            <span class="admin-only" style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn" id="logPurge7">Conservar 7 días</button>
+              <button class="btn" id="logPurge30">Conservar 30 días</button>
+              <button class="btn bad" id="logClear">Vaciar</button>
+            </span>
+          </div>
+        </div>
+        <div class="logview" id="logView"></div>
+      </section>
+
+      <!-- INBOX (maqueta) -->
+      <section class="page" id="p-inbox">
+        <div class="mock">
+          <div class="big">📥</div>
+          <h2>Inbox — alta de libros físicos</h2>
+          <p>Aquí escanearás libros físicos con la cámara (portada / ISBN) y grabarás etiquetas <b>NFC</b> para localizarlos en la estantería.</p>
+          <p>Será la función principal del front-end. Por ahora es una maqueta.</p>
+          <div class="chips"><span class="chip">📷 Escanear portada/ISBN</span><span class="chip">🏷️ Escribir NFC</span><span class="chip">📍 Ubicación física</span><span class="chip">➕ Alta rápida</span></div>
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -252,9 +301,11 @@ const toast=(m,t='ok')=>{const e=document.createElement('div');e.className='toas
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // ── nav ──
-const titles={dashboard:'Dashboard',mant:'Mantenimiento',vig:'Vigilante',cuar:'Cuarentena',pap:'Papelera',obras:'Obras'};
+const titles={dashboard:'Dashboard',mant:'Mantenimiento',vig:'Vigilante',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',logs:'Logs',inbox:'Inbox'};
+let logTimer=null;
 function go(p){$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
+  if(logTimer&&p!=='logs'){clearInterval(logTimer);logTimer=null;}
   $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');loaders[p]&&loaders[p]();}
 $('#nav').onclick=e=>{const b=e.target.closest('button[data-p]');if(b&&!b.disabled)go(b.dataset.p);};
 $('#burger').onclick=()=>{$('#sidebar').classList.toggle('open');$('#scrim').classList.toggle('open');};
@@ -267,13 +318,15 @@ async function refrescarEstado(){try{const s=await api('/estado');
   const v=s.vigilante.activo,b=s.vigilante.procesando;
   $('#dVig').className='dot '+(b?'busy':v?'ok':'off');
   const mm=s.conformador.mantenimientoManual,modo=s.conformador.modo;
-  $('#dMant').className='dot '+(mm?'busy':modo==='diferido'?'ok':'off');
+  $('#dMant').className='dot '+(mm?'busy':modo==='diferido'?'ok':''); // apagado = neutral, no rojo
   // vigilante page
   $('#vSwitch').checked=v;$('#vLabel').textContent=v?'Activo':'Pausado';
   $('#vSub').textContent=b?'procesando el Inbox…':v?'observando el Inbox':'los ficheros esperan en el Inbox';
-  // mant estado
-  $('#mEstado').innerHTML=`<table><tr><td>Modo</td><td><span class="tag ${modo==='apagado'?'mut':'ok'}">${esc(modo)}</span></td></tr>
-   <tr><td>Manual en curso</td><td>${mm?'<span class="tag warn">sí</span>':'<span class="tag mut">no</span>'}</td></tr>
+  // mant estado: "Estado" es el indicador en vivo; "Modo" es el ajuste (manual/auto), no un error
+  const modoTxt=modo==='diferido'?'Automático (al reposo)':modo==='apagado'?'Manual (a demanda)':modo;
+  $('#mEstado').innerHTML=`<table>
+   <tr><td>Estado</td><td><span class="tag ${mm?'warn':'mut'}">${mm?'ejecutándose…':'en reposo'}</span></td></tr>
+   <tr><td>Modo</td><td><span class="tag ${modo==='diferido'?'ok':'mut'}">${modoTxt}</span></td></tr>
    <tr><td>Última revisión</td><td class="muted">${s.conformador.ultimaRevision?new Date(s.conformador.ultimaRevision).toLocaleString('es-ES'):'—'}</td></tr></table>`;
 }catch(e){}}
 
@@ -349,13 +402,31 @@ async function purga(ejecutar){const clave=$('#purgaClave').value.trim();if(!cla
   }catch(e){toast(e.message,'bad');}}
 $('#purgaSim').onclick=()=>purga(false);$('#purgaExec').onclick=()=>purga(true);
 async function loadObras(){try{const o=await api('/obras');
-  $('#obrasBody').innerHTML=o.length?`<table><tr><th>Obra</th><th>isbn_obra</th><th>Tomos</th><th>Estado</th></tr>
+  $('#obrasBody').innerHTML=o.length?`<table><tr><th>Obra</th><th>isbn_obra</th><th>Tomos</th><th>Estado</th><th></th></tr>
     ${o.map(x=>`<tr><td>${esc(x.titulo)}</td><td class="mono muted">${esc(x.isbn_obra||'—')}</td>
       <td>${x.volumenes_presentes||0}/${x.total_volumenes||'?'}</td>
-      <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':x.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'}</td></tr>`).join('')}</table>`:'<div class="empty">Sin obras</div>';
+      <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':x.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'}</td>
+      <td style="text-align:right">${x.isbn_obra?`<button class="btn admin-only" data-req="${esc(x._id)}" title="Re-consultar título/sinopsis por su ISBN">↻</button>`:''}</td></tr>`).join('')}</table>`:'<div class="empty">Sin obras</div>';
+  $$('#obrasBody [data-req]').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='…';
+    try{const r=await api('/obras/requery',{method:'POST',body:JSON.stringify({id:b.dataset.req})});
+      if(r.ok){toast('Obra actualizada → '+r.titulo);loadObras();}else{toast(r.motivo,'warn');b.disabled=false;b.textContent='↻';}}
+    catch(e){toast(e.message,'bad');b.disabled=false;b.textContent='↻';}});
 }catch(e){toast(e.message,'bad');}}
 
-const loaders={dashboard:loadDashboard,mant:refrescarEstado,vig:refrescarEstado,cuar:loadCuar,pap:loadPap,obras:loadObras};
+// ── logs ──
+function pintarLogs(lineas){const v=$('#logView');const cerca=v.scrollTop+v.clientHeight>=v.scrollHeight-50;
+  v.innerHTML=lineas.map(l=>{const c=/❌|⛔|🚫|error|falló|inalcanzable/i.test(l)?'e':/⚠/i.test(l)?'w':/✅|🎛|👁|🧹|📥|♻/i.test(l)?'k':'';return `<div class="${c}">${esc(l)}</div>`;}).join('');
+  if(cerca)v.scrollTop=v.scrollHeight;}
+async function loadLogs(){try{const [g,info]=await Promise.all([api('/logs?n=500'),api('/logs/info')]);
+  pintarLogs(g.lineas);$('#logInfo').textContent=`${fmtBytes(info.bytes)} en disco · ${info.lineas_buffer} líneas en vivo`;}catch(e){}}
+function logAuto(){if(logTimer){clearInterval(logTimer);logTimer=null;}loadLogs();if($('#logAuto').checked)logTimer=setInterval(loadLogs,4000);}
+$('#logAuto').onchange=logAuto;
+async function purgaLog(body,msg){try{await api('/logs/purgar',{method:'POST',body:JSON.stringify(body)});toast(msg);loadLogs();}catch(e){toast(e.message,'bad');}}
+$('#logPurge7').onclick=()=>purgaLog({dias:7},'Logs: conservados los últimos 7 días');
+$('#logPurge30').onclick=()=>purgaLog({dias:30},'Logs: conservados los últimos 30 días');
+$('#logClear').onclick=()=>{if(confirm('¿Vaciar TODO el log?'))purgaLog({todo:true},'Log vaciado');};
+
+const loaders={dashboard:loadDashboard,mant:refrescarEstado,vig:refrescarEstado,cuar:loadCuar,pap:loadPap,obras:loadObras,logs:logAuto,inbox:()=>{}};
 
 // ── auth ──
 let estadoTimer=null;

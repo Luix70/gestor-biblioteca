@@ -2,6 +2,7 @@ import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
 import { resolverColeccion } from './utils/colecciones.js';
 import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
+import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -138,6 +139,16 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             if (creada) docFinal.alertas_agente.push(`Nueva obra multivolumen registrada: ${docFinal.obra_titulo}`);
             if (_id) docFinal.obra = _id;
             if (cduObra) docFinal.cdu = cduObra; // todos los tomos comparten la CDU de la obra
+
+            // Al CREAR la obra: resolver su título/sinopsis reales por el isbn_obra (autoridad), ya —
+            // no esperar al Conformador. Fire-and-forget para NO añadir latencia a la ingesta del tomo
+            // (la obra se renombra 1-2 s después); si la API falla, queda el nombre de carpeta y el
+            // Conformador (completar-obra-por-isbn) lo reintenta.
+            if (creada && _id && docFinal.isbn_obra) {
+                resolverObraPorIsbn(db, _id)
+                    .then(r => { if (r?.ok) console.log(`   📖 Obra resuelta por ISBN: "${r.titulo}".`); })
+                    .catch(() => {});
+            }
         }
 
         // SEGURIDAD MULTIVOLUMEN — un TOMO JAMÁS debe fusionarse con otro documento por su ISBN
