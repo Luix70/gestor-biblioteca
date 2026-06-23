@@ -4,7 +4,7 @@ import { conectarDB } from './database.js';
 import { configurarVigilante, estadoVigilante, estadoConformador } from './vigilante.js';
 import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
-    listarCuarentena, reingestarCuarentena, ingestaPorDia,
+    listarCuarentena, reingestarCuarentena, reingestarTodosDuplicados, ingestaPorDia,
 } from './utils/inspeccion.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { purgarObra } from './utils/purga.js';
@@ -65,13 +65,18 @@ export function rutasPanel() {
             res.status(r2.ok ? 200 : 400).json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
-    // Resolver un duplicado. Body { id, quedarse: 'existente'|'entrante' }. (POST → solo admin.)
+    // Resolver un duplicado. Body { id, quedarse: 'existente'|'entrante'|'ambos' }. (POST → solo admin.)
     r.post('/cuarentena/duplicado/resolver', async (req, res) => {
         try {
             const { id, quedarse } = req.body || {};
             const r2 = await resolverDuplicado(id, quedarse);
             res.status(r2.ok ? 200 : 400).json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Reprocesar TODO Cuarentena/duplicados (vuelven al Inbox; la lógica actual los resuelve sola).
+    r.post('/cuarentena/duplicados/reprocesar-todos', async (req, res) => {
+        try { res.json(await reingestarTodosDuplicados()); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
     // ── Purga de obra multivolumen (simulación por defecto; ejecutar:true aplica) ──

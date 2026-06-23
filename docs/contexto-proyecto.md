@@ -238,8 +238,15 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
 - **Mayoría de la biblioteca = ediciones ePubLibre**: sin ISBN en Dublin Core (solo UUID + id EPL),
   por eso para esos libros se tira de título/autor; el "tesoro" de DC ahí es título/autor/sinopsis/
   materias, que sí se usan.
-- **Reproceso idempotente:** dedup por isbn → issn → título; corregir un libro mal identificado y
-  reprocesar crea un registro NUEVO (otra clave) y deja el viejo → hay que borrar el viejo a mano.
+- **Reproceso idempotente:** dedup por hash → isbn(+formato) → issn → título; corregir un libro mal
+  identificado y reprocesar crea un registro NUEVO (otra clave) y deja el viejo → hay que borrar el viejo a mano.
+- **Duplicados y formatos:** un ISBN admite VARIOS documentos, **uno por formato** (pdf/epub/mobi…):
+  mismo ISBN + formato distinto → documento APARTE (fundir formatos más tarde es fácil; separarlos no).
+  Mismo **hash** que algo ya catalogado = es el mismo fichero → se **BORRA** (no Papelera, no Cuarentena).
+  Solo el conflicto real (mismo ISBN, mismo formato, contenido distinto) va a **Cuarentena/duplicados**,
+  con el comparador del panel (quedarse con catalogado/entrante/ambos) y un botón "reprocesar todos".
+  En el Inbox: una carpeta con el MISMO nombre base en varias extensiones = "mismo libro, varios formatos"
+  (no es colección; un doc por formato, comparten portada); 2+ nombres base distintos = colección.
 - **Secretos:** el `.env` es la única fuente; las env vars son visibles en el panel Docker de DSM
   (inherente a Docker) — la defensa es restringir acceso al NAS + usuario Atlas con IP allowlist.
 

@@ -114,6 +114,21 @@ export async function reingestarCuarentena(idRel) {
     return { ok: movidos > 0, movidos, total: archivos.length };
 }
 
+/** Reingesta TODOS los depósitos de Cuarentena/duplicados (vuelven al Inbox para re-evaluarse con la
+ *  lógica actual: los de mismo hash se BORRAN, los de otro formato se SEPARAN en su propio documento,
+ *  y solo los conflictos reales (mismo formato, contenido distinto) vuelven a Cuarentena). */
+export async function reingestarTodosDuplicados() {
+    const catDir = path.join(DIR_CUARENTENA, 'duplicados');
+    let deps; try { deps = await fs.readdir(catDir, { withFileTypes: true }); } catch { return { ok: true, depositos: 0, movidos: 0 }; }
+    let depositos = 0, movidos = 0;
+    for (const d of deps) {
+        if (!d.isDirectory()) continue;
+        const r = await reingestarCuarentena(`duplicados/${d.name}`);
+        depositos++; if (r.ok) movidos += r.movidos || 0;
+    }
+    return { ok: true, depositos, movidos };
+}
+
 // ── Ingesta por día (para la gráfica del panel) ──────────────────────────────
 export async function ingestaPorDia(dias = 30) {
     const db = await conectarDB();

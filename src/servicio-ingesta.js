@@ -8,7 +8,6 @@ import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
 import { enviarACuarentena } from './gestor-fallos.js';
-import { reciclar } from './utils/papelera.js';
 import { carpetaDeDoc, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -129,8 +128,9 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     // DUPLICADO sospechado (hash idéntico, o mismo ISBN con fichero de otro nombre): se CONFIRMA por
     // HASH DE CONTENIDO antes de decidir. "Hashear ambos si no lo están ya": el recién llegado ya trae
     // hash (paso 1); del existente se usa el suyo o se calcula de su fichero en el árbol CDU (y se
-    // guarda, para no repetirlo). Idéntico → reciclar el recién llegado (no satura Cuarentena);
-    // distinto → Cuarentena/duplicados para revisión humana (nada se pierde).
+    // guarda, para no repetirlo). Idéntico → se BORRA el recién llegado (es el mismo fichero); distinto
+    // → Cuarentena/duplicados para revisión humana (nada se pierde). NOTA: con la dedup por ISBN+formato
+    // de motor-catalogo, los formatos distintos del mismo libro ya NO llegan aquí (se insertan aparte).
     if (resultado.operacion === 'duplicado_exacto' || resultado.operacion === 'posible_duplicado') {
         const idExist = String(resultado._id);
         const hashNuevo = documento.hash_contenido
@@ -154,10 +154,12 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
             documento: { ...resultado },
         };
         if (identico) {
-            // Contenido IDÉNTICO → se descarta el recién llegado a la Papelera (recuperable).
-            await reciclar(rutas, `duplicado-${documento.isbn || documento.issn || documento.titulo || 'recurso'}`);
-            console.log(`  ♻️  Duplicado EXACTO (hash) de ${idExist}: «${path.basename(rutas[0])}» → Papelera.`);
-            return { ...comun, operacion: 'duplicado_exacto', accion: 'reciclado' };
+            // Contenido IDÉNTICO (mismo hash que un doc ya catalogado) = es OBVIAMENTE el mismo
+            // fichero. No aporta nada → se BORRA permanentemente (ni Papelera ni Cuarentena: la
+            // intervención humana se reserva para lo que de verdad la necesita).
+            for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
+            console.log(`  🗑️  Duplicado EXACTO (hash) de ${idExist}: «${path.basename(rutas[0])}» → borrado.`);
+            return { ...comun, operacion: 'duplicado_exacto', accion: 'borrado' };
         }
         // Hash distinto (o no comparable) → Cuarentena/duplicados.
         await enviarACuarentena(rutas, {

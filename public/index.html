@@ -376,7 +376,7 @@ $('#vSwitch').onchange=async e=>{try{const r=await api('/vigilante',{method:'POS
 // ── cuarentena ──
 async function loadCuar(){try{const c=await api('/cuarentena');const cats=Object.keys(c);
   $('#cuarCount').textContent=cats.reduce((s,k)=>s+c[k].length,0)+' depósito(s)';
-  $('#cuarBody').innerHTML=cats.length?cats.map(cat=>`<div class="card" style="margin-bottom:14px"><h3>${esc(cat)} · ${c[cat].length}</h3>
+  $('#cuarBody').innerHTML=cats.length?cats.map(cat=>`<div class="card" style="margin-bottom:14px"><h3>${esc(cat)} · ${c[cat].length}${cat==='duplicados'?` <button class="btn admin-only" id="reproAllDup" style="float:right">♻ Reprocesar todos</button>`:''}</h3>
     <table><tr><th>Título / archivo</th><th>Motivo</th><th></th></tr>${c[cat].map(d=>`<tr>
       <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div></td>
       <td class="muted">${esc(d.error||'—')}</td>
@@ -384,6 +384,11 @@ async function loadCuar(){try{const c=await api('/cuarentena');const cats=Object
   $$('#cuarBody [data-re]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api('/cuarentena/reingestar',{method:'POST',body:JSON.stringify({id:b.dataset.re})});
     if(r.ok){toast(`Reingestados ${r.movidos}/${r.total} → Inbox`);loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}catch(e){toast(e.message,'bad');b.disabled=false;}});
   $$('#cuarBody [data-cmp]').forEach(b=>b.onclick=()=>abrirComparador(b.dataset.cmp));
+  if($('#reproAllDup'))$('#reproAllDup').onclick=async()=>{
+    if(!confirm('Devuelve TODOS los duplicados al Inbox para re-evaluarlos con la lógica actual (los idénticos se borran, los de otro formato se separan, solo los conflictos reales vuelven). ¿Seguir?'))return;
+    const b=$('#reproAllDup');b.disabled=true;
+    try{const r=await api('/cuarentena/duplicados/reprocesar-todos',{method:'POST'});toast(`Reprocesando ${r.movidos} fichero(s) de ${r.depositos} depósito(s) → Inbox`);loadCuar();}
+    catch(e){toast(e.message,'bad');b.disabled=false;}};
 }catch(e){toast(e.message,'bad');}}
 
 // Comparador de duplicados: catalogado vs entrante, con la recomendación resaltada.

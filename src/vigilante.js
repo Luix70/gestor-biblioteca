@@ -277,11 +277,17 @@ async function listarUnidades() {
                         obra: { titulo: obra.titulo_obra, numero: v.numero, titulo_volumen: v.titulo, total: obra.total },
                     });
                 }
-                // Resto (no son tomos): 2+ docs DISTINTOS = colección (la carpeta PERSISTE como
-                // buzón); 1 solo doc = documento suelto y la carpeta se DISUELVE (deflate) al vaciarse.
+                // Resto (no son tomos). Tres casos:
+                //   · 1 documento → suelto; la carpeta se DISUELVE (deflate) al vaciarse.
+                //   · 2+ con el MISMO nombre base (Book.pdf/.epub/.mobi) = "mismo libro, varios
+                //     formatos": un documento POR formato (la dedup por ISBN+formato los separa), NO es
+                //     colección, la carpeta se disuelve y comparten portada (mismo nombre base).
+                //   · 2+ con nombres base DISTINTOS = colección (la carpeta PERSISTE como buzón).
                 if (resto.length > 0) {
-                    const esColeccion = resto.length >= 2;
-                    if (!esColeccion) dropsADisolver.add(ruta); // carpeta de un solo documento → deflate
+                    const base = (p) => path.basename(p, path.extname(p)).trim().toLowerCase().replace(/\s+/g, ' ');
+                    const multiFormato = resto.length >= 2 && new Set(resto.map(base)).size === 1;
+                    const esColeccion = !multiFormato && resto.length >= 2;
+                    if (!esColeccion) dropsADisolver.add(ruta); // single-doc o multi-formato → deflate
                     for (const d of resto) unidades.push({
                         rutas: [d], esImagenes: false, carpeta: ruta,
                         conservarCarpeta: esColeccion,

@@ -219,20 +219,26 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                     filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
                 }
             } else if (docFinal.isbn && !docFinal.obra) {
-                // — Nivel C: libros con ISBN (NUNCA tomos de obra: jamás se fusionan por ISBN) — solo
-                //   actualizar si es el mismo fichero
-                const candidato = await coleccionBiblioteca.findOne({ isbn: docFinal.isbn });
-                if (candidato) {
-                    const mismoArchivo = !candidato.nombre_archivo
-                        || candidato.nombre_archivo === docFinal.nombre_archivo;
-                    if (mismoArchivo) {
-                        filtro = { _id: candidato._id };
-                    } else {
-                        // Mismo ISBN, fichero con OTRO nombre → POSIBLE duplicado. No se inserta a ciegas
-                        // (evita versiones duplicadas silenciosas): el servicio lo confirma por HASH de
-                        // contenido y recicla el idéntico, o lo manda a Cuarentena/duplicados si difiere.
-                        return { ...candidato, operacion: 'posible_duplicado' };
+                // — Nivel C: libros con ISBN (NUNCA tomos de obra: jamás se fusionan por ISBN).
+                //   Un mismo ISBN puede tener VARIOS documentos: UNO POR FORMATO (pdf, epub, mobi…),
+                //   que es lo deseado (no se fusionan formatos en un solo registro; fundirlos más tarde
+                //   es fácil, separarlos no). Solo deduplicamos contra el doc del MISMO formato:
+                //     · mismo ISBN + mismo formato + mismo fichero  → ACTUALIZAR
+                //     · mismo ISBN + mismo formato + OTRO fichero   → posible_duplicado (revisión)
+                //     · mismo ISBN + formato NUEVO                  → documento DISTINTO (insertar)
+                const candidatos = await coleccionBiblioteca.find({ isbn: docFinal.isbn }).toArray();
+                if (candidatos.length) {
+                    const miFormato = (docFinal.formatos || [])[0] || null;
+                    const mismoFormato = miFormato
+                        ? candidatos.find(c => (c.formatos || []).includes(miFormato))
+                        : candidatos[0]; // sin formato conocido: compat con el comportamiento anterior
+                    if (mismoFormato) {
+                        const mismoArchivo = !mismoFormato.nombre_archivo
+                            || mismoFormato.nombre_archivo === docFinal.nombre_archivo;
+                        if (mismoArchivo) filtro = { _id: mismoFormato._id };
+                        else return { ...mismoFormato, operacion: 'posible_duplicado' };
                     }
+                    // Ningún doc con este ISBN tiene este formato → otro formato del mismo libro: insertar.
                 }
             } else if (docFinal.issn) {
                 filtro = { issn: docFinal.issn };
