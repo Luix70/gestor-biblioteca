@@ -7,6 +7,7 @@ import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
+import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
 
@@ -63,6 +64,38 @@ function fusionarOcr(base, ocr) {
         sinopsis: ocr.sinopsis || null,
         palabras_clave: arr(ocr.palabras_clave),
     };
+}
+
+// ── OVERRIDE manual (sidecar) ────────────────────────────────────────────────
+// Para FORZAR la catalogación de un documento mal identificado (p. ej. "Guns" confundido por las
+// APIs con "Guns, Germs and Steel"): se deja junto al fichero un JSON "<fichero>.meta.json" (o
+// "<base>.meta.json") con los campos a imponer. Mandan sobre el archivo Y las APIs. Claves
+// especiales: "sin_apis": true (no consultar APIs/IA — usa solo archivo+override) y "sin_isbn": true
+// (el documento NO tiene ISBN; evita que se le adjudique el de un homónimo).
+const CAMPOS_OVERRIDE = ['titulo', 'subtitulo', 'autores', 'editorial', 'cdu', 'idioma', 'año_edicion',
+    'sinopsis', 'palabras_clave', 'coleccion_nombre', 'coleccion_numero', 'tipo_recurso',
+    'obra_titulo', 'volumen_numero', 'isbn_obra'];
+
+export async function leerOverride(rutaArchivo) {
+    const sinExt = path.join(path.dirname(rutaArchivo), path.basename(rutaArchivo, path.extname(rutaArchivo)));
+    for (const c of [rutaArchivo + '.meta.json', sinExt + '.meta.json']) {
+        try { const j = JSON.parse(await fs.readFile(c, 'utf8')); if (j && typeof j === 'object') return j; }
+        catch { /* no existe o JSON inválido: probar el siguiente */ }
+    }
+    return null;
+}
+
+/** Aplica el override a datosBase (in situ) y devuelve { sinApis }. */
+function aplicarOverride(datosBase, override) {
+    for (const k of CAMPOS_OVERRIDE) {
+        if (override[k] !== undefined && override[k] !== null) datosBase[k] = override[k];
+    }
+    if (override.isbn) { const v = validarISBN(override.isbn); if (v) { datosBase.isbn = v; datosBase.isbn_candidatos = variantesISBN(v); } }
+    if (override.issn) { const v = validarISSN(override.issn); if (v) datosBase.issn = v; }
+    if (override.sin_isbn === true) { delete datosBase.isbn; datosBase.isbn_candidatos = []; datosBase._isbnBloqueado = true; }
+    const sinApis = override.sin_apis === true || override.forzar === true;
+    datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Override manual (.meta.json) aplicado${sinApis ? ' · sin APIs' : ''}.`];
+    return { sinApis };
 }
 
 function metadatosDesdeNombre(ruta) {
@@ -199,6 +232,17 @@ export async function procesarRecurso(entrada) {
         throw new ErrorIdentificacion(`Tipo de archivo no soportado: ${path.basename(rutas[0])}`);
     }
 
+    // OVERRIDE manual (sidecar .meta.json): el usuario FUERZA campos para corregir una identificación
+    // errónea. Se aplica ANTES de enriquecer: sus valores guían/bloquean el enriquecimiento (un ISBN
+    // correcto pasa a ser el pivote; sin_apis evita que las APIs vuelvan a confundirlo).
+    let sinApis = false;
+    const override = await leerOverride(rutas[0]);
+    if (override) {
+        ({ sinApis } = aplicarOverride(datosBase, override));
+        if (override.tipo_recurso) tipo_recurso = override.tipo_recurso;
+        console.log(`[Orquestador] Override manual aplicado a ${path.basename(rutas[0])}${sinApis ? ' (sin APIs)' : ''}.`);
+    }
+
     // TIER 2–4 · enriquecimiento conservador (APIs + IA solo para huecos)
     const documento = await enriquecerMetadatos(datosBase, {
         tipo_recurso,
@@ -206,6 +250,7 @@ export async function procesarRecurso(entrada) {
         ubicacion: contexto.ubicacion,
         coleccion: contexto.coleccion,   // drop por carpeta: colección autoritativa
         obra: contexto.obra,             // tomo de obra multivolumen (titulo, numero, titulo_volumen)
+        sinApis,                         // override sin_apis: no consultar APIs/IA
     });
 
     // Portada de calidad (las imágenes escaneadas ya son su propia portada; no se tocan).

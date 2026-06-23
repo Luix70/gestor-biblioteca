@@ -144,14 +144,20 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Pasar el idioma del archivo para filtrar la búsqueda por lengua: da con la edición en
     // español/inglés/etc. antes que con ediciones en otras lenguas (caso Anna Karenina).
     // El Dewey/LC del CIP (del propio fichero) se siembra como autoridad antes que las APIs.
-    const datosExtra = await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
-        incluirSinopsis: faltaSinopsis,
-        incluirCdu: faltaCdu,
-        isbnsArchivo: [...isbnsArchivo],
-        idioma: documento.idioma || null,
-        cipDewey: cip?.dewey || null,
-        cipLcc: cip?.lc || null,
-    });
+    // OVERRIDE sin_apis: NO se consulta a ninguna autoridad (el usuario fuerza los datos; evita que
+    // un título genérico vuelva a confundirse con un homónimo). datosExtra queda vacío → no rellena.
+    const datosExtra = contexto.sinApis
+        ? { isbn: null, titulo: null, autores: [], sinopsis: null, editorial: null, año_edicion: null,
+            idioma: null, categorias: [], dewey: null, lcc: null, portadas_remotas: [], cdu: null,
+            cdu_adicionales: [], coleccion_nombre: null, coleccion_numero: null, alertas: ['Sin APIs (override manual).'] }
+        : await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
+            incluirSinopsis: faltaSinopsis,
+            incluirCdu: faltaCdu,
+            isbnsArchivo: [...isbnsArchivo],
+            idioma: documento.idioma || null,
+            cipDewey: cip?.dewey || null,
+            cipLcc: cip?.lc || null,
+        });
 
     // Título y autores: el archivo manda, SALVO que su "título" no sea fiable, es decir,
     // que falte o sea en realidad un identificador (p. ej. un PDF llamado "0071769234.pdf",
@@ -222,7 +228,10 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // resolvió, vale el del archivo. Se valida el dígito de control y se descarta si es basura.
     // Las revistas no tienen ISBN propio; cualquier ISBN que retorne la API para una búsqueda
     // por título de revista es de un libro homónimo, no del número de la publicación.
-    if (!esRevista) {
+    if (datosBase._isbnBloqueado) {
+        // Override "sin_isbn": el documento NO tiene ISBN; nunca se le adjudica el de un homónimo.
+        delete documento.isbn;
+    } else if (!esRevista) {
         // TOMO de obra: manda el ISBN de ROL del propio fichero ("… (Vol. N)"), NO la API. Las
         // autoridades suelen fundir todos los tomos en una sola edición y devuelven SIEMPRE el mismo
         // ISBN (el del set o el del tomo 1), lo que volvería a colisionar/fusionar los tomos.
@@ -274,7 +283,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Limpieza 1: descartar campos internos de los lectores que no deben persistirse
     // (evita guardar la portada base64 completa o banderas de proceso en MongoDB).
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
-    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos', 'esFechada', 'isbns_rol', 'cip'];
+    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', 'paginas', '_error', 'isbn_candidatos', 'esFechada', 'isbns_rol', 'cip', '_isbnBloqueado'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).
