@@ -12,6 +12,7 @@ services:
       - "/volume3/BIBLIOTECA DIGITAL/Reintentos:/app/Reintentos"
       - "/volume3/BIBLIOTECA DIGITAL/_ER Room:/app/_ER Room"
       - "/volume3/BIBLIOTECA DIGITAL/Recycling:/app/Recycling"
+      - "/volume3/BIBLIOTECA DIGITAL/Fichero:/app/Fichero"
     ports:
       - "3000:3000"
       - "4000:4000"
@@ -26,6 +27,7 @@ services:
       - PATH_REINTENTOS=/app/Reintentos
       - PATH_ER_ROOM=/app/_ER Room
       - PATH_RECICLAJE=/app/Recycling
+      - PATH_FICHERO=/app/Fichero
       - PANEL_PORT=4000
       - ADMIN_PWD=${ADMIN_PWD}
       - GUEST_PWD=${GUEST_PWD:-guest}

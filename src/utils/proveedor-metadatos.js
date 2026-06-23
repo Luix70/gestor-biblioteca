@@ -4,6 +4,8 @@ import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { buscarEnBNE } from './buscador-bne.js';
 import { buscarEnDNB } from './buscador-dnb.js';
+import { buscarEnFicheroLocal } from './buscador-local.js';
+import { buscarEnBNF } from './buscador-bnf.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 
 // Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
@@ -110,12 +112,45 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // en el texto/nombre nunca se resolvía por identificador (solo por título). Ver case 14.
     const isbnsLookup = [...isbnsArchivo, ...(isbnHint ? [isbnHint] : [])];
 
+    // TIER 2.0 · FICHERO LOCAL (volcados OL+BNE offline en fichero.db). Autoridad principal:
+    // sin red, ~0,1 ms por ISBN. Gana a las APIs online (rellenar = primera fuente), que quedan
+    // como fallback de FRESCURA para lo que el volcado (una instantánea) no tenga. Si el .db no
+    // está o better-sqlite3 no carga, devuelve null y el pipeline sigue con las APIs online.
+    let infoLocal = null;
+    try {
+        infoLocal = await buscarEnFicheroLocal({ isbns: isbnsLookup });
+    } catch (e) {
+        datosExtra.alertas.push('Fichero local: omitido por error.');
+    }
+    if (infoLocal && infoLocal.titulo) {
+        rellenar('isbn', infoLocal.isbn);
+        rellenar('titulo', infoLocal.titulo);
+        rellenar('autores', infoLocal.autores);
+        rellenar('editorial', infoLocal.editorial);
+        rellenar('sinopsis', infoLocal.sinopsis);
+        rellenar('año_edicion', infoLocal.año_edicion);
+        rellenar('idioma', infoLocal.idioma);
+        rellenar('dewey', infoLocal.dewey);   // alimenta la clasificación CDU
+        rellenar('lcc', infoLocal.lcc);
+        rellenar('categorias', infoLocal.categorias);
+        rellenar('coleccion_nombre', infoLocal.coleccion_nombre);
+        if (infoLocal.cdu) datosExtra.cdu = infoLocal.cdu;   // CDU de la BNE → salta el clasificador IA
+        if (infoLocal.paginas) datosExtra.paginas_bne = infoLocal.paginas;       // canales que captura
+        if (infoLocal.dimensiones) datosExtra.dimensiones_bne = infoLocal.dimensiones; // motor-enriquecimiento
+        if (infoLocal.portada_url) datosExtra.portadas_remotas.push({ origen: 'fichero_local', url: infoLocal.portada_url });
+        datosExtra.alertas.push(`Datos del Fichero local (${infoLocal.fuentes.join('+')}).`);
+    }
+    const localHit = !!(infoLocal && infoLocal.titulo);
+
     // TIER 2a · OpenLibrary (autoridad principal). Si los ISBN dan 404, el buscador recae
     // en una búsqueda por título/autor filtrada por idioma (da con la edición en la lengua
     // del archivo antes que con ediciones en otras lenguas).
     // Un fallo de RED en una API no aborta la ingesta: se degrada con una alerta y se sigue.
     let infoOL = null;
-    if (Date.now() < olBloqueadoHasta) {
+    if (localHit) {
+        // El Fichero local ya trae los datos de OL (mismo origen, sin el timeout de 20-45 s).
+        datosExtra.alertas.push('OpenLibrary online omitida: ya la sirve el Fichero local.');
+    } else if (Date.now() < olBloqueadoHasta) {
         const minutos = Math.ceil((olBloqueadoHasta - Date.now()) / 60000);
         console.warn(`⚠️  OpenLibrary: circuit-breaker abierto — omitida (${minutos} min restantes).`);
         datosExtra.alertas.push('OpenLibrary pausada (circuit-breaker): omitida.');
@@ -200,7 +235,9 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // lengua, tema). Si BNE resuelve la CDU, el clasificador AI no se ejecuta.
     const isbnParaBusquedas = datosExtra.isbn || isbnsLookup[0] || null;
     let bneTieneCDU = false;
-    if (isbnParaBusquedas) {
+    // Si el Fichero local ya dio CDU (su registro BNE), no consultamos la BNE online (evita los
+    // 403 de SPARQL). Solo se consulta para libros sin CDU aún (típicamente OL-only en el volcado).
+    if (isbnParaBusquedas && !datosExtra.cdu) {
         const recBNE = await buscarEnBNE(isbnParaBusquedas);
         if (recBNE) {
             if (recBNE.cdus?.length > 0) {
@@ -232,6 +269,26 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             rellenar('lcc', infoDNB.lcc);
             if (infoDNB.dewey || infoDNB.lcc)
                 datosExtra.alertas.push('Dewey/LCC complementados desde DNB (Deutsche Nationalbibliothek).');
+        }
+    }
+
+    // TIER 2e · BnF (SRU UNIMARC) — fallback para libros francófonos + Dewey. Se consulta solo si
+    // aún faltan clasificación o datos clave; rellena huecos sin pisar nada. (La British National
+    // Bibliography será un fallback hermano cuando publique su endpoint Share Family; ver docs.)
+    if (isbnParaBusquedas && ((!datosExtra.cdu && !datosExtra.dewey) || !datosExtra.titulo || !datosExtra.autores?.length)) {
+        const infoBNF = await buscarEnBNF({ isbns: [datosExtra.isbn, ...isbnsLookup].filter(Boolean) });
+        if (infoBNF && infoBNF.titulo) {
+            rellenar('titulo', infoBNF.titulo);
+            rellenar('autores', infoBNF.autores);
+            rellenar('editorial', infoBNF.editorial);
+            rellenar('año_edicion', infoBNF.año_edicion);
+            rellenar('idioma', infoBNF.idioma);
+            rellenar('coleccion_nombre', infoBNF.coleccion_nombre);
+            rellenar('dewey', infoBNF.dewey);
+            if (infoBNF.cdu && !datosExtra.cdu) datosExtra.cdu = infoBNF.cdu;
+            if (infoBNF.paginas && !datosExtra.paginas_bne) datosExtra.paginas_bne = infoBNF.paginas;
+            if (infoBNF.dimensiones && !datosExtra.dimensiones_bne) datosExtra.dimensiones_bne = infoBNF.dimensiones;
+            datosExtra.alertas.push('Datos/Dewey complementados desde la BnF.');
         }
     }
 

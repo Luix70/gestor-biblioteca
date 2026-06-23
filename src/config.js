@@ -20,6 +20,7 @@ export const AJUSTES = {
     HTTP_TIMEOUT_MS: 20000,         // timeout de TODA llamada HTTP a las APIs bibliográficas
     OL_TIMEOUT_MS: 20000,           // timeout de OpenLibrary; el circuit-breaker evita esperar en cada fallo
     DNB_TIMEOUT_MS: 15000,          // timeout de Deutsche Nationalbibliothek (SRU público)
+    BNF_TIMEOUT_MS: 15000,          // timeout de la Bibliothèque nationale de France (SRU público)
 
     // --- Vigilante del Inbox ---
     PAUSA_INGESTA_MS: 1500,         // pausa entre recursos (no saturar APIs)
