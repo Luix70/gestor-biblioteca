@@ -7,9 +7,9 @@ import { COLS, ESQUEMA_FICHERO, ESQUEMA_INDICES, parseAutorLine, parseEdicionLin
  * a un único SQLite `fichero.db` con columnas al estilo de `biblioteca`. Se ejecuta UNA VEZ en un PC
  * potente (con NVMe), y luego se copia el .db al NAS (/volume3/BIBLIOTECA DIGITAL/Fichero/).
  *
- *   1) en ese PC:  npm install better-sqlite3      (NO está en package.json para no romper el
- *                                                   build del NAS; allí lo añadiremos con buscador-local)
+ *   1) en ese PC:  npm install      (better-sqlite3 ya está en dependencies; basta instalar)
  *   2)  node scripts/etl-fichero.js --ol <ol_dump.txt> --bne <BNE_dump.json> --out <fichero.db> [--raw]
+ *   3) copia el .db al NAS: /volume3/BIBLIOTECA DIGITAL/Fichero/fichero.db  (lo consume buscador-local.js)
  *
  * REANUDABLE: cada lote (50k) commitea las filas Y el offset de bytes en la MISMA transacción
  * (tabla _etl_progreso). Un corte de luz / Ctrl-C NO corrompe (SQLite es ACID): al re-ejecutar,

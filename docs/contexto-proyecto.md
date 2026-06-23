@@ -187,6 +187,40 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   **reingestar** la Cuarentena, ver tamaño/contenido y **vaciar** la Papelera, y **purgar** una obra
   (`purgarObra`, reutilizada por `scripts/purgar-multipart.js`). Pensado como ANDAMIO del futuro front-end
   (la "Búsqueda" es un hueco del menú para lo que viene). Acceso: `http://<nas>:4000`.
+- **Fichero local — volcados OL+BNE offline** (`scripts/etl-fichero.js` · `scripts/etl-map.js` ·
+  `src/utils/buscador-local.js`): SQLite **solo-lectura** (`fichero.db`, ~23 GB, **58,7 M registros /
+  37,4 M con ISBN**) con los dumps de Open Library (ediciones) + BNE en una tabla `fichero` con
+  columnas al estilo de `biblioteca`. Es el **Tier 2.0** (autoridad principal): sustituye a las
+  consultas online a OL/BNE, que pasan a **fallback de frescura** (el volcado es una instantánea: lo
+  recién publicado no está). **El esquema es ÚNICA FUENTE DE VERDAD en `etl-map.js`** (`ESQUEMA_FICHERO`
+  = DDL con la procedencia de cada columna, `ESQUEMA_INDICES` = idx_isbn + FTS5, `COLS`); lo importan
+  tanto el ETL (que lo CREA) como `buscador-local.js` (que lo CONSULTA) → no puede desincronizarse.
+  El **ETL es reanudable** (cada lote commitea filas + offset de bytes en la misma transacción; Ctrl-C
+  o corte de luz no corrompe, retoma por offset). Se ejecuta UNA vez en un PC potente (`npm install
+  better-sqlite3` allí) y se copia el `.db` al NAS (`/volume3/BIBLIOTECA DIGITAL/Fichero/`, bind mount
+  `/app/Fichero`, `PATH_FICHERO`). `buscador-local.js` hace **point lookup indexado por ISBN (~0,07 ms;
+  el tamaño no importa, no escanea)** normalizando a ISBN-13, y **fusiona** las filas del mismo ISBN
+  (BNE primero → CDU/idioma/tema; OL → Dewey/LCC/portada/sinopsis). **Degrada elegantemente**: sin el
+  `.db` o sin que cargue `better-sqlite3`, devuelve null y el pipeline sigue con las APIs online.
+  `better-sqlite3` es C puro (sin AVX) → corre en el Atom como la excepción de poppler; va en
+  `dependencies` (el build del NAS baja el binario precompilado linux-x64/node18). En el orquestador:
+  un acierto local **omite OpenLibrary online** (evita su timeout de 20-45 s) y la **BNE online solo se
+  consulta si aún no hay CDU** (evita los 403 de SPARQL). **Próxima reconstrucción** (columnas a añadir,
+  el `.db` se rehace desde cero, sin migraciones): `edicion` (OL `edition_name`/BNE `edicion` — caso
+  "Eleventh Edition"), rellenar `dimensiones` desde OL `physical_dimensions` y `lengua_original` desde
+  OL `translated_from`, materias OL `subject_*`, y una **tabla de autoridad de autores** (OL aporta
+  fechas/bio/VIAF/Wikidata; BNE `per_id`) en vez de tirar `_ol_autores`.
+- **Fallbacks bibliográficos online — BnF y (pendiente) BNB** (`utils/buscador-bnf.js`): la **BnF**
+  expone un SRU UNIMARC público (`catalogue.bnf.fr/api/SRU`, mismo protocolo que la DNB) — clon de
+  `buscador-dnb.js` pero con registro completo. Fallback para **libros francófonos** (título/autor/
+  editorial/año/idioma/páginas/colección) **+ Dewey** (campo 676, presente en buena parte; 675/CDU
+  rara vez; el 686 "Cadre de classement de la Bibliographie nationale française" **NO** es Dewey/CDU
+  aunque lo parezca → se ignora). Se consulta tras la DNB solo si faltan clasificación o datos clave.
+  **British National Bibliography (BNB): PENDIENTE, integrarla algún día.** Su LOD/SPARQL histórico
+  (`bnb.data.bl.uk`) **murió** tras el ciberataque de 2023 (no conecta); el sustituto es el portal
+  **Share Family** (`https://bl.natbib-lod.org/`), pero en beta y **sin API pública aún** (SPARQL +
+  data dumps anunciados como *futuros*; responde 429 a peticiones automáticas). Revisitar cuando
+  publiquen el endpoint (contacto: metadata@bl.uk); encajará como fallback hermano de la BnF.
 
 ---
 
