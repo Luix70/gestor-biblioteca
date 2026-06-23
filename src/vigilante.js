@@ -60,9 +60,13 @@ let ultimaRevisionMant = 0;          // última pasada de mantenimiento
 const dropsMultiparte = new Set();
 
 // --- Estado del Conformador ---
-let modoConformador = (process.env.MANTENIMIENTO_ACTIVO !== '0') ? 'diferido' : 'apagado';
+// El mantenimiento NO corre automáticamente al quedar el Inbox inactivo: se dispara A MANO con
+// POST /api/mantenimiento (activar/intervalo). El modo 'diferido' (auto al reposo) es OPT-IN
+// (MANTENIMIENTO_ACTIVO=1); por defecto queda 'apagado'.
+let modoConformador = (process.env.MANTENIMIENTO_ACTIVO === '1') ? 'diferido' : 'apagado';
 let conformadorApagadoHasta = null;  // ms epoch; solo para modo 'apagado-hasta'
 let conformadorDormido = false;      // true cuando la cola está vacía; evita polls innecesarios a Mongo
+let pararMantManual = false;         // señal de STOP del bucle de mantenimiento manual (modo=apagado)
 
 const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
 
@@ -487,27 +491,41 @@ async function quizasMantenimiento() {
  * Disparo MANUAL del Conformador (vía API): vacía TODO el backlog en segundo plano, lote a lote,
  * saltándose la espera de inactividad. Cede a la ingesta entre lotes. Devuelve de inmediato.
  */
-export function mantenimientoManual({ intervaloSegundos = 0 } = {}) {
+export function mantenimientoManual({ intervaloSegundos = 0, activarSegundos = 0 } = {}) {
     if (mantManualEnCurso) return { ok: false, motivo: 'ya hay un mantenimiento manual en curso' };
     mantManualEnCurso = true;
+    pararMantManual = false;
     conformadorDormido = false; // forzar aunque la cola pareciera vacía
-    const seg = Math.max(0, Number(intervaloSegundos) || 0);
+    const seg = Math.max(0, Number(intervaloSegundos) || 0);     // pausa entre rondas (0 = continuo)
+    const activar = Number(activarSegundos) || 0;                // 0 = ya · >0 = tras N s · -1 = al quedar el Inbox inactivo
     const lote = Number(process.env.MANTENIMIENTO_LOTE || 25);
+    const dormir = (s) => new Promise(r => setTimeout(r, s * 1000));
     (async () => {
-        const dormir = (s) => new Promise(r => setTimeout(r, s * 1000));
-        console.log(`🧹 Mantenimiento manual iniciado (${seg > 0 ? `pausa ${seg}s entre rondas de ${lote}` : 'continuo, sin pausa'}).`);
         try {
-            while (mantManualEnCurso) {
-                if (modoConformador === 'apagado') { console.log('🧹 Mantenimiento manual detenido (Conformador en apagado).'); break; }
-                const r = await ejecutarPasadaMantenimiento();
-                // Ocupado por la ingesta o cesión de turno: NO abandona el backlog; espera y reintenta.
-                if (!r.ok || r.abortado) { await dormir(Math.max(seg, 5)); continue; }
-                if (r.pendientes === 0) { console.log('🧹 Mantenimiento manual finalizado: backlog vacío.'); break; }
-                if (seg > 0) await dormir(seg); // ritmo entre rondas (0 = continuo)
+            // — Arranque programado —
+            if (activar === -1) {
+                console.log('🧹 Mantenimiento manual: esperando a que el Inbox quede inactivo…');
+                while (!pararMantManual && await inboxTieneArchivos()) await dormir(10);
+            } else if (activar > 0) {
+                console.log(`🧹 Mantenimiento manual: arrancará en ${activar}s…`);
+                for (let t = 0; t < activar && !pararMantManual; t += 5) await dormir(Math.min(5, activar - t));
             }
+            if (pararMantManual) { console.log('🧹 Mantenimiento manual cancelado antes de arrancar.'); return; }
+
+            // — Rondas de LOTE, cediendo a la ingesta y reintentando hasta vaciar el backlog —
+            console.log(`🧹 Mantenimiento manual iniciado (${seg > 0 ? `pausa ${seg}s entre rondas de ${lote}` : 'continuo, sin pausa'}).`);
+            while (!pararMantManual) {
+                const r = await ejecutarPasadaMantenimiento();
+                if (!r.ok || r.abortado) { await dormir(Math.max(seg, 5)); continue; } // ocupado/cedió → reintenta
+                if (r.pendientes === 0) { console.log('🧹 Mantenimiento manual finalizado: backlog vacío.'); break; }
+                if (seg > 0) await dormir(seg);
+            }
+            if (pararMantManual) console.log('🧹 Mantenimiento manual detenido (modo=apagado).');
         } finally { mantManualEnCurso = false; }
     })().catch(e => { mantManualEnCurso = false; console.error('Mantenimiento manual:', e.message); });
-    return { ok: true, mensaje: `Mantenimiento iniciado en segundo plano (${seg > 0 ? `${seg}s entre rondas de ${lote}` : 'continuo'}); detén con modo=apagado.` };
+
+    const cuando = activar === -1 ? 'cuando el Inbox quede inactivo' : activar > 0 ? `en ${activar}s` : 'inmediatamente';
+    return { ok: true, mensaje: `Mantenimiento programado (${cuando}; ${seg > 0 ? `${seg}s entre rondas de ${lote}` : 'continuo'}). Detén con modo=apagado.` };
 }
 
 /** Calcula el ms-epoch del siguiente hito temporal para 'apagado-hasta'. */
@@ -546,7 +564,8 @@ export function configurarConformador({ modo, hasta } = {}) {
     }
 
     modoConformador = modo;
-    if (modo === 'diferido') conformadorDormido = false; // permitir que el auto compruebe pronto
+    if (modo === 'diferido') conformadorDormido = false;      // permitir que el auto compruebe pronto
+    if (modo === 'apagado') pararMantManual = true;           // además, DETIENE un mantenimiento manual en curso
 
     const info = modo === 'apagado-hasta'
         ? `apagado hasta ${new Date(conformadorApagadoHasta).toLocaleString('es-ES')}`
@@ -600,9 +619,9 @@ export async function iniciarVigilante() {
     procesarCola().catch(e => console.error('Vigilante (escaneo inicial):', e));
 
     if (modoConformador === 'diferido') {
-        console.log(`🧹 Conformador activo: mantenimiento tras ${Math.round(MANTENIMIENTO_REPOSO_MS / 1000)}s de Inbox inactivo.`);
-    } else if (modoConformador === 'apagado') {
-        console.log('🧹 Conformador desactivado (MANTENIMIENTO_ACTIVO=0).');
+        console.log(`🧹 Conformador en AUTO (opt-in): mantenimiento tras ${Math.round(MANTENIMIENTO_REPOSO_MS / 1000)}s de Inbox inactivo.`);
+    } else {
+        console.log('🧹 Conformador MANUAL: no corre solo. Dispáralo con POST /api/mantenimiento (activar=0|N|-1, intervalo=N).');
     }
 
     return watcher;
