@@ -391,6 +391,12 @@ async function procesarUnidad(unidad) {
             });
             console.error(`  🔁 ${etiqueta} → Reintentos (${e.message})`);
             await limpiarInbox(unidad); // sacar del Inbox para no reprocesar en bucle
+        } else if (e.tipo === 'ilegible') {
+            // Fichero estructuralmente dañado (EPUB/PDF corrupto): no es cuestión de catalogación
+            // manual sino de conseguir una COPIA MEJOR → al _ER Room (preserva el nombre para
+            // redescargarlo), igual que los fantasmas de 0 bytes. No satura la Cuarentena.
+            await moverAErRoom(unidad.rutas);
+            console.error(`  📛 ${etiqueta} → _ER Room (ilegible: ${e.message})`);
         } else {
             // identificación imposible u otro error no recuperable → Cuarentena (manual).
             await enviarACuarentena(unidad.rutas, { error: { tipo: e.tipo || 'desconocido', mensaje: e.message } });
