@@ -1,6 +1,6 @@
 import fs from 'fs';
 import Database from 'better-sqlite3';
-import { COLS, parseAutorLine, parseEdicionLine, parseBneLine } from './etl-map.js';
+import { COLS, ESQUEMA_FICHERO, ESQUEMA_INDICES, parseAutorLine, parseEdicionLine, parseBneLine } from './etl-map.js';
 
 /**
  * ETL del FICHERO local: vuelca los dumps de Open Library (TSV, ~92 GB) y BNE (JSON array, ~2,4 GB)
@@ -35,12 +35,7 @@ db.pragma('synchronous = NORMAL');
 db.pragma('temp_store = MEMORY');
 db.pragma('cache_size = -300000'); // ~300 MB
 db.exec(`
-CREATE TABLE IF NOT EXISTS fichero (
-  isbn TEXT, isbn_10 TEXT, titulo TEXT, subtitulo TEXT, autores TEXT, editorial TEXT,
-  anio_edicion INTEGER, idioma TEXT, cdu TEXT, dewey TEXT, lcc TEXT, lccn TEXT, paginas INTEGER,
-  dimensiones TEXT, palabras_clave TEXT, coleccion_nombre TEXT, sinopsis TEXT, tipo_documento TEXT,
-  pais TEXT, lugar_publicacion TEXT, genero_forma TEXT, lengua_original TEXT, portada_url TEXT,
-  fuente TEXT, fuente_id TEXT, extra TEXT);
+${ESQUEMA_FICHERO}
 CREATE TABLE IF NOT EXISTS _ol_autores (key TEXT PRIMARY KEY, nombre TEXT);
 CREATE TABLE IF NOT EXISTS _etl_progreso (fase TEXT PRIMARY KEY, offset INTEGER DEFAULT 0, hechos INTEGER DEFAULT 0, completa INTEGER DEFAULT 0);
 `);
@@ -106,10 +101,7 @@ function faseIndices() {
     const p = getProg.get('indices');
     if (p && p.completa) { console.log('✓ indices: ya completa.'); return; }
     console.log('▶ indices: índice ISBN + FTS5 (varios minutos)…');
-    db.exec('CREATE INDEX IF NOT EXISTS idx_isbn ON fichero(isbn)');
-    db.exec(`DROP TABLE IF EXISTS fichero_fts;
-      CREATE VIRTUAL TABLE fichero_fts USING fts5(titulo, subtitulo, autores, content='fichero', content_rowid='rowid');
-      INSERT INTO fichero_fts(rowid, titulo, subtitulo, autores) SELECT rowid, titulo, subtitulo, autores FROM fichero;`);
+    db.exec(ESQUEMA_INDICES);
     db.exec('DROP TABLE IF EXISTS _ol_autores');
     setProg.run({ fase: 'indices', offset: 0, hechos: 0, completa: 1 });
     console.log('✓ indices: COMPLETA.');

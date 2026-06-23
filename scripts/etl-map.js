@@ -56,7 +56,51 @@ export function mapBNE(r, raw = false) {
     };
 }
 
-// Columnas del INSERT (orden estable; usado por etl-fichero.js).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+// ESQUEMA DEL FICHERO — ÚNICA FUENTE DE VERDAD de la estructura del SQLite.
+// Lo importan el ETL (etl-fichero.js, lo CREA) y el futuro proveedor (buscador-local.js, lo CONSULTA).
+// Nombres ASCII al estilo de Biblioteca.biblioteca (anio_edicion ≈ año_edicion). El comentario de
+// cada columna indica su PROCEDENCIA en cada dump. Si cambias columnas: ajusta también COLS (abajo)
+// y, para que tome efecto, hay que RE-CONSTRUIR el fichero.db (no hay migraciones: es read-only).
+// ════════════════════════════════════════════════════════════════════════════════════════════════
+export const ESQUEMA_FICHERO = `
+CREATE TABLE IF NOT EXISTS fichero (
+  isbn             TEXT,    -- ISBN-13 normalizado · clave de búsqueda  | OL isbn_13/isbn_10 · BNE isbn
+  isbn_10          TEXT,    --                                          | OL isbn_10
+  titulo           TEXT,    --                                          | OL title · BNE titulo
+  subtitulo        TEXT,    --                                          | OL subtitle
+  autores          TEXT,    -- nombres unidos "; "                      | OL authors(resueltos) · BNE autores/mencion
+  editorial        TEXT,    --                                          | OL publishers[0] · BNE editorial
+  anio_edicion     INTEGER, --                                          | OL publish_date · BNE fecha_de_publicacion
+  idioma           TEXT,    -- 2 letras                                 | OL languages · BNE lengua_principal
+  cdu              TEXT,    --                                          | BNE cdu
+  dewey            TEXT,    --                                          | OL dewey_decimal_class[0]
+  lcc              TEXT,    --                                          | OL lc_classifications[0]
+  lccn             TEXT,    --                                          | OL lccn[0]
+  paginas          INTEGER, --                                          | OL number_of_pages/pagination · BNE extension
+  dimensiones      TEXT,    --                                          | BNE dimensiones
+  palabras_clave   TEXT,    --                                          | OL subjects · BNE tema
+  coleccion_nombre TEXT,    --                                          | OL series[0] · BNE serie
+  sinopsis         TEXT,    --                                          | OL description · BNE nota_de_contenido
+  tipo_documento   TEXT,    --                                          | OL physical_format · BNE tipo_de_documento
+  pais             TEXT,    --                                          | OL publish_country · BNE pais_de_publicacion
+  lugar_publicacion TEXT,   --                                          | BNE lugar_de_publicacion
+  genero_forma     TEXT,    --                                          | BNE genero_forma
+  lengua_original  TEXT,    --                                          | BNE lengua_original
+  portada_url      TEXT,    -- construida desde covers[0]               | OL covers
+  fuente           TEXT,    -- 'openlibrary' | 'bne'
+  fuente_id        TEXT,    -- OL key (/books/OL…M) · BNE id
+  extra            TEXT     -- JSON del registro original (solo con --raw)
+);`;
+
+// Índices + búsqueda por texto (FTS5 sobre título/subtítulo/autor). Se crean al final del ETL.
+export const ESQUEMA_INDICES = `
+CREATE INDEX IF NOT EXISTS idx_isbn ON fichero(isbn);
+DROP TABLE IF EXISTS fichero_fts;
+CREATE VIRTUAL TABLE fichero_fts USING fts5(titulo, subtitulo, autores, content='fichero', content_rowid='rowid');
+INSERT INTO fichero_fts(rowid, titulo, subtitulo, autores) SELECT rowid, titulo, subtitulo, autores FROM fichero;`;
+
+// Columnas del INSERT (orden estable; DEBE coincidir con ESQUEMA_FICHERO).
 export const COLS = ['isbn', 'isbn_10', 'titulo', 'subtitulo', 'autores', 'editorial', 'anio_edicion', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'paginas', 'dimensiones', 'palabras_clave', 'coleccion_nombre', 'sinopsis', 'tipo_documento', 'pais', 'lugar_publicacion', 'genero_forma', 'lengua_original', 'portada_url', 'fuente', 'fuente_id', 'extra'];
 
 // Parsers de línea (Open Library = TSV; el JSON es la 5ª columna).
