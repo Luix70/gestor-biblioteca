@@ -113,7 +113,9 @@ de ficheros clasificado por CDU.
   DESACTIVAR_VIGILANTE=1    Arranca solo la API REST, sin vigilar el Inbox
   VIGILANTE_POLLING=0       Desactiva el sondeo por intervalos (solo donde
                             inotify funciona; NUNCA poner en el NAS Synology)
-  MANTENIMIENTO_ACTIVO=0    Arranca el Conformador en modo "apagado"
+  MANTENIMIENTO_ACTIVO=1    OPT-IN al modo AUTO ("diferido": mantenimiento tras
+                            ~5 min de Inbox inactivo). Por defecto NO corre solo:
+                            se dispara a mano con POST /api/mantenimiento.
   MANTENIMIENTO_FORZAR=1    Fuerza el Conformador fuera de Docker (desarrollo)
 
   4.2  Ajustes numéricos (src/config.js — va a git, se edita en el repo)
@@ -292,23 +294,27 @@ de ficheros clasificado por CDU.
   ──────────────────────────────────────────────────────────────────────────────
   POST /api/mantenimiento
   ──────────────────────────────────────────────────────────────────────────────
-  Dispara el Conformador INMEDIATAMENTE (sin esperar los 5 min de inactividad).
+  Dispara el Conformador MANUALMENTE. El mantenimiento NO corre solo al quedar el
+  Inbox inactivo (salvo opt-in MANTENIMIENTO_ACTIVO=1): se lanza desde aquí.
   Vacía todo el backlog de documentos pendientes de conformar, en RONDAS de
   MANTENIMIENTO_LOTE (25) documentos, en segundo plano. Cede a la ingesta del
   Inbox entre rondas y REINTENTA hasta vaciar el backlog (no se abandona a medias).
   El progreso se sigue en los logs del contenedor.
 
-  Parámetro 'intervalo' (segundos, en query o body): pausa entre una ronda de 25
-  y la siguiente. 0 (defecto) = continuo, sin pausa. Útil para correr suave y
-  desatendido sin saturar Atlas/APIs.
-    POST /api/mantenimiento?intervalo=30
-    POST /api/mantenimiento     body { "intervalo": 30 }
+  Parámetros (en query o body):
+    activar  (M):  CUÁNDO arrancar.  0 = ya (defecto) · N>0 = en N segundos ·
+                   -1 = cuando el Inbox quede inactivo.
+    intervalo (N): pausa en segundos entre una ronda de 25 y la siguiente.
+                   0 (defecto) = continuo, sin pausa. Útil para correr suave y
+                   desatendido sin saturar Atlas/APIs.
+    POST /api/mantenimiento?activar=-1&intervalo=30
+    POST /api/mantenimiento     body { "activar": 300, "intervalo": 0 }
 
-  Para DETENER un mantenimiento manual en marcha: ponerlo en apagado con
+  Para DETENER un mantenimiento manual en marcha (o cancelar uno programado):
     POST /api/mantenimiento/modo   body { "modo": "apagado" }
 
-  Respuesta 202 (iniciado):
-    { "ok": true, "mensaje": "Mantenimiento iniciado en segundo plano (30s entre rondas de 25); detén con modo=apagado." }
+  Respuesta 202 (programado):
+    { "ok": true, "mensaje": "Mantenimiento programado (cuando el Inbox quede inactivo; 30s entre rondas de 25). Detén con modo=apagado." }
 
   Respuesta 409 (ya hay un mantenimiento manual en curso):
     { "ok": false, "motivo": "ya hay un mantenimiento manual en curso" }
@@ -480,10 +486,12 @@ de ficheros clasificado por CDU.
   Firmas: cada tarea tiene una versión; subir la versión fuerza que todos
   los documentos vuelvan a pasar por esa tarea en la próxima pasada.
 
-  Modos de funcionamiento (cambiables en caliente vía API):
-    diferido      Auto, tras MANTENIMIENTO_REPOSO_MS de inactividad (defecto)
-    apagado       No corre hasta cambio manual
-    apagado-hasta Pausa temporal hasta una hora/día/semana
+  Por defecto el mantenimiento es MANUAL (no corre solo); se dispara con
+  POST /api/mantenimiento (activar/intervalo). Modos del AUTO (opt-in), cambiables
+  en caliente vía API:
+    diferido      Auto, tras MANTENIMIENTO_REPOSO_MS de inactividad (opt-in)
+    apagado       No corre solo (DEFECTO); además DETIENE un manual en curso
+    apagado-hasta Pausa temporal del auto hasta una hora/día/semana
 
 
 ────────────────────────────────────────────────────────────────────────────────
