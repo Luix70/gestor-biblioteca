@@ -18,6 +18,7 @@ import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { reciclar } from './utils/papelera.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
 import { obtenerEstadisticas } from './estadisticas.js';
+import { rutasPanel } from './api-panel.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -28,7 +29,9 @@ const resolver = (p, def) => {
 
 const DIR_CDU = resolver(process.env.PATH_CDU, 'CDU');
 const DIR_TMP = path.join(RAIZ, 'temp');
+const DIR_PUBLIC = path.join(RAIZ, 'public');
 const PUERTO = Number(process.env.PORT || 3000);
+const PUERTO_PANEL = Number(process.env.PANEL_PORT || 4000);
 
 await fs.mkdir(DIR_TMP, { recursive: true });
 
@@ -45,6 +48,10 @@ app.use(express.json());
 
 // Servir el catálogo (portadas e imágenes) como estático para el front-end.
 app.use('/recursos', express.static(DIR_CDU));
+
+// Panel de control (estático) + sus rutas de operación bajo /api.
+app.use(express.static(DIR_PUBLIC));
+app.use('/api', rutasPanel());
 
 /** Extrae la ubicación física del cuerpo de la petición (para libros/revistas en papel). */
 function ubicacionDe(body) {
@@ -144,3 +151,9 @@ app.listen(PUERTO, () => {
         iniciarVigilante().catch(e => console.error('No se pudo iniciar el vigilante:', e.message));
     }
 });
+
+// El mismo servidor (API + estáticos + panel) escucha también en el puerto del PANEL, para
+// acceder al cuadro de mando sin CORS (la página y su /api comparten origen).
+if (PUERTO_PANEL && PUERTO_PANEL !== PUERTO) {
+    app.listen(PUERTO_PANEL, () => console.log(`🎛️  Panel de control en http://localhost:${PUERTO_PANEL}`));
+}

@@ -178,6 +178,15 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   la CDU **sin IA** vía el mapeo aprendido (`equivalencias_cdu`). El `dewey`/`lcc`/`lccn` fiables
   (CIP o API) se **persisten** en el documento (procedencia + re-derivación/auditoría de la CDU).
   Probado con el CIP de Loy, *A Buddhist history of the West* → CDU `930.85:24` sin gasto de IA.
+- **Panel de control** (`public/index.html` · `src/api-panel.js` · `utils/inspeccion.js` · `utils/purga.js`):
+  cuadro de mando web servido por el MISMO Express en un 2.º puerto (`PANEL_PORT=4000`; la página y su
+  `/api` comparten origen → sin CORS). Sin build ni dependencias: **un solo HTML vanilla** (CSS+JS
+  embebidos, menú hamburguesa, tema oscuro) — coherente con el "sin transpile" del proyecto y seguro en
+  el Atom del NAS. Permite: lanzar/parar mantenimiento (activar/intervalo), pausar/reanudar el vigilante
+  (`configurarVigilante` → gate en `procesarCola`), ver estadísticas + anomalías + ingesta/día, listar y
+  **reingestar** la Cuarentena, ver tamaño/contenido y **vaciar** la Papelera, y **purgar** una obra
+  (`purgarObra`, reutilizada por `scripts/purgar-multipart.js`). Pensado como ANDAMIO del futuro front-end
+  (la "Búsqueda" es un hueco del menú para lo que viene). Acceso: `http://<nas>:4000`.
 
 ---
 

@@ -100,6 +100,7 @@ rsync -a --delete \
     --exclude='/Cuarentena' \
     --exclude='/Reintentos' \
     --exclude='/_ER Room' \
+    --exclude='/Recycling' \
     --exclude='/temp' \
     "$SRC_DIR"/ "$APP_DIR"/
 

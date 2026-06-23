@@ -49,6 +49,7 @@ const MANTENIMIENTO_REPOSO_MS = Number(process.env.MANTENIMIENTO_REPOSO_MS || 30
 let temporizador = null;
 let procesando = false;              // lock compartido: ingesta Y mantenimiento (nunca solapan)
 let mantManualEnCurso = false;       // bucle de mantenimiento manual en marcha (rondas paginadas)
+let vigilanteActivo = process.env.DESACTIVAR_VIGILANTE !== '1'; // pausa/reanuda el procesado del Inbox (panel)
 // ruta → timestamp (ms) de la primera vez que se vio el archivo con 0 bytes.
 // Si supera HUERFANO_TIMEOUT_MS el archivo se trata como transferencia fallida y va a Cuarentena.
 const huerfanosVistos = new Map();
@@ -388,7 +389,7 @@ async function procesarUnidad(unidad) {
 }
 
 async function procesarCola() {
-    if (procesando) return;
+    if (procesando || !vigilanteActivo) return; // pausado desde el panel → los ficheros esperan en el Inbox
     procesando = true;
     try {
         let totalProcesadas = 0;
@@ -579,9 +580,25 @@ export function estadoConformador() {
     return {
         modo: modoConformador,
         dormido: conformadorDormido,
+        mantenimientoManual: mantManualEnCurso,
         apagadoHasta: conformadorApagadoHasta ? new Date(conformadorApagadoHasta).toISOString() : null,
         ultimaRevision: ultimaRevisionMant ? new Date(ultimaRevisionMant).toISOString() : null,
     };
+}
+
+/** Pausa/reanuda el procesado del Inbox (sin parar la app). Pausado: los ficheros esperan. */
+export function configurarVigilante({ activo } = {}) {
+    if (typeof activo === 'boolean') {
+        vigilanteActivo = activo;
+        console.log(`👁️  Vigilante ${activo ? 'REANUDADO' : 'PAUSADO'} desde el panel.`);
+        if (activo) programarScan(); // al reanudar, procesa lo que se haya acumulado
+    }
+    return estadoVigilante();
+}
+
+/** Estado del vigilante (para el panel). */
+export function estadoVigilante() {
+    return { activo: vigilanteActivo, procesando };
 }
 
 export async function iniciarVigilante() {

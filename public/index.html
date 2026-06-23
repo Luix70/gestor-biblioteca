@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestor Biblioteca · Panel</title>
+<style>
+:root{
+  --bg:#0e1116; --bg2:#151a22; --card:#1a212c; --card2:#202938; --line:#2a3340;
+  --txt:#e7edf3; --mut:#8a97a6; --acc:#28d9a8; --acc2:#1ba3ff; --warn:#ffb454; --bad:#ff5c7a;
+  --ok:#28d9a8; --radius:14px; --sb:248px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+  background:var(--bg);color:var(--txt);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+/* layout */
+.layout{display:flex;min-height:100vh}
+.sidebar{width:var(--sb);background:linear-gradient(180deg,#141a23,#0f141b);border-right:1px solid var(--line);
+  position:fixed;inset:0 auto 0 0;display:flex;flex-direction:column;z-index:30;transition:transform .25s ease}
+.brand{display:flex;align-items:center;gap:10px;padding:20px 18px;border-bottom:1px solid var(--line)}
+.brand .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--acc),var(--acc2));
+  display:grid;place-items:center;font-size:18px;box-shadow:0 4px 14px rgba(40,217,168,.3)}
+.brand b{font-size:15px;letter-spacing:.2px}.brand small{display:block;color:var(--mut);font-size:11px;font-weight:400}
+nav{padding:12px 10px;flex:1;overflow:auto}
+nav button{display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;color:var(--mut);
+  padding:11px 13px;border-radius:10px;cursor:pointer;font-size:14px;text-align:left;transition:.15s;margin-bottom:2px}
+nav button:hover{background:var(--card);color:var(--txt)}
+nav button.on{background:linear-gradient(90deg,rgba(40,217,168,.16),rgba(27,163,255,.08));color:var(--txt);
+  box-shadow:inset 2px 0 0 var(--acc)}
+nav button .ic{font-size:17px;width:22px;text-align:center}
+nav .soon{margin-left:auto;font-size:9px;background:var(--card2);color:var(--mut);padding:2px 6px;border-radius:6px}
+.sb-foot{padding:14px 18px;border-top:1px solid var(--line);color:var(--mut);font-size:11px}
+.main{flex:1;margin-left:var(--sb);min-width:0;display:flex;flex-direction:column}
+/* topbar */
+.top{position:sticky;top:0;background:rgba(14,17,22,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:14px;padding:14px 24px;z-index:20}
+.top h1{font-size:18px;font-weight:600;flex:1}
+.burger{display:none;background:var(--card);border:1px solid var(--line);color:var(--txt);width:38px;height:38px;
+  border-radius:10px;font-size:18px;cursor:pointer}
+.pill{display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--line);
+  padding:7px 12px;border-radius:30px;font-size:12px;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mut);box-shadow:0 0 0 0 rgba(40,217,168,.5)}
+.dot.ok{background:var(--ok);animation:pulse 2s infinite}.dot.off{background:var(--bad)}.dot.busy{background:var(--warn);animation:pulse 1s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(40,217,168,.5)}70%{box-shadow:0 0 0 7px rgba(40,217,168,0)}100%{box-shadow:0 0 0 0 rgba(40,217,168,0)}}
+.btn{background:var(--card2);border:1px solid var(--line);color:var(--txt);padding:8px 13px;border-radius:9px;
+  cursor:pointer;font-size:13px;font-weight:500;transition:.15s;display:inline-flex;align-items:center;gap:7px}
+.btn:hover{border-color:var(--acc);color:#fff}
+.btn.pri{background:linear-gradient(135deg,var(--acc),var(--acc2));border:none;color:#04231b;font-weight:600}
+.btn.pri:hover{filter:brightness(1.08)}
+.btn.bad{border-color:transparent;background:rgba(255,92,122,.14);color:var(--bad)}.btn.bad:hover{background:rgba(255,92,122,.24)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+/* content */
+.wrap{padding:24px;max-width:1180px;width:100%}
+.page{display:none}.page.on{display:block;animation:fade .25s ease}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.grid{display:grid;gap:16px}
+.g4{grid-template-columns:repeat(4,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g2{grid-template-columns:repeat(2,1fr)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.card h3{font-size:13px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;position:relative;overflow:hidden}
+.stat .v{font-size:30px;font-weight:700;letter-spacing:-.5px}
+.stat .k{color:var(--mut);font-size:12px;margin-top:2px}
+.stat .ic{position:absolute;right:14px;top:14px;font-size:22px;opacity:.5}
+.stat.acc{background:linear-gradient(135deg,rgba(40,217,168,.12),rgba(27,163,255,.05));border-color:rgba(40,217,168,.3)}
+/* chart */
+.chart{display:flex;align-items:flex-end;gap:4px;height:130px;padding-top:10px}
+.chart .bar{flex:1;background:linear-gradient(180deg,var(--acc),var(--acc2));border-radius:4px 4px 0 0;min-height:3px;
+  position:relative;transition:.2s;opacity:.85}
+.chart .bar:hover{opacity:1}.chart .bar span{position:absolute;top:-20px;left:50%;transform:translateX(-50%);
+  font-size:10px;color:var(--mut);opacity:0;white-space:nowrap}.chart .bar:hover span{opacity:1}
+/* table */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:10px;border-bottom:1px solid var(--bg2)}
+tr:hover td{background:var(--bg2)}
+.tag{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600}
+.tag.ok{background:rgba(40,217,168,.16);color:var(--acc)}.tag.warn{background:rgba(255,180,84,.16);color:var(--warn)}
+.tag.bad{background:rgba(255,92,122,.16);color:var(--bad)}.tag.mut{background:var(--card2);color:var(--mut)}
+/* form */
+label{display:block;color:var(--mut);font-size:12px;margin-bottom:6px}
+input,select{background:var(--bg2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:9px;font-size:13px;width:100%;font-family:inherit}
+input:focus,select:focus{outline:none;border-color:var(--acc)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.row>div{flex:1;min-width:120px}
+.switch{position:relative;width:52px;height:28px;flex:0 0 auto}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;inset:0;background:var(--card2);border-radius:30px;cursor:pointer;transition:.2s;border:1px solid var(--line)}
+.slider:before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;background:var(--mut);border-radius:50%;transition:.2s}
+.switch input:checked+.slider{background:linear-gradient(135deg,var(--acc),var(--acc2));border-color:transparent}
+.switch input:checked+.slider:before{transform:translateX(24px);background:#fff}
+.muted{color:var(--mut)}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.empty{text-align:center;color:var(--mut);padding:36px 10px}
+.sec-h{display:flex;align-items:center;gap:12px;margin-bottom:18px}.sec-h h2{font-size:20px;font-weight:600;flex:1}
+/* toast */
+#toast{position:fixed;bottom:24px;right:24px;display:flex;flex-direction:column;gap:10px;z-index:100}
+.toast{background:var(--card2);border:1px solid var(--line);border-left:3px solid var(--acc);padding:12px 16px;border-radius:10px;
+  box-shadow:0 8px 30px rgba(0,0,0,.4);min-width:260px;animation:slide .3s ease}
+.toast.bad{border-left-color:var(--bad)}.toast.warn{border-left-color:var(--warn)}
+@keyframes slide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+.scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:25}
+@media(max-width:900px){
+  .sidebar{transform:translateX(-100%)}.sidebar.open{transform:none}
+  .main{margin-left:0}.burger{display:block}.scrim.open{display:block}
+  .g4{grid-template-columns:repeat(2,1fr)}.g3,.g2{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="logo">📚</div><div><b>Gestor Biblioteca</b><small>Panel de control</small></div></div>
+    <nav id="nav">
+      <button data-p="dashboard" class="on"><span class="ic">▥</span> Dashboard</button>
+      <button data-p="mant"><span class="ic">🧹</span> Mantenimiento</button>
+      <button data-p="vig"><span class="ic">👁</span> Vigilante</button>
+      <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
+      <button data-p="pap"><span class="ic">♻</span> Papelera</button>
+      <button data-p="obras"><span class="ic">📖</span> Obras</button>
+      <button data-p="search" disabled><span class="ic">🔍</span> Búsqueda <span class="soon">PRONTO</span></button>
+    </nav>
+    <div class="sb-foot">v1 · cuadro de mando<br><span id="clock"></span></div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <div class="main">
+    <div class="top">
+      <button class="burger" id="burger">☰</button>
+      <h1 id="title">Dashboard</h1>
+      <span class="pill"><span class="dot" id="dVig"></span> Vigilante</span>
+      <span class="pill"><span class="dot" id="dMant"></span> Mantenim.</span>
+      <button class="btn" id="refresh">⟳ Actualizar</button>
+    </div>
+
+    <div class="wrap">
+      <!-- DASHBOARD -->
+      <section class="page on" id="p-dashboard">
+        <div class="grid g4" id="stats"></div>
+        <div class="grid g3" style="margin-top:16px">
+          <div class="card" style="grid-column:span 2"><h3>📈 Ingesta (últimos 30 días)</h3><div class="chart" id="chart"></div></div>
+          <div class="card"><h3>⚠ Requieren atención</h3><div id="aten"></div></div>
+        </div>
+        <div class="grid g2" style="margin-top:16px">
+          <div class="card"><h3>🩹 Defectos del catálogo</h3><div id="defs"></div></div>
+          <div class="card"><h3>🗂 CDU principales</h3><div id="cdus"></div></div>
+        </div>
+      </section>
+
+      <!-- MANTENIMIENTO -->
+      <section class="page" id="p-mant">
+        <div class="grid g2">
+          <div class="card">
+            <h3>🧹 Lanzar mantenimiento</h3>
+            <div class="row">
+              <div><label>Activar (cuándo)</label><select id="mActivar">
+                <option value="0">Ahora mismo</option><option value="10">En 10 s</option>
+                <option value="60">En 1 min</option><option value="300">En 5 min</option>
+                <option value="-1">Cuando el Inbox esté inactivo</option></select></div>
+              <div><label>Intervalo entre rondas de 25 (s)</label><input id="mIntervalo" type="number" min="0" value="30"></div>
+            </div>
+            <div class="row" style="margin-top:14px">
+              <button class="btn pri" id="mStart">▶ Iniciar</button>
+              <button class="btn bad" id="mStop">■ Detener</button>
+            </div>
+            <p class="muted" style="margin-top:12px;font-size:12px">Procesa 25 documentos por ronda, cede a la ingesta y reintenta hasta vaciar el backlog.</p>
+          </div>
+          <div class="card"><h3>Estado del Conformador</h3><div id="mEstado"></div></div>
+        </div>
+      </section>
+
+      <!-- VIGILANTE -->
+      <section class="page" id="p-vig">
+        <div class="card" style="max-width:520px">
+          <h3>👁 Vigilante del Inbox</h3>
+          <div style="display:flex;align-items:center;gap:16px;margin:8px 0">
+            <label class="switch"><input type="checkbox" id="vSwitch"><span class="slider"></span></label>
+            <div><b id="vLabel">—</b><div class="muted" style="font-size:12px" id="vSub"></div></div>
+          </div>
+          <p class="muted" style="font-size:12px;margin-top:10px">Al pausarlo, los ficheros que sueltes en el Inbox esperan sin catalogarse. Útil para soltar muchos a la vez y procesarlos cuando quieras.</p>
+        </div>
+      </section>
+
+      <!-- CUARENTENA -->
+      <section class="page" id="p-cuar">
+        <div class="sec-h"><h2>Cuarentena</h2><span class="muted" id="cuarCount"></span></div>
+        <div id="cuarBody"></div>
+      </section>
+
+      <!-- PAPELERA -->
+      <section class="page" id="p-pap">
+        <div class="sec-h"><h2>Papelera</h2><button class="btn bad" id="papVaciarAll">🗑 Vaciar todo</button></div>
+        <div class="grid g3" id="papStats" style="margin-bottom:16px"></div>
+        <div class="card"><h3>Subcarpetas</h3><div id="papBody"></div></div>
+      </section>
+
+      <!-- OBRAS -->
+      <section class="page" id="p-obras">
+        <div class="sec-h"><h2>Obras multivolumen</h2></div>
+        <div class="card" style="margin-bottom:16px">
+          <h3>🧨 Purgar una obra (para re-ingerirla limpia)</h3>
+          <div class="row">
+            <div><label>isbn_obra o título</label><input id="purgaClave" placeholder="0787674249"></div>
+            <button class="btn" id="purgaSim">👁 Simular</button>
+            <button class="btn bad" id="purgaExec">🧨 Purgar</button>
+          </div>
+          <div id="purgaOut" style="margin-top:12px"></div>
+        </div>
+        <div class="card"><h3>Inventario</h3><div id="obrasBody"></div></div>
+      </section>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const api=async(p,opt)=>{const r=await fetch('/api'+p,{headers:{'Content-Type':'application/json'},...opt});
+  const t=await r.text();let j;try{j=t?JSON.parse(t):{}}catch{j={raw:t}};if(!r.ok)throw new Error(j.motivo||j.message||r.status);return j;};
+const fmtBytes=b=>{if(!b)return'0 B';const u=['B','KB','MB','GB','TB'];const i=Math.floor(Math.log(b)/Math.log(1024));return (b/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i];};
+const toast=(m,t='ok')=>{const e=document.createElement('div');e.className='toast '+(t==='ok'?'':t);e.textContent=m;$('#toast').append(e);setTimeout(()=>e.remove(),3800);};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ── nav ──
+const titles={dashboard:'Dashboard',mant:'Mantenimiento',vig:'Vigilante',cuar:'Cuarentena',pap:'Papelera',obras:'Obras'};
+function go(p){$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+  $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
+  $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');loaders[p]&&loaders[p]();}
+$('#nav').onclick=e=>{const b=e.target.closest('button[data-p]');if(b&&!b.disabled)go(b.dataset.p);};
+$('#burger').onclick=()=>{$('#sidebar').classList.toggle('open');$('#scrim').classList.toggle('open');};
+$('#scrim').onclick=()=>{$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');};
+$('#refresh').onclick=()=>{const cur=$$('#nav button.on')[0]?.dataset.p||'dashboard';loaders[cur]&&loaders[cur]();refrescarEstado();};
+setInterval(()=>$('#clock').textContent=new Date().toLocaleTimeString('es-ES'),1000);
+
+// ── estado (pills) ──
+async function refrescarEstado(){try{const s=await api('/estado');
+  const v=s.vigilante.activo,b=s.vigilante.procesando;
+  $('#dVig').className='dot '+(b?'busy':v?'ok':'off');
+  const mm=s.conformador.mantenimientoManual,modo=s.conformador.modo;
+  $('#dMant').className='dot '+(mm?'busy':modo==='diferido'?'ok':'off');
+  // vigilante page
+  $('#vSwitch').checked=v;$('#vLabel').textContent=v?'Activo':'Pausado';
+  $('#vSub').textContent=b?'procesando el Inbox…':v?'observando el Inbox':'los ficheros esperan en el Inbox';
+  // mant estado
+  $('#mEstado').innerHTML=`<table><tr><td>Modo</td><td><span class="tag ${modo==='apagado'?'mut':'ok'}">${esc(modo)}</span></td></tr>
+   <tr><td>Manual en curso</td><td>${mm?'<span class="tag warn">sí</span>':'<span class="tag mut">no</span>'}</td></tr>
+   <tr><td>Última revisión</td><td class="muted">${s.conformador.ultimaRevision?new Date(s.conformador.ultimaRevision).toLocaleString('es-ES'):'—'}</td></tr></table>`;
+}catch(e){}}
+
+// ── dashboard ──
+async function loadDashboard(){
+  try{const st=await api('/estadisticas?detalle=1');
+    const cards=[['📚',st.total,'Documentos','acc'],['📖',st.libros,'Libros',''],['📰',st.revistas_total,'Revistas (números)',''],['🗂',st.colecciones,'Colecciones','']];
+    $('#stats').innerHTML=cards.map(([i,v,k,c])=>`<div class="stat ${c}"><div class="ic">${i}</div><div class="v">${(v??0).toLocaleString('es-ES')}</div><div class="k">${k}</div></div>`).join('');
+    const a=st.anomalias||{},d=st.defectos||{};
+    $('#aten').innerHTML=`<table>
+      ${rowN('Obras incompletas',a.obras_incompletas,'warn')}
+      ${rowN('Obras a revisar',a.obras_revision,a.obras_revision?'bad':'ok')}
+      ${rowN('Tomos sin número (?)',a.tomos_sin_numero,a.tomos_sin_numero?'bad':'ok')}
+      ${rowN('Docs a revisar',a.docs_revision,a.docs_revision?'bad':'ok')}</table>`;
+    $('#defs').innerHTML=`<table>
+      ${rowN('Libros sin ISBN',d.libros_sin_isbn,'mut')}${rowN('Sin hash',d.sin_hash,'mut')}
+      ${rowN('Sin portada',d.sin_portada,'mut')}${rowN('CDU genérica',d.cdu_generica,'mut')}
+      ${rowN('Pendientes',d.pendientes,d.pendientes?'warn':'ok')}${rowN('Sin colección',d.sin_coleccion,'mut')}</table>`;
+    const top=(st.cdu?.detalle||[]).slice(0,8);
+    $('#cdus').innerHTML=top.length?`<table>${top.map(c=>`<tr><td class="mono">${esc(c.cdu)}</td><td>${esc(c.titulo_es||'—')}</td><td style="text-align:right"><b>${c.documentos}</b></td></tr>`).join('')}</table>`:'<div class="empty">—</div>';
+  }catch(e){toast('Estadísticas: '+e.message,'bad');}
+  try{const g=await api('/ingesta?dias=30');const max=Math.max(1,...g.serie.map(x=>x.n));
+    $('#chart').innerHTML=g.serie.length?g.serie.map(x=>`<div class="bar" style="height:${Math.round(x.n/max*100)}%"><span>${x.dia.slice(5)}: ${x.n}</span></div>`).join(''):'<div class="empty" style="margin:auto">Sin ingesta reciente</div>';
+  }catch(e){}
+}
+const rowN=(k,v,t)=>`<tr><td>${k}</td><td style="text-align:right"><span class="tag ${t}">${v??0}</span></td></tr>`;
+
+// ── mantenimiento ──
+$('#mStart').onclick=async()=>{try{const r=await api('/mantenimiento',{method:'POST',body:JSON.stringify({activar:+$('#mActivar').value,intervalo:+$('#mIntervalo').value})});
+  toast(r.mensaje||'Mantenimiento programado');refrescarEstado();}catch(e){toast(e.message,'bad');}};
+$('#mStop').onclick=async()=>{try{await api('/mantenimiento/modo',{method:'POST',body:JSON.stringify({modo:'apagado'})});toast('Mantenimiento detenido','warn');refrescarEstado();}catch(e){toast(e.message,'bad');}};
+
+// ── vigilante ──
+$('#vSwitch').onchange=async e=>{try{const r=await api('/vigilante',{method:'POST',body:JSON.stringify({activo:e.target.checked})});
+  toast('Vigilante '+(r.activo?'activado':'pausado'),r.activo?'ok':'warn');refrescarEstado();}catch(err){toast(err.message,'bad');}};
+
+// ── cuarentena ──
+async function loadCuar(){try{const c=await api('/cuarentena');const cats=Object.keys(c);
+  $('#cuarCount').textContent=cats.reduce((s,k)=>s+c[k].length,0)+' depósito(s)';
+  $('#cuarBody').innerHTML=cats.length?cats.map(cat=>`<div class="card" style="margin-bottom:14px"><h3>${esc(cat)} · ${c[cat].length}</h3>
+    <table><tr><th>Título / archivo</th><th>Motivo</th><th></th></tr>${c[cat].map(d=>`<tr>
+      <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div></td>
+      <td class="muted">${esc(d.error||'—')}</td>
+      <td><button class="btn" data-re="${esc(d.id)}">↻ Reingestar</button></td></tr>`).join('')}</table></div>`).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
+  $$('#cuarBody [data-re]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api('/cuarentena/reingestar',{method:'POST',body:JSON.stringify({id:b.dataset.re})});
+    if(r.ok){toast(`Reingestados ${r.movidos}/${r.total} → Inbox`);loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}catch(e){toast(e.message,'bad');b.disabled=false;}});
+}catch(e){toast(e.message,'bad');}}
+
+// ── papelera ──
+async function loadPap(){try{const p=await api('/papelera');
+  $('#papStats').innerHTML=`<div class="stat acc"><div class="ic">♻</div><div class="v">${fmtBytes(p.bytes)}</div><div class="k">Tamaño total</div></div>
+    <div class="stat"><div class="ic">📄</div><div class="v">${p.ficheros}</div><div class="k">Ficheros</div></div>
+    <div class="stat"><div class="ic">📁</div><div class="v">${p.subcarpetas.length}</div><div class="k">Subcarpetas</div></div>`;
+  $('#papBody').innerHTML=p.subcarpetas.length?`<table><tr><th>Subcarpeta</th><th>Ficheros</th><th>Tamaño</th><th></th></tr>
+    ${p.subcarpetas.map(s=>`<tr><td class="mono">${esc(s.nombre)}</td><td>${s.ficheros}</td><td>${fmtBytes(s.bytes)}</td>
+      <td style="text-align:right"><button class="btn" data-ver="${esc(s.nombre)}">ver</button> <button class="btn bad" data-del="${esc(s.nombre)}">vaciar</button></td></tr>`).join('')}</table>`:'<div class="empty">Papelera vacía</div>';
+  $$('#papBody [data-del]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Vaciar '+b.dataset.del+'? (irreversible)'))return;
+    try{await api('/papelera/vaciar',{method:'POST',body:JSON.stringify({sub:b.dataset.del})});toast('Subcarpeta vaciada','warn');loadPap();}catch(e){toast(e.message,'bad');}});
+  $$('#papBody [data-ver]').forEach(b=>b.onclick=async()=>{try{const r=await api('/papelera/contenido?sub='+encodeURIComponent(b.dataset.ver));
+    alert(b.dataset.ver+'\\n\\n'+(r.ficheros.map(f=>`• ${f.nombre} (${fmtBytes(f.bytes)})`).join('\\n')||'(vacía)'));}catch(e){toast(e.message,'bad');}});
+}catch(e){toast(e.message,'bad');}}
+$('#papVaciarAll').onclick=async()=>{if(!confirm('¿Vaciar TODA la papelera? (irreversible)'))return;
+  try{await api('/papelera/vaciar',{method:'POST',body:JSON.stringify({})});toast('Papelera vaciada','warn');loadPap();}catch(e){toast(e.message,'bad');}};
+
+// ── obras ──
+async function purga(ejecutar){const clave=$('#purgaClave').value.trim();if(!clave)return toast('Indica isbn_obra o título','warn');
+  if(ejecutar&&!confirm('¿Purgar "'+clave+'"? Elimina la obra y sus tomos (ficheros → Papelera).'))return;
+  try{const r=await api('/obras/purgar',{method:'POST',body:JSON.stringify({clave,ejecutar})});
+    if(!r.ok)return $('#purgaOut').innerHTML=`<span class="tag bad">${esc(r.motivo)}</span>`;
+    if(r.simulacion)$('#purgaOut').innerHTML=`<div class="muted">Obra «${esc(r.obra.titulo)}» — se eliminarían ${r.tomos.length} tomo(s):</div>
+      <table>${r.tomos.map(t=>`<tr><td>vol ${t.vol??'?'}</td><td>${esc(t.titulo)}</td><td class="mono muted">${esc(t.isbn||'—')}</td></tr>`).join('')}</table>`;
+    else{$('#purgaOut').innerHTML=`<span class="tag ok">Eliminados ${r.eliminados} tomo(s) + la obra. Ya puedes re-soltarla.</span>`;toast('Obra purgada');loadObras();}
+  }catch(e){toast(e.message,'bad');}}
+$('#purgaSim').onclick=()=>purga(false);$('#purgaExec').onclick=()=>purga(true);
+async function loadObras(){try{const o=await api('/obras');
+  $('#obrasBody').innerHTML=o.length?`<table><tr><th>Obra</th><th>isbn_obra</th><th>Tomos</th><th>Estado</th></tr>
+    ${o.map(x=>`<tr><td>${esc(x.titulo)}</td><td class="mono muted">${esc(x.isbn_obra||'—')}</td>
+      <td>${x.volumenes_presentes||0}/${x.total_volumenes||'?'}</td>
+      <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':x.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'}</td></tr>`).join('')}</table>`:'<div class="empty">Sin obras</div>';
+}catch(e){toast(e.message,'bad');}}
+
+const loaders={dashboard:loadDashboard,mant:refrescarEstado,vig:refrescarEstado,cuar:loadCuar,pap:loadPap,obras:loadObras};
+refrescarEstado();loadDashboard();setInterval(refrescarEstado,8000);
+</script>
+</body>
+</html>
