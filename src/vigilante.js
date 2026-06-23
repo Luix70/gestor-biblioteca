@@ -55,10 +55,11 @@ let vigilanteActivo = process.env.DESACTIVAR_VIGILANTE !== '1'; // pausa/reanuda
 const huerfanosVistos = new Map();
 let ultimaActividad = Date.now();    // último momento con actividad de ingesta
 let ultimaRevisionMant = 0;          // última pasada de mantenimiento
-// Carpetas-buzón de primer nivel que contienen obra(s) multivolumen: a diferencia de una colección
-// (buzón persistente al que se añaden números), una obra es finita → su carpeta se ELIMINA cuando
-// se vacía (último tomo catalogado y movido a su destino).
-const dropsMultiparte = new Set();
+// Carpetas-buzón de primer nivel que se DISUELVEN (se eliminan) cuando quedan vacías: obras
+// multivolumen (finitas, se vacían al catalogar el último tomo), carpetas de UN solo documento y
+// carpetas de imágenes (libro escaneado). NO se añaden las COLECCIONES (2+ documentos distintos),
+// que persisten como buzón al que se siguen añadiendo números.
+const dropsADisolver = new Set();
 
 // --- Estado del Conformador ---
 // El mantenimiento NO corre automáticamente al quedar el Inbox inactivo: se dispara A MANO con
@@ -156,20 +157,20 @@ async function podarVaciosInbox() {
 }
 
 /**
- * Elimina las carpetas-buzón de primer nivel que contenían obra(s) multivolumen y ya están vacías
- * (todos los tomos catalogados y movidos a su destino). A diferencia de una colección —buzón que
- * persiste para añadir números—, una obra es finita: su carpeta se retira al completarse. Solo se
- * borra si no queda ningún documento (solo metadatos de Synology @eaDir, etc.).
+ * Disuelve (elimina) las carpetas-buzón de primer nivel marcadas en dropsADisolver que ya están
+ * vacías: obras multivolumen completas, drops de UN solo documento y libros escaneados. A diferencia
+ * de una colección —buzón que persiste para añadir números—, estas son finitas y su carpeta se retira
+ * al vaciarse. Solo se borra si no queda ningún documento (solo metadatos de Synology @eaDir, etc.).
  */
-async function eliminarDropsMultiparteVacios() {
-    for (const carpeta of [...dropsMultiparte]) {
+async function disolverDropsVacios() {
+    for (const carpeta of [...dropsADisolver]) {
         let restantes;
         try { restantes = await fs.readdir(carpeta); }
-        catch { dropsMultiparte.delete(carpeta); continue; } // ya no existe
+        catch { dropsADisolver.delete(carpeta); continue; } // ya no existe
         if (restantes.every(soloMetadatos)) {
             await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
-            dropsMultiparte.delete(carpeta);
-            console.log(`  🗑️  Obra multivolumen completa: retirada la carpeta «${path.basename(carpeta)}» del Inbox.`);
+            dropsADisolver.delete(carpeta);
+            console.log(`  🗑️  Carpeta vacía disuelta: «${path.basename(carpeta)}» retirada del Inbox.`);
         }
     }
 }
@@ -270,15 +271,17 @@ async function listarUnidades() {
                 // a la obra (nombre de la carpeta), no una colección de libros sueltos.
                 const { obras, resto } = discriminarMultivolumenes(documentos);
                 for (const obra of obras) {
-                    dropsMultiparte.add(ruta); // drop de obra(s): la carpeta-buzón se elimina al vaciarse
+                    dropsADisolver.add(ruta); // drop de obra(s): la carpeta-buzón se elimina al vaciarse
                     for (const v of obra.volumenes) unidades.push({
                         rutas: [v.ruta], esImagenes: false, carpeta: ruta, conservarCarpeta: false, esObra: true,
                         obra: { titulo: obra.titulo_obra, numero: v.numero, titulo_volumen: v.titulo, total: obra.total },
                     });
                 }
-                // Resto (no son tomos): 2+ docs = colección; 1 solo = documento suelto.
+                // Resto (no son tomos): 2+ docs DISTINTOS = colección (la carpeta PERSISTE como
+                // buzón); 1 solo doc = documento suelto y la carpeta se DISUELVE (deflate) al vaciarse.
                 if (resto.length > 0) {
                     const esColeccion = resto.length >= 2;
+                    if (!esColeccion) dropsADisolver.add(ruta); // carpeta de un solo documento → deflate
                     for (const d of resto) unidades.push({
                         rutas: [d], esImagenes: false, carpeta: ruta,
                         conservarCarpeta: esColeccion,
@@ -286,9 +289,11 @@ async function listarUnidades() {
                     });
                 }
             } else {
-                // Sin documentos: imágenes DIRECTAS en la carpeta = un libro escaneado.
+                // Sin documentos: imágenes DIRECTAS en la carpeta = un libro escaneado. La carpeta se
+                // DISUELVE al vaciarse (no es un buzón de colección).
                 const imagenes = (await fs.readdir(ruta)).map(n => path.join(ruta, n)).filter(esImagen);
                 if (imagenes.length > 0) {
+                    dropsADisolver.add(ruta);
                     unidades.push({ rutas: filtrarDuplicadosNombre(imagenes), esImagenes: true, carpeta: ruta, conservarCarpeta: false });
                 }
             }
@@ -452,7 +457,7 @@ async function procesarCola() {
         // SALVO los de obras multivolumen ya completas, que sí se retiran.
         if (totalProcesadas > 0) {
             await podarVaciosInbox().catch(() => {});
-            await eliminarDropsMultiparteVacios().catch(() => {});
+            await disolverDropsVacios().catch(() => {});
         }
         // Anuncio de reposo: solo en la TRANSICIÓN (tras procesar algo y quedar el Inbox vacío),
         // no en cada escaneo en vacío (evita spam cada VIGILANTE_ESCANEO_MS).
