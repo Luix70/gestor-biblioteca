@@ -127,8 +127,8 @@ async function limpiarDeposito(depDir) {
  * @param {'existente'|'entrante'} quedarse  cuál se conserva
  */
 export async function resolverDuplicado(idRel, quedarse) {
-    if (!['existente', 'entrante'].includes(quedarse))
-        return { ok: false, motivo: "quedarse debe ser 'existente' o 'entrante'" };
+    if (!['existente', 'entrante', 'ambos'].includes(quedarse))
+        return { ok: false, motivo: "quedarse debe ser 'existente', 'entrante' o 'ambos'" };
     const depDir = depositoDe(idRel);
     if (!depDir) return { ok: false, motivo: 'identificador de depósito inválido' };
     let estado; try { estado = JSON.parse(await fs.readFile(path.join(depDir, 'estado.json'), 'utf8')); }
@@ -136,6 +136,27 @@ export async function resolverDuplicado(idRel, quedarse) {
     const etiqueta = estado.identificador || estado.titulo || 'recurso';
     const ficherosEntrante = (await fs.readdir(depDir).catch(() => []))
         .filter(n => n !== 'estado.json').map(n => path.join(depDir, n));
+
+    // ── Conservar AMBOS: el catalogado queda intacto y el entrante vuelve al Inbox con un override
+    //    forzar_nuevo (.meta.json) para catalogarse como documento DISTINTO (otra edición/ejemplar). ──
+    if (quedarse === 'ambos') {
+        await fs.mkdir(DIR_INBOX, { recursive: true });
+        let movidos = 0;
+        for (const f of ficherosEntrante) {
+            try {
+                const destino = path.join(DIR_INBOX, path.basename(f));
+                await fs.copyFile(f, destino);
+                const [o, d] = await Promise.all([fs.stat(f), fs.stat(destino)]);
+                if (o.size === d.size) {
+                    await fs.writeFile(destino + '.meta.json', JSON.stringify({ forzar_nuevo: true }, null, 2), 'utf8');
+                    movidos++;
+                }
+            } catch { /* sigue con el resto */ }
+        }
+        if (movidos === ficherosEntrante.length) await fs.rm(depDir, { recursive: true, force: true }).catch(() => {});
+        return { ok: movidos > 0, accion: 'entrante-reingestado-como-distinto', movidos, total: ficherosEntrante.length,
+            aviso: movidos === ficherosEntrante.length ? null : 'algún fichero no se pudo mover al Inbox: depósito conservado' };
+    }
 
     // ── Conservar el CATALOGADO: el entrante se descarta a la Papelera. ──
     if (quedarse === 'existente') {

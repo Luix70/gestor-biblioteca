@@ -70,8 +70,11 @@ function fusionarOcr(base, ocr) {
 // Para FORZAR la catalogación de un documento mal identificado (p. ej. "Guns" confundido por las
 // APIs con "Guns, Germs and Steel"): se deja junto al fichero un JSON "<fichero>.meta.json" (o
 // "<base>.meta.json") con los campos a imponer. Mandan sobre el archivo Y las APIs. Claves
-// especiales: "sin_apis": true (no consultar APIs/IA — usa solo archivo+override) y "sin_isbn": true
-// (el documento NO tiene ISBN; evita que se le adjudique el de un homónimo).
+// especiales: "sin_apis": true (no consultar APIs/IA — usa solo archivo+override), "sin_isbn": true
+// (el documento NO tiene ISBN; evita que se le adjudique el de un homónimo) y "forzar_nuevo": true
+// (OMITE la deduplicación: cataloga el fichero como documento DISTINTO aunque comparta ISBN/título
+// con uno ya existente — "conservar ambos"; lo usa el panel para reingestar duplicados que en
+// realidad son ediciones/ejemplares diferentes).
 const CAMPOS_OVERRIDE = ['titulo', 'subtitulo', 'autores', 'editorial', 'cdu', 'idioma', 'año_edicion',
     'sinopsis', 'palabras_clave', 'coleccion_nombre', 'coleccion_numero', 'tipo_recurso',
     'obra_titulo', 'volumen_numero', 'isbn_obra'];
@@ -85,7 +88,7 @@ export async function leerOverride(rutaArchivo) {
     return null;
 }
 
-/** Aplica el override a datosBase (in situ) y devuelve { sinApis }. */
+/** Aplica el override a datosBase (in situ) y devuelve { sinApis, forzarNuevo }. */
 function aplicarOverride(datosBase, override) {
     for (const k of CAMPOS_OVERRIDE) {
         if (override[k] !== undefined && override[k] !== null) datosBase[k] = override[k];
@@ -94,8 +97,10 @@ function aplicarOverride(datosBase, override) {
     if (override.issn) { const v = validarISSN(override.issn); if (v) datosBase.issn = v; }
     if (override.sin_isbn === true) { delete datosBase.isbn; datosBase.isbn_candidatos = []; datosBase._isbnBloqueado = true; }
     const sinApis = override.sin_apis === true || override.forzar === true;
-    datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Override manual (.meta.json) aplicado${sinApis ? ' · sin APIs' : ''}.`];
-    return { sinApis };
+    const forzarNuevo = override.forzar_nuevo === true;
+    datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
+        `Override manual (.meta.json) aplicado${sinApis ? ' · sin APIs' : ''}${forzarNuevo ? ' · forzar nuevo (sin dedup)' : ''}.`];
+    return { sinApis, forzarNuevo };
 }
 
 function metadatosDesdeNombre(ruta) {
@@ -235,12 +240,12 @@ export async function procesarRecurso(entrada) {
     // OVERRIDE manual (sidecar .meta.json): el usuario FUERZA campos para corregir una identificación
     // errónea. Se aplica ANTES de enriquecer: sus valores guían/bloquean el enriquecimiento (un ISBN
     // correcto pasa a ser el pivote; sin_apis evita que las APIs vuelvan a confundirlo).
-    let sinApis = false;
+    let sinApis = false, forzarNuevo = false;
     const override = await leerOverride(rutas[0]);
     if (override) {
-        ({ sinApis } = aplicarOverride(datosBase, override));
+        ({ sinApis, forzarNuevo } = aplicarOverride(datosBase, override));
         if (override.tipo_recurso) tipo_recurso = override.tipo_recurso;
-        console.log(`[Orquestador] Override manual aplicado a ${path.basename(rutas[0])}${sinApis ? ' (sin APIs)' : ''}.`);
+        console.log(`[Orquestador] Override manual aplicado a ${path.basename(rutas[0])}${sinApis ? ' (sin APIs)' : ''}${forzarNuevo ? ' (forzar nuevo)' : ''}.`);
     }
 
     // TIER 2–4 · enriquecimiento conservador (APIs + IA solo para huecos)
@@ -324,5 +329,5 @@ export async function procesarRecurso(entrada) {
         }
     }
 
-    return { documento, activos };
+    return { documento, activos, forzarNuevo };
 }

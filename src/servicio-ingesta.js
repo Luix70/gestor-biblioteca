@@ -100,7 +100,7 @@ async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
  */
 export async function ingestarRecurso({ rutas, contexto = {} }) {
     // 1. Extracción + enriquecimiento.
-    const { documento, activos } = await procesarRecurso({ rutas, contexto });
+    const { documento, activos, forzarNuevo } = await procesarRecurso({ rutas, contexto });
 
     // Añadir nombre_archivo y hash antes de catalogar.
     // El nombre_archivo permite detectar re-procesamientos del mismo fichero (vs nuevas versiones);
@@ -120,7 +120,7 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     //    el siguiente incremental dentro de su colección.
     let resultado;
     try {
-        resultado = await procesarCatalogo(documento, { serieAuto: !!contexto.serieAuto });
+        resultado = await procesarCatalogo(documento, { serieAuto: !!contexto.serieAuto, forzarNuevo: !!forzarNuevo });
     } catch (e) {
         if (e.tipo === 'infraestructura') e.documentoParcial = documento;
         throw e;

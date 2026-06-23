@@ -414,21 +414,24 @@ async function abrirComparador(id){
       <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn admin-only" id="cmpKeepEx">📚 Quedarse con el catalogado</button>
         <button class="btn admin-only" id="cmpKeepEn"${obra?' disabled':''}>📥 Quedarse con el entrante</button>
+        <button class="btn admin-only" id="cmpKeepBoth" title="Son ediciones/ejemplares distintos: catalogar el entrante como documento aparte">📑 Conservar ambos</button>
         <button class="btn" id="cmpClose">Cerrar</button>
       </div></div>`;
     $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
     $('#cmpClose').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
     const resolver=async(quedarse)=>{
-      const aviso=quedarse==='entrante'
-        ?'Se retirará el documento catalogado (a la Papelera) y el entrante volverá al Inbox para recatalogarse. ¿Seguir?'
-        :'El entrante se descartará a la Papelera (recuperable). ¿Seguir?';
-      if(!confirm(aviso))return;
+      const avisos={
+        entrante:'Se retirará el documento catalogado (a la Papelera) y el entrante volverá al Inbox para recatalogarse. ¿Seguir?',
+        existente:'El entrante se descartará a la Papelera (recuperable). ¿Seguir?',
+        ambos:'Se conservarán LOS DOS: el catalogado queda igual y el entrante volverá al Inbox para catalogarse como documento DISTINTO. ¿Seguir?'};
+      if(!confirm(avisos[quedarse]))return;
       try{const r=await api('/cuarentena/duplicado/resolver',{method:'POST',body:JSON.stringify({id,quedarse})});
-        if(r.ok){toast(quedarse==='entrante'?`Catalogado retirado · entrante → Inbox (${r.movidos}/${r.total})`:'Entrante descartado a la Papelera');cerrarCmp();loadCuar();}
+        if(r.ok){const msg={entrante:`Catalogado retirado · entrante → Inbox (${r.movidos}/${r.total})`,existente:'Entrante descartado a la Papelera',ambos:`Conservados ambos · entrante → Inbox como distinto (${r.movidos}/${r.total})`};toast(msg[quedarse]);cerrarCmp();loadCuar();}
         else toast(r.motivo,'warn');}catch(e){toast(e.message,'bad');}
     };
     if($('#cmpKeepEx'))$('#cmpKeepEx').onclick=()=>resolver('existente');
     if($('#cmpKeepEn'))$('#cmpKeepEn').onclick=()=>resolver('entrante');
+    if($('#cmpKeepBoth'))$('#cmpKeepBoth').onclick=()=>resolver('ambos');
   }catch(e){toast(e.message,'bad');}
 }
 

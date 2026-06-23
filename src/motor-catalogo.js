@@ -184,55 +184,61 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         //   existente aún no tiene nombre_archivo — compatibilidad con docs pre-hash).
         //   Versiones distintas del mismo ISBN (ej. ePubLibre r2.7 vs r2.9) son docs distintos.
 
-        // — Nivel A: hash
-        if (docFinal.hash_contenido) {
-            const hashDoc = await coleccionBiblioteca.findOne({ hash_contenido: docFinal.hash_contenido });
-            if (hashDoc) {
-                if (hashDoc.nombre_archivo === docFinal.nombre_archivo) {
-                    // Mismo fichero reprocesado (vuelta del Inbox, re-ingesta manual, etc.)
-                    const cambios = calcularActualizacion(hashDoc, docFinal);
-                    await coleccionBiblioteca.updateOne({ _id: hashDoc._id }, { $set: cambios });
-                    const actualizado = await coleccionBiblioteca.findOne({ _id: hashDoc._id });
-                    await registrarTomo(hashDoc._id);
-                    return { ...actualizado, operacion: 'actualizacion' };
-                }
-                // Mismo contenido, nombre distinto → el llamante envía a Cuarentena
-                return { ...hashDoc, operacion: 'duplicado_exacto' };
-            }
-        }
-
-        // — Nivel B0: tomo de obra multivolumen → (obra, volumen_numero) lo identifica.
+        // "CONSERVAR AMBOS" (opciones.forzarNuevo, override forzar_nuevo): se OMITE TODA la
+        // deduplicación y se inserta como documento DISTINTO aunque comparta ISBN/título con otro
+        // (biblioteca no tiene índice único de ISBN; servicio-ingesta desambigua la carpeta con un
+        // sufijo del _id). Lo usa el panel para reingestar un duplicado que es otra edición/ejemplar.
         let filtro = null;
-        if (docFinal.obra && docFinal.volumen_numero != null) {
-            filtro = { obra: docFinal.obra, volumen_numero: docFinal.volumen_numero };
-        } else if (docFinal.tipo_recurso === 'revista') {
-            if (docFinal.issn && docFinal.año_edicion && docFinal.mes_publicacion) {
-                filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion, mes_publicacion: docFinal.mes_publicacion };
-            } else if (docFinal.issn && docFinal.año_edicion) {
-                filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion };
-            } else {
-                filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
-            }
-        } else if (docFinal.isbn && !docFinal.obra) {
-            // — Nivel C: libros con ISBN (NUNCA tomos de obra: jamás se fusionan por ISBN) — solo
-            //   actualizar si es el mismo fichero
-            const candidato = await coleccionBiblioteca.findOne({ isbn: docFinal.isbn });
-            if (candidato) {
-                const mismoArchivo = !candidato.nombre_archivo
-                    || candidato.nombre_archivo === docFinal.nombre_archivo;
-                if (mismoArchivo) {
-                    filtro = { _id: candidato._id };
-                } else {
-                    // Mismo ISBN, fichero con OTRO nombre → POSIBLE duplicado. No se inserta a ciegas
-                    // (evita versiones duplicadas silenciosas): el servicio lo confirma por HASH de
-                    // contenido y recicla el idéntico, o lo manda a Cuarentena/duplicados si difiere.
-                    return { ...candidato, operacion: 'posible_duplicado' };
+        if (!opciones.forzarNuevo) {
+            // — Nivel A: hash
+            if (docFinal.hash_contenido) {
+                const hashDoc = await coleccionBiblioteca.findOne({ hash_contenido: docFinal.hash_contenido });
+                if (hashDoc) {
+                    if (hashDoc.nombre_archivo === docFinal.nombre_archivo) {
+                        // Mismo fichero reprocesado (vuelta del Inbox, re-ingesta manual, etc.)
+                        const cambios = calcularActualizacion(hashDoc, docFinal);
+                        await coleccionBiblioteca.updateOne({ _id: hashDoc._id }, { $set: cambios });
+                        const actualizado = await coleccionBiblioteca.findOne({ _id: hashDoc._id });
+                        await registrarTomo(hashDoc._id);
+                        return { ...actualizado, operacion: 'actualizacion' };
+                    }
+                    // Mismo contenido, nombre distinto → el llamante envía a Cuarentena
+                    return { ...hashDoc, operacion: 'duplicado_exacto' };
                 }
             }
-        } else if (docFinal.issn) {
-            filtro = { issn: docFinal.issn };
+
+            // — Nivel B0: tomo de obra multivolumen → (obra, volumen_numero) lo identifica.
+            if (docFinal.obra && docFinal.volumen_numero != null) {
+                filtro = { obra: docFinal.obra, volumen_numero: docFinal.volumen_numero };
+            } else if (docFinal.tipo_recurso === 'revista') {
+                if (docFinal.issn && docFinal.año_edicion && docFinal.mes_publicacion) {
+                    filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion, mes_publicacion: docFinal.mes_publicacion };
+                } else if (docFinal.issn && docFinal.año_edicion) {
+                    filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion };
+                } else {
+                    filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
+                }
+            } else if (docFinal.isbn && !docFinal.obra) {
+                // — Nivel C: libros con ISBN (NUNCA tomos de obra: jamás se fusionan por ISBN) — solo
+                //   actualizar si es el mismo fichero
+                const candidato = await coleccionBiblioteca.findOne({ isbn: docFinal.isbn });
+                if (candidato) {
+                    const mismoArchivo = !candidato.nombre_archivo
+                        || candidato.nombre_archivo === docFinal.nombre_archivo;
+                    if (mismoArchivo) {
+                        filtro = { _id: candidato._id };
+                    } else {
+                        // Mismo ISBN, fichero con OTRO nombre → POSIBLE duplicado. No se inserta a ciegas
+                        // (evita versiones duplicadas silenciosas): el servicio lo confirma por HASH de
+                        // contenido y recicla el idéntico, o lo manda a Cuarentena/duplicados si difiere.
+                        return { ...candidato, operacion: 'posible_duplicado' };
+                    }
+                }
+            } else if (docFinal.issn) {
+                filtro = { issn: docFinal.issn };
+            }
+            // Sin filtro → siempre insertar
         }
-        // Sin filtro → siempre insertar
 
         const existente = filtro ? await coleccionBiblioteca.findOne(filtro) : null;
 

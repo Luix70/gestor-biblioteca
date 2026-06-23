@@ -351,6 +351,12 @@ export async function limpiarInbox(unidad, { borrarCatalogados = false } = {}) {
             await fs.rm(r, { force: true }).catch(() => {});
         }
     }
+    // Sidecars de override (.meta.json) ya consumidos: el fichero que acompañaban abandona el Inbox,
+    // así que se eliminan (son instrucciones, no datos) para no dejarlos huérfanos en la raíz.
+    for (const r of unidad.rutas) {
+        const sinExt = path.join(path.dirname(r), path.basename(r, path.extname(r)));
+        for (const meta of [r + '.meta.json', sinExt + '.meta.json']) await fs.rm(meta, { force: true }).catch(() => {});
+    }
 }
 
 async function procesarUnidad(unidad) {

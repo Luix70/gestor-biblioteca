@@ -273,6 +273,12 @@ el Conformador revisite los de baja confianza) y se EMITE como evento (feed para
 - **DISCRIMINATE:** estructural (audio→audiolibro; varios docs→colección; imágenes→escaneado;
   2 ISBN + "Tomo N"→obra) → metadatos de fichero (OPF, info-dict, ffprobe) → señales de contenido
   (ISSN/fecha→revista) → **agente IA que lee portada/créditos/índice/prefacio** (último recurso).
+- **Carpeta ≠ colección por defecto** (regla del usuario, PENDIENTE de implementar en la discriminación):
+  una carpeta con UN SOLO documento NO es una colección. Solo cuenta como colección si el documento se
+  suelta en una carpeta que YA estaba en el Inbox (remanente de una colección ya ingerida). En el caso
+  normal —carpeta remanente / estructura anidada con un único documento por nivel— la acción correcta es
+  **APLANAR ("deflate") la estructura** (aunque tenga 2+ niveles) y extraer los documentos sueltos a la
+  raíz del Inbox, tratándolos como drops individuales.
 - **IDENTIFY:** metadatos embebidos → **nombre de fichero** (convenciones: ePubLibre, LibGen
   `Autor-Título-Editorial (Año)`, fecha, ISBN-suelto) → **BD local BNE/OL** (volcado en NAS;
   rápida/offline) → APIs externas (OL/GB/BNE/DNB) → OCR (visión) → agente IA.
