@@ -100,6 +100,18 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .toast.bad{border-left-color:var(--bad)}.toast.warn{border-left-color:var(--warn)}
 @keyframes slide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
 .scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:25}
+/* auth */
+#login{position:fixed;inset:0;background:radial-gradient(900px 500px at 70% -10%,rgba(40,217,168,.10),transparent),var(--bg);display:none;place-items:center;z-index:200}
+#login.show{display:grid}
+.loginbox{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:34px 30px;width:330px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+.loginbox .logo{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;font-size:28px;margin:0 auto 16px;box-shadow:0 8px 24px rgba(40,217,168,.35)}
+.loginbox h2{text-align:center;font-size:19px}.loginbox p{text-align:center;color:var(--mut);font-size:12px;margin:2px 0 18px}
+.loginbox label{margin-top:12px}.loginbox .err{color:var(--bad);font-size:12px;text-align:center;margin-top:12px;min-height:16px}
+.loginbox .btn{width:100%;justify-content:center;margin-top:18px;padding:11px}
+.userbox{display:flex;align-items:center;gap:8px}.userbox .who{font-size:12px;color:var(--mut)}
+.rol{font-size:10px;padding:2px 7px;border-radius:6px;font-weight:700;text-transform:uppercase}
+.rol.admin{background:rgba(40,217,168,.16);color:var(--acc)}.rol.guest{background:var(--card2);color:var(--mut)}
+body.guest .admin-only{display:none!important}
 @media(max-width:900px){
   .sidebar{transform:translateX(-100%)}.sidebar.open{transform:none}
   .main{margin-left:0}.burger{display:block}.scrim.open{display:block}
@@ -130,7 +142,9 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
       <h1 id="title">Dashboard</h1>
       <span class="pill"><span class="dot" id="dVig"></span> Vigilante</span>
       <span class="pill"><span class="dot" id="dMant"></span> Mantenim.</span>
+      <span class="userbox"><span class="who" id="who"></span><span class="rol" id="rol"></span></span>
       <button class="btn" id="refresh">⟳ Actualizar</button>
+      <button class="btn" id="logout" title="Cerrar sesión">⎋</button>
     </div>
 
     <div class="wrap">
@@ -150,7 +164,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
       <!-- MANTENIMIENTO -->
       <section class="page" id="p-mant">
         <div class="grid g2">
-          <div class="card">
+          <div class="card admin-only">
             <h3>🧹 Lanzar mantenimiento</h3>
             <div class="row">
               <div><label>Activar (cuándo)</label><select id="mActivar">
@@ -174,7 +188,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
         <div class="card" style="max-width:520px">
           <h3>👁 Vigilante del Inbox</h3>
           <div style="display:flex;align-items:center;gap:16px;margin:8px 0">
-            <label class="switch"><input type="checkbox" id="vSwitch"><span class="slider"></span></label>
+            <label class="switch admin-only"><input type="checkbox" id="vSwitch"><span class="slider"></span></label>
             <div><b id="vLabel">—</b><div class="muted" style="font-size:12px" id="vSub"></div></div>
           </div>
           <p class="muted" style="font-size:12px;margin-top:10px">Al pausarlo, los ficheros que sueltes en el Inbox esperan sin catalogarse. Útil para soltar muchos a la vez y procesarlos cuando quieras.</p>
@@ -189,7 +203,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 
       <!-- PAPELERA -->
       <section class="page" id="p-pap">
-        <div class="sec-h"><h2>Papelera</h2><button class="btn bad" id="papVaciarAll">🗑 Vaciar todo</button></div>
+        <div class="sec-h"><h2>Papelera</h2><button class="btn bad admin-only" id="papVaciarAll">🗑 Vaciar todo</button></div>
         <div class="grid g3" id="papStats" style="margin-bottom:16px"></div>
         <div class="card"><h3>Subcarpetas</h3><div id="papBody"></div></div>
       </section>
@@ -197,7 +211,7 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
       <!-- OBRAS -->
       <section class="page" id="p-obras">
         <div class="sec-h"><h2>Obras multivolumen</h2></div>
-        <div class="card" style="margin-bottom:16px">
+        <div class="card admin-only" style="margin-bottom:16px">
           <h3>🧨 Purgar una obra (para re-ingerirla limpia)</h3>
           <div class="row">
             <div><label>isbn_obra o título</label><input id="purgaClave" placeholder="0787674249"></div>
@@ -211,12 +225,28 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
     </div>
   </div>
 </div>
+
+<div id="login">
+  <form class="loginbox" id="loginForm">
+    <div class="logo">📚</div>
+    <h2>Gestor Biblioteca</h2><p>Panel de control · acceso</p>
+    <label>Usuario</label><input id="lgUser" autocomplete="username" placeholder="Luis o guest">
+    <label>Contraseña</label><input id="lgPass" type="password" autocomplete="current-password">
+    <button class="btn pri" type="submit">Entrar</button>
+    <div class="err" id="lgErr"></div>
+  </form>
+</div>
 <div id="toast"></div>
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const api=async(p,opt)=>{const r=await fetch('/api'+p,{headers:{'Content-Type':'application/json'},...opt});
-  const t=await r.text();let j;try{j=t?JSON.parse(t):{}}catch{j={raw:t}};if(!r.ok)throw new Error(j.motivo||j.message||r.status);return j;};
+let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
+const api=async(p,opt={})=>{const h={'Content-Type':'application/json',...(opt.headers||{})};
+  if(TOKEN)h['Authorization']='Bearer '+TOKEN;
+  const r=await fetch('/api'+p,{...opt,headers:h});
+  if(r.status===401){mostrarLogin();throw new Error('Sesión caducada — vuelve a entrar');}
+  const t=await r.text();let j;try{j=t?JSON.parse(t):{}}catch{j={raw:t}};
+  if(!r.ok)throw new Error(j.motivo||j.message||r.status);return j;};
 const fmtBytes=b=>{if(!b)return'0 B';const u=['B','KB','MB','GB','TB'];const i=Math.floor(Math.log(b)/Math.log(1024));return (b/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i];};
 const toast=(m,t='ok')=>{const e=document.createElement('div');e.className='toast '+(t==='ok'?'':t);e.textContent=m;$('#toast').append(e);setTimeout(()=>e.remove(),3800);};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -287,7 +317,7 @@ async function loadCuar(){try{const c=await api('/cuarentena');const cats=Object
     <table><tr><th>Título / archivo</th><th>Motivo</th><th></th></tr>${c[cat].map(d=>`<tr>
       <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div></td>
       <td class="muted">${esc(d.error||'—')}</td>
-      <td><button class="btn" data-re="${esc(d.id)}">↻ Reingestar</button></td></tr>`).join('')}</table></div>`).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
+      <td><button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button></td></tr>`).join('')}</table></div>`).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
   $$('#cuarBody [data-re]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api('/cuarentena/reingestar',{method:'POST',body:JSON.stringify({id:b.dataset.re})});
     if(r.ok){toast(`Reingestados ${r.movidos}/${r.total} → Inbox`);loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}catch(e){toast(e.message,'bad');b.disabled=false;}});
 }catch(e){toast(e.message,'bad');}}
@@ -299,7 +329,7 @@ async function loadPap(){try{const p=await api('/papelera');
     <div class="stat"><div class="ic">📁</div><div class="v">${p.subcarpetas.length}</div><div class="k">Subcarpetas</div></div>`;
   $('#papBody').innerHTML=p.subcarpetas.length?`<table><tr><th>Subcarpeta</th><th>Ficheros</th><th>Tamaño</th><th></th></tr>
     ${p.subcarpetas.map(s=>`<tr><td class="mono">${esc(s.nombre)}</td><td>${s.ficheros}</td><td>${fmtBytes(s.bytes)}</td>
-      <td style="text-align:right"><button class="btn" data-ver="${esc(s.nombre)}">ver</button> <button class="btn bad" data-del="${esc(s.nombre)}">vaciar</button></td></tr>`).join('')}</table>`:'<div class="empty">Papelera vacía</div>';
+      <td style="text-align:right"><button class="btn" data-ver="${esc(s.nombre)}">ver</button> <button class="btn bad admin-only" data-del="${esc(s.nombre)}">vaciar</button></td></tr>`).join('')}</table>`:'<div class="empty">Papelera vacía</div>';
   $$('#papBody [data-del]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Vaciar '+b.dataset.del+'? (irreversible)'))return;
     try{await api('/papelera/vaciar',{method:'POST',body:JSON.stringify({sub:b.dataset.del})});toast('Subcarpeta vaciada','warn');loadPap();}catch(e){toast(e.message,'bad');}});
   $$('#papBody [data-ver]').forEach(b=>b.onclick=async()=>{try{const r=await api('/papelera/contenido?sub='+encodeURIComponent(b.dataset.ver));
@@ -326,7 +356,23 @@ async function loadObras(){try{const o=await api('/obras');
 }catch(e){toast(e.message,'bad');}}
 
 const loaders={dashboard:loadDashboard,mant:refrescarEstado,vig:refrescarEstado,cuar:loadCuar,pap:loadPap,obras:loadObras};
-refrescarEstado();loadDashboard();setInterval(refrescarEstado,8000);
+
+// ── auth ──
+let estadoTimer=null;
+function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
+function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
+function arrancar(){$('#login').classList.remove('show');aplicarRol();go('dashboard');refrescarEstado();loadDashboard();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
+$('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
+  try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
+    const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.motivo||'usuario o contraseña incorrectos');
+    TOKEN=j.token;USER=j.usuario;ROL=j.rol;localStorage.setItem('panel_token',TOKEN);$('#lgPass').value='';arrancar();
+  }catch(err){$('#lgErr').textContent=err.message;}};
+$('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};mostrarLogin();};
+// sesión inicial: valida el token guardado o muestra el login
+(async()=>{if(!TOKEN)return mostrarLogin();
+  try{const me=await fetch('/api/yo',{headers:{'Authorization':'Bearer '+TOKEN}}).then(r=>r.json());
+    if(me&&me.rol){USER=me.usuario;ROL=me.rol;arrancar();}else mostrarLogin();
+  }catch{mostrarLogin();}})();
 </script>
 </body>
 </html>

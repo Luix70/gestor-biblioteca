@@ -27,6 +27,8 @@ services:
       - PATH_ER_ROOM=/app/_ER Room
       - PATH_RECICLAJE=/app/Recycling
       - PANEL_PORT=4000
+      - ADMIN_PWD=${ADMIN_PWD}
+      - GUEST_PWD=${GUEST_PWD:-guest}
       - TZ=${TZ:-Europe/Madrid}
       - NODE_OPTIONS=--max-old-space-size=512 --no-warnings
 

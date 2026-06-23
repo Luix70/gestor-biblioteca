@@ -19,6 +19,7 @@ import { reciclar } from './utils/papelera.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel } from './api-panel.js';
+import { login, logout, validar, autenticar, tokenDe } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -49,8 +50,22 @@ app.use(express.json());
 // Servir el catálogo (portadas e imágenes) como estático para el front-end.
 app.use('/recursos', express.static(DIR_CDU));
 
-// Panel de control (estático) + sus rutas de operación bajo /api.
+// Panel de control (estático). La página y el login son públicos; los datos van por /api (protegido).
 app.use(express.static(DIR_PUBLIC));
+
+// AUTENTICACIÓN: login público + estado de sesión + logout, y la PUERTA del resto de /api.
+// Regla: GET = lectura (admin y guest); cualquier mutación = solo admin.
+app.post('/api/login', (req, res) => {
+    const { usuario, password } = req.body || {};
+    const r = login(usuario, password);
+    if (!r) return res.status(401).json({ ok: false, motivo: 'usuario o contraseña incorrectos' });
+    res.json({ ok: true, ...r });
+});
+app.get('/api/yo', (req, res) => res.json(validar(tokenDe(req)) || { rol: null }));
+app.post('/api/logout', (req, res) => { logout(tokenDe(req)); res.json({ ok: true }); });
+app.use('/api', autenticar); // todo lo que sigue bajo /api exige sesión
+
+// Rutas de operación del panel (protegidas por la puerta anterior).
 app.use('/api', rutasPanel());
 
 /** Extrae la ubicación física del cuerpo de la petición (para libros/revistas en papel). */
@@ -155,5 +170,9 @@ app.listen(PUERTO, () => {
 // El mismo servidor (API + estáticos + panel) escucha también en el puerto del PANEL, para
 // acceder al cuadro de mando sin CORS (la página y su /api comparten origen).
 if (PUERTO_PANEL && PUERTO_PANEL !== PUERTO) {
-    app.listen(PUERTO_PANEL, () => console.log(`🎛️  Panel de control en http://localhost:${PUERTO_PANEL}`));
+    app.listen(PUERTO_PANEL, () => {
+        console.log(`🎛️  Panel de control en http://localhost:${PUERTO_PANEL}`);
+        if (!process.env.ADMIN_PWD && !process.env.PANEL_ADMIN_PASSWORD)
+            console.warn('⚠️  ADMIN_PWD no definido: el admin "Luis" no podrá entrar (solo "guest"/lectura). Defínelo en .env.');
+    });
 }
