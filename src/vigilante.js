@@ -319,13 +319,15 @@ async function moverAErRoom(rutas) {
     }
 }
 
-export async function limpiarInbox(unidad) {
-    // Política "nunca borrar": en vez de eliminar, se MUEVE todo a la Papelera (Recycling) en una
-    // subcarpeta serializada. Se recicla el/los documento(s) ya catalogados, SUS portadas candidatas
-    // (usadas o no, junto al doc o en covers/) y los sidecars NO bibliográficos sueltos de la carpeta.
-    // La CARPETA (buzón de primer nivel del Inbox) NUNCA se toca; las subcarpetas vacías las poda
-    // podarVaciosInbox tras la pasada.
-    const aReciclar = [...unidad.rutas];
+export async function limpiarInbox(unidad, { borrarCatalogados = false } = {}) {
+    // Limpieza del Inbox tras procesar una unidad. Por defecto, política "nunca borrar": se MUEVE
+    // todo a la Papelera (Recycling) en una subcarpeta serializada. PERO si borrarCatalogados=true
+    // (éxito VERIFICADO: copia íntegra en el árbol CDU + documento en Mongo), los originales ya
+    // catalogados se BORRAN permanentemente —son redundantes y solo inflarían la Papelera—; sus
+    // portadas candidatas y los sidecars NO bibliográficos sí van a la Papelera (red de seguridad
+    // para lo accesorio/ambiguo). La CARPETA (buzón de primer nivel del Inbox) NUNCA se toca; las
+    // subcarpetas vacías las poda podarVaciosInbox tras la pasada.
+    const aReciclar = borrarCatalogados ? [] : [...unidad.rutas];
     if (unidad.carpeta) {
         for (const r of unidad.rutas) aReciclar.push(...await rutasPortadasCandidatas(unidad.carpeta, r));
         // Drop puntual (no colección): sidecars sueltos (.txt/.url…) de la raíz de la carpeta.
@@ -340,7 +342,15 @@ export async function limpiarInbox(unidad) {
             }
         }
     }
-    await reciclar(aReciclar, path.basename(unidad.rutas[0]));
+    if (aReciclar.length) await reciclar(aReciclar, path.basename(unidad.rutas[0]));
+    // Borrado permanente de los originales ya catalogados (su copia íntegra vive en el árbol CDU y
+    // el documento en Mongo): redundantes → no se reciclan, se eliminan.
+    if (borrarCatalogados) {
+        for (const r of unidad.rutas) {
+            await fs.chmod(r, 0o666).catch(() => {});
+            await fs.rm(r, { force: true }).catch(() => {});
+        }
+    }
 }
 
 async function procesarUnidad(unidad) {
@@ -367,7 +377,9 @@ async function procesarUnidad(unidad) {
         // destino). Si no, se conserva el original para no perder datos; el próximo escaneo lo
         // reintentará (la copia es idempotente: sobrescribe el destino corrupto).
         if (r.copiaIntegra) {
-            await limpiarInbox(unidad);
+            // Éxito VERIFICADO (copia íntegra en CDU + documento insertado en Mongo): el original del
+            // Inbox es redundante → BORRADO PERMANENTE (no inflamos la Papelera con copias seguras).
+            await limpiarInbox(unidad, { borrarCatalogados: !!r._id });
         } else {
             console.error(`  ⛔ ${etiqueta}: copia a CDU NO verificada → se CONSERVA el original en el Inbox (se reintentará).`);
         }

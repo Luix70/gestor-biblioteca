@@ -152,13 +152,16 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   A diferencia de una colección (buzón persistente), la **carpeta-drop de una obra se ELIMINA del
   Inbox al completarse** (último tomo movido a su destino). Probado: Worldmark (6 tomos) y dos obras
   Gale en un mismo drop.
-- **Papelera de reciclaje** (`utils/papelera.js` · `reciclar`): política **"nunca borrar"**. Toda
-  retirada de un fichero de datos (limpieza del Inbox tras catalogar, portadas candidatas, sidecars,
-  temporales de subida API, fantasmas a `_ER Room`) **mueve** a `Recycling/<serial>_<fecha>[_etq]/`
-  en vez de `fs.rm`. Mueve con **copia+verificación+borrado** (los destinos son bind mounts distintos
-  del Inbox → `fs.rename` daría EXDEV) y **nunca borra el origen si la copia no quedó íntegra** → es
-  imposible perder datos. El usuario vacía `Recycling/` a mano. Motivado por el incidente multivolumen
-  (el barrido de sidecars se llevó tomos válidos sin procesar).
+- **Papelera de reciclaje** (`utils/papelera.js` · `reciclar`): política **"nunca borrar"** para lo
+  **ambiguo/accesorio**. Esas retiradas (portadas candidatas y sidecars al limpiar el Inbox, temporales
+  de subida API, fantasmas a `_ER Room`, descartes de Cuarentena/duplicados) **mueven** a
+  `Recycling/<serial>_<fecha>[_etq]/` en vez de `fs.rm`, con **copia+verificación+borrado** (los destinos
+  son bind mounts distintos del Inbox → `fs.rename` daría EXDEV) y **nunca borran el origen si la copia no
+  quedó íntegra** → imposible perder datos. **EXCEPCIÓN — éxito VERIFICADO:** el original del Inbox ya
+  catalogado, cuando `copiaIntegra` (copia al árbol CDU verificada por tamaño) **y** el documento está
+  insertado en Mongo, se **BORRA permanentemente** (`limpiarInbox(unidad, { borrarCatalogados })` en
+  `vigilante.js`) — es redundante y solo inflaría la Papelera. El usuario vacía `Recycling/` a mano. La
+  política nació del incidente multivolumen (el barrido de sidecars se llevó tomos válidos sin procesar).
 - **Títulos-artefacto del productor** (`utils/parsear-nombre.js` · `esTituloArtefacto`/`esAutorArtefacto`):
   muchos PDF traen en el info-dict, como "Title", el nombre del fichero FUENTE en vez del título real
   (caso real: `C:\TARANTOLABOOK.DVI`, `Creator: DVIPSONE`; o `…​.indd`, `Microsoft Word - …`, `Untitled`),
