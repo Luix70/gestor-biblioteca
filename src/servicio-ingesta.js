@@ -8,6 +8,8 @@ import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
 import { enviarACuarentena } from './gestor-fallos.js';
+import { reciclar } from './utils/papelera.js';
+import { carpetaDeDoc, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -124,30 +126,53 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         throw e;
     }
 
-    // Copia exacta detectada por hash: mover el archivo a Cuarentena con nota al documento existente.
-    if (resultado.operacion === 'duplicado_exacto') {
+    // DUPLICADO sospechado (hash idéntico, o mismo ISBN con fichero de otro nombre): se CONFIRMA por
+    // HASH DE CONTENIDO antes de decidir. "Hashear ambos si no lo están ya": el recién llegado ya trae
+    // hash (paso 1); del existente se usa el suyo o se calcula de su fichero en el árbol CDU (y se
+    // guarda, para no repetirlo). Idéntico → reciclar el recién llegado (no satura Cuarentena);
+    // distinto → Cuarentena/duplicados para revisión humana (nada se pierde).
+    if (resultado.operacion === 'duplicado_exacto' || resultado.operacion === 'posible_duplicado') {
+        const idExist = String(resultado._id);
+        const hashNuevo = documento.hash_contenido
+            || (rutas.length === 1 ? await calcularHashArchivo(rutas[0]).catch(() => null) : null);
+        let hashExistente = resultado.hash_contenido || null;
+        if (!hashExistente) {
+            try {
+                const original = await archivoOriginal(carpetaDeDoc(resultado));
+                if (original) {
+                    hashExistente = await calcularHashArchivo(original);
+                    if (hashExistente) await actualizarDocumento(resultado._id, { hash_contenido: hashExistente }).catch(() => {});
+                }
+            } catch { /* sin fichero del existente: no comparable → se trata como distinto (a duplicados) */ }
+        }
+        const identico = !!(hashNuevo && hashExistente && hashNuevo === hashExistente);
+        const comun = {
+            _id: resultado._id, duplicado: true,
+            estado: resultado.estado_verificacion,
+            isbn: resultado.isbn || null, issn: resultado.issn || null,
+            carpeta: null, rutaWeb: resultado.ruta_base || null, copiaIntegra: false,
+            documento: { ...resultado },
+        };
+        if (identico) {
+            // Contenido IDÉNTICO → se descarta el recién llegado a la Papelera (recuperable).
+            await reciclar(rutas, `duplicado-${documento.isbn || documento.issn || documento.titulo || 'recurso'}`);
+            console.log(`  ♻️  Duplicado EXACTO (hash) de ${idExist}: «${path.basename(rutas[0])}» → Papelera.`);
+            return { ...comun, operacion: 'duplicado_exacto', accion: 'reciclado' };
+        }
+        // Hash distinto (o no comparable) → Cuarentena/duplicados.
         await enviarACuarentena(rutas, {
             titulo: documento.titulo,
             identificador: documento.isbn || documento.issn || documento.titulo,
             error: {
-                tipo: 'duplicado_exacto',
-                mensaje: `Contenido idéntico a documento ya catalogado (id: ${resultado._id}, ` +
-                         `archivo: ${resultado.nombre_archivo || 'desconocido'}).`,
+                tipo: 'duplicado',
+                mensaje: `Mismo identificador que ${idExist} (archivo: ${resultado.nombre_archivo || '—'}) ` +
+                         `pero CONTENIDO DISTINTO${hashExistente ? '' : ' (no se pudo hashear el existente)'}: revisar.`,
             },
-            documento_existente_id: String(resultado._id),
+            documento_existente_id: idExist,
             fase: 'catalogo',
         });
-        return {
-            _id: resultado._id,
-            operacion: 'duplicado_exacto',
-            estado: resultado.estado_verificacion,
-            isbn: resultado.isbn || null,
-            issn: resultado.issn || null,
-            carpeta: null,
-            rutaWeb: resultado.ruta_base || null,
-            copiaIntegra: false,
-            documento: { ...resultado },
-        };
+        console.log(`  ⚠️  Posible duplicado de ${idExist} con contenido DISTINTO → Cuarentena/duplicados.`);
+        return { ...comun, operacion: 'duplicado', accion: 'cuarentena' };
     }
 
     // 3. Gestión de archivos: copiar a <CDU>/<libros|revistas>/.../.

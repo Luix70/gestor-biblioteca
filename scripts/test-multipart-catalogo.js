@@ -38,16 +38,15 @@ const base = (extra) => ({
 try {
     await limpiar(); // por si quedó algo de una ejecución previa
 
-    // ── A) Dos libros NO-obra con el MISMO isbn → el 2º cae en E11000 → debe FUSIONAR sin romper ──
-    console.log('A) E11000 en libro normal (registrarTomo definido en el catch):');
-    const a1 = await procesarCatalogo(base({ titulo: `${MARCA} A1`, isbn: '0306406152', nombre_archivo: 'a1.pdf' }));
-    let a2;
-    try {
-        a2 = await procesarCatalogo(base({ titulo: `${MARCA} A2`, isbn: '0306406152', nombre_archivo: 'a2.pdf' }));
-        eq(a2.operacion === 'actualizacion', `2º con mismo isbn → fusiona (no "registrarTomo is not defined"), op=${a2.operacion}`);
-    } catch (e) {
-        eq(false, `lanzó: ${e.message}`);
-    }
+    // ── A) Detección de duplicados (motor-catalogo): mismo ISBN+otro nombre → posible_duplicado;
+    //       mismo HASH → duplicado_exacto. El servicio confirma luego por hash (reciclar/duplicados). ──
+    console.log('A) señales de duplicado (motor-catalogo):');
+    const a1 = await procesarCatalogo(base({ titulo: `${MARCA} A1`, isbn: '0306406152', nombre_archivo: 'a1.pdf', hash_contenido: `${MARCA}_H1` }));
+    eq(a1.operacion === 'insercion', `1º → insercion (op=${a1.operacion})`);
+    const a2 = await procesarCatalogo(base({ titulo: `${MARCA} A2`, isbn: '0306406152', nombre_archivo: 'a2.pdf', hash_contenido: `${MARCA}_H2` }));
+    eq(a2.operacion === 'posible_duplicado', `mismo ISBN, otro nombre, hash distinto → posible_duplicado (op=${a2.operacion})`);
+    const a3 = await procesarCatalogo(base({ titulo: `${MARCA} A3`, isbn: '0306406152', nombre_archivo: 'a3.pdf', hash_contenido: `${MARCA}_H1` }));
+    eq(a3.operacion === 'duplicado_exacto', `mismo HASH que a1 → duplicado_exacto (op=${a3.operacion})`);
     await bib.deleteMany({ isbn: '0306406152', titulo: new RegExp(MARCA) });
 
     // ── B) Dos TOMOS de una obra que comparten el ISBN del set → deben insertarse por separado ──

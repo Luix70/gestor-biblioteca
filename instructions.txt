@@ -495,7 +495,11 @@ de ficheros clasificado por CDU.
 
        Ficheros que no se pudieron catalogar. Se organizan en SUBCARPETAS por
        categoría (cada depósito lleva su estado.json con el error):
-         duplicados        Copia exacta (mismo hash) de algo ya catalogado.
+         duplicados        Mismo identificador (ISBN/hash) que algo ya catalogado
+                           pero CONTENIDO DISTINTO (otra edición/versión): a revisar.
+                           OJO: una copia EXACTA (mismo hash de contenido) ya NO llega
+                           aquí — se confirma por hash y se manda a la Papelera (no
+                           satura Cuarentena). Solo lo que difiere queda para revisar.
          no-identificados  Sin título/ISBN tras agotar texto/APIs/OCR/IA.
          ilegibles         Fichero DEFECTUOSO (p. ej. PDF con el xref dañado /
                            sin páginas, EPUB con el ZIP roto). Necesita una

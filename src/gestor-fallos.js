@@ -25,7 +25,7 @@ function nombreSeguro(s) {
  */
 export function categoriaCuarentena(estado) {
     const tipo = (estado && (estado.error?.tipo || estado.motivo)) || '';
-    if (tipo === 'duplicado_exacto') return 'duplicados';
+    if (tipo === 'duplicado_exacto' || tipo === 'duplicado') return 'duplicados';
     if (tipo === 'identificacion') return 'no-identificados';
     if (tipo === 'ilegible') return 'ilegibles';
     return 'otros';
