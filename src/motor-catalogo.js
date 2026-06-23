@@ -211,8 +211,12 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                     || candidato.nombre_archivo === docFinal.nombre_archivo;
                 if (mismoArchivo) {
                     filtro = { _id: candidato._id };
+                } else {
+                    // Mismo ISBN, fichero con OTRO nombre → POSIBLE duplicado. No se inserta a ciegas
+                    // (evita versiones duplicadas silenciosas): el servicio lo confirma por HASH de
+                    // contenido y recicla el idéntico, o lo manda a Cuarentena/duplicados si difiere.
+                    return { ...candidato, operacion: 'posible_duplicado' };
                 }
-                // else: mismo ISBN pero distinto nombre_archivo → versión diferente → insertar
             }
         } else if (docFinal.issn) {
             filtro = { issn: docFinal.issn };

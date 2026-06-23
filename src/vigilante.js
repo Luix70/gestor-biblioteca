@@ -351,6 +351,12 @@ async function procesarUnidad(unidad) {
     }
     try {
         const r = await ingestarRecurso({ rutas: unidad.rutas, contexto });
+        // Duplicado: el servicio ya dispuso del fichero (reciclado si idéntico por hash, o a
+        // Cuarentena/duplicados si el contenido difiere). No hay nada que copiar ni limpiar.
+        if (r.duplicado) {
+            console.log(`  ${r.accion === 'reciclado' ? '♻️' : '⚠️'}  ${etiqueta} → duplicado (${r.accion === 'reciclado' ? 'idéntico → Papelera' : 'difiere → Cuarentena/duplicados'}; ya catalogado: ${r._id}).`);
+            return;
+        }
         console.log(`  ✅ ${etiqueta} → ${r.operacion} (${r.estado}) · ${r.rutaWeb}`);
         // SOLO se borra del Inbox si la copia al árbol CDU se verificó íntegra (tamaño origen ===
         // destino). Si no, se conserva el original para no perder datos; el próximo escaneo lo
