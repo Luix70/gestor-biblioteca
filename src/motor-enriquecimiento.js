@@ -55,7 +55,13 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     if (sinopsisEpub) documento.sinopsis = sinopsisEpub;
     delete documento.sinopsis_nativa;
 
-    console.log(`[Enriquecedor] Datos nativos para: "${documento.titulo}"`);
+    // Título NATIVO (del propio archivo), ANTES de enriquecer. Es normal que falte en PDFs sin
+    // metadatos y nombrados por su ISBN: el título real se resuelve luego por identificador (no se
+    // persiste nunca un título nulo — el $jsonSchema lo exige).
+    const isbnPista = documento.isbn || (Array.isArray(datosBase.isbn_candidatos) && datosBase.isbn_candidatos[0]) || null;
+    console.log(primerValido(documento.titulo)
+        ? `[Enriquecedor] Título nativo del archivo: "${documento.titulo}"`
+        : `[Enriquecedor] Sin título nativo en el archivo${isbnPista ? ` (ISBN ${isbnPista})` : ''}: se resolverá por identificador.`);
 
     // OBRA MULTIVOLUMEN: por drop de carpeta de tomos (contexto.obra) o por ISBN con rol en los
     // créditos. El nombre de carpeta / "(obra completa)" identifica la OBRA; "(tomo N)" el tomo.
