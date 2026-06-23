@@ -2,7 +2,6 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
-import { buscarEnBNE } from './buscador-bne.js';
 import { buscarEnDNB } from './buscador-dnb.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarEnBNF } from './buscador-bnf.js';
@@ -230,34 +229,10 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('coleccion_numero', pistasIA.numero_coleccion != null ? String(pistasIA.numero_coleccion) : null);
     }
 
-    // TIER 2c · BNE — autoridad para obras en español.
-    // Aporta CDU profesional + campos que las APIs externas no cubren (páginas, dimensiones,
-    // lengua, tema). Si BNE resuelve la CDU, el clasificador AI no se ejecuta.
+    // BNE RETIRADA del pipeline online: el Fichero local (Tier 2.0, dump COMPLETO OL+BNE) ya aportó
+    // arriba la CDU/idioma/tema/páginas/dimensiones de la BNE (su registro fusiona BNE+OL). El antiguo
+    // buscador-bne (SPARQL 403 + caché Mongo `bne_cdus`) era redundante y gastaba el free tier de Atlas.
     const isbnParaBusquedas = datosExtra.isbn || isbnsLookup[0] || null;
-    let bneTieneCDU = false;
-    // Si el Fichero local ya dio CDU (su registro BNE), no consultamos la BNE online (evita los
-    // 403 de SPARQL). Solo se consulta para libros sin CDU aún (típicamente OL-only en el volcado).
-    if (isbnParaBusquedas && !datosExtra.cdu) {
-        const recBNE = await buscarEnBNE(isbnParaBusquedas);
-        if (recBNE) {
-            if (recBNE.cdus?.length > 0) {
-                datosExtra.cdu = recBNE.cdus[0];
-                if (recBNE.cdus.length > 1) datosExtra.cdu_adicionales = recBNE.cdus.slice(1);
-                datosExtra.alertas.push(`CDU de la BNE: ${recBNE.cdus.join(' / ')}.`);
-                bneTieneCDU = true;
-            }
-            // BNE complementa campos que las APIs externas rara vez tienen
-            rellenar('idioma',  recBNE.lengua);
-            if (!datosExtra.categorias?.length && recBNE.tema) {
-                // tema BNE → se usa como palabras_clave si no hay nada mejor
-                rellenar('categorias', recBNE.tema.split(/\s*-\s*/).map(s => s.trim()).filter(Boolean));
-            }
-            // paginas y dimensiones se pasan como alertas para que motor-enriquecimiento
-            // los capture (los lectores de archivo no siempre los tienen)
-            if (recBNE.paginas) datosExtra.paginas_bne = recBNE.paginas;
-            if (recBNE.dimensiones) datosExtra.dimensiones_bne = recBNE.dimensiones;
-        }
-    }
 
     // TIER 2d · DNB — Dewey/DDC de la Deutsche Nationalbibliothek para libros europeos.
     // Complementa OpenLibrary cuando ésta no dio Dewey (p.ej. ISBN no indexado en OL).

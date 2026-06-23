@@ -6,7 +6,7 @@ import { rasterizarPaginas } from '../utils/rasterizar-pdf.js';
 import { extraerMetadatosEpub } from '../utils/lector-epub.js';
 import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion, restaurarOriginalSiFalta } from './util-mantenimiento.js';
 import { arbolCDU } from '../utils/cdu-arbol.js';
-import { buscarEnBNE } from '../utils/buscador-bne.js';
+import { buscarEnFicheroLocal } from '../utils/buscador-local.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { calcularHashArchivo } from '../utils/hash-archivo.js';
@@ -166,7 +166,7 @@ export const TAREAS = [
     {
         id: 're-clasificar-cdu',
         version: 2,
-        descripcion: 'Re-clasifica la CDU con el pipeline BNE→DNB→caché→IA y mueve los ficheros al nuevo árbol si cambió.',
+        descripcion: 'Re-clasifica la CDU con el pipeline Fichero→DNB→caché→IA y mueve los ficheros al nuevo árbol si cambió.',
         // Los tomos de una obra multivolumen NO se re-clasifican por separado: comparten la CDU de
         // la obra (un solo classmark). Su ruta va por <cdu>/obras/… y este movimiento no la entiende.
         aplica: (doc) => !doc.obra,
@@ -174,14 +174,13 @@ export const TAREAS = [
         async ejecutar(doc, { db }) {
             const isbn = doc.isbn || null;
 
-            // ── Paso 1: BNE (autoridad más fiable para fondos hispanos) ──────────────
+            // ── Paso 1: Fichero local (dump OL+BNE; la BNE online se retiró) ──────────
             let cduNueva = null, cduAdicionales = [], fuente = null;
             if (isbn) {
-                const recBNE = await buscarEnBNE(isbn);
-                if (recBNE?.cdus?.length > 0) {
-                    [cduNueva] = recBNE.cdus;
-                    cduAdicionales = recBNE.cdus.slice(1);
-                    fuente = 'BNE';
+                const rec = await buscarEnFicheroLocal({ isbns: [isbn] });
+                if (rec?.cdu) {
+                    cduNueva = rec.cdu;
+                    fuente = 'Fichero';
                 }
             }
 
