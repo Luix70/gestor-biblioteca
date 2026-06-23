@@ -293,17 +293,25 @@ de ficheros clasificado por CDU.
   POST /api/mantenimiento
   ──────────────────────────────────────────────────────────────────────────────
   Dispara el Conformador INMEDIATAMENTE (sin esperar los 5 min de inactividad).
-  Vacía todo el backlog de documentos pendientes de conformar, lote a lote, en
-  segundo plano. Cede a la ingesta del Inbox entre lotes.
+  Vacía todo el backlog de documentos pendientes de conformar, en RONDAS de
+  MANTENIMIENTO_LOTE (25) documentos, en segundo plano. Cede a la ingesta del
+  Inbox entre rondas y REINTENTA hasta vaciar el backlog (no se abandona a medias).
   El progreso se sigue en los logs del contenedor.
 
-  No lleva body.
+  Parámetro 'intervalo' (segundos, en query o body): pausa entre una ronda de 25
+  y la siguiente. 0 (defecto) = continuo, sin pausa. Útil para correr suave y
+  desatendido sin saturar Atlas/APIs.
+    POST /api/mantenimiento?intervalo=30
+    POST /api/mantenimiento     body { "intervalo": 30 }
+
+  Para DETENER un mantenimiento manual en marcha: ponerlo en apagado con
+    POST /api/mantenimiento/modo   body { "modo": "apagado" }
 
   Respuesta 202 (iniciado):
-    { "ok": true, "mensaje": "Mantenimiento iniciado en segundo plano; sigue el progreso en los logs." }
+    { "ok": true, "mensaje": "Mantenimiento iniciado en segundo plano (30s entre rondas de 25); detén con modo=apagado." }
 
-  Respuesta 409 (ya hay algo en curso):
-    { "ok": false, "motivo": "ocupado: hay ingesta o mantenimiento en curso" }
+  Respuesta 409 (ya hay un mantenimiento manual en curso):
+    { "ok": false, "motivo": "ya hay un mantenimiento manual en curso" }
 
   ──────────────────────────────────────────────────────────────────────────────
   GET /api/mantenimiento/estado

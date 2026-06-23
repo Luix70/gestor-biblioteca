@@ -48,6 +48,7 @@ const MANTENIMIENTO_REPOSO_MS = Number(process.env.MANTENIMIENTO_REPOSO_MS || 30
 
 let temporizador = null;
 let procesando = false;              // lock compartido: ingesta Y mantenimiento (nunca solapan)
+let mantManualEnCurso = false;       // bucle de mantenimiento manual en marcha (rondas paginadas)
 // ruta → timestamp (ms) de la primera vez que se vio el archivo con 0 bytes.
 // Si supera HUERFANO_TIMEOUT_MS el archivo se trata como transferencia fallida y va a Cuarentena.
 const huerfanosVistos = new Map();
@@ -470,7 +471,7 @@ async function quizasMantenimiento() {
         console.log('🧹 Conformador: pausa temporal expirada → modo diferido.');
     }
     if (modoConformador === 'apagado' || modoConformador === 'apagado-hasta') return;
-    if (procesando || conformadorDormido) return; // dormido = cola vacía, no gastar Mongo
+    if (procesando || conformadorDormido || mantManualEnCurso) return; // dormido = cola vacía; o ya hay manual en curso
     if (Date.now() - ultimaActividad < MANTENIMIENTO_REPOSO_MS) return;
     if (await inboxTieneArchivos()) return; // prioridad absoluta a la ingesta
     await ejecutarPasadaMantenimiento();
@@ -480,17 +481,27 @@ async function quizasMantenimiento() {
  * Disparo MANUAL del Conformador (vía API): vacía TODO el backlog en segundo plano, lote a lote,
  * saltándose la espera de inactividad. Cede a la ingesta entre lotes. Devuelve de inmediato.
  */
-export function mantenimientoManual() {
-    if (procesando) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
+export function mantenimientoManual({ intervaloSegundos = 0 } = {}) {
+    if (mantManualEnCurso) return { ok: false, motivo: 'ya hay un mantenimiento manual en curso' };
+    mantManualEnCurso = true;
     conformadorDormido = false; // forzar aunque la cola pareciera vacía
+    const seg = Math.max(0, Number(intervaloSegundos) || 0);
+    const lote = Number(process.env.MANTENIMIENTO_LOTE || 25);
     (async () => {
-        console.log('🧹 Mantenimiento lanzado MANUALMENTE.');
-        let r;
-        do { r = await ejecutarPasadaMantenimiento(); }
-        while (r.ok && r.pendientes > 0 && !r.abortado);
-        console.log(`🧹 Mantenimiento manual finalizado${r.abortado ? ' (cedió a la ingesta; quedan pendientes)' : ''}.`);
-    })().catch(e => console.error('Mantenimiento manual:', e.message));
-    return { ok: true, mensaje: 'Mantenimiento iniciado en segundo plano; sigue el progreso en los logs.' };
+        const dormir = (s) => new Promise(r => setTimeout(r, s * 1000));
+        console.log(`🧹 Mantenimiento manual iniciado (${seg > 0 ? `pausa ${seg}s entre rondas de ${lote}` : 'continuo, sin pausa'}).`);
+        try {
+            while (mantManualEnCurso) {
+                if (modoConformador === 'apagado') { console.log('🧹 Mantenimiento manual detenido (Conformador en apagado).'); break; }
+                const r = await ejecutarPasadaMantenimiento();
+                // Ocupado por la ingesta o cesión de turno: NO abandona el backlog; espera y reintenta.
+                if (!r.ok || r.abortado) { await dormir(Math.max(seg, 5)); continue; }
+                if (r.pendientes === 0) { console.log('🧹 Mantenimiento manual finalizado: backlog vacío.'); break; }
+                if (seg > 0) await dormir(seg); // ritmo entre rondas (0 = continuo)
+            }
+        } finally { mantManualEnCurso = false; }
+    })().catch(e => { mantManualEnCurso = false; console.error('Mantenimiento manual:', e.message); });
+    return { ok: true, mensaje: `Mantenimiento iniciado en segundo plano (${seg > 0 ? `${seg}s entre rondas de ${lote}` : 'continuo'}); detén con modo=apagado.` };
 }
 
 /** Calcula el ms-epoch del siguiente hito temporal para 'apagado-hasta'. */

@@ -63,13 +63,17 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     const coleccionEditoriales = db.collection('editoriales');
 
     let docFinal = { ...documentoEnriquecido };
+    // Un tomo "?" (sin número determinable) lleva volumen_numero AUSENTE, nunca null (el $jsonSchema
+    // lo tipa number|string). Si llegara null, se elimina para que el campo no exista.
+    if (docFinal.volumen_numero == null) delete docFinal.volumen_numero;
 
     // Registra el tomo en el inventario de su obra (qué tomos hay y cuáles faltan). Declarada ANTES
     // del try para ser accesible también desde el manejador de E11000 (catch). Lee docFinal en el
     // momento de la llamada (ya tendrá .obra/.volumen_numero fijados por el paso 2c).
     const registrarTomo = async (idFinal) => {
-        if (docFinal.obra && docFinal.volumen_numero != null && idFinal)
-            await registrarVolumenEnObra(db, docFinal.obra, docFinal.volumen_numero, idFinal, docFinal.obra_total);
+        if (docFinal.obra && idFinal)
+            // volumen_numero puede ser null ("tomo ?"): se registra igual (nunca se descarta un tomo).
+            await registrarVolumenEnObra(db, docFinal.obra, docFinal.volumen_numero ?? null, idFinal, docFinal.obra_total);
     };
 
     try {
@@ -136,14 +140,24 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             if (cduObra) docFinal.cdu = cduObra; // todos los tomos comparten la CDU de la obra
         }
 
-        // Un TOMO no puede llevar como `isbn` el de la OBRA completa (set): colisionaría con los
-        // demás tomos en el índice único `isbn` (E11000) y los fusionaría en uno. Si solo se conoce
-        // el ISBN de obra, el tomo va SIN isbn (lo identifica obra+volumen_numero); un isbn propio
-        // distinto sí se conserva. Comparación por todas las variantes 10/13.
-        if (docFinal.obra && docFinal.isbn && docFinal.isbn_obra) {
-            const variantesObra = new Set(variantesISBN(docFinal.isbn_obra));
-            if (variantesISBN(docFinal.isbn).some(v => variantesObra.has(v))) {
+        // SEGURIDAD MULTIVOLUMEN — un TOMO JAMÁS debe fusionarse con otro documento por su ISBN
+        // (eso fusionaba/perdía tomos). Su identidad es (obra, volumen_numero), NO el ISBN. Por eso,
+        // si el `isbn` del tomo (a) es el de la OBRA completa (set), o (b) ya pertenece a OTRO
+        // documento (otro tomo, una variante de formato print/epub/tapa, o un código espurio), se
+        // DESCARTA del tomo —que se guarda SIN isbn, identificado por obra+nº— y se marca anomalía.
+        // Vale más un tomo sin ISBN que un tomo perdido.
+        if (docFinal.obra && docFinal.isbn) {
+            const variantesObra = docFinal.isbn_obra ? new Set(variantesISBN(docFinal.isbn_obra)) : new Set();
+            const esDelSet = variantesISBN(docFinal.isbn).some(v => variantesObra.has(v));
+            const choca = esDelSet ? null : await coleccionBiblioteca.findOne({ isbn: docFinal.isbn });
+            const mismoTomo = choca && String(choca.obra) === String(docFinal.obra)
+                && choca.volumen_numero != null && choca.volumen_numero === docFinal.volumen_numero;
+            if (esDelSet) {
+                delete docFinal.isbn; // el ISBN del set no es el del tomo
+            } else if (choca && !mismoTomo) {
+                docFinal.alertas_agente.push(`⚠ ISBN ${docFinal.isbn} ya pertenece a otro documento (${choca._id}); el tomo se guarda SIN isbn para NO fusionarlo.`);
                 delete docFinal.isbn;
+                docFinal.revision_requerida = true;
             }
         }
 
@@ -188,8 +202,9 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             } else {
                 filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
             }
-        } else if (docFinal.isbn) {
-            // — Nivel C: libros con ISBN — solo actualizar si es el mismo fichero
+        } else if (docFinal.isbn && !docFinal.obra) {
+            // — Nivel C: libros con ISBN (NUNCA tomos de obra: jamás se fusionan por ISBN) — solo
+            //   actualizar si es el mismo fichero
             const candidato = await coleccionBiblioteca.findOne({ isbn: docFinal.isbn });
             if (candidato) {
                 const mismoArchivo = !candidato.nombre_archivo

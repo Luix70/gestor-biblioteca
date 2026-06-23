@@ -69,6 +69,28 @@ try {
     eq(obra && obra.volumenes_presentes === 2, `inventario: 2 tomos presentes (${obra?.volumenes_presentes})`);
     eq(obra && obra.volumenes?.every(v => v._id), 'todos los tomos del inventario tienen _id (ninguno null)');
     eq(obra && obra.completa === true, 'obra marcada completa');
+
+    // ── C) SEGURIDAD: un tomo cuyo ISBN ya es de OTRO documento NO se fusiona: se guarda sin isbn ──
+    console.log('C) ISBN de tomo que choca con otro doc → se guarda SIN isbn (no fusiona) + anomalía:');
+    const ajeno = await procesarCatalogo(base({ titulo: `${MARCA} Ajeno`, isbn: '0131103628', nombre_archivo: 'ajeno.pdf' }));
+    const volC = await procesarCatalogo(base({
+        titulo: `${MARCA} Obra C — Vol. 1`, obra_titulo: `${MARCA} Obra C`, isbn_obra: '0000000002',
+        isbn: '0131103628', volumen_numero: 1, nombre_archivo: 'obraC-vol-1.pdf', // mismo isbn que 'ajeno'
+    }));
+    eq(volC.operacion === 'insercion', `tomo insertado aparte (op=${volC.operacion})`);
+    eq(String(volC._id) !== String(ajeno._id), 'el tomo NO se fusionó con el documento ajeno');
+    eq(volC.isbn === undefined, 'el tomo se guardó SIN isbn (descartado el que chocaba)');
+
+    // ── D) Tomo SIN número ("?") → se guarda igual, en volumenes_sin_numero, obra a revisión ──
+    console.log('D) tomo sin número ("?") → guardado y marcado, nunca descartado:');
+    const volD = await procesarCatalogo(base({   // sin volumen_numero (tomo "?")
+        titulo: `${MARCA} Obra D — ?`, obra_titulo: `${MARCA} Obra D`, isbn_obra: '0000000001',
+        nombre_archivo: 'obraD-vol-x.pdf',
+    }));
+    eq(volD.operacion === 'insercion', `tomo "?" insertado (op=${volD.operacion})`);
+    const obraD = await obras.findOne({ titulo: `${MARCA} Obra D` });
+    eq(obraD && (obraD.volumenes_sin_numero || []).length === 1, 'tomo "?" registrado en volumenes_sin_numero');
+    eq(obraD && obraD.revision_requerida === true, 'obra marcada revision_requerida');
 } finally {
     const n = await limpiar();
     console.log(`(limpieza: ${n} documento(s) de prueba eliminados)`);
