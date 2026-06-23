@@ -6,6 +6,7 @@ import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
     listarCuarentena, reingestarCuarentena, ingestaPorDia,
 } from './utils/inspeccion.js';
+import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { purgarObra } from './utils/purga.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
@@ -54,6 +55,21 @@ export function rutasPanel() {
     r.post('/cuarentena/reingestar', async (req, res) => {
         try {
             const r2 = await reingestarCuarentena(req.body?.id);
+            res.status(r2.ok ? 200 : 400).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Comparar un duplicado: catalogado vs entrante (tamaño/páginas/fecha/legible + recomendación).
+    r.get('/cuarentena/duplicado', async (req, res) => {
+        try {
+            const r2 = await compararDuplicado(req.query.id);
+            res.status(r2.ok ? 200 : 400).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Resolver un duplicado. Body { id, quedarse: 'existente'|'entrante' }. (POST → solo admin.)
+    r.post('/cuarentena/duplicado/resolver', async (req, res) => {
+        try {
+            const { id, quedarse } = req.body || {};
+            const r2 = await resolverDuplicado(id, quedarse);
             res.status(r2.ok ? 200 : 400).json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

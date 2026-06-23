@@ -100,6 +100,14 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .toast.bad{border-left-color:var(--bad)}.toast.warn{border-left-color:var(--warn)}
 @keyframes slide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
 .scrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:25}
+#cmpScrim{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:205}
+#cmpModal{display:none;position:fixed;inset:0;place-items:center;z-index:206;padding:16px;overflow:auto}
+#cmpModal .box{max-width:660px;width:100%}
+.cmpcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.cmpcol{border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px;line-height:1.7}
+.cmpcol h4{margin:0 0 8px;font-size:13px}
+.cmpcol.win{border-color:var(--acc);background:rgba(40,217,168,.06)}
+.winbadge{color:var(--acc);font-size:11px;margin-left:6px}
 /* auth */
 #login{position:fixed;inset:0;background:radial-gradient(900px 500px at 70% -10%,rgba(40,217,168,.10),transparent),var(--bg);display:none;place-items:center;z-index:200}
 #login.show{display:grid}
@@ -286,6 +294,8 @@ body.guest .admin-only{display:none!important}
   </form>
 </div>
 <div id="toast"></div>
+<div id="cmpScrim"></div>
+<div id="cmpModal"></div>
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -370,10 +380,57 @@ async function loadCuar(){try{const c=await api('/cuarentena');const cats=Object
     <table><tr><th>Título / archivo</th><th>Motivo</th><th></th></tr>${c[cat].map(d=>`<tr>
       <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div></td>
       <td class="muted">${esc(d.error||'—')}</td>
-      <td><button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button></td></tr>`).join('')}</table></div>`).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
+      <td>${cat==='duplicados'?`<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> `:''}<button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button></td></tr>`).join('')}</table></div>`).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
   $$('#cuarBody [data-re]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api('/cuarentena/reingestar',{method:'POST',body:JSON.stringify({id:b.dataset.re})});
     if(r.ok){toast(`Reingestados ${r.movidos}/${r.total} → Inbox`);loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}catch(e){toast(e.message,'bad');b.disabled=false;}});
+  $$('#cuarBody [data-cmp]').forEach(b=>b.onclick=()=>abrirComparador(b.dataset.cmp));
 }catch(e){toast(e.message,'bad');}}
+
+// Comparador de duplicados: catalogado vs entrante, con la recomendación resaltada.
+function cerrarCmp(){$('#cmpScrim').style.display='none';$('#cmpModal').style.display='none';$('#cmpModal').innerHTML='';}
+async function abrirComparador(id){
+  try{
+    const d=await api('/cuarentena/duplicado?id='+encodeURIComponent(id));
+    if(!d.ok){toast(d.motivo||'no se pudo comparar','warn');return;}
+    const col=(lado,o,win)=>{
+      const cuerpo=o.existe?[
+        `📄 <span class="mono">${esc(o.archivo||'—')}</span>`,
+        `Tamaño: <b>${fmtBytes(o.bytes)}</b>`,
+        o.paginas!=null?`Páginas: <b>${o.paginas}</b>`:'',
+        o.mtime?`Fecha: ${new Date(o.mtime).toLocaleDateString()}`:'',
+        `Legible: ${o.legible?'✅':'⛔ no'}`,
+        (lado==='existente'&&o.isbn)?`ISBN: ${esc(o.isbn)}`:'',
+        (lado==='existente'&&o.es_obra)?`<span style="color:var(--warn)">⚠ tomo de obra</span>`:'',
+      ].filter(Boolean).join('<br>'):`<span style="color:var(--bad)">${esc(o.motivo||'no disponible')}</span>`;
+      return `<div class="cmpcol${win?' win':''}"><h4>${lado==='existente'?'📚 Catalogado':'📥 Entrante'}${win?'<span class="winbadge">★ recomendado</span>':''}</h4>${cuerpo}</div>`;
+    };
+    const obra=!!(d.existente&&d.existente.es_obra);
+    $('#cmpModal').innerHTML=`<div class="box card">
+      <h3 style="margin-top:0">⚖ Comparar duplicado</h3>
+      <div class="muted" style="margin:-4px 0 12px">${esc(d.titulo||d.identificador||id)}</div>
+      <div class="cmpcols">${col('existente',d.existente,d.recomendado==='existente')}${col('entrante',d.entrante,d.recomendado==='entrante')}</div>
+      <div class="muted" style="margin-top:10px">Recomendación: <b>conservar el ${d.recomendado==='entrante'?'entrante':'catalogado'}</b> — ${esc(d.motivo)}${d.identico?' · contenido idéntico':''}</div>
+      ${obra?`<div style="color:var(--warn);margin-top:8px">⚠ El catalogado es un tomo de obra: solo puedes conservar el catalogado (el reemplazo se hace desde Obras).</div>`:''}
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn admin-only" id="cmpKeepEx">📚 Quedarse con el catalogado</button>
+        <button class="btn admin-only" id="cmpKeepEn"${obra?' disabled':''}>📥 Quedarse con el entrante</button>
+        <button class="btn" id="cmpClose">Cerrar</button>
+      </div></div>`;
+    $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+    $('#cmpClose').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
+    const resolver=async(quedarse)=>{
+      const aviso=quedarse==='entrante'
+        ?'Se retirará el documento catalogado (a la Papelera) y el entrante volverá al Inbox para recatalogarse. ¿Seguir?'
+        :'El entrante se descartará a la Papelera (recuperable). ¿Seguir?';
+      if(!confirm(aviso))return;
+      try{const r=await api('/cuarentena/duplicado/resolver',{method:'POST',body:JSON.stringify({id,quedarse})});
+        if(r.ok){toast(quedarse==='entrante'?`Catalogado retirado · entrante → Inbox (${r.movidos}/${r.total})`:'Entrante descartado a la Papelera');cerrarCmp();loadCuar();}
+        else toast(r.motivo,'warn');}catch(e){toast(e.message,'bad');}
+    };
+    if($('#cmpKeepEx'))$('#cmpKeepEx').onclick=()=>resolver('existente');
+    if($('#cmpKeepEn'))$('#cmpKeepEn').onclick=()=>resolver('entrante');
+  }catch(e){toast(e.message,'bad');}
+}
 
 // ── papelera ──
 async function loadPap(){try{const p=await api('/papelera');
