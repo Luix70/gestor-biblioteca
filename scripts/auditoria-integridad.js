@@ -13,8 +13,9 @@
  * Solo informa por defecto. Ejecutar:
  *   node scripts/auditoria-integridad.js [--fix-rutas] [--limpiar]
  *
- * --fix-rutas: actualiza ruta_base en Mongo para los docs cuya carpeta se encontró pero la
- *   ruta_base guardada no coincide (útil tras renombrar CDUs).
+ * --fix-rutas: REPARA las inconsistencias de B (un doc con DOS carpetas en disco: la viva, donde
+ *   ruta_base apunta y está el fichero, y una stale sobrante). Deja la BD apuntando a la carpeta que
+ *   SÍ tiene el fichero y RECICLA la otra → match 1:1 BD↔disco. Nunca borra sin reciclar.
  * --limpiar:   ELIMINA las carpetas vacías y ramas sin hojas (E) — son podas seguras: no contienen
  *   ningún documento/registro/imagen. NO toca nada que tenga contenido.
  */
@@ -189,16 +190,44 @@ async function main() {
             console.log(`     En BD:    ${rutaBDActual || '(vacío)'}`);
         }
         if (FIX_RUTAS) {
-            console.log('\n  Aplicando --fix-rutas…');
+            console.log('\n  Aplicando --fix-rutas (reparación: la BD apunta a la carpeta que TIENE el fichero; la otra se RECICLA → match 1:1)…');
             const { ObjectId } = await import('mongodb');
-            for (const { web, docId } of carpetasConDocErroneo) {
+            const { reciclar } = await import('../src/utils/papelera.js');
+            const aAbs = (web) => web ? path.join(DIR_CDU, ...(web.startsWith('/recursos/') ? web.slice('/recursos/'.length) : web).split('/')) : null;
+            const tieneFichero = async (dir) => { if (!dir) return false; try { return (await fs.readdir(dir)).some(n => EXT_DOC.includes(path.extname(n).toLowerCase())); } catch { return false; } };
+            const reciclarCarpeta = async (dir) => {
+                let ents; try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+                const ficheros = ents.filter(e => e.isFile()).map(e => path.join(dir, e.name));
+                if (ficheros.length) await reciclar(ficheros, 'carpeta-stale-' + path.basename(dir));
+                await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+            };
+            let reparados = 0;
+            for (const { carpeta: diskFolder, web, docId, rutaBDActual } of carpetasConDocErroneo) {
                 try {
-                    await col.updateOne({ _id: new ObjectId(docId) }, { $set: { ruta_base: web } });
-                    console.log(`  ✅ [${docId}] ruta_base → ${web}`);
+                    const rbFolder = aAbs(rutaBDActual);
+                    const rbFile = await tieneFichero(rbFolder);
+                    const diskFile = await tieneFichero(diskFolder);
+                    if (rbFile) {
+                        // La BD YA apunta a la carpeta con el fichero → la escaneada es una DUPLICADA stale → reciclar.
+                        await reciclarCarpeta(diskFolder);
+                        console.log(`  ♻️  [${docId}] carpeta duplicada reciclada (${web}); BD correcta → ${rutaBDActual}`);
+                        reparados++;
+                    } else if (diskFile) {
+                        // El fichero vive en la carpeta escaneada; la BD apunta a una SIN fichero → corregir ruta_base y reciclar la otra.
+                        await col.updateOne({ _id: new ObjectId(docId) }, { $set: { ruta_base: web } });
+                        if (rbFolder) await reciclarCarpeta(rbFolder);
+                        console.log(`  ✅ [${docId}] ruta_base → ${web} (la otra carpeta, sin fichero, reciclada)`);
+                        reparados++;
+                    } else {
+                        console.log(`  ❓ [${docId}] ninguna de las dos carpetas tiene el fichero — revisar a mano.`);
+                    }
                 } catch (e) {
-                    console.warn(`  ⚠️  [${docId}] no se pudo actualizar: ${e.message}`);
+                    console.warn(`  ⚠️  [${docId}] no se pudo reparar: ${e.message}`);
                 }
             }
+            console.log(`  → ${reparados}/${carpetasConDocErroneo.length} reparados (match BD↔disco).`);
+        } else {
+            console.log('  ℹ️  Re-ejecuta con --fix-rutas para repararlos (la BD apuntará a la carpeta con el fichero; la duplicada se recicla).');
         }
     }
 
