@@ -43,6 +43,16 @@ export async function reemplazarConSano(idDeposito, rutaSubida, { ubicacion } = 
     const depDir = path.join(DIR_CUARENTENA, ...partes);
     try { await fs.access(depDir); } catch { return { ok: false, motivo: 'el depósito ya no existe' }; }
 
+    // 0) Test de legibilidad MÍNIMO: una copia vacía/diminuta no se cataloga (no sustituir un
+    //    fantasma por otro). El pipeline hace el resto de la validación al intentar catalogarla.
+    try {
+        const st = await fs.stat(rutaSubida);
+        if (st.size < 1024) {
+            await reciclar([rutaSubida], 'saneamiento-vacio').catch(() => {});
+            return { ok: false, motivo: `la copia subida está vacía o es demasiado pequeña (${st.size} B) — elige otro fichero` };
+        }
+    } catch { return { ok: false, motivo: 'no se pudo leer el fichero subido' }; }
+
     // 1) Catalogar la copia sana por el pipeline compartido.
     let resultado;
     try {

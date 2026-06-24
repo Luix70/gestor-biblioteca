@@ -103,8 +103,14 @@ export async function reingestarCuarentena(idRel) {
     if (partes.length < 2) return { ok: false, motivo: 'identificador de depósito inválido' };
     const depDir = path.join(DIR_CUARENTENA, ...partes);
     let ents; try { ents = await fs.readdir(depDir, { withFileTypes: true }); } catch { return { ok: false, motivo: 'depósito no encontrado' }; }
-    const archivos = ents.filter(e => e.isFile() && e.name !== 'estado.json');
-    if (!archivos.length) return { ok: false, motivo: 'el depósito no tiene archivos que reingestar' };
+    // Solo ficheros NO vacíos: reingestar un fantasma de 0 bytes lo devolvería tal cual a
+    // Cuarentena/ilegibles (trabajo de Sísifo). Un fichero ilegible se arregla con «Reemplazar».
+    const candidatos = ents.filter(e => e.isFile() && e.name !== 'estado.json');
+    const archivos = [];
+    for (const a of candidatos) {
+        try { if ((await fs.stat(path.join(depDir, a.name))).size > 0) archivos.push(a); } catch { /* ignora */ }
+    }
+    if (!archivos.length) return { ok: false, motivo: 'el depósito solo tiene ficheros vacíos (0 bytes): usa «Reemplazar» con una copia sana' };
     await fs.mkdir(DIR_INBOX, { recursive: true });
     let movidos = 0;
     for (const a of archivos) {
