@@ -38,6 +38,9 @@ async function nombrePorId(db, coleccion, id, campo = 'nombre') {
     return d ? d[campo] : null;
 }
 
+// Escapa una cadena para usarla literal dentro de una expresión regular de MongoDB.
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Rutas del PANEL DE CONTROL (montadas bajo /api). Acciones de operación: vigilante, papelera,
  * cuarentena, purga de obras, ingesta por día. (Mantenimiento y estadísticas viven en app.js.)
@@ -155,6 +158,60 @@ export function rutasPanel() {
                 .find({}, { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1, completa: 1, revision_requerida: 1 } })
                 .sort({ revision_requerida: -1, completa: 1, titulo: 1 }).limit(500).toArray();
             res.json(obras.map(o => ({ ...o, _id: String(o._id) })));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Búsqueda + navegación del catálogo (página "Búsqueda"). Sin `q` = navegar todo (recientes).
+    // Filtros: q (título/subtítulo/obra/colección/palabras_clave/ISBN/ISSN + autor/editorial por
+    // nombre), tipo (libro|revista), cdu (prefijo), orden (reciente|titulo|antiguo). Paginado (24).
+    // Devuelve fichas mínimas con autores ya resueltos (vía $lookup) para pintar tarjetas con portada.
+    r.get('/catalogo', async (req, res) => {
+        try {
+            const db = await conectarDB();
+            const q = (req.query.q || '').trim();
+            const tipo = req.query.tipo;
+            const cdu = (req.query.cdu || '').trim();
+            const orden = req.query.orden || 'reciente';
+            const page = Math.max(1, Number(req.query.page) || 1);
+            const porPagina = 24;
+
+            const match = {};
+            if (tipo === 'libro' || tipo === 'revista') match.tipo_recurso = tipo;
+            if (cdu) match.cdu = { $regex: '^' + escapeRegex(cdu) };
+            if (q) {
+                const rx = { $regex: escapeRegex(q), $options: 'i' };
+                const or = [{ titulo: rx }, { subtitulo: rx }, { obra_titulo: rx },
+                    { coleccion_nombre: rx }, { palabras_clave: rx }];
+                const qIsbn = q.replace(/[^0-9Xx]/g, '');
+                if (qIsbn.length >= 8) {
+                    const irx = { $regex: '^' + qIsbn };
+                    or.push({ isbn: irx }, { issn: irx }, { isbn_obra: irx });
+                }
+                const [autores, edits] = await Promise.all([
+                    db.collection('autores').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
+                    db.collection('editoriales').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
+                ]);
+                if (autores.length) or.push({ autores: { $in: autores.map(a => a._id) } });
+                if (edits.length) or.push({ editorial: { $in: edits.map(e => e._id) } });
+                match.$or = or;
+            }
+
+            const sort = orden === 'titulo' ? { titulo: 1 } : orden === 'antiguo' ? { fecha_ingreso: 1 } : { fecha_ingreso: -1 };
+            const opciones = orden === 'titulo' ? { collation: { locale: 'es', strength: 1 } } : {};
+            const total = await db.collection('biblioteca').countDocuments(match);
+            const docs = await db.collection('biblioteca').aggregate([
+                { $match: match }, { $sort: sort }, { $skip: (page - 1) * porPagina }, { $limit: porPagina },
+                { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
+                { $project: {
+                    titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
+                    tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, autores: '$_au.nombre',
+                } },
+            ], opciones).toArray();
+
+            res.json({
+                ok: true, total, page, porPagina, paginas: Math.max(1, Math.ceil(total / porPagina)),
+                docs: docs.map(d => ({ ...d, _id: String(d._id) })),
+            });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

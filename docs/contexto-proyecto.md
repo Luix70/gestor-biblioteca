@@ -199,6 +199,14 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
     / descargar para epub/djvu/… (sin visor nativo en el navegador). El detalle es una página oculta
     (`#p-detalle`, no en el menú) con pila de navegación (`detalle={tipo,id,ctx}`); `/recursos` es público
     (montado antes de la puerta `/api`), así que imágenes y ficheros cargan sin token.
+  - **Búsqueda + catálogo** (`GET /catalogo`): página única que busca y navega TODO el catálogo (no solo
+    obras). `q` casa título/subtítulo/obra/colección/palabras_clave/ISBN/ISSN y **autor/editorial por
+    nombre** (resuelve nombre→ids antes de filtrar); filtros tipo (libro|revista), `cdu` (prefijo) y orden
+    (recientes|título A-Z con collation `es`|antiguos); paginado de 24 con `$lookup` de autores resuelto en
+    la propia página (sort/skip/limit ANTES del lookup). Resultados como rejilla de tarjetas con portada
+    (mismo estilo que los tomos) que abren la **misma ficha** (`verDoc(..,{volver:'search'})`). Sin `q` =
+    navegar recientes. Búsqueda Mongo por regex — suficiente a esta escala (~7,5 k docs); la FTS en SQLite
+    queda para cuando el catálogo crezca. (La ficha enlaza a su obra vía `verObra` cuando el doc es un tomo.)
 - **Fichero local — volcados OL+BNE offline** (`scripts/etl-fichero.js` · `scripts/etl-map.js` ·
   `src/utils/buscador-local.js`): SQLite **solo-lectura** (`fichero.db`, ~23 GB, **58,7 M registros /
   37,4 M con ISBN**) con los dumps de Open Library (ediciones) + BNE en una tabla `fichero` con
