@@ -23,7 +23,7 @@ export const AJUSTES = {
     FUENTES_COPIA: JSON.stringify([
         { nombre: "Anna's Archive", url: 'https://annas-archive.gl/search?q={q}' },
         { nombre: 'Z-Library', url: 'https://z-library.sk/s/?q={q}' },
-        { nombre: 'Libgen', url: 'https://libgen.is/search.php?req={q}' },
+        { nombre: 'Libgen', url: 'https://libgen.bz/index.php?req={q}' },
         { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
     ]),
     HTTP_TIMEOUT_MS: 20000,         // timeout de TODA llamada HTTP a las APIs bibliográficas
