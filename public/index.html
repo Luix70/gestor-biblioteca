@@ -159,6 +159,11 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .epubtoc a{display:block;padding:9px 14px;color:var(--txt);font-size:13px;text-decoration:none;border-bottom:1px solid var(--bg2)}
 .epubtoc a:hover{background:var(--card2);color:var(--acc)}
 .epubtoc a.sub{padding-left:30px;color:var(--mut);font-size:12px}
+.pdfwrap{position:relative;width:100%;height:70vh;height:70svh;border:1px solid var(--line);border-radius:12px;background:#3a3f44;overflow:hidden}
+.pdfwrap.full{position:fixed;inset:0;width:auto;height:auto;z-index:300;border:none;border-radius:0}
+.pdfscroll{position:absolute;inset:0 0 40px 0;overflow:auto;padding:12px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.pdfpage{width:100%;max-width:880px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.45)}
+.pdfpage canvas{display:block;width:100%;height:auto}
 /* auth */
 #login{position:fixed;inset:0;background:radial-gradient(900px 500px at 70% -10%,rgba(40,217,168,.10),transparent),var(--bg);display:none;place-items:center;z-index:200}
 #login.show{display:grid}
@@ -188,7 +193,7 @@ body.guest .admin-only{display:none!important}
   .grid.g3>div[style*="span 2"],.grid.g2>div[style*="span 2"]{grid-column:1/-1!important}
   .row>div{min-width:100%}.row .btn{flex:1}
   .logview{height:56vh}
-  .ficha{grid-template-columns:1fr}.fileprev iframe{height:58vh}.epubwrap{height:64vh;height:64svh}
+  .ficha{grid-template-columns:1fr}.fileprev iframe{height:58vh}.epubwrap,.pdfwrap{height:64vh;height:64svh}
   .vol-grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
   .det-title h2{font-size:18px}
 }
@@ -636,7 +641,9 @@ function pintarDoc(r,ctx){
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${cduFull}${palabras}${alertas}</div></div>${sinopsis}`;
   carIdx=0;const tr=$('#carTrack');
   if(tr&&tr.children.length>1)tr.onscroll=()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==carIdx){carIdx=i;const dd=$('#carDots');if(dd)dd.textContent=(i+1)+' / '+tr.children.length;}};
-  if(r.archivo_url&&(r.nombre_archivo||'').toLowerCase().endsWith('.epub'))iniciarLectorEpub(r.archivo_url);
+  const _nom=(r.nombre_archivo||'').toLowerCase();
+  if(r.archivo_url&&_nom.endsWith('.epub'))iniciarLectorEpub(r.archivo_url);
+  else if(r.archivo_url&&_nom.endsWith('.pdf'))iniciarLectorPdf(r.archivo_url);
 }
 
 let carIdx=0;
@@ -647,13 +654,16 @@ function previewArchivo(r){
   if(!r.archivo_url)return '';
   const nombre=r.nombre_archivo||'archivo',url=r.archivo_url,ext=(nombre.split('.').pop()||'').toLowerCase();
   if(['jpg','jpeg','png','webp','gif'].includes(ext))return ''; // un set de imágenes ya se ve en el carrusel
-  const bAbrir=`<a class="btn" href="${esc(url)}" target="_blank" rel="noopener">↗ Abrir en pestaña</a>`;
-  const bDescargar=`<a class="btn" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a>`;
-  // "Abrir en pestaña" SOLO para PDF (el navegador lo previsualiza); epub/djvu/mobi… se descargarían
-  // (no hay visor nativo en pestaña) → confunde, así que solo "Descargar". El epub ya se lee aquí.
-  const acc=`<div class="row" style="margin-top:12px;gap:8px">${ext==='pdf'?bAbrir:''}${bDescargar}</div>`;
-  // PDF: el navegador lo renderiza de forma nativa en un iframe.
-  if(ext==='pdf')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3><iframe src="${esc(url)}#view=FitH" title="PDF"></iframe>${acc}</div>`;
+  // Solo "Descargar": PDF y EPUB se LEEN EMBEBIDOS aquí (visores propios). Ya no se ofrece "Abrir en
+  // pestaña" (en PC, según la config del navegador, descargaba el PDF en vez de previsualizarlo).
+  const acc=`<div class="row" style="margin-top:12px;gap:8px"><a class="btn" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a></div>`;
+  // PDF: visor PDF.js embebido (vendored) — render propio en canvas → previsualiza IGUAL en PC y móvil,
+  // sin depender de la config de PDF del navegador. Se inicializa tras pintar (iniciarLectorPdf).
+  if(ext==='pdf')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3>
+    <div class="pdfwrap" id="pdfWrap"><div class="pdfscroll" id="pdfScroll"></div>
+      <button class="epubfs" id="pdfFs" title="Pantalla completa" style="display:none">⛶</button>
+      <div class="epubbar" id="pdfBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="pdfCur">1</span> / <span id="pdfTotal">?</span></span></div>
+      <div class="epubmsg" id="pdfMsg">Cargando PDF…</div></div>${acc}</div>`;
   // EPUB: lector epub.js (vendored en /vendor) — se inicializa tras pintar (iniciarLectorEpub).
   if(ext==='epub')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📗 ${esc(nombre)}</h3>
     <div class="epubwrap" id="epubWrap"><div id="epubArea"></div>
@@ -662,11 +672,13 @@ function previewArchivo(r){
       <nav class="epubtoc" id="epubToc"></nav>
       <div class="epubbar" id="epubBar" style="display:none">
         <button id="epubTocBtn" title="Índice">☰</button>
+        <button id="epubFontDown" title="Reducir letra" style="font-size:13px">A−</button>
+        <button id="epubFontUp" title="Aumentar letra" style="font-size:17px">A+</button>
         <div class="epubprog" id="epubProg" title="Ir a una posición"><i></i></div>
         <span class="epubpct" id="epubPct">—</span>
       </div>
       <div class="epubmsg" id="epubMsg">Cargando lector…</div></div>${acc}</div>`;
-  // Resto de formatos: sin vista previa integrada — solo descarga / abrir.
+  // Resto de formatos: sin vista previa integrada — solo descarga.
   const ic={djvu:'📘',mobi:'📙',azw3:'📙',cbr:'🗂️',cbz:'🗂️'}[ext]||'📦';
   return `<div class="fileprev"><div class="filebox"><div class="ic">${ic}</div><div style="font-weight:600;word-break:break-word">${esc(nombre)}</div>
     <div class="muted" style="font-size:12px;margin-top:4px">Formato ${esc((ext||'—').toUpperCase())} — el navegador no lo previsualiza de forma integrada.</div>${acc}</div></div>`;
@@ -720,6 +732,12 @@ async function iniciarLectorEpub(url){
     }).catch(()=>{});
     $('#epubTocBtn').onclick=()=>$('#epubToc').classList.toggle('open');
 
+    // Tamaño de letra (A− / A+). epub.js reflowa al cambiarlo → 'relocated' re-clava la altura.
+    let epubFont=100;
+    const aplicarFuente=()=>{try{epubRendition.themes.fontSize(epubFont+'%');}catch{}};
+    $('#epubFontDown').onclick=()=>{epubFont=Math.max(60,epubFont-10);aplicarFuente();};
+    $('#epubFontUp').onclick=()=>{epubFont=Math.min(250,epubFont+10);aplicarFuente();};
+
     // Progreso (%). Las localizaciones se generan en segundo plano; hasta entonces, página/total.
     let locsReady=false;
     const progreso=(loc)=>{if(!loc){try{loc=epubRendition.currentLocation();}catch{return;}}if(!loc||!loc.start)return;
@@ -754,6 +772,51 @@ async function iniciarLectorEpub(url){
       else if(e.key==='Escape'&&wrap.classList.contains('full')){wrap.classList.remove('full');fs.textContent='⛶';fs.title='Pantalla completa';refit();}};
   }catch(e){if(msg)msg.innerHTML=`No se pudo abrir el EPUB en el navegador (${esc(e.message)}).<br>Usa las opciones de descarga de abajo.`;}
 }
+
+// ── lector PDF (PDF.js vendored) — render propio en canvas: previsualiza IGUAL en PC y móvil ──
+let pdfLibPromise=null,pdfDoc=null,pdfObs=null;
+function cargarPdfLib(){
+  if(window.pdfjsLib)return Promise.resolve();
+  if(pdfLibPromise)return pdfLibPromise;
+  pdfLibPromise=new Promise((res,rej)=>{const s=document.createElement('script');s.src='/vendor/pdf.min.js';s.onload=res;s.onerror=()=>rej(new Error('no se pudo cargar pdf.js'));document.head.appendChild(s);});
+  return pdfLibPromise;
+}
+async function iniciarLectorPdf(url){
+  const wrap=$('#pdfWrap'),scroll=$('#pdfScroll'),msg=$('#pdfMsg');if(!scroll)return;
+  try{
+    await cargarPdfLib();
+    if(!$('#pdfScroll'))return; // el usuario navegó fuera mientras cargaba la librería
+    const lib=window.pdfjsLib;lib.GlobalWorkerOptions.workerSrc='/vendor/pdf.worker.min.js';
+    pdfDoc=await lib.getDocument(url).promise;
+    if(!$('#pdfScroll'))return;
+    if(msg)msg.style.display='none';
+    $('#pdfBar').style.display='flex';$('#pdfFs').style.display='grid';$('#pdfTotal').textContent=pdfDoc.numPages;
+    scroll.innerHTML='';
+    if(pdfObs)pdfObs.disconnect();
+    // Render perezoso: cada página se dibuja al acercarse y se libera al alejarse (acota memoria).
+    pdfObs=new IntersectionObserver(ents=>ents.forEach(en=>{en.isIntersecting?renderPdfPage(en.target):liberarPdfPage(en.target);}),{root:scroll,rootMargin:'300px'});
+    for(let n=1;n<=pdfDoc.numPages;n++){const ph=document.createElement('div');ph.className='pdfpage';ph.dataset.n=n;ph.style.aspectRatio='1/1.414';scroll.appendChild(ph);pdfObs.observe(ph);}
+    // Indicador de página: la más alta cuyo borde superior ya pasó el del visor.
+    scroll.onscroll=()=>{const y=scroll.scrollTop+80;let cur=1;for(const p of scroll.children){if(p.offsetTop<=y)cur=Number(p.dataset.n);else break;}const e=$('#pdfCur');if(e)e.textContent=cur;};
+    // Pantalla completa: overlay por CSS (igual que el epub).
+    const fs=$('#pdfFs');fs.onclick=()=>{const f=wrap.classList.toggle('full');fs.textContent=f?'✕':'⛶';fs.title=f?'Salir de pantalla completa':'Pantalla completa';};
+    document.onkeydown=e=>{if(!$('#pdfScroll'))return;if(e.key==='Escape'&&wrap.classList.contains('full')){wrap.classList.remove('full');fs.textContent='⛶';fs.title='Pantalla completa';}};
+  }catch(e){if(msg)msg.innerHTML=`No se pudo abrir el PDF en el navegador (${esc(e.message)}).<br>Usa Descargar.`;}
+}
+async function renderPdfPage(el){
+  if(!pdfDoc||el.dataset.done)return;el.dataset.done='1';
+  try{
+    const page=await pdfDoc.getPage(Number(el.dataset.n));
+    if(!el.isConnected||el.dataset.done!=='1')return;
+    const vp1=page.getViewport({scale:1});
+    const objetivo=1300; // ancho de render (px): nítido hasta pantalla completa; se muestra a 100%
+    const vp=page.getViewport({scale:objetivo/vp1.width});
+    const canvas=document.createElement('canvas');canvas.width=Math.round(vp.width);canvas.height=Math.round(vp.height);
+    el.style.aspectRatio='';el.innerHTML='';el.appendChild(canvas);
+    await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+  }catch(e){if(el)el.innerHTML=`<div class="muted" style="padding:10px;font-size:12px">Página ${esc(el.dataset.n)}: ${esc(e.message)}</div>`;}
+}
+function liberarPdfPage(el){if(!el.dataset.done)return;el.dataset.done='';el.innerHTML='';el.style.aspectRatio='1/1.414';}
 
 // ── búsqueda + catálogo ──
 let estadoBusqueda={page:1},busqTimer=null;
