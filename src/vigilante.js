@@ -210,6 +210,13 @@ async function inboxTieneArchivos() {
     return (await listarUnidades()).length > 0;
 }
 
+/** El mantenimiento solo CEDE el turno a la ingesta si el vigilante está ACTIVO. Si está PAUSADO, los
+ *  ficheros del Inbox no se van a catalogar, así que el mantenimiento puede correr aunque los haya
+ *  (ese es justo el caso de uso: pausar el vigilante para conformar el catálogo con el Inbox lleno). */
+async function debeCederAIngesta() {
+    return vigilanteActivo && await inboxTieneArchivos();
+}
+
 /**
  * Analiza el estado de escritura de una unidad del Inbox.
  *
@@ -491,7 +498,7 @@ async function ejecutarPasadaMantenimiento() {
     if (procesando) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
     procesando = true;
     try {
-        const r = await ejecutarMantenimiento({ debeAbortar: inboxTieneArchivos });
+        const r = await ejecutarMantenimiento({ debeAbortar: debeCederAIngesta });
         ultimaRevisionMant = Date.now();
         ultimaActividad = Date.now(); // reinicia el reloj: esperar REPOSO antes del siguiente lote
         if (!r.abortado && r.pendientes === 0) {
@@ -523,7 +530,7 @@ async function quizasMantenimiento() {
     if (modoConformador === 'apagado' || modoConformador === 'apagado-hasta') return;
     if (procesando || conformadorDormido || mantManualEnCurso) return; // dormido = cola vacía; o ya hay manual en curso
     if (Date.now() - ultimaActividad < MANTENIMIENTO_REPOSO_MS) return;
-    if (await inboxTieneArchivos()) return; // prioridad absoluta a la ingesta
+    if (await debeCederAIngesta()) return; // prioridad a la ingesta SOLO si el vigilante está activo
     await ejecutarPasadaMantenimiento();
 }
 
@@ -545,7 +552,7 @@ export function mantenimientoManual({ intervaloSegundos = 0, activarSegundos = 0
             // — Arranque programado —
             if (activar === -1) {
                 console.log('🧹 Mantenimiento manual: esperando a que el Inbox quede inactivo…');
-                while (!pararMantManual && await inboxTieneArchivos()) await dormir(10);
+                while (!pararMantManual && await debeCederAIngesta()) await dormir(10);
             } else if (activar > 0) {
                 console.log(`🧹 Mantenimiento manual: arrancará en ${activar}s…`);
                 for (let t = 0; t < activar && !pararMantManual; t += 5) await dormir(Math.min(5, activar - t));
