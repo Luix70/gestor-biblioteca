@@ -434,6 +434,9 @@ async function procesarCola() {
             console.log(`\n📥 Procesando ${unidades.length} unidad(es) del Inbox...`);
             let procesadas = 0;
             for (const u of unidades) {
+                // PAUSA desde el panel: se detiene tras el documento en curso; el resto espera en el
+                // Inbox y se reanuda al reactivar el vigilante (igual que el Mantenimiento cede el turno).
+                if (!vigilanteActivo) break;
                 // Comprobar si el archivo terminó de escribirse (o es un fantasma de 0 bytes).
                 const estabilidad = await verificarEstabilidad(u.rutas);
                 if (estabilidad === 'fantasma') {
@@ -453,6 +456,7 @@ async function procesarCola() {
                 await new Promise(res => setTimeout(res, PAUSA_MS)); // ritmo
             }
             totalProcesadas += procesadas;
+            if (!vigilanteActivo) { console.log(`  ⏸️  Vigilante PAUSADO: ingesta detenida (${totalProcesadas} procesada(s)); el resto espera en el Inbox.`); break; }
             // Si en una pasada completa no se procesó nada (todo inestable), salir y esperar al
             // próximo escaneo periódico — así no entramos en un bucle re-listando lo inestable.
             if (procesadas === 0) break;
