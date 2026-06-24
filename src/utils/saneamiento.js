@@ -16,7 +16,7 @@ const resolver = (p, def) => { const v = p || def; return path.isAbsolute(v) ? v
 const DIR_CUARENTENA = resolver(process.env.PATH_CUARENTENA, 'Cuarentena');
 
 const DEFECTO_FUENTES = [
-    { nombre: "Anna's Archive", url: 'https://annas-archive.org/search?q={q}' },
+    { nombre: "Anna's Archive", url: 'https://annas-archive.gl/search?q={q}' },
     { nombre: 'Libgen', url: 'https://libgen.is/search.php?req={q}' },
     { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
 ];

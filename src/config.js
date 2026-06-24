@@ -19,7 +19,7 @@ export const AJUSTES = {
     PORT: 3000,                     // puerto de la API REST
     // Fuentes para "buscar copia" al sanear ilegibles de Cuarentena (JSON [{nombre,url}]; {q}=consulta).
     FUENTES_COPIA: JSON.stringify([
-        { nombre: "Anna's Archive", url: 'https://annas-archive.org/search?q={q}' },
+        { nombre: "Anna's Archive", url: 'https://annas-archive.gl/search?q={q}' },
         { nombre: 'Libgen', url: 'https://libgen.is/search.php?req={q}' },
         { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
     ]),
