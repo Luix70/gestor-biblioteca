@@ -6,7 +6,7 @@
  *   B. Carpetas en el árbol CDU sin documento MongoDB (carpeta huérfana)
  *   C. Documentos duplicados por hash_contenido (copias exactas ya en BD)
  *   D. Documentos cuya carpeta existe pero le FALTA el fichero original (.epub/.pdf
- *      desaparecido). Localiza el original por nombre en Inbox/Cuarentena/Reintentos/_ER Room.
+ *      desaparecido). Localiza el original por nombre en Inbox/Cuarentena/Reintentos.
  *   E. Estructura del árbol: carpetas vacías y RAMAS SIN HOJAS (subárboles sin ningún
  *      documento/registro/imagen — podables) y carpetas con registro/sidecars pero SIN documento.
  *
@@ -37,7 +37,6 @@ const DIR_CDU = resolverDir('PATH_CDU', 'CDU');
 const DIR_INBOX = resolverDir('PATH_INBOX', 'Inbox');
 const DIR_CUARENTENA = resolverDir('PATH_CUARENTENA', 'Cuarentena');
 const DIR_REINTENTOS = resolverDir('PATH_REINTENTOS', 'Reintentos');
-const DIR_ER_ROOM = resolverDir('PATH_ER_ROOM', '_ER Room');
 const FIX_RUTAS = process.argv.includes('--fix-rutas');
 const LIMPIAR = process.argv.includes('--limpiar');
 const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
@@ -255,7 +254,6 @@ async function main() {
     await indexarFicheros(DIR_INBOX, indice, 'Inbox');
     await indexarFicheros(DIR_CUARENTENA, indice, 'Cuarentena');
     await indexarFicheros(DIR_REINTENTOS, indice, 'Reintentos');
-    await indexarFicheros(DIR_ER_ROOM, indice, '_ER Room');
 
     const sinFichero = [];
     for (const doc of todos) {

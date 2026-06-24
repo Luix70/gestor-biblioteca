@@ -8,7 +8,7 @@ import { ingestarRecurso } from '../servicio-ingesta.js';
  * SANEAMIENTO de ficheros problemáticos de la Cuarentena (ilegibles / no-identificados / otros):
  * el usuario busca una COPIA SANA (enlaces a buscadores) y la sube; aquí se cataloga por el pipeline
  * normal y, si entra, se retira el depósito original (a la Papelera). 'duplicados' NO entra aquí
- * (tiene su comparador). Unifica lo que antes se repartía entre Cuarentena y _ER Room.
+ * (tiene su comparador).
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..', '..');

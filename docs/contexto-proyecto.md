@@ -154,7 +154,7 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   Gale en un mismo drop.
 - **Papelera de reciclaje** (`utils/papelera.js` · `reciclar`): política **"nunca borrar"** para lo
   **ambiguo/accesorio**. Esas retiradas (portadas candidatas y sidecars al limpiar el Inbox, temporales
-  de subida API, fantasmas a `_ER Room`, descartes de Cuarentena/duplicados) **mueven** a
+  de subida API, descartes de Cuarentena/duplicados) **mueven** a
   `Recycling/<serial>_<fecha>[_etq]/` en vez de `fs.rm`, con **copia+verificación+borrado** (los destinos
   son bind mounts distintos del Inbox → `fs.rename` daría EXDEV) y **nunca borran el origen si la copia no
   quedó íntegra** → imposible perder datos. **EXCEPCIÓN — éxito VERIFICADO:** el original del Inbox ya

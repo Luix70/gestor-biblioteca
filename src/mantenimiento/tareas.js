@@ -84,7 +84,7 @@ export const TAREAS = [
     {
         id: 'restaurar-original',
         version: 1,
-        descripcion: 'Si a la carpeta le falta el .epub/.pdf, lo restaura desde Reintentos/Cuarentena/_ER Room antes de que las demás tareas trabajen sobre la carpeta.',
+        descripcion: 'Si a la carpeta le falta el .epub/.pdf, lo restaura desde Reintentos/Cuarentena antes de que las demás tareas trabajen sobre la carpeta.',
         // No aplica a escaneos ('papel': solo imágenes) ni a docs sin carpeta.
         aplica: (doc) => !!doc.ruta_base && !(doc.formatos || []).includes('papel'),
         async ejecutar(doc) {

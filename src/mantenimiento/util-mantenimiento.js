@@ -26,7 +26,6 @@ const resolverZona = (envVar, def) => {
 const ZONAS_RESPALDO = [
     resolverZona('PATH_REINTENTOS', 'Reintentos'),
     resolverZona('PATH_CUARENTENA', 'Cuarentena'),
-    resolverZona('PATH_ER_ROOM', '_ER Room'),
 ];
 
 // Índice cacheado nombreBase → rutaAbsoluta de las zonas de respaldo. Se reconstruye cada

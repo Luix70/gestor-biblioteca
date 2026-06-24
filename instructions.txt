@@ -41,7 +41,6 @@ de ficheros clasificado por CDU.
     CDU/          ← árbol jerárquico: <clase>/<division>/<cdu>/<libros|revistas>/…
     Cuarentena/   ← fallos, por categoría: duplicados/ no-identificados/ ilegibles/ otros/
     Reintentos/   ← fallos de infraestructura (red, BD); se reintentarán
-    _ER Room/     ← transferencias fallidas (ficheros de 0 bytes > 10 min): redescargar
 
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -467,7 +466,7 @@ de ficheros clasificado por CDU.
 
   Tareas actuales (en src/mantenimiento/tareas.js), EN ORDEN (la cadena importa):
     restaurar-original         Repone el .epub/.pdf si falta en la carpeta, desde
-                               Reintentos/Cuarentena/_ER Room
+                               Reintentos/Cuarentena
     re-enriquecer-degradados   Docs con ISBN pero metadata pobre (lote con APIs
                                caídas): re-busca por ISBN y corrige título/autor
     re-clasificar-cdu          Re-clasifica la CDU (BNE→DNB→caché→IA) y mueve la

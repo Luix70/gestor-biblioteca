@@ -105,7 +105,6 @@ rsync -a --delete \
     --exclude='/CDU' \
     --exclude='/Cuarentena' \
     --exclude='/Reintentos' \
-    --exclude='/_ER Room' \
     --exclude='/Recycling' \
     --exclude='/Fichero' \
     --exclude='/logs' \

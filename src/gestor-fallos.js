@@ -81,7 +81,7 @@ export async function enviarACuarentena(rutas, estado) {
 /**
  * Fichero estructuralmente dañado (EPUB/PDF corrupto) o fantasma de 0 bytes → Cuarentena/ilegibles
  * como depósito con sidecar (estado.json). No es cuestión de catalogarlo a mano sino de conseguir
- * una COPIA SANA y reemplazarlo desde el panel. Unifica lo que antes iba al _ER Room.
+ * una COPIA SANA y reemplazarlo desde el panel.
  */
 export async function enviarAIlegibles(rutas, estado = {}) {
     const e = {

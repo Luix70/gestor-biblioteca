@@ -2,7 +2,7 @@
  * Restaura los ficheros originales "desaparecidos" de su carpeta CDU.
  *
  * Para cada documento cuyo carpeta existe pero le falta el .epub/.pdf, busca el original por
- * nombre en las zonas de respaldo (Reintentos, Inbox, Cuarentena, _ER Room) y lo copia de
+ * nombre en las zonas de respaldo (Reintentos, Inbox, Cuarentena) y lo copia de
  * vuelta a su carpeta. La copia es NO DESTRUCTIVA (temporal oculto → verifica tamaño → rename)
  * y NUNCA borra el origen de respaldo (queda como red de seguridad hasta que verifiques).
  *
@@ -31,7 +31,6 @@ const ZONAS = [
     ['Reintentos', resolverDir('PATH_REINTENTOS', 'Reintentos')],
     ['Inbox',      resolverDir('PATH_INBOX', 'Inbox')],
     ['Cuarentena', resolverDir('PATH_CUARENTENA', 'Cuarentena')],
-    ['_ER Room',   resolverDir('PATH_ER_ROOM', '_ER Room')],
 ];
 const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
 const EJECUTAR = process.argv.includes('--ejecutar');
