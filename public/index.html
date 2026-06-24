@@ -636,7 +636,11 @@ function previewArchivo(r){
   if(!r.archivo_url)return '';
   const nombre=r.nombre_archivo||'archivo',url=r.archivo_url,ext=(nombre.split('.').pop()||'').toLowerCase();
   if(['jpg','jpeg','png','webp','gif'].includes(ext))return ''; // un set de imágenes ya se ve en el carrusel
-  const acc=`<div class="row" style="margin-top:12px;gap:8px"><a class="btn" href="${esc(url)}" target="_blank" rel="noopener">↗ Abrir en pestaña</a><a class="btn" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a></div>`;
+  const bAbrir=`<a class="btn" href="${esc(url)}" target="_blank" rel="noopener">↗ Abrir en pestaña</a>`;
+  const bDescargar=`<a class="btn" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a>`;
+  // "Abrir en pestaña" SOLO para PDF (el navegador lo previsualiza); epub/djvu/mobi… se descargarían
+  // (no hay visor nativo en pestaña) → confunde, así que solo "Descargar". El epub ya se lee aquí.
+  const acc=`<div class="row" style="margin-top:12px;gap:8px">${ext==='pdf'?bAbrir:''}${bDescargar}</div>`;
   // PDF: el navegador lo renderiza de forma nativa en un iframe.
   if(ext==='pdf')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3><iframe src="${esc(url)}#view=FitH" title="PDF"></iframe>${acc}</div>`;
   // EPUB: lector epub.js (vendored en /vendor) — se inicializa tras pintar (iniciarLectorEpub).
@@ -678,26 +682,31 @@ async function iniciarLectorEpub(url){
       'body':{'margin':'0 !important','padding':'0 !important'},
       'img,image,svg':{'max-width':'100% !important','max-height':'100% !important','object-fit':'contain'},
     });
-    // Tras cada render, clavar la altura del iframe al marco → impide que crezca de página a página.
-    const fijarAltura=()=>{const ifr=area.querySelector('iframe');if(ifr)ifr.style.height=area.clientHeight+'px';};
-    epubRendition.on('rendered',fijarAltura);
+    // Clavar la altura del iframe al marco. epub.js a veces la reajusta al contenido (sobre todo
+    // tras un resize: maximizar/restaurar) → se re-clava en CADA render Y en CADA cambio de página
+    // ('relocated'), y siempre tras dos requestAnimationFrame (cuando el navegador ya recompuso).
+    const fijar=()=>{const h=area.clientHeight;if(!h)return;const ifr=area.querySelector('iframe');if(ifr)ifr.style.height=h+'px';};
+    const pin=()=>requestAnimationFrame(()=>requestAnimationFrame(fijar));
+    epubRendition.on('rendered',pin);
+    epubRendition.on('relocated',pin);
     await epubRendition.display();
-    fijarAltura();
+    pin();
     if(msg)msg.style.display='none';
     const prev=$('#epubPrev'),next=$('#epubNext'),fs=$('#epubFs');
     [prev,next,fs].forEach(b=>b.style.display='grid');
     prev.onclick=()=>epubRendition.prev();next.onclick=()=>epubRendition.next();
-    const refit=()=>{const dd=dims();try{epubRendition.resize(dd.w,dd.h);fijarAltura();}catch{}};
+    // Re-mide el marco y re-encaja el render. Tras dos rAF para leer el tamaño YA recompuesto.
+    const refit=()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const dd=dims();try{epubRendition.resize(dd.w,dd.h);}catch{};pin();}));
     // Pantalla completa: overlay por CSS (NO la Fullscreen API — iOS Safari no la soporta en <div>).
     fs.onclick=()=>{const f=wrap.classList.toggle('full');fs.textContent=f?'✕':'⛶';
-      fs.title=f?'Salir de pantalla completa':'Pantalla completa';setTimeout(refit,90);};
+      fs.title=f?'Salir de pantalla completa':'Pantalla completa';refit();};
     if(epubResize)window.removeEventListener('resize',epubResize);
     epubResize=()=>{clearTimeout(epubResize._t);epubResize._t=setTimeout(refit,150);};
     window.addEventListener('resize',epubResize);
     document.onkeydown=e=>{if(!$('#epubArea'))return;
       if(e.key==='ArrowLeft')epubRendition.prev();
       else if(e.key==='ArrowRight')epubRendition.next();
-      else if(e.key==='Escape'&&wrap.classList.contains('full')){wrap.classList.remove('full');fs.textContent='⛶';fs.title='Pantalla completa';setTimeout(refit,90);}};
+      else if(e.key==='Escape'&&wrap.classList.contains('full')){wrap.classList.remove('full');fs.textContent='⛶';fs.title='Pantalla completa';refit();}};
   }catch(e){if(msg)msg.innerHTML=`No se pudo abrir el EPUB en el navegador (${esc(e.message)}).<br>Usa las opciones de descarga de abajo.`;}
 }
 
