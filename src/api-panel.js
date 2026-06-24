@@ -11,6 +11,32 @@ import { verificarIntegridad } from './integridad.js';
 import { purgarObra } from './utils/purga.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
+import { resolverNombres } from './utils/registro.js';
+import { sanitizarCDU } from './utils/cdu-arbol.js';
+
+// Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
+const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1 };
+
+// URL servible (en /recursos) del fichero original de un documento. Solo se codifica el nombre del
+// fichero: ruta_base ya viene saneada para web (utils/rutas.js) y sus segmentos son seguros.
+const urlArchivo = (doc) => (doc.ruta_base && doc.nombre_archivo)
+    ? `${doc.ruta_base}/${encodeURIComponent(doc.nombre_archivo)}` : null;
+
+// Descripción legible (ES/EN) de un código CDU desde 'cdu_descripciones' (clave = código saneado).
+async function cduDesc(db, cdu) {
+    if (!cdu) return null;
+    const codigo = sanitizarCDU(cdu);
+    if (!codigo) return null;
+    return await db.collection('cdu_descripciones').findOne(
+        { codigo }, { projection: { titulo_es: 1, descripcion_es: 1, titulo_en: 1, descripcion_en: 1 } });
+}
+
+// Resuelve un ObjectId → nombre (editorial/colección/obra…) sin reventar si falta.
+async function nombrePorId(db, coleccion, id, campo = 'nombre') {
+    if (!id) return null;
+    const d = await db.collection(coleccion).findOne({ _id: id }, { projection: { [campo]: 1 } });
+    return d ? d[campo] : null;
+}
 
 /**
  * Rutas del PANEL DE CONTROL (montadas bajo /api). Acciones de operación: vigilante, papelera,
@@ -129,6 +155,73 @@ export function rutasPanel() {
                 .find({}, { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1, completa: 1, revision_requerida: 1 } })
                 .sort({ revision_requerida: -1, completa: 1, titulo: 1 }).limit(500).toArray();
             res.json(obras.map(o => ({ ...o, _id: String(o._id) })));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Detalle de UNA obra: cabecera resuelta (editorial/colección/CDU+descripción) + inventario de
+    // tomos — presentes con su ficha mínima (portada/formatos/título), ausentes como hueco — para
+    // la vista de drill-down del panel (obra → tomo → ficha).
+    r.get('/obras/:id', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const obra = await db.collection('obras').findOne({ _id: new ObjectId(req.params.id) });
+            if (!obra) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
+
+            const idsPresentes = (obra.volumenes || []).filter(v => v && v._id).map(v => v._id);
+            const idsSin = (obra.volumenes_sin_numero || []).filter(Boolean);
+            const todos = [...idsPresentes, ...idsSin];
+            const docs = todos.length
+                ? await db.collection('biblioteca').find({ _id: { $in: todos } }, { projection: PROY_VOL }).toArray()
+                : [];
+            const mapa = new Map(docs.map(d => [String(d._id), { ...d, _id: String(d._id) }]));
+
+            const volumenes = (obra.volumenes || []).map(v => ({
+                numero: v.numero, presente: !!v._id,
+                doc: v._id ? (mapa.get(String(v._id)) || null) : null,
+            }));
+            const sin_numero = idsSin.map(id => mapa.get(String(id))).filter(Boolean);
+
+            res.json({
+                ok: true,
+                obra: {
+                    _id: String(obra._id), titulo: obra.titulo, isbn_obra: obra.isbn_obra || null,
+                    cdu: obra.cdu || null, cdu_desc: await cduDesc(db, obra.cdu),
+                    editorial: await nombrePorId(db, 'editoriales', obra.editorial),
+                    coleccion: await nombrePorId(db, 'colecciones', obra.coleccion),
+                    total_volumenes: obra.total_volumenes || 0, volumenes_presentes: obra.volumenes_presentes || 0,
+                    completa: !!obra.completa, revision_requerida: !!obra.revision_requerida,
+                },
+                volumenes, sin_numero,
+            });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Ficha COMPLETA de un documento: nombres resueltos (autores/editorial/colección/CDU+descripción),
+    // imágenes y portada, y la URL del fichero original (servido en /recursos) para previsualizar
+    // (PDF embebido), abrir en pestaña o descargar. Se omiten los ObjectId crudos y campos internos.
+    r.get('/documentos/:id', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+
+            const { autores, editorial } = await resolverNombres(db, doc);
+            const coleccion = doc.coleccion_nombre || await nombrePorId(db, 'colecciones', doc.coleccion);
+            const obra = doc.obra
+                ? { _id: String(doc.obra), titulo: await nombrePorId(db, 'obras', doc.obra, 'titulo') } : null;
+
+            const limpio = { ...doc, _id: String(doc._id) };
+            for (const k of ['autores', 'editorial', 'coleccion', 'coleccion_nombre', 'obra',
+                '_portadas_remotas', 'mantenimiento', 'mantenimiento_firma']) delete limpio[k];
+
+            res.json({
+                ok: true, doc: limpio, autores, editorial, coleccion,
+                cdu_desc: await cduDesc(db, doc.cdu), obra,
+                archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
+                imagenes: doc.imagenes || [], portada: doc.portada || null,
+            });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

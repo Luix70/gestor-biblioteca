@@ -108,6 +108,40 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .cmpcol h4{margin:0 0 8px;font-size:13px}
 .cmpcol.win{border-color:var(--acc);background:rgba(40,217,168,.06)}
 .winbadge{color:var(--acc);font-size:11px;margin-left:6px}
+/* detalle (obra / ficha de documento) */
+.rowlink{color:var(--acc);cursor:pointer;font-weight:500}.rowlink:hover{text-decoration:underline}
+.crumb{color:var(--mut);font-size:12px;margin-bottom:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.crumb a{color:var(--acc);cursor:pointer}.crumb a:hover{text-decoration:underline}
+.det-head{display:flex;align-items:flex-start;gap:14px;margin-bottom:18px}
+.det-back{background:var(--card2);border:1px solid var(--line);color:var(--txt);width:40px;height:40px;border-radius:10px;cursor:pointer;font-size:18px;flex:0 0 auto}
+.det-back:hover{border-color:var(--acc);color:#fff}
+.det-title{flex:1;min-width:0}.det-title h2{font-size:21px;line-height:1.25;word-break:break-word}
+.det-title .sub{color:var(--mut);font-size:13px;margin-top:4px}
+.vol-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:14px}
+.vol{background:var(--card2);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer;transition:.15s;display:flex;flex-direction:column}
+.vol:hover{border-color:var(--acc);transform:translateY(-2px)}
+.vol .cov{aspect-ratio:3/4;background:var(--bg2);display:grid;place-items:center;overflow:hidden}
+.vol .cov img{width:100%;height:100%;object-fit:cover}
+.vol .cov .ph{font-size:30px;opacity:.4}
+.vol .meta{padding:9px 11px}.vol .meta .n{font-weight:600;font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.vol .meta .t{color:var(--mut);font-size:11px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vol.falta{cursor:default;opacity:.55;border-style:dashed}.vol.falta:hover{transform:none;border-color:var(--line)}
+.fmt{font-size:9px;text-transform:uppercase;letter-spacing:.4px;background:rgba(27,163,255,.16);color:var(--acc2);padding:1px 6px;border-radius:5px;font-weight:700}
+.ficha{display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start}
+.dl{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:13px}
+.dl dt{color:var(--mut);font-weight:600;white-space:nowrap}.dl dd{word-break:break-word}
+.dl dd .fmt{margin-right:4px}
+.carousel{position:relative;background:#0a0d12;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.carousel .track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;aspect-ratio:3/4}
+.carousel .track::-webkit-scrollbar{display:none}
+.carousel .track img{min-width:100%;width:100%;height:100%;object-fit:contain;scroll-snap-align:center;cursor:zoom-in}
+.cnav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.5);border:1px solid var(--line);color:#fff;width:34px;height:44px;border-radius:9px;cursor:pointer;font-size:20px;display:grid;place-items:center}
+.cnav.prev{left:8px}.cnav.next{right:8px}.cnav:hover{background:var(--acc);color:#04231b}
+.cdots{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.55);padding:3px 10px;border-radius:20px;font-size:11px}
+.fileprev{margin-top:16px}
+.fileprev iframe{width:100%;height:68vh;border:1px solid var(--line);border-radius:12px;background:#fff}
+.filebox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:22px;text-align:center}
+.filebox .ic{font-size:42px;margin-bottom:8px}
 /* auth */
 #login{position:fixed;inset:0;background:radial-gradient(900px 500px at 70% -10%,rgba(40,217,168,.10),transparent),var(--bg);display:none;place-items:center;z-index:200}
 #login.show{display:grid}
@@ -137,6 +171,9 @@ body.guest .admin-only{display:none!important}
   .grid.g3>div[style*="span 2"],.grid.g2>div[style*="span 2"]{grid-column:1/-1!important}
   .row>div{min-width:100%}.row .btn{flex:1}
   .logview{height:56vh}
+  .ficha{grid-template-columns:1fr}.fileprev iframe{height:58vh}
+  .vol-grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+  .det-title h2{font-size:18px}
 }
 @media(max-width:900px){
   .sidebar{transform:translateX(-100%)}.sidebar.open{transform:none}
@@ -294,6 +331,9 @@ body.guest .admin-only{display:none!important}
           <div class="chips"><span class="chip">📷 Escanear portada/ISBN</span><span class="chip">🏷️ Escribir NFC</span><span class="chip">📍 Ubicación física</span><span class="chip">➕ Alta rápida</span></div>
         </div>
       </section>
+
+      <!-- DETALLE (obra / ficha de documento) — no aparece en el menú; se abre al pinchar -->
+      <section class="page" id="p-detalle"></section>
     </div>
   </div>
 </div>
@@ -315,6 +355,7 @@ body.guest .admin-only{display:none!important}
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
+let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
 const api=async(p,opt={})=>{const h={'Content-Type':'application/json',...(opt.headers||{})};
   if(TOKEN)h['Authorization']='Bearer '+TOKEN;
   const r=await fetch('/api'+p,{...opt,headers:h});
@@ -328,14 +369,15 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 // ── nav ──
 const titles={dashboard:'Dashboard',mant:'Mantenimiento',vig:'Vigilante',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',integ:'Integridad',logs:'Logs',inbox:'Inbox'};
 let logTimer=null;
-function go(p){$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+function go(p){detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
   if(logTimer&&p!=='logs'){clearInterval(logTimer);logTimer=null;}
   $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');loaders[p]&&loaders[p]();}
 $('#nav').onclick=e=>{const b=e.target.closest('button[data-p]');if(b&&!b.disabled)go(b.dataset.p);};
 $('#burger').onclick=()=>{$('#sidebar').classList.toggle('open');$('#scrim').classList.toggle('open');};
 $('#scrim').onclick=()=>{$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');};
-$('#refresh').onclick=()=>{const cur=$$('#nav button.on')[0]?.dataset.p||'dashboard';loaders[cur]&&loaders[cur]();refrescarEstado();};
+$('#refresh').onclick=()=>{if(detalle){const d=detalle;d.tipo==='obra'?verObra(d.id):verDoc(d.id,d.ctx);refrescarEstado();return;}
+  const cur=$$('#nav button.on')[0]?.dataset.p||'dashboard';loaders[cur]&&loaders[cur]();refrescarEstado();};
 setInterval(()=>$('#clock').textContent=new Date().toLocaleTimeString('es-ES'),1000);
 
 // ── estado (pills) ──
@@ -483,15 +525,109 @@ async function purga(ejecutar){const clave=$('#purgaClave').value.trim();if(!cla
 $('#purgaSim').onclick=()=>purga(false);$('#purgaExec').onclick=()=>purga(true);
 async function loadObras(){try{const o=await api('/obras');
   $('#obrasBody').innerHTML=o.length?`<table><tr><th>Obra</th><th>isbn_obra</th><th>Tomos</th><th>Estado</th><th></th></tr>
-    ${o.map(x=>`<tr><td>${esc(x.titulo)}</td><td class="mono muted">${esc(x.isbn_obra||'—')}</td>
+    ${o.map(x=>`<tr><td><span class="rowlink" data-obra="${esc(x._id)}">${esc(x.titulo)}</span></td><td class="mono muted">${esc(x.isbn_obra||'—')}</td>
       <td>${x.volumenes_presentes||0}/${x.total_volumenes||'?'}</td>
       <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':x.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'}</td>
       <td style="text-align:right">${x.isbn_obra?`<button class="btn admin-only" data-req="${esc(x._id)}" title="Re-consultar título/sinopsis por su ISBN">↻</button>`:''}</td></tr>`).join('')}</table>`:'<div class="empty">Sin obras</div>';
+  $$('#obrasBody [data-obra]').forEach(b=>b.onclick=()=>verObra(b.dataset.obra));
   $$('#obrasBody [data-req]').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='…';
     try{const r=await api('/obras/requery',{method:'POST',body:JSON.stringify({id:b.dataset.req})});
       if(r.ok){toast('Obra actualizada → '+r.titulo);loadObras();}else{toast(r.motivo,'warn');b.disabled=false;b.textContent='↻';}}
     catch(e){toast(e.message,'bad');b.disabled=false;b.textContent='↻';}});
 }catch(e){toast(e.message,'bad');}}
+
+// ── detalle: obra → tomos → ficha (drill-down clicable, mobile-first) ──
+const recortar=(s,n)=>{s=String(s||'');return s.length>n?s.slice(0,n-1)+'…':s;};
+function mostrarDetalle(){$$('.page').forEach(s=>s.classList.remove('on'));$('#p-detalle').classList.add('on');
+  $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');window.scrollTo(0,0);}
+
+async function verObra(id){detalle={tipo:'obra',id};mostrarDetalle();$('#title').textContent='Obra';
+  $('#p-detalle').innerHTML='<div class="card"><div class="muted">Cargando obra…</div></div>';
+  try{const r=await api('/obras/'+encodeURIComponent(id));pintarObra(r);}
+  catch(e){$('#p-detalle').innerHTML=`<div class="crumb"><a onclick="go('obras')">← Obras</a></div><div class="empty">${esc(e.message)}</div>`;}}
+
+function tomoCard(d,numero,falta){
+  if(falta)return `<div class="vol falta"><div class="cov"><div class="ph">∅</div></div><div class="meta"><div class="n">Tomo ${numero}</div><div class="t">falta</div></div></div>`;
+  const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
+  const fmt=(d.formatos||[]).slice(0,3).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">Tomo ${numero??'?'} ${fmt}</div><div class="t">${esc(d.volumen_titulo||d.titulo||'—')}</div></div></div>`;
+}
+
+function pintarObra(r){
+  const o=r.obra,desc=o.cdu_desc;
+  const sub=[o.isbn_obra?'ISBN obra '+o.isbn_obra:'',o.editorial,o.coleccion].filter(Boolean).map(esc).join(' · ')||'—';
+  const head=`<div class="crumb"><a onclick="go('obras')">Obras</a> › <span>${esc(recortar(o.titulo,50))}</span></div>
+    <div class="det-head"><button class="det-back" title="Volver" onclick="go('obras')">←</button>
+      <div class="det-title"><h2>${esc(o.titulo||'(sin título)')}</h2><div class="sub">${sub}</div>
+        <div style="margin-top:8px">${o.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'} ${o.revision_requerida?'<span class="tag bad">revisar</span>':''} <span class="muted">${o.volumenes_presentes||0}/${o.total_volumenes||'?'} tomos</span></div>
+        ${o.cdu?`<div class="mono muted" style="margin-top:8px">CDU ${esc(o.cdu)}${desc&&desc.titulo_es?' · '+esc(desc.titulo_es):''}</div>`:''}
+        ${desc&&desc.descripcion_es?`<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">Descripción CDU</summary><p class="muted" style="font-size:12px;margin-top:6px">${esc(desc.descripcion_es)}</p></details>`:''}
+      </div></div>`;
+  const vols=r.volumenes.length?r.volumenes.map(v=>tomoCard(v.doc,v.numero,!v.presente)).join(''):'<div class="empty">Sin tomos registrados</div>';
+  const sin=r.sin_numero&&r.sin_numero.length?`<div class="card" style="margin-top:14px"><h3 style="color:var(--warn)">Tomos sin número (${r.sin_numero.length})</h3><div class="vol-grid">${r.sin_numero.map(d=>tomoCard(d,'?',false)).join('')}</div></div>`:'';
+  $('#p-detalle').innerHTML=head+`<div class="card"><h3>Tomos</h3><div class="vol-grid">${vols}</div></div>`+sin;
+  $$('#p-detalle .vol[data-doc]').forEach(el=>el.onclick=()=>verDoc(el.dataset.doc,{obra:{_id:o._id,titulo:o.titulo}}));
+}
+
+async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();$('#title').textContent='Ficha';
+  $('#p-detalle').innerHTML='<div class="card"><div class="muted">Cargando ficha…</div></div>';
+  try{const r=await api('/documentos/'+encodeURIComponent(id));pintarDoc(r,ctx);}
+  catch(e){$('#p-detalle').innerHTML=`<div class="crumb"><a onclick="go('obras')">← Obras</a></div><div class="empty">${esc(e.message)}</div>`;}}
+
+const CAMPOS_FICHA=[['subtitulo','Subtítulo'],['_autores','Autores'],['_editorial','Editorial'],['_coleccion','Colección'],
+  ['año_edicion','Año'],['numero_edicion','Edición'],['idioma','Idioma'],['_formatos','Formatos'],['paginas','Páginas'],
+  ['isbn','ISBN'],['issn','ISSN'],['_cdu','CDU'],['dewey','Dewey'],['lcc','LCC'],['lccn','LCCN'],
+  ['volumen_numero','Volumen nº'],['volumen_titulo','Título del volumen'],['obra_titulo','Obra'],['isbn_obra','ISBN obra'],
+  ['coleccion_numero','Nº en colección'],['numero_issue','Número'],['mes_publicacion','Mes'],
+  ['_estado','Estado'],['_ubicacion','Ubicación'],['nombre_archivo','Archivo'],['hash_contenido','Hash'],
+  ['_ingreso','Ingresado'],['_actualizado','Actualizado']];
+
+function pintarDoc(r,ctx){
+  const d=r.doc,vo=ctx&&ctx.obra;
+  const crumb=`<div class="crumb"><a onclick="go('obras')">Obras</a>${vo?` › <a onclick="verObra('${esc(vo._id)}')">${esc(recortar(vo.titulo,32))}</a>`:''} › <span>${esc(recortar(d.titulo,40))}</span></div>`;
+  const back=vo?`verObra('${esc(vo._id)}')`:`go('obras')`;
+  const fmtFecha=v=>{const t=new Date(v);return isNaN(t)?esc(v):t.toLocaleString('es-ES');};
+  const especiales={
+    _autores:r.autores&&r.autores.length?r.autores.map(esc).join(', '):null,
+    _editorial:r.editorial?esc(r.editorial):null,
+    _coleccion:r.coleccion?esc(r.coleccion)+(d.coleccion_numero?` · nº ${esc(d.coleccion_numero)}`:''):null,
+    _formatos:(d.formatos||[]).length?d.formatos.map(f=>`<span class="fmt">${esc(f)}</span>`).join(''):null,
+    _cdu:d.cdu?`<span class="mono">${esc(d.cdu)}</span>${r.cdu_desc&&r.cdu_desc.titulo_es?' · '+esc(r.cdu_desc.titulo_es):''}`:null,
+    _estado:d.estado_verificacion?`<span class="tag ${d.estado_verificacion==='completado'?'ok':'warn'}">${esc(d.estado_verificacion)}</span>`:null,
+    _ubicacion:d.ubicacion?(esc([d.ubicacion.ambito,d.ubicacion.estanteria].filter(Boolean).join(' · '))||null):null,
+    _ingreso:d.fecha_ingreso?fmtFecha(d.fecha_ingreso):null,
+    _actualizado:d.fecha_actualizacion?fmtFecha(d.fecha_actualizacion):null,
+  };
+  const valor=k=>{if(k in especiales)return especiales[k];let v=d[k];if(v==null||v===''||(Array.isArray(v)&&!v.length))return null;return esc(v);};
+  const dl=CAMPOS_FICHA.map(([k,lab])=>{const v=valor(k);return v?`<dt>${lab}</dt><dd>${v}</dd>`:'';}).join('');
+  const sinopsis=d.sinopsis?`<div class="card" style="margin-top:14px"><h3>Sinopsis</h3><p>${esc(d.sinopsis)}</p></div>`:'';
+  const palabras=(d.palabras_clave||[]).length?`<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:5px">${d.palabras_clave.map(p=>`<span class="tag mut">${esc(p)}</span>`).join('')}</div>`:'';
+  const cduFull=r.cdu_desc&&r.cdu_desc.descripcion_es?`<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">Descripción CDU completa</summary><p class="muted" style="font-size:12px;margin-top:6px">${esc(r.cdu_desc.descripcion_es)}</p></details>`:'';
+  const alertas=(d.alertas_agente||[]).length?`<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">Notas del agente (${d.alertas_agente.length})</summary><div style="margin-top:6px">${d.alertas_agente.map(a=>`<div class="muted" style="font-size:12px">• ${esc(a)}</div>`).join('')}</div></details>`:'';
+  const imgs=(r.imagenes&&r.imagenes.length)?r.imagenes:(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]);
+  const carrusel=imgs.length?`<div class="carousel"><div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(im.ruta)}" loading="lazy" onclick="window.open('${esc(im.ruta)}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:'<div class="filebox"><div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>';
+  const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
+    <div class="det-title"><h2>${esc(d.titulo||'(sin título)')}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div></div></div>`;
+  $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
+    <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${cduFull}${palabras}${alertas}</div></div>${sinopsis}`;
+  carIdx=0;const tr=$('#carTrack');
+  if(tr&&tr.children.length>1)tr.onscroll=()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==carIdx){carIdx=i;const dd=$('#carDots');if(dd)dd.textContent=(i+1)+' / '+tr.children.length;}};
+}
+
+let carIdx=0;
+function carMove(dir){const t=$('#carTrack');if(!t)return;const n=t.children.length;carIdx=Math.max(0,Math.min(n-1,carIdx+dir));
+  t.scrollTo({left:t.clientWidth*carIdx,behavior:'smooth'});const dd=$('#carDots');if(dd)dd.textContent=(carIdx+1)+' / '+n;}
+
+function previewArchivo(r){
+  if(!r.archivo_url)return '';
+  const nombre=r.nombre_archivo||'archivo',url=r.archivo_url,ext=(nombre.split('.').pop()||'').toLowerCase();
+  if(['jpg','jpeg','png','webp','gif'].includes(ext))return ''; // un set de imágenes ya se ve en el carrusel
+  const acc=`<div class="row" style="margin-top:12px;gap:8px"><a class="btn" href="${esc(url)}" target="_blank" rel="noopener">↗ Abrir en pestaña</a><a class="btn" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a></div>`;
+  if(ext==='pdf')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3><iframe src="${esc(url)}#view=FitH" title="PDF"></iframe>${acc}</div>`;
+  const ic={epub:'📗',djvu:'📘',mobi:'📙',azw3:'📙',cbr:'🗂️',cbz:'🗂️'}[ext]||'📦';
+  return `<div class="fileprev"><div class="filebox"><div class="ic">${ic}</div><div style="font-weight:600;word-break:break-word">${esc(nombre)}</div>
+    <div class="muted" style="font-size:12px;margin-top:4px">Formato ${esc((ext||'—').toUpperCase())} — el navegador no lo previsualiza de forma integrada.</div>${acc}</div></div>`;
+}
 
 // ── logs ──
 function pintarLogs(lineas){const v=$('#logView');const cerca=v.scrollTop+v.clientHeight>=v.scrollHeight-50;

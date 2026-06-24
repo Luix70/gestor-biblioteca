@@ -190,6 +190,15 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   **reingestar** la Cuarentena, ver tamaño/contenido y **vaciar** la Papelera, y **purgar** una obra
   (`purgarObra`, reutilizada por `scripts/purgar-multipart.js`). Pensado como ANDAMIO del futuro front-end
   (la "Búsqueda" es un hueco del menú para lo que viene). Acceso: `http://<nas>:4000`.
+  - **Drill-down Obra → tomos → ficha** (mobile-first): cada obra del inventario es clicable (`GET
+    /obras/:id` → cabecera resuelta + inventario de tomos presentes/ausentes); un tomo abre su **ficha
+    completa** (`GET /documentos/:id`): nombres **resueltos** desde las tablas auxiliares (autores,
+    editorial, colección, **CDU + descripción** de `cdu_descripciones` — nunca ObjectIds; reutiliza
+    `resolverNombres` y `sanitizarCDU`), **carrusel** de imágenes/portadas (scroll-snap, sin librería) y
+    **previsualización del fichero** servido en `/recursos`: PDF embebido en `<iframe>`, y abrir-en-pestaña
+    / descargar para epub/djvu/… (sin visor nativo en el navegador). El detalle es una página oculta
+    (`#p-detalle`, no en el menú) con pila de navegación (`detalle={tipo,id,ctx}`); `/recursos` es público
+    (montado antes de la puerta `/api`), así que imágenes y ficheros cargan sin token.
 - **Fichero local — volcados OL+BNE offline** (`scripts/etl-fichero.js` · `scripts/etl-map.js` ·
   `src/utils/buscador-local.js`): SQLite **solo-lectura** (`fichero.db`, ~23 GB, **58,7 M registros /
   37,4 M con ISBN**) con los dumps de Open Library (ediciones) + BNE en una tabla `fichero` con
