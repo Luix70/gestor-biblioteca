@@ -8,6 +8,7 @@ import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
 import { enviarACuarentena } from './gestor-fallos.js';
+import { metricasFichero, ganaEntrante, reemplazarFicheroDeDoc } from './utils/duplicados.js';
 import { carpetaDeDoc, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -161,20 +162,33 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
             console.log(`  🗑️  Duplicado EXACTO (hash) de ${idExist}: «${path.basename(rutas[0])}» → borrado.`);
             return { ...comun, operacion: 'duplicado_exacto', accion: 'borrado' };
         }
-        // Hash distinto (o no comparable) → Cuarentena/duplicados.
-        await enviarACuarentena(rutas, {
-            titulo: documento.titulo,
-            identificador: documento.isbn || documento.issn || documento.titulo,
-            error: {
-                tipo: 'duplicado',
-                mensaje: `Mismo identificador que ${idExist} (archivo: ${resultado.nombre_archivo || '—'}) ` +
-                         `pero CONTENIDO DISTINTO${hashExistente ? '' : ' (no se pudo hashear el existente)'}: revisar.`,
-            },
-            documento_existente_id: idExist,
-            fase: 'catalogo',
-        });
-        console.log(`  ⚠️  Posible duplicado de ${idExist} con contenido DISTINTO → Cuarentena/duplicados.`);
-        return { ...comun, operacion: 'duplicado', accion: 'cuarentena' };
+        // Hash distinto (mismo formato, contenido distinto) → AUTO-RESOLUCIÓN por tamaño/fecha (sin
+        // intervención humana): gana el MÁS GRANDE; empate → el MÁS RECIENTE. Si gana el entrante,
+        // reemplaza el fichero del doc y SINCRONIZA la BD (nombre_archivo/hash/paginas); si gana el
+        // catalogado, se descarta el entrante. Solo si la auto-resolución falla → Cuarentena (no perder).
+        try {
+            const ex = await metricasFichero(await archivoOriginal(carpetaDeDoc(resultado)));
+            const en = await metricasFichero(rutas[0]);
+            if (ganaEntrante(ex, en)) {
+                await reemplazarFicheroDeDoc(resultado, rutas[0]);
+                for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
+                console.log(`  ⤴️  Duplicado de ${idExist}: entrante más grande/reciente → REEMPLAZA al catalogado (BD en sync).`);
+                return { ...comun, operacion: 'reemplazo', accion: 'reemplazado' };
+            }
+            for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
+            console.log(`  🗑️  Duplicado de ${idExist}: el catalogado es igual o mejor → entrante descartado.`);
+            return { ...comun, operacion: 'duplicado_descartado', accion: 'borrado' };
+        } catch (e) {
+            console.warn(`  ⚠️  Auto-resolución de duplicado de ${idExist} falló (${e.message}) → Cuarentena/duplicados.`);
+            await enviarACuarentena(rutas, {
+                titulo: documento.titulo,
+                identificador: documento.isbn || documento.issn || documento.titulo,
+                error: { tipo: 'duplicado', mensaje: `Auto-resolución falló: ${e.message}` },
+                documento_existente_id: idExist,
+                fase: 'catalogo',
+            });
+            return { ...comun, operacion: 'duplicado', accion: 'cuarentena' };
+        }
     }
 
     // 3. Gestión de archivos: copiar a <CDU>/<libros|revistas>/.../.

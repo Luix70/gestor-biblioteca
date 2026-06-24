@@ -24,6 +24,7 @@ import { conectarDB } from '../database.js';
 import { carpetaDeDoc, archivoOriginal, numeroPaginasPdf } from '../mantenimiento/util-mantenimiento.js';
 import { calcularHashArchivo } from './hash-archivo.js';
 import { reciclar } from './papelera.js';
+import { resolverNombres, aRegistroLegible, escribirSidecars } from './registro.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..', '..');
@@ -38,8 +39,8 @@ function depositoDe(idRel) {
     return path.join(DIR_CUARENTENA, ...partes);
 }
 
-// Métricas de un fichero para comparar: tamaño, páginas (PDF), fecha y si es LEGIBLE.
-async function metricas(ruta) {
+// Métricas de un fichero para comparar: tamaño, páginas (PDF), fecha, formato y si es LEGIBLE.
+export async function metricasFichero(ruta) {
     if (!ruta) return { existe: false, legible: false };
     let st; try { st = await fs.stat(ruta); } catch { return { existe: false, legible: false }; }
     const ext = path.extname(ruta).toLowerCase();
@@ -47,7 +48,43 @@ async function metricas(ruta) {
     if (ext === '.pdf') paginas = await numeroPaginasPdf(ruta).catch(() => null);
     // PDF legible = pdfinfo dio páginas (>0); otros formatos: basta que no sea de 0 bytes.
     const legible = st.size > 0 && (ext === '.pdf' ? !!(paginas && paginas > 0) : true);
-    return { existe: true, archivo: path.basename(ruta), bytes: st.size, mtime: st.mtimeMs, paginas, legible, ext };
+    return { existe: true, ruta, archivo: path.basename(ruta), bytes: st.size, mtime: st.mtimeMs, paginas, legible, ext, formato: ext.slice(1) };
+}
+const metricas = metricasFichero; // alias interno (compararDuplicado lo usa).
+
+// Política de desempate "mismo formato, contenido distinto": gana el MÁS GRANDE; empate de tamaño
+// → el MÁS RECIENTE. Si el catalogado no tiene fichero, gana el entrante (lo aporta).
+export function ganaEntrante(ex, en) {
+    if (!en.existe) return false;
+    if (!ex.existe) return true;
+    if (en.bytes !== ex.bytes) return en.bytes > ex.bytes;
+    return en.mtime > ex.mtime;
+}
+
+/**
+ * Sustituye el fichero del documento `doc` por `ficheroNuevo` y SINCRONIZA la BD: actualiza
+ * nombre_archivo, hash_contenido y paginas, y regenera registro.json/.marc.xml. El fichero viejo
+ * (distinto) va a la Papelera. NO toca el `ficheroNuevo` de origen (eso lo decide el llamante).
+ * Lo usan tanto la ingesta en vivo (servicio-ingesta) como el script de backlog.
+ */
+export async function reemplazarFicheroDeDoc(doc, ficheroNuevo) {
+    const db = await conectarDB();
+    const carpeta = carpetaDeDoc(doc);
+    await fs.mkdir(carpeta, { recursive: true });
+    const viejo = await archivoOriginal(carpeta);
+    if (viejo) await reciclar([viejo], `reemplazado-${doc.isbn || doc.titulo || String(doc._id)}`);
+    const destino = path.join(carpeta, path.basename(ficheroNuevo));
+    await fs.copyFile(ficheroNuevo, destino);
+    const hash = await calcularHashArchivo(destino).catch(() => null);
+    const paginas = path.extname(destino).toLowerCase() === '.pdf' ? await numeroPaginasPdf(destino).catch(() => null) : null;
+    const set = { nombre_archivo: path.basename(ficheroNuevo) };
+    if (hash) set.hash_contenido = hash;
+    if (paginas) set.paginas = paginas;
+    await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
+    const docAct = { ...doc, ...set };
+    const nombres = await resolverNombres(db, docAct);
+    await escribirSidecars(carpeta, aRegistroLegible(docAct, nombres)).catch(() => {});
+    return { _id: doc._id, ...set };
 }
 
 // Desempate (política "más grande / más páginas") + guardas de legibilidad e identidad.

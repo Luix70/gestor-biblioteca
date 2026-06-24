@@ -243,8 +243,13 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
 - **Duplicados y formatos:** un ISBN admite VARIOS documentos, **uno por formato** (pdf/epub/mobi…):
   mismo ISBN + formato distinto → documento APARTE (fundir formatos más tarde es fácil; separarlos no).
   Mismo **hash** que algo ya catalogado = es el mismo fichero → se **BORRA** (no Papelera, no Cuarentena).
-  Solo el conflicto real (mismo ISBN, mismo formato, contenido distinto) va a **Cuarentena/duplicados**,
-  con el comparador del panel (quedarse con catalogado/entrante/ambos) y un botón "reprocesar todos".
+  Mismo ISBN+formato, contenido distinto → **AUTO-RESOLUCIÓN en vivo** (sin intervención humana): gana
+  el **más grande** (tamaño; empate → el **más reciente**); si gana el entrante, **reemplaza** el fichero
+  del doc y **sincroniza la BD** (nombre_archivo/hash/paginas) + regenera los sidecars. Lógica compartida
+  en `utils/duplicados.js` (`ganaEntrante`/`reemplazarFicheroDeDoc`) por servicio-ingesta, el panel y
+  `scripts/resolver-duplicados.js`. `Cuarentena/duplicados` queda solo como fallback si la auto-resolución
+  falla; el comparador del panel (catalogado/entrante/ambos) + "reprocesar todos" + el script limpian el
+  backlog heredado.
   En el Inbox: una carpeta con el MISMO nombre base en varias extensiones = "mismo libro, varios formatos"
   (no es colección; un doc por formato, comparten portada); 2+ nombres base distintos = colección.
 - **Secretos:** el `.env` es la única fuente; las env vars son visibles en el panel Docker de DSM
