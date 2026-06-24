@@ -1,18 +1,22 @@
 /**
  * Auditoría de integridad del archivo digital.
  *
- * Detecta cuatro clases de problemas:
+ * Detecta seis clases de problemas:
  *   A. Documentos MongoDB sin carpeta en disco  (doc huérfano)
  *   B. Carpetas en el árbol CDU sin documento MongoDB (carpeta huérfana)
  *   C. Documentos duplicados por hash_contenido (copias exactas ya en BD)
  *   D. Documentos cuya carpeta existe pero le FALTA el fichero original (.epub/.pdf
  *      desaparecido). Localiza el original por nombre en Inbox/Cuarentena/Reintentos/_ER Room.
+ *   E. Estructura del árbol: carpetas vacías y RAMAS SIN HOJAS (subárboles sin ningún
+ *      documento/registro/imagen — podables) y carpetas con registro/sidecars pero SIN documento.
  *
- * Solo informa — no modifica nada. Ejecutar:
- *   node scripts/auditoria-integridad.js [--fix-rutas]
+ * Solo informa por defecto. Ejecutar:
+ *   node scripts/auditoria-integridad.js [--fix-rutas] [--limpiar]
  *
- * --fix-rutas: actualiza ruta_base en Mongo para los docs cuya carpeta se
- *   encontró pero la ruta_base guardada no coincide (útil tras renombrar CDUs).
+ * --fix-rutas: actualiza ruta_base en Mongo para los docs cuya carpeta se encontró pero la
+ *   ruta_base guardada no coincide (útil tras renombrar CDUs).
+ * --limpiar:   ELIMINA las carpetas vacías y ramas sin hojas (E) — son podas seguras: no contienen
+ *   ningún documento/registro/imagen. NO toca nada que tenga contenido.
  */
 
 import 'dotenv/config';
@@ -34,6 +38,9 @@ const DIR_CUARENTENA = resolverDir('PATH_CUARENTENA', 'Cuarentena');
 const DIR_REINTENTOS = resolverDir('PATH_REINTENTOS', 'Reintentos');
 const DIR_ER_ROOM = resolverDir('PATH_ER_ROOM', '_ER Room');
 const FIX_RUTAS = process.argv.includes('--fix-rutas');
+const LIMPIAR = process.argv.includes('--limpiar');
+const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
+const ignorarEntrada = (n) => n.startsWith('@') || n.startsWith('.') || n.startsWith('#');
 
 // Extensiones del fichero "original" (no las imágenes/sidecars que genera el sistema).
 const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
@@ -250,6 +257,44 @@ async function main() {
     }
     if (sinFichero.length > 30) console.log(`  … y ${sinFichero.length - 30} más`);
 
+    // ── E. Estructura del árbol: vacías / ramas sin hojas / registro sin documento ──
+    console.log('\n── E. Estructura del árbol CDU ─────────────────────────────────────');
+    const sinHoja = new Set();          // carpetas cuyo subárbol NO tiene NINGUNA hoja (podables)
+    const registroSinDoc = [];          // carpeta con registro/sidecars pero sin el documento ni imágenes
+    async function recorrerArbol(dir) {
+        let ents; try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+        const files = ents.filter(e => e.isFile() && !ignorarEntrada(e.name)).map(e => e.name);
+        const subdirs = ents.filter(e => e.isDirectory() && !ignorarEntrada(e.name));
+        const tieneDoc = files.some(n => EXT_DOC.includes(path.extname(n).toLowerCase()));
+        const tieneImg = files.some(n => EXT_IMG.includes(path.extname(n).toLowerCase()));
+        const tieneRegistro = files.includes('registro.json') || files.includes('registro.marc.xml');
+        let hojaAbajo = false;
+        for (const s of subdirs) hojaAbajo = (await recorrerArbol(path.join(dir, s.name))) || hojaAbajo;
+        const hayContenido = tieneDoc || tieneImg || tieneRegistro;
+        if (dir !== DIR_CDU) {
+            if (!hayContenido && !hojaAbajo) sinHoja.add(dir);                  // vacía o rama muerta
+            else if (tieneRegistro && !tieneDoc && !tieneImg) registroSinDoc.push(dir); // metadatos sin contenido
+        }
+        return hayContenido || hojaAbajo;
+    }
+    if (await existeDir(DIR_CDU)) await recorrerArbol(DIR_CDU);
+    // Ramas muertas = nodos TOPE de cada subárbol sin hojas (el padre sí tiene hojas o es la raíz).
+    const ramasMuertas = [...sinHoja].filter(d => !sinHoja.has(path.dirname(d)));
+    console.log(`Carpetas vacías / ramas sin hojas (tope): ${ramasMuertas.length}  (nodos totales sin hoja: ${sinHoja.size})`);
+    console.log(`Carpetas con registro pero SIN documento: ${registroSinDoc.length}`);
+    for (const d of ramasMuertas.slice(0, 20)) console.log(`  🍂 ${rutaWebDeCarpeta(d)}`);
+    if (ramasMuertas.length > 20) console.log(`  … y ${ramasMuertas.length - 20} más`);
+    for (const d of registroSinDoc.slice(0, 20)) console.log(`  📄 (registro sin doc) ${rutaWebDeCarpeta(d)}`);
+    if (registroSinDoc.length > 20) console.log(`  … y ${registroSinDoc.length - 20} más`);
+    if (LIMPIAR && ramasMuertas.length) {
+        console.log('\n  --limpiar: eliminando carpetas vacías / ramas sin hojas (sin documentos)…');
+        let podadas = 0;
+        for (const d of ramasMuertas) { await fs.rm(d, { recursive: true, force: true }).then(() => podadas++).catch(() => {}); }
+        console.log(`  ✅ ${podadas} rama(s) podada(s).`);
+    } else if (ramasMuertas.length) {
+        console.log('  ℹ️  Re-ejecuta con --limpiar para eliminarlas (es seguro: no contienen documentos).');
+    }
+
     // ── Resumen ──────────────────────────────────────────────────────────────
     console.log('\n══════════════════════════════════════════════════════════════════════');
     console.log('RESUMEN');
@@ -260,6 +305,8 @@ async function main() {
     console.log(`  ruta_base desactualizada:     ${carpetasConDocErroneo.length}`);
     console.log(`  Grupos de duplicados exactos: ${hashDups.length}`);
     console.log(`  Docs sin fichero original:    ${sinFichero.length} (localizables: ${localizables.length})`);
+    console.log(`  Ramas vacías / sin hojas:     ${ramasMuertas.length}${LIMPIAR ? ' (limpiadas)' : ''}`);
+    console.log(`  Carpetas con registro sin doc:${registroSinDoc.length}`);
 
     await client.close();
 }
