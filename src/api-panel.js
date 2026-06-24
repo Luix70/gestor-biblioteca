@@ -7,6 +7,7 @@ import {
     listarCuarentena, reingestarCuarentena, reingestarTodosDuplicados, ingestaPorDia,
 } from './utils/inspeccion.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
+import { verificarIntegridad } from './integridad.js';
 import { purgarObra } from './utils/purga.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
@@ -77,6 +78,19 @@ export function rutasPanel() {
     r.post('/cuarentena/duplicados/reprocesar-todos', async (req, res) => {
         try { res.json(await reingestarTodosDuplicados()); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ── Integridad: diagnóstico (o diagnóstico+reparación) a voluntad. (POST → solo admin.) ──
+    let integridadEnCurso = false;
+    r.post('/integridad', async (req, res) => {
+        if (integridadEnCurso) return res.status(409).json({ ok: false, motivo: 'ya hay una verificación de integridad en curso' });
+        integridadEnCurso = true;
+        try {
+            const informe = await verificarIntegridad({ reparar: req.body?.reparar === true });
+            res.json({ ok: true, ...informe });
+        } catch (e) {
+            res.status(500).json({ ok: false, motivo: e.message });
+        } finally { integridadEnCurso = false; }
     });
 
     // ── Purga de obra multivolumen (simulación por defecto; ejecutar:true aplica) ──

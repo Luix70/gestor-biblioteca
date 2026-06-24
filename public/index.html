@@ -156,6 +156,7 @@ body.guest .admin-only{display:none!important}
       <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
       <button data-p="pap"><span class="ic">♻</span> Papelera</button>
       <button data-p="obras"><span class="ic">📖</span> Obras</button>
+      <button data-p="integ"><span class="ic">🩺</span> Integridad</button>
       <button data-p="logs" class="admin-only"><span class="ic">📜</span> Logs</button>
       <button data-p="inbox"><span class="ic">📥</span> Inbox <span class="soon">MAQUETA</span></button>
       <button data-p="search" disabled><span class="ic">🔍</span> Búsqueda <span class="soon">PRONTO</span></button>
@@ -251,6 +252,20 @@ body.guest .admin-only{display:none!important}
         <div class="card"><h3>Inventario</h3><div id="obrasBody"></div></div>
       </section>
 
+      <!-- INTEGRIDAD -->
+      <section class="page" id="p-integ">
+        <div class="sec-h"><h2>Integridad del archivo</h2></div>
+        <div class="card" style="margin-bottom:16px">
+          <p class="muted" style="margin-top:0">Comprueba la coherencia entre la base de datos y el árbol CDU en disco: docs sin carpeta o sin fichero, carpetas huérfanas, ruta_base desajustada, ramas vacías, duplicados por hash y Cuarentena/duplicados pendientes.</p>
+          <div class="row">
+            <button class="btn" id="integDiag">🩺 Diagnosticar</button>
+            <button class="btn bad admin-only" id="integFix">🛠 Diagnosticar y reparar</button>
+          </div>
+          <p class="muted" style="margin-top:10px;font-size:12px">Reparar es seguro: todo lo retirado va a la Papelera. Lo no auto-reparable (docs sin carpeta/fichero) solo se informa. Para programarlo a diario/semanal, usa el Programador de tareas de DSM con <span class="mono">docker exec gestor-biblioteca node scripts/integridad.js --reparar</span>.</p>
+        </div>
+        <div id="integOut"></div>
+      </section>
+
       <!-- LOGS -->
       <section class="page" id="p-logs">
         <div class="sec-h"><h2>Logs</h2><span class="muted" id="logInfo"></span></div>
@@ -311,7 +326,7 @@ const toast=(m,t='ok')=>{const e=document.createElement('div');e.className='toas
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // ── nav ──
-const titles={dashboard:'Dashboard',mant:'Mantenimiento',vig:'Vigilante',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',logs:'Logs',inbox:'Inbox'};
+const titles={dashboard:'Dashboard',mant:'Mantenimiento',vig:'Vigilante',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',integ:'Integridad',logs:'Logs',inbox:'Inbox'};
 let logTimer=null;
 function go(p){$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
@@ -491,7 +506,31 @@ $('#logPurge7').onclick=()=>purgaLog({dias:7},'Logs: conservados los últimos 7 
 $('#logPurge30').onclick=()=>purgaLog({dias:30},'Logs: conservados los últimos 30 días');
 $('#logClear').onclick=()=>{if(confirm('¿Vaciar TODO el log?'))purgaLog({todo:true},'Log vaciado');};
 
-const loaders={dashboard:loadDashboard,mant:refrescarEstado,vig:refrescarEstado,cuar:loadCuar,pap:loadPap,obras:loadObras,logs:logAuto,inbox:()=>{}};
+// ── integridad ──
+function loadInteg(){$('#integDiag').onclick=()=>correrIntegridad(false);if($('#integFix'))$('#integFix').onclick=()=>correrIntegridad(true);}
+async function correrIntegridad(reparar){
+  if(reparar&&!confirm('Reparará la integridad: poda ramas vacías, deduplica por hash, resuelve Cuarentena/duplicados y ajusta ruta_base. Todo lo retirado va a la Papelera. ¿Seguir?'))return;
+  const dB=$('#integDiag'),fB=$('#integFix');dB.disabled=true;if(fB)fB.disabled=true;
+  $('#integOut').innerHTML='<div class="card"><div class="muted">Verificando… (puede tardar en bibliotecas grandes)</div></div>';
+  try{const r=await api('/integridad',{method:'POST',body:JSON.stringify({reparar})});pintarInteg(r);toast(reparar?'Integridad: diagnóstico + reparación':'Integridad: diagnóstico completado');}
+  catch(e){$('#integOut').innerHTML='';toast(e.message,'bad');}
+  finally{dB.disabled=false;if(fB)fB.disabled=false;}
+}
+function pintarInteg(r){
+  const fila=(k,v,warn)=>`<tr><td>${esc(k)}</td><td style="text-align:right"><b ${warn&&v>0?'style="color:var(--warn)"':''}>${v}</b></td></tr>`;
+  const d=r.diagnostico||{},et={docsSinCarpeta:'Docs sin carpeta',docsSinFicheroOriginal:'Docs sin fichero original',ramasMuertas:'Ramas vacías / muertas',registroSinDocumento:'Registro sin documento',carpetasHuerfanas:'Carpetas huérfanas',rutaBaseDesajustada:'ruta_base desajustada',hashDuplicadosGrupos:'Duplicados por hash (grupos)',hashDuplicadosDocs:'Duplicados por hash (sobrantes)',cuarentenaDuplicados:'Cuarentena/duplicados'};
+  let h=`<div class="card" style="margin-bottom:14px"><h3>Diagnóstico · ${esc(new Date(r.ts).toLocaleString('es-ES'))} · ${r.totalDocs} docs</h3><table>`;
+  for(const k of Object.keys(et))h+=fila(et[k],d[k]??0,true);h+='</table></div>';
+  if(r.reparado){const rp=r.reparado,er={ramasPodadas:'Ramas podadas',rutasReparadas:'ruta_base reparadas',carpetasHuerfanasRecicladas:'Huérfanas recicladas',hashDuplicadosEliminados:'Hash-duplicados eliminados',cuarentenaResueltos:'Cuarentena resueltos'};
+    h+=`<div class="card" style="margin-bottom:14px"><h3>🛠 Reparado (a la Papelera)</h3><table>`;for(const k of Object.keys(er))h+=fila(er[k],rp[k]??0,false);h+='</table></div>';}
+  const m=r.muestras||{};
+  if(m.docsSinCarpeta?.length||m.docsSinFicheroOriginal?.length){h+='<div class="card"><h3>Requiere revisión manual</h3>';
+    if(m.docsSinCarpeta?.length)h+='<div class="muted">Docs sin carpeta:</div>'+m.docsSinCarpeta.map(x=>`<div class="mono" style="font-size:12px">[${esc(x.id)}] ${esc(x.titulo||'')} → ${esc(x.ruta||'')}</div>`).join('');
+    if(m.docsSinFicheroOriginal?.length)h+='<div class="muted" style="margin-top:8px">Docs sin fichero original:</div>'+m.docsSinFicheroOriginal.map(x=>`<div class="mono" style="font-size:12px">[${esc(x.id)}] ${esc(x.titulo||'')} (${esc(x.archivo||'—')})</div>`).join('');
+    h+='</div>';}
+  $('#integOut').innerHTML=h;
+}
+const loaders={dashboard:loadDashboard,mant:refrescarEstado,vig:refrescarEstado,cuar:loadCuar,pap:loadPap,obras:loadObras,integ:loadInteg,logs:logAuto,inbox:()=>{}};
 
 // ── auth ──
 let estadoTimer=null;
