@@ -13,7 +13,7 @@ import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js';
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { reciclar } from './utils/papelera.js';
-import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
+import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,7 +24,6 @@ const resolver = (p, def) => {
 };
 
 const INBOX   = resolver(process.env.PATH_INBOX,   'Inbox');
-const ER_ROOM = resolver(process.env.PATH_ER_ROOM, '_ER Room');
 const PAUSA_MS = Number(process.env.PAUSA_INGESTA_MS || 1500);   // ritmo entre recursos (no saturar APIs)
 const REPOSO_MS = Number(process.env.REPOSO_INBOX_MS || 2500);   // espera tras el último cambio antes de procesar
 const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse
@@ -320,24 +319,6 @@ async function listarUnidades() {
     return unidades;
 }
 
-/** Mueve los archivos fantasma (0 bytes) al _ER Room preservando el nombre de fichero. */
-async function moverAErRoom(rutas) {
-    await fs.mkdir(ER_ROOM, { recursive: true });
-    for (const ruta of rutas) {
-        const nombre = path.basename(ruta);
-        let destino = path.join(ER_ROOM, nombre);
-        // Evitar colisión si ya existe un archivo con el mismo nombre en el _ER Room.
-        if (await fs.access(destino).then(() => true).catch(() => false)) {
-            const ext  = path.extname(nombre);
-            const base = path.basename(nombre, ext);
-            destino = path.join(ER_ROOM, `${base}.${Date.now()}${ext}`);
-        }
-        // _ER Room es un bind mount DISTINTO del Inbox → fs.rename siempre da EXDEV y caía en el
-        // borrado del original (el fantasma se perdía en vez de moverse). Copiar y borrar origen.
-        try { await fs.rename(ruta, destino); }
-        catch { try { await fs.copyFile(ruta, destino); await fs.rm(ruta, { force: true }).catch(() => {}); } catch { /* best-effort */ } }
-    }
-}
 
 export async function limpiarInbox(unidad, { borrarCatalogados = false } = {}) {
     // Limpieza del Inbox tras procesar una unidad. Por defecto, política "nunca borrar": se MUEVE
@@ -419,10 +400,10 @@ async function procesarUnidad(unidad) {
             await limpiarInbox(unidad); // sacar del Inbox para no reprocesar en bucle
         } else if (e.tipo === 'ilegible') {
             // Fichero estructuralmente dañado (EPUB/PDF corrupto): no es cuestión de catalogación
-            // manual sino de conseguir una COPIA MEJOR → al _ER Room (preserva el nombre para
-            // redescargarlo), igual que los fantasmas de 0 bytes. No satura la Cuarentena.
-            await moverAErRoom(unidad.rutas);
-            console.error(`  📛 ${etiqueta} → _ER Room (ilegible: ${e.message})`);
+            // manual sino de conseguir una COPIA SANA → Cuarentena/ilegibles (depósito con sidecar);
+            // se reemplaza desde el panel buscando una copia. Igual que los fantasmas de 0 bytes.
+            await enviarAIlegibles(unidad.rutas, { titulo: etiqueta, mensaje: e.message });
+            console.error(`  📛 ${etiqueta} → Cuarentena/ilegibles (ilegible: ${e.message})`);
         } else {
             // identificación imposible u otro error no recuperable → Cuarentena (manual).
             await enviarACuarentena(unidad.rutas, { error: { tipo: e.tipo || 'desconocido', mensaje: e.message } });
@@ -450,8 +431,8 @@ async function procesarCola() {
                 const estabilidad = await verificarEstabilidad(u.rutas);
                 if (estabilidad === 'fantasma') {
                     const nombre = `${path.basename(u.rutas[0])}${u.rutas.length > 1 ? ` (+${u.rutas.length - 1})` : ''}`;
-                    console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min → _ER Room (redescargar manualmente).`);
-                    await moverAErRoom(u.rutas);
+                    console.warn(`  👻 ${nombre}: 0 bytes durante >${Math.round(HUERFANO_TIMEOUT_MS / 60000)} min → Cuarentena/ilegibles (redescargar y reemplazar).`);
+                    await enviarAIlegibles(u.rutas, { titulo: path.basename(u.rutas[0]), mensaje: 'transferencia incompleta (0 bytes)' });
                     // La carpeta (buzón de primer nivel) no se borra.
                     for (const r of u.rutas) huerfanosVistos.delete(r);
                     continue;

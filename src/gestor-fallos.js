@@ -78,6 +78,20 @@ export async function enviarACuarentena(rutas, estado) {
     return depositar(DIR_CUARENTENA, rutas, e, true, categoriaCuarentena(e));
 }
 
+/**
+ * Fichero estructuralmente dañado (EPUB/PDF corrupto) o fantasma de 0 bytes → Cuarentena/ilegibles
+ * como depósito con sidecar (estado.json). No es cuestión de catalogarlo a mano sino de conseguir
+ * una COPIA SANA y reemplazarlo desde el panel. Unifica lo que antes iba al _ER Room.
+ */
+export async function enviarAIlegibles(rutas, estado = {}) {
+    const e = {
+        motivo: 'ilegible',
+        titulo: estado.titulo || null,
+        error: { tipo: 'ilegible', mensaje: estado.mensaje || estado.error?.mensaje || 'fichero ilegible o dañado' },
+    };
+    return depositar(DIR_CUARENTENA, rutas, e, true, 'ilegibles');
+}
+
 /** Fallo transitorio (APIs/MongoDB inalcanzables) → Reintentos (se COPIA; se reprocesará). */
 export async function enviarAReintentos(rutas, estado) {
     return depositar(DIR_REINTENTOS, rutas, { motivo: 'infraestructura', ...estado }, false);

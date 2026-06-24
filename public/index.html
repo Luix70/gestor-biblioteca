@@ -108,6 +108,8 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .cmpcol h4{margin:0 0 8px;font-size:13px}
 .cmpcol.win{border-color:var(--acc);background:rgba(40,217,168,.06)}
 .winbadge{color:var(--acc);font-size:11px;margin-left:6px}
+.buscar{font-size:11px;margin-top:5px;color:var(--mut)}
+.buscar a{color:var(--acc2);cursor:pointer}.buscar a:hover{text-decoration:underline}
 /* detalle (obra / ficha de documento) */
 .rowlink{color:var(--acc);cursor:pointer;font-weight:500}.rowlink:hover{text-decoration:underline}
 .crumb{color:var(--mut);font-size:12px;margin-bottom:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
@@ -286,6 +288,7 @@ body.guest .admin-only{display:none!important}
       <!-- CUARENTENA -->
       <section class="page" id="p-cuar">
         <div class="sec-h"><h2>Cuarentena</h2><span class="muted" id="cuarCount"></span></div>
+        <input type="file" id="sanFile" accept=".pdf,.epub,.mobi,.azw3,.djvu,.cbr,.cbz" style="display:none">
         <div id="cuarBody"></div>
       </section>
 
@@ -381,6 +384,7 @@ body.guest .admin-only{display:none!important}
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
+let FUENTES=[],sanCtx=null; // fuentes "buscar copia" (cacheadas) + depósito en curso de saneamiento
 const api=async(p,opt={})=>{const h={'Content-Type':'application/json',...(opt.headers||{})};
   if(TOKEN)h['Authorization']='Bearer '+TOKEN;
   const r=await fetch('/api'+p,{...opt,headers:h});
@@ -456,22 +460,46 @@ $('#vSwitch').onchange=async e=>{try{const r=await api('/vigilante',{method:'POS
   toast('Vigilante '+(r.activo?'activado':'pausado'),r.activo?'ok':'warn');refrescarEstado();}catch(err){toast(err.message,'bad');}};
 
 // ── cuarentena ──
-async function loadCuar(){try{const c=await api('/cuarentena');const cats=Object.keys(c);
+// Consulta de búsqueda de copia a partir del título / nombre de fichero del depósito.
+const consultaCopia=d=>{const base=d.titulo||(d.archivos&&d.archivos[0])||d.nombre||'';return base.replace(/\.[^.]+$/,'').replace(/_+/g,' ').replace(/\s+/g,' ').trim();};
+// Sube una copia sana y reemplaza el depósito (multipart; fetch propio para no forzar JSON).
+async function reemplazarSano(id,file){
+  const fd=new FormData();fd.append('file',file);fd.append('id',id);
+  const h={};if(TOKEN)h['Authorization']='Bearer '+TOKEN;
+  const r=await fetch('/api/saneamiento/reemplazar',{method:'POST',headers:h,body:fd});
+  if(r.status===401){mostrarLogin();throw new Error('Sesión caducada — vuelve a entrar');}
+  const t=await r.text();let j;try{j=t?JSON.parse(t):{}}catch{j={raw:t}}
+  if(!r.ok&&!j.motivo)throw new Error(j.message||r.status);return j;
+}
+async function loadCuar(){try{
+  if(!FUENTES.length){try{FUENTES=(await api('/saneamiento/fuentes')).fuentes||[];}catch{}}
+  const c=await api('/cuarentena');const cats=Object.keys(c);
   $('#cuarCount').textContent=cats.reduce((s,k)=>s+c[k].length,0)+' depósito(s)';
-  $('#cuarBody').innerHTML=cats.length?cats.map(cat=>`<div class="card" style="margin-bottom:14px"><h3>${esc(cat)} · ${c[cat].length}${cat==='duplicados'?` <button class="btn admin-only" id="reproAllDup" style="float:right">♻ Reprocesar todos</button>`:''}</h3>
-    <table><tr><th>Título / archivo</th><th>Motivo</th><th></th></tr>${c[cat].map(d=>`<tr>
-      <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div></td>
+  $('#cuarBody').innerHTML=cats.length?cats.map(cat=>{const dup=cat==='duplicados';
+    return `<div class="card" style="margin-bottom:14px"><h3>${esc(cat)} · ${c[cat].length}${dup?` <button class="btn admin-only" id="reproAllDup" style="float:right">♻ Reprocesar todos</button>`:''}</h3>
+    <table><tr><th>Título / archivo</th><th>Motivo</th><th></th></tr>${c[cat].map(d=>{const q=consultaCopia(d);
+      const links=(!dup&&FUENTES.length)?`<div class="buscar">🔎 copia: ${FUENTES.map(f=>`<a href="${esc(f.url.replace('{q}',encodeURIComponent(q)))}" target="_blank" rel="noopener">${esc(f.nombre)}</a>`).join(' · ')}</div>`:'';
+      return `<tr>
+      <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div>${links}</td>
       <td class="muted">${esc(d.error||'—')}</td>
-      <td>${cat==='duplicados'?`<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> `:''}<button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button></td></tr>`).join('')}</table></div>`).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
+      <td>${dup?`<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> `:`<button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir una copia sana, catalogarla y retirar este depósito">⤓ Reemplazar</button> `}<button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button></td></tr>`;}).join('')}</table></div>`;}).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
   $$('#cuarBody [data-re]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api('/cuarentena/reingestar',{method:'POST',body:JSON.stringify({id:b.dataset.re})});
     if(r.ok){toast(`Reingestados ${r.movidos}/${r.total} → Inbox`);loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}catch(e){toast(e.message,'bad');b.disabled=false;}});
   $$('#cuarBody [data-cmp]').forEach(b=>b.onclick=()=>abrirComparador(b.dataset.cmp));
+  $$('#cuarBody [data-rep]').forEach(b=>b.onclick=()=>{sanCtx={id:b.dataset.rep};const inp=$('#sanFile');inp.value='';inp.click();});
   if($('#reproAllDup'))$('#reproAllDup').onclick=async()=>{
     if(!confirm('Devuelve TODOS los duplicados al Inbox para re-evaluarlos con la lógica actual (los idénticos se borran, los de otro formato se separan, solo los conflictos reales vuelven). ¿Seguir?'))return;
     const b=$('#reproAllDup');b.disabled=true;
     try{const r=await api('/cuarentena/duplicados/reprocesar-todos',{method:'POST'});toast(`Reprocesando ${r.movidos} fichero(s) de ${r.depositos} depósito(s) → Inbox`);loadCuar();}
     catch(e){toast(e.message,'bad');b.disabled=false;}};
 }catch(e){toast(e.message,'bad');}}
+// Selector de fichero para "Reemplazar" (un único input oculto, contexto en sanCtx).
+$('#sanFile').onchange=async e=>{const file=e.target.files&&e.target.files[0];const ctx=sanCtx;sanCtx=null;if(!file||!ctx)return;
+  toast('Subiendo y catalogando la copia sana…');
+  try{const r=await reemplazarSano(ctx.id,file);
+    if(r.ok){toast(`Saneado: «${esc(r.titulo||'documento')}» (${r.operacion}); depósito retirado a Papelera`);loadCuar();}
+    else toast(r.motivo||'no se pudo sanear','warn');
+  }catch(err){toast(err.message,'bad');}};
 
 // Comparador de duplicados: catalogado vs entrante, con la recomendación resaltada.
 function cerrarCmp(){$('#cmpScrim').style.display='none';$('#cmpModal').style.display='none';$('#cmpModal').innerHTML='';}

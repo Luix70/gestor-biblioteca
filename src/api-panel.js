@@ -13,6 +13,7 @@ import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
+import { fuentesCopia } from './utils/saneamiento.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1 };
@@ -108,6 +109,9 @@ export function rutasPanel() {
         try { res.json(await reingestarTodosDuplicados()); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+
+    // Fuentes de "buscar copia" para sanear ilegibles (configurables en config.js / .env FUENTES_COPIA).
+    r.get('/saneamiento/fuentes', (req, res) => res.json({ ok: true, fuentes: fuentesCopia() }));
 
     // ── Integridad: diagnóstico (o diagnóstico+reparación) a voluntad. (POST → solo admin.) ──
     let integridadEnCurso = false;

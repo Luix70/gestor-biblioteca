@@ -17,6 +17,12 @@
 export const AJUSTES = {
     // --- General ---
     PORT: 3000,                     // puerto de la API REST
+    // Fuentes para "buscar copia" al sanear ilegibles de Cuarentena (JSON [{nombre,url}]; {q}=consulta).
+    FUENTES_COPIA: JSON.stringify([
+        { nombre: "Anna's Archive", url: 'https://annas-archive.org/search?q={q}' },
+        { nombre: 'Libgen', url: 'https://libgen.is/search.php?req={q}' },
+        { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
+    ]),
     HTTP_TIMEOUT_MS: 20000,         // timeout de TODA llamada HTTP a las APIs bibliográficas
     OL_TIMEOUT_MS: 20000,           // timeout de OpenLibrary; el circuit-breaker evita esperar en cada fallo
     DNB_TIMEOUT_MS: 15000,          // timeout de Deutsche Nationalbibliothek (SRU público)
