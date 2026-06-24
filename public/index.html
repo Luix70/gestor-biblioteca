@@ -142,9 +142,12 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .fileprev iframe{width:100%;height:68vh;border:1px solid var(--line);border-radius:12px;background:#fff}
 .filebox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:22px;text-align:center}
 .filebox .ic{font-size:42px;margin-bottom:8px}
-.epubwrap{position:relative;height:68vh;border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
+.epubwrap{position:relative;width:100%;height:70vh;height:70svh;border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
 .epubwrap #epubArea{width:100%;height:100%}
+.epubwrap.full{position:fixed;inset:0;width:auto;height:auto;z-index:300;border:none;border-radius:0}
 .epubwrap .epubmsg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--mut);background:var(--card2)}
+.epubfs{position:absolute;top:8px;right:8px;z-index:6;background:rgba(0,0,0,.5);border:1px solid var(--line);color:#fff;width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:15px;display:grid;place-items:center}
+.epubfs:hover{background:var(--acc);color:#04231b}
 /* auth */
 #login{position:fixed;inset:0;background:radial-gradient(900px 500px at 70% -10%,rgba(40,217,168,.10),transparent),var(--bg);display:none;place-items:center;z-index:200}
 #login.show{display:grid}
@@ -174,7 +177,7 @@ body.guest .admin-only{display:none!important}
   .grid.g3>div[style*="span 2"],.grid.g2>div[style*="span 2"]{grid-column:1/-1!important}
   .row>div{min-width:100%}.row .btn{flex:1}
   .logview{height:56vh}
-  .ficha{grid-template-columns:1fr}.fileprev iframe{height:58vh}.epubwrap{height:62vh}
+  .ficha{grid-template-columns:1fr}.fileprev iframe{height:58vh}.epubwrap{height:64vh;height:64svh}
   .vol-grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
   .det-title h2{font-size:18px}
 }
@@ -638,8 +641,9 @@ function previewArchivo(r){
   if(ext==='pdf')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3><iframe src="${esc(url)}#view=FitH" title="PDF"></iframe>${acc}</div>`;
   // EPUB: lector epub.js (vendored en /vendor) — se inicializa tras pintar (iniciarLectorEpub).
   if(ext==='epub')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📗 ${esc(nombre)}</h3>
-    <div class="epubwrap"><div id="epubArea"></div>
+    <div class="epubwrap" id="epubWrap"><div id="epubArea"></div>
       <button class="cnav prev" id="epubPrev" style="display:none">‹</button><button class="cnav next" id="epubNext" style="display:none">›</button>
+      <button class="epubfs" id="epubFs" title="Pantalla completa" style="display:none">⛶</button>
       <div class="epubmsg" id="epubMsg">Cargando lector…</div></div>${acc}</div>`;
   // Resto de formatos: sin vista previa integrada — solo descarga / abrir.
   const ic={djvu:'📘',mobi:'📙',azw3:'📙',cbr:'🗂️',cbz:'🗂️'}[ext]||'📦';
@@ -656,20 +660,44 @@ function cargarEpubLib(){
   epubLibPromise=cargar('/vendor/jszip.min.js').then(()=>cargar('/vendor/epub.min.js'));
   return epubLibPromise;
 }
-let epubRendition=null;
+let epubRendition=null,epubResize=null;
 async function iniciarLectorEpub(url){
-  const area=$('#epubArea'),msg=$('#epubMsg');if(!area)return;
+  const wrap=$('#epubWrap'),area=$('#epubArea'),msg=$('#epubMsg');if(!area)return;
   try{
     await cargarEpubLib();
     if(!$('#epubArea'))return; // el usuario navegó fuera mientras cargaba la librería
     const book=ePub(url);
-    epubRendition=book.renderTo(area,{width:'100%',height:'100%',spread:'none',flow:'paginated'});
+    // Dimensiones EN PÍXELES (no '100%'): así el marco queda FIJO y epub.js no lo redimensiona
+    // según el contenido de cada sección (lo que hacía que "saltara" de página a página).
+    const dims=()=>({w:area.clientWidth||320,h:area.clientHeight||420});
+    let d0=dims();
+    epubRendition=book.renderTo(area,{width:d0.w,height:d0.h,spread:'none',flow:'paginated'});
+    // Constreñir el contenido al marco: sin márgenes del body e imágenes contenidas (no desbordan).
+    epubRendition.themes.default({
+      'html':{'height':'100% !important'},
+      'body':{'margin':'0 !important','padding':'0 !important'},
+      'img,image,svg':{'max-width':'100% !important','max-height':'100% !important','object-fit':'contain'},
+    });
+    // Tras cada render, clavar la altura del iframe al marco → impide que crezca de página a página.
+    const fijarAltura=()=>{const ifr=area.querySelector('iframe');if(ifr)ifr.style.height=area.clientHeight+'px';};
+    epubRendition.on('rendered',fijarAltura);
     await epubRendition.display();
+    fijarAltura();
     if(msg)msg.style.display='none';
-    const prev=$('#epubPrev'),next=$('#epubNext');
-    prev.style.display='grid';next.style.display='grid';
+    const prev=$('#epubPrev'),next=$('#epubNext'),fs=$('#epubFs');
+    [prev,next,fs].forEach(b=>b.style.display='grid');
     prev.onclick=()=>epubRendition.prev();next.onclick=()=>epubRendition.next();
-    document.onkeydown=e=>{if(!$('#epubArea'))return;if(e.key==='ArrowLeft')epubRendition.prev();if(e.key==='ArrowRight')epubRendition.next();};
+    const refit=()=>{const dd=dims();try{epubRendition.resize(dd.w,dd.h);fijarAltura();}catch{}};
+    // Pantalla completa: overlay por CSS (NO la Fullscreen API — iOS Safari no la soporta en <div>).
+    fs.onclick=()=>{const f=wrap.classList.toggle('full');fs.textContent=f?'✕':'⛶';
+      fs.title=f?'Salir de pantalla completa':'Pantalla completa';setTimeout(refit,90);};
+    if(epubResize)window.removeEventListener('resize',epubResize);
+    epubResize=()=>{clearTimeout(epubResize._t);epubResize._t=setTimeout(refit,150);};
+    window.addEventListener('resize',epubResize);
+    document.onkeydown=e=>{if(!$('#epubArea'))return;
+      if(e.key==='ArrowLeft')epubRendition.prev();
+      else if(e.key==='ArrowRight')epubRendition.next();
+      else if(e.key==='Escape'&&wrap.classList.contains('full')){wrap.classList.remove('full');fs.textContent='⛶';fs.title='Pantalla completa';setTimeout(refit,90);}};
   }catch(e){if(msg)msg.innerHTML=`No se pudo abrir el EPUB en el navegador (${esc(e.message)}).<br>Usa las opciones de descarga de abajo.`;}
 }
 
