@@ -18,8 +18,11 @@ export const AJUSTES = {
     // --- General ---
     PORT: 3000,                     // puerto de la API REST
     // Fuentes para "buscar copia" al sanear ilegibles de Cuarentena (JSON [{nombre,url}]; {q}=consulta).
+    // Estos dominios ROTAN (Anna's Archive / Z-Library cambian de TLD a menudo): cuando uno deje de
+    // resolver, edita su dominio aquí —o, mejor, en `.env` (FUENTES_COPIA, sobrevive a los despliegues)—.
     FUENTES_COPIA: JSON.stringify([
         { nombre: "Anna's Archive", url: 'https://annas-archive.gl/search?q={q}' },
+        { nombre: 'Z-Library', url: 'https://z-library.sk/s/?q={q}' },
         { nombre: 'Libgen', url: 'https://libgen.is/search.php?req={q}' },
         { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
     ]),
