@@ -35,7 +35,7 @@ export function fuentesCopia() {
  * Sanea un depósito de Cuarentena con la copia sana subida: la cataloga y, si entra, retira el
  * depósito original a la Papelera. idDeposito = '<categoria>/<carpeta>' (de listarCuarentena).
  */
-export async function reemplazarConSano(idDeposito, rutaSubida, { ubicacion } = {}) {
+export async function reemplazarConSano(idDeposito, rutaSubida, { ubicacion, nombreOriginal } = {}) {
     if (!rutaSubida) return { ok: false, motivo: 'no se recibió el fichero sano' };
     const partes = String(idDeposito || '').split('/').map(s => path.basename(s)).filter(Boolean);
     if (partes.length < 2) return { ok: false, motivo: 'identificador de depósito inválido' };
@@ -53,22 +53,40 @@ export async function reemplazarConSano(idDeposito, rutaSubida, { ubicacion } = 
         }
     } catch { return { ok: false, motivo: 'no se pudo leer el fichero subido' }; }
 
-    // 1) Catalogar la copia sana por el pipeline compartido.
+    // 1) Catalogar con el NOMBRE ORIGINAL del fichero subido (no el temporal de multer, que lleva un
+    //    prefijo de fecha). Puede DIFERIR del original roto (los descargados traen un hash) — da igual:
+    //    el documento se identifica por su CONTENIDO, no por el nombre. Se copia a un subdir temporal
+    //    propio para que `nombre_archivo` quede limpio.
+    let rutaIngesta = rutaSubida, tmpDir = null;
+    if (nombreOriginal) {
+        tmpDir = path.join(path.dirname(rutaSubida), `.san-${Date.now()}-${process.pid}`);
+        try {
+            await fs.mkdir(tmpDir, { recursive: true });
+            rutaIngesta = path.join(tmpDir, path.basename(nombreOriginal));
+            await fs.copyFile(rutaSubida, rutaIngesta);
+        } catch { rutaIngesta = rutaSubida; tmpDir = null; }
+    }
+
+    console.log(`🩹 Saneamiento ${partes.join('/')}: catalogando «${path.basename(rutaIngesta)}»…`);
     let resultado;
     try {
-        resultado = await ingestarRecurso({ rutas: [rutaSubida], contexto: ubicacion ? { ubicacion } : {} });
+        resultado = await ingestarRecurso({ rutas: [rutaIngesta], contexto: ubicacion ? { ubicacion } : {} });
     } catch (e) {
         await reciclar([rutaSubida], 'saneamiento-fallido').catch(() => {});
+        if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+        console.error(`🩹 Saneamiento FALLÓ (${partes.join('/')}): ${e.message}`);
         return { ok: false, motivo: `no se pudo catalogar la copia sana: ${e.message}` };
     }
 
-    // 2) Éxito → retirar el depósito problemático a la Papelera y reciclar el temporal de subida.
+    // 2) Éxito → retirar el depósito problemático a la Papelera y reciclar los temporales.
     let archivos = [];
     try { archivos = (await fs.readdir(depDir)).map(n => path.join(depDir, n)); } catch { /* vacío */ }
     await reciclar(archivos, 'saneado-ilegible');
     await fs.rm(depDir, { recursive: true, force: true }).catch(() => {});
     await reciclar([rutaSubida], 'subida-saneamiento').catch(() => {});
+    if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 
+    console.log(`🩹 Saneamiento OK (${partes.join('/')}): «${resultado.documento?.titulo || '—'}» (${resultado.operacion}).`);
     return {
         ok: true, operacion: resultado.operacion, estado: resultado.estado,
         id: String(resultado._id), titulo: resultado.documento?.titulo || null,

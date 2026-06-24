@@ -133,7 +133,10 @@ app.post('/api/saneamiento/reemplazar', upload.single('file'), async (req, res) 
     if (!req.file) return res.status(400).json({ ok: false, motivo: 'no se recibió ningún fichero' });
     try {
         const ubicacion = ubicacionDe(req.body);
-        const r = await reemplazarConSano(req.body?.id, req.file.path, { ubicacion });
+        // nombreOriginal = el nombre REAL del fichero subido (multer lo guarda con un prefijo de fecha):
+        // el catálogo conservará ese nombre, no el temporal. Puede diferir del original roto (los
+        // descargados traen un hash) — no importa: el documento se identifica por su CONTENIDO.
+        const r = await reemplazarConSano(req.body?.id, req.file.path, { ubicacion, nombreOriginal: req.file.originalname });
         res.status(r.ok ? 200 : 400).json(r);
     } catch (e) {
         await reciclar([req.file.path], 'saneamiento-error').catch(() => {});
