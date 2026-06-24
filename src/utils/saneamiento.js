@@ -6,14 +6,16 @@ import { ingestarRecurso } from '../servicio-ingesta.js';
 
 /**
  * SANEAMIENTO de ficheros problemáticos de la Cuarentena (ilegibles / no-identificados / otros):
- * el usuario busca una COPIA SANA (enlaces a buscadores) y la sube; aquí se cataloga por el pipeline
- * normal y, si entra, se retira el depósito original (a la Papelera). 'duplicados' NO entra aquí
- * (tiene su comparador).
+ * el usuario busca una COPIA SANA (enlaces a buscadores) y la SUBE → se PREPARA dentro del depósito
+ * (subcarpeta `.reemplazo/` + `estado.listo`) sin catalogar todavía; cuando hay varias listas, se
+ * PROCESAN EN LOTE en segundo plano (catalogar por el pipeline + retirar el depósito a la Papelera).
+ * 'duplicados' NO entra aquí (tiene su comparador).
  */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..', '..');
 const resolver = (p, def) => { const v = p || def; return path.isAbsolute(v) ? v : path.resolve(RAIZ, v); };
 const DIR_CUARENTENA = resolver(process.env.PATH_CUARENTENA, 'Cuarentena');
+const SUBDIR_REEMPLAZO = '.reemplazo';
 
 const DEFECTO_FUENTES = [
     { nombre: "Anna's Archive", url: 'https://annas-archive.gl/search?q={q}' },
@@ -31,65 +33,126 @@ export function fuentesCopia() {
     return DEFECTO_FUENTES;
 }
 
-/**
- * Sanea un depósito de Cuarentena con la copia sana subida: la cataloga y, si entra, retira el
- * depósito original a la Papelera. idDeposito = '<categoria>/<carpeta>' (de listarCuarentena).
- */
-export async function reemplazarConSano(idDeposito, rutaSubida, { ubicacion, nombreOriginal } = {}) {
-    if (!rutaSubida) return { ok: false, motivo: 'no se recibió el fichero sano' };
+/** Resuelve y valida el id '<categoria>/<carpeta>' → ruta absoluta (sin escapar de Cuarentena). */
+function depDirDe(idDeposito) {
     const partes = String(idDeposito || '').split('/').map(s => path.basename(s)).filter(Boolean);
-    if (partes.length < 2) return { ok: false, motivo: 'identificador de depósito inválido' };
-    if (partes[0] === 'duplicados') return { ok: false, motivo: 'los duplicados se resuelven desde su comparador' };
-    const depDir = path.join(DIR_CUARENTENA, ...partes);
+    if (partes.length < 2) return { error: 'identificador de depósito inválido' };
+    if (partes[0] === 'duplicados') return { error: 'los duplicados se resuelven desde su comparador' };
+    return { id: partes.join('/'), dir: path.join(DIR_CUARENTENA, ...partes) };
+}
+
+/** Primeros n bytes de un fichero (para comprobar la firma). */
+async function cabecera(ruta, n = 8) {
+    const fh = await fs.open(ruta, 'r');
+    try { const b = Buffer.alloc(n); await fh.read(b, 0, n, 0); return b; }
+    finally { await fh.close().catch(() => {}); }
+}
+
+/** "No es basura": firma de PDF (%PDF) o ZIP/EPUB (PK). Otros formatos: solo tamaño. Caza el caso
+ *  típico de una descarga fallida guardada como .epub/.pdf (una página HTML de error). */
+function firmaValida(buf, ext) {
+    const s = buf.toString('latin1');
+    if (ext === 'pdf') return s.startsWith('%PDF');
+    if (['epub', 'cbz', 'zip', 'kepub'].includes(ext)) return s.startsWith('PK');
+    return true;
+}
+
+/**
+ * PREPARA una copia sana para un depósito: valida (tamaño + firma) y la deja LISTA dentro del depósito
+ * (`.reemplazo/`) marcando `estado.listo`. NO cataloga aún (eso lo hace el proceso por lotes). El
+ * nombre puede diferir del original roto (los descargados traen un hash): se identifica por contenido.
+ */
+export async function prepararReemplazo(idDeposito, rutaSubida, { nombreOriginal } = {}) {
+    if (!rutaSubida) return { ok: false, motivo: 'no se recibió el fichero sano' };
+    const { dir: depDir, error } = depDirDe(idDeposito);
+    if (error) return { ok: false, motivo: error };
     try { await fs.access(depDir); } catch { return { ok: false, motivo: 'el depósito ya no existe' }; }
 
-    // 0) Test de legibilidad MÍNIMO: una copia vacía/diminuta no se cataloga (no sustituir un
-    //    fantasma por otro). El pipeline hace el resto de la validación al intentar catalogarla.
-    try {
-        const st = await fs.stat(rutaSubida);
-        if (st.size < 1024) {
-            await reciclar([rutaSubida], 'saneamiento-vacio').catch(() => {});
-            return { ok: false, motivo: `la copia subida está vacía o es demasiado pequeña (${st.size} B) — elige otro fichero` };
-        }
-    } catch { return { ok: false, motivo: 'no se pudo leer el fichero subido' }; }
-
-    // 1) Catalogar con el NOMBRE ORIGINAL del fichero subido (no el temporal de multer, que lleva un
-    //    prefijo de fecha). Puede DIFERIR del original roto (los descargados traen un hash) — da igual:
-    //    el documento se identifica por su CONTENIDO, no por el nombre. Se copia a un subdir temporal
-    //    propio para que `nombre_archivo` quede limpio.
-    let rutaIngesta = rutaSubida, tmpDir = null;
-    if (nombreOriginal) {
-        tmpDir = path.join(path.dirname(rutaSubida), `.san-${Date.now()}-${process.pid}`);
-        try {
-            await fs.mkdir(tmpDir, { recursive: true });
-            rutaIngesta = path.join(tmpDir, path.basename(nombreOriginal));
-            await fs.copyFile(rutaSubida, rutaIngesta);
-        } catch { rutaIngesta = rutaSubida; tmpDir = null; }
+    const nombre = path.basename(nombreOriginal || 'copia');
+    const ext = (nombre.split('.').pop() || '').toLowerCase();
+    let st;
+    try { st = await fs.stat(rutaSubida); } catch { return { ok: false, motivo: 'no se pudo leer el fichero subido' }; }
+    if (st.size < 1024) {
+        await reciclar([rutaSubida], 'saneamiento-vacio').catch(() => {});
+        return { ok: false, motivo: `la copia está vacía o es demasiado pequeña (${st.size} B)` };
+    }
+    if (!firmaValida(await cabecera(rutaSubida).catch(() => Buffer.alloc(8)), ext)) {
+        await reciclar([rutaSubida], 'saneamiento-invalida').catch(() => {});
+        return { ok: false, motivo: `el fichero no parece un ${ext.toUpperCase() || 'documento'} válido (¿una página de error?)` };
     }
 
-    console.log(`🩹 Saneamiento ${partes.join('/')}: catalogando «${path.basename(rutaIngesta)}»…`);
+    // Dejar la copia LISTA en `.reemplazo/` (sustituye una anterior si la hubiera).
+    const repDir = path.join(depDir, SUBDIR_REEMPLAZO);
+    await fs.rm(repDir, { recursive: true, force: true }).catch(() => {});
+    await fs.mkdir(repDir, { recursive: true });
+    await fs.copyFile(rutaSubida, path.join(repDir, nombre));
+    await reciclar([rutaSubida], 'subida-saneamiento').catch(() => {}); // temporal de multer
+
+    const estadoPath = path.join(depDir, 'estado.json');
+    let estado = {}; try { estado = JSON.parse(await fs.readFile(estadoPath, 'utf8')); } catch { /* sin estado previo */ }
+    estado.listo = true;
+    estado.reemplazo = nombre;
+    estado.reemplazo_bytes = st.size;
+    estado.reemplazo_fecha = new Date().toISOString();
+    delete estado.error_proceso;
+    await fs.writeFile(estadoPath, JSON.stringify(estado, null, 2), 'utf8');
+
+    console.log(`🩹 Saneamiento: copia LISTA para ${idDeposito} («${nombre}», ${st.size} B).`);
+    return { ok: true, reemplazo: nombre, bytes: st.size };
+}
+
+/** Cataloga la copia preparada de UN depósito y, si entra, retira el depósito a la Papelera. */
+async function catalogarPreparado(idDeposito) {
+    const { dir: depDir, error } = depDirDe(idDeposito);
+    if (error) return { ok: false, motivo: error };
+    const estadoPath = path.join(depDir, 'estado.json');
+    let estado = {}; try { estado = JSON.parse(await fs.readFile(estadoPath, 'utf8')); } catch { /* */ }
+    if (!estado.reemplazo) return { ok: false, motivo: 'el depósito no tiene copia preparada' };
+    const repFile = path.join(depDir, SUBDIR_REEMPLAZO, estado.reemplazo);
+    try { await fs.access(repFile); } catch { return { ok: false, motivo: 'falta el fichero de reemplazo preparado' }; }
+
     let resultado;
     try {
-        resultado = await ingestarRecurso({ rutas: [rutaIngesta], contexto: ubicacion ? { ubicacion } : {} });
+        resultado = await ingestarRecurso({ rutas: [repFile] });
     } catch (e) {
-        await reciclar([rutaSubida], 'saneamiento-fallido').catch(() => {});
-        if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-        console.error(`🩹 Saneamiento FALLÓ (${partes.join('/')}): ${e.message}`);
-        return { ok: false, motivo: `no se pudo catalogar la copia sana: ${e.message}` };
+        estado.error_proceso = e.message;
+        await fs.writeFile(estadoPath, JSON.stringify(estado, null, 2), 'utf8').catch(() => {});
+        console.error(`🩹 Saneamiento FALLÓ (${idDeposito}): ${e.message}`);
+        return { ok: false, motivo: e.message };
     }
-
-    // 2) Éxito → retirar el depósito problemático a la Papelera y reciclar los temporales.
+    // Éxito → retirar el depósito (original roto + sidecar + .reemplazo) a la Papelera.
     let archivos = [];
-    try { archivos = (await fs.readdir(depDir)).map(n => path.join(depDir, n)); } catch { /* vacío */ }
+    try { archivos = (await fs.readdir(depDir)).filter(n => n !== SUBDIR_REEMPLAZO).map(n => path.join(depDir, n)); } catch { /* */ }
     await reciclar(archivos, 'saneado-ilegible');
     await fs.rm(depDir, { recursive: true, force: true }).catch(() => {});
-    await reciclar([rutaSubida], 'subida-saneamiento').catch(() => {});
-    if (tmpDir) await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    console.log(`🩹 Saneamiento OK (${idDeposito}): «${resultado.documento?.titulo || '—'}» (${resultado.operacion}).`);
+    return { ok: true, id: String(resultado._id), titulo: resultado.documento?.titulo || null, operacion: resultado.operacion };
+}
 
-    console.log(`🩹 Saneamiento OK (${partes.join('/')}): «${resultado.documento?.titulo || '—'}» (${resultado.operacion}).`);
-    return {
-        ok: true, operacion: resultado.operacion, estado: resultado.estado,
-        id: String(resultado._id), titulo: resultado.documento?.titulo || null,
-        isbn: resultado.isbn || null, ruta: resultado.rutaWeb || null,
-    };
+// Estado del trabajo por lotes (en memoria; un trabajo a la vez).
+let trabajo = { enCurso: false, total: 0, hechos: 0, fallos: 0, actual: null, fin: null, resumen: [] };
+export function estadoSaneamiento() { return { ...trabajo, resumen: trabajo.resumen.slice(-50) }; }
+
+/**
+ * Procesa EN LOTE (secuencial, en segundo plano) las copias preparadas de los depósitos indicados.
+ * Devuelve de inmediato; el progreso se consulta con estadoSaneamiento(). Un solo trabajo a la vez.
+ */
+export function procesarSaneamiento(ids) {
+    if (trabajo.enCurso) return { ok: false, motivo: 'ya hay un proceso de saneamiento en curso' };
+    const lista = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+    if (!lista.length) return { ok: false, motivo: 'no se seleccionaron depósitos' };
+    trabajo = { enCurso: true, total: lista.length, hechos: 0, fallos: 0, actual: null, fin: null, resumen: [] };
+    (async () => {
+        for (const id of lista) {
+            trabajo.actual = id;
+            try {
+                const r = await catalogarPreparado(id);
+                if (r.ok) { trabajo.hechos++; trabajo.resumen.push({ id, ok: true, titulo: r.titulo }); }
+                else { trabajo.fallos++; trabajo.resumen.push({ id, ok: false, motivo: r.motivo }); }
+            } catch (e) { trabajo.fallos++; trabajo.resumen.push({ id, ok: false, motivo: e.message }); }
+        }
+        trabajo.actual = null; trabajo.enCurso = false; trabajo.fin = new Date().toISOString();
+        console.log(`🩹 Saneamiento por lotes terminado: ${trabajo.hechos} OK · ${trabajo.fallos} fallo(s).`);
+    })();
+    return { ok: true, ...estadoSaneamiento() };
 }

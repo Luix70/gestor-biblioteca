@@ -13,7 +13,7 @@ import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
-import { fuentesCopia } from './utils/saneamiento.js';
+import { fuentesCopia, procesarSaneamiento, estadoSaneamiento } from './utils/saneamiento.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1 };
@@ -112,6 +112,14 @@ export function rutasPanel() {
 
     // Fuentes de "buscar copia" para sanear ilegibles (configurables en config.js / .env FUENTES_COPIA).
     r.get('/saneamiento/fuentes', (req, res) => res.json({ ok: true, fuentes: fuentesCopia() }));
+
+    // Procesar EN LOTE (segundo plano) las copias preparadas. Body { ids:[...] }. (POST → solo admin.)
+    r.post('/saneamiento/procesar', (req, res) => {
+        const r2 = procesarSaneamiento(req.body?.ids);
+        res.status(r2.ok ? 202 : 409).json(r2);
+    });
+    // Progreso del trabajo de saneamiento por lotes (para el panel).
+    r.get('/saneamiento/estado', (req, res) => res.json(estadoSaneamiento()));
 
     // ── Integridad: diagnóstico (o diagnóstico+reparación) a voluntad. (POST → solo admin.) ──
     let integridadEnCurso = false;

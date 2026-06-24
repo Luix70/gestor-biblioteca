@@ -84,12 +84,17 @@ export async function listarCuarentena() {
             const depDir = path.join(catDir, d.name);
             let estado = null;
             try { estado = JSON.parse(await fs.readFile(path.join(depDir, 'estado.json'), 'utf8')); } catch { /* sin estado */ }
-            const archivos = (await fs.readdir(depDir).catch(() => [])).filter(n => n !== 'estado.json');
+            const archivos = (await fs.readdir(depDir).catch(() => []))
+                .filter(n => n !== 'estado.json' && n !== '.reemplazo');
             depositos.push({
                 id: `${c.name}/${d.name}`, nombre: d.name, archivos,
                 titulo: estado?.titulo || null,
                 error: estado?.error?.mensaje || estado?.error?.tipo || null,
                 fecha: estado?.fecha || null,
+                // Saneamiento: copia sana ya PREPARADA (lista para procesar por lotes) + posible fallo.
+                listo: !!estado?.listo,
+                reemplazo: estado?.reemplazo || null,
+                error_proceso: estado?.error_proceso || null,
             });
         }
         if (depositos.length) categorias[c.name] = depositos;

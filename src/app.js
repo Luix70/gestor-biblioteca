@@ -19,7 +19,7 @@ import { reciclar } from './utils/papelera.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel } from './api-panel.js';
-import { reemplazarConSano } from './utils/saneamiento.js';
+import { prepararReemplazo } from './utils/saneamiento.js';
 import { login, logout, validar, autenticar, tokenDe } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -126,17 +126,15 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
     res.status(huboError ? 207 : 200).json({ status: huboError ? 'partial' : 'success', resultados });
 });
 
-// SANEAMIENTO: reemplazar un depósito problemático de Cuarentena (ilegible/no-identificado/otro) con
-// una COPIA SANA subida por el usuario. La cataloga por el pipeline y, si entra, retira el depósito a
-// la Papelera. Mutación → la puerta `autenticar` ya exige rol admin. Body: { id } (idDeposito) + file.
+// SANEAMIENTO: PREPARAR una copia sana para un depósito de Cuarentena (ilegible/no-identificado/otro).
+// Valida (tamaño + firma) y la deja LISTA dentro del depósito; NO cataloga aún (eso lo hace el proceso
+// por lotes). Mutación → la puerta `autenticar` ya exige rol admin. Body: { id } (idDeposito) + file.
+// nombreOriginal = el nombre REAL subido (multer lo guarda con prefijo de fecha); el catálogo lo
+// conservará. Puede diferir del original roto (los descargados traen un hash): se identifica por contenido.
 app.post('/api/saneamiento/reemplazar', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ ok: false, motivo: 'no se recibió ningún fichero' });
     try {
-        const ubicacion = ubicacionDe(req.body);
-        // nombreOriginal = el nombre REAL del fichero subido (multer lo guarda con un prefijo de fecha):
-        // el catálogo conservará ese nombre, no el temporal. Puede diferir del original roto (los
-        // descargados traen un hash) — no importa: el documento se identifica por su CONTENIDO.
-        const r = await reemplazarConSano(req.body?.id, req.file.path, { ubicacion, nombreOriginal: req.file.originalname });
+        const r = await prepararReemplazo(req.body?.id, req.file.path, { nombreOriginal: req.file.originalname });
         res.status(r.ok ? 200 : 400).json(r);
     } catch (e) {
         await reciclar([req.file.path], 'saneamiento-error').catch(() => {});

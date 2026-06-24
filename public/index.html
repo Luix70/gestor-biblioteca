@@ -287,7 +287,10 @@ body.guest .admin-only{display:none!important}
 
       <!-- CUARENTENA -->
       <section class="page" id="p-cuar">
-        <div class="sec-h"><h2>Cuarentena</h2><span class="muted" id="cuarCount"></span></div>
+        <div class="sec-h"><h2>Cuarentena</h2><span class="muted" id="cuarCount"></span>
+          <span class="muted" id="sanProgreso" style="display:none"></span>
+          <button class="btn pri admin-only" id="sanProcesar" style="display:none">▶ Procesar seleccionados</button>
+        </div>
         <input type="file" id="sanFile" accept=".pdf,.epub,.mobi,.azw3,.djvu,.cbr,.cbz" style="display:none">
         <div id="cuarBody"></div>
       </section>
@@ -385,6 +388,7 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
 let FUENTES=[],sanCtx=null; // fuentes "buscar copia" (cacheadas) + depósito en curso de saneamiento
+let sanSel=new Set(),sanPoll=null; // ids seleccionados para procesar por lotes + timer de progreso
 const api=async(p,opt={})=>{const h={'Content-Type':'application/json',...(opt.headers||{})};
   if(TOKEN)h['Authorization']='Bearer '+TOKEN;
   const r=await fetch('/api'+p,{...opt,headers:h});
@@ -462,8 +466,8 @@ $('#vSwitch').onchange=async e=>{try{const r=await api('/vigilante',{method:'POS
 // ── cuarentena ──
 // Consulta de búsqueda de copia a partir del título / nombre de fichero del depósito.
 const consultaCopia=d=>{const base=d.titulo||(d.archivos&&d.archivos[0])||d.nombre||'';return base.replace(/\.[^.]+$/,'').replace(/_+/g,' ').replace(/\s+/g,' ').trim();};
-// Sube una copia sana y reemplaza el depósito (multipart; fetch propio para no forzar JSON).
-async function reemplazarSano(id,file){
+// Sube una copia sana y la PREPARA (no cataloga aún) en el depósito (multipart; fetch propio).
+async function prepararCopia(id,file){
   const fd=new FormData();fd.append('file',file);fd.append('id',id);
   const h={};if(TOKEN)h['Authorization']='Bearer '+TOKEN;
   const r=await fetch('/api/saneamiento/reemplazar',{method:'POST',headers:h,body:fd});
@@ -471,39 +475,72 @@ async function reemplazarSano(id,file){
   const t=await r.text();let j;try{j=t?JSON.parse(t):{}}catch{j={raw:t}}
   if(!r.ok&&!j.motivo)throw new Error(j.message||r.status);return j;
 }
+function actualizarBotonLote(){const n=sanSel.size,b=$('#sanProcesar');if(!b)return;
+  b.style.display=n?'inline-flex':'none';b.textContent=`▶ Procesar seleccionados (${n})`;}
 async function loadCuar(){try{
   if(!FUENTES.length){try{FUENTES=(await api('/saneamiento/fuentes')).fuentes||[];}catch{}}
   const c=await api('/cuarentena');const cats=Object.keys(c);
+  // Conservar selección solo de ids que sigan presentes y listos.
+  const listosIds=new Set();cats.forEach(k=>c[k].forEach(d=>{if(d.listo)listosIds.add(d.id);}));
+  sanSel=new Set([...sanSel].filter(id=>listosIds.has(id)));
   $('#cuarCount').textContent=cats.reduce((s,k)=>s+c[k].length,0)+' depósito(s)';
   $('#cuarBody').innerHTML=cats.length?cats.map(cat=>{const dup=cat==='duplicados';
-    return `<div class="card" style="margin-bottom:14px"><h3>${esc(cat)} · ${c[cat].length}${cat==='ilegibles'?` <span class="muted" style="font-weight:400;font-size:11px;text-transform:none;letter-spacing:0">· se arreglan con «Reemplazar» (copia sana), no reingestando</span>`:''}${dup?` <button class="btn admin-only" id="reproAllDup" style="float:right">♻ Reprocesar todos</button>`:''}</h3>
-    <table><tr><th>Título / archivo</th><th>Motivo</th><th></th></tr>${c[cat].map(d=>{const q=consultaCopia(d);
+    return `<div class="card" style="margin-bottom:14px"><h3>${esc(cat)} · ${c[cat].length}${cat==='ilegibles'?` <span class="muted" style="font-weight:400;font-size:11px;text-transform:none;letter-spacing:0">· sube una copia sana → queda «lista» → Procesar (en lote)</span>`:''}${dup?` <button class="btn admin-only" id="reproAllDup" style="float:right">♻ Reprocesar todos</button>`:''}</h3>
+    <table><tr><th></th><th>Título / archivo</th><th>Estado</th><th></th></tr>${c[cat].map(d=>{const q=consultaCopia(d);
       const links=(!dup&&FUENTES.length)?`<div class="buscar">🔎 copia: ${FUENTES.map(f=>`<a href="${esc(f.url.replace('{q}',encodeURIComponent(q)))}" target="_blank" rel="noopener">${esc(f.nombre)}</a>`).join(' · ')}</div>`:'';
-      return `<tr>
+      const chk=d.listo?`<input type="checkbox" class="admin-only" data-sel="${esc(d.id)}" ${sanSel.has(d.id)?'checked':''}>`:'';
+      const estado=dup?`<span class="muted">${esc(d.error||'—')}</span>`
+        :d.listo?`<span class="tag ok">✓ lista</span> <span class="muted mono" style="font-size:11px">${esc(d.reemplazo||'')}</span>${d.error_proceso?`<div class="tag bad" style="margin-top:4px">⛔ ${esc(d.error_proceso)}</div>`:''}`
+        :`<span class="muted">${esc(d.error||'—')}</span>`;
+      const acc=dup?`<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`
+        :d.listo?`<button class="btn pri admin-only" data-proc="${esc(d.id)}" title="Catalogar esta copia ya">▶ Procesar</button> <button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir otra copia">⤓ Cambiar</button>`
+        :`<button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir una copia sana (queda lista para procesar)">⤓ Reemplazar</button>${cat==='ilegibles'?'':` <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`}`;
+      return `<tr${d.listo?' style="background:rgba(40,217,168,.05)"':''}>
+      <td style="width:24px">${chk}</td>
       <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div>${links}</td>
-      <td class="muted">${esc(d.error||'—')}</td>
-      <td>${dup?`<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`:`<button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir una copia sana, catalogarla y retirar este depósito">⤓ Reemplazar</button>${cat==='ilegibles'?'':` <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`}`}</td></tr>`;}).join('')}</table></div>`;}).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
+      <td>${estado}</td>
+      <td style="text-align:right">${acc}</td></tr>`;}).join('')}</table></div>`;}).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
   $$('#cuarBody [data-re]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api('/cuarentena/reingestar',{method:'POST',body:JSON.stringify({id:b.dataset.re})});
     if(r.ok){toast(`Reingestados ${r.movidos}/${r.total} → Inbox`);loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}catch(e){toast(e.message,'bad');b.disabled=false;}});
   $$('#cuarBody [data-cmp]').forEach(b=>b.onclick=()=>abrirComparador(b.dataset.cmp));
   $$('#cuarBody [data-rep]').forEach(b=>b.onclick=()=>{sanCtx={id:b.dataset.rep};const inp=$('#sanFile');inp.value='';inp.click();});
+  $$('#cuarBody [data-proc]').forEach(b=>b.onclick=()=>procesarSaneados([b.dataset.proc]));
+  $$('#cuarBody [data-sel]').forEach(b=>b.onchange=()=>{b.checked?sanSel.add(b.dataset.sel):sanSel.delete(b.dataset.sel);actualizarBotonLote();});
+  actualizarBotonLote();
   if($('#reproAllDup'))$('#reproAllDup').onclick=async()=>{
     if(!confirm('Devuelve TODOS los duplicados al Inbox para re-evaluarlos con la lógica actual (los idénticos se borran, los de otro formato se separan, solo los conflictos reales vuelven). ¿Seguir?'))return;
     const b=$('#reproAllDup');b.disabled=true;
     try{const r=await api('/cuarentena/duplicados/reprocesar-todos',{method:'POST'});toast(`Reprocesando ${r.movidos} fichero(s) de ${r.depositos} depósito(s) → Inbox`);loadCuar();}
     catch(e){toast(e.message,'bad');b.disabled=false;}};
 }catch(e){toast(e.message,'bad');}}
-// Ventana de estado del saneamiento (reutiliza el overlay del comparador): feedback que NO se
-// desvanece, porque catalogar puede tardar (extracción + APIs) y antes no había pista visual.
-function modalEstado(html){$('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px">${html}</div>`;$('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';}
-// Selector de fichero para "Reemplazar" (un único input oculto, contexto en sanCtx).
+$('#sanProcesar').onclick=()=>procesarSaneados([...sanSel]);
+// Lanza el proceso por lotes (segundo plano) y sigue el progreso.
+async function procesarSaneados(ids){
+  if(!ids||!ids.length)return;
+  try{const r=await api('/saneamiento/procesar',{method:'POST',body:JSON.stringify({ids})});
+    if(!r.ok){toast(r.motivo||'no se pudo iniciar','warn');return;}
+    toast(`Procesando ${ids.length} copia(s) en segundo plano…`);seguirSaneamiento();
+  }catch(e){toast(e.message,'bad');}
+}
+function seguirSaneamiento(){if(sanPoll)clearInterval(sanPoll);
+  const pintar=s=>{const p=$('#sanProgreso');if(!p)return;
+    if(s.enCurso){p.style.display='inline';p.textContent=`⏳ Procesando ${s.hechos+s.fallos+1}/${s.total}…`;}
+    else p.style.display='none';};
+  const tick=async()=>{try{const s=await api('/saneamiento/estado');pintar(s);
+    if(!s.enCurso){clearInterval(sanPoll);sanPoll=null;
+      if(s.total)toast(`Saneamiento: ${s.hechos} catalogado(s)${s.fallos?` · ${s.fallos} fallo(s)`:''}`,s.fallos?'warn':'ok');
+      loadCuar();}
+  }catch{}};
+  sanPoll=setInterval(tick,2000);tick();
+}
+// Selector de fichero para "Reemplazar/Cambiar" → PREPARA la copia (no cataloga; eso es el lote).
 $('#sanFile').onchange=async e=>{const file=e.target.files&&e.target.files[0];const ctx=sanCtx;sanCtx=null;if(!file||!ctx)return;
   if(file.size<1024){toast(`Ese fichero parece vacío o dañado (${fmtBytes(file.size)}); elige otra copia`,'warn');return;}
-  modalEstado(`<h3 style="margin-top:0">⤓ Reemplazando…</h3><div class="muted">Subiendo y catalogando <b>${esc(file.name)}</b> (${fmtBytes(file.size)}).<br>Puede tardar (extracción de texto + APIs). No cierres esta ventana.</div>`);
-  try{const r=await reemplazarSano(ctx.id,file);
-    if(r.ok){modalEstado(`<h3 style="margin-top:0;color:var(--acc)">✅ Saneado</h3><div>Catalogado: <b>${esc(r.titulo||'documento')}</b> <span class="muted">(${esc(r.operacion||'')})</span>.<br>El depósito problemático se retiró a la Papelera.</div><div style="margin-top:16px;text-align:right"><button class="btn pri" id="okSan">Hecho</button></div>`);$('#okSan').onclick=()=>{cerrarCmp();loadCuar();};}
-    else{modalEstado(`<h3 style="margin-top:0;color:var(--warn)">⛔ No se pudo sanear</h3><div>${esc(r.motivo||'la copia no se pudo catalogar')}.<br><span class="muted">El depósito SIGUE en Cuarentena; prueba con otra copia.</span></div><div style="margin-top:16px;text-align:right"><button class="btn" id="okSan">Cerrar</button></div>`);$('#okSan').onclick=cerrarCmp;}
-  }catch(err){modalEstado(`<h3 style="margin-top:0;color:var(--bad)">⛔ Error de subida</h3><div>${esc(err.message)}</div><div style="margin-top:16px;text-align:right"><button class="btn" id="okSan">Cerrar</button></div>`);if($('#okSan'))$('#okSan').onclick=cerrarCmp;}};
+  toast(`Subiendo «${file.name}»…`);
+  try{const r=await prepararCopia(ctx.id,file);
+    if(r.ok){toast(`✓ Copia lista (${fmtBytes(r.bytes||file.size)}). Pulsa «Procesar» cuando quieras.`);loadCuar();}
+    else toast(r.motivo||'no se pudo preparar la copia','warn');
+  }catch(err){toast(err.message,'bad');}};
 
 // Comparador de duplicados: catalogado vs entrante, con la recomendación resaltada.
 function cerrarCmp(){$('#cmpScrim').style.display='none';$('#cmpModal').style.display='none';$('#cmpModal').innerHTML='';}
