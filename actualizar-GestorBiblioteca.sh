@@ -1,6 +1,7 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# actualizar-GestorBiblioteca.sh — Actualiza Gestor Biblioteca en el Synology desde main.
+# actualizar-GestorBiblioteca.sh — Actualiza Gestor Biblioteca en el Synology (main, o la rama
+# que pases como 1.er argumento, p. ej. para probar antes de fusionar).
 #
 # Colócalo en /volume1/docker/  (NO dentro de GestorBiblioteca, para que el
 # propio script no se sobrescriba durante el rsync) y ejecútalo así:
@@ -40,7 +41,12 @@ fi
 
 # --- Configuración --------------------------------------------------------
 REPO="Luix70/gestor-biblioteca"
-BRANCH="main"
+# Rama a desplegar: 1.er argumento, o la variable DEPLOY_BRANCH, o 'main' por defecto.
+#   sudo bash actualizar-GestorBiblioteca.sh                          → main (producción)
+#   sudo bash actualizar-GestorBiblioteca.sh feature/mi-rama          → esa rama (para PROBAR)
+# Aviso: desplegar una rama y luego volver a 'main' hace que rsync --delete retire del NAS
+# lo que solo estaba en la rama (es lo esperado: vuelves a producción).
+BRANCH="${1:-${DEPLOY_BRANCH:-main}}"
 APP_DIR="/volume1/docker/GestorBiblioteca"
 STAGE="/volume1/docker/.gestor-deploy-tmp"
 TARBALL_URL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.tar.gz"
