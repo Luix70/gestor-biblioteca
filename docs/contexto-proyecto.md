@@ -195,8 +195,10 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
     completa** (`GET /documentos/:id`): nombres **resueltos** desde las tablas auxiliares (autores,
     editorial, colección, **CDU + descripción** de `cdu_descripciones` — nunca ObjectIds; reutiliza
     `resolverNombres` y `sanitizarCDU`), **carrusel** de imágenes/portadas (scroll-snap, sin librería) y
-    **previsualización del fichero** servido en `/recursos`: PDF embebido en `<iframe>`, y abrir-en-pestaña
-    / descargar para epub/djvu/… (sin visor nativo en el navegador). El detalle es una página oculta
+    **previsualización del fichero** servido en `/recursos`: **PDF** embebido en `<iframe>` (nativo) y
+    **EPUB** con lector **epub.js** (vendored en `public/vendor/` + JSZip — sin CDN, se carga perezoso solo
+    al abrir un epub; respeta el "self-contained" del proyecto y funciona sin internet en el NAS); el resto
+    de formatos (djvu/mobi/cbr…) solo descarga/abrir. El detalle es una página oculta
     (`#p-detalle`, no en el menú) con pila de navegación (`detalle={tipo,id,ctx}`); `/recursos` es público
     (montado antes de la puerta `/api`), así que imágenes y ficheros cargan sin token.
   - **Búsqueda + catálogo** (`GET /catalogo`): página única que busca y navega TODO el catálogo (no solo
