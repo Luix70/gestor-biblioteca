@@ -28,6 +28,7 @@ export const AJUSTES = {
     VIGILANTE_POLL_MS: 1500,        // intervalo de sondeo de chokidar
     VIGILANTE_ESCANEO_MS: 10000,    // cada cuánto se reescanea el Inbox (red de seguridad del NAS)
     VIGILANTE_ESTABILIDAD_MS: 1500, // ventana para confirmar que un archivo terminó de escribirse
+    VIGILANTE_AUTOSTART: '0',       // '1' = arranca catalogando ya; por defecto arranca PAUSADO (se activa en el Panel)
     INBOX_HUERFANO_MS: 600000,      // tras este tiempo con 0 bytes → fantasma → Cuarentena (10 min)
 
     // --- Mantenimiento (Conformador) ---

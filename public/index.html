@@ -143,11 +143,22 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .filebox{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:22px;text-align:center}
 .filebox .ic{font-size:42px;margin-bottom:8px}
 .epubwrap{position:relative;width:100%;height:70vh;height:70svh;border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
-.epubwrap #epubArea{width:100%;height:100%}
+.epubwrap #epubArea{position:absolute;inset:0 0 40px 0}
 .epubwrap.full{position:fixed;inset:0;width:auto;height:auto;z-index:300;border:none;border-radius:0}
-.epubwrap .epubmsg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--mut);background:var(--card2)}
+.epubwrap .epubmsg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--mut);background:var(--card2);z-index:8}
 .epubfs{position:absolute;top:8px;right:8px;z-index:6;background:rgba(0,0,0,.5);border:1px solid var(--line);color:#fff;width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:15px;display:grid;place-items:center}
 .epubfs:hover{background:var(--acc);color:#04231b}
+.epubbar{position:absolute;left:0;right:0;bottom:0;height:40px;display:flex;align-items:center;gap:10px;padding:0 10px;background:var(--card2);border-top:1px solid var(--line);z-index:6}
+.epubbar button{background:none;border:none;color:var(--txt);cursor:pointer;font-size:16px;line-height:1;padding:4px 8px;border-radius:6px}
+.epubbar button:hover{background:var(--card);color:var(--acc)}
+.epubprog{flex:1;height:6px;background:var(--line);border-radius:4px;position:relative;cursor:pointer}
+.epubprog>i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));border-radius:4px}
+.epubpct{font-size:11px;color:var(--mut);min-width:48px;text-align:right;font-variant-numeric:tabular-nums}
+.epubtoc{position:absolute;top:0;left:0;bottom:40px;width:min(290px,82%);background:var(--card);border-right:1px solid var(--line);transform:translateX(-101%);transition:transform .2s ease;overflow:auto;z-index:7}
+.epubtoc.open{transform:none}
+.epubtoc a{display:block;padding:9px 14px;color:var(--txt);font-size:13px;text-decoration:none;border-bottom:1px solid var(--bg2)}
+.epubtoc a:hover{background:var(--card2);color:var(--acc)}
+.epubtoc a.sub{padding-left:30px;color:var(--mut);font-size:12px}
 /* auth */
 #login{position:fixed;inset:0;background:radial-gradient(900px 500px at 70% -10%,rgba(40,217,168,.10),transparent),var(--bg);display:none;place-items:center;z-index:200}
 #login.show{display:grid}
@@ -648,6 +659,12 @@ function previewArchivo(r){
     <div class="epubwrap" id="epubWrap"><div id="epubArea"></div>
       <button class="cnav prev" id="epubPrev" style="display:none">‹</button><button class="cnav next" id="epubNext" style="display:none">›</button>
       <button class="epubfs" id="epubFs" title="Pantalla completa" style="display:none">⛶</button>
+      <nav class="epubtoc" id="epubToc"></nav>
+      <div class="epubbar" id="epubBar" style="display:none">
+        <button id="epubTocBtn" title="Índice">☰</button>
+        <div class="epubprog" id="epubProg" title="Ir a una posición"><i></i></div>
+        <span class="epubpct" id="epubPct">—</span>
+      </div>
       <div class="epubmsg" id="epubMsg">Cargando lector…</div></div>${acc}</div>`;
   // Resto de formatos: sin vista previa integrada — solo descarga / abrir.
   const ic={djvu:'📘',mobi:'📙',azw3:'📙',cbr:'🗂️',cbz:'🗂️'}[ext]||'📦';
@@ -682,21 +699,49 @@ async function iniciarLectorEpub(url){
       'body':{'margin':'0 !important','padding':'0 !important'},
       'img,image,svg':{'max-width':'100% !important','max-height':'100% !important','object-fit':'contain'},
     });
-    // Clavar la altura del iframe al marco. epub.js a veces la reajusta al contenido (sobre todo
-    // tras un resize: maximizar/restaurar) → se re-clava en CADA render Y en CADA cambio de página
-    // ('relocated'), y siempre tras dos requestAnimationFrame (cuando el navegador ya recompuso).
+    // Clavar la altura del iframe al marco (epub.js a veces la reajusta al contenido); tras dos rAF.
     const fijar=()=>{const h=area.clientHeight;if(!h)return;const ifr=area.querySelector('iframe');if(ifr)ifr.style.height=h+'px';};
     const pin=()=>requestAnimationFrame(()=>requestAnimationFrame(fijar));
     epubRendition.on('rendered',pin);
-    epubRendition.on('relocated',pin);
     await epubRendition.display();
     pin();
     if(msg)msg.style.display='none';
-    const prev=$('#epubPrev'),next=$('#epubNext'),fs=$('#epubFs');
-    [prev,next,fs].forEach(b=>b.style.display='grid');
+    const prev=$('#epubPrev'),next=$('#epubNext'),fs=$('#epubFs'),bar=$('#epubBar');
+    [prev,next,fs].forEach(b=>b.style.display='grid');bar.style.display='flex';
     prev.onclick=()=>epubRendition.prev();next.onclick=()=>epubRendition.next();
-    // Re-mide el marco y re-encaja el render. Tras dos rAF para leer el tamaño YA recompuesto.
-    const refit=()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{const dd=dims();try{epubRendition.resize(dd.w,dd.h);}catch{};pin();}));
+
+    // Índice (tabla de contenidos).
+    book.loaded.navigation.then(nav=>{
+      const toc=$('#epubToc');if(!toc)return;const items=[];
+      const rec=(arr,sub)=>arr.forEach(it=>{items.push(`<a href="#" data-href="${esc(it.href)}"${sub?' class="sub"':''}>${esc((it.label||'').trim()||'—')}</a>`);if(it.subitems&&it.subitems.length)rec(it.subitems,true);});
+      rec(nav.toc||[],false);
+      toc.innerHTML=items.join('')||'<div class="muted" style="padding:14px">Sin índice</div>';
+      $$('#epubToc a[data-href]').forEach(a=>a.onclick=e=>{e.preventDefault();epubRendition.display(a.dataset.href);toc.classList.remove('open');});
+    }).catch(()=>{});
+    $('#epubTocBtn').onclick=()=>$('#epubToc').classList.toggle('open');
+
+    // Progreso (%). Las localizaciones se generan en segundo plano; hasta entonces, página/total.
+    let locsReady=false;
+    const progreso=(loc)=>{if(!loc){try{loc=epubRendition.currentLocation();}catch{return;}}if(!loc||!loc.start)return;
+      const bi=$('#epubProg>i'),pc=$('#epubPct');let pct=null;
+      if(locsReady){try{pct=book.locations.percentageFromCfi(loc.start.cfi);}catch{}}
+      if(pct!=null){if(bi)bi.style.width=Math.round(pct*100)+'%';if(pc)pc.textContent=Math.round(pct*100)+'%';}
+      else if(pc&&loc.start.displayed)pc.textContent=`${loc.start.displayed.page}/${loc.start.displayed.total}`;};
+    epubRendition.on('relocated',loc=>{pin();progreso(loc);});
+    book.ready.then(()=>book.locations.generate(1600)).then(()=>{locsReady=true;progreso();}).catch(()=>{});
+    $('#epubProg').onclick=e=>{if(!locsReady)return;const rc=e.currentTarget.getBoundingClientRect();
+      const p=Math.max(0,Math.min(1,(e.clientX-rc.left)/rc.width));try{epubRendition.display(book.locations.cfiFromPercentage(p));}catch{}};
+
+    // Re-encajar tras resize / pantalla completa: re-medir, redimensionar Y re-mostrar la posición
+    // actual (un display(cfi) fuerza un re-layout LIMPIO al nuevo tamaño — clave para que no quede
+    // "errático" al restaurar). Todo tras dos rAF, cuando el navegador ya recompuso el marco.
+    const refit=()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      if(!epubRendition)return;const dd=dims();let cfi=null;
+      try{const l=epubRendition.currentLocation();cfi=l&&l.start&&l.start.cfi;}catch{}
+      try{epubRendition.resize(dd.w,dd.h);}catch{}
+      if(cfi){try{epubRendition.display(cfi);}catch{}}
+      pin();
+    }));
     // Pantalla completa: overlay por CSS (NO la Fullscreen API — iOS Safari no la soporta en <div>).
     fs.onclick=()=>{const f=wrap.classList.toggle('full');fs.textContent=f?'✕':'⛶';
       fs.title=f?'Salir de pantalla completa':'Pantalla completa';refit();};

@@ -47,8 +47,15 @@ const upload = multer({
 const app = express();
 app.use(express.json());
 
-// Servir el catálogo (portadas e imágenes) como estático para el front-end.
-app.use('/recursos', express.static(DIR_CDU));
+// Servir el catálogo (portadas, imágenes y ficheros) como estático para el front-end.
+// Forzamos Content-Disposition: inline en los formatos que el navegador sabe mostrar (PDF, imágenes)
+// para que los PREVISUALICE en lugar de descargarlos (algunos navegadores de escritorio, sin esta
+// cabecera, descargan el PDF embebido). Los demás formatos se sirven tal cual (el front ofrece descarga).
+app.use('/recursos', express.static(DIR_CDU, {
+    setHeaders: (res, ruta) => {
+        if (/\.(pdf|jpe?g|png|webp|gif|svg)$/i.test(ruta)) res.setHeader('Content-Disposition', 'inline');
+    },
+}));
 
 // Panel de control (estático). La página y el login son públicos; los datos van por /api (protegido).
 app.use(express.static(DIR_PUBLIC));

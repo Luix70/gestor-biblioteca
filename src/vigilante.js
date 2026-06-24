@@ -49,7 +49,9 @@ const MANTENIMIENTO_REPOSO_MS = Number(process.env.MANTENIMIENTO_REPOSO_MS || 30
 let temporizador = null;
 let procesando = false;              // lock compartido: ingesta Y mantenimiento (nunca solapan)
 let mantManualEnCurso = false;       // bucle de mantenimiento manual en marcha (rondas paginadas)
-let vigilanteActivo = process.env.DESACTIVAR_VIGILANTE !== '1'; // pausa/reanuda el procesado del Inbox (panel)
+// Arranca PAUSADO por defecto: observa el Inbox pero NO cataloga hasta activarlo desde el Panel de
+// Control. VIGILANTE_AUTOSTART=1 lo arranca ya activo (comportamiento anterior).
+let vigilanteActivo = process.env.VIGILANTE_AUTOSTART === '1'; // pausa/reanuda el procesado del Inbox (panel)
 // ruta → timestamp (ms) de la primera vez que se vio el archivo con 0 bytes.
 // Si supera HUERFANO_TIMEOUT_MS el archivo se trata como transferencia fallida y va a Cuarentena.
 const huerfanosVistos = new Map();
@@ -650,6 +652,9 @@ export function estadoVigilante() {
 export async function iniciarVigilante() {
     await fs.mkdir(INBOX, { recursive: true }).catch(() => {});
     console.log(`👁️  Vigilante observando: ${INBOX}`);
+    console.log(vigilanteActivo
+        ? '   ▶️  Vigilante ACTIVO al arrancar (VIGILANTE_AUTOSTART=1).'
+        : '   ⏸️  Vigilante PAUSADO al arrancar: actívalo desde el Panel de Control (los ficheros esperan en el Inbox).');
     const sondeoMs = Number(process.env.VIGILANTE_POLL_MS || 1500);
     const watcher = chokidar.watch(INBOX, {
         ignoreInitial: false,
