@@ -752,8 +752,8 @@ async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();$('#t
 
 const CAMPOS_FICHA=[['subtitulo','Subtítulo'],['_autores','Autores'],['_editorial','Editorial'],['_coleccion','Colección'],
   ['año_edicion','Año'],['numero_edicion','Edición'],['idioma','Idioma'],['_formatos','Formatos'],['paginas','Páginas'],
-  ['isbn','ISBN'],['issn','ISSN'],['lccn','LCCN'],
-  ['volumen_numero','Volumen nº'],['volumen_titulo','Título del volumen'],['obra_titulo','Obra'],['isbn_obra','ISBN obra'],
+  ['_isbn','ISBN'],['_issn','ISSN'],['lccn','LCCN'],
+  ['volumen_numero','Volumen nº'],['volumen_titulo','Título del volumen'],['obra_titulo','Obra'],['_isbn_obra','ISBN obra'],
   ['coleccion_numero','Nº en colección'],['numero_issue','Número'],['mes_publicacion','Mes'],
   ['_estado','Estado'],['_ubicacion','Ubicación'],['nombre_archivo','Archivo'],['hash_contenido','Hash'],
   ['_ingreso','Ingresado'],['_actualizado','Actualizado']];
@@ -783,6 +783,16 @@ function irBusquedaFiltro(extra){
   if($('#sqQ'))$('#sqQ').value='';if($('#sqCdu'))$('#sqCdu').value='';
   go('search');
 }
+// Búsqueda por TEXTO libre (drill de ISSN/ISBN desde la ficha): pone la consulta en la caja y busca.
+function buscarTexto(q){
+  estadoBusqueda.extra=null;estadoBusqueda.page=1;
+  go('search');
+  if(!$('#sqQ'))construirSearch();
+  $('#sqQ').value=q;
+  if($('#sqCdu'))$('#sqCdu').value='';
+  if($('#sqTipo'))$('#sqTipo').value='';
+  buscarCatalogo(1);
+}
 function filtrarPorClasificacion(sist,cod){irBusquedaFiltro({clasSistema:sist,clasCodigo:cod,etiqueta:`${sist.toUpperCase()} ${cod}`});}
 function filtrarColeccion(id,nombre){irBusquedaFiltro({coleccion:id,etiqueta:`Colección: ${nombre}`});}
 function filtrarCatalogo(filtro,etiqueta){irBusquedaFiltro({filtro,etiqueta:etiqueta||filtro});}
@@ -806,6 +816,11 @@ function pintarDoc(r,ctx){
     _ingreso:d.fecha_ingreso?fmtFecha(d.fecha_ingreso):null,
     _actualizado:d.fecha_actualizacion?fmtFecha(d.fecha_actualizacion):null,
     obra_titulo:r.obra?`<a onclick="verObra('${esc(r.obra._id)}')" class="rowlink">${esc(r.obra.titulo||d.obra_titulo||'(obra)')}</a>`:(d.obra_titulo?esc(d.obra_titulo):null),
+    // Identificadores DRILLABLES: clic → Búsqueda por ese ISSN/ISBN (ve TODO lo que lo comparte — útil
+    // para destapar libros mal clasificados colgando de un ISSN de serie, o ediciones del mismo ISBN).
+    _issn:d.issn?`<a class="rowlink" data-q="${esc(d.issn)}" title="Ver todo lo que comparte este ISSN">${esc(d.issn)}</a>`:null,
+    _isbn:d.isbn?`<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a>`:null,
+    _isbn_obra:d.isbn_obra?`<a class="rowlink" data-q="${esc(d.isbn_obra)}" title="Ver todo lo que comparte este ISBN de obra">${esc(d.isbn_obra)}</a>`:null,
   };
   const valor=k=>{if(k in especiales)return especiales[k];let v=d[k];if(v==null||v===''||(Array.isArray(v)&&!v.length))return null;return esc(v);};
   const dl=CAMPOS_FICHA.map(([k,lab])=>{const v=valor(k);return v?`<dt>${lab}</dt><dd>${v}</dd>`:'';}).join('');
@@ -821,6 +836,7 @@ function pintarDoc(r,ctx){
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>filtrarColeccion(a.dataset.colid,a.dataset.colnom));
+  $$('#p-detalle [data-q]').forEach(a=>a.onclick=()=>buscarTexto(a.dataset.q));
   carIdx=0;const tr=$('#carTrack');
   if(tr&&tr.children.length>1)tr.onscroll=()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==carIdx){carIdx=i;const dd=$('#carDots');if(dd)dd.textContent=(i+1)+' / '+tr.children.length;}};
   const _nom=(r.nombre_archivo||'').toLowerCase();
