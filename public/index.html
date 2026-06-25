@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gestor Biblioteca · Panel</title>
+<title>Bibliotheca Ludoviciana · Panel</title>
 <style>
 :root{
   --bg:#0e1116; --bg2:#151a22; --card:#1a212c; --card2:#202938; --line:#2a3340;
@@ -20,9 +20,10 @@ a{color:inherit}
 .sidebar{width:var(--sb);background:linear-gradient(180deg,#141a23,#0f141b);border-right:1px solid var(--line);
   position:fixed;inset:0 auto 0 0;display:flex;flex-direction:column;z-index:30;transition:transform .25s ease}
 .brand{display:flex;align-items:center;gap:10px;padding:20px 18px;border-bottom:1px solid var(--line)}
-.brand .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--acc),var(--acc2));
+.brand .logo{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,var(--acc),var(--acc2));
   display:grid;place-items:center;font-size:18px;box-shadow:0 4px 14px rgba(40,217,168,.3)}
-.brand b{font-size:15px;letter-spacing:.2px}.brand small{display:block;color:var(--mut);font-size:11px;font-weight:400}
+.logo{position:relative;overflow:hidden}.logo .logoimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.brand b{font-size:14px;letter-spacing:.3px}.brand small{display:block;color:var(--mut);font-size:11px;font-weight:400}
 nav{padding:12px 10px;flex:1;overflow:auto}
 nav button{display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;color:var(--mut);
   padding:11px 13px;border-radius:10px;cursor:pointer;font-size:14px;text-align:left;transition:.15s;margin-bottom:2px}
@@ -183,7 +184,7 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 #login{position:fixed;inset:0;background:radial-gradient(900px 500px at 70% -10%,rgba(40,217,168,.10),transparent),var(--bg);display:none;place-items:center;z-index:200}
 #login.show{display:grid}
 .loginbox{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:34px 30px;width:330px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
-.loginbox .logo{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;font-size:28px;margin:0 auto 16px;box-shadow:0 8px 24px rgba(40,217,168,.35)}
+.loginbox .logo{width:84px;height:84px;border-radius:18px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;font-size:40px;margin:0 auto 16px;box-shadow:0 8px 24px rgba(40,217,168,.35)}
 .loginbox h2{text-align:center;font-size:19px}.loginbox p{text-align:center;color:var(--mut);font-size:12px;margin:2px 0 18px}
 .loginbox label{margin-top:12px}.loginbox .err{color:var(--bad);font-size:12px;text-align:center;margin-top:12px;min-height:16px}
 .loginbox .btn{width:100%;justify-content:center;margin-top:18px;padding:11px}
@@ -222,7 +223,7 @@ body.guest .admin-only{display:none!important}
 <body>
 <div class="layout">
   <aside class="sidebar" id="sidebar">
-    <div class="brand"><div class="logo">📚</div><div><b>Gestor Biblioteca</b><small>Panel de control</small></div></div>
+    <div class="brand"><div class="logo">📚<img class="logoimg" src="/logo.png" alt="" onerror="this.remove()"></div><div><b>Bibliotheca Ludoviciana</b><small>Panel de control</small></div></div>
     <nav id="nav">
       <button data-p="dashboard" class="on"><span class="ic">▥</span> Dashboard</button>
       <button data-p="activity"><span class="ic">📡</span> Actividad</button>
@@ -373,8 +374,8 @@ body.guest .admin-only{display:none!important}
 
 <div id="login">
   <form class="loginbox" id="loginForm">
-    <div class="logo">📚</div>
-    <h2>Gestor Biblioteca</h2><p>Panel de control · acceso</p>
+    <div class="logo">📚<img class="logoimg" src="/logo.png" alt="" onerror="this.remove()"></div>
+    <h2>Bibliotheca Ludoviciana</h2><p>Panel de control · acceso</p>
     <label>Usuario</label><input id="lgUser" autocomplete="username" placeholder="Luis o guest">
     <label>Contraseña</label><input id="lgPass" type="password" autocomplete="current-password">
     <button class="btn pri" type="submit">Entrar</button>
@@ -764,6 +765,7 @@ function irBusquedaFiltro(extra){
   go('search');
 }
 function filtrarPorClasificacion(sist,cod){irBusquedaFiltro({clasSistema:sist,clasCodigo:cod,etiqueta:`${sist.toUpperCase()} ${cod}`});}
+function filtrarColeccion(id,nombre){irBusquedaFiltro({coleccion:id,etiqueta:`Colección: ${nombre}`});}
 function filtrarCatalogo(filtro,etiqueta){irBusquedaFiltro({filtro,etiqueta:etiqueta||filtro});}
 function filtrarPorDia(dia){irBusquedaFiltro({dia,etiqueta:`Ingresados el ${dia}`});}
 
@@ -778,7 +780,7 @@ function pintarDoc(r,ctx){
   const especiales={
     _autores:r.autores&&r.autores.length?r.autores.map(esc).join(', '):null,
     _editorial:r.editorial?esc(r.editorial):null,
-    _coleccion:r.coleccion?esc(r.coleccion)+(d.coleccion_numero?` · nº ${esc(d.coleccion_numero)}`:''):null,
+    _coleccion:r.coleccion?((r.coleccion_id?`<a class="rowlink" data-colid="${esc(r.coleccion_id)}" data-colnom="${esc(r.coleccion)}">${esc(r.coleccion)}</a>`:esc(r.coleccion))+(d.coleccion_numero?` · nº ${esc(d.coleccion_numero)}`:'')):null,
     _formatos:(d.formatos||[]).length?d.formatos.map(f=>`<span class="fmt">${esc(f)}</span>`).join(''):null,
     _estado:d.estado_verificacion?`<span class="tag ${d.estado_verificacion==='completado'?'ok':'warn'}">${esc(d.estado_verificacion)}</span>`:null,
     _ubicacion:d.ubicacion?(esc([d.ubicacion.ambito,d.ubicacion.estanteria].filter(Boolean).join(' · '))||null):null,
@@ -799,6 +801,7 @@ function pintarDoc(r,ctx){
   $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
+  $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>filtrarColeccion(a.dataset.colid,a.dataset.colnom));
   carIdx=0;const tr=$('#carTrack');
   if(tr&&tr.children.length>1)tr.onscroll=()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==carIdx){carIdx=i;const dd=$('#carDots');if(dd)dd.textContent=(i+1)+' / '+tr.children.length;}};
   const _nom=(r.nombre_archivo||'').toLowerCase();

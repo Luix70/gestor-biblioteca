@@ -237,6 +237,9 @@ export function rutasPanel() {
             const clasSistema = String(req.query.clasSistema || '').toLowerCase();
             const clasCodigo = String(req.query.clasCodigo || '').trim();
             if (['cdu', 'dewey', 'lcc'].includes(clasSistema) && clasCodigo) match[clasSistema] = clasCodigo;
+            // Filtro por colección (clic en la colección desde la ficha).
+            const colId = String(req.query.coleccion || '').trim();
+            if (colId && ObjectId.isValid(colId)) match.coleccion = new ObjectId(colId);
             if (q) {
                 const rx = { $regex: escapeRegex(q), $options: 'i' };
                 const or = [{ titulo: rx }, { subtitulo: rx }, { obra_titulo: rx },
@@ -360,6 +363,7 @@ export function rutasPanel() {
 
             res.json({
                 ok: true, doc: limpio, autores, editorial, coleccion,
+                coleccion_id: doc.coleccion ? String(doc.coleccion) : null,
                 cdu_desc: cdesc, clasificaciones, obra,
                 archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
                 imagenes: doc.imagenes || [], portada: doc.portada || null,
