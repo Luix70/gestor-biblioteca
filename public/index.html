@@ -192,12 +192,16 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .loginbox{position:relative;z-index:1;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:0;width:330px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
 .loginbanner{display:block;width:100%;height:150px;object-fit:cover}
 /* Cuerpo del login: cuadrado 1:1 con Placa2 como fondo (se muestra entera) y los controles centrados. */
-.loginbody{position:relative;width:100%;aspect-ratio:1/1;background:#0a0d12 url('/Placa2.png') center/cover no-repeat;display:flex;flex-direction:column;justify-content:center;gap:9px;padding:26px}
-.loginbody .loginlbl{text-align:center;text-transform:uppercase;letter-spacing:1.5px;font-size:12px;color:#efe9da;margin:0 0 -3px;text-shadow:0 1px 4px #000,0 0 3px #000}
-.loginbody select,.loginbody input{background:rgba(8,11,16,.72);border-color:rgba(255,255,255,.14);color:#fff}
-.loginbody select:focus,.loginbody input:focus{border-color:var(--acc);background:rgba(8,11,16,.86)}
-.loginbody select option{background:#12161d;color:#fff} /* lista nativa legible (no blanco sobre blanco) */
-.loginbody .btn{margin-top:6px}
+/* Controles ESTRECHOS y centrados (caben en el círculo interior del sello, dejando legible la
+   inscripción) y de aspecto CLÁSICO (serif, bronce, esquinas poco redondeadas) a juego con la placa. */
+.loginbody{position:relative;width:100%;aspect-ratio:1/1;background:#0a0d12 url('/Placa2.png') center/cover no-repeat;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:26px}
+.loginbody .loginlbl{width:100%;text-align:center;text-transform:uppercase;letter-spacing:2px;font-size:12px;font-family:Georgia,'Times New Roman',serif;color:#f3e9d2;margin:0 0 -2px;text-shadow:0 1px 4px #000,0 0 3px #000}
+.loginbody select,.loginbody input,.loginbody .btn{width:62%;max-width:200px;min-width:150px;border-radius:3px;font-family:Georgia,'Times New Roman',serif}
+.loginbody select,.loginbody input{background:rgba(28,22,14,.82);border:1px solid #8a6e44;color:#f3e9d2;text-align:center}
+.loginbody select:focus,.loginbody input:focus{border-color:#d4b878;background:rgba(28,22,14,.94);outline:none}
+.loginbody select option{background:#1c160e;color:#f3e9d2;text-align:center}
+.loginbody .btn{margin-top:9px;padding:9px;background:linear-gradient(#cdab6c,#9c7a44);border:1px solid #6e5226;color:#2a1d0e;font-weight:700;text-transform:uppercase;letter-spacing:2px;box-shadow:0 2px 7px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.35)}
+.loginbody .btn:hover{filter:brightness(1.07);border-color:#8a6e44}
 .loginbox .err{color:var(--bad);font-size:12px;text-align:center;min-height:16px;text-shadow:0 1px 3px #000}
 .loginbox .btn{width:100%;justify-content:center;padding:11px}
 .userbox{display:flex;align-items:center;gap:8px}.userbox .who{font-size:12px;color:var(--mut)}
