@@ -56,7 +56,8 @@ app.use((req, res, next) => {
     const auth = req.headers.authorization;
     if (auth && auth.startsWith('Basic ') && !(req.headers.cookie || '').includes('panel_token=')) {
         const r = loginBasic(auth);
-        if (r) res.cookie('panel_token', r.token, { maxAge: 600000, path: '/', sameSite: 'lax' });
+        if (r) { res.cookie('panel_token', r.token, { maxAge: 600000, path: '/', sameSite: 'lax' }); console.log(`🔑 Auto-login por URL: ${r.usuario} (${r.rol}).`); }
+        else console.warn('🔑 Auto-login por URL: cabecera Basic recibida pero credenciales inválidas.');
     }
     next();
 });

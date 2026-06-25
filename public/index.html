@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bibliotheca Ludoviciana · Panel</title>
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
 <style>
 :root{
   --bg:#0e1116; --bg2:#151a22; --card:#1a212c; --card2:#202938; --line:#2a3340;
@@ -23,9 +25,9 @@ a{color:inherit}
 .sidebar{width:var(--sb);background:linear-gradient(180deg,#141a23,#0f141b);border-right:1px solid var(--line);
   position:fixed;inset:0 auto 0 0;display:flex;flex-direction:column;z-index:30;transition:transform .25s ease}
 .brand{display:flex;align-items:center;gap:10px;padding:20px 18px;border-bottom:1px solid var(--line)}
-.brand .logo{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,var(--acc),var(--acc2));
-  display:grid;place-items:center;font-size:18px;box-shadow:0 4px 14px rgba(40,217,168,.3)}
-.logo{position:relative;overflow:hidden}.logo .logoimg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.brand .logo{width:40px;height:40px;display:grid;place-items:center;font-size:18px}
+/* El logo (con transparencia) se muestra tal cual: sin color/placeholder de fondo. */
+.logo{position:relative;background:transparent!important;box-shadow:none!important}.logo .logoimg{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 .brand b{font-size:14px;letter-spacing:.3px}.brand small{display:block;color:var(--mut);font-size:11px;font-weight:400}
 nav{padding:12px 10px;flex:1;overflow:auto}
 nav button{display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;color:var(--mut);
@@ -194,6 +196,7 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .loginbody .loginlbl{text-align:center;text-transform:uppercase;letter-spacing:1.5px;font-size:12px;color:#efe9da;margin:0 0 -3px;text-shadow:0 1px 4px #000,0 0 3px #000}
 .loginbody select,.loginbody input{background:rgba(8,11,16,.72);border-color:rgba(255,255,255,.14);color:#fff}
 .loginbody select:focus,.loginbody input:focus{border-color:var(--acc);background:rgba(8,11,16,.86)}
+.loginbody select option{background:#12161d;color:#fff} /* lista nativa legible (no blanco sobre blanco) */
 .loginbody .btn{margin-top:6px}
 .loginbox .err{color:var(--bad);font-size:12px;text-align:center;min-height:16px;text-shadow:0 1px 3px #000}
 .loginbox .btn{width:100%;justify-content:center;padding:11px}
@@ -1107,7 +1110,10 @@ $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent=''
 $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};mostrarLogin();};
 // sesión inicial: token guardado, o el sembrado por auto-login de URL (cookie), o mostrar el login
 (async()=>{
-  if(!TOKEN){const ck=tokenDeCookie();if(ck){TOKEN=ck;localStorage.setItem('panel_token',TOKEN);limpiarCookieToken();}}
+  // El auto-login por URL (cookie sembrada por la cabecera Basic) tiene PRIORIDAD sobre un token
+  // viejo de localStorage: si llega una cookie nueva, se usa esa (antes solo se miraba si NO había token).
+  const ck=tokenDeCookie();
+  if(ck){TOKEN=ck;localStorage.setItem('panel_token',TOKEN);limpiarCookieToken();}
   if(!TOKEN)return mostrarLogin();
   try{const me=await fetch('/api/yo',{headers:{'Authorization':'Bearer '+TOKEN}}).then(r=>r.json());
     if(me&&me.rol){USER=me.usuario;ROL=me.rol;arrancar();}else mostrarLogin();
