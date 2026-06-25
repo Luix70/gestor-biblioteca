@@ -23,6 +23,11 @@ export function esTituloArtefacto(s) {
     if (/^[a-z]:[\\/]?/i.test(t) && /\.[a-z0-9]{2,4}$/i.test(t)) return true; // "C:…algo.ext" (ruta Windows)
     if (/^microsoft\s+(word|powerpoint|excel|publisher)\b/i.test(t)) return true; // "Microsoft Word - documento1"
     if (/^(untitled|sin\s*t[íi]tulo|documento?\s*\d*|document\s*\d+|presentaci[óo]n\s*\d*)$/i.test(t)) return true;
+    if (/https?:\/\//i.test(t)) return true;                        // un título no lleva una URL → artefacto
+    // Marca del PRODUCTOR del PDF grabada como "título" (no es un título): herramientas de creación/
+    // reparación/conversión. Casos reales: "Creator_ Advanced PDF Repair at http://www.datanumen.com/apdfr/",
+    // "Creator_ PScript5.dll Version 5.2.2".
+    if (/\b(advanced\s+pdf\s+repair|datanumen|pscript\d?\.dll|acrobat\s+distiller|ghostscript|quartz\s*pdf|pdfcreator|primopdf|nitro\s*pro|dvipsone|dvips|pdftex|xetex|miktex|tex\s+output|aspose|itext|prince\s*xml|apache\s+fop)\b/i.test(t)) return true;
     return false;
 }
 

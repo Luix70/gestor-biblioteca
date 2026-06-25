@@ -170,8 +170,11 @@ export async function procesarRecurso(entrada) {
             throw new ErrorRecursoIlegible(`PDF ilegible (estructura dañada): ${path.basename(rutas[0])}. Requiere una copia mejor.`);
         }
         // Señales de revista: prefijo de fecha ISO en nombre (esFechada), ISSN encontrado en
-        // el texto, o título con patrones de publicación periódica.
-        tipo_recurso = (datosBase.esFechada || datosBase.issn || pareceRevista(datosBase.titulo))
+        // el texto, o título con patrones de publicación periódica. PERO un ISBN propio MANDA: es un
+        // LIBRO, aunque lleve un ISSN DE SERIE (p. ej. monografías Springer con su «Lecture Notes…»
+        // ISSN). El ISSN solo vota «revista» cuando NO hay ISBN; la fecha/el título de revista sí
+        // mantienen su voto (una publicación periódica fechada es revista aunque traiga ISBN por número).
+        tipo_recurso = (datosBase.esFechada || pareceRevista(datosBase.titulo) || (datosBase.issn && !datosBase.isbn))
             ? 'revista' : 'libro';
         isbnDelArchivo = !!datosBase.isbn; // ISBN leído del propio PDF (fiable)
 
