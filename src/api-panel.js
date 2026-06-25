@@ -240,8 +240,8 @@ export function rutasPanel() {
     });
 
     // Búsqueda + navegación del catálogo (página "Búsqueda"). Sin `q` = navegar todo (recientes).
-    // Filtros: q (título/subtítulo/obra/colección/palabras_clave/ISBN/ISSN + autor/editorial por
-    // nombre), tipo (libro|revista), cdu (prefijo), orden (reciente|titulo|antiguo). Paginado (24).
+    // Filtros: q (título/subtítulo/obra/colección/palabras_clave/nombre_archivo/ISBN/ISSN + autor/editorial
+    // por nombre), tipo (libro|revista), cdu (prefijo), orden (reciente|titulo|antiguo). Paginado (24).
     // Devuelve fichas mínimas con autores ya resueltos (vía $lookup) para pintar tarjetas con portada.
     r.get('/catalogo', async (req, res) => {
         try {
@@ -266,10 +266,12 @@ export function rutasPanel() {
             if (q) {
                 const rx = { $regex: escapeRegex(q), $options: 'i' };
                 const or = [{ titulo: rx }, { subtitulo: rx }, { obra_titulo: rx },
-                    { coleccion_nombre: rx }, { palabras_clave: rx }];
-                const qIsbn = q.replace(/[^0-9Xx]/g, '');
-                if (qIsbn.length >= 8) {
-                    const irx = { $regex: '^' + qIsbn };
+                    { coleccion_nombre: rx }, { palabras_clave: rx }, { nombre_archivo: rx }];
+                // Identificadores: el ISSN se guarda CON guion (1699-7913) y el ISBN sin él. Toleramos
+                // separadores (guion/espacio) entre los dígitos para encontrarlo se escriba como se escriba.
+                const qId = q.replace(/[^0-9Xx]/g, '');
+                if (qId.length >= 8) {
+                    const irx = { $regex: '^' + qId.split('').join('[\\s-]?'), $options: 'i' };
                     or.push({ isbn: irx }, { issn: irx }, { isbn_obra: irx });
                 }
                 const [autores, edits] = await Promise.all([
