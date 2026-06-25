@@ -20,7 +20,7 @@ import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoCon
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
-import { login, logout, validar, autenticar, tokenDe } from './auth.js';
+import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -48,6 +48,19 @@ const upload = multer({
 const app = express();
 app.use(express.json());
 
+// AUTO-LOGIN POR URL (https://user:pwd@host): el navegador manda esas credenciales como cabecera
+// `Authorization: Basic` en la carga de la página. Las validamos y, si son correctas, sembramos una
+// cookie `panel_token` (legible por JS, breve) que el panel recoge al cargar. Se omite si ya hay
+// cookie (la cabecera Basic llega en cada petición; no re-mintear). El token real va luego por Bearer.
+app.use((req, res, next) => {
+    const auth = req.headers.authorization;
+    if (auth && auth.startsWith('Basic ') && !(req.headers.cookie || '').includes('panel_token=')) {
+        const r = loginBasic(auth);
+        if (r) res.cookie('panel_token', r.token, { maxAge: 600000, path: '/', sameSite: 'lax' });
+    }
+    next();
+});
+
 // Servir el catálogo (portadas, imágenes y ficheros) como estático para el front-end.
 // Forzamos Content-Disposition: inline en los formatos que el navegador sabe mostrar (PDF, imágenes)
 // para que los PREVISUALICE en lugar de descargarlos (algunos navegadores de escritorio, sin esta
@@ -71,6 +84,8 @@ app.post('/api/login', (req, res) => {
 });
 app.get('/api/yo', (req, res) => res.json(validar(tokenDe(req)) || { rol: null }));
 app.post('/api/logout', (req, res) => { logout(tokenDe(req)); res.json({ ok: true }); });
+// Lista de usuarios (SIN contraseñas) para el desplegable del login. Público (antes de la puerta).
+app.get('/api/usuarios', (req, res) => res.json({ usuarios: listarUsuarios() }));
 app.use('/api', autenticar); // todo lo que sigue bajo /api exige sesión
 
 // Rutas de operación del panel (protegidas por la puerta anterior).

@@ -30,7 +30,8 @@ export async function ejecutarMantenimiento({ debeAbortar = async () => false } 
     try { db = await conectarDB(); } catch { return { revisados: 0, cambios: 0, pendientes: -1, abortado: true }; }
     const col = db.collection('biblioteca');
 
-    const docs = await col.find({ mantenimiento_firma: { $ne: FIRMA } }).limit(LOTE).toArray();
+    // `locked` = fijado por intervención humana → el Conformador NO lo toca (ni lo cuenta como pendiente).
+    const docs = await col.find({ mantenimiento_firma: { $ne: FIRMA }, locked: { $ne: true } }).limit(LOTE).toArray();
     if (!docs.length) return { revisados: 0, cambios: 0, pendientes: 0, abortado: false };
 
     console.log(`🧹 [Mantenimiento] Conformando hasta ${docs.length} documento(s)...`);
@@ -78,7 +79,7 @@ export async function ejecutarMantenimiento({ debeAbortar = async () => false } 
         await new Promise(r => setTimeout(r, PAUSA_MS));
     }
 
-    const pendientes = await col.countDocuments({ mantenimiento_firma: { $ne: FIRMA } });
+    const pendientes = await col.countDocuments({ mantenimiento_firma: { $ne: FIRMA }, locked: { $ne: true } });
     console.log(`🧹 [Mantenimiento] Lote: ${revisados} revisados · ${cambios} cambios · ${pendientes} pendientes.`);
     return { revisados, cambios, pendientes, abortado: false };
 }

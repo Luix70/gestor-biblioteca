@@ -187,12 +187,12 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 #login{position:fixed;inset:0;background:transparent;display:none;place-items:center;z-index:200}
 #login::before{content:"";position:absolute;inset:-16px;z-index:0;background:url('/Background.jpg') center/cover no-repeat;filter:saturate(.5) blur(4px)}
 #login.show{display:grid}
-.loginbox{position:relative;z-index:1;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:34px 30px;width:330px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
-.loginbanner{display:block;width:calc(100% + 60px);height:140px;object-fit:cover;margin:-34px -30px 18px -30px}
-.loginbox .logo{width:84px;height:84px;border-radius:18px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;font-size:40px;margin:0 auto 16px;box-shadow:0 8px 24px rgba(40,217,168,.35)}
-.loginbox h2{text-align:center;font-size:19px}.loginbox p{text-align:center;color:var(--mut);font-size:12px;margin:2px 0 18px}
-.loginbox label{margin-top:12px}.loginbox .err{color:var(--bad);font-size:12px;text-align:center;margin-top:12px;min-height:16px}
-.loginbox .btn{width:100%;justify-content:center;margin-top:18px;padding:11px}
+.loginbox{position:relative;z-index:1;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:0;width:330px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+.loginbanner{display:block;width:100%;height:150px;object-fit:cover}
+/* Cuerpo del login: cuadrado 1:1 con Placa2 como fondo (se muestra entera) y los controles centrados. */
+.loginbody{position:relative;width:100%;aspect-ratio:1/1;background:#0a0d12 url('/Placa2.png') center/cover no-repeat;display:flex;flex-direction:column;justify-content:center;gap:11px;padding:26px}
+.loginbox .err{color:var(--bad);font-size:12px;text-align:center;min-height:16px;text-shadow:0 1px 3px #000}
+.loginbox .btn{width:100%;justify-content:center;padding:11px}
 .userbox{display:flex;align-items:center;gap:8px}.userbox .who{font-size:12px;color:var(--mut)}
 .rol{font-size:10px;padding:2px 7px;border-radius:6px;font-weight:700;text-transform:uppercase}
 .rol.admin{background:rgba(40,217,168,.16);color:var(--acc)}.rol.guest{background:var(--card2);color:var(--mut)}
@@ -380,12 +380,12 @@ body.guest .admin-only{display:none!important}
 <div id="login">
   <form class="loginbox" id="loginForm">
     <img class="loginbanner" src="/Banner.png" alt="" onerror="this.remove()">
-    <div class="logo">📚<img class="logoimg" src="/LogoBig.png" alt="" onerror="this.remove()"></div>
-    <h2>Bibliotheca Ludoviciana</h2><p>Panel de control · acceso</p>
-    <label>Usuario</label><input id="lgUser" autocomplete="username" placeholder="Luis o guest">
-    <label>Contraseña</label><input id="lgPass" type="password" autocomplete="current-password">
-    <button class="btn pri" type="submit">Entrar</button>
-    <div class="err" id="lgErr"></div>
+    <div class="loginbody">
+      <select id="lgUser" autocomplete="username"></select>
+      <input id="lgPass" type="password" autocomplete="current-password" placeholder="Contraseña">
+      <button class="btn pri" type="submit">Entrar</button>
+      <div class="err" id="lgErr"></div>
+    </div>
   </form>
 </div>
 <div id="toast"></div>
@@ -803,7 +803,7 @@ function pintarDoc(r,ctx){
   const imgs=(r.imagenes&&r.imagenes.length)?r.imagenes:(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]);
   const carrusel=imgs.length?`<div class="carousel"><div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(im.ruta)}" loading="lazy" onclick="window.open('${esc(im.ruta)}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:'<div class="filebox"><div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>';
   const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
-    <div class="det-title"><h2>${esc(d.titulo||'(sin título)')}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div></div></div>`;
+    <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div></div></div>`;
   $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
@@ -1023,12 +1023,14 @@ function pintarChipClas(){const el=$('#searchChip');if(!el)return;
   if(estadoBusqueda.extra&&estadoBusqueda.extra.etiqueta){el.innerHTML=`<span class="clasfilt">Filtro: <b>${esc(estadoBusqueda.extra.etiqueta)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>`;
     $('#clasX').onclick=()=>{estadoBusqueda.extra=null;buscarCatalogo(1);};}
   else el.innerHTML='';}
+// Distintivos de admin: 🔞 NSFW (oculto a invitados) y 🔒 bloqueado (el Conformador no lo altera).
+const badgesDoc=d=>`${d.nsfw?' <span class="fmt" style="background:rgba(255,92,122,.18);color:var(--bad)" title="NSFW: oculto a invitados">🔞</span>':''}${d.locked?' <span class="fmt" style="background:rgba(255,180,84,.18);color:var(--warn)" title="Bloqueado: el Conformador no lo altera">🔒</span>':''}`;
 function docCard(d){
   const ph=d.tipo_recurso==='revista'?'📰':'📕';
   const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`:`<div class="ph">${ph}</div>`;
   const fmt=(d.formatos||[]).slice(0,2).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
   const sub=(d.autores&&d.autores.length?d.autores.slice(0,2).join(', '):'')||(d.año_edicion?String(d.año_edicion):'')||d.isbn||'—';
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}</div><div class="t">${esc(sub)}</div></div></div>`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div></div></div>`;
 }
 function pintarBusqueda(r){
   $('#searchCount').textContent=`${r.total.toLocaleString('es-ES')} resultado${r.total===1?'':'s'}`;
@@ -1083,7 +1085,12 @@ const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:l
 
 // ── auth ──
 let estadoTimer=null;
-function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
+// Rellena el desplegable de usuarios del login (sin contraseñas; de /api/usuarios).
+async function cargarUsuariosLogin(){try{const r=await fetch('/api/usuarios').then(x=>x.json());const sel=$('#lgUser');if(!sel)return;
+  sel.innerHTML=(r.usuarios||[]).map(u=>`<option value="${esc(u.user)}">${esc(u.user)}${u.rol==='admin'?' · admin':''}</option>`).join('')||'<option value="">—</option>';}catch{}}
+const tokenDeCookie=()=>{const m=document.cookie.match(/(?:^|;\s*)panel_token=([^;]+)/);return m?decodeURIComponent(m[1]):'';};
+const limpiarCookieToken=()=>{document.cookie='panel_token=; Max-Age=0; path=/';};
+function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
 function arrancar(){$('#login').classList.remove('show');aplicarRol();go('dashboard');refrescarEstado();loadDashboard();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
@@ -1092,8 +1099,10 @@ $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent=''
     TOKEN=j.token;USER=j.usuario;ROL=j.rol;localStorage.setItem('panel_token',TOKEN);$('#lgPass').value='';arrancar();
   }catch(err){$('#lgErr').textContent=err.message;}};
 $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};mostrarLogin();};
-// sesión inicial: valida el token guardado o muestra el login
-(async()=>{if(!TOKEN)return mostrarLogin();
+// sesión inicial: token guardado, o el sembrado por auto-login de URL (cookie), o mostrar el login
+(async()=>{
+  if(!TOKEN){const ck=tokenDeCookie();if(ck){TOKEN=ck;localStorage.setItem('panel_token',TOKEN);limpiarCookieToken();}}
+  if(!TOKEN)return mostrarLogin();
   try{const me=await fetch('/api/yo',{headers:{'Authorization':'Bearer '+TOKEN}}).then(r=>r.json());
     if(me&&me.rol){USER=me.usuario;ROL=me.rol;arrancar();}else mostrarLogin();
   }catch{mostrarLogin();}})();

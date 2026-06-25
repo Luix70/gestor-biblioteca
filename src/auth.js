@@ -18,6 +18,27 @@ const TTL_MS = Number(process.env.PANEL_SESION_MS || 12 * 3600 * 1000); // 12 h
 
 const sesiones = new Map(); // token → { user, role, exp }
 
+// Usuarios: legacy (admin "Luis" + "guest") + PANEL_USERS del .env (JSON [{user,rol,pwd}]). NO hay
+// alta/recuperación por UI: se editan en el .env (pocos usuarios, admin o guest). PANEL_USERS sobrescribe
+// por nombre, así que se puede redefinir "Luis"/"guest" o añadir nuevos.
+function cargarUsuarios() {
+    const lista = [];
+    if (ADMIN_PASS) lista.push({ user: ADMIN_USER, rol: 'admin', pwd: ADMIN_PASS });
+    lista.push({ user: GUEST_USER, rol: 'guest', pwd: GUEST_PASS });
+    try {
+        const extra = JSON.parse(process.env.PANEL_USERS || '');
+        if (Array.isArray(extra)) for (const u of extra) {
+            if (!u || !u.user || !u.pwd) continue;
+            const rol = u.rol === 'admin' ? 'admin' : 'guest';
+            const i = lista.findIndex(x => x.user === u.user);
+            if (i >= 0) lista[i] = { user: u.user, rol, pwd: String(u.pwd) };
+            else lista.push({ user: u.user, rol, pwd: String(u.pwd) });
+        }
+    } catch { /* PANEL_USERS mal formado → se ignora */ }
+    return lista;
+}
+const USUARIOS = cargarUsuarios();
+
 /** Comparación en tiempo constante (evita fugas por temporización en la contraseña). */
 function igual(a, b) {
     const ba = Buffer.from(String(a)), bb = Buffer.from(String(b));
@@ -25,13 +46,24 @@ function igual(a, b) {
 }
 
 export function login(usuario, password) {
-    let role = null;
-    if (ADMIN_PASS && usuario === ADMIN_USER && igual(password, ADMIN_PASS)) role = 'admin';
-    else if (usuario === GUEST_USER && igual(password, GUEST_PASS)) role = 'guest';
-    if (!role) return null;
+    const u = USUARIOS.find(x => x.user === usuario);
+    if (!u || !u.pwd || !igual(password, u.pwd)) return null;
     const token = crypto.randomBytes(24).toString('hex');
-    sesiones.set(token, { user: usuario, role, exp: Date.now() + TTL_MS });
-    return { token, usuario, rol: role };
+    sesiones.set(token, { user: u.user, role: u.rol, exp: Date.now() + TTL_MS });
+    return { token, usuario: u.user, rol: u.rol };
+}
+
+/** Lista de usuarios para el desplegable del login (SIN contraseñas). */
+export function listarUsuarios() {
+    return USUARIOS.map(u => ({ user: u.user, rol: u.rol }));
+}
+
+/** Auto-login por credenciales en la URL (https://user:pwd@host): valida la cabecera Basic → sesión. */
+export function loginBasic(authHeader) {
+    if (!authHeader || !authHeader.startsWith('Basic ')) return null;
+    let dec; try { dec = Buffer.from(authHeader.slice(6), 'base64').toString('utf8'); } catch { return null; }
+    const i = dec.indexOf(':');
+    return i < 0 ? null : login(dec.slice(0, i), dec.slice(i + 1));
 }
 
 export function validar(token) {
@@ -43,9 +75,9 @@ export function validar(token) {
 
 export function logout(token) { if (token) sesiones.delete(token); }
 
-/** Verifica una contraseña contra la del administrador (re-confirmación para acciones destructivas). */
+/** Verifica una contraseña contra la de CUALQUIER admin (re-confirmación de acciones destructivas). */
 export function verificarPasswordAdmin(password) {
-    return !!ADMIN_PASS && igual(password, ADMIN_PASS);
+    return USUARIOS.some(u => u.rol === 'admin' && u.pwd && igual(password, u.pwd));
 }
 
 function tokenDe(req) {

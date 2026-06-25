@@ -70,6 +70,28 @@ async function filtroEspecial(db, nombre) {
     }
 }
 
+// NSFW para INVITADOS (guest): no ven docs marcados nsfw NI los que pertenezcan a una obra/colección
+// marcada nsfw (propaga hacia abajo). Devuelve un array de condiciones a AND-ear, o null para admin.
+async function condicionNsfwDocs(db, rol) {
+    if (rol !== 'guest') return null; // admin ve todo
+    const [obras, cols] = await Promise.all([
+        db.collection('obras').find({ nsfw: true }, { projection: { _id: 1 } }).toArray(),
+        db.collection('colecciones').find({ nsfw: true }, { projection: { _id: 1 } }).toArray(),
+    ]);
+    const cond = [{ nsfw: { $ne: true } }];
+    if (obras.length) cond.push({ obra: { $nin: obras.map(o => o._id) } });
+    if (cols.length) cond.push({ coleccion: { $nin: cols.map(c => c._id) } });
+    return cond;
+}
+
+// ¿Está OCULTO este doc para un invitado? (nsfw propio o de su obra/colección.)
+async function docOcultoParaGuest(db, doc) {
+    if (doc.nsfw) return true;
+    if (doc.obra && (await db.collection('obras').findOne({ _id: doc.obra }, { projection: { nsfw: 1 } }))?.nsfw) return true;
+    if (doc.coleccion && (await db.collection('colecciones').findOne({ _id: doc.coleccion }, { projection: { nsfw: 1 } }))?.nsfw) return true;
+    return false;
+}
+
 /**
  * Rutas del PANEL DE CONTROL (montadas bajo /api). Acciones de operación: vigilante, papelera,
  * cuarentena, purga de obras, ingesta por día. (Mantenimiento y estadísticas viven en app.js.)
@@ -209,8 +231,9 @@ export function rutasPanel() {
     r.get('/obras', async (req, res) => {
         try {
             const db = await conectarDB();
+            const filtroObras = req.usuario?.rol === 'guest' ? { nsfw: { $ne: true } } : {};
             const obras = await db.collection('obras')
-                .find({}, { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1, completa: 1, revision_requerida: 1 } })
+                .find(filtroObras, { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1, completa: 1, revision_requerida: 1, nsfw: 1 } })
                 .sort({ revision_requerida: -1, completa: 1, titulo: 1 }).limit(500).toArray();
             res.json(obras.map(o => ({ ...o, _id: String(o._id) })));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
@@ -268,6 +291,9 @@ export function rutasPanel() {
             }
             const fe = await filtroEspecial(db, String(req.query.filtro || '').trim());
             if (fe) extras.push(fe);
+            // NSFW: los invitados no ven material marcado (ni el que cuelga de una obra/colección nsfw).
+            const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
+            if (nsfwCond) extras.push(...nsfwCond);
             const consulta = extras.length ? { $and: [...(Object.keys(match).length ? [match] : []), ...extras] } : match;
 
             const sort = orden === 'titulo' ? { titulo: 1 } : orden === 'antiguo' ? { fecha_ingreso: 1 } : { fecha_ingreso: -1 };
@@ -278,7 +304,7 @@ export function rutasPanel() {
                 { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
                 { $project: {
                     titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
-                    tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, autores: '$_au.nombre',
+                    tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1, autores: '$_au.nombre',
                 } },
             ], opciones).toArray();
 
@@ -298,6 +324,7 @@ export function rutasPanel() {
             const db = await conectarDB();
             const obra = await db.collection('obras').findOne({ _id: new ObjectId(req.params.id) });
             if (!obra) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
+            if (req.usuario?.rol === 'guest' && obra.nsfw) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
 
             const idsPresentes = (obra.volumenes || []).filter(v => v && v._id).map(v => v._id);
             const idsSin = (obra.volumenes_sin_numero || []).filter(Boolean);
@@ -337,6 +364,8 @@ export function rutasPanel() {
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (req.usuario?.rol === 'guest' && await docOcultoParaGuest(db, doc))
+                return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
 
             const { autores, editorial } = await resolverNombres(db, doc);
             const coleccion = doc.coleccion_nombre || await nombrePorId(db, 'colecciones', doc.coleccion);

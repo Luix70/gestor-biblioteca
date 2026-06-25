@@ -30,6 +30,8 @@ const VALIDADOR_COLECCIONES = {
             nombre:         { bsonType: 'string', description: 'Nombre de la colección/serie (obligatorio).' },
             editorial:      { bsonType: 'objectId', description: 'Referencia a editoriales (opcional).' },
             fecha_creacion: { bsonType: 'date' },
+            nsfw:           { bsonType: ['bool', 'null'], description: 'No apto para invitados: oculto a guest (solo admin).' },
+            locked:         { bsonType: ['bool', 'null'], description: 'Fijado por intervención humana: el Conformador no lo altera.' },
         },
     },
 };
@@ -62,6 +64,8 @@ const VALIDADOR_OBRAS = {
             revision_requerida:   { bsonType: ['bool', 'null'], description: 'Algo se guardó desordenado (tomo sin nº / ISBN en conflicto): revisar.' },
             fecha_creacion:     { bsonType: 'date' },
             fecha_actualizacion:{ bsonType: ['date', 'null'] },
+            nsfw:               { bsonType: ['bool', 'null'], description: 'No apto para invitados: oculta la obra Y sus tomos a guest (solo admin).' },
+            locked:             { bsonType: ['bool', 'null'], description: 'Fijado por intervención humana: el Conformador no lo altera.' },
         },
     },
 };
