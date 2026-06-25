@@ -43,6 +43,11 @@ export function validar(token) {
 
 export function logout(token) { if (token) sesiones.delete(token); }
 
+/** Verifica una contraseña contra la del administrador (re-confirmación para acciones destructivas). */
+export function verificarPasswordAdmin(password) {
+    return !!ADMIN_PASS && igual(password, ADMIN_PASS);
+}
+
 function tokenDe(req) {
     const a = req.headers.authorization || '';
     return a.startsWith('Bearer ') ? a.slice(7) : (req.query.token || '');

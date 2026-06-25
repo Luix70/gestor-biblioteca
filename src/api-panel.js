@@ -4,8 +4,9 @@ import { conectarDB } from './database.js';
 import { configurarVigilante, estadoVigilante, estadoConformador } from './vigilante.js';
 import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
-    listarCuarentena, reingestarCuarentena, reingestarTodosDuplicados, ingestaPorDia,
+    listarCuarentena, reingestarCuarentena, descartarCuarentena, descartarCategoria, reingestarTodosDuplicados, ingestaPorDia,
 } from './utils/inspeccion.js';
+import { verificarPasswordAdmin } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { verificarIntegridad } from './integridad.js';
 import { purgarObra } from './utils/purga.js';
@@ -89,6 +90,21 @@ export function rutasPanel() {
             res.status(r2.ok ? 200 : 400).json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+    // Descartar un depósito: a la Papelera (carpeta intacta) + fuera de Cuarentena. Body { id }.
+    r.post('/cuarentena/descartar', async (req, res) => {
+        try {
+            const r2 = await descartarCuarentena(req.body?.id);
+            res.status(r2.ok ? 200 : 400).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Descartar una CATEGORÍA entera (destructivo) → exige re-confirmar la contraseña de admin.
+    r.post('/cuarentena/categoria/descartar', async (req, res) => {
+        const { cat, password } = req.body || {};
+        if (!verificarPasswordAdmin(password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+        try { res.json(await descartarCategoria(cat)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // Comparar un duplicado: catalogado vs entrante (tamaño/páginas/fecha/legible + recomendación).
     r.get('/cuarentena/duplicado', async (req, res) => {
         try {

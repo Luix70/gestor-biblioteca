@@ -110,6 +110,11 @@ input:focus,select:focus{outline:none;border-color:var(--acc)}
 .winbadge{color:var(--acc);font-size:11px;margin-left:6px}
 .buscar{font-size:11px;margin-top:5px;color:var(--mut)}
 .buscar a{color:var(--acc2);cursor:pointer}.buscar a:hover{text-decoration:underline}
+.cuar-head{cursor:pointer;user-select:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cuar-head .fold-tri{font-size:10px;color:var(--mut);transition:transform .15s;display:inline-block}
+.cuar-head.col .fold-tri{transform:rotate(-90deg)}
+.masterchk{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--mut);font-weight:400;text-transform:none;letter-spacing:0;cursor:pointer}
+input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 /* detalle (obra / ficha de documento) */
 .rowlink{color:var(--acc);cursor:pointer;font-weight:500}.rowlink:hover{text-decoration:underline}
 .crumb{color:var(--mut);font-size:12px;margin-bottom:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
@@ -464,8 +469,22 @@ $('#vSwitch').onchange=async e=>{try{const r=await api('/vigilante',{method:'POS
   toast('Vigilante '+(r.activo?'activado':'pausado'),r.activo?'ok':'warn');refrescarEstado();}catch(err){toast(err.message,'bad');}};
 
 // ── cuarentena ──
-// Consulta de búsqueda de copia a partir del título / nombre de fichero del depósito.
-const consultaCopia=d=>{const base=d.titulo||(d.archivos&&d.archivos[0])||d.nombre||'';return base.replace(/\.[^.]+$/,'').replace(/_+/g,' ').replace(/\s+/g,' ').trim();};
+// Consulta de búsqueda: limpia serializaciones (Epublibre [id]/(rN), marcas de fuente, hashes de
+// descarga) y normaliza separadores → "Autor Título" buscable.
+const consultaCopia=d=>{let s=d.titulo||(d.archivos&&d.archivos[0])||d.nombre||'';
+  s=s.replace(/\.[a-z0-9]{2,4}$/i,'');                                 // extensión
+  s=s.replace(/\[[^\]]*\]/g,' ');                                      // [81401] (ids/brackets)
+  s=s.replace(/\((?:r|v)\d[\w.]*\)/gi,' ');                            // (r1.0)/(v2) revisiones
+  s=s.replace(/\((?:z-?lib|annas?[\s-]?archive|libgen)[^)]*\)/gi,' '); // marcas de fuente
+  s=s.replace(/\b[0-9a-f]{16,}\b/gi,' ');                              // hashes de descarga
+  s=s.replace(/[_,–—-]+/g,' ');                                        // separadores → espacio
+  return s.replace(/\s+/g,' ').trim();};
+// Pliegue de categorías (persistido en localStorage).
+const foldGet=()=>{try{return new Set(JSON.parse(localStorage.getItem('cuarFold')||'[]'))}catch{return new Set()}};
+const foldSet=s=>{try{localStorage.setItem('cuarFold',JSON.stringify([...s]))}catch{}};
+function sincMaster(card){const m=card&&card.querySelector('[data-selall]');if(!m)return;
+  const cbs=[...card.querySelectorAll('[data-sel]')],n=cbs.filter(c=>c.checked).length;
+  m.checked=n>0&&n===cbs.length;m.indeterminate=n>0&&n<cbs.length;}
 // Sube una copia sana y la PREPARA (no cataloga aún) en el depósito (multipart; fetch propio).
 async function prepararCopia(id,file){
   const fd=new FormData();fd.append('file',file);fd.append('id',id);
@@ -479,33 +498,54 @@ function actualizarBotonLote(){const n=sanSel.size,b=$('#sanProcesar');if(!b)ret
   b.style.display=n?'inline-flex':'none';b.textContent=`▶ Procesar seleccionados (${n})`;}
 async function loadCuar(){try{
   if(!FUENTES.length){try{FUENTES=(await api('/saneamiento/fuentes')).fuentes||[];}catch{}}
-  const c=await api('/cuarentena');const cats=Object.keys(c);
-  // Conservar selección solo de ids que sigan presentes y listos.
+  const c=await api('/cuarentena');const cats=Object.keys(c);const fold=foldGet();
   const listosIds=new Set();cats.forEach(k=>c[k].forEach(d=>{if(d.listo)listosIds.add(d.id);}));
   sanSel=new Set([...sanSel].filter(id=>listosIds.has(id)));
   $('#cuarCount').textContent=cats.reduce((s,k)=>s+c[k].length,0)+' depósito(s)';
-  $('#cuarBody').innerHTML=cats.length?cats.map(cat=>{const dup=cat==='duplicados';
-    return `<div class="card" style="margin-bottom:14px"><h3>${esc(cat)} · ${c[cat].length}${cat==='ilegibles'?` <span class="muted" style="font-weight:400;font-size:11px;text-transform:none;letter-spacing:0">· sube una copia sana → queda «lista» → Procesar (en lote)</span>`:''}${dup?` <button class="btn admin-only" id="reproAllDup" style="float:right">♻ Reprocesar todos</button>`:''}</h3>
-    <table><tr><th></th><th>Título / archivo</th><th>Estado</th><th></th></tr>${c[cat].map(d=>{const q=consultaCopia(d);
-      const links=(!dup&&FUENTES.length)?`<div class="buscar">🔎 copia: ${FUENTES.map(f=>`<a href="${esc(f.url.replace('{q}',encodeURIComponent(q)))}" target="_blank" rel="noopener">${esc(f.nombre)}</a>`).join(' · ')}</div>`:'';
-      const chk=d.listo?`<input type="checkbox" class="admin-only" data-sel="${esc(d.id)}" ${sanSel.has(d.id)?'checked':''}>`:'';
-      const estado=dup?`<span class="muted">${esc(d.error||'—')}</span>`
-        :d.listo?`<span class="tag ok">✓ lista</span> <span class="muted mono" style="font-size:11px">${esc(d.reemplazo||'')}</span>${d.error_proceso?`<div class="tag bad" style="margin-top:4px">⛔ ${esc(d.error_proceso)}</div>`:''}`
-        :`<span class="muted">${esc(d.error||'—')}</span>`;
-      const acc=dup?`<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`
-        :d.listo?`<button class="btn pri admin-only" data-proc="${esc(d.id)}" title="Catalogar esta copia ya">▶ Procesar</button> <button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir otra copia">⤓ Cambiar</button>`
-        :`<button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir una copia sana (queda lista para procesar)">⤓ Reemplazar</button>${cat==='ilegibles'?'':` <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`}`;
-      return `<tr${d.listo?' style="background:rgba(40,217,168,.05)"':''}>
-      <td style="width:24px">${chk}</td>
-      <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div>${links}</td>
-      <td>${estado}</td>
-      <td style="text-align:right">${acc}</td></tr>`;}).join('')}</table></div>`;}).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
+  $('#cuarBody').innerHTML=cats.length?cats.map(cat=>{const dup=cat==='duplicados',col=fold.has(cat);
+    const listas=c[cat].filter(d=>d.listo);
+    const master=listas.length?`<label class="masterchk admin-only" title="Seleccionar/quitar todas las listas"><input type="checkbox" data-selall="${esc(cat)}" ${listas.every(d=>sanSel.has(d.id))?'checked':''}> todas</label>`:'';
+    const dcat=`<span style="margin-left:auto;display:flex;gap:8px">${dup?`<button class="btn admin-only" id="reproAllDup">♻ Reprocesar todos</button>`:''}<button class="btn bad admin-only" data-desccat="${esc(cat)}" title="Eliminar TODA la categoría → Papelera (pide contraseña)">🗑 categoría</button></span>`;
+    return `<div class="card" style="margin-bottom:14px">
+      <h3 class="cuar-head${col?' col':''}" data-fold="${esc(cat)}"><span class="fold-tri">▾</span><span>${esc(cat)} · ${c[cat].length}</span>${cat==='ilegibles'?` <span class="muted" style="font-weight:400;font-size:11px;text-transform:none;letter-spacing:0">· sube copia sana → «lista» → Procesar</span>`:''}${master}${dcat}</h3>
+      <div class="cuar-body"${col?' style="display:none"':''}>
+      <table><tr><th></th><th>Título / archivo</th><th>Estado</th><th></th></tr>${c[cat].map(d=>{const q=consultaCopia(d);
+        const links=(!dup&&FUENTES.length)?`<div class="buscar">🔎 copia: ${FUENTES.map(f=>`<a href="${esc(f.url.replace('{q}',encodeURIComponent(q)))}" target="_blank" rel="noopener">${esc(f.nombre)}</a>`).join(' · ')}</div>`:'';
+        const chk=d.listo?`<input type="checkbox" class="admin-only" data-sel="${esc(d.id)}" ${sanSel.has(d.id)?'checked':''}>`:'';
+        const estado=dup?`<span class="muted">${esc(d.error||'—')}</span>`
+          :d.listo?`<span class="tag ok">✓ lista</span> <span class="muted mono" style="font-size:11px">${esc(d.reemplazo||'')}</span>${d.error_proceso?`<div class="tag bad" style="margin-top:4px">⛔ ${esc(d.error_proceso)}</div>`:''}`
+          :`<span class="muted">${esc(d.error||'—')}</span>`;
+        let acc=dup?`<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`
+          :d.listo?`<button class="btn pri admin-only" data-proc="${esc(d.id)}" title="Catalogar esta copia ya">▶ Procesar</button> <button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir otra copia">⤓ Cambiar</button>`
+          :`<button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir una copia sana (queda lista para procesar)">⤓ Reemplazar</button>${cat==='ilegibles'?'':` <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`}`;
+        acc+=` <button class="btn bad admin-only" data-desc="${esc(d.id)}" data-tit="${esc(d.titulo||d.archivos[0]||d.nombre||'')}" title="Descartar: carpeta completa → Papelera, fuera de Cuarentena">🗑</button>`;
+        return `<tr${d.listo?' style="background:rgba(40,217,168,.05)"':''}>
+        <td style="width:24px">${chk}</td>
+        <td>${esc(d.titulo||d.archivos[0]||d.nombre)}<div class="muted mono">${esc(d.archivos.join(', '))}</div>${links}</td>
+        <td>${estado}</td>
+        <td style="text-align:right;white-space:nowrap">${acc}</td></tr>`;}).join('')}</table></div></div>`;}).join(''):'<div class="empty">Cuarentena vacía 🎉</div>';
+  $$('#cuarBody .cuar-head').forEach(h=>h.onclick=e=>{if(e.target.closest('input,button,label,a'))return;
+    const cat=h.dataset.fold,f=foldGet();f.has(cat)?f.delete(cat):f.add(cat);foldSet(f);
+    h.classList.toggle('col');const body=h.nextElementSibling;if(body)body.style.display=h.classList.contains('col')?'none':'';});
   $$('#cuarBody [data-re]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await api('/cuarentena/reingestar',{method:'POST',body:JSON.stringify({id:b.dataset.re})});
     if(r.ok){toast(`Reingestados ${r.movidos}/${r.total} → Inbox`);loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}catch(e){toast(e.message,'bad');b.disabled=false;}});
   $$('#cuarBody [data-cmp]').forEach(b=>b.onclick=()=>abrirComparador(b.dataset.cmp));
   $$('#cuarBody [data-rep]').forEach(b=>b.onclick=()=>{sanCtx={id:b.dataset.rep};const inp=$('#sanFile');inp.value='';inp.click();});
   $$('#cuarBody [data-proc]').forEach(b=>b.onclick=()=>procesarSaneados([b.dataset.proc]));
-  $$('#cuarBody [data-sel]').forEach(b=>b.onchange=()=>{b.checked?sanSel.add(b.dataset.sel):sanSel.delete(b.dataset.sel);actualizarBotonLote();});
+  $$('#cuarBody [data-desc]').forEach(b=>b.onclick=async()=>{
+    if(!confirm(`¿Descartar «${b.dataset.tit||'este depósito'}»?\n\nSe mueve a la Papelera (carpeta COMPLETA, recuperable) y sale de Cuarentena.`))return;
+    b.disabled=true;try{const r=await api('/cuarentena/descartar',{method:'POST',body:JSON.stringify({id:b.dataset.desc})});
+      if(r.ok){toast('Descartado → Papelera','warn');loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}catch(e){toast(e.message,'bad');b.disabled=false;}});
+  $$('#cuarBody [data-desccat]').forEach(b=>b.onclick=async()=>{const cat=b.dataset.desccat;
+    const pwd=prompt(`Vas a ELIMINAR toda la categoría «${cat}» → Papelera (recuperable, carpetas intactas).\n\nEscribe la contraseña de administrador para confirmar:`);
+    if(pwd==null)return;b.disabled=true;
+    try{const r=await api('/cuarentena/categoria/descartar',{method:'POST',body:JSON.stringify({cat,password:pwd})});
+      if(r.ok){toast(`Categoría «${cat}» → Papelera (${r.movidos}/${r.total})`,'warn');loadCuar();}else{toast(r.motivo,'warn');b.disabled=false;}}
+    catch(e){toast(e.message,'bad');b.disabled=false;}});
+  $$('#cuarBody [data-sel]').forEach(b=>b.onchange=()=>{b.checked?sanSel.add(b.dataset.sel):sanSel.delete(b.dataset.sel);sincMaster(b.closest('.card'));actualizarBotonLote();});
+  $$('#cuarBody [data-selall]').forEach(m=>{sincMaster(m.closest('.card'));m.onchange=()=>{const card=m.closest('.card');
+    card.querySelectorAll('[data-sel]').forEach(cb=>{cb.checked=m.checked;m.checked?sanSel.add(cb.dataset.sel):sanSel.delete(cb.dataset.sel);});
+    m.indeterminate=false;actualizarBotonLote();};});
   actualizarBotonLote();
   if($('#reproAllDup'))$('#reproAllDup').onclick=async()=>{
     if(!confirm('Devuelve TODOS los duplicados al Inbox para re-evaluarlos con la lógica actual (los idénticos se borran, los de otro formato se separan, solo los conflictos reales vuelven). ¿Seguir?'))return;

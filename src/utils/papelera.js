@@ -91,3 +91,27 @@ export async function reciclar(rutas, etiqueta = '') {
     }
     return sub;
 }
+
+/**
+ * Mueve una CARPETA ENTERA a la Papelera CONSERVANDO su estructura y su nombre, de modo que restaurarla
+ * sea tan fácil como volver a moverla a su sitio (p. ej. un depósito de Cuarentena de vuelta a su
+ * categoría). `subruta` la coloca bajo esa ruta relativa dentro del serial (p. ej. la categoría).
+ * Copia → verifica → borra el origen (nunca pierde datos: si la copia falla, conserva el original).
+ * @returns {Promise<string|null>} la carpeta destino, o null si no se pudo.
+ */
+export async function reciclarCarpeta(dirOrigen, etiqueta = '', subruta = '') {
+    try { if (!(await fs.stat(dirOrigen)).isDirectory()) return null; } catch { return null; }
+    const dir = dirReciclaje();
+    const sub = await siguienteSubcarpeta(dir, etiqueta);
+    const destino = path.join(sub, subruta ? path.basename(String(subruta)) : '', path.basename(dirOrigen));
+    try {
+        await fs.mkdir(path.dirname(destino), { recursive: true });
+        await fs.cp(dirOrigen, destino, { recursive: true });
+        if (!(await fs.stat(destino)).isDirectory()) throw new Error('copia no verificada');
+        await fs.rm(dirOrigen, { recursive: true, force: true });
+        return destino;
+    } catch (e) {
+        console.error(`♻️  Papelera (carpeta): no se pudo reciclar ${path.basename(dirOrigen)} (${e.message}) → se CONSERVA.`);
+        return null;
+    }
+}

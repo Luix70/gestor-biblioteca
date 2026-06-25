@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { conectarDB } from '../database.js';
+import { reciclar, reciclarCarpeta } from './papelera.js';
 
 /**
  * Utilidades de INSPECCIÓN para el panel de control: tamaño/contenido de la Papelera, listado y
@@ -123,6 +124,35 @@ export async function reingestarCuarentena(idRel) {
     }
     if (movidos === archivos.length) await fs.rm(depDir, { recursive: true, force: true }).catch(() => {});
     return { ok: movidos > 0, movidos, total: archivos.length };
+}
+
+/** DESCARTA un depósito: mueve su CARPETA ENTERA (intacta, con `.reemplazo/` y sidecar) a la Papelera,
+ *  bajo su categoría, y lo retira de la Cuarentena. Conservar la carpeta tal cual facilita restaurarla
+ *  (basta moverla de vuelta). Para cuando ya no interesa el documento o no hay copia sana. */
+export async function descartarCuarentena(idRel) {
+    const partes = String(idRel || '').split('/').map(s => path.basename(s)).filter(Boolean);
+    if (partes.length < 2) return { ok: false, motivo: 'identificador de depósito inválido' };
+    const depDir = path.join(DIR_CUARENTENA, ...partes);
+    try { await fs.access(depDir); } catch { return { ok: false, motivo: 'depósito no encontrado' }; }
+    const dest = await reciclarCarpeta(depDir, 'cuarentena-descartada', partes[0]);
+    if (!dest) return { ok: false, motivo: 'no se pudo mover el depósito a la Papelera' };
+    return { ok: true, descartado: partes.join('/') };
+}
+
+/** DESCARTA una CATEGORÍA entera: mueve cada depósito (carpeta intacta) a la Papelera. Destructivo →
+ *  el endpoint exige re-confirmar la contraseña de administrador. */
+export async function descartarCategoria(cat) {
+    const c = path.basename(String(cat || ''));
+    if (!c) return { ok: false, motivo: 'categoría inválida' };
+    const catDir = path.join(DIR_CUARENTENA, c);
+    let deps; try { deps = (await fs.readdir(catDir, { withFileTypes: true })).filter(e => e.isDirectory()); }
+    catch { return { ok: false, motivo: 'categoría no encontrada' }; }
+    let movidos = 0;
+    for (const d of deps) {
+        if (await reciclarCarpeta(path.join(catDir, d.name), `cuarentena-categoria-${c}`, c)) movidos++;
+    }
+    await fs.rm(catDir, { recursive: true, force: true }).catch(() => {}); // la carpeta de categoría ya vacía
+    return { ok: true, categoria: c, movidos, total: deps.length };
 }
 
 /** Reingesta TODOS los depósitos de Cuarentena/duplicados (vuelven al Inbox para re-evaluarse con la
