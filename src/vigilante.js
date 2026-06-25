@@ -15,6 +15,7 @@ import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { reciclar } from './utils/papelera.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
+import { rellenarDescripcionesFaltantes } from './mantenimiento/backfill-descripciones.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -484,12 +485,25 @@ async function ejecutarPasadaMantenimiento() {
         const r = await ejecutarMantenimiento({ debeAbortar: debeCederAIngesta });
         ultimaRevisionMant = Date.now();
         ultimaActividad = Date.now(); // reinicia el reloj: esperar REPOSO antes del siguiente lote
-        if (!r.abortado && r.pendientes === 0) {
+
+        // Relleno perezoso de descripciones de clasificación (CDU/Dewey/LCC) en tandas pequeñas: acota
+        // el coste de IA y, cuando todo está descrito, no hace ninguna llamada. MANTENIMIENTO_DESC_LOTE=0
+        // lo desactiva. Si genera o quedan pendientes, el Conformador NO se duerme (sigue rellenando).
+        let desc = { generadas: 0, fallos: 0, pendientes: 0 };
+        if (!r.abortado) {
+            const lote = Number(process.env.MANTENIMIENTO_DESC_LOTE ?? 5);
+            try { desc = await rellenarDescripcionesFaltantes({ limite: lote }); }
+            catch (e) { console.error('Mantenimiento (descripciones):', e.message); }
+            if (desc.generadas) console.log(`🧹 Conformador: ${desc.generadas} descripción(es) de clasificación generadas (faltan ${desc.pendientes}).`);
+        }
+
+        // Dormir SOLO si no queda trabajo ni de documentos ni de descripciones.
+        if (!r.abortado && r.pendientes === 0 && desc.pendientes === 0) {
             conformadorDormido = true;
             if (r.revisados > 0)
                 console.log('🧹 Conformador: cola vacía — en reposo hasta la próxima ingesta.');
         }
-        return { ok: true, ...r };
+        return { ok: true, ...r, descripciones: desc };
     } catch (e) {
         console.error('Mantenimiento:', e.message);
         return { ok: false, motivo: e.message };
