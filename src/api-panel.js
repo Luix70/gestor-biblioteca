@@ -15,6 +15,8 @@ import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
 import { fuentesCopia, procesarSaneamiento, estadoSaneamiento } from './utils/saneamiento.js';
+import { describirCDU } from './utils/descripcion-cdu.js';
+import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1 };
@@ -206,6 +208,10 @@ export function rutasPanel() {
             const match = {};
             if (tipo === 'libro' || tipo === 'revista') match.tipo_recurso = tipo;
             if (cdu) match.cdu = { $regex: '^' + escapeRegex(cdu) };
+            // Filtro EXACTO por clasificación (clic en el contador de la ficha/dashboard).
+            const clasSistema = String(req.query.clasSistema || '').toLowerCase();
+            const clasCodigo = String(req.query.clasCodigo || '').trim();
+            if (['cdu', 'dewey', 'lcc'].includes(clasSistema) && clasCodigo) match[clasSistema] = clasCodigo;
             if (q) {
                 const rx = { $regex: escapeRegex(q), $options: 'i' };
                 const or = [{ titulo: rx }, { subtitulo: rx }, { obra_titulo: rx },
@@ -301,12 +307,49 @@ export function rutasPanel() {
             for (const k of ['autores', 'editorial', 'coleccion', 'coleccion_nombre', 'obra',
                 '_portadas_remotas', 'mantenimiento', 'mantenimiento_firma']) delete limpio[k];
 
+            // Clasificaciones (CDU/Dewey/LCC): código + título CONCISO (de caché, SIN IA aquí) + nº de
+            // documentos con ese mismo código. El texto extenso se pide aparte en GET /clasificacion.
+            const coll = db.collection('biblioteca');
+            const cdesc = await cduDesc(db, doc.cdu);
+            const tituloCache = async (sistema, codigo) => {
+                if (!codigo) return null;
+                const d = await db.collection('clasificacion_descripciones').findOne({ sistema, codigo }, { projection: { titulo_es: 1 } });
+                return d?.titulo_es || null;
+            };
+            const clasificaciones = [];
+            if (doc.cdu)   clasificaciones.push({ sistema: 'cdu',   codigo: doc.cdu,   titulo: cdesc?.titulo_es || null, n: await coll.countDocuments({ cdu: doc.cdu }) });
+            if (doc.dewey) clasificaciones.push({ sistema: 'dewey', codigo: doc.dewey, titulo: await tituloCache('dewey', doc.dewey), n: await coll.countDocuments({ dewey: doc.dewey }) });
+            if (doc.lcc)   clasificaciones.push({ sistema: 'lcc',   codigo: doc.lcc,   titulo: await tituloCache('lcc', doc.lcc), n: await coll.countDocuments({ lcc: doc.lcc }) });
+
             res.json({
                 ok: true, doc: limpio, autores, editorial, coleccion,
-                cdu_desc: await cduDesc(db, doc.cdu), obra,
+                cdu_desc: cdesc, clasificaciones, obra,
                 archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
                 imagenes: doc.imagenes || [], portada: doc.portada || null,
             });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Descripción (título conciso + texto extenso, ES) de un código de clasificación — de CACHÉ o
+    // generada por IA al momento. CDU → cdu_descripciones/describirCDU; Dewey/LCC →
+    // clasificacion_descripciones/describirClasificacion. Alimenta el popup ⓘ de la ficha/dashboard.
+    r.get('/clasificacion', async (req, res) => {
+        try {
+            const sistema = String(req.query.sistema || '').toLowerCase();
+            const codigo = String(req.query.codigo || '').trim();
+            if (!codigo) return res.status(400).json({ ok: false, motivo: 'falta el código' });
+            const db = await conectarDB();
+            if (sistema === 'cdu') {
+                const cod = sanitizarCDU(codigo);
+                let d = await db.collection('cdu_descripciones').findOne({ codigo: cod });
+                if (!d) d = await describirCDU(db, codigo);
+                return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null });
+            }
+            if (sistema === 'dewey' || sistema === 'lcc') {
+                const d = await describirClasificacion(db, sistema, codigo);
+                return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null });
+            }
+            return res.status(400).json({ ok: false, motivo: 'sistema inválido (cdu|dewey|lcc)' });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

@@ -138,6 +138,14 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .dl{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:13px}
 .dl dt{color:var(--mut);font-weight:600;white-space:nowrap}.dl dd{word-break:break-word}
 .dl dd .fmt{margin-right:4px}
+.clastab{width:100%;border-collapse:collapse;font-size:13px}
+.clastab td{padding:5px 8px;border-bottom:1px solid var(--bg2);vertical-align:top}
+.iclas{cursor:pointer;color:var(--acc2);background:none;border:none;font-size:14px;padding:0 2px;line-height:1;vertical-align:middle}
+.iclas:hover{color:var(--acc)}
+.cntclas{color:var(--acc2);cursor:pointer;font-weight:600}.cntclas:hover{text-decoration:underline}
+.clasfilt{display:inline-flex;align-items:center;gap:7px;background:var(--card2);border:1px solid var(--acc);color:var(--txt);padding:4px 11px;border-radius:20px;font-size:12px}
+.clasfilt b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.clasfilt .x{cursor:pointer;color:var(--mut);font-weight:700}.clasfilt .x:hover{color:var(--bad)}
 .carousel{position:relative;background:#0a0d12;border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .carousel .track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;aspect-ratio:3/4}
 .carousel .track::-webkit-scrollbar{display:none}
@@ -450,8 +458,9 @@ async function loadDashboard(){
       ${rowN('Libros sin ISBN',d.libros_sin_isbn,'mut')}${rowN('Sin hash',d.sin_hash,'mut')}
       ${rowN('Sin portada',d.sin_portada,'mut')}${rowN('CDU genérica',d.cdu_generica,'mut')}
       ${rowN('Pendientes',d.pendientes,d.pendientes?'warn':'ok')}${rowN('Sin colección',d.sin_coleccion,'mut')}</table>`;
-    const top=(st.cdu?.detalle||[]).slice(0,8);
-    $('#cdus').innerHTML=top.length?`<table>${top.map(c=>`<tr><td class="mono">${esc(c.cdu)}</td><td>${esc(c.titulo_es||'—')}</td><td style="text-align:right"><b>${c.documentos}</b></td></tr>`).join('')}</table>`:'<div class="empty">—</div>';
+    const top=(st.cdu?.detalle||[]).filter(c=>c.cdu&&c.cdu!=='sin_cdu').slice(0,100).map(c=>({sistema:'cdu',codigo:c.cdu,titulo:c.titulo_es,n:c.documentos}));
+    $('#cdus').innerHTML=top.length?`<div style="max-height:340px;overflow:auto"><table class="clastab">${top.map(x=>filaClas(x,true)).join('')}</table></div>`:'<div class="empty">—</div>';
+    attachClas('#cdus');
   }catch(e){toast('Estadísticas: '+e.message,'bad');}
   try{const g=await api('/ingesta?dias=30');const max=Math.max(1,...g.serie.map(x=>x.n));
     $('#chart').innerHTML=g.serie.length?g.serie.map(x=>`<div class="bar" style="height:${Math.round(x.n/max*100)}%"><span>${x.dia.slice(5)}: ${x.n}</span></div>`).join(''):'<div class="empty" style="margin:auto">Sin ingesta reciente</div>';
@@ -729,11 +738,34 @@ async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();$('#t
 
 const CAMPOS_FICHA=[['subtitulo','Subtítulo'],['_autores','Autores'],['_editorial','Editorial'],['_coleccion','Colección'],
   ['año_edicion','Año'],['numero_edicion','Edición'],['idioma','Idioma'],['_formatos','Formatos'],['paginas','Páginas'],
-  ['isbn','ISBN'],['issn','ISSN'],['_cdu','CDU'],['dewey','Dewey'],['lcc','LCC'],['lccn','LCCN'],
+  ['isbn','ISBN'],['issn','ISSN'],['lccn','LCCN'],
   ['volumen_numero','Volumen nº'],['volumen_titulo','Título del volumen'],['obra_titulo','Obra'],['isbn_obra','ISBN obra'],
   ['coleccion_numero','Nº en colección'],['numero_issue','Número'],['mes_publicacion','Mes'],
   ['_estado','Estado'],['_ubicacion','Ubicación'],['nombre_archivo','Archivo'],['hash_contenido','Hash'],
   ['_ingreso','Ingresado'],['_actualizado','Actualizado']];
+
+// ── Clasificaciones (CDU/Dewey/LCC): fila (código · concisa · ⓘ · contador), popup ⓘ y filtro ──
+function filaClas(x,sinSist){
+  const t=x.titulo?esc(x.titulo):'<span class="muted">—</span>';
+  const cnt=(x.n>1)?`<a class="cntclas" data-sist="${esc(x.sistema)}" data-cod="${esc(x.codigo)}" title="Ver los ${x.n} documentos">${x.n}</a>`:`<span class="muted">${x.n||1}</span>`;
+  return `<tr>${sinSist?'':`<td class="mono muted" style="white-space:nowrap">${esc((x.sistema||'').toUpperCase())}</td>`}<td class="mono" style="white-space:nowrap">${esc(x.codigo)}</td><td>${t} <button class="iclas" data-sist="${esc(x.sistema)}" data-cod="${esc(x.codigo)}" title="Más información sobre esta clasificación">ⓘ</button></td><td style="text-align:right">${cnt}</td></tr>`;
+}
+function attachClas(scope){
+  $$(scope+' .iclas').forEach(b=>b.onclick=()=>infoClasificacion(b.dataset.sist,b.dataset.cod));
+  $$(scope+' .cntclas').forEach(b=>b.onclick=()=>filtrarPorClasificacion(b.dataset.sist,b.dataset.cod));
+}
+async function infoClasificacion(sist,cod){
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:520px"><h3 style="margin-top:0">${esc((sist||'').toUpperCase())} <span class="mono">${esc(cod)}</span></h3><div id="iclasBody" class="muted">Cargando…</div><div style="margin-top:14px;text-align:right"><button class="btn" id="iclasClose">Cerrar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#iclasClose').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
+  try{const r=await api('/clasificacion?sistema='+encodeURIComponent(sist)+'&codigo='+encodeURIComponent(cod));const b=$('#iclasBody');if(!b)return;b.classList.remove('muted');
+    b.innerHTML=r.ok?`${r.titulo?`<div style="font-weight:600;margin-bottom:8px">${esc(r.titulo)}</div>`:''}<div style="line-height:1.65;font-size:13px">${esc(r.descripcion||'Sin descripción disponible (la IA no la generó).')}</div>`:`<span class="muted">${esc(r.motivo||'no disponible')}</span>`;
+  }catch(e){const b=$('#iclasBody');if(b)b.textContent=e.message;}
+}
+function filtrarPorClasificacion(sist,cod){
+  estadoBusqueda.clas={sistema:sist,codigo:cod};estadoBusqueda.page=1;
+  if($('#sqQ'))$('#sqQ').value='';if($('#sqCdu'))$('#sqCdu').value=''; // resultado = exactamente esa clasificación
+  go('search');
+}
 
 function pintarDoc(r,ctx){
   const d=r.doc,vo=ctx&&ctx.obra,vol=ctx&&ctx.volver;
@@ -748,7 +780,6 @@ function pintarDoc(r,ctx){
     _editorial:r.editorial?esc(r.editorial):null,
     _coleccion:r.coleccion?esc(r.coleccion)+(d.coleccion_numero?` · nº ${esc(d.coleccion_numero)}`:''):null,
     _formatos:(d.formatos||[]).length?d.formatos.map(f=>`<span class="fmt">${esc(f)}</span>`).join(''):null,
-    _cdu:d.cdu?`<span class="mono">${esc(d.cdu)}</span>${r.cdu_desc&&r.cdu_desc.titulo_es?' · '+esc(r.cdu_desc.titulo_es):''}`:null,
     _estado:d.estado_verificacion?`<span class="tag ${d.estado_verificacion==='completado'?'ok':'warn'}">${esc(d.estado_verificacion)}</span>`:null,
     _ubicacion:d.ubicacion?(esc([d.ubicacion.ambito,d.ubicacion.estanteria].filter(Boolean).join(' · '))||null):null,
     _ingreso:d.fecha_ingreso?fmtFecha(d.fecha_ingreso):null,
@@ -759,14 +790,15 @@ function pintarDoc(r,ctx){
   const dl=CAMPOS_FICHA.map(([k,lab])=>{const v=valor(k);return v?`<dt>${lab}</dt><dd>${v}</dd>`:'';}).join('');
   const sinopsis=d.sinopsis?`<div class="card" style="margin-top:14px"><h3>Sinopsis</h3><p>${esc(d.sinopsis)}</p></div>`:'';
   const palabras=(d.palabras_clave||[]).length?`<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:5px">${d.palabras_clave.map(p=>`<span class="tag mut">${esc(p)}</span>`).join('')}</div>`:'';
-  const cduFull=r.cdu_desc&&r.cdu_desc.descripcion_es?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:5px">Descripción CDU${r.cdu_desc.titulo_es?' · '+esc(r.cdu_desc.titulo_es):''}</div><p class="muted" style="font-size:13px;line-height:1.6">${esc(r.cdu_desc.descripcion_es)}</p></div>`:'';
+  const clas=(r.clasificaciones||[]).length?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:6px">Clasificación</div><table class="clastab">${r.clasificaciones.map(x=>filaClas(x)).join('')}</table></div>`:'';
   const alertas=(d.alertas_agente||[]).length?`<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">Notas del agente (${d.alertas_agente.length})</summary><div style="margin-top:6px">${d.alertas_agente.map(a=>`<div class="muted" style="font-size:12px">• ${esc(a)}</div>`).join('')}</div></details>`:'';
   const imgs=(r.imagenes&&r.imagenes.length)?r.imagenes:(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]);
   const carrusel=imgs.length?`<div class="carousel"><div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(im.ruta)}" loading="lazy" onclick="window.open('${esc(im.ruta)}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:'<div class="filebox"><div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>';
   const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
     <div class="det-title"><h2>${esc(d.titulo||'(sin título)')}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div></div></div>`;
   $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
-    <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${cduFull}${palabras}${alertas}</div></div>${sinopsis}`;
+    <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
+  attachClas('#p-detalle');
   carIdx=0;const tr=$('#carTrack');
   if(tr&&tr.children.length>1)tr.onscroll=()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==carIdx){carIdx=i;const dd=$('#carDots');if(dd)dd.textContent=(i+1)+' / '+tr.children.length;}};
   const _nom=(r.nombre_archivo||'').toLowerCase();
@@ -959,6 +991,7 @@ function construirSearch(){
         <div><label>Orden</label><select id="sqOrden"><option value="reciente">Recientes</option><option value="titulo">Título A-Z</option><option value="antiguo">Antiguos</option></select></div>
       </div>
     </div>
+    <div id="searchChip" style="margin-bottom:12px"></div>
     <div id="searchResults"></div>
     <div id="searchPager" style="margin-top:16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap"></div>`;
   $('#sqQ').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
@@ -971,10 +1004,16 @@ function loadSearch(){if(!$('#sqQ'))construirSearch();buscarCatalogo(estadoBusqu
 async function buscarCatalogo(page){
   estadoBusqueda.page=page;
   const params=new URLSearchParams({q:$('#sqQ').value.trim(),tipo:$('#sqTipo').value,cdu:$('#sqCdu').value.trim(),orden:$('#sqOrden').value,page});
+  if(estadoBusqueda.clas){params.set('clasSistema',estadoBusqueda.clas.sistema);params.set('clasCodigo',estadoBusqueda.clas.codigo);}
+  pintarChipClas();
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
   try{const r=await api('/catalogo?'+params.toString());pintarBusqueda(r);}
   catch(e){$('#searchResults').innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
 }
+function pintarChipClas(){const el=$('#searchChip');if(!el)return;
+  if(estadoBusqueda.clas){el.innerHTML=`<span class="clasfilt">Filtro ${esc(estadoBusqueda.clas.sistema.toUpperCase())} <b>${esc(estadoBusqueda.clas.codigo)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>`;
+    $('#clasX').onclick=()=>{estadoBusqueda.clas=null;buscarCatalogo(1);};}
+  else el.innerHTML='';}
 function docCard(d){
   const ph=d.tipo_recurso==='revista'?'📰':'📕';
   const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`:`<div class="ph">${ph}</div>`;

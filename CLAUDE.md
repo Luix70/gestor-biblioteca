@@ -44,6 +44,8 @@ Entry points:                         Shared pipeline (src/servicio-ingesta.js �
 
 `src/clasificador-cdu.js` (`resolverCDU`) normalizes everything to CDU while minimizing AI: **learned-cache → external-API stub → AI**. OpenLibrary's Dewey/LCC codes are captured; on an AI derivation the Dewey/LC→CDU mapping is **learned** into the `equivalencias_cdu` collection (`sistema_origen`, `codigo_origen`, `cdu`, `fuente`, `verificado`) so future books with that code are a free, consistent cache hit. Manual edits set `verificado: true`.
 
+**Human-readable descriptions** of classification codes are cached + AI-generated on demand (`utils/descripcion-cdu.js` · `describirCDU` → `cdu_descripciones`; `utils/descripcion-clasificacion.js` · `describirClasificacion` → `clasificacion_descripciones` for Dewey/LCC). The panel ficha + Dashboard show each code with its **concise title + a ⓘ** (popup with the exhaustive text, `GET /api/clasificacion?sistema=&codigo=` — generates+caches on a miss) **+ a count** of docs sharing that code (click → Búsqueda filtered exactly, `/catalogo?clasSistema=&clasCodigo=`).
+
 ## Outputs & file management
 
 After insert, files are copied to `PATH_CDU/<cdu>/<libros|revistas>/<isbn|issn|ObjectId>/` alongside cover images, plus `registro.json` (resolved names) and `registro.marc.xml` (MARC 21 / MARCXML, via `src/marc21.js`). **CDU folder names are sanitized for Windows+Linux** (`utils/rutas.js`: `141.78:81'37` → `141.78_81`) while the real CDU string stays in Mongo. The doc's `ruta_base`/`imagenes`/`portada` point at `/recursos/...` (served statically by `app.js`).
