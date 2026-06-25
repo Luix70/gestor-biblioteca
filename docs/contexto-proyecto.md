@@ -211,6 +211,13 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
     (mismo estilo que los tomos) que abren la **misma ficha** (`verDoc(..,{volver:'search'})`). Sin `q` =
     navegar recientes. Búsqueda Mongo por regex — suficiente a esta escala (~7,5 k docs); la FTS en SQLite
     queda para cuando el catálogo crezca. (La ficha enlaza a su obra vía `verObra` cuando el doc es un tomo.)
+    Además de `q`/`tipo`/`cdu`, `/catalogo` acepta **filtros de drill-down** pintados como un *chip*
+    quitable (estado `estadoBusqueda.extra`): `clasSistema`+`clasCodigo` (clasificación exacta), `dia`
+    (`YYYY-MM-DD`, por `fecha_ingreso`) y `filtro` (atajos del Dashboard: `sin_isbn`/`sin_hash`/`sin_portada`/
+    `cdu_generica`/`pendientes`/`sin_coleccion`/`revision`/`tomos_sin_numero`/`obras_incompletas`/
+    `obras_revision`; los de obras resuelven a sus tomos vía `obras`). **El Dashboard es navegable:** cada
+    barra de ingesta/día y cada contador de "Requieren atención"/"Defectos" abre la Búsqueda con
+    EXACTAMENTE esos documentos.
 - **Fichero local — volcados OL+BNE offline** (`scripts/etl-fichero.js` · `scripts/etl-map.js` ·
   `src/utils/buscador-local.js`): SQLite **solo-lectura** (`fichero.db`, ~23 GB, **58,7 M registros /
   37,4 M con ISBN**) con los dumps de Open Library (ediciones) + BNE en una tabla `fichero` con

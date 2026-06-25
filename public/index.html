@@ -439,23 +439,28 @@ async function loadDashboard(){
     $('#stats').innerHTML=cards.map(([i,v,k,c])=>`<div class="stat ${c}"><div class="ic">${i}</div><div class="v">${(v??0).toLocaleString('es-ES')}</div><div class="k">${k}</div></div>`).join('');
     const a=st.anomalias||{},d=st.defectos||{};
     $('#aten').innerHTML=`<table>
-      ${rowN('Obras incompletas',a.obras_incompletas,'warn')}
-      ${rowN('Obras a revisar',a.obras_revision,a.obras_revision?'bad':'ok')}
-      ${rowN('Tomos sin número (?)',a.tomos_sin_numero,a.tomos_sin_numero?'bad':'ok')}
-      ${rowN('Docs a revisar',a.docs_revision,a.docs_revision?'bad':'ok')}</table>`;
+      ${rowN('Obras incompletas',a.obras_incompletas,'warn','obras_incompletas','Tomos de obras incompletas')}
+      ${rowN('Obras a revisar',a.obras_revision,a.obras_revision?'bad':'ok','obras_revision','Tomos de obras a revisar')}
+      ${rowN('Tomos sin número (?)',a.tomos_sin_numero,a.tomos_sin_numero?'bad':'ok','tomos_sin_numero','Tomos sin número')}
+      ${rowN('Docs a revisar',a.docs_revision,a.docs_revision?'bad':'ok','revision','Documentos a revisar')}</table>`;
     $('#defs').innerHTML=`<table>
-      ${rowN('Libros sin ISBN',d.libros_sin_isbn,'mut')}${rowN('Sin hash',d.sin_hash,'mut')}
-      ${rowN('Sin portada',d.sin_portada,'mut')}${rowN('CDU genérica',d.cdu_generica,'mut')}
-      ${rowN('Pendientes',d.pendientes,d.pendientes?'warn':'ok')}${rowN('Sin colección',d.sin_coleccion,'mut')}</table>`;
+      ${rowN('Libros sin ISBN',d.libros_sin_isbn,'mut','sin_isbn','Libros sin ISBN')}${rowN('Sin hash',d.sin_hash,'mut','sin_hash','Sin hash')}
+      ${rowN('Sin portada',d.sin_portada,'mut','sin_portada','Sin portada')}${rowN('CDU genérica',d.cdu_generica,'mut','cdu_generica','CDU genérica')}
+      ${rowN('Pendientes',d.pendientes,d.pendientes?'warn':'ok','pendientes','Pendientes')}${rowN('Sin colección',d.sin_coleccion,'mut','sin_coleccion','Sin colección')}</table>`;
+    $$('#aten [data-filtro],#defs [data-filtro]').forEach(el=>el.onclick=()=>filtrarCatalogo(el.dataset.filtro,el.dataset.etq));
     const top=(st.cdu?.detalle||[]).filter(c=>c.cdu&&c.cdu!=='sin_cdu').slice(0,100).map(c=>({sistema:'cdu',codigo:c.cdu,titulo:c.titulo_es,n:c.documentos}));
     $('#cdus').innerHTML=top.length?`<div style="max-height:340px;overflow:auto"><table class="clastab">${top.map(x=>filaClas(x,true)).join('')}</table></div>`:'<div class="empty">—</div>';
     attachClas('#cdus');
   }catch(e){toast('Estadísticas: '+e.message,'bad');}
   try{const g=await api('/ingesta?dias=30');const max=Math.max(1,...g.serie.map(x=>x.n));
-    $('#chart').innerHTML=g.serie.length?g.serie.map(x=>`<div class="bar" style="height:${Math.round(x.n/max*100)}%"><span>${x.dia.slice(5)}: ${x.n}</span></div>`).join(''):'<div class="empty" style="margin:auto">Sin ingesta reciente</div>';
+    $('#chart').innerHTML=g.serie.length?g.serie.map(x=>`<div class="bar" data-dia="${esc(x.dia)}" title="Ver ${x.n} ingestado(s) el ${esc(x.dia)}" style="height:${Math.round(x.n/max*100)}%;cursor:pointer"><span>${x.dia.slice(5)}: ${x.n}</span></div>`).join(''):'<div class="empty" style="margin:auto">Sin ingesta reciente</div>';
+    $$('#chart .bar[data-dia]').forEach(b=>b.onclick=()=>filtrarPorDia(b.dataset.dia));
   }catch(e){}
 }
-const rowN=(k,v,t)=>`<tr><td>${k}</td><td style="text-align:right"><span class="tag ${t}">${v??0}</span></td></tr>`;
+// Fila de conteo del dashboard; si hay un filtro y el valor > 0, el número abre la Búsqueda con esos docs.
+const rowN=(k,v,t,filtro,etq)=>{const val=v??0;const inner=`<span class="tag ${t}">${val}</span>`;
+  const cell=(val>0&&filtro)?`<a class="cntclas" data-filtro="${esc(filtro)}" data-etq="${esc(etq||filtro)}" title="Ver estos documentos en la Búsqueda">${inner}</a>`:inner;
+  return `<tr><td>${k}</td><td style="text-align:right">${cell}</td></tr>`;};
 
 // ── mantenimiento ──
 $('#mStart').onclick=async()=>{try{const r=await api('/mantenimiento',{method:'POST',body:JSON.stringify({activar:+$('#mActivar').value,intervalo:+$('#mIntervalo').value})});
@@ -750,11 +755,17 @@ async function infoClasificacion(sist,cod){
     b.innerHTML=r.ok?`${r.titulo?`<div style="font-weight:600;margin-bottom:8px">${esc(r.titulo)}</div>`:''}<div style="line-height:1.65;font-size:13px">${esc(r.descripcion||'Sin descripción disponible (la IA no la generó).')}</div>`:`<span class="muted">${esc(r.motivo||'no disponible')}</span>`;
   }catch(e){const b=$('#iclasBody');if(b)b.textContent=e.message;}
 }
-function filtrarPorClasificacion(sist,cod){
-  estadoBusqueda.clas={sistema:sist,codigo:cod};estadoBusqueda.page=1;
-  if($('#sqQ'))$('#sqQ').value='';if($('#sqCdu'))$('#sqCdu').value=''; // resultado = exactamente esa clasificación
+// Filtro especial de Búsqueda (clasificación / contador del dashboard / día de ingesta): un único
+// objeto `extra` con los parámetros que entiende /catalogo + una `etiqueta` para el chip. Limpia la
+// caja de texto y abre la Búsqueda con EXACTAMENTE esos documentos.
+function irBusquedaFiltro(extra){
+  estadoBusqueda.extra=extra;estadoBusqueda.page=1;
+  if($('#sqQ'))$('#sqQ').value='';if($('#sqCdu'))$('#sqCdu').value='';
   go('search');
 }
+function filtrarPorClasificacion(sist,cod){irBusquedaFiltro({clasSistema:sist,clasCodigo:cod,etiqueta:`${sist.toUpperCase()} ${cod}`});}
+function filtrarCatalogo(filtro,etiqueta){irBusquedaFiltro({filtro,etiqueta:etiqueta||filtro});}
+function filtrarPorDia(dia){irBusquedaFiltro({dia,etiqueta:`Ingresados el ${dia}`});}
 
 function pintarDoc(r,ctx){
   const d=r.doc,vo=ctx&&ctx.obra,vol=ctx&&ctx.volver;
@@ -993,15 +1004,15 @@ function loadSearch(){if(!$('#sqQ'))construirSearch();buscarCatalogo(estadoBusqu
 async function buscarCatalogo(page){
   estadoBusqueda.page=page;
   const params=new URLSearchParams({q:$('#sqQ').value.trim(),tipo:$('#sqTipo').value,cdu:$('#sqCdu').value.trim(),orden:$('#sqOrden').value,page});
-  if(estadoBusqueda.clas){params.set('clasSistema',estadoBusqueda.clas.sistema);params.set('clasCodigo',estadoBusqueda.clas.codigo);}
+  if(estadoBusqueda.extra)for(const[k,v]of Object.entries(estadoBusqueda.extra)){if(k!=='etiqueta'&&v!=null&&v!=='')params.set(k,v);}
   pintarChipClas();
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
   try{const r=await api('/catalogo?'+params.toString());pintarBusqueda(r);}
   catch(e){$('#searchResults').innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
 }
 function pintarChipClas(){const el=$('#searchChip');if(!el)return;
-  if(estadoBusqueda.clas){el.innerHTML=`<span class="clasfilt">Filtro ${esc(estadoBusqueda.clas.sistema.toUpperCase())} <b>${esc(estadoBusqueda.clas.codigo)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>`;
-    $('#clasX').onclick=()=>{estadoBusqueda.clas=null;buscarCatalogo(1);};}
+  if(estadoBusqueda.extra&&estadoBusqueda.extra.etiqueta){el.innerHTML=`<span class="clasfilt">Filtro: <b>${esc(estadoBusqueda.extra.etiqueta)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>`;
+    $('#clasX').onclick=()=>{estadoBusqueda.extra=null;buscarCatalogo(1);};}
   else el.innerHTML='';}
 function docCard(d){
   const ph=d.tipo_recurso==='revista'?'📰':'📕';

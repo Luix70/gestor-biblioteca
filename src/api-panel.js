@@ -45,6 +45,31 @@ async function nombrePorId(db, coleccion, id, campo = 'nombre') {
 // Escapa una cadena para usarla literal dentro de una expresión regular de MongoDB.
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Filtros "especiales" del Dashboard → condición sobre 'biblioteca' (clic en un contador para ver
+// EXACTAMENTE esos documentos en la Búsqueda). Los de obras resuelven a sus tomos vía la colección 'obras'.
+const ausenteCampo = (campo) => ({ $or: [{ [campo]: { $exists: false } }, { [campo]: null }, { [campo]: '' }] });
+async function filtroEspecial(db, nombre) {
+    switch (nombre) {
+        case 'sin_isbn':         return { tipo_recurso: 'libro', ...ausenteCampo('isbn') };
+        case 'sin_hash':         return ausenteCampo('hash_contenido');
+        case 'sin_portada':      return ausenteCampo('portada');
+        case 'cdu_generica':     return { cdu: { $in: ['00', '0', '000'] } };
+        case 'pendientes':       return { estado_verificacion: 'pendiente' };
+        case 'sin_coleccion':    return ausenteCampo('coleccion');
+        case 'revision':         return { revision_requerida: true };
+        case 'tomos_sin_numero': return { obra: { $exists: true }, $or: [{ volumen_numero: { $exists: false } }, { volumen_numero: null }] };
+        case 'obras_incompletas': {
+            const ids = (await db.collection('obras').find({ completa: false }, { projection: { _id: 1 } }).toArray()).map(o => o._id);
+            return { obra: { $in: ids } };
+        }
+        case 'obras_revision': {
+            const ids = (await db.collection('obras').find({ revision_requerida: true }, { projection: { _id: 1 } }).toArray()).map(o => o._id);
+            return { obra: { $in: ids } };
+        }
+        default: return null;
+    }
+}
+
 /**
  * Rutas del PANEL DE CONTROL (montadas bajo /api). Acciones de operación: vigilante, papelera,
  * cuarentena, purga de obras, ingesta por día. (Mantenimiento y estadísticas viven en app.js.)
@@ -230,11 +255,23 @@ export function rutasPanel() {
                 match.$or = or;
             }
 
+            // Filtros del Dashboard: por día de ingesta y/o por contador especial (se combinan con AND).
+            const extras = [];
+            const dia = String(req.query.dia || '').trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
+                const d0 = new Date(dia + 'T00:00:00');
+                const d1 = new Date(d0); d1.setDate(d1.getDate() + 1);
+                extras.push({ fecha_ingreso: { $gte: d0, $lt: d1 } });
+            }
+            const fe = await filtroEspecial(db, String(req.query.filtro || '').trim());
+            if (fe) extras.push(fe);
+            const consulta = extras.length ? { $and: [...(Object.keys(match).length ? [match] : []), ...extras] } : match;
+
             const sort = orden === 'titulo' ? { titulo: 1 } : orden === 'antiguo' ? { fecha_ingreso: 1 } : { fecha_ingreso: -1 };
             const opciones = orden === 'titulo' ? { collation: { locale: 'es', strength: 1 } } : {};
-            const total = await db.collection('biblioteca').countDocuments(match);
+            const total = await db.collection('biblioteca').countDocuments(consulta);
             const docs = await db.collection('biblioteca').aggregate([
-                { $match: match }, { $sort: sort }, { $skip: (page - 1) * porPagina }, { $limit: porPagina },
+                { $match: consulta }, { $sort: sort }, { $skip: (page - 1) * porPagina }, { $limit: porPagina },
                 { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
                 { $project: {
                     titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
