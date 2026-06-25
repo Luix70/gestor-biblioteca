@@ -190,7 +190,11 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .loginbox{position:relative;z-index:1;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:0;width:330px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
 .loginbanner{display:block;width:100%;height:150px;object-fit:cover}
 /* Cuerpo del login: cuadrado 1:1 con Placa2 como fondo (se muestra entera) y los controles centrados. */
-.loginbody{position:relative;width:100%;aspect-ratio:1/1;background:#0a0d12 url('/Placa2.png') center/cover no-repeat;display:flex;flex-direction:column;justify-content:center;gap:11px;padding:26px}
+.loginbody{position:relative;width:100%;aspect-ratio:1/1;background:#0a0d12 url('/Placa2.png') center/cover no-repeat;display:flex;flex-direction:column;justify-content:center;gap:9px;padding:26px}
+.loginbody .loginlbl{text-align:center;text-transform:uppercase;letter-spacing:1.5px;font-size:12px;color:#efe9da;margin:0 0 -3px;text-shadow:0 1px 4px #000,0 0 3px #000}
+.loginbody select,.loginbody input{background:rgba(8,11,16,.72);border-color:rgba(255,255,255,.14);color:#fff}
+.loginbody select:focus,.loginbody input:focus{border-color:var(--acc);background:rgba(8,11,16,.86)}
+.loginbody .btn{margin-top:6px}
 .loginbox .err{color:var(--bad);font-size:12px;text-align:center;min-height:16px;text-shadow:0 1px 3px #000}
 .loginbox .btn{width:100%;justify-content:center;padding:11px}
 .userbox{display:flex;align-items:center;gap:8px}.userbox .who{font-size:12px;color:var(--mut)}
@@ -381,8 +385,10 @@ body.guest .admin-only{display:none!important}
   <form class="loginbox" id="loginForm">
     <img class="loginbanner" src="/Banner.png" alt="" onerror="this.remove()">
     <div class="loginbody">
+      <label class="loginlbl">Usuario</label>
       <select id="lgUser" autocomplete="username"></select>
-      <input id="lgPass" type="password" autocomplete="current-password" placeholder="Contraseña">
+      <label class="loginlbl">Contraseña</label>
+      <input id="lgPass" type="password" autocomplete="current-password">
       <button class="btn pri" type="submit">Entrar</button>
       <div class="err" id="lgErr"></div>
     </div>

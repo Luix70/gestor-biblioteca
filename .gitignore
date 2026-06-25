@@ -26,3 +26,6 @@ Thumbs.db
 
 # editor/backup leftovers
 *.bak
+
+# mockups de diseño (no son assets de producción)
+LoginPageMockup.jpg
