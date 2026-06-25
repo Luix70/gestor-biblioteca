@@ -260,6 +260,17 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         console.warn(`[Servicio] No se pudieron escribir los registros JSON/MARC: ${e.message}`);
     }
 
+    // 6. CONFORMAR AL INGERIR (opcional): corre el Conformador sobre el doc recién catalogado para
+    //    "acertar desde el principio" en ingestas sueltas/manuales. FIRE-AND-FORGET: no bloquea la cola
+    //    del Inbox (como resolverObraPorIsbn). Por defecto OFF; se activa con el toggle global
+    //    CONFORMAR_AL_INGERIR=1 o por petición (contexto.conformar). Import dinámico: solo se carga si toca.
+    if (process.env.CONFORMAR_AL_INGERIR === '1' || contexto.conformar) {
+        import('./mantenimiento/conformador.js')
+            .then(({ conformarAlIngerir }) => conformarAlIngerir(resultado._id))
+            .then(r => { if (r?.ok && r.cambios) console.log(`   🧹 Conformado al ingerir (${r.cambios} cambio/s): ${documento.titulo || resultado._id}.`); })
+            .catch(() => {});
+    }
+
     return {
         _id: resultado._id,
         operacion: resultado.operacion,

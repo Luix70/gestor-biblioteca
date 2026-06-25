@@ -111,6 +111,9 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
 
     const ubicacion = ubicacionDe(req.body);
     const contexto = ubicacion ? { ubicacion } : {};
+    // Conformar al ingerir bajo demanda (además del toggle global CONFORMAR_AL_INGERIR): ?conformar=1
+    // o body.conformar — útil para una ingesta manual suelta que quieras dejar perfecta ya.
+    if (req.body?.conformar === '1' || req.body?.conformar === true || req.query?.conformar === '1') contexto.conformar = true;
     const unidades = agrupar(archivos);
     const resultados = [];
 
