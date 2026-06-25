@@ -1,22 +1,25 @@
 #!/usr/bin/env node
 /**
- * DIAGNÓSTICO (SOLO LECTURA) de revistas conflacionadas.
+ * DIAGNÓSTICO (SOLO LECTURA) de revistas conflacionadas / carpetas colisionadas.
  *
- * Antiguo bug de dedup: cuando NO se extraía el mes de un número fechado por nombre ("octubre 2015"),
- * la clave caía a (issn + año), de modo que VARIOS números del mismo año se fusionaban en un único
- * registro Y en una única carpeta `…/revistas/<issn>/<año>/`. Los ficheros NO se borran (solo se borra
- * un hash idéntico), así que los números "absorbidos" siguen en disco, en la misma carpeta, sin catalogar
- * aparte. La señal es: una carpeta de número con MÁS DE UN fichero-documento (pdf/epub/…).
+ * Recorre el árbol CDU buscando carpetas de revista con MÁS de un fichero-documento y, CRUZANDO con
+ * la BD (biblioteca.nombre_archivo), distingue las dos situaciones —muy distintas— que producen eso:
  *
- * Este script NO modifica nada: recorre el árbol CDU, cuenta y reporta. Mide el alcance del problema
- * antes de cualquier migración. (La recuperación —re-catalogar los ficheros absorbidos— es el Paso 2.)
+ *   (A) REGISTRO PERDIDO  — el fichero está en disco pero NINGÚN documento lo referencia: el bug de
+ *       dedup fusionó ese número en el registro de otro (pérdida real de catálogo; recuperable
+ *       re-catalogando el fichero, que sigue en disco).
+ *   (B) COLISIÓN DE CARPETA — varios documentos DISTINTOS (cada uno con su registro en BD) acabaron
+ *       en la MISMA carpeta (la ruta de revista no lleva discriminador), pisándose el registro.json /
+ *       las portadas. No hay pérdida de catálogo: solo el layout en disco colisiona.
  *
- * Uso (en el contenedor del NAS, donde está montado el árbol CDU):
+ * Además CLASIFICA cada carpeta: «revista» real, «serie de LIBROS mal clasificada» (ficheros con
+ * nombre de ISBN) o «título BASURA» (marca de agua del productor del PDF como título → libro mal
+ * clasificado). Así se ve cuánto es problema de revistas y cuánto de clasificación/extracción.
+ *
+ * NO modifica nada. Uso en el contenedor del NAS:
  *   docker exec gestor-biblioteca node scripts/diagnostico-revistas.js
- *   docker exec gestor-biblioteca node scripts/diagnostico-revistas.js --listar   # detalle por carpeta
- *
- * Limitación: detecta números en formato documento (pdf/epub/…). Las revistas escaneadas como GRUPOS
- * de imágenes no se evalúan (no hay un fichero-documento que contar).
+ *   docker exec gestor-biblioteca node scripts/diagnostico-revistas.js --listar
+ *   docker exec gestor-biblioteca node scripts/diagnostico-revistas.js --sin-bd   # solo disco
  */
 import 'dotenv/config';
 import fs from 'node:fs/promises';
@@ -29,13 +32,17 @@ const resolver = (p, def) => { const v = p || def; return path.isAbsolute(v) ? v
 const DIR_CDU = resolver(process.env.PATH_CDU, 'CDU');
 
 const DETALLE = process.argv.includes('--listar');
+const SIN_BD = process.argv.includes('--sin-bd');
 
-// Extensiones de "documento" (el fichero real del número) — NO las imágenes materializadas (portada-*.jpg).
 const EXT_DOC = new Set(['.pdf', '.epub', '.mobi', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.zip', '.rar']);
 const esDoc = (n) => EXT_DOC.has(path.extname(n).toLowerCase());
-const soloAño = (seg) => /^\d{4}$/.test(seg);   // "2015" (sin mes) vs "2015-10"
+const soloAño = (seg) => /^\d{4}$/.test(seg);
 
-/** Recorre el árbol y emite { dir, archivos } de cada carpeta SITUADA dentro de un subárbol `revistas`. */
+// Heurísticas de mala clasificación.
+const ISBNRX = /^(97[89])?\d{9,12}[\dX]$/i;
+const esISBNnombre = (n) => ISBNRX.test(path.basename(n, path.extname(n)).replace(/\(\d+\)$/, '').replace(/[ _\-.]/g, ''));
+const TITULO_BASURA = /creator_|pscript|pdf ?repair|datanumen|acrobat ?distiller|ghostscript|quartz ?pdf|untitled/i;
+
 async function* carpetasDeRevista(dir, dentro = false) {
     let entradas;
     try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
@@ -46,82 +53,101 @@ async function* carpetasDeRevista(dir, dentro = false) {
     }
 }
 
-async function leerRegistro(dir) {
-    try { return JSON.parse(await fs.readFile(path.join(dir, 'registro.json'), 'utf8')); }
-    catch { return null; }
+async function cargarMapaBD() {
+    if (SIN_BD) return null;
+    try {
+        const { conectarDB } = await import('../src/database.js');
+        const db = await conectarDB();
+        const docs = await db.collection('biblioteca')
+            .find({}, { projection: { nombre_archivo: 1, archivos_originales: 1, tipo_recurso: 1 } }).toArray();
+        const mapa = new Map();
+        for (const d of docs) {
+            if (d.nombre_archivo) mapa.set(d.nombre_archivo, d);
+            for (const a of (d.archivos_originales || [])) mapa.set(a, d);
+        }
+        console.log(`✔ Cruce con BD: ${docs.length} documentos indexados por nombre de fichero.\n`);
+        return mapa;
+    } catch (e) {
+        console.warn(`⚠ Sin cruce con BD (${e.message}). Informe SOLO por disco (cuentas = cota superior).\n`);
+        return null;
+    }
+}
+
+function clasificar(seg, segPadre, docFiles) {
+    if (TITULO_BASURA.test(seg) || TITULO_BASURA.test(segPadre) || docFiles.some(f => TITULO_BASURA.test(f))) return 'basura';
+    if (docFiles.filter(esISBNnombre).length >= Math.ceil(docFiles.length / 2)) return 'libros';
+    return 'revista';
 }
 
 async function main() {
     try { await fs.access(DIR_CDU); }
-    catch { console.error(`❌ No existe el árbol CDU en ${DIR_CDU}. ¿Ruta PATH_CDU correcta / montada?`); process.exit(2); }
-
+    catch { console.error(`❌ No existe el árbol CDU en ${DIR_CDU}.`); process.exit(2); }
     console.log(`🔎 Diagnóstico de revistas (SOLO LECTURA) sobre ${DIR_CDU}\n`);
 
-    let carpetas = 0, totalDocs = 0;
-    let conflacion = 0, absorbidos = 0, conflacionSoloAño = 0, absorbidosSoloAño = 0;
-    let sinRegistro = 0;
+    const mapa = await cargarMapaBD();
+    const tieneReg = (f) => mapa ? mapa.has(f) : null;
+
+    let carpetas = 0, totalDocs = 0, conflacion = 0;
+    let perdidos = 0, perdidosRevista = 0;                 // ficheros sin registro en BD (A)
+    let colisionCarpetas = 0, colisionRegistros = 0;       // registros distintos compartiendo carpeta (B)
+    const porClase = { revista: { carpetas: 0, perdidos: 0 }, libros: { carpetas: 0, perdidos: 0 }, basura: { carpetas: 0, perdidos: 0 } };
     const detalle = [];
 
     for await (const { dir, archivos } of carpetasDeRevista(DIR_CDU)) {
         const docs = archivos.filter(esDoc);
-        carpetas++;
-        totalDocs += docs.length;
+        carpetas++; totalDocs += docs.length;
+        if (docs.length < 2) continue;
+        conflacion++;
 
-        const reg = await leerRegistro(dir);
-        if (!reg) sinRegistro++;
-        const catalogados = new Set([reg?.nombre_archivo, ...(reg?.archivos_originales || [])].filter(Boolean));
-        // "Absorbidos" = ficheros-documento de la carpeta que NO son el catalogado. Sin registro, todos
-        // menos uno se cuentan como absorbidos (la carpeta cataloga, como mucho, un número).
-        const extra = catalogados.size
-            ? docs.filter(d => !catalogados.has(d))
-            : docs.slice(1);
+        const seg = path.basename(dir), segPadre = path.basename(path.dirname(dir));
+        const clase = clasificar(seg, segPadre, docs);
+        porClase[clase].carpetas++;
 
-        const seg = path.basename(dir);
-        const esSoloAño = soloAño(seg);
+        const sinReg = mapa ? docs.filter(f => !tieneReg(f)) : docs.slice(1); // sin BD: estimación K-1
+        const conReg = mapa ? docs.filter(f => tieneReg(f)) : [];
+        const distintos = mapa ? new Set(conReg.map(f => String(mapa.get(f)._id))).size : 0;
 
-        if (docs.length >= 2) {
-            conflacion++;
-            absorbidos += extra.length;
-            if (esSoloAño) { conflacionSoloAño++; absorbidosSoloAño += extra.length; }
-            if (DETALLE) detalle.push({
-                ruta: path.relative(DIR_CDU, dir), seg, esSoloAño, n: docs.length,
-                catalogado: reg?.nombre_archivo || '(sin registro)',
-                absorbidos: extra,
-            });
-        }
+        perdidos += sinReg.length;
+        porClase[clase].perdidos += sinReg.length;
+        if (clase === 'revista') perdidosRevista += sinReg.length;
+        if (distintos >= 2) { colisionCarpetas++; colisionRegistros += distintos; }
+
+        if (DETALLE) detalle.push({ ruta: path.relative(DIR_CDU, dir), clase, n: docs.length, soloAño: soloAño(seg), sinReg, distintos });
     }
 
-    const ok = carpetas - conflacion;
-    const fmt = (n) => String(n).padStart(6);
-
+    const f = (n) => String(n).padStart(6);
     console.log('── Resumen ───────────────────────────────────────────────');
-    console.log(`Carpetas de número con documento:        ${fmt(carpetas)}`);
-    console.log(`Ficheros-documento en disco:             ${fmt(totalDocs)}`);
-    console.log(`  · carpetas con 1 documento (OK):       ${fmt(ok)}`);
-    console.log(`  · carpetas con ≥2 documentos (CONFLACIÓN): ${fmt(conflacion)}`);
-    console.log(`      de ellas en carpetas «solo año»:   ${fmt(conflacionSoloAño)}  (la firma del bug del mes)`);
-    if (sinRegistro) console.log(`  · carpetas sin registro.json (huérfanas):  ${fmt(sinRegistro)}`);
-    console.log('──────────────────────────────────────────────────────────');
-    console.log(`NÚMEROS ABSORBIDOS (en disco, sin catalogar aparte): ${absorbidos}`);
-    console.log(`   de ellos en carpetas «solo año»:                  ${absorbidosSoloAño}`);
+    console.log(`Carpetas de número con documento:            ${f(carpetas)}`);
+    console.log(`Ficheros-documento en disco:                 ${f(totalDocs)}`);
+    console.log(`Carpetas con ≥2 documentos:                  ${f(conflacion)}`);
     console.log('');
-    if (absorbidos === 0) {
-        console.log('✅ No se detectan números absorbidos: no hay conflaciones recuperables en disco.');
+    if (mapa) {
+        console.log(`(A) REGISTROS PERDIDOS  (fichero en disco SIN documento en BD): ${perdidos}`);
+        console.log(`      · de carpetas tipo «revista» real:                       ${perdidosRevista}   ← lo recuperable de verdad`);
+        console.log(`      · de carpetas «libros»/«basura» (mal clasificadas):      ${perdidos - perdidosRevista}`);
+        console.log(`(B) COLISIÓN DE CARPETA (registros DISTINTOS compartiendo carpeta, SIN pérdida):`);
+        console.log(`      · carpetas afectadas: ${colisionCarpetas}  ·  registros implicados: ${colisionRegistros}`);
     } else {
-        console.log(`➡  Estimación: tienes ~${absorbidos} número(s) de revista en disco que el bug fusionó en`);
-        console.log('   el registro de otro número. NINGUNO se ha perdido del disco; el Paso 2 (migración) los');
-        console.log('   re-cataloga como números distintos (ya con el mes recuperado y la dedup por cabecera+clave).');
+        console.log(`Números ABSORBIDOS estimados (cota superior, K-1 por carpeta): ${perdidos}`);
+        console.log('  (ejecuta dentro del contenedor SIN --sin-bd para separar pérdidas reales de colisiones)');
     }
-    if (DETALLE && detalle.length) {
-        console.log('\n── Detalle (carpetas conflacionadas) ─────────────────────');
-        for (const d of detalle.sort((a, b) => b.n - a.n)) {
-            console.log(`\n• ${d.ruta}   [${d.n} docs${d.esSoloAño ? ', SOLO AÑO' : ''}]`);
-            console.log(`    catalogado: ${d.catalogado}`);
-            for (const a of d.absorbidos) console.log(`    absorbido : ${a}`);
+    console.log('');
+    console.log('── Por clase de carpeta ──────────────────────────────────');
+    console.log(`  REVISTA real:                  carpetas ${f(porClase.revista.carpetas)} · perdidos ${porClase.revista.perdidos}`);
+    console.log(`  LIBROS (ISBN) mal clasificados:carpetas ${f(porClase.libros.carpetas)} · perdidos ${porClase.libros.perdidos}`);
+    console.log(`  TÍTULO BASURA (productor PDF):  carpetas ${f(porClase.basura.carpetas)} · perdidos ${porClase.basura.perdidos}`);
+
+    if (DETALLE) {
+        const orden = { revista: 0, libros: 1, basura: 2 };
+        console.log('\n── Detalle ───────────────────────────────────────────────');
+        for (const d of detalle.sort((a, b) => orden[a.clase] - orden[b.clase] || b.n - a.n)) {
+            const etiq = d.clase === 'revista' ? 'REVISTA' : d.clase === 'libros' ? 'LIBROS?' : 'BASURA';
+            const col = d.distintos >= 2 ? ` · colisión(${d.distintos} registros)` : '';
+            console.log(`\n• [${etiq}${d.soloAño ? ',AÑO' : ''}] ${d.ruta}   (${d.n} docs, ${d.sinReg.length} sin registro${col})`);
+            for (const a of d.sinReg) console.log(`    perdido: ${a}`);
         }
-    } else if (!DETALLE && conflacion) {
-        console.log('\n(añade --listar para ver carpeta por carpeta qué ficheros quedaron sin catalogar)');
     }
+    process.exit(0);
 }
 
 main().catch(e => { console.error('Error:', e.message); process.exit(1); });
