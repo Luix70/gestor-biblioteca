@@ -137,21 +137,33 @@ async function recuperar(db) {
     }
     console.log(`\n══ FASE RECUPERAR ══  ${perdidos.length} fichero(s) de número en disco sin registro (revistas)`);
 
-    let hechos = 0, fallos = 0, n = 0;
+    const STAGING = path.join(RAIZ, 'temp', 'recup-revistas');
+    let hechos = 0, fallos = 0, ausentes = 0, n = 0;
     for (const abs of perdidos) {
         if (n++ >= LIMITE) { console.log(`  (límite ${LIMITE} alcanzado)`); break; }
         if (!EJECUTAR) { console.log(`  [dry-run] re-catalogaría: ${path.relative(DIR_CDU, abs)}`); continue; }
+        // CLAVE: el original VIVE en el árbol CDU. NUNCA se lo damos directo al pipeline — para un
+        // duplicado exacto el pipeline hace fs.rm del "origen" (= borraría el fichero del catálogo).
+        // Lo COPIAMOS a un staging desechable y catalogamos ESA copia; el original queda intacto.
+        try { await fs.access(abs); }
+        catch { console.warn(`  ⊘ ya no está en disco (revisar Recycling/obras): ${path.relative(DIR_CDU, abs)}`); ausentes++; continue; }
+        await fs.mkdir(STAGING, { recursive: true });
+        const copia = path.join(STAGING, path.basename(abs));
         try {
-            const r = await ingestarRecurso({ rutas: [abs] });
+            await fs.copyFile(abs, copia);
+            const r = await ingestarRecurso({ rutas: [copia] });
             console.log(`  ✔ ${r.operacion} · ${r.documento?.titulo || path.basename(abs)}  (${r.issn || 's/issn'})`);
             hechos++;
         } catch (e) {
             console.warn(`  ✗ ${path.basename(abs)}: ${e.message}`);
             fallos++;
+        } finally {
+            await fs.rm(copia, { force: true }).catch(() => {});
         }
     }
-    if (EJECUTAR) console.log(`  Recatalogados: ${hechos} · fallos: ${fallos}`);
-    if (EJECUTAR && hechos) console.log('  NOTA: la copia "absorbida" original queda en su carpeta vieja (política no-borrar);\n        un pase de integridad la reciclará como huérfana, o se limpia a mano.');
+    await fs.rm(STAGING, { recursive: true, force: true }).catch(() => {});
+    if (EJECUTAR) console.log(`  Recatalogados: ${hechos} · fallos: ${fallos} · ausentes en disco: ${ausentes}`);
+    if (EJECUTAR && hechos) console.log('  NOTA: el original "absorbido" queda en su carpeta vieja (intacto); un pase de integridad lo recicla.');
 }
 
 async function main() {
