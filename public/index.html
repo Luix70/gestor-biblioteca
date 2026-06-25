@@ -1103,6 +1103,22 @@ async function cargarUsuariosLogin(){try{const r=await fetch('/api/usuarios').th
   sel.innerHTML=(r.usuarios||[]).map(u=>`<option value="${esc(u.user)}">${esc(u.user)}${u.rol==='admin'?' · admin':''}</option>`).join('')||'<option value="">—</option>';}catch{}}
 const tokenDeCookie=()=>{const m=document.cookie.match(/(?:^|;\s*)panel_token=([^;]+)/);return m?decodeURIComponent(m[1]):'';};
 const limpiarCookieToken=()=>{document.cookie='panel_token=; Max-Age=0; path=/';};
+// AUTO-LOGIN POR URL (robusto): https://host/?u=USUARIO&p=CONTRASEÑA  (también ?user=&pwd=).
+// La query la lee JS directamente, así que NO depende de la cabecera Basic (que DSM/el proxy inverso
+// se comen en :4443) ni cachea credenciales en el navegador (lo que dejaba el desplegable bloqueado).
+// Tras intentarlo, LIMPIA las credenciales de la barra/historial pase lo que pase.
+async function autoLoginURL(){
+  const q=new URLSearchParams(location.search);
+  const u=q.get('u')||q.get('user'), p=q.get('p')||q.get('pwd');
+  const limpiar=()=>history.replaceState(null,'',location.pathname+location.hash);
+  if(!u||!p)return false;
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:u,password:p})}).then(x=>x.json());
+    limpiar();
+    if(r&&r.ok){TOKEN=r.token;USER=r.usuario;ROL=r.rol;localStorage.setItem('panel_token',TOKEN);return true;}
+  }catch{limpiar();}
+  return false;
+}
 function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
 function arrancar(){$('#login').classList.remove('show');aplicarRol();go('search');refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
@@ -1114,8 +1130,10 @@ $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent=''
 $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};mostrarLogin();};
 // sesión inicial: token guardado, o el sembrado por auto-login de URL (cookie), o mostrar el login
 (async()=>{
-  // El auto-login por URL (cookie sembrada por la cabecera Basic) tiene PRIORIDAD sobre un token
-  // viejo de localStorage: si llega una cookie nueva, se usa esa (antes solo se miraba si NO había token).
+  // 1) Credenciales en la query (?u=&p=): forma robusta, atraviesa DSM/proxy. Prioritaria.
+  if(await autoLoginURL())return arrancar();
+  // 2) Cookie sembrada por la cabecera Basic (https://user:pwd@host): solo si llega a la app (acceso
+  //    directo; vía DSM:4443 normalmente NO). Tiene prioridad sobre un token viejo de localStorage.
   const ck=tokenDeCookie();
   if(ck){TOKEN=ck;localStorage.setItem('panel_token',TOKEN);limpiarCookieToken();}
   if(!TOKEN)return mostrarLogin();
