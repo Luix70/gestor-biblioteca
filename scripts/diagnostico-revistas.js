@@ -144,7 +144,7 @@ async function main() {
             const etiq = d.clase === 'revista' ? 'REVISTA' : d.clase === 'libros' ? 'LIBROS?' : 'BASURA';
             const col = d.distintos >= 2 ? ` · colisión(${d.distintos} registros)` : '';
             console.log(`\n• [${etiq}${d.soloAño ? ',AÑO' : ''}] ${d.ruta}   (${d.n} docs, ${d.sinReg.length} sin registro${col})`);
-            for (const a of d.sinReg) console.log(`    perdido: ${a}`);
+            for (const a of d.sinReg) console.log(`    sin registro en BD (fichero a salvo en disco): ${a}`);
         }
     }
     process.exit(0);
