@@ -237,12 +237,12 @@ body.guest .admin-only{display:none!important}
   <aside class="sidebar" id="sidebar">
     <div class="brand"><div class="logo">📚<img class="logoimg" src="/logo.png" alt="" onerror="this.remove()"></div><div><b>Bibliotheca Ludoviciana</b><small>Panel de control</small></div></div>
     <nav id="nav">
-      <button data-p="dashboard" class="on"><span class="ic">▥</span> Dashboard</button>
+      <button data-p="search" class="on"><span class="ic">🔍</span> Búsqueda</button>
+      <button data-p="dashboard"><span class="ic">▥</span> Dashboard</button>
       <button data-p="activity"><span class="ic">📡</span> Actividad</button>
       <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
       <button data-p="pap"><span class="ic">♻</span> Papelera</button>
       <button data-p="obras"><span class="ic">📖</span> Obras</button>
-      <button data-p="search"><span class="ic">🔍</span> Búsqueda</button>
       <button data-p="inbox"><span class="ic">📥</span> Inbox <span class="soon">MAQUETA</span></button>
     </nav>
     <div class="sb-foot">v1 · cuadro de mando<br><span id="clock"></span></div>
@@ -1101,7 +1101,7 @@ const tokenDeCookie=()=>{const m=document.cookie.match(/(?:^|;\s*)panel_token=([
 const limpiarCookieToken=()=>{document.cookie='panel_token=; Max-Age=0; path=/';};
 function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
-function arrancar(){$('#login').classList.remove('show');aplicarRol();go('dashboard');refrescarEstado();loadDashboard();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
+function arrancar(){$('#login').classList.remove('show');aplicarRol();go('search');refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
     const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.motivo||'usuario o contraseña incorrectos');
