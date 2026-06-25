@@ -2,6 +2,7 @@ import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
 import { resolverColeccion } from './utils/colecciones.js';
 import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
+import { resolverCabecera, registrarNumeroEnCabecera, claveNumero, tituloCabecera } from './utils/revistas.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
 
@@ -16,7 +17,7 @@ const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra'];
+    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra'];
 
     // (1) Rellenar huecos.
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
@@ -72,9 +73,17 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     // del try para ser accesible también desde el manejador de E11000 (catch). Lee docFinal en el
     // momento de la llamada (ya tendrá .obra/.volumen_numero fijados por el paso 2c).
     const registrarTomo = async (idFinal) => {
-        if (docFinal.obra && idFinal)
+        if (!docFinal.obra || !idFinal) return;
+        if (docFinal.tipo_recurso === 'revista') {
+            // Número de revista → inventario cronológico de la cabecera (no el array 1..N de libros).
+            await registrarNumeroEnCabecera(db, docFinal.obra, {
+                clave: docFinal.clave_numero || null, 'año': docFinal.año_edicion ?? null,
+                mes: docFinal.mes_publicacion ?? null, numero_issue: docFinal.numero_issue ?? null,
+            }, idFinal);
+        } else {
             // volumen_numero puede ser null ("tomo ?"): se registra igual (nunca se descarta un tomo).
             await registrarVolumenEnObra(db, docFinal.obra, docFinal.volumen_numero ?? null, idFinal, docFinal.obra_total);
+        }
     };
 
     try {
@@ -127,9 +136,10 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             docFinal.coleccion = _id;
         }
 
-        // 2c. Obra multivolumen (tras editorial/colección, que se enlazan a la obra). Todos los
-        // tomos comparten la CDU de la obra (un solo classmark → se archivan juntos).
-        if (docFinal.obra_titulo && typeof docFinal.obra_titulo === 'string') {
+        // 2c. Obra multivolumen de LIBROS (tras editorial/colección, que se enlazan a la obra). Todos
+        // los tomos comparten la CDU de la obra (un solo classmark → se archivan juntos). Las revistas
+        // NO entran aquí: tienen su propio camino (2d), aunque traigan obra_titulo.
+        if (docFinal.obra_titulo && typeof docFinal.obra_titulo === 'string' && docFinal.tipo_recurso !== 'revista') {
             const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
             const colId = (docFinal.coleccion && typeof docFinal.coleccion !== 'string') ? docFinal.coleccion : null;
             const { _id, cdu: cduObra, creada } = await resolverObra(db, {
@@ -148,6 +158,26 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 resolverObraPorIsbn(db, _id)
                     .then(r => { if (r?.ok) console.log(`   📖 Obra resuelta por ISBN: "${r.titulo}".`); })
                     .catch(() => {});
+            }
+        }
+
+        // 2d. CABECERA DE REVISTA (se modela como obra: tipo:'revista' + issn_obra). El ISSN es el
+        // pivote: cada número se cuelga de su cabecera y su identidad es (cabecera, clave-de-número),
+        // NO el ISSN suelto (eso fusionaba TODOS los números en un solo documento). Sin fecha/nº →
+        // miembro "sin fecha" de la cabecera (nunca se fusiona, nunca se pierde).
+        if (docFinal.tipo_recurso === 'revista') {
+            const cn = claveNumero(docFinal);
+            if (cn) docFinal.clave_numero = cn; else delete docFinal.clave_numero;
+            const cabTitulo = tituloCabecera(docFinal.obra_titulo || docFinal.titulo);
+            if (docFinal.issn || cabTitulo) {
+                const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
+                const colId = (docFinal.coleccion && typeof docFinal.coleccion !== 'string') ? docFinal.coleccion : null;
+                const { _id, cdu: cduCab, creada } = await resolverCabecera(db, {
+                    titulo: cabTitulo, issn: docFinal.issn, editorialId: edId, coleccionId: colId, cdu: docFinal.cdu,
+                });
+                if (creada) docFinal.alertas_agente.push(`Nueva cabecera de revista registrada: ${cabTitulo || docFinal.issn}`);
+                if (_id) { docFinal.obra = _id; if (cabTitulo) docFinal.obra_titulo = cabTitulo; }
+                if (cduCab) docFinal.cdu = cduCab; // los números comparten la CDU de la cabecera
             }
         }
 
@@ -211,11 +241,14 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             if (docFinal.obra && docFinal.volumen_numero != null) {
                 filtro = { obra: docFinal.obra, volumen_numero: docFinal.volumen_numero };
             } else if (docFinal.tipo_recurso === 'revista') {
-                if (docFinal.issn && docFinal.año_edicion && docFinal.mes_publicacion) {
-                    filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion, mes_publicacion: docFinal.mes_publicacion };
-                } else if (docFinal.issn && docFinal.año_edicion) {
-                    filtro = { issn: docFinal.issn, año_edicion: docFinal.año_edicion };
-                } else {
+                // Identidad ROBUSTA de un número = (cabecera, clave-de-número). El ISSN suelto YA NO se
+                // usa como clave (fusionaba todos los números). Con cabecera pero SIN clave (sin fecha/nº)
+                // → insertar (miembro "sin fecha"). Sin cabecera (sin ISSN) → caer a (título + año [+ mes]).
+                if (docFinal.obra) {
+                    if (docFinal.clave_numero) filtro = { obra: docFinal.obra, clave_numero: docFinal.clave_numero };
+                } else if (docFinal.titulo && docFinal.año_edicion && docFinal.mes_publicacion) {
+                    filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion, mes_publicacion: docFinal.mes_publicacion };
+                } else if (docFinal.titulo && docFinal.año_edicion) {
                     filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
                 }
             } else if (docFinal.isbn && !docFinal.obra) {
@@ -240,9 +273,9 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                     }
                     // Ningún doc con este ISBN tiene este formato → otro formato del mismo libro: insertar.
                 }
-            } else if (docFinal.issn) {
-                filtro = { issn: docFinal.issn };
             }
+            // (Se RETIRA el antiguo fallback `else if (issn) → {issn}`: fusionaba TODOS los números de
+            //  una revista en un solo documento. Las revistas se deduplican ahora por (cabecera, clave).)
             // Sin filtro → siempre insertar
         }
 

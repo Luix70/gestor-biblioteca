@@ -61,7 +61,27 @@ const VALIDADOR_OBRAS = {
             },
             // Tomos sin número determinable ("?"): se guardan igual (nunca se descartan) y marcan revisión.
             volumenes_sin_numero: { bsonType: ['array', 'null'], items: { bsonType: 'objectId' } },
-            revision_requerida:   { bsonType: ['bool', 'null'], description: 'Algo se guardó desordenado (tomo sin nº / ISBN en conflicto): revisar.' },
+            // ── Revistas: una obra con tipo:'revista' es una CABECERA (p. ej. ISSN 1699-7913); sus
+            //    "tomos" son los NÚMEROS, en un inventario cronológico propio (no el array 1..N) ──
+            tipo:        { bsonType: ['string', 'null'], description: "Naturaleza de la obra: 'libro' (ausente) o 'revista' (cabecera)." },
+            issn_obra:   { bsonType: ['string', 'null'], description: 'ISSN de la cabecera de revista (autoridad, análogo a isbn_obra).' },
+            numeros: {
+                bsonType: ['array', 'null'],
+                description: 'Inventario cronológico de los números de la revista.',
+                items: {
+                    bsonType: 'object',
+                    properties: {
+                        clave:        { bsonType: 'string', description: 'Clave estable del número (AAAA-MM / n<nº> / AAAA).' },
+                        'año':        { bsonType: ['int', 'null'] },
+                        mes:          { bsonType: ['int', 'null'] },
+                        numero_issue: { bsonType: ['string', 'int', 'null'] },
+                        _id:          { bsonType: ['objectId', 'null'] },
+                    },
+                },
+            },
+            numeros_sin_fecha: { bsonType: ['array', 'null'], items: { bsonType: 'objectId' }, description: 'Números con ISSN pero sin fecha/nº detectables.' },
+            numeros_presentes: { bsonType: ['int', 'null'], description: 'Nº de números ya catalogados en la cabecera.' },
+            revision_requerida:   { bsonType: ['bool', 'null'], description: 'Algo se guardó desordenado (tomo sin nº / número sin fecha / ISBN en conflicto): revisar.' },
             fecha_creacion:     { bsonType: 'date' },
             fecha_actualizacion:{ bsonType: ['date', 'null'] },
             nsfw:               { bsonType: ['bool', 'null'], description: 'No apto para invitados: oculta la obra Y sus tomos a guest (solo admin).' },
@@ -141,11 +161,14 @@ async function main() {
     }
     const obras = db.collection('obras');
     await asegurarIndice(obras, { isbn_obra: 1 }, { unique: true, sparse: true, name: 'idx_isbn_obra_unico' });
+    await asegurarIndice(obras, { issn_obra: 1 }, { unique: true, sparse: true, name: 'idx_issn_obra_unico' });
     await asegurarIndice(obras, { titulo: 1 },    { name: 'idx_titulo' });
     await asegurarIndice(obras, { coleccion: 1 }, { sparse: true, name: 'idx_coleccion' });
 
     // biblioteca: índice para localizar tomos por obra (y detectar obras incompletas).
     await asegurarIndice(biblioteca, { obra: 1, volumen_numero: 1 }, { sparse: true, name: 'idx_obra_volumen' });
+    // biblioteca: número de revista por (cabecera, clave) — dedup robusto de números de revista.
+    await asegurarIndice(biblioteca, { obra: 1, clave_numero: 1 }, { sparse: true, name: 'idx_obra_clave_numero' });
 
     console.log('\nListo.\n');
     process.exit(0);

@@ -45,6 +45,26 @@ const MESES = {
     en: ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'jan', 'apr', 'jun', 'jul', 'aug', 'sept', 'dec'],
 };
 
+// Nombre (o abreviatura, es/en/fr) de mes → número 1..12. Cubre TODAS las entradas de MESES más las
+// formas plenas, para recuperar el MES de una revista fechada por nombre ("octubre 2015" → 10) — antes
+// se perdía y dejaba el número de revista sin fecha completa. Exportado para los helpers de revistas.
+export const MES_NUM = {
+    enero: 1, ene: 1, january: 1, jan: 1, janvier: 1, janv: 1,
+    febrero: 2, feb: 2, february: 2, 'février': 2, fevrier: 2, 'févr': 2, fevr: 2,
+    marzo: 3, march: 3, mars: 3,
+    abril: 4, abr: 4, april: 4, apr: 4, avril: 4, avr: 4,
+    mayo: 5, may: 5, mai: 5,
+    junio: 6, jun: 6, june: 6, juin: 6,
+    julio: 7, jul: 7, july: 7, juillet: 7, juil: 7,
+    agosto: 8, ago: 8, august: 8, aug: 8, 'août': 8, aout: 8,
+    septiembre: 9, sep: 9, sept: 9, september: 9, septembre: 9,
+    octubre: 10, oct: 10, october: 10, octobre: 10,
+    noviembre: 11, nov: 11, november: 11, novembre: 11,
+    diciembre: 12, dic: 12, december: 12, dec: 12, 'décembre': 12, decembre: 12, 'déc': 12,
+};
+/** Nombre/abreviatura de mes → número 1..12, o null si no se reconoce. */
+export const mesANumero = (s) => (s ? (MES_NUM[String(s).toLowerCase()] ?? null) : null);
+
 /**
  * Extrae editorial/colección de los corchetes iniciales al estilo ePubLibre/Lectulandia y
  * detecta la firma del formato:
@@ -145,12 +165,13 @@ export function parsearNombre(nombreArchivo) {
     // ¿Bloque de fecha "Mes[-Mes] Año" (señal fuerte de publicación periódica)?
     for (const [lang, meses] of Object.entries(MESES)) {
         const grupo = meses.join('|');
-        const re = new RegExp(`(?:${grupo})[a-zà-ÿ]*(?:[-/\\s]+(?:${grupo})[a-zà-ÿ]*)?[\\s,.–-]*((?:19|20)\\d{2})`, 'i');
+        // Capturamos el PRIMER mes (m[1]) además del año (m[2]) para no perder el mes ("octubre 2015").
+        const re = new RegExp(`(${grupo})[a-zà-ÿ]*(?:[-/\\s]+(?:${grupo})[a-zà-ÿ]*)?[\\s,.–-]*((?:19|20)\\d{2})`, 'i');
         const m = trabajo.match(re);
         if (m) {
             let titulo = trabajo.slice(0, m.index).replace(/[-–_\s]+$/, '').trim();
             if (!titulo) titulo = trabajo.replace(re, '').replace(/[-–_\s]+$/, '').trim();
-            return { titulo, autores: [], año_edicion: parseInt(m[1]), idioma: lang, esFechada: true, mes_publicacion: null, ...colExtra };
+            return { titulo, autores: [], año_edicion: parseInt(m[2]), idioma: lang, esFechada: true, mes_publicacion: mesANumero(m[1]), ...colExtra };
         }
     }
 
