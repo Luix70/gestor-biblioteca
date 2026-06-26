@@ -1,32 +1,33 @@
 /**
- * Lectura del CÓDIGO DE BARRAS de la cubierta de un PDF, ENFOCADA por recorte.
+ * Lectura del IDENTIFICADOR de una revista/libro escaneado, ENFOCADA, en UNA sola llamada de visión:
+ *   (a) el CÓDIGO DE BARRAS de la cubierta — recortes ajustados de las esquinas a alta resolución
+ *       (poppler en C, sin SIMD → apto para el Atom; la visión lee bien un recorte enfocado), y
+ *   (b) el ISSN IMPRESO en las páginas interiores (mancheta/créditos) — por si el código de barras de la
+ *       cubierta es COMERCIAL (UPC), no un 977-ISSN. En revistas el EAN-13 empieza por 977 y codifica el
+ *       ISSN; 978/979 → ISBN; cualquier otro EAN válido = comercial (entonces vale el ISSN impreso).
  *
- * La visión (Gemini) lee mal un código de barras diminuto perdido en la página entera, pero lee MUY
- * bien un recorte AJUSTADO y a alta resolución (comprobado). Por eso, con poppler (C, sin SIMD → apto
- * para el Atom) se recortan a alta resolución las ESQUINAS donde vive el código de barras (inferior
- * izquierda/derecha y borde derecho de la cubierta + franja inferior de la contracubierta) y se le pasan
- * ESOS recortes a la visión con una orden ENFOCADA: "tu única tarea es leer el código de barras".
- *
- * En revistas el EAN-13 empieza por 977 y CODIFICA el ISSN (el dato clave para agrupar números de la
- * misma cabecera). 978/979 → ISBN. El add-on EAN-2 (si es 1-12) se toma como MES. Devuelve
- * { issn?, isbn?, esRevista, mes_publicacion? } o null. El llamante lo invoca SOLO si aún no hay id.
+ * Devuelve { issn?, isbn?, esRevista, mes_publicacion? } o null. El llamante lo invoca SOLO si falta el
+ * identificador propio del tipo (revista→issn, libro→isbn).
  */
 import { conGemini } from './gemini.js';
 import { tamanoPagina, rasterizarRecorte } from './rasterizar-pdf.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
+import { validarISSN } from './identificadores.js';
 
 const ANCHO = Number(process.env.PDF_BARRAS_ANCHO || 3000); // px de ancho de página equivalente (DPI alto)
 const MODELO = { model: 'gemini-2.5-flash', generationConfig: { responseMimeType: 'application/json' } };
-const PROMPT = `Tu ÚNICA tarea es leer el CÓDIGO DE BARRAS de estas imágenes. Son recortes de las esquinas
-de la cubierta/contracubierta de una REVISTA o libro, donde está el código de barras EAN-13.
-En las revistas el código de barras EMPIEZA POR 977 y CODIFICA EL ISSN: es el dato MÁS IMPORTANTE.
-El código puede estar HORIZONTAL o GIRADO 90° (VERTICAL): búscalo en CUALQUIER orientación y léelo.
-Transcribe EXACTAMENTE sus 13 dígitos (los números impresos junto a las barras), SIN guiones ni espacios.
-Si a su derecha hay un pequeño add-on de 2 dígitos, transcríbelo aparte.
-Responde SOLO con JSON: {"codigo_barras":"<13 dígitos o vacío>","add_on":"<2 dígitos o vacío>"}.
-NO inventes dígitos: si de verdad NO ves ningún código de barras en los recortes, deja los campos vacíos.`;
+const PROMPT = `Tienes RECORTES de la cubierta (donde está el CÓDIGO DE BARRAS) y algunas PÁGINAS INTERIORES
+de una revista o libro. Devuelve SOLO un JSON con tres campos:
+- "codigo_barras": los 13 dígitos del EAN-13 de la cubierta, SIN guiones ni espacios, leídos en CUALQUIER
+  orientación (el código puede estar HORIZONTAL o GIRADO 90°/VERTICAL). Vacío si no lo ves. (En revistas
+  empieza por 977 y codifica el ISSN; en libros por 978/979.)
+- "add_on": el pequeño add-on de 2 dígitos a la derecha del código de barras, o vacío.
+- "issn_impreso": si en las PÁGINAS INTERIORES (mancheta/créditos/staff) hay un ISSN IMPRESO (formato
+  NNNN-NNNX, normalmente junto a la palabra "ISSN"), transcríbelo (con su guion); si no, vacío. Esto importa
+  porque el código de barras de la cubierta puede ser COMERCIAL (un UPC de precio), NO el ISSN.
+NO inventes nada: deja vacío lo que no veas con seguridad.`;
 
-// Recortes candidatos (fracciones del lienzo) donde suele estar el código de barras de una revista.
+// Recortes candidatos (fracciones del lienzo) de la CUBIERTA donde suele estar el código de barras.
 function recortesPortada() {
     return [
         { p: 1, fx: 0.52, fy: 0.58, fw: 0.48, fh: 0.42 }, // esquina inferior DERECHA (horizontal + base de verticales)
@@ -35,24 +36,28 @@ function recortesPortada() {
     ];
 }
 
-export async function leerCodigoBarrasPorVision(ruta, numPaginas) {
+export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInternos = []) {
     const tam = await tamanoPagina(ruta);
     if (!tam) { console.warn('[Barras] pdfinfo no dio el tamaño de página → se omite la lectura de barras.'); return null; }
     const dpi = Math.max(72, Math.round(ANCHO * 72 / tam.anchoPts));
     const wpx = Math.round(tam.anchoPts / 72 * dpi), hpx = Math.round(tam.altoPts / 72 * dpi);
 
-    const fracc = recortesPortada();
-    const ult = numPaginas && numPaginas > 1 ? numPaginas : null;
-    if (ult) fracc.push({ p: ult, fx: 0.0, fy: 0.60, fw: 1.0, fh: 0.40 }); // contraportada: franja inferior
-
     const imgs = [];
-    for (const r of fracc) {
-        const buf = await rasterizarRecorte(ruta, r.p, {
-            dpi, x: r.fx * wpx, y: r.fy * hpx, w: r.fw * wpx, h: r.fh * hpx,
-        });
+    // (a) Recortes de la cubierta a alta resolución para el código de barras.
+    for (const r of recortesPortada()) {
+        const buf = await rasterizarRecorte(ruta, r.p, { dpi, x: r.fx * wpx, y: r.fy * hpx, w: r.fw * wpx, h: r.fh * hpx });
         if (buf && buf.length) imgs.push({ inlineData: { data: buf.toString('base64'), mimeType: 'image/jpeg' } });
     }
-    console.log(`[Barras] ${imgs.length}/${fracc.length} recorte(s) de cubierta generados (dpi=${dpi}); consultando a la visión…`);
+    const recortes = imgs.length;
+    // (b) Páginas INTERIORES (mancheta/créditos) para el ISSN impreso: reusar renders ya hechos (2ª-5ª,
+    //     ni la portada ni la contraportada). Hasta 3, sin re-rasterizar.
+    const ult = numPaginas && numPaginas > 1 ? numPaginas : null;
+    const interiores = (rendersInternos || [])
+        .filter(r => r && r.buffer && r.pagina > 1 && r.pagina !== ult)
+        .slice(0, 3);
+    for (const r of interiores) imgs.push({ inlineData: { data: r.buffer.toString('base64'), mimeType: 'image/jpeg' } });
+
+    console.log(`[Barras] ${recortes} recorte(s) de cubierta + ${interiores.length} página(s) interior(es) (dpi=${dpi}); consultando a la visión…`);
     if (!imgs.length) return null;
 
     let datos;
@@ -63,11 +68,22 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas) {
         console.warn(`[Barras] visión falló: ${e.message}`);
         return null;
     }
-    console.log(`[Barras] visión devolvió codigo_barras="${datos.codigo_barras || ''}" add_on="${datos.add_on || ''}"`);
+    console.log(`[Barras] visión: codigo_barras="${datos.codigo_barras || ''}" add_on="${datos.add_on || ''}" issn_impreso="${datos.issn_impreso || ''}"`);
 
-    const bc = decodificarCodigoBarras(datos.codigo_barras);
-    if (!bc) { console.log('[Barras] sin EAN-13 válido (977/978/979) en los recortes.'); return null; }
+    const bc = decodificarCodigoBarras(datos.codigo_barras); // {issn|isbn|comercial}|null
+    let issn = bc?.issn || null;
+    const isbn = bc?.isbn || null;
+    // Código de barras COMERCIAL (o ausente) → el ISSN viene del impreso en el interior.
+    if (!issn && datos.issn_impreso) {
+        const v = validarISSN(datos.issn_impreso);
+        if (v) { issn = v; console.log(`[Barras] ISSN impreso en el interior: ${v}${bc?.comercial ? ' (el código de barras de cubierta era comercial)' : ''}.`); }
+    }
+    if (!issn && !isbn) {
+        if (bc?.comercial) console.log('[Barras] código de barras COMERCIAL (no ISSN) y sin ISSN impreso legible.');
+        else console.log('[Barras] sin EAN-13 ISSN/ISBN ni ISSN impreso en los recortes.');
+        return null;
+    }
     const add = String(datos.add_on || '').replace(/\D/g, '');
     const mes = add && Number(add) >= 1 && Number(add) <= 12 ? Number(add) : null;
-    return { ...bc, mes_publicacion: mes };
+    return { issn, isbn, esRevista: !!issn, mes_publicacion: mes };
 }

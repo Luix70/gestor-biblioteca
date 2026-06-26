@@ -224,11 +224,12 @@ export async function procesarRecurso(entrada) {
             }
         }
 
-        // CÓDIGO DE BARRAS (recorte→visión): si tras texto/OCR aún NO hay identificador, lee el EAN-13 de
-        // la cubierta a partir de recortes a alta resolución (977→ISSN/revista, 978/979→ISBN). Acotado:
-        // solo cuando falta isbn e issn (no gasta visión en lo ya identificado).
-        if (!datosBase.isbn && !datosBase.issn) {
-            const bc = await leerCodigoBarrasPorVision(rutas[0], datosBase.paginas);
+        // CÓDIGO DE BARRAS (recorte→visión): lee el EAN-13 de la cubierta cuando falta el identificador
+        // PROPIO del tipo. Una REVISTA necesita su ISSN aunque el OCR le haya colado un ISBN espurio (las
+        // revistas no llevan ISBN); un LIBRO necesita su ISBN. 977→ISSN/revista, 978/979→ISBN. Recortes a
+        // alta resolución (la visión lee bien un recorte enfocado). No gasta visión si el id propio ya está.
+        if (!datosBase.issn && (!datosBase.isbn || tipo_recurso === 'revista')) {
+            const bc = await leerCodigoBarrasPorVision(rutas[0], datosBase.paginas, renders);
             if (bc) {
                 if (bc.issn) datosBase.issn = bc.issn;
                 if (bc.isbn) { datosBase.isbn = bc.isbn; isbnDelArchivo = true; }

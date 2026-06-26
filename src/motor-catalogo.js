@@ -9,6 +9,14 @@ import { variantesISBN } from './utils/identificadores.js';
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
 
+/** Busca un documento ya catalogado por su hash de contenido (SHA-256). Para el atajo de ingesta:
+ *  si el fichero entrante ya está archivado (hash idéntico) no hace falta extraer/enriquecer. */
+export async function buscarDocPorHash(hash) {
+    if (!hash) return null;
+    const db = await conectarDB();
+    return db.collection('biblioteca').findOne({ hash_contenido: hash });
+}
+
 /**
  * Calcula los cambios al re-procesar un libro ya catalogado (búsqueda futura con mejor info).
  * Reglas: (1) rellenar huecos siempre; (2) si el registro estaba 'pendiente' y la nueva

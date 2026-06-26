@@ -2,8 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
-import { procesarRecurso } from './orquestador.js';
-import { procesarCatalogo, actualizarDocumento } from './motor-catalogo.js';
+import { procesarRecurso, leerOverride } from './orquestador.js';
+import { procesarCatalogo, actualizarDocumento, buscarDocPorHash } from './motor-catalogo.js';
 import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
@@ -89,6 +89,53 @@ async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
 }
 
 /**
+ * ATAJO POR HASH (primera línea de defensa, ANTES de extraer/enriquecer/llamar a APIs): si el fichero
+ * ya está archivado (hash de contenido idéntico) no se malgasta OCR/visión/APIs.
+ *   · doc con ese hash y su fichero PRESENTE en el archivo → duplicado exacto → se BORRA el entrante.
+ *   · doc con ese hash pero su fichero AUSENTE → se RESTAURA con el entrante (mismo contenido) en su sitio.
+ *   · sin coincidencia de hash → null (se procesa normal).
+ * Solo para recursos de UN fichero (un grupo de imágenes no tiene un hash único). Respeta el override
+ * manual `forzar_nuevo` (conservar ambos): en ese caso NO cortocircuita.
+ */
+async function atajoPorHash(rutas) {
+    if (!rutas || rutas.length !== 1) return null;
+    try { const ov = await leerOverride(rutas[0]); if (ov?.forzar_nuevo) return null; } catch { /* sin override */ }
+    let hash;
+    try { hash = await calcularHashArchivo(rutas[0]); } catch { return null; }
+    if (!hash) return null;
+    const doc = await buscarDocPorHash(hash);
+    if (!doc) return null;                                   // hash nuevo → procesar normal
+
+    const comun = {
+        _id: String(doc._id), duplicado: true, estado: doc.estado_verificacion || null,
+        isbn: doc.isbn || null, issn: doc.issn || null, rutaWeb: doc.ruta_base || null,
+        carpeta: null, copiaIntegra: false, documento: { ...doc, _id: String(doc._id) },
+    };
+    const carpeta = carpetaDeDoc(doc);
+    const original = carpeta ? await archivoOriginal(carpeta) : null;
+    if (original) {
+        // Duplicado EXACTO ya archivado y referenciado → borrar el entrante SIN reprocesar (ahorra API/IA).
+        for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
+        console.log(`  🗑️  [Atajo hash] «${path.basename(rutas[0])}» ya archivado como ${doc._id} → borrado sin reprocesar.`);
+        return { ...comun, operacion: 'duplicado_exacto', accion: 'borrado' };
+    }
+    // El doc existe pero su FICHERO falta → restaurar con el entrante (mismo contenido) en su carpeta.
+    if (carpeta && doc.nombre_archivo) {
+        try {
+            await fs.mkdir(carpeta, { recursive: true });
+            await fs.copyFile(rutas[0], path.join(carpeta, doc.nombre_archivo));
+            for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
+            console.log(`  ♻️  [Atajo hash] Fichero ausente de ${doc._id} RESTAURADO con el entrante (mismo hash) en ${carpeta}.`);
+            return { ...comun, operacion: 'restaurado', accion: 'restaurado' };
+        } catch (e) {
+            console.warn(`  ⚠️  [Atajo hash] No se pudo restaurar el fichero de ${doc._id}: ${e.message} → se procesa normal.`);
+            return null;                                     // fallback: procesar normal
+        }
+    }
+    return null; // doc sin carpeta/nombre fiable → procesar normal (el pipeline lo coloca)
+}
+
+/**
  * Ingesta completa de UN recurso (1 archivo o grupo de imágenes del mismo libro/revista):
  *   extracción → enriquecimiento → persistencia → copia a estructura CDU → enlace de rutas.
  *
@@ -98,6 +145,11 @@ async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
  * @param entrada { rutas: string[], contexto?: { ubicacion } }
  */
 export async function ingestarRecurso({ rutas, contexto = {} }) {
+    // 0. ATAJO POR HASH: si el fichero ya está archivado (hash idéntico) no malgastar OCR/visión/APIs;
+    //    si el doc existe pero su fichero falta, restaurarlo con el entrante. (Ver atajoPorHash.)
+    const atajo = await atajoPorHash(rutas);
+    if (atajo) return atajo;
+
     // 1. Extracción + enriquecimiento.
     const { documento, activos, forzarNuevo } = await procesarRecurso({ rutas, contexto });
 

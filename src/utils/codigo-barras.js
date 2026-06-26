@@ -28,8 +28,12 @@ function checkISSN(base7) {
 
 /**
  * @param {string} principal  los 13 dígitos del EAN-13 (lo que hay bajo las barras; orientación da igual).
- * @returns {{issn?:string, isbn?:string, esRevista:boolean}|null}
- *          null si no es un EAN-13 válido (lectura dudosa → no se inventa nada).
+ * @returns {{issn?:string, isbn?:string, comercial?:boolean, ean?:string, esRevista:boolean}|null}
+ *          - { issn, esRevista:true }   si es 977 (periódico)
+ *          - { isbn, esRevista:false }  si es 978/979 (libro)
+ *          - { comercial:true, ean }    si es un EAN-13 VÁLIDO pero NO ISSN/ISBN (código COMERCIAL/UPC):
+ *                                       hay código de barras, pero el ISSN hay que buscarlo en el interior.
+ *          - null                       si no es un EAN-13 válido (lectura dudosa → no se inventa nada).
  */
 export function decodificarCodigoBarras(principal) {
     const d = String(principal || '').replace(/\D/g, '');
@@ -44,5 +48,5 @@ export function decodificarCodigoBarras(principal) {
         const isbn = validarISBN(d);                       // el EAN-13 ES el ISBN-13
         return isbn ? { isbn, esRevista: false } : null;
     }
-    return null;                                            // otro prefijo: no es ISSN ni ISBN
+    return { comercial: true, ean: d, esRevista: false };  // EAN válido pero comercial (UPC): no es ISSN/ISBN
 }
