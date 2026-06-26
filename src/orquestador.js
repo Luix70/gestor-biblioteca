@@ -9,6 +9,7 @@ import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from 
 import { parsearNombre } from './utils/parsear-nombre.js';
 import { pareceSerieLibros } from './utils/revistas.js';
 import { clasificarTipo } from './utils/discriminador.js';
+import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
@@ -32,9 +33,11 @@ const mimeDeImagen = (ruta) => MIME_IMAGEN[path.extname(ruta).toLowerCase()] || 
 // Formato (enum del esquema) según extensión. Puerta abierta a nuevos formatos:
 // epub/pdf/imágenes tienen lector propio; el resto se catalogan por nombre + APIs (sin leer
 // el contenido todavía) y quedan 'pendiente' hasta implementar su lector.
+const EXT_COMIC = ['.cbr', '.cbz', '.cb7'];
+
 const FORMATO_POR_EXT = {
     '.epub': 'epub', '.pdf': 'pdf',
-    '.mobi': 'mobi', '.cbr': 'cbr', '.djvu': 'djvu', '.zip': 'zip', '.rar': 'rar',
+    '.mobi': 'mobi', '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.zip': 'zip', '.rar': 'rar',
 };
 
 export function detectarTipo(ruta) {
@@ -42,6 +45,7 @@ export function detectarTipo(ruta) {
     if (ext === '.epub') return 'epub';
     if (ext === '.pdf') return 'pdf';
     if (EXT_IMAGEN.includes(ext)) return 'imagen';
+    if (EXT_COMIC.includes(ext)) return 'comic';
     if (FORMATO_POR_EXT[ext]) return 'otro-formato';
     return 'desconocido';
 }
@@ -293,8 +297,21 @@ export async function procesarRecurso(entrada) {
             rutaOrigen: r
         }));
 
+    } else if (tipo === 'comic') {
+        // CÓMIC (.cbz/.cbr/.cb7): portada (CBZ) + clasificación serie/álbum. naturaleza:'comic'.
+        datosBase = extraerMetadatosComic(rutas[0]);
+        formatos = datosBase.formatos;
+        const clasif = clasificarTipo({
+            esComic: true,
+            comicSerie: datosBase.comic_serie,
+            esFechada: !!datosBase.esFechada,
+            isbnPropio: datosBase.isbn_propio || null,
+        });
+        tipo_recurso = clasif.tipo_recurso;          // revista (nº de serie) | libro (álbum/novela gráfica)
+        datosBase.naturaleza = clasif.naturaleza;    // 'comic'
+
     } else if (tipo === 'otro-formato') {
-        // Puerta abierta: formato conocido sin lector propio aún (mobi/cbr/djvu/zip/rar).
+        // Puerta abierta: formato conocido sin lector propio aún (mobi/djvu/zip/rar; los cómics .cbz/.cbr/.cb7 tienen su rama).
         datosBase = metadatosDesdeNombre(rutas[0]);
         datosBase.alertas_agente = [`Formato "${path.extname(rutas[0])}" sin lector de contenido: catalogado por nombre + APIs.`];
         formatos = [FORMATO_POR_EXT[path.extname(rutas[0]).toLowerCase()]];

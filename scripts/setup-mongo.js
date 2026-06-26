@@ -31,6 +31,7 @@ const VALIDADOR_COLECCIONES = {
             // Discriminador: 'revista' = cabecera de periódico (pivote ISSN, inventario numeros[]);
             // 'libro' (o ausente) = serie/colección editorial de libros (cada libro con su propio ISBN).
             tipo:           { bsonType: ['string', 'null'], description: "Naturaleza: 'revista' (cabecera) | 'libro' (serie editorial) | null (legado ⇒ libro)." },
+            naturaleza:     { bsonType: ['string', 'null'], description: "Clase del contenido: 'comic' | 'novela-grafica' | 'fanzine' | 'academico' | null." },
             // ISSN de la cabecera/serie: AUTORIDAD del grupo (análogo a isbn_obra para obras). Una serie
             // de monografías (p. ej. «Graduate Texts in Physics») tiene ISSN de serie aunque sea de libros.
             issn:           { bsonType: ['string', 'null'], description: 'ISSN de la cabecera/serie (autoridad del grupo).' },
@@ -163,6 +164,34 @@ async function main() {
     } catch (e) { console.warn(`  ⚠️  revisión de índices únicos isbn/issn: ${e.codeName || e.message}`); }
     await asegurarIndice(biblioteca, { isbn: 1 }, { sparse: true, name: 'idx_isbn' });
     await asegurarIndice(biblioteca, { issn: 1 }, { sparse: true, name: 'idx_issn' });
+
+    // Ampliar (sin quitar) el enum de `formatos` del validador de biblioteca para admitir cómics/ebooks
+    // (cbz/cbr/cb7/djvu/mobi). El validador de biblioteca vive en Atlas, así que se LEE y se re-aplica
+    // añadiendo solo lo que falte (defensivo: si la estructura no encaja, no se toca).
+    try {
+        const info = (await db.listCollections({ name: 'biblioteca' }).toArray())[0];
+        const js = info?.options?.validator?.$jsonSchema;
+        const fmt = js?.properties?.formatos;
+        const ref = fmt?.items?.enum ? fmt.items : (Array.isArray(fmt?.enum) ? fmt : null);
+        if (ref) {
+            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'mobi'].filter(v => !ref.enum.includes(v));
+            if (faltan.length) {
+                ref.enum = [...ref.enum, ...faltan];
+                await db.command({
+                    collMod: 'biblioteca', validator: { $jsonSchema: js },
+                    validationLevel: info.options.validationLevel || 'moderate',
+                    validationAction: info.options.validationAction || 'error',
+                });
+                console.log(`  ✅ formatos: enum ampliado (+${faltan.join(', ')}).`);
+            } else {
+                console.log('  ✓ formatos: el enum ya admite cómics/ebooks.');
+            }
+        } else {
+            console.log('  ⓘ biblioteca sin enum de formatos (o estructura distinta): no se modifica.');
+        }
+    } catch (e) {
+        console.warn(`  ⚠️  no se pudo ampliar el enum de formatos: ${e.codeName || e.message}`);
+    }
 
     // ── colecciones: crear con validador (o aplicarlo si ya existe) ───────────
     console.log('\ncolecciones:');

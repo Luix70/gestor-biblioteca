@@ -14,9 +14,10 @@
  *
  * @param {import('mongodb').Db} db
  * @param {{nombre?:string|null, issn?:string|null, tipo?:'revista'|'libro'|null,
- *          editorialId?:import('mongodb').ObjectId|null, cdu?:string|null, descripcion?:string|null}} datos
+ *          editorialId?:import('mongodb').ObjectId|null, cdu?:string|null, descripcion?:string|null,
+ *          naturaleza?:string|null}} datos
  */
-export async function resolverCabecera(db, { nombre, issn = null, tipo = null, editorialId = null, cdu = null, descripcion = null }) {
+export async function resolverCabecera(db, { nombre, issn = null, tipo = null, editorialId = null, cdu = null, descripcion = null, naturaleza = null }) {
     const col = db.collection('colecciones');
     // nombre es obligatorio y único; si solo tenemos ISSN, usamos el ISSN como nombre provisional
     // (el Conformador/autoridad lo renombra luego con el título real de la cabecera/serie).
@@ -35,6 +36,7 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
         if (editorialId && !existente.editorial) set.editorial = editorialId;
         if (cdu && !existente.cdu) set.cdu = cdu;
         if (descripcion && !existente.descripcion) set.descripcion = descripcion;
+        if (naturaleza && !existente.naturaleza) set.naturaleza = naturaleza;
         if (Object.keys(set).length) {
             set.fecha_actualizacion = new Date();
             await col.updateOne({ _id: existente._id }, { $set: set });
@@ -48,6 +50,7 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
     if (editorialId) nueva.editorial = editorialId;
     if (cdu)         nueva.cdu = cdu;
     if (descripcion) nueva.descripcion = descripcion;
+    if (naturaleza)  nueva.naturaleza = naturaleza;
     try {
         const r = await col.insertOne(nueva);
         return { _id: r.insertedId, cdu: cdu || null, creada: true };

@@ -183,6 +183,7 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
                 const { _id, cdu: cduCab, creada } = await resolverCabecera(db, {
                     nombre: cabTitulo, issn: docFinal.issn, tipo: 'revista', editorialId: edId, cdu: docFinal.cdu,
+                    naturaleza: docFinal.naturaleza || null,   // cómics: la cabecera hereda naturaleza:'comic'
                 });
                 if (creada) docFinal.alertas_agente.push(`Nueva cabecera de revista registrada: ${cabTitulo || docFinal.issn}`);
                 if (_id) { docFinal.coleccion = _id; if (cabTitulo) docFinal.coleccion_nombre = cabTitulo; }

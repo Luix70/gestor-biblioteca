@@ -29,23 +29,30 @@
  * @returns {{ tipo_recurso:'libro'|'revista', naturaleza:string|null, multiparte:boolean }}
  */
 export function clasificarTipo(s = {}) {
-    // T3 · estructural: un fichero de cómic es cómic (la serie/álbum se decide en su lector).
-    if (s.esComic) return { tipo_recurso: 'libro', naturaleza: 'comic', multiparte: false };
+    // T3 · estructural: CÓMIC (.cbz/.cbr/.cb7). Auto: un NÚMERO de serie (nº de ejemplar / fechado) y sin
+    // ISBN propio → revista (cabecera-colección, como un magazine); un ÁLBUM/novela gráfica suelto (con
+    // ISBN propio, o sin nº) → libro. Ambos llevan naturaleza:'comic'.
+    if (s.esComic) {
+        const serie = (s.comicSerie || s.esFechada) && !s.isbnPropio;
+        return { tipo_recurso: serie ? 'revista' : 'libro', naturaleza: 'comic', multiparte: false };
+    }
 
     // T1/T2 · multivolumen: ISBN con rol (obra completa + tomo) o "Vol N" en el nombre → obra de LIBRO.
     if (s.multiparte) return { tipo_recurso: 'libro', naturaleza: null, multiparte: true };
 
-    const libroFuerte = !!(s.isbnPropio || s.cip || s.pareceSerieLibros);   // identificador/serie propios de libro
-    const periodicoFuerte = !!(s.esFechada || s.issnFuerte);                // nombre fechado o ISSN fiable (977/impreso)
+    const libroFuerte = !!(s.isbnPropio || s.cip || s.pareceSerieLibros);   // identificador/serie PROPIOS de libro (T1)
+    const periodicoFuerte = !!(s.esFechada || s.issnFuerte);                // nombre fechado (T2) o ISSN fiable 977/impreso (T1)
 
-    // Periódico FUERTE manda sobre un libro DÉBIL (ISBN del cuerpo): un nº fechado o con 977 es revista
-    // aunque el texto traiga el ISBN de un libro anunciado dentro.
-    if (periodicoFuerte && !libroFuerte) return { tipo_recurso: 'revista', naturaleza: null, multiparte: false };
-    // Libro FUERTE (CIP / ISBN propio / serie editorial) → libro, aunque venga fechado (anuario con CIP).
-    if (libroFuerte && !periodicoFuerte) return { tipo_recurso: 'libro', naturaleza: null, multiparte: false };
-    // Ambas fuertes (raro: p. ej. seriado que reimprime ISBN con nombre fechado) → gana PERIÓDICO: el
-    // nombre fechado del curador refleja un NÚMERO; un ISBN compartido entre números no lo hace un libro.
-    if (periodicoFuerte && libroFuerte) return { tipo_recurso: 'revista', naturaleza: null, multiparte: false };
+    // LIBRO FUERTE manda (regla de CLAUDE.md: «un ISBN PROPIO o un bloque CIP ⇒ libro, aun con ISSN de
+    // serie o nombre fechado»). El ISBN PROPIO (nombre/título/CIP — NO el del cuerpo, que es solo pista)
+    // y el CIP son la señal de libro más fuerte: ganan a un nombre fechado (anuario con CIP) y al ISSN de
+    // serie (monografía Springer con «Lecture Notes…»). Un nombre que acaba en año es el AÑO DE EDICIÓN de
+    // un libro, no un número de revista, si el libro trae su propio identificador.
+    if (libroFuerte) return { tipo_recurso: 'libro', naturaleza: null, multiparte: false };
+    // Sin señal de libro: nombre fechado o ISSN fiable (977/impreso) → revista. Aquí cae el caso que
+    // motivó esta rama: una revista fechada cuyo único ISBN venía del CUERPO (anuncio/reseña interna) ya
+    // NO es libroFuerte (ese ISBN es pista), así que clasifica como revista correctamente.
+    if (periodicoFuerte) return { tipo_recurso: 'revista', naturaleza: null, multiparte: false };
 
     // Sin señales fuertes → pistas (T4). Periódico-pista antes que libro-pista (un ISBN del cuerpo es lo
     // más débil); si nada apunta a periódico, un ISBN/CIP del cuerpo lo hace libro (caso libro normal).
