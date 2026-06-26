@@ -189,6 +189,10 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         const candidatos = new Set();
         for (const x of extraerISBNs(texto)) for (const v of variantesISBN(x)) candidatos.add(v);
         if (parsed.isbn) for (const v of variantesISBN(parsed.isbn)) candidatos.add(v);
+        // ISBN INCRUSTADO en el nombre aunque no sea el nombre ENTERO (p. ej. "9783319666303(1).pdf"
+        // o "3642377491 Title.pdf"): muchos libros (Springer y otros) se nombran por su ISBN. Recuperarlo
+        // es clave: sin él, un libro de serie (con ISSN de colección) se clasificaría como revista.
+        for (const x of extraerISBNs(nombre)) for (const v of variantesISBN(x)) candidatos.add(v);
         datos.isbn_candidatos = [...candidatos];
         datos.isbn = datos.isbn_candidatos.find(c => c.length === 13) || datos.isbn_candidatos[0] || null;
 

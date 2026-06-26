@@ -169,14 +169,15 @@ export async function procesarRecurso(entrada) {
         if (datosBase.pdf_ilegible) {
             throw new ErrorRecursoIlegible(`PDF ilegible (estructura dañada): ${path.basename(rutas[0])}. Requiere una copia mejor.`);
         }
-        // Señales de revista: prefijo de fecha ISO en nombre (esFechada), ISSN encontrado en
-        // el texto, o título con patrones de publicación periódica. PERO un ISBN propio MANDA: es un
-        // LIBRO, aunque lleve un ISSN DE SERIE (p. ej. monografías Springer con su «Lecture Notes…»
-        // ISSN). El ISSN solo vota «revista» cuando NO hay ISBN; la fecha/el título de revista sí
-        // mantienen su voto (una publicación periódica fechada es revista aunque traiga ISBN por número).
-        tipo_recurso = (datosBase.esFechada || pareceRevista(datosBase.titulo) || (datosBase.issn && !datosBase.isbn))
+        // libro vs revista (robusto). Señales de LIBRO inequívocas: un ISBN (del contenido O del nombre
+        // de archivo, ya resuelto en lector-pdf) o un bloque CIP/Dewey (Catalogación en Publicación) — las
+        // revistas no lo llevan. Un libro PUEDE tener ISBN + ISSN (el ISSN es de su COLECCIÓN/serie). Por
+        // eso el ISSN SOLO no convierte en revista: hace falta que NO haya señal de libro. La fecha/el
+        // título periódico mantienen su voto salvo que haya ISBN/CIP (sería un libro de serie fechado).
+        const esLibro = !!(datosBase.isbn || datosBase.cip);
+        tipo_recurso = (!esLibro && (datosBase.esFechada || pareceRevista(datosBase.titulo) || datosBase.issn))
             ? 'revista' : 'libro';
-        isbnDelArchivo = !!datosBase.isbn; // ISBN leído del propio PDF (fiable)
+        isbnDelArchivo = !!datosBase.isbn; // ISBN propio (contenido o nombre) → fiable
 
         // Sidecars de TODO PDF: rasteriza las 5 primeras + la última (preview + OCR de datos/
         // código de barras). La 1ª hace de portada → resolverPortada no re-rasteriza más abajo.
