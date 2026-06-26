@@ -169,28 +169,37 @@ export async function procesarRecurso(entrada) {
         datosBase = await extraerMetadatosPdf(rutas[0]);
         formatos = ['pdf'];
 
-        // FICHERO DEFECTUOSO detectado en el PRIMER paso: PDF estructuralmente ilegible (xref
-        // dañado / sin páginas). No se cataloga ni se rasteriza: a Cuarentena/ilegibles.
-        if (datosBase.pdf_ilegible) {
-            throw new ErrorRecursoIlegible(`PDF ilegible (estructura dañada): ${path.basename(rutas[0])}. Requiere una copia mejor.`);
+        // Sidecars + SEGUNDA OPINIÓN sobre la legibilidad: rasteriza las portadas con poppler (las 5
+        // primeras + la última; la 1ª hace de portada para resolverPortada). Se hace ANTES del veredicto
+        // de "ilegible": un PDF que el parser de TEXTO rechaza (cifrado/raro) o que sufrió un fallo
+        // TRANSITORIO de E/S (p. ej. leído sobre una unidad de red mapeada, o abierto a la vez en Acrobat)
+        // puede rasterizarse sin problema → NO es ilegible, es un escaneado y se procesa por OCR/visión/
+        // barras. (Sin poppler, renders=[].)
+        const renders = await rasterizarFrontalesPdf(rutas[0], datosBase.paginas);
+
+        // FICHERO DEFECTUOSO: ilegible SÓLO si NI el parser de texto NI poppler pudieron con él. Así un
+        // PDF legible (que Acrobat abre) que el parser tropezó, o un glitch puntual de red, ya NO va a
+        // Cuarentena por error.
+        if (datosBase.pdf_ilegible && renders.length === 0) {
+            throw new ErrorRecursoIlegible(`PDF ilegible (ni el parser ni poppler pudieron leerlo): ${path.basename(rutas[0])}. Requiere una copia mejor.`);
         }
+        if (datosBase.pdf_ilegible) {
+            datosBase.pdf_ilegible = false;          // poppler SÍ lo rasterizó → procesable como escaneado
+            datosBase.texto_legible = false;
+            if (!datosBase.paginas && renders.length) datosBase.paginas = Math.max(...renders.map(r => r.pagina));
+        }
+
         // libro vs revista (robusto). Señales de LIBRO inequívocas: un ISBN (del contenido O del nombre
         // de archivo, ya resuelto en lector-pdf) o un bloque CIP/Dewey (Catalogación en Publicación) — las
         // revistas no lo llevan. Un libro PUEDE tener ISBN + ISSN (el ISSN es de su COLECCIÓN/serie). Por
         // eso el ISSN SOLO no convierte en revista: hace falta que NO haya señal de libro. La fecha/el
         // título periódico mantienen su voto salvo que haya ISBN/CIP (sería un libro de serie fechado).
-        // ISBN/CIP propio → libro. También un título INEQUÍVOCO de libro/serie editorial académica
-        // (Springer, «Lecture Notes…», «Graduate Texts…», marca de edición): un ISSN de serie no debe
-        // convertirlo en revista (era el origen de la contaminación de monografías como números).
+        // También un título INEQUÍVOCO de serie editorial académica (Springer, «Lecture Notes…»…) = libro.
         const esLibro = !!(datosBase.isbn || datosBase.cip || pareceSerieLibros(datosBase.titulo));
         tipo_recurso = (!esLibro && (datosBase.esFechada || pareceRevista(datosBase.titulo) || datosBase.issn))
             ? 'revista' : 'libro';
         isbnDelArchivo = !!datosBase.isbn; // ISBN propio (contenido o nombre) → fiable
 
-        // Sidecars de TODO PDF: rasteriza las 5 primeras + la última (preview + OCR de datos/
-        // código de barras). La 1ª hace de portada → resolverPortada no re-rasteriza más abajo.
-        // (Si no hay poppler, renders=[] y la portada vendrá de fuentes remotas.)
-        const renders = await rasterizarFrontalesPdf(rutas[0], datosBase.paginas);
         for (const r of renders) {
             activos.push({
                 tipo: r.etiqueta === 'portada' ? 'portada' : 'otra',
