@@ -85,25 +85,29 @@ async function inspeccionar(db) {
         if (!arr) porISSN.set(d.issn, arr = []);
         arr.push(d);
     }
-    const clases = new Map(); // issn → 'revista'|'serie-libros'|'ambiguo'
+    const clases = new Map(); // issn → 'revista'|'serie-libros'|'ambiguo' (entrada de decidirLibro)
     const filas = [];
     for (const [issn, docs] of porISSN) {
         const r = clasificarISSN(docs);
         clases.set(issn, r.clase);
-        filas.push({ issn, ...r, titulo: tituloCabecera(docs[0].obra_titulo || docs[0].titulo) || issn });
+        // VERDICTO FINAL = lo que hará FASE 3 (decidirLibro por documento), no solo clasificarISSN.
+        const libros = docs.filter(d => decidirLibro(d, r.clase).libro).length;
+        const verdicto = libros === docs.length ? 'LIBRO' : libros === 0 ? 'revista' : `mixto ${libros}/${docs.length}`;
+        filas.push({ issn, ...r, verdicto, titulo: tituloCabecera(docs[0].obra_titulo || docs[0].titulo) || issn });
     }
-    filas.sort((a, b) => b.n - a.n);
+    // Ordena para revisar: primero lo que QUEDARÁ como revista (posibles libros colados), luego mixto, luego LIBRO.
+    const rango = (v) => v === 'revista' ? 0 : v.startsWith('mixto') ? 1 : 2;
+    filas.sort((a, b) => rango(a.verdicto) - rango(b.verdicto) || b.n - a.n);
 
     console.log(`\n══ FASE 1 · INSPECT ══  ${revistas.length} doc(s) tipo:'revista'  ·  ${porISSN.size} ISSN distinto(s)  ·  ${sinISSN} sin ISSN`);
-    const tot = { revista: 0, 'serie-libros': 0, ambiguo: 0 };
-    for (const f of filas) tot[f.clase]++;
-    console.log(`  Clasificación de ISSN:  revista=${tot.revista}  serie-libros=${tot['serie-libros']}  ambiguo=${tot.ambiguo}`);
-    console.log(`  ${'clase'.padEnd(13)} ${'n'.padStart(4)} ${'tít.dist'.padStart(8)} ${'c/fecha'.padStart(7)} ${'c/dewey'.padStart(7)}  ISSN · título`);
-    for (const f of filas.slice(0, 40)) {
-        console.log(`  ${f.clase.padEnd(13)} ${String(f.n).padStart(4)} ${String(f.distintos).padStart(8)} ${String(f.conFecha).padStart(7)} ${String(f.conDewey).padStart(7)}  ${f.issn} · ${f.titulo}`);
-        if (f.clase === 'serie-libros' && f.titulos.length) console.log(`      → títulos: ${f.titulos.slice(0, 4).join(' | ')}${f.titulos.length > 4 ? ' …' : ''}`);
+    const totV = { LIBRO: 0, revista: 0, mixto: 0 };
+    for (const f of filas) totV[f.verdicto.startsWith('mixto') ? 'mixto' : f.verdicto]++;
+    console.log(`  Verdicto FINAL por ISSN (decidirLibro):  → LIBRO=${totV.LIBRO}   quedan REVISTA=${totV.revista}   mixto=${totV.mixto}`);
+    console.log(`  Revisa las filas «revista»: si alguna es un LIBRO, pásala con --libros=ISSN1,ISSN2,…\n`);
+    console.log(`  ${'verdicto'.padEnd(10)} ${'n'.padStart(3)} ${'fecha'.padStart(5)}  ISSN · título`);
+    for (const f of filas) {
+        console.log(`  ${f.verdicto.padEnd(10)} ${String(f.n).padStart(3)} ${String(f.conFecha).padStart(5)}  ${f.issn} · ${f.titulo}`);
     }
-    if (filas.length > 40) console.log(`  … y ${filas.length - 40} ISSN más`);
     return clases;
 }
 
