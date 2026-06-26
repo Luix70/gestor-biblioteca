@@ -27,9 +27,36 @@ const VALIDADOR_COLECCIONES = {
         bsonType: 'object',
         required: ['nombre'],
         properties: {
-            nombre:         { bsonType: 'string', description: 'Nombre de la colección/serie (obligatorio).' },
-            editorial:      { bsonType: 'objectId', description: 'Referencia a editoriales (opcional).' },
+            nombre:         { bsonType: 'string', description: 'Nombre de la colección/serie/cabecera (obligatorio).' },
+            // Discriminador: 'revista' = cabecera de periódico (pivote ISSN, inventario numeros[]);
+            // 'libro' (o ausente) = serie/colección editorial de libros (cada libro con su propio ISBN).
+            tipo:           { bsonType: ['string', 'null'], description: "Naturaleza: 'revista' (cabecera) | 'libro' (serie editorial) | null (legado ⇒ libro)." },
+            // ISSN de la cabecera/serie: AUTORIDAD del grupo (análogo a isbn_obra para obras). Una serie
+            // de monografías (p. ej. «Graduate Texts in Physics») tiene ISSN de serie aunque sea de libros.
+            issn:           { bsonType: ['string', 'null'], description: 'ISSN de la cabecera/serie (autoridad del grupo).' },
+            editorial:      { bsonType: ['objectId', 'null'], description: 'Referencia a editoriales (opcional).' },
+            cdu:            { bsonType: ['string', 'null'], description: 'CDU común a los miembros (mismo classmark → se archivan juntos).' },
+            descripcion:    { bsonType: ['string', 'null'], description: 'Descripción general de la cabecera/serie.' },
             fecha_creacion: { bsonType: 'date' },
+            fecha_actualizacion: { bsonType: ['date', 'null'] },
+            // ── Revistas (tipo:'revista'): inventario CRONOLÓGICO de números (no el array 1..N de obras) ──
+            numeros: {
+                bsonType: ['array', 'null'],
+                description: 'Inventario cronológico de los números de la revista.',
+                items: {
+                    bsonType: 'object',
+                    properties: {
+                        clave:        { bsonType: 'string', description: 'Clave estable del número (AAAA-MM / n<nº> / AAAA).' },
+                        'año':        { bsonType: ['int', 'null'] },
+                        mes:          { bsonType: ['int', 'null'] },
+                        numero_issue: { bsonType: ['string', 'int', 'null'] },
+                        _id:          { bsonType: ['objectId', 'null'] },
+                    },
+                },
+            },
+            numeros_sin_fecha:  { bsonType: ['array', 'null'], items: { bsonType: 'objectId' }, description: 'Números con ISSN pero sin fecha/nº detectables.' },
+            numeros_presentes:  { bsonType: ['int', 'null'], description: 'Nº de números ya catalogados en la cabecera.' },
+            revision_requerida: { bsonType: ['bool', 'null'], description: 'Algo se guardó desordenado (número sin fecha): revisar.' },
             nsfw:           { bsonType: ['bool', 'null'], description: 'No apto para invitados: oculto a guest (solo admin).' },
             locked:         { bsonType: ['bool', 'null'], description: 'Fijado por intervención humana: el Conformador no lo altera.' },
         },
@@ -134,6 +161,8 @@ async function main() {
     const colecciones = db.collection('colecciones');
     await asegurarIndice(colecciones, { nombre: 1 },    { unique: true, name: 'idx_nombre_unico' });
     await asegurarIndice(colecciones, { editorial: 1 }, { sparse: true, name: 'idx_editorial' });
+    // ISSN de la cabecera/serie: AUTORIDAD del grupo (análogo a obras.issn_obra). Sparse: solo las que lo tienen.
+    await asegurarIndice(colecciones, { issn: 1 },      { unique: true, sparse: true, name: 'idx_issn_unico' });
 
     // ── cdu_descripciones: descripciones bilingües ES/EN de cada código CDU ────
     console.log('\ncdu_descripciones:');
@@ -167,7 +196,10 @@ async function main() {
 
     // biblioteca: índice para localizar tomos por obra (y detectar obras incompletas).
     await asegurarIndice(biblioteca, { obra: 1, volumen_numero: 1 }, { sparse: true, name: 'idx_obra_volumen' });
-    // biblioteca: número de revista por (cabecera, clave) — dedup robusto de números de revista.
+    // biblioteca: número de revista por (cabecera, clave). La cabecera ahora es una COLECCIÓN
+    // (tipo:'revista'), así que la identidad de un número es (coleccion, clave_numero). El índice
+    // antiguo obra+clave_numero se conserva por compatibilidad con datos sin migrar.
+    await asegurarIndice(biblioteca, { coleccion: 1, clave_numero: 1 }, { sparse: true, name: 'idx_coleccion_clave_numero' });
     await asegurarIndice(biblioteca, { obra: 1, clave_numero: 1 }, { sparse: true, name: 'idx_obra_clave_numero' });
 
     console.log('\nListo.\n');

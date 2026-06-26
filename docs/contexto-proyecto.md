@@ -342,6 +342,27 @@ aplicabilidad), no secuencias hardcodeadas. Añadir la BD local o reordenar = co
   "falta el final" necesita `total_volumenes` (de la BD/API por el ISBN de obra, o los créditos).
   → informe `obras-incompletas` (misma forma que los huecos de números de revista).
 
+### Cabeceras de revista y series de libros = COLECCIONES (decisión 2026-06-26)
+- **Problema:** la cabecera de revista se modelaba como `obra` (tipo:'revista' + `issn_obra`), pero el
+  ISSN de una **serie de monografías** (p. ej. Springer *Graduate Texts in Physics*, 1868-4513) lo
+  comparten MUCHOS libros distintos. El pivote-ISSN convertía 16 libros de física en 16 "números" de una
+  revista falsa. Tres cosas son lo mismo —"un padre abstracto, sin fichero, con documentos hijos"— pero
+  se modelaban de dos formas opuestas.
+- **Decisión (elegida por el usuario: "dos colecciones padre"):** las cabeceras de revista **y** las
+  series de libros viven en **`colecciones`** con un discriminador **`tipo` ('revista' | 'libro')** y un
+  campo **`issn`** (autoridad del grupo). `obras` queda SOLO para **obras multivolumen de libros**
+  (pivote `isbn_obra`); no se fusiona con `colecciones`.
+- **Modelo:** revista → colección `tipo:'revista'` + `issn`; cada número es un doc `biblioteca`
+  (`tipo_recurso:'revista'`) con `doc.coleccion` + `clave_numero`; inventario cronológico `numeros[]` en
+  la colección. Serie de libros → colección `tipo:'libro'` + `issn` de serie; cada libro conserva su
+  **propio ISBN**; el ISSN vive en la colección, **nunca** en el libro (`motor-catalogo.js` 2e lo retira).
+- **Discriminador** (`utils/revistas.js · clasificarISSN`): un ISSN con **1 título de cabecera** y varios
+  números = revista; con **muchos títulos distintos** = serie de libros (corrobora Dewey/LCC sin fecha).
+- **Migración:** `scripts/migrar-revistas-a-colecciones.js` (dry-run por defecto): INSPECT (clasifica cada
+  ISSN) → MOVE (obras tipo:'revista' → colecciones) → REWIRE (reengancha números + reclasifica las series
+  de libros a `libro`) → RECOVER (ficheros en disco sin registro) → CLEANUP (borra obras-cabecera vacías).
+  Sustituye a migrar-revistas.js / reparar-revistas.js / reclasificar-libros.js (archivados, `--force-legacy`).
+
 ### Multivolumen: SEGURIDAD ante todo (principio "nunca perder/fusionar un tomo")
 Una ingesta de cientos de docs corre DESATENDIDA en el NAS: descubrir semanas después que faltan
 tomos es carísimo de arreglar. Principio: **vale más una obra desordenada que un tomo perdido.**

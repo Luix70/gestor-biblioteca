@@ -42,6 +42,11 @@ const carpetaDeRutaBase = (rb) => rb ? path.join(DIR_CDU, String(rb).replace(/^\
 const existe = async (p) => { try { await fs.access(p); return true; } catch { return false; } };
 
 async function main() {
+    if (!process.argv.includes('--force-legacy')) {
+        console.log('⛔ SUPERSEDED — usa scripts/migrar-revistas-a-colecciones.js (modelo nuevo: cabecera = COLECCIÓN).');
+        console.log('   Este script revierte el modelo ANTIGUO (cabecera = obra). Archivado; forzarlo: --force-legacy.');
+        process.exit(0);
+    }
     console.log(`🛠  Reparación de revistas — ${EJECUTAR ? '⚠ EJECUTAR (recicla-solo, reversible)' : 'DRY-RUN (no cambia nada)'}`);
     console.log(`    Árbol CDU: ${DIR_CDU}  ·  Papelera: ${process.env.PATH_RECICLAJE || 'Recycling'}`);
     const db = await conectarDB();

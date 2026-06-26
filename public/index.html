@@ -247,6 +247,7 @@ body.guest .admin-only{display:none!important}
       <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
       <button data-p="pap"><span class="ic">♻</span> Papelera</button>
       <button data-p="obras"><span class="ic">📖</span> Obras</button>
+      <button data-p="colecciones"><span class="ic">🗂️</span> Colecciones</button>
       <button data-p="inbox"><span class="ic">📥</span> Inbox <span class="soon">MAQUETA</span></button>
     </nav>
     <div class="sb-foot">v1 · cuadro de mando<br><span id="clock"></span></div>
@@ -368,6 +369,16 @@ body.guest .admin-only{display:none!important}
         <div class="card"><h3>Inventario</h3><div id="obrasBody"></div></div>
       </section>
 
+      <!-- COLECCIONES (cabeceras de revista + series de libros) -->
+      <section class="page" id="p-colecciones">
+        <div class="sec-h"><h2>Colecciones</h2></div>
+        <div class="card"><h3>Cabeceras de revista y series de libros</h3>
+          <div class="row" style="margin-bottom:12px"><div><label>Tipo</label>
+            <select id="colsTipo" onchange="loadColecciones()"><option value="">Todas</option><option value="revista">📰 Revistas</option><option value="libro">📚 Series de libros</option></select></div></div>
+          <div id="colsBody"></div>
+        </div>
+      </section>
+
       <!-- INBOX (maqueta) -->
       <section class="page" id="p-inbox">
         <div class="mock">
@@ -422,7 +433,7 @@ const toast=(m,t='ok')=>{const e=document.createElement('div');e.className='toas
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // ── nav ──
-const titles={dashboard:'Dashboard',activity:'Actividad',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',inbox:'Inbox',search:'Búsqueda'};
+const titles={dashboard:'Dashboard',activity:'Actividad',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',colecciones:'Colecciones',inbox:'Inbox',search:'Búsqueda'};
 let logTimer=null;
 function go(p){detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
@@ -431,7 +442,7 @@ function go(p){detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on'
 $('#nav').onclick=e=>{const b=e.target.closest('button[data-p]');if(b&&!b.disabled)go(b.dataset.p);};
 $('#burger').onclick=()=>{$('#sidebar').classList.toggle('open');$('#scrim').classList.toggle('open');};
 $('#scrim').onclick=()=>{$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');};
-$('#refresh').onclick=()=>{if(detalle){const d=detalle;d.tipo==='obra'?verObra(d.id):verDoc(d.id,d.ctx);refrescarEstado();return;}
+$('#refresh').onclick=()=>{if(detalle){const d=detalle;d.tipo==='obra'?verObra(d.id):d.tipo==='coleccion'?verColeccion(d.id):verDoc(d.id,d.ctx);refrescarEstado();return;}
   const cur=$$('#nav button.on')[0]?.dataset.p||'dashboard';loaders[cur]&&loaders[cur]();refrescarEstado();};
 setInterval(()=>$('#clock').textContent=new Date().toLocaleTimeString('es-ES'),1000);
 
@@ -745,6 +756,46 @@ function pintarObra(r){
   $$('#p-detalle .vol[data-doc]').forEach(el=>el.onclick=()=>verDoc(el.dataset.doc,{obra:{_id:o._id,titulo:o.titulo}}));
 }
 
+// ── colecciones: cabeceras de revista (números) + series de libros ──
+async function loadColecciones(){try{
+  const tipo=$('#colsTipo')?$('#colsTipo').value:'';
+  const o=await api('/colecciones'+(tipo?('?tipo='+encodeURIComponent(tipo)):''));
+  $('#colsBody').innerHTML=o.length?`<table><tr><th>Colección</th><th>Tipo</th><th>ISSN</th><th>Miembros</th><th>Estado</th></tr>
+    ${o.map(x=>`<tr><td><span class="rowlink" data-col="${esc(x._id)}">${esc(x.nombre)}</span></td>
+      <td>${x.tipo==='revista'?'📰 revista':'📚 libro'}</td><td class="mono muted">${esc(x.issn||'—')}</td>
+      <td>${x.miembros||0}</td>
+      <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':'<span class="tag ok">ok</span>'}</td></tr>`).join('')}</table>`:'<div class="empty">Sin colecciones</div>';
+  $$('#colsBody [data-col]').forEach(b=>b.onclick=()=>verColeccion(b.dataset.col));
+}catch(e){toast(e.message,'bad');}}
+
+async function verColeccion(id){detalle={tipo:'coleccion',id};mostrarDetalle();$('#title').textContent='Colección';
+  $('#p-detalle').innerHTML='<div class="card"><div class="muted">Cargando colección…</div></div>';
+  try{const r=await api('/colecciones/'+encodeURIComponent(id));pintarColeccion(r);}
+  catch(e){$('#p-detalle').innerHTML=`<div class="crumb"><a onclick="go('colecciones')">← Colecciones</a></div><div class="empty">${esc(e.message)}</div>`;}}
+
+function miembroCard(d,etiqueta){
+  const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
+  const fmt=(d.formatos||[]).slice(0,3).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(etiqueta||'')} ${fmt}</div><div class="t">${esc(d.titulo||'—')}</div></div></div>`;
+}
+
+function pintarColeccion(r){
+  const c=r.coleccion,desc=c.cdu_desc,esRev=c.tipo==='revista';
+  const tipoLabel=esRev?'📰 Revista (cabecera)':'📚 Serie de libros';
+  const sub=[c.issn?'ISSN '+c.issn:'',c.editorial].filter(Boolean).map(esc).join(' · ')||'—';
+  const head=`<div class="crumb"><a onclick="go('colecciones')">Colecciones</a> › <span>${esc(recortar(c.nombre,50))}</span></div>
+    <div class="det-head"><button class="det-back" title="Volver" onclick="go('colecciones')">←</button>
+      <div class="det-title"><h2>${esc(c.nombre||'(sin título)')}</h2><div class="sub">${tipoLabel} · ${sub}</div>
+        <div style="margin-top:8px"><span class="muted">${r.miembros.length} ${esRev?'número(s)':'libro(s)'}</span> ${c.revision_requerida?'<span class="tag bad">revisar</span>':''}</div>
+        ${c.cdu?`<div class="mono muted" style="margin-top:8px">CDU ${esc(c.cdu)}${desc&&desc.titulo_es?' · '+esc(desc.titulo_es):''}</div>`:''}
+        ${c.descripcion?`<p class="muted" style="font-size:12px;margin-top:6px">${esc(c.descripcion)}</p>`:''}
+      </div></div>`;
+  const etiq=d=>esRev?(d.clave_numero||(d.año_edicion?String(d.año_edicion):'')||'nº ?'):(d.coleccion_numero?'nº '+d.coleccion_numero:'');
+  const cards=r.miembros.length?r.miembros.map(d=>miembroCard(d,etiq(d))).join(''):`<div class="empty">Sin ${esRev?'números':'libros'} registrados</div>`;
+  $('#p-detalle').innerHTML=head+`<div class="card"><h3>${esRev?'Números':'Libros'}</h3><div class="vol-grid">${cards}</div></div>`;
+  $$('#p-detalle .vol[data-doc]').forEach(el=>el.onclick=()=>verDoc(el.dataset.doc,{coleccion:{_id:c._id,nombre:c.nombre}}));
+}
+
 async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();$('#title').textContent='Ficha';
   $('#p-detalle').innerHTML='<div class="card"><div class="muted">Cargando ficha…</div></div>';
   try{const r=await api('/documentos/'+encodeURIComponent(id));pintarDoc(r,ctx);}
@@ -799,9 +850,10 @@ function filtrarCatalogo(filtro,etiqueta){irBusquedaFiltro({filtro,etiqueta:etiq
 function filtrarPorDia(dia){irBusquedaFiltro({dia,etiqueta:`Ingresados el ${dia}`});}
 
 function pintarDoc(r,ctx){
-  const d=r.doc,vo=ctx&&ctx.obra,vol=ctx&&ctx.volver;
+  const d=r.doc,vo=ctx&&ctx.obra,vc=ctx&&ctx.coleccion,vol=ctx&&ctx.volver;
   let inicio,back;
   if(vo){inicio=`<a onclick="go('obras')">Obras</a> › <a onclick="verObra('${esc(vo._id)}')">${esc(recortar(vo.titulo,32))}</a>`;back=`verObra('${esc(vo._id)}')`;}
+  else if(vc){inicio=`<a onclick="go('colecciones')">Colecciones</a> › <a onclick="verColeccion('${esc(vc._id)}')">${esc(recortar(vc.nombre,32))}</a>`;back=`verColeccion('${esc(vc._id)}')`;}
   else if(vol){inicio=`<a onclick="go('${esc(vol)}')">${esc(ctx.etiqueta||vol)}</a>`;back=`go('${esc(vol)}')`;}
   else{inicio=`<a onclick="go('obras')">Obras</a>`;back=`go('obras')`;}
   const crumb=`<div class="crumb">${inicio} › <span>${esc(recortar(d.titulo,40))}</span></div>`;
@@ -835,7 +887,7 @@ function pintarDoc(r,ctx){
   $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
-  $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>filtrarColeccion(a.dataset.colid,a.dataset.colnom));
+  $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
   $$('#p-detalle [data-q]').forEach(a=>a.onclick=()=>buscarTexto(a.dataset.q));
   carIdx=0;const tr=$('#carTrack');
   if(tr&&tr.children.length>1)tr.onscroll=()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==carIdx){carIdx=i;const dd=$('#carDots');if(dd)dd.textContent=(i+1)+' / '+tr.children.length;}};
@@ -1110,7 +1162,7 @@ function pintarInteg(r){
     h+='</div>';}
   $('#integOut').innerHTML=h;
 }
-const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:loadPap,obras:loadObras,inbox:()=>{},search:loadSearch};
+const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:loadPap,obras:loadObras,colecciones:loadColecciones,inbox:()=>{},search:loadSearch};
 
 // ── auth ──
 let estadoTimer=null;

@@ -30,7 +30,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { conectarDB } from '../src/database.js';
-import { resolverCabecera, registrarNumeroEnCabecera, claveNumero, tituloCabecera } from '../src/utils/revistas.js';
+import { resolverCabecera, registrarNumeroEnColeccion as registrarNumeroEnCabecera } from '../src/utils/colecciones.js';
+import { claveNumero, tituloCabecera } from '../src/utils/revistas.js';
 import { esTituloArtefacto } from '../src/utils/parsear-nombre.js';
 import { ingestarRecurso } from '../src/servicio-ingesta.js';
 
@@ -167,6 +168,11 @@ async function recuperar(db) {
 }
 
 async function main() {
+    if (!process.argv.includes('--force-legacy')) {
+        console.log('⛔ SUPERSEDED — usa scripts/migrar-revistas-a-colecciones.js (modelo nuevo: cabecera = COLECCIÓN).');
+        console.log('   Este script opera sobre el modelo ANTIGUO (cabecera = obra). Archivado; forzarlo: --force-legacy.');
+        process.exit(0);
+    }
     console.log(`🛠  Migración de revistas — ${EJECUTAR ? '⚠ EJECUTAR (aplica cambios)' : 'DRY-RUN (no cambia nada)'}`);
     console.log(`    Árbol CDU: ${DIR_CDU}`);
     const db = await conectarDB();

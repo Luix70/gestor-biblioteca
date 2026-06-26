@@ -46,6 +46,11 @@ function razonLibro(doc) {
 }
 
 async function main() {
+    if (!process.argv.includes('--force-legacy')) {
+        console.log('⛔ SUPERSEDED — la reclasificación libro↔revista está integrada en');
+        console.log('   scripts/migrar-revistas-a-colecciones.js (FASE 3 · RECLASSIFY). Archivado; forzarlo: --force-legacy.');
+        process.exit(0);
+    }
     console.log(`📚 Fix B — reclasificar libros mal clasificados como revista — ${EJECUTAR ? '⚠ EJECUTAR' : 'DRY-RUN (no cambia nada)'}`);
     const db = await conectarDB();
     const bib = db.collection('biblioteca'), obras = db.collection('obras');

@@ -1,8 +1,8 @@
 import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
-import { resolverColeccion } from './utils/colecciones.js';
+import { resolverColeccion, resolverCabecera, registrarNumeroEnColeccion } from './utils/colecciones.js';
 import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
-import { resolverCabecera, registrarNumeroEnCabecera, claveNumero, tituloCabecera } from './utils/revistas.js';
+import { claveNumero, tituloCabecera } from './utils/revistas.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
 
@@ -73,14 +73,16 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     // del try para ser accesible también desde el manejador de E11000 (catch). Lee docFinal en el
     // momento de la llamada (ya tendrá .obra/.volumen_numero fijados por el paso 2c).
     const registrarTomo = async (idFinal) => {
-        if (!docFinal.obra || !idFinal) return;
+        if (!idFinal) return;
         if (docFinal.tipo_recurso === 'revista') {
-            // Número de revista → inventario cronológico de la cabecera (no el array 1..N de libros).
-            await registrarNumeroEnCabecera(db, docFinal.obra, {
+            // Número de revista → inventario cronológico de la CABECERA (colección tipo:'revista'),
+            // no el array 1..N de las obras multivolumen.
+            if (!docFinal.coleccion) return;
+            await registrarNumeroEnColeccion(db, docFinal.coleccion, {
                 clave: docFinal.clave_numero || null, 'año': docFinal.año_edicion ?? null,
                 mes: docFinal.mes_publicacion ?? null, numero_issue: docFinal.numero_issue ?? null,
             }, idFinal);
-        } else {
+        } else if (docFinal.obra) {
             // volumen_numero puede ser null ("tomo ?"): se registra igual (nunca se descarta un tomo).
             await registrarVolumenEnObra(db, docFinal.obra, docFinal.volumen_numero ?? null, idFinal, docFinal.obra_total);
         }
@@ -171,14 +173,30 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             const cabTitulo = tituloCabecera(docFinal.obra_titulo || docFinal.titulo);
             if (docFinal.issn || cabTitulo) {
                 const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
-                const colId = (docFinal.coleccion && typeof docFinal.coleccion !== 'string') ? docFinal.coleccion : null;
                 const { _id, cdu: cduCab, creada } = await resolverCabecera(db, {
-                    titulo: cabTitulo, issn: docFinal.issn, editorialId: edId, coleccionId: colId, cdu: docFinal.cdu,
+                    nombre: cabTitulo, issn: docFinal.issn, tipo: 'revista', editorialId: edId, cdu: docFinal.cdu,
                 });
                 if (creada) docFinal.alertas_agente.push(`Nueva cabecera de revista registrada: ${cabTitulo || docFinal.issn}`);
-                if (_id) { docFinal.obra = _id; if (cabTitulo) docFinal.obra_titulo = cabTitulo; }
+                if (_id) { docFinal.coleccion = _id; if (cabTitulo) docFinal.coleccion_nombre = cabTitulo; }
                 if (cduCab) docFinal.cdu = cduCab; // los números comparten la CDU de la cabecera
             }
+        }
+
+        // 2e. SERIE de LIBROS con ISSN de serie (p. ej. «Graduate Texts in Physics», ISSN 1868-4513): el
+        // libro conserva su PROPIO ISBN; el ISSN es la AUTORIDAD de la SERIE, no del libro. Se modela como
+        // colección tipo:'libro' (pivote ISSN) y el libro se cuelga de ella. El ISSN se RETIRA del
+        // documento (su identidad es el ISBN; el ISSN vive en la colección) — así un ISSN de serie no
+        // convierte el libro en revista ni fusiona libros distintos. Si 2b ya creó la colección por su
+        // nombre, resolverCabecera la reencuentra por nombre y le añade el ISSN (no duplica).
+        if (docFinal.tipo_recurso === 'libro' && docFinal.issn) {
+            const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
+            const nombreSerie = docFinal.coleccion_nombre || docFinal.obra_titulo || null;
+            const { _id, creada } = await resolverCabecera(db, {
+                nombre: nombreSerie, issn: docFinal.issn, tipo: 'libro', editorialId: edId, cdu: docFinal.cdu,
+            });
+            if (creada) docFinal.alertas_agente.push(`Nueva serie de libros registrada (ISSN ${docFinal.issn}): ${nombreSerie || docFinal.issn}`);
+            if (_id) { docFinal.coleccion = _id; if (nombreSerie) docFinal.coleccion_nombre = nombreSerie; }
+            delete docFinal.issn; // la autoridad ISSN vive en la colección, no en el libro
         }
 
         // SEGURIDAD MULTIVOLUMEN — un TOMO JAMÁS debe fusionarse con otro documento por su ISBN
@@ -241,11 +259,12 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             if (docFinal.obra && docFinal.volumen_numero != null) {
                 filtro = { obra: docFinal.obra, volumen_numero: docFinal.volumen_numero };
             } else if (docFinal.tipo_recurso === 'revista') {
-                // Identidad ROBUSTA de un número = (cabecera, clave-de-número). El ISSN suelto YA NO se
-                // usa como clave (fusionaba todos los números). Con cabecera pero SIN clave (sin fecha/nº)
-                // → insertar (miembro "sin fecha"). Sin cabecera (sin ISSN) → caer a (título + año [+ mes]).
-                if (docFinal.obra) {
-                    if (docFinal.clave_numero) filtro = { obra: docFinal.obra, clave_numero: docFinal.clave_numero };
+                // Identidad ROBUSTA de un número = (cabecera, clave-de-número). La cabecera es una
+                // COLECCIÓN (tipo:'revista'). El ISSN suelto YA NO se usa como clave (fusionaba todos los
+                // números). Con cabecera pero SIN clave (sin fecha/nº) → insertar (miembro "sin fecha").
+                // Sin cabecera (sin ISSN) → caer a (título + año [+ mes]).
+                if (docFinal.coleccion) {
+                    if (docFinal.clave_numero) filtro = { coleccion: docFinal.coleccion, clave_numero: docFinal.clave_numero };
                 } else if (docFinal.titulo && docFinal.año_edicion && docFinal.mes_publicacion) {
                     filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion, mes_publicacion: docFinal.mes_publicacion };
                 } else if (docFinal.titulo && docFinal.año_edicion) {

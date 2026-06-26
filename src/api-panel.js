@@ -273,6 +273,10 @@ export function rutasPanel() {
                 if (qId.length >= 8) {
                     const irx = { $regex: '^' + qId.split('').join('[\\s-]?'), $options: 'i' };
                     or.push({ isbn: irx }, { issn: irx }, { isbn_obra: irx });
+                    // El ISSN de una serie de libros vive en la COLECCIÓN (no en el libro): buscar la
+                    // cabecera/serie por su ISSN y traer sus miembros.
+                    const colsISSN = await db.collection('colecciones').find({ issn: irx }, { projection: { _id: 1 } }).limit(50).toArray();
+                    if (colsISSN.length) or.push({ coleccion: { $in: colsISSN.map(c => c._id) } });
                 }
                 const [autores, edits] = await Promise.all([
                     db.collection('autores').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
@@ -357,6 +361,59 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // Lista de COLECCIONES (cabeceras de revista + series de libros) para el panel. ?tipo=revista|libro.
+    r.get('/colecciones', async (req, res) => {
+        try {
+            const db = await conectarDB();
+            const tipo = req.query.tipo;
+            const filtro = req.usuario?.rol === 'guest' ? { nsfw: { $ne: true } } : {};
+            if (tipo === 'revista') filtro.tipo = 'revista';
+            else if (tipo === 'libro') filtro.tipo = { $ne: 'revista' }; // libro o legado (sin tipo)
+            const cols = await db.collection('colecciones')
+                .find(filtro, { projection: { nombre: 1, tipo: 1, issn: 1, numeros_presentes: 1, revision_requerida: 1, nsfw: 1 } })
+                .sort({ revision_requerida: -1, nombre: 1 }).limit(1000).toArray();
+            // Nº de miembros (números/libros) de un tirón, por agregación sobre biblioteca.
+            const conteos = cols.length ? await db.collection('biblioteca').aggregate([
+                { $match: { coleccion: { $in: cols.map(c => c._id) } } },
+                { $group: { _id: '$coleccion', n: { $sum: 1 } } },
+            ]).toArray() : [];
+            const mapaN = new Map(conteos.map(x => [String(x._id), x.n]));
+            res.json(cols.map(c => ({ ...c, _id: String(c._id), tipo: c.tipo || 'libro', miembros: mapaN.get(String(c._id)) || 0 })));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Detalle de UNA colección: cabecera/serie resuelta (editorial/CDU+descripción) + sus miembros
+    // (números de revista en orden cronológico, o libros de la serie) para el drill-down del panel.
+    r.get('/colecciones/:id', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const col = await db.collection('colecciones').findOne({ _id: new ObjectId(req.params.id) });
+            if (!col) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
+            if (req.usuario?.rol === 'guest' && col.nsfw) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
+
+            const esRevista = col.tipo === 'revista';
+            const matchMiembros = { coleccion: col._id };
+            if (req.usuario?.rol === 'guest') matchMiembros.nsfw = { $ne: true };
+            const proy = { ...PROY_VOL, clave_numero: 1, 'año_edicion': 1, mes_publicacion: 1, numero_issue: 1, coleccion_numero: 1 };
+            const miembros = await db.collection('biblioteca')
+                .find(matchMiembros, { projection: proy })
+                .sort(esRevista ? { clave_numero: 1, 'año_edicion': 1 } : { titulo: 1 }).limit(2000).toArray();
+
+            res.json({
+                ok: true,
+                coleccion: {
+                    _id: String(col._id), nombre: col.nombre, tipo: col.tipo || 'libro', issn: col.issn || null,
+                    descripcion: col.descripcion || null, cdu: col.cdu || null, cdu_desc: await cduDesc(db, col.cdu),
+                    editorial: await nombrePorId(db, 'editoriales', col.editorial),
+                    numeros_presentes: col.numeros_presentes || (esRevista ? miembros.length : 0),
+                    revision_requerida: !!col.revision_requerida,
+                },
+                miembros: miembros.map(d => ({ ...d, _id: String(d._id) })),
+            });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // Ficha COMPLETA de un documento: nombres resueltos (autores/editorial/colección/CDU+descripción),
     // imágenes y portada, y la URL del fichero original (servido en /recursos) para previsualizar
     // (PDF embebido), abrir en pestaña o descargar. Se omiten los ObjectId crudos y campos internos.
@@ -370,7 +427,10 @@ export function rutasPanel() {
                 return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
 
             const { autores, editorial } = await resolverNombres(db, doc);
-            const coleccion = doc.coleccion_nombre || await nombrePorId(db, 'colecciones', doc.coleccion);
+            const colDoc = doc.coleccion
+                ? await db.collection('colecciones').findOne({ _id: doc.coleccion }, { projection: { nombre: 1, tipo: 1, issn: 1 } })
+                : null;
+            const coleccion = colDoc?.nombre || doc.coleccion_nombre || null;
             const obra = doc.obra
                 ? { _id: String(doc.obra), titulo: await nombrePorId(db, 'obras', doc.obra, 'titulo') } : null;
 
@@ -395,6 +455,7 @@ export function rutasPanel() {
             res.json({
                 ok: true, doc: limpio, autores, editorial, coleccion,
                 coleccion_id: doc.coleccion ? String(doc.coleccion) : null,
+                coleccion_tipo: colDoc?.tipo || null, coleccion_issn: colDoc?.issn || null,
                 cdu_desc: cdesc, clasificaciones, obra,
                 archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
                 imagenes: doc.imagenes || [], portada: doc.portada || null,

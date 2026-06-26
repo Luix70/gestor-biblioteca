@@ -1,9 +1,13 @@
 /**
- * Revistas: la CABECERA (p. ej. "Historia de Iberia Vieja", ISSN 1699-7913) se modela como una
- * OBRA — reutilizamos la colección 'obras' con tipo:'revista' e issn_obra como AUTORIDAD — y cada
- * NÚMERO (oct 2015, feb 2020…) es un documento de 'biblioteca' miembro de esa cabecera, identificado
- * por una CLAVE estable dentro de ella. El ISSN es el pivote (igual que el ISBN para los libros): así
- * el vínculo título↔número no se fragmenta por el ruido de fechas/números en el título de cada uno.
+ * Revistas — helpers de identidad de un NÚMERO dentro de su cabecera.
+ *
+ * La CABECERA (p. ej. "Historia de Iberia Vieja", ISSN 1699-7913) se modela como una COLECCIÓN
+ * (colección tipo:'revista' con `issn` como AUTORIDAD; ver src/utils/colecciones.js). Cada NÚMERO es un
+ * documento de 'biblioteca' miembro de esa cabecera (`doc.coleccion`), identificado por una CLAVE
+ * estable dentro de ella. El ISSN es el pivote (igual que el ISBN para los libros): así el vínculo
+ * título↔número no se fragmenta por el ruido de fechas/números en el título de cada uno.
+ *
+ * (resolverCabecera / registrarNumeroEnColeccion viven en colecciones.js — la cabecera ES una colección.)
  */
 import { MES_NUM } from './parsear-nombre.js';
 
@@ -33,8 +37,8 @@ export function tituloCabecera(titulo) {
     const orig = String(titulo).trim();
     const meses = Object.keys(MES_NUM).join('|');
     let t = orig;
-    // nº / número / issue / # + dígitos … hasta el final
-    t = t.replace(/[\s\-–—,;:|]*\b(?:n[.º°o]?|n[úu]m(?:ero)?\.?|issue|#)\s*\d+\b.*$/i, '');
+    // nº / núm / No. / N° / issue / # + dígitos … hasta el final
+    t = t.replace(/[\s\-–—,;:|]*\b(?:n[.ºo°]?\.?|n[úu]m(?:ero)?\.?|issue|#)\s*\d+\b.*$/i, '');
     // mes(es) por nombre [+ rango] + año  ("octubre 2015", "jul-ago 2020", "oct. 2015")
     t = t.replace(new RegExp(`[\\s\\-–—,;:|]*\\b(?:${meses})\\b(?:[\\s\\-/]+(?:${meses})\\b)?[\\s.,–-]*(?:19|20)\\d{2}.*$`, 'i'), '');
     // un año suelto al final
@@ -44,75 +48,41 @@ export function tituloCabecera(titulo) {
 }
 
 /**
- * Resuelve la cabecera de una revista a un documento de 'obras' (check-then-create), keyed por ISSN
- * (issn_obra) y, en su defecto, por título. Completa huecos (issn_obra, editorial, colección, cdu) de
- * una cabecera ya existente. Devuelve { _id, cdu, creada }. Análogo a resolverObra() para libros.
+ * Discriminador REVISTA vs SERIE-DE-LIBROS para un grupo de documentos que comparten un mismo ISSN.
+ *
+ * Idea: un periódico genuino = UNA cabecera (un solo título de masthead) con MUCHOS números que solo
+ * difieren por fecha/número. Una serie de monografías (p. ej. «Graduate Texts in Physics», ISSN de
+ * serie) = MUCHOS títulos DISTINTOS bajo el mismo ISSN. Así, contando los títulos-de-cabecera distintos
+ * (normalizados con tituloCabecera, sin distinción de mayúsculas) se separan limpiamente ambos casos.
+ *
+ * Corroboradores para grupos pequeños/ambiguos: Dewey/LCC en todos + ningún número con fecha ⇒ libros.
+ *
+ * @param {Array<{titulo?:string, obra_titulo?:string, dewey?:string, lcc?:string,
+ *                año_edicion?:any, mes_publicacion?:any, numero_issue?:any}>} docs
+ * @returns {{clase:'revista'|'serie-libros'|'ambiguo', n:number, distintos:number, conFecha:number,
+ *            conDewey:number, titulos:string[]}}
  */
-export async function resolverCabecera(db, { titulo, issn = null, editorialId = null, coleccionId = null, cdu = null }) {
-    const col = db.collection('obras');
-    const t = titulo ? String(titulo).trim() : null;
-
-    let existente = issn ? await col.findOne({ issn_obra: issn }) : null;
-    if (!existente && t) existente = await col.findOne({ titulo: t, tipo: 'revista' });
-
-    if (existente) {
-        const set = {};
-        if (issn && !existente.issn_obra) set.issn_obra = issn;
-        if (!existente.tipo) set.tipo = 'revista';
-        if (editorialId && !existente.editorial) set.editorial = editorialId;
-        if (coleccionId && !existente.coleccion) set.coleccion = coleccionId;
-        if (cdu && !existente.cdu) set.cdu = cdu;
-        if (Object.keys(set).length) await col.updateOne({ _id: existente._id }, { $set: set });
-        return { _id: existente._id, cdu: existente.cdu || cdu || null, creada: false };
+export function clasificarISSN(docs = []) {
+    const n = docs.length;
+    const titulosSet = new Set();
+    for (const d of docs) {
+        const t = (tituloCabecera(d.obra_titulo || d.titulo) || '').toLowerCase().trim();
+        if (t) titulosSet.add(t);
     }
+    const titulos = [...titulosSet];
+    const distintos = titulos.length;
+    const conFecha = docs.filter(d => claveNumero(d)).length;
+    const conDewey = docs.filter(d => d.dewey || d.lcc).length;
 
-    const nueva = { titulo: t, tipo: 'revista', fecha_creacion: new Date() };
-    if (issn)        nueva.issn_obra = issn;
-    if (editorialId) nueva.editorial = editorialId;
-    if (coleccionId) nueva.coleccion = coleccionId;
-    if (cdu)         nueva.cdu = cdu;
-    try {
-        const r = await col.insertOne(nueva);
-        return { _id: r.insertedId, cdu: cdu || null, creada: true };
-    } catch {
-        // Carrera con el índice único de issn_obra: devolver el existente.
-        const ya = issn ? await col.findOne({ issn_obra: issn }) : (t ? await col.findOne({ titulo: t, tipo: 'revista' }) : null);
-        return ya ? { _id: ya._id, cdu: ya.cdu || cdu || null, creada: false } : { _id: null, cdu: null, creada: false };
+    let clase;
+    if (distintos >= 2 && distintos >= Math.ceil(n * 0.6)) {
+        clase = 'serie-libros';                 // muchos títulos distintos bajo un ISSN
+    } else if (distintos <= 1 && n >= 2) {
+        clase = 'revista';                      // un solo masthead, varios números
+    } else {
+        // Grupo pequeño / señales mixtas: corroboradores.
+        const pareceLibro = n > 0 && conDewey >= n && conFecha === 0;
+        clase = pareceLibro ? 'serie-libros' : (distintos <= 1 ? 'revista' : 'ambiguo');
     }
-}
-
-/**
- * Registra (o actualiza) en la cabecera el número `docId`, manteniendo `numeros` como una lista
- * CRONOLÓGICA [{clave, año, mes, numero_issue, _id}] — adecuada para una publicación periódica (no el
- * array contiguo 1..N de los libros). Un número sin clave (sin fecha/nº) va a `numeros_sin_fecha` y
- * marca la cabecera para revisión. Idempotente y best-effort (nunca rompe la ingesta del número).
- */
-export async function registrarNumeroEnCabecera(db, obraId, num, docId) {
-    if (!obraId || !docId) return;
-    try {
-        const col = db.collection('obras');
-        const obra = await col.findOne({ _id: obraId });
-        if (!obra) return;
-
-        const clave = num?.clave || null;
-        // Quita cualquier entrada previa de ESTE doc (por _id) y, si trae clave, la de su misma clave.
-        const numeros = (obra.numeros || [])
-            .filter(n => n && String(n._id) !== String(docId) && (!clave || n.clave !== clave));
-        let sinFecha = (obra.numeros_sin_fecha || []).filter(id => String(id) !== String(docId));
-
-        if (clave) {
-            numeros.push({ clave, 'año': num.año ?? null, mes: num.mes ?? null, numero_issue: num.numero_issue ?? null, _id: docId });
-            numeros.sort((a, b) => String(a.clave).localeCompare(String(b.clave), undefined, { numeric: true }));
-        } else {
-            sinFecha = [...sinFecha, docId];
-        }
-
-        await col.updateOne({ _id: obraId }, { $set: {
-            numeros,
-            numeros_presentes: numeros.length,
-            numeros_sin_fecha: sinFecha,
-            revision_requerida: sinFecha.length > 0,
-            fecha_actualizacion: new Date(),
-        } });
-    } catch { /* el inventario de la cabecera no debe romper la ingesta del número */ }
+    return { clase, n, distintos, conFecha, conDewey, titulos };
 }
