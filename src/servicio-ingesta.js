@@ -8,7 +8,6 @@ import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
 import { enviarACuarentena } from './gestor-fallos.js';
-import { metricasFichero, ganaEntrante, reemplazarFicheroDeDoc } from './utils/duplicados.js';
 import { carpetaDeDoc, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -162,33 +161,18 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
             console.log(`  🗑️  Duplicado EXACTO (hash) de ${idExist}: «${path.basename(rutas[0])}» → borrado.`);
             return { ...comun, operacion: 'duplicado_exacto', accion: 'borrado' };
         }
-        // Hash distinto (mismo formato, contenido distinto) → AUTO-RESOLUCIÓN por tamaño/fecha (sin
-        // intervención humana): gana el MÁS GRANDE; empate → el MÁS RECIENTE. Si gana el entrante,
-        // reemplaza el fichero del doc y SINCRONIZA la BD (nombre_archivo/hash/paginas); si gana el
-        // catalogado, se descarta el entrante. Solo si la auto-resolución falla → Cuarentena (no perder).
-        try {
-            const ex = await metricasFichero(await archivoOriginal(carpetaDeDoc(resultado)));
-            const en = await metricasFichero(rutas[0]);
-            if (ganaEntrante(ex, en)) {
-                await reemplazarFicheroDeDoc(resultado, rutas[0]);
-                for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
-                console.log(`  ⤴️  Duplicado de ${idExist}: entrante más grande/reciente → REEMPLAZA al catalogado (BD en sync).`);
-                return { ...comun, operacion: 'reemplazo', accion: 'reemplazado' };
-            }
-            for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
-            console.log(`  🗑️  Duplicado de ${idExist}: el catalogado es igual o mejor → entrante descartado.`);
-            return { ...comun, operacion: 'duplicado_descartado', accion: 'borrado' };
-        } catch (e) {
-            console.warn(`  ⚠️  Auto-resolución de duplicado de ${idExist} falló (${e.message}) → Cuarentena/duplicados.`);
-            await enviarACuarentena(rutas, {
-                titulo: documento.titulo,
-                identificador: documento.isbn || documento.issn || documento.titulo,
-                error: { tipo: 'duplicado', mensaje: `Auto-resolución falló: ${e.message}` },
-                documento_existente_id: idExist,
-                fase: 'catalogo',
-            });
-            return { ...comun, operacion: 'duplicado', accion: 'cuarentena' };
-        }
+        // Hash DISTINTO (contenido distinto) → POLÍTICA "solo se borra un fichero si ya existe OTRO
+        // IDÉNTICO por hash en el archivo": aquí NO se borra ni se reemplaza NADA. Se conservan AMBOS;
+        // el entrante se deja en Cuarentena/duplicados para deduplicación manual posterior (nada se pierde).
+        console.log(`  ↔ Duplicado de ${idExist} (mismo identificador, contenido distinto): conservado en Cuarentena/duplicados (no se borra ni reemplaza).`);
+        await enviarACuarentena(rutas, {
+            titulo: documento.titulo,
+            identificador: documento.isbn || documento.issn || documento.titulo,
+            error: { tipo: 'duplicado', mensaje: 'Mismo identificador, contenido distinto: conservado para dedup manual.' },
+            documento_existente_id: idExist,
+            fase: 'catalogo',
+        });
+        return { ...comun, operacion: 'duplicado', accion: 'cuarentena' };
     }
 
     // 3. Gestión de archivos: copiar a <CDU>/<libros|revistas>/.../.
@@ -210,10 +194,12 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     let rc = rutaCatalogo(argsRuta);
     let carpetaFs = path.join(DIR_CDU, rc.relativa);
 
-    // Colisión de carpeta (libros): si esto es un documento NUEVO (otra versión del mismo ISBN)
-    // y la carpeta destino ya la ocupa OTRO documento, disambiguamos la hoja con un sufijo del
-    // _id. Así dos revisiones del mismo ISBN viven en carpetas distintas (1 doc ↔ 1 carpeta).
-    if (resultado.operacion === 'insercion' && documento.tipo_recurso !== 'revista'
+    // Colisión de carpeta: si esto es un documento NUEVO y la carpeta destino ya la ocupa OTRO
+    // documento (otra edición del mismo ISBN, u OTRO número de revista del mismo año/cabecera cuando
+    // falta el mes), disambiguamos la hoja con un sufijo del _id. Así cada documento tiene SU carpeta
+    // (1 doc ↔ 1 carpeta) y nunca se pisan ficheros ni sidecars (registro.json/portada). Aplica también
+    // a revistas (antes excluidas, lo que mezclaba números del mismo año en una sola carpeta).
+    if (resultado.operacion === 'insercion'
         && await carpetaOcupadaPorOtroDoc(carpetaFs, resultado._id)) {
         rc = rutaCatalogo({ ...argsRuta, discriminador: String(resultado._id).slice(-6) });
         carpetaFs = path.join(DIR_CDU, rc.relativa);

@@ -287,8 +287,10 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                     if (mismoFormato) {
                         const mismoArchivo = !mismoFormato.nombre_archivo
                             || mismoFormato.nombre_archivo === docFinal.nombre_archivo;
+                        // POLÍTICA "nunca perder un documento": mismo ISBN+formato pero OTRO fichero (el
+                        // hash idéntico ya se resolvió en el Nivel A) = OTRO documento → se INSERTA aparte
+                        // (dedup posterior si procede). Antes iba a 'posible_duplicado' (riesgo de borrado).
                         if (mismoArchivo) filtro = { _id: mismoFormato._id };
-                        else return { ...mismoFormato, operacion: 'posible_duplicado' };
                     }
                     // Ningún doc con este ISBN tiene este formato → otro formato del mismo libro: insertar.
                 }
@@ -298,7 +300,17 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             // Sin filtro → siempre insertar
         }
 
-        const existente = filtro ? await coleccionBiblioteca.findOne(filtro) : null;
+        let existente = filtro ? await coleccionBiblioteca.findOne(filtro) : null;
+
+        // POLÍTICA "nunca reemplazar un documento por otro": si el existente YA tiene un fichero con OTRO
+        // nombre (y no es el mismo contenido — el hash idéntico ya se resolvió en el Nivel A), NO se
+        // fusiona: el entrante es un documento DISTINTO y se inserta aparte (se deduplica luego si
+        // procede). Solo se actualiza un existente SIN fichero (placeholder) o re-procesado con el MISMO
+        // nombre. Así dos números/ediciones distintos jamás colapsan en uno (caso revista mismo año).
+        if (existente && existente.nombre_archivo && docFinal.nombre_archivo
+            && existente.nombre_archivo !== docFinal.nombre_archivo) {
+            existente = null;
+        }
 
         // 4. Actualización inteligente o inserción.
         if (existente) {
