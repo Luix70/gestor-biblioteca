@@ -170,6 +170,23 @@ export function parsearNombre(nombreArchivo) {
         };
     }
 
+    // Sufijo de fecha ISO al FINAL del nombre: "Fotogramas 2014-01", "Paranormal 2010-12",
+    // "NationalGeographic201503". Patrón MUY común al nombrar números de revista; el nombre que da el
+    // curador es autoridad para la fecha del número. Exige AÑO-MES (mes 01-12): un año SUELTO no basta
+    // (un libro suele acabar en año y NO es periódico) — así no se clasifican libros como revista.
+    const isoSuffix = trabajo.match(/^(.*?)[\s._-]*((?:19|20)\d{2})[-_.]?(0[1-9]|1[0-2])(?:[-_.]\d{2})?$/);
+    if (isoSuffix && isoSuffix[1].replace(/[-–_\s.]+$/, '').trim().length >= 2) {
+        return {
+            titulo: isoSuffix[1].replace(/[-–_\s.]+$/, '').trim(),
+            autores: [],
+            año_edicion: parseInt(isoSuffix[2]),
+            mes_publicacion: parseInt(isoSuffix[3]),
+            idioma: null,
+            esFechada: true,
+            ...colExtra,
+        };
+    }
+
     // ¿Bloque de fecha "Mes[-Mes] Año" (señal fuerte de publicación periódica)?
     for (const [lang, meses] of Object.entries(MESES)) {
         const grupo = meses.join('|');

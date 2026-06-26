@@ -224,6 +224,18 @@ export async function procesarRecurso(entrada) {
             }
         }
 
+        // FECHA DEL NOMBRE = autoridad para el nº de revista (la mejor info, y temprana): "Title YYYY-MM"
+        // / "Title Mes Año". El curador nombró el fichero con la fecha REAL del número; en escaneados
+        // fusionarOcr la descarta y la visión puede dar un año equivocado (p. ej. la fecha del escaneo) →
+        // aquí se reimpone la del nombre. Solo si el nombre trae fecha (esFechada); si no, se respeta lo extraído.
+        {
+            const fechaNombre = parsearNombre(path.basename(rutas[0]));
+            if (fechaNombre.esFechada) {
+                datosBase.año_edicion = fechaNombre.año_edicion;
+                if (fechaNombre.mes_publicacion != null) datosBase.mes_publicacion = fechaNombre.mes_publicacion;
+            }
+        }
+
         // CÓDIGO DE BARRAS (recorte→visión): lee el EAN-13 de la cubierta cuando falta el identificador
         // PROPIO del tipo. Una REVISTA necesita su ISSN aunque el OCR le haya colado un ISBN espurio (las
         // revistas no llevan ISBN); un LIBRO necesita su ISBN. 977→ISSN/revista, 978/979→ISBN. Recortes a
