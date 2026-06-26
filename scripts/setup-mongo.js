@@ -148,6 +148,22 @@ async function main() {
     await asegurarIndice(biblioteca, { hash_contenido: 1 }, { sparse: true, name: 'idx_hash_contenido' });
     await asegurarIndice(biblioteca, { coleccion: 1 },      { sparse: true, name: 'idx_coleccion' });
 
+    // Quitar índices ÚNICOS heredados de UN solo campo en isbn/issn: contradicen el modelo y FUSIONAN
+    // documentos distintos (E11000). Un mismo ISBN puede tener varios docs (uno por formato; y hay
+    // seriados que reimprimen el mismo ISBN en cada número); un ISSN lo COMPARTEN todos los números de
+    // una revista → un único en biblioteca.issn fusionaría toda la cabecera. Se sustituyen por NO únicos.
+    try {
+        for (const ix of await biblioteca.indexes()) {
+            const ks = ix.key ? Object.keys(ix.key) : [];
+            if (ix.unique && ks.length === 1 && (ks[0] === 'isbn' || ks[0] === 'issn')) {
+                await biblioteca.dropIndex(ix.name);
+                console.log(`  🗑️  índice ÚNICO heredado ${ix.name} (${ks[0]}) eliminado (fusionaba documentos distintos).`);
+            }
+        }
+    } catch (e) { console.warn(`  ⚠️  revisión de índices únicos isbn/issn: ${e.codeName || e.message}`); }
+    await asegurarIndice(biblioteca, { isbn: 1 }, { sparse: true, name: 'idx_isbn' });
+    await asegurarIndice(biblioteca, { issn: 1 }, { sparse: true, name: 'idx_issn' });
+
     // ── colecciones: crear con validador (o aplicarlo si ya existe) ───────────
     console.log('\ncolecciones:');
     const existentes = await db.listCollections({ name: 'colecciones' }).toArray();

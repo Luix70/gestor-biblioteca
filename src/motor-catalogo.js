@@ -341,20 +341,41 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             console.error(JSON.stringify(error.errInfo?.details, null, 2));
             throw new Error("El documento no cumple con el $jsonSchema de 'biblioteca'.");
         }
-        // Clave duplicada (E11000): existe un índice ÚNICO (p. ej. isbn_1) y ya hay un documento
-        // con esa clave. En vez de fallar a Cuarentena, FUSIONAMOS con el existente (la mayoría
-        // son re-ingestas del mismo libro). El identificador conflictivo viene en error.keyValue.
+        // Clave duplicada (E11000): un índice ÚNICO (p. ej. isbn_1 heredado) y ya hay un documento con
+        // esa clave. POLÍTICA anti-pérdida (igual que en el dedup de arriba):
+        //   · si el conflicto es con el MISMO fichero (re-proceso) → fusionar (actualizar).
+        //   · si es con OTRO fichero (otro contenido — p. ej. un ISBN/ISSN COMPARTIDO por todos los
+        //     números de una publicación seriada) → NO fusionar: se QUITA la(s) clave(s) en conflicto y
+        //     se inserta como documento DISTINTO. Vale más un doc sin ese identificador que un número
+        //     perdido. (Lo ideal es no tener ese índice único; ver scripts/setup-mongo.js.)
         if (error.code === 11000) {
             const clave = error.keyValue || {};
-            const existente = Object.keys(clave).length
-                ? await coleccionBiblioteca.findOne(clave) : null;
-            if (existente) {
+            const existente = Object.keys(clave).length ? await coleccionBiblioteca.findOne(clave) : null;
+            const mismoFichero = existente && (!existente.nombre_archivo || !docFinal.nombre_archivo
+                || existente.nombre_archivo === docFinal.nombre_archivo);
+            if (existente && mismoFichero) {
                 const cambios = calcularActualizacion(existente, docFinal);
                 await coleccionBiblioteca.updateOne({ _id: existente._id }, { $set: cambios });
                 const actualizado = await coleccionBiblioteca.findOne({ _id: existente._id });
                 await registrarTomo(existente._id);
-                console.warn(`   ↔ ISBN/ISSN ya catalogado (${JSON.stringify(clave)}): fusionado con ${existente._id}.`);
+                console.warn(`   ↔ Identificador ya catalogado (${JSON.stringify(clave)}): re-proceso del mismo fichero → fusionado con ${existente._id}.`);
                 return { ...actualizado, operacion: 'actualizacion' };
+            }
+            if (existente) {
+                for (const k of Object.keys(clave)) {
+                    docFinal.alertas_agente.push(`${k}=${clave[k]} ya pertenece a otro documento (${existente._id}); este se cataloga SIN ${k} para no fusionarlo.`);
+                    delete docFinal[k];
+                }
+                docFinal.revision_requerida = true;
+                if (!docFinal.fecha_ingreso) docFinal.fecha_ingreso = new Date();
+                try {
+                    const reins = await coleccionBiblioteca.insertOne(docFinal);
+                    await registrarTomo(reins.insertedId);
+                    console.warn(`   ↔ ${JSON.stringify(clave)} en conflicto con OTRO fichero → insertado como documento DISTINTO sin ese identificador (${reins.insertedId}).`);
+                    return { ...docFinal, _id: reins.insertedId, operacion: 'insercion' };
+                } catch (e2) {
+                    throw new Error(`Error en base de datos (reinserción sin clave en conflicto): ${e2.message}`);
+                }
             }
         }
         throw new Error(`Error en base de datos: ${error.message}`);
