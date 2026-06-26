@@ -8,6 +8,7 @@ import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
 import { pareceSerieLibros } from './utils/revistas.js';
+import { clasificarTipo } from './utils/discriminador.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
@@ -189,16 +190,23 @@ export async function procesarRecurso(entrada) {
             if (!datosBase.paginas && renders.length) datosBase.paginas = Math.max(...renders.map(r => r.pagina));
         }
 
-        // libro vs revista (robusto). Señales de LIBRO inequívocas: un ISBN (del contenido O del nombre
-        // de archivo, ya resuelto en lector-pdf) o un bloque CIP/Dewey (Catalogación en Publicación) — las
-        // revistas no lo llevan. Un libro PUEDE tener ISBN + ISSN (el ISSN es de su COLECCIÓN/serie). Por
-        // eso el ISSN SOLO no convierte en revista: hace falta que NO haya señal de libro. La fecha/el
-        // título periódico mantienen su voto salvo que haya ISBN/CIP (sería un libro de serie fechado).
-        // También un título INEQUÍVOCO de serie editorial académica (Springer, «Lecture Notes…»…) = libro.
-        const esLibro = !!(datosBase.isbn || datosBase.cip || pareceSerieLibros(datosBase.titulo));
-        tipo_recurso = (!esLibro && (datosBase.esFechada || pareceRevista(datosBase.titulo) || datosBase.issn))
-            ? 'revista' : 'libro';
-        isbnDelArchivo = !!datosBase.isbn; // ISBN propio (contenido o nombre) → fiable
+        // libro vs revista (DISCRIMINADOR por confianza): una señal débil (ISBN del CUERPO del texto, que
+        // puede ser de un libro anunciado dentro de una revista) nunca pisa a una fuerte (ISBN PROPIO /
+        // CIP / serie editorial → libro;  nombre fechado / ISSN 977 → revista). El 977/impreso lo añade
+        // luego el lector de barras; aquí va la decisión provisional con texto + nombre.
+        const clasif = clasificarTipo({
+            multiparte: !!((datosBase.isbns_rol && datosBase.isbns_rol.length > 1) || datosBase.volumen_numero != null || datosBase.obra_titulo),
+            isbnPropio: datosBase.isbn_propio,                          // CIP / nombre-es-ISBN / incrustado
+            cip: !!datosBase.cip,
+            pareceSerieLibros: pareceSerieLibros(datosBase.titulo),
+            esFechada: !!datosBase.esFechada,
+            issnFuerte: false,                                         // 977/impreso lo resuelve el lector de barras
+            pareceRevista: pareceRevista(datosBase.titulo),
+            issnHint: !!datosBase.issn,                                // ISSN del cuerpo → pista
+            isbnHint: !!datosBase.isbn,
+        });
+        tipo_recurso = clasif.tipo_recurso;
+        isbnDelArchivo = !!datosBase.isbn_propio; // solo el ISBN PROPIO (no el del cuerpo) cuenta como fiable
 
         for (const r of renders) {
             activos.push({

@@ -185,16 +185,20 @@ export async function extraerMetadatosPdf(rutaArchivo) {
             if (vol.prefijo) datos.obra_titulo = vol.prefijo;
         }
 
-        // ISBN: candidatos del texto + del nombre de archivo, ampliados a sus formas 10/13.
+        // ISBN: candidatos para BÚSQUEDA (cuerpo del texto + nombre + CIP), ampliados a 10/13. Se distingue
+        // la PROCEDENCIA: un ISBN del CUERPO del texto es solo una PISTA (puede ser el de un libro anunciado
+        // o reseñado DENTRO de una revista). Un ISBN PROPIO —el nombre de archivo ES un ISBN, va incrustado
+        // en él, o procede del bloque CIP— es señal FUERTE de libro. El discriminador usa `isbn_propio`
+        // (no el del cuerpo) para decidir "es libro", así un ISBN espurio no convierte una revista en libro.
         const candidatos = new Set();
-        for (const x of extraerISBNs(texto)) for (const v of variantesISBN(x)) candidatos.add(v);
-        if (parsed.isbn) for (const v of variantesISBN(parsed.isbn)) candidatos.add(v);
-        // ISBN INCRUSTADO en el nombre aunque no sea el nombre ENTERO (p. ej. "9783319666303(1).pdf"
-        // o "3642377491 Title.pdf"): muchos libros (Springer y otros) se nombran por su ISBN. Recuperarlo
-        // es clave: sin él, un libro de serie (con ISSN de colección) se clasificaría como revista.
-        for (const x of extraerISBNs(nombre)) for (const v of variantesISBN(x)) candidatos.add(v);
+        const propios = new Set();
+        for (const x of extraerISBNs(texto)) for (const v of variantesISBN(x)) candidatos.add(v);                 // cuerpo → pista
+        if (parsed.isbn) for (const v of variantesISBN(parsed.isbn)) { candidatos.add(v); propios.add(v); }       // el nombre ES un ISBN
+        for (const x of extraerISBNs(nombre)) for (const v of variantesISBN(x)) { candidatos.add(v); propios.add(v); } // ISBN incrustado en el nombre
+        for (const c of (cip?.isbns || [])) for (const v of variantesISBN(c.isbn || c)) { candidatos.add(v); propios.add(v); } // CIP
         datos.isbn_candidatos = [...candidatos];
         datos.isbn = datos.isbn_candidatos.find(c => c.length === 13) || datos.isbn_candidatos[0] || null;
+        datos.isbn_propio = [...propios].find(c => c.length === 13) || [...propios][0] || null;
 
         return datos;
     } catch (e) {
