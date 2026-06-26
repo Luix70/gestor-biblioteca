@@ -58,6 +58,8 @@ function fusionarOcr(base, ocr) {
         titulo: ocr.titulo || null,
         autores: arr(ocr.autores),
         isbn: ocr.isbn || null,
+        issn: ocr.issn || null,                       // del código de barras 977 (revista)
+        numero_issue: ocr.numero_issue ?? null,       // del add-on del código de barras
         editorial: ocr.editorial || null,
         año_edicion: ocr.año_edicion || null,
         idioma: ocr.idioma || null,
@@ -201,7 +203,7 @@ export async function procesarRecurso(entrada) {
             // "(ebook - pdf) Título") y arrastra a las APIs a un libro equivocado. La única
             // fuente fiable es la imagen de esas páginas → OCR por visión (reusa los renders).
             const v = await ocrDesdeRenders(renders);
-            if (v && (v.titulo || v.isbn)) {
+            if (v && (v.titulo || v.isbn || v.issn)) {       // issn → revista identificada por código de barras
                 datosBase = fusionarOcr(datosBase, v);
                 isbnDelArchivo = !!v.isbn;                   // ISBN leído del documento: fiable
                 if (v.tipo_recurso) tipo_recurso = v.tipo_recurso;

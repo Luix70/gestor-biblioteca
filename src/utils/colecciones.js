@@ -23,9 +23,10 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
     const n = (nombre && String(nombre).trim()) || issn || null;
 
     let existente = issn ? await col.findOne({ issn }) : null;
-    // Nombre case-insensitive (collation): evita crear duplicados por mayúsculas/minúsculas
-    // («Direction Italie» vs «direction Italie»). El índice único de nombre es case-sensitive.
-    if (!existente && n) existente = await col.findOne({ nombre: n }, { collation: { locale: 'es', strength: 2 } });
+    // Nombre case- Y acento-insensitive (collation strength:1): reutiliza la colección existente y
+    // evita crear duplicados por mayúsculas/minúsculas o acentos («Filosofia»/«Filosofía»,
+    // «direction Italie»/«Direction Italie»). El índice único de nombre es sensible (no basta solo).
+    if (!existente && n) existente = await col.findOne({ nombre: n }, { collation: { locale: 'es', strength: 1 } });
 
     if (existente) {
         const set = {};
@@ -53,7 +54,7 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
     } catch {
         // Carrera con el índice único (issn o nombre): devolver el existente.
         const ya = issn ? await col.findOne({ issn })
-            : (n ? await col.findOne({ nombre: n }, { collation: { locale: 'es', strength: 2 } }) : null);
+            : (n ? await col.findOne({ nombre: n }, { collation: { locale: 'es', strength: 1 } }) : null);
         return ya ? { _id: ya._id, cdu: ya.cdu || cdu || null, creada: false } : { _id: null, cdu: null, creada: false };
     }
 }

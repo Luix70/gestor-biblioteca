@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { conGemini } from './utils/gemini.js';
+import { decodificarCodigoBarras } from './utils/codigo-barras.js';
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ REGLAS DE EXTRACCIÓN Y VALIDACIÓN:
 8. 'estado_verificacion': Si consigues extraer con total claridad el título y el ISBN/Editorial, establece "completado". Si faltan datos o las imágenes no permiten certificar los metadatos obligatorios, establece "pendiente".
 9. 'alertas_agente': Si el estado es "pendiente", detalla los motivos en este array de texto.
 10. 'sinopsis': Genera un resumen de dos líneas con tus propias palabras. ¡PROHIBIDO copiar o transcribir textualmente párrafos de la imagen para evitar bloqueos por copyright (RECITATION)!
+11. 'codigo_barras': Lee y transcribe los DÍGITOS del código de barras EAN-13 (los números impresos bajo las barras de la cubierta o contracubierta), EXACTAMENTE como aparecen y sin guiones (13 dígitos). Si a la derecha del código de barras hay un pequeño código adicional de 2 a 5 dígitos (add-on), transcríbelo aparte en 'codigo_barras_sufijo'. NO inventes dígitos: si no los lees con seguridad, deja ambos campos vacíos. (Pista: un EAN-13 que empieza por 977 corresponde a una REVISTA; 978/979 a un LIBRO.)
 ESTRUCTURA JSON REQUERIDA:
 {
   "tipo_recurso": "libro|revista",
@@ -36,6 +38,9 @@ ESTRUCTURA JSON REQUERIDA:
   "idioma": "string",
   "formatos": ["papel"],
   "isbn": "string",
+  "issn": "string",
+  "codigo_barras": "string",
+  "codigo_barras_sufijo": "string",
   "editorial": "string",
   "año_edicion": number,
   "sinopsis": "string",
@@ -70,6 +75,22 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
         const responseText = result.response.text();
         
         const recursoEstructurado = JSON.parse(responseText.trim());
+
+        // CÓDIGO DE BARRAS: decodifica el EAN-13 leído de la cubierta. 977 → ISSN (revista) + nº de
+        // ejemplar (del add-on); 978/979 → ISBN. Rellena SOLO huecos (no pisa lo ya extraído) y, ante
+        // un 977 válido sin ISBN propio, fija tipo_recurso='revista' (un libro llevaría 978/979).
+        const bc = decodificarCodigoBarras(recursoEstructurado.codigo_barras, recursoEstructurado.codigo_barras_sufijo);
+        if (bc) {
+            if (bc.issn && !recursoEstructurado.issn) recursoEstructurado.issn = bc.issn;
+            if (bc.isbn && !recursoEstructurado.isbn) recursoEstructurado.isbn = bc.isbn;
+            if (bc.numero_issue && recursoEstructurado.numero_issue == null) recursoEstructurado.numero_issue = bc.numero_issue;
+            if (bc.esRevista && !recursoEstructurado.isbn) recursoEstructurado.tipo_recurso = 'revista';
+            recursoEstructurado.alertas_agente = [...(recursoEstructurado.alertas_agente || []),
+                `Código de barras leído: ${bc.issn || bc.isbn}${bc.numero_issue ? ' · nº ' + bc.numero_issue : ''}.`];
+        }
+        delete recursoEstructurado.codigo_barras;          // no se persisten (no son campos del esquema)
+        delete recursoEstructurado.codigo_barras_sufijo;
+
         recursoEstructurado.fecha_ingreso = new Date();
         return recursoEstructurado;
 
