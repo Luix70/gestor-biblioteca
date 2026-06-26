@@ -233,6 +233,15 @@ export async function procesarRecurso(entrada) {
             if (fechaNombre.esFechada) {
                 datosBase.año_edicion = fechaNombre.año_edicion;
                 if (fechaNombre.mes_publicacion != null) datosBase.mes_publicacion = fechaNombre.mes_publicacion;
+                // Un nombre "Título YYYY-MM" (o "Título Mes Año") es un NÚMERO de revista: intención del
+                // curador. MANDA sobre un ISBN ESPURIO del texto/visión (anuncios/reseñas DENTRO de la
+                // revista, o alucinación de la IA) — un nº mensual NO es un libro. → revista, y se DESCARTA
+                // ese ISBN para que el identificador real (ISSN) venga de la cubierta (barras)/interior/título.
+                if (datosBase.isbn) datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
+                    `ISBN ${datosBase.isbn} descartado: nombre de revista fechado → el identificador es el ISSN.`];
+                tipo_recurso = 'revista';
+                delete datosBase.isbn;
+                datosBase.isbn_candidatos = [];
             }
         }
 

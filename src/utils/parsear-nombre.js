@@ -19,6 +19,7 @@ export function esTituloArtefacto(s) {
     const t = String(s || '').trim();
     if (!t) return false;
     if (EXT_ARTEFACTO.test(t)) return true;                         // termina en extensión de fichero fuente
+    if (/\.(pdf|epub|mobi|azw3|fb2|djvu|cbr|cbz|cb7)$/i.test(t)) return true; // el "título" es un nombre de fichero (p. ej. "jan09-1.pdf")
     if (/[\\]/.test(t)) return true;                                // contiene barra invertida → es una ruta
     if (/^[a-z]:[\\/]?/i.test(t) && /\.[a-z0-9]{2,4}$/i.test(t)) return true; // "C:…algo.ext" (ruta Windows)
     if (/^microsoft\s+(word|powerpoint|excel|publisher)\b/i.test(t)) return true; // "Microsoft Word - documento1"
