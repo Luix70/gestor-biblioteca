@@ -57,7 +57,13 @@ export async function conGemini(opcionesModelo, fn) {
             ultimo = e;
             if (etiqueta === 'free' && esCuota(e)) freeAgotadaHasta = Date.now() + COOLDOWN_MS;
             if (i < orden.length - 1) {
-                console.warn(`   ↻ Gemini[${etiqueta}] falló (${e?.status || (e?.message || '').slice(0, 70)}); probando la siguiente clave.`);
+                // En un 429 se vuelca el mensaje COMPLETO: nombra la cuota agotada (…PerDay = RPD diaria,
+                // …PerMinute = RPM, …InputTokensPerMinute = TPM por tokens). Así sabemos si reducir el
+                // payload (TPM) ayudaría o si es simple agotamiento de peticiones (RPD/RPM).
+                const motivo = esCuota(e)
+                    ? `429 cuota — ${(e?.message || '').replace(/\s+/g, ' ').slice(0, 220)}`
+                    : (e?.status || (e?.message || '').slice(0, 80));
+                console.warn(`   ↻ Gemini[${etiqueta}] falló (${motivo}); probando la siguiente clave.`);
                 continue;
             }
             throw e;
