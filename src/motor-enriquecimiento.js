@@ -1,6 +1,8 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { esTituloArtefacto } from './utils/parsear-nombre.js';
+import { tituloCabecera } from './utils/revistas.js';
+import { buscarISSNporTitulo } from './utils/buscador-issn-titulo.js';
 
 // "Editoriales" que en realidad son grupos de difusión/maquetación, no casas editoriales.
 // Si el archivo trae una de estas, NO es autoritativa: una editorial real de las APIs prevalece.
@@ -253,6 +255,18 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
             }
         } else {
             delete documento.isbn;
+        }
+    }
+
+    // Revista SIN ISSN (p. ej. cubierta sin código de barras legible): intentar resolverlo por el TÍTULO
+    // (Wikidata) → así el número entra en su cabecera-colección por ISSN en vez de quedar suelto.
+    // Conservador: solo periódicos con ISSN registrado en Wikidata; un fallo deja la revista sin ISSN.
+    if (esRevista && !documento.issn && documento.titulo && !contexto.sinApis) {
+        const cab = tituloCabecera(documento.titulo) || documento.titulo;
+        const r = await buscarISSNporTitulo(cab, { idioma: documento.idioma });
+        if (r?.issn) {
+            documento.issn = r.issn;
+            documento.alertas_agente.push(`ISSN ${r.issn} resuelto por título vía ${r.fuente}.`);
         }
     }
 

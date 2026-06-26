@@ -79,3 +79,42 @@ export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, 
     }
     return salida;
 }
+
+/**
+ * Tamaño de la 1ª página en puntos (1/72") vía pdfinfo. Sirve para calcular recortes a una resolución
+ * conocida. Devuelve { anchoPts, altoPts } o null (sin pdfinfo / PDF ilegible) → degradación elegante.
+ */
+export async function tamanoPagina(ruta) {
+    try {
+        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: 30000 });
+        const m = stdout.match(/Page size:\s*([\d.]+)\s*x\s*([\d.]+)\s*pts/i);
+        if (m) return { anchoPts: parseFloat(m[1]), altoPts: parseFloat(m[2]) };
+    } catch { /* sin pdfinfo o PDF ilegible */ }
+    return null;
+}
+
+/**
+ * Rasteriza UN RECORTE de una página a JPEG con poppler (pdftoppm -r DPI -x -y -W -H, todo en C → barato
+ * en CPU, sin SIMD; apto para el Atom). Coordenadas en el espacio de píxeles del DPI dado. Devuelve el
+ * buffer JPEG o null. Se usa para enfocar el CÓDIGO DE BARRAS de la cubierta antes de pasarlo a la visión.
+ */
+export async function rasterizarRecorte(ruta, pagina, { dpi, x, y, w, h }) {
+    let dir;
+    try { dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crop-')); } catch { return null; }
+    const prefijo = path.join(dir, `crop-${pagina}`);
+    try {
+        await execFileP('pdftoppm', [
+            '-jpeg', '-singlefile', '-f', String(pagina), '-l', String(pagina),
+            '-r', String(Math.round(dpi)),
+            '-x', String(Math.max(0, Math.round(x))), '-y', String(Math.max(0, Math.round(y))),
+            '-W', String(Math.max(1, Math.round(w))), '-H', String(Math.max(1, Math.round(h))),
+            ruta, prefijo,
+        ], { timeout: 60000 });
+        return await fs.readFile(`${prefijo}.jpg`);
+    } catch (e) {
+        if (e.code !== 'ENOENT') console.warn(`[Raster] recorte p${pagina} no generado: ${e.message}`);
+        return null;
+    } finally {
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+}

@@ -11,6 +11,7 @@ import { pareceSerieLibros } from './utils/revistas.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
+import { leerCodigoBarrasPorVision } from './utils/lector-barras.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -211,6 +212,22 @@ export async function procesarRecurso(entrada) {
                 datosBase.alertas_agente = ["PDF escaneado identificado por OCR de visión; páginas guardadas como sidecars."];
             } else {
                 datosBase.alertas_agente = ["PDF escaneado, OCR no concluyente: páginas guardadas como sidecars para revisión manual."];
+            }
+        }
+
+        // CÓDIGO DE BARRAS (recorte→visión): si tras texto/OCR aún NO hay identificador, lee el EAN-13 de
+        // la cubierta a partir de recortes a alta resolución (977→ISSN/revista, 978/979→ISBN). Acotado:
+        // solo cuando falta isbn e issn (no gasta visión en lo ya identificado).
+        if (!datosBase.isbn && !datosBase.issn) {
+            const bc = await leerCodigoBarrasPorVision(rutas[0], datosBase.paginas);
+            if (bc) {
+                if (bc.issn) datosBase.issn = bc.issn;
+                if (bc.isbn) { datosBase.isbn = bc.isbn; isbnDelArchivo = true; }
+                if (bc.mes_publicacion && datosBase.mes_publicacion == null) datosBase.mes_publicacion = bc.mes_publicacion;
+                if (bc.esRevista && !bc.isbn) tipo_recurso = 'revista'; // un 977 = periódico (los libros llevan 978/979)
+                datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
+                    `Código de barras (recorte→visión): ${bc.issn || bc.isbn}${bc.mes_publicacion ? ' · mes ' + bc.mes_publicacion : ''}.`];
+                console.log(`[Barras] EAN-13 leído de la cubierta → ${bc.issn || bc.isbn}`);
             }
         }
 
