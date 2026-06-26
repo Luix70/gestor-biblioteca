@@ -59,7 +59,8 @@ function fusionarOcr(base, ocr) {
         autores: arr(ocr.autores),
         isbn: ocr.isbn || null,
         issn: ocr.issn || null,                       // del código de barras 977 (revista)
-        numero_issue: ocr.numero_issue ?? null,       // del add-on del código de barras
+        numero_issue: ocr.numero_issue ?? null,       // nº de ejemplar leído del texto de portada
+        mes_publicacion: ocr.mes_publicacion ?? null, // mes leído del texto de portada (1-12)
         editorial: ocr.editorial || null,
         año_edicion: ocr.año_edicion || null,
         idioma: ocr.idioma || null,
