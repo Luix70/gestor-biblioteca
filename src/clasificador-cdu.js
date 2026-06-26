@@ -1,5 +1,5 @@
 import { conectarDB } from './database.js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { conGemini } from './utils/gemini.js';
 
 const COL = 'equivalencias_cdu';
 
@@ -78,8 +78,6 @@ function esFiccionLiteratura({ dewey, lcc, categorias }) {
 /** Deriva una CDU con IA, convirtiendo desde Dewey/LC si están disponibles. */
 async function iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis }) {
     try {
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY.trim());
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
         const esLiteratura = esFiccionLiteratura({ dewey, lcc, categorias });
         const categoria = Array.isArray(categorias) && categorias.length > 0 ? categorias[0] : null;
 
@@ -147,7 +145,7 @@ ${autor ? `Autor: "${autor}".` : ''}
 Título: "${titulo || 'N/A'}".
 Sinopsis: "${(sinopsis || 'N/A').slice(0, 400)}".
         `.trim();
-        const result = await model.generateContent(prompt);
+        const result = await conGemini({ model: 'gemini-2.5-flash' }, (model) => model.generateContent(prompt));
         return result.response.text().trim().replace(/^["']|["']$/g, '');
     } catch (e) {
         console.error(`❌ [Clasificador CDU IA]: ${e.message}`);

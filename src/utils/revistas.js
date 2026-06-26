@@ -47,6 +47,18 @@ export function tituloCabecera(titulo) {
     return t.length >= 2 ? t : orig;
 }
 
+// Tokens INEQUÍVOCOS de libro/serie editorial académica en un título (editoriales, colecciones de
+// monografías, marcas de edición). Sirven para distinguir un LIBRO con ISSN de SERIE (p. ej. Springer
+// «Graduate Texts in Physics») de un número de revista, incluso cuando el ISSN tiene un solo documento.
+const RE_SERIE_LIBROS = /\b(?:springer|elsevier|birkh[aä]user|wiley|de\s*gruyter|world\s+scientific|academic\s+press|crc\s+press|cambridge\s+university\s+press|oxford\s+university\s+press|north[-\s]?holland|morgan\s+kaufmann|o'?reilly|packt|apress|manning|lecture\s+notes|graduate\s+texts|undergraduate\s+texts|texts\s+and\s+readings|progress\s+in\s+(?:mathematics|physics|nonlinear)|studies\s+in\s+systems|understanding\s+complex\s+systems|springer\s+series|universitext)\b/i;
+const RE_EDICION = /\b(?:\d+(?:st|nd|rd|th)|second|third|fourth|fifth|sixth)\s+edition\b/i;
+
+/** ¿El título delata un LIBRO/serie editorial académica (no una revista)? Señal de alta precisión. */
+export function pareceSerieLibros(titulo) {
+    const t = String(titulo || '');
+    return RE_SERIE_LIBROS.test(t) || RE_EDICION.test(t);
+}
+
 /**
  * Discriminador REVISTA vs SERIE-DE-LIBROS para un grupo de documentos que comparten un mismo ISSN.
  *
@@ -73,9 +85,12 @@ export function clasificarISSN(docs = []) {
     const distintos = titulos.length;
     const conFecha = docs.filter(d => claveNumero(d)).length;
     const conDewey = docs.filter(d => d.dewey || d.lcc).length;
+    const algunoLibro = docs.some(d => pareceSerieLibros(d.obra_titulo || d.titulo));
 
     let clase;
-    if (distintos >= 2 && distintos >= Math.ceil(n * 0.6)) {
+    if (algunoLibro && conFecha === 0) {
+        clase = 'serie-libros';                 // título inequívoco de libro/serie y ningún nº fechado
+    } else if (distintos >= 2 && distintos >= Math.ceil(n * 0.6)) {
         clase = 'serie-libros';                 // muchos títulos distintos bajo un ISSN
     } else if (distintos <= 1 && n >= 2) {
         clase = 'revista';                      // un solo masthead, varios números

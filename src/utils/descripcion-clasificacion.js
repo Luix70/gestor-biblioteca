@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { conGemini } from './gemini.js';
 
 /**
  * Descripciones (ES) de códigos Dewey (DDC) y Library of Congress (LCC), análogo a `descripcion-cdu.js`
@@ -20,9 +20,7 @@ Responde ÚNICAMENTE con JSON válido (sin markdown, sin texto fuera del JSON):
 {"titulo_es":"<título breve>","descripcion_es":"<explicación extensa>"}`;
 
 async function generarIA(sistema, codigo) {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY.trim());
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const res = await model.generateContent(prompt(sistema, codigo));
+    const res = await conGemini({ model: 'gemini-2.5-flash' }, (model) => model.generateContent(prompt(sistema, codigo)));
     const txt = res.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
     return JSON.parse(txt);
 }

@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { conGemini } from './gemini.js';
 import { sanitizarCDU, arbolCDU } from './cdu-arbol.js';
 
 /**
@@ -22,9 +22,7 @@ Responde ÚNICAMENTE con JSON válido (sin markdown, sin texto fuera del JSON):
 }`;
 
 async function generarIA(codigo) {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY.trim());
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const res = await model.generateContent(prompt(codigo));
+    const res = await conGemini({ model: 'gemini-2.5-flash' }, (model) => model.generateContent(prompt(codigo)));
     const txt = res.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
     return JSON.parse(txt);
 }

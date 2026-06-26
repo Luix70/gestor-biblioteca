@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { conectarDB } from '../src/database.js';
 import { resolverCabecera, registrarNumeroEnColeccion } from '../src/utils/colecciones.js';
-import { claveNumero, tituloCabecera, clasificarISSN } from '../src/utils/revistas.js';
+import { claveNumero, tituloCabecera, clasificarISSN, pareceSerieLibros } from '../src/utils/revistas.js';
 import { esTituloArtefacto } from '../src/utils/parsear-nombre.js';
 import { validarISBN, variantesISBN } from '../src/utils/identificadores.js';
 import { ingestarRecurso } from '../src/servicio-ingesta.js';
@@ -42,6 +42,9 @@ const arg = (n) => process.argv.includes(n);
 const EJECUTAR = arg('--ejecutar');
 const SIN_RECUPERAR = arg('--sin-recuperar');
 const LIMITE = (() => { const i = process.argv.indexOf('--limite'); return i >= 0 ? Number(process.argv[i + 1]) || Infinity : Infinity; })();
+// ISSN forzados a SERIE DE LIBROS por el usuario tras revisar el INSPECT: --libros=ISSN1,ISSN2,…
+const LIBROS_OVERRIDE = new Set((process.argv.find(a => a.startsWith('--libros=')) || '')
+    .replace('--libros=', '').split(',').map(s => s.trim()).filter(Boolean));
 
 const EXT_DOC = new Set(['.pdf', '.epub', '.mobi', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.zip', '.rar']);
 const esDoc = (n) => EXT_DOC.has(path.extname(n).toLowerCase());
@@ -58,11 +61,13 @@ function isbnDeNombre(nombre) {
 
 /** ¿Este "número de revista" es en realidad un LIBRO? (clase del ISSN + señales por documento). */
 function decidirLibro(doc, claseISSN) {
+    if (doc.issn && LIBROS_OVERRIDE.has(doc.issn)) return { libro: true, motivo: 'forzado por --libros' };
     if (claseISSN === 'serie-libros') return { libro: true, motivo: 'ISSN de serie de libros' };
     if (doc.isbn) return { libro: true, motivo: 'tiene ISBN propio' };
     const isbn = isbnDeNombre(doc.nombre_archivo);
     if (isbn) return { libro: true, motivo: 'ISBN en el nombre', isbn };
     if (esTituloArtefacto(doc.titulo)) return { libro: true, motivo: 'título-artefacto' };
+    if (pareceSerieLibros(doc.titulo)) return { libro: true, motivo: 'título de serie/editorial' };
     if (/\/obras\//.test(doc.ruta_base || '')) return { libro: true, motivo: 'colocado en obras/' };
     if ((doc.dewey || doc.lcc) && !doc.numero_issue && !doc.mes_publicacion) return { libro: true, motivo: 'Dewey/LCC sin nº de revista' };
     return { libro: false };
@@ -255,6 +260,20 @@ async function limpiarCabecerasVacias(db) {
         if (usos === 0) { if (EJECUTAR) await obras.deleteOne({ _id: c._id }); borradas++; }
     }
     console.log(`\n══ FASE 5 · CLEANUP ══  obras tipo:'revista' vacías ${EJECUTAR ? 'borradas' : 'a borrar'}: ${borradas} / ${cabeceras.length}`);
+    await limpiarColeccionesVacias(db);
+}
+
+// Colecciones sin ningún miembro ni inventario (p. ej. cabeceras-fantasma que quedaron tras reclasificar
+// sus únicos docs a libro). No toca las `locked` (intervención humana).
+async function limpiarColeccionesVacias(db) {
+    const colCol = db.collection('colecciones'), bib = db.collection('biblioteca');
+    const cols = await colCol.find({ locked: { $ne: true } }, { projection: { numeros: 1 } }).toArray();
+    let borradas = 0;
+    for (const c of cols) {
+        const usos = await bib.countDocuments({ coleccion: c._id });
+        if (usos === 0 && !(c.numeros && c.numeros.length)) { if (EJECUTAR) await colCol.deleteOne({ _id: c._id }); borradas++; }
+    }
+    console.log(`           colecciones vacías ${EJECUTAR ? 'borradas' : 'a borrar'}: ${borradas} / ${cols.length}`);
 }
 
 async function main() {

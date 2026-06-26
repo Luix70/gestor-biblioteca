@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { conGemini } from './gemini.js';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { buscarEnDNB } from './buscador-dnb.js';
@@ -21,9 +21,6 @@ let olBloqueadoHasta = 0;
  */
 async function analizarImagenConIA(base64Image) {
     try {
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY.trim());
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
         const prompt = `Eres un bibliotecario experto analizando la portada de un libro.
 Extrae TODOS los datos bibliográficos visibles. Presta especial atención a:
 - ISBN (10 o 13 dígitos, puede aparecer en el lomo, la contraportada o como código de barras)
@@ -42,10 +39,10 @@ Responde ÚNICAMENTE en JSON (null para los campos que no puedas leer):
   "año_edicion": número_entero_o_null
 }`;
 
-        const result = await model.generateContent([
+        const result = await conGemini({ model: "gemini-2.5-flash" }, (model) => model.generateContent([
             prompt,
             { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
-        ]);
+        ]));
 
         const textoRespuesta = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
         return JSON.parse(textoRespuesta);

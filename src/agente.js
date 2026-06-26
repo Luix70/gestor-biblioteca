@@ -1,17 +1,16 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
+import { conGemini } from './utils/gemini.js';
 
 dotenv.config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// CONFIGURACIÓN DE RIGIDEZ GRAMATICAL: Forzamos salida JSON nativa a nivel de API
-const model = genAI.getGenerativeModel({ 
+// CONFIGURACIÓN DE RIGIDEZ GRAMATICAL: Forzamos salida JSON nativa a nivel de API.
+// El cliente (con fallback free→pago) se construye por llamada en conGemini().
+const MODELO_VISION = {
     model: "gemini-2.5-flash",
-    generationConfig: { 
-        responseMimeType: "application/json" 
+    generationConfig: {
+        responseMimeType: "application/json"
     }
-});
+};
 
 const INSTRUCCIONES_SISTEMA = `
 Eres un bibliotecario experto y un sistema de extracción de metadatos estructurados.
@@ -67,7 +66,7 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
 
         console.log(`\n──> [IA] Enviando ${imageParts.length} imagen(es) combinada(s) al pipeline de Gemini...`);
         
-        const result = await model.generateContent([instruccionesContextuales, ...imageParts]);
+        const result = await conGemini(MODELO_VISION, (model) => model.generateContent([instruccionesContextuales, ...imageParts]));
         const responseText = result.response.text();
         
         const recursoEstructurado = JSON.parse(responseText.trim());

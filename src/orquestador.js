@@ -7,6 +7,7 @@ import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
+import { pareceSerieLibros } from './utils/revistas.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
@@ -174,7 +175,10 @@ export async function procesarRecurso(entrada) {
         // revistas no lo llevan. Un libro PUEDE tener ISBN + ISSN (el ISSN es de su COLECCIÓN/serie). Por
         // eso el ISSN SOLO no convierte en revista: hace falta que NO haya señal de libro. La fecha/el
         // título periódico mantienen su voto salvo que haya ISBN/CIP (sería un libro de serie fechado).
-        const esLibro = !!(datosBase.isbn || datosBase.cip);
+        // ISBN/CIP propio → libro. También un título INEQUÍVOCO de libro/serie editorial académica
+        // (Springer, «Lecture Notes…», «Graduate Texts…», marca de edición): un ISSN de serie no debe
+        // convertirlo en revista (era el origen de la contaminación de monografías como números).
+        const esLibro = !!(datosBase.isbn || datosBase.cip || pareceSerieLibros(datosBase.titulo));
         tipo_recurso = (!esLibro && (datosBase.esFechada || pareceRevista(datosBase.titulo) || datosBase.issn))
             ? 'revista' : 'libro';
         isbnDelArchivo = !!datosBase.isbn; // ISBN propio (contenido o nombre) → fiable
