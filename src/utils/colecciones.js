@@ -23,7 +23,9 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
     const n = (nombre && String(nombre).trim()) || issn || null;
 
     let existente = issn ? await col.findOne({ issn }) : null;
-    if (!existente && n) existente = await col.findOne({ nombre: n });
+    // Nombre case-insensitive (collation): evita crear duplicados por mayúsculas/minúsculas
+    // («Direction Italie» vs «direction Italie»). El índice único de nombre es case-sensitive.
+    if (!existente && n) existente = await col.findOne({ nombre: n }, { collation: { locale: 'es', strength: 2 } });
 
     if (existente) {
         const set = {};
@@ -50,7 +52,8 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
         return { _id: r.insertedId, cdu: cdu || null, creada: true };
     } catch {
         // Carrera con el índice único (issn o nombre): devolver el existente.
-        const ya = issn ? await col.findOne({ issn }) : (n ? await col.findOne({ nombre: n }) : null);
+        const ya = issn ? await col.findOne({ issn })
+            : (n ? await col.findOne({ nombre: n }, { collation: { locale: 'es', strength: 2 } }) : null);
         return ya ? { _id: ya._id, cdu: ya.cdu || cdu || null, creada: false } : { _id: null, cdu: null, creada: false };
     }
 }
