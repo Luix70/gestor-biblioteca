@@ -1006,6 +1006,7 @@ function pintarDoc(r,ctx){
     <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.naturaleza?' · '+esc(d.naturaleza):''}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div>
     <div style="margin-top:8px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div>
     <div class="det-acts">
+      <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
       <button class="fbtn" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
       <button class="fbtn bad" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
@@ -1020,7 +1021,8 @@ function pintarDoc(r,ctx){
    if(cf)cf.onclick=()=>fichaAccion('conformar',d._id,cf);
    if(ce)ce.onclick=()=>fichaAccion('enriquecer',d._id,ce);
    if(cr)cr.onclick=()=>fichaReprocesar(d._id);
-   const cd=$('#actDel');if(cd)cd.onclick=()=>fichaEliminar(d._id);}
+   const cd=$('#actDel');if(cd)cd.onclick=()=>fichaEliminar(d._id);
+   const ce2=$('#actEdit');if(ce2)ce2.onclick=()=>fichaEditar(d,r);}
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
   $$('#p-detalle [data-q]').forEach(a=>a.onclick=()=>buscarTexto(a.dataset.q));
   carIdx=0;const tr=$('#carTrack');
@@ -1123,6 +1125,35 @@ async function fichaEliminar(id){
     if(!r.ok){toast(r.motivo,'bad');return;}
     toast('Documento eliminado (su carpeta está en la Papelera)');go('search');
   }catch(e){toast(e.message,'bad');}}
+function fichaEditar(d,r){
+  const v=x=>x==null?'':String(x);
+  const campo=(id,lab,val,tag='input',extra='')=>`<label style="display:block;margin-top:8px">${lab}</label>${tag==='textarea'?`<textarea id="${id}" rows="3" ${extra}>${esc(val)}</textarea>`:`<input id="${id}" value="${esc(val)}" ${extra} autocomplete="off">`}`;
+  const ub=d.ubicacion||{};
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">✏️ Editar documento</h3>
+    ${campo('edTit','Título',d.titulo)}
+    ${campo('edSub','Subtítulo',d.subtitulo)}
+    ${campo('edAut','Autores (coma)',(r.autores||[]).join(', '))}
+    ${campo('edEdi','Editorial',r.editorial||'')}
+    <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno','Año',d.año_edicion)}</div><div style="flex:1">${campo('edIdi','Idioma',d.idioma)}</div><div style="flex:1">${campo('edPag','Páginas',d.paginas)}</div>`}</div>
+    <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edIsbn','ISBN',d.isbn)}</div><div style="flex:1">${campo('edIssn','ISSN',d.issn)}</div></div>`}
+    <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edCdu','CDU',d.cdu)}</div><div style="flex:1">${campo('edEd','Edición nº',d.numero_edicion)}</div></div>`}
+    ${campo('edPal','Palabras clave (coma)',(d.palabras_clave||[]).join(', '))}
+    ${campo('edSin','Sinopsis',d.sinopsis,'textarea')}
+    <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAmb','Ámbito',ub.ambito)}</div><div style="flex:1">${campo('edEst','Estantería',ub.estanteria)}</div></div>`}
+    <label style="display:flex;gap:8px;align-items:center;margin-top:12px;cursor:pointer"><input type="checkbox" id="edLock" ${d.locked?'checked':''}> 🔒 Bloquear (el Conformador no lo tocará)</label>
+    <div id="edErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edOk">Guardar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#edX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
+  $('#edOk').onclick=async()=>{
+    const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
+      'año_edicion':$('#edAno').value,idioma:$('#edIdi').value,paginas:$('#edPag').value,isbn:$('#edIsbn').value,issn:$('#edIssn').value,
+      cdu:$('#edCdu').value,numero_edicion:$('#edEd').value,palabras_clave:$('#edPal').value,sinopsis:$('#edSin').value,
+      ubicacion:{ambito:$('#edAmb').value,estanteria:$('#edEst').value},locked:$('#edLock').checked};
+    try{const res=await api('/documentos/'+encodeURIComponent(d._id)+'/editar',{method:'POST',body:JSON.stringify(campos)});
+      if(!res.ok){$('#edErr').textContent=res.motivo;return;}
+      cerrarCmp();toast('Guardado'+((res.avisos||[]).length?' · '+res.avisos.join('; '):''));verDoc(d._id,detalle&&detalle.ctx);
+    }catch(e){$('#edErr').textContent=e.message;}};
+}
 
 function previewArchivo(r){
   if(!r.archivo_url)return '';

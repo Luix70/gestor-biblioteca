@@ -12,6 +12,7 @@ import { lanzarIntegridad, estadoIntegridad } from './integridad.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
+import { editarDocumento } from './utils/editar-doc.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -574,6 +575,14 @@ export function rutasPanel() {
             if (!r2.ok) return res.json({ ok: false, motivo: r2.motivo === 'locked' ? 'documento bloqueado (locked): el Conformador no lo toca' : (r2.motivo === 'fuera-de-contenedor' ? 'el Conformador solo corre en el NAS (junto a los ficheros)' : r2.motivo) });
             const despues = await col.findOne({ _id: id });
             res.json({ ok: true, cambios: diffSnap(snapshot(antes), snapshot(despues)), n: r2.cambios });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // EDICIÓN MANUAL de un documento (ficha → ✏️ Editar; solo admin): lista blanca de campos + lock.
+    r.post('/documentos/:id/editar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await editarDocumento(await conectarDB(), req.params.id, req.body || {}));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
