@@ -845,7 +845,7 @@ const CAMPOS_FICHA=[['subtitulo','Subtítulo'],['_autores','Autores'],['_editori
   ['_isbn','ISBN'],['_issn','ISSN'],['lccn','LCCN'],
   ['volumen_numero','Volumen nº'],['volumen_titulo','Título del volumen'],['obra_titulo','Obra'],['_isbn_obra','ISBN obra'],
   ['coleccion_numero','Nº en colección'],['numero_issue','Número'],['mes_publicacion','Mes'],
-  ['_estado','Estado'],['_ubicacion','Ubicación'],['nombre_archivo','Archivo'],['hash_contenido','Hash'],
+  ['_estado','Estado'],['_ubicacion','Ubicación'],['nombre_archivo','Archivo'],['_ruta','Ruta'],['hash_contenido','Hash'],
   ['_ingreso','Ingresado'],['_actualizado','Actualizado']];
 
 // ── Clasificaciones (CDU/Dewey/LCC): fila (código · concisa · ⓘ · contador), popup ⓘ y filtro ──
@@ -906,6 +906,7 @@ function pintarDoc(r,ctx){
     _ubicacion:d.ubicacion?(esc([d.ubicacion.ambito,d.ubicacion.estanteria].filter(Boolean).join(' · '))||null):null,
     _ingreso:d.fecha_ingreso?fmtFecha(d.fecha_ingreso):null,
     _actualizado:d.fecha_actualizacion?fmtFecha(d.fecha_actualizacion):null,
+    _ruta:d.ruta_base?`<span class="mono">${esc(d.ruta_base.replace(/^\/recursos\//,''))}</span>`:null,
     obra_titulo:r.obra?`<a onclick="verObra('${esc(r.obra._id)}')" class="rowlink">${esc(r.obra.titulo||d.obra_titulo||'(obra)')}</a>`:(d.obra_titulo?esc(d.obra_titulo):null),
     // Identificadores DRILLABLES: clic → Búsqueda por ese ISSN/ISBN (ve TODO lo que lo comparte — útil
     // para destapar libros mal clasificados colgando de un ISSN de serie, o ediciones del mismo ISBN).
