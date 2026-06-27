@@ -777,20 +777,76 @@ async function purga(ejecutar){const clave=$('#purgaClave').value.trim();if(!cla
     else{$('#purgaOut').innerHTML=`<span class="tag ok">Eliminados ${r.eliminados} tomo(s) + la obra. Ya puedes re-soltarla.</span>`;toast('Obra purgada');loadObras();}
   }catch(e){toast(e.message,'bad');}}
 $('#purgaSim').onclick=()=>purga(false);$('#purgaExec').onclick=()=>purga(true);
-async function loadObras(){try{const o=await api('/obras');
-  $('#obrasBody').innerHTML=o.length?`<table><tr><th>Obra</th><th>isbn_obra</th><th>Tomos</th><th>Estado</th><th>Valoración</th><th></th></tr>
-    ${o.map(x=>`<tr><td><span class="rowlink" data-obra="${esc(x._id)}">${esc(x.titulo)}</span></td><td class="mono muted">${esc(x.isbn_obra||'—')}</td>
-      <td>${x.volumenes_presentes||0}/${x.total_volumenes||'?'}</td>
-      <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':x.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'}</td>
-      <td>${ratingBar('obras',x._id,x.valoracion,x.nsfw)}</td>
-      <td style="text-align:right">${x.isbn_obra?`<button class="btn admin-only" data-req="${esc(x._id)}" title="Re-consultar título/sinopsis por su ISBN">↻</button>`:''}</td></tr>`).join('')}</table>`:'<div class="empty">Sin obras</div>';
-  $$('#obrasBody [data-obra]').forEach(b=>b.onclick=()=>verObra(b.dataset.obra));
-  attachRating('#obrasBody');
-  $$('#obrasBody [data-req]').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='…';
-    try{const r=await api('/obras/requery',{method:'POST',body:JSON.stringify({id:b.dataset.req})});
-      if(r.ok){toast('Obra actualizada → '+r.titulo);loadObras();}else{toast(r.motivo,'warn');b.disabled=false;b.textContent='↻';}}
-    catch(e){toast(e.message,'bad');b.disabled=false;b.textContent='↻';}});
-}catch(e){toast(e.message,'bad');}}
+// ── ESTANTERÍA (shelf) de obras y colecciones: rejilla con portada, filtro, selección y acciones en lote ──
+const shelf={obra:{items:[],sel:new Set()},coleccion:{items:[],sel:new Set()}};
+async function loadObras(){try{shelf.obra.items=await api('/obras');shelf.obra.sel.clear();pintarShelf('obra');}catch(e){toast(e.message,'bad');}}
+async function loadColecciones(){try{const tipo=$('#colsTipo')?$('#colsTipo').value:'';shelf.coleccion.items=await api('/colecciones'+(tipo?('?tipo='+encodeURIComponent(tipo)):''));shelf.coleccion.sel.clear();pintarShelf('coleccion');}catch(e){toast(e.message,'bad');}}
+function shelfCard(kind,x){
+  const esObra=kind==='obra',nombre=esObra?x.titulo:x.nombre,ph=esObra?'📚':(x.tipo==='revista'?'📰':'📚');
+  const cov=x.portada?`<img src="${esc(encUrl(x.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`:`<div class="ph">${ph}</div>`;
+  const estado=esObra
+    ?`${x.volumenes_presentes||0}/${x.total_volumenes||'?'} tomos ${x.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'}${x.revision_requerida?' <span class="tag bad">revisar</span>':''}`
+    :`${x.tipo==='revista'?'📰 revista':'📚 libro'} · ${x.miembros||0}${x.revision_requerida?' <span class="tag bad">revisar</span>':''}`;
+  const sel=shelf[kind].sel.has(x._id);
+  const chk=`<input type="checkbox" class="shelfchk admin-only" data-id="${esc(x._id)}"${sel?' checked':''}>`;
+  const req=(esObra&&x.isbn_obra)?` <button class="rbtn shreq admin-only" data-req="${esc(x._id)}" title="Re-consultar título/sinopsis por ISBN">↻</button>`:'';
+  return `<div class="vol${sel?' sel':''}" data-${kind}="${esc(x._id)}" data-nombre="${esc((nombre||'').toLowerCase())}">${chk}<div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(nombre||'—',60))}${x.nsfw?' 🔞':''}${req}</div><div class="t">${estado}</div><div style="margin-top:5px">${ratingBar(esObra?'obras':'colecciones',x._id,x.valoracion,x.nsfw)}</div></div></div>`;
+}
+function pintarShelf(kind){
+  const cont=kind==='obra'?$('#obrasBody'):$('#colsBody'); if(!cont)return;
+  const st=shelf[kind];
+  cont.innerHTML=`<div class="row" style="margin-bottom:10px"><input id="shf_${kind}" placeholder="🔍 filtrar por nombre…" autocomplete="off" style="flex:1"></div>
+    <div id="shbulk_${kind}"></div>
+    ${st.items.length?`<div class="vol-grid">${st.items.map(x=>shelfCard(kind,x)).join('')}</div>`:`<div class="empty">Sin ${kind==='obra'?'obras':'colecciones'}</div>`}`;
+  const fi=$('#shf_'+kind);if(fi)fi.oninput=()=>{const q=fi.value.toLowerCase();$$(`#${cont.id} .vol[data-${kind}]`).forEach(c=>{c.style.display=(c.dataset.nombre||'').includes(q)?'':'none';});};
+  $$(`#${cont.id} .vol[data-${kind}]`).forEach(el=>el.onclick=()=>{kind==='obra'?verObra(el.dataset.obra):verColeccion(el.dataset.coleccion);});
+  $$(`#${cont.id} .shelfchk`).forEach(cb=>{cb.onclick=e=>e.stopPropagation();cb.onchange=()=>{cb.checked?st.sel.add(cb.dataset.id):st.sel.delete(cb.dataset.id);const c=cb.closest('.vol');if(c)c.classList.toggle('sel',cb.checked);renderShelfBulk(kind);};});
+  $$(`#${cont.id} .shreq`).forEach(b=>{b.onclick=async e=>{e.stopPropagation();b.disabled=true;b.textContent='…';try{const r=await api('/obras/requery',{method:'POST',body:JSON.stringify({id:b.dataset.req})});if(r.ok){toast('Obra actualizada → '+r.titulo);loadObras();}else{toast(r.motivo,'warn');b.disabled=false;b.textContent='↻';}}catch(err){toast(err.message,'bad');b.disabled=false;b.textContent='↻';}};});
+  attachRating('#'+cont.id);renderShelfBulk(kind);
+}
+function renderShelfBulk(kind){
+  const el=$('#shbulk_'+kind);if(!el)return;
+  const cont=kind==='obra'?$('#obrasBody'):$('#colsBody'),st=shelf[kind];
+  if(ROL!=='admin'){el.innerHTML='';return;}
+  const ids=st.items.map(x=>x._id),enSel=ids.filter(id=>st.sel.has(id)).length;
+  const acc=st.sel.size?`<span style="margin-left:auto"></span><b>${st.sel.size}</b> sel.
+    ${st.sel.size>=2?`<button class="btn pri" id="shMerge">⛙ Fusionar</button>`:''}
+    <button class="btn" id="shExpl">💥 Explotar</button>
+    <button class="btn bad" id="shDel">🗑 Eliminar vacías</button>
+    <button class="btn" id="shClr">Limpiar</button>`:'';
+  el.innerHTML=`<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="shAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todas</label>${acc}</div>`;
+  const all=$('#shAll');all.checked=enSel>0&&enSel===ids.length;all.indeterminate=enSel>0&&enSel<ids.length;
+  all.onchange=()=>{const on=all.checked;ids.forEach(id=>on?st.sel.add(id):st.sel.delete(id));$$(`#${cont.id} .shelfchk`).forEach(cb=>cb.checked=on);$$(`#${cont.id} .vol`).forEach(c=>c.classList.toggle('sel',on));renderShelfBulk(kind);};
+  if(st.sel.size){const mg=$('#shMerge');if(mg)mg.onclick=()=>shelfFusionar(kind);
+    $('#shExpl').onclick=()=>shelfExplotar(kind);$('#shDel').onclick=()=>shelfEliminar(kind);
+    $('#shClr').onclick=()=>{st.sel.clear();$$(`#${cont.id} .shelfchk`).forEach(cb=>cb.checked=false);$$(`#${cont.id} .vol.sel`).forEach(c=>c.classList.remove('sel'));renderShelfBulk(kind);};}
+}
+function shelfSel(kind){const st=shelf[kind];return st.items.filter(x=>st.sel.has(x._id));}
+async function shelfFusionar(kind){
+  const sel=shelfSel(kind);if(sel.length<2)return;const esObra=kind==='obra',nom=x=>esObra?x.titulo:x.nombre;
+  const opts=sel.map((x,i)=>`<label class="pkitem" style="cursor:pointer;gap:8px"><input type="radio" name="mgd" value="${esc(x._id)}"${i===0?' checked':''}> ${esc(nom(x)||'—')}</label>`).join('');
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:480px"><h3 style="margin-top:0">⛙ Fusionar ${sel.length} ${esObra?'obras':'colecciones'}</h3>
+    <div class="muted" style="margin:-4px 0 8px">Elige cuál CONSERVAR (las demás vuelcan sus miembros en ella y desaparecen):</div>
+    <div class="pklist">${opts}</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px"><button class="btn" id="mgX">Cancelar</button><button class="btn pri" id="mgOk">Fusionar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#mgX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
+  $('#mgOk').onclick=async()=>{const destino=($('input[name=mgd]:checked')||{}).value;if(!destino)return;
+    try{const r=await api(esObra?'/obras/fusionar':'/colecciones/fusionar',{method:'POST',body:JSON.stringify({ids:sel.map(x=>x._id),destino})});
+      if(!r.ok){toast(r.motivo,'bad');return;}cerrarCmp();toast(`${r.movidos} miembro(s) → «${esObra?r.destino.titulo:r.destino.nombre}»; ${r.fusionadas} fusionada(s)`);esObra?loadObras():loadColecciones();
+    }catch(e){toast(e.message,'bad');}};
+}
+async function shelfExplotar(kind){
+  const sel=shelfSel(kind);if(!sel.length)return;const esObra=kind==='obra';
+  if(!confirm(`Explotar ${sel.length} ${esObra?'obra(s)':'colección(es)'}: sus miembros quedan como documentos sueltos y el grupo desaparece. Los ficheros NO se tocan. ¿Seguir?`))return;
+  let lib=0;for(const x of sel){try{const r=await api(esObra?'/obras/explotar':'/colecciones/explotar',{method:'POST',body:JSON.stringify({id:x._id})});if(r.ok)lib+=r.liberados||0;}catch{}}
+  toast(`Explotado: ${lib} documento(s) liberado(s)`);esObra?loadObras():loadColecciones();
+}
+async function shelfEliminar(kind){
+  const sel=shelfSel(kind);if(!sel.length)return;const esObra=kind==='obra';
+  if(!confirm(`Eliminar las ${esObra?'obras':'colecciones'} VACÍAS de la selección (las que tengan miembros se omiten). ¿Seguir?`))return;
+  let del=0,om=0;for(const x of sel){try{const r=await api(esObra?'/obras/eliminar':'/colecciones/eliminar',{method:'POST',body:JSON.stringify({id:x._id})});r.ok?del++:om++;}catch{om++;}}
+  toast(`${del} eliminada(s)${om?`, ${om} omitida(s) (no vacías)`:''}`);esObra?loadObras():loadColecciones();
+}
 
 // ── detalle: obra → tomos → ficha (drill-down clicable, mobile-first) ──
 const recortar=(s,n)=>{s=String(s||'');return s.length>n?s.slice(0,n-1)+'…':s;};
@@ -815,7 +871,7 @@ function pintarObra(r){
   const head=`<div class="crumb"><a onclick="go('obras')">Obras</a> › <span>${esc(recortar(o.titulo,50))}</span></div>
     <div class="det-head"><button class="det-back" title="Volver" onclick="go('obras')">←</button>
       <div class="det-title"><h2>${esc(o.titulo||'(sin título)')}</h2><div class="sub">${sub}</div>
-        <div style="margin-top:8px">${o.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'} ${o.revision_requerida?'<span class="tag bad">revisar</span>':''} <span class="muted">${o.volumenes_presentes||0}/${o.total_volumenes||'?'} tomos</span></div>
+        <div style="margin-top:8px">${o.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'} ${o.revision_requerida?'<span class="tag bad">revisar</span>':''} <span class="muted">${o.volumenes_presentes||0} presentes · ${Math.max(0,(o.total_volumenes||0)-(o.volumenes_presentes||0))} ausentes · ${o.total_volumenes||'?'} total</span></div>
         <div style="margin-top:8px">${ratingBar('obras',o._id,o.valoracion,o.nsfw)}</div>
         ${o.cdu?`<div class="mono muted" style="margin-top:8px">CDU ${esc(o.cdu)}${desc&&desc.titulo_es?' · '+esc(desc.titulo_es):''}</div>`:''}
         ${desc&&desc.descripcion_es?`<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">Descripción CDU</summary><p class="muted" style="font-size:12px;margin-top:6px">${esc(desc.descripcion_es)}</p></details>`:''}
@@ -828,18 +884,6 @@ function pintarObra(r){
 }
 
 // ── colecciones: cabeceras de revista (números) + series de libros ──
-async function loadColecciones(){try{
-  const tipo=$('#colsTipo')?$('#colsTipo').value:'';
-  const o=await api('/colecciones'+(tipo?('?tipo='+encodeURIComponent(tipo)):''));
-  $('#colsBody').innerHTML=o.length?`<table><tr><th>Colección</th><th>Tipo</th><th>ISSN</th><th>Miembros</th><th>Estado</th><th>Valoración</th></tr>
-    ${o.map(x=>`<tr><td><span class="rowlink" data-col="${esc(x._id)}">${esc(x.nombre)}</span></td>
-      <td>${x.tipo==='revista'?'📰 revista':'📚 libro'}</td><td class="mono muted">${esc(x.issn||'—')}</td>
-      <td>${x.miembros||0}</td>
-      <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':'<span class="tag ok">ok</span>'}</td>
-      <td>${ratingBar('colecciones',x._id,x.valoracion,x.nsfw)}</td></tr>`).join('')}</table>`:'<div class="empty">Sin colecciones</div>';
-  $$('#colsBody [data-col]').forEach(b=>b.onclick=()=>verColeccion(b.dataset.col));
-  attachRating('#colsBody');
-}catch(e){toast(e.message,'bad');}}
 
 async function verColeccion(id){detalle={tipo:'coleccion',id};mostrarDetalle();$('#title').textContent='Colección';
   $('#p-detalle').innerHTML='<div class="card"><div class="muted">Cargando colección…</div></div>';

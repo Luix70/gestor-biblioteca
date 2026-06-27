@@ -13,6 +13,7 @@ import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalog
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
+import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
@@ -669,6 +670,21 @@ export function rutasPanel() {
             res.json(await asignarObra(await conectarDB(), ids, { obraId, titulo }));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+
+    // GESTIÓN DE GRUPOS (revisión humana, solo admin): fusionar / explotar / eliminar-vacía colecciones y
+    // obras. Sin pérdida de datos (solo vínculos en Mongo + borrar el padre abstracto vacío).
+    const grupo = (fn, arg) => async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await fn(await conectarDB(), ...arg(req.body || {})));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    };
+    r.post('/colecciones/fusionar', grupo(fusionarColecciones, b => [b.ids || [], b.destino]));
+    r.post('/colecciones/explotar', grupo(explotarColeccion, b => [b.id]));
+    r.post('/colecciones/eliminar', grupo(eliminarColeccionVacia, b => [b.id]));
+    r.post('/obras/fusionar', grupo(fusionarObras, b => [b.ids || [], b.destino]));
+    r.post('/obras/explotar', grupo(explotarObra, b => [b.id]));
+    r.post('/obras/eliminar', grupo(eliminarObraVacia, b => [b.id]));
 
     // Descripción (título conciso + texto extenso, ES) de un código de clasificación — de CACHÉ o
     // generada por IA al momento. CDU → cdu_descripciones/describirCDU; Dewey/LCC →
