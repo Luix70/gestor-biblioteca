@@ -334,6 +334,11 @@ export async function procesarRecurso(entrada) {
         });
         tipo_recurso = clasif.tipo_recurso;          // revista (nº de serie / ISSN) | libro (álbum/novela gráfica)
         datosBase.naturaleza = clasif.naturaleza;    // 'comic'
+        // Un cómic-LIBRO (álbum/novela gráfica suelto) NO es una obra multivolumen: obra_titulo se fijó
+        // SOLO para agrupar una SERIE-revista por cabecera. Si quedó como libro (p. ej. trae ISBN), se
+        // descarta — si no, motor-catalogo lo enruta al árbol de obras y, SIN volumen_numero, los
+        // ejemplares colisionan todos en obras/<serie>/vol-x. Como libro, cada ejemplar es su propio doc.
+        if (tipo_recurso === 'libro') delete datosBase.obra_titulo;
         delete datosBase.muestra_paginas;            // páginas de muestra: solo para la visión, no se persisten
 
     } else if (tipo === 'djvu') {

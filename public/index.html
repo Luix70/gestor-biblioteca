@@ -1338,15 +1338,16 @@ async function correrIntegridad(reparar){
 }
 function pintarInteg(r){
   const fila=(k,v,warn)=>`<tr><td>${esc(k)}</td><td style="text-align:right"><b ${warn&&v>0?'style="color:var(--warn)"':''}>${v}</b></td></tr>`;
-  const d=r.diagnostico||{},et={docsSinCarpeta:'Docs sin carpeta',docsSinFicheroOriginal:'Docs sin fichero original',ramasMuertas:'Ramas vacías / muertas',registroSinDocumento:'Registro sin documento',carpetasHuerfanas:'Carpetas huérfanas',rutaBaseDesajustada:'ruta_base desajustada',hashDuplicadosGrupos:'Duplicados por hash (grupos)',hashDuplicadosDocs:'Duplicados por hash (sobrantes)',cuarentenaDuplicados:'Cuarentena/duplicados'};
+  const d=r.diagnostico||{},et={docsSinCarpeta:'Docs sin carpeta',docsSinFicheroOriginal:'Docs sin fichero original',rutaBaseCompartida:'Varios docs en la misma carpeta',ramasMuertas:'Ramas vacías / muertas',registroSinDocumento:'Registro sin documento',carpetasHuerfanas:'Carpetas huérfanas',rutaBaseDesajustada:'ruta_base desajustada',hashDuplicadosGrupos:'Duplicados por hash (grupos)',hashDuplicadosDocs:'Duplicados por hash (sobrantes)',cuarentenaDuplicados:'Cuarentena/duplicados'};
   let h=`<div class="card" style="margin-bottom:14px"><h3>Diagnóstico · ${esc(new Date(r.ts).toLocaleString('es-ES'))} · ${r.totalDocs} docs</h3><table>`;
   for(const k of Object.keys(et))h+=fila(et[k],d[k]??0,true);h+='</table></div>';
   if(r.reparado){const rp=r.reparado,er={ramasPodadas:'Ramas podadas',rutasReparadas:'ruta_base reparadas',carpetasHuerfanasRecicladas:'Huérfanas recicladas',hashDuplicadosEliminados:'Hash-duplicados eliminados',cuarentenaResueltos:'Cuarentena resueltos'};
     h+=`<div class="card" style="margin-bottom:14px"><h3>🛠 Reparado (a la Papelera)</h3><table>`;for(const k of Object.keys(er))h+=fila(er[k],rp[k]??0,false);h+='</table></div>';}
   const m=r.muestras||{};
-  if(m.docsSinCarpeta?.length||m.docsSinFicheroOriginal?.length){h+='<div class="card"><h3>Requiere revisión manual</h3>';
+  if(m.docsSinCarpeta?.length||m.docsSinFicheroOriginal?.length||m.rutaBaseCompartida?.length){h+='<div class="card"><h3>Requiere revisión manual</h3>';
     if(m.docsSinCarpeta?.length)h+='<div class="muted">Docs sin carpeta:</div>'+m.docsSinCarpeta.map(x=>`<div class="mono" style="font-size:12px">[${esc(x.id)}] ${esc(x.titulo||'')} → ${esc(x.ruta||'')}</div>`).join('');
     if(m.docsSinFicheroOriginal?.length)h+='<div class="muted" style="margin-top:8px">Docs sin fichero original:</div>'+m.docsSinFicheroOriginal.map(x=>`<div class="mono" style="font-size:12px">[${esc(x.id)}] ${esc(x.titulo||'')} (${esc(x.archivo||'—')})</div>`).join('');
+    if(m.rutaBaseCompartida?.length)h+='<div class="muted" style="margin-top:8px">Varios documentos en la misma carpeta (usa «Reprocesar» en su ficha para separarlos):</div>'+m.rutaBaseCompartida.map(g=>`<div class="mono" style="font-size:12px;margin-top:4px">${esc(g.ruta||'')}<br>${g.docs.map(x=>`&nbsp;&nbsp;[${esc(x.id)}] ${esc(x.titulo||'')} (${esc(x.archivo||'—')})`).join('<br>')}</div>`).join('');
     h+='</div>';}
   $('#integOut').innerHTML=h;
 }

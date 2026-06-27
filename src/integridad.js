@@ -127,6 +127,22 @@ export async function verificarIntegridad({ reparar = false } = {}) {
     M.carpetasHuerfanas = carpetasHuerfanas.slice(0, 10).map(webDe);
     M.rutaBaseDesajustada = rutaBaseDesync.slice(0, 10).map(x => ({ id: String(x.doc._id), enDisco: x.web, enBD: x.doc.ruta_base }));
 
+    // ── F. Varios documentos comparten la MISMA ruta_base (rompe 1-doc↔1-carpeta). Solo informa: se
+    //     arregla recatalogando a mano (botón «Reprocesar» de la ficha) — la carpeta tiene 2+ ficheros
+    //     distintos y separarlos automáticamente sin riesgo no es trivial. ──
+    const porRuta = new Map();
+    for (const d of docs) {
+        if (!d.ruta_base) continue;
+        if (!porRuta.has(d.ruta_base)) porRuta.set(d.ruta_base, []);
+        porRuta.get(d.ruta_base).push(d);
+    }
+    const rutaCompartida = [...porRuta.values()].filter(g => g.length > 1);
+    D.rutaBaseCompartida = rutaCompartida.length;
+    M.rutaBaseCompartida = rutaCompartida.slice(0, 10).map(g => ({
+        ruta: g[0].ruta_base,
+        docs: g.map(d => ({ id: String(d._id), titulo: d.titulo, archivo: d.nombre_archivo })),
+    }));
+
     // ── C. Duplicados exactos por hash ──
     const hashDups = await col.aggregate([
         { $match: { hash_contenido: { $exists: true, $ne: null } } },
