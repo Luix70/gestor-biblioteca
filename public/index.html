@@ -361,6 +361,17 @@ body.guest .admin-only{display:none!important}
             </div>
             <p class="muted" style="margin-top:10px;font-size:12px">Reparar es seguro: todo lo retirado va a la Papelera. Programable con DSM: <span class="mono">docker exec gestor-biblioteca node scripts/integridad.js --reparar</span>.</p>
           </div>
+          <div class="card admin-only">
+            <h3>🧼 Sanear catálogo</h3>
+            <p class="muted" style="margin-top:0;font-size:12px">Re-deriva con el pipeline actual: re-aloja carpetas con caracteres rotos (#, %), recupera portadas que faltan y, opcional, re-ingiere cómics mal archivados como obra. Sin pérdida de datos (mover seguro / Papelera).</p>
+            <div class="row" style="align-items:center">
+              <button class="btn" id="sanDiag">🔎 Diagnosticar</button>
+              <button class="btn bad" id="sanRun">🧼 Sanear</button>
+              <label class="switch" style="flex:0 0 auto;margin-left:6px"><input type="checkbox" id="sanReclas"><span class="slider"></span></label>
+              <span class="muted" title="Re-ingiere cómics mal archivados como obra (usa APIs/IA; más lento)">incluir re-clasificación (IA)</span>
+            </div>
+            <div id="sanOut" style="margin-top:12px"></div>
+          </div>
         </div>
         <div id="integOut" style="margin-top:16px"></div>
         <div class="card" style="margin-top:16px">
@@ -1383,7 +1394,38 @@ $('#logPurge30').onclick=()=>purgaLog({dias:30},'Logs: conservados los últimos 
 $('#logClear').onclick=()=>{if(confirm('¿Vaciar TODO el log?'))purgaLog({todo:true},'Log vaciado');};
 
 // ── integridad ──
-function loadInteg(){$('#integDiag').onclick=()=>correrIntegridad(false);if($('#integFix'))$('#integFix').onclick=()=>correrIntegridad(true);}
+function loadInteg(){$('#integDiag').onclick=()=>correrIntegridad(false);if($('#integFix'))$('#integFix').onclick=()=>correrIntegridad(true);
+  if($('#sanDiag')){$('#sanDiag').onclick=sanearDiag;$('#sanRun').onclick=sanearRun;}}
+// ── Sanear catálogo (re-home #, portadas, re-clasificar) ──
+function sanResumen(inf){const d=inf.diagnostico||{},h=inf.hecho;
+  const fila=(lab,v)=>`<tr><td>${esc(lab)}</td><td style="text-align:right"><b ${(typeof v==='number'?v>0:true)?'style="color:var(--warn)"':''}>${v}</b></td></tr>`;
+  let html=`<table><tr><th>Tarea</th><th style="text-align:right">${h?'hecho / candidatos':'candidatos'}</th></tr>
+    ${fila('Re-alojar carpeta (#/%)',h?`${h.rehome} / ${d.rehome}`:(d.rehome||0))}
+    ${fila('Recuperar portada',h?`${h.portada} / ${d.portada}`:(d.portada||0))}
+    ${fila('Re-clasificar (cómic↔obra)',h?`${h.reclasificar} / ${d.reclasificar}`:(d.reclasificar||0))}
+    ${h&&h.errores?fila('Errores',h.errores):''}</table>${inf.reclasificar?'':'<div class="muted" style="font-size:11px;margin-top:4px">La re-clasificación solo corre con la opción «incluir re-clasificación» marcada.</div>'}`;
+  const m=inf.muestras||{};
+  for(const[k,lab] of [['rehome','Carpetas a re-alojar'],['portada','Portadas a recuperar'],['reclasificar','Cómics mal archivados']]){
+    if(m[k]?.length)html+=`<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12px">${lab} (${m[k].length}${m[k].length>=12?'+':''})</summary>${m[k].map(x=>`<div class="mono" style="font-size:11px"><a class="rowlink" data-doc="${esc(x.id)}">${esc(x.titulo||x.id)}</a>${x.ruta?' → '+esc(x.ruta):''}</div>`).join('')}</details>`;}
+  return html;}
+function sanWire(){$$('#sanOut [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'activity',etiqueta:'Sanear'}));}
+async function sanearDiag(){const b=$('#sanDiag');b.disabled=true;$('#sanOut').innerHTML='<div class="muted">Diagnosticando…</div>';
+  try{const r=await api('/sanear',{method:'POST',body:'{}'});$('#sanOut').innerHTML=sanResumen(r);sanWire();}
+  catch(e){$('#sanOut').innerHTML='';toast(e.message,'bad');}finally{b.disabled=false;}}
+let sanTimer=null;
+async function sanearRun(){const reclas=$('#sanReclas').checked;
+  if(!confirm('Sanear el catálogo'+(reclas?' (incluye re-clasificación con IA, más lenta)':'')+'. Lo retirado va a la Papelera (recuperable). ¿Seguir?'))return;
+  $('#sanRun').disabled=true;$('#sanDiag').disabled=true;
+  try{const r=await api('/sanear/ejecutar',{method:'POST',body:JSON.stringify({reclasificar:reclas})});
+    if(!r.ok){toast(r.motivo,'warn');$('#sanRun').disabled=false;$('#sanDiag').disabled=false;return;}
+    if(sanTimer)clearInterval(sanTimer);
+    sanTimer=setInterval(async()=>{try{const s=await api('/sanear/estado');
+      if(s.en_curso)$('#sanOut').innerHTML=`<div class="muted">Saneando… ${s.hechos}/${s.total||'?'}</div>`;
+      else{clearInterval(sanTimer);sanTimer=null;$('#sanRun').disabled=false;$('#sanDiag').disabled=false;
+        if(s.error)toast('Saneo: '+s.error,'bad');
+        else if(s.informe){$('#sanOut').innerHTML=sanResumen(s.informe);sanWire();toast('Saneo terminado');}}
+    }catch(e){}},1500);
+  }catch(e){toast(e.message,'bad');$('#sanRun').disabled=false;$('#sanDiag').disabled=false;}}
 // Página "Actividad": vigilante + conformador + mantenimiento + integridad + logs (al final).
 function loadActivity(){refrescarEstado();loadInteg();logAuto();}
 async function correrIntegridad(reparar){

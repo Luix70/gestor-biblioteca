@@ -9,6 +9,7 @@ import {
 import { verificarPasswordAdmin } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { verificarIntegridad } from './integridad.js';
+import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
@@ -209,6 +210,19 @@ export function rutasPanel() {
             res.status(500).json({ ok: false, motivo: e.message });
         } finally { integridadEnCurso = false; }
     });
+
+    // ── Sanear catálogo: re-deriva con el pipeline actual (re-home #, portadas, re-clasificar). admin. ──
+    r.post('/sanear', async (req, res) => {        // DRY-RUN (diagnóstico): síncrono y rápido
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json({ ok: true, ...await sanearCatalogo({ ejecutar: false }) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/sanear/ejecutar', (req, res) => {     // EJECUTA en 2º plano (puede tardar / usar IA)
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(lanzarSaneador({ reclasificar: req.body?.reclasificar === true }));
+    });
+    r.get('/sanear/estado', (req, res) => res.json(estadoSaneador()));
 
     // ── Purga de obra multivolumen (simulación por defecto; ejecutar:true aplica) ──
     r.post('/obras/purgar', async (req, res) => {
