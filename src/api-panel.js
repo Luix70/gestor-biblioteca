@@ -11,6 +11,7 @@ import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { verificarIntegridad } from './integridad.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
+import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
@@ -632,6 +633,25 @@ export function rutasPanel() {
             res.set('Content-Type', pag.mimeType);
             res.set('Cache-Control', 'private, max-age=600');
             res.send(pag.buffer);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // AGRUPADO MANUAL (selección múltiple en Búsqueda, solo admin): meter N documentos en una colección
+    // o una obra (existente o nueva).
+    r.post('/documentos/agrupar/coleccion', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const { ids, coleccionId, nombre, tipo } = req.body || {};
+            if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos seleccionados' });
+            res.json(await asignarColeccion(await conectarDB(), ids, { coleccionId, nombre, tipo }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/agrupar/obra', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const { ids, obraId, titulo } = req.body || {};
+            if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos seleccionados' });
+            res.json(await asignarObra(await conectarDB(), ids, { obraId, titulo }));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
