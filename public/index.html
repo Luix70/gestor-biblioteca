@@ -209,6 +209,7 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .pdfwrap.full{position:fixed;inset:0;width:auto;height:auto;z-index:300;border:none;border-radius:0}
 .pdfscroll{position:absolute;inset:0 0 40px 0;overflow:auto;padding:12px;display:flex;flex-direction:column;align-items:center;gap:12px}
 .pdfpage{width:100%;max-width:880px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.45)}
+.pdfwrap .comicpg{position:absolute;inset:0;margin:auto;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;cursor:pointer;background:#1a1d20}
 .pdfpage canvas{display:block;width:100%;height:auto}
 /* auth */
 #login{position:fixed;inset:0;background:transparent;display:none;place-items:center;z-index:200}
@@ -930,7 +931,41 @@ function pintarDoc(r,ctx){
   const _nom=(r.nombre_archivo||'').toLowerCase();
   if(r.archivo_url&&_nom.endsWith('.epub'))iniciarLectorEpub(r.archivo_url);
   else if(r.archivo_url&&_nom.endsWith('.pdf'))iniciarLectorPdf(r.archivo_url);
+  else if(/\.(cbz|cbr|cb7)$/.test(_nom))iniciarLectorComic(d._id);
 }
+
+// ── visor de CÓMIC: páginas servidas por el backend (/documentos/:id/comic[/:n]); paginación bajo demanda ──
+let comicState=null;
+async function iniciarLectorComic(id){
+  const wrap=$('#comicWrap'),msg=$('#comicMsg'),img=$('#comicImg');if(!wrap||!img)return;
+  if(comicState){for(const u of comicState.blobs.values())URL.revokeObjectURL(u);} // liberar el cómic anterior
+  comicState={id,n:0,total:0,blobs:new Map()};
+  try{
+    const r=await api('/documentos/'+encodeURIComponent(id)+'/comic');
+    const total=r.paginas||0;
+    if(!total){if(msg)msg.textContent='No se pudieron extraer páginas de este cómic.';return;}
+    comicState.total=total;$('#comicTotal').textContent=total;
+    $('#comicBar').style.display='';$('#comicFs').style.display='';
+    if(total>1){$('#comicPrev').style.display='';$('#comicNext').style.display='';}
+    $('#comicPrev').onclick=()=>comicIr(-1);$('#comicNext').onclick=()=>comicIr(1);
+    $('#comicFs').onclick=()=>wrap.classList.toggle('full');
+    img.onclick=()=>comicIr(1); // clic en la página → siguiente
+    await comicMostrar(0);
+  }catch(e){if(msg)msg.textContent=e.message;}
+}
+async function comicBlob(n){
+  if(comicState.blobs.has(n))return comicState.blobs.get(n);
+  const res=await fetch('/api/documentos/'+encodeURIComponent(comicState.id)+'/comic/'+n,{headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
+  if(!res.ok)throw new Error('no se pudo cargar la página '+(n+1));
+  const u=URL.createObjectURL(await res.blob());comicState.blobs.set(n,u);return u;
+}
+async function comicMostrar(n){
+  const img=$('#comicImg'),msg=$('#comicMsg');if(!img||!comicState)return;
+  try{const u=await comicBlob(n);img.src=u;comicState.n=n;$('#comicCur').textContent=n+1;if(msg)msg.style.display='none';
+    if(n+1<comicState.total)comicBlob(n+1).catch(()=>{}); // prefetch de la siguiente
+  }catch(e){if(msg){msg.style.display='';msg.textContent=e.message;}}
+}
+function comicIr(d){if(!comicState)return;const n=Math.max(0,Math.min(comicState.total-1,comicState.n+d));if(n!==comicState.n)comicMostrar(n);}
 
 let carIdx=0;
 function carMove(dir){const t=$('#carTrack');if(!t)return;const n=t.children.length;carIdx=Math.max(0,Math.min(n-1,carIdx+dir));
@@ -1000,8 +1035,16 @@ function previewArchivo(r){
         <span class="epubpct" id="epubPct">—</span>
       </div>
       <div class="epubmsg" id="epubMsg">Cargando lector…</div></div>${acc}</div>`;
+  // CÓMIC (.cbz/.cbr/.cb7): visor de páginas servidas por el backend (extraídas del comprimido al vuelo).
+  // Se inicializa tras pintar (iniciarLectorComic).
+  if(['cbz','cbr','cb7'].includes(ext))return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">🗂️ ${esc(nombre)}</h3>
+    <div class="pdfwrap" id="comicWrap"><img id="comicImg" class="comicpg" alt="">
+      <button class="cnav prev" id="comicPrev" style="display:none">‹</button><button class="cnav next" id="comicNext" style="display:none">›</button>
+      <button class="epubfs" id="comicFs" title="Pantalla completa" style="display:none">⛶</button>
+      <div class="epubbar" id="comicBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="comicCur">1</span> / <span id="comicTotal">?</span></span></div>
+      <div class="epubmsg" id="comicMsg">Cargando cómic…</div></div>${acc}</div>`;
   // Resto de formatos: sin vista previa integrada — solo descarga.
-  const ic={djvu:'📘',mobi:'📙',azw3:'📙',cbr:'🗂️',cbz:'🗂️'}[ext]||'📦';
+  const ic={djvu:'📘',mobi:'📙',azw3:'📙'}[ext]||'📦';
   return `<div class="fileprev"><div class="filebox"><div class="ic">${ic}</div><div style="font-weight:600;word-break:break-word">${esc(nombre)}</div>
     <div class="muted" style="font-size:12px;margin-top:4px">Formato ${esc((ext||'—').toUpperCase())} — el navegador no lo previsualiza de forma integrada.</div>${acc}</div></div>`;
 }

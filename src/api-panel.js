@@ -13,6 +13,11 @@ import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento } from './utils/reproceso.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
+import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
+import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
+import path from 'node:path';
+
+const EXT_COMIC = new Set(['.cbz', '.cbr', '.cb7']);
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { resolverNombres } from './utils/registro.js';
@@ -548,6 +553,36 @@ export function rutasPanel() {
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             const r2 = await reprocesarDocumento(db, doc);
             res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // PREVISUALIZACIÓN de cómic: nº de páginas + página N como imagen (extraídas del comprimido al vuelo;
+    // CBZ con adm-zip, CBR/CB7 con unar+caché). El visor del panel pagina bajo demanda.
+    const docComic = async (req, res) => {
+        if (!ObjectId.isValid(req.params.id)) { res.status(400).json({ ok: false, motivo: 'id inválido' }); return null; }
+        const db = await conectarDB();
+        const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+        if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (req.usuario?.rol === 'guest' && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (!doc.nombre_archivo || !EXT_COMIC.has(path.extname(doc.nombre_archivo).toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es un cómic (.cbz/.cbr/.cb7)' }); return null; }
+        return path.join(carpetaDeDoc(doc), doc.nombre_archivo);
+    };
+    r.get('/documentos/:id/comic', async (req, res) => {
+        try {
+            const ruta = await docComic(req, res);
+            if (!ruta) return;
+            res.json({ ok: true, paginas: await contarPaginasComic(ruta) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.get('/documentos/:id/comic/:n', async (req, res) => {
+        try {
+            const ruta = await docComic(req, res);
+            if (!ruta) return;
+            const pag = await leerPaginaComic(ruta, Math.max(0, parseInt(req.params.n, 10) || 0));
+            if (!pag) return res.status(404).json({ ok: false, motivo: 'página no encontrada' });
+            res.set('Content-Type', pag.mimeType);
+            res.set('Cache-Control', 'private, max-age=600');
+            res.send(pag.buffer);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
