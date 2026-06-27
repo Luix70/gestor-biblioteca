@@ -1009,14 +1009,16 @@ function carMove(dir){const t=$('#carTrack');if(!t)return;const n=t.children.len
 // ── valoración (estrellas, estilo Lightroom) + quitar (⊘) + NSFW (🔞) — para documentos / obras / colecciones ──
 // `ent` = 'documentos' | 'obras' | 'colecciones'. La valoración es por nivel (independiente); marcar NSFW en
 // una obra/colección oculta a los invitados todos sus miembros (actuales y futuros).
-function ratingBar(ent,id,v,nsfw){v=Number(v)||0;
+function ratingBar(ent,id,v,nsfw){v=Number(v)||0;const admin=ROL==='admin';
   const st=[5,4,3,2,1].map(n=>`<span class="st${n<=v?' on':''}" data-v="${n}">★</span>`).join(''); // 5→1 + row-reverse: relleno al pasar el ratón
+  // Invitado: solo VE la valoración (estrellas de solo lectura, sin botones de quitar/NSFW ni clic).
+  if(!admin)return `<span class="ratebar ro"><span class="stars ro" title="Valoración: ${v}/5">${st}</span></span>`;
   return `<span class="ratebar" data-ent="${ent}" data-id="${esc(id)}" data-v="${v}">`
     +`<button class="rbtn rclear" title="Quitar valoración (0★)">⊘</button>`
     +`<span class="stars" title="Valora (clic en una estrella; repite la misma para quitar)">${st}</span>`
     +`<button class="rbtn rnsfw${nsfw?' on':''}" title="Marcar / quitar NSFW (oculto a invitados)">🔞</button>`
     +`</span>`;}
-function attachRating(scope){$$(scope+' .ratebar').forEach(bar=>{
+function attachRating(scope){$$(scope+' .ratebar:not(.ro)').forEach(bar=>{
   const ent=bar.dataset.ent,id=bar.dataset.id;
   const setVal=async nv=>{try{await api('/'+ent+'/'+encodeURIComponent(id)+'/valoracion',{method:'POST',body:JSON.stringify({valoracion:nv})});
       bar.dataset.v=nv;bar.querySelectorAll('.st').forEach(x=>x.classList.toggle('on',Number(x.dataset.v)<=nv));
