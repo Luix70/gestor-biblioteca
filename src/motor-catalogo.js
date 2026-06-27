@@ -208,6 +208,16 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             delete docFinal.issn; // la autoridad ISSN vive en la colección, no en el libro
         }
 
+        // NSFW HEREDADO: un nuevo miembro de una obra/colección marcada NSFW nace NSFW (así la marca
+        // PROPAGA a los miembros FUTUROS; los actuales se propagan al marcar el padre desde el panel).
+        if (!docFinal.nsfw && (docFinal.coleccion || docFinal.obra)) {
+            const padres = await Promise.all([
+                docFinal.coleccion ? db.collection('colecciones').findOne({ _id: docFinal.coleccion }, { projection: { nsfw: 1 } }) : null,
+                docFinal.obra ? db.collection('obras').findOne({ _id: docFinal.obra }, { projection: { nsfw: 1 } }) : null,
+            ]);
+            if (padres.some(p => p?.nsfw)) docFinal.nsfw = true;
+        }
+
         // SEGURIDAD MULTIVOLUMEN — un TOMO JAMÁS debe fusionarse con otro documento por su ISBN
         // (eso fusionaba/perdía tomos). Su identidad es (obra, volumen_numero), NO el ISBN. Por eso,
         // si el `isbn` del tomo (a) es el de la OBRA completa (set), o (b) ya pertenece a OTRO

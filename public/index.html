@@ -778,7 +778,7 @@ function tomoCard(d,numero,falta){
   if(falta)return `<div class="vol falta"><div class="cov"><div class="ph">∅</div></div><div class="meta"><div class="n">Tomo ${numero}</div><div class="t">falta</div></div></div>`;
   const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
   const fmt=(d.formatos||[]).slice(0,3).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">Tomo ${numero??'?'} ${fmt}</div><div class="t">${esc(d.volumen_titulo||d.titulo||'—')}</div></div></div>`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">Tomo ${numero??'?'} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.volumen_titulo||d.titulo||'—')}</div></div></div>`;
 }
 
 function pintarObra(r){
@@ -821,7 +821,7 @@ async function verColeccion(id){detalle={tipo:'coleccion',id};mostrarDetalle();$
 function miembroCard(d,etiqueta){
   const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
   const fmt=(d.formatos||[]).slice(0,3).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(etiqueta||'')} ${fmt}</div><div class="t">${esc(d.titulo||'—')}</div></div></div>`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(etiqueta||'')} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo||'—')}</div></div></div>`;
 }
 
 function pintarColeccion(r){
@@ -1024,7 +1024,10 @@ function attachRating(scope){$$(scope+' .ratebar').forEach(bar=>{
   bar.querySelectorAll('.st').forEach(s=>s.onclick=e=>{e.stopPropagation();const n=Number(s.dataset.v),cur=Number(bar.dataset.v)||0;setVal(n===cur?0:n);});
   const clr=bar.querySelector('.rclear');if(clr)clr.onclick=e=>{e.stopPropagation();setVal(0);};
   const nb=bar.querySelector('.rnsfw');if(nb)nb.onclick=async e=>{e.stopPropagation();const nv=!nb.classList.contains('on');
-    try{await api('/'+ent+'/'+encodeURIComponent(id)+'/nsfw',{method:'POST',body:JSON.stringify({nsfw:nv})});nb.classList.toggle('on',nv);toast(nv?'Marcado NSFW 🔞':'NSFW quitado');}catch(err){toast(err.message,'bad');}};
+    try{const r=await api('/'+ent+'/'+encodeURIComponent(id)+'/nsfw',{method:'POST',body:JSON.stringify({nsfw:nv})});nb.classList.toggle('on',nv);
+      const ext=r.propagado?` (${r.propagado} miembro${r.propagado===1?'':'s'})`:'';toast((nv?'Marcado NSFW 🔞':'NSFW quitado')+ext);
+      if(r.propagado&&detalle&&(detalle.tipo==='obra'||detalle.tipo==='coleccion')){detalle.tipo==='obra'?verObra(detalle.id):verColeccion(detalle.id);} // refrescar badges de los miembros
+    }catch(err){toast(err.message,'bad');}};
 });}
 
 // ── acciones de la ficha: Conformar / Enriquecer (con resumen de cambios) y Reprocesar ──

@@ -28,7 +28,7 @@ import { describirCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
-const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1 };
+const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1 };
 
 // URL servible (en /recursos) del fichero original de un documento. Solo se codifica el nombre del
 // fichero: ruta_base ya viene saneada para web (utils/rutas.js) y sus segmentos son seguros.
@@ -510,9 +510,15 @@ export function rutasPanel() {
                 if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
                 const nsfw = !!req.body?.nsfw;
                 const db = await conectarDB();
-                const r2 = await db.collection(coleccion).updateOne({ _id: new ObjectId(req.params.id) }, { $set: { nsfw, fecha_actualizacion: new Date() } });
+                const _id = new ObjectId(req.params.id);
+                const r2 = await db.collection(coleccion).updateOne({ _id }, { $set: { nsfw, fecha_actualizacion: new Date() } });
                 if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
-                res.json({ ok: true, nsfw });
+                // PROPAGAR a los miembros ACTUALES (obra/colección). Los FUTUROS heredan en la ingesta
+                // (motor-catalogo) y, para invitados, el filtro nsfw del padre ya los oculta igualmente.
+                let propagado = 0;
+                if (ruta === 'obras') propagado = (await db.collection('biblioteca').updateMany({ obra: _id }, { $set: { nsfw } })).modifiedCount;
+                else if (ruta === 'colecciones') propagado = (await db.collection('biblioteca').updateMany({ coleccion: _id }, { $set: { nsfw } })).modifiedCount;
+                res.json({ ok: true, nsfw, propagado });
             } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
         });
     }
