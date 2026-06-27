@@ -170,6 +170,8 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .ddown .pop{position:absolute;z-index:40;margin-top:6px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px;min-width:160px;box-shadow:0 10px 28px rgba(0,0,0,.35)}
 .ddown .pop label{display:flex;gap:8px;align-items:center;font-size:13px;padding:5px 7px;cursor:pointer;font-weight:400;border-radius:6px}
 .ddown .pop label:hover{background:var(--card2)}
+.integrow{cursor:pointer}.integrow:hover{background:var(--card2)}
+.intgrp{padding:5px 2px;border-top:1px solid var(--line)}.intgrp:first-child{border-top:none}
 .ficha{display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start}
 .dl{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:13px}
 .dl dt{color:var(--mut);font-weight:600;white-space:nowrap}.dl dd{word-break:break-word}
@@ -1320,20 +1322,39 @@ async function correrIntegridad(reparar){
   catch(e){$('#integOut').innerHTML='';toast(e.message,'bad');}
   finally{dB.disabled=false;if(fB)fB.disabled=false;}
 }
+// ¿qué fila se AUTO-repara con el botón? (las demás son solo diagnóstico → acción manual en la ficha)
+const INTEG_AUTOREPARA=new Set(['ramasMuertas','carpetasHuerfanas','rutaBaseDesajustada','hashDuplicadosGrupos','hashDuplicadosDocs','cuarentenaDuplicados']);
 function pintarInteg(r){
-  const fila=(k,v,warn)=>`<tr><td>${esc(k)}</td><td style="text-align:right"><b ${warn&&v>0?'style="color:var(--warn)"':''}>${v}</b></td></tr>`;
-  const d=r.diagnostico||{},et={docsSinCarpeta:'Docs sin carpeta',docsSinFicheroOriginal:'Docs sin fichero original',rutaBaseCompartida:'Varios docs en la misma carpeta',ramasMuertas:'Ramas vacías / muertas',registroSinDocumento:'Registro sin documento',carpetasHuerfanas:'Carpetas huérfanas',rutaBaseDesajustada:'ruta_base desajustada',hashDuplicadosGrupos:'Duplicados por hash (grupos)',hashDuplicadosDocs:'Duplicados por hash (sobrantes)',cuarentenaDuplicados:'Cuarentena/duplicados'};
-  let h=`<div class="card" style="margin-bottom:14px"><h3>Diagnóstico · ${esc(new Date(r.ts).toLocaleString('es-ES'))} · ${r.totalDocs} docs</h3><table>`;
-  for(const k of Object.keys(et))h+=fila(et[k],d[k]??0,true);h+='</table></div>';
+  const d=r.diagnostico||{},m=r.muestras||{};
+  const et={docsSinCarpeta:'Docs sin carpeta',docsSinFicheroOriginal:'Docs sin fichero original',rutaBaseCompartida:'Varios docs en la misma carpeta',ramasMuertas:'Ramas vacías / muertas',registroSinDocumento:'Registro sin documento',carpetasHuerfanas:'Carpetas huérfanas',rutaBaseDesajustada:'ruta_base desajustada',hashDuplicadosGrupos:'Duplicados por hash (grupos)',hashDuplicadosDocs:'Duplicados por hash (sobrantes)',cuarentenaDuplicados:'Cuarentena/duplicados'};
+  // clave de muestras por fila (las dos de hash comparten muestra)
+  const mDe={docsSinCarpeta:'docsSinCarpeta',docsSinFicheroOriginal:'docsSinFicheroOriginal',rutaBaseCompartida:'rutaBaseCompartida',ramasMuertas:'ramasMuertas',registroSinDocumento:'registroSinDocumento',carpetasHuerfanas:'carpetasHuerfanas',rutaBaseDesajustada:'rutaBaseDesajustada',hashDuplicadosGrupos:'hashDuplicados',hashDuplicadosDocs:'hashDuplicados',cuarentenaDuplicados:'cuarentenaDuplicados'};
+  const fila=(k)=>{const v=d[k]??0,mk=mDe[k],tiene=v>0&&m[mk]&&m[mk].length;
+    const sello=v>0?(INTEG_AUTOREPARA.has(k)?'<span class="tag ok" title="Se arregla con «Diagnosticar y reparar»">auto</span>':'<span class="tag warn" title="Acción manual: abre la ficha y usa Reprocesar/Eliminar">manual</span>'):'';
+    return `<tr ${tiene?`class="integrow" data-k="${esc(mk)}" title="Ver qué documentos"`:''}><td>${esc(et[k])}${tiene?' <span class="muted">▸</span>':''}</td><td style="text-align:center">${sello}</td><td style="text-align:right"><b ${v>0?'style="color:var(--warn)"':''}>${v}</b></td></tr>`;};
+  let h=`<div class="card" style="margin-bottom:14px"><h3>Diagnóstico · ${esc(new Date(r.ts).toLocaleString('es-ES'))} · ${r.totalDocs} docs</h3>
+    <table>${Object.keys(et).map(fila).join('')}</table>
+    <div class="muted" style="font-size:11px;margin-top:8px"><span class="tag ok">auto</span> lo arregla el botón «Reparar» · <span class="tag warn">manual</span> requiere abrir la ficha (Reprocesar/Eliminar). Pincha una fila para ver qué documentos.</div>
+    <div id="integDetalle" style="margin-top:12px"></div></div>`;
   if(r.reparado){const rp=r.reparado,er={ramasPodadas:'Ramas podadas',rutasReparadas:'ruta_base reparadas',carpetasHuerfanasRecicladas:'Huérfanas recicladas',hashDuplicadosEliminados:'Hash-duplicados eliminados',cuarentenaResueltos:'Cuarentena resueltos'};
-    h+=`<div class="card" style="margin-bottom:14px"><h3>🛠 Reparado (a la Papelera)</h3><table>`;for(const k of Object.keys(er))h+=fila(er[k],rp[k]??0,false);h+='</table></div>';}
-  const m=r.muestras||{};
-  if(m.docsSinCarpeta?.length||m.docsSinFicheroOriginal?.length||m.rutaBaseCompartida?.length){h+='<div class="card"><h3>Requiere revisión manual</h3>';
-    if(m.docsSinCarpeta?.length)h+='<div class="muted">Docs sin carpeta:</div>'+m.docsSinCarpeta.map(x=>`<div class="mono" style="font-size:12px">[${esc(x.id)}] ${esc(x.titulo||'')} → ${esc(x.ruta||'')}</div>`).join('');
-    if(m.docsSinFicheroOriginal?.length)h+='<div class="muted" style="margin-top:8px">Docs sin fichero original:</div>'+m.docsSinFicheroOriginal.map(x=>`<div class="mono" style="font-size:12px">[${esc(x.id)}] ${esc(x.titulo||'')} (${esc(x.archivo||'—')})</div>`).join('');
-    if(m.rutaBaseCompartida?.length)h+='<div class="muted" style="margin-top:8px">Varios documentos en la misma carpeta (usa «Reprocesar» en su ficha para separarlos):</div>'+m.rutaBaseCompartida.map(g=>`<div class="mono" style="font-size:12px;margin-top:4px">${esc(g.ruta||'')}<br>${g.docs.map(x=>`&nbsp;&nbsp;[${esc(x.id)}] ${esc(x.titulo||'')} (${esc(x.archivo||'—')})`).join('<br>')}</div>`).join('');
-    h+='</div>';}
+    h+=`<div class="card" style="margin-bottom:14px"><h3>🛠 Reparado (a la Papelera)</h3><table>`+Object.keys(er).map(k=>`<tr><td>${esc(er[k])}</td><td style="text-align:right"><b>${rp[k]??0}</b></td></tr>`).join('')+'</table></div>';}
   $('#integOut').innerHTML=h;
+  $$('#integOut tr.integrow').forEach(tr=>tr.onclick=()=>drillInteg(tr.dataset.k,m));
+}
+// Detalle drillable de una fila del diagnóstico: lista los documentos/carpetas afectados (docs → ficha).
+function drillInteg(mk,m){
+  const el=$('#integDetalle');if(!el)return;
+  const arr=m[mk]||[];if(!arr.length){el.innerHTML='';return;}
+  const dl=x=>`<a class="rowlink" data-doc="${esc(x.id)}">${esc(x.titulo||x.id)}</a>${x.archivo?` <span class="muted mono">(${esc(x.archivo)})</span>`:''}${x.isbn?` <span class="muted mono">ISBN ${esc(x.isbn)}</span>`:''}`;
+  let h='';
+  if(mk==='hashDuplicados')h=arr.map(g=>`<div class="intgrp">${g.docs.map(dl).join(' · ')}</div>`).join('');
+  else if(mk==='rutaBaseCompartida')h=arr.map(g=>`<div class="intgrp"><span class="mono">${esc(g.ruta||'')}</span><br>${g.docs.map(dl).join('<br>')}</div>`).join('');
+  else if(mk==='rutaBaseDesajustada')h=arr.map(x=>`<div class="intgrp">${dl(x)}<br><span class="muted">disco</span> <span class="mono">${esc(x.enDisco||'')}</span></div>`).join('');
+  else if(mk==='docsSinCarpeta'||mk==='docsSinFicheroOriginal')h=arr.map(x=>`<div class="intgrp">${dl(x)}${x.ruta?` → <span class="mono">${esc(x.ruta)}</span>`:''}</div>`).join('');
+  else h=arr.map(x=>`<div class="intgrp mono">${esc(typeof x==='string'?x:JSON.stringify(x))}</div>`).join('');
+  el.innerHTML=`<div class="card" style="background:var(--card2);margin:0"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><b>Detalle (${arr.length})</b><button class="btn" id="intX">✕</button></div><div style="margin-top:8px;font-size:13px;line-height:1.6">${h}</div></div>`;
+  $('#intX').onclick=()=>{el.innerHTML='';};
+  $$('#integDetalle [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'activity',etiqueta:'Integridad'}));
 }
 const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:loadPap,obras:loadObras,colecciones:loadColecciones,inbox:()=>{},search:loadSearch};
 

@@ -125,7 +125,8 @@ export async function verificarIntegridad({ reparar = false } = {}) {
     D.rutaBaseDesajustada = rutaBaseDesync.length;
     M.ramasMuertas = ramasMuertas.slice(0, 15).map(webDe);
     M.carpetasHuerfanas = carpetasHuerfanas.slice(0, 10).map(webDe);
-    M.rutaBaseDesajustada = rutaBaseDesync.slice(0, 10).map(x => ({ id: String(x.doc._id), enDisco: x.web, enBD: x.doc.ruta_base }));
+    M.registroSinDocumento = registroSinDoc.slice(0, 15).map(webDe);
+    M.rutaBaseDesajustada = rutaBaseDesync.slice(0, 10).map(x => ({ id: String(x.doc._id), titulo: x.doc.titulo, enDisco: x.web, enBD: x.doc.ruta_base }));
 
     // ── F. Varios documentos comparten la MISMA ruta_base (rompe 1-doc↔1-carpeta). Solo informa: se
     //     arregla recatalogando a mano (botón «Reprocesar» de la ficha) — la carpeta tiene 2+ ficheros
@@ -151,11 +152,16 @@ export async function verificarIntegridad({ reparar = false } = {}) {
     ]).toArray();
     D.hashDuplicadosGrupos = hashDups.length;
     D.hashDuplicadosDocs = hashDups.reduce((s, g) => s + (g.n - 1), 0); // sobrantes
+    M.hashDuplicados = hashDups.slice(0, 10).map(g => ({
+        docs: g.ids.map(id => porId.get(String(id))).filter(Boolean)
+            .map(d => ({ id: String(d._id), titulo: d.titulo, isbn: d.isbn || null, archivo: d.nombre_archivo })),
+    }));
 
     // ── Cuarentena/duplicados pendientes ──
     let depositos = [];
     try { depositos = (await fs.readdir(path.join(DIR_CUARENTENA, 'duplicados'), { withFileTypes: true })).filter(e => e.isDirectory()); } catch { /* */ }
     D.cuarentenaDuplicados = depositos.length;
+    M.cuarentenaDuplicados = depositos.slice(0, 15).map(e => e.name);
 
     if (!reparar) return informe;
 
