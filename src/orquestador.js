@@ -300,9 +300,11 @@ export async function procesarRecurso(entrada) {
         }));
 
     } else if (tipo === 'comic') {
-        // CÓMIC (.cbz/.cbr/.cb7): portada (CBZ→adm-zip, CBR/CB7→unar) + clasificación serie/álbum. naturaleza:'comic'.
+        // CÓMIC (.cbz/.cbr/.cb7): portada (CBZ→adm-zip, CBR/CB7→bsdtar) + clasificación serie/álbum. naturaleza:'comic'.
         datosBase = await extraerMetadatosComic(rutas[0]);
         formatos = datosBase.formatos;
+        // Diagnóstico (titular: visible en modo simple): ¿se extrajo la PORTADA del comprimido al ingerir?
+        console.log(`  📕 Cómic «${path.basename(rutas[0])}»: ${datosBase.paginas || 0} pág · portada ${datosBase.cubierta_base64 ? 'extraída ✓' : 'NO ✗'} · ${datosBase.muestra_paginas?.length || 0} de muestra${(datosBase.alertas_agente || []).length ? ' · ' + datosBase.alertas_agente.join('; ') : ''}`);
         // VISIÓN sobre las páginas de muestra (5 primeras + última, como un PDF): busca el código de barras /
         // ISBN / ISSN impreso. El ISBN es el PIVOTE para identificar el cómic por Fichero/APIs. Una sola
         // llamada; se omite si el nombre ya trajo un ISBN propio (coste mínimo).
