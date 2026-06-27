@@ -147,6 +147,11 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .stars.ro .st{cursor:default}
 .stars:not(.ro) .st:hover,.stars:not(.ro) .st:hover~.st{color:#f5b301;opacity:1}
 .vol .stars{font-size:13px}
+.ratebar{display:inline-flex;align-items:center;gap:6px}
+.rbtn{background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:2px;opacity:.5;transition:.1s}
+.rbtn:hover{opacity:1}
+.rbtn.rnsfw{filter:grayscale(1)}
+.rbtn.rnsfw.on{filter:none;opacity:1}
 .det-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .fbtn{background:var(--card2);border:1px solid var(--line);color:var(--txt);padding:7px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;gap:6px;align-items:center}
 .fbtn:hover{border-color:var(--acc);color:#fff}
@@ -737,12 +742,14 @@ async function purga(ejecutar){const clave=$('#purgaClave').value.trim();if(!cla
   }catch(e){toast(e.message,'bad');}}
 $('#purgaSim').onclick=()=>purga(false);$('#purgaExec').onclick=()=>purga(true);
 async function loadObras(){try{const o=await api('/obras');
-  $('#obrasBody').innerHTML=o.length?`<table><tr><th>Obra</th><th>isbn_obra</th><th>Tomos</th><th>Estado</th><th></th></tr>
+  $('#obrasBody').innerHTML=o.length?`<table><tr><th>Obra</th><th>isbn_obra</th><th>Tomos</th><th>Estado</th><th>Valoración</th><th></th></tr>
     ${o.map(x=>`<tr><td><span class="rowlink" data-obra="${esc(x._id)}">${esc(x.titulo)}</span></td><td class="mono muted">${esc(x.isbn_obra||'—')}</td>
       <td>${x.volumenes_presentes||0}/${x.total_volumenes||'?'}</td>
       <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':x.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'}</td>
+      <td>${ratingBar('obras',x._id,x.valoracion,x.nsfw)}</td>
       <td style="text-align:right">${x.isbn_obra?`<button class="btn admin-only" data-req="${esc(x._id)}" title="Re-consultar título/sinopsis por su ISBN">↻</button>`:''}</td></tr>`).join('')}</table>`:'<div class="empty">Sin obras</div>';
   $$('#obrasBody [data-obra]').forEach(b=>b.onclick=()=>verObra(b.dataset.obra));
+  attachRating('#obrasBody');
   $$('#obrasBody [data-req]').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='…';
     try{const r=await api('/obras/requery',{method:'POST',body:JSON.stringify({id:b.dataset.req})});
       if(r.ok){toast('Obra actualizada → '+r.titulo);loadObras();}else{toast(r.motivo,'warn');b.disabled=false;b.textContent='↻';}}
@@ -773,6 +780,7 @@ function pintarObra(r){
     <div class="det-head"><button class="det-back" title="Volver" onclick="go('obras')">←</button>
       <div class="det-title"><h2>${esc(o.titulo||'(sin título)')}</h2><div class="sub">${sub}</div>
         <div style="margin-top:8px">${o.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'} ${o.revision_requerida?'<span class="tag bad">revisar</span>':''} <span class="muted">${o.volumenes_presentes||0}/${o.total_volumenes||'?'} tomos</span></div>
+        <div style="margin-top:8px">${ratingBar('obras',o._id,o.valoracion,o.nsfw)}</div>
         ${o.cdu?`<div class="mono muted" style="margin-top:8px">CDU ${esc(o.cdu)}${desc&&desc.titulo_es?' · '+esc(desc.titulo_es):''}</div>`:''}
         ${desc&&desc.descripcion_es?`<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">Descripción CDU</summary><p class="muted" style="font-size:12px;margin-top:6px">${esc(desc.descripcion_es)}</p></details>`:''}
       </div></div>`;
@@ -780,18 +788,21 @@ function pintarObra(r){
   const sin=r.sin_numero&&r.sin_numero.length?`<div class="card" style="margin-top:14px"><h3 style="color:var(--warn)">Tomos sin número (${r.sin_numero.length})</h3><div class="vol-grid">${r.sin_numero.map(d=>tomoCard(d,'?',false)).join('')}</div></div>`:'';
   $('#p-detalle').innerHTML=head+`<div class="card"><h3>Tomos</h3><div class="vol-grid">${vols}</div></div>`+sin;
   $$('#p-detalle .vol[data-doc]').forEach(el=>el.onclick=()=>verDoc(el.dataset.doc,{obra:{_id:o._id,titulo:o.titulo}}));
+  attachRating('#p-detalle');
 }
 
 // ── colecciones: cabeceras de revista (números) + series de libros ──
 async function loadColecciones(){try{
   const tipo=$('#colsTipo')?$('#colsTipo').value:'';
   const o=await api('/colecciones'+(tipo?('?tipo='+encodeURIComponent(tipo)):''));
-  $('#colsBody').innerHTML=o.length?`<table><tr><th>Colección</th><th>Tipo</th><th>ISSN</th><th>Miembros</th><th>Estado</th></tr>
+  $('#colsBody').innerHTML=o.length?`<table><tr><th>Colección</th><th>Tipo</th><th>ISSN</th><th>Miembros</th><th>Estado</th><th>Valoración</th></tr>
     ${o.map(x=>`<tr><td><span class="rowlink" data-col="${esc(x._id)}">${esc(x.nombre)}</span></td>
       <td>${x.tipo==='revista'?'📰 revista':'📚 libro'}</td><td class="mono muted">${esc(x.issn||'—')}</td>
       <td>${x.miembros||0}</td>
-      <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':'<span class="tag ok">ok</span>'}</td></tr>`).join('')}</table>`:'<div class="empty">Sin colecciones</div>';
+      <td>${x.revision_requerida?'<span class="tag bad">revisar</span>':'<span class="tag ok">ok</span>'}</td>
+      <td>${ratingBar('colecciones',x._id,x.valoracion,x.nsfw)}</td></tr>`).join('')}</table>`:'<div class="empty">Sin colecciones</div>';
   $$('#colsBody [data-col]').forEach(b=>b.onclick=()=>verColeccion(b.dataset.col));
+  attachRating('#colsBody');
 }catch(e){toast(e.message,'bad');}}
 
 async function verColeccion(id){detalle={tipo:'coleccion',id};mostrarDetalle();$('#title').textContent='Colección';
@@ -813,6 +824,7 @@ function pintarColeccion(r){
     <div class="det-head"><button class="det-back" title="Volver" onclick="go('colecciones')">←</button>
       <div class="det-title"><h2>${esc(c.nombre||'(sin título)')}</h2><div class="sub">${tipoLabel} · ${sub}</div>
         <div style="margin-top:8px"><span class="muted">${r.miembros.length} ${esRev?'número(s)':'libro(s)'}</span> ${c.revision_requerida?'<span class="tag bad">revisar</span>':''}</div>
+        <div style="margin-top:8px">${ratingBar('colecciones',c._id,c.valoracion,c.nsfw)}</div>
         ${c.cdu?`<div class="mono muted" style="margin-top:8px">CDU ${esc(c.cdu)}${desc&&desc.titulo_es?' · '+esc(desc.titulo_es):''}</div>`:''}
         ${c.descripcion?`<p class="muted" style="font-size:12px;margin-top:6px">${esc(c.descripcion)}</p>`:''}
       </div></div>`;
@@ -820,6 +832,7 @@ function pintarColeccion(r){
   const cards=r.miembros.length?r.miembros.map(d=>miembroCard(d,etiq(d))).join(''):`<div class="empty">Sin ${esRev?'números':'libros'} registrados</div>`;
   $('#p-detalle').innerHTML=head+`<div class="card"><h3>${esRev?'Números':'Libros'}</h3><div class="vol-grid">${cards}</div></div>`;
   $$('#p-detalle .vol[data-doc]').forEach(el=>el.onclick=()=>verDoc(el.dataset.doc,{coleccion:{_id:c._id,nombre:c.nombre}}));
+  attachRating('#p-detalle');
 }
 
 async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();$('#title').textContent='Ficha';
@@ -910,7 +923,7 @@ function pintarDoc(r,ctx){
   const carrusel=imgs.length?`<div class="carousel"><div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(im.ruta)}" loading="lazy" onclick="window.open('${esc(im.ruta)}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:'<div class="filebox"><div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>';
   const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
     <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.naturaleza?' · '+esc(d.naturaleza):''}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div>
-    <div style="margin-top:8px">${starsHtml(d._id,d.valoracion||0)}</div>
+    <div style="margin-top:8px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div>
     <div class="det-acts">
       <button class="fbtn" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
@@ -919,7 +932,7 @@ function pintarDoc(r,ctx){
   $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
-  attachStars('#p-detalle .stars');
+  attachRating('#p-detalle');
   {const cf=$('#actConf'),ce=$('#actEnr'),cr=$('#actRepr');
    if(cf)cf.onclick=()=>fichaAccion('conformar',d._id,cf);
    if(ce)ce.onclick=()=>fichaAccion('enriquecer',d._id,ce);
@@ -932,6 +945,16 @@ function pintarDoc(r,ctx){
   if(r.archivo_url&&_nom.endsWith('.epub'))iniciarLectorEpub(r.archivo_url);
   else if(r.archivo_url&&_nom.endsWith('.pdf'))iniciarLectorPdf(r.archivo_url);
   else if(/\.(cbz|cbr|cb7)$/.test(_nom))iniciarLectorComic(d._id);
+  else if(_nom.endsWith('.djvu'))iniciarLectorDjvu(d._id);
+}
+// DjVu → PDF (el backend convierte con ddjvu); se carga como blob autenticado en el visor PDF.
+async function iniciarLectorDjvu(id){
+  const msg=$('#pdfMsg');if(msg)msg.textContent='Convirtiendo DjVu… (puede tardar la primera vez)';
+  try{
+    const res=await fetch('/api/documentos/'+encodeURIComponent(id)+'/djvu.pdf',{headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
+    if(!res.ok)throw new Error('no se pudo convertir el DjVu');
+    await iniciarLectorPdf(URL.createObjectURL(await res.blob()));
+  }catch(e){if($('#pdfMsg'))$('#pdfMsg').textContent=e.message;}
 }
 
 // ── visor de CÓMIC: páginas servidas por el backend (/documentos/:id/comic[/:n]); paginación bajo demanda ──
@@ -971,18 +994,26 @@ let carIdx=0;
 function carMove(dir){const t=$('#carTrack');if(!t)return;const n=t.children.length;carIdx=Math.max(0,Math.min(n-1,carIdx+dir));
   t.scrollTo({left:t.clientWidth*carIdx,behavior:'smooth'});const dd=$('#carDots');if(dd)dd.textContent=(carIdx+1)+' / '+n;}
 
-// ── valoración (estrellas, estilo Lightroom) — clicables en la ficha y en las tarjetas de Búsqueda ──
-function starsHtml(id,v){v=Number(v)||0;
+// ── valoración (estrellas, estilo Lightroom) + quitar (⊘) + NSFW (🔞) — para documentos / obras / colecciones ──
+// `ent` = 'documentos' | 'obras' | 'colecciones'. La valoración es por nivel (independiente); marcar NSFW en
+// una obra/colección oculta a los invitados todos sus miembros (actuales y futuros).
+function ratingBar(ent,id,v,nsfw){v=Number(v)||0;
   const st=[5,4,3,2,1].map(n=>`<span class="st${n<=v?' on':''}" data-v="${n}">★</span>`).join(''); // 5→1 + row-reverse: relleno al pasar el ratón
-  return `<span class="stars" data-doc="${esc(id)}" data-v="${v}" title="Valora (clic en una estrella; repite la misma para quitar)">${st}</span>`;}
-function attachStars(sel){$$(sel).forEach(w=>{
-  if(w.classList.contains('ro'))return;
-  w.querySelectorAll('.st').forEach(s=>{s.onclick=async e=>{e.stopPropagation();
-    const n=Number(s.dataset.v),cur=Number(w.dataset.v)||0,nv=(n===cur)?0:n; // clic en la actual → quitar
-    try{await api('/documentos/'+encodeURIComponent(w.dataset.doc)+'/valoracion',{method:'POST',body:JSON.stringify({valoracion:nv})});
-      w.dataset.v=nv;w.querySelectorAll('.st').forEach(x=>x.classList.toggle('on',Number(x.dataset.v)<=nv));
-      toast(nv?('Valorado con '+nv+'★'):'Valoración quitada');
-    }catch(err){toast(err.message,'bad');}};});});}
+  return `<span class="ratebar" data-ent="${ent}" data-id="${esc(id)}" data-v="${v}">`
+    +`<button class="rbtn rclear" title="Quitar valoración (0★)">⊘</button>`
+    +`<span class="stars" title="Valora (clic en una estrella; repite la misma para quitar)">${st}</span>`
+    +`<button class="rbtn rnsfw${nsfw?' on':''}" title="Marcar / quitar NSFW (oculto a invitados)">🔞</button>`
+    +`</span>`;}
+function attachRating(scope){$$(scope+' .ratebar').forEach(bar=>{
+  const ent=bar.dataset.ent,id=bar.dataset.id;
+  const setVal=async nv=>{try{await api('/'+ent+'/'+encodeURIComponent(id)+'/valoracion',{method:'POST',body:JSON.stringify({valoracion:nv})});
+      bar.dataset.v=nv;bar.querySelectorAll('.st').forEach(x=>x.classList.toggle('on',Number(x.dataset.v)<=nv));
+      toast(nv?('Valorado con '+nv+'★'):'Valoración quitada');}catch(e){toast(e.message,'bad');}};
+  bar.querySelectorAll('.st').forEach(s=>s.onclick=e=>{e.stopPropagation();const n=Number(s.dataset.v),cur=Number(bar.dataset.v)||0;setVal(n===cur?0:n);});
+  const clr=bar.querySelector('.rclear');if(clr)clr.onclick=e=>{e.stopPropagation();setVal(0);};
+  const nb=bar.querySelector('.rnsfw');if(nb)nb.onclick=async e=>{e.stopPropagation();const nv=!nb.classList.contains('on');
+    try{await api('/'+ent+'/'+encodeURIComponent(id)+'/nsfw',{method:'POST',body:JSON.stringify({nsfw:nv})});nb.classList.toggle('on',nv);toast(nv?'Marcado NSFW 🔞':'NSFW quitado');}catch(err){toast(err.message,'bad');}};
+});}
 
 // ── acciones de la ficha: Conformar / Enriquecer (con resumen de cambios) y Reprocesar ──
 async function fichaAccion(tipo,id,btn){
@@ -1035,6 +1066,12 @@ function previewArchivo(r){
         <span class="epubpct" id="epubPct">—</span>
       </div>
       <div class="epubmsg" id="epubMsg">Cargando lector…</div></div>${acc}</div>`;
+  // DjVu: el backend lo convierte a PDF (ddjvu) y se reutiliza el visor de PDF (mismo contenedor #pdfWrap).
+  if(ext==='djvu')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📘 ${esc(nombre)}</h3>
+    <div class="pdfwrap" id="pdfWrap"><div class="pdfscroll" id="pdfScroll"></div>
+      <button class="epubfs" id="pdfFs" title="Pantalla completa" style="display:none">⛶</button>
+      <div class="epubbar" id="pdfBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="pdfCur">1</span> / <span id="pdfTotal">?</span></span></div>
+      <div class="epubmsg" id="pdfMsg">Convirtiendo DjVu…</div></div>${acc}</div>`;
   // CÓMIC (.cbz/.cbr/.cb7): visor de páginas servidas por el backend (extraídas del comprimido al vuelo).
   // Se inicializa tras pintar (iniciarLectorComic).
   if(['cbz','cbr','cb7'].includes(ext))return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">🗂️ ${esc(nombre)}</h3>
@@ -1237,13 +1274,13 @@ function docCard(d){
   const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`:`<div class="ph">${ph}</div>`;
   const fmt=(d.formatos||[]).slice(0,2).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
   const sub=(d.autores&&d.autores.length?d.autores.slice(0,2).join(', '):'')||(d.año_edicion?String(d.año_edicion):'')||d.isbn||'—';
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${starsHtml(d._id,d.valoracion||0)}</div></div></div>`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div></div></div>`;
 }
 function pintarBusqueda(r){
   $('#searchCount').textContent=`${r.total.toLocaleString('es-ES')} resultado${r.total===1?'':'s'}`;
   $('#searchResults').innerHTML=r.docs.length?`<div class="vol-grid">${r.docs.map(docCard).join('')}</div>`:'<div class="empty">Sin resultados</div>';
   $$('#searchResults .vol[data-doc]').forEach(el=>el.onclick=()=>verDoc(el.dataset.doc,{volver:'search',etiqueta:'Búsqueda'}));
-  attachStars('#searchResults .stars');
+  attachRating('#searchResults');
   const p=r.page,tp=r.paginas;
   $('#searchPager').innerHTML=tp>1?`<button class="btn" id="pgPrev" ${p<=1?'disabled':''}>‹ Anterior</button><span class="muted">Página ${p} de ${tp}</span><button class="btn" id="pgNext" ${p>=tp?'disabled':''}>Siguiente ›</button>`:'';
   if($('#pgPrev'))$('#pgPrev').onclick=()=>buscarCatalogo(p-1);

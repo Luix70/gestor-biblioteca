@@ -14,8 +14,11 @@ FROM node:18-bullseye-slim
 # unar (paquete `unar`, de Debian MAIN = libre) aporta `lsar`/`unar`: descomprime CÓMICS .cbr (RAR),
 # .cb7 (7z) y .cbz (ZIP) para extraer la PORTADA (1ª imagen) y contar páginas. Es C plano (sin
 # SIMD/AVX), igual que poppler → apto para el Atom. Se prefiere a p7zip-rar (que está en non-free).
+#
+# djvulibre-bin aporta `ddjvu` para convertir un .djvu a PDF y previsualizarlo con el visor de PDF del
+# panel (pdf.js). También C plano, apto para el Atom.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils unar \
+    && apt-get install -y --no-install-recommends poppler-utils unar djvulibre-bin \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

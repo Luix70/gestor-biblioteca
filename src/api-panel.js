@@ -15,6 +15,7 @@ import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
+import { djvuAPdf } from './utils/djvu.js';
 import path from 'node:path';
 
 const EXT_COMIC = new Set(['.cbz', '.cbr', '.cb7']);
@@ -241,7 +242,7 @@ export function rutasPanel() {
             const db = await conectarDB();
             const filtroObras = req.usuario?.rol === 'guest' ? { nsfw: { $ne: true } } : {};
             const obras = await db.collection('obras')
-                .find(filtroObras, { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1, completa: 1, revision_requerida: 1, nsfw: 1 } })
+                .find(filtroObras, { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1, completa: 1, revision_requerida: 1, nsfw: 1, valoracion: 1 } })
                 .sort({ revision_requerida: -1, completa: 1, titulo: 1 }).limit(500).toArray();
             res.json(obras.map(o => ({ ...o, _id: String(o._id) })));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
@@ -375,6 +376,7 @@ export function rutasPanel() {
                     coleccion: await nombrePorId(db, 'colecciones', obra.coleccion),
                     total_volumenes: obra.total_volumenes || 0, volumenes_presentes: obra.volumenes_presentes || 0,
                     completa: !!obra.completa, revision_requerida: !!obra.revision_requerida,
+                    valoracion: obra.valoracion || 0, nsfw: !!obra.nsfw,
                 },
                 volumenes, sin_numero,
             });
@@ -390,7 +392,7 @@ export function rutasPanel() {
             if (tipo === 'revista') filtro.tipo = 'revista';
             else if (tipo === 'libro') filtro.tipo = { $ne: 'revista' }; // libro o legado (sin tipo)
             const cols = await db.collection('colecciones')
-                .find(filtro, { projection: { nombre: 1, tipo: 1, issn: 1, numeros_presentes: 1, revision_requerida: 1, nsfw: 1 } })
+                .find(filtro, { projection: { nombre: 1, tipo: 1, issn: 1, numeros_presentes: 1, revision_requerida: 1, nsfw: 1, valoracion: 1 } })
                 .sort({ revision_requerida: -1, nombre: 1 }).limit(1000).toArray();
             // Nº de miembros (números/libros) de un tirón, por agregación sobre biblioteca.
             const conteos = cols.length ? await db.collection('biblioteca').aggregate([
@@ -428,6 +430,7 @@ export function rutasPanel() {
                     editorial: await nombrePorId(db, 'editoriales', col.editorial),
                     numeros_presentes: col.numeros_presentes || (esRevista ? miembros.length : 0),
                     revision_requerida: !!col.revision_requerida,
+                    valoracion: col.valoracion || 0, nsfw: !!col.nsfw,
                 },
                 miembros: miembros.map(d => ({ ...d, _id: String(d._id) })),
             });
@@ -483,20 +486,36 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
-    // VALORACIÓN (estrellas 0..5, estilo Lightroom) de un documento — para evaluar salud/interés a mano.
-    // 0 = sin valorar. La fija el usuario desde la ficha o las tarjetas de la Búsqueda.
-    r.post('/documentos/:id/valoracion', async (req, res) => {
-        try {
-            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-            const v = Math.round(Number(req.body?.valoracion));
-            if (!(v >= 0 && v <= 5)) return res.status(400).json({ ok: false, motivo: 'valoración fuera de rango (0..5)' });
-            const db = await conectarDB();
-            const r2 = await db.collection('biblioteca').updateOne(
-                { _id: new ObjectId(req.params.id) }, { $set: { valoracion: v, fecha_actualizacion: new Date() } });
-            if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            res.json({ ok: true, valoracion: v });
-        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
-    });
+    // VALORACIÓN (estrellas 0..5, estilo Lightroom) y NSFW para documentos / obras / colecciones (solo
+    // admin). La valoración es INDEPENDIENTE por nivel: una colección 1★ puede tener un documento 5★.
+    // NSFW en una obra/colección PROPAGA a sus miembros actuales Y futuros vía el filtro de invitados
+    // (condicionNsfwDocs/docOcultoParaGuest comprueban el nsfw del padre en cada consulta).
+    const COLS_RATING = { documentos: 'biblioteca', obras: 'obras', colecciones: 'colecciones' };
+    for (const [ruta, coleccion] of Object.entries(COLS_RATING)) {
+        r.post(`/${ruta}/:id/valoracion`, async (req, res) => {
+            try {
+                if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+                if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+                const v = Math.round(Number(req.body?.valoracion));
+                if (!(v >= 0 && v <= 5)) return res.status(400).json({ ok: false, motivo: 'valoración fuera de rango (0..5)' });
+                const db = await conectarDB();
+                const r2 = await db.collection(coleccion).updateOne({ _id: new ObjectId(req.params.id) }, { $set: { valoracion: v, fecha_actualizacion: new Date() } });
+                if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
+                res.json({ ok: true, valoracion: v });
+            } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+        });
+        r.post(`/${ruta}/:id/nsfw`, async (req, res) => {
+            try {
+                if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+                if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+                const nsfw = !!req.body?.nsfw;
+                const db = await conectarDB();
+                const r2 = await db.collection(coleccion).updateOne({ _id: new ObjectId(req.params.id) }, { $set: { nsfw, fecha_actualizacion: new Date() } });
+                if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
+                res.json({ ok: true, nsfw });
+            } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+        });
+    }
 
     // Campos relevantes a comparar antes/después de conformar para mostrar "qué cambió".
     const CAMPOS_DIFF = ['titulo', 'subtitulo', 'cdu', 'dewey', 'lcc', 'lccn', 'portada', 'ruta_base',
@@ -583,6 +602,22 @@ export function rutasPanel() {
             res.set('Content-Type', pag.mimeType);
             res.set('Cache-Control', 'private, max-age=600');
             res.send(pag.buffer);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // PREVISUALIZACIÓN de DjVu: se convierte a PDF (ddjvu) y se sirve para el visor PDF del panel.
+    r.get('/documentos/:id/djvu.pdf', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (req.usuario?.rol === 'guest' && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (!doc.nombre_archivo || path.extname(doc.nombre_archivo).toLowerCase() !== '.djvu') return res.status(400).json({ ok: false, motivo: 'no es un DjVu' });
+            const pdf = await djvuAPdf(path.join(carpetaDeDoc(doc), doc.nombre_archivo));
+            res.set('Content-Type', 'application/pdf');
+            res.set('Cache-Control', 'private, max-age=600');
+            res.sendFile(pdf);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
