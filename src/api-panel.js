@@ -8,7 +8,7 @@ import {
 } from './utils/inspeccion.js';
 import { verificarPasswordAdmin } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
-import { verificarIntegridad } from './integridad.js';
+import { lanzarIntegridad, estadoIntegridad } from './integridad.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
@@ -198,18 +198,13 @@ export function rutasPanel() {
     // Progreso del trabajo de saneamiento por lotes (para el panel).
     r.get('/saneamiento/estado', (req, res) => res.json(estadoSaneamiento()));
 
-    // ── Integridad: diagnóstico (o diagnóstico+reparación) a voluntad. (POST → solo admin.) ──
-    let integridadEnCurso = false;
-    r.post('/integridad', async (req, res) => {
-        if (integridadEnCurso) return res.status(409).json({ ok: false, motivo: 'ya hay una verificación de integridad en curso' });
-        integridadEnCurso = true;
-        try {
-            const informe = await verificarIntegridad({ reparar: req.body?.reparar === true });
-            res.json({ ok: true, ...informe });
-        } catch (e) {
-            res.status(500).json({ ok: false, motivo: e.message });
-        } finally { integridadEnCurso = false; }
+    // ── Integridad: proceso PESADO → se ejecuta en 2º plano y el panel sondea el progreso (así un proxy
+    //    no corta la petición larga, que daba 405). POST arranca; GET /integridad/estado da fase + informe. ──
+    r.post('/integridad', (req, res) => {
+        if (req.usuario?.rol !== 'admin' && req.body?.reparar === true) return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(lanzarIntegridad({ reparar: req.body?.reparar === true }));
     });
+    r.get('/integridad/estado', (req, res) => res.json(estadoIntegridad()));
 
     // ── Sanear catálogo: re-deriva con el pipeline actual (re-home #, portadas, re-clasificar). admin. ──
     r.post('/sanear', async (req, res) => {        // DRY-RUN (diagnóstico): síncrono y rápido

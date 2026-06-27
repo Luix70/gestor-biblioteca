@@ -1428,13 +1428,24 @@ async function sanearRun(){const reclas=$('#sanReclas').checked;
   }catch(e){toast(e.message,'bad');$('#sanRun').disabled=false;$('#sanDiag').disabled=false;}}
 // Página "Actividad": vigilante + conformador + mantenimiento + integridad + logs (al final).
 function loadActivity(){refrescarEstado();loadInteg();logAuto();}
+const INTEG_FASES={cargando:'Cargando documentos…','docs-sin-carpeta':'Comprobando carpetas','docs-sin-fichero':'Comprobando ficheros','recorrido-arbol':'Recorriendo el árbol CDU','duplicados-hash':'Buscando duplicados por hash',cuarentena:'Revisando Cuarentena',reparando:'Reparando (a la Papelera)…',hecho:'Terminado'};
+let integTimer=null;
 async function correrIntegridad(reparar){
   if(reparar&&!confirm('Reparará la integridad: poda ramas vacías, deduplica por hash, resuelve Cuarentena/duplicados y ajusta ruta_base. Todo lo retirado va a la Papelera. ¿Seguir?'))return;
   const dB=$('#integDiag'),fB=$('#integFix');dB.disabled=true;if(fB)fB.disabled=true;
-  $('#integOut').innerHTML='<div class="card"><div class="muted">Verificando… (puede tardar en bibliotecas grandes)</div></div>';
-  try{const r=await api('/integridad',{method:'POST',body:JSON.stringify({reparar})});pintarInteg(r);toast(reparar?'Integridad: diagnóstico + reparación':'Integridad: diagnóstico completado');}
-  catch(e){$('#integOut').innerHTML='';toast(e.message,'bad');}
-  finally{dB.disabled=false;if(fB)fB.disabled=false;}
+  $('#integOut').innerHTML='<div class="card"><div class="muted">Iniciando…</div></div>';
+  try{
+    const r=await api('/integridad',{method:'POST',body:JSON.stringify({reparar})});
+    if(!r.ok){toast(r.motivo||'no se pudo iniciar','warn');dB.disabled=false;if(fB)fB.disabled=false;return;}
+    if(integTimer)clearInterval(integTimer);
+    integTimer=setInterval(async()=>{try{const s=await api('/integridad/estado');
+      if(s.en_curso){const p=s.progreso||{};const det=p.total?` (${p.i||0}/${p.total})`:(p.carpetas?` (${p.carpetas} carpetas)`:'');
+        $('#integOut').innerHTML=`<div class="card"><div class="muted">⏳ ${esc(INTEG_FASES[s.fase]||s.fase||'Procesando')}${det}…</div></div>`;}
+      else{clearInterval(integTimer);integTimer=null;dB.disabled=false;if(fB)fB.disabled=false;
+        if(s.error){$('#integOut').innerHTML='';toast('Integridad: '+s.error,'bad');}
+        else if(s.informe){pintarInteg(s.informe);toast(reparar?'Integridad: diagnóstico + reparación':'Integridad: diagnóstico completado');}}
+    }catch(e){}},1500);
+  }catch(e){$('#integOut').innerHTML='';toast(e.message,'bad');dB.disabled=false;if(fB)fB.disabled=false;}
 }
 // ¿qué fila se AUTO-repara con el botón? (las demás son solo diagnóstico → acción manual en la ficha)
 const INTEG_AUTOREPARA=new Set(['ramasMuertas','carpetasHuerfanas','rutaBaseDesajustada','hashDuplicadosGrupos','hashDuplicadosDocs','cuarentenaDuplicados']);

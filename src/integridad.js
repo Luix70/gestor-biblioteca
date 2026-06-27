@@ -62,7 +62,9 @@ function puntuaDoc(d) {
 /**
  * Ejecuta el diagnóstico (y reparación si reparar=true) y devuelve un informe estructurado.
  */
-export async function verificarIntegridad({ reparar = false } = {}) {
+export async function verificarIntegridad({ reparar = false, onProgress = null } = {}) {
+    const prog = (fase, extra = {}) => { try { onProgress?.({ fase, ...extra }); } catch { /* el progreso nunca rompe */ } };
+    prog('cargando');
     const db = await conectarDB();
     const col = db.collection('biblioteca');
     const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1 } }).toArray();
@@ -77,13 +79,17 @@ export async function verificarIntegridad({ reparar = false } = {}) {
 
     // ── A. Docs sin carpeta en disco (solo informa) ──
     const sinCarpeta = [];
-    for (const d of docs) { if (d.ruta_base && !await existe(absDe(d.ruta_base))) sinCarpeta.push(d); }
+    let _iA = 0;
+    for (const d of docs) { if (d.ruta_base && !await existe(absDe(d.ruta_base))) sinCarpeta.push(d); if (++_iA % 50 === 0) prog('docs-sin-carpeta', { i: _iA, total: docs.length }); }
     D.docsSinCarpeta = sinCarpeta.length;
     M.docsSinCarpeta = sinCarpeta.slice(0, 10).map(d => ({ id: String(d._id), titulo: d.titulo, ruta: d.ruta_base }));
 
     // ── D. Docs cuya carpeta existe pero falta el fichero original (solo informa) ──
+    prog('docs-sin-fichero', { i: 0, total: docs.length });
     const sinFichero = [];
+    let _iD = 0;
     for (const d of docs) {
+        if (++_iD % 50 === 0) prog('docs-sin-fichero', { i: _iD, total: docs.length });
         if ((d.formatos || []).includes('papel') || !d.ruta_base) continue;
         const carpeta = absDe(d.ruta_base);
         if (await existe(carpeta) && !await tieneDocFichero(carpeta)) sinFichero.push(d);
@@ -92,8 +98,11 @@ export async function verificarIntegridad({ reparar = false } = {}) {
     M.docsSinFicheroOriginal = sinFichero.slice(0, 10).map(d => ({ id: String(d._id), titulo: d.titulo, archivo: d.nombre_archivo }));
 
     // ── Recorrido del árbol CDU: hojas (registro/doc/img), ramas muertas, registro sin doc, huérfanas/desync ──
+    prog('recorrido-arbol', { carpetas: 0 });
     const carpetasHuerfanas = [], rutaBaseDesync = [], registroSinDoc = [], sinHoja = new Set();
+    let _carp = 0;
     async function recorrer(d) {
+        if (++_carp % 50 === 0) prog('recorrido-arbol', { carpetas: _carp });
         let ents; try { ents = await fs.readdir(d, { withFileTypes: true }); } catch { return false; }
         const files = ents.filter(e => e.isFile() && !ignorar(e.name)).map(e => e.name);
         const subdirs = ents.filter(e => e.isDirectory() && !ignorar(e.name));
@@ -145,6 +154,7 @@ export async function verificarIntegridad({ reparar = false } = {}) {
     }));
 
     // ── C. Duplicados exactos por hash ──
+    prog('duplicados-hash');
     const hashDups = await col.aggregate([
         { $match: { hash_contenido: { $exists: true, $ne: null } } },
         { $group: { _id: '$hash_contenido', n: { $sum: 1 }, ids: { $push: '$_id' } } },
@@ -163,9 +173,10 @@ export async function verificarIntegridad({ reparar = false } = {}) {
     D.cuarentenaDuplicados = depositos.length;
     M.cuarentenaDuplicados = depositos.slice(0, 15).map(e => e.name);
 
-    if (!reparar) return informe;
+    if (!reparar) { prog('hecho'); return informe; }
 
     // ════════════════════════ REPARACIÓN (todo a la Papelera) ════════════════════════
+    prog('reparando');
     // E. Podar ramas muertas.
     let podadas = 0;
     for (const d of ramasMuertas) { await reciclarCarpeta(d, 'rama-muerta'); podadas++; }
@@ -220,5 +231,23 @@ export async function verificarIntegridad({ reparar = false } = {}) {
     }
     R.cuarentenaResueltos = cuarentenaResueltos;
 
+    prog('hecho');
     return informe;
+}
+
+// ── Ejecución en SEGUNDO PLANO (para el panel): la POST arranca y devuelve al instante; el progreso y el
+//    informe final se consultan con estadoIntegridad(). Evita que un proxy corte la petición larga (405). ──
+let trabajoInteg = { en_curso: false, fase: null, progreso: {}, reparar: false, ts: null, informe: null, error: null };
+export function estadoIntegridad() { return { ...trabajoInteg }; }
+export function lanzarIntegridad({ reparar = false } = {}) {
+    if (trabajoInteg.en_curso) return { ok: false, motivo: 'ya hay una verificación en curso' };
+    trabajoInteg = { en_curso: true, fase: 'cargando', progreso: {}, reparar: !!reparar, ts: new Date().toISOString(), informe: null, error: null };
+    (async () => {
+        try {
+            const inf = await verificarIntegridad({ reparar, onProgress: (p) => { trabajoInteg.fase = p.fase; trabajoInteg.progreso = p; } });
+            trabajoInteg.informe = inf;
+        } catch (e) { trabajoInteg.error = e.message; }
+        finally { trabajoInteg.en_curso = false; trabajoInteg.fase = 'hecho'; }
+    })();
+    return { ok: true };
 }
