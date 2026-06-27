@@ -378,7 +378,7 @@ async function procesarUnidad(unidad) {
         // Cuarentena/duplicados si el contenido difiere). No hay nada que copiar ni limpiar.
         if (r.duplicado) {
             console.log(`  ${r.accion === 'reciclado' ? '♻️' : '⚠️'}  ${etiqueta} → duplicado (${r.accion === 'reciclado' ? 'idéntico → Papelera' : 'difiere → Cuarentena/duplicados'}; ya catalogado: ${r._id}).`);
-            return;
+            return r.accion === 'reciclado' ? 'reciclado' : 'duplicado';
         }
         console.log(`  ✅ ${etiqueta} → ${r.operacion} (${r.estado}) · ${r.rutaWeb}`);
         // SOLO se borra del Inbox si la copia al árbol CDU se verificó íntegra (tamaño origen ===
@@ -388,8 +388,10 @@ async function procesarUnidad(unidad) {
             // Éxito VERIFICADO (copia íntegra en CDU + documento insertado en Mongo): el original del
             // Inbox es redundante → BORRADO PERMANENTE (no inflamos la Papelera con copias seguras).
             await limpiarInbox(unidad, { borrarCatalogados: !!r._id });
+            return r.operacion === 'actualizacion' ? 'actualizado' : 'nuevo';
         } else {
             console.error(`  ⛔ ${etiqueta}: copia a CDU NO verificada → se CONSERVA el original en el Inbox (se reintentará).`);
+            return 'conservado';
         }
     } catch (e) {
         if (e.tipo === 'infraestructura') {
@@ -399,19 +401,31 @@ async function procesarUnidad(unidad) {
             });
             console.error(`  🔁 ${etiqueta} → Reintentos (${e.message})`);
             await limpiarInbox(unidad); // sacar del Inbox para no reprocesar en bucle
+            return 'reintento';
         } else if (e.tipo === 'ilegible') {
             // Fichero estructuralmente dañado (EPUB/PDF corrupto): no es cuestión de catalogación
             // manual sino de conseguir una COPIA SANA → Cuarentena/ilegibles (depósito con sidecar);
             // se reemplaza desde el panel buscando una copia. Igual que los fantasmas de 0 bytes.
             await enviarAIlegibles(unidad.rutas, { titulo: etiqueta, mensaje: e.message });
             console.error(`  📛 ${etiqueta} → Cuarentena/ilegibles (ilegible: ${e.message})`);
+            return 'ilegible';
         } else {
             // identificación imposible u otro error no recuperable → Cuarentena (manual).
             await enviarACuarentena(unidad.rutas, { error: { tipo: e.tipo || 'desconocido', mensaje: e.message } });
             console.error(`  🚫 ${etiqueta} → Cuarentena (${e.message})`);
             // La carpeta (buzón de primer nivel) no se borra; sus subcarpetas vacías las poda el barrido.
+            return 'cuarentena';
         }
     }
+}
+
+// Resumen legible de un lote del Vigilante (solo categorías con cuenta). Lleva 📊 → visible en modo simple.
+function resumenLote(t, totalUnidades) {
+    const orden = [['nuevo', '✅ nuevos'], ['actualizado', '♻️ actualizados'], ['reciclado', '⏭️ duplicados idénticos'],
+        ['duplicado', '⚠️ duplicados a Cuarentena'], ['cuarentena', '🚫 sin identificar'], ['ilegible', '📛 ilegibles'],
+        ['reintento', '🔁 a Reintentos'], ['conservado', '⛔ conservados (copia no íntegra)']];
+    const partes = orden.filter(([k]) => t[k]).map(([k, lab]) => `${lab}: ${t[k]}`);
+    return `📊 Lote terminado: ${totalUnidades} unidad(es) — ${partes.length ? partes.join(' · ') : 'sin cambios'}`;
 }
 
 async function procesarCola() {
@@ -419,6 +433,7 @@ async function procesarCola() {
     procesando = true;
     try {
         let totalProcesadas = 0;
+        const tally = {};
         let unidades = await listarUnidades();
         if (unidades.length) ultimaActividad = Date.now(); // hay trabajo: posponer el mantenimiento
         while (unidades.length) {
@@ -436,13 +451,15 @@ async function procesarCola() {
                     await enviarAIlegibles(u.rutas, { titulo: path.basename(u.rutas[0]), mensaje: 'transferencia incompleta (0 bytes)' });
                     // La carpeta (buzón de primer nivel) no se borra.
                     for (const r of u.rutas) huerfanosVistos.delete(r);
+                    tally.ilegible = (tally.ilegible || 0) + 1;
                     continue;
                 }
                 if (estabilidad !== 'estable') {
                     console.log(`  ⏳ ${path.basename(u.rutas[0])}: aún escribiéndose; se reintenta en el próximo escaneo.`);
                     continue;
                 }
-                await procesarUnidad(u);
+                const out = await procesarUnidad(u);
+                if (out) tally[out] = (tally[out] || 0) + 1;
                 procesadas++;
                 await new Promise(res => setTimeout(res, PAUSA_MS)); // ritmo
             }
@@ -457,6 +474,7 @@ async function procesarCola() {
         // dentro de las carpetas-colección persistentes; los buzones (carpeta raíz) se conservan,
         // SALVO los de obras multivolumen ya completas, que sí se retiran.
         if (totalProcesadas > 0) {
+            console.log(resumenLote(tally, totalProcesadas)); // RESUMEN del lote (visible también en modo simple)
             await podarVaciosInbox().catch(() => {});
             await disolverDropsVacios().catch(() => {});
         }

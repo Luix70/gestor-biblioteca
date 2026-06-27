@@ -360,6 +360,8 @@ body.guest .admin-only{display:none!important}
             <div style="flex:1"></div>
             <label class="switch" style="flex:0 0 auto"><input type="checkbox" id="logAuto" checked><span class="slider"></span></label>
             <span class="muted">Auto</span>
+            <label class="switch admin-only" style="flex:0 0 auto;margin-left:10px"><input type="checkbox" id="logVerbose"><span class="slider"></span></label>
+            <span class="muted admin-only" title="Detallado: muestra los pasos internos. Simple: solo titulares y resúmenes.">Verboso</span>
             <span class="admin-only" style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn" id="logPurge7">7 días</button>
               <button class="btn" id="logPurge30">30 días</button>
@@ -1302,9 +1304,11 @@ function pintarLogs(lineas){const v=$('#logView');const cerca=v.scrollTop+v.clie
   v.innerHTML=lineas.map(l=>{const c=/❌|⛔|🚫|error|falló|inalcanzable/i.test(l)?'e':/⚠/i.test(l)?'w':/✅|🎛|👁|🧹|📥|♻/i.test(l)?'k':'';return `<div class="${c}">${esc(l)}</div>`;}).join('');
   if(cerca)v.scrollTop=v.scrollHeight;}
 async function loadLogs(){try{const [g,info]=await Promise.all([api('/logs?n=500'),api('/logs/info')]);
-  pintarLogs(g.lineas);$('#logInfo').textContent=`${fmtBytes(info.bytes)} en disco · ${info.lineas_buffer} líneas en vivo`;}catch(e){}}
+  pintarLogs(g.lineas);$('#logInfo').textContent=`${fmtBytes(info.bytes)} en disco · ${info.lineas_buffer} líneas en vivo`;
+  if($('#logVerbose')&&typeof info.verbose==='boolean'&&document.activeElement!==$('#logVerbose'))$('#logVerbose').checked=info.verbose;}catch(e){}}
 function logAuto(){if(logTimer){clearInterval(logTimer);logTimer=null;}loadLogs();if($('#logAuto').checked)logTimer=setInterval(loadLogs,4000);}
 $('#logAuto').onchange=logAuto;
+if($('#logVerbose'))$('#logVerbose').onchange=async()=>{try{const r=await api('/logs/verbose',{method:'POST',body:JSON.stringify({verbose:$('#logVerbose').checked})});toast(r.verbose?'Log detallado (verboso)':'Log simple');loadLogs();}catch(e){toast(e.message,'bad');}};
 async function purgaLog(body,msg){try{await api('/logs/purgar',{method:'POST',body:JSON.stringify(body)});toast(msg);loadLogs();}catch(e){toast(e.message,'bad');}}
 $('#logPurge7').onclick=()=>purgaLog({dias:7},'Logs: conservados los últimos 7 días');
 $('#logPurge30').onclick=()=>purgaLog({dias:30},'Logs: conservados los últimos 30 días');

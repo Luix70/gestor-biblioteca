@@ -21,6 +21,7 @@ import path from 'node:path';
 const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu']);
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
+import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
 import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
 import { fuentesCopia, procesarSaneamiento, estadoSaneamiento } from './utils/saneamiento.js';
@@ -230,10 +231,16 @@ export function rutasPanel() {
 
     // ── Logs (vista en vivo + tamaño + purga) ──
     r.get('/logs', (req, res) => res.json({ lineas: ultimasLineas(Math.min(2000, Math.max(20, Number(req.query.n) || 400))) }));
-    r.get('/logs/info', (req, res) => res.json(infoLog()));
+    r.get('/logs/info', (req, res) => res.json({ ...infoLog(), verbose: getVerboso() }));
     r.post('/logs/purgar', (req, res) => {
         const { dias, todo } = req.body || {};
         res.json(purgarLog({ dias, todo: todo === true }));
+    });
+    // Verbosidad del log: OFF = simple (titulares + resúmenes + avisos); ON = detallado. Solo admin.
+    r.post('/logs/verbose', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        setVerboso(req.body?.verbose === true);
+        res.json({ ok: true, verbose: getVerboso() });
     });
 
     // Lista de obras (con su estado de completitud) para el panel.
