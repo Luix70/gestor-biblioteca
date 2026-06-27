@@ -182,6 +182,11 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .pkcov{width:38px;height:52px;flex:0 0 auto;display:grid;place-items:center;background:var(--bg2);border-radius:5px;overflow:hidden;font-size:20px}
 .pkcov img{width:100%;height:100%;object-fit:cover}
 .pkn{font-weight:600;font-size:14px;word-break:break-word}.pks{font-size:12px}
+.stack{position:relative;width:100%;height:100%}
+.stack img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.stack img:nth-child(1){transform:rotate(-5deg) translate(-4px,3px);filter:brightness(.8)}
+.stack img:nth-child(2){transform:rotate(3deg) translate(3px,-1px);filter:brightness(.9)}
+.stack img:last-child{transform:none;box-shadow:0 1px 7px rgba(0,0,0,.5)}
 .ficha{display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start}
 .dl{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:13px}
 .dl dt{color:var(--mut);font-weight:600;white-space:nowrap}.dl dd{word-break:break-word}
@@ -781,9 +786,15 @@ $('#purgaSim').onclick=()=>purga(false);$('#purgaExec').onclick=()=>purga(true);
 const shelf={obra:{items:[],sel:new Set()},coleccion:{items:[],sel:new Set()}};
 async function loadObras(){try{shelf.obra.items=await api('/obras');shelf.obra.sel.clear();pintarShelf('obra');}catch(e){toast(e.message,'bad');}}
 async function loadColecciones(){try{const tipo=$('#colsTipo')?$('#colsTipo').value:'';shelf.coleccion.items=await api('/colecciones'+(tipo?('?tipo='+encodeURIComponent(tipo)):''));shelf.coleccion.sel.clear();pintarShelf('coleccion');}catch(e){toast(e.message,'bad');}}
+function stackCover(portadas,ph){
+  const ps=(portadas||[]).filter(Boolean).slice(0,3);
+  if(!ps.length)return `<div class="ph">${ph}</div>`;
+  if(ps.length===1)return `<img src="${esc(encUrl(ps[0]))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`;
+  return `<div class="stack">${ps.slice().reverse().map(p=>`<img src="${esc(encUrl(p))}" loading="lazy">`).join('')}</div>`; // frontal = ps[0] (último)
+}
 function shelfCard(kind,x){
   const esObra=kind==='obra',nombre=esObra?x.titulo:x.nombre,ph=esObra?'📚':(x.tipo==='revista'?'📰':'📚');
-  const cov=x.portada?`<img src="${esc(encUrl(x.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`:`<div class="ph">${ph}</div>`;
+  const cov=stackCover(x.portadas&&x.portadas.length?x.portadas:(x.portada?[x.portada]:[]),ph);
   const estado=esObra
     ?`${x.volumenes_presentes||0}/${x.total_volumenes||'?'} tomos ${x.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'}${x.revision_requerida?' <span class="tag bad">revisar</span>':''}`
     :`${x.tipo==='revista'?'📰 revista':'📚 libro'} · ${x.miembros||0}${x.revision_requerida?' <span class="tag bad">revisar</span>':''}`;
