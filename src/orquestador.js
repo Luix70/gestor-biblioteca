@@ -14,6 +14,7 @@ import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
 import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/lector-barras.js';
+import { paginasMuestraDjvu } from './utils/djvu.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -46,6 +47,7 @@ export function detectarTipo(ruta) {
     if (ext === '.pdf') return 'pdf';
     if (EXT_IMAGEN.includes(ext)) return 'imagen';
     if (EXT_COMIC.includes(ext)) return 'comic';
+    if (ext === '.djvu') return 'djvu';
     if (FORMATO_POR_EXT[ext]) return 'otro-formato';
     return 'desconocido';
 }
@@ -333,6 +335,50 @@ export async function procesarRecurso(entrada) {
         tipo_recurso = clasif.tipo_recurso;          // revista (nº de serie / ISSN) | libro (álbum/novela gráfica)
         datosBase.naturaleza = clasif.naturaleza;    // 'comic'
         delete datosBase.muestra_paginas;            // páginas de muestra: solo para la visión, no se persisten
+
+    } else if (tipo === 'djvu') {
+        // DjVu (normalmente un LIBRO escaneado): metadatos del nombre + rasterizado de páginas de muestra
+        // (ddjvu→pdftoppm) → VISIÓN para código de barras / ISBN / ISSN, igual que un cómic o un PDF.
+        datosBase = metadatosDesdeNombre(rutas[0]);
+        datosBase.formatos = ['djvu'];
+        formatos = ['djvu'];
+        datosBase.alertas_agente = datosBase.alertas_agente || [];
+        if (datosBase.isbn) datosBase.isbn_propio = datosBase.isbn; // el nombre ERA un ISBN (señal fuerte)
+        try {
+            const { paginas, cubierta_base64, muestra } = await paginasMuestraDjvu(rutas[0]);
+            if (paginas) datosBase.paginas = paginas;
+            if (cubierta_base64) datosBase.cubierta_base64 = cubierta_base64;
+            if (muestra?.length) datosBase.muestra_paginas = muestra;
+            else datosBase.alertas_agente.push('DjVu: no se pudieron rasterizar páginas para la visión.');
+        } catch (e) {
+            datosBase.alertas_agente.push(`DjVu: rasterizado de páginas falló (${e.message}).`);
+        }
+        if (datosBase.muestra_paginas?.length && !datosBase.isbn_propio) {
+            try {
+                const id = await leerIdentificadorDeImagenes(datosBase.muestra_paginas);
+                if (id?.isbn) {
+                    datosBase.isbn = id.isbn; datosBase.isbn_propio = id.isbn;
+                    datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(id.isbn)])];
+                    datosBase.alertas_agente.push(`ISBN leído de las páginas (visión): ${id.isbn}.`);
+                    console.log(`[DjVu] ISBN de las páginas → ${id.isbn}`);
+                }
+                if (id?.issn) {
+                    datosBase.issn = id.issn;
+                    if (id.mes_publicacion && !datosBase.mes_publicacion) datosBase.mes_publicacion = id.mes_publicacion;
+                    datosBase.alertas_agente.push(`ISSN leído de las páginas (visión): ${id.issn}.`);
+                    console.log(`[DjVu] ISSN de las páginas → ${id.issn}`);
+                }
+            } catch (e) {
+                datosBase.alertas_agente.push(`Lectura de identificador por visión falló: ${e.message}`);
+            }
+        }
+        const clasif = clasificarTipo({
+            isbnPropio: datosBase.isbn_propio || null,
+            issnFuerte: !!datosBase.issn,                 // un 977-ISSN ⇒ revista escaneada
+            pareceRevista: pareceRevista(datosBase.titulo || ''),
+        });
+        tipo_recurso = clasif.tipo_recurso;               // libro (por defecto) | revista (ISSN / título de revista)
+        delete datosBase.muestra_paginas;                 // solo para la visión, no se persiste
 
     } else if (tipo === 'otro-formato') {
         // Puerta abierta: formato conocido sin lector propio aún (mobi/djvu/zip/rar; los cómics .cbz/.cbr/.cb7 tienen su rama).
