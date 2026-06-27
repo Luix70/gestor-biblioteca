@@ -11,14 +11,14 @@ FROM node:18-bullseye-slim
 # (no un .node): detecta el CPU en tiempo de ejecución (pixman cae a SSE2/SSSE3) y por eso
 # SÍ funciona en el Atom, al contrario que sharp/libvips.
 #
-# unar (paquete `unar`, de Debian MAIN = libre) aporta `lsar`/`unar`: descomprime CÓMICS .cbr (RAR),
-# .cb7 (7z) y .cbz (ZIP) para extraer la PORTADA (1ª imagen) y contar páginas. Es C plano (sin
-# SIMD/AVX), igual que poppler → apto para el Atom. Se prefiere a p7zip-rar (que está en non-free).
-#
-# djvulibre-bin aporta `ddjvu` para convertir un .djvu a PDF y previsualizarlo con el visor de PDF del
-# panel (pdf.js). También C plano, apto para el Atom.
+# Descompresión de CÓMICS (.cbr RAR, .cb7 7z, .cbz ZIP) para extraer páginas/portada:
+#   · libarchive-tools aporta `bsdtar` — libre (Debian MAIN), C plano (apto Atom), y CLAVE: lee RAR5
+#     (el formato por defecto del RAR moderno), además de RAR4/7z/ZIP. Es el extractor principal.
+#   · unar (`unar`/`lsar`, también MAIN/libre) se mantiene como RESPALDO (cubre algún RAR4/7z que
+#     libarchive no lea). OJO: unar NO soporta RAR5 — de ahí que bsdtar sea el principal.
+# djvulibre-bin aporta `ddjvu` para convertir un .djvu a PDF y verlo con el visor PDF del panel.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils unar djvulibre-bin \
+    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

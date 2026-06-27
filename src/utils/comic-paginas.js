@@ -2,20 +2,18 @@
  * Servidor de PÁGINAS de un cómic para la PREVISUALIZACIÓN del panel (como el visor de PDF/EPUB, pero las
  * páginas son imágenes dentro del comprimido):
  *   · .cbz (ZIP) → adm-zip (en memoria, sin dependencias de sistema),
- *   · .cbr (RAR) / .cb7 (7z) → `unar` (extrae UNA vez a un tmp y lo CACHEA por archivo).
+ *   · .cbr (RAR/RAR5) / .cb7 (7z) → bsdtar (→unar de respaldo) (extrae UNA vez a un tmp y lo CACHEA).
  *
  * Una CACHÉ en memoria (por ruta de archivo) evita re-leer/re-extraer en cada página; se PODA por TTL
- * (COMIC_CACHE_TTL_MS) en cada acceso, borrando los tmp de unar. El visor pagina bajo demanda, así que el
- * coste en el Atom es 1 lectura de imagen por página vista (despreciable frente a la ingesta).
+ * (COMIC_CACHE_TTL_MS) en cada acceso, borrando los tmp. El visor pagina bajo demanda, así que el coste
+ * en el Atom es 1 lectura de imagen por página vista (despreciable frente a la ingesta).
  */
 import AdmZip from 'adm-zip';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { extraerArchivoComic } from './extraer-archivo.js';
 
-const execFileP = promisify(execFile);
 const ES_IMG = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
 const ORDEN = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp', '.avif': 'image/avif' };
@@ -63,8 +61,7 @@ async function preparar(ruta) {
         entrada = { tipo: 'cbz', zip, entradas };
     } else {
         const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'comic-prev-'));
-        await execFileP('unar', ['-quiet', '-force-overwrite', '-no-directory', '-output-directory', dir, ruta],
-            { timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
+        await extraerArchivoComic(ruta, dir);
         const files = await listarImagenes(dir);
         entrada = { tipo: 'arch', dir, files };
     }

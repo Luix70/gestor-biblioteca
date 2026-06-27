@@ -12,14 +12,12 @@
  * Ambos llevan `naturaleza:'comic'`. Devuelve un datosBase compatible con el resto del pipeline.
  */
 import AdmZip from 'adm-zip';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { parsearNombre } from './parsear-nombre.js';
+import { extraerArchivoComic } from './extraer-archivo.js';
 
-const execFileP = promisify(execFile);
 const ES_IMG = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
 const ORDEN = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp', '.avif': 'image/avif' };
@@ -82,12 +80,11 @@ function leerCbz(ruta) {
     return { paginas: imgs.length, cubierta_base64: imgs[0].getData().toString('base64'), muestra };
 }
 
-/** Igual para un CBR (RAR) / CB7 (7z) vía unar. Extrae a un tmp efímero y lee de él portada + muestra. */
-async function leerConUnar(ruta) {
+/** Igual para un CBR (RAR/RAR5) / CB7 (7z): extrae a un tmp efímero (bsdtar→unar) y lee portada + muestra. */
+async function leerComprimido(ruta) {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'comic-'));
     try {
-        await execFileP('unar', ['-quiet', '-force-overwrite', '-no-directory', '-output-directory', tmp, ruta],
-            { timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+        await extraerArchivoComic(ruta, tmp);
         const imgs = await listarImagenes(tmp);
         if (!imgs.length) return { paginas: 0 };
         const muestra = [];
@@ -112,7 +109,7 @@ export async function extraerMetadatosComic(ruta) {
     // PORTADA + nº de páginas: CBZ con adm-zip; CBR/CB7 con unar. Cualquier fallo (archivo dañado,
     // unar ausente) degrada a "catalogado por nombre" sin romper la ingesta.
     try {
-        const { paginas, cubierta_base64, muestra } = ext === '.cbz' ? leerCbz(ruta) : await leerConUnar(ruta);
+        const { paginas, cubierta_base64, muestra } = ext === '.cbz' ? leerCbz(ruta) : await leerComprimido(ruta);
         if (cubierta_base64) { datos.paginas = paginas; datos.cubierta_base64 = cubierta_base64; datos.muestra_paginas = muestra || []; }
         else datos.alertas_agente.push('Cómic sin imágenes legibles: catalogado por nombre.');
     } catch (e) {
