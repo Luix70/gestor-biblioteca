@@ -956,29 +956,19 @@ function pintarDoc(r,ctx){
   const _nom=(r.nombre_archivo||'').toLowerCase();
   if(r.archivo_url&&_nom.endsWith('.epub'))iniciarLectorEpub(r.archivo_url);
   else if(r.archivo_url&&_nom.endsWith('.pdf'))iniciarLectorPdf(r.archivo_url);
-  else if(/\.(cbz|cbr|cb7)$/.test(_nom))iniciarLectorComic(d._id);
-  else if(_nom.endsWith('.djvu'))iniciarLectorDjvu(d._id);
-}
-// DjVu → PDF (el backend convierte con ddjvu); se carga como blob autenticado en el visor PDF.
-async function iniciarLectorDjvu(id){
-  const msg=$('#pdfMsg');if(msg)msg.textContent='Convirtiendo DjVu… (puede tardar la primera vez)';
-  try{
-    const res=await fetch('/api/documentos/'+encodeURIComponent(id)+'/djvu.pdf',{headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
-    if(!res.ok)throw new Error('no se pudo convertir el DjVu');
-    await iniciarLectorPdf(URL.createObjectURL(await res.blob()));
-  }catch(e){if($('#pdfMsg'))$('#pdfMsg').textContent=e.message;}
+  else if(/\.(cbz|cbr|cb7|djvu)$/.test(_nom))iniciarLectorComic(d._id);
 }
 
-// ── visor de CÓMIC: páginas servidas por el backend (/documentos/:id/comic[/:n]); paginación bajo demanda ──
+// ── visor PAGINADO (cómic .cbz/.cbr/.cb7 y .djvu): páginas servidas por /documentos/:id/paginas[/:n] bajo demanda ──
 let comicState=null;
 async function iniciarLectorComic(id){
   const wrap=$('#comicWrap'),msg=$('#comicMsg'),img=$('#comicImg');if(!wrap||!img)return;
   if(comicState){for(const u of comicState.blobs.values())URL.revokeObjectURL(u);} // liberar el cómic anterior
   comicState={id,n:0,total:0,blobs:new Map()};
   try{
-    const r=await api('/documentos/'+encodeURIComponent(id)+'/comic');
+    const r=await api('/documentos/'+encodeURIComponent(id)+'/paginas');
     const total=r.paginas||0;
-    if(!total){if(msg)msg.textContent='No se pudieron extraer páginas de este cómic.';return;}
+    if(!total){if(msg)msg.textContent='No se pudieron extraer las páginas de este documento.';return;}
     comicState.total=total;$('#comicTotal').textContent=total;
     $('#comicBar').style.display='';$('#comicFs').style.display='';
     if(total>1){$('#comicPrev').style.display='';$('#comicNext').style.display='';}
@@ -990,7 +980,7 @@ async function iniciarLectorComic(id){
 }
 async function comicBlob(n){
   if(comicState.blobs.has(n))return comicState.blobs.get(n);
-  const res=await fetch('/api/documentos/'+encodeURIComponent(comicState.id)+'/comic/'+n,{headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
+  const res=await fetch('/api/documentos/'+encodeURIComponent(comicState.id)+'/paginas/'+n,{headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{}});
   if(!res.ok)throw new Error('no se pudo cargar la página '+(n+1));
   const u=URL.createObjectURL(await res.blob());comicState.blobs.set(n,u);return u;
 }
@@ -1090,15 +1080,9 @@ function previewArchivo(r){
         <span class="epubpct" id="epubPct">—</span>
       </div>
       <div class="epubmsg" id="epubMsg">Cargando lector…</div></div>${acc}</div>`;
-  // DjVu: el backend lo convierte a PDF (ddjvu) y se reutiliza el visor de PDF (mismo contenedor #pdfWrap).
-  if(ext==='djvu')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📘 ${esc(nombre)}</h3>
-    <div class="pdfwrap" id="pdfWrap"><div class="pdfscroll" id="pdfScroll"></div>
-      <button class="epubfs" id="pdfFs" title="Pantalla completa" style="display:none">⛶</button>
-      <div class="epubbar" id="pdfBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="pdfCur">1</span> / <span id="pdfTotal">?</span></span></div>
-      <div class="epubmsg" id="pdfMsg">Convirtiendo DjVu…</div></div>${acc}</div>`;
-  // CÓMIC (.cbz/.cbr/.cb7): visor de páginas servidas por el backend (extraídas del comprimido al vuelo).
-  // Se inicializa tras pintar (iniciarLectorComic).
-  if(['cbz','cbr','cb7'].includes(ext))return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">🗂️ ${esc(nombre)}</h3>
+  // PAGINADO (cómic .cbz/.cbr/.cb7 y .djvu): visor de páginas servidas BAJO DEMANDA por el backend
+  // (cómic→del comprimido; DjVu→rasterizando esa página). Se inicializa tras pintar (iniciarLectorComic).
+  if(['cbz','cbr','cb7','djvu'].includes(ext))return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">${ext==='djvu'?'📘':'🗂️'} ${esc(nombre)}</h3>
     <div class="pdfwrap" id="comicWrap"><img id="comicImg" class="comicpg" alt="">
       <button class="cnav prev" id="comicPrev" style="display:none">‹</button><button class="cnav next" id="comicNext" style="display:none">›</button>
       <button class="epubfs" id="comicFs" title="Pantalla completa" style="display:none">⛶</button>

@@ -15,10 +15,10 @@ import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
-import { djvuAPdf } from './utils/djvu.js';
+import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
 import path from 'node:path';
 
-const EXT_COMIC = new Set(['.cbz', '.cbr', '.cb7']);
+const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu']);
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { resolverNombres } from './utils/registro.js';
@@ -595,49 +595,36 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
-    // PREVISUALIZACIÓN de cómic: nº de páginas + página N como imagen (extraídas del comprimido al vuelo;
-    // CBZ con adm-zip, CBR/CB7 con unar+caché). El visor del panel pagina bajo demanda.
-    const docComic = async (req, res) => {
+    // PREVISUALIZACIÓN paginada (cómic .cbz/.cbr/.cb7 y .djvu): nº de páginas + página N como imagen,
+    // BAJO DEMANDA. Cómics: del comprimido (adm-zip/bsdtar). DjVu: rasterizando solo esa página (ddjvu→
+    // pdftoppm). El visor del panel pide una página por vez (no se convierte el documento entero).
+    const docPaginable = async (req, res) => {
         if (!ObjectId.isValid(req.params.id)) { res.status(400).json({ ok: false, motivo: 'id inválido' }); return null; }
         const db = await conectarDB();
         const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
         if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (req.usuario?.rol === 'guest' && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
-        if (!doc.nombre_archivo || !EXT_COMIC.has(path.extname(doc.nombre_archivo).toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es un cómic (.cbz/.cbr/.cb7)' }); return null; }
+        if (!doc.nombre_archivo || !EXT_PAGINABLE.has(path.extname(doc.nombre_archivo).toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es paginable (.cbz/.cbr/.cb7/.djvu)' }); return null; }
         return path.join(carpetaDeDoc(doc), doc.nombre_archivo);
     };
-    r.get('/documentos/:id/comic', async (req, res) => {
+    const esDjvu = (ruta) => path.extname(ruta).toLowerCase() === '.djvu';
+    r.get('/documentos/:id/paginas', async (req, res) => {
         try {
-            const ruta = await docComic(req, res);
+            const ruta = await docPaginable(req, res);
             if (!ruta) return;
-            res.json({ ok: true, paginas: await contarPaginasComic(ruta) });
+            res.json({ ok: true, paginas: esDjvu(ruta) ? await contarPaginasDjvu(ruta) : await contarPaginasComic(ruta) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
-    r.get('/documentos/:id/comic/:n', async (req, res) => {
+    r.get('/documentos/:id/paginas/:n', async (req, res) => {
         try {
-            const ruta = await docComic(req, res);
+            const ruta = await docPaginable(req, res);
             if (!ruta) return;
-            const pag = await leerPaginaComic(ruta, Math.max(0, parseInt(req.params.n, 10) || 0));
+            const n = Math.max(0, parseInt(req.params.n, 10) || 0);
+            const pag = esDjvu(ruta) ? await leerPaginaDjvu(ruta, n) : await leerPaginaComic(ruta, n);
             if (!pag) return res.status(404).json({ ok: false, motivo: 'página no encontrada' });
             res.set('Content-Type', pag.mimeType);
             res.set('Cache-Control', 'private, max-age=600');
             res.send(pag.buffer);
-        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
-    });
-
-    // PREVISUALIZACIÓN de DjVu: se convierte a PDF (ddjvu) y se sirve para el visor PDF del panel.
-    r.get('/documentos/:id/djvu.pdf', async (req, res) => {
-        try {
-            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-            const db = await conectarDB();
-            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
-            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            if (req.usuario?.rol === 'guest' && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            if (!doc.nombre_archivo || path.extname(doc.nombre_archivo).toLowerCase() !== '.djvu') return res.status(400).json({ ok: false, motivo: 'no es un DjVu' });
-            const pdf = await djvuAPdf(path.join(carpetaDeDoc(doc), doc.nombre_archivo));
-            res.set('Content-Type', 'application/pdf');
-            res.set('Cache-Control', 'private, max-age=600');
-            res.sendFile(pdf);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

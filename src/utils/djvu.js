@@ -1,10 +1,10 @@
 /**
- * DjVu → PDF para la PREVISUALIZACIÓN del panel. En vez de un visor DjVu propio (no hay librería JS libre
- * apta para el Atom), se convierte el .djvu a PDF con `ddjvu` (paquete djvulibre-bin, C plano, sin SIMD →
- * apto para el Atom, como poppler) y se reutiliza el visor de PDF (pdf.js) que ya tiene el panel.
+ * DjVu — páginas a imagen, BAJO DEMANDA (una por petición), tanto para la VISIÓN al ingerir como para el
+ * visor del panel. Se rasteriza cada página con `ddjvu` (djvulibre-bin) → PDF de 1 página → `pdftoppm`
+ * → JPEG (ambas herramientas ya instaladas, C nativo apto para el Atom).
  *
- * La conversión se CACHEA por archivo (TTL DJVU_CACHE_TTL_MS) en un tmp efímero; se poda en cada acceso.
- * Es una acción a demanda del usuario (abrir la ficha), no del pipeline: el coste puntual es aceptable.
+ * NO se convierte el documento ENTERO a PDF: para un libro escaneado de cientos de páginas eso es lento
+ * y pesado (y fallaba). Página a página es instantáneo y barato: 1 página por petición del visor.
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -13,17 +13,6 @@ import os from 'os';
 import path from 'path';
 
 const execFileP = promisify(execFile);
-const TTL = Number(process.env.DJVU_CACHE_TTL_MS || 30 * 60 * 1000);
-const cache = new Map(); // ruta → { pdf, dir, ts }
-
-async function podar() {
-    const ahora = Date.now();
-    for (const [k, v] of cache) {
-        if (ahora - v.ts <= TTL) continue;
-        cache.delete(k);
-        await fs.rm(v.dir, { recursive: true, force: true }).catch(() => {});
-    }
-}
 
 // ── Páginas de MUESTRA para la VISIÓN (igual que un cómic/PDF): 5 primeras + última ──────────────
 const PAG_FRENTE = Number(process.env.DJVU_PAGINAS_FRENTE || 5);
@@ -37,7 +26,7 @@ function indicesMuestra(n) {
 }
 
 /** Nº de páginas de un DjVu (djvused). 0 si no se puede leer. */
-async function contarPaginasDjvu(ruta) {
+export async function contarPaginasDjvu(ruta) {
     try {
         const { stdout } = await execFileP('djvused', ['-e', 'n', ruta], { timeout: 30000 });
         const n = parseInt(String(stdout).trim().split(/\s+/)[0], 10);
@@ -58,6 +47,12 @@ async function paginaDjvuJpeg(ruta, n1) {
     }
 }
 
+/** Página `n0` (0-indexada) de un DjVu como { buffer, mimeType }, o null si no se pudo. (Para el visor.) */
+export async function leerPaginaDjvu(ruta, n0) {
+    try { return { buffer: await paginaDjvuJpeg(ruta, n0 + 1), mimeType: 'image/jpeg' }; }
+    catch { return null; }
+}
+
 /**
  * Páginas de MUESTRA de un DjVu (5 primeras + última) como JPEG base64, para mandarlas a la visión
  * (código de barras / ISBN / ISSN). Devuelve { paginas, cubierta_base64, muestra } — análogo a leerCbz.
@@ -71,17 +66,4 @@ export async function paginasMuestraDjvu(ruta) {
         catch { /* una página suelta ilegible no aborta el resto */ }
     }
     return { paginas: total, cubierta_base64: muestra[0]?.base64 || null, muestra };
-}
-
-/** Convierte (y cachea) un .djvu a PDF; devuelve la ruta absoluta del PDF. */
-export async function djvuAPdf(ruta) {
-    await podar();
-    const ya = cache.get(ruta);
-    if (ya) { try { await fs.access(ya.pdf); ya.ts = Date.now(); return ya.pdf; } catch { cache.delete(ruta); } }
-
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'djvu-'));
-    const pdf = path.join(dir, 'doc.pdf');
-    await execFileP('ddjvu', ['-format=pdf', ruta, pdf], { timeout: 600000 });
-    cache.set(ruta, { pdf, dir, ts: Date.now() });
-    return pdf;
 }
