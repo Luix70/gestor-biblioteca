@@ -1,14 +1,12 @@
 /**
- * Reproceso de UN documento desde la ficha del panel: lo DEVUELVE al Inbox para re-catalogarlo de cero.
+ * Acciones de un documento desde la ficha del panel que retiran su carpeta del árbol CDU:
+ *   · reprocesarDocumento — lo DEVUELVE al Inbox para re-catalogarlo de cero.
+ *   · eliminarDocumento   — lo BORRA del catálogo (sin re-ingestar).
  *
- *   1. copia el fichero original (de su carpeta CDU) al Inbox,
- *   2. borra el documento de Mongo (así el atajo-por-hash NO lo deduplica al re-ingerir),
- *   3. lo quita del inventario de su cabecera/colección,
- *   4. RECICLA su carpeta CDU entera (sidecars, imágenes, registro.json/.marc.xml y la copia original)
- *      a la Papelera — "nunca borrar": es recuperable.
- *
- * El Vigilante re-cataloga el fichero del Inbox (si está ACTIVO; si no, espera ahí). Política anti-pérdida:
- * el original viaja al Inbox Y queda una copia en la Papelera.
+ * Ambas: borran el documento de Mongo, lo desvinculan del inventario de su cabecera/colección y de su
+ * obra, y RECICLAN su carpeta CDU entera (sidecars, imágenes, registro.json/.marc.xml y el original) a la
+ * Papelera — "nunca borrar": es recuperable. reprocesar copia ANTES el original al Inbox (y el Vigilante,
+ * si está ACTIVO, lo vuelve a catalogar; si no, espera ahí).
  */
 import fs from 'fs/promises';
 import path from 'path';
@@ -23,30 +21,12 @@ const DIR_INBOX = resolver(process.env.PATH_INBOX, 'Inbox');
 
 const existe = (p) => fs.access(p).then(() => true).catch(() => false);
 
-export async function reprocesarDocumento(db, doc) {
-    const bib = db.collection('biblioteca');
+/** Borra el doc, lo saca del inventario de su colección y de su obra, y recicla su carpeta CDU. */
+async function desvincularYReciclar(db, doc, etiqueta) {
     const carpeta = carpetaDeDoc(doc);
-    const origen = doc.nombre_archivo ? path.join(carpeta, doc.nombre_archivo) : null;
-    if (!origen) return { ok: false, motivo: 'el documento no tiene nombre_archivo: no se puede reprocesar' };
+    await db.collection('biblioteca').deleteOne({ _id: doc._id });
 
-    let tam = -1;
-    try { tam = (await fs.stat(origen)).size; } catch { /* no existe */ }
-    if (tam <= 0) return { ok: false, motivo: 'no se encuentra el fichero original en su carpeta CDU: no se puede reprocesar' };
-
-    // 1. Copiar el original al Inbox (sin pisar uno ya presente).
-    await fs.mkdir(DIR_INBOX, { recursive: true });
-    let destino = path.join(DIR_INBOX, doc.nombre_archivo);
-    if (await existe(destino)) {
-        const ext = path.extname(doc.nombre_archivo);
-        const base = path.basename(doc.nombre_archivo, ext);
-        destino = path.join(DIR_INBOX, `${base} (reproc ${String(doc._id).slice(-6)})${ext}`);
-    }
-    await fs.copyFile(origen, destino);
-
-    // 2. Borrar el documento (para que el re-ingreso NO se deduplique por hash contra sí mismo).
-    await bib.deleteOne({ _id: doc._id });
-
-    // 3. Sacarlo del inventario de su cabecera/colección y recalcular su recuento.
+    // Quitar de la cabecera/colección (números) y recalcular su recuento.
     if (doc.coleccion) {
         const col = db.collection('colecciones');
         await col.updateOne({ _id: doc.coleccion }, { $pull: { numeros: { _id: doc._id }, numeros_sin_fecha: doc._id } });
@@ -57,7 +37,51 @@ export async function reprocesarDocumento(db, doc) {
         } });
     }
 
-    // 4. Reciclar la carpeta CDU entera a la Papelera (recuperable).
-    const reciclada = await reciclarCarpeta(carpeta, 'reprocesado', path.basename(path.dirname(carpeta)));
-    return { ok: true, inbox: path.basename(destino), reciclada: !!reciclada };
+    // Quitar de la obra multivolumen: el hueco del tomo queda como "falta" (_id:null); recalcular.
+    if (doc.obra) {
+        const col = db.collection('obras');
+        const obra = await col.findOne({ _id: doc.obra });
+        if (obra) {
+            const volumenes = (obra.volumenes || []).map(v => (v && String(v._id) === String(doc._id)) ? { ...v, _id: null } : v);
+            const sin = (obra.volumenes_sin_numero || []).filter(id => String(id) !== String(doc._id));
+            const presentes = volumenes.filter(v => v && v._id).length;
+            const maxNum = obra.total_volumenes || volumenes.length;
+            await col.updateOne({ _id: doc.obra }, { $set: {
+                volumenes, volumenes_sin_numero: sin, volumenes_presentes: presentes,
+                completa: presentes === maxNum && sin.length === 0, fecha_actualizacion: new Date(),
+            } });
+        }
+    }
+
+    const reciclada = await reciclarCarpeta(carpeta, etiqueta, path.basename(path.dirname(carpeta)));
+    return !!reciclada;
+}
+
+export async function reprocesarDocumento(db, doc) {
+    const carpeta = carpetaDeDoc(doc);
+    const origen = doc.nombre_archivo ? path.join(carpeta, doc.nombre_archivo) : null;
+    if (!origen) return { ok: false, motivo: 'el documento no tiene nombre_archivo: no se puede reprocesar' };
+
+    let tam = -1;
+    try { tam = (await fs.stat(origen)).size; } catch { /* no existe */ }
+    if (tam <= 0) return { ok: false, motivo: 'no se encuentra el fichero original en su carpeta CDU: no se puede reprocesar' };
+
+    // Copiar el original al Inbox (sin pisar uno ya presente) ANTES de reciclar la carpeta.
+    await fs.mkdir(DIR_INBOX, { recursive: true });
+    let destino = path.join(DIR_INBOX, doc.nombre_archivo);
+    if (await existe(destino)) {
+        const ext = path.extname(doc.nombre_archivo);
+        const base = path.basename(doc.nombre_archivo, ext);
+        destino = path.join(DIR_INBOX, `${base} (reproc ${String(doc._id).slice(-6)})${ext}`);
+    }
+    await fs.copyFile(origen, destino);
+
+    const reciclada = await desvincularYReciclar(db, doc, 'reprocesado');
+    return { ok: true, inbox: path.basename(destino), reciclada };
+}
+
+/** Elimina el documento del catálogo: borra el registro y recicla su carpeta CDU (recuperable en Papelera). */
+export async function eliminarDocumento(db, doc) {
+    const reciclada = await desvincularYReciclar(db, doc, 'eliminado');
+    return { ok: true, reciclada };
 }

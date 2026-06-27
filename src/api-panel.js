@@ -10,7 +10,7 @@ import { verificarPasswordAdmin } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { verificarIntegridad } from './integridad.js';
 import { purgarObra } from './utils/purga.js';
-import { reprocesarDocumento } from './utils/reproceso.js';
+import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
@@ -571,6 +571,20 @@ export function rutasPanel() {
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             const r2 = await reprocesarDocumento(db, doc);
+            res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ELIMINAR un documento (botón de la ficha): borra el registro de Mongo y RECICLA su carpeta CDU
+    // (sidecars/imágenes/original) a la Papelera — recuperable. Requiere contraseña de admin.
+    r.post('/documentos/:id/eliminar', async (req, res) => {
+        try {
+            if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const r2 = await eliminarDocumento(db, doc);
             res.json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

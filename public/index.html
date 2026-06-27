@@ -937,6 +937,7 @@ function pintarDoc(r,ctx){
       <button class="fbtn" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
       <button class="fbtn bad" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
+      <button class="fbtn bad" id="actDel" title="Borra el documento y su carpeta (sidecars/imágenes → Papelera, recuperable)">🗑 Eliminar</button>
     </div></div></div>`;
   $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
@@ -946,7 +947,8 @@ function pintarDoc(r,ctx){
   {const cf=$('#actConf'),ce=$('#actEnr'),cr=$('#actRepr');
    if(cf)cf.onclick=()=>fichaAccion('conformar',d._id,cf);
    if(ce)ce.onclick=()=>fichaAccion('enriquecer',d._id,ce);
-   if(cr)cr.onclick=()=>fichaReprocesar(d._id);}
+   if(cr)cr.onclick=()=>fichaReprocesar(d._id);
+   const cd=$('#actDel');if(cd)cd.onclick=()=>fichaEliminar(d._id);}
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
   $$('#p-detalle [data-q]').forEach(a=>a.onclick=()=>buscarTexto(a.dataset.q));
   carIdx=0;const tr=$('#carTrack');
@@ -1046,6 +1048,13 @@ async function fichaReprocesar(id){
   try{const r=await api('/documentos/'+encodeURIComponent(id)+'/reprocesar',{method:'POST',body:JSON.stringify({password:pw})});
     if(!r.ok){toast(r.motivo,'bad');return;}
     toast('Reprocesando: «'+r.inbox+'» devuelto al Inbox');go('search');
+  }catch(e){toast(e.message,'bad');}}
+async function fichaEliminar(id){
+  const pw=await modalPassword({titulo:'🗑 Eliminar documento',aviso:'Se borrará el registro de la base y su carpeta (sidecars e imágenes) se moverá a la <b>Papelera</b> (recuperable). El fichero NO vuelve al Inbox.'});
+  if(pw==null)return;
+  try{const r=await api('/documentos/'+encodeURIComponent(id)+'/eliminar',{method:'POST',body:JSON.stringify({password:pw})});
+    if(!r.ok){toast(r.motivo,'bad');return;}
+    toast('Documento eliminado (su carpeta está en la Papelera)');go('search');
   }catch(e){toast(e.message,'bad');}}
 
 function previewArchivo(r){
