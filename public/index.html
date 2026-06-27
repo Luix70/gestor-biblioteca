@@ -176,6 +176,12 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .selchk{position:absolute;top:6px;left:6px;z-index:4;width:18px;height:18px;cursor:pointer;accent-color:var(--acc)}
 .vol.sel{outline:2px solid var(--acc);outline-offset:-2px}
 .bulkbar{position:sticky;top:0;z-index:20;background:var(--card);border:1px solid var(--acc);border-radius:10px;padding:10px 12px;margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.pklist{max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:9px;margin-top:8px}
+.pkitem{display:flex;gap:10px;align-items:center;padding:7px 9px;cursor:pointer;border-bottom:1px solid var(--line)}
+.pkitem:last-child{border-bottom:none}.pkitem:hover{background:var(--card2)}
+.pkcov{width:38px;height:52px;flex:0 0 auto;display:grid;place-items:center;background:var(--bg2);border-radius:5px;overflow:hidden;font-size:20px}
+.pkcov img{width:100%;height:100%;object-fit:cover}
+.pkn{font-weight:600;font-size:14px;word-break:break-word}.pks{font-size:12px}
 .ficha{display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start}
 .dl{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:13px}
 .dl dt{color:var(--mut);font-weight:600;white-space:nowrap}.dl dd{word-break:break-word}
@@ -1256,41 +1262,41 @@ function renderBulk(){const el=$('#searchBulk');if(!el)return;
   const all=$('#bkAll');all.checked=enPag>0&&enPag===paginaIds.length;all.indeterminate=enPag>0&&enPag<paginaIds.length;
   all.onchange=()=>{const on=all.checked;paginaIds.forEach(id=>{if(on)selDocs.add(id);else selDocs.delete(id);});
     $$('#searchResults .selchk').forEach(cb=>cb.checked=on);$$('#searchResults .vol').forEach(c=>c.classList.toggle('sel',on));renderBulk();};
-  if(selDocs.size){$('#bkCol').onclick=bulkColeccion;$('#bkObra').onclick=bulkObra;
+  if(selDocs.size){$('#bkCol').onclick=()=>pickerGrupo('coleccion');$('#bkObra').onclick=()=>pickerGrupo('obra');
     $('#bkClear').onclick=()=>{selDocs.clear();$$('#searchResults .vol.sel').forEach(c=>c.classList.remove('sel'));$$('#searchResults .selchk').forEach(c=>c.checked=false);renderBulk();};}}
-async function bulkColeccion(){
-  let cols=[];try{cols=await api('/colecciones');}catch{}
-  const opts=cols.map(c=>`<option value="${esc(c._id)}">${esc(c.nombre)} (${c.tipo==='revista'?'revista':'libro'}, ${c.miembros||0})</option>`).join('');
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px"><h3 style="margin-top:0">📚 Añadir ${selDocs.size} doc(s) a una colección</h3>
-    <label>Colección existente</label><select id="bkSel"><option value="">— elegir —</option>${opts}</select>
+// Selector con FILTRO + PREVISUALIZACIÓN (en vez de un desplegable largo): clic en una tarjeta → añade
+// los seleccionados a esa colección/obra; o crear una nueva abajo. kind: 'coleccion' | 'obra'.
+async function pickerGrupo(kind){
+  const esCol=kind==='coleccion';
+  let items=[];try{items=await api(esCol?'/colecciones':'/obras');}catch{}
+  const ico=esCol?'📚':'📖';
+  const nom=o=>esCol?o.nombre:o.titulo;
+  const sub=o=>esCol?`${o.tipo==='revista'?'📰 revista':'📚 libro'} · ${o.miembros||0} miembro(s)`:`${o.volumenes_presentes||0}/${o.total_volumenes||'?'} tomos`;
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px"><h3 style="margin-top:0">${ico} Añadir <b>${selDocs.size}</b> doc(s) a una ${esCol?'colección':'obra'}</h3>
+    <input id="pkFiltro" placeholder="🔍 filtrar por nombre…" autocomplete="off">
+    <div id="pkLista" class="pklist"></div>
     <div style="margin:10px 0;text-align:center;color:var(--mut)">— o crear nueva —</div>
-    <label>Nombre nuevo</label><input id="bkNom" placeholder="p. ej. The Sandman Universe" autocomplete="off">
-    <label style="margin-top:8px">Tipo (si es nueva)</label><select id="bkTipo"><option value="libro">Serie de libros</option><option value="revista">Revista (números)</option></select>
-    <div id="bkErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="bkX">Cancelar</button><button class="btn pri" id="bkOk">Añadir</button></div></div>`;
-  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#bkX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
-  $('#bkOk').onclick=async()=>{const coleccionId=$('#bkSel').value||null,nombre=$('#bkNom').value.trim()||null,tipo=$('#bkTipo').value;
-    if(!coleccionId&&!nombre){$('#bkErr').textContent='Elige una colección o escribe un nombre';return;}
-    try{const r=await api('/documentos/agrupar/coleccion',{method:'POST',body:JSON.stringify({ids:[...selDocs],coleccionId,nombre,tipo})});
-      if(!r.ok){$('#bkErr').textContent=r.motivo;return;}
-      cerrarCmp();toast(`${r.n} doc(s) → colección «${r.coleccion.nombre}»`);selDocs.clear();buscarCatalogo(estadoBusqueda.page||1);
-    }catch(e){$('#bkErr').textContent=e.message;}};}
-async function bulkObra(){
-  let obras=[];try{obras=await api('/obras');}catch{}
-  const opts=obras.map(o=>`<option value="${esc(o._id)}">${esc(o.titulo)} (${o.volumenes_presentes||0}/${o.total_volumenes||'?'})</option>`).join('');
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px"><h3 style="margin-top:0">📖 Añadir ${selDocs.size} doc(s) a una obra</h3>
-    <label>Obra existente</label><select id="bkSel"><option value="">— elegir —</option>${opts}</select>
-    <div style="margin:10px 0;text-align:center;color:var(--mut)">— o crear nueva —</div>
-    <label>Título nuevo</label><input id="bkNom" placeholder="p. ej. The Sandman" autocomplete="off">
-    <div id="bkErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="bkX">Cancelar</button><button class="btn pri" id="bkOk">Añadir</button></div></div>`;
-  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#bkX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
-  $('#bkOk').onclick=async()=>{const obraId=$('#bkSel').value||null,titulo=$('#bkNom').value.trim()||null;
-    if(!obraId&&!titulo){$('#bkErr').textContent='Elige una obra o escribe un título';return;}
-    try{const r=await api('/documentos/agrupar/obra',{method:'POST',body:JSON.stringify({ids:[...selDocs],obraId,titulo})});
-      if(!r.ok){$('#bkErr').textContent=r.motivo;return;}
-      cerrarCmp();toast(`${r.n} doc(s) → obra «${r.obra.titulo}»`);selDocs.clear();buscarCatalogo(estadoBusqueda.page||1);
-    }catch(e){$('#bkErr').textContent=e.message;}};}
+    <div class="row" style="gap:8px;align-items:center"><input id="pkNom" placeholder="${esCol?'Nombre de la colección':'Título de la obra'}" autocomplete="off" style="flex:1 1 180px">
+      ${esCol?`<select id="pkTipo" style="flex:0 0 auto"><option value="libro">Serie de libros</option><option value="revista">Revista</option></select>`:''}
+      <button class="btn pri" id="pkCrear">Crear y añadir</button></div>
+    <div id="pkErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+    <div style="text-align:right;margin-top:6px"><button class="btn" id="pkX">Cancelar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#pkX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
+  const pintar=q=>{q=(q||'').toLowerCase().trim();
+    const fil=items.filter(o=>(nom(o)||'').toLowerCase().includes(q));
+    $('#pkLista').innerHTML=fil.length?fil.map(o=>`<div class="pkitem" data-id="${esc(o._id)}"><div class="pkcov">${o.portada?`<img src="${esc(encUrl(o.portada))}" loading="lazy" onerror="this.parentNode.textContent='${ico}'">`:ico}</div><div class="pkmeta"><div class="pkn">${esc(nom(o)||'—')}</div><div class="pks muted">${esc(sub(o))}</div></div></div>`).join(''):'<div class="muted" style="padding:14px">Sin resultados</div>';
+    $$('#pkLista .pkitem').forEach(el=>el.onclick=()=>aplicarGrupo(kind,{id:el.dataset.id}));};
+  pintar('');
+  $('#pkFiltro').oninput=()=>pintar($('#pkFiltro').value);setTimeout(()=>$('#pkFiltro').focus(),30);
+  $('#pkCrear').onclick=()=>{const nombre=$('#pkNom').value.trim();if(!nombre){$('#pkErr').textContent='Escribe un nombre';return;}aplicarGrupo(kind,{nombre,tipo:esCol?$('#pkTipo').value:undefined});};
+}
+async function aplicarGrupo(kind,{id,nombre,tipo}){
+  const esCol=kind==='coleccion';
+  const body=esCol?{ids:[...selDocs],coleccionId:id||null,nombre:nombre||null,tipo}:{ids:[...selDocs],obraId:id||null,titulo:nombre||null};
+  try{const r=await api(esCol?'/documentos/agrupar/coleccion':'/documentos/agrupar/obra',{method:'POST',body:JSON.stringify(body)});
+    if(!r.ok){const e=$('#pkErr');if(e)e.textContent=r.motivo;else toast(r.motivo,'bad');return;}
+    cerrarCmp();toast(`${r.n} doc(s) → ${esCol?'colección «'+r.coleccion.nombre:'obra «'+r.obra.titulo}»`);selDocs.clear();buscarCatalogo(estadoBusqueda.page||1);
+  }catch(e){const el=$('#pkErr');if(el)el.textContent=e.message;else toast(e.message,'bad');}}
 function construirSearch(){
   $('#p-search').innerHTML=`
     <div class="sec-h"><h2>Búsqueda y catálogo</h2><span class="muted" id="searchCount"></span></div>

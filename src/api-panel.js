@@ -252,7 +252,13 @@ export function rutasPanel() {
             const obras = await db.collection('obras')
                 .find(filtroObras, { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1, completa: 1, revision_requerida: 1, nsfw: 1, valoracion: 1 } })
                 .sort({ revision_requerida: -1, completa: 1, titulo: 1 }).limit(500).toArray();
-            res.json(obras.map(o => ({ ...o, _id: String(o._id) })));
+            // Portada representativa (la de un tomo) para el selector con previsualización.
+            const portO = obras.length ? await db.collection('biblioteca').aggregate([
+                { $match: { obra: { $in: obras.map(o => o._id) }, portada: { $exists: true, $ne: null } } },
+                { $group: { _id: '$obra', portada: { $max: '$portada' } } },
+            ]).toArray() : [];
+            const mapaP = new Map(portO.map(x => [String(x._id), x.portada]));
+            res.json(obras.map(o => ({ ...o, _id: String(o._id), portada: mapaP.get(String(o._id)) || null })));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
@@ -402,13 +408,13 @@ export function rutasPanel() {
             const cols = await db.collection('colecciones')
                 .find(filtro, { projection: { nombre: 1, tipo: 1, issn: 1, numeros_presentes: 1, revision_requerida: 1, nsfw: 1, valoracion: 1 } })
                 .sort({ revision_requerida: -1, nombre: 1 }).limit(1000).toArray();
-            // Nº de miembros (números/libros) de un tirón, por agregación sobre biblioteca.
-            const conteos = cols.length ? await db.collection('biblioteca').aggregate([
+            // Nº de miembros + portada representativa (la de un miembro) de un tirón, por agregación.
+            const agg = cols.length ? await db.collection('biblioteca').aggregate([
                 { $match: { coleccion: { $in: cols.map(c => c._id) } } },
-                { $group: { _id: '$coleccion', n: { $sum: 1 } } },
+                { $group: { _id: '$coleccion', n: { $sum: 1 }, portada: { $max: '$portada' } } },
             ]).toArray() : [];
-            const mapaN = new Map(conteos.map(x => [String(x._id), x.n]));
-            res.json(cols.map(c => ({ ...c, _id: String(c._id), tipo: c.tipo || 'libro', miembros: mapaN.get(String(c._id)) || 0 })));
+            const mapa = new Map(agg.map(x => [String(x._id), x]));
+            res.json(cols.map(c => { const a = mapa.get(String(c._id)); return { ...c, _id: String(c._id), tipo: c.tipo || 'libro', miembros: a?.n || 0, portada: a?.portada || null }; }));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
