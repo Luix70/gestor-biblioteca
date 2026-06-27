@@ -22,6 +22,18 @@ import { parsearNombre } from './parsear-nombre.js';
 const execFileP = promisify(execFile);
 const ES_IMG = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
 const ORDEN = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp', '.avif': 'image/avif' };
+const mimeDe = (n) => MIME[path.extname(n).toLowerCase()] || 'image/jpeg';
+const PAG_FRENTE = Number(process.env.COMIC_PAGINAS_FRENTE || 5);   // como un PDF: créditos/ISBN viven al principio
+const PAG_FONDO  = Number(process.env.COMIC_PAGINAS_FONDO  || 1);   // …y el código de barras suele ir en la contraportada
+
+// Índices de las páginas de MUESTRA para la visión: las PAG_FRENTE primeras + las PAG_FONDO últimas.
+function indicesMuestra(n) {
+    const s = new Set();
+    for (let i = 0; i < Math.min(PAG_FRENTE, n); i++) s.add(i);
+    for (let i = Math.max(0, n - PAG_FONDO); i < n; i++) s.add(i);
+    return [...s].sort((a, b) => a - b);
+}
 
 // Nº de ejemplar en el NOMBRE del cómic: "Nº 12", "N 3", "#5", "núm 7", o "Extra"/"Especial" (cómics
 // con número simbólico). Un número/extra ⇒ es un EJEMPLAR de una serie (→ revista-colección).
@@ -59,17 +71,18 @@ async function listarImagenes(dir) {
     return out.sort(ORDEN);
 }
 
-/** Portada (1ª imagen) + nº de páginas de un CBZ (ZIP) vía adm-zip. */
+/** Portada + nº de páginas + páginas de MUESTRA (5 primeras + última, base64) de un CBZ (ZIP) vía adm-zip. */
 function leerCbz(ruta) {
     const zip = new AdmZip(ruta);
     const imgs = zip.getEntries()
         .filter(e => !e.isDirectory && ES_IMG.test(e.entryName))
         .sort((a, b) => ORDEN(a.entryName, b.entryName));
     if (!imgs.length) return { paginas: 0 };
-    return { paginas: imgs.length, cubierta_base64: imgs[0].getData().toString('base64') };
+    const muestra = indicesMuestra(imgs.length).map(i => ({ base64: imgs[i].getData().toString('base64'), mimeType: mimeDe(imgs[i].entryName) }));
+    return { paginas: imgs.length, cubierta_base64: imgs[0].getData().toString('base64'), muestra };
 }
 
-/** Portada (1ª imagen) + nº de páginas de un CBR (RAR) / CB7 (7z) vía unar. Extrae a un tmp efímero. */
+/** Igual para un CBR (RAR) / CB7 (7z) vía unar. Extrae a un tmp efímero y lee de él portada + muestra. */
 async function leerConUnar(ruta) {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'comic-'));
     try {
@@ -77,8 +90,10 @@ async function leerConUnar(ruta) {
             { timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
         const imgs = await listarImagenes(tmp);
         if (!imgs.length) return { paginas: 0 };
-        const buf = await fs.readFile(imgs[0]);
-        return { paginas: imgs.length, cubierta_base64: buf.toString('base64') };
+        const muestra = [];
+        for (const i of indicesMuestra(imgs.length)) muestra.push({ base64: (await fs.readFile(imgs[i])).toString('base64'), mimeType: mimeDe(imgs[i]) });
+        const cubierta_base64 = (await fs.readFile(imgs[0])).toString('base64');
+        return { paginas: imgs.length, cubierta_base64, muestra };
     } finally {
         await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
     }
@@ -97,8 +112,8 @@ export async function extraerMetadatosComic(ruta) {
     // PORTADA + nº de páginas: CBZ con adm-zip; CBR/CB7 con unar. Cualquier fallo (archivo dañado,
     // unar ausente) degrada a "catalogado por nombre" sin romper la ingesta.
     try {
-        const { paginas, cubierta_base64 } = ext === '.cbz' ? leerCbz(ruta) : await leerConUnar(ruta);
-        if (cubierta_base64) { datos.paginas = paginas; datos.cubierta_base64 = cubierta_base64; }
+        const { paginas, cubierta_base64, muestra } = ext === '.cbz' ? leerCbz(ruta) : await leerConUnar(ruta);
+        if (cubierta_base64) { datos.paginas = paginas; datos.cubierta_base64 = cubierta_base64; datos.muestra_paginas = muestra || []; }
         else datos.alertas_agente.push('Cómic sin imágenes legibles: catalogado por nombre.');
     } catch (e) {
         datos.alertas_agente.push(`No se pudo abrir el cómic (${e.message}): catalogado por nombre.`);

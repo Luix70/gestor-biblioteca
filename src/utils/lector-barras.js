@@ -12,7 +12,7 @@
 import { conGemini } from './gemini.js';
 import { tamanoPagina, rasterizarRecorte } from './rasterizar-pdf.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
-import { validarISSN } from './identificadores.js';
+import { validarISSN, validarISBN } from './identificadores.js';
 
 const ANCHO = Number(process.env.PDF_BARRAS_ANCHO || 3000); // px de ancho de página equivalente (DPI alto)
 const MODELO = { model: 'gemini-2.5-flash', generationConfig: { responseMimeType: 'application/json' } };
@@ -86,4 +86,41 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInterno
     const add = String(datos.add_on || '').replace(/\D/g, '');
     const mes = add && Number(add) >= 1 && Number(add) <= 12 ? Number(add) : null;
     return { issn, isbn, esRevista: !!issn, mes_publicacion: mes };
+}
+
+const PROMPT_IMGS = `Tienes varias PÁGINAS (portada, créditos, contraportada) de un CÓMIC, libro o revista. Busca su
+IDENTIFICADOR y devuelve SOLO un JSON con estos campos (deja vacío lo que no veas con seguridad; NO inventes):
+- "codigo_barras": los 13 dígitos del EAN-13 (cubierta/contraportada), SIN guiones ni espacios, leídos en
+  CUALQUIER orientación (horizontal o GIRADO 90°/vertical). (977→ISSN de revista; 978/979→ISBN de libro.)
+- "add_on": el pequeño add-on de 2 dígitos a la derecha del código de barras, o vacío.
+- "isbn_impreso": un ISBN IMPRESO en los créditos/colofón (10 o 13 cifras, normalmente junto a "ISBN"),
+  transcrito con sus guiones. Útil cuando el código de barras no se lee bien.
+- "issn_impreso": un ISSN IMPRESO (formato NNNN-NNNX, junto a "ISSN"), o vacío.`;
+
+/**
+ * Lee el IDENTIFICADOR (código de barras EAN-13, o ISBN/ISSN impreso) a partir de un puñado de PÁGINAS ya
+ * extraídas como imágenes (p. ej. las 5 primeras + la última de un cómic). UNA sola llamada de visión.
+ * @param {Array<{base64:string, mimeType?:string}>} muestras
+ * @returns {Promise<{issn:?string,isbn:?string,esRevista:boolean,mes_publicacion:?number}|null>}
+ */
+export async function leerIdentificadorDeImagenes(muestras) {
+    const imgs = (muestras || []).filter(m => m && m.base64)
+        .map(m => ({ inlineData: { data: m.base64, mimeType: m.mimeType || 'image/jpeg' } }));
+    if (!imgs.length) return null;
+    console.log(`[Barras/img] ${imgs.length} página(s) de muestra → consultando a la visión…`);
+    let datos;
+    try {
+        const res = await conGemini(MODELO, (model) => model.generateContent([PROMPT_IMGS, ...imgs]));
+        datos = JSON.parse((res.response.text() || '{}').trim());
+    } catch (e) { console.warn(`[Barras/img] visión falló: ${e.message}`); return null; }
+    console.log(`[Barras/img] codigo_barras="${datos.codigo_barras || ''}" isbn_impreso="${datos.isbn_impreso || ''}" issn_impreso="${datos.issn_impreso || ''}"`);
+
+    const bc = decodificarCodigoBarras(datos.codigo_barras);
+    let issn = bc?.issn || null, isbn = bc?.isbn || null;
+    if (!isbn && datos.isbn_impreso) { const v = validarISBN(datos.isbn_impreso); if (v) { isbn = v; console.log(`[Barras/img] ISBN impreso: ${v}.`); } }
+    if (!issn && datos.issn_impreso) { const v = validarISSN(datos.issn_impreso); if (v) { issn = v; console.log(`[Barras/img] ISSN impreso: ${v}.`); } }
+    if (!issn && !isbn) { console.log('[Barras/img] sin identificador legible en las páginas.'); return null; }
+    const add = String(datos.add_on || '').replace(/\D/g, '');
+    const mes = add && Number(add) >= 1 && Number(add) <= 12 ? Number(add) : null;
+    return { issn, isbn, esRevista: !!issn && !isbn, mes_publicacion: mes };
 }

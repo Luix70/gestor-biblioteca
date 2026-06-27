@@ -13,7 +13,7 @@ import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
-import { leerCodigoBarrasPorVision } from './utils/lector-barras.js';
+import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/lector-barras.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -301,14 +301,38 @@ export async function procesarRecurso(entrada) {
         // CÓMIC (.cbz/.cbr/.cb7): portada (CBZ→adm-zip, CBR/CB7→unar) + clasificación serie/álbum. naturaleza:'comic'.
         datosBase = await extraerMetadatosComic(rutas[0]);
         formatos = datosBase.formatos;
+        // VISIÓN sobre las páginas de muestra (5 primeras + última, como un PDF): busca el código de barras /
+        // ISBN / ISSN impreso. El ISBN es el PIVOTE para identificar el cómic por Fichero/APIs. Una sola
+        // llamada; se omite si el nombre ya trajo un ISBN propio (coste mínimo).
+        if (datosBase.muestra_paginas?.length && !datosBase.isbn_propio) {
+            try {
+                const id = await leerIdentificadorDeImagenes(datosBase.muestra_paginas);
+                if (id?.isbn) {
+                    datosBase.isbn = id.isbn; datosBase.isbn_propio = id.isbn;
+                    datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(id.isbn)])];
+                    datosBase.alertas_agente.push(`ISBN leído de las páginas (visión): ${id.isbn}.`);
+                    console.log(`[Cómic] ISBN de las páginas → ${id.isbn}`);
+                }
+                if (id?.issn) {
+                    datosBase.issn = id.issn;
+                    if (id.mes_publicacion && !datosBase.mes_publicacion) datosBase.mes_publicacion = id.mes_publicacion;
+                    datosBase.alertas_agente.push(`ISSN leído de las páginas (visión): ${id.issn}.`);
+                    console.log(`[Cómic] ISSN de las páginas → ${id.issn}`);
+                }
+            } catch (e) {
+                datosBase.alertas_agente.push(`Lectura de identificador por visión falló: ${e.message}`);
+            }
+        }
         const clasif = clasificarTipo({
             esComic: true,
             comicSerie: datosBase.comic_serie,
             esFechada: !!datosBase.esFechada,
             isbnPropio: datosBase.isbn_propio || null,
+            issnFuerte: !!datosBase.issn,            // un 977-ISSN leído del barras ⇒ cómic-revista
         });
-        tipo_recurso = clasif.tipo_recurso;          // revista (nº de serie) | libro (álbum/novela gráfica)
+        tipo_recurso = clasif.tipo_recurso;          // revista (nº de serie / ISSN) | libro (álbum/novela gráfica)
         datosBase.naturaleza = clasif.naturaleza;    // 'comic'
+        delete datosBase.muestra_paginas;            // páginas de muestra: solo para la visión, no se persisten
 
     } else if (tipo === 'otro-formato') {
         // Puerta abierta: formato conocido sin lector propio aún (mobi/djvu/zip/rar; los cómics .cbz/.cbr/.cb7 tienen su rama).

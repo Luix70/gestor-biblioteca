@@ -33,7 +33,9 @@ export function clasificarTipo(s = {}) {
     // ISBN propio → revista (cabecera-colección, como un magazine); un ÁLBUM/novela gráfica suelto (con
     // ISBN propio, o sin nº) → libro. Ambos llevan naturaleza:'comic'.
     if (s.esComic) {
-        const serie = (s.comicSerie || s.esFechada) && !s.isbnPropio;
+        // Un ISBN PROPIO (978, leído del barras/créditos) ⇒ álbum/novela gráfica = libro. Un nº de serie,
+        // un nombre fechado o un ISSN 977 (cómic-revista) y SIN ISBN propio ⇒ revista (cabecera-colección).
+        const serie = (s.comicSerie || s.esFechada || s.issnFuerte) && !s.isbnPropio;
         return { tipo_recurso: serie ? 'revista' : 'libro', naturaleza: 'comic', multiparte: false };
     }
 
