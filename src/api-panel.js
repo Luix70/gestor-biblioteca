@@ -32,10 +32,10 @@ import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1 };
 
-// URL servible (en /recursos) del fichero original de un documento. Solo se codifica el nombre del
-// fichero: ruta_base ya viene saneada para web (utils/rutas.js) y sus segmentos son seguros.
+// Ruta (en /recursos) del fichero original de un documento, SIN codificar: el front la %-codifica por
+// segmentos al usarla (así funciona aunque la carpeta tenga caracteres heredados como '#', '%', espacios).
 const urlArchivo = (doc) => (doc.ruta_base && doc.nombre_archivo)
-    ? `${doc.ruta_base}/${encodeURIComponent(doc.nombre_archivo)}` : null;
+    ? `${doc.ruta_base}/${doc.nombre_archivo}` : null;
 
 // Descripción legible (ES/EN) de un código CDU desde 'cdu_descripciones' (clave = código saneado).
 async function cduDesc(db, cdu) {

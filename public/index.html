@@ -470,6 +470,9 @@ const api=async(p,opt={})=>{const h={'Content-Type':'application/json',...(opt.h
 const fmtBytes=b=>{if(!b)return'0 B';const u=['B','KB','MB','GB','TB'];const i=Math.floor(Math.log(b)/Math.log(1024));return (b/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i];};
 const toast=(m,t='ok')=>{const e=document.createElement('div');e.className='toast '+(t==='ok'?'':t);e.textContent=m;$('#toast').append(e);setTimeout(()=>e.remove(),3800);};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// %-codifica una ruta /recursos por SEGMENTOS (mantiene las '/'): así una URL con '#', '%', espacios o
+// acentos en la carpeta no se rompe (el navegador trunca en '#'); Express la des-codifica y casa el fichero.
+const encUrl=p=>String(p||'').split('/').map(encodeURIComponent).join('/');
 // Copia al portapapeles con respaldo (la API clipboard exige contexto seguro; en LAN/http no está).
 function copiar(txt){
   const ok=()=>toast('Copiado al portapapeles');
@@ -784,7 +787,7 @@ async function verObra(id){detalle={tipo:'obra',id};mostrarDetalle();$('#title')
 
 function tomoCard(d,numero,falta){
   if(falta)return `<div class="vol falta"><div class="cov"><div class="ph">∅</div></div><div class="meta"><div class="n">Tomo ${numero}</div><div class="t">falta</div></div></div>`;
-  const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
+  const cov=d.portada?`<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
   const fmt=(d.formatos||[]).slice(0,3).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
   return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">Tomo ${numero??'?'} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.volumen_titulo||d.titulo||'—')}</div></div></div>`;
 }
@@ -827,7 +830,7 @@ async function verColeccion(id){detalle={tipo:'coleccion',id};mostrarDetalle();$
   catch(e){$('#p-detalle').innerHTML=`<div class="crumb"><a onclick="go('colecciones')">← Colecciones</a></div><div class="empty">${esc(e.message)}</div>`;}}
 
 function miembroCard(d,etiqueta){
-  const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
+  const cov=d.portada?`<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
   const fmt=(d.formatos||[]).slice(0,3).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
   return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(etiqueta||'')} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo||'—')}</div></div></div>`;
 }
@@ -937,7 +940,7 @@ function pintarDoc(r,ctx){
   const clas=(r.clasificaciones||[]).length?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:6px">Clasificación</div><table class="clastab">${r.clasificaciones.map(x=>filaClas(x)).join('')}</table></div>`:'';
   const alertas=(d.alertas_agente||[]).length?`<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">Notas del agente (${d.alertas_agente.length})</summary><div style="margin-top:6px">${d.alertas_agente.map(a=>`<div class="muted" style="font-size:12px">• ${esc(a)}</div>`).join('')}</div></details>`:'';
   const imgs=(r.imagenes&&r.imagenes.length)?r.imagenes:(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]);
-  const carrusel=imgs.length?`<div class="carousel"><div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(im.ruta)}" loading="lazy" onclick="window.open('${esc(im.ruta)}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:'<div class="filebox"><div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>';
+  const carrusel=imgs.length?`<div class="carousel"><div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:'<div class="filebox"><div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>';
   const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
     <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.naturaleza?' · '+esc(d.naturaleza):''}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div>
     <div style="margin-top:8px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div>
@@ -962,8 +965,8 @@ function pintarDoc(r,ctx){
   carIdx=0;const tr=$('#carTrack');
   if(tr&&tr.children.length>1)tr.onscroll=()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==carIdx){carIdx=i;const dd=$('#carDots');if(dd)dd.textContent=(i+1)+' / '+tr.children.length;}};
   const _nom=(r.nombre_archivo||'').toLowerCase();
-  if(r.archivo_url&&_nom.endsWith('.epub'))iniciarLectorEpub(r.archivo_url);
-  else if(r.archivo_url&&_nom.endsWith('.pdf'))iniciarLectorPdf(r.archivo_url);
+  if(r.archivo_url&&_nom.endsWith('.epub'))iniciarLectorEpub(encUrl(r.archivo_url));
+  else if(r.archivo_url&&_nom.endsWith('.pdf'))iniciarLectorPdf(encUrl(r.archivo_url));
   else if(/\.(cbz|cbr|cb7|djvu)$/.test(_nom))iniciarLectorComic(d._id);
 }
 
@@ -1062,7 +1065,7 @@ async function fichaEliminar(id){
 
 function previewArchivo(r){
   if(!r.archivo_url)return '';
-  const nombre=r.nombre_archivo||'archivo',url=r.archivo_url,ext=(nombre.split('.').pop()||'').toLowerCase();
+  const nombre=r.nombre_archivo||'archivo',url=encUrl(r.archivo_url),ext=(nombre.split('.').pop()||'').toLowerCase();
   if(['jpg','jpeg','png','webp','gif'].includes(ext))return ''; // un set de imágenes ya se ve en el carrusel
   // Solo "Descargar": PDF y EPUB se LEEN EMBEBIDOS aquí (visores propios). Ya no se ofrece "Abrir en
   // pestaña" (en PC, según la config del navegador, descargaba el PDF en vez de previsualizarlo).
@@ -1338,7 +1341,7 @@ function pintarChipClas(){const el=$('#searchChip');if(!el)return;
 const badgesDoc=d=>`${d.nsfw?' <span class="fmt" style="background:rgba(255,92,122,.18);color:var(--bad)" title="NSFW: oculto a invitados">🔞</span>':''}${d.locked?' <span class="fmt" style="background:rgba(255,180,84,.18);color:var(--warn)" title="Bloqueado: el Conformador no lo altera">🔒</span>':''}`;
 function docCard(d){
   const ph=d.tipo_recurso==='revista'?'📰':'📕';
-  const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`:`<div class="ph">${ph}</div>`;
+  const cov=d.portada?`<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`:`<div class="ph">${ph}</div>`;
   const fmt=(d.formatos||[]).slice(0,2).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
   const sub=(d.autores&&d.autores.length?d.autores.slice(0,2).join(', '):'')||(d.año_edicion?String(d.año_edicion):'')||d.isbn||'—';
   const chk=`<input type="checkbox" class="selchk admin-only" data-id="${esc(d._id)}" title="Seleccionar"${selDocs.has(d._id)?' checked':''}>`;
