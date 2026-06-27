@@ -298,8 +298,8 @@ export async function procesarRecurso(entrada) {
         }));
 
     } else if (tipo === 'comic') {
-        // CÓMIC (.cbz/.cbr/.cb7): portada (CBZ) + clasificación serie/álbum. naturaleza:'comic'.
-        datosBase = extraerMetadatosComic(rutas[0]);
+        // CÓMIC (.cbz/.cbr/.cb7): portada (CBZ→adm-zip, CBR/CB7→unar) + clasificación serie/álbum. naturaleza:'comic'.
+        datosBase = await extraerMetadatosComic(rutas[0]);
         formatos = datosBase.formatos;
         const clasif = clasificarTipo({
             esComic: true,

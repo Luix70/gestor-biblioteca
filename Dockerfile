@@ -10,8 +10,12 @@ FROM node:18-bullseye-slim
 # poppler-utils aporta pdftoppm para rasterizar portadas de PDF. Es un binario de SISTEMA
 # (no un .node): detecta el CPU en tiempo de ejecución (pixman cae a SSE2/SSSE3) y por eso
 # SÍ funciona en el Atom, al contrario que sharp/libvips.
+#
+# unar (paquete `unar`, de Debian MAIN = libre) aporta `lsar`/`unar`: descomprime CÓMICS .cbr (RAR),
+# .cb7 (7z) y .cbz (ZIP) para extraer la PORTADA (1ª imagen) y contar páginas. Es C plano (sin
+# SIMD/AVX), igual que poppler → apto para el Atom. Se prefiere a p7zip-rar (que está en non-free).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils \
+    && apt-get install -y --no-install-recommends poppler-utils unar \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

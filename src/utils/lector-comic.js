@@ -1,20 +1,27 @@
 /**
  * Lector de CÓMIC (.cbz/.cbr/.cb7) — un cómic es un archivo comprimido de imágenes (una por página).
  *
- *   .cbz = ZIP  → se abre en el NAS con adm-zip (C ligero, sin SIMD → apto para el Atom): se extrae la
- *                 PRIMERA imagen como PORTADA y se cuenta el nº de páginas.
- *   .cbr = RAR / .cb7 = 7z → NO hay descompresor en el Atom (unrar es non-free; 7z aparte). No se extrae
- *                 portada en el servidor: se cataloga por NOMBRE (la previsualización la hará el navegador).
+ *   .cbz = ZIP  → se abre con adm-zip (JS puro, sin dependencias de sistema).
+ *   .cbr = RAR / .cb7 = 7z → se abren con `unar` (paquete Debian `unar`, libre; C plano sin SIMD →
+ *                 apto para el Atom, igual que poppler). Si `unar` no está o falla, se cataloga por
+ *                 NOMBRE (sin portada) — degradación segura, nunca rompe la ingesta.
  *
- * Clasificación (auto): un NÚMERO de una serie (nº de ejemplar / fechado, p. ej. "Don Miki Nº Extra 1986")
- * → revista (cabecera-colección por serie); un ÁLBUM/novela gráfica suelto → libro. Ambos llevan
- * `naturaleza:'comic'`. Devuelve un datosBase compatible con el resto del pipeline.
+ * En los tres casos se extrae la PRIMERA imagen (orden natural) como PORTADA y se cuenta el nº de
+ * páginas. Clasificación (auto): un NÚMERO de una serie (nº de ejemplar / fechado, p. ej. "Don Miki
+ * Nº Extra 1986") → revista (cabecera-colección por serie); un ÁLBUM/novela gráfica suelto → libro.
+ * Ambos llevan `naturaleza:'comic'`. Devuelve un datosBase compatible con el resto del pipeline.
  */
 import AdmZip from 'adm-zip';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { parsearNombre } from './parsear-nombre.js';
 
+const execFileP = promisify(execFile);
 const ES_IMG = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
+const ORDEN = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 
 // Nº de ejemplar en el NOMBRE del cómic: "Nº 12", "N 3", "#5", "núm 7", o "Extra"/"Especial" (cómics
 // con número simbólico). Un número/extra ⇒ es un EJEMPLAR de una serie (→ revista-colección).
@@ -39,7 +46,45 @@ function serieComic(s) {
     return t.length >= 2 ? t : String(s || '').trim();
 }
 
-export function extraerMetadatosComic(ruta) {
+/** Lista recursiva de imágenes (rutas absolutas) bajo `dir`, en orden natural. */
+async function listarImagenes(dir) {
+    const out = [];
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
+    for (const e of entradas) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) out.push(...await listarImagenes(p));
+        else if (ES_IMG.test(e.name)) out.push(p);
+    }
+    return out.sort(ORDEN);
+}
+
+/** Portada (1ª imagen) + nº de páginas de un CBZ (ZIP) vía adm-zip. */
+function leerCbz(ruta) {
+    const zip = new AdmZip(ruta);
+    const imgs = zip.getEntries()
+        .filter(e => !e.isDirectory && ES_IMG.test(e.entryName))
+        .sort((a, b) => ORDEN(a.entryName, b.entryName));
+    if (!imgs.length) return { paginas: 0 };
+    return { paginas: imgs.length, cubierta_base64: imgs[0].getData().toString('base64') };
+}
+
+/** Portada (1ª imagen) + nº de páginas de un CBR (RAR) / CB7 (7z) vía unar. Extrae a un tmp efímero. */
+async function leerConUnar(ruta) {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'comic-'));
+    try {
+        await execFileP('unar', ['-quiet', '-force-overwrite', '-no-directory', '-output-directory', tmp, ruta],
+            { timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+        const imgs = await listarImagenes(tmp);
+        if (!imgs.length) return { paginas: 0 };
+        const buf = await fs.readFile(imgs[0]);
+        return { paginas: imgs.length, cubierta_base64: buf.toString('base64') };
+    } finally {
+        await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
+export async function extraerMetadatosComic(ruta) {
     const ext = path.extname(ruta).toLowerCase();
     const nombre = path.basename(ruta, ext);
     const datos = {
@@ -49,24 +94,14 @@ export function extraerMetadatosComic(ruta) {
         alertas_agente: [],
     };
 
-    // PORTADA: solo CBZ (ZIP) se descomprime en el Atom. La 1ª imagen (orden natural) es la cubierta.
-    if (ext === '.cbz') {
-        try {
-            const zip = new AdmZip(ruta);
-            const imgs = zip.getEntries()
-                .filter(e => !e.isDirectory && ES_IMG.test(e.entryName))
-                .sort((a, b) => a.entryName.localeCompare(b.entryName, undefined, { numeric: true, sensitivity: 'base' }));
-            if (imgs.length) {
-                datos.paginas = imgs.length;
-                datos.cubierta_base64 = imgs[0].getData().toString('base64'); // → portada (resolverPortada)
-            } else {
-                datos.alertas_agente.push('CBZ sin imágenes legibles: catalogado por nombre.');
-            }
-        } catch (e) {
-            datos.alertas_agente.push(`CBZ no legible (${e.message}): catalogado por nombre.`);
-        }
-    } else {
-        datos.alertas_agente.push(`${ext.slice(1).toUpperCase()} no se descomprime en el servidor: catalogado por nombre (previsualización en el navegador).`);
+    // PORTADA + nº de páginas: CBZ con adm-zip; CBR/CB7 con unar. Cualquier fallo (archivo dañado,
+    // unar ausente) degrada a "catalogado por nombre" sin romper la ingesta.
+    try {
+        const { paginas, cubierta_base64 } = ext === '.cbz' ? leerCbz(ruta) : await leerConUnar(ruta);
+        if (cubierta_base64) { datos.paginas = paginas; datos.cubierta_base64 = cubierta_base64; }
+        else datos.alertas_agente.push('Cómic sin imágenes legibles: catalogado por nombre.');
+    } catch (e) {
+        datos.alertas_agente.push(`No se pudo abrir el cómic (${e.message}): catalogado por nombre.`);
     }
 
     // Título / serie / nº a partir del NOMBRE (curador). Los cómics suelen usar '_' como separador. NO se
