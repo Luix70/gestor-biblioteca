@@ -140,6 +140,31 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .vol .meta .t{color:var(--mut);font-size:11px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vol.falta{cursor:default;opacity:.55;border-style:dashed}.vol.falta:hover{transform:none;border-color:var(--line)}
 .fmt{font-size:9px;text-transform:uppercase;letter-spacing:.4px;background:rgba(27,163,255,.16);color:var(--acc2);padding:1px 6px;border-radius:5px;font-weight:700}
+/* valoración (estrellas estilo Lightroom) + acciones de la ficha */
+.stars{display:inline-flex;flex-direction:row-reverse;justify-content:flex-end;gap:2px;font-size:18px;line-height:1;user-select:none}
+.stars .st{cursor:pointer;color:var(--mut);opacity:.5;transition:.1s}
+.stars .st.on{color:#f5b301;opacity:1}
+.stars.ro .st{cursor:default}
+.stars:not(.ro) .st:hover,.stars:not(.ro) .st:hover~.st{color:#f5b301;opacity:1}
+.vol .stars{font-size:13px}
+.det-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.fbtn{background:var(--card2);border:1px solid var(--line);color:var(--txt);padding:7px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.fbtn:hover{border-color:var(--acc);color:#fff}
+.fbtn.bad:hover{border-color:var(--bad);color:var(--bad)}
+.fbtn:disabled{opacity:.55;cursor:default}
+.chgtab{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+.chgtab td{border-top:1px solid var(--line);padding:5px 7px;vertical-align:top}
+.chgtab td.k{color:var(--mut);font-weight:600;white-space:nowrap}
+.chgtab .de{color:var(--bad);text-decoration:line-through;opacity:.8}
+.chgtab .a{color:var(--ok,#39d98a)}
+/* desplegable con checkboxes (filtro de estrellas en Búsqueda) */
+.ddown{position:relative;display:inline-block}
+.ddown>summary{list-style:none;cursor:pointer;background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:9px 10px;font-size:13px;min-width:96px}
+.ddown>summary::-webkit-details-marker{display:none}
+.ddown[open]>summary{border-color:var(--acc)}
+.ddown .pop{position:absolute;z-index:40;margin-top:6px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px;min-width:160px;box-shadow:0 10px 28px rgba(0,0,0,.35)}
+.ddown .pop label{display:flex;gap:8px;align-items:center;font-size:13px;padding:5px 7px;cursor:pointer;font-weight:400;border-radius:6px}
+.ddown .pop label:hover{background:var(--card2)}
 .ficha{display:grid;grid-template-columns:1.05fr 1fr;gap:16px;align-items:start}
 .dl{display:grid;grid-template-columns:auto 1fr;gap:7px 14px;font-size:13px}
 .dl dt{color:var(--mut);font-weight:600;white-space:nowrap}.dl dd{word-break:break-word}
@@ -883,10 +908,21 @@ function pintarDoc(r,ctx){
   const imgs=(r.imagenes&&r.imagenes.length)?r.imagenes:(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]);
   const carrusel=imgs.length?`<div class="carousel"><div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(im.ruta)}" loading="lazy" onclick="window.open('${esc(im.ruta)}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:'<div class="filebox"><div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>';
   const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
-    <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div></div></div>`;
+    <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.naturaleza?' · '+esc(d.naturaleza):''}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div>
+    <div style="margin-top:8px">${starsHtml(d._id,d.valoracion||0)}</div>
+    <div class="det-acts">
+      <button class="fbtn" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
+      <button class="fbtn" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
+      <button class="fbtn bad" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
+    </div></div></div>`;
   $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
+  attachStars('#p-detalle .stars');
+  {const cf=$('#actConf'),ce=$('#actEnr'),cr=$('#actRepr');
+   if(cf)cf.onclick=()=>fichaAccion('conformar',d._id,cf);
+   if(ce)ce.onclick=()=>fichaAccion('enriquecer',d._id,ce);
+   if(cr)cr.onclick=()=>fichaReprocesar(d._id);}
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
   $$('#p-detalle [data-q]').forEach(a=>a.onclick=()=>buscarTexto(a.dataset.q));
   carIdx=0;const tr=$('#carTrack');
@@ -899,6 +935,42 @@ function pintarDoc(r,ctx){
 let carIdx=0;
 function carMove(dir){const t=$('#carTrack');if(!t)return;const n=t.children.length;carIdx=Math.max(0,Math.min(n-1,carIdx+dir));
   t.scrollTo({left:t.clientWidth*carIdx,behavior:'smooth'});const dd=$('#carDots');if(dd)dd.textContent=(carIdx+1)+' / '+n;}
+
+// ── valoración (estrellas, estilo Lightroom) — clicables en la ficha y en las tarjetas de Búsqueda ──
+function starsHtml(id,v){v=Number(v)||0;
+  const st=[5,4,3,2,1].map(n=>`<span class="st${n<=v?' on':''}" data-v="${n}">★</span>`).join(''); // 5→1 + row-reverse: relleno al pasar el ratón
+  return `<span class="stars" data-doc="${esc(id)}" data-v="${v}" title="Valora (clic en una estrella; repite la misma para quitar)">${st}</span>`;}
+function attachStars(sel){$$(sel).forEach(w=>{
+  if(w.classList.contains('ro'))return;
+  w.querySelectorAll('.st').forEach(s=>{s.onclick=async e=>{e.stopPropagation();
+    const n=Number(s.dataset.v),cur=Number(w.dataset.v)||0,nv=(n===cur)?0:n; // clic en la actual → quitar
+    try{await api('/documentos/'+encodeURIComponent(w.dataset.doc)+'/valoracion',{method:'POST',body:JSON.stringify({valoracion:nv})});
+      w.dataset.v=nv;w.querySelectorAll('.st').forEach(x=>x.classList.toggle('on',Number(x.dataset.v)<=nv));
+      toast(nv?('Valorado con '+nv+'★'):'Valoración quitada');
+    }catch(err){toast(err.message,'bad');}};});});}
+
+// ── acciones de la ficha: Conformar / Enriquecer (con resumen de cambios) y Reprocesar ──
+async function fichaAccion(tipo,id,btn){
+  const lbl=btn.innerHTML;btn.disabled=true;btn.textContent=tipo==='conformar'?'⏳ Conformando…':'⏳ Enriqueciendo…';
+  try{const r=await api('/documentos/'+encodeURIComponent(id)+'/'+tipo,{method:'POST',body:'{}'});
+    if(!r.ok){toast(r.motivo||'sin cambios','warn');return;}
+    const cambios=r.cambios||[];
+    mostrarCambios(tipo==='conformar'?'Conformador':'Enriquecedor',cambios);
+    if(cambios.length)verDoc(id,detalle&&detalle.ctx); // refrescar la ficha con el nuevo estado
+  }catch(e){toast(e.message,'bad');}
+  finally{btn.disabled=false;btn.innerHTML=lbl;}}
+function mostrarCambios(titulo,cambios){
+  const fila=c=>`<tr><td class="k">${esc(c.campo)}</td><td>${(c.de!=null&&c.de!=='')?`<span class="de">${esc(recortar(String(c.de),80))}</span><br>`:''}<span class="a">${esc(recortar(String(c.a),140))||'—'}</span></td></tr>`;
+  const cuerpo=cambios.length?`<table class="chgtab">${cambios.map(fila).join('')}</table>`:'<div class="muted">Sin cambios: el documento ya estaba al día.</div>';
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:540px"><h3 style="margin-top:0">${esc(titulo)} — ${cambios.length} cambio${cambios.length===1?'':'s'}</h3>${cuerpo}<div style="margin-top:14px;text-align:right"><button class="btn" id="chgClose">Cerrar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#chgClose').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;}
+async function fichaReprocesar(id){
+  const pw=await modalPassword({titulo:'♻️ Reprocesar documento',aviso:'Se borrará el documento, su fichero volverá al <b>Inbox</b> para re-catalogarse y su carpeta actual (sidecars e imágenes) irá a la <b>Papelera</b> (recuperable). El Vigilante debe estar activo para que se vuelva a procesar.'});
+  if(pw==null)return;
+  try{const r=await api('/documentos/'+encodeURIComponent(id)+'/reprocesar',{method:'POST',body:JSON.stringify({password:pw})});
+    if(!r.ok){toast(r.motivo,'bad');return;}
+    toast('Reprocesando: «'+r.inbox+'» devuelto al Inbox');go('search');
+  }catch(e){toast(e.message,'bad');}}
 
 function previewArchivo(r){
   if(!r.archivo_url)return '';
@@ -1078,7 +1150,11 @@ function construirSearch(){
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option></select></div>
         <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off"></div>
+        <div><label>Estrellas</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
+          <div class="pop">${[5,4,3,2,1].map(n=>`<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label></div>
+        </details></div>
         <div><label>Orden</label><select id="sqOrden"><option value="reciente">Recientes</option><option value="titulo">Título A-Z</option><option value="antiguo">Antiguos</option></select></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
       </div>
     </div>
     <div id="searchChip" style="margin-bottom:12px"></div>
@@ -1089,11 +1165,18 @@ function construirSearch(){
   $('#sqCdu').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
   $('#sqTipo').onchange=()=>buscarCatalogo(1);
   $('#sqOrden').onchange=()=>buscarCatalogo(1);
+  $$('#p-search .sqStar').forEach(c=>c.onchange=()=>{actualizarSumEstrellas();buscarCatalogo(1);});
+  $('#sqClear').onclick=()=>{$('#sqQ').value='';$('#sqCdu').value='';$('#sqTipo').value='';$('#sqOrden').value='reciente';
+    $$('#p-search .sqStar').forEach(c=>c.checked=false);estadoBusqueda.extra=null;actualizarSumEstrellas();buscarCatalogo(1);};
 }
+function estrellasSel(){return $$('#p-search .sqStar:checked').map(c=>c.value);}
+function actualizarSumEstrellas(){const s=$('#sqStarsSum');if(!s)return;const sel=estrellasSel();
+  s.textContent=(!sel.length||sel.length===6)?'Todas':sel.map(n=>n==='0'?'0★':n+'★').sort().reverse().join(' ');}
 function loadSearch(){if(!$('#sqQ'))construirSearch();buscarCatalogo(estadoBusqueda.page||1);}
 async function buscarCatalogo(page){
   estadoBusqueda.page=page;
   const params=new URLSearchParams({q:$('#sqQ').value.trim(),tipo:$('#sqTipo').value,cdu:$('#sqCdu').value.trim(),orden:$('#sqOrden').value,page});
+  const est=estrellasSel();if(est.length&&est.length<6)params.set('estrellas',est.join(','));
   if(estadoBusqueda.extra)for(const[k,v]of Object.entries(estadoBusqueda.extra)){if(k!=='etiqueta'&&v!=null&&v!=='')params.set(k,v);}
   pintarChipClas();
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
@@ -1111,12 +1194,13 @@ function docCard(d){
   const cov=d.portada?`<img src="${esc(d.portada)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`:`<div class="ph">${ph}</div>`;
   const fmt=(d.formatos||[]).slice(0,2).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
   const sub=(d.autores&&d.autores.length?d.autores.slice(0,2).join(', '):'')||(d.año_edicion?String(d.año_edicion):'')||d.isbn||'—';
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div></div></div>`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${starsHtml(d._id,d.valoracion||0)}</div></div></div>`;
 }
 function pintarBusqueda(r){
   $('#searchCount').textContent=`${r.total.toLocaleString('es-ES')} resultado${r.total===1?'':'s'}`;
   $('#searchResults').innerHTML=r.docs.length?`<div class="vol-grid">${r.docs.map(docCard).join('')}</div>`:'<div class="empty">Sin resultados</div>';
   $$('#searchResults .vol[data-doc]').forEach(el=>el.onclick=()=>verDoc(el.dataset.doc,{volver:'search',etiqueta:'Búsqueda'}));
+  attachStars('#searchResults .stars');
   const p=r.page,tp=r.paginas;
   $('#searchPager').innerHTML=tp>1?`<button class="btn" id="pgPrev" ${p<=1?'disabled':''}>‹ Anterior</button><span class="muted">Página ${p} de ${tp}</span><button class="btn" id="pgNext" ${p>=tp?'disabled':''}>Siguiente ›</button>`:'';
   if($('#pgPrev'))$('#pgPrev').onclick=()=>buscarCatalogo(p-1);

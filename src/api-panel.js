@@ -10,6 +10,9 @@ import { verificarPasswordAdmin } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { verificarIntegridad } from './integridad.js';
 import { purgarObra } from './utils/purga.js';
+import { reprocesarDocumento } from './utils/reproceso.js';
+import { reenriquecerDoc } from './utils/reenriquecer.js';
+import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { resolverNombres } from './utils/registro.js';
@@ -297,6 +300,17 @@ export function rutasPanel() {
             }
             const fe = await filtroEspecial(db, String(req.query.filtro || '').trim());
             if (fe) extras.push(fe);
+            // Filtro por VALORACIÓN (estrellas): CSV de valores 0..5 (multi-selección, p. ej. "0,1,2").
+            // 0 = sin valorar (valoracion ausente/null/0). Si están los 6, no filtra (equivale a "todas").
+            const estrellas = [...new Set(String(req.query.estrellas || '').split(',')
+                .map(s => parseInt(s, 10)).filter(n => n >= 0 && n <= 5))];
+            if (estrellas.length && estrellas.length < 6) {
+                const ors = [];
+                const pos = estrellas.filter(n => n > 0);
+                if (pos.length) ors.push({ valoracion: { $in: pos } });
+                if (estrellas.includes(0)) ors.push({ valoracion: { $in: [0, null] } }, { valoracion: { $exists: false } });
+                extras.push({ $or: ors });
+            }
             // NSFW: los invitados no ven material marcado (ni el que cuelga de una obra/colección nsfw).
             const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
             if (nsfwCond) extras.push(...nsfwCond);
@@ -310,7 +324,8 @@ export function rutasPanel() {
                 { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
                 { $project: {
                     titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
-                    tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1, autores: '$_au.nombre',
+                    tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
+                    valoracion: 1, naturaleza: 1, autores: '$_au.nombre',
                 } },
             ], opciones).toArray();
 
@@ -460,6 +475,79 @@ export function rutasPanel() {
                 archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
                 imagenes: doc.imagenes || [], portada: doc.portada || null,
             });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // VALORACIÓN (estrellas 0..5, estilo Lightroom) de un documento — para evaluar salud/interés a mano.
+    // 0 = sin valorar. La fija el usuario desde la ficha o las tarjetas de la Búsqueda.
+    r.post('/documentos/:id/valoracion', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const v = Math.round(Number(req.body?.valoracion));
+            if (!(v >= 0 && v <= 5)) return res.status(400).json({ ok: false, motivo: 'valoración fuera de rango (0..5)' });
+            const db = await conectarDB();
+            const r2 = await db.collection('biblioteca').updateOne(
+                { _id: new ObjectId(req.params.id) }, { $set: { valoracion: v, fecha_actualizacion: new Date() } });
+            if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json({ ok: true, valoracion: v });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Campos relevantes a comparar antes/después de conformar para mostrar "qué cambió".
+    const CAMPOS_DIFF = ['titulo', 'subtitulo', 'cdu', 'dewey', 'lcc', 'lccn', 'portada', 'ruta_base',
+        'nombre_archivo', 'sinopsis', 'año_edicion', 'idioma', 'estado_verificacion', 'isbn', 'issn'];
+    const snapshot = (d) => { const o = {}; for (const k of CAMPOS_DIFF) o[k] = d?.[k] ?? null; o.imagenes = (d?.imagenes || []).length; return o; };
+    const diffSnap = (a, b) => {
+        const out = [];
+        for (const k of [...CAMPOS_DIFF, 'imagenes']) {
+            const va = a[k], vb = b[k];
+            if (JSON.stringify(va) !== JSON.stringify(vb)) out.push({ campo: k, de: va, a: vb });
+        }
+        return out;
+    };
+
+    // CONFORMADOR para UN documento (botón de la ficha): ejecuta las tareas de mantenimiento (portada,
+    // re-clasificar CDU + mover carpeta, regenerar sidecars…) solo sobre este doc. Devuelve los cambios.
+    r.post('/documentos/:id/conformar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const col = db.collection('biblioteca');
+            const id = new ObjectId(req.params.id);
+            const antes = await col.findOne({ _id: id });
+            if (!antes) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const r2 = await conformarAlIngerir(id);
+            if (!r2.ok) return res.json({ ok: false, motivo: r2.motivo === 'locked' ? 'documento bloqueado (locked): el Conformador no lo toca' : (r2.motivo === 'fuera-de-contenedor' ? 'el Conformador solo corre en el NAS (junto a los ficheros)' : r2.motivo) });
+            const despues = await col.findOne({ _id: id });
+            res.json({ ok: true, cambios: diffSnap(snapshot(antes), snapshot(despues)), n: r2.cambios });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ENRIQUECEDOR para UN documento (botón de la ficha): re-consulta APIs/IA y mejora el registro
+    // (rellena huecos; corrige título/autor solo si eran basura). Devuelve la lista de cambios.
+    r.post('/documentos/:id/enriquecer', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (doc.locked) return res.json({ ok: false, motivo: 'documento bloqueado (locked)' });
+            const r2 = await reenriquecerDoc(db, doc);
+            res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // REPROCESAR un documento (botón de la ficha): lo devuelve al Inbox para re-catalogarlo de cero,
+    // recicla su carpeta CDU (sidecars/imágenes) y borra el doc. Requiere contraseña de admin.
+    r.post('/documentos/:id/reprocesar', async (req, res) => {
+        try {
+            if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const r2 = await reprocesarDocumento(db, doc);
+            res.json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
