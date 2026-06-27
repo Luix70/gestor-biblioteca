@@ -462,6 +462,14 @@ const api=async(p,opt={})=>{const h={'Content-Type':'application/json',...(opt.h
 const fmtBytes=b=>{if(!b)return'0 B';const u=['B','KB','MB','GB','TB'];const i=Math.floor(Math.log(b)/Math.log(1024));return (b/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i];};
 const toast=(m,t='ok')=>{const e=document.createElement('div');e.className='toast '+(t==='ok'?'':t);e.textContent=m;$('#toast').append(e);setTimeout(()=>e.remove(),3800);};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Copia al portapapeles con respaldo (la API clipboard exige contexto seguro; en LAN/http no está).
+function copiar(txt){
+  const ok=()=>toast('Copiado al portapapeles');
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(ok).catch(()=>copiarFallback(txt,ok));
+  else copiarFallback(txt,ok);
+}
+function copiarFallback(txt,ok){const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');ok();}catch{toast('No se pudo copiar','bad');}document.body.removeChild(ta);}
 
 // ── nav ──
 const titles={dashboard:'Dashboard',activity:'Actividad',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',colecciones:'Colecciones',inbox:'Inbox',search:'Búsqueda'};
@@ -906,7 +914,7 @@ function pintarDoc(r,ctx){
     _ubicacion:d.ubicacion?(esc([d.ubicacion.ambito,d.ubicacion.estanteria].filter(Boolean).join(' · '))||null):null,
     _ingreso:d.fecha_ingreso?fmtFecha(d.fecha_ingreso):null,
     _actualizado:d.fecha_actualizacion?fmtFecha(d.fecha_actualizacion):null,
-    _ruta:d.ruta_base?`<span class="mono">${esc(d.ruta_base.replace(/^\/recursos\//,''))}</span>`:null,
+    _ruta:d.ruta_base?(()=>{const rb=d.ruta_base.replace(/^\/recursos/,'');return `<span class="mono">${esc(rb)}</span> <button class="rbtn copybtn" data-copy="${esc(rb)}" title="Copiar la ruta">📋</button>`;})():null,
     obra_titulo:r.obra?`<a onclick="verObra('${esc(r.obra._id)}')" class="rowlink">${esc(r.obra.titulo||d.obra_titulo||'(obra)')}</a>`:(d.obra_titulo?esc(d.obra_titulo):null),
     // Identificadores DRILLABLES: clic → Búsqueda por ese ISSN/ISBN (ve TODO lo que lo comparte — útil
     // para destapar libros mal clasificados colgando de un ISSN de serie, o ediciones del mismo ISBN).
@@ -934,6 +942,7 @@ function pintarDoc(r,ctx){
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
   attachRating('#p-detalle');
+  $$('#p-detalle .copybtn').forEach(b=>b.onclick=e=>{e.stopPropagation();copiar(b.dataset.copy);});
   {const cf=$('#actConf'),ce=$('#actEnr'),cr=$('#actRepr');
    if(cf)cf.onclick=()=>fichaAccion('conformar',d._id,cf);
    if(ce)ce.onclick=()=>fichaAccion('enriquecer',d._id,ce);
