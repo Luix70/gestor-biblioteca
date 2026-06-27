@@ -8,10 +8,14 @@ const ANCHO_OBJETIVO = Number(process.env.PORTADA_ANCHO_OBJETIVO || 1000);
 const ANCHO_MINIMO   = Number(process.env.PORTADA_ANCHO_MINIMO   || 100);
 const ANCHO_DECENTE  = Number(process.env.PORTADA_ANCHO_DECENTE  || 500); // si ya hay algo así, no se descargan remotos
 
-function evaluar(buffer, origen) {
+function evaluar(buffer, origen, aceptarSinMedir = false) {
     if (!buffer || !buffer.length) return null;
     const m = medirImagen(buffer);
-    if (!m || m.width < ANCHO_MINIMO || m.height < ANCHO_MINIMO) return null; // degenerada / no legible
+    // No medible: una portada LOCAL extraída del propio archivo (cómic/EPUB) ES la cubierta — no se
+    // descarta solo porque no sepamos medir su formato; se acepta con un ancho nominal "objetivo" para
+    // que se use sin disparar descargas remotas. Las remotas SÍ exigen medida (así cae el 1x1 de OL).
+    if (!m) return aceptarSinMedir ? { base64: buffer.toString('base64'), origen, ancho: ANCHO_OBJETIVO, alto: ANCHO_OBJETIVO } : null;
+    if (m.width < ANCHO_MINIMO || m.height < ANCHO_MINIMO) return null; // degenerada / no legible
     return { base64: buffer.toString('base64'), origen, ancho: m.width, alto: m.height };
 }
 
@@ -38,13 +42,13 @@ export async function resolverPortada({ tipo, rutas = [], numPaginas = 2, embebi
 
     // 1. Cubierta embebida en el archivo (EPUB): la fuente preferida y gratis.
     if (embebidaBase64) {
-        const c = evaluar(Buffer.from(embebidaBase64, 'base64'), 'archivo');
+        const c = evaluar(Buffer.from(embebidaBase64, 'base64'), 'archivo', true); // local: no descartar si no se mide
         if (c) candidatas.push(c);
     }
 
     // 1b. Portada pre-extraída (covers/ del drop por carpeta): compite por tamaño con las demás.
     if (preextraidaBase64) {
-        const c = evaluar(Buffer.from(preextraidaBase64, 'base64'), 'covers');
+        const c = evaluar(Buffer.from(preextraidaBase64, 'base64'), 'covers', true); // local: no descartar si no se mide
         if (c) candidatas.push(c);
     }
 

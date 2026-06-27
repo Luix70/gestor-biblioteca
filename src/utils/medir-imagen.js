@@ -37,6 +37,11 @@ export function medirImagen(buffer) {
         return null;
     }
 
+    // --- BMP: "BM", ancho/alto en int32 LE en offsets 18/22 (alto puede ser negativo: top-down) ---
+    if (buffer[0] === 0x42 && buffer[1] === 0x4d && buffer.length >= 26) {
+        return { formato: 'bmp', width: Math.abs(buffer.readInt32LE(18)), height: Math.abs(buffer.readInt32LE(22)) };
+    }
+
     // --- WEBP: "RIFF"...."WEBP" + sub-chunk VP8 / VP8L / VP8X ---
     if (buffer.length >= 30 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
         const tipo = buffer.toString('ascii', 12, 16);
