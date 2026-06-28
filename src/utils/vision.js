@@ -20,22 +20,31 @@ const TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS) || Number(process.env.H
 const limpia = (k) => (k && String(k).trim()) || null;
 
 // Catálogo de proveedores. `claves()` descubre en .env; `modelo`/`baseURL` admiten override por env.
+// `maxImg` = nº MÁXIMO de imágenes por petición que admite el modelo (Groq llama-4 = 5; Gemini, muchas).
+// Si se superan, conVision recorta a las primeras (max-1) + la última (evita "too many images"). Override
+// por env: GEMINI_MAX_IMG / GROQ_MAX_IMG / OPENROUTER_MAX_IMG.
 const PROVEEDORES = [
-    { id: 'gemini-free', etiqueta: 'Gemini (free)', tipo: 'gemini', tier: 'free',
+    { id: 'gemini-free', etiqueta: 'Gemini (free)', tipo: 'gemini', tier: 'free', maxImg: Number(process.env.GEMINI_MAX_IMG) || 16,
         modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
         prefijos: ['GEMINI_API_FREE_KEY'] },
-    { id: 'groq', etiqueta: 'Groq · Llama Vision', tipo: 'openai', tier: 'free',
+    { id: 'groq', etiqueta: 'Groq · Llama Vision', tipo: 'openai', tier: 'free', maxImg: Number(process.env.GROQ_MAX_IMG) || 5,
         baseURL: () => process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
         modelo: () => process.env.GROQ_MODELO || 'meta-llama/llama-4-scout-17b-16e-instruct',
         prefijos: ['GROQ_API_KEY'] },
-    { id: 'openrouter', etiqueta: 'OpenRouter (free)', tipo: 'openai', tier: 'free',
+    { id: 'openrouter', etiqueta: 'OpenRouter (free)', tipo: 'openai', tier: 'free', maxImg: Number(process.env.OPENROUTER_MAX_IMG) || 5,
         baseURL: () => process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
         modelo: () => process.env.OPENROUTER_MODELO || 'meta-llama/llama-3.2-11b-vision-instruct:free',
         prefijos: ['OPENROUTER_API_KEY'] },
-    { id: 'gemini-paid', etiqueta: 'Gemini (pago)', tipo: 'gemini', tier: 'paid',
+    { id: 'gemini-paid', etiqueta: 'Gemini (pago)', tipo: 'gemini', tier: 'paid', maxImg: Number(process.env.GEMINI_MAX_IMG) || 16,
         modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
         prefijos: ['GEMINI_API_KEY_PAID'] },
 ];
+
+// Recorta a `max` imágenes conservando las primeras (max-1) + la ÚLTIMA (suele llevar ISBN/créditos).
+function recortarImagenes(imgs, max) {
+    if (!max || !imgs || imgs.length <= max) return imgs || [];
+    return [...imgs.slice(0, max - 1), imgs[imgs.length - 1]];
+}
 
 function descubrir(prefijos) {
     const out = [];
@@ -80,24 +89,32 @@ async function ajustes() {
 }
 async function habilitado(id) { return (await ajustes()).get(id)?.enabled !== false; } // por defecto activo
 
+// "Demasiadas imágenes" NO es cuota: es un error de PETICIÓN (el modelo limita el nº de imágenes). No debe
+// enfriar la clave ni contarse como 429 (con el recorte por maxImg ya no debería ocurrir; esto es la red).
+const esTantasImagenes = (e) => {
+    const m = String(e?.message || '') + ' ' + String(e?.response?.data?.error?.message || '');
+    return /too.?many.?images|supports up to \d+ image|number of images|image.?(count|limit)/i.test(m);
+};
 const esCuota = (e) => {
+    if (esTantasImagenes(e)) return false;
     const s = e?.status || e?.response?.status;
     const m = String(e?.message || '') + ' ' + String(e?.response?.data?.error?.message || '');
-    return s === 429 || /\b429\b|quota|rate.?limit|resource.?exhausted|exhausted|too.?many/i.test(m);
+    return s === 429 || /\b429\b|quota|rate.?limit|resource.?exhausted|exhausted|too.?many.?request/i.test(m);
 };
 const motivo = (e) => esCuota(e) ? `429 cuota — ${(e?.response?.data?.error?.message || e?.message || '').replace(/\s+/g, ' ').slice(0, 160)}`
     : (e?.response?.status || e?.status || (e?.message || '').slice(0, 120));
 
 async function llamar(c, { prompt, imagenes, json }) {
+    const imgs = recortarImagenes(imagenes, c.prov.maxImg);   // respeta el límite de imágenes del modelo
     if (c.prov.tipo === 'gemini') {
         const model = new GoogleGenerativeAI(c.key).getGenerativeModel({ model: c.modelo, generationConfig: json ? { responseMimeType: 'application/json' } : {} });
-        const parts = [prompt, ...imagenes.map(im => ({ inlineData: { data: im.base64, mimeType: im.mimeType || 'image/jpeg' } }))];
+        const parts = [prompt, ...imgs.map(im => ({ inlineData: { data: im.base64, mimeType: im.mimeType || 'image/jpeg' } }))];
         const res = await model.generateContent(parts);
         return res.response.text();
     }
     // OpenAI-compatible (Groq, OpenRouter, …): no forzamos response_format (algunos modelos lo rechazan);
     // el prompt ya pide JSON y extraerJSON() lo limpia.
-    const content = [{ type: 'text', text: prompt }, ...imagenes.map(im => ({ type: 'image_url', image_url: { url: `data:${im.mimeType || 'image/jpeg'};base64,${im.base64}` } }))];
+    const content = [{ type: 'text', text: prompt }, ...imgs.map(im => ({ type: 'image_url', image_url: { url: `data:${im.mimeType || 'image/jpeg'};base64,${im.base64}` } }))];
     const headers = { Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json' };
     if (c.prov.id === 'openrouter') { headers['HTTP-Referer'] = 'https://gestor-biblioteca.local'; headers['X-Title'] = 'Gestor Biblioteca'; }
     const res = await axios.post(`${c.baseURL}/chat/completions`,
