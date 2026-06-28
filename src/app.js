@@ -109,16 +109,26 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
         return res.status(400).json({ status: 'error', message: 'No se recibieron archivos.' });
     }
 
+    // Metadatos del FORMULARIO del Inbox que VIAJAN con la subida (igual que el contexto de un drop de
+    // carpeta): ubicación física, colección, obra e ISBN conocido → el pipeline hace menos trabajo.
     const ubicacion = ubicacionDe(req.body);
-    const contexto = ubicacion ? { ubicacion } : {};
-    // Conformar al ingerir bajo demanda (además del toggle global CONFORMAR_AL_INGERIR): ?conformar=1
-    // o body.conformar — útil para una ingesta manual suelta que quieras dejar perfecta ya.
-    if (req.body?.conformar === '1' || req.body?.conformar === true || req.query?.conformar === '1') contexto.conformar = true;
+    const coleccion = String(req.body?.coleccion || '').trim() || null;
+    const obraTit   = String(req.body?.obra || '').trim() || null;
+    const isbnForm  = String(req.body?.isbn || '').replace(/[^0-9Xx]/g, '').toUpperCase() || null;
+    const conformar = req.body?.conformar === '1' || req.body?.conformar === true || req.query?.conformar === '1';
+    const baseCtx = {};
+    if (ubicacion) baseCtx.ubicacion = ubicacion;
+    if (coleccion) { baseCtx.coleccion = coleccion; baseCtx.serieAuto = true; } // serie de libros → autonumera
+    if (obraTit)   baseCtx.obra = { titulo: obraTit };
+    if (conformar) baseCtx.conformar = true;
+
     const unidades = agrupar(archivos);
     const resultados = [];
 
     for (const unidad of unidades) {
-        const ctx = unidad.esImagenes ? contexto : (ubicacion ? { ubicacion } : {});
+        const ctx = { ...baseCtx };
+        // El ISBN del formulario solo aplica a UN libro (un grupo de imágenes, o una única unidad subida).
+        if (isbnForm && (unidad.esImagenes || unidades.length === 1)) ctx.isbn = isbnForm;
         try {
             const r = await ingestarRecurso({ rutas: unidad.rutas, contexto: ctx });
             resultados.push({

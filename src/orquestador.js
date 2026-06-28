@@ -409,6 +409,17 @@ export async function procesarRecurso(entrada) {
         console.log(`[Orquestador] Override manual aplicado a ${path.basename(rutas[0])}${sinApis ? ' (sin APIs)' : ''}${forzarNuevo ? ' (forzar nuevo)' : ''}.`);
     }
 
+    // ISBN provisto por el usuario (formulario del Inbox): AUTORIDAD (como un override.isbn) → la
+    // identificación es directa y barata, y cuenta como señal fuerte de LIBRO (isbn_propio).
+    if (contexto.isbn) {
+        const v = validarISBN(contexto.isbn);
+        if (v) {
+            datosBase.isbn = v; datosBase.isbn_propio = v;
+            datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(v)])];
+            console.log(`[Orquestador] ISBN del formulario aplicado a ${path.basename(rutas[0])}: ${v}.`);
+        }
+    }
+
     // TIER 2–4 · enriquecimiento conservador (APIs + IA solo para huecos)
     const documento = await enriquecerMetadatos(datosBase, {
         tipo_recurso,

@@ -478,23 +478,36 @@ body.guest .admin-only{display:none!important}
       <section class="page" id="p-inbox">
         <div class="sec-h"><h2>Inbox — alta de recursos</h2><span class="muted" id="inboxHint"></span></div>
         <div class="card admin-only">
+          <h3>🏷️ Datos de esta alta <span class="muted" style="font-weight:400;font-size:12px">— opcional; viajan con lo que subas (el servidor trabaja menos)</span></h3>
+          <div class="row">
+            <div><label>ISBN</label><input id="inIsbn" placeholder="escanéalo (lector BT) o escríbelo" autocomplete="off" inputmode="numeric"></div>
+            <div><label>Colección / serie</label><input id="inColeccion" placeholder="p. ej. Astérix" autocomplete="off" list="dlColecciones"></div>
+            <div><label>Obra (multivolumen)</label><input id="inObra" placeholder="título de la obra" autocomplete="off"></div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div><label>Ubicación · ámbito</label><input id="inAmbito" placeholder="p. ej. Salón" autocomplete="off"></div>
+            <div><label>Ubicación · estantería</label><input id="inEstanteria" placeholder="p. ej. Estante 3" autocomplete="off"></div>
+            <div style="display:flex;align-items:flex-end"><button class="btn" id="inClear" type="button">✕ Limpiar</button></div>
+          </div>
+          <datalist id="dlColecciones"></datalist>
+        </div>
+        <div class="card admin-only">
           <h3>📁 Subir ficheros</h3>
-          <p class="muted" style="margin-top:0;font-size:12px">Arrastra o elige EPUB/PDF/imágenes/cómic/.zip/.rar/.7z. Varias imágenes del MISMO libro (portada + contra + páginas) → UN libro; varios documentos → cada uno por su lado. Pasan por el mismo pipeline que el Inbox del NAS.</p>
+          <p class="muted" style="margin-top:0;font-size:12px">Arrastra o elige EPUB/PDF/imágenes/cómic/.zip/.rar/.7z. Varias imágenes del MISMO libro (portada + contra + páginas) → UN libro; varios documentos → cada uno por su lado. Se aplican los datos de arriba.</p>
           <div id="dropZone" class="dropzone">⬆️ Arrastra ficheros aquí, o <button class="btn" id="pickBtn" type="button">elegir…</button>
             <input type="file" id="fileInput" multiple style="display:none">
           </div>
         </div>
-        <div class="card admin-only" id="camCard" style="display:none">
-          <h3>📷 Cámara</h3>
-          <p class="muted" style="margin-top:0;font-size:12px">Fotografía la portada y la CONTRAportada (código de barras) de un libro físico; se catalogan como UN libro.</p>
+        <div class="card admin-only" id="camCard">
+          <h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— usa la cámara del móvil (enfoque/zoom)</span></h3>
+          <p class="muted" style="margin-top:0;font-size:12px">Haz una foto de la portada y otra de la CONTRAportada (código de barras); se catalogan como UN libro. Cada foto se reduce antes de subir. (En PC abre el selector de archivos.)</p>
           <div class="row" style="align-items:center">
-            <button class="btn" id="camStart" type="button">📷 Abrir cámara</button>
-            <button class="btn" id="camShot" type="button" style="display:none">📸 Capturar</button>
-            <button class="btn pri" id="camDone" type="button" style="display:none">✅ Catalogar</button>
-            <button class="btn" id="camCancel" type="button" style="display:none">✕ Cerrar</button>
+            <button class="btn" id="camShot" type="button">📷 Hacer foto</button>
+            <button class="btn pri" id="camDone" type="button" disabled>✅ Catalogar (0)</button>
+            <button class="btn" id="camClear" type="button" style="display:none">✕ Descartar</button>
+            <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none">
           </div>
-          <video id="camVideo" playsinline muted style="display:none;width:100%;max-width:440px;border-radius:10px;margin-top:10px;background:#000"></video>
-          <div id="camThumbs" class="row" style="margin-top:10px;gap:8px"></div>
+          <div id="camThumbs" class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"></div>
         </div>
         <div class="card admin-only" id="nfcCard" style="display:none">
           <h3>📶 NFC</h3>
@@ -560,7 +573,7 @@ function copiarFallback(txt,ok){const ta=document.createElement('textarea');ta.v
 // ── nav ──
 const titles={dashboard:'Dashboard',activity:'Actividad',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',colecciones:'Colecciones',inbox:'Inbox',search:'Búsqueda'};
 let logTimer=null;
-function go(p){if(camStream)camCerrar();detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+function go(p){detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
   if(logTimer&&p!=='activity'){clearInterval(logTimer);logTimer=null;}
   $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');loaders[p]&&loaders[p]();apilarVista({v:'page',p});}
@@ -1733,13 +1746,13 @@ function drillInteg(mk,m){
   $('#intX').onclick=()=>{el.innerHTML='';};
   $$('#integDetalle [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'activity',etiqueta:'Integridad'}));
 }
-// ── Inbox OPERATIVO: subir ficheros (drag-drop/picker) · cámara · NFC → POST /api/ingestar ──
-let inboxWired=false, camStream=null, camShots=[];
+// ── Inbox OPERATIVO: subir ficheros/fotos con METADATOS que VIAJAN (ISBN/colección/obra/ubicación) ──
+let inboxWired=false, camFotos=[];
 function loadInbox(){
   if(!inboxWired){inboxWired=true;wireInbox();}
-  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&$('#camCard'))$('#camCard').style.display='';
   if(('NDEFReader' in window)&&$('#nfcCard'))$('#nfcCard').style.display='';
   if($('#inboxHint'))$('#inboxHint').textContent='Alta directa (pasa por el pipeline). Solo administradores.';
+  cargarDatalistColecciones();
 }
 function wireInbox(){
   const dz=$('#dropZone'),fi=$('#fileInput');
@@ -1750,22 +1763,66 @@ function wireInbox(){
     ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
     dz.addEventListener('drop',e=>{const f=[...((e.dataTransfer&&e.dataTransfer.files)||[])];if(f.length)subirInbox(f);});
   }
-  if($('#camStart'))$('#camStart').onclick=camAbrir;
-  if($('#camShot'))$('#camShot').onclick=camCapturar;
+  if($('#inClear'))$('#inClear').onclick=()=>['inIsbn','inColeccion','inObra','inAmbito','inEstanteria'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});
+  const ci=$('#camInput');
+  if($('#camShot'))$('#camShot').onclick=()=>ci&&ci.click();
+  if(ci)ci.onchange=async()=>{for(const f of ci.files){try{camFotos.push(await reducirImagen(f));}catch{camFotos.push(f);}}ci.value='';renderCamThumbs();};
   if($('#camDone'))$('#camDone').onclick=camCatalogar;
-  if($('#camCancel'))$('#camCancel').onclick=camCerrar;
+  if($('#camClear'))$('#camClear').onclick=()=>{camFotos=[];renderCamThumbs();};
   if($('#nfcRead'))$('#nfcRead').onclick=leerNFC;
+}
+// Autocompletado del campo Colección con las colecciones existentes.
+async function cargarDatalistColecciones(){
+  const dl=$('#dlColecciones');if(!dl)return;
+  try{const r=await api('/colecciones');const cols=r.colecciones||r.items||(Array.isArray(r)?r:[]);
+    dl.innerHTML=(Array.isArray(cols)?cols:[]).map(c=>`<option value="${esc(c.nombre||'')}">`).join('');
+  }catch(e){}
+}
+// Reduce una foto a máx. 2000px (canvas) antes de subir → menos datos y más rápido en el Atom.
+function reducirImagen(file,max=2000,q=0.85){
+  return new Promise((res,rej)=>{
+    const img=new Image(),url=URL.createObjectURL(file);
+    img.onload=()=>{URL.revokeObjectURL(url);const w=img.naturalWidth,h=img.naturalHeight,s=Math.min(1,max/Math.max(w,h));
+      if(s>=1){res(file);return;}
+      const c=document.createElement('canvas');c.width=Math.round(w*s);c.height=Math.round(h*s);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      c.toBlob(b=>res(b?new File([b],(file.name||'foto')+'.jpg',{type:'image/jpeg'}):file),'image/jpeg',q);};
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('img'));};
+    img.src=url;
+  });
+}
+function renderCamThumbs(){
+  const t=$('#camThumbs');if(t)t.innerHTML=camFotos.map((b,i)=>`<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(b)}" style="width:62px;height:82px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`).join('');
+  $$('#camThumbs [data-rm]').forEach(b=>b.onclick=()=>{camFotos.splice(+b.dataset.rm,1);renderCamThumbs();});
+  const d=$('#camDone');if(d){d.textContent=`✅ Catalogar (${camFotos.length})`;d.disabled=!camFotos.length;}
+  const cl=$('#camClear');if(cl)cl.style.display=camFotos.length?'':'none';
+}
+async function camCatalogar(){
+  if(!camFotos.length){toast('Haz al menos una foto','warn');return;}
+  const files=camFotos.slice();camFotos=[];renderCamThumbs();
+  await subirInbox(files);
+}
+// FormData con los METADATOS del formulario (viajan con la subida → el pipeline trabaja menos).
+function metaInbox(){
+  const fd=new FormData(),v=id=>($('#'+id)&&$('#'+id).value||'').trim();
+  if(v('inIsbn'))fd.append('isbn',v('inIsbn'));
+  if(v('inColeccion'))fd.append('coleccion',v('inColeccion'));
+  if(v('inObra'))fd.append('obra',v('inObra'));
+  if(v('inAmbito')||v('inEstanteria'))fd.append('ubicacion',JSON.stringify({ambito:v('inAmbito')||'Sin asignar',estanteria:v('inEstanteria')||'Sin asignar'}));
+  return fd;
 }
 // Subida → /api/ingestar (agrupar() en el server: varias imágenes = 1 libro; documentos = c/u por su lado).
 async function subirInbox(files){
   if(!files||!files.length)return;
-  const fd=new FormData();for(const f of files)fd.append('files',f,f.name);
+  const fd=metaInbox();for(const f of files)fd.append('files',f,f.name);
   const out=$('#inboxResults');if(out)out.innerHTML=`<div class="muted" style="padding:14px 4px">⏳ Subiendo y catalogando ${files.length} fichero(s)…</div>`;
   try{
     const r=await fetch('/api/ingestar',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});
     const j=await r.json().catch(()=>({}));
     if(r.status===403){if(out)out.innerHTML='<div class="empty">Solo los administradores pueden dar de alta recursos.</div>';return;}
     pintarInboxResultados(j.resultados||[]);
+    if($('#inIsbn'))$('#inIsbn').value='';   // el ISBN es por-libro: limpiar tras el alta (ubicación/colección se conservan)
+    cargarDatalistColecciones();             // refrescar el autocompletado por si se creó una colección nueva
   }catch(e){if(out)out.innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
 }
 function pintarInboxResultados(res){
@@ -1775,32 +1832,6 @@ function pintarInboxResultados(res){
     ?`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag ${r.estado==='completado'?'ok':'warn'}">${esc(r.operacion||'ok')}</span> <b>${esc(recortar(r.titulo||'(sin título)',70))}</b> <span class="muted mono" style="font-size:11px">${esc(r.isbn||r.issn||'')}</span>${r.id?` · <a class="rowlink" data-doc="${esc(r.id)}">ver ficha</a>`:''}</div>`
     :`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag bad">${esc(r.destino||'error')}</span> <span class="muted">${esc(r.error||'')}</span></div>`).join('')}</div>`;
   $$('#inboxResults [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'inbox',etiqueta:'Inbox'}));
-}
-// Cámara (getUserMedia): captura portada+contra+páginas → se suben como UN grupo (un libro).
-async function camAbrir(){
-  try{camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
-    const v=$('#camVideo');v.srcObject=camStream;v.style.display='';await v.play();camShots=[];renderCamThumbs();
-    $('#camStart').style.display='none';$('#camShot').style.display='';$('#camDone').style.display='';$('#camCancel').style.display='';
-  }catch(e){toast('No se pudo abrir la cámara: '+e.message,'bad');}
-}
-function camCapturar(){
-  const v=$('#camVideo');if(!v||!v.videoWidth)return;
-  const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
-  c.getContext('2d').drawImage(v,0,0);c.toBlob(b=>{if(b){camShots.push(b);renderCamThumbs();}},'image/jpeg',0.9);
-}
-function renderCamThumbs(){
-  const t=$('#camThumbs');if(t)t.innerHTML=camShots.map((b,i)=>`<span class="tag ok">📸 ${i+1}</span>`).join(' ');
-  const d=$('#camDone');if(d){d.textContent=`✅ Catalogar (${camShots.length})`;d.disabled=!camShots.length;}
-}
-async function camCatalogar(){
-  if(!camShots.length){toast('Captura al menos una foto','warn');return;}
-  const files=camShots.map((b,i)=>new File([b],`captura-${Date.now()}-${i+1}.jpg`,{type:'image/jpeg'}));
-  camCerrar();await subirInbox(files);
-}
-function camCerrar(){
-  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
-  const v=$('#camVideo');if(v){v.style.display='none';v.srcObject=null;}camShots=[];const t=$('#camThumbs');if(t)t.innerHTML='';
-  if($('#camStart')){$('#camStart').style.display='';$('#camShot').style.display='none';$('#camDone').style.display='none';$('#camCancel').style.display='none';}
 }
 // NFC (Web NFC, Android/Chrome): lee texto/URL de la etiqueta y lo busca en la biblioteca.
 async function leerNFC(){
