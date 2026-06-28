@@ -27,12 +27,14 @@ de una revista o libro. Devuelve SOLO un JSON con tres campos:
   porque el código de barras de la cubierta puede ser COMERCIAL (un UPC de precio), NO el ISSN.
 NO inventes nada: deja vacío lo que no veas con seguridad.`;
 
-// Recortes candidatos (fracciones del lienzo) de la CUBIERTA donde suele estar el código de barras.
-function recortesPortada() {
+// Recortes candidatos (fracciones del lienzo de UNA página) donde suele estar el código de barras. Se
+// aplican a la portada (pág. 1) y a la CONTRAportada (última página): en LIBROS el EAN del ISBN casi
+// siempre va en la contracubierta, no en la portada.
+function recortesDePagina(p) {
     return [
-        { p: 1, fx: 0.52, fy: 0.58, fw: 0.48, fh: 0.42 }, // esquina inferior DERECHA (horizontal + base de verticales)
-        { p: 1, fx: 0.00, fy: 0.66, fw: 0.45, fh: 0.34 }, // esquina inferior IZQUIERDA
-        { p: 1, fx: 0.68, fy: 0.20, fw: 0.32, fh: 0.80 }, // borde DERECHO alto (barras verticales)
+        { p, fx: 0.52, fy: 0.58, fw: 0.48, fh: 0.42 }, // esquina inferior DERECHA (horizontal + base de verticales)
+        { p, fx: 0.00, fy: 0.66, fw: 0.45, fh: 0.34 }, // esquina inferior IZQUIERDA
+        { p, fx: 0.68, fy: 0.20, fw: 0.32, fh: 0.80 }, // borde DERECHO alto (barras verticales)
     ];
 }
 
@@ -44,8 +46,11 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInterno
 
     const imagenes = [];
     const bufsPortada = [];
-    // (a) Recortes de la cubierta a alta resolución para el código de barras.
-    for (const r of recortesPortada()) {
+    // (a) Recortes para el código de barras: la CUBIERTA (pág. 1) y también la CONTRACUBIERTA (última
+    //     página) — en los LIBROS el EAN del ISBN suele estar en la contracubierta, no en la portada.
+    const ult = numPaginas && numPaginas > 1 ? numPaginas : null;
+    const zonas = [...recortesDePagina(1), ...(ult ? recortesDePagina(ult).slice(0, 2) : [])];
+    for (const r of zonas) {
         const buf = await rasterizarRecorte(ruta, r.p, { dpi, x: r.fx * wpx, y: r.fy * hpx, w: r.fw * wpx, h: r.fh * hpx });
         if (buf && buf.length) { bufsPortada.push(buf); imagenes.push({ base64: buf.toString('base64'), mimeType: 'image/jpeg' }); }
     }
@@ -65,7 +70,6 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInterno
     }
     // (b) Páginas INTERIORES (mancheta/créditos) para el ISSN impreso: reusar renders ya hechos (2ª-5ª,
     //     ni la portada ni la contraportada). Hasta 3, sin re-rasterizar.
-    const ult = numPaginas && numPaginas > 1 ? numPaginas : null;
     const interiores = (rendersInternos || [])
         .filter(r => r && r.buffer && r.pagina > 1 && r.pagina !== ult)
         .slice(0, 3);
