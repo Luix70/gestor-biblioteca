@@ -30,12 +30,25 @@ export async function asignarColeccion(db, ids = [], { coleccionId = null, nombr
 
     const bib = db.collection('biblioteca');
     let n = 0;
+    // Series de LIBROS: auto-numerar (coleccion_numero) los miembros SIN número, continuando desde el
+    // máximo actual (igual que el serieAuto de motor-catalogo). Las revistas usan clave_numero (fecha).
+    let maxLibro = 0;
+    if (t !== 'revista') {
+        for (const m of await bib.find({ coleccion: _id }, { projection: { coleccion_numero: 1 } }).toArray()) {
+            const x = parseInt(m.coleccion_numero, 10); if (Number.isFinite(x) && x > maxLibro) maxLibro = x;
+        }
+    }
     for (const id of ids) {
         const _doc = oid(id); if (!_doc) continue;
         const doc = await bib.findOne({ _id: _doc });
         if (!doc) continue;
         const set = { coleccion: _id, coleccion_nombre: nom, fecha_actualizacion: new Date() };
         if (t === 'revista') { const cn = claveNumero(doc); if (cn) set.clave_numero = cn; }
+        else {
+            const propio = parseInt(doc.coleccion_numero, 10);
+            if (Number.isFinite(propio)) { if (propio > maxLibro) maxLibro = propio; } // conserva el suyo
+            else set.coleccion_numero = String(++maxLibro);                            // siguiente de la serie
+        }
         await bib.updateOne({ _id: doc._id }, { $set: set });
         if (t === 'revista') await registrarNumeroEnColeccion(db, _id, {
             clave: set.clave_numero || null, 'año': doc.año_edicion ?? null, mes: doc.mes_publicacion ?? null, numero_issue: doc.numero_issue ?? null,
