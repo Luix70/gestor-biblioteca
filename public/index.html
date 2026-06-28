@@ -264,6 +264,9 @@ body.guest .admin-only{display:none!important}
 .mock h2{font-size:22px;margin-bottom:8px}.mock p{color:var(--mut);max-width:460px;margin:0 auto 6px}
 .mock .chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:20px}
 .mock .chip{background:var(--card2);border:1px solid var(--line);padding:9px 15px;border-radius:30px;font-size:13px}
+/* inbox operativo */
+.dropzone{border:2px dashed var(--line);border-radius:12px;padding:26px 16px;text-align:center;color:var(--mut);background:var(--bg2);transition:.15s}
+.dropzone.drag{border-color:var(--acc);background:rgba(40,217,168,.08);color:var(--txt)}
 /* mobile-first refinements */
 @media(max-width:640px){
   .top .pill{display:none}.userbox .who{display:none}.top h1{font-size:16px}
@@ -304,7 +307,7 @@ body.guest .admin-only{display:none!important}
       <button data-p="pap"><span class="ic">♻</span> Papelera</button>
       <button data-p="obras"><span class="ic">📖</span> Obras</button>
       <button data-p="colecciones"><span class="ic">🗂️</span> Colecciones</button>
-      <button data-p="inbox"><span class="ic">📥</span> Inbox <span class="soon">MAQUETA</span></button>
+      <button class="admin-only" data-p="inbox"><span class="ic">📥</span> Inbox</button>
     </nav>
     <div class="sb-foot">v1 · cuadro de mando<br><span id="clock"></span></div>
   </aside>
@@ -473,13 +476,32 @@ body.guest .admin-only{display:none!important}
 
       <!-- INBOX (maqueta) -->
       <section class="page" id="p-inbox">
-        <div class="mock">
-          <div class="big">📥</div>
-          <h2>Inbox — alta de libros físicos</h2>
-          <p>Aquí escanearás libros físicos con la cámara (portada / ISBN) y grabarás etiquetas <b>NFC</b> para localizarlos en la estantería.</p>
-          <p>Será la función principal del front-end. Por ahora es una maqueta.</p>
-          <div class="chips"><span class="chip">📷 Escanear portada/ISBN</span><span class="chip">🏷️ Escribir NFC</span><span class="chip">📍 Ubicación física</span><span class="chip">➕ Alta rápida</span></div>
+        <div class="sec-h"><h2>Inbox — alta de recursos</h2><span class="muted" id="inboxHint"></span></div>
+        <div class="card admin-only">
+          <h3>📁 Subir ficheros</h3>
+          <p class="muted" style="margin-top:0;font-size:12px">Arrastra o elige EPUB/PDF/imágenes/cómic/.zip/.rar/.7z. Varias imágenes del MISMO libro (portada + contra + páginas) → UN libro; varios documentos → cada uno por su lado. Pasan por el mismo pipeline que el Inbox del NAS.</p>
+          <div id="dropZone" class="dropzone">⬆️ Arrastra ficheros aquí, o <button class="btn" id="pickBtn" type="button">elegir…</button>
+            <input type="file" id="fileInput" multiple style="display:none">
+          </div>
         </div>
+        <div class="card admin-only" id="camCard" style="display:none">
+          <h3>📷 Cámara</h3>
+          <p class="muted" style="margin-top:0;font-size:12px">Fotografía la portada y la CONTRAportada (código de barras) de un libro físico; se catalogan como UN libro.</p>
+          <div class="row" style="align-items:center">
+            <button class="btn" id="camStart" type="button">📷 Abrir cámara</button>
+            <button class="btn" id="camShot" type="button" style="display:none">📸 Capturar</button>
+            <button class="btn pri" id="camDone" type="button" style="display:none">✅ Catalogar</button>
+            <button class="btn" id="camCancel" type="button" style="display:none">✕ Cerrar</button>
+          </div>
+          <video id="camVideo" playsinline muted style="display:none;width:100%;max-width:440px;border-radius:10px;margin-top:10px;background:#000"></video>
+          <div id="camThumbs" class="row" style="margin-top:10px;gap:8px"></div>
+        </div>
+        <div class="card admin-only" id="nfcCard" style="display:none">
+          <h3>📶 NFC</h3>
+          <p class="muted" style="margin-top:0;font-size:12px">Lee una etiqueta NFC (ISBN/identificador) y búscalo en tu biblioteca. (Solo Android + Chrome con NFC.)</p>
+          <div class="row" style="align-items:center"><button class="btn" id="nfcRead" type="button">📶 Leer etiqueta</button><span class="muted" id="nfcOut"></span></div>
+        </div>
+        <div id="inboxResults" style="margin-top:14px"></div>
       </section>
 
       <!-- BÚSQUEDA + CATÁLOGO -->
@@ -538,7 +560,7 @@ function copiarFallback(txt,ok){const ta=document.createElement('textarea');ta.v
 // ── nav ──
 const titles={dashboard:'Dashboard',activity:'Actividad',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',colecciones:'Colecciones',inbox:'Inbox',search:'Búsqueda'};
 let logTimer=null;
-function go(p){detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
+function go(p){if(camStream)camCerrar();detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
   if(logTimer&&p!=='activity'){clearInterval(logTimer);logTimer=null;}
   $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');loaders[p]&&loaders[p]();apilarVista({v:'page',p});}
@@ -1711,7 +1733,92 @@ function drillInteg(mk,m){
   $('#intX').onclick=()=>{el.innerHTML='';};
   $$('#integDetalle [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'activity',etiqueta:'Integridad'}));
 }
-const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:loadPap,obras:loadObras,colecciones:loadColecciones,inbox:()=>{},search:loadSearch};
+// ── Inbox OPERATIVO: subir ficheros (drag-drop/picker) · cámara · NFC → POST /api/ingestar ──
+let inboxWired=false, camStream=null, camShots=[];
+function loadInbox(){
+  if(!inboxWired){inboxWired=true;wireInbox();}
+  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&$('#camCard'))$('#camCard').style.display='';
+  if(('NDEFReader' in window)&&$('#nfcCard'))$('#nfcCard').style.display='';
+  if($('#inboxHint'))$('#inboxHint').textContent='Alta directa (pasa por el pipeline). Solo administradores.';
+}
+function wireInbox(){
+  const dz=$('#dropZone'),fi=$('#fileInput');
+  if($('#pickBtn'))$('#pickBtn').onclick=()=>fi&&fi.click();
+  if(fi)fi.onchange=()=>{if(fi.files.length)subirInbox([...fi.files]);fi.value='';};
+  if(dz){
+    ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
+    ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
+    dz.addEventListener('drop',e=>{const f=[...((e.dataTransfer&&e.dataTransfer.files)||[])];if(f.length)subirInbox(f);});
+  }
+  if($('#camStart'))$('#camStart').onclick=camAbrir;
+  if($('#camShot'))$('#camShot').onclick=camCapturar;
+  if($('#camDone'))$('#camDone').onclick=camCatalogar;
+  if($('#camCancel'))$('#camCancel').onclick=camCerrar;
+  if($('#nfcRead'))$('#nfcRead').onclick=leerNFC;
+}
+// Subida → /api/ingestar (agrupar() en el server: varias imágenes = 1 libro; documentos = c/u por su lado).
+async function subirInbox(files){
+  if(!files||!files.length)return;
+  const fd=new FormData();for(const f of files)fd.append('files',f,f.name);
+  const out=$('#inboxResults');if(out)out.innerHTML=`<div class="muted" style="padding:14px 4px">⏳ Subiendo y catalogando ${files.length} fichero(s)…</div>`;
+  try{
+    const r=await fetch('/api/ingestar',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});
+    const j=await r.json().catch(()=>({}));
+    if(r.status===403){if(out)out.innerHTML='<div class="empty">Solo los administradores pueden dar de alta recursos.</div>';return;}
+    pintarInboxResultados(j.resultados||[]);
+  }catch(e){if(out)out.innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
+}
+function pintarInboxResultados(res){
+  const out=$('#inboxResults');if(!out)return;
+  if(!res.length){out.innerHTML='<div class="muted">Sin resultados.</div>';return;}
+  out.innerHTML=`<div class="card"><h3>Resultado (${res.length})</h3>${res.map(r=>r.ok
+    ?`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag ${r.estado==='completado'?'ok':'warn'}">${esc(r.operacion||'ok')}</span> <b>${esc(recortar(r.titulo||'(sin título)',70))}</b> <span class="muted mono" style="font-size:11px">${esc(r.isbn||r.issn||'')}</span>${r.id?` · <a class="rowlink" data-doc="${esc(r.id)}">ver ficha</a>`:''}</div>`
+    :`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag bad">${esc(r.destino||'error')}</span> <span class="muted">${esc(r.error||'')}</span></div>`).join('')}</div>`;
+  $$('#inboxResults [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'inbox',etiqueta:'Inbox'}));
+}
+// Cámara (getUserMedia): captura portada+contra+páginas → se suben como UN grupo (un libro).
+async function camAbrir(){
+  try{camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
+    const v=$('#camVideo');v.srcObject=camStream;v.style.display='';await v.play();camShots=[];renderCamThumbs();
+    $('#camStart').style.display='none';$('#camShot').style.display='';$('#camDone').style.display='';$('#camCancel').style.display='';
+  }catch(e){toast('No se pudo abrir la cámara: '+e.message,'bad');}
+}
+function camCapturar(){
+  const v=$('#camVideo');if(!v||!v.videoWidth)return;
+  const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+  c.getContext('2d').drawImage(v,0,0);c.toBlob(b=>{if(b){camShots.push(b);renderCamThumbs();}},'image/jpeg',0.9);
+}
+function renderCamThumbs(){
+  const t=$('#camThumbs');if(t)t.innerHTML=camShots.map((b,i)=>`<span class="tag ok">📸 ${i+1}</span>`).join(' ');
+  const d=$('#camDone');if(d){d.textContent=`✅ Catalogar (${camShots.length})`;d.disabled=!camShots.length;}
+}
+async function camCatalogar(){
+  if(!camShots.length){toast('Captura al menos una foto','warn');return;}
+  const files=camShots.map((b,i)=>new File([b],`captura-${Date.now()}-${i+1}.jpg`,{type:'image/jpeg'}));
+  camCerrar();await subirInbox(files);
+}
+function camCerrar(){
+  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
+  const v=$('#camVideo');if(v){v.style.display='none';v.srcObject=null;}camShots=[];const t=$('#camThumbs');if(t)t.innerHTML='';
+  if($('#camStart')){$('#camStart').style.display='';$('#camShot').style.display='none';$('#camDone').style.display='none';$('#camCancel').style.display='none';}
+}
+// NFC (Web NFC, Android/Chrome): lee texto/URL de la etiqueta y lo busca en la biblioteca.
+async function leerNFC(){
+  if(!('NDEFReader' in window)){toast('Este navegador no soporta NFC (Android + Chrome)','bad');return;}
+  const out=$('#nfcOut');if(out)out.textContent='Acerca la etiqueta…';
+  try{
+    const reader=new NDEFReader();await reader.scan();
+    reader.onreading=ev=>{
+      let txt='';
+      for(const rec of ev.message.records){try{if(rec.recordType==='text'||rec.recordType==='url'){txt=new TextDecoder(rec.encoding||'utf-8').decode(rec.data);break;}}catch(_){}}
+      const q=(txt||'').trim();
+      if(q){if(out)out.innerHTML=`Leído: <b class="mono">${esc(q)}</b>`;go('search');const inp=$('#sqQ');if(inp){inp.value=q;buscarCatalogo(1);}}
+      else if(out)out.textContent='Etiqueta sin texto legible.';
+    };
+    reader.onreadingerror=()=>{if(out)out.textContent='No se pudo leer la etiqueta.';};
+  }catch(e){if(out)out.textContent='NFC: '+e.message;}
+}
+const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:loadPap,obras:loadObras,colecciones:loadColecciones,inbox:loadInbox,search:loadSearch};
 
 // ── auth ──
 let estadoTimer=null;
