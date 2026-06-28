@@ -383,6 +383,15 @@ body.guest .admin-only{display:none!important}
             <div class="row"><button class="btn" id="visRefresh">↻ Actualizar</button></div>
             <div id="visOut" style="margin-top:12px"></div>
           </div>
+          <div class="card">
+            <h3>🔎 Búsqueda (índice FTS)</h3>
+            <p class="muted" style="margin-top:0;font-size:12px">Índice local SQLite para una búsqueda RÁPIDA e insensible a acentos ("matematicas" encuentra "Matemáticas"). Se mantiene solo al ingerir/editar/borrar; reindexa tras el 1.er despliegue o si la búsqueda parece incompleta. Sin índice, la búsqueda cae a Mongo.</p>
+            <div class="row" style="align-items:center">
+              <button class="btn admin-only" id="reindexBtn">🔁 Reindexar</button>
+              <span class="muted" id="indiceEstado" style="font-size:12px">…</span>
+            </div>
+            <p class="muted" style="margin-top:10px;font-size:12px">CLI: <span class="mono">docker exec gestor-biblioteca node scripts/reindexar-busqueda.js</span>.</p>
+          </div>
         </div>
         <div id="integOut" style="margin-top:16px"></div>
         <div class="card" style="margin-top:16px">
@@ -1488,7 +1497,23 @@ $('#logClear').onclick=()=>{if(confirm('¿Vaciar TODO el log?'))purgaLog({todo:t
 // ── integridad ──
 function loadInteg(){$('#integDiag').onclick=()=>correrIntegridad(false);if($('#integFix'))$('#integFix').onclick=()=>correrIntegridad(true);
   if($('#sanDiag')){$('#sanDiag').onclick=sanearDiag;$('#sanRun').onclick=sanearRun;}
-  if($('#visRefresh')){$('#visRefresh').onclick=loadVision;loadVision();}}
+  if($('#visRefresh')){$('#visRefresh').onclick=loadVision;loadVision();}
+  if($('#reindexBtn')){$('#reindexBtn').onclick=reindexar;loadIndice();}}
+// ── Búsqueda: índice FTS local (estado + reindexar en 2º plano con progreso) ──
+let reindexTimer=null;
+async function loadIndice(){const el=$('#indiceEstado');if(!el)return;
+  try{const r=await api('/busqueda/estado');const i=r.indice||{},t=r.trabajo||{};
+    if(t.en_curso){const p=t.progreso||{};el.innerHTML=`<span class="tag warn">reindexando</span> ${p.hechos||0}/${p.total||'?'}`;
+      if(!reindexTimer)reindexTimer=setInterval(loadIndice,1200);return;}
+    if(reindexTimer){clearInterval(reindexTimer);reindexTimer=null;}
+    if(t.error){el.innerHTML=`<span class="tag bad">error</span> ${esc(t.error)}`;return;}
+    el.innerHTML=i.disponible?`<span class="tag ok">activo</span> ${i.total} documento(s) indexados`:'<span class="tag warn">sin índice</span> · búsqueda por Mongo — pulsa Reindexar';
+  }catch(e){el.innerHTML='';}}
+async function reindexar(){const b=$('#reindexBtn');if(!b)return;b.disabled=true;
+  try{const r=await api('/busqueda/reindexar',{method:'POST',body:JSON.stringify({})});
+    if(!r.ok){toast(r.motivo||'no se pudo reindexar','bad');b.disabled=false;return;}
+    toast('Reindexando…');loadIndice();
+  }catch(e){toast(e.message,'bad');}finally{setTimeout(()=>{b.disabled=false;},800);}}
 async function loadVision(){const el=$('#visOut');if(!el)return;el.innerHTML='<div class="muted">Cargando…</div>';
   try{const r=await api('/vision/proveedores');const ps=r.proveedores||[];
     if(!ps.length){el.innerHTML='<div class="muted">Sin claves de visión en .env. Añade p. ej. GROQ_API_KEY_1=… y reinicia.</div>';return;}

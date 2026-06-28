@@ -13,6 +13,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { carpetaDeDoc } from '../mantenimiento/util-mantenimiento.js';
 import { reciclarCarpeta } from './papelera.js';
+import { desindexarDoc } from './indice-busqueda.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..', '..');
@@ -25,6 +26,7 @@ const existe = (p) => fs.access(p).then(() => true).catch(() => false);
 async function desvincularYReciclar(db, doc, etiqueta) {
     const carpeta = carpetaDeDoc(doc);
     await db.collection('biblioteca').deleteOne({ _id: doc._id });
+    await desindexarDoc(doc._id);   // quitar del índice de búsqueda (re-ingesta lo re-añade)
 
     // Quitar de la cabecera/colección (números) y recalcular su recuento.
     if (doc.coleccion) {

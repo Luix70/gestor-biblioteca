@@ -6,6 +6,7 @@
  */
 import { ObjectId } from 'mongodb';
 import { validarISBN, validarISSN } from './identificadores.js';
+import { indexarDoc } from './indice-busqueda.js';
 
 const TEXTO = ['subtitulo', 'idioma', 'numero_edicion', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'obra_titulo'];
 const NUM = ['año_edicion', 'paginas', 'volumen_numero'];
@@ -86,5 +87,7 @@ export async function editarDocumento(db, id, campos = {}) {
     if (Object.keys(unset).length) upd.$unset = unset;
     const r = await db.collection('biblioteca').updateOne({ _id: new ObjectId(id) }, upd);
     if (!r.matchedCount) return { ok: false, motivo: 'documento no encontrado' };
+    // Reindexar para que la búsqueda refleje los cambios (best-effort; no rompe la edición).
+    await indexarDoc(db, id);
     return { ok: true, avisos };
 }

@@ -13,6 +13,7 @@ import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalog
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { editarDocumento } from './utils/editar-doc.js';
+import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -237,6 +238,19 @@ export function rutasPanel() {
     });
     r.get('/sanear/estado', (req, res) => res.json(estadoSaneador()));
 
+    // ── Búsqueda (índice FTS local): estado + reconstrucción en 2º plano (con progreso, sin 405). El
+    //    índice se mantiene solo al ingerir/editar/borrar; reindexar es para la 1ª carga o una recuperación. ──
+    r.get('/busqueda/estado', async (req, res) => {
+        try { res.json({ ok: true, indice: await estadoIndice(), trabajo: estadoReindexado() }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/busqueda/reindexar', async (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        try { res.json(lanzarReindexado(await conectarDB())); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.get('/busqueda/reindexar/estado', (req, res) => res.json(estadoReindexado()));
+
     // ── Purga de obra multivolumen (simulación por defecto; ejecutar:true aplica) ──
     r.post('/obras/purgar', async (req, res) => {
         try {
@@ -313,12 +327,30 @@ export function rutasPanel() {
             // Filtro por colección (clic en la colección desde la ficha).
             const colId = String(req.query.coleccion || '').trim();
             if (colId && ObjectId.isValid(colId)) match.coleccion = new ObjectId(colId);
+            // Búsqueda de texto: si el ÍNDICE FTS local está disponible lo usa (rápido, ranqueado e
+            // INSENSIBLE A ACENTOS: "matematicas" encuentra "Matemáticas"), devolviendo _id por relevancia;
+            // si no, CAE a la búsqueda Mongo $regex de siempre. Los IDENTIFICADORES (ISBN/ISSN, tolerando
+            // separadores + ISSN de serie en la colección) van SIEMPRE por Mongo, en unión con el texto.
+            let idsRanked = null, ordenRelevancia = false;
             if (q) {
-                const rx = { $regex: escapeRegex(q), $options: 'i' };
-                const or = [{ titulo: rx }, { subtitulo: rx }, { obra_titulo: rx },
-                    { coleccion_nombre: rx }, { palabras_clave: rx }, { nombre_archivo: rx }];
-                // Identificadores: el ISSN se guarda CON guion (1699-7913) y el ISBN sin él. Toleramos
-                // separadores (guion/espacio) entre los dígitos para encontrarlo se escriba como se escriba.
+                const or = [];
+                const ftsIds = await buscarIndice(q, { limite: 1000 }).catch(() => null);
+                if (ftsIds) {
+                    idsRanked = ftsIds;
+                    if (ftsIds.length) or.push({ _id: { $in: ftsIds.map(id => new ObjectId(id)) } });
+                    ordenRelevancia = orden === 'reciente';   // por defecto, ordenar por relevancia
+                } else {
+                    const rx = { $regex: escapeRegex(q), $options: 'i' };
+                    or.push({ titulo: rx }, { subtitulo: rx }, { obra_titulo: rx },
+                        { coleccion_nombre: rx }, { palabras_clave: rx }, { nombre_archivo: rx });
+                    const [autores, edits] = await Promise.all([
+                        db.collection('autores').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
+                        db.collection('editoriales').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
+                    ]);
+                    if (autores.length) or.push({ autores: { $in: autores.map(a => a._id) } });
+                    if (edits.length) or.push({ editorial: { $in: edits.map(e => e._id) } });
+                }
+                // Identificadores (SIEMPRE Mongo): el ISSN se guarda CON guion (1699-7913) y el ISBN sin él.
                 const qId = q.replace(/[^0-9Xx]/g, '');
                 if (qId.length >= 8) {
                     const irx = { $regex: '^' + qId.split('').join('[\\s-]?'), $options: 'i' };
@@ -328,13 +360,9 @@ export function rutasPanel() {
                     const colsISSN = await db.collection('colecciones').find({ issn: irx }, { projection: { _id: 1 } }).limit(50).toArray();
                     if (colsISSN.length) or.push({ coleccion: { $in: colsISSN.map(c => c._id) } });
                 }
-                const [autores, edits] = await Promise.all([
-                    db.collection('autores').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
-                    db.collection('editoriales').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
-                ]);
-                if (autores.length) or.push({ autores: { $in: autores.map(a => a._id) } });
-                if (edits.length) or.push({ editorial: { $in: edits.map(e => e._id) } });
-                match.$or = or;
+                // Con q SIEMPRE filtramos por $or; si quedó vacío (FTS sin aciertos y sin identificador) →
+                // "sin resultados" en vez de devolver el catálogo entero.
+                match.$or = or.length ? or : [{ _id: { $in: [] } }];
             }
 
             // Filtros del Dashboard: por día de ingesta y/o por contador especial (se combinan con AND).
@@ -365,9 +393,18 @@ export function rutasPanel() {
 
             const sort = orden === 'titulo' ? { titulo: 1 } : orden === 'antiguo' ? { fecha_ingreso: 1 } : { fecha_ingreso: -1 };
             const opciones = orden === 'titulo' ? { collation: { locale: 'es', strength: 1 } } : {};
+            // Orden por RELEVANCIA cuando hay índice FTS: respeta el ranking bm25 (orden de idsRanked); los
+            // aciertos por identificador que no estén en el ranking caen al final (_rank grande).
+            const etapasOrden = (ordenRelevancia && idsRanked && idsRanked.length)
+                ? [
+                    { $addFields: { _rank: { $indexOfArray: [idsRanked, { $toString: '$_id' }] } } },
+                    { $addFields: { _rank: { $cond: [{ $lt: ['$_rank', 0] }, 1e9, '$_rank'] } } },
+                    { $sort: { _rank: 1, fecha_ingreso: -1 } },
+                  ]
+                : [{ $sort: sort }];
             const total = await db.collection('biblioteca').countDocuments(consulta);
             const docs = await db.collection('biblioteca').aggregate([
-                { $match: consulta }, { $sort: sort }, { $skip: (page - 1) * porPagina }, { $limit: porPagina },
+                { $match: consulta }, ...etapasOrden, { $skip: (page - 1) * porPagina }, { $limit: porPagina },
                 { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
                 { $project: {
                     titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,

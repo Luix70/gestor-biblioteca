@@ -244,6 +244,25 @@ revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
   "Eleventh Edition"), rellenar `dimensiones` desde OL `physical_dimensions` y `lengua_original` desde
   OL `translated_from`, materias OL `subject_*`, y una **tabla de autoridad de autores** (OL aporta
   fechas/bio/VIAF/Wikidata; BNE `per_id`) en vez de tirar `_ol_autores`.
+- **Índice de búsqueda del panel — SQLite FTS local** (`src/utils/indice-busqueda.js` ·
+  `scripts/reindexar-busqueda.js`): un **segundo** SQLite (`busqueda.db`, ESCRIBIBLE, no confundir con el
+  `fichero.db` de solo-lectura), una tabla **FTS5** que espeja el texto buscable de `biblioteca`
+  (título/subtítulo/obra/autores/editorial/colección/palabras_clave/identificadores/nombre_archivo) con
+  `tokenize='unicode61 remove_diacritics 2'` → búsqueda **insensible a acentos/mayúsculas** ("matematicas"
+  encuentra "Matemáticas"), por **prefijo** y multi-término (AND). **Por qué SQLite y no `$text` de Mongo:**
+  el plan de roadmap era "Mongo primario + SQLite-FTS"; el text-index de Atlas (free tier) no pliega acentos
+  bien y `$regex` ni rankea ni usa índice. **Mongo SIGUE siendo la verdad** — el FTS solo resuelve el *match
+  de texto*: `/api/catalogo?q=` es **híbrido** (FTS da los `_id` ranqueados por bm25 → se inyectan como
+  `_id $in` en el pipeline Mongo de siempre, así **TODOS los filtros estructurados — nsfw, valoración, CDU,
+  dashboard — quedan intactos** + orden por relevancia; los **identificadores** ISBN/ISSN siguen por Mongo,
+  en unión). **Degradación elegante idéntica al Fichero**: sin el `.db` o sin que cargue `better-sqlite3`,
+  `buscar` devuelve null y `/catalogo` **cae a la búsqueda `$regex` de antes** (la búsqueda nunca se rompe).
+  Se mantiene SOLO en los puntos de escritura (`indexarDoc`/`desindexarDoc`, best-effort que nunca lanza:
+  ingesta en `servicio-ingesta`, edición en `editar-doc`, borrado en `reproceso·desvincularYReciclar`); la
+  reconstrucción total es `node scripts/reindexar-busqueda.js` o la tarjeta **Búsqueda** del panel
+  (`POST /api/busqueda/reindexar`, 2º plano + progreso como Integridad). El `.db` es **derivado/reconstruible**:
+  NO va en git ni en el rsync del deploy; ruta por defecto junto a `fichero.db` (override `PATH_BUSQUEDA`).
+  **Tras el 1.er despliegue hay que reindexar una vez** para poblarlo (mientras tanto, búsqueda por Mongo).
 - **Fallbacks bibliográficos online — BnF y (pendiente) BNB** (`utils/buscador-bnf.js`): la **BnF**
   expone un SRU UNIMARC público (`catalogue.bnf.fr/api/SRU`, mismo protocolo que la DNB) — clon de
   `buscador-dnb.js` pero con registro completo. Fallback para **libros francófonos** (título/autor/

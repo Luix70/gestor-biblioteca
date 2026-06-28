@@ -9,6 +9,8 @@ import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
 import { enviarACuarentena } from './gestor-fallos.js';
 import { carpetaDeDoc, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
+import { conectarDB } from './database.js';
+import { indexarDoc } from './utils/indice-busqueda.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -297,6 +299,12 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     } catch (e) {
         console.warn(`[Servicio] No se pudieron escribir los registros JSON/MARC: ${e.message}`);
     }
+
+    // 5b. Índice de búsqueda (FTS local): refleja el doc recién catalogado/actualizado para que la
+    //     búsqueda lo encuentre al instante. Best-effort: un fallo del índice no afecta a la ingesta
+    //     (la búsqueda cae a Mongo si el índice no está disponible).
+    try { await indexarDoc(await conectarDB(), resultado._id); }
+    catch (e) { console.warn(`[Servicio] No se pudo indexar para búsqueda: ${e.message}`); }
 
     // 6. CONFORMAR AL INGERIR (opcional): corre el Conformador sobre el doc recién catalogado para
     //    "acertar desde el principio" en ingestas sueltas/manuales. FIRE-AND-FORGET: no bloquea la cola
