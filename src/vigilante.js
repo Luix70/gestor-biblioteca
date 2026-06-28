@@ -14,6 +14,7 @@ import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
 import { reciclar } from './utils/papelera.js';
+import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 import { rellenarDescripcionesFaltantes } from './mantenimiento/backfill-descripciones.js';
@@ -258,6 +259,20 @@ async function verificarEstabilidad(rutas) {
  *   - cada subcarpeta se agrupa por su cuenta (imágenes juntas = un libro),
  *   - los archivos sueltos en la raíz: cada epub/pdf por su lado, todas las imágenes juntas.
  */
+// ¿Existe ya una colección con ese NOMBRE? (case- y acento-insensible, igual que resolverCabecera).
+// Permite tratar como colección una carpeta que coincide con una colección existente AUNQUE quede 1 solo
+// documento dentro (p. ej. AÑADIR a una colección re-dropeando un libro en su carpeta). Best-effort.
+async function coleccionExiste(nombre) {
+    if (!nombre || !String(nombre).trim()) return false;
+    try {
+        const db = await conectarDB();
+        const c = await db.collection('colecciones').findOne(
+            { nombre: String(nombre).trim() },
+            { collation: { locale: 'es', strength: 1 }, projection: { _id: 1 } });
+        return !!c;
+    } catch { return false; }
+}
+
 async function listarUnidades() {
     let entradas;
     try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); }
@@ -296,8 +311,12 @@ async function listarUnidades() {
                 if (resto.length > 0) {
                     const base = (p) => path.basename(p, path.extname(p)).trim().toLowerCase().replace(/\s+/g, ' ');
                     const multiFormato = resto.length >= 2 && new Set(resto.map(base)).size === 1;
-                    const esColeccion = !multiFormato && resto.length >= 2;
-                    if (!esColeccion) dropsADisolver.add(ruta); // single-doc o multi-formato → deflate
+                    // Colección si hay 2+ documentos DISTINTOS, O si el NOMBRE de la carpeta coincide con una
+                    // colección YA EXISTENTE. Esto último arregla AÑADIR a una colección re-dropeando un libro
+                    // en su carpeta aunque quede SOLO ese (caso atajo/gap-fill: el resto ya estaba catalogado).
+                    let esColeccion = !multiFormato && resto.length >= 2;
+                    if (!esColeccion && !multiFormato && await coleccionExiste(e.name)) esColeccion = true;
+                    if (!esColeccion) dropsADisolver.add(ruta); // single-doc NUEVO o multi-formato → deflate
                     for (const d of resto) unidades.push({
                         rutas: [d], esImagenes: false, carpeta: ruta,
                         conservarCarpeta: esColeccion,
