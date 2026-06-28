@@ -1421,20 +1421,24 @@ function construirSearch(){
           <div class="pop">${[5,4,3,2,1].map(n=>`<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label></div>
         </details></div>
         <div><label>Orden</label><select id="sqOrden"><option value="reciente">Recientes</option><option value="titulo">Título A-Z</option><option value="antiguo">Antiguos</option></select></div>
+        <div class="admin-only"><label>Descubrir</label><div style="display:flex;align-items:center;gap:6px;height:36px"><label class="switch" style="flex:0 0 auto"><input type="checkbox" id="sqDescubrir"><span class="slider"></span></label><span class="muted" title="Busca en el Fichero (58,7 M) libros que NO tienes, con enlaces para conseguirlos">🔭 Fichero</span></div></div>
         <div style="display:flex;align-items:flex-end"><button class="btn" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
       </div>
     </div>
     <div id="searchChip" style="margin-bottom:12px"></div>
     <div id="searchBulk"></div>
     <div id="searchResults"></div>
-    <div id="searchPager" style="margin-top:16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap"></div>`;
+    <div id="searchPager" style="margin-top:16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap"></div>
+    <div id="searchExternal" style="margin-top:20px"></div>`;
   $('#sqQ').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
   $('#sqQ').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(busqTimer);buscarCatalogo(1);}};
   $('#sqCdu').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
   $('#sqTipo').onchange=()=>buscarCatalogo(1);
   $('#sqOrden').onchange=()=>buscarCatalogo(1);
+  if($('#sqDescubrir'))$('#sqDescubrir').onchange=()=>buscarCatalogo(1);
   $$('#p-search .sqStar').forEach(c=>c.onchange=()=>{actualizarSumEstrellas();buscarCatalogo(1);});
   $('#sqClear').onclick=()=>{$('#sqQ').value='';$('#sqCdu').value='';$('#sqTipo').value='';$('#sqOrden').value='reciente';
+    if($('#sqDescubrir'))$('#sqDescubrir').checked=false;if($('#searchExternal'))$('#searchExternal').innerHTML='';
     $$('#p-search .sqStar').forEach(c=>c.checked=false);estadoBusqueda.extra=null;actualizarSumEstrellas();buscarCatalogo(1);};
 }
 function estrellasSel(){return $$('#p-search .sqStar:checked').map(c=>c.value);}
@@ -1450,6 +1454,36 @@ async function buscarCatalogo(page){
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
   try{const r=await api('/catalogo?'+params.toString());pintarBusqueda(r);}
   catch(e){$('#searchResults').innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
+  // Descubrir (Fichero): sección APARTE, debajo de los resultados de tu biblioteca; solo si el toggle está ON.
+  const ext=$('#searchExternal');
+  if(ext){if($('#sqDescubrir')&&$('#sqDescubrir').checked)descubrir();else ext.innerHTML='';}
+}
+// ── Descubrir: candidatos del Fichero (OL+BNE, no en tu biblioteca) en LISTA, con enlaces de copia ──
+async function descubrir(){
+  const ext=$('#searchExternal');if(!ext)return;
+  const q=$('#sqQ').value.trim();
+  if(q.length<2){ext.innerHTML='<div class="card" style="border-color:rgba(120,160,255,.35)"><b>🔭 Fuera de tu biblioteca</b><div class="muted" style="margin-top:6px">Escribe al menos 2 letras para buscar en el Fichero (58,7 M).</div></div>';return;}
+  ext.innerHTML='<div class="card" style="border-color:rgba(120,160,255,.35)"><div class="muted" style="padding:4px">🔭 Buscando en el Fichero (58,7 M)…</div></div>';
+  try{const r=await api('/descubrir?q='+encodeURIComponent(q));
+    if(!r.disponible){ext.innerHTML=`<div class="card" style="border-color:rgba(120,160,255,.35)"><b>🔭 Fuera de tu biblioteca</b><div class="muted" style="margin-top:6px">No disponible: ${esc(r.motivo||'el Fichero no tiene índice de texto en este equipo')}.</div></div>`;return;}
+    const cs=r.candidatos||[];
+    ext.innerHTML=`<div class="card" style="border-color:rgba(120,160,255,.35)">
+      <div class="row" style="align-items:center;margin-bottom:6px"><b>🔭 Fuera de tu biblioteca</b><span class="muted">${cs.length} candidato${cs.length===1?'':'s'} del Fichero (Open Library + BNE)</span></div>
+      ${cs.length?cs.map(descRow).join(''):'<div class="muted" style="padding:6px 0">Sin candidatos en el Fichero para esa búsqueda (busca por título/autor).</div>'}
+      ${cs.length?'<div class="muted" style="font-size:11px;margin-top:10px">No están en tu biblioteca. Los enlaces buscan una copia descargable; al obtenerla, déjala en el Inbox para catalogarla.</div>':''}
+    </div>`;
+  }catch(e){ext.innerHTML=`<div class="card" style="border-color:rgba(120,160,255,.35)"><div class="empty">${esc(e.message)}</div></div>`;}
+}
+function descRow(c){
+  const aut=(c.autores&&c.autores.length?c.autores.join(', '):'')||c.editorial||'autor desconocido';
+  const bits=[c.anio,c.idioma?String(c.idioma).toUpperCase():'',c.cdu?('CDU '+c.cdu):(c.dewey?('Dewey '+c.dewey):''),c.isbn?('ISBN '+c.isbn):''].filter(Boolean).join(' · ');
+  const badge=c.enBiblioteca?' <span class="fmt" style="background:rgba(74,222,128,.18);color:var(--ok)" title="Ya está en tu biblioteca">✓ la tienes</span>':'';
+  const chip='display:inline-block;padding:4px 9px;border-radius:7px;background:rgba(120,160,255,.16);color:var(--accent,#9ab8ff);text-decoration:none;font-size:12px;white-space:nowrap';
+  const links=(c.enlaces||[]).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener" style="${chip}">${esc(l.nombre)} ↗</a>`).join('');
+  return `<div style="display:flex;justify-content:space-between;gap:14px;align-items:center;padding:9px 2px;border-top:1px solid rgba(255,255,255,.08);flex-wrap:wrap">
+    <div style="flex:1 1 280px;min-width:0"><div class="n" style="font-weight:600">${esc(recortar(c.titulo||'(sin título)',95))}${badge}</div>
+      <div class="muted" style="font-size:12px">${esc(aut)}</div><div class="muted" style="font-size:11px">${esc(bits)}</div></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${links}</div></div>`;
 }
 function pintarChipClas(){const el=$('#searchChip');if(!el)return;
   if(estadoBusqueda.extra&&estadoBusqueda.extra.etiqueta){el.innerHTML=`<span class="clasfilt">Filtro: <b>${esc(estadoBusqueda.extra.etiqueta)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>`;

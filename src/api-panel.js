@@ -14,6 +14,7 @@ import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { editarDocumento } from './utils/editar-doc.js';
 import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
+import { buscarTextoEnFichero } from './utils/buscador-local.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -417,6 +418,34 @@ export function rutasPanel() {
                 ok: true, total, page, porPagina, paginas: Math.max(1, Math.ceil(total / porPagina)),
                 docs: docs.map(d => ({ ...d, _id: String(d._id) })),
             });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ── DESCUBRIR: busca en el FICHERO (OL+BNE, 58,7 M) libros que NO tienes — FTS por título/subtítulo/
+    //    autor — y propone enlaces de adquisición (FUENTES_COPIA). Marca los que YA están en la biblioteca
+    //    (por ISBN). Solo admin (son enlaces de adquisición, como el saneamiento de ilegibles). ──
+    r.get('/descubrir', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const q = (req.query.q || '').trim();
+            if (q.length < 2) return res.json({ ok: true, disponible: true, candidatos: [] });
+            const cands = await buscarTextoEnFichero(q, { limite: 40 });
+            if (cands === null) return res.json({ ok: true, disponible: false, candidatos: [], motivo: 'Fichero sin índice de texto o no disponible' });
+            const db = await conectarDB();
+            const isbns = cands.map(c => c.isbn).filter(Boolean);
+            const owned = new Set((isbns.length
+                ? await db.collection('biblioteca').find({ isbn: { $in: isbns } }, { projection: { isbn: 1 } }).toArray()
+                : []).map(d => d.isbn));
+            const fuentes = fuentesCopia();
+            const candidatos = cands.map(c => {
+                const consulta = encodeURIComponent([c.titulo, (c.autores || []).join(' ')].filter(Boolean).join(' ').trim());
+                return {
+                    ...c,
+                    enBiblioteca: c.isbn ? owned.has(c.isbn) : false,
+                    enlaces: fuentes.map(f => ({ nombre: f.nombre, url: String(f.url).replace('{q}', consulta) })),
+                };
+            });
+            res.json({ ok: true, disponible: true, candidatos });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
