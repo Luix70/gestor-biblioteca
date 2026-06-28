@@ -13,6 +13,7 @@ import { conVision, extraerJSON } from './vision.js';
 import { tamanoPagina, rasterizarRecorte } from './rasterizar-pdf.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
 import { validarISSN, validarISBN } from './identificadores.js';
+import { leerBarrasLocal } from './lector-barras-local.js';
 
 const ANCHO = Number(process.env.PDF_BARRAS_ANCHO || 3000); // px de ancho de página equivalente (DPI alto)
 const PROMPT = `Tienes RECORTES de la cubierta (donde está el CÓDIGO DE BARRAS) y algunas PÁGINAS INTERIORES
@@ -42,12 +43,26 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInterno
     const wpx = Math.round(tam.anchoPts / 72 * dpi), hpx = Math.round(tam.altoPts / 72 * dpi);
 
     const imagenes = [];
+    const bufsPortada = [];
     // (a) Recortes de la cubierta a alta resolución para el código de barras.
     for (const r of recortesPortada()) {
         const buf = await rasterizarRecorte(ruta, r.p, { dpi, x: r.fx * wpx, y: r.fy * hpx, w: r.fw * wpx, h: r.fh * hpx });
-        if (buf && buf.length) imagenes.push({ base64: buf.toString('base64'), mimeType: 'image/jpeg' });
+        if (buf && buf.length) { bufsPortada.push(buf); imagenes.push({ base64: buf.toString('base64'), mimeType: 'image/jpeg' }); }
     }
     const recortes = imagenes.length;
+
+    // PASO PREVIO SIN IA: leer el EAN localmente (zxing) de los recortes de cubierta. Si sale un 977/978/979
+    // claro, devolvemos sin gastar una llamada de visión. (Si el código es COMERCIAL o no se lee, seguimos a
+    // la visión, que además mira el ISSN IMPRESO en el interior.)
+    const localPdf = await leerBarrasLocal(bufsPortada);
+    if (localPdf) {
+        const bc = decodificarCodigoBarras(localPdf.codigo_barras);
+        if (bc && (bc.issn || bc.isbn)) {
+            const mes = localPdf.add_on && Number(localPdf.add_on) >= 1 && Number(localPdf.add_on) <= 12 ? Number(localPdf.add_on) : null;
+            console.log(`[Barras] EAN leído LOCALMENTE sin IA: ${bc.issn || bc.isbn}.`);
+            return { issn: bc.issn || null, isbn: bc.isbn || null, esRevista: !!bc.issn, mes_publicacion: mes };
+        }
+    }
     // (b) Páginas INTERIORES (mancheta/créditos) para el ISSN impreso: reusar renders ya hechos (2ª-5ª,
     //     ni la portada ni la contraportada). Hasta 3, sin re-rasterizar.
     const ult = numPaginas && numPaginas > 1 ? numPaginas : null;
@@ -104,6 +119,16 @@ IDENTIFICADOR y devuelve SOLO un JSON con estos campos (deja vacío lo que no ve
 export async function leerIdentificadorDeImagenes(muestras) {
     const imagenes = (muestras || []).filter(m => m && m.base64).map(m => ({ base64: m.base64, mimeType: m.mimeType || 'image/jpeg' }));
     if (!imagenes.length) return null;
+    // PASO PREVIO SIN IA: leer el EAN localmente (zxing) de las páginas de muestra.
+    const localImg = await leerBarrasLocal(imagenes.map(m => Buffer.from(m.base64, 'base64')));
+    if (localImg) {
+        const bc = decodificarCodigoBarras(localImg.codigo_barras);
+        if (bc && (bc.issn || bc.isbn)) {
+            const mes = localImg.add_on && Number(localImg.add_on) >= 1 && Number(localImg.add_on) <= 12 ? Number(localImg.add_on) : null;
+            console.log(`[Barras/img] EAN leído LOCALMENTE sin IA: ${bc.issn || bc.isbn}.`);
+            return { issn: bc.issn || null, isbn: bc.isbn || null, esRevista: !!bc.issn && !bc.isbn, mes_publicacion: mes };
+        }
+    }
     console.log(`[Barras/img] ${imagenes.length} página(s) de muestra → consultando a la visión…`);
     let datos;
     try {

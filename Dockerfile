@@ -7,6 +7,11 @@ FROM node:18-bullseye-slim
 # que corre en el Atom D525 (hasta SSSE3) como poppler. OJO: better-sqlite3 va PINNED a la línea
 # v11 — la v12+ exige Node 20+ y deja de publicar prebuilt para Node 18 (este base) → fallaría.
 #
+# zxing-wasm (lectura LOCAL del código de barras ANTES de la IA, ahorra llamadas/429) es WASM puro, NO un
+# addon nativo: se instala sin toolchain. OJO: su .wasm podría usar SIMD y NO instanciar en el Atom (sin
+# SSE4.1); por eso el lector local DEGRADA con elegancia (si no instancia → se cae a la visión, sin romper
+# nada). Sus deps type-fest/tagged-tag son SOLO TIPOS (sin código en runtime); el aviso EBADENGINE es inocuo.
+#
 # poppler-utils aporta pdftoppm para rasterizar portadas de PDF. Es un binario de SISTEMA
 # (no un .node): detecta el CPU en tiempo de ejecución (pixman cae a SSE2/SSSE3) y por eso
 # SÍ funciona en el Atom, al contrario que sharp/libvips.
