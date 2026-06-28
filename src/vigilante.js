@@ -378,8 +378,17 @@ async function procesarUnidad(unidad) {
         // Duplicado: el servicio ya dispuso del fichero (reciclado si idéntico por hash, o a
         // Cuarentena/duplicados si el contenido difiere). No hay nada que copiar ni limpiar.
         if (r.duplicado) {
-            console.log(`  ${r.accion === 'reciclado' ? '♻️' : '⚠️'}  ${etiqueta} → duplicado (${r.accion === 'reciclado' ? 'idéntico → Papelera' : 'difiere → Cuarentena/duplicados'}; ya catalogado: ${r._id}).`);
-            return r.accion === 'reciclado' ? 'reciclado' : 'duplicado';
+            // El servicio YA dispuso del fichero entrante; etiquetar por `accion` (no inventar Cuarentena):
+            //   borrado/restaurado = duplicado IDÉNTICO por hash (ya NO está en el Inbox; NO es Cuarentena);
+            //   cuarentena         = mismo identificador pero CONTENIDO distinto → Cuarentena/duplicados.
+            const MAPA = {
+                borrado:    ['♻️', 'idéntico (mismo hash) → borrado', 'reciclado'],
+                restaurado: ['♻️', 'fichero ausente restaurado con el entrante', 'reciclado'],
+                cuarentena: ['⚠️', 'contenido distinto → Cuarentena/duplicados', 'duplicado'],
+            };
+            const [ic, txt, cat] = MAPA[r.accion] || ['⚠️', `duplicado (${r.accion || '?'})`, 'duplicado'];
+            console.log(`  ${ic}  ${etiqueta} → ${txt}; ya catalogado: ${r._id}.`);
+            return cat;
         }
         console.log(`  ✅ ${etiqueta} → ${r.operacion} (${r.estado}) · ${r.rutaWeb}`);
         // SOLO se borra del Inbox si la copia al árbol CDU se verificó íntegra (tamaño origen ===
