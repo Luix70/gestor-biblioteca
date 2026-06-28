@@ -26,7 +26,7 @@ export async function rasterizarFrontalesPdf(ruta, numPaginas = PAGINAS_FRENTE) 
  */
 export async function ocrDesdeRenders(renders) {
     if (!renders || !renders.length) return null;
-    console.log(`[OCR-PDF] ${renders.length} página(s) → visión para identificar el escaneado.`);
+    console.log(`[PDF escaneado] ${renders.length} página(s) → IA/visión para identificar (sin capa de texto; NO es OCR de texto).`);
     const imagenes = renders.map(r => ({ data: r.buffer, mimeType: 'image/jpeg' }));
     try {
         return await analizarImagenesRecurso(imagenes);

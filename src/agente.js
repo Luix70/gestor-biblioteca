@@ -64,6 +64,9 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
         const recursoEstructurado = extraerJSON(responseText);
         if (!recursoEstructurado) throw new Error('la visión no devolvió un JSON válido');
 
+        // Resumen (verbose) de lo que EXTRAJO la visión — para juzgar si la llamada mereció la pena.
+        console.log(`   ↳ [IA] visión extrajo → tipo=${recursoEstructurado.tipo_recurso || '?'} · título="${String(recursoEstructurado.titulo || '').slice(0, 60)}" · isbn=${recursoEstructurado.isbn || '—'} · issn=${recursoEstructurado.issn || '—'} · cdu=${recursoEstructurado.cdu || '—'} · estado=${recursoEstructurado.estado_verificacion || '?'}`);
+
         // CÓDIGO DE BARRAS: decodifica el EAN-13 leído de la cubierta (orientación indiferente: 977 →
         // ISSN/revista, 978/979 → ISBN). Rellena SOLO huecos (no pisa lo extraído del texto) y, ante un
         // 977 válido sin ISBN propio, fija tipo_recurso='revista' (un libro llevaría 978/979). El nº de

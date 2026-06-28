@@ -146,9 +146,12 @@ export async function conVision({ prompt, imagenes = [], json = true } = {}) {
     if (!orden.length) throw new Error('No hay proveedores de visión configurados/activos (revisa las claves en .env y los Ajustes).');
     let ultimo;
     for (const c of orden) {
+        const t0 = Date.now();
         try {
             const txt = await llamar(c, { prompt, imagenes, json });
             ultimoOk = c.id;
+            // Éxito (verbose): QUIÉN resolvió la visión — clave/proveedor, tier (free/paid), modelo y ms.
+            console.log(`   ✓ Visión[${c.id}] (${c.tier} · ${c.modelo}) respondió en ${Date.now() - t0} ms.`);
             return txt;
         } catch (e) {
             ultimo = e;
