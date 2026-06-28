@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js';
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
+import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
 import { reciclar } from './utils/papelera.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
@@ -428,12 +429,58 @@ function resumenLote(t, totalUnidades) {
     return `📊 Lote terminado: ${totalUnidades} unidad(es) — ${partes.length ? partes.join(' · ') : 'sin cambios'}`;
 }
 
+// Formatos comprimidos GENÉRICOS que se EXPANDEN como si fueran una CARPETA (misma lógica de drop):
+// imágenes sueltas → un libro escaneado; varios documentos → colección; "Vol N" → obra. NO incluye
+// .cbz/.cbr/.cb7 (cómics = UN documento) ni .epub (es un zip, pero es un libro).
+const EXT_COMPRIMIDO = ['.zip'];
+const rutaExiste = (p) => fs.access(p).then(() => true).catch(() => false);
+
+/**
+ * PRE-PASO del Inbox: expande los comprimidos (.zip) SUELTOS de la raíz a una CARPETA del mismo nombre,
+ * para que listarUnidades los trate IGUAL que un drop de carpeta (imágenes→libro escaneado, varios docs→
+ * colección, "Vol N"→obra). El zip original se RECICLA (nunca se borra). Un zip corrupto → Cuarentena/
+ * ilegibles. Aplana un único directorio raíz (evita Inbox/<base>/<base>/… y que las imágenes queden anidadas).
+ */
+async function expandirComprimidos() {
+    let entradas;
+    try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+        if (!e.isFile() || ignorarEntrada(e.name)) continue;
+        if (!EXT_COMPRIMIDO.includes(path.extname(e.name).toLowerCase())) continue;
+        const zip = path.join(INBOX, e.name);
+        if (await verificarEstabilidad([zip]) !== 'estable') {   // no expandir un zip a medio copiar
+            console.log(`  ⏳ ${e.name}: comprimido aún copiándose; se expandirá en el próximo escaneo.`);
+            continue;
+        }
+        const base = path.basename(e.name, path.extname(e.name)).trim() || 'archivo';
+        let destino = path.join(INBOX, base);
+        for (let i = 2; await rutaExiste(destino); i++) destino = path.join(INBOX, `${base} (${i})`);
+        const tmp = path.join(INBOX, `.expand-${Date.now()}`);   // oculto → ignorarEntrada lo salta
+        try {
+            await fs.mkdir(tmp, { recursive: true });
+            await extraerComprimido(zip, tmp);                   // bsdtar (zip/rar/7z) → al temporal
+            // Aplanar: si el zip contiene UN único directorio de nivel superior, usar SU contenido como raíz.
+            const top = (await fs.readdir(tmp, { withFileTypes: true })).filter(d => !ignorarEntrada(d.name));
+            const raiz = (top.length === 1 && top[0].isDirectory()) ? path.join(tmp, top[0].name) : tmp;
+            await fs.rename(raiz, destino);
+            if (raiz !== tmp) await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+            await reciclar([zip], 'comprimido-expandido');       // política nunca-borrar: zip → Papelera
+            console.log(`  📦 «${e.name}» expandido → carpeta «${path.basename(destino)}» (se cataloga como drop de carpeta).`);
+        } catch (err) {
+            await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+            console.warn(`  ⚠️  No se pudo expandir «${e.name}» (${err.message}) → Cuarentena/ilegibles.`);
+            await enviarAIlegibles([zip], { titulo: e.name, mensaje: `comprimido no extraíble: ${err.message}` });
+        }
+    }
+}
+
 async function procesarCola() {
     if (procesando || !vigilanteActivo) return; // pausado desde el panel → los ficheros esperan en el Inbox
     procesando = true;
     try {
         let totalProcesadas = 0;
         const tally = {};
+        await expandirComprimidos();          // .zip suelto → carpeta (drop) ANTES de listar unidades
         let unidades = await listarUnidades();
         if (unidades.length) ultimaActividad = Date.now(); // hay trabajo: posponer el mantenimiento
         while (unidades.length) {
