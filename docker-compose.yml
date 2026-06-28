@@ -15,11 +15,13 @@ services:
     ports:
       - "3000:3000"
       - "4000:4000"
+    # NOTA: las CLAVES de IA (GEMINI_API_FREE_KEY_*, GEMINI_API_KEY_PAID, GROQ_API_KEY_*, OPENROUTER_API_KEY_*,
+    # GOOGLE_BOOKS_API_KEY, EUROPEANA_API_KEY…) NO se listan aquí: las lee la app del .env montado en /app
+    # (dotenv). Así añadir una clave nueva = editar .env, sin tocar este fichero. Aquí solo van las que deben
+    # GANAR sobre el .env (paths a /app) y las pocas que conviene fijar explícitas.
     environment:
       - MONGO_URI=${MONGO_URI}
       - MONGO_DB_NAME=${MONGO_DB_NAME}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY}
       - PATH_INBOX=/app/Inbox
       - PATH_CDU=/app/CDU
       - PATH_CUARENTENA=/app/Cuarentena
