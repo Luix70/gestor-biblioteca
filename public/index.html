@@ -400,6 +400,14 @@ body.guest .admin-only{display:none!important}
             </div>
             <p class="muted" style="margin-top:10px;font-size:12px">CLI: <span class="mono">docker exec gestor-biblioteca node scripts/reindexar-busqueda.js</span>.</p>
           </div>
+          <div class="card admin-only">
+            <h3>🔞 Permisos de invitados</h3>
+            <p class="muted" style="margin-top:0;font-size:12px">Por defecto los invitados NO ven el contenido marcado NSFW (🔞) ni lo que cuelga de una obra/colección NSFW. Actívalo para permitírselo.</p>
+            <div class="row" style="align-items:center">
+              <label class="switch" style="flex:0 0 auto"><input type="checkbox" id="guestNsfw"><span class="slider"></span></label>
+              <span class="muted">Invitados pueden ver contenido NSFW (🔞)</span>
+            </div>
+          </div>
         </div>
         <div id="integOut" style="margin-top:16px"></div>
         <div class="card" style="margin-top:16px">
@@ -1589,7 +1597,9 @@ $('#logClear').onclick=()=>{if(confirm('¿Vaciar TODO el log?'))purgaLog({todo:t
 function loadInteg(){$('#integDiag').onclick=()=>correrIntegridad(false);if($('#integFix'))$('#integFix').onclick=()=>correrIntegridad(true);
   if($('#sanDiag')){$('#sanDiag').onclick=sanearDiag;$('#sanRun').onclick=sanearRun;}
   if($('#visRefresh')){$('#visRefresh').onclick=loadVision;loadVision();}
-  if($('#reindexBtn')){$('#reindexBtn').onclick=reindexar;loadIndice();}}
+  if($('#reindexBtn')){$('#reindexBtn').onclick=reindexar;loadIndice();}
+  if($('#guestNsfw')){loadGuestNsfw();$('#guestNsfw').onchange=async()=>{const cb=$('#guestNsfw');try{const r=await api('/ajustes/guest-nsfw',{method:'POST',body:JSON.stringify({enabled:cb.checked})});toast(r.enabled?'Invitados: NSFW permitido':'Invitados: NSFW restringido');}catch(e){toast(e.message,'bad');cb.checked=!cb.checked;}};}}
+async function loadGuestNsfw(){try{const r=await api('/ajustes/guest-nsfw');if($('#guestNsfw'))$('#guestNsfw').checked=!!r.enabled;}catch(e){}}
 // ── Búsqueda: índice FTS local (estado + reindexar en 2º plano con progreso) ──
 let reindexTimer=null;
 async function loadIndice(){const el=$('#indiceEstado');if(!el)return;
