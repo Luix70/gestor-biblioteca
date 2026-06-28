@@ -525,13 +525,40 @@ let logTimer=null;
 function go(p){detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
   $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
   if(logTimer&&p!=='activity'){clearInterval(logTimer);logTimer=null;}
-  $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');loaders[p]&&loaders[p]();}
+  $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');loaders[p]&&loaders[p]();apilarVista({v:'page',p});}
 $('#nav').onclick=e=>{const b=e.target.closest('button[data-p]');if(b&&!b.disabled)go(b.dataset.p);};
 $('#burger').onclick=()=>{$('#sidebar').classList.toggle('open');$('#scrim').classList.toggle('open');};
 $('#scrim').onclick=()=>{$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');};
-$('#refresh').onclick=()=>{if(detalle){const d=detalle;d.tipo==='obra'?verObra(d.id):d.tipo==='coleccion'?verColeccion(d.id):verDoc(d.id,d.ctx);refrescarEstado();return;}
+$('#refresh').onclick=()=>{if(detalle){const d=detalle;_supNav=true;try{d.tipo==='obra'?verObra(d.id):d.tipo==='coleccion'?verColeccion(d.id):verDoc(d.id,d.ctx);}finally{_supNav=false;}refrescarEstado();return;}
   const cur=$$('#nav button.on')[0]?.dataset.p||'dashboard';loaders[cur]&&loaders[cur]();refrescarEstado();};
 setInterval(()=>$('#clock').textContent=new Date().toLocaleTimeString('es-ES'),1000);
+
+// ── Historial de navegación (clave en móvil): el botón ATRÁS del navegador/sistema navega DENTRO de la
+//    app (entre pantallas visitadas) y, al llegar a la raíz, pide confirmación (doble-atrás) en vez de
+//    salir y perderlo todo. Cada go()/verDoc/verObra/verColeccion apila una entrada (history.pushState);
+//    popstate la reconstruye. Se inicia en arrancar() tras el login. ──
+let _supNav=false,_salirArmado=false,_salirT=null;
+function apilarVista(st){ if(_supNav)return; try{history.pushState(st,'');}catch{/* navegador sin history */} }
+function _estadoActual(){
+  if(detalle)return {v:'det',tipo:detalle.tipo,id:detalle.id,ctx:detalle.ctx};
+  return {v:'page',p:$$('#nav button.on')[0]?.dataset.p||'search'};
+}
+function _renderEstado(st){
+  _supNav=true;
+  try{
+    if(!st||st.v==='page')go((st&&st.p)||'search');
+    else if(st.v==='det'){ if(st.tipo==='obra')verObra(st.id);else if(st.tipo==='coleccion')verColeccion(st.id);else verDoc(st.id,st.ctx); }
+  }finally{_supNav=false;}
+}
+function volverAtras(){ history.back(); }   // los botones «←» internos usan el historial
+function _intentarSalir(){
+  if(_salirArmado){_salirArmado=false;history.back();return;}        // 2º «atrás» seguido → salir de verdad
+  _salirArmado=true;toast('Pulsa «atrás» otra vez para salir');
+  _supNav=true;try{history.pushState(_estadoActual(),'');}finally{_supNav=false;}   // re-atrapar: seguir dentro
+  clearTimeout(_salirT);_salirT=setTimeout(()=>_salirArmado=false,2500);
+}
+window.addEventListener('popstate',e=>{ const st=e.state; if(st&&st.guard)return _intentarSalir(); _renderEstado(st); });
+function iniciarHistorial(){ try{history.replaceState({guard:true},'');}catch{/* navegador sin history */} }
 
 // ── estado (pills) ──
 async function refrescarEstado(){try{const s=await api('/estado');
@@ -879,7 +906,7 @@ const recortar=(s,n)=>{s=String(s||'');return s.length>n?s.slice(0,n-1)+'…':s;
 function mostrarDetalle(){$$('.page').forEach(s=>s.classList.remove('on'));$('#p-detalle').classList.add('on');
   $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');window.scrollTo(0,0);}
 
-async function verObra(id){detalle={tipo:'obra',id};mostrarDetalle();$('#title').textContent='Obra';
+async function verObra(id){detalle={tipo:'obra',id};mostrarDetalle();apilarVista({v:'det',tipo:'obra',id});$('#title').textContent='Obra';
   $('#p-detalle').innerHTML='<div class="card"><div class="muted">Cargando obra…</div></div>';
   try{const r=await api('/obras/'+encodeURIComponent(id));pintarObra(r);}
   catch(e){$('#p-detalle').innerHTML=`<div class="crumb"><a onclick="go('obras')">← Obras</a></div><div class="empty">${esc(e.message)}</div>`;}}
@@ -895,7 +922,7 @@ function pintarObra(r){
   const o=r.obra,desc=o.cdu_desc;
   const sub=[o.isbn_obra?'ISBN obra '+o.isbn_obra:'',o.editorial,o.coleccion].filter(Boolean).map(esc).join(' · ')||'—';
   const head=`<div class="crumb"><a onclick="go('obras')">Obras</a> › <span>${esc(recortar(o.titulo,50))}</span></div>
-    <div class="det-head"><button class="det-back" title="Volver" onclick="go('obras')">←</button>
+    <div class="det-head"><button class="det-back" title="Volver" onclick="volverAtras()">←</button>
       <div class="det-title"><h2>${esc(o.titulo||'(sin título)')}</h2><div class="sub">${sub}</div>
         <div style="margin-top:8px">${o.completa?'<span class="tag ok">completa</span>':'<span class="tag warn">incompleta</span>'} ${o.revision_requerida?'<span class="tag bad">revisar</span>':''} <span class="muted">${o.volumenes_presentes||0} presentes · ${Math.max(0,(o.total_volumenes||0)-(o.volumenes_presentes||0))} ausentes · ${o.total_volumenes||'?'} total</span></div>
         <div style="margin-top:8px">${ratingBar('obras',o._id,o.valoracion,o.nsfw)}</div>
@@ -911,7 +938,7 @@ function pintarObra(r){
 
 // ── colecciones: cabeceras de revista (números) + series de libros ──
 
-async function verColeccion(id){detalle={tipo:'coleccion',id};mostrarDetalle();$('#title').textContent='Colección';
+async function verColeccion(id){detalle={tipo:'coleccion',id};mostrarDetalle();apilarVista({v:'det',tipo:'coleccion',id});$('#title').textContent='Colección';
   $('#p-detalle').innerHTML='<div class="card"><div class="muted">Cargando colección…</div></div>';
   try{const r=await api('/colecciones/'+encodeURIComponent(id));pintarColeccion(r);}
   catch(e){$('#p-detalle').innerHTML=`<div class="crumb"><a onclick="go('colecciones')">← Colecciones</a></div><div class="empty">${esc(e.message)}</div>`;}}
@@ -927,7 +954,7 @@ function pintarColeccion(r){
   const tipoLabel=esRev?'📰 Revista (cabecera)':'📚 Serie de libros';
   const sub=[c.issn?'ISSN '+c.issn:'',c.editorial].filter(Boolean).map(esc).join(' · ')||'—';
   const head=`<div class="crumb"><a onclick="go('colecciones')">Colecciones</a> › <span>${esc(recortar(c.nombre,50))}</span></div>
-    <div class="det-head"><button class="det-back" title="Volver" onclick="go('colecciones')">←</button>
+    <div class="det-head"><button class="det-back" title="Volver" onclick="volverAtras()">←</button>
       <div class="det-title"><h2>${esc(c.nombre||'(sin título)')}</h2><div class="sub">${tipoLabel} · ${sub}</div>
         <div style="margin-top:8px"><span class="muted">${r.miembros.length} ${esRev?'número(s)':'libro(s)'}</span> ${c.revision_requerida?'<span class="tag bad">revisar</span>':''}</div>
         <div style="margin-top:8px">${ratingBar('colecciones',c._id,c.valoracion,c.nsfw)}</div>
@@ -941,7 +968,7 @@ function pintarColeccion(r){
   attachRating('#p-detalle');
 }
 
-async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();$('#title').textContent='Ficha';
+async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();apilarVista({v:'det',tipo:'doc',id,ctx});$('#title').textContent='Ficha';
   $('#p-detalle').innerHTML='<div class="card"><div class="muted">Cargando ficha…</div></div>';
   try{const r=await api('/documentos/'+encodeURIComponent(id));pintarDoc(r,ctx);}
   catch(e){$('#p-detalle').innerHTML=`<div class="crumb"><a onclick="go('obras')">← Obras</a></div><div class="empty">${esc(e.message)}</div>`;}}
@@ -1001,6 +1028,7 @@ function pintarDoc(r,ctx){
   else if(vc){inicio=`<a onclick="go('colecciones')">Colecciones</a> › <a onclick="verColeccion('${esc(vc._id)}')">${esc(recortar(vc.nombre,32))}</a>`;back=`verColeccion('${esc(vc._id)}')`;}
   else if(vol){inicio=`<a onclick="go('${esc(vol)}')">${esc(ctx.etiqueta||vol)}</a>`;back=`go('${esc(vol)}')`;}
   else{inicio=`<a onclick="go('obras')">Obras</a>`;back=`go('obras')`;}
+  back='volverAtras()';   // el botón «←» de la ficha usa el historial (vuelve a donde estabas)
   const crumb=`<div class="crumb">${inicio} › <span>${esc(recortar(d.titulo,40))}</span></div>`;
   const fmtFecha=v=>{const t=new Date(v);return isNaN(t)?esc(v):t.toLocaleString('es-ES');};
   const especiales={
@@ -1692,7 +1720,7 @@ async function autoLoginURL(){
 }
 function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
-function arrancar(){$('#login').classList.remove('show');aplicarRol();go('search');refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
+function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();go('search');refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
     const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.motivo||'usuario o contraseña incorrectos');
