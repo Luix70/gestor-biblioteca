@@ -1,0 +1,188 @@
+/**
+ * VISIÓN multi-proveedor con ROTACIÓN (imagen + instrucción → texto/JSON). Reemplaza la dependencia de un
+ * solo Gemini: prueba varios proveedores GRATIS primero y de PAGO como último recurso, con preferencia
+ * "pegajosa" al último que funcionó (si era gratis) y enfriamiento por clave al recibir 429.
+ *
+ * SECRETOS: las claves viven SOLO en .env, con la convención NUMERADA `<PREFIJO>[_N]` (p. ej.
+ * GROQ_API_KEY_1, _2). Se auto-descubren. El panel gestiona enable/disable/estado/probar (en Mongo,
+ * `ajustes_vision`) SIN exponer ni almacenar los secretos. Para añadir/cambiar una clave: editar .env.
+ *
+ * Algoritmo: orden base = [free… (orden de config), paid…]. Si el último OK fue una clave FREE y no está
+ * en cooldown → va primero (pegajoso). Si el último OK fue de PAGO → NO se fija (se vuelve a free-first).
+ * Las que están en cooldown van al final (se intentan solo si todo lo demás falla).
+ */
+import axios from 'axios';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { conectarDB } from '../database.js';
+
+const COOLDOWN_MS = Number(process.env.VISION_COOLDOWN_MS) || 5 * 60 * 1000;
+const TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS) || Number(process.env.HTTP_TIMEOUT_MS) || 30000;
+const limpia = (k) => (k && String(k).trim()) || null;
+
+// Catálogo de proveedores. `claves()` descubre en .env; `modelo`/`baseURL` admiten override por env.
+const PROVEEDORES = [
+    { id: 'gemini-free', etiqueta: 'Gemini (free)', tipo: 'gemini', tier: 'free',
+        modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
+        prefijos: ['GEMINI_API_FREE_KEY'] },
+    { id: 'groq', etiqueta: 'Groq · Llama Vision', tipo: 'openai', tier: 'free',
+        baseURL: () => process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
+        modelo: () => process.env.GROQ_MODELO || 'meta-llama/llama-4-scout-17b-16e-instruct',
+        prefijos: ['GROQ_API_KEY'] },
+    { id: 'openrouter', etiqueta: 'OpenRouter (free)', tipo: 'openai', tier: 'free',
+        baseURL: () => process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+        modelo: () => process.env.OPENROUTER_MODELO || 'meta-llama/llama-3.2-11b-vision-instruct:free',
+        prefijos: ['OPENROUTER_API_KEY'] },
+    { id: 'gemini-paid', etiqueta: 'Gemini (pago)', tipo: 'gemini', tier: 'paid',
+        modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
+        prefijos: ['GEMINI_API_KEY_PAID'] },
+];
+
+function descubrir(prefijos) {
+    const out = [];
+    for (const p of prefijos) {
+        const re = new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(_\\d+)?$');
+        for (const [k, v] of Object.entries(process.env)) { const val = limpia(v); if (val && re.test(k)) out.push({ env: k, valor: val }); }
+    }
+    const vistos = new Set(), u = [];
+    for (const c of out.sort((a, b) => a.env.localeCompare(b.env, undefined, { numeric: true }))) if (!vistos.has(c.valor)) { vistos.add(c.valor); u.push(c); }
+    return u;
+}
+const mask = (s) => s.length <= 10 ? '••••' : `${s.slice(0, 4)}…${s.slice(-4)}`;
+
+/** Lista de CANDIDATOS (una entrada por clave) en orden base de config (free→paid). id = nombre de la env. */
+function candidatos() {
+    const out = [];
+    for (const prov of PROVEEDORES) {
+        for (const cl of descubrir(prov.prefijos)) {
+            out.push({ id: cl.env, env: cl.env, key: cl.valor, prov, tier: prov.tier, etiqueta: prov.etiqueta,
+                modelo: prov.modelo(), baseURL: prov.baseURL ? prov.baseURL() : null, masked: mask(cl.valor) });
+        }
+    }
+    return out;
+}
+
+// ── Estado en memoria ──
+const cooldownHasta = {};     // id → ts
+const errores = {};           // id → { n, ultimo, ts }
+let ultimoOk = null;          // id de la última clave que funcionó
+
+// ── Ajustes persistidos (enable/disable), SIN secretos ──
+let ajustesCache = null, ajustesTs = 0;
+async function ajustes() {
+    if (ajustesCache && Date.now() - ajustesTs < 15000) return ajustesCache;
+    try {
+        const db = await conectarDB();
+        const docs = await db.collection('ajustes_vision').find({}).toArray();
+        ajustesCache = new Map(docs.map(d => [d._id, d]));
+    } catch { ajustesCache = new Map(); }
+    ajustesTs = Date.now();
+    return ajustesCache;
+}
+async function habilitado(id) { return (await ajustes()).get(id)?.enabled !== false; } // por defecto activo
+
+const esCuota = (e) => {
+    const s = e?.status || e?.response?.status;
+    const m = String(e?.message || '') + ' ' + String(e?.response?.data?.error?.message || '');
+    return s === 429 || /\b429\b|quota|rate.?limit|resource.?exhausted|exhausted|too.?many/i.test(m);
+};
+const motivo = (e) => esCuota(e) ? `429 cuota — ${(e?.response?.data?.error?.message || e?.message || '').replace(/\s+/g, ' ').slice(0, 160)}`
+    : (e?.response?.status || e?.status || (e?.message || '').slice(0, 120));
+
+async function llamar(c, { prompt, imagenes, json }) {
+    if (c.prov.tipo === 'gemini') {
+        const model = new GoogleGenerativeAI(c.key).getGenerativeModel({ model: c.modelo, generationConfig: json ? { responseMimeType: 'application/json' } : {} });
+        const parts = [prompt, ...imagenes.map(im => ({ inlineData: { data: im.base64, mimeType: im.mimeType || 'image/jpeg' } }))];
+        const res = await model.generateContent(parts);
+        return res.response.text();
+    }
+    // OpenAI-compatible (Groq, OpenRouter, …): no forzamos response_format (algunos modelos lo rechazan);
+    // el prompt ya pide JSON y extraerJSON() lo limpia.
+    const content = [{ type: 'text', text: prompt }, ...imagenes.map(im => ({ type: 'image_url', image_url: { url: `data:${im.mimeType || 'image/jpeg'};base64,${im.base64}` } }))];
+    const headers = { Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json' };
+    if (c.prov.id === 'openrouter') { headers['HTTP-Referer'] = 'https://gestor-biblioteca.local'; headers['X-Title'] = 'Gestor Biblioteca'; }
+    const res = await axios.post(`${c.baseURL}/chat/completions`,
+        { model: c.modelo, messages: [{ role: 'user', content }], temperature: 0, max_tokens: 1500 },
+        { headers, timeout: TIMEOUT_MS });
+    return res.data?.choices?.[0]?.message?.content || '';
+}
+
+/** Orden de intento: enabled, free→paid (config), pegajoso al último-OK FREE; cooldown al final. */
+async function ordenIntento() {
+    const aj = await ajustes();
+    let base = candidatos().filter(c => aj.get(c.id)?.enabled !== false);
+    const ahora = Date.now();
+    if (ultimoOk) {
+        const lc = base.find(c => c.id === ultimoOk);
+        if (lc && lc.tier === 'free' && (cooldownHasta[lc.id] || 0) <= ahora) base = [lc, ...base.filter(c => c.id !== ultimoOk)];
+    }
+    const activos = base.filter(c => (cooldownHasta[c.id] || 0) <= ahora);
+    const enfriando = base.filter(c => (cooldownHasta[c.id] || 0) > ahora);
+    return [...activos, ...enfriando];
+}
+
+/**
+ * Llama a la visión con rotación. Devuelve el TEXTO de la respuesta (usa extraerJSON para parsear).
+ * @param {{prompt:string, imagenes?:Array<{base64:string,mimeType?:string}>, json?:boolean}} opts
+ */
+export async function conVision({ prompt, imagenes = [], json = true } = {}) {
+    const orden = await ordenIntento();
+    if (!orden.length) throw new Error('No hay proveedores de visión configurados/activos (revisa las claves en .env y los Ajustes).');
+    let ultimo;
+    for (const c of orden) {
+        try {
+            const txt = await llamar(c, { prompt, imagenes, json });
+            ultimoOk = c.id;
+            return txt;
+        } catch (e) {
+            ultimo = e;
+            if (esCuota(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_MS;
+            errores[c.id] = { n: (errores[c.id]?.n || 0) + 1, ultimo: String(motivo(e)), ts: Date.now() };
+            console.warn(`   ↻ Visión[${c.id}] falló (${motivo(e)}); siguiente proveedor.`);
+        }
+    }
+    throw ultimo || new Error('Todos los proveedores de visión fallaron.');
+}
+
+/** Limpia y parsea JSON de una respuesta de modelo (tolera fences ```json y texto alrededor). */
+export function extraerJSON(txt) {
+    if (!txt) return null;
+    let s = String(txt).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+    try { return JSON.parse(s); } catch { /* intentar recortar al primer objeto */ }
+    const a = s.indexOf('{'), b = s.lastIndexOf('}');
+    if (a >= 0 && b > a) { try { return JSON.parse(s.slice(a, b + 1)); } catch { /* */ } }
+    return null;
+}
+
+// ── Para el panel (sin secretos) ──
+export async function estadoVision() {
+    const aj = await ajustes();
+    const ahora = Date.now();
+    return candidatos().map(c => ({
+        id: c.id, etiqueta: c.etiqueta, tier: c.tier, modelo: c.modelo, masked: c.masked,
+        enabled: aj.get(c.id)?.enabled !== false,
+        cooldown: (cooldownHasta[c.id] || 0) > ahora ? new Date(cooldownHasta[c.id]).toISOString() : null,
+        errores: errores[c.id]?.n || 0, ultimoError: errores[c.id]?.ultimo || null,
+        ultimoOk: ultimoOk === c.id,
+    }));
+}
+export async function configurarProveedor(id, { enabled } = {}) {
+    if (!candidatos().some(c => c.id === id)) return { ok: false, motivo: 'proveedor desconocido' };
+    const db = await conectarDB();
+    await db.collection('ajustes_vision').updateOne({ _id: id }, { $set: { enabled: !!enabled } }, { upsert: true });
+    ajustesCache = null;
+    return { ok: true, id, enabled: !!enabled };
+}
+/** Proba UNA clave (sonda de texto): valida clave+modelo+conexión sin gastar visión. */
+export async function probarProveedor(id) {
+    const c = candidatos().find(x => x.id === id);
+    if (!c) return { ok: false, motivo: 'proveedor desconocido' };
+    const t0 = Date.now();
+    try {
+        const txt = await llamar(c, { prompt: 'Responde solo con la palabra: OK', imagenes: [], json: false });
+        delete cooldownHasta[c.id];
+        return { ok: true, ms: Date.now() - t0, respuesta: String(txt || '').trim().slice(0, 40) };
+    } catch (e) {
+        if (esCuota(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_MS;
+        return { ok: false, ms: Date.now() - t0, motivo: String(motivo(e)) };
+    }
+}

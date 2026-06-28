@@ -26,6 +26,7 @@ const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu']);
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
+import { estadoVision, configurarProveedor, probarProveedor } from './utils/vision.js';
 import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
 import { fuentesCopia, procesarSaneamiento, estadoSaneamiento } from './utils/saneamiento.js';
@@ -207,6 +208,21 @@ export function rutasPanel() {
         res.json(lanzarIntegridad({ reparar: req.body?.reparar === true }));
     });
     r.get('/integridad/estado', (req, res) => res.json(estadoIntegridad()));
+
+    // ── Visión (rotación multi-proveedor): estado, activar/desactivar y PROBAR una clave. Solo admin.
+    //    No expone secretos (solo enmascarados). Las claves se gestionan en .env (numeradas). ──
+    r.get('/vision/proveedores', async (req, res) => {
+        try { if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json({ ok: true, proveedores: await estadoVision() }); } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/vision/proveedor', async (req, res) => {
+        try { if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await configurarProveedor(req.body?.id, { enabled: req.body?.enabled === true })); } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/vision/probar', async (req, res) => {
+        try { if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await probarProveedor(req.body?.id)); } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
 
     // ── Sanear catálogo: re-deriva con el pipeline actual (re-home #, portadas, re-clasificar). admin. ──
     r.post('/sanear', async (req, res) => {        // DRY-RUN (diagnóstico): síncrono y rápido

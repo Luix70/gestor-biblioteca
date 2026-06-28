@@ -21,16 +21,28 @@ const esCuota = (e) => {
     return s === 429 || /\b429\b|quota|rate.?limit|resource.?exhausted|exhausted/i.test(m);
 };
 
-/** Orden de claves a intentar: free primero (si no está en cooldown), luego pago; sin duplicados. */
+// Descubre TODAS las claves de un prefijo en .env: admite la forma escueta y la NUMERADA
+// (GEMINI_API_FREE_KEY, GEMINI_API_FREE_KEY_1, _2…). Sin duplicados, en orden natural.
+function descubrirEnv(prefijos) {
+    const out = [];
+    for (const p of prefijos) {
+        const re = new RegExp('^' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(_\\d+)?$');
+        for (const [k, v] of Object.entries(process.env)) {
+            const val = limpia(v);
+            if (val && re.test(k)) out.push(val);
+        }
+    }
+    return [...new Set(out)];
+}
+
+/** Orden de claves Gemini a intentar: TODAS las free primero (si no en cooldown), luego las de pago. */
 function clavesOrdenadas() {
-    const free = limpia(process.env.GEMINI_API_FREE_KEY);
-    const paid = limpia(process.env.GEMINI_API_KEY);
+    const free = descubrirEnv(['GEMINI_API_FREE_KEY']);                       // *_FREE_KEY[_N]
+    const paid = descubrirEnv(['GEMINI_API_KEY_PAID', 'GEMINI_API_KEY']).filter(k => !free.includes(k)); // _PAID + legado
     const orden = [];
-    if (free && Date.now() >= freeAgotadaHasta) orden.push(['free', free]);
-    if (paid && paid !== free) orden.push(['paid', paid]);
-    // Si la free está en cooldown pero no hay otra distinta, intentarla igualmente (mejor que nada).
-    if (!orden.length && free) orden.push(['free', free]);
-    if (!orden.length && paid) orden.push(['paid', paid]);
+    if (Date.now() >= freeAgotadaHasta) for (const k of free) orden.push(['free', k]);
+    for (const k of paid) orden.push(['paid', k]);
+    if (!orden.length) for (const k of free) orden.push(['free', k]); // free en cooldown pero sin alternativa
     return orden;
 }
 

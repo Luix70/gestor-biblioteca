@@ -9,13 +9,12 @@
  * Devuelve { issn?, isbn?, esRevista, mes_publicacion? } o null. El llamante lo invoca SOLO si falta el
  * identificador propio del tipo (revista→issn, libro→isbn).
  */
-import { conGemini } from './gemini.js';
+import { conVision, extraerJSON } from './vision.js';
 import { tamanoPagina, rasterizarRecorte } from './rasterizar-pdf.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
 import { validarISSN, validarISBN } from './identificadores.js';
 
 const ANCHO = Number(process.env.PDF_BARRAS_ANCHO || 3000); // px de ancho de página equivalente (DPI alto)
-const MODELO = { model: 'gemini-2.5-flash', generationConfig: { responseMimeType: 'application/json' } };
 const PROMPT = `Tienes RECORTES de la cubierta (donde está el CÓDIGO DE BARRAS) y algunas PÁGINAS INTERIORES
 de una revista o libro. Devuelve SOLO un JSON con tres campos:
 - "codigo_barras": los 13 dígitos del EAN-13 de la cubierta, SIN guiones ni espacios, leídos en CUALQUIER
@@ -42,28 +41,27 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInterno
     const dpi = Math.max(72, Math.round(ANCHO * 72 / tam.anchoPts));
     const wpx = Math.round(tam.anchoPts / 72 * dpi), hpx = Math.round(tam.altoPts / 72 * dpi);
 
-    const imgs = [];
+    const imagenes = [];
     // (a) Recortes de la cubierta a alta resolución para el código de barras.
     for (const r of recortesPortada()) {
         const buf = await rasterizarRecorte(ruta, r.p, { dpi, x: r.fx * wpx, y: r.fy * hpx, w: r.fw * wpx, h: r.fh * hpx });
-        if (buf && buf.length) imgs.push({ inlineData: { data: buf.toString('base64'), mimeType: 'image/jpeg' } });
+        if (buf && buf.length) imagenes.push({ base64: buf.toString('base64'), mimeType: 'image/jpeg' });
     }
-    const recortes = imgs.length;
+    const recortes = imagenes.length;
     // (b) Páginas INTERIORES (mancheta/créditos) para el ISSN impreso: reusar renders ya hechos (2ª-5ª,
     //     ni la portada ni la contraportada). Hasta 3, sin re-rasterizar.
     const ult = numPaginas && numPaginas > 1 ? numPaginas : null;
     const interiores = (rendersInternos || [])
         .filter(r => r && r.buffer && r.pagina > 1 && r.pagina !== ult)
         .slice(0, 3);
-    for (const r of interiores) imgs.push({ inlineData: { data: r.buffer.toString('base64'), mimeType: 'image/jpeg' } });
+    for (const r of interiores) imagenes.push({ base64: r.buffer.toString('base64'), mimeType: 'image/jpeg' });
 
     console.log(`[Barras] ${recortes} recorte(s) de cubierta + ${interiores.length} página(s) interior(es) (dpi=${dpi}); consultando a la visión…`);
-    if (!imgs.length) return null;
+    if (!imagenes.length) return null;
 
     let datos;
     try {
-        const res = await conGemini(MODELO, (model) => model.generateContent([PROMPT, ...imgs]));
-        datos = JSON.parse((res.response.text() || '{}').trim());
+        datos = extraerJSON(await conVision({ prompt: PROMPT, imagenes })) || {};
     } catch (e) {
         console.warn(`[Barras] visión falló: ${e.message}`);
         return null;
@@ -104,14 +102,12 @@ IDENTIFICADOR y devuelve SOLO un JSON con estos campos (deja vacío lo que no ve
  * @returns {Promise<{issn:?string,isbn:?string,esRevista:boolean,mes_publicacion:?number}|null>}
  */
 export async function leerIdentificadorDeImagenes(muestras) {
-    const imgs = (muestras || []).filter(m => m && m.base64)
-        .map(m => ({ inlineData: { data: m.base64, mimeType: m.mimeType || 'image/jpeg' } }));
-    if (!imgs.length) return null;
-    console.log(`[Barras/img] ${imgs.length} página(s) de muestra → consultando a la visión…`);
+    const imagenes = (muestras || []).filter(m => m && m.base64).map(m => ({ base64: m.base64, mimeType: m.mimeType || 'image/jpeg' }));
+    if (!imagenes.length) return null;
+    console.log(`[Barras/img] ${imagenes.length} página(s) de muestra → consultando a la visión…`);
     let datos;
     try {
-        const res = await conGemini(MODELO, (model) => model.generateContent([PROMPT_IMGS, ...imgs]));
-        datos = JSON.parse((res.response.text() || '{}').trim());
+        datos = extraerJSON(await conVision({ prompt: PROMPT_IMGS, imagenes })) || {};
     } catch (e) { console.warn(`[Barras/img] visión falló: ${e.message}`); return null; }
     console.log(`[Barras/img] codigo_barras="${datos.codigo_barras || ''}" isbn_impreso="${datos.isbn_impreso || ''}" issn_impreso="${datos.issn_impreso || ''}"`);
 

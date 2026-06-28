@@ -1,18 +1,10 @@
 import dotenv from 'dotenv';
-import { conGemini } from './utils/gemini.js';
+import { conVision, extraerJSON } from './utils/vision.js';
 import { decodificarCodigoBarras } from './utils/codigo-barras.js';
 
 dotenv.config();
 
-// CONFIGURACIÓN DE RIGIDEZ GRAMATICAL: Forzamos salida JSON nativa a nivel de API.
-// El cliente (con fallback free→pago) se construye por llamada en conGemini().
-const MODELO_VISION = {
-    model: "gemini-2.5-flash",
-    generationConfig: {
-        responseMimeType: "application/json"
-    }
-};
-
+// Salida JSON; la visión va por rotación multi-proveedor (gratis→pago) en conVision().
 const INSTRUCCIONES_SISTEMA = `
 Eres un bibliotecario experto y un sistema de extracción de metadatos estructurados.
 Tu objetivo es analizar las imágenes provistas (pueden ser una o varias del mismo recurso: portada, lomo, contraportada, o páginas interiores como la portadilla y la página de créditos/copyright de un PDF escaneado) y consolidar la información en ÚNICAMENTE un objeto JSON válido.
@@ -58,12 +50,7 @@ ESTRUCTURA JSON REQUERIDA:
  */
 export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
     try {
-        const imageParts = imagenes.map(({ data, mimeType }) => ({
-            inlineData: {
-                data: data.toString("base64"),
-                mimeType: mimeType || "image/jpeg"
-            }
-        }));
+        const imageParts = imagenes.map(({ data, mimeType }) => ({ base64: data.toString("base64"), mimeType: mimeType || "image/jpeg" }));
 
         // Inyección dinámica de metadatos nativos para dar máxima prioridad a los datos del archivo
         let instruccionesContextuales = INSTRUCCIONES_SISTEMA;
@@ -71,12 +58,11 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
             instruccionesContextuales += `\n\n⚠️ ENTORNO DIGITAL - NOTA PRIORITARIA:\nEl recurso actual es un libro digital (EPUB). El analizador nativo ha extraído el siguiente manifiesto:\n${JSON.stringify(datosEpub, null, 2)}\nUsa estos datos como fuente de verdad absoluta. Tu tarea principal aquí es verificar si el ISBN es correcto, estructurar la sinopsis final, e inferir con el máximo rigor la Clasificación Decimal Universal ('cdu') y las 'palabras_clave'.`;
         }
 
-        console.log(`\n──> [IA] Enviando ${imageParts.length} imagen(es) combinada(s) al pipeline de Gemini...`);
-        
-        const result = await conGemini(MODELO_VISION, (model) => model.generateContent([instruccionesContextuales, ...imageParts]));
-        const responseText = result.response.text();
-        
-        const recursoEstructurado = JSON.parse(responseText.trim());
+        console.log(`\n──> [IA] Enviando ${imageParts.length} imagen(es) a la visión (rotación multi-proveedor)...`);
+
+        const responseText = await conVision({ prompt: instruccionesContextuales, imagenes: imageParts });
+        const recursoEstructurado = extraerJSON(responseText);
+        if (!recursoEstructurado) throw new Error('la visión no devolvió un JSON válido');
 
         // CÓDIGO DE BARRAS: decodifica el EAN-13 leído de la cubierta (orientación indiferente: 977 →
         // ISSN/revista, 978/979 → ISBN). Rellena SOLO huecos (no pisa lo extraído del texto) y, ante un

@@ -377,6 +377,12 @@ body.guest .admin-only{display:none!important}
             </div>
             <div id="sanOut" style="margin-top:12px"></div>
           </div>
+          <div class="card admin-only">
+            <h3>👁️ Visión (IA) · rotación de proveedores</h3>
+            <p class="muted" style="margin-top:0;font-size:12px">Claves en <span class="mono">.env</span> (numeradas: <span class="mono">GROQ_API_KEY_1</span>, <span class="mono">_2</span>…). Se prueban GRATIS primero, de pago al final. Aquí solo se activan/desactivan y se prueban (los secretos no salen del servidor).</p>
+            <div class="row"><button class="btn" id="visRefresh">↻ Actualizar</button></div>
+            <div id="visOut" style="margin-top:12px"></div>
+          </div>
         </div>
         <div id="integOut" style="margin-top:16px"></div>
         <div class="card" style="margin-top:16px">
@@ -1481,7 +1487,19 @@ $('#logClear').onclick=()=>{if(confirm('¿Vaciar TODO el log?'))purgaLog({todo:t
 
 // ── integridad ──
 function loadInteg(){$('#integDiag').onclick=()=>correrIntegridad(false);if($('#integFix'))$('#integFix').onclick=()=>correrIntegridad(true);
-  if($('#sanDiag')){$('#sanDiag').onclick=sanearDiag;$('#sanRun').onclick=sanearRun;}}
+  if($('#sanDiag')){$('#sanDiag').onclick=sanearDiag;$('#sanRun').onclick=sanearRun;}
+  if($('#visRefresh')){$('#visRefresh').onclick=loadVision;loadVision();}}
+async function loadVision(){const el=$('#visOut');if(!el)return;el.innerHTML='<div class="muted">Cargando…</div>';
+  try{const r=await api('/vision/proveedores');const ps=r.proveedores||[];
+    if(!ps.length){el.innerHTML='<div class="muted">Sin claves de visión en .env. Añade p. ej. GROQ_API_KEY_1=… y reinicia.</div>';return;}
+    el.innerHTML=`<table><tr><th>Proveedor</th><th>Clave</th><th>Estado</th><th></th></tr>${ps.map(p=>`<tr data-id="${esc(p.id)}">
+      <td>${esc(p.etiqueta)} <span class="tag ${p.tier==='free'?'ok':'warn'}">${esc(p.tier)}</span><br><span class="muted mono" style="font-size:10px">${esc(p.id)} · ${esc(p.modelo)}</span></td>
+      <td class="mono muted">${esc(p.masked)}</td>
+      <td style="font-size:12px">${p.ultimoOk?'<span class="tag ok">último OK</span> ':''}${p.cooldown?'<span class="tag bad">cooldown</span> ':''}${p.errores?`<span class="muted">${p.errores} err</span>`:''}${p.ultimoError?`<br><span class="muted" style="font-size:10px">${esc(String(p.ultimoError).slice(0,90))}</span>`:''}</td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn vprobar" data-id="${esc(p.id)}">Probar</button> <label class="switch" style="vertical-align:middle;margin-left:6px"><input type="checkbox" class="vena" data-id="${esc(p.id)}" ${p.enabled?'checked':''}><span class="slider"></span></label></td></tr>`).join('')}</table>`;
+    $$('#visOut .vena').forEach(cb=>cb.onchange=async()=>{try{await api('/vision/proveedor',{method:'POST',body:JSON.stringify({id:cb.dataset.id,enabled:cb.checked})});toast(cb.checked?'Activado':'Desactivado');}catch(e){toast(e.message,'bad');cb.checked=!cb.checked;}});
+    $$('#visOut .vprobar').forEach(b=>b.onclick=async()=>{b.disabled=true;const t=b.textContent;b.textContent='…';try{const r=await api('/vision/probar',{method:'POST',body:JSON.stringify({id:b.dataset.id})});toast(r.ok?`✓ OK (${r.ms} ms)`:`✗ ${r.motivo}`,r.ok?'ok':'bad');loadVision();}catch(e){toast(e.message,'bad');b.disabled=false;b.textContent=t;}});
+  }catch(e){el.innerHTML='';toast(e.message,'bad');}}
 // ── Sanear catálogo (re-home #, portadas, re-clasificar) ──
 function sanResumen(inf){const d=inf.diagnostico||{},h=inf.hecho;
   const fila=(lab,v)=>`<tr><td>${esc(lab)}</td><td style="text-align:right"><b ${(typeof v==='number'?v>0:true)?'style="color:var(--warn)"':''}>${v}</b></td></tr>`;
