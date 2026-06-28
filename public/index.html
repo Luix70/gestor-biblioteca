@@ -1415,6 +1415,7 @@ function construirSearch(){
     <div class="card" style="margin-bottom:16px">
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option></select></div>
         <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off"></div>
         <div><label>Estrellas</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
@@ -1422,7 +1423,6 @@ function construirSearch(){
         </details></div>
         <div><label>Orden</label><select id="sqOrden"><option value="reciente">Recientes</option><option value="titulo">Título A-Z</option><option value="antiguo">Antiguos</option></select></div>
         <div class="admin-only"><label>Descubrir</label><div style="display:flex;align-items:center;gap:6px;height:36px"><label class="switch" style="flex:0 0 auto"><input type="checkbox" id="sqDescubrir"><span class="slider"></span></label><span class="muted" title="Busca en el Fichero (58,7 M) libros que NO tienes, con enlaces para conseguirlos">🔭 Fichero</span></div></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
       </div>
     </div>
     <div id="searchChip" style="margin-bottom:12px"></div>
@@ -1431,7 +1431,7 @@ function construirSearch(){
     <div id="searchPager" style="margin-top:16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap"></div>
     <div id="searchExternal" style="margin-top:20px"></div>`;
   $('#sqQ').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
-  $('#sqQ').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(busqTimer);buscarCatalogo(1);}};
+  $('#sqQ').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(busqTimer);buscarCatalogo(1);if($('#sqDescubrir')&&$('#sqDescubrir').checked)lanzarDescubrir();}};
   $('#sqCdu').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
   $('#sqTipo').onchange=()=>buscarCatalogo(1);
   $('#sqOrden').onchange=()=>buscarCatalogo(1);
@@ -1453,26 +1453,47 @@ async function buscarCatalogo(page){
   pintarChipClas();
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
   try{const r=await api('/catalogo?'+params.toString());pintarBusqueda(r);}
-  catch(e){$('#searchResults').innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
-  // Descubrir (Fichero): sección APARTE, debajo de los resultados de tu biblioteca; solo si el toggle está ON.
+  catch(e){$('#searchResults').innerHTML=`<div class="empty">${esc(e.message)}</div>`;if($('#searchCount'))$('#searchCount').textContent='—';}
+  // Descubrir (Fichero) es BAJO DEMANDA y corre en un WORKER: NUNCA bloquea la búsqueda de tu biblioteca
+  // (que es la prioritaria). Al teclear solo se muestra el botón; la consulta al Fichero se lanza con él/Enter.
   const ext=$('#searchExternal');
-  if(ext){if($('#sqDescubrir')&&$('#sqDescubrir').checked)descubrir();else ext.innerHTML='';}
+  if(ext){if($('#sqDescubrir')&&$('#sqDescubrir').checked)pintarDescubrirBoton();else ext.innerHTML='';}
 }
-// ── Descubrir: candidatos del Fichero (OL+BNE, no en tu biblioteca) en LISTA, con enlaces de copia ──
-async function descubrir(){
+// ── Descubrir: candidatos del Fichero (OL+BNE) BAJO DEMANDA (worker) + paginación en cliente ──
+let descResultados=[],descPagina=1,descQ='';
+const DESC_POR_PAG=25;
+const descCaja=(html)=>`<div class="card" style="border-color:rgba(120,160,255,.35)">${html}</div>`;
+function pintarDescubrirBoton(){
   const ext=$('#searchExternal');if(!ext)return;
   const q=$('#sqQ').value.trim();
-  if(q.length<2){ext.innerHTML='<div class="card" style="border-color:rgba(120,160,255,.35)"><b>🔭 Fuera de tu biblioteca</b><div class="muted" style="margin-top:6px">Escribe al menos 2 letras para buscar en el Fichero (58,7 M).</div></div>';return;}
-  ext.innerHTML='<div class="card" style="border-color:rgba(120,160,255,.35)"><div class="muted" style="padding:4px">🔭 Buscando en el Fichero (58,7 M)…</div></div>';
+  ext.innerHTML=descCaja(`<div class="row" style="align-items:center"><b>🔭 Fuera de tu biblioteca</b><span class="muted">Fichero · Open Library + BNE (58,7 M)</span><div style="flex:1"></div>
+    <button class="btn" id="descBtn"${q.length<2?' disabled':''}>🔭 Buscar en el Fichero${q?` «${esc(recortar(q,36))}»`:''}</button></div>
+    <div class="muted" style="font-size:11px;margin-top:8px">Bajo demanda (no ralentiza tu biblioteca). Busca por título/autor.</div>`);
+  if($('#descBtn'))$('#descBtn').onclick=lanzarDescubrir;
+}
+async function lanzarDescubrir(){
+  const ext=$('#searchExternal');if(!ext)return;
+  const q=$('#sqQ').value.trim();if(q.length<2)return;
+  descQ=q;descResultados=[];descPagina=1;
+  ext.innerHTML=descCaja('<div class="muted" style="padding:4px">🔭 Buscando en el Fichero (58,7 M)…</div>');
   try{const r=await api('/descubrir?q='+encodeURIComponent(q));
-    if(!r.disponible){ext.innerHTML=`<div class="card" style="border-color:rgba(120,160,255,.35)"><b>🔭 Fuera de tu biblioteca</b><div class="muted" style="margin-top:6px">No disponible: ${esc(r.motivo||'el Fichero no tiene índice de texto en este equipo')}.</div></div>`;return;}
-    const cs=r.candidatos||[];
-    ext.innerHTML=`<div class="card" style="border-color:rgba(120,160,255,.35)">
-      <div class="row" style="align-items:center;margin-bottom:6px"><b>🔭 Fuera de tu biblioteca</b><span class="muted">${cs.length} candidato${cs.length===1?'':'s'} del Fichero (Open Library + BNE)</span></div>
-      ${cs.length?cs.map(descRow).join(''):'<div class="muted" style="padding:6px 0">Sin candidatos en el Fichero para esa búsqueda (busca por título/autor).</div>'}
-      ${cs.length?'<div class="muted" style="font-size:11px;margin-top:10px">No están en tu biblioteca. Los enlaces buscan una copia descargable; al obtenerla, déjala en el Inbox para catalogarla.</div>':''}
-    </div>`;
-  }catch(e){ext.innerHTML=`<div class="card" style="border-color:rgba(120,160,255,.35)"><div class="empty">${esc(e.message)}</div></div>`;}
+    if(!r.disponible){ext.innerHTML=descCaja(`<b>🔭 Fuera de tu biblioteca</b><div class="muted" style="margin-top:6px">No disponible: ${esc(r.motivo||'el Fichero no tiene índice de texto en este equipo')}.</div>`);return;}
+    descResultados=r.candidatos||[];pintarDescubrir();
+  }catch(e){ext.innerHTML=descCaja(`<div class="empty">${esc(e.message)}</div><div style="margin-top:8px"><button class="btn" id="descRetry">↻ Reintentar</button></div>`);if($('#descRetry'))$('#descRetry').onclick=lanzarDescubrir;}
+}
+function pintarDescubrir(){
+  const ext=$('#searchExternal');if(!ext)return;
+  const tot=descResultados.length,tp=Math.max(1,Math.ceil(tot/DESC_POR_PAG));
+  descPagina=Math.min(Math.max(1,descPagina),tp);
+  const slice=descResultados.slice((descPagina-1)*DESC_POR_PAG,descPagina*DESC_POR_PAG);
+  const pager=tp>1?`<div style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px"><button class="btn" id="descPrev"${descPagina<=1?' disabled':''}>‹ Anterior</button><span class="muted">Página ${descPagina} de ${tp}</span><button class="btn" id="descNext"${descPagina>=tp?' disabled':''}>Siguiente ›</button></div>`:'';
+  ext.innerHTML=descCaja(`<div class="row" style="align-items:center;margin-bottom:6px"><b>🔭 Fuera de tu biblioteca</b><span class="muted">${tot}${tot>=100?'+':''} candidato${tot===1?'':'s'} del Fichero · «${esc(recortar(descQ,36))}»</span><div style="flex:1"></div><button class="btn" id="descAgain" title="Buscar de nuevo">↻</button></div>
+    ${tot?slice.map(descRow).join(''):'<div class="muted" style="padding:6px 0">Sin candidatos en el Fichero para esa búsqueda (busca por título/autor).</div>'}
+    ${pager}
+    ${tot?'<div class="muted" style="font-size:11px;margin-top:10px">No están en tu biblioteca. Los enlaces buscan una copia descargable; al obtenerla, déjala en el Inbox para catalogarla.</div>':''}`);
+  if($('#descPrev'))$('#descPrev').onclick=()=>{descPagina--;pintarDescubrir();};
+  if($('#descNext'))$('#descNext').onclick=()=>{descPagina++;pintarDescubrir();};
+  if($('#descAgain'))$('#descAgain').onclick=lanzarDescubrir;
 }
 function descRow(c){
   const aut=(c.autores&&c.autores.length?c.autores.join(', '):'')||c.editorial||'autor desconocido';

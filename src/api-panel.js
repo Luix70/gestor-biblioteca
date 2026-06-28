@@ -14,7 +14,7 @@ import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { editarDocumento } from './utils/editar-doc.js';
 import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
-import { buscarTextoEnFichero } from './utils/buscador-local.js';
+import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -429,7 +429,8 @@ export function rutasPanel() {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
             const q = (req.query.q || '').trim();
             if (q.length < 2) return res.json({ ok: true, disponible: true, candidatos: [] });
-            const cands = await buscarTextoEnFichero(q, { limite: 40 });
+            // Corre en un WORKER (no bloquea el event loop; better-sqlite3 es síncrono). Bajo demanda.
+            const cands = await descubrirEnFichero(q, { limite: 100 });
             if (cands === null) return res.json({ ok: true, disponible: false, candidatos: [], motivo: 'Fichero sin índice de texto o no disponible' });
             const db = await conectarDB();
             const isbns = cands.map(c => c.isbn).filter(Boolean);
