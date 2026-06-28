@@ -9,7 +9,7 @@
 <style>
 :root{
   --bg:#0e1116; --bg2:#151a22; --card:#1a212c; --card2:#202938; --line:#2a3340;
-  --txt:#e7edf3; --mut:#8a97a6; --acc:#28d9a8; --acc2:#1ba3ff; --warn:#ffb454; --bad:#ff5c7a;
+  --txt:#e7edf3; --mut:#9aa8b7; --acc:#28d9a8; --acc2:#1ba3ff; --warn:#ffb454; --bad:#ff5c7a;
   --ok:#28d9a8; --radius:14px; --sb:248px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -18,7 +18,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system
   background:var(--bg);color:var(--txt);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
 /* Fondo fijo de toda la app (detrás de todo): saturación 50% + leve desenfoque. El inset negativo
    esconde el borde transparente del blur fuera del viewport. */
-body::before{content:"";position:fixed;inset:-16px;z-index:-1;background:url('/Background.jpg') center/cover no-repeat;filter:saturate(.5) blur(4px)}
+body::before{content:"";position:fixed;inset:-16px;z-index:-1;background:linear-gradient(rgba(8,10,14,.66),rgba(8,10,14,.66)),url('/Background.jpg') center/cover no-repeat;filter:saturate(.5) blur(4px)}
 a{color:inherit}
 /* layout */
 .layout{display:flex;min-height:100vh}
@@ -276,6 +276,14 @@ body.guest .admin-only{display:none!important}
   .ficha{grid-template-columns:1fr}.fileprev iframe{height:58vh}.epubwrap,.pdfwrap{height:64vh;height:64svh}
   .vol-grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
   .det-title h2{font-size:18px}
+  /* Cuarentena: la tabla de 4 columnas pasa a TARJETAS apiladas en vertical (sin scroll horizontal). */
+  #p-cuar .card{overflow-x:visible}
+  #p-cuar .cuar-body table,#p-cuar .cuar-body tbody,#p-cuar .cuar-body tr,#p-cuar .cuar-body td,#p-cuar .cuar-body th{display:block;width:auto}
+  #p-cuar .cuar-body tr:first-child{display:none}            /* oculta la fila de cabecera (th) */
+  #p-cuar .cuar-body tr{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--bg2)}
+  #p-cuar .cuar-body td{text-align:left!important;white-space:normal!important;padding:3px 0}
+  #p-cuar .cuar-body td:last-child{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  #p-cuar .cuar-body td:last-child .btn{flex:1 1 auto;min-width:128px}
 }
 @media(max-width:900px){
   .sidebar{transform:translateX(-100%)}.sidebar.open{transform:none}
