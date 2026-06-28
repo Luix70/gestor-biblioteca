@@ -15,7 +15,7 @@ import { decodificarCodigoBarras } from './codigo-barras.js';
 import { validarISSN, validarISBN } from './identificadores.js';
 import { leerBarrasLocal } from './lector-barras-local.js';
 
-const ANCHO = Number(process.env.PDF_BARRAS_ANCHO || 3000); // px de ancho de página equivalente (DPI alto)
+const ANCHO = Number(process.env.PDF_BARRAS_ANCHO || 2000); // px de ancho de página equivalente (alto pero acotado para el Atom)
 const PROMPT = `Tienes RECORTES de la cubierta (donde está el CÓDIGO DE BARRAS) y algunas PÁGINAS INTERIORES
 de una revista o libro. Devuelve SOLO un JSON con tres campos:
 - "codigo_barras": los 13 dígitos del EAN-13 de la cubierta, SIN guiones ni espacios, leídos en CUALQUIER
@@ -80,7 +80,7 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInterno
 
     let datos;
     try {
-        datos = extraerJSON(await conVision({ prompt: PROMPT, imagenes })) || {};
+        datos = extraerJSON(await conVision({ prompt: PROMPT, imagenes, soloGemini: true })) || {};
     } catch (e) {
         console.warn(`[Barras] visión falló: ${e.message}`);
         return null;
@@ -136,7 +136,7 @@ export async function leerIdentificadorDeImagenes(muestras) {
     console.log(`[Barras/img] ${imagenes.length} página(s) de muestra → consultando a la visión…`);
     let datos;
     try {
-        datos = extraerJSON(await conVision({ prompt: PROMPT_IMGS, imagenes })) || {};
+        datos = extraerJSON(await conVision({ prompt: PROMPT_IMGS, imagenes, soloGemini: true })) || {};
     } catch (e) { console.warn(`[Barras/img] visión falló: ${e.message}`); return null; }
     console.log(`[Barras/img] codigo_barras="${datos.codigo_barras || ''}" isbn_impreso="${datos.isbn_impreso || ''}" issn_impreso="${datos.issn_impreso || ''}"`);
 

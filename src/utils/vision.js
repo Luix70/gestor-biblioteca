@@ -124,9 +124,10 @@ async function llamar(c, { prompt, imagenes, json }) {
 }
 
 /** Orden de intento: enabled, free→paid (config), pegajoso al último-OK FREE; cooldown al final. */
-async function ordenIntento() {
+async function ordenIntento(filtro = null) {
     const aj = await ajustes();
     let base = candidatos().filter(c => aj.get(c.id)?.enabled !== false);
+    if (filtro) base = base.filter(filtro);
     const ahora = Date.now();
     if (ultimoOk) {
         const lc = base.find(c => c.id === ultimoOk);
@@ -141,9 +142,14 @@ async function ordenIntento() {
  * Llama a la visión con rotación. Devuelve el TEXTO de la respuesta (usa extraerJSON para parsear).
  * @param {{prompt:string, imagenes?:Array<{base64:string,mimeType?:string}>, json?:boolean}} opts
  */
-export async function conVision({ prompt, imagenes = [], json = true } = {}) {
-    const orden = await ordenIntento();
-    if (!orden.length) throw new Error('No hay proveedores de visión configurados/activos (revisa las claves en .env y los Ajustes).');
+export async function conVision({ prompt, imagenes = [], json = true, soloGemini = false } = {}) {
+    // soloGemini: para tareas que exigen leer DÍGITOS con exactitud (códigos de barras) → solo Gemini
+    // (free→paid), que es el preciso. Así un 429 cae a Gemini de PAGO en vez de pararse en una lectura
+    // ERRÓNEA de Groq/OpenRouter (que "responden" con dígitos mal y cortan la rotación).
+    const orden = await ordenIntento(soloGemini ? (c => c.prov.tipo === 'gemini') : null);
+    if (!orden.length) throw new Error(soloGemini
+        ? 'No hay proveedor Gemini disponible/activo para leer el código de barras con precisión.'
+        : 'No hay proveedores de visión configurados/activos (revisa las claves en .env y los Ajustes).');
     let ultimo;
     for (const c of orden) {
         const t0 = Date.now();

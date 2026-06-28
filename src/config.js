@@ -55,8 +55,9 @@ export const AJUSTES = {
     PDF_PAGINAS_FRENTE: 15,         // nº de primeras páginas de las que se extrae texto (ISBN/título)
     PDF_PAGINAS_FONDO: 5,           // nº de últimas páginas de las que se extrae texto
     PDF_RASTER_ANCHO: 1024,         // ancho del rasterizado de portada (poppler)
-    PDF_OCR_PAGINAS: 5,             // nº de primeras páginas (+ la última) que se OCR-ean si escaneado
-    PDF_OCR_ANCHO: 1600,            // ancho del rasterizado para OCR (más alto = ISBN legible)
+    PDF_OCR_PAGINAS: 3,             // nº de primeras páginas (+ la última) a rasterizar para OCR/barras (menos = más rápido en el Atom)
+    PDF_OCR_ANCHO: 1300,            // ancho del rasterizado para OCR/barras (más alto = ISBN legible; más bajo = más rápido en el Atom)
+    PDF_BARRAS_ANCHO: 2000,         // ancho equivalente de los recortes del código de barras (alto pero acotado para no asfixiar al Atom)
 };
 
 // Siembra process.env con los valores de AJUSTES que .env NO haya definido (env > config).
