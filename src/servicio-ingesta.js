@@ -11,6 +11,8 @@ import { enviarACuarentena } from './gestor-fallos.js';
 import { carpetaDeDoc, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
 import { conectarDB } from './database.js';
 import { indexarDoc } from './utils/indice-busqueda.js';
+import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
+import { parsearVolumen } from './utils/multivolumen.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -99,7 +101,41 @@ async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
  * Solo para recursos de UN fichero (un grupo de imágenes no tiene un hash único). Respeta el override
  * manual `forzar_nuevo` (conservar ambos): en ese caso NO cortocircuita.
  */
-async function atajoPorHash(rutas) {
+/**
+ * GAP-FILL del re-drop: rellena SOLO los huecos del doc existente con el CONTEXTO del nuevo drop
+ * (carpeta-colección, obra, o "Vol N" en el nombre). Conservador: nunca pisa lo ya puesto. Best-effort
+ * (un fallo no rompe el atajo). Devuelve la lista de campos rellenados (para el log).
+ */
+async function rellenarHuecosPorContexto(doc, ruta, contexto = {}) {
+    const rellenos = [];
+    let db;
+    try { db = await conectarDB(); } catch { return rellenos; }
+    try {
+        // Colección por carpeta (re-drop dentro de una carpeta-colección) → enlazar si no la tenía.
+        if (contexto.coleccion && !doc.coleccion) {
+            const r = await asignarColeccion(db, [doc._id], { nombre: String(contexto.coleccion), tipo: doc.tipo_recurso === 'revista' ? 'revista' : 'libro' });
+            if (r?.ok && r.n) rellenos.push(`colección «${contexto.coleccion}»`);
+        }
+        // Obra por carpeta (re-drop como tomo de una obra) → enlazar si no la tenía.
+        const obraTit = contexto.obra?.titulo || contexto.obra?.titulo_obra || null;
+        if (obraTit && !doc.obra) {
+            const r = await asignarObra(db, [doc._id], { titulo: String(obraTit) });
+            if (r?.ok && r.n) rellenos.push(`obra «${obraTit}»`);
+        }
+        // Volumen por NOMBRE del re-drop ("… Vol. 3") → rellenar si faltaba.
+        const vol = parsearVolumen(path.basename(ruta));
+        if (vol && vol.numero != null && doc.volumen_numero == null) {
+            const set = { volumen_numero: vol.numero, fecha_actualizacion: new Date() };
+            if (vol.prefijo && !doc.obra_titulo) set.obra_titulo = vol.prefijo;
+            await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
+            rellenos.push(`volumen ${vol.numero}`);
+        }
+        if (rellenos.length) { try { await indexarDoc(db, doc._id); } catch { /* índice best-effort */ } }
+    } catch (e) { console.warn(`  ⚠️  [Atajo hash] gap-fill parcial en ${doc._id}: ${e.message}`); }
+    return rellenos;
+}
+
+async function atajoPorHash(rutas, contexto = {}) {
     if (!rutas || rutas.length !== 1) return null;
     try { const ov = await leerOverride(rutas[0]); if (ov?.forzar_nuevo) return null; } catch { /* sin override */ }
     let hash;
@@ -107,6 +143,11 @@ async function atajoPorHash(rutas) {
     if (!hash) return null;
     const doc = await buscarDocPorHash(hash);
     if (!doc) return null;                                   // hash nuevo → procesar normal
+
+    // GAP-FILL: el re-drop de un fichero YA archivado puede traer MÁS contexto que la 1.ª vez. Rellena
+    // los huecos del doc existente (conservador) antes de descartarlo/restaurarlo.
+    const rellenos = await rellenarHuecosPorContexto(doc, rutas[0], contexto);
+    const sufijo = rellenos.length ? ` (huecos: ${rellenos.join(', ')})` : '';
 
     const comun = {
         _id: String(doc._id), duplicado: true, estado: doc.estado_verificacion || null,
@@ -118,7 +159,7 @@ async function atajoPorHash(rutas) {
     if (original) {
         // Duplicado EXACTO ya archivado y referenciado → borrar el entrante SIN reprocesar (ahorra API/IA).
         for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
-        console.log(`  🗑️  [Atajo hash] «${path.basename(rutas[0])}» ya archivado como ${doc._id} → borrado sin reprocesar.`);
+        console.log(`  🗑️  [Atajo hash] «${path.basename(rutas[0])}» ya archivado como ${doc._id} → borrado sin reprocesar${sufijo}.`);
         return { ...comun, operacion: 'duplicado_exacto', accion: 'borrado' };
     }
     // El doc existe pero su FICHERO falta → restaurar con el entrante (mismo contenido) en su carpeta.
@@ -127,7 +168,7 @@ async function atajoPorHash(rutas) {
             await fs.mkdir(carpeta, { recursive: true });
             await fs.copyFile(rutas[0], path.join(carpeta, doc.nombre_archivo));
             for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
-            console.log(`  ♻️  [Atajo hash] Fichero ausente de ${doc._id} RESTAURADO con el entrante (mismo hash) en ${carpeta}.`);
+            console.log(`  ♻️  [Atajo hash] Fichero ausente de ${doc._id} RESTAURADO con el entrante (mismo hash) en ${carpeta}${sufijo}.`);
             return { ...comun, operacion: 'restaurado', accion: 'restaurado' };
         } catch (e) {
             console.warn(`  ⚠️  [Atajo hash] No se pudo restaurar el fichero de ${doc._id}: ${e.message} → se procesa normal.`);
@@ -149,7 +190,7 @@ async function atajoPorHash(rutas) {
 export async function ingestarRecurso({ rutas, contexto = {} }) {
     // 0. ATAJO POR HASH: si el fichero ya está archivado (hash idéntico) no malgastar OCR/visión/APIs;
     //    si el doc existe pero su fichero falta, restaurarlo con el entrante. (Ver atajoPorHash.)
-    const atajo = await atajoPorHash(rutas);
+    const atajo = await atajoPorHash(rutas, contexto);
     if (atajo) return atajo;
 
     // 1. Extracción + enriquecimiento.
