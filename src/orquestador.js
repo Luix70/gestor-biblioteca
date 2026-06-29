@@ -14,7 +14,7 @@ import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
-import { rasterizarPaginas } from './utils/rasterizar-pdf.js';
+import { rasterizarPaginas, pdfEsImagen } from './utils/rasterizar-pdf.js';
 import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/lector-barras.js';
 import { paginasMuestraDjvu } from './utils/djvu.js';
 
@@ -220,7 +220,11 @@ export async function procesarRecurso(entrada) {
         tipo_recurso = clasif.tipo_recurso;
         isbnDelArchivo = !!datosBase.isbn_propio; // solo el ISBN PROPIO (no el del cuerpo) cuenta como fiable
 
-        if (!datosBase.texto_legible) {
+        // ¿Es realmente un ESCANEO? Sin capa de texto, O un PDF de imágenes con capa OCR (Adobe Scan/Lens
+        // añaden OCR → texto_legible daba true y se colaba como "PDF digital"). pdfEsImagen lo detecta por
+        // productor + fuentes (solo GlyphLessFont del OCR).
+        const esEscaneado = !datosBase.texto_legible || await pdfEsImagen(rutas[0]);
+        if (esEscaneado) {
             // PDF ESCANEADO = fotos de un libro FÍSICO (Adobe Scan / cámara / Lens), NO un PDF digital.
             // Se trata IGUAL que el grupo de imágenes de la cámara (que sí identifica bien): se identifican
             // las páginas rasterizadas con la MISMA visión (analizarImagenesRecurso) y el soporte es

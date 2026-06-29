@@ -81,6 +81,29 @@ export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, 
 }
 
 /**
+ * ¿Es un PDF de IMÁGENES (escaneo), aunque traiga capa de texto OCR? Adobe Scan / CamScanner / Lens…
+ * generan PDFs que SON fotos de páginas con una capa de texto OCR encima → `texto_legible` da true y
+ * se colaban como "PDF digital". Señales (poppler, C, sin SIMD → apto para el Atom):
+ *   1) Productor/creador = app de escaneo conocida.
+ *   2) pdffonts: sin fuentes reales — solo la invisible "GlyphLessFont" del OCR (Tesseract/Adobe), o ninguna.
+ * Devuelve true si parece escaneo. Degrada a false si no hay pdfinfo/pdffonts.
+ */
+const APPS_ESCANEO = /adobe scan|camscanner|office lens|microsoft lens|genius scan|scanbot|swiftscan|tiny scanner|tapscanner|clear ?scanner|fast scanner|notebloc|photomyne|simple scan|naps2|vflat/i;
+export async function pdfEsImagen(ruta) {
+    try {
+        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: 15000 });
+        if (APPS_ESCANEO.test(stdout)) return true;
+    } catch { /* sin pdfinfo o PDF raro */ }
+    try {
+        const { stdout } = await execFileP('pdffonts', [ruta], { timeout: 15000 });
+        const filas = stdout.split('\n').slice(2).filter(l => l.trim()); // saltar las 2 líneas de cabecera
+        if (filas.length === 0) return true;                              // sin fuentes → página = imagen
+        if (filas.every(l => /glyphlessfont/i.test(l))) return true;      // solo la fuente invisible del OCR
+    } catch { /* sin pdffonts (poppler) → no se puede afinar; se queda en false */ }
+    return false;
+}
+
+/**
  * Tamaño de la 1ª página en puntos (1/72") vía pdfinfo. Sirve para calcular recortes a una resolución
  * conocida. Devuelve { anchoPts, altoPts } o null (sin pdfinfo / PDF ilegible) → degradación elegante.
  */
