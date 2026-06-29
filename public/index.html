@@ -1143,6 +1143,7 @@ function pintarDoc(r,ctx){
     <div style="margin-top:8px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div>
     <div class="det-acts">
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
+      <button class="fbtn admin-only" id="actImgs" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">🖼️ Imágenes</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
       <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
@@ -1160,6 +1161,7 @@ function pintarDoc(r,ctx){
    if(cr)cr.onclick=()=>fichaReprocesar(d._id);
    const cd=$('#actDel');if(cd)cd.onclick=()=>fichaEliminar(d._id);
    const ce2=$('#actEdit');if(ce2)ce2.onclick=()=>fichaEditar(d,r);
+   const ci=$('#actImgs');if(ci)ci.onclick=()=>editarImagenes(d._id,r.imagenes||(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]));
    // Grabar NFC: solo en navegadores con Web NFC (Android + Chrome). En el resto queda oculto.
    const cn=$('#actNfc');if(cn&&('NDEFReader' in window)){cn.style.display='';cn.onclick=()=>grabarNFC(d);}}
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
@@ -1264,6 +1266,121 @@ async function fichaEliminar(id){
     if(!r.ok){toast(r.motivo,'bad');return;}
     toast('Documento eliminado (su carpeta está en la Papelera)');go('search');
   }catch(e){toast(e.message,'bad');}}
+// ════════ GESTIÓN DE IMÁGENES DEL CARRUSEL (reordenar/borrar/añadir + editor rotar/recortar/perspectiva) ════════
+const fileADataURL=blob=>new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=rej;fr.readAsDataURL(blob);});
+let _imgState=null;
+function editarImagenes(id, imagenes){ _imgState={ id, imgs:(imagenes||[]).map(im=>({...im})) }; pintarGestorImagenes(); }
+async function apiImg(op, body){
+  const {id}=_imgState;
+  try{const r=await api('/documentos/'+encodeURIComponent(id)+'/imagenes/'+op,{method:'POST',body:JSON.stringify(body)});
+    if(!r.ok){toast(r.motivo||'error','bad');return false;}
+    _imgState.imgs=(r.imagenes||[]).map(im=>({...im}));_imgState.cambiado=true;pintarGestorImagenes();return true;
+  }catch(e){toast(e.message,'bad');return false;}
+}
+function pintarGestorImagenes(){
+  const {id,imgs}=_imgState;
+  const filas=imgs.map((im,i)=>`<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
+    <img src="${esc(encUrl(im.ruta))}?t=${Date.now()}" style="width:50px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">
+    <span class="muted" style="flex:1;font-size:12px">${i===0?'⭐ portada':'#'+(i+1)}</span>
+    <button class="btn" data-up="${i}" ${i===0?'disabled':''} title="Subir">↑</button>
+    <button class="btn" data-down="${i}" ${i===imgs.length-1?'disabled':''} title="Bajar">↓</button>
+    <button class="btn" data-edit="${i}" title="Rotar / recortar / perspectiva">✎</button>
+    <button class="btn bad" data-del="${esc(im.ruta)}" title="Borrar (a la Papelera)">🗑</button>
+  </div>`).join('');
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">🖼️ Imágenes (${imgs.length})</h3>
+    <p class="muted" style="font-size:12px;margin:0 0 6px">La 1.ª es la PORTADA. Reordena con ↑/↓; ✎ abre el editor (rotar/recortar/corregir perspectiva).</p>
+    ${imgs.length?filas:'<div class="muted">Sin imágenes.</div>'}
+    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn pri" id="imgCerrar">Cerrar</button></div>
+    <input type="file" id="imgAddInput" accept="image/*" style="display:none"></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+  const cerrar=()=>{const id=_imgState.id,refrescar=_imgState.cambiado;cerrarCmp();if(refrescar)verDoc(id,detalle&&detalle.ctx);};
+  $('#imgCerrar').onclick=cerrar;$('#cmpScrim').onclick=cerrar;
+  $$('#cmpModal [data-up]').forEach(b=>b.onclick=()=>moverImg(+b.dataset.up,-1));
+  $$('#cmpModal [data-down]').forEach(b=>b.onclick=()=>moverImg(+b.dataset.down,1));
+  $$('#cmpModal [data-del]').forEach(b=>b.onclick=async()=>{ if(await ubicConfirm('Borrar imagen','Irá a la Papelera (recuperable). ¿Seguir?')) apiImg('eliminar',{ruta:b.dataset.del}); });
+  $$('#cmpModal [data-edit]').forEach(b=>b.onclick=()=>abrirEditorImagen(+b.dataset.edit));
+  const fi=$('#imgAddInput');
+  $('#imgAdd').onclick=()=>fi.click();
+  fi.onchange=async()=>{ if(fi.files[0]){ try{const b64=await fileADataURL(await reducirImagen(fi.files[0],2200,0.88));await apiImg('anadir',{base64:b64});}catch(e){toast(e.message,'bad');} } fi.value=''; };
+}
+async function moverImg(i,dir){ const {imgs}=_imgState;const j=i+dir;if(j<0||j>=imgs.length)return;[imgs[i],imgs[j]]=[imgs[j],imgs[i]];await apiImg('orden',{orden:imgs.map(im=>im.ruta)}); }
+// ── Homografía (perspectiva): resolver 4→4 y aplicar (Gauss 8×8) ──
+function _gauss(A,b){const n=b.length,M=A.map((r,i)=>[...r,b[i]]);for(let c=0;c<n;c++){let p=c;for(let r=c+1;r<n;r++)if(Math.abs(M[r][c])>Math.abs(M[p][c]))p=r;[M[c],M[p]]=[M[p],M[c]];const pv=M[c][c]||1e-9;for(let r=0;r<n;r++){if(r===c)continue;const f=M[r][c]/pv;for(let k=c;k<=n;k++)M[r][k]-=f*M[c][k];}}return M.map((r,c)=>r[n]/(r[c]||1e-9));}
+function _homografia(src,dst){const A=[],b=[];for(let i=0;i<4;i++){const[x,y]=src[i],[u,v]=dst[i];A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v);}const h=_gauss(A,b);return[h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1];}
+function _mapH(H,x,y){const d=H[6]*x+H[7]*y+H[8];return[(H[0]*x+H[1]*y+H[2])/d,(H[3]*x+H[4]*y+H[5])/d];}
+const _dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+// Editor de UNA imagen: rotar 90°, recortar (rect) y corregir PERSPECTIVA (4 esquinas → rectángulo).
+function abrirEditorImagen(i){
+  const im=_imgState.imgs[i]; if(!im)return;
+  const src=new Image(); src.crossOrigin='anonymous';
+  src.onerror=()=>toast('No se pudo cargar la imagen para editar','bad');
+  src.onload=()=>{
+    let work=document.createElement('canvas'); work.width=src.naturalWidth; work.height=src.naturalHeight; work.getContext('2d').drawImage(src,0,0);
+    let modo='none', drag=-1, crop=null, quad=null;
+    const TOPE=2400; // tope del lado mayor al exportar (protege memoria del móvil)
+    $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:92vh;overflow:auto"><h3 style="margin-top:0">✎ Editar imagen</h3>
+      <div style="display:flex;justify-content:center;background:#0a0d12;border-radius:8px;padding:6px"><canvas id="edC" style="max-width:100%;touch-action:none;border-radius:6px"></canvas></div>
+      <p class="muted" id="edMsg" style="font-size:12px;margin:8px 0 4px"></p>
+      <div class="row" style="gap:6px;margin-top:4px;flex-wrap:wrap">
+        <button class="btn" id="edRotL" title="Girar -90°">⟲</button><button class="btn" id="edRotR" title="Girar +90°">⟳</button>
+        <button class="btn" id="edCrop">✂ Recortar</button><button class="btn" id="edPersp">▱ Perspectiva</button>
+        <button class="btn pri" id="edApply" style="display:none">Aplicar</button></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edSave">Guardar</button></div></div>`;
+    $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+    const c=$('#edC'),ctx=c.getContext('2d');
+    let escala=1;
+    const ajustar=()=>{const maxW=Math.min(520,(window.innerWidth||520)-60);escala=Math.min(1,maxW/work.width);c.width=Math.round(work.width*escala);c.height=Math.round(work.height*escala);};
+    const W2V=p=>[p[0]*escala,p[1]*escala], V2W=(x,y)=>[x/escala,y/escala];
+    const render=()=>{
+      ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(work,0,0,c.width,c.height);
+      const pts = modo==='crop'?[[crop.x0,crop.y0],[crop.x1,crop.y0],[crop.x1,crop.y1],[crop.x0,crop.y1]] : modo==='persp'?quad : null;
+      if(pts){ ctx.save();ctx.strokeStyle='#28d9a8';ctx.lineWidth=2;ctx.fillStyle='rgba(40,217,168,.12)';
+        ctx.beginPath();pts.forEach((p,k)=>{const v=W2V(p);k?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]);});ctx.closePath();ctx.fill();ctx.stroke();
+        ctx.fillStyle='#28d9a8';pts.forEach(p=>{const v=W2V(p);ctx.beginPath();ctx.arc(v[0],v[1],7,0,7);ctx.fill();});ctx.restore(); }
+    };
+    const reset=()=>{ajustar();crop={x0:work.width*0.08,y0:work.height*0.08,x1:work.width*0.92,y1:work.height*0.92};quad=[[0,0],[work.width,0],[work.width,work.height],[0,work.height]];render();};
+    reset();
+    const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';$('#edMsg').textContent=modo==='crop'?'Arrastra las esquinas del recuadro a recortar.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (orden: ↖ ↗ ↘ ↙).':'';render();};
+    $('#edCrop').onclick=()=>setModo('crop');$('#edPersp').onclick=()=>setModo('persp');
+    const rotar=horario=>{const nc=document.createElement('canvas');nc.width=work.height;nc.height=work.width;const x=nc.getContext('2d');x.translate(nc.width/2,nc.height/2);x.rotate((horario?90:-90)*Math.PI/180);x.drawImage(work,-work.width/2,-work.height/2);work=nc;modo='none';$('#edApply').style.display='none';reset();};
+    $('#edRotL').onclick=()=>rotar(false);$('#edRotR').onclick=()=>rotar(true);
+    // arrastre de esquinas
+    const pos=ev=>{const rc=c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);};
+    const handles=()=> modo==='crop'?[[crop.x0,crop.y0],[crop.x1,crop.y0],[crop.x1,crop.y1],[crop.x0,crop.y1]] : modo==='persp'?quad : [];
+    c.addEventListener('pointerdown',ev=>{ if(modo==='none')return; ev.preventDefault(); const p=pos(ev),hs=handles();let best=-1,bd=24/escala; hs.forEach((h,k)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best=k;}}); drag=best; });
+    c.addEventListener('pointermove',ev=>{ if(drag<0)return; ev.preventDefault(); let[x,y]=pos(ev);x=Math.max(0,Math.min(work.width,x));y=Math.max(0,Math.min(work.height,y));
+      if(modo==='crop'){ if(drag===0){crop.x0=x;crop.y0=y;}else if(drag===1){crop.x1=x;crop.y0=y;}else if(drag===2){crop.x1=x;crop.y1=y;}else{crop.x0=x;crop.y1=y;} }
+      else { quad[drag]=[x,y]; } render(); });
+    const soltar=()=>{drag=-1;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
+    $('#edApply').onclick=()=>{
+      if(modo==='crop'){ const x0=Math.min(crop.x0,crop.x1),y0=Math.min(crop.y0,crop.y1),w=Math.abs(crop.x1-crop.x0),h=Math.abs(crop.y1-crop.y0);
+        if(w<8||h<8){toast('Recorte demasiado pequeño','warn');return;}
+        const nc=document.createElement('canvas');nc.width=Math.round(w);nc.height=Math.round(h);nc.getContext('2d').drawImage(work,x0,y0,w,h,0,0,nc.width,nc.height);work=nc; }
+      else if(modo==='persp'){
+        const[TL,TR,BR,BL]=quad; let W=Math.round((_dist(TL,TR)+_dist(BL,BR))/2),H=Math.round((_dist(TL,BL)+_dist(TR,BR))/2);
+        if(W<8||H<8){toast('Esquinas no válidas','warn');return;}
+        const f=Math.min(1,TOPE/Math.max(W,H));W=Math.round(W*f);H=Math.round(H*f);
+        const Hi=_homografia([[0,0],[W,0],[W,H],[0,H]],quad); // salida-rect → fuente
+        const simg=work.getContext('2d').getImageData(0,0,work.width,work.height),sd=simg.data,sw=work.width,sh=work.height;
+        const out=ctx.createImageData(W,H),od=out.data;
+        for(let y=0;y<H;y++)for(let x=0;x<W;x++){const[sx,sy]=_mapH(Hi,x+0.5,y+0.5);const ix=sx|0,iy=sy|0;const o=(y*W+x)*4;
+          if(ix>=0&&iy>=0&&ix<sw&&iy<sh){const s=(iy*sw+ix)*4;od[o]=sd[s];od[o+1]=sd[s+1];od[o+2]=sd[s+2];od[o+3]=255;}else od[o+3]=255;}
+        const nc=document.createElement('canvas');nc.width=W;nc.height=H;nc.getContext('2d').putImageData(out,0,0);work=nc; }
+      modo='none';$('#edApply').style.display='none';reset();
+    };
+    const cerrarEd=()=>pintarGestorImagenes();
+    $('#edX').onclick=cerrarEd;
+    $('#edSave').onclick=async()=>{
+      // exportar (cap del lado mayor) a JPEG
+      let cw=work.width,ch=work.height;const f=Math.min(1,TOPE/Math.max(cw,ch));
+      let exp=work; if(f<1){exp=document.createElement('canvas');exp.width=Math.round(cw*f);exp.height=Math.round(ch*f);exp.getContext('2d').drawImage(work,0,0,exp.width,exp.height);}
+      const b64=exp.toDataURL('image/jpeg',0.9);
+      const ok=await apiImg('reemplazar',{ruta:im.ruta,base64:b64});  // re-pinta el gestor
+      if(ok)toast('Imagen actualizada');
+    };
+  };
+  src.src=encUrl(im.ruta)+'?t='+Date.now();
+}
 function fichaEditar(d,r,opts){
   opts=opts||{};const sup=!!opts.supervisado;
   const v=x=>x==null?'':String(x);

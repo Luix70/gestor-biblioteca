@@ -46,7 +46,7 @@ const upload = multer({
 });
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '25mb' })); // 25mb: admite imágenes editadas (rotar/recortar/perspectiva) en base64
 
 // AUTO-LOGIN POR URL (https://user:pwd@host): el navegador manda esas credenciales como cabecera
 // `Authorization: Basic` en la carga de la página. Las validamos y, si son correctas, sembramos una

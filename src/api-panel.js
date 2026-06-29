@@ -12,6 +12,7 @@ import { lanzarIntegridad, estadoIntegridad } from './integridad.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
+import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen } from './utils/imagenes-doc.js';
 import { editarDocumento } from './utils/editar-doc.js';
 import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
@@ -827,6 +828,25 @@ export function rutasPanel() {
             }
             res.json({ ok: true, eliminados, fallidos: fallidos.length, total: ids.length });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ── Imágenes del carrusel (gestión manual desde la ficha; las mutaciones ya las restringe a admin
+    //    `autenticar`). Editar (rotar/recortar/perspectiva) se hace en el CLIENTE y llega en base64. ──
+    r.post('/documentos/:id/imagenes/orden', async (req, res) => {
+        try { res.json(await reordenarImagenes(await conectarDB(), req.params.id, req.body?.orden || [])); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/:id/imagenes/eliminar', async (req, res) => {
+        try { res.json(await eliminarImagen(await conectarDB(), req.params.id, req.body?.ruta)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/:id/imagenes/anadir', async (req, res) => {
+        try { res.json(await anadirImagen(await conectarDB(), req.params.id, req.body?.base64)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/:id/imagenes/reemplazar', async (req, res) => {
+        try { res.json(await reemplazarImagen(await conectarDB(), req.params.id, req.body?.ruta, req.body?.base64)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
     // PREVISUALIZACIÓN paginada (cómic .cbz/.cbr/.cb7 y .djvu): nº de páginas + página N como imagen,
