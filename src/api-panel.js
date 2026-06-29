@@ -17,6 +17,7 @@ import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexad
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
+import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
@@ -574,13 +575,39 @@ export function rutasPanel() {
                 { $sort: { _id: 1 } },
             ]).toArray();
             const colar = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true, sensitivity: 'base' });
-            const ambitos = agg.map(a => ({
-                ambito: a._id,
-                estanterias: (a.estanterias || []).filter(e => e && e !== 'Sin asignar').sort(colar),
-            }));
+            // Unir el REGISTRO (estanterías/ámbitos pre-creados, aún sin libros) para que aparezcan en los
+            // desplegables aunque ninguna obra los use todavía.
+            const mapa = new Map(agg.map(a => [a._id, new Set((a.estanterias || []).filter(e => e && e !== 'Sin asignar'))]));
+            for (const row of await db.collection('ubicaciones').find({}).toArray()) {
+                const a = String(row.ambito || '').trim(); if (!a) continue;
+                if (!mapa.has(a)) mapa.set(a, new Set());
+                const e = String(row.estanteria || '').trim();
+                if (e && e !== 'Sin asignar') mapa.get(a).add(e);
+            }
+            const ambitos = [...mapa.entries()].sort((x, y) => colar(x[0], y[0]))
+                .map(([ambito, set]) => ({ ambito, estanterias: [...set].sort(colar) }));
             res.json({ ok: true, ambitos });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+
+    // ── Gestión de ubicaciones (estanterías como colecciones): árbol + crear(lote)/renombrar/mover/
+    //    fusionar/explotar/eliminar/asignar/nfc. Las mutaciones (POST) ya las restringe `autenticar` a admin.
+    r.get('/ubicaciones/gestion', async (req, res) => {
+        try { res.json({ ok: true, ambitos: await listarUbicacionesGestion(await conectarDB()) }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    const ubicPost = (ruta, fn) => r.post('/ubicaciones/' + ruta, async (req, res) => {
+        try { res.json(await fn(await conectarDB(), req.body || {})); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    ubicPost('crear', crearUbicaciones);
+    ubicPost('renombrar', renombrarUbicacion);
+    ubicPost('mover', moverEstanteria);
+    ubicPost('fusionar', fusionarEstanteria);
+    ubicPost('explotar', explotarUbicacion);
+    ubicPost('eliminar', eliminarUbicacion);
+    ubicPost('asignar', asignarUbicacion);
+    ubicPost('nfc', registrarNfcUbicacion);
 
     // Detalle de UNA colección: cabecera/serie resuelta (editorial/CDU+descripción) + sus miembros
     // (números de revista en orden cronológico, o libros de la serie) para el drill-down del panel.

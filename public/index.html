@@ -307,6 +307,7 @@ body.guest .admin-only{display:none!important}
       <button data-p="pap"><span class="ic">♻</span> Papelera</button>
       <button data-p="obras"><span class="ic">📖</span> Obras</button>
       <button data-p="colecciones"><span class="ic">🗂️</span> Colecciones</button>
+      <button class="admin-only" data-p="ubic"><span class="ic">📍</span> Ubicaciones</button>
       <button class="admin-only" data-p="inbox"><span class="ic">📥</span> Inbox</button>
     </nav>
     <div class="sb-foot">v1 · cuadro de mando<br><span id="clock"></span></div>
@@ -522,6 +523,9 @@ body.guest .admin-only{display:none!important}
         </div>
         <div id="inboxResults" style="margin-top:14px"></div>
       </section>
+
+      <!-- UBICACIONES (gestión de ámbitos/estanterías) -->
+      <section class="page" id="p-ubic"></section>
 
       <!-- BÚSQUEDA + CATÁLOGO -->
       <section class="page" id="p-search"></section>
@@ -1472,12 +1476,13 @@ function renderBulk(){const el=$('#searchBulk');if(!el)return;
   const acc=selDocs.size?`<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.
     <button class="btn pri" id="bkCol">📚 Colección</button>
     <button class="btn pri" id="bkObra">📖 Obra</button>
+    <button class="btn pri" id="bkUbic">📍 Estantería</button>
     <button class="btn" id="bkClear">Limpiar</button>`:'';
   el.innerHTML=`<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="bkAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todos <span class="muted">(${paginaIds.length} en esta página)</span></label>${acc}</div>`;
   const all=$('#bkAll');all.checked=enPag>0&&enPag===paginaIds.length;all.indeterminate=enPag>0&&enPag<paginaIds.length;
   all.onchange=()=>{const on=all.checked;paginaIds.forEach(id=>{if(on)selDocs.add(id);else selDocs.delete(id);});
     $$('#searchResults .selchk').forEach(cb=>cb.checked=on);$$('#searchResults .vol').forEach(c=>c.classList.toggle('sel',on));renderBulk();};
-  if(selDocs.size){$('#bkCol').onclick=()=>pickerGrupo('coleccion');$('#bkObra').onclick=()=>pickerGrupo('obra');
+  if(selDocs.size){$('#bkCol').onclick=()=>pickerGrupo('coleccion');$('#bkObra').onclick=()=>pickerGrupo('obra');$('#bkUbic').onclick=()=>pickerUbic();
     $('#bkClear').onclick=()=>{selDocs.clear();$$('#searchResults .vol.sel').forEach(c=>c.classList.remove('sel'));$$('#searchResults .selchk').forEach(c=>c.checked=false);renderBulk();};}}
 // Selector con FILTRO + PREVISUALIZACIÓN (en vez de un desplegable largo): clic en una tarjeta → añade
 // los seleccionados a esa colección/obra; o crear una nueva abajo. kind: 'coleccion' | 'obra'.
@@ -1523,6 +1528,7 @@ function construirSearch(){
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
         <div><label>Estantería</label><select id="sqEstanteria" disabled><option value="">Todas</option></select></div>
+        <div class="admin-only" style="display:flex;align-items:flex-end"><button class="btn" id="sqGoUbic" title="Gestionar ubicaciones (o ver esta estantería)">📍 Gestionar</button></div>
         <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off"></div>
         <div><label>Estrellas</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
           <div class="pop">${[5,4,3,2,1].map(n=>`<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label></div>
@@ -1544,6 +1550,8 @@ function construirSearch(){
   // Ubicación: al cambiar el ámbito, refrescar la estantería (asociada a ese ámbito) y buscar.
   if($('#sqAmbito'))$('#sqAmbito').onchange=()=>{pintarEstanteriaSearch();buscarCatalogo(1);};
   if($('#sqEstanteria'))$('#sqEstanteria').onchange=()=>buscarCatalogo(1);
+  // Ir a la página de Ubicaciones (si hay ámbito elegido, abre directamente sus libros allí).
+  if($('#sqGoUbic'))$('#sqGoUbic').onclick=()=>{const a=($('#sqAmbito')&&$('#sqAmbito').value)||'';ubicPendiente=a?{a,e:($('#sqEstanteria')&&$('#sqEstanteria').value)||null}:null;go('ubic');};
   $('#sqOrden').onchange=()=>buscarCatalogo(1);
   if($('#sqDescubrir'))$('#sqDescubrir').onchange=()=>buscarCatalogo(1);
   $$('#p-search .sqStar').forEach(c=>c.onchange=()=>{actualizarSumEstrellas();buscarCatalogo(1);});
@@ -1957,18 +1965,219 @@ async function grabarNFC(d){
     const m=$('#nfcWrMsg');if(m){m.textContent='No se pudo grabar: '+e.message;m.style.color='var(--bad)';}
   }
 }
-const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:loadPap,obras:loadObras,colecciones:loadColecciones,inbox:loadInbox,search:loadSearch};
+// ════════ UBICACIONES (ámbitos/estanterías gestionadas como colecciones de estanterías) ════════
+let ubicArbol=[], ubicSel=null, ubicPendiente=null;
+const ubBtn=(act,a,e,ico,tit)=>`<button type="button" class="ubx" data-act="${act}" data-a="${esc(a)}"${e!=null?` data-e="${esc(e)}"`:''} title="${esc(tit)}">${ico}</button>`;
+function ambitosNombres(){return ubicArbol.map(x=>x.ambito);}
+function estanteriasNombres(a){const A=ubicArbol.find(x=>x.ambito===a);return A?A.estanterias.map(e=>e.estanteria):[];}
+async function loadUbic(){
+  const cont=$('#p-ubic');if(cont&&!cont.innerHTML)cont.innerHTML='<div class="muted" style="padding:22px">Cargando…</div>';
+  try{const r=await api('/ubicaciones/gestion');ubicArbol=r.ambitos||[];}catch(e){if(cont)cont.innerHTML=`<div class="empty">${esc(e.message)}</div>`;return;}
+  pintarUbic();
+}
+function pintarUbic(){
+  const cont=$('#p-ubic');if(!cont)return;const arbol=ubicArbol;
+  cont.innerHTML=`<style>
+    #p-ubic .ubrow{display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);flex-wrap:wrap}
+    #p-ubic .ubhdr{border-top:0;margin-top:10px}
+    #p-ubic .ubest{padding-left:18px}
+    #p-ubic .ubacts{margin-left:auto;display:flex;gap:1px;flex-wrap:wrap}
+    #p-ubic .ubx{background:none;border:0;color:var(--txt);cursor:pointer;font-size:14px;opacity:.65;padding:2px 5px;border-radius:6px}
+    #p-ubic .ubx:hover{opacity:1;background:rgba(255,255,255,.08)}
+    #p-ubic .ubgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px}
+    #p-ubic .ubcard{background:var(--card2);border-radius:10px;padding:6px}
+  </style>
+  <div class="sec-h"><h2>📍 Ubicaciones</h2><span class="muted">${arbol.length} ámbito(s)</span></div>
+  <div class="card" style="margin-bottom:16px">
+    <h3 style="margin-top:0">➕ Crear estanterías</h3>
+    <div class="row" style="gap:8px;align-items:flex-end">
+      <div style="flex:1 1 160px"><label>Ámbito</label><input id="ubAmb" list="ubDlAmb" placeholder="p. ej. Biblioteca" autocomplete="off"></div>
+      <div><label>Modo</label><select id="ubModo"><option value="una">Una</option><option value="lote">En lote</option></select></div>
+    </div>
+    <div id="ubUna" class="row" style="gap:8px;align-items:flex-end;margin-top:8px">
+      <div style="flex:1 1 160px"><label>Estantería</label><input id="ubEstUna" placeholder="p. ej. Estante 3" autocomplete="off"></div>
+    </div>
+    <div id="ubLote" class="row" style="gap:8px;align-items:flex-end;margin-top:8px;display:none">
+      <div style="flex:1 1 160px"><label>Prefijo</label><input id="ubPre" placeholder="Estanteria_pared_" autocomplete="off"></div>
+      <div style="width:84px"><label>Desde</label><input id="ubDesde" type="number" value="1" min="0"></div>
+      <div style="width:84px"><label>Hasta</label><input id="ubHasta" type="number" value="10" min="0"></div>
+      <div style="width:84px"><label>Dígitos</label><input id="ubAncho" type="number" value="2" min="1" max="6"></div>
+    </div>
+    <div id="ubPrev" class="muted" style="font-size:12px;margin-top:8px"></div>
+    <div style="margin-top:10px"><button class="btn pri" id="ubCrear">Crear</button></div>
+    <datalist id="ubDlAmb">${arbol.map(a=>`<option value="${esc(a.ambito)}">`).join('')}</datalist>
+  </div>
+  <div class="card">${arbol.length?arbol.map(ubicAmbHTML).join(''):'<div class="muted">Aún no hay ubicaciones. Crea estanterías arriba, o asigna libros desde la Búsqueda (📍 Estantería).</div>'}</div>
+  <div id="ubicLibros" style="margin-top:16px"></div>`;
+  wireUbic();
+  if(ubicPendiente){const p=ubicPendiente;ubicPendiente=null;ubicVerLibros(p.a,p.e);}
+}
+function ubicAmbHTML(a){
+  const nfc=a.nfc?` <span title="NFC ${esc(a.nfc)}">📶</span>`:'';
+  const acts=`<span class="ubacts">${ubBtn('amb-add',a.ambito,null,'➕','Añadir estantería')}${ubBtn('amb-ren',a.ambito,null,'✏️','Renombrar ámbito')}${ubBtn('amb-nfc',a.ambito,null,'📶','Grabar NFC del ámbito')}${ubBtn('amb-explotar',a.ambito,null,'🧹','Sus libros → sin ubicación')}${ubBtn('amb-del',a.ambito,null,'🗑','Eliminar (si está vacío)')}</span>`;
+  const ests=a.estanterias.length?a.estanterias.map(e=>ubicEstHTML(a.ambito,e)).join(''):`<div class="ubrow ubest"><span class="muted" style="font-size:12px">— sin estanterías —</span></div>`;
+  return `<div class="ubamb"><div class="ubrow ubhdr"><b class="ubx" data-act="amb-ver" data-a="${esc(a.ambito)}" style="font-size:14px;opacity:1" title="Ver libros del ámbito">📍 ${esc(a.ambito)}</b><span class="muted">${a.n} libro(s)</span>${nfc}${acts}</div>${ests}</div>`;
+}
+function ubicEstHTML(amb,e){
+  const nfc=e.nfc?` <span title="NFC ${esc(e.nfc)}">📶</span>`:'';
+  const acts=`<span class="ubacts">${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
+  return `<div class="ubrow ubest"><span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver libros">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
+}
+function wireUbic(){
+  const modo=$('#ubModo');
+  const sync=()=>{const lote=modo&&modo.value==='lote';if($('#ubUna'))$('#ubUna').style.display=lote?'none':'';if($('#ubLote'))$('#ubLote').style.display=lote?'':'none';ubicPreview();};
+  if(modo)modo.onchange=sync;
+  ['ubPre','ubDesde','ubHasta','ubAncho','ubEstUna'].forEach(id=>{const el=$('#'+id);if(el)el.oninput=ubicPreview;});
+  if($('#ubCrear'))$('#ubCrear').onclick=ubicCrear;
+  sync();
+  $$('#p-ubic [data-act]').forEach(el=>el.onclick=()=>ubicAccion(el.dataset.act,el.dataset.a,el.dataset.e));
+}
+function ubicLoteNombres(){
+  const pre=($('#ubPre')&&$('#ubPre').value)||'';
+  const d=parseInt($('#ubDesde').value,10),h=parseInt($('#ubHasta').value,10),w=Math.max(1,parseInt($('#ubAncho').value,10)||1);
+  if(!Number.isFinite(d)||!Number.isFinite(h)||h<d)return [];
+  const out=[];for(let i=d;i<=h&&out.length<500;i++)out.push(pre+String(i).padStart(w,'0'));
+  return out;
+}
+function ubicPreview(){
+  const box=$('#ubPrev');if(!box)return;
+  if($('#ubModo')&&$('#ubModo').value==='lote'){const n=ubicLoteNombres();box.textContent=n.length?`${n.length} estantería(s): ${n[0]} … ${n[n.length-1]}`:'Rango no válido.';}
+  else{const e=($('#ubEstUna')&&$('#ubEstUna').value||'').trim();box.textContent=e?`1 estantería: ${e}`:'Escribe el nombre (o déjalo vacío para registrar solo el ámbito).';}
+}
+async function ubicCrear(){
+  const amb=($('#ubAmb')&&$('#ubAmb').value||'').trim();if(!amb){toast('Indica el ámbito','warn');return;}
+  let ests=[];
+  if($('#ubModo').value==='lote'){ests=ubicLoteNombres();if(!ests.length){toast('Rango no válido','warn');return;}}
+  else{const e=($('#ubEstUna').value||'').trim();if(e)ests=[e];}
+  await ubicApi('/ubicaciones/crear',{ambito:amb,estanterias:ests});
+}
+async function ubicApi(path,body){
+  try{const r=await api(path,{method:'POST',body:JSON.stringify(body)});
+    if(!r.ok){toast(r.motivo||'error','bad');return r;}
+    const det=r.modificados!=null?` · ${r.modificados} libro(s)`:r.liberados!=null?` · ${r.liberados} liberado(s)`:r.movidos!=null?` · ${r.movidos} movido(s)`:r.creadas!=null?` · ${r.creadas} creada(s)`:'';
+    toast('Hecho'+det);loadUbic();return r;
+  }catch(e){toast(e.message,'bad');return {ok:false};}
+}
+async function ubicAccion(act,a,e){
+  try{
+    if(act==='amb-ver')return ubicVerLibros(a,null);
+    if(act==='est-ver')return ubicVerLibros(a,e);
+    if(act==='amb-nfc')return grabarNFCUbic(a,null);
+    if(act==='est-nfc')return grabarNFCUbic(a,e);
+    if(act==='amb-add'){const nom=await ubicPedirTexto('Añadir estantería a «'+a+'»');if(!nom)return;return void ubicApi('/ubicaciones/crear',{ambito:a,estanterias:[nom]});}
+    if(act==='amb-ren'){const nv=await ubicPedirTexto('Renombrar ámbito',a);if(!nv||nv===a)return;return void ubicApi('/ubicaciones/renombrar',{ambito:a,nuevoAmbito:nv});}
+    if(act==='est-ren'){const nv=await ubicPedirTexto('Renombrar estantería',e);if(!nv||nv===e)return;return void ubicApi('/ubicaciones/renombrar',{ambito:a,estanteria:e,nuevaEstanteria:nv});}
+    if(act==='est-mover'){const na=await ubicPedirTexto('Mover «'+e+'» a qué ámbito',a,ambitosNombres());if(!na||na===a)return;return void ubicApi('/ubicaciones/mover',{ambito:a,estanteria:e,nuevoAmbito:na});}
+    if(act==='est-fus'){const de=await ubicPedirTexto('Fusionar «'+e+'» en qué estantería (mismo ámbito)','',estanteriasNombres(a).filter(x=>x!==e));if(!de||de===e)return;return void ubicApi('/ubicaciones/fusionar',{ambito:a,estanteria:e,destinoAmbito:a,destinoEstanteria:de});}
+    if(act==='amb-explotar'){if(!await ubicConfirm('Explotar ámbito «'+a+'»','Todos sus libros quedarán SIN ubicación. ¿Seguir?'))return;return void ubicApi('/ubicaciones/explotar',{ambito:a});}
+    if(act==='est-explotar'){if(!await ubicConfirm('Explotar estantería «'+e+'»','Sus libros quedarán SIN ubicación. ¿Seguir?'))return;return void ubicApi('/ubicaciones/explotar',{ambito:a,estanteria:e});}
+    if(act==='amb-del')return void ubicApi('/ubicaciones/eliminar',{ambito:a});
+    if(act==='est-del')return void ubicApi('/ubicaciones/eliminar',{ambito:a,estanteria:e});
+  }catch(err){toast(err.message,'bad');}
+}
+async function ubicVerLibros(ambito,estanteria){
+  ubicSel={ambito,estanteria:estanteria||null};
+  const box=$('#ubicLibros');if(!box)return;
+  box.innerHTML='<div class="muted" style="padding:14px">Cargando libros…</div>';
+  const p=new URLSearchParams({ambito,page:'1'});if(estanteria)p.set('estanteria',estanteria);
+  try{const r=await api('/catalogo?'+p.toString());
+    const tit=esc(ambito)+(estanteria?' · '+esc(estanteria):'');
+    box.innerHTML=`<div class="card"><div class="sec-h" style="margin-bottom:8px"><h3 style="margin:0">📚 ${tit}</h3><span class="muted">${r.total} libro(s)</span></div>`+
+      (r.docs.length?`<div class="ubgrid">${r.docs.map(ubicCard).join('')}</div>${r.total>r.docs.length?`<div class="muted" style="margin-top:10px">Mostrando ${r.docs.length} de ${r.total}. <a class="rowlink" id="ubVerBusq">Ver todos en Búsqueda →</a></div>`:''}`:'<div class="muted">Sin libros en esta ubicación.</div>')+`</div>`;
+    $$('#ubicLibros [data-doc]').forEach(el=>el.onclick=()=>verDoc(el.dataset.doc,{volver:'ubic',etiqueta:'Ubicaciones'}));
+    const vb=$('#ubVerBusq');if(vb)vb.onclick=()=>{estadoBusqueda.extra={ambito,estanteria:estanteria||undefined,etiqueta:'📍 '+ambito+(estanteria?' · '+estanteria:'')};estadoBusqueda.page=1;go('search');};
+    box.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }catch(e){box.innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
+}
+function ubicCard(d){
+  const por=d.portada?`<img src="${esc(encUrl(d.portada))}" loading="lazy" style="width:100%;height:130px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'">`:'<div style="height:130px;display:flex;align-items:center;justify-content:center;font-size:28px">📕</div>';
+  return `<div class="ubcard" data-doc="${esc(d._id)}" style="cursor:pointer">${por}<div style="font-size:12px;margin-top:4px;line-height:1.3">${esc(recortar(d.titulo||'(sin título)',48))}</div></div>`;
+}
+// Modal de texto reutilizable (con sugerencias opcionales via datalist). Promesa → valor o null.
+function ubicPedirTexto(titulo,valor='',sugerencias=null){
+  return new Promise(res=>{
+    const dl=sugerencias?`<datalist id="ptDl">${sugerencias.map(s=>`<option value="${esc(s)}">`).join('')}</datalist>`:'';
+    $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px"><h3 style="margin-top:0">${esc(titulo)}</h3>
+      <input id="ptVal" value="${esc(valor)}" autocomplete="off"${sugerencias?' list="ptDl"':''}>${dl}
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn" id="ptX">Cancelar</button><button class="btn pri" id="ptOk">Aceptar</button></div></div>`;
+    $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+    const fin=v=>{cerrarCmp();res(v);};
+    $('#ptX').onclick=()=>fin(null);$('#cmpScrim').onclick=()=>fin(null);
+    $('#ptOk').onclick=()=>fin(($('#ptVal').value||'').trim());
+    const inp=$('#ptVal');if(inp)inp.onkeydown=ev=>{if(ev.key==='Enter')fin((inp.value||'').trim());};
+    setTimeout(()=>{if(inp){inp.focus();inp.select();}},30);
+  });
+}
+function ubicConfirm(titulo,txt){
+  return new Promise(res=>{
+    $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px"><h3 style="margin-top:0">${esc(titulo)}</h3><p class="muted">${esc(txt||'')}</p>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn" id="pcX">Cancelar</button><button class="btn bad" id="pcOk">Confirmar</button></div></div>`;
+    $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+    const fin=v=>{cerrarCmp();res(v);};$('#pcX').onclick=()=>fin(false);$('#cmpScrim').onclick=()=>fin(false);$('#pcOk').onclick=()=>fin(true);
+  });
+}
+// Graba (y registra el UID de) la etiqueta NFC de una estantería/ámbito. URL beacon ?amb=&est= → al
+// acercar el móvil abre los libros de esa ubicación (Android Chrome o iPhone).
+async function grabarNFCUbic(ambito,estanteria){
+  if(!('NDEFReader' in window)){toast('Este navegador no soporta NFC (Android + Chrome)','bad');return;}
+  const url=location.origin+'/?amb='+encodeURIComponent(ambito)+(estanteria?'&est='+encodeURIComponent(estanteria):'');
+  const label=(estanteria?estanteria+' · ':'')+ambito;
+  const records=[{recordType:'url',data:url},{recordType:'text',data:label}];
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px;text-align:center"><h3 style="margin-top:0">📶 Etiqueta de estantería</h3>
+    <p class="muted" id="nfcUMsg">Acerca la etiqueta de «${esc(label)}»…</p>
+    <p class="mono" style="font-size:11px;word-break:break-all;color:var(--mut)">${esc(url)}</p>
+    <div style="margin-top:8px"><button class="btn" id="nfcUX">Cancelar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+  let done=false;const ctrl=new AbortController();
+  const cerrar=()=>{try{ctrl.abort();}catch(_){}cerrarCmp();};
+  $('#nfcUX').onclick=cerrar;$('#cmpScrim').onclick=cerrar;
+  try{
+    const reader=new NDEFReader();await reader.scan({signal:ctrl.signal});
+    reader.onreading=async ev=>{
+      if(done)return;done=true;
+      const uid=ev.serialNumber||'';
+      let escrito=false;try{await reader.write({records},{signal:ctrl.signal});escrito=true;}catch(_){}
+      try{await api('/ubicaciones/nfc',{method:'POST',body:JSON.stringify({ambito,estanteria:estanteria||null,uid})});}catch(_){}
+      const m=$('#nfcUMsg');if(m){m.textContent=(escrito?'✅ Etiqueta grabada':'✅ UID registrado (no se pudo escribir el tag)')+(uid?(' · UID '+uid):'');m.style.color='var(--ok)';}
+      toast('NFC de estantería '+(escrito?'grabada':'registrada'));setTimeout(()=>{cerrarCmp();loadUbic();},1100);
+    };
+    reader.onreadingerror=()=>{const m=$('#nfcUMsg');if(m)m.textContent='No se pudo leer la etiqueta.';};
+  }catch(e){const m=$('#nfcUMsg');if(m){m.textContent='NFC: '+e.message;m.style.color='var(--bad)';}}
+}
+// Asignar los documentos SELECCIONADOS en Búsqueda a una estantería (alta masiva, como añadir a colección).
+async function pickerUbic(){
+  await cargarUbicaciones();
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px"><h3 style="margin-top:0">📍 Asignar <b>${selDocs.size}</b> doc(s) a una estantería</h3>
+    <div class="row" style="gap:8px"><div style="flex:1"><label>Ámbito</label><input id="puAmb" list="puDlA" autocomplete="off"></div>
+    <div style="flex:1"><label>Estantería</label><input id="puEst" list="puDlE" autocomplete="off"></div></div>
+    <datalist id="puDlA">${mapaUbicaciones.map(x=>`<option value="${esc(x.ambito)}">`).join('')}</datalist><datalist id="puDlE"></datalist>
+    <div id="puErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="puX">Cancelar</button><button class="btn pri" id="puOk">Asignar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#puX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
+  const refE=()=>llenarDatalist('puDlE',estanteriasDe(($('#puAmb').value)||''));refE();
+  $('#puAmb').oninput=refE;
+  $('#puOk').onclick=async()=>{
+    const ambito=($('#puAmb').value||'').trim(),estanteria=($('#puEst').value||'').trim();
+    if(!ambito){$('#puErr').textContent='Indica el ámbito';return;}
+    try{const r=await api('/ubicaciones/asignar',{method:'POST',body:JSON.stringify({ids:[...selDocs],ambito,estanteria})});
+      if(!r.ok){$('#puErr').textContent=r.motivo;return;}
+      cerrarCmp();toast(`${r.n} doc(s) → ${r.ambito}${r.estanteria&&r.estanteria!=='Sin asignar'?' · '+r.estanteria:''}`);selDocs.clear();buscarCatalogo(estadoBusqueda.page||1);
+    }catch(e){$('#puErr').textContent=e.message;}};
+}
+const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:loadPap,obras:loadObras,colecciones:loadColecciones,ubic:loadUbic,inbox:loadInbox,search:loadSearch};
 
 // ── auth ──
 let estadoTimer=null;
 // Enlace profundo ?doc=<id>: lo lee una etiqueta NFC grabada por nosotros (Android Chrome) y también
 // un iPhone que abre la URL en Safari. Se captura ANTES de que autoLoginURL limpie la query, y se
 // aplica al final de arrancar() (tras autenticar) abriendo la ficha.
-let _deepDoc=null;
+let _deepDoc=null,_deepUbic=null;
 function abrirEnlaceProfundo(){
-  if(!_deepDoc)return;const id=_deepDoc;_deepDoc=null;
   try{history.replaceState(null,'',location.pathname);}catch(_){}
-  verDoc(id,{volver:'search',etiqueta:'Búsqueda'});
+  if(_deepDoc){const id=_deepDoc;_deepDoc=null;_deepUbic=null;return verDoc(id,{volver:'search',etiqueta:'Búsqueda'});}
+  // Etiqueta de estantería (?amb=&est=) → abrir sus libros en la Búsqueda (disponible para invitados).
+  if(_deepUbic){const{amb,est}=_deepUbic;_deepUbic=null;
+    estadoBusqueda.extra={ambito:amb,estanteria:est||undefined,etiqueta:'📍 '+amb+(est?' · '+est:'')};estadoBusqueda.page=1;go('search');}
 }
 // Rellena el desplegable de usuarios del login (sin contraseñas; de /api/usuarios).
 async function cargarUsuariosLogin(){try{const r=await fetch('/api/usuarios').then(x=>x.json());const sel=$('#lgUser');if(!sel)return;
@@ -2002,8 +2211,10 @@ $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent=''
 $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};mostrarLogin();};
 // sesión inicial: token guardado, o el sembrado por auto-login de URL (cookie), o mostrar el login
 (async()=>{
-  // 0) Captura el enlace profundo ?doc=<id> ANTES de que autoLoginURL limpie la query.
-  try{_deepDoc=new URLSearchParams(location.search).get('doc')||null;}catch(_){}
+  // 0) Captura los enlaces profundos (?doc=<id> de un libro, ?amb=&est= de una estantería) ANTES de que
+  //    autoLoginURL limpie la query.
+  try{const qp=new URLSearchParams(location.search);_deepDoc=qp.get('doc')||null;
+    const amb=qp.get('amb');if(amb)_deepUbic={amb,est:qp.get('est')||''};}catch(_){}
   // 1) Credenciales en la query (?u=&p=): forma robusta, atraviesa DSM/proxy. Prioritaria.
   if(await autoLoginURL())return arrancar();
   // 2) Cookie sembrada por la cabecera Basic (https://user:pwd@host): solo si llega a la app (acceso
