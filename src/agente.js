@@ -44,13 +44,25 @@ ESTRUCTURA JSON REQUERIDA:
 }
 `;
 
+// SMART TRIM: para IDENTIFICAR un libro solo hacen falta las páginas CLAVE — portada + primeras de
+// cortesía/CRÉDITOS (ISBN/CIP) + CONTRAPORTADA (código de barras). Enviar TODAS las páginas de un escaneo
+// (p. ej. un PDF de Adobe Scan explotado) a la visión es caro y choca con el límite de imágenes del modelo
+// (que además podía DESCARTAR la página de créditos del medio). Reducimos a las primeras IDENT_FRENTE + la
+// última → menos coste de IA y la página de créditos (front matter) SIEMPRE viaja.
+const IDENT_FRENTE = Number(process.env.IDENT_PAG_FRENTE) || 6;
+function paginasClave(partes) {
+    if (!partes || partes.length <= IDENT_FRENTE + 1) return partes || [];
+    return [...partes.slice(0, IDENT_FRENTE), partes[partes.length - 1]];
+}
+
 /**
  * Procesa un grupo de imágenes (`{ data: Buffer, mimeType: string }`) del mismo recurso y
  * extrae la ficha técnica unificada. Asimila metadatos de texto nativos si provienen de un EPUB.
  */
 export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
     try {
-        const imageParts = imagenes.map(({ data, mimeType }) => ({ base64: data.toString("base64"), mimeType: mimeType || "image/jpeg" }));
+        const todas = imagenes.map(({ data, mimeType }) => ({ base64: data.toString("base64"), mimeType: mimeType || "image/jpeg" }));
+        const imageParts = paginasClave(todas);   // solo las páginas clave (portada + créditos + contraportada)
 
         // Inyección dinámica de metadatos nativos para dar máxima prioridad a los datos del archivo
         let instruccionesContextuales = INSTRUCCIONES_SISTEMA;
@@ -58,7 +70,7 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
             instruccionesContextuales += `\n\n⚠️ ENTORNO DIGITAL - NOTA PRIORITARIA:\nEl recurso actual es un libro digital (EPUB). El analizador nativo ha extraído el siguiente manifiesto:\n${JSON.stringify(datosEpub, null, 2)}\nUsa estos datos como fuente de verdad absoluta. Tu tarea principal aquí es verificar si el ISBN es correcto, estructurar la sinopsis final, e inferir con el máximo rigor la Clasificación Decimal Universal ('cdu') y las 'palabras_clave'.`;
         }
 
-        console.log(`\n──> [IA] Enviando ${imageParts.length} imagen(es) a la visión (rotación multi-proveedor)...`);
+        console.log(`\n──> [IA] Enviando ${imageParts.length}/${todas.length} imagen(es) CLAVE a la visión (rotación multi-proveedor)...`);
 
         const responseText = await conVision({ prompt: instruccionesContextuales, imagenes: imageParts });
         const recursoEstructurado = extraerJSON(responseText);
@@ -90,4 +102,26 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
     }
 
 
+}
+
+// Lectura FOCALIZADA del bloque CIP / página de créditos de un escaneo (visión). Devuelve SOLO datos
+// IMPRESOS (no inferidos): Dewey/LCC/CDU, ISBN, idioma y título originales, traductor. Es de ÚLTIMO
+// recurso (idle, en el Conformador) cuando las fuentes GRATIS no dieron CDU — ver [[minimize-ai-ingestion]].
+const INSTRUCCIONES_CIP = `Eres un catalogador. En las imágenes (página de CRÉDITOS/copyright y bloque CIP de un libro)
+localiza ÚNICAMENTE datos IMPRESOS y devuelve SOLO un objeto JSON válido (sin texto extra). NO inventes:
+si un dato no está impreso, déjalo "" (cadena vacía).
+{
+  "dewey": "clasificación Dewey/CDD impresa (p. ej. '004.1'); '' si no aparece",
+  "lcc": "signatura Library of Congress impresa (p. ej. 'QA76.76'); '' si no",
+  "cdu": "CDU impreso si aparece literalmente; '' si no",
+  "isbn": "ISBN impreso, solo dígitos sin guiones; '' si no",
+  "idioma_original": "código ISO 639-1 del idioma original si se indica 'traducido de…'; '' si no",
+  "titulo_original": "título original si se indica; '' si no",
+  "traductor": "nombre del traductor si aparece; '' si no"
+}`;
+export async function leerCIPdeImagenes(imagenes) {
+    const partes = paginasClave((imagenes || []).map(({ data, mimeType }) => ({ base64: data.toString('base64'), mimeType: mimeType || 'image/jpeg' })));
+    if (!partes.length) return {};
+    const txt = await conVision({ prompt: INSTRUCCIONES_CIP, imagenes: partes });
+    return extraerJSON(txt) || {};
 }

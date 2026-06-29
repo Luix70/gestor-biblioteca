@@ -9,6 +9,7 @@ import { arbolCDU } from '../utils/cdu-arbol.js';
 import { buscarEnFicheroLocal } from '../utils/buscador-local.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { resolverCDU } from '../clasificador-cdu.js';
+import { leerCIPdeImagenes } from '../agente.js';
 import { calcularHashArchivo } from '../utils/hash-archivo.js';
 import { parsearNombre, esTituloArtefacto } from '../utils/parsear-nombre.js';
 import { resolverColeccion } from '../utils/colecciones.js';
@@ -19,6 +20,18 @@ import { aRegistroLegible, escribirSidecars, resolverNombres } from '../utils/re
 import { describirCDU } from '../utils/descripcion-cdu.js';
 
 const ANCHO_OBJETIVO = Number(process.env.PORTADA_ANCHO_OBJETIVO || 1000);
+
+// ¿CDU pobre? (ausente o genérica) — única condición para gastar una visión del CIP (al idle, una vez).
+const cduPobre = (cdu) => !cdu || ['0', '00', '000'].includes(String(cdu).trim());
+// Lee las primeras imágenes GUARDADAS de un escaneo (página de créditos = front matter) para la visión CIP.
+async function leerImagenesDeDoc(doc, max = 6) {
+    const carpeta = carpetaDeDoc(doc); if (!carpeta) return [];
+    const out = [];
+    for (const im of (doc.imagenes || []).slice(0, max)) {
+        try { out.push({ data: await fs.readFile(path.join(carpeta, path.basename(im.ruta))), mimeType: 'image/jpeg' }); } catch { /* falta el fichero */ }
+    }
+    return out;
+}
 
 const tipoDeArchivo = (ruta) => {
     const ext = path.extname(ruta || '').toLowerCase();
@@ -160,6 +173,38 @@ export const TAREAS = [
 
             if (Object.keys(set).length === 0) return null;
             return { set, alertas: ['Metadatos re-enriquecidos desde ISBN (lote degradado).'] };
+        },
+    },
+
+    {
+        id: 'cip-vision-escaneo',
+        version: 1,
+        descripcion: 'ÚLTIMO RECURSO (idle): escaneos (papel) con CDU ausente/genérica y SIN ISBN (no hay vía gratis por ISBN) → lee el bloque CIP de las páginas de créditos GUARDADAS (visión) para fijar la CDU por su Dewey/LCC/CDU IMPRESO (más fiable que inferirla) y rellenar idioma/título original. Una sola vez por doc; re-clasificar-cdu (posterior) reubica la carpeta.',
+        // Solo donde NO hay alternativa gratis: papel (escaneo, sin texto), con imágenes guardadas, CDU
+        // pobre y SIN ISBN (con ISBN, las fuentes gratis por ISBN ya intentan la CDU sin gastar visión).
+        aplica: (doc) => (doc.formatos || []).includes('papel') && (doc.imagenes || []).length > 0 && cduPobre(doc.cdu) && !doc.isbn && !doc.obra,
+        async ejecutar(doc) {
+            const imgs = await leerImagenesDeDoc(doc);
+            if (!imgs.length) return null;
+            let cip;
+            try { cip = await leerCIPdeImagenes(imgs); } catch (e) { console.warn(`   ⚠️ cip-vision falló: ${e.message}`); return null; }
+            if (!cip || (!cip.dewey && !cip.lcc && !cip.cdu && !cip.isbn && !cip.idioma_original && !cip.titulo_original)) return null;
+            const set = {}, alertas = [];
+            // CDU: el CDU impreso manda; si no, mapear el Dewey/LCC impreso (caché→IA, se aprende).
+            let cduNueva = (cip.cdu || '').trim() || null, fuente = cduNueva ? 'CIP impreso' : null;
+            if (!cduNueva && (cip.dewey || cip.lcc)) {
+                try { const r = await resolverCDU({ dewey: cip.dewey || null, lcc: cip.lcc || null, titulo: doc.titulo, sinopsis: doc.sinopsis }); if (r?.cdu) { cduNueva = r.cdu; fuente = r.fuente; } } catch { /* sin CDU */ }
+            }
+            if (cduNueva && cduNueva !== doc.cdu) {
+                set.cdu = cduNueva;
+                if (cip.dewey) set.dewey = String(cip.dewey).trim();
+                if (cip.lcc) set.lcc = String(cip.lcc).trim();
+                alertas.push(`CDU fijada desde el CIP impreso del escaneo (${fuente}): ${cduNueva}.`);
+            }
+            if (cip.isbn && !doc.isbn) { const v = validarISBN(cip.isbn); if (v) { set.isbn = v; alertas.push(`ISBN ${v} leído del CIP impreso (visión, escaneo).`); } }
+            if (cip.idioma_original && !doc.idioma_original) { set.idioma_original = String(cip.idioma_original).trim(); alertas.push('Idioma original del CIP.'); }
+            if (cip.titulo_original && !doc.titulo_original) { set.titulo_original = String(cip.titulo_original).trim(); alertas.push('Título original del CIP.'); }
+            return Object.keys(set).length ? { set, alertas } : null;
         },
     },
 
