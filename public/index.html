@@ -1379,7 +1379,8 @@ function abrirEditorImagen(i){
     reset();
     const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';if($('#edAuto'))$('#edAuto').style.display=(modo==='persp'||modo==='crop')?'':'none';$('#edMsg').textContent=modo==='crop'?'Arrastra el recuadro a recortar (o «Auto bordes» si el libro está RECTO sobre verde). Si está inclinado, usa Perspectiva.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (↖↗↘↙) — o «Auto bordes» — y desestira un libro INCLINADO a rectángulo.':'';render();};
     $('#edCrop').onclick=()=>setModo('crop');$('#edPersp').onclick=()=>setModo('persp');
-    if($('#edAuto'))$('#edAuto').onclick=()=>{const q=detectarBordesVerde(work);if(!q){toast('No detecté el libro sobre fondo verde; colócalo a mano','warn');return;}
+    if($('#edAuto'))$('#edAuto').onclick=()=>{let q=detectarBordesVerde(work);if(!q){toast('No detecté el libro sobre fondo verde; colócalo a mano','warn');return;}
+      const mX=work.width*0.03,mY=work.height*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));q=q.map(p=>[cl(p[0],mX,work.width-mX),cl(p[1],mY,work.height-mY)]); // nunca pegadas al borde (agarrables en móvil)
       if(modo==='crop'){const xs=q.map(p=>p[0]),ys=q.map(p=>p[1]);crop={x0:Math.min(...xs),y0:Math.min(...ys),x1:Math.max(...xs),y1:Math.max(...ys)};toast('Recuadro ajustado al libro (si está inclinado, mejor Perspectiva)');}
       else{quad=q;toast('Esquinas detectadas — ajústalas si hace falta');}
       render();};
@@ -1389,7 +1390,7 @@ function abrirEditorImagen(i){
     const pos=ev=>{const rc=c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);};
     const handles=()=> modo==='crop'?[[crop.x0,crop.y0],[crop.x1,crop.y0],[crop.x1,crop.y1],[crop.x0,crop.y1]] : modo==='persp'?quad : [];
     c.addEventListener('pointerdown',ev=>{ if(modo==='none')return; ev.preventDefault(); const p=pos(ev),hs=handles();let best=-1,bd=34/escala; hs.forEach((h,k)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best=k;}}); drag=best; });
-    c.addEventListener('pointermove',ev=>{ if(drag<0)return; ev.preventDefault(); let[x,y]=pos(ev);x=Math.max(0,Math.min(work.width,x));y=Math.max(0,Math.min(work.height,y));
+    c.addEventListener('pointermove',ev=>{ if(drag<0)return; ev.preventDefault(); let[x,y]=pos(ev);const mX=work.width*0.03,mY=work.height*0.03;x=Math.max(mX,Math.min(work.width-mX,x));y=Math.max(mY,Math.min(work.height-mY,y));
       if(modo==='crop'){ if(drag===0){crop.x0=x;crop.y0=y;}else if(drag===1){crop.x1=x;crop.y0=y;}else if(drag===2){crop.x1=x;crop.y1=y;}else{crop.x0=x;crop.y1=y;} }
       else { quad[drag]=[x,y]; } render(); });
     const soltar=()=>{drag=-1;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
@@ -1458,10 +1459,10 @@ function medirDimensiones(id, imagenes){
     c.addEventListener('pointerdown',ev=>{ev.preventDefault();const p=pos(ev);let best=null,bd=34/escala;
       quad.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'q',i};}});
       regla.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'r',i};}});drag=best;});
-    c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);x=Math.max(0,Math.min(iw,x));y=Math.max(0,Math.min(ih,y));(drag.s==='q'?quad:regla)[drag.i]=[x,y];render();});
+    c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);const mX=iw*0.03,mY=ih*0.03;x=Math.max(mX,Math.min(iw-mX,x));y=Math.max(mY,Math.min(ih-mY,y));(drag.s==='q'?quad:regla)[drag.i]=[x,y];render();});
     const soltar=()=>{drag=null;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
     $('#mdCm').oninput=()=>{cm=parseFloat($('#mdCm').value)||0;render();};
-    $('#mdAuto').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);const q=detectarBordesVerde(tmp);if(q){quad=q;render();toast('Bordes detectados');}else toast('No detecté el libro sobre fondo verde','warn');};
+    $('#mdAuto').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);let q=detectarBordesVerde(tmp);if(q){const mX=iw*0.03,mY=ih*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);render();toast('Bordes detectados');}else toast('No detecté el libro sobre fondo verde','warn');};
     $('#mdX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
     $('#mdSave').onclick=async()=>{const r=calc();if(!r||!(r.W>0&&r.H>0)){toast('Coloca la regla y el recuadro primero','warn');return;}
       try{const res=await api('/documentos/'+encodeURIComponent(id)+'/dimensiones',{method:'POST',body:JSON.stringify({ancho_cm:r.W,alto_cm:r.H})});
