@@ -1325,7 +1325,10 @@ function detectarBordesVerde(canvas){
   const d=t.getContext('2d').getImageData(0,0,w,h).data;
   const verde=new Uint8Array(N);
   let nVerde=0;
-  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];const v=(g>55&&g>=r&&g>=b&&(g-Math.min(r,b))>14)?1:0;verde[i]=v;nVerde+=v;}
+  // Verde del TAPETE = verde dominante y SATURADO (g supera a r y a b con margen). Usar max(r,b) -no min-
+  // descarta el gris-verde PÁLIDO de muchas portadas (p.ej. fondo claro), que antes contaba como tapete y
+  // dejaba el recuadro metido DENTRO del libro (solo rodeaba el contenido impreso oscuro).
+  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];const v=(g>50&&(g-Math.max(r,b))>12)?1:0;verde[i]=v;nVerde+=v;}
   if(nVerde < N*0.15) return null;                       // poco verde → probablemente NO hay alfombrilla
   // flood-fill del NO-verde desde los 4 bordes → "alrededor" (mesa/marco fuera de la alfombrilla)
   const fuera=new Uint8Array(N), pila=[];
@@ -1351,33 +1354,33 @@ function detectarBordesVerde(canvas){
 // el menor lag con un máximo local fuerte = 1 celda = 1 cm. Devuelve px/cm en coords de IMAGEN COMPLETA,
 // o null (sin rejilla clara, o ejes incoherentes → usa la regla manual). La rejilla es de 1 cm.
 function detectarRejillaPxCm(canvas){
-  const maxD=1000, sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
+  const maxD=1100, sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
   const w=Math.max(1,Math.round(canvas.width*sc)), h=Math.max(1,Math.round(canvas.height*sc)), N=w*h;
   const t=document.createElement('canvas');t.width=w;t.height=h;t.getContext('2d').drawImage(canvas,0,0,w,h);
   const d=t.getContext('2d').getImageData(0,0,w,h).data;
-  const gris=new Float32Array(N); let nVerde=0;
-  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];gris[i]=0.299*r+0.587*g+0.114*b;if(g>55&&g>=r&&g>=b&&(g-Math.min(r,b))>10)nVerde++;}
-  if(nVerde < N*0.12) return null;                       // poca alfombrilla a la vista
+  const gris=new Float32Array(N), verde=new Uint8Array(N); let nVerde=0;
+  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];gris[i]=0.299*r+0.587*g+0.114*b;if(g>50&&(g-Math.max(r,b))>12){verde[i]=1;nVerde++;}}
+  if(nVerde < N*0.10) return null;                       // poca alfombrilla a la vista
+  // Gradiente SOLO sobre el tapete (verde): captura las líneas de la rejilla, NO los bordes del libro.
   const colp=new Float32Array(w), rowp=new Float32Array(h);
-  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;colp[x]+=Math.abs(gris[i+1]-gris[i-1]);rowp[y]+=Math.abs(gris[i+w]-gris[i-w]);}
-  const periodo=sig=>{                                    // periodo dominante por autocorrelación, o 0
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;if(!verde[i])continue;colp[x]+=Math.abs(gris[i+1]-gris[i-1]);rowp[y]+=Math.abs(gris[i+w]-gris[i-w]);}
+  // Periodo dominante = lag con MÁXIMA autocorrelación (global, no el primer bulto) en [minL,maxL].
+  const periodo=sig=>{
     const n=sig.length; let m=0;for(let i=0;i<n;i++)m+=sig[i];m/=n;
     const s=new Float32Array(n);let ac0=0;for(let i=0;i<n;i++){s[i]=sig[i]-m;ac0+=s[i]*s[i];}
     if(ac0<=0)return 0;
-    const minL=Math.max(6,Math.round(n*0.012)), maxL=Math.floor(n/3);
-    const ac=new Float32Array(maxL+2);let pm=0;
-    for(let L=minL;L<=maxL;L++){let a=0;for(let i=0;i+L<n;i++)a+=s[i]*s[i+L];ac[L]=a/ac0;if(ac[L]>pm)pm=ac[L];}
-    if(pm<0.18)return 0;                                  // sin periodicidad clara
-    for(let L=minL+1;L<maxL;L++)if(ac[L]>=0.5*pm&&ac[L]>=ac[L-1]&&ac[L]>=ac[L+1])return L; // fundamental = menor pico fuerte
-    return 0;
+    const minL=Math.max(7,Math.round(n*0.015)), maxL=Math.floor(n/4); // ≥4 periodos visibles
+    let best=0,bestL=0;
+    for(let L=minL;L<=maxL;L++){let a=0;for(let i=0;i+L<n;i++)a+=s[i]*s[i+L];const v=a/ac0;if(v>best){best=v;bestL=L;}}
+    return best>=0.20?bestL:0;                            // sin periodicidad clara → 0
   };
   const pc=periodo(colp), pr=periodo(rowp), vals=[];
   if(pc>0)vals.push(pc); if(pr>0)vals.push(pr);
   if(!vals.length) return null;
-  if(pc>0&&pr>0&&Math.abs(pc-pr)/Math.min(pc,pr)>0.35) return null; // ejes incoherentes → no fiable
+  if(pc>0&&pr>0&&Math.abs(pc-pr)/Math.min(pc,pr)>0.30) return null; // ejes incoherentes → no fiable (usa la regla)
   const pasoDs=vals.reduce((a,b)=>a+b,0)/vals.length;     // px por cm (escala reducida)
   const pxcm=pasoDs/sc;                                   // px por cm en imagen completa
-  return (pxcm>2&&isFinite(pxcm))?pxcm:null;
+  return (pxcm>3&&isFinite(pxcm))?pxcm:null;
 }
 // Editor de UNA imagen: rotar 90°, recortar (rect) y corregir PERSPECTIVA (4 esquinas → rectángulo).
 function abrirEditorImagen(i){
