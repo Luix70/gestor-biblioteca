@@ -44,7 +44,9 @@ export const AJUSTES = {
     MANTENIMIENTO_REPOSO_MS: 300000, // Inbox inactivo necesario antes de una pasada (5 min)
     MANTENIMIENTO_LOTE: 25,          // documentos por pasada (disparo automático)
     MANTENIMIENTO_PAUSA_MS: 800,     // pausa entre documentos durante el mantenimiento
-    MANTENIMIENTO_DESC_LOTE: 5,      // descripciones de clasificación (CDU/Dewey/LCC) a generar por pasada (0 = off)
+    MANTENIMIENTO_DESC_LOTE: 0,      // descripciones de clasificación (CDU/Dewey/LCC) por pasada. 0 = OFF (por
+                                     // defecto): se generan SOLO bajo demanda (al abrir el ⓘ), no en masa —
+                                     // miles de códigos = miles de llamadas de IA. Súbelo (.env) para un backfill puntual.
 
     // --- Portadas (resolver-portada) ---
     PORTADA_ANCHO_OBJETIVO: 1000,   // ancho ideal; por debajo se intenta mejorar

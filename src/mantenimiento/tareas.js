@@ -324,12 +324,10 @@ export const TAREAS = [
     {
         id: 'describir-cdu',
         version: 1,
-        descripcion: 'Asegura la descripción bilingüe (ES/EN, extensa) del CDU del documento en cdu_descripciones (IA, cacheada).',
-        aplica: (doc) => !!doc.cdu,
-        async ejecutar(doc, { db }) {
-            await describirCDU(db, doc.cdu); // cacheado y best-effort; no modifica el libro
-            return null;
-        },
+        descripcion: 'DESACTIVADA: las descripciones de CDU se generan SOLO bajo demanda (al abrir el ⓘ en la ficha/dashboard) — generarlas en masa serían miles de llamadas de IA. (id/version intactos: no re-sella la cola.)',
+        // Sin proactividad de IA (ver [[minimize-ai-ingestion]]). Para un backfill puntual: scripts/describir-clasificaciones.js --ejecutar.
+        aplica: () => false,
+        async ejecutar() { return null; },
     },
 
     {
