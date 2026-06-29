@@ -496,6 +496,10 @@ body.guest .admin-only{display:none!important}
             <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inSupervisar"><span class="slider"></span></span>
             <span class="muted">🚥 Supervisado — abrir la ficha tras cada alta para revisar/corregir (tipo, requery, datos). Si no, modo autopiloto (lista de resultados).</span>
           </label>
+          <label style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
+            <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inAutoCompartir" checked><span class="slider"></span></span>
+            <span class="muted">📤 Procesar lo compartido al instante. Si lo apagas, lo compartido (Adobe Scan…) queda EN ESPERA para que añadas ISBN/colección/ubicación y pulses Procesar.</span>
+          </label>
           <datalist id="dlColecciones"></datalist>
           <datalist id="dlAmbitos"></datalist>
           <datalist id="dlEstanterias"></datalist>
@@ -1883,6 +1887,9 @@ function wireInbox(){
   if(fa)fa.onchange=()=>{if(fa.files.length)subirInbox([...fa.files]);fa.value='';};
   // Escanear el ISBN con la cámara (código de barras EAN-13 → rellena el campo ISBN).
   if($('#inScan'))$('#inScan').onclick=escanearISBN;
+  // Interruptor «procesar lo compartido al instante» (persistente en este navegador).
+  const ac=$('#inAutoCompartir');
+  if(ac){ac.checked=localStorage.getItem('auto_compartir')!=='0';ac.onchange=()=>localStorage.setItem('auto_compartir',ac.checked?'1':'0');}
   // Lanzadores de apps (intents Android, solo Chrome/Android; one-way: abren la app, luego se comparte/
   // importa el resultado). En PC/iOS quedan ocultos.
   if(/Android/i.test(navigator.userAgent)){
@@ -2284,9 +2291,12 @@ function abrirEnlaceProfundo(){
   if(_deepUbic){const{amb,est}=_deepUbic;_deepUbic=null;
     estadoBusqueda.extra={ambito:amb,estanteria:est||undefined,etiqueta:'📍 '+amb+(est?' · '+est:'')};estadoBusqueda.page=1;go('search');}
 }
+// ¿Procesar lo compartido al instante? Interruptor persistente (localStorage). Por defecto SÍ.
+let compartidosPendientes=[];
+const autoCompartir=()=>{const sw=$('#inAutoCompartir');return sw?sw.checked:(localStorage.getItem('auto_compartir')!=='0');};
 // SHARE TARGET (Task 1): al compartir ficheros a la PWA, el service worker los guarda en una Cache y
-// redirige a /?compartido=1. Aquí los recogemos, abrimos el Inbox y los subimos (con el token). Honra
-// el interruptor «Supervisado». Solo admin (subirInbox/ingestar lo exige el servidor).
+// redirige a /?compartido=1. Aquí los recogemos y, según el interruptor: los subimos al instante
+// (honra «Supervisado») o los dejamos EN ESPERA para añadir datos y pulsar Procesar. Solo admin.
 async function procesarCompartidos(){
   if(!_compartido)return;_compartido=false;
   if(ROL!=='admin'){toast('Solo un administrador puede dar de alta lo compartido','warn');return;}
@@ -2297,8 +2307,21 @@ async function procesarCompartidos(){
     const metas=await idx.json();const files=[];
     for(const m of (metas||[])){const r=await cache.match('/__shared__/'+m.i);if(!r)continue;const b=await r.blob();files.push(new File([b],m.nombre||('compartido-'+m.i),{type:m.type||b.type}));}
     for(const k of await cache.keys())await cache.delete(k);   // vaciar tras leer
-    if(files.length){go('inbox');toast(`📥 Recibido(s) ${files.length} fichero(s) compartido(s)`);subirInbox(files);}
+    if(!files.length)return;
+    go('inbox');
+    if(autoCompartir()){toast(`📥 Recibido(s) ${files.length} fichero(s) compartido(s)`);subirInbox(files);}
+    else{compartidosPendientes=files;toast(`📥 ${files.length} fichero(s) en espera: añade datos y pulsa Procesar`);pintarCompartidosPendientes();}
   }catch(e){toast('No se pudo procesar lo compartido: '+e.message,'bad');}
+}
+// Panel de lo compartido EN ESPERA: deja añadir ISBN/colección/ubicación arriba y procesar (o descartar).
+function pintarCompartidosPendientes(){
+  const out=$('#inboxResults');if(!out)return;
+  if(!compartidosPendientes.length){out.innerHTML='';return;}
+  out.innerHTML=`<div class="card" style="border-color:rgba(120,160,255,.35)"><h3 style="margin-top:0">📥 ${compartidosPendientes.length} fichero(s) compartido(s) en espera</h3>
+    <p class="muted" style="font-size:12px;margin:0 0 10px">Añade arriba ISBN/colección/ubicación si quieres y pulsa Procesar.</p>
+    <div style="display:flex;gap:10px"><button class="btn pri" id="shProc">▶ Procesar</button><button class="btn" id="shDesc">Descartar</button></div></div>`;
+  $('#shProc').onclick=()=>{const f=compartidosPendientes.slice();compartidosPendientes=[];subirInbox(f);};
+  $('#shDesc').onclick=()=>{compartidosPendientes=[];out.innerHTML='';toast('Descartado');};
 }
 // Registrar el service worker (necesario para el share target + instalación como PWA). Best-effort.
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
