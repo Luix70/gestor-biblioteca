@@ -515,6 +515,10 @@ body.guest .admin-only{display:none!important}
             <span class="muted" style="font-size:12px">PDF o imágenes guardadas por Adobe Scan / Drive / Files. (Para escanear AHORA: hazlo en Adobe Scan y usa «Compartir → Bibliotheca».)</span>
             <input type="file" id="fileInputApp" accept="application/pdf,image/*" multiple style="display:none">
           </div>
+          <div class="row" id="appAdobe" style="margin-top:8px;gap:8px;align-items:center;display:none">
+            <button class="btn" id="openScan" type="button" title="Abrir Adobe Scan (o su página en Google Play, desde donde puedes pulsar «Abrir»)">📄 Abrir Adobe Scan</button>
+            <span class="muted" style="font-size:12px">Escanea ahí y vuelve con «Compartir → Bibliotheca».</span>
+          </div>
         </div>
         <div class="card admin-only" id="camCard">
           <h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— usa la cámara del móvil (enfoque/zoom)</span></h3>
@@ -532,7 +536,8 @@ body.guest .admin-only{display:none!important}
           <p class="muted" style="margin-top:0;font-size:12px">Lee una etiqueta NFC (ISBN/identificador) y búscalo en tu biblioteca. (Solo Android + Chrome con NFC.)</p>
           <div class="row" style="align-items:center"><button class="btn" id="nfcRead" type="button">📶 Leer etiqueta</button><span class="muted" id="nfcOut"></span></div>
         </div>
-        <div id="inboxResults" style="margin-top:14px"></div>
+        <div id="inboxEstado" style="margin-top:12px;min-height:18px"></div>
+        <div id="inboxResults" style="margin-top:8px"></div>
       </section>
 
       <!-- UBICACIONES (gestión de ámbitos/estanterías) -->
@@ -1264,6 +1269,7 @@ function fichaEditar(d,r,opts){
   const v=x=>x==null?'':String(x);
   const campo=(id,lab,val,tag='input',extra='')=>`<label style="display:block;margin-top:8px">${lab}</label>${tag==='textarea'?`<textarea id="${id}" rows="3" ${extra}>${esc(val)}</textarea>`:`<input id="${id}" value="${esc(val)}" ${extra} autocomplete="off">`}`;
   const ub=d.ubicacion||{};
+  const btnScanIsbn=('BarcodeDetector' in window)?'<button class="btn" type="button" id="edScan" title="Escanear código de barras con la cámara">📷</button>':'';
   $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">${sup?'🚥 Revisar alta':'✏️ Editar documento'}</h3>
     ${(sup&&d.portada)?`<img src="${encUrl(d.portada)}" alt="" style="float:right;width:84px;border-radius:8px;margin:0 0 8px 12px;border:1px solid var(--line)">`:''}
     ${sup?`<p class="muted" style="font-size:12px;margin:0 0 6px">Revisa y corrige si hace falta; «Aceptar» guarda y vuelve al Inbox para el siguiente.</p>`:''}
@@ -1275,7 +1281,7 @@ function fichaEditar(d,r,opts){
     ${campo('edAut','Autores (coma)',(r.autores||[]).join(', '))}
     ${campo('edEdi','Editorial',r.editorial||'')}
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno','Año',d.año_edicion)}</div><div style="flex:1">${campo('edIdi','Idioma',d.idioma)}</div><div style="flex:1">${campo('edPag','Páginas',d.paginas)}</div>`}</div>
-    <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edIsbn','ISBN',d.isbn)}</div><div style="flex:1">${campo('edIssn','ISSN',d.issn)}</div></div>`}
+    <div class="row" style="gap:8px"><div style="flex:1"><label style="display:block;margin-top:8px">ISBN</label><div style="display:flex;gap:6px"><input id="edIsbn" value="${esc(d.isbn||'')}" autocomplete="off" style="flex:1">${btnScanIsbn}</div></div><div style="flex:1">${campo('edIssn','ISSN',d.issn)}</div></div>
     <div style="margin-top:8px"><label style="display:block">Otras ediciones (ISBN)</label><div id="edAltList"></div><button type="button" class="btn" id="edAltAdd" style="margin-top:6px">➕ Añadir edición</button></div>
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edCdu','CDU',d.cdu)}</div><div style="flex:1">${campo('edEd','Edición nº',d.numero_edicion)}</div></div>`}
     ${campo('edPal','Palabras clave (coma)',(d.palabras_clave||[]).join(', '))}
@@ -1295,6 +1301,7 @@ function fichaEditar(d,r,opts){
   const edAltWire=b=>{b.onclick=()=>b.closest('.edAltRow').remove();};
   {const L=$('#edAltList');if(L){L.innerHTML=(d.isbns_alternativos||[]).map(edAltFila).join('');$$('#edAltList .edAltDel').forEach(edAltWire);}}
   if($('#edAltAdd'))$('#edAltAdd').onclick=()=>{const L=$('#edAltList');if(!L)return;L.insertAdjacentHTML('beforeend',edAltFila(null));edAltWire(L.lastElementChild.querySelector('.edAltDel'));};
+  if($('#edScan'))$('#edScan').onclick=()=>escanearISBN('edIsbn');   // escanear ISBN en la ficha (supervisado)
   const onGuardar=async()=>{
     const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,tipo_recurso:$('#edTipo').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
       'año_edicion':$('#edAno').value,idioma:$('#edIdi').value,paginas:$('#edPag').value,isbn:$('#edIsbn').value,issn:$('#edIssn').value,
@@ -1813,6 +1820,7 @@ function drillInteg(mk,m){
 }
 // ── Inbox OPERATIVO: subir ficheros/fotos con METADATOS que VIAJAN (ISBN/colección/obra/ubicación) ──
 let inboxWired=false, camFotos=[];
+let colaInbox=[], jobsHechos=[], colaCorriendo=false, jobSeq=0;   // cola de subida (autopiloto, no bloquea)
 function loadInbox(){
   if(!inboxWired){inboxWired=true;wireInbox();}
   if(('NDEFReader' in window)&&$('#nfcCard'))$('#nfcCard').style.display='';
@@ -1824,7 +1832,7 @@ function loadInbox(){
 // Escanear el código de barras (EAN-13) con la cámara y rellenar el ISBN. Usa el lector NATIVO del
 // navegador (BarcodeDetector, en Chrome Android); si no está, avisa de escribirlo a mano. El ISBN así
 // capturado viaja como autoridad → identificación por Fichero local (fast-path, sin visión IA).
-async function escanearISBN(){
+async function escanearISBN(targetId='inIsbn'){
   if(!('BarcodeDetector' in window)){toast('Este navegador no trae lector de códigos (usa Chrome en Android). Escribe el ISBN.','warn');return;}
   let stream;
   try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});}
@@ -1832,33 +1840,35 @@ async function escanearISBN(){
   let formatos=['ean_13','ean_8','upc_a','upc_e'];
   try{const sop=await BarcodeDetector.getSupportedFormats();formatos=formatos.filter(f=>sop.includes(f));if(!formatos.length)formatos=['ean_13'];}catch(_){}
   const det=new BarcodeDetector({formats:formatos});
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:480px"><h3 style="margin-top:0">📷 Escanear ISBN</h3>
+  // Overlay PROPIO (no usa #cmpModal) para poder escanear TAMBIÉN sobre el formulario de edición.
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:grid;place-items:center;padding:16px';
+  ov.innerHTML=`<div class="box card" style="max-width:480px;width:100%"><h3 style="margin-top:0">📷 Escanear ISBN</h3>
     <video id="scVid" playsinline muted style="width:100%;border-radius:10px;background:#000;max-height:60vh"></video>
-    <p class="muted" id="scMsg" style="font-size:12px;margin:8px 0 0">Enfoca el código de barras de la contraportada…</p>
+    <p class="muted" style="font-size:12px;margin:8px 0 0">Enfoca el código de barras de la contraportada…</p>
     <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn" id="scX">Cancelar</button></div></div>`;
-  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
-  const vid=$('#scVid');vid.srcObject=stream;try{await vid.play();}catch(_){}
+  document.body.appendChild(ov);
+  const vid=ov.querySelector('#scVid');vid.srcObject=stream;try{await vid.play();}catch(_){}
   let activo=true;
   const parar=()=>{activo=false;try{stream.getTracks().forEach(t=>t.stop());}catch(_){}};
-  const cerrar=()=>{parar();cerrarCmp();};
-  $('#scX').onclick=cerrar;$('#cmpScrim').onclick=cerrar;
+  const cerrar=()=>{parar();ov.remove();};
+  ov.querySelector('#scX').onclick=cerrar;ov.onclick=e=>{if(e.target===ov)cerrar();};
   const loop=async()=>{
     if(!activo)return;
     try{
       const codes=await det.detect(vid);
       const hit=(codes||[]).map(c=>String(c.rawValue||'').replace(/\D/g,'')).find(v=>/^97[89]\d{10}$/.test(v));
-      if(hit){parar();const inp=$('#inIsbn');if(inp)inp.value=hit;cerrarCmp();toast('ISBN leído: '+hit);return;}
+      if(hit){parar();const inp=$('#'+targetId);if(inp)inp.value=hit;ov.remove();toast('ISBN leído: '+hit);return;}
     }catch(_){}
     setTimeout(loop,300);
   };
   loop();
 }
-// Detecta automáticamente un ISBN (EAN-13 978/979) en las IMÁGENES que se van a subir y, si el campo
-// ISBN está vacío, lo rellena → viaja como autoridad y dispara el fast-path por Fichero (sin visión IA).
-// Respeta un ISBN ya escrito/escaneado a mano. Solo imágenes (un PDF lo lee el servidor).
-async function autoDetectarISBN(files){
+// Detecta un ISBN (EAN-13 978/979) en las IMÁGENES (sin tocar el DOM): lo lee EN EL MÓVIL con
+// BarcodeDetector. Devuelve el ISBN o null. Lo usan la subida (autopiloto y supervisado) para que el
+// ISBN viaje como autoridad → fast-path por Fichero (sin visión IA). Un PDF lo lee el servidor.
+async function detectarISBNenFiles(files){
   if(!('BarcodeDetector' in window))return null;
-  const inp=$('#inIsbn');if(inp&&inp.value.trim())return null;
   const imgs=(files||[]).filter(f=>/^image\//.test(f.type||''));
   if(!imgs.length)return null;
   let det;try{det=new BarcodeDetector({formats:['ean_13']});}catch(_){return null;}
@@ -1867,7 +1877,7 @@ async function autoDetectarISBN(files){
       const bmp=await createImageBitmap(f);
       const codes=await det.detect(bmp);if(bmp.close)bmp.close();
       const hit=(codes||[]).map(c=>String(c.rawValue||'').replace(/\D/g,'')).find(v=>/^97[89]\d{10}$/.test(v));
-      if(hit){if(inp)inp.value=hit;toast('ISBN detectado en la imagen: '+hit);return hit;}
+      if(hit)return hit;
     }catch(_){}
   }
   return null;
@@ -1885,6 +1895,12 @@ function wireInbox(){
   // Interruptor «procesar lo compartido al instante» (persistente en este navegador).
   const ac=$('#inAutoCompartir');
   if(ac){ac.checked=localStorage.getItem('auto_compartir')!=='0';ac.onchange=()=>localStorage.setItem('auto_compartir',ac.checked?'1':'0');}
+  // Abrir Adobe Scan (Android): intent → la app, o su página en Google Play si no se puede lanzar (one-way;
+  // luego se vuelve con «Compartir → Bibliotheca»). El lanzamiento web→app no es fiable desde una PWA.
+  if(/Android/i.test(navigator.userAgent)){
+    const aa=$('#appAdobe');if(aa)aa.style.display='';
+    if($('#openScan'))$('#openScan').onclick=()=>{location.href='intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.adobe.scan.android;S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.adobe.scan.android;end';};
+  }
   if(dz){
     ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
     ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
@@ -1973,44 +1989,95 @@ async function camCatalogar(){
   await subirInbox(files);
 }
 // FormData con los METADATOS del formulario (viajan con la subida → el pipeline trabaja menos).
-function metaInbox(){
-  const fd=new FormData(),v=id=>($('#'+id)&&$('#'+id).value||'').trim();
-  if(v('inIsbn'))fd.append('isbn',v('inIsbn'));
-  if(v('inColeccion'))fd.append('coleccion',v('inColeccion'));
-  if(v('inObra'))fd.append('obra',v('inObra'));
-  if(v('inAmbito')||v('inEstanteria'))fd.append('ubicacion',JSON.stringify({ambito:v('inAmbito')||'Sin asignar',estanteria:v('inEstanteria')||'Sin asignar'}));
+// Metadatos del formulario como objeto (snapshot) → cada trabajo encolado lleva LOS SUYOS (el form
+// puede cambiar mientras la cola procesa en segundo plano).
+function metaSnapshot(){
+  const v=id=>($('#'+id)&&$('#'+id).value||'').trim();
+  return { isbn:v('inIsbn'), coleccion:v('inColeccion'), obra:v('inObra'), ambito:v('inAmbito'), estanteria:v('inEstanteria') };
+}
+function fdDesdeSnap(snap, files){
+  const fd=new FormData();
+  if(snap.isbn)fd.append('isbn',snap.isbn);
+  if(snap.coleccion)fd.append('coleccion',snap.coleccion);
+  if(snap.obra)fd.append('obra',snap.obra);
+  if(snap.ambito||snap.estanteria)fd.append('ubicacion',JSON.stringify({ambito:snap.ambito||'Sin asignar',estanteria:snap.estanteria||'Sin asignar'}));
+  for(const f of files)fd.append('files',f,f.name);
   return fd;
 }
-// Subida → /api/ingestar (agrupar() en el server: varias imágenes = 1 libro; documentos = c/u por su lado).
+async function enviarIngesta(fd){
+  const r=await fetch('/api/ingestar',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});
+  if(r.status===403)throw new Error('Solo los administradores pueden dar de alta recursos.');
+  return await r.json().catch(()=>({}));
+}
+function setInboxEstado(txt){const el=$('#inboxEstado');if(el)el.innerHTML=txt?`<span class="muted" style="font-size:13px">${esc(txt)}</span>`:'';}
+// Subida. SUPERVISADO = SÍNCRONO (sube y abre la ficha para revisar). AUTOPILOTO = ASÍNCRONO: ENCOLA y
+// procesa en segundo plano → puedes seguir empujando documentos sin esperar; la cola se ve abajo.
 async function subirInbox(files){
   if(!files||!files.length)return;
-  await autoDetectarISBN(files);   // si hay un código de barras en las imágenes y el ISBN está vacío, rellénalo
-  const fd=metaInbox();for(const f of files)fd.append('files',f,f.name);
-  const out=$('#inboxResults');if(out)out.innerHTML=`<div class="muted" style="padding:14px 4px">⏳ Subiendo y catalogando ${files.length} fichero(s)…</div>`;
-  try{
-    const r=await fetch('/api/ingestar',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN},body:fd});
-    const j=await r.json().catch(()=>({}));
-    if(r.status===403){if(out)out.innerHTML='<div class="empty">Solo los administradores pueden dar de alta recursos.</div>';return;}
-    pintarInboxResultados(j.resultados||[]);
-    if($('#inIsbn'))$('#inIsbn').value='';   // el ISBN es por-libro: limpiar tras el alta (ubicación/colección se conservan)
-    cargarDatalistColecciones();             // refrescar el autocompletado por si se creó una colección nueva
-    cargarUbicaciones();                     // y por si el alta estrenó un ámbito/estantería nuevos
-    // Modo SUPERVISADO: si el alta produjo UNA ficha, abrirla DIRECTAMENTE EN EDICIÓN (preview) para
-    // revisar/corregir; «Aceptar» guarda y vuelve al Inbox → ciclo escanear-revisar-1clic-escanear.
-    if($('#inSupervisar')&&$('#inSupervisar').checked){
+  const supervisado=$('#inSupervisar')&&$('#inSupervisar').checked;
+  if(supervisado){
+    setInboxEstado('🔎 Buscando código de barras en el móvil…');
+    const isbn=await detectarISBNenFiles(files);
+    if(isbn&&$('#inIsbn')&&!$('#inIsbn').value.trim())$('#inIsbn').value=isbn;
+    setInboxEstado(isbn?`📱 ISBN ${isbn} leído en el móvil · ⏳ subiendo y catalogando…`:'⏳ Subiendo y catalogando… (identificará el servidor)');
+    const snap=metaSnapshot();
+    try{
+      const j=await enviarIngesta(fdDesdeSnap(snap,files));
+      setInboxEstado('');
+      jobsHechos.unshift({estado:'ok',resultados:j.resultados||[],isbnCliente:isbn});cortarJobs();pintarCola();
+      if($('#inIsbn'))$('#inIsbn').value='';
+      cargarDatalistColecciones();cargarUbicaciones();
       const ok=(j.resultados||[]).filter(x=>x.ok&&x.id);
       if(ok.length===1)revisarSupervisado(ok[0].id);
-    }
-  }catch(e){if(out)out.innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
+    }catch(e){setInboxEstado('');jobsHechos.unshift({estado:'error',msg:e.message});cortarJobs();pintarCola();}
+    return;
+  }
+  // AUTOPILOTO: encolar (NO bloquea) y limpiar el ISBN por-libro. La cola procesa una a una en segundo plano.
+  const snap=metaSnapshot();
+  if($('#inIsbn'))$('#inIsbn').value='';
+  colaInbox.push({id:++jobSeq, files, snap, n:files.length, estado:'cola', titulo:files.map(f=>f.name).join(', ')});
+  pintarCola();
+  procesarCola();
 }
-function pintarInboxResultados(res){
+async function procesarCola(){
+  if(colaCorriendo)return;colaCorriendo=true;
+  while(colaInbox.length){
+    const job=colaInbox[0];job.estado='procesando';pintarCola();
+    try{
+      if(!job.snap.isbn){const isbn=await detectarISBNenFiles(job.files);if(isbn){job.snap.isbn=isbn;job.isbnCliente=isbn;}}
+      const j=await enviarIngesta(fdDesdeSnap(job.snap,job.files));
+      job.estado='ok';job.resultados=j.resultados||[];
+    }catch(e){job.estado='error';job.msg=e.message;}
+    colaInbox.shift();jobsHechos.unshift(job);cortarJobs();pintarCola();
+  }
+  colaCorriendo=false;
+  cargarDatalistColecciones();cargarUbicaciones();
+}
+function cortarJobs(){if(jobsHechos.length>25)jobsHechos.length=25;}
+const _filaInb=html=>`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)">${html}</div>`;
+function filaResultado(r){
+  if(!r.ok)return _filaInb(`<span class="tag bad">${esc(r.destino||'error')}</span> <span class="muted">${esc(r.error||'')}</span>`);
+  const det=[r.tipo_recurso,(r.formatos||[]).join(','),(r.nImagenes?`${r.nImagenes} pág/img`:'')].filter(Boolean).join(' · ');
+  const nota=r.nota?`<div class="muted" style="font-size:11px;margin-top:2px">↳ ${esc(r.nota)}</div>`:'';
+  return _filaInb(`<span class="tag ${r.estado==='completado'?'ok':'warn'}">${esc(r.operacion||'ok')}</span> <b>${esc(recortar(r.titulo||'(sin título)',64))}</b> <span class="muted mono" style="font-size:11px">${esc(r.isbn||r.issn||'')}</span>${r.id?` · <a class="rowlink" data-doc="${esc(r.id)}">ver ficha</a>`:''}${det?`<div class="muted" style="font-size:11px">${esc(det)}</div>`:''}${nota}`);
+}
+// Render de la cola (en cola / procesando) + resultados ya hechos (más reciente arriba).
+function pintarCola(){
   const out=$('#inboxResults');if(!out)return;
-  if(!res.length){out.innerHTML='<div class="muted">Sin resultados.</div>';return;}
-  out.innerHTML=`<div class="card"><h3>Resultado (${res.length})</h3>${res.map(r=>r.ok
-    ?`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag ${r.estado==='completado'?'ok':'warn'}">${esc(r.operacion||'ok')}</span> <b>${esc(recortar(r.titulo||'(sin título)',70))}</b> <span class="muted mono" style="font-size:11px">${esc(r.isbn||r.issn||'')}</span>${r.id?` · <a class="rowlink" data-doc="${esc(r.id)}">ver ficha</a>`:''}</div>`
-    :`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag bad">${esc(r.destino||'error')}</span> <span class="muted">${esc(r.error||'')}</span></div>`).join('')}</div>`;
+  const cola=colaInbox.map(j=>_filaInb(`<span class="tag ${j.estado==='procesando'?'warn':'mut'}">${j.estado==='procesando'?'⏳ procesando':'🕒 en cola'}</span> <span class="muted">${esc(recortar(j.titulo,56))} · ${j.n} fich.</span>`)).join('');
+  const hechas=[];
+  for(const j of jobsHechos){
+    if(j.estado==='error'){hechas.push(_filaInb(`<span class="tag bad">error</span> <span class="muted">${esc(j.msg||'')}</span>`));continue;}
+    if(j.isbnCliente)hechas.push(_filaInb(`<span class="muted" style="font-size:11px">📱 ISBN ${esc(j.isbnCliente)} leído en el móvil</span>`));
+    for(const r of (j.resultados||[]))hechas.push(filaResultado(r));
+  }
+  out.innerHTML=(colaInbox.length||jobsHechos.length)
+    ?`<div class="card"><h3 style="margin-top:0">Inbox${colaInbox.length?` · <span class="muted" style="font-weight:400">${colaInbox.length} en cola${colaCorriendo?' · procesando…':''}</span>`:''}</h3>${cola}${hechas.join('')||'<div class="muted">—</div>'}</div>`
+    :'';
   $$('#inboxResults [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'inbox',etiqueta:'Inbox'}));
 }
+// Compat: resultados directos (p. ej. al descartar lo compartido) → a la lista de hechos.
+function pintarInboxResultados(res){if(res&&res.length){jobsHechos.unshift({estado:'ok',resultados:res});cortarJobs();}pintarCola();}
 // Supervisado: trae la ficha recién creada y abre el formulario de edición como PREVIEW (sin navegar).
 async function revisarSupervisado(id){
   try{const r=await api('/documentos/'+encodeURIComponent(id));fichaEditar(r.doc,r,{supervisado:true});}

@@ -135,6 +135,12 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
                 ok: true, operacion: r.operacion, estado: r.estado,
                 id: String(r._id), isbn: r.isbn, issn: r.issn,
                 titulo: r.documento.titulo, ruta: r.rutaWeb,
+                // Pistas del proceso para el Inbox (qué se hizo y dónde): tipo, soporte, nº de páginas/
+                // imágenes extraídas y la última nota del agente (p. ej. "sin visión IA" / "libro físico").
+                tipo_recurso: r.documento.tipo_recurso || null,
+                formatos: r.documento.formatos || [],
+                nImagenes: (r.documento.imagenes || []).length,
+                nota: (r.documento.alertas_agente || []).slice(-1)[0] || null,
             });
         } catch (e) {
             if (e.tipo === 'infraestructura') {
