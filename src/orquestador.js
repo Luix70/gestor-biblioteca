@@ -199,6 +199,7 @@ export async function procesarRecurso(entrada) {
         if (datosBase.pdf_ilegible) {
             datosBase.pdf_ilegible = false;          // poppler SÍ lo rasterizó → procesable como escaneado
             datosBase.texto_legible = false;
+            datosBase.texto_util = false;
             if (!datosBase.paginas && renders.length) datosBase.paginas = Math.max(...renders.map(r => r.pagina));
         }
 
@@ -220,10 +221,12 @@ export async function procesarRecurso(entrada) {
         tipo_recurso = clasif.tipo_recurso;
         isbnDelArchivo = !!datosBase.isbn_propio; // solo el ISBN PROPIO (no el del cuerpo) cuenta como fiable
 
-        // ¿Es realmente un ESCANEO? Sin capa de texto, O un PDF de imágenes con capa OCR (Adobe Scan/Lens
-        // añaden OCR → texto_legible daba true y se colaba como "PDF digital"). pdfEsImagen lo detecta por
-        // productor + fuentes (solo GlyphLessFont del OCR).
-        const esEscaneado = !datosBase.texto_legible || await pdfEsImagen(rutas[0]);
+        // ¿Es realmente un ESCANEO? Tres señales (cualquiera basta):
+        //  1) sin capa de texto;
+        //  2) la capa de texto NO es UTILIZABLE (OCR basura / extracción rota) — muy común;
+        //  3) PDF de imágenes con capa OCR (Adobe Scan/Lens): pdfEsImagen lo detecta por productor + fuentes.
+        // Así un escaneo con OCR ilegible deja de catalogarse como "libro digital en PDF".
+        const esEscaneado = !datosBase.texto_legible || !datosBase.texto_util || await pdfEsImagen(rutas[0]);
         if (esEscaneado) {
             // PDF ESCANEADO = fotos de un libro FÍSICO (Adobe Scan / cámara / Lens), NO un PDF digital.
             // Se trata IGUAL que el grupo de imágenes de la cámara (que sí identifica bien): se identifican

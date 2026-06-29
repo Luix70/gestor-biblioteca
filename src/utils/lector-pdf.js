@@ -78,6 +78,23 @@ function extraerNumeroIssue(texto) {
     return m ? parseInt(m[1] ?? m[2]) : null;
 }
 
+/**
+ * ¿La capa de texto del PDF es UTILIZABLE (libro digital real) o basura (OCR ilegible / extracción rota)?
+ * No basta la longitud: muchos escaneos traen una capa OCR larga pero ininteligible. Heurística por
+ * idioma-agnóstica: exige una proporción alta de LETRAS (no símbolos sueltos) y suficientes PALABRAS
+ * "de verdad" (≥4 letras con vocal). Conservadora: solo declara INUTILIZABLE lo claramente roto.
+ */
+function textoPdfUtil(texto) {
+    const t = String(texto || '');
+    if (t.replace(/\s/g, '').length < 200) return false;          // muy poco texto → no fiable
+    const sinEsp = t.replace(/\s+/g, '');
+    const letras = (t.match(/[A-Za-zÀ-ÿ]/g) || []).length;
+    const alphaRatio = letras / Math.max(1, sinEsp.length);       // ¿son letras o símbolos/ruido?
+    const palabras = t.match(/[A-Za-zÀ-ÿ]{2,}/g) || [];
+    const reales = palabras.filter(w => w.length >= 4 && /[aeiouáéíóúàèìòùäëïöüy]/i.test(w)).length;
+    return alphaRatio >= 0.6 && reales >= 40;                     // bastantes letras y palabras reales
+}
+
 function extraerISBNs(texto) {
     if (!texto) return [];
     const re = /(?:ISBN(?:-1[03])?:?\s*)?((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])/g;
@@ -138,6 +155,9 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         }
 
         datos.texto_legible = texto.replace(/\s/g, '').length > 200;
+        // ¿Es texto UTILIZABLE (libro digital de verdad) o una capa OCR basura? No basta la longitud:
+        // muchos escaneos traen una capa OCR ilegible. Si el texto no es usable, se tratará como ESCANEO.
+        datos.texto_util = textoPdfUtil(texto);
         // PDF estructuralmente ILEGIBLE: pdfinfo no halló páginas (0) y no hay texto extraíble.
         // Un PDF válido (incl. escaneado) siempre tiene ≥1 página; 0 = xref/estructura dañada.
         // Se marca aquí, en el primer paso, para descartarlo a Cuarentena cuanto antes.
