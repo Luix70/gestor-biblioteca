@@ -485,11 +485,17 @@ body.guest .admin-only{display:none!important}
             <div><label>Obra (multivolumen)</label><input id="inObra" placeholder="título de la obra" autocomplete="off"></div>
           </div>
           <div class="row" style="margin-top:8px">
-            <div><label>Ubicación · ámbito</label><input id="inAmbito" placeholder="p. ej. Salón" autocomplete="off"></div>
-            <div><label>Ubicación · estantería</label><input id="inEstanteria" placeholder="p. ej. Estante 3" autocomplete="off"></div>
+            <div><label>Ubicación · ámbito</label><input id="inAmbito" placeholder="p. ej. Salón" autocomplete="off" list="dlAmbitos"></div>
+            <div><label>Ubicación · estantería</label><input id="inEstanteria" placeholder="p. ej. Estante 3" autocomplete="off" list="dlEstanterias"></div>
             <div style="display:flex;align-items:flex-end"><button class="btn" id="inClear" type="button">✕ Limpiar</button></div>
           </div>
+          <label style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
+            <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inSupervisar"><span class="slider"></span></span>
+            <span class="muted">🚥 Supervisado — abrir la ficha tras cada alta para revisar/corregir (tipo, requery, datos). Si no, modo autopiloto (lista de resultados).</span>
+          </label>
           <datalist id="dlColecciones"></datalist>
+          <datalist id="dlAmbitos"></datalist>
+          <datalist id="dlEstanterias"></datalist>
         </div>
         <div class="card admin-only">
           <h3>📁 Subir ficheros</h3>
@@ -1230,13 +1236,19 @@ async function fichaEliminar(id){
     if(!r.ok){toast(r.motivo,'bad');return;}
     toast('Documento eliminado (su carpeta está en la Papelera)');go('search');
   }catch(e){toast(e.message,'bad');}}
-function fichaEditar(d,r){
+function fichaEditar(d,r,opts){
+  opts=opts||{};const sup=!!opts.supervisado;
   const v=x=>x==null?'':String(x);
   const campo=(id,lab,val,tag='input',extra='')=>`<label style="display:block;margin-top:8px">${lab}</label>${tag==='textarea'?`<textarea id="${id}" rows="3" ${extra}>${esc(val)}</textarea>`:`<input id="${id}" value="${esc(val)}" ${extra} autocomplete="off">`}`;
   const ub=d.ubicacion||{};
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">✏️ Editar documento</h3>
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">${sup?'🚥 Revisar alta':'✏️ Editar documento'}</h3>
+    ${(sup&&d.portada)?`<img src="${encUrl(d.portada)}" alt="" style="float:right;width:84px;border-radius:8px;margin:0 0 8px 12px;border:1px solid var(--line)">`:''}
+    ${sup?`<p class="muted" style="font-size:12px;margin:0 0 6px">Revisa y corrige si hace falta; «Aceptar» guarda y vuelve al Inbox para el siguiente.</p>`:''}
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin:2px 0 4px"><button class="btn" id="edXTop">Cancelar</button><button class="btn pri" id="edOkTop">${sup?'✓ Aceptar y siguiente':'Guardar'}</button></div>
     ${campo('edTit','Título',d.titulo)}
     ${campo('edSub','Subtítulo',d.subtitulo)}
+    <label style="display:block;margin-top:8px">Tipo</label>
+    <select id="edTipo"><option value="libro"${d.tipo_recurso!=='revista'?' selected':''}>📕 Libro</option><option value="revista"${d.tipo_recurso==='revista'?' selected':''}>📰 Revista</option></select>
     ${campo('edAut','Autores (coma)',(r.autores||[]).join(', '))}
     ${campo('edEdi','Editorial',r.editorial||'')}
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno','Año',d.año_edicion)}</div><div style="flex:1">${campo('edIdi','Idioma',d.idioma)}</div><div style="flex:1">${campo('edPag','Páginas',d.paginas)}</div>`}</div>
@@ -1244,20 +1256,29 @@ function fichaEditar(d,r){
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edCdu','CDU',d.cdu)}</div><div style="flex:1">${campo('edEd','Edición nº',d.numero_edicion)}</div></div>`}
     ${campo('edPal','Palabras clave (coma)',(d.palabras_clave||[]).join(', '))}
     ${campo('edSin','Sinopsis',d.sinopsis,'textarea')}
-    <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAmb','Ámbito',ub.ambito)}</div><div style="flex:1">${campo('edEst','Estantería',ub.estanteria)}</div></div>`}
+    <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAmb','Ámbito',ub.ambito,'input','list="dlAmbitosEd"')}</div><div style="flex:1">${campo('edEst','Estantería',ub.estanteria,'input','list="dlEstanteriasEd"')}</div></div>`}
+    <datalist id="dlAmbitosEd"></datalist><datalist id="dlEstanteriasEd"></datalist>
     <label style="display:flex;gap:8px;align-items:center;margin-top:12px;cursor:pointer"><input type="checkbox" id="edLock" ${d.locked?'checked':''}> 🔒 Bloquear (el Conformador no lo tocará)</label>
     <div id="edErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edOk">Guardar</button></div></div>`;
-  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#edX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
-  $('#edOk').onclick=async()=>{
-    const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edOk">${sup?'✓ Aceptar y siguiente':'Guardar'}</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrarCmp;
+  // Estantería ASOCIADA al ámbito también al editar (misma lógica que el Inbox; usa el mapa ya cargado).
+  const fillEd=()=>{llenarDatalist('dlAmbitosEd',mapaUbicaciones.map(x=>x.ambito));llenarDatalist('dlEstanteriasEd',estanteriasDe(($('#edAmb')&&$('#edAmb').value)||''));};
+  fillEd();if(!mapaUbicaciones.length)cargarUbicaciones().then(fillEd);
+  if($('#edAmb'))$('#edAmb').oninput=()=>llenarDatalist('dlEstanteriasEd',estanteriasDe($('#edAmb').value));
+  const onGuardar=async()=>{
+    const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,tipo_recurso:$('#edTipo').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
       'año_edicion':$('#edAno').value,idioma:$('#edIdi').value,paginas:$('#edPag').value,isbn:$('#edIsbn').value,issn:$('#edIssn').value,
       cdu:$('#edCdu').value,numero_edicion:$('#edEd').value,palabras_clave:$('#edPal').value,sinopsis:$('#edSin').value,
       ubicacion:{ambito:$('#edAmb').value,estanteria:$('#edEst').value},locked:$('#edLock').checked};
     try{const res=await api('/documentos/'+encodeURIComponent(d._id)+'/editar',{method:'POST',body:JSON.stringify(campos)});
-      if(!res.ok){$('#edErr').textContent=res.motivo;return;}
-      cerrarCmp();toast('Guardado'+((res.avisos||[]).length?' · '+res.avisos.join('; '):''));verDoc(d._id,detalle&&detalle.ctx);
-    }catch(e){$('#edErr').textContent=e.message;}};
+      if(!res.ok){$('#edErr').textContent=res.motivo;toast(res.motivo,'bad');return;}
+      cerrarCmp();toast('Guardado'+((res.avisos||[]).length?' · '+res.avisos.join('; '):''));
+      if(sup)go('inbox');else verDoc(d._id,detalle&&detalle.ctx);
+    }catch(e){$('#edErr').textContent=e.message;toast(e.message,'bad');}};
+  // Botones duplicados arriba y abajo (no hace falta hacer scroll para Aceptar/Cancelar).
+  ['edX','edXTop'].forEach(id=>{const b=$('#'+id);if(b)b.onclick=cerrarCmp;});
+  ['edOk','edOkTop'].forEach(id=>{const b=$('#'+id);if(b)b.onclick=onGuardar;});
 }
 
 function previewArchivo(r){
@@ -1755,6 +1776,7 @@ function loadInbox(){
   if(('NDEFReader' in window)&&$('#nfcCard'))$('#nfcCard').style.display='';
   if($('#inboxHint'))$('#inboxHint').textContent='Alta directa (pasa por el pipeline). Solo administradores.';
   cargarDatalistColecciones();
+  cargarUbicaciones();
 }
 function wireInbox(){
   const dz=$('#dropZone'),fi=$('#fileInput');
@@ -1766,6 +1788,8 @@ function wireInbox(){
     dz.addEventListener('drop',e=>{const f=[...((e.dataTransfer&&e.dataTransfer.files)||[])];if(f.length)subirInbox(f);});
   }
   if($('#inClear'))$('#inClear').onclick=()=>['inIsbn','inColeccion','inObra','inAmbito','inEstanteria'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});
+  // Estantería ASOCIADA al ámbito: al cambiar el ámbito, refrescar las estanterías sugeridas.
+  if($('#inAmbito'))$('#inAmbito').oninput=()=>llenarDatalist('dlEstanterias',estanteriasDe($('#inAmbito').value));
   const ci=$('#camInput');
   if($('#camShot'))$('#camShot').onclick=()=>ci&&ci.click();
   if(ci)ci.onchange=async()=>{for(const f of ci.files){try{camFotos.push(await reducirImagen(f));}catch{camFotos.push(f);}}ci.value='';renderCamThumbs();};
@@ -1779,6 +1803,16 @@ async function cargarDatalistColecciones(){
   try{const r=await api('/colecciones');const cols=r.colecciones||r.items||(Array.isArray(r)?r:[]);
     dl.innerHTML=(Array.isArray(cols)?cols:[]).map(c=>`<option value="${esc(c.nombre||'')}">`).join('');
   }catch(e){}
+}
+// ── Ubicaciones (ámbito → estanterías): se acumulan según se cataloga, así puedes elegirlas de un
+// desplegable. La estantería va ASOCIADA al ámbito (un «Estante 1» en «Comedor» ≠ otro en «Biblioteca»).
+let mapaUbicaciones=[];
+function llenarDatalist(id,valores){const dl=$('#'+id);if(!dl)return;dl.innerHTML=(valores||[]).map(v=>`<option value="${esc(v)}">`).join('');}
+function estanteriasDe(ambito){const a=(ambito||'').trim().toLowerCase();const e=mapaUbicaciones.find(x=>(x.ambito||'').trim().toLowerCase()===a);return e?e.estanterias:[];}
+async function cargarUbicaciones(){
+  try{const r=await api('/ubicaciones');mapaUbicaciones=r.ambitos||[];}catch(e){return;}
+  llenarDatalist('dlAmbitos',mapaUbicaciones.map(x=>x.ambito));
+  const amb=$('#inAmbito');if(amb)llenarDatalist('dlEstanterias',estanteriasDe(amb.value));
 }
 // Reduce una foto a máx. 2000px (canvas) antes de subir → menos datos y más rápido en el Atom.
 function reducirImagen(file,max=2000,q=0.85){
@@ -1825,6 +1859,13 @@ async function subirInbox(files){
     pintarInboxResultados(j.resultados||[]);
     if($('#inIsbn'))$('#inIsbn').value='';   // el ISBN es por-libro: limpiar tras el alta (ubicación/colección se conservan)
     cargarDatalistColecciones();             // refrescar el autocompletado por si se creó una colección nueva
+    cargarUbicaciones();                     // y por si el alta estrenó un ámbito/estantería nuevos
+    // Modo SUPERVISADO: si el alta produjo UNA ficha, abrirla DIRECTAMENTE EN EDICIÓN (preview) para
+    // revisar/corregir; «Aceptar» guarda y vuelve al Inbox → ciclo escanear-revisar-1clic-escanear.
+    if($('#inSupervisar')&&$('#inSupervisar').checked){
+      const ok=(j.resultados||[]).filter(x=>x.ok&&x.id);
+      if(ok.length===1)revisarSupervisado(ok[0].id);
+    }
   }catch(e){if(out)out.innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
 }
 function pintarInboxResultados(res){
@@ -1834,6 +1875,11 @@ function pintarInboxResultados(res){
     ?`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag ${r.estado==='completado'?'ok':'warn'}">${esc(r.operacion||'ok')}</span> <b>${esc(recortar(r.titulo||'(sin título)',70))}</b> <span class="muted mono" style="font-size:11px">${esc(r.isbn||r.issn||'')}</span>${r.id?` · <a class="rowlink" data-doc="${esc(r.id)}">ver ficha</a>`:''}</div>`
     :`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag bad">${esc(r.destino||'error')}</span> <span class="muted">${esc(r.error||'')}</span></div>`).join('')}</div>`;
   $$('#inboxResults [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'inbox',etiqueta:'Inbox'}));
+}
+// Supervisado: trae la ficha recién creada y abre el formulario de edición como PREVIEW (sin navegar).
+async function revisarSupervisado(id){
+  try{const r=await api('/documentos/'+encodeURIComponent(id));fichaEditar(r.doc,r,{supervisado:true});}
+  catch(e){toast('No se pudo abrir para revisar: '+e.message,'bad');}
 }
 // NFC (Web NFC, Android/Chrome): lee texto/URL de la etiqueta y lo busca en la biblioteca.
 async function leerNFC(){

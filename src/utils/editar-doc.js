@@ -79,6 +79,9 @@ export async function editarDocumento(db, id, campos = {}) {
     }
     if ('locked' in campos) set.locked = !!campos.locked;
     if ('estado_verificacion' in campos && ['pendiente', 'completado'].includes(campos.estado_verificacion)) set.estado_verificacion = campos.estado_verificacion;
+    // Corregir un tipo mal detectado (revista↔libro). No re-aloja el fichero por sí solo: el Conformador/
+    // reprocesar re-archiva en revistas/ o libros/ según corresponda; aquí solo se fija el campo.
+    if ('tipo_recurso' in campos && ['libro', 'revista'].includes(campos.tipo_recurso)) set.tipo_recurso = campos.tipo_recurso;
 
     if (!Object.keys(set).length && !Object.keys(unset).length) return { ok: true, sinCambios: true, avisos };
     set.fecha_actualizacion = new Date();
