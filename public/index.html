@@ -1263,16 +1263,27 @@ function fichaEditar(d,r,opts){
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edCdu','CDU',d.cdu)}</div><div style="flex:1">${campo('edEd','Edición nº',d.numero_edicion)}</div></div>`}
     ${campo('edPal','Palabras clave (coma)',(d.palabras_clave||[]).join(', '))}
     ${campo('edSin','Sinopsis',d.sinopsis,'textarea')}
-    <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAmb','Ámbito',ub.ambito,'input','list="dlAmbitosEd"')}</div><div style="flex:1">${campo('edEst','Estantería',ub.estanteria,'input','list="dlEstanteriasEd"')}</div></div>`}
-    <datalist id="dlAmbitosEd"></datalist><datalist id="dlEstanteriasEd"></datalist>
+    <div class="row" style="gap:8px"><div style="flex:1"><label>Ámbito</label><select id="edAmbSel"></select><input id="edAmb" autocomplete="off" placeholder="nuevo ámbito…" style="display:none;margin-top:6px"></div><div style="flex:1"><label>Estantería</label><select id="edEstSel"></select><input id="edEst" autocomplete="off" placeholder="nueva estantería…" style="display:none;margin-top:6px"></div></div>
     <label style="display:flex;gap:8px;align-items:center;margin-top:12px;cursor:pointer"><input type="checkbox" id="edLock" ${d.locked?'checked':''}> 🔒 Bloquear (el Conformador no lo tocará)</label>
     <div id="edErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edOk">${sup?'✓ Aceptar y siguiente':'Guardar'}</button></div></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrarCmp;
-  // Estantería ASOCIADA al ámbito también al editar (misma lógica que el Inbox; usa el mapa ya cargado).
-  const fillEd=()=>{llenarDatalist('dlAmbitosEd',mapaUbicaciones.map(x=>x.ambito));llenarDatalist('dlEstanteriasEd',estanteriasDe(($('#edAmb')&&$('#edAmb').value)||''));};
-  fillEd();if(!mapaUbicaciones.length)cargarUbicaciones().then(fillEd);
-  if($('#edAmb'))$('#edAmb').oninput=()=>llenarDatalist('dlEstanteriasEd',estanteriasDe($('#edAmb').value));
+  // Ubicación en edición: <select> FIABLE (despliega sus valores) con opción «➕ Otra…» para texto libre.
+  // La estantería va ASOCIADA al ámbito elegido. #edAmb/#edEst (ocultos) son los valores que se guardan.
+  const setupUbicEdit=()=>{
+    const SIN='Sin asignar';
+    const ia=$('#edAmb'),ie=$('#edEst'),sa=$('#edAmbSel'),se=$('#edEstSel');if(!sa||!se)return;
+    const curA=(ub.ambito&&ub.ambito!==SIN)?ub.ambito:'',curE=(ub.estanteria&&ub.estanteria!==SIN)?ub.estanteria:'';
+    const mkOpts=(arr,cur)=>{const set=[...new Set((arr||[]).filter(Boolean))];if(cur&&!set.includes(cur))set.unshift(cur);
+      return ['<option value="">— sin asignar —</option>',...set.map(v=>`<option${v===cur?' selected':''}>${esc(v)}</option>`),'<option value="__new__">➕ Otra…</option>'].join('');};
+    sa.innerHTML=mkOpts(mapaUbicaciones.map(x=>x.ambito),curA);
+    se.innerHTML=mkOpts(estanteriasDe(curA),curE);
+    ia.value=curA;ie.value=curE;ia.style.display='none';ie.style.display='none';
+    sa.onchange=()=>{if(sa.value==='__new__'){ia.style.display='';ia.value='';ia.focus();}else{ia.style.display='none';ia.value=sa.value;}
+      se.innerHTML=mkOpts(estanteriasDe(ia.value),'');ie.value=(se.value==='__new__'?'':se.value);ie.style.display=(se.value==='__new__'?'':'none');};
+    se.onchange=()=>{if(se.value==='__new__'){ie.style.display='';ie.value='';ie.focus();}else{ie.style.display='none';ie.value=se.value;}};
+  };
+  if(mapaUbicaciones.length)setupUbicEdit();else cargarUbicaciones().then(setupUbicEdit);
   const onGuardar=async()=>{
     const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,tipo_recurso:$('#edTipo').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
       'año_edicion':$('#edAno').value,idioma:$('#edIdi').value,paginas:$('#edPag').value,isbn:$('#edIsbn').value,issn:$('#edIssn').value,
@@ -2202,7 +2213,7 @@ async function autoLoginURL(){
 }
 function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
-function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();go('search');abrirEnlaceProfundo();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
+function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();cargarUbicaciones();go('search');abrirEnlaceProfundo();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
     const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.motivo||'usuario o contraseña incorrectos');
