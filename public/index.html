@@ -1495,7 +1495,8 @@ function construirSearch(){
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
         <div style="display:flex;align-items:flex-end"><button class="btn" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
-        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option></select></div>
+        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option></select></div>
+        <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off"></div>
         <div><label>Estrellas</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
           <div class="pop">${[5,4,3,2,1].map(n=>`<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label></div>
@@ -1513,10 +1514,11 @@ function construirSearch(){
   $('#sqQ').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(busqTimer);buscarCatalogo(1);if($('#sqDescubrir')&&$('#sqDescubrir').checked)lanzarDescubrir();}};
   $('#sqCdu').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
   $('#sqTipo').onchange=()=>buscarCatalogo(1);
+  if($('#sqSoporte'))$('#sqSoporte').onchange=()=>buscarCatalogo(1);
   $('#sqOrden').onchange=()=>buscarCatalogo(1);
   if($('#sqDescubrir'))$('#sqDescubrir').onchange=()=>buscarCatalogo(1);
   $$('#p-search .sqStar').forEach(c=>c.onchange=()=>{actualizarSumEstrellas();buscarCatalogo(1);});
-  $('#sqClear').onclick=()=>{$('#sqQ').value='';$('#sqCdu').value='';$('#sqTipo').value='';$('#sqOrden').value='reciente';
+  $('#sqClear').onclick=()=>{$('#sqQ').value='';$('#sqCdu').value='';$('#sqTipo').value='';if($('#sqSoporte'))$('#sqSoporte').value='';$('#sqOrden').value='reciente';
     if($('#sqDescubrir'))$('#sqDescubrir').checked=false;if($('#searchExternal'))$('#searchExternal').innerHTML='';
     $$('#p-search .sqStar').forEach(c=>c.checked=false);estadoBusqueda.extra=null;actualizarSumEstrellas();buscarCatalogo(1);};
 }
@@ -1526,7 +1528,7 @@ function actualizarSumEstrellas(){const s=$('#sqStarsSum');if(!s)return;const se
 function loadSearch(){if(!$('#sqQ'))construirSearch();buscarCatalogo(estadoBusqueda.page||1);}
 async function buscarCatalogo(page){
   estadoBusqueda.page=page;
-  const params=new URLSearchParams({q:$('#sqQ').value.trim(),tipo:$('#sqTipo').value,cdu:$('#sqCdu').value.trim(),orden:$('#sqOrden').value,page});
+  const params=new URLSearchParams({q:$('#sqQ').value.trim(),tipo:$('#sqTipo').value,soporte:($('#sqSoporte')?$('#sqSoporte').value:''),cdu:$('#sqCdu').value.trim(),orden:$('#sqOrden').value,page});
   const est=estrellasSel();if(est.length&&est.length<6)params.set('estrellas',est.join(','));
   if(estadoBusqueda.extra)for(const[k,v]of Object.entries(estadoBusqueda.extra)){if(k!=='etiqueta'&&v!=null&&v!=='')params.set(k,v);}
   pintarChipClas();

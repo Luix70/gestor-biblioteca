@@ -349,7 +349,15 @@ export function rutasPanel() {
             const porPagina = 24;
 
             const match = {};
+            // Tipo: libro/revista por tipo_recurso; 'comic' por naturaleza (un cómic puede ser libro=GN o
+            // revista/serie, así que se filtra por su clase, no por tipo_recurso).
             if (tipo === 'libro' || tipo === 'revista') match.tipo_recurso = tipo;
+            else if (tipo === 'comic') match.naturaleza = { $in: ['comic', 'novela-grafica'] };
+            // Soporte: 'papel' = escaneado/físico (formatos incluye 'papel'); 'digital' = el resto
+            // (epub/pdf/mobi/djvu/cbz…). Vacío = ambos.
+            const soporte = String(req.query.soporte || '').trim();
+            if (soporte === 'papel') match.formatos = 'papel';
+            else if (soporte === 'digital') match.formatos = { $ne: 'papel' };
             if (cdu) match.cdu = { $regex: '^' + escapeRegex(cdu) };
             // Filtro EXACTO por clasificación (clic en el contador de la ficha/dashboard).
             const clasSistema = String(req.query.clasSistema || '').toLowerCase();
