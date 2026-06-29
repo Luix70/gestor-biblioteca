@@ -1114,6 +1114,7 @@ function pintarDoc(r,ctx){
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
+      <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
       <button class="fbtn bad admin-only" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
       <button class="fbtn bad admin-only" id="actDel" title="Borra el documento y su carpeta (sidecars/imágenes → Papelera, recuperable)">🗑 Eliminar</button>
     </div></div></div>`;
@@ -1127,7 +1128,9 @@ function pintarDoc(r,ctx){
    if(ce)ce.onclick=()=>fichaAccion('enriquecer',d._id,ce);
    if(cr)cr.onclick=()=>fichaReprocesar(d._id);
    const cd=$('#actDel');if(cd)cd.onclick=()=>fichaEliminar(d._id);
-   const ce2=$('#actEdit');if(ce2)ce2.onclick=()=>fichaEditar(d,r);}
+   const ce2=$('#actEdit');if(ce2)ce2.onclick=()=>fichaEditar(d,r);
+   // Grabar NFC: solo en navegadores con Web NFC (Android + Chrome). En el resto queda oculto.
+   const cn=$('#actNfc');if(cn&&('NDEFReader' in window)){cn.style.display='';cn.onclick=()=>grabarNFC(d);}}
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
   $$('#p-detalle [data-q]').forEach(a=>a.onclick=()=>buscarTexto(a.dataset.q));
   carIdx=0;const tr=$('#carTrack');
@@ -1833,26 +1836,68 @@ function pintarInboxResultados(res){
     :`<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)"><span class="tag bad">${esc(r.destino||'error')}</span> <span class="muted">${esc(r.error||'')}</span></div>`).join('')}</div>`;
   $$('#inboxResults [data-doc]').forEach(a=>a.onclick=()=>verDoc(a.dataset.doc,{volver:'inbox',etiqueta:'Inbox'}));
 }
-// NFC (Web NFC, Android/Chrome): lee texto/URL de la etiqueta y lo busca en la biblioteca.
+// NFC (Web NFC, Android/Chrome). Extrae el _id de doc de una URL ?doc=<id> (etiqueta grabada por
+// nosotros); en su defecto devuelve el texto/URL crudo (ISBN/identificador) para buscarlo.
+function docIdDeURL(s){try{const u=new URL(s,location.origin);return u.searchParams.get('doc')||'';}catch(_){return '';}}
 async function leerNFC(){
   if(!('NDEFReader' in window)){toast('Este navegador no soporta NFC (Android + Chrome)','bad');return;}
   const out=$('#nfcOut');if(out)out.textContent='Acerca la etiqueta…';
   try{
     const reader=new NDEFReader();await reader.scan();
     reader.onreading=ev=>{
-      let txt='';
-      for(const rec of ev.message.records){try{if(rec.recordType==='text'||rec.recordType==='url'){txt=new TextDecoder(rec.encoding||'utf-8').decode(rec.data);break;}}catch(_){}}
-      const q=(txt||'').trim();
+      let url='',txt='';
+      for(const rec of ev.message.records){try{
+        const val=(rec.recordType==='text'||rec.recordType==='url')?new TextDecoder(rec.encoding||'utf-8').decode(rec.data):'';
+        if(rec.recordType==='url'&&!url)url=val; else if(rec.recordType==='text'&&!txt)txt=val;
+      }catch(_){}}
+      // ¿Etiqueta nuestra? La URL lleva ?doc=<id> → abrir la ficha directamente.
+      const id=docIdDeURL(url);
+      if(id){if(out)out.textContent='Abriendo ficha…';verDoc(id,{volver:'inbox',etiqueta:'Inbox'});return;}
+      const q=(txt||url||'').trim();
       if(q){if(out)out.innerHTML=`Leído: <b class="mono">${esc(q)}</b>`;go('search');const inp=$('#sqQ');if(inp){inp.value=q;buscarCatalogo(1);}}
       else if(out)out.textContent='Etiqueta sin texto legible.';
     };
     reader.onreadingerror=()=>{if(out)out.textContent='No se pudo leer la etiqueta.';};
   }catch(e){if(out)out.textContent='NFC: '+e.message;}
 }
+// Graba en una etiqueta NFC (NTAG215, 504 B) una URL ?doc=<id> + título. La URL hace que, al acercar
+// el móvil, se abra esta ficha (Android Chrome la lee aquí; un iPhone la abre en Safari = mismo destino).
+async function grabarNFC(d){
+  if(!('NDEFReader' in window)){toast('Este navegador no soporta NFC (Android + Chrome)','bad');return;}
+  const url=location.origin+'/?doc='+encodeURIComponent(d._id);
+  const records=[{recordType:'url',data:url}];
+  const tit=(d.titulo||'').slice(0,120);if(tit)records.push({recordType:'text',data:tit});
+  if(d.isbn)records.push({recordType:'text',data:'ISBN '+d.isbn});
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px;text-align:center"><h3 style="margin-top:0">📶 Grabar etiqueta NFC</h3>
+    <p class="muted" id="nfcWrMsg">Acerca una etiqueta NFC (NTAG215) al móvil para grabarla…</p>
+    <p class="mono" style="font-size:11px;word-break:break-all;color:var(--mut)">${esc(url)}</p>
+    <div style="display:flex;gap:10px;justify-content:center;margin-top:8px"><button class="btn" id="nfcWrX">Cancelar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+  const ctrl=new AbortController();
+  const cerrar=()=>{try{ctrl.abort();}catch(_){}cerrarCmp();};
+  $('#nfcWrX').onclick=cerrar;$('#cmpScrim').onclick=cerrar;
+  try{
+    await new NDEFReader().write({records},{signal:ctrl.signal});
+    const m=$('#nfcWrMsg');if(m){m.textContent='✅ Etiqueta grabada.';m.style.color='var(--ok)';}
+    toast('Etiqueta NFC grabada');setTimeout(cerrarCmp,900);
+  }catch(e){
+    if(e&&e.name==='AbortError')return; // cancelado por el usuario
+    const m=$('#nfcWrMsg');if(m){m.textContent='No se pudo grabar: '+e.message;m.style.color='var(--bad)';}
+  }
+}
 const loaders={dashboard:loadDashboard,activity:loadActivity,cuar:loadCuar,pap:loadPap,obras:loadObras,colecciones:loadColecciones,inbox:loadInbox,search:loadSearch};
 
 // ── auth ──
 let estadoTimer=null;
+// Enlace profundo ?doc=<id>: lo lee una etiqueta NFC grabada por nosotros (Android Chrome) y también
+// un iPhone que abre la URL en Safari. Se captura ANTES de que autoLoginURL limpie la query, y se
+// aplica al final de arrancar() (tras autenticar) abriendo la ficha.
+let _deepDoc=null;
+function abrirEnlaceProfundo(){
+  if(!_deepDoc)return;const id=_deepDoc;_deepDoc=null;
+  try{history.replaceState(null,'',location.pathname);}catch(_){}
+  verDoc(id,{volver:'search',etiqueta:'Búsqueda'});
+}
 // Rellena el desplegable de usuarios del login (sin contraseñas; de /api/usuarios).
 async function cargarUsuariosLogin(){try{const r=await fetch('/api/usuarios').then(x=>x.json());const sel=$('#lgUser');if(!sel)return;
   sel.innerHTML=(r.usuarios||[]).map(u=>`<option value="${esc(u.user)}">${esc(u.user)}${u.rol==='admin'?' · admin':''}</option>`).join('')||'<option value="">—</option>';}catch{}}
@@ -1876,7 +1921,7 @@ async function autoLoginURL(){
 }
 function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
-function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();go('search');refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
+function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();go('search');abrirEnlaceProfundo();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
     const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.motivo||'usuario o contraseña incorrectos');
@@ -1885,6 +1930,8 @@ $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent=''
 $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};mostrarLogin();};
 // sesión inicial: token guardado, o el sembrado por auto-login de URL (cookie), o mostrar el login
 (async()=>{
+  // 0) Captura el enlace profundo ?doc=<id> ANTES de que autoLoginURL limpie la query.
+  try{_deepDoc=new URLSearchParams(location.search).get('doc')||null;}catch(_){}
   // 1) Credenciales en la query (?u=&p=): forma robusta, atraviesa DSM/proxy. Prioritaria.
   if(await autoLoginURL())return arrancar();
   // 2) Cookie sembrada por la cabecera Basic (https://user:pwd@host): solo si llega a la app (acceso
