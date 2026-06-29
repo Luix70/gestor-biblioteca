@@ -848,6 +848,22 @@ export function rutasPanel() {
         try { res.json(await reemplazarImagen(await conectarDB(), req.params.id, req.body?.ruta, req.body?.base64)); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+    // Dimensiones físicas del libro (cm), estimadas en el cliente sobre la alfombrilla reglada (solo admin).
+    r.post('/documentos/:id/dimensiones', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const a = Number(req.body?.ancho_cm), h = Number(req.body?.alto_cm);
+            const set = { fecha_actualizacion: new Date() }, unset = {};
+            const ok = (v) => Number.isFinite(v) && v > 0 && v < 200;       // cordura: 0–200 cm
+            if (ok(a)) set.ancho_cm = Math.round(a * 10) / 10; else unset.ancho_cm = '';
+            if (ok(h)) set.alto_cm = Math.round(h * 10) / 10; else unset.alto_cm = '';
+            const upd = { $set: set }; if (Object.keys(unset).length) upd.$unset = unset;
+            const db = await conectarDB();
+            const r2 = await db.collection('biblioteca').updateOne({ _id: new ObjectId(req.params.id) }, upd);
+            if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json({ ok: true, ancho_cm: set.ancho_cm ?? null, alto_cm: set.alto_cm ?? null });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
 
     // PREVISUALIZACIÓN paginada (cómic .cbz/.cbr/.cb7 y .djvu): nº de páginas + página N como imagen,
     // BAJO DEMANDA. Cómics: del comprimido (adm-zip/bsdtar). DjVu: rasterizando solo esa página (ddjvu→

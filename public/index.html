@@ -1054,7 +1054,7 @@ async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();apila
 const ROL_ISBN={tapa_dura:'tapa dura',tapa_blanda:'tapa blanda',ebook:'ebook/digital',obra:'obra completa',volumen:'volumen',barras:'código de barras',otro:'otra edición'};
 const ROL_ISBN_OPC=[['tapa_blanda','Tapa blanda'],['tapa_dura','Tapa dura'],['ebook','Ebook / digital'],['obra','Obra completa'],['volumen','Volumen'],['barras','Código de barras'],['otro','Otra edición']];
 const CAMPOS_FICHA=[['subtitulo','Subtítulo'],['_autores','Autores'],['_editorial','Editorial'],['_coleccion','Colección'],
-  ['año_edicion','Año'],['numero_edicion','Edición'],['idioma','Idioma'],['_formatos','Formatos'],['paginas','Páginas'],
+  ['año_edicion','Año'],['numero_edicion','Edición'],['idioma','Idioma'],['_formatos','Formatos'],['paginas','Páginas'],['_dimensiones','Tamaño'],
   ['_isbn','ISBN'],['_isbns_alt','Otras ediciones'],['_issn','ISSN'],['lccn','LCCN'],
   ['volumen_numero','Volumen nº'],['volumen_titulo','Título del volumen'],['obra_titulo','Obra'],['_isbn_obra','ISBN obra'],
   ['coleccion_numero','Nº en colección'],['numero_issue','Número'],['mes_publicacion','Mes'],
@@ -1118,6 +1118,7 @@ function pintarDoc(r,ctx){
     _formatos:(d.formatos||[]).length?d.formatos.map(f=>`<span class="fmt">${esc(f)}</span>`).join(''):null,
     _estado:d.estado_verificacion?`<span class="tag ${d.estado_verificacion==='completado'?'ok':'warn'}">${esc(d.estado_verificacion)}</span>`:null,
     _ubicacion:d.ubicacion?(esc([d.ubicacion.ambito,d.ubicacion.estanteria].filter(Boolean).join(' · '))||null):null,
+    _dimensiones:(d.ancho_cm&&d.alto_cm)?`${esc(String(d.ancho_cm).replace('.',','))} × ${esc(String(d.alto_cm).replace('.',','))} cm`:null,
     _ingreso:d.fecha_ingreso?fmtFecha(d.fecha_ingreso):null,
     _actualizado:d.fecha_actualizacion?fmtFecha(d.fecha_actualizacion):null,
     _ruta:d.ruta_base?(()=>{const rb=d.ruta_base.replace(/^\/recursos/,'');return `<span class="mono">${esc(rb)}</span> <button class="rbtn copybtn" data-copy="${esc(rb)}" title="Copiar la ruta">📋</button>`;})():null,
@@ -1144,6 +1145,7 @@ function pintarDoc(r,ctx){
     <div class="det-acts">
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
       <button class="fbtn admin-only" id="actImgs" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">🖼️ Imágenes</button>
+      <button class="fbtn admin-only" id="actMedir" title="Estimar el tamaño físico del libro (cm) sobre la alfombrilla reglada">📐 Medir</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
       <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
@@ -1162,6 +1164,7 @@ function pintarDoc(r,ctx){
    const cd=$('#actDel');if(cd)cd.onclick=()=>fichaEliminar(d._id);
    const ce2=$('#actEdit');if(ce2)ce2.onclick=()=>fichaEditar(d,r);
    const ci=$('#actImgs');if(ci)ci.onclick=()=>editarImagenes(d._id,r.imagenes||(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]));
+   const cm2=$('#actMedir');if(cm2)cm2.onclick=()=>medirDimensiones(d._id,r.imagenes||(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]));
    // Grabar NFC: solo en navegadores con Web NFC (Android + Chrome). En el resto queda oculto.
    const cn=$('#actNfc');if(cn&&('NDEFReader' in window)){cn.style.display='';cn.onclick=()=>grabarNFC(d);}}
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
@@ -1401,6 +1404,55 @@ function abrirEditorImagen(i){
       const ok=await apiImg('reemplazar',{ruta:im.ruta,base64:b64});  // re-pinta el gestor
       if(ok)toast('Imagen actualizada');
     };
+  };
+  src.src=encUrl(im.ruta)+'?t='+Date.now();
+}
+// MEDIR el tamaño físico del libro (opcional, on-demand). Sobre la 1.ª imagen (idealmente en la
+// alfombrilla reglada): recuadro VERDE en el libro (auto o manual) + regla AZUL de 2 puntos sobre una
+// distancia conocida del eje → px/cm → ancho×alto en cm. Foto cenital ≈ escala uniforme. Sin IA.
+function medirDimensiones(id, imagenes){
+  const im=(imagenes||[])[0]; if(!im){toast('No hay imagen para medir','warn');return;}
+  const src=new Image(); src.crossOrigin='anonymous';
+  src.onerror=()=>toast('No se pudo cargar la imagen','bad');
+  src.onload=()=>{
+    const iw=src.naturalWidth, ih=src.naturalHeight;
+    let quad=[[iw*0.14,ih*0.14],[iw*0.86,ih*0.14],[iw*0.86,ih*0.86],[iw*0.14,ih*0.86]];
+    let regla=[[iw*0.20,ih*0.95],[iw*0.50,ih*0.95]], cm=10, drag=null;
+    $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:92vh;overflow:auto"><h3 style="margin-top:0">📐 Medir tamaño</h3>
+      <div style="display:flex;justify-content:center;background:#0a0d12;border-radius:8px;padding:6px"><canvas id="mdC" style="max-width:100%;touch-action:none;border-radius:6px"></canvas></div>
+      <p class="muted" style="font-size:12px;margin:8px 0 4px">1) Pon el recuadro VERDE en el libro (o «Auto bordes»). 2) Coloca la regla AZUL sobre una distancia CONOCIDA del eje e indícala en cm.</p>
+      <div class="row" style="gap:8px;align-items:center;margin:4px 0">
+        <button class="btn" id="mdAuto">✨ Auto bordes</button>
+        <label class="muted" style="font-size:12px">Regla =</label><input id="mdCm" type="number" value="10" step="0.5" min="0.5" style="width:74px"><span class="muted">cm</span>
+        <b id="mdOut" style="margin-left:auto"></b></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px"><button class="btn" id="mdX">Cancelar</button><button class="btn pri" id="mdSave">Guardar</button></div></div>`;
+    $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+    const c=$('#mdC'),ctx=c.getContext('2d');
+    const maxW=Math.min(520,(window.innerWidth||520)-60), escala=Math.min(1,maxW/iw);
+    c.width=Math.round(iw*escala);c.height=Math.round(ih*escala);
+    const W2V=p=>[p[0]*escala,p[1]*escala], V2W=(x,y)=>[x/escala,y/escala];
+    const calc=()=>{const pxcm=_dist(regla[0],regla[1])/(cm||1);if(!pxcm||!isFinite(pxcm))return null;
+      return {W:(_dist(quad[0],quad[1])+_dist(quad[3],quad[2]))/2/pxcm, H:(_dist(quad[0],quad[3])+_dist(quad[1],quad[2]))/2/pxcm};};
+    const aro=(p,fill)=>{const v=W2V(p);ctx.beginPath();ctx.arc(v[0],v[1],11,0,7);ctx.fillStyle=fill;ctx.fill();ctx.lineWidth=2.5;ctx.strokeStyle='#fff';ctx.stroke();};
+    const render=()=>{ ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(src,0,0,c.width,c.height);
+      ctx.save();ctx.strokeStyle='#28d9a8';ctx.lineWidth=2;ctx.fillStyle='rgba(40,217,168,.10)';ctx.beginPath();quad.forEach((p,k)=>{const v=W2V(p);k?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]);});ctx.closePath();ctx.fill();ctx.stroke();quad.forEach(p=>aro(p,'rgba(40,217,168,.92)'));
+      ctx.strokeStyle='#1ba3ff';ctx.lineWidth=3;const a=W2V(regla[0]),b=W2V(regla[1]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();regla.forEach(p=>aro(p,'rgba(27,163,255,.95)'));ctx.restore();
+      const r=calc();$('#mdOut').textContent=r?`≈ ${r.W.toFixed(1).replace('.',',')} × ${r.H.toFixed(1).replace('.',',')} cm`:''; };
+    render();
+    const pos=ev=>{const rc=c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);};
+    c.addEventListener('pointerdown',ev=>{ev.preventDefault();const p=pos(ev);let best=null,bd=34/escala;
+      quad.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'q',i};}});
+      regla.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'r',i};}});drag=best;});
+    c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);x=Math.max(0,Math.min(iw,x));y=Math.max(0,Math.min(ih,y));(drag.s==='q'?quad:regla)[drag.i]=[x,y];render();});
+    const soltar=()=>{drag=null;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
+    $('#mdCm').oninput=()=>{cm=parseFloat($('#mdCm').value)||0;render();};
+    $('#mdAuto').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);const q=detectarBordesVerde(tmp);if(q){quad=q;render();toast('Bordes detectados');}else toast('No detecté el libro sobre fondo verde','warn');};
+    $('#mdX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
+    $('#mdSave').onclick=async()=>{const r=calc();if(!r||!(r.W>0&&r.H>0)){toast('Coloca la regla y el recuadro primero','warn');return;}
+      try{const res=await api('/documentos/'+encodeURIComponent(id)+'/dimensiones',{method:'POST',body:JSON.stringify({ancho_cm:r.W,alto_cm:r.H})});
+        if(!res.ok){toast(res.motivo||'error','bad');return;}
+        cerrarCmp();toast(`Tamaño guardado: ${String(res.ancho_cm).replace('.',',')} × ${String(res.alto_cm).replace('.',',')} cm`);verDoc(id,detalle&&detalle.ctx);
+      }catch(e){toast(e.message,'bad');}};
   };
   src.src=encUrl(im.ruta)+'?t='+Date.now();
 }
