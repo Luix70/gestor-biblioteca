@@ -1309,6 +1309,28 @@ function _gauss(A,b){const n=b.length,M=A.map((r,i)=>[...r,b[i]]);for(let c=0;c<
 function _homografia(src,dst){const A=[],b=[];for(let i=0;i<4;i++){const[x,y]=src[i],[u,v]=dst[i];A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v);}const h=_gauss(A,b);return[h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1];}
 function _mapH(H,x,y){const d=H[6]*x+H[7]*y+H[8];return[(H[0]*x+H[1]*y+H[2])/d,(H[3]*x+H[4]*y+H[5])/d];}
 const _dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+// Auto-detección de los 4 bordes de un libro sobre FONDO VERDE (alfombrilla de corte): el libro es la
+// región NO verde; sus esquinas son los extremos diagonales (x+y, x−y). 100% local, sin IA. → [TL,TR,BR,BL] | null.
+function detectarBordesVerde(canvas){
+  const maxD=640, sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
+  const w=Math.max(1,Math.round(canvas.width*sc)),h=Math.max(1,Math.round(canvas.height*sc));
+  const t=document.createElement('canvas');t.width=w;t.height=h;t.getContext('2d').drawImage(canvas,0,0,w,h);
+  const d=t.getContext('2d').getImageData(0,0,w,h).data;
+  const verde=(r,g,b)=> g>50 && (g-r)>18 && (g-b)>18;
+  const px=(x,y)=>{const o=(y*w+x)*4;return [d[o],d[o+1],d[o+2]];};
+  let tl=null,br=null,bl=null,tr=null,n=0;
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+    const [r,g,b]=px(x,y); if(verde(r,g,b))continue;
+    let nv=0; for(const e of [[-1,0],[1,0],[0,-1],[0,1]]){const c=px(x+e[0],y+e[1]);if(!verde(c[0],c[1],c[2]))nv++;}
+    if(nv<3)continue;                       // ignora ruido no-verde aislado
+    n++; const s=x+y, df=x-y;
+    if(tl===null||s<tl[2])tl=[x,y,s]; if(br===null||s>br[2])br=[x,y,s];
+    if(bl===null||df<bl[2])bl=[x,y,df]; if(tr===null||df>tr[2])tr=[x,y,df];
+  }
+  if(n<60)return null;                       // no se ve un libro sobre el verde
+  const up=p=>[p[0]/sc,p[1]/sc];
+  return [up(tl),up(tr),up(br),up(bl)];
+}
 // Editor de UNA imagen: rotar 90°, recortar (rect) y corregir PERSPECTIVA (4 esquinas → rectángulo).
 function abrirEditorImagen(i){
   const im=_imgState.imgs[i]; if(!im)return;
@@ -1323,7 +1345,7 @@ function abrirEditorImagen(i){
       <p class="muted" id="edMsg" style="font-size:12px;margin:8px 0 4px"></p>
       <div class="row" style="gap:6px;margin-top:4px;flex-wrap:wrap">
         <button class="btn" id="edRotL" title="Girar -90°">⟲</button><button class="btn" id="edRotR" title="Girar +90°">⟳</button>
-        <button class="btn" id="edCrop">✂ Recortar</button><button class="btn" id="edPersp">▱ Perspectiva</button>
+        <button class="btn" id="edCrop">✂ Recortar</button><button class="btn" id="edPersp">▱ Perspectiva</button><button class="btn" id="edAuto" style="display:none">✨ Auto bordes</button>
         <button class="btn pri" id="edApply" style="display:none">Aplicar</button></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edSave">Guardar</button></div></div>`;
     $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
@@ -1340,8 +1362,9 @@ function abrirEditorImagen(i){
     };
     const reset=()=>{ajustar();crop={x0:work.width*0.08,y0:work.height*0.08,x1:work.width*0.92,y1:work.height*0.92};const mx=work.width*0.14,my=work.height*0.14;quad=[[mx,my],[work.width-mx,my],[work.width-mx,work.height-my],[mx,work.height-my]];render();};
     reset();
-    const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';$('#edMsg').textContent=modo==='crop'?'Arrastra las esquinas del recuadro a recortar.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (orden: ↖ ↗ ↘ ↙).':'';render();};
+    const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';if($('#edAuto'))$('#edAuto').style.display=modo==='persp'?'':'none';$('#edMsg').textContent=modo==='crop'?'Arrastra las esquinas del recuadro a recortar.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (↖↗↘↙), o pulsa «Auto bordes» si está sobre fondo verde.':'';render();};
     $('#edCrop').onclick=()=>setModo('crop');$('#edPersp').onclick=()=>setModo('persp');
+    if($('#edAuto'))$('#edAuto').onclick=()=>{const q=detectarBordesVerde(work);if(q){quad=q;render();toast('Bordes detectados sobre el verde — ajústalos si hace falta');}else toast('No detecté el libro sobre fondo verde; colócalos a mano','warn');};
     const rotar=horario=>{const nc=document.createElement('canvas');nc.width=work.height;nc.height=work.width;const x=nc.getContext('2d');x.translate(nc.width/2,nc.height/2);x.rotate((horario?90:-90)*Math.PI/180);x.drawImage(work,-work.width/2,-work.height/2);work=nc;modo='none';$('#edApply').style.display='none';reset();};
     $('#edRotL').onclick=()=>rotar(false);$('#edRotR').onclick=()=>rotar(true);
     // arrastre de esquinas
