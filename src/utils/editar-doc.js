@@ -59,6 +59,28 @@ export async function editarDocumento(db, id, campos = {}) {
         else { const ok = validarISSN(v); if (ok) set.issn = ok; else avisos.push(`ISSN inválido (ignorado): ${v}`); }
     }
 
+    // ISBNs ALTERNATIVOS (otras ediciones/encuadernaciones, con su rol). Se validan por checksum; los
+    // inválidos/duplicados se descartan (no romper el esquema). El ISBN primario no se repite aquí.
+    if ('isbns_alternativos' in campos) {
+        const ROLES = ['tapa_dura', 'tapa_blanda', 'ebook', 'obra', 'volumen', 'barras', 'otro'];
+        const arr = Array.isArray(campos.isbns_alternativos) ? campos.isbns_alternativos : [];
+        const vistos = new Set();
+        const primario = validarISBN(String(campos.isbn || '').trim());
+        if (primario) vistos.add(primario);
+        const limpio = [];
+        for (const it of arr) {
+            const ok = validarISBN(String(it?.isbn || '').trim());
+            if (!ok || vistos.has(ok)) continue;
+            vistos.add(ok);
+            const a = { isbn: ok, rol: ROLES.includes(it?.rol) ? it.rol : 'otro', fuente: it?.fuente || 'manual' };
+            if (it?.etiqueta) a.etiqueta = String(it.etiqueta).slice(0, 40);
+            limpio.push(a);
+        }
+        if (limpio.length) set.isbns_alternativos = limpio; else unset.isbns_alternativos = '';
+        const desc = arr.length - limpio.length;
+        if (desc > 0) avisos.push(`${desc} ISBN alternativo(s) inválido(s)/duplicado(s) ignorado(s)`);
+    }
+
     if ('autores' in campos) {
         const arr = (Array.isArray(campos.autores) ? campos.autores : String(campos.autores || '').split(',')).map(s => s.trim()).filter(Boolean);
         if (arr.length) set.autores = await resolverAutores(db, arr); else unset.autores = '';

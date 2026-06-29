@@ -1036,9 +1036,12 @@ async function verDoc(id,ctx){detalle={tipo:'doc',id,ctx};mostrarDetalle();apila
   try{const r=await api('/documentos/'+encodeURIComponent(id));pintarDoc(r,ctx);}
   catch(e){$('#p-detalle').innerHTML=`<div class="crumb"><a onclick="go('obras')">← Obras</a></div><div class="empty">${esc(e.message)}</div>`;}}
 
+// Etiquetas legibles de los roles de ISBN alternativo (otras ediciones).
+const ROL_ISBN={tapa_dura:'tapa dura',tapa_blanda:'tapa blanda',ebook:'ebook/digital',obra:'obra completa',volumen:'volumen',barras:'código de barras',otro:'otra edición'};
+const ROL_ISBN_OPC=[['tapa_blanda','Tapa blanda'],['tapa_dura','Tapa dura'],['ebook','Ebook / digital'],['obra','Obra completa'],['volumen','Volumen'],['barras','Código de barras'],['otro','Otra edición']];
 const CAMPOS_FICHA=[['subtitulo','Subtítulo'],['_autores','Autores'],['_editorial','Editorial'],['_coleccion','Colección'],
   ['año_edicion','Año'],['numero_edicion','Edición'],['idioma','Idioma'],['_formatos','Formatos'],['paginas','Páginas'],
-  ['_isbn','ISBN'],['_issn','ISSN'],['lccn','LCCN'],
+  ['_isbn','ISBN'],['_isbns_alt','Otras ediciones'],['_issn','ISSN'],['lccn','LCCN'],
   ['volumen_numero','Volumen nº'],['volumen_titulo','Título del volumen'],['obra_titulo','Obra'],['_isbn_obra','ISBN obra'],
   ['coleccion_numero','Nº en colección'],['numero_issue','Número'],['mes_publicacion','Mes'],
   ['_estado','Estado'],['_ubicacion','Ubicación'],['nombre_archivo','Archivo'],['_ruta','Ruta'],['hash_contenido','Hash'],
@@ -1109,6 +1112,8 @@ function pintarDoc(r,ctx){
     // para destapar libros mal clasificados colgando de un ISSN de serie, o ediciones del mismo ISBN).
     _issn:d.issn?`<a class="rowlink" data-q="${esc(d.issn)}" title="Ver todo lo que comparte este ISSN">${esc(d.issn)}</a>`:null,
     _isbn:d.isbn?`<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a>`:null,
+    // Otras ediciones (e-ISBN, tapa dura/blanda, obra completa, código de barras…), drillables.
+    _isbns_alt:(d.isbns_alternativos&&d.isbns_alternativos.length)?d.isbns_alternativos.map(a=>`<a class="rowlink" data-q="${esc(a.isbn)}" title="Buscar este ISBN">${esc(a.isbn)}</a> <span class="muted" style="font-size:11px">(${esc(ROL_ISBN[a.rol]||a.rol||'otra')})</span>`).join('<br>'):null,
     _isbn_obra:d.isbn_obra?`<a class="rowlink" data-q="${esc(d.isbn_obra)}" title="Ver todo lo que comparte este ISBN de obra">${esc(d.isbn_obra)}</a>`:null,
   };
   const valor=k=>{if(k in especiales)return especiales[k];let v=d[k];if(v==null||v===''||(Array.isArray(v)&&!v.length))return null;return esc(v);};
@@ -1262,6 +1267,7 @@ function fichaEditar(d,r,opts){
     ${campo('edEdi','Editorial',r.editorial||'')}
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno','Año',d.año_edicion)}</div><div style="flex:1">${campo('edIdi','Idioma',d.idioma)}</div><div style="flex:1">${campo('edPag','Páginas',d.paginas)}</div>`}</div>
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edIsbn','ISBN',d.isbn)}</div><div style="flex:1">${campo('edIssn','ISSN',d.issn)}</div></div>`}
+    <div style="margin-top:8px"><label style="display:block">Otras ediciones (ISBN)</label><div id="edAltList"></div><button type="button" class="btn" id="edAltAdd" style="margin-top:6px">➕ Añadir edición</button></div>
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edCdu','CDU',d.cdu)}</div><div style="flex:1">${campo('edEd','Edición nº',d.numero_edicion)}</div></div>`}
     ${campo('edPal','Palabras clave (coma)',(d.palabras_clave||[]).join(', '))}
     ${campo('edSin','Sinopsis',d.sinopsis,'textarea')}
@@ -1274,11 +1280,18 @@ function fichaEditar(d,r,opts){
   // La estantería va ASOCIADA al ámbito elegido. #edAmb/#edEst (ocultos) son los valores que se guardan.
   const setupUbicEdit=()=>montarSelUbic({sa:'edAmbSel',ia:'edAmb',se:'edEstSel',ie:'edEst',curA:ub.ambito,curE:ub.estanteria});
   if(mapaUbicaciones.length)setupUbicEdit();else cargarUbicaciones().then(setupUbicEdit);
+  // Editor de OTRAS EDICIONES (ISBN alternativo + rol). Filas añadibles/borrables.
+  const rolOpts=sel=>ROL_ISBN_OPC.map(([val,lab])=>`<option value="${val}"${val===sel?' selected':''}>${lab}</option>`).join('');
+  const edAltFila=a=>`<div class="edAltRow" style="display:flex;gap:6px;margin-top:6px;align-items:center"><input class="edAltIsbn" value="${esc((a&&a.isbn)||'')}" placeholder="ISBN" autocomplete="off" style="flex:1"><select class="edAltRol" style="flex:0 0 auto">${rolOpts((a&&a.rol)||'otro')}</select><button type="button" class="btn bad edAltDel" title="Quitar" style="padding:2px 9px">✕</button></div>`;
+  const edAltWire=b=>{b.onclick=()=>b.closest('.edAltRow').remove();};
+  {const L=$('#edAltList');if(L){L.innerHTML=(d.isbns_alternativos||[]).map(edAltFila).join('');$$('#edAltList .edAltDel').forEach(edAltWire);}}
+  if($('#edAltAdd'))$('#edAltAdd').onclick=()=>{const L=$('#edAltList');if(!L)return;L.insertAdjacentHTML('beforeend',edAltFila(null));edAltWire(L.lastElementChild.querySelector('.edAltDel'));};
   const onGuardar=async()=>{
     const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,tipo_recurso:$('#edTipo').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
       'año_edicion':$('#edAno').value,idioma:$('#edIdi').value,paginas:$('#edPag').value,isbn:$('#edIsbn').value,issn:$('#edIssn').value,
       cdu:$('#edCdu').value,numero_edicion:$('#edEd').value,palabras_clave:$('#edPal').value,sinopsis:$('#edSin').value,
-      ubicacion:{ambito:$('#edAmb').value,estanteria:$('#edEst').value},locked:$('#edLock').checked};
+      ubicacion:{ambito:$('#edAmb').value,estanteria:$('#edEst').value},locked:$('#edLock').checked,
+      isbns_alternativos:[...document.querySelectorAll('#edAltList .edAltRow')].map(row=>({isbn:row.querySelector('.edAltIsbn').value.trim(),rol:row.querySelector('.edAltRol').value})).filter(a=>a.isbn)};
     try{const res=await api('/documentos/'+encodeURIComponent(d._id)+'/editar',{method:'POST',body:JSON.stringify(campos)});
       if(!res.ok){$('#edErr').textContent=res.motivo;toast(res.motivo,'bad');return;}
       cerrarCmp();toast('Guardado'+((res.avisos||[]).length?' · '+res.avisos.join('; '):''));

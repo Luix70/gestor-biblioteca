@@ -74,6 +74,10 @@ export function extraerISBNsConRol(texto) {
             // faltar; exige límite tras la palabra para no casar dentro de otra (p. ej. la "v" de "vol").
             const mv = etq.match(/\b(?:tomo|vol[úu]men|volume|vols?|tome|band|teil|parte?|[tv])\b\.?\s*([0-9]{1,3}|[ivxlcdm]{1,7})\b/i);
             if (mv) { rol = 'volumen'; numero = aArabigo(mv[1]); }
+            // Encuadernación / formato de edición (créditos típicos: "(hardcover)", "(pbk.)", "(ebook)").
+            else if (/hardcover|hardback|hbk|cloth|bound|tapa\s*dura|cartonn|gebunden|encuadernad|reli[ée]/i.test(etq)) rol = 'tapa_dura';
+            else if (/paperback|softcover|soft\s*cover|paper\s*back|pbk|r[úu]stica|tapa\s*blanda|broch/i.test(etq)) rol = 'tapa_blanda';
+            else if (/e-?book|electronic|epub|\bpdf\b|\bmobi\b|digital|online|kindle|e-?isbn/i.test(etq)) rol = 'ebook';
         }
         out.push({ isbn, rol, numero, etiqueta: etq });
     }
