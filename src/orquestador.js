@@ -5,6 +5,7 @@ import { extraerMetadatosPdf, textoPagina } from './utils/lector-pdf.js';
 import { medirImagen } from './utils/medir-imagen.js';
 import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
+import { buscarEnFicheroLocal } from './utils/buscador-local.js';
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
 import { pareceSerieLibros } from './utils/revistas.js';
@@ -277,18 +278,33 @@ export async function procesarRecurso(entrada) {
         }
 
     } else if (tipo === 'imagen') {
-        // TIER 3 · libro físico: visión multimodal sobre el grupo de imágenes.
-        // Sin reprocesado local (sin sharp): se envían los bytes originales con su MIME real.
-        // El redimensionado/orientación de fotos escaneadas se delega al front-end emisor.
-        const imagenes = [];
-        for (const r of rutas) {
-            imagenes.push({ data: await fs.readFile(r), mimeType: mimeDeImagen(r) });
-        }
-        try {
-            datosBase = await analizarImagenesRecurso(imagenes);
-        } catch (e) {
-            // Sin texto ni metadatos, si la visión falla no hay forma de identificar el libro.
-            throw new ErrorIdentificacion(`Visión IA falló sobre el grupo de imágenes: ${e.message}`);
+        // FAST-PATH por ISBN (código de barras leído en el MÓVIL → formulario): si ese ISBN está en el
+        // Fichero local, NO se gasta VISIÓN IA — se identifica por ISBN (Fichero → APIs) y las fotos son
+        // solo la portada/escaneo. Sin ISBN, o si no está en el Fichero, se cae a la visión de siempre.
+        const isbnForm = contexto.isbn ? validarISBN(contexto.isbn) : null;
+        let local = null;
+        if (isbnForm) local = await buscarEnFicheroLocal({ isbns: [isbnForm] }).catch(() => null);
+        if (isbnForm && local && local.titulo) {
+            datosBase = {
+                isbn: isbnForm, isbn_propio: isbnForm, isbn_candidatos: variantesISBN(isbnForm),
+                titulo: local.titulo, tipo_recurso: 'libro',
+                alertas_agente: [`ISBN ${isbnForm} (formulario/código de barras) hallado en el Fichero local → identificado sin visión IA.`],
+            };
+            console.log(`[Orquestador] Imagen con ISBN ${isbnForm} en Fichero: FAST-PATH (sin visión IA).`);
+        } else {
+            // TIER 3 · libro físico: visión multimodal sobre el grupo de imágenes.
+            // Sin reprocesado local (sin sharp): se envían los bytes originales con su MIME real.
+            // El redimensionado/orientación de fotos escaneadas se delega al front-end emisor.
+            const imagenes = [];
+            for (const r of rutas) {
+                imagenes.push({ data: await fs.readFile(r), mimeType: mimeDeImagen(r) });
+            }
+            try {
+                datosBase = await analizarImagenesRecurso(imagenes);
+            } catch (e) {
+                // Sin texto ni metadatos, si la visión falla no hay forma de identificar el libro.
+                throw new ErrorIdentificacion(`Visión IA falló sobre el grupo de imágenes: ${e.message}`);
+            }
         }
         formatos = ['papel'];
         tipo_recurso = datosBase.tipo_recurso || 'libro';
