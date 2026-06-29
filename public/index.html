@@ -1895,7 +1895,7 @@ function wireInbox(){
   if(/Android/i.test(navigator.userAgent)){
     const al=$('#appLaunchers');if(al)al.style.display='';
     if($('#openCam'))$('#openCam').onclick=()=>{location.href='intent:#Intent;action=android.media.action.STILL_IMAGE_CAMERA;end';};
-    if($('#openScan'))$('#openScan').onclick=()=>{location.href='intent://#Intent;package=com.adobe.scan.android;S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.adobe.scan.android;end';};
+    if($('#openScan'))$('#openScan').onclick=()=>{location.href='intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.adobe.scan.android;S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.adobe.scan.android;end';};
   }
   if(dz){
     ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));

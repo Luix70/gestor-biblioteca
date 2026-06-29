@@ -224,34 +224,50 @@ export async function procesarRecurso(entrada) {
         }
 
         if (!datosBase.texto_legible) {
+            // PDF ESCANEADO = fotos de un libro FÍSICO (Adobe Scan / cámara / Lens), NO un PDF digital.
+            // Se trata IGUAL que el grupo de imágenes de la cámara (que sí identifica bien): se identifican
+            // las páginas rasterizadas con la MISMA visión (analizarImagenesRecurso) y el soporte es
+            // 'papel'. Su nombre suele ser la FECHA del escaneo ("Adobe Scan Jun 29, 2024"), por eso aquí
+            // NO se aplica la heurística nombre-fechado→revista (eso archivaba escaneos de libros como revistas).
             escaneadoSinTexto = true;
-            // TIER 3 · PDF escaneado: el nombre del archivo suele ser basura (p. ej.
-            // "(ebook - pdf) Título") y arrastra a las APIs a un libro equivocado. La única
-            // fuente fiable es la imagen de esas páginas → OCR por visión (reusa los renders).
-            const v = await ocrDesdeRenders(renders);
-            if (v && (v.titulo || v.isbn || v.issn)) {       // issn → revista identificada por código de barras
-                datosBase = fusionarOcr(datosBase, v);
-                isbnDelArchivo = !!v.isbn;                   // ISBN leído del documento: fiable
-                if (v.tipo_recurso) tipo_recurso = v.tipo_recurso;
-                datosBase.alertas_agente = ["PDF escaneado identificado por OCR de visión; páginas guardadas como sidecars."];
+            formatos = ['papel'];
+            const tecnicos = { paginas: datosBase.paginas, isbns_rol: datosBase.isbns_rol, cip: datosBase.cip };
+            const isbnForm = contexto.isbn ? validarISBN(contexto.isbn) : null;
+            let local = null;
+            if (isbnForm) local = await buscarEnFicheroLocal({ isbns: [isbnForm] }).catch(() => null);
+            if (isbnForm && local && local.titulo) {
+                // FAST-PATH: ISBN conocido y en el Fichero local → sin visión IA.
+                datosBase = { isbn: isbnForm, isbn_propio: isbnForm, isbn_candidatos: variantesISBN(isbnForm),
+                    titulo: local.titulo, tipo_recurso: 'libro', paginas: tecnicos.paginas, texto_legible: false,
+                    alertas_agente: [`PDF escaneado: ISBN ${isbnForm} hallado en el Fichero local → identificado sin visión IA.`] };
+                isbnDelArchivo = true; tipo_recurso = 'libro';
+                console.log(`[Orquestador] PDF escaneado con ISBN ${isbnForm} en Fichero: FAST-PATH (sin visión IA).`);
             } else {
-                datosBase.alertas_agente = ["PDF escaneado, OCR no concluyente: páginas guardadas como sidecars para revisión manual."];
+                const imgs = renders.map(r => ({ data: r.buffer, mimeType: 'image/png' }));
+                let visto = null;
+                if (imgs.length) { try { visto = await analizarImagenesRecurso(imgs); } catch (e) { console.warn(`[PDF escaneado] visión falló: ${e.message}; OCR de reserva.`); } }
+                if (visto && (visto.titulo || visto.isbn || visto.issn)) {
+                    datosBase = { ...visto, paginas: tecnicos.paginas, texto_legible: false };
+                    isbnDelArchivo = !!visto.isbn;
+                    tipo_recurso = visto.tipo_recurso || tipo_recurso;
+                    datosBase.alertas_agente = ['PDF escaneado tratado como libro físico: identificado por visión sobre las páginas (soporte: papel).'];
+                } else {
+                    // Reserva: OCR clásico sobre los renders.
+                    const v = await ocrDesdeRenders(renders);
+                    if (v && (v.titulo || v.isbn || v.issn)) { datosBase = fusionarOcr(datosBase, v); isbnDelArchivo = !!v.isbn; if (v.tipo_recurso) tipo_recurso = v.tipo_recurso; }
+                    datosBase.alertas_agente = ['PDF escaneado, OCR de reserva (visión no concluyente): páginas como sidecars para revisión.'];
+                }
+                if (tecnicos.isbns_rol) datosBase.isbns_rol = tecnicos.isbns_rol;
+                if (tecnicos.cip) datosBase.cip = tecnicos.cip;
             }
-        }
-
-        // FECHA DEL NOMBRE = autoridad para el nº de revista (la mejor info, y temprana): "Title YYYY-MM"
-        // / "Title Mes Año". El curador nombró el fichero con la fecha REAL del número; en escaneados
-        // fusionarOcr la descarta y la visión puede dar un año equivocado (p. ej. la fecha del escaneo) →
-        // aquí se reimpone la del nombre. Solo si el nombre trae fecha (esFechada); si no, se respeta lo extraído.
-        {
+        } else {
+            // PDF DIGITAL (con capa de texto): la FECHA DEL NOMBRE es autoridad para el nº de revista
+            // ("Title YYYY-MM" / "Title Mes Año") — el curador lo nombró con la fecha real del número; un
+            // nº mensual NO es un libro. (En ESCANEADOS no se aplica: su nombre es la fecha del escaneo.)
             const fechaNombre = parsearNombre(path.basename(rutas[0]));
             if (fechaNombre.esFechada) {
                 datosBase.año_edicion = fechaNombre.año_edicion;
                 if (fechaNombre.mes_publicacion != null) datosBase.mes_publicacion = fechaNombre.mes_publicacion;
-                // Un nombre "Título YYYY-MM" (o "Título Mes Año") es un NÚMERO de revista: intención del
-                // curador. MANDA sobre un ISBN ESPURIO del texto/visión (anuncios/reseñas DENTRO de la
-                // revista, o alucinación de la IA) — un nº mensual NO es un libro. → revista, y se DESCARTA
-                // ese ISBN para que el identificador real (ISSN) venga de la cubierta (barras)/interior/título.
                 if (datosBase.isbn) datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
                     `ISBN ${datosBase.isbn} descartado: nombre de revista fechado → el identificador es el ISSN.`];
                 tipo_recurso = 'revista';
