@@ -7,16 +7,28 @@ import crypto from 'node:crypto';
  *   - guest  (usuario "guest"; contraseña PANEL_GUEST_PASSWORD, por defecto "guest"):
  *            SOLO LECTURA — peticiones GET (estadísticas/estado/búsqueda); cualquier mutación → 403.
  *
- * El login devuelve un token aleatorio; el panel lo envía en `Authorization: Bearer <token>`. Las
- * sesiones viven en memoria (se pierden al reiniciar → re-login); TTL configurable.
+ * El login devuelve un token FIRMADO (HMAC) y SIN ESTADO: lleva {usuario, rol, expiración} y se valida
+ * recomputando la firma → SOBREVIVE a los reinicios del contenedor (ya no hay que re-loguear tras cada
+ * deploy) y dura TTL_MS (por defecto 2 días). El panel lo guarda en localStorage y lo manda en
+ * `Authorization: Bearer <token>`. logout es best-effort (revoca en memoria; tras un reinicio el token
+ * sigue válido hasta expirar, pero el cliente lo descarta igualmente).
  */
 const ADMIN_USER = process.env.PANEL_ADMIN_USER || 'Luis';
 const ADMIN_PASS = process.env.ADMIN_PWD || process.env.PANEL_ADMIN_PASSWORD || '';
 const GUEST_USER = 'guest';
 const GUEST_PASS = process.env.GUEST_PWD || process.env.PANEL_GUEST_PASSWORD || 'guest';
-const TTL_MS = Number(process.env.PANEL_SESION_MS || 12 * 3600 * 1000); // 12 h
+const TTL_MS = Number(process.env.PANEL_SESION_MS || 2 * 24 * 3600 * 1000); // 2 días
+// Secreto para firmar los tokens. ESTABLE entre reinicios (de PANEL_TOKEN_SECRET, o derivado de las
+// contraseñas) → los tokens siguen válidos tras un deploy. Cambiar una contraseña invalida los tokens.
+const SECRET = process.env.PANEL_TOKEN_SECRET
+    || crypto.createHash('sha256').update('gestor-panel|' + ADMIN_USER + '|' + ADMIN_PASS + '|' + GUEST_PASS).digest('hex');
+const revocados = new Set(); // logout best-effort (se pierde al reiniciar)
 
-const sesiones = new Map(); // token → { user, role, exp }
+function firmarSesion(user, role) {
+    const payload = Buffer.from(JSON.stringify({ u: user, r: role, exp: Date.now() + TTL_MS })).toString('base64url');
+    const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+    return payload + '.' + sig;
+}
 
 // Usuarios: legacy (admin "Luis" + "guest") + PANEL_USERS del .env (JSON [{user,rol,pwd}]). NO hay
 // alta/recuperación por UI: se editan en el .env (pocos usuarios, admin o guest). PANEL_USERS sobrescribe
@@ -48,9 +60,7 @@ function igual(a, b) {
 export function login(usuario, password) {
     const u = USUARIOS.find(x => x.user === usuario);
     if (!u || !u.pwd || !igual(password, u.pwd)) return null;
-    const token = crypto.randomBytes(24).toString('hex');
-    sesiones.set(token, { user: u.user, role: u.rol, exp: Date.now() + TTL_MS });
-    return { token, usuario: u.user, rol: u.rol };
+    return { token: firmarSesion(u.user, u.rol), usuario: u.user, rol: u.rol };
 }
 
 /** Lista de usuarios para el desplegable del login (SIN contraseñas). */
@@ -67,13 +77,19 @@ export function loginBasic(authHeader) {
 }
 
 export function validar(token) {
-    const s = token && sesiones.get(token);
-    if (!s) return null;
-    if (Date.now() > s.exp) { sesiones.delete(token); return null; }
-    return { usuario: s.user, rol: s.role };
+    if (!token || typeof token !== 'string' || revocados.has(token)) return null;
+    const i = token.lastIndexOf('.');
+    if (i < 0) return null;
+    const payload = token.slice(0, i), sig = token.slice(i + 1);
+    const esperado = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+    const a = Buffer.from(sig), b = Buffer.from(esperado);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;   // firma inválida
+    let data; try { data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { return null; }
+    if (!data || !data.u || !data.exp || Date.now() > data.exp) return null;   // expirado / corrupto
+    return { usuario: data.u, rol: data.r };
 }
 
-export function logout(token) { if (token) sesiones.delete(token); }
+export function logout(token) { if (token) revocados.add(token); }
 
 /** Verifica una contraseña contra la de CUALQUIER admin (re-confirmación de acciones destructivas). */
 export function verificarPasswordAdmin(password) {
