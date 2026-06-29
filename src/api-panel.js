@@ -546,6 +546,26 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // Mapa de ubicaciones: ámbito → estanterías, derivado de los documentos ya catalogados. Alimenta los
+    // desplegables del Inbox y de la edición; la estantería va ASOCIADA a su ámbito (puede haber un
+    // «Estante 1» en «Comedor» y otro distinto en «Biblioteca»). Se enriquece solo, según se da de alta.
+    r.get('/ubicaciones', async (req, res) => {
+        try {
+            const db = await conectarDB();
+            const agg = await db.collection('biblioteca').aggregate([
+                { $match: { 'ubicacion.ambito': { $nin: [null, '', 'Sin asignar'] } } },
+                { $group: { _id: '$ubicacion.ambito', estanterias: { $addToSet: '$ubicacion.estanteria' } } },
+                { $sort: { _id: 1 } },
+            ]).toArray();
+            const colar = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true, sensitivity: 'base' });
+            const ambitos = agg.map(a => ({
+                ambito: a._id,
+                estanterias: (a.estanterias || []).filter(e => e && e !== 'Sin asignar').sort(colar),
+            }));
+            res.json({ ok: true, ambitos });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // Detalle de UNA colección: cabecera/serie resuelta (editorial/CDU+descripción) + sus miembros
     // (números de revista en orden cronológico, o libros de la serie) para el drill-down del panel.
     r.get('/colecciones/:id', async (req, res) => {
