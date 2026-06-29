@@ -1895,6 +1895,9 @@ function wireInbox(){
   // Interruptor «procesar lo compartido al instante» (persistente en este navegador).
   const ac=$('#inAutoCompartir');
   if(ac){ac.checked=localStorage.getItem('auto_compartir')!=='0';ac.onchange=()=>localStorage.setItem('auto_compartir',ac.checked?'1':'0');}
+  // Modo Supervisado PERSISTENTE (no se reinicia al volver de Adobe Scan / recargar la PWA).
+  const sv=$('#inSupervisar');
+  if(sv){sv.checked=localStorage.getItem('inbox_supervisar')==='1';sv.onchange=()=>localStorage.setItem('inbox_supervisar',sv.checked?'1':'0');}
   // Abrir Adobe Scan (Android): intent → la app, o su página en Google Play si no se puede lanzar (one-way;
   // luego se vuelve con «Compartir → Bibliotheca»). El lanzamiento web→app no es fiable desde una PWA.
   if(/Android/i.test(navigator.userAgent)){
@@ -2011,22 +2014,64 @@ async function enviarIngesta(fd){
   return await r.json().catch(()=>({}));
 }
 function setInboxEstado(txt){const el=$('#inboxEstado');if(el)el.innerHTML=txt?`<span class="muted" style="font-size:13px">${esc(txt)}</span>`:'';}
+const esPdf=f=>/\.pdf$/i.test((f&&f.name)||'')||((f&&f.type)==='application/pdf');
+function opsImagenPdf(){const O=(window.pdfjsLib&&window.pdfjsLib.OPS)||{};return new Set([O.paintImageXObject,O.paintJpegXObject,O.paintInlineImageXObject,O.paintImageMaskXObject].filter(v=>v!=null));}
+// Explota un PDF de ESCANEO (Adobe Scan/cámara) en páginas JPG EN EL NAVEGADOR (pdf.js). "escaneo" = las
+// primeras páginas dibujan una imagen a página completa (foto). Un PDF DIGITAL de texto NO se explota
+// (se sube tal cual; lo trata el servidor). Devuelve {escaneo, pages:File[]}.
+async function pdfAImagenes(file,{maxPag=60,ancho=1500}={}){
+  await cargarPdfLib();
+  const lib=window.pdfjsLib;lib.GlobalWorkerOptions.workerSrc='/vendor/pdf.worker.min.js';
+  const pdf=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  try{
+    const total=pdf.numPages,setImg=opsImagenPdf(),comprobar=Math.min(total,2);
+    let conImg=0;
+    for(let i=1;i<=comprobar;i++){const pg=await pdf.getPage(i);const ol=await pg.getOperatorList();if(ol.fnArray.some(fn=>setImg.has(fn)))conImg++;}
+    if(!(comprobar>0&&conImg===comprobar))return {escaneo:false,pages:[]};   // PDF digital → no explotar
+    const pages=[],n=Math.min(total,maxPag);
+    for(let i=1;i<=n;i++){
+      const pg=await pdf.getPage(i);
+      const vp1=pg.getViewport({scale:1});
+      const vp=pg.getViewport({scale:Math.max(1,Math.min(3,ancho/vp1.width))});
+      const c=document.createElement('canvas');c.width=Math.round(vp.width);c.height=Math.round(vp.height);
+      await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+      const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.85));
+      if(blob)pages.push(new File([blob],'pag-'+String(i).padStart(3,'0')+'.jpg',{type:'image/jpeg'}));
+      c.width=c.height=0;
+    }
+    return {escaneo:true,pages};
+  }finally{try{pdf.destroy();}catch(_){}}
+}
 // Subida. SUPERVISADO = SÍNCRONO (sube y abre la ficha para revisar). AUTOPILOTO = ASÍNCRONO: ENCOLA y
-// procesa en segundo plano → puedes seguir empujando documentos sin esperar; la cola se ve abajo.
-async function subirInbox(files){
+// procesa en segundo plano. Un PDF de escaneo se EXPLOTA aquí (cliente) en páginas-imagen + se lee su
+// código de barras → viaja como un libro escaneado (igual que la cámara). `extra` = {isbn,isbnOrigen,titulo}.
+async function subirInbox(files, extra){
   if(!files||!files.length)return;
+  extra=extra||{};
+  // PDF (Adobe Scan/cámara/importado) → explotar en páginas JPG EN EL NAVEGADOR + leer el código de barras.
+  if(files.length===1&&esPdf(files[0])&&!extra.isbn){
+    try{
+      setInboxEstado('🧩 Explotando el PDF en páginas y leyendo el código de barras…');
+      const res=await pdfAImagenes(files[0]);
+      if(res.escaneo&&res.pages.length){
+        const isbn=await detectarISBNenFiles(res.pages);
+        extra={isbn:isbn||undefined,isbnOrigen:isbn?'movil':undefined,titulo:files[0].name};
+        files=res.pages;
+        setInboxEstado(`🧩 PDF → ${res.pages.length} página(s)${isbn?` · 📱 ISBN ${isbn} leído en el móvil`:' · sin código de barras (lo leerá el servidor de las páginas)'}`);
+      }else setInboxEstado('');
+    }catch(e){console.warn('[PDF cliente] no explotado:',e.message);setInboxEstado('');}
+  }
   const supervisado=$('#inSupervisar')&&$('#inSupervisar').checked;
   if(supervisado){
-    setInboxEstado('🔎 Buscando código de barras en el móvil…');
-    const isbn=await detectarISBNenFiles(files);
-    let origenMovil=false;
-    if(isbn&&$('#inIsbn')&&!$('#inIsbn').value.trim()){$('#inIsbn').value=isbn;origenMovil=true;}
-    setInboxEstado(isbn?`📱 ISBN ${isbn} leído en el móvil · ⏳ subiendo y catalogando…`:'⏳ Subiendo y catalogando… (identificará el servidor)');
-    const snap=metaSnapshot();if(origenMovil)snap.isbnOrigen='movil';
+    let isbn=extra.isbn||null,origenMovil=extra.isbnOrigen==='movil';
+    if(!isbn){setInboxEstado('🔎 Buscando código de barras en el móvil…');isbn=await detectarISBNenFiles(files);if(isbn)origenMovil=true;}
+    if(isbn&&$('#inIsbn')&&!$('#inIsbn').value.trim())$('#inIsbn').value=isbn;
+    setInboxEstado(isbn?`📱 ISBN ${isbn} · ⏳ subiendo y catalogando…`:'⏳ Subiendo y catalogando… (identificará el servidor)');
+    const snap=metaSnapshot();if(isbn&&!snap.isbn)snap.isbn=isbn;if(snap.isbn&&origenMovil)snap.isbnOrigen='movil';
     try{
       const j=await enviarIngesta(fdDesdeSnap(snap,files));
       setInboxEstado('');
-      jobsHechos.unshift({estado:'ok',resultados:j.resultados||[],isbnCliente:isbn});cortarJobs();pintarCola();
+      jobsHechos.unshift({estado:'ok',resultados:j.resultados||[],isbnCliente:origenMovil?snap.isbn:null});cortarJobs();pintarCola();
       if($('#inIsbn'))$('#inIsbn').value='';
       cargarDatalistColecciones();cargarUbicaciones();
       const ok=(j.resultados||[]).filter(x=>x.ok&&x.id);
@@ -2034,10 +2079,13 @@ async function subirInbox(files){
     }catch(e){setInboxEstado('');jobsHechos.unshift({estado:'error',msg:e.message});cortarJobs();pintarCola();}
     return;
   }
-  // AUTOPILOTO: encolar (NO bloquea) y limpiar el ISBN por-libro. La cola procesa una a una en segundo plano.
+  // AUTOPILOTO: encolar (NO bloquea). La cola procesa una a una en segundo plano.
   const snap=metaSnapshot();
+  if(extra.isbn){snap.isbn=extra.isbn;if(extra.isbnOrigen)snap.isbnOrigen=extra.isbnOrigen;}
   if($('#inIsbn'))$('#inIsbn').value='';
-  colaInbox.push({id:++jobSeq, files, snap, n:files.length, estado:'cola', titulo:files.map(f=>f.name).join(', ')});
+  setInboxEstado('');
+  colaInbox.push({id:++jobSeq, files, snap, n:files.length, estado:'cola',
+    titulo:extra.titulo||files.map(f=>f.name).join(', '), isbnCliente:(extra.isbnOrigen==='movil'?extra.isbn:null)});
   pintarCola();
   procesarCola();
 }
