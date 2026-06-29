@@ -1346,6 +1346,39 @@ function detectarBordesVerde(canvas){
   const up=p=>[p[0]/sc,p[1]/sc];
   return [up(tl),up(tr),up(br),up(bl)];
 }
+// AUTO-ESCALA: detecta el PASO de la rejilla del tapete (px por 1 cm) sin IA, por PERIODICIDAD:
+// perfiles de gradiente por columnas (líneas verticales) y filas (horizontales) → autocorrelación →
+// el menor lag con un máximo local fuerte = 1 celda = 1 cm. Devuelve px/cm en coords de IMAGEN COMPLETA,
+// o null (sin rejilla clara, o ejes incoherentes → usa la regla manual). La rejilla es de 1 cm.
+function detectarRejillaPxCm(canvas){
+  const maxD=1000, sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
+  const w=Math.max(1,Math.round(canvas.width*sc)), h=Math.max(1,Math.round(canvas.height*sc)), N=w*h;
+  const t=document.createElement('canvas');t.width=w;t.height=h;t.getContext('2d').drawImage(canvas,0,0,w,h);
+  const d=t.getContext('2d').getImageData(0,0,w,h).data;
+  const gris=new Float32Array(N); let nVerde=0;
+  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];gris[i]=0.299*r+0.587*g+0.114*b;if(g>55&&g>=r&&g>=b&&(g-Math.min(r,b))>10)nVerde++;}
+  if(nVerde < N*0.12) return null;                       // poca alfombrilla a la vista
+  const colp=new Float32Array(w), rowp=new Float32Array(h);
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;colp[x]+=Math.abs(gris[i+1]-gris[i-1]);rowp[y]+=Math.abs(gris[i+w]-gris[i-w]);}
+  const periodo=sig=>{                                    // periodo dominante por autocorrelación, o 0
+    const n=sig.length; let m=0;for(let i=0;i<n;i++)m+=sig[i];m/=n;
+    const s=new Float32Array(n);let ac0=0;for(let i=0;i<n;i++){s[i]=sig[i]-m;ac0+=s[i]*s[i];}
+    if(ac0<=0)return 0;
+    const minL=Math.max(6,Math.round(n*0.012)), maxL=Math.floor(n/3);
+    const ac=new Float32Array(maxL+2);let pm=0;
+    for(let L=minL;L<=maxL;L++){let a=0;for(let i=0;i+L<n;i++)a+=s[i]*s[i+L];ac[L]=a/ac0;if(ac[L]>pm)pm=ac[L];}
+    if(pm<0.18)return 0;                                  // sin periodicidad clara
+    for(let L=minL+1;L<maxL;L++)if(ac[L]>=0.5*pm&&ac[L]>=ac[L-1]&&ac[L]>=ac[L+1])return L; // fundamental = menor pico fuerte
+    return 0;
+  };
+  const pc=periodo(colp), pr=periodo(rowp), vals=[];
+  if(pc>0)vals.push(pc); if(pr>0)vals.push(pr);
+  if(!vals.length) return null;
+  if(pc>0&&pr>0&&Math.abs(pc-pr)/Math.min(pc,pr)>0.35) return null; // ejes incoherentes → no fiable
+  const pasoDs=vals.reduce((a,b)=>a+b,0)/vals.length;     // px por cm (escala reducida)
+  const pxcm=pasoDs/sc;                                   // px por cm en imagen completa
+  return (pxcm>2&&isFinite(pxcm))?pxcm:null;
+}
 // Editor de UNA imagen: rotar 90°, recortar (rect) y corregir PERSPECTIVA (4 esquinas → rectángulo).
 function abrirEditorImagen(i){
   const im=_imgState.imgs[i]; if(!im)return;
@@ -1433,11 +1466,12 @@ function medirDimensiones(id, imagenes){
   src.onload=()=>{
     const iw=src.naturalWidth, ih=src.naturalHeight;
     let quad=[[iw*0.14,ih*0.14],[iw*0.86,ih*0.14],[iw*0.86,ih*0.86],[iw*0.14,ih*0.86]];
-    let regla=[[iw*0.20,ih*0.95],[iw*0.50,ih*0.95]], cm=10, drag=null;
+    let regla=[[iw*0.20,ih*0.95],[iw*0.50,ih*0.95]], cm=10, drag=null, pxcmAuto=null;
     $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:92vh;overflow:auto"><h3 style="margin-top:0">📐 Medir tamaño</h3>
       <div style="display:flex;justify-content:center;background:#0a0d12;border-radius:8px;padding:6px"><canvas id="mdC" style="max-width:100%;touch-action:none;border-radius:6px"></canvas></div>
-      <p class="muted" style="font-size:12px;margin:8px 0 4px">1) Pon el recuadro VERDE en el libro (o «Auto bordes»). 2) Coloca la regla AZUL sobre una distancia CONOCIDA del eje e indícala en cm.</p>
+      <p class="muted" style="font-size:12px;margin:8px 0 4px">«📐 Auto medir»: detecta libro + rejilla del tapete (1 cm) y calcula solo. Si no, ponlo a mano: recuadro VERDE en el libro («Auto bordes») y regla AZUL sobre una distancia CONOCIDA del eje, indicándola en cm. Foto cenital (de frente).</p>
       <div class="row" style="gap:8px;align-items:center;margin:4px 0">
+        <button class="btn pri" id="mdAutoMed" title="Detecta el libro y el paso de la rejilla (1 cm) y mide automáticamente">📐 Auto medir</button>
         <button class="btn" id="mdAuto">✨ Auto bordes</button>
         <label class="muted" style="font-size:12px">Regla =</label><input id="mdCm" type="number" value="10" step="0.5" min="0.5" style="width:74px"><span class="muted">cm</span>
         <b id="mdOut" style="margin-left:auto"></b></div>
@@ -1447,21 +1481,30 @@ function medirDimensiones(id, imagenes){
     const maxW=Math.min(520,(window.innerWidth||520)-60), escala=Math.min(1,maxW/iw);
     c.width=Math.round(iw*escala);c.height=Math.round(ih*escala);
     const W2V=p=>[p[0]*escala,p[1]*escala], V2W=(x,y)=>[x/escala,y/escala];
-    const calc=()=>{const pxcm=_dist(regla[0],regla[1])/(cm||1);if(!pxcm||!isFinite(pxcm))return null;
+    const calc=()=>{const pxcm=pxcmAuto||(_dist(regla[0],regla[1])/(cm||1));if(!pxcm||!isFinite(pxcm))return null;
       return {W:(_dist(quad[0],quad[1])+_dist(quad[3],quad[2]))/2/pxcm, H:(_dist(quad[0],quad[3])+_dist(quad[1],quad[2]))/2/pxcm};};
     const aro=(p,fill)=>{const v=W2V(p);ctx.beginPath();ctx.arc(v[0],v[1],11,0,7);ctx.fillStyle=fill;ctx.fill();ctx.lineWidth=2.5;ctx.strokeStyle='#fff';ctx.stroke();};
     const render=()=>{ ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(src,0,0,c.width,c.height);
       ctx.save();ctx.strokeStyle='#28d9a8';ctx.lineWidth=2;ctx.fillStyle='rgba(40,217,168,.10)';ctx.beginPath();quad.forEach((p,k)=>{const v=W2V(p);k?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]);});ctx.closePath();ctx.fill();ctx.stroke();quad.forEach(p=>aro(p,'rgba(40,217,168,.92)'));
       ctx.strokeStyle='#1ba3ff';ctx.lineWidth=3;const a=W2V(regla[0]),b=W2V(regla[1]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();regla.forEach(p=>aro(p,'rgba(27,163,255,.95)'));ctx.restore();
-      const r=calc();$('#mdOut').textContent=r?`≈ ${r.W.toFixed(1).replace('.',',')} × ${r.H.toFixed(1).replace('.',',')} cm`:''; };
+      const r=calc();$('#mdOut').textContent=r?`≈ ${r.W.toFixed(1).replace('.',',')} × ${r.H.toFixed(1).replace('.',',')} cm${pxcmAuto?' · auto':''}`:''; };
     render();
     const pos=ev=>{const rc=c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);};
     c.addEventListener('pointerdown',ev=>{ev.preventDefault();const p=pos(ev);let best=null,bd=34/escala;
       quad.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'q',i};}});
       regla.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'r',i};}});drag=best;});
-    c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);const mX=iw*0.03,mY=ih*0.03;x=Math.max(mX,Math.min(iw-mX,x));y=Math.max(mY,Math.min(ih-mY,y));(drag.s==='q'?quad:regla)[drag.i]=[x,y];render();});
+    c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);const mX=iw*0.03,mY=ih*0.03;x=Math.max(mX,Math.min(iw-mX,x));y=Math.max(mY,Math.min(ih-mY,y));if(drag.s==='r')pxcmAuto=null;/* tocar la regla → escala manual */(drag.s==='q'?quad:regla)[drag.i]=[x,y];render();});
     const soltar=()=>{drag=null;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
-    $('#mdCm').oninput=()=>{cm=parseFloat($('#mdCm').value)||0;render();};
+    $('#mdCm').oninput=()=>{cm=parseFloat($('#mdCm').value)||0;pxcmAuto=null;/* la regla manual manda */render();};
+    $('#mdAutoMed').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);
+      const mX=iw*0.03,mY=ih*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+      const q=detectarBordesVerde(tmp); if(q)quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);
+      const pxcm=detectarRejillaPxCm(tmp); pxcmAuto=pxcm||null;
+      render();
+      if(!q&&!pxcm)toast('No detecté libro ni rejilla; mide a mano','warn');
+      else if(!pxcm)toast('Detecté el libro pero no la rejilla; pon la regla a mano','warn');
+      else if(!q)toast('Detecté la rejilla pero no el libro; coloca el recuadro','warn');
+      else toast('Auto: rejilla '+pxcm.toFixed(1).replace('.',',')+' px/cm');};
     $('#mdAuto').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);let q=detectarBordesVerde(tmp);if(q){const mX=iw*0.03,mY=ih*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);render();toast('Bordes detectados');}else toast('No detecté el libro sobre fondo verde','warn');};
     $('#mdX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
     $('#mdSave').onclick=async()=>{const r=calc();if(!r||!(r.W>0&&r.H>0)){toast('Coloca la regla y el recuadro primero','warn');return;}
