@@ -1365,9 +1365,12 @@ function abrirEditorImagen(i){
     };
     const reset=()=>{ajustar();crop={x0:work.width*0.08,y0:work.height*0.08,x1:work.width*0.92,y1:work.height*0.92};const mx=work.width*0.14,my=work.height*0.14;quad=[[mx,my],[work.width-mx,my],[work.width-mx,work.height-my],[mx,work.height-my]];render();};
     reset();
-    const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';if($('#edAuto'))$('#edAuto').style.display=modo==='persp'?'':'none';$('#edMsg').textContent=modo==='crop'?'Arrastra las esquinas del recuadro a recortar.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (↖↗↘↙), o pulsa «Auto bordes» si está sobre fondo verde.':'';render();};
+    const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';if($('#edAuto'))$('#edAuto').style.display=(modo==='persp'||modo==='crop')?'':'none';$('#edMsg').textContent=modo==='crop'?'Arrastra el recuadro a recortar (o «Auto bordes» si el libro está RECTO sobre verde). Si está inclinado, usa Perspectiva.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (↖↗↘↙) — o «Auto bordes» — y desestira un libro INCLINADO a rectángulo.':'';render();};
     $('#edCrop').onclick=()=>setModo('crop');$('#edPersp').onclick=()=>setModo('persp');
-    if($('#edAuto'))$('#edAuto').onclick=()=>{const q=detectarBordesVerde(work);if(q){quad=q;render();toast('Bordes detectados sobre el verde — ajústalos si hace falta');}else toast('No detecté el libro sobre fondo verde; colócalos a mano','warn');};
+    if($('#edAuto'))$('#edAuto').onclick=()=>{const q=detectarBordesVerde(work);if(!q){toast('No detecté el libro sobre fondo verde; colócalo a mano','warn');return;}
+      if(modo==='crop'){const xs=q.map(p=>p[0]),ys=q.map(p=>p[1]);crop={x0:Math.min(...xs),y0:Math.min(...ys),x1:Math.max(...xs),y1:Math.max(...ys)};toast('Recuadro ajustado al libro (si está inclinado, mejor Perspectiva)');}
+      else{quad=q;toast('Esquinas detectadas — ajústalas si hace falta');}
+      render();};
     const rotar=horario=>{const nc=document.createElement('canvas');nc.width=work.height;nc.height=work.width;const x=nc.getContext('2d');x.translate(nc.width/2,nc.height/2);x.rotate((horario?90:-90)*Math.PI/180);x.drawImage(work,-work.width/2,-work.height/2);work=nc;modo='none';$('#edApply').style.display='none';reset();};
     $('#edRotL').onclick=()=>rotar(false);$('#edRotR').onclick=()=>rotar(true);
     // arrastre de esquinas
