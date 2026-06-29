@@ -925,14 +925,19 @@ export function rutasPanel() {
             const codigo = String(req.query.codigo || '').trim();
             if (!codigo) return res.status(400).json({ ok: false, motivo: 'falta el código' });
             const db = await conectarDB();
+            // Solo el ADMIN puede GENERAR (IA + escritura en la caché de descripciones). El invitado
+            // NO dispara IA ni escribe en BD: lee la caché y, si falta, recibe null. (Cumple "los
+            // invitados no cambian nada en la BD" y la regla de MINIMIZAR IA — sin coste por invitado.)
+            const esAdmin = req.usuario?.rol === 'admin';
             if (sistema === 'cdu') {
                 const cod = sanitizarCDU(codigo);
                 let d = await db.collection('cdu_descripciones').findOne({ codigo: cod });
-                if (!d) d = await describirCDU(db, codigo);
+                if (!d && esAdmin) d = await describirCDU(db, codigo);
                 return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null });
             }
             if (sistema === 'dewey' || sistema === 'lcc') {
-                const d = await describirClasificacion(db, sistema, codigo);
+                let d = await db.collection('clasificacion_descripciones').findOne({ sistema, codigo });
+                if (!d && esAdmin) d = await describirClasificacion(db, sistema, codigo);
                 return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null });
             }
             return res.status(400).json({ ok: false, motivo: 'sistema inválido (cdu|dewey|lcc)' });
