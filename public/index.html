@@ -489,6 +489,10 @@ body.guest .admin-only{display:none!important}
             <div><label>Ubicación · estantería</label><input id="inEstanteria" placeholder="p. ej. Estante 3" autocomplete="off"></div>
             <div style="display:flex;align-items:flex-end"><button class="btn" id="inClear" type="button">✕ Limpiar</button></div>
           </div>
+          <label style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
+            <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inSupervisar"><span class="slider"></span></span>
+            <span class="muted">🚥 Supervisado — abrir la ficha tras cada alta para revisar/corregir (tipo, requery, datos). Si no, modo autopiloto (lista de resultados).</span>
+          </label>
           <datalist id="dlColecciones"></datalist>
         </div>
         <div class="card admin-only">
@@ -1237,6 +1241,8 @@ function fichaEditar(d,r){
   $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">✏️ Editar documento</h3>
     ${campo('edTit','Título',d.titulo)}
     ${campo('edSub','Subtítulo',d.subtitulo)}
+    <label style="display:block;margin-top:8px">Tipo</label>
+    <select id="edTipo"><option value="libro"${d.tipo_recurso!=='revista'?' selected':''}>📕 Libro</option><option value="revista"${d.tipo_recurso==='revista'?' selected':''}>📰 Revista</option></select>
     ${campo('edAut','Autores (coma)',(r.autores||[]).join(', '))}
     ${campo('edEdi','Editorial',r.editorial||'')}
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno','Año',d.año_edicion)}</div><div style="flex:1">${campo('edIdi','Idioma',d.idioma)}</div><div style="flex:1">${campo('edPag','Páginas',d.paginas)}</div>`}</div>
@@ -1250,7 +1256,7 @@ function fichaEditar(d,r){
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edOk">Guardar</button></div></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#edX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
   $('#edOk').onclick=async()=>{
-    const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
+    const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,tipo_recurso:$('#edTipo').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
       'año_edicion':$('#edAno').value,idioma:$('#edIdi').value,paginas:$('#edPag').value,isbn:$('#edIsbn').value,issn:$('#edIssn').value,
       cdu:$('#edCdu').value,numero_edicion:$('#edEd').value,palabras_clave:$('#edPal').value,sinopsis:$('#edSin').value,
       ubicacion:{ambito:$('#edAmb').value,estanteria:$('#edEst').value},locked:$('#edLock').checked};
@@ -1823,6 +1829,11 @@ async function subirInbox(files){
     pintarInboxResultados(j.resultados||[]);
     if($('#inIsbn'))$('#inIsbn').value='';   // el ISBN es por-libro: limpiar tras el alta (ubicación/colección se conservan)
     cargarDatalistColecciones();             // refrescar el autocompletado por si se creó una colección nueva
+    // Modo SUPERVISADO: si el alta produjo UNA ficha, abrirla para revisar/corregir (tipo, requery, datos).
+    if($('#inSupervisar')&&$('#inSupervisar').checked){
+      const ok=(j.resultados||[]).filter(x=>x.ok&&x.id);
+      if(ok.length===1)verDoc(ok[0].id,{volver:'inbox',etiqueta:'Inbox'});
+    }
   }catch(e){if(out)out.innerHTML=`<div class="empty">${esc(e.message)}</div>`;}
 }
 function pintarInboxResultados(res){
