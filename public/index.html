@@ -88,8 +88,10 @@ tr:hover td{background:var(--bg2)}
 .tag.bad{background:rgba(255,92,122,.16);color:var(--bad)}.tag.mut{background:var(--card2);color:var(--mut)}
 /* form */
 label{display:block;color:var(--mut);font-size:12px;margin-bottom:6px}
-input,select{background:var(--bg2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:9px;font-size:13px;width:100%;font-family:inherit}
-input:focus,select:focus{outline:none;border-color:var(--acc)}
+input,select,textarea{background:var(--bg2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:9px;font-size:13px;width:100%;font-family:inherit;box-sizing:border-box}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc)}
+textarea{line-height:1.6;resize:vertical;min-height:15em;display:block}
+.sinopsis-text{white-space:pre-wrap;line-height:1.6;font-size:14px;color:var(--txt);margin:0}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
 .row>div{flex:1;min-width:120px}
 .switch{position:relative;width:52px;height:28px;flex:0 0 auto}
@@ -1133,7 +1135,7 @@ function pintarDoc(r,ctx){
   };
   const valor=k=>{if(k in especiales)return especiales[k];let v=d[k];if(v==null||v===''||(Array.isArray(v)&&!v.length))return null;return esc(v);};
   const dl=CAMPOS_FICHA.map(([k,lab])=>{const v=valor(k);return v?`<dt>${lab}</dt><dd>${v}</dd>`:'';}).join('');
-  const sinopsis=d.sinopsis?`<div class="card" style="margin-top:14px"><h3>Sinopsis</h3><p>${esc(d.sinopsis)}</p></div>`:'';
+  const sinopsis=d.sinopsis?`<div class="card" style="margin-top:14px"><h3>Sinopsis</h3><p class="sinopsis-text">${esc(d.sinopsis)}</p></div>`:'';
   const palabras=(d.palabras_clave||[]).length?`<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:5px">${d.palabras_clave.map(p=>`<span class="tag mut">${esc(p)}</span>`).join('')}</div>`:'';
   const clas=(r.clasificaciones||[]).length?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:6px">Clasificación</div><table class="clastab">${r.clasificaciones.map(x=>filaClas(x)).join('')}</table></div>`:'';
   const alertas=(d.alertas_agente||[]).length?`<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">Notas del agente (${d.alertas_agente.length})</summary><div style="margin-top:6px">${d.alertas_agente.map(a=>`<div class="muted" style="font-size:12px">• ${esc(a)}</div>`).join('')}</div></details>`:'';
@@ -1472,7 +1474,7 @@ function medirDimensiones(id, imagenes){
 function fichaEditar(d,r,opts){
   opts=opts||{};const sup=!!opts.supervisado;
   const v=x=>x==null?'':String(x);
-  const campo=(id,lab,val,tag='input',extra='')=>`<label style="display:block;margin-top:8px">${lab}</label>${tag==='textarea'?`<textarea id="${id}" rows="3" ${extra}>${esc(val)}</textarea>`:`<input id="${id}" value="${esc(val)}" ${extra} autocomplete="off">`}`;
+  const campo=(id,lab,val,tag='input',extra='')=>`<label style="display:block;margin-top:8px">${lab}</label>${tag==='textarea'?`<textarea id="${id}" rows="10" ${extra}>${esc(val)}</textarea>`:`<input id="${id}" value="${esc(val)}" ${extra} autocomplete="off">`}`;
   const ub=d.ubicacion||{};
   const btnScanIsbn=('BarcodeDetector' in window)?'<button class="btn" type="button" id="edScan" title="Escanear código de barras con la cámara">📷</button>':'';
   $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">${sup?'🚥 Revisar alta':'✏️ Editar documento'}</h3>
