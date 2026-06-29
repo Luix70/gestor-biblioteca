@@ -1336,9 +1336,9 @@ function abrirEditorImagen(i){
       const pts = modo==='crop'?[[crop.x0,crop.y0],[crop.x1,crop.y0],[crop.x1,crop.y1],[crop.x0,crop.y1]] : modo==='persp'?quad : null;
       if(pts){ ctx.save();ctx.strokeStyle='#28d9a8';ctx.lineWidth=2;ctx.fillStyle='rgba(40,217,168,.12)';
         ctx.beginPath();pts.forEach((p,k)=>{const v=W2V(p);k?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]);});ctx.closePath();ctx.fill();ctx.stroke();
-        ctx.fillStyle='#28d9a8';pts.forEach(p=>{const v=W2V(p);ctx.beginPath();ctx.arc(v[0],v[1],7,0,7);ctx.fill();});ctx.restore(); }
+        pts.forEach(p=>{const v=W2V(p);ctx.beginPath();ctx.arc(v[0],v[1],13,0,7);ctx.fillStyle='rgba(40,217,168,.92)';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#fff';ctx.stroke();});ctx.restore(); }
     };
-    const reset=()=>{ajustar();crop={x0:work.width*0.08,y0:work.height*0.08,x1:work.width*0.92,y1:work.height*0.92};quad=[[0,0],[work.width,0],[work.width,work.height],[0,work.height]];render();};
+    const reset=()=>{ajustar();crop={x0:work.width*0.08,y0:work.height*0.08,x1:work.width*0.92,y1:work.height*0.92};const mx=work.width*0.14,my=work.height*0.14;quad=[[mx,my],[work.width-mx,my],[work.width-mx,work.height-my],[mx,work.height-my]];render();};
     reset();
     const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';$('#edMsg').textContent=modo==='crop'?'Arrastra las esquinas del recuadro a recortar.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (orden: ↖ ↗ ↘ ↙).':'';render();};
     $('#edCrop').onclick=()=>setModo('crop');$('#edPersp').onclick=()=>setModo('persp');
@@ -1347,7 +1347,7 @@ function abrirEditorImagen(i){
     // arrastre de esquinas
     const pos=ev=>{const rc=c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);};
     const handles=()=> modo==='crop'?[[crop.x0,crop.y0],[crop.x1,crop.y0],[crop.x1,crop.y1],[crop.x0,crop.y1]] : modo==='persp'?quad : [];
-    c.addEventListener('pointerdown',ev=>{ if(modo==='none')return; ev.preventDefault(); const p=pos(ev),hs=handles();let best=-1,bd=24/escala; hs.forEach((h,k)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best=k;}}); drag=best; });
+    c.addEventListener('pointerdown',ev=>{ if(modo==='none')return; ev.preventDefault(); const p=pos(ev),hs=handles();let best=-1,bd=34/escala; hs.forEach((h,k)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best=k;}}); drag=best; });
     c.addEventListener('pointermove',ev=>{ if(drag<0)return; ev.preventDefault(); let[x,y]=pos(ev);x=Math.max(0,Math.min(work.width,x));y=Math.max(0,Math.min(work.height,y));
       if(modo==='crop'){ if(drag===0){crop.x0=x;crop.y0=y;}else if(drag===1){crop.x1=x;crop.y0=y;}else if(drag===2){crop.x1=x;crop.y1=y;}else{crop.x0=x;crop.y1=y;} }
       else { quad[drag]=[x,y]; } render(); });
