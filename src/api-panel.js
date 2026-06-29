@@ -358,6 +358,14 @@ export function rutasPanel() {
             const soporte = String(req.query.soporte || '').trim();
             if (soporte === 'papel') match.formatos = 'papel';
             else if (soporte === 'digital') match.formatos = { $ne: 'papel' };
+            // Ubicación: por ámbito y, dentro de él, por estantería (la estantería sin ámbito sería
+            // ambigua —un «Estante 1» puede existir en varios ámbitos—, así que solo cuenta con ámbito).
+            const ambito = String(req.query.ambito || '').trim();
+            if (ambito) {
+                match['ubicacion.ambito'] = ambito;
+                const estanteria = String(req.query.estanteria || '').trim();
+                if (estanteria) match['ubicacion.estanteria'] = estanteria;
+            }
             if (cdu) match.cdu = { $regex: '^' + escapeRegex(cdu) };
             // Filtro EXACTO por clasificación (clic en el contador de la ficha/dashboard).
             const clasSistema = String(req.query.clasSistema || '').toLowerCase();

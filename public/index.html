@@ -1521,6 +1521,8 @@ function construirSearch(){
         <div style="display:flex;align-items:flex-end"><button class="btn" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
+        <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
+        <div><label>Estantería</label><select id="sqEstanteria" disabled><option value="">Todas</option></select></div>
         <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off"></div>
         <div><label>Estrellas</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
           <div class="pop">${[5,4,3,2,1].map(n=>`<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label></div>
@@ -1539,21 +1541,27 @@ function construirSearch(){
   $('#sqCdu').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
   $('#sqTipo').onchange=()=>buscarCatalogo(1);
   if($('#sqSoporte'))$('#sqSoporte').onchange=()=>buscarCatalogo(1);
+  // Ubicación: al cambiar el ámbito, refrescar la estantería (asociada a ese ámbito) y buscar.
+  if($('#sqAmbito'))$('#sqAmbito').onchange=()=>{pintarEstanteriaSearch();buscarCatalogo(1);};
+  if($('#sqEstanteria'))$('#sqEstanteria').onchange=()=>buscarCatalogo(1);
   $('#sqOrden').onchange=()=>buscarCatalogo(1);
   if($('#sqDescubrir'))$('#sqDescubrir').onchange=()=>buscarCatalogo(1);
   $$('#p-search .sqStar').forEach(c=>c.onchange=()=>{actualizarSumEstrellas();buscarCatalogo(1);});
   $('#sqClear').onclick=()=>{$('#sqQ').value='';$('#sqCdu').value='';$('#sqTipo').value='';if($('#sqSoporte'))$('#sqSoporte').value='';$('#sqOrden').value='reciente';
+    if($('#sqAmbito'))$('#sqAmbito').value='';if($('#sqEstanteria')){$('#sqEstanteria').value='';pintarEstanteriaSearch();}
     if($('#sqDescubrir'))$('#sqDescubrir').checked=false;if($('#searchExternal'))$('#searchExternal').innerHTML='';
     $$('#p-search .sqStar').forEach(c=>c.checked=false);estadoBusqueda.extra=null;actualizarSumEstrellas();buscarCatalogo(1);};
 }
 function estrellasSel(){return $$('#p-search .sqStar:checked').map(c=>c.value);}
 function actualizarSumEstrellas(){const s=$('#sqStarsSum');if(!s)return;const sel=estrellasSel();
   s.textContent=(!sel.length||sel.length===6)?'Todas':sel.map(n=>n==='0'?'0★':n+'★').sort().reverse().join(' ');}
-function loadSearch(){if(!$('#sqQ'))construirSearch();buscarCatalogo(estadoBusqueda.page||1);}
+function loadSearch(){if(!$('#sqQ'))construirSearch();cargarUbicaciones();buscarCatalogo(estadoBusqueda.page||1);}
 async function buscarCatalogo(page){
   estadoBusqueda.page=page;
   const params=new URLSearchParams({q:$('#sqQ').value.trim(),tipo:$('#sqTipo').value,soporte:($('#sqSoporte')?$('#sqSoporte').value:''),cdu:$('#sqCdu').value.trim(),orden:$('#sqOrden').value,page});
   const est=estrellasSel();if(est.length&&est.length<6)params.set('estrellas',est.join(','));
+  const ambS=($('#sqAmbito')&&$('#sqAmbito').value)||'';if(ambS)params.set('ambito',ambS);
+  const estS=($('#sqEstanteria')&&$('#sqEstanteria').value)||'';if(ambS&&estS)params.set('estanteria',estS);
   if(estadoBusqueda.extra)for(const[k,v]of Object.entries(estadoBusqueda.extra)){if(k!=='etiqueta'&&v!=null&&v!=='')params.set(k,v);}
   pintarChipClas();
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
@@ -1816,6 +1824,22 @@ async function cargarUbicaciones(){
   try{const r=await api('/ubicaciones');mapaUbicaciones=r.ambitos||[];}catch(e){return;}
   llenarDatalist('dlAmbitos',mapaUbicaciones.map(x=>x.ambito));
   const amb=$('#inAmbito');if(amb)llenarDatalist('dlEstanterias',estanteriasDe(amb.value));
+  pintarUbicSearch();   // y los desplegables del filtro de Búsqueda
+}
+// Filtro de Búsqueda por ubicación: el <select> de ámbitos y, dependiente, el de estanterías (las del
+// ámbito elegido). Conservan la selección actual al repintar.
+function pintarUbicSearch(){
+  const sa=$('#sqAmbito');if(sa){const cur=sa.value;
+    sa.innerHTML='<option value="">Todos</option>'+mapaUbicaciones.map(x=>`<option value="${esc(x.ambito)}">${esc(x.ambito)}</option>`).join('');
+    sa.value=cur;}
+  pintarEstanteriaSearch();
+}
+function pintarEstanteriaSearch(){
+  const se=$('#sqEstanteria');if(!se)return;
+  const amb=($('#sqAmbito')&&$('#sqAmbito').value)||'',cur=se.value,ests=estanteriasDe(amb);
+  se.innerHTML='<option value="">Todas</option>'+ests.map(e=>`<option value="${esc(e)}">${esc(e)}</option>`).join('');
+  se.disabled=!amb;
+  se.value=[...se.options].some(o=>o.value===cur)?cur:'';
 }
 // Reduce una foto a máx. 2000px (canvas) antes de subir → menos datos y más rápido en el Atom.
 function reducirImagen(file,max=2000,q=0.85){
