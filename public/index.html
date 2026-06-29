@@ -515,11 +515,6 @@ body.guest .admin-only{display:none!important}
             <span class="muted" style="font-size:12px">PDF o imágenes guardadas por Adobe Scan / Drive / Files. (Para escanear AHORA: hazlo en Adobe Scan y usa «Compartir → Bibliotheca».)</span>
             <input type="file" id="fileInputApp" accept="application/pdf,image/*" multiple style="display:none">
           </div>
-          <div class="row" id="appLaunchers" style="margin-top:8px;gap:8px;align-items:center;display:none">
-            <span class="muted" style="font-size:12px">Abrir app (luego comparte/importa el resultado):</span>
-            <button class="btn" id="openCam" type="button" title="Abrir la cámara del sistema">📷 Cámara</button>
-            <button class="btn" id="openScan" type="button" title="Abrir Adobe Scan (o instalarlo)">📄 Adobe Scan</button>
-          </div>
         </div>
         <div class="card admin-only" id="camCard">
           <h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— usa la cámara del móvil (enfoque/zoom)</span></h3>
@@ -1149,7 +1144,7 @@ function pintarDoc(r,ctx){
       <button class="fbtn bad admin-only" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
       <button class="fbtn bad admin-only" id="actDel" title="Borra el documento y su carpeta (sidecars/imágenes → Papelera, recuperable)">🗑 Eliminar</button>
     </div></div></div>`;
-  $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${previewArchivo(r)}</div>
+  $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${(d.formatos||[]).includes('papel')?'':previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
   attachRating('#p-detalle');
@@ -1890,13 +1885,6 @@ function wireInbox(){
   // Interruptor «procesar lo compartido al instante» (persistente en este navegador).
   const ac=$('#inAutoCompartir');
   if(ac){ac.checked=localStorage.getItem('auto_compartir')!=='0';ac.onchange=()=>localStorage.setItem('auto_compartir',ac.checked?'1':'0');}
-  // Lanzadores de apps (intents Android, solo Chrome/Android; one-way: abren la app, luego se comparte/
-  // importa el resultado). En PC/iOS quedan ocultos.
-  if(/Android/i.test(navigator.userAgent)){
-    const al=$('#appLaunchers');if(al)al.style.display='';
-    if($('#openCam'))$('#openCam').onclick=()=>{location.href='intent:#Intent;action=android.media.action.STILL_IMAGE_CAMERA;end';};
-    if($('#openScan'))$('#openScan').onclick=()=>{location.href='intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.adobe.scan.android;S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.adobe.scan.android;end';};
-  }
   if(dz){
     ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
     ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));

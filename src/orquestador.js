@@ -14,6 +14,7 @@ import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
+import { rasterizarPaginas } from './utils/rasterizar-pdf.js';
 import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/lector-barras.js';
 import { paginasMuestraDjvu } from './utils/djvu.js';
 
@@ -23,6 +24,10 @@ const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 // se considera que la página 1 de un PDF es texto (no cubierta).
 const PORTADA_ANCHO_MINIMO = Number(process.env.PORTADA_ANCHO_MINIMO || 100);
 const PAG1_TEXTO_UMBRAL = Number(process.env.PORTADA_PAG1_TEXTO_UMBRAL || 250);
+// PDF ESCANEADO → EXPLOTAR en imágenes (una por página) para que la ficha sea idéntica a un escaneo de
+// cámara. Cap de páginas (proteger al Atom de un escaneo gigante) y ancho de cada página-imagen.
+const PDF_EXPLOTAR_MAX = Number(process.env.PDF_EXPLOTAR_MAX || 60);
+const PDF_EXPLOTAR_ANCHO = Number(process.env.PDF_EXPLOTAR_ANCHO || 1400);
 
 // Tipo MIME real de cada imagen (Gemini soporta jpeg/png/webp/heic de forma nativa).
 // Ya no reprocesamos con sharp: enviamos los bytes originales etiquetados con su MIME correcto.
@@ -215,14 +220,6 @@ export async function procesarRecurso(entrada) {
         tipo_recurso = clasif.tipo_recurso;
         isbnDelArchivo = !!datosBase.isbn_propio; // solo el ISBN PROPIO (no el del cuerpo) cuenta como fiable
 
-        for (const r of renders) {
-            activos.push({
-                tipo: r.etiqueta === 'portada' ? 'portada' : 'otra',
-                origen: `pdf:${r.etiqueta}`,
-                base64: r.buffer.toString('base64'),
-            });
-        }
-
         if (!datosBase.texto_legible) {
             // PDF ESCANEADO = fotos de un libro FÍSICO (Adobe Scan / cámara / Lens), NO un PDF digital.
             // Se trata IGUAL que el grupo de imágenes de la cámara (que sí identifica bien): se identifican
@@ -231,6 +228,19 @@ export async function procesarRecurso(entrada) {
             // NO se aplica la heurística nombre-fechado→revista (eso archivaba escaneos de libros como revistas).
             escaneadoSinTexto = true;
             formatos = ['papel'];
+            // EXPLOTAR el PDF en imágenes: una por página (todas, con un cap) → se guardan como las
+            // imágenes del libro (carrusel), igual que un escaneo de cámara. Así la ficha es idéntica
+            // para todos los libros escaneados. Se conservan TODAS las páginas escaneadas.
+            const totalPag = datosBase.paginas || (renders.length ? Math.max(...renders.map(r => r.pagina)) : 0);
+            let paginasImg = renders;
+            if (totalPag > renders.length) {
+                const nums = Array.from({ length: Math.min(totalPag, PDF_EXPLOTAR_MAX) }, (_, i) => i + 1);
+                const todas = await rasterizarPaginas(rutas[0], { paginas: nums, ancho: PDF_EXPLOTAR_ANCHO });
+                if (todas.length) paginasImg = todas;
+            }
+            for (const r of paginasImg) {
+                activos.push({ tipo: r.pagina === 1 ? 'portada' : 'otra', origen: `pdf:pag-${r.pagina}`, base64: r.buffer.toString('base64') });
+            }
             const tecnicos = { paginas: datosBase.paginas, isbns_rol: datosBase.isbns_rol, cip: datosBase.cip };
             const isbnForm = contexto.isbn ? validarISBN(contexto.isbn) : null;
             let local = null;
@@ -261,9 +271,14 @@ export async function procesarRecurso(entrada) {
                 if (tecnicos.cip) datosBase.cip = tecnicos.cip;
             }
         } else {
-            // PDF DIGITAL (con capa de texto): la FECHA DEL NOMBRE es autoridad para el nº de revista
-            // ("Title YYYY-MM" / "Title Mes Año") — el curador lo nombró con la fecha real del número; un
-            // nº mensual NO es un libro. (En ESCANEADOS no se aplica: su nombre es la fecha del escaneo.)
+            // PDF DIGITAL (con capa de texto): se conserva el PDF; sus páginas clave (portada + créditos +
+            // contraportada) van como SIDECARS (preview/portada), no se explota en imágenes.
+            for (const r of renders) {
+                activos.push({ tipo: r.etiqueta === 'portada' ? 'portada' : 'otra', origen: `pdf:${r.etiqueta}`, base64: r.buffer.toString('base64') });
+            }
+            // La FECHA DEL NOMBRE es autoridad para el nº de revista ("Title YYYY-MM" / "Title Mes Año") —
+            // el curador lo nombró con la fecha real del número; un nº mensual NO es un libro. (En
+            // ESCANEADOS no se aplica: su nombre es la fecha del escaneo.)
             const fechaNombre = parsearNombre(path.basename(rutas[0]));
             if (fechaNombre.esFechada) {
                 datosBase.año_edicion = fechaNombre.año_edicion;
