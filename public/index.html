@@ -1507,13 +1507,27 @@ function renderBulk(){const el=$('#searchBulk');if(!el)return;
     <button class="btn pri" id="bkCol">📚 Colección</button>
     <button class="btn pri" id="bkObra">📖 Obra</button>
     <button class="btn pri" id="bkUbic">📍 Estantería</button>
+    <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`:'';
   el.innerHTML=`<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="bkAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todos <span class="muted">(${paginaIds.length} en esta página)</span></label>${acc}</div>`;
   const all=$('#bkAll');all.checked=enPag>0&&enPag===paginaIds.length;all.indeterminate=enPag>0&&enPag<paginaIds.length;
   all.onchange=()=>{const on=all.checked;paginaIds.forEach(id=>{if(on)selDocs.add(id);else selDocs.delete(id);});
     $$('#searchResults .selchk').forEach(cb=>cb.checked=on);$$('#searchResults .vol').forEach(c=>c.classList.toggle('sel',on));renderBulk();};
   if(selDocs.size){$('#bkCol').onclick=()=>pickerGrupo('coleccion');$('#bkObra').onclick=()=>pickerGrupo('obra');$('#bkUbic').onclick=()=>pickerUbic();
+    $('#bkDel').onclick=eliminarSeleccionados;
     $('#bkClear').onclick=()=>{selDocs.clear();$$('#searchResults .vol.sel').forEach(c=>c.classList.remove('sel'));$$('#searchResults .selchk').forEach(c=>c.checked=false);renderBulk();};}}
+// Borrado MASIVO de los seleccionados (solo admin; renderBulk ya gatea ROL). Pide contraseña. Las
+// carpetas van a la Papelera (recuperable), como el borrado individual.
+async function eliminarSeleccionados(){
+  const n=selDocs.size;if(!n)return;
+  const pw=await modalPassword({titulo:`🗑 Eliminar ${n} libro(s)`,aviso:`Se borrarán <b>${n}</b> documento(s); sus carpetas (sidecars e imágenes) irán a la <b>Papelera</b> (recuperable). Acción MASIVA. Confirma con tu contraseña de administrador.`});
+  if(pw==null)return;
+  try{const r=await api('/documentos/eliminar-lote',{method:'POST',body:JSON.stringify({ids:[...selDocs],password:pw})});
+    if(!r.ok){toast(r.motivo||'No se pudo eliminar','bad');return;}
+    toast(`Eliminado(s) ${r.eliminados} libro(s)${r.fallidos?` · ${r.fallidos} fallido(s)`:''} → Papelera`);
+    selDocs.clear();buscarCatalogo(estadoBusqueda.page||1);
+  }catch(e){toast(e.message,'bad');}
+}
 // Selector con FILTRO + PREVISUALIZACIÓN (en vez de un desplegable largo): clic en una tarjeta → añade
 // los seleccionados a esa colección/obra; o crear una nueva abajo. kind: 'coleccion' | 'obra'.
 async function pickerGrupo(kind){

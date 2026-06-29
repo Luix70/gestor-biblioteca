@@ -808,6 +808,27 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // Borrado MASIVO desde la Búsqueda (solo admin, contraseña). Recicla la carpeta de cada doc a la
+    // Papelera (recuperable), igual que el borrado individual. Devuelve cuántos se borraron / fallaron.
+    r.post('/documentos/eliminar-lote', async (req, res) => {
+        try {
+            if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter(id => ObjectId.isValid(id));
+            if (!ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos válidos' });
+            const db = await conectarDB();
+            let eliminados = 0; const fallidos = [];
+            for (const id of ids) {
+                try {
+                    const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(id) });
+                    if (!doc) { fallidos.push(id); continue; }
+                    const r2 = await eliminarDocumento(db, doc);
+                    if (r2?.ok !== false) eliminados++; else fallidos.push(id);
+                } catch { fallidos.push(id); }
+            }
+            res.json({ ok: true, eliminados, fallidos: fallidos.length, total: ids.length });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // PREVISUALIZACIÓN paginada (cómic .cbz/.cbr/.cb7 y .djvu): nº de páginas + página N como imagen,
     // BAJO DEMANDA. Cómics: del comprimido (adm-zip/bsdtar). DjVu: rasterizando solo esa página (ddjvu→
     // pdftoppm). El visor del panel pide una página por vez (no se convierte el documento entero).
