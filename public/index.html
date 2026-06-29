@@ -486,8 +486,8 @@ body.guest .admin-only{display:none!important}
             <div><label>Obra (multivolumen)</label><input id="inObra" placeholder="título de la obra" autocomplete="off"></div>
           </div>
           <div class="row" style="margin-top:8px">
-            <div><label>Ubicación · ámbito</label><input id="inAmbito" placeholder="p. ej. Salón" autocomplete="off" list="dlAmbitos"></div>
-            <div><label>Ubicación · estantería</label><input id="inEstanteria" placeholder="p. ej. Estante 3" autocomplete="off" list="dlEstanterias"></div>
+            <div><label>Ubicación · ámbito</label><select id="inAmbSel"></select><input id="inAmbito" autocomplete="off" placeholder="nuevo ámbito…" style="display:none;margin-top:6px"></div>
+            <div><label>Ubicación · estantería</label><select id="inEstSel"></select><input id="inEstanteria" autocomplete="off" placeholder="nueva estantería…" style="display:none;margin-top:6px"></div>
             <div style="display:flex;align-items:flex-end"><button class="btn" id="inClear" type="button">✕ Limpiar</button></div>
           </div>
           <label style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
@@ -1270,19 +1270,7 @@ function fichaEditar(d,r,opts){
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrarCmp;
   // Ubicación en edición: <select> FIABLE (despliega sus valores) con opción «➕ Otra…» para texto libre.
   // La estantería va ASOCIADA al ámbito elegido. #edAmb/#edEst (ocultos) son los valores que se guardan.
-  const setupUbicEdit=()=>{
-    const SIN='Sin asignar';
-    const ia=$('#edAmb'),ie=$('#edEst'),sa=$('#edAmbSel'),se=$('#edEstSel');if(!sa||!se)return;
-    const curA=(ub.ambito&&ub.ambito!==SIN)?ub.ambito:'',curE=(ub.estanteria&&ub.estanteria!==SIN)?ub.estanteria:'';
-    const mkOpts=(arr,cur)=>{const set=[...new Set((arr||[]).filter(Boolean))];if(cur&&!set.includes(cur))set.unshift(cur);
-      return ['<option value="">— sin asignar —</option>',...set.map(v=>`<option${v===cur?' selected':''}>${esc(v)}</option>`),'<option value="__new__">➕ Otra…</option>'].join('');};
-    sa.innerHTML=mkOpts(mapaUbicaciones.map(x=>x.ambito),curA);
-    se.innerHTML=mkOpts(estanteriasDe(curA),curE);
-    ia.value=curA;ie.value=curE;ia.style.display='none';ie.style.display='none';
-    sa.onchange=()=>{if(sa.value==='__new__'){ia.style.display='';ia.value='';ia.focus();}else{ia.style.display='none';ia.value=sa.value;}
-      se.innerHTML=mkOpts(estanteriasDe(ia.value),'');ie.value=(se.value==='__new__'?'':se.value);ie.style.display=(se.value==='__new__'?'':'none');};
-    se.onchange=()=>{if(se.value==='__new__'){ie.style.display='';ie.value='';ie.focus();}else{ie.style.display='none';ie.value=se.value;}};
-  };
+  const setupUbicEdit=()=>montarSelUbic({sa:'edAmbSel',ia:'edAmb',se:'edEstSel',ie:'edEst',curA:ub.ambito,curE:ub.estanteria});
   if(mapaUbicaciones.length)setupUbicEdit();else cargarUbicaciones().then(setupUbicEdit);
   const onGuardar=async()=>{
     const campos={titulo:$('#edTit').value,subtitulo:$('#edSub').value,tipo_recurso:$('#edTipo').value,autores:$('#edAut').value,editorial:$('#edEdi').value,
@@ -1806,7 +1794,8 @@ function loadInbox(){
   if(('NDEFReader' in window)&&$('#nfcCard'))$('#nfcCard').style.display='';
   if($('#inboxHint'))$('#inboxHint').textContent='Alta directa (pasa por el pipeline). Solo administradores.';
   cargarDatalistColecciones();
-  cargarUbicaciones();
+  refrescarInboxUbic();   // monta los <select> al instante con el mapa en caché
+  cargarUbicaciones();    // y lo refresca desde el servidor
 }
 function wireInbox(){
   const dz=$('#dropZone'),fi=$('#fileInput');
@@ -1817,9 +1806,7 @@ function wireInbox(){
     ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
     dz.addEventListener('drop',e=>{const f=[...((e.dataTransfer&&e.dataTransfer.files)||[])];if(f.length)subirInbox(f);});
   }
-  if($('#inClear'))$('#inClear').onclick=()=>['inIsbn','inColeccion','inObra','inAmbito','inEstanteria'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});
-  // Estantería ASOCIADA al ámbito: al cambiar el ámbito, refrescar las estanterías sugeridas.
-  if($('#inAmbito'))$('#inAmbito').oninput=()=>llenarDatalist('dlEstanterias',estanteriasDe($('#inAmbito').value));
+  if($('#inClear'))$('#inClear').onclick=()=>{['inIsbn','inColeccion','inObra','inAmbito','inEstanteria'].forEach(id=>{const el=$('#'+id);if(el)el.value='';});refrescarInboxUbic();};
   const ci=$('#camInput');
   if($('#camShot'))$('#camShot').onclick=()=>ci&&ci.click();
   if(ci)ci.onchange=async()=>{for(const f of ci.files){try{camFotos.push(await reducirImagen(f));}catch{camFotos.push(f);}}ci.value='';renderCamThumbs();};
@@ -1839,11 +1826,28 @@ async function cargarDatalistColecciones(){
 let mapaUbicaciones=[];
 function llenarDatalist(id,valores){const dl=$('#'+id);if(!dl)return;dl.innerHTML=(valores||[]).map(v=>`<option value="${esc(v)}">`).join('');}
 function estanteriasDe(ambito){const a=(ambito||'').trim().toLowerCase();const e=mapaUbicaciones.find(x=>(x.ambito||'').trim().toLowerCase()===a);return e?e.estanterias:[];}
+// <select> de ámbito/estantería FIABLE (en móvil el datalist sale en la barra del teclado, no como
+// desplegable). Despliega SIEMPRE sus valores; la estantería va asociada al ámbito (al cambiarlo se
+// vacía/recalcula); «➕ Otra…» revela un campo de texto para crear una nueva. Los inputs OCULTOS
+// (#<ia>/#<ie>) guardan el valor final que se envía/guarda.
+function montarSelUbic(o){
+  const SIN='Sin asignar';
+  const sa=$('#'+o.sa),ia=$('#'+o.ia),se=$('#'+o.se),ie=$('#'+o.ie);if(!sa||!ia||!se||!ie)return;
+  const curA=(o.curA&&o.curA!==SIN)?o.curA:'',curE=(o.curE&&o.curE!==SIN)?o.curE:'';
+  const mk=(arr,cur)=>{const set=[...new Set((arr||[]).filter(Boolean))];if(cur&&!set.includes(cur))set.unshift(cur);
+    return ['<option value="">— sin asignar —</option>',...set.map(v=>`<option${v===cur?' selected':''}>${esc(v)}</option>`),'<option value="__new__">➕ Otra…</option>'].join('');};
+  sa.innerHTML=mk(mapaUbicaciones.map(x=>x.ambito),curA);
+  se.innerHTML=mk(estanteriasDe(curA),curE);
+  ia.value=curA;ie.value=curE;ia.style.display='none';ie.style.display='none';
+  sa.onchange=()=>{if(sa.value==='__new__'){ia.style.display='';ia.value='';ia.focus();}else{ia.style.display='none';ia.value=sa.value;}
+    se.innerHTML=mk(estanteriasDe(ia.value),'');ie.value=(se.value==='__new__'?'':se.value);ie.style.display=(se.value==='__new__'?'':'none');};
+  se.onchange=()=>{if(se.value==='__new__'){ie.style.display='';ie.value='';ie.focus();}else{ie.style.display='none';ie.value=se.value;}};
+}
+function refrescarInboxUbic(){if(!$('#inAmbSel'))return;montarSelUbic({sa:'inAmbSel',ia:'inAmbito',se:'inEstSel',ie:'inEstanteria',curA:($('#inAmbito')&&$('#inAmbito').value)||'',curE:($('#inEstanteria')&&$('#inEstanteria').value)||''});}
 async function cargarUbicaciones(){
   try{const r=await api('/ubicaciones');mapaUbicaciones=r.ambitos||[];}catch(e){return;}
-  llenarDatalist('dlAmbitos',mapaUbicaciones.map(x=>x.ambito));
-  const amb=$('#inAmbito');if(amb)llenarDatalist('dlEstanterias',estanteriasDe(amb.value));
-  pintarUbicSearch();   // y los desplegables del filtro de Búsqueda
+  refrescarInboxUbic();  // desplegables del Inbox
+  pintarUbicSearch();    // y los del filtro de Búsqueda
 }
 // Filtro de Búsqueda por ubicación: el <select> de ámbitos y, dependiente, el de estanterías (las del
 // ámbito elegido). Conservan la selección actual al repintar.
