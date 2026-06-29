@@ -115,6 +115,7 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
     const coleccion = String(req.body?.coleccion || '').trim() || null;
     const obraTit   = String(req.body?.obra || '').trim() || null;
     const isbnForm  = String(req.body?.isbn || '').replace(/[^0-9Xx]/g, '').toUpperCase() || null;
+    const isbnOrigen = String(req.body?.isbn_origen || '').trim() || null;   // 'movil' = leído del código de barras en el cliente
     const conformar = req.body?.conformar === '1' || req.body?.conformar === true || req.query?.conformar === '1';
     const baseCtx = {};
     if (ubicacion) baseCtx.ubicacion = ubicacion;
@@ -128,7 +129,7 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
     for (const unidad of unidades) {
         const ctx = { ...baseCtx };
         // El ISBN del formulario solo aplica a UN libro (un grupo de imágenes, o una única unidad subida).
-        if (isbnForm && (unidad.esImagenes || unidades.length === 1)) ctx.isbn = isbnForm;
+        if (isbnForm && (unidad.esImagenes || unidades.length === 1)) { ctx.isbn = isbnForm; if (isbnOrigen) ctx.isbn_origen = isbnOrigen; }
         try {
             const r = await ingestarRecurso({ rutas: unidad.rutas, contexto: ctx });
             resultados.push({

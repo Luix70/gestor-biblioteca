@@ -268,6 +268,7 @@ export async function procesarRecurso(entrada) {
                     isbnDelArchivo = !!visto.isbn;
                     tipo_recurso = visto.tipo_recurso || tipo_recurso;
                     datosBase.alertas_agente = ['PDF escaneado tratado como libro físico: identificado por visión sobre las páginas (soporte: papel).'];
+                    if (visto.isbn) datosBase.alertas_agente.push(`ISBN ${visto.isbn} leído de las páginas por VISIÓN IA (servidor); no se usó lector de código de barras dedicado.`);
                 } else {
                     // Reserva: OCR clásico sobre los renders.
                     const v = await ocrDesdeRenders(renders);
@@ -343,6 +344,8 @@ export async function procesarRecurso(entrada) {
                 // Sin texto ni metadatos, si la visión falla no hay forma de identificar el libro.
                 throw new ErrorIdentificacion(`Visión IA falló sobre el grupo de imágenes: ${e.message}`);
             }
+            if (datosBase.isbn) datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
+                `ISBN ${datosBase.isbn} leído de las imágenes por VISIÓN IA (servidor); el código de barras no se leyó en el móvil.`];
         }
         formatos = ['papel'];
         tipo_recurso = datosBase.tipo_recurso || 'libro';
@@ -470,6 +473,9 @@ export async function procesarRecurso(entrada) {
         if (v) {
             datosBase.isbn = v; datosBase.isbn_propio = v;
             datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(v)])];
+            datosBase.alertas_agente = [...(datosBase.alertas_agente || []), contexto.isbn_origen === 'movil'
+                ? `ISBN ${v} leído del CÓDIGO DE BARRAS en el móvil (cliente, antes de subir).`
+                : `ISBN ${v} aportado en el formulario de la subida.`];
             console.log(`[Orquestador] ISBN del formulario aplicado a ${path.basename(rutas[0])}: ${v}.`);
         }
     }

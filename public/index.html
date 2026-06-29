@@ -1998,6 +1998,7 @@ function metaSnapshot(){
 function fdDesdeSnap(snap, files){
   const fd=new FormData();
   if(snap.isbn)fd.append('isbn',snap.isbn);
+  if(snap.isbn&&snap.isbnOrigen)fd.append('isbn_origen',snap.isbnOrigen);
   if(snap.coleccion)fd.append('coleccion',snap.coleccion);
   if(snap.obra)fd.append('obra',snap.obra);
   if(snap.ambito||snap.estanteria)fd.append('ubicacion',JSON.stringify({ambito:snap.ambito||'Sin asignar',estanteria:snap.estanteria||'Sin asignar'}));
@@ -2018,9 +2019,10 @@ async function subirInbox(files){
   if(supervisado){
     setInboxEstado('🔎 Buscando código de barras en el móvil…');
     const isbn=await detectarISBNenFiles(files);
-    if(isbn&&$('#inIsbn')&&!$('#inIsbn').value.trim())$('#inIsbn').value=isbn;
+    let origenMovil=false;
+    if(isbn&&$('#inIsbn')&&!$('#inIsbn').value.trim()){$('#inIsbn').value=isbn;origenMovil=true;}
     setInboxEstado(isbn?`📱 ISBN ${isbn} leído en el móvil · ⏳ subiendo y catalogando…`:'⏳ Subiendo y catalogando… (identificará el servidor)');
-    const snap=metaSnapshot();
+    const snap=metaSnapshot();if(origenMovil)snap.isbnOrigen='movil';
     try{
       const j=await enviarIngesta(fdDesdeSnap(snap,files));
       setInboxEstado('');
@@ -2044,7 +2046,7 @@ async function procesarCola(){
   while(colaInbox.length){
     const job=colaInbox[0];job.estado='procesando';pintarCola();
     try{
-      if(!job.snap.isbn){const isbn=await detectarISBNenFiles(job.files);if(isbn){job.snap.isbn=isbn;job.isbnCliente=isbn;}}
+      if(!job.snap.isbn){const isbn=await detectarISBNenFiles(job.files);if(isbn){job.snap.isbn=isbn;job.snap.isbnOrigen='movil';job.isbnCliente=isbn;}}
       const j=await enviarIngesta(fdDesdeSnap(job.snap,job.files));
       job.estado='ok';job.resultados=j.resultados||[];
     }catch(e){job.estado='error';job.msg=e.message;}
