@@ -51,6 +51,15 @@ function calcularActualizacion(existente, nuevo) {
     const alertas = union(existente.alertas_agente, nuevo.alertas_agente);
     set.alertas_agente = [...alertas, 'Registro actualizado con nueva información.'];
 
+    // ISBNs alternativos (otras ediciones): unir por isbn sin perder los ya registrados.
+    const altsEx = Array.isArray(existente.isbns_alternativos) ? existente.isbns_alternativos : [];
+    const altsNu = Array.isArray(nuevo.isbns_alternativos) ? nuevo.isbns_alternativos : [];
+    if (altsNu.length) {
+        const mapa = new Map(altsEx.map(a => [a.isbn, a]));
+        for (const a of altsNu) if (a && a.isbn && !mapa.has(a.isbn)) mapa.set(a.isbn, a);
+        if (mapa.size !== altsEx.length) set.isbns_alternativos = [...mapa.values()];
+    }
+
     set.fecha_actualizacion = new Date();
     return set;
 }

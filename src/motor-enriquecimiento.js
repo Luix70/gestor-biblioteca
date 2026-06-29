@@ -300,6 +300,22 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         documento.alertas_agente.push("Identificación incompleta (sin ISBN/ISSN o sin CDU): requiere revisión humana.");
     }
 
+    // ISBNs ALTERNATIVOS (otras ediciones/encuadernaciones leídas de los créditos/CIP): se PERSISTEN con
+    // su rol para no perderlos — el `isbn` primario es solo uno. Quedan drillables y buscables. Se
+    // construyen de los `isbns_rol` ya extraídos del fichero (fuente de archivo), excluyendo el primario.
+    {
+        const vistos = new Set([documento.isbn].filter(Boolean));
+        const alts = Array.isArray(documento.isbns_alternativos) ? [...documento.isbns_alternativos] : [];
+        for (const x of isbnsRol) {
+            const v = validarISBN(x.isbn); if (!v || vistos.has(v)) continue;
+            vistos.add(v);
+            const a = { isbn: v, rol: (x.rol && x.rol !== 'desconocido') ? x.rol : 'otro', fuente: 'cip' };
+            if (x.etiqueta) a.etiqueta = String(x.etiqueta).slice(0, 40);
+            alts.push(a);
+        }
+        if (alts.length) documento.isbns_alternativos = alts;
+    }
+
     // Limpieza 1: descartar campos internos de los lectores que no deben persistirse
     // (evita guardar la portada base64 completa o banderas de proceso en MongoDB).
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.

@@ -402,7 +402,7 @@ export function rutasPanel() {
                 const qId = q.replace(/[^0-9Xx]/g, '');
                 if (qId.length >= 8) {
                     const irx = { $regex: '^' + qId.split('').join('[\\s-]?'), $options: 'i' };
-                    or.push({ isbn: irx }, { issn: irx }, { isbn_obra: irx });
+                    or.push({ isbn: irx }, { issn: irx }, { isbn_obra: irx }, { 'isbns_alternativos.isbn': irx });
                     // El ISSN de una serie de libros vive en la COLECCIÓN (no en el libro): buscar la
                     // cabecera/serie por su ISSN y traer sus miembros.
                     const colsISSN = await db.collection('colecciones').find({ issn: irx }, { projection: { _id: 1 } }).limit(50).toArray();
