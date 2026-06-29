@@ -483,7 +483,7 @@ body.guest .admin-only{display:none!important}
         <div class="card admin-only">
           <h3>🏷️ Datos de esta alta <span class="muted" style="font-weight:400;font-size:12px">— opcional; viajan con lo que subas (el servidor trabaja menos)</span></h3>
           <div class="row">
-            <div><label>ISBN</label><input id="inIsbn" placeholder="escanéalo (lector BT) o escríbelo" autocomplete="off" inputmode="numeric"></div>
+            <div><label>ISBN</label><div style="display:flex;gap:6px"><input id="inIsbn" placeholder="escanéalo o escríbelo" autocomplete="off" inputmode="numeric" style="flex:1"><button class="btn" id="inScan" type="button" title="Escanear el código de barras con la cámara">📷</button></div></div>
             <div><label>Colección / serie</label><input id="inColeccion" placeholder="p. ej. Astérix" autocomplete="off" list="dlColecciones"></div>
             <div><label>Obra (multivolumen)</label><input id="inObra" placeholder="título de la obra" autocomplete="off"></div>
           </div>
@@ -505,6 +505,16 @@ body.guest .admin-only{display:none!important}
           <p class="muted" style="margin-top:0;font-size:12px">Arrastra o elige EPUB/PDF/imágenes/cómic/.zip/.rar/.7z. Varias imágenes del MISMO libro (portada + contra + páginas) → UN libro; varios documentos → cada uno por su lado. Se aplican los datos de arriba.</p>
           <div id="dropZone" class="dropzone">⬆️ Arrastra ficheros aquí, o <button class="btn" id="pickBtn" type="button">elegir…</button>
             <input type="file" id="fileInput" multiple style="display:none">
+          </div>
+          <div class="row" style="margin-top:10px;align-items:center;gap:8px">
+            <button class="btn" id="pickApp" type="button" title="Abre el selector del sistema: Drive, Adobe Scan, Files…">📄 Importar de otra app</button>
+            <span class="muted" style="font-size:12px">PDF o imágenes guardadas por Adobe Scan / Drive / Files. (Para escanear AHORA: hazlo en Adobe Scan y usa «Compartir → Bibliotheca».)</span>
+            <input type="file" id="fileInputApp" accept="application/pdf,image/*" multiple style="display:none">
+          </div>
+          <div class="row" id="appLaunchers" style="margin-top:8px;gap:8px;align-items:center;display:none">
+            <span class="muted" style="font-size:12px">Abrir app (luego comparte/importa el resultado):</span>
+            <button class="btn" id="openCam" type="button" title="Abrir la cámara del sistema">📷 Cámara</button>
+            <button class="btn" id="openScan" type="button" title="Abrir Adobe Scan (o instalarlo)">📄 Adobe Scan</button>
           </div>
         </div>
         <div class="card admin-only" id="camCard">
@@ -1812,10 +1822,74 @@ function loadInbox(){
   refrescarInboxUbic();   // monta los <select> al instante con el mapa en caché
   cargarUbicaciones();    // y lo refresca desde el servidor
 }
+// Escanear el código de barras (EAN-13) con la cámara y rellenar el ISBN. Usa el lector NATIVO del
+// navegador (BarcodeDetector, en Chrome Android); si no está, avisa de escribirlo a mano. El ISBN así
+// capturado viaja como autoridad → identificación por Fichero local (fast-path, sin visión IA).
+async function escanearISBN(){
+  if(!('BarcodeDetector' in window)){toast('Este navegador no trae lector de códigos (usa Chrome en Android). Escribe el ISBN.','warn');return;}
+  let stream;
+  try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});}
+  catch(e){toast('No se pudo abrir la cámara: '+e.message,'bad');return;}
+  let formatos=['ean_13','ean_8','upc_a','upc_e'];
+  try{const sop=await BarcodeDetector.getSupportedFormats();formatos=formatos.filter(f=>sop.includes(f));if(!formatos.length)formatos=['ean_13'];}catch(_){}
+  const det=new BarcodeDetector({formats:formatos});
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:480px"><h3 style="margin-top:0">📷 Escanear ISBN</h3>
+    <video id="scVid" playsinline muted style="width:100%;border-radius:10px;background:#000;max-height:60vh"></video>
+    <p class="muted" id="scMsg" style="font-size:12px;margin:8px 0 0">Enfoca el código de barras de la contraportada…</p>
+    <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn" id="scX">Cancelar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+  const vid=$('#scVid');vid.srcObject=stream;try{await vid.play();}catch(_){}
+  let activo=true;
+  const parar=()=>{activo=false;try{stream.getTracks().forEach(t=>t.stop());}catch(_){}};
+  const cerrar=()=>{parar();cerrarCmp();};
+  $('#scX').onclick=cerrar;$('#cmpScrim').onclick=cerrar;
+  const loop=async()=>{
+    if(!activo)return;
+    try{
+      const codes=await det.detect(vid);
+      const hit=(codes||[]).map(c=>String(c.rawValue||'').replace(/\D/g,'')).find(v=>/^97[89]\d{10}$/.test(v));
+      if(hit){parar();const inp=$('#inIsbn');if(inp)inp.value=hit;cerrarCmp();toast('ISBN leído: '+hit);return;}
+    }catch(_){}
+    setTimeout(loop,300);
+  };
+  loop();
+}
+// Detecta automáticamente un ISBN (EAN-13 978/979) en las IMÁGENES que se van a subir y, si el campo
+// ISBN está vacío, lo rellena → viaja como autoridad y dispara el fast-path por Fichero (sin visión IA).
+// Respeta un ISBN ya escrito/escaneado a mano. Solo imágenes (un PDF lo lee el servidor).
+async function autoDetectarISBN(files){
+  if(!('BarcodeDetector' in window))return null;
+  const inp=$('#inIsbn');if(inp&&inp.value.trim())return null;
+  const imgs=(files||[]).filter(f=>/^image\//.test(f.type||''));
+  if(!imgs.length)return null;
+  let det;try{det=new BarcodeDetector({formats:['ean_13']});}catch(_){return null;}
+  for(const f of imgs){
+    try{
+      const bmp=await createImageBitmap(f);
+      const codes=await det.detect(bmp);if(bmp.close)bmp.close();
+      const hit=(codes||[]).map(c=>String(c.rawValue||'').replace(/\D/g,'')).find(v=>/^97[89]\d{10}$/.test(v));
+      if(hit){if(inp)inp.value=hit;toast('ISBN detectado en la imagen: '+hit);return hit;}
+    }catch(_){}
+  }
+  return null;
+}
 function wireInbox(){
   const dz=$('#dropZone'),fi=$('#fileInput');
   if($('#pickBtn'))$('#pickBtn').onclick=()=>fi&&fi.click();
   if(fi)fi.onchange=()=>{if(fi.files.length)subirInbox([...fi.files]);fi.value='';};
+  // Importar de otra app (Drive, Adobe Scan, Files…) vía el selector del sistema.
+  const fa=$('#fileInputApp');
+  if($('#pickApp'))$('#pickApp').onclick=()=>fa&&fa.click();
+  if(fa)fa.onchange=()=>{if(fa.files.length)subirInbox([...fa.files]);fa.value='';};
+  // Escanear el ISBN con la cámara (código de barras EAN-13 → rellena el campo ISBN).
+  if($('#inScan'))$('#inScan').onclick=escanearISBN;
+  // Lanzadores de apps (intents Android, solo Chrome/Android; one-way: abren la app, luego se comparte/
+  // importa el resultado). En PC/iOS quedan ocultos.
+  if(/Android/i.test(navigator.userAgent)){
+    const al=$('#appLaunchers');if(al)al.style.display='';
+    if($('#openCam'))$('#openCam').onclick=()=>{location.href='intent:#Intent;action=android.media.action.STILL_IMAGE_CAMERA;end';};
+    if($('#openScan'))$('#openScan').onclick=()=>{location.href='intent://#Intent;package=com.adobe.scan.android;S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.adobe.scan.android;end';};
+  }
   if(dz){
     ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
     ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('drag');}));
@@ -1915,6 +1989,7 @@ function metaInbox(){
 // Subida → /api/ingestar (agrupar() en el server: varias imágenes = 1 libro; documentos = c/u por su lado).
 async function subirInbox(files){
   if(!files||!files.length)return;
+  await autoDetectarISBN(files);   // si hay un código de barras en las imágenes y el ISBN está vacío, rellénalo
   const fd=metaInbox();for(const f of files)fd.append('files',f,f.name);
   const out=$('#inboxResults');if(out)out.innerHTML=`<div class="muted" style="padding:14px 4px">⏳ Subiendo y catalogando ${files.length} fichero(s)…</div>`;
   try{
