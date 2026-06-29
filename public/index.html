@@ -6,6 +6,8 @@
 <title>Bibliotheca Ludoviciana · Panel</title>
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0e1116">
 <style>
 :root{
   --bg:#0e1116; --bg2:#151a22; --card:#1a212c; --card2:#202938; --line:#2a3340;
@@ -2186,7 +2188,7 @@ let estadoTimer=null;
 // Enlace profundo ?doc=<id>: lo lee una etiqueta NFC grabada por nosotros (Android Chrome) y también
 // un iPhone que abre la URL en Safari. Se captura ANTES de que autoLoginURL limpie la query, y se
 // aplica al final de arrancar() (tras autenticar) abriendo la ficha.
-let _deepDoc=null,_deepUbic=null;
+let _deepDoc=null,_deepUbic=null,_compartido=false;
 function abrirEnlaceProfundo(){
   try{history.replaceState(null,'',location.pathname);}catch(_){}
   if(_deepDoc){const id=_deepDoc;_deepDoc=null;_deepUbic=null;return verDoc(id,{volver:'search',etiqueta:'Búsqueda'});}
@@ -2194,6 +2196,24 @@ function abrirEnlaceProfundo(){
   if(_deepUbic){const{amb,est}=_deepUbic;_deepUbic=null;
     estadoBusqueda.extra={ambito:amb,estanteria:est||undefined,etiqueta:'📍 '+amb+(est?' · '+est:'')};estadoBusqueda.page=1;go('search');}
 }
+// SHARE TARGET (Task 1): al compartir ficheros a la PWA, el service worker los guarda en una Cache y
+// redirige a /?compartido=1. Aquí los recogemos, abrimos el Inbox y los subimos (con el token). Honra
+// el interruptor «Supervisado». Solo admin (subirInbox/ingestar lo exige el servidor).
+async function procesarCompartidos(){
+  if(!_compartido)return;_compartido=false;
+  if(ROL!=='admin'){toast('Solo un administrador puede dar de alta lo compartido','warn');return;}
+  if(!('caches' in window))return;
+  try{
+    const cache=await caches.open('compartidos-v1');
+    const idx=await cache.match('/__shared__/index.json');if(!idx){toast('No llegó nada que compartir','warn');return;}
+    const metas=await idx.json();const files=[];
+    for(const m of (metas||[])){const r=await cache.match('/__shared__/'+m.i);if(!r)continue;const b=await r.blob();files.push(new File([b],m.nombre||('compartido-'+m.i),{type:m.type||b.type}));}
+    for(const k of await cache.keys())await cache.delete(k);   // vaciar tras leer
+    if(files.length){go('inbox');toast(`📥 Recibido(s) ${files.length} fichero(s) compartido(s)`);subirInbox(files);}
+  }catch(e){toast('No se pudo procesar lo compartido: '+e.message,'bad');}
+}
+// Registrar el service worker (necesario para el share target + instalación como PWA). Best-effort.
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 // Rellena el desplegable de usuarios del login (sin contraseñas; de /api/usuarios).
 async function cargarUsuariosLogin(){try{const r=await fetch('/api/usuarios').then(x=>x.json());const sel=$('#lgUser');if(!sel)return;
   sel.innerHTML=(r.usuarios||[]).map(u=>`<option value="${esc(u.user)}">${esc(u.user)}${u.rol==='admin'?' · admin':''}</option>`).join('')||'<option value="">—</option>';}catch{}}
@@ -2217,7 +2237,7 @@ async function autoLoginURL(){
 }
 function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
-function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();cargarUbicaciones();go('search');abrirEnlaceProfundo();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
+function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();cargarUbicaciones();go('search');abrirEnlaceProfundo();procesarCompartidos();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
     const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.motivo||'usuario o contraseña incorrectos');
@@ -2228,7 +2248,7 @@ $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{}
 (async()=>{
   // 0) Captura los enlaces profundos (?doc=<id> de un libro, ?amb=&est= de una estantería) ANTES de que
   //    autoLoginURL limpie la query.
-  try{const qp=new URLSearchParams(location.search);_deepDoc=qp.get('doc')||null;
+  try{const qp=new URLSearchParams(location.search);_deepDoc=qp.get('doc')||null;_compartido=qp.get('compartido')==='1';
     const amb=qp.get('amb');if(amb)_deepUbic={amb,est:qp.get('est')||''};}catch(_){}
   // 1) Credenciales en la query (?u=&p=): forma robusta, atraviesa DSM/proxy. Prioritaria.
   if(await autoLoginURL())return arrancar();
