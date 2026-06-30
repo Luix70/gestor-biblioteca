@@ -515,6 +515,11 @@ body.guest .admin-only{display:none!important}
             <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inTapete"><span class="slider"></span></span>
             <span class="muted">📐 Tapete — la foto es un libro sobre la alfombrilla reglada (1 cm): mide sus dimensiones (las guarda en la ficha) y recorta+endereza la imagen para que NO se vea el tapete. Todo en el navegador, sin IA.</span>
           </label>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <button class="btn" type="button" id="inTapeteCal" title="Sube una foto del TAPETE VACÍO para fijar su color de esta sesión (sirve para cualquier color de tapete y se rehace si cambia la luz)">🎨 Calibrar tapete</button>
+            <span class="muted" id="inTapeteCalEstado" style="font-size:12px"></span>
+            <input type="file" id="inTapeteCalFile" accept="image/*" style="display:none">
+          </div>
           <datalist id="dlColecciones"></datalist>
           <datalist id="dlAmbitos"></datalist>
           <datalist id="dlEstanterias"></datalist>
@@ -1331,12 +1336,51 @@ const _dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
 // Robustez: (1) máscara verde laxa; (2) si hay poco verde → null (no hay alfombrilla); (3) flood-fill del
 // NO-verde desde los BORDES → quita la mesa/marco no verde de alrededor; (4) el LIBRO = isla no-verde
 // RODEADA de verde (no conectada al borde); (5) esquinas = extremos diagonales (x±y). Devuelve [TL,TR,BR,BL]|null.
-// Regla ÚNICA de "píxel del tapete". El tapete es un color FRÍO (verde o TEAL azulado, según luz/balance
-// de blancos): el VERDE supera al ROJO con margen y el AZUL queda cerca del verde. Eso lo distingue del
-// libro CÁLIDO (sepia/marrón/crema: rojo el mayor) y del azul puro. (Antes exigía g>=b, y con la alfombrilla
-// en teal —azul ≳ verde— la rechazaba y «no detectaba los bordes».) Excluye el gris-verde PÁLIDO claro de
-// algunas portadas (alto y poco saturado), que si no metía el recuadro dentro del libro.
-function _verdeMat(r,g,b){const mn=r<b?r:b;return (g-r)>10 && g>=(b-25) && !(g>170&&(g-mn)<g*0.18);}
+// CALIBRACIÓN OPCIONAL del tapete: una foto del tapete VACÍO fija su color de SESIÓN → funciona con
+// CUALQUIER tapete (verde, teal, verde oscuro, rojo, negro…) y bajo cualquier luz (nublado/soleado cambian
+// el balance de blancos). Se rehace en 2 s cuando cambia la luz. Persistida en localStorage.
+let _tapeteCal=null;
+function cargarTapeteCal(){try{_tapeteCal=JSON.parse(localStorage.getItem('tapete_cal')||'null');}catch(_){_tapeteCal=null;}}
+cargarTapeteCal();
+function limpiarTapeteCal(){localStorage.removeItem('tapete_cal');_tapeteCal=null;}
+// ¿El píxel coincide con el tapete calibrado? Tapete CON color → se compara la DIRECCIÓN de color (coseno),
+// invariante a sombra/brillo dentro de la sesión; tapete ACROMÁTICO (negro/gris) → baja saturación + banda
+// de brillo.
+function _coincideTapete(r,g,b,c){
+  const sat=Math.max(r,g,b)-Math.min(r,g,b);
+  if(c.crom){const np=Math.sqrt(r*r+g*g+b*b)||1; const cos=(r*c.r+g*c.g+b*c.b)/(np*c.norm);
+    return cos>0.985 && sat>=Math.max(8,c.sat*0.35);}
+  return sat<35 && Math.abs((r+g+b)-c.sum) < c.sum*0.55+60;
+}
+// Regla ÚNICA de "píxel del tapete". Si hay CALIBRACIÓN, manda. Si no, heurística: color FRÍO (verde/teal):
+// verde sobre rojo y azul cercano al verde → distingue del libro CÁLIDO (sepia/crema) y del azul puro;
+// excluye el gris-verde PÁLIDO claro de algunas portadas.
+function _verdeMat(r,g,b){
+  if(_tapeteCal) return _coincideTapete(r,g,b,_tapeteCal);
+  const mn=r<b?r:b; return (g-r)>10 && g>=(b-25) && !(g>170&&(g-mn)<g*0.18);
+}
+// Calcula el color del tapete desde una foto del tapete VACÍO (MEDIANAS por canal, robustas a la rejilla) y
+// lo guarda como calibración de sesión. Devuelve la calibración.
+async function calibrarTapete(file){
+  const img=await fileAImagen(file);
+  const maxD=600, sc=Math.min(1,maxD/Math.max(img.naturalWidth,img.naturalHeight));
+  const w=Math.max(1,Math.round(img.naturalWidth*sc)),h=Math.max(1,Math.round(img.naturalHeight*sc)),N=w*h;
+  const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);
+  try{URL.revokeObjectURL(img.src);}catch(_){}
+  const d=cv.getContext('2d').getImageData(0,0,w,h).data;
+  const hr=new Uint32Array(256),hg=new Uint32Array(256),hb=new Uint32Array(256);
+  for(let i=0;i<N;i++){hr[d[i*4]]++;hg[d[i*4+1]]++;hb[d[i*4+2]]++;}
+  const med=hh=>{let a=0;for(let v=0;v<256;v++){a+=hh[v];if(a>=N/2)return v;}return 128;};
+  const r=med(hr),g=med(hg),b=med(hb), sat=Math.max(r,g,b)-Math.min(r,g,b);
+  const cal={r,g,b,norm:Math.sqrt(r*r+g*g+b*b)||1,sum:r+g+b,sat,crom:sat>=25};
+  localStorage.setItem('tapete_cal',JSON.stringify(cal)); _tapeteCal=cal; return cal;
+}
+// Estado de la calibración bajo el botón: muestra el color fijado + enlace para quitarla (vuelve al auto).
+function pintarTapeteCalEstado(){const e=document.getElementById('inTapeteCalEstado');if(!e)return;
+  if(_tapeteCal){const c=_tapeteCal;
+    e.innerHTML=`<span style="display:inline-block;width:13px;height:13px;border-radius:3px;border:1px solid var(--line);vertical-align:middle;background:rgb(${c.r},${c.g},${c.b})"></span> calibrado (${c.crom?'color':'acromático'}) · <a class="rowlink" id="inTapeteCalClr">✕ quitar</a>`;
+    const clr=document.getElementById('inTapeteCalClr');if(clr)clr.onclick=()=>{limpiarTapeteCal();pintarTapeteCalEstado();toast('Calibración borrada (vuelve a la detección verde/teal automática)');};}
+  else e.textContent='sin calibrar · detección verde/teal automática';}
 // Fracción de píxeles de tapete (diagnóstico para calibrar): submuestrea y cuenta verdes.
 function fraccionVerde(canvas){const maxD=400,sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
   const w=Math.max(1,Math.round(canvas.width*sc)),h=Math.max(1,Math.round(canvas.height*sc)),N=w*h;
@@ -2247,6 +2291,11 @@ function wireInbox(){
   // Modo Tapete PERSISTENTE: medir + recortar el libro sobre la alfombrilla al subir.
   const tp=$('#inTapete');
   if(tp){tp.checked=localStorage.getItem('inbox_tapete')==='1';tp.onchange=()=>localStorage.setItem('inbox_tapete',tp.checked?'1':'0');}
+  // Calibración del tapete (foto del tapete vacío): fija su color de sesión (cualquier color / luz).
+  const tcb=$('#inTapeteCal'),tcf=$('#inTapeteCalFile');
+  if(tcb&&tcf){tcb.onclick=()=>tcf.click();
+    tcf.onchange=async()=>{if(tcf.files[0]){try{const c=await calibrarTapete(tcf.files[0]);toast(`Tapete calibrado: rgb(${c.r},${c.g},${c.b})${c.crom?'':' · acromático'}`);}catch(e){toast('No se pudo calibrar: '+e.message,'bad');}}tcf.value='';pintarTapeteCalEstado();};
+    pintarTapeteCalEstado();}
   // Abrir Adobe Scan (Android): intent → la app, o su página en Google Play si no se puede lanzar (one-way;
   // luego se vuelve con «Compartir → Bibliotheca»). El lanzamiento web→app no es fiable desde una PWA.
   if(/Android/i.test(navigator.userAgent)){
