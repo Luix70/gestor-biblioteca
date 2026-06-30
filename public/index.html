@@ -1685,9 +1685,21 @@ function fichaEditar(d,r,opts){
       cerrarCmp();toast('Guardado'+((res.avisos||[]).length?' · '+res.avisos.join('; '):''));
       if(sup)go('inbox');else verDoc(d._id,detalle&&detalle.ctx);
     }catch(e){$('#edErr').textContent=e.message;toast(e.message,'bad');}};
+  // Cancelar: en modo NORMAL solo cierra; en SUPERVISADO el alta acaba de insertarse, así que «Cancelar»
+  // la DESCARTA (la borra de la base; su carpeta va a la Papelera, recuperable) — sin contraseña por ser
+  // un alta reciente. Confirma para no descartar por error.
+  const onCancelar=sup?async()=>{
+    if(!confirm('¿Descartar este alta? Se borra de la base y su carpeta va a la Papelera (recuperable).'))return;
+    try{const res=await api('/documentos/'+encodeURIComponent(d._id)+'/descartar',{method:'POST',body:JSON.stringify({})});
+      if(!res.ok){toast(res.motivo||'No se pudo descartar','bad');return;}
+      cerrarCmp();toast('Alta descartada (en la Papelera)');go('inbox');
+    }catch(e){toast(e.message,'bad');}
+  }:cerrarCmp;
   // Botones duplicados arriba y abajo (no hace falta hacer scroll para Aceptar/Cancelar).
-  ['edX','edXTop'].forEach(id=>{const b=$('#'+id);if(b)b.onclick=cerrarCmp;});
+  ['edX','edXTop'].forEach(id=>{const b=$('#'+id);if(b)b.onclick=onCancelar;});
   ['edOk','edOkTop'].forEach(id=>{const b=$('#'+id);if(b)b.onclick=onGuardar;});
+  // En supervisado, clic fuera NO deja el alta en limbo: no cerramos por el scrim (usa Aceptar/Cancelar).
+  if(sup)$('#cmpScrim').onclick=null;
 }
 
 function previewArchivo(r){
@@ -2563,8 +2575,8 @@ async function subirInbox(files, extra){
     setInboxEstado('📐 Tapete: midiendo y recortando…');
     try{ const r=await recortarYMedirTapete(files); files=r.files; if(r.dims)extra.dims=r.dims;
       const pct=r.tapetePct!=null?` · tapete ${r.tapetePct}%`:'';
-      setInboxEstado(r.recortadas? (r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · tapete recortado`:`✂️ Recortado (sin medida fiable)${pct}`)
-        : `⚠️ No detecté el tapete${pct} — ¿calibrado? ¿deja margen alrededor del libro`);
+      if(r.recortadas){const m=r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · tapete recortado`:`✂️ Recortado (sin medida fiable)${pct}`;setInboxEstado(m);toast(m);}
+      else {const m=`⚠️ No detecté el tapete${pct} — ¿deja margen alrededor del libro?`;setInboxEstado(m);toast(m,'warn');}
     }catch(e){console.warn('[tapete]',e&&e.message);}
   }
   // ELEGIR PORTADA: con el switch activo y VARIAS fotos de un libro, confirmar/cambiar la portada antes de

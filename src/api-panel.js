@@ -809,6 +809,23 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // DESCARTAR un alta RECIÉN creada (botón «Cancelar» en la revisión supervisada): borra SIN contraseña
+    // pero SOLO si el documento es muy reciente (recién catalogado en este flujo de alta). Recicla a la
+    // Papelera (recuperable). Para borrar documentos ya asentados se usa /eliminar (con contraseña).
+    r.post('/documentos/:id/descartar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const t = doc.fecha_ingreso ? new Date(doc.fecha_ingreso).getTime() : 0;
+            if (!t || (Date.now() - t) > 30 * 60 * 1000)
+                return res.status(403).json({ ok: false, motivo: 'solo se descarta un alta reciente; para borrarlo usa Eliminar (con contraseña)' });
+            const r2 = await eliminarDocumento(db, doc);
+            res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // Borrado MASIVO desde la Búsqueda (solo admin, contraseña). Recicla la carpeta de cada doc a la
     // Papelera (recuperable), igual que el borrado individual. Devuelve cuántos se borraron / fallaron.
     r.post('/documentos/eliminar-lote', async (req, res) => {
