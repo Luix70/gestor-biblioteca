@@ -187,6 +187,8 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
 .selchk{position:absolute;top:6px;left:6px;z-index:4;width:18px;height:18px;cursor:pointer;accent-color:var(--acc)}
 .vol.sel{outline:2px solid var(--acc);outline-offset:-2px}
 .bulkbar{position:sticky;top:0;z-index:20;background:var(--card);border:1px solid var(--acc);border-radius:10px;padding:10px 12px;margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+/* Al paginar, dejamos hueco bajo la barra superior fija para que el destino del scroll no quede tapado. */
+#searchBulk,#searchPagerTop,#searchResults{scroll-margin-top:64px}
 .pklist{max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:9px;margin-top:8px}
 .pkitem{display:flex;gap:10px;align-items:center;padding:7px 9px;cursor:pointer;border-bottom:1px solid var(--line)}
 .pkitem:last-child{border-bottom:none}.pkitem:hover{background:var(--card2)}
@@ -1368,45 +1370,55 @@ function detectarBordesVerde(canvas){
   const up=p=>[p[0]/sc,p[1]/sc];
   return [up(tl),up(tr),up(br),up(bl)];
 }
-// AUTO-ESCALA: detecta el PASO de la rejilla del tapete (px por 1 cm) sin IA, por PERIODICIDAD:
-// perfiles de gradiente por columnas (líneas verticales) y filas (horizontales) → autocorrelación →
-// el menor lag con un máximo local fuerte = 1 celda = 1 cm. Devuelve px/cm en coords de IMAGEN COMPLETA,
-// o null (sin rejilla clara, o ejes incoherentes → usa la regla manual). La rejilla es de 1 cm.
+// AUTO-ESCALA (px por 1 cm), sin IA y ROBUSTA AL GIRO DEL TAPETE. No basta proyectar por filas/columnas:
+// si la rejilla está inclinada, una línea se desparrama por muchos píxeles y se pierde la periodicidad. En su
+// lugar: (1) histograma de orientación del gradiente sobre el tapete → ángulo APROXIMADO de la rejilla;
+// (2) búsqueda fina ±8° proyectando PERPENDICULAR a las líneas (todas las paralelas caen en el mismo bin →
+// pico nítido) y exigiendo que los dos ejes ⟂ coincidan (rejilla cuadrada); el periodo = 1 celda = 1 cm.
+// Devuelve px/cm en coords de IMAGEN COMPLETA, o null (sin rejilla clara → regla manual). Rejilla de 1 cm.
 function detectarRejillaPxCm(canvas){
-  const maxD=1100, sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
+  const PI=Math.PI, maxD=1100, sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
   const w=Math.max(1,Math.round(canvas.width*sc)), h=Math.max(1,Math.round(canvas.height*sc)), N=w*h;
   const t=document.createElement('canvas');t.width=w;t.height=h;t.getContext('2d').drawImage(canvas,0,0,w,h);
   const d=t.getContext('2d').getImageData(0,0,w,h).data;
   const gris=new Float32Array(N), verde=new Uint8Array(N); let nVerde=0;
   for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];gris[i]=0.299*r+0.587*g+0.114*b;if(_verdeMat(r,g,b)){verde[i]=1;nVerde++;}}
   if(nVerde < N*0.10) return null;                       // poca alfombrilla a la vista
-  // Gradiente SOLO sobre el tapete (verde): captura las líneas de la rejilla, NO los bordes del libro.
-  const colp=new Float32Array(w), rowp=new Float32Array(h);
-  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;if(!verde[i])continue;colp[x]+=Math.abs(gris[i+1]-gris[i-1]);rowp[y]+=Math.abs(gris[i+w]-gris[i-w]);}
-  // Periodo dominante = mejor MÁXIMO LOCAL de la autocorrelación (NO el global: el lóbulo central decae de
-  // forma monótona desde lag 0 y su borde podía ser el máximo global → daba un periodo minúsculo y medidas
-  // gigantes). Un máximo local salta ese lóbulo y cae en el pico del periodo real. Devuelve {L,conf}.
+  // Píxeles de TAPETE con gradiente significativo → arrays compactos (x,y,gx,gy) + histograma de orientación.
+  const PX=new Int16Array(N),PY=new Int16Array(N),GX=new Float32Array(N),GY=new Float32Array(N); let m=0;
+  const NB=180, hist=new Float32Array(NB);
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;if(!verde[i])continue;
+    const gx=gris[i+1]-gris[i-1], gy=gris[i+w]-gris[i-w]; if(Math.abs(gx)+Math.abs(gy)<10)continue;
+    PX[m]=x;PY[m]=y;GX[m]=gx;GY[m]=gy;m++;
+    let an=Math.atan2(gy,gx);an=((an%PI)+PI)%PI;hist[Math.min(NB-1,(an/PI*NB)|0)]+=Math.hypot(gx,gy);}
+  if(m < 200) return null;
+  const sm=new Float32Array(NB);for(let i=0;i<NB;i++){let s=0;for(let k=-2;k<=2;k++)s+=hist[(i+k+NB)%NB];sm[i]=s;}
+  let pk=0;for(let i=0;i<NB;i++)if(sm[i]>sm[pk])pk=i; const phi0=(pk+0.5)/NB*PI; // ángulo aproximado
+  // Periodo dominante = mejor MÁXIMO LOCAL de la autocorrelación (salta el lóbulo central). {L,conf}.
   const periodo=sig=>{
-    const n=sig.length; let m=0;for(let i=0;i<n;i++)m+=sig[i];m/=n;
-    const s=new Float32Array(n);let ac0=0;for(let i=0;i<n;i++){s[i]=sig[i]-m;ac0+=s[i]*s[i];}
+    const n=sig.length; let mn=0;for(let i=0;i<n;i++)mn+=sig[i];mn/=n;
+    const s=new Float32Array(n);let ac0=0;for(let i=0;i<n;i++){s[i]=sig[i]-mn;ac0+=s[i]*s[i];}
     if(ac0<=0)return {L:0,conf:0};
-    const minL=Math.max(8,Math.round(n*0.01)), maxL=Math.floor(n/3);
-    const ac=new Float32Array(maxL+2);
+    const minL=Math.max(8,Math.round(n*0.01)), maxL=Math.floor(n/3); const ac=new Float32Array(maxL+2);
     for(let L=minL-1;L<=maxL+1&&L<n;L++){let a=0;for(let i=0;i+L<n;i++)a+=s[i]*s[i+L];ac[L]=a/ac0;}
-    let best=0,bestL=0;
-    for(let L=minL;L<=maxL;L++)if(ac[L]>ac[L-1]&&ac[L]>=ac[L+1]&&ac[L]>best){best=ac[L];bestL=L;}
+    let best=0,bestL=0;for(let L=minL;L<=maxL;L++)if(ac[L]>ac[L-1]&&ac[L]>=ac[L+1]&&ac[L]>best){best=ac[L];bestL=L;}
     return {L:bestL,conf:best};
   };
-  // Dos rutas de aceptación: (1) AMBOS ejes coinciden (≤18%) → fiable aunque la correlación sea floja —el
-  // tapete suele verse poco (frame fino) y la coincidencia X≈Y es de por sí la prueba; (2) un solo eje con
-  // correlación FUERTE. Si no, null → regla manual.
-  const a=periodo(colp), b=periodo(rowp); let pasoDs=0;
-  const coinc = a.L&&b.L&&Math.abs(a.L-b.L)/Math.min(a.L,b.L)<0.18;
-  if(coinc && Math.min(a.conf,b.conf)>=0.10) pasoDs=(a.L+b.L)/2;
-  else { const mejor=a.conf>=b.conf?a:b; if(mejor.L&&mejor.conf>=0.28) pasoDs=mejor.L; }
-  const pxcm=pasoDs?pasoDs/sc:0;                          // px por cm en imagen completa
-  try{window._rejillaDbg={cx:a.L,cc:+a.conf.toFixed(2),rx:b.L,rc:+b.conf.toFixed(2),sc:+sc.toFixed(2),pxcm:+pxcm.toFixed(1)};}catch(_){} // diag
-  if(!pasoDs) return null;
+  // Perfil proyectado sobre la dirección dir (normal a una familia de líneas) → periodo del paso de rejilla.
+  const periodoDir=dir=>{const cd=Math.cos(dir),sd=Math.sin(dir);
+    let tmin=Infinity,tmax=-Infinity; for(let k=0;k<m;k++){const tt=PX[k]*cd+PY[k]*sd;if(tt<tmin)tmin=tt;if(tt>tmax)tmax=tt;}
+    const n=Math.max(8,Math.ceil(tmax-tmin)+1); const P=new Float32Array(n);
+    for(let k=0;k<m;k++){const wgt=Math.abs(GX[k]*cd+GY[k]*sd);if(wgt<=0)continue;const bi=(PX[k]*cd+PY[k]*sd-tmin)|0;if(bi>=0&&bi<n)P[bi]+=wgt;}
+    return periodo(P);};
+  // Búsqueda fina ±8° alrededor de phi0: ejes ⟂ deben coincidir (rejilla cuadrada); maximiza min(conf).
+  let best={s:-1,a:null,b:null,dir:phi0};
+  for(let dg=-8;dg<=8;dg+=0.5){const dir=phi0+dg*PI/180; const a=periodoDir(dir), b=periodoDir(dir+PI/2);
+    const ok=a.L&&b.L&&Math.abs(a.L-b.L)/Math.min(a.L,b.L)<0.15; const s=ok?Math.min(a.conf,b.conf):0;
+    if(s>best.s)best={s,a,b,dir};}
+  const pasoDs=(best.a&&best.b)?(best.a.L+best.b.L)/2:0; const pxcm=pasoDs?pasoDs/sc:0;
+  const angDeg=(((best.dir*180/PI)%90)+90)%90;
+  try{window._rejillaDbg={ang:+angDeg.toFixed(1),cx:best.a?best.a.L:0,cc:best.a?+best.a.conf.toFixed(2):0,rx:best.b?best.b.L:0,rc:best.b?+best.b.conf.toFixed(2):0,sc:+sc.toFixed(2),pxcm:+pxcm.toFixed(1)};}catch(_){}
+  if(best.s < 0.18) return null;                          // sin rejilla clara → regla manual
   return (pxcm>3&&isFinite(pxcm))?pxcm:null;
 }
 // Editor de UNA imagen: rotar 90°, recortar (rect) y corregir PERSPECTIVA (4 esquinas → rectángulo).
@@ -1547,7 +1559,7 @@ function medirDimensiones(id, imagenes){
     const soltar=()=>{drag=null;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
     $('#mdCm').oninput=()=>{cm=parseFloat($('#mdCm').value)||0;pxcmAuto=null;/* la regla manual manda */render();};
     $('#mdAutoMed').onclick=()=>{const {q,pxcm,dims,ok,tmp}=intentarAuto();
-      const dg=window._rejillaDbg; const dbg=dg?` · X[${dg.cx}|${dg.cc}] Y[${dg.rx}|${dg.rc}] sc${dg.sc} ${dg.pxcm}px/cm`:'';
+      const dg=window._rejillaDbg; const dbg=dg?` · ${dg.ang}° X[${dg.cx}|${dg.cc}] Y[${dg.rx}|${dg.rc}] sc${dg.sc} ${dg.pxcm}px/cm`:'';
       try{console.log('AutoMedir',{libro:!!q,pxcm,dims,dbg:dg});}catch(_){}
       if(ok){toast('Auto: rejilla '+pxcm.toFixed(1).replace('.',',')+' px/cm'+dbg);return;}
       if(pxcm&&dims){toast(`Rejilla DUDOSA → ${dims.W.toFixed(0)}×${dims.H.toFixed(0)} cm absurdo; mide a mano${dbg}`,'warn');return;}
@@ -2000,7 +2012,9 @@ function pintarBusqueda(r){
   // Paginación ARRIBA y ABAJO de los thumbnails. Al cambiar de página, desliza hasta el primer resultado.
   const pagerHtml=tp>1?`<button class="btn pgPrev" ${p<=1?'disabled':''}>‹ Anterior</button><span class="muted">Página ${p} de ${tp}</span><button class="btn pgNext" ${p>=tp?'disabled':''}>Siguiente ›</button>`:'';
   $('#searchPager').innerHTML=pagerHtml; if($('#searchPagerTop'))$('#searchPagerTop').innerHTML=pagerHtml;
-  const irA=async np=>{await buscarCatalogo(np);const a=$('#searchPagerTop')||$('#searchResults');if(a)a.scrollIntoView({behavior:'smooth',block:'start'});};
+  const irA=async np=>{await buscarCatalogo(np);
+    const sb=$('#searchBulk');const a=(sb&&sb.textContent.trim())?sb:($('#searchPagerTop')||$('#searchResults'));
+    if(a)a.scrollIntoView({behavior:'smooth',block:'start'});}; // muestra la barra «seleccionar todos» (y la nav fija)
   ['#searchPagerTop','#searchPager'].forEach(sel=>{const c=$(sel);if(!c)return;
     const pv=c.querySelector('.pgPrev'),nx=c.querySelector('.pgNext');
     if(pv&&!pv.disabled)pv.onclick=()=>irA(p-1); if(nx&&!nx.disabled)nx.onclick=()=>irA(p+1);});
