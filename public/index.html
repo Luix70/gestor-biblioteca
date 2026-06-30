@@ -523,8 +523,10 @@ body.guest .admin-only{display:none!important}
           </label>
           <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <button class="btn" type="button" id="inTapeteCal" title="Sube una foto del TAPETE VACÍO para fijar su color de esta sesión (sirve para cualquier color de tapete y se rehace si cambia la luz)">🎨 Calibrar tapete</button>
+            <button class="btn" type="button" id="inTapeteTest" title="Sube una foto del LIBRO sobre el tapete para VER qué considera tapete (máscara roja) y el % detectado">🔍 Probar</button>
             <span class="muted" id="inTapeteCalEstado" style="font-size:12px"></span>
             <input type="file" id="inTapeteCalFile" accept="image/*" style="display:none">
+            <input type="file" id="inTapeteTestFile" accept="image/*" style="display:none">
           </div>
           <label style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
             <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inPortada" checked><span class="slider"></span></span>
@@ -1397,6 +1399,26 @@ function pintarTapeteCalEstado(){const e=document.getElementById('inTapeteCalEst
     e.innerHTML=`<span style="display:inline-block;width:13px;height:13px;border-radius:3px;border:1px solid var(--line);vertical-align:middle;background:rgb(${c.r},${c.g},${c.b})"></span> calibrado (${c.crom?'color':'acromático'}) · <a class="rowlink" id="inTapeteCalClr">✕ quitar</a>`;
     const clr=document.getElementById('inTapeteCalClr');if(clr)clr.onclick=()=>{limpiarTapeteCal();pintarTapeteCalEstado();toast('Calibración borrada (vuelve a la detección verde/teal automática)');};}
   else e.textContent='sin calibrar · detección verde/teal automática';}
+// DIAGNÓSTICO: pinta en ROJO lo que se considera TAPETE sobre una foto (el libro debe quedar SIN teñir y
+// rodeado de rojo). Muestra el % de tapete y la calibración activa. Sirve para ver de un vistazo si el color
+// del tapete se reconoce y si el libro se separa bien.
+async function verMascaraTapete(file){
+  const img=await fileAImagen(file);
+  const maxD=680, sc=Math.min(1,maxD/Math.max(img.naturalWidth,img.naturalHeight));
+  const w=Math.max(1,Math.round(img.naturalWidth*sc)),h=Math.max(1,Math.round(img.naturalHeight*sc)),N=w*h;
+  const cv=document.createElement('canvas');cv.width=w;cv.height=h;const ctx=cv.getContext('2d');ctx.drawImage(img,0,0,w,h);
+  try{URL.revokeObjectURL(img.src);}catch(_){}
+  const im=ctx.getImageData(0,0,w,h),d=im.data;let nv=0;
+  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];if(_verdeMat(r,g,b)){nv++;d[i*4]=255;d[i*4+1]=40;d[i*4+2]=40;}}
+  ctx.putImageData(im,0,0);
+  const pct=Math.round(nv/N*100), url=cv.toDataURL('image/jpeg',0.85), c=_tapeteCal;
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:520px;max-height:92vh;overflow:auto"><h3 style="margin-top:0">🔍 Máscara del tapete</h3>
+    <p class="muted" style="font-size:12px;margin:4px 0 8px">En ROJO lo que se considera TAPETE. El libro debe quedar SIN teñir y rodeado de rojo. Tapete: <b>${pct}%</b> · ${c?`calibrado tono ${Math.round(c.h)}° sat ${(c.s||0).toFixed(2)}`:'sin calibrar (heurística verde/teal)'}</p>
+    <img src="${url}" style="width:100%;border-radius:8px;border:1px solid var(--line)">
+    <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn" id="vmX">Cerrar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+  const x=$('#vmX');if(x)x.onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
+}
 // Fracción de píxeles de tapete (diagnóstico para calibrar): submuestrea y cuenta verdes.
 function fraccionVerde(canvas){const maxD=400,sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
   const w=Math.max(1,Math.round(canvas.width*sc)),h=Math.max(1,Math.round(canvas.height*sc)),N=w*h;
@@ -2359,6 +2381,9 @@ function wireInbox(){
   if(tcb&&tcf){tcb.onclick=()=>tcf.click();
     tcf.onchange=async()=>{if(tcf.files[0]){try{const c=await calibrarTapete(tcf.files[0]);toast(`Tapete calibrado: rgb(${c.r},${c.g},${c.b})${c.crom?'':' · acromático'}`);}catch(e){toast('No se pudo calibrar: '+e.message,'bad');}}tcf.value='';pintarTapeteCalEstado();};
     pintarTapeteCalEstado();}
+  const ttb=$('#inTapeteTest'),ttf=$('#inTapeteTestFile');
+  if(ttb&&ttf){ttb.onclick=()=>ttf.click();
+    ttf.onchange=async()=>{if(ttf.files[0]){try{await verMascaraTapete(ttf.files[0]);}catch(e){toast('No se pudo: '+e.message,'bad');}}ttf.value='';};}
   // Abrir Adobe Scan (Android): intent → la app, o su página en Google Play si no se puede lanzar (one-way;
   // luego se vuelve con «Compartir → Bibliotheca»). El lanzamiento web→app no es fiable desde una PWA.
   if(/Android/i.test(navigator.userAgent)){
@@ -2575,7 +2600,7 @@ async function subirInbox(files, extra){
     setInboxEstado('📐 Tapete: midiendo y recortando…');
     try{ const r=await recortarYMedirTapete(files); files=r.files; if(r.dims)extra.dims=r.dims;
       const pct=r.tapetePct!=null?` · tapete ${r.tapetePct}%`:'';
-      if(r.recortadas){const m=r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · tapete recortado`:`✂️ Recortado (sin medida fiable)${pct}`;setInboxEstado(m);toast(m);}
+      if(r.recortadas){const m=r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · recortado${pct}`:`✂️ Recortado (sin medida fiable)${pct}`;setInboxEstado(m);toast(m);}
       else {const m=`⚠️ No detecté el tapete${pct} — ¿deja margen alrededor del libro?`;setInboxEstado(m);toast(m,'warn');}
     }catch(e){console.warn('[tapete]',e&&e.message);}
   }
