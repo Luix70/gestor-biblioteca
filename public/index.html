@@ -1513,7 +1513,21 @@ function medirDimensiones(id, imagenes){
       ctx.save();ctx.strokeStyle='#28d9a8';ctx.lineWidth=2;ctx.fillStyle='rgba(40,217,168,.10)';ctx.beginPath();quad.forEach((p,k)=>{const v=W2V(p);k?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]);});ctx.closePath();ctx.fill();ctx.stroke();quad.forEach(p=>aro(p,'rgba(40,217,168,.92)'));
       ctx.strokeStyle='#1ba3ff';ctx.lineWidth=3;const a=W2V(regla[0]),b=W2V(regla[1]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();regla.forEach(p=>aro(p,'rgba(27,163,255,.95)'));ctx.restore();
       const r=calc();$('#mdOut').textContent=r?`≈ ${r.W.toFixed(1).replace('.',',')} × ${r.H.toFixed(1).replace('.',',')} cm${pxcmAuto?' · auto':''}`:''; };
-    render();
+    // Auto-detectar (libro + escala de rejilla). Si la escala es plausible (4-50 cm): fija pxcmAuto Y
+    // CORRIGE el "Regla = 10" por defecto a la medida REAL que cubre la regla actual. Reutilizado en carga y
+    // en el botón. Devuelve {q,pxcm,dims,ok,tmp} para los avisos.
+    const intentarAuto=()=>{
+      const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);
+      const mX=iw*0.03,mY=ih*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+      const q=detectarBordesVerde(tmp); if(q)quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);
+      const pxcm=detectarRejillaPxCm(tmp);
+      let dims=null; if(pxcm&&q){const W=(_dist(quad[0],quad[1])+_dist(quad[3],quad[2]))/2/pxcm,H=(_dist(quad[0],quad[3])+_dist(quad[1],quad[2]))/2/pxcm;dims={W,H};}
+      const ok=!!dims&&dims.W>=4&&dims.W<=50&&dims.H>=4&&dims.H<=50;
+      if(ok){pxcmAuto=pxcm;cm=+(_dist(regla[0],regla[1])/pxcm).toFixed(1);const ci=$('#mdCm');if(ci)ci.value=String(cm);} else pxcmAuto=null;
+      render(); return {q,pxcm,dims,ok,tmp};
+    };
+    // Al CARGAR: si hay tapete, auto-mide (silencioso si falla). Foto normal sin tapete → no cambia nada.
+    {const a0=intentarAuto(); if(a0.ok)toast(`Auto: ${a0.dims.W.toFixed(1).replace('.',',')} × ${a0.dims.H.toFixed(1).replace('.',',')} cm — ajusta si hace falta`);}
     let _rc=null;const pos=ev=>{const rc=_rc||c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);}; // _rc cacheado en pointerdown (evita reflow por evento)
     c.addEventListener('pointerdown',ev=>{ev.preventDefault();_rc=c.getBoundingClientRect();const p=pos(ev);let best=null,bd=34/escala;
       quad.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'q',i};}});
@@ -1521,15 +1535,7 @@ function medirDimensiones(id, imagenes){
     c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);const mX=iw*0.03,mY=ih*0.03;x=Math.max(mX,Math.min(iw-mX,x));y=Math.max(mY,Math.min(ih-mY,y));if(drag.s==='r')pxcmAuto=null;/* tocar la regla → escala manual */(drag.s==='q'?quad:regla)[drag.i]=[x,y];pedir();});
     const soltar=()=>{drag=null;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
     $('#mdCm').oninput=()=>{cm=parseFloat($('#mdCm').value)||0;pxcmAuto=null;/* la regla manual manda */render();};
-    $('#mdAutoMed').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);
-      const mX=iw*0.03,mY=ih*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
-      const q=detectarBordesVerde(tmp); if(q)quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);
-      const pxcm=detectarRejillaPxCm(tmp);
-      // PLAUSIBILIDAD: con el quad detectado, ¿da un tamaño de libro razonable (4-50 cm)? Si no, NO aplicar
-      // la escala (era basura, p.ej. 72x95) → regla manual; así nunca se guarda una medida absurda.
-      let dims=null; if(pxcm&&q){const W=(_dist(quad[0],quad[1])+_dist(quad[3],quad[2]))/2/pxcm,H=(_dist(quad[0],quad[3])+_dist(quad[1],quad[2]))/2/pxcm;dims={W,H};}
-      const ok = !!dims && dims.W>=4&&dims.W<=50&&dims.H>=4&&dims.H<=50;
-      pxcmAuto = ok?pxcm:null; render();
+    $('#mdAutoMed').onclick=()=>{const {q,pxcm,dims,ok,tmp}=intentarAuto();
       const dg=window._rejillaDbg; const dbg=dg?` · X[${dg.cx}|${dg.cc}] Y[${dg.rx}|${dg.rc}] sc${dg.sc} ${dg.pxcm}px/cm`:'';
       try{console.log('AutoMedir',{libro:!!q,pxcm,dims,dbg:dg});}catch(_){}
       if(ok){toast('Auto: rejilla '+pxcm.toFixed(1).replace('.',',')+' px/cm'+dbg);return;}
