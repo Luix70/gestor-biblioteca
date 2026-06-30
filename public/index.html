@@ -616,7 +616,7 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='nfc-badge-esquina · 2026-06-30';   // marca de versión (verificar despliegue)
+const APP_BUILD='nfc-badge-todas-tarjetas · 2026-06-30';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1032,6 +1032,8 @@ async function shelfEliminar(kind){
 
 // ── detalle: obra → tomos → ficha (drill-down clicable, mobile-first) ──
 const recortar=(s,n)=>{s=String(s||'');return s.length>n?s.slice(0,n-1)+'…':s;};
+// Distintivo 📶 (etiqueta NFC vinculada) para superponer en cualquier miniatura/portada de un documento.
+function nfcBadge(d){return (d&&d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid))?'<span class="nfctag" title="Etiqueta NFC vinculada">📶</span>':'';}
 function mostrarDetalle(){$$('.page').forEach(s=>s.classList.remove('on'));$('#p-detalle').classList.add('on');
   $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');window.scrollTo(0,0);}
 
@@ -1044,7 +1046,7 @@ function tomoCard(d,numero,falta){
   if(falta)return `<div class="vol falta"><div class="cov"><div class="ph">∅</div></div><div class="meta"><div class="n">Tomo ${numero}</div><div class="t">falta</div></div></div>`;
   const cov=d.portada?`<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
   const fmt=(d.formatos||[]).slice(0,3).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">Tomo ${numero??'?'} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.volumen_titulo||d.titulo||'—')}</div></div></div>`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">Tomo ${numero??'?'} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.volumen_titulo||d.titulo||'—')}</div></div></div>`;
 }
 
 function pintarObra(r){
@@ -1075,7 +1077,7 @@ async function verColeccion(id){detalle={tipo:'coleccion',id};mostrarDetalle();a
 function miembroCard(d,etiqueta){
   const cov=d.portada?`<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`:'<div class="ph">📕</div>';
   const fmt=(d.formatos||[]).slice(0,3).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(etiqueta||'')} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo||'—')}</div></div></div>`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${esc(etiqueta||'')} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo||'—')}</div></div></div>`;
 }
 
 function pintarColeccion(r){
@@ -1190,7 +1192,7 @@ function pintarDoc(r,ctx){
   const clas=(r.clasificaciones||[]).length?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:6px">Clasificación</div><table class="clastab">${r.clasificaciones.map(x=>filaClas(x)).join('')}</table></div>`:'';
   const alertas=(d.alertas_agente||[]).length?`<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">Notas del agente (${d.alertas_agente.length})</summary><div style="margin-top:6px">${d.alertas_agente.map(a=>`<div class="muted" style="font-size:12px">• ${esc(a)}</div>`).join('')}</div></details>`:'';
   const imgs=(r.imagenes&&r.imagenes.length)?r.imagenes:(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]);
-  const nfcOv=(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid))?`<span class="nfctag" title="Etiqueta NFC vinculada">📶</span>`:'';
+  const nfcOv=nfcBadge(d);
   const carrusel=imgs.length?`<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:`<div class="filebox" style="position:relative">${nfcOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
   const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
     <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.naturaleza?' · '+esc(d.naturaleza):''}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div>
@@ -2158,7 +2160,7 @@ function docCard(d){
   const fmt=(d.formatos||[]).slice(0,2).map(f=>`<span class="fmt">${esc(f)}</span>`).join('');
   const sub=(d.autores&&d.autores.length?d.autores.slice(0,2).join(', '):'')||(d.año_edicion?String(d.año_edicion):'')||d.isbn||'—';
   const chk=`<input type="checkbox" class="selchk admin-only" data-id="${esc(d._id)}" title="Seleccionar"${selDocs.has(d._id)?' checked':''}>`;
-  const nfcTag=(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid))?`<span class="nfctag" title="Etiqueta NFC vinculada">📶</span>`:'';
+  const nfcTag=nfcBadge(d);
   return `<div class="vol${selDocs.has(d._id)?' sel':''}" data-doc="${esc(d._id)}">${chk}<div class="cov">${cov}${nfcTag}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div></div></div>`;
 }
 function pintarBusqueda(r){
