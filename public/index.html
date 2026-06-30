@@ -603,6 +603,8 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const APP_BUILD='tapete-forma+probar-quad · 2026-06-30';   // marca de versión (verificar despliegue)
+try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
 let FUENTES=[],sanCtx=null; // fuentes "buscar copia" (cacheadas) + depósito en curso de saneamiento
@@ -1404,16 +1406,24 @@ function pintarTapeteCalEstado(){const e=document.getElementById('inTapeteCalEst
 // del tapete se reconoce y si el libro se separa bien.
 async function verMascaraTapete(file){
   const img=await fileAImagen(file);
-  const maxD=680, sc=Math.min(1,maxD/Math.max(img.naturalWidth,img.naturalHeight));
-  const w=Math.max(1,Math.round(img.naturalWidth*sc)),h=Math.max(1,Math.round(img.naturalHeight*sc)),N=w*h;
+  const iw=img.naturalWidth, ih=img.naturalHeight;
+  // Detección REAL (la misma del recorte) sobre tamaño natural → contorno + medida.
+  const work=document.createElement('canvas');work.width=iw;work.height=ih;work.getContext('2d').drawImage(img,0,0);
+  const quad=detectarBordesVerde(work), pxcm=detectarRejillaPxCm(work);
+  let dims=null; if(quad&&pxcm){const W=(_dist(quad[0],quad[1])+_dist(quad[3],quad[2]))/2/pxcm,H=(_dist(quad[0],quad[3])+_dist(quad[1],quad[2]))/2/pxcm;dims={W,H};}
+  const maxD=680, sc=Math.min(1,maxD/Math.max(iw,ih));
+  const w=Math.max(1,Math.round(iw*sc)),h=Math.max(1,Math.round(ih*sc)),N=w*h;
   const cv=document.createElement('canvas');cv.width=w;cv.height=h;const ctx=cv.getContext('2d');ctx.drawImage(img,0,0,w,h);
   try{URL.revokeObjectURL(img.src);}catch(_){}
   const im=ctx.getImageData(0,0,w,h),d=im.data;let nv=0;
-  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];if(_verdeMat(r,g,b)){nv++;d[i*4]=255;d[i*4+1]=40;d[i*4+2]=40;}}
+  for(let i=0;i<N;i++){if(_verdeMat(d[i*4],d[i*4+1],d[i*4+2])){nv++;d[i*4]=255;d[i*4+1]=40;d[i*4+2]=40;}}
   ctx.putImageData(im,0,0);
+  if(quad){ctx.strokeStyle='#28ff90';ctx.lineWidth=3;ctx.beginPath();quad.forEach((p,k)=>{const X=p[0]*sc,Y=p[1]*sc;k?ctx.lineTo(X,Y):ctx.moveTo(X,Y);});ctx.closePath();ctx.stroke();
+    quad.forEach(p=>{ctx.beginPath();ctx.arc(p[0]*sc,p[1]*sc,5,0,7);ctx.fillStyle='#28ff90';ctx.fill();});}
   const pct=Math.round(nv/N*100), url=cv.toDataURL('image/jpeg',0.85), c=_tapeteCal;
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:520px;max-height:92vh;overflow:auto"><h3 style="margin-top:0">🔍 Máscara del tapete</h3>
-    <p class="muted" style="font-size:12px;margin:4px 0 8px">En ROJO lo que se considera TAPETE. El libro debe quedar SIN teñir y rodeado de rojo. Tapete: <b>${pct}%</b> · ${c?`calibrado tono ${Math.round(c.h)}° sat ${(c.s||0).toFixed(2)}`:'sin calibrar (heurística verde/teal)'}</p>
+  const medida=dims?`${dims.W.toFixed(1).replace('.',',')}×${dims.H.toFixed(1).replace('.',',')} cm`:(quad?'libro ✓ (rejilla ✗)':'libro ✗');
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:520px;max-height:92vh;overflow:auto"><h3 style="margin-top:0">🔍 Probar tapete</h3>
+    <p class="muted" style="font-size:12px;margin:4px 0 8px">ROJO = tapete · contorno VERDE = libro detectado (debe ceñirse al libro). Tapete <b>${pct}%</b> · <b>${medida}</b> · ${c?`tono ${Math.round(c.h)}° sat ${(c.s||0).toFixed(2)}`:'sin calibrar'}</p>
     <img src="${url}" style="width:100%;border-radius:8px;border:1px solid var(--line)">
     <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn" id="vmX">Cerrar</button></div></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
