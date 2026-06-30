@@ -2725,17 +2725,26 @@ async function leerNFC(){
   const out=$('#nfcOut');if(out)out.textContent='Acerca la etiqueta…';
   try{
     const reader=new NDEFReader();await reader.scan();
-    reader.onreading=ev=>{
+    reader.onreading=async ev=>{
       let url='',txt='';
       for(const rec of ev.message.records){try{
         const val=(rec.recordType==='text'||rec.recordType==='url')?new TextDecoder(rec.encoding||'utf-8').decode(rec.data):'';
-        if(rec.recordType==='url'&&!url)url=val; else if(rec.recordType==='text'&&!txt)txt=val;
+        if(rec.recordType==='url'&&!url)url=val; else if(rec.recordType==='text'&&!txt&&/^BIB1:/.test(val))txt=val; else if(rec.recordType==='text'&&!txt)txt=val;
       }catch(_){}}
-      // ¿Etiqueta nuestra? URL ?doc=<id> → ficha (si hay conexión). Si no, datos OFFLINE de la etiqueta.
+      // ¿Etiqueta nuestra? URL ?doc=<id>. Se INTENTA la ficha online (no basta navigator.onLine: el móvil
+      // puede tener red pero NO alcanzar el NAS). Si el servidor no responde, se cae a los DATOS OFFLINE.
       const id=docIdDeURL(url), off=_parseOffline(txt);
-      if(id&&navigator.onLine){if(out)out.textContent='Abriendo ficha…';verDoc(id,{volver:'inbox',etiqueta:'Inbox'});return;}
-      if(off){if(out)out.textContent='';mostrarOfflineNFC(off);return;}        // sin conexión → tarjeta offline
-      if(id){if(out)out.textContent='Abriendo ficha…';verDoc(id,{volver:'inbox',etiqueta:'Inbox'});return;}
+      if(id){
+        if(out)out.textContent='Conectando con la ficha…';
+        let ok=false;
+        try{const ctrl=new AbortController(),to=setTimeout(()=>ctrl.abort(),4000);
+          const r=await fetch('/api/documentos/'+encodeURIComponent(id),{headers:TOKEN?{Authorization:'Bearer '+TOKEN}:{},signal:ctrl.signal});
+          clearTimeout(to);ok=r.ok;}catch(_){ok=false;}
+        if(ok){if(out)out.textContent='';verDoc(id,{volver:'inbox',etiqueta:'Inbox'});return;}
+        if(off){if(out)out.textContent='📴 Sin conexión con el servidor — datos de la etiqueta:';mostrarOfflineNFC(off);return;}
+        if(out)out.textContent='Sin conexión con el servidor y la etiqueta no trae datos offline.';return;
+      }
+      if(off){if(out)out.textContent='';mostrarOfflineNFC(off);return;}        // etiqueta sin URL pero con datos
       const q=(txt||url||'').trim();
       if(q){if(out)out.innerHTML=`Leído: <b class="mono">${esc(q)}</b>`;go('search');const inp=$('#sqQ');if(inp){inp.value=q;buscarCatalogo(1);}}
       else if(out)out.textContent='Etiqueta sin texto legible.';
