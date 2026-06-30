@@ -1350,27 +1350,31 @@ const _dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
 // CUALQUIER tapete (verde, teal, verde oscuro, rojo, negro…) y bajo cualquier luz (nublado/soleado cambian
 // el balance de blancos). Se rehace en 2 s cuando cambia la luz. Persistida en localStorage.
 let _tapeteCal=null;
-function cargarTapeteCal(){try{_tapeteCal=JSON.parse(localStorage.getItem('tapete_cal')||'null');}catch(_){_tapeteCal=null;}}
+// HSV (h en grados, s en 0..1) — el TONO (hue) identifica el color del tapete de forma robusta a la luz y
+// distingue p.ej. el ROSA (~343°) del crema/madera CÁLIDOS (~30-45°), que el coseno-RGB confundía.
+function _rgb2hs(r,g,b){const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0;
+  if(d>0){if(mx===r)h=(((g-b)/d)%6+6)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h*=60;}
+  return {h,s:mx>0?d/mx:0,mx};}
+function _normCal(c){if(c&&c.h===undefined&&c.r!==undefined){const o=_rgb2hs(c.r,c.g,c.b);c.h=o.h;c.s=o.s;c.crom=o.s>=0.12;c.sum=c.sum||(c.r+c.g+c.b);}return c;}
+function cargarTapeteCal(){try{_tapeteCal=_normCal(JSON.parse(localStorage.getItem('tapete_cal')||'null'));}catch(_){_tapeteCal=null;}}
 cargarTapeteCal();
 function limpiarTapeteCal(){localStorage.removeItem('tapete_cal');_tapeteCal=null;}
-// ¿El píxel coincide con el tapete calibrado? Tapete CON color → se compara la DIRECCIÓN de color (coseno),
-// invariante a sombra/brillo dentro de la sesión; tapete ACROMÁTICO (negro/gris) → baja saturación + banda
-// de brillo.
+// ¿El píxel coincide con el tapete calibrado? Tapete CON color → mismo TONO (±30°) y con saturación
+// suficiente (excluye el libro/mesa desaturados aunque compartan zona de color); ACROMÁTICO (negro/gris) →
+// baja saturación + brillo en banda.
 function _coincideTapete(r,g,b,c){
-  const sat=Math.max(r,g,b)-Math.min(r,g,b);
-  if(c.crom){const np=Math.sqrt(r*r+g*g+b*b)||1; const cos=(r*c.r+g*c.g+b*c.b)/(np*c.norm);
-    return cos>0.985 && sat>=Math.max(8,c.sat*0.35);}
-  return sat<35 && Math.abs((r+g+b)-c.sum) < c.sum*0.55+60;
+  const o=_rgb2hs(r,g,b);
+  if(c.crom){let dh=Math.abs(o.h-c.h);if(dh>180)dh=360-dh; return dh<=30 && o.s>=Math.max(0.12,c.s*0.5);}
+  return o.s<0.18 && Math.abs((r+g+b)-c.sum) < c.sum*0.55+60;
 }
-// Regla ÚNICA de "píxel del tapete". Si hay CALIBRACIÓN, manda. Si no, heurística: color FRÍO (verde/teal):
-// verde sobre rojo y azul cercano al verde → distingue del libro CÁLIDO (sepia/crema) y del azul puro;
-// excluye el gris-verde PÁLIDO claro de algunas portadas.
+// Regla ÚNICA de "píxel del tapete". Si hay CALIBRACIÓN, manda (por TONO). Si no, heurística verde/teal:
+// verde sobre rojo y azul cercano al verde → distingue del libro CÁLIDO (sepia/crema) y del azul puro.
 function _verdeMat(r,g,b){
   if(_tapeteCal) return _coincideTapete(r,g,b,_tapeteCal);
   const mn=r<b?r:b; return (g-r)>10 && g>=(b-25) && !(g>170&&(g-mn)<g*0.18);
 }
 // Calcula el color del tapete desde una foto del tapete VACÍO (MEDIANAS por canal, robustas a la rejilla) y
-// lo guarda como calibración de sesión. Devuelve la calibración.
+// lo guarda como calibración de sesión (tono + saturación). Devuelve la calibración.
 async function calibrarTapete(file){
   const img=await fileAImagen(file);
   const maxD=600, sc=Math.min(1,maxD/Math.max(img.naturalWidth,img.naturalHeight));
@@ -1381,8 +1385,8 @@ async function calibrarTapete(file){
   const hr=new Uint32Array(256),hg=new Uint32Array(256),hb=new Uint32Array(256);
   for(let i=0;i<N;i++){hr[d[i*4]]++;hg[d[i*4+1]]++;hb[d[i*4+2]]++;}
   const med=hh=>{let a=0;for(let v=0;v<256;v++){a+=hh[v];if(a>=N/2)return v;}return 128;};
-  const r=med(hr),g=med(hg),b=med(hb), sat=Math.max(r,g,b)-Math.min(r,g,b);
-  const cal={r,g,b,norm:Math.sqrt(r*r+g*g+b*b)||1,sum:r+g+b,sat,crom:sat>=25};
+  const r=med(hr),g=med(hg),b=med(hb), o=_rgb2hs(r,g,b);
+  const cal={r,g,b,h:o.h,s:o.s,sum:r+g+b,crom:o.s>=0.12};
   localStorage.setItem('tapete_cal',JSON.stringify(cal)); _tapeteCal=cal; return cal;
 }
 // Estado de la calibración bajo el botón: muestra el color fijado + enlace para quitarla (vuelve al auto).
@@ -2506,13 +2510,14 @@ function rectificarLibro(work, quad, TOPE=2200){
 // Procesa las imágenes que estén sobre el tapete: recorta+endereza cada una y MIDE (de la 1.ª plausible). Las
 // que no tengan tapete/libro pasan TAL CUAL. Devuelve {files, dims:{ancho_cm,alto_cm}|null}.
 async function recortarYMedirTapete(files){
-  let dims=null; const out=[];
+  let dims=null, recortadas=0, tapetePct=null; const out=[];
   for(const f of files){
     if(!_esImg(f)){out.push(f);continue;}
     let url=null;
     try{
       const img=await fileAImagen(f); url=img.src;
       const work=document.createElement('canvas');work.width=img.naturalWidth;work.height=img.naturalHeight;work.getContext('2d').drawImage(img,0,0);
+      if(tapetePct===null){try{tapetePct=Math.round(fraccionVerde(work)*100);}catch(_){}} // diagnóstico
       const q=detectarBordesVerde(work);
       if(!q){out.push(f);continue;}                          // sin tapete/libro → intacta
       if(!dims){const pxcm=detectarRejillaPxCm(work);
@@ -2520,12 +2525,12 @@ async function recortarYMedirTapete(files){
           if(W>=4&&W<=50&&H>=4&&H<=50)dims={ancho_cm:+W.toFixed(1),alto_cm:+H.toFixed(1)};}}
       const oc=rectificarLibro(work,q);
       if(oc){const blob=await new Promise(r=>oc.toBlob(r,'image/jpeg',0.9));
-        out.push(blob?new File([blob],(f.name||'tapete.jpg').replace(/\.(png|webp|jpeg)$/i,'.jpg'),{type:'image/jpeg'}):f);}
+        out.push(blob?new File([blob],(f.name||'tapete.jpg').replace(/\.(png|webp|jpeg)$/i,'.jpg'),{type:'image/jpeg'}):f);recortadas++;}
       else out.push(f);
     }catch(e){console.warn('[tapete]',e&&e.message);out.push(f);}
     finally{ if(url)try{URL.revokeObjectURL(url);}catch(_){} }
   }
-  return {files:out, dims};
+  return {files:out, dims, recortadas, tapetePct};
 }
 // Guarda las dimensiones medidas en cada documento recién catalogado (best-effort, no rompe la subida).
 async function guardarDimsResultados(resultados, dims){
@@ -2555,7 +2560,9 @@ async function subirInbox(files, extra){
   if($('#inTapete')&&$('#inTapete').checked&&files.some(_esImg)){
     setInboxEstado('📐 Tapete: midiendo y recortando…');
     try{ const r=await recortarYMedirTapete(files); files=r.files; if(r.dims)extra.dims=r.dims;
-      setInboxEstado(r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · tapete recortado`:'✂️ Recortado (sin medida fiable)');
+      const pct=r.tapetePct!=null?` · tapete ${r.tapetePct}%`:'';
+      setInboxEstado(r.recortadas? (r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · tapete recortado`:`✂️ Recortado (sin medida fiable)${pct}`)
+        : `⚠️ No detecté el tapete${pct} — ¿calibrado? ¿deja margen alrededor del libro`);
     }catch(e){console.warn('[tapete]',e&&e.message);}
   }
   // ELEGIR PORTADA: con el switch activo y VARIAS fotos de un libro, confirmar/cambiar la portada antes de
