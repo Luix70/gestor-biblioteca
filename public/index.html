@@ -609,14 +609,19 @@ let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
 let FUENTES=[],sanCtx=null; // fuentes "buscar copia" (cacheadas) + depósito en curso de saneamiento
 let sanSel=new Set(),sanPoll=null; // ids seleccionados para procesar por lotes + timer de progreso
+let APP_OFFLINE=false;   // modo sin conexión (arranque sin red): solo lectura NFC; evita el ruido de errores
 const api=async(p,opt={})=>{const h={'Content-Type':'application/json',...(opt.headers||{})};
   if(TOKEN)h['Authorization']='Bearer '+TOKEN;
-  const r=await fetch('/api'+p,{...opt,headers:h});
+  let r; try{ r=await fetch('/api'+p,{...opt,headers:h}); }
+  catch(_){ const e=new Error('Sin conexión con el servidor'); e.sinRed=true; throw e; }   // red caída → error normalizado
   if(r.status===401){mostrarLogin();throw new Error('Sesión caducada — vuelve a entrar');}
   const t=await r.text();let j;try{j=t?JSON.parse(t):{}}catch{j={raw:t}};
   if(!r.ok)throw new Error(j.motivo||j.message||r.status);return j;};
 const fmtBytes=b=>{if(!b)return'0 B';const u=['B','KB','MB','GB','TB'];const i=Math.floor(Math.log(b)/Math.log(1024));return (b/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i];};
-const toast=(m,t='ok')=>{const e=document.createElement('div');e.className='toast '+(t==='ok'?'':t);e.textContent=m;$('#toast').append(e);setTimeout(()=>e.remove(),3800);};
+const toast=(m,t='ok')=>{
+  // En modo sin conexión se silencian los errores de red (todo lo de servidor falla): evita el ruido.
+  if(APP_OFFLINE&&t==='bad'&&/sin conexi|failed to fetch|networkerror|load failed/i.test(String(m)))return;
+  const e=document.createElement('div');e.className='toast '+(t==='ok'?'':t);e.textContent=m;$('#toast').append(e);setTimeout(()=>e.remove(),3800);};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 // %-codifica una ruta /recursos por SEGMENTOS (mantiene las '/'): así una URL con '#', '%', espacios o
 // acentos en la carpeta no se rompe (el navegador trunca en '#'); Express la des-codifica y casa el fichero.
@@ -3083,7 +3088,10 @@ async function autoLoginURL(){
 }
 function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
-function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();cargarUbicaciones();go('search');abrirEnlaceProfundo();procesarCompartidos();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
+function bannerOffline(){let b=document.getElementById('offBanner');if(!b){b=document.createElement('div');b.id='offBanner';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:400;background:#7a5c00;color:#fff;text-align:center;font-size:13px;padding:6px 10px;box-shadow:0 1px 6px rgba(0,0,0,.4)';b.innerHTML='📴 Sin conexión — modo lectura de etiquetas NFC (pulsa 📲 Leer etiqueta)';document.body.appendChild(b);}}
+function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();
+  if(APP_OFFLINE){bannerOffline();go('inbox');return;}   // sin red: directo al Inbox (Leer NFC); sin llamadas de red
+  cargarUbicaciones();go('search');abrirEnlaceProfundo();procesarCompartidos();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
     const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.motivo||'usuario o contraseña incorrectos');
@@ -3111,7 +3119,7 @@ $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{}
     // SIN RED al validar: si hay token + rol recordado, ARRANCA igualmente (modo offline → leer NFC sin
     // servidor). No se borra el token; cuando vuelva la red, todo opera normal.
     const rol=localStorage.getItem('panel_rol');
-    if(TOKEN&&rol){USER=localStorage.getItem('panel_user')||'';ROL=rol;arrancar();}else mostrarLogin();
+    if(TOKEN&&rol){USER=localStorage.getItem('panel_user')||'';ROL=rol;APP_OFFLINE=true;arrancar();}else mostrarLogin();
   }})();
 </script>
 </body>
