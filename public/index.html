@@ -498,8 +498,26 @@ body.guest .admin-only{display:none!important}
       <!-- INBOX (maqueta) -->
       <section class="page" id="p-inbox">
         <div class="sec-h"><h2>Inbox — alta de recursos</h2><span class="muted" id="inboxHint"></span></div>
+        <!-- 1) SUBIR FICHEROS — primera y siempre visible -->
         <div class="card admin-only">
-          <h3>🏷️ Datos de esta alta <span class="muted" style="font-weight:400;font-size:12px">— opcional; viajan con lo que subas (el servidor trabaja menos)</span></h3>
+          <h3>📁 Subir ficheros</h3>
+          <p class="muted" style="margin-top:0;font-size:12px">Arrastra o elige EPUB/PDF/imágenes/cómic/.zip/.rar/.7z. Varias imágenes del MISMO libro (portada + contra + páginas) → UN libro; varios documentos → cada uno por su lado. Se aplican los datos de esta alta (debajo).</p>
+          <div id="dropZone" class="dropzone">⬆️ Arrastra ficheros aquí, o <button class="btn" id="pickBtn" type="button">elegir…</button>
+            <input type="file" id="fileInput" multiple style="display:none">
+          </div>
+          <div class="row" style="margin-top:10px;align-items:center;gap:8px">
+            <button class="btn" id="pickApp" type="button" title="Abre el selector del sistema: Drive, Adobe Scan, Files…">📄 Importar de otra app</button>
+            <span class="muted" style="font-size:12px">PDF o imágenes guardadas por Adobe Scan / Drive / Files. (Para escanear AHORA: hazlo en Adobe Scan y usa «Compartir → Bibliotheca».)</span>
+            <input type="file" id="fileInputApp" accept="application/pdf,image/*" multiple style="display:none">
+          </div>
+          <div class="row" id="appAdobe" style="margin-top:8px;gap:8px;align-items:center;display:none">
+            <button class="btn" id="openScan" type="button" title="Abrir Adobe Scan (o su página en Google Play, desde donde puedes pulsar «Abrir»)">📄 Abrir Adobe Scan</button>
+            <span class="muted" style="font-size:12px">Escanea ahí y vuelve con «Compartir → Bibliotheca».</span>
+          </div>
+        </div>
+        <!-- 2) DATOS QUE VIAJAN — plegable, COLAPSADA -->
+        <details class="card foldcard admin-only">
+          <summary><h3>🏷️ Datos de esta alta <span class="muted" style="font-weight:400;font-size:12px">— opcional; viajan con lo que subas</span></h3></summary>
           <div class="row">
             <div><label>ISBN</label><div style="display:flex;gap:6px"><input id="inIsbn" placeholder="escanéalo o escríbelo" autocomplete="off" inputmode="numeric" style="flex:1"><button class="btn" id="inScan" type="button" title="Escanear el código de barras con la cámara">📷</button></div></div>
             <div><label>Colección / serie</label><input id="inColeccion" placeholder="p. ej. Astérix" autocomplete="off" list="dlColecciones"></div>
@@ -510,7 +528,14 @@ body.guest .admin-only{display:none!important}
             <div><label>Ubicación · estantería</label><select id="inEstSel"></select><input id="inEstanteria" autocomplete="off" placeholder="nueva estantería…" style="display:none;margin-top:6px"></div>
             <div style="display:flex;align-items:flex-end"><button class="btn" id="inClear" type="button">✕ Limpiar</button></div>
           </div>
-          <label style="display:inline-flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
+          <datalist id="dlColecciones"></datalist>
+          <datalist id="dlAmbitos"></datalist>
+          <datalist id="dlEstanterias"></datalist>
+        </details>
+        <!-- 3) MODOS Y ESCANEO — plegable, DESPLEGADA -->
+        <details class="card foldcard admin-only" open>
+          <summary><h3>⚙️ Modos y escaneo</h3></summary>
+          <label style="display:inline-flex;align-items:center;gap:8px;margin-top:4px;cursor:pointer">
             <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inSupervisar"><span class="slider"></span></span>
             <span class="muted">🚥 Supervisado — abrir la ficha tras cada alta para revisar/corregir (tipo, requery, datos). Si no, modo autopiloto (lista de resultados).</span>
           </label>
@@ -533,28 +558,10 @@ body.guest .admin-only{display:none!important}
             <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inPortada" checked><span class="slider"></span></span>
             <span class="muted">🖼️ Elegir portada — al subir VARIAS imágenes de un libro, muestra los thumbnails antes de enviar para confirmar/cambiar cuál es la portada (con un default automático: la del código de barras es la contra).</span>
           </label>
-          <datalist id="dlColecciones"></datalist>
-          <datalist id="dlAmbitos"></datalist>
-          <datalist id="dlEstanterias"></datalist>
-        </div>
-        <div class="card admin-only">
-          <h3>📁 Subir ficheros</h3>
-          <p class="muted" style="margin-top:0;font-size:12px">Arrastra o elige EPUB/PDF/imágenes/cómic/.zip/.rar/.7z. Varias imágenes del MISMO libro (portada + contra + páginas) → UN libro; varios documentos → cada uno por su lado. Se aplican los datos de arriba.</p>
-          <div id="dropZone" class="dropzone">⬆️ Arrastra ficheros aquí, o <button class="btn" id="pickBtn" type="button">elegir…</button>
-            <input type="file" id="fileInput" multiple style="display:none">
-          </div>
-          <div class="row" style="margin-top:10px;align-items:center;gap:8px">
-            <button class="btn" id="pickApp" type="button" title="Abre el selector del sistema: Drive, Adobe Scan, Files…">📄 Importar de otra app</button>
-            <span class="muted" style="font-size:12px">PDF o imágenes guardadas por Adobe Scan / Drive / Files. (Para escanear AHORA: hazlo en Adobe Scan y usa «Compartir → Bibliotheca».)</span>
-            <input type="file" id="fileInputApp" accept="application/pdf,image/*" multiple style="display:none">
-          </div>
-          <div class="row" id="appAdobe" style="margin-top:8px;gap:8px;align-items:center;display:none">
-            <button class="btn" id="openScan" type="button" title="Abrir Adobe Scan (o su página en Google Play, desde donde puedes pulsar «Abrir»)">📄 Abrir Adobe Scan</button>
-            <span class="muted" style="font-size:12px">Escanea ahí y vuelve con «Compartir → Bibliotheca».</span>
-          </div>
-        </div>
-        <div class="card admin-only" id="camCard">
-          <h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— usa la cámara del móvil (enfoque/zoom)</span></h3>
+        </details>
+        <!-- 4) CÁMARA — plegable, COLAPSADA -->
+        <details class="card foldcard admin-only" id="camCard">
+          <summary><h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— usa la cámara del móvil (enfoque/zoom)</span></h3></summary>
           <p class="muted" style="margin-top:0;font-size:12px">Haz una foto de la portada y otra de la CONTRAportada (código de barras); se catalogan como UN libro. Cada foto se reduce antes de subir. (En PC abre el selector de archivos.)</p>
           <div class="row" style="align-items:center">
             <button class="btn" id="camShot" type="button">📷 Hacer foto</button>
@@ -563,12 +570,13 @@ body.guest .admin-only{display:none!important}
             <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none">
           </div>
           <div id="camThumbs" class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"></div>
-        </div>
-        <div class="card admin-only" id="nfcCard" style="display:none">
-          <h3>📶 NFC</h3>
+        </details>
+        <!-- 5) NFC — plegable, COLAPSADA -->
+        <details class="card foldcard admin-only" id="nfcCard" style="display:none">
+          <summary><h3>📶 NFC</h3></summary>
           <p class="muted" style="margin-top:0;font-size:12px">Lee una etiqueta NFC (ISBN/identificador) y búscalo en tu biblioteca. (Solo Android + Chrome con NFC.)</p>
           <div class="row" style="align-items:center"><button class="btn" id="nfcRead" type="button">📶 Leer etiqueta</button><span class="muted" id="nfcOut"></span></div>
-        </div>
+        </details>
         <div id="inboxEstado" style="margin-top:12px;min-height:18px"></div>
         <div id="inboxResults" style="margin-top:8px"></div>
       </section>
@@ -604,7 +612,7 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='nfc-confirmar-sobrescribir · 2026-06-30';   // marca de versión (verificar despliegue)
+const APP_BUILD='inbox-reorg+nfc-overlay-ficha · 2026-06-30';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1178,7 +1186,8 @@ function pintarDoc(r,ctx){
   const clas=(r.clasificaciones||[]).length?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:6px">Clasificación</div><table class="clastab">${r.clasificaciones.map(x=>filaClas(x)).join('')}</table></div>`:'';
   const alertas=(d.alertas_agente||[]).length?`<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:12px">Notas del agente (${d.alertas_agente.length})</summary><div style="margin-top:6px">${d.alertas_agente.map(a=>`<div class="muted" style="font-size:12px">• ${esc(a)}</div>`).join('')}</div></details>`:'';
   const imgs=(r.imagenes&&r.imagenes.length)?r.imagenes:(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]);
-  const carrusel=imgs.length?`<div class="carousel"><div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:'<div class="filebox"><div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>';
+  const nfcOv=(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid))?`<span class="nfctag" title="Etiqueta NFC vinculada">📶</span>`:'';
+  const carrusel=imgs.length?`<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:`<div class="filebox" style="position:relative">${nfcOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
   const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
     <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.naturaleza?' · '+esc(d.naturaleza):''}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div>
     <div style="margin-top:8px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div>
@@ -2010,7 +2019,7 @@ function construirSearch(){
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn pri" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
