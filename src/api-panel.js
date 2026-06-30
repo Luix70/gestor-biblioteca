@@ -435,8 +435,11 @@ export function rutasPanel() {
                 if (estrellas.includes(0)) ors.push({ valoracion: { $in: [0, null] } }, { valoracion: { $exists: false } });
                 extras.push({ $or: ors });
             }
-            // Filtro explícito "solo NSFW" (casilla 🔞 de la Búsqueda): muestra únicamente lo marcado.
-            if (String(req.query.nsfw || '') === '1') extras.push({ nsfw: true });
+            // Control 🔞 NSFW de la Búsqueda (junto a Estrellas): 'solo' = únicamente lo marcado nsfw;
+            // 'excluir' = ocultar todo lo nsfw (los docs sin el campo cuentan como no-nsfw).
+            const nf = String(req.query.nsfw || '');
+            if (nf === 'solo') extras.push({ nsfw: true });
+            else if (nf === 'excluir') extras.push({ nsfw: { $ne: true } });
             // NSFW: los invitados no ven material marcado (ni el que cuelga de una obra/colección nsfw).
             const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
             if (nsfwCond) extras.push(...nsfwCond);

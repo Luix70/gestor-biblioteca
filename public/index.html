@@ -603,7 +603,7 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='nsfw-filtro-fix · 2026-06-30';   // marca de versión (verificar despliegue)
+const APP_BUILD='nsfw-incluir-excluir · 2026-06-30';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2012,10 +2012,9 @@ function construirSearch(){
         <div><label>Estantería</label><select id="sqEstanteria" disabled><option value="">Todas</option></select></div>
         <div class="admin-only" style="display:flex;align-items:flex-end"><button class="btn" id="sqGoUbic" title="Gestionar ubicaciones (o ver esta estantería)">📍 Gestionar</button></div>
         <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off"></div>
-        <div><label>Estrellas</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
-          <div class="pop">${[5,4,3,2,1].map(n=>`<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label></div>
+        <div><label>Estrellas${ROL==='admin'?' / NSFW':''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
+          <div class="pop">${[5,4,3,2,1].map(n=>`<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL==='admin'?'<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA el contenido NSFW · Marcada: muestra SOLO NSFW"><input type="checkbox" id="sqNsfw"> 🔞 Solo NSFW</label>':''}</div>
         </details></div>
-        <div class="admin-only"><label>NSFW</label><div style="display:flex;align-items:center;height:36px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--mut)"><input type="checkbox" id="sqNsfw" style="width:auto;margin:0"> 🔞 Solo</label></div></div>
         <div><label>Orden</label><select id="sqOrden"><option value="reciente">Recientes</option><option value="titulo">Título A-Z</option><option value="antiguo">Antiguos</option></select></div>
         <div class="admin-only"><label>Descubrir</label><div style="display:flex;align-items:center;gap:6px;height:36px"><label class="switch" style="flex:0 0 auto"><input type="checkbox" id="sqDescubrir"><span class="slider"></span></label><span class="muted" title="Busca en el Fichero (58,7 M) libros que NO tienes, con enlaces para conseguirlos">🔭 Fichero</span></div></div>
       </div>
@@ -2041,7 +2040,7 @@ function construirSearch(){
   $('#sqOrden').onchange=()=>buscarCatalogo(1);
   if($('#sqDescubrir'))$('#sqDescubrir').onchange=()=>buscarCatalogo(1);
   $$('#p-search .sqStar').forEach(c=>c.onchange=()=>{actualizarSumEstrellas();buscarCatalogo(1);});
-  if($('#sqNsfw'))$('#sqNsfw').onchange=()=>buscarCatalogo(1);
+  if($('#sqNsfw'))$('#sqNsfw').onchange=()=>{actualizarSumEstrellas();buscarCatalogo(1);};
   $('#sqClear').onclick=()=>{$('#sqQ').value='';$('#sqCdu').value='';$('#sqTipo').value='';if($('#sqSoporte'))$('#sqSoporte').value='';$('#sqOrden').value='reciente';
     if($('#sqAmbito'))$('#sqAmbito').value='';if($('#sqEstanteria')){$('#sqEstanteria').value='';pintarEstanteriaSearch();}
     if($('#sqDescubrir'))$('#sqDescubrir').checked=false;if($('#searchExternal'))$('#searchExternal').innerHTML='';
@@ -2050,7 +2049,8 @@ function construirSearch(){
 }
 function estrellasSel(){return $$('#p-search .sqStar:checked').map(c=>c.value);}
 function actualizarSumEstrellas(){const s=$('#sqStarsSum');if(!s)return;const sel=estrellasSel();
-  s.textContent=(!sel.length||sel.length===6)?'Todas':sel.map(n=>n==='0'?'0★':n+'★').sort().reverse().join(' ');}
+  const base=(!sel.length||sel.length===6)?'Todas':sel.map(n=>n==='0'?'0★':n+'★').sort().reverse().join(' ');
+  s.textContent=base+(($('#sqNsfw')&&$('#sqNsfw').checked)?' · 🔞':'');}
 function loadSearch(){if(!$('#sqQ'))construirSearch();cargarUbicaciones();buscarCatalogo(estadoBusqueda.page||1);}
 async function buscarCatalogo(page){
   estadoBusqueda.page=page;
@@ -2058,7 +2058,7 @@ async function buscarCatalogo(page){
   const est=estrellasSel();if(est.length&&est.length<6)params.set('estrellas',est.join(','));
   const ambS=($('#sqAmbito')&&$('#sqAmbito').value)||'';if(ambS)params.set('ambito',ambS);
   const estS=($('#sqEstanteria')&&$('#sqEstanteria').value)||'';if(ambS&&estS)params.set('estanteria',estS);
-  if($('#sqNsfw')&&$('#sqNsfw').checked)params.set('nsfw','1');   // 🔞 Solo NSFW
+  if($('#sqNsfw'))params.set('nsfw',$('#sqNsfw').checked?'solo':'excluir');   // 🔞 marcada=solo NSFW · sin marcar=excluir NSFW
   if(estadoBusqueda.extra)for(const[k,v]of Object.entries(estadoBusqueda.extra)){if(k!=='etiqueta'&&v!=null&&v!=='')params.set(k,v);}
   pintarChipClas();
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
