@@ -73,7 +73,12 @@ app.use('/recursos', express.static(DIR_CDU, {
 }));
 
 // Panel de control (estático). La página y el login son públicos; los datos van por /api (protegido).
-app.use(express.static(DIR_PUBLIC));
+app.use(express.static(DIR_PUBLIC, {
+    setHeaders: (res, ruta) => {
+        // El HTML del panel y el service worker NO se cachean: así un despliegue se ve YA (sin Ctrl+F5).
+        if (/\.html$/i.test(ruta) || ruta.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
+    },
+}));
 
 // AUTENTICACIÓN: login público + estado de sesión + logout, y la PUERTA del resto de /api.
 // Regla: GET = lectura (admin y guest); cualquier mutación = solo admin.
