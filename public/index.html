@@ -1331,11 +1331,12 @@ const _dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
 // Robustez: (1) máscara verde laxa; (2) si hay poco verde → null (no hay alfombrilla); (3) flood-fill del
 // NO-verde desde los BORDES → quita la mesa/marco no verde de alrededor; (4) el LIBRO = isla no-verde
 // RODEADA de verde (no conectada al borde); (5) esquinas = extremos diagonales (x±y). Devuelve [TL,TR,BR,BL]|null.
-// Regla ÚNICA de "píxel del tapete verde". El tapete suele ser verde OSCURO/teal (b cerca de g), así que
-// se exige verde DOMINANTE (g>=r, g>=b) con margen sobre el min — eso detecta bien el tapete. Y se EXCLUYE
-// el gris-verde PÁLIDO de muchas portadas (claro y poco saturado): si g es alto y la saturación baja, NO es
-// tapete (antes contaba como verde y metía el recuadro dentro del libro).
-function _verdeMat(r,g,b){const mn=r<b?r:b;return g>=r&&g>=b&&(g-mn)>14&&!(g>150&&(g-mn)<g*0.22);}
+// Regla ÚNICA de "píxel del tapete". El tapete es un color FRÍO (verde o TEAL azulado, según luz/balance
+// de blancos): el VERDE supera al ROJO con margen y el AZUL queda cerca del verde. Eso lo distingue del
+// libro CÁLIDO (sepia/marrón/crema: rojo el mayor) y del azul puro. (Antes exigía g>=b, y con la alfombrilla
+// en teal —azul ≳ verde— la rechazaba y «no detectaba los bordes».) Excluye el gris-verde PÁLIDO claro de
+// algunas portadas (alto y poco saturado), que si no metía el recuadro dentro del libro.
+function _verdeMat(r,g,b){const mn=r<b?r:b;return (g-r)>10 && g>=(b-25) && !(g>170&&(g-mn)<g*0.18);}
 // Fracción de píxeles de tapete (diagnóstico para calibrar): submuestrea y cuenta verdes.
 function fraccionVerde(canvas){const maxD=400,sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
   const w=Math.max(1,Math.round(canvas.width*sc)),h=Math.max(1,Math.round(canvas.height*sc)),N=w*h;
