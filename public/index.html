@@ -2901,6 +2901,7 @@ async function etqSoloEnlace(){
 }
 function finEtq(){const n=_etq?_etq.ids.length:0;localStorage.removeItem(ETQ_LS);_etqGen++;_etq=null;cerrarCmp();toast(`Etiquetado terminado (${n} libro/s)`);if($('#sqQ'))buscarCatalogo(estadoBusqueda.page||1);}
 function vaciarEtq(){_etqGen++;if(_etq&&_etq.abort){try{_etq.abort.abort();}catch(_){}}localStorage.removeItem(ETQ_LS);_etq=null;cerrarCmp();toast('Cola de etiquetado vaciada','warn');if($('#sqQ'))buscarCatalogo(estadoBusqueda.page||1);}
+function cerrarEtqGuardando(){_etqGen++;if(_etq&&_etq.abort){try{_etq.abort.abort();}catch(_){}}guardarColaEtq();_etq=null;cerrarCmp();toast('Etiquetado en pausa — «Reanudar» cuando quieras');if($('#sqQ'))buscarCatalogo(estadoBusqueda.page||1);}
 function pintarEtq(doc,r,estado,extra){
   const b=$('#etqBody'); if(!b||!_etq)return;
   const tot=_etq.ids.length, n=Math.min(_etq.i+1,tot);
@@ -2917,7 +2918,7 @@ function pintarEtq(doc,r,estado,extra){
   else if(estado==='pausa'){est='<span class="muted">⏸ En pausa</span>';bot=`<button class="btn pri" id="etqCont">▶ Continuar</button>`+cS+cX;}
   else if(estado==='errorDoc'){est='<span style="color:var(--bad)">No se pudo cargar este documento.</span>';bot=cS+cX;}
   else {est='<span class="muted">Cargando…</span>';bot=cX;}
-  b.innerHTML=`<h3 style="margin-top:0">📶 Etiquetar — ${n} / ${tot}</h3>
+  b.innerHTML=`<h3 style="margin-top:0">📶 Etiquetar — ${n} / ${tot} <button class="btn" id="etqMin" title="Cerrar conservando la cola (reanudar luego)" style="float:right;padding:2px 9px">✕</button></h3>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer"><input type="checkbox" id="etqAuto" ${_etq.auto?'checked':''} style="width:auto;margin:0"> Modo automático (avanza solo al grabar)</label>
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">${cov}<div style="min-width:0"><div style="font-weight:600;word-break:break-word">${tit}</div>${aut?`<div class="muted" style="font-size:12px">${aut}</div>`:''}<div style="margin-top:6px"><span class="tag" style="background:rgba(40,217,168,.16);color:var(--acc)">📍 ${ubic}</span>${yaTen?' <span class="muted" style="font-size:11px">· ya tenía etiqueta (regrabar)</span>':''}</div></div></div>
     <div style="min-height:24px;margin:6px 0;font-size:14px">${est}</div>
@@ -2925,6 +2926,7 @@ function pintarEtq(doc,r,estado,extra){
   const A=$('#etqAuto'); if(A)A.onchange=()=>{_etq.auto=A.checked;guardarColaEtq();if(_etq.auto&&estado==='ok'){_etq.i++;procesarEtq();}};
   const w=(id,fn)=>{const e=$('#'+id);if(e)e.onclick=fn;};
   w('etqCerrar',vaciarEtq);
+  w('etqMin',cerrarEtqGuardando);
   w('etqSaltar',()=>{_etq.i++;procesarEtq();});
   w('etqSig',()=>{_etq.i++;procesarEtq();});
   w('etqCont',()=>procesarEtq());
