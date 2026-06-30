@@ -250,8 +250,10 @@ de ficheros clasificado por CDU.
         - Soporte (Papel/Digital)
         - Ámbito y Estantería (ubicación física)
         - CDU (prefijo)
-        - Estrellas (valoración, multi-selección; "sin valorar")
-        - 🔞 Solo NSFW (admin)  — filtra a lo marcado como NSFW
+        - Estrellas (valoración, multi-selección; "sin valorar"). Dentro del mismo
+          desplegable, 🔞 NSFW (admin): SIN marcar EXCLUYE lo NSFW (por defecto);
+          MARCADA muestra SOLO lo NSFW.
+        - Etiqueta NFC (admin): Todas / Con etiqueta (📶) / Sin etiqueta
         - Orden (recientes / título A-Z / antiguos)
     · Resultados como tarjetas con miniatura; PAGINACIÓN arriba y abajo (al pasar
       de página, el scroll sube al primer resultado).
@@ -311,6 +313,10 @@ de ficheros clasificado por CDU.
       libros que contiene.
     · Leer (📲 en el Inbox): con conexión abre la ficha; SIN conexión muestra una
       tarjeta con la UBICACIÓN destacada (leída de la etiqueta) para recolocar.
+    · Al grabar con éxito se VINCULA la etiqueta al documento (su UID único + fecha
+      + URL). Así puedes filtrar "con/sin etiqueta" en la Búsqueda; los que ya la
+      tienen muestran un icono 📶 (badge y un distintivo sobre la esquina superior
+      izquierda de la miniatura, donde suele ir pegada la etiqueta).
     · Límite: requiere el móvil DESBLOQUEADO y la app/Chrome en primer plano (Web
       NFC no lee con la pantalla bloqueada).
 

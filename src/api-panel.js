@@ -440,6 +440,10 @@ export function rutasPanel() {
             const nf = String(req.query.nsfw || '');
             if (nf === 'solo') extras.push({ nsfw: true });
             else if (nf === 'excluir') extras.push({ nsfw: { $ne: true } });
+            // Filtro por ETIQUETA NFC: 'con' = ya tiene etiqueta grabada; 'sin' = aún no.
+            const nfc = String(req.query.nfc || '');
+            if (nfc === 'con') extras.push({ 'nfc.fecha_vinculacion': { $exists: true } });
+            else if (nfc === 'sin') extras.push({ 'nfc.fecha_vinculacion': { $exists: false } });
             // NSFW: los invitados no ven material marcado (ni el que cuelga de una obra/colección nsfw).
             const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
             if (nsfwCond) extras.push(...nsfwCond);
@@ -884,6 +888,25 @@ export function rutasPanel() {
             const r2 = await db.collection('biblioteca').updateOne({ _id: new ObjectId(req.params.id) }, upd);
             if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             res.json({ ok: true, ancho_cm: set.ancho_cm ?? null, alto_cm: set.alto_cm ?? null });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // VINCULAR ETIQUETA NFC: al grabar con éxito se marca el documento (fecha + UID único de la etiqueta,
+    // si el navegador lo expone). Permite filtrar "con/sin etiqueta". {borrar:true} desvincula.
+    r.post('/documentos/:id/nfc', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const _id = new ObjectId(req.params.id);
+            if (req.body?.borrar) {
+                const r2 = await db.collection('biblioteca').updateOne({ _id }, { $unset: { nfc: '' } });
+                return res.json({ ok: r2.matchedCount > 0, vinculada: false });
+            }
+            const set = { 'nfc.fecha_vinculacion': new Date() };
+            if (req.body?.uid) set['nfc.uid'] = String(req.body.uid).slice(0, 64);
+            if (req.body?.url) set['nfc.url_vinculada'] = String(req.body.url).slice(0, 300);
+            const r2 = await db.collection('biblioteca').updateOne({ _id }, { $set: set });
+            res.json({ ok: r2.matchedCount > 0, vinculada: true, uid: set['nfc.uid'] || null });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
