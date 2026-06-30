@@ -2582,6 +2582,9 @@ async function guardarDimsResultados(resultados, dims){
 async function subirInbox(files, extra){
   if(!files||!files.length)return;
   extra=extra||{};
+  // Mensajes del proceso (PDF/ISBN/tapete/portada/visión): se acumulan y quedan BAJO el trabajo en la lista
+  // del Inbox (no como toasts fugaces). log() = guarda + muestra en vivo en el estado.
+  const msgs=[]; const log=(m,vivo=true)=>{if(m){msgs.push(m);if(vivo)setInboxEstado(m);}};
   // PDF (Adobe Scan/cámara/importado) → explotar en páginas JPG EN EL NAVEGADOR + leer el código de barras.
   if(files.length===1&&esPdf(files[0])&&!extra.isbn){
     try{
@@ -2591,8 +2594,8 @@ async function subirInbox(files, extra){
         const isbn=await detectarISBNenFiles(res.pages);
         extra={isbn:isbn||undefined,isbnOrigen:isbn?'movil':undefined,titulo:files[0].name};
         files=res.pages;
-        setInboxEstado(`🧩 PDF → ${res.pages.length} página(s)${isbn?` · 📱 ISBN ${isbn} leído en el móvil`:' · sin código de barras (lo leerá el servidor de las páginas)'}`);
-      }else setInboxEstado('');
+        log(`🧩 PDF → ${res.pages.length} página(s)${isbn?` · 📱 ISBN ${isbn} leído en el móvil`:' · sin código de barras (lo leerá el servidor)'}`);
+      }
     }catch(e){console.warn('[PDF cliente] no explotado:',e.message);setInboxEstado('');}
   }
   // TAPETE: si está activo y hay imágenes, recorta+endereza (quita el tapete de la imagen guardada) y mide.
@@ -2600,8 +2603,8 @@ async function subirInbox(files, extra){
     setInboxEstado('📐 Tapete: midiendo y recortando…');
     try{ const r=await recortarYMedirTapete(files); files=r.files; if(r.dims)extra.dims=r.dims;
       const pct=r.tapetePct!=null?` · tapete ${r.tapetePct}%`:'';
-      if(r.recortadas){const m=r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · recortado${pct}`:`✂️ Recortado (sin medida fiable)${pct}`;setInboxEstado(m);toast(m);}
-      else {const m=`⚠️ No detecté el tapete${pct} — ¿deja margen alrededor del libro?`;setInboxEstado(m);toast(m,'warn');}
+      if(r.recortadas)log(r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · recortado${pct}`:`✂️ Recortado (sin medida fiable)${pct}`);
+      else log(`⚠️ No detecté el tapete${pct} — ¿deja margen alrededor del libro?`);
     }catch(e){console.warn('[tapete]',e&&e.message);}
   }
   // ELEGIR PORTADA: con el switch activo y VARIAS fotos de un libro, confirmar/cambiar la portada antes de
@@ -2616,18 +2619,19 @@ async function subirInbox(files, extra){
     let isbn=extra.isbn||null,origenMovil=extra.isbnOrigen==='movil';
     if(!isbn){setInboxEstado('🔎 Buscando código de barras en el móvil…');isbn=await detectarISBNenFiles(files);if(isbn)origenMovil=true;}
     if(isbn&&$('#inIsbn')&&!$('#inIsbn').value.trim())$('#inIsbn').value=isbn;
+    if(isbn&&origenMovil)log(`📱 ISBN ${isbn} leído en el móvil`,false);
     setInboxEstado(isbn?`📱 ISBN ${isbn} · ⏳ subiendo y catalogando…`:'⏳ Subiendo y catalogando… (identificará el servidor)');
     const snap=metaSnapshot();if(isbn&&!snap.isbn)snap.isbn=isbn;if(snap.isbn&&origenMovil)snap.isbnOrigen='movil';
     try{
       const j=await enviarIngesta(fdDesdeSnap(snap,files));
       await guardarDimsResultados(j.resultados,extra.dims); // tapete → dimensiones en la ficha
       setInboxEstado('');
-      jobsHechos.unshift({estado:'ok',resultados:j.resultados||[],isbnCliente:origenMovil?snap.isbn:null});cortarJobs();pintarCola();
+      jobsHechos.unshift({estado:'ok',resultados:j.resultados||[],mensajes:msgs});cortarJobs();pintarCola();
       if($('#inIsbn'))$('#inIsbn').value='';
       cargarDatalistColecciones();cargarUbicaciones();
       const ok=(j.resultados||[]).filter(x=>x.ok&&x.id);
       if(ok.length===1)revisarSupervisado(ok[0].id);
-    }catch(e){setInboxEstado('');jobsHechos.unshift({estado:'error',msg:e.message});cortarJobs();pintarCola();}
+    }catch(e){setInboxEstado('');jobsHechos.unshift({estado:'error',msg:e.message,mensajes:msgs});cortarJobs();pintarCola();}
     return;
   }
   // AUTOPILOTO: encolar (NO bloquea). La cola procesa una a una en segundo plano.
@@ -2635,7 +2639,7 @@ async function subirInbox(files, extra){
   if(extra.isbn){snap.isbn=extra.isbn;if(extra.isbnOrigen)snap.isbnOrigen=extra.isbnOrigen;}
   if($('#inIsbn'))$('#inIsbn').value='';
   setInboxEstado('');
-  colaInbox.push({id:++jobSeq, files, snap, n:files.length, estado:'cola', dims:extra.dims||null,
+  colaInbox.push({id:++jobSeq, files, snap, n:files.length, estado:'cola', dims:extra.dims||null, mensajes:msgs,
     titulo:extra.titulo||files.map(f=>f.name).join(', '), isbnCliente:(extra.isbnOrigen==='movil'?extra.isbn:null)});
   pintarCola();
   procesarCola();
@@ -2643,9 +2647,9 @@ async function subirInbox(files, extra){
 async function procesarCola(){
   if(colaCorriendo)return;colaCorriendo=true;
   while(colaInbox.length){
-    const job=colaInbox[0];job.estado='procesando';pintarCola();
+    const job=colaInbox[0];job.estado='procesando';job.mensajes=job.mensajes||[];pintarCola();
     try{
-      if(!job.snap.isbn){const isbn=await detectarISBNenFiles(job.files);if(isbn){job.snap.isbn=isbn;job.snap.isbnOrigen='movil';job.isbnCliente=isbn;}}
+      if(!job.snap.isbn){const isbn=await detectarISBNenFiles(job.files);if(isbn){job.snap.isbn=isbn;job.snap.isbnOrigen='movil';job.isbnCliente=isbn;job.mensajes.push(`📱 ISBN ${isbn} leído en el móvil`);}}
       const j=await enviarIngesta(fdDesdeSnap(job.snap,job.files));
       await guardarDimsResultados(j.resultados,job.dims); // tapete → dimensiones en la ficha
       job.estado='ok';job.resultados=j.resultados||[];
@@ -2666,11 +2670,13 @@ function filaResultado(r){
 // Render de la cola (en cola / procesando) + resultados ya hechos (más reciente arriba).
 function pintarCola(){
   const out=$('#inboxResults');if(!out)return;
-  const cola=colaInbox.map(j=>_filaInb(`<span class="tag ${j.estado==='procesando'?'warn':'mut'}">${j.estado==='procesando'?'⏳ procesando':'🕒 en cola'}</span> <span class="muted">${esc(recortar(j.titulo,56))} · ${j.n} fich.</span>`)).join('');
+  // Mensajes del proceso (tapete, ISBN, visión…) BAJO el trabajo, en muted pequeño.
+  const msgsHtml=j=>(j.mensajes||[]).map(m=>`<div class="muted" style="font-size:11px;margin-left:2px">· ${esc(m)}</div>`).join('');
+  const cola=colaInbox.map(j=>_filaInb(`<span class="tag ${j.estado==='procesando'?'warn':'mut'}">${j.estado==='procesando'?'⏳ procesando':'🕒 en cola'}</span> <span class="muted">${esc(recortar(j.titulo,56))} · ${j.n} fich.</span>${msgsHtml(j)}`)).join('');
   const hechas=[];
   for(const j of jobsHechos){
-    if(j.estado==='error'){hechas.push(_filaInb(`<span class="tag bad">error</span> <span class="muted">${esc(j.msg||'')}</span>`));continue;}
-    if(j.isbnCliente)hechas.push(_filaInb(`<span class="muted" style="font-size:11px">📱 ISBN ${esc(j.isbnCliente)} leído en el móvil</span>`));
+    if(j.estado==='error'){hechas.push(_filaInb(`<span class="tag bad">error</span> <span class="muted">${esc(j.msg||'')}</span>${msgsHtml(j)}`));continue;}
+    const ms=msgsHtml(j); if(ms)hechas.push(_filaInb(ms));
     for(const r of (j.resultados||[]))hechas.push(filaResultado(r));
   }
   out.innerHTML=(colaInbox.length||jobsHechos.length)
