@@ -1372,26 +1372,30 @@ function detectarRejillaPxCm(canvas){
   // Gradiente SOLO sobre el tapete (verde): captura las líneas de la rejilla, NO los bordes del libro.
   const colp=new Float32Array(w), rowp=new Float32Array(h);
   for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x;if(!verde[i])continue;colp[x]+=Math.abs(gris[i+1]-gris[i-1]);rowp[y]+=Math.abs(gris[i+w]-gris[i-w]);}
-  // Periodo dominante = lag con MÁXIMA autocorrelación (global) en [minL,maxL]. Devuelve {L,conf}.
+  // Periodo dominante = mejor MÁXIMO LOCAL de la autocorrelación (NO el global: el lóbulo central decae de
+  // forma monótona desde lag 0 y su borde podía ser el máximo global → daba un periodo minúsculo y medidas
+  // gigantes). Un máximo local salta ese lóbulo y cae en el pico del periodo real. Devuelve {L,conf}.
   const periodo=sig=>{
     const n=sig.length; let m=0;for(let i=0;i<n;i++)m+=sig[i];m/=n;
     const s=new Float32Array(n);let ac0=0;for(let i=0;i<n;i++){s[i]=sig[i]-m;ac0+=s[i]*s[i];}
     if(ac0<=0)return {L:0,conf:0};
-    const minL=Math.max(7,Math.round(n*0.012)), maxL=Math.floor(n/3); // ≥3 periodos visibles
+    const minL=Math.max(8,Math.round(n*0.01)), maxL=Math.floor(n/3);
+    const ac=new Float32Array(maxL+2);
+    for(let L=minL-1;L<=maxL+1&&L<n;L++){let a=0;for(let i=0;i+L<n;i++)a+=s[i]*s[i+L];ac[L]=a/ac0;}
     let best=0,bestL=0;
-    for(let L=minL;L<=maxL;L++){let a=0;for(let i=0;i+L<n;i++)a+=s[i]*s[i+L];const v=a/ac0;if(v>best){best=v;bestL=L;}}
+    for(let L=minL;L<=maxL;L++)if(ac[L]>ac[L-1]&&ac[L]>=ac[L+1]&&ac[L]>best){best=ac[L];bestL=L;}
     return {L:bestL,conf:best};
   };
   // Dos rutas de aceptación: (1) AMBOS ejes coinciden (≤18%) → fiable aunque la correlación sea floja —el
   // tapete suele verse poco (frame fino) y la coincidencia X≈Y es de por sí la prueba; (2) un solo eje con
   // correlación FUERTE. Si no, null → regla manual.
   const a=periodo(colp), b=periodo(rowp); let pasoDs=0;
-  try{window._rejillaDbg={cx:a.L,cc:+a.conf.toFixed(2),rx:b.L,rc:+b.conf.toFixed(2),sc:+sc.toFixed(2)};}catch(_){} // diag
   const coinc = a.L&&b.L&&Math.abs(a.L-b.L)/Math.min(a.L,b.L)<0.18;
   if(coinc && Math.min(a.conf,b.conf)>=0.10) pasoDs=(a.L+b.L)/2;
   else { const mejor=a.conf>=b.conf?a:b; if(mejor.L&&mejor.conf>=0.28) pasoDs=mejor.L; }
+  const pxcm=pasoDs?pasoDs/sc:0;                          // px por cm en imagen completa
+  try{window._rejillaDbg={cx:a.L,cc:+a.conf.toFixed(2),rx:b.L,rc:+b.conf.toFixed(2),sc:+sc.toFixed(2),pxcm:+pxcm.toFixed(1)};}catch(_){} // diag
   if(!pasoDs) return null;
-  const pxcm=pasoDs/sc;                                   // px por cm en imagen completa
   return (pxcm>3&&isFinite(pxcm))?pxcm:null;
 }
 // Editor de UNA imagen: rotar 90°, recortar (rect) y corregir PERSPECTIVA (4 esquinas → rectángulo).
@@ -1438,9 +1442,9 @@ function abrirEditorImagen(i){
     const rotar=horario=>{const nc=document.createElement('canvas');nc.width=work.height;nc.height=work.width;const x=nc.getContext('2d');x.translate(nc.width/2,nc.height/2);x.rotate((horario?90:-90)*Math.PI/180);x.drawImage(work,-work.width/2,-work.height/2);work=nc;modo='none';$('#edApply').style.display='none';reset();};
     $('#edRotL').onclick=()=>rotar(false);$('#edRotR').onclick=()=>rotar(true);
     // arrastre de esquinas
-    const pos=ev=>{const rc=c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);};
+    let _rc=null;const pos=ev=>{const rc=_rc||c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);}; // _rc cacheado en pointerdown (evita reflow por evento)
     const handles=()=> modo==='crop'?[[crop.x0,crop.y0],[crop.x1,crop.y0],[crop.x1,crop.y1],[crop.x0,crop.y1]] : modo==='persp'?quad : [];
-    c.addEventListener('pointerdown',ev=>{ if(modo==='none')return; ev.preventDefault(); const p=pos(ev),hs=handles();let best=-1,bd=34/escala; hs.forEach((h,k)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best=k;}}); drag=best; if(best>=0)try{c.setPointerCapture(ev.pointerId);}catch(_){} });
+    c.addEventListener('pointerdown',ev=>{ if(modo==='none')return; ev.preventDefault(); _rc=c.getBoundingClientRect(); const p=pos(ev),hs=handles();let best=-1,bd=34/escala; hs.forEach((h,k)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best=k;}}); drag=best; if(best>=0)try{c.setPointerCapture(ev.pointerId);}catch(_){} });
     c.addEventListener('pointermove',ev=>{ if(drag<0)return; ev.preventDefault(); let[x,y]=pos(ev);const mX=work.width*0.03,mY=work.height*0.03;x=Math.max(mX,Math.min(work.width-mX,x));y=Math.max(mY,Math.min(work.height-mY,y));
       if(modo==='crop'){ if(drag===0){crop.x0=x;crop.y0=y;}else if(drag===1){crop.x1=x;crop.y0=y;}else if(drag===2){crop.x1=x;crop.y1=y;}else{crop.x0=x;crop.y1=y;} }
       else { quad[drag]=[x,y]; } pedir(); });
@@ -1510,8 +1514,8 @@ function medirDimensiones(id, imagenes){
       ctx.strokeStyle='#1ba3ff';ctx.lineWidth=3;const a=W2V(regla[0]),b=W2V(regla[1]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();regla.forEach(p=>aro(p,'rgba(27,163,255,.95)'));ctx.restore();
       const r=calc();$('#mdOut').textContent=r?`≈ ${r.W.toFixed(1).replace('.',',')} × ${r.H.toFixed(1).replace('.',',')} cm${pxcmAuto?' · auto':''}`:''; };
     render();
-    const pos=ev=>{const rc=c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);};
-    c.addEventListener('pointerdown',ev=>{ev.preventDefault();const p=pos(ev);let best=null,bd=34/escala;
+    let _rc=null;const pos=ev=>{const rc=_rc||c.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;return V2W(t.clientX-rc.left,t.clientY-rc.top);}; // _rc cacheado en pointerdown (evita reflow por evento)
+    c.addEventListener('pointerdown',ev=>{ev.preventDefault();_rc=c.getBoundingClientRect();const p=pos(ev);let best=null,bd=34/escala;
       quad.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'q',i};}});
       regla.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'r',i};}});drag=best;if(best)try{c.setPointerCapture(ev.pointerId);}catch(_){}});
     c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);const mX=iw*0.03,mY=ih*0.03;x=Math.max(mX,Math.min(iw-mX,x));y=Math.max(mY,Math.min(ih-mY,y));if(drag.s==='r')pxcmAuto=null;/* tocar la regla → escala manual */(drag.s==='q'?quad:regla)[drag.i]=[x,y];pedir();});
@@ -1520,12 +1524,18 @@ function medirDimensiones(id, imagenes){
     $('#mdAutoMed').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);
       const mX=iw*0.03,mY=ih*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
       const q=detectarBordesVerde(tmp); if(q)quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);
-      const pxcm=detectarRejillaPxCm(tmp); pxcmAuto=pxcm||null;
-      render();
-      if(q&&pxcm){toast('Auto: rejilla '+pxcm.toFixed(1).replace('.',',')+' px/cm');return;}
-      const fv=Math.round(fraccionVerde(tmp)*100); // diagnóstico: % de tapete detectado (para calibrar)
-      const dg=window._rejillaDbg; const dbg=dg?` · ejes X[${dg.cx}|${dg.cc}] Y[${dg.rx}|${dg.rc}]`:'';
-      toast(`${q?'libro ✓':'libro ✗'} · ${pxcm?'rejilla ✓':'rejilla ✗'} · tapete ${fv}%${dbg}`,'warn');};
+      const pxcm=detectarRejillaPxCm(tmp);
+      // PLAUSIBILIDAD: con el quad detectado, ¿da un tamaño de libro razonable (4-50 cm)? Si no, NO aplicar
+      // la escala (era basura, p.ej. 72x95) → regla manual; así nunca se guarda una medida absurda.
+      let dims=null; if(pxcm&&q){const W=(_dist(quad[0],quad[1])+_dist(quad[3],quad[2]))/2/pxcm,H=(_dist(quad[0],quad[3])+_dist(quad[1],quad[2]))/2/pxcm;dims={W,H};}
+      const ok = !!dims && dims.W>=4&&dims.W<=50&&dims.H>=4&&dims.H<=50;
+      pxcmAuto = ok?pxcm:null; render();
+      const dg=window._rejillaDbg; const dbg=dg?` · X[${dg.cx}|${dg.cc}] Y[${dg.rx}|${dg.rc}] sc${dg.sc} ${dg.pxcm}px/cm`:'';
+      try{console.log('AutoMedir',{libro:!!q,pxcm,dims,dbg:dg});}catch(_){}
+      if(ok){toast('Auto: rejilla '+pxcm.toFixed(1).replace('.',',')+' px/cm'+dbg);return;}
+      if(pxcm&&dims){toast(`Rejilla DUDOSA → ${dims.W.toFixed(0)}×${dims.H.toFixed(0)} cm absurdo; mide a mano${dbg}`,'warn');return;}
+      const fv=Math.round(fraccionVerde(tmp)*100); // % de tapete detectado
+      toast(`${q?'libro ✓':'libro ✗'} · rejilla ✗ · tapete ${fv}%${dbg}`,'warn');};
     $('#mdAuto').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);let q=detectarBordesVerde(tmp);if(q){const mX=iw*0.03,mY=ih*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);render();toast('Bordes detectados');}else toast('No detecté el libro sobre fondo verde','warn');};
     $('#mdX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
     $('#mdSave').onclick=async()=>{const r=calc();if(!r||!(r.W>0&&r.H>0)){toast('Coloca la regla y el recuadro primero','warn');return;}
