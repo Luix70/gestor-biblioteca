@@ -603,7 +603,7 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='tapete-forma+probar-quad · 2026-06-30';   // marca de versión (verificar despliegue)
+const APP_BUILD='nsfw-filtro-fix · 2026-06-30';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2058,6 +2058,7 @@ async function buscarCatalogo(page){
   const est=estrellasSel();if(est.length&&est.length<6)params.set('estrellas',est.join(','));
   const ambS=($('#sqAmbito')&&$('#sqAmbito').value)||'';if(ambS)params.set('ambito',ambS);
   const estS=($('#sqEstanteria')&&$('#sqEstanteria').value)||'';if(ambS&&estS)params.set('estanteria',estS);
+  if($('#sqNsfw')&&$('#sqNsfw').checked)params.set('nsfw','1');   // 🔞 Solo NSFW
   if(estadoBusqueda.extra)for(const[k,v]of Object.entries(estadoBusqueda.extra)){if(k!=='etiqueta'&&v!=null&&v!=='')params.set(k,v);}
   pintarChipClas();
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
