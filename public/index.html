@@ -1430,26 +1430,42 @@ function detectarBordesVerde(canvas){
   const w=Math.max(1,Math.round(canvas.width*sc)),h=Math.max(1,Math.round(canvas.height*sc)),N=w*h;
   const t=document.createElement('canvas');t.width=w;t.height=h;t.getContext('2d').drawImage(canvas,0,0,w,h);
   const d=t.getContext('2d').getImageData(0,0,w,h).data;
-  const verde=new Uint8Array(N);
-  let nVerde=0;
+  const verde=new Uint8Array(N); let nVerde=0;
   for(let i=0;i<N;i++){const v=_verdeMat(d[i*4],d[i*4+1],d[i*4+2])?1:0;verde[i]=v;nVerde+=v;}
-  if(nVerde < N*0.15) return null;                       // poco verde → probablemente NO hay alfombrilla
-  // flood-fill del NO-verde desde los 4 bordes → "alrededor" (mesa/marco fuera de la alfombrilla)
+  if(nVerde < N*0.15) return null;                        // poco tapete → probablemente NO hay alfombrilla
+  // DILATAR el tapete (cierre morfológico, radio 2, max-filter separable) para TRAGARSE las LÍNEAS de la
+  // rejilla: son "no-tapete" y, si no, conectan el libro con el exterior y el flood-fill se cuela en él.
+  const r=2, tmp=new Uint8Array(N), mat=new Uint8Array(N);
+  for(let y=0;y<h;y++){const o=y*w;for(let x=0;x<w;x++){let v=0;for(let k=-r;k<=r;k++){const xx=x+k;if(xx>=0&&xx<w&&verde[o+xx]){v=1;break;}}tmp[o+x]=v;}}
+  for(let x=0;x<w;x++)for(let y=0;y<h;y++){let v=0;for(let k=-r;k<=r;k++){const yy=y+k;if(yy>=0&&yy<h&&tmp[yy*w+x]){v=1;break;}}mat[y*w+x]=v;}
+  // flood-fill del EXTERIOR (no-tapete alcanzable desde los bordes) sobre el tapete YA SÓLIDO.
   const fuera=new Uint8Array(N), pila=[];
-  const meter=(x,y)=>{const i=y*w+x;if(x>=0&&x<w&&y>=0&&y<h&&!verde[i]&&!fuera[i]){fuera[i]=1;pila.push(i);}};
-  for(let x=0;x<w;x++){meter(x,0);meter(x,h-1);} for(let y=0;y<h;y++){meter(0,y);meter(w-1,y);}
-  while(pila.length){const i=pila.pop(),x=i%w,y=(i/w)|0;meter(x-1,y);meter(x+1,y);meter(x,y-1);meter(x,y+1);}
-  const esLibro=(x,y)=>{const i=y*w+x;return i>=0&&i<N&&!verde[i]&&!fuera[i];}; // no-verde RODEADO de verde
-  let tl=null,br=null,bl=null,tr=null,n=0;
-  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
-    if(!esLibro(x,y))continue;
-    let nv=0; if(esLibro(x-1,y))nv++; if(esLibro(x+1,y))nv++; if(esLibro(x,y-1))nv++; if(esLibro(x,y+1))nv++;
-    if(nv<3)continue;                                    // erosiona ruido suelto
-    n++; const s=x+y, df=x-y;
+  const meter=i=>{if(!mat[i]&&!fuera[i]){fuera[i]=1;pila.push(i);}};
+  for(let x=0;x<w;x++){meter(x);meter((h-1)*w+x);} for(let y=0;y<h;y++){meter(y*w);meter(y*w+w-1);}
+  while(pila.length){const i=pila.pop(),x=i%w,y=(i/w)|0;if(x>0)meter(i-1);if(x<w-1)meter(i+1);if(y>0)meter(i-w);if(y<h-1)meter(i+w);}
+  // ISLA = no-tapete RODEADO de tapete. Etiquetar componentes conexas y quedarse con la MAYOR (el libro):
+  // así se ignoran restos sueltos fuera y los "agujeros" mat dentro de la cubierta no rompen la forma.
+  const comp=new Int32Array(N); let id=0,bestId=0,bestSz=0;
+  for(let s=0;s<N;s++){
+    if(mat[s]||fuera[s]||comp[s])continue;
+    id++; let sz=0; const st=[s]; comp[s]=id;
+    while(st.length){const i=st.pop();sz++;const x=i%w,y=(i/w)|0;
+      const push=j=>{if(!mat[j]&&!fuera[j]&&!comp[j]){comp[j]=id;st.push(j);}};
+      if(x>0)push(i-1); if(x<w-1)push(i+1); if(y>0)push(i-w); if(y<h-1)push(i+w);}
+    if(sz>bestSz){bestSz=sz;bestId=id;}
+  }
+  if(bestSz < N*0.01) return null;                        // libro demasiado pequeño / no fiable
+  // 4 esquinas de la MAYOR componente (extremos diagonales x±y) — se adapta a giro/trapecio. Erosión: el
+  // píxel de esquina debe tener ≥3 vecinos de la misma componente (evita protuberancias finas).
+  const dela=i=>comp[i]===bestId;
+  let tl=null,br=null,bl=null,tr=null;
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x; if(!dela(i))continue;
+    let nb=0; if(dela(i-1))nb++; if(dela(i+1))nb++; if(dela(i-w))nb++; if(dela(i+w))nb++; if(nb<3)continue;
+    const s=x+y, df=x-y;
     if(tl===null||s<tl[2])tl=[x,y,s]; if(br===null||s>br[2])br=[x,y,s];
     if(bl===null||df<bl[2])bl=[x,y,df]; if(tr===null||df>tr[2])tr=[x,y,df];
   }
-  if(n < N*0.01) return null;                            // isla del libro demasiado pequeña / no fiable
+  if(!tl||!tr||!br||!bl) return null;
   const up=p=>[p[0]/sc,p[1]/sc];
   return [up(tl),up(tr),up(br),up(bl)];
 }
