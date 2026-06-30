@@ -905,8 +905,18 @@ export function rutasPanel() {
             const set = { 'nfc.fecha_vinculacion': new Date() };
             if (req.body?.uid) set['nfc.uid'] = String(req.body.uid).slice(0, 64);
             if (req.body?.url) set['nfc.url_vinculada'] = String(req.body.url).slice(0, 300);
+            // ANTI-DUPLICADO: una etiqueta física (UID) solo puede estar en UN libro. Si este UID ya estaba
+            // en OTRO documento, la etiqueta se ha sobrescrito → desvincúlalo de aquél y avisa (reasignado).
+            let reasignado = null;
+            if (set['nfc.uid']) {
+                const otro = await db.collection('biblioteca').findOne({ 'nfc.uid': set['nfc.uid'], _id: { $ne: _id } }, { projection: { titulo: 1 } });
+                if (otro) {
+                    await db.collection('biblioteca').updateOne({ _id: otro._id }, { $unset: { nfc: '' } });
+                    reasignado = { id: String(otro._id), titulo: otro.titulo || '' };
+                }
+            }
             const r2 = await db.collection('biblioteca').updateOne({ _id }, { $set: set });
-            res.json({ ok: r2.matchedCount > 0, vinculada: true, uid: set['nfc.uid'] || null });
+            res.json({ ok: r2.matchedCount > 0, vinculada: true, uid: set['nfc.uid'] || null, reasignado });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

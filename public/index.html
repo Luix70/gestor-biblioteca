@@ -604,7 +604,7 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='nfc-lote · 2026-06-30';   // marca de versión (verificar despliegue)
+const APP_BUILD='nfc-lote+antidup · 2026-06-30';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2827,11 +2827,12 @@ async function grabarNFC(d,r){
       catch(err){ if(!done){done=true; reject(err);} } };
     rd.scan({signal:ctrl.signal}).catch(err=>{ if(!done){done=true; reject(err);} });
   });
-  const marcar=async uid=>{try{await api('/documentos/'+encodeURIComponent(d._id)+'/nfc',{method:'POST',body:JSON.stringify({uid,url})});}catch(_){}};
+  const marcar=async uid=>{try{return await api('/documentos/'+encodeURIComponent(d._id)+'/nfc',{method:'POST',body:JSON.stringify({uid,url})});}catch(_){return null;}};
   try{
-    const uid=await escribir(recs); await marcar(uid);
-    const m=$('#nfcWrMsg');if(m){m.textContent='✅ Etiqueta grabada y vinculada'+(uid?' · UID '+uid:'')+'.';m.style.color='var(--ok)';}
-    toast('Etiqueta NFC grabada');setTimeout(cerrarCmp,1100);
+    const uid=await escribir(recs); const res=await marcar(uid);
+    const rea=res&&res.reasignado;
+    const m=$('#nfcWrMsg');if(m){m.innerHTML='✅ Etiqueta grabada y vinculada'+(uid?' · UID '+esc(uid):'')+'.'+(rea?`<br><span style="color:var(--warn)">⚠️ Estaba en «${esc(recortar(rea.titulo||'?',40))}» — reasignada a este libro.</span>`:'');m.style.color='var(--ok)';}
+    toast(rea?'Etiqueta reasignada (estaba en otro libro)':'Etiqueta NFC grabada',rea?'warn':'ok');setTimeout(cerrarCmp,rea?2200:1100);
   }catch(e){
     if(e&&e.name==='AbortError')return;                            // cancelado por el usuario
     const m=$('#nfcWrMsg');if(m){m.innerHTML=`No cupo con datos offline (${esc(e.message)}). <button class="btn" id="nfcSolo" style="margin-top:8px">Grabar solo el enlace</button>`;m.style.color='var(--bad)';}
@@ -2878,9 +2879,10 @@ async function procesarEtq(){
   const abort=new AbortController(); _etq.abort=abort;
   try{
     const uid=await escribirEtq(recs,abort); if(gen!==_etqGen)return;
-    try{await api('/documentos/'+encodeURIComponent(id)+'/nfc',{method:'POST',body:JSON.stringify({uid,url})});}catch(_){}
+    let res=null; try{res=await api('/documentos/'+encodeURIComponent(id)+'/nfc',{method:'POST',body:JSON.stringify({uid,url})});}catch(_){}
     doc.nfc={uid:uid||undefined,fecha_vinculacion:new Date().toISOString()};
     try{navigator.vibrate&&navigator.vibrate(70);}catch(_){}
+    if(res&&res.reasignado)toast('⚠️ Etiqueta reasignada (estaba en «'+recortar(res.reasignado.titulo||'?',30)+'»)','warn');
     pintarEtq(doc,r,'ok',uid);
     if(_etq.auto)setTimeout(()=>{ if(_etq&&_etqGen===gen){_etq.i++;procesarEtq();} },900);
   }catch(e){ if(gen!==_etqGen)return;
@@ -2892,9 +2894,10 @@ async function etqSoloEnlace(){
   if(!_etq||!_etq.actual)return; const {doc,r,url}=_etq.actual; const gen=++_etqGen;
   const abort=new AbortController(); _etq.abort=abort; pintarEtq(doc,r,'esperando');
   try{ const uid=await escribirEtq([{recordType:'url',data:url}],abort); if(gen!==_etqGen)return;
-    try{await api('/documentos/'+encodeURIComponent(doc._id)+'/nfc',{method:'POST',body:JSON.stringify({uid,url})});}catch(_){}
+    let res=null; try{res=await api('/documentos/'+encodeURIComponent(doc._id)+'/nfc',{method:'POST',body:JSON.stringify({uid,url})});}catch(_){}
     doc.nfc={uid:uid||undefined,fecha_vinculacion:new Date().toISOString()};
     try{navigator.vibrate&&navigator.vibrate(70);}catch(_){}
+    if(res&&res.reasignado)toast('⚠️ Etiqueta reasignada (estaba en «'+recortar(res.reasignado.titulo||'?',30)+'»)','warn');
     pintarEtq(doc,r,'ok',uid);
     if(_etq.auto)setTimeout(()=>{ if(_etq&&_etqGen===gen){_etq.i++;procesarEtq();} },900);
   }catch(e){ if(gen!==_etqGen)return; if(e&&e.name==='AbortError'){pintarEtq(doc,r,'pausa');return;} pintarEtq(doc,r,'error',e&&e.message); }
