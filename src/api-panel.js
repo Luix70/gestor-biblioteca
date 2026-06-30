@@ -38,7 +38,7 @@ import { describirCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
-const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1 };
+const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1, nfc: 1 };
 
 // Ruta (en /recursos) del fichero original de un documento, SIN codificar: el front la %-codifica por
 // segmentos al usarla (así funciona aunque la carpeta tenga caracteres heredados como '#', '%', espacios).
