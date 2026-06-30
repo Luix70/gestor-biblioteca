@@ -92,6 +92,12 @@ input,select,textarea{background:var(--bg2);border:1px solid var(--line);color:v
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc)}
 textarea{line-height:1.6;resize:vertical;min-height:15em;display:block}
 .sinopsis-text{white-space:pre-wrap;line-height:1.6;font-size:14px;color:var(--txt);margin:0}
+/* Selector de portada (thumbnails antes de enviar) */
+.cpThumb{position:relative;border:2px solid var(--line);border-radius:8px;overflow:hidden;padding:0;background:#0a0d12;cursor:pointer;aspect-ratio:3/4}
+.cpThumb.port{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+.cpThumb img{width:100%;height:100%;object-fit:cover;display:block}
+.cpBadge{position:absolute;top:4px;left:4px;background:var(--acc);color:#04110c;font-size:10px;font-weight:700;padding:2px 5px;border-radius:5px}
+.cpBC{position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.72);color:#fff;font-size:10px;padding:2px 5px;border-radius:5px}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
 .row>div{flex:1;min-width:120px}
 .switch{position:relative;width:52px;height:28px;flex:0 0 auto}
@@ -520,6 +526,10 @@ body.guest .admin-only{display:none!important}
             <span class="muted" id="inTapeteCalEstado" style="font-size:12px"></span>
             <input type="file" id="inTapeteCalFile" accept="image/*" style="display:none">
           </div>
+          <label style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
+            <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inPortada" checked><span class="slider"></span></span>
+            <span class="muted">🖼️ Elegir portada — al subir VARIAS imágenes de un libro, muestra los thumbnails antes de enviar para confirmar/cambiar cuál es la portada (con un default automático: la del código de barras es la contra).</span>
+          </label>
           <datalist id="dlColecciones"></datalist>
           <datalist id="dlAmbitos"></datalist>
           <datalist id="dlEstanterias"></datalist>
@@ -2272,6 +2282,38 @@ async function detectarISBNenFiles(files){
   }
   return null;
 }
+// Índice de la imagen que lleva el CÓDIGO DE BARRAS EAN-13 (suele ser la CONTRAPORTADA), o -1.
+async function indiceConBarcode(files){
+  if(!('BarcodeDetector' in window))return -1;
+  let det;try{det=new BarcodeDetector({formats:['ean_13']});}catch(_){return -1;}
+  for(let i=0;i<files.length;i++){const f=files[i];if(!/^image\//.test(f.type||''))continue;
+    try{const bmp=await createImageBitmap(f);const codes=await det.detect(bmp);if(bmp.close)bmp.close();
+      if((codes||[]).some(c=>/^97[89]\d{10}$/.test(String(c.rawValue||'').replace(/\D/g,''))))return i;}catch(_){}}
+  return -1;
+}
+// Selector de PORTADA antes de enviar: thumbnails + default inteligente (si la 1.ª lleva el código de barras
+// —contraportada— se adelanta una imagen SIN barcode). Tocar una la pone de portada. Devuelve el array
+// reordenado (portada 1.ª) o null si se cancela.
+function elegirPortada(files){
+  return new Promise(async resolve=>{
+    let orden=files.slice();
+    const urlMap=new Map(orden.map(f=>[f,URL.createObjectURL(f)]));
+    let bcFile=null; const bi=await indiceConBarcode(orden).catch(()=>-1);
+    if(bi>=0)bcFile=orden[bi];
+    if(bi===0){const alt=orden.find((f,i)=>i!==0 && /^image\//.test(f.type||''));if(alt)orden=[alt,...orden.filter(f=>f!==alt)];}
+    const cerrar=()=>{for(const u of urlMap.values())try{URL.revokeObjectURL(u);}catch(_){};$('#cmpScrim').style.display='none';$('#cmpModal').style.display='none';$('#cmpModal').innerHTML='';};
+    const pintar=()=>{$('#cpGrid').innerHTML=orden.map((f,i)=>`<button type="button" class="cpThumb${i===0?' port':''}" data-i="${i}"><img src="${esc(urlMap.get(f))}" loading="lazy">${i===0?'<span class="cpBadge">PORTADA</span>':''}${f===bcFile?'<span class="cpBC">código</span>':''}</button>`).join('');
+      $$('#cpGrid .cpThumb').forEach(el=>el.onclick=()=>{const i=+el.dataset.i;if(i>0){const f=orden[i];orden=[f,...orden.filter(x=>x!==f)];pintar();}});};
+    $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:92vh;overflow:auto"><h3 style="margin-top:0">🖼️ Elegir portada</h3>
+      <p class="muted" style="font-size:12px;margin:6px 0 10px">Toca la imagen que sea la PORTADA (pasará a la 1.ª). El resto mantiene su orden. La marcada «código» es la contraportada.</p>
+      <div id="cpGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px"><button class="btn" id="cpX">Cancelar</button><button class="btn pri" id="cpOk">Enviar</button></div></div>`;
+    $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+    pintar();
+    $('#cpX').onclick=()=>{cerrar();resolve(null);};
+    $('#cpOk').onclick=()=>{cerrar();resolve(orden);};
+  });
+}
 function wireInbox(){
   const dz=$('#dropZone'),fi=$('#fileInput');
   if($('#pickBtn'))$('#pickBtn').onclick=()=>fi&&fi.click();
@@ -2291,6 +2333,9 @@ function wireInbox(){
   // Modo Tapete PERSISTENTE: medir + recortar el libro sobre la alfombrilla al subir.
   const tp=$('#inTapete');
   if(tp){tp.checked=localStorage.getItem('inbox_tapete')==='1';tp.onchange=()=>localStorage.setItem('inbox_tapete',tp.checked?'1':'0');}
+  // Elegir portada PERSISTENTE (por defecto activado).
+  const inP=$('#inPortada');
+  if(inP){inP.checked=localStorage.getItem('inbox_portada')!=='0';inP.onchange=()=>localStorage.setItem('inbox_portada',inP.checked?'1':'0');}
   // Calibración del tapete (foto del tapete vacío): fija su color de sesión (cualquier color / luz).
   const tcb=$('#inTapeteCal'),tcf=$('#inTapeteCalFile');
   if(tcb&&tcf){tcb.onclick=()=>tcf.click();
@@ -2513,6 +2558,13 @@ async function subirInbox(files, extra){
       setInboxEstado(r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · tapete recortado`:'✂️ Recortado (sin medida fiable)');
     }catch(e){console.warn('[tapete]',e&&e.message);}
   }
+  // ELEGIR PORTADA: con el switch activo y VARIAS fotos de un libro, confirmar/cambiar la portada antes de
+  // enviar (default automático: la del código de barras es la contra). Cancelar aborta el envío.
+  {const imgs=files.filter(_esImg);
+   if($('#inPortada')&&$('#inPortada').checked && imgs.length>=2 && imgs.length<=12 && imgs.length===files.length){
+     setInboxEstado('🖼️ Elige la portada…');
+     const r=await elegirPortada(files); if(!r){setInboxEstado('');return;} files=r; setInboxEstado('');
+   }}
   const supervisado=$('#inSupervisar')&&$('#inSupervisar').checked;
   if(supervisado){
     let isbn=extra.isbn||null,origenMovil=extra.isbnOrigen==='movil';
