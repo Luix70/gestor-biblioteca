@@ -2015,6 +2015,7 @@ function construirSearch(){
         <div><label>Estrellas</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
           <div class="pop">${[5,4,3,2,1].map(n=>`<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label></div>
         </details></div>
+        <div class="admin-only"><label>NSFW</label><div style="display:flex;align-items:center;height:36px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--mut)"><input type="checkbox" id="sqNsfw" style="width:auto;margin:0"> 🔞 Solo</label></div></div>
         <div><label>Orden</label><select id="sqOrden"><option value="reciente">Recientes</option><option value="titulo">Título A-Z</option><option value="antiguo">Antiguos</option></select></div>
         <div class="admin-only"><label>Descubrir</label><div style="display:flex;align-items:center;gap:6px;height:36px"><label class="switch" style="flex:0 0 auto"><input type="checkbox" id="sqDescubrir"><span class="slider"></span></label><span class="muted" title="Busca en el Fichero (58,7 M) libros que NO tienes, con enlaces para conseguirlos">🔭 Fichero</span></div></div>
       </div>
@@ -2040,9 +2041,11 @@ function construirSearch(){
   $('#sqOrden').onchange=()=>buscarCatalogo(1);
   if($('#sqDescubrir'))$('#sqDescubrir').onchange=()=>buscarCatalogo(1);
   $$('#p-search .sqStar').forEach(c=>c.onchange=()=>{actualizarSumEstrellas();buscarCatalogo(1);});
+  if($('#sqNsfw'))$('#sqNsfw').onchange=()=>buscarCatalogo(1);
   $('#sqClear').onclick=()=>{$('#sqQ').value='';$('#sqCdu').value='';$('#sqTipo').value='';if($('#sqSoporte'))$('#sqSoporte').value='';$('#sqOrden').value='reciente';
     if($('#sqAmbito'))$('#sqAmbito').value='';if($('#sqEstanteria')){$('#sqEstanteria').value='';pintarEstanteriaSearch();}
     if($('#sqDescubrir'))$('#sqDescubrir').checked=false;if($('#searchExternal'))$('#searchExternal').innerHTML='';
+    if($('#sqNsfw'))$('#sqNsfw').checked=false;
     $$('#p-search .sqStar').forEach(c=>c.checked=false);estadoBusqueda.extra=null;actualizarSumEstrellas();buscarCatalogo(1);};
 }
 function estrellasSel(){return $$('#p-search .sqStar:checked').map(c=>c.value);}
