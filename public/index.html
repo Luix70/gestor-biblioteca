@@ -101,6 +101,13 @@ textarea{line-height:1.6;resize:vertical;min-height:15em;display:block}
 .switch input:checked+.slider{background:linear-gradient(135deg,var(--acc),var(--acc2));border-color:transparent}
 .switch input:checked+.slider:before{transform:translateX(24px);background:#fff}
 .muted{color:var(--mut)}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+/* Tarjeta plegable (details/summary) reutilizable: chevron que gira; el resumen actúa de cabecera. */
+details.foldcard>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;color:var(--txt)}
+details.foldcard>summary::-webkit-details-marker{display:none}
+details.foldcard>summary::before{content:'▸';color:var(--mut);font-size:12px;transition:transform .15s}
+details.foldcard[open]>summary::before{transform:rotate(90deg)}
+details.foldcard>summary h3{display:inline;margin:0;font-size:15px}
+details.foldcard[open]>summary{margin-bottom:12px}
 .empty{text-align:center;color:var(--mut);padding:36px 10px}
 .sec-h{display:flex;align-items:center;gap:12px;margin-bottom:18px}.sec-h h2{font-size:20px;font-weight:600;flex:1}
 /* toast */
@@ -355,11 +362,11 @@ body.guest .admin-only{display:none!important}
             </div>
             <p class="muted" style="font-size:12px;margin-top:10px">Al pausarlo, los ficheros que sueltes en el Inbox esperan sin catalogarse. Útil para soltar muchos a la vez y procesarlos cuando quieras.</p>
           </div>
-          <div class="card"><h3>🧭 Estado del Conformador</h3><div id="mEstado"></div></div>
+          <details class="card foldcard" id="fcConformador" data-fold="open" open><summary><h3>🧭 Estado del Conformador</h3></summary><div id="mEstado"></div></details>
         </div>
         <div class="grid g2" style="margin-top:16px">
-          <div class="card admin-only">
-            <h3>🧹 Lanzar mantenimiento</h3>
+          <details class="card foldcard admin-only" id="fcMantenimiento" data-fold="open" open>
+            <summary><h3>🧹 Lanzar mantenimiento</h3></summary>
             <div class="row">
               <div><label>Activar (cuándo)</label><select id="mActivar">
                 <option value="0">Ahora mismo</option><option value="10">En 10 s</option>
@@ -372,18 +379,18 @@ body.guest .admin-only{display:none!important}
               <button class="btn bad" id="mStop">■ Detener</button>
             </div>
             <p class="muted" style="margin-top:12px;font-size:12px">Procesa 25 documentos por ronda, cede a la ingesta y reintenta hasta vaciar el backlog.</p>
-          </div>
-          <div class="card">
-            <h3>🩺 Integridad del archivo</h3>
+          </details>
+          <details class="card foldcard" id="fcIntegridad" data-fold="pc">
+            <summary><h3>🩺 Integridad del archivo</h3></summary>
             <p class="muted" style="margin-top:0;font-size:12px">Coherencia BD↔disco: docs sin carpeta/fichero, carpetas huérfanas, ruta_base, ramas vacías, duplicados por hash y Cuarentena/duplicados.</p>
             <div class="row">
               <button class="btn" id="integDiag">🩺 Diagnosticar</button>
               <button class="btn bad admin-only" id="integFix">🛠 Diagnosticar y reparar</button>
             </div>
             <p class="muted" style="margin-top:10px;font-size:12px">Reparar es seguro: todo lo retirado va a la Papelera. Programable con DSM: <span class="mono">docker exec gestor-biblioteca node scripts/integridad.js --reparar</span>.</p>
-          </div>
-          <div class="card admin-only">
-            <h3>🧼 Sanear catálogo</h3>
+          </details>
+          <details class="card foldcard admin-only" id="fcSanear" data-fold="pc">
+            <summary><h3>🧼 Sanear catálogo</h3></summary>
             <p class="muted" style="margin-top:0;font-size:12px">Re-deriva con el pipeline actual: re-aloja carpetas con caracteres rotos (#, %), recupera portadas que faltan y, opcional, re-ingiere cómics mal archivados como obra. Sin pérdida de datos (mover seguro / Papelera).</p>
             <div class="row" style="align-items:center">
               <button class="btn" id="sanDiag">🔎 Diagnosticar</button>
@@ -392,30 +399,30 @@ body.guest .admin-only{display:none!important}
               <span class="muted" title="Re-ingiere cómics mal archivados como obra (usa APIs/IA; más lento)">incluir re-clasificación (IA)</span>
             </div>
             <div id="sanOut" style="margin-top:12px"></div>
-          </div>
-          <div class="card admin-only">
-            <h3>👁️ Visión (IA) · rotación de proveedores</h3>
+          </details>
+          <details class="card foldcard admin-only" id="fcVision" data-fold="pc">
+            <summary><h3>👁️ Visión (IA) · rotación de proveedores</h3></summary>
             <p class="muted" style="margin-top:0;font-size:12px">Claves en <span class="mono">.env</span> (numeradas: <span class="mono">GROQ_API_KEY_1</span>, <span class="mono">_2</span>…). Se prueban GRATIS primero, de pago al final. Aquí solo se activan/desactivan y se prueban (los secretos no salen del servidor).</p>
             <div class="row"><button class="btn" id="visRefresh">↻ Actualizar</button></div>
             <div id="visOut" style="margin-top:12px"></div>
-          </div>
-          <div class="card">
-            <h3>🔎 Búsqueda (índice FTS)</h3>
+          </details>
+          <details class="card foldcard" id="fcBusquedaFts" data-fold="pc">
+            <summary><h3>🔎 Búsqueda (índice FTS)</h3></summary>
             <p class="muted" style="margin-top:0;font-size:12px">Índice local SQLite para una búsqueda RÁPIDA e insensible a acentos ("matematicas" encuentra "Matemáticas"). Se mantiene solo al ingerir/editar/borrar; reindexa tras el 1.er despliegue o si la búsqueda parece incompleta. Sin índice, la búsqueda cae a Mongo.</p>
             <div class="row" style="align-items:center">
               <button class="btn admin-only" id="reindexBtn">🔁 Reindexar</button>
               <span class="muted" id="indiceEstado" style="font-size:12px">…</span>
             </div>
             <p class="muted" style="margin-top:10px;font-size:12px">CLI: <span class="mono">docker exec gestor-biblioteca node scripts/reindexar-busqueda.js</span>.</p>
-          </div>
-          <div class="card admin-only">
-            <h3>🔞 Permisos de invitados</h3>
+          </details>
+          <details class="card foldcard admin-only" id="fcPermisos" data-fold="pc">
+            <summary><h3>🔞 Permisos de invitados</h3></summary>
             <p class="muted" style="margin-top:0;font-size:12px">Por defecto los invitados NO ven el contenido marcado NSFW (🔞) ni lo que cuelga de una obra/colección NSFW. Actívalo para permitírselo.</p>
             <div class="row" style="align-items:center">
               <label class="switch" style="flex:0 0 auto"><input type="checkbox" id="guestNsfw"><span class="slider"></span></label>
               <span class="muted">Invitados pueden ver contenido NSFW (🔞)</span>
             </div>
-          </div>
+          </details>
         </div>
         <div id="integOut" style="margin-top:16px"></div>
         <div class="card" style="margin-top:16px">
@@ -1856,7 +1863,8 @@ async function aplicarGrupo(kind,{id,nombre,tipo}){
 function construirSearch(){
   $('#p-search').innerHTML=`
     <div class="sec-h"><h2>Búsqueda y catálogo</h2><span class="muted" id="searchCount"></span></div>
-    <div class="card" style="margin-bottom:16px">
+    <details class="card foldcard" id="sqFiltros" style="margin-bottom:16px">
+      <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
         <div style="display:flex;align-items:flex-end"><button class="btn" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
@@ -1872,12 +1880,15 @@ function construirSearch(){
         <div><label>Orden</label><select id="sqOrden"><option value="reciente">Recientes</option><option value="titulo">Título A-Z</option><option value="antiguo">Antiguos</option></select></div>
         <div class="admin-only"><label>Descubrir</label><div style="display:flex;align-items:center;gap:6px;height:36px"><label class="switch" style="flex:0 0 auto"><input type="checkbox" id="sqDescubrir"><span class="slider"></span></label><span class="muted" title="Busca en el Fichero (58,7 M) libros que NO tienes, con enlaces para conseguirlos">🔭 Fichero</span></div></div>
       </div>
-    </div>
+    </details>
     <div id="searchChip" style="margin-bottom:12px"></div>
     <div id="searchBulk"></div>
+    <div id="searchPagerTop" style="margin:0 0 12px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap"></div>
     <div id="searchResults"></div>
     <div id="searchPager" style="margin-top:16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap"></div>
     <div id="searchExternal" style="margin-top:20px"></div>`;
+  // Filtros plegables: en PC desplegados, en móvil colapsados (recordando la última preferencia del usuario).
+  {const fl=$('#sqFiltros');if(fl){const sav=localStorage.getItem('sq_filtros');fl.open=(sav===null)?matchMedia('(min-width:860px)').matches:(sav==='1');fl.addEventListener('toggle',()=>localStorage.setItem('sq_filtros',fl.open?'1':'0'));}}
   $('#sqQ').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
   $('#sqQ').onkeydown=e=>{if(e.key==='Enter'){clearTimeout(busqTimer);buscarCatalogo(1);if($('#sqDescubrir')&&$('#sqDescubrir').checked)lanzarDescubrir();}};
   $('#sqCdu').oninput=()=>{clearTimeout(busqTimer);busqTimer=setTimeout(()=>buscarCatalogo(1),350);};
@@ -1986,9 +1997,13 @@ function pintarBusqueda(r){
   attachRating('#searchResults');
   renderBulk();
   const p=r.page,tp=r.paginas;
-  $('#searchPager').innerHTML=tp>1?`<button class="btn" id="pgPrev" ${p<=1?'disabled':''}>‹ Anterior</button><span class="muted">Página ${p} de ${tp}</span><button class="btn" id="pgNext" ${p>=tp?'disabled':''}>Siguiente ›</button>`:'';
-  if($('#pgPrev'))$('#pgPrev').onclick=()=>buscarCatalogo(p-1);
-  if($('#pgNext'))$('#pgNext').onclick=()=>buscarCatalogo(p+1);
+  // Paginación ARRIBA y ABAJO de los thumbnails. Al cambiar de página, desliza hasta el primer resultado.
+  const pagerHtml=tp>1?`<button class="btn pgPrev" ${p<=1?'disabled':''}>‹ Anterior</button><span class="muted">Página ${p} de ${tp}</span><button class="btn pgNext" ${p>=tp?'disabled':''}>Siguiente ›</button>`:'';
+  $('#searchPager').innerHTML=pagerHtml; if($('#searchPagerTop'))$('#searchPagerTop').innerHTML=pagerHtml;
+  const irA=async np=>{await buscarCatalogo(np);const a=$('#searchPagerTop')||$('#searchResults');if(a)a.scrollIntoView({behavior:'smooth',block:'start'});};
+  ['#searchPagerTop','#searchPager'].forEach(sel=>{const c=$(sel);if(!c)return;
+    const pv=c.querySelector('.pgPrev'),nx=c.querySelector('.pgNext');
+    if(pv&&!pv.disabled)pv.onclick=()=>irA(p-1); if(nx&&!nx.disabled)nx.onclick=()=>irA(p+1);});
 }
 
 // ── logs ──
@@ -2070,7 +2085,17 @@ async function sanearRun(){const reclas=$('#sanReclas').checked;
     }catch(e){}},1500);
   }catch(e){toast(e.message,'bad');$('#sanRun').disabled=false;$('#sanDiag').disabled=false;}}
 // Página "Actividad": vigilante + conformador + mantenimiento + integridad + logs (al final).
-function loadActivity(){refrescarEstado();loadInteg();logAuto();}
+function loadActivity(){refrescarEstado();loadInteg();logAuto();aplicarPliegueActividad();}
+// Pliegue de las fichas de Actividad: data-fold="open" siempre desplegada; data-fold="pc" desplegada en
+// PC y colapsada en móvil. Se recuerda la última preferencia por ficha (localStorage).
+function aplicarPliegueActividad(){
+  const pc=matchMedia('(min-width:860px)').matches;
+  $$('#p-activity details.foldcard[data-fold]').forEach(d=>{
+    const id=d.id, sav=id?localStorage.getItem('fold_'+id):null;
+    d.open = (sav!==null)?(sav==='1'):(d.dataset.fold==='open'?true:(d.dataset.fold==='pc'?pc:false));
+    if(id&&!d._foldWired){d._foldWired=1;d.addEventListener('toggle',()=>localStorage.setItem('fold_'+id,d.open?'1':'0'));}
+  });
+}
 const INTEG_FASES={cargando:'Cargando documentos…','docs-sin-carpeta':'Comprobando carpetas','docs-sin-fichero':'Comprobando ficheros','recorrido-arbol':'Recorriendo el árbol CDU','duplicados-hash':'Buscando duplicados por hash',cuarentena:'Revisando Cuarentena',reparando:'Reparando (a la Papelera)…',hecho:'Terminado'};
 let integTimer=null;
 async function correrIntegridad(reparar){
