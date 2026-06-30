@@ -1318,6 +1318,17 @@ const _dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
 // Robustez: (1) máscara verde laxa; (2) si hay poco verde → null (no hay alfombrilla); (3) flood-fill del
 // NO-verde desde los BORDES → quita la mesa/marco no verde de alrededor; (4) el LIBRO = isla no-verde
 // RODEADA de verde (no conectada al borde); (5) esquinas = extremos diagonales (x±y). Devuelve [TL,TR,BR,BL]|null.
+// Regla ÚNICA de "píxel del tapete verde". El tapete suele ser verde OSCURO/teal (b cerca de g), así que
+// se exige verde DOMINANTE (g>=r, g>=b) con margen sobre el min — eso detecta bien el tapete. Y se EXCLUYE
+// el gris-verde PÁLIDO de muchas portadas (claro y poco saturado): si g es alto y la saturación baja, NO es
+// tapete (antes contaba como verde y metía el recuadro dentro del libro).
+function _verdeMat(r,g,b){const mn=r<b?r:b;return g>=r&&g>=b&&(g-mn)>14&&!(g>150&&(g-mn)<g*0.22);}
+// Fracción de píxeles de tapete (diagnóstico para calibrar): submuestrea y cuenta verdes.
+function fraccionVerde(canvas){const maxD=400,sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
+  const w=Math.max(1,Math.round(canvas.width*sc)),h=Math.max(1,Math.round(canvas.height*sc)),N=w*h;
+  const t=document.createElement('canvas');t.width=w;t.height=h;t.getContext('2d').drawImage(canvas,0,0,w,h);
+  const d=t.getContext('2d').getImageData(0,0,w,h).data;let nv=0;
+  for(let i=0;i<N;i++)if(_verdeMat(d[i*4],d[i*4+1],d[i*4+2]))nv++; return nv/N;}
 function detectarBordesVerde(canvas){
   const maxD=720, sc=Math.min(1,maxD/Math.max(canvas.width,canvas.height));
   const w=Math.max(1,Math.round(canvas.width*sc)),h=Math.max(1,Math.round(canvas.height*sc)),N=w*h;
@@ -1325,10 +1336,7 @@ function detectarBordesVerde(canvas){
   const d=t.getContext('2d').getImageData(0,0,w,h).data;
   const verde=new Uint8Array(N);
   let nVerde=0;
-  // Verde del TAPETE = verde dominante y SATURADO (g supera a r y a b con margen). Usar max(r,b) -no min-
-  // descarta el gris-verde PÁLIDO de muchas portadas (p.ej. fondo claro), que antes contaba como tapete y
-  // dejaba el recuadro metido DENTRO del libro (solo rodeaba el contenido impreso oscuro).
-  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];const v=(g>50&&(g-Math.max(r,b))>12)?1:0;verde[i]=v;nVerde+=v;}
+  for(let i=0;i<N;i++){const v=_verdeMat(d[i*4],d[i*4+1],d[i*4+2])?1:0;verde[i]=v;nVerde+=v;}
   if(nVerde < N*0.15) return null;                       // poco verde → probablemente NO hay alfombrilla
   // flood-fill del NO-verde desde los 4 bordes → "alrededor" (mesa/marco fuera de la alfombrilla)
   const fuera=new Uint8Array(N), pila=[];
@@ -1359,7 +1367,7 @@ function detectarRejillaPxCm(canvas){
   const t=document.createElement('canvas');t.width=w;t.height=h;t.getContext('2d').drawImage(canvas,0,0,w,h);
   const d=t.getContext('2d').getImageData(0,0,w,h).data;
   const gris=new Float32Array(N), verde=new Uint8Array(N); let nVerde=0;
-  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];gris[i]=0.299*r+0.587*g+0.114*b;if(g>50&&(g-Math.max(r,b))>12){verde[i]=1;nVerde++;}}
+  for(let i=0;i<N;i++){const r=d[i*4],g=d[i*4+1],b=d[i*4+2];gris[i]=0.299*r+0.587*g+0.114*b;if(_verdeMat(r,g,b)){verde[i]=1;nVerde++;}}
   if(nVerde < N*0.10) return null;                       // poca alfombrilla a la vista
   // Gradiente SOLO sobre el tapete (verde): captura las líneas de la rejilla, NO los bordes del libro.
   const colp=new Float32Array(w), rowp=new Float32Array(h);
@@ -1401,11 +1409,14 @@ function abrirEditorImagen(i){
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edSave">Guardar</button></div></div>`;
     $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
     const c=$('#edC'),ctx=c.getContext('2d');
-    let escala=1;
-    const ajustar=()=>{const maxW=Math.min(520,(window.innerWidth||520)-60);escala=Math.min(1,maxW/work.width);c.width=Math.round(work.width*escala);c.height=Math.round(work.height*escala);};
+    let escala=1; const base=document.createElement('canvas'), bctx=base.getContext('2d');
+    // base = imagen YA escalada a pantalla; se reconstruye solo al cambiar work/escala (rotar, recortar,
+    // perspectiva, reset), NO en cada arrastre → arrastrar solo blitea base + dibuja tiradores (sin freeze).
+    const ajustar=()=>{const maxW=Math.min(520,(window.innerWidth||520)-60);escala=Math.min(1,maxW/work.width);c.width=Math.round(work.width*escala);c.height=Math.round(work.height*escala);base.width=c.width;base.height=c.height;bctx.clearRect(0,0,base.width,base.height);bctx.drawImage(work,0,0,base.width,base.height);};
     const W2V=p=>[p[0]*escala,p[1]*escala], V2W=(x,y)=>[x/escala,y/escala];
+    let raf=0; const pedir=()=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;render();});}; // throttle a 1/frame
     const render=()=>{
-      ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(work,0,0,c.width,c.height);
+      ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(base,0,0);
       const pts = modo==='crop'?[[crop.x0,crop.y0],[crop.x1,crop.y0],[crop.x1,crop.y1],[crop.x0,crop.y1]] : modo==='persp'?quad : null;
       if(pts){ ctx.save();ctx.strokeStyle='#28d9a8';ctx.lineWidth=2;ctx.fillStyle='rgba(40,217,168,.12)';
         ctx.beginPath();pts.forEach((p,k)=>{const v=W2V(p);k?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]);});ctx.closePath();ctx.fill();ctx.stroke();
@@ -1428,7 +1439,7 @@ function abrirEditorImagen(i){
     c.addEventListener('pointerdown',ev=>{ if(modo==='none')return; ev.preventDefault(); const p=pos(ev),hs=handles();let best=-1,bd=34/escala; hs.forEach((h,k)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best=k;}}); drag=best; });
     c.addEventListener('pointermove',ev=>{ if(drag<0)return; ev.preventDefault(); let[x,y]=pos(ev);const mX=work.width*0.03,mY=work.height*0.03;x=Math.max(mX,Math.min(work.width-mX,x));y=Math.max(mY,Math.min(work.height-mY,y));
       if(modo==='crop'){ if(drag===0){crop.x0=x;crop.y0=y;}else if(drag===1){crop.x1=x;crop.y0=y;}else if(drag===2){crop.x1=x;crop.y1=y;}else{crop.x0=x;crop.y1=y;} }
-      else { quad[drag]=[x,y]; } render(); });
+      else { quad[drag]=[x,y]; } pedir(); });
     const soltar=()=>{drag=-1;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
     $('#edApply').onclick=()=>{
       if(modo==='crop'){ const x0=Math.min(crop.x0,crop.x1),y0=Math.min(crop.y0,crop.y1),w=Math.abs(crop.x1-crop.x0),h=Math.abs(crop.y1-crop.y0);
@@ -1484,10 +1495,13 @@ function medirDimensiones(id, imagenes){
     const maxW=Math.min(520,(window.innerWidth||520)-60), escala=Math.min(1,maxW/iw);
     c.width=Math.round(iw*escala);c.height=Math.round(ih*escala);
     const W2V=p=>[p[0]*escala,p[1]*escala], V2W=(x,y)=>[x/escala,y/escala];
+    // base = imagen ya escalada (una vez); arrastrar solo blitea base + dibuja recuadro/regla (sin freeze).
+    const base=document.createElement('canvas');base.width=c.width;base.height=c.height;base.getContext('2d').drawImage(src,0,0,base.width,base.height);
+    let raf=0; const pedir=()=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;render();});}; // throttle a 1/frame
     const calc=()=>{const pxcm=pxcmAuto||(_dist(regla[0],regla[1])/(cm||1));if(!pxcm||!isFinite(pxcm))return null;
       return {W:(_dist(quad[0],quad[1])+_dist(quad[3],quad[2]))/2/pxcm, H:(_dist(quad[0],quad[3])+_dist(quad[1],quad[2]))/2/pxcm};};
     const aro=(p,fill)=>{const v=W2V(p);ctx.beginPath();ctx.arc(v[0],v[1],11,0,7);ctx.fillStyle=fill;ctx.fill();ctx.lineWidth=2.5;ctx.strokeStyle='#fff';ctx.stroke();};
-    const render=()=>{ ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(src,0,0,c.width,c.height);
+    const render=()=>{ ctx.clearRect(0,0,c.width,c.height);ctx.drawImage(base,0,0);
       ctx.save();ctx.strokeStyle='#28d9a8';ctx.lineWidth=2;ctx.fillStyle='rgba(40,217,168,.10)';ctx.beginPath();quad.forEach((p,k)=>{const v=W2V(p);k?ctx.lineTo(v[0],v[1]):ctx.moveTo(v[0],v[1]);});ctx.closePath();ctx.fill();ctx.stroke();quad.forEach(p=>aro(p,'rgba(40,217,168,.92)'));
       ctx.strokeStyle='#1ba3ff';ctx.lineWidth=3;const a=W2V(regla[0]),b=W2V(regla[1]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();regla.forEach(p=>aro(p,'rgba(27,163,255,.95)'));ctx.restore();
       const r=calc();$('#mdOut').textContent=r?`≈ ${r.W.toFixed(1).replace('.',',')} × ${r.H.toFixed(1).replace('.',',')} cm${pxcmAuto?' · auto':''}`:''; };
@@ -1496,7 +1510,7 @@ function medirDimensiones(id, imagenes){
     c.addEventListener('pointerdown',ev=>{ev.preventDefault();const p=pos(ev);let best=null,bd=34/escala;
       quad.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'q',i};}});
       regla.forEach((h,i)=>{const dd=_dist(h,p);if(dd<bd){bd=dd;best={s:'r',i};}});drag=best;});
-    c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);const mX=iw*0.03,mY=ih*0.03;x=Math.max(mX,Math.min(iw-mX,x));y=Math.max(mY,Math.min(ih-mY,y));if(drag.s==='r')pxcmAuto=null;/* tocar la regla → escala manual */(drag.s==='q'?quad:regla)[drag.i]=[x,y];render();});
+    c.addEventListener('pointermove',ev=>{if(!drag)return;ev.preventDefault();let[x,y]=pos(ev);const mX=iw*0.03,mY=ih*0.03;x=Math.max(mX,Math.min(iw-mX,x));y=Math.max(mY,Math.min(ih-mY,y));if(drag.s==='r')pxcmAuto=null;/* tocar la regla → escala manual */(drag.s==='q'?quad:regla)[drag.i]=[x,y];pedir();});
     const soltar=()=>{drag=null;};c.addEventListener('pointerup',soltar);c.addEventListener('pointercancel',soltar);
     $('#mdCm').oninput=()=>{cm=parseFloat($('#mdCm').value)||0;pxcmAuto=null;/* la regla manual manda */render();};
     $('#mdAutoMed').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);
@@ -1504,10 +1518,9 @@ function medirDimensiones(id, imagenes){
       const q=detectarBordesVerde(tmp); if(q)quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);
       const pxcm=detectarRejillaPxCm(tmp); pxcmAuto=pxcm||null;
       render();
-      if(!q&&!pxcm)toast('No detecté libro ni rejilla; mide a mano','warn');
-      else if(!pxcm)toast('Detecté el libro pero no la rejilla; pon la regla a mano','warn');
-      else if(!q)toast('Detecté la rejilla pero no el libro; coloca el recuadro','warn');
-      else toast('Auto: rejilla '+pxcm.toFixed(1).replace('.',',')+' px/cm');};
+      if(q&&pxcm){toast('Auto: rejilla '+pxcm.toFixed(1).replace('.',',')+' px/cm');return;}
+      const fv=Math.round(fraccionVerde(tmp)*100); // diagnóstico: % de tapete detectado (para calibrar)
+      toast(`${q?'libro ✓':'libro ✗'} · ${pxcm?'rejilla ✓':'rejilla ✗'} · tapete ${fv}%`,'warn');};
     $('#mdAuto').onclick=()=>{const tmp=document.createElement('canvas');tmp.width=iw;tmp.height=ih;tmp.getContext('2d').drawImage(src,0,0);let q=detectarBordesVerde(tmp);if(q){const mX=iw*0.03,mY=ih*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));quad=q.map(p=>[cl(p[0],mX,iw-mX),cl(p[1],mY,ih-mY)]);render();toast('Bordes detectados');}else toast('No detecté el libro sobre fondo verde','warn');};
     $('#mdX').onclick=cerrarCmp;$('#cmpScrim').onclick=cerrarCmp;
     $('#mdSave').onclick=async()=>{const r=calc();if(!r||!(r.W>0&&r.H>0)){toast('Coloca la regla y el recuadro primero','warn');return;}
