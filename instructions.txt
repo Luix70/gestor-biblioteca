@@ -223,7 +223,129 @@ de ficheros clasificado por CDU.
 
 
 ────────────────────────────────────────────────────────────────────────────────
-7. API REST — REFERENCIA DE ENDPOINTS
+7. EL PANEL DE CONTROL WEB (la app que usas a diario)
+────────────────────────────────────────────────────────────────────────────────
+
+  Además del Inbox por carpeta, la app sirve un PANEL WEB completo en la raíz
+  (http://<nas>:3000/ — o vía proxy del NAS). Es una sola página (public/index.html)
+  con todas las funciones. Pensado MÓVIL-FIRST e instalable como app (PWA).
+
+  ACCESO Y SESIÓN
+    · Login con usuario/contraseña: rol ADMIN (todo) o INVITADO (solo lectura;
+      no cambia NADA en la base ni dispara IA, y por defecto no ve el contenido
+      🔞 NSFW). La sesión usa un token firmado que SOBREVIVE a reinicios del
+      contenedor y dura ~2 días (no hay que reloguear a cada rato).
+    · Instalar como app (PWA): el navegador ofrece "Instalar"/"Añadir a inicio".
+      Queda como icono propio ("Bibliotheca Ludoviciana").
+
+  NAVEGACIÓN (menú ≡): Búsqueda · Inbox · Ubicaciones · Actividad · Cuarentena.
+  En móvil el botón Atrás del teléfono navega hacia atrás (doble-atrás = salir).
+
+  ── BÚSQUEDA Y CATÁLOGO ──────────────────────────────────────────────────────
+    · Caja de búsqueda (título, autor, editorial, ISBN, ISSN, nombre de archivo).
+      Rápida e INSENSIBLE A ACENTOS gracias a un índice local SQLite-FTS
+      ("matematicas" encuentra "Matemáticas"); si el índice no está, cae a Mongo.
+    · Panel de filtros PLEGABLE (desplegado en PC, colapsado en móvil):
+        - Tipo (Libros/Revistas/Cómics)
+        - Soporte (Papel/Digital)
+        - Ámbito y Estantería (ubicación física)
+        - CDU (prefijo)
+        - Estrellas (valoración, multi-selección; "sin valorar")
+        - 🔞 Solo NSFW (admin)  — filtra a lo marcado como NSFW
+        - Orden (recientes / título A-Z / antiguos)
+    · Resultados como tarjetas con miniatura; PAGINACIÓN arriba y abajo (al pasar
+      de página, el scroll sube al primer resultado).
+    · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
+    · Borrado por LOTES (admin, pide contraseña): selecciona varios y elimínalos.
+    · 🔭 Descubrir (Fichero): busca en el volcado offline OL+BNE (58,7 M) libros
+      que NO tienes, con enlaces para conseguirlos (Anna's/Z-Lib/Libgen/Gutenberg).
+
+  ── FICHA DE UN DOCUMENTO ────────────────────────────────────────────────────
+    Datos catalográficos; identificadores (ISBN/ISSN) "clicables" (buscan todo lo
+    que comparte ese identificador); "otras ediciones" (ISBN alternativos con rol);
+    SINOPSIS; CDU y demás clasificaciones con su título + ⓘ (texto largo) + nº de
+    documentos que comparten el código (clic = búsqueda filtrada); chip 📍 con la
+    UBICACIÓN (clic = ver los libros de esa estantería). Acciones (admin):
+      ✏️ Editar (y bloquear para que el Conformador no lo cambie)
+      🖼️ Imágenes — reordenar/añadir/borrar + editor en el navegador: rotar,
+         recortar, corregir PERSPECTIVA (4 esquinas) con auto-bordes.
+      📐 Medir — estima el tamaño físico (cm) sobre la alfombrilla reglada.
+      🧹 Conformar · ✨ Enriquecer · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
+      📶 Grabar NFC (ver más abajo)
+
+  ── INBOX (ALTA MANUAL desde el panel) ───────────────────────────────────────
+    Subir/arrastrar EPUB/PDF/imágenes/cómic/.zip; HACER FOTO con la cámara;
+    IMPORTAR de otra app; o COMPARTIR a la PWA (Adobe Scan → Compartir →
+    Bibliotheca). Antes de subir puedes fijar ISBN/colección/obra/ubicación que
+    "viajan" con el alta. Un PDF de escaneo se EXPLOTA en páginas-imagen EN EL
+    NAVEGADOR y se lee su código de barras (ISBN) sin gastar IA. Interruptores
+    PERSISTENTES:
+      🚥 Supervisado — tras cada alta abre la ficha para revisar/corregir; con
+         "Cancelar" DESCARTA el alta (no se queda en la base). Si está apagado,
+         AUTOPILOTO: encola y procesa en segundo plano (no bloquea; sigues subiendo).
+      📤 Procesar lo compartido al instante (si no, queda EN ESPERA).
+      📐 Tapete — la foto es un libro sobre la alfombrilla reglada (ver abajo).
+      🖼️ Elegir portada — con varias fotos de un libro, antes de enviar muestra
+         las miniaturas para confirmar/cambiar cuál es la portada (la del código
+         de barras se asume contraportada).
+    Cada trabajo muestra sus mensajes (ISBN leído, tapete, notas de visión…)
+    DEBAJO, en la lista del Inbox.
+
+  ── TAPETE (medir y recortar con la alfombrilla reglada) ─────────────────────
+    Foto del libro sobre una alfombrilla de corte CUADRICULADA (1 cm). Con el
+    interruptor 📐 Tapete activo, al subir: MIDE el libro (lee el paso de la
+    rejilla, robusto al giro del tapete y del libro), RECORTA y ENDEREZA la imagen
+    (quita el tapete) y guarda las DIMENSIONES en la ficha. Todo en el navegador,
+    SIN IA. Botones:
+      🎨 Calibrar tapete — sube una foto del tapete VACÍO para fijar su color de
+         sesión (sirve para CUALQUIER color: verde, teal, rosa, negro…). Rehazlo
+         si cambia la luz (nublado/soleado).
+      🔍 Probar — sobre una foto, pinta en ROJO lo que considera tapete y dibuja
+         el contorno del libro detectado + la medida (para verificar antes de subir).
+
+  ── NFC (etiquetas, Android + Chrome) ────────────────────────────────────────
+    · Etiqueta de LIBRO (📶 en la ficha): graba un enlace que abre la ficha al
+      acercar el móvil, MÁS datos OFFLINE en la propia etiqueta (ubicación, título,
+      autor, editorial, colección, CDU, ISBN) para recolocarlo SIN conexión.
+    · Etiqueta de ESTANTERÍA (desde Ubicaciones): al acercar el móvil lista los
+      libros que contiene.
+    · Leer (📲 en el Inbox): con conexión abre la ficha; SIN conexión muestra una
+      tarjeta con la UBICACIÓN destacada (leída de la etiqueta) para recolocar.
+    · Límite: requiere el móvil DESBLOQUEADO y la app/Chrome en primer plano (Web
+      NFC no lee con la pantalla bloqueada).
+
+  ── FUNCIONA SIN CONEXIÓN (PWA offline) ──────────────────────────────────────
+    Tras instalarla y abrirla UNA vez con red, la app CARGA sin conexión (modo
+    avión) para leer etiquetas NFC y ver la ubicación de un libro. Aparece un
+    aviso "📴 Sin conexión". Las altas/ediciones requieren servidor.
+
+  ── UBICACIONES (ámbitos y estanterías) ──────────────────────────────────────
+    Gestiona la ubicación física como colecciones de estanterías: crear (incluso
+    por lotes, p. ej. "Estanteria_pared_01..10"), renombrar, fusionar, mover,
+    "explotar" (dejar sus libros sin ubicar), eliminar, añadir libros desde la
+    búsqueda, y grabar la etiqueta NFC de una estantería. Los desplegables de
+    ámbito/estantería son <select> (fiables en móvil) y se reutilizan en el Inbox
+    y en la edición de la ficha.
+
+  ── ACTIVIDAD (administración) ───────────────────────────────────────────────
+    Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del
+    Conformador, 🧹 Lanzar mantenimiento, 🩺 Integridad (diagnosticar/reparar a la
+    Papelera), 🧼 Sanear catálogo, 👁️ Visión IA (proveedores/claves), 🔎 Búsqueda
+    (reindexar FTS), 🔞 Permisos de invitados (permitir/restringir NSFW), 📜 Logs
+    en vivo.
+
+  ── CUARENTENA ───────────────────────────────────────────────────────────────
+    Lo que no se pudo catalogar, por categorías plegables:
+      · no-identificados (sin título tras todos los intentos)
+      · ilegibles (PDF/EPUB corrupto o 0 bytes): flujo de arreglo — buscar una
+        copia sana (Anna's/Z-Lib/Libgen/Gutenberg), SUBIRLA y "Procesar".
+      · duplicados (mismo identificador, distinto contenido): dedup manual.
+    Cualquier depósito se puede DESCARTAR (va a la Papelera, recuperable), por ítem
+    o por categoría entera (re-pide contraseña).
+
+
+────────────────────────────────────────────────────────────────────────────────
+8. API REST — REFERENCIA DE ENDPOINTS
 ────────────────────────────────────────────────────────────────────────────────
 
   Base URL: http://ip-del-nas:3000  (o http://localhost:3000 en local)
@@ -448,7 +570,7 @@ de ficheros clasificado por CDU.
 
 
 ────────────────────────────────────────────────────────────────────────────────
-8. EL CONFORMADOR — PROCESO DE MANTENIMIENTO
+9. EL CONFORMADOR — PROCESO DE MANTENIMIENTO
 ────────────────────────────────────────────────────────────────────────────────
 
   El Conformador es un proceso durmiente que revisa periódicamente los
@@ -494,7 +616,7 @@ de ficheros clasificado por CDU.
 
 
 ────────────────────────────────────────────────────────────────────────────────
-9. GESTIÓN DE FALLOS
+10. GESTIÓN DE FALLOS
 ────────────────────────────────────────────────────────────────────────────────
 
   9.1  Cuarentena
@@ -531,7 +653,7 @@ de ficheros clasificado por CDU.
 
 
 ────────────────────────────────────────────────────────────────────────────────
-10. DESARROLLO LOCAL
+11. DESARROLLO LOCAL
 ────────────────────────────────────────────────────────────────────────────────
 
   10.1  Arrancar la app
@@ -578,7 +700,7 @@ de ficheros clasificado por CDU.
 
 
 ────────────────────────────────────────────────────────────────────────────────
-11. COMANDOS DE DOCKER ÚTILES EN EL NAS
+12. COMANDOS DE DOCKER ÚTILES EN EL NAS
 ────────────────────────────────────────────────────────────────────────────────
 
   # Ver logs en tiempo real
@@ -604,7 +726,7 @@ de ficheros clasificado por CDU.
 
 
 ────────────────────────────────────────────────────────────────────────────────
-12. NOTAS IMPORTANTES SOBRE EL NAS SYNOLOGY
+13. NOTAS IMPORTANTES SOBRE EL NAS SYNOLOGY
 ────────────────────────────────────────────────────────────────────────────────
 
   · El NAS usa Compose v1: el comando es "docker-compose" (con guion), no

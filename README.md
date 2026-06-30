@@ -24,6 +24,10 @@ Agente que ingesta archivos de libros y revistas (EPUB, PDF, imágenes escaneada
 | **axios** | Cliente HTTP para todas las APIs externas. |
 | **dotenv** | Carga de configuración desde `.env`. |
 | **epub2** | (Heredado) lector EPUB alternativo, ya no usado por el flujo activo. |
+| **better-sqlite3** | Índice **FTS5 local** de búsqueda (`busqueda.db`) y el volcado offline **Fichero** (OL+BNE) para Descubrir. C, sin SIMD (apto Atom). El Fichero corre en *worker thread* (es síncrono). |
+| **poppler-utils** (`pdfinfo`/`pdftoppm`) | Rasterizado de PDF y recortes del código de barras (C, sin SIMD) en lugar de sharp. |
+| **zxing-wasm** | Lectura local de EAN del código de barras (sin IA) como pre-paso a la visión. |
+| **PWA · Web NFC · Service Worker · pdf.js** (cliente) | Panel `public/index.html`: instalable y **offline**; lectura/escritura de etiquetas NFC; explosión de PDF y lectura de barras **en el navegador**; medición/recorte con la alfombrilla reglada (sin IA). |
 
 ### Configuración (`.env` en la raíz)
 
@@ -98,6 +102,22 @@ Salida por cada recurso: un documento en `biblioteca` (MongoDB) + los archivos c
 4. **Persistencia.** Se resuelven autores/editorial a referencias `ObjectId`, se deduplica y se inserta o **fusiona** (rellena huecos y promociona `pendiente`→`completado`).
 5. **Gestión de archivos.** Se copian los originales y las portadas al árbol CDU y se escriben las fichas `registro.json` y `registro.marc.xml`.
 6. **Resultado / fallo.** Éxito → catálogo + disco. Fallo → Cuarentena o Reintentos con `estado.json`.
+
+---
+
+## Panel de control web (PWA)
+
+Además de la API y el Inbox por carpeta, `app.js` sirve un **panel web de una sola página** (`public/index.html`) que es la interfaz de uso diario. **Móvil-first**, instalable como **PWA** y operable **sin conexión** para parte de su función. Resumen de prestaciones (detalle de uso en `instructions.txt §7`):
+
+- **Sesión y roles:** login admin/invitado con **token HMAC firmado** que sobrevive a reinicios (~2 días). El invitado es **estrictamente de solo lectura** (ninguna mutación, ninguna IA) y, por defecto, no ve el contenido **NSFW** (conmutable por el admin).
+- **Búsqueda y catálogo:** índice local **SQLite-FTS** (rápido, insensible a acentos; cae a Mongo si falta). Filtros plegables: tipo, soporte (papel/digital), ámbito/estantería, CDU, estrellas, **🔞 solo NSFW**, orden; paginación arriba y abajo; valoración por estrellas; borrado por lotes (admin); **🔭 Descubrir** (busca en el volcado *Fichero* OL+BNE lo que no tienes).
+- **Ficha:** datos + clasificaciones con ⓘ y recuento drillable, identificadores clicables, ISBN alternativos, sinopsis, chip **📍 ubicación**; acciones admin: editar/bloquear, **imágenes** (editor en navegador: rotar, recortar, **perspectiva** con auto-bordes), **📐 medir**, conformar, enriquecer, reprocesar, eliminar, **📶 grabar NFC**.
+- **Inbox operativo:** subir/arrastrar/cámara/compartir (Web Share Target desde Adobe Scan). PDF de escaneo **explotado a imágenes en el navegador** + lectura de código de barras (ISBN) sin IA. Interruptores persistentes: **🚥 Supervisado** (revisar/aceptar o **descartar** el alta), **📐 Tapete**, **🖼️ Elegir portada**, autopiloto con cola.
+- **Tapete (alfombrilla reglada, sin IA, en el navegador):** mide el libro por el paso de la **rejilla de 1 cm** (robusto al giro del tapete y del libro), recorta+endereza (homografía) y guarda las **dimensiones**; **calibración por tono** (cualquier color de tapete/luz) y **🔍 Probar** (máscara + contorno + medida).
+- **NFC (Web NFC, Android/Chrome):** etiqueta de **libro** con enlace a la ficha + **datos offline** (ubicación, título, autor, editorial, colección, CDU, ISBN, con tope de capacidad) para recolocar sin conexión; etiqueta de **estantería** que lista sus libros; lectura online→ficha / offline→tarjeta con ubicación.
+- **Ubicaciones:** ámbitos/estanterías gestionados como colecciones (crear por lotes, renombrar, fusionar, mover, explotar, eliminar, NFC de estantería).
+- **Actividad:** vigilante, Conformador, integridad, sanear, visión (proveedores), reindexar FTS, permisos de invitados, logs en vivo. **Cuarentena:** no-identificados, ilegibles (flujo de saneamiento) y duplicados.
+- **Offline (service worker):** estrategia *network-first* — online trae lo último (los despliegues se ven al instante), offline sirve la copia cacheada y arranca en modo lectura-NFC.
 
 ---
 
