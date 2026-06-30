@@ -317,6 +317,13 @@ de ficheros clasificado por CDU.
       + URL). Así puedes filtrar "con/sin etiqueta" en la Búsqueda; los que ya la
       tienen muestran un icono 📶 (badge y un distintivo sobre la esquina superior
       izquierda de la miniatura, donde suele ir pegada la etiqueta).
+    · ETIQUETADO POR LOTES: selecciona libros en la Búsqueda y pulsa «📶 Etiquetar».
+      Se abre una COLA que muestra cada ficha (portada, título, ubicación) y pide
+      acercar la etiqueta; al grabar avanza. MODO MANUAL (confirmar «Siguiente») o
+      AUTOMÁTICO (avanza solo si la grabación es óptima). Pausar/Continuar, Saltar y
+      Vaciar cola. La cola pendiente se guarda: si cierras, aparece «Reanudar
+      etiquetado (N)». Truco: filtra antes «Etiqueta NFC = Sin» para etiquetar solo
+      los que faltan.
     · Límite: requiere el móvil DESBLOQUEADO y la app/Chrome en primer plano (Web
       NFC no lee con la pantalla bloqueada).
 
