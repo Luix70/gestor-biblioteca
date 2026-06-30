@@ -467,7 +467,7 @@ export function rutasPanel() {
                 { $project: {
                     titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
                     tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
-                    valoracion: 1, naturaleza: 1, autores: '$_au.nombre',
+                    valoracion: 1, naturaleza: 1, nfc: 1, autores: '$_au.nombre',
                 } },
             ], opciones).toArray();
 
