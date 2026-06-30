@@ -251,8 +251,9 @@ de ficheros clasificado por CDU.
         - Ámbito y Estantería (ubicación física)
         - CDU (prefijo)
         - Estrellas (valoración, multi-selección; "sin valorar"). Dentro del mismo
-          desplegable, 🔞 NSFW (admin): SIN marcar EXCLUYE lo NSFW (por defecto);
-          MARCADA muestra SOLO lo NSFW.
+          desplegable, 🔞 NSFW (admin), con TRES estados: SIN marcar = OCULTA lo
+          NSFW (por defecto); MARCADA junto a otros filtros = lo INCLUYE también;
+          MARCADA y sola (sin otro criterio) = SOLO NSFW.
         - Etiqueta NFC (admin): Todas / Con etiqueta (📶) / Sin etiqueta
         - Orden (recientes / título A-Z / antiguos)
     · Resultados como tarjetas con miniatura; PAGINACIÓN arriba y abajo (al pasar
@@ -317,6 +318,9 @@ de ficheros clasificado por CDU.
       + URL). Así puedes filtrar "con/sin etiqueta" en la Búsqueda; los que ya la
       tienen muestran un icono 📶 (badge y un distintivo sobre la esquina superior
       izquierda de la miniatura, donde suele ir pegada la etiqueta).
+    · ANTI-DUPLICADO: una etiqueta física (su UID) solo puede estar en UN libro. Si
+      grabas una etiqueta que ya estaba en OTRO libro, se desvincula del antiguo
+      (su etiqueta se ha sobrescrito) y se avisa "reasignada (estaba en «X»)".
     · ETIQUETADO POR LOTES: selecciona libros en la Búsqueda y pulsa «📶 Etiquetar».
       Se abre una COLA que muestra cada ficha (portada, título, ubicación) y pide
       acercar la etiqueta; al grabar avanza. MODO MANUAL (confirmar «Siguiente») o
