@@ -502,6 +502,10 @@ body.guest .admin-only{display:none!important}
             <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inAutoCompartir" checked><span class="slider"></span></span>
             <span class="muted">📤 Procesar lo compartido al instante. Si lo apagas, lo compartido (Adobe Scan…) queda EN ESPERA para que añadas ISBN/colección/ubicación y pulses Procesar.</span>
           </label>
+          <label style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
+            <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inTapete"><span class="slider"></span></span>
+            <span class="muted">📐 Tapete — la foto es un libro sobre la alfombrilla reglada (1 cm): mide sus dimensiones (las guarda en la ficha) y recorta+endereza la imagen para que NO se vea el tapete. Todo en el navegador, sin IA.</span>
+          </label>
           <datalist id="dlColecciones"></datalist>
           <datalist id="dlAmbitos"></datalist>
           <datalist id="dlEstanterias"></datalist>
@@ -2200,6 +2204,9 @@ function wireInbox(){
   // Modo Supervisado PERSISTENTE (no se reinicia al volver de Adobe Scan / recargar la PWA).
   const sv=$('#inSupervisar');
   if(sv){sv.checked=localStorage.getItem('inbox_supervisar')==='1';sv.onchange=()=>localStorage.setItem('inbox_supervisar',sv.checked?'1':'0');}
+  // Modo Tapete PERSISTENTE: medir + recortar el libro sobre la alfombrilla al subir.
+  const tp=$('#inTapete');
+  if(tp){tp.checked=localStorage.getItem('inbox_tapete')==='1';tp.onchange=()=>localStorage.setItem('inbox_tapete',tp.checked?'1':'0');}
   // Abrir Adobe Scan (Android): intent → la app, o su página en Google Play si no se puede lanzar (one-way;
   // luego se vuelve con «Compartir → Bibliotheca»). El lanzamiento web→app no es fiable desde una PWA.
   if(/Android/i.test(navigator.userAgent)){
@@ -2344,6 +2351,53 @@ async function pdfAImagenes(file,{maxPag=60,ancho=1500}={}){
     return {escaneo:true,pages};
   }finally{try{pdf.destroy();}catch(_){}}
 }
+// ── TAPETE: medir + recortar el libro sobre la alfombrilla, en el navegador (sin IA). Reutiliza
+//    detectarBordesVerde / detectarRejillaPxCm / _homografia. ──
+function fileAImagen(f){return new Promise((res,rej)=>{const img=new Image();img.onload=()=>res(img);img.onerror=rej;img.src=URL.createObjectURL(f);});}
+const _esImg=f=>/^image\//.test((f&&f.type)||'')||/\.(jpe?g|png|webp)$/i.test((f&&f.name)||'');
+// Rectifica (recorta + desestira) el libro definido por quad a un rectángulo frontal. Devuelve canvas|null.
+function rectificarLibro(work, quad, TOPE=2200){
+  const [TL,TR,BR,BL]=quad;
+  let W=Math.round((_dist(TL,TR)+_dist(BL,BR))/2), H=Math.round((_dist(TL,BL)+_dist(TR,BR))/2);
+  if(W<16||H<16)return null;
+  const f=Math.min(1,TOPE/Math.max(W,H));W=Math.round(W*f);H=Math.round(H*f);
+  const Hi=_homografia([[0,0],[W,0],[W,H],[0,H]],quad); // rect de salida → fuente
+  const sd=work.getContext('2d').getImageData(0,0,work.width,work.height).data,sw=work.width,sh=work.height;
+  const oc=document.createElement('canvas');oc.width=W;oc.height=H;const octx=oc.getContext('2d');
+  const out=octx.createImageData(W,H),od=out.data;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const[sx,sy]=_mapH(Hi,x+0.5,y+0.5);const ix=sx|0,iy=sy|0;const o=(y*W+x)*4;
+    if(ix>=0&&iy>=0&&ix<sw&&iy<sh){const s=(iy*sw+ix)*4;od[o]=sd[s];od[o+1]=sd[s+1];od[o+2]=sd[s+2];od[o+3]=255;}else od[o+3]=255;}
+  octx.putImageData(out,0,0);return oc;
+}
+// Procesa las imágenes que estén sobre el tapete: recorta+endereza cada una y MIDE (de la 1.ª plausible). Las
+// que no tengan tapete/libro pasan TAL CUAL. Devuelve {files, dims:{ancho_cm,alto_cm}|null}.
+async function recortarYMedirTapete(files){
+  let dims=null; const out=[];
+  for(const f of files){
+    if(!_esImg(f)){out.push(f);continue;}
+    let url=null;
+    try{
+      const img=await fileAImagen(f); url=img.src;
+      const work=document.createElement('canvas');work.width=img.naturalWidth;work.height=img.naturalHeight;work.getContext('2d').drawImage(img,0,0);
+      const q=detectarBordesVerde(work);
+      if(!q){out.push(f);continue;}                          // sin tapete/libro → intacta
+      if(!dims){const pxcm=detectarRejillaPxCm(work);
+        if(pxcm){const W=(_dist(q[0],q[1])+_dist(q[3],q[2]))/2/pxcm,H=(_dist(q[0],q[3])+_dist(q[1],q[2]))/2/pxcm;
+          if(W>=4&&W<=50&&H>=4&&H<=50)dims={ancho_cm:+W.toFixed(1),alto_cm:+H.toFixed(1)};}}
+      const oc=rectificarLibro(work,q);
+      if(oc){const blob=await new Promise(r=>oc.toBlob(r,'image/jpeg',0.9));
+        out.push(blob?new File([blob],(f.name||'tapete.jpg').replace(/\.(png|webp|jpeg)$/i,'.jpg'),{type:'image/jpeg'}):f);}
+      else out.push(f);
+    }catch(e){console.warn('[tapete]',e&&e.message);out.push(f);}
+    finally{ if(url)try{URL.revokeObjectURL(url);}catch(_){} }
+  }
+  return {files:out, dims};
+}
+// Guarda las dimensiones medidas en cada documento recién catalogado (best-effort, no rompe la subida).
+async function guardarDimsResultados(resultados, dims){
+  if(!dims||!Array.isArray(resultados))return;
+  for(const x of resultados){ if(x&&x.ok&&x.id){ try{ await api('/documentos/'+encodeURIComponent(x.id)+'/dimensiones',{method:'POST',body:JSON.stringify(dims)}); }catch(_){} } }
+}
 // Subida. SUPERVISADO = SÍNCRONO (sube y abre la ficha para revisar). AUTOPILOTO = ASÍNCRONO: ENCOLA y
 // procesa en segundo plano. Un PDF de escaneo se EXPLOTA aquí (cliente) en páginas-imagen + se lee su
 // código de barras → viaja como un libro escaneado (igual que la cámara). `extra` = {isbn,isbnOrigen,titulo}.
@@ -2363,6 +2417,13 @@ async function subirInbox(files, extra){
       }else setInboxEstado('');
     }catch(e){console.warn('[PDF cliente] no explotado:',e.message);setInboxEstado('');}
   }
+  // TAPETE: si está activo y hay imágenes, recorta+endereza (quita el tapete de la imagen guardada) y mide.
+  if($('#inTapete')&&$('#inTapete').checked&&files.some(_esImg)){
+    setInboxEstado('📐 Tapete: midiendo y recortando…');
+    try{ const r=await recortarYMedirTapete(files); files=r.files; if(r.dims)extra.dims=r.dims;
+      setInboxEstado(r.dims?`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm · tapete recortado`:'✂️ Recortado (sin medida fiable)');
+    }catch(e){console.warn('[tapete]',e&&e.message);}
+  }
   const supervisado=$('#inSupervisar')&&$('#inSupervisar').checked;
   if(supervisado){
     let isbn=extra.isbn||null,origenMovil=extra.isbnOrigen==='movil';
@@ -2372,6 +2433,7 @@ async function subirInbox(files, extra){
     const snap=metaSnapshot();if(isbn&&!snap.isbn)snap.isbn=isbn;if(snap.isbn&&origenMovil)snap.isbnOrigen='movil';
     try{
       const j=await enviarIngesta(fdDesdeSnap(snap,files));
+      await guardarDimsResultados(j.resultados,extra.dims); // tapete → dimensiones en la ficha
       setInboxEstado('');
       jobsHechos.unshift({estado:'ok',resultados:j.resultados||[],isbnCliente:origenMovil?snap.isbn:null});cortarJobs();pintarCola();
       if($('#inIsbn'))$('#inIsbn').value='';
@@ -2386,7 +2448,7 @@ async function subirInbox(files, extra){
   if(extra.isbn){snap.isbn=extra.isbn;if(extra.isbnOrigen)snap.isbnOrigen=extra.isbnOrigen;}
   if($('#inIsbn'))$('#inIsbn').value='';
   setInboxEstado('');
-  colaInbox.push({id:++jobSeq, files, snap, n:files.length, estado:'cola',
+  colaInbox.push({id:++jobSeq, files, snap, n:files.length, estado:'cola', dims:extra.dims||null,
     titulo:extra.titulo||files.map(f=>f.name).join(', '), isbnCliente:(extra.isbnOrigen==='movil'?extra.isbn:null)});
   pintarCola();
   procesarCola();
@@ -2398,6 +2460,7 @@ async function procesarCola(){
     try{
       if(!job.snap.isbn){const isbn=await detectarISBNenFiles(job.files);if(isbn){job.snap.isbn=isbn;job.snap.isbnOrigen='movil';job.isbnCliente=isbn;}}
       const j=await enviarIngesta(fdDesdeSnap(job.snap,job.files));
+      await guardarDimsResultados(j.resultados,job.dims); // tapete → dimensiones en la ficha
       job.estado='ok';job.resultados=j.resultados||[];
     }catch(e){job.estado='error';job.msg=e.message;}
     colaInbox.shift();jobsHechos.unshift(job);cortarJobs();pintarCola();
