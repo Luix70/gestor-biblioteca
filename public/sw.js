@@ -1,11 +1,22 @@
-// Service worker MÍNIMO — su única misión real es el SHARE TARGET (Task 1): recibir ficheros
-// compartidos desde otra app (Adobe Scan / Lens / cámara «documento» → PDF, o imágenes), guardarlos
-// en una Cache temporal y redirigir a la app, que los sube al Inbox con su token. NO cachea la app
-// (la API necesita datos en vivo); el handler de fetch existe sobre todo para ser "instalable".
+// Service worker: (1) SHARE TARGET (recibir ficheros compartidos de Adobe Scan/Lens/cámara → Inbox) y
+// (2) CACHÉ DE LA APP para que cargue SIN RED (NFC offline: ver dónde recolocar un libro sin servidor).
+// Estrategia NETWORK-FIRST para la "cáscara" (HTML + estáticos): online siempre trae lo último (los
+// despliegues se ven al instante), y solo si no hay red se sirve la copia cacheada. La API (/api) y los
+// recursos en vivo (/recursos) NUNCA se cachean (necesitan datos frescos).
 const SHARE_CACHE = 'compartidos-v1';
+const APP_CACHE = 'app-v2';
+const PRECACHE = ['/', '/index.html'];
 
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('install', (e) => {
+  e.waitUntil(caches.open(APP_CACHE).then((c) => c.addAll(PRECACHE).catch(() => {})).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', (e) => {
+  e.waitUntil((async () => {
+    const ks = await caches.keys();
+    await Promise.all(ks.filter((k) => k !== APP_CACHE && k !== SHARE_CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+  })());
+});
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
@@ -15,7 +26,24 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(recibirCompartido(event));
     return;
   }
-  // Resto: red directa (sin caché). Dejar pasar.
+  if (req.method !== 'GET' || url.origin !== location.origin) return;          // otros orígenes / mutaciones: red directa
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/recursos/')) return; // datos en vivo: nunca caché
+  // Cáscara de la app + estáticos: NETWORK-FIRST con respaldo en caché (para cargar sin red).
+  event.respondWith((async () => {
+    try {
+      const net = await fetch(req);
+      if (net && net.ok) { const c = await caches.open(APP_CACHE); c.put(req, net.clone()); }
+      return net;
+    } catch (_) {
+      const hit = await caches.match(req);
+      if (hit) return hit;
+      if (req.mode === 'navigate') {                                            // navegación offline → index cacheado
+        const idx = (await caches.match('/index.html')) || (await caches.match('/'));
+        if (idx) return idx;
+      }
+      throw _;
+    }
+  })());
 });
 
 async function recibirCompartido(event) {

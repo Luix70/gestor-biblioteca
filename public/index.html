@@ -3087,9 +3087,11 @@ function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHis
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
     const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.motivo||'usuario o contraseña incorrectos');
-    TOKEN=j.token;USER=j.usuario;ROL=j.rol;localStorage.setItem('panel_token',TOKEN);$('#lgPass').value='';arrancar();
+    TOKEN=j.token;USER=j.usuario;ROL=j.rol;localStorage.setItem('panel_token',TOKEN);_recordarSesion();$('#lgPass').value='';arrancar();
   }catch(err){$('#lgErr').textContent=err.message;}};
-$('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};mostrarLogin();};
+// Recuerda usuario/rol para poder ARRANCAR sin red (NFC offline). El logout sí los borra.
+function _recordarSesion(){try{localStorage.setItem('panel_user',USER||'');localStorage.setItem('panel_rol',ROL||'');}catch(_){}}
+$('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};try{localStorage.removeItem('panel_user');localStorage.removeItem('panel_rol');}catch(_){}mostrarLogin();};
 // sesión inicial: token guardado, o el sembrado por auto-login de URL (cookie), o mostrar el login
 (async()=>{
   // 0) Captura los enlaces profundos (?doc=<id> de un libro, ?amb=&est= de una estantería) ANTES de que
@@ -3104,8 +3106,13 @@ $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{}
   if(ck){TOKEN=ck;localStorage.setItem('panel_token',TOKEN);limpiarCookieToken();}
   if(!TOKEN)return mostrarLogin();
   try{const me=await fetch('/api/yo',{headers:{'Authorization':'Bearer '+TOKEN}}).then(r=>r.json());
-    if(me&&me.rol){USER=me.usuario;ROL=me.rol;arrancar();}else mostrarLogin();
-  }catch{mostrarLogin();}})();
+    if(me&&me.rol){USER=me.usuario;ROL=me.rol;_recordarSesion();arrancar();}else mostrarLogin();
+  }catch{
+    // SIN RED al validar: si hay token + rol recordado, ARRANCA igualmente (modo offline → leer NFC sin
+    // servidor). No se borra el token; cuando vuelva la red, todo opera normal.
+    const rol=localStorage.getItem('panel_rol');
+    if(TOKEN&&rol){USER=localStorage.getItem('panel_user')||'';ROL=rol;arrancar();}else mostrarLogin();
+  }})();
 </script>
 </body>
 </html>
