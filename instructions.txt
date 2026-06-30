@@ -277,12 +277,16 @@ de ficheros clasificado por CDU.
       📶 Grabar NFC (ver más abajo)
 
   ── INBOX (ALTA MANUAL desde el panel) ───────────────────────────────────────
+    Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la
+    primera y siempre visible; «🏷️ Datos de esta alta» (los que VIAJAN) está
+    colapsada; «⚙️ Modos y escaneo» (los interruptores) desplegada; «📷 Cámara» y
+    «📶 NFC» colapsadas.
     Subir/arrastrar EPUB/PDF/imágenes/cómic/.zip; HACER FOTO con la cámara;
     IMPORTAR de otra app; o COMPARTIR a la PWA (Adobe Scan → Compartir →
     Bibliotheca). Antes de subir puedes fijar ISBN/colección/obra/ubicación que
     "viajan" con el alta. Un PDF de escaneo se EXPLOTA en páginas-imagen EN EL
     NAVEGADOR y se lee su código de barras (ISBN) sin gastar IA. Interruptores
-    PERSISTENTES:
+    PERSISTENTES (ficha «Modos y escaneo»):
       🚥 Supervisado — tras cada alta abre la ficha para revisar/corregir; con
          "Cancelar" DESCARTA el alta (no se queda en la base). Si está apagado,
          AUTOPILOTO: encola y procesa en segundo plano (no bloquea; sigues subiendo).
@@ -316,11 +320,16 @@ de ficheros clasificado por CDU.
       tarjeta con la UBICACIÓN destacada (leída de la etiqueta) para recolocar.
     · Al grabar con éxito se VINCULA la etiqueta al documento (su UID único + fecha
       + URL). Así puedes filtrar "con/sin etiqueta" en la Búsqueda; los que ya la
-      tienen muestran un icono 📶 (badge y un distintivo sobre la esquina superior
-      izquierda de la miniatura, donde suele ir pegada la etiqueta).
+      tienen muestran un icono 📶 (cuarto de círculo en la esquina superior DERECHA)
+      sobre TODAS sus miniaturas: búsqueda, carrusel de la ficha, tomos de obra y
+      miembros de colección.
+    · SOBRESCRIBIR: si vas a grabar sobre una etiqueta que YA contenía datos de otro
+      libro, AVISA y pide confirmación ANTES de escribir (por si es el libro
+      equivocado): en la individual con un diálogo; en lotes con un estado «ocupada»
+      (Sobrescribir / Saltar) que dice de qué libro era.
     · ANTI-DUPLICADO: una etiqueta física (su UID) solo puede estar en UN libro. Si
-      grabas una etiqueta que ya estaba en OTRO libro, se desvincula del antiguo
-      (su etiqueta se ha sobrescrito) y se avisa "reasignada (estaba en «X»)".
+      la sobrescribes, se desvincula del libro antiguo y se avisa "reasignada
+      (estaba en «X»)".
     · ETIQUETADO POR LOTES: selecciona libros en la Búsqueda y pulsa «📶 Etiquetar».
       Se abre una COLA que muestra cada ficha (portada, título, ubicación) y pide
       acercar la etiqueta; al grabar avanza. MODO MANUAL (confirmar «Siguiente») o
