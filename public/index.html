@@ -2679,11 +2679,17 @@ async function leerNFC(){
 //    acotada (NTAG215≈504 B): se RECORTA por prioridad sin desbordar (se conservan ubicación, título e ISBN).
 const _blen=s=>new TextEncoder().encode(String(s||'')).length;
 function _txtUbic(d){const u=(d&&d.ubicacion)||{};const a=u.ambito&&u.ambito!=='Sin asignar'?u.ambito:'';const e=u.estanteria&&u.estanteria!=='Sin asignar'?u.estanteria:'';return [a,e].filter(Boolean).join(' · ');}
+// LÍMITES FIJOS de caracteres (suficiente para IDENTIFICAR; evita overflow con títulos largos). El CDU NO
+// se trunca y se reserva su longitud de forma PESIMISTA (los códigos con auxiliares pueden ser largos).
 function _payloadOffline(d,r,budget){
   const cut=(s,n)=>{s=String(s||'');while(_blen(s)>n&&s.length)s=s.slice(0,-1);return s;};
-  let t=cut(d.titulo,80), a=cut((r&&r.autores&&r.autores.length)?r.autores.join(', '):'',50), e=cut((r&&r.editorial)||'',40), c=d.cdu||'', i=d.isbn||'', dd=String(d._id||''), u=_txtUbic(d);
-  const build=()=>'BIB1:'+JSON.stringify(Object.fromEntries(Object.entries({v:1,d:dd,u,t,i,c,a,e}).filter(([,x])=>x!=='')));
-  const pasos=[()=>e=cut(e,24),()=>a=cut(a,30),()=>t=cut(t,60),()=>e='',()=>a='',()=>c='',()=>t=cut(t,40),()=>i=''];
+  let t=cut(d.titulo,40), a=cut((r&&r.autores&&r.autores.length)?r.autores.join(', '):'',28),
+      e=cut((r&&r.editorial)||'',22), x=cut((r&&r.coleccion)||'',22),
+      c=String(d.cdu||''), i=d.isbn||'', dd=String(d._id||''), u=cut(_txtUbic(d),30);
+  // claves cortas: d=id, u=ubicación, t=título, i=isbn, c=cdu, x=colección, a=autor, e=editorial
+  const build=()=>'BIB1:'+JSON.stringify(Object.fromEntries(Object.entries({v:1,d:dd,u,t,i,c,x,a,e}).filter(([,v])=>v!=='')));
+  // Salvaguarda final SOLO si la URL fuese muy larga: nunca toca ubicación/título/isbn/cdu.
+  const pasos=[()=>e='',()=>x='',()=>a=cut(a,18),()=>a=''];
   let s=build(),k=0; while(_blen(s)>budget && k<pasos.length){pasos[k]();k++;s=build();}
   return s;
 }
@@ -2694,7 +2700,7 @@ function mostrarOfflineNFC(o){
     <div style="margin:14px 0;padding:12px;border:1px solid var(--acc);border-radius:10px;text-align:center;background:var(--card2)">
       <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Ubicación</div>
       <div style="font-size:21px;font-weight:700;color:var(--acc)">${esc(o.u||'Sin asignar')}</div></div>
-    <dl class="dl">${o.c?`<dt>CDU</dt><dd class="mono">${esc(o.c)}</dd>`:''}${o.e?`<dt>Editorial</dt><dd>${esc(o.e)}</dd>`:''}${o.i?`<dt>ISBN</dt><dd class="mono">${esc(o.i)}</dd>`:''}</dl>
+    <dl class="dl">${o.c?`<dt>CDU</dt><dd class="mono">${esc(o.c)}</dd>`:''}${o.x?`<dt>Colección</dt><dd>${esc(o.x)}</dd>`:''}${o.e?`<dt>Editorial</dt><dd>${esc(o.e)}</dd>`:''}${o.i?`<dt>ISBN</dt><dd class="mono">${esc(o.i)}</dd>`:''}</dl>
     <p class="muted" style="font-size:11px;margin-top:6px">📴 Datos de la etiqueta (sin conexión).</p>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px">${o.d?`<button class="btn pri" id="nfcOnline">Ver ficha online</button>`:''}<button class="btn" id="nfcCerr">Cerrar</button></div></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
@@ -2706,7 +2712,7 @@ function mostrarOfflineNFC(o){
 async function grabarNFC(d,r){
   if(!('NDEFReader' in window)){toast('Este navegador no soporta NFC (Android + Chrome)','bad');return;}
   const url=location.origin+'/?doc='+encodeURIComponent(d._id);
-  const budget=Math.max(60, 470 - _blen(url) - 20);               // sitio para la URL + overhead NDEF
+  const budget=Math.max(60, 470 - _blen(url));                    // cabe en NTAG215 (~492 B) con los caps fijos
   const off=_payloadOffline(d,r,budget);
   const recs=[{recordType:'url',data:url},{recordType:'text',data:off}];
   $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px;text-align:center"><h3 style="margin-top:0">📶 Grabar etiqueta NFC</h3>
