@@ -642,7 +642,7 @@ body.guest .admin-only{display:none!important}
 <script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ficha-minima-2 (sinopsis-arriba · nfc-offline-pantalla · acciones-grid) · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='qr-copiar-imagen · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2977,15 +2977,34 @@ async function compartirDoc(d){
     <p class="muted" style="font-size:12px;line-height:1.5">Escanea el QR o comparte el enlace. Abre ${esDigital?'la ficha y permite la <b>descarga</b>':'solo la ficha'} — sin acceso al resto de la biblioteca.</p>
     <div class="row" style="gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap">
       <button class="btn pri" id="cmpShare">📤 Compartir</button>
+      <button class="btn" id="cmpCopyImg">🖼️ Copiar imagen</button>
       <button class="btn" id="cmpCopy">📋 Copiar enlace</button>
       <button class="btn" id="cmpXq">Cerrar</button></div></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrarCmp;
-  try{const box=$('#qrBox');if(box)box.appendChild(qrCanvas(qrGenerar(url),260));}catch(e){const box=$('#qrBox');if(box)box.innerHTML='<span class="muted" style="font-size:12px">No se pudo generar el QR; usa el enlace.</span>';}
+  let cv=null;
+  try{cv=qrCanvas(qrGenerar(url),260);const box=$('#qrBox');if(box)box.appendChild(cv);}catch(e){const box=$('#qrBox');if(box)box.innerHTML='<span class="muted" style="font-size:12px">No se pudo generar el QR; usa el enlace.</span>';}
   $('#cmpXq').onclick=cerrarCmp;
   $('#cmpCopy').onclick=()=>{copiar(url);toast('Enlace copiado');};
+  // Copiar la IMAGEN del QR al portapapeles (Clipboard API; requiere contexto seguro). Si no hay soporte
+  // o no hay canvas, se oculta el botón y queda «Copiar enlace».
+  const ci=$('#cmpCopyImg');
+  if(ci&&cv&&navigator.clipboard&&window.ClipboardItem&&cv.toBlob){
+    ci.onclick=()=>{try{cv.toBlob(async b=>{try{await navigator.clipboard.write([new ClipboardItem({'image/png':b})]);toast('Imagen del QR copiada');}catch(e){toast('No se pudo copiar la imagen — usa «Copiar enlace»','warn');}},'image/png');}catch(e){toast('No se pudo copiar la imagen — usa «Copiar enlace»','warn');}};
+  } else if(ci) ci.style.display='none';
   const sh=$('#cmpShare');
-  if(navigator.share){sh.onclick=()=>{navigator.share({title:d.titulo||'Ficha',url}).catch(()=>{});};}
-  else sh.style.display='none';
+  // Compartir nativo: preferimos compartir la IMAGEN (si el sistema admite ficheros); si no, el enlace.
+  if(navigator.share){
+    sh.onclick=async()=>{
+      try{
+        if(cv&&cv.toBlob&&navigator.canShare){
+          const blob=await new Promise(res=>cv.toBlob(res,'image/png'));
+          const file=blob&&new File([blob],'qr.png',{type:'image/png'});
+          if(file&&navigator.canShare({files:[file]})){await navigator.share({title:d.titulo||'Ficha',text:url,files:[file]});return;}
+        }
+        await navigator.share({title:d.titulo||'Ficha',url});
+      }catch(_){/* cancelado */}
+    };
+  } else sh.style.display='none';
 }
 // Contenedor de PÁGINA AUTÓNOMA (oculta el resto del panel): vista compartida por QR y lectura NFC offline.
 function _sharedCont(){
