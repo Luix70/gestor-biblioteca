@@ -522,6 +522,12 @@ export function rutasPanel() {
                     { $sort: { _rank: 1, fecha_ingreso: -1 } },
                   ]
                 : [{ $sort: sort }];
+            // Modo SOLO-IDS: devuelve TODOS los _id que casan (todas las páginas) para «seleccionar todos los
+            // resultados». Respeta cada filtro (estantería, con/sin NFC, nsfw…). Sin paginar; tope de seguridad.
+            if (String(req.query.soloIds || '') === '1') {
+                const idsAll = await db.collection('biblioteca').find(consulta, { projection: { _id: 1 } }).limit(5000).toArray();
+                return res.json({ ok: true, soloIds: true, ids: idsAll.map(x => String(x._id)) });
+            }
             const total = await db.collection('biblioteca').countDocuments(consulta);
             const docs = await db.collection('biblioteca').aggregate([
                 { $match: consulta }, ...etapasOrden, { $skip: (page - 1) * porPagina }, { $limit: porPagina },
@@ -537,6 +543,20 @@ export function rutasPanel() {
                 ok: true, total, page, porPagina, paginas: Math.max(1, Math.ceil(total / porPagina)),
                 docs: docs.map(d => ({ ...d, _id: String(d._id) })),
             });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Fichas MÍNIMAS por lista de _ids — para «ver selección» (título + si tiene NFC + ubicación). Admin.
+    r.post('/documentos/por-ids', async (req, res) => {
+        try {
+            const ids = ((req.body && req.body.ids) || []).filter(x => ObjectId.isValid(x)).map(x => new ObjectId(x)).slice(0, 2000);
+            if (!ids.length) return res.json({ ok: true, docs: [] });
+            const db = await conectarDB();
+            const cond = { _id: { $in: ids } };
+            const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
+            const consulta = nsfwCond ? { $and: [cond, ...nsfwCond] } : cond;
+            const docs = await db.collection('biblioteca').find(consulta, { projection: { titulo: 1, nfc: 1, ubicacion: 1 } }).limit(2000).toArray();
+            res.json({ ok: true, docs: docs.map(d => ({ _id: String(d._id), titulo: d.titulo || null, nfc: !!(d.nfc && (d.nfc.fecha_vinculacion || d.nfc.uid)), ubicacion: d.ubicacion || null })) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

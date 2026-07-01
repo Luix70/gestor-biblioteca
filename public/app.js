@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='isbn-foto-autoritativa+orden-botones · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='estanterias-fase0 (sel-todos+ver-sel+añadir-aqui) · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1433,6 +1433,7 @@ function renderBulk(){const el=$('#searchBulk');if(!el)return;
   if(!paginaIds.length||ROL!=='admin'){el.innerHTML='';return;}
   const enPag=paginaIds.filter(id=>selDocs.has(id)).length;
   const acc=selDocs.size?`<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.
+    <button class="btn" id="bkVer">👁 Ver</button>
     <button class="btn pri" id="bkCol">📚 Colección</button>
     <button class="btn pri" id="bkObra">📖 Obra</button>
     <button class="btn pri" id="bkUbic">📍 Estantería</button>
@@ -1440,15 +1441,44 @@ function renderBulk(){const el=$('#searchBulk');if(!el)return;
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`:'';
   const g=colaEtqGuardada(); const resume=(g&&('NDEFReader' in window)&&!selDocs.size)?`<button class="btn pri" id="bkResumeNfc" style="margin-left:auto">📶 Reanudar etiquetado (${g.ids.length})</button>`:'';
-  el.innerHTML=`<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="bkAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todos <span class="muted">(${paginaIds.length} en esta página)</span></label>${resume}${acc}</div>`;
+  el.innerHTML=`<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="bkAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todos <span class="muted">(${paginaIds.length} en esta página)</span></label><button class="btn" id="bkAllRes" title="Selecciona TODOS los resultados de esta búsqueda (todas las páginas)">🗂 Todos los resultados</button>${resume}${acc}</div>`;
   if($('#bkResumeNfc'))$('#bkResumeNfc').onclick=()=>{const s=colaEtqGuardada();if(s)iniciarEtiquetadoLote(s.ids,s.auto);};
   const all=$('#bkAll');all.checked=enPag>0&&enPag===paginaIds.length;all.indeterminate=enPag>0&&enPag<paginaIds.length;
   all.onchange=()=>{const on=all.checked;paginaIds.forEach(id=>{if(on)selDocs.add(id);else selDocs.delete(id);});
     $$('#searchResults .selchk').forEach(cb=>cb.checked=on);$$('#searchResults .vol').forEach(c=>c.classList.toggle('sel',on));renderBulk();};
+  if($('#bkAllRes'))$('#bkAllRes').onclick=selTodosResultados;
   if(selDocs.size){$('#bkCol').onclick=()=>pickerGrupo('coleccion');$('#bkObra').onclick=()=>pickerGrupo('obra');$('#bkUbic').onclick=()=>pickerUbic();
     if($('#bkNfc'))$('#bkNfc').onclick=()=>iniciarEtiquetadoLote([...selDocs],false);
+    if($('#bkVer'))$('#bkVer').onclick=verSeleccion;
     $('#bkDel').onclick=eliminarSeleccionados;
     $('#bkClear').onclick=()=>{selDocs.clear();$$('#searchResults .vol.sel').forEach(c=>c.classList.remove('sel'));$$('#searchResults .selchk').forEach(c=>c.checked=false);renderBulk();};}}
+// Selecciona TODOS los resultados de la búsqueda actual (todas las páginas, respeta filtros incl. con/sin NFC).
+async function selTodosResultados(){
+  const params=_paramsBusqueda(); params.set('soloIds','1');
+  let r; try{ r=await api('/catalogo?'+params.toString()); }catch(e){ toast(e.message,'bad'); return; }
+  (r.ids||[]).forEach(id=>selDocs.add(id));
+  $$('#searchResults .selchk').forEach(cb=>{ if(selDocs.has(cb.dataset.id)){cb.checked=true;const v=cb.closest('.vol');if(v)v.classList.add('sel');} });
+  renderBulk();
+  toast(`${(r.ids||[]).length} resultado(s) seleccionados · total ${selDocs.size}`);
+}
+// Ver la selección acumulada (de todas las búsquedas): lista con quitar uno a uno + borrar todo.
+async function verSeleccion(){
+  if(!selDocs.size)return;
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:520px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">👁 Selección (<b id="vsN">${selDocs.size}</b>)</h3><div id="vsBody" class="muted">Cargando…</div>
+    <div class="row" style="gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn bad" id="vsClr">Borrar selección</button><button class="btn" id="vsX">Cerrar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrarCmp;
+  $('#vsX').onclick=cerrarCmp;
+  $('#vsClr').onclick=()=>{selDocs.clear();$$('#searchResults .vol.sel').forEach(c=>c.classList.remove('sel'));$$('#searchResults .selchk').forEach(c=>c.checked=false);renderBulk();cerrarCmp();};
+  let docs=[]; try{ const r=await api('/documentos/por-ids',{method:'POST',body:JSON.stringify({ids:[...selDocs]})}); docs=r.docs||[]; }catch(e){}
+  const body=$('#vsBody'); if(!body)return; body.classList.remove('muted');
+  body.innerHTML=docs.length?docs.map(d=>`<div class="row" style="align-items:center;gap:8px;border-top:1px solid var(--line);padding:6px 0">
+      <span style="flex:1;font-size:13px">${d.nfc?'📶 ':''}${esc(recortar(d.titulo||'(sin título)',60))}</span>
+      <a class="rowlink" data-vsver="${esc(d._id)}" style="font-size:12px">ficha</a>
+      <button class="rbtn" data-vsdel="${esc(d._id)}" title="Quitar de la selección">✕</button></div>`).join('')
+    :'<div class="muted">No se pudieron cargar los títulos (la selección sigue activa).</div>';
+  body.querySelectorAll('[data-vsdel]').forEach(b=>b.onclick=()=>{selDocs.delete(b.dataset.vsdel);const c=$(`#searchResults .vol[data-doc="${b.dataset.vsdel}"]`);if(c){c.classList.remove('sel');const cb=c.querySelector('.selchk');if(cb)cb.checked=false;}renderBulk();if(!selDocs.size)cerrarCmp();else{$('#vsN').textContent=selDocs.size;b.closest('.row').remove();}});
+  body.querySelectorAll('[data-vsver]').forEach(a=>a.onclick=()=>{cerrarCmp();verDoc(a.dataset.vsver,{volver:'search',etiqueta:'Búsqueda'});});
+}
 // Borrado MASIVO de los seleccionados (solo admin; renderBulk ya gatea ROL). Pide contraseña. Las
 // carpetas van a la Papelera (recuperable), como el borrado individual.
 async function eliminarSeleccionados(){
@@ -1558,9 +1588,9 @@ function actualizarSumEstrellas(){const s=$('#sqStarsSum');if(!s)return;const se
   const base=(!sel.length||sel.length===6)?'Todas':sel.map(n=>n==='0'?'0★':n+'★').sort().reverse().join(' ');
   s.textContent=base+(($('#sqNsfw')&&$('#sqNsfw').checked)?' · 🔞':'');}
 function loadSearch(){if(!$('#sqQ'))construirSearch();cargarUbicaciones();buscarCatalogo(estadoBusqueda.page||1);}
-async function buscarCatalogo(page){
-  estadoBusqueda.page=page;
-  const params=new URLSearchParams({q:$('#sqQ').value.trim(),tipo:$('#sqTipo').value,soporte:($('#sqSoporte')?$('#sqSoporte').value:''),cdu:$('#sqCdu').value.trim(),orden:$('#sqOrden').value,page});
+// Parámetros de la búsqueda actual (SIN page): reutilizados por buscarCatalogo y por «seleccionar todos».
+function _paramsBusqueda(){
+  const params=new URLSearchParams({q:$('#sqQ').value.trim(),tipo:$('#sqTipo').value,soporte:($('#sqSoporte')?$('#sqSoporte').value:''),cdu:$('#sqCdu').value.trim(),orden:$('#sqOrden').value});
   const est=estrellasSel();if(est.length&&est.length<6)params.set('estrellas',est.join(','));
   const ambS=($('#sqAmbito')&&$('#sqAmbito').value)||'';if(ambS)params.set('ambito',ambS);
   const estS=($('#sqEstanteria')&&$('#sqEstanteria').value)||'';if(ambS&&estS)params.set('estanteria',estS);
@@ -1568,6 +1598,11 @@ async function buscarCatalogo(page){
   // 🔞 NSFW: sin marcar = excluir; marcada + otros criterios = incluir (también); marcada y sola = solo NSFW.
   if($('#sqNsfw'))params.set('nsfw', !$('#sqNsfw').checked ? 'excluir' : (hayOtrosCriteriosBusqueda()?'incluir':'solo'));
   if(estadoBusqueda.extra)for(const[k,v]of Object.entries(estadoBusqueda.extra)){if(k!=='etiqueta'&&v!=null&&v!=='')params.set(k,v);}
+  return params;
+}
+async function buscarCatalogo(page){
+  estadoBusqueda.page=page;
+  const params=_paramsBusqueda(); params.set('page',page);
   pintarChipClas();
   $('#searchResults').innerHTML='<div class="muted" style="padding:22px 6px">Buscando…</div>';$('#searchPager').innerHTML='';
   try{const r=await api('/catalogo?'+params.toString());pintarBusqueda(r);}
@@ -1625,9 +1660,27 @@ function descRow(c){
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${links}</div></div>`;
 }
 function pintarChipClas(){const el=$('#searchChip');if(!el)return;
-  if(estadoBusqueda.extra&&estadoBusqueda.extra.etiqueta){el.innerHTML=`<span class="clasfilt">Filtro: <b>${esc(estadoBusqueda.extra.etiqueta)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>`;
-    $('#clasX').onclick=()=>{estadoBusqueda.extra=null;buscarCatalogo(1);};}
+  const ex=estadoBusqueda.extra;
+  if(ex&&ex.etiqueta){
+    // Si el filtro es una ESTANTERÍA/ámbito, ofrecer «Añadir libros aquí» → Inbox con la ubicación puesta.
+    const addAqui=(ROL==='admin'&&ex.ambito)?` <button class="btn" id="chipAdd" style="padding:2px 9px;font-size:12px" title="Ir al Inbox con esta ubicación ya rellena para añadir libros">➕ Añadir libros aquí</button>`:'';
+    el.innerHTML=`<span class="clasfilt">Filtro: <b>${esc(ex.etiqueta)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>${addAqui}`;
+    $('#clasX').onclick=()=>{estadoBusqueda.extra=null;buscarCatalogo(1);};
+    if($('#chipAdd'))$('#chipAdd').onclick=()=>irAInboxConUbic(ex.ambito, ex.estanteria);
+  }
   else el.innerHTML='';}
+// Va al Inbox con el ámbito/estantería ya puestos en «Datos de esta alta» (para el bucle escanear estantería
+// → añadir libros → etiquetar). Deja abierta la tarjeta de datos para que se vean.
+function irAInboxConUbic(ambito, estanteria){
+  go('inbox');
+  setTimeout(()=>{
+    if($('#inAmbito'))$('#inAmbito').value=ambito||'';
+    if($('#inEstanteria'))$('#inEstanteria').value=(estanteria&&estanteria!=='Sin asignar')?estanteria:'';
+    if(typeof refrescarInboxUbic==='function')refrescarInboxUbic();
+    const da=$('#datosAltaCard');if(da)da.open=true;
+    toast(`Ubicación puesta: ${ambito||'—'}${(estanteria&&estanteria!=='Sin asignar')?' · '+estanteria:''}. Añade los libros.`);
+  },60);
+}
 // Distintivos de admin: 🔞 NSFW (oculto a invitados) y 🔒 bloqueado (el Conformador no lo altera).
 const badgesDoc=d=>`${d.nsfw?' <span class="fmt" style="background:rgba(255,92,122,.18);color:var(--bad)" title="NSFW: oculto a invitados">🔞</span>':''}${d.locked?' <span class="fmt" style="background:rgba(255,180,84,.18);color:var(--warn)" title="Bloqueado: el Conformador no lo altera">🔒</span>':''}${(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid))?' <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)" title="Tiene etiqueta NFC vinculada">📶</span>':''}`;
 function docCard(d){
