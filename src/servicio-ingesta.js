@@ -13,6 +13,8 @@ import { conectarDB } from './database.js';
 import { indexarDoc } from './utils/indice-busqueda.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { parsearVolumen } from './utils/multivolumen.js';
+import { resolverCDU } from './clasificador-cdu.js';
+import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -368,5 +370,92 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         rutaWeb: rc.web,
         copiaIntegra,          // el vigilante solo borra del Inbox si esto es true
         documento: documentoLegible,
+    };
+}
+
+/**
+ * ALTA POR ISBN (sin fichero): crea un documento a partir de los metadatos del Fichero local (+ ediciones
+ * del usuario) y de la(s) portada(s) elegidas (por URL o subida). Reutiliza el motor de catálogo y la copia
+ * de archivos del pipeline, pero SIN extracción ni visión: el ISBN es el pivote y los datos ya vienen dados,
+ * así que NO se gasta IA en identificar. Pensado para catalogar libros FÍSICOS a mano con su código de barras.
+ *   base      = { titulo, subtitulo, autores[], editorial, isbn, idioma, paginas, año_edicion, dewey, lcc,
+ *                 cdu, sinopsis, categorias[], coleccion_nombre }  (metadatos del Fichero + ediciones)
+ *   activos   = [{ tipo:'portada'|'imagen', url?|base64?, origen }]  (la portada primero)
+ *   contexto  = { ambito, estanteria, coleccion, obra }
+ *   completar = true → enriquecer (APIs, conservador) + resolver CDU de forma SÍNCRONA antes de insertar;
+ *               false → alta rápida (queda pendiente; el Conformador la perfeccionará luego).
+ */
+export async function altaPorISBN({ base = {}, activos = [], contexto = {}, completar = false }) {
+    let documento;
+    if (completar) {
+        documento = await enriquecerMetadatos({ ...base, formatos: ['papel'], tipo_recurso: 'libro' },
+            { ...contexto, tipo_recurso: 'libro', formatos: ['papel'] });
+    } else {
+        documento = { ...base, formatos: ['papel'], tipo_recurso: 'libro', estado_verificacion: 'pendiente' };
+    }
+    documento.tipo_recurso = documento.tipo_recurso || 'libro';
+    documento.formatos = (documento.formatos && documento.formatos.length) ? documento.formatos : ['papel'];
+    if (!documento.idioma) documento.idioma = base.idioma || 'es';
+
+    // CDU obligatoria ($jsonSchema). Fichero.cdu → mapear dewey/lcc (cache/API/IA) → placeholder '0'.
+    if (!documento.cdu) {
+        try {
+            const rcdu = await resolverCDU({ dewey: documento.dewey, lcc: documento.lcc, categorias: documento.categorias || [], titulo: documento.titulo, autor: (documento.autores || [])[0], sinopsis: documento.sinopsis });
+            if (rcdu && rcdu.cdu) documento.cdu = rcdu.cdu;
+        } catch (e) { console.warn(`[AltaISBN] CDU no resuelta: ${e.message}`); }
+    }
+    if (!documento.cdu) { documento.cdu = '0'; documento.estado_verificacion = documento.estado_verificacion || 'pendiente'; }
+
+    // Ubicación ($jsonSchema exige {ambito, estanteria}); colección/obra como señales del pipeline.
+    documento.ubicacion = {
+        ambito: contexto.ambito || (documento.ubicacion && documento.ubicacion.ambito) || 'Sin asignar',
+        estanteria: contexto.estanteria || (documento.ubicacion && documento.ubicacion.estanteria) || 'Sin asignar',
+    };
+    if (contexto.coleccion) documento.coleccion_nombre = contexto.coleccion;
+    if (contexto.obra) documento.obra_titulo = contexto.obra;
+    documento.origen_ingesta = 'isbn';
+
+    // Persistencia (dedup + refs autores/editorial + upsert).
+    const resultado = await procesarCatalogo(documento, {});
+
+    // Carpeta CDU + copia de imágenes (por URL/base64, sin fichero original) + enlazar rutas + sidecars.
+    const argsRuta = {
+        cdu: resultado.cdu || documento.cdu, tipo_recurso: documento.tipo_recurso,
+        isbn: resultado.isbn, issn: resultado.issn, id: resultado._id,
+        año_edicion: resultado.año_edicion || documento.año_edicion,
+        titulo: resultado.titulo || documento.titulo,
+        obra: (resultado.obra || documento.obra)
+            ? (resultado.isbn_obra || documento.isbn_obra || resultado.obra_titulo || documento.obra_titulo || String(resultado.obra || documento.obra))
+            : null,
+        volumen_numero: resultado.volumen_numero != null ? resultado.volumen_numero : documento.volumen_numero,
+    };
+    let rc = rutaCatalogo(argsRuta);
+    let carpetaFs = path.join(DIR_CDU, rc.relativa);
+    if (resultado.operacion === 'insercion' && await carpetaOcupadaPorOtroDoc(carpetaFs, resultado._id)) {
+        rc = rutaCatalogo({ ...argsRuta, discriminador: String(resultado._id).slice(-6) });
+        carpetaFs = path.join(DIR_CDU, rc.relativa);
+    }
+    let imagenes = [], portada = null;
+    try { ({ imagenes, portada } = await copiarArchivos(carpetaFs, rc.web, [], activos)); }
+    catch (e) { console.warn(`[AltaISBN] Imágenes no copiadas: ${e.message}`); }
+
+    const campos = { ruta_base: rc.web };
+    if (imagenes.length) campos.imagenes = imagenes;
+    if (portada) campos.portada = portada;
+    try { await actualizarDocumento(resultado._id, campos); } catch (e) { console.warn(`[AltaISBN] Rutas no enlazadas: ${e.message}`); }
+
+    try {
+        const snap = { ...documento, ...campos, isbn: resultado.isbn, cdu: resultado.cdu, _id: String(resultado._id) };
+        delete snap._portadas_remotas;
+        await fs.writeFile(path.join(carpetaFs, 'registro.json'), JSON.stringify(snap, null, 2), 'utf8');
+        await fs.writeFile(path.join(carpetaFs, 'registro.marc.xml'), aMARCXML(snap), 'utf8');
+    } catch (e) { console.warn(`[AltaISBN] Sidecars no escritos: ${e.message}`); }
+
+    try { await indexarDoc(await conectarDB(), resultado._id); } catch { /* índice best-effort */ }
+
+    return {
+        _id: String(resultado._id), operacion: resultado.operacion,
+        titulo: resultado.titulo || documento.titulo, isbn: resultado.isbn || documento.isbn || null,
+        cdu: resultado.cdu || documento.cdu, ruta_base: rc.web, portada: portada || null,
     };
 }

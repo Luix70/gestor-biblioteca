@@ -36,6 +36,10 @@ import { sanitizarCDU } from './utils/cdu-arbol.js';
 import { fuentesCopia, procesarSaneamiento, estadoSaneamiento } from './utils/saneamiento.js';
 import { describirCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion } from './utils/descripcion-clasificacion.js';
+import { buscarEnFicheroLocal } from './utils/buscador-local.js';
+import { medirImagen } from './utils/medir-imagen.js';
+import { validarISBN, isbn10a13, isbn13a10 } from './utils/identificadores.js';
+import { altaPorISBN } from './servicio-ingesta.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1, nfc: 1 };
@@ -129,6 +133,46 @@ async function docOcultoParaGuest(db, doc) {
  * Rutas del PANEL DE CONTROL (montadas bajo /api). Acciones de operación: vigilante, papelera,
  * cuarentena, purga de obras, ingesta por día. (Mantenimiento y estadísticas viven en app.js.)
  */
+// Descarga una imagen remota y devuelve sus dimensiones (sin sharp: se leen de la cabecera JPEG/PNG).
+// Descarta placeholders diminutos («sin imagen») por tamaño de buffer. null si no carga o no es imagen.
+async function medirPortadaRemota(url, fuente) {
+    try {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 9000);
+        const resp = await fetch(url, { signal: ctrl.signal, redirect: 'follow' });
+        clearTimeout(to);
+        if (!resp.ok) return null;
+        const buf = Buffer.from(await resp.arrayBuffer());
+        if (buf.length < 2500) return null;                 // 1x1 / gif «no image» de Amazon, etc.
+        const dim = medirImagen(buf);
+        if (!dim || !dim.width) return null;
+        return { url, fuente, ancho: dim.width, alto: dim.height, bytes: buf.length };
+    } catch { return null; }
+}
+
+// Candidatas de PORTADA por ISBN desde fuentes KEYLESS (sin scraping frágil): OpenLibrary Covers (L),
+// Amazon (truco ISBN-10) y Google Books (mayor tamaño disponible). Se miden y ordenan por ancho desc.
+async function portadasPorISBN(isbn13, isbn10) {
+    const urls = [];
+    if (isbn13) urls.push([`https://covers.openlibrary.org/b/isbn/${isbn13}-L.jpg?default=false`, 'OpenLibrary']);
+    if (isbn10) urls.push([`https://images-na.ssl-images-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
+    try {
+        const q = isbn13 || isbn10;
+        const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
+        const resp = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${q}${key}`);
+        if (resp.ok) {
+            const j = await resp.json();
+            const il = j && j.items && j.items[0] && j.items[0].volumeInfo && j.items[0].volumeInfo.imageLinks;
+            let u = il && (il.extraLarge || il.large || il.medium || il.thumbnail);
+            if (u) { u = u.replace(/^http:/, 'https:').replace(/&edge=curl/, ''); urls.push([u, 'Google Books']); }
+        }
+    } catch { /* Google Books opcional */ }
+    const out = [];
+    for (const [u, f] of urls) { const m = await medirPortadaRemota(u, f); if (m) out.push(m); }
+    out.sort((a, b) => b.ancho - a.ancho);
+    return out;
+}
+
 export function rutasPanel() {
     const r = express.Router();
 
@@ -1012,6 +1056,46 @@ export function rutasPanel() {
                 return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null });
             }
             return res.status(400).json({ ok: false, motivo: 'sistema inválido (cdu|dewey|lcc)' });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // INGRESO POR ISBN — 1) LOOKUP: valida el ISBN, recupera metadatos del Fichero local y reúne candidatas
+    // de portada (>800 px marcadas como buena resolución). GET (lectura); no crea nada todavía.
+    r.get('/isbn/:isbn', async (req, res) => {
+        try {
+            const limpio = String(req.params.isbn || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+            if (!validarISBN(limpio)) return res.status(400).json({ ok: false, motivo: 'ISBN no válido (dígito de control incorrecto)' });
+            const isbn13 = limpio.length === 13 ? limpio : isbn10a13(limpio);
+            const isbn10 = limpio.length === 10 ? limpio : isbn13a10(limpio);
+            const meta = await buscarEnFicheroLocal({ isbns: [isbn13, isbn10, limpio].filter(Boolean) });
+            const portadas = await portadasPorISBN(isbn13, isbn10);
+            res.json({ ok: true, isbn: isbn13 || limpio, encontrado: !!(meta && meta.titulo), meta: meta || null, portadas });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // INGRESO POR ISBN — 2) ALTA: crea el documento con los metadatos validados + portada(s) elegidas (admin).
+    // completar=1 → enriquecer (APIs) + resolver CDU síncronamente; si no, alta rápida (pendiente).
+    r.post('/isbn/alta', async (req, res) => {
+        try {
+            const b = req.body || {};
+            const meta = b.meta || {};
+            if (!meta.titulo) return res.status(400).json({ ok: false, motivo: 'Falta el título' });
+            const autores = Array.isArray(meta.autores) ? meta.autores
+                : (meta.autores ? String(meta.autores).split(/[;,]/).map(s => s.trim()).filter(Boolean) : []);
+            const base = {
+                isbn: meta.isbn || b.isbn || null, titulo: meta.titulo, subtitulo: meta.subtitulo || null,
+                autores, editorial: meta.editorial || null, idioma: meta.idioma || null, paginas: meta.paginas || null,
+                'año_edicion': meta['año_edicion'] || meta.anio || null, dewey: meta.dewey || null, lcc: meta.lcc || null,
+                cdu: meta.cdu || null, sinopsis: meta.sinopsis || null,
+                categorias: Array.isArray(meta.categorias) ? meta.categorias : [], coleccion_nombre: meta.coleccion_nombre || null,
+            };
+            const activos = [];
+            for (const im of (b.imagenes || [])) { if (im && im.url) activos.push({ tipo: im.tipo || 'imagen', url: im.url, origen: 'isbn-web' }); }
+            for (const s of (b.subidas || [])) { if (s && s.base64) activos.push({ tipo: s.tipo || 'imagen', base64: String(s.base64).replace(/^data:[^,]+,/, ''), origen: 'isbn-subida' }); }
+            if (activos.length && !activos.some(a => a.tipo === 'portada')) activos[0].tipo = 'portada';
+            const ubic = b.ubicacion || {};
+            const r2 = await altaPorISBN({ base, activos, contexto: { ambito: ubic.ambito, estanteria: ubic.estanteria, coleccion: b.coleccion, obra: b.obra }, completar: !!b.completar });
+            res.json({ ok: true, ...r2 });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
