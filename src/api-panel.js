@@ -1147,6 +1147,35 @@ export function rutasPanel() {
         } catch (e) { res.status(500).send('error'); }
     });
 
+    // BUSCAR PORTADAS en Google Imágenes (Custom Search JSON API, admin). Prioriza Amazon/AbeBooks/IberLibro
+    // y ordena por resolución. Devuelve URLs + dimensiones (las da la propia API, sin descargar). Si faltan
+    // las credenciales GOOGLE_CSE_KEY/GOOGLE_CSE_CX → { disponible:false } y el front mantiene las keyless.
+    r.get('/buscar-portadas', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo admin' });
+            const key = process.env.GOOGLE_CSE_KEY, cx = process.env.GOOGLE_CSE_CX;
+            if (!key || !cx) return res.json({ ok: true, disponible: false, motivo: 'Faltan GOOGLE_CSE_KEY / GOOGLE_CSE_CX', portadas: [] });
+            const isbn = String(req.query.isbn || '').trim(), titulo = String(req.query.titulo || '').trim();
+            const q = [titulo, isbn, 'portada'].filter(Boolean).join(' ').trim();
+            if (!q) return res.status(400).json({ ok: false, motivo: 'falta consulta' });
+            const u = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(key)}&cx=${encodeURIComponent(cx)}&searchType=image&num=10&imgSize=large&safe=off&q=${encodeURIComponent(q)}`;
+            const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 12000);
+            const resp = await fetch(u, { signal: ctrl.signal }); clearTimeout(to);
+            if (!resp.ok) { const t = await resp.text().catch(() => ''); return res.status(502).json({ ok: false, motivo: 'Custom Search ' + resp.status, detalle: t.slice(0, 200) }); }
+            const j = await resp.json();
+            const PRIOR = /(amazon\.|abebooks\.|iberlibro\.|images-amazon|media-amazon|ssl-images-amazon)/i;
+            const items = (j.items || [])
+                .map(it => ({ url: it.link, ancho: (it.image && it.image.width) || 0, alto: (it.image && it.image.height) || 0, fuente: it.displayLink || '', ctx: (it.image && it.image.contextLink) || '' }))
+                .filter(x => x.url && /^https?:\/\//i.test(x.url));
+            items.sort((a, b) => {
+                const pa = (PRIOR.test(a.fuente) || PRIOR.test(a.url)) ? 1 : 0, pb = (PRIOR.test(b.fuente) || PRIOR.test(b.url)) ? 1 : 0;
+                if (pa !== pb) return pb - pa;
+                return (b.ancho || 0) - (a.ancho || 0);
+            });
+            res.json({ ok: true, disponible: true, portadas: items.slice(0, 12) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // COMPARTIR (QR): genera un enlace permanente acotado a ESTE documento (admin). Para medios digitales
     // el token autoriza además la descarga; el front construye la URL (origin + '/?s=' + token) y su QR.
     r.post('/documentos/:id/compartir', async (req, res) => {
