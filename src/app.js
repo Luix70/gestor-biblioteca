@@ -75,8 +75,10 @@ app.use('/recursos', express.static(DIR_CDU, {
 // Panel de control (estático). La página y el login son públicos; los datos van por /api (protegido).
 app.use(express.static(DIR_PUBLIC, {
     setHeaders: (res, ruta) => {
-        // El HTML del panel y el service worker NO se cachean: así un despliegue se ve YA (sin Ctrl+F5).
-        if (/\.html$/i.test(ruta) || ruta.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
+        // NO cachear lo que cambia en cada despliegue (así se ve YA, sin Ctrl+F5): el HTML, el service worker
+        // y los ficheros del panel (app.js/styles.css). Los vendored (/vendor, qrcode.js) SÍ se cachean.
+        if (/\.html$/i.test(ruta) || ruta.endsWith('sw.js') || ruta.endsWith('app.js') || ruta.endsWith('styles.css'))
+            res.setHeader('Cache-Control', 'no-cache');
     },
 }));
 
