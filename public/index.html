@@ -672,7 +672,7 @@ body.guest .admin-only{display:none!important}
 <script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='portadas-isbn10y13+enlaces · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='conformar-portada+proxy · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1638,9 +1638,10 @@ function detectarRejillaPxCm(canvas){
   if(best.s < 0.18) return null;                          // sin rejilla clara → regla manual
   return (pxcm>3&&isFinite(pxcm))?pxcm:null;
 }
-// Editor de UNA imagen: rotar 90°, recortar (rect) y corregir PERSPECTIVA (4 esquinas → rectángulo).
-function abrirEditorImagen(i){
-  const im=_imgState.imgs[i]; if(!im)return;
+// Editor de UNA imagen (núcleo reutilizable): rotar 90°, recortar (rect) y corregir PERSPECTIVA (4 esquinas
+// → rectángulo). opts = { src (URL o dataURL), onSave(dataURLjpeg), onClose() }. No depende de un documento,
+// así sirve tanto para la ficha (guarda por API) como para el alta por ISBN (conforma una portada subida).
+function _editorImagen(opts){
   const src=new Image(); src.crossOrigin='anonymous';
   src.onerror=()=>toast('No se pudo cargar la imagen para editar','bad');
   src.onload=()=>{
@@ -1705,18 +1706,22 @@ function abrirEditorImagen(i){
         const nc=document.createElement('canvas');nc.width=W;nc.height=H;nc.getContext('2d').putImageData(out,0,0);work=nc; }
       modo='none';$('#edApply').style.display='none';reset();
     };
-    const cerrarEd=()=>pintarGestorImagenes();
-    $('#edX').onclick=cerrarEd;
+    $('#edX').onclick=()=>{ if(opts.onClose)opts.onClose(); };
     $('#edSave').onclick=async()=>{
       // exportar (cap del lado mayor) a JPEG
       let cw=work.width,ch=work.height;const f=Math.min(1,TOPE/Math.max(cw,ch));
       let exp=work; if(f<1){exp=document.createElement('canvas');exp.width=Math.round(cw*f);exp.height=Math.round(ch*f);exp.getContext('2d').drawImage(work,0,0,exp.width,exp.height);}
       const b64=exp.toDataURL('image/jpeg',0.9);
-      const ok=await apiImg('reemplazar',{ruta:im.ruta,base64:b64});  // re-pinta el gestor
-      if(ok)toast('Imagen actualizada');
+      if(opts.onSave)await opts.onSave(b64);
     };
   };
-  src.src=encUrl(im.ruta)+'?t='+Date.now();
+  src.src=opts.src;
+}
+// Envoltura para la ficha: edita una imagen del carrusel y guarda por API (re-pinta el gestor).
+function abrirEditorImagen(i){
+  const im=_imgState.imgs[i]; if(!im)return;
+  _editorImagen({ src:encUrl(im.ruta)+'?t='+Date.now(), onClose:pintarGestorImagenes,
+    onSave:async(b64)=>{ const ok=await apiImg('reemplazar',{ruta:im.ruta,base64:b64}); if(ok)toast('Imagen actualizada'); } });
 }
 // MEDIR el tamaño físico del libro (opcional, on-demand). Sobre la 1.ª imagen (idealmente en la
 // alfombrilla reglada): recuadro VERDE en el libro (auto o manual) + regla AZUL de 2 puntos sobre una
@@ -2578,10 +2583,14 @@ async function isbnBuscar(){
   if(msg)msg.textContent=r.encontrado?`✔ Encontrado en el Fichero${(meta.fuentes||[]).length?` (${meta.fuentes.join(', ')})`:''}.`:'⚠ No está en el Fichero local: revisa/completa los datos a mano.';
   isbnRender();
 }
-function isbnThumb(id,src,cap,sel,hires){
-  return `<div data-thumb="${id}" style="cursor:pointer;width:96px;text-align:center;border:2px solid ${sel?'var(--acc)':'transparent'};border-radius:8px;padding:3px;background:var(--card)">
-    <img src="${esc(src)}" style="width:100%;height:120px;object-fit:contain;border-radius:5px" loading="lazy">
-    <div class="muted" style="font-size:10px;margin-top:2px;line-height:1.2">${sel?'✅ ':''}${hires?'✔ ':''}${esc(cap)}</div></div>`;
+function isbnThumb(id,src,cap,sel,hires,editable){
+  return `<div style="position:relative;width:96px">
+    <div data-thumb="${id}" style="cursor:pointer;text-align:center;border:2px solid ${sel?'var(--acc)':'transparent'};border-radius:8px;padding:3px;background:var(--card)">
+      <img src="${esc(src)}" style="width:100%;height:120px;object-fit:contain;border-radius:5px" loading="lazy">
+      <div class="muted" style="font-size:10px;margin-top:2px;line-height:1.2">${sel?'✅ ':''}${hires?'✔ ':''}${esc(cap)}</div>
+    </div>
+    ${editable?`<button type="button" data-edit="${id}" title="Conformar: recortar / enderezar perspectiva" style="position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.6);color:#fff;cursor:pointer;font-size:13px;line-height:1;padding:0">✎</button>`:''}
+  </div>`;
 }
 function isbnRender(){
   const res=$('#isbnRes'); if(!res||!_isbnEstado)return; const m=_isbnEstado.meta;
@@ -2597,8 +2606,8 @@ function isbnRender(){
       <div><label>Idioma</label><input data-mk="idioma" value="${val('idioma')}" autocomplete="off"></div>
       <div><label>CDU${m.cdu?' <span class="muted" style="font-weight:400;font-size:11px">(del Fichero)</span>':''}</label><input data-mk="cdu" value="${val('cdu')}" autocomplete="off">${_isbnEstado.cduDesc&&_isbnEstado.cduDesc.titulo_es?`<div class="muted" style="font-size:11px;margin-top:3px">ⓘ ${esc(_isbnEstado.cduDesc.titulo_es)}</div>`:''}</div>
     </div>`;
-  const cand=_isbnEstado.portadas.map((p,i)=>isbnThumb('c'+i,p.url,`${p.fuente} · ${p.ancho}×${p.alto}`,p.sel,p.ancho>=800)).join('');
-  const extra=_isbnEstado.extra.map((p,i)=>isbnThumb('e'+i,p.previa||p.url,p.nombre||'añadida',p.sel,true)).join('');
+  const cand=_isbnEstado.portadas.map((p,i)=>isbnThumb('c'+i,p.url,`${p.fuente} · ${p.ancho}×${p.alto}`,p.sel,p.ancho>=800,true)).join('');
+  const extra=_isbnEstado.extra.map((p,i)=>isbnThumb('e'+i,p.previa||p.url,p.nombre||'añadida',p.sel,true,true)).join('');
   const galeria=(cand||extra)?`<div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${cand}${extra}</div>`:'<div class="muted" style="font-size:12px;margin-top:4px">No se encontraron portadas automáticas. Usa «Buscar más imágenes» o añade una.</div>';
   const gimg=encodeURIComponent(((m.titulo?m.titulo+' ':'')+(_isbnEstado.isbn||'')+' portada libro').trim());
   const isbnQ=encodeURIComponent(_isbnEstado.isbn||'');
@@ -2624,12 +2633,29 @@ function isbnRender(){
       <button class="btn" type="button" id="isbnCancel">Cancelar</button>
     </div></div>`;
   res.querySelectorAll('[data-thumb]').forEach(el=>el.onclick=()=>isbnToggle(el.dataset.thumb));
+  res.querySelectorAll('[data-edit]').forEach(el=>el.onclick=e=>{e.stopPropagation();isbnConformar(el.dataset.edit);});
   res.querySelectorAll('[data-mk]').forEach(el=>el.oninput=()=>{const k=el.dataset.mk;_isbnEstado.meta[k]=(k==='autores')?el.value.split(';').map(s=>s.trim()).filter(Boolean):el.value;});
   $('#isbnAddUrl').onclick=isbnAddUrl; $('#isbnAddFile').onclick=()=>$('#isbnFile').click(); $('#isbnFile').onchange=isbnAddFiles;
   $('#isbnCrear').onclick=()=>isbnCrear(false); $('#isbnCompletar').onclick=()=>isbnCrear(true);
   $('#isbnCancel').onclick=()=>{_isbnEstado=null;$('#isbnRes').innerHTML='';$('#isbnMsg').textContent='';};
 }
 function isbnToggle(id){const l=id[0]==='c'?_isbnEstado.portadas:_isbnEstado.extra;const i=+id.slice(1);if(l[i]){l[i].sel=!l[i].sel;isbnRender();}}
+// Conformar (recortar/enderezar perspectiva) una portada antes de crear. Local (base64) → directo; remota
+// (URL) → vía proxy same-origin para esquivar el CORS del canvas. El resultado depurado se añade como imagen.
+function isbnConformar(id){
+  const remoto=id[0]==='c'; const i=+id.slice(1);
+  const item=remoto?_isbnEstado.portadas[i]:_isbnEstado.extra[i]; if(!item)return;
+  const src=(!remoto&&item.base64)?(item.previa||item.base64)
+    :'/api/proxy-imagen?url='+encodeURIComponent(item.url)+(TOKEN?'&token='+encodeURIComponent(TOKEN):'');
+  _editorImagen({ src,
+    onSave:(b64)=>{
+      if(remoto||!item.base64){ if(remoto)item.sel=false; _isbnEstado.extra.push({base64:b64,previa:b64,tipo:'imagen',sel:true,nombre:'conformada'}); }
+      else { item.base64=b64; item.previa=b64; item.sel=true; }
+      cerrarCmp(); isbnRender();
+    },
+    onClose:()=>{ cerrarCmp(); }
+  });
+}
 function isbnAddUrl(){const u=prompt('URL de la imagen (https://…):');if(!u)return;_isbnEstado.extra.push({url:u.trim(),tipo:'imagen',sel:true});isbnRender();}
 async function isbnAddFiles(){
   const files=[...$('#isbnFile').files];$('#isbnFile').value='';

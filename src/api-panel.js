@@ -1121,6 +1121,32 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // PROXY DE IMAGEN (admin): baja una imagen remota y la sirve desde NUESTRO origen, para poder conformarla
+    // en el navegador (canvas) sin CORS. Solo imágenes, con tope de tamaño y bloqueo de destinos internos (SSRF).
+    r.get('/proxy-imagen', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).send('solo admin');
+            const url = String(req.query.url || '');
+            let u; try { u = new URL(url); } catch { return res.status(400).send('url no válida'); }
+            if (!/^https?:$/.test(u.protocol)) return res.status(400).send('esquema no permitido');
+            const host = u.hostname.toLowerCase();
+            if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|::1|\[::1\])/.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host))
+                return res.status(400).send('destino no permitido');
+            const ctrl = new AbortController();
+            const to = setTimeout(() => ctrl.abort(), 12000);
+            const up = await fetch(url, { signal: ctrl.signal, redirect: 'follow' });
+            clearTimeout(to);
+            if (!up.ok) return res.status(502).send('no disponible');
+            const ct = up.headers.get('content-type') || '';
+            if (!/^image\//i.test(ct)) return res.status(415).send('no es una imagen');
+            const buf = Buffer.from(await up.arrayBuffer());
+            if (buf.length > 12 * 1024 * 1024) return res.status(413).send('imagen demasiado grande');
+            res.setHeader('Content-Type', ct);
+            res.setHeader('Cache-Control', 'no-store');
+            res.send(buf);
+        } catch (e) { res.status(500).send('error'); }
+    });
+
     // COMPARTIR (QR): genera un enlace permanente acotado a ESTE documento (admin). Para medios digitales
     // el token autoriza además la descarga; el front construye la URL (origin + '/?s=' + token) y su QR.
     r.post('/documentos/:id/compartir', async (req, res) => {
