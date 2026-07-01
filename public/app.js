@@ -224,14 +224,27 @@ const rowN = (etiqueta, valor, colorTag, filtro, etqFiltro) => {
   return `<tr><td>${etiqueta}</td><td style="text-align:right">${celda}</td></tr>`;
 };
 
-// ── mantenimiento ──
-$('#mStart').onclick=async()=>{try{const r=await api('/mantenimiento',{method:'POST',body:JSON.stringify({activar:+$('#mActivar').value,intervalo:+$('#mIntervalo').value})});
-  toast(r.mensaje||'Mantenimiento programado');refrescarEstado();}catch(e){toast(e.message,'bad');}};
-$('#mStop').onclick=async()=>{try{await api('/mantenimiento/modo',{method:'POST',body:JSON.stringify({modo:'apagado'})});toast('Mantenimiento detenido','warn');refrescarEstado();}catch(e){toast(e.message,'bad');}};
+// ── mantenimiento (Conformador): programar/detener desde la página Actividad ─────────────────────────
+// Programa el mantenimiento con el modo (activar) e intervalo elegidos en los <select>.
+$('#mStart').onclick = async () => {
+  try {
+    const resp = await api('/mantenimiento', { method:'POST', body: JSON.stringify({ activar: +$('#mActivar').value, intervalo: +$('#mIntervalo').value }) });
+    toast(resp.mensaje || 'Mantenimiento programado'); refrescarEstado();
+  } catch (e) { toast(e.message, 'bad'); }
+};
+// Detiene el mantenimiento automático (modo 'apagado' = solo a demanda).
+$('#mStop').onclick = async () => {
+  try { await api('/mantenimiento/modo', { method:'POST', body: JSON.stringify({ modo:'apagado' }) }); toast('Mantenimiento detenido', 'warn'); refrescarEstado(); }
+  catch (e) { toast(e.message, 'bad'); }
+};
 
-// ── vigilante ──
-$('#vSwitch').onchange=async e=>{try{const r=await api('/vigilante',{method:'POST',body:JSON.stringify({activo:e.target.checked})});
-  toast('Vigilante '+(r.activo?'activado':'pausado'),r.activo?'ok':'warn');refrescarEstado();}catch(err){toast(err.message,'bad');}};
+// ── vigilante del Inbox: interruptor activar/pausar ──────────────────────────────────────────────────
+$('#vSwitch').onchange = async ev => {
+  try {
+    const resp = await api('/vigilante', { method:'POST', body: JSON.stringify({ activo: ev.target.checked }) });
+    toast('Vigilante ' + (resp.activo ? 'activado' : 'pausado'), resp.activo ? 'ok' : 'warn'); refrescarEstado();
+  } catch (err) { toast(err.message, 'bad'); }
+};
 
 // ── cuarentena ──
 // Consulta de búsqueda: limpia serializaciones (Epublibre [id]/(rN), marcas de fuente, hashes de
