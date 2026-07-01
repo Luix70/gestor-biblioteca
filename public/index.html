@@ -616,7 +616,7 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ficha-offline+valoracion-tag · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ficha-offline-solo-papel · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1210,9 +1210,11 @@ function pintarDoc(r,ctx){
     </div></div></div>`;
   // «Ficha offline»: primera sección tras el encabezado — lo que lleva (o llevaría) la etiqueta NFC. Para
   // libros CON etiqueta es su contenido; para libros SIN etiqueta se reconstruye de la base. Luego, el resto.
+  // SOLO para ejemplares EN PAPEL (libro/revista/cómic físico): un medio digital no se recoloca ni se etiqueta.
+  const _fisico=(d.formatos||[]).includes('papel');
   const _off={u:_txtUbic(d),a:(r.autores||[]).join(', '),e:r.editorial||'',x:r.coleccion||'',c:d.cdu||'',i:d.isbn||''};
   const _tag=!!(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid));
-  const fichaOff=`<div class="card"><h3 style="margin-top:0">📴 Ficha offline <span class="muted" style="font-size:11px;font-weight:400">— ${_tag?'contenido de la etiqueta NFC':'reconstruida de la base'}</span></h3>${_offlineInner(_off)}</div>`;
+  const fichaOff=_fisico?`<div class="card"><h3 style="margin-top:0">📴 Ficha offline <span class="muted" style="font-size:11px;font-weight:400">— ${_tag?'contenido de la etiqueta NFC':'reconstruida de la base'}</span></h3>${_offlineInner(_off)}</div>`:'';
   $('#p-detalle').innerHTML=`${head}${fichaOff}<div class="ficha"><div>${carrusel}${(d.formatos||[]).includes('papel')?'':previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
@@ -2815,9 +2817,9 @@ function _payloadOffline(d,r,budget){
   let t=cut(d.titulo,40), a=cut((r&&r.autores&&r.autores.length)?r.autores.join(', '):'',28),
       e=cut((r&&r.editorial)||'',22), x=cut((r&&r.coleccion)||'',22),
       c=String(d.cdu||''), i=d.isbn||'', dd=String(d._id||''), u=cut(_txtUbic(d),30),
-      s=(d.valoracion&&d.valoracion>0)?d.valoracion:'';
+      va=(d.valoracion&&d.valoracion>0)?d.valoracion:'';
   // claves cortas: d=id, u=ubicación, t=título, i=isbn, c=cdu, x=colección, a=autor, e=editorial, s=estrellas
-  const build=()=>'BIB1:'+JSON.stringify(Object.fromEntries(Object.entries({v:1,d:dd,u,t,i,c,x,a,e,s}).filter(([,v])=>v!=='')));
+  const build=()=>'BIB1:'+JSON.stringify(Object.fromEntries(Object.entries({v:1,d:dd,u,t,i,c,x,a,e,s:va}).filter(([,v])=>v!=='')));
   // Salvaguarda final SOLO si la URL fuese muy larga: nunca toca ubicación/título/isbn/cdu.
   const pasos=[()=>e='',()=>x='',()=>a=cut(a,18),()=>a=''];
   let s=build(),k=0; while(_blen(s)>budget && k<pasos.length){pasos[k]();k++;s=build();}
