@@ -90,93 +90,139 @@ function copiarFallback(texto, avisarOk) {
   document.body.removeChild(ta);
 }
 
-// ── nav ──
-const titles={dashboard:'Dashboard',activity:'Actividad',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',colecciones:'Colecciones',inbox:'Inbox',search:'Búsqueda'};
-let logTimer=null;
-function go(p){detalle=null;$$('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.p===p));
-  $$('.page').forEach(s=>s.classList.remove('on'));$('#p-'+p).classList.add('on');$('#title').textContent=titles[p]||p;
-  if(logTimer&&p!=='activity'){clearInterval(logTimer);logTimer=null;}
-  $('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');loaders[p]&&loaders[p]();apilarVista({v:'page',p});}
-$('#nav').onclick=e=>{const b=e.target.closest('button[data-p]');if(b&&!b.disabled)go(b.dataset.p);};
-$('#burger').onclick=()=>{$('#sidebar').classList.toggle('open');$('#scrim').classList.toggle('open');};
-$('#scrim').onclick=()=>{$('#sidebar').classList.remove('open');$('#scrim').classList.remove('open');};
-$('#refresh').onclick=()=>{if(detalle){const d=detalle;_supNav=true;try{d.tipo==='obra'?verObra(d.id):d.tipo==='coleccion'?verColeccion(d.id):verDoc(d.id,d.ctx);}finally{_supNav=false;}refrescarEstado();return;}
-  const cur=$$('#nav button.on')[0]?.dataset.p||'dashboard';loaders[cur]&&loaders[cur]();refrescarEstado();};
-setInterval(()=>$('#clock').textContent=new Date().toLocaleTimeString('es-ES'),1000);
+// ── nav (navegación entre las páginas del panel) ─────────────────────────────────────────────────────
+// Título de la barra superior según la página activa.
+const titles = { dashboard:'Dashboard', activity:'Actividad', cuar:'Cuarentena', pap:'Papelera', obras:'Obras', colecciones:'Colecciones', inbox:'Inbox', search:'Búsqueda' };
+let logTimer = null;   // intervalo de refresco de los logs en vivo (solo activo en la página Actividad)
+
+// Cambia de página: marca el botón de nav, muestra su <section>, ajusta el título, carga sus datos
+// (loaders[pagina]) y apila la vista en el historial (para el botón atrás del móvil).
+function go(pagina) {
+  detalle = null;
+  $$('#nav button').forEach(boton => boton.classList.toggle('on', boton.dataset.p === pagina));
+  $$('.page').forEach(seccion => seccion.classList.remove('on'));
+  $('#p-' + pagina).classList.add('on');
+  $('#title').textContent = titles[pagina] || pagina;
+  if (logTimer && pagina !== 'activity') { clearInterval(logTimer); logTimer = null; }
+  $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('open');
+  loaders[pagina] && loaders[pagina]();
+  apilarVista({ v: 'page', p: pagina });
+}
+$('#nav').onclick = ev => { const boton = ev.target.closest('button[data-p]'); if (boton && !boton.disabled) go(boton.dataset.p); };
+$('#burger').onclick = () => { $('#sidebar').classList.toggle('open'); $('#scrim').classList.toggle('open'); };
+$('#scrim').onclick  = () => { $('#sidebar').classList.remove('open'); $('#scrim').classList.remove('open'); };
+// Botón «recargar»: si hay ficha/obra/colección abierta, la re-abre (sin apilar); si no, recarga la página actual.
+$('#refresh').onclick = () => {
+  if (detalle) {
+    const det = detalle; _supNav = true;
+    try { det.tipo === 'obra' ? verObra(det.id) : det.tipo === 'coleccion' ? verColeccion(det.id) : verDoc(det.id, det.ctx); }
+    finally { _supNav = false; }
+    refrescarEstado(); return;
+  }
+  const paginaActual = $$('#nav button.on')[0]?.dataset.p || 'dashboard';
+  loaders[paginaActual] && loaders[paginaActual](); refrescarEstado();
+};
+setInterval(() => $('#clock').textContent = new Date().toLocaleTimeString('es-ES'), 1000);
 
 // ── Historial de navegación (clave en móvil): el botón ATRÁS del navegador/sistema navega DENTRO de la
 //    app (entre pantallas visitadas) y, al llegar a la raíz, pide confirmación (doble-atrás) en vez de
 //    salir y perderlo todo. Cada go()/verDoc/verObra/verColeccion apila una entrada (history.pushState);
-//    popstate la reconstruye. Se inicia en arrancar() tras el login. ──
-let _supNav=false,_salirArmado=false,_salirT=null;
-function apilarVista(st){ if(_supNav)return; try{history.pushState(st,'');}catch{/* navegador sin history */} }
-function _estadoActual(){
-  if(detalle)return {v:'det',tipo:detalle.tipo,id:detalle.id,ctx:detalle.ctx};
-  return {v:'page',p:$$('#nav button.on')[0]?.dataset.p||'search'};
+//    popstate la reconstruye. Se inicia en arrancar() tras el login.
+//    `_supNav` (suprimir-navegación) evita apilar cuando somos NOSOTROS quienes reconstruimos una vista. ──
+let _supNav = false, _salirArmado = false, _salirT = null;
+function apilarVista(estado) { if (_supNav) return; try { history.pushState(estado, ''); } catch { /* navegador sin history */ } }
+// Instantánea de la vista actual (página o ficha) para re-apilarla en el "guard" de salida.
+function _estadoActual() {
+  if (detalle) return { v:'det', tipo: detalle.tipo, id: detalle.id, ctx: detalle.ctx };
+  return { v:'page', p: $$('#nav button.on')[0]?.dataset.p || 'search' };
 }
-function _renderEstado(st){
-  _supNav=true;
-  try{
-    if(!st||st.v==='page')go((st&&st.p)||'search');
-    else if(st.v==='det'){ if(st.tipo==='obra')verObra(st.id);else if(st.tipo==='coleccion')verColeccion(st.id);else verDoc(st.id,st.ctx); }
-  }finally{_supNav=false;}
+// Reconstruye una vista a partir de un estado del historial (al pulsar atrás/adelante).
+function _renderEstado(estado) {
+  _supNav = true;
+  try {
+    if (!estado || estado.v === 'page') go((estado && estado.p) || 'search');
+    else if (estado.v === 'det') { if (estado.tipo === 'obra') verObra(estado.id); else if (estado.tipo === 'coleccion') verColeccion(estado.id); else verDoc(estado.id, estado.ctx); }
+  } finally { _supNav = false; }
 }
-function volverAtras(){ history.back(); }   // los botones «←» internos usan el historial
-function _intentarSalir(){
-  if(_salirArmado){_salirArmado=false;history.back();return;}        // 2º «atrás» seguido → salir de verdad
-  _salirArmado=true;toast('Pulsa «atrás» otra vez para salir');
-  _supNav=true;try{history.pushState(_estadoActual(),'');}finally{_supNav=false;}   // re-atrapar: seguir dentro
-  clearTimeout(_salirT);_salirT=setTimeout(()=>_salirArmado=false,2500);
+function volverAtras() { history.back(); }   // los botones «←» internos usan el historial
+// Al llegar a la raíz (entrada "guard"): primer atrás avisa; el segundo en <2,5 s sale de verdad.
+function _intentarSalir() {
+  if (_salirArmado) { _salirArmado = false; history.back(); return; }   // 2º «atrás» seguido → salir de verdad
+  _salirArmado = true; toast('Pulsa «atrás» otra vez para salir');
+  _supNav = true; try { history.pushState(_estadoActual(), ''); } finally { _supNav = false; }   // re-atrapar: seguir dentro
+  clearTimeout(_salirT); _salirT = setTimeout(() => _salirArmado = false, 2500);
 }
-window.addEventListener('popstate',e=>{ const st=e.state; if(st&&st.guard)return _intentarSalir(); _renderEstado(st); });
-function iniciarHistorial(){ try{history.replaceState({guard:true},'');}catch{/* navegador sin history */} }
+window.addEventListener('popstate', ev => { const estado = ev.state; if (estado && estado.guard) return _intentarSalir(); _renderEstado(estado); });
+function iniciarHistorial() { try { history.replaceState({ guard: true }, ''); } catch { /* navegador sin history */ } }
 
-// ── estado (pills) ──
-async function refrescarEstado(){try{const s=await api('/estado');
-  const v=s.vigilante.activo,b=s.vigilante.procesando;
-  $('#dVig').className='dot '+(b?'busy':v?'ok':'off');
-  const mm=s.conformador.mantenimientoManual,modo=s.conformador.modo;
-  $('#dMant').className='dot '+(mm?'busy':modo==='diferido'?'ok':''); // apagado = neutral, no rojo
-  // vigilante page
-  $('#vSwitch').checked=v;$('#vLabel').textContent=v?'Activo':'Pausado';
-  $('#vSub').textContent=b?'procesando el Inbox…':v?'observando el Inbox':'los ficheros esperan en el Inbox';
-  // mant estado: "Estado" es el indicador en vivo; "Modo" es el ajuste (manual/auto), no un error
-  const modoTxt=modo==='diferido'?'Automático (al reposo)':modo==='apagado'?'Manual (a demanda)':modo;
-  $('#mEstado').innerHTML=`<table>
-   <tr><td>Estado</td><td><span class="tag ${mm?'warn':'mut'}">${mm?'ejecutándose…':'en reposo'}</span></td></tr>
-   <tr><td>Modo</td><td><span class="tag ${modo==='diferido'?'ok':'mut'}">${modoTxt}</span></td></tr>
-   <tr><td>Última revisión</td><td class="muted">${s.conformador.ultimaRevision?new Date(s.conformador.ultimaRevision).toLocaleString('es-ES'):'—'}</td></tr></table>`;
-}catch(e){}}
+// ── estado (indicadores «pill» de la barra superior + panel de la página Actividad) ──────────────────
+// Refresca los puntos de estado (vigilante del Inbox / mantenimiento) y la tabla de estado del Conformador.
+async function refrescarEstado() {
+  try {
+    const estado = await api('/estado');
+    const vigilanteActivo = estado.vigilante.activo, vigilanteProcesando = estado.vigilante.procesando;
+    $('#dVig').className = 'dot ' + (vigilanteProcesando ? 'busy' : vigilanteActivo ? 'ok' : 'off');
+    const mantManual = estado.conformador.mantenimientoManual, modo = estado.conformador.modo;
+    $('#dMant').className = 'dot ' + (mantManual ? 'busy' : modo === 'diferido' ? 'ok' : '');   // apagado = neutral, no rojo
+    // Página Vigilante
+    $('#vSwitch').checked = vigilanteActivo; $('#vLabel').textContent = vigilanteActivo ? 'Activo' : 'Pausado';
+    $('#vSub').textContent = vigilanteProcesando ? 'procesando el Inbox…' : vigilanteActivo ? 'observando el Inbox' : 'los ficheros esperan en el Inbox';
+    // Estado del Conformador: "Estado" = indicador en vivo; "Modo" = ajuste (manual/automático), no un error.
+    const modoTxt = modo === 'diferido' ? 'Automático (al reposo)' : modo === 'apagado' ? 'Manual (a demanda)' : modo;
+    $('#mEstado').innerHTML = `<table>
+     <tr><td>Estado</td><td><span class="tag ${mantManual ? 'warn' : 'mut'}">${mantManual ? 'ejecutándose…' : 'en reposo'}</span></td></tr>
+     <tr><td>Modo</td><td><span class="tag ${modo === 'diferido' ? 'ok' : 'mut'}">${modoTxt}</span></td></tr>
+     <tr><td>Última revisión</td><td class="muted">${estado.conformador.ultimaRevision ? new Date(estado.conformador.ultimaRevision).toLocaleString('es-ES') : '—'}</td></tr></table>`;
+  } catch (e) {}
+}
 
-// ── dashboard ──
+// ── dashboard (portada: cifras clave, tablas de anomalías/defectos, top de CDU y gráfico de ingesta) ──
 async function loadDashboard(){
-  try{const st=await api('/estadisticas?detalle=1');
-    const cards=[['📚',st.total,'Documentos','acc'],['📖',st.libros,'Libros',''],['📰',st.revistas_total,'Revistas (números)',''],['🗂',st.colecciones,'Colecciones','']];
-    $('#stats').innerHTML=cards.map(([i,v,k,c])=>`<div class="stat ${c}"><div class="ic">${i}</div><div class="v">${(v??0).toLocaleString('es-ES')}</div><div class="k">${k}</div></div>`).join('');
-    const a=st.anomalias||{},d=st.defectos||{};
-    $('#aten').innerHTML=`<table>
-      ${rowN('Obras incompletas',a.obras_incompletas,'warn','obras_incompletas','Tomos de obras incompletas')}
-      ${rowN('Obras a revisar',a.obras_revision,a.obras_revision?'bad':'ok','obras_revision','Tomos de obras a revisar')}
-      ${rowN('Tomos sin número (?)',a.tomos_sin_numero,a.tomos_sin_numero?'bad':'ok','tomos_sin_numero','Tomos sin número')}
-      ${rowN('Docs a revisar',a.docs_revision,a.docs_revision?'bad':'ok','revision','Documentos a revisar')}</table>`;
-    $('#defs').innerHTML=`<table>
-      ${rowN('Libros sin ISBN',d.libros_sin_isbn,'mut','sin_isbn','Libros sin ISBN')}${rowN('Sin hash',d.sin_hash,'mut','sin_hash','Sin hash')}
-      ${rowN('Sin portada',d.sin_portada,'mut','sin_portada','Sin portada')}${rowN('CDU genérica',d.cdu_generica,'mut','cdu_generica','CDU genérica')}
-      ${rowN('Pendientes',d.pendientes,d.pendientes?'warn':'ok','pendientes','Pendientes')}${rowN('Sin colección',d.sin_coleccion,'mut','sin_coleccion','Sin colección')}</table>`;
-    $$('#aten [data-filtro],#defs [data-filtro]').forEach(el=>el.onclick=()=>filtrarCatalogo(el.dataset.filtro,el.dataset.etq));
-    const top=(st.cdu?.detalle||[]).filter(c=>c.cdu&&c.cdu!=='sin_cdu').slice(0,100).map(c=>({sistema:'cdu',codigo:c.cdu,titulo:c.titulo_es,n:c.documentos}));
-    $('#cdus').innerHTML=top.length?`<div style="max-height:340px;overflow:auto"><table class="clastab">${top.map(x=>filaClas(x,true)).join('')}</table></div>`:'<div class="empty">—</div>';
+  // 1) Estadísticas: tarjetas de totales + tablas «necesita atención» y «defectos» + top de CDU.
+  try{
+    const stats = await api('/estadisticas?detalle=1');
+    // Tarjetas de cabecera: [icono, valor, etiqueta, claseExtra].
+    const tarjetas = [['📚',stats.total,'Documentos','acc'],['📖',stats.libros,'Libros',''],['📰',stats.revistas_total,'Revistas (números)',''],['🗂',stats.colecciones,'Colecciones','']];
+    $('#stats').innerHTML = tarjetas.map(([icono,valor,etiqueta,clase]) =>
+      `<div class="stat ${clase}"><div class="ic">${icono}</div><div class="v">${(valor??0).toLocaleString('es-ES')}</div><div class="k">${etiqueta}</div></div>`).join('');
+    const anom = stats.anomalias || {}, def = stats.defectos || {};
+    // Cada fila (rowN) es un contador clicable → abre la Búsqueda con ese subconjunto (filtrarCatalogo).
+    $('#aten').innerHTML = `<table>
+      ${rowN('Obras incompletas',anom.obras_incompletas,'warn','obras_incompletas','Tomos de obras incompletas')}
+      ${rowN('Obras a revisar',anom.obras_revision,anom.obras_revision?'bad':'ok','obras_revision','Tomos de obras a revisar')}
+      ${rowN('Tomos sin número (?)',anom.tomos_sin_numero,anom.tomos_sin_numero?'bad':'ok','tomos_sin_numero','Tomos sin número')}
+      ${rowN('Docs a revisar',anom.docs_revision,anom.docs_revision?'bad':'ok','revision','Documentos a revisar')}</table>`;
+    $('#defs').innerHTML = `<table>
+      ${rowN('Libros sin ISBN',def.libros_sin_isbn,'mut','sin_isbn','Libros sin ISBN')}${rowN('Sin hash',def.sin_hash,'mut','sin_hash','Sin hash')}
+      ${rowN('Sin portada',def.sin_portada,'mut','sin_portada','Sin portada')}${rowN('CDU genérica',def.cdu_generica,'mut','cdu_generica','CDU genérica')}
+      ${rowN('Pendientes',def.pendientes,def.pendientes?'warn':'ok','pendientes','Pendientes')}${rowN('Sin colección',def.sin_coleccion,'mut','sin_coleccion','Sin colección')}</table>`;
+    $$('#aten [data-filtro],#defs [data-filtro]').forEach(el => el.onclick = () => filtrarCatalogo(el.dataset.filtro, el.dataset.etq));
+    // Top 100 de CDU con más documentos (tabla de clasificaciones clicable).
+    const topCdu = (stats.cdu?.detalle || []).filter(c => c.cdu && c.cdu !== 'sin_cdu').slice(0,100)
+      .map(c => ({ sistema:'cdu', codigo:c.cdu, titulo:c.titulo_es, n:c.documentos }));
+    $('#cdus').innerHTML = topCdu.length ? `<div style="max-height:340px;overflow:auto"><table class="clastab">${topCdu.map(clas => filaClas(clas,true)).join('')}</table></div>` : '<div class="empty">—</div>';
     attachClas('#cdus');
-  }catch(e){toast('Estadísticas: '+e.message,'bad');}
-  try{const g=await api('/ingesta?dias=30');const max=Math.max(1,...g.serie.map(x=>x.n));
-    $('#chart').innerHTML=g.serie.length?g.serie.map(x=>`<div class="bar" data-dia="${esc(x.dia)}" title="Ver ${x.n} ingestado(s) el ${esc(x.dia)}" style="height:${Math.round(x.n/max*100)}%;cursor:pointer"><span>${x.dia.slice(5)}: ${x.n}</span></div>`).join(''):'<div class="empty" style="margin:auto">Sin ingesta reciente</div>';
-    $$('#chart .bar[data-dia]').forEach(b=>b.onclick=()=>filtrarPorDia(b.dataset.dia));
+  }catch(e){ toast('Estadísticas: '+e.message,'bad'); }
+  // 2) Gráfico de barras: documentos ingestados por día (últimos 30). Cada barra abre ese día en la Búsqueda.
+  try{
+    const ingesta = await api('/ingesta?dias=30');
+    const maxDia = Math.max(1, ...ingesta.serie.map(d => d.n));
+    $('#chart').innerHTML = ingesta.serie.length
+      ? ingesta.serie.map(d => `<div class="bar" data-dia="${esc(d.dia)}" title="Ver ${d.n} ingestado(s) el ${esc(d.dia)}" style="height:${Math.round(d.n/maxDia*100)}%;cursor:pointer"><span>${d.dia.slice(5)}: ${d.n}</span></div>`).join('')
+      : '<div class="empty" style="margin:auto">Sin ingesta reciente</div>';
+    $$('#chart .bar[data-dia]').forEach(barra => barra.onclick = () => filtrarPorDia(barra.dataset.dia));
   }catch(e){}
 }
-// Fila de conteo del dashboard; si hay un filtro y el valor > 0, el número abre la Búsqueda con esos docs.
-const rowN=(k,v,t,filtro,etq)=>{const val=v??0;const inner=`<span class="tag ${t}">${val}</span>`;
-  const cell=(val>0&&filtro)?`<a class="cntclas" data-filtro="${esc(filtro)}" data-etq="${esc(etq||filtro)}" title="Ver estos documentos en la Búsqueda">${inner}</a>`:inner;
-  return `<tr><td>${k}</td><td style="text-align:right">${cell}</td></tr>`;};
+// Fila de conteo del dashboard: etiqueta + número con color (tag). Si hay filtro y el valor > 0, el número
+// es un enlace que abre la Búsqueda con esos documentos.
+const rowN = (etiqueta, valor, colorTag, filtro, etqFiltro) => {
+  const n = valor ?? 0;
+  const badge = `<span class="tag ${colorTag}">${n}</span>`;
+  const celda = (n > 0 && filtro)
+    ? `<a class="cntclas" data-filtro="${esc(filtro)}" data-etq="${esc(etqFiltro || filtro)}" title="Ver estos documentos en la Búsqueda">${badge}</a>`
+    : badge;
+  return `<tr><td>${etiqueta}</td><td style="text-align:right">${celda}</td></tr>`;
+};
 
 // ── mantenimiento ──
 $('#mStart').onclick=async()=>{try{const r=await api('/mantenimiento',{method:'POST',body:JSON.stringify({activar:+$('#mActivar').value,intervalo:+$('#mIntervalo').value})});
