@@ -672,7 +672,7 @@ body.guest .admin-only{display:none!important}
 <script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='inbox-orden+leer-desplegado · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='portadas-isbn10y13+enlaces · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2601,11 +2601,19 @@ function isbnRender(){
   const extra=_isbnEstado.extra.map((p,i)=>isbnThumb('e'+i,p.previa||p.url,p.nombre||'añadida',p.sel,true)).join('');
   const galeria=(cand||extra)?`<div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${cand}${extra}</div>`:'<div class="muted" style="font-size:12px;margin-top:4px">No se encontraron portadas automáticas. Usa «Buscar más imágenes» o añade una.</div>';
   const gimg=encodeURIComponent(((m.titulo?m.titulo+' ':'')+(_isbnEstado.isbn||'')+' portada libro').trim());
+  const isbnQ=encodeURIComponent(_isbnEstado.isbn||'');
   res.innerHTML=`<div class="card" style="background:var(--card2)">
     ${datos}
     <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Portada — marca la buena (la 1ª marcada es la portada; ✔ = ≥800 px)</div>${galeria}</div>
+    <div style="margin-top:10px"><div class="muted" style="font-size:11px">Buscar la cubierta (ábrela, copia la dirección de la imagen y pégala en «Añadir por URL»):</div>
+      <div class="row" style="gap:6px;margin-top:5px;flex-wrap:wrap">
+        <a class="btn" href="https://www.google.com/search?tbm=isch&tbs=isz:l&q=${gimg}" target="_blank" rel="noopener">🔎 Google Imágenes</a>
+        <a class="btn" href="https://www.amazon.es/s?k=${isbnQ}" target="_blank" rel="noopener">Amazon</a>
+        <a class="btn" href="https://www.iberlibro.com/servlet/SearchResults?kn=${isbnQ}&cm_sp=SearchF-_-topnav-_-Results" target="_blank" rel="noopener">IberLibro</a>
+        <a class="btn" href="https://www.abebooks.com/servlet/SearchResults?kn=${isbnQ}" target="_blank" rel="noopener">AbeBooks</a>
+      </div>
+    </div>
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
-      <a class="btn" href="https://www.google.com/search?tbm=isch&tbs=isz:l&q=${gimg}" target="_blank" rel="noopener" title="Abrir búsqueda de imágenes (tamaño grande) — arrastra/guarda la que quieras y añádela">🔎 Buscar más imágenes</a>
       <button class="btn" type="button" id="isbnAddUrl">➕ Añadir por URL</button>
       <button class="btn" type="button" id="isbnAddFile">⬆️ Subir imagen</button>
       <input type="file" id="isbnFile" accept="image/*" multiple style="display:none">

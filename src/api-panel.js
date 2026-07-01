@@ -156,21 +156,37 @@ async function medirPortadaRemota(url, fuente) {
 async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
     const urls = [];
     if (ficheroUrl) urls.push([String(ficheroUrl).replace(/^http:/, 'https:'), 'Fichero']);
-    if (isbn13) urls.push([`https://covers.openlibrary.org/b/isbn/${isbn13}-L.jpg?default=false`, 'OpenLibrary']);
-    if (isbn10) urls.push([`https://images-na.ssl-images-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
-    try {
-        const q = isbn13 || isbn10;
-        const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
-        const resp = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${q}${key}`);
-        if (resp.ok) {
-            const j = await resp.json();
-            const il = j && j.items && j.items[0] && j.items[0].volumeInfo && j.items[0].volumeInfo.imageLinks;
-            let u = il && (il.extraLarge || il.large || il.medium || il.thumbnail);
-            if (u) { u = u.replace(/^http:/, 'https:').replace(/&edge=curl/, ''); urls.push([u, 'Google Books']); }
-        }
-    } catch { /* Google Books opcional */ }
-    const out = [];
-    for (const [u, f] of urls) { const m = await medirPortadaRemota(u, f); if (m) out.push(m); }
+    // OpenLibrary Covers: probar 13 Y 10 (distinta disponibilidad por edición).
+    for (const x of [isbn13, isbn10]) if (x) urls.push([`https://covers.openlibrary.org/b/isbn/${x}-L.jpg?default=false`, 'OpenLibrary']);
+    // Amazon (ISBN-10 = ASIN de libro): CDN ACTUAL (m.media-amazon) + heredado, con «max res» y «grande».
+    if (isbn10) {
+        urls.push([`https://m.media-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
+        urls.push([`https://m.media-amazon.com/images/P/${isbn10}.01.L.jpg`, 'Amazon']);
+        urls.push([`https://images-na.ssl-images-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
+    }
+    // Google Books: probar por 13 y, si no hay imagen, por 10 (mayor tamaño disponible).
+    for (const x of [isbn13, isbn10]) {
+        if (!x) continue;
+        try {
+            const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
+            const resp = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${x}${key}`);
+            if (resp.ok) {
+                const j = await resp.json();
+                const il = j && j.items && j.items[0] && j.items[0].volumeInfo && j.items[0].volumeInfo.imageLinks;
+                let u = il && (il.extraLarge || il.large || il.medium || il.small || il.thumbnail);
+                if (u) { u = u.replace(/^http:/, 'https:').replace(/&edge=curl/, ''); urls.push([u, 'Google Books']); break; }
+            }
+        } catch { /* Google Books opcional */ }
+    }
+    // Medir todas; DEDUP por (dimensiones+bytes) — evita mostrar la misma imagen dos veces (13 y 10, CDNs).
+    const out = [], vistos = new Set();
+    for (const [u, f] of urls) {
+        const m = await medirPortadaRemota(u, f);
+        if (!m) continue;
+        const sig = `${m.ancho}x${m.alto}:${m.bytes}`;
+        if (vistos.has(sig)) continue;
+        vistos.add(sig); out.push(m);
+    }
     out.sort((a, b) => b.ancho - a.ancho);
     return out;
 }
