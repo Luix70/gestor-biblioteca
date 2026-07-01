@@ -616,7 +616,7 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ficha-offline-solo-papel · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='nfc-solo-papel · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1228,8 +1228,9 @@ function pintarDoc(r,ctx){
    const ce2=$('#actEdit');if(ce2)ce2.onclick=()=>fichaEditar(d,r);
    const ci=$('#actImgs');if(ci)ci.onclick=()=>editarImagenes(d._id,r.imagenes||(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]));
    const cm2=$('#actMedir');if(cm2)cm2.onclick=()=>medirDimensiones(d._id,r.imagenes||(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]));
-   // Grabar NFC: solo en navegadores con Web NFC (Android + Chrome). En el resto queda oculto.
-   const cn=$('#actNfc');if(cn&&('NDEFReader' in window)){cn.style.display='';cn.onclick=()=>grabarNFC(d,r);}
+   // Grabar NFC: solo para ejemplares EN PAPEL (un medio digital no se etiqueta) y en navegadores con Web
+   // NFC (Android + Chrome). En el resto queda oculto.
+   const cn=$('#actNfc');if(cn&&_fisico&&('NDEFReader' in window)){cn.style.display='';cn.onclick=()=>grabarNFC(d,r);}
    const uc=$('#ubicChip');if(uc)uc.onclick=()=>{const u=d.ubicacion||{};estadoBusqueda.extra={ambito:u.ambito,estanteria:(u.estanteria&&u.estanteria!=='Sin asignar')?u.estanteria:undefined,etiqueta:'📍 '+_txtUbic(d)};estadoBusqueda.page=1;go('search');};}
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
   $$('#p-detalle [data-q]').forEach(a=>a.onclick=()=>buscarTexto(a.dataset.q));
