@@ -150,10 +150,12 @@ async function medirPortadaRemota(url, fuente) {
     } catch { return null; }
 }
 
-// Candidatas de PORTADA por ISBN desde fuentes KEYLESS (sin scraping frágil): OpenLibrary Covers (L),
-// Amazon (truco ISBN-10) y Google Books (mayor tamaño disponible). Se miden y ordenan por ancho desc.
-async function portadasPorISBN(isbn13, isbn10) {
+// Candidatas de PORTADA por ISBN. PRIMERO la del propio Fichero local (la más autoritativa: la trae nuestro
+// dump), luego fuentes KEYLESS (sin scraping frágil): OpenLibrary Covers (L), Amazon (truco ISBN-10) y
+// Google Books (mayor tamaño). Se miden (sin sharp) y ordenan por ancho desc para premarcar la de más resolución.
+async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
     const urls = [];
+    if (ficheroUrl) urls.push([String(ficheroUrl).replace(/^http:/, 'https:'), 'Fichero']);
     if (isbn13) urls.push([`https://covers.openlibrary.org/b/isbn/${isbn13}-L.jpg?default=false`, 'OpenLibrary']);
     if (isbn10) urls.push([`https://images-na.ssl-images-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
     try {
@@ -1068,8 +1070,12 @@ export function rutasPanel() {
             const isbn13 = limpio.length === 13 ? limpio : isbn10a13(limpio);
             const isbn10 = limpio.length === 10 ? limpio : isbn13a10(limpio);
             const meta = await buscarEnFicheroLocal({ isbns: [isbn13, isbn10, limpio].filter(Boolean) });
-            const portadas = await portadasPorISBN(isbn13, isbn10);
-            res.json({ ok: true, isbn: isbn13 || limpio, encontrado: !!(meta && meta.titulo), meta: meta || null, portadas });
+            const portadas = await portadasPorISBN(isbn13, isbn10, meta && meta.portada_url);
+            // Descripción del CDU: SOLO de la caché local (cdu_descripciones), sin generar nada (evita
+            // dependencia externa/IA en el alta). Sirve para validar la CDU con su título legible.
+            let cdu_desc = null;
+            if (meta && meta.cdu) { try { cdu_desc = await cduDesc(await conectarDB(), meta.cdu); } catch { /* caché opcional */ } }
+            res.json({ ok: true, isbn: isbn13 || limpio, encontrado: !!(meta && meta.titulo), meta: meta || null, portadas, cdu_desc });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

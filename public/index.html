@@ -669,7 +669,7 @@ body.guest .admin-only{display:none!important}
 <script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='aviso-ya-ingresado · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='isbn-portada-fichero+cdu-cache · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2570,7 +2570,7 @@ async function isbnBuscar(){
   if(msg)msg.textContent='Buscando…'; if(res)res.innerHTML='';
   let r; try{ r=await api('/isbn/'+encodeURIComponent(raw)); }catch(e){ if(msg)msg.textContent=e.message; return; }
   const meta=r.meta||{};
-  _isbnEstado={ isbn:r.isbn, meta:{...meta}, portadas:(r.portadas||[]).map((p,i)=>({...p,sel:i===0})), extra:[] };
+  _isbnEstado={ isbn:r.isbn, meta:{...meta}, portadas:(r.portadas||[]).map((p,i)=>({...p,sel:i===0})), extra:[], cduDesc:r.cdu_desc||null };
   if(msg)msg.textContent=r.encontrado?`✔ Encontrado en el Fichero${(meta.fuentes||[]).length?` (${meta.fuentes.join(', ')})`:''}.`:'⚠ No está en el Fichero local: revisa/completa los datos a mano.';
   isbnRender();
 }
@@ -2591,7 +2591,7 @@ function isbnRender(){
     <div class="row" style="margin-top:8px">
       <div><label>Año</label><input data-mk="año_edicion" value="${val('año_edicion')}" autocomplete="off"></div>
       <div><label>Idioma</label><input data-mk="idioma" value="${val('idioma')}" autocomplete="off"></div>
-      <div><label>CDU</label><input data-mk="cdu" value="${val('cdu')}" autocomplete="off"></div>
+      <div><label>CDU${m.cdu?' <span class="muted" style="font-weight:400;font-size:11px">(del Fichero)</span>':''}</label><input data-mk="cdu" value="${val('cdu')}" autocomplete="off">${_isbnEstado.cduDesc&&_isbnEstado.cduDesc.titulo_es?`<div class="muted" style="font-size:11px;margin-top:3px">ⓘ ${esc(_isbnEstado.cduDesc.titulo_es)}</div>`:''}</div>
     </div>`;
   const cand=_isbnEstado.portadas.map((p,i)=>isbnThumb('c'+i,p.url,`${p.fuente} · ${p.ancho}×${p.alto}`,p.sel,p.ancho>=800)).join('');
   const extra=_isbnEstado.extra.map((p,i)=>isbnThumb('e'+i,p.previa||p.url,p.nombre||'añadida',p.sel,true)).join('');
