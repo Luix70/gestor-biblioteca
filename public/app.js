@@ -257,16 +257,20 @@ const consultaCopia=d=>{let s=d.titulo||(d.archivos&&d.archivos[0])||d.nombre||'
   s=s.replace(/\b[0-9a-f]{16,}\b/gi,' ');                              // hashes de descarga
   s=s.replace(/[_,–—-]+/g,' ');                                        // separadores → espacio
   return s.replace(/\s+/g,' ').trim();};
-// Pliegue de categorías (persistido en localStorage).
-const foldGet=()=>{try{return new Set(JSON.parse(localStorage.getItem('cuarFold')||'[]'))}catch{return new Set()}};
-const foldSet=s=>{try{localStorage.setItem('cuarFold',JSON.stringify([...s]))}catch{}};
-function sincMaster(card){const m=card&&card.querySelector('[data-selall]');if(!m)return;
-  const cbs=[...card.querySelectorAll('[data-sel]')],n=cbs.filter(c=>c.checked).length;
-  m.checked=n>0&&n===cbs.length;m.indeterminate=n>0&&n<cbs.length;}
+// Pliegue de categorías de Cuarentena, persistido en localStorage (qué categorías quedan colapsadas).
+const foldGet = () => { try { return new Set(JSON.parse(localStorage.getItem('cuarFold') || '[]')); } catch { return new Set(); } };
+const foldSet = (plegadas) => { try { localStorage.setItem('cuarFold', JSON.stringify([...plegadas])); } catch {} };
+// Sincroniza la casilla «todas» (master) de una tarjeta según cuántas de sus filas estén marcadas.
+function sincMaster(card) {
+  const master = card && card.querySelector('[data-selall]'); if (!master) return;
+  const casillas = [...card.querySelectorAll('[data-sel]')], marcadas = casillas.filter(cb => cb.checked).length;
+  master.checked = marcadas > 0 && marcadas === casillas.length;
+  master.indeterminate = marcadas > 0 && marcadas < casillas.length;
+}
 // Modal de confirmación con contraseña ENMASCARADA (reutiliza el overlay del comparador).
 // Resuelve con la contraseña escrita, o null si se cancela.
-function modalPassword({titulo,aviso}){return new Promise(res=>{
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px">
+function modalPassword({ titulo, aviso }) { return new Promise(resolver => {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:420px">
     <h3 style="margin-top:0">${titulo}</h3>
     <div class="muted" style="margin:-4px 0 14px">${aviso}</div>
     <label>Contraseña de administrador</label>
@@ -275,24 +279,33 @@ function modalPassword({titulo,aviso}){return new Promise(res=>{
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
       <button class="btn" id="pwCancel">Cancelar</button><button class="btn bad" id="pwOk">🗑 Eliminar</button>
     </div></div>`;
-  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
-  const inp=$('#pwInput');setTimeout(()=>inp.focus(),30);
-  const fin=v=>{cerrarCmp();res(v);};
-  $('#pwCancel').onclick=()=>fin(null);$('#cmpScrim').onclick=()=>fin(null);
-  $('#pwOk').onclick=()=>{if(!inp.value){$('#pwErr').textContent='Escribe la contraseña';inp.focus();return;}fin(inp.value);};
-  inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('#pwOk').click();}else if(e.key==='Escape')fin(null);};
-});}
-// Sube una copia sana y la PREPARA (no cataloga aún) en el depósito (multipart; fetch propio).
-async function prepararCopia(id,file){
-  const fd=new FormData();fd.append('file',file);fd.append('id',id);
-  const h={};if(TOKEN)h['Authorization']='Bearer '+TOKEN;
-  const r=await fetch('/api/saneamiento/reemplazar',{method:'POST',headers:h,body:fd});
-  if(r.status===401){mostrarLogin();throw new Error('Sesión caducada — vuelve a entrar');}
-  const t=await r.text();let j;try{j=t?JSON.parse(t):{}}catch{j={raw:t}}
-  if(!r.ok&&!j.motivo)throw new Error(j.message||r.status);return j;
+  $('#cmpScrim').style.display = 'block'; $('#cmpModal').style.display = 'grid';
+  const input = $('#pwInput'); setTimeout(() => input.focus(), 30);
+  const cerrarCon = valor => { cerrarCmp(); resolver(valor); };
+  $('#pwCancel').onclick = () => cerrarCon(null); $('#cmpScrim').onclick = () => cerrarCon(null);
+  $('#pwOk').onclick = () => { if (!input.value) { $('#pwErr').textContent = 'Escribe la contraseña'; input.focus(); return; } cerrarCon(input.value); };
+  input.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); $('#pwOk').click(); } else if (ev.key === 'Escape') cerrarCon(null); };
+}); }
+// Sube una copia sana y la PREPARA (no cataloga aún) en el depósito (multipart; usa fetch propio por el FormData).
+async function prepararCopia(id, file) {
+  const formData = new FormData(); formData.append('file', file); formData.append('id', id);
+  const cabeceras = {}; if (TOKEN) cabeceras['Authorization'] = 'Bearer ' + TOKEN;
+  const resp = await fetch('/api/saneamiento/reemplazar', { method:'POST', headers: cabeceras, body: formData });
+  if (resp.status === 401) { mostrarLogin(); throw new Error('Sesión caducada — vuelve a entrar'); }
+  const texto = await resp.text(); let json; try { json = texto ? JSON.parse(texto) : {}; } catch { json = { raw: texto }; }
+  if (!resp.ok && !json.motivo) throw new Error(json.message || resp.status);
+  return json;
 }
-function actualizarBotonLote(){const n=sanSel.size,b=$('#sanProcesar');if(!b)return;
-  b.style.display=n?'inline-flex':'none';b.textContent=`▶ Procesar seleccionados (${n})`;}
+// Muestra/oculta el botón «Procesar seleccionados (N)» del saneamiento por lotes según la selección actual.
+function actualizarBotonLote() {
+  const nSel = sanSel.size, boton = $('#sanProcesar'); if (!boton) return;
+  boton.style.display = nSel ? 'inline-flex' : 'none';
+  boton.textContent = `▶ Procesar seleccionados (${nSel})`;
+}
+// Página Cuarentena: pinta cada categoría de depósitos (no-identificados/ilegibles/duplicados…) como una
+// tarjeta plegable con sus filas (título, estado, acciones: reingestar/comparar/reemplazar/procesar/descartar)
+// y cablea todos sus botones. Reutiliza consultaCopia() para el enlace «buscar copia». (Función de render larga;
+// el gran literal HTML se deja tal cual a propósito para no arriesgar su marcado.)
 async function loadCuar(){try{
   if(!FUENTES.length){try{FUENTES=(await api('/saneamiento/fuentes')).fuentes||[];}catch{}}
   const c=await api('/cuarentena');const cats=Object.keys(c);const fold=foldGet();
