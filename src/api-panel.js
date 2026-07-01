@@ -1153,15 +1153,21 @@ export function rutasPanel() {
     r.get('/buscar-portadas', async (req, res) => {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo admin' });
-            const key = process.env.GOOGLE_CSE_KEY, cx = process.env.GOOGLE_CSE_CX;
+            // .trim(): un salto de línea o espacios pegados en el .env dan «invalid value» (400) en la API.
+            const key = (process.env.GOOGLE_CSE_KEY || '').trim(), cx = (process.env.GOOGLE_CSE_CX || '').trim();
             if (!key || !cx) return res.json({ ok: true, disponible: false, motivo: 'Faltan GOOGLE_CSE_KEY / GOOGLE_CSE_CX', portadas: [] });
             const isbn = String(req.query.isbn || '').trim(), titulo = String(req.query.titulo || '').trim();
             const q = [titulo, isbn, 'portada'].filter(Boolean).join(' ').trim();
             if (!q) return res.status(400).json({ ok: false, motivo: 'falta consulta' });
-            const u = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(key)}&cx=${encodeURIComponent(cx)}&searchType=image&num=10&imgSize=large&safe=off&q=${encodeURIComponent(q)}`;
+            const u = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(key)}&cx=${encodeURIComponent(cx)}&searchType=image&num=10&safe=off&q=${encodeURIComponent(q)}`;
             const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 12000);
             const resp = await fetch(u, { signal: ctrl.signal }); clearTimeout(to);
-            if (!resp.ok) { const t = await resp.text().catch(() => ''); return res.status(502).json({ ok: false, motivo: 'Custom Search ' + resp.status, detalle: t.slice(0, 200) }); }
+            if (!resp.ok) {
+                const t = await resp.text().catch(() => '');
+                let gmsg = ''; try { gmsg = (JSON.parse(t).error || {}).message || ''; } catch { gmsg = t.slice(0, 160); }
+                console.warn(`[buscar-portadas] Custom Search ${resp.status}: ${gmsg}`);
+                return res.status(502).json({ ok: false, motivo: `Custom Search ${resp.status}: ${gmsg || 'sin detalle'}` });
+            }
             const j = await resp.json();
             const PRIOR = /(amazon\.|abebooks\.|iberlibro\.|images-amazon|media-amazon|ssl-images-amazon)/i;
             const items = (j.items || [])
