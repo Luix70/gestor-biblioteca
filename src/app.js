@@ -143,6 +143,10 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
             resultados.push({
                 ok: true, operacion: r.operacion, estado: r.estado,
                 id: String(r._id), isbn: r.isbn, issn: r.issn,
+                // Aviso «ya ingresado» (doc preexistente): fecha de alta y ubicación reales del existente.
+                ya_existia: !!r.ya_existia || r.operacion === 'duplicado' || r.operacion === 'duplicado_exacto' || r.operacion === 'posible_duplicado',
+                fecha_ingreso: r.fecha_ingreso || null,
+                ubicacion_existente: r.ubicacion || null,
                 titulo: r.documento.titulo, ruta: r.rutaWeb,
                 // Pistas del proceso para el Inbox (qué se hizo y dónde): tipo, soporte, nº de páginas/
                 // imágenes extraídas y la última nota del agente (p. ej. "sin visión IA" / "libro físico").

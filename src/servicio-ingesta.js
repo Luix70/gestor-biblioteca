@@ -248,6 +248,7 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
             estado: resultado.estado_verificacion,
             isbn: resultado.isbn || null, issn: resultado.issn || null,
             carpeta: null, rutaWeb: resultado.ruta_base || null, copiaIntegra: false,
+            ya_existia: true, fecha_ingreso: resultado.fecha_ingreso || null, ubicacion: resultado.ubicacion || null,
             documento: { ...resultado },
         };
         if (identico) {
@@ -370,6 +371,10 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         rutaWeb: rc.web,
         copiaIntegra,          // el vigilante solo borra del Inbox si esto es true
         documento: documentoLegible,
+        // Aviso «ya ingresado»: si actualizó un doc que ya existía, su fecha de ingreso y ubicación reales.
+        ya_existia: resultado.operacion === 'actualizacion',
+        fecha_ingreso: resultado.fecha_ingreso || null,
+        ubicacion: resultado.ubicacion || null,
     };
 }
 
@@ -457,5 +462,7 @@ export async function altaPorISBN({ base = {}, activos = [], contexto = {}, comp
         _id: String(resultado._id), operacion: resultado.operacion,
         titulo: resultado.titulo || documento.titulo, isbn: resultado.isbn || documento.isbn || null,
         cdu: resultado.cdu || documento.cdu, ruta_base: rc.web, portada: portada || null,
+        ya_existia: resultado.operacion === 'actualizacion',
+        fecha_ingreso: resultado.fecha_ingreso || null, ubicacion: resultado.ubicacion || null,
     };
 }

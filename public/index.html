@@ -669,7 +669,7 @@ body.guest .admin-only{display:none!important}
 <script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='nfc-offline-directo+colofon · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='aviso-ya-ingresado · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2636,8 +2636,9 @@ async function isbnCrear(completar){
     coleccion:($('#inColeccion')&&$('#inColeccion').value)||undefined,obra:($('#inObra')&&$('#inObra').value)||undefined,completar};
   const msg=$('#isbnMsg');if(msg)msg.textContent=completar?'Completando y creando…':'Creando…';
   let r;try{r=await api('/isbn/alta',{method:'POST',body:JSON.stringify(body)});}catch(e){if(msg)msg.textContent='Error: '+e.message;return;}
-  toast(r.operacion==='insercion'?'📗 Documento creado':'Documento actualizado (ya existía)');
-  _isbnEstado=null;$('#isbnRes').innerHTML='';if($('#isbnIn'))$('#isbnIn').value='';if(msg)msg.textContent='';
+  _isbnEstado=null;$('#isbnRes').innerHTML='';if($('#isbnIn'))$('#isbnIn').value='';
+  if(r.ya_existia){toast('Este libro ya estaba en la biblioteca','warn');if(msg)msg.innerHTML=avisoYaIngresado(r);}
+  else{toast('📗 Documento creado');if(msg)msg.textContent='';}
   if(r._id)verDoc(r._id,{volver:'inbox',etiqueta:'Inbox'});
 }
 // Autocompletado del campo Colección con las colecciones existentes.
@@ -2902,7 +2903,16 @@ function filaResultado(r){
   if(!r.ok)return _filaInb(`<span class="tag bad">${esc(r.destino||'error')}</span> <span class="muted">${esc(r.error||'')}</span>`);
   const det=[r.tipo_recurso,(r.formatos||[]).join(','),(r.nImagenes?`${r.nImagenes} pág/img`:'')].filter(Boolean).join(' · ');
   const nota=r.nota?`<div class="muted" style="font-size:11px;margin-top:2px">↳ ${esc(r.nota)}</div>`:'';
-  return _filaInb(`<span class="tag ${r.estado==='completado'?'ok':'warn'}">${esc(r.operacion||'ok')}</span> <b>${esc(recortar(r.titulo||'(sin título)',64))}</b> <span class="muted mono" style="font-size:11px">${esc(r.isbn||r.issn||'')}</span>${r.id?` · <a class="rowlink" data-doc="${esc(r.id)}">ver ficha</a>`:''}${det?`<div class="muted" style="font-size:11px">${esc(det)}</div>`:''}${nota}`);
+  return _filaInb(`<span class="tag ${r.estado==='completado'?'ok':'warn'}">${esc(r.operacion||'ok')}</span> <b>${esc(recortar(r.titulo||'(sin título)',64))}</b> <span class="muted mono" style="font-size:11px">${esc(r.isbn||r.issn||'')}</span>${r.id?` · <a class="rowlink" data-doc="${esc(r.id)}">ver ficha</a>`:''}${det?`<div class="muted" style="font-size:11px">${esc(det)}</div>`:''}${nota}${avisoYaIngresado(r)}`);
+}
+// Aviso cuando el documento YA estaba en la base (actualización o duplicado): día de alta + ubicación.
+function avisoYaIngresado(r){
+  if(!r||!r.ya_existia)return '';
+  const f=r.fecha_ingreso?new Date(r.fecha_ingreso):null;
+  const dia=f&&!isNaN(f)?f.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}):'—';
+  const u=r.ubicacion_existente||r.ubicacion;
+  const ub=(u&&(u.ambito||u.estanteria))?[u.ambito,u.estanteria].filter(x=>x&&x!=='Sin asignar').join(' · ')||'Sin asignar':'Sin asignar';
+  return `<div style="margin-top:5px;padding:6px 9px;border-radius:8px;background:rgba(230,180,0,.14);border:1px solid rgba(230,180,0,.4);font-size:12px">⚠️ <b>Documento ya ingresado</b> el día: ${esc(dia)} · Ubicación: ${esc(ub)}</div>`;
 }
 // Render de la cola (en cola / procesando) + resultados ya hechos (más reciente arriba).
 function pintarCola(){
