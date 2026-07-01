@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ordenar-libros-en-estantería (posición física + inventario) + fichas plegables más grandes · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ordenar-libros-en-estantería + «ordenar escaneando» NFC (doble<5s, libro ajeno, repetido) · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1743,25 +1743,94 @@ function irAInboxConUbic(ambito, estanteria){
 }
 // ── Ordenar los LIBROS de una estantería por su posición física (localizar un libro / inventario) ──
 // Modal con la estantería como LISTA vertical arrastrable (+ ↑/↓ para móvil). Guarda el índice de cada libro.
-let _ordEst=null;   // { ambito, estanteria, items:[{_id,titulo,portada,autores,…}] }
+let _ordEst=null;    // { ambito, estanteria, items:[{_id,titulo,portada,autores,…}] }
+let _ordScan=null;   // mientras se ordena ESCANEANDO por NFC: { ctrl:AbortController, hechos:Set<id> }
 async function ordenarLibrosEstanteria(ambito,estanteria){
+  const btnScan=('NDEFReader' in window)?`<button class="btn" id="ordScan" title="Toca los libros con NFC en su orden físico; se numeran solos 1,2,3…">📶 Ordenar escaneando</button>`:'';
   $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">📋 Ordenar «${esc(estanteria)}»</h3>
-    <p class="muted" style="margin:-4px 0 10px;font-size:12px">Coloca los libros en su ORDEN FÍSICO (de izquierda a derecha). Arrastra las filas o usa ↑/↓. El nº es la posición en la balda.</p>
+    <p class="muted" style="margin:-4px 0 8px;font-size:12px">Coloca los libros en su ORDEN FÍSICO (izquierda→derecha). Arrastra, usa ↑/↓ o <b>escanea los NFC en orden</b>. El nº es la posición.</p>
+    <div id="ordScanMsg" style="display:none;font-size:12px;margin-bottom:8px;padding:8px 10px;border:1px solid var(--acc);border-radius:9px;background:rgba(40,217,168,.08)"></div>
     <div id="ordList" class="muted">Cargando…</div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn" id="ordX">Cancelar</button><button class="btn pri" id="ordSave">Guardar orden</button></div></div>`;
-  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrarCmp;$('#ordX').onclick=cerrarCmp;
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">${btnScan}<div style="flex:1"></div><button class="btn" id="ordX">Cancelar</button><button class="btn pri" id="ordSave">Guardar orden</button></div></div>`;
+  const cerrar=()=>{pararOrdenPorNFC();cerrarCmp();};
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrar;$('#ordX').onclick=cerrar;
   let items=[];
   try{const r=await api('/ubicaciones/libros?'+new URLSearchParams({ambito,estanteria}).toString());items=r.docs||[];}
   catch(e){$('#ordList').innerHTML=`<div class="empty">${esc(e.message)}</div>`;return;}
-  _ordEst={ambito,estanteria,items};
+  _ordEst={ambito,estanteria,items};_ordScan=null;
   pintarOrdList();
+  if($('#ordScan'))$('#ordScan').onclick=()=>{ _ordScan?pararOrdenPorNFC():iniciarOrdenPorNFC(); };
   $('#ordSave').onclick=async()=>{
+    pararOrdenPorNFC();
     try{const r=await api('/ubicaciones/orden-libros',{method:'POST',body:JSON.stringify({ambito,estanteria,ids:_ordEst.items.map(x=>x._id)})});
       if(!r.ok){toast(r.motivo||'No se pudo guardar','bad');return;}
       toast(`Orden guardado (${r.n} libro(s))`);cerrarCmp();
       if($('#p-search')&&$('#p-search').classList.contains('on'))buscarCatalogo(estadoBusqueda.page||1);
     }catch(e){toast(e.message,'bad');}
   };
+}
+// Ordenar ESCANEANDO: escaneo NFC continuo; cada libro que tocas (su etiqueta lleva ?doc=<id>) se coloca en el
+// SIGUIENTE hueco (1,2,3…) según el orden físico en que los vas tocando. Ideal para inventariar baldas largas.
+async function iniciarOrdenPorNFC(){
+  if(!_ordEst||!('NDEFReader' in window)){toast('Este dispositivo no puede leer NFC (Android + Chrome)','warn');return;}
+  const msg=$('#ordScanMsg');
+  let rd;try{rd=new NDEFReader();const ctrl=new AbortController();await rd.scan({signal:ctrl.signal});_ordScan={ctrl,hechos:new Set(),ultimoId:null,ultimoT:0};}
+  catch(e){if(msg){msg.style.display='';msg.textContent='NFC: '+e.message;}return;}
+  rd.onreading=ev=>{
+    let url='';for(const rec of ev.message.records){try{if(rec.recordType==='url'){url=new TextDecoder(rec.encoding||'utf-8').decode(rec.data);if(url)break;}}catch(_){}}
+    const res=colocarEscaneado(docIdDeURL(url));
+    ordScanEstado(res);
+    // Vibración DISTINTA para «ojo»: un toque corto al colocar bien; doble toque si hay problema (repetido
+    // deliberado o libro ajeno a la balda). El doble accidental (<5s) no vibra: es ruido del lector.
+    try{if(navigator.vibrate){ if(res.estado==='ok')navigator.vibrate(40); else if(res.estado==='dup'||res.estado==='fuera')navigator.vibrate([70,55,70]); }}catch(_){}
+  };
+  rd.onreadingerror=()=>{if(msg)msg.textContent='No se pudo leer esa etiqueta, reinténtalo.';};
+  const btn=$('#ordScan');if(btn){btn.textContent='⏹ Parar escaneo';btn.classList.add('pri');}
+  if(msg)msg.style.display='';
+  ordScanEstado(null);
+}
+function pararOrdenPorNFC(){
+  if(_ordScan){try{_ordScan.ctrl.abort();}catch(_){}}
+  _ordScan=null;
+  const btn=$('#ordScan');if(btn){btn.textContent='📶 Ordenar escaneando';btn.classList.remove('pri');}
+}
+// Coloca el libro escaneado en el siguiente hueco. Detecta:
+//  · doble ACCIDENTAL: la MISMA etiqueta releída en <5 s (el lector NFC repite lecturas por un toque, o el tag
+//    sigue apoyado) → se IGNORA (ni coloca ni avisa, solo un apunte discreto);
+//  · repetido DELIBERADO: un libro ya escaneado se vuelve a tocar pasados ≥5 s → AVISO (posible copia doble o
+//    despiste) y NO se recoloca;
+//  · libro AJENO: su etiqueta no corresponde a ningún libro catalogado en esta estantería → AVISO (mal colocado).
+const ORD_DOBLE_MS=5000;
+function colocarEscaneado(id){
+  if(!id)return {estado:'sinid'};
+  if(!_ordEst||!_ordScan)return {estado:'off'};
+  const now=Date.now();
+  if(id===_ordScan.ultimoId && (now-_ordScan.ultimoT)<ORD_DOBLE_MS){ _ordScan.ultimoT=now; return {estado:'accidental'}; }
+  _ordScan.ultimoId=id; _ordScan.ultimoT=now;
+  const it=_ordEst.items,idx=it.findIndex(x=>x._id===id);
+  if(idx<0)return {estado:'fuera'};                       // no está catalogado en esta estantería (¿mal colocado?)
+  if(_ordScan.hechos.has(id))return {estado:'dup',titulo:it[idx].titulo};
+  _ordScan.hechos.add(id);
+  const destino=_ordScan.hechos.size-1;                   // 0,1,2… a medida que escaneas
+  const [x]=it.splice(idx,1);it.splice(destino,0,x);
+  pintarOrdList();
+  const row=$(`#ordList .ordrow[data-id="${id}"]`);if(row){row.classList.add('justscan');row.scrollIntoView({block:'nearest'});setTimeout(()=>row.classList.remove('justscan'),700);}
+  return {estado:'ok',pos:destino+1,titulo:x.titulo};
+}
+function ordScanEstado(res){
+  const msg=$('#ordScanMsg');if(!msg||!_ordScan)return;
+  const hechos=_ordScan.hechos.size,total=_ordEst.items.length,faltan=Math.max(0,total-hechos);
+  // Color del recuadro según la gravedad: verde OK · naranja repetido · rojo ajeno/etiqueta rara.
+  let col='var(--acc)',bg='rgba(40,217,168,.08)',linea='';
+  if(res){
+    if(res.estado==='ok')linea=`✅ #${res.pos} · ${esc(recortar(res.titulo||'',44))}`;
+    else if(res.estado==='accidental')linea='↩︎ doble accidental ignorado (mismo tag < 5 s)';
+    else if(res.estado==='dup'){col='var(--warn)';bg='rgba(255,180,84,.10)';linea=`⚠️ YA lo habías escaneado — no se recoloca. ¿Copia duplicada o repetido por error? · ${esc(recortar(res.titulo||'',36))}`;}
+    else if(res.estado==='fuera'){col='var(--bad)';bg='rgba(255,92,122,.10)';linea='⛔ Ese libro NO está catalogado en esta estantería (¿mal colocado o de otra balda?)';}
+    else if(res.estado==='sinid'){col='var(--warn)';bg='rgba(255,180,84,.10)';linea='⚠️ Etiqueta sin libro (¿es una etiqueta de estantería?)';}
+  }
+  msg.style.borderColor=col;msg.style.background=bg;
+  msg.innerHTML=`<b>Escaneando…</b> ${hechos}/${total} colocados · faltan ${faltan}. Toca los libros en su orden físico.${linea?`<br>${linea}`:''}`;
 }
 function pintarOrdList(){
   const box=$('#ordList');if(!box||!_ordEst)return;box.classList.remove('muted');
