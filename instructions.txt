@@ -255,7 +255,8 @@ de ficheros clasificado por CDU.
           NSFW (por defecto); MARCADA junto a otros filtros = lo INCLUYE también;
           MARCADA y sola (sin otro criterio) = SOLO NSFW.
         - Etiqueta NFC (admin): Todas / Con etiqueta (📶) / Sin etiqueta
-        - Orden (recientes / título A-Z / antiguos)
+        - Orden (recientes / título A-Z / antiguos). Al ver UNA estantería, se
+          ordena automáticamente por POSICIÓN física (ver Ubicaciones · 📋).
     · Resultados como tarjetas con miniatura; PAGINACIÓN arriba y abajo (al pasar
       de página, el scroll sube al primer resultado).
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
@@ -349,9 +350,28 @@ de ficheros clasificado por CDU.
     Gestiona la ubicación física como colecciones de estanterías: crear (incluso
     por lotes, p. ej. "Estanteria_pared_01..10"), renombrar, fusionar, mover,
     "explotar" (dejar sus libros sin ubicar), eliminar, añadir libros desde la
-    búsqueda, y grabar la etiqueta NFC de una estantería. Los desplegables de
-    ámbito/estantería son <select> (fiables en móvil) y se reutilizan en el Inbox
-    y en la edición de la ficha.
+    búsqueda, y grabar la etiqueta NFC de una estantería (o de un ÁMBITO). Los
+    desplegables de ámbito/estantería son <select> (fiables en móvil) y se
+    reutilizan en el Inbox y en la edición de la ficha.
+    · Los ámbitos salen COLAPSADOS por defecto y muestran cuántas estanterías y
+      cuántos libros contienen. Clic en el NOMBRE de un ámbito/estantería = abre
+      la Búsqueda filtrada por él (interactivo: seleccionar, etiquetar, mover…),
+      sin tocar la selección que ya tuvieras acumulada.
+    · 📋 ORDENAR ESTANTERÍA (por su posición física, para localizar libros e
+      inventariar): botón 📋 en cada estantería (y en el chip de filtro cuando ves
+      una balda en la Búsqueda). Abre la estantería como LISTA vertical donde
+      colocas los libros en su orden real:
+        - ARRASTRANDO las filas (escritorio) o con ↑/↓ (móvil), o
+        - 📶 ORDENANDO ESCANEANDO: escaneo NFC continuo; tocas los libros en su
+          orden físico y se numeran solos 1,2,3… Detecta y avisa (con vibración
+          distinta): doble ACCIDENTAL (mismo tag < 5 s → se ignora), libro AJENO
+          a la balda, y repetido DELIBERADO (ya escaneado, no se recoloca).
+      Al ver una estantería, sus libros salen en ese orden y cada portada muestra
+      su nº de posición (#N). "Guardar orden" lo fija.
+    · Acciones en LOTE en la Búsqueda (barra de selección): además de mover a una
+      estantería 📍, ahora «🚫 Quitar de estantería» (pasan a "Sin asignar", sin
+      borrar nada) y «📶 Seleccionar por NFC» (toca etiquetas para ir sumándolos a
+      la selección).
 
   ── ACTIVIDAD (administración) ───────────────────────────────────────────────
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del
