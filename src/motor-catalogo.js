@@ -6,6 +6,7 @@ import { claveNumero, tituloCabecera } from './utils/revistas.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
 import { latinizarNombre } from './utils/transliterar.js';
+import { normalizarAutor } from './utils/autor-normalizar.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -107,23 +108,37 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     };
 
     try {
-        // 1. Autores (string → ObjectId; crea si no existe). Nombres en otro alfabeto (p. ej. cirílico) →
-        //    principal LATINIZADO + grafía original en `nombres_alternativos`. El emparejamiento tiene en
-        //    cuenta el nombre crudo, el latinizado y las variantes ya guardadas (no duplica al re-ingerir).
+        // 1. Autores (string → ObjectId; crea si no existe).
+        //    · normalizarAutor: se queda con el PRIMER contribuyente (marcador BNE /**​/ = autor·traductor·…)
+        //      y extrae las FECHAS de vida «(1857-1924)» a campos biográficos (nacimiento/fallecimiento),
+        //      dejando el nombre limpio («Conrad, Joseph»). [Roles de todos los contribuyentes: pendiente.]
+        //    · latinizarNombre: nombre en otro alfabeto (cirílico/griego) → principal LATINIZADO + grafía
+        //      original en `nombres_alternativos`. El emparejamiento usa el nombre limpio/latinizado + variantes.
         if (docFinal.autores && docFinal.autores.length > 0) {
             const ids = [];
             for (const autor of docFinal.autores) {
                 if (typeof autor === 'string') {
-                    const { nombre, alternativos } = latinizarNombre(autor);
-                    const existente = await coleccionAutores.findOne({ $or: [{ nombre: autor }, { nombre }, { nombres_alternativos: autor }] });
+                    const bio = normalizarAutor(autor);
+                    const limpio = bio.nombre || autor;
+                    const { nombre, alternativos } = latinizarNombre(limpio);
+                    const existente = await coleccionAutores.findOne({ $or: [{ nombre }, { nombre: limpio }, { nombres_alternativos: limpio }] });
                     if (existente) {
                         ids.push(existente._id);
-                        if (autor !== existente.nombre) await coleccionAutores.updateOne({ _id: existente._id }, { $addToSet: { nombres_alternativos: autor } }).catch(() => {});
+                        const upd = {};
+                        if (limpio !== existente.nombre) upd.$addToSet = { nombres_alternativos: limpio };
+                        const setBio = {};
+                        if (bio.nacimiento && !existente.nacimiento) setBio.nacimiento = bio.nacimiento;
+                        if (bio.fallecimiento && !existente.fallecimiento) setBio.fallecimiento = bio.fallecimiento;
+                        if (Object.keys(setBio).length) upd.$set = setBio;
+                        if (Object.keys(upd).length) await coleccionAutores.updateOne({ _id: existente._id }, upd).catch(() => {});
                     } else {
-                        const doc = { nombre }; if (alternativos.length) doc.nombres_alternativos = alternativos;
+                        const doc = { nombre };
+                        if (alternativos.length) doc.nombres_alternativos = alternativos;
+                        if (bio.nacimiento) doc.nacimiento = bio.nacimiento;
+                        if (bio.fallecimiento) doc.fallecimiento = bio.fallecimiento;
                         const nuevo = await coleccionAutores.insertOne(doc);
                         ids.push(nuevo.insertedId);
-                        docFinal.alertas_agente.push(`Nuevo autor registrado: ${nombre}${alternativos.length ? ` (variante: ${alternativos.join(', ')})` : ''}`);
+                        docFinal.alertas_agente.push(`Nuevo autor registrado: ${nombre}${bio.nacimiento ? ` (${bio.nacimiento}-${bio.fallecimiento || ''})` : ''}`);
                     }
                 } else ids.push(autor);
             }
