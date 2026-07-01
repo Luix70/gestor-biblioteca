@@ -616,7 +616,7 @@ body.guest .admin-only{display:none!important}
 
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='nfc-exlibris · 2026-06-30';   // marca de versión (verificar despliegue)
+const APP_BUILD='ficha-offline+valoracion-tag · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1208,7 +1208,12 @@ function pintarDoc(r,ctx){
       <button class="fbtn bad admin-only" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
       <button class="fbtn bad admin-only" id="actDel" title="Borra el documento y su carpeta (sidecars/imágenes → Papelera, recuperable)">🗑 Eliminar</button>
     </div></div></div>`;
-  $('#p-detalle').innerHTML=`${head}<div class="ficha"><div>${carrusel}${(d.formatos||[]).includes('papel')?'':previewArchivo(r)}</div>
+  // «Ficha offline»: primera sección tras el encabezado — lo que lleva (o llevaría) la etiqueta NFC. Para
+  // libros CON etiqueta es su contenido; para libros SIN etiqueta se reconstruye de la base. Luego, el resto.
+  const _off={u:_txtUbic(d),a:(r.autores||[]).join(', '),e:r.editorial||'',x:r.coleccion||'',c:d.cdu||'',i:d.isbn||''};
+  const _tag=!!(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid));
+  const fichaOff=`<div class="card"><h3 style="margin-top:0">📴 Ficha offline <span class="muted" style="font-size:11px;font-weight:400">— ${_tag?'contenido de la etiqueta NFC':'reconstruida de la base'}</span></h3>${_offlineInner(_off)}</div>`;
+  $('#p-detalle').innerHTML=`${head}${fichaOff}<div class="ficha"><div>${carrusel}${(d.formatos||[]).includes('papel')?'':previewArchivo(r)}</div>
     <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
   attachClas('#p-detalle');
   attachRating('#p-detalle');
@@ -2809,9 +2814,10 @@ function _payloadOffline(d,r,budget){
   const cut=(s,n)=>{s=String(s||'');while(_blen(s)>n&&s.length)s=s.slice(0,-1);return s;};
   let t=cut(d.titulo,40), a=cut((r&&r.autores&&r.autores.length)?r.autores.join(', '):'',28),
       e=cut((r&&r.editorial)||'',22), x=cut((r&&r.coleccion)||'',22),
-      c=String(d.cdu||''), i=d.isbn||'', dd=String(d._id||''), u=cut(_txtUbic(d),30);
-  // claves cortas: d=id, u=ubicación, t=título, i=isbn, c=cdu, x=colección, a=autor, e=editorial
-  const build=()=>'BIB1:'+JSON.stringify(Object.fromEntries(Object.entries({v:1,d:dd,u,t,i,c,x,a,e}).filter(([,v])=>v!=='')));
+      c=String(d.cdu||''), i=d.isbn||'', dd=String(d._id||''), u=cut(_txtUbic(d),30),
+      s=(d.valoracion&&d.valoracion>0)?d.valoracion:'';
+  // claves cortas: d=id, u=ubicación, t=título, i=isbn, c=cdu, x=colección, a=autor, e=editorial, s=estrellas
+  const build=()=>'BIB1:'+JSON.stringify(Object.fromEntries(Object.entries({v:1,d:dd,u,t,i,c,x,a,e,s}).filter(([,v])=>v!=='')));
   // Salvaguarda final SOLO si la URL fuese muy larga: nunca toca ubicación/título/isbn/cdu.
   const pasos=[()=>e='',()=>x='',()=>a=cut(a,18),()=>a=''];
   let s=build(),k=0; while(_blen(s)>budget && k<pasos.length){pasos[k]();k++;s=build();}
@@ -2865,13 +2871,20 @@ function heroExlibris(ex){
   return `<div style="text-align:center;font-family:Georgia,'Times New Roman',serif;background:linear-gradient(#cdab6c,#9c7a44);color:#2a1d0e;border:1px solid #6e5226;border-radius:10px;padding:16px 12px;margin:0 0 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 3px 10px rgba(0,0,0,.45)">
     <div style="font-size:19px;font-weight:700;letter-spacing:2px;text-transform:uppercase">📖 ${esc(lib)}</div>${prop?`<div style="font-size:13px;margin-top:5px;font-style:italic">${esc(prop)}</div>`:''}</div>`;
 }
-function mostrarOfflineNFC(o,ex){
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px">${heroExlibris(ex)}<h3 style="margin-top:0">📕 ${esc(o.t||'(sin título)')}</h3>${o.a?`<div class="muted">${esc(o.a)}</div>`:''}
-    <div style="margin:14px 0;padding:12px;border:1px solid var(--acc);border-radius:10px;text-align:center;background:var(--card2)">
+// Estrellas estáticas (solo lectura) para la valoración guardada en la etiqueta.
+const estrellasHTML=n=>{n=+n||0;return n?`<span style="color:#ffcf5a;font-size:16px;letter-spacing:2px" title="${n}★">${'★'.repeat(n)}${'☆'.repeat(Math.max(0,5-n))}</span>`:'';};
+// Bloque «Ficha offline» (ubicación PROMINENTE + datos básicos). Reutilizado por la tarjeta offline (datos
+// de la etiqueta) y por la ficha online (reconstruido de la base). o = {u,a,e,x,c,i}.
+function _offlineInner(o){
+  return `<div style="margin:2px 0 12px;padding:12px;border:1px solid var(--acc);border-radius:10px;text-align:center;background:var(--card2)">
       <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">Ubicación</div>
       <div style="font-size:21px;font-weight:700;color:var(--acc)">${esc(o.u||'Sin asignar')}</div></div>
-    <dl class="dl">${o.c?`<dt>CDU</dt><dd class="mono">${esc(o.c)}</dd>`:''}${o.x?`<dt>Colección</dt><dd>${esc(o.x)}</dd>`:''}${o.e?`<dt>Editorial</dt><dd>${esc(o.e)}</dd>`:''}${o.i?`<dt>ISBN</dt><dd class="mono">${esc(o.i)}</dd>`:''}</dl>
-    <p class="muted" style="font-size:11px;margin-top:6px">📴 Datos de la etiqueta (sin conexión).</p>
+    <dl class="dl">${o.a?`<dt>Autor</dt><dd>${esc(o.a)}</dd>`:''}${o.e?`<dt>Editorial</dt><dd>${esc(o.e)}</dd>`:''}${o.x?`<dt>Colección</dt><dd>${esc(o.x)}</dd>`:''}${o.c?`<dt>CDU</dt><dd class="mono">${esc(o.c)}</dd>`:''}${o.i?`<dt>ISBN</dt><dd class="mono">${esc(o.i)}</dd>`:''}</dl>`;
+}
+function mostrarOfflineNFC(o,ex){
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px">${heroExlibris(ex)}<h3 style="margin-top:0">📕 ${esc(o.t||'(sin título)')}</h3>${o.a?`<div class="muted">${esc(o.a)}</div>`:''}${o.s?`<div style="margin-top:6px">${estrellasHTML(o.s)}</div>`:''}
+    ${_offlineInner(o)}
+    <p class="muted" style="font-size:12px;margin-top:6px">📴 No hay conexión — datos de la etiqueta.</p>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px">${o.d?`<button class="btn pri" id="nfcOnline">Ver ficha online</button>`:''}<button class="btn" id="nfcCerr">Cerrar</button></div></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
   const cl=$('#nfcCerr');if(cl)cl.onclick=cerrarCmp; $('#cmpScrim').onclick=cerrarCmp;
@@ -3296,9 +3309,10 @@ async function autoLoginURL(){
 }
 function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token');cargarUsuariosLogin();$('#login').classList.add('show');if(estadoTimer)clearInterval(estadoTimer);}
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
-function bannerOffline(){let b=document.getElementById('offBanner');if(!b){b=document.createElement('div');b.id='offBanner';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:400;background:#7a5c00;color:#fff;text-align:center;font-size:13px;padding:6px 10px;box-shadow:0 1px 6px rgba(0,0,0,.4)';b.innerHTML='📴 Sin conexión — modo lectura de etiquetas NFC (pulsa 📲 Leer etiqueta)';document.body.appendChild(b);}}
+function bannerOffline(){let b=document.getElementById('offBanner');if(!b){b=document.createElement('div');b.id='offBanner';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:400;background:#7a5c00;color:#fff;text-align:center;font-size:13px;padding:6px 10px;box-shadow:0 1px 6px rgba(0,0,0,.4)';b.innerHTML='📴 Sin conexión — acerca una etiqueta NFC para ver su ficha offline';document.body.appendChild(b);}}
 function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();
-  if(APP_OFFLINE){bannerOffline();go('inbox');return;}   // sin red: directo al Inbox (Leer NFC); sin llamadas de red
+  // Sin red: directo al Inbox y AUTO-ESCANEA NFC → al acercar la etiqueta sale su ficha offline directamente.
+  if(APP_OFFLINE){bannerOffline();go('inbox');if('NDEFReader' in window)setTimeout(()=>{try{leerNFC();}catch(_){}},300);return;}
   cargarUbicaciones();go('search');abrirEnlaceProfundo();procesarCompartidos();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
