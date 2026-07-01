@@ -6,7 +6,7 @@ import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
     listarCuarentena, reingestarCuarentena, descartarCuarentena, descartarCategoria, reingestarTodosDuplicados, ingestaPorDia,
 } from './utils/inspeccion.js';
-import { verificarPasswordAdmin } from './auth.js';
+import { verificarPasswordAdmin, firmarCompartir, validarCompartir } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad } from './integridad.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
@@ -1015,5 +1015,61 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // COMPARTIR (QR): genera un enlace permanente acotado a ESTE documento (admin). Para medios digitales
+    // el token autoriza además la descarga; el front construye la URL (origin + '/?s=' + token) y su QR.
+    r.post('/documentos/:id/compartir', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) }, { projection: { formatos: 1 } });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const esDigital = !(doc.formatos || []).includes('papel');
+            res.json({ ok: true, token: firmarCompartir(req.params.id, { descarga: esDigital }), descarga: esDigital });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    return r;
+}
+
+// Datos PÚBLICOS de una ficha (vista compartida por QR): solo lo bibliográfico + portada. SIN ubicación
+// física, sin campos internos ni acceso al resto del catálogo. La descarga solo si el token la autoriza
+// y el medio es digital (un libro en papel no tiene fichero que bajar).
+async function fichaCompartida(docId, permiteDescarga) {
+    if (!ObjectId.isValid(docId)) return null;
+    const db = await conectarDB();
+    const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(docId) });
+    if (!doc) return null;
+    const { autores, editorial } = await resolverNombres(db, doc);
+    const colDoc = doc.coleccion ? await db.collection('colecciones').findOne({ _id: doc.coleccion }, { projection: { nombre: 1 } }) : null;
+    const cdesc = await cduDesc(db, doc.cdu);
+    const esDigital = !(doc.formatos || []).includes('papel');
+    return {
+        titulo: doc.titulo || '', subtitulo: doc.subtitulo || '',
+        autores: autores || [], editorial: editorial || null,
+        coleccion: colDoc?.nombre || doc.coleccion_nombre || null,
+        cdu: doc.cdu || null, cdu_titulo: cdesc?.titulo_es || null,
+        isbn: doc.isbn || null, issn: doc.issn || null,
+        idioma: doc.idioma || null, tipo_recurso: doc.tipo_recurso || null,
+        formatos: doc.formatos || [], es_digital: esDigital,
+        valoracion: doc.valoracion || 0, sinopsis: doc.sinopsis || null,
+        portada: doc.portada || null,
+        descarga_url: (permiteDescarga && esDigital) ? urlArchivo(doc) : null,
+        nombre_archivo: (permiteDescarga && esDigital) ? (doc.nombre_archivo || null) : null,
+    };
+}
+
+// Router PÚBLICO (montado ANTES de la puerta de autenticación en app.js): consumir un enlace de compartir.
+// NO autentica ni abre el resto de la app: devuelve EXCLUSIVAMENTE la ficha de ese documento.
+export function rutasPublicas() {
+    const r = express.Router();
+    r.get('/compartido/:token', async (req, res) => {
+        try {
+            const info = validarCompartir(req.params.token);
+            if (!info) return res.status(404).json({ ok: false, motivo: 'enlace no válido' });
+            const ficha = await fichaCompartida(info.docId, info.descarga);
+            if (!ficha) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json({ ok: true, ficha });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
     return r;
 }

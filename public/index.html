@@ -157,6 +157,30 @@ input[type=checkbox]{width:auto;margin:0;cursor:pointer}
   border-bottom-left-radius:36px;display:flex;align-items:center;justify-content:center;
   font-size:15px;line-height:1;padding:0 2px 8px 8px;box-shadow:-1px 1px 5px rgba(0,0,0,.45)}
 .vol .cov img{width:100%;height:100%;object-fit:cover}
+/* ── FICHA MÍNIMA: encabezado vistoso reutilizado por la ficha online, la lectura NFC offline y la vista
+   compartida por QR (título · estrellas · [papel: ex-libris | digital: descarga] · datos · [papel: ubicación]) ── */
+.fmin{position:relative;overflow:hidden;text-align:center;padding:20px 18px 22px;
+  background:radial-gradient(120% 130% at 50% -10%,rgba(40,217,168,.10),transparent 60%),linear-gradient(165deg,var(--card),var(--card2));
+  border:1px solid var(--line)}
+.fmin-tit{margin:2px 30px 2px;font-size:23px;line-height:1.22;font-weight:800;letter-spacing:.2px}
+.fmin-sub{color:var(--mut);font-size:12px;margin-top:2px;text-transform:uppercase;letter-spacing:.6px}
+.fmin-stars{margin-top:7px}
+.fmin-data{max-width:440px;margin:14px auto 0;text-align:left}
+.fmin-ubic{max-width:440px;margin:16px auto 0;padding:13px;border:1px solid var(--acc);border-radius:12px;
+  background:rgba(40,217,168,.08);text-align:center}
+.fmin-ubic .lbl{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--mut)}
+.fmin-ubic .val{font-size:22px;font-weight:800;color:var(--acc);margin-top:2px}
+.fmin-dl{display:inline-flex;align-items:center;gap:8px;margin-top:16px;font-size:16px;padding:13px 30px;font-weight:700}
+/* Badge de PROCEDENCIA: cuarto de círculo en la esquina superior derecha (como el NFC), con popup al pulsar. */
+.fmin-badge{position:absolute;top:0;right:0;z-index:4;width:42px;height:42px;background:var(--acc);color:#04110c;
+  border-bottom-left-radius:42px;display:flex;align-items:flex-start;justify-content:flex-end;
+  padding:5px 7px 0 0;font-size:15px;font-weight:800;cursor:pointer;box-shadow:-1px 1px 5px rgba(0,0,0,.4)}
+.fmin-pop{position:absolute;top:46px;right:6px;width:220px;background:#0d1512;color:#dfe;border:1px solid var(--acc);
+  border-radius:10px;padding:9px 11px;font-size:12px;font-weight:400;line-height:1.45;text-align:left;
+  display:none;z-index:5;box-shadow:0 8px 22px rgba(0,0,0,.55)}
+.fmin-badge.open .fmin-pop{display:block}
+/* Vista COMPARTIDA por QR: página autónoma de solo la ficha; oculta el resto del panel (nav, login, páginas). */
+body.shared>*:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast){display:none!important}
 .vol .cov .ph{font-size:30px;opacity:.4}
 .vol .meta{padding:9px 11px}.vol .meta .n{font-weight:600;font-size:13px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .vol .meta .t{color:var(--mut);font-size:11px;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -614,9 +638,10 @@ body.guest .admin-only{display:none!important}
 <div id="cmpScrim"></div>
 <div id="cmpModal"></div>
 
+<script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='nfc-solo-papel · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ficha-minima+qr-compartir · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1194,29 +1219,43 @@ function pintarDoc(r,ctx){
   const imgs=(r.imagenes&&r.imagenes.length)?r.imagenes:(r.portada?[{ruta:r.portada,tipo:'portada'}]:[]);
   const nfcOv=nfcBadge(d);
   const carrusel=imgs.length?`<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map(im=>`<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length>1?`<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>`:''}</div>`:`<div class="filebox" style="position:relative">${nfcOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
-  const head=`${crumb}<div class="det-head"><button class="det-back" title="Volver" onclick="${back}">←</button>
-    <div class="det-title"><h2>${esc(d.titulo||'(sin título)')} ${badgesDoc(d)}</h2><div class="sub">${esc(d.tipo_recurso||'')}${d.naturaleza?' · '+esc(d.naturaleza):''}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}</div>
-    <div style="margin-top:8px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div>
-    ${_txtUbic(d)?`<div style="margin-top:8px"><a class="rowlink" id="ubicChip" style="display:inline-flex;align-items:center;gap:6px;background:rgba(40,217,168,.16);color:var(--acc);font-weight:600;padding:4px 11px;border-radius:999px;font-size:13px" title="Ver los libros de esta estantería">📍 ${esc(_txtUbic(d))}</a></div>`:''}
-    <div class="det-acts">
+  // ── FICHA MÍNIMA (encabezado vistoso): título → estrellas → [papel: ex-libris | digital: descarga] →
+  //    datos (autor/editorial/colección/CDU/ISBN/ISSN, drillables) → [papel: ubicación clicable]. Un badge
+  //    en la esquina superior derecha explica al pulsarlo de dónde salen los datos (etiqueta NFC / base). ──
+  const _fisico=(d.formatos||[]).includes('papel');
+  const _tag=!!(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid));
+  const subDoc=`${esc(d.tipo_recurso||'')}${d.naturaleza?' · '+esc(d.naturaleza):''}${d.volumen_numero!=null?' · tomo '+esc(d.volumen_numero):''}${d.obra_titulo?' · '+esc(recortar(d.obra_titulo,40)):''}`;
+  const origen=_fisico
+    ? (_tag?'Estos son los datos que lleva grabada la etiqueta NFC de este ejemplar.':'Ficha reconstruida a partir de la base de datos (este ejemplar aún no tiene etiqueta NFC).')
+    : 'Ejemplar digital: en vez de ubicación física se ofrece la descarga.';
+  const filasFmin=[['Autor',especiales._autores],['Editorial',especiales._editorial],['Colección',especiales._coleccion],
+    ['CDU',d.cdu?`<span class="mono">${esc(d.cdu)}</span>`:null],['ISBN',especiales._isbn],['ISSN',especiales._issn]]
+    .filter(p=>p[1]).map(p=>`<dt>${p[0]}</dt><dd>${p[1]}</dd>`).join('');
+  const ubicFmin=`<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">${_txtUbic(d)?`<a class="rowlink" id="ubicChip" style="color:var(--acc)" title="Ver los libros de esta estantería">📍 ${esc(_txtUbic(d))}</a>`:'<span class="muted">Sin asignar</span>'}</div></div>`;
+  const fmin=fichaMinima({
+    titulo:d.titulo, subtitulo:d.subtitulo||subDoc, esDigital:!_fisico, exlibris:EX_LIBRIS,
+    descargaUrl:r.archivo_url?encUrl(r.archivo_url):'', descargaNombre:r.nombre_archivo||'',
+    estrellasHTML:ratingBar('documentos',d._id,d.valoracion,d.nsfw)+' '+badgesDoc(d),
+    datosHTML:filasFmin, ubicacionHTML:ubicFmin, origen});
+  // Debajo de la ficha, secciones PLEGABLES y colapsadas por defecto (acciones, imágenes, lectura, datos, sinopsis).
+  const botones=`<div class="det-acts">
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
       <button class="fbtn admin-only" id="actImgs" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">🖼️ Imágenes</button>
       <button class="fbtn admin-only" id="actMedir" title="Estimar el tamaño físico del libro (cm) sobre la alfombrilla reglada">📐 Medir</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
+      <button class="fbtn admin-only" id="actShare" title="Genera un QR/enlace para compartir esta ficha (y su descarga, si es digital)">🔗 Compartir</button>
       <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
       <button class="fbtn bad admin-only" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
       <button class="fbtn bad admin-only" id="actDel" title="Borra el documento y su carpeta (sidecars/imágenes → Papelera, recuperable)">🗑 Eliminar</button>
-    </div></div></div>`;
-  // «Ficha offline»: primera sección tras el encabezado — lo que lleva (o llevaría) la etiqueta NFC. Para
-  // libros CON etiqueta es su contenido; para libros SIN etiqueta se reconstruye de la base. Luego, el resto.
-  // SOLO para ejemplares EN PAPEL (libro/revista/cómic físico): un medio digital no se recoloca ni se etiqueta.
-  const _fisico=(d.formatos||[]).includes('papel');
-  const _off={u:_txtUbic(d),a:(r.autores||[]).join(', '),e:r.editorial||'',x:r.coleccion||'',c:d.cdu||'',i:d.isbn||''};
-  const _tag=!!(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid));
-  const fichaOff=_fisico?`<div class="card"><h3 style="margin-top:0">📴 Ficha offline <span class="muted" style="font-size:11px;font-weight:400">— ${_tag?'contenido de la etiqueta NFC':'reconstruida de la base'}</span></h3>${_offlineInner(_off)}</div>`:'';
-  $('#p-detalle').innerHTML=`${head}${fichaOff}<div class="ficha"><div>${carrusel}${(d.formatos||[]).includes('papel')?'':previewArchivo(r)}</div>
-    <div class="card"><h3>Datos catalográficos</h3><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></div>${sinopsis}`;
+    </div>`;
+  const lector=_fisico?'':previewArchivo(r);
+  const secAcc=`<details class="card foldcard admin-only" style="margin-top:14px"><summary>⚙️ Acciones</summary>${botones}</details>`;
+  const secImg=`<details class="card foldcard" style="margin-top:14px"><summary>🖼️ Imágenes</summary><div style="margin-top:10px">${carrusel}</div></details>`;
+  const secLect=lector?`<details class="card foldcard" id="lectDet" style="margin-top:14px"><summary>📖 Leer / archivo</summary><div style="margin-top:10px">${lector}</div></details>`:'';
+  const secCat=`<details class="card foldcard" style="margin-top:14px"><summary>📚 Datos catalográficos</summary><div style="margin-top:10px"><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></details>`;
+  const secSin=d.sinopsis?`<details class="card foldcard" style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(d.sinopsis)}</p></details>`:'';
+  $('#p-detalle').innerHTML=`${crumb}<div style="margin:2px 0 12px"><button class="det-back" title="Volver" onclick="${back}">←</button></div>${fmin}${secAcc}${secImg}${secLect}${secCat}${secSin}`;
   attachClas('#p-detalle');
   attachRating('#p-detalle');
   $$('#p-detalle .copybtn').forEach(b=>b.onclick=e=>{e.stopPropagation();copiar(b.dataset.copy);});
@@ -1231,15 +1270,22 @@ function pintarDoc(r,ctx){
    // Grabar NFC: solo para ejemplares EN PAPEL (un medio digital no se etiqueta) y en navegadores con Web
    // NFC (Android + Chrome). En el resto queda oculto.
    const cn=$('#actNfc');if(cn&&_fisico&&('NDEFReader' in window)){cn.style.display='';cn.onclick=()=>grabarNFC(d,r);}
+   const cs=$('#actShare');if(cs)cs.onclick=()=>compartirDoc(d);
    const uc=$('#ubicChip');if(uc)uc.onclick=()=>{const u=d.ubicacion||{};estadoBusqueda.extra={ambito:u.ambito,estanteria:(u.estanteria&&u.estanteria!=='Sin asignar')?u.estanteria:undefined,etiqueta:'📍 '+_txtUbic(d)};estadoBusqueda.page=1;go('search');};}
   $$('#p-detalle [data-colid]').forEach(a=>a.onclick=()=>verColeccion(a.dataset.colid));
   $$('#p-detalle [data-q]').forEach(a=>a.onclick=()=>buscarTexto(a.dataset.q));
   carIdx=0;const tr=$('#carTrack');
   if(tr&&tr.children.length>1)tr.onscroll=()=>{const i=Math.round(tr.scrollLeft/tr.clientWidth);if(i!==carIdx){carIdx=i;const dd=$('#carDots');if(dd)dd.textContent=(i+1)+' / '+tr.children.length;}};
+  // Lector embebido (PDF/EPUB/cómic): se inicializa PEREZOSAMENTE al abrir su sección plegable (evita
+  // renderizar en un contenedor oculto de tamaño 0 y no descarga el fichero hasta que se pide leerlo).
   const _nom=(r.nombre_archivo||'').toLowerCase();
-  if(r.archivo_url&&_nom.endsWith('.epub'))iniciarLectorEpub(encUrl(r.archivo_url));
-  else if(r.archivo_url&&_nom.endsWith('.pdf'))iniciarLectorPdf(encUrl(r.archivo_url));
-  else if(/\.(cbz|cbr|cb7|djvu)$/.test(_nom))iniciarLectorComic(d._id);
+  const initLector=()=>{
+    if(r.archivo_url&&_nom.endsWith('.epub'))iniciarLectorEpub(encUrl(r.archivo_url));
+    else if(r.archivo_url&&_nom.endsWith('.pdf'))iniciarLectorPdf(encUrl(r.archivo_url));
+    else if(/\.(cbz|cbr|cb7|djvu)$/.test(_nom))iniciarLectorComic(d._id);
+  };
+  const ld=$('#lectDet');
+  if(ld){let hecho=false;ld.addEventListener('toggle',()=>{if(ld.open&&!hecho){hecho=true;initLector();}});}
 }
 
 // ── visor PAGINADO (cómic .cbz/.cbr/.cb7 y .djvu): páginas servidas por /documentos/:id/paginas[/:n] bajo demanda ──
@@ -1785,7 +1831,7 @@ function previewArchivo(r){
   if(['jpg','jpeg','png','webp','gif'].includes(ext))return ''; // un set de imágenes ya se ve en el carrusel
   // Solo "Descargar": PDF y EPUB se LEEN EMBEBIDOS aquí (visores propios). Ya no se ofrece "Abrir en
   // pestaña" (en PC, según la config del navegador, descargaba el PDF en vez de previsualizarlo).
-  const acc=`<div class="row" style="margin-top:12px;gap:8px"><a class="btn" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a></div>`;
+  const acc=`<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a></div>`;
   // PDF: visor PDF.js embebido (vendored) — render propio en canvas → previsualiza IGUAL en PC y móvil,
   // sin depender de la config de PDF del navegador. Se inicializa tras pintar (iniciarLectorPdf).
   if(ext==='pdf')return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3>
@@ -2884,11 +2930,92 @@ function _offlineInner(o){
       <div style="font-size:21px;font-weight:700;color:var(--acc)">${esc(o.u||'Sin asignar')}</div></div>
     <dl class="dl">${o.a?`<dt>Autor</dt><dd>${esc(o.a)}</dd>`:''}${o.e?`<dt>Editorial</dt><dd>${esc(o.e)}</dd>`:''}${o.x?`<dt>Colección</dt><dd>${esc(o.x)}</dd>`:''}${o.c?`<dt>CDU</dt><dd class="mono">${esc(o.c)}</dd>`:''}${o.i?`<dt>ISBN</dt><dd class="mono">${esc(o.i)}</dd>`:''}</dl>`;
 }
+// ── FICHA MÍNIMA: encabezado vistoso común (ficha online · lectura NFC offline · vista compartida por QR).
+//   título → estrellas → [papel: ex-libris | digital: botón de descarga verde] → datos → [papel: ubicación].
+//   Campos interactivos (estrellas editables, ubicación clicable, identificadores drillables) se pasan como
+//   HTML por estrellasHTML/datosHTML/ubicacionHTML; si no, se generan versiones estáticas (solo lectura).
+function fichaMinima(o){
+  const badge=o.origen?`<div class="fmin-badge" onclick="this.classList.toggle('open')" title="¿De dónde salen estos datos?">ⓘ<span class="fmin-pop">${esc(o.origen)}</span></div>`:'';
+  const starsInner=(o.estrellasHTML!=null)?o.estrellasHTML:(o.estrellas?estrellasHTML(o.estrellas):'');
+  const hero=o.esDigital
+    ? (o.descargaUrl?`<a class="btn pri fmin-dl" href="${esc(o.descargaUrl)}" download="${esc(o.descargaNombre||'')}">⬇ Descargar</a>`:'')
+    : heroExlibris(o.exlibris||EX_LIBRIS);
+  let filas=o.datosHTML;
+  if(filas==null){
+    filas=[['Autor',o.autor],['Editorial',o.editorial],['Colección',o.coleccion],['CDU',o.cdu,'mono'],['ISBN',o.isbn,'mono']]
+      .filter(function(p){return p[1];}).map(function(p){return `<dt>${p[0]}</dt><dd${p[2]?` class="${p[2]}"`:''}>${esc(p[1])}</dd>`;}).join('');
+  }
+  const pie=(o.esDigital||o.ocultarUbicacion)?''
+    :((o.ubicacionHTML!=null)?o.ubicacionHTML
+      :`<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">📍 ${esc(o.ubicacion||'Sin asignar')}</div></div>`);
+  return `<div class="fmin card">${badge}
+    <h1 class="fmin-tit">${esc(o.titulo||'(sin título)')}</h1>${o.subtitulo?`<div class="fmin-sub">${esc(o.subtitulo)}</div>`:''}${starsInner?`<div class="fmin-stars">${starsInner}</div>`:''}
+    ${hero?`<div style="margin-top:14px">${hero}</div>`:''}
+    ${filas?`<dl class="dl fmin-data">${filas}</dl>`:''}
+    ${pie}</div>`;
+}
+// Dibuja un código QR (matriz de qrGenerar) en un <canvas> con zona de silencio. px = tamaño objetivo.
+function qrCanvas(qr,px){
+  const quiet=4,n=qr.size,total=n+quiet*2,scale=Math.max(2,Math.floor((px||260)/total)),W=total*scale;
+  const cv=document.createElement('canvas');cv.width=W;cv.height=W;
+  cv.style.cssText='width:'+W+'px;max-width:100%;height:auto;border-radius:10px;image-rendering:pixelated';
+  const g=cv.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,W,W);g.fillStyle='#000';
+  for(let y=0;y<n;y++)for(let x=0;x<n;x++)if(qr.mod[y][x])g.fillRect((quiet+x)*scale,(quiet+y)*scale,scale,scale);
+  return cv;
+}
+// Compartir por QR: pide al servidor un token firmado de ESTE documento y muestra el QR + enlace. Abre solo
+// la ficha (y, si es digital, permite la descarga); no da acceso al resto de la app.
+async function compartirDoc(d){
+  const esDigital=!(d.formatos||[]).includes('papel');
+  let token;
+  try{const res=await api('/documentos/'+encodeURIComponent(d._id)+'/compartir',{method:'POST',body:'{}'});token=res.token;}
+  catch(e){toast(e.message,'bad');return;}
+  const url=location.origin+'/?s='+token;
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:360px;text-align:center"><h3 style="margin-top:0">🔗 Compartir ficha</h3>
+    <div id="qrBox" style="display:flex;justify-content:center;margin:4px 0 12px"></div>
+    <p class="muted" style="font-size:12px;line-height:1.5">Escanea el QR o comparte el enlace. Abre ${esDigital?'la ficha y permite la <b>descarga</b>':'solo la ficha'} — sin acceso al resto de la biblioteca.</p>
+    <div class="row" style="gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap">
+      <button class="btn pri" id="cmpShare">📤 Compartir</button>
+      <button class="btn" id="cmpCopy">📋 Copiar enlace</button>
+      <button class="btn" id="cmpXq">Cerrar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrarCmp;
+  try{const box=$('#qrBox');if(box)box.appendChild(qrCanvas(qrGenerar(url),260));}catch(e){const box=$('#qrBox');if(box)box.innerHTML='<span class="muted" style="font-size:12px">No se pudo generar el QR; usa el enlace.</span>';}
+  $('#cmpXq').onclick=cerrarCmp;
+  $('#cmpCopy').onclick=()=>{copiar(url);toast('Enlace copiado');};
+  const sh=$('#cmpShare');
+  if(navigator.share){sh.onclick=()=>{navigator.share({title:d.titulo||'Ficha',url}).catch(()=>{});};}
+  else sh.style.display='none';
+}
+// VISTA COMPARTIDA (?s=<token>): página autónoma de SOLO la ficha (sin login ni resto de la app).
+async function vistaCompartida(token){
+  document.body.classList.add('shared');
+  let cont=document.getElementById('sharedView');
+  if(!cont){cont=document.createElement('div');cont.id='sharedView';cont.style.cssText='max-width:640px;margin:0 auto;padding:16px 14px 40px';document.body.appendChild(cont);}
+  cont.innerHTML='<p class="muted" style="text-align:center;margin-top:50px">Cargando ficha…</p>';
+  let data;
+  try{data=await fetch('/api/compartido/'+encodeURIComponent(token)).then(r=>r.json());}catch(e){data=null;}
+  if(!data||!data.ok||!data.ficha){cont.innerHTML='<p class="muted" style="text-align:center;margin-top:50px">Enlace no válido o documento no disponible.</p>';return;}
+  const f=data.ficha;
+  const portada=f.portada?`<div style="text-align:center;margin-bottom:14px"><img src="${esc(encUrl(f.portada))}" style="max-height:260px;max-width:78%;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.5)"></div>`:'';
+  const fmin=fichaMinima({
+    titulo:f.titulo,subtitulo:f.subtitulo,estrellas:f.valoracion,
+    esDigital:f.es_digital,exlibris:EX_LIBRIS,ocultarUbicacion:true,   // nunca se expone la ubicación física
+    descargaUrl:f.descarga_url?encUrl(f.descarga_url):'',descargaNombre:f.nombre_archivo||'',
+    autor:(f.autores||[]).join(', '),editorial:f.editorial||'',coleccion:f.coleccion||'',
+    cdu:f.cdu||'',isbn:f.isbn||'',
+    origen:'Ficha compartida (solo lectura). No da acceso al resto de la biblioteca.'
+  });
+  const sinopsis=f.sinopsis?`<details class="card foldcard" style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(f.sinopsis)}</p></details>`:'';
+  cont.innerHTML=`<div style="text-align:center;margin:8px 0 16px"><span style="font-family:Georgia,'Times New Roman',serif;font-weight:700;letter-spacing:1.5px;color:var(--acc);font-size:14px">📖 BIBLIOTHECA LUDOVICIANA</span></div>${portada}${fmin}${sinopsis}`;
+}
 function mostrarOfflineNFC(o,ex){
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px">${heroExlibris(ex)}<h3 style="margin-top:0">📕 ${esc(o.t||'(sin título)')}</h3>${o.a?`<div class="muted">${esc(o.a)}</div>`:''}${o.s?`<div style="margin-top:6px">${estrellasHTML(o.s)}</div>`:''}
-    ${_offlineInner(o)}
-    <p class="muted" style="font-size:12px;margin-top:6px">📴 No hay conexión — datos de la etiqueta.</p>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px">${o.d?`<button class="btn pri" id="nfcOnline">Ver ficha online</button>`:''}<button class="btn" id="nfcCerr">Cerrar</button></div></div>`;
+  // Una etiqueta NFC se pega a un ejemplar FÍSICO → siempre papel: ex-libris + ubicación (Ficha mínima).
+  const fmin=fichaMinima({titulo:o.t,estrellas:o.s,esDigital:false,exlibris:ex||EX_LIBRIS,
+    autor:o.a||'',editorial:o.e||'',coleccion:o.x||'',cdu:o.c||'',isbn:o.i||'',ubicacion:o.u||'',
+    origen:'Datos leídos de la etiqueta NFC (sin conexión).'});
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px;padding:0;overflow:hidden;border:none">${fmin}
+    <div style="padding:12px 16px 14px"><p class="muted" style="font-size:12px;margin:0 0 10px">📴 No hay conexión.</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end">${o.d?`<button class="btn pri" id="nfcOnline">Ver ficha online</button>`:''}<button class="btn" id="nfcCerr">Cerrar</button></div></div></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
   const cl=$('#nfcCerr');if(cl)cl.onclick=cerrarCmp; $('#cmpScrim').onclick=cerrarCmp;
   const on=$('#nfcOnline');if(on)on.onclick=()=>{cerrarCmp();verDoc(o.d,{volver:'inbox',etiqueta:'Inbox'});};
@@ -3327,7 +3454,9 @@ function _recordarSesion(){try{localStorage.setItem('panel_user',USER||'');local
 $('#logout').onclick=async()=>{try{await api('/logout',{method:'POST'});}catch{};try{localStorage.removeItem('panel_user');localStorage.removeItem('panel_rol');}catch(_){}mostrarLogin();};
 // sesión inicial: token guardado, o el sembrado por auto-login de URL (cookie), o mostrar el login
 (async()=>{
-  // 0) Captura los enlaces profundos (?doc=<id> de un libro, ?amb=&est= de una estantería) ANTES de que
+  // 0a) VISTA COMPARTIDA (?s=<token>): página autónoma de SOLO esa ficha (sin login ni resto de la app).
+  try{const sp=new URLSearchParams(location.search).get('s');if(sp){await vistaCompartida(sp);return;}}catch(_){}
+  // 0b) Captura los enlaces profundos (?doc=<id> de un libro, ?amb=&est= de una estantería) ANTES de que
   //    autoLoginURL limpie la query.
   try{const qp=new URLSearchParams(location.search);_deepDoc=qp.get('doc')||null;_compartido=qp.get('compartido')==='1';
     const amb=qp.get('amb');if(amb)_deepUbic={amb,est:qp.get('est')||''};}catch(_){}

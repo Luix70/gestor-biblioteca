@@ -18,7 +18,7 @@ import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { reciclar } from './utils/papelera.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
 import { obtenerEstadisticas } from './estadisticas.js';
-import { rutasPanel } from './api-panel.js';
+import { rutasPanel, rutasPublicas } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
 import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
 
@@ -92,6 +92,9 @@ app.get('/api/yo', (req, res) => res.json(validar(tokenDe(req)) || { rol: null }
 app.post('/api/logout', (req, res) => { logout(tokenDe(req)); res.json({ ok: true }); });
 // Lista de usuarios (SIN contraseñas) para el desplegable del login. Público (antes de la puerta).
 app.get('/api/usuarios', (req, res) => res.json({ usuarios: listarUsuarios() }));
+// Vista COMPARTIDA por QR: pública (antes de la puerta), pero solo devuelve la ficha del documento cuyo
+// token firmado se presenta — no autentica ni abre nada más de la app.
+app.use('/api', rutasPublicas());
 app.use('/api', autenticar); // todo lo que sigue bajo /api exige sesión
 
 // Rutas de operación del panel (protegidas por la puerta anterior).

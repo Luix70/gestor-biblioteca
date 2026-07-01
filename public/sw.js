@@ -4,8 +4,8 @@
 // despliegues se ven al instante), y solo si no hay red se sirve la copia cacheada. La API (/api) y los
 // recursos en vivo (/recursos) NUNCA se cachean (necesitan datos frescos).
 const SHARE_CACHE = 'compartidos-v1';
-const APP_CACHE = 'app-v2';
-const PRECACHE = ['/', '/index.html'];
+const APP_CACHE = 'app-v3';
+const PRECACHE = ['/', '/index.html', '/qrcode.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(APP_CACHE).then((c) => c.addAll(PRECACHE).catch(() => {})).then(() => self.skipWaiting()));

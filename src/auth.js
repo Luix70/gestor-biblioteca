@@ -91,6 +91,32 @@ export function validar(token) {
 
 export function logout(token) { if (token) revocados.add(token); }
 
+/**
+ * ENLACE DE COMPARTIR (QR): token FIRMADO acotado a UN documento, SIN caducidad (permanente hasta que
+ * cambie el secreto/contraseñas). No es una sesión: no autentica ni da acceso al resto de la app; solo
+ * autoriza a ver ESA ficha (y, si `descarga`, a descargar el fichero, para medios digitales). El marcador
+ * `c:1` lo distingue de un token de sesión (que lleva `u`), así que uno no vale como el otro.
+ */
+export function firmarCompartir(docId, opciones = {}) {
+    const payload = Buffer.from(JSON.stringify({ c: 1, d: String(docId), dl: !!opciones.descarga })).toString('base64url');
+    const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+    return payload + '.' + sig;
+}
+
+/** Valida un token de compartir → { docId, descarga } o null. */
+export function validarCompartir(token) {
+    if (!token || typeof token !== 'string') return null;
+    const i = token.lastIndexOf('.');
+    if (i < 0) return null;
+    const payload = token.slice(0, i), sig = token.slice(i + 1);
+    const esperado = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
+    const a = Buffer.from(sig), b = Buffer.from(esperado);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    let data; try { data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { return null; }
+    if (!data || data.c !== 1 || !data.d) return null;   // no es un token de compartir
+    return { docId: data.d, descarga: !!data.dl };
+}
+
 /** Verifica una contraseña contra la de CUALQUIER admin (re-confirmación de acciones destructivas). */
 export function verificarPasswordAdmin(password) {
     return USUARIOS.some(u => u.rol === 'admin' && u.pwd && igual(password, u.pwd));
