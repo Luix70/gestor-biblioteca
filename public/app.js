@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='portadas-multiseleccion+camara · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='isbn-ir-a-camara · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2006,12 +2006,11 @@ function isbnRender(){
     <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Portadas — ✓ marca las que archivar; pulsa una para elegir la ⭐ PORTADA (✔ = ≥800 px)</div>${galeria}</div>
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
       <button class="btn pri" type="button" id="isbnBuscarWeb" title="Busca más portadas por título+autor en OpenLibrary y Apple Books (sin clave) y las trae aquí para elegir">🔎 Buscar más portadas</button>
-      <button class="btn" type="button" id="isbnCam">📷 Cámara</button>
+      <button class="btn" type="button" id="isbnIrCam" title="Fotografía el libro con la Cámara (tapete: recorte + medida) — te lleva allí con el ISBN ya puesto">📷 Ir a Cámara…</button>
       <button class="btn" type="button" id="isbnAddFile">⬆️ Subir imagen</button>
       <button class="btn" type="button" id="isbnAddUrl">➕ Añadir por URL</button>
       <span class="muted" id="isbnWebMsg" style="font-size:12px"></span>
       <input type="file" id="isbnFile" accept="image/*" multiple style="display:none">
-      <input type="file" id="isbnCamFile" accept="image/*" capture="environment" style="display:none">
     </div>
     <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn pri" type="button" id="isbnCrear">✅ Crear</button>
@@ -2023,7 +2022,7 @@ function isbnRender(){
   res.querySelectorAll('[data-edit]').forEach(el=>el.onclick=e=>{e.stopPropagation();isbnConformar(el.dataset.edit);});
   res.querySelectorAll('[data-mk]').forEach(el=>el.oninput=()=>{const k=el.dataset.mk;_isbnEstado.meta[k]=(k==='autores')?el.value.split(';').map(s=>s.trim()).filter(Boolean):el.value;});
   $('#isbnAddUrl').onclick=isbnAddUrl; $('#isbnAddFile').onclick=()=>$('#isbnFile').click(); $('#isbnFile').onchange=()=>_isbnAnadirArchivos($('#isbnFile'));
-  $('#isbnCam').onclick=()=>$('#isbnCamFile').click(); $('#isbnCamFile').onchange=()=>_isbnAnadirArchivos($('#isbnCamFile'));
+  if($('#isbnIrCam'))$('#isbnIrCam').onclick=isbnIrACamara;
   if($('#isbnBuscarWeb'))$('#isbnBuscarWeb').onclick=isbnBuscarPortadasWeb;
   $('#isbnCrear').onclick=()=>isbnCrear(false); $('#isbnCompletar').onclick=()=>isbnCrear(true);
   $('#isbnCancel').onclick=()=>{_isbnEstado=null;$('#isbnRes').innerHTML='';$('#isbnMsg').textContent='';};
@@ -2051,6 +2050,14 @@ function isbnConformar(id){
   });
 }
 function isbnAddUrl(){const u=prompt('URL de la imagen (https://…):');if(!u)return;_isbnEstado.extra.push({url:u.trim(),tipo:'imagen',sel:true});isbnRender();}
+// «Ir a Cámara»: si ninguna portada convence, fotografía el libro con la sección Cámara (que ya recorta con el
+// tapete y mide). Autorrellena el ISBN en «Datos de esta alta» y lleva allí; no duplicamos recorte/medida aquí.
+function isbnIrACamara(){
+  const isbn=_isbnEstado&&_isbnEstado.isbn;
+  if(isbn&&$('#inIsbn')){$('#inIsbn').value=isbn;const da=$('#datosAltaCard');if(da)da.open=true;}
+  const cam=$('#camCard'); if(cam){cam.open=true; cam.scrollIntoView({behavior:'smooth',block:'start'});}
+  toast('ISBN copiado a «Datos de esta alta». Haz las fotos en Cámara (activa 📐 Tapete para recortar y medir).');
+}
 // Busca más portadas por título+autor (OpenLibrary Search + Apple Books, sin clave) y las añade como candidatas.
 async function isbnBuscarPortadasWeb(){
   if(!_isbnEstado)return; const msg=$('#isbnWebMsg'); if(msg)msg.textContent='Buscando portadas…';
