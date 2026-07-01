@@ -97,11 +97,11 @@ textarea{line-height:1.6;resize:vertical;min-height:15em;display:block}
 .switch input:checked+.slider:before{transform:translateX(24px);background:#fff}
 .muted{color:var(--mut)}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
 /* Tarjeta plegable (details/summary) reutilizable: chevron que gira; el resumen actúa de cabecera. */
-details.foldcard>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;color:var(--txt)}
+details.foldcard>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:11px;font-weight:700;font-size:19px;color:var(--txt);padding:8px 2px;min-height:30px}
 details.foldcard>summary::-webkit-details-marker{display:none}
-details.foldcard>summary::before{content:'▸';color:var(--mut);font-size:12px;transition:transform .15s}
+details.foldcard>summary::before{content:'▸';color:var(--acc);font-size:17px;transition:transform .15s}
 details.foldcard[open]>summary::before{transform:rotate(90deg)}
-details.foldcard>summary h3{display:inline;margin:0;font-size:15px}
+details.foldcard>summary h3{display:inline;margin:0;font-size:19px}
 details.foldcard[open]>summary{margin-bottom:12px}
 .empty{text-align:center;color:var(--mut);padding:36px 10px}
 .sec-h{display:flex;align-items:center;gap:12px;margin-bottom:18px}.sec-h h2{font-size:20px;font-weight:600;flex:1}

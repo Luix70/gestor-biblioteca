@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ubic-fase2 (reordenar estanterías: ↑/↓ + arrastrar + insertar debajo) · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ubic-fase2 + ficha: secciones plegables más grandes · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
