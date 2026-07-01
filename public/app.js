@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='estanterias-fase0 (sel-todos+ver-sel+añadir-aqui) · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='estanterias-fase0 + editor-autobordes + botones-cam-fijos · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1052,18 +1052,21 @@ function _editorImagen(opts){
     };
     const reset=()=>{ajustar();crop={x0:work.width*0.08,y0:work.height*0.08,x1:work.width*0.92,y1:work.height*0.92};const mx=work.width*0.14,my=work.height*0.14;quad=[[mx,my],[work.width-mx,my],[work.width-mx,work.height-my],[mx,work.height-my]];render();};
     reset();
-    const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';if($('#edAuto'))$('#edAuto').style.display=(modo==='persp'||modo==='crop')?'':'none';$('#edMsg').textContent=modo==='crop'?'Arrastra el recuadro a recortar (o «Auto bordes»). Si está inclinado, usa Perspectiva.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (↖↗↘↙) — o «Auto bordes» — y desestira un libro INCLINADO a rectángulo.':'';render();};
-    $('#edCrop').onclick=()=>setModo('crop');$('#edPersp').onclick=()=>setModo('persp');
     // Auto bordes: 1º el tapete (fondo verde/calibrado); si no hay tapete, el detector GENÉRICO (cubierta
-    // sobre fondo claro/oscuro, foto en ángulo). Si ninguno, se coloca a mano.
-    if($('#edAuto'))$('#edAuto').onclick=()=>{
+    // sobre fondo claro/oscuro, foto en ángulo). silencioso=true: sin avisos (uso automático al abrir modo).
+    const autoBordes=(silencioso)=>{
       let q=detectarBordesVerde(work), gen=false;
       if(!q){q=detectarCuadrilateroGenerico(work);gen=!!q;}
-      if(!q){toast('No detecté la cubierta automáticamente; colócala a mano','warn');return;}
+      if(!q){ if(!silencioso)toast('No detecté la cubierta automáticamente; colócala a mano','warn'); return; }
       const mX=work.width*0.03,mY=work.height*0.03,cl=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));q=q.map(p=>[cl(p[0],mX,work.width-mX),cl(p[1],mY,work.height-mY)]); // nunca pegadas al borde (agarrables en móvil)
-      if(modo==='crop'){const xs=q.map(p=>p[0]),ys=q.map(p=>p[1]);crop={x0:Math.min(...xs),y0:Math.min(...ys),x1:Math.max(...xs),y1:Math.max(...ys)};toast('Recuadro ajustado a la cubierta (si está inclinada, mejor Perspectiva)');}
-      else{quad=q;toast(gen?'Esquinas detectadas — revísalas antes de enderezar':'Esquinas detectadas — ajústalas si hace falta');}
-      render();};
+      if(modo==='crop'){const xs=q.map(p=>p[0]),ys=q.map(p=>p[1]);crop={x0:Math.min(...xs),y0:Math.min(...ys),x1:Math.max(...xs),y1:Math.max(...ys)};if(!silencioso)toast('Recuadro ajustado a la cubierta (si está inclinada, mejor Perspectiva)');}
+      else if(modo==='persp'){quad=q;if(!silencioso)toast(gen?'Esquinas detectadas — revísalas antes de enderezar':'Esquinas detectadas — ajústalas si hace falta');}
+      render();
+    };
+    const setModo=m=>{modo=(modo===m)?'none':m;$('#edApply').style.display=modo==='none'?'none':'';if($('#edAuto'))$('#edAuto').style.display=(modo==='persp'||modo==='crop')?'':'none';$('#edMsg').textContent=modo==='crop'?'Arrastra el recuadro a recortar (o «Auto bordes»). Si está inclinado, usa Perspectiva.':modo==='persp'?'Coloca las 4 esquinas sobre las del libro (↖↗↘↙) — o «Auto bordes» — y desestira un libro INCLINADO a rectángulo.':'';render();
+      if(modo==='crop'||modo==='persp')autoBordes(true);};   // auto-detección inmediata al abrir el modo (como Medir)
+    $('#edCrop').onclick=()=>setModo('crop');$('#edPersp').onclick=()=>setModo('persp');
+    if($('#edAuto'))$('#edAuto').onclick=()=>autoBordes(false);
     const rotar=horario=>{const nc=document.createElement('canvas');nc.width=work.height;nc.height=work.width;const x=nc.getContext('2d');x.translate(nc.width/2,nc.height/2);x.rotate((horario?90:-90)*Math.PI/180);x.drawImage(work,-work.width/2,-work.height/2);work=nc;modo='none';$('#edApply').style.display='none';reset();};
     $('#edRotL').onclick=()=>rotar(false);$('#edRotR').onclick=()=>rotar(true);
     // arrastre de esquinas
@@ -1998,8 +2001,6 @@ function wireInbox(){
   if(ci)ci.onchange=async()=>{for(const f of ci.files){try{camFotos.push(await reducirImagen(f));}catch{camFotos.push(f);}}ci.value='';renderCamThumbs();};
   if($('#camDone'))$('#camDone').onclick=camCatalogar;
   if($('#camClear'))$('#camClear').onclick=()=>{camFotos=[];renderCamThumbs();};
-  if($('#camOrden'))$('#camOrden').onclick=()=>{localStorage.setItem('cam_orden',localStorage.getItem('cam_orden')==='izq'?'der':'izq');aplicarCamOrden();};
-  aplicarCamOrden();
   if($('#nfcRead'))$('#nfcRead').onclick=leerNFC;
   // «Cámara del móvil» (en «Subir desde otra app»): input capture (fiable) → foto directa al Inbox.
   const oci=$('#openCamInput');
@@ -2216,15 +2217,6 @@ function renderCamThumbs(){
   $$('#camThumbs [data-rm]').forEach(b=>b.onclick=()=>{camFotos.splice(+b.dataset.rm,1);renderCamThumbs();});
   const d=$('#camDone');if(d){d.textContent=`✅ Catalogar (${camFotos.length})`;d.disabled=!camFotos.length;}
   const cl=$('#camClear');if(cl)cl.style.display=camFotos.length?'':'none';
-}
-// Orden de los botones de Cámara según la mano (persistido). der: Hacer foto · Catalogar · Descartar.
-// izq: Descartar · Hacer foto · Catalogar (el primario queda bajo el pulgar de la mano izquierda).
-function aplicarCamOrden(){
-  const izq=localStorage.getItem('cam_orden')==='izq';
-  const shot=$('#camShot'),done=$('#camDone'),clr=$('#camClear'),ord=$('#camOrden');
-  if(!shot||!done||!clr)return;
-  if(izq){clr.style.order='1';shot.style.order='2';done.style.order='3';if(ord)ord.style.order='4';}
-  else{shot.style.order='';done.style.order='';clr.style.order='';if(ord)ord.style.order='';}
 }
 async function camCatalogar(){
   if(!camFotos.length){toast('Haz al menos una foto','warn');return;}
