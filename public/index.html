@@ -196,10 +196,11 @@
         <!-- 1) CÁMARA — forma PREFERIDA para libros físicos (autorecorte + automedida con el tapete). DESPLEGADA -->
         <details class="card foldcard admin-only" id="camCard" open>
           <summary><h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— la forma preferida para libros físicos</span></h3></summary>
-          <div class="row" style="align-items:center">
+          <div class="row" style="align-items:center" id="camActs">
             <button class="btn" id="camShot" type="button">📷 Hacer foto</button>
             <button class="btn pri" id="camDone" type="button" disabled>✅ Catalogar (0)</button>
             <button class="btn" id="camClear" type="button" style="display:none">✕ Descartar</button>
+            <button class="btn" id="camOrden" type="button" title="Cambiar el orden de los botones (mano izquierda / derecha)">↔</button>
             <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none">
           </div>
           <div id="camThumbs" class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"></div>

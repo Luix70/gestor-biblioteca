@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='isbn-ir-a-camara · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='isbn-foto-autoritativa+orden-botones · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1945,6 +1945,8 @@ function wireInbox(){
   if(ci)ci.onchange=async()=>{for(const f of ci.files){try{camFotos.push(await reducirImagen(f));}catch{camFotos.push(f);}}ci.value='';renderCamThumbs();};
   if($('#camDone'))$('#camDone').onclick=camCatalogar;
   if($('#camClear'))$('#camClear').onclick=()=>{camFotos=[];renderCamThumbs();};
+  if($('#camOrden'))$('#camOrden').onclick=()=>{localStorage.setItem('cam_orden',localStorage.getItem('cam_orden')==='izq'?'der':'izq');aplicarCamOrden();};
+  aplicarCamOrden();
   if($('#nfcRead'))$('#nfcRead').onclick=leerNFC;
   // «Cámara del móvil» (en «Subir desde otra app»): input capture (fiable) → foto directa al Inbox.
   const oci=$('#openCamInput');
@@ -1963,7 +1965,7 @@ async function isbnBuscar(){
   if(msg)msg.textContent='Buscando…'; if(res)res.innerHTML='';
   let r; try{ r=await api('/isbn/'+encodeURIComponent(raw)); }catch(e){ if(msg)msg.textContent=e.message; return; }
   const meta=r.meta||{};
-  _isbnEstado={ isbn:r.isbn, meta:{...meta}, portadas:(r.portadas||[]).map((p,i)=>({...p,sel:i===0})), extra:[], cduDesc:r.cdu_desc||null, portadaId:(r.portadas&&r.portadas.length)?'c0':null };
+  _isbnEstado={ isbn:r.isbn, meta:{...meta}, portadas:(r.portadas||[]).map((p,i)=>({...p,sel:i===0})), extra:[], cduDesc:r.cdu_desc||null, portadaId:(r.portadas&&r.portadas.length)?'c0':null, dims:null };
   if(msg)msg.textContent=r.encontrado?`✔ Encontrado en el Fichero${(meta.fuentes||[]).length?` (${meta.fuentes.join(', ')})`:''}.`:'⚠ No está en el Fichero local: revisa/completa los datos a mano.';
   isbnRender();
 }
@@ -2006,11 +2008,12 @@ function isbnRender(){
     <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Portadas — ✓ marca las que archivar; pulsa una para elegir la ⭐ PORTADA (✔ = ≥800 px)</div>${galeria}</div>
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
       <button class="btn pri" type="button" id="isbnBuscarWeb" title="Busca más portadas por título+autor en OpenLibrary y Apple Books (sin clave) y las trae aquí para elegir">🔎 Buscar más portadas</button>
-      <button class="btn" type="button" id="isbnIrCam" title="Fotografía el libro con la Cámara (tapete: recorte + medida) — te lleva allí con el ISBN ya puesto">📷 Ir a Cámara…</button>
+      <button class="btn" type="button" id="isbnCam" title="Fotografía el libro AHORA (sobre el tapete: recorta y mide automáticamente). El alta sigue usando los datos del ISBN.">📷 Cámara</button>
       <button class="btn" type="button" id="isbnAddFile">⬆️ Subir imagen</button>
       <button class="btn" type="button" id="isbnAddUrl">➕ Añadir por URL</button>
       <span class="muted" id="isbnWebMsg" style="font-size:12px"></span>
       <input type="file" id="isbnFile" accept="image/*" multiple style="display:none">
+      <input type="file" id="isbnCamFile" accept="image/*" capture="environment" style="display:none">
     </div>
     <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn pri" type="button" id="isbnCrear">✅ Crear</button>
@@ -2022,7 +2025,7 @@ function isbnRender(){
   res.querySelectorAll('[data-edit]').forEach(el=>el.onclick=e=>{e.stopPropagation();isbnConformar(el.dataset.edit);});
   res.querySelectorAll('[data-mk]').forEach(el=>el.oninput=()=>{const k=el.dataset.mk;_isbnEstado.meta[k]=(k==='autores')?el.value.split(';').map(s=>s.trim()).filter(Boolean):el.value;});
   $('#isbnAddUrl').onclick=isbnAddUrl; $('#isbnAddFile').onclick=()=>$('#isbnFile').click(); $('#isbnFile').onchange=()=>_isbnAnadirArchivos($('#isbnFile'));
-  if($('#isbnIrCam'))$('#isbnIrCam').onclick=isbnIrACamara;
+  if($('#isbnCam'))$('#isbnCam').onclick=()=>$('#isbnCamFile').click(); if($('#isbnCamFile'))$('#isbnCamFile').onchange=()=>_isbnAnadirArchivos($('#isbnCamFile'));
   if($('#isbnBuscarWeb'))$('#isbnBuscarWeb').onclick=isbnBuscarPortadasWeb;
   $('#isbnCrear').onclick=()=>isbnCrear(false); $('#isbnCompletar').onclick=()=>isbnCrear(true);
   $('#isbnCancel').onclick=()=>{_isbnEstado=null;$('#isbnRes').innerHTML='';$('#isbnMsg').textContent='';};
@@ -2050,14 +2053,6 @@ function isbnConformar(id){
   });
 }
 function isbnAddUrl(){const u=prompt('URL de la imagen (https://…):');if(!u)return;_isbnEstado.extra.push({url:u.trim(),tipo:'imagen',sel:true});isbnRender();}
-// «Ir a Cámara»: si ninguna portada convence, fotografía el libro con la sección Cámara (que ya recorta con el
-// tapete y mide). Autorrellena el ISBN en «Datos de esta alta» y lleva allí; no duplicamos recorte/medida aquí.
-function isbnIrACamara(){
-  const isbn=_isbnEstado&&_isbnEstado.isbn;
-  if(isbn&&$('#inIsbn')){$('#inIsbn').value=isbn;const da=$('#datosAltaCard');if(da)da.open=true;}
-  const cam=$('#camCard'); if(cam){cam.open=true; cam.scrollIntoView({behavior:'smooth',block:'start'});}
-  toast('ISBN copiado a «Datos de esta alta». Haz las fotos en Cámara (activa 📐 Tapete para recortar y medir).');
-}
 // Busca más portadas por título+autor (OpenLibrary Search + Apple Books, sin clave) y las añade como candidatas.
 async function isbnBuscarPortadasWeb(){
   if(!_isbnEstado)return; const msg=$('#isbnWebMsg'); if(msg)msg.textContent='Buscando portadas…';
@@ -2070,8 +2065,13 @@ async function isbnBuscarPortadasWeb(){
   const m2=$('#isbnWebMsg'); if(m2)m2.textContent=nuevas.length?`${nuevas.length} portada(s) encontradas (OpenLibrary/Apple). Marca la buena y ✎ para conformar.`:'Sin resultados nuevos.';
 }
 // Añade imágenes desde un <input type=file> (galería o cámara con capture) como candidatas incluidas.
+// Si la foto está sobre el TAPETE, se recorta+endereza y MIDE (reutiliza recortarYMedirTapete de la Cámara);
+// las dimensiones viajan al alta por ISBN (que es autoritativa y SIN visión). Sin tapete, la imagen pasa igual.
 async function _isbnAnadirArchivos(inp){
-  if(!inp)return; const files=[...inp.files]; inp.value='';
+  if(!inp)return; let files=[...inp.files]; inp.value=''; if(!files.length)return;
+  try{ const r=await recortarYMedirTapete(files); files=r.files;
+    if(r.dims){_isbnEstado.dims=r.dims; toast(`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm${r.recortadas?' · recortado':''}`);}
+    else if(r.recortadas)toast('✂️ Recortado (sin medida fiable)'); }catch(e){ /* sin tapete → imagen tal cual */ }
   for(const f of files){try{const red=await reducirImagen(f);const durl=await fileADataURL(red);_isbnEstado.extra.push({base64:durl,previa:durl,tipo:'imagen',sel:true,nombre:f.name||'foto'});}catch(e){toast('Imagen no añadida: '+e.message,'bad');}}
   isbnRender();
 }
@@ -2086,7 +2086,7 @@ async function isbnCrear(completar){
   const imagenes=items.filter(s=>s.url).map(s=>({url:s.url,tipo:s.tipo}));
   const subidas=items.filter(s=>s.base64).map(s=>({base64:s.base64,tipo:s.tipo}));
   const ubic={ambito:($('#inAmbito')&&$('#inAmbito').value)||undefined,estanteria:($('#inEstanteria')&&$('#inEstanteria').value)||undefined};
-  const body={isbn:_isbnEstado.isbn,meta:{..._isbnEstado.meta},imagenes,subidas,ubicacion:ubic,
+  const body={isbn:_isbnEstado.isbn,meta:{..._isbnEstado.meta},imagenes,subidas,ubicacion:ubic,dimensiones:_isbnEstado.dims||undefined,
     coleccion:($('#inColeccion')&&$('#inColeccion').value)||undefined,obra:($('#inObra')&&$('#inObra').value)||undefined,completar};
   const msg=$('#isbnMsg');if(msg)msg.textContent=completar?'Completando y creando…':'Creando…';
   let r;try{r=await api('/isbn/alta',{method:'POST',body:JSON.stringify(body)});}catch(e){if(msg)msg.textContent='Error: '+e.message;return;}
@@ -2163,6 +2163,15 @@ function renderCamThumbs(){
   $$('#camThumbs [data-rm]').forEach(b=>b.onclick=()=>{camFotos.splice(+b.dataset.rm,1);renderCamThumbs();});
   const d=$('#camDone');if(d){d.textContent=`✅ Catalogar (${camFotos.length})`;d.disabled=!camFotos.length;}
   const cl=$('#camClear');if(cl)cl.style.display=camFotos.length?'':'none';
+}
+// Orden de los botones de Cámara según la mano (persistido). der: Hacer foto · Catalogar · Descartar.
+// izq: Descartar · Hacer foto · Catalogar (el primario queda bajo el pulgar de la mano izquierda).
+function aplicarCamOrden(){
+  const izq=localStorage.getItem('cam_orden')==='izq';
+  const shot=$('#camShot'),done=$('#camDone'),clr=$('#camClear'),ord=$('#camOrden');
+  if(!shot||!done||!clr)return;
+  if(izq){clr.style.order='1';shot.style.order='2';done.style.order='3';if(ord)ord.style.order='4';}
+  else{shot.style.order='';done.style.order='';clr.style.order='';if(ord)ord.style.order='';}
 }
 async function camCatalogar(){
   if(!camFotos.length){toast('Haz al menos una foto','warn');return;}

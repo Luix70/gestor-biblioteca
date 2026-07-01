@@ -418,6 +418,11 @@ export async function altaPorISBN({ base = {}, activos = [], contexto = {}, comp
     };
     if (contexto.coleccion) documento.coleccion_nombre = contexto.coleccion;
     if (contexto.obra) documento.obra_titulo = contexto.obra;
+    // Dimensiones medidas con el tapete en el cliente (ancho_cm/alto_cm) → viajan tal cual, sin re-medir.
+    if (contexto.dimensiones && contexto.dimensiones.ancho_cm && contexto.dimensiones.alto_cm) {
+        documento.ancho_cm = contexto.dimensiones.ancho_cm;
+        documento.alto_cm = contexto.dimensiones.alto_cm;
+    }
     documento.origen_ingesta = 'isbn';
 
     // Persistencia (dedup + refs autores/editorial + upsert).

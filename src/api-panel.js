@@ -1116,7 +1116,8 @@ export function rutasPanel() {
             for (const s of (b.subidas || [])) { if (s && s.base64) activos.push({ tipo: s.tipo || 'imagen', base64: String(s.base64).replace(/^data:[^,]+,/, ''), origen: 'isbn-subida' }); }
             if (activos.length && !activos.some(a => a.tipo === 'portada')) activos[0].tipo = 'portada';
             const ubic = b.ubicacion || {};
-            const r2 = await altaPorISBN({ base, activos, contexto: { ambito: ubic.ambito, estanteria: ubic.estanteria, coleccion: b.coleccion, obra: b.obra }, completar: !!b.completar });
+            const dim = b.dimensiones || null;
+            const r2 = await altaPorISBN({ base, activos, contexto: { ambito: ubic.ambito, estanteria: ubic.estanteria, coleccion: b.coleccion, obra: b.obra, dimensiones: dim }, completar: !!b.completar });
             res.json({ ok: true, ...r2 });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
