@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ubic-fase1b (colapsado-def+contadores+quitar+sel-NFC+botones-grandes) · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ordenar-libros-en-estantería (posición física + inventario) + fichas plegables más grandes · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1653,6 +1653,8 @@ function _paramsBusqueda(){
   // 🔞 NSFW: sin marcar = excluir; marcada + otros criterios = incluir (también); marcada y sola = solo NSFW.
   if($('#sqNsfw'))params.set('nsfw', !$('#sqNsfw').checked ? 'excluir' : (hayOtrosCriteriosBusqueda()?'incluir':'solo'));
   if(estadoBusqueda.extra)for(const[k,v]of Object.entries(estadoBusqueda.extra)){if(k!=='etiqueta'&&v!=null&&v!=='')params.set(k,v);}
+  // Ver UNA estantería: por defecto ordena por POSICIÓN física (a menos que el usuario elija otro orden).
+  if(estadoBusqueda.extra&&estadoBusqueda.extra.ambito&&estadoBusqueda.extra.estanteria&&$('#sqOrden').value==='reciente')params.set('orden','posicion');
   return params;
 }
 async function buscarCatalogo(page){
@@ -1719,9 +1721,12 @@ function pintarChipClas(){const el=$('#searchChip');if(!el)return;
   if(ex&&ex.etiqueta){
     // Si el filtro es una ESTANTERÍA/ámbito, ofrecer «Añadir libros aquí» → Inbox con la ubicación puesta.
     const addAqui=(ROL==='admin'&&ex.ambito)?` <button class="btn" id="chipAdd" style="padding:2px 9px;font-size:12px" title="Ir al Inbox con esta ubicación ya rellena para añadir libros">➕ Añadir libros aquí</button>`:'';
-    el.innerHTML=`<span class="clasfilt">Filtro: <b>${esc(ex.etiqueta)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>${addAqui}`;
+    // Al ver UNA estantería: ordenar sus libros por posición física (localizar / inventario).
+    const ordenar=(ROL==='admin'&&ex.ambito&&ex.estanteria)?` <button class="btn" id="chipOrd" style="padding:2px 9px;font-size:12px" title="Colocar los libros en su orden físico dentro de la estantería">📋 Ordenar estantería</button>`:'';
+    el.innerHTML=`<span class="clasfilt">Filtro: <b>${esc(ex.etiqueta)}</b> <span class="x" id="clasX" title="Quitar filtro">✕</span></span>${ordenar}${addAqui}`;
     $('#clasX').onclick=()=>{estadoBusqueda.extra=null;buscarCatalogo(1);};
     if($('#chipAdd'))$('#chipAdd').onclick=()=>irAInboxConUbic(ex.ambito, ex.estanteria);
+    if($('#chipOrd'))$('#chipOrd').onclick=()=>ordenarLibrosEstanteria(ex.ambito, ex.estanteria);
   }
   else el.innerHTML='';}
 // Va al Inbox con el ámbito/estantería ya puestos en «Datos de esta alta» (para el bucle escanear estantería
@@ -1736,6 +1741,59 @@ function irAInboxConUbic(ambito, estanteria){
     toast(`Ubicación puesta: ${ambito||'—'}${(estanteria&&estanteria!=='Sin asignar')?' · '+estanteria:''}. Añade los libros.`);
   },60);
 }
+// ── Ordenar los LIBROS de una estantería por su posición física (localizar un libro / inventario) ──
+// Modal con la estantería como LISTA vertical arrastrable (+ ↑/↓ para móvil). Guarda el índice de cada libro.
+let _ordEst=null;   // { ambito, estanteria, items:[{_id,titulo,portada,autores,…}] }
+async function ordenarLibrosEstanteria(ambito,estanteria){
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">📋 Ordenar «${esc(estanteria)}»</h3>
+    <p class="muted" style="margin:-4px 0 10px;font-size:12px">Coloca los libros en su ORDEN FÍSICO (de izquierda a derecha). Arrastra las filas o usa ↑/↓. El nº es la posición en la balda.</p>
+    <div id="ordList" class="muted">Cargando…</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn" id="ordX">Cancelar</button><button class="btn pri" id="ordSave">Guardar orden</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';$('#cmpScrim').onclick=cerrarCmp;$('#ordX').onclick=cerrarCmp;
+  let items=[];
+  try{const r=await api('/ubicaciones/libros?'+new URLSearchParams({ambito,estanteria}).toString());items=r.docs||[];}
+  catch(e){$('#ordList').innerHTML=`<div class="empty">${esc(e.message)}</div>`;return;}
+  _ordEst={ambito,estanteria,items};
+  pintarOrdList();
+  $('#ordSave').onclick=async()=>{
+    try{const r=await api('/ubicaciones/orden-libros',{method:'POST',body:JSON.stringify({ambito,estanteria,ids:_ordEst.items.map(x=>x._id)})});
+      if(!r.ok){toast(r.motivo||'No se pudo guardar','bad');return;}
+      toast(`Orden guardado (${r.n} libro(s))`);cerrarCmp();
+      if($('#p-search')&&$('#p-search').classList.contains('on'))buscarCatalogo(estadoBusqueda.page||1);
+    }catch(e){toast(e.message,'bad');}
+  };
+}
+function pintarOrdList(){
+  const box=$('#ordList');if(!box||!_ordEst)return;box.classList.remove('muted');
+  box.innerHTML=_ordEst.items.length?_ordEst.items.map(ordRow).join(''):'<div class="muted">La estantería no tiene libros.</div>';
+  wireOrdList();
+}
+function ordRow(d,i){
+  const por=d.portada?`<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.style.visibility='hidden'">`:'<div class="ordph">📕</div>';
+  const aut=(d.autores&&d.autores.length)?d.autores.filter(Boolean).join(', '):'';
+  return `<div class="ordrow" draggable="true" data-id="${esc(d._id)}"><span class="ordnum">${i+1}</span><div class="ordcov">${por}</div>`+
+    `<div style="flex:1;min-width:0"><div style="font-size:13px;line-height:1.25">${esc(recortar(d.titulo||'(sin título)',72))}</div>${aut?`<div class="muted" style="font-size:11px">${esc(recortar(aut,62))}</div>`:''}</div>`+
+    `<span class="ordmove"><button type="button" class="btn" data-up="${i}" title="Subir">↑</button><button type="button" class="btn" data-dn="${i}" title="Bajar">↓</button></span></div>`;
+}
+function moverOrd(from,to){
+  const it=_ordEst&&_ordEst.items;if(!it||to<0||to>=it.length||from<0||from>=it.length)return;
+  const [x]=it.splice(from,1);it.splice(to,0,x);pintarOrdList();
+}
+function wireOrdList(){
+  $$('#ordList [data-up]').forEach(b=>b.onclick=()=>moverOrd(+b.dataset.up,+b.dataset.up-1));
+  $$('#ordList [data-dn]').forEach(b=>b.onclick=()=>moverOrd(+b.dataset.dn,+b.dataset.dn+1));
+  let src=null;
+  $$('#ordList .ordrow').forEach(row=>{
+    row.addEventListener('dragstart',ev=>{src=row.dataset.id;row.classList.add('dragging');try{ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',src);}catch(_){}});
+    row.addEventListener('dragend',()=>{row.classList.remove('dragging');$$('#ordList .ordrow.dragover').forEach(x=>x.classList.remove('dragover'));src=null;});
+    row.addEventListener('dragover',ev=>{if(src&&src!==row.dataset.id){ev.preventDefault();row.classList.add('dragover');}});
+    row.addEventListener('dragleave',()=>row.classList.remove('dragover'));
+    row.addEventListener('drop',ev=>{ev.preventDefault();row.classList.remove('dragover');
+      if(!src||src===row.dataset.id)return;
+      const from=_ordEst.items.findIndex(x=>x._id===src),to=_ordEst.items.findIndex(x=>x._id===row.dataset.id);
+      moverOrd(from,to);});
+  });
+}
 // Distintivos de admin: 🔞 NSFW (oculto a invitados) y 🔒 bloqueado (el Conformador no lo altera).
 const badgesDoc=d=>`${d.nsfw?' <span class="fmt" style="background:rgba(255,92,122,.18);color:var(--bad)" title="NSFW: oculto a invitados">🔞</span>':''}${d.locked?' <span class="fmt" style="background:rgba(255,180,84,.18);color:var(--warn)" title="Bloqueado: el Conformador no lo altera">🔒</span>':''}${(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid))?' <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)" title="Tiene etiqueta NFC vinculada">📶</span>':''}`;
 function docCard(d){
@@ -1745,7 +1803,13 @@ function docCard(d){
   const sub=(d.autores&&d.autores.length?d.autores.slice(0,2).join(', '):'')||(d.año_edicion?String(d.año_edicion):'')||d.isbn||'—';
   const chk=`<input type="checkbox" class="selchk admin-only" data-id="${esc(d._id)}" title="Seleccionar"${selDocs.has(d._id)?' checked':''}>`;
   const nfcTag=nfcBadge(d);
-  return `<div class="vol${selDocs.has(d._id)?' sel':''}" data-doc="${esc(d._id)}">${chk}<div class="cov">${cov}${nfcTag}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div></div></div>`;
+  return `<div class="vol${selDocs.has(d._id)?' sel':''}" data-doc="${esc(d._id)}">${chk}<div class="cov">${cov}${nfcTag}${posBadge(d)}</div><div class="meta"><div class="n">${esc(recortar(d.titulo||'(sin título)',64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos',d._id,d.valoracion,d.nsfw)}</div></div></div>`;
+}
+// Nº de POSICIÓN física en la estantería — solo al ver UNA estantería (ayuda a localizar el libro / inventario).
+function posBadge(d){
+  const ex=estadoBusqueda.extra;
+  if(!(ex&&ex.ambito&&ex.estanteria)||!Number.isFinite(d.orden_estanteria))return '';
+  return `<span class="posbadge" title="Posición física en la estantería">#${d.orden_estanteria+1}</span>`;
 }
 function pintarBusqueda(r){
   paginaIds=r.docs.map(d=>d._id); // ids de la página actual (para «seleccionar todos»)
@@ -2978,7 +3042,7 @@ function ubicAmbHTML(a){
 }
 function ubicEstHTML(amb,e){
   const nfc=e.nfc?` <span title="NFC ${esc(e.nfc)}">📶</span>`:'';
-  const acts=`<span class="ubacts">${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
+  const acts=`<span class="ubacts">${ubBtn('est-orden',amb,e.estanteria,'📋','Ordenar los libros por su posición física')}${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
   return `<div class="ubrow ubest"><span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver sus libros en la Búsqueda (interactivo)">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
 }
 function wireUbic(){
@@ -3026,6 +3090,7 @@ async function ubicAccion(act,a,e){
     if(act==='est-ver'){estadoBusqueda.extra={ambito:a,estanteria:e,etiqueta:'📍 '+a+' · '+e};estadoBusqueda.page=1;return void go('search');}
     if(act==='amb-nfc')return grabarNFCUbic(a,null);
     if(act==='est-nfc')return grabarNFCUbic(a,e);
+    if(act==='est-orden')return ordenarLibrosEstanteria(a,e);
     if(act==='amb-add'){const nom=await ubicPedirTexto('Añadir estantería a «'+a+'»');if(!nom)return;return void ubicApi('/ubicaciones/crear',{ambito:a,estanterias:[nom]});}
     if(act==='amb-ren'){const nv=await ubicPedirTexto('Renombrar ámbito',a);if(!nv||nv===a)return;return void ubicApi('/ubicaciones/renombrar',{ambito:a,nuevoAmbito:nv});}
     if(act==='est-ren'){const nv=await ubicPedirTexto('Renombrar estantería',e);if(!nv||nv===e)return;return void ubicApi('/ubicaciones/renombrar',{ambito:a,estanteria:e,nuevaEstanteria:nv});}

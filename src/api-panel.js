@@ -18,7 +18,7 @@ import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexad
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
-import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
+import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
@@ -512,10 +512,17 @@ export function rutasPanel() {
             const consulta = extras.length ? { $and: [...(Object.keys(match).length ? [match] : []), ...extras] } : match;
 
             const sort = orden === 'titulo' ? { titulo: 1 } : orden === 'antiguo' ? { fecha_ingreso: 1 } : { fecha_ingreso: -1 };
-            const opciones = orden === 'titulo' ? { collation: { locale: 'es', strength: 1 } } : {};
-            // Orden por RELEVANCIA cuando hay índice FTS: respeta el ranking bm25 (orden de idsRanked); los
-            // aciertos por identificador que no estén en el ranking caen al final (_rank grande).
-            const etapasOrden = (ordenRelevancia && idsRanked && idsRanked.length)
+            const opciones = (orden === 'titulo' || orden === 'posicion') ? { collation: { locale: 'es', strength: 1 } } : {};
+            // 'posicion' = orden FÍSICO en la estantería (campo orden_estanteria); los libros aún sin colocar van al
+            // final por título. Es el orden natural al ver UNA estantería (localizar un libro / inventario).
+            // Si no, RELEVANCIA cuando hay índice FTS (ranking bm25 de idsRanked; los aciertos por identificador
+            // fuera del ranking caen al final con _rank grande); en su defecto, el orden elegido (sort).
+            const etapasOrden = orden === 'posicion'
+                ? [
+                    { $addFields: { _pos: { $ifNull: ['$orden_estanteria', 1e9] } } },
+                    { $sort: { _pos: 1, titulo: 1 } },
+                  ]
+                : (ordenRelevancia && idsRanked && idsRanked.length)
                 ? [
                     { $addFields: { _rank: { $indexOfArray: [idsRanked, { $toString: '$_id' }] } } },
                     { $addFields: { _rank: { $cond: [{ $lt: ['$_rank', 0] }, 1e9, '$_rank'] } } },
@@ -535,7 +542,7 @@ export function rutasPanel() {
                 { $project: {
                     titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
                     tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
-                    valoracion: 1, naturaleza: 1, nfc: 1, autores: '$_au.nombre',
+                    valoracion: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
                 } },
             ], opciones).toArray();
 
@@ -688,6 +695,11 @@ export function rutasPanel() {
         try { res.json({ ok: true, ambitos: await listarUbicacionesGestion(await conectarDB()) }); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+    // Libros de una estantería en su orden físico (para el modal «Ordenar estantería»).
+    r.get('/ubicaciones/libros', async (req, res) => {
+        try { res.json(await librosDeEstanteria(await conectarDB(), { ambito: req.query.ambito, estanteria: req.query.estanteria })); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
     const ubicPost = (ruta, fn) => r.post('/ubicaciones/' + ruta, async (req, res) => {
         try { res.json(await fn(await conectarDB(), req.body || {})); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
@@ -700,6 +712,7 @@ export function rutasPanel() {
     ubicPost('eliminar', eliminarUbicacion);
     ubicPost('asignar', asignarUbicacion);
     ubicPost('quitar', quitarUbicacion);
+    ubicPost('orden-libros', ordenarLibros);
     ubicPost('nfc', registrarNfcUbicacion);
 
     // Detalle de UNA colección: cabecera/serie resuelta (editorial/CDU+descripción) + sus miembros

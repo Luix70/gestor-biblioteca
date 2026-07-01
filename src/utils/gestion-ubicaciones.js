@@ -98,7 +98,7 @@ export async function moverEstanteria(db, { ambito, estanteria, nuevoAmbito } = 
     if (!a || !e || !na) return { ok: false, motivo: 'faltan datos' };
     if (na === a) return { ok: true, modificados: 0 };
     const bib = db.collection('biblioteca'), reg = db.collection('ubicaciones');
-    const r = await bib.updateMany({ 'ubicacion.ambito': a, 'ubicacion.estanteria': e }, { $set: { 'ubicacion.ambito': na, fecha_actualizacion: new Date() } });
+    const r = await bib.updateMany({ 'ubicacion.ambito': a, 'ubicacion.estanteria': e }, { $set: { 'ubicacion.ambito': na, fecha_actualizacion: new Date() }, $unset: { orden_estanteria: '' } });
     const old = await reg.findOne({ ambito: a, estanteria: e });
     await reg.updateOne({ ambito: na, estanteria: e },
         { $setOnInsert: { ambito: na, estanteria: e, fecha_creacion: new Date() }, $set: { nfc_uid: old?.nfc_uid || null } }, { upsert: true });
@@ -113,7 +113,7 @@ export async function fusionarEstanteria(db, { ambito, estanteria, destinoAmbito
     if (a === da && e === de) return { ok: false, motivo: 'origen y destino iguales' };
     const bib = db.collection('biblioteca'), reg = db.collection('ubicaciones');
     const r = await bib.updateMany({ 'ubicacion.ambito': a, 'ubicacion.estanteria': e },
-        { $set: { 'ubicacion.ambito': da, 'ubicacion.estanteria': de, fecha_actualizacion: new Date() } });
+        { $set: { 'ubicacion.ambito': da, 'ubicacion.estanteria': de, fecha_actualizacion: new Date() }, $unset: { orden_estanteria: '' } });
     await reg.deleteOne({ ambito: a, estanteria: e });
     await reg.updateOne({ ambito: da, estanteria: de }, { $setOnInsert: { ambito: da, estanteria: de, fecha_creacion: new Date() } }, { upsert: true });
     return { ok: true, movidos: r.modifiedCount };
@@ -125,7 +125,7 @@ export async function explotarUbicacion(db, { ambito, estanteria } = {}) {
     const e = claveEst(estanteria);
     const bib = db.collection('biblioteca'), reg = db.collection('ubicaciones');
     const filtro = e != null ? { 'ubicacion.ambito': a, 'ubicacion.estanteria': e } : { 'ubicacion.ambito': a };
-    const r = await bib.updateMany(filtro, { $set: { 'ubicacion.ambito': SIN, 'ubicacion.estanteria': SIN, fecha_actualizacion: new Date() } });
+    const r = await bib.updateMany(filtro, { $set: { 'ubicacion.ambito': SIN, 'ubicacion.estanteria': SIN, fecha_actualizacion: new Date() }, $unset: { orden_estanteria: '' } });
     if (e != null) await reg.deleteOne({ ambito: a, estanteria: e });
     else await reg.deleteMany({ ambito: a });
     return { ok: true, liberados: r.modifiedCount };
@@ -151,8 +151,9 @@ export async function asignarUbicacion(db, { ids = [], ambito, estanteria } = {}
     const oids = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
     if (!oids.length) return { ok: false, motivo: 'sin documentos' };
     const bib = db.collection('biblioteca'), reg = db.collection('ubicaciones');
+    // Al cambiar de estantería, la posición física antigua deja de valer → se limpia (entrará al final de la nueva).
     const r = await bib.updateMany({ _id: { $in: oids } },
-        { $set: { ubicacion: { ambito: a, estanteria: e || SIN }, fecha_actualizacion: new Date() } });
+        { $set: { ubicacion: { ambito: a, estanteria: e || SIN }, fecha_actualizacion: new Date() }, $unset: { orden_estanteria: '' } });
     await reg.updateOne({ ambito: a, estanteria: e }, { $setOnInsert: { ambito: a, estanteria: e, fecha_creacion: new Date() } }, { upsert: true });
     return { ok: true, n: r.modifiedCount, ambito: a, estanteria: e || SIN };
 }
@@ -162,8 +163,42 @@ export async function quitarUbicacion(db, { ids = [] } = {}) {
     const oids = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
     if (!oids.length) return { ok: false, motivo: 'sin documentos' };
     const r = await db.collection('biblioteca').updateMany({ _id: { $in: oids } },
-        { $set: { ubicacion: { ambito: SIN, estanteria: SIN }, fecha_actualizacion: new Date() } });
+        { $set: { ubicacion: { ambito: SIN, estanteria: SIN }, fecha_actualizacion: new Date() }, $unset: { orden_estanteria: '' } });
     return { ok: true, n: r.modifiedCount };
+}
+
+// Ordenar los LIBROS dentro de una estantería según su posición FÍSICA (para localizarlos y hacer inventario).
+// `ids` es la lista de documentos en el orden deseado; a cada uno se le graba su índice en `orden_estanteria`.
+// Se restringe a los libros que realmente están en esa (ámbito, estantería) para no tocar nada de otra balda.
+export async function ordenarLibros(db, { ambito, estanteria, ids = [] } = {}) {
+    const a = norm(ambito), e = claveEst(estanteria);
+    if (!a || !e) return { ok: false, motivo: 'faltan ámbito/estantería' };
+    const oids = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
+    if (!oids.length) return { ok: false, motivo: 'sin documentos' };
+    const bib = db.collection('biblioteca');
+    let n = 0;
+    for (let i = 0; i < oids.length; i++) {
+        const r = await bib.updateOne({ _id: oids[i], 'ubicacion.ambito': a, 'ubicacion.estanteria': e },
+            { $set: { orden_estanteria: i, fecha_actualizacion: new Date() } });
+        n += r.modifiedCount;
+    }
+    return { ok: true, n };
+}
+
+// Libros de una estantería en su orden físico (por `orden_estanteria`; los sin colocar, al final por título).
+// Alimenta el modal «Ordenar estantería». Campos mínimos para pintar una lista arrastrable ligera.
+export async function librosDeEstanteria(db, { ambito, estanteria } = {}) {
+    const a = norm(ambito), e = claveEst(estanteria);
+    if (!a || !e) return { ok: false, motivo: 'faltan ámbito/estantería' };
+    const docs = await db.collection('biblioteca').aggregate([
+        { $match: { 'ubicacion.ambito': a, 'ubicacion.estanteria': e } },
+        { $addFields: { _pos: { $ifNull: ['$orden_estanteria', 1e9] } } },
+        { $sort: { _pos: 1, titulo: 1 } },
+        { $limit: 3000 },
+        { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
+        { $project: { titulo: 1, portada: 1, 'año_edicion': 1, orden_estanteria: 1, autores: '$_au.nombre' } },
+    ], { collation: { locale: 'es', strength: 1 } }).toArray();
+    return { ok: true, ambito: a, estanteria: e, docs: docs.map(d => ({ ...d, _id: String(d._id) })) };
 }
 
 // Registrar el UID de la etiqueta NFC de una estantería/ámbito (la escritura del tag es en el cliente).
