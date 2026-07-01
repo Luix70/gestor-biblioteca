@@ -527,24 +527,55 @@ body.guest .admin-only{display:none!important}
       <!-- INBOX (maqueta) -->
       <section class="page" id="p-inbox">
         <div class="sec-h"><h2>Inbox — alta de recursos</h2><span class="muted" id="inboxHint"></span></div>
-        <!-- 1) SUBIR FICHEROS — primera y siempre visible -->
+        <!-- 1) CÁMARA — forma PREFERIDA para libros físicos (autorecorte + automedida con el tapete). DESPLEGADA -->
+        <details class="card foldcard admin-only" id="camCard" open>
+          <summary><h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— la forma preferida para libros físicos</span></h3></summary>
+          <p class="muted" style="margin-top:0;font-size:12px">Haz una foto de la portada y otra de la CONTRAportada (código de barras); se catalogan como UN libro. Cada foto se reduce antes de subir. (En PC abre el selector de archivos.)</p>
+          <div class="row" style="align-items:center">
+            <button class="btn" id="camShot" type="button">📷 Hacer foto</button>
+            <button class="btn pri" id="camDone" type="button" disabled>✅ Catalogar (0)</button>
+            <button class="btn" id="camClear" type="button" style="display:none">✕ Descartar</button>
+            <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none">
+          </div>
+          <div id="camThumbs" class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"></div>
+          <!-- Tapete: autorecorte + automedida. Aplica a estas fotos Y a las imágenes que subas. -->
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+            <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+              <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inTapete"><span class="slider"></span></span>
+              <span class="muted">📐 Tapete — la foto es un libro sobre la alfombrilla reglada (1 cm): mide sus dimensiones (las guarda en la ficha) y recorta+endereza la imagen para que NO se vea el tapete. Todo en el navegador, sin IA. (También se aplica a las imágenes que subas.)</span>
+            </label>
+            <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button class="btn" type="button" id="inTapeteCal" title="Sube una foto del TAPETE VACÍO para fijar su color de esta sesión (sirve para cualquier color de tapete y se rehace si cambia la luz)">🎨 Calibrar tapete</button>
+              <button class="btn" type="button" id="inTapeteTest" title="Sube una foto del LIBRO sobre el tapete para VER qué considera tapete (máscara roja) y el % detectado">🔍 Probar</button>
+              <span class="muted" id="inTapeteCalEstado" style="font-size:12px"></span>
+              <input type="file" id="inTapeteCalFile" accept="image/*" style="display:none">
+              <input type="file" id="inTapeteTestFile" accept="image/*" style="display:none">
+            </div>
+          </div>
+        </details>
+        <!-- 2) SUBIR FICHEROS — DESPLEGADA -->
         <div class="card admin-only">
           <h3>📁 Subir ficheros</h3>
           <p class="muted" style="margin-top:0;font-size:12px">Arrastra o elige EPUB/PDF/imágenes/cómic/.zip/.rar/.7z. Varias imágenes del MISMO libro (portada + contra + páginas) → UN libro; varios documentos → cada uno por su lado. Se aplican los datos de esta alta (debajo).</p>
           <div id="dropZone" class="dropzone">⬆️ Arrastra ficheros aquí, o <button class="btn" id="pickBtn" type="button">elegir…</button>
             <input type="file" id="fileInput" multiple style="display:none">
           </div>
-          <div class="row" style="margin-top:10px;align-items:center;gap:8px">
+        </div>
+        <!-- 3) SUBIR DESDE OTRA APP — plegable, COLAPSADA -->
+        <details class="card foldcard admin-only">
+          <summary><h3>📲 Subir desde otra app <span class="muted" style="font-weight:400;font-size:12px">— Adobe Scan, cámara del sistema, Drive, Files…</span></h3></summary>
+          <div class="row" style="margin-top:4px;align-items:center;gap:8px">
             <button class="btn" id="pickApp" type="button" title="Abre el selector del sistema: Drive, Adobe Scan, Files…">📄 Importar de otra app</button>
-            <span class="muted" style="font-size:12px">PDF o imágenes guardadas por Adobe Scan / Drive / Files. (Para escanear AHORA: hazlo en Adobe Scan y usa «Compartir → Bibliotheca».)</span>
+            <span class="muted" style="font-size:12px">PDF o imágenes ya guardadas por Adobe Scan / Drive / Files.</span>
             <input type="file" id="fileInputApp" accept="application/pdf,image/*" multiple style="display:none">
           </div>
-          <div class="row" id="appAdobe" style="margin-top:8px;gap:8px;align-items:center;display:none">
+          <div class="row" id="appAdobe" style="margin-top:8px;gap:8px;align-items:center;display:none;flex-wrap:wrap">
             <button class="btn" id="openScan" type="button" title="Abrir Adobe Scan (o su página en Google Play, desde donde puedes pulsar «Abrir»)">📄 Abrir Adobe Scan</button>
-            <span class="muted" style="font-size:12px">Escanea ahí y vuelve con «Compartir → Bibliotheca».</span>
+            <button class="btn" id="openCam" type="button" title="Abrir la app de cámara del teléfono">📸 Abrir cámara del móvil</button>
+            <span class="muted" style="font-size:12px">Escanea/haz la foto ahí y vuelve con «Compartir → Bibliotheca».</span>
           </div>
-        </div>
-        <!-- 2) DATOS QUE VIAJAN — plegable, COLAPSADA -->
+        </details>
+        <!-- 4) DATOS DE ESTA ALTA — plegable, COLAPSADA -->
         <details class="card foldcard admin-only">
           <summary><h3>🏷️ Datos de esta alta <span class="muted" style="font-weight:400;font-size:12px">— opcional; viajan con lo que subas</span></h3></summary>
           <div class="row">
@@ -561,9 +592,9 @@ body.guest .admin-only{display:none!important}
           <datalist id="dlAmbitos"></datalist>
           <datalist id="dlEstanterias"></datalist>
         </details>
-        <!-- 3) MODOS Y ESCANEO — plegable, DESPLEGADA -->
-        <details class="card foldcard admin-only" open>
-          <summary><h3>⚙️ Modos y escaneo</h3></summary>
+        <!-- 5) OPCIONES DE INGRESO — plegable, COLAPSADA (antes «Modos y escaneo»; el Tapete se movió a Cámara) -->
+        <details class="card foldcard admin-only">
+          <summary><h3>⚙️ Opciones de ingreso</h3></summary>
           <label style="display:inline-flex;align-items:center;gap:8px;margin-top:4px;cursor:pointer">
             <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inSupervisar"><span class="slider"></span></span>
             <span class="muted">🚥 Supervisado — abrir la ficha tras cada alta para revisar/corregir (tipo, requery, datos). Si no, modo autopiloto (lista de resultados).</span>
@@ -573,34 +604,11 @@ body.guest .admin-only{display:none!important}
             <span class="muted">📤 Procesar lo compartido al instante. Si lo apagas, lo compartido (Adobe Scan…) queda EN ESPERA para que añadas ISBN/colección/ubicación y pulses Procesar.</span>
           </label>
           <label style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
-            <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inTapete"><span class="slider"></span></span>
-            <span class="muted">📐 Tapete — la foto es un libro sobre la alfombrilla reglada (1 cm): mide sus dimensiones (las guarda en la ficha) y recorta+endereza la imagen para que NO se vea el tapete. Todo en el navegador, sin IA.</span>
-          </label>
-          <div style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <button class="btn" type="button" id="inTapeteCal" title="Sube una foto del TAPETE VACÍO para fijar su color de esta sesión (sirve para cualquier color de tapete y se rehace si cambia la luz)">🎨 Calibrar tapete</button>
-            <button class="btn" type="button" id="inTapeteTest" title="Sube una foto del LIBRO sobre el tapete para VER qué considera tapete (máscara roja) y el % detectado">🔍 Probar</button>
-            <span class="muted" id="inTapeteCalEstado" style="font-size:12px"></span>
-            <input type="file" id="inTapeteCalFile" accept="image/*" style="display:none">
-            <input type="file" id="inTapeteTestFile" accept="image/*" style="display:none">
-          </div>
-          <label style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer">
             <span class="switch" style="flex:0 0 auto"><input type="checkbox" id="inPortada" checked><span class="slider"></span></span>
             <span class="muted">🖼️ Elegir portada — al subir VARIAS imágenes de un libro, muestra los thumbnails antes de enviar para confirmar/cambiar cuál es la portada (con un default automático: la del código de barras es la contra).</span>
           </label>
         </details>
-        <!-- 4) CÁMARA — plegable, COLAPSADA -->
-        <details class="card foldcard admin-only" id="camCard">
-          <summary><h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— usa la cámara del móvil (enfoque/zoom)</span></h3></summary>
-          <p class="muted" style="margin-top:0;font-size:12px">Haz una foto de la portada y otra de la CONTRAportada (código de barras); se catalogan como UN libro. Cada foto se reduce antes de subir. (En PC abre el selector de archivos.)</p>
-          <div class="row" style="align-items:center">
-            <button class="btn" id="camShot" type="button">📷 Hacer foto</button>
-            <button class="btn pri" id="camDone" type="button" disabled>✅ Catalogar (0)</button>
-            <button class="btn" id="camClear" type="button" style="display:none">✕ Descartar</button>
-            <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none">
-          </div>
-          <div id="camThumbs" class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"></div>
-        </details>
-        <!-- 5) NFC — plegable, COLAPSADA -->
+        <!-- 6) NFC — plegable, COLAPSADA -->
         <details class="card foldcard admin-only" id="nfcCard" style="display:none">
           <summary><h3>📶 NFC</h3></summary>
           <p class="muted" style="margin-top:0;font-size:12px">Lee una etiqueta NFC (ISBN/identificador) y búscalo en tu biblioteca. (Solo Android + Chrome con NFC.)</p>
@@ -642,7 +650,7 @@ body.guest .admin-only{display:none!important}
 <script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='qr-copiar-imagen · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='inbox-reorg (camara-primero) · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2512,6 +2520,8 @@ function wireInbox(){
   if(/Android/i.test(navigator.userAgent)){
     const aa=$('#appAdobe');if(aa)aa.style.display='';
     if($('#openScan'))$('#openScan').onclick=()=>{location.href='intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.adobe.scan.android;S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.adobe.scan.android;end';};
+    // Cámara del sistema (Android): abre la app de cámara para hacer la foto y luego volver con «Compartir».
+    if($('#openCam'))$('#openCam').onclick=()=>{location.href='intent:#Intent;action=android.media.action.STILL_IMAGE_CAMERA;end';};
   }
   if(dz){
     ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('drag');}));
