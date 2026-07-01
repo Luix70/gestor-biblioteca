@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ficha-imagenes-camara · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ficha-imagenes-camara+tapete · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -774,7 +774,14 @@ function pintarGestorImagenes(){
   $$('#cmpModal [data-down]').forEach(b=>b.onclick=()=>moverImg(+b.dataset.down,1));
   $$('#cmpModal [data-del]').forEach(b=>b.onclick=async()=>{ if(await ubicConfirm('Borrar imagen','Irá a la Papelera (recuperable). ¿Seguir?')) apiImg('eliminar',{ruta:b.dataset.del}); });
   $$('#cmpModal [data-edit]').forEach(b=>b.onclick=()=>abrirEditorImagen(+b.dataset.edit));
-  const anadirDe=async inp=>{ if(inp&&inp.files[0]){ try{const b64=await fileADataURL(await reducirImagen(inp.files[0],2200,0.88));await apiImg('anadir',{base64:b64});}catch(e){toast(e.message,'bad');} } if(inp)inp.value=''; };
+  const anadirDe=async inp=>{ if(inp&&inp.files[0]){ try{
+        let file=inp.files[0];
+        // Si la foto está sobre el TAPETE: recorta+endereza (misma función que Cámara) y mide; sin tapete, igual.
+        try{ const r=await recortarYMedirTapete([file]); file=(r.files&&r.files[0])||file;
+          if(r.dims&&_imgState&&_imgState.id){ try{await api('/documentos/'+encodeURIComponent(_imgState.id)+'/dimensiones',{method:'POST',body:JSON.stringify(r.dims)});_imgState.cambiado=true;}catch(_){} toast(`📐 ${String(r.dims.ancho_cm).replace('.',',')}×${String(r.dims.alto_cm).replace('.',',')} cm${r.recortadas?' · recortado':''}`); }
+          else if(r.recortadas)toast('✂️ Recortado'); }catch(_){}
+        const b64=await fileADataURL(await reducirImagen(file,2200,0.88));await apiImg('anadir',{base64:b64});
+      }catch(e){toast(e.message,'bad');} } if(inp)inp.value=''; };
   const fi=$('#imgAddInput'), fc=$('#imgCamInput');
   $('#imgAdd').onclick=()=>fi.click(); fi.onchange=()=>anadirDe(fi);
   if($('#imgCam'))$('#imgCam').onclick=()=>fc.click(); if(fc)fc.onchange=()=>anadirDe(fc);
