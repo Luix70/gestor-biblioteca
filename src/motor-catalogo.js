@@ -5,6 +5,7 @@ import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
 import { claveNumero, tituloCabecera } from './utils/revistas.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
+import { latinizarNombre } from './utils/transliterar.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -106,17 +107,23 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     };
 
     try {
-        // 1. Autores (string → ObjectId; crea si no existe).
+        // 1. Autores (string → ObjectId; crea si no existe). Nombres en otro alfabeto (p. ej. cirílico) →
+        //    principal LATINIZADO + grafía original en `nombres_alternativos`. El emparejamiento tiene en
+        //    cuenta el nombre crudo, el latinizado y las variantes ya guardadas (no duplica al re-ingerir).
         if (docFinal.autores && docFinal.autores.length > 0) {
             const ids = [];
             for (const autor of docFinal.autores) {
                 if (typeof autor === 'string') {
-                    const existente = await coleccionAutores.findOne({ nombre: autor });
-                    if (existente) ids.push(existente._id);
-                    else {
-                        const nuevo = await coleccionAutores.insertOne({ nombre: autor });
+                    const { nombre, alternativos } = latinizarNombre(autor);
+                    const existente = await coleccionAutores.findOne({ $or: [{ nombre: autor }, { nombre }, { nombres_alternativos: autor }] });
+                    if (existente) {
+                        ids.push(existente._id);
+                        if (autor !== existente.nombre) await coleccionAutores.updateOne({ _id: existente._id }, { $addToSet: { nombres_alternativos: autor } }).catch(() => {});
+                    } else {
+                        const doc = { nombre }; if (alternativos.length) doc.nombres_alternativos = alternativos;
+                        const nuevo = await coleccionAutores.insertOne(doc);
                         ids.push(nuevo.insertedId);
-                        docFinal.alertas_agente.push(`Nuevo autor registrado: ${autor}`);
+                        docFinal.alertas_agente.push(`Nuevo autor registrado: ${nombre}${alternativos.length ? ` (variante: ${alternativos.join(', ')})` : ''}`);
                     }
                 } else ids.push(autor);
             }
