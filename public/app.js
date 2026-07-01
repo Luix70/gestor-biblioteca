@@ -1,35 +1,94 @@
-const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ordenar libros (posición+NFC) + reordenar estanterías (↑/↓/arrastrar) · 2026-07-01';   // marca de versión (verificar despliegue)
-try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
-let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
-let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
-let FUENTES=[],sanCtx=null; // fuentes "buscar copia" (cacheadas) + depósito en curso de saneamiento
-let sanSel=new Set(),sanPoll=null; // ids seleccionados para procesar por lotes + timer de progreso
-let APP_OFFLINE=false;   // modo sin conexión (arranque sin red): solo lectura NFC; evita el ruido de errores
-const api=async(p,opt={})=>{const h={'Content-Type':'application/json',...(opt.headers||{})};
-  if(TOKEN)h['Authorization']='Bearer '+TOKEN;
-  let r; try{ r=await fetch('/api'+p,{...opt,headers:h}); }
-  catch(_){ const e=new Error('Sin conexión con el servidor'); e.sinRed=true; throw e; }   // red caída → error normalizado
-  if(r.status===401){mostrarLogin();throw new Error('Sesión caducada — vuelve a entrar');}
-  const t=await r.text();let j;try{j=t?JSON.parse(t):{}}catch{j={raw:t}};
-  if(!r.ok)throw new Error(j.motivo||j.message||r.status);return j;};
-const fmtBytes=b=>{if(!b)return'0 B';const u=['B','KB','MB','GB','TB'];const i=Math.floor(Math.log(b)/Math.log(1024));return (b/Math.pow(1024,i)).toFixed(i?1:0)+' '+u[i];};
-const toast=(m,t='ok')=>{
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Bibliotheca Ludoviciana — Panel web (PWA). TODO el front-end vive en este archivo. Es un script CLÁSICO
+//  (NO un módulo): se carga con <script src> y muchas de sus funciones se referencian desde onclick="…" en
+//  index.html y desde las plantillas HTML que se generan aquí. POR ESO los nombres GLOBALES (funciones y
+//  const/let de nivel superior) NO deben renombrarse sin actualizar TODAS sus referencias (app.js + index.html).
+//
+//  Idiomas usados por todo el archivo (memorízalos y el resto se lee solo):
+//    $(sel)          → primer elemento que casa el selector CSS      (document.querySelector)
+//    $$(sel)         → array con TODOS los que casan                 (querySelectorAll → array)
+//    api(ruta,opts)  → fetch a /api con el token; devuelve el JSON o lanza Error(motivo)
+//    esc(txt)        → escapa &<>" para incrustar datos en HTML sin inyección
+//    encUrl(ruta)    → %-codifica una ruta /recursos por segmentos
+//    toast(msg,tipo) → aviso efímero: tipo 'ok' (verde) | 'bad' (rojo) | 'warn' (ámbar)
+//
+//  Mapa de regiones (busca los banners «── … ──»): nav · dashboard · obras/colecciones · ficha/detalle ·
+//    búsqueda y catálogo · logs · integridad · inbox · NFC · tapete/visión (CV) · editor de imágenes ·
+//    ubicaciones · auth · arranque.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Atajos de selección del DOM (estilo jQuery). $ = el primero; $$ = todos, ya como array real.
+const $  = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+// Marca de versión del front: se imprime en consola al cargar para comprobar que el despliegue trae lo último.
+const APP_BUILD = 'ordenar libros (posición+NFC) + reordenar estanterías (↑/↓/arrastrar) · 2026-07-01';
+try { console.log('%c📚 Bibliotheca build: ' + APP_BUILD, 'color:#28d9a8;font-weight:700'); } catch (_) {}
+
+// ── Estado global de sesión y de algunas vistas ──────────────────────────────────────────────────────
+let TOKEN = localStorage.getItem('panel_token') || '';   // token HMAC de sesión (persiste en el navegador)
+let ROL   = null;                                         // rol tras el login: 'admin' | 'guest'
+let USER  = null;                                         // nombre del usuario autenticado
+let detalle = null;                     // vista de detalle abierta: { tipo:'obra'|'doc', id, ctx? } · null = ninguna
+let FUENTES = [], sanCtx = null;        // «buscar copia» (fuentes cacheadas) + depósito de saneamiento en curso
+let sanSel = new Set(), sanPoll = null; // ids marcados para procesar por lotes + timer de sondeo de progreso
+let APP_OFFLINE = false;                // arranque sin red: solo lectura NFC; silencia el ruido de errores de servidor
+
+// Llama a la API REST del panel (/api…). Pone el token, normaliza errores y devuelve el JSON ya parseado.
+// Lanza Error(motivo) si la respuesta no es OK; si no hay red, un Error con .sinRed=true (para silenciarlo offline).
+const api = async (ruta, opciones = {}) => {
+  const cabeceras = { 'Content-Type': 'application/json', ...(opciones.headers || {}) };
+  if (TOKEN) cabeceras['Authorization'] = 'Bearer ' + TOKEN;
+  let resp;
+  try { resp = await fetch('/api' + ruta, { ...opciones, headers: cabeceras }); }
+  catch (_) { const err = new Error('Sin conexión con el servidor'); err.sinRed = true; throw err; }
+  if (resp.status === 401) { mostrarLogin(); throw new Error('Sesión caducada — vuelve a entrar'); }
+  const texto = await resp.text();
+  let json; try { json = texto ? JSON.parse(texto) : {}; } catch { json = { raw: texto }; }
+  if (!resp.ok) throw new Error(json.motivo || json.message || resp.status);
+  return json;
+};
+
+// Formatea un tamaño en bytes → B/KB/MB/… (1 decimal salvo para bytes enteros).
+const fmtBytes = (bytes) => {
+  if (!bytes) return '0 B';
+  const unidades = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponente = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, exponente)).toFixed(exponente ? 1 : 0) + ' ' + unidades[exponente];
+};
+
+// Aviso efímero (esquina). tipo: 'ok' (verde, por defecto) | 'bad' (rojo) | 'warn' (ámbar).
+const toast = (mensaje, tipo = 'ok') => {
   // En modo sin conexión se silencian los errores de red (todo lo de servidor falla): evita el ruido.
-  if(APP_OFFLINE&&t==='bad'&&/sin conexi|failed to fetch|networkerror|load failed/i.test(String(m)))return;
-  const e=document.createElement('div');e.className='toast '+(t==='ok'?'':t);e.textContent=m;$('#toast').append(e);setTimeout(()=>e.remove(),3800);};
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  if (APP_OFFLINE && tipo === 'bad' && /sin conexi|failed to fetch|networkerror|load failed/i.test(String(mensaje))) return;
+  const el = document.createElement('div');
+  el.className = 'toast ' + (tipo === 'ok' ? '' : tipo);
+  el.textContent = mensaje;
+  $('#toast').append(el);
+  setTimeout(() => el.remove(), 3800);
+};
+
+// Escapa &<>" para incrustar texto de datos dentro de HTML generado (evita inyección y roturas de marcado).
+const esc = (txt) => String(txt ?? '').replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
 // %-codifica una ruta /recursos por SEGMENTOS (mantiene las '/'): así una URL con '#', '%', espacios o
 // acentos en la carpeta no se rompe (el navegador trunca en '#'); Express la des-codifica y casa el fichero.
-const encUrl=p=>String(p||'').split('/').map(encodeURIComponent).join('/');
-// Copia al portapapeles con respaldo (la API clipboard exige contexto seguro; en LAN/http no está).
-function copiar(txt){
-  const ok=()=>toast('Copiado al portapapeles');
-  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(ok).catch(()=>copiarFallback(txt,ok));
-  else copiarFallback(txt,ok);
+const encUrl = (ruta) => String(ruta || '').split('/').map(encodeURIComponent).join('/');
+
+// Copia al portapapeles con respaldo (la API clipboard exige contexto seguro; en LAN/http no está disponible).
+function copiar(texto) {
+  const avisarOk = () => toast('Copiado al portapapeles');
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(texto).then(avisarOk).catch(() => copiarFallback(texto, avisarOk));
+  else copiarFallback(texto, avisarOk);
 }
-function copiarFallback(txt,ok){const ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
-  try{document.execCommand('copy');ok();}catch{toast('No se pudo copiar','bad');}document.body.removeChild(ta);}
+function copiarFallback(texto, avisarOk) {
+  const ta = document.createElement('textarea');
+  ta.value = texto; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); avisarOk(); } catch { toast('No se pudo copiar', 'bad'); }
+  document.body.removeChild(ta);
+}
 
 // ── nav ──
 const titles={dashboard:'Dashboard',activity:'Actividad',cuar:'Cuarentena',pap:'Papelera',obras:'Obras',colecciones:'Colecciones',inbox:'Inbox',search:'Búsqueda'};
