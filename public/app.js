@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ficha-imagenes-camara+tapete · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ubic-fase1 (colapsables+badge+mantenimiento) · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2868,6 +2868,10 @@ function pintarEtq(doc,r,estado,extra){
 }
 // ════════ UBICACIONES (ámbitos/estanterías gestionadas como colecciones de estanterías) ════════
 let ubicArbol=[], ubicSel=null, ubicPendiente=null;
+// Ámbitos plegados (persistente): set de nombres colapsados.
+function _cargarUbicFold(){try{return new Set(JSON.parse(localStorage.getItem('ubic_fold')||'[]'));}catch(_){return new Set();}}
+let ubicFold=_cargarUbicFold();
+const _guardarUbicFold=()=>{try{localStorage.setItem('ubic_fold',JSON.stringify([...ubicFold]));}catch(_){}};
 const ubBtn=(act,a,e,ico,tit)=>`<button type="button" class="ubx" data-act="${act}" data-a="${esc(a)}"${e!=null?` data-e="${esc(e)}"`:''} title="${esc(tit)}">${ico}</button>`;
 function ambitosNombres(){return ubicArbol.map(x=>x.ambito);}
 function estanteriasNombres(a){const A=ubicArbol.find(x=>x.ambito===a);return A?A.estanterias.map(e=>e.estanteria):[];}
@@ -2914,14 +2918,15 @@ function pintarUbic(){
   if(ubicPendiente){const p=ubicPendiente;ubicPendiente=null;ubicVerLibros(p.a,p.e);}
 }
 function ubicAmbHTML(a){
+  const folded=ubicFold.has(a.ambito);
   const nfc=a.nfc?` <span title="NFC ${esc(a.nfc)}">📶</span>`:'';
-  const acts=`<span class="ubacts">${ubBtn('amb-add',a.ambito,null,'➕','Añadir estantería')}${ubBtn('amb-ren',a.ambito,null,'✏️','Renombrar ámbito')}${ubBtn('amb-nfc',a.ambito,null,'📶','Grabar NFC del ámbito')}${ubBtn('amb-explotar',a.ambito,null,'🧹','Sus libros → sin ubicación')}${ubBtn('amb-del',a.ambito,null,'🗑','Eliminar (si está vacío)')}</span>`;
+  const acts=`<span class="ubacts">${ubBtn('amb-mant',a.ambito,null,'🔧','Gestionar en Búsqueda: seleccionar, etiquetar, mover, añadir')}${ubBtn('amb-add',a.ambito,null,'➕','Añadir estantería')}${ubBtn('amb-ren',a.ambito,null,'✏️','Renombrar ámbito')}${ubBtn('amb-nfc',a.ambito,null,'📶','Grabar NFC del ámbito')}${ubBtn('amb-explotar',a.ambito,null,'🧹','Sus libros → sin ubicación')}${ubBtn('amb-del',a.ambito,null,'🗑','Eliminar (si está vacío)')}</span>`;
   const ests=a.estanterias.length?a.estanterias.map(e=>ubicEstHTML(a.ambito,e)).join(''):`<div class="ubrow ubest"><span class="muted" style="font-size:12px">— sin estanterías —</span></div>`;
-  return `<div class="ubamb"><div class="ubrow ubhdr"><b class="ubx" data-act="amb-ver" data-a="${esc(a.ambito)}" style="font-size:14px;opacity:1" title="Ver libros del ámbito">📍 ${esc(a.ambito)}</b><span class="muted">${a.n} libro(s)</span>${nfc}${acts}</div>${ests}</div>`;
+  return `<div class="ubamb"><div class="ubrow ubhdr"><span class="ubx" data-act="amb-fold" data-a="${esc(a.ambito)}" title="Plegar/desplegar" style="opacity:1;width:20px;text-align:center">${folded?'▸':'▾'}</span><b class="ubx" data-act="amb-ver" data-a="${esc(a.ambito)}" style="font-size:14px;opacity:1" title="Ver libros del ámbito">📍 ${esc(a.ambito)}</b><span class="muted">${a.n} libro(s)</span>${nfc}${acts}</div><div class="ubests"${folded?' style="display:none"':''}>${ests}</div></div>`;
 }
 function ubicEstHTML(amb,e){
   const nfc=e.nfc?` <span title="NFC ${esc(e.nfc)}">📶</span>`:'';
-  const acts=`<span class="ubacts">${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
+  const acts=`<span class="ubacts">${ubBtn('est-mant',amb,e.estanteria,'🔧','Gestionar en Búsqueda: seleccionar, etiquetar, mover, añadir')}${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
   return `<div class="ubrow ubest"><span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver libros">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
 }
 function wireUbic(){
@@ -2961,6 +2966,11 @@ async function ubicApi(path,body){
 }
 async function ubicAccion(act,a,e){
   try{
+    if(act==='amb-fold'){if(ubicFold.has(a))ubicFold.delete(a);else ubicFold.add(a);_guardarUbicFold();return pintarUbic();}
+    // «Mantenimiento» = abrir la Búsqueda filtrada por ese ámbito/estantería (allí: seleccionar, «todos los
+    // resultados», etiquetar NFC en lote, mover 📍, «añadir libros aquí»…).
+    if(act==='amb-mant'){estadoBusqueda.extra={ambito:a,etiqueta:'📍 '+a};estadoBusqueda.page=1;return void go('search');}
+    if(act==='est-mant'){estadoBusqueda.extra={ambito:a,estanteria:e,etiqueta:'📍 '+a+' · '+e};estadoBusqueda.page=1;return void go('search');}
     if(act==='amb-ver')return ubicVerLibros(a,null);
     if(act==='est-ver')return ubicVerLibros(a,e);
     if(act==='amb-nfc')return grabarNFCUbic(a,null);
@@ -2992,7 +3002,8 @@ async function ubicVerLibros(ambito,estanteria){
 }
 function ubicCard(d){
   const por=d.portada?`<img src="${esc(encUrl(d.portada))}" loading="lazy" style="width:100%;height:130px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'">`:'<div style="height:130px;display:flex;align-items:center;justify-content:center;font-size:28px">📕</div>';
-  return `<div class="ubcard" data-doc="${esc(d._id)}" style="cursor:pointer">${por}<div style="font-size:12px;margin-top:4px;line-height:1.3">${esc(recortar(d.titulo||'(sin título)',48))}</div></div>`;
+  const nfc=(d.nfc&&(d.nfc.fecha_vinculacion||d.nfc.uid))?'<span class="nfctag" title="Etiqueta NFC vinculada">📶</span>':'';
+  return `<div class="ubcard" data-doc="${esc(d._id)}" style="cursor:pointer;position:relative;overflow:hidden">${nfc}${por}<div style="font-size:12px;margin-top:4px;line-height:1.3">${esc(recortar(d.titulo||'(sin título)',48))}</div></div>`;
 }
 // Modal de texto reutilizable (con sugerencias opcionales via datalist). Promesa → valor o null.
 function ubicPedirTexto(titulo,valor='',sugerencias=null){
