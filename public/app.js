@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='estanterias-fase0 + editor-autobordes + botones-cam-fijos · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ficha-imagenes-camara · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -764,8 +764,9 @@ function pintarGestorImagenes(){
   $('#cmpModal').innerHTML=`<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">🖼️ Imágenes (${imgs.length})</h3>
     <p class="muted" style="font-size:12px;margin:0 0 6px">La 1.ª es la PORTADA. Reordena con ↑/↓; ✎ abre el editor (rotar/recortar/corregir perspectiva).</p>
     ${imgs.length?filas:'<div class="muted">Sin imágenes.</div>'}
-    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn pri" id="imgCerrar">Cerrar</button></div>
-    <input type="file" id="imgAddInput" accept="image/*" style="display:none"></div>`;
+    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px"><div class="row" style="gap:8px"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn" id="imgCam">📷 Cámara</button></div><button class="btn pri" id="imgCerrar">Cerrar</button></div>
+    <input type="file" id="imgAddInput" accept="image/*" style="display:none">
+    <input type="file" id="imgCamInput" accept="image/*" capture="environment" style="display:none"></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
   const cerrar=()=>{const id=_imgState.id,refrescar=_imgState.cambiado;cerrarCmp();if(refrescar)verDoc(id,detalle&&detalle.ctx);};
   $('#imgCerrar').onclick=cerrar;$('#cmpScrim').onclick=cerrar;
@@ -773,9 +774,10 @@ function pintarGestorImagenes(){
   $$('#cmpModal [data-down]').forEach(b=>b.onclick=()=>moverImg(+b.dataset.down,1));
   $$('#cmpModal [data-del]').forEach(b=>b.onclick=async()=>{ if(await ubicConfirm('Borrar imagen','Irá a la Papelera (recuperable). ¿Seguir?')) apiImg('eliminar',{ruta:b.dataset.del}); });
   $$('#cmpModal [data-edit]').forEach(b=>b.onclick=()=>abrirEditorImagen(+b.dataset.edit));
-  const fi=$('#imgAddInput');
-  $('#imgAdd').onclick=()=>fi.click();
-  fi.onchange=async()=>{ if(fi.files[0]){ try{const b64=await fileADataURL(await reducirImagen(fi.files[0],2200,0.88));await apiImg('anadir',{base64:b64});}catch(e){toast(e.message,'bad');} } fi.value=''; };
+  const anadirDe=async inp=>{ if(inp&&inp.files[0]){ try{const b64=await fileADataURL(await reducirImagen(inp.files[0],2200,0.88));await apiImg('anadir',{base64:b64});}catch(e){toast(e.message,'bad');} } if(inp)inp.value=''; };
+  const fi=$('#imgAddInput'), fc=$('#imgCamInput');
+  $('#imgAdd').onclick=()=>fi.click(); fi.onchange=()=>anadirDe(fi);
+  if($('#imgCam'))$('#imgCam').onclick=()=>fc.click(); if(fc)fc.onchange=()=>anadirDe(fc);
 }
 async function moverImg(i,dir){ const {imgs}=_imgState;const j=i+dir;if(j<0||j>=imgs.length)return;[imgs[i],imgs[j]]=[imgs[j],imgs[i]];await apiImg('orden',{orden:imgs.map(im=>im.ruta)}); }
 // ── Homografía (perspectiva): resolver 4→4 y aplicar (Gauss 8×8) ──
