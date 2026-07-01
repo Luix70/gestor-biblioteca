@@ -18,7 +18,7 @@ import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexad
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
-import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
+import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
@@ -668,16 +668,18 @@ export function rutasPanel() {
             ]).toArray();
             const colar = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true, sensitivity: 'base' });
             // Unir el REGISTRO (estanterías/ámbitos pre-creados, aún sin libros) para que aparezcan en los
-            // desplegables aunque ninguna obra los use todavía.
-            const mapa = new Map(agg.map(a => [a._id, new Set((a.estanterias || []).filter(e => e && e !== 'Sin asignar'))]));
+            // desplegables aunque ninguna obra los use todavía. `orden` (asignado al reordenar, Fase 2) fija la
+            // secuencia; las que no lo tienen van al final, alfanuméricas — mismo criterio que la gestión.
+            const mapa = new Map(agg.map(a => [a._id, new Map((a.estanterias || []).filter(e => e && e !== 'Sin asignar').map(e => [e, Infinity]))]));
             for (const row of await db.collection('ubicaciones').find({}).toArray()) {
                 const a = String(row.ambito || '').trim(); if (!a) continue;
-                if (!mapa.has(a)) mapa.set(a, new Set());
+                if (!mapa.has(a)) mapa.set(a, new Map());
                 const e = String(row.estanteria || '').trim();
-                if (e && e !== 'Sin asignar') mapa.get(a).add(e);
+                if (e && e !== 'Sin asignar' && (!mapa.get(a).has(e) || Number.isFinite(row.orden))) mapa.get(a).set(e, Number.isFinite(row.orden) ? row.orden : Infinity);
             }
+            const ordenar = (m) => [...m.entries()].sort((x, y) => (x[1] - y[1]) || colar(x[0], y[0])).map(([e]) => e);
             const ambitos = [...mapa.entries()].sort((x, y) => colar(x[0], y[0]))
-                .map(([ambito, set]) => ({ ambito, estanterias: [...set].sort(colar) }));
+                .map(([ambito, ests]) => ({ ambito, estanterias: ordenar(ests) }));
             res.json({ ok: true, ambitos });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
@@ -700,6 +702,7 @@ export function rutasPanel() {
     ubicPost('eliminar', eliminarUbicacion);
     ubicPost('asignar', asignarUbicacion);
     ubicPost('quitar', quitarUbicacion);
+    ubicPost('ordenar', ordenarEstanterias);
     ubicPost('nfc', registrarNfcUbicacion);
 
     // Detalle de UNA colección: cabecera/serie resuelta (editorial/CDU+descripción) + sus miembros

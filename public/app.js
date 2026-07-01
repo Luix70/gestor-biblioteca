@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ubic-fase1b (colapsado-def+contadores+quitar+sel-NFC+botones-grandes) · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ubic-fase2 (reordenar estanterías: ↑/↓ + arrastrar + insertar debajo) · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -2941,6 +2941,12 @@ function pintarUbic(){
     #p-ubic button.ubx{background:var(--card2);border:1px solid var(--line);color:var(--txt);min-width:40px;height:40px;padding:0 9px;border-radius:10px;font-size:18px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:.12s;opacity:1}
     #p-ubic button.ubx:hover{border-color:var(--acc);color:#fff;background:var(--card)}
     #p-ubic button.ubx:active{transform:scale(.93)}
+    /* asa de reordenar: ↑/↓ apiladas y compactas (no ocupan como un botón de acción) */
+    #p-ubic .ubreord{display:flex;flex-direction:column;gap:2px;flex:0 0 auto}
+    #p-ubic .ubreord button.ubx{height:19px;min-width:34px;font-size:13px;padding:0 6px;border-radius:7px}
+    #p-ubic .ubest{cursor:default}
+    #p-ubic .ubest.dragging{opacity:.45}
+    #p-ubic .ubest.dragover{box-shadow:inset 0 2px 0 var(--acc)}
     #p-ubic .ubgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px}
     #p-ubic .ubcard{background:var(--card2);border-radius:10px;padding:6px}
   </style>
@@ -2978,8 +2984,10 @@ function ubicAmbHTML(a){
 }
 function ubicEstHTML(amb,e){
   const nfc=e.nfc?` <span title="NFC ${esc(e.nfc)}">📶</span>`:'';
-  const acts=`<span class="ubacts">${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
-  return `<div class="ubrow ubest"><span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver sus libros en la Búsqueda (interactivo)">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
+  // Reordenar: ↑/↓ (fiable en móvil) — la fila también es arrastrable en escritorio (wireUbic).
+  const reord=`<span class="ubreord">${ubBtn('est-subir',amb,e.estanteria,'↑','Subir una posición')}${ubBtn('est-bajar',amb,e.estanteria,'↓','Bajar una posición')}</span>`;
+  const acts=`<span class="ubacts">${ubBtn('est-insertar',amb,e.estanteria,'➕','Insertar una estantería DEBAJO de esta')}${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
+  return `<div class="ubrow ubest" draggable="true" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}">${reord}<span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver sus libros en la Búsqueda (interactivo)">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
 }
 function wireUbic(){
   const modo=$('#ubModo');
@@ -2989,6 +2997,23 @@ function wireUbic(){
   if($('#ubCrear'))$('#ubCrear').onclick=ubicCrear;
   sync();
   $$('#p-ubic [data-act]').forEach(el=>el.onclick=()=>ubicAccion(el.dataset.act,el.dataset.a,el.dataset.e));
+  // Arrastrar para reordenar estanterías (escritorio; en móvil se usan ↑/↓). Solo dentro del MISMO ámbito.
+  let arrastrada=null;
+  $$('#p-ubic .ubest[draggable]').forEach(row=>{
+    row.addEventListener('dragstart',ev=>{arrastrada={a:row.dataset.a,e:row.dataset.e};row.classList.add('dragging');try{ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',row.dataset.e);}catch(_){}});
+    row.addEventListener('dragend',()=>{row.classList.remove('dragging');$$('#p-ubic .ubest.dragover').forEach(x=>x.classList.remove('dragover'));arrastrada=null;});
+    row.addEventListener('dragover',ev=>{if(arrastrada&&arrastrada.a===row.dataset.a&&arrastrada.e!==row.dataset.e){ev.preventDefault();row.classList.add('dragover');}});
+    row.addEventListener('dragleave',()=>row.classList.remove('dragover'));
+    row.addEventListener('drop',ev=>{ev.preventDefault();row.classList.remove('dragover');
+      if(!arrastrada||arrastrada.a!==row.dataset.a||arrastrada.e===row.dataset.e)return;
+      const A=ubicArbol.find(x=>x.ambito===arrastrada.a);if(!A)return;
+      const nombres=A.estanterias.map(x=>x.estanteria);
+      const from=nombres.indexOf(arrastrada.e),to=nombres.indexOf(row.dataset.e);
+      if(from<0||to<0)return;
+      nombres.splice(from,1);nombres.splice(to,0,arrastrada.e);
+      ubicReordenar(arrastrada.a,nombres);
+    });
+  });
 }
 function ubicLoteNombres(){
   const pre=($('#ubPre')&&$('#ubPre').value)||'';
@@ -3016,6 +3041,13 @@ async function ubicApi(path,body){
     toast('Hecho'+det);loadUbic();return r;
   }catch(e){toast(e.message,'bad');return {ok:false};}
 }
+// Graba el nuevo orden de las estanterías de un ámbito (lista de nombres en orden) y refresca el árbol.
+async function ubicReordenar(ambito,nombres){
+  try{const r=await api('/ubicaciones/ordenar',{method:'POST',body:JSON.stringify({ambito,orden:nombres})});
+    if(!r.ok){toast(r.motivo||'No se pudo ordenar','bad');return;}
+    await loadUbic();
+  }catch(e){toast(e.message,'bad');}
+}
 async function ubicAccion(act,a,e){
   try{
     if(act==='amb-fold'){if(ubicExp.has(a))ubicExp.delete(a);else ubicExp.add(a);_guardarUbicExp();return pintarUbic();}
@@ -3026,6 +3058,22 @@ async function ubicAccion(act,a,e){
     if(act==='est-ver'){estadoBusqueda.extra={ambito:a,estanteria:e,etiqueta:'📍 '+a+' · '+e};estadoBusqueda.page=1;return void go('search');}
     if(act==='amb-nfc')return grabarNFCUbic(a,null);
     if(act==='est-nfc')return grabarNFCUbic(a,e);
+    // Reordenar estanterías (Fase 2): ↑/↓ mueven una posición; «insertar» crea una nueva justo debajo.
+    if(act==='est-subir'||act==='est-bajar'){
+      const A=ubicArbol.find(x=>x.ambito===a);if(!A)return;
+      const nombres=A.estanterias.map(x=>x.estanteria);const i=nombres.indexOf(e);if(i<0)return;
+      const j=act==='est-subir'?i-1:i+1;if(j<0||j>=nombres.length)return;   // ya en el extremo
+      nombres.splice(i,1);nombres.splice(j,0,e);
+      return void ubicReordenar(a,nombres);
+    }
+    if(act==='est-insertar'){
+      const nom=await ubicPedirTexto('Insertar estantería DEBAJO de «'+e+'»');if(!nom)return;
+      const A=ubicArbol.find(x=>x.ambito===a);if(!A)return;
+      const nombres=A.estanterias.map(x=>x.estanteria).filter(x=>x!==nom);  // por si ya existiera
+      const i=nombres.indexOf(e);nombres.splice(i<0?nombres.length:i+1,0,nom);
+      try{await api('/ubicaciones/crear',{method:'POST',body:JSON.stringify({ambito:a,estanterias:[nom]})});}catch(err){toast(err.message,'bad');return;}
+      return void ubicReordenar(a,nombres);
+    }
     if(act==='amb-add'){const nom=await ubicPedirTexto('Añadir estantería a «'+a+'»');if(!nom)return;return void ubicApi('/ubicaciones/crear',{ambito:a,estanterias:[nom]});}
     if(act==='amb-ren'){const nv=await ubicPedirTexto('Renombrar ámbito',a);if(!nv||nv===a)return;return void ubicApi('/ubicaciones/renombrar',{ambito:a,nuevoAmbito:nv});}
     if(act==='est-ren'){const nv=await ubicPedirTexto('Renombrar estantería',e);if(!nv||nv===e)return;return void ubicApi('/ubicaciones/renombrar',{ambito:a,estanteria:e,nuevaEstanteria:nv});}
