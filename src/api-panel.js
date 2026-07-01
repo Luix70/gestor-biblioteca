@@ -1147,38 +1147,44 @@ export function rutasPanel() {
         } catch (e) { res.status(500).send('error'); }
     });
 
-    // BUSCAR PORTADAS en Google Imágenes (Custom Search JSON API, admin). Prioriza Amazon/AbeBooks/IberLibro
-    // y ordena por resolución. Devuelve URLs + dimensiones (las da la propia API, sin descargar). Si faltan
-    // las credenciales GOOGLE_CSE_KEY/GOOGLE_CSE_CX → { disponible:false } y el front mantiene las keyless.
+    // BUSCAR MÁS PORTADAS por TÍTULO+AUTOR, sin clave ni cuota (Google cerró la Custom Search JSON API a
+    // clientes nuevos). Fuentes keyless: OpenLibrary Search (varias ediciones) + Apple Books/iTunes (carátula
+    // a 600 px). Se miden (sin sharp), se deduplican y se ordenan por resolución. Complementa a las candidatas
+    // por ISBN del lookup (OpenLibrary/Amazon/Google Books).
     r.get('/buscar-portadas', async (req, res) => {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo admin' });
-            // .trim(): un salto de línea o espacios pegados en el .env dan «invalid value» (400) en la API.
-            const key = (process.env.GOOGLE_CSE_KEY || '').trim(), cx = (process.env.GOOGLE_CSE_CX || '').trim();
-            if (!key || !cx) return res.json({ ok: true, disponible: false, motivo: 'Faltan GOOGLE_CSE_KEY / GOOGLE_CSE_CX', portadas: [] });
-            const isbn = String(req.query.isbn || '').trim(), titulo = String(req.query.titulo || '').trim();
-            const q = [titulo, isbn, 'portada'].filter(Boolean).join(' ').trim();
-            if (!q) return res.status(400).json({ ok: false, motivo: 'falta consulta' });
-            const u = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(key)}&cx=${encodeURIComponent(cx)}&searchType=image&num=10&safe=off&q=${encodeURIComponent(q)}`;
-            const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 12000);
-            const resp = await fetch(u, { signal: ctrl.signal }); clearTimeout(to);
-            if (!resp.ok) {
-                const t = await resp.text().catch(() => '');
-                let gmsg = ''; try { gmsg = (JSON.parse(t).error || {}).message || ''; } catch { gmsg = t.slice(0, 160); }
-                console.warn(`[buscar-portadas] Custom Search ${resp.status}: ${gmsg}`);
-                return res.status(502).json({ ok: false, motivo: `Custom Search ${resp.status}: ${gmsg || 'sin detalle'}` });
+            const isbn = String(req.query.isbn || '').trim();
+            const titulo = String(req.query.titulo || '').trim();
+            const autor = String(req.query.autor || '').trim();
+            const cands = [];
+            // 1) OpenLibrary Search (título + autor) → id de cubierta de varias ediciones.
+            try {
+                const p = new URLSearchParams({ limit: '8', fields: 'cover_i' });
+                if (titulo) p.set('title', titulo); if (autor) p.set('author', autor);
+                if (!titulo && isbn) { p.delete('title'); p.set('q', isbn); }
+                const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 10000);
+                const r1 = await fetch('https://openlibrary.org/search.json?' + p.toString(), { signal: ctrl.signal }); clearTimeout(to);
+                if (r1.ok) { const j1 = await r1.json(); for (const d of (j1.docs || [])) if (d.cover_i) cands.push([`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`, 'OpenLibrary']); }
+            } catch { /* OL opcional */ }
+            // 2) Apple Books / iTunes Search (keyless) → carátula subida a 600 px.
+            try {
+                const term = [titulo, autor].filter(Boolean).join(' ') || isbn;
+                if (term) {
+                    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 10000);
+                    const r2 = await fetch('https://itunes.apple.com/search?media=ebook&limit=8&term=' + encodeURIComponent(term), { signal: ctrl.signal }); clearTimeout(to);
+                    if (r2.ok) { const j2 = await r2.json(); for (const it of (j2.results || [])) { let a = it.artworkUrl100 || it.artworkUrl60; if (a) cands.push([a.replace(/\/\d+x\d+bb\.(jpg|png|jpeg)/i, '/600x600bb.$1'), 'Apple Books']); } }
+                }
+            } catch { /* Apple opcional */ }
+            // Medir, deduplicar (dims+bytes) y ordenar por resolución.
+            const out = [], vistos = new Set();
+            for (const [u, f] of cands) {
+                const m = await medirPortadaRemota(u, f); if (!m) continue;
+                const sig = `${m.ancho}x${m.alto}:${m.bytes}`; if (vistos.has(sig)) continue;
+                vistos.add(sig); out.push(m);
             }
-            const j = await resp.json();
-            const PRIOR = /(amazon\.|abebooks\.|iberlibro\.|images-amazon|media-amazon|ssl-images-amazon)/i;
-            const items = (j.items || [])
-                .map(it => ({ url: it.link, ancho: (it.image && it.image.width) || 0, alto: (it.image && it.image.height) || 0, fuente: it.displayLink || '', ctx: (it.image && it.image.contextLink) || '' }))
-                .filter(x => x.url && /^https?:\/\//i.test(x.url));
-            items.sort((a, b) => {
-                const pa = (PRIOR.test(a.fuente) || PRIOR.test(a.url)) ? 1 : 0, pb = (PRIOR.test(b.fuente) || PRIOR.test(b.url)) ? 1 : 0;
-                if (pa !== pb) return pb - pa;
-                return (b.ancho || 0) - (a.ancho || 0);
-            });
-            res.json({ ok: true, disponible: true, portadas: items.slice(0, 12) });
+            out.sort((a, b) => b.ancho - a.ancho);
+            res.json({ ok: true, disponible: true, portadas: out.slice(0, 12) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

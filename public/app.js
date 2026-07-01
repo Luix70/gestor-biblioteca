@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='separacion-html-css-js · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='portadas-keyless (OL+Apple) · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1995,12 +1995,12 @@ function isbnRender(){
   const dispSrc=p=>p.web?('/api/proxy-imagen?url='+encodeURIComponent(p.url)+(TOKEN?'&token='+encodeURIComponent(TOKEN):'')):p.url;
   const cand=_isbnEstado.portadas.map((p,i)=>isbnThumb('c'+i,dispSrc(p),`${p.fuente} · ${p.ancho}×${p.alto}`,p.sel,p.ancho>=800,true)).join('');
   const extra=_isbnEstado.extra.map((p,i)=>isbnThumb('e'+i,p.previa||p.url,p.nombre||'añadida',p.sel,true,true)).join('');
-  const galeria=(cand||extra)?`<div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${cand}${extra}</div>`:'<div class="muted" style="font-size:12px;margin-top:4px">Sin portadas automáticas. Pulsa «Buscar portadas en Google» o sube una.</div>';
+  const galeria=(cand||extra)?`<div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${cand}${extra}</div>`:'<div class="muted" style="font-size:12px;margin-top:4px">Sin portadas automáticas. Pulsa «Buscar más portadas» o sube una.</div>';
   res.innerHTML=`<div class="card" style="background:var(--card2)">
     ${datos}
     <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Portada — marca la buena (la 1ª marcada es la portada; ✔ = ≥800 px)</div>${galeria}</div>
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
-      <button class="btn pri" type="button" id="isbnBuscarWeb" title="Busca portadas en Google Imágenes (prioriza Amazon/AbeBooks) y las trae aquí para elegir">🔎 Buscar portadas en Google</button>
+      <button class="btn pri" type="button" id="isbnBuscarWeb" title="Busca más portadas por título+autor en OpenLibrary y Apple Books (sin clave) y las trae aquí para elegir">🔎 Buscar más portadas</button>
       <button class="btn" type="button" id="isbnAddFile">⬆️ Subir imagen</button>
       <button class="btn" type="button" id="isbnAddUrl">➕ Añadir por URL</button>
       <span class="muted" id="isbnWebMsg" style="font-size:12px"></span>
@@ -2037,16 +2037,16 @@ function isbnConformar(id){
   });
 }
 function isbnAddUrl(){const u=prompt('URL de la imagen (https://…):');if(!u)return;_isbnEstado.extra.push({url:u.trim(),tipo:'imagen',sel:true});isbnRender();}
-// Busca portadas en Google Imágenes (Custom Search) y las añade como candidatas (se muestran vía proxy).
+// Busca más portadas por título+autor (OpenLibrary Search + Apple Books, sin clave) y las añade como candidatas.
 async function isbnBuscarPortadasWeb(){
-  if(!_isbnEstado)return; const msg=$('#isbnWebMsg'); if(msg)msg.textContent='Buscando en Google…';
-  let r; try{ r=await api('/buscar-portadas?isbn='+encodeURIComponent(_isbnEstado.isbn||'')+'&titulo='+encodeURIComponent(_isbnEstado.meta.titulo||'')); }
+  if(!_isbnEstado)return; const msg=$('#isbnWebMsg'); if(msg)msg.textContent='Buscando portadas…';
+  const a=_isbnEstado.meta.autores, autor=Array.isArray(a)?(a[0]||''):(a||'');
+  let r; try{ r=await api('/buscar-portadas?isbn='+encodeURIComponent(_isbnEstado.isbn||'')+'&titulo='+encodeURIComponent(_isbnEstado.meta.titulo||'')+'&autor='+encodeURIComponent(autor)); }
   catch(e){ if(msg)msg.textContent=e.message; return; }
-  if(!r.disponible){ if(msg)msg.textContent='Configura GOOGLE_CSE_KEY / GOOGLE_CSE_CX en el .env del NAS.'; return; }
   const nuevas=(r.portadas||[]).filter(p=>!_isbnEstado.portadas.some(q=>q.url===p.url));
-  nuevas.forEach(p=>_isbnEstado.portadas.push({url:p.url,fuente:p.fuente||'Google',ancho:p.ancho||0,alto:p.alto||0,sel:false,web:true}));
+  nuevas.forEach(p=>_isbnEstado.portadas.push({url:p.url,fuente:p.fuente||'web',ancho:p.ancho||0,alto:p.alto||0,sel:false,web:true}));
   isbnRender();
-  const m2=$('#isbnWebMsg'); if(m2)m2.textContent=nuevas.length?`${nuevas.length} portada(s) de Google (prioriza Amazon/AbeBooks). Marca la buena y ✎ para conformar.`:'Sin resultados nuevos.';
+  const m2=$('#isbnWebMsg'); if(m2)m2.textContent=nuevas.length?`${nuevas.length} portada(s) encontradas (OpenLibrary/Apple). Marca la buena y ✎ para conformar.`:'Sin resultados nuevos.';
 }
 async function isbnAddFiles(){
   const files=[...$('#isbnFile').files];$('#isbnFile').value='';
