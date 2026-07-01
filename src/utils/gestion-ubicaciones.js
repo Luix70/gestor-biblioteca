@@ -157,6 +157,15 @@ export async function asignarUbicacion(db, { ids = [], ambito, estanteria } = {}
     return { ok: true, n: r.modifiedCount, ambito: a, estanteria: e || SIN };
 }
 
+// QUITAR de estantería/ámbito: deja los libros SIN ubicación (no crea registro «Sin asignar»).
+export async function quitarUbicacion(db, { ids = [] } = {}) {
+    const oids = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
+    if (!oids.length) return { ok: false, motivo: 'sin documentos' };
+    const r = await db.collection('biblioteca').updateMany({ _id: { $in: oids } },
+        { $set: { ubicacion: { ambito: SIN, estanteria: SIN }, fecha_actualizacion: new Date() } });
+    return { ok: true, n: r.modifiedCount };
+}
+
 // Registrar el UID de la etiqueta NFC de una estantería/ámbito (la escritura del tag es en el cliente).
 export async function registrarNfcUbicacion(db, { ambito, estanteria, uid } = {}) {
     const a = norm(ambito); if (!a) return { ok: false, motivo: 'ámbito requerido' };

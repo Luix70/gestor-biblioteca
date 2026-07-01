@@ -18,7 +18,7 @@ import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexad
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
-import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
+import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
@@ -699,6 +699,7 @@ export function rutasPanel() {
     ubicPost('explotar', explotarUbicacion);
     ubicPost('eliminar', eliminarUbicacion);
     ubicPost('asignar', asignarUbicacion);
+    ubicPost('quitar', quitarUbicacion);
     ubicPost('nfc', registrarNfcUbicacion);
 
     // Detalle de UNA colección: cabecera/serie resuelta (editorial/CDU+descripción) + sus miembros

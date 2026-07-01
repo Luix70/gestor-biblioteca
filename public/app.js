@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ubic-fase1 (colapsables+badge+mantenimiento) · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ubic-fase1b (colapsado-def+contadores+quitar+sel-NFC+botones-grandes) · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1449,17 +1449,21 @@ function renderBulk(){const el=$('#searchBulk');if(!el)return;
     <button class="btn pri" id="bkCol">📚 Colección</button>
     <button class="btn pri" id="bkObra">📖 Obra</button>
     <button class="btn pri" id="bkUbic">📍 Estantería</button>
+    <button class="btn" id="bkQuitUbic" title="Quitar de su estantería/ámbito (pasan a «Sin asignar»)">🚫 Quitar de estantería</button>
     ${('NDEFReader' in window)?'<button class="btn pri" id="bkNfc">📶 Etiquetar</button>':''}
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`:'';
   const g=colaEtqGuardada(); const resume=(g&&('NDEFReader' in window)&&!selDocs.size)?`<button class="btn pri" id="bkResumeNfc" style="margin-left:auto">📶 Reanudar etiquetado (${g.ids.length})</button>`:'';
-  el.innerHTML=`<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="bkAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todos <span class="muted">(${paginaIds.length} en esta página)</span></label><button class="btn" id="bkAllRes" title="Selecciona TODOS los resultados de esta búsqueda (todas las páginas)">🗂 Todos los resultados</button>${resume}${acc}</div>`;
+  const selNfc=('NDEFReader' in window)?`<button class="btn" id="bkSelNfc" title="Acumula en la selección los libros que vayas tocando con etiquetas NFC">📶 Seleccionar por NFC</button>`:'';
+  el.innerHTML=`<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="bkAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todos <span class="muted">(${paginaIds.length} en esta página)</span></label><button class="btn" id="bkAllRes" title="Selecciona TODOS los resultados de esta búsqueda (todas las páginas)">🗂 Todos los resultados</button>${selNfc}${resume}${acc}</div>`;
   if($('#bkResumeNfc'))$('#bkResumeNfc').onclick=()=>{const s=colaEtqGuardada();if(s)iniciarEtiquetadoLote(s.ids,s.auto);};
+  if($('#bkSelNfc'))$('#bkSelNfc').onclick=seleccionarPorNFC;
   const all=$('#bkAll');all.checked=enPag>0&&enPag===paginaIds.length;all.indeterminate=enPag>0&&enPag<paginaIds.length;
   all.onchange=()=>{const on=all.checked;paginaIds.forEach(id=>{if(on)selDocs.add(id);else selDocs.delete(id);});
     $$('#searchResults .selchk').forEach(cb=>cb.checked=on);$$('#searchResults .vol').forEach(c=>c.classList.toggle('sel',on));renderBulk();};
   if($('#bkAllRes'))$('#bkAllRes').onclick=selTodosResultados;
   if(selDocs.size){$('#bkCol').onclick=()=>pickerGrupo('coleccion');$('#bkObra').onclick=()=>pickerGrupo('obra');$('#bkUbic').onclick=()=>pickerUbic();
+    if($('#bkQuitUbic'))$('#bkQuitUbic').onclick=quitarSeleccionDeUbic;
     if($('#bkNfc'))$('#bkNfc').onclick=()=>iniciarEtiquetadoLote([...selDocs],false);
     if($('#bkVer'))$('#bkVer').onclick=verSeleccion;
     $('#bkDel').onclick=eliminarSeleccionados;
@@ -1490,6 +1494,45 @@ async function verSeleccion(){
     :'<div class="muted">No se pudieron cargar los títulos (la selección sigue activa).</div>';
   body.querySelectorAll('[data-vsdel]').forEach(b=>b.onclick=()=>{selDocs.delete(b.dataset.vsdel);const c=$(`#searchResults .vol[data-doc="${b.dataset.vsdel}"]`);if(c){c.classList.remove('sel');const cb=c.querySelector('.selchk');if(cb)cb.checked=false;}renderBulk();if(!selDocs.size)cerrarCmp();else{$('#vsN').textContent=selDocs.size;b.closest('.row').remove();}});
   body.querySelectorAll('[data-vsver]').forEach(a=>a.onclick=()=>{cerrarCmp();verDoc(a.dataset.vsver,{volver:'search',etiqueta:'Búsqueda'});});
+}
+// Quitar los SELECCIONADOS de su estantería/ámbito → ubicación «Sin asignar» (NO crea registro de movimiento,
+// NO borra nada; es reversible reasignándolos). Acción en lote de la barra de selección.
+async function quitarSeleccionDeUbic(){
+  const n=selDocs.size;if(!n)return;
+  if(!await ubicConfirm(`🚫 Quitar ${n} de su estantería`,`Sus libros quedarán en «Sin asignar» (no se borra nada; puedes reasignarlos cuando quieras). ¿Seguir?`))return;
+  try{const r=await api('/ubicaciones/quitar',{method:'POST',body:JSON.stringify({ids:[...selDocs]})});
+    if(!r.ok){toast(r.motivo||'No se pudo','bad');return;}
+    toast(`${r.n} doc(s) → Sin asignar`);selDocs.clear();buscarCatalogo(estadoBusqueda.page||1);
+  }catch(e){toast(e.message,'bad');}
+}
+// Selección por NFC: escaneo CONTINUO; cada libro que toques (su etiqueta lleva ?doc=<id>) se ACUMULA en la
+// selección (selDocs) sin borrar lo ya elegido. Ideal para juntar libros dispersos físicamente por el estante.
+async function seleccionarPorNFC(){
+  if(!('NDEFReader' in window)){toast('Este dispositivo no puede leer NFC (Android + Chrome)','warn');return;}
+  let n=0;const vistos=new Set();
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px;text-align:center"><h3 style="margin-top:0">📶 Seleccionar por NFC</h3>
+    <p class="muted" id="snMsg">Ve tocando las etiquetas de los libros…</p>
+    <p style="font-size:15px"><b id="snN">0</b> añadido(s) · <b id="snTot">${selDocs.size}</b> en la selección</p>
+    <div style="margin-top:8px"><button class="btn pri" id="snX">Terminar</button></div></div>`;
+  $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
+  const ctrl=new AbortController();
+  const cerrar=()=>{try{ctrl.abort();}catch(_){}cerrarCmp();renderBulk();if(n)buscarCatalogo(estadoBusqueda.page||1);};
+  $('#snX').onclick=cerrar;$('#cmpScrim').onclick=cerrar;
+  try{
+    const reader=new NDEFReader();await reader.scan({signal:ctrl.signal});
+    reader.onreading=ev=>{
+      let url='';for(const rec of ev.message.records){try{if(rec.recordType==='url'){url=new TextDecoder(rec.encoding||'utf-8').decode(rec.data);if(url)break;}}catch(_){}}
+      const id=docIdDeURL(url);const m=$('#snMsg');
+      if(!id){if(m)m.textContent='Etiqueta sin libro (¿es de estantería?).';return;}
+      if(vistos.has(id)){if(m)m.textContent='Ese libro ya estaba en la selección.';return;}
+      vistos.add(id);selDocs.add(id);n++;
+      const eN=$('#snN'),eT=$('#snTot');if(eN)eN.textContent=n;if(eT)eT.textContent=selDocs.size;
+      if(m){m.textContent='✅ Añadido';m.style.color='var(--acc)';}
+      const c=$(`#searchResults .vol[data-doc="${id}"]`);if(c){c.classList.add('sel');const cb=c.querySelector('.selchk');if(cb)cb.checked=true;}
+      try{navigator.vibrate&&navigator.vibrate(40);}catch(_){}
+    };
+    reader.onreadingerror=()=>{const m=$('#snMsg');if(m)m.textContent='No se pudo leer esa etiqueta, reinténtalo.';};
+  }catch(e){const m=$('#snMsg');if(m){m.textContent='NFC: '+e.message;m.style.color='var(--bad)';}}
 }
 // Borrado MASIVO de los seleccionados (solo admin; renderBulk ya gatea ROL). Pide contraseña. Las
 // carpetas van a la Papelera (recuperable), como el borrado individual.
@@ -2868,10 +2911,11 @@ function pintarEtq(doc,r,estado,extra){
 }
 // ════════ UBICACIONES (ámbitos/estanterías gestionadas como colecciones de estanterías) ════════
 let ubicArbol=[], ubicSel=null, ubicPendiente=null;
-// Ámbitos plegados (persistente): set de nombres colapsados.
-function _cargarUbicFold(){try{return new Set(JSON.parse(localStorage.getItem('ubic_fold')||'[]'));}catch(_){return new Set();}}
-let ubicFold=_cargarUbicFold();
-const _guardarUbicFold=()=>{try{localStorage.setItem('ubic_fold',JSON.stringify([...ubicFold]));}catch(_){}};
+// Ámbitos COLAPSADOS por defecto: guardamos el set de EXPANDIDOS (persistente); lo no listado sale plegado,
+// así al abrir Ubicaciones se ve la lista compacta.
+function _cargarUbicExp(){try{return new Set(JSON.parse(localStorage.getItem('ubic_exp')||'[]'));}catch(_){return new Set();}}
+let ubicExp=_cargarUbicExp();
+const _guardarUbicExp=()=>{try{localStorage.setItem('ubic_exp',JSON.stringify([...ubicExp]));}catch(_){}};
 const ubBtn=(act,a,e,ico,tit)=>`<button type="button" class="ubx" data-act="${act}" data-a="${esc(a)}"${e!=null?` data-e="${esc(e)}"`:''} title="${esc(tit)}">${ico}</button>`;
 function ambitosNombres(){return ubicArbol.map(x=>x.ambito);}
 function estanteriasNombres(a){const A=ubicArbol.find(x=>x.ambito===a);return A?A.estanterias.map(e=>e.estanteria):[];}
@@ -2883,12 +2927,20 @@ async function loadUbic(){
 function pintarUbic(){
   const cont=$('#p-ubic');if(!cont)return;const arbol=ubicArbol;
   cont.innerHTML=`<style>
-    #p-ubic .ubrow{display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid rgba(255,255,255,.06);flex-wrap:wrap}
-    #p-ubic .ubhdr{border-top:0;margin-top:10px}
-    #p-ubic .ubest{padding-left:18px}
-    #p-ubic .ubacts{margin-left:auto;display:flex;gap:1px;flex-wrap:wrap}
-    #p-ubic .ubx{background:none;border:0;color:var(--txt);cursor:pointer;font-size:14px;opacity:.65;padding:2px 5px;border-radius:6px}
-    #p-ubic .ubx:hover{opacity:1;background:rgba(255,255,255,.08)}
+    #p-ubic .ubamb{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;overflow:hidden;background:var(--card)}
+    #p-ubic .ubrow{display:flex;gap:10px;align-items:center;padding:9px 11px;flex-wrap:wrap}
+    #p-ubic .ubhdr{background:var(--card2);border-bottom:1px solid var(--line)}
+    #p-ubic .ubests{background:var(--bg2)}
+    #p-ubic .ubest{border-top:1px solid var(--bg2)}
+    #p-ubic .ubest>.ubx:first-child{padding-left:12px}
+    /* nombres + triángulo de plegado: texto clicable (no botón) */
+    #p-ubic b.ubx,#p-ubic span.ubx{background:none;border:0;color:var(--txt);cursor:pointer;opacity:.9;padding:4px 3px;border-radius:6px}
+    #p-ubic b.ubx:hover,#p-ubic span.ubx:hover{opacity:1;color:var(--acc)}
+    /* botones de acción: superficie táctil amplia y bien separada (antes: diminutos y pegados) */
+    #p-ubic .ubacts{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    #p-ubic button.ubx{background:var(--card2);border:1px solid var(--line);color:var(--txt);min-width:40px;height:40px;padding:0 9px;border-radius:10px;font-size:18px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:.12s;opacity:1}
+    #p-ubic button.ubx:hover{border-color:var(--acc);color:#fff;background:var(--card)}
+    #p-ubic button.ubx:active{transform:scale(.93)}
     #p-ubic .ubgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px}
     #p-ubic .ubcard{background:var(--card2);border-radius:10px;padding:6px}
   </style>
@@ -2918,16 +2970,16 @@ function pintarUbic(){
   if(ubicPendiente){const p=ubicPendiente;ubicPendiente=null;ubicVerLibros(p.a,p.e);}
 }
 function ubicAmbHTML(a){
-  const folded=ubicFold.has(a.ambito);
+  const folded=!ubicExp.has(a.ambito);
   const nfc=a.nfc?` <span title="NFC ${esc(a.nfc)}">📶</span>`:'';
-  const acts=`<span class="ubacts">${ubBtn('amb-mant',a.ambito,null,'🔧','Gestionar en Búsqueda: seleccionar, etiquetar, mover, añadir')}${ubBtn('amb-add',a.ambito,null,'➕','Añadir estantería')}${ubBtn('amb-ren',a.ambito,null,'✏️','Renombrar ámbito')}${ubBtn('amb-nfc',a.ambito,null,'📶','Grabar NFC del ámbito')}${ubBtn('amb-explotar',a.ambito,null,'🧹','Sus libros → sin ubicación')}${ubBtn('amb-del',a.ambito,null,'🗑','Eliminar (si está vacío)')}</span>`;
+  const acts=`<span class="ubacts">${ubBtn('amb-add',a.ambito,null,'➕','Añadir estantería')}${ubBtn('amb-ren',a.ambito,null,'✏️','Renombrar ámbito')}${ubBtn('amb-nfc',a.ambito,null,'📶','Grabar NFC del ámbito')}${ubBtn('amb-explotar',a.ambito,null,'🧹','Sus libros → sin ubicación')}${ubBtn('amb-del',a.ambito,null,'🗑','Eliminar (si está vacío)')}</span>`;
   const ests=a.estanterias.length?a.estanterias.map(e=>ubicEstHTML(a.ambito,e)).join(''):`<div class="ubrow ubest"><span class="muted" style="font-size:12px">— sin estanterías —</span></div>`;
-  return `<div class="ubamb"><div class="ubrow ubhdr"><span class="ubx" data-act="amb-fold" data-a="${esc(a.ambito)}" title="Plegar/desplegar" style="opacity:1;width:20px;text-align:center">${folded?'▸':'▾'}</span><b class="ubx" data-act="amb-ver" data-a="${esc(a.ambito)}" style="font-size:14px;opacity:1" title="Ver libros del ámbito">📍 ${esc(a.ambito)}</b><span class="muted">${a.n} libro(s)</span>${nfc}${acts}</div><div class="ubests"${folded?' style="display:none"':''}>${ests}</div></div>`;
+  return `<div class="ubamb"><div class="ubrow ubhdr"><span class="ubx" data-act="amb-fold" data-a="${esc(a.ambito)}" title="Plegar/desplegar" style="opacity:1;width:20px;text-align:center">${folded?'▸':'▾'}</span><b class="ubx" data-act="amb-ver" data-a="${esc(a.ambito)}" style="font-size:14px;opacity:1" title="Ver sus libros en la Búsqueda (interactivo)">📍 ${esc(a.ambito)}</b><span class="muted">${a.estanterias.length} estante(s) · ${a.n} libro(s)</span>${nfc}${acts}</div><div class="ubests"${folded?' style="display:none"':''}>${ests}</div></div>`;
 }
 function ubicEstHTML(amb,e){
   const nfc=e.nfc?` <span title="NFC ${esc(e.nfc)}">📶</span>`:'';
-  const acts=`<span class="ubacts">${ubBtn('est-mant',amb,e.estanteria,'🔧','Gestionar en Búsqueda: seleccionar, etiquetar, mover, añadir')}${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
-  return `<div class="ubrow ubest"><span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver libros">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
+  const acts=`<span class="ubacts">${ubBtn('est-ren',amb,e.estanteria,'✏️','Renombrar')}${ubBtn('est-mover',amb,e.estanteria,'➡️','Mover a otro ámbito')}${ubBtn('est-fus',amb,e.estanteria,'🔀','Fusionar en otra estantería')}${ubBtn('est-nfc',amb,e.estanteria,'📶','Grabar NFC')}${ubBtn('est-explotar',amb,e.estanteria,'🧹','Libros → sin ubicación')}${ubBtn('est-del',amb,e.estanteria,'🗑','Eliminar (si vacía)')}</span>`;
+  return `<div class="ubrow ubest"><span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver sus libros en la Búsqueda (interactivo)">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
 }
 function wireUbic(){
   const modo=$('#ubModo');
@@ -2966,13 +3018,12 @@ async function ubicApi(path,body){
 }
 async function ubicAccion(act,a,e){
   try{
-    if(act==='amb-fold'){if(ubicFold.has(a))ubicFold.delete(a);else ubicFold.add(a);_guardarUbicFold();return pintarUbic();}
-    // «Mantenimiento» = abrir la Búsqueda filtrada por ese ámbito/estantería (allí: seleccionar, «todos los
-    // resultados», etiquetar NFC en lote, mover 📍, «añadir libros aquí»…).
-    if(act==='amb-mant'){estadoBusqueda.extra={ambito:a,etiqueta:'📍 '+a};estadoBusqueda.page=1;return void go('search');}
-    if(act==='est-mant'){estadoBusqueda.extra={ambito:a,estanteria:e,etiqueta:'📍 '+a+' · '+e};estadoBusqueda.page=1;return void go('search');}
-    if(act==='amb-ver')return ubicVerLibros(a,null);
-    if(act==='est-ver')return ubicVerLibros(a,e);
+    if(act==='amb-fold'){if(ubicExp.has(a))ubicExp.delete(a);else ubicExp.add(a);_guardarUbicExp();return pintarUbic();}
+    // Pinchar el NOMBRE del ámbito/estantería = abrir la Búsqueda filtrada por él (allí hay interactividad total:
+    // seleccionar, «todos los resultados», etiquetar NFC en lote, mover 📍, «añadir libros aquí»…), SIN tocar la
+    // selección previa que hubiera acumulada.
+    if(act==='amb-ver'){estadoBusqueda.extra={ambito:a,etiqueta:'📍 '+a};estadoBusqueda.page=1;return void go('search');}
+    if(act==='est-ver'){estadoBusqueda.extra={ambito:a,estanteria:e,etiqueta:'📍 '+a+' · '+e};estadoBusqueda.page=1;return void go('search');}
     if(act==='amb-nfc')return grabarNFCUbic(a,null);
     if(act==='est-nfc')return grabarNFCUbic(a,e);
     if(act==='amb-add'){const nom=await ubicPedirTexto('Añadir estantería a «'+a+'»');if(!nom)return;return void ubicApi('/ubicaciones/crear',{ambito:a,estanterias:[nom]});}
@@ -3035,7 +3086,7 @@ async function grabarNFCUbic(ambito,estanteria){
   const url=location.origin+'/?amb='+encodeURIComponent(ambito)+(estanteria?'&est='+encodeURIComponent(estanteria):'');
   const label=(estanteria?estanteria+' · ':'')+ambito;
   const records=[{recordType:'url',data:url},{recordType:'text',data:EX_LIBRIS},{recordType:'text',data:label}];
-  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px;text-align:center"><h3 style="margin-top:0">📶 Etiqueta de estantería</h3>
+  $('#cmpModal').innerHTML=`<div class="box card" style="max-width:420px;text-align:center"><h3 style="margin-top:0">📶 Etiqueta de ${estanteria?'estantería':'ámbito'}</h3>
     <p class="muted" id="nfcUMsg">Acerca la etiqueta de «${esc(label)}»…</p>
     <p class="mono" style="font-size:11px;word-break:break-all;color:var(--mut)">${esc(url)}</p>
     <div style="margin-top:8px"><button class="btn" id="nfcUX">Cancelar</button></div></div>`;
