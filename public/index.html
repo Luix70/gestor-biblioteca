@@ -527,16 +527,6 @@ body.guest .admin-only{display:none!important}
       <!-- INBOX (maqueta) -->
       <section class="page" id="p-inbox">
         <div class="sec-h"><h2>Inbox — alta de recursos</h2><span class="muted" id="inboxHint"></span></div>
-        <!-- Leyenda: qué hace cada método (una línea para cada uno), bajo el título de la página. -->
-        <div class="muted admin-only" style="font-size:12px;line-height:1.75;margin:2px 0 14px">
-          <div>📷 <b>Cámara</b> — foto de portada y contraportada; autorecorte y automedida con el tapete (la forma preferida para libros físicos).</div>
-          <div>📁 <b>Subir ficheros</b> — EPUB/PDF/imágenes/cómic/.zip; varias imágenes del mismo libro → un libro.</div>
-          <div>🔢 <b>Ingreso por ISBN</b> — alta directa por código de barras: recupera los datos del Fichero local y busca la portada.</div>
-          <div>📲 <b>Subir desde otra app</b> — importa de Adobe Scan / Drive / Files, o abre la cámara del móvil.</div>
-          <div>🏷️ <b>Datos de esta alta</b> — ISBN / colección / obra / ubicación que viajan con lo que subas.</div>
-          <div>⚙️ <b>Opciones de ingreso</b> — supervisado, procesar lo compartido al instante, elegir portada.</div>
-          <div>📶 <b>NFC</b> — leer una etiqueta (Android + Chrome).</div>
-        </div>
         <!-- 1) CÁMARA — forma PREFERIDA para libros físicos (autorecorte + automedida con el tapete). DESPLEGADA -->
         <details class="card foldcard admin-only" id="camCard" open>
           <summary><h3>📷 Cámara <span class="muted" style="font-weight:400;font-size:12px">— la forma preferida para libros físicos</span></h3></summary>
@@ -562,15 +552,8 @@ body.guest .admin-only{display:none!important}
             </div>
           </div>
         </details>
-        <!-- 2) SUBIR FICHEROS — DESPLEGADA -->
-        <div class="card admin-only">
-          <h3>📁 Subir ficheros</h3>
-          <div id="dropZone" class="dropzone">⬆️ Arrastra ficheros aquí, o <button class="btn" id="pickBtn" type="button">elegir…</button>
-            <input type="file" id="fileInput" multiple style="display:none">
-          </div>
-        </div>
-        <!-- 3) INGRESO POR ISBN — plegable, COLAPSADA -->
-        <details class="card foldcard admin-only" id="isbnCard">
+        <!-- 2) INGRESO POR ISBN — plegable, DESPLEGADA -->
+        <details class="card foldcard admin-only" id="isbnCard" open>
           <summary><h3>🔢 Ingreso por ISBN <span class="muted" style="font-weight:400;font-size:12px">— lector de código de barras o teclado</span></h3></summary>
           <div class="row" style="align-items:center;gap:8px;margin-top:4px">
             <input id="isbnIn" placeholder="Escanea o escribe un ISBN y pulsa Enter" autocomplete="off" inputmode="numeric" style="flex:1">
@@ -579,22 +562,14 @@ body.guest .admin-only{display:none!important}
           <div id="isbnMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
           <div id="isbnRes" style="margin-top:10px"></div>
         </details>
-        <!-- 4) SUBIR DESDE OTRA APP — plegable, COLAPSADA -->
-        <details class="card foldcard admin-only">
-          <summary><h3>📲 Subir desde otra app <span class="muted" style="font-weight:400;font-size:12px">— Adobe Scan, cámara del sistema, Drive, Files…</span></h3></summary>
-          <div class="row" style="margin-top:4px;align-items:center;gap:8px;flex-wrap:wrap">
-            <button class="btn" id="pickApp" type="button" title="Abre el selector del sistema: Drive, Adobe Scan, Files…">📄 Importar de otra app</button>
-            <button class="btn" id="openCam" type="button" title="Abre la cámara del móvil para hacer una foto y catalogarla">📸 Cámara del móvil</button>
-            <input type="file" id="fileInputApp" accept="application/pdf,image/*" multiple style="display:none">
-            <input type="file" id="openCamInput" accept="image/*" capture="environment" style="display:none">
-          </div>
-          <div class="muted" style="font-size:12px;margin-top:6px">PDF o imágenes ya guardadas por Adobe Scan / Drive / Files. La cámara hace una foto y la cataloga directamente.</div>
-          <div class="row" id="appAdobe" style="margin-top:8px;gap:8px;align-items:center;display:none;flex-wrap:wrap">
-            <button class="btn" id="openScan" type="button" title="Abrir Adobe Scan (o su página en Google Play, desde donde puedes pulsar «Abrir»)">📄 Abrir Adobe Scan</button>
-            <span class="muted" style="font-size:12px">Escanea ahí y vuelve con «Compartir → Bibliotheca».</span>
+        <!-- 3) SUBIR FICHEROS — plegable, DESPLEGADA -->
+        <details class="card foldcard admin-only" open>
+          <summary><h3>📁 Subir ficheros</h3></summary>
+          <div id="dropZone" class="dropzone" style="margin-top:4px">⬆️ Arrastra ficheros aquí, o <button class="btn" id="pickBtn" type="button">elegir…</button>
+            <input type="file" id="fileInput" multiple style="display:none">
           </div>
         </details>
-        <!-- 5) DATOS DE ESTA ALTA — plegable, COLAPSADA -->
+        <!-- 4) DATOS DE ESTA ALTA — plegable, COLAPSADA -->
         <details class="card foldcard admin-only">
           <summary><h3>🏷️ Datos de esta alta <span class="muted" style="font-weight:400;font-size:12px">— opcional; viajan con lo que subas</span></h3></summary>
           <div class="row">
@@ -610,6 +585,21 @@ body.guest .admin-only{display:none!important}
           <datalist id="dlColecciones"></datalist>
           <datalist id="dlAmbitos"></datalist>
           <datalist id="dlEstanterias"></datalist>
+        </details>
+        <!-- 5) SUBIR DESDE OTRA APP — plegable, COLAPSADA -->
+        <details class="card foldcard admin-only">
+          <summary><h3>📲 Subir desde otra app <span class="muted" style="font-weight:400;font-size:12px">— Adobe Scan, cámara del sistema, Drive, Files…</span></h3></summary>
+          <div class="row" style="margin-top:4px;align-items:center;gap:8px;flex-wrap:wrap">
+            <button class="btn" id="pickApp" type="button" title="Abre el selector del sistema: Drive, Adobe Scan, Files…">📄 Importar de otra app</button>
+            <button class="btn" id="openCam" type="button" title="Abre la cámara del móvil para hacer una foto y catalogarla">📸 Cámara del móvil</button>
+            <input type="file" id="fileInputApp" accept="application/pdf,image/*" multiple style="display:none">
+            <input type="file" id="openCamInput" accept="image/*" capture="environment" style="display:none">
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:6px">PDF o imágenes ya guardadas por Adobe Scan / Drive / Files. La cámara hace una foto y la cataloga directamente.</div>
+          <div class="row" id="appAdobe" style="margin-top:8px;gap:8px;align-items:center;display:none;flex-wrap:wrap">
+            <button class="btn" id="openScan" type="button" title="Abrir Adobe Scan (o su página en Google Play, desde donde puedes pulsar «Abrir»)">📄 Abrir Adobe Scan</button>
+            <span class="muted" style="font-size:12px">Escanea ahí y vuelve con «Compartir → Bibliotheca».</span>
+          </div>
         </details>
         <!-- 6) OPCIONES DE INGRESO — plegable, COLAPSADA (antes «Modos y escaneo»; el Tapete se movió a Cámara) -->
         <details class="card foldcard admin-only">
@@ -635,6 +625,19 @@ body.guest .admin-only{display:none!important}
         </details>
         <div id="inboxEstado" style="margin-top:12px;min-height:18px"></div>
         <div id="inboxResults" style="margin-top:8px"></div>
+        <!-- Leyenda de los métodos de ingreso: al FINAL de todo, como referencia (una línea por método). -->
+        <details class="card foldcard admin-only" style="margin-top:18px">
+          <summary><h3>❔ Qué hace cada método de ingreso</h3></summary>
+          <div class="muted" style="font-size:12px;line-height:1.75;margin-top:8px">
+            <div>📷 <b>Cámara</b> — foto de portada y contraportada; autorecorte y automedida con el tapete (la forma preferida para libros físicos).</div>
+            <div>🔢 <b>Ingreso por ISBN</b> — por código de barras: recupera los datos del Fichero local y busca la portada.</div>
+            <div>📁 <b>Subir ficheros</b> — EPUB/PDF/imágenes/cómic/.zip; varias imágenes del mismo libro → un libro.</div>
+            <div>🏷️ <b>Datos de esta alta</b> — ISBN / colección / obra / ubicación que viajan con lo que subas.</div>
+            <div>📲 <b>Subir desde otra app</b> — importa de Adobe Scan / Drive / Files, o abre la cámara del móvil.</div>
+            <div>⚙️ <b>Opciones de ingreso</b> — supervisado, procesar lo compartido al instante, elegir portada.</div>
+            <div>📶 <b>NFC</b> — leer una etiqueta (Android + Chrome).</div>
+          </div>
+        </details>
       </section>
 
       <!-- UBICACIONES (gestión de ámbitos/estanterías) -->
@@ -669,7 +672,7 @@ body.guest .admin-only{display:none!important}
 <script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='isbn-portada-fichero+cdu-cache · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='inbox-orden+leer-desplegado · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1280,7 +1283,7 @@ function pintarDoc(r,ctx){
   const lector=_fisico?'':previewArchivo(r);
   const secAcc=`<details class="card foldcard admin-only" style="margin-top:14px"><summary>⚙️ Acciones</summary>${botones}</details>`;
   const secImg=`<details class="card foldcard" open style="margin-top:14px"><summary>🖼️ Imágenes</summary><div style="margin-top:10px">${carrusel}</div></details>`;
-  const secLect=lector?`<details class="card foldcard" id="lectDet" style="margin-top:14px"><summary>📖 Leer / archivo</summary><div style="margin-top:10px">${lector}</div></details>`:'';
+  const secLect=lector?`<details class="card foldcard" id="lectDet" open style="margin-top:14px"><summary>📖 Leer / archivo</summary><div style="margin-top:10px">${lector}</div></details>`:'';
   const secCat=`<details class="card foldcard" style="margin-top:14px"><summary>📚 Datos catalográficos</summary><div style="margin-top:10px"><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></details>`;
   const secSin=d.sinopsis?`<details class="card foldcard" open style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(d.sinopsis)}</p></details>`:'';
   // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos) plegado, después.
@@ -1314,7 +1317,8 @@ function pintarDoc(r,ctx){
     else if(/\.(cbz|cbr|cb7|djvu)$/.test(_nom))iniciarLectorComic(d._id);
   };
   const ld=$('#lectDet');
-  if(ld){let hecho=false;ld.addEventListener('toggle',()=>{if(ld.open&&!hecho){hecho=true;initLector();}});}
+  if(ld){let hecho=false;const arranca=()=>{if(!hecho){hecho=true;initLector();}};
+    if(ld.open)arranca(); else ld.addEventListener('toggle',()=>{if(ld.open)arranca();});}
 }
 
 // ── visor PAGINADO (cómic .cbz/.cbr/.cb7 y .djvu): páginas servidas por /documentos/:id/paginas[/:n] bajo demanda ──
@@ -2415,7 +2419,7 @@ let colaInbox=[], jobsHechos=[], colaCorriendo=false, jobSeq=0;   // cola de sub
 function loadInbox(){
   if(!inboxWired){inboxWired=true;wireInbox();}
   if(('NDEFReader' in window)&&$('#nfcCard'))$('#nfcCard').style.display='';
-  if($('#inboxHint'))$('#inboxHint').textContent='Alta directa (pasa por el pipeline). Solo administradores.';
+  if($('#inboxHint'))$('#inboxHint').textContent='';
   cargarDatalistColecciones();
   refrescarInboxUbic();   // monta los <select> al instante con el mapa en caché
   cargarUbicaciones();    // y lo refresca desde el servidor
