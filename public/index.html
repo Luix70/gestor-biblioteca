@@ -198,8 +198,9 @@ body.shared>*:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast){display
 .rbtn:hover{opacity:1}
 .rbtn.rnsfw{filter:grayscale(1)}
 .rbtn.rnsfw.on{filter:none;opacity:1}
-.det-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.fbtn{background:var(--card2);border:1px solid var(--line);color:var(--txt);padding:7px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;gap:6px;align-items:center}
+/* Acciones de la ficha: rejilla de botones del MISMO tamaño (filas y columnas), texto centrado dentro. */
+.det-acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:4px}
+.fbtn{background:var(--card2);border:1px solid var(--line);color:var(--txt);padding:11px 12px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;display:flex;gap:6px;align-items:center;justify-content:center;text-align:center;width:100%}
 .fbtn:hover{border-color:var(--acc);color:#fff}
 .fbtn.bad:hover{border-color:var(--bad);color:var(--bad)}
 .fbtn:disabled{opacity:.55;cursor:default}
@@ -641,7 +642,7 @@ body.guest .admin-only{display:none!important}
 <script src="/qrcode.js"></script>
 <script>
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='ficha-minima+qr-compartir · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='ficha-minima-2 (sinopsis-arriba · nfc-offline-pantalla · acciones-grid) · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1254,8 +1255,8 @@ function pintarDoc(r,ctx){
   const secImg=`<details class="card foldcard" style="margin-top:14px"><summary>🖼️ Imágenes</summary><div style="margin-top:10px">${carrusel}</div></details>`;
   const secLect=lector?`<details class="card foldcard" id="lectDet" style="margin-top:14px"><summary>📖 Leer / archivo</summary><div style="margin-top:10px">${lector}</div></details>`:'';
   const secCat=`<details class="card foldcard" style="margin-top:14px"><summary>📚 Datos catalográficos</summary><div style="margin-top:10px"><dl class="dl">${dl}</dl>${clas}${palabras}${alertas}</div></details>`;
-  const secSin=d.sinopsis?`<details class="card foldcard" style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(d.sinopsis)}</p></details>`:'';
-  $('#p-detalle').innerHTML=`${crumb}<div style="margin:2px 0 12px"><button class="det-back" title="Volver" onclick="${back}">←</button></div>${fmin}${secAcc}${secImg}${secLect}${secCat}${secSin}`;
+  const secSin=d.sinopsis?`<details class="card foldcard" open style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(d.sinopsis)}</p></details>`:'';
+  $('#p-detalle').innerHTML=`${crumb}<div style="margin:2px 0 12px"><button class="det-back" title="Volver" onclick="${back}">←</button></div>${fmin}${secAcc}${secImg}${secLect}${secSin}${secCat}`;
   attachClas('#p-detalle');
   attachRating('#p-detalle');
   $$('#p-detalle .copybtn').forEach(b=>b.onclick=e=>{e.stopPropagation();copiar(b.dataset.copy);});
@@ -2918,7 +2919,7 @@ function heroExlibris(ex){
   const p=String(ex).split('·').map(s=>s.trim()).filter(Boolean);
   const lib=p[0]||ex, prop=p.slice(1).join(' · ');
   return `<div style="text-align:center;font-family:Georgia,'Times New Roman',serif;background:linear-gradient(#cdab6c,#9c7a44);color:#2a1d0e;border:1px solid #6e5226;border-radius:10px;padding:16px 12px;margin:0 0 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 3px 10px rgba(0,0,0,.45)">
-    <div style="font-size:19px;font-weight:700;letter-spacing:2px;text-transform:uppercase">📖 ${esc(lib)}</div>${prop?`<div style="font-size:13px;margin-top:5px;font-style:italic">${esc(prop)}</div>`:''}</div>`;
+    <div style="font-size:19px;font-weight:700;letter-spacing:2px;text-transform:uppercase">${esc(lib)}</div>${prop?`<div style="font-size:13px;margin-top:5px;font-style:italic">${esc(prop)}</div>`:''}</div>`;
 }
 // Estrellas estáticas (solo lectura) para la valoración guardada en la etiqueta.
 const estrellasHTML=n=>{n=+n||0;return n?`<span style="color:#ffcf5a;font-size:16px;letter-spacing:2px" title="${n}★">${'★'.repeat(n)}${'☆'.repeat(Math.max(0,5-n))}</span>`:'';};
@@ -2986,11 +2987,28 @@ async function compartirDoc(d){
   if(navigator.share){sh.onclick=()=>{navigator.share({title:d.titulo||'Ficha',url}).catch(()=>{});};}
   else sh.style.display='none';
 }
+// Contenedor de PÁGINA AUTÓNOMA (oculta el resto del panel): vista compartida por QR y lectura NFC offline.
+function _sharedCont(){
+  document.body.classList.add('shared');
+  let c=document.getElementById('sharedView');
+  if(!c){c=document.createElement('div');c.id='sharedView';c.style.cssText='max-width:640px;margin:0 auto;padding:16px 14px 40px';document.body.appendChild(c);}
+  return c;
+}
+const _brandLine='<div style="text-align:center;margin:8px 0 16px"><span style="font-family:Georgia,\'Times New Roman\',serif;font-weight:700;letter-spacing:1.5px;color:var(--acc);font-size:14px">BIBLIOTHECA LUDOVICIANA</span></div>';
+// Sin conexión: pantalla completa que espera una etiqueta NFC y auto-escanea (no aterriza en el Inbox).
+function pantallaEsperaNFC(){
+  const cont=_sharedCont();
+  cont.innerHTML=`<div style="text-align:center;margin-top:54px"><div style="font-size:44px">📴</div>
+    <h2 style="margin:12px 0 4px">Sin conexión</h2>
+    <p class="muted">Acerca una etiqueta NFC para ver la ficha del libro.</p>
+    ${('NDEFReader' in window)?`<button class="btn pri" id="offRead" style="margin-top:16px">📲 Leer etiqueta</button>`:`<p class="muted" style="font-size:12px;margin-top:10px">Este navegador no soporta NFC (Android + Chrome).</p>`}</div>
+    <div style="margin-top:30px">${_brandLine}</div>`;
+  const b=document.getElementById('offRead');if(b)b.onclick=()=>{try{leerNFC();}catch(_){}}
+  if('NDEFReader' in window)setTimeout(()=>{try{leerNFC();}catch(_){}},300);
+}
 // VISTA COMPARTIDA (?s=<token>): página autónoma de SOLO la ficha (sin login ni resto de la app).
 async function vistaCompartida(token){
-  document.body.classList.add('shared');
-  let cont=document.getElementById('sharedView');
-  if(!cont){cont=document.createElement('div');cont.id='sharedView';cont.style.cssText='max-width:640px;margin:0 auto;padding:16px 14px 40px';document.body.appendChild(cont);}
+  const cont=_sharedCont();
   cont.innerHTML='<p class="muted" style="text-align:center;margin-top:50px">Cargando ficha…</p>';
   let data;
   try{data=await fetch('/api/compartido/'+encodeURIComponent(token)).then(r=>r.json());}catch(e){data=null;}
@@ -3005,20 +3023,28 @@ async function vistaCompartida(token){
     cdu:f.cdu||'',isbn:f.isbn||'',
     origen:'Ficha compartida (solo lectura). No da acceso al resto de la biblioteca.'
   });
-  const sinopsis=f.sinopsis?`<details class="card foldcard" style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(f.sinopsis)}</p></details>`:'';
-  cont.innerHTML=`<div style="text-align:center;margin:8px 0 16px"><span style="font-family:Georgia,'Times New Roman',serif;font-weight:700;letter-spacing:1.5px;color:var(--acc);font-size:14px">📖 BIBLIOTHECA LUDOVICIANA</span></div>${portada}${fmin}${sinopsis}`;
+  const sinopsis=f.sinopsis?`<details class="card foldcard" open style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(f.sinopsis)}</p></details>`:'';
+  cont.innerHTML=`${_brandLine}${portada}${fmin}${sinopsis}`;
 }
 function mostrarOfflineNFC(o,ex){
   // Una etiqueta NFC se pega a un ejemplar FÍSICO → siempre papel: ex-libris + ubicación (Ficha mínima).
   const fmin=fichaMinima({titulo:o.t,estrellas:o.s,esDigital:false,exlibris:ex||EX_LIBRIS,
     autor:o.a||'',editorial:o.e||'',coleccion:o.x||'',cdu:o.c||'',isbn:o.i||'',ubicacion:o.u||'',
     origen:'Datos leídos de la etiqueta NFC (sin conexión).'});
+  // Sin conexión → PÁGINA COMPLETA con solo la Ficha mínima (no un modal sobre el Inbox).
+  if(APP_OFFLINE){
+    const cont=_sharedCont();
+    cont.innerHTML=`${fmin}<div style="text-align:center;margin-top:16px">${('NDEFReader' in window)?`<button class="btn pri" id="offOtra">📲 Leer otra etiqueta</button>`:''}</div><div style="margin-top:24px">${_brandLine}</div>`;
+    const b=document.getElementById('offOtra');if(b)b.onclick=()=>{try{leerNFC();}catch(_){}}
+    return;
+  }
+  // Con conexión (lectura puntual que no alcanzó el servidor): modal ligero, sin abandonar la página. Cuando
+  //   el servidor SÍ responde, leerNFC ya abre la ficha online directamente (con la Ficha mínima primero).
   $('#cmpModal').innerHTML=`<div class="box card" style="max-width:460px;padding:0;overflow:hidden;border:none">${fmin}
     <div style="padding:12px 16px 14px"><p class="muted" style="font-size:12px;margin:0 0 10px">📴 No hay conexión.</p>
-    <div style="display:flex;gap:10px;justify-content:flex-end">${o.d?`<button class="btn pri" id="nfcOnline">Ver ficha online</button>`:''}<button class="btn" id="nfcCerr">Cerrar</button></div></div></div>`;
+    <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn" id="nfcCerr">Cerrar</button></div></div></div>`;
   $('#cmpScrim').style.display='block';$('#cmpModal').style.display='grid';
   const cl=$('#nfcCerr');if(cl)cl.onclick=cerrarCmp; $('#cmpScrim').onclick=cerrarCmp;
-  const on=$('#nfcOnline');if(on)on.onclick=()=>{cerrarCmp();verDoc(o.d,{volver:'inbox',etiqueta:'Inbox'});};
 }
 // Lectura de una etiqueta de ESTANTERÍA: ex-libris (hero) + nombre + «Ver libros» (lista esa ubicación).
 function mostrarEstanteriaNFC(label,amb,est,ex){
@@ -3441,8 +3467,9 @@ function mostrarLogin(){TOKEN='';ROL=null;localStorage.removeItem('panel_token')
 function aplicarRol(){document.body.classList.toggle('guest',ROL==='guest');$('#who').textContent=USER||'';$('#rol').textContent=ROL||'';$('#rol').className='rol '+(ROL||'');}
 function bannerOffline(){let b=document.getElementById('offBanner');if(!b){b=document.createElement('div');b.id='offBanner';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:400;background:#7a5c00;color:#fff;text-align:center;font-size:13px;padding:6px 10px;box-shadow:0 1px 6px rgba(0,0,0,.4)';b.innerHTML='📴 Sin conexión — acerca una etiqueta NFC para ver su ficha offline';document.body.appendChild(b);}}
 function arrancar(){$('#login').classList.remove('show');aplicarRol();iniciarHistorial();
-  // Sin red: directo al Inbox y AUTO-ESCANEA NFC → al acercar la etiqueta sale su ficha offline directamente.
-  if(APP_OFFLINE){bannerOffline();go('inbox');if('NDEFReader' in window)setTimeout(()=>{try{leerNFC();}catch(_){}},300);return;}
+  // Sin red: pantalla completa que espera y auto-escanea NFC → al acercar la etiqueta sale SOLO su Ficha
+  //   mínima (no aterriza en el Inbox, que offline no sirve de nada).
+  if(APP_OFFLINE){pantallaEsperaNFC();return;}
   cargarUbicaciones();go('search');abrirEnlaceProfundo();procesarCompartidos();refrescarEstado();if(estadoTimer)clearInterval(estadoTimer);estadoTimer=setInterval(refrescarEstado,8000);}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#lgErr').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:$('#lgUser').value.trim(),password:$('#lgPass').value})});
