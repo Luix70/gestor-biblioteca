@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const APP_BUILD='portadas-keyless (OL+Apple) · 2026-07-01';   // marca de versión (verificar despliegue)
+const APP_BUILD='portadas-multiseleccion+camara · 2026-07-01';   // marca de versión (verificar despliegue)
 try{console.log('%c📚 Bibliotheca build: '+APP_BUILD,'color:#28d9a8;font-weight:700');}catch(_){}
 let TOKEN=localStorage.getItem('panel_token')||'', ROL=null, USER=null;
 let detalle=null; // vista de detalle abierta: {tipo:'obra'|'doc', id, ctx?}
@@ -1963,16 +1963,20 @@ async function isbnBuscar(){
   if(msg)msg.textContent='Buscando…'; if(res)res.innerHTML='';
   let r; try{ r=await api('/isbn/'+encodeURIComponent(raw)); }catch(e){ if(msg)msg.textContent=e.message; return; }
   const meta=r.meta||{};
-  _isbnEstado={ isbn:r.isbn, meta:{...meta}, portadas:(r.portadas||[]).map((p,i)=>({...p,sel:i===0})), extra:[], cduDesc:r.cdu_desc||null };
+  _isbnEstado={ isbn:r.isbn, meta:{...meta}, portadas:(r.portadas||[]).map((p,i)=>({...p,sel:i===0})), extra:[], cduDesc:r.cdu_desc||null, portadaId:(r.portadas&&r.portadas.length)?'c0':null };
   if(msg)msg.textContent=r.encontrado?`✔ Encontrado en el Fichero${(meta.fuentes||[]).length?` (${meta.fuentes.join(', ')})`:''}.`:'⚠ No está en el Fichero local: revisa/completa los datos a mano.';
   isbnRender();
 }
-function isbnThumb(id,src,cap,sel,hires,editable){
-  return `<div style="position:relative;width:96px">
-    <div data-thumb="${id}" style="cursor:pointer;text-align:center;border:2px solid ${sel?'var(--acc)':'transparent'};border-radius:8px;padding:3px;background:var(--card)">
-      <img src="${esc(src)}" style="width:100%;height:120px;object-fit:contain;border-radius:5px" loading="lazy">
-      <div class="muted" style="font-size:10px;margin-top:2px;line-height:1.2">${sel?'✅ ':''}${hires?'✔ ':''}${esc(cap)}</div>
+// Miniatura de portada: casilla «incluir» (arriba-izq), ✎ conformar (arriba-der), y clic en la imagen para
+// marcarla como PORTADA (borde dorado + ⭐). incluida = va al archivo; esPortada = es la cubierta principal.
+function isbnThumb(id,src,cap,incluida,esPortada,hires,editable){
+  const bord=esPortada?'#ffcf5a':(incluida?'var(--acc)':'transparent');
+  return `<div style="position:relative;width:100px">
+    <div data-portada="${id}" title="Pulsa para marcarla como PORTADA" style="cursor:pointer;text-align:center;border:2px solid ${bord};border-radius:8px;padding:3px;background:var(--card)">
+      <img src="${esc(src)}" style="width:100%;height:118px;object-fit:contain;border-radius:5px" loading="lazy">
+      <div class="muted" style="font-size:10px;margin-top:2px;line-height:1.2">${esPortada?'<span style="color:#ffcf5a;font-weight:700">⭐ PORTADA</span> ':(incluida?'✓ ':'')}${hires?'✔ ':''}${esc(cap)}</div>
     </div>
+    <label title="Incluir esta imagen al archivar" style="position:absolute;top:5px;left:5px;display:inline-flex;align-items:center;background:rgba(0,0,0,.65);border-radius:6px;padding:2px 4px;cursor:pointer;z-index:2"><input type="checkbox" data-chk="${id}" ${incluida?'checked':''} style="margin:0;width:15px;height:15px"></label>
     ${editable?`<button type="button" data-edit="${id}" title="Conformar: recortar / enderezar perspectiva" style="position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.6);color:#fff;cursor:pointer;font-size:13px;line-height:1;padding:0">✎</button>`:''}
   </div>`;
 }
@@ -1993,33 +1997,43 @@ function isbnRender(){
   // Miniaturas: las candidatas «web» (resultados de Google) se muestran VÍA PROXY same-origin (evita bloqueo
   // de hotlink y contenido mixto en HTTPS). Las keyless y las subidas, directas.
   const dispSrc=p=>p.web?('/api/proxy-imagen?url='+encodeURIComponent(p.url)+(TOKEN?'&token='+encodeURIComponent(TOKEN):'')):p.url;
-  const cand=_isbnEstado.portadas.map((p,i)=>isbnThumb('c'+i,dispSrc(p),`${p.fuente} · ${p.ancho}×${p.alto}`,p.sel,p.ancho>=800,true)).join('');
-  const extra=_isbnEstado.extra.map((p,i)=>isbnThumb('e'+i,p.previa||p.url,p.nombre||'añadida',p.sel,true,true)).join('');
-  const galeria=(cand||extra)?`<div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${cand}${extra}</div>`:'<div class="muted" style="font-size:12px;margin-top:4px">Sin portadas automáticas. Pulsa «Buscar más portadas» o sube una.</div>';
+  _isbnNormalizaPortada();
+  const cand=_isbnEstado.portadas.map((p,i)=>isbnThumb('c'+i,dispSrc(p),`${p.fuente} · ${p.ancho}×${p.alto}`,p.sel,_isbnEstado.portadaId==='c'+i,p.ancho>=800,true)).join('');
+  const extra=_isbnEstado.extra.map((p,i)=>isbnThumb('e'+i,p.previa||p.url,p.nombre||'añadida',p.sel,_isbnEstado.portadaId==='e'+i,true,true)).join('');
+  const galeria=(cand||extra)?`<div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${cand}${extra}</div>`:'<div class="muted" style="font-size:12px;margin-top:4px">Sin portadas automáticas. Pulsa «Buscar más portadas», haz una foto o sube una.</div>';
   res.innerHTML=`<div class="card" style="background:var(--card2)">
     ${datos}
-    <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Portada — marca la buena (la 1ª marcada es la portada; ✔ = ≥800 px)</div>${galeria}</div>
+    <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Portadas — ✓ marca las que archivar; pulsa una para elegir la ⭐ PORTADA (✔ = ≥800 px)</div>${galeria}</div>
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
       <button class="btn pri" type="button" id="isbnBuscarWeb" title="Busca más portadas por título+autor en OpenLibrary y Apple Books (sin clave) y las trae aquí para elegir">🔎 Buscar más portadas</button>
+      <button class="btn" type="button" id="isbnCam">📷 Cámara</button>
       <button class="btn" type="button" id="isbnAddFile">⬆️ Subir imagen</button>
       <button class="btn" type="button" id="isbnAddUrl">➕ Añadir por URL</button>
       <span class="muted" id="isbnWebMsg" style="font-size:12px"></span>
       <input type="file" id="isbnFile" accept="image/*" multiple style="display:none">
+      <input type="file" id="isbnCamFile" accept="image/*" capture="environment" style="display:none">
     </div>
     <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
       <button class="btn pri" type="button" id="isbnCrear">✅ Crear</button>
       <button class="btn" type="button" id="isbnCompletar" title="Enriquecer con las APIs y resolver la CDU antes de crear">✨ Completar y crear</button>
       <button class="btn" type="button" id="isbnCancel">Cancelar</button>
     </div></div>`;
-  res.querySelectorAll('[data-thumb]').forEach(el=>el.onclick=()=>isbnToggle(el.dataset.thumb));
+  res.querySelectorAll('[data-portada]').forEach(el=>el.onclick=()=>isbnSetPortada(el.dataset.portada));
+  res.querySelectorAll('[data-chk]').forEach(el=>el.onchange=e=>{e.stopPropagation();isbnToggleInc(el.dataset.chk);});
   res.querySelectorAll('[data-edit]').forEach(el=>el.onclick=e=>{e.stopPropagation();isbnConformar(el.dataset.edit);});
   res.querySelectorAll('[data-mk]').forEach(el=>el.oninput=()=>{const k=el.dataset.mk;_isbnEstado.meta[k]=(k==='autores')?el.value.split(';').map(s=>s.trim()).filter(Boolean):el.value;});
-  $('#isbnAddUrl').onclick=isbnAddUrl; $('#isbnAddFile').onclick=()=>$('#isbnFile').click(); $('#isbnFile').onchange=isbnAddFiles;
+  $('#isbnAddUrl').onclick=isbnAddUrl; $('#isbnAddFile').onclick=()=>$('#isbnFile').click(); $('#isbnFile').onchange=()=>_isbnAnadirArchivos($('#isbnFile'));
+  $('#isbnCam').onclick=()=>$('#isbnCamFile').click(); $('#isbnCamFile').onchange=()=>_isbnAnadirArchivos($('#isbnCamFile'));
   if($('#isbnBuscarWeb'))$('#isbnBuscarWeb').onclick=isbnBuscarPortadasWeb;
   $('#isbnCrear').onclick=()=>isbnCrear(false); $('#isbnCompletar').onclick=()=>isbnCrear(true);
   $('#isbnCancel').onclick=()=>{_isbnEstado=null;$('#isbnRes').innerHTML='';$('#isbnMsg').textContent='';};
 }
-function isbnToggle(id){const l=id[0]==='c'?_isbnEstado.portadas:_isbnEstado.extra;const i=+id.slice(1);if(l[i]){l[i].sel=!l[i].sel;isbnRender();}}
+function _isbnItem(id){const l=id[0]==='c'?_isbnEstado.portadas:_isbnEstado.extra;return l[+id.slice(1)];}
+function _isbnIncluidos(){const inc=[];_isbnEstado.portadas.forEach((p,i)=>{if(p.sel)inc.push('c'+i);});_isbnEstado.extra.forEach((p,i)=>{if(p.sel)inc.push('e'+i);});return inc;}
+// La portada siempre apunta a una imagen INCLUIDA; si deja de estarlo, pasa a la primera incluida (o ninguna).
+function _isbnNormalizaPortada(){const inc=_isbnIncluidos();if(!inc.includes(_isbnEstado.portadaId))_isbnEstado.portadaId=inc[0]||null;}
+function isbnToggleInc(id){const it=_isbnItem(id);if(it){it.sel=!it.sel;isbnRender();}}
+function isbnSetPortada(id){const it=_isbnItem(id);if(it){it.sel=true;_isbnEstado.portadaId=id;isbnRender();}}
 // Conformar (recortar/enderezar perspectiva) una portada antes de crear. Local (base64) → directo; remota
 // (URL) → vía proxy same-origin para esquivar el CORS del canvas. El resultado depurado se añade como imagen.
 function isbnConformar(id){
@@ -2029,8 +2043,8 @@ function isbnConformar(id){
     :'/api/proxy-imagen?url='+encodeURIComponent(item.url)+(TOKEN?'&token='+encodeURIComponent(TOKEN):'');
   _editorImagen({ src,
     onSave:(b64)=>{
-      if(remoto||!item.base64){ if(remoto)item.sel=false; _isbnEstado.extra.push({base64:b64,previa:b64,tipo:'imagen',sel:true,nombre:'conformada'}); }
-      else { item.base64=b64; item.previa=b64; item.sel=true; }
+      if(remoto||!item.base64){ if(remoto)item.sel=false; _isbnEstado.extra.push({base64:b64,previa:b64,tipo:'imagen',sel:true,nombre:'conformada'}); _isbnEstado.portadaId='e'+(_isbnEstado.extra.length-1); }
+      else { item.base64=b64; item.previa=b64; item.sel=true; _isbnEstado.portadaId=id; }
       cerrarCmp(); isbnRender();
     },
     onClose:()=>{ cerrarCmp(); }
@@ -2048,18 +2062,22 @@ async function isbnBuscarPortadasWeb(){
   isbnRender();
   const m2=$('#isbnWebMsg'); if(m2)m2.textContent=nuevas.length?`${nuevas.length} portada(s) encontradas (OpenLibrary/Apple). Marca la buena y ✎ para conformar.`:'Sin resultados nuevos.';
 }
-async function isbnAddFiles(){
-  const files=[...$('#isbnFile').files];$('#isbnFile').value='';
-  for(const f of files){try{const red=await reducirImagen(f);const durl=await fileADataURL(red);_isbnEstado.extra.push({base64:durl,previa:durl,tipo:'imagen',sel:true,nombre:f.name});}catch(e){toast('Imagen no añadida: '+e.message,'bad');}}
+// Añade imágenes desde un <input type=file> (galería o cámara con capture) como candidatas incluidas.
+async function _isbnAnadirArchivos(inp){
+  if(!inp)return; const files=[...inp.files]; inp.value='';
+  for(const f of files){try{const red=await reducirImagen(f);const durl=await fileADataURL(red);_isbnEstado.extra.push({base64:durl,previa:durl,tipo:'imagen',sel:true,nombre:f.name||'foto'});}catch(e){toast('Imagen no añadida: '+e.message,'bad');}}
   isbnRender();
 }
 async function isbnCrear(completar){
-  if(!_isbnEstado)return;
-  const sel=[..._isbnEstado.portadas.filter(p=>p.sel).map(p=>({url:p.url})),
-            ..._isbnEstado.extra.filter(p=>p.sel).map(p=>p.base64?{base64:p.base64}:{url:p.url})];
-  if(sel.length)sel[0].tipo='portada';
-  const imagenes=sel.filter(s=>s.url).map(s=>({url:s.url,tipo:s.tipo||'imagen'}));
-  const subidas=sel.filter(s=>s.base64).map(s=>({base64:s.base64,tipo:s.tipo||'imagen'}));
+  if(!_isbnEstado)return; _isbnNormalizaPortada();
+  // Todas las imágenes INCLUIDAS (✓); la marcada como ⭐ portada va como tipo:'portada', el resto 'imagen'.
+  const items=[];
+  _isbnEstado.portadas.forEach((p,i)=>{if(p.sel)items.push({id:'c'+i,url:p.url});});
+  _isbnEstado.extra.forEach((p,i)=>{if(p.sel)items.push(p.base64?{id:'e'+i,base64:p.base64}:{id:'e'+i,url:p.url});});
+  items.forEach(it=>it.tipo=(it.id===_isbnEstado.portadaId)?'portada':'imagen');
+  if(items.length&&!items.some(it=>it.tipo==='portada'))items[0].tipo='portada';
+  const imagenes=items.filter(s=>s.url).map(s=>({url:s.url,tipo:s.tipo}));
+  const subidas=items.filter(s=>s.base64).map(s=>({base64:s.base64,tipo:s.tipo}));
   const ubic={ambito:($('#inAmbito')&&$('#inAmbito').value)||undefined,estanteria:($('#inEstanteria')&&$('#inEstanteria').value)||undefined};
   const body={isbn:_isbnEstado.isbn,meta:{..._isbnEstado.meta},imagenes,subidas,ubicacion:ubic,
     coleccion:($('#inColeccion')&&$('#inColeccion').value)||undefined,obra:($('#inObra')&&$('#inObra').value)||undefined,completar};
