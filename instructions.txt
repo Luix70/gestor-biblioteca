@@ -378,10 +378,11 @@ de ficheros clasificado por CDU.
       arbitrario): 📥 por fecha de ingreso · 🗂️ por colección + nº de volumen · ↕️ como
       están seleccionados. Así la cola sigue un orden útil (y físico).
       Se abre una COLA que muestra cada ficha (portada, título, ubicación) y pide
-      acercar la etiqueta; al grabar avanza. Si vas a RE-GRABAR etiquetas que YA tienen
-      datos, marca «Sobrescribir sin comprobar» (se recuerda): escribe en el primer
-      toque sin leerlas antes, evitando que Android abra la ficha vieja y rompa el flujo.
-      MODO MANUAL (confirmar «Siguiente») o
+      acercar la etiqueta; al grabar avanza. Mantiene el NFC en primer plano durante
+      TODA la cola (un solo scan sostenido) y graba en el primer toque SIN leer la
+      etiqueta antes: así re-graba etiquetas ya usadas sin que Android abra la ficha
+      vieja ni entre libros (evita el redirect que rompía el flujo). MODO MANUAL
+      (confirmar «Siguiente») o
       AUTOMÁTICO (avanza solo si la grabación es óptima). Pausar/Continuar, Saltar y
       Vaciar cola. La cola pendiente se guarda: si cierras, aparece «Reanudar
       etiquetado (N)». Truco: filtra antes «Etiqueta NFC = Sin» para etiquetar solo

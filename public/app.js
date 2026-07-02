@@ -8306,7 +8306,10 @@ async function iniciarEtiquetadoLote(ids, auto) {
       }
     }
   }
-  _etq = { ids, i: 0, auto: !!auto, forzar: localStorage.getItem('etq_forzar') === '1', abort: null, actual: null };
+  // reader/scanAbort/_onRead/ultimoUid: un ÚNICO lector con scan() sostenido durante TODA la cola (mantiene
+  // el foreground NFC → el sistema nunca lee la etiqueta ni redirige, ni siquiera entre libros). Ver
+  // _etqAsegurarScan/grabarItemEtq. `soportaScan` = si el navegador dejó abrir ese scan sostenido.
+  _etq = { ids, i: 0, auto: !!auto, abort: null, actual: null, reader: null, scanAbort: null, _onRead: null, ultimoUid: null, soportaScan: true };
   $('#cmpModal').innerHTML = '<div class="box card" style="max-width:480px"><div id="etqBody"></div></div>';
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
@@ -8330,6 +8333,58 @@ function elegirOrdenLote() {
     const cerrarCon = (valor) => { cerrarCmp(); resolver(valor); };
     $('#cmpScrim').onclick = () => cerrarCon(null);
     $$('#cmpModal [data-ord]').forEach((b) => (b.onclick = () => cerrarCon(b.dataset.ord || null)));
+  });
+}
+// Asegura UN lector con scan() ACTIVO durante toda la cola: así Chrome mantiene el foreground NFC de forma
+// CONTINUA y el sistema no lee/redirige nunca (tampoco en el hueco entre libros). El onreading del scan se
+// reenvía al «esperador» del ítem actual (_etq._onRead). Si el navegador no deja abrir el scan sostenido,
+// `soportaScan=false` y se recae al método por-etiqueta (escribirNFC).
+async function _etqAsegurarScan() {
+  if (!_etq || _etq.reader || !_etq.soportaScan) return;
+  try {
+    _etq.reader = new NDEFReader();
+    _etq.scanAbort = new AbortController();
+    _etq.reader.onreading = (ev) => { if (_etq && typeof _etq._onRead === 'function') _etq._onRead(ev); };
+    _etq.reader.onreadingerror = () => {};
+    await _etq.reader.scan({ signal: _etq.scanAbort.signal });
+  } catch (_) {
+    _etq.reader = null;
+    _etq.soportaScan = false; // el navegador no permite el scan sostenido → recambio por-etiqueta
+  }
+}
+// Detiene el scan sostenido de la sesión (al terminar/pausar/vaciar la cola).
+function _etqPararScan() {
+  if (_etq && _etq.scanAbort) { try { _etq.scanAbort.abort(); } catch (_) {} }
+  if (_etq) { _etq.reader = null; _etq._onRead = null; }
+}
+// Graba UN ítem sobre el lector sostenido: espera el PRÓXIMO toque (de ahí saca el UID), NO comprueba nada
+// (escribe directo → sin lectura previa que redirija) y NO aborta el scan (sin hueco). Ignora la etiqueta
+// recién grabada (mismo UID) para no reescribir el libro anterior si sigue cerca. Devuelve el UID (o null).
+function grabarItemEtq(recs, signal) {
+  return new Promise((resolve, reject) => {
+    let hecho = false;
+    const onAbort = () => {
+      if (hecho) return;
+      hecho = true; _etq._onRead = null;
+      reject(new DOMException('abortado', 'AbortError'));
+    };
+    if (signal.aborted) return onAbort();
+    signal.addEventListener('abort', onAbort, { once: true });
+    _etq._onRead = async (ev) => {
+      if (hecho) return;
+      const uid = ev.serialNumber || null;
+      if (uid && _etq.ultimoUid && uid === _etq.ultimoUid) return; // misma etiqueta ya grabada: espera otra
+      _etq._onRead = null; // desarma mientras escribe (no re-entrar)
+      try {
+        await _etq.reader.write({ records: recs }, { signal });
+        hecho = true;
+        if (uid) _etq.ultimoUid = uid;
+        resolve(uid);
+      } catch (e) {
+        hecho = true;
+        reject(e);
+      }
+    };
   });
 }
 async function procesarEtq() {
@@ -8360,22 +8415,20 @@ async function procesarEtq() {
   }
   const { url, records: recs } = _recordsDoc(doc, r);
   _etq.actual = { doc, r, url };
+  await _etqAsegurarScan(); // scan sostenido de la sesión (foreground continuo, sin huecos)
   pintarEtq(doc, r, 'esperando');
   const abort = new AbortController();
   _etq.abort = abort;
   try {
-    // forzar (leído al TOCAR) = «Sobrescribir sin comprobar»: escribe en el primer toque SIN leer la
-    // etiqueta antes, evitando el hueco en que Android leía la URL vieja y redirigía al re-grabar.
-    const uid = await escribirNFC(recs, id, abort.signal, () => !!(_etq && _etq.forzar));
+    // Con el scan sostenido, se graba sobre ese lector (sin lectura previa de comprobación → sin el hueco
+    // que hacía que el sistema abriera la URL). Si el navegador no lo soporta, recambio: escribirNFC forzado.
+    const uid = _etq.reader
+      ? await grabarItemEtq(recs, abort.signal)
+      : await escribirNFC(recs, id, abort.signal, true);
     if (gen !== _etqGen) return;
     await etqTrasGrabar(doc, r, uid, url, gen);
   } catch (e) {
     if (gen !== _etqGen) return;
-    if (e && e.code === 'OCUPADA') {
-      _etq.pend = { recs, id, url };
-      pintarEtq(doc, r, 'ocupada', e.prev);
-      return;
-    }
     if (e && e.name === 'AbortError') {
       pintarEtq(doc, r, 'pausa');
       return;
@@ -8407,46 +8460,24 @@ async function etqTrasGrabar(doc, r, uid, url, gen) {
       }
     }, 900);
 }
-// SOBRESCRIBIR (confirmado) la etiqueta ocupada del documento actual.
-async function etqSobrescribir() {
-  if (!_etq || !_etq.pend || !_etq.actual) return;
-  const { recs, id, url } = _etq.pend;
-  _etq.pend = null;
-  const { doc, r } = _etq.actual;
-  const gen = ++_etqGen;
-  const abort = new AbortController();
-  _etq.abort = abort;
-  pintarEtq(doc, r, 'esperando');
-  try {
-    const uid = await escribirNFC(recs, id, abort.signal, true);
-    if (gen !== _etqGen) return;
-    await etqTrasGrabar(doc, r, uid, url, gen);
-  } catch (e) {
-    if (gen !== _etqGen) return;
-    if (e && e.name === 'AbortError') {
-      pintarEtq(doc, r, 'pausa');
-      return;
-    }
-    pintarEtq(doc, r, 'error', e && e.message);
-  }
-}
+// Reintento «solo el enlace» (si los datos offline no cupieron): graba url + ex-libris sobre el lector
+// sostenido (o recambio). No hace lectura previa de comprobación.
 async function etqSoloEnlace() {
   if (!_etq || !_etq.actual) return;
   const { doc, r, url } = _etq.actual;
+  const recs = [
+    { recordType: 'url', data: url },
+    { recordType: 'text', data: EX_LIBRIS },
+  ];
   const gen = ++_etqGen;
   const abort = new AbortController();
   _etq.abort = abort;
+  await _etqAsegurarScan();
   pintarEtq(doc, r, 'esperando');
   try {
-    const uid = await escribirNFC(
-      [
-        { recordType: 'url', data: url },
-        { recordType: 'text', data: EX_LIBRIS },
-      ],
-      doc._id,
-      abort.signal,
-      true,
-    );
+    const uid = _etq.reader
+      ? await grabarItemEtq(recs, abort.signal)
+      : await escribirNFC(recs, doc._id, abort.signal, true);
     if (gen !== _etqGen) return;
     await etqTrasGrabar(doc, r, uid, url, gen);
   } catch (e) {
@@ -8460,6 +8491,7 @@ async function etqSoloEnlace() {
 }
 function finEtq() {
   const n = _etq ? _etq.ids.length : 0;
+  _etqPararScan(); // suelta el foreground NFC de la sesión
   localStorage.removeItem(ETQ_LS);
   _etqGen++;
   _etq = null;
@@ -8474,6 +8506,7 @@ function vaciarEtq() {
       _etq.abort.abort();
     } catch (_) {}
   }
+  _etqPararScan();
   localStorage.removeItem(ETQ_LS);
   _etq = null;
   cerrarCmp();
@@ -8487,6 +8520,7 @@ function cerrarEtqGuardando() {
       _etq.abort.abort();
     } catch (_) {}
   }
+  _etqPararScan();
   guardarColaEtq();
   _etq = null;
   cerrarCmp();
@@ -8529,9 +8563,6 @@ function pintarEtq(doc, r, estado, extra) {
   } else if (estado === 'pausa') {
     est = '<span class="muted">⏸ En pausa</span>';
     bot = `<button class="btn pri" id="etqCont">▶ Continuar</button>` + cS + cX;
-  } else if (estado === 'ocupada') {
-    est = `<span style="color:var(--warn)">⚠️ Esta etiqueta YA está grabada${extra && extra.titulo ? ` de «${esc(recortar(extra.titulo, 30))}»` : extra && extra.docId ? ' de OTRO libro' : ' (datos ajenos)'}. ¿Libro equivocado?</span>`;
-    bot = `<button class="btn pri" id="etqSobre">Sobrescribir</button>` + cS + cX;
   } else if (estado === 'errorDoc') {
     est = '<span style="color:var(--bad)">No se pudo cargar este documento.</span>';
     bot = cS + cX;
@@ -8540,8 +8571,7 @@ function pintarEtq(doc, r, estado, extra) {
     bot = cX;
   }
   b.innerHTML = `<h3 style="margin-top:0">📶 Etiquetar — ${n} / ${tot} <button class="btn" id="etqMin" title="Cerrar conservando la cola (reanudar luego)" style="float:right;padding:2px 9px">✕</button></h3>
-    <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="etqAuto" ${_etq.auto ? 'checked' : ''} style="width:auto;margin:0"> Modo automático (avanza solo al grabar)</label>
-    <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer" title="Escribe en el primer toque sin leer la etiqueta antes. Actívalo si las etiquetas YA tienen datos (re-grabar): evita que el móvil abra la ficha vieja."><input type="checkbox" id="etqForzar" ${_etq.forzar ? 'checked' : ''} style="width:auto;margin:0"> Sobrescribir sin comprobar (re-grabar etiquetas usadas)</label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer"><input type="checkbox" id="etqAuto" ${_etq.auto ? 'checked' : ''} style="width:auto;margin:0"> Modo automático (avanza solo al grabar)</label>
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">${cov}<div style="min-width:0"><div style="font-weight:600;word-break:break-word">${tit}</div>${aut ? `<div class="muted" style="font-size:12px">${aut}</div>` : ''}<div style="margin-top:6px"><span class="tag" style="background:rgba(40,217,168,.16);color:var(--acc)">📍 ${ubic}</span>${yaTen ? ' <span class="muted" style="font-size:11px">· ya tenía etiqueta (regrabar)</span>' : ''}</div></div></div>
     <div style="min-height:24px;margin:6px 0;font-size:14px">${est}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${bot}</div>`;
@@ -8554,12 +8584,6 @@ function pintarEtq(doc, r, estado, extra) {
         _etq.i++;
         procesarEtq();
       }
-    };
-  const F = $('#etqForzar');
-  if (F)
-    F.onchange = () => {
-      _etq.forzar = F.checked;
-      localStorage.setItem('etq_forzar', F.checked ? '1' : '0'); // recordar la preferencia entre sesiones
     };
   const w = (id, fn) => {
     const e = $('#' + id);
@@ -8585,7 +8609,6 @@ function pintarEtq(doc, r, estado, extra) {
   });
   w('etqReint', () => procesarEtq());
   w('etqSolo', etqSoloEnlace);
-  w('etqSobre', etqSobrescribir);
 }
 // ════════ UBICACIONES (ámbitos/estanterías gestionadas como colecciones de estanterías) ════════
 let ubicArbol = [],
