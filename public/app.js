@@ -6860,10 +6860,11 @@ function llenarDatalist(id, valores) {
   if (!dl) return;
   dl.innerHTML = (valores || []).map((v) => `<option value="${esc(v)}">`).join('');
 }
+// Estanterías de un ámbito (según el mapa de ubicaciones), comparando el nombre sin distinguir may/min.
 function estanteriasDe(ambito) {
-  const a = (ambito || '').trim().toLowerCase();
-  const e = mapaUbicaciones.find((x) => (x.ambito || '').trim().toLowerCase() === a);
-  return e ? e.estanterias : [];
+  const buscado = (ambito || '').trim().toLowerCase();
+  const entrada = mapaUbicaciones.find((u) => (u.ambito || '').trim().toLowerCase() === buscado);
+  return entrada ? entrada.estanterias : [];
 }
 // <select> de ámbito/estantería FIABLE (en móvil el datalist sale en la barra del teclado, no como
 // desplegable). Despliega SIEMPRE sus valores; la estantería va asociada al ámbito (al cambiarlo se
@@ -6944,27 +6945,28 @@ async function cargarUbicaciones() {
 // Filtro de Búsqueda por ubicación: el <select> de ámbitos y, dependiente, el de estanterías (las del
 // ámbito elegido). Conservan la selección actual al repintar.
 function pintarUbicSearch() {
-  const sa = $('#sqAmbito');
-  if (sa) {
-    const cur = sa.value;
-    sa.innerHTML =
+  const selAmbito = $('#sqAmbito');
+  if (selAmbito) {
+    const previo = selAmbito.value;
+    selAmbito.innerHTML =
       '<option value="">Todos</option>' +
-      mapaUbicaciones.map((x) => `<option value="${esc(x.ambito)}">${esc(x.ambito)}</option>`).join('');
-    sa.value = cur;
+      mapaUbicaciones.map((u) => `<option value="${esc(u.ambito)}">${esc(u.ambito)}</option>`).join('');
+    selAmbito.value = previo;
   }
   pintarEstanteriaSearch();
 }
 function pintarEstanteriaSearch() {
-  const se = $('#sqEstanteria');
-  if (!se) return;
-  const amb = ($('#sqAmbito') && $('#sqAmbito').value) || '',
-    cur = se.value,
-    ests = estanteriasDe(amb);
-  se.innerHTML =
+  const selEstanteria = $('#sqEstanteria');
+  if (!selEstanteria) return;
+  const ambito = ($('#sqAmbito') && $('#sqAmbito').value) || '';
+  const previo = selEstanteria.value;
+  const estanterias = estanteriasDe(ambito);
+  selEstanteria.innerHTML =
     '<option value="">Todas</option>' +
-    ests.map((e) => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
-  se.disabled = !amb;
-  se.value = [...se.options].some((o) => o.value === cur) ? cur : '';
+    estanterias.map((e) => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
+  selEstanteria.disabled = !ambito;
+  // Conserva la estantería previa solo si sigue existiendo en el ámbito elegido.
+  selEstanteria.value = [...selEstanteria.options].some((o) => o.value === previo) ? previo : '';
 }
 // Reduce una foto a máx. `ladoMax` px (por el lado mayor) reescalándola en un canvas antes de subir →
 // menos datos y más rápido en el Atom. `calidad` = calidad JPEG (0..1). Si ya es más pequeña, devuelve el
