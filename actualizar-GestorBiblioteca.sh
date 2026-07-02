@@ -15,7 +15,8 @@
 # Repo privado: exporta un token antes de lanzarlo ->  sudo GITHUB_TOKEN=ghp_xxx bash ...
 #
 # Qué hace, en orden:
-#   1. Descarga main.tar.gz de GitHub (wget+tar; sin git, sin Alpine).
+#   1. Resuelve el SHA del commit (API) y descarga archive/<SHA>.tar.gz (inmutable, sin caché de rama;
+#      wget+tar, sin git). Fallback al tarball de rama si la API no responde. Escribe un fichero VERSION.
 #   2. down -v: para el contenedor (libera los montajes Inbox/CDU/... ) y elimina el
 #      volumen anónimo de node_modules, que "ensombrecía" módulos viejos (sharp/undici@7).
 #   3. Sincroniza el código PRESERVANDO .env, node_modules y los datos del host.
@@ -64,11 +65,29 @@ if [ ! -f "$APP_DIR/.env" ]; then
     exit 1
 fi
 
-# --- 1. Descargar y extrae el tarball en una zona de staging --------------
-echo "==> Descargando ${TARBALL_URL}"
+# --- 1. Resolver el COMMIT y descargar SU tarball (inmutable, sin caché de rama) ----------
+# El tarball de RAMA (archive/refs/heads/<rama>.tar.gz) lo CACHEA GitHub y puede servir código VIEJO
+# durante minutos tras un push (causa de "he desplegado y sigue lo anterior"). Resolvemos el SHA por la
+# API y bajamos archive/<SHA>.tar.gz (contenido inmutable, no cacheado "viejo"): así el despliegue trae
+# SIEMPRE lo último. Si la API no responde, se cae al tarball de rama (comportamiento anterior).
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
+API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
+echo "==> Resolviendo el commit de ${BRANCH}…"
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    SHA="$(wget --header="Authorization: token ${GITHUB_TOKEN}" -qO- "$API_URL" | grep -m1 '"sha"' | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([0-9a-f]+)".*/\1/' || true)"
+else
+    SHA="$(wget -qO- "$API_URL" | grep -m1 '"sha"' | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([0-9a-f]+)".*/\1/' || true)"
+fi
+if [ -n "${SHA:-}" ]; then
+    TARBALL_URL="https://github.com/${REPO}/archive/${SHA}.tar.gz"
+    echo "==> Commit resuelto: ${SHA}"
+else
+    echo "==> AVISO: no se pudo resolver el SHA (¿sin red/API?); uso el tarball de rama (puede venir cacheado)."
+fi
+
+echo "==> Descargando ${TARBALL_URL}"
 if [ -n "${GITHUB_TOKEN:-}" ]; then
     wget --header="Authorization: token ${GITHUB_TOKEN}" -qO "$STAGE/src.tar.gz" "$TARBALL_URL"
 else
@@ -101,6 +120,7 @@ rsync -a --delete \
     --exclude='/.env' \
     --exclude='/node_modules' \
     --exclude='/.git' \
+    --exclude='/VERSION' \
     --exclude='/Inbox' \
     --exclude='/CDU' \
     --exclude='/Cuarentena' \
@@ -110,6 +130,10 @@ rsync -a --delete \
     --exclude='/logs' \
     --exclude='/temp' \
     "$SRC_DIR"/ "$APP_DIR"/
+
+# Sello de versión: la app lo lee al arrancar y muestra «📦 Versión en ejecución: commit <sha>». Se escribe
+# TRAS el rsync (que lo excluye) y ANTES del build, para que quede dentro de la imagen (COPY . .).
+echo "${SHA:-desconocido} ${BRANCH}" > "$APP_DIR/VERSION"
 
 # --- 4. Reconstruir e iniciar -------------------------------------------
 echo "==> Reconstruyendo e iniciando (esto reinstala dependencias; en el Atom tarda un poco)"
