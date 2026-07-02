@@ -84,6 +84,9 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     const coleccionEditoriales = db.collection('editoriales');
 
     let docFinal = { ...documentoEnriquecido };
+    // El alta rápida por ISBN (sin enriquecer) no trae este array; sin él, cualquier `.push` de aviso
+    // (nuevo autor/colección/…) revienta con "Cannot read properties of undefined (reading 'push')".
+    if (!Array.isArray(docFinal.alertas_agente)) docFinal.alertas_agente = [];
     // Un tomo "?" (sin número determinable) lleva volumen_numero AUSENTE, nunca null (el $jsonSchema
     // lo tipa number|string). Si llegara null, se elimina para que el campo no exista.
     if (docFinal.volumen_numero == null) delete docFinal.volumen_numero;
@@ -376,6 +379,11 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             await registrarTomo(existente._id);
             return { ...actualizado, operacion: 'actualizacion' };
         }
+
+        // Nunca persistir campos VACÍOS (null/''/[]): el $jsonSchema rechaza en null muchos opcionales (error
+        // 121). El enriquecimiento ya los limpia; el alta rápida por ISBN no, así que se limpia aquí para TODOS
+        // los caminos. Los campos requeridos nunca son vacíos, así que no se tocan.
+        for (const k of Object.keys(docFinal)) if (vacio(docFinal[k])) delete docFinal[k];
 
         docFinal.fecha_ingreso = new Date();
         const resultado = await coleccionBiblioteca.insertOne(docFinal);
