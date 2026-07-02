@@ -2205,7 +2205,12 @@ async function isbnBuscar(){
   let r; try{ r=await api('/isbn/'+encodeURIComponent(raw)); }catch(e){ if(msg)msg.textContent=e.message; return; }
   const meta=r.meta||{};
   _isbnEstado={ isbn:r.isbn, meta:{...meta}, portadas:(r.portadas||[]).map((p,i)=>({...p,sel:i===0})), extra:[], cduDesc:r.cdu_desc||null, portadaId:(r.portadas&&r.portadas.length)?'c0':null, dims:null };
-  if(msg)msg.textContent=r.encontrado?`✔ Encontrado en el Fichero${(meta.fuentes||[]).length?` (${meta.fuentes.join(', ')})`:''}.`:'⚠ No está en el Fichero local: revisa/completa los datos a mano.';
+  // Mensaje según el origen (r.fuente): Fichero local, online (fallback OL/Google Books) o nada (rellenar a mano).
+  if(msg)msg.textContent = r.encontrado
+    ? (r.fuente==='online'
+        ? '✔ Encontrado ONLINE (OpenLibrary / Google Books). Revisa los datos antes de crear.'
+        : `✔ Encontrado en el Fichero local${(meta.fuentes||[]).length&&meta.fuentes[0]!=='online'?` (${meta.fuentes.join(', ')})`:''}.`)
+    : '⚠ No está ni en el Fichero ni online. Escribe el título (y lo que sepas) a mano y pulsa Crear.';
   isbnRender();
 }
 // Miniatura de portada: casilla «incluir» (arriba-izq), ✎ conformar (arriba-der), y clic en la imagen para

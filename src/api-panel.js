@@ -37,6 +37,7 @@ import { fuentesCopia, procesarSaneamiento, estadoSaneamiento } from './utils/sa
 import { describirCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 import { buscarEnFicheroLocal } from './utils/buscador-local.js';
+import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
 import { medirImagen } from './utils/medir-imagen.js';
 import { validarISBN, isbn10a13, isbn13a10 } from './utils/identificadores.js';
 import { altaPorISBN } from './servicio-ingesta.js';
@@ -1118,18 +1119,80 @@ export function rutasPanel() {
     // de portada (>800 px marcadas como buena resolución). GET (lectura); no crea nada todavía.
     r.get('/isbn/:isbn', async (req, res) => {
         try {
-            const limpio = String(req.params.isbn || '').replace(/[^0-9Xx]/g, '').toUpperCase();
-            if (!validarISBN(limpio)) return res.status(400).json({ ok: false, motivo: 'ISBN no válido (dígito de control incorrecto)' });
+            const limpio = String(req.params.isbn || '')
+                .replace(/[^0-9Xx]/g, '')
+                .toUpperCase();
+            if (!validarISBN(limpio)) {
+                return res.status(400).json({ ok: false, motivo: 'ISBN no válido (dígito de control incorrecto)' });
+            }
             const isbn13 = limpio.length === 13 ? limpio : isbn10a13(limpio);
             const isbn10 = limpio.length === 10 ? limpio : isbn13a10(limpio);
-            const meta = await buscarEnFicheroLocal({ isbns: [isbn13, isbn10, limpio].filter(Boolean) });
+            const isbns = [isbn13, isbn10, limpio].filter(Boolean);
+
+            // 1) Fuente principal: el Fichero local (dump OL+BNE, offline e instantáneo).
+            let meta = await buscarEnFicheroLocal({ isbns });
+            let fuenteMeta = meta && meta.titulo ? 'fichero' : null;
+
+            // 2) FALLBACK ONLINE — si el ISBN NO está en el dump (típico en novedades posteriores a la
+            //    instantánea del Fichero), se consultan las APIs online por ISBN (OpenLibrary + Google Books
+            //    + DNB/BnF), SIN IA (incluirCdu:false y sin imagen). Degradan con alertas si no hay red.
+            //    Así un libro reciente se puede dar de alta con sus datos en lugar de bloquearse en
+            //    «Falta el título». Se normaliza al MISMO shape que devuelve el Fichero local para que el
+            //    formulario del panel lo consuma sin distinción.
+            if (!meta || !meta.titulo) {
+                const online = await buscarMetadatosExternos(null, null, null, {
+                    isbnsArchivo: isbns,
+                    incluirSinopsis: true,
+                    incluirCdu: false,
+                }).catch(() => null);
+                if (online && online.titulo) {
+                    const portadaOnline = online.portadas_remotas?.find((p) => p && p.url)?.url || null;
+                    meta = {
+                        isbn: online.isbn || isbn13 || limpio,
+                        titulo: online.titulo,
+                        subtitulo: null,
+                        autores: online.autores || [],
+                        editorial: online.editorial || null,
+                        año_edicion: online.año_edicion || null,
+                        idioma: online.idioma || null,
+                        dewey: online.dewey || null,
+                        lcc: online.lcc || null,
+                        cdu: online.cdu || null,
+                        paginas: online.paginas_bne || null,
+                        dimensiones: online.dimensiones_bne || null,
+                        categorias: online.categorias || [],
+                        coleccion_nombre: online.coleccion_nombre || null,
+                        sinopsis: online.sinopsis || null,
+                        portada_url: portadaOnline,
+                        fuentes: ['online'],
+                    };
+                    fuenteMeta = 'online';
+                }
+            }
+
             const portadas = await portadasPorISBN(isbn13, isbn10, meta && meta.portada_url);
             // Descripción del CDU: SOLO de la caché local (cdu_descripciones), sin generar nada (evita
             // dependencia externa/IA en el alta). Sirve para validar la CDU con su título legible.
             let cdu_desc = null;
-            if (meta && meta.cdu) { try { cdu_desc = await cduDesc(await conectarDB(), meta.cdu); } catch { /* caché opcional */ } }
-            res.json({ ok: true, isbn: isbn13 || limpio, encontrado: !!(meta && meta.titulo), meta: meta || null, portadas, cdu_desc });
-        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+            if (meta && meta.cdu) {
+                try {
+                    cdu_desc = await cduDesc(await conectarDB(), meta.cdu);
+                } catch {
+                    /* caché opcional */
+                }
+            }
+            res.json({
+                ok: true,
+                isbn: isbn13 || limpio,
+                encontrado: !!(meta && meta.titulo),
+                fuente: fuenteMeta, // 'fichero' | 'online' | null — de dónde salieron los datos
+                meta: meta || null,
+                portadas,
+                cdu_desc,
+            });
+        } catch (e) {
+            res.status(500).json({ ok: false, motivo: e.message });
+        }
     });
 
     // INGRESO POR ISBN — 2) ALTA: crea el documento con los metadatos validados + portada(s) elegidas (admin).
@@ -1138,11 +1201,20 @@ export function rutasPanel() {
         try {
             const b = req.body || {};
             const meta = b.meta || {};
-            if (!meta.titulo) return res.status(400).json({ ok: false, motivo: 'Falta el título' });
+            const completar = !!b.completar;
+            // «Crear» (rápido, sin enriquecer) exige que el título ya esté puesto. «Completar y crear» SÍ puede
+            // seguir sin título: altaPorISBN enriquecerá con las APIs/IA y ahí se rellenará (o fallará con un
+            // mensaje claro si no hay datos en ninguna fuente). Así un ISBN nuevo se resuelve por «Completar».
+            if (!meta.titulo && !completar) {
+                return res.status(400).json({
+                    ok: false,
+                    motivo: 'Falta el título. Escríbelo, o pulsa «Completar y crear» para recuperarlo de las APIs.',
+                });
+            }
             const autores = Array.isArray(meta.autores) ? meta.autores
                 : (meta.autores ? String(meta.autores).split(/[;,]/).map(s => s.trim()).filter(Boolean) : []);
             const base = {
-                isbn: meta.isbn || b.isbn || null, titulo: meta.titulo, subtitulo: meta.subtitulo || null,
+                isbn: meta.isbn || b.isbn || null, titulo: meta.titulo || null, subtitulo: meta.subtitulo || null,
                 autores, editorial: meta.editorial || null, idioma: meta.idioma || null, paginas: meta.paginas || null,
                 'año_edicion': meta['año_edicion'] || meta.anio || null, dewey: meta.dewey || null, lcc: meta.lcc || null,
                 cdu: meta.cdu || null, sinopsis: meta.sinopsis || null,
@@ -1154,7 +1226,7 @@ export function rutasPanel() {
             if (activos.length && !activos.some(a => a.tipo === 'portada')) activos[0].tipo = 'portada';
             const ubic = b.ubicacion || {};
             const dim = b.dimensiones || null;
-            const r2 = await altaPorISBN({ base, activos, contexto: { ambito: ubic.ambito, estanteria: ubic.estanteria, coleccion: b.coleccion, obra: b.obra, dimensiones: dim }, completar: !!b.completar });
+            const r2 = await altaPorISBN({ base, activos, contexto: { ambito: ubic.ambito, estanteria: ubic.estanteria, coleccion: b.coleccion, obra: b.obra, dimensiones: dim }, completar });
             res.json({ ok: true, ...r2 });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

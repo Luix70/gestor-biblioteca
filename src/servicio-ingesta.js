@@ -402,6 +402,13 @@ export async function altaPorISBN({ base = {}, activos = [], contexto = {}, comp
     documento.formatos = (documento.formatos && documento.formatos.length) ? documento.formatos : ['papel'];
     if (!documento.idioma) documento.idioma = base.idioma || 'es';
 
+    // Sin título no se puede catalogar (lo exige el $jsonSchema). Con `completar` se acaba de intentar
+    // recuperarlo de las APIs/IA (enriquecerMetadatos); si aun así no hay título, el ISBN no está en ninguna
+    // fuente → error claro para el panel, en lugar de un fallo de validación de esquema (121) más adelante.
+    if (!documento.titulo || !String(documento.titulo).trim()) {
+        throw new Error('No se pudo determinar el título (ni en el Fichero ni en las APIs online). Escribe al menos el título y pulsa «Crear».');
+    }
+
     // CDU obligatoria ($jsonSchema). Fichero.cdu → mapear dewey/lcc (cache/API/IA) → placeholder '0'.
     if (!documento.cdu) {
         try {
