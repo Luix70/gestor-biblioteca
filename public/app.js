@@ -7766,7 +7766,11 @@ function escribirNFC(records, docIdActual, outerSignal, forzar) {
     rd.onreading = async (ev) => {
       if (done) return;
       const uid = ev.serialNumber || null;
-      if (!forzar) {
+      // `forzar` puede ser booleano O una función (se evalúa AL TOCAR, para poder marcar «sobrescribir» en
+      // el modal después de abrirlo). Forzando NO se hace la lectura de comprobación → se escribe en el
+      // PRIMER toque sin abortar el scan, así el sistema no captura la URL vieja y no redirige.
+      const f = typeof forzar === 'function' ? forzar() : forzar;
+      if (!f) {
         const prev = inspeccionarTagNFC(ev.message);
         if (prev && prev.docId !== docIdActual) {
           fin();
@@ -8114,6 +8118,8 @@ async function grabarNFC(d, r) {
     `<div class="box card" style="max-width:420px;text-align:center"><h3 style="margin-top:0">📶 Grabar etiqueta NFC</h3>
     <p class="muted" id="nfcWrMsg">Acerca una etiqueta NFC (NTAG215) al móvil para grabarla…</p>
     <p class="muted" style="font-size:12px">📍 ${esc(_txtUbic(d) || 'Sin asignar')} · ex-libris + datos offline</p>
+    <label style="display:flex;gap:6px;align-items:center;justify-content:center;font-size:12px;margin:6px 0"><input type="checkbox" id="nfcSobrescribir"> Sobrescribir sin comprobar (re-grabar una etiqueta ya usada)</label>
+    <p class="muted" style="font-size:11px;margin:0 6px 6px">Márcalo si la etiqueta YA tiene datos (antiguos o de este mismo libro): escribe en el primer toque, sin leerla antes, para que el móvil no abra la ficha vieja.</p>
     <div style="display:flex;gap:10px;justify-content:center;margin-top:8px"><button class="btn" id="nfcWrX">Cancelar</button></div></div>`;
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
@@ -8139,7 +8145,9 @@ async function grabarNFC(d, r) {
   // Graba pidiendo CONFIRMACIÓN si la etiqueta ya estaba grabada para otro libro (posible libro equivocado).
   const escribir = async (records) => {
     try {
-      return await escribirNFC(records, d._id, ctrl.signal, false);
+      // forzar se lee EN EL TOQUE: si marcas «Sobrescribir sin comprobar», se escribe directo (sin leer la
+      // etiqueta antes), lo que evita que el sistema abra la URL vieja al re-grabar una etiqueta ya usada.
+      return await escribirNFC(records, d._id, ctrl.signal, () => !!($('#nfcSobrescribir') && $('#nfcSobrescribir').checked));
     } catch (eo) {
       if (eo && eo.code === 'OCUPADA') {
         const det =

@@ -364,6 +364,11 @@ de ficheros clasificado por CDU.
       libro, AVISA y pide confirmación ANTES de escribir (por si es el libro
       equivocado): en la individual con un diálogo; en lotes con un estado «ocupada»
       (Sobrescribir / Saltar) que dice de qué libro era.
+    · RE-GRABAR una etiqueta con datos ANTIGUOS/desfasados: marca «Sobrescribir sin
+      comprobar» en el diálogo de grabar. Entonces escribe en el PRIMER toque, SIN
+      leer la etiqueta antes. Esto evita que Android lea el enlace viejo y abra una
+      ficha inexistente en vez de dejar grabar (el hueco surgía porque la comprobación
+      previa soltaba el control del NFC un instante; sin comprobación no hay hueco).
     · ANTI-DUPLICADO: una etiqueta física (su UID) solo puede estar en UN libro. Si
       la sobrescribes, se desvincula del libro antiguo y se avisa "reasignada
       (estaba en «X»)".
