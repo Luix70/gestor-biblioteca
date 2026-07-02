@@ -45,15 +45,16 @@ const DIR_PUBLIC = path.join(RAIZ, 'public');
 const PUERTO = Number(process.env.PORT || 3000);
 const PUERTO_PANEL = Number(process.env.PANEL_PORT || 4000);
 
-// Commit en ejecución: se registra LO PRIMERO (a nivel de módulo, no dentro de un callback de listen), para
-// que salga siempre al arrancar, sin depender del orden de arranque de los puertos.
-{
+// Commit en ejecución. Va en un setTimeout (escritura TARDÍA, tras arrancar el event loop): las escrituras
+// MUY tempranas a stdout —pipe del contenedor— se descartan (por eso no salían 📦/🚀 pero sí 🎛️, que es
+// posterior). Diferido = aparece SIEMPRE en `docker logs`.
+setTimeout(() => {
     const v = versionEnEjecucion();
     console.log(`📦 Versión en ejecución: commit ${v.commit}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
     if (v.commit === 'desconocido') {
-        console.log('   ⓘ  El contenedor no expone el commit: que el script de despliegue exporte GIT_COMMIT (o incluya la carpeta .git).');
+        console.log('   ⓘ  El contenedor no expone el commit: que el despliegue exporte GIT_COMMIT o escriba un fichero VERSION.');
     }
-}
+}, 500);
 
 await fs.mkdir(DIR_TMP, { recursive: true });
 
@@ -308,7 +309,10 @@ app.listen(PUERTO, () => {
 // acceder al cuadro de mando sin CORS (la página y su /api comparten origen).
 if (PUERTO_PANEL && PUERTO_PANEL !== PUERTO) {
     app.listen(PUERTO_PANEL, () => {
-        console.log(`🎛️  Panel de control en http://localhost:${PUERTO_PANEL}`);
+        // El puerto es el INTERNO del contenedor; el acceso real suele ser por proxy inverso + HTTPS
+        // (p. ej. https://j56.diskstation.me:4443). Se muestra PANEL_PUBLIC_URL si está definida en .env.
+        const urlPublica = process.env.PANEL_PUBLIC_URL || '';
+        console.log(`🎛️  Panel de control: puerto ${PUERTO_PANEL} (interno del contenedor)${urlPublica ? ` · acceso: ${urlPublica}` : ' · accede por tu proxy/HTTPS configurado'}`);
         if (!process.env.ADMIN_PWD && !process.env.PANEL_ADMIN_PASSWORD)
             console.warn('⚠️  ADMIN_PWD no definido: el admin "Luis" no podrá entrar (solo "guest"/lectura). Defínelo en .env.');
     });
