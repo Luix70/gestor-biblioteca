@@ -16,7 +16,7 @@
 import 'dotenv/config';
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
-import { separarNumeroColeccion } from '../src/utils/colecciones.js';
+import { separarNumeroColeccion, claveCanonica } from '../src/utils/colecciones.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 
@@ -39,28 +39,31 @@ async function main() {
     }
     const nMiembros = (id) => miembros.get(String(id)) || 0;
 
-    // Agrupar por nombre canónico. Cada item guarda el número embebido en el nombre de ESA colección (o null).
+    // Agrupar por CLAVE CANÓNICA: las VARIANTES DE GRAFÍA del mismo grupo caen juntas («Cátedra, Letras
+    // Universales» ≡ «Letras Universales Cátedra» ≡ «Cátedra-Letras Universales»). Si el nombre no da ≥2
+    // tokens significativos (clave null), se agrupa por el nombre limpio EXACTO (evita fundir de más).
+    // Cada item guarda su nombre limpio y el número embebido en el nombre de ESA colección (o null).
     const grupos = new Map();
     for (const c of libros) {
         const { nombre, numero } = separarNumeroColeccion(c.nombre);
-        const canon = nombre || c.nombre;
-        const clave = canon.toLowerCase();
-        if (!grupos.has(clave)) grupos.set(clave, { canon, items: [] });
-        grupos.get(clave).items.push({ col: c, numero });
+        const limpio = nombre || c.nombre;
+        const clave = claveCanonica(limpio) || limpio.toLowerCase();
+        if (!grupos.has(clave)) grupos.set(clave, []);
+        grupos.get(clave).push({ col: c, numero, limpio });
     }
 
     // Plan: grupos con >1 colección, o con una sola pero cuyo nombre hay que limpiar.
     const plan = [];
-    for (const { canon, items } of grupos.values()) {
-        const hayQueRenombrar = items.some((it) => it.col.nombre !== canon);
-        if (items.length === 1 && !hayQueRenombrar) continue; // ya está bien
-
+    for (const items of grupos.values()) {
         // Canónica: la que YA tiene el nombre limpio; si no, la de más miembros; desempate por _id.
         items.sort((a, b) => {
-            const aEx = a.col.nombre === canon ? 1 : 0, bEx = b.col.nombre === canon ? 1 : 0;
+            const aEx = a.col.nombre === a.limpio ? 1 : 0, bEx = b.col.nombre === b.limpio ? 1 : 0;
             return bEx - aEx || nMiembros(b.col._id) - nMiembros(a.col._id) || String(a.col._id).localeCompare(String(b.col._id));
         });
         const canonical = items[0].col;
+        const canon = items[0].limpio;                 // nombre limpio de la canónica = nombre del grupo
+        const hayQueRenombrar = items.some((it) => it.col.nombre !== canon);
+        if (items.length === 1 && !hayQueRenombrar) continue; // grupo de 1 ya correcto (la clave la pone el backfill final)
         const absorbidos = items.slice(1).map((it) => it.col);
         const numeroPorCol = new Map(); // colecciónId → número embebido en su nombre (para rellenar los docs)
         for (const it of items) if (it.numero) numeroPorCol.set(String(it.col._id), it.numero);
@@ -69,11 +72,16 @@ async function main() {
         plan.push({ canon, canonical, absorbidos, numeroPorCol, ids, nDocs, rename: canonical.nombre !== canon });
     }
 
+    // Colecciones (de libros) a las que les FALTA la clave canónica → se rellenará (habilita el
+    // emparejamiento por grafía en futuras ingestas). Se cuenta para el informe.
+    const sinClave = libros.filter((c) => !c.clave_canonica && claveCanonica(separarNumeroColeccion(c.nombre).nombre || c.nombre));
+
     // ── Informe ──────────────────────────────────────────────────────────────────────────────────────
     console.log(`\n── Plan ${EJECUTAR ? '(EJECUTAR)' : '(DRY-RUN)'} ──`);
-    console.log(`  Grupos a consolidar: ${plan.length}`);
+    console.log(`  Grupos a consolidar (incl. variantes de grafía): ${plan.length}`);
     console.log(`  Colecciones a borrar (absorbidas): ${plan.reduce((s, p) => s + p.absorbidos.length, 0)}`);
     console.log(`  Documentos a reasignar/actualizar: ${plan.reduce((s, p) => s + p.nDocs, 0)}`);
+    console.log(`  Clave canónica a rellenar (para emparejar en el futuro): ${sinClave.length}`);
     for (const p of plan.slice(0, 25)) {
         console.log(`\n  «${p.canon}»  (canónica: «${p.canonical.nombre}» · ${p.nDocs} doc)`);
         for (const a of p.absorbidos) console.log(`     ⇐ «${a.nombre}»`);
@@ -92,12 +100,16 @@ async function main() {
                 .catch((e) => console.warn(`  ⚠️ renombrar ${p.canonical._id}: ${e.message}`));
             nRen++;
         }
-        // Rellenar issn/editorial/cdu de la canónica desde las absorbidas si le faltan.
+        // Rellenar issn/editorial/cdu/clave_canonica de la canónica desde las absorbidas / el nombre si faltan.
         const relleno = {};
         for (const a of p.absorbidos) {
             if (!p.canonical.issn && a.issn) relleno.issn = a.issn;
             if (!p.canonical.editorial && a.editorial) relleno.editorial = a.editorial;
             if (!p.canonical.cdu && a.cdu) relleno.cdu = a.cdu;
+        }
+        if (!p.canonical.clave_canonica) {
+            const k = claveCanonica(p.canon);
+            if (k) relleno.clave_canonica = k;
         }
         if (Object.keys(relleno).length) {
             await colColecciones.updateOne({ _id: p.canonical._id }, { $set: relleno }).catch(() => {});
@@ -121,7 +133,16 @@ async function main() {
             nDel++;
         }
     }
-    console.log(`\n✅ Hecho: ${nRen} renombrada(s), ${nDocU} documento(s) actualizado(s), ${nDel} colección(es) borrada(s).\n`);
+
+    // Backfill de clave_canonica en TODAS las colecciones de libros que aún no la tengan (habilita el
+    // emparejamiento por grafía en la ingesta futura). Idempotente; no toca cabeceras de revista.
+    let nClave = 0;
+    for (const c of await colColecciones.find({ tipo: { $ne: 'revista' }, clave_canonica: { $exists: false } }).toArray()) {
+        const k = claveCanonica(separarNumeroColeccion(c.nombre).nombre || c.nombre);
+        if (k) { await colColecciones.updateOne({ _id: c._id }, { $set: { clave_canonica: k } }).catch(() => {}); nClave++; }
+    }
+
+    console.log(`\n✅ Hecho: ${nRen} renombrada(s), ${nDocU} documento(s) actualizado(s), ${nDel} colección(es) borrada(s), ${nClave} clave(s) canónica(s) rellenada(s).\n`);
     process.exit(0);
 }
 

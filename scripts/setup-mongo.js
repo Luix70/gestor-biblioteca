@@ -208,6 +208,9 @@ async function main() {
     await asegurarIndice(colecciones, { editorial: 1 }, { sparse: true, name: 'idx_editorial' });
     // ISSN de la cabecera/serie: AUTORIDAD del grupo (análogo a obras.issn_obra). Sparse: solo las que lo tienen.
     await asegurarIndice(colecciones, { issn: 1 },      { unique: true, sparse: true, name: 'idx_issn_unico' });
+    // Clave canónica (tokens significativos ordenados): empareja VARIANTES de grafía del mismo grupo en la
+    // ingesta. NO única (dos grupos distintos podrían compartirla en casos raros; la fusión es revisable).
+    await asegurarIndice(colecciones, { clave_canonica: 1 }, { sparse: true, name: 'idx_clave_canonica' });
 
     // ── cdu_descripciones: descripciones bilingües ES/EN de cada código CDU ────
     console.log('\ncdu_descripciones:');

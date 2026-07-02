@@ -23,11 +23,18 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
     // (el Conformador/autoridad lo renombra luego con el título real de la cabecera/serie).
     const n = (nombre && String(nombre).trim()) || issn || null;
 
+    const claveCan = claveCanonica(n);
+
     let existente = issn ? await col.findOne({ issn }) : null;
     // Nombre case- Y acento-insensitive (collation strength:1): reutiliza la colección existente y
     // evita crear duplicados por mayúsculas/minúsculas o acentos («Filosofia»/«Filosofía»,
     // «direction Italie»/«Direction Italie»). El índice único de nombre es sensible (no basta solo).
     if (!existente && n) existente = await col.findOne({ nombre: n }, { collation: { locale: 'es', strength: 1 } });
+    // VARIANTE DE GRAFÍA (mismo grupo, distinto orden/puntuación/conectores): solo como último recurso,
+    // solo si el entrante NO trae ISSN (un ISSN es autoridad: no se funde por parecido de nombre) y solo
+    // contra colecciones que YA tengan la clave canónica guardada (el script de consolidación la rellena
+    // en las existentes). Así una serie nueva se asigna a la que ya existe ligeramente distinta.
+    if (!existente && !issn && claveCan) existente = await col.findOne({ clave_canonica: claveCan });
 
     if (existente) {
         const set = {};
@@ -37,6 +44,8 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
         if (cdu && !existente.cdu) set.cdu = cdu;
         if (descripcion && !existente.descripcion) set.descripcion = descripcion;
         if (naturaleza && !existente.naturaleza) set.naturaleza = naturaleza;
+        // Rellena la clave canónica si la existente aún no la tenía (para futuros emparejamientos).
+        if (claveCan && !existente.clave_canonica) set.clave_canonica = claveCan;
         if (Object.keys(set).length) {
             set.fecha_actualizacion = new Date();
             await col.updateOne({ _id: existente._id }, { $set: set });
@@ -51,6 +60,7 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
     if (cdu)         nueva.cdu = cdu;
     if (descripcion) nueva.descripcion = descripcion;
     if (naturaleza)  nueva.naturaleza = naturaleza;
+    if (claveCan)    nueva.clave_canonica = claveCan;
     try {
         const r = await col.insertOne(nueva);
         return { _id: r.insertedId, cdu: cdu || null, creada: true };
@@ -69,6 +79,27 @@ const ALIAS_COLECCION = new Map([
     ['alianza cien', 'Alianza Cien'],
     ['alianza 100', 'Alianza Cien'],
 ]);
+
+// Marcas diacríticas combinantes (para quitar acentos), vía new RegExp desde ASCII (regla del proyecto).
+const RE_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
+// Conectores que NO distinguen una serie de otra: se ignoran al comparar («Cátedra, Letras Universales» ≡
+// «Letras Universales de Cátedra»). ES + EN habituales.
+const CONECTORES = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'e', 'o', 'u', 'en', 'a', 'al', 'the', 'of', 'and', 'or']);
+
+/**
+ * CLAVE CANÓNICA de un nombre de colección para detectar VARIANTES de grafía del mismo grupo
+ * («Cátedra, Letras Universales» · «Cátedra Letras Universales» · «Cátedra-Letras Universales» ·
+ * «Letras Universales Cátedra» → todas «catedra letras universales»): minúsculas, sin acentos ni
+ * puntuación, sin conectores, y con los tokens significativos ORDENADOS (independiente del orden).
+ * Devuelve null con menos de 2 tokens significativos (1 palabra colisiona demasiado → solo match exacto).
+ */
+export function claveCanonica(nombre) {
+    const base = String(nombre || '').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '')
+        .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const tokens = base.split(' ').filter((t) => t.length >= 2 && !CONECTORES.has(t));
+    if (tokens.length < 2) return null;
+    return [...new Set(tokens)].sort().join(' ');
+}
 
 // Número de volumen al final del nombre de una serie, con separadores y/o una ETIQUETA reconocida delante
 // (nº, n., no., núm., num., vol., volumen, tomo). La etiqueta NO puede ser una «n» suelta (si no, se comería

@@ -326,6 +326,14 @@ de ficheros clasificado por CDU.
         «Enviar seleccionados» los crea en bloque; los que fallen quedan en la lista.
         Campo «Colección para los que no la traigan»: se aplica SOLO a los que no
         traigan colección propia (útil para una serie entera, p. ej. Alianza Cien).
+      · COLECCIONES por VARIANTE de grafía: al catalogar, una serie se asigna a la
+        que YA existe aunque esté escrita distinta (orden, puntuación, conectores:
+        «Cátedra, Letras Universales» ≡ «Letras Universales Cátedra»), casando por
+        una CLAVE canónica (tokens significativos ordenados). Para unificar las YA
+        duplicadas y rellenar esa clave en las existentes (necesario para que el
+        emparejamiento funcione hacia atrás):
+          node scripts/consolidar-colecciones.js            (cuenta, no escribe)
+          node scripts/consolidar-colecciones.js --ejecutar (unifica; revisa antes)
 
   ── TAPETE (medir y recortar con la alfombrilla reglada) ─────────────────────
     Foto del libro sobre una alfombrilla de corte CUADRICULADA (1 cm). Con el
