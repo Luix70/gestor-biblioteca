@@ -253,6 +253,15 @@ function versionEnEjecucion() {
     if (process.env.GIT_COMMIT) {
         return { commit: String(process.env.GIT_COMMIT).slice(0, 10), rama: process.env.GIT_BRANCH || null, origen: 'env' };
     }
+    // Fichero VERSION en la raíz (lo escribe el script de despliegue con el SHA). Funciona con TARBALL, que
+    // no trae carpeta .git — es la vía fiable en el NAS. Formato libre: «<sha>» o «<sha> <rama>».
+    try {
+        const txt = readFileSync(path.join(RAIZ, 'VERSION'), 'utf8').trim();
+        if (txt) {
+            const [sha, rama] = txt.split(/\s+/);
+            return { commit: sha.slice(0, 10), rama: rama || null, origen: 'VERSION' };
+        }
+    } catch { /* sin fichero VERSION */ }
     try {
         const gitDir = path.join(RAIZ, '.git');
         const head = readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
