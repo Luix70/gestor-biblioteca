@@ -414,6 +414,13 @@ de ficheros clasificado por CDU.
       se funden en B: sus nombres pasan a «también conocido como» de B y TODOS sus
       libros se reasignan a B; luego se borran las A. Sin pérdida (los libros y sus
       ficheros no se tocan). Es la versión interactiva de scripts/backfill-autores.
+    · ✨ AUTOCOMPLETAR (web) (admin, en la ficha): rellena foto, biografía,
+      seudónimos/heterónimos y fechas desde OpenLibrary + Wikidata + Wikipedia
+      (gratis, sin clave y SIN IA). Conservador: solo rellena lo que falte. Para
+      rellenar TODO el catálogo de golpe, por TANDAS DE 25:
+        docker exec gestor-biblioteca node scripts/enriquecer-autores.js --ejecutar
+      (sin --ejecutar = cuenta cuántos faltan; --limite N para probar; es
+      reanudable: cada pasada coge los que aún no tienen bio/foto).
 
   ── ACTIVIDAD (administración) ───────────────────────────────────────────────
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del

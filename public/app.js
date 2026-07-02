@@ -9245,7 +9245,7 @@ async function autorFicha(id) {
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div style="text-align:center">
         ${foto}
-        ${admin ? `<div style="margin-top:6px"><button class="btn" id="autFoto">📷 Foto</button><input type="file" id="autFotoFile" accept="image/*" style="display:none"></div>` : ''}
+        ${admin ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px"><button class="btn" id="autFoto">📷 Foto</button><button class="btn" id="autEnriquecer" title="Rellena foto, biografía, seudónimos y fechas desde OpenLibrary, Wikidata y Wikipedia (sin IA)">✨ Autocompletar (web)</button><input type="file" id="autFotoFile" accept="image/*" style="display:none"></div>` : ''}
       </div>
       <div style="flex:1;min-width:250px">${campos}</div>
     </div>
@@ -9272,6 +9272,7 @@ async function autorFicha(id) {
   if (admin) {
     if ($('#autFoto')) $('#autFoto').onclick = () => $('#autFotoFile').click();
     if ($('#autFotoFile')) $('#autFotoFile').onchange = () => autorSubirFoto(id, $('#autFotoFile'));
+    if ($('#autEnriquecer')) $('#autEnriquecer').onclick = () => autorEnriquecer(id);
     if ($('#autGuardar')) $('#autGuardar').onclick = () => autorGuardar(id);
   }
 }
@@ -9316,6 +9317,27 @@ async function autorSubirFoto(id, inp) {
   }
   toast('📷 Foto guardada');
   autorFicha(id); // recargar la ficha para mostrar la nueva foto
+}
+
+// Autocompletar (web): rellena huecos (foto/biografía/seudónimos/fechas) desde OpenLibrary + Wikidata +
+// Wikipedia (sin clave, sin IA). Conservador: no pisa lo que ya haya. Recarga la ficha con lo encontrado.
+async function autorEnriquecer(id) {
+  const msg = $('#autMsg');
+  if (msg) msg.textContent = '✨ Buscando en OpenLibrary / Wikidata / Wikipedia…';
+  let r;
+  try {
+    r = await api('/autores/' + encodeURIComponent(id) + '/enriquecer-web', { method: 'POST', body: JSON.stringify({}) });
+  } catch (e) {
+    if (msg) msg.textContent = 'Error: ' + e.message;
+    return;
+  }
+  if (!r.cambios || !r.cambios.length) {
+    if (msg) msg.textContent = r.motivo || 'Sin datos nuevos en la web para este autor.';
+    toast('Sin datos nuevos', 'warn');
+    return;
+  }
+  toast(`✨ Autocompletado: ${r.cambios.join(', ')} (${(r.fuentes || []).join(', ')})`);
+  autorFicha(id); // recargar para mostrar foto/bio/alternativos nuevos
 }
 
 // Combinar (A→B): elige entre los seleccionados cuál es el DESTINO (B, se conserva) y funde el resto en él.

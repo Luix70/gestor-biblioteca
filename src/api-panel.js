@@ -19,6 +19,7 @@ import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor } from './utils/gestion-autores.js';
+import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
@@ -1076,6 +1077,14 @@ export function rutasPanel() {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
             res.json(await guardarFotoAutor(await conectarDB(), req.params.id, (req.body || {}).base64));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Autocompletar (web): rellena foto/biografía/seudónimos/fechas desde OpenLibrary + Wikidata + Wikipedia
+    // (sin clave, sin IA). Conservador (solo huecos) salvo body.sobrescribir. Solo admin (dispara red).
+    r.post('/autores/:id/enriquecer-web', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await enriquecerAutor(await conectarDB(), req.params.id, { sobrescribir: !!(req.body || {}).sobrescribir }));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
