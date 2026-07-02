@@ -24,6 +24,14 @@ import { rutasPanel, rutasPublicas } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
 import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
 
+// stdout/stderr a un PIPE (contenedor Docker) es ASÍNCRONO: los logs muy tempranos del arranque pueden
+// perderse (por eso no salían 📦/🚀 pero sí los posteriores, ya con el event loop drenando). Forzar
+// escritura BLOQUEANTE garantiza que TODO log de arranque aparezca en `docker logs`.
+try {
+    process.stdout?._handle?.setBlocking?.(true);
+    process.stderr?._handle?.setBlocking?.(true);
+} catch { /* no-op si el handle no soporta setBlocking */ }
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
 const resolver = (p, def) => {
