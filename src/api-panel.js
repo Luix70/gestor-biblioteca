@@ -747,6 +747,33 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // ORDENAR una lista de documentos (por ids) según un criterio — para el etiquetado NFC por lotes, que
+    // recibía los ids en orden de SELECCIÓN (aleatorio). Devuelve los ids ordenados. criterio:
+    //   'ingreso'   → por fecha/hora de ingreso (asc).
+    //   'coleccion' → por colección/obra y nº de volumen (numérico) y luego título.
+    r.post('/documentos/orden', async (req, res) => {
+        try {
+            const b = req.body || {};
+            const oids = (Array.isArray(b.ids) ? b.ids : []).filter(id => ObjectId.isValid(id)).map(id => new ObjectId(id));
+            if (!oids.length) return res.json({ ok: true, ids: [] });
+            const db = await conectarDB();
+            const docs = await db.collection('biblioteca').find(
+                { _id: { $in: oids } },
+                { projection: { fecha_ingreso: 1, coleccion_nombre: 1, coleccion_numero: 1, volumen_numero: 1, obra_titulo: 1, titulo: 1 } },
+            ).toArray();
+            const ms = (d) => { const t = d.fecha_ingreso ? new Date(d.fecha_ingreso).getTime() : 0; return Number.isFinite(t) ? t : 0; };
+            const num = (d) => { const v = parseInt(d.coleccion_numero != null ? d.coleccion_numero : d.volumen_numero, 10); return Number.isFinite(v) ? v : Infinity; };
+            const grupo = (d) => String(d.coleccion_nombre || d.obra_titulo || '￿'); // sin colección → al final
+            const porTitulo = (a, c) => String(a.titulo || '').localeCompare(String(c.titulo || ''), 'es', { numeric: true });
+            if (b.criterio === 'coleccion') {
+                docs.sort((a, c) => grupo(a).localeCompare(grupo(c), 'es', { numeric: true }) || num(a) - num(c) || porTitulo(a, c));
+            } else { // 'ingreso' (por defecto)
+                docs.sort((a, c) => ms(a) - ms(c) || porTitulo(a, c));
+            }
+            res.json({ ok: true, ids: docs.map(d => String(d._id)) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // VALORACIÓN (estrellas 0..5, estilo Lightroom) y NSFW para documentos / obras / colecciones (solo
     // admin). La valoración es INDEPENDIENTE por nivel: una colección 1★ puede tener un documento 5★.
     // NSFW en una obra/colección PROPAGA a sus miembros actuales Y futuros vía el filtro de invitados

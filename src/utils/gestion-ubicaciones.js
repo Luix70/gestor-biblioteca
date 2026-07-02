@@ -214,10 +214,13 @@ export async function librosDeEstanteria(db, { ambito, estanteria } = {}) {
     const docs = await db.collection('biblioteca').aggregate([
         { $match: { 'ubicacion.ambito': a, 'ubicacion.estanteria': e } },
         { $addFields: { _pos: { $ifNull: ['$orden_estanteria', 1e9] } } },
-        { $sort: { _pos: 1, titulo: 1 } },
+        // Los ya COLOCADOS mandan por su posición; los que NO tienen posición se presentan por ORDEN DE
+        // INGRESO (fecha_ingreso), no por título — así el orden inicial de la estantería coincide con el
+        // de ingesta (al «Guardar orden» se fija ese). fecha_ingreso ausente → al final.
+        { $sort: { _pos: 1, 'fecha_ingreso': 1, titulo: 1 } },
         { $limit: 3000 },
         { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
-        { $project: { titulo: 1, portada: 1, 'año_edicion': 1, orden_estanteria: 1, autores: '$_au.nombre' } },
+        { $project: { titulo: 1, portada: 1, 'año_edicion': 1, orden_estanteria: 1, 'fecha_ingreso': 1, autores: '$_au.nombre' } },
     ], { collation: { locale: 'es', strength: 1 } }).toArray();
     return { ok: true, ambito: a, estanteria: e, docs: docs.map(d => ({ ...d, _id: String(d._id) })) };
 }

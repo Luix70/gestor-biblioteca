@@ -373,6 +373,9 @@ de ficheros clasificado por CDU.
       la sobrescribes, se desvincula del libro antiguo y se avisa "reasignada
       (estaba en «X»)".
     · ETIQUETADO POR LOTES: selecciona libros en la Búsqueda y pulsa «📶 Etiquetar».
+      Con 2+ libros pregunta EN QUÉ ORDEN etiquetar (la selección llega en orden
+      arbitrario): 📥 por fecha de ingreso · 🗂️ por colección + nº de volumen · ↕️ como
+      están seleccionados. Así la cola sigue un orden útil (y físico).
       Se abre una COLA que muestra cada ficha (portada, título, ubicación) y pide
       acercar la etiqueta; al grabar avanza. MODO MANUAL (confirmar «Siguiente») o
       AUTOMÁTICO (avanza solo si la grabación es óptima). Pausar/Continuar, Saltar y
@@ -408,7 +411,9 @@ de ficheros clasificado por CDU.
           distinta): doble ACCIDENTAL (mismo tag < 5 s → se ignora), libro AJENO
           a la balda, y repetido DELIBERADO (ya escaneado, no se recoloca).
       Al ver una estantería, sus libros salen en ese orden y cada portada muestra
-      su nº de posición (#N). "Guardar orden" lo fija.
+      su nº de posición (#N). "Guardar orden" lo fija. Los libros aún SIN posición se
+      presentan por ORDEN DE INGRESO (no por título), así el orden inicial coincide
+      con el de ingesta; al «Guardar orden» ese queda fijado.
     · Acciones en LOTE en la Búsqueda (barra de selección): además de mover a una
       estantería 📍, ahora «🚫 Quitar de estantería» (pasan a "Sin asignar", sin
       borrar nada) y «📶 Seleccionar por NFC» (toca etiquetas para ir sumándolos a

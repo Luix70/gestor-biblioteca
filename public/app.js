@@ -8274,7 +8274,7 @@ function colaEtqGuardada() {
     return null;
   }
 }
-function iniciarEtiquetadoLote(ids, auto) {
+async function iniciarEtiquetadoLote(ids, auto) {
   if (!('NDEFReader' in window)) {
     toast('Este navegador no soporta NFC (Android + Chrome)', 'bad');
     return;
@@ -8284,12 +8284,45 @@ function iniciarEtiquetadoLote(ids, auto) {
     toast('No hay libros seleccionados', 'warn');
     return;
   }
+  // Con 2+ libros, se pregunta EN QUÉ ORDEN etiquetarlos (la selección llega en orden arbitrario). Así se
+  // etiquetan en un orden útil (ingreso, o colección+nº) que además puede coincidir con el orden físico.
+  if (ids.length >= 2) {
+    const criterio = await elegirOrdenLote();
+    if (criterio === null) return; // cancelado
+    if (criterio === 'ingreso' || criterio === 'coleccion') {
+      try {
+        const r = await api('/documentos/orden', { method: 'POST', body: JSON.stringify({ ids, criterio }) });
+        if (r.ids && r.ids.length) ids = r.ids;
+      } catch (_) {
+        /* si falla la ordenación, se sigue con el orden de selección */
+      }
+    }
+  }
   _etq = { ids, i: 0, auto: !!auto, abort: null, actual: null };
   $('#cmpModal').innerHTML = '<div class="box card" style="max-width:480px"><div id="etqBody"></div></div>';
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
   $('#cmpScrim').onclick = null; // no cerrar por fuera
   procesarEtq();
+}
+// Pregunta el orden para el etiquetado por lotes. Devuelve 'ingreso' | 'coleccion' | 'actual' | null(cancelar).
+function elegirOrdenLote() {
+  return new Promise((resolver) => {
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:420px">
+      <h3 style="margin-top:0">📶 Etiquetar en lote — ¿en qué orden?</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">Se irán pidiendo las etiquetas en ese orden (útil para dejarlas en el mismo orden físico).</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn pri" data-ord="ingreso">📥 Por fecha de ingreso</button>
+        <button class="btn" data-ord="coleccion">🗂️ Por colección + nº de volumen</button>
+        <button class="btn" data-ord="actual">↕️ Como están seleccionados</button>
+        <button class="btn" data-ord="">Cancelar</button>
+      </div></div>`;
+    $('#cmpScrim').style.display = 'block';
+    $('#cmpModal').style.display = 'grid';
+    const cerrarCon = (valor) => { cerrarCmp(); resolver(valor); };
+    $('#cmpScrim').onclick = () => cerrarCon(null);
+    $$('#cmpModal [data-ord]').forEach((b) => (b.onclick = () => cerrarCon(b.dataset.ord || null)));
+  });
 }
 async function procesarEtq() {
   if (!_etq) return;
