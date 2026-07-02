@@ -7065,26 +7065,28 @@ function fdDesdeSnap(snap, files) {
   for (const fichero of files) formData.append('files', fichero, fichero.name);
   return formData;
 }
-async function enviarIngesta(fd) {
-  const r = await fetch('/api/ingestar', {
+// POST multipart /api/ingestar con el FormData de la subida. 403 = no admin. Devuelve el JSON (o {}).
+async function enviarIngesta(formData) {
+  const resp = await fetch('/api/ingestar', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + TOKEN },
-    body: fd,
+    body: formData,
   });
-  if (r.status === 403) throw new Error('Solo los administradores pueden dar de alta recursos.');
-  return await r.json().catch(() => ({}));
+  if (resp.status === 403) throw new Error('Solo los administradores pueden dar de alta recursos.');
+  return await resp.json().catch(() => ({}));
 }
-function setInboxEstado(txt) {
-  const el = $('#inboxEstado');
-  if (el) el.innerHTML = txt ? `<span class="muted" style="font-size:13px">${esc(txt)}</span>` : '';
+// Línea de estado del Inbox (bajo la zona de subida). Texto vacío = la limpia.
+function setInboxEstado(texto) {
+  const cont = $('#inboxEstado');
+  if (cont) cont.innerHTML = texto ? `<span class="muted" style="font-size:13px">${esc(texto)}</span>` : '';
 }
 const esPdf = (f) => /\.pdf$/i.test((f && f.name) || '') || (f && f.type) === 'application/pdf';
+// Conjunto de códigos de operación de pdf.js que PINTAN una imagen (para detectar páginas-foto de un escaneo).
 function opsImagenPdf() {
-  const O = (window.pdfjsLib && window.pdfjsLib.OPS) || {};
+  const ops = (window.pdfjsLib && window.pdfjsLib.OPS) || {};
   return new Set(
-    [O.paintImageXObject, O.paintJpegXObject, O.paintInlineImageXObject, O.paintImageMaskXObject].filter(
-      (v) => v != null,
-    ),
+    [ops.paintImageXObject, ops.paintJpegXObject, ops.paintInlineImageXObject, ops.paintImageMaskXObject]
+      .filter((codigo) => codigo != null),
   );
 }
 // Explota un PDF de ESCANEO (Adobe Scan/cámara) en páginas JPG EN EL NAVEGADOR (pdf.js). "escaneo" = las
@@ -7096,30 +7098,32 @@ async function pdfAImagenes(file, { maxPag = 60, ancho = 1500 } = {}) {
   lib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.js';
   const pdf = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
   try {
-    const total = pdf.numPages,
-      setImg = opsImagenPdf(),
-      comprobar = Math.min(total, 2);
-    let conImg = 0;
-    for (let i = 1; i <= comprobar; i++) {
-      const pg = await pdf.getPage(i);
-      const ol = await pg.getOperatorList();
-      if (ol.fnArray.some((fn) => setImg.has(fn))) conImg++;
+    const totalPaginas = pdf.numPages;
+    const opsImg = opsImagenPdf();
+    // Se considera "escaneo" si las primeras páginas (hasta 2) pintan una imagen: se explotan a JPG.
+    const aComprobar = Math.min(totalPaginas, 2);
+    let conImagen = 0;
+    for (let i = 1; i <= aComprobar; i++) {
+      const pagina = await pdf.getPage(i);
+      const operaciones = await pagina.getOperatorList();
+      if (operaciones.fnArray.some((fn) => opsImg.has(fn))) conImagen++;
     }
-    if (!(comprobar > 0 && conImg === comprobar)) return { escaneo: false, pages: [] }; // PDF digital → no explotar
-    const pages = [],
-      n = Math.min(total, maxPag);
-    for (let i = 1; i <= n; i++) {
-      const pg = await pdf.getPage(i);
-      const vp1 = pg.getViewport({ scale: 1 });
-      const vp = pg.getViewport({ scale: Math.max(1, Math.min(3, ancho / vp1.width)) });
-      const c = document.createElement('canvas');
-      c.width = Math.round(vp.width);
-      c.height = Math.round(vp.height);
-      await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+    if (!(aComprobar > 0 && conImagen === aComprobar)) return { escaneo: false, pages: [] }; // PDF digital → no explotar
+
+    const pages = [];
+    const nPaginas = Math.min(totalPaginas, maxPag);
+    for (let i = 1; i <= nPaginas; i++) {
+      const pagina = await pdf.getPage(i);
+      const vistaBase = pagina.getViewport({ scale: 1 });
+      const vista = pagina.getViewport({ scale: Math.max(1, Math.min(3, ancho / vistaBase.width)) });
+      const lienzo = document.createElement('canvas');
+      lienzo.width = Math.round(vista.width);
+      lienzo.height = Math.round(vista.height);
+      await pagina.render({ canvasContext: lienzo.getContext('2d'), viewport: vista }).promise;
+      const blob = await new Promise((resolver) => lienzo.toBlob(resolver, 'image/jpeg', 0.85));
       if (blob)
         pages.push(new File([blob], 'pag-' + String(i).padStart(3, '0') + '.jpg', { type: 'image/jpeg' }));
-      c.width = c.height = 0;
+      lienzo.width = lienzo.height = 0; // libera memoria del canvas (importante en el Atom/móvil)
     }
     return { escaneo: true, pages };
   } finally {
