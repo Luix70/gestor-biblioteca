@@ -739,7 +739,10 @@ export function estadoVigilante() {
 
 export async function iniciarVigilante() {
     await fs.mkdir(INBOX, { recursive: true }).catch(() => {});
-    console.log(`👁️  Vigilante observando: ${INBOX}`);
+    // INBOX es la ruta INTERNA del contenedor (p. ej. /app/Inbox); el usuario ve la carpeta del HOST mapeada
+    // por el bind mount (p. ej. "Biblioteca Digital/Inbox"). Se muestra INBOX_PUBLIC_PATH si está en .env.
+    const inboxPublico = process.env.INBOX_PUBLIC_PATH || '';
+    console.log(`👁️  Vigilante observando el Inbox${inboxPublico ? `: ${inboxPublico}` : ` (${INBOX} dentro del contenedor)`}`);
     console.log(vigilanteActivo
         ? '   ▶️  Vigilante ACTIVO al arrancar (VIGILANTE_AUTOSTART=1).'
         : '   ⏸️  Vigilante PAUSADO al arrancar: actívalo desde el Panel de Control (los ficheros esperan en el Inbox).');
