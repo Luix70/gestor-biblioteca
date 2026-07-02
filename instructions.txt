@@ -238,7 +238,8 @@ de ficheros clasificado por CDU.
     · Instalar como app (PWA): el navegador ofrece "Instalar"/"Añadir a inicio".
       Queda como icono propio ("Bibliotheca Ludoviciana").
 
-  NAVEGACIÓN (menú ≡): Búsqueda · Inbox · Ubicaciones · Actividad · Cuarentena.
+  NAVEGACIÓN (menú ≡): Búsqueda · Dashboard · Obras · Colecciones · Autores ·
+  Ubicaciones · Inbox · Actividad · Cuarentena · Papelera.
   En móvil el botón Atrás del teléfono navega hacia atrás (doble-atrás = salir).
 
   ── BÚSQUEDA Y CATÁLOGO ──────────────────────────────────────────────────────
@@ -399,6 +400,20 @@ de ficheros clasificado por CDU.
       estantería 📍, ahora «🚫 Quitar de estantería» (pasan a "Sin asignar", sin
       borrar nada) y «📶 Seleccionar por NFC» (toca etiquetas para ir sumándolos a
       la selección).
+
+  ── AUTORES ──────────────────────────────────────────────────────────────────
+    Página para consultar y DEPURAR autores. Buscador por nombre o grafía
+    alternativa; sin búsqueda, salen los autores CON libros, más usados primero
+    (los miles de nombres del volcado sin libros aparecen al buscarlos). Cada
+    tarjeta muestra foto, nombre, «a.k.a.» (variantes), nº de libros y fechas.
+    · Clic en una tarjeta → FICHA del autor: foto, biografía, fechas, «también
+      conocido como» y sus libros (clic en un libro = su ficha). El admin puede
+      EDITAR esos datos y SUBIR una foto.
+    · COMBINAR (admin): marca 2+ autores (casilla) → «🔗 Combinar» → elige el que
+      se CONSERVA (destino B; por defecto el que más libros tiene). Los demás (A)
+      se funden en B: sus nombres pasan a «también conocido como» de B y TODOS sus
+      libros se reasignan a B; luego se borran las A. Sin pérdida (los libros y sus
+      ficheros no se tocan). Es la versión interactiva de scripts/backfill-autores.
 
   ── ACTIVIDAD (administración) ───────────────────────────────────────────────
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del

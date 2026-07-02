@@ -18,6 +18,7 @@ import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexad
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
+import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor } from './utils/gestion-autores.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
@@ -1047,6 +1048,36 @@ export function rutasPanel() {
     r.post('/obras/fusionar', grupo(fusionarObras, b => [b.ids || [], b.destino]));
     r.post('/obras/explotar', grupo(explotarObra, b => [b.id]));
     r.post('/obras/eliminar', grupo(eliminarObraVacia, b => [b.id]));
+
+    // ── AUTORES (página «Autores»): buscar/listar + ficha (lectura, cualquier rol); editar/fusionar/foto
+    //    (mutaciones → solo admin, ya lo garantiza el guardián global de no-GET). ──────────────────────────
+    r.get('/autores', async (req, res) => {
+        try {
+            const q = String(req.query.q || '');
+            const limite = Number(req.query.limite) || 300;
+            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite }) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.get('/autores/:id', async (req, res) => {
+        try {
+            const ficha = await fichaAutor(await conectarDB(), req.params.id);
+            if (!ficha) return res.status(404).json({ ok: false, motivo: 'autor no encontrado' });
+            res.json({ ok: true, ...ficha });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/autores/fusionar', grupo(fusionarAutores, b => [b.destino, b.ids || []]));
+    r.post('/autores/:id/editar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await editarAutor(await conectarDB(), req.params.id, req.body || {}));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/autores/:id/foto', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await guardarFotoAutor(await conectarDB(), req.params.id, (req.body || {}).base64));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
 
     // Descripción (título conciso + texto extenso, ES) de un código de clasificación — de CACHÉ o
     // generada por IA al momento. CDU → cdu_descripciones/describirCDU; Dewey/LCC →

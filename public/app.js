@@ -140,6 +140,7 @@ const titles = {
   pap: 'Papelera',
   obras: 'Obras',
   colecciones: 'Colecciones',
+  autores: 'Autores',
   inbox: 'Inbox',
   search: 'Búsqueda',
 };
@@ -9090,6 +9091,279 @@ async function pickerUbic() {
     }
   };
 }
+// ── Página AUTORES ──────────────────────────────────────────────────────────────────────────────────
+// Buscar autores, ver su ficha (foto/bio/libros) y COMBINAR duplicados (A→B): se mantiene el nombre de B,
+// los de las A pasan a sus «también conocido como» y todos sus libros se reasignan a B. Es la versión
+// INTERACTIVA de scripts/backfill-autores.js. Las mutaciones son solo admin (las exige el backend).
+let _autores = []; // último listado recibido
+const _autoresSel = new Set(); // ids marcados para combinar
+let _autoresBuscarTimer = null; // debounce del buscador
+
+async function loadAutores() {
+  const cont = $('#p-autores');
+  if (!cont) return;
+  _autoresSel.clear();
+  cont.innerHTML = `
+    <div class="sec-h"><h2>Autores</h2></div>
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <input id="autBuscar" placeholder="🔍 Buscar autor (nombre o variante)…" autocomplete="off" style="flex:1;min-width:220px" />
+      <span id="autCombinaBar"></span>
+    </div>
+    <div id="autGrid" class="muted">Cargando…</div>`;
+  const inp = $('#autBuscar');
+  if (inp)
+    inp.oninput = () => {
+      clearTimeout(_autoresBuscarTimer);
+      _autoresBuscarTimer = setTimeout(() => autoresBuscar(inp.value), 300);
+    };
+  autoresBuscar('');
+}
+
+async function autoresBuscar(q) {
+  const grid = $('#autGrid');
+  if (grid) grid.textContent = 'Cargando…';
+  try {
+    const r = await api('/autores?q=' + encodeURIComponent(q || ''));
+    _autores = r.autores || [];
+  } catch (e) {
+    if (grid) grid.textContent = 'Error: ' + e.message;
+    return;
+  }
+  autoresPintar();
+}
+
+function autoresPintar() {
+  const grid = $('#autGrid');
+  if (!grid) return;
+  if (!_autores.length) {
+    grid.innerHTML = '<div class="empty">Sin autores.</div>';
+    autoresBarraCombinar();
+    return;
+  }
+  grid.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">${_autores
+    .map(autorCard)
+    .join('')}</div>`;
+  grid.querySelectorAll('[data-aut]').forEach(
+    (el) =>
+      (el.onclick = (e) => {
+        if (e.target.closest('[data-autchk]')) return; // clic en la casilla: no abre la ficha
+        autorFicha(el.dataset.aut);
+      }),
+  );
+  grid.querySelectorAll('[data-autchk]').forEach(
+    (cb) =>
+      (cb.onchange = () => {
+        cb.checked ? _autoresSel.add(cb.dataset.autchk) : _autoresSel.delete(cb.dataset.autchk);
+        autoresBarraCombinar();
+      }),
+  );
+  autoresBarraCombinar();
+}
+
+function autorCard(a) {
+  const sel = _autoresSel.has(a._id);
+  const foto = a.foto
+    ? `<img src="${esc(encUrl(a.foto))}" style="width:52px;height:52px;object-fit:cover;border-radius:50%;background:var(--card)" loading="lazy">`
+    : `<div style="width:52px;height:52px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">👤</div>`;
+  const vida =
+    a.nacimiento || a.fallecimiento
+      ? ` · <span class="muted" style="font-size:11px">${a.nacimiento || '?'}–${a.fallecimiento || ''}</span>`
+      : '';
+  const alt =
+    a.nombres_alternativos && a.nombres_alternativos.length
+      ? `<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.nombres_alternativos.join(' · '))}">a.k.a. ${esc(a.nombres_alternativos.join(' · '))}</div>`
+      : '';
+  return `<div data-aut="${esc(a._id)}" class="card" style="display:flex;gap:10px;align-items:center;cursor:pointer;padding:10px${sel ? ';outline:2px solid var(--acc)' : ''}">
+    <input type="checkbox" class="admin-only" data-autchk="${esc(a._id)}" ${sel ? 'checked' : ''} title="Seleccionar para combinar" style="width:16px;height:16px;flex:0 0 auto">
+    ${foto}
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.nombre || '—')}</div>
+      <div class="muted" style="font-size:12px">${a.n_libros} libro(s)${vida}</div>
+      ${alt}
+    </div></div>`;
+}
+
+// Barra de acción de «Combinar»: aparece al marcar 2+ autores.
+function autoresBarraCombinar() {
+  const bar = $('#autCombinaBar');
+  if (!bar) return;
+  const n = _autoresSel.size;
+  bar.innerHTML =
+    n >= 2
+      ? `<button class="btn pri admin-only" id="autCombinar">🔗 Combinar ${n}…</button> <button class="btn" id="autSelClear">✕ deseleccionar</button>`
+      : n === 1
+        ? `<span class="muted" style="font-size:12px">1 marcado (marca 2+ para combinar)</span> <button class="btn" id="autSelClear">✕</button>`
+        : '';
+  if ($('#autCombinar')) $('#autCombinar').onclick = autorCombinar;
+  if ($('#autSelClear'))
+    $('#autSelClear').onclick = () => {
+      _autoresSel.clear();
+      autoresPintar();
+    };
+}
+
+// Ficha de autor (modal): foto, datos (editables si admin) y sus libros (clic → ficha del libro).
+async function autorFicha(id) {
+  let r;
+  try {
+    r = await api('/autores/' + encodeURIComponent(id));
+  } catch (e) {
+    toast(e.message, 'bad');
+    return;
+  }
+  const a = r.autor || {};
+  const libros = r.libros || [];
+  const admin = ROL === 'admin';
+  const foto = a.foto
+    ? `<img src="${esc(encUrl(a.foto))}" style="width:110px;height:110px;object-fit:cover;border-radius:12px;background:var(--card)">`
+    : `<div style="width:110px;height:110px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:44px">👤</div>`;
+  const alt = Array.isArray(a.nombres_alternativos) ? a.nombres_alternativos.join('; ') : '';
+  // Datos: editables (admin) o de solo lectura (invitado).
+  const campos = admin
+    ? `<div><label>Nombre</label><input id="autNombre" value="${esc(a.nombre || '')}" autocomplete="off"></div>
+       <div style="margin-top:6px"><label>También conocido como (separa con ;)</label><input id="autAlt" value="${esc(alt)}" autocomplete="off"></div>
+       <div class="row" style="margin-top:6px">
+         <div><label>Nacimiento</label><input id="autNac" value="${esc(a.nacimiento || '')}" inputmode="numeric" autocomplete="off"></div>
+         <div><label>Fallecimiento</label><input id="autFall" value="${esc(a.fallecimiento || '')}" inputmode="numeric" autocomplete="off"></div>
+       </div>
+       <div style="margin-top:6px"><label>Biografía</label><textarea id="autBio" rows="4" style="width:100%;resize:vertical;font-family:inherit">${esc(a.biografia || '')}</textarea></div>`
+    : `<h3 style="margin:0">${esc(a.nombre || '—')}</h3>
+       ${alt ? `<div class="muted" style="font-size:12px;margin-top:4px">a.k.a. ${esc(alt)}</div>` : ''}
+       ${a.nacimiento || a.fallecimiento ? `<div class="muted" style="font-size:12px;margin-top:4px">${a.nacimiento || '?'}–${a.fallecimiento || ''}</div>` : ''}
+       ${a.biografia ? `<p class="sinopsis-text" style="margin-top:8px">${esc(a.biografia)}</p>` : ''}`;
+  const librosHtml = libros.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;margin-top:8px">${libros
+        .map(
+          (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="cursor:pointer;text-align:center">
+            ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">📕</div>`}
+            <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
+          </div>`,
+        )
+        .join('')}</div>`
+    : '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:660px;max-height:92vh;overflow:auto">
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div style="text-align:center">
+        ${foto}
+        ${admin ? `<div style="margin-top:6px"><button class="btn" id="autFoto">📷 Foto</button><input type="file" id="autFotoFile" accept="image/*" style="display:none"></div>` : ''}
+      </div>
+      <div style="flex:1;min-width:250px">${campos}</div>
+    </div>
+    <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})</div>${librosHtml}</div>
+    <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
+      ${admin ? '<button class="btn pri" id="autGuardar">💾 Guardar</button>' : ''}
+      <button class="btn" id="autCerrar">Cerrar</button>
+    </div>
+    <div id="autMsg" class="muted" style="font-size:12px;margin-top:6px"></div>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#autCerrar').onclick = cerrarCmp;
+  $('#cmpModal')
+    .querySelectorAll('[data-libro]')
+    .forEach(
+      (el) =>
+        (el.onclick = () => {
+          cerrarCmp();
+          verDoc(el.dataset.libro, { volver: 'autores', etiqueta: 'Autores' });
+        }),
+    );
+  if (admin) {
+    if ($('#autFoto')) $('#autFoto').onclick = () => $('#autFotoFile').click();
+    if ($('#autFotoFile')) $('#autFotoFile').onchange = () => autorSubirFoto(id, $('#autFotoFile'));
+    if ($('#autGuardar')) $('#autGuardar').onclick = () => autorGuardar(id);
+  }
+}
+
+async function autorGuardar(id) {
+  const cambios = {
+    nombre: ($('#autNombre') && $('#autNombre').value) || '',
+    nombres_alternativos: (($('#autAlt') && $('#autAlt').value) || '')
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    nacimiento: ($('#autNac') && $('#autNac').value) || '',
+    fallecimiento: ($('#autFall') && $('#autFall').value) || '',
+    biografia: ($('#autBio') && $('#autBio').value) || '',
+  };
+  const msg = $('#autMsg');
+  if (msg) msg.textContent = 'Guardando…';
+  try {
+    await api('/autores/' + encodeURIComponent(id) + '/editar', { method: 'POST', body: JSON.stringify(cambios) });
+  } catch (e) {
+    if (msg) msg.textContent = 'Error: ' + e.message;
+    return;
+  }
+  cerrarCmp();
+  toast('✔ Autor guardado');
+  autoresBuscar(($('#autBuscar') && $('#autBuscar').value) || '');
+}
+
+async function autorSubirFoto(id, inp) {
+  const f = inp && inp.files && inp.files[0];
+  if (inp) inp.value = '';
+  if (!f) return;
+  const msg = $('#autMsg');
+  if (msg) msg.textContent = 'Subiendo foto…';
+  try {
+    const red = await reducirImagen(f);
+    const base64 = await fileADataURL(red);
+    await api('/autores/' + encodeURIComponent(id) + '/foto', { method: 'POST', body: JSON.stringify({ base64 }) });
+  } catch (e) {
+    if (msg) msg.textContent = 'Error: ' + e.message;
+    return;
+  }
+  toast('📷 Foto guardada');
+  autorFicha(id); // recargar la ficha para mostrar la nueva foto
+}
+
+// Combinar (A→B): elige entre los seleccionados cuál es el DESTINO (B, se conserva) y funde el resto en él.
+function autorCombinar() {
+  const ids = [..._autoresSel];
+  if (ids.length < 2) return;
+  const sel = ids.map((id) => _autores.find((a) => a._id === id)).filter(Boolean);
+  // Por defecto, destino = el que más libros tiene (menos reasignaciones).
+  const porDefecto = sel.slice().sort((a, b) => b.n_libros - a.n_libros)[0];
+  const opciones = sel
+    .map(
+      (a) =>
+        `<label style="display:flex;gap:8px;align-items:center;padding:6px;border-bottom:1px solid var(--line);cursor:pointer">
+          <input type="radio" name="autDest" value="${esc(a._id)}" ${a._id === porDefecto._id ? 'checked' : ''}>
+          <span style="flex:1">${esc(a.nombre)} <span class="muted" style="font-size:11px">· ${a.n_libros} libro(s)</span></span>
+        </label>`,
+    )
+    .join('');
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px">
+    <h3 style="margin-top:0">🔗 Combinar autores</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Elige el autor que se CONSERVA (destino). El resto se fundirán en él: sus nombres pasarán a «también conocido como» y todos sus libros se reasignarán.</div>
+    ${opciones}
+    <div id="autCombMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
+    <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn pri" id="autCombOk">🔗 Combinar</button>
+      <button class="btn" id="autCombX">Cancelar</button>
+    </div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#autCombX').onclick = cerrarCmp;
+  $('#autCombOk').onclick = async () => {
+    const destino = ($('#cmpModal input[name="autDest"]:checked') || {}).value;
+    if (!destino) return;
+    const msg = $('#autCombMsg');
+    if (msg) msg.textContent = 'Combinando…';
+    try {
+      const r = await api('/autores/fusionar', { method: 'POST', body: JSON.stringify({ destino, ids }) });
+      cerrarCmp();
+      toast(`🔗 ${r.fusionados} fundido(s) en «${r.destino.nombre}» · ${r.reasignados} libro(s) reasignados`);
+      _autoresSel.clear();
+      autoresBuscar(($('#autBuscar') && $('#autBuscar').value) || '');
+    } catch (e) {
+      if (msg) msg.textContent = 'Error: ' + e.message;
+    }
+  };
+}
+
 const loaders = {
   dashboard: loadDashboard,
   activity: loadActivity,
@@ -9097,6 +9371,7 @@ const loaders = {
   pap: loadPap,
   obras: loadObras,
   colecciones: loadColecciones,
+  autores: loadAutores,
   ubic: loadUbic,
   inbox: loadInbox,
   search: loadSearch,

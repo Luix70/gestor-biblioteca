@@ -247,6 +247,13 @@ async function main() {
     await asegurarIndice(biblioteca, { coleccion: 1, clave_numero: 1 }, { sparse: true, name: 'idx_coleccion_clave_numero' });
     await asegurarIndice(biblioteca, { obra: 1, clave_numero: 1 }, { sparse: true, name: 'idx_obra_clave_numero' });
 
+    // autores: la ingesta busca por `nombre` (check-then-create) y la página «Autores» busca por nombre y
+    // por grafías alternativas. Índices no únicos (puede haber homónimos reales; la fusión es manual).
+    console.log('\nautores:');
+    const autores = db.collection('autores');
+    await asegurarIndice(autores, { nombre: 1 }, { name: 'idx_nombre' });
+    await asegurarIndice(autores, { nombres_alternativos: 1 }, { sparse: true, name: 'idx_nombres_alternativos' });
+
     console.log('\nListo.\n');
     process.exit(0);
 }
