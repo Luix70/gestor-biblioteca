@@ -8306,7 +8306,7 @@ async function iniciarEtiquetadoLote(ids, auto) {
       }
     }
   }
-  _etq = { ids, i: 0, auto: !!auto, abort: null, actual: null };
+  _etq = { ids, i: 0, auto: !!auto, forzar: localStorage.getItem('etq_forzar') === '1', abort: null, actual: null };
   $('#cmpModal').innerHTML = '<div class="box card" style="max-width:480px"><div id="etqBody"></div></div>';
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
@@ -8364,7 +8364,9 @@ async function procesarEtq() {
   const abort = new AbortController();
   _etq.abort = abort;
   try {
-    const uid = await escribirNFC(recs, id, abort.signal, false);
+    // forzar (leído al TOCAR) = «Sobrescribir sin comprobar»: escribe en el primer toque SIN leer la
+    // etiqueta antes, evitando el hueco en que Android leía la URL vieja y redirigía al re-grabar.
+    const uid = await escribirNFC(recs, id, abort.signal, () => !!(_etq && _etq.forzar));
     if (gen !== _etqGen) return;
     await etqTrasGrabar(doc, r, uid, url, gen);
   } catch (e) {
@@ -8538,7 +8540,8 @@ function pintarEtq(doc, r, estado, extra) {
     bot = cX;
   }
   b.innerHTML = `<h3 style="margin-top:0">📶 Etiquetar — ${n} / ${tot} <button class="btn" id="etqMin" title="Cerrar conservando la cola (reanudar luego)" style="float:right;padding:2px 9px">✕</button></h3>
-    <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer"><input type="checkbox" id="etqAuto" ${_etq.auto ? 'checked' : ''} style="width:auto;margin:0"> Modo automático (avanza solo al grabar)</label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="etqAuto" ${_etq.auto ? 'checked' : ''} style="width:auto;margin:0"> Modo automático (avanza solo al grabar)</label>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer" title="Escribe en el primer toque sin leer la etiqueta antes. Actívalo si las etiquetas YA tienen datos (re-grabar): evita que el móvil abra la ficha vieja."><input type="checkbox" id="etqForzar" ${_etq.forzar ? 'checked' : ''} style="width:auto;margin:0"> Sobrescribir sin comprobar (re-grabar etiquetas usadas)</label>
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">${cov}<div style="min-width:0"><div style="font-weight:600;word-break:break-word">${tit}</div>${aut ? `<div class="muted" style="font-size:12px">${aut}</div>` : ''}<div style="margin-top:6px"><span class="tag" style="background:rgba(40,217,168,.16);color:var(--acc)">📍 ${ubic}</span>${yaTen ? ' <span class="muted" style="font-size:11px">· ya tenía etiqueta (regrabar)</span>' : ''}</div></div></div>
     <div style="min-height:24px;margin:6px 0;font-size:14px">${est}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">${bot}</div>`;
@@ -8551,6 +8554,12 @@ function pintarEtq(doc, r, estado, extra) {
         _etq.i++;
         procesarEtq();
       }
+    };
+  const F = $('#etqForzar');
+  if (F)
+    F.onchange = () => {
+      _etq.forzar = F.checked;
+      localStorage.setItem('etq_forzar', F.checked ? '1' : '0'); // recordar la preferencia entre sesiones
     };
   const w = (id, fn) => {
     const e = $('#' + id);
