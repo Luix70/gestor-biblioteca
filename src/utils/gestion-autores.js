@@ -37,48 +37,56 @@ async function conteosDeLibros(db, ids) {
     return conteos;
 }
 
+// Sub-filtros «tiene / no tiene» un campo de texto (foto, biografia), para los selectores del panel.
+// valor: 'si' = presente y no vacío · 'no' = ausente/nulo/vacío · '' = no filtra.
+function condicionCampo(campo, valor) {
+    if (valor === 'si') return { [campo]: { $exists: true, $nin: [null, ''] } };
+    if (valor === 'no') return { $or: [{ [campo]: { $exists: false } }, { [campo]: null }, { [campo]: '' }] };
+    return null;
+}
+
 /**
- * Lista/busca autores con el nº de libros de cada uno.
- *   · CON búsqueda: por nombre o grafía alternativa (tolerante a mayúsculas), más usados primero.
- *   · SIN búsqueda: los autores QUE TIENEN LIBROS en la biblioteca, más usados primero (los ~9000 nombres
- *     del volcado sin libros asociados serían ruido aquí; aparecen al buscarlos por nombre).
+ * Lista/busca autores con el nº de libros de cada uno. Parámetros opcionales:
+ *   · q      — texto (nombre o grafía alternativa, tolerante a mayúsculas).
+ *   · foto   — 'si' | 'no' | '' : con / sin foto.
+ *   · bio    — 'si' | 'no' | '' : con / sin biografía.
+ *   · orden  — 'libros' (por nº de obras, desc; por defecto) | 'nombre' (alfabético).
+ * SIN búsqueda muestra los autores QUE TIENEN LIBROS (los miles de nombres del volcado sin libros son
+ * ruido aquí; aparecen al buscarlos por nombre). Los filtros foto/bio se aplican en ambos casos.
  */
-export async function listarAutores(db, { q = '', limite = 300 } = {}) {
+export async function listarAutores(db, { q = '', limite = 300, foto = '', bio = '', orden = 'libros' } = {}) {
     const tope = Math.min(1000, Math.max(1, limite));
     const consulta = String(q || '').trim();
+    const and = [condicionCampo('foto', foto), condicionCampo('biografia', bio)].filter(Boolean);
 
-    if (!consulta) {
-        // Autores realmente usados, ordenados por nº de libros (desc) — la vista por defecto útil.
-        const filas = await db.collection('biblioteca').aggregate([
-            { $unwind: '$autores' },
-            { $group: { _id: '$autores', n: { $sum: 1 } } },
-            { $sort: { n: -1 } },
-            { $limit: tope },
-        ]).toArray();
-        const ids = filas.map((f) => f._id).filter(Boolean);
-        const porId = new Map(
-            (await db.collection('autores').find({ _id: { $in: ids } }, { projection: PROY_AUTOR }).toArray())
-                .map((a) => [String(a._id), a]),
-        );
-        return filas
-            .map((f) => {
-                const a = porId.get(String(f._id));
-                if (!a) return null; // ref huérfana (autor borrado): se ignora
-                return { ...a, _id: String(a._id), n_libros: f.n };
-            })
-            .filter(Boolean);
+    let autores;
+    if (consulta) {
+        // Búsqueda por texto sobre el nombre o las grafías alternativas (+ filtros foto/bio).
+        const rx = new RegExp(escapeRegex(consulta), 'i');
+        const filtro = { $or: [{ nombre: rx }, { nombres_alternativos: rx }] };
+        if (and.length) filtro.$and = and;
+        const docs = await db.collection('autores').find(filtro, { projection: PROY_AUTOR }).limit(tope * 2).toArray();
+        const conteos = await conteosDeLibros(db, docs.map((a) => a._id));
+        autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteos.get(String(a._id)) || 0 }));
+    } else {
+        // Autores realmente usados (con libros) + filtros foto/bio.
+        const usados = await db.collection('biblioteca')
+            .aggregate([{ $unwind: '$autores' }, { $group: { _id: '$autores', n: { $sum: 1 } } }]).toArray();
+        const conteo = new Map(usados.map((u) => [String(u._id), u.n]));
+        const ids = usados.map((u) => u._id).filter(Boolean);
+        if (!ids.length) return [];
+        const filtro = { _id: { $in: ids } };
+        if (and.length) filtro.$and = and;
+        const docs = await db.collection('autores').find(filtro, { projection: PROY_AUTOR }).toArray();
+        autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteo.get(String(a._id)) || 0 }));
     }
 
-    // Búsqueda por texto sobre el nombre o las grafías alternativas.
-    const rx = new RegExp(escapeRegex(consulta), 'i');
-    const autores = await db.collection('autores')
-        .find({ $or: [{ nombre: rx }, { nombres_alternativos: rx }] }, { projection: PROY_AUTOR })
-        .limit(tope)
-        .toArray();
-    const conteos = await conteosDeLibros(db, autores.map((a) => a._id));
-    return autores
-        .map((a) => ({ ...a, _id: String(a._id), n_libros: conteos.get(String(a._id)) || 0 }))
-        .sort((x, y) => y.n_libros - x.n_libros || String(x.nombre || '').localeCompare(String(y.nombre || '')));
+    if (orden === 'nombre') {
+        autores.sort((x, y) => String(x.nombre || '').localeCompare(String(y.nombre || '')));
+    } else {
+        autores.sort((x, y) => y.n_libros - x.n_libros || String(x.nombre || '').localeCompare(String(y.nombre || '')));
+    }
+    return autores.slice(0, tope);
 }
 
 /**

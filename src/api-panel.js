@@ -1056,7 +1056,10 @@ export function rutasPanel() {
         try {
             const q = String(req.query.q || '');
             const limite = Number(req.query.limite) || 300;
-            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite }) });
+            const foto = String(req.query.foto || '');   // 'si' | 'no' | ''
+            const bio = String(req.query.bio || '');      // 'si' | 'no' | ''
+            const orden = String(req.query.orden || 'libros'); // 'libros' | 'nombre'
+            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite, foto, bio, orden }) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.get('/autores/:id', async (req, res) => {

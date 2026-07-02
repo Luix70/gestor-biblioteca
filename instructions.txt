@@ -406,6 +406,8 @@ de ficheros clasificado por CDU.
     alternativa; sin búsqueda, salen los autores CON libros, más usados primero
     (los miles de nombres del volcado sin libros aparecen al buscarlos). Cada
     tarjeta muestra foto, nombre, «a.k.a.» (variantes), nº de libros y fechas.
+    · Filtros: Foto (con/sin), Biografía (con/sin) y Orden (nº de obras / nombre)
+      — útiles para localizar a quién falta foto o bio y autocompletarlo.
     · Clic en una tarjeta → FICHA del autor: foto, biografía, fechas, «también
       conocido como» y sus libros (clic en un libro = su ficha). El admin puede
       EDITAR esos datos y SUBIR una foto.

@@ -9105,25 +9105,48 @@ async function loadAutores() {
   _autoresSel.clear();
   cont.innerHTML = `
     <div class="sec-h"><h2>Autores</h2></div>
-    <div class="row" style="gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-      <input id="autBuscar" placeholder="🔍 Buscar autor (nombre o variante)…" autocomplete="off" style="flex:1;min-width:220px" />
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <input id="autBuscar" placeholder="🔍 Buscar autor (nombre o variante)…" autocomplete="off" style="flex:1;min-width:200px" />
       <span id="autCombinaBar"></span>
+    </div>
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <label class="muted" style="font-size:12px">Foto
+        <select id="autFotoFiltro"><option value="">todas</option><option value="si">con</option><option value="no">sin</option></select>
+      </label>
+      <label class="muted" style="font-size:12px">Biografía
+        <select id="autBioFiltro"><option value="">todas</option><option value="si">con</option><option value="no">sin</option></select>
+      </label>
+      <label class="muted" style="font-size:12px">Orden
+        <select id="autOrden"><option value="libros">nº de obras</option><option value="nombre">nombre</option></select>
+      </label>
     </div>
     <div id="autGrid" class="muted">Cargando…</div>`;
   const inp = $('#autBuscar');
   if (inp)
     inp.oninput = () => {
       clearTimeout(_autoresBuscarTimer);
-      _autoresBuscarTimer = setTimeout(() => autoresBuscar(inp.value), 300);
+      _autoresBuscarTimer = setTimeout(autoresBuscar, 300);
     };
-  autoresBuscar('');
+  // Los selectores de filtro/orden recargan al instante.
+  ['#autFotoFiltro', '#autBioFiltro', '#autOrden'].forEach((sel) => {
+    const el = $(sel);
+    if (el) el.onchange = autoresBuscar;
+  });
+  autoresBuscar();
 }
 
-async function autoresBuscar(q) {
+// Lee los controles (texto + filtros foto/bio + orden) y pide la lista al servidor.
+async function autoresBuscar() {
   const grid = $('#autGrid');
   if (grid) grid.textContent = 'Cargando…';
+  const params = new URLSearchParams({
+    q: ($('#autBuscar') && $('#autBuscar').value.trim()) || '',
+    foto: ($('#autFotoFiltro') && $('#autFotoFiltro').value) || '',
+    bio: ($('#autBioFiltro') && $('#autBioFiltro').value) || '',
+    orden: ($('#autOrden') && $('#autOrden').value) || 'libros',
+  });
   try {
-    const r = await api('/autores?q=' + encodeURIComponent(q || ''));
+    const r = await api('/autores?' + params.toString());
     _autores = r.autores || [];
   } catch (e) {
     if (grid) grid.textContent = 'Error: ' + e.message;
@@ -9298,7 +9321,7 @@ async function autorGuardar(id) {
   }
   cerrarCmp();
   toast('✔ Autor guardado');
-  autoresBuscar(($('#autBuscar') && $('#autBuscar').value) || '');
+  autoresBuscar();
 }
 
 async function autorSubirFoto(id, inp) {
@@ -9379,7 +9402,7 @@ function autorCombinar() {
       cerrarCmp();
       toast(`🔗 ${r.fusionados} fundido(s) en «${r.destino.nombre}» · ${r.reasignados} libro(s) reasignados`);
       _autoresSel.clear();
-      autoresBuscar(($('#autBuscar') && $('#autBuscar').value) || '');
+      autoresBuscar();
     } catch (e) {
       if (msg) msg.textContent = 'Error: ' + e.message;
     }
