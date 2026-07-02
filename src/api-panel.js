@@ -588,9 +588,13 @@ export function rutasPanel() {
             const filtro = await ocultarNsfw(req.usuario?.rol) ? { nsfw: { $ne: true } } : {};
             if (tipo === 'revista') filtro.tipo = 'revista';
             else if (tipo === 'libro') filtro.tipo = { $ne: 'revista' }; // libro o legado (sin tipo)
+            // La página de Colecciones filtra en el CLIENTE sobre lo que recibe, así que hay que devolverlas
+            // TODAS: con un tope de 1000 y >1000 colecciones, las alfabéticamente tardías quedaban fuera y no
+            // aparecían ni en la búsqueda (bug: «Series on knots…» invisible con 1510 colecciones). El tope
+            // alto es sólo una salvaguarda; si algún día se superara, pasar a búsqueda server-side (?q=).
             const cols = await db.collection('colecciones')
                 .find(filtro, { projection: { nombre: 1, tipo: 1, issn: 1, numeros_presentes: 1, revision_requerida: 1, nsfw: 1, valoracion: 1 } })
-                .sort({ revision_requerida: -1, nombre: 1 }).limit(1000).toArray();
+                .sort({ revision_requerida: -1, nombre: 1 }).limit(20000).toArray();
             // Nº de miembros + hasta 3 portadas (para la cubierta apilada) de un tirón, por agregación.
             const agg = cols.length ? await db.collection('biblioteca').aggregate([
                 { $match: { coleccion: { $in: cols.map(c => c._id) } } },
