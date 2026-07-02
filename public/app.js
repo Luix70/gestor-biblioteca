@@ -5942,6 +5942,15 @@ function isbnAutoReset() {
   isbnAutoCancelar();
   const auto = $('#isbnAuto');
   if (!auto || !auto.checked || !_isbnEstado) return; // solo con switch activo y datos ya cargados
+  // Sin TÍTULO no se puede dar de alta rápida (fallaría con «Falta el título»). En modo AUTO eso pasaría
+  // desapercibido (fallo silencioso). Así que NO se auto-crea: se avisa en voz alta y se deja al usuario
+  // rellenar a mano o pulsar «Completar y crear» (que tira de APIs/IA).
+  if (!_isbnEstado.meta || !String(_isbnEstado.meta.titulo || '').trim()) {
+    const est0 = $('#isbnAutoEstado');
+    if (est0) est0.textContent = '⚠ sin título: no se auto-crea; rellénalo o pulsa «Completar y crear».';
+    toast('Sin datos para este ISBN: escribe el título o usa «Completar y crear»', 'warn');
+    return;
+  }
   const seg = Math.min(
     10,
     Math.max(1, parseInt(($('#isbnAutoSeg') && $('#isbnAutoSeg').value) || '5', 10) || 5),
@@ -6328,6 +6337,13 @@ async function isbnCrear(completar, auto = false) {
     r = await api('/isbn/alta', { method: 'POST', body: JSON.stringify(body) });
   } catch (e) {
     if (msg) msg.textContent = 'Error: ' + e.message;
+    // En modo AUTO (lectura por lotes) el error NO puede pasar desapercibido: aviso en voz alta y se DEJA el
+    // ISBN en el campo con el foco, para que veas cuál falló y no se «pierda» el libro silenciosamente.
+    if (auto) {
+      toast('❌ No se pudo crear el ISBN ' + (_isbnEstado?.isbn || '') + ': ' + e.message, 'bad');
+      const inp = $('#isbnIn');
+      if (inp) inp.focus();
+    }
     return;
   }
   _isbnEstado = null;
