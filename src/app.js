@@ -10,6 +10,8 @@ axios.defaults.timeout = Number(process.env.HTTP_TIMEOUT_MS || 20000);
 import express from 'express';
 import multer from 'multer';
 import fs from 'fs/promises';
+import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
@@ -234,8 +236,47 @@ app.get('/api/estadisticas', async (req, res) => {
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
+// Commit que está corriendo el contenedor (observabilidad: verificar que un despliegue trae lo último).
+// Se detecta, en orden: variable de entorno GIT_COMMIT (si el script de despliegue la define, lo más fiable),
+// lectura directa de .git/HEAD (sin binario git), binario `git`, o «desconocido».
+function versionEnEjecucion() {
+    if (process.env.GIT_COMMIT) {
+        return { commit: String(process.env.GIT_COMMIT).slice(0, 10), rama: process.env.GIT_BRANCH || null, origen: 'env' };
+    }
+    try {
+        const gitDir = path.join(RAIZ, '.git');
+        const head = readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+        const ref = head.match(/^ref:\s*(.+)$/);
+        if (ref) {
+            const rama = ref[1].replace('refs/heads/', '');
+            let commit = null;
+            try {
+                commit = readFileSync(path.join(gitDir, ref[1]), 'utf8').trim();
+            } catch {
+                const packed = readFileSync(path.join(gitDir, 'packed-refs'), 'utf8');
+                const linea = packed.split('\n').find((l) => l.endsWith(' ' + ref[1]));
+                if (linea) commit = linea.split(' ')[0];
+            }
+            if (commit) return { commit: commit.slice(0, 10), rama, origen: '.git' };
+        } else if (/^[0-9a-f]{7,40}$/i.test(head)) {
+            return { commit: head.slice(0, 10), rama: '(detached)', origen: '.git' };
+        }
+    } catch { /* sin carpeta .git en el contenedor */ }
+    try {
+        const commit = execSync('git rev-parse --short HEAD', { cwd: RAIZ, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+        const rama = execSync('git rev-parse --abbrev-ref HEAD', { cwd: RAIZ, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+        if (commit) return { commit, rama, origen: 'git' };
+    } catch { /* sin binario git */ }
+    return { commit: 'desconocido', rama: null, origen: null };
+}
+
 app.listen(PUERTO, () => {
     console.log(`🚀 API REST de ingesta activa en el puerto ${PUERTO}`);
+    const v = versionEnEjecucion();
+    console.log(`📦 Versión en ejecución: commit ${v.commit}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
+    if (v.commit === 'desconocido') {
+        console.log('   ⓘ  Para verlo siempre, el script de despliegue puede exportar GIT_COMMIT/GIT_BRANCH (o incluir la carpeta .git).');
+    }
     if (process.env.DESACTIVAR_VIGILANTE !== '1') {
         iniciarVigilante().catch(e => console.error('No se pudo iniciar el vigilante:', e.message));
     }
