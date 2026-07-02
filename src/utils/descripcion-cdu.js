@@ -28,6 +28,33 @@ async function generarIA(codigo) {
 }
 
 /**
+ * Siembra una descripción de CDU en 'cdu_descripciones' a partir de datos YA obtenidos (p. ej. la MISMA
+ * llamada a la IA que dedujo el código, ver clasificador-cdu.js·iaCDU) — así NO se gasta otra llamada de IA
+ * después con describirCDU. Best-effort e idempotente: si ya existe la descripción, no hace nada.
+ * `datos` = { titulo_es, descripcion_es, titulo_en, descripcion_en }.
+ */
+export async function sembrarDescripcionCDU(db, cdu, datos = {}) {
+    const codigo = sanitizarCDU(cdu);
+    if (!codigo || !/[0-9]/.test(codigo)) return null;
+    if (!datos || (!datos.descripcion_es && !datos.titulo_es)) return null;
+    const col = db.collection('cdu_descripciones');
+    if (await col.findOne({ codigo })) return null; // ya cacheada: no re-generar ni pisar
+    const { clase, division } = arbolCDU(cdu);
+    const doc = {
+        codigo, clase, division,
+        titulo_es: datos.titulo_es || null,
+        descripcion_es: datos.descripcion_es || null,
+        titulo_en: datos.titulo_en || null,
+        descripcion_en: datos.descripcion_en || null,
+        fuente: 'ia',
+        verificado: false,
+        fecha: new Date(),
+    };
+    try { await col.insertOne(doc); return doc; }
+    catch { return await col.findOne({ codigo }); } // carrera con el índice único
+}
+
+/**
  * Asegura que el código CDU tenga descripción en 'cdu_descripciones'. Cacheado: si ya existe,
  * la devuelve sin llamar a la IA. Best-effort: ante fallo de IA/JSON devuelve null (se reintenta
  * más tarde, no inserta basura).

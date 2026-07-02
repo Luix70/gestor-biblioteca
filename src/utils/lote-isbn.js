@@ -38,7 +38,7 @@ export async function buscarUnISBN(rawIsbn) {
     // procedencia SOLO de campos con valor (no se pisa una ya anotada: gana la fuente más autoritativa,
     // que siempre se consulta antes).
     const procedencia = {};
-    const CAMPOS = ['titulo', 'subtitulo', 'autores', 'editorial', 'año_edicion', 'idioma', 'cdu', 'dewey', 'lcc', 'sinopsis', 'coleccion_nombre', 'categorias'];
+    const CAMPOS = ['titulo', 'subtitulo', 'autores', 'editorial', 'año_edicion', 'idioma', 'cdu', 'dewey', 'lcc', 'sinopsis', 'coleccion_nombre', 'categorias', 'palabras_clave'];
     const tieneValor = (v) => !(v == null || v === '' || (Array.isArray(v) && !v.length));
     const marcar = (obj, origen, campos = CAMPOS) => {
         for (const c of campos) if (tieneValor(obj[c]) && !procedencia[c]) procedencia[c] = origen;
@@ -76,6 +76,7 @@ export async function buscarUnISBN(rawIsbn) {
                 paginas: online.paginas_bne || null,
                 dimensiones: online.dimensiones_bne || null,
                 categorias: online.categorias || [],
+                palabras_clave: online.palabras_clave || [],
                 coleccion_nombre: online.coleccion_nombre || null,
                 sinopsis: online.sinopsis || null,
                 portada_url: portadaOnline,
@@ -84,11 +85,14 @@ export async function buscarUnISBN(rawIsbn) {
             fuenteMeta = 'online';
             marcar(meta, 'online');                     // todo lo demás es de APIs gratuitas
             if (tieneValor(meta.cdu)) procedencia.cdu = cduOrigen; // salvo la CDU, que puede ser IA
+            // Las palabras_clave, si vienen, las dedujo la IA en la misma llamada de la CDU.
+            if (tieneValor(meta.palabras_clave)) procedencia.palabras_clave = 'ia';
         } else if (online && meta && meta.titulo) {
             // El Fichero SÍ tenía título: el online solo RELLENA lo que faltaba, sin pisar nada.
             if (!meta.sinopsis && online.sinopsis) { meta.sinopsis = online.sinopsis; procedencia.sinopsis = 'online'; fuenteMeta = 'fichero+online'; }
             if (!meta.coleccion_nombre && online.coleccion_nombre) { meta.coleccion_nombre = online.coleccion_nombre; procedencia.coleccion_nombre = 'online'; fuenteMeta = 'fichero+online'; }
             if (!meta.cdu && online.cdu) { meta.cdu = online.cdu; procedencia.cdu = cduOrigen; fuenteMeta = 'fichero+online'; }
+            if ((!meta.palabras_clave || !meta.palabras_clave.length) && online.palabras_clave?.length) { meta.palabras_clave = online.palabras_clave; procedencia.palabras_clave = 'ia'; }
             if (!meta.dewey && online.dewey) { meta.dewey = online.dewey; procedencia.dewey = 'online'; }
             if (!meta.lcc && online.lcc) { meta.lcc = online.lcc; procedencia.lcc = 'online'; }
             if (!meta.portada_url) {

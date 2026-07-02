@@ -1125,6 +1125,7 @@ export function rutasPanel() {
                 'año_edicion': meta['año_edicion'] || meta.anio || null, dewey: meta.dewey || null, lcc: meta.lcc || null,
                 cdu: meta.cdu || null, sinopsis: meta.sinopsis || null,
                 categorias: Array.isArray(meta.categorias) ? meta.categorias : [], coleccion_nombre: meta.coleccion_nombre || null,
+                palabras_clave: Array.isArray(meta.palabras_clave) ? meta.palabras_clave : [],
             };
             const activos = [];
             for (const im of (b.imagenes || [])) { if (im && im.url) activos.push({ tipo: im.tipo || 'imagen', url: im.url, origen: 'isbn-web' }); }

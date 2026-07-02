@@ -313,16 +313,18 @@ de ficheros clasificado por CDU.
         se pulsa «Crear» (rápido) o «Completar y crear» (enriquece con APIs+CDU).
       · Cualquier fallo del alta se avisa por Toast (no pasa desapercibido) y el
         modal sigue abierto para corregir.
+      · Tras crear NO se salta a la ficha (interrumpía el flujo): el foco vuelve al
+        campo ISBN para leer el siguiente; queda un enlace «ver ficha» por si acaso.
       · Auto-alta (interruptor + deslizador 1–10 s): tras esa inactividad da de
         alta con la portada elegida, limpia el ISBN y re-enfoca el campo para leer
         el siguiente — lectura en cadena con lector Bluetooth, sin tocar el ratón.
       · 📋 Alta por LOTE: pega una lista de ISBN (o del portapapeles, o sube un
-        .txt); se buscan TODOS y se apilan en tarjetas con casilla. Deselecciona
-        los erróneos/incompletos y «Enviar seleccionados» los crea de golpe; los
-        que queden (o fallen) siguen en la lista, y con ✎ se abren en el modal
-        para completarlos a mano. Campo «Colección para los que no la traigan»:
-        se aplica SOLO a los que no traigan colección propia (útil para una serie
-        entera, p. ej. Alianza Cien).
+        .txt); se buscan TODOS y se revisan en un CARRUSEL (un libro por pantalla)
+        con la portada grande (se elige entre las candidatas) y TODOS los datos
+        EDITABLES a mano (coloreados por procedencia). Casilla «Incluir» por libro;
+        «Enviar seleccionados» los crea en bloque; los que fallen quedan en la lista.
+        Campo «Colección para los que no la traigan»: se aplica SOLO a los que no
+        traigan colección propia (útil para una serie entera, p. ej. Alianza Cien).
 
   ── TAPETE (medir y recortar con la alfombrilla reglada) ─────────────────────
     Foto del libro sobre una alfombrilla de corte CUADRICULADA (1 cm). Con el

@@ -267,7 +267,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // TIER 3c · Resolución de la CDU vía clasificador (solo si BNE no la resolvió ya).
     // Dewey/LC en caché → API externa → IA, aprendiendo la equivalencia.
     if (incluirCdu && !datosExtra.cdu) {
-        const { cdu, fuente } = await resolverCDU({
+        const { cdu, fuente, palabras_clave } = await resolverCDU({
             dewey: datosExtra.dewey,
             lcc: datosExtra.lcc,
             categorias: datosExtra.categorias,     // lista completa para detectar ficción
@@ -277,6 +277,8 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         });
         datosExtra.cdu = cdu;
         datosExtra.cdu_fuente = fuente;   // 'cache:…'|'api:…'|'ia' — para colorear la procedencia en el panel
+        // Materias que la MISMA llamada IA dedujo (rentabiliza la llamada): rellenan palabras_clave si faltan.
+        if (Array.isArray(palabras_clave) && palabras_clave.length) datosExtra.palabras_clave = palabras_clave;
         if (fuente.startsWith('cache')) datosExtra.alertas.push(`CDU por equivalencia aprendida (${fuente}).`);
     }
 

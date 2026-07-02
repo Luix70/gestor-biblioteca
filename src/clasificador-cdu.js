@@ -1,5 +1,6 @@
 import { conectarDB } from './database.js';
 import { conGemini } from './utils/gemini.js';
+import { sembrarDescripcionCDU } from './utils/descripcion-cdu.js';
 
 const COL = 'equivalencias_cdu';
 
@@ -75,7 +76,14 @@ function esFiccionLiteratura({ dewey, lcc, categorias }) {
     return categorias.some(c => pat.test(c));
 }
 
-/** Deriva una CDU con IA, convirtiendo desde Dewey/LC si están disponibles. */
+const IA_CDU_VACIO = { cdu: '000', titulo_es: null, descripcion_es: null, titulo_en: null, descripcion_en: null, palabras_clave: [] };
+
+/**
+ * Deriva la CDU con IA y, en la MISMA llamada, su descripción bilingüe y las materias que la IA pueda
+ * DEDUCIR de los datos aportados. Rentabiliza al máximo la llamada (Gemini cobra por TOKENS, no por tiempo:
+ * una sola respuesta rica cuesta casi lo mismo que pedir solo el código y evita una 2ª llamada para describir
+ * el código). Devuelve { cdu, titulo_es, descripcion_es, titulo_en, descripcion_en, palabras_clave[] }.
+ */
 async function iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis }) {
     try {
         const esLiteratura = esFiccionLiteratura({ dewey, lcc, categorias });
@@ -101,10 +109,10 @@ async function iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis }) {
 
         const prompt = `
 Eres un bibliotecario catalogador experto en Clasificación Decimal Universal (CDU).
-Devuelve SOLO el código CDU, sin explicación. Máx. 12 caracteres, sin subdivisiones alfabéticas,
-":" como separador de materias como máximo una vez.
+Tu tarea: (1) determinar el código CDU de la obra, (2) describirlo, y (3) deducir sus materias.
 
-═══ REGLAS (en orden de prioridad) ═══
+═══ REGLAS PARA EL CÓDIGO 'cdu' (en orden de prioridad) ═══
+Formato: máx. 12 caracteres, sin subdivisiones alfabéticas, ":" como separador de materias como máx. una vez.
 
 REGLA A — FICCIÓN Y LITERATURA (solo si ESTÁS SEGURO de que es ficción):
   Si la obra es novela, cuento, poesía, teatro o ensayo literario, clasifícala por la
@@ -144,12 +152,34 @@ ${categoria ? `Categoría: "${categoria}".` : ''}
 ${autor ? `Autor: "${autor}".` : ''}
 Título: "${titulo || 'N/A'}".
 Sinopsis: "${(sinopsis || 'N/A').slice(0, 400)}".
+
+Responde ÚNICAMENTE con JSON válido (sin markdown, sin texto fuera del JSON):
+{
+  "cdu": "<código CDU>",
+  "titulo_es": "<título breve de la materia del código, en español>",
+  "descripcion_es": "<explicación del código y su desglose por componentes, 1-3 frases, en español>",
+  "titulo_en": "<short subject title in English>",
+  "descripcion_en": "<short explanation with the breakdown, in English>",
+  "palabras_clave": ["<materia1>", "<materia2>"]
+}
+'palabras_clave': 3-6 términos de materia deducidos de los datos aportados (temas, género, ámbito). No
+inventes datos concretos (fechas, nombres) que no puedas justificar con lo dado.
         `.trim();
         const result = await conGemini({ model: 'gemini-2.5-flash' }, (model) => model.generateContent(prompt));
-        return result.response.text().trim().replace(/^["']|["']$/g, '');
+        const txt = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+        const j = JSON.parse(txt);
+        const cdu = String(j.cdu || '').trim().replace(/^["']|["']$/g, '');
+        return {
+            cdu: cdu || '000',
+            titulo_es: j.titulo_es || null,
+            descripcion_es: j.descripcion_es || null,
+            titulo_en: j.titulo_en || null,
+            descripcion_en: j.descripcion_en || null,
+            palabras_clave: Array.isArray(j.palabras_clave) ? j.palabras_clave.map(String).map(s => s.trim()).filter(Boolean).slice(0, 8) : [],
+        };
     } catch (e) {
         console.error(`❌ [Clasificador CDU IA]: ${e.message}`);
-        return '000';
+        return { ...IA_CDU_VACIO };
     }
 }
 
@@ -182,11 +212,24 @@ export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, 
         }
     }
 
-    // 3) IA + aprendizaje (solo aprende equivalencias no literarias; la ficción varía por autor).
-    const cdu = await iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis });
+    // 3) IA + aprendizaje (solo aprende equivalencias no literarias; la ficción varía por autor). La MISMA
+    //    llamada trae ya la descripción y las materias → se aprovechan sin gastar más IA.
+    const r = await iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis });
+    const cdu = r.cdu;
     if (cdu && cdu !== '000' && candidatos.length > 0 && !esLit) {
         const [sistema, codigo] = candidatos[0]; // el más fiable disponible (Dewey > LC)
-        await guardarEquivalencia(sistema, codigo, cdu, 'IA', categoria);
+        await guardarEquivalencia(sistema, codigo, cdu, 'IA', r.titulo_es || categoria);
     }
-    return { cdu, fuente: 'ia', aprendida: false };
+    // Sembrar la descripción del código en su caché AHORA (misma llamada IA): evita la 2ª llamada de
+    // describirCDU que el panel/mantenimiento harían después. Idempotente y best-effort.
+    if (cdu && cdu !== '000' && (r.descripcion_es || r.titulo_es)) {
+        try { const db = await conectarDB(); await sembrarDescripcionCDU(db, cdu, r); } catch { /* caché best-effort */ }
+    }
+    return {
+        cdu,
+        fuente: 'ia',
+        aprendida: false,
+        descripcion: { titulo_es: r.titulo_es, descripcion_es: r.descripcion_es, titulo_en: r.titulo_en, descripcion_en: r.descripcion_en },
+        palabras_clave: r.palabras_clave || [],
+    };
 }

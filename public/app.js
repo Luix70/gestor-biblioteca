@@ -6063,11 +6063,16 @@ function isbnThumb(id, src, cap, incluida, esPortada, hires, editable, grande = 
     ${editable ? `<button type="button" data-edit="${id}" title="Conformar: recortar / enderezar perspectiva" style="position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.6);color:#fff;cursor:pointer;font-size:13px;line-height:1;padding:0">✎</button>` : ''}
   </div>`;
 }
-// Clase de color según la PROCEDENCIA de un campo (leyenda del modal): Fichero/a mano = neutro (proc-fichero),
-// APIs gratuitas = azul (proc-online), IA = rojo (proc-ia). Sin dato de procedencia se asume autoritativo.
-function isbnProcClase(campo) {
-  const p = _isbnEstado && _isbnEstado.procedencia && _isbnEstado.procedencia[campo];
+// Campos del alta por ISBN cuyo valor es una LISTA (se muestran unidos por "; " y al editarlos se parten).
+const CAMPOS_LISTA = ['autores', 'palabras_clave'];
+// Clase de color según la PROCEDENCIA de un campo (leyenda del modal/carrusel): Fichero/a mano = neutro
+// (proc-fichero), APIs gratuitas = azul (proc-online), IA = rojo (proc-ia). Sin dato se asume autoritativo.
+function procClase(proc, campo) {
+  const p = proc && proc[campo];
   return p === 'online' ? 'proc-online' : p === 'ia' ? 'proc-ia' : 'proc-fichero';
+}
+function isbnProcClase(campo) {
+  return procClase(_isbnEstado && _isbnEstado.procedencia, campo);
 }
 // Cierra el modal de resultados del ISBN y descarta el estado en curso. Si se estaba editando una fila del
 // lote, ésta se queda tal cual (ni creada ni tocada). No borra el campo ISBN (lo gestiona quien llama).
@@ -6088,8 +6093,8 @@ function isbnRender() {
   const cont = $('#isbnModal');
   if (!cont || !_isbnEstado) return;
   const m = _isbnEstado.meta;
-  const val = (k) => esc(m[k] != null ? String(m[k]) : '');
-  const autoresVal = Array.isArray(m.autores) ? m.autores.join('; ') : m.autores || '';
+  // Valor mostrable: las listas (autores, palabras_clave) se unen con "; ".
+  const val = (k) => esc(Array.isArray(m[k]) ? m[k].join('; ') : m[k] != null ? String(m[k]) : '');
   // Campo editable con etiqueta+valor coloreados por procedencia (negro=fichero/mano, azul=APIs, rojo=IA).
   const campo = (k, etiqueta, notaExtra = '') => {
     const cls = isbnProcClase(k);
@@ -6107,6 +6112,10 @@ function isbnRender() {
       ${campo('año_edicion', 'Año')}
       ${campo('idioma', 'Idioma')}
       <div><label class="${isbnProcClase('cdu')}">CDU${notaCdu}</label><input data-mk="cdu" class="${isbnProcClase('cdu')}" value="${val('cdu')}" autocomplete="off">${_isbnEstado.cduDesc && _isbnEstado.cduDesc.titulo_es ? `<div class="muted" style="font-size:11px;margin-top:3px">ⓘ ${esc(_isbnEstado.cduDesc.titulo_es)}</div>` : ''}</div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      ${campo('coleccion_nombre', 'Colección')}
+      ${campo('palabras_clave', 'Palabras clave (separa con ;)')}
     </div>`;
   const leyenda = `<div class="muted" style="font-size:11px;margin:2px 0 12px">
       Procedencia del dato: <b class="proc-fichero">■ Fichero / a mano</b> ·
@@ -6207,13 +6216,12 @@ function isbnRender() {
     (el) =>
       (el.oninput = () => {
         const k = el.dataset.mk;
-        _isbnEstado.meta[k] =
-          k === 'autores'
-            ? el.value
-                .split(';')
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : el.value;
+        _isbnEstado.meta[k] = CAMPOS_LISTA.includes(k)
+          ? el.value
+              .split(';')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : el.value;
         // Editar a mano vuelve el dato AUTORITATIVO (neutro): se recolorea el campo y su etiqueta.
         _isbnEstado.procedencia[k] = 'manual';
         el.classList.remove('proc-online', 'proc-ia');
@@ -6450,35 +6458,42 @@ async function isbnCrear(completar, auto = false) {
   const loteItem = _loteEditItem; // capturar antes de que isbnCerrarModal lo ponga a null
   isbnCerrarModal();
   if ($('#isbnIn')) $('#isbnIn').value = '';
+  const cardMsg = $('#isbnMsg');
   if (r.ya_existia) {
     toast('Este libro ya estaba en la biblioteca', 'warn');
-    if ($('#isbnMsg')) $('#isbnMsg').innerHTML = avisoYaIngresado(r);
+    if (cardMsg) cardMsg.innerHTML = avisoYaIngresado(r);
   } else {
     toast('📗 Documento creado');
-    if ($('#isbnMsg')) $('#isbnMsg').textContent = '';
+    // NO se navega a la ficha (interrumpía el flujo de escaneo): se deja un enlace por si quieres abrirla,
+    // y el foco vuelve al campo ISBN para leer el siguiente. Ver ficha = clic voluntario, sin interrumpir.
+    if (cardMsg) {
+      cardMsg.innerHTML = r._id
+        ? `✔ Creado: <a href="#" data-verdoc="${r._id}">${esc(r.titulo || 'ver ficha')}</a>`
+        : '✔ Creado.';
+      const a = cardMsg.querySelector('[data-verdoc]');
+      if (a)
+        a.onclick = (e) => {
+          e.preventDefault();
+          verDoc(r._id, { volver: 'inbox', etiqueta: 'Inbox' });
+        };
+    }
   }
-  // Si este ISBN se editó desde el LOTE (ver loteEditar), marca esa fila como creada y vuelve a pintar la pila.
   if (loteItem) {
     loteItem.estado = 'ok';
     loteRenderStack();
   }
-  // Modo AUTO (lectura por lotes) o edición desde el lote: NO navegar a la ficha; devolver el foco al ISBN
-  // para la siguiente lectura. Modo manual suelto: abrir la ficha del documento recién creado, como siempre.
-  if (auto || loteItem) {
-    if ($('#isbnIn')) $('#isbnIn').focus();
-  } else if (r._id) {
-    verDoc(r._id, { volver: 'inbox', etiqueta: 'Inbox' });
-  }
+  // SIEMPRE devolver el foco al campo ISBN para encadenar la siguiente lectura sin interrumpir el flujo.
+  if ($('#isbnIn')) $('#isbnIn').focus();
 }
 // ── Alta por LOTE de ISBNs ──────────────────────────────────────────────────────────────────────────
 // Pega/sube una lista de ISBN → se buscan TODOS en segundo plano (Fichero + huecos rellenados online,
-// vía GET /isbn/lote/*) → se apilan en tarjetas para revisar: se deseleccionan los erróneos/incompletos,
-// se envían de golpe los correctos (reutilizando el YA EXISTENTE POST /isbn/alta, uno a uno) y los que
-// queden sin enviar (deseleccionados o fallidos) siguen en la lista para completarlos/arreglarles la
-// portada a mano con el editor de «Ingreso por ISBN» de arriba (botón ✎, ver loteEditar).
-let _lote = null; // { items: [ {entrada, ok, motivo, isbn, encontrado, fuente, meta, portadas, cduDesc, sel, estado, error} ] }
+// vía GET /isbn/lote/*) → se revisan en un CARRUSEL (un libro por diapositiva) con la portada grande y los
+// datos EDITABLES a mano; se deseleccionan los que no interesen y «Enviar seleccionados» los crea en bloque
+// (reutilizando el YA EXISTENTE POST /isbn/alta, uno a uno). Los que fallen quedan en la lista para reintentar.
+let _lote = null; // { items: [ {entrada, ok, motivo, isbn, encontrado, fuente, meta, procedencia, portadas, portadaSel, sel, estado, error} ] }
 let _lotePollTimer = null;
-let _loteEditItem = null; // referencia (no índice: sobrevive a que se quite otra fila) al ítem del lote en edición
+let _lotePos = 0; // índice del libro visible en el carrusel de revisión
+let _loteEditItem = null; // (reservado) referencia a un ítem del lote abierto en el modal individual, si lo hubiera
 
 // Extrae ISBN de un texto libre (portapapeles o .txt): un token por línea/coma/espacio; conserva la
 // entrada TAL CUAL la escribió el usuario (para señalar cuál falló) pero deduplica por su forma limpia.
@@ -6572,33 +6587,113 @@ async function lotePoll() {
     items: (r.resultados || []).map((res) => ({
       ...res,
       sel: !!(res.ok && res.encontrado && res.meta && res.meta.titulo),
+      portadaSel: 0, // índice de la portada elegida entre las candidatas
       estado: null, // null | 'ok' | 'error'
       error: null,
     })),
   };
+  _lotePos = 0;
   loteRenderStack();
 }
 
 function loteSeleccionados() {
   return _lote ? _lote.items.filter((it) => it.sel && it.estado !== 'ok') : [];
 }
+// URL mostrable de una candidata de portada (las «web» de Google van por el proxy same-origin; el resto directo).
+function portadaSrc(p) {
+  return p.web
+    ? '/api/proxy-imagen?url=' + encodeURIComponent(p.url) + (TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '')
+    : p.url;
+}
 
+// El lote se revisa en un CARRUSEL: un libro por «diapositiva» con su portada grande (elige entre las
+// candidatas), sus datos EDITABLES a mano (coloreados por procedencia) y la casilla «Incluir». Debajo, una
+// tira de puntos para saltar y ver de un vistazo cuáles están seleccionados/creados/con error. «Enviar
+// seleccionados» los crea en bloque. (Sustituye al antiguo botón ✎ por-fila, que confundía: parecía editar
+// pero abría el alta.)
 function loteRenderStack() {
   const cont = $('#loteStack');
   if (!cont || !_lote) return;
-  const total = _lote.items.length;
-  const creados = _lote.items.filter((it) => it.estado === 'ok').length;
+  const items = _lote.items;
+  const total = items.length;
+  if (!total) {
+    cont.innerHTML = '<div class="muted" style="font-size:12px">Lote vacío.</div>';
+    return;
+  }
+  _lotePos = Math.max(0, Math.min(_lotePos, total - 1));
+  const creados = items.filter((it) => it.estado === 'ok').length;
   const nSel = loteSeleccionados().length;
-  const filas = _lote.items.map((it, idx) => loteItemHTML(it, idx)).join('');
-  cont.innerHTML = `<div class="row" style="align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
-      <b>${nSel}</b><span class="muted" style="font-size:12px">seleccionados de ${total}${creados ? ` · ${creados} ya creados` : ''}</span>
+  const it = items[_lotePos];
+  // Tira de puntos: color según estado (creado/error/seleccionado/pendiente) y borde en el actual.
+  const puntos = items
+    .map((x, i) => {
+      const color =
+        x.estado === 'ok'
+          ? '#7cd992'
+          : x.estado === 'error'
+            ? 'var(--bad)'
+            : x.sel
+              ? 'var(--acc)'
+              : 'var(--line)';
+      const actual = i === _lotePos ? 'box-shadow:0 0 0 2px var(--txt)' : '';
+      return `<button type="button" data-lote-ir="${i}" title="${esc((x.meta && x.meta.titulo) || x.entrada)}" style="width:14px;height:14px;border-radius:50%;border:none;cursor:pointer;background:${color};${actual}"></button>`;
+    })
+    .join('');
+  cont.innerHTML = `
+    <div class="row" style="align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+      <b>${nSel}</b><span class="muted" style="font-size:12px">seleccionados de ${total}${creados ? ` · ${creados} creados` : ''}</span>
       <button class="btn pri" type="button" id="loteEnviar" ${nSel ? '' : 'disabled'}>✅ Enviar seleccionados (${nSel})</button>
       <button class="btn" type="button" id="loteLimpiar">🗑 Descartar lote</button>
     </div>
-    <div style="border-top:1px solid var(--line)">${filas}</div>`;
+    <div class="muted" style="font-size:11px;margin-bottom:8px">
+      Procedencia del dato: <b class="proc-fichero">■ Fichero / a mano</b> ·
+      <b class="proc-online">■ APIs gratuitas</b> · <b class="proc-ia">■ IA / de pago</b></div>
+    <div class="row" style="align-items:center;gap:8px;justify-content:space-between;margin-bottom:6px">
+      <button class="btn" type="button" id="lotePrev" ${_lotePos === 0 ? 'disabled' : ''}>‹ Anterior</button>
+      <span class="muted" style="font-size:12px">Libro ${_lotePos + 1} / ${total}</span>
+      <button class="btn" type="button" id="loteNext" ${_lotePos === total - 1 ? 'disabled' : ''}>Siguiente ›</button>
+    </div>
+    ${loteSlideHTML(it, _lotePos)}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:12px">${puntos}</div>`;
+  // Navegación
+  cont.querySelectorAll('[data-lote-ir]').forEach((el) => (el.onclick = () => loteIr(+el.dataset.loteIr)));
+  if ($('#lotePrev')) $('#lotePrev').onclick = () => loteIr(_lotePos - 1);
+  if ($('#loteNext')) $('#loteNext').onclick = () => loteIr(_lotePos + 1);
+  // Elegir portada entre las candidatas
+  cont.querySelectorAll('[data-lote-port]').forEach(
+    (el) =>
+      (el.onclick = () => {
+        it.portadaSel = +el.dataset.lotePort;
+        loteRenderStack();
+      }),
+  );
+  // Casilla incluir / quitar del lote
   cont.querySelectorAll('[data-lote-chk]').forEach((el) => (el.onchange = () => loteToggleSel(+el.dataset.loteChk)));
-  cont.querySelectorAll('[data-lote-edit]').forEach((el) => (el.onclick = () => loteEditar(+el.dataset.loteEdit)));
   cont.querySelectorAll('[data-lote-quitar]').forEach((el) => (el.onclick = () => loteQuitar(+el.dataset.loteQuitar)));
+  // Edición a mano de los campos: actualiza el dato y lo vuelve AUTORITATIVO (negro), sin re-render (para no
+  // perder el foco mientras se escribe).
+  cont.querySelectorAll('[data-lm]').forEach(
+    (el) =>
+      (el.oninput = () => {
+        const k = el.dataset.lm;
+        it.meta = it.meta || {};
+        it.meta[k] = CAMPOS_LISTA.includes(k)
+          ? el.value
+              .split(';')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : el.value;
+        it.procedencia = it.procedencia || {};
+        it.procedencia[k] = 'manual';
+        el.classList.remove('proc-online', 'proc-ia');
+        el.classList.add('proc-fichero');
+        const lab = el.previousElementSibling;
+        if (lab && lab.tagName === 'LABEL') {
+          lab.classList.remove('proc-online', 'proc-ia');
+          lab.classList.add('proc-fichero');
+        }
+      }),
+  );
   if ($('#loteEnviar')) $('#loteEnviar').onclick = loteEnviarSeleccionados;
   if ($('#loteLimpiar'))
     $('#loteLimpiar').onclick = () => {
@@ -6609,40 +6704,62 @@ function loteRenderStack() {
     };
 }
 
-function loteItemHTML(it, idx) {
-  const m = it.meta || {};
+// Una diapositiva del carrusel = un libro: portada grande + tira de candidatas + datos editables + estado.
+function loteSlideHTML(it, idx) {
   const creado = it.estado === 'ok';
-  const chk = creado
-    ? '<span title="Ya creado">✓</span>'
-    : `<input type="checkbox" data-lote-chk="${idx}" ${it.sel ? 'checked' : ''} style="width:17px;height:17px">`;
-  const primeraPortada = it.portadas && it.portadas[0] ? it.portadas[0].url : null;
-  const thumb = primeraPortada
-    ? `<img src="${esc(primeraPortada)}" style="width:42px;height:60px;object-fit:contain;border-radius:4px;background:var(--card2)" loading="lazy">`
-    : `<div style="width:42px;height:60px;border-radius:4px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:16px">🚫</div>`;
+  const m = it.meta || {};
+  const portadas = it.portadas || [];
+  const sel = it.portadaSel || 0;
+  const cover = portadas[sel]
+    ? `<img src="${esc(portadaSrc(portadas[sel]))}" style="width:160px;height:224px;object-fit:contain;border-radius:8px;background:var(--card)" loading="lazy">`
+    : `<div style="width:160px;height:224px;border-radius:8px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:30px">🚫</div>`;
+  const tira = portadas
+    .map(
+      (p, i) =>
+        `<img data-lote-port="${i}" src="${esc(portadaSrc(p))}" title="${esc(p.fuente)} ${p.ancho}×${p.alto}" style="width:38px;height:54px;object-fit:contain;border-radius:4px;cursor:pointer;background:var(--card);border:2px solid ${i === sel ? '#ffcf5a' : 'transparent'}" loading="lazy">`,
+    )
+    .join('');
   const badge = creado
-    ? '<span style="color:#7cd992;font-size:11px">✓ creado</span>'
+    ? '<span style="color:#7cd992;font-size:12px">✓ creado</span>'
     : it.estado === 'error'
-      ? `<span style="color:#ff8a8a;font-size:11px" title="${esc(it.error || '')}">✗ ${esc(it.error || 'error')}</span>`
+      ? `<span class="proc-ia" style="font-size:12px" title="${esc(it.error || '')}">✗ ${esc(it.error || 'error')}</span>`
       : !it.ok
-        ? `<span style="color:#ffb15a;font-size:11px">⚠ ${esc(it.motivo || 'ISBN inválido')}</span>`
+        ? `<span class="proc-ia" style="font-size:12px">⚠ ${esc(it.motivo || 'ISBN inválido')}</span>`
         : !it.encontrado
-          ? '<span style="color:#ffb15a;font-size:11px">⚠ sin datos (completa a mano)</span>'
-          : `<span class="muted" style="font-size:11px">${esc(it.fuente || '')}</span>`;
-  const titulo = m.titulo ? esc(m.titulo) : `<i class="muted">— sin título (${esc(it.entrada)})</i>`;
-  const autor = Array.isArray(m.autores) && m.autores.length ? esc(m.autores.join('; ')) : '';
-  const col = m.coleccion_nombre ? ` · ${esc(m.coleccion_nombre)}` : '';
-  const disabled = creado ? 'disabled' : '';
-  return `<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--line);opacity:${creado ? '.6' : '1'}">
-    <div style="width:20px;text-align:center">${chk}</div>
-    ${thumb}
-    <div style="flex:1;min-width:0">
-      <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${titulo}</div>
-      <div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${autor}${col} · ISBN ${esc(it.isbn || it.entrada)}</div>
+          ? '<span style="color:var(--warn);font-size:12px">⚠ sin datos: complétalos a mano</span>'
+          : `<span class="muted" style="font-size:12px">${esc(it.fuente || '')}</span>`;
+  const dis = creado ? 'disabled' : '';
+  const campo = (k, etiqueta) => {
+    const cls = procClase(it.procedencia, k);
+    const v = m[k] != null ? (Array.isArray(m[k]) ? m[k].join('; ') : String(m[k])) : '';
+    return `<div><label class="${cls}">${etiqueta}</label><input data-lm="${k}" class="${cls}" value="${esc(v)}" ${dis} autocomplete="off"></div>`;
+  };
+  return `<div class="card" style="background:var(--card2)">
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div style="text-align:center">
+        ${cover}
+        <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin-top:6px;max-width:160px">${tira}</div>
+      </div>
+      <div style="flex:1;min-width:230px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <label style="margin:0;display:inline-flex;align-items:center;gap:5px;font-weight:600"><input type="checkbox" data-lote-chk="${idx}" ${it.sel ? 'checked' : ''} ${dis} style="width:16px;height:16px"> Incluir</label>
+          <span style="margin-left:auto">${badge}</span>
+          <button class="btn" type="button" data-lote-quitar="${idx}" ${dis} title="Quitar del lote (no se crea)">🗑</button>
+        </div>
+        <div class="muted" style="font-size:11px;margin-bottom:8px">ISBN ${esc(it.isbn || it.entrada)}</div>
+        <div class="row">${campo('titulo', 'Título')}${campo('autores', 'Autores (separa con ;)')}</div>
+        <div class="row" style="margin-top:6px">${campo('editorial', 'Editorial')}${campo('año_edicion', 'Año')}</div>
+        <div class="row" style="margin-top:6px">${campo('idioma', 'Idioma')}${campo('cdu', 'CDU')}</div>
+        <div class="row" style="margin-top:6px">${campo('coleccion_nombre', 'Colección')}${campo('palabras_clave', 'Palabras clave (;)')}</div>
+      </div>
     </div>
-    <div style="text-align:right;max-width:160px">${badge}</div>
-    <button class="btn" type="button" data-lote-edit="${idx}" ${disabled} title="Completar / arreglar portada / editar a mano">✎</button>
-    <button class="btn" type="button" data-lote-quitar="${idx}" ${disabled} title="Quitar de la lista (no se crea)">🗑</button>
   </div>`;
+}
+
+function loteIr(pos) {
+  if (!_lote) return;
+  _lotePos = Math.max(0, Math.min(pos, _lote.items.length - 1));
+  loteRenderStack();
 }
 
 function loteToggleSel(idx) {
@@ -6655,38 +6772,15 @@ function loteToggleSel(idx) {
 function loteQuitar(idx) {
   if (!_lote) return;
   _lote.items.splice(idx, 1);
+  if (_lotePos >= _lote.items.length) _lotePos = _lote.items.length - 1;
   loteRenderStack();
-}
-
-// Envía el ISBN de esta fila al editor individual de arriba (misma pantalla que «Ingreso por ISBN»), con
-// TODOS sus datos ya recuperados: permite completar a mano título/autor, elegir/subir/conformar la portada,
-// o simplemente pulsar Crear/Completar. Al crearse (o cancelarse), isbnCrear/isbnCancel avisan de vuelta
-// al lote (ver _loteEditItem) para marcar la fila como creada sin tener que reabrir la búsqueda del lote.
-function loteEditar(idx) {
-  const it = _lote && _lote.items[idx];
-  if (!it || it.estado === 'ok') return;
-  _loteEditItem = it;
-  _isbnEstado = {
-    isbn: it.isbn,
-    meta: { ...(it.meta || {}) },
-    procedencia: { ...(it.procedencia || {}) },
-    portadas: (it.portadas || []).map((p, i) => ({ ...p, sel: i === 0 })),
-    extra: [],
-    cduDesc: it.cdu_desc || null,
-    portadaId: it.portadas && it.portadas.length ? 'c0' : null,
-    dims: null,
-    fuente: it.fuente || null,
-    encontrado: !!it.encontrado,
-  };
-  isbnRender(); // abre el mismo modal de resultados
-  const msg = $('#isbnModalMsg');
-  if (msg) msg.textContent = `Editando del lote: ${it.entrada}`;
 }
 
 // Envío en bloque: uno a uno (no en paralelo, para no saturar el servidor ni dar rodeos al usuario sobre
 // qué falló), reutilizando el mismo POST /isbn/alta que el alta individual — alta RÁPIDA (sin reenriquecer:
 // el lote ya buscó los datos). Ubicación = los campos compartidos de «Datos de esta alta»; Colección = la
 // propia del ISBN si la trae, o si no la del campo del lote (relleno de hueco, nunca pisa una ya detectada).
+// Portada = la elegida en el carrusel (it.portadaSel).
 async function loteEnviarSeleccionados() {
   const items = loteSeleccionados();
   if (!items.length) return;
@@ -6708,14 +6802,13 @@ async function loteEnviarSeleccionados() {
       loteRenderStack();
       continue;
     }
-    const idx = _lote.items.indexOf(it);
     const prog = $('#loteProg');
     if (prog) prog.textContent = `Creando ${ok + fallo + 1}/${items.length}: «${m.titulo}»…`;
-    const primeraPortada = it.portadas && it.portadas[0] ? it.portadas[0].url : null;
+    const portadaElegida = it.portadas && it.portadas[it.portadaSel || 0] ? it.portadas[it.portadaSel || 0].url : null;
     const body = {
       isbn: it.isbn,
       meta: { ...m },
-      imagenes: primeraPortada ? [{ url: primeraPortada, tipo: 'portada' }] : [],
+      imagenes: portadaElegida ? [{ url: portadaElegida, tipo: 'portada' }] : [],
       subidas: [],
       ubicacion: ubic,
       coleccion: m.coleccion_nombre ? undefined : coleccionLote || undefined,
@@ -6730,7 +6823,7 @@ async function loteEnviarSeleccionados() {
       it.error = e.message;
       fallo++;
     }
-    if (idx >= 0) loteRenderStack();
+    loteRenderStack();
   }
   if (btn) btn.disabled = false;
   const prog = $('#loteProg');
