@@ -96,6 +96,50 @@ async function conformarDocumento(db, doc) {
 }
 
 /**
+ * SALUD de un documento (para la ficha 🩺): por cada tarea de mantenimiento indica si está HECHA a su
+ * versión actual, si le APLICA a este documento, y qué versión tiene sellada. Más la firma global y los
+ * flags que afectan al Conformador (locked, cdu_manual). Solo lectura; no toca nada.
+ */
+export function saludDocumento(doc) {
+    const sello = doc.mantenimiento || {};
+    const tareas = TAREAS.map((t) => ({
+        id: t.id,
+        descripcion: t.descripcion,
+        version: t.version,
+        version_doc: sello[t.id] ?? null,
+        hecha: sello[t.id] === t.version,
+        aplica: (() => { try { return !!t.aplica(doc); } catch { return false; } })(),
+    }));
+    return {
+        firma_actual: FIRMA,
+        firma_doc: doc.mantenimiento_firma || null,
+        conforme: doc.mantenimiento_firma === FIRMA,
+        locked: !!doc.locked,
+        cdu_manual: !!doc.cdu_manual,
+        tareas,
+    };
+}
+
+/**
+ * Des-sella tareas concretas de un documento (checkboxes desmarcados en la ficha): quita su marca de
+ * `mantenimiento` para que el Conformador VUELVA a ejecutarlas. `ids` vacío = des-sella TODAS. Además pone
+ * `mantenimiento_firma` a null para que el documento se considere no-conforme y se revisite.
+ */
+export async function dessellarTareas(db, docId, ids = []) {
+    const doc = await db.collection('biblioteca').findOne({ _id: docId }, { projection: { mantenimiento: 1 } });
+    if (!doc) return { ok: false, motivo: 'sin-doc' };
+    const sello = { ...(doc.mantenimiento || {}) };
+    const aQuitar = Array.isArray(ids) && ids.length ? ids : Object.keys(sello);
+    let dessellada = 0;
+    for (const id of aQuitar) { if (id in sello) { delete sello[id]; dessellada++; } }
+    await db.collection('biblioteca').updateOne(
+        { _id: docId },
+        { $set: { mantenimiento: sello, mantenimiento_firma: null } },
+    );
+    return { ok: true, dessellada };
+}
+
+/**
  * Conforma AL VUELO el documento recién catalogado (por _id) — para "acertar desde el principio" en
  * ingestas sueltas/manuales (toggle CONFORMAR_AL_INGERIR u opción por petición). Respeta `locked` y
  * solo actúa donde el Conformador puede (contenedor del NAS, junto a los ficheros). Best-effort.

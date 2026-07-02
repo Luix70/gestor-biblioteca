@@ -20,7 +20,7 @@ import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
-import { conformarAlIngerir } from './mantenimiento/conformador.js';
+import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
@@ -887,6 +887,27 @@ export function rutasPanel() {
             if (doc.locked) return res.json({ ok: false, motivo: 'documento bloqueado (locked)' });
             const r2 = await reenriquecerDoc(db, doc);
             res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // SALUD de un documento (ficha → 🩺): checklist de las tareas de mantenimiento (hecha / aplica / versión)
+    // + firma global. Solo lectura.
+    r.get('/documentos/:id/salud', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const doc = await (await conectarDB()).collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json({ ok: true, salud: saludDocumento(doc) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // DES-SELLAR tareas (checkboxes desmarcados en la ficha): fuerza que el Conformador las repita. `tareas`
+    // vacío = todas. La ejecución real la hace luego «Conformar» (o el Conformador al reposo). Admin.
+    r.post('/documentos/:id/salud/dessellar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const ids = Array.isArray(req.body?.tareas) ? req.body.tareas : [];
+            res.json(await dessellarTareas(await conectarDB(), new ObjectId(req.params.id), ids));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
