@@ -5922,6 +5922,7 @@ function wireInbox() {
       if (_isbnAutoTimer) isbnAutoReset(); // recuenta con el nuevo intervalo si ya estaba corriendo
     };
   }
+  loteWire();
 }
 
 // ── Auto-alta por inactividad (lectura por lotes con escáner) ─────────────────────────────────────────
@@ -6144,6 +6145,7 @@ function isbnRender() {
   $('#isbnCancel').onclick = () => {
     isbnAutoCancelar();
     _isbnEstado = null;
+    _loteEditItem = null; // si se estaba editando una fila del lote, se queda tal cual (ni creada ni tocada)
     $('#isbnRes').innerHTML = '';
     $('#isbnMsg').textContent = '';
   };
@@ -6358,6 +6360,12 @@ async function isbnCrear(completar, auto = false) {
     toast('📗 Documento creado');
     if (msg) msg.textContent = '';
   }
+  // Si este ISBN se editó desde el LOTE (ver loteEditar), marca esa fila como creada y vuelve a pintar la pila.
+  if (_loteEditItem) {
+    _loteEditItem.estado = 'ok';
+    _loteEditItem = null;
+    loteRenderStack();
+  }
   // Modo AUTO (lectura por lotes): NO navegar a la ficha; devolver el foco al ISBN para el siguiente escaneo.
   // Modo manual: abrir la ficha del documento recién creado, como siempre.
   if (auto) {
@@ -6366,6 +6374,274 @@ async function isbnCrear(completar, auto = false) {
     verDoc(r._id, { volver: 'inbox', etiqueta: 'Inbox' });
   }
 }
+// ── Alta por LOTE de ISBNs ──────────────────────────────────────────────────────────────────────────
+// Pega/sube una lista de ISBN → se buscan TODOS en segundo plano (Fichero + huecos rellenados online,
+// vía GET /isbn/lote/*) → se apilan en tarjetas para revisar: se deseleccionan los erróneos/incompletos,
+// se envían de golpe los correctos (reutilizando el YA EXISTENTE POST /isbn/alta, uno a uno) y los que
+// queden sin enviar (deseleccionados o fallidos) siguen en la lista para completarlos/arreglarles la
+// portada a mano con el editor de «Ingreso por ISBN» de arriba (botón ✎, ver loteEditar).
+let _lote = null; // { items: [ {entrada, ok, motivo, isbn, encontrado, fuente, meta, portadas, cduDesc, sel, estado, error} ] }
+let _lotePollTimer = null;
+let _loteEditItem = null; // referencia (no índice: sobrevive a que se quite otra fila) al ítem del lote en edición
+
+// Extrae ISBN de un texto libre (portapapeles o .txt): un token por línea/coma/espacio; conserva la
+// entrada TAL CUAL la escribió el usuario (para señalar cuál falló) pero deduplica por su forma limpia.
+function loteParseISBNs(texto) {
+  const tokens = String(texto || '')
+    .split(/[\s,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const vistos = new Set(),
+    out = [];
+  for (const t of tokens) {
+    const limpio = t.replace(/[^0-9Xx]/g, '').toUpperCase();
+    if (limpio.length !== 10 && limpio.length !== 13) continue;
+    if (vistos.has(limpio)) continue;
+    vistos.add(limpio);
+    out.push(t);
+  }
+  return out;
+}
+
+function loteWire() {
+  if ($('#lotePegar'))
+    $('#lotePegar').onclick = async () => {
+      try {
+        const texto = await navigator.clipboard.readText();
+        const ta = $('#loteTxt');
+        if (ta) ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + texto;
+      } catch (e) {
+        toast('No se pudo leer el portapapeles: ' + e.message, 'bad');
+      }
+    };
+  if ($('#loteSubirBtn')) $('#loteSubirBtn').onclick = () => $('#loteFile').click();
+  if ($('#loteFile'))
+    $('#loteFile').onchange = async () => {
+      const f = $('#loteFile').files[0];
+      $('#loteFile').value = '';
+      if (!f) return;
+      const texto = await f.text();
+      const ta = $('#loteTxt');
+      if (ta) ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + texto;
+    };
+  if ($('#loteBuscar')) $('#loteBuscar').onclick = loteBuscar;
+}
+
+async function loteBuscar() {
+  const isbns = loteParseISBNs($('#loteTxt') && $('#loteTxt').value);
+  const prog = $('#loteProg');
+  // No se pisa en silencio una revisión anterior con ítems aún sin enviar (deseleccionados/fallidos que
+  // el usuario dejó «a disposición» para completar a mano): hay que enviarlos o descartar el lote primero.
+  if (_lote && _lote.items.some((it) => it.estado !== 'ok')) {
+    if (prog) prog.textContent = '⚠ Hay ISBN del lote anterior sin enviar. Envíalos o pulsa «🗑 Descartar lote» antes de buscar uno nuevo.';
+    return;
+  }
+  if (!isbns.length) {
+    if (prog) prog.textContent = '⚠ No se ha reconocido ningún ISBN (10 o 13 dígitos) en el texto.';
+    return;
+  }
+  $('#loteStack').innerHTML = '';
+  _lote = null;
+  if (prog) prog.textContent = `Buscando 0/${isbns.length}…`;
+  let r;
+  try {
+    r = await api('/isbn/lote/iniciar', { method: 'POST', body: JSON.stringify({ isbns }) });
+  } catch (e) {
+    if (prog) prog.textContent = 'Error: ' + e.message;
+    return;
+  }
+  if (!r.ok) {
+    if (prog) prog.textContent = '⚠ ' + (r.motivo || 'no se pudo iniciar la búsqueda');
+    return;
+  }
+  if (_lotePollTimer) clearInterval(_lotePollTimer);
+  _lotePollTimer = setInterval(lotePoll, 1200);
+  lotePoll();
+}
+
+async function lotePoll() {
+  let r;
+  try {
+    r = await api('/isbn/lote/estado');
+  } catch (e) {
+    return; // fallo de red puntual del sondeo: se reintenta en el siguiente tick
+  }
+  const prog = $('#loteProg');
+  if (prog) prog.textContent = `Buscando ${r.hechos}/${r.total}…`;
+  if (r.enCurso) return;
+  clearInterval(_lotePollTimer);
+  _lotePollTimer = null;
+  if (prog) prog.textContent = `✔ Búsqueda completa: ${r.total} ISBN.`;
+  _lote = {
+    items: (r.resultados || []).map((res) => ({
+      ...res,
+      sel: !!(res.ok && res.encontrado && res.meta && res.meta.titulo),
+      estado: null, // null | 'ok' | 'error'
+      error: null,
+    })),
+  };
+  loteRenderStack();
+}
+
+function loteSeleccionados() {
+  return _lote ? _lote.items.filter((it) => it.sel && it.estado !== 'ok') : [];
+}
+
+function loteRenderStack() {
+  const cont = $('#loteStack');
+  if (!cont || !_lote) return;
+  const total = _lote.items.length;
+  const creados = _lote.items.filter((it) => it.estado === 'ok').length;
+  const nSel = loteSeleccionados().length;
+  const filas = _lote.items.map((it, idx) => loteItemHTML(it, idx)).join('');
+  cont.innerHTML = `<div class="row" style="align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+      <b>${nSel}</b><span class="muted" style="font-size:12px">seleccionados de ${total}${creados ? ` · ${creados} ya creados` : ''}</span>
+      <button class="btn pri" type="button" id="loteEnviar" ${nSel ? '' : 'disabled'}>✅ Enviar seleccionados (${nSel})</button>
+      <button class="btn" type="button" id="loteLimpiar">🗑 Descartar lote</button>
+    </div>
+    <div style="border-top:1px solid var(--line)">${filas}</div>`;
+  cont.querySelectorAll('[data-lote-chk]').forEach((el) => (el.onchange = () => loteToggleSel(+el.dataset.loteChk)));
+  cont.querySelectorAll('[data-lote-edit]').forEach((el) => (el.onclick = () => loteEditar(+el.dataset.loteEdit)));
+  cont.querySelectorAll('[data-lote-quitar]').forEach((el) => (el.onclick = () => loteQuitar(+el.dataset.loteQuitar)));
+  if ($('#loteEnviar')) $('#loteEnviar').onclick = loteEnviarSeleccionados;
+  if ($('#loteLimpiar'))
+    $('#loteLimpiar').onclick = () => {
+      _lote = null;
+      cont.innerHTML = '';
+      if ($('#loteProg')) $('#loteProg').textContent = '';
+      if ($('#loteTxt')) $('#loteTxt').value = '';
+    };
+}
+
+function loteItemHTML(it, idx) {
+  const m = it.meta || {};
+  const creado = it.estado === 'ok';
+  const chk = creado
+    ? '<span title="Ya creado">✓</span>'
+    : `<input type="checkbox" data-lote-chk="${idx}" ${it.sel ? 'checked' : ''} style="width:17px;height:17px">`;
+  const primeraPortada = it.portadas && it.portadas[0] ? it.portadas[0].url : null;
+  const thumb = primeraPortada
+    ? `<img src="${esc(primeraPortada)}" style="width:42px;height:60px;object-fit:contain;border-radius:4px;background:var(--card2)" loading="lazy">`
+    : `<div style="width:42px;height:60px;border-radius:4px;background:var(--card2);display:flex;align-items:center;justify-content:center;font-size:16px">🚫</div>`;
+  const badge = creado
+    ? '<span style="color:#7cd992;font-size:11px">✓ creado</span>'
+    : it.estado === 'error'
+      ? `<span style="color:#ff8a8a;font-size:11px" title="${esc(it.error || '')}">✗ ${esc(it.error || 'error')}</span>`
+      : !it.ok
+        ? `<span style="color:#ffb15a;font-size:11px">⚠ ${esc(it.motivo || 'ISBN inválido')}</span>`
+        : !it.encontrado
+          ? '<span style="color:#ffb15a;font-size:11px">⚠ sin datos (completa a mano)</span>'
+          : `<span class="muted" style="font-size:11px">${esc(it.fuente || '')}</span>`;
+  const titulo = m.titulo ? esc(m.titulo) : `<i class="muted">— sin título (${esc(it.entrada)})</i>`;
+  const autor = Array.isArray(m.autores) && m.autores.length ? esc(m.autores.join('; ')) : '';
+  const col = m.coleccion_nombre ? ` · ${esc(m.coleccion_nombre)}` : '';
+  const disabled = creado ? 'disabled' : '';
+  return `<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--line);opacity:${creado ? '.6' : '1'}">
+    <div style="width:20px;text-align:center">${chk}</div>
+    ${thumb}
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${titulo}</div>
+      <div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${autor}${col} · ISBN ${esc(it.isbn || it.entrada)}</div>
+    </div>
+    <div style="text-align:right;max-width:160px">${badge}</div>
+    <button class="btn" type="button" data-lote-edit="${idx}" ${disabled} title="Completar / arreglar portada / editar a mano">✎</button>
+    <button class="btn" type="button" data-lote-quitar="${idx}" ${disabled} title="Quitar de la lista (no se crea)">🗑</button>
+  </div>`;
+}
+
+function loteToggleSel(idx) {
+  const it = _lote && _lote.items[idx];
+  if (!it || it.estado === 'ok') return;
+  it.sel = !it.sel;
+  loteRenderStack();
+}
+
+function loteQuitar(idx) {
+  if (!_lote) return;
+  _lote.items.splice(idx, 1);
+  loteRenderStack();
+}
+
+// Envía el ISBN de esta fila al editor individual de arriba (misma pantalla que «Ingreso por ISBN»), con
+// TODOS sus datos ya recuperados: permite completar a mano título/autor, elegir/subir/conformar la portada,
+// o simplemente pulsar Crear/Completar. Al crearse (o cancelarse), isbnCrear/isbnCancel avisan de vuelta
+// al lote (ver _loteEditItem) para marcar la fila como creada sin tener que reabrir la búsqueda del lote.
+function loteEditar(idx) {
+  const it = _lote && _lote.items[idx];
+  if (!it || it.estado === 'ok') return;
+  _loteEditItem = it;
+  _isbnEstado = {
+    isbn: it.isbn,
+    meta: { ...(it.meta || {}) },
+    portadas: (it.portadas || []).map((p, i) => ({ ...p, sel: i === 0 })),
+    extra: [],
+    cduDesc: it.cdu_desc || null,
+    portadaId: it.portadas && it.portadas.length ? 'c0' : null,
+    dims: null,
+  };
+  const card = $('#isbnCard');
+  if (card) card.open = true;
+  isbnRender();
+  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const msg = $('#isbnMsg');
+  if (msg) msg.textContent = `Editando del lote: ${it.entrada}`;
+}
+
+// Envío en bloque: uno a uno (no en paralelo, para no saturar el servidor ni dar rodeos al usuario sobre
+// qué falló), reutilizando el mismo POST /isbn/alta que el alta individual — alta RÁPIDA (sin reenriquecer:
+// el lote ya buscó los datos). Ubicación = los campos compartidos de «Datos de esta alta»; Colección = la
+// propia del ISBN si la trae, o si no la del campo del lote (relleno de hueco, nunca pisa una ya detectada).
+async function loteEnviarSeleccionados() {
+  const items = loteSeleccionados();
+  if (!items.length) return;
+  const btn = $('#loteEnviar');
+  if (btn) btn.disabled = true;
+  const ubic = {
+    ambito: ($('#inAmbito') && $('#inAmbito').value) || undefined,
+    estanteria: ($('#inEstanteria') && $('#inEstanteria').value) || undefined,
+  };
+  const coleccionLote = ($('#loteColeccion') && $('#loteColeccion').value.trim()) || '';
+  let ok = 0,
+    fallo = 0;
+  for (const it of items) {
+    const m = it.meta || {};
+    if (!m.titulo) {
+      it.estado = 'error';
+      it.error = 'Falta el título';
+      fallo++;
+      loteRenderStack();
+      continue;
+    }
+    const idx = _lote.items.indexOf(it);
+    const prog = $('#loteProg');
+    if (prog) prog.textContent = `Creando ${ok + fallo + 1}/${items.length}: «${m.titulo}»…`;
+    const primeraPortada = it.portadas && it.portadas[0] ? it.portadas[0].url : null;
+    const body = {
+      isbn: it.isbn,
+      meta: { ...m },
+      imagenes: primeraPortada ? [{ url: primeraPortada, tipo: 'portada' }] : [],
+      subidas: [],
+      ubicacion: ubic,
+      coleccion: m.coleccion_nombre ? undefined : coleccionLote || undefined,
+      completar: false,
+    };
+    try {
+      await api('/isbn/alta', { method: 'POST', body: JSON.stringify(body) });
+      it.estado = 'ok';
+      ok++;
+    } catch (e) {
+      it.estado = 'error';
+      it.error = e.message;
+      fallo++;
+    }
+    if (idx >= 0) loteRenderStack();
+  }
+  if (btn) btn.disabled = false;
+  const prog = $('#loteProg');
+  if (prog) prog.textContent = `Lote enviado: ${ok} creado(s)${fallo ? ` · ${fallo} con error (quedan en la lista)` : ''}.`;
+  toast(`📚 Lote: ${ok} creado(s)${fallo ? ` · ${fallo} con error` : ''}`, fallo ? 'warn' : 'ok');
+}
+
 // Autocompletado del campo Colección con las colecciones existentes.
 async function cargarDatalistColecciones() {
   const dl = $('#dlColecciones');

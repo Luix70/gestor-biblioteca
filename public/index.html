@@ -415,6 +415,41 @@
               <div id="isbnMsg" class="muted" style="font-size: 12px; margin-top: 8px"></div>
               <div id="isbnRes" style="margin-top: 10px"></div>
             </details>
+            <!-- 2b) ALTA POR LOTE DE ISBN — plegable, COLAPSADA: pega/sube muchos ISBN de golpe, se buscan
+                 todos solos y se apilan para revisión (deselecciona los erróneos, envía el resto; los que
+                 queden se pueden completar/arreglar a mano con el editor de arriba). -->
+            <details class="card foldcard admin-only" id="loteCard">
+              <summary>
+                <h3>
+                  📋 Alta por lote de ISBNs
+                  <span class="muted" style="font-weight: 400; font-size: 12px"
+                    >— pega una lista o sube un .txt; se buscan todos y se revisan antes de crear</span
+                  >
+                </h3>
+              </summary>
+              <div style="margin-top: 4px">
+                <textarea
+                  id="loteTxt"
+                  rows="4"
+                  placeholder="Un ISBN por línea (o separados por comas/espacios)…"
+                  style="width: 100%; resize: vertical; font-family: inherit"
+                ></textarea>
+                <div class="row" style="gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center">
+                  <button class="btn" type="button" id="lotePegar">📋 Pegar del portapapeles</button>
+                  <button class="btn" type="button" id="loteSubirBtn">📄 Subir .txt</button>
+                  <input type="file" id="loteFile" accept=".txt,text/plain" style="display: none" />
+                  <input
+                    id="loteColeccion"
+                    placeholder="Colección para los que no la traigan (opcional, p. ej. Alianza Cien)"
+                    autocomplete="off"
+                    style="flex: 1; min-width: 220px"
+                  />
+                  <button class="btn pri" type="button" id="loteBuscar">🔍 Buscar lote</button>
+                </div>
+                <div id="loteProg" class="muted" style="font-size: 12px; margin-top: 8px"></div>
+                <div id="loteStack" style="margin-top: 10px"></div>
+              </div>
+            </details>
             <!-- 3) SUBIR FICHEROS — plegable, DESPLEGADA -->
             <details class="card foldcard admin-only" open>
               <summary><h3>📁 Subir ficheros</h3></summary>

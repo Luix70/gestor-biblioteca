@@ -11,10 +11,9 @@
 import 'dotenv/config';
 import '../src/config.js';
 import { buscarEnFicheroLocal } from '../src/utils/buscador-local.js';
-import { buscarMetadatosExternos } from '../src/utils/proveedor-metadatos.js';
 import { buscarPorCriterios } from '../src/utils/buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from '../src/utils/buscador-google-books.js';
-import { portadasPorISBN } from '../src/api-panel.js';
+import { buscarUnISBN } from '../src/utils/lote-isbn.js';
 import { validarISBN, isbn10a13, isbn13a10 } from '../src/utils/identificadores.js';
 import { separarNumeroColeccion } from '../src/utils/colecciones.js';
 
@@ -56,14 +55,14 @@ for (const raw of ISBNS) {
     try { gb = await buscarEnGoogleBooks({ isbns }); } catch (e) { gb = { error: e.message }; }
     imprimir(`  · GoogleBk: ${tit(gb)}${gb?.error ? ` (ERROR ${gb.error})` : ''} | sinopsis ${sinop(gb?.sinopsis)} | categorías ${(gb?.categorias || []).join(', ') || '—'} | portada ${gb?.portada_url ? 'sí' : 'no'}`);
 
-    let ext = null;
-    try { ext = await buscarMetadatosExternos(null, null, null, { isbnsArchivo: isbns, incluirSinopsis: true, incluirCdu: false }); } catch (e) { ext = { error: e.message }; }
-    const col = separarNumeroColeccion(ext?.coleccion_nombre || f?.coleccion_nombre || '');
-    const tituloFinal = f?.titulo || ext?.titulo;
-    imprimir(`  · RESULTADO alta: título ${tituloFinal ? 'OK' : '‼ SIN TÍTULO → el alta rápida FALLA'} | sinopsis ${sinop(f?.sinopsis || ext?.sinopsis)} | colección «${col.nombre || '—'}»${col.numero ? ` nº${col.numero}` : ''}`);
+    // RESULTADO REAL de producción: la MISMA función que usan GET /isbn/:isbn y el LOTE (Fichero + huecos
+    // rellenados online, sin pisar nada). Así el test verifica el camino real, no una reimplementación aparte.
+    let real = null;
+    try { real = await buscarUnISBN(raw); } catch (e) { real = { ok: false, motivo: e.message }; }
+    const col = separarNumeroColeccion(real?.meta?.coleccion_nombre || '');
+    imprimir(`  · RESULTADO alta: fuente «${real?.fuente || '—'}» | título ${real?.meta?.titulo ? 'OK' : '‼ SIN TÍTULO → el alta rápida FALLA'} | sinopsis ${sinop(real?.meta?.sinopsis)} | colección «${col.nombre || '—'}»${col.numero ? ` nº${col.numero}` : ''} | cdu ${real?.meta?.cdu || '—'}`);
 
-    let port = [];
-    try { port = await portadasPorISBN(isbn13, isbn10, f?.portada_url || null); } catch (e) { imprimir('  · portadas ERROR: ' + e.message); }
+    const port = real?.portadas || [];
     imprimir(`  · PORTADAS (${port.length}): ${port.map((p) => `${p.fuente} ${p.ancho}×${p.alto}`).join('  |  ') || '‼ NINGUNA'}`);
     for (const p of port) imprimir(`       ${p.fuente}: ${p.url}`);
 }

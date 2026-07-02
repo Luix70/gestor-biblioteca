@@ -36,11 +36,9 @@ import { sanitizarCDU } from './utils/cdu-arbol.js';
 import { fuentesCopia, procesarSaneamiento, estadoSaneamiento } from './utils/saneamiento.js';
 import { describirCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion } from './utils/descripcion-clasificacion.js';
-import { buscarEnFicheroLocal } from './utils/buscador-local.js';
-import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
-import { medirImagen } from './utils/medir-imagen.js';
-import { validarISBN, isbn10a13, isbn13a10 } from './utils/identificadores.js';
 import { altaPorISBN } from './servicio-ingesta.js';
+import { medirPortadaRemota, portadasPorISBN } from './utils/portadas-isbn.js';
+import { buscarUnISBN, iniciarLoteISBN, estadoLoteISBN } from './utils/lote-isbn.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1, nfc: 1 };
@@ -134,85 +132,6 @@ async function docOcultoParaGuest(db, doc) {
  * Rutas del PANEL DE CONTROL (montadas bajo /api). Acciones de operación: vigilante, papelera,
  * cuarentena, purga de obras, ingesta por día. (Mantenimiento y estadísticas viven en app.js.)
  */
-// Descarga una imagen remota y devuelve sus dimensiones (sin sharp: se leen de la cabecera JPEG/PNG).
-// Descarta placeholders diminutos («sin imagen») por tamaño de buffer. null si no carga o no es imagen.
-async function medirPortadaRemota(url, fuente) {
-    try {
-        const ctrl = new AbortController();
-        const to = setTimeout(() => ctrl.abort(), 9000);
-        const resp = await fetch(url, { signal: ctrl.signal, redirect: 'follow' });
-        clearTimeout(to);
-        if (!resp.ok) return null;
-        const buf = Buffer.from(await resp.arrayBuffer());
-        if (buf.length < 800) return null;                  // cuerpo vacío / respuesta de error
-        const dim = medirImagen(buf);
-        // Se rechaza SOLO el placeholder 1x1 («no image» de Amazon, etc.), NO las portadas pequeñas reales:
-        // el usuario prefiere una cubierta chica a un documento sin portada.
-        if (!dim || !dim.width || dim.width < 20 || dim.height < 20) return null;
-        return { url, fuente, ancho: dim.width, alto: dim.height, bytes: buf.length };
-    } catch { return null; }
-}
-
-// Candidatas de PORTADA por ISBN. PRIMERO la del propio Fichero local (la más autoritativa: la trae nuestro
-// dump), luego fuentes KEYLESS (sin scraping frágil): OpenLibrary Covers (L), Amazon (truco ISBN-10) y
-// Google Books (mayor tamaño). Se miden (sin sharp) y ordenan por ancho desc para premarcar la de más resolución.
-export async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
-    const urls = [];
-    if (ficheroUrl) urls.push([String(ficheroUrl).replace(/^http:/, 'https:'), 'Fichero']);
-    // OpenLibrary Covers: probar 13 Y 10 (distinta disponibilidad por edición).
-    for (const x of [isbn13, isbn10]) if (x) urls.push([`https://covers.openlibrary.org/b/isbn/${x}-L.jpg?default=false`, 'OpenLibrary']);
-    // Amazon (ISBN-10 = ASIN de libro): CDN ACTUAL (m.media-amazon) + heredado, con «max res» y «grande».
-    if (isbn10) {
-        urls.push([`https://m.media-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
-        urls.push([`https://m.media-amazon.com/images/P/${isbn10}.01.L.jpg`, 'Amazon']);
-        urls.push([`https://images-na.ssl-images-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
-    }
-    // OpenLibrary Search por el CAMPO isbn (NO por q=, que es difuso y traía portadas de otros libros que
-    // "mencionan" ese número → causa de portadas equivocadas). isbn= empareja EXACTO y devuelve las ediciones
-    // con ese ISBN (varias cover_i). Si OL no tiene el ISBN, no devuelve nada (mejor nada que una equivocada).
-    for (const x of [isbn13, isbn10]) {
-        if (!x) continue;
-        try {
-            const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 9000);
-            const resp = await fetch(`https://openlibrary.org/search.json?isbn=${x}&limit=5&fields=cover_i`, { signal: ctrl.signal });
-            clearTimeout(to);
-            if (resp.ok) {
-                const j = await resp.json();
-                for (const d of (j.docs || [])) if (d.cover_i) urls.push([`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`, 'OpenLibrary']);
-            }
-        } catch { /* OL search opcional */ }
-    }
-    // Google Books: por 13 y 10, tomando la portada de VARIOS resultados (no solo el primero) → más variedad.
-    for (const x of [isbn13, isbn10]) {
-        if (!x) continue;
-        try {
-            const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
-            const resp = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${x}${key}`);
-            if (resp.ok) {
-                const j = await resp.json();
-                for (const it of (j.items || []).slice(0, 5)) {
-                    const il = it.volumeInfo && it.volumeInfo.imageLinks;
-                    const u = il && (il.extraLarge || il.large || il.medium || il.small || il.thumbnail);
-                    if (u) urls.push([u.replace(/^http:/, 'https:').replace(/&edge=curl/, ''), 'Google Books']);
-                }
-            }
-        } catch { /* Google Books opcional */ }
-    }
-    // Medir EN PARALELO (con tope) y DEDUP por URL y por (dimensiones+bytes) — evita repetir la misma imagen
-    // (13 y 10, distintas CDNs, misma edición). Se aceptan portadas pequeñas: mejor una chica que ninguna.
-    const urlsUnicas = [...new Map(urls.map(([u, f]) => [u, f])).entries()].slice(0, 18);
-    const medidas = await Promise.all(urlsUnicas.map(([u, f]) => medirPortadaRemota(u, f)));
-    const out = [], vistos = new Set();
-    for (const m of medidas) {
-        if (!m) continue;
-        const sig = `${m.ancho}x${m.alto}:${m.bytes}`;
-        if (vistos.has(sig)) continue;
-        vistos.add(sig); out.push(m);
-    }
-    out.sort((a, b) => b.ancho - a.ancho);
-    return out;
-}
-
 export function rutasPanel() {
     const r = express.Router();
 
@@ -1157,98 +1076,29 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
-    // INGRESO POR ISBN — 1) LOOKUP: valida el ISBN, recupera metadatos del Fichero local y reúne candidatas
-    // de portada (>800 px marcadas como buena resolución). GET (lectura); no crea nada todavía.
+    // INGRESO POR ISBN — 1) LOOKUP: valida el ISBN, recupera metadatos (Fichero local + huecos rellenados
+    // online) y reúne candidatas de portada. GET (lectura); no crea nada todavía. La lógica vive en
+    // utils/lote-isbn.js (buscarUnISBN) para compartirla con el LOTE (búsqueda masiva) sin duplicarla.
     r.get('/isbn/:isbn', async (req, res) => {
         try {
-            const limpio = String(req.params.isbn || '')
-                .replace(/[^0-9Xx]/g, '')
-                .toUpperCase();
-            if (!validarISBN(limpio)) {
-                return res.status(400).json({ ok: false, motivo: 'ISBN no válido (dígito de control incorrecto)' });
-            }
-            const isbn13 = limpio.length === 13 ? limpio : isbn10a13(limpio);
-            const isbn10 = limpio.length === 10 ? limpio : isbn13a10(limpio);
-            const isbns = [isbn13, isbn10, limpio].filter(Boolean);
-
-            // 1) Fuente principal: el Fichero local (dump OL+BNE, offline e instantáneo).
-            let meta = await buscarEnFicheroLocal({ isbns });
-            let fuenteMeta = meta && meta.titulo ? 'fichero' : null;
-
-            // 2) ONLINE — se consulta si (a) el ISBN NO está en el dump (novedad posterior a la
-            //    instantánea del Fichero) O (b) SÍ está pero le faltan huecos que el Fichero no
-            //    capturó para esa edición concreta (sinopsis/colección/CDU/portada: frecuente en
-            //    reimpresiones de bolsillo antiguas — el volcado BNE/OL rara vez tiene esos campos
-            //    aunque el libro sea de hace años). Un Fichero-hit NUNCA se pisa: solo se RELLENA lo
-            //    vacío (conservador), igual que hace el resto del pipeline (`primerValido`).
-            const faltaHueco = !meta || !meta.titulo
-                || !meta.sinopsis || !meta.coleccion_nombre || !meta.cdu || !meta.portada_url;
-            if (faltaHueco) {
-                const online = await buscarMetadatosExternos(meta?.titulo || null, (meta?.autores || [])[0] || null, null, {
-                    isbnsArchivo: isbns,
-                    incluirSinopsis: true,
-                    incluirCdu: !(meta && meta.cdu),
-                }).catch(() => null);
-                if (online && online.titulo && (!meta || !meta.titulo)) {
-                    // El Fichero no tenía NADA → el online pasa a ser la base completa.
-                    const portadaOnline = online.portadas_remotas?.find((p) => p && p.url)?.url || null;
-                    meta = {
-                        isbn: online.isbn || isbn13 || limpio,
-                        titulo: online.titulo,
-                        subtitulo: null,
-                        autores: online.autores || [],
-                        editorial: online.editorial || null,
-                        año_edicion: online.año_edicion || null,
-                        idioma: online.idioma || null,
-                        dewey: online.dewey || null,
-                        lcc: online.lcc || null,
-                        cdu: online.cdu || null,
-                        paginas: online.paginas_bne || null,
-                        dimensiones: online.dimensiones_bne || null,
-                        categorias: online.categorias || [],
-                        coleccion_nombre: online.coleccion_nombre || null,
-                        sinopsis: online.sinopsis || null,
-                        portada_url: portadaOnline,
-                        fuentes: ['online'],
-                    };
-                    fuenteMeta = 'online';
-                } else if (online && meta && meta.titulo) {
-                    // El Fichero SÍ tenía título: el online solo RELLENA lo que faltaba, sin pisar nada.
-                    if (!meta.sinopsis && online.sinopsis) { meta.sinopsis = online.sinopsis; fuenteMeta = 'fichero+online'; }
-                    if (!meta.coleccion_nombre && online.coleccion_nombre) { meta.coleccion_nombre = online.coleccion_nombre; fuenteMeta = 'fichero+online'; }
-                    if (!meta.cdu && online.cdu) { meta.cdu = online.cdu; fuenteMeta = 'fichero+online'; }
-                    if (!meta.dewey && online.dewey) meta.dewey = online.dewey;
-                    if (!meta.lcc && online.lcc) meta.lcc = online.lcc;
-                    if (!meta.portada_url) {
-                        const portadaOnline = online.portadas_remotas?.find((p) => p && p.url)?.url || null;
-                        if (portadaOnline) { meta.portada_url = portadaOnline; fuenteMeta = 'fichero+online'; }
-                    }
-                }
-            }
-
-            const portadas = await portadasPorISBN(isbn13, isbn10, meta && meta.portada_url);
-            // Descripción del CDU: SOLO de la caché local (cdu_descripciones), sin generar nada (evita
-            // dependencia externa/IA en el alta). Sirve para validar la CDU con su título legible.
-            let cdu_desc = null;
-            if (meta && meta.cdu) {
-                try {
-                    cdu_desc = await cduDesc(await conectarDB(), meta.cdu);
-                } catch {
-                    /* caché opcional */
-                }
-            }
-            res.json({
-                ok: true,
-                isbn: isbn13 || limpio,
-                encontrado: !!(meta && meta.titulo),
-                fuente: fuenteMeta, // 'fichero' | 'online' | null — de dónde salieron los datos
-                meta: meta || null,
-                portadas,
-                cdu_desc,
-            });
+            const r2 = await buscarUnISBN(req.params.isbn);
+            if (!r2.ok) return res.status(400).json(r2);
+            res.json(r2); // { ok, isbn, encontrado, fuente: 'fichero'|'fichero+online'|'online'|null, meta, portadas, cdu_desc }
         } catch (e) {
             res.status(500).json({ ok: false, motivo: e.message });
         }
+    });
+
+    // INGRESO POR ISBN — LOTE: busca (sin crear nada) una LISTA de ISBNs en segundo plano — pegados desde
+    // el portapapeles o subidos en un .txt (el front ya los separa). 1) iniciar 2) sondear el progreso.
+    // El alta de cada uno sigue yendo por el YA EXISTENTE POST /isbn/alta, uno a uno, desde el front —
+    // así lo erróneo/incompleto se queda tal cual en pantalla para completarlo o reintentarlo a mano.
+    r.post('/isbn/lote/iniciar', (req, res) => {
+        const entradas = req.body?.isbns;
+        res.json(iniciarLoteISBN(entradas));
+    });
+    r.get('/isbn/lote/estado', (req, res) => {
+        res.json({ ok: true, ...estadoLoteISBN() });
     });
 
     // INGRESO POR ISBN — 2) ALTA: crea el documento con los metadatos validados + portada(s) elegidas (admin).
