@@ -37,6 +37,16 @@ const DIR_PUBLIC = path.join(RAIZ, 'public');
 const PUERTO = Number(process.env.PORT || 3000);
 const PUERTO_PANEL = Number(process.env.PANEL_PORT || 4000);
 
+// Commit en ejecución: se registra LO PRIMERO (a nivel de módulo, no dentro de un callback de listen), para
+// que salga siempre al arrancar, sin depender del orden de arranque de los puertos.
+{
+    const v = versionEnEjecucion();
+    console.log(`📦 Versión en ejecución: commit ${v.commit}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
+    if (v.commit === 'desconocido') {
+        console.log('   ⓘ  El contenedor no expone el commit: que el script de despliegue exporte GIT_COMMIT (o incluya la carpeta .git).');
+    }
+}
+
 await fs.mkdir(DIR_TMP, { recursive: true });
 
 // Guardamos las subidas conservando el nombre original (la extensión guía la detección de tipo).
@@ -272,11 +282,6 @@ function versionEnEjecucion() {
 
 app.listen(PUERTO, () => {
     console.log(`🚀 API REST de ingesta activa en el puerto ${PUERTO}`);
-    const v = versionEnEjecucion();
-    console.log(`📦 Versión en ejecución: commit ${v.commit}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
-    if (v.commit === 'desconocido') {
-        console.log('   ⓘ  Para verlo siempre, el script de despliegue puede exportar GIT_COMMIT/GIT_BRANCH (o incluir la carpeta .git).');
-    }
     if (process.env.DESACTIVAR_VIGILANTE !== '1') {
         iniciarVigilante().catch(e => console.error('No se pudo iniciar el vigilante:', e.message));
     }
