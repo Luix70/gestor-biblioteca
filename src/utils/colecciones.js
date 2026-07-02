@@ -20,8 +20,11 @@
 export async function resolverCabecera(db, { nombre, issn = null, tipo = null, editorialId = null, cdu = null, descripcion = null, naturaleza = null }) {
     const col = db.collection('colecciones');
     // nombre es obligatorio y único; si solo tenemos ISSN, usamos el ISSN como nombre provisional
-    // (el Conformador/autoridad lo renombra luego con el título real de la cabecera/serie).
-    const n = (nombre && String(nombre).trim()) || issn || null;
+    // (el Conformador/autoridad lo renombra luego con el título real de la cabecera/serie). Se limpian las
+    // colas de basura (« ; v», «, ISSN …») para no crear/guardar nombres feos; si el nombre ERA un ISSN
+    // suelto, limpiarNombreColeccion lo deja intacto (no lleva esas colas).
+    const bruto = (nombre && String(nombre).trim()) || issn || null;
+    const n = bruto ? limpiarNombreColeccion(bruto) : null;
 
     const claveCan = claveCanonica(n);
 
@@ -85,6 +88,30 @@ const RE_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
 // Conectores que NO distinguen una serie de otra: se ignoran al comparar («Cátedra, Letras Universales» ≡
 // «Letras Universales de Cátedra»). ES + EN habituales.
 const CONECTORES = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'e', 'o', 'u', 'en', 'a', 'al', 'the', 'of', 'and', 'or']);
+
+// Colas de BASURA que las fuentes dejan en el nombre de serie al incrustar el volumen/ISSN («… ; v. 46»,
+// «…, ISSN 0261-9814», «… ;»). Se construyen con new RegExp (regla del proyecto para clases de caracteres).
+// Cola «ISSN …» con dígitos O YA sin ellos (separarNumeroColeccion puede haber quitado el número antes,
+// dejando un «, ISSN» colgante): se limpia igualmente.
+const RE_COLA_ISSN = new RegExp('[\\s,;:.·\\-–—]*issn\\b[\\s0-9xX-]*$', 'i');
+const RE_COLA_VOL = new RegExp('[\\s,;:.·\\-–—]+(?:v|vol|volumen|tomo)\\.?\\s*$', 'i'); // marca de volumen SUELTA (sin número)
+const RE_COLA_SEP = new RegExp('[\\s,;:.·\\-–—]+$');                                   // separador(es) colgante(s)
+
+/**
+ * Limpia las COLAS de basura del final del nombre de una colección (separadores sueltos, marca de volumen
+ * sin número «; v», colas de «ISSN ####-####»). No toca el contenido real (solo el final) y NUNCA devuelve
+ * vacío. Ej.: «Series on knots and everything ; v» → «Series on knots and everything»; «Arthurian studies,
+ * ISSN 0261-9814» → «Arthurian studies».
+ */
+export function limpiarNombreColeccion(nombre) {
+    const original = String(nombre || '').trim();
+    let s = original, prev;
+    do {
+        prev = s;
+        s = s.replace(RE_COLA_ISSN, '').replace(RE_COLA_VOL, '').replace(RE_COLA_SEP, '').trim();
+    } while (s !== prev && s);
+    return s || original;
+}
 
 /**
  * CLAVE CANÓNICA de un nombre de colección para detectar VARIANTES de grafía del mismo grupo

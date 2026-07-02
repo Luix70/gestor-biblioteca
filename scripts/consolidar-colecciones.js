@@ -16,7 +16,7 @@
 import 'dotenv/config';
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
-import { separarNumeroColeccion, claveCanonica } from '../src/utils/colecciones.js';
+import { separarNumeroColeccion, claveCanonica, limpiarNombreColeccion } from '../src/utils/colecciones.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 
@@ -61,7 +61,8 @@ async function main() {
             return bEx - aEx || nMiembros(b.col._id) - nMiembros(a.col._id) || String(a.col._id).localeCompare(String(b.col._id));
         });
         const canonical = items[0].col;
-        const canon = items[0].limpio;                 // nombre limpio de la canónica = nombre del grupo
+        // Nombre del grupo = el de la canónica, con las COLAS de basura quitadas (« ; v», «, ISSN …»).
+        const canon = limpiarNombreColeccion(items[0].limpio);
         const hayQueRenombrar = items.some((it) => it.col.nombre !== canon);
         if (items.length === 1 && !hayQueRenombrar) continue; // grupo de 1 ya correcto (la clave la pone el backfill final)
         const absorbidos = items.slice(1).map((it) => it.col);
