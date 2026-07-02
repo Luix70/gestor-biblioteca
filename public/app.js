@@ -5583,53 +5583,54 @@ async function escanearISBN(targetId = 'inIsbn') {
   }
   let formatos = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
   try {
-    const sop = await BarcodeDetector.getSupportedFormats();
-    formatos = formatos.filter((f) => sop.includes(f));
+    const soportados = await BarcodeDetector.getSupportedFormats();
+    formatos = formatos.filter((f) => soportados.includes(f));
     if (!formatos.length) formatos = ['ean_13'];
   } catch (_) {}
-  const det = new BarcodeDetector({ formats: formatos });
+  const detector = new BarcodeDetector({ formats: formatos });
   // Overlay PROPIO (no usa #cmpModal) para poder escanear TAMBIÉN sobre el formulario de edición.
-  const ov = document.createElement('div');
-  ov.style.cssText =
+  const overlay = document.createElement('div');
+  overlay.style.cssText =
     'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:grid;place-items:center;padding:16px';
-  ov.innerHTML = `<div class="box card" style="max-width:480px;width:100%"><h3 style="margin-top:0">📷 Escanear ISBN</h3>
+  overlay.innerHTML = `<div class="box card" style="max-width:480px;width:100%"><h3 style="margin-top:0">📷 Escanear ISBN</h3>
     <video id="scVid" playsinline muted style="width:100%;border-radius:10px;background:#000;max-height:60vh"></video>
     <p class="muted" style="font-size:12px;margin:8px 0 0">Enfoca el código de barras de la contraportada…</p>
     <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="btn" id="scX">Cancelar</button></div></div>`;
-  document.body.appendChild(ov);
-  const vid = ov.querySelector('#scVid');
-  vid.srcObject = stream;
+  document.body.appendChild(overlay);
+  const video = overlay.querySelector('#scVid');
+  video.srcObject = stream;
   try {
-    await vid.play();
+    await video.play();
   } catch (_) {}
   let activo = true;
   const parar = () => {
     activo = false;
     try {
-      stream.getTracks().forEach((t) => t.stop());
+      stream.getTracks().forEach((track) => track.stop());
     } catch (_) {}
   };
   const cerrar = () => {
     parar();
-    ov.remove();
+    overlay.remove();
   };
-  ov.querySelector('#scX').onclick = cerrar;
-  ov.onclick = (e) => {
-    if (e.target === ov) cerrar();
+  overlay.querySelector('#scX').onclick = cerrar;
+  overlay.onclick = (e) => {
+    if (e.target === overlay) cerrar();
   };
+  // Bucle de lectura: cada 300 ms busca un EAN-13 978/979 (ISBN) en el vídeo; al leerlo, lo pone en el campo.
   const loop = async () => {
     if (!activo) return;
     try {
-      const codes = await det.detect(vid);
-      const hit = (codes || [])
+      const codigos = await detector.detect(video);
+      const isbn = (codigos || [])
         .map((c) => String(c.rawValue || '').replace(/\D/g, ''))
         .find((v) => /^97[89]\d{10}$/.test(v));
-      if (hit) {
+      if (isbn) {
         parar();
-        const inp = $('#' + targetId);
-        if (inp) inp.value = hit;
-        ov.remove();
-        toast('ISBN leído: ' + hit);
+        const campo = $('#' + targetId);
+        if (campo) campo.value = isbn;
+        overlay.remove();
+        toast('ISBN leído: ' + isbn);
         return;
       }
     } catch (_) {}
@@ -5642,23 +5643,24 @@ async function escanearISBN(targetId = 'inIsbn') {
 // ISBN viaje como autoridad → fast-path por Fichero (sin visión IA). Un PDF lo lee el servidor.
 async function detectarISBNenFiles(files) {
   if (!('BarcodeDetector' in window)) return null;
-  const imgs = (files || []).filter((f) => /^image\//.test(f.type || ''));
-  if (!imgs.length) return null;
-  let det;
+  const imagenes = (files || []).filter((f) => /^image\//.test(f.type || ''));
+  if (!imagenes.length) return null;
+  let detector;
   try {
-    det = new BarcodeDetector({ formats: ['ean_13'] });
+    detector = new BarcodeDetector({ formats: ['ean_13'] });
   } catch (_) {
     return null;
   }
-  for (const f of imgs) {
+  for (const imagen of imagenes) {
     try {
-      const bmp = await createImageBitmap(f);
-      const codes = await det.detect(bmp);
-      if (bmp.close) bmp.close();
-      const hit = (codes || [])
+      const bitmap = await createImageBitmap(imagen);
+      const codigos = await detector.detect(bitmap);
+      if (bitmap.close) bitmap.close();
+      // EAN-13 que empieza por 978/979 = ISBN (Bookland). Solo dígitos.
+      const isbn = (codigos || [])
         .map((c) => String(c.rawValue || '').replace(/\D/g, ''))
         .find((v) => /^97[89]\d{10}$/.test(v));
-      if (hit) return hit;
+      if (isbn) return isbn;
     } catch (_) {}
   }
   return null;
@@ -5666,20 +5668,20 @@ async function detectarISBNenFiles(files) {
 // Índice de la imagen que lleva el CÓDIGO DE BARRAS EAN-13 (suele ser la CONTRAPORTADA), o -1.
 async function indiceConBarcode(files) {
   if (!('BarcodeDetector' in window)) return -1;
-  let det;
+  let detector;
   try {
-    det = new BarcodeDetector({ formats: ['ean_13'] });
+    detector = new BarcodeDetector({ formats: ['ean_13'] });
   } catch (_) {
     return -1;
   }
   for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    if (!/^image\//.test(f.type || '')) continue;
+    const imagen = files[i];
+    if (!/^image\//.test(imagen.type || '')) continue;
     try {
-      const bmp = await createImageBitmap(f);
-      const codes = await det.detect(bmp);
-      if (bmp.close) bmp.close();
-      if ((codes || []).some((c) => /^97[89]\d{10}$/.test(String(c.rawValue || '').replace(/\D/g, ''))))
+      const bitmap = await createImageBitmap(imagen);
+      const codigos = await detector.detect(bitmap);
+      if (bitmap.close) bitmap.close();
+      if ((codigos || []).some((c) => /^97[89]\d{10}$/.test(String(c.rawValue || '').replace(/\D/g, ''))))
         return i;
     } catch (_) {}
   }
