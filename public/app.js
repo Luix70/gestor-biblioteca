@@ -876,19 +876,22 @@ async function abrirComparador(id) {
 }
 
 // ── papelera ──
+// Página Papelera: totales (tamaño/ficheros/subcarpetas) + tabla de subcarpetas con «ver» y «vaciar».
 async function loadPap() {
   try {
-    const p = await api('/papelera');
+    const papelera = await api('/papelera');
     $('#papStats').innerHTML =
-      `<div class="stat acc"><div class="ic">♻</div><div class="v">${fmtBytes(p.bytes)}</div><div class="k">Tamaño total</div></div>
-    <div class="stat"><div class="ic">📄</div><div class="v">${p.ficheros}</div><div class="k">Ficheros</div></div>
-    <div class="stat"><div class="ic">📁</div><div class="v">${p.subcarpetas.length}</div><div class="k">Subcarpetas</div></div>`;
-    $('#papBody').innerHTML = p.subcarpetas.length
+      `<div class="stat acc"><div class="ic">♻</div><div class="v">${fmtBytes(papelera.bytes)}</div><div class="k">Tamaño total</div></div>
+    <div class="stat"><div class="ic">📄</div><div class="v">${papelera.ficheros}</div><div class="k">Ficheros</div></div>
+    <div class="stat"><div class="ic">📁</div><div class="v">${papelera.subcarpetas.length}</div><div class="k">Subcarpetas</div></div>`;
+    $('#papBody').innerHTML = papelera.subcarpetas.length
       ? `<table><tr><th>Subcarpeta</th><th>Ficheros</th><th>Tamaño</th><th></th></tr>
-    ${p.subcarpetas
+    ${papelera.subcarpetas
       .map(
-        (s) => `<tr><td class="mono">${esc(s.nombre)}</td><td>${s.ficheros}</td><td>${fmtBytes(s.bytes)}</td>
-      <td style="text-align:right"><button class="btn" data-ver="${esc(s.nombre)}">ver</button> <button class="btn bad admin-only" data-del="${esc(s.nombre)}">vaciar</button></td></tr>`,
+        (
+          sub,
+        ) => `<tr><td class="mono">${esc(sub.nombre)}</td><td>${sub.ficheros}</td><td>${fmtBytes(sub.bytes)}</td>
+      <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}">ver</button> <button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
       )
       .join('')}</table>`
       : '<div class="empty">Papelera vacía</div>';
@@ -936,26 +939,28 @@ $('#papVaciarAll').onclick = async () => {
 };
 
 // ── obras ──
+// Purga (borra) una obra multivolumen y sus tomos por isbn_obra/título. `ejecutar=false` = simulación
+// (lista lo que se borraría); `true` = borra de verdad (los ficheros de los tomos van a la Papelera).
 async function purga(ejecutar) {
   const clave = $('#purgaClave').value.trim();
   if (!clave) return toast('Indica isbn_obra o título', 'warn');
   if (ejecutar && !confirm('¿Purgar "' + clave + '"? Elimina la obra y sus tomos (ficheros → Papelera).'))
     return;
   try {
-    const r = await api('/obras/purgar', { method: 'POST', body: JSON.stringify({ clave, ejecutar }) });
-    if (!r.ok) return ($('#purgaOut').innerHTML = `<span class="tag bad">${esc(r.motivo)}</span>`);
-    if (r.simulacion)
+    const resp = await api('/obras/purgar', { method: 'POST', body: JSON.stringify({ clave, ejecutar }) });
+    if (!resp.ok) return ($('#purgaOut').innerHTML = `<span class="tag bad">${esc(resp.motivo)}</span>`);
+    if (resp.simulacion)
       $('#purgaOut').innerHTML =
-        `<div class="muted">Obra «${esc(r.obra.titulo)}» — se eliminarían ${r.tomos.length} tomo(s):</div>
-      <table>${r.tomos.map((t) => `<tr><td>vol ${t.vol ?? '?'}</td><td>${esc(t.titulo)}</td><td class="mono muted">${esc(t.isbn || '—')}</td></tr>`).join('')}</table>`;
+        `<div class="muted">Obra «${esc(resp.obra.titulo)}» — se eliminarían ${resp.tomos.length} tomo(s):</div>
+      <table>${resp.tomos.map((tomo) => `<tr><td>vol ${tomo.vol ?? '?'}</td><td>${esc(tomo.titulo)}</td><td class="mono muted">${esc(tomo.isbn || '—')}</td></tr>`).join('')}</table>`;
     else {
       $('#purgaOut').innerHTML =
-        `<span class="tag ok">Eliminados ${r.eliminados} tomo(s) + la obra. Ya puedes re-soltarla.</span>`;
+        `<span class="tag ok">Eliminados ${resp.eliminados} tomo(s) + la obra. Ya puedes re-soltarla.</span>`;
       toast('Obra purgada');
       loadObras();
     }
-  } catch (e) {
-    toast(e.message, 'bad');
+  } catch (err) {
+    toast(err.message, 'bad');
   }
 }
 $('#purgaSim').onclick = () => purga(false);
