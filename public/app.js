@@ -1649,9 +1649,11 @@ function pintarDoc(r, ctx) {
   const secSin = d.sinopsis
     ? `<details class="card foldcard" open style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(d.sinopsis)}</p></details>`
     : '';
-  // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos) plegado, después.
+  // 🩺 Salud: plegable, admin-only, carga perezosa al abrir (checklist de tareas de mantenimiento).
+  const secSalud = `<details class="card foldcard admin-only" id="saludDet" style="margin-top:14px"><summary>🩺 Salud del documento</summary><div id="saludBody" class="muted" style="margin-top:10px">Abre para ver el estado de mantenimiento…</div></details>`;
+  // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos, salud) plegado, después.
   $('#p-detalle').innerHTML =
-    `${crumb}<div style="margin:2px 0 12px"><button class="det-back" title="Volver" onclick="${back}">←</button></div>${fmin}${secImg}${secSin}${secAcc}${secLect}${secCat}`;
+    `${crumb}<div style="margin:2px 0 12px"><button class="det-back" title="Volver" onclick="${back}">←</button></div>${fmin}${secImg}${secSin}${secAcc}${secLect}${secCat}${secSalud}`;
   attachClas('#p-detalle');
   attachRating('#p-detalle');
   $$('#p-detalle .copybtn').forEach(
@@ -1668,6 +1670,15 @@ function pintarDoc(r, ctx) {
     if (cf) cf.onclick = () => fichaAccion('conformar', d._id, cf);
     if (ce) ce.onclick = () => fichaAccion('enriquecer', d._id, ce);
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
+    // 🩺 Salud: carga perezosa del checklist la primera vez que se despliega la sección.
+    const saludDet = $('#saludDet');
+    if (saludDet)
+      saludDet.addEventListener('toggle', () => {
+        if (saludDet.open && !saludDet._cargada) {
+          saludDet._cargada = true;
+          cargarSalud(d._id);
+        }
+      });
     const cd = $('#actDel');
     if (cd) cd.onclick = () => fichaEliminar(d._id);
     const ce2 = $('#actEdit');
@@ -1893,6 +1904,89 @@ function attachRating(scope) {
         }
       };
   });
+}
+
+// ── 🩺 Salud del documento: checklist de tareas de mantenimiento (firma) + forzar conformar/enriquecer ──
+// Muestra, por cada tarea, si está HECHA a su versión y si le APLICA. Desmarcar una tarea = pedir que se
+// vuelva a ejecutar (des-sellar) y luego Conformar; el diff de cambios se muestra con mostrarCambios().
+async function cargarSalud(id) {
+  const box = $('#saludBody');
+  if (!box) return;
+  box.classList.add('muted');
+  box.textContent = 'Cargando…';
+  let r;
+  try {
+    r = await api('/documentos/' + encodeURIComponent(id) + '/salud');
+  } catch (e) {
+    box.textContent = e.message;
+    return;
+  }
+  const s = r.salud || {};
+  box.classList.remove('muted');
+  const flags = [
+    s.conforme ? '<span class="tag ok">conforme</span>' : '<span class="tag warn">pendiente</span>',
+    s.locked ? '<span class="tag mut">🔒 bloqueado</span>' : '',
+    s.cdu_manual ? '<span class="tag mut">CDU manual</span>' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const filas = (s.tareas || [])
+    .map((t) => {
+      const estado = !t.aplica
+        ? '<span class="tag mut">no aplica</span>'
+        : t.hecha
+          ? '<span class="tag ok">hecha</span>'
+          : '<span class="tag warn">pendiente</span>';
+      return `<label class="saludrow"><input type="checkbox" data-tarea="${esc(t.id)}" data-hecha="${t.hecha ? '1' : ''}" ${t.hecha ? 'checked' : ''}>
+        <span class="saludid mono">${esc(t.id)}</span><span class="muted saluddesc">${esc(t.descripcion || '')}</span>${estado}</label>`;
+    })
+    .join('');
+  box.innerHTML = `<div style="margin-bottom:8px">${flags}</div>
+     <div class="muted" style="font-size:12px;margin-bottom:8px">Desmarca las tareas que quieras volver a ejecutar y pulsa «Forzar lo desmarcado». Verás qué cambió.</div>
+     <div class="saludlist">${filas || '<div class="muted">Sin tareas.</div>'}</div>
+     <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap">
+       <button class="btn pri" id="saludForzar">🔄 Forzar lo desmarcado</button>
+       <button class="btn" id="saludConf">🧹 Conformar pendientes</button>
+       <button class="btn" id="saludEnr">✨ Enriquecer</button>
+     </div>`;
+  if ($('#saludForzar')) $('#saludForzar').onclick = () => saludForzar(id);
+  if ($('#saludConf')) $('#saludConf').onclick = () => saludConformar(id, false);
+  if ($('#saludEnr')) $('#saludEnr').onclick = () => saludConformar(id, true);
+}
+// Des-sella las tareas que estaban HECHAS y el usuario ha DESMARCADO, y luego Conforma (las re-ejecuta).
+async function saludForzar(id) {
+  const desmarcadas = $$('#saludBody [data-tarea]')
+    .filter((cb) => cb.dataset.hecha === '1' && !cb.checked)
+    .map((cb) => cb.dataset.tarea);
+  if (!desmarcadas.length) {
+    toast('No has desmarcado ninguna tarea ya hecha', 'warn');
+    return;
+  }
+  try {
+    await api('/documentos/' + encodeURIComponent(id) + '/salud/dessellar', {
+      method: 'POST',
+      body: JSON.stringify({ tareas: desmarcadas }),
+    });
+    await saludConformar(id, false);
+  } catch (e) {
+    toast(e.message, 'bad');
+  }
+}
+// Ejecuta Conformar (o Enriquecer) sobre el doc, muestra el diff y refresca el checklist (sin recargar la ficha).
+async function saludConformar(id, enriquecer) {
+  const tipo = enriquecer ? 'enriquecer' : 'conformar';
+  try {
+    const r = await api('/documentos/' + encodeURIComponent(id) + '/' + tipo, { method: 'POST', body: '{}' });
+    if (!r.ok) {
+      toast(r.motivo || 'sin cambios', 'warn');
+      cargarSalud(id);
+      return;
+    }
+    mostrarCambios(enriquecer ? 'Enriquecedor' : 'Conformador', r.cambios || []);
+    cargarSalud(id);
+  } catch (e) {
+    toast(e.message, 'bad');
+  }
 }
 
 // ── acciones de la ficha: Conformar / Enriquecer (con resumen de cambios) y Reprocesar ──
