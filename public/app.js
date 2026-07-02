@@ -7146,12 +7146,13 @@ async function pdfAImagenes(file, { maxPag = 60, ancho = 1500 } = {}) {
 }
 // ── TAPETE: medir + recortar el libro sobre la alfombrilla, en el navegador (sin IA). Reutiliza
 //    detectarBordesVerde / detectarRejillaPxCm / _homografia. ──
-function fileAImagen(f) {
-  return new Promise((res, rej) => {
-    const img = new Image();
-    img.onload = () => res(img);
-    img.onerror = rej;
-    img.src = URL.createObjectURL(f);
+// Carga un File/Blob como <img> ya decodificada (para el tapete/CV). Rechaza si no carga.
+function fileAImagen(fichero) {
+  return new Promise((resolver, rechazar) => {
+    const imagen = new Image();
+    imagen.onload = () => resolver(imagen);
+    imagen.onerror = rechazar;
+    imagen.src = URL.createObjectURL(fichero);
   });
 }
 const _esImg = (f) =>
@@ -7263,13 +7264,13 @@ async function recortarYMedirTapete(files) {
   }
   return { files: out, dims, recortadas, tapetePct };
 }
-// Guarda las dimensiones medidas en cada documento recién catalogado (best-effort, no rompe la subida).
+// Guarda las dimensiones medidas (tapete) en cada documento recién catalogado (best-effort, no rompe la subida).
 async function guardarDimsResultados(resultados, dims) {
   if (!dims || !Array.isArray(resultados)) return;
-  for (const x of resultados) {
-    if (x && x.ok && x.id) {
+  for (const resultado of resultados) {
+    if (resultado && resultado.ok && resultado.id) {
       try {
-        await api('/documentos/' + encodeURIComponent(x.id) + '/dimensiones', {
+        await api('/documentos/' + encodeURIComponent(resultado.id) + '/dimensiones', {
           method: 'POST',
           body: JSON.stringify(dims),
         });
