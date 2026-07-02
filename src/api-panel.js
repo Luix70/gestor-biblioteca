@@ -449,6 +449,23 @@ export function rutasPanel() {
             const nfc = String(req.query.nfc || '');
             if (nfc === 'con') extras.push({ 'nfc.fecha_vinculacion': { $exists: true } });
             else if (nfc === 'sin') extras.push({ 'nfc.fecha_vinculacion': { $exists: false } });
+            // Filtro por AUTOR/CONTRIBUYENTE (desde la ficha del autor → "ver sus libros en Búsqueda").
+            // Incluye tanto los libros donde figura como autor (`autores`) como donde es traductor,
+            // ilustrador, etc. (`contribuciones.persona`). Va en `extras` (AND) para coexistir con `q`.
+            const autId = String(req.query.autor || '').trim();
+            if (autId && ObjectId.isValid(autId)) {
+                const oid = new ObjectId(autId);
+                extras.push({ $or: [{ autores: oid }, { 'contribuciones.persona': oid }] });
+            }
+            // Filtro por lista EXPLÍCITA de ids (una selección enviada desde la ficha del autor a la
+            // Búsqueda). CSV de ObjectId; se acota a 1000 para no abusar del pipeline. Si el CSV no trae
+            // ningún id válido, fuerza "sin resultados" (id imposible) en vez de ignorar el filtro.
+            const idsCsv = String(req.query.ids || '').trim();
+            if (idsCsv) {
+                const oids = idsCsv.split(',').map(s => s.trim()).filter(s => ObjectId.isValid(s))
+                    .slice(0, 1000).map(s => new ObjectId(s));
+                extras.push({ _id: { $in: oids.length ? oids : [new ObjectId()] } });
+            }
             // NSFW: los invitados no ven material marcado (ni el que cuelga de una obra/colección nsfw).
             const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
             if (nsfwCond) extras.push(...nsfwCond);

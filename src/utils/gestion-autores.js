@@ -103,7 +103,18 @@ export async function fichaAutor(db, id) {
     if (!_id) return null;
     const autor = await db.collection('autores').findOne({ _id }, { projection: PROY_AUTOR });
     if (!autor) return null;
-    const PROY = { titulo: 1, portada: 1, 'año_edicion': 1, cdu: 1, tipo_recurso: 1, nsfw: 1, contribuciones: 1 };
+    // `formatos` → distinguir papel de electrónico; `nfc.fecha_vinculacion` → badge de etiqueta grabada.
+    const PROY = { titulo: 1, portada: 1, 'año_edicion': 1, cdu: 1, tipo_recurso: 1, nsfw: 1, formatos: 1, 'nfc.fecha_vinculacion': 1, contribuciones: 1 };
+
+    // Convierte un doc de biblioteca en el item mínimo de la ficha (con el rol de esta persona en él).
+    //   · papel = tiene el formato 'papel' (libro físico escaneado); si no, es electrónico (epub/pdf/…).
+    //   · nfc   = ya tiene una etiqueta NFC grabada.
+    const aItem = (l, rol) => ({
+        _id: String(l._id), titulo: l.titulo, portada: l.portada, 'año_edicion': l['año_edicion'],
+        cdu: l.cdu, tipo_recurso: l.tipo_recurso, nsfw: l.nsfw,
+        formatos: l.formatos || [], papel: (l.formatos || []).includes('papel'),
+        nfc: !!(l.nfc && l.nfc.fecha_vinculacion), rol,
+    });
 
     // Libros como AUTOR + libros donde figura en CONTRIBUCIONES (traductor/ilustrador/…).
     const [comoAutor, comoContrib] = await Promise.all([
@@ -112,12 +123,12 @@ export async function fichaAutor(db, id) {
     ]);
 
     const porId = new Map();
-    for (const l of comoAutor) porId.set(String(l._id), { _id: String(l._id), titulo: l.titulo, portada: l.portada, 'año_edicion': l['año_edicion'], cdu: l.cdu, tipo_recurso: l.tipo_recurso, nsfw: l.nsfw, rol: 'autor' });
+    for (const l of comoAutor) porId.set(String(l._id), aItem(l, 'autor'));
     for (const l of comoContrib) {
         const k = String(l._id);
-        const rol = (l.contribuciones || []).find((c) => String(c.persona) === String(_id))?.rol || 'contribuyente';
         if (porId.has(k)) continue; // ya está como autor (gana 'autor')
-        porId.set(k, { _id: k, titulo: l.titulo, portada: l.portada, 'año_edicion': l['año_edicion'], cdu: l.cdu, tipo_recurso: l.tipo_recurso, nsfw: l.nsfw, rol });
+        const rol = (l.contribuciones || []).find((c) => String(c.persona) === String(_id))?.rol || 'contribuyente';
+        porId.set(k, aItem(l, rol));
     }
     const libros = [...porId.values()];
     const roles = [...new Set(libros.map((l) => l.rol))]; // roles que desempeña esta persona

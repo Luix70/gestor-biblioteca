@@ -9335,6 +9335,12 @@ function autoresBarraCombinar() {
 }
 
 // Ficha de autor (modal): foto, datos (editables si admin) y sus libros (clic → ficha del libro).
+// Selección ergonómica de libros DENTRO de la ficha del autor: en «modo selección» tocar una tarjeta la
+// marca (en vez de abrir su ficha), para enviar luego esa selección al panel de Búsqueda. Se reinicia en
+// cada apertura de la ficha.
+let _autFichaSel = new Set();
+let _autFichaSelModo = false;
+
 async function autorFicha(id) {
   let r;
   try {
@@ -9346,6 +9352,8 @@ async function autorFicha(id) {
   const a = r.autor || {};
   const libros = r.libros || [];
   const admin = ROL === 'admin';
+  _autFichaSel = new Set(); // selección limpia al (re)abrir la ficha
+  _autFichaSelModo = false;
   const foto = a.foto
     ? `<img src="${esc(encUrl(a.foto))}" style="width:110px;height:110px;object-fit:cover;border-radius:12px;background:var(--card)">`
     : `<div style="width:110px;height:110px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:44px">👤</div>`;
@@ -9368,31 +9376,70 @@ async function autorFicha(id) {
     rol && rol !== 'autor'
       ? `<div style="font-size:9px;color:var(--acc);text-transform:uppercase;letter-spacing:.4px">${esc(rol)}</div>`
       : '';
-  const librosHtml = libros.length
-    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;margin-top:8px">${libros
-        .map(
-          (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="cursor:pointer;text-align:center">
-            ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">📕</div>`}
-            ${rolBadge(l.rol)}
-            <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
-          </div>`,
-        )
-        .join('')}</div>`
-    : '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
+  // Badge de etiqueta NFC (el libro ya tiene una grabada).
+  const nfcBadge = (l) =>
+    l.nfc
+      ? `<span title="Tiene etiqueta NFC" style="position:absolute;top:3px;right:3px;font-size:11px;background:var(--card);border-radius:6px;padding:0 3px">📶</span>`
+      : '';
+  // Tarjeta de un libro: lleva la marca de selección (oculta salvo en modo selección) y el badge NFC.
+  const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
+      <span class="autSelMark" style="display:none;position:absolute;top:3px;left:3px;font-size:12px;background:var(--acc);color:#fff;border-radius:50%;width:18px;height:18px;line-height:18px">✓</span>
+      ${nfcBadge(l)}
+      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">📕</div>`}
+      ${rolBadge(l.rol)}
+      <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
+    </div>`;
+  const gridLibros = (arr) =>
+    `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;margin-top:8px">${arr.map(cardLibro).join('')}</div>`;
+  // Papel primero, luego electrónicos. Con ambos grupos, cada uno con su subtítulo; con uno solo, rejilla directa.
+  const enPapel = libros.filter((l) => l.papel);
+  const electronicos = libros.filter((l) => !l.papel);
+  const subtitulo = (t) => `<div class="muted" style="font-size:11px;margin-top:10px;font-weight:600">${t}</div>`;
+  let librosHtml;
+  if (!libros.length) librosHtml = '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
+  else if (enPapel.length && electronicos.length)
+    librosHtml = `${subtitulo('📖 En papel (' + enPapel.length + ')')}${gridLibros(enPapel)}${subtitulo('💾 Electrónicos (' + electronicos.length + ')')}${gridLibros(electronicos)}`;
+  else librosHtml = gridLibros(libros);
   // Resumen de roles que desempeña esta persona (autor/traductor/…).
   const rolesResumen =
     Array.isArray(r.roles) && r.roles.length
       ? `<div class="muted" style="font-size:11px;margin-top:4px">Roles: ${r.roles.map((x) => esc(x)).join(' · ')}</div>`
       : '';
+  // Botones de la columna de la foto (arriba): admin ve Foto/Autocompletar + Guardar/Cerrar DUPLICADOS aquí
+  // (cómodos sin bajar hasta el pie); el invitado solo Cerrar.
+  const botonesFoto = admin
+    ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+         <button class="btn" id="autFoto">📷 Foto</button>
+         <button class="btn" id="autEnriquecer" title="Rellena foto, biografía, seudónimos y fechas desde OpenLibrary, Wikidata y Wikipedia (sin IA)">✨ Autocompletar (web)</button>
+         <button class="btn pri" id="autGuardarTop">💾 Guardar</button>
+         <button class="btn" id="autCerrarTop">Cerrar</button>
+         <input type="file" id="autFotoFile" accept="image/*" style="display:none">
+       </div>`
+    : `<div style="margin-top:6px"><button class="btn" id="autCerrarTop">Cerrar</button></div>`;
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:660px;max-height:92vh;overflow:auto">
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div style="text-align:center">
         ${foto}
-        ${admin ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px"><button class="btn" id="autFoto">📷 Foto</button><button class="btn" id="autEnriquecer" title="Rellena foto, biografía, seudónimos y fechas desde OpenLibrary, Wikidata y Wikipedia (sin IA)">✨ Autocompletar (web)</button><input type="file" id="autFotoFile" accept="image/*" style="display:none"></div>` : ''}
+        ${botonesFoto}
       </div>
       <div style="flex:1;min-width:250px">${campos}${rolesResumen}</div>
     </div>
-    <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})</div>${librosHtml}</div>
+    <div style="margin-top:12px">
+      <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})</div>
+        ${libros.length ? `<div class="row" style="gap:6px">
+          <button class="btn" id="autSelModo" style="padding:3px 9px;font-size:12px">☑️ Seleccionar</button>
+          <button class="btn" id="autVerBusqueda" style="padding:3px 9px;font-size:12px" title="Ver todos sus libros en el panel de Búsqueda (con filtros, orden y selección)">🔍 Ver en Búsqueda</button>
+        </div>` : ''}
+      </div>
+      <div id="autSelBarra" class="row" style="display:none;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+        <span class="muted" id="autSelCuenta" style="font-size:12px">0 seleccionados</span>
+        <button class="btn" id="autSelTodos" style="padding:2px 8px;font-size:12px">Todos</button>
+        <button class="btn" id="autSelNinguno" style="padding:2px 8px;font-size:12px">Ninguno</button>
+        <button class="btn pri" id="autSelEnviar" style="padding:2px 8px;font-size:12px">🔍 Enviar a Búsqueda</button>
+      </div>
+      ${librosHtml}
+    </div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
       ${admin ? '<button class="btn pri" id="autGuardar">💾 Guardar</button>' : ''}
       <button class="btn" id="autCerrar">Cerrar</button>
@@ -9403,20 +9450,85 @@ async function autorFicha(id) {
   $('#cmpModal').style.display = 'grid';
   $('#cmpScrim').onclick = cerrarCmp;
   $('#autCerrar').onclick = cerrarCmp;
-  $('#cmpModal')
-    .querySelectorAll('[data-libro]')
-    .forEach(
-      (el) =>
-        (el.onclick = () => {
-          cerrarCmp();
-          verDoc(el.dataset.libro, { volver: 'autores', etiqueta: 'Autores' });
-        }),
-    );
+  if ($('#autCerrarTop')) $('#autCerrarTop').onclick = cerrarCmp;
+
+  // ── Selección de libros (modo selección) ──────────────────────────────────────────────
+  const nombreAutor = a.nombre || 'Autor';
+  // Pinta/despinta el marco + la marca ✓ de una tarjeta según esté seleccionada.
+  const pintarSel = (el, on) => {
+    el.style.outline = on ? '2px solid var(--acc)' : '';
+    const marca = el.querySelector('.autSelMark');
+    if (marca) marca.style.display = on ? 'block' : 'none';
+  };
+  const actualizarCuenta = () => {
+    if ($('#autSelCuenta')) $('#autSelCuenta').textContent = _autFichaSel.size + ' seleccionados';
+  };
+  const tarjetas = [...$('#cmpModal').querySelectorAll('[data-libro]')];
+  tarjetas.forEach((el) => {
+    el.onclick = () => {
+      if (_autFichaSelModo) {
+        // En modo selección: tocar marca/desmarca (no abre la ficha → selección cómoda).
+        const lid = el.dataset.libro;
+        if (_autFichaSel.has(lid)) _autFichaSel.delete(lid);
+        else _autFichaSel.add(lid);
+        pintarSel(el, _autFichaSel.has(lid));
+        actualizarCuenta();
+      } else {
+        cerrarCmp();
+        verDoc(el.dataset.libro, { volver: 'autores', etiqueta: 'Autores' });
+      }
+    };
+  });
+  if ($('#autSelModo'))
+    $('#autSelModo').onclick = () => {
+      _autFichaSelModo = !_autFichaSelModo;
+      $('#autSelModo').classList.toggle('pri', _autFichaSelModo);
+      $('#autSelModo').textContent = _autFichaSelModo ? '✓ Seleccionando' : '☑️ Seleccionar';
+      if ($('#autSelBarra')) $('#autSelBarra').style.display = _autFichaSelModo ? 'flex' : 'none';
+      if (!_autFichaSelModo) {
+        // Al salir del modo, limpiar la selección y los marcos.
+        _autFichaSel.clear();
+        tarjetas.forEach((el) => pintarSel(el, false));
+      }
+      actualizarCuenta();
+    };
+  if ($('#autSelTodos'))
+    $('#autSelTodos').onclick = () => {
+      tarjetas.forEach((el) => {
+        _autFichaSel.add(el.dataset.libro);
+        pintarSel(el, true);
+      });
+      actualizarCuenta();
+    };
+  if ($('#autSelNinguno'))
+    $('#autSelNinguno').onclick = () => {
+      _autFichaSel.clear();
+      tarjetas.forEach((el) => pintarSel(el, false));
+      actualizarCuenta();
+    };
+  if ($('#autSelEnviar'))
+    $('#autSelEnviar').onclick = () => {
+      if (!_autFichaSel.size) {
+        toast('Selecciona al menos un libro', 'warn');
+        return;
+      }
+      const ids = [..._autFichaSel];
+      cerrarCmp();
+      irBusquedaFiltro({ ids: ids.join(','), etiqueta: '👤 ' + nombreAutor + ' (' + ids.length + ')' });
+    };
+  // Ver TODOS sus libros en el panel de Búsqueda (selección/filtros/orden ergonómicos allí).
+  if ($('#autVerBusqueda'))
+    $('#autVerBusqueda').onclick = () => {
+      cerrarCmp();
+      irBusquedaFiltro({ autor: id, etiqueta: '👤 ' + nombreAutor });
+    };
+
   if (admin) {
     if ($('#autFoto')) $('#autFoto').onclick = () => $('#autFotoFile').click();
     if ($('#autFotoFile')) $('#autFotoFile').onchange = () => autorSubirFoto(id, $('#autFotoFile'));
     if ($('#autEnriquecer')) $('#autEnriquecer').onclick = () => autorEnriquecer(id);
     if ($('#autGuardar')) $('#autGuardar').onclick = () => autorGuardar(id);
+    if ($('#autGuardarTop')) $('#autGuardarTop').onclick = () => autorGuardar(id);
   }
 }
 
