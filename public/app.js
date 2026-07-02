@@ -5826,10 +5826,17 @@ async function isbnBuscar() {
     portadaId: r.portadas && r.portadas.length ? 'c0' : null,
     dims: null,
   };
-  if (msg)
-    msg.textContent = r.encontrado
-      ? `✔ Encontrado en el Fichero${(meta.fuentes || []).length ? ` (${meta.fuentes.join(', ')})` : ''}.`
-      : '⚠ No está en el Fichero local: revisa/completa los datos a mano.';
+  // Mensaje según el origen (r.fuente): Fichero local, online (fallback OL/Google Books) o nada (rellenar a mano).
+  if (msg) {
+    if (!r.encontrado) {
+      msg.textContent = '⚠ No está ni en el Fichero ni online. Escribe el título (y lo que sepas) a mano y pulsa Crear.';
+    } else if (r.fuente === 'online') {
+      msg.textContent = '✔ Encontrado ONLINE (OpenLibrary / Google Books). Revisa los datos antes de crear.';
+    } else {
+      const detalle = (meta.fuentes || []).length && meta.fuentes[0] !== 'online' ? ` (${meta.fuentes.join(', ')})` : '';
+      msg.textContent = `✔ Encontrado en el Fichero local${detalle}.`;
+    }
+  }
   isbnRender();
 }
 // Miniatura de portada: casilla «incluir» (arriba-izq), ✎ conformar (arriba-der), y clic en la imagen para
