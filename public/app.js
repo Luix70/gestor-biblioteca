@@ -7417,10 +7417,10 @@ async function procesarCola() {
           job.mensajes.push(`📱 ISBN ${isbn} leído en el móvil`);
         }
       }
-      const j = await enviarIngesta(fdDesdeSnap(job.snap, job.files));
-      await guardarDimsResultados(j.resultados, job.dims); // tapete → dimensiones en la ficha
+      const resp = await enviarIngesta(fdDesdeSnap(job.snap, job.files));
+      await guardarDimsResultados(resp.resultados, job.dims); // tapete → dimensiones en la ficha
       job.estado = 'ok';
-      job.resultados = j.resultados || [];
+      job.resultados = resp.resultados || [];
     } catch (e) {
       job.estado = 'error';
       job.msg = e.message;
@@ -7457,17 +7457,17 @@ function filaResultado(r) {
 // Aviso cuando el documento YA estaba en la base (actualización o duplicado): día de alta + ubicación.
 function avisoYaIngresado(r) {
   if (!r || !r.ya_existia) return '';
-  const f = r.fecha_ingreso ? new Date(r.fecha_ingreso) : null;
+  const fecha = r.fecha_ingreso ? new Date(r.fecha_ingreso) : null;
   const dia =
-    f && !isNaN(f)
-      ? f.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    fecha && !isNaN(fecha)
+      ? fecha.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
       : '—';
-  const u = r.ubicacion_existente || r.ubicacion;
-  const ub =
-    u && (u.ambito || u.estanteria)
-      ? [u.ambito, u.estanteria].filter((x) => x && x !== 'Sin asignar').join(' · ') || 'Sin asignar'
+  const ubic = r.ubicacion_existente || r.ubicacion;
+  const ubicTexto =
+    ubic && (ubic.ambito || ubic.estanteria)
+      ? [ubic.ambito, ubic.estanteria].filter((x) => x && x !== 'Sin asignar').join(' · ') || 'Sin asignar'
       : 'Sin asignar';
-  return `<div style="margin-top:5px;padding:6px 9px;border-radius:8px;background:rgba(230,180,0,.14);border:1px solid rgba(230,180,0,.4);font-size:12px">⚠️ <b>Documento ya ingresado</b> el día: ${esc(dia)} · Ubicación: ${esc(ub)}</div>`;
+  return `<div style="margin-top:5px;padding:6px 9px;border-radius:8px;background:rgba(230,180,0,.14);border:1px solid rgba(230,180,0,.4);font-size:12px">⚠️ <b>Documento ya ingresado</b> el día: ${esc(dia)} · Ubicación: ${esc(ubicTexto)}</div>`;
 }
 // Render de la cola (en cola / procesando) + resultados ya hechos (más reciente arriba).
 function pintarCola() {
