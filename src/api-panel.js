@@ -710,7 +710,7 @@ export function rutasPanel() {
             if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc))
                 return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
 
-            const { autores, editorial, contribuciones } = await resolverNombres(db, doc);
+            const { autores, autores_ids, editorial, contribuciones } = await resolverNombres(db, doc);
             const colDoc = doc.coleccion
                 ? await db.collection('colecciones').findOne({ _id: doc.coleccion }, { projection: { nombre: 1, tipo: 1, issn: 1 } })
                 : null;
@@ -737,7 +737,7 @@ export function rutasPanel() {
             if (doc.lcc)   clasificaciones.push({ sistema: 'lcc',   codigo: doc.lcc,   titulo: await tituloCache('lcc', doc.lcc), n: await coll.countDocuments({ lcc: doc.lcc }) });
 
             res.json({
-                ok: true, doc: limpio, autores, editorial, coleccion, contribuciones,
+                ok: true, doc: limpio, autores, autores_ids, editorial, coleccion, contribuciones,
                 coleccion_id: doc.coleccion ? String(doc.coleccion) : null,
                 coleccion_tipo: colDoc?.tipo || null, coleccion_issn: colDoc?.issn || null,
                 cdu_desc: cdesc, clasificaciones, obra,

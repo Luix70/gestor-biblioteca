@@ -1511,13 +1511,19 @@ function pintarDoc(r, ctx) {
     const t = new Date(v);
     return isNaN(t) ? esc(v) : t.toLocaleString('es-ES');
   };
+  // Nombre de persona clicable → ficha del autor (autorFicha), si tenemos su id.
+  const enlaceAutor = (nombre, id) =>
+    id ? `<a class="rowlink" data-autid="${esc(id)}" title="Ver la ficha del autor">${esc(nombre)}</a>` : esc(nombre);
   const especiales = {
-    _autores: r.autores && r.autores.length ? r.autores.map(esc).join(', ') : null,
+    _autores:
+      r.autores && r.autores.length
+        ? r.autores.map((n, i) => enlaceAutor(n, r.autores_ids && r.autores_ids[i])).join(', ')
+        : null,
     _editorial: r.editorial ? esc(r.editorial) : null,
-    // Contribuciones con rol (traductor/ilustrador/…): «rol: Nombre · rol: Nombre».
+    // Contribuciones con rol (traductor/ilustrador/…): «rol: Nombre · rol: Nombre» (nombre drillable).
     _contribuciones:
       r.contribuciones && r.contribuciones.length
-        ? r.contribuciones.map((c) => `${esc(c.rol)}: ${esc(c.nombre)}`).join(' · ')
+        ? r.contribuciones.map((c) => `${esc(c.rol)}: ${enlaceAutor(c.nombre, c.persona)}`).join(' · ')
         : null,
     _coleccion: r.coleccion
       ? (r.coleccion_id
@@ -1723,6 +1729,8 @@ function pintarDoc(r, ctx) {
   }
   $$('#p-detalle [data-colid]').forEach((a) => (a.onclick = () => verColeccion(a.dataset.colid)));
   $$('#p-detalle [data-q]').forEach((a) => (a.onclick = () => buscarTexto(a.dataset.q)));
+  // Autor/contribuyente clicable → abre su ficha (modal) sobre la ficha del libro. (La editorial, en el futuro.)
+  $$('#p-detalle [data-autid]').forEach((a) => (a.onclick = () => autorFicha(a.dataset.autid)));
   carIdx = 0;
   const tr = $('#carTrack');
   if (tr && tr.children.length > 1)

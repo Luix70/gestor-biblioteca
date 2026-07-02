@@ -50,15 +50,16 @@ export async function resolverNombres(db, doc) {
         : [];
     const amap = new Map(personaDocs.map(a => [String(a._id), a.nombre]));
     const autores = autorIds.map(id => amap.get(String(id)) || String(id));
-    // Contribuciones (traductor/ilustrador/…) con el nombre resuelto de cada persona.
+    const autores_ids = autorIds.map(String); // alineado con `autores` (para enlazar a la ficha del autor)
+    // Contribuciones (traductor/ilustrador/…) con el nombre Y el id de persona resueltos (drillables).
     const contribuciones = (doc.contribuciones || [])
         .filter(c => c && c.persona)
-        .map(c => ({ rol: c.rol, nombre: amap.get(String(c.persona)) || String(c.persona) }));
+        .map(c => ({ rol: c.rol, nombre: amap.get(String(c.persona)) || String(c.persona), persona: String(c.persona) }));
 
     let editorial = null;
     if (doc.editorial) {
         const e = await db.collection('editoriales').findOne({ _id: doc.editorial }, { projection: { nombre: 1 } });
         editorial = e ? e.nombre : null;
     }
-    return { autores, editorial, contribuciones };
+    return { autores, autores_ids, editorial, contribuciones };
 }

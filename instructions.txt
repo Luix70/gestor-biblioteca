@@ -266,8 +266,9 @@ de ficheros clasificado por CDU.
       que NO tienes, con enlaces para conseguirlos (Anna's/Z-Lib/Libgen/Gutenberg).
 
   ── FICHA DE UN DOCUMENTO ────────────────────────────────────────────────────
-    Datos catalográficos; identificadores (ISBN/ISSN) "clicables" (buscan todo lo
-    que comparte ese identificador); "otras ediciones" (ISBN alternativos con rol);
+    Datos catalográficos; AUTOR y contribuyentes (traductor/ilustrador/…) "clicables"
+    (abren la ficha del autor); identificadores (ISBN/ISSN) "clicables" (buscan todo
+    lo que comparte ese identificador); "otras ediciones" (ISBN alternativos con rol);
     SINOPSIS; CDU y demás clasificaciones con su título + ⓘ (texto largo) + nº de
     documentos que comparten el código (clic = búsqueda filtrada); chip 📍 con la
     UBICACIÓN (clic = ver los libros de esa estantería). Acciones (admin):
