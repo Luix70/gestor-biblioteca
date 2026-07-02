@@ -10,12 +10,17 @@ import { aMARCXML } from '../marc21.js';
  * @param doc            documento de MongoDB (autores/editorial como ObjectId)
  * @param autores        array de nombres ya resueltos
  * @param editorial      nombre de la editorial ya resuelto (o null)
+ * @param contribuciones array [{nombre, rol}] ya resueltos (traductor/ilustrador/…)
  */
-export function aRegistroLegible(doc, { autores = [], editorial = null } = {}) {
+export function aRegistroLegible(doc, { autores = [], editorial = null, contribuciones = [] } = {}) {
     const legible = { ...doc };
     legible._id = String(doc._id);
     legible.autores = autores;
     if (editorial) legible.editorial = editorial; else delete legible.editorial;
+    // Contribuciones por NOMBRE (no ObjectId). Fuera el campo de trabajo y el crudo con persona-ObjectId.
+    delete legible.contribuciones_nombres;
+    if (Array.isArray(contribuciones) && contribuciones.length) legible.contribuciones = contribuciones;
+    else delete legible.contribuciones;
     // La colección se muestra por su nombre denormalizado (coleccion_nombre); fuera el ObjectId.
     delete legible.coleccion;
     // Campos internos que no van al sidecar.

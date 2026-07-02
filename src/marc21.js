@@ -1,6 +1,8 @@
 // Generación de registros MARC 21 (serialización MARCXML del esquema MARC21/slim de la LoC)
 // a partir del documento bibliográfico interno. Mapea nuestros campos a los campos MARC estándar.
 
+import { REL_MARC } from './utils/contribuciones.js';
+
 const LANG3 = { es: 'spa', en: 'eng', fr: 'fre', de: 'ger', it: 'ita', pt: 'por', ca: 'cat', gl: 'glg', eu: 'baq', la: 'lat', ru: 'rus', nl: 'dut' };
 const lang3 = (c) => LANG3[String(c || '').toLowerCase()] || 'und';
 
@@ -72,7 +74,14 @@ export function aMARCXML(doc) {
         datafield('490', '0', ' ', [['a', typeof doc.coleccion_nombre === 'string' ? doc.coleccion_nombre : null], ['v', doc.coleccion_numero]]), // mención de serie/colección
         datafield('520', ' ', ' ', [['a', doc.sinopsis]]),                   // sinopsis/resumen
         ...(Array.isArray(doc.palabras_clave) ? doc.palabras_clave.map(k => datafield('653', ' ', ' ', [['a', k]])) : []), // materias libres
-        ...autores.slice(1).map(a => datafield('700', '1', ' ', [['a', a]])), // coautores
+        ...autores.slice(1).map(a => datafield('700', '1', ' ', [['a', a], ['e', 'autor']])), // coautores (relator aut)
+        // Contribuciones con ROL → 700 con relator $e (traductor→trl, ilustrador→ill, prologuista→aui,
+        // anotador→ann, editor→edt, compilador→com). contribuciones = [{nombre, rol}] (nombres resueltos).
+        ...(Array.isArray(doc.contribuciones)
+            ? doc.contribuciones
+                .filter(c => c && typeof c.nombre === 'string')
+                .map(c => datafield('700', '1', ' ', [['a', c.nombre], ['e', c.rol || null], ['4', REL_MARC[c.rol] || null]]))
+            : []),
         datafield('856', '4', ' ', [['u', enlace]]),                         // recurso electrónico
     ].filter(Boolean);
 

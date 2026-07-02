@@ -333,6 +333,11 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         _id: String(resultado._id), operacion: resultado.operacion,
     };
     delete documentoLegible._portadas_remotas;
+    // Contribuciones por NOMBRE para el sidecar/MARC (aquí ya vienen como [{nombre,rol}]; el ObjectId lo
+    // resolvió procesarCatalogo sobre su copia). Fuera el campo de trabajo.
+    if (Array.isArray(documento.contribuciones_nombres) && documento.contribuciones_nombres.length)
+        documentoLegible.contribuciones = documento.contribuciones_nombres;
+    delete documentoLegible.contribuciones_nombres;
 
     // 5. Guardar, junto a los archivos, el registro en JSON y en MARC 21 (MARCXML).
     try {
@@ -464,6 +469,9 @@ export async function altaPorISBN({ base = {}, activos = [], contexto = {}, comp
     try {
         const snap = { ...documento, ...campos, isbn: resultado.isbn, cdu: resultado.cdu, _id: String(resultado._id) };
         delete snap._portadas_remotas;
+        if (Array.isArray(documento.contribuciones_nombres) && documento.contribuciones_nombres.length)
+            snap.contribuciones = documento.contribuciones_nombres;
+        delete snap.contribuciones_nombres;
         await fs.writeFile(path.join(carpetaFs, 'registro.json'), JSON.stringify(snap, null, 2), 'utf8');
         await fs.writeFile(path.join(carpetaFs, 'registro.marc.xml'), aMARCXML(snap), 'utf8');
     } catch (e) { console.warn(`[AltaISBN] Sidecars no escritos: ${e.message}`); }

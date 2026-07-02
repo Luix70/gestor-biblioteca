@@ -80,8 +80,8 @@ async function reHome(db, doc) {
     await col.updateOne({ _id: doc._id }, { $set: set });
     try {
         const docF = { ...doc, ...set };
-        const { autores, editorial } = await resolverNombres(db, docF);
-        await escribirSidecars(destAbs, aRegistroLegible(docF, { autores, editorial }));
+        const { autores, editorial, contribuciones } = await resolverNombres(db, docF);
+        await escribirSidecars(destAbs, aRegistroLegible(docF, { autores, editorial, contribuciones }));
     } catch { /* sidecars best-effort */ }
     return true;
 }

@@ -515,8 +515,8 @@ export const TAREAS = [
             // incluida la ruta_base nueva si re-clasificar-cdu movió la carpeta.
             const carpeta = carpetaDeDoc(doc);
             if (!await carpetaExiste(carpeta)) return null;
-            const { autores, editorial } = await resolverNombres(db, doc);
-            const legible = aRegistroLegible(doc, { autores, editorial });
+            const { autores, editorial, contribuciones } = await resolverNombres(db, doc);
+            const legible = aRegistroLegible(doc, { autores, editorial, contribuciones });
             try { await escribirSidecars(carpeta, legible); } catch { /* best-effort */ }
             return null; // no cambia la BD; solo sincroniza los sidecars en disco
         },
