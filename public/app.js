@@ -6008,6 +6008,8 @@ async function isbnBuscar() {
         '⚠ No está ni en el Fichero ni online. Escribe el título (y lo que sepas) a mano y pulsa Crear.';
     } else if (r.fuente === 'online') {
       msg.textContent = '✔ Encontrado ONLINE (OpenLibrary / Google Books). Revisa los datos antes de crear.';
+    } else if (r.fuente === 'fichero+online') {
+      msg.textContent = '✔ Encontrado en el Fichero local + huecos rellenados online (sinopsis/colección/CDU/portada).';
     } else {
       const detalle =
         (meta.fuentes || []).length && meta.fuentes[0] !== 'online' ? ` (${meta.fuentes.join(', ')})` : '';

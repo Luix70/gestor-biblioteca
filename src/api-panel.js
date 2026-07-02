@@ -1175,19 +1175,22 @@ export function rutasPanel() {
             let meta = await buscarEnFicheroLocal({ isbns });
             let fuenteMeta = meta && meta.titulo ? 'fichero' : null;
 
-            // 2) FALLBACK ONLINE — si el ISBN NO está en el dump (típico en novedades posteriores a la
-            //    instantánea del Fichero), se consultan las APIs online por ISBN (OpenLibrary + Google Books
-            //    + DNB/BnF), SIN IA (incluirCdu:false y sin imagen). Degradan con alertas si no hay red.
-            //    Así un libro reciente se puede dar de alta con sus datos en lugar de bloquearse en
-            //    «Falta el título». Se normaliza al MISMO shape que devuelve el Fichero local para que el
-            //    formulario del panel lo consuma sin distinción.
-            if (!meta || !meta.titulo) {
-                const online = await buscarMetadatosExternos(null, null, null, {
+            // 2) ONLINE — se consulta si (a) el ISBN NO está en el dump (novedad posterior a la
+            //    instantánea del Fichero) O (b) SÍ está pero le faltan huecos que el Fichero no
+            //    capturó para esa edición concreta (sinopsis/colección/CDU/portada: frecuente en
+            //    reimpresiones de bolsillo antiguas — el volcado BNE/OL rara vez tiene esos campos
+            //    aunque el libro sea de hace años). Un Fichero-hit NUNCA se pisa: solo se RELLENA lo
+            //    vacío (conservador), igual que hace el resto del pipeline (`primerValido`).
+            const faltaHueco = !meta || !meta.titulo
+                || !meta.sinopsis || !meta.coleccion_nombre || !meta.cdu || !meta.portada_url;
+            if (faltaHueco) {
+                const online = await buscarMetadatosExternos(meta?.titulo || null, (meta?.autores || [])[0] || null, null, {
                     isbnsArchivo: isbns,
                     incluirSinopsis: true,
-                    incluirCdu: false,
+                    incluirCdu: !(meta && meta.cdu),
                 }).catch(() => null);
-                if (online && online.titulo) {
+                if (online && online.titulo && (!meta || !meta.titulo)) {
+                    // El Fichero no tenía NADA → el online pasa a ser la base completa.
                     const portadaOnline = online.portadas_remotas?.find((p) => p && p.url)?.url || null;
                     meta = {
                         isbn: online.isbn || isbn13 || limpio,
@@ -1209,6 +1212,17 @@ export function rutasPanel() {
                         fuentes: ['online'],
                     };
                     fuenteMeta = 'online';
+                } else if (online && meta && meta.titulo) {
+                    // El Fichero SÍ tenía título: el online solo RELLENA lo que faltaba, sin pisar nada.
+                    if (!meta.sinopsis && online.sinopsis) { meta.sinopsis = online.sinopsis; fuenteMeta = 'fichero+online'; }
+                    if (!meta.coleccion_nombre && online.coleccion_nombre) { meta.coleccion_nombre = online.coleccion_nombre; fuenteMeta = 'fichero+online'; }
+                    if (!meta.cdu && online.cdu) { meta.cdu = online.cdu; fuenteMeta = 'fichero+online'; }
+                    if (!meta.dewey && online.dewey) meta.dewey = online.dewey;
+                    if (!meta.lcc && online.lcc) meta.lcc = online.lcc;
+                    if (!meta.portada_url) {
+                        const portadaOnline = online.portadas_remotas?.find((p) => p && p.url)?.url || null;
+                        if (portadaOnline) { meta.portada_url = portadaOnline; fuenteMeta = 'fichero+online'; }
+                    }
                 }
             }
 
