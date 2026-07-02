@@ -5788,13 +5788,85 @@ function wireInbox() {
     };
   // Ingreso por ISBN: Buscar (botón) o Enter en el campo (los lectores de código de barras envían Enter).
   if ($('#isbnGo')) $('#isbnGo').onclick = isbnBuscar;
-  if ($('#isbnIn'))
+  if ($('#isbnIn')) {
     $('#isbnIn').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
         isbnBuscar();
       }
     });
+    // Escribir/escanear un ISBN nuevo invalida el auto-alta del anterior: se cancela hasta que lleguen datos.
+    $('#isbnIn').addEventListener('input', isbnAutoCancelar);
+  }
+  // Botón ✕: limpia el ISBN y devuelve el foco (para encadenar escaneos sin tocar el ratón).
+  if ($('#isbnClear'))
+    $('#isbnClear').onclick = () => {
+      isbnAutoCancelar();
+      const inp = $('#isbnIn');
+      if (inp) {
+        inp.value = '';
+        inp.focus();
+      }
+    };
+  // Auto-alta (switch + slider 1–10 s), persistidos en localStorage.
+  const auto = $('#isbnAuto'),
+    seg = $('#isbnAutoSeg'),
+    segVal = $('#isbnAutoSegVal');
+  if (auto) {
+    auto.checked = localStorage.getItem('isbn_auto') === '1';
+    auto.onchange = () => {
+      localStorage.setItem('isbn_auto', auto.checked ? '1' : '0');
+      auto.checked ? isbnAutoReset() : isbnAutoCancelar();
+    };
+  }
+  if (seg) {
+    seg.value = localStorage.getItem('isbn_auto_seg') || '5';
+    if (segVal) segVal.textContent = seg.value;
+    seg.oninput = () => {
+      if (segVal) segVal.textContent = seg.value;
+      localStorage.setItem('isbn_auto_seg', seg.value);
+      if (_isbnAutoTimer) isbnAutoReset(); // recuenta con el nuevo intervalo si ya estaba corriendo
+    };
+  }
+}
+
+// ── Auto-alta por inactividad (lectura por lotes con escáner) ─────────────────────────────────────────
+// Cuando el switch «Auto-alta» está activo, tras N s SIN interacción (desde que llegan los datos del ISBN)
+// se da de alta el libro con la portada elegida, se limpia el ISBN y se mantiene el foco para el siguiente
+// escaneo. Cualquier interacción (teclear el ISBN, tocar una portada o un botón de la tarjeta) REINICIA la
+// cuenta; así solo salta con inactividad real. Ver isbnCrear(completar, auto).
+let _isbnAutoTimer = null; // intervalo de la cuenta atrás en curso
+function isbnAutoCancelar() {
+  if (_isbnAutoTimer) {
+    clearInterval(_isbnAutoTimer);
+    _isbnAutoTimer = null;
+  }
+  const est = $('#isbnAutoEstado');
+  if (est) est.textContent = '';
+}
+function isbnAutoReset() {
+  isbnAutoCancelar();
+  const auto = $('#isbnAuto');
+  if (!auto || !auto.checked || !_isbnEstado) return; // solo con switch activo y datos ya cargados
+  const seg = Math.min(
+    10,
+    Math.max(1, parseInt(($('#isbnAutoSeg') && $('#isbnAutoSeg').value) || '5', 10) || 5),
+  );
+  let restante = seg * 1000;
+  const est = $('#isbnAutoEstado');
+  const pintar = () => {
+    if (est) est.textContent = `⏳ alta automática en ${Math.ceil(restante / 1000)} s…`;
+  };
+  pintar();
+  _isbnAutoTimer = setInterval(() => {
+    restante -= 250;
+    if (restante > 0) {
+      pintar();
+      return;
+    }
+    isbnAutoCancelar();
+    isbnCrear(false, true); // alta rápida, modo auto (no navega; refresca foco)
+  }, 250);
 }
 // ── INGRESO POR ISBN: valida, recupera del Fichero + candidatas de portada; el usuario valida antes de crear.
 let _isbnEstado = null; // { isbn, meta, portadas:[{url,fuente,ancho,alto,sel}], extra:[{url|base64,previa,tipo,sel,nombre}] }
@@ -5829,11 +5901,13 @@ async function isbnBuscar() {
   // Mensaje según el origen (r.fuente): Fichero local, online (fallback OL/Google Books) o nada (rellenar a mano).
   if (msg) {
     if (!r.encontrado) {
-      msg.textContent = '⚠ No está ni en el Fichero ni online. Escribe el título (y lo que sepas) a mano y pulsa Crear.';
+      msg.textContent =
+        '⚠ No está ni en el Fichero ni online. Escribe el título (y lo que sepas) a mano y pulsa Crear.';
     } else if (r.fuente === 'online') {
       msg.textContent = '✔ Encontrado ONLINE (OpenLibrary / Google Books). Revisa los datos antes de crear.';
     } else {
-      const detalle = (meta.fuentes || []).length && meta.fuentes[0] !== 'online' ? ` (${meta.fuentes.join(', ')})` : '';
+      const detalle =
+        (meta.fuentes || []).length && meta.fuentes[0] !== 'online' ? ` (${meta.fuentes.join(', ')})` : '';
       msg.textContent = `✔ Encontrado en el Fichero local${detalle}.`;
     }
   }
@@ -5963,10 +6037,14 @@ function isbnRender() {
   $('#isbnCrear').onclick = () => isbnCrear(false);
   $('#isbnCompletar').onclick = () => isbnCrear(true);
   $('#isbnCancel').onclick = () => {
+    isbnAutoCancelar();
     _isbnEstado = null;
     $('#isbnRes').innerHTML = '';
     $('#isbnMsg').textContent = '';
   };
+  // Datos cargados / re-render (elegir portada, incluir imagen, etc.) = interacción → reinicia la cuenta atrás
+  // del auto-alta (solo salta con inactividad real). No hace nada si el switch está apagado.
+  isbnAutoReset();
 }
 function _isbnItem(id) {
   const l = id[0] === 'c' ? _isbnEstado.portadas : _isbnEstado.extra;
@@ -6118,8 +6196,9 @@ async function _isbnAnadirArchivos(inp) {
   }
   isbnRender();
 }
-async function isbnCrear(completar) {
+async function isbnCrear(completar, auto = false) {
   if (!_isbnEstado) return;
+  isbnAutoCancelar(); // el alta en curso detiene cualquier cuenta atrás pendiente
   _isbnNormalizaPortada();
   // Todas las imágenes INCLUIDAS (✓); la marcada como ⭐ portada va como tipo:'portada', el resto 'imagen'.
   const items = [];
@@ -6167,7 +6246,13 @@ async function isbnCrear(completar) {
     toast('📗 Documento creado');
     if (msg) msg.textContent = '';
   }
-  if (r._id) verDoc(r._id, { volver: 'inbox', etiqueta: 'Inbox' });
+  // Modo AUTO (lectura por lotes): NO navegar a la ficha; devolver el foco al ISBN para el siguiente escaneo.
+  // Modo manual: abrir la ficha del documento recién creado, como siempre.
+  if (auto) {
+    if ($('#isbnIn')) $('#isbnIn').focus();
+  } else if (r._id) {
+    verDoc(r._id, { volver: 'inbox', etiqueta: 'Inbox' });
+  }
 }
 // Autocompletado del campo Colección con las colecciones existentes.
 async function cargarDatalistColecciones() {

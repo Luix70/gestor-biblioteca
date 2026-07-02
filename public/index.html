@@ -371,14 +371,46 @@
                 </h3>
               </summary>
               <div class="row" style="align-items: center; gap: 8px; margin-top: 4px">
-                <input
-                  id="isbnIn"
-                  placeholder="Escanea o escribe un ISBN y pulsa Enter"
-                  autocomplete="off"
-                  inputmode="numeric"
-                  style="flex: 1"
-                />
+                <div style="flex: 1; position: relative; display: flex; align-items: center">
+                  <input
+                    id="isbnIn"
+                    placeholder="Escanea o escribe un ISBN y pulsa Enter"
+                    autocomplete="off"
+                    inputmode="numeric"
+                    style="flex: 1; padding-right: 30px"
+                  />
+                  <button
+                    id="isbnClear"
+                    type="button"
+                    title="Limpiar el ISBN"
+                    style="
+                      position: absolute;
+                      right: 6px;
+                      background: none;
+                      border: none;
+                      color: var(--mut);
+                      cursor: pointer;
+                      font-size: 16px;
+                      line-height: 1;
+                    "
+                  >
+                    ✕
+                  </button>
+                </div>
                 <button class="btn pri" id="isbnGo" type="button">🔍 Buscar</button>
+              </div>
+              <!-- Auto-alta: tras N s de inactividad (desde que llegan los datos), da de alta con la portada
+                   elegida, limpia el ISBN y mantiene el foco para el siguiente escaneo (lectura por lotes con
+                   escáner Bluetooth: escanea → espera → se cataloga solo → escanea el siguiente). -->
+              <div class="row" style="align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap">
+                <label class="switch" title="Alta automática tras unos segundos de inactividad">
+                  <input type="checkbox" id="isbnAuto" />
+                  <span class="slider"></span>
+                </label>
+                <span class="muted" style="font-size: 12px">Auto-alta</span>
+                <input type="range" id="isbnAutoSeg" min="1" max="10" value="5" style="width: 110px" />
+                <span class="muted" style="font-size: 12px"><b id="isbnAutoSegVal">5</b> s</span>
+                <span id="isbnAutoEstado" class="muted" style="font-size: 12px; margin-left: auto"></span>
               </div>
               <div id="isbnMsg" class="muted" style="font-size: 12px; margin-top: 8px"></div>
               <div id="isbnRes" style="margin-top: 10px"></div>
