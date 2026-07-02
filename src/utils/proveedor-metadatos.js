@@ -138,6 +138,16 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         if (infoLocal.paginas) datosExtra.paginas_bne = infoLocal.paginas;       // canales que captura
         if (infoLocal.dimensiones) datosExtra.dimensiones_bne = infoLocal.dimensiones; // motor-enriquecimiento
         if (infoLocal.portada_url) datosExtra.portadas_remotas.push({ origen: 'fichero_local', url: infoLocal.portada_url });
+        // ROLES desde la MENCIÓN de la BNE: el volcado guarda la mención de responsabilidad en `autores`
+        // con la marca «/**​/» entre contribuyentes (autor /**​/ traductor /**​/ ilustrador…). Se parsea aquí
+        // (mejor cobertura para catálogo español que el `by_statement` de OpenLibrary). Best-effort.
+        if (Array.isArray(infoLocal.autores) && infoLocal.autores.length) {
+            const contribs = extraerContribuciones(infoLocal.autores.join(' /**/ '), { autoresConocidos: infoLocal.autores });
+            if (contribs.length) {
+                datosExtra.contribuciones_nombres = contribs;
+                datosExtra.alertas.push(`Roles de la mención de la BNE (Fichero): ${contribs.length}.`);
+            }
+        }
         datosExtra.alertas.push(`Datos del Fichero local (${infoLocal.fuentes.join('+')}).`);
     }
     const localHit = !!(infoLocal && infoLocal.titulo);

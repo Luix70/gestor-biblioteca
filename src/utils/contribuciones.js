@@ -13,11 +13,13 @@
 // proyecto para clases de caracteres frágiles).
 const RE_MARCA_BNE = new RegExp('\\/\\*+\\/?', 'g');
 
-// Cada rol con las palabras clave que lo delatan en la mención (minúsculas, sin acento se normaliza antes).
+// Cada rol con las palabras clave que lo delatan en la mención (minúsculas; el acento se normaliza antes).
+// Incluye abreviaturas habituales de la BNE (trad., ilustr., pról., introd., pref.), que suelen ir con el
+// conector «de» → el nombre se extrae igual.
 const REGLAS_ROL = [
-    { rol: 'traductor', re: /traduc|translat|ubersetz|traduction/ },
-    { rol: 'ilustrador', re: /ilustrac|ilustrad|dibujos|grabados|illustrat|laminas/ },
-    { rol: 'prologuista', re: /prologo|prologad|introduccion|introduction|preface|prefacio|estudio preliminar|vorwort/ },
+    { rol: 'traductor', re: /traduc|\btrad\b|translat|ubersetz|traduction/ },
+    { rol: 'ilustrador', re: /ilustrac|ilustrad|\bilustr|dibujos|grabados|illustrat|laminas/ },
+    { rol: 'prologuista', re: /prologo|prologad|\bprol|introduccion|\bintrod|introduction|preface|prefacio|\bpref|estudio preliminar|vorwort/ },
     { rol: 'anotador', re: /\bnotas\b|anotad|\bnotes\b|comentari|annotat/ },
     { rol: 'editor', re: /edicion de|edited by|\beditor|a cura|herausg|edicion literaria|edicion a cargo/ },
     { rol: 'compilador', re: /compilac|compilad|compiled|seleccion|antolog|recopilac/ },
