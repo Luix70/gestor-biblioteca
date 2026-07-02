@@ -7,6 +7,7 @@
 import { ObjectId } from 'mongodb';
 import { validarISBN, validarISSN } from './identificadores.js';
 import { indexarDoc } from './indice-busqueda.js';
+import { reubicarPorCdu } from '../mantenimiento/util-mantenimiento.js';
 
 const TEXTO = ['subtitulo', 'idioma', 'numero_edicion', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'obra_titulo'];
 const NUM = ['año_edicion', 'paginas', 'volumen_numero'];
@@ -30,6 +31,8 @@ export async function editarDocumento(db, id, campos = {}) {
     if (!ObjectId.isValid(id)) return { ok: false, motivo: 'id inválido' };
     const set = {}, unset = {};
     const avisos = [];
+    // Documento actual: solo se necesita si cambia la CDU a mano (para reubicar su carpeta desde la ruta vieja).
+    const docActual = ('cdu' in campos) ? await db.collection('biblioteca').findOne({ _id: new ObjectId(id) }) : null;
 
     // Título: requerido por el esquema → solo se actualiza si viene NO vacío (nunca se borra).
     if ('titulo' in campos && String(campos.titulo).trim()) set.titulo = String(campos.titulo).trim();
@@ -104,6 +107,21 @@ export async function editarDocumento(db, id, campos = {}) {
     // Corregir un tipo mal detectado (revista↔libro). No re-aloja el fichero por sí solo: el Conformador/
     // reprocesar re-archiva en revistas/ o libros/ según corresponda; aquí solo se fija el campo.
     if ('tipo_recurso' in campos && ['libro', 'revista'].includes(campos.tipo_recurso)) set.tipo_recurso = campos.tipo_recurso;
+
+    // CDU cambiada A MANO: la clasificación manual manda → mover la carpeta a su árbol nuevo al instante y
+    // proteger el valor (cdu_manual) para que el Conformador (re-clasificar-cdu) no lo recalcule ni lo pise.
+    if (set.cdu && docActual && set.cdu !== docActual.cdu) {
+        try {
+            const reub = await reubicarPorCdu(docActual, set.cdu);
+            if (reub) {
+                Object.assign(set, reub.set);   // cdu + ruta_base + portada + imagenes remapeadas
+                (reub.alertas || []).forEach(a => avisos.push(a));
+            }
+        } catch (e) {
+            avisos.push(`No se pudo reubicar la carpeta por la nueva CDU: ${e.message}`);
+        }
+        set.cdu_manual = true;
+    }
 
     if (!Object.keys(set).length && !Object.keys(unset).length) return { ok: true, sinCambios: true, avisos };
     set.fecha_actualizacion = new Date();

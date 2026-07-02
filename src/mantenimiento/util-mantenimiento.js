@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { rutaCatalogo } from '../utils/rutas.js';
+import { arbolCDU } from '../utils/cdu-arbol.js';
 import { aMARCXML } from '../marc21.js';
 
 const execFileP = promisify(execFile);
@@ -213,6 +214,58 @@ const union = (a, b, clave) => {
     for (const x of (b || [])) if (!out.some(y => (clave ? y[clave] === x[clave] : y === x))) out.push(x);
     return out;
 };
+
+/**
+ * Reubica FÍSICAMENTE la carpeta de un documento al árbol de una CDU DADA (no la recalcula) y devuelve los
+ * campos a actualizar en Mongo. Es la misma cirugía de ruta que la tarea `re-clasificar-cdu`, extraída para
+ * poder reutilizarla cuando el usuario cambia la CDU A MANO en la ficha (su valor manda).
+ *   · nuevaCdu vacía o igual a la actual → null (nada que hacer).
+ *   · tomo de obra (doc.obra) → solo BD (su ruta va por <cdu>/obras/… y esta cirugía no la contempla).
+ *   · sin carpeta en disco, o el destino ya existe (colisión) → actualiza solo la BD, sin mover, con aviso.
+ * Devuelve { set:{ cdu, ruta_base, portada?, imagenes? }, alertas:[...] } o null.
+ */
+export async function reubicarPorCdu(doc, nuevaCdu) {
+    const destinoCdu = String(nuevaCdu || '').trim();
+    if (!destinoCdu || destinoCdu === doc.cdu) return null;
+    if (doc.obra) {
+        return { set: { cdu: destinoCdu }, alertas: ['CDU actualizada en BD; es tomo de obra: no se reubica la carpeta.'] };
+    }
+
+    const carpetaVieja = carpetaDeDoc(doc);
+    const existeVieja = await carpetaExiste(carpetaVieja);
+
+    // La ruta nueva sustituye SOLO la parte CDU (lo anterior a libros/revistas) por el árbol nuevo
+    // <clase>/<division>/<cdu>, conservando tipo + resto (isbn/discriminador, o issn/año-mes en revistas).
+    const rutaBaseVieja = webDeDoc(doc);
+    const segsViejos = rutaBaseVieja.replace(/^\/recursos\//, '').split('/');
+    const iTipo = segsViejos.findIndex(s => s === 'libros' || s === 'revistas');
+    const resto = iTipo >= 0 ? segsViejos.slice(iTipo) : segsViejos.slice(-2);
+    const segsNuevos = [...arbolCDU(destinoCdu).segmentos, ...resto];
+    const rutaBaseNueva = '/recursos/' + segsNuevos.join('/');
+    const carpetaNueva = path.join(DIR_CDU, ...segsNuevos);
+
+    // Recalcular las rutas internas (portada/imágenes) que llevaban el prefijo viejo.
+    const remap = (p) => (p && p.startsWith(rutaBaseVieja) ? rutaBaseNueva + p.slice(rutaBaseVieja.length) : p);
+    const set = { cdu: destinoCdu, ruta_base: rutaBaseNueva };
+    if (doc.portada) set.portada = remap(doc.portada);
+    if (doc.imagenes?.length) set.imagenes = doc.imagenes.map(im => ({ ...im, ruta: remap(im.ruta) }));
+
+    // Sin carpeta en disco (p.ej. API fuera del NAS) o mismo destino → solo BD.
+    if (!existeVieja || carpetaNueva === carpetaVieja) {
+        return { set, alertas: [`CDU → "${destinoCdu}" (solo BD${existeVieja ? '' : '; sin carpeta en disco'}).`] };
+    }
+    // Colisión: el destino ya existe (otro registro con el mismo CDU+ISBN) → no pisar; solo BD.
+    if (await carpetaExiste(carpetaNueva)) {
+        return { set, alertas: [`CDU → "${destinoCdu}"; la carpeta destino ya existía — ficheros NO movidos.`] };
+    }
+
+    const archivosEnBD = [
+        doc.portada ? path.basename(doc.portada) : null,
+        ...(doc.imagenes || []).map(im => path.basename(im.ruta)),
+    ].filter(Boolean);
+    await moverCarpetaConVerificacion(carpetaVieja, carpetaNueva, archivosEnBD);
+    return { set, alertas: [`CDU → "${destinoCdu}"; ficheros movidos a "${segsNuevos.join('/')}".`] };
+}
 
 /**
  * Aplica un 'cambio' producido por una tarea: actualiza MongoDB y mantiene el registro.json/

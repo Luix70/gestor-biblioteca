@@ -214,7 +214,8 @@ export const TAREAS = [
         descripcion: 'Re-clasifica la CDU con el pipeline Fichero→DNB→caché→IA y mueve los ficheros al nuevo árbol si cambió.',
         // Los tomos de una obra multivolumen NO se re-clasifican por separado: comparten la CDU de
         // la obra (un solo classmark). Su ruta va por <cdu>/obras/… y este movimiento no la entiende.
-        aplica: (doc) => !doc.obra,
+        // `cdu_manual`: el usuario fijó la CDU a mano en la ficha → es autoritativa, no se recalcula ni se pisa.
+        aplica: (doc) => !doc.obra && !doc.cdu_manual,
 
         async ejecutar(doc, { db }) {
             const isbn = doc.isbn || null;
