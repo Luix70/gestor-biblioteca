@@ -31,8 +31,22 @@ export async function buscarUnISBN(rawIsbn) {
     const isbn10 = limpio.length === 10 ? limpio : isbn13a10(limpio);
     const isbns = [isbn13, isbn10, limpio].filter(Boolean);
 
+    // PROCEDENCIA por campo — para colorear cada dato en el panel según cuánto fiarse de él:
+    //   'fichero' = autoridad (volcado OL+BNE local) → negro    · 'online' = APIs gratuitas (OL/Google
+    //   Books/DNB/BnF) → azul    · 'ia' = derivado por IA (solo la CDU cuando no hay Dewey/LCC) → rojo.
+    // Un campo escrito/corregido a mano en el panel pasa a 'manual' (lo marca el cliente). Se anota la
+    // procedencia SOLO de campos con valor (no se pisa una ya anotada: gana la fuente más autoritativa,
+    // que siempre se consulta antes).
+    const procedencia = {};
+    const CAMPOS = ['titulo', 'subtitulo', 'autores', 'editorial', 'año_edicion', 'idioma', 'cdu', 'dewey', 'lcc', 'sinopsis', 'coleccion_nombre', 'categorias'];
+    const tieneValor = (v) => !(v == null || v === '' || (Array.isArray(v) && !v.length));
+    const marcar = (obj, origen, campos = CAMPOS) => {
+        for (const c of campos) if (tieneValor(obj[c]) && !procedencia[c]) procedencia[c] = origen;
+    };
+
     let meta = await buscarEnFicheroLocal({ isbns });
     let fuenteMeta = meta && meta.titulo ? 'fichero' : null;
+    if (meta) marcar(meta, 'fichero'); // lo que traiga el Fichero es autoritativo
 
     const faltaHueco = !meta || !meta.titulo
         || !meta.sinopsis || !meta.coleccion_nombre || !meta.cdu || !meta.portada_url;
@@ -42,6 +56,9 @@ export async function buscarUnISBN(rawIsbn) {
             incluirSinopsis: true,
             incluirCdu: !(meta && meta.cdu),
         }).catch(() => null);
+        // La CDU es lo único que puede venir de IA en este camino (sin imagen no hay visión): 'ia' si
+        // resolverCDU la dedujo por IA; 'online' si salió de una equivalencia en caché/API o de la BnF.
+        const cduOrigen = online && String(online.cdu_fuente || '').startsWith('ia') ? 'ia' : 'online';
         if (online && online.titulo && (!meta || !meta.titulo)) {
             // El Fichero no tenía NADA → el online pasa a ser la base completa.
             const portadaOnline = online.portadas_remotas?.find((p) => p && p.url)?.url || null;
@@ -65,13 +82,15 @@ export async function buscarUnISBN(rawIsbn) {
                 fuentes: ['online'],
             };
             fuenteMeta = 'online';
+            marcar(meta, 'online');                     // todo lo demás es de APIs gratuitas
+            if (tieneValor(meta.cdu)) procedencia.cdu = cduOrigen; // salvo la CDU, que puede ser IA
         } else if (online && meta && meta.titulo) {
             // El Fichero SÍ tenía título: el online solo RELLENA lo que faltaba, sin pisar nada.
-            if (!meta.sinopsis && online.sinopsis) { meta.sinopsis = online.sinopsis; fuenteMeta = 'fichero+online'; }
-            if (!meta.coleccion_nombre && online.coleccion_nombre) { meta.coleccion_nombre = online.coleccion_nombre; fuenteMeta = 'fichero+online'; }
-            if (!meta.cdu && online.cdu) { meta.cdu = online.cdu; fuenteMeta = 'fichero+online'; }
-            if (!meta.dewey && online.dewey) meta.dewey = online.dewey;
-            if (!meta.lcc && online.lcc) meta.lcc = online.lcc;
+            if (!meta.sinopsis && online.sinopsis) { meta.sinopsis = online.sinopsis; procedencia.sinopsis = 'online'; fuenteMeta = 'fichero+online'; }
+            if (!meta.coleccion_nombre && online.coleccion_nombre) { meta.coleccion_nombre = online.coleccion_nombre; procedencia.coleccion_nombre = 'online'; fuenteMeta = 'fichero+online'; }
+            if (!meta.cdu && online.cdu) { meta.cdu = online.cdu; procedencia.cdu = cduOrigen; fuenteMeta = 'fichero+online'; }
+            if (!meta.dewey && online.dewey) { meta.dewey = online.dewey; procedencia.dewey = 'online'; }
+            if (!meta.lcc && online.lcc) { meta.lcc = online.lcc; procedencia.lcc = 'online'; }
             if (!meta.portada_url) {
                 const portadaOnline = online.portadas_remotas?.find((p) => p && p.url)?.url || null;
                 if (portadaOnline) { meta.portada_url = portadaOnline; fuenteMeta = 'fichero+online'; }
@@ -90,6 +109,7 @@ export async function buscarUnISBN(rawIsbn) {
         encontrado: !!(meta && meta.titulo),
         fuente: fuenteMeta,
         meta: meta || null,
+        procedencia,   // { campo: 'fichero'|'online'|'ia' } — el cliente lo usa para colorear
         portadas,
         cdu_desc,
     };

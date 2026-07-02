@@ -5893,15 +5893,7 @@ function wireInbox() {
     $('#isbnIn').addEventListener('input', isbnAutoCancelar);
   }
   // Botón ✕: limpia el ISBN y devuelve el foco (para encadenar escaneos sin tocar el ratón).
-  if ($('#isbnClear'))
-    $('#isbnClear').onclick = () => {
-      isbnAutoCancelar();
-      const inp = $('#isbnIn');
-      if (inp) {
-        inp.value = '';
-        inp.focus();
-      }
-    };
+  if ($('#isbnClear')) $('#isbnClear').onclick = isbnLimpiarEntrada;
   // Auto-alta (switch + slider 1–10 s), persistidos en localStorage.
   const auto = $('#isbnAuto'),
     seg = $('#isbnAutoSeg'),
@@ -5931,13 +5923,20 @@ function wireInbox() {
 // escaneo. Cualquier interacción (teclear el ISBN, tocar una portada o un botón de la tarjeta) REINICIA la
 // cuenta; así solo salta con inactividad real. Ver isbnCrear(completar, auto).
 let _isbnAutoTimer = null; // intervalo de la cuenta atrás en curso
+// El estado de la cuenta atrás se muestra tanto en la tarjeta (#isbnAutoEstado) como dentro del modal de
+// resultados (#isbnAutoEstadoModal, que es el que el usuario está mirando): se actualizan ambos si existen.
+function _isbnAutoEstadoSet(txt) {
+  ['#isbnAutoEstado', '#isbnAutoEstadoModal'].forEach((sel) => {
+    const el = $(sel);
+    if (el) el.textContent = txt;
+  });
+}
 function isbnAutoCancelar() {
   if (_isbnAutoTimer) {
     clearInterval(_isbnAutoTimer);
     _isbnAutoTimer = null;
   }
-  const est = $('#isbnAutoEstado');
-  if (est) est.textContent = '';
+  _isbnAutoEstadoSet('');
 }
 function isbnAutoReset() {
   isbnAutoCancelar();
@@ -5947,8 +5946,7 @@ function isbnAutoReset() {
   // desapercibido (fallo silencioso). Así que NO se auto-crea: se avisa en voz alta y se deja al usuario
   // rellenar a mano o pulsar «Completar y crear» (que tira de APIs/IA).
   if (!_isbnEstado.meta || !String(_isbnEstado.meta.titulo || '').trim()) {
-    const est0 = $('#isbnAutoEstado');
-    if (est0) est0.textContent = '⚠ sin título: no se auto-crea; rellénalo o pulsa «Completar y crear».';
+    _isbnAutoEstadoSet('⚠ sin título: no se auto-crea; rellénalo o pulsa «Completar y crear».');
     toast('Sin datos para este ISBN: escribe el título o usa «Completar y crear»', 'warn');
     return;
   }
@@ -5957,10 +5955,7 @@ function isbnAutoReset() {
     Math.max(1, parseInt(($('#isbnAutoSeg') && $('#isbnAutoSeg').value) || '5', 10) || 5),
   );
   let restante = seg * 1000;
-  const est = $('#isbnAutoEstado');
-  const pintar = () => {
-    if (est) est.textContent = `⏳ alta automática en ${Math.ceil(restante / 1000)} s…`;
-  };
+  const pintar = () => _isbnAutoEstadoSet(`⏳ alta automática en ${Math.ceil(restante / 1000)} s…`);
   pintar();
   _isbnAutoTimer = setInterval(() => {
     restante -= 250;
@@ -5976,31 +5971,48 @@ function isbnAutoReset() {
 let _isbnEstado = null; // { isbn, meta, portadas:[{url,fuente,ancho,alto,sel}], extra:[{url|base64,previa,tipo,sel,nombre}] }
 async function isbnBuscar() {
   const inp = $('#isbnIn'),
-    msg = $('#isbnMsg'),
-    res = $('#isbnRes');
-  const raw = ((inp && inp.value) || '').replace(/[^0-9Xx]/g, '');
+    msg = $('#isbnMsg');
+  const raw = ((inp && inp.value) || '').replace(/[^0-9Xx]/g, '').toUpperCase();
   if (!raw) {
     if (msg) msg.textContent = 'Escribe o escanea un ISBN.';
     return;
   }
+  // Validación de LONGITUD en el cliente (10 o 13): un ISBN mal formado se avisa por Toast y se LIMPIA el
+  // input al momento, para que no colisione con la siguiente lectura del escáner. El dígito de control lo
+  // valida el servidor (y su 400 se trata igual, abajo).
+  if (raw.length !== 10 && raw.length !== 13) {
+    toast('❌ ISBN no válido (debe tener 10 o 13 dígitos): ' + raw, 'bad');
+    isbnLimpiarEntrada();
+    return;
+  }
+  // «Modo modal» del input mientras se busca: se BLOQUEA para que las pulsaciones del escáner (que envía
+  // Enter al final) no se encadenen sobre una búsqueda en curso ni contaminen la siguiente lectura.
+  if (inp) inp.disabled = true;
   if (msg) msg.textContent = 'Buscando…';
-  if (res) res.innerHTML = '';
   let r;
   try {
     r = await api('/isbn/' + encodeURIComponent(raw));
   } catch (e) {
+    // Fallo (ISBN inválido por checksum, red, etc.): NO puede pasar desapercibido → Toast + limpiar input.
+    toast('❌ ' + e.message, 'bad');
     if (msg) msg.textContent = e.message;
+    isbnLimpiarEntrada();
     return;
+  } finally {
+    if (inp) inp.disabled = false;
   }
   const meta = r.meta || {};
   _isbnEstado = {
     isbn: r.isbn,
     meta: { ...meta },
+    procedencia: r.procedencia || {}, // { campo: 'fichero'|'online'|'ia' } — para colorear los datos
     portadas: (r.portadas || []).map((p, i) => ({ ...p, sel: i === 0 })),
     extra: [],
     cduDesc: r.cdu_desc || null,
     portadaId: r.portadas && r.portadas.length ? 'c0' : null,
     dims: null,
+    fuente: r.fuente || null,
+    encontrado: !!r.encontrado,
   };
   // Mensaje según el origen (r.fuente): Fichero local, online (fallback OL/Google Books) o nada (rellenar a mano).
   if (msg) {
@@ -6010,44 +6022,95 @@ async function isbnBuscar() {
     } else if (r.fuente === 'online') {
       msg.textContent = '✔ Encontrado ONLINE (OpenLibrary / Google Books). Revisa los datos antes de crear.';
     } else if (r.fuente === 'fichero+online') {
-      msg.textContent = '✔ Encontrado en el Fichero local + huecos rellenados online (sinopsis/colección/CDU/portada).';
+      msg.textContent = '✔ Encontrado en el Fichero local + huecos rellenados online.';
     } else {
-      const detalle =
-        (meta.fuentes || []).length && meta.fuentes[0] !== 'online' ? ` (${meta.fuentes.join(', ')})` : '';
-      msg.textContent = `✔ Encontrado en el Fichero local${detalle}.`;
+      msg.textContent = '✔ Encontrado en el Fichero local.';
     }
   }
   isbnRender();
+  // Con auto-alta activo (escaneo en cadena con lector Bluetooth): se limpia y RE-ENFOCA el campo ISBN para
+  // poder leer el siguiente mientras corre la cuenta atrás, sin tocar el ratón. Sin auto-alta se deja el foco
+  // libre para editar los datos en el modal.
+  const autoSw = $('#isbnAuto');
+  if (autoSw && autoSw.checked && $('#isbnIn')) {
+    $('#isbnIn').value = '';
+    $('#isbnIn').focus();
+  }
+}
+// Limpia el campo ISBN y le devuelve el foco (para encadenar lecturas del escáner sin tocar el ratón).
+function isbnLimpiarEntrada() {
+  isbnAutoCancelar();
+  const inp = $('#isbnIn');
+  if (inp) {
+    inp.disabled = false;
+    inp.value = '';
+    inp.focus();
+  }
 }
 // Miniatura de portada: casilla «incluir» (arriba-izq), ✎ conformar (arriba-der), y clic en la imagen para
 // marcarla como PORTADA (borde dorado + ⭐). incluida = va al archivo; esPortada = es la cubierta principal.
-function isbnThumb(id, src, cap, incluida, esPortada, hires, editable) {
+// grande=true → tamaño ampliado (para el modal de resultados: se ven mejor las cubiertas encontradas).
+function isbnThumb(id, src, cap, incluida, esPortada, hires, editable, grande = false) {
   const bord = esPortada ? '#ffcf5a' : incluida ? 'var(--acc)' : 'transparent';
-  return `<div style="position:relative;width:100px">
+  const anchoCaja = grande ? 150 : 100;
+  const altoImg = grande ? 210 : 118;
+  return `<div style="position:relative;width:${anchoCaja}px">
     <div data-portada="${id}" title="Pulsa para marcarla como PORTADA" style="cursor:pointer;text-align:center;border:2px solid ${bord};border-radius:8px;padding:3px;background:var(--card)">
-      <img src="${esc(src)}" style="width:100%;height:118px;object-fit:contain;border-radius:5px" loading="lazy">
+      <img src="${esc(src)}" style="width:100%;height:${altoImg}px;object-fit:contain;border-radius:5px" loading="lazy">
       <div class="muted" style="font-size:10px;margin-top:2px;line-height:1.2">${esPortada ? '<span style="color:#ffcf5a;font-weight:700">⭐ PORTADA</span> ' : incluida ? '✓ ' : ''}${hires ? '✔ ' : ''}${esc(cap)}</div>
     </div>
     <label title="Incluir esta imagen al archivar" style="position:absolute;top:5px;left:5px;display:inline-flex;align-items:center;background:rgba(0,0,0,.65);border-radius:6px;padding:2px 4px;cursor:pointer;z-index:2"><input type="checkbox" data-chk="${id}" ${incluida ? 'checked' : ''} style="margin:0;width:15px;height:15px"></label>
     ${editable ? `<button type="button" data-edit="${id}" title="Conformar: recortar / enderezar perspectiva" style="position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.6);color:#fff;cursor:pointer;font-size:13px;line-height:1;padding:0">✎</button>` : ''}
   </div>`;
 }
+// Clase de color según la PROCEDENCIA de un campo (leyenda del modal): Fichero/a mano = neutro (proc-fichero),
+// APIs gratuitas = azul (proc-online), IA = rojo (proc-ia). Sin dato de procedencia se asume autoritativo.
+function isbnProcClase(campo) {
+  const p = _isbnEstado && _isbnEstado.procedencia && _isbnEstado.procedencia[campo];
+  return p === 'online' ? 'proc-online' : p === 'ia' ? 'proc-ia' : 'proc-fichero';
+}
+// Cierra el modal de resultados del ISBN y descarta el estado en curso. Si se estaba editando una fila del
+// lote, ésta se queda tal cual (ni creada ni tocada). No borra el campo ISBN (lo gestiona quien llama).
+function isbnCerrarModal() {
+  isbnAutoCancelar();
+  _isbnEstado = null;
+  _loteEditItem = null;
+  $('#isbnScrim').style.display = 'none';
+  $('#isbnModal').style.display = 'none';
+  $('#isbnModal').innerHTML = '';
+}
+// Elemento donde escribir mensajes/errores del alta: el del MODAL si está abierto (es lo que el usuario mira),
+// si no el de la tarjeta. Así un fallo nunca queda oculto detrás del modal (los fallos «pasaban desapercibidos»).
+function isbnMsgEl() {
+  return $('#isbnModalMsg') || $('#isbnMsg');
+}
 function isbnRender() {
-  const res = $('#isbnRes');
-  if (!res || !_isbnEstado) return;
+  const cont = $('#isbnModal');
+  if (!cont || !_isbnEstado) return;
   const m = _isbnEstado.meta;
   const val = (k) => esc(m[k] != null ? String(m[k]) : '');
   const autoresVal = Array.isArray(m.autores) ? m.autores.join('; ') : m.autores || '';
+  // Campo editable con etiqueta+valor coloreados por procedencia (negro=fichero/mano, azul=APIs, rojo=IA).
+  const campo = (k, etiqueta, notaExtra = '') => {
+    const cls = isbnProcClase(k);
+    return `<div><label class="${cls}">${etiqueta}${notaExtra}</label><input data-mk="${k}" class="${cls}" value="${val(k)}" autocomplete="off"></div>`;
+  };
+  const notaCdu = m.cdu
+    ? ` <span class="muted" style="font-weight:400;font-size:11px">(${_isbnEstado.procedencia?.cdu === 'ia' ? 'IA' : _isbnEstado.procedencia?.cdu === 'online' ? 'online' : 'Fichero'})</span>`
+    : '';
   const datos = `<div class="row">
-      <div><label>Título</label><input data-mk="titulo" value="${val('titulo')}" autocomplete="off"></div>
-      <div><label>Autores (separa con ;)</label><input data-mk="autores" value="${esc(autoresVal)}" autocomplete="off"></div>
-      <div><label>Editorial</label><input data-mk="editorial" value="${val('editorial')}" autocomplete="off"></div>
+      ${campo('titulo', 'Título')}
+      ${campo('autores', 'Autores (separa con ;)')}
+      ${campo('editorial', 'Editorial')}
     </div>
     <div class="row" style="margin-top:8px">
-      <div><label>Año</label><input data-mk="año_edicion" value="${val('año_edicion')}" autocomplete="off"></div>
-      <div><label>Idioma</label><input data-mk="idioma" value="${val('idioma')}" autocomplete="off"></div>
-      <div><label>CDU${m.cdu ? ' <span class="muted" style="font-weight:400;font-size:11px">(del Fichero)</span>' : ''}</label><input data-mk="cdu" value="${val('cdu')}" autocomplete="off">${_isbnEstado.cduDesc && _isbnEstado.cduDesc.titulo_es ? `<div class="muted" style="font-size:11px;margin-top:3px">ⓘ ${esc(_isbnEstado.cduDesc.titulo_es)}</div>` : ''}</div>
+      ${campo('año_edicion', 'Año')}
+      ${campo('idioma', 'Idioma')}
+      <div><label class="${isbnProcClase('cdu')}">CDU${notaCdu}</label><input data-mk="cdu" class="${isbnProcClase('cdu')}" value="${val('cdu')}" autocomplete="off">${_isbnEstado.cduDesc && _isbnEstado.cduDesc.titulo_es ? `<div class="muted" style="font-size:11px;margin-top:3px">ⓘ ${esc(_isbnEstado.cduDesc.titulo_es)}</div>` : ''}</div>
     </div>`;
+  const leyenda = `<div class="muted" style="font-size:11px;margin:2px 0 12px">
+      Procedencia del dato: <b class="proc-fichero">■ Fichero / a mano</b> ·
+      <b class="proc-online">■ APIs gratuitas</b> · <b class="proc-ia">■ IA / de pago</b></div>`;
   // Miniaturas: las candidatas «web» (resultados de Google) se muestran VÍA PROXY same-origin (evita bloqueo
   // de hotlink y contenido mixto en HTTPS). Las keyless y las subidas, directas.
   const dispSrc = (p) =>
@@ -6067,6 +6130,7 @@ function isbnRender() {
         _isbnEstado.portadaId === 'c' + i,
         p.ancho >= 800,
         true,
+        true,
       ),
     )
     .join('');
@@ -6080,14 +6144,28 @@ function isbnRender() {
         _isbnEstado.portadaId === 'e' + i,
         true,
         true,
+        true,
       ),
     )
     .join('');
   const galeria =
     cand || extra
-      ? `<div class="row" style="gap:10px;flex-wrap:wrap;margin-top:6px">${cand}${extra}</div>`
+      ? `<div class="row" style="gap:12px;flex-wrap:wrap;margin-top:6px">${cand}${extra}</div>`
       : '<div class="muted" style="font-size:12px;margin-top:4px">Sin portadas automáticas. Pulsa «Buscar más portadas», haz una foto o sube una.</div>';
-  res.innerHTML = `<div class="card" style="background:var(--card2)">
+  const cabeceraFuente = !_isbnEstado.encontrado
+    ? '<span class="proc-ia">⚠ Sin datos: rellena a mano</span>'
+    : _isbnEstado.fuente === 'online'
+      ? '<span class="proc-online">Datos ONLINE (APIs gratuitas)</span>'
+      : _isbnEstado.fuente === 'fichero+online'
+        ? '<span class="proc-fichero">Fichero</span> + <span class="proc-online">huecos online</span>'
+        : '<span class="proc-fichero">Fichero local</span>';
+  cont.innerHTML = `<div class="box card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <h3 style="margin:0;flex:1">📖 ISBN ${esc(_isbnEstado.isbn || '')}</h3>
+      <span class="muted" style="font-size:12px">${cabeceraFuente}</span>
+      <button class="btn" type="button" id="isbnModalX" title="Cerrar">✕</button>
+    </div>
+    ${leyenda}
     ${datos}
     <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Portadas — ✓ marca las que archivar; pulsa una para elegir la ⭐ PORTADA (✔ = ≥800 px)</div>${galeria}</div>
     <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
@@ -6099,29 +6177,33 @@ function isbnRender() {
       <input type="file" id="isbnFile" accept="image/*" multiple style="display:none">
       <input type="file" id="isbnCamFile" accept="image/*" capture="environment" style="display:none">
     </div>
-    <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
+    <div id="isbnModalMsg" class="muted" style="font-size:12px;margin-top:10px;min-height:16px"></div>
+    <div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;align-items:center">
       <button class="btn pri" type="button" id="isbnCrear">✅ Crear</button>
       <button class="btn" type="button" id="isbnCompletar" title="Enriquecer con las APIs y resolver la CDU antes de crear">✨ Completar y crear</button>
       <button class="btn" type="button" id="isbnCancel">Cancelar</button>
+      <span id="isbnAutoEstadoModal" class="muted" style="font-size:12px;margin-left:auto"></span>
     </div></div>`;
-  res
+  $('#isbnScrim').style.display = 'block';
+  cont.style.display = 'grid';
+  cont
     .querySelectorAll('[data-portada]')
     .forEach((el) => (el.onclick = () => isbnSetPortada(el.dataset.portada)));
-  res.querySelectorAll('[data-chk]').forEach(
+  cont.querySelectorAll('[data-chk]').forEach(
     (el) =>
       (el.onchange = (e) => {
         e.stopPropagation();
         isbnToggleInc(el.dataset.chk);
       }),
   );
-  res.querySelectorAll('[data-edit]').forEach(
+  cont.querySelectorAll('[data-edit]').forEach(
     (el) =>
       (el.onclick = (e) => {
         e.stopPropagation();
         isbnConformar(el.dataset.edit);
       }),
   );
-  res.querySelectorAll('[data-mk]').forEach(
+  cont.querySelectorAll('[data-mk]').forEach(
     (el) =>
       (el.oninput = () => {
         const k = el.dataset.mk;
@@ -6132,6 +6214,16 @@ function isbnRender() {
                 .map((s) => s.trim())
                 .filter(Boolean)
             : el.value;
+        // Editar a mano vuelve el dato AUTORITATIVO (neutro): se recolorea el campo y su etiqueta.
+        _isbnEstado.procedencia[k] = 'manual';
+        el.classList.remove('proc-online', 'proc-ia');
+        el.classList.add('proc-fichero');
+        const lab = el.previousElementSibling;
+        if (lab && lab.tagName === 'LABEL') {
+          lab.classList.remove('proc-online', 'proc-ia');
+          lab.classList.add('proc-fichero');
+        }
+        isbnAutoReset(); // teclear = interacción → reinicia la cuenta atrás del auto-alta
       }),
   );
   $('#isbnAddUrl').onclick = isbnAddUrl;
@@ -6142,12 +6234,15 @@ function isbnRender() {
   if ($('#isbnBuscarWeb')) $('#isbnBuscarWeb').onclick = isbnBuscarPortadasWeb;
   $('#isbnCrear').onclick = () => isbnCrear(false);
   $('#isbnCompletar').onclick = () => isbnCrear(true);
-  $('#isbnCancel').onclick = () => {
-    isbnAutoCancelar();
-    _isbnEstado = null;
-    _loteEditItem = null; // si se estaba editando una fila del lote, se queda tal cual (ni creada ni tocada)
-    $('#isbnRes').innerHTML = '';
-    $('#isbnMsg').textContent = '';
+  const cerrar = () => {
+    isbnCerrarModal();
+    if ($('#isbnMsg')) $('#isbnMsg').textContent = '';
+  };
+  $('#isbnCancel').onclick = cerrar;
+  $('#isbnModalX').onclick = cerrar;
+  $('#isbnScrim').onclick = cerrar;
+  cont.onkeydown = (e) => {
+    if (e.key === 'Escape') cerrar();
   };
   // Datos cargados / re-render (elegir portada, incluir imagen, etc.) = interacción → reinicia la cuenta atrás
   // del auto-alta (solo salta con inactividad real). No hace nada si el switch está apagado.
@@ -6334,41 +6429,42 @@ async function isbnCrear(completar, auto = false) {
     obra: ($('#inObra') && $('#inObra').value) || undefined,
     completar,
   };
-  const msg = $('#isbnMsg');
+  const isbnActual = _isbnEstado.isbn;
+  const msg = isbnMsgEl();
   if (msg) msg.textContent = completar ? 'Completando y creando…' : 'Creando…';
   let r;
   try {
     r = await api('/isbn/alta', { method: 'POST', body: JSON.stringify(body) });
   } catch (e) {
+    // Un fallo del alta NUNCA puede pasar desapercibido (era la queja: «los fallos pasan desapercibidos»):
+    // Toast en voz alta SIEMPRE + se DEJA el modal abierto con el mensaje para corregir. En modo AUTO además
+    // se devuelve el foco al campo ISBN para que veas cuál falló y no se «pierda» el libro.
     if (msg) msg.textContent = 'Error: ' + e.message;
-    // En modo AUTO (lectura por lotes) el error NO puede pasar desapercibido: aviso en voz alta y se DEJA el
-    // ISBN en el campo con el foco, para que veas cuál falló y no se «pierda» el libro silenciosamente.
+    toast('❌ No se pudo crear el ISBN ' + (isbnActual || '') + ': ' + e.message, 'bad');
     if (auto) {
-      toast('❌ No se pudo crear el ISBN ' + (_isbnEstado?.isbn || '') + ': ' + e.message, 'bad');
       const inp = $('#isbnIn');
       if (inp) inp.focus();
     }
     return;
   }
-  _isbnEstado = null;
-  $('#isbnRes').innerHTML = '';
+  const loteItem = _loteEditItem; // capturar antes de que isbnCerrarModal lo ponga a null
+  isbnCerrarModal();
   if ($('#isbnIn')) $('#isbnIn').value = '';
   if (r.ya_existia) {
     toast('Este libro ya estaba en la biblioteca', 'warn');
-    if (msg) msg.innerHTML = avisoYaIngresado(r);
+    if ($('#isbnMsg')) $('#isbnMsg').innerHTML = avisoYaIngresado(r);
   } else {
     toast('📗 Documento creado');
-    if (msg) msg.textContent = '';
+    if ($('#isbnMsg')) $('#isbnMsg').textContent = '';
   }
   // Si este ISBN se editó desde el LOTE (ver loteEditar), marca esa fila como creada y vuelve a pintar la pila.
-  if (_loteEditItem) {
-    _loteEditItem.estado = 'ok';
-    _loteEditItem = null;
+  if (loteItem) {
+    loteItem.estado = 'ok';
     loteRenderStack();
   }
-  // Modo AUTO (lectura por lotes): NO navegar a la ficha; devolver el foco al ISBN para el siguiente escaneo.
-  // Modo manual: abrir la ficha del documento recién creado, como siempre.
-  if (auto) {
+  // Modo AUTO (lectura por lotes) o edición desde el lote: NO navegar a la ficha; devolver el foco al ISBN
+  // para la siguiente lectura. Modo manual suelto: abrir la ficha del documento recién creado, como siempre.
+  if (auto || loteItem) {
     if ($('#isbnIn')) $('#isbnIn').focus();
   } else if (r._id) {
     verDoc(r._id, { volver: 'inbox', etiqueta: 'Inbox' });
@@ -6573,17 +6669,17 @@ function loteEditar(idx) {
   _isbnEstado = {
     isbn: it.isbn,
     meta: { ...(it.meta || {}) },
+    procedencia: { ...(it.procedencia || {}) },
     portadas: (it.portadas || []).map((p, i) => ({ ...p, sel: i === 0 })),
     extra: [],
     cduDesc: it.cdu_desc || null,
     portadaId: it.portadas && it.portadas.length ? 'c0' : null,
     dims: null,
+    fuente: it.fuente || null,
+    encontrado: !!it.encontrado,
   };
-  const card = $('#isbnCard');
-  if (card) card.open = true;
-  isbnRender();
-  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  const msg = $('#isbnMsg');
+  isbnRender(); // abre el mismo modal de resultados
+  const msg = $('#isbnModalMsg');
   if (msg) msg.textContent = `Editando del lote: ${it.entrada}`;
 }
 

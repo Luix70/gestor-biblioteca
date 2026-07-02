@@ -276,6 +276,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             sinopsis: datosExtra.sinopsis,
         });
         datosExtra.cdu = cdu;
+        datosExtra.cdu_fuente = fuente;   // 'cache:…'|'api:…'|'ia' — para colorear la procedencia en el panel
         if (fuente.startsWith('cache')) datosExtra.alertas.push(`CDU por equivalencia aprendida (${fuente}).`);
     }
 

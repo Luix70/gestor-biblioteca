@@ -299,6 +299,31 @@ de ficheros clasificado por CDU.
     Cada trabajo muestra sus mensajes (ISBN leído, tapete, notas de visión…)
     DEBAJO, en la lista del Inbox.
 
+  ── INGRESO POR ISBN (lector de código de barras o teclado) ──────────────────
+    Escanea o teclea un ISBN y pulsa Enter/Buscar. Recupera los datos del FICHERO
+    local (offline) y, si le faltan huecos (sinopsis/colección/CDU/portada) o no
+    está, los COMPLETA con APIs gratuitas online, SIN pisar lo del Fichero.
+      · ISBN mal formado (no 10/13 dígitos) o inválido: AVISO emergente (Toast) y
+        se LIMPIA el campo al momento, para que no colisione con la próxima lectura.
+      · Mientras busca, el campo se BLOQUEA (no encadena pulsaciones del escáner).
+      · Los RESULTADOS salen en una ventana MODAL con las portadas grandes. Cada
+        dato se colorea según su PROCEDENCIA (cuánto fiarse): negro = Fichero o
+        escrito a mano (autoritativo) · azul = APIs gratuitas · rojo = IA/de pago.
+        Al editar un dato a mano pasa a negro. Se elige/sube/conforma la portada y
+        se pulsa «Crear» (rápido) o «Completar y crear» (enriquece con APIs+CDU).
+      · Cualquier fallo del alta se avisa por Toast (no pasa desapercibido) y el
+        modal sigue abierto para corregir.
+      · Auto-alta (interruptor + deslizador 1–10 s): tras esa inactividad da de
+        alta con la portada elegida, limpia el ISBN y re-enfoca el campo para leer
+        el siguiente — lectura en cadena con lector Bluetooth, sin tocar el ratón.
+      · 📋 Alta por LOTE: pega una lista de ISBN (o del portapapeles, o sube un
+        .txt); se buscan TODOS y se apilan en tarjetas con casilla. Deselecciona
+        los erróneos/incompletos y «Enviar seleccionados» los crea de golpe; los
+        que queden (o fallen) siguen en la lista, y con ✎ se abren en el modal
+        para completarlos a mano. Campo «Colección para los que no la traigan»:
+        se aplica SOLO a los que no traigan colección propia (útil para una serie
+        entera, p. ej. Alianza Cien).
+
   ── TAPETE (medir y recortar con la alfombrilla reglada) ─────────────────────
     Foto del libro sobre una alfombrilla de corte CUADRICULADA (1 cm). Con el
     interruptor 📐 Tapete activo, al subir: MIDE el libro (lee el paso de la

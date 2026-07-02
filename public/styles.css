@@ -668,6 +668,40 @@ details.foldcard[open] > summary {
   padding: 16px;
   overflow: auto;
 }
+/* Modal de resultados del ingreso por ISBN — bajo el editor de imágenes (#cmpModal, 205/206) para que
+   éste pueda apilarse encima sin cerrarlo. */
+#isbnScrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  z-index: 200;
+}
+#isbnModal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  place-items: center;
+  z-index: 201;
+  padding: 16px;
+  overflow: auto;
+}
+#isbnModal .box {
+  max-width: 720px;
+  width: 100%;
+  max-height: 94vh;
+  overflow: auto;
+}
+/* Código de color de la PROCEDENCIA de cada dato (leyenda en el modal). */
+.proc-fichero {
+  color: var(--txt);
+}
+.proc-online {
+  color: var(--acc2);
+}
+.proc-ia {
+  color: var(--bad);
+}
 #cmpModal .box {
   max-width: 660px;
   width: 100%;
