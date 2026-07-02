@@ -45,16 +45,6 @@ const DIR_PUBLIC = path.join(RAIZ, 'public');
 const PUERTO = Number(process.env.PORT || 3000);
 const PUERTO_PANEL = Number(process.env.PANEL_PORT || 4000);
 
-// Commit en ejecución. Va en un setTimeout (escritura TARDÍA, tras arrancar el event loop): las escrituras
-// MUY tempranas a stdout —pipe del contenedor— se descartan (por eso no salían 📦/🚀 pero sí 🎛️, que es
-// posterior). Diferido = aparece SIEMPRE en `docker logs`.
-setTimeout(() => {
-    const v = versionEnEjecucion();
-    console.log(`📦 Versión en ejecución: commit ${v.commit}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
-    if (v.commit === 'desconocido') {
-        console.log('   ⓘ  El contenedor no expone el commit: que el despliegue exporte GIT_COMMIT o escriba un fichero VERSION.');
-    }
-}, 500);
 
 await fs.mkdir(DIR_TMP, { recursive: true });
 
@@ -313,6 +303,10 @@ if (PUERTO_PANEL && PUERTO_PANEL !== PUERTO) {
         // (p. ej. https://j56.diskstation.me:4443). Se muestra PANEL_PUBLIC_URL si está definida en .env.
         const urlPublica = process.env.PANEL_PUBLIC_URL || '';
         console.log(`🎛️  Panel de control: puerto ${PUERTO_PANEL} (interno del contenedor)${urlPublica ? ` · acceso: ${urlPublica}` : ' · accede por tu proxy/HTTPS configurado'}`);
+        // Versión en ejecución JUNTO al log del panel (que sí se imprime siempre; los logs de arranque más
+        // tempranos se pierden en el pipe del contenedor). Así tienes el commit a la vista de forma fiable.
+        const v = versionEnEjecucion();
+        console.log(`📦  Versión en ejecución: commit ${v.commit}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
         if (!process.env.ADMIN_PWD && !process.env.PANEL_ADMIN_PASSWORD)
             console.warn('⚠️  ADMIN_PWD no definido: el admin "Luis" no podrá entrar (solo "guest"/lectura). Defínelo en .env.');
     });
