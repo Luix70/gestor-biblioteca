@@ -62,17 +62,61 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
     }
 }
 
+// Alias de colecciones: unifica variantes de grafía del MISMO nombre de serie que las fuentes (BNE/OL)
+// escriben de formas distintas. Clave = nombre YA LIMPIO en minúsculas; valor = nombre canónico. Amplía la
+// tabla cuando detectes otra serie que se duplica por cómo la escribe la fuente (p. ej. cifra ↔ palabra).
+const ALIAS_COLECCION = new Map([
+    ['alianza cien', 'Alianza Cien'],
+    ['alianza 100', 'Alianza Cien'],
+]);
+
+// Número de volumen al final del nombre de una serie, con separadores y/o una ETIQUETA reconocida delante
+// (nº, n., no., núm., num., vol., volumen, tomo). La etiqueta NO puede ser una «n» suelta (si no, se comería
+// la «n» final de palabras como «Cien»). Construida con new RegExp (regla del proyecto para char-classes).
+const RE_NUM_COLECCION = new RegExp(
+    "^(.*?)[\\s,;:.·\\-–—]*(?:(?:nº|n\\.|no\\.|núm\\.?|num\\.?|vol\\.?|volumen|tomo)\\s*)?\\(?\\s*(\\d{1,4})\\)?\\s*$",
+    'i',
+);
+
+/**
+ * Separa el NÚMERO de volumen final del nombre de una colección de LIBROS y aplica el alias canónico:
+ *   «Alianza Cien 15» · «Alianza Cien, 15» · «Alianza Cien nº 15» · «Alianza Cien (15)» → { nombre:'Alianza Cien', numero:'15' }
+ *   «Alianza 100 10» → { nombre:'Alianza Cien', numero:'10' }   (alias unifica la grafía tras separar el nº)
+ *   «Alianza 100» → { nombre:'Alianza Cien', numero:null }       (alias sobre el nombre completo: «100» no es volumen)
+ * Sin número final: { nombre:<limpio>, numero:null }. Nunca deja el nombre vacío. Idempotente.
+ */
+export function separarNumeroColeccion(raw) {
+    const base = String(raw || '').trim();
+    if (!base) return { nombre: '', numero: null };
+    // 1) Alias sobre el nombre COMPLETO: capta variantes SIN número (p. ej. «Alianza 100», donde «100» es
+    //    parte del nombre, no un volumen). Si casa, no se separa nada.
+    const aliasCompleto = ALIAS_COLECCION.get(base.toLowerCase());
+    if (aliasCompleto) return { nombre: aliasCompleto, numero: null };
+    // 2) Separar el número final (solo si delante queda un nombre con letras) y aplicar alias al resultado.
+    let nombre = base, numero = null;
+    const m = base.match(RE_NUM_COLECCION);
+    if (m && /[a-zà-ÿ]/i.test(m[1])) {
+        nombre = m[1].replace(/[\s,;:.·\-–—]+$/, '').trim();
+        numero = m[2];
+    }
+    const alias = ALIAS_COLECCION.get(nombre.toLowerCase());
+    if (alias) nombre = alias;
+    return { nombre, numero };
+}
+
 /**
  * Resuelve el nombre de una colección/serie editorial de LIBROS (patrón check-then-create, como
- * autores/editoriales). Atajo sobre resolverCabecera con tipo:'libro'. Enlaza la editorial si se
- * conoce. Devuelve { _id, creada } (compatibilidad con los llamantes previos).
+ * autores/editoriales). Atajo sobre resolverCabecera con tipo:'libro'. LIMPIA el nombre (separa el número
+ * de volumen final y aplica el alias canónico) para no crear una colección por cada tomo. Enlaza la
+ * editorial si se conoce. Devuelve { _id, creada } (compatibilidad con los llamantes previos).
  *
  * @param {import('mongodb').Db} db
  * @param {string} nombre
  * @param {import('mongodb').ObjectId|null} editorialId
  */
 export async function resolverColeccion(db, nombre, editorialId = null) {
-    const { _id, creada } = await resolverCabecera(db, { nombre, tipo: 'libro', editorialId });
+    const { nombre: limpio } = separarNumeroColeccion(nombre);
+    const { _id, creada } = await resolverCabecera(db, { nombre: limpio || nombre, tipo: 'libro', editorialId });
     return { _id, creada };
 }
 

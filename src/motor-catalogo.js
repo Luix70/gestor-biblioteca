@@ -1,6 +1,6 @@
 import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
-import { resolverColeccion, resolverCabecera, registrarNumeroEnColeccion } from './utils/colecciones.js';
+import { resolverColeccion, resolverCabecera, registrarNumeroEnColeccion, separarNumeroColeccion } from './utils/colecciones.js';
 import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
 import { claveNumero, tituloCabecera } from './utils/revistas.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
@@ -159,6 +159,12 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         // 2b. Colección/serie (nombre → ObjectId en 'colecciones'; crea si no existe, enlazando
         // la editorial ya resuelta). Se conserva coleccion_nombre denormalizado para MARC/registro.
         if (docFinal.coleccion_nombre && typeof docFinal.coleccion_nombre === 'string') {
+            // Separar el número de volumen embebido en el nombre («Alianza Cien 15» → «Alianza Cien» + nº 15)
+            // y unificar la grafía (alias), para NO crear una colección por cada tomo. El número, si aún no
+            // estaba, pasa a coleccion_numero. Así todos los volúmenes enlazan a la MISMA colección.
+            const { nombre: nomColeccion, numero: numColeccion } = separarNumeroColeccion(docFinal.coleccion_nombre);
+            if (nomColeccion) docFinal.coleccion_nombre = nomColeccion;
+            if (numColeccion && !docFinal.coleccion_numero) docFinal.coleccion_numero = String(numColeccion);
             const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
             const { _id, creada } = await resolverColeccion(db, docFinal.coleccion_nombre, edId);
             if (creada) docFinal.alertas_agente.push(`Nueva colección registrada: ${docFinal.coleccion_nombre}`);
