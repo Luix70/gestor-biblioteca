@@ -1842,19 +1842,21 @@ function carMove(dir) {
 // ── valoración (estrellas, estilo Lightroom) + quitar (⊘) + NSFW (🔞) — para documentos / obras / colecciones ──
 // `ent` = 'documentos' | 'obras' | 'colecciones'. La valoración es por nivel (independiente); marcar NSFW en
 // una obra/colección oculta a los invitados todos sus miembros (actuales y futuros).
-function ratingBar(ent, id, v, nsfw) {
-  v = Number(v) || 0;
+// Barra de valoración (0-5★) de un documento/obra/colección (`ent` = entidad, `id`). El invitado solo la
+// VE (solo lectura); el admin puede valorar, quitar la valoración y marcar NSFW. Ver attachRating (eventos).
+function ratingBar(ent, id, valoracion, nsfw) {
+  valoracion = Number(valoracion) || 0;
   const admin = ROL === 'admin';
-  const st = [5, 4, 3, 2, 1]
-    .map((n) => `<span class="st${n <= v ? ' on' : ''}" data-v="${n}">★</span>`)
+  const estrellasHtml = [5, 4, 3, 2, 1]
+    .map((n) => `<span class="st${n <= valoracion ? ' on' : ''}" data-v="${n}">★</span>`)
     .join(''); // 5→1 + row-reverse: relleno al pasar el ratón
   // Invitado: solo VE la valoración (estrellas de solo lectura, sin botones de quitar/NSFW ni clic).
   if (!admin)
-    return `<span class="ratebar ro"><span class="stars ro" title="Valoración: ${v}/5">${st}</span></span>`;
+    return `<span class="ratebar ro"><span class="stars ro" title="Valoración: ${valoracion}/5">${estrellasHtml}</span></span>`;
   return (
-    `<span class="ratebar" data-ent="${ent}" data-id="${esc(id)}" data-v="${v}">` +
+    `<span class="ratebar" data-ent="${ent}" data-id="${esc(id)}" data-v="${valoracion}">` +
     `<button class="rbtn rclear" title="Quitar valoración (0★)">⊘</button>` +
-    `<span class="stars" title="Valora (clic en una estrella; repite la misma para quitar)">${st}</span>` +
+    `<span class="stars" title="Valora (clic en una estrella; repite la misma para quitar)">${estrellasHtml}</span>` +
     `<button class="rbtn rnsfw${nsfw ? ' on' : ''}" title="Marcar / quitar NSFW (oculto a invitados)">🔞</button>` +
     `</span>`
   );
