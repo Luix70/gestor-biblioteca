@@ -2076,12 +2076,13 @@ async function fichaEliminar(id) {
   }
 }
 // ════════ GESTIÓN DE IMÁGENES DEL CARRUSEL (reordenar/borrar/añadir + editor rotar/recortar/perspectiva) ════════
+// Lee un Blob/File y lo devuelve como data URL (base64) — para enviar imágenes al backend en JSON.
 const fileADataURL = (blob) =>
-  new Promise((res, rej) => {
-    const fr = new FileReader();
-    fr.onload = () => res(fr.result);
-    fr.onerror = rej;
-    fr.readAsDataURL(blob);
+  new Promise((resolver, rechazar) => {
+    const lector = new FileReader();
+    lector.onload = () => resolver(lector.result);
+    lector.onerror = rechazar;
+    lector.readAsDataURL(blob);
   });
 let _imgState = null;
 function editarImagenes(id, imagenes) {
@@ -6965,60 +6966,64 @@ function pintarEstanteriaSearch() {
   se.disabled = !amb;
   se.value = [...se.options].some((o) => o.value === cur) ? cur : '';
 }
-// Reduce una foto a máx. 2000px (canvas) antes de subir → menos datos y más rápido en el Atom.
-function reducirImagen(file, max = 2000, q = 0.85) {
-  return new Promise((res, rej) => {
-    const img = new Image(),
-      url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const w = img.naturalWidth,
-        h = img.naturalHeight,
-        s = Math.min(1, max / Math.max(w, h));
-      if (s >= 1) {
-        res(file);
+// Reduce una foto a máx. `ladoMax` px (por el lado mayor) reescalándola en un canvas antes de subir →
+// menos datos y más rápido en el Atom. `calidad` = calidad JPEG (0..1). Si ya es más pequeña, devuelve el
+// fichero original tal cual. Devuelve una Promise con un File JPEG (o el original si algo falla).
+function reducirImagen(file, ladoMax = 2000, calidad = 0.85) {
+  return new Promise((resolver, rechazar) => {
+    const imagen = new Image();
+    const urlObjeto = URL.createObjectURL(file);
+    imagen.onload = () => {
+      URL.revokeObjectURL(urlObjeto);
+      const anchoOrig = imagen.naturalWidth;
+      const altoOrig = imagen.naturalHeight;
+      const escala = Math.min(1, ladoMax / Math.max(anchoOrig, altoOrig));
+      if (escala >= 1) {
+        resolver(file); // ya cabe: no reescalar
         return;
       }
-      const c = document.createElement('canvas');
-      c.width = Math.round(w * s);
-      c.height = Math.round(h * s);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      c.toBlob(
-        (b) => res(b ? new File([b], (file.name || 'foto') + '.jpg', { type: 'image/jpeg' }) : file),
+      const lienzo = document.createElement('canvas');
+      lienzo.width = Math.round(anchoOrig * escala);
+      lienzo.height = Math.round(altoOrig * escala);
+      lienzo.getContext('2d').drawImage(imagen, 0, 0, lienzo.width, lienzo.height);
+      lienzo.toBlob(
+        (blob) => resolver(blob ? new File([blob], (file.name || 'foto') + '.jpg', { type: 'image/jpeg' }) : file),
         'image/jpeg',
-        q,
+        calidad,
       );
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      rej(new Error('img'));
+    imagen.onerror = () => {
+      URL.revokeObjectURL(urlObjeto);
+      rechazar(new Error('img'));
     };
-    img.src = url;
+    imagen.src = urlObjeto;
   });
 }
+// Pinta las miniaturas de las fotos tomadas con la cámara (cola `camFotos`), cada una con su ✕ para
+// quitarla, y actualiza el botón «Catalogar (N)» y el de limpiar según cuántas haya.
 function renderCamThumbs() {
-  const t = $('#camThumbs');
-  if (t)
-    t.innerHTML = camFotos
+  const cont = $('#camThumbs');
+  if (cont)
+    cont.innerHTML = camFotos
       .map(
-        (b, i) =>
-          `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(b)}" style="width:62px;height:82px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`,
+        (foto, i) =>
+          `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(foto)}" style="width:62px;height:82px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`,
       )
       .join('');
   $$('#camThumbs [data-rm]').forEach(
-    (b) =>
-      (b.onclick = () => {
-        camFotos.splice(+b.dataset.rm, 1);
+    (boton) =>
+      (boton.onclick = () => {
+        camFotos.splice(+boton.dataset.rm, 1);
         renderCamThumbs();
       }),
   );
-  const d = $('#camDone');
-  if (d) {
-    d.textContent = `✅ Catalogar (${camFotos.length})`;
-    d.disabled = !camFotos.length;
+  const btnCatalogar = $('#camDone');
+  if (btnCatalogar) {
+    btnCatalogar.textContent = `✅ Catalogar (${camFotos.length})`;
+    btnCatalogar.disabled = !camFotos.length;
   }
-  const cl = $('#camClear');
-  if (cl) cl.style.display = camFotos.length ? '' : 'none';
+  const btnLimpiar = $('#camClear');
+  if (btnLimpiar) btnLimpiar.style.display = camFotos.length ? '' : 'none';
 }
 async function camCatalogar() {
   if (!camFotos.length) {
@@ -7034,28 +7039,29 @@ async function camCatalogar() {
 // Metadatos del formulario como objeto (snapshot) → cada trabajo encolado lleva LOS SUYOS (el form
 // puede cambiar mientras la cola procesa en segundo plano).
 function metaSnapshot() {
-  const v = (id) => (($('#' + id) && $('#' + id).value) || '').trim();
+  const valorCampo = (id) => (($('#' + id) && $('#' + id).value) || '').trim();
   return {
-    isbn: v('inIsbn'),
-    coleccion: v('inColeccion'),
-    obra: v('inObra'),
-    ambito: v('inAmbito'),
-    estanteria: v('inEstanteria'),
+    isbn: valorCampo('inIsbn'),
+    coleccion: valorCampo('inColeccion'),
+    obra: valorCampo('inObra'),
+    ambito: valorCampo('inAmbito'),
+    estanteria: valorCampo('inEstanteria'),
   };
 }
+// Construye el FormData de la subida a partir del snapshot de metadatos + los ficheros elegidos.
 function fdDesdeSnap(snap, files) {
-  const fd = new FormData();
-  if (snap.isbn) fd.append('isbn', snap.isbn);
-  if (snap.isbn && snap.isbnOrigen) fd.append('isbn_origen', snap.isbnOrigen);
-  if (snap.coleccion) fd.append('coleccion', snap.coleccion);
-  if (snap.obra) fd.append('obra', snap.obra);
+  const formData = new FormData();
+  if (snap.isbn) formData.append('isbn', snap.isbn);
+  if (snap.isbn && snap.isbnOrigen) formData.append('isbn_origen', snap.isbnOrigen);
+  if (snap.coleccion) formData.append('coleccion', snap.coleccion);
+  if (snap.obra) formData.append('obra', snap.obra);
   if (snap.ambito || snap.estanteria)
-    fd.append(
+    formData.append(
       'ubicacion',
       JSON.stringify({ ambito: snap.ambito || 'Sin asignar', estanteria: snap.estanteria || 'Sin asignar' }),
     );
-  for (const f of files) fd.append('files', f, f.name);
-  return fd;
+  for (const fichero of files) formData.append('files', fichero, fichero.name);
+  return formData;
 }
 async function enviarIngesta(fd) {
   const r = await fetch('/api/ingestar', {
