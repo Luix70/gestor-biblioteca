@@ -144,9 +144,11 @@ async function medirPortadaRemota(url, fuente) {
         clearTimeout(to);
         if (!resp.ok) return null;
         const buf = Buffer.from(await resp.arrayBuffer());
-        if (buf.length < 2500) return null;                 // 1x1 / gif «no image» de Amazon, etc.
+        if (buf.length < 800) return null;                  // cuerpo vacío / respuesta de error
         const dim = medirImagen(buf);
-        if (!dim || !dim.width) return null;
+        // Se rechaza SOLO el placeholder 1x1 («no image» de Amazon, etc.), NO las portadas pequeñas reales:
+        // el usuario prefiere una cubierta chica a un documento sin portada.
+        if (!dim || !dim.width || dim.width < 20 || dim.height < 20) return null;
         return { url, fuente, ancho: dim.width, alto: dim.height, bytes: buf.length };
     } catch { return null; }
 }
@@ -165,7 +167,21 @@ async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
         urls.push([`https://m.media-amazon.com/images/P/${isbn10}.01.L.jpg`, 'Amazon']);
         urls.push([`https://images-na.ssl-images-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
     }
-    // Google Books: probar por 13 y, si no hay imagen, por 10 (mayor tamaño disponible).
+    // OpenLibrary Search por ISBN: devuelve VARIAS ediciones (cover_i) del mismo libro → más candidatas que
+    // el lookup directo por ISBN (que solo da la cubierta de UNA edición, si está indexada por ese ISBN).
+    for (const x of [isbn13, isbn10]) {
+        if (!x) continue;
+        try {
+            const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 9000);
+            const resp = await fetch(`https://openlibrary.org/search.json?q=${x}&limit=5&fields=cover_i`, { signal: ctrl.signal });
+            clearTimeout(to);
+            if (resp.ok) {
+                const j = await resp.json();
+                for (const d of (j.docs || [])) if (d.cover_i) urls.push([`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`, 'OpenLibrary']);
+            }
+        } catch { /* OL search opcional */ }
+    }
+    // Google Books: por 13 y 10, tomando la portada de VARIOS resultados (no solo el primero) → más variedad.
     for (const x of [isbn13, isbn10]) {
         if (!x) continue;
         try {
@@ -173,16 +189,20 @@ async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
             const resp = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${x}${key}`);
             if (resp.ok) {
                 const j = await resp.json();
-                const il = j && j.items && j.items[0] && j.items[0].volumeInfo && j.items[0].volumeInfo.imageLinks;
-                let u = il && (il.extraLarge || il.large || il.medium || il.small || il.thumbnail);
-                if (u) { u = u.replace(/^http:/, 'https:').replace(/&edge=curl/, ''); urls.push([u, 'Google Books']); break; }
+                for (const it of (j.items || []).slice(0, 5)) {
+                    const il = it.volumeInfo && it.volumeInfo.imageLinks;
+                    const u = il && (il.extraLarge || il.large || il.medium || il.small || il.thumbnail);
+                    if (u) urls.push([u.replace(/^http:/, 'https:').replace(/&edge=curl/, ''), 'Google Books']);
+                }
             }
         } catch { /* Google Books opcional */ }
     }
-    // Medir todas; DEDUP por (dimensiones+bytes) — evita mostrar la misma imagen dos veces (13 y 10, CDNs).
+    // Medir EN PARALELO (con tope) y DEDUP por URL y por (dimensiones+bytes) — evita repetir la misma imagen
+    // (13 y 10, distintas CDNs, misma edición). Se aceptan portadas pequeñas: mejor una chica que ninguna.
+    const urlsUnicas = [...new Map(urls.map(([u, f]) => [u, f])).entries()].slice(0, 18);
+    const medidas = await Promise.all(urlsUnicas.map(([u, f]) => medirPortadaRemota(u, f)));
     const out = [], vistos = new Set();
-    for (const [u, f] of urls) {
-        const m = await medirPortadaRemota(u, f);
+    for (const m of medidas) {
         if (!m) continue;
         const sig = `${m.ancho}x${m.alto}:${m.bytes}`;
         if (vistos.has(sig)) continue;
