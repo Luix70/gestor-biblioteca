@@ -213,6 +213,11 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.lcc   = primerValido(documento.lcc, datosExtra.lcc);
     documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
 
+    // Contribuciones con ROL (traductor/ilustrador/…) e IDIOMA ORIGINAL: el archivo manda; lo externo
+    // rellena el hueco. `contribuciones_nombres` [{nombre,rol}] lo resuelve motor-catalogo a personas.
+    documento.contribuciones_nombres = primerValido(documento.contribuciones_nombres, datosExtra.contribuciones_nombres);
+    documento.idioma_original = primerValido(documento.idioma_original, datosExtra.idioma_original);
+
     // Colección/serie: el archivo (metadatos Calibre / nombre) manda; la visión rellena el hueco.
     // El número se guarda como cadena (preserva romanos como "XLVII" y árabes por igual).
     documento.coleccion_nombre = primerValido(documento.coleccion_nombre, datosExtra.coleccion_nombre);

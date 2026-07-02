@@ -5,8 +5,8 @@ import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
 import { claveNumero, tituloCabecera } from './utils/revistas.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
-import { latinizarNombre } from './utils/transliterar.js';
-import { normalizarAutor } from './utils/autor-normalizar.js';
+import { resolverPersona } from './utils/resolver-persona.js';
+import { ROLES_VALIDOS } from './utils/contribuciones.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -80,7 +80,6 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     }
 
     const coleccionBiblioteca = db.collection('biblioteca');
-    const coleccionAutores = db.collection('autores');
     const coleccionEditoriales = db.collection('editoriales');
 
     let docFinal = { ...documentoEnriquecido };
@@ -111,42 +110,42 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
     };
 
     try {
-        // 1. Autores (string → ObjectId; crea si no existe).
-        //    · normalizarAutor: se queda con el PRIMER contribuyente (marcador BNE /**​/ = autor·traductor·…)
-        //      y extrae las FECHAS de vida «(1857-1924)» a campos biográficos (nacimiento/fallecimiento),
-        //      dejando el nombre limpio («Conrad, Joseph»). [Roles de todos los contribuyentes: pendiente.]
-        //    · latinizarNombre: nombre en otro alfabeto (cirílico/griego) → principal LATINIZADO + grafía
-        //      original en `nombres_alternativos`. El emparejamiento usa el nombre limpio/latinizado + variantes.
+        // 1. Autores (string → ObjectId; crea si no existe). La resolución (normaliza el marcador BNE «/**​/»,
+        //    extrae fechas de vida, latiniza alfabetos no latinos + grafías alternativas, empareja/crea) vive
+        //    en utils/resolver-persona.js, compartida con las contribuciones y los scripts de backfill.
         if (docFinal.autores && docFinal.autores.length > 0) {
             const ids = [];
             for (const autor of docFinal.autores) {
                 if (typeof autor === 'string') {
-                    const bio = normalizarAutor(autor);
-                    const limpio = bio.nombre || autor;
-                    const { nombre, alternativos } = latinizarNombre(limpio);
-                    const existente = await coleccionAutores.findOne({ $or: [{ nombre }, { nombre: limpio }, { nombres_alternativos: limpio }] });
-                    if (existente) {
-                        ids.push(existente._id);
-                        const upd = {};
-                        if (limpio !== existente.nombre) upd.$addToSet = { nombres_alternativos: limpio };
-                        const setBio = {};
-                        if (bio.nacimiento && !existente.nacimiento) setBio.nacimiento = bio.nacimiento;
-                        if (bio.fallecimiento && !existente.fallecimiento) setBio.fallecimiento = bio.fallecimiento;
-                        if (Object.keys(setBio).length) upd.$set = setBio;
-                        if (Object.keys(upd).length) await coleccionAutores.updateOne({ _id: existente._id }, upd).catch(() => {});
-                    } else {
-                        const doc = { nombre };
-                        if (alternativos.length) doc.nombres_alternativos = alternativos;
-                        if (bio.nacimiento) doc.nacimiento = bio.nacimiento;
-                        if (bio.fallecimiento) doc.fallecimiento = bio.fallecimiento;
-                        const nuevo = await coleccionAutores.insertOne(doc);
-                        ids.push(nuevo.insertedId);
-                        docFinal.alertas_agente.push(`Nuevo autor registrado: ${nombre}${bio.nacimiento ? ` (${bio.nacimiento}-${bio.fallecimiento || ''})` : ''}`);
-                    }
+                    const r = await resolverPersona(db, autor);
+                    if (!r) continue;
+                    ids.push(r._id);
+                    if (r.creada) docFinal.alertas_agente.push(`Nuevo autor registrado: ${r.nombre}`);
                 } else ids.push(autor);
             }
             docFinal.autores = ids;
         }
+
+        // 1b. CONTRIBUCIONES con ROL (traductor/ilustrador/prologuista/anotador/editor/compilador), extraídas
+        //     de la mención de responsabilidad. Llegan como `contribuciones_nombres:[{nombre,rol}]` (el autor
+        //     principal ya se excluyó al parsear) → se resuelven a `contribuciones:[{persona,rol}]`, dedup por
+        //     (persona,rol). Rol no reconocido → se ignora. El campo de trabajo crudo no se persiste.
+        if (Array.isArray(docFinal.contribuciones_nombres) && docFinal.contribuciones_nombres.length) {
+            const contribs = [];
+            const vistos = new Set();
+            for (const c of docFinal.contribuciones_nombres) {
+                if (!c || !c.nombre || !ROLES_VALIDOS.includes(c.rol) || c.rol === 'autor') continue;
+                const r = await resolverPersona(db, c.nombre);
+                if (!r) continue;
+                const clave = `${String(r._id)}|${c.rol}`;
+                if (vistos.has(clave)) continue;
+                vistos.add(clave);
+                contribs.push({ persona: r._id, rol: c.rol });
+                if (r.creada) docFinal.alertas_agente.push(`Nuevo contribuyente (${c.rol}): ${r.nombre}`);
+            }
+            if (contribs.length) docFinal.contribuciones = contribs;
+        }
+        delete docFinal.contribuciones_nombres;
 
         // 2. Editorial (string → ObjectId; crea si no existe).
         if (docFinal.editorial && typeof docFinal.editorial === 'string') {

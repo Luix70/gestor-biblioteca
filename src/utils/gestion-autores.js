@@ -12,6 +12,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { ObjectId } from 'mongodb';
 import { DIR_CDU } from '../mantenimiento/util-mantenimiento.js';
+import { ROLES_VALIDOS } from './contribuciones.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
@@ -23,18 +24,17 @@ const PROY_AUTOR = {
     nombre: 1, nombres_alternativos: 1, nacimiento: 1, fallecimiento: 1, biografia: 1, foto: 1, fotos: 1,
 };
 
-// Nº de documentos que referencian a cada autor de una lista de ids (una sola agregación → Map id→n).
-async function conteosDeLibros(db, ids) {
-    const conteos = new Map();
-    if (!ids.length) return conteos;
-    const filas = await db.collection('biblioteca').aggregate([
-        { $match: { autores: { $in: ids } } },
-        { $unwind: '$autores' },
-        { $match: { autores: { $in: ids } } },
-        { $group: { _id: '$autores', n: { $sum: 1 } } },
-    ]).toArray();
-    for (const f of filas) conteos.set(String(f._id), f.n);
-    return conteos;
+// Recuento id→nº de libros. Si `rol` es un rol de CONTRIBUCIÓN (traductor/…), cuenta libros EN ESE ROL
+// (biblioteca.contribuciones); si no, cuenta libros como AUTOR (biblioteca.autores). Una sola agregación.
+async function recuentoPorAutor(db, rol) {
+    const rolContrib = rol && rol !== 'autor' && ROLES_VALIDOS.includes(rol);
+    const pipeline = rolContrib
+        ? [{ $match: { 'contribuciones.rol': rol } }, { $unwind: '$contribuciones' },
+            { $match: { 'contribuciones.rol': rol } }, { $group: { _id: '$contribuciones.persona', n: { $sum: 1 } } }]
+        : [{ $unwind: '$autores' }, { $group: { _id: '$autores', n: { $sum: 1 } } }];
+    const conteo = new Map();
+    for (const f of await db.collection('biblioteca').aggregate(pipeline).toArray()) conteo.set(String(f._id), f.n);
+    return conteo;
 }
 
 // Sub-filtros «tiene / no tiene» un campo de texto (foto, biografia), para los selectores del panel.
@@ -50,37 +50,41 @@ function condicionCampo(campo, valor) {
  *   · q      — texto (nombre o grafía alternativa, tolerante a mayúsculas).
  *   · foto   — 'si' | 'no' | '' : con / sin foto.
  *   · bio    — 'si' | 'no' | '' : con / sin biografía.
- *   · orden  — 'libros' (por nº de obras, desc; por defecto) | 'nombre' (alfabético).
- * SIN búsqueda muestra los autores QUE TIENEN LIBROS (los miles de nombres del volcado sin libros son
- * ruido aquí; aparecen al buscarlos por nombre). Los filtros foto/bio se aplican en ambos casos.
+ *   · rol    — '' | 'autor' | 'traductor' | 'ilustrador' | 'prologuista' | 'anotador' | 'editor' |
+ *              'compilador'. Con un rol de CONTRIBUCIÓN, lista a quienes intervienen en ese rol (n = nº de
+ *              libros en ese rol). Con '' o 'autor', lista autores (n = nº de libros como autor).
+ *   · orden  — 'libros' (por nº, desc; por defecto) | 'nombre' (alfabético).
+ * SIN búsqueda ni rol muestra los autores QUE TIENEN LIBROS (los miles del volcado sin libros son ruido;
+ * aparecen al buscarlos por nombre). foto/bio se aplican siempre.
  */
-export async function listarAutores(db, { q = '', limite = 300, foto = '', bio = '', orden = 'libros' } = {}) {
+export async function listarAutores(db, { q = '', limite = 300, foto = '', bio = '', orden = 'libros', rol = '' } = {}) {
     const tope = Math.min(1000, Math.max(1, limite));
     const consulta = String(q || '').trim();
+    const rolContrib = rol && rol !== 'autor' && ROLES_VALIDOS.includes(rol);
     const and = [condicionCampo('foto', foto), condicionCampo('biografia', bio)].filter(Boolean);
+    const rx = consulta ? new RegExp(escapeRegex(consulta), 'i') : null;
 
-    let autores;
-    if (consulta) {
-        // Búsqueda por texto sobre el nombre o las grafías alternativas (+ filtros foto/bio).
-        const rx = new RegExp(escapeRegex(consulta), 'i');
-        const filtro = { $or: [{ nombre: rx }, { nombres_alternativos: rx }] };
-        if (and.length) filtro.$and = and;
-        const docs = await db.collection('autores').find(filtro, { projection: PROY_AUTOR }).limit(tope * 2).toArray();
-        const conteos = await conteosDeLibros(db, docs.map((a) => a._id));
-        autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteos.get(String(a._id)) || 0 }));
-    } else {
-        // Autores realmente usados (con libros) + filtros foto/bio.
-        const usados = await db.collection('biblioteca')
-            .aggregate([{ $unwind: '$autores' }, { $group: { _id: '$autores', n: { $sum: 1 } } }]).toArray();
-        const conteo = new Map(usados.map((u) => [String(u._id), u.n]));
-        const ids = usados.map((u) => u._id).filter(Boolean);
+    // Recuento base (como autor, o en el rol pedido). Es también el conjunto de candidatos por defecto.
+    const conteo = await recuentoPorAutor(db, rol);
+
+    // Conjunto de autores a devolver:
+    //  · con ROL de contribución → los que intervienen en ese rol (+ q/foto/bio);
+    //  · con q y sin rol → búsqueda por nombre en TODA la colección (aunque tengan 0 libros) (+ foto/bio);
+    //  · sin q y sin rol → los que tienen libros como autor (+ foto/bio).
+    const filtro = {};
+    if (rolContrib || !consulta) {
+        const ids = [...conteo.keys()].map(oid).filter(Boolean);
         if (!ids.length) return [];
-        const filtro = { _id: { $in: ids } };
-        if (and.length) filtro.$and = and;
-        const docs = await db.collection('autores').find(filtro, { projection: PROY_AUTOR }).toArray();
-        autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteo.get(String(a._id)) || 0 }));
+        filtro._id = { $in: ids };
     }
+    if (rx) filtro.$or = [{ nombre: rx }, { nombres_alternativos: rx }];
+    if (and.length) filtro.$and = and;
 
+    const cur = db.collection('autores').find(filtro, { projection: PROY_AUTOR });
+    if (consulta && !rolContrib) cur.limit(tope * 2); // búsqueda global: acota antes de puntuar
+    const docs = await cur.toArray();
+
+    const autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteo.get(String(a._id)) || 0 }));
     if (orden === 'nombre') {
         autores.sort((x, y) => String(x.nombre || '').localeCompare(String(y.nombre || '')));
     } else {
@@ -90,21 +94,38 @@ export async function listarAutores(db, { q = '', limite = 300, foto = '', bio =
 }
 
 /**
- * Ficha de un autor: sus datos + los libros en los que interviene (los que lo tienen en `autores`),
- * ordenados por año y título. Devuelve null si no existe.
+ * Ficha de un autor: sus datos + los libros en los que interviene (como AUTOR y como CONTRIBUYENTE, con el
+ * rol correspondiente) + la lista de roles que desempeña. Cada libro lleva `rol` ('autor' | traductor | …);
+ * si aparece como autor Y como contribuyente del mismo libro, gana 'autor'. Devuelve null si no existe.
  */
 export async function fichaAutor(db, id) {
     const _id = oid(id);
     if (!_id) return null;
     const autor = await db.collection('autores').findOne({ _id }, { projection: PROY_AUTOR });
     if (!autor) return null;
-    const libros = await db.collection('biblioteca')
-        .find({ autores: _id }, { projection: { titulo: 1, portada: 1, 'año_edicion': 1, cdu: 1, tipo_recurso: 1, nsfw: 1 } })
-        .sort({ 'año_edicion': 1, titulo: 1 })
-        .toArray();
+    const PROY = { titulo: 1, portada: 1, 'año_edicion': 1, cdu: 1, tipo_recurso: 1, nsfw: 1, contribuciones: 1 };
+
+    // Libros como AUTOR + libros donde figura en CONTRIBUCIONES (traductor/ilustrador/…).
+    const [comoAutor, comoContrib] = await Promise.all([
+        db.collection('biblioteca').find({ autores: _id }, { projection: PROY }).sort({ 'año_edicion': 1, titulo: 1 }).toArray(),
+        db.collection('biblioteca').find({ 'contribuciones.persona': _id }, { projection: PROY }).sort({ 'año_edicion': 1, titulo: 1 }).toArray(),
+    ]);
+
+    const porId = new Map();
+    for (const l of comoAutor) porId.set(String(l._id), { _id: String(l._id), titulo: l.titulo, portada: l.portada, 'año_edicion': l['año_edicion'], cdu: l.cdu, tipo_recurso: l.tipo_recurso, nsfw: l.nsfw, rol: 'autor' });
+    for (const l of comoContrib) {
+        const k = String(l._id);
+        const rol = (l.contribuciones || []).find((c) => String(c.persona) === String(_id))?.rol || 'contribuyente';
+        if (porId.has(k)) continue; // ya está como autor (gana 'autor')
+        porId.set(k, { _id: k, titulo: l.titulo, portada: l.portada, 'año_edicion': l['año_edicion'], cdu: l.cdu, tipo_recurso: l.tipo_recurso, nsfw: l.nsfw, rol });
+    }
+    const libros = [...porId.values()];
+    const roles = [...new Set(libros.map((l) => l.rol))]; // roles que desempeña esta persona
+
     return {
         autor: { ...autor, _id: String(autor._id) },
-        libros: libros.map((l) => ({ ...l, _id: String(l._id) })),
+        libros,
+        roles,
     };
 }
 

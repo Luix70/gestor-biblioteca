@@ -97,6 +97,7 @@ function fusionar(filas) {
         coleccion_nombre: primero('coleccion_nombre'),
         sinopsis: primero('sinopsis'),
         portada_url: primero('portada_url'),
+        lengua_original: primero('lengua_original'),   // → idioma_original del documento (traducciones)
         fuentes: [...new Set(orden.map(f => f.fuente))],
     };
 }

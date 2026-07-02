@@ -47,6 +47,9 @@ function normalizar(data) {
         año_edicion: data.first_publish_year || parseInt(data.publish_date) || null,
         dewey: dewey,
         lcc: lcc,
+        // Mención de responsabilidad en texto libre («… translated by X ; edited by Y»): de aquí se extraen
+        // los ROLES (traductor/ilustrador/…). Solo está en el registro de EDICIÓN (/isbn), no en /search.
+        by_statement: data.by_statement || null,
         workKey: workKey,
         autoresNombres: autoresNombres,
         autoresClaves: autoresClaves

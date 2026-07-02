@@ -35,19 +35,25 @@ export async function escribirSidecars(carpeta, legible) {
     await fs.writeFile(path.join(carpeta, 'registro.marc.xml'), aMARCXML(legible), 'utf8');
 }
 
-/** Resuelve los nombres de autores/editorial de un documento (consultas puntuales a la BD). */
+/** Resuelve los nombres de autores/editorial/contribuciones de un documento (consultas puntuales a la BD). */
 export async function resolverNombres(db, doc) {
-    const ids = (doc.autores || []).filter(Boolean);
-    const autorDocs = ids.length
-        ? await db.collection('autores').find({ _id: { $in: ids } }).toArray()
+    const autorIds = (doc.autores || []).filter(Boolean);
+    const contribIds = (doc.contribuciones || []).map(c => c && c.persona).filter(Boolean);
+    const todos = [...autorIds, ...contribIds];
+    const personaDocs = todos.length
+        ? await db.collection('autores').find({ _id: { $in: todos } }, { projection: { nombre: 1 } }).toArray()
         : [];
-    const amap = new Map(autorDocs.map(a => [String(a._id), a.nombre]));
-    const autores = ids.map(id => amap.get(String(id)) || String(id));
+    const amap = new Map(personaDocs.map(a => [String(a._id), a.nombre]));
+    const autores = autorIds.map(id => amap.get(String(id)) || String(id));
+    // Contribuciones (traductor/ilustrador/…) con el nombre resuelto de cada persona.
+    const contribuciones = (doc.contribuciones || [])
+        .filter(c => c && c.persona)
+        .map(c => ({ rol: c.rol, nombre: amap.get(String(c.persona)) || String(c.persona) }));
 
     let editorial = null;
     if (doc.editorial) {
         const e = await db.collection('editoriales').findOne({ _id: doc.editorial }, { projection: { nombre: 1 } });
         editorial = e ? e.nombre : null;
     }
-    return { autores, editorial };
+    return { autores, editorial, contribuciones };
 }

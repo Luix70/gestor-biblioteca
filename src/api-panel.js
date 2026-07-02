@@ -710,7 +710,7 @@ export function rutasPanel() {
             if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc))
                 return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
 
-            const { autores, editorial } = await resolverNombres(db, doc);
+            const { autores, editorial, contribuciones } = await resolverNombres(db, doc);
             const colDoc = doc.coleccion
                 ? await db.collection('colecciones').findOne({ _id: doc.coleccion }, { projection: { nombre: 1, tipo: 1, issn: 1 } })
                 : null;
@@ -719,7 +719,7 @@ export function rutasPanel() {
                 ? { _id: String(doc.obra), titulo: await nombrePorId(db, 'obras', doc.obra, 'titulo') } : null;
 
             const limpio = { ...doc, _id: String(doc._id) };
-            for (const k of ['autores', 'editorial', 'coleccion', 'coleccion_nombre', 'obra',
+            for (const k of ['autores', 'editorial', 'coleccion', 'coleccion_nombre', 'obra', 'contribuciones',
                 '_portadas_remotas', 'mantenimiento', 'mantenimiento_firma']) delete limpio[k];
 
             // Clasificaciones (CDU/Dewey/LCC): código + título CONCISO (de caché, SIN IA aquí) + nº de
@@ -737,7 +737,7 @@ export function rutasPanel() {
             if (doc.lcc)   clasificaciones.push({ sistema: 'lcc',   codigo: doc.lcc,   titulo: await tituloCache('lcc', doc.lcc), n: await coll.countDocuments({ lcc: doc.lcc }) });
 
             res.json({
-                ok: true, doc: limpio, autores, editorial, coleccion,
+                ok: true, doc: limpio, autores, editorial, coleccion, contribuciones,
                 coleccion_id: doc.coleccion ? String(doc.coleccion) : null,
                 coleccion_tipo: colDoc?.tipo || null, coleccion_issn: colDoc?.issn || null,
                 cdu_desc: cdesc, clasificaciones, obra,
@@ -1063,7 +1063,8 @@ export function rutasPanel() {
             const foto = String(req.query.foto || '');   // 'si' | 'no' | ''
             const bio = String(req.query.bio || '');      // 'si' | 'no' | ''
             const orden = String(req.query.orden || 'libros'); // 'libros' | 'nombre'
-            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite, foto, bio, orden }) });
+            const rol = String(req.query.rol || '');      // '' | autor | traductor | ilustrador | …
+            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite, foto, bio, orden, rol }) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.get('/autores/:id', async (req, res) => {

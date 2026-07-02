@@ -6,6 +6,7 @@ import { buscarEnDNB } from './buscador-dnb.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarEnBNF } from './buscador-bnf.js';
 import { resolverCDU } from '../clasificador-cdu.js';
+import { extraerContribuciones } from './contribuciones.js';
 
 // Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
 // para no bloquear cada ingesta con un timeout largo. Se reinicia solo.
@@ -73,6 +74,8 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         cdu_adicionales: [],   // CDUs secundarios de fuentes autoritativas (BNE, etc.)
         coleccion_nombre: null,   // serie/colección leída de la portada (rellena hueco)
         coleccion_numero: null,
+        contribuciones_nombres: [], // [{nombre,rol}] traductor/ilustrador/… parseados de la mención (by_statement)
+        idioma_original: null,      // lengua ORIGINAL de la obra (traducciones): del Fichero (BNE lengua_original)
         alertas: []
     };
 
@@ -130,6 +133,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('lcc', infoLocal.lcc);
         rellenar('categorias', infoLocal.categorias);
         rellenar('coleccion_nombre', infoLocal.coleccion_nombre);
+        rellenar('idioma_original', infoLocal.lengua_original);   // lengua original (traducciones)
         if (infoLocal.cdu) datosExtra.cdu = infoLocal.cdu;   // CDU de la BNE → salta el clasificador IA
         if (infoLocal.paginas) datosExtra.paginas_bne = infoLocal.paginas;       // canales que captura
         if (infoLocal.dimensiones) datosExtra.dimensiones_bne = infoLocal.dimensiones; // motor-enriquecimiento
@@ -177,6 +181,17 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('año_edicion', infoOL.año_edicion);
         rellenar('dewey', infoOL.dewey);   // para derivar/aprender la CDU
         rellenar('lcc', infoOL.lcc);
+        // ROLES: la mención de responsabilidad de OL («… translated by X ; edited by Y») → contribuciones,
+        // excluyendo a los autores ya conocidos. Solo si aún no se tienen (rellena hueco).
+        if (infoOL.by_statement && (!datosExtra.contribuciones_nombres || !datosExtra.contribuciones_nombres.length)) {
+            const contribs = extraerContribuciones(infoOL.by_statement, {
+                autoresConocidos: [...(datosExtra.autores || []), ...(infoOL.autores || [])],
+            });
+            if (contribs.length) {
+                datosExtra.contribuciones_nombres = contribs;
+                datosExtra.alertas.push(`Roles de contribuyentes de OpenLibrary (${contribs.length}).`);
+            }
+        }
         datosExtra.alertas.push("Datos validados contra OpenLibrary.");
     }
 

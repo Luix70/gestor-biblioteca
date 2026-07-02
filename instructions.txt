@@ -419,11 +419,18 @@ de ficheros clasificado por CDU.
     alternativa; sin búsqueda, salen los autores CON libros, más usados primero
     (los miles de nombres del volcado sin libros aparecen al buscarlos). Cada
     tarjeta muestra foto, nombre, «a.k.a.» (variantes), nº de libros y fechas.
-    · Filtros: Foto (con/sin), Biografía (con/sin) y Orden (nº de obras / nombre)
-      — útiles para localizar a quién falta foto o bio y autocompletarlo.
+    · Filtros: Foto (con/sin), Biografía (con/sin), ROL (autor/traductor/ilustrador/
+      prologuista/anotador/editor/compilador) y Orden (nº de obras / nombre). El
+      filtro de rol lista a quienes intervienen en ese rol (nº = libros en ese rol).
     · Clic en una tarjeta → FICHA del autor: foto, biografía, fechas, «también
-      conocido como» y sus libros (clic en un libro = su ficha). El admin puede
-      EDITAR esos datos y SUBIR una foto.
+      conocido como», sus ROLES y sus libros (con el rol marcado; clic = su ficha).
+      El admin puede EDITAR esos datos y SUBIR una foto.
+    · ROLES de contribuyente: la ficha del LIBRO muestra «Contribuciones» (traductor:
+      X · ilustrador: Y) e «Idioma original». Se capturan en la ingesta desde
+      OpenLibrary (mención de responsabilidad `by_statement`) + la lengua original del
+      Fichero (BNE), SIN IA. Backfill de lo ya catalogado (por ISBN, tandas de 25,
+      reanudable): docker exec gestor-biblioteca node scripts/roles-autores.js --ejecutar
+      (sin --ejecutar cuenta; --limite N para probar).
     · COMBINAR (admin): marca 2+ autores (casilla) → «🔗 Combinar» → elige el que
       se CONSERVA (destino B; por defecto el que más libros tiene). Los demás (A)
       se funden en B: sus nombres pasan a «también conocido como» de B y TODOS sus

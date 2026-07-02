@@ -257,6 +257,12 @@ async function main() {
     await asegurarIndice(autores, { nombre: 1 }, { name: 'idx_nombre' });
     await asegurarIndice(autores, { nombres_alternativos: 1 }, { sparse: true, name: 'idx_nombres_alternativos' });
 
+    // biblioteca.contribuciones [{persona,rol}]: filtrar por rol y por persona-en-un-rol (página Autores).
+    // (contribuciones e idioma_original son campos OPCIONALES; additionalProperties del validador está
+    // abierto, así que no hace falta declararlos en el $jsonSchema.)
+    await asegurarIndice(biblioteca, { 'contribuciones.persona': 1 }, { sparse: true, name: 'idx_contrib_persona' });
+    await asegurarIndice(biblioteca, { 'contribuciones.rol': 1 }, { sparse: true, name: 'idx_contrib_rol' });
+
     console.log('\nListo.\n');
     process.exit(0);
 }

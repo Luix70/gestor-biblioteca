@@ -1385,11 +1385,13 @@ const ROL_ISBN_OPC = [
 const CAMPOS_FICHA = [
   ['subtitulo', 'Subtítulo'],
   ['_autores', 'Autores'],
+  ['_contribuciones', 'Contribuciones'],
   ['_editorial', 'Editorial'],
   ['_coleccion', 'Colección'],
   ['año_edicion', 'Año'],
   ['numero_edicion', 'Edición'],
   ['idioma', 'Idioma'],
+  ['idioma_original', 'Idioma original'],
   ['_formatos', 'Formatos'],
   ['paginas', 'Páginas'],
   ['_dimensiones', 'Tamaño'],
@@ -1512,6 +1514,11 @@ function pintarDoc(r, ctx) {
   const especiales = {
     _autores: r.autores && r.autores.length ? r.autores.map(esc).join(', ') : null,
     _editorial: r.editorial ? esc(r.editorial) : null,
+    // Contribuciones con rol (traductor/ilustrador/…): «rol: Nombre · rol: Nombre».
+    _contribuciones:
+      r.contribuciones && r.contribuciones.length
+        ? r.contribuciones.map((c) => `${esc(c.rol)}: ${esc(c.nombre)}`).join(' · ')
+        : null,
     _coleccion: r.coleccion
       ? (r.coleccion_id
           ? `<a class="rowlink" data-colid="${esc(r.coleccion_id)}" data-colnom="${esc(r.coleccion)}">${esc(r.coleccion)}</a>`
@@ -9124,6 +9131,9 @@ async function loadAutores() {
       <label class="muted" style="font-size:12px">Biografía
         <select id="autBioFiltro"><option value="">todas</option><option value="si">con</option><option value="no">sin</option></select>
       </label>
+      <label class="muted" style="font-size:12px">Rol
+        <select id="autRol"><option value="">todos</option><option value="autor">autor</option><option value="traductor">traductor</option><option value="ilustrador">ilustrador</option><option value="prologuista">prologuista</option><option value="anotador">anotador</option><option value="editor">editor</option><option value="compilador">compilador</option></select>
+      </label>
       <label class="muted" style="font-size:12px">Orden
         <select id="autOrden"><option value="libros">nº de obras</option><option value="nombre">nombre</option></select>
       </label>
@@ -9135,15 +9145,15 @@ async function loadAutores() {
       clearTimeout(_autoresBuscarTimer);
       _autoresBuscarTimer = setTimeout(autoresBuscar, 300);
     };
-  // Los selectores de filtro/orden recargan al instante.
-  ['#autFotoFiltro', '#autBioFiltro', '#autOrden'].forEach((sel) => {
+  // Los selectores de filtro/orden/rol recargan al instante.
+  ['#autFotoFiltro', '#autBioFiltro', '#autRol', '#autOrden'].forEach((sel) => {
     const el = $(sel);
     if (el) el.onchange = autoresBuscar;
   });
   autoresBuscar();
 }
 
-// Lee los controles (texto + filtros foto/bio + orden) y pide la lista al servidor.
+// Lee los controles (texto + filtros foto/bio/rol + orden) y pide la lista al servidor.
 async function autoresBuscar() {
   const grid = $('#autGrid');
   if (grid) grid.textContent = 'Cargando…';
@@ -9151,6 +9161,7 @@ async function autoresBuscar() {
     q: ($('#autBuscar') && $('#autBuscar').value.trim()) || '',
     foto: ($('#autFotoFiltro') && $('#autFotoFiltro').value) || '',
     bio: ($('#autBioFiltro') && $('#autBioFiltro').value) || '',
+    rol: ($('#autRol') && $('#autRol').value) || '',
     orden: ($('#autOrden') && $('#autOrden').value) || 'libros',
   });
   try {
@@ -9262,23 +9273,34 @@ async function autorFicha(id) {
        ${alt ? `<div class="muted" style="font-size:12px;margin-top:4px">a.k.a. ${esc(alt)}</div>` : ''}
        ${a.nacimiento || a.fallecimiento ? `<div class="muted" style="font-size:12px;margin-top:4px">${a.nacimiento || '?'}–${a.fallecimiento || ''}</div>` : ''}
        ${a.biografia ? `<p class="sinopsis-text" style="margin-top:8px">${esc(a.biografia)}</p>` : ''}`;
+  // Etiqueta de rol por libro (no se muestra «autor», es lo esperado; sí traductor/ilustrador/…).
+  const rolBadge = (rol) =>
+    rol && rol !== 'autor'
+      ? `<div style="font-size:9px;color:var(--acc);text-transform:uppercase;letter-spacing:.4px">${esc(rol)}</div>`
+      : '';
   const librosHtml = libros.length
     ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;margin-top:8px">${libros
         .map(
           (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="cursor:pointer;text-align:center">
             ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">📕</div>`}
+            ${rolBadge(l.rol)}
             <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
           </div>`,
         )
         .join('')}</div>`
     : '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
+  // Resumen de roles que desempeña esta persona (autor/traductor/…).
+  const rolesResumen =
+    Array.isArray(r.roles) && r.roles.length
+      ? `<div class="muted" style="font-size:11px;margin-top:4px">Roles: ${r.roles.map((x) => esc(x)).join(' · ')}</div>`
+      : '';
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:660px;max-height:92vh;overflow:auto">
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div style="text-align:center">
         ${foto}
         ${admin ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px"><button class="btn" id="autFoto">📷 Foto</button><button class="btn" id="autEnriquecer" title="Rellena foto, biografía, seudónimos y fechas desde OpenLibrary, Wikidata y Wikipedia (sin IA)">✨ Autocompletar (web)</button><input type="file" id="autFotoFile" accept="image/*" style="display:none"></div>` : ''}
       </div>
-      <div style="flex:1;min-width:250px">${campos}</div>
+      <div style="flex:1;min-width:250px">${campos}${rolesResumen}</div>
     </div>
     <div style="margin-top:12px"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})</div>${librosHtml}</div>
     <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
