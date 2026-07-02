@@ -156,7 +156,7 @@ async function medirPortadaRemota(url, fuente) {
 // Candidatas de PORTADA por ISBN. PRIMERO la del propio Fichero local (la más autoritativa: la trae nuestro
 // dump), luego fuentes KEYLESS (sin scraping frágil): OpenLibrary Covers (L), Amazon (truco ISBN-10) y
 // Google Books (mayor tamaño). Se miden (sin sharp) y ordenan por ancho desc para premarcar la de más resolución.
-async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
+export async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
     const urls = [];
     if (ficheroUrl) urls.push([String(ficheroUrl).replace(/^http:/, 'https:'), 'Fichero']);
     // OpenLibrary Covers: probar 13 Y 10 (distinta disponibilidad por edición).
@@ -167,13 +167,14 @@ async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
         urls.push([`https://m.media-amazon.com/images/P/${isbn10}.01.L.jpg`, 'Amazon']);
         urls.push([`https://images-na.ssl-images-amazon.com/images/P/${isbn10}.01._SCLZZZZZZZ_.jpg`, 'Amazon']);
     }
-    // OpenLibrary Search por ISBN: devuelve VARIAS ediciones (cover_i) del mismo libro → más candidatas que
-    // el lookup directo por ISBN (que solo da la cubierta de UNA edición, si está indexada por ese ISBN).
+    // OpenLibrary Search por el CAMPO isbn (NO por q=, que es difuso y traía portadas de otros libros que
+    // "mencionan" ese número → causa de portadas equivocadas). isbn= empareja EXACTO y devuelve las ediciones
+    // con ese ISBN (varias cover_i). Si OL no tiene el ISBN, no devuelve nada (mejor nada que una equivocada).
     for (const x of [isbn13, isbn10]) {
         if (!x) continue;
         try {
             const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 9000);
-            const resp = await fetch(`https://openlibrary.org/search.json?q=${x}&limit=5&fields=cover_i`, { signal: ctrl.signal });
+            const resp = await fetch(`https://openlibrary.org/search.json?isbn=${x}&limit=5&fields=cover_i`, { signal: ctrl.signal });
             clearTimeout(to);
             if (resp.ok) {
                 const j = await resp.json();
