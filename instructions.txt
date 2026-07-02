@@ -433,13 +433,24 @@ de ficheros clasificado por CDU.
       prologuista/anotador/editor/compilador) y Orden (nº de obras / nombre). El
       filtro de rol lista a quienes intervienen en ese rol (nº = libros en ese rol).
     · Clic en una tarjeta → FICHA del autor: foto, biografía, fechas, «también
-      conocido como», sus ROLES y sus libros (con el rol marcado; clic = su ficha).
-      El admin puede EDITAR esos datos y SUBIR una foto.
+      conocido como», sus ROLES y sus libros. Los libros EN PAPEL se listan primero
+      (subtítulo «📖 En papel») y los ELECTRÓNICOS después; los que ya tienen etiqueta
+      NFC llevan un badge 📶. El admin puede EDITAR esos datos y SUBIR una foto; los
+      botones Guardar/Cerrar están DUPLICADOS arriba (bajo la foto, junto a
+      Autocompletar) para no bajar hasta el pie.
+    · ENVIAR LIBROS A BÚSQUEDA (desde la ficha): «🔍 Ver en Búsqueda» abre el panel de
+      Búsqueda con TODOS sus libros (como autor o contribuyente), donde ya hay
+      selección/filtros/orden cómodos. Para mandar solo ALGUNOS: «☑️ Seleccionar» entra
+      en modo selección (tocar una tarjeta la marca, ✓, en vez de abrir su ficha —
+      selección cómoda en móvil) → «🔍 Enviar a Búsqueda» manda esa selección. (Debajo,
+      /catalogo acepta ?autor= —autor o contribuyente— y ?ids= —CSV de libros—.)
     · ROLES de contribuyente: la ficha del LIBRO muestra «Contribuciones» (traductor:
       X · ilustrador: Y) e «Idioma original». Se capturan en la ingesta desde
-      OpenLibrary (mención de responsabilidad `by_statement`) + la lengua original del
-      Fichero (BNE), SIN IA. Backfill de lo ya catalogado (por ISBN, tandas de 25,
-      reanudable): docker exec gestor-biblioteca node scripts/roles-autores.js --ejecutar
+      OpenLibrary (mención `by_statement`) + la MENCIÓN de la BNE del Fichero (roles y
+      abreviaturas: trad./ilustr./pról./introd./pref.) + la lengua original del Fichero,
+      SIN IA. OJO: los libros ya catalogados NO tienen roles hasta correr el backfill
+      (por ISBN, tandas de 25, reanudable):
+        docker exec gestor-biblioteca node scripts/roles-autores.js --ejecutar
       (sin --ejecutar cuenta; --limite N para probar).
     · COMBINAR (admin): marca 2+ autores (casilla) → «🔗 Combinar» → elige el que
       se CONSERVA (destino B; por defecto el que más libros tiene). Los demás (A)
