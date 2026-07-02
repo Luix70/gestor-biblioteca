@@ -43,10 +43,14 @@ async function main() {
     // Universales» ≡ «Letras Universales Cátedra» ≡ «Cátedra-Letras Universales»). Si el nombre no da ≥2
     // tokens significativos (clave null), se agrupa por el nombre limpio EXACTO (evita fundir de más).
     // Cada item guarda su nombre limpio y el número embebido en el nombre de ESA colección (o null).
+    // La clave y el nombre limpio deben ser CONSISTENTES: si se agrupa por el nombre solo con el número
+    // separado (deja tokens como «ISSN»/«0075»), «Springer … series, ISSN 1615» NO caería con «Springer …
+    // series» y luego al renombrar chocaría con ella (E11000). Por eso se LIMPIA el nombre (quita « ; v»,
+    // «, ISSN …») ANTES de calcular la clave y de agrupar. `limpio` = nombre final de esa colección.
     const grupos = new Map();
     for (const c of libros) {
         const { nombre, numero } = separarNumeroColeccion(c.nombre);
-        const limpio = nombre || c.nombre;
+        const limpio = limpiarNombreColeccion(nombre || c.nombre);
         const clave = claveCanonica(limpio) || limpio.toLowerCase();
         if (!grupos.has(clave)) grupos.set(clave, []);
         grupos.get(clave).push({ col: c, numero, limpio });
@@ -61,8 +65,7 @@ async function main() {
             return bEx - aEx || nMiembros(b.col._id) - nMiembros(a.col._id) || String(a.col._id).localeCompare(String(b.col._id));
         });
         const canonical = items[0].col;
-        // Nombre del grupo = el de la canónica, con las COLAS de basura quitadas (« ; v», «, ISSN …»).
-        const canon = limpiarNombreColeccion(items[0].limpio);
+        const canon = items[0].limpio;   // nombre del grupo = el nombre YA LIMPIO de la canónica
         const hayQueRenombrar = items.some((it) => it.col.nombre !== canon);
         if (items.length === 1 && !hayQueRenombrar) continue; // grupo de 1 ya correcto (la clave la pone el backfill final)
         const absorbidos = items.slice(1).map((it) => it.col);
@@ -94,11 +97,23 @@ async function main() {
     }
 
     // ── Aplicar ──────────────────────────────────────────────────────────────────────────────────────
-    let nRen = 0, nDocU = 0, nDel = 0;
+    let nRen = 0, nDocU = 0, nDel = 0, nOmit = 0;
     for (const p of plan) {
         if (p.rename) {
+            // Salvaguarda: el nombre limpio ya puede pertenecer a OTRA colección FUERA de este grupo (p. ej.
+            // una cabecera de revista, excluida del ámbito «libros»). Renombrar chocaría con el índice único
+            // (E11000). En ese caso se OMITE el grupo (revisión manual) — no se funde libro↔revista a ciegas.
+            const ocupa = await colColecciones.findOne(
+                { nombre: p.canon, _id: { $nin: p.ids } },
+                { collation: { locale: 'es', strength: 1 } },
+            );
+            if (ocupa) {
+                console.warn(`  ⚠️ «${p.canon}» ya existe (${ocupa.tipo === 'revista' ? 'revista' : 'otra colección'}); grupo OMITIDO (revisar a mano).`);
+                nOmit++;
+                continue;
+            }
             await colColecciones.updateOne({ _id: p.canonical._id }, { $set: { nombre: p.canon, fecha_actualizacion: new Date() } })
-                .catch((e) => console.warn(`  ⚠️ renombrar ${p.canonical._id}: ${e.message}`));
+                .catch((e) => { console.warn(`  ⚠️ renombrar ${p.canonical._id}: ${e.message}`); });
             nRen++;
         }
         // Rellenar issn/editorial/cdu/clave_canonica de la canónica desde las absorbidas / el nombre si faltan.
@@ -143,7 +158,7 @@ async function main() {
         if (k) { await colColecciones.updateOne({ _id: c._id }, { $set: { clave_canonica: k } }).catch(() => {}); nClave++; }
     }
 
-    console.log(`\n✅ Hecho: ${nRen} renombrada(s), ${nDocU} documento(s) actualizado(s), ${nDel} colección(es) borrada(s), ${nClave} clave(s) canónica(s) rellenada(s).\n`);
+    console.log(`\n✅ Hecho: ${nRen} renombrada(s), ${nDocU} documento(s) actualizado(s), ${nDel} colección(es) borrada(s), ${nClave} clave(s) canónica(s) rellenada(s)${nOmit ? `, ${nOmit} grupo(s) OMITIDO(s) (nombre ya en uso)` : ''}.\n`);
     process.exit(0);
 }
 
