@@ -1254,8 +1254,13 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 }
 /* Rejilla en modo selección: el cursor y un ligero realce invitan a tocar para seleccionar. */
 .selmode .vol,
-.selmode .drow {
+.selmode .drow,
+.selmode .ubcard {
   cursor: pointer;
+}
+.ubcard.sel {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
 }
 .selmode .vol:not(.sel):active,
 .selmode .drow:not(.sel):active {

@@ -267,10 +267,13 @@ de ficheros clasificado por CDU.
     · Resultados como tarjetas con miniatura; PAGINACIÓN arriba y abajo (al pasar
       de página, el scroll sube al primer resultado).
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
-    · MODO SELECCIÓN (admin, patrón ergonómico y móvil, común a toda la app —
-      Catálogo, ficha de autor, y en el futuro obras/editoriales): botón «🖱 Modo
-      selección» en la barra. Con él ACTIVO, tocar una portada la marca (tick ✓ +
-      recuadro) en vez de abrir su ficha; con él APAGADO, tocar abre la ficha. La
+    · MODO SELECCIÓN (admin, patrón ergonómico y móvil, COMÚN A TODA LA APP — Catálogo,
+      ficha de autor, Colecciones, Obras, ficha de colección/obra y Estanterías/
+      Ubicaciones; helper reutilizable montarSelDocs): botón «🖱 Modo selección» en la
+      barra. Con él ACTIVO, tocar una portada la marca (tick ✓ + recuadro) en vez de
+      abrir su ficha; con él APAGADO, tocar abre la ficha. En las listas fuera del
+      Catálogo la acción es «🔍 Mostrar en Catálogo» (lleva la selección al Catálogo,
+      ya marcada, con toda la barra de acciones). La
       selección NO se pierde al apagar el modo (así inspeccionas un libro y vuelves a
       seleccionar). Con selección hay acciones: 👁 Ver · 📚 Colección · 📖 Obra · 📍
       Estantería · 🚫 Quitar de estantería · 📶 Etiquetar · 🗑 Eliminar (pide

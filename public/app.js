@@ -1292,12 +1292,8 @@ function pintarObra(r) {
       ? `<div class="card" style="margin-top:14px"><h3 style="color:var(--warn)">Tomos sin número (${r.sin_numero.length})</h3><div class="vol-grid">${r.sin_numero.map((d) => tomoCard(d, '?', false)).join('')}</div></div>`
       : '';
   $('#p-detalle').innerHTML =
-    head + `<div class="card"><h3>Tomos</h3><div class="vol-grid">${vols}</div></div>` + sin;
-  {
-    const els = $$('#p-detalle .vol[data-doc]');
-    const lista = els.map((el) => el.dataset.doc);
-    els.forEach((el) => (el.onclick = () => verDoc(el.dataset.doc, { obra: { _id: o._id, titulo: o.titulo }, lista })));
-  }
+    head + `<div class="card"><div id="selbarDet"></div><h3>Tomos</h3><div class="vol-grid">${vols}</div></div>` + sin;
+  montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { obra: { _id: o._id, titulo: o.titulo } }, titulo: `📚 ${recortar(o.titulo || 'obra', 30)}` });
   attachRating('#p-detalle');
 }
 
@@ -1354,12 +1350,8 @@ function pintarColeccion(r) {
     : `<div class="empty">Sin ${esRev ? 'números' : 'libros'} registrados</div>`;
   $('#p-detalle').innerHTML =
     head +
-    `<div class="card"><h3>${esRev ? 'Números' : 'Libros'}</h3><div class="vol-grid">${cards}</div></div>`;
-  {
-    const els = $$('#p-detalle .vol[data-doc]');
-    const lista = els.map((el) => el.dataset.doc);
-    els.forEach((el) => (el.onclick = () => verDoc(el.dataset.doc, { coleccion: { _id: c._id, nombre: c.nombre }, lista })));
-  }
+    `<div class="card"><div id="selbarDet"></div><h3>${esRev ? 'Números' : 'Libros'}</h3><div class="vol-grid">${cards}</div></div>`;
+  montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}` });
   attachRating('#p-detalle');
 }
 
@@ -1405,6 +1397,46 @@ function pintarNavFicha(id, ctx) {
     cont.innerHTML = '<span class="muted" style="font-size:11px">…</span>';
     idsDelCatalogo().then(render).catch(() => { if ($('#fichaNav')) cont.innerHTML = ''; });
   } else cont.innerHTML = '';
+}
+
+// Patrón de SELECCIÓN reutilizable para cualquier lista de documentos (colección, obra, estantería…):
+// «Modo selección» (tocar marca con tick, la selección persiste; si no, abre la ficha con navegación) +
+// «Mostrar en Catálogo» de lo seleccionado. Mismo comportamiento y diseño que el Catálogo.
+//   scopeSel = contenedor con las tarjetas [data-doc]; barSel = dónde pintar la barra; verCtx = contexto de
+//   verDoc (volver/etiqueta); titulo = etiqueta del chip en el Catálogo.
+function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo }) {
+  const scope = $(scopeSel);
+  const bar = $(barSel);
+  if (!scope || !bar) return;
+  const cards = [...scope.querySelectorAll('[data-doc]')];
+  const lista = cards.map((c) => c.dataset.doc); // orden mostrado (para navegar en la ficha)
+  const sel = new Set();
+  let modo = false;
+  // Cada tarjeta necesita el tick ✓ (se inyecta si no lo trae).
+  cards.forEach((c) => { if (!c.querySelector('.selmark')) c.insertAdjacentHTML('afterbegin', '<span class="selmark">✓</span>'); });
+  const soloAdmin = ROL === 'admin';
+  const pintarBar = () => {
+    const acc = sel.size
+      ? `<span style="margin-left:auto"></span><b>${sel.size}</b> sel. <button class="btn pri" id="selcat">🔍 Mostrar en Catálogo</button> <button class="btn" id="selclr">Limpiar</button>`
+      : '';
+    bar.innerHTML = `<div class="bulkbar"><button class="btn${modo ? ' pri' : ''}" id="selmodo" title="Tocar una tarjeta la marca (en vez de abrirla). La selección se conserva.">🖱 Modo selección</button>${acc}</div>`;
+    $('#selmodo').onclick = () => { modo = !modo; scope.classList.toggle('selmode', modo); pintarBar(); };
+    if (sel.size) {
+      $('#selcat').onclick = () => mostrarEnCatalogo([...sel], titulo || `${sel.size} libros`);
+      $('#selclr').onclick = () => { sel.clear(); cards.forEach((c) => c.classList.remove('sel')); pintarBar(); };
+    }
+  };
+  cards.forEach((el) => {
+    el.onclick = () => {
+      const id = el.dataset.doc;
+      if (modo && soloAdmin) {
+        sel.has(id) ? sel.delete(id) : sel.add(id);
+        el.classList.toggle('sel', sel.has(id));
+        pintarBar();
+      } else verDoc(id, { ...verCtx, lista });
+    };
+  });
+  if (soloAdmin) pintarBar();
 }
 
 async function verDoc(id, ctx) {
@@ -9307,16 +9339,12 @@ async function ubicVerLibros(ambito, estanteria) {
     const r = await api('/catalogo?' + p.toString());
     const tit = esc(ambito) + (estanteria ? ' · ' + esc(estanteria) : '');
     box.innerHTML =
-      `<div class="card"><div class="sec-h" style="margin-bottom:8px"><h3 style="margin:0">📚 ${tit}</h3><span class="muted">${r.total} libro(s)</span></div>` +
+      `<div class="card"><div class="sec-h" style="margin-bottom:8px"><h3 style="margin:0">📚 ${tit}</h3><span class="muted">${r.total} libro(s)</span></div><div id="selbarUbic"></div>` +
       (r.docs.length
         ? `<div class="ubgrid">${r.docs.map(ubicCard).join('')}</div>${r.total > r.docs.length ? `<div class="muted" style="margin-top:10px">Mostrando ${r.docs.length} de ${r.total}. <a class="rowlink" id="ubVerBusq">Ver todos en el Catálogo →</a></div>` : ''}`
         : '<div class="muted">Sin libros en esta ubicación.</div>') +
       `</div>`;
-    {
-      const els = $$('#ubicLibros [data-doc]');
-      const lista = els.map((el) => el.dataset.doc);
-      els.forEach((el) => (el.onclick = () => verDoc(el.dataset.doc, { volver: 'ubic', etiqueta: 'Ubicaciones', lista })));
-    }
+    montarSelDocs({ scopeSel: '#ubicLibros', barSel: '#selbarUbic', verCtx: { volver: 'ubic', etiqueta: 'Ubicaciones' }, titulo: `📍 ${tit}` });
     const vb = $('#ubVerBusq');
     if (vb)
       vb.onclick = () => {
