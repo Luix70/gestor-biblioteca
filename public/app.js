@@ -1723,6 +1723,23 @@ function pintarDoc(r, ctx) {
     .map((p) => `<dt>${p[0]}</dt><dd>${p[1]}</dd>`)
     .join('');
   const ubicFmin = `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">${_txtUbic(d) ? `<a class="rowlink" id="ubicChip" style="color:var(--acc)" title="Ver los libros de esta estantería">📍 ${esc(_txtUbic(d))}</a>` : '<span class="muted">Sin asignar</span>'}</div></div>`;
+  // Bajo el exlibris: la OBRA (con el ordinal del volumen, «Vol.: III») y la COLECCIÓN (con el nº del
+  // libro/obra dentro de la colección, «Nº 678»). Primero la obra, luego la colección. Ambas clicables.
+  const obraColFmin = (() => {
+    const filas = [];
+    const obraTit = (r.obra && r.obra.titulo) || d.obra_titulo;
+    if (obraTit) {
+      const obraLink = r.obra && r.obra._id ? `<a class="rowlink" onclick="verObra('${esc(r.obra._id)}')">${esc(obraTit)}</a>` : esc(obraTit);
+      const vol = d.volumen_numero != null ? ` <b>Vol.: ${aRomano(d.volumen_numero)}</b>` : '';
+      filas.push(`<div class="fmin-oc-fila"><span class="lbl">Obra</span> <span>${obraLink}${vol}</span></div>`);
+    }
+    if (r.coleccion) {
+      const colLink = r.coleccion_id ? `<a class="rowlink" data-colid="${esc(r.coleccion_id)}" data-colnom="${esc(r.coleccion)}">${esc(r.coleccion)}</a>` : esc(r.coleccion);
+      const num = d.coleccion_numero ? ` <b>Nº ${esc(d.coleccion_numero)}</b>` : '';
+      filas.push(`<div class="fmin-oc-fila"><span class="lbl">Colección</span> <span>${colLink}${num}</span></div>`);
+    }
+    return filas.length ? `<div class="fmin-obracol">${filas.join('')}</div>` : '';
+  })();
   const fmin = fichaMinima({
     titulo: d.titulo,
     subtitulo: d.subtitulo || subDoc,
@@ -1732,6 +1749,7 @@ function pintarDoc(r, ctx) {
     descargaNombre: r.nombre_archivo || '',
     estrellasHTML: ratingBar('documentos', d._id, d.valoracion, d.nsfw) + ' ' + badgesDoc(d),
     datosHTML: filasFmin,
+    obraColHTML: obraColFmin,
     ubicacionHTML: ubicFmin,
     origen,
   });
@@ -8252,8 +8270,21 @@ function fichaMinima(o) {
   return `<div class="fmin card">${badge}
     <h1 class="fmin-tit">${esc(o.titulo || '(sin título)')}</h1>${o.subtitulo ? `<div class="fmin-sub">${esc(o.subtitulo)}</div>` : ''}${starsInner ? `<div class="fmin-stars">${starsInner}</div>` : ''}
     ${hero ? `<div style="margin-top:14px">${hero}</div>` : ''}
+    ${o.obraColHTML || ''}
     ${filas ? `<dl class="dl fmin-data">${filas}</dl>` : ''}
     ${pie}</div>`;
+}
+// Entero → número romano (para el ordinal del volumen, «Vol.: III»). Fuera de rango: devuelve el número.
+function aRomano(n) {
+  n = parseInt(n, 10);
+  if (!Number.isFinite(n) || n <= 0 || n >= 4000) return String(n);
+  const t = [
+    [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'],
+    [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
+  ];
+  let s = '';
+  for (const [v, r] of t) while (n >= v) { s += r; n -= v; }
+  return s;
 }
 // Dibuja un código QR (matriz de qrGenerar) en un <canvas> con zona de silencio. px = tamaño objetivo.
 function qrCanvas(qr, px) {
