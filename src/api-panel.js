@@ -498,6 +498,13 @@ export function rutasPanel() {
                     .slice(0, 1000).map(s => new ObjectId(s));
                 extras.push({ _id: { $in: oids.length ? oids : [new ObjectId()] } });
             }
+            // Filtro por VARIAS colecciones / VARIAS obras (selección enviada desde la página de Colecciones/
+            // Obras al Catálogo). CSV de ObjectId.
+            const oidsDe = (csv) => String(csv || '').split(',').map(s => s.trim()).filter(s => ObjectId.isValid(s)).slice(0, 500).map(s => new ObjectId(s));
+            const colsCsv = oidsDe(req.query.colecciones);
+            if (colsCsv.length) extras.push({ coleccion: { $in: colsCsv } });
+            const obrasCsv = oidsDe(req.query.obras);
+            if (obrasCsv.length) extras.push({ obra: { $in: obrasCsv } });
             // NSFW: los invitados no ven material marcado (ni el que cuelga de una obra/colección nsfw).
             const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
             if (nsfwCond) extras.push(...nsfwCond);

@@ -967,7 +967,7 @@ async function purga(ejecutar) {
 $('#purgaSim').onclick = () => purga(false);
 $('#purgaExec').onclick = () => purga(true);
 // ── ESTANTERÍA (shelf) de obras y colecciones: rejilla con portada, filtro, selección y acciones en lote ──
-const shelf = { obra: { items: [], sel: new Set() }, coleccion: { items: [], sel: new Set() } };
+const shelf = { obra: { items: [], sel: new Set(), modo: false }, coleccion: { items: [], sel: new Set(), modo: false } };
 async function loadObras() {
   try {
     shelf.obra.items = await api('/obras');
@@ -1007,12 +1007,11 @@ function shelfCard(kind, x) {
     ? `${x.volumenes_presentes || 0}/${x.total_volumenes || '?'} tomos ${x.completa ? '<span class="tag ok">completa</span>' : '<span class="tag warn">incompleta</span>'}${x.revision_requerida ? ' <span class="tag bad">revisar</span>' : ''}`
     : `${x.tipo === 'revista' ? '📰 revista' : '📚 libro'} · ${x.miembros || 0}${x.revision_requerida ? ' <span class="tag bad">revisar</span>' : ''}`;
   const sel = shelf[kind].sel.has(x._id);
-  const chk = `<input type="checkbox" class="shelfchk admin-only" data-id="${esc(x._id)}"${sel ? ' checked' : ''}>`;
   const req =
     esObra && x.isbn_obra
       ? ` <button class="rbtn shreq admin-only" data-req="${esc(x._id)}" title="Re-consultar título/sinopsis por ISBN">↻</button>`
       : '';
-  return `<div class="vol${sel ? ' sel' : ''}" data-${kind}="${esc(x._id)}" data-nombre="${esc((nombre || '').toLowerCase())}">${chk}<div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(nombre || '—', 60))}${x.nsfw ? ' 🔞' : ''}${req}</div><div class="t">${estado}</div><div style="margin-top:5px">${ratingBar(esObra ? 'obras' : 'colecciones', x._id, x.valoracion, x.nsfw)}</div></div></div>`;
+  return `<div class="vol${sel ? ' sel' : ''}" data-${kind}="${esc(x._id)}" data-nombre="${esc((nombre || '').toLowerCase())}"><span class="selmark">✓</span><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(nombre || '—', 60))}${x.nsfw ? ' 🔞' : ''}${req}</div><div class="t">${estado}</div><div style="margin-top:5px">${ratingBar(esObra ? 'obras' : 'colecciones', x._id, x.valoracion, x.nsfw)}</div></div></div>`;
 }
 function pintarShelf(kind) {
   const cont = kind === 'obra' ? $('#obrasBody') : $('#colsBody');
@@ -1020,7 +1019,7 @@ function pintarShelf(kind) {
   const st = shelf[kind];
   cont.innerHTML = `<div class="row" style="margin-bottom:10px"><input id="shf_${kind}" placeholder="🔍 filtrar por nombre…" autocomplete="off" style="flex:1"></div>
     <div id="shbulk_${kind}"></div>
-    ${st.items.length ? `<div class="vol-grid">${st.items.map((x) => shelfCard(kind, x)).join('')}</div>` : `<div class="empty">Sin ${kind === 'obra' ? 'obras' : 'colecciones'}</div>`}`;
+    ${st.items.length ? `<div class="vol-grid${st.modo && ROL === 'admin' ? ' selmode' : ''}">${st.items.map((x) => shelfCard(kind, x)).join('')}</div>` : `<div class="empty">Sin ${kind === 'obra' ? 'obras' : 'colecciones'}</div>`}`;
   const fi = $('#shf_' + kind);
   if (fi)
     fi.oninput = () => {
@@ -1029,21 +1028,18 @@ function pintarShelf(kind) {
         c.style.display = (c.dataset.nombre || '').includes(q) ? '' : 'none';
       });
     };
+  // Tocar una tarjeta: en Modo selección (admin) marca/desmarca; si no, abre la colección/obra.
   $$(`#${cont.id} .vol[data-${kind}]`).forEach(
     (el) =>
       (el.onclick = () => {
-        kind === 'obra' ? verObra(el.dataset.obra) : verColeccion(el.dataset.coleccion);
+        const id = el.dataset[kind];
+        if (st.modo && ROL === 'admin') {
+          st.sel.has(id) ? st.sel.delete(id) : st.sel.add(id);
+          el.classList.toggle('sel', st.sel.has(id));
+          renderShelfBulk(kind);
+        } else kind === 'obra' ? verObra(id) : verColeccion(id);
       }),
   );
-  $$(`#${cont.id} .shelfchk`).forEach((cb) => {
-    cb.onclick = (e) => e.stopPropagation();
-    cb.onchange = () => {
-      cb.checked ? st.sel.add(cb.dataset.id) : st.sel.delete(cb.dataset.id);
-      const c = cb.closest('.vol');
-      if (c) c.classList.toggle('sel', cb.checked);
-      renderShelfBulk(kind);
-    };
-  });
   $$(`#${cont.id} .shreq`).forEach((b) => {
     b.onclick = async (e) => {
       e.stopPropagation();
@@ -1082,37 +1078,52 @@ function renderShelfBulk(kind) {
     return;
   }
   const ids = st.items.map((x) => x._id),
-    enSel = ids.filter((id) => st.sel.has(id)).length;
+    enSel = ids.filter((id) => st.sel.has(id)).length,
+    todas = enSel > 0 && enSel === ids.length;
+  const modoBtn = `<button class="btn${st.modo ? ' pri' : ''}" id="shModo" title="Tocar una tarjeta la marca (en vez de abrirla). La selección se conserva al apagarlo.">🖱 Modo selección</button>`;
+  const tools = st.modo ? `<button class="btn" id="shAll">${todas ? 'Quitar' : 'Todas'}</button>` : '';
+  const nom = kind === 'obra' ? 'obra' : 'colección';
   const acc = st.sel.size
     ? `<span style="margin-left:auto"></span><b>${st.sel.size}</b> sel.
-    ${st.sel.size >= 2 ? `<button class="btn pri" id="shMerge">⛙ Fusionar</button>` : ''}
+    <button class="btn pri" id="shCat" title="Ver en el Catálogo los libros de las ${kind === 'obra' ? 'obras' : 'colecciones'} seleccionadas">🔍 Mostrar en Catálogo</button>
+    ${st.sel.size >= 2 ? `<button class="btn" id="shMerge">⛙ Fusionar</button>` : ''}
     <button class="btn" id="shExpl">💥 Explotar</button>
     <button class="btn bad" id="shDel">🗑 Eliminar vacías</button>
     <button class="btn" id="shClr">Limpiar</button>`
     : '';
-  el.innerHTML = `<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="shAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todas</label>${acc}</div>`;
-  const all = $('#shAll');
-  all.checked = enSel > 0 && enSel === ids.length;
-  all.indeterminate = enSel > 0 && enSel < ids.length;
-  all.onchange = () => {
-    const on = all.checked;
-    ids.forEach((id) => (on ? st.sel.add(id) : st.sel.delete(id)));
-    $$(`#${cont.id} .shelfchk`).forEach((cb) => (cb.checked = on));
-    $$(`#${cont.id} .vol`).forEach((c) => c.classList.toggle('sel', on));
-    renderShelfBulk(kind);
+  el.innerHTML = `<div class="bulkbar">${modoBtn}${tools}${acc}</div>`;
+  $('#shModo').onclick = () => {
+    st.modo = !st.modo;
+    pintarShelf(kind); // re-render para aplicar/quitar el modo selección (cursor + comportamiento)
   };
+  if ($('#shAll'))
+    $('#shAll').onclick = () => {
+      const on = !todas;
+      ids.forEach((id) => (on ? st.sel.add(id) : st.sel.delete(id)));
+      $$(`#${cont.id} .vol`).forEach((c) => c.classList.toggle('sel', st.sel.has(c.dataset[kind])));
+      renderShelfBulk(kind);
+    };
   if (st.sel.size) {
+    $('#shCat').onclick = () => mostrarShelfEnCatalogo(kind);
     const mg = $('#shMerge');
     if (mg) mg.onclick = () => shelfFusionar(kind);
     $('#shExpl').onclick = () => shelfExplotar(kind);
     $('#shDel').onclick = () => shelfEliminar(kind);
     $('#shClr').onclick = () => {
       st.sel.clear();
-      $$(`#${cont.id} .shelfchk`).forEach((cb) => (cb.checked = false));
       $$(`#${cont.id} .vol.sel`).forEach((c) => c.classList.remove('sel'));
       renderShelfBulk(kind);
     };
   }
+}
+// Envía las colecciones/obras seleccionadas al Catálogo (muestra sus libros, filtrando por ellas).
+function mostrarShelfEnCatalogo(kind) {
+  const st = shelf[kind];
+  const ids = [...st.sel];
+  if (!ids.length) return;
+  const clave = kind === 'obra' ? 'obras' : 'colecciones';
+  const etq = `${kind === 'obra' ? '📚' : '🗂️'} ${ids.length} ${kind === 'obra' ? 'obra(s)' : 'colección(es)'}`;
+  irBusquedaFiltro({ [clave]: ids.join(','), etiqueta: etq });
 }
 function shelfSel(kind) {
   const st = shelf[kind];
