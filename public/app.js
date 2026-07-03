@@ -6122,6 +6122,7 @@ async function camaraEnVivo() {
       <div style="position:relative;max-width:100%;max-height:100%">
         <video id="cvVid" playsinline muted style="display:block;max-width:100%;max-height:78vh"></video>
         <canvas id="cvOvl" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
+        <div id="cvInfo" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.62);color:#fff;font-size:13px;font-weight:600;padding:5px 12px;border-radius:14px;pointer-events:none;white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis">Encuadra el libro sobre el tapete</div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:center;justify-content:center;padding:12px;background:#111;flex-wrap:wrap">
@@ -6155,12 +6156,37 @@ async function camaraEnVivo() {
   let vivo = true;
   const capCanvas = document.createElement('canvas');
   const work = document.createElement('canvas');
+  const mcan = document.createElement('canvas'); // canvas de MEDICIÓN (mayor resolución, throttled)
   const actualizarN = () => { const n = camFotos.length; overlay.querySelector('#cvN').textContent = `${n} foto(s)`; overlay.querySelector('#cvDone').textContent = `✅ Catalogar (${n})`; };
   actualizarN();
 
-  // Overlay del TAPETE en vivo: cada ~250 ms detecta el cuadrilátero del libro y lo dibuja sobre el vídeo.
+  // MEDIR SIN DISPARAR: sobre un frame a ~1024 px, detecta el libro y la rejilla del tapete y devuelve
+  // {ancho_cm,alto_cm} — misma fórmula que el recorte al enviar (distancia de esquinas ÷ px/cm). Más
+  // caro que el overlay, así que se llama throttled (~1 s). El tapete debe verse (rejilla) para medir.
+  const medir = () => {
+    try {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw) return null;
+      const ancho = Math.min(vw, 1024);
+      mcan.width = ancho; mcan.height = Math.max(1, Math.round((vh / vw) * ancho));
+      mcan.getContext('2d').drawImage(video, 0, 0, mcan.width, mcan.height);
+      const q = detectarBordesVerde(mcan);
+      if (!q) return null;
+      const pxcm = detectarRejillaPxCm(mcan);
+      if (!pxcm) return null;
+      const W = (_dist(q[0], q[1]) + _dist(q[3], q[2])) / 2 / pxcm,
+        H = (_dist(q[0], q[3]) + _dist(q[1], q[2])) / 2 / pxcm;
+      if (W >= 4 && W <= 50 && H >= 4 && H <= 50) return { ancho_cm: +W.toFixed(1), alto_cm: +H.toFixed(1) };
+    } catch (_) {}
+    return null;
+  };
+
+  // Overlay del TAPETE en vivo: cada ~250 ms detecta el cuadrilátero del libro y lo dibuja sobre el
+  // vídeo; en verde si además hay medida fresca, ámbar si aún se está midiendo.
+  let iter = 0, ultDims = null, fallosMedida = 0;
   const loopTapete = () => {
     if (!vivo) return;
+    let hayQuad = false;
     try {
       const vw = video.videoWidth, vh = video.videoHeight, cw = video.clientWidth, ch = video.clientHeight;
       if (vw && vh && cw) {
@@ -6171,14 +6197,26 @@ async function camaraEnVivo() {
         const ctx = ovl.getContext('2d');
         ctx.clearRect(0, 0, cw, ch);
         if (q) {
+          hayQuad = true;
           const sx = cw / work.width, sy = ch / work.height;
-          ctx.strokeStyle = '#28d9a8'; ctx.lineWidth = 3; ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 3;
+          ctx.strokeStyle = ultDims ? '#28d9a8' : '#f5b301'; ctx.lineWidth = 3; ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 3;
           ctx.beginPath();
-          q.forEach((p, i) => { const x = p.x * sx, y = p.y * sy; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+          q.forEach((p, i) => { const x = p[0] * sx, y = p[1] * sy; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
           ctx.closePath(); ctx.stroke();
         }
       }
     } catch (_) {}
+    // Medición (más cara) throttled: ~cada segundo; caduca la última medida tras 2 fallos seguidos.
+    if (++iter % 4 === 0) {
+      const d = medir();
+      if (d) { ultDims = d; fallosMedida = 0; }
+      else if (++fallosMedida >= 2) ultDims = null;
+    }
+    const info = overlay.querySelector('#cvInfo');
+    if (info)
+      info.textContent = ultDims
+        ? `📐 ${String(ultDims.ancho_cm).replace('.', ',')} × ${String(ultDims.alto_cm).replace('.', ',')} cm`
+        : hayQuad ? 'Midiendo…' : 'Encuadra el libro sobre el tapete';
     setTimeout(loopTapete, 250);
   };
   loopTapete();
