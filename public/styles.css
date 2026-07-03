@@ -1276,6 +1276,47 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
   transition: width 0.4s ease;
 }
 
+/* Badges de tipo/soporte de documento (ficha de autor). */
+.docbadge {
+  font-size: 9px;
+  border-radius: 5px;
+  padding: 0 4px;
+  line-height: 1.6;
+  white-space: nowrap;
+  font-weight: 600;
+}
+/* Secciones por ROL de la ficha de autor: card colapsable con rótulo grande. */
+.autrolsec {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 8px 12px 10px;
+  margin-top: 12px;
+  background: var(--bg2);
+}
+.autrolsec > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.autrolsec > summary::-webkit-details-marker {
+  display: none;
+}
+.autrolsec > summary::before {
+  content: '▾';
+  color: var(--muted);
+  font-size: 12px;
+  transition: transform 0.15s;
+}
+.autrolsec:not([open]) > summary::before {
+  transform: rotate(-90deg);
+}
+.autrol-tit {
+  font-weight: 700;
+  font-size: 16px;
+}
+
 /* Vista DETALLES del Catálogo: una fila por documento, solo texto (más documentos por página). */
 .dlist {
   border-top: 1px solid var(--line);

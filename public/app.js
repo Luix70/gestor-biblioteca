@@ -9627,27 +9627,37 @@ async function autorFicha(id) {
     l.nfc
       ? `<span title="Tiene etiqueta NFC" style="position:absolute;top:3px;right:3px;font-size:11px;background:var(--card);border-radius:6px;padding:0 3px">📶</span>`
       : '';
-  // Tarjeta de un libro: marca de selección (oculta salvo en modo selección) + badge NFC + 📖 si es papel.
+  // Badges de TIPO (libro/revista/cómic) y SOPORTE (papel/digital) de cada documento.
+  const tipoBadge = (l) =>
+    l.comic
+      ? '<span class="docbadge" style="background:rgba(180,120,255,.18);color:#b478ff">📓 cómic</span>'
+      : l.tipo_recurso === 'revista'
+        ? '<span class="docbadge" style="background:rgba(120,160,255,.18);color:#78a0ff">📰 revista</span>'
+        : '<span class="docbadge" style="background:rgba(120,160,255,.14);color:var(--muted)">📕 libro</span>';
+  const soporteBadge = (l) =>
+    l.papel
+      ? '<span class="docbadge" style="background:rgba(200,160,90,.18);color:#d0a860">📄 papel</span>'
+      : '<span class="docbadge" style="background:rgba(40,217,168,.16);color:var(--acc)">💾 digital</span>';
+  // Tarjeta de un libro: selección + NFC + badges de tipo/soporte bajo el título.
   const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
       <span class="selmark">✓</span>
       ${nfcBadge(l)}
-      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">📕</div>`}
-      <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${l.papel ? '📖 ' : ''}${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
+      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${l.comic ? '📓' : l.tipo_recurso === 'revista' ? '📰' : '📕'}</div>`}
+      <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
+      <div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin-top:3px">${tipoBadge(l)}${soporteBadge(l)}</div>
     </div>`;
   const gridLibros = (arr) =>
-    `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;margin-top:8px">${arr.map(cardLibro).join('')}</div>`;
-  const subtitulo = (t) => `<div class="muted" style="font-size:11px;margin-top:10px;font-weight:600">${t}</div>`;
-  // AGRUPADO POR ROL (estilo IMDB): «Como autor / Como traductor / Como ilustrador…». Dentro de cada rol,
-  // los de papel primero. El orden de las secciones es fijo (autoría primero).
+    `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:10px;margin-top:8px">${arr.map(cardLibro).join('')}</div>`;
+  // AGRUPADO POR ROL (estilo IMDB) en CARDS COLAPSABLES con rótulo grande. Dentro de cada rol, papel primero.
   const ROL_SECCION = [
-    ['autor', 'Como autor'],
-    ['traductor', 'Como traductor'],
-    ['ilustrador', 'Como ilustrador'],
-    ['editor', 'Como editor'],
-    ['prologuista', 'Como prologuista'],
-    ['anotador', 'Como anotador'],
-    ['compilador', 'Como compilador'],
-    ['contribuyente', 'Otras contribuciones'],
+    ['autor', '✍️ Como autor'],
+    ['traductor', '🌐 Como traductor'],
+    ['ilustrador', '🎨 Como ilustrador'],
+    ['editor', '📝 Como editor'],
+    ['prologuista', '📖 Como prologuista'],
+    ['anotador', '🖊️ Como anotador'],
+    ['compilador', '📚 Como compilador'],
+    ['contribuyente', '👥 Otras contribuciones'],
   ];
   const porRol = new Map();
   for (const l of libros) {
@@ -9659,7 +9669,10 @@ async function autorFicha(id) {
     const arr = porRol.get(rol);
     if (!arr || !arr.length) return '';
     const orden = [...arr].sort((a, b) => (b.papel ? 1 : 0) - (a.papel ? 1 : 0)); // papel primero dentro del rol
-    return `${subtitulo(lab + ' (' + arr.length + ')')}${gridLibros(orden)}`;
+    return `<details class="autrolsec" open>
+        <summary><span class="autrol-tit">${lab}</span> <span class="muted" style="font-weight:400;font-size:12px">· ${arr.length}</span></summary>
+        ${gridLibros(orden)}
+      </details>`;
   };
   let librosHtml;
   if (!libros.length) librosHtml = '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';

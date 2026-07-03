@@ -103,16 +103,17 @@ export async function fichaAutor(db, id) {
     if (!_id) return null;
     const autor = await db.collection('autores').findOne({ _id }, { projection: PROY_AUTOR });
     if (!autor) return null;
-    // `formatos` → distinguir papel de electrónico; `nfc.fecha_vinculacion` → badge de etiqueta grabada.
-    const PROY = { titulo: 1, portada: 1, 'año_edicion': 1, cdu: 1, tipo_recurso: 1, nsfw: 1, formatos: 1, 'nfc.fecha_vinculacion': 1, contribuciones: 1 };
+    // `formatos` → distinguir papel de electrónico; `nfc.fecha_vinculacion` → badge; `naturaleza` → cómic.
+    const PROY = { titulo: 1, portada: 1, 'año_edicion': 1, cdu: 1, tipo_recurso: 1, naturaleza: 1, nsfw: 1, formatos: 1, 'nfc.fecha_vinculacion': 1, contribuciones: 1 };
 
     // Convierte un doc de biblioteca en el item mínimo de la ficha (con el rol de esta persona en él).
     //   · papel = tiene el formato 'papel' (libro físico escaneado); si no, es electrónico (epub/pdf/…).
-    //   · nfc   = ya tiene una etiqueta NFC grabada.
+    //   · comic = es cómic/novela gráfica (naturaleza).   · nfc = ya tiene una etiqueta NFC grabada.
     const aItem = (l, rol) => ({
         _id: String(l._id), titulo: l.titulo, portada: l.portada, 'año_edicion': l['año_edicion'],
         cdu: l.cdu, tipo_recurso: l.tipo_recurso, nsfw: l.nsfw,
         formatos: l.formatos || [], papel: (l.formatos || []).includes('papel'),
+        comic: ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(String(l.naturaleza || '').toLowerCase()),
         nfc: !!(l.nfc && l.nfc.fecha_vinculacion), rol,
     });
 
