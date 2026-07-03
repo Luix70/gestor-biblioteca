@@ -7,7 +7,7 @@ import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
 import { resolverPersona } from './utils/resolver-persona.js';
 import { separarAutores } from './utils/autor-normalizar.js';
-import { ROLES_VALIDOS } from './utils/contribuciones.js';
+import { ROLES_VALIDOS, esComicPorDatos, promoverIlustradorSiComic } from './utils/contribuciones.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -114,6 +114,17 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         // 1. Autores (string → ObjectId; crea si no existe). La resolución (normaliza el marcador BNE «/**​/»,
         //    extrae fechas de vida, latiniza alfabetos no latinos + grafías alternativas, empareja/crea) vive
         //    en utils/resolver-persona.js, compartida con las contribuciones y los scripts de backfill.
+        // CÓMIC: el dibujante es COAUTOR (al mismo nivel que el guionista). Antes de resolver, se pasan los
+        // 'ilustrador' de la mención a AUTOR (el guionista ya viene como autor del parser). Anti-pérdida: solo
+        // añade, no quita nada.
+        if (Array.isArray(docFinal.contribuciones_nombres) && esComicPorDatos(docFinal)) {
+            const { autoresExtra, contribuciones } = promoverIlustradorSiComic(docFinal.contribuciones_nombres, true);
+            if (autoresExtra.length) {
+                docFinal.autores = [...(docFinal.autores || []), ...autoresExtra];
+                docFinal.contribuciones_nombres = contribuciones;
+            }
+        }
+
         if (docFinal.autores && docFinal.autores.length > 0) {
             const ids = [];
             const vistos = new Set();

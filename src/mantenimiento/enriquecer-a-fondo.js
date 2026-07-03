@@ -18,7 +18,7 @@ import { extraerConPlantilla } from '../utils/plantilla-vision.js';
 import { esAutorPlaceholder } from '../utils/creditos-portada.js';
 import { resolverPersona } from '../utils/resolver-persona.js';
 import { separarAutores } from '../utils/autor-normalizar.js';
-import { ROLES_VALIDOS } from '../utils/contribuciones.js';
+import { ROLES_VALIDOS, esComicPorDatos, promoverIlustradorSiComic } from '../utils/contribuciones.js';
 import { validarISBN, variantesISBN } from '../utils/identificadores.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
 
@@ -86,23 +86,27 @@ export async function analizarAFondo(db, doc, { maxImagenes = 6 } = {}) {
     };
     const primero = (...vs) => vs.find((v) => v != null && v !== '' && !(Array.isArray(v) && !v.length));
 
-    // AUTORES: sustituir SOLO si los actuales son placeholder/ausentes, y SOLO por autores REALES.
-    // Nunca se pisa un autor bueno, y NUNCA se propone un placeholder como autor (p. ej. no cambiar
-    // «Alan Moore» —ni ningún autor— por «Various»/«DK»): esos se descartan del valor propuesto.
-    const desdeVis = (vis && vis.autores || []).filter((n) => !esAutorPlaceholder(n, edNombre));
-    const desdeExt = (ext && ext.autores || []).filter((n) => !esAutorPlaceholder(n, edNombre));
-    const autoresNuevos = desdeVis.length ? desdeVis : desdeExt;
+    // CONTRIBUCIONES (roles): unir visión + APIs (la mención de la BNE también trae roles).
+    const deVis = (vis && vis.contribuciones || []).filter((c) => ROLES_VALIDOS.includes(c.rol) && c.rol !== 'autor');
+    const deExt = (ext && ext.contribuciones_nombres || []).filter((c) => ROLES_VALIDOS.includes(c.rol) && c.rol !== 'autor');
+    let merged = []; const seen = new Set();
+    for (const c of [...deExt, ...deVis]) { const k = `${c.nombre.toLowerCase()}|${c.rol}`; if (seen.has(k)) continue; seen.add(k); merged.push(c); }
+
+    // CÓMIC: el dibujante es COAUTOR → pasa de contribuciones a autores (junto al guionista, ya autor).
+    const comic = esComicPorDatos({ ...doc, tipo_documento: vis && vis.tipo_documento });
+    const { autoresExtra, contribuciones: mergedResto } = promoverIlustradorSiComic(merged, comic);
+    merged = mergedResto;
+
+    // AUTORES: sustituir SOLO si los actuales son placeholder/ausentes, y SOLO por autores REALES (nunca se
+    // pisa un autor bueno ni se propone un placeholder «Various»/«DK»). Se añaden los coautores de cómic.
+    const desdeVis = (vis && vis.autores) || [];
+    const desdeExt = (ext && ext.autores) || [];
+    const autoresNuevos = [...new Set([...(desdeVis.length ? desdeVis : desdeExt), ...autoresExtra])].filter((n) => !esAutorPlaceholder(n, edNombre));
     if (autorEsPlaceholder && autoresNuevos.length)
         proponer('autores', autoresActuales.join(', ') || '—', autoresNuevos.join(', '), autoresNuevos, desdeVis.length ? 'portadilla·IA' : 'Fichero/APIs');
 
-    // CONTRIBUCIONES (roles): unir visión + APIs (la mención de la BNE también trae roles), si el doc no tenía.
-    if (!doc.contribuciones || !doc.contribuciones.length) {
-        const deVis = (vis && vis.contribuciones || []).filter((c) => ROLES_VALIDOS.includes(c.rol) && c.rol !== 'autor');
-        const deExt = (ext && ext.contribuciones_nombres || []).filter((c) => ROLES_VALIDOS.includes(c.rol) && c.rol !== 'autor');
-        const merged = []; const seen = new Set();
-        for (const c of [...deExt, ...deVis]) { const k = `${c.nombre.toLowerCase()}|${c.rol}`; if (seen.has(k)) continue; seen.add(k); merged.push(c); }
-        if (merged.length) proponer('contribuciones', '—', merged.map((c) => `${c.nombre} (${c.rol})`).join(' · '), merged, deVis.length ? 'portadilla·IA + APIs' : 'Fichero/APIs');
-    }
+    if ((!doc.contribuciones || !doc.contribuciones.length) && merged.length)
+        proponer('contribuciones', '—', merged.map((c) => `${c.nombre} (${c.rol})`).join(' · '), merged, deVis.length ? 'portadilla·IA + APIs' : 'Fichero/APIs');
 
     // SINOPSIS: SOLO si falta (anti-pérdida: nunca se reemplaza una existente). La de la visión es
     // parafraseada (anti-RECITATION); si no, la de las APIs.

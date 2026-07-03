@@ -180,6 +180,31 @@ export function combinarContribuciones(...listas) {
     return out;
 }
 
+// ¿El recurso es un CÓMIC/tebeo/novela gráfica? Señales robustas (valen también en el alta por ISBN):
+//   naturaleza, formato .cbz/.cbr/.cb7, CDU 741.5 (historieta/BD), o tipo_documento de la visión.
+const CDU_COMIC = /^741\.5/;
+export function esComicPorDatos(doc = {}) {
+    const nat = String(doc.naturaleza || '').toLowerCase();
+    if (['comic', 'cómic', 'novela-grafica', 'novela gráfica', 'tebeo', 'historieta', 'manga'].includes(nat)) return true;
+    if ((doc.formatos || []).some((f) => ['cbz', 'cbr', 'cb7'].includes(String(f).toLowerCase()))) return true;
+    if (doc.cdu && CDU_COMIC.test(String(doc.cdu))) return true;
+    if (String(doc.tipo_documento || '').toLowerCase() === 'comic') return true;
+    return false;
+}
+
+/**
+ * En un CÓMIC, el DIBUJANTE es COAUTOR (al mismo nivel que el guionista). Separa de una lista
+ * [{nombre,rol}] los 'ilustrador' como AUTORES (nombres) cuando el recurso es cómic; el resto sigue como
+ * contribuciones. Fuera de cómic, no toca nada.
+ * @returns {{ autoresExtra:string[], contribuciones:{nombre:string,rol:string}[] }}
+ */
+export function promoverIlustradorSiComic(contribuciones = [], esComic = false) {
+    if (!esComic) return { autoresExtra: [], contribuciones };
+    const autoresExtra = contribuciones.filter((c) => c.rol === 'ilustrador').map((c) => c.nombre);
+    const resto = contribuciones.filter((c) => c.rol !== 'ilustrador');
+    return { autoresExtra, contribuciones: resto };
+}
+
 // Roles válidos (para validar entradas manuales del panel). 'autor' incluido por completitud.
 export const ROLES_VALIDOS = ['autor', 'traductor', 'ilustrador', 'prologuista', 'anotador', 'editor', 'compilador'];
 
