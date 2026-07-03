@@ -11,7 +11,8 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { carpetaDeDoc } from '../mantenimiento/util-mantenimiento.js';
+import AdmZip from 'adm-zip';
+import { carpetaDeDoc, EXT_DOC } from '../mantenimiento/util-mantenimiento.js';
 import { reciclarCarpeta } from './papelera.js';
 import { desindexarDoc } from './indice-busqueda.js';
 
@@ -59,27 +60,77 @@ async function desvincularYReciclar(db, doc, etiqueta) {
     return !!reciclada;
 }
 
+// ¿El `origen` de una imagen es una EXTRACCIÓN DEL SISTEMA (no un dato del usuario)? Las páginas de un PDF
+// rasterizado, portadas embebidas de EPUB o descargadas de la web son derivadas → se re-generan al re-
+// ingerir (con las mejoras de extracción/número actuales). Los ESCANEOS del usuario ('escaneo', 'covers',
+// 'subida'…) son el DATO ORIGINAL → hay que conservarlos.
+const ORIGEN_SISTEMA = /^(pdf:|rasteriz|embebida|openlibrary|apple|fichero_local|remot|isbn-web)/i;
+const esImagenUsuario = (origen) => !ORIGEN_SISTEMA.test(String(origen || ''));
+// Nombre de fichero seguro a partir del título (para el zip/imagen que se suelta en el Inbox).
+const nombreSeguro = (s) => (String(s || '').replace(/[<>:"/\\|?*\x00-\x1f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || 'escaneo');
+
+/**
+ * Devuelve el documento al Inbox para re-catalogarlo:
+ *   · Si tiene un FICHERO original (pdf/epub/mobi/…) → se envía ese fichero; sus imágenes son extracciones
+ *     del sistema y se descartan (se re-extraen al re-ingerir).
+ *   · Si es un ESCANEO (imágenes suministradas por el usuario, sin fichero-documento) → se envían TODAS sus
+ *     imágenes de contenido: una sola tal cual, o VARIAS empaquetadas en un ZIP (el Vigilante lo expande a
+ *     una carpeta-drop y las re-cataloga como un único libro escaneado). Así no se pierde ninguna.
+ */
 export async function reprocesarDocumento(db, doc) {
     const carpeta = carpetaDeDoc(doc);
-    const origen = doc.nombre_archivo ? path.join(carpeta, doc.nombre_archivo) : null;
-    if (!origen) return { ok: false, motivo: 'el documento no tiene nombre_archivo: no se puede reprocesar' };
-
-    let tam = -1;
-    try { tam = (await fs.stat(origen)).size; } catch { /* no existe */ }
-    if (tam <= 0) return { ok: false, motivo: 'no se encuentra el fichero original en su carpeta CDU: no se puede reprocesar' };
-
-    // Copiar el original al Inbox (sin pisar uno ya presente) ANTES de reciclar la carpeta.
+    const nombre = doc.nombre_archivo || '';
+    const tieneDocOriginal = nombre && EXT_DOC.includes(path.extname(nombre).toLowerCase());
+    const id6 = String(doc._id).slice(-6);
     await fs.mkdir(DIR_INBOX, { recursive: true });
-    let destino = path.join(DIR_INBOX, doc.nombre_archivo);
-    if (await existe(destino)) {
-        const ext = path.extname(doc.nombre_archivo);
-        const base = path.basename(doc.nombre_archivo, ext);
-        destino = path.join(DIR_INBOX, `${base} (reproc ${String(doc._id).slice(-6)})${ext}`);
+
+    // ── Documento con fichero original (pdf/epub/…): enviar el fichero; descartar sidecars del sistema. ──
+    if (tieneDocOriginal) {
+        const origen = path.join(carpeta, nombre);
+        let tam = -1;
+        try { tam = (await fs.stat(origen)).size; } catch { /* no existe */ }
+        if (tam <= 0) return { ok: false, motivo: 'no se encuentra el fichero original en su carpeta CDU: no se puede reprocesar' };
+        let destino = path.join(DIR_INBOX, nombre);
+        if (await existe(destino)) {
+            const ext = path.extname(nombre);
+            destino = path.join(DIR_INBOX, `${path.basename(nombre, ext)} (reproc ${id6})${ext}`);
+        }
+        await fs.copyFile(origen, destino);
+        const reciclada = await desvincularYReciclar(db, doc, 'reprocesado');
+        return { ok: true, inbox: path.basename(destino), reciclada };
     }
-    await fs.copyFile(origen, destino);
+
+    // ── Escaneo (imágenes = dato del usuario): reunir TODAS las imágenes de contenido y enviarlas. ──
+    const imgs = [];
+    for (const im of (doc.imagenes || [])) {
+        if (!esImagenUsuario(im.origen)) continue;   // saltar extracciones del sistema
+        const p = path.join(carpeta, path.basename(im.ruta || ''));
+        if (await existe(p)) imgs.push(p);
+    }
+    // Fallback: si el filtro dejó 0 pero nombre_archivo es una imagen que existe, usarla.
+    if (!imgs.length && nombre) { const p = path.join(carpeta, nombre); if (await existe(p)) imgs.push(p); }
+    if (!imgs.length) return { ok: false, motivo: 'no se encontraron las imágenes del escaneo en su carpeta CDU: no se puede reprocesar' };
+
+    const base = nombreSeguro(doc.titulo);
+    let inbox;
+    if (imgs.length === 1) {
+        // Una sola imagen → enviarla tal cual.
+        let destino = path.join(DIR_INBOX, path.basename(imgs[0]));
+        if (await existe(destino)) destino = path.join(DIR_INBOX, `${base} (reproc ${id6})${path.extname(imgs[0]) || '.jpg'}`);
+        await fs.copyFile(imgs[0], destino);
+        inbox = path.basename(destino);
+    } else {
+        // Varias imágenes → ZIP (el Vigilante lo expande y re-cataloga como un único libro escaneado).
+        const zip = new AdmZip();
+        for (const p of imgs) zip.addLocalFile(p);
+        let destino = path.join(DIR_INBOX, `${base} (reproc ${id6}).zip`);
+        if (await existe(destino)) destino = path.join(DIR_INBOX, `${base} (reproc ${id6}-${Date.now().toString().slice(-4)}).zip`);
+        zip.writeZip(destino);
+        inbox = path.basename(destino);
+    }
 
     const reciclada = await desvincularYReciclar(db, doc, 'reprocesado');
-    return { ok: true, inbox: path.basename(destino), reciclada };
+    return { ok: true, inbox, imagenes: imgs.length, reciclada };
 }
 
 /** Elimina el documento del catálogo: borra el registro y recicla su carpeta CDU (recuperable en Papelera). */

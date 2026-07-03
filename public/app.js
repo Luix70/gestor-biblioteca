@@ -1080,9 +1080,9 @@ function renderShelfBulk(kind) {
   const ids = st.items.map((x) => x._id),
     enSel = ids.filter((id) => st.sel.has(id)).length,
     todas = enSel > 0 && enSel === ids.length;
-  const modoBtn = `<button class="btn${st.modo ? ' pri' : ''}" id="shModo" title="Tocar una tarjeta la marca (en vez de abrirla). La selección se conserva al apagarlo.">🖱 Modo selección</button>`;
-  const tools = st.modo ? `<button class="btn" id="shAll">${todas ? 'Quitar' : 'Todas'}</button>` : '';
   const nom = kind === 'obra' ? 'obra' : 'colección';
+  const modoBtn = `<button class="btn${st.modo ? ' pri' : ''}" id="shModo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre la ${nom}. La selección se conserva al cambiar.">${st.modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`;
+  const tools = st.modo ? `<button class="btn" id="shAll">${todas ? 'Quitar' : 'Todas'}</button>` : '';
   const acc = st.sel.size
     ? `<span style="margin-left:auto"></span><b>${st.sel.size}</b> sel.
     <button class="btn pri" id="shCat" title="Ver en el Catálogo los libros de las ${kind === 'obra' ? 'obras' : 'colecciones'} seleccionadas">🔍 Mostrar en Catálogo</button>
@@ -1268,9 +1268,15 @@ function tomoCard(d, numero, falta) {
   return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">Tomo ${numero ?? '?'} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.volumen_titulo || d.titulo || '—')}</div></div></div>`;
 }
 
+let _obraR = null; // última obra pintada (para el editor «Numerar tomos»)
 function pintarObra(r) {
+  _obraR = r;
   const o = r.obra,
     desc = o.cdu_desc;
+  const numBtn =
+    ROL === 'admin'
+      ? `<button class="btn" id="obraNumerar" title="Asignar o corregir el número de tomo de cada libro de la obra">🔢 Numerar tomos</button>`
+      : '';
   const sub =
     [o.isbn_obra ? 'ISBN obra ' + o.isbn_obra : '', o.editorial, o.coleccion]
       .filter(Boolean)
@@ -1292,9 +1298,88 @@ function pintarObra(r) {
       ? `<div class="card" style="margin-top:14px"><h3 style="color:var(--warn)">Tomos sin número (${r.sin_numero.length})</h3><div class="vol-grid">${r.sin_numero.map((d) => tomoCard(d, '?', false)).join('')}</div></div>`
       : '';
   $('#p-detalle').innerHTML =
-    head + `<div class="card"><div id="selbarDet"></div><h3>Tomos</h3><div class="vol-grid">${vols}</div></div>` + sin;
+    head +
+    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">Tomos</h3>${numBtn}</div><div class="vol-grid" style="margin-top:10px">${vols}</div></div>` +
+    sin;
   montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { obra: { _id: o._id, titulo: o.titulo } }, titulo: `📚 ${recortar(o.titulo || 'obra', 30)}` });
   attachRating('#p-detalle');
+  if ($('#obraNumerar')) $('#obraNumerar').onclick = () => numerarTomos();
+}
+
+// Editor «Numerar tomos»: lista cada libro de la obra con un campo para su nº de tomo (vacío = sin
+// número) + el total de tomos de la obra. «⚙️ Orden automático» rellena la numeración por INDICIOS
+// (nº existente / «Vol/Tomo N» del título/OCR/nombre de archivo) y es editable a mano antes de guardar.
+// Guarda vía POST /obras/:id/numerar y re-pinta la obra.
+function numerarTomos() {
+  const r = _obraR;
+  if (!r) return;
+  const o = r.obra;
+  const filas = [];
+  for (const v of r.volumenes) if (v.presente && v.doc) filas.push({ d: v.doc, numero: v.numero });
+  for (const d of r.sin_numero || []) filas.push({ d, numero: '' });
+  const ordenadas = () =>
+    filas.slice().sort((a, b) => (a.numero === '' ? 1e9 : a.numero) - (b.numero === '' ? 1e9 : b.numero));
+  const cardRow = (f) => {
+    const d = f.d;
+    const cov = d.portada
+      ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" style="width:34px;height:48px;object-fit:cover;border-radius:3px;flex:none">`
+      : '<div style="width:34px;height:48px;display:grid;place-items:center;background:var(--card2,#eee);border-radius:3px;flex:none">📕</div>';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--bord,#e5e5e5)">
+        ${cov}
+        <div style="flex:1;min-width:0"><div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.volumen_titulo || d.titulo || '—')}</div><div class="muted mono" style="font-size:11px">${esc(d.isbn || '')}</div></div>
+        <input type="number" min="1" class="numinput" data-doc="${esc(d._id)}" value="${f.numero === '' ? '' : esc(f.numero)}" placeholder="—" inputmode="numeric" style="width:64px;text-align:center">
+      </div>`;
+  };
+  const pintarFilas = () => {
+    $('#numFilas').innerHTML =
+      filas.length ? ordenadas().map(cardRow).join('') : '<div class="muted">Esta obra no tiene libros.</div>';
+  };
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:540px;width:94vw">
+      <h3 style="margin-top:0">🔢 Numerar tomos — ${esc(recortar(o.titulo, 40))}</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Asigna el nº de tomo de cada libro. Vacío = «sin número». Dos tomos con el mismo número → el segundo queda «sin número» para revisión.</div>
+      <div style="margin-bottom:8px"><button class="btn" id="numAuto" title="Rellena la numeración deduciéndola de los indicios (nº ya asignado, «Vol./Tomo N» del título/OCR/nombre de archivo). Puedes corregirla antes de guardar.">⚙️ Orden automático</button></div>
+      <div id="numFilas" style="max-height:50vh;overflow:auto"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px"><label style="font-size:13px">Total de tomos de la obra:</label><input type="number" min="0" id="numTotal" value="${o.total_volumenes || ''}" placeholder="?" inputmode="numeric" style="width:64px;text-align:center"></div>
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="numCancel">Cancelar</button><button class="btn pri" id="numSave">Guardar</button></div>
+    </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  pintarFilas();
+  $('#numCancel').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  // Orden automático por indicios: ordena por nº inferido (los sin indicio, al final por título) y
+  // asigna 1..N secuencial. Editable a mano después.
+  $('#numAuto').onclick = () => {
+    const inf = filas.map((f) => ({
+      f,
+      n: inferirNumTomo(f.d),
+      t: String(f.d.volumen_titulo || f.d.titulo || f.d.nombre_archivo || ''),
+    }));
+    inf.sort((a, b) => (a.n == null ? 1e9 : a.n) - (b.n == null ? 1e9 : b.n) || a.t.localeCompare(b.t, 'es'));
+    inf.forEach((x, i) => (x.f.numero = i + 1));
+    pintarFilas();
+    if (!$('#numTotal').value) $('#numTotal').value = String(filas.length);
+  };
+  $('#numSave').onclick = async () => {
+    const numeros = {};
+    $$('#numFilas .numinput').forEach((i) => (numeros[i.dataset.doc] = i.value.trim()));
+    const total = $('#numTotal').value.trim();
+    const btn = $('#numSave');
+    btn.disabled = true;
+    btn.textContent = 'Guardando…';
+    try {
+      await api('/obras/' + encodeURIComponent(o._id) + '/numerar', {
+        method: 'POST',
+        body: JSON.stringify({ numeros, total }),
+      });
+      cerrarCmp();
+      verObra(o._id); // re-pintar con el inventario nuevo
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      alert('No se pudo guardar la numeración: ' + e.message);
+    }
+  };
 }
 
 // ── colecciones: cabeceras de revista (números) + series de libros ──
@@ -1419,7 +1504,7 @@ function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo }) {
     const acc = sel.size
       ? `<span style="margin-left:auto"></span><b>${sel.size}</b> sel. <button class="btn pri" id="selcat">🔍 Mostrar en Catálogo</button> <button class="btn" id="selclr">Limpiar</button>`
       : '';
-    bar.innerHTML = `<div class="bulkbar"><button class="btn${modo ? ' pri' : ''}" id="selmodo" title="Tocar una tarjeta la marca (en vez de abrirla). La selección se conserva.">🖱 Modo selección</button>${acc}</div>`;
+    bar.innerHTML = `<div class="bulkbar"><button class="btn${modo ? ' pri' : ''}" id="selmodo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre su ficha. La selección se conserva al cambiar.">${modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>${acc}</div>`;
     $('#selmodo').onclick = () => { modo = !modo; scope.classList.toggle('selmode', modo); pintarBar(); };
     if (sel.size) {
       $('#selcat').onclick = () => mostrarEnCatalogo([...sel], titulo || `${sel.size} libros`);
@@ -1477,7 +1562,6 @@ const CAMPOS_FICHA = [
   ['subtitulo', 'Subtítulo'],
   ['_autores', 'Autor(es)'],
   ['_editorial', 'Editorial'],
-  ['_coleccion', 'Colección'],
   ['año_edicion', 'Año'],
   ['numero_edicion', 'Edición'],
   ['idioma', 'Idioma'],
@@ -1489,10 +1573,11 @@ const CAMPOS_FICHA = [
   ['_isbns_alt', 'Otras ediciones'],
   ['_issn', 'ISSN'],
   ['lccn', 'LCCN'],
-  ['volumen_numero', 'Volumen nº'],
-  ['volumen_titulo', 'Título del volumen'],
   ['obra_titulo', 'Obra'],
   ['_isbn_obra', 'ISBN obra'],
+  ['volumen_numero', 'Volumen nº'],
+  ['volumen_titulo', 'Título del volumen'],
+  ['_coleccion', 'Colección'],
   ['coleccion_numero', 'Nº en colección'],
   ['numero_issue', 'Número'],
   ['mes_publicacion', 'Mes'],
@@ -1723,6 +1808,23 @@ function pintarDoc(r, ctx) {
     .map((p) => `<dt>${p[0]}</dt><dd>${p[1]}</dd>`)
     .join('');
   const ubicFmin = `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">${_txtUbic(d) ? `<a class="rowlink" id="ubicChip" style="color:var(--acc)" title="Ver los libros de esta estantería">📍 ${esc(_txtUbic(d))}</a>` : '<span class="muted">Sin asignar</span>'}</div></div>`;
+  // Bajo el exlibris: la OBRA (con el ordinal del volumen, «Vol.: III») y la COLECCIÓN (con el nº del
+  // libro/obra dentro de la colección, «Nº 678»). Primero la obra, luego la colección. Ambas clicables.
+  const obraColFmin = (() => {
+    const filas = [];
+    const obraTit = (r.obra && r.obra.titulo) || d.obra_titulo;
+    if (obraTit) {
+      const obraLink = r.obra && r.obra._id ? `<a class="rowlink" onclick="verObra('${esc(r.obra._id)}')">${esc(obraTit)}</a>` : esc(obraTit);
+      const vol = d.volumen_numero != null ? ` <b>Vol.: ${aRomano(d.volumen_numero)}</b>` : '';
+      filas.push(`<div class="fmin-oc-fila"><span class="lbl">Obra</span> <span>${obraLink}${vol}</span></div>`);
+    }
+    if (r.coleccion) {
+      const colLink = r.coleccion_id ? `<a class="rowlink" data-colid="${esc(r.coleccion_id)}" data-colnom="${esc(r.coleccion)}">${esc(r.coleccion)}</a>` : esc(r.coleccion);
+      const num = d.coleccion_numero ? ` <b>Nº ${esc(d.coleccion_numero)}</b>` : '';
+      filas.push(`<div class="fmin-oc-fila"><span class="lbl">Colección</span> <span>${colLink}${num}</span></div>`);
+    }
+    return filas.length ? `<div class="fmin-obracol">${filas.join('')}</div>` : '';
+  })();
   const fmin = fichaMinima({
     titulo: d.titulo,
     subtitulo: d.subtitulo || subDoc,
@@ -1732,6 +1834,7 @@ function pintarDoc(r, ctx) {
     descargaNombre: r.nombre_archivo || '',
     estrellasHTML: ratingBar('documentos', d._id, d.valoracion, d.nsfw) + ' ' + badgesDoc(d),
     datosHTML: filasFmin,
+    obraColHTML: obraColFmin,
     ubicacionHTML: ubicFmin,
     origen,
   });
@@ -7439,6 +7542,24 @@ function pintarEstanteriaSearch() {
   // Conserva la estantería previa solo si sigue existiendo en el ámbito elegido.
   selEstanteria.value = [...selEstanteria.options].some((o) => o.value === previo) ? previo : '';
 }
+// Nombre de fichero LIMPIO y CORTO para una imagen (evita '.jpg.jpg', rutas y basura numérica larga que
+// estresa el sistema de ficheros). Conserva un nombre original razonable; si es vacío/largo/numérico-basura
+// lo sustituye por 'foto-xxxxxx'. El servidor ya antepone un sello único, así que aquí basta con ser breve.
+function nombreImagen(nombre, ext = 'jpg') {
+  let base = String(nombre || '')
+    .replace(/^.*[\\/]/, '')          // sin ruta
+    .replace(/\.[a-z0-9]{2,5}$/i, '') // sin extensión (una sola vez → mata el '.jpg.jpg')
+    .replace(/[^\w.-]+/g, '_')        // saneado sistema de ficheros
+    .replace(/_+/g, '_').replace(/^[._-]+|[._-]+$/g, '');
+  if (!base || base.length > 32 || /^\d{9,}$/.test(base)) base = 'foto-' + Math.random().toString(36).slice(2, 8);
+  return base + '.' + ext;
+}
+// Extensión de imagen de un File (por su nombre o su MIME), en minúsculas y sin punto.
+function extImagen(file) {
+  const m = String(file && file.name || '').match(/\.([a-z0-9]{2,5})$/i);
+  return (m ? m[1] : ((file && file.type || '').split('/')[1] || 'jpg')).toLowerCase().replace('jpeg', 'jpg');
+}
+
 // Reduce una foto a máx. `ladoMax` px (por el lado mayor) reescalándola en un canvas antes de subir →
 // menos datos y más rápido en el Atom. `calidad` = calidad JPEG (0..1). Si ya es más pequeña, devuelve el
 // fichero original tal cual. Devuelve una Promise con un File JPEG (o el original si algo falla).
@@ -7452,7 +7573,8 @@ function reducirImagen(file, ladoMax = 2000, calidad = 0.85) {
       const altoOrig = imagen.naturalHeight;
       const escala = Math.min(1, ladoMax / Math.max(anchoOrig, altoOrig));
       if (escala >= 1) {
-        resolver(file); // ya cabe: no reescalar
+        // Ya cabe: no reescalar, pero renombrar limpio (conserva bytes/tipo) para no arrastrar nombres largos.
+        resolver(new File([file], nombreImagen(file.name, extImagen(file)), { type: file.type || 'image/jpeg' }));
         return;
       }
       const lienzo = document.createElement('canvas');
@@ -7460,7 +7582,7 @@ function reducirImagen(file, ladoMax = 2000, calidad = 0.85) {
       lienzo.height = Math.round(altoOrig * escala);
       lienzo.getContext('2d').drawImage(imagen, 0, 0, lienzo.width, lienzo.height);
       lienzo.toBlob(
-        (blob) => resolver(blob ? new File([blob], (file.name || 'foto') + '.jpg', { type: 'image/jpeg' }) : file),
+        (blob) => resolver(blob ? new File([blob], nombreImagen(file.name, 'jpg'), { type: 'image/jpeg' }) : file),
         'image/jpeg',
         calidad,
       );
@@ -7704,9 +7826,7 @@ async function recortarYMedirTapete(files) {
         const blob = await new Promise((r) => oc.toBlob(r, 'image/jpeg', 0.9));
         out.push(
           blob
-            ? new File([blob], (f.name || 'tapete.jpg').replace(/\.(png|webp|jpeg)$/i, '.jpg'), {
-                type: 'image/jpeg',
-              })
+            ? new File([blob], nombreImagen(f.name || 'tapete', 'jpg'), { type: 'image/jpeg' })
             : f,
         );
         recortadas++;
@@ -8367,8 +8487,49 @@ function fichaMinima(o) {
   return `<div class="fmin card">${badge}
     <h1 class="fmin-tit">${esc(o.titulo || '(sin título)')}</h1>${o.subtitulo ? `<div class="fmin-sub">${esc(o.subtitulo)}</div>` : ''}${starsInner ? `<div class="fmin-stars">${starsInner}</div>` : ''}
     ${hero ? `<div style="margin-top:14px">${hero}</div>` : ''}
+    ${o.obraColHTML || ''}
     ${filas ? `<dl class="dl fmin-data">${filas}</dl>` : ''}
     ${pie}</div>`;
+}
+// Entero → número romano (para el ordinal del volumen, «Vol.: III»). Fuera de rango: devuelve el número.
+// Numeral romano (I..MMM) → entero, o null si no lo es. Para inferir el nº de tomo de un título.
+function romanoANum(s) {
+  const t = String(s || '').toUpperCase().trim();
+  if (!/^[IVXLCDM]+$/.test(t)) return null;
+  const val = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
+  let n = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = val[t[i]], sig = val[t[i + 1]] || 0;
+    n += c < sig ? -c : c;
+  }
+  return n > 0 && n < 4000 ? n : null;
+}
+// Infiere el nº de tomo de un documento a partir de INDICIOS ya presentes (sin coste): nº existente,
+// luego «Vol./Tomo/Libro/Parte/Band N» (arábigo o romano) en volumen_titulo → título → nombre de
+// archivo (que a su vez recoge el OCR/APIs de la ingesta). Devuelve null si no hay indicio.
+function inferirNumTomo(d) {
+  if (Number.isInteger(d.volumen_numero)) return d.volumen_numero;
+  const PAL = '(?:vol(?:umen|ume)?|tomo|libro|parte|part|band|bd|heft|teil|t)';
+  for (const txt of [d.volumen_titulo, d.titulo, d.nombre_archivo]) {
+    const s = String(txt || '');
+    if (!s) continue;
+    let m = s.match(new RegExp('\\b' + PAL + '\\.?\\s*(\\d{1,3})\\b', 'i'));
+    if (m) return parseInt(m[1], 10);
+    m = s.match(new RegExp('\\b' + PAL + '\\.?\\s*([IVXLCDM]{1,7})\\b', 'i'));
+    if (m) { const n = romanoANum(m[1]); if (n) return n; }
+  }
+  return null;
+}
+function aRomano(n) {
+  n = parseInt(n, 10);
+  if (!Number.isFinite(n) || n <= 0 || n >= 4000) return String(n);
+  const t = [
+    [1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'],
+    [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I'],
+  ];
+  let s = '';
+  for (const [v, r] of t) while (n >= v) { s += r; n -= v; }
+  return s;
 }
 // Dibuja un código QR (matriz de qrGenerar) en un <canvas> con zona de silencio. px = tamaño objetivo.
 function qrCanvas(qr, px) {

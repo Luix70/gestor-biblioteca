@@ -269,8 +269,9 @@ de ficheros clasificado por CDU.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
     · MODO SELECCIÓN (admin, patrón ergonómico y móvil, COMÚN A TODA LA APP — Catálogo,
       ficha de autor, Colecciones, Obras, ficha de colección/obra y Estanterías/
-      Ubicaciones; helper reutilizable montarSelDocs): botón «🖱 Modo selección» en la
-      barra. Con él ACTIVO, tocar una portada la marca (tick ✓ + recuadro) en vez de
+      Ubicaciones; helper reutilizable montarSelDocs): botón que ALTERNA su rótulo
+      «👁 Modo previsualización» (apagado) ↔ «🖱 Modo selección» (activo) en la barra.
+      Con él ACTIVO, tocar una portada la marca (tick ✓ + recuadro) en vez de
       abrir su ficha; con él APAGADO, tocar abre la ficha. En las listas fuera del
       Catálogo la acción es «🔍 Mostrar en Catálogo» (lleva la selección al Catálogo,
       ya marcada, con toda la barra de acciones). La
@@ -297,6 +298,24 @@ de ficheros clasificado por CDU.
       📐 Medir — estima el tamaño físico (cm) sobre la alfombrilla reglada.
       🧹 Conformar · ✨ Enriquecer · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
       📶 Grabar NFC (ver más abajo)
+    En «Datos catalográficos» el bloque de agrupación va en orden: Obra · ISBN obra ·
+    Volumen nº · Título del volumen · Colección · Nº en colección (el nº de colección
+    justo tras la colección).
+
+  ── OBRAS (multivolumen) ─────────────────────────────────────────────────────
+    La ficha de una obra lista sus TOMOS (presentes y los que faltan) y los «sin
+    número». Admin: «🔢 Numerar tomos» abre un editor con un campo de nº por libro
+    (vacío = sin número) + el TOTAL de tomos de la obra; al guardar reescribe el
+    volumen_numero de cada libro y reconstruye el inventario. Anti-pérdida: dos
+    tomos con el mismo número → el segundo queda «sin número» para revisión.
+    (POST /obras/:id/numerar {numeros:{docId:nº|""}, total}.)  «⚙️ Orden automático»
+    rellena la numeración por INDICIOS (nº ya asignado / «Vol./Tomo N» del
+    título/OCR/nombre de archivo, arábigo o romano) y es editable antes de guardar.
+    DETECCIÓN EN LA INGESTA (igual sea cual sea la vía de entrada — PDF/EPUB/imágenes/
+    ISBN): además del drop de carpeta de tomos y del ISBN-con-rol de los créditos, el
+    enriquecedor deduce el tomo del PROPIO TEXTO cuando el título/subtítulo/nombre de
+    archivo trae «Vol./Tomo N» con el título de la obra delante (motor-enriquecimiento).
+    Conservador: solo si no hay ya nº de volumen, y no en revistas ni cómics.
 
   ── INBOX (ALTA MANUAL desde el panel) ───────────────────────────────────────
     Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la

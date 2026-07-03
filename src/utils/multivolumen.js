@@ -35,7 +35,10 @@ const VOL_RE = /\b(?:vols?|vol[úu]men|volume|tomo|tome|band|teil|livre|livro|fa
  * 'titulo' es el subtítulo del tomo (lo que sigue al número), si lo hay.
  */
 export function parsearVolumen(nombre) {
-    const base = String(nombre || '').replace(/\.[^.]+$/, '');
+    // Quitar SOLO una extensión de fichero CONOCIDA (no cualquier ".algo": un título sin extensión como
+    // "…Vol. 1" tiene un punto en "Vol." que el patrón goloso confundía con una extensión y se comía el
+    // número → parsearVolumen(título) devolvía null. Para nombres de fichero reales sigue funcionando.
+    const base = String(nombre || '').replace(/\.(pdf|epub|mobi|azw3?|fb2|djvu|cbr|cbz|cb7|zip|rar|7z|jpe?g|png|webp|gif|tiff?|bmp|txt|docx?|rtf)$/i, '');
     const m = base.match(VOL_RE);
     if (!m) return null;
     const numero = aArabigo(m[1]);
