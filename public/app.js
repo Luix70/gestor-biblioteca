@@ -1750,7 +1750,7 @@ function pintarDoc(r, ctx) {
     </div>`;
   const lector = _fisico ? '' : previewArchivo(r);
   const secAcc = `<details class="card foldcard admin-only" style="margin-top:14px"><summary>⚙️ Acciones</summary>${botones}</details>`;
-  const secImg = `<details class="card foldcard" open style="margin-top:14px"><summary>🖼️ Imágenes</summary><div style="margin-top:10px">${carrusel}</div></details>`;
+  const secImg = `<details class="card foldcard" open style="margin-top:14px"><summary>🖼️ Imágenes</summary><div style="margin-top:10px"><div class="row admin-only" style="margin-bottom:8px"><button class="btn" id="actImgsCar" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">✏️ Editar</button></div>${carrusel}</div></details>`;
   const secLect = lector
     ? `<details class="card foldcard" id="lectDet" open style="margin-top:14px"><summary>📖 Leer / archivo</summary><div style="margin-top:10px">${lector}</div></details>`
     : '';
@@ -1797,10 +1797,9 @@ function pintarDoc(r, ctx) {
     if (cd) cd.onclick = () => fichaEliminar(d._id);
     const ce2 = $('#actEdit');
     if (ce2) ce2.onclick = () => fichaEditar(d, r);
-    const ci = $('#actImgs');
-    if (ci)
-      ci.onclick = () =>
-        editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []));
+    const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []));
+    if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
+    if ($('#actImgsCar')) $('#actImgsCar').onclick = editarImgs; // duplicado en el encabezado del carrusel
     const cm2 = $('#actMedir');
     if (cm2)
       cm2.onclick = () =>
