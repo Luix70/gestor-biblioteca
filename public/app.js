@@ -1293,9 +1293,11 @@ function pintarObra(r) {
       : '';
   $('#p-detalle').innerHTML =
     head + `<div class="card"><h3>Tomos</h3><div class="vol-grid">${vols}</div></div>` + sin;
-  $$('#p-detalle .vol[data-doc]').forEach(
-    (el) => (el.onclick = () => verDoc(el.dataset.doc, { obra: { _id: o._id, titulo: o.titulo } })),
-  );
+  {
+    const els = $$('#p-detalle .vol[data-doc]');
+    const lista = els.map((el) => el.dataset.doc);
+    els.forEach((el) => (el.onclick = () => verDoc(el.dataset.doc, { obra: { _id: o._id, titulo: o.titulo }, lista })));
+  }
   attachRating('#p-detalle');
 }
 
@@ -1353,9 +1355,11 @@ function pintarColeccion(r) {
   $('#p-detalle').innerHTML =
     head +
     `<div class="card"><h3>${esRev ? 'Números' : 'Libros'}</h3><div class="vol-grid">${cards}</div></div>`;
-  $$('#p-detalle .vol[data-doc]').forEach(
-    (el) => (el.onclick = () => verDoc(el.dataset.doc, { coleccion: { _id: c._id, nombre: c.nombre } })),
-  );
+  {
+    const els = $$('#p-detalle .vol[data-doc]');
+    const lista = els.map((el) => el.dataset.doc);
+    els.forEach((el) => (el.onclick = () => verDoc(el.dataset.doc, { coleccion: { _id: c._id, nombre: c.nombre }, lista })));
+  }
   attachRating('#p-detalle');
 }
 
@@ -7825,9 +7829,11 @@ function pintarCola() {
     colaInbox.length || jobsHechos.length
       ? `<div class="card"><h3 style="margin-top:0">Inbox${colaInbox.length ? ` · <span class="muted" style="font-weight:400">${colaInbox.length} en cola${colaCorriendo ? ' · procesando…' : ''}</span>` : ''}</h3>${cola}${hechas.join('') || '<div class="muted">—</div>'}</div>`
       : '';
-  $$('#inboxResults [data-doc]').forEach(
-    (a) => (a.onclick = () => verDoc(a.dataset.doc, { volver: 'inbox', etiqueta: 'Inbox' })),
-  );
+  {
+    const els = $$('#inboxResults [data-doc]');
+    const lista = els.map((a) => a.dataset.doc);
+    els.forEach((a) => (a.onclick = () => verDoc(a.dataset.doc, { volver: 'inbox', etiqueta: 'Inbox', lista })));
+  }
 }
 // Compat: resultados directos (p. ej. al descartar lo compartido) → a la lista de hechos.
 function pintarInboxResultados(res) {
@@ -9306,9 +9312,11 @@ async function ubicVerLibros(ambito, estanteria) {
         ? `<div class="ubgrid">${r.docs.map(ubicCard).join('')}</div>${r.total > r.docs.length ? `<div class="muted" style="margin-top:10px">Mostrando ${r.docs.length} de ${r.total}. <a class="rowlink" id="ubVerBusq">Ver todos en el Catálogo →</a></div>` : ''}`
         : '<div class="muted">Sin libros en esta ubicación.</div>') +
       `</div>`;
-    $$('#ubicLibros [data-doc]').forEach(
-      (el) => (el.onclick = () => verDoc(el.dataset.doc, { volver: 'ubic', etiqueta: 'Ubicaciones' })),
-    );
+    {
+      const els = $$('#ubicLibros [data-doc]');
+      const lista = els.map((el) => el.dataset.doc);
+      els.forEach((el) => (el.onclick = () => verDoc(el.dataset.doc, { volver: 'ubic', etiqueta: 'Ubicaciones', lista })));
+    }
     const vb = $('#ubVerBusq');
     if (vb)
       vb.onclick = () => {
@@ -9798,6 +9806,7 @@ async function autorFicha(id) {
     if ($('#autSelCuenta')) $('#autSelCuenta').textContent = _autFichaSel.size + ' seleccionados';
   };
   const tarjetas = [...$('#cmpModal').querySelectorAll('[data-libro]')];
+  const listaLibros = tarjetas.map((el) => el.dataset.libro); // orden mostrado (para navegar en la ficha)
   tarjetas.forEach((el) => {
     el.onclick = () => {
       if (_autFichaSelModo) {
@@ -9809,7 +9818,7 @@ async function autorFicha(id) {
         actualizarCuenta();
       } else {
         cerrarCmp();
-        verDoc(el.dataset.libro, { volver: 'autores', etiqueta: 'Autores' });
+        verDoc(el.dataset.libro, { volver: 'autores', etiqueta: 'Autores', lista: listaLibros });
       }
     };
   });
