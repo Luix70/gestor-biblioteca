@@ -5227,12 +5227,18 @@ async function loadCampanas(silencioso) {
     cont.innerHTML = `<span class="muted" style="font-size:12px">${esc(e.message)}</span>`;
     return;
   }
+  const drenaje = r.drenaje || {}; // { id, etiqueta } de un backfill completo en curso (o vacío)
   cont.innerHTML = (r.campanas || [])
-    .map(
-      (c) => `<div class="camprow" data-id="${esc(c.id)}" style="border-top:1px solid var(--line);padding:10px 0">
+    .map((c) => {
+      const drenando = drenaje.id === c.id;
+      // Botón «Completar» (vaciar la campaña) o «Detener» si esta campaña se está drenando.
+      const btnCompletar = drenando
+        ? `<button class="btn bad campParar" style="padding:3px 9px;font-size:12px">⏹ Detener</button>`
+        : `<button class="btn campFull" style="padding:3px 9px;font-size:12px" title="Vacía la campaña ENTERA: encadena tandas hasta 0 (en 2º plano, cediendo a la ingesta)"${drenaje.id ? ' disabled' : ''}>⏩ Completar</button>`;
+      return `<div class="camprow" data-id="${esc(c.id)}" style="border-top:1px solid var(--line);padding:10px 0">
         <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
           <div style="flex:1;min-width:180px">
-            <div style="font-weight:600"><span title="${CAMP_BADGE_TIT[c.coste] || ''}">${CAMP_BADGE[c.coste] || ''}</span> ${esc(c.etiqueta)}</div>
+            <div style="font-weight:600"><span title="${CAMP_BADGE_TIT[c.coste] || ''}">${CAMP_BADGE[c.coste] || ''}</span> ${esc(c.etiqueta)}${drenando ? ' <span class="tag warn" style="font-size:10px">backfill…</span>' : ''}</div>
             <div class="muted" style="font-size:11px;line-height:1.3;margin-top:2px">${esc(c.descripcion)}</div>
           </div>
           <label class="switch" style="flex:0 0 auto"><input type="checkbox" class="campActiva" ${c.activa ? 'checked' : ''}><span class="slider"></span></label>
@@ -5242,14 +5248,15 @@ async function loadCampanas(silencioso) {
           <label style="font-size:12px">Lote <input class="campLote" type="number" min="1" value="${c.lote}" style="width:66px"></label>
           <label style="font-size:12px">cada <input class="campCada" type="number" min="1" value="${c.cadenciaMin}" style="width:56px"> min</label>
           <button class="btn campGuardar" style="padding:3px 9px;font-size:12px">Guardar</button>
-          <button class="btn campRun" style="padding:3px 9px;font-size:12px" title="Lanza una tanda ahora (en segundo plano)">▶ Ahora</button>
+          <button class="btn campRun" style="padding:3px 9px;font-size:12px" title="Lanza una tanda ahora (en segundo plano)"${drenaje.id ? ' disabled' : ''}>▶ Ahora</button>
+          ${btnCompletar}
         </div>
         ${barraCampana(c)}
-      </div>`,
-    )
+      </div>`;
+    })
     .join('');
-  // Mientras alguna campaña esté en curso, refresca solo (barra + pendientes) cada 2 s.
-  const corriendo = (r.campanas || []).some((c) => c.progreso && c.progreso.enCurso);
+  // Refresca solo cada 2 s mientras haya una tanda en curso o un backfill completo activo.
+  const corriendo = (r.campanas || []).some((c) => c.progreso && c.progreso.enCurso) || !!drenaje.id;
   clearTimeout(campTimer);
   if (corriendo) campTimer = setTimeout(() => loadCampanas(true), 2000);
   // Cablear cada fila: el interruptor guarda al instante; «Guardar» persiste lote/cadencia; «Ahora» lanza una tanda.
@@ -5281,6 +5288,32 @@ async function loadCampanas(silencioso) {
       }
       setTimeout(() => loadCampanas(true), 800); // aparece la barra de progreso enseguida
     };
+    // «⏩ Completar»: vacía la campaña entera (backfill completo) en segundo plano.
+    const full = row.querySelector('.campFull');
+    if (full)
+      full.onclick = async () => {
+        await guardar(true); // fija lote antes de drenar
+        try {
+          const r2 = await api('/campanas/' + encodeURIComponent(id) + '/completar', { method: 'POST', body: JSON.stringify({}) });
+          toast(r2.mensaje || 'Backfill en marcha');
+        } catch (e) {
+          toast(e.message, 'bad');
+          return;
+        }
+        setTimeout(() => loadCampanas(true), 800);
+      };
+    // «⏹ Detener»: detiene el backfill completo en curso.
+    const parar = row.querySelector('.campParar');
+    if (parar)
+      parar.onclick = async () => {
+        try {
+          const r2 = await api('/campanas/completar/detener', { method: 'POST', body: JSON.stringify({}) });
+          toast(r2.mensaje || 'Deteniendo…', 'warn');
+        } catch (e) {
+          toast(e.message, 'bad');
+        }
+        setTimeout(() => loadCampanas(true), 800);
+      };
   });
 }
 // ── Búsqueda: índice FTS local (estado + reindexar en 2º plano con progreso) ──

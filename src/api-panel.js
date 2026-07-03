@@ -1,7 +1,7 @@
 import express from 'express';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
-import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora } from './vigilante.js';
+import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora, ejecutarCampanaCompleta, pararCampanaCompleta, estadoDrenaje } from './vigilante.js';
 import { listarCampanas, guardarAjusteCampana } from './mantenimiento/campanas.js';
 import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
@@ -236,7 +236,7 @@ export function rutasPanel() {
     // ── Campañas de fondo (backfill autorreparable al reposo): listar estado+config+pendientes,
     //    ajustar (activa/lote/cada-N-min) y disparar una tanda ahora. Config y disparo = solo admin. ──
     r.get('/campanas', async (req, res) => {
-        try { res.json({ ok: true, campanas: await listarCampanas(await conectarDB()) }); }
+        try { res.json({ ok: true, campanas: await listarCampanas(await conectarDB()), drenaje: estadoDrenaje() }); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/campanas/:id', async (req, res) => {
@@ -250,6 +250,16 @@ export function rutasPanel() {
         if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
         const r2 = ejecutarCampanaAhora(req.params.id);
         res.status(r2.ok ? 202 : 409).json(r2);
+    });
+    // Backfill COMPLETO (drena la campaña hasta 0 en 2º plano) y su detención.
+    r.post('/campanas/:id/completar', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        const r2 = ejecutarCampanaCompleta(req.params.id);
+        res.status(r2.ok ? 202 : 409).json(r2);
+    });
+    r.post('/campanas/completar/detener', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(pararCampanaCompleta());
     });
 
     // ── Visión (rotación multi-proveedor): estado, activar/desactivar y PROBAR una clave. Solo admin.

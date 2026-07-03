@@ -682,6 +682,67 @@ export function ejecutarCampanaAhora(id) {
     return { ok: true, mensaje: `Campaña «${etiquetaCampana(id)}» lanzada (una tanda). Verás su progreso abajo.` };
 }
 
+// ── Backfill COMPLETO de una campaña (drenaje): encadena tandas hasta pendientes=0 ────────────
+let drenajeId = null;       // id de la campaña que se está vaciando (o null)
+let pararDrenaje = false;   // señal de STOP del drenaje
+
+/**
+ * Vacía una campaña ENTERA en segundo plano: repite tandas hasta que no queden pendientes, cediendo el
+ * turno a la ingesta entre tandas (respeta el lock único). Ideal para un backfill completo (p. ej. roles).
+ * Solo uno a la vez. Devuelve de inmediato; el progreso y el nº de pendientes se ven en el panel.
+ */
+export function ejecutarCampanaCompleta(id) {
+    if (drenajeId) return { ok: false, motivo: `Ya hay un backfill completo en curso («${etiquetaCampana(drenajeId)}»). Deténlo antes.` };
+    if (procesando || mantManualEnCurso) return { ok: false, motivo: `Ocupado: «${actividadActual || 'otro proceso'}» en curso. Inténtalo cuando termine.` };
+    drenajeId = id;
+    pararDrenaje = false;
+    const dormir = (s) => new Promise((r) => setTimeout(r, s * 1000));
+    (async () => {
+        try {
+            const db = await conectarDB();
+            let vueltas = 0;
+            console.log(`🎯 Backfill COMPLETO de «${etiquetaCampana(id)}» iniciado.`);
+            while (!pararDrenaje) {
+                if (procesando || mantManualEnCurso) { await dormir(2); continue; } // otro proceso tiene el lock
+                procesando = true;
+                if (await debeCederAIngesta()) { procesando = false; await dormir(5); continue; } // prioridad a la ingesta
+                actividadActual = `Backfill: ${etiquetaCampana(id)}`;
+                let r = null;
+                try {
+                    const cfg = await leerAjustesCampanas(db);
+                    const limite = (cfg[id] && cfg[id].lote) || 25;
+                    r = await ejecutarCampana(db, id, { limite, debeAbortar: debeCederAIngesta });
+                } finally {
+                    procesando = false;
+                    actividadActual = null;
+                }
+                vueltas++;
+                if (r && r.pendientes === 0) { console.log(`🎯 Backfill «${etiquetaCampana(id)}» COMPLETO (${vueltas} tandas).`); break; }
+                await dormir(1);
+            }
+            if (pararDrenaje) console.log(`🎯 Backfill «${etiquetaCampana(id)}» detenido por el usuario.`);
+        } catch (e) {
+            console.error(`Backfill ${id}:`, e.message);
+        } finally {
+            drenajeId = null;
+            pararDrenaje = false;
+        }
+    })();
+    return { ok: true, mensaje: `Backfill completo de «${etiquetaCampana(id)}» en marcha (se detiene solo al llegar a 0).` };
+}
+
+/** Detiene el backfill completo en curso (si lo hay). */
+export function pararCampanaCompleta() {
+    if (!drenajeId) return { ok: false, motivo: 'no hay ningún backfill completo en curso' };
+    pararDrenaje = true;
+    return { ok: true, mensaje: `Deteniendo el backfill de «${etiquetaCampana(drenajeId)}»…` };
+}
+
+/** Estado del backfill completo (para el panel). */
+export function estadoDrenaje() {
+    return { id: drenajeId, etiqueta: drenajeId ? etiquetaCampana(drenajeId) : null };
+}
+
 /**
  * Disparo MANUAL del Conformador (vía API): vacía TODO el backlog en segundo plano, lote a lote,
  * saltándose la espera de inactividad. Cede a la ingesta entre lotes. Devuelve de inmediato.

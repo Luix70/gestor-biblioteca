@@ -504,7 +504,9 @@ de ficheros clasificado por CDU.
       Cada campaña es RESUMIBLE y TERMINABLE: sella cada elemento procesado (con o sin
       datos) para no repetirlo; el contador «Pendientes» baja hasta 0. Arrancan todas
       DESACTIVADAS (opt-in). «▶ Ahora» lanza una tanda inmediata en 2º plano y muestra
-      una BARRA DE PROGRESO bajo la campaña mientras corre. Si al pulsar «Ahora» sale
+      una BARRA DE PROGRESO bajo la campaña mientras corre. «⏩ Completar» hace un
+      BACKFILL COMPLETO: encadena tandas hasta dejar 0 pendientes (en 2º plano, cediendo
+      a la ingesta); «⏹ Detener» lo para. Solo un backfill a la vez. Si al pulsar «Ahora» sale
       «Ocupado: … en curso», es que el candado ÚNICO lo tiene otro proceso (ingesta /
       mantenimiento / otra campaña): solo corre un trabajo pesado a la vez. Solo corren
       en el NAS (contenedor). Config persistida en Mongo (ajustes/campanas).
