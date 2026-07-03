@@ -32,6 +32,7 @@ import path from 'node:path';
 
 const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu']);
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
+import { reconstruirInventarioObra } from './utils/obras.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
 import { estadoVision, configurarProveedor, probarProveedor } from './utils/vision.js';
@@ -637,6 +638,35 @@ export function rutasPanel() {
                 },
                 volumenes, sin_numero,
             });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Numerar / renumerar los tomos de una obra a mano (no había forma de hacerlo tras la ingesta).
+    //   body.numeros = { "<docId>": <nº|""> }  ("" ⇒ deja el tomo SIN número, nunca null)
+    //   body.total   = total de tomos de la obra, opcional (para marcar cuántos faltan).
+    // Reescribe el `volumen_numero` de cada doc indicado y reconstruye el inventario de la obra.
+    r.post('/obras/:id/numerar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const obraId = new ObjectId(req.params.id);
+            const obra = await db.collection('obras').findOne({ _id: obraId });
+            if (!obra) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
+            const numeros = (req.body && req.body.numeros) || {};
+            for (const [docId, val] of Object.entries(numeros)) {
+                if (!ObjectId.isValid(docId)) continue;
+                const filtro = { _id: new ObjectId(docId), obra: obraId }; // solo miembros de ESTA obra
+                if (val === '' || val == null) {
+                    await db.collection('biblioteca').updateOne(filtro, { $unset: { volumen_numero: '' } });
+                } else {
+                    const n = parseInt(val, 10);
+                    if (Number.isFinite(n) && n >= 1) await db.collection('biblioteca').updateOne(filtro, { $set: { volumen_numero: n } });
+                }
+            }
+            const totRaw = req.body && req.body.total;
+            const total = (totRaw != null && totRaw !== '') ? parseInt(totRaw, 10) : null;
+            const inv = await reconstruirInventarioObra(db, obraId, { total: Number.isFinite(total) ? total : null });
+            res.json({ ok: true, ...inv });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

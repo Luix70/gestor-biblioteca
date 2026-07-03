@@ -48,6 +48,41 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
  *   volumenes: [ {numero:1,_id:ObjectId}, {numero:2,_id:null}, {numero:3,_id:ObjectId} ]
  * Idempotente: re-catalogar un tomo solo refresca su _id. Best-effort (no rompe la ingesta).
  */
+/**
+ * Reconstruye el inventario de tomos de una obra a partir del `volumen_numero` ACTUAL de TODOS sus
+ * documentos miembro (los que tienen `obra: obraId`). Se usa tras renumerar tomos a mano desde el panel.
+ * Anti-pérdida: un tomo sin número —o que colisiona con otro ya asignado a ese número— va a
+ * `volumenes_sin_numero` (nunca se descarta) y marca la obra para revisión.
+ *   opts.total: fija explícitamente el total de tomos (acotado por debajo al mayor tomo presente); si no
+ *   se da, se conserva el total conocido (nunca se degrada por debajo de lo ya sabido).
+ */
+export async function reconstruirInventarioObra(db, obraId, { total = null } = {}) {
+    const col = db.collection('obras');
+    const obra = await col.findOne({ _id: obraId });
+    if (!obra) return null;
+    const docs = await db.collection('biblioteca')
+        .find({ obra: obraId }, { projection: { volumen_numero: 1 } }).toArray();
+    const presentes = new Map();   // numero -> _id (el primero que reclama un número lo ocupa)
+    const sin = [];
+    for (const d of docs) {
+        const n = Number.isInteger(d.volumen_numero) ? d.volumen_numero : null;
+        if (n != null && n >= 1 && !presentes.has(n)) presentes.set(n, d._id);
+        else sin.push(d._id);        // sin número o colisión → no se pierde
+    }
+    const base = presentes.size ? Math.max(...presentes.keys()) : 0;
+    const maxNum = (total != null && total >= base) ? total : Math.max(base, obra.total_volumenes || 0);
+    const volumenes = [];
+    for (let n = 1; n <= maxNum; n++) volumenes.push({ numero: n, _id: presentes.get(n) || null });
+    await col.updateOne({ _id: obraId }, { $set: {
+        volumenes, volumenes_sin_numero: sin,
+        total_volumenes: maxNum, volumenes_presentes: presentes.size,
+        completa: maxNum > 0 && presentes.size === maxNum && sin.length === 0,
+        revision_requerida: sin.length > 0,
+        fecha_actualizacion: new Date(),
+    } });
+    return { total_volumenes: maxNum, volumenes_presentes: presentes.size, sin_numero: sin.length };
+}
+
 export async function registrarVolumenEnObra(db, obraId, numero, docId, total = null) {
     if (!obraId || !docId) return;
     try {
