@@ -6,7 +6,7 @@ import { buscarEnDNB } from './buscador-dnb.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarEnBNF } from './buscador-bnf.js';
 import { resolverCDU } from '../clasificador-cdu.js';
-import { extraerContribuciones, extraerContribucionesBNE, combinarContribuciones } from './contribuciones.js';
+import { extraerContribuciones } from './contribuciones.js';
 
 // Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
 // para no bloquear cada ingesta con un timeout largo. Se reinicia solo.
@@ -122,20 +122,12 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         datosExtra.alertas.push('Fichero local: omitido por error.');
     }
     if (infoLocal && infoLocal.titulo) {
-        // La columna `autores` de la BNE puede venir como MENCIÓN estructurada («Apellido, Nombre,
-        // ( 1872-1957)( autor) /**​/ Otro( traductor)»). Se separa en: autores LIMPIOS (para `autores`, sin
-        // fechas ni marcas de rol → no se contamina el campo) y contribuciones con rol (traductor/…).
-        const mencionBNE = (infoLocal.autores || []).join(' /**/ ');
-        const conAutor = extraerContribucionesBNE(mencionBNE, { incluirAutor: true });
-        const autoresLimpiosBNE = conAutor.filter((c) => c.rol === 'autor').map((c) => c.nombre);
-        // ¿La mención es ESTRUCTURADA (con marcas /**​/ o roles entre paréntesis)? Si lo es, NUNCA usar la
-        // cadena cruda como autor (contaminaría con «( traductor)», fechas, /**​/); si además no hay un
-        // «( autor)» explícito (p. ej. un manga con solo dibujante/traductor), se deja `autores` sin rellenar.
-        const mencionEstructurada = conAutor.length > 0 || /\/\*+\//.test(mencionBNE);
-
+        // `infoLocal.autores` ya viene LIMPIO y `infoLocal.contribuciones_nombres` con los roles: la mención
+        // de la BNE la parsea el propio buscador-local, así el tratamiento de autores es IDÉNTICO sea cual
+        // sea el camino de entrada (fichero, alta por ISBN…).
         rellenar('isbn', infoLocal.isbn);
         rellenar('titulo', infoLocal.titulo);
-        rellenar('autores', autoresLimpiosBNE.length ? autoresLimpiosBNE : (mencionEstructurada ? [] : infoLocal.autores));
+        rellenar('autores', infoLocal.autores);
         rellenar('editorial', infoLocal.editorial);
         rellenar('sinopsis', infoLocal.sinopsis);
         rellenar('año_edicion', infoLocal.año_edicion);
@@ -149,17 +141,11 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         if (infoLocal.paginas) datosExtra.paginas_bne = infoLocal.paginas;       // canales que captura
         if (infoLocal.dimensiones) datosExtra.dimensiones_bne = infoLocal.dimensiones; // motor-enriquecimiento
         if (infoLocal.portada_url) datosExtra.portadas_remotas.push({ origen: 'fichero_local', url: infoLocal.portada_url });
-        // ROLES desde la mención: el parser BNE estructurado («Nombre( rol)») + el de texto libre (por si
-        // viene «edición preparada por X»). Mejor cobertura para catálogo español que el by_statement de OL.
-        if (mencionBNE) {
-            const contribs = combinarContribuciones(
-                conAutor.filter((c) => c.rol !== 'autor'),
-                extraerContribuciones(mencionBNE, { autoresConocidos: autoresLimpiosBNE }),
-            );
-            if (contribs.length) {
-                datosExtra.contribuciones_nombres = contribs;
-                datosExtra.alertas.push(`Roles de la mención de la BNE (Fichero): ${contribs.length}.`);
-            }
+        // ROLES (traductor/ilustrador/…) parseados por buscador-local desde la mención de la BNE.
+        if (Array.isArray(infoLocal.contribuciones_nombres) && infoLocal.contribuciones_nombres.length
+            && !(datosExtra.contribuciones_nombres && datosExtra.contribuciones_nombres.length)) {
+            datosExtra.contribuciones_nombres = infoLocal.contribuciones_nombres;
+            datosExtra.alertas.push(`Roles de la mención de la BNE (Fichero): ${infoLocal.contribuciones_nombres.length}.`);
         }
         datosExtra.alertas.push(`Datos del Fichero local (${infoLocal.fuentes.join('+')}).`);
     }

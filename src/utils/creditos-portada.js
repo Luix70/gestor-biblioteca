@@ -16,7 +16,7 @@ import { conVision, extraerJSON } from './vision.js';
 // un libro es uno de estos, es candidato ideal a leer la portadilla para obtener los autores reales.
 export const PLACEHOLDERS_AUTOR = [
     'dk', 'd.k.', 'dorling kindersley', 'vv.aa.', 'vv. aa.', 'vvaa', 'aa.vv.', 'aa. vv.', 'aavv',
-    'varios autores', 'varios', 'autores varios', 'anonimo', 'anónimo', 'anonymous', 'colectivo',
+    'varios autores', 'varios', 'autores varios', 'various', 'various authors', 'anonimo', 'anónimo', 'anonymous', 'colectivo',
     'the editors', 'editors of', 'staff', 'sin autor', 's.a.', 'n/a',
 ];
 

@@ -1271,7 +1271,8 @@ export function rutasPanel() {
                 : (meta.autores ? String(meta.autores).split(/[;,]/).map(s => s.trim()).filter(Boolean) : []);
             const base = {
                 isbn: meta.isbn || b.isbn || null, titulo: meta.titulo || null, subtitulo: meta.subtitulo || null,
-                autores, editorial: meta.editorial || null, idioma: meta.idioma || null, paginas: meta.paginas || null,
+                autores, contribuciones_nombres: Array.isArray(meta.contribuciones_nombres) ? meta.contribuciones_nombres : [],
+                editorial: meta.editorial || null, idioma: meta.idioma || null, paginas: meta.paginas || null,
                 'año_edicion': meta['año_edicion'] || meta.anio || null, dewey: meta.dewey || null, lcc: meta.lcc || null,
                 cdu: meta.cdu || null, sinopsis: meta.sinopsis || null,
                 categorias: Array.isArray(meta.categorias) ? meta.categorias : [], coleccion_nombre: meta.coleccion_nombre || null,

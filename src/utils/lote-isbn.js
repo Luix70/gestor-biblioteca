@@ -67,6 +67,7 @@ export async function buscarUnISBN(rawIsbn) {
                 titulo: online.titulo,
                 subtitulo: null,
                 autores: online.autores || [],
+                contribuciones_nombres: online.contribuciones_nombres || [],
                 editorial: online.editorial || null,
                 año_edicion: online.año_edicion || null,
                 idioma: online.idioma || null,

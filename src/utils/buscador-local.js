@@ -20,8 +20,26 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { extraerContribucionesBNE } from './contribuciones.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// La columna `autores` puede venir como MENCIÓN de la BNE («Apellido, Nombre, ( fechas)( autor) /**​/
+// Otro( traductor)») o como nombres OL limpios unidos por «;». Devuelve autores LIMPIOS (sin roles/fechas/
+// marcadores) + contribuciones con rol → así ni se cuela basura como autor ni se pierden los roles.
+const RE_ROL_MENCION = /\/\*+\/|\(\s*(autor|coautor|traductor|traduc|ilustrad|ilustrac|dibuj|guionist|grabad|editor|edici|director|prolog|introduc|prefac|compil|selecc|antolog|anotad|notas|colaborad)/i;
+function separarAutoresYRoles(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return { autores: [], contribuciones_nombres: [] };
+    if (RE_ROL_MENCION.test(s)) {
+        const todos = extraerContribucionesBNE(s, { incluirAutor: true });
+        const autores = todos.filter((c) => c.rol === 'autor').map((c) => c.nombre);
+        const contribuciones_nombres = todos.filter((c) => c.rol && c.rol !== 'autor');
+        if (autores.length || contribuciones_nombres.length) return { autores, contribuciones_nombres };
+        // La mención no dejó nada reconocible → cae al reparto simple por «;».
+    }
+    return { autores: s.split(';').map((x) => x.trim()).filter(Boolean), contribuciones_nombres: [] };
+}
 const RAIZ = path.resolve(__dirname, '..', '..');
 function resolverDB() {
     const v = process.env.PATH_FICHERO;
@@ -80,11 +98,13 @@ function fusionar(filas) {
     const titulo = primero('titulo');
     if (!titulo) return null; // sin título no es un acierto útil
     const lista = (s) => s ? String(s).split(';').map(x => x.trim()).filter(Boolean) : [];
+    const { autores, contribuciones_nombres } = separarAutoresYRoles(primero('autores'));
     return {
         isbn: primero('isbn'),
         titulo,
         subtitulo: primero('subtitulo'),
-        autores: lista(primero('autores')),
+        autores,
+        contribuciones_nombres,   // [{nombre,rol}] (traductor/ilustrador/…) parseados de la mención BNE
         editorial: primero('editorial'),
         año_edicion: primero('anio_edicion'),
         idioma: primero('idioma'),

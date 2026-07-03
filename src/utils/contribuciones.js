@@ -100,7 +100,9 @@ export function extraerContribuciones(texto, { autoresConocidos = [] } = {}) {
 function rolBNE(txt) {
     const s = sinAcentos(txt);
     if (/traduc/.test(s)) return 'traductor';
-    if (/ilustr|dibuj|grabad|lamin/.test(s)) return 'ilustrador';
+    // Guionista/argumento = AUTOR (escribe la obra; típico en cómic): si no, se perdía por completo.
+    if (/guion|guionist|argument/.test(s)) return 'autor';
+    if (/ilustr|dibuj|grabad|lamin|entint/.test(s)) return 'ilustrador';
     if (/prolog|introduc|prefac|estudio preliminar/.test(s)) return 'prologuista';
     if (/anotad|\bnotas?\b|comentari/.test(s)) return 'anotador';
     if (/edicion|editor|\bedit|director|coordin|a cargo/.test(s)) return 'editor';
