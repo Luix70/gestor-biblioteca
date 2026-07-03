@@ -185,8 +185,8 @@ export const CAMPANAS = [
         async pendientes(db) {
             return (await contarFaltantes(db)).total;
         },
-        async ejecutarLote(db, { limite }) {
-            const r = await rellenarDescripcionesFaltantes({ limite, db });
+        async ejecutarLote(db, { limite, onProgreso }) {
+            const r = await rellenarDescripcionesFaltantes({ limite, db, onProgreso });
             return { procesados: r.generadas + r.fallos, cambios: r.generadas, pendientes: r.pendientes };
         },
     },
@@ -241,7 +241,19 @@ export async function pendientesCampana(db, camp) {
     return db.collection(camp.coleccion).countDocuments(filtroConSello(camp, base));
 }
 
-/** Estado + config + pendientes de TODAS las campañas (para GET /api/campanas). */
+/** Nombre legible de una campaña (para logs, «ocupado» y el panel). */
+export function etiquetaCampana(id) {
+    const c = PORID.get(id);
+    return c ? c.etiqueta : id;
+}
+
+/** ¿Hay alguna campaña ejecutándose una tanda ahora mismo? */
+export function campanaEnCurso() {
+    for (const p of progreso.values()) if (p.enCurso) return true;
+    return false;
+}
+
+/** Estado + config + pendientes + PROGRESO de TODAS las campañas (para GET /api/campanas). */
 export async function listarCampanas(db) {
     const cfg = await leerAjustesCampanas(db);
     const out = [];
@@ -252,6 +264,7 @@ export async function listarCampanas(db) {
             id: c.id, etiqueta: c.etiqueta, coste: c.coste, descripcion: c.descripcion,
             version: c.version, ...cfg[c.id], pendientes,
             ultimaEjecucion: ultimaEjecucion.get(c.id) || null,
+            progreso: progreso.get(c.id) || null,   // { enCurso, procesados, objetivo, cambios } de la tanda en curso/última
         });
     }
     return out;
@@ -260,51 +273,70 @@ export async function listarCampanas(db) {
 // ── EJECUCIÓN ───────────────────────────────────────────────────────────────────────────────
 
 const ultimaEjecucion = new Map(); // id → ms epoch de la última tanda (para la cadencia y el panel)
+const progreso = new Map();        // id → { enCurso, procesados, objetivo, cambios, inicio, fin } de la tanda
 
 /**
  * Ejecuta UNA tanda (hasta `limite`) de una campaña. Cede el turno si `debeAbortar()` (llegó ingesta).
+ * Publica su avance en `progreso` (lo lee el panel para pintar una barra).
  * @returns {Promise<{procesados, cambios, pendientes, abortado}>}
  */
 export async function ejecutarCampana(db, id, { limite, debeAbortar = async () => false } = {}) {
     const camp = PORID.get(id);
     if (!camp) return { procesados: 0, cambios: 0, pendientes: 0, abortado: false };
     ultimaEjecucion.set(id, Date.now());
+    const prog = { enCurso: true, procesados: 0, objetivo: limite, cambios: 0, inicio: Date.now(), fin: null };
+    progreso.set(id, prog);
 
-    if (camp.especial) {
-        const r = await camp.ejecutarLote(db, { limite });
-        return { ...r, abortado: false };
-    }
-
-    const base = await camp.candidatos(db);
-    const col = db.collection(camp.coleccion);
-    const docs = await col.find(filtroConSello(camp, base), { projection: camp.proyeccion || {} }).limit(limite).toArray();
-
-    let procesados = 0, cambios = 0;
-    for (const doc of docs) {
-        if (await debeAbortar()) {
-            const pendientes = await col.countDocuments(filtroConSello(camp, base));
-            return { procesados, cambios, pendientes, abortado: true };
+    try {
+        if (camp.especial) {
+            // Campaña sin iteración de documentos (descripciones): avanza por su propio callback.
+            const r = await camp.ejecutarLote(db, {
+                limite,
+                onProgreso: (hechos, total) => { prog.procesados = hechos; if (total) prog.objetivo = total; },
+            });
+            prog.cambios = r.cambios || 0;
+            prog.procesados = r.procesados ?? prog.procesados;
+            return { ...r, abortado: false };
         }
-        try {
-            if (await camp.procesarDoc(db, doc)) cambios++;
-        } catch (e) {
-            console.warn(`   ⚠️ campaña ${id} falló en ${doc._id}: ${e.message}`);
+
+        const base = await camp.candidatos(db);
+        const col = db.collection(camp.coleccion);
+        const docs = await col.find(filtroConSello(camp, base), { projection: camp.proyeccion || {} }).limit(limite).toArray();
+        prog.objetivo = docs.length;
+
+        let procesados = 0, cambios = 0;
+        for (const doc of docs) {
+            if (await debeAbortar()) {
+                const pendientes = await col.countDocuments(filtroConSello(camp, base));
+                return { procesados, cambios, pendientes, abortado: true };
+            }
+            try {
+                if (await camp.procesarDoc(db, doc)) cambios++;
+            } catch (e) {
+                console.warn(`   ⚠️ campaña ${id} falló en ${doc._id}: ${e.message}`);
+            }
+            // Sella el documento (procesado, con o sin datos) para no reintentarlo mientras no suba la versión.
+            await col.updateOne({ _id: doc._id }, { $set: { [`campanas.${camp.id}`]: camp.version } });
+            procesados++;
+            prog.procesados = procesados;
+            prog.cambios = cambios;
+            await espera(PAUSA_MS);
         }
-        // Sella el documento (procesado, con o sin datos) para no reintentarlo mientras no suba la versión.
-        await col.updateOne({ _id: doc._id }, { $set: { [`campanas.${camp.id}`]: camp.version } });
-        procesados++;
-        await espera(PAUSA_MS);
+        const pendientes = await col.countDocuments(filtroConSello(camp, base));
+        return { procesados, cambios, pendientes, abortado: false };
+    } finally {
+        prog.enCurso = false;
+        prog.fin = Date.now();
     }
-    const pendientes = await col.countDocuments(filtroConSello(camp, base));
-    return { procesados, cambios, pendientes, abortado: false };
 }
 
 /**
  * Pasada del PLANIFICADOR: ejecuta una tanda de cada campaña ACTIVA cuya cadencia ya venció. La llama el
  * vigilante al reposo (bajo su lock, cediendo a la ingesta). No corre fuera del contenedor.
+ * `alEmpezar(id)` se invoca antes de cada campaña (el vigilante lo usa para la etiqueta de actividad).
  * @returns {Promise<{lanzadas:number, cambios:number}>}
  */
-export async function ejecutarCampanasDebidas({ debeAbortar = async () => false } = {}) {
+export async function ejecutarCampanasDebidas({ debeAbortar = async () => false, alEmpezar = () => {} } = {}) {
     if (!PUEDE_CAMPANAS) return { lanzadas: 0, cambios: 0 };
     let db;
     try { db = await conectarDB(); } catch { return { lanzadas: 0, cambios: 0 }; }
@@ -316,6 +348,7 @@ export async function ejecutarCampanasDebidas({ debeAbortar = async () => false 
         const ultima = ultimaEjecucion.get(camp.id) || 0;
         if (Date.now() - ultima < c.cadenciaMin * 60000) continue; // aún no toca
         if (await debeAbortar()) break;                             // cede a la ingesta
+        alEmpezar(camp.id);
         const r = await ejecutarCampana(db, camp.id, { limite: c.lote, debeAbortar });
         lanzadas++;
         cambios += r.cambios;

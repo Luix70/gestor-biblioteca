@@ -1262,6 +1262,20 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
   outline: 2px dashed var(--acc);
   outline-offset: -2px;
 }
+/* Barra de progreso de una campaña de fondo (Actividad → 🎯 Campañas de fondo). */
+.campbar {
+  height: 8px;
+  border-radius: 6px;
+  background: var(--line);
+  overflow: hidden;
+}
+.campbar-fill {
+  height: 100%;
+  background: var(--acc);
+  border-radius: 6px;
+  transition: width 0.4s ease;
+}
+
 /* Vista DETALLES del Catálogo: una fila por documento, solo texto (más documentos por página). */
 .dlist {
   border-top: 1px solid var(--line);

@@ -5201,10 +5201,25 @@ const CAMP_BADGE_TIT = {
   apis: 'APIs gratuitas, pero con LÍMITE de llamadas',
   ia: 'Consume IA de pago (Gemini)',
 };
-async function loadCampanas() {
+// Barra/estado de la tanda de una campaña (en curso o la última terminada).
+function barraCampana(c) {
+  const p = c.progreso;
+  if (!p) return '';
+  const obj = p.objetivo || 0;
+  const pct = obj ? Math.min(100, Math.round((100 * p.procesados) / obj)) : p.enCurso ? 100 : 0;
+  if (p.enCurso) {
+    return `<div style="margin-top:8px">
+      <div class="campbar"><div class="campbar-fill" style="width:${pct}%"></div></div>
+      <span class="muted" style="font-size:11px">⏳ En curso… ${p.procesados}/${obj || '?'} · ${p.cambios} con datos</span>
+    </div>`;
+  }
+  return `<div class="muted" style="font-size:11px;margin-top:6px">Última tanda: ${p.procesados} procesados · ${p.cambios} con datos</div>`;
+}
+let campTimer = null; // auto-refresco mientras alguna campaña esté en curso
+async function loadCampanas(silencioso) {
   const cont = $('#campanasBody');
   if (!cont) return;
-  cont.innerHTML = '<span class="muted" style="font-size:12px">Cargando…</span>';
+  if (!silencioso && !cont.querySelector('.camprow')) cont.innerHTML = '<span class="muted" style="font-size:12px">Cargando…</span>';
   let r;
   try {
     r = await api('/campanas');
@@ -5229,9 +5244,14 @@ async function loadCampanas() {
           <button class="btn campGuardar" style="padding:3px 9px;font-size:12px">Guardar</button>
           <button class="btn campRun" style="padding:3px 9px;font-size:12px" title="Lanza una tanda ahora (en segundo plano)">▶ Ahora</button>
         </div>
+        ${barraCampana(c)}
       </div>`,
     )
     .join('');
+  // Mientras alguna campaña esté en curso, refresca solo (barra + pendientes) cada 2 s.
+  const corriendo = (r.campanas || []).some((c) => c.progreso && c.progreso.enCurso);
+  clearTimeout(campTimer);
+  if (corriendo) campTimer = setTimeout(() => loadCampanas(true), 2000);
   // Cablear cada fila: el interruptor guarda al instante; «Guardar» persiste lote/cadencia; «Ahora» lanza una tanda.
   cont.querySelectorAll('.camprow').forEach((row) => {
     const id = row.dataset.id;
@@ -5254,12 +5274,12 @@ async function loadCampanas() {
       await guardar(true); // asegura que lote/cadencia estén persistidos antes de lanzar
       try {
         const r2 = await api('/campanas/' + encodeURIComponent(id) + '/ejecutar', { method: 'POST', body: JSON.stringify({}) });
-        toast(r2.mensaje || 'Campaña lanzada');
+        toast(r2.mensaje || 'Campaña lanzada', r2.ok === false ? 'warn' : 'ok');
       } catch (e) {
         toast(e.message, 'bad');
         return;
       }
-      setTimeout(loadCampanas, 5000); // refresca los pendientes cuando la tanda ya avanzó
+      setTimeout(() => loadCampanas(true), 800); // aparece la barra de progreso enseguida
     };
   });
 }

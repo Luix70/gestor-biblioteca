@@ -18,7 +18,7 @@ import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 import { rellenarDescripcionesFaltantes } from './mantenimiento/backfill-descripciones.js';
-import { ejecutarCampanasDebidas, ejecutarCampana, leerAjustesCampanas } from './mantenimiento/campanas.js';
+import { ejecutarCampanasDebidas, ejecutarCampana, leerAjustesCampanas, etiquetaCampana, campanaEnCurso } from './mantenimiento/campanas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -51,6 +51,7 @@ const MANTENIMIENTO_REPOSO_MS = Number(process.env.MANTENIMIENTO_REPOSO_MS || 30
 
 let temporizador = null;
 let procesando = false;              // lock compartido: ingesta Y mantenimiento (nunca solapan)
+let actividadActual = null;          // etiqueta legible de QUÉ tiene el lock (para el panel y el «ocupado»)
 let mantManualEnCurso = false;       // bucle de mantenimiento manual en marcha (rondas paginadas)
 // Arranca PAUSADO por defecto: observa el Inbox pero NO cataloga hasta activarlo desde el Panel de
 // Control. VIGILANTE_AUTOSTART=1 lo arranca ya activo (comportamiento anterior).
@@ -506,6 +507,7 @@ async function expandirComprimidos() {
 async function procesarCola() {
     if (procesando || !vigilanteActivo) return; // pausado desde el panel → los ficheros esperan en el Inbox
     procesando = true;
+    actividadActual = 'Ingesta del Inbox';
     try {
         let totalProcesadas = 0;
         const tally = {};
@@ -562,6 +564,7 @@ async function procesarCola() {
         }
     } finally {
         procesando = false;
+        actividadActual = null;
     }
 }
 
@@ -575,6 +578,7 @@ function programarScan() {
 async function ejecutarPasadaMantenimiento() {
     if (procesando) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
     procesando = true;
+    actividadActual = 'Mantenimiento (Conformador)';
     try {
         const r = await ejecutarMantenimiento({ debeAbortar: debeCederAIngesta });
         ultimaRevisionMant = Date.now();
@@ -603,6 +607,7 @@ async function ejecutarPasadaMantenimiento() {
         return { ok: false, motivo: e.message };
     } finally {
         procesando = false;
+        actividadActual = null;
     }
 }
 
@@ -636,13 +641,15 @@ async function quizasCampanas() {
     if (Date.now() - ultimaActividad < MANTENIMIENTO_REPOSO_MS) return;
     if (await debeCederAIngesta()) return;
     procesando = true;
+    actividadActual = 'Campañas de fondo';
     try {
-        const r = await ejecutarCampanasDebidas({ debeAbortar: debeCederAIngesta });
+        const r = await ejecutarCampanasDebidas({ debeAbortar: debeCederAIngesta, alEmpezar: (id) => { actividadActual = `Campaña: ${etiquetaCampana(id)}`; } });
         if (r.lanzadas) ultimaActividad = Date.now(); // se hizo trabajo: reinicia el reloj de reposo
     } catch (e) {
         console.error('Campañas de fondo:', e.message);
     } finally {
         procesando = false;
+        actividadActual = null;
     }
 }
 
@@ -651,8 +658,13 @@ async function quizasCampanas() {
  * saltándose la espera de reposo pero respetando el lock y cediendo a la ingesta. Devuelve de inmediato.
  */
 export function ejecutarCampanaAhora(id) {
-    if (procesando || mantManualEnCurso) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
+    if (procesando || mantManualEnCurso) {
+        // Mensaje INFORMATIVO: dice QUÉ tiene el lock (ingesta / mantenimiento / otra campaña).
+        const quien = actividadActual || (mantManualEnCurso ? 'Mantenimiento manual' : 'otro proceso');
+        return { ok: false, motivo: `Ocupado: «${quien}» en curso. Se ejecuta un proceso pesado a la vez; espera a que termine.` };
+    }
     procesando = true;
+    actividadActual = `Campaña: ${etiquetaCampana(id)}`;
     (async () => {
         try {
             const db = await conectarDB();
@@ -664,9 +676,10 @@ export function ejecutarCampanaAhora(id) {
             console.error(`Campaña ${id} (manual):`, e.message);
         } finally {
             procesando = false;
+            actividadActual = null;
         }
     })();
-    return { ok: true, mensaje: `Campaña «${id}» lanzada (una tanda). Refresca para ver los pendientes.` };
+    return { ok: true, mensaje: `Campaña «${etiquetaCampana(id)}» lanzada (una tanda). Verás su progreso abajo.` };
 }
 
 /**
@@ -777,9 +790,9 @@ export function configurarVigilante({ activo } = {}) {
     return estadoVigilante();
 }
 
-/** Estado del vigilante (para el panel). */
+/** Estado del vigilante (para el panel). `actividad` = qué tiene el lock ahora (o null si libre). */
 export function estadoVigilante() {
-    return { activo: vigilanteActivo, procesando };
+    return { activo: vigilanteActivo, procesando, actividad: actividadActual };
 }
 
 export async function iniciarVigilante() {
