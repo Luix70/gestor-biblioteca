@@ -1,4 +1,4 @@
-import { conGemini } from './gemini.js';
+import { conTexto, extraerJSON } from './vision.js';
 import { sanitizarCDU, arbolCDU } from './cdu-arbol.js';
 
 /**
@@ -22,9 +22,10 @@ Responde ÚNICAMENTE con JSON válido (sin markdown, sin texto fuera del JSON):
 }`;
 
 async function generarIA(codigo) {
-    const res = await conGemini({ model: 'gemini-2.5-flash' }, (model) => model.generateContent(prompt(codigo)));
-    const txt = res.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(txt);
+    const txt = await conTexto({ prompt: prompt(codigo), json: true, maxTokens: 1200 });
+    const j = extraerJSON(txt);
+    if (!j) throw new Error('respuesta de IA no parseable');
+    return j;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { conectarDB } from './database.js';
-import { conGemini } from './utils/gemini.js';
+import { conTexto, extraerJSON } from './utils/vision.js';
 import { sembrarDescripcionCDU } from './utils/descripcion-cdu.js';
 
 const COL = 'equivalencias_cdu';
@@ -165,9 +165,10 @@ Responde ÚNICAMENTE con JSON válido (sin markdown, sin texto fuera del JSON):
 'palabras_clave': 3-6 términos de materia deducidos de los datos aportados (temas, género, ámbito). No
 inventes datos concretos (fechas, nombres) que no puedas justificar con lo dado.
         `.trim();
-        const result = await conGemini({ model: 'gemini-2.5-flash' }, (model) => model.generateContent(prompt));
-        const txt = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-        const j = JSON.parse(txt);
+        // Texto multi-proveedor (Gemini free → Groq/OpenRouter free → Gemini pago).
+        const txt = await conTexto({ prompt, json: true, maxTokens: 1200 });
+        const j = extraerJSON(txt);
+        if (!j) throw new Error('respuesta de IA no parseable');
         const cdu = String(j.cdu || '').trim().replace(/^["']|["']$/g, '');
         return {
             cdu: cdu || '000',

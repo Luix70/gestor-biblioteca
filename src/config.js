@@ -50,6 +50,8 @@ export const AJUSTES = {
 
     // --- Campañas de fondo (backfill autorreparable al reposo; ajustables en el panel) ---
     CAMPANAS_PAUSA_MS: 700,          // ritmo entre elementos de una tanda de campaña (respeta a las APIs)
+    DESC_LOTE_IA: 6,                 // descripciones CDU/Dewey/LCC por LLAMADA de IA (batch → menos coste/llamadas)
+    DESC_PAUSA_MS: 400,              // ritmo entre códigos al describir
 
     // --- Portadas (resolver-portada) ---
     PORTADA_ANCHO_OBJETIVO: 1000,   // ancho ideal; por debajo se intenta mejorar

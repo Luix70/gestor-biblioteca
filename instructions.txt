@@ -499,11 +499,18 @@ de ficheros clasificado por CDU.
         · 🌐 Huecos de metadatos — sinopsis, año, editorial, autores, palabras clave
           y Dewey/LCC por ISBN (OpenLibrary/Google Books/DNB). Conservador.
         · 🌐 Fotos y biografías de autor — OpenLibrary + Wikidata + Wikipedia.
-        · 🤖 Descripciones CDU/Dewey/LCC — 1 llamada de IA por código (se cachea).
+        · 🤖 Descripciones CDU/Dewey/LCC — se generan POR LOTE (varios códigos por
+          llamada de IA → menos coste; DESC_LOTE_IA=6), con fallback uno-a-uno.
       Cada campaña es RESUMIBLE y TERMINABLE: sella cada elemento procesado (con o sin
       datos) para no repetirlo; el contador «Pendientes» baja hasta 0. Arrancan todas
-      DESACTIVADAS (opt-in). «▶ Ahora» lanza una tanda inmediata en 2º plano. Solo
-      corren en el NAS (contenedor). Config persistida en Mongo (ajustes/campanas).
+      DESACTIVADAS (opt-in). «▶ Ahora» lanza una tanda inmediata en 2º plano y muestra
+      una BARRA DE PROGRESO bajo la campaña mientras corre. Si al pulsar «Ahora» sale
+      «Ocupado: … en curso», es que el candado ÚNICO lo tiene otro proceso (ingesta /
+      mantenimiento / otra campaña): solo corre un trabajo pesado a la vez. Solo corren
+      en el NAS (contenedor). Config persistida en Mongo (ajustes/campanas).
+      · IA de TEXTO (clasificación CDU + descripciones) usa la MISMA rotación
+        multi-proveedor que la visión: Gemini free → Groq/OpenRouter free → Gemini de
+        PAGO como último recurso (gestionada en «👁️ Visión IA»).
 
   ── CUARENTENA ───────────────────────────────────────────────────────────────
     Lo que no se pudo catalogar, por categorías plegables:

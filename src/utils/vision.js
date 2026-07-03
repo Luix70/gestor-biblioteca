@@ -104,10 +104,12 @@ const esCuota = (e) => {
 const motivo = (e) => esCuota(e) ? `429 cuota — ${(e?.response?.data?.error?.message || e?.message || '').replace(/\s+/g, ' ').slice(0, 160)}`
     : (e?.response?.status || e?.status || (e?.message || '').slice(0, 120));
 
-async function llamar(c, { prompt, imagenes, json }) {
+async function llamar(c, { prompt, imagenes, json, maxTokens }) {
     const imgs = recortarImagenes(imagenes, c.prov.maxImg);   // respeta el límite de imágenes del modelo
     if (c.prov.tipo === 'gemini') {
-        const model = new GoogleGenerativeAI(c.key).getGenerativeModel({ model: c.modelo, generationConfig: json ? { responseMimeType: 'application/json' } : {} });
+        const generationConfig = json ? { responseMimeType: 'application/json' } : {};
+        if (maxTokens) generationConfig.maxOutputTokens = maxTokens;
+        const model = new GoogleGenerativeAI(c.key).getGenerativeModel({ model: c.modelo, generationConfig });
         const parts = [prompt, ...imgs.map(im => ({ inlineData: { data: im.base64, mimeType: im.mimeType || 'image/jpeg' } }))];
         const res = await model.generateContent(parts);
         return res.response.text();
@@ -118,7 +120,7 @@ async function llamar(c, { prompt, imagenes, json }) {
     const headers = { Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json' };
     if (c.prov.id === 'openrouter') { headers['HTTP-Referer'] = 'https://gestor-biblioteca.local'; headers['X-Title'] = 'Gestor Biblioteca'; }
     const res = await axios.post(`${c.baseURL}/chat/completions`,
-        { model: c.modelo, messages: [{ role: 'user', content }], temperature: 0, max_tokens: 1500 },
+        { model: c.modelo, messages: [{ role: 'user', content }], temperature: 0, max_tokens: maxTokens || 1500 },
         { headers, timeout: TIMEOUT_MS });
     return res.data?.choices?.[0]?.message?.content || '';
 }
@@ -167,6 +169,34 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
         }
     }
     throw ultimo || new Error('Todos los proveedores de visión fallaron.');
+}
+
+/**
+ * IA de TEXTO con la MISMA rotación multi-proveedor (Gemini free → Groq/OpenRouter free → Gemini pago):
+ * sin imágenes. Para tareas de texto puro (clasificación CDU, descripciones…), así el texto también
+ * aprovecha los tiers gratis de otros proveedores antes de gastar la de pago. Devuelve el TEXTO (usa
+ * extraerJSON para parsear). `maxTokens` sube el límite de salida (p. ej. descripciones por lote).
+ * @param {{prompt:string, json?:boolean, maxTokens?:number}} opts
+ */
+export async function conTexto({ prompt, json = true, maxTokens } = {}) {
+    const orden = await ordenIntento();
+    if (!orden.length) throw new Error('No hay proveedores de IA configurados/activos (revisa las claves en .env y los Ajustes).');
+    let ultimo;
+    for (const c of orden) {
+        const t0 = Date.now();
+        try {
+            const txt = await llamar(c, { prompt, imagenes: [], json, maxTokens });
+            ultimoOk = c.id;
+            console.log(`   ✓ IA-texto[${c.id}] (${c.tier} · ${c.modelo}) respondió en ${Date.now() - t0} ms.`);
+            return txt;
+        } catch (e) {
+            ultimo = e;
+            if (esCuota(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_MS;
+            errores[c.id] = { n: (errores[c.id]?.n || 0) + 1, ultimo: String(motivo(e)), ts: Date.now() };
+            console.warn(`   ↻ IA-texto[${c.id}] falló (${motivo(e)}); siguiente proveedor.`);
+        }
+    }
+    throw ultimo || new Error('Todos los proveedores de IA de texto fallaron.');
 }
 
 /** Limpia y parsea JSON de una respuesta de modelo (tolera fences ```json y texto alrededor). */
