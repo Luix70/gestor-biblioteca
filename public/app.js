@@ -1384,8 +1384,7 @@ const ROL_ISBN_OPC = [
 ];
 const CAMPOS_FICHA = [
   ['subtitulo', 'Subtítulo'],
-  ['_autores', 'Autores'],
-  ['_contribuciones', 'Contribuciones'],
+  ['_autores', 'Autor(es)'],
   ['_editorial', 'Editorial'],
   ['_coleccion', 'Colección'],
   ['año_edicion', 'Año'],
@@ -1514,17 +1513,21 @@ function pintarDoc(r, ctx) {
   // Nombre de persona clicable → ficha del autor (autorFicha), si tenemos su id.
   const enlaceAutor = (nombre, id) =>
     id ? `<a class="rowlink" data-autid="${esc(id)}" title="Ver la ficha del autor">${esc(nombre)}</a>` : esc(nombre);
+  const capRol = (s) => (s ? String(s).charAt(0).toUpperCase() + String(s).slice(1) : s);
   const especiales = {
-    _autores:
-      r.autores && r.autores.length
-        ? r.autores.map((n, i) => enlaceAutor(n, r.autores_ids && r.autores_ids[i])).join(', ')
-        : null,
+    // Créditos estilo IMDB: autores primero (sin etiqueta) y luego los contribuyentes con su rol entre
+    // paréntesis, uno por línea; todos clicables → ficha del autor.
+    _autores: (() => {
+      const lineas = [];
+      (r.autores || []).forEach((n, i) => lineas.push(enlaceAutor(n, r.autores_ids && r.autores_ids[i])));
+      (r.contribuciones || []).forEach((c) =>
+        lineas.push(`${enlaceAutor(c.nombre, c.persona)} <span class="muted" style="font-size:12px">(${esc(capRol(c.rol))})</span>`),
+      );
+      return lineas.length ? lineas.join('<br>') : null;
+    })(),
     _editorial: r.editorial ? esc(r.editorial) : null,
-    // Contribuciones con rol (traductor/ilustrador/…): «rol: Nombre · rol: Nombre» (nombre drillable).
-    _contribuciones:
-      r.contribuciones && r.contribuciones.length
-        ? r.contribuciones.map((c) => `${esc(c.rol)}: ${enlaceAutor(c.nombre, c.persona)}`).join(' · ')
-        : null,
+    // Los contribuyentes ya se muestran junto a los autores (arriba), no en fila aparte.
+    _contribuciones: null,
     _coleccion: r.coleccion
       ? (r.coleccion_id
           ? `<a class="rowlink" data-colid="${esc(r.coleccion_id)}" data-colnom="${esc(r.coleccion)}">${esc(r.coleccion)}</a>`
@@ -9537,35 +9540,48 @@ async function autorFicha(id) {
        ${alt ? `<div class="muted" style="font-size:12px;margin-top:4px">a.k.a. ${esc(alt)}</div>` : ''}
        ${a.nacimiento || a.fallecimiento ? `<div class="muted" style="font-size:12px;margin-top:4px">${a.nacimiento || '?'}–${a.fallecimiento || ''}</div>` : ''}
        ${a.biografia ? `<p class="sinopsis-text" style="margin-top:8px">${esc(a.biografia)}</p>` : ''}`;
-  // Etiqueta de rol por libro (no se muestra «autor», es lo esperado; sí traductor/ilustrador/…).
-  const rolBadge = (rol) =>
-    rol && rol !== 'autor'
-      ? `<div style="font-size:9px;color:var(--acc);text-transform:uppercase;letter-spacing:.4px">${esc(rol)}</div>`
-      : '';
   // Badge de etiqueta NFC (el libro ya tiene una grabada).
   const nfcBadge = (l) =>
     l.nfc
       ? `<span title="Tiene etiqueta NFC" style="position:absolute;top:3px;right:3px;font-size:11px;background:var(--card);border-radius:6px;padding:0 3px">📶</span>`
       : '';
-  // Tarjeta de un libro: lleva la marca de selección (oculta salvo en modo selección) y el badge NFC.
+  // Tarjeta de un libro: marca de selección (oculta salvo en modo selección) + badge NFC + 📖 si es papel.
   const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
       <span class="selmark">✓</span>
       ${nfcBadge(l)}
       ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">📕</div>`}
-      ${rolBadge(l.rol)}
-      <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
+      <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${l.papel ? '📖 ' : ''}${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
     </div>`;
   const gridLibros = (arr) =>
     `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;margin-top:8px">${arr.map(cardLibro).join('')}</div>`;
-  // Papel primero, luego electrónicos. Con ambos grupos, cada uno con su subtítulo; con uno solo, rejilla directa.
-  const enPapel = libros.filter((l) => l.papel);
-  const electronicos = libros.filter((l) => !l.papel);
   const subtitulo = (t) => `<div class="muted" style="font-size:11px;margin-top:10px;font-weight:600">${t}</div>`;
+  // AGRUPADO POR ROL (estilo IMDB): «Como autor / Como traductor / Como ilustrador…». Dentro de cada rol,
+  // los de papel primero. El orden de las secciones es fijo (autoría primero).
+  const ROL_SECCION = [
+    ['autor', 'Como autor'],
+    ['traductor', 'Como traductor'],
+    ['ilustrador', 'Como ilustrador'],
+    ['editor', 'Como editor'],
+    ['prologuista', 'Como prologuista'],
+    ['anotador', 'Como anotador'],
+    ['compilador', 'Como compilador'],
+    ['contribuyente', 'Otras contribuciones'],
+  ];
+  const porRol = new Map();
+  for (const l of libros) {
+    const k = l.rol || 'contribuyente';
+    if (!porRol.has(k)) porRol.set(k, []);
+    porRol.get(k).push(l);
+  }
+  const seccionRol = (rol, lab) => {
+    const arr = porRol.get(rol);
+    if (!arr || !arr.length) return '';
+    const orden = [...arr].sort((a, b) => (b.papel ? 1 : 0) - (a.papel ? 1 : 0)); // papel primero dentro del rol
+    return `${subtitulo(lab + ' (' + arr.length + ')')}${gridLibros(orden)}`;
+  };
   let librosHtml;
   if (!libros.length) librosHtml = '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
-  else if (enPapel.length && electronicos.length)
-    librosHtml = `${subtitulo('📖 En papel (' + enPapel.length + ')')}${gridLibros(enPapel)}${subtitulo('💾 Electrónicos (' + electronicos.length + ')')}${gridLibros(electronicos)}`;
-  else librosHtml = gridLibros(libros);
+  else librosHtml = ROL_SECCION.map(([rol, lab]) => seccionRol(rol, lab)).join('') || gridLibros(libros);
   // Resumen de roles que desempeña esta persona (autor/traductor/…).
   const rolesResumen =
     Array.isArray(r.roles) && r.roles.length
