@@ -1680,9 +1680,30 @@ function pintarDoc(r, ctx) {
     : '';
   // 🩺 Salud: plegable, admin-only, carga perezosa al abrir (checklist de tareas de mantenimiento).
   const secSalud = `<details class="card foldcard admin-only" id="saludDet" style="margin-top:14px"><summary>🩺 Salud del documento</summary><div id="saludBody" class="muted" style="margin-top:10px">Abre para ver el estado de mantenimiento…</div></details>`;
+  // Navegación entre documentos de la lista de origen (Catálogo/estantería…): primero/anterior/siguiente/
+  // último, sin volver atrás. `ctx.lista` = ids en orden; se conserva al saltar de ficha en ficha.
+  const navLista = Array.isArray(ctx && ctx.lista) ? ctx.lista : [];
+  const navIdx = navLista.indexOf(d._id);
+  const navHtml =
+    navLista.length > 1 && navIdx >= 0
+      ? `<div class="row" style="gap:4px;align-items:center;margin-left:auto">
+          <button class="det-back" id="navFirst" ${navIdx <= 0 ? 'disabled' : ''} title="Primero">⏮</button>
+          <button class="det-back" id="navPrev" ${navIdx <= 0 ? 'disabled' : ''} title="Anterior">◀</button>
+          <span class="muted" style="font-size:12px">${navIdx + 1}/${navLista.length}</span>
+          <button class="det-back" id="navNext" ${navIdx >= navLista.length - 1 ? 'disabled' : ''} title="Siguiente">▶</button>
+          <button class="det-back" id="navLast" ${navIdx >= navLista.length - 1 ? 'disabled' : ''} title="Último">⏭</button>
+        </div>`
+      : '';
   // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos, salud) plegado, después.
   $('#p-detalle').innerHTML =
-    `${crumb}<div style="margin:2px 0 12px"><button class="det-back" title="Volver" onclick="${back}">←</button></div>${fmin}${secImg}${secSin}${secAcc}${secLect}${secCat}${secSalud}`;
+    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button>${navHtml}</div>${fmin}${secImg}${secSin}${secAcc}${secLect}${secCat}${secSalud}`;
+  if (navLista.length > 1 && navIdx >= 0) {
+    const irA = (i) => { if (i >= 0 && i < navLista.length) verDoc(navLista[i], { ...ctx }); };
+    if ($('#navFirst')) $('#navFirst').onclick = () => irA(0);
+    if ($('#navPrev')) $('#navPrev').onclick = () => irA(navIdx - 1);
+    if ($('#navNext')) $('#navNext').onclick = () => irA(navIdx + 1);
+    if ($('#navLast')) $('#navLast').onclick = () => irA(navLista.length - 1);
+  }
   attachClas('#p-detalle');
   attachRating('#p-detalle');
   $$('#p-detalle .copybtn').forEach(
@@ -5150,7 +5171,7 @@ function pintarBusqueda(r) {
     (el) =>
       (el.onclick = () => {
         if (modoSeleccion && ROL === 'admin') toggleSel(el.dataset.doc);
-        else verDoc(el.dataset.doc, { volver: 'search', etiqueta: 'Catálogo' });
+        else verDoc(el.dataset.doc, { volver: 'search', etiqueta: 'Catálogo', lista: paginaIds.slice() });
       }),
   );
   aplicarModoSelUI();
