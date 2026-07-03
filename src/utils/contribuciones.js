@@ -95,6 +95,89 @@ export function extraerContribuciones(texto, { autoresConocidos = [] } = {}) {
     return out;
 }
 
+// Vocabulario de roles de la BNE (contenido del paréntesis o etiqueta) → rol canónico. La BNE usa muchas
+// variantes en español (dibujante/ilustraciones, edición/director de la publicación, etc.).
+function rolBNE(txt) {
+    const s = sinAcentos(txt);
+    if (/traduc/.test(s)) return 'traductor';
+    if (/ilustr|dibuj|grabad|lamin/.test(s)) return 'ilustrador';
+    if (/prolog|introduc|prefac|estudio preliminar/.test(s)) return 'prologuista';
+    if (/anotad|\bnotas?\b|comentari/.test(s)) return 'anotador';
+    if (/edicion|editor|\bedit|director|coordin|a cargo/.test(s)) return 'editor';
+    if (/compil|selecc|antolog|recopil/.test(s)) return 'compilador';
+    if (/\bautor\b|\baut\b/.test(s)) return 'autor';
+    return null;
+}
+
+// ¿El contenido de un paréntesis son FECHAS de vida (no un rol)? p. ej. «1872-1957», «1964-», «n. 1950».
+function esFechaParen(p) {
+    return /\d{3,4}/.test(p) && !/[a-zà-ÿ]{3,}/i.test(p);
+}
+
+/**
+ * Parser de la mención tal y como la guarda el Fichero (volcado BNE) en su columna `autores`:
+ *   «Apellido, Nombre, ( 1872-1957)( traductor) /**​/ Otro( ilustrador)»  → el ROL va entre PARÉNTESIS
+ *   tras el nombre (puede haber antes un paréntesis de fechas), y los contribuyentes se separan con «/**​/»
+ *   (o «;»). También la forma de etiqueta de subcampo «ilustraciones, Nombre» / «edición, A y B».
+ * Es COMPLEMENTARIO de extraerContribuciones (texto libre estilo OpenLibrary «traducción de X»).
+ * Devuelve [{nombre, rol}] SIN el rol 'autor' (ese va por `autores`); dedup por (nombre,rol).
+ */
+export function extraerContribucionesBNE(texto, { autoresConocidos = [], incluirAutor = false } = {}) {
+    const base = String(texto || '').trim();
+    if (!base) return [];
+    const autoresNorm = new Set(autoresConocidos.map((a) => sinAcentos(a).replace(/\s+/g, ' ').trim()));
+    const segmentos = base.replace(RE_MARCA_BNE, ';').split(';').map((s) => s.trim()).filter(Boolean);
+    const vistos = new Set();
+    const out = [];
+    const anadir = (nombre, rol) => {
+        if (!rol || (rol === 'autor' && !incluirAutor)) return; // 'autor' solo si se pide explícitamente
+        const limpio = limpiarNombre(nombre);
+        if (!limpio || limpio.length < 3 || /^none$/i.test(limpio)) return;
+        const claveNombre = sinAcentos(limpio).replace(/\s+/g, ' ').trim();
+        if (autoresNorm.has(claveNombre)) return; // ya es autor principal
+        const clave = `${claveNombre}|${rol}`;
+        if (vistos.has(clave)) return;
+        vistos.add(clave);
+        out.push({ nombre: limpio, rol });
+    };
+    for (const seg of segmentos) {
+        const parens = [...seg.matchAll(/\(([^)]*)\)/g)].map((m) => m[1].trim());
+        // Rol = el ÚLTIMO paréntesis que NO sea fechas de vida.
+        let rolTxt = null;
+        for (let i = parens.length - 1; i >= 0; i--) {
+            if (!esFechaParen(parens[i])) { rolTxt = parens[i]; break; }
+        }
+        if (rolTxt) {
+            anadir(seg.replace(/\([^)]*\)/g, ' '), rolBNE(rolTxt)); // nombre = segmento sin paréntesis
+            continue;
+        }
+        // Forma «rol, Nombre(s)» (etiqueta de subcampo). Si la 1ª palabra no es un rol, no aporta nada
+        // (así «Ibsen, Henrik» o «shippitsu Izumi…» no generan roles falsos).
+        const m = seg.match(/^\s*([a-zà-ÿ.]+)\s*[,:]\s*(.+)$/i);
+        if (m) {
+            const rol = rolBNE(m[1]);
+            if (rol && rol !== 'autor')
+                for (const nombre of partirNombres(m[2].replace(/\([^)]*\)/g, ' '))) anadir(nombre, rol);
+        }
+    }
+    return out;
+}
+
+/** Une y deduplica varias listas de contribuciones [{nombre,rol}] (dedup por nombre normalizado + rol). */
+export function combinarContribuciones(...listas) {
+    const vistos = new Set();
+    const out = [];
+    for (const lista of listas)
+        for (const c of lista || []) {
+            if (!c || !c.nombre || !c.rol) continue;
+            const clave = `${sinAcentos(c.nombre).replace(/\s+/g, ' ').trim()}|${c.rol}`;
+            if (vistos.has(clave)) continue;
+            vistos.add(clave);
+            out.push(c);
+        }
+    return out;
+}
+
 // Roles válidos (para validar entradas manuales del panel). 'autor' incluido por completitud.
 export const ROLES_VALIDOS = ['autor', 'traductor', 'ilustrador', 'prologuista', 'anotador', 'editor', 'compilador'];
 
