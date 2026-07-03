@@ -1562,7 +1562,7 @@ function pintarDoc(r, ctx) {
       ? `<a class="rowlink" data-q="${esc(d.issn)}" title="Ver todo lo que comparte este ISSN">${esc(d.issn)}</a>`
       : null,
     _isbn: d.isbn
-      ? `<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a>`
+      ? `<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a> <button class="rbtn copybtn" data-copy="${esc(d.isbn)}" title="Copiar el ISBN al portapapeles">📋</button>`
       : null,
     // Otras ediciones (e-ISBN, tapa dura/blanda, obra completa, código de barras…), drillables.
     _isbns_alt:
