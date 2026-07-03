@@ -23,6 +23,7 @@ import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAut
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
+import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fondo.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
@@ -907,6 +908,32 @@ export function rutasPanel() {
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             if (doc.locked) return res.json({ ok: false, motivo: 'documento bloqueado (locked)' });
             const r2 = await reenriquecerDoc(db, doc);
+            res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // COMPLETAR A FONDO — modo SUPERVISADO (ficha). Previsualizar: lee las páginas del propio libro con la
+    // visión y devuelve el BALANCE (antes/después) + calidad + `propuesta`, SIN escribir nada. Admin.
+    r.post('/documentos/:id/a-fondo', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json(await analizarAFondo(db, doc));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Aplicar los campos elegidos del balance (resuelve nombres→personas y persiste). Admin.
+    r.post('/documentos/:id/a-fondo/aplicar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (doc.locked) return res.json({ ok: false, motivo: 'documento bloqueado (locked)' });
+            const r2 = await aplicarAFondo(db, doc, req.body?.propuesta || {}, req.body?.campos || null, { reclasificar: req.body?.reclasificar === true });
             res.json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

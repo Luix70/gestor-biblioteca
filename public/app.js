@@ -1651,6 +1651,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actMedir" title="Estimar el tamaño físico del libro (cm) sobre la alfombrilla reglada">📐 Medir</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
+      <button class="fbtn admin-only" id="actAFondo" title="Lee las PÁGINAS del propio libro (portadilla/contraportada) con la visión y propone autores/roles reales, sinopsis e identificadores. Muestra un balance antes/después para aplicar lo que elijas.">🎯 Completar a fondo</button>
       <button class="fbtn admin-only" id="actShare" title="Genera un QR/enlace para compartir esta ficha (y su descarga, si es digital)">🔗 Compartir</button>
       <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
       <button class="fbtn bad admin-only" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
@@ -1687,6 +1688,8 @@ function pintarDoc(r, ctx) {
     if (cf) cf.onclick = () => fichaAccion('conformar', d._id, cf);
     if (ce) ce.onclick = () => fichaAccion('enriquecer', d._id, ce);
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
+    const caf = $('#actAFondo');
+    if (caf) caf.onclick = () => completarAFondo(d._id, caf);
     // 🩺 Salud: carga perezosa del checklist la primera vez que se despliega la sección.
     const saludDet = $('#saludDet');
     if (saludDet)
@@ -2043,6 +2046,85 @@ function mostrarCambios(titulo, cambios) {
   $('#cmpModal').style.display = 'grid';
   $('#chgClose').onclick = cerrarCmp;
   $('#cmpScrim').onclick = cerrarCmp;
+}
+// ── Completar a fondo (modo SUPERVISADO): previsualiza leyendo el libro y muestra un balance a aplicar ──
+async function completarAFondo(id, btn) {
+  const prev = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '🎯 Leyendo el libro…';
+  }
+  let r;
+  try {
+    r = await api('/documentos/' + encodeURIComponent(id) + '/a-fondo', { method: 'POST', body: JSON.stringify({}) });
+  } catch (e) {
+    toast(e.message, 'bad');
+    return;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prev;
+    }
+  }
+  if (!r.ok) {
+    toast(r.motivo || 'no se pudo leer el documento', 'warn');
+    return;
+  }
+  mostrarBalanceAFondo(id, r);
+}
+// Modal del BALANCE (antes/después + calidad). Casillas para elegir qué aplicar; las «sugerencias» son solo informativas.
+function mostrarBalanceAFondo(id, r) {
+  const cal = r.calidad || { puntuacion: 0, merecePena: false };
+  const aplicables = (r.balance || []).filter((b) => !b.soloSugerencia);
+  const sugerencias = (r.balance || []).filter((b) => b.soloSugerencia);
+  const veredicto = cal.merecePena
+    ? `<span class="tag ok">merece la pena</span>`
+    : `<span class="tag warn">aporta poco</span>`;
+  const fila = (b) => `<tr>
+      <td style="vertical-align:top"><label style="display:flex;gap:6px;align-items:flex-start;cursor:pointer"><input type="checkbox" class="afChk" data-campo="${esc(b.campo)}" checked style="margin-top:3px"> <b>${esc(b.campo)}</b></label></td>
+      <td>${b.antes != null && b.antes !== '' ? `<span class="muted" style="font-size:12px">${esc(recortar(String(b.antes), 80))}</span><br>` : ''}<span class="a">${esc(recortar(String(b.despues), 160)) || '—'}</span><div class="muted" style="font-size:10px;margin-top:2px">${esc(b.fuente || '')}</div></td>
+    </tr>`;
+  const cuerpo = aplicables.length
+    ? `<table class="chgtab">${aplicables.map(fila).join('')}</table>`
+    : '<div class="muted" style="margin-top:8px">Sin mejoras aplicables (el documento ya tiene esos datos, o la visión no leyó nada nuevo).</div>';
+  const sug = sugerencias.length
+    ? `<div class="muted" style="font-size:12px;margin-top:10px;border-top:1px solid var(--line);padding-top:8px"><b>Sugerencias</b> (no se aplican solas): ${sugerencias.map((s) => `${esc(s.campo)} → ${esc(s.despues)}`).join(' · ')}</div>`
+    : '';
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:600px;max-height:90vh;overflow:auto">
+    <h3 style="margin-top:0">🎯 Completar a fondo</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">Calidad de la lectura: <b>${cal.puntuacion}/100</b> ${veredicto}${cal.señales && cal.señales.length ? ' · ' + cal.señales.map((s) => esc(s)).join(' · ') : ''}</div>
+    ${cuerpo}${sug}
+    <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
+      ${aplicables.length ? '<button class="btn pri" id="afAplicar">Aplicar seleccionados</button>' : ''}
+      <button class="btn" id="afCerrar">Cerrar</button>
+    </div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#afCerrar').onclick = cerrarCmp;
+  if ($('#afAplicar'))
+    $('#afAplicar').onclick = async () => {
+      const campos = $$('#cmpModal .afChk:checked').map((c) => c.dataset.campo);
+      if (!campos.length) {
+        toast('Marca al menos un campo', 'warn');
+        return;
+      }
+      $('#afAplicar').disabled = true;
+      $('#afAplicar').textContent = 'Aplicando…';
+      try {
+        const r2 = await api('/documentos/' + encodeURIComponent(id) + '/a-fondo/aplicar', {
+          method: 'POST',
+          body: JSON.stringify({ propuesta: r.propuesta || {}, campos, reclasificar: r.reclasificar === true }),
+        });
+        cerrarCmp();
+        toast(r2.aplicados && r2.aplicados.length ? `✔ Aplicado: ${r2.aplicados.join(', ')}` : 'Nada que aplicar');
+        verDoc(id, { volver: 'search', etiqueta: 'Catálogo' }); // recargar la ficha con los cambios
+      } catch (e) {
+        toast(e.message, 'bad');
+        $('#afAplicar').disabled = false;
+        $('#afAplicar').textContent = 'Aplicar seleccionados';
+      }
+    };
 }
 async function fichaReprocesar(id) {
   const pw = await modalPassword({
