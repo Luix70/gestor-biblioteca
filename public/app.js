@@ -5992,6 +5992,120 @@ async function escanearISBN(targetId = 'inIsbn') {
   };
   loop();
 }
+
+// ── CÁMARA EN VIVO (multidisparo) para escanear libros/obras sin salir de la app ──────────────
+// Modo RÁPIDO opcional (la cámara nativa «📷 Hacer foto» sigue disponible para máxima resolución).
+// Overlay del TAPETE en vivo (cuadrilátero del libro detectado) para encuadrar antes de disparar; cada
+// disparo captura el frame a la mayor resolución que dé getUserMedia y lo añade a la cola `camFotos`
+// (la misma que «✅ Catalogar», que ya recorta con el tapete y envía).
+async function camaraEnVivo() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast('Este navegador no permite cámara en vivo. Usa «📷 Hacer foto».', 'warn');
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } },
+    });
+  } catch (e) {
+    toast('No se pudo abrir la cámara: ' + e.message, 'bad');
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#000;display:flex;flex-direction:column';
+  overlay.innerHTML = `
+    <div id="cvWrap" style="position:relative;flex:1;min-height:0;display:grid;place-items:center;overflow:hidden">
+      <div style="position:relative;max-width:100%;max-height:100%">
+        <video id="cvVid" playsinline muted style="display:block;max-width:100%;max-height:78vh"></video>
+        <canvas id="cvOvl" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;justify-content:center;padding:12px;background:#111;flex-wrap:wrap">
+      <button class="btn" id="cvX">✕ Cerrar</button>
+      <button class="btn" id="cvTorch" style="display:none">🔦</button>
+      <button class="btn pri" id="cvShot" style="font-size:18px;padding:10px 24px">📸 Capturar</button>
+      <span id="cvN" style="color:#fff;font-size:13px">0 fotos</span>
+      <button class="btn pri" id="cvDone">✅ Catalogar</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  const video = overlay.querySelector('#cvVid');
+  const ovl = overlay.querySelector('#cvOvl');
+  video.srcObject = stream;
+  try { await video.play(); } catch (_) {}
+
+  const track = stream.getVideoTracks()[0];
+  // Linterna (torch), si el dispositivo la soporta.
+  let torchOn = false;
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps && caps.torch) {
+      const bt = overlay.querySelector('#cvTorch');
+      bt.style.display = '';
+      bt.onclick = async () => {
+        torchOn = !torchOn;
+        try { await track.applyConstraints({ advanced: [{ torch: torchOn }] }); bt.classList.toggle('pri', torchOn); } catch (_) {}
+      };
+    }
+  } catch (_) {}
+
+  let vivo = true;
+  const capCanvas = document.createElement('canvas');
+  const work = document.createElement('canvas');
+  const actualizarN = () => { const n = camFotos.length; overlay.querySelector('#cvN').textContent = `${n} foto(s)`; overlay.querySelector('#cvDone').textContent = `✅ Catalogar (${n})`; };
+  actualizarN();
+
+  // Overlay del TAPETE en vivo: cada ~250 ms detecta el cuadrilátero del libro y lo dibuja sobre el vídeo.
+  const loopTapete = () => {
+    if (!vivo) return;
+    try {
+      const vw = video.videoWidth, vh = video.videoHeight, cw = video.clientWidth, ch = video.clientHeight;
+      if (vw && vh && cw) {
+        work.width = 480; work.height = Math.max(1, Math.round((vh / vw) * 480));
+        work.getContext('2d').drawImage(video, 0, 0, work.width, work.height);
+        const q = detectarBordesVerde(work);
+        ovl.width = cw; ovl.height = ch;
+        const ctx = ovl.getContext('2d');
+        ctx.clearRect(0, 0, cw, ch);
+        if (q) {
+          const sx = cw / work.width, sy = ch / work.height;
+          ctx.strokeStyle = '#28d9a8'; ctx.lineWidth = 3; ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 3;
+          ctx.beginPath();
+          q.forEach((p, i) => { const x = p.x * sx, y = p.y * sy; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+          ctx.closePath(); ctx.stroke();
+        }
+      }
+    } catch (_) {}
+    setTimeout(loopTapete, 250);
+  };
+  loopTapete();
+
+  const cerrar = () => {
+    vivo = false;
+    try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+    overlay.remove();
+  };
+  overlay.querySelector('#cvX').onclick = cerrar;
+  // Capturar el frame actual a máxima resolución → File → cola camFotos (multidisparo).
+  overlay.querySelector('#cvShot').onclick = async () => {
+    try {
+      capCanvas.width = video.videoWidth; capCanvas.height = video.videoHeight;
+      capCanvas.getContext('2d').drawImage(video, 0, 0);
+      const blob = await new Promise((res) => capCanvas.toBlob(res, 'image/jpeg', 0.92));
+      if (blob) {
+        camFotos.push(new File([blob], `camara-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+        renderCamThumbs();
+        actualizarN();
+        try { navigator.vibrate && navigator.vibrate(30); } catch (_) {}
+      }
+    } catch (e) { toast('No se pudo capturar: ' + e.message, 'bad'); }
+  };
+  overlay.querySelector('#cvDone').onclick = () => {
+    cerrar();
+    if (camFotos.length) camCatalogar();
+  };
+}
+
 // Detecta un ISBN (EAN-13 978/979) en las IMÁGENES (sin tocar el DOM): lo lee EN EL MÓVIL con
 // BarcodeDetector. Devuelve el ISBN o null. Lo usan la subida (autopiloto y supervisado) para que el
 // ISBN viaje como autoridad → fast-path por Fichero (sin visión IA). Un PDF lo lee el servidor.
@@ -6217,6 +6331,7 @@ function wireInbox() {
     };
   const ci = $('#camInput');
   if ($('#camShot')) $('#camShot').onclick = () => ci && ci.click();
+  if ($('#camLive')) $('#camLive').onclick = camaraEnVivo; // cámara en vivo (multidisparo + overlay tapete)
   if (ci)
     ci.onchange = async () => {
       for (const f of ci.files) {
