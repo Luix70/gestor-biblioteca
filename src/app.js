@@ -49,10 +49,22 @@ const PUERTO_PANEL = Number(process.env.PANEL_PORT || 4000);
 await fs.mkdir(DIR_TMP, { recursive: true });
 
 // Guardamos las subidas conservando el nombre original (la extensión guía la detección de tipo).
+// Defensa: colapsamos una extensión duplicada redundante (".jpg.jpg" → ".jpg") que algunos clientes o
+// reductores de imagen generan, y acotamos el nombre para no estresar el sistema de ficheros — sin
+// mutilar por lo demás el nombre (que además de la extensión aporta señales de identificación).
+const colapsarExtDup = (n) => String(n || '').replace(/(\.[a-z0-9]{2,5})\1$/i, '$1');
+const nombreSubida = (original) => {
+    const base = colapsarExtDup(String(original || 'archivo').replace(/^.*[\\/]/, '')); // sin ruta
+    const ext = (base.match(/\.[a-z0-9]{2,6}$/i) || [''])[0];
+    const cuerpo = base.slice(0, base.length - ext.length);
+    // Basura numérica larga (nombres de cámara) o nombre desmesurado → recorte breve; si no, se respeta.
+    const limpio = (/^\d{9,}$/.test(cuerpo) ? '' : cuerpo).slice(0, 80) || 'archivo';
+    return `${limpio}${ext}`;
+};
 const upload = multer({
     storage: multer.diskStorage({
         destination: (req, file, cb) => cb(null, DIR_TMP),
-        filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+        filename: (req, file, cb) => cb(null, `${Date.now()}-${nombreSubida(file.originalname)}`),
     }),
 });
 

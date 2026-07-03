@@ -7342,6 +7342,24 @@ function pintarEstanteriaSearch() {
   // Conserva la estantería previa solo si sigue existiendo en el ámbito elegido.
   selEstanteria.value = [...selEstanteria.options].some((o) => o.value === previo) ? previo : '';
 }
+// Nombre de fichero LIMPIO y CORTO para una imagen (evita '.jpg.jpg', rutas y basura numérica larga que
+// estresa el sistema de ficheros). Conserva un nombre original razonable; si es vacío/largo/numérico-basura
+// lo sustituye por 'foto-xxxxxx'. El servidor ya antepone un sello único, así que aquí basta con ser breve.
+function nombreImagen(nombre, ext = 'jpg') {
+  let base = String(nombre || '')
+    .replace(/^.*[\\/]/, '')          // sin ruta
+    .replace(/\.[a-z0-9]{2,5}$/i, '') // sin extensión (una sola vez → mata el '.jpg.jpg')
+    .replace(/[^\w.-]+/g, '_')        // saneado sistema de ficheros
+    .replace(/_+/g, '_').replace(/^[._-]+|[._-]+$/g, '');
+  if (!base || base.length > 32 || /^\d{9,}$/.test(base)) base = 'foto-' + Math.random().toString(36).slice(2, 8);
+  return base + '.' + ext;
+}
+// Extensión de imagen de un File (por su nombre o su MIME), en minúsculas y sin punto.
+function extImagen(file) {
+  const m = String(file && file.name || '').match(/\.([a-z0-9]{2,5})$/i);
+  return (m ? m[1] : ((file && file.type || '').split('/')[1] || 'jpg')).toLowerCase().replace('jpeg', 'jpg');
+}
+
 // Reduce una foto a máx. `ladoMax` px (por el lado mayor) reescalándola en un canvas antes de subir →
 // menos datos y más rápido en el Atom. `calidad` = calidad JPEG (0..1). Si ya es más pequeña, devuelve el
 // fichero original tal cual. Devuelve una Promise con un File JPEG (o el original si algo falla).
@@ -7355,7 +7373,8 @@ function reducirImagen(file, ladoMax = 2000, calidad = 0.85) {
       const altoOrig = imagen.naturalHeight;
       const escala = Math.min(1, ladoMax / Math.max(anchoOrig, altoOrig));
       if (escala >= 1) {
-        resolver(file); // ya cabe: no reescalar
+        // Ya cabe: no reescalar, pero renombrar limpio (conserva bytes/tipo) para no arrastrar nombres largos.
+        resolver(new File([file], nombreImagen(file.name, extImagen(file)), { type: file.type || 'image/jpeg' }));
         return;
       }
       const lienzo = document.createElement('canvas');
@@ -7363,7 +7382,7 @@ function reducirImagen(file, ladoMax = 2000, calidad = 0.85) {
       lienzo.height = Math.round(altoOrig * escala);
       lienzo.getContext('2d').drawImage(imagen, 0, 0, lienzo.width, lienzo.height);
       lienzo.toBlob(
-        (blob) => resolver(blob ? new File([blob], (file.name || 'foto') + '.jpg', { type: 'image/jpeg' }) : file),
+        (blob) => resolver(blob ? new File([blob], nombreImagen(file.name, 'jpg'), { type: 'image/jpeg' }) : file),
         'image/jpeg',
         calidad,
       );
@@ -7607,9 +7626,7 @@ async function recortarYMedirTapete(files) {
         const blob = await new Promise((r) => oc.toBlob(r, 'image/jpeg', 0.9));
         out.push(
           blob
-            ? new File([blob], (f.name || 'tapete.jpg').replace(/\.(png|webp|jpeg)$/i, '.jpg'), {
-                type: 'image/jpeg',
-              })
+            ? new File([blob], nombreImagen(f.name || 'tapete', 'jpg'), { type: 'image/jpeg' })
             : f,
         );
         recortadas++;
