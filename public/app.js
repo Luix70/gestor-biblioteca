@@ -1359,6 +1359,50 @@ function pintarColeccion(r) {
   attachRating('#p-detalle');
 }
 
+// Ids (en orden) de TODOS los resultados de la búsqueda actual del Catálogo, cacheados por «clave» de
+// búsqueda (los mismos filtros → no se re-piden). Reutiliza el endpoint soloIds (como «Todos los resultados»).
+let _catalogoNav = { clave: null, ids: [] };
+async function idsDelCatalogo() {
+  const clave = _paramsBusqueda().toString(); // sin page → identifica la búsqueda
+  if (_catalogoNav.clave === clave && _catalogoNav.ids.length) return _catalogoNav.ids;
+  const params = _paramsBusqueda();
+  params.set('soloIds', '1');
+  const r = await api('/catalogo?' + params.toString());
+  _catalogoNav = { clave, ids: r.ids || [] };
+  return _catalogoNav.ids;
+}
+// Pinta los controles de navegación en #fichaNav. `ctx.lista` = lista explícita; `ctx.catalogo` = todos los
+// resultados del Catálogo (async). Sin lista → no muestra nada.
+function pintarNavFicha(id, ctx) {
+  const cont = $('#fichaNav');
+  if (!cont) return;
+  const render = (ids) => {
+    if (!$('#fichaNav')) return; // la ficha ya cambió mientras se cargaban los ids
+    const idx = (ids || []).indexOf(id);
+    if (!ids || ids.length < 2 || idx < 0) {
+      cont.innerHTML = '';
+      return;
+    }
+    const b = (bid, txt, tit, dis) => `<button class="det-back" id="${bid}" ${dis ? 'disabled' : ''} title="${tit}">${txt}</button>`;
+    cont.innerHTML =
+      b('navFirst', '⏮', 'Primero', idx <= 0) +
+      b('navPrev', '◀', 'Anterior', idx <= 0) +
+      `<span class="muted" style="font-size:12px">${idx + 1}/${ids.length}</span>` +
+      b('navNext', '▶', 'Siguiente', idx >= ids.length - 1) +
+      b('navLast', '⏭', 'Último', idx >= ids.length - 1);
+    const irA = (i) => { if (i >= 0 && i < ids.length) verDoc(ids[i], { ...ctx }); };
+    if ($('#navFirst')) $('#navFirst').onclick = () => irA(0);
+    if ($('#navPrev')) $('#navPrev').onclick = () => irA(idx - 1);
+    if ($('#navNext')) $('#navNext').onclick = () => irA(idx + 1);
+    if ($('#navLast')) $('#navLast').onclick = () => irA(ids.length - 1);
+  };
+  if (Array.isArray(ctx && ctx.lista)) render(ctx.lista);
+  else if (ctx && ctx.catalogo) {
+    cont.innerHTML = '<span class="muted" style="font-size:11px">…</span>';
+    idsDelCatalogo().then(render).catch(() => { if ($('#fichaNav')) cont.innerHTML = ''; });
+  } else cont.innerHTML = '';
+}
+
 async function verDoc(id, ctx) {
   detalle = { tipo: 'doc', id, ctx };
   mostrarDetalle();
@@ -1680,30 +1724,12 @@ function pintarDoc(r, ctx) {
     : '';
   // 🩺 Salud: plegable, admin-only, carga perezosa al abrir (checklist de tareas de mantenimiento).
   const secSalud = `<details class="card foldcard admin-only" id="saludDet" style="margin-top:14px"><summary>🩺 Salud del documento</summary><div id="saludBody" class="muted" style="margin-top:10px">Abre para ver el estado de mantenimiento…</div></details>`;
-  // Navegación entre documentos de la lista de origen (Catálogo/estantería…): primero/anterior/siguiente/
-  // último, sin volver atrás. `ctx.lista` = ids en orden; se conserva al saltar de ficha en ficha.
-  const navLista = Array.isArray(ctx && ctx.lista) ? ctx.lista : [];
-  const navIdx = navLista.indexOf(d._id);
-  const navHtml =
-    navLista.length > 1 && navIdx >= 0
-      ? `<div class="row" style="gap:4px;align-items:center;margin-left:auto">
-          <button class="det-back" id="navFirst" ${navIdx <= 0 ? 'disabled' : ''} title="Primero">⏮</button>
-          <button class="det-back" id="navPrev" ${navIdx <= 0 ? 'disabled' : ''} title="Anterior">◀</button>
-          <span class="muted" style="font-size:12px">${navIdx + 1}/${navLista.length}</span>
-          <button class="det-back" id="navNext" ${navIdx >= navLista.length - 1 ? 'disabled' : ''} title="Siguiente">▶</button>
-          <button class="det-back" id="navLast" ${navIdx >= navLista.length - 1 ? 'disabled' : ''} title="Último">⏭</button>
-        </div>`
-      : '';
+  // Navegación entre documentos (⏮◀ N/M ▶⏭): recorre TODOS los resultados de la búsqueda del Catálogo
+  // (no solo la página). El contenedor #fichaNav se rellena async (los ids se traen y cachean por búsqueda).
   // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos, salud) plegado, después.
   $('#p-detalle').innerHTML =
-    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button>${navHtml}</div>${fmin}${secImg}${secSin}${secAcc}${secLect}${secCat}${secSalud}`;
-  if (navLista.length > 1 && navIdx >= 0) {
-    const irA = (i) => { if (i >= 0 && i < navLista.length) verDoc(navLista[i], { ...ctx }); };
-    if ($('#navFirst')) $('#navFirst').onclick = () => irA(0);
-    if ($('#navPrev')) $('#navPrev').onclick = () => irA(navIdx - 1);
-    if ($('#navNext')) $('#navNext').onclick = () => irA(navIdx + 1);
-    if ($('#navLast')) $('#navLast').onclick = () => irA(navLista.length - 1);
-  }
+    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}${secImg}${secSin}${secAcc}${secLect}${secCat}${secSalud}`;
+  pintarNavFicha(d._id, ctx);
   attachClas('#p-detalle');
   attachRating('#p-detalle');
   $$('#p-detalle .copybtn').forEach(
@@ -5171,7 +5197,7 @@ function pintarBusqueda(r) {
     (el) =>
       (el.onclick = () => {
         if (modoSeleccion && ROL === 'admin') toggleSel(el.dataset.doc);
-        else verDoc(el.dataset.doc, { volver: 'search', etiqueta: 'Catálogo', lista: paginaIds.slice() });
+        else verDoc(el.dataset.doc, { volver: 'search', etiqueta: 'Catálogo', catalogo: true });
       }),
   );
   aplicarModoSelUI();

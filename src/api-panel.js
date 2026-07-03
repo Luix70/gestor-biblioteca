@@ -529,9 +529,13 @@ export function rutasPanel() {
                   ]
                 : [{ $sort: sort }];
             // Modo SOLO-IDS: devuelve TODOS los _id que casan (todas las páginas) para «seleccionar todos los
-            // resultados». Respeta cada filtro (estantería, con/sin NFC, nsfw…). Sin paginar; tope de seguridad.
+            // resultados» y para la NAVEGACIÓN de la ficha. Usa el MISMO pipeline de orden que la vista (para
+            // que anterior/siguiente sigan el orden visible). Respeta cada filtro. Sin paginar; tope de seguridad.
             if (String(req.query.soloIds || '') === '1') {
-                const idsAll = await db.collection('biblioteca').find(consulta, { projection: { _id: 1 } }).limit(5000).toArray();
+                const idsAll = await db.collection('biblioteca').aggregate(
+                    [{ $match: consulta }, ...etapasOrden, { $limit: 5000 }, { $project: { _id: 1 } }],
+                    opciones,
+                ).toArray();
                 return res.json({ ok: true, soloIds: true, ids: idsAll.map(x => String(x._id)) });
             }
             const total = await db.collection('biblioteca').countDocuments(consulta);
