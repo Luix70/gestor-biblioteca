@@ -18,6 +18,7 @@ import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 import { rellenarDescripcionesFaltantes } from './mantenimiento/backfill-descripciones.js';
+import { ejecutarCampanasDebidas, ejecutarCampana, leerAjustesCampanas } from './mantenimiento/campanas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -625,6 +626,50 @@ async function quizasMantenimiento() {
 }
 
 /**
+ * Pasada de CAMPAÑAS DE FONDO (roles, huecos, autores, descripciones): independiente del Conformador
+ * por-documento — cada campaña tiene su propio ajuste activa/lote/cadencia y decide dentro si le toca.
+ * Se dispara al reposo, comparte el lock con la ingesta y le cede el turno. Es opt-in por campaña (todas
+ * arrancan desactivadas), por eso no depende del modo del Conformador.
+ */
+async function quizasCampanas() {
+    if (procesando || mantManualEnCurso) return;
+    if (Date.now() - ultimaActividad < MANTENIMIENTO_REPOSO_MS) return;
+    if (await debeCederAIngesta()) return;
+    procesando = true;
+    try {
+        const r = await ejecutarCampanasDebidas({ debeAbortar: debeCederAIngesta });
+        if (r.lanzadas) ultimaActividad = Date.now(); // se hizo trabajo: reinicia el reloj de reposo
+    } catch (e) {
+        console.error('Campañas de fondo:', e.message);
+    } finally {
+        procesando = false;
+    }
+}
+
+/**
+ * Disparo MANUAL de UNA campaña (botón «Ejecutar ahora» del panel): lanza UNA tanda en segundo plano,
+ * saltándose la espera de reposo pero respetando el lock y cediendo a la ingesta. Devuelve de inmediato.
+ */
+export function ejecutarCampanaAhora(id) {
+    if (procesando || mantManualEnCurso) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
+    procesando = true;
+    (async () => {
+        try {
+            const db = await conectarDB();
+            const cfg = await leerAjustesCampanas(db);
+            const limite = (cfg[id] && cfg[id].lote) || 25; // una sola tanda del tamaño configurado
+            const r = await ejecutarCampana(db, id, { limite, debeAbortar: debeCederAIngesta });
+            console.log(`🎯 [Campaña ${id}] (manual) ${r.procesados} procesados · ${r.cambios} cambios · ${r.pendientes} pendientes.`);
+        } catch (e) {
+            console.error(`Campaña ${id} (manual):`, e.message);
+        } finally {
+            procesando = false;
+        }
+    })();
+    return { ok: true, mensaje: `Campaña «${id}» lanzada (una tanda). Refresca para ver los pendientes.` };
+}
+
+/**
  * Disparo MANUAL del Conformador (vía API): vacía TODO el backlog en segundo plano, lote a lote,
  * saltándose la espera de inactividad. Cede a la ingesta entre lotes. Devuelve de inmediato.
  */
@@ -772,6 +817,8 @@ export async function iniciarVigilante() {
         await procesarCola().catch(e => console.error('Vigilante (escaneo periódico):', e));
         // Si el Inbox queda inactivo, aprovechar para una pasada de mantenimiento (cede a la ingesta).
         await quizasMantenimiento().catch(e => console.error('Vigilante (mantenimiento):', e));
+        // Y, con el sistema en reposo, una tanda de las campañas de fondo que estén activas y les toque.
+        await quizasCampanas().catch(e => console.error('Vigilante (campañas):', e));
     }, escaneoMs);
 
     // Y un primer barrido inmediato de lo que ya hubiera en el Inbox al arrancar.

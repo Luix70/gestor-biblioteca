@@ -467,10 +467,27 @@ de ficheros clasificado por CDU.
 
   ── ACTIVIDAD (administración) ───────────────────────────────────────────────
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del
-    Conformador, 🧹 Lanzar mantenimiento, 🩺 Integridad (diagnosticar/reparar a la
-    Papelera), 🧼 Sanear catálogo, 👁️ Visión IA (proveedores/claves), 🔎 Búsqueda
-    (reindexar FTS), 🔞 Permisos de invitados (permitir/restringir NSFW), 📜 Logs
-    en vivo.
+    Conformador, 🧹 Lanzar mantenimiento, 🎯 Campañas de fondo (ver abajo), 🩺
+    Integridad (diagnosticar/reparar a la Papelera), 🧼 Sanear catálogo, 👁️ Visión
+    IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🔞 Permisos de invitados
+    (permitir/restringir NSFW), 📜 Logs en vivo.
+
+    · 🎯 CAMPAÑAS DE FONDO (admin): rellenan información INCOMPLETA del catálogo
+      cuando el sistema está en REPOSO (Inbox inactivo), cada una con su interruptor,
+      su tamaño de LOTE y su periodicidad (cada N minutos). Comparten el candado con
+      la ingesta y le CEDEN el turno. Cada campaña avisa de su COSTE:
+        🆓 sin IA (local/Fichero) · 🌐 APIs gratis (con LÍMITE de llamadas) · 🤖 IA de pago.
+      Campañas actuales:
+        · 🆓 Roles e idioma original — traductor/ilustrador/… e idioma original por
+          ISBN (mención de la BNE del Fichero + OpenLibrary).
+        · 🌐 Huecos de metadatos — sinopsis, año, editorial, autores, palabras clave
+          y Dewey/LCC por ISBN (OpenLibrary/Google Books/DNB). Conservador.
+        · 🌐 Fotos y biografías de autor — OpenLibrary + Wikidata + Wikipedia.
+        · 🤖 Descripciones CDU/Dewey/LCC — 1 llamada de IA por código (se cachea).
+      Cada campaña es RESUMIBLE y TERMINABLE: sella cada elemento procesado (con o sin
+      datos) para no repetirlo; el contador «Pendientes» baja hasta 0. Arrancan todas
+      DESACTIVADAS (opt-in). «▶ Ahora» lanza una tanda inmediata en 2º plano. Solo
+      corren en el NAS (contenedor). Config persistida en Mongo (ajustes/campanas).
 
   ── CUARENTENA ───────────────────────────────────────────────────────────────
     Lo que no se pudo catalogar, por categorías plegables:

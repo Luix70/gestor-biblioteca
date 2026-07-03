@@ -44,9 +44,12 @@ export const AJUSTES = {
     MANTENIMIENTO_REPOSO_MS: 300000, // Inbox inactivo necesario antes de una pasada (5 min)
     MANTENIMIENTO_LOTE: 25,          // documentos por pasada (disparo automático)
     MANTENIMIENTO_PAUSA_MS: 800,     // pausa entre documentos durante el mantenimiento
-    MANTENIMIENTO_DESC_LOTE: 0,      // descripciones de clasificación (CDU/Dewey/LCC) por pasada. 0 = OFF (por
-                                     // defecto): se generan SOLO bajo demanda (al abrir el ⓘ), no en masa —
-                                     // miles de códigos = miles de llamadas de IA. Súbelo (.env) para un backfill puntual.
+    MANTENIMIENTO_DESC_LOTE: 0,      // descripciones de clasificación (CDU/Dewey/LCC) por pasada del Conformador.
+                                     // 0 = OFF (por defecto): se generan bajo demanda (al abrir el ⓘ). Para un
+                                     // backfill controlado usa mejor la CAMPAÑA «descripciones» del panel (ajustable).
+
+    // --- Campañas de fondo (backfill autorreparable al reposo; ajustables en el panel) ---
+    CAMPANAS_PAUSA_MS: 700,          // ritmo entre elementos de una tanda de campaña (respeta a las APIs)
 
     // --- Portadas (resolver-portada) ---
     PORTADA_ANCHO_OBJETIVO: 1000,   // ancho ideal; por debajo se intenta mejorar

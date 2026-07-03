@@ -122,6 +122,18 @@
                   Procesa 25 documentos por ronda, cede a la ingesta y reintenta hasta vaciar el backlog.
                 </p>
               </details>
+              <details class="card foldcard admin-only" id="fcCampanas" data-fold="pc">
+                <summary><h3>🎯 Campañas de fondo</h3></summary>
+                <p class="muted" style="margin-top: 0; font-size: 12px">
+                  Rellenan información incompleta del catálogo cuando el sistema está en reposo. Cada una con su
+                  lote y periodicidad. Ojo al coste:
+                  <b>🆓 sin IA</b> · <b>🌐 APIs gratis (con límite de llamadas)</b> · <b>🤖 IA de pago</b>.
+                </p>
+                <div class="row" style="align-items: center; margin-bottom: 4px">
+                  <button class="btn" id="campRefresh">↻ Actualizar</button>
+                </div>
+                <div id="campanasBody">…</div>
+              </details>
               <details class="card foldcard" id="fcIntegridad" data-fold="pc">
                 <summary><h3>🩺 Integridad del archivo</h3></summary>
                 <p class="muted" style="margin-top: 0; font-size: 12px">

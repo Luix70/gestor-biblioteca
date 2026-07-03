@@ -1,7 +1,8 @@
 import express from 'express';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
-import { configurarVigilante, estadoVigilante, estadoConformador } from './vigilante.js';
+import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora } from './vigilante.js';
+import { listarCampanas, guardarAjusteCampana } from './mantenimiento/campanas.js';
 import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
     listarCuarentena, reingestarCuarentena, descartarCuarentena, descartarCategoria, reingestarTodosDuplicados, ingestaPorDia,
@@ -231,6 +232,25 @@ export function rutasPanel() {
         res.json(lanzarIntegridad({ reparar: req.body?.reparar === true }));
     });
     r.get('/integridad/estado', (req, res) => res.json(estadoIntegridad()));
+
+    // ── Campañas de fondo (backfill autorreparable al reposo): listar estado+config+pendientes,
+    //    ajustar (activa/lote/cada-N-min) y disparar una tanda ahora. Config y disparo = solo admin. ──
+    r.get('/campanas', async (req, res) => {
+        try { res.json({ ok: true, campanas: await listarCampanas(await conectarDB()) }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/campanas/:id', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const r2 = await guardarAjusteCampana(await conectarDB(), req.params.id, req.body || {});
+            res.status(r2.ok ? 200 : 400).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/campanas/:id/ejecutar', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        const r2 = ejecutarCampanaAhora(req.params.id);
+        res.status(r2.ok ? 202 : 409).json(r2);
+    });
 
     // ── Visión (rotación multi-proveedor): estado, activar/desactivar y PROBAR una clave. Solo admin.
     //    No expone secretos (solo enmascarados). Las claves se gestionan en .env (numeradas). ──

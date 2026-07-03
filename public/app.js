@@ -5127,6 +5127,10 @@ function loadInteg() {
     $('#reindexBtn').onclick = reindexar;
     loadIndice();
   }
+  if ($('#campRefresh') && ROL === 'admin') {
+    $('#campRefresh').onclick = loadCampanas;
+    loadCampanas();
+  }
   if ($('#guestNsfw')) {
     loadGuestNsfw();
     $('#guestNsfw').onchange = async () => {
@@ -5149,6 +5153,77 @@ async function loadGuestNsfw() {
     const r = await api('/ajustes/guest-nsfw');
     if ($('#guestNsfw')) $('#guestNsfw').checked = !!r.enabled;
   } catch (e) {}
+}
+
+// ── Campañas de fondo (backfill autorreparable al reposo): estado + ajuste (activa/lote/cada-N-min) + «Ahora» ──
+// Coste de cada campaña: 🆓 sin IA · 🌐 APIs gratis (con límite de llamadas) · 🤖 IA de pago.
+const CAMP_BADGE = { gratis: '🆓', apis: '🌐', ia: '🤖' };
+const CAMP_BADGE_TIT = {
+  gratis: 'Sin IA (local / Fichero)',
+  apis: 'APIs gratuitas, pero con LÍMITE de llamadas',
+  ia: 'Consume IA de pago (Gemini)',
+};
+async function loadCampanas() {
+  const cont = $('#campanasBody');
+  if (!cont) return;
+  cont.innerHTML = '<span class="muted" style="font-size:12px">Cargando…</span>';
+  let r;
+  try {
+    r = await api('/campanas');
+  } catch (e) {
+    cont.innerHTML = `<span class="muted" style="font-size:12px">${esc(e.message)}</span>`;
+    return;
+  }
+  cont.innerHTML = (r.campanas || [])
+    .map(
+      (c) => `<div class="camprow" data-id="${esc(c.id)}" style="border-top:1px solid var(--line);padding:10px 0">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1;min-width:180px">
+            <div style="font-weight:600"><span title="${CAMP_BADGE_TIT[c.coste] || ''}">${CAMP_BADGE[c.coste] || ''}</span> ${esc(c.etiqueta)}</div>
+            <div class="muted" style="font-size:11px;line-height:1.3;margin-top:2px">${esc(c.descripcion)}</div>
+          </div>
+          <label class="switch" style="flex:0 0 auto"><input type="checkbox" class="campActiva" ${c.activa ? 'checked' : ''}><span class="slider"></span></label>
+        </div>
+        <div class="row" style="gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+          <span class="muted" style="font-size:12px">Pendientes: <b class="campPend">${c.pendientes == null ? '—' : c.pendientes}</b></span>
+          <label style="font-size:12px">Lote <input class="campLote" type="number" min="1" value="${c.lote}" style="width:66px"></label>
+          <label style="font-size:12px">cada <input class="campCada" type="number" min="1" value="${c.cadenciaMin}" style="width:56px"> min</label>
+          <button class="btn campGuardar" style="padding:3px 9px;font-size:12px">Guardar</button>
+          <button class="btn campRun" style="padding:3px 9px;font-size:12px" title="Lanza una tanda ahora (en segundo plano)">▶ Ahora</button>
+        </div>
+      </div>`,
+    )
+    .join('');
+  // Cablear cada fila: el interruptor guarda al instante; «Guardar» persiste lote/cadencia; «Ahora» lanza una tanda.
+  cont.querySelectorAll('.camprow').forEach((row) => {
+    const id = row.dataset.id;
+    const leer = () => ({
+      activa: row.querySelector('.campActiva').checked,
+      lote: +row.querySelector('.campLote').value,
+      cadenciaMin: +row.querySelector('.campCada').value,
+    });
+    const guardar = async (silencioso) => {
+      try {
+        await api('/campanas/' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify(leer()) });
+        if (!silencioso) toast('✔ Campaña guardada');
+      } catch (e) {
+        toast(e.message, 'bad');
+      }
+    };
+    row.querySelector('.campActiva').onchange = () => guardar(true);
+    row.querySelector('.campGuardar').onclick = () => guardar(false);
+    row.querySelector('.campRun').onclick = async () => {
+      await guardar(true); // asegura que lote/cadencia estén persistidos antes de lanzar
+      try {
+        const r2 = await api('/campanas/' + encodeURIComponent(id) + '/ejecutar', { method: 'POST', body: JSON.stringify({}) });
+        toast(r2.mensaje || 'Campaña lanzada');
+      } catch (e) {
+        toast(e.message, 'bad');
+        return;
+      }
+      setTimeout(loadCampanas, 5000); // refresca los pendientes cuando la tanda ya avanzó
+    };
+  });
 }
 // ── Búsqueda: índice FTS local (estado + reindexar en 2º plano con progreso) ──
 let reindexTimer = null;
