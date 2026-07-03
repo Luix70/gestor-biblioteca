@@ -21,6 +21,8 @@ import { separarAutores } from '../utils/autor-normalizar.js';
 import { ROLES_VALIDOS, esComicPorDatos, promoverIlustradorSiComic } from '../utils/contribuciones.js';
 import { validarISBN, variantesISBN } from '../utils/identificadores.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
+import { resolverObra, registrarVolumenEnObra } from '../utils/obras.js';
+import { resolverColeccion } from '../utils/colecciones.js';
 
 // Lee las primeras imágenes GUARDADAS del documento (páginas clave: portada + créditos + contraportada).
 async function leerImagenesDeDoc(doc, max = 6) {
@@ -97,13 +99,25 @@ export async function analizarAFondo(db, doc, { maxImagenes = 6 } = {}) {
     const { autoresExtra, contribuciones: mergedResto } = promoverIlustradorSiComic(merged, comic);
     merged = mergedResto;
 
-    // AUTORES: sustituir SOLO si los actuales son placeholder/ausentes, y SOLO por autores REALES (nunca se
-    // pisa un autor bueno ni se propone un placeholder «Various»/«DK»). Se añaden los coautores de cómic.
+    // AUTORES (anti-pérdida — NUNCA se quita a nadie ni se propone un placeholder «Various»/«DK»):
+    //   · si los actuales son placeholder/ausentes → se REEMPLAZAN por los autores reales;
+    //   · si ya hay autores buenos → se AÑADEN los COAUTORES que falten (p. ej. un diccionario con 3 autores
+    //     del que solo teníamos 1) — así no se pierde ninguno.
     const desdeVis = (vis && vis.autores) || [];
     const desdeExt = (ext && ext.autores) || [];
-    const autoresNuevos = [...new Set([...(desdeVis.length ? desdeVis : desdeExt), ...autoresExtra])].filter((n) => !esAutorPlaceholder(n, edNombre));
-    if (autorEsPlaceholder && autoresNuevos.length)
-        proponer('autores', autoresActuales.join(', ') || '—', autoresNuevos.join(', '), autoresNuevos, desdeVis.length ? 'portadilla·IA' : 'Fichero/APIs');
+    const autoresVision = [...new Set([...(desdeVis.length ? desdeVis : desdeExt), ...autoresExtra])].filter((n) => !esAutorPlaceholder(n, edNombre));
+    if (autoresVision.length) {
+        const norm = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+        let finalAutores = null, fuenteA = desdeVis.length ? 'portadilla·IA' : 'Fichero/APIs';
+        if (autorEsPlaceholder) {
+            finalAutores = autoresVision;
+        } else {
+            const actualesNorm = new Set(autoresActuales.map(norm));
+            const nuevos = autoresVision.filter((n) => !actualesNorm.has(norm(n)));
+            if (nuevos.length) { finalAutores = [...autoresActuales, ...nuevos]; fuenteA = 'portadilla·IA (+ los existentes)'; }
+        }
+        if (finalAutores) proponer('autores', autoresActuales.join(', ') || '—', finalAutores.join(', '), finalAutores, fuenteA);
+    }
 
     if ((!doc.contribuciones || !doc.contribuciones.length) && merged.length)
         proponer('contribuciones', '—', merged.map((c) => `${c.nombre} (${c.rol})`).join(' · '), merged, deVis.length ? 'portadilla·IA + APIs' : 'Fichero/APIs');
@@ -133,10 +147,17 @@ export async function analizarAFondo(db, doc, { maxImagenes = 6 } = {}) {
         if (vis['año_edicion'] && !doc['año_edicion']) proponer('año_edicion', '—', vis['año_edicion'], vis['año_edicion'], 'portadilla·IA');
     }
 
-    // Colección/obra: SUGERENCIA informativa (no se auto-agrupa para no romper colecciones/obras).
+    // OBRA multivolumen (pivote isbn_obra) — APLICABLE: agrupa el tomo con su obra (enciclopedias/diccionarios).
+    const obraTit = vis && vis.obra_titulo;
+    const obraIsbn = vis && vis.isbn_obra;
+    if ((obraTit || obraIsbn) && !doc.obra)
+        proponer('obra', '—', `${obraTit || '(obra)'}${vis && vis.volumen_numero ? ' · vol ' + vis.volumen_numero : ''}${obraIsbn ? ' · ISBN obra ' + obraIsbn : ''}`,
+            { titulo: obraTit || null, isbn_obra: obraIsbn || null, volumen: (vis && vis.volumen_numero) || null }, 'portadilla·IA');
+    // COLECCIÓN/serie — APLICABLE si la portadilla la nombra con su número (distinto del volumen de la obra).
     const colN = primero(vis && vis.coleccion_nombre, ext && ext.coleccion_nombre);
-    if (colN && !doc.coleccion) balance.push({ campo: 'coleccion (sugerencia)', antes: '—', despues: colN, fuente: 'IA/APIs', soloSugerencia: true });
-    if (vis && vis.obra_titulo && !doc.obra) balance.push({ campo: 'obra (sugerencia)', antes: '—', despues: `${vis.obra_titulo}${vis.volumen_numero ? ' · vol ' + vis.volumen_numero : ''}`, fuente: 'portadilla·IA', soloSugerencia: true });
+    const colNum = (vis && vis.coleccion_numero) || (ext && ext.coleccion_numero) || null;
+    if (colN && !doc.coleccion)
+        proponer('coleccion', '—', `${colN}${colNum ? ' · nº ' + colNum : ''}`, { nombre: colN, numero: colNum }, vis && vis.coleccion_nombre ? 'portadilla·IA' : 'APIs');
 
     // Calidad: si no hubo visión, puntúa por la riqueza de lo propuesto (para el veredicto merece-la-pena).
     if (!vis) {
@@ -205,6 +226,33 @@ export async function aplicarAFondo(db, doc, propuesta = {}, campos = null, { re
         if (propuesta.clasificacion.lcc && !doc.lcc) set.lcc = String(propuesta.clasificacion.lcc).trim();
         if (set.dewey || set.lcc) aplicados.push('clasificacion');
     }
+    // OBRA multivolumen: enlaza el tomo con su obra (dedup por isbn_obra en resolverObra) y lo registra en su
+    // inventario. Solo si el doc no tenía obra (anti-pérdida). El registro del volumen va tras el update.
+    let regObra = null;
+    if (elegidos.includes('obra') && propuesta.obra && !doc.obra && propuesta.obra.titulo) {
+        const edId = (doc.editorial && typeof doc.editorial !== 'string') ? doc.editorial : (set.editorial || null);
+        const colId = (doc.coleccion || set.coleccion || null);
+        const { _id } = await resolverObra(db, { titulo: propuesta.obra.titulo, isbn_obra: propuesta.obra.isbn_obra, editorialId: edId, coleccionId: colId, cdu: doc.cdu });
+        if (_id) {
+            set.obra = _id;
+            set.obra_titulo = propuesta.obra.titulo;
+            if (propuesta.obra.isbn_obra) set.isbn_obra = propuesta.obra.isbn_obra;
+            if (propuesta.obra.volumen != null) set.volumen_numero = propuesta.obra.volumen;
+            aplicados.push('obra');
+            regObra = { obraId: _id, vol: propuesta.obra.volumen ?? null };
+        }
+    }
+    // COLECCIÓN/serie: enlaza el doc a su colección (número DE COLECCIÓN, distinto del volumen de la obra).
+    if (elegidos.includes('coleccion') && propuesta.coleccion && !doc.coleccion && propuesta.coleccion.nombre) {
+        const edId = (doc.editorial && typeof doc.editorial !== 'string') ? doc.editorial : (set.editorial || null);
+        const { _id } = await resolverColeccion(db, propuesta.coleccion.nombre, edId);
+        if (_id) {
+            set.coleccion = _id;
+            set.coleccion_nombre = propuesta.coleccion.nombre;
+            if (propuesta.coleccion.numero) set.coleccion_numero = String(propuesta.coleccion.numero);
+            aplicados.push('coleccion');
+        }
+    }
 
     if (!aplicados.length) return { ok: true, aplicados: [] };
 
@@ -215,6 +263,8 @@ export async function aplicarAFondo(db, doc, propuesta = {}, campos = null, { re
     set.fecha_actualizacion = new Date();
     set.alertas_agente = [...(doc.alertas_agente || []), `Enriquecido a fondo (visión): ${aplicados.join(', ')}.`];
     await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
+    // Registrar el tomo en el inventario de su obra (qué tomos hay/faltan) tras enlazarlo.
+    if (regObra) { try { await registrarVolumenEnObra(db, regObra.obraId, regObra.vol, doc._id, null); } catch { /* best-effort */ } }
     return { ok: true, aplicados };
 }
 

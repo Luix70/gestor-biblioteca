@@ -22,6 +22,13 @@ REGLAS DE EXTRACCIÓN Y VALIDACIÓN:
 10. 'sinopsis': Genera un resumen de dos líneas con tus propias palabras. ¡PROHIBIDO copiar o transcribir textualmente párrafos de la imagen para evitar bloqueos por copyright (RECITATION)!
 11. 'codigo_barras': Lee y transcribe los 13 DÍGITOS del código de barras EAN-13 (los números impresos junto a las barras de la cubierta o contracubierta), EXACTAMENTE como aparecen y sin guiones. El código de barras PUEDE ESTAR GIRADO (en vertical / 90°): léelo igualmente, en cualquier orientación. NO inventes dígitos: si no los lees con seguridad, deja el campo vacío. (Pista: un EAN-13 que empieza por 977 es de una REVISTA; 978/979 de un LIBRO.)
 12. 'numero_issue' y 'mes_publicacion': si es una revista, extrae del TEXTO de la portada el número de ejemplar ("ISSUE 44", "Nº 145" → "44"/"145") y el mes de publicación como número 1-12 ("FEBRUARY 2010" → 2). NO los tomes del add-on del código de barras; déjalos vacíos si no aparecen en el texto.
+13. OBRA MULTIVOLUMEN (enciclopedias, diccionarios, tratados en varios TOMOS): MUY IMPORTANTE. Si este ejemplar es un VOLUMEN/TOMO de una obra mayor, rellena:
+   - 'obra_titulo': el título de la OBRA COMPLETA (p. ej. "Diccionario de Filosofía", "Historia de las ideas políticas"), tal como aparece en la portadilla/créditos; '' si es un libro suelto.
+   - 'volumen_numero': el número de ESTE tomo dentro de la obra (entero: "Tomo II"/"Vol. 2"/"II" → 2); null si no consta.
+   - 'obra_total': nº total de tomos si se indica ("obra en 4 volúmenes" → 4); null si no.
+   - 'isbn_obra': el ISBN de la OBRA COMPLETA / del SET, que en la página de créditos suele figurar JUNTO al del volumen ("ISBN obra completa:", "ISBN O.C.:", "ISBN de la obra:"). Es DISTINTO del 'isbn' de este volumen. Solo dígitos, sin guiones; '' si no aparece.
+   OJO: en la página de créditos de estos libros HAY DOS ISBN — el de ESTE volumen (→ 'isbn') y el de la OBRA COMPLETA (→ 'isbn_obra'). Distínguelos con cuidado; no los mezcles.
+14. COLECCIÓN/SERIE editorial: si el ejemplar pertenece a una colección/serie con nombre y número (p. ej. "Círculo Universidad, 8", "Biblioteca Básica, 12"), rellena 'coleccion_nombre' (el nombre de la colección) y 'coleccion_numero' (su número DENTRO de la colección). OJO: este número es DISTINTO de 'volumen_numero' (el tomo dentro de la OBRA). Una obra en 2 tomos puede ocupar UN SOLO número de colección (p. ej. ambos tomos son el nº 8 de la colección "Círculo Universidad", pero volumen 1 y 2 de la obra "Historia de las Ideas Políticas"). No confundas colección (serie editorial amplia, con muchos títulos distintos) con obra (un único título en varios tomos).
 ESTRUCTURA JSON REQUERIDA:
 {
   "tipo_recurso": "libro|revista",
@@ -37,6 +44,12 @@ ESTRUCTURA JSON REQUERIDA:
   "mes_publicacion": number,
   "editorial": "string",
   "año_edicion": number,
+  "obra_titulo": "string",
+  "volumen_numero": number,
+  "obra_total": number,
+  "isbn_obra": "string",
+  "coleccion_nombre": "string",
+  "coleccion_numero": "string",
   "sinopsis": "string",
   "palabras_clave": ["tag1", "tag2"],
   "estado_verificacion": "completado|pendiente",
@@ -92,6 +105,21 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
                 `Código de barras leído: ${bc.issn || bc.isbn}.`];
         }
         delete recursoEstructurado.codigo_barras;          // no se persiste (no es campo del esquema)
+
+        // OBRA MULTIVOLUMEN: normaliza el ISBN de la obra (solo dígitos) y descarta si coincide con el del
+        // volumen (no sería el ISBN de la obra completa). El pivote de agrupación es isbn_obra (resolverObra
+        // deduplica por él → todos los tomos del set caen en la MISMA obra).
+        const digitos = (s) => String(s || '').replace(/[^0-9Xx]/g, '');
+        if (recursoEstructurado.isbn_obra) {
+            const io = digitos(recursoEstructurado.isbn_obra);
+            recursoEstructurado.isbn_obra = (io.length >= 10 && io !== digitos(recursoEstructurado.isbn)) ? io : '';
+        }
+        // volumen_numero como entero (o fuera si no consta) y obra_total como entero.
+        const ent = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+        if (recursoEstructurado.volumen_numero != null) recursoEstructurado.volumen_numero = ent(recursoEstructurado.volumen_numero);
+        if (recursoEstructurado.obra_total != null) recursoEstructurado.obra_total = ent(recursoEstructurado.obra_total);
+        // Si trae obra_titulo o isbn_obra, es un tomo → limpia el título de la obra.
+        if (recursoEstructurado.obra_titulo) recursoEstructurado.obra_titulo = String(recursoEstructurado.obra_titulo).trim() || null;
 
         recursoEstructurado.fecha_ingreso = new Date();
         return recursoEstructurado;
