@@ -4059,8 +4059,9 @@ function renderBulk() {
   }
   const enPag = paginaIds.filter((id) => selDocs.has(id)).length;
   const todaLaPag = enPag > 0 && enPag === paginaIds.length;
-  // Botón que activa/desactiva el Modo selección (tocar una portada la marca en vez de abrir su ficha).
-  const modoBtn = `<button class="btn${modoSeleccion ? ' pri' : ''}" id="bkModo" title="Tocar una portada la marca (en vez de abrir su ficha). La selección se conserva al apagarlo.">🖱 Modo selección</button>`;
+  // Botón que alterna Modo selección (tocar la portada la marca) ↔ Modo previsualización (tocar abre la
+  // ficha). El texto refleja el modo ACTUAL; la selección se conserva al cambiar de modo.
+  const modoBtn = `<button class="btn${modoSeleccion ? ' pri' : ''}" id="bkModo" title="Modo selección: tocar una portada la marca. Modo previsualización: tocar abre su ficha. La selección se conserva al cambiar.">${modoSeleccion ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`;
   // Herramientas de selección masiva (solo tienen sentido en modo selección).
   const selNfc =
     'NDEFReader' in window
@@ -4074,7 +4075,7 @@ function renderBulk() {
   // Acciones sobre la selección (aparecen cuando hay algo seleccionado).
   const acc = selDocs.size
     ? `<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.
-    <button class="btn${soloSeleccion ? ' pri' : ''}" id="bkMostrarSel" title="Muestra SOLO los documentos seleccionados (para revisar la selección y quitar los que no quieras). Vuelve a pulsar para salir.">👁 Mostrar selección</button>
+    <button class="btn${soloSeleccion ? ' pri' : ''}" id="bkMostrarSel" title="Muestra SOLO los seleccionados (para revisar la selección y, en Modo selección, quitar los que no quieras). Vuelve a pulsar para mostrar todo.">${soloSeleccion ? '🗂 Mostrar todo' : '👁 Mostrar selección'}</button>
     <button class="btn pri" id="bkCol">📚 Colección</button>
     <button class="btn pri" id="bkObra">📖 Obra</button>
     <button class="btn pri" id="bkUbic">📍 Estantería</button>
