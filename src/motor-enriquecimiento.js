@@ -1,6 +1,7 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { esTituloArtefacto } from './utils/parsear-nombre.js';
+import { parsearVolumen, totalDeclarado } from './utils/multivolumen.js';
 import { tituloCabecera } from './utils/revistas.js';
 import { buscarISSNporTitulo } from './utils/buscador-issn-titulo.js';
 
@@ -71,15 +72,35 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     const isbnsRol = Array.isArray(datosBase.isbns_rol) ? datosBase.isbns_rol : [];
     const isbnObraRol = isbnsRol.find(x => x.rol === 'obra');
     const rolVol = isbnsRol.filter(x => x.rol === 'volumen');
-    if (contexto.obra || isbnObraRol) {
-        documento.obra_titulo = contexto.obra?.titulo || documento.obra_titulo || documento.titulo;
-        if (contexto.obra?.total) documento.obra_total = contexto.obra.total; // nº de tomos declarado
-        // Número del tomo: del drop de carpeta (contexto) o del propio fichero (nombre de archivo).
-        // NUNCA del "primer rol-volumen" de los créditos: ese número es del tomo 1, no de ESTE tomo
-        // → un tomo suelto (sin contexto de carpeta) se catalogaba como Vol. 1 (caso real Vol 4→1).
-        const numVol = contexto.obra?.numero ?? documento.volumen_numero ?? null;
+    // INDICIO DE TOMO POR TEXTO — común a TODOS los métodos de entrada (PDF/EPUB/imágenes/ISBN): si el
+    // título, el subtítulo o el nombre de archivo traen "Vol./Tomo N" precedido del título de la OBRA, es
+    // un tomo de obra multivolumen aunque NO venga por carpeta (contexto.obra) ni con ISBN-de-rol en los
+    // créditos. Refuerza la detección para que sea igual sea cual sea la vía de entrada. Conservador:
+    // solo si aún no hay volumen_numero (no pisa una detección estructurada previa: vision/carpeta/CIP) y
+    // solo para libros no-cómic (una revista/número o un álbum de cómic suelto no son obras multivolumen).
+    // Exige 'prefijo' (título de obra ANTES del "Vol N"): así "Vol. 3" a secas no inventa una obra sin nombre.
+    let volTexto = null;
+    if (documento.volumen_numero == null && documento.tipo_recurso !== 'revista' && documento.naturaleza !== 'comic') {
+        for (const t of [documento.subtitulo, documento.nombre_archivo, datosBase.titulo, documento.titulo]) {
+            const v = parsearVolumen(t);
+            if (v && v.numero != null && v.prefijo) { volTexto = v; break; }
+        }
+    }
+    if (contexto.obra || isbnObraRol || volTexto) {
+        documento.obra_titulo = contexto.obra?.titulo || documento.obra_titulo || volTexto?.prefijo || documento.titulo;
+        // nº total de tomos: del drop de carpeta o DECLARADO en el texto ("(3 vols)", "en 4 tomos").
+        if (contexto.obra?.total) documento.obra_total = contexto.obra.total;
+        else if (documento.obra_total == null) {
+            const tot = totalDeclarado(documento.nombre_archivo) || totalDeclarado(datosBase.titulo);
+            if (tot) documento.obra_total = tot;
+        }
+        // Número del tomo: del drop de carpeta (contexto), del propio fichero (volumen_numero ya fijado) o
+        // del indicio de texto. NUNCA del "primer rol-volumen" de los créditos: ese número es del tomo 1,
+        // no de ESTE tomo → un tomo suelto (sin contexto de carpeta) se catalogaba como Vol. 1 (caso real Vol 4→1).
+        const numVol = contexto.obra?.numero ?? documento.volumen_numero ?? volTexto?.numero ?? null;
         if (numVol != null) documento.volumen_numero = numVol;
         if (contexto.obra?.titulo_volumen) documento.volumen_titulo = contexto.obra.titulo_volumen;
+        else if (volTexto?.titulo && !primerValido(documento.volumen_titulo)) documento.volumen_titulo = volTexto.titulo;
         if (isbnObraRol) documento.isbn_obra = isbnObraRol.isbn;
         // ISBN del tomo = el de SU número. La página de créditos de CADA tomo lista TODOS los ISBN
         // del set ("ISBN … (Vol. 1)", "(Vol. 2)"…); coger el PRIMER rol-volumen hacía que todos los

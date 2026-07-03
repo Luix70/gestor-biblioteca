@@ -308,7 +308,14 @@ de ficheros clasificado por CDU.
     (vacío = sin número) + el TOTAL de tomos de la obra; al guardar reescribe el
     volumen_numero de cada libro y reconstruye el inventario. Anti-pérdida: dos
     tomos con el mismo número → el segundo queda «sin número» para revisión.
-    (POST /obras/:id/numerar {numeros:{docId:nº|""}, total}.)
+    (POST /obras/:id/numerar {numeros:{docId:nº|""}, total}.)  «⚙️ Orden automático»
+    rellena la numeración por INDICIOS (nº ya asignado / «Vol./Tomo N» del
+    título/OCR/nombre de archivo, arábigo o romano) y es editable antes de guardar.
+    DETECCIÓN EN LA INGESTA (igual sea cual sea la vía de entrada — PDF/EPUB/imágenes/
+    ISBN): además del drop de carpeta de tomos y del ISBN-con-rol de los créditos, el
+    enriquecedor deduce el tomo del PROPIO TEXTO cuando el título/subtítulo/nombre de
+    archivo trae «Vol./Tomo N» con el título de la obra delante (motor-enriquecimiento).
+    Conservador: solo si no hay ya nº de volumen, y no en revistas ni cómics.
 
   ── INBOX (ALTA MANUAL desde el panel) ───────────────────────────────────────
     Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la
