@@ -373,7 +373,8 @@ export function rutasPanel() {
             const cdu = (req.query.cdu || '').trim();
             const orden = req.query.orden || 'reciente';
             const page = Math.max(1, Number(req.query.page) || 1);
-            const porPagina = 24;
+            // Tamaño de página: por defecto 24 (vista iconos); la vista «detalles» pide 100. Acotado a [1,100].
+            const porPagina = Math.min(100, Math.max(1, Number(req.query.porPagina) || 24));
 
             const match = {};
             // Tipo: libro/revista por tipo_recurso; 'comic' por naturaleza (un cómic puede ser libro=GN o

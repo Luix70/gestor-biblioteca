@@ -1253,12 +1253,70 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
   display: block;
 }
 /* Rejilla en modo selección: el cursor y un ligero realce invitan a tocar para seleccionar. */
-.selmode .vol {
+.selmode .vol,
+.selmode .drow {
   cursor: pointer;
 }
-.selmode .vol:not(.sel):active {
+.selmode .vol:not(.sel):active,
+.selmode .drow:not(.sel):active {
   outline: 2px dashed var(--acc);
   outline-offset: -2px;
+}
+/* Vista DETALLES del Catálogo: una fila por documento, solo texto (más documentos por página). */
+.dlist {
+  border-top: 1px solid var(--line);
+}
+.drow {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 10px 9px 32px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.drow:hover {
+  background: var(--bg2);
+}
+.drow.sel {
+  outline: 2px solid var(--acc);
+  outline-offset: -2px;
+  background: rgba(40, 217, 168, 0.08);
+}
+.drow .selmark {
+  top: 50%;
+  left: 6px;
+  transform: translateY(-50%);
+}
+.drow .dtit {
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drow .dmeta {
+  color: var(--muted);
+  font-size: 12px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drow .dfmt {
+  flex: 0 0 auto;
+}
+@media (max-width: 620px) {
+  /* En móvil, título y meta en dos líneas (la fila se hace bloque). */
+  .drow {
+    flex-wrap: wrap;
+    gap: 2px 10px;
+  }
+  .drow .dtit {
+    flex-basis: 100%;
+  }
 }
 /* Nº de posición física en la estantería (esquina inferior izda. de la portada) */
 .posbadge {

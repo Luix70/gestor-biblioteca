@@ -4019,11 +4019,22 @@ let estadoBusqueda = { page: 1 },
 let selDocs = new Set(),
   paginaIds = [];
 let modoSeleccion = false; // Catálogo: ¿tocar una tarjeta selecciona (true) o abre su ficha (false)?
+// Vista del Catálogo: 'iconos' (rejilla con portadas, 24/pág) | 'detalles' (filas de texto, 100/pág).
+let vistaCatalogo = (() => {
+  try {
+    return localStorage.getItem('cat_vista') === 'detalles' ? 'detalles' : 'iconos';
+  } catch {
+    return 'iconos';
+  }
+})();
+// «Mostrar selección»: cuando está activo, el Catálogo muestra SOLO los documentos seleccionados (para
+// revisar la selección y quitar los no deseados). Bimodal (activo/inactivo).
+let soloSeleccion = false;
 function toggleSel(id, on) {
   if (on === undefined) on = !selDocs.has(id); // sin argumento: alterna
   if (on) selDocs.add(id);
   else selDocs.delete(id);
-  const c = $('#searchResults .vol[data-doc="' + id + '"]');
+  const c = $('#searchResults [data-doc="' + id + '"]');
   if (c) c.classList.toggle('sel', on);
   renderBulk();
 }
@@ -4063,7 +4074,7 @@ function renderBulk() {
   // Acciones sobre la selección (aparecen cuando hay algo seleccionado).
   const acc = selDocs.size
     ? `<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.
-    <button class="btn" id="bkVer">👁 Ver</button>
+    <button class="btn${soloSeleccion ? ' pri' : ''}" id="bkMostrarSel" title="Muestra SOLO los documentos seleccionados (para revisar la selección y quitar los que no quieras). Vuelve a pulsar para salir.">👁 Mostrar selección</button>
     <button class="btn pri" id="bkCol">📚 Colección</button>
     <button class="btn pri" id="bkObra">📖 Obra</button>
     <button class="btn pri" id="bkUbic">📍 Estantería</button>
@@ -4095,7 +4106,7 @@ function renderBulk() {
     $('#bkAllPag').onclick = () => {
       const on = !todaLaPag;
       paginaIds.forEach((id) => (on ? selDocs.add(id) : selDocs.delete(id)));
-      $$('#searchResults .vol').forEach((c) => c.classList.toggle('sel', selDocs.has(c.dataset.doc)));
+      $$('#searchResults [data-doc]').forEach((c) => c.classList.toggle('sel', selDocs.has(c.dataset.doc)));
       renderBulk();
     };
   if ($('#bkAllRes')) $('#bkAllRes').onclick = selTodosResultados;
@@ -4105,12 +4116,19 @@ function renderBulk() {
     $('#bkUbic').onclick = () => pickerUbic();
     if ($('#bkQuitUbic')) $('#bkQuitUbic').onclick = quitarSeleccionDeUbic;
     if ($('#bkNfc')) $('#bkNfc').onclick = () => iniciarEtiquetadoLote([...selDocs], false);
-    if ($('#bkVer')) $('#bkVer').onclick = verSeleccion;
+    // «Mostrar selección»: alterna la vista restringida a lo seleccionado (y re-busca).
+    if ($('#bkMostrarSel'))
+      $('#bkMostrarSel').onclick = () => {
+        soloSeleccion = !soloSeleccion;
+        buscarCatalogo(1);
+      };
     $('#bkDel').onclick = eliminarSeleccionados;
     $('#bkClear').onclick = () => {
       selDocs.clear();
-      $$('#searchResults .vol.sel').forEach((c) => c.classList.remove('sel'));
+      soloSeleccion = false; // al vaciar la selección, salir de «Mostrar selección»
+      $$('#searchResults .sel').forEach((c) => c.classList.remove('sel'));
       renderBulk();
+      if ($('#searchResults').dataset.solo === '1') buscarCatalogo(1); // estaba filtrando por selección
     };
   }
 }
@@ -4126,73 +4144,15 @@ async function selTodosResultados() {
     return;
   }
   (r.ids || []).forEach((id) => selDocs.add(id));
-  $$('#searchResults .vol[data-doc]').forEach((v) => {
+  $$('#searchResults [data-doc]').forEach((v) => {
     if (selDocs.has(v.dataset.doc)) v.classList.add('sel');
   });
   renderBulk();
   toast(`${(r.ids || []).length} resultado(s) seleccionados · total ${selDocs.size}`);
 }
-// Ver la selección acumulada (de todas las búsquedas): lista con quitar uno a uno + borrar todo.
-async function verSeleccion() {
-  if (!selDocs.size) return;
-  $('#cmpModal').innerHTML =
-    `<div class="box card" style="max-width:520px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">👁 Selección (<b id="vsN">${selDocs.size}</b>)</h3><div id="vsBody" class="muted">Cargando…</div>
-    <div class="row" style="gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn bad" id="vsClr">Borrar selección</button><button class="btn" id="vsX">Cerrar</button></div></div>`;
-  $('#cmpScrim').style.display = 'block';
-  $('#cmpModal').style.display = 'grid';
-  $('#cmpScrim').onclick = cerrarCmp;
-  $('#vsX').onclick = cerrarCmp;
-  $('#vsClr').onclick = () => {
-    selDocs.clear();
-    $$('#searchResults .vol.sel').forEach((c) => c.classList.remove('sel'));
-    renderBulk();
-    cerrarCmp();
-  };
-  let docs = [];
-  try {
-    const r = await api('/documentos/por-ids', {
-      method: 'POST',
-      body: JSON.stringify({ ids: [...selDocs] }),
-    });
-    docs = r.docs || [];
-  } catch (e) {}
-  const body = $('#vsBody');
-  if (!body) return;
-  body.classList.remove('muted');
-  body.innerHTML = docs.length
-    ? docs
-        .map(
-          (
-            d,
-          ) => `<div class="row" style="align-items:center;gap:8px;border-top:1px solid var(--line);padding:6px 0">
-      <span style="flex:1;font-size:13px">${d.nfc ? '📶 ' : ''}${esc(recortar(d.titulo || '(sin título)', 60))}</span>
-      <a class="rowlink" data-vsver="${esc(d._id)}" style="font-size:12px">ficha</a>
-      <button class="rbtn" data-vsdel="${esc(d._id)}" title="Quitar de la selección">✕</button></div>`,
-        )
-        .join('')
-    : '<div class="muted">No se pudieron cargar los títulos (la selección sigue activa).</div>';
-  body.querySelectorAll('[data-vsdel]').forEach(
-    (b) =>
-      (b.onclick = () => {
-        selDocs.delete(b.dataset.vsdel);
-        const c = $(`#searchResults .vol[data-doc="${b.dataset.vsdel}"]`);
-        if (c) c.classList.remove('sel');
-        renderBulk();
-        if (!selDocs.size) cerrarCmp();
-        else {
-          $('#vsN').textContent = selDocs.size;
-          b.closest('.row').remove();
-        }
-      }),
-  );
-  body.querySelectorAll('[data-vsver]').forEach(
-    (a) =>
-      (a.onclick = () => {
-        cerrarCmp();
-        verDoc(a.dataset.vsver, { volver: 'search', etiqueta: 'Catálogo' });
-      }),
-  );
-}
+// («Ver selección» como popup se sustituyó por «Mostrar selección», que restringe el propio Catálogo a los
+//  documentos seleccionados — más funcional para selecciones grandes; ver renderBulk · bkMostrarSel.)
+
 // Quitar los SELECCIONADOS de su estantería/ámbito → ubicación «Sin asignar» (NO crea registro de movimiento,
 // NO borra nada; es reversible reasignándolos). Acción en lote de la barra de selección.
 async function quitarSeleccionDeUbic() {
@@ -4282,7 +4242,7 @@ async function seleccionarPorNFC() {
         m.textContent = '✅ Añadido';
         m.style.color = 'var(--acc)';
       }
-      const c = $(`#searchResults .vol[data-doc="${id}"]`);
+      const c = $(`#searchResults [data-doc="${id}"]`);
       if (c) c.classList.add('sel');
       try {
         navigator.vibrate && navigator.vibrate(40);
@@ -4409,7 +4369,7 @@ async function aplicarGrupo(kind, { id, nombre, tipo }) {
 }
 function construirSearch() {
   $('#p-search').innerHTML = `
-    <div class="sec-h"><h2>Catálogo</h2><span class="muted" id="searchCount" style="margin-left:auto"></span><button class="btn" id="sqClear" title="Limpiar la búsqueda y todos los filtros" style="margin-left:10px">✕ Limpiar</button></div>
+    <div class="sec-h"><h2>Catálogo</h2><span class="muted" id="searchCount" style="margin-left:auto"></span><button class="btn" id="sqVista" title="Cambiar entre vista de iconos y vista de detalles" style="margin-left:10px"></button><button class="btn" id="sqClear" title="Limpiar la búsqueda y todos los filtros" style="margin-left:8px">✕ Limpiar</button></div>
     <details class="card foldcard" id="sqFiltros" style="margin-bottom:16px">
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
@@ -4520,9 +4480,26 @@ function construirSearch() {
     if ($('#sqNfc')) $('#sqNfc').value = '';
     $$('#p-search .sqStar').forEach((c) => (c.checked = false));
     estadoBusqueda.extra = null;
+    soloSeleccion = false; // «Limpiar» también sale de «Mostrar selección»
     actualizarSumEstrellas();
     buscarCatalogo(1);
   };
+  // Toggle de vista iconos/detalles (el botón muestra la vista a la que se cambiaría).
+  actualizarBotonVista();
+  if ($('#sqVista'))
+    $('#sqVista').onclick = () => {
+      vistaCatalogo = vistaCatalogo === 'detalles' ? 'iconos' : 'detalles';
+      try {
+        localStorage.setItem('cat_vista', vistaCatalogo);
+      } catch {}
+      actualizarBotonVista();
+      buscarCatalogo(1); // cambia el tamaño de página (24/100) y re-renderiza
+    };
+}
+// Etiqueta del botón de vista: muestra a qué vista se cambia (el contrario de la actual).
+function actualizarBotonVista() {
+  const b = $('#sqVista');
+  if (b) b.textContent = vistaCatalogo === 'detalles' ? '▦ Iconos' : '☰ Detalles';
 }
 function estrellasSel() {
   return $$('#p-search .sqStar:checked').map((c) => c.value);
@@ -4565,13 +4542,26 @@ function loadSearch() {
   buscarCatalogo(estadoBusqueda.page || 1);
 }
 // Parámetros de la búsqueda actual (SIN page): reutilizados por buscarCatalogo y por «seleccionar todos».
+// Tamaño de página según la vista: 24 (iconos) / 100 (detalles).
+function _porPaginaVista() {
+  return vistaCatalogo === 'detalles' ? 100 : 24;
+}
 function _paramsBusqueda() {
+  // «Mostrar selección» activo: la vista se restringe a los documentos seleccionados (ignora los demás
+  // filtros; solo ids + orden). Si la selección se vació, sale del modo y busca normal.
+  if (soloSeleccion && selDocs.size) {
+    const p = new URLSearchParams({ ids: [...selDocs].join(','), orden: $('#sqOrden') ? $('#sqOrden').value : 'reciente' });
+    p.set('porPagina', _porPaginaVista());
+    return p;
+  }
+  soloSeleccion = soloSeleccion && selDocs.size > 0;
   const params = new URLSearchParams({
     q: $('#sqQ').value.trim(),
     tipo: $('#sqTipo').value,
     soporte: $('#sqSoporte') ? $('#sqSoporte').value : '',
     cdu: $('#sqCdu').value.trim(),
     orden: $('#sqOrden').value,
+    porPagina: _porPaginaVista(),
   });
   const est = estrellasSel();
   if (est.length && est.length < 6) params.set('estrellas', est.join(','));
@@ -5027,6 +5017,21 @@ function docCard(d) {
   const nfcTag = nfcBadge(d);
   return `<div class="vol${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><div class="cov">${cov}${nfcTag}${posBadge(d)}</div><div class="meta"><div class="n">${esc(recortar(d.titulo || '(sin título)', 64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos', d._id, d.valoracion, d.nsfw)}</div></div></div>`;
 }
+// Vista DETALLES: una FILA por documento, solo texto (título · autor · año · identificador · CDU + formatos).
+// Comparte data-doc, .selmark y .sel con la vista iconos (misma mecánica de selección).
+function docRow(d) {
+  const partes = [
+    d.autores && d.autores.length ? d.autores.slice(0, 3).join(', ') : '',
+    d.año_edicion ? String(d.año_edicion) : '',
+    d.isbn || d.issn || '',
+    d.cdu ? 'CDU ' + d.cdu : '',
+  ].filter(Boolean);
+  const fmt = (d.formatos || [])
+    .slice(0, 3)
+    .map((f) => `<span class="fmt">${esc(f)}</span>`)
+    .join('');
+  return `<div class="drow${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><span class="dtit">${d.tipo_recurso === 'revista' ? '📰 ' : ''}${esc(recortar(d.titulo || '(sin título)', 90))}${badgesDoc(d)}</span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${fmt}</span></div>`;
+}
 // Nº de POSICIÓN física en la estantería — solo al ver UNA estantería (ayuda a localizar el libro / inventario).
 function posBadge(d) {
   const ex = estadoBusqueda.extra;
@@ -5036,11 +5041,15 @@ function posBadge(d) {
 function pintarBusqueda(r) {
   paginaIds = r.docs.map((d) => d._id); // ids de la página actual (para «seleccionar todos»)
   $('#searchCount').textContent = `${r.total.toLocaleString('es-ES')} resultado${r.total === 1 ? '' : 's'}`;
-  $('#searchResults').innerHTML = r.docs.length
-    ? `<div class="vol-grid">${r.docs.map(docCard).join('')}</div>`
-    : '<div class="empty">Sin resultados</div>';
-  // Tocar una tarjeta: en Modo selección (admin) marca/desmarca; si no, abre su ficha.
-  $$('#searchResults .vol[data-doc]').forEach(
+  $('#searchResults').dataset.solo = soloSeleccion ? '1' : ''; // marca si la vista está restringida a la selección
+  // Vista según el modo elegido: iconos (rejilla de portadas) o detalles (filas de texto).
+  const cuerpo =
+    vistaCatalogo === 'detalles'
+      ? `<div class="dlist">${r.docs.map(docRow).join('')}</div>`
+      : `<div class="vol-grid">${r.docs.map(docCard).join('')}</div>`;
+  $('#searchResults').innerHTML = r.docs.length ? cuerpo : '<div class="empty">Sin resultados</div>';
+  // Tocar un elemento (tarjeta o fila): en Modo selección (admin) marca/desmarca; si no, abre su ficha.
+  $$('#searchResults [data-doc]').forEach(
     (el) =>
       (el.onclick = () => {
         if (modoSeleccion && ROL === 'admin') toggleSel(el.dataset.doc);

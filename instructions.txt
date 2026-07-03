@@ -261,6 +261,9 @@ de ficheros clasificado por CDU.
         - Etiqueta NFC (admin): Todas / Con etiqueta (📶) / Sin etiqueta
         - Orden (recientes / título A-Z / antiguos). Al ver UNA estantería, se
           ordena automáticamente por POSICIÓN física (ver Ubicaciones · 📋).
+    · VISTA (botón en la cabecera): «▦ Iconos» (rejilla con portadas, 24/pág, por
+      defecto) o «☰ Detalles» (una fila de texto por documento —título · autor · año ·
+      ISBN · CDU + formatos—, 100/pág, para revisar muchos de un vistazo). Se recuerda.
     · Resultados como tarjetas con miniatura; PAGINACIÓN arriba y abajo (al pasar
       de página, el scroll sube al primer resultado).
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
@@ -272,6 +275,9 @@ de ficheros clasificado por CDU.
       seleccionar). Con selección hay acciones: 👁 Ver · 📚 Colección · 📖 Obra · 📍
       Estantería · 🚫 Quitar de estantería · 📶 Etiquetar · 🗑 Eliminar (pide
       contraseña) · Limpiar. «🗂 Todos los resultados» selecciona todas las páginas.
+      «👁 Mostrar selección» es un TOGGLE que restringe el Catálogo a SOLO los
+      documentos seleccionados (para revisar la selección y, en Modo selección, quitar
+      los que no quieras tocándolos).
     · 🔭 Descubrir (Fichero): busca en el volcado offline OL+BNE (58,7 M) libros
       que NO tienes, con enlaces para conseguirlos (Anna's/Z-Lib/Libgen/Gutenberg).
 
