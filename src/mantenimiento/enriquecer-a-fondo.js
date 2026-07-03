@@ -19,7 +19,8 @@ import { esAutorPlaceholder } from '../utils/creditos-portada.js';
 import { resolverPersona } from '../utils/resolver-persona.js';
 import { separarAutores } from '../utils/autor-normalizar.js';
 import { ROLES_VALIDOS } from '../utils/contribuciones.js';
-import { validarISBN } from '../utils/identificadores.js';
+import { validarISBN, variantesISBN } from '../utils/identificadores.js';
+import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
 
 // Lee las primeras imágenes GUARDADAS del documento (páginas clave: portada + créditos + contraportada).
 async function leerImagenesDeDoc(doc, max = 6) {
@@ -53,54 +54,92 @@ async function nombresAutores(db, doc) {
  */
 export async function analizarAFondo(db, doc, { maxImagenes = 6 } = {}) {
     const vacio = { balance: [], calidad: { puntuacion: 0, merecePena: false, señales: [] }, propuesta: {}, reclasificar: false };
-    const imagenes = await leerImagenesDeDoc(doc, maxImagenes);
-    if (!imagenes.length) return { ok: false, motivo: 'el documento no tiene imágenes que leer', ...vacio };
 
-    let normalizado, calidad;
-    try { ({ normalizado, calidad } = await extraerConPlantilla(imagenes)); }
-    catch (e) { return { ok: false, motivo: `visión falló: ${e.message}`, ...vacio }; }
-    if (!normalizado) return { ok: false, motivo: 'la visión no devolvió datos', ...vacio, calidad };
+    // (1) VISIÓN a partir de las páginas del propio fichero (si tiene imágenes guardadas). Opcional.
+    let vis = null, calidad = { puntuacion: 0, merecePena: false, señales: [] };
+    const imagenes = await leerImagenesDeDoc(doc, maxImagenes);
+    if (imagenes.length) {
+        try { const r = await extraerConPlantilla(imagenes); vis = r.normalizado; calidad = r.calidad; }
+        catch (e) { console.warn(`   ⚠️ a-fondo visión falló: ${e.message}`); }
+    }
+
+    // (2) BÚSQUEDA EXTERNA EXTENSA por ISBN/título (Fichero + OpenLibrary + Google Books + DNB/BnF). Best-effort.
+    let ext = null;
+    try {
+        const isbns = doc.isbn ? variantesISBN(doc.isbn) : [];
+        if (isbns.length || doc.titulo)
+            ext = await buscarMetadatosExternos(doc.titulo || '', '', null, {
+                isbnsArchivo: isbns, incluirSinopsis: !doc.sinopsis, incluirCdu: false, idioma: doc.idioma || null,
+            });
+    } catch (e) { console.warn(`   ⚠️ a-fondo búsqueda externa falló: ${e.message}`); }
+
+    if (!vis && !ext) return { ok: false, motivo: 'no se obtuvieron datos (ni de las páginas ni de las APIs)', ...vacio, calidad };
 
     const [edNombre, autoresActuales] = await Promise.all([nombreEditorial(db, doc), nombresAutores(db, doc)]);
     const autorEsPlaceholder = !autoresActuales.length || autoresActuales.every((n) => esAutorPlaceholder(n, edNombre));
 
     const balance = [];
     const propuesta = {};
-    const FUENTE = 'portadilla·IA';
-    const proponer = (campo, antes, despues, valor, extra = {}) => {
+    const proponer = (campo, antes, despues, valor, fuente, extra = {}) => {
         propuesta[campo] = valor;
-        balance.push({ campo, antes: antes ?? null, despues, fuente: FUENTE, ...extra });
+        balance.push({ campo, antes: antes ?? null, despues, fuente, ...extra });
     };
+    const primero = (...vs) => vs.find((v) => v != null && v !== '' && !(Array.isArray(v) && !v.length));
 
-    // AUTORES: sustituir solo si los actuales son placeholder (o no hay) y la visión trae autores.
-    if (autorEsPlaceholder && normalizado.autores.length)
-        proponer('autores', autoresActuales.join(', ') || '—', normalizado.autores.join(', '), normalizado.autores);
+    // AUTORES: sustituir SOLO si los actuales son placeholder/ausentes, y SOLO por autores REALES.
+    // Nunca se pisa un autor bueno, y NUNCA se propone un placeholder como autor (p. ej. no cambiar
+    // «Alan Moore» —ni ningún autor— por «Various»/«DK»): esos se descartan del valor propuesto.
+    const desdeVis = (vis && vis.autores || []).filter((n) => !esAutorPlaceholder(n, edNombre));
+    const desdeExt = (ext && ext.autores || []).filter((n) => !esAutorPlaceholder(n, edNombre));
+    const autoresNuevos = desdeVis.length ? desdeVis : desdeExt;
+    if (autorEsPlaceholder && autoresNuevos.length)
+        proponer('autores', autoresActuales.join(', ') || '—', autoresNuevos.join(', '), autoresNuevos, desdeVis.length ? 'portadilla·IA' : 'Fichero/APIs');
 
-    // CONTRIBUCIONES (roles): añadir si el doc no tenía ninguna.
-    const contribs = (normalizado.contribuciones || []).filter((c) => ROLES_VALIDOS.includes(c.rol) && c.rol !== 'autor');
-    if ((!doc.contribuciones || !doc.contribuciones.length) && contribs.length)
-        proponer('contribuciones', '—', contribs.map((c) => `${c.nombre} (${c.rol})`).join(' · '), contribs);
-
-    // SINOPSIS: rellenar si falta o es mucho más corta (la de la visión es parafraseada → sin RECITATION).
-    if (normalizado.sinopsis && normalizado.sinopsis.length >= 60 && (!doc.sinopsis || doc.sinopsis.length < normalizado.sinopsis.length / 2))
-        proponer('sinopsis', doc.sinopsis ? '(existente, más corta)' : '—', '(nueva, parafraseada)', normalizado.sinopsis);
-
-    // ISBN: si el doc no tiene, proponer los VÁLIDOS leídos.
-    if (!doc.isbn) {
-        const validos = (normalizado.isbn || []).filter((x) => validarISBN(x));
-        if (validos.length) proponer('isbn', '—', validos.join(', '), validos);
+    // CONTRIBUCIONES (roles): unir visión + APIs (la mención de la BNE también trae roles), si el doc no tenía.
+    if (!doc.contribuciones || !doc.contribuciones.length) {
+        const deVis = (vis && vis.contribuciones || []).filter((c) => ROLES_VALIDOS.includes(c.rol) && c.rol !== 'autor');
+        const deExt = (ext && ext.contribuciones_nombres || []).filter((c) => ROLES_VALIDOS.includes(c.rol) && c.rol !== 'autor');
+        const merged = []; const seen = new Set();
+        for (const c of [...deExt, ...deVis]) { const k = `${c.nombre.toLowerCase()}|${c.rol}`; if (seen.has(k)) continue; seen.add(k); merged.push(c); }
+        if (merged.length) proponer('contribuciones', '—', merged.map((c) => `${c.nombre} (${c.rol})`).join(' · '), merged, deVis.length ? 'portadilla·IA + APIs' : 'Fichero/APIs');
     }
 
-    // Huecos simples.
-    if (normalizado.idioma_original && !doc.idioma_original) proponer('idioma_original', '—', normalizado.idioma_original, normalizado.idioma_original);
-    if (normalizado.palabras_clave.length && !(doc.palabras_clave || []).length) proponer('palabras_clave', '—', normalizado.palabras_clave.join(', '), normalizado.palabras_clave);
-    if (normalizado['año_edicion'] && !doc['año_edicion']) proponer('año_edicion', '—', normalizado['año_edicion'], normalizado['año_edicion']);
+    // SINOPSIS: SOLO si falta (anti-pérdida: nunca se reemplaza una existente). La de la visión es
+    // parafraseada (anti-RECITATION); si no, la de las APIs.
+    const sinNueva = primero(vis && vis.sinopsis && vis.sinopsis.length >= 60 ? vis.sinopsis : null, ext && ext.sinopsis);
+    if (sinNueva && !doc.sinopsis)
+        proponer('sinopsis', '—', '(nueva)', sinNueva, (vis && vis.sinopsis) ? 'portadilla·IA' : 'APIs');
+
+    // ISBN (si falta): leído de la portada o de las APIs.
+    if (!doc.isbn) {
+        const validos = [...new Set([...((vis && vis.isbn) || []), ...(ext && ext.isbn ? [ext.isbn] : [])])].filter((x) => validarISBN(x));
+        if (validos.length) proponer('isbn', '—', validos.join(', '), validos, (vis && vis.isbn && vis.isbn.length) ? 'portadilla·IA' : 'APIs');
+    }
+
+    // EDITORIAL / AÑO / IDIOMA ORIGINAL / PALABRAS CLAVE / DEWEY-LCC (para re-clasificar) — huecos, de las APIs.
+    if (ext) {
+        if (ext.editorial && !doc.editorial) proponer('editorial', '—', ext.editorial, ext.editorial, 'APIs');
+        if (ext['año_edicion'] && !doc['año_edicion']) proponer('año_edicion', '—', ext['año_edicion'], ext['año_edicion'], 'APIs');
+        if (ext.idioma_original && !doc.idioma_original) proponer('idioma_original', '—', ext.idioma_original, ext.idioma_original, 'APIs');
+        if (ext.categorias?.length && !(doc.palabras_clave || []).length) proponer('palabras_clave', '—', ext.categorias.join(', '), ext.categorias, 'APIs');
+        if (!doc.cdu && (ext.dewey || ext.lcc)) proponer('clasificacion', '—', [ext.dewey && `Dewey ${ext.dewey}`, ext.lcc && `LCC ${ext.lcc}`].filter(Boolean).join(' · '), { dewey: ext.dewey || null, lcc: ext.lcc || null }, 'APIs');
+    } else if (vis) {
+        if (vis.idioma_original && !doc.idioma_original) proponer('idioma_original', '—', vis.idioma_original, vis.idioma_original, 'portadilla·IA');
+        if (vis.palabras_clave.length && !(doc.palabras_clave || []).length) proponer('palabras_clave', '—', vis.palabras_clave.join(', '), vis.palabras_clave, 'portadilla·IA');
+        if (vis['año_edicion'] && !doc['año_edicion']) proponer('año_edicion', '—', vis['año_edicion'], vis['año_edicion'], 'portadilla·IA');
+    }
 
     // Colección/obra: SUGERENCIA informativa (no se auto-agrupa para no romper colecciones/obras).
-    if (normalizado.coleccion_nombre && !doc.coleccion) balance.push({ campo: 'coleccion (sugerencia)', antes: '—', despues: `${normalizado.coleccion_nombre}${normalizado.coleccion_numero ? ' · nº ' + normalizado.coleccion_numero : ''}`, fuente: FUENTE, soloSugerencia: true });
-    if (normalizado.obra_titulo && !doc.obra) balance.push({ campo: 'obra (sugerencia)', antes: '—', despues: `${normalizado.obra_titulo}${normalizado.volumen_numero ? ' · vol ' + normalizado.volumen_numero : ''}`, fuente: FUENTE, soloSugerencia: true });
+    const colN = primero(vis && vis.coleccion_nombre, ext && ext.coleccion_nombre);
+    if (colN && !doc.coleccion) balance.push({ campo: 'coleccion (sugerencia)', antes: '—', despues: colN, fuente: 'IA/APIs', soloSugerencia: true });
+    if (vis && vis.obra_titulo && !doc.obra) balance.push({ campo: 'obra (sugerencia)', antes: '—', despues: `${vis.obra_titulo}${vis.volumen_numero ? ' · vol ' + vis.volumen_numero : ''}`, fuente: 'portadilla·IA', soloSugerencia: true });
 
-    const reclasificar = !doc.cdu && (!!propuesta.autores || !!propuesta.sinopsis);
+    // Calidad: si no hubo visión, puntúa por la riqueza de lo propuesto (para el veredicto merece-la-pena).
+    if (!vis) {
+        const n = Object.keys(propuesta).length;
+        calidad = { puntuacion: Math.min(100, n * 18), merecePena: n >= 2, señales: Object.keys(propuesta) };
+    }
+    const reclasificar = !doc.cdu && (!!propuesta.autores || !!propuesta.sinopsis || !!propuesta.clasificacion);
     return { ok: true, balance, calidad, propuesta, reclasificar };
 }
 
@@ -149,10 +188,23 @@ export async function aplicarAFondo(db, doc, propuesta = {}, campos = null, { re
     if (elegidos.includes('idioma_original') && propuesta.idioma_original) { set.idioma_original = propuesta.idioma_original; aplicados.push('idioma_original'); }
     if (elegidos.includes('palabras_clave') && Array.isArray(propuesta.palabras_clave) && propuesta.palabras_clave.length) { set.palabras_clave = propuesta.palabras_clave; aplicados.push('palabras_clave'); }
     if (elegidos.includes('año_edicion') && propuesta['año_edicion']) { set['año_edicion'] = propuesta['año_edicion']; aplicados.push('año_edicion'); }
+    // EDITORIAL (nombre → ObjectId, check-then-create). Solo si el doc no tenía (anti-pérdida).
+    if (elegidos.includes('editorial') && propuesta.editorial && !doc.editorial) {
+        const nombre = String(propuesta.editorial).trim();
+        const ex = await db.collection('editoriales').findOne({ nombre });
+        set.editorial = ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
+        aplicados.push('editorial');
+    }
+    // CLASIFICACIÓN: guarda Dewey/LCC (para que re-clasificar-cdu deduzca la CDU) si faltaba la CDU.
+    if (elegidos.includes('clasificacion') && propuesta.clasificacion && !doc.cdu) {
+        if (propuesta.clasificacion.dewey && !doc.dewey) set.dewey = String(propuesta.clasificacion.dewey).trim();
+        if (propuesta.clasificacion.lcc && !doc.lcc) set.lcc = String(propuesta.clasificacion.lcc).trim();
+        if (set.dewey || set.lcc) aplicados.push('clasificacion');
+    }
 
     if (!aplicados.length) return { ok: true, aplicados: [] };
 
-    if (reclasificar && !doc.cdu && (set.autores || set.sinopsis)) {
+    if (reclasificar && !doc.cdu && (set.autores || set.sinopsis || set.dewey || set.lcc)) {
         set['mantenimiento.re-clasificar-cdu'] = 0;
         set.mantenimiento_firma = 'pendiente-a-fondo';
     }
