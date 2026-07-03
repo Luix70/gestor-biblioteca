@@ -6,6 +6,7 @@ import { claveNumero, tituloCabecera } from './utils/revistas.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
 import { resolverPersona } from './utils/resolver-persona.js';
+import { separarAutores } from './utils/autor-normalizar.js';
 import { ROLES_VALIDOS } from './utils/contribuciones.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -115,13 +116,19 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         //    en utils/resolver-persona.js, compartida con las contribuciones y los scripts de backfill.
         if (docFinal.autores && docFinal.autores.length > 0) {
             const ids = [];
+            const vistos = new Set();
             for (const autor of docFinal.autores) {
                 if (typeof autor === 'string') {
-                    const r = await resolverPersona(db, autor);
-                    if (!r) continue;
-                    ids.push(r._id);
-                    if (r.creada) docFinal.alertas_agente.push(`Nuevo autor registrado: ${r.nombre}`);
-                } else ids.push(autor);
+                    // Una cadena puede traer VARIAS personas unidas por « & »/« ; »/« / » (p. ej. un epub con
+                    // «Carroll, Lewis & Gardner, Martin») → se separan en personas distintas (normalización).
+                    for (const nombre of separarAutores(autor)) {
+                        const r = await resolverPersona(db, nombre);
+                        if (!r || vistos.has(String(r._id))) continue;
+                        vistos.add(String(r._id));
+                        ids.push(r._id);
+                        if (r.creada) docFinal.alertas_agente.push(`Nuevo autor registrado: ${r.nombre}`);
+                    }
+                } else if (!vistos.has(String(autor))) { vistos.add(String(autor)); ids.push(autor); }
             }
             docFinal.autores = ids;
         }

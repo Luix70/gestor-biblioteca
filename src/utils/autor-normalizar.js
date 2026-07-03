@@ -9,6 +9,20 @@
  *   3) limpiamos el marcador suelto y comas/espacios sobrantes.
  * @returns {{ nombre: string, nacimiento: number|null, fallecimiento: number|null }}
  */
+/**
+ * Separa una cadena de autor que en realidad contiene VARIAS personas unidas por un separador de coautoría
+ * (« & », « ; », « / »): p. ej. «Carroll, Lewis & Gardner, Martin» → ["Carroll, Lewis", "Gardner, Martin"].
+ * NO separa por « y » (ambiguo: puede ser parte de un apellido) ni toca el marcador «/**​/» de la BNE (ese
+ * lleva ROLES y lo maneja el parser de contribuciones). Devuelve la lista de nombres (>=1).
+ */
+export function separarAutores(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return [];
+    if (/\/\*+\//.test(s)) return [s]; // mención BNE con roles: no partir aquí (la trata contribuciones.js)
+    const partes = s.split(/\s*&\s*|\s*;\s*|\s+\/\s+/).map((x) => x.trim()).filter(Boolean);
+    return partes.length ? partes : [s];
+}
+
 export function normalizarAutor(raw) {
     let s = String(raw || '').trim();
     if (!s) return { nombre: '', nacimiento: null, fallecimiento: null };
