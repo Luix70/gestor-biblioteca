@@ -29,6 +29,8 @@ import { variantesISBN } from '../utils/identificadores.js';
 import { ROLES_VALIDOS } from '../utils/contribuciones.js';
 import { enriquecerAutor, autoresEnriquecibles } from '../utils/enriquecer-autor.js';
 import { rellenarDescripcionesFaltantes, contarFaltantes } from './backfill-descripciones.js';
+import { enriquecerAFondo } from './enriquecer-a-fondo.js';
+import { PLACEHOLDERS_AUTOR } from '../utils/creditos-portada.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -169,6 +171,36 @@ export const CAMPANAS = [
         async procesarDoc(db, doc) {
             const r = await enriquecerAutor(db, doc._id, { sobrescribir: false }).catch(() => null);
             return !!(r && r.ok && r.cambios && r.cambios.length);
+        },
+    },
+
+    {
+        id: 'completar_a_fondo',
+        etiqueta: 'Completar a fondo (leer el libro)',
+        coste: 'ia',
+        descripcion: 'Lee las PÁGINAS del propio fichero (portadilla/contraportada/créditos) con la visión y una plantilla rica, y completa autores/roles reales, sinopsis e identificadores que las APIs no tienen. Se centra en libros con el AUTOR puesto a la editorial (DK, VV.AA.) o sin autor. Solo aplica si la extracción MERECE LA PENA. CONSUME IA (visión) de pago como último recurso.',
+        version: 1,
+        loteDefecto: 5,          // la visión es lenta/costosa → lotes pequeños
+        cadenciaDefecto: 30,
+        activaDefecto: false,
+        coleccion: 'biblioteca',
+        // Candidatos: documentos CON imágenes que leer y cuyo autor es placeholder (editorial colada) o falta.
+        async candidatos(db) {
+            const re = new RegExp('^(' + PLACEHOLDERS_AUTOR.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')$', 'i');
+            const ph = await db.collection('autores').find({ nombre: re }, { projection: { _id: 1 } }).toArray();
+            const ids = ph.map((a) => a._id);
+            return {
+                'imagenes.0': { $exists: true },
+                $or: [
+                    { autores: { $in: ids.length ? ids : [null] } },
+                    { autores: { $size: 0 } },
+                    { autores: { $exists: false } },
+                ],
+            };
+        },
+        async procesarDoc(db, doc) {
+            const r = await enriquecerAFondo(db, doc, { aplicar: true });
+            return !!r.aplicado;
         },
     },
 

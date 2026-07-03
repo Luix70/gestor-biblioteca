@@ -499,6 +499,12 @@ de ficheros clasificado por CDU.
         · 🌐 Huecos de metadatos — sinopsis, año, editorial, autores, palabras clave
           y Dewey/LCC por ISBN (OpenLibrary/Google Books/DNB). Conservador.
         · 🌐 Fotos y biografías de autor — OpenLibrary + Wikidata + Wikipedia.
+        · 🤖 Completar a fondo (leer el libro) — lee las PÁGINAS del propio fichero
+          (portadilla/contraportada/créditos) con la visión y una plantilla rica, y
+          completa autores/roles reales, sinopsis e identificadores que las APIs no
+          tienen. Se centra en libros con el autor puesto a la EDITORIAL (DK, VV.AA.)
+          o sin autor, y solo aplica si la extracción MERECE LA PENA (evaluador de
+          calidad). Consume visión (gratis→pago).
         · 🤖 Descripciones CDU/Dewey/LCC — se generan POR LOTE (varios códigos por
           llamada de IA → menos coste; DESC_LOTE_IA=6), con fallback uno-a-uno.
       Cada campaña es RESUMIBLE y TERMINABLE: sella cada elemento procesado (con o sin

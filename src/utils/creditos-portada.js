@@ -14,7 +14,7 @@ import { conVision, extraerJSON } from './vision.js';
 
 // Nombres que suelen ser la EDITORIAL colada como «autor» (o autoría genérica sin persona). Si el autor de
 // un libro es uno de estos, es candidato ideal a leer la portadilla para obtener los autores reales.
-const PLACEHOLDERS_AUTOR = [
+export const PLACEHOLDERS_AUTOR = [
     'dk', 'd.k.', 'dorling kindersley', 'vv.aa.', 'vv. aa.', 'vvaa', 'aa.vv.', 'aa. vv.', 'aavv',
     'varios autores', 'varios', 'autores varios', 'anonimo', 'anónimo', 'anonymous', 'colectivo',
     'the editors', 'editors of', 'staff', 'sin autor', 's.a.', 'n/a',
