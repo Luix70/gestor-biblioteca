@@ -7655,8 +7655,15 @@ async function subirInbox(files, extra) {
       setInboxEstado('');
     }
   }
-  // TAPETE: si está activo y hay imágenes, recorta+endereza (quita el tapete de la imagen guardada) y mide.
-  if ($('#inTapete') && $('#inTapete').checked && files.some(_esImg)) {
+  // TAPETE: recorta+endereza (quita el tapete de la imagen guardada) y mide. Es AUTOMÁTICO al enviar —no hace
+  // falta previsualizar ni marcar el switch—: recortarYMedirTapete es SEGURO (si no detecta tapete deja la
+  // imagen intacta). Se aplica a grupos de imágenes de escaneo (≤12) o si el modo tapete está activo/calibrado;
+  // así una tanda enorme de páginas (p. ej. un PDF explotado) no paga la detección salvo que se pida.
+  {
+    const imgs = files.filter(_esImg);
+    const forzar = ($('#inTapete') && $('#inTapete').checked) || !!_tapeteCal;
+    const auto = imgs.length > 0 && imgs.length <= 12;
+    if (imgs.length && (forzar || auto)) {
     setInboxEstado('📐 Tapete: midiendo y recortando…');
     try {
       const r = await recortarYMedirTapete(files);
@@ -7672,6 +7679,7 @@ async function subirInbox(files, extra) {
       else log(`⚠️ No detecté el tapete${pct} — ¿deja margen alrededor del libro?`);
     } catch (e) {
       console.warn('[tapete]', e && e.message);
+    }
     }
   }
   // ELEGIR PORTADA: con el switch activo y VARIAS fotos de un libro, confirmar/cambiar la portada antes de
