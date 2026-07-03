@@ -238,15 +238,18 @@ de ficheros clasificado por CDU.
     · Instalar como app (PWA): el navegador ofrece "Instalar"/"Añadir a inicio".
       Queda como icono propio ("Bibliotheca Ludoviciana").
 
-  NAVEGACIÓN (menú ≡): Búsqueda · Dashboard · Obras · Colecciones · Autores ·
+  NAVEGACIÓN (menú ≡): Catálogo · Dashboard · Obras · Colecciones · Autores ·
   Ubicaciones · Inbox · Actividad · Cuarentena · Papelera.
   En móvil el botón Atrás del teléfono navega hacia atrás (doble-atrás = salir).
 
-  ── BÚSQUEDA Y CATÁLOGO ──────────────────────────────────────────────────────
+  ── CATÁLOGO (búsqueda + selección) ──────────────────────────────────────────
     · Caja de búsqueda (título, autor, editorial, ISBN, ISSN, nombre de archivo).
       Rápida e INSENSIBLE A ACENTOS gracias a un índice local SQLite-FTS
       ("matematicas" encuentra "Matemáticas"); si el índice no está, cae a Mongo.
-    · Panel de filtros PLEGABLE (desplegado en PC, colapsado en móvil):
+    · Panel de filtros PLEGABLE (desplegado en PC, colapsado en móvil). Al confirmar
+      una búsqueda (Enter / «Ir» del teclado móvil) se CONTRAE solo para ver los
+      resultados sin scroll; el botón «✕ Limpiar» vive en la CABECERA (a la derecha,
+      visible aun con el panel plegado). Filtros:
         - Tipo (Libros/Revistas/Cómics)
         - Soporte (Papel/Digital)
         - Ámbito y Estantería (ubicación física)
@@ -261,7 +264,14 @@ de ficheros clasificado por CDU.
     · Resultados como tarjetas con miniatura; PAGINACIÓN arriba y abajo (al pasar
       de página, el scroll sube al primer resultado).
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
-    · Borrado por LOTES (admin, pide contraseña): selecciona varios y elimínalos.
+    · MODO SELECCIÓN (admin, patrón ergonómico y móvil, común a toda la app —
+      Catálogo, ficha de autor, y en el futuro obras/editoriales): botón «🖱 Modo
+      selección» en la barra. Con él ACTIVO, tocar una portada la marca (tick ✓ +
+      recuadro) en vez de abrir su ficha; con él APAGADO, tocar abre la ficha. La
+      selección NO se pierde al apagar el modo (así inspeccionas un libro y vuelves a
+      seleccionar). Con selección hay acciones: 👁 Ver · 📚 Colección · 📖 Obra · 📍
+      Estantería · 🚫 Quitar de estantería · 📶 Etiquetar · 🗑 Eliminar (pide
+      contraseña) · Limpiar. «🗂 Todos los resultados» selecciona todas las páginas.
     · 🔭 Descubrir (Fichero): busca en el volcado offline OL+BNE (58,7 M) libros
       que NO tienes, con enlaces para conseguirlos (Anna's/Z-Lib/Libgen/Gutenberg).
 
@@ -438,12 +448,12 @@ de ficheros clasificado por CDU.
       NFC llevan un badge 📶. El admin puede EDITAR esos datos y SUBIR una foto; los
       botones Guardar/Cerrar están DUPLICADOS arriba (bajo la foto, junto a
       Autocompletar) para no bajar hasta el pie.
-    · ENVIAR LIBROS A BÚSQUEDA (desde la ficha): «🔍 Ver en Búsqueda» abre el panel de
-      Búsqueda con TODOS sus libros (como autor o contribuyente), donde ya hay
-      selección/filtros/orden cómodos. Para mandar solo ALGUNOS: «☑️ Seleccionar» entra
-      en modo selección (tocar una tarjeta la marca, ✓, en vez de abrir su ficha —
-      selección cómoda en móvil) → «🔍 Enviar a Búsqueda» manda esa selección. (Debajo,
-      /catalogo acepta ?autor= —autor o contribuyente— y ?ids= —CSV de libros—.)
+    · MOSTRAR LIBROS EN EL CATÁLOGO (desde la ficha): «🔍 Ver en Catálogo» abre el
+      Catálogo con TODOS sus libros (como autor o contribuyente). Para mandar solo
+      ALGUNOS: «🖱 Modo selección» (tocar una tarjeta la marca, ✓, en vez de abrir su
+      ficha) → «🔍 Mostrar en Catálogo» los manda YA SELECCIONADOS (llegan en modo
+      selección, listos para actuar). (Debajo, /catalogo acepta ?autor= —autor o
+      contribuyente— y ?ids= —CSV de libros—.)
     · ROLES de contribuyente: la ficha del LIBRO muestra «Contribuciones» (traductor:
       X · ilustrador: Y) e «Idioma original». Se capturan en la ingesta desde
       OpenLibrary (mención `by_statement`) + la MENCIÓN de la BNE del Fichero (roles y

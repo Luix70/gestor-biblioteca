@@ -142,7 +142,7 @@ const titles = {
   colecciones: 'Colecciones',
   autores: 'Autores',
   inbox: 'Inbox',
-  search: 'Búsqueda',
+  search: 'Catálogo',
 };
 let logTimer = null; // intervalo de refresco de los logs en vivo (solo activo en la página Actividad)
 
@@ -363,7 +363,7 @@ const rowN = (etiqueta, valor, colorTag, filtro, etqFiltro) => {
   const badge = `<span class="tag ${colorTag}">${n}</span>`;
   const celda =
     n > 0 && filtro
-      ? `<a class="cntclas" data-filtro="${esc(filtro)}" data-etq="${esc(etqFiltro || filtro)}" title="Ver estos documentos en la Búsqueda">${badge}</a>`
+      ? `<a class="cntclas" data-filtro="${esc(filtro)}" data-etq="${esc(etqFiltro || filtro)}" title="Ver estos documentos en el Catálogo">${badge}</a>`
       : badge;
   return `<tr><td>${etiqueta}</td><td style="text-align:right">${celda}</td></tr>`;
 };
@@ -4013,14 +4013,31 @@ function liberarPdfPage(el) {
 let estadoBusqueda = { page: 1 },
   busqTimer = null;
 // ── selección múltiple + agrupado (añadir a colección / obra) ──
+// Patrón de selección ERGONÓMICO y móvil (mismo que la ficha de autor): en «Modo selección» tocar una
+// portada la marca (tick ✓ + recuadro) en vez de abrir su ficha; fuera de modo, tocar abre la ficha.
+// La selección PERSISTE al apagar el modo (para inspeccionar un libro y volver a seleccionar).
 let selDocs = new Set(),
   paginaIds = [];
+let modoSeleccion = false; // Catálogo: ¿tocar una tarjeta selecciona (true) o abre su ficha (false)?
 function toggleSel(id, on) {
+  if (on === undefined) on = !selDocs.has(id); // sin argumento: alterna
   if (on) selDocs.add(id);
   else selDocs.delete(id);
   const c = $('#searchResults .vol[data-doc="' + id + '"]');
   if (c) c.classList.toggle('sel', on);
   renderBulk();
+}
+// Refleja el modo selección en la rejilla (cursor/realce) — CSS .selmode.
+function aplicarModoSelUI() {
+  const r = $('#searchResults');
+  if (r) r.classList.toggle('selmode', modoSeleccion && ROL === 'admin');
+}
+// Envía una lista de libros al Catálogo YA SELECCIONADOS (en modo selección), filtrando por esos ids.
+// Reutilizable desde cualquier origen (ficha de autor, colección, editorial, obra…).
+function mostrarEnCatalogo(ids, etiqueta) {
+  selDocs = new Set(ids);
+  modoSeleccion = ROL === 'admin';
+  irBusquedaFiltro({ ids: ids.join(','), etiqueta });
 }
 function renderBulk() {
   const el = $('#searchBulk');
@@ -4030,6 +4047,20 @@ function renderBulk() {
     return;
   }
   const enPag = paginaIds.filter((id) => selDocs.has(id)).length;
+  const todaLaPag = enPag > 0 && enPag === paginaIds.length;
+  // Botón que activa/desactiva el Modo selección (tocar una portada la marca en vez de abrir su ficha).
+  const modoBtn = `<button class="btn${modoSeleccion ? ' pri' : ''}" id="bkModo" title="Tocar una portada la marca (en vez de abrir su ficha). La selección se conserva al apagarlo.">🖱 Modo selección</button>`;
+  // Herramientas de selección masiva (solo tienen sentido en modo selección).
+  const selNfc =
+    'NDEFReader' in window
+      ? `<button class="btn" id="bkSelNfc" title="Acumula en la selección los libros que vayas tocando con etiquetas NFC">📶 Por NFC</button>`
+      : '';
+  const herramientas = modoSeleccion
+    ? `<button class="btn" id="bkAllPag">${todaLaPag ? 'Quitar' : 'Todos'} (página)</button>
+       <button class="btn" id="bkAllRes" title="Selecciona TODOS los resultados de esta búsqueda (todas las páginas)">🗂 Todos los resultados</button>
+       ${selNfc}`
+    : '';
+  // Acciones sobre la selección (aparecen cuando hay algo seleccionado).
   const acc = selDocs.size
     ? `<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.
     <button class="btn" id="bkVer">👁 Ver</button>
@@ -4046,30 +4077,27 @@ function renderBulk() {
     g && 'NDEFReader' in window && !selDocs.size
       ? `<button class="btn pri" id="bkResumeNfc" style="margin-left:auto">📶 Reanudar etiquetado (${g.ids.length})</button>`
       : '';
-  const selNfc =
-    'NDEFReader' in window
-      ? `<button class="btn" id="bkSelNfc" title="Acumula en la selección los libros que vayas tocando con etiquetas NFC">📶 Seleccionar por NFC</button>`
-      : '';
-  el.innerHTML = `<div class="bulkbar"><label style="display:flex;gap:7px;align-items:center;cursor:pointer"><input type="checkbox" id="bkAll" style="width:18px;height:18px;accent-color:var(--acc)"> Seleccionar todos <span class="muted">(${paginaIds.length} en esta página)</span></label><button class="btn" id="bkAllRes" title="Selecciona TODOS los resultados de esta búsqueda (todas las páginas)">🗂 Todos los resultados</button>${selNfc}${resume}${acc}</div>`;
+  el.innerHTML = `<div class="bulkbar">${modoBtn}${herramientas}${resume}${acc}</div>`;
+  // Activar/desactivar Modo selección (la selección NO se pierde al apagarlo).
+  $('#bkModo').onclick = () => {
+    modoSeleccion = !modoSeleccion;
+    aplicarModoSelUI();
+    renderBulk();
+  };
   if ($('#bkResumeNfc'))
     $('#bkResumeNfc').onclick = () => {
       const s = colaEtqGuardada();
       if (s) iniciarEtiquetadoLote(s.ids, s.auto);
     };
   if ($('#bkSelNfc')) $('#bkSelNfc').onclick = seleccionarPorNFC;
-  const all = $('#bkAll');
-  all.checked = enPag > 0 && enPag === paginaIds.length;
-  all.indeterminate = enPag > 0 && enPag < paginaIds.length;
-  all.onchange = () => {
-    const on = all.checked;
-    paginaIds.forEach((id) => {
-      if (on) selDocs.add(id);
-      else selDocs.delete(id);
-    });
-    $$('#searchResults .selchk').forEach((cb) => (cb.checked = on));
-    $$('#searchResults .vol').forEach((c) => c.classList.toggle('sel', on));
-    renderBulk();
-  };
+  // Seleccionar/quitar toda la página visible.
+  if ($('#bkAllPag'))
+    $('#bkAllPag').onclick = () => {
+      const on = !todaLaPag;
+      paginaIds.forEach((id) => (on ? selDocs.add(id) : selDocs.delete(id)));
+      $$('#searchResults .vol').forEach((c) => c.classList.toggle('sel', selDocs.has(c.dataset.doc)));
+      renderBulk();
+    };
   if ($('#bkAllRes')) $('#bkAllRes').onclick = selTodosResultados;
   if (selDocs.size) {
     $('#bkCol').onclick = () => pickerGrupo('coleccion');
@@ -4082,7 +4110,6 @@ function renderBulk() {
     $('#bkClear').onclick = () => {
       selDocs.clear();
       $$('#searchResults .vol.sel').forEach((c) => c.classList.remove('sel'));
-      $$('#searchResults .selchk').forEach((c) => (c.checked = false));
       renderBulk();
     };
   }
@@ -4099,12 +4126,8 @@ async function selTodosResultados() {
     return;
   }
   (r.ids || []).forEach((id) => selDocs.add(id));
-  $$('#searchResults .selchk').forEach((cb) => {
-    if (selDocs.has(cb.dataset.id)) {
-      cb.checked = true;
-      const v = cb.closest('.vol');
-      if (v) v.classList.add('sel');
-    }
+  $$('#searchResults .vol[data-doc]').forEach((v) => {
+    if (selDocs.has(v.dataset.doc)) v.classList.add('sel');
   });
   renderBulk();
   toast(`${(r.ids || []).length} resultado(s) seleccionados · total ${selDocs.size}`);
@@ -4122,7 +4145,6 @@ async function verSeleccion() {
   $('#vsClr').onclick = () => {
     selDocs.clear();
     $$('#searchResults .vol.sel').forEach((c) => c.classList.remove('sel'));
-    $$('#searchResults .selchk').forEach((c) => (c.checked = false));
     renderBulk();
     cerrarCmp();
   };
@@ -4154,11 +4176,7 @@ async function verSeleccion() {
       (b.onclick = () => {
         selDocs.delete(b.dataset.vsdel);
         const c = $(`#searchResults .vol[data-doc="${b.dataset.vsdel}"]`);
-        if (c) {
-          c.classList.remove('sel');
-          const cb = c.querySelector('.selchk');
-          if (cb) cb.checked = false;
-        }
+        if (c) c.classList.remove('sel');
         renderBulk();
         if (!selDocs.size) cerrarCmp();
         else {
@@ -4171,7 +4189,7 @@ async function verSeleccion() {
     (a) =>
       (a.onclick = () => {
         cerrarCmp();
-        verDoc(a.dataset.vsver, { volver: 'search', etiqueta: 'Búsqueda' });
+        verDoc(a.dataset.vsver, { volver: 'search', etiqueta: 'Catálogo' });
       }),
   );
 }
@@ -4265,11 +4283,7 @@ async function seleccionarPorNFC() {
         m.style.color = 'var(--acc)';
       }
       const c = $(`#searchResults .vol[data-doc="${id}"]`);
-      if (c) {
-        c.classList.add('sel');
-        const cb = c.querySelector('.selchk');
-        if (cb) cb.checked = true;
-      }
+      if (c) c.classList.add('sel');
       try {
         navigator.vibrate && navigator.vibrate(40);
       } catch (_) {}
@@ -4395,12 +4409,11 @@ async function aplicarGrupo(kind, { id, nombre, tipo }) {
 }
 function construirSearch() {
   $('#p-search').innerHTML = `
-    <div class="sec-h"><h2>Búsqueda y catálogo</h2><span class="muted" id="searchCount"></span></div>
+    <div class="sec-h"><h2>Catálogo</h2><span class="muted" id="searchCount" style="margin-left:auto"></span><button class="btn" id="sqClear" title="Limpiar la búsqueda y todos los filtros" style="margin-left:10px">✕ Limpiar</button></div>
     <details class="card foldcard" id="sqFiltros" style="margin-bottom:16px">
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn pri" id="sqClear" title="Limpiar todos los filtros de búsqueda">✕ Limpiar</button></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
@@ -4430,6 +4443,12 @@ function construirSearch() {
       fl.addEventListener('toggle', () => localStorage.setItem('sq_filtros', fl.open ? '1' : '0'));
     }
   }
+  // Al confirmar una búsqueda (Enter / «Ir» del teclado móvil) contrae el panel de filtros para VER los
+  // resultados sin hacer scroll (el panel se hizo grande). Se reabre tocando «🔎 Buscar y filtrar».
+  const colapsarFiltros = () => {
+    const fl = $('#sqFiltros');
+    if (fl) fl.open = false;
+  };
   $('#sqQ').oninput = () => {
     clearTimeout(busqTimer);
     busqTimer = setTimeout(() => buscarCatalogo(1), 350);
@@ -4439,11 +4458,19 @@ function construirSearch() {
       clearTimeout(busqTimer);
       buscarCatalogo(1);
       if ($('#sqDescubrir') && $('#sqDescubrir').checked) lanzarDescubrir();
+      colapsarFiltros();
     }
   };
   $('#sqCdu').oninput = () => {
     clearTimeout(busqTimer);
     busqTimer = setTimeout(() => buscarCatalogo(1), 350);
+  };
+  $('#sqCdu').onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      clearTimeout(busqTimer);
+      buscarCatalogo(1);
+      colapsarFiltros();
+    }
   };
   $('#sqTipo').onchange = () => buscarCatalogo(1);
   if ($('#sqSoporte')) $('#sqSoporte').onchange = () => buscarCatalogo(1);
@@ -4997,9 +5024,8 @@ function docCard(d) {
     (d.año_edicion ? String(d.año_edicion) : '') ||
     d.isbn ||
     '—';
-  const chk = `<input type="checkbox" class="selchk admin-only" data-id="${esc(d._id)}" title="Seleccionar"${selDocs.has(d._id) ? ' checked' : ''}>`;
   const nfcTag = nfcBadge(d);
-  return `<div class="vol${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}">${chk}<div class="cov">${cov}${nfcTag}${posBadge(d)}</div><div class="meta"><div class="n">${esc(recortar(d.titulo || '(sin título)', 64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos', d._id, d.valoracion, d.nsfw)}</div></div></div>`;
+  return `<div class="vol${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><div class="cov">${cov}${nfcTag}${posBadge(d)}</div><div class="meta"><div class="n">${esc(recortar(d.titulo || '(sin título)', 64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos', d._id, d.valoracion, d.nsfw)}</div></div></div>`;
 }
 // Nº de POSICIÓN física en la estantería — solo al ver UNA estantería (ayuda a localizar el libro / inventario).
 function posBadge(d) {
@@ -5013,13 +5039,15 @@ function pintarBusqueda(r) {
   $('#searchResults').innerHTML = r.docs.length
     ? `<div class="vol-grid">${r.docs.map(docCard).join('')}</div>`
     : '<div class="empty">Sin resultados</div>';
+  // Tocar una tarjeta: en Modo selección (admin) marca/desmarca; si no, abre su ficha.
   $$('#searchResults .vol[data-doc]').forEach(
-    (el) => (el.onclick = () => verDoc(el.dataset.doc, { volver: 'search', etiqueta: 'Búsqueda' })),
+    (el) =>
+      (el.onclick = () => {
+        if (modoSeleccion && ROL === 'admin') toggleSel(el.dataset.doc);
+        else verDoc(el.dataset.doc, { volver: 'search', etiqueta: 'Catálogo' });
+      }),
   );
-  $$('#searchResults .selchk').forEach((cb) => {
-    cb.onclick = (e) => e.stopPropagation();
-    cb.onchange = () => toggleSel(cb.dataset.id, cb.checked);
-  });
+  aplicarModoSelUI();
   attachRating('#searchResults');
   renderBulk();
   const p = r.page,
@@ -8774,7 +8802,7 @@ function pintarUbic() {
     <div style="margin-top:10px"><button class="btn pri" id="ubCrear">Crear</button></div>
     <datalist id="ubDlAmb">${arbol.map((a) => `<option value="${esc(a.ambito)}">`).join('')}</datalist>
   </div>
-  <div class="card">${arbol.length ? arbol.map(ubicAmbHTML).join('') : '<div class="muted">Aún no hay ubicaciones. Crea estanterías arriba, o asigna libros desde la Búsqueda (📍 Estantería).</div>'}</div>
+  <div class="card">${arbol.length ? arbol.map(ubicAmbHTML).join('') : '<div class="muted">Aún no hay ubicaciones. Crea estanterías arriba, o asigna libros desde el Catálogo (📍 Estantería).</div>'}</div>
   <div id="ubicLibros" style="margin-top:16px"></div>`;
   wireUbic();
   if (ubicPendiente) {
@@ -8790,7 +8818,7 @@ function ubicAmbHTML(a) {
   const ests = a.estanterias.length
     ? a.estanterias.map((e) => ubicEstHTML(a.ambito, e)).join('')
     : `<div class="ubrow ubest"><span class="muted" style="font-size:12px">— sin estanterías —</span></div>`;
-  return `<div class="ubamb"><div class="ubrow ubhdr"><span class="ubx" data-act="amb-fold" data-a="${esc(a.ambito)}" title="Plegar/desplegar" style="opacity:1;width:20px;text-align:center">${folded ? '▸' : '▾'}</span><b class="ubx" data-act="amb-ver" data-a="${esc(a.ambito)}" style="font-size:14px;opacity:1" title="Ver sus libros en la Búsqueda (interactivo)">📍 ${esc(a.ambito)}</b><span class="muted">${a.estanterias.length} estante(s) · ${a.n} libro(s)</span>${nfc}${acts}</div><div class="ubests"${folded ? ' style="display:none"' : ''}>${ests}</div></div>`;
+  return `<div class="ubamb"><div class="ubrow ubhdr"><span class="ubx" data-act="amb-fold" data-a="${esc(a.ambito)}" title="Plegar/desplegar" style="opacity:1;width:20px;text-align:center">${folded ? '▸' : '▾'}</span><b class="ubx" data-act="amb-ver" data-a="${esc(a.ambito)}" style="font-size:14px;opacity:1" title="Ver sus libros en el Catálogo (interactivo)">📍 ${esc(a.ambito)}</b><span class="muted">${a.estanterias.length} estante(s) · ${a.n} libro(s)</span>${nfc}${acts}</div><div class="ubests"${folded ? ' style="display:none"' : ''}>${ests}</div></div>`;
 }
 function ubicEstHTML(amb, e) {
   const nfc = e.nfc ? ` <span title="NFC ${esc(e.nfc)}">📶</span>` : '';
@@ -8798,7 +8826,7 @@ function ubicEstHTML(amb, e) {
   // escritorio (wireUbic). El 📋 ordena los LIBROS de dentro por su posición física (feature distinta).
   const reord = `<span class="ubreord">${ubBtn('est-subir', amb, e.estanteria, '↑', 'Subir una posición')}${ubBtn('est-bajar', amb, e.estanteria, '↓', 'Bajar una posición')}</span>`;
   const acts = `<span class="ubacts">${ubBtn('est-orden', amb, e.estanteria, '📋', 'Ordenar los libros por su posición física')}${ubBtn('est-insertar', amb, e.estanteria, '➕', 'Insertar una estantería DEBAJO de esta')}${ubBtn('est-ren', amb, e.estanteria, '✏️', 'Renombrar')}${ubBtn('est-mover', amb, e.estanteria, '➡️', 'Mover a otro ámbito')}${ubBtn('est-fus', amb, e.estanteria, '🔀', 'Fusionar en otra estantería')}${ubBtn('est-nfc', amb, e.estanteria, '📶', 'Grabar NFC')}${ubBtn('est-explotar', amb, e.estanteria, '🧹', 'Libros → sin ubicación')}${ubBtn('est-del', amb, e.estanteria, '🗑', 'Eliminar (si vacía)')}</span>`;
-  return `<div class="ubrow ubest" draggable="true" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}">${reord}<span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver sus libros en la Búsqueda (interactivo)">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
+  return `<div class="ubrow ubest" draggable="true" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}">${reord}<span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver sus libros en el Catálogo (interactivo)">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
 }
 function wireUbic() {
   const modo = $('#ubModo');
@@ -9069,7 +9097,7 @@ async function ubicVerLibros(ambito, estanteria) {
     box.innerHTML =
       `<div class="card"><div class="sec-h" style="margin-bottom:8px"><h3 style="margin:0">📚 ${tit}</h3><span class="muted">${r.total} libro(s)</span></div>` +
       (r.docs.length
-        ? `<div class="ubgrid">${r.docs.map(ubicCard).join('')}</div>${r.total > r.docs.length ? `<div class="muted" style="margin-top:10px">Mostrando ${r.docs.length} de ${r.total}. <a class="rowlink" id="ubVerBusq">Ver todos en Búsqueda →</a></div>` : ''}`
+        ? `<div class="ubgrid">${r.docs.map(ubicCard).join('')}</div>${r.total > r.docs.length ? `<div class="muted" style="margin-top:10px">Mostrando ${r.docs.length} de ${r.total}. <a class="rowlink" id="ubVerBusq">Ver todos en el Catálogo →</a></div>` : ''}`
         : '<div class="muted">Sin libros en esta ubicación.</div>') +
       `</div>`;
     $$('#ubicLibros [data-doc]').forEach(
@@ -9458,7 +9486,7 @@ async function autorFicha(id) {
       : '';
   // Tarjeta de un libro: lleva la marca de selección (oculta salvo en modo selección) y el badge NFC.
   const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
-      <span class="autSelMark" style="display:none;position:absolute;top:3px;left:3px;font-size:12px;background:var(--acc);color:#fff;border-radius:50%;width:18px;height:18px;line-height:18px">✓</span>
+      <span class="selmark">✓</span>
       ${nfcBadge(l)}
       ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">📕</div>`}
       ${rolBadge(l.rol)}
@@ -9503,15 +9531,15 @@ async function autorFicha(id) {
       <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})</div>
         ${libros.length ? `<div class="row" style="gap:6px">
-          <button class="btn" id="autSelModo" style="padding:3px 9px;font-size:12px">☑️ Seleccionar</button>
-          <button class="btn" id="autVerBusqueda" style="padding:3px 9px;font-size:12px" title="Ver todos sus libros en el panel de Búsqueda (con filtros, orden y selección)">🔍 Ver en Búsqueda</button>
+          <button class="btn" id="autSelModo" style="padding:3px 9px;font-size:12px">🖱 Modo selección</button>
+          <button class="btn" id="autVerBusqueda" style="padding:3px 9px;font-size:12px" title="Ver todos sus libros en el Catálogo (con filtros, orden y selección)">🔍 Ver en Catálogo</button>
         </div>` : ''}
       </div>
       <div id="autSelBarra" class="row" style="display:none;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
         <span class="muted" id="autSelCuenta" style="font-size:12px">0 seleccionados</span>
         <button class="btn" id="autSelTodos" style="padding:2px 8px;font-size:12px">Todos</button>
         <button class="btn" id="autSelNinguno" style="padding:2px 8px;font-size:12px">Ninguno</button>
-        <button class="btn pri" id="autSelEnviar" style="padding:2px 8px;font-size:12px">🔍 Enviar a Búsqueda</button>
+        <button class="btn pri" id="autSelEnviar" style="padding:2px 8px;font-size:12px">🔍 Mostrar en Catálogo</button>
       </div>
       ${librosHtml}
     </div>
@@ -9529,11 +9557,10 @@ async function autorFicha(id) {
 
   // ── Selección de libros (modo selección) ──────────────────────────────────────────────
   const nombreAutor = a.nombre || 'Autor';
-  // Pinta/despinta el marco + la marca ✓ de una tarjeta según esté seleccionada.
+  // Marca/desmarca una tarjeta con el patrón compartido: clase .sel (muestra el tick ✓ vía CSS) + recuadro.
   const pintarSel = (el, on) => {
+    el.classList.toggle('sel', on);
     el.style.outline = on ? '2px solid var(--acc)' : '';
-    const marca = el.querySelector('.autSelMark');
-    if (marca) marca.style.display = on ? 'block' : 'none';
   };
   const actualizarCuenta = () => {
     if ($('#autSelCuenta')) $('#autSelCuenta').textContent = _autFichaSel.size + ' seleccionados';
@@ -9558,7 +9585,6 @@ async function autorFicha(id) {
     $('#autSelModo').onclick = () => {
       _autFichaSelModo = !_autFichaSelModo;
       $('#autSelModo').classList.toggle('pri', _autFichaSelModo);
-      $('#autSelModo').textContent = _autFichaSelModo ? '✓ Seleccionando' : '☑️ Seleccionar';
       if ($('#autSelBarra')) $('#autSelBarra').style.display = _autFichaSelModo ? 'flex' : 'none';
       if (!_autFichaSelModo) {
         // Al salir del modo, limpiar la selección y los marcos.
@@ -9589,9 +9615,10 @@ async function autorFicha(id) {
       }
       const ids = [..._autFichaSel];
       cerrarCmp();
-      irBusquedaFiltro({ ids: ids.join(','), etiqueta: '👤 ' + nombreAutor + ' (' + ids.length + ')' });
+      // Los libros llegan al Catálogo YA SELECCIONADOS (en modo selección), listos para actuar sobre ellos.
+      mostrarEnCatalogo(ids, '👤 ' + nombreAutor + ' (' + ids.length + ')');
     };
-  // Ver TODOS sus libros en el panel de Búsqueda (selección/filtros/orden ergonómicos allí).
+  // Ver TODOS sus libros en el Catálogo (selección/filtros/orden ergonómicos allí).
   if ($('#autVerBusqueda'))
     $('#autVerBusqueda').onclick = () => {
       cerrarCmp();
@@ -9746,9 +9773,9 @@ function abrirEnlaceProfundo() {
     const id = _deepDoc;
     _deepDoc = null;
     _deepUbic = null;
-    return verDoc(id, { volver: 'search', etiqueta: 'Búsqueda' });
+    return verDoc(id, { volver: 'search', etiqueta: 'Catálogo' });
   }
-  // Etiqueta de estantería (?amb=&est=) → abrir sus libros en la Búsqueda (disponible para invitados).
+  // Etiqueta de estantería (?amb=&est=) → abrir sus libros en el Catálogo (disponible para invitados).
   if (_deepUbic) {
     const { amb, est } = _deepUbic;
     _deepUbic = null;

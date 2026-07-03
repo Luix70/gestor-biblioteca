@@ -1228,6 +1228,38 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
   outline: 2px solid var(--acc);
   outline-offset: -2px;
 }
+/* Patrón de SELECCIÓN reutilizable (Catálogo, ficha de autor, obras, editoriales…): en «Modo
+   selección» tocar la tarjeta la marca con un tick ✓ bien visible + recuadro (en vez de abrir su
+   ficha). El tick solo se ve cuando la tarjeta está seleccionada (.sel). */
+.selmark {
+  display: none;
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 5;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--acc);
+  color: #04231b;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 24px;
+  text-align: center;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.sel .selmark {
+  display: block;
+}
+/* Rejilla en modo selección: el cursor y un ligero realce invitan a tocar para seleccionar. */
+.selmode .vol {
+  cursor: pointer;
+}
+.selmode .vol:not(.sel):active {
+  outline: 2px dashed var(--acc);
+  outline-offset: -2px;
+}
 /* Nº de posición física en la estantería (esquina inferior izda. de la portada) */
 .posbadge {
   position: absolute;
