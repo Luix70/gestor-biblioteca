@@ -1476,9 +1476,9 @@ body.modo-seleccion::after {
 }
 .ordcov {
   flex: 0 0 auto;
-  width: 34px;
-  height: 46px;
-  border-radius: 5px;
+  width: 58px;
+  height: 80px;
+  border-radius: 6px;
   overflow: hidden;
   background: var(--card2);
   display: grid;
@@ -1490,7 +1490,7 @@ body.modo-seleccion::after {
   object-fit: cover;
 }
 .ordcov .ordph {
-  font-size: 18px;
+  font-size: 28px;
   opacity: 0.5;
 }
 .ordmove {

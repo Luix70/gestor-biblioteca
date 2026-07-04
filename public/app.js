@@ -1405,8 +1405,8 @@ function numerarTomos() {
   const cardRow = (f) => {
     const d = f.d;
     const cov = d.portada
-      ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" style="width:34px;height:48px;object-fit:cover;border-radius:3px;flex:none">`
-      : '<div style="width:34px;height:48px;display:grid;place-items:center;background:var(--card2,#eee);border-radius:3px;flex:none">📕</div>';
+      ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" style="width:56px;height:78px;object-fit:cover;border-radius:4px;flex:none">`
+      : '<div style="width:56px;height:78px;display:grid;place-items:center;background:var(--card2,#eee);border-radius:4px;flex:none;font-size:24px">📕</div>';
     return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--bord,#e5e5e5)">
         ${cov}
         <div style="flex:1;min-width:0"><div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.volumen_titulo || d.titulo || '—')}</div><div class="muted mono" style="font-size:11px">${esc(d.isbn || '')}</div></div>
@@ -1924,7 +1924,7 @@ function pintarDoc(r, ctx) {
     .filter((p) => p[1])
     .map((p) => `<dt>${p[0]}</dt><dd>${p[1]}</dd>`)
     .join('');
-  const ubicFmin = `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">${_txtUbic(d) ? `<a class="rowlink" id="ubicChip" style="color:var(--acc)" title="Ver los libros de esta estantería">📍 ${esc(_txtUbic(d))}</a>` : '<span class="muted">Sin asignar</span>'}</div></div>`;
+  const ubicFmin = `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">${_txtUbic(d) || ROL === 'admin' ? `<span class="rowlink" id="ubicChip" style="color:var(--acc);cursor:pointer" title="Toca para ver los libros de esta estantería${ROL === 'admin' ? '; doble clic / pulsación larga para cambiar la ubicación' : ''}">📍 ${esc(_txtUbic(d) || 'Sin asignar')}</span>` : '<span class="muted">Sin asignar</span>'}</div></div>`;
   // Bajo el exlibris: la OBRA (con el ordinal del volumen, «Vol.: III») y la COLECCIÓN (con el nº del
   // libro/obra dentro de la colección, «Nº 678»). Primero la obra, luego la colección. Ambas clicables.
   const obraColFmin = (() => {
@@ -2034,17 +2034,17 @@ function pintarDoc(r, ctx) {
     const cs = $('#actShare');
     if (cs) cs.onclick = () => compartirDoc(d);
     const uc = $('#ubicChip');
-    if (uc)
-      uc.onclick = () => {
-        const u = d.ubicacion || {};
-        estadoBusqueda.extra = {
-          ambito: u.ambito,
-          estanteria: u.estanteria && u.estanteria !== 'Sin asignar' ? u.estanteria : undefined,
-          etiqueta: '📍 ' + _txtUbic(d),
-        };
-        estadoBusqueda.page = 1;
-        go('search');
+    if (uc) {
+      const u = d.ubicacion || {};
+      const filtrar = () => {
+        if (!u.ambito || u.ambito === 'Sin asignar') { if (ROL === 'admin') editarUbicacionRapida(d); return; }
+        verEstanteriaEnCatalogo(u.ambito, u.estanteria && u.estanteria !== 'Sin asignar' ? u.estanteria : '');
       };
+      // Clic/toque = ver los libros de la estantería; doble clic / pulsación larga (admin) = cambiar la
+      // ubicación (acción frecuente). Los invitados solo filtran.
+      if (ROL === 'admin') attachGesto(uc, filtrar, () => editarUbicacionRapida(d));
+      else uc.onclick = filtrar;
+    }
   }
   $$('#p-detalle [data-colid]').forEach((a) => (a.onclick = () => verColeccion(a.dataset.colid)));
   $$('#p-detalle [data-q]').forEach((a) => (a.onclick = () => buscarTexto(a.dataset.q)));
@@ -10076,6 +10076,41 @@ async function pickerUbic() {
     } catch (e) {
       $('#puErr').textContent = e.message;
     }
+  };
+}
+// Cambio RÁPIDO de la ubicación de UN documento desde su ficha (doble clic / pulsación larga en el chip
+// 📍). Reutiliza el mismo modal y endpoint que la asignación en lote, precargado con la ubicación actual.
+async function editarUbicacionRapida(doc) {
+  if (ROL !== 'admin' || !doc || !doc._id) return;
+  await cargarUbicaciones();
+  const u = doc.ubicacion || {};
+  const amb0 = u.ambito && u.ambito !== 'Sin asignar' ? u.ambito : '';
+  const est0 = u.estanteria && u.estanteria !== 'Sin asignar' ? u.estanteria : '';
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:460px"><h3 style="margin-top:0">📍 Cambiar ubicación</h3>
+    <div class="muted" style="font-size:12px;margin:-4px 0 10px">${esc(recortar(doc.titulo || '', 60))}</div>
+    <div class="row" style="gap:8px"><div style="flex:1"><label>Ámbito</label><input id="puAmb" list="puDlA" autocomplete="off" value="${esc(amb0)}"></div>
+    <div style="flex:1"><label>Estantería</label><input id="puEst" list="puDlE" autocomplete="off" value="${esc(est0)}"></div></div>
+    <datalist id="puDlA">${mapaUbicaciones.map((x) => `<option value="${esc(x.ambito)}">`).join('')}</datalist><datalist id="puDlE"></datalist>
+    <div id="puErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="puX">Cancelar</button><button class="btn pri" id="puOk">Guardar</button></div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#puX').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  const refE = () => llenarDatalist('puDlE', estanteriasDe($('#puAmb').value || ''));
+  refE();
+  $('#puAmb').oninput = refE;
+  $('#puOk').onclick = async () => {
+    const ambito = ($('#puAmb').value || '').trim(),
+      estanteria = ($('#puEst').value || '').trim();
+    if (!ambito) { $('#puErr').textContent = 'Indica el ámbito'; return; }
+    try {
+      const r = await api('/ubicaciones/asignar', { method: 'POST', body: JSON.stringify({ ids: [doc._id], ambito, estanteria }) });
+      if (!r.ok) { $('#puErr').textContent = r.motivo; return; }
+      cerrarCmp();
+      toast(`Ubicación → ${r.ambito}${r.estanteria && r.estanteria !== 'Sin asignar' ? ' · ' + r.estanteria : ''}`);
+      verDoc(doc._id, (detalle && detalle.ctx) || {}); // re-pintar la ficha con la nueva ubicación
+    } catch (e) { $('#puErr').textContent = e.message; }
   };
 }
 // ── Página AUTORES ──────────────────────────────────────────────────────────────────────────────────
