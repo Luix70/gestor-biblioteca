@@ -360,6 +360,15 @@ de ficheros clasificado por CDU.
          de barras se asume contraportada).
     Cada trabajo muestra sus mensajes (ISBN leído, tapete, notas de visión…)
     DEBAJO, en la lista del Inbox.
+    CÁMARA EN VIVO (Inbox → 📷): visor a pantalla completa con MULTIDISPARO. Trae:
+      · BOTÓN FLOTANTE de disparo (cae a mano; un TOQUE dispara, MANTÉN+ARRASTRA para
+        recolocarlo — posición persistente). También hay disparador en la barra.
+      · Sonido de captura + tira de MINIATURAS para borrar fotos (✕) antes de procesar.
+      · 📐 Recuadro on/off: superpone el cuadro del libro y la MEDIDA del tapete en vivo
+        (verde con medida, ámbar midiendo); apágalo para fotos que no son portada.
+      · ZOOM por FACTORES NATIVOS (botones mín·2·3·5·10×·máx según el dispositivo — evita
+        la interpolación digital), persistente. 🔦 linterna si el aparato la tiene.
+      · «✅ Catalogar» envía todas las fotos como un solo libro escaneado.
 
   ── INGRESO POR ISBN (lector de código de barras o teclado) ──────────────────
     Escanea o teclea un ISBN y pulsa Enter/Buscar. Recupera los datos del FICHERO

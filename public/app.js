@@ -6402,10 +6402,8 @@ async function camaraEnVivo() {
         <video id="cvVid" playsinline muted style="display:block;max-width:100%;max-height:78vh"></video>
         <canvas id="cvOvl" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
         <div id="cvInfo" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.62);color:#fff;font-size:13px;font-weight:600;padding:5px 12px;border-radius:14px;pointer-events:none;white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis">Encuadra el libro sobre el tapete</div>
-        <div id="cvZoomWrap" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);height:60%;flex-direction:column;align-items:center;gap:6px;background:rgba(0,0,0,.45);border-radius:16px;padding:8px 4px">
-          <span style="color:#fff;font-size:16px">🔍</span>
-          <input id="cvZoom" type="range" min="1" max="5" step="0.1" value="1" style="writing-mode:vertical-lr;direction:rtl;width:26px;flex:1" aria-label="Zoom">
-        </div>
+        <div id="cvZoomWrap" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);flex-direction:column;align-items:center;gap:6px;background:rgba(0,0,0,.42);border-radius:16px;padding:8px 6px"></div>
+        <button id="cvFloat" title="Capturar (mantén y arrastra para moverlo)" style="display:none;position:absolute;z-index:20;width:66px;height:66px;border-radius:50%;border:4px solid rgba(255,255,255,.92);background:rgba(255,255,255,.26);box-shadow:0 4px 16px rgba(0,0,0,.5);place-items:center;font-size:26px;touch-action:none;cursor:grab;color:#fff">📸</button>
       </div>
     </div>
     <div id="cvStrip" style="display:none;gap:8px;padding:8px 12px;background:#0a0a0a;overflow-x:auto;white-space:nowrap"></div>
@@ -6438,20 +6436,36 @@ async function camaraEnVivo() {
     }
   } catch (_) {}
 
-  // ZOOM ajustable y PERSISTENTE (si el dispositivo lo soporta): slider vertical + valor guardado en
-  // localStorage, que se re-aplica al abrir la cámara.
+  // ZOOM por FACTORES NATIVOS (evita la interpolación digital): en vez de un slider continuo, botones
+  // fijos a los factores ópticos típicos (mín · 2 · 3 · 5 · 10 · máx dentro del rango del dispositivo).
+  // Persistente: recuerda el último y lo re-aplica al abrir; ajusta el guardado al factor más cercano.
   try {
     const caps = track.getCapabilities ? track.getCapabilities() : {};
     if (caps && caps.zoom && (caps.zoom.max || 0) > (caps.zoom.min || 1)) {
-      const wrap = overlay.querySelector('#cvZoomWrap'), sl = overlay.querySelector('#cvZoom');
-      wrap.style.display = 'flex';
-      sl.min = caps.zoom.min; sl.max = caps.zoom.max; sl.step = caps.zoom.step || 0.1;
-      let z = parseFloat(localStorage.getItem('cam_zoom') || '');
-      if (!Number.isFinite(z) || z < caps.zoom.min || z > caps.zoom.max) z = caps.zoom.min;
-      sl.value = z;
-      const aplicar = async () => { try { await track.applyConstraints({ advanced: [{ zoom: parseFloat(sl.value) }] }); } catch (_) {} };
-      if (z !== caps.zoom.min) aplicar();
-      sl.oninput = () => { localStorage.setItem('cam_zoom', sl.value); aplicar(); };
+      const wrap = overlay.querySelector('#cvZoomWrap');
+      const zmin = caps.zoom.min || 1, zmax = caps.zoom.max;
+      const factores = [...new Set([zmin, 2, 3, 5, 10, zmax].filter((z) => z >= zmin && z <= zmax))].sort((a, b) => a - b);
+      if (factores.length > 1) {
+        wrap.style.display = 'flex';
+        let z = parseFloat(localStorage.getItem('cam_zoom') || '');
+        if (!Number.isFinite(z)) z = zmin;
+        z = factores.reduce((best, f) => (Math.abs(f - z) < Math.abs(best - z) ? f : best), factores[0]);
+        const etiqueta = (f) => (Number.isInteger(f) ? f : Math.round(f * 10) / 10) + '×';
+        const aplicar = async (val, btn) => {
+          try { await track.applyConstraints({ advanced: [{ zoom: val }] }); } catch (_) {}
+          localStorage.setItem('cam_zoom', String(val));
+          wrap.querySelectorAll('button').forEach((b) => b.classList.toggle('pri', b === btn));
+        };
+        for (const f of factores) {
+          const b = document.createElement('button');
+          b.className = 'btn' + (f === z ? ' pri' : '');
+          b.textContent = etiqueta(f);
+          b.style.cssText = 'padding:5px 0;min-width:48px;font-size:13px';
+          b.onclick = () => aplicar(f, b);
+          wrap.appendChild(b);
+        }
+        if (z !== zmin) { try { track.applyConstraints({ advanced: [{ zoom: z }] }); } catch (_) {} }
+      }
     }
   } catch (_) {}
 
@@ -6554,8 +6568,9 @@ async function camaraEnVivo() {
     overlay.remove();
   };
   overlay.querySelector('#cvX').onclick = cerrar;
-  // Capturar el frame actual a máxima resolución → File → cola camFotos (multidisparo).
-  overlay.querySelector('#cvShot').onclick = async () => {
+  // Capturar el frame actual a máxima resolución → File → cola camFotos (multidisparo). Reutilizable por
+  // el botón de la barra y por el botón FLOTANTE.
+  const capturar = async () => {
     try {
       capCanvas.width = video.videoWidth; capCanvas.height = video.videoHeight;
       capCanvas.getContext('2d').drawImage(video, 0, 0);
@@ -6570,6 +6585,46 @@ async function camaraEnVivo() {
       }
     } catch (e) { toast('No se pudo capturar: ' + e.message, 'bad'); }
   };
+  overlay.querySelector('#cvShot').onclick = capturar;
+
+  // BOTÓN FLOTANTE de disparo: cae a mano (sin estirar el pulgar hasta la barra). Un TOQUE dispara; si lo
+  // MANTIENES y ARRASTRAS, lo recolocas donde quieras (posición persistente por localStorage).
+  const fab = overlay.querySelector('#cvFloat');
+  const wrapEl = overlay.querySelector('#cvWrap');
+  fab.style.display = 'grid';
+  const colocarFab = () => {
+    const rw = wrapEl.getBoundingClientRect(), fw = fab.offsetWidth || 66, fh = fab.offsetHeight || 66;
+    let p = null; try { p = JSON.parse(localStorage.getItem('cam_fab') || 'null'); } catch (_) {}
+    let x = p ? p.x : (rw.width - fw) / 2;       // por defecto: abajo-centro (cómodo para el pulgar)
+    let y = p ? p.y : rw.height - fh - 18;
+    x = Math.max(6, Math.min(rw.width - fw - 6, x));
+    y = Math.max(6, Math.min(rw.height - fh - 6, y));
+    fab.style.left = x + 'px'; fab.style.top = y + 'px';
+  };
+  setTimeout(colocarFab, 60); // tras el layout del vídeo
+  let fdrag = false, fmoved = false, fsx = 0, fsy = 0, foffx = 0, foffy = 0;
+  fab.addEventListener('pointerdown', (e) => {
+    fdrag = true; fmoved = false; fsx = e.clientX; fsy = e.clientY;
+    const rct = fab.getBoundingClientRect(); foffx = e.clientX - rct.left; foffy = e.clientY - rct.top;
+    try { fab.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  fab.addEventListener('pointermove', (e) => {
+    if (!fdrag) return;
+    if (Math.hypot(e.clientX - fsx, e.clientY - fsy) > 6) fmoved = true;
+    const rw = wrapEl.getBoundingClientRect(), fw = fab.offsetWidth, fh = fab.offsetHeight;
+    let x = e.clientX - rw.left - foffx, y = e.clientY - rw.top - foffy;
+    x = Math.max(6, Math.min(rw.width - fw - 6, x));
+    y = Math.max(6, Math.min(rw.height - fh - 6, y));
+    fab.style.left = x + 'px'; fab.style.top = y + 'px';
+  });
+  fab.addEventListener('pointerup', () => {
+    if (!fdrag) return;
+    fdrag = false;
+    if (fmoved) localStorage.setItem('cam_fab', JSON.stringify({ x: parseFloat(fab.style.left), y: parseFloat(fab.style.top) }));
+    else capturar(); // toque sin arrastre → disparar
+  });
+  fab.addEventListener('contextmenu', (e) => e.preventDefault());
+
   overlay.querySelector('#cvDone').onclick = () => {
     cerrar();
     if (camFotos.length) camCatalogar();
