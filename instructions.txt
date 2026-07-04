@@ -326,6 +326,19 @@ de ficheros clasificado por CDU.
     archivo trae «Vol./Tomo N» con el título de la obra delante (motor-enriquecimiento).
     Conservador: solo si no hay ya nº de volumen, y no en revistas ni cómics.
 
+  ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
+    El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos
+    o del nombre — PREVALECE) o AUTOMÁTICO (asignado por el sistema — cede). Se distingue
+    con coleccion_numero_auto. REGLA anti-conflicto en la INGESTA: si entra un libro con
+    su nº editorial y ese nº ya lo ocupaba uno AUTO, el auto se renumera a un hueco libre
+    y el entrante conserva el suyo → nunca hay conflicto (motor-catalogo). Las colecciones
+    pueden tener libros SIN número (no todas se numeran). En la ficha de una serie de
+    libros, admin: «🔢 Numerar» abre un editor (nº por libro, badge editorial/auto) con
+    «⚙️ Orden automático» que respeta SIEMPRE los editoriales y —según el interruptor
+    «rehacer también los auto»— conserva o rehace los automáticos, rellenando huecos y
+    continuando desde el más alto; editar un nº a mano lo vuelve editorial.
+    (POST /colecciones/:id/numerar {numeros:{docId:nº|""}, auto:{docId:true}}.)
+
   ── INBOX (ALTA MANUAL desde el panel) ───────────────────────────────────────
     Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la
     primera y siempre visible; «🏷️ Datos de esta alta» (los que VIAJAN) está

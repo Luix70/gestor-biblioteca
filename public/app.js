@@ -1498,10 +1498,17 @@ function miembroCard(d, etiqueta) {
   return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${esc(etiqueta || '')} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo || '—')}</div></div></div>`;
 }
 
+let _colR = null; // última colección pintada (para el editor «Numerar»)
 function pintarColeccion(r) {
+  _colR = r;
   const c = r.coleccion,
     desc = c.cdu_desc,
     esRev = c.tipo === 'revista';
+  // «Numerar» solo tiene sentido en SERIES DE LIBROS (las revistas se ordenan por fecha/clave).
+  const numBtn =
+    !esRev && ROL === 'admin'
+      ? `<button class="btn" id="colNumerar" title="Asignar o corregir el nº de cada libro dentro de la colección">🔢 Numerar</button>`
+      : '';
   const tipoLabel = esRev ? '📰 Revista (cabecera)' : '📚 Serie de libros';
   const sub = [c.issn ? 'ISSN ' + c.issn : '', c.editorial].filter(Boolean).map(esc).join(' · ') || '—';
   const head = `<div class="crumb"><a onclick="go('colecciones')">Colecciones</a> › <span>${esc(recortar(c.nombre, 50))}</span></div>
@@ -1523,9 +1530,100 @@ function pintarColeccion(r) {
     : `<div class="empty">Sin ${esRev ? 'números' : 'libros'} registrados</div>`;
   $('#p-detalle').innerHTML =
     head +
-    `<div class="card"><div id="selbarDet"></div><h3>${esRev ? 'Números' : 'Libros'}</h3><div class="vol-grid">${cards}</div></div>`;
+    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${esRev ? 'Números' : 'Libros'}</h3>${numBtn}</div><div class="vol-grid" style="margin-top:10px">${cards}</div></div>`;
   montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}` });
   attachRating('#p-detalle');
+  if ($('#colNumerar')) $('#colNumerar').onclick = () => numerarColeccion();
+}
+
+// Editor «Numerar» de una serie de libros: un nº por libro (vacío = sin número, permitido). Distingue el
+// número EDITORIAL (leído del ISBN/datos — prevalece) del AUTOMÁTICO (badge «auto»). «⚙️ Orden automático»
+// respeta SIEMPRE los editoriales y (según el interruptor) conserva o rehace los automáticos, rellenando
+// huecos y continuando desde el más alto. Guarda vía POST /colecciones/:id/numerar.
+function numerarColeccion() {
+  const r = _colR;
+  if (!r) return;
+  const c = r.coleccion;
+  // Estado por libro: numero (string), auto (bool = asignado automáticamente), editorial (tiene nº no-auto).
+  const filas = r.miembros.map((d) => ({
+    d,
+    numero: d.coleccion_numero != null ? String(d.coleccion_numero) : '',
+    auto: d.coleccion_numero_auto === true,
+  }));
+  const numOf = (f) => { const n = parseInt(f.numero, 10); return Number.isFinite(n) ? n : null; };
+  const ordenadas = () =>
+    filas.slice().sort((a, b) => (numOf(a) == null ? 1e9 : numOf(a)) - (numOf(b) == null ? 1e9 : numOf(b)) || String(a.d.titulo || '').localeCompare(String(b.d.titulo || ''), 'es'));
+  const cardRow = (f) => {
+    const d = f.d;
+    const cov = d.portada
+      ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" style="width:48px;height:66px;object-fit:cover;border-radius:4px;flex:none">`
+      : '<div style="width:48px;height:66px;display:grid;place-items:center;background:var(--card2,#eee);border-radius:4px;flex:none;font-size:22px">📕</div>';
+    const badge = f.numero === '' ? '' : f.auto
+      ? '<span class="tag" style="font-size:10px;background:var(--card2);color:var(--mut)">auto</span>'
+      : '<span class="tag ok" style="font-size:10px">editorial</span>';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--bord,#e5e5e5)">
+        ${cov}
+        <div style="flex:1;min-width:0"><div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.titulo || '—')}</div><div class="muted mono" style="font-size:11px">${esc(d.isbn || '')} ${badge}</div></div>
+        <input type="number" min="1" class="cnuminput" data-doc="${esc(d._id)}" data-auto="${f.auto ? '1' : '0'}" value="${esc(f.numero)}" placeholder="—" inputmode="numeric" style="width:64px;text-align:center">
+      </div>`;
+  };
+  const pintarFilas = () => {
+    $('#cnFilas').innerHTML = filas.length ? ordenadas().map(cardRow).join('') : '<div class="muted">La colección no tiene libros.</div>';
+    // Editar un nº a mano lo vuelve EDITORIAL (deja de ser auto).
+    $$('#cnFilas .cnuminput').forEach((i) => (i.oninput = () => { i.dataset.auto = '0'; }));
+  };
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;width:94vw">
+      <h3 style="margin-top:0">🔢 Numerar — ${esc(recortar(c.nombre, 40))}</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Nº de cada libro en la colección. Vacío = sin número (algunas colecciones no se numeran). El nº «editorial» (leído del ISBN/datos) prevalece; el «auto» cede.</div>
+      <div style="margin-bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn" id="cnAuto" title="Rellena los números que falten (y, si marcas la casilla, rehace los automáticos), respetando siempre los editoriales; rellena huecos y continúa desde el más alto.">⚙️ Orden automático</button>
+        <label style="font-size:12px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="cnRehacer"> rehacer también los «auto»</label>
+      </div>
+      <div id="cnFilas" style="max-height:50vh;overflow:auto"></div>
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="cnCancel">Cancelar</button><button class="btn pri" id="cnSave">Guardar</button></div>
+    </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  pintarFilas();
+  $('#cnCancel').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  // Orden automático por indicios: respeta los EDITORIALES (fijos); opcionalmente rehace los auto; asigna a
+  // los que queden sin número el siguiente HUECO libre (y luego continúa desde el más alto). Marca auto.
+  $('#cnAuto').onclick = () => {
+    const rehacer = $('#cnRehacer').checked;
+    const fijos = new Set(); // números ocupados por EDITORIALES (y por auto si NO se rehacen)
+    for (const f of filas) {
+      const n = numOf(f);
+      if (n == null) continue;
+      if (!f.auto || !rehacer) fijos.add(n);
+    }
+    const libre = () => { let n = 1; while (fijos.has(n)) n++; fijos.add(n); return n; };
+    // Recorre en el orden mostrado; a cada libro sin número fijo, le da el siguiente hueco.
+    for (const f of ordenadas()) {
+      const n = numOf(f);
+      const esFijo = n != null && (!f.auto || !rehacer);
+      if (esFijo) continue;               // editorial (o auto que se conserva) → intacto
+      f.numero = String(libre());
+      f.auto = true;                       // asignado automáticamente
+    }
+    pintarFilas();
+  };
+  $('#cnSave').onclick = async () => {
+    const numeros = {}, auto = {};
+    $$('#cnFilas .cnuminput').forEach((i) => { numeros[i.dataset.doc] = i.value.trim(); if (i.dataset.auto === '1') auto[i.dataset.doc] = true; });
+    const btn = $('#cnSave');
+    btn.disabled = true;
+    btn.textContent = 'Guardando…';
+    try {
+      await api('/colecciones/' + encodeURIComponent(c._id) + '/numerar', { method: 'POST', body: JSON.stringify({ numeros, auto }) });
+      cerrarCmp();
+      verColeccion(c._id);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      alert('No se pudo guardar la numeración: ' + e.message);
+    }
+  };
 }
 
 // Ids (en orden) de TODOS los resultados de la búsqueda actual del Catálogo, cacheados por «clave» de

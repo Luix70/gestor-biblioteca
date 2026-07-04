@@ -788,7 +788,7 @@ export function rutasPanel() {
             const esRevista = col.tipo === 'revista';
             const matchMiembros = { coleccion: col._id };
             if (await ocultarNsfw(req.usuario?.rol)) matchMiembros.nsfw = { $ne: true };
-            const proy = { ...PROY_VOL, clave_numero: 1, 'año_edicion': 1, mes_publicacion: 1, numero_issue: 1, coleccion_numero: 1 };
+            const proy = { ...PROY_VOL, clave_numero: 1, 'año_edicion': 1, mes_publicacion: 1, numero_issue: 1, coleccion_numero: 1, coleccion_numero_auto: 1 };
             const miembros = await db.collection('biblioteca')
                 .find(matchMiembros, { projection: proy })
                 .sort(esRevista ? { clave_numero: 1, 'año_edicion': 1 } : { titulo: 1 }).limit(2000).toArray();
@@ -805,6 +805,34 @@ export function rutasPanel() {
                 },
                 miembros: miembros.map(d => ({ ...d, _id: String(d._id) })),
             });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Numerar / renumerar a mano los miembros de una colección de LIBROS. Un número puesto A MANO es
+    // EDITORIAL y PREVALECE (coleccion_numero_auto:false); uno del «orden automático» se marca auto
+    // (auto[docId]=true) para que un futuro número editorial pueda desplazarlo. Vacío = SIN número (válido:
+    // hay colecciones sin numerar). body.numeros={docId:nº|""}, body.auto={docId:true}.
+    r.post('/colecciones/:id/numerar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const colId = new ObjectId(req.params.id);
+            const col = await db.collection('colecciones').findOne({ _id: colId });
+            if (!col) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
+            const numeros = (req.body && req.body.numeros) || {};
+            const auto = (req.body && req.body.auto) || {};
+            for (const [docId, val] of Object.entries(numeros)) {
+                if (!ObjectId.isValid(docId)) continue;
+                const filtro = { _id: new ObjectId(docId), coleccion: colId }; // solo miembros de ESTA colección
+                if (val === '' || val == null) {
+                    await db.collection('biblioteca').updateOne(filtro, { $unset: { coleccion_numero: '', coleccion_numero_auto: '' } });
+                } else {
+                    await db.collection('biblioteca').updateOne(filtro, { $set: { coleccion_numero: String(val).trim(), coleccion_numero_auto: !!auto[docId] } });
+                }
+            }
+            const n = await db.collection('biblioteca').countDocuments({ coleccion: colId });
+            await db.collection('colecciones').updateOne({ _id: colId }, { $set: { numeros_presentes: n } });
+            res.json({ ok: true, miembros: n });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

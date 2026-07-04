@@ -28,7 +28,7 @@ export async function buscarDocPorHash(hash) {
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza'];
+    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza'];
 
     // (1) Rellenar huecos.
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
@@ -189,9 +189,11 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             const { _id, creada } = await resolverColeccion(db, docFinal.coleccion_nombre, edId);
             if (creada) docFinal.alertas_agente.push(`Nueva colección registrada: ${docFinal.coleccion_nombre}`);
 
-            // Serie automática (drop por carpeta): si el documento no trae número de serie, se le
-            // asigna el siguiente incremental dentro de la colección (max numérico existente + 1).
+            // NUMERACIÓN dentro de la colección (regla: el número EDITORIAL —leído del nombre/ISBN/datos—
+            // PREVALECE; el asignado automáticamente cede). `coleccion_numero_auto:true` marca el AUTO, para
+            // poder distinguirlo (y renumerarlo) después.
             if (opciones.serieAuto && !docFinal.coleccion_numero) {
+                // Serie automática (drop por carpeta): sin número propio → el siguiente por encima del máximo.
                 const miembros = await coleccionBiblioteca
                     .find({ coleccion: _id }, { projection: { coleccion_numero: 1 } }).toArray();
                 const maxN = miembros.reduce((m, d) => {
@@ -199,6 +201,21 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                     return Number.isFinite(n) && n > m ? n : m;
                 }, 0);
                 docFinal.coleccion_numero = String(maxN + 1);
+                docFinal.coleccion_numero_auto = true;
+            } else if (docFinal.coleccion_numero != null && docFinal.coleccion_numero_auto !== true) {
+                // Número EDITORIAL: si un miembro AUTO ya ocupa ese número, se le renumera a un hueco libre y
+                // el entrante conserva el suyo → nunca hay conflicto de numeración.
+                const nEnt = parseInt(docFinal.coleccion_numero, 10);
+                if (Number.isFinite(nEnt)) {
+                    const choca = await coleccionBiblioteca.findOne({ coleccion: _id, coleccion_numero: String(nEnt), coleccion_numero_auto: true });
+                    if (choca) {
+                        const miembros = await coleccionBiblioteca.find({ coleccion: _id }, { projection: { coleccion_numero: 1 } }).toArray();
+                        const usados = new Set(miembros.map(d => parseInt(d.coleccion_numero, 10)).filter(Number.isFinite));
+                        let libre = nEnt + 1; while (usados.has(libre)) libre++;
+                        await coleccionBiblioteca.updateOne({ _id: choca._id }, { $set: { coleccion_numero: String(libre), coleccion_numero_auto: true } });
+                        docFinal.alertas_agente.push(`Nº ${nEnt} de la colección liberado (editorial); el miembro auto pasa a ${libre}.`);
+                    }
+                }
             }
             docFinal.coleccion = _id;
         }
