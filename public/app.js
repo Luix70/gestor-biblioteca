@@ -4688,9 +4688,24 @@ function construirSearch() {
         <div><label>Estrellas${ROL === 'admin' ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
           <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' ? '<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"> 🔞 NSFW</label>' : ''}</div>
         </details></div>
-        <div><label>Orden</label><select id="sqOrden"><option value="reciente">Recientes</option><option value="titulo">Título A-Z</option><option value="antiguo">Antiguos</option></select></div>
         <div class="admin-only"><label>Etiqueta NFC</label><select id="sqNfc"><option value="">Todas</option><option value="con">📶 Con etiqueta</option><option value="sin">Sin etiqueta</option></select></div>
         <div class="admin-only"><label>Descubrir</label><div style="display:flex;align-items:center;gap:6px;height:36px"><label class="switch" style="flex:0 0 auto"><input type="checkbox" id="sqDescubrir"><span class="slider"></span></label><span class="muted" title="Busca en el Fichero (58,7 M) libros que NO tienes, con enlaces para conseguirlos">🔭 Fichero</span></div></div>
+      </div>
+    </details>
+    <details class="card foldcard" id="sqOrdenar" style="margin-bottom:16px">
+      <summary>↕️ Ordenar</summary>
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:1 1 240px"><label>Ordenar por</label>
+          <select id="sqOrden">
+            <option value="reciente">Relevancia / recientes</option>
+            <option value="fecha">Fecha de ingreso</option>
+            <option value="titulo">Título (alfabético)</option>
+            <option value="autor">Autor</option>
+            <option value="posicion">Posición en la estantería</option>
+            <option value="obra">Posición en la obra</option>
+            <option value="coleccion">Posición en la colección</option>
+          </select></div>
+        <div id="sqDirWrap" style="display:none"><label>Sentido</label><button class="btn" id="sqDir" data-dir="desc" title="Cambiar entre ascendente y descendente">↓ Desc</button></div>
       </div>
     </details>
     <div id="searchChip" style="margin-bottom:12px"></div>
@@ -4753,7 +4768,24 @@ function construirSearch() {
       ubicPendiente = a ? { a, e: ($('#sqEstanteria') && $('#sqEstanteria').value) || null } : null;
       go('ubic');
     };
-  $('#sqOrden').onchange = () => buscarCatalogo(1);
+  // Ordenación: colapsable propio + toggle de sentido (asc/desc) con valor por defecto según el campo.
+  {
+    const fo = $('#sqOrdenar');
+    if (fo) {
+      fo.open = localStorage.getItem('sq_ordenar') === '1'; // por defecto colapsado
+      fo.addEventListener('toggle', () => localStorage.setItem('sq_ordenar', fo.open ? '1' : '0'));
+    }
+  }
+  const DIR_DEF = { reciente: 'desc', fecha: 'desc', titulo: 'asc', autor: 'asc', posicion: 'asc', obra: 'asc', coleccion: 'asc' };
+  const setOrdenDir = (d) => {
+    const b = $('#sqDir');
+    if (b) { b.dataset.dir = d; b.textContent = d === 'asc' ? '↑ Asc' : '↓ Desc'; }
+    const w = $('#sqDirWrap');
+    if (w) w.style.display = $('#sqOrden').value === 'reciente' ? 'none' : ''; // relevancia no lleva sentido
+  };
+  setOrdenDir($('#sqDir') && $('#sqDir').dataset.dir || 'desc');
+  $('#sqOrden').onchange = () => { setOrdenDir(DIR_DEF[$('#sqOrden').value] || 'asc'); buscarCatalogo(1); };
+  if ($('#sqDir')) $('#sqDir').onclick = () => { setOrdenDir($('#sqDir').dataset.dir === 'asc' ? 'desc' : 'asc'); buscarCatalogo(1); };
   if ($('#sqNfc')) $('#sqNfc').onchange = () => buscarCatalogo(1);
   if ($('#sqDescubrir')) $('#sqDescubrir').onchange = () => buscarCatalogo(1);
   $$('#p-search .sqStar').forEach(
@@ -4774,6 +4806,7 @@ function construirSearch() {
     $('#sqTipo').value = '';
     if ($('#sqSoporte')) $('#sqSoporte').value = '';
     $('#sqOrden').value = 'reciente';
+    setOrdenDir('desc');
     if ($('#sqAmbito')) $('#sqAmbito').value = '';
     if ($('#sqEstanteria')) {
       $('#sqEstanteria').value = '';
@@ -4868,6 +4901,8 @@ function _paramsBusqueda() {
     orden: $('#sqOrden').value,
     porPagina: _porPaginaVista(),
   });
+  // Sentido asc/desc (salvo en «Relevancia / recientes», que no lo usa).
+  if ($('#sqOrden').value !== 'reciente') params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
   const est = estrellasSel();
   if (est.length && est.length < 6) params.set('estrellas', est.join(','));
   const ambS = ($('#sqAmbito') && $('#sqAmbito').value) || '';

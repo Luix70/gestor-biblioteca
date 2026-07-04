@@ -511,24 +511,44 @@ export function rutasPanel() {
             if (nsfwCond) extras.push(...nsfwCond);
             const consulta = extras.length ? { $and: [...(Object.keys(match).length ? [match] : []), ...extras] } : match;
 
-            const sort = orden === 'titulo' ? { titulo: 1 } : orden === 'antiguo' ? { fecha_ingreso: 1 } : { fecha_ingreso: -1 };
-            const opciones = (orden === 'titulo' || orden === 'posicion') ? { collation: { locale: 'es', strength: 1 } } : {};
-            // 'posicion' = orden FÍSICO en la estantería (campo orden_estanteria); los libros aún sin colocar van al
-            // final por título. Es el orden natural al ver UNA estantería (localizar un libro / inventario).
-            // Si no, RELEVANCIA cuando hay índice FTS (ranking bm25 de idsRanked; los aciertos por identificador
-            // fuera del ranking caen al final con _rank grande); en su defecto, el orden elegido (sort).
-            const etapasOrden = orden === 'posicion'
-                ? [
-                    { $addFields: { _pos: { $ifNull: ['$orden_estanteria', 1e9] } } },
-                    { $sort: { _pos: 1, titulo: 1 } },
-                  ]
-                : (ordenRelevancia && idsRanked && idsRanked.length)
+            // ORDEN: `orden` = CAMPO por el que ordenar, `dir` = asc|desc. Campos: fecha (ingreso), titulo
+            // (alfabético), autor, posicion (físico en estantería), obra (obra+volumen), coleccion
+            // (colección+nº). Compatibilidad: 'reciente'=fecha desc, 'antiguo'=fecha asc. Los nulos van al
+            // final. Con collation español (acentos/mayúsculas indiferentes) en los órdenes de texto.
+            const CAMPO_ORDEN = { reciente: 'fecha', antiguo: 'fecha', fecha: 'fecha', titulo: 'titulo', autor: 'autor', posicion: 'posicion', obra: 'obra', coleccion: 'coleccion' };
+            const campoOrden = CAMPO_ORDEN[orden] || 'fecha';
+            const dirRaw = String(req.query.dir || '').toLowerCase();
+            const s = dirRaw === 'asc' ? 1 : dirRaw === 'desc' ? -1
+                : orden === 'antiguo' ? 1 : campoOrden === 'fecha' ? -1 : 1; // por defecto: fecha desc, el resto asc
+            const opciones = ['titulo', 'autor', 'obra', 'coleccion', 'posicion'].includes(campoOrden)
+                ? { collation: { locale: 'es', strength: 1 } } : {};
+            // RELEVANCIA cuando hay índice FTS y no se pidió un orden explícito (ranking bm25 de idsRanked; los
+            // aciertos por identificador fuera del ranking caen al final con _rank grande).
+            const etapasOrden = (ordenRelevancia && idsRanked && idsRanked.length)
                 ? [
                     { $addFields: { _rank: { $indexOfArray: [idsRanked, { $toString: '$_id' }] } } },
                     { $addFields: { _rank: { $cond: [{ $lt: ['$_rank', 0] }, 1e9, '$_rank'] } } },
                     { $sort: { _rank: 1, fecha_ingreso: -1 } },
                   ]
-                : [{ $sort: sort }];
+                : campoOrden === 'posicion'
+                ? [{ $addFields: { _pos: { $ifNull: ['$orden_estanteria', 1e9] } } }, { $sort: { _pos: s, titulo: 1 } }]
+                : campoOrden === 'autor'
+                ? [
+                    { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_auS' } },
+                    { $addFields: { _auNom: { $ifNull: [{ $arrayElemAt: ['$_auS.nombre', 0] }, 'zzzzzzzz'] } } },
+                    { $sort: { _auNom: s, titulo: 1 } },
+                  ]
+                : campoOrden === 'obra'
+                ? [
+                    { $addFields: { _ot: { $ifNull: ['$obra_titulo', 'zzzzzzzz'] }, _vn: { $ifNull: ['$volumen_numero', 1e9] } } },
+                    { $sort: { _ot: s, _vn: s, titulo: 1 } },
+                  ]
+                : campoOrden === 'coleccion'
+                ? [
+                    { $addFields: { _cn: { $ifNull: ['$coleccion_nombre', 'zzzzzzzz'] }, _cnum: { $ifNull: ['$coleccion_numero', 1e9] } } },
+                    { $sort: { _cn: s, _cnum: s, titulo: 1 } },
+                  ]
+                : [{ $sort: campoOrden === 'titulo' ? { titulo: s } : { fecha_ingreso: s } }];
             // Modo SOLO-IDS: devuelve TODOS los _id que casan (todas las páginas) para «seleccionar todos los
             // resultados» y para la NAVEGACIÓN de la ficha. Usa el MISMO pipeline de orden que la vista (para
             // que anterior/siguiente sigan el orden visible). Respeta cada filtro. Sin paginar; tope de seguridad.
