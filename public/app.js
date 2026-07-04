@@ -2968,6 +2968,90 @@ function fraccionVerde(canvas) {
   for (let i = 0; i < N; i++) if (_verdeMat(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) nv++;
   return nv / N;
 }
+// Núcleo COMPARTIDO (puro, testeable en Node): dada una MÁSCARA de "fondo" (1=fondo) de w×h, devuelve las 4
+// esquinas [TL,TR,BR,BL] (en coords de la máscara) del mayor OBJETO rodeado por el fondo, o null. `dilatar`
+// = radio del cierre morfológico del fondo (traga líneas finas que conectarían el objeto con el exterior;
+// 0 = sin dilatación). Lo usan el detector del tapete (fondo=verde) y el genérico por fondo muestreado.
+function _quadDeMascara(fondo0, w, h, dilatar) {
+  const N = w * h;
+  let mat = fondo0;
+  if (dilatar > 0) {
+    const r = dilatar,
+      tmp = new Uint8Array(N);
+    mat = new Uint8Array(N);
+    for (let y = 0; y < h; y++) {
+      const o = y * w;
+      for (let x = 0; x < w; x++) {
+        let v = 0;
+        for (let k = -r; k <= r; k++) { const xx = x + k; if (xx >= 0 && xx < w && fondo0[o + xx]) { v = 1; break; } }
+        tmp[o + x] = v;
+      }
+    }
+    for (let x = 0; x < w; x++)
+      for (let y = 0; y < h; y++) {
+        let v = 0;
+        for (let k = -r; k <= r; k++) { const yy = y + k; if (yy >= 0 && yy < h && tmp[yy * w + x]) { v = 1; break; } }
+        mat[y * w + x] = v;
+      }
+  }
+  // flood-fill del EXTERIOR (fondo alcanzable desde los bordes) sobre el fondo YA SÓLIDO.
+  const fuera = new Uint8Array(N),
+    pila = [];
+  const meter = (i) => { if (!mat[i] && !fuera[i]) { fuera[i] = 1; pila.push(i); } };
+  for (let x = 0; x < w; x++) { meter(x); meter((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { meter(y * w); meter(y * w + w - 1); }
+  while (pila.length) {
+    const i = pila.pop(), x = i % w, y = (i / w) | 0;
+    if (x > 0) meter(i - 1);
+    if (x < w - 1) meter(i + 1);
+    if (y > 0) meter(i - w);
+    if (y < h - 1) meter(i + w);
+  }
+  // ISLA = objeto RODEADO de fondo. Mayor componente conexa (ignora restos sueltos y agujeros internos).
+  const comp = new Int32Array(N);
+  let id = 0, bestId = 0, bestSz = 0;
+  for (let s = 0; s < N; s++) {
+    if (mat[s] || fuera[s] || comp[s]) continue;
+    id++;
+    let sz = 0;
+    const st = [s];
+    comp[s] = id;
+    while (st.length) {
+      const i = st.pop();
+      sz++;
+      const x = i % w, y = (i / w) | 0;
+      const push = (j) => { if (!mat[j] && !fuera[j] && !comp[j]) { comp[j] = id; st.push(j); } };
+      if (x > 0) push(i - 1);
+      if (x < w - 1) push(i + 1);
+      if (y > 0) push(i - w);
+      if (y < h - 1) push(i + w);
+    }
+    if (sz > bestSz) { bestSz = sz; bestId = id; }
+  }
+  if (bestSz < N * 0.01) return null; // objeto demasiado pequeño / no fiable
+  // 4 esquinas de la MAYOR componente (extremos diagonales x±y) — se adapta a giro/trapecio. Erosión: el
+  // píxel de esquina debe tener ≥3 vecinos de la misma componente (evita protuberancias finas).
+  const dela = (i) => comp[i] === bestId;
+  let tl = null, br = null, bl = null, tr = null;
+  for (let y = 1; y < h - 1; y++)
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (!dela(i)) continue;
+      let nb = 0;
+      if (dela(i - 1)) nb++;
+      if (dela(i + 1)) nb++;
+      if (dela(i - w)) nb++;
+      if (dela(i + w)) nb++;
+      if (nb < 3) continue;
+      const s = x + y, df = x - y;
+      if (tl === null || s < tl[2]) tl = [x, y, s];
+      if (br === null || s > br[2]) br = [x, y, s];
+      if (bl === null || df < bl[2]) bl = [x, y, df];
+      if (tr === null || df > tr[2]) tr = [x, y, df];
+    }
+  if (!tl || !tr || !br || !bl) return null;
+  return [[tl[0], tl[1]], [tr[0], tr[1]], [br[0], br[1]], [bl[0], bl[1]]];
+}
 function detectarBordesVerde(canvas) {
   const maxD = 720,
     sc = Math.min(1, maxD / Math.max(canvas.width, canvas.height));
@@ -2987,124 +3071,53 @@ function detectarBordesVerde(canvas) {
     nVerde += v;
   }
   if (nVerde < N * 0.15) return null; // poco tapete → probablemente NO hay alfombrilla
-  // DILATAR el tapete (cierre morfológico, radio 2, max-filter separable) para TRAGARSE las LÍNEAS de la
-  // rejilla: son "no-tapete" y, si no, conectan el libro con el exterior y el flood-fill se cuela en él.
-  const r = 2,
-    tmp = new Uint8Array(N),
-    mat = new Uint8Array(N);
-  for (let y = 0; y < h; y++) {
-    const o = y * w;
-    for (let x = 0; x < w; x++) {
-      let v = 0;
-      for (let k = -r; k <= r; k++) {
-        const xx = x + k;
-        if (xx >= 0 && xx < w && verde[o + xx]) {
-          v = 1;
-          break;
-        }
+  // El tapete es el FONDO; se dilata (radio 2) para tragarse las LÍNEAS de la rejilla (que si no conectan el
+  // libro con el exterior). El libro = mayor isla rodeada de tapete.
+  const dq = _quadDeMascara(verde, w, h, 2);
+  return dq ? dq.map((p) => [p[0] / sc, p[1] / sc]) : null;
+}
+// FASE 2b: detección GENÉRICA por SEGMENTACIÓN DE FONDO (cubierta sobre una superficie relativamente
+// UNIFORME — mesa/suelo, foto en ángulo, SIN tapete). Muestrea el color del fondo en las 4 ESQUINAS de la
+// foto → máscara de fondo (píxeles parecidos a alguna muestra) → mayor objeto rodeado = la cubierta → 4
+// esquinas. Complementa al detector por LÍNEAS (mejor cuando la cubierta va "cargada" de texto/dibujos que
+// confunden a Hough). Libre, sin IA. Devuelve [TL,TR,BR,BL] en coords del canvas o null.
+function detectarBordesPorFondo(canvas) {
+  const maxD = 600,
+    sc = Math.min(1, maxD / Math.max(canvas.width, canvas.height));
+  const w = Math.max(1, Math.round(canvas.width * sc)),
+    h = Math.max(1, Math.round(canvas.height * sc)),
+    N = w * h;
+  if (w < 40 || h < 40) return null;
+  const t = document.createElement('canvas');
+  t.width = w;
+  t.height = h;
+  t.getContext('2d').drawImage(canvas, 0, 0, w, h);
+  const d = t.getContext('2d').getImageData(0, 0, w, h).data;
+  // Color medio de un bloque en cada esquina → colores de fondo de referencia.
+  const R = Math.max(4, Math.round(Math.min(w, h) * 0.06));
+  const bloque = (cx, cy) => {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let y = cy - R; y <= cy + R; y++)
+      for (let x = cx - R; x <= cx + R; x++) {
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+        const i = (y * w + x) * 4; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
       }
-      tmp[o + x] = v;
-    }
-  }
-  for (let x = 0; x < w; x++)
-    for (let y = 0; y < h; y++) {
-      let v = 0;
-      for (let k = -r; k <= r; k++) {
-        const yy = y + k;
-        if (yy >= 0 && yy < h && tmp[yy * w + x]) {
-          v = 1;
-          break;
-        }
-      }
-      mat[y * w + x] = v;
-    }
-  // flood-fill del EXTERIOR (no-tapete alcanzable desde los bordes) sobre el tapete YA SÓLIDO.
-  const fuera = new Uint8Array(N),
-    pila = [];
-  const meter = (i) => {
-    if (!mat[i] && !fuera[i]) {
-      fuera[i] = 1;
-      pila.push(i);
-    }
+    return n ? [r / n, g / n, b / n] : null;
   };
-  for (let x = 0; x < w; x++) {
-    meter(x);
-    meter((h - 1) * w + x);
+  const refs = [bloque(R, R), bloque(w - 1 - R, R), bloque(R, h - 1 - R), bloque(w - 1 - R, h - 1 - R)].filter(Boolean);
+  if (refs.length < 3) return null;
+  const tol = 64; // distancia (suma de |ΔR|+|ΔG|+|ΔB|) para considerar un píxel "fondo"
+  const fondo = new Uint8Array(N);
+  let nf = 0;
+  for (let i = 0; i < N; i++) {
+    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
+    let bg = false;
+    for (const c of refs) { if (Math.abs(r - c[0]) + Math.abs(g - c[1]) + Math.abs(b - c[2]) < tol) { bg = true; break; } }
+    if (bg) { fondo[i] = 1; nf++; }
   }
-  for (let y = 0; y < h; y++) {
-    meter(y * w);
-    meter(y * w + w - 1);
-  }
-  while (pila.length) {
-    const i = pila.pop(),
-      x = i % w,
-      y = (i / w) | 0;
-    if (x > 0) meter(i - 1);
-    if (x < w - 1) meter(i + 1);
-    if (y > 0) meter(i - w);
-    if (y < h - 1) meter(i + w);
-  }
-  // ISLA = no-tapete RODEADO de tapete. Etiquetar componentes conexas y quedarse con la MAYOR (el libro):
-  // así se ignoran restos sueltos fuera y los "agujeros" mat dentro de la cubierta no rompen la forma.
-  const comp = new Int32Array(N);
-  let id = 0,
-    bestId = 0,
-    bestSz = 0;
-  for (let s = 0; s < N; s++) {
-    if (mat[s] || fuera[s] || comp[s]) continue;
-    id++;
-    let sz = 0;
-    const st = [s];
-    comp[s] = id;
-    while (st.length) {
-      const i = st.pop();
-      sz++;
-      const x = i % w,
-        y = (i / w) | 0;
-      const push = (j) => {
-        if (!mat[j] && !fuera[j] && !comp[j]) {
-          comp[j] = id;
-          st.push(j);
-        }
-      };
-      if (x > 0) push(i - 1);
-      if (x < w - 1) push(i + 1);
-      if (y > 0) push(i - w);
-      if (y < h - 1) push(i + w);
-    }
-    if (sz > bestSz) {
-      bestSz = sz;
-      bestId = id;
-    }
-  }
-  if (bestSz < N * 0.01) return null; // libro demasiado pequeño / no fiable
-  // 4 esquinas de la MAYOR componente (extremos diagonales x±y) — se adapta a giro/trapecio. Erosión: el
-  // píxel de esquina debe tener ≥3 vecinos de la misma componente (evita protuberancias finas).
-  const dela = (i) => comp[i] === bestId;
-  let tl = null,
-    br = null,
-    bl = null,
-    tr = null;
-  for (let y = 1; y < h - 1; y++)
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      if (!dela(i)) continue;
-      let nb = 0;
-      if (dela(i - 1)) nb++;
-      if (dela(i + 1)) nb++;
-      if (dela(i - w)) nb++;
-      if (dela(i + w)) nb++;
-      if (nb < 3) continue;
-      const s = x + y,
-        df = x - y;
-      if (tl === null || s < tl[2]) tl = [x, y, s];
-      if (br === null || s > br[2]) br = [x, y, s];
-      if (bl === null || df < bl[2]) bl = [x, y, df];
-      if (tr === null || df > tr[2]) tr = [x, y, df];
-    }
-  if (!tl || !tr || !br || !bl) return null;
-  const up = (p) => [p[0] / sc, p[1] / sc];
-  return [up(tl), up(tr), up(br), up(bl)];
+  if (nf < N * 0.18 || nf > N * 0.94) return null; // fondo insuficiente/no uniforme, o casi todo fondo
+  const dq = _quadDeMascara(fondo, w, h, 1);
+  return dq ? dq.map((p) => [p[0] / sc, p[1] / sc]) : null;
 }
 // ── FASE 2: detección GENÉRICA del cuadrilátero de la cubierta (SIN tapete), para fotos en ángulo. Núcleo
 //   PURO (ImageData {data,width,height}) → 4 esquinas [TL,TR,BR,BL] o null; testeable en Node. Método: Sobel →
@@ -3502,7 +3515,8 @@ function _editorImagen(opts) {
       let q = detectarBordesVerde(work),
         gen = false;
       if (!q) {
-        q = detectarCuadrilateroGenerico(work);
+        // Sin tapete: 1º segmentación por FONDO (cubierta sobre superficie uniforme), 2º detector por LÍNEAS.
+        q = detectarBordesPorFondo(work) || detectarCuadrilateroGenerico(work);
         gen = !!q;
       }
       if (!q) {

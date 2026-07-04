@@ -303,7 +303,10 @@ de ficheros clasificado por CDU.
     (admin) = CAMBIAR la ubicación —acción frecuente— con un mini-editor). Acciones (admin):
       ✏️ Editar (y bloquear para que el Conformador no lo cambie)
       🖼️ Imágenes — reordenar/añadir/borrar + editor en el navegador: rotar,
-         recortar, corregir PERSPECTIVA (4 esquinas) con auto-bordes.
+         recortar, corregir PERSPECTIVA (4 esquinas) con «✨ Auto bordes». Auto-bordes
+         detecta la cubierta en 3 pasadas (todas locales, sin IA): tapete verde →
+         SEGMENTACIÓN por el color del FONDO (libro sobre superficie uniforme, foto en
+         ángulo, sin tapete) → líneas (Sobel/Hough). Ajusta las esquinas antes de aplicar.
       📐 Medir — estima el tamaño físico (cm) sobre la alfombrilla reglada.
       🧹 Conformar · ✨ Enriquecer · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
       📶 Grabar NFC (ver más abajo)
