@@ -112,6 +112,54 @@ const sonidoCaptura = () => _tono({ freq: 1180, hasta: 1500, dur: 0.06, tipo: 's
 const sonidoNfcLectura = () => _tono({ freq: 920, dur: 0.11, tipo: 'sine', vol: 0.2 });                // lectura: un tono
 const sonidoNfcEscritura = () => { _tono({ freq: 620, dur: 0.09, vol: 0.2 }); _tono({ freq: 990, dur: 0.14, vol: 0.2, retardo: 0.1 }); }; // escritura: dos tonos ascendentes
 
+// ── Modelo de interacción unificado de las listas (Catálogo, obras, colecciones, autores, ubicaciones) ──
+// Clic/toque simple = acción PRINCIPAL (abrir la ficha). Doble clic (PC) o pulsación larga (móvil) =
+// CONMUTAR el modo selección (sin perder lo seleccionado). Además del botón «Modo selección» y del realce
+// de las tarjetas, un indicador de modo (pastilla inferior) avisa en qué modo estamos.
+function setModoVisual(activo) {
+  document.body.classList.toggle('modo-seleccion', !!activo);
+}
+// Controles internos de una tarjeta que NO deben disparar el gesto (estrellas, badges, enlaces, botones).
+const _ES_CTRL_TARJETA = 'a,button,input,select,textarea,label,.ratebar,.stars,.st,.rclear,.rnsfw,.nfctag';
+// Adjunta a `el` el gesto unificado: onTap (toque/clic corto) y onModo (doble clic / pulsación larga).
+// No añade latencia en móvil (usa touchend directo); en PC distingue clic simple de doble con un pequeño
+// retardo. Ignora los toques que nacen sobre un control interno de la tarjeta.
+function attachGesto(el, onTap, onModo) {
+  let lpTimer = null, lp = false, movido = false, ctrl = false, sx = 0, sy = 0, tocado = false;
+  el.addEventListener('touchstart', (e) => {
+    tocado = true; lp = false; movido = false;
+    ctrl = !!(e.target.closest && e.target.closest(_ES_CTRL_TARJETA));
+    if (ctrl) return;
+    const t = e.touches && e.touches[0]; sx = t ? t.clientX : 0; sy = t ? t.clientY : 0;
+    lpTimer = setTimeout(() => { lp = true; try { navigator.vibrate && navigator.vibrate(25); } catch (_) {} onModo(); }, 500);
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    const t = e.touches && e.touches[0];
+    if (t && (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10)) { movido = true; clearTimeout(lpTimer); }
+  }, { passive: true });
+  el.addEventListener('touchend', (e) => {
+    clearTimeout(lpTimer);
+    if (ctrl) return;                          // el toque fue sobre un control interno
+    if (lp) { lp = false; e.preventDefault(); return; }   // fue pulsación larga
+    if (movido) { movido = false; return; }    // fue scroll
+    e.preventDefault();                         // evita el click sintético posterior
+    onTap();
+  });
+  let clickTimer = null;
+  el.addEventListener('click', (e) => {
+    if (tocado) { tocado = false; return; }     // el touch ya lo gestionó
+    if (e.target.closest && e.target.closest(_ES_CTRL_TARJETA)) return;
+    if (clickTimer) return;                     // el 2º clic lo captura dblclick
+    clickTimer = setTimeout(() => { clickTimer = null; onTap(); }, 220);
+  });
+  el.addEventListener('dblclick', (e) => {
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+    if (e.target.closest && e.target.closest(_ES_CTRL_TARJETA)) return;
+    e.preventDefault();
+    onModo();
+  });
+}
+
 // Escapa &<>" para incrustar texto de datos dentro de HTML generado (evita inyección y roturas de marcado).
 const esc = (txt) =>
   String(txt ?? '').replace(
@@ -172,6 +220,7 @@ let logTimer = null; // intervalo de refresco de los logs en vivo (solo activo e
 // (loaders[pagina]) y apila la vista en el historial (para el botón atrás del móvil).
 function go(pagina) {
   detalle = null;
+  setModoVisual(false); // al cambiar de página se apaga el indicador; cada lista lo re-aplica si procede
   $$('#nav button').forEach((boton) => boton.classList.toggle('on', boton.dataset.p === pagina));
   $$('.page').forEach((seccion) => seccion.classList.remove('on'));
   $('#p-' + pagina).classList.add('on');
@@ -1050,18 +1099,23 @@ function pintarShelf(kind) {
         c.style.display = (c.dataset.nombre || '').includes(q) ? '' : 'none';
       });
     };
-  // Tocar una tarjeta: en Modo selección (admin) marca/desmarca; si no, abre la colección/obra.
-  $$(`#${cont.id} .vol[data-${kind}]`).forEach(
-    (el) =>
-      (el.onclick = () => {
+  // Interacción unificada: clic/toque = abrir la colección/obra (o marcar en Modo selección); doble clic /
+  // pulsación larga = conmutar el modo (conservando la selección).
+  $$(`#${cont.id} .vol[data-${kind}]`).forEach((el) =>
+    attachGesto(
+      el,
+      () => {
         const id = el.dataset[kind];
         if (st.modo && ROL === 'admin') {
           st.sel.has(id) ? st.sel.delete(id) : st.sel.add(id);
           el.classList.toggle('sel', st.sel.has(id));
           renderShelfBulk(kind);
         } else kind === 'obra' ? verObra(id) : verColeccion(id);
-      }),
+      },
+      () => alternarShelfModo(kind),
+    ),
   );
+  setModoVisual(st.modo && ROL === 'admin');
   $$(`#${cont.id} .shreq`).forEach((b) => {
     b.onclick = async (e) => {
       e.stopPropagation();
@@ -1090,6 +1144,15 @@ function pintarShelf(kind) {
   attachRating('#' + cont.id);
   renderShelfBulk(kind);
 }
+// Conmuta el Modo selección de la lista de obras/colecciones (botón «Modo selección» o gesto doble-clic /
+// pulsación-larga en una tarjeta). Re-renderiza para aplicar/quitar el modo.
+function alternarShelfModo(kind) {
+  if (ROL !== 'admin') return;
+  const st = shelf[kind];
+  st.modo = !st.modo;
+  setModoVisual(st.modo);
+  pintarShelf(kind);
+}
 function renderShelfBulk(kind) {
   const el = $('#shbulk_' + kind);
   if (!el) return;
@@ -1103,7 +1166,7 @@ function renderShelfBulk(kind) {
     enSel = ids.filter((id) => st.sel.has(id)).length,
     todas = enSel > 0 && enSel === ids.length;
   const nom = kind === 'obra' ? 'obra' : 'colección';
-  const modoBtn = `<button class="btn${st.modo ? ' pri' : ''}" id="shModo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre la ${nom}. La selección se conserva al cambiar.">${st.modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`;
+  const modoBtn = `<button class="btn${st.modo ? ' pri' : ''}" id="shModo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre la ${nom}. Doble clic / pulsación larga en una tarjeta también conmuta. La selección se conserva.">${st.modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`;
   const tools = st.modo ? `<button class="btn" id="shAll">${todas ? 'Quitar' : 'Todas'}</button>` : '';
   const acc = st.sel.size
     ? `<span style="margin-left:auto"></span><b>${st.sel.size}</b> sel.
@@ -1114,10 +1177,7 @@ function renderShelfBulk(kind) {
     <button class="btn" id="shClr">Limpiar</button>`
     : '';
   el.innerHTML = `<div class="bulkbar">${modoBtn}${tools}${acc}</div>`;
-  $('#shModo').onclick = () => {
-    st.modo = !st.modo;
-    pintarShelf(kind); // re-render para aplicar/quitar el modo selección (cursor + comportamiento)
-  };
+  $('#shModo').onclick = () => alternarShelfModo(kind);
   if ($('#shAll'))
     $('#shAll').onclick = () => {
       const on = !todas;
@@ -1255,6 +1315,7 @@ function nfcBadge(d) {
     : '';
 }
 function mostrarDetalle() {
+  setModoVisual(false); // una ficha no es una lista: apaga el indicador de modo selección
   $$('.page').forEach((s) => s.classList.remove('on'));
   $('#p-detalle').classList.add('on');
   $('#sidebar').classList.remove('open');
@@ -1522,27 +1583,34 @@ function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo }) {
   // Cada tarjeta necesita el tick ✓ (se inyecta si no lo trae).
   cards.forEach((c) => { if (!c.querySelector('.selmark')) c.insertAdjacentHTML('afterbegin', '<span class="selmark">✓</span>'); });
   const soloAdmin = ROL === 'admin';
+  const alternar = () => { if (!soloAdmin) return; modo = !modo; scope.classList.toggle('selmode', modo); setModoVisual(modo); pintarBar(); };
   const pintarBar = () => {
     const acc = sel.size
       ? `<span style="margin-left:auto"></span><b>${sel.size}</b> sel. <button class="btn pri" id="selcat">🔍 Mostrar en Catálogo</button> <button class="btn" id="selclr">Limpiar</button>`
       : '';
-    bar.innerHTML = `<div class="bulkbar"><button class="btn${modo ? ' pri' : ''}" id="selmodo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre su ficha. La selección se conserva al cambiar.">${modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>${acc}</div>`;
-    $('#selmodo').onclick = () => { modo = !modo; scope.classList.toggle('selmode', modo); pintarBar(); };
+    bar.innerHTML = `<div class="bulkbar"><button class="btn${modo ? ' pri' : ''}" id="selmodo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre su ficha. Doble clic / pulsación larga en una tarjeta también conmuta. La selección se conserva.">${modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>${acc}</div>`;
+    $('#selmodo').onclick = alternar;
     if (sel.size) {
       $('#selcat').onclick = () => mostrarEnCatalogo([...sel], titulo || `${sel.size} libros`);
       $('#selclr').onclick = () => { sel.clear(); cards.forEach((c) => c.classList.remove('sel')); pintarBar(); };
     }
   };
-  cards.forEach((el) => {
-    el.onclick = () => {
-      const id = el.dataset.doc;
-      if (modo && soloAdmin) {
-        sel.has(id) ? sel.delete(id) : sel.add(id);
-        el.classList.toggle('sel', sel.has(id));
-        pintarBar();
-      } else verDoc(id, { ...verCtx, lista });
-    };
-  });
+  // Interacción unificada: clic/toque = abrir ficha (o marcar en Modo selección); doble clic / pulsación
+  // larga = conmutar el modo (conservando la selección).
+  cards.forEach((el) =>
+    attachGesto(
+      el,
+      () => {
+        const id = el.dataset.doc;
+        if (modo && soloAdmin) {
+          sel.has(id) ? sel.delete(id) : sel.add(id);
+          el.classList.toggle('sel', sel.has(id));
+          pintarBar();
+        } else verDoc(id, { ...verCtx, lista });
+      },
+      alternar,
+    ),
+  );
   if (soloAdmin) pintarBar();
 }
 
@@ -4368,10 +4436,19 @@ function toggleSel(id, on) {
   if (c) c.classList.toggle('sel', on);
   renderBulk();
 }
-// Refleja el modo selección en la rejilla (cursor/realce) — CSS .selmode.
+// Refleja el modo selección en la rejilla (cursor/realce) — CSS .selmode — y en el indicador de modo.
 function aplicarModoSelUI() {
   const r = $('#searchResults');
   if (r) r.classList.toggle('selmode', modoSeleccion && ROL === 'admin');
+  setModoVisual(modoSeleccion && ROL === 'admin');
+}
+// Conmuta el modo selección del Catálogo (sin perder la selección). Lo llaman el botón «Modo selección»
+// y el gesto doble-clic/pulsación-larga sobre una tarjeta.
+function alternarModoSel() {
+  if (ROL !== 'admin') return;
+  modoSeleccion = !modoSeleccion;
+  aplicarModoSelUI();
+  renderBulk();
 }
 // Envía una lista de libros al Catálogo YA SELECCIONADOS (en modo selección), filtrando por esos ids.
 // Reutilizable desde cualquier origen (ficha de autor, colección, editorial, obra…).
@@ -4391,7 +4468,7 @@ function renderBulk() {
   const todaLaPag = enPag > 0 && enPag === paginaIds.length;
   // Botón que alterna Modo selección (tocar la portada la marca) ↔ Modo previsualización (tocar abre la
   // ficha). El texto refleja el modo ACTUAL; la selección se conserva al cambiar de modo.
-  const modoBtn = `<button class="btn${modoSeleccion ? ' pri' : ''}" id="bkModo" title="Modo selección: tocar una portada la marca. Modo previsualización: tocar abre su ficha. La selección se conserva al cambiar.">${modoSeleccion ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`;
+  const modoBtn = `<button class="btn${modoSeleccion ? ' pri' : ''}" id="bkModo" title="Modo selección: tocar una portada la marca. Modo previsualización: tocar abre su ficha. Doble clic / pulsación larga en una portada también conmuta. La selección se conserva.">${modoSeleccion ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`;
   // Herramientas de selección masiva (solo tienen sentido en modo selección).
   const selNfc =
     'NDEFReader' in window
@@ -4420,12 +4497,9 @@ function renderBulk() {
       ? `<button class="btn pri" id="bkResumeNfc" style="margin-left:auto">📶 Reanudar etiquetado (${g.ids.length})</button>`
       : '';
   el.innerHTML = `<div class="bulkbar">${modoBtn}${herramientas}${resume}${acc}</div>`;
-  // Activar/desactivar Modo selección (la selección NO se pierde al apagarlo).
-  $('#bkModo').onclick = () => {
-    modoSeleccion = !modoSeleccion;
-    aplicarModoSelUI();
-    renderBulk();
-  };
+  // Activar/desactivar Modo selección (la selección NO se pierde al apagarlo). Mismo efecto que el gesto
+  // doble-clic / pulsación-larga sobre una tarjeta.
+  $('#bkModo').onclick = alternarModoSel;
   if ($('#bkResumeNfc'))
     $('#bkResumeNfc').onclick = () => {
       const s = colaEtqGuardada();
@@ -5416,13 +5490,17 @@ function pintarBusqueda(r) {
       ? `<div class="dlist">${r.docs.map(docRow).join('')}</div>`
       : `<div class="vol-grid">${r.docs.map(docCard).join('')}</div>`;
   $('#searchResults').innerHTML = r.docs.length ? cuerpo : '<div class="empty">Sin resultados</div>';
-  // Tocar un elemento (tarjeta o fila): en Modo selección (admin) marca/desmarca; si no, abre su ficha.
-  $$('#searchResults [data-doc]').forEach(
-    (el) =>
-      (el.onclick = () => {
+  // Interacción unificada: clic/toque = abrir ficha (o marcar si estamos en Modo selección); doble clic /
+  // pulsación larga = conmutar el Modo selección (conservando la selección).
+  $$('#searchResults [data-doc]').forEach((el) =>
+    attachGesto(
+      el,
+      () => {
         if (modoSeleccion && ROL === 'admin') toggleSel(el.dataset.doc);
         else verDoc(el.dataset.doc, { volver: 'search', etiqueta: 'Catálogo', catalogo: true });
-      }),
+      },
+      alternarModoSel,
+    ),
   );
   aplicarModoSelUI();
   attachRating('#searchResults');
@@ -10294,33 +10372,33 @@ async function autorFicha(id) {
   };
   const tarjetas = [...$('#cmpModal').querySelectorAll('[data-libro]')];
   const listaLibros = tarjetas.map((el) => el.dataset.libro); // orden mostrado (para navegar en la ficha)
-  tarjetas.forEach((el) => {
-    el.onclick = () => {
-      if (_autFichaSelModo) {
-        // En modo selección: tocar marca/desmarca (no abre la ficha → selección cómoda).
-        const lid = el.dataset.libro;
-        if (_autFichaSel.has(lid)) _autFichaSel.delete(lid);
-        else _autFichaSel.add(lid);
-        pintarSel(el, _autFichaSel.has(lid));
-        actualizarCuenta();
-      } else {
-        cerrarCmp();
-        verDoc(el.dataset.libro, { volver: 'autores', etiqueta: 'Autores', lista: listaLibros });
-      }
-    };
-  });
-  if ($('#autSelModo'))
-    $('#autSelModo').onclick = () => {
-      _autFichaSelModo = !_autFichaSelModo;
-      $('#autSelModo').classList.toggle('pri', _autFichaSelModo);
-      if ($('#autSelBarra')) $('#autSelBarra').style.display = _autFichaSelModo ? 'flex' : 'none';
-      if (!_autFichaSelModo) {
-        // Al salir del modo, limpiar la selección y los marcos.
-        _autFichaSel.clear();
-        tarjetas.forEach((el) => pintarSel(el, false));
-      }
-      actualizarCuenta();
-    };
+  const alternarAutFicha = () => {
+    _autFichaSelModo = !_autFichaSelModo;
+    if ($('#autSelModo')) $('#autSelModo').classList.toggle('pri', _autFichaSelModo);
+    if ($('#autSelBarra')) $('#autSelBarra').style.display = _autFichaSelModo ? 'flex' : 'none';
+    if (!_autFichaSelModo) { _autFichaSel.clear(); tarjetas.forEach((el) => pintarSel(el, false)); } // al salir, limpiar
+    actualizarCuenta();
+  };
+  // Interacción unificada: clic/toque = abrir ficha (o marcar en Modo selección); doble clic / pulsación
+  // larga = conmutar el Modo selección.
+  tarjetas.forEach((el) =>
+    attachGesto(
+      el,
+      () => {
+        if (_autFichaSelModo) {
+          const lid = el.dataset.libro;
+          _autFichaSel.has(lid) ? _autFichaSel.delete(lid) : _autFichaSel.add(lid);
+          pintarSel(el, _autFichaSel.has(lid));
+          actualizarCuenta();
+        } else {
+          cerrarCmp();
+          verDoc(el.dataset.libro, { volver: 'autores', etiqueta: 'Autores', lista: listaLibros });
+        }
+      },
+      alternarAutFicha,
+    ),
+  );
+  if ($('#autSelModo')) $('#autSelModo').onclick = alternarAutFicha;
   if ($('#autSelTodos'))
     $('#autSelTodos').onclick = () => {
       tarjetas.forEach((el) => {

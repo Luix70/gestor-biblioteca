@@ -1279,6 +1279,31 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .selmode .ubcard {
   cursor: pointer;
 }
+/* MODO SELECCIÓN activo: fondo un punto más claro + pastilla explicativa abajo, para que se vea de un
+   vistazo en qué modo estamos (además del botón «🖱 Modo selección» y del realce de las tarjetas). */
+body.modo-seleccion {
+  --bg: #182231;
+}
+body.modo-seleccion::after {
+  content: '🖱 Modo selección · toca para marcar · doble clic / pulsación larga para salir';
+  position: fixed;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 4000;
+  background: var(--acc);
+  color: #04231b;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  max-width: 92vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ubcard.sel {
   outline: 2px solid var(--acc);
   outline-offset: -2px;
