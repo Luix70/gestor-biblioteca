@@ -90,6 +90,28 @@ const toast = (mensaje, tipo = 'ok') => {
   setTimeout(() => el.remove(), 3800);
 };
 
+// ── Sonidos cortos con WebAudio (sin ficheros → funcionan offline en la PWA). Se necesita un gesto del
+// usuario para arrancar el AudioContext; captura/NFC ocurren tras una interacción, así que es válido. ──
+let _audioCtx = null;
+function _tono({ freq = 880, dur = 0.12, tipo = 'sine', vol = 0.18, hasta = null, retardo = 0 } = {}) {
+  try {
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _audioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+    const t0 = ctx.currentTime + retardo;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = tipo; o.frequency.setValueAtTime(freq, t0);
+    if (hasta) o.frequency.exponentialRampToValueAtTime(hasta, t0 + dur);
+    g.gain.setValueAtTime(vol, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  } catch (_) {}
+}
+const sonidoCaptura = () => _tono({ freq: 1180, hasta: 1500, dur: 0.06, tipo: 'square', vol: 0.14 }); // «click» agudo de disparo
+const sonidoNfcLectura = () => _tono({ freq: 920, dur: 0.11, tipo: 'sine', vol: 0.2 });                // lectura: un tono
+const sonidoNfcEscritura = () => { _tono({ freq: 620, dur: 0.09, vol: 0.2 }); _tono({ freq: 990, dur: 0.14, vol: 0.2, retardo: 0.1 }); }; // escritura: dos tonos ascendentes
+
 // Escapa &<>" para incrustar texto de datos dentro de HTML generado (evita inyección y roturas de marcado).
 const esc = (txt) =>
   String(txt ?? '').replace(
@@ -4494,6 +4516,7 @@ async function seleccionarPorNFC() {
     const reader = new NDEFReader();
     await reader.scan({ signal: ctrl.signal });
     reader.onreading = (ev) => {
+      sonidoNfcLectura();
       let url = '';
       for (const rec of ev.message.records) {
         try {
@@ -5108,6 +5131,7 @@ async function iniciarOrdenPorNFC() {
     return;
   }
   rd.onreading = (ev) => {
+    sonidoNfcLectura();
     let url = '';
     for (const rec of ev.message.records) {
       try {
@@ -6123,11 +6147,17 @@ async function camaraEnVivo() {
         <video id="cvVid" playsinline muted style="display:block;max-width:100%;max-height:78vh"></video>
         <canvas id="cvOvl" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
         <div id="cvInfo" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.62);color:#fff;font-size:13px;font-weight:600;padding:5px 12px;border-radius:14px;pointer-events:none;white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis">Encuadra el libro sobre el tapete</div>
+        <div id="cvZoomWrap" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);height:60%;flex-direction:column;align-items:center;gap:6px;background:rgba(0,0,0,.45);border-radius:16px;padding:8px 4px">
+          <span style="color:#fff;font-size:16px">🔍</span>
+          <input id="cvZoom" type="range" min="1" max="5" step="0.1" value="1" style="writing-mode:vertical-lr;direction:rtl;width:26px;flex:1" aria-label="Zoom">
+        </div>
       </div>
     </div>
+    <div id="cvStrip" style="display:none;gap:8px;padding:8px 12px;background:#0a0a0a;overflow-x:auto;white-space:nowrap"></div>
     <div style="display:flex;gap:10px;align-items:center;justify-content:center;padding:12px;background:#111;flex-wrap:wrap">
       <button class="btn" id="cvX">✕ Cerrar</button>
       <button class="btn" id="cvTorch" style="display:none">🔦</button>
+      <button class="btn pri" id="cvRect" title="Muestra u oculta el recuadro y la medida del tapete (desactívalo para fotos que no sean de portada/contraportada)">📐 Recuadro</button>
       <button class="btn pri" id="cvShot" style="font-size:18px;padding:10px 24px">📸 Capturar</button>
       <span id="cvN" style="color:#fff;font-size:13px">0 fotos</span>
       <button class="btn pri" id="cvDone">✅ Catalogar</button>
@@ -6153,7 +6183,36 @@ async function camaraEnVivo() {
     }
   } catch (_) {}
 
+  // ZOOM ajustable y PERSISTENTE (si el dispositivo lo soporta): slider vertical + valor guardado en
+  // localStorage, que se re-aplica al abrir la cámara.
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps && caps.zoom && (caps.zoom.max || 0) > (caps.zoom.min || 1)) {
+      const wrap = overlay.querySelector('#cvZoomWrap'), sl = overlay.querySelector('#cvZoom');
+      wrap.style.display = 'flex';
+      sl.min = caps.zoom.min; sl.max = caps.zoom.max; sl.step = caps.zoom.step || 0.1;
+      let z = parseFloat(localStorage.getItem('cam_zoom') || '');
+      if (!Number.isFinite(z) || z < caps.zoom.min || z > caps.zoom.max) z = caps.zoom.min;
+      sl.value = z;
+      const aplicar = async () => { try { await track.applyConstraints({ advanced: [{ zoom: parseFloat(sl.value) }] }); } catch (_) {} };
+      if (z !== caps.zoom.min) aplicar();
+      sl.oninput = () => { localStorage.setItem('cam_zoom', sl.value); aplicar(); };
+    }
+  } catch (_) {}
+
   let vivo = true;
+  // Recuadro/medida del tapete: ON por defecto (persistente). Para fotos que NO son de portada/
+  // contraportada (ISBN, interior…) el usuario puede desactivarlo → ni se detecta ni se mide.
+  let overlayOn = localStorage.getItem('cam_recuadro') !== '0';
+  // Tira de miniaturas DENTRO de la cámara: revisar y BORRAR fotos antes de procesar (sin salir).
+  const strip = overlay.querySelector('#cvStrip');
+  const renderCamStrip = () => {
+    strip.style.display = camFotos.length ? 'flex' : 'none';
+    strip.innerHTML = camFotos
+      .map((foto, i) => `<span style="position:relative;display:inline-block;flex:none"><img src="${URL.createObjectURL(foto)}" style="width:54px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #333"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-6px;right:-6px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`)
+      .join('');
+    strip.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => { camFotos.splice(+b.dataset.rm, 1); renderCamStrip(); actualizarN(); renderCamThumbs(); }));
+  };
   const capCanvas = document.createElement('canvas');
   const work = document.createElement('canvas');
   const mcan = document.createElement('canvas'); // canvas de MEDICIÓN (mayor resolución, throttled)
@@ -6187,7 +6246,7 @@ async function camaraEnVivo() {
   const loopTapete = () => {
     if (!vivo) return;
     let hayQuad = false;
-    try {
+    if (overlayOn) try {
       const vw = video.videoWidth, vh = video.videoHeight, cw = video.clientWidth, ch = video.clientHeight;
       if (vw && vh && cw) {
         work.width = 480; work.height = Math.max(1, Math.round((vh / vw) * 480));
@@ -6207,19 +6266,32 @@ async function camaraEnVivo() {
       }
     } catch (_) {}
     // Medición (más cara) throttled: ~cada segundo; caduca la última medida tras 2 fallos seguidos.
-    if (++iter % 4 === 0) {
+    if (overlayOn && ++iter % 4 === 0) {
       const d = medir();
       if (d) { ultDims = d; fallosMedida = 0; }
       else if (++fallosMedida >= 2) ultDims = null;
     }
     const info = overlay.querySelector('#cvInfo');
-    if (info)
+    if (info) {
+      info.style.display = overlayOn ? '' : 'none';
       info.textContent = ultDims
         ? `📐 ${String(ultDims.ancho_cm).replace('.', ',')} × ${String(ultDims.alto_cm).replace('.', ',')} cm`
         : hayQuad ? 'Midiendo…' : 'Encuadra el libro sobre el tapete';
+    }
     setTimeout(loopTapete, 250);
   };
   loopTapete();
+  renderCamStrip();
+  // Botón activar/desactivar el recuadro/medida (persistente). Al apagarlo se limpia el overlay.
+  const btnRect = overlay.querySelector('#cvRect');
+  const pintarRectBtn = () => btnRect.classList.toggle('pri', overlayOn);
+  pintarRectBtn();
+  btnRect.onclick = () => {
+    overlayOn = !overlayOn;
+    localStorage.setItem('cam_recuadro', overlayOn ? '1' : '0');
+    if (!overlayOn) { try { ovl.getContext('2d').clearRect(0, 0, ovl.width, ovl.height); } catch (_) {} ultDims = null; }
+    pintarRectBtn();
+  };
 
   const cerrar = () => {
     vivo = false;
@@ -6236,7 +6308,9 @@ async function camaraEnVivo() {
       if (blob) {
         camFotos.push(new File([blob], `camara-${Date.now()}.jpg`, { type: 'image/jpeg' }));
         renderCamThumbs();
+        renderCamStrip();
         actualizarN();
+        sonidoCaptura();
         try { navigator.vibrate && navigator.vibrate(30); } catch (_) {}
       }
     } catch (e) { toast('No se pudo capturar: ' + e.message, 'bad'); }
@@ -8185,6 +8259,7 @@ async function leerNFC() {
     const reader = new NDEFReader();
     await reader.scan();
     reader.onreading = async (ev) => {
+      sonidoNfcLectura();
       let url = '',
         bib = '',
         ex = '';
@@ -8439,6 +8514,7 @@ function escribirNFC(records, docIdActual, outerSignal, forzar) {
       }
       try {
         await rd.write({ records }, { signal: ac.signal });
+        sonidoNfcEscritura();
         fin();
         resolve(uid);
       } catch (err) {
@@ -9046,6 +9122,7 @@ function grabarItemEtq(recs, signal) {
       _etq._onRead = null; // desarma mientras escribe (no re-entrar)
       try {
         await _etq.reader.write({ records: recs }, { signal });
+        sonidoNfcEscritura();
         hecho = true;
         if (uid) _etq.ultimoUid = uid;
         resolve(uid);
@@ -9786,6 +9863,7 @@ async function grabarNFCUbic(ambito, estanteria) {
       try {
         await reader.write({ records }, { signal: ctrl.signal });
         escrito = true;
+        sonidoNfcEscritura();
       } catch (_) {}
       try {
         await api('/ubicaciones/nfc', {
