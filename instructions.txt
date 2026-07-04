@@ -259,8 +259,12 @@ de ficheros clasificado por CDU.
           NSFW (por defecto); MARCADA junto a otros filtros = lo INCLUYE también;
           MARCADA y sola (sin otro criterio) = SOLO NSFW.
         - Etiqueta NFC (admin): Todas / Con etiqueta (📶) / Sin etiqueta
-        - Orden (recientes / título A-Z / antiguos). Al ver UNA estantería, se
-          ordena automáticamente por POSICIÓN física (ver Ubicaciones · 📋).
+      El ORDEN está en su PROPIO colapsable «↕️ Ordenar» (el panel de búsqueda era
+      enorme): Relevancia/recientes (defecto) · Fecha de ingreso · Título · Autor ·
+      Posición en la estantería · Posición en la obra · Posición en la colección, cada
+      uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia). Al ver
+      UNA estantería se ordena por POSICIÓN física (ya reflejado en el selector, ver
+      Ubicaciones · 📋).
     · VISTA (botón en la cabecera): «▦ Iconos» (rejilla con portadas, 24/pág, por
       defecto) o «☰ Detalles» (una fila de texto por documento —título · autor · año ·
       ISBN · CDU + formatos—, 100/pág, para revisar muchos de un vistazo). Se recuerda.
@@ -440,6 +444,9 @@ de ficheros clasificado por CDU.
     búsqueda, y grabar la etiqueta NFC de una estantería (o de un ÁMBITO). Los
     desplegables de ámbito/estantería son <select> (fiables en móvil) y se
     reutilizan en el Inbox y en la edición de la ficha.
+    · ESCANEAR la etiqueta NFC de una estantería/ámbito (o abrir su enlace ?amb=&est=)
+      lleva al Catálogo FILTRADO por esa ubicación; si es una estantería concreta, ya
+      ORDENADO por posición física (visible en «↕️ Ordenar», ajustable).
     · Los ámbitos salen COLAPSADOS por defecto y muestran cuántas estanterías y
       cuántos libros contienen. Clic en el NOMBRE de un ámbito/estantería = abre
       la Búsqueda filtrada por él (interactivo: seleccionar, etiquetar, mover…),

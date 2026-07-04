@@ -1659,6 +1659,33 @@ function irBusquedaFiltro(extra) {
   if ($('#sqCdu')) $('#sqCdu').value = '';
   go('search');
 }
+// Ver los libros de UNA ubicación (ámbito/estantería) en el Catálogo: FILTRA por esa ubicación y —si es
+// una estantería concreta— ordena por su POSICIÓN física (visible y ajustable en el selector de orden).
+// Punto ÚNICO usado por el deep-link ?amb=&est= (arranque) y por la lectura NFC de una etiqueta de
+// estantería, para que ambos caminos se comporten igual (antes «llevaba al catálogo con todo mostrado»).
+function verEstanteriaEnCatalogo(amb, est) {
+  if (!amb) return;
+  estadoBusqueda.extra = {
+    ambito: amb,
+    estanteria: est || undefined,
+    etiqueta: '📍 ' + amb + (est ? ' · ' + est : ''),
+  };
+  estadoBusqueda.page = 1;
+  go('search');
+  if (!$('#sqQ')) construirSearch();
+  if ($('#sqQ')) $('#sqQ').value = ''; // sin texto: solo el filtro de ubicación
+  // Limpia otros filtros que arrastrasen de una búsqueda previa (para que muestre SOLO esta ubicación).
+  if ($('#sqTipo')) $('#sqTipo').value = '';
+  if ($('#sqSoporte')) $('#sqSoporte').value = '';
+  if ($('#sqCdu')) $('#sqCdu').value = '';
+  // Estantería concreta → orden por POSICIÓN física, reflejado en el selector (y modificable a mano).
+  if (est && $('#sqOrden')) {
+    $('#sqOrden').value = 'posicion';
+    const b = $('#sqDir'); if (b) { b.dataset.dir = 'asc'; b.textContent = '↑ Asc'; }
+    const w = $('#sqDirWrap'); if (w) w.style.display = '';
+  }
+  buscarCatalogo(1);
+}
 // Búsqueda por TEXTO libre (drill de ISSN/ISBN desde la ficha): pone la consulta en la caja y busca.
 function buscarTexto(q) {
   estadoBusqueda.extra = null;
@@ -8912,9 +8939,7 @@ function mostrarEstanteriaNFC(label, amb, est, ex) {
   if (v)
     v.onclick = () => {
       cerrarCmp();
-      estadoBusqueda.extra = { ambito: amb, estanteria: est || undefined, etiqueta: '📍 ' + (label || amb) };
-      estadoBusqueda.page = 1;
-      go('search');
+      verEstanteriaEnCatalogo(amb, est);
     };
 }
 // Graba en una etiqueta NFC (NTAG215, 504 B) el enlace ?doc=<id> (al acercar el móvil abre la ficha; en
@@ -10482,13 +10507,7 @@ function abrirEnlaceProfundo() {
   if (_deepUbic) {
     const { amb, est } = _deepUbic;
     _deepUbic = null;
-    estadoBusqueda.extra = {
-      ambito: amb,
-      estanteria: est || undefined,
-      etiqueta: '📍 ' + amb + (est ? ' · ' + est : ''),
-    };
-    estadoBusqueda.page = 1;
-    go('search');
+    verEstanteriaEnCatalogo(amb, est);
   }
 }
 // ¿Procesar lo compartido al instante? Interruptor persistente (localStorage). Por defecto SÍ.
