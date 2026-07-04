@@ -17,6 +17,7 @@
  */
 import 'dotenv/config';
 import '../src/config.js';
+import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';
 import { resolverObra, reconstruirInventarioObra } from '../src/utils/obras.js';
 
@@ -116,8 +117,8 @@ async function main() {
     for (const p of plan) {
         const { _id: obraId } = await resolverObra(db, {
             titulo: p.titulo,
-            editorialId: p.editorialId ? p.editorialId : null,
-            coleccionId: p.coleccionId ? p.coleccionId : null,
+            editorialId: p.editorialId ? new ObjectId(p.editorialId) : null,
+            coleccionId: p.coleccionId ? new ObjectId(p.coleccionId) : null,
             cdu: p.cdu || null,
             total: Math.max(...p.items.map((it) => it.numero)),
         });
