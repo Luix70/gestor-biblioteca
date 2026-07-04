@@ -1273,6 +1273,24 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .sel .selmark {
   display: block;
 }
+/* Tarjetas con gesto (clic abre / doble-largo conmuta selección): sin callout ni selección de texto
+   nativos, para que la PULSACIÓN LARGA sea NUESTRA y no abra el menú de Android (copiar/descargar imagen). */
+.vol,
+.drow,
+.ubcard,
+[data-libro],
+#ubicChip {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.vol img,
+.drow img,
+.ubcard img,
+[data-libro] img {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+}
 /* Rejilla en modo selección: el cursor y un ligero realce invitan a tocar para seleccionar. */
 .selmode .vol,
 .selmode .drow,

@@ -158,6 +158,9 @@ function attachGesto(el, onTap, onModo) {
     e.preventDefault();
     onModo();
   });
+  // Evita el menú contextual nativo (copiar/descargar imagen…) que Android/desktop abren con la pulsación
+  // larga / clic derecho sobre la tarjeta: aquí ese gesto es NUESTRO (conmutar modo selección).
+  el.addEventListener('contextmenu', (e) => { if (!(e.target.closest && e.target.closest(_ES_CTRL_TARJETA))) e.preventDefault(); });
 }
 
 // Escapa &<>" para incrustar texto de datos dentro de HTML generado (evita inyección y roturas de marcado).
@@ -1112,7 +1115,7 @@ function pintarShelf(kind) {
           renderShelfBulk(kind);
         } else kind === 'obra' ? verObra(id) : verColeccion(id);
       },
-      () => alternarShelfModo(kind),
+      () => alternarShelfModo(kind, el.dataset[kind]),
     ),
   );
   setModoVisual(st.modo && ROL === 'admin');
@@ -1146,10 +1149,12 @@ function pintarShelf(kind) {
 }
 // Conmuta el Modo selección de la lista de obras/colecciones (botón «Modo selección» o gesto doble-clic /
 // pulsación-larga en una tarjeta). Re-renderiza para aplicar/quitar el modo.
-function alternarShelfModo(kind) {
+function alternarShelfModo(kind, selId) {
   if (ROL !== 'admin') return;
   const st = shelf[kind];
+  const entrando = !st.modo;
   st.modo = !st.modo;
+  if (entrando && st.modo && selId) st.sel.add(selId); // al ENTRAR por gesto, marca ya esa tarjeta
   setModoVisual(st.modo);
   pintarShelf(kind);
 }
@@ -1608,7 +1613,12 @@ function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo }) {
           pintarBar();
         } else verDoc(id, { ...verCtx, lista });
       },
-      alternar,
+      () => {
+        if (!soloAdmin) return;
+        const entrando = !modo;
+        alternar();
+        if (entrando && modo) { sel.add(el.dataset.doc); el.classList.add('sel'); pintarBar(); } // marca la tarjeta del gesto
+      },
     ),
   );
   if (soloAdmin) pintarBar();
@@ -5499,7 +5509,14 @@ function pintarBusqueda(r) {
         if (modoSeleccion && ROL === 'admin') toggleSel(el.dataset.doc);
         else verDoc(el.dataset.doc, { volver: 'search', etiqueta: 'Catálogo', catalogo: true });
       },
-      alternarModoSel,
+      () => {
+        // Doble clic / pulsación larga: conmuta el modo y, si ENTRAMOS en selección, deja YA marcada
+        // esta tarjeta (el gesto nació sobre ella).
+        if (ROL !== 'admin') return;
+        const entrando = !modoSeleccion;
+        alternarModoSel();
+        if (entrando && modoSeleccion) toggleSel(el.dataset.doc, true);
+      },
     ),
   );
   aplicarModoSelUI();
@@ -10430,7 +10447,11 @@ async function autorFicha(id) {
           verDoc(el.dataset.libro, { volver: 'autores', etiqueta: 'Autores', lista: listaLibros });
         }
       },
-      alternarAutFicha,
+      () => {
+        const entrando = !_autFichaSelModo;
+        alternarAutFicha();
+        if (entrando && _autFichaSelModo) { _autFichaSel.add(el.dataset.libro); pintarSel(el, true); actualizarCuenta(); } // marca la del gesto
+      },
     ),
   );
   if ($('#autSelModo')) $('#autSelModo').onclick = alternarAutFicha;
