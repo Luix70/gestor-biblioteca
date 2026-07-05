@@ -1507,7 +1507,8 @@ function pintarColeccion(r) {
   // «Numerar» solo tiene sentido en SERIES DE LIBROS (las revistas se ordenan por fecha/clave).
   const numBtn =
     !esRev && ROL === 'admin'
-      ? `<button class="btn" id="colNumerar" title="Asignar o corregir el nº de cada libro dentro de la colección">🔢 Numerar</button>`
+      ? `<button class="btn" id="colNumerar" title="Asignar o corregir el nº de cada libro dentro de la colección">🔢 Numerar</button>
+         <button class="btn" id="colLomos" title="Foto de los lomos → la IA lee título y nº de cada uno y renumera la colección (y adjunta el recorte del lomo)">📷 Numerar por lomos</button>`
       : '';
   const tipoLabel = esRev ? '📰 Revista (cabecera)' : '📚 Serie de libros';
   const sub = [c.issn ? 'ISSN ' + c.issn : '', c.editorial].filter(Boolean).map(esc).join(' · ') || '—';
@@ -1534,6 +1535,7 @@ function pintarColeccion(r) {
   montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}` });
   attachRating('#p-detalle');
   if ($('#colNumerar')) $('#colNumerar').onclick = () => numerarColeccion();
+  if ($('#colLomos')) $('#colLomos').onclick = () => numerarPorLomos();
 }
 
 // Editor «Numerar» de una serie de libros: un nº por libro (vacío = sin número, permitido). Distingue el
@@ -1624,6 +1626,177 @@ function numerarColeccion() {
       alert('No se pudo guardar la numeración: ' + e.message);
     }
   };
+}
+
+// Recorta el rectángulo `bbox` (fracciones 0..1) de una imagen ya cargada y lo devuelve como data-URL JPEG.
+// Para adjuntar el canto de cada libro como imagen suya (y para la miniatura de revisión). null si no cabe.
+function _recortarLomo(imgEl, bbox, maxW = 380) {
+  if (!imgEl || !bbox) return null;
+  const iw = imgEl.naturalWidth, ih = imgEl.naturalHeight;
+  const sx = Math.round(bbox.x * iw), sy = Math.round(bbox.y * ih);
+  const sw = Math.round(bbox.w * iw), sh = Math.round(bbox.h * ih);
+  if (sw < 4 || sh < 4) return null;
+  const escala = Math.min(1, maxW / sw);
+  const cw = Math.max(1, Math.round(sw * escala)), ch = Math.max(1, Math.round(sh * escala));
+  const cv = document.createElement('canvas');
+  cv.width = cw; cv.height = ch;
+  cv.getContext('2d').drawImage(imgEl, sx, sy, sw, sh, 0, 0, cw, ch);
+  try { return cv.toDataURL('image/jpeg', 0.85); } catch { return null; }
+}
+
+// NUMERAR POR LOMOS (serie de libros): el admin fotografía los cantos alineados → la IA lee título y nº de
+// cada lomo y los empareja con los libros de la colección → revisión (ajustar libro/nº, marcar cuáles
+// adjuntar como imagen) → aplica /numerar + adjunta los recortes. Flujo en 2 fases dentro del mismo modal.
+function numerarPorLomos() {
+  const r = _colR;
+  if (!r) return;
+  const c = r.coleccion;
+  const miembros = r.miembros || [];
+  let fotos = [];        // File[] seleccionados
+  let imgsCargadas = []; // Image[] (de las fotos ya reducidas) para recortar, por índice de imagen
+  const scrim = $('#cmpScrim'), modal = $('#cmpModal');
+  const optsMiembros = (sel) =>
+    `<option value="">— sin asignar —</option>` +
+    miembros.map((m) => `<option value="${esc(m._id)}"${String(m._id) === String(sel || '') ? ' selected' : ''}>${esc(recortar(m.titulo || '(sin título)', 46))}</option>`).join('');
+
+  function pintarCaptura() {
+    modal.innerHTML = `<div class="box card" style="max-width:560px;width:94vw">
+        <h3 style="margin-top:0">📷 Numerar por lomos — ${esc(recortar(c.nombre, 36))}</h3>
+        <div class="muted" style="font-size:12px;margin-bottom:10px">Haz una o varias fotos de los <b>lomos</b> (cantos) de los libros de esta colección, alineados y con el texto legible. La IA leerá el título y el número de cada uno para renumerar la colección.</div>
+        <label class="btn" style="display:inline-block">➕ Añadir fotos<input type="file" id="lomFile" accept="image/*" capture="environment" multiple hidden></label>
+        <div id="lomThumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px"></div>
+        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="lomCancel">Cancelar</button><button class="btn pri" id="lomAnalizar" disabled>🔍 Analizar lomos</button></div>
+      </div>`;
+    scrim.style.display = 'block';
+    modal.style.display = 'grid';
+    scrim.onclick = cerrarCmp;
+    $('#lomCancel').onclick = cerrarCmp;
+    $('#lomFile').onchange = (e) => { fotos = fotos.concat([...e.target.files]); e.target.value = ''; pintarThumbs(); };
+    $('#lomAnalizar').onclick = analizar;
+    pintarThumbs();
+  }
+  function pintarThumbs() {
+    const cont = $('#lomThumbs');
+    if (!cont) return;
+    cont.innerHTML = fotos
+      .map((f, i) => `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(f)}" style="width:78px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`)
+      .join('');
+    $$('#lomThumbs [data-rm]').forEach((b) => (b.onclick = () => { fotos.splice(+b.dataset.rm, 1); pintarThumbs(); }));
+    if ($('#lomAnalizar')) $('#lomAnalizar').disabled = fotos.length === 0;
+  }
+  async function analizar() {
+    const btn = $('#lomAnalizar');
+    btn.disabled = true;
+    btn.textContent = 'Analizando…';
+    try {
+      // Reduce cada foto (≤1600 px) y guárdala como data-URL + Image (para recortar los lomos localmente).
+      const dataurls = [];
+      imgsCargadas = [];
+      for (const f of fotos) {
+        const red = await reducirImagen(f, 1600, 0.82);
+        const du = await fileADataURL(red);
+        dataurls.push(du);
+        const im = new Image();
+        await new Promise((ok) => { im.onload = ok; im.onerror = ok; im.src = du; });
+        imgsCargadas.push(im);
+      }
+      const resp = await api('/colecciones/' + encodeURIComponent(c._id) + '/lomos', { method: 'POST', body: JSON.stringify({ imagenes: dataurls }) });
+      pintarRevision(resp);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = '🔍 Analizar lomos';
+      alert('No se pudieron leer los lomos: ' + e.message);
+    }
+  }
+  function pintarRevision(resp) {
+    const props = (resp && resp.propuesta) || [];
+    // Precalcula el recorte de cada lomo (miniatura + para adjuntar) desde la imagen de origen.
+    props.forEach((p) => { p._crop = p.bbox ? _recortarLomo(imgsCargadas[p.img], p.bbox) : null; });
+    const sinEmp = (resp && resp.sin_emparejar_miembros) || [];
+    if (!props.length) {
+      modal.innerHTML = `<div class="box card" style="max-width:520px;width:94vw"><h3 style="margin-top:0">📷 Numerar por lomos</h3>
+        <div class="muted">${esc((resp && resp.aviso) || 'No se detectaron lomos legibles.')} Prueba con una foto más nítida y con los lomos bien enfocados.</div>
+        <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="lomVolver">Volver</button><button class="btn" id="lomCerrar2">Cerrar</button></div></div>`;
+      $('#lomVolver').onclick = pintarCaptura;
+      $('#lomCerrar2').onclick = cerrarCmp;
+      return;
+    }
+    const fila = (p, idx) => {
+      const thumb = p._crop
+        ? `<img src="${p._crop}" style="width:44px;height:120px;object-fit:cover;border-radius:4px;flex:none;background:#0002" title="Recorte del lomo">`
+        : `<div style="width:44px;height:120px;display:grid;place-items:center;background:var(--card2,#eee);border-radius:4px;flex:none">📖</div>`;
+      const conf = p.confianza >= 60 ? 'ok' : p.confianza > 0 ? '' : 'bad';
+      const confTxt = p.doc_id ? `<span class="tag ${conf}" style="font-size:10px">${p.confianza}%</span>` : '<span class="tag bad" style="font-size:10px">sin libro</span>';
+      return `<div class="lomrow" data-idx="${idx}" style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bord,#e5e5e5)">
+          ${thumb}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px" class="muted">Lee: <b>${esc(recortar(p.titulo_detectado || p.texto || '¿?', 44))}</b> ${confTxt}</div>
+            <div style="margin-top:5px"><select class="lomSel" style="width:100%;font-size:12px">${optsMiembros(p.doc_id)}</select></div>
+            <div style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px">Nº <input type="number" min="1" class="lomNum" value="${esc(p.numero || '')}" placeholder="—" inputmode="numeric" style="width:60px;text-align:center"></label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:5px" title="Adjuntar el recorte del lomo como imagen del libro"><input type="checkbox" class="lomAdj"${p._crop ? ' checked' : ' disabled'}> adjuntar lomo</label>
+            </div>
+          </div>
+        </div>`;
+    };
+    const sinEmpHTML = sinEmp.length
+      ? `<details style="margin-top:10px"><summary class="muted" style="font-size:12px">Sin emparejar: ${sinEmp.length} libro(s) de la colección</summary><div class="muted" style="font-size:12px;margin-top:6px">${sinEmp.map((m) => esc(recortar(m.titulo || '', 50))).join(' · ')}</div></details>`
+      : '';
+    modal.innerHTML = `<div class="box card" style="max-width:600px;width:96vw">
+        <h3 style="margin-top:0">📷 Revisar lomos — ${esc(recortar(c.nombre, 30))}</h3>
+        <div class="muted" style="font-size:12px;margin-bottom:6px">Revisa el libro y el nº de cada lomo (${props.length} detectado(s)). Corrige lo que haga falta; el nº leído del lomo es <b>editorial</b> (prevalece). Marca «adjuntar lomo» para guardar el recorte como imagen del libro.</div>
+        <div id="lomFilas" style="max-height:52vh;overflow:auto">${props.map(fila).join('')}</div>
+        ${sinEmpHTML}
+        <div id="lomProg" class="muted" style="font-size:12px;margin-top:8px"></div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="lomAtras">← Otras fotos</button><button class="btn" id="lomCancel2">Cancelar</button><button class="btn pri" id="lomAplicar">✅ Aplicar</button></div>
+      </div>`;
+    $('#lomAtras').onclick = pintarCaptura;
+    $('#lomCancel2').onclick = cerrarCmp;
+    $('#lomAplicar').onclick = () => aplicar(props);
+  }
+  async function aplicar(props) {
+    // Lee lo revisado de cada fila (por si el admin cambió libro/nº/adjuntar).
+    const filas = $$('#lomFilas .lomrow').map((row) => {
+      const idx = +row.dataset.idx;
+      return {
+        p: props[idx],
+        docId: row.querySelector('.lomSel').value.trim(),
+        num: row.querySelector('.lomNum').value.trim(),
+        adjuntar: row.querySelector('.lomAdj').checked,
+      };
+    });
+    const numeros = {}, auto = {};
+    for (const f of filas) {
+      if (!f.docId) continue;
+      if (f.num !== '') { numeros[f.docId] = f.num; auto[f.docId] = false; } // leído del lomo = editorial
+    }
+    const btn = $('#lomAplicar');
+    btn.disabled = true;
+    const prog = $('#lomProg');
+    try {
+      if (Object.keys(numeros).length) {
+        prog.textContent = 'Guardando numeración…';
+        await api('/colecciones/' + encodeURIComponent(c._id) + '/numerar', { method: 'POST', body: JSON.stringify({ numeros, auto }) });
+      }
+      // Adjunta los recortes marcados (secuencial, best-effort: un fallo no aborta el resto).
+      const conCrop = filas.filter((f) => f.docId && f.adjuntar && f.p._crop);
+      let n = 0, fallos = 0;
+      for (const f of conCrop) {
+        prog.textContent = `Adjuntando lomos… ${++n}/${conCrop.length}`;
+        try {
+          await api('/documentos/' + encodeURIComponent(f.docId) + '/imagenes/anadir', { method: 'POST', body: JSON.stringify({ base64: f.p._crop }) });
+        } catch { fallos++; }
+      }
+      cerrarCmp();
+      toast(`Lomos aplicados: ${Object.keys(numeros).length} nº · ${conCrop.length - fallos} recorte(s)${fallos ? ` · ${fallos} fallo(s)` : ''}.`);
+      verColeccion(c._id);
+    } catch (e) {
+      btn.disabled = false;
+      prog.textContent = '';
+      alert('No se pudo aplicar: ' + e.message);
+    }
+  }
+  pintarCaptura();
 }
 
 // Ids (en orden) de TODOS los resultados de la búsqueda actual del Catálogo, cacheados por «clave» de

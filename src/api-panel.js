@@ -14,6 +14,7 @@ import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalog
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen } from './utils/imagenes-doc.js';
+import { leerLomosImagen, emparejarLomos } from './utils/lector-lomos.js';
 import { editarDocumento } from './utils/editar-doc.js';
 import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
@@ -833,6 +834,71 @@ export function rutasPanel() {
             const n = await db.collection('biblioteca').countDocuments({ coleccion: colId });
             await db.collection('colecciones').updateOne({ _id: colId }, { $set: { numeros_presentes: n } });
             res.json({ ok: true, miembros: n });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // NUMERAR POR LOMOS: recibe una o varias FOTOS de los cantos de los libros de una serie (base64), lee
+    // cada lomo con visión (título + número impreso + bbox) y los EMPAREJA con los miembros de la colección
+    // por parecido de título. Devuelve una PROPUESTA para que el admin revise/ajuste antes de aplicarla (el
+    // cliente recorta los lomos y llama a /numerar + /imagenes/anadir). No modifica nada aquí.
+    r.post('/colecciones/:id/lomos', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const colId = new ObjectId(req.params.id);
+            const col = await db.collection('colecciones').findOne({ _id: colId });
+            if (!col) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
+            const imagenes = Array.isArray(req.body?.imagenes) ? req.body.imagenes.slice(0, 8) : [];
+            if (!imagenes.length) return res.status(400).json({ ok: false, motivo: 'no se recibieron fotos de los lomos' });
+            const miembros = await db.collection('biblioteca')
+                .find({ coleccion: colId })
+                .project({ titulo: 1, isbn: 1, portada: 1, coleccion_numero: 1 })
+                .toArray();
+            if (!miembros.length) return res.status(400).json({ ok: false, motivo: 'la colección no tiene libros que numerar' });
+            // Descompone data-URLs a { base64, mimeType } (conVision espera base64 SIN el prefijo data:).
+            const partirDataURL = (s) => {
+                const m = /^data:([^;]+);base64,([\s\S]+)$/.exec(String(s || ''));
+                if (m) return { mimeType: m[1], base64: m[2] };
+                return { mimeType: 'image/jpeg', base64: String(s || '').replace(/^data:[^,]*,/, '') };
+            };
+            // Lee los lomos de cada imagen (secuencial: la rotación de visión ya paraleliza poco y así no
+            // dispara 429). Cada lomo se etiqueta con el índice de imagen del que salió (para recortarlo).
+            const todos = [];
+            for (let i = 0; i < imagenes.length; i++) {
+                try {
+                    const ls = await leerLomosImagen(partirDataURL(imagenes[i]));
+                    for (const l of ls) todos.push({ ...l, img: i });
+                } catch (e) {
+                    console.warn(`   ↻ lomos: la imagen ${i + 1} falló (${e.message}).`);
+                }
+            }
+            if (!todos.length) return res.json({ ok: true, propuesta: [], sin_emparejar_miembros: miembros.map((m) => ({ _id: String(m._id), titulo: m.titulo })), imagenes_n: imagenes.length, aviso: 'La visión no detectó lomos legibles.' });
+            const { asignacion, miembroUsado } = emparejarLomos(todos, miembros);
+            const propuesta = todos.map((l, li) => {
+                const a = asignacion.get(li);
+                const m = a ? miembros[a.mi] : null;
+                return {
+                    img: l.img,
+                    bbox: l.bbox,
+                    orden: l.orden,
+                    titulo_detectado: l.titulo,
+                    autor: l.autor,
+                    numero: l.numero,
+                    texto: l.texto,
+                    doc_id: m ? String(m._id) : null,
+                    doc_titulo: m ? m.titulo : null,
+                    doc_portada: m ? m.portada || null : null,
+                    doc_numero_actual: m && m.coleccion_numero != null ? String(m.coleccion_numero) : '',
+                    confianza: a ? Math.round(a.s * 100) : 0,
+                };
+            });
+            // Ordena por el número leído (los que lo traen primero) y luego por confianza, para una revisión cómoda.
+            propuesta.sort((x, y) => {
+                const nx = x.numero ? parseInt(x.numero, 10) : 1e9, ny = y.numero ? parseInt(y.numero, 10) : 1e9;
+                return nx - ny || y.confianza - x.confianza;
+            });
+            const sinEmparejar = miembros.filter((_, mi) => !miembroUsado.has(mi)).map((m) => ({ _id: String(m._id), titulo: m.titulo }));
+            res.json({ ok: true, propuesta, sin_emparejar_miembros: sinEmparejar, imagenes_n: imagenes.length });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
