@@ -6483,8 +6483,8 @@ async function camaraEnVivo() {
         <canvas id="cvOvl" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></canvas>
         <div id="cvInfo" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.62);color:#fff;font-size:13px;font-weight:600;padding:5px 12px;border-radius:14px;pointer-events:none;white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis">Encuadra el libro sobre el tapete</div>
         <div id="cvZoomWrap" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);flex-direction:column;align-items:center;gap:6px;background:rgba(0,0,0,.42);border-radius:16px;padding:8px 6px"></div>
-        <button id="cvFloat" title="Capturar (mantén y arrastra para moverlo)" style="display:none;position:absolute;z-index:20;width:66px;height:66px;border-radius:50%;border:4px solid rgba(255,255,255,.92);background:rgba(255,255,255,.26);box-shadow:0 4px 16px rgba(0,0,0,.5);place-items:center;font-size:26px;touch-action:none;cursor:grab;color:#fff">📸</button>
-        <button id="cvFloatDone" title="Catalogar las fotos tomadas y seguir en la cámara para el siguiente libro" style="display:none;position:absolute;z-index:20;right:14px;bottom:18px;min-width:66px;height:56px;border-radius:28px;border:3px solid rgba(40,217,168,.95);background:rgba(40,217,168,.9);color:#04231b;font-weight:800;font-size:15px;box-shadow:0 4px 16px rgba(0,0,0,.5);padding:0 16px;cursor:pointer">✅ 0</button>
+        <button id="cvFloat" title="Toca para CAPTURAR · mantén pulsado para MOVER el botón" style="display:none;position:absolute;z-index:20;width:66px;height:66px;border-radius:50%;border:4px solid rgba(255,255,255,.92);background:rgba(255,255,255,.26);box-shadow:0 4px 16px rgba(0,0,0,.5);place-items:center;font-size:26px;touch-action:none;cursor:grab;color:#fff;transition:transform .12s">📸</button>
+        <button id="cvFloatDone" title="Catalogar las fotos tomadas y seguir en la cámara para el siguiente libro" style="display:none;position:absolute;z-index:21;right:12px;top:12px;min-width:66px;height:48px;border-radius:24px;border:3px solid rgba(40,217,168,.95);background:rgba(40,217,168,.92);color:#04231b;font-weight:800;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.5);padding:0 14px;cursor:pointer">✅ Catalogar</button>
       </div>
     </div>
     <div id="cvStrip" style="display:none;gap:8px;padding:8px 12px;background:#0a0a0a;overflow-x:auto;white-space:nowrap"></div>
@@ -6532,20 +6532,30 @@ async function camaraEnVivo() {
         if (!Number.isFinite(z)) z = zmin;
         z = factores.reduce((best, f) => (Math.abs(f - z) < Math.abs(best - z) ? f : best), factores[0]);
         const etiqueta = (f) => (Number.isInteger(f) ? f : Math.round(f * 10) / 10) + '×';
-        const aplicar = async (val, btn) => {
+        const cercano = (v) => factores.reduce((best, f) => (Math.abs(f - v) < Math.abs(best - v) ? f : best), factores[0]);
+        // Marca el botón que coincide con el zoom REAL de la cámara (getSettings), no con el pedido: si el
+        // dispositivo redondea o ignora el valor, el botón activo refleja lo que de verdad se ve.
+        const sincronizar = () => {
+          let real = z; try { const s = track.getSettings ? track.getSettings() : {}; if (Number.isFinite(s.zoom)) real = s.zoom; } catch (_) {}
+          const act = cercano(real);
+          wrap.querySelectorAll('button').forEach((b) => b.classList.toggle('pri', parseFloat(b.dataset.z) === act));
+        };
+        const aplicar = async (val) => {
           try { await track.applyConstraints({ advanced: [{ zoom: val }] }); } catch (_) {}
           localStorage.setItem('cam_zoom', String(val));
-          wrap.querySelectorAll('button').forEach((b) => b.classList.toggle('pri', b === btn));
+          sincronizar();
         };
         for (const f of factores) {
           const b = document.createElement('button');
-          b.className = 'btn' + (f === z ? ' pri' : '');
+          b.className = 'btn';
+          b.dataset.z = f;
           b.textContent = etiqueta(f);
           b.style.cssText = 'padding:5px 0;min-width:48px;font-size:13px';
-          b.onclick = () => aplicar(f, b);
+          b.onclick = () => aplicar(f);
           wrap.appendChild(b);
         }
-        if (z !== zmin) { try { track.applyConstraints({ advanced: [{ zoom: z }] }); } catch (_) {} }
+        await aplicar(z);              // aplica el zoom guardado y SINCRONIZA el botón con el zoom real
+        setTimeout(sincronizar, 500);  // re-sincroniza por si la cámara tarda en asentar el zoom
       }
     }
   } catch (_) {}
@@ -6571,7 +6581,7 @@ async function camaraEnVivo() {
     overlay.querySelector('#cvN').textContent = `${n} foto(s)`;
     overlay.querySelector('#cvDone').textContent = `✅ Catalogar (${n})`;
     const fd = overlay.querySelector('#cvFloatDone');
-    if (fd) { fd.style.display = n ? 'block' : 'none'; fd.textContent = `✅ ${n}`; }
+    if (fd) { fd.style.display = n ? 'block' : 'none'; fd.textContent = `✅ Catalogar (${n})`; }
   };
   actualizarN();
 
@@ -6689,15 +6699,26 @@ async function camaraEnVivo() {
     fab.style.left = x + 'px'; fab.style.top = y + 'px';
   };
   setTimeout(colocarFab, 60); // tras el layout del vídeo
-  let fdrag = false, fmoved = false, fsx = 0, fsy = 0, foffx = 0, foffy = 0;
+  // Un TOQUE corto dispara; para MOVERLO hay que MANTENER pulsado (~280 ms) → entra en «modo mover» (se
+  // agranda + vibra) y ya se arrastra. Así no se dispara sin querer al intentar recolocarlo.
+  let fdrag = false, fmoved = false, fhold = null, fsx = 0, fsy = 0, foffx = 0, foffy = 0;
+  const finMover = () => { fab.style.transform = ''; fab.style.cursor = 'grab'; };
   fab.addEventListener('pointerdown', (e) => {
-    fdrag = true; fmoved = false; fsx = e.clientX; fsy = e.clientY;
+    fdrag = false; fmoved = false; fsx = e.clientX; fsy = e.clientY;
     const rct = fab.getBoundingClientRect(); foffx = e.clientX - rct.left; foffy = e.clientY - rct.top;
-    try { fab.setPointerCapture(e.pointerId); } catch (_) {}
+    clearTimeout(fhold);
+    fhold = setTimeout(() => {                       // mantener pulsado → modo mover
+      fdrag = true;
+      try { fab.setPointerCapture(e.pointerId); } catch (_) {}
+      fab.style.transform = 'scale(1.18)'; fab.style.cursor = 'grabbing';
+      try { navigator.vibrate && navigator.vibrate(20); } catch (_) {}
+    }, 280);
   });
   fab.addEventListener('pointermove', (e) => {
-    if (!fdrag) return;
-    if (Math.hypot(e.clientX - fsx, e.clientY - fsy) > 6) fmoved = true;
+    if (!fdrag) {
+      if (Math.hypot(e.clientX - fsx, e.clientY - fsy) > 12) { clearTimeout(fhold); fmoved = true; } // swipe: ni tap ni mover
+      return;
+    }
     const rw = wrapEl.getBoundingClientRect(), fw = fab.offsetWidth, fh = fab.offsetHeight;
     let x = e.clientX - rw.left - foffx, y = e.clientY - rw.top - foffy;
     x = Math.max(6, Math.min(rw.width - fw - 6, x));
@@ -6705,11 +6726,12 @@ async function camaraEnVivo() {
     fab.style.left = x + 'px'; fab.style.top = y + 'px';
   });
   fab.addEventListener('pointerup', () => {
-    if (!fdrag) return;
-    fdrag = false;
-    if (fmoved) localStorage.setItem('cam_fab', JSON.stringify({ x: parseFloat(fab.style.left), y: parseFloat(fab.style.top) }));
-    else capturar(); // toque sin arrastre → disparar
+    clearTimeout(fhold);
+    if (fdrag) { fdrag = false; finMover(); localStorage.setItem('cam_fab', JSON.stringify({ x: parseFloat(fab.style.left), y: parseFloat(fab.style.top) })); return; }
+    if (fmoved) { fmoved = false; return; }           // fue un swipe: no disparar
+    capturar();                                        // toque corto → capturar
   });
+  fab.addEventListener('pointercancel', () => { clearTimeout(fhold); fdrag = false; fmoved = false; finMover(); });
   fab.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // Catalogar SIN salir de la cámara: envía las fotos actuales como un libro y sigue filmando (encadenar
