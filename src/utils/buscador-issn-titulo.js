@@ -48,24 +48,36 @@ export async function buscarISSNporTitulo(titulo, { idioma = null } = {}) {
 // 2197-6503) en vez de caer al nombre críptico del fichero. Wikidata indexa el ISSN (P236): se busca el
 // ítem con ese P236 (`haswbstatement`) y se devuelve su etiqueta (preferido el idioma dado, luego inglés,
 // luego cualquiera). Libre, sin clave, sin IA. Devuelve { nombre, fuente } o null.
+// Clases de Wikidata (P31) de una publicación SERIADA: la etiqueta solo vale si el ítem con ese ISSN es una
+// de estas (revista/serie/periódico…), NO un LIBRO que cite el ISSN (evita «AstroFAQs… / Tonkin» para una
+// serie): Q5633421 revista científica · Q277759 colección de libros · Q1002697 publicación periódica ·
+// Q41298 revista · Q737498 revista académica · Q1259759 magazine · Q27785883 serie de textos.
+const CLASES_SERIE = new Set(['Q5633421', 'Q277759', 'Q1002697', 'Q41298', 'Q737498', 'Q1259759', 'Q27785883']);
 export async function buscarNombrePorISSN(issn, { idioma = null } = {}) {
     const s = validarISSN(issn);
     if (!s) return null;
     const langs = [...new Set([(idioma && /^[a-z]{2}$/i.test(idioma)) ? idioma.toLowerCase() : null, 'en', 'es'].filter(Boolean))];
     try {
         const { data: q } = await axios.get(API, {
-            params: { action: 'query', list: 'search', srsearch: `haswbstatement:P236=${s}`, format: 'json' },
+            params: { action: 'query', list: 'search', srsearch: `haswbstatement:P236=${s}`, srlimit: 6, format: 'json' },
             headers: { 'User-Agent': UA }, timeout: TIMEOUT,
         });
-        const id = q?.query?.search?.[0]?.title;
-        if (!id) return null;
+        const ids = (q?.query?.search || []).map((x) => x.title).filter(Boolean).slice(0, 6);
+        if (!ids.length) return null;
         const { data: e } = await axios.get(API, {
-            params: { action: 'wbgetentities', ids: id, props: 'labels', languages: langs.join('|'), format: 'json' },
+            params: { action: 'wbgetentities', ids: ids.join('|'), props: 'labels|claims', languages: langs.join('|'), format: 'json' },
             headers: { 'User-Agent': UA }, timeout: TIMEOUT,
         });
-        const labels = e?.entities?.[id]?.labels || {};
-        const etiqueta = (langs.map((l) => labels[l]).find(Boolean) || Object.values(labels)[0])?.value || null;
-        return etiqueta ? { nombre: String(etiqueta).trim(), fuente: `wikidata:${id}` } : null;
+        for (const id of ids) {                                     // el PRIMERO que sea una publicación seriada
+            const ent = e?.entities?.[id];
+            const clases = (ent?.claims?.P31 || []).map((c) => c?.mainsnak?.datavalue?.value?.id).filter(Boolean);
+            if (!clases.some((c) => CLASES_SERIE.has(c))) continue;  // no es serie/revista → no vale (¿un libro?)
+            const labels = ent.labels || {};
+            const etiqueta = (langs.map((l) => labels[l]).find(Boolean) || Object.values(labels)[0])?.value || null;
+            // Descarta un REGISTRO BIBLIOGRÁFICO de libro colado con el ISSN de su serie: «Título : subtítulo
+            // / Autor» (el « / » es separador de autor; un nombre de serie no lo lleva). Caso real Wikidata.
+            if (etiqueta && !etiqueta.includes(' / ')) return { nombre: String(etiqueta).trim(), fuente: `wikidata:${id}` };
+        }
     } catch { /* red/timeout: degradar (colección sin nombre autoritativo) */ }
     return null;
 }

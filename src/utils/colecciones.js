@@ -12,7 +12,7 @@ import { validarISSN } from './identificadores.js';
 // ¿El nombre de una colección es un PLACEHOLDER/ARTEFACTO (no un nombre real)? Su propio ISSN, un ISSN
 // suelto, un DOI o una cadena URL-codificada (restos de una 1ª ingesta fallida). Sirve para RENOMBRARLA
 // cuando luego aparece el nombre real (p. ej. resuelto por ISSN vía Wikidata).
-const nombreEsPlaceholder = (nombre, issn) => {
+export const nombreEsPlaceholder = (nombre, issn) => {
     const s = String(nombre || '').trim();
     if (!s) return true;
     if (issn && s === String(issn)) return true;
