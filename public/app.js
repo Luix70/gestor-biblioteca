@@ -1876,6 +1876,31 @@ function buscarTexto(q) {
 function filtrarPorClasificacion(sist, cod) {
   irBusquedaFiltro({ clasSistema: sist, clasCodigo: cod, etiqueta: `${sist.toUpperCase()} ${cod}` });
 }
+// CDU inmediatamente SUPERIOR en la jerarquía (el «ámbito» virtual de un medio digital):
+//  · si el código lleva auxiliares/cualificadores tras el número principal ((73), :81'37, -3, =111…),
+//    el padre inmediato es el número principal a secas — p.ej. 821.111(73) → 821.111.
+//  · si ya es número principal puro, baja un nivel quitando el último dígito (respetando el decimal) —
+//    821.111 → 821.11, 82 → 8, 8 → «» (raíz).
+function cduPadre(cdu) {
+  const s = String(cdu || '').trim();
+  const m = (s.match(/^[0-9]+(?:\.[0-9]+)*/) || [''])[0];
+  if (!m) return '';
+  if (m !== s) return m; // había auxiliares → el padre es el número principal
+  if (m.includes('.')) return m.replace(/\.?[0-9]$/, '').replace(/\.$/, '');
+  return m.length > 1 ? m.slice(0, -1) : '';
+}
+// El "estante virtual" de un DIGITAL es su CDU. Ver sus COMPAÑEROS DE ESTANTERÍA: los demás medios
+// digitales clasificados con esa misma CDU (match EXACTO). Con `prefijo` se navega al ÁMBITO (CDU
+// superior) mostrando todo lo que cuelga de él (match por prefijo, param `cdu` del servidor).
+function verEstanteriaDigital(cdu, opts) {
+  if (!cdu) return;
+  const prefijo = opts && opts.prefijo;
+  irBusquedaFiltro(
+    prefijo
+      ? { cdu, soporte: 'digital', etiqueta: `📂 CDU ${cdu}·* digitales` }
+      : { clasSistema: 'cdu', clasCodigo: cdu, soporte: 'digital', etiqueta: `📚 CDU ${cdu} · digitales` },
+  );
+}
 function filtrarColeccion(id, nombre) {
   irBusquedaFiltro({ coleccion: id, etiqueta: `Colección: ${nombre}` });
 }
@@ -2032,7 +2057,23 @@ function pintarDoc(r, ctx) {
     .filter((p) => p[1])
     .map((p) => `<dt>${p[0]}</dt><dd>${p[1]}</dd>`)
     .join('');
-  const ubicFmin = `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">${_txtUbic(d) || ROL === 'admin' ? `<span class="rowlink" id="ubicChip" style="color:var(--acc);cursor:pointer" title="Toca para ver los libros de esta estantería${ROL === 'admin' ? '; doble clic / pulsación larga para cambiar la ubicación' : ''}">📍 ${esc(_txtUbic(d) || 'Sin asignar')}</span>` : '<span class="muted">Sin asignar</span>'}</div></div>`;
+  const ubicFmin = (() => {
+    // DIGITAL → estantería virtual por CDU: el propio código es el «estante» (con su descripción) y su
+    // CDU inmediatamente superior el «ámbito». La descripción del estante ya viene en r.clasificaciones;
+    // la del ámbito se rellena luego (fetch async, ver más abajo). Compañeros = digitales de esa CDU.
+    if (!_fisico) {
+      if (!d.cdu) return `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val"><span class="muted">Sin clasificar (asigna una CDU)</span></div></div>`;
+      const clasCdu = (r.clasificaciones || []).find((x) => x.sistema === 'cdu' && String(x.codigo) === String(d.cdu));
+      const descCdu = clasCdu && clasCdu.titulo ? ' · ' + esc(clasCdu.titulo) : '';
+      const padre = cduPadre(d.cdu);
+      const estante = `<span class="rowlink" id="ubicChip" data-cdu="${esc(d.cdu)}" style="color:var(--acc);cursor:pointer" title="Estante virtual por CDU · toca para ver los demás documentos digitales de este estante">📚 <span class="mono">${esc(d.cdu)}</span>${descCdu}</span>`;
+      const amb = padre
+        ? `<div class="muted" style="font-size:12px;margin-top:3px">Ámbito: <span class="rowlink" id="ubicAmbDig" data-cdu="${esc(padre)}" style="cursor:pointer" title="Toca para ver el ámbito superior">📂 <span class="mono">${esc(padre)}</span></span></div>`
+        : '';
+      return `<div class="fmin-ubic"><div class="lbl">Ubicación digital</div><div class="val">${estante}${amb}</div></div>`;
+    }
+    return `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">${_txtUbic(d) || ROL === 'admin' ? `<span class="rowlink" id="ubicChip" style="color:var(--acc);cursor:pointer" title="Toca para ver los libros de esta estantería${ROL === 'admin' ? '; doble clic / pulsación larga para cambiar la ubicación' : ''}">📍 ${esc(_txtUbic(d) || 'Sin asignar')}</span>` : '<span class="muted">Sin asignar</span>'}</div></div>`;
+  })();
   // Bajo el exlibris: la OBRA (con el ordinal del volumen, «Vol.: III») y la COLECCIÓN (con el nº del
   // libro/obra dentro de la colección, «Nº 678»). Primero la obra, luego la colección. Ambas clicables.
   const obraColFmin = (() => {
@@ -2142,7 +2183,23 @@ function pintarDoc(r, ctx) {
     const cs = $('#actShare');
     if (cs) cs.onclick = () => compartirDoc(d);
     const uc = $('#ubicChip');
-    if (uc) {
+    if (uc && !_fisico) {
+      // DIGITAL: estante virtual por CDU. Tap = compañeros de estantería (digitales de esa CDU). No hay
+      // edición de ubicación (los digitales no tienen ubicación física). El «ámbito» (CDU superior)
+      // también navega, y su descripción se rellena de forma perezosa (el estante ya la trae).
+      const cdu = uc.dataset.cdu;
+      uc.onclick = () => verEstanteriaDigital(cdu);
+      const amb = $('#ubicAmbDig');
+      if (amb) {
+        const padre = amb.dataset.cdu;
+        amb.onclick = () => verEstanteriaDigital(padre, { prefijo: true });
+        api('/clasificacion?sistema=cdu&codigo=' + encodeURIComponent(padre))
+          .then((res) => {
+            if (res && res.ok && res.titulo && document.body.contains(amb)) amb.insertAdjacentHTML('beforeend', ' · ' + esc(res.titulo));
+          })
+          .catch(() => {});
+      }
+    } else if (uc) {
       const u = d.ubicacion || {};
       const filtrar = () => {
         if (!u.ambito || u.ambito === 'Sin asignar') { if (ROL === 'admin') editarUbicacionRapida(d); return; }
@@ -8781,6 +8838,10 @@ function _txtUbic(d) {
   const u = (d && d.ubicacion) || {};
   const a = u.ambito && u.ambito !== 'Sin asignar' ? u.ambito : '';
   const e = u.estanteria && u.estanteria !== 'Sin asignar' ? u.estanteria : '';
+  // Los DIGITALES no tienen ubicación física: su «estante» es su CDU (estantería virtual). Así las
+  // tarjetas del catálogo muestran «CDU 004.65» en vez de «Sin asignar».
+  const fisico = d && (d.formatos || []).includes('papel');
+  if (!fisico && !a && !e && d && d.cdu) return 'CDU ' + d.cdu;
   return [a, e].filter(Boolean).join(' · ');
 }
 // LÍMITES FIJOS de caracteres (suficiente para IDENTIFICAR; evita overflow con títulos largos). El CDU NO
