@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { conVision, extraerJSON } from './utils/vision.js';
 import { decodificarCodigoBarras } from './utils/codigo-barras.js';
+import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 
 dotenv.config();
 
@@ -16,7 +17,8 @@ REGLAS DE EXTRACCIÓN Y VALIDACIÓN:
 4. 'cdu': Infiere el código de Clasificación Decimal Universal más apropiado (ej. "52" para astronomía, "821" para literatura). ¡Obligatorio clasificarlo con rigor!
 5. 'idioma': Código ISO 639-1 de dos letras (ej. "es", "en", "de").
 6. 'formatos': Por defecto usa ["papel"].
-7. 'isbn' / 'issn': Revisa minuciosamente todas las imágenes: códigos de barras (contraportada) Y el texto de la página de créditos ("ISBN: ..."). Extrae el número continuo sin guiones. Si no estás seguro, déjalo vacío en vez de inventarlo.
+7. 'isbn' / 'issn': Revisa minuciosamente todas las imágenes: códigos de barras (contraportada) Y el texto de la página de créditos ("ISBN: ..."). Extrae el número continuo sin guiones. Si no estás seguro, déjalo vacío en vez de inventarlo. 'isbn' = el del PROPIO ejemplar; 'issn' = el principal.
+7b. 'isbns' / 'issns' — CAPTURA TODOS: en la página de créditos suele haber VARIOS ISBN (tapa dura y tapa blanda/rústica, y el del ebook/PDF) y a veces DOS ISSN (impreso y electrónico/e-ISSN). Devuélvelos TODOS. 'isbns' = lista de objetos {"numero":"solo dígitos, sin guiones","rol":"volumen|obra|tapa_dura|tapa_blanda|ebook|desconocido"} — 'volumen' = el de ESTE ejemplar; 'obra' = el de la OBRA COMPLETA/SET; usa 'tapa_dura'/'tapa_blanda'/'ebook' cuando el crédito lo indique («hardcover», «pbk», «eBook», «PDF»), si no 'desconocido'. 'issns' = lista de TODOS los ISSN (solo dígitos con o sin guion). No inventes: incluye solo los que leas con seguridad.
 8. 'estado_verificacion': Si consigues extraer con total claridad el título y el ISBN/Editorial, establece "completado". Si faltan datos o las imágenes no permiten certificar los metadatos obligatorios, establece "pendiente".
 9. 'alertas_agente': Si el estado es "pendiente", detalla los motivos en este array de texto.
 10. 'sinopsis': Genera un resumen de dos líneas con tus propias palabras. ¡PROHIBIDO copiar o transcribir textualmente párrafos de la imagen para evitar bloqueos por copyright (RECITATION)!
@@ -39,6 +41,8 @@ ESTRUCTURA JSON REQUERIDA:
   "formatos": ["papel"],
   "isbn": "string",
   "issn": "string",
+  "isbns": [{ "numero": "string", "rol": "volumen|obra|tapa_dura|tapa_blanda|ebook|desconocido" }],
+  "issns": ["string"],
   "codigo_barras": "string",
   "numero_issue": "string",
   "mes_publicacion": number,
@@ -120,6 +124,38 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
         if (recursoEstructurado.obra_total != null) recursoEstructurado.obra_total = ent(recursoEstructurado.obra_total);
         // Si trae obra_titulo o isbn_obra, es un tomo → limpia el título de la obra.
         if (recursoEstructurado.obra_titulo) recursoEstructurado.obra_titulo = String(recursoEstructurado.obra_titulo).trim() || null;
+
+        // TODOS los identificadores leídos por la VISIÓN → mismas estructuras que el lector de texto
+        // (isbn_candidatos + isbn_propio + isbns_rol + issn_candidatos), para que el interpretador (obra/
+        // ediciones alternativas, corroboración por Fichero, serie por ISSN) los trate IGUAL sea cual sea la
+        // fuente. El ISBN del ejemplar y sus ediciones son PROPIOS (leídos de SUS créditos); el de la OBRA no.
+        {
+            const ROL_ISBN = new Set(['obra', 'volumen', 'tapa_dura', 'tapa_blanda', 'ebook']);
+            const cand = new Set(), propios = new Set(), rolesOut = [];
+            const addISBN = (raw, rol) => {
+                const v = validarISBN(raw); if (!v) return;
+                for (const x of variantesISBN(v)) cand.add(x);
+                if (rol !== 'obra') propios.add(v);
+                if (rol && ROL_ISBN.has(rol)) rolesOut.push({ isbn: v, rol });
+            };
+            addISBN(recursoEstructurado.isbn, 'volumen');
+            for (const it of (Array.isArray(recursoEstructurado.isbns) ? recursoEstructurado.isbns : [])) addISBN(it && (it.numero || it.isbn), it && it.rol);
+            if (recursoEstructurado.isbn_obra) addISBN(recursoEstructurado.isbn_obra, 'obra');
+            if (cand.size) recursoEstructurado.isbn_candidatos = [...new Set([...(recursoEstructurado.isbn_candidatos || []), ...cand])];
+            recursoEstructurado.isbn_propio = recursoEstructurado.isbn_propio || [...propios].find((c) => c.length === 13) || [...propios][0] || null;
+            if (rolesOut.length) recursoEstructurado.isbns_rol = [...(recursoEstructurado.isbns_rol || []), ...rolesOut];
+
+            const issnCand = new Set();
+            const addISSN = (raw) => { const v = validarISSN(raw); if (v) issnCand.add(v); };
+            addISSN(recursoEstructurado.issn);
+            for (const s of (Array.isArray(recursoEstructurado.issns) ? recursoEstructurado.issns : [])) addISSN(typeof s === 'string' ? s : (s && (s.numero || s.issn)));
+            if (issnCand.size) {
+                recursoEstructurado.issn_candidatos = [...issnCand];
+                if (!recursoEstructurado.issn) recursoEstructurado.issn = [...issnCand][0];
+            }
+            delete recursoEstructurado.isbns;   // ya volcados a las estructuras internas
+            delete recursoEstructurado.issns;
+        }
 
         recursoEstructurado.fecha_ingreso = new Date();
         return recursoEstructurado;
