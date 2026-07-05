@@ -9082,11 +9082,16 @@ function fichaMinima(o) {
       })
       .join('');
   }
-  const pie =
-    o.esDigital || o.ocultarUbicacion
-      ? ''
-      : o.ubicacionHTML != null
-        ? o.ubicacionHTML
+  // Ubicación: si el llamador la oculta explícitamente (ficha compartida) → nada. Si aporta su propio
+  // ubicacionHTML → se muestra (los DIGITALES ahora traen su estantería virtual por CDU, así que también
+  // se renderiza). Solo el FALLBACK «Sin asignar» por defecto se omite para digitales (no tienen ubicación
+  // física ni CDU que mostrar).
+  const pie = o.ocultarUbicacion
+    ? ''
+    : o.ubicacionHTML != null
+      ? o.ubicacionHTML
+      : o.esDigital
+        ? ''
         : `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">📍 ${esc(o.ubicacion || 'Sin asignar')}</div></div>`;
   return `<div class="fmin card">${badge}
     <h1 class="fmin-tit">${esc(o.titulo || '(sin título)')}</h1>${o.subtitulo ? `<div class="fmin-sub">${esc(o.subtitulo)}</div>` : ''}${starsInner ? `<div class="fmin-stars">${starsInner}</div>` : ''}
