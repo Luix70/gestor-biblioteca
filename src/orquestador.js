@@ -10,6 +10,7 @@ import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from 
 import { parsearNombre } from './utils/parsear-nombre.js';
 import { pareceSerieLibros } from './utils/revistas.js';
 import { clasificarTipo } from './utils/discriminador.js';
+import { interpretarIdentificadores } from './utils/interpretar-identificadores.js';
 import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
@@ -225,17 +226,23 @@ export async function procesarRecurso(entrada) {
         // puede ser de un libro anunciado dentro de una revista) nunca pisa a una fuerte (ISBN PROPIO /
         // CIP / serie editorial → libro;  nombre fechado / ISSN 977 → revista). El 977/impreso lo añade
         // luego el lector de barras; aquí va la decisión provisional con texto + nombre.
-        const clasif = clasificarTipo({
-            multiparte: !!((datosBase.isbns_rol && datosBase.isbns_rol.length > 1) || datosBase.volumen_numero != null || datosBase.obra_titulo),
+        // Intérprete unificado de identificadores (fase 2·2): reúne TODOS los ISBN/ISSN y decide qué es
+        // cada uno → señales por confianza para el discriminador. El 977/impreso lo resuelve luego el lector
+        // de barras (aquí el ISSN del cuerpo es solo pista, vía issnCandidatos).
+        const clasif = clasificarTipo(interpretarIdentificadores({
+            isbnCandidatos: datosBase.isbn_candidatos || (datosBase.isbn ? [datosBase.isbn] : []),
             isbnPropio: datosBase.isbn_propio,                          // CIP / nombre-es-ISBN / incrustado
+            isbnsRol: datosBase.isbns_rol,
+            isbnObra: datosBase.isbn_obra,
             cip: !!datosBase.cip,
-            pareceSerieLibros: pareceSerieLibros(datosBase.titulo),
+            issnCandidatos: datosBase.issn_candidatos || (datosBase.issn ? [datosBase.issn] : []),
             esFechada: !!datosBase.esFechada,
-            issnFuerte: false,                                         // 977/impreso lo resuelve el lector de barras
+            volumenNumero: datosBase.volumen_numero,
+            obraTitulo: datosBase.obra_titulo,
+            pareceSerieLibros: pareceSerieLibros(datosBase.titulo),
             pareceRevista: pareceRevista(datosBase.titulo),
-            issnHint: !!datosBase.issn,                                // ISSN del cuerpo → pista
-            isbnHint: !!datosBase.isbn,
-        });
+            titulo: datosBase.titulo,
+        }).senales);
         tipo_recurso = clasif.tipo_recurso;
         isbnDelArchivo = !!datosBase.isbn_propio; // solo el ISBN PROPIO (no el del cuerpo) cuenta como fiable
 
@@ -416,13 +423,15 @@ export async function procesarRecurso(entrada) {
                 datosBase.alertas_agente.push(`Lectura de identificador por visión falló: ${e.message}`);
             }
         }
-        const clasif = clasificarTipo({
+        const clasif = clasificarTipo(interpretarIdentificadores({
             esComic: true,
             comicSerie: datosBase.comic_serie,
             esFechada: !!datosBase.esFechada,
             isbnPropio: datosBase.isbn_propio || null,
-            issnFuerte: !!datosBase.issn,            // un 977-ISSN leído del barras ⇒ cómic-revista
-        });
+            isbnCandidatos: datosBase.isbn_candidatos,
+            issnBarras977: datosBase.issn,           // el ISSN del cómic viene del barras 977 ⇒ cómic-revista
+            titulo: datosBase.titulo,
+        }).senales);
         tipo_recurso = clasif.tipo_recurso;          // revista (nº de serie / ISSN) | libro (álbum/novela gráfica)
         datosBase.naturaleza = clasif.naturaleza;    // 'comic'
         // Un cómic-LIBRO (álbum/novela gráfica suelto) NO es una obra multivolumen: obra_titulo se fijó
@@ -468,11 +477,13 @@ export async function procesarRecurso(entrada) {
                 datosBase.alertas_agente.push(`Lectura de identificador por visión falló: ${e.message}`);
             }
         }
-        const clasif = clasificarTipo({
+        const clasif = clasificarTipo(interpretarIdentificadores({
             isbnPropio: datosBase.isbn_propio || null,
-            issnFuerte: !!datosBase.issn,                 // un 977-ISSN ⇒ revista escaneada
+            isbnCandidatos: datosBase.isbn_candidatos,
+            issnBarras977: datosBase.issn,                // un 977-ISSN escaneado ⇒ revista
             pareceRevista: pareceRevista(datosBase.titulo || ''),
-        });
+            titulo: datosBase.titulo,
+        }).senales);
         tipo_recurso = clasif.tipo_recurso;               // libro (por defecto) | revista (ISSN / título de revista)
         delete datosBase.muestra_paginas;                 // solo para la visión, no se persiste
 
