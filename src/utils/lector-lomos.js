@@ -56,6 +56,48 @@ export async function leerLomosImagen(imagen) {
         .filter((l) => l.titulo || l.numero || l.texto);
 }
 
+const PROMPT_RECORTADOS = `Te paso VARIAS imágenes; cada una es el LOMO (canto) de UN libro de una misma colección, ya recortado y en orden.
+Para CADA imagen, en el MISMO orden, devuelve un objeto con:
+- "titulo": el título del libro tal como se lee en el lomo (une saltos de línea).
+- "autor": autor si aparece (o "").
+- "numero": SOLO el número de volumen/colección impreso en el lomo (dígitos; "" si no hay).
+- "texto": todo el texto legible del lomo.
+Responde EXCLUSIVAMENTE con JSON {"lomos":[{...}]} con EXACTAMENTE una entrada por imagen, en orden. No inventes números.`;
+
+/**
+ * Lee lomos ya RECORTADOS por el navegador (una imagen = un lomo aislado y enderezado). UNA sola llamada de
+ * visión con todas las imágenes en orden → una lectura por imagen (sin bbox: la imagen ya ES el recorte).
+ * @param {Array<{base64:string, mimeType?:string}>} imagenes  en orden
+ * @returns {Promise<Array<{titulo,autor,numero,texto}>>}  misma longitud/orden que `imagenes` (rellena huecos)
+ */
+const LOTE_RECORTADOS = 10; // imágenes por llamada: más allá, algunos modelos truncan el array de salida
+export async function leerLomosRecortados(imagenes) {
+    // soloGemini: leer TÍTULOS y NÚMEROS con exactitud es como leer un código de barras — Groq/OpenRouter
+    // (free) confunden el texto (y peor si va rotado) y devuelven arrays incompletos. Gemini (free→paid)
+    // sigue mejor «una entrada por imagen» y es más preciso en OCR. Se trocea en lotes para que ni el modelo
+    // ni el límite de imágenes por petición trunquen la respuesta en colecciones grandes.
+    const norm = (l = {}) => ({
+        titulo: String(l.titulo || '').replace(/\s+/g, ' ').trim(),
+        autor: String(l.autor || '').trim(),
+        numero: String(l.numero || '').replace(/[^0-9]/g, ''),
+        texto: String(l.texto || '').replace(/\s+/g, ' ').trim(),
+    });
+    const salida = [];
+    for (let off = 0; off < imagenes.length; off += LOTE_RECORTADOS) {
+        const lote = imagenes.slice(off, off + LOTE_RECORTADOS);
+        let arr = [];
+        try {
+            const txt = await conVision({ prompt: PROMPT_RECORTADOS, imagenes: lote, soloGemini: true });
+            const j = extraerJSON(txt);
+            arr = j && Array.isArray(j.lomos) ? j.lomos : [];
+        } catch (e) {
+            console.warn(`   ↻ lomos (recortados): lote ${off / LOTE_RECORTADOS + 1} falló (${e.message}).`);
+        }
+        for (let i = 0; i < lote.length; i++) salida.push(norm(arr[i]));
+    }
+    return salida;
+}
+
 // ── Emparejado lomo ↔ miembro de la colección por parecido de título (solape de tokens) ──────────────
 const RE_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g'); // marcas combinantes tras normalizar a NFD
 function normT(s) {
@@ -71,29 +113,33 @@ const PALABRAS_VACIAS = new Set(['de', 'la', 'el', 'los', 'las', 'un', 'una', 'y
 function tokens(s) {
     return new Set(normT(s).split(' ').filter((w) => w.length > 2 && !PALABRAS_VACIAS.has(w)));
 }
-// Solape sobre el conjunto MÁS PEQUEÑO: el lomo puede llevar menos texto que el título completo (o al revés).
+// Parecido F1 (media armónica de precisión y cobertura de tokens): penaliza el DESAJUSTE de tamaño, así un
+// título largo del lomo NO casa al 100% con un miembro corto que sea subconjunto (p. ej. «La cruz azul y
+// otros cuentos» vs el miembro «Cuentos»), pero sí tolera que el lomo lleve algo menos de texto que el
+// título completo. F1(A,B) = 2·|A∩B| / (|A|+|B|).
 function parecido(a, b) {
     const A = tokens(a), B = tokens(b);
     if (!A.size || !B.size) return 0;
     let inter = 0;
     for (const t of A) if (B.has(t)) inter++;
-    return inter / Math.min(A.size, B.size);
+    return (2 * inter) / (A.size + B.size);
 }
 
 /**
  * Empareja greedy: calcula el parecido de cada (lomo, miembro), ordena de mayor a menor y asigna cada par
- * si ambos siguen libres y superan el umbral. Cada miembro y cada lomo se usan UNA vez. El texto del lomo
- * (título + texto suelto) se compara con el título del miembro.
- * @param {Array} lomos  salida de leerLomosImagen (con un campo `img` añadido por el llamador)
+ * si ambos siguen libres y superan el umbral. Cada miembro y cada lomo se usan UNA vez. Se compara el
+ * TÍTULO leído del lomo (limpio) con el del miembro; solo si el título viene vacío se recurre al `texto`
+ * suelto (que arrastra ruido del lomo: BORGES · BIBLIOTECA PERSONAL · autor…, y hundiría el F1).
+ * @param {Array} lomos  salida de leerLomos* (con un campo `img` añadido por el llamador)
  * @param {Array<{_id, titulo}>} miembros
  * @param {number} umbral  parecido mínimo para aceptar el emparejamiento (0..1)
  */
-export function emparejarLomos(lomos, miembros, umbral = 0.34) {
+export function emparejarLomos(lomos, miembros, umbral = 0.3) {
     const pares = [];
     lomos.forEach((l, li) => {
-        const heno = `${l.titulo} ${l.texto}`;
+        const consulta = l.titulo || l.texto || '';
         miembros.forEach((m, mi) => {
-            const s = parecido(heno, m.titulo);
+            const s = parecido(consulta, m.titulo);
             if (s >= umbral) pares.push({ li, mi, s });
         });
     });

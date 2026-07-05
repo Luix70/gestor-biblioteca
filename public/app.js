@@ -1629,7 +1629,7 @@ function numerarColeccion() {
 }
 
 // Recorta el rectángulo `bbox` (fracciones 0..1) de una imagen ya cargada y lo devuelve como data-URL JPEG.
-// Para adjuntar el canto de cada libro como imagen suya (y para la miniatura de revisión). null si no cabe.
+// Para el camino de reserva (fotos completas → la IA da bbox). null si no cabe.
 function _recortarLomo(imgEl, bbox, maxW = 380) {
   if (!imgEl || !bbox) return null;
   const iw = imgEl.naturalWidth, ih = imgEl.naturalHeight;
@@ -1644,35 +1644,134 @@ function _recortarLomo(imgEl, bbox, maxW = 380) {
   try { return cv.toDataURL('image/jpeg', 0.85); } catch { return null; }
 }
 
-// NUMERAR POR LOMOS (serie de libros): el admin fotografía los cantos alineados → la IA lee título y nº de
-// cada lomo y los empareja con los libros de la colección → revisión (ajustar libro/nº, marcar cuáles
-// adjuntar como imagen) → aplica /numerar + adjunta los recortes. Flujo en 2 fases dentro del mismo modal.
+// ── SEGMENTACIÓN DE LOMOS EN EL NAVEGADOR (sin IA) ───────────────────────────────────────────────────
+// Los lomos de una serie se tocan (sin hueco de tapete entre ellos) y separan por SURCOS finos y oscuros
+// perpendiculares a su longitud. Se detectan por PERFIL DE PROYECCIÓN de luminancia: valles (surcos) del
+// perfil por FILA (lomos horizontales, apilados) o por COLUMNA (lomos verticales, de pie). Se elige el eje
+// con más surcos → orientación AUTO (así una foto en horizontal y otra en vertical se resuelven cada una).
+// Devuelve bandas (una por lomo) como fracciones 0..1 del eje perpendicular; el admin las afina (dividir/
+// quitar) y luego se recortan enderezadas y se mandan a la IA ya AISLADAS (mucho más preciso que pedir bbox).
+function _suavizarProf(a, k) {
+  const n = a.length, out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0, c = 0;
+    for (let j = Math.max(0, i - k); j < Math.min(n, i + k + 1); j++) { s += a[j]; c++; }
+    out[i] = s / c;
+  }
+  return out;
+}
+// Valles (surcos) del perfil por PROMINENCIA: mínimo local cuya subida mínima a ambos lados supera un umbral
+// del rango; se quedan los más prominentes respetando una separación mínima (minsep).
+function _surcosLomos(prof, minsep) {
+  const n = prof.length, sm = _suavizarProf(prof, Math.max(2, Math.round(n / 120)));
+  let lo = Infinity, hi = -Infinity;
+  for (const v of sm) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  const rng = (hi - lo) || 1, cand = [];
+  for (let i = 1; i < n - 1; i++) {
+    if (sm[i] <= sm[i - 1] && sm[i] <= sm[i + 1]) {
+      let l = sm[i]; for (let j = i; j > Math.max(-1, i - minsep * 2); j--) l = Math.max(l, sm[j]);
+      let rr = sm[i]; for (let j = i; j < Math.min(n, i + minsep * 2); j++) rr = Math.max(rr, sm[j]);
+      const prom = Math.min(l, rr) - sm[i];
+      if (prom > rng * 0.06 && sm[i] < lo + rng * 0.78) cand.push([i, prom]);
+    }
+  }
+  cand.sort((a, b) => b[1] - a[1]);
+  const picked = [];
+  for (const [i] of cand) if (picked.every((p) => Math.abs(i - p) >= minsep)) picked.push(i);
+  picked.sort((a, b) => a - b);
+  return picked;
+}
+// Segmenta un canvas en bandas de lomo. `forz`: 'v'|'h' fuerza orientación (null = auto). Descarta bandas
+// muy finas y las que son mayoritariamente TAPETE (fondo verde). Devuelve { orient:'v'|'h', bandas:[{a,b}] }.
+function segmentarLomos(canvas, forz) {
+  const maxD = 1000, sc = Math.min(1, maxD / Math.max(canvas.width, canvas.height));
+  const w = Math.max(1, Math.round(canvas.width * sc)), h = Math.max(1, Math.round(canvas.height * sc));
+  const t = document.createElement('canvas'); t.width = w; t.height = h;
+  t.getContext('2d').drawImage(canvas, 0, 0, w, h);
+  const d = t.getContext('2d').getImageData(0, 0, w, h).data;
+  const row = new Float32Array(h), col = new Float32Array(w), matRow = new Float32Array(h), matCol = new Float32Array(w);
+  for (let y = 0; y < h; y++) {
+    let s = 0, mm = 0; const o = y * w;
+    for (let x = 0; x < w; x++) {
+      const i = (o + x) * 4, L = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      s += L; col[x] += L;
+      if (_verdeMat(d[i], d[i + 1], d[i + 2])) { mm++; matCol[x]++; }
+    }
+    row[y] = s / w; matRow[y] = mm / w;
+  }
+  for (let x = 0; x < w; x++) { col[x] /= h; matCol[x] /= h; }
+  const surcRow = _surcosLomos(row, Math.max(6, Math.round(h / 45)));
+  const surcCol = _surcosLomos(col, Math.max(6, Math.round(w / 45)));
+  const horizontal = forz ? forz === 'h' : surcRow.length >= surcCol.length;
+  const cuts = horizontal ? surcRow : surcCol, axis = horizontal ? h : w, matPerp = horizontal ? matRow : matCol;
+  const bounds = [...new Set([0, ...cuts, axis])].sort((a, b) => a - b), bandas = [];
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const a = bounds[i], b = bounds[i + 1], th = b - a;
+    if (th < axis * 0.035) continue;             // demasiado fino (ruido / surco)
+    let mm = 0; for (let k = a; k < b; k++) mm += matPerp[k];
+    if (mm / Math.max(1, th) > 0.5) continue;     // mayoritariamente tapete → fondo
+    bandas.push({ a: a / axis, b: b / axis });
+  }
+  return { orient: horizontal ? 'h' : 'v', bandas };
+}
+// Recorta una banda del canvas (a,b = fracciones del eje perpendicular) y la deja VERTICAL: los lomos
+// horizontales (orient 'h', texto girado 90°) se rotan para que el texto quede legible. Lado largo ≤ cap.
+function _recortarBanda(canvas, orient, a, b, cap = 900) {
+  const W = canvas.width, H = canvas.height;
+  let sx, sy, sw, sh;
+  if (orient === 'v') { sx = Math.round(a * W); sw = Math.max(1, Math.round((b - a) * W)); sy = 0; sh = H; }
+  else { sy = Math.round(a * H); sh = Math.max(1, Math.round((b - a) * H)); sx = 0; sw = W; }
+  const tmp = document.createElement('canvas'); tmp.width = sw; tmp.height = sh;
+  tmp.getContext('2d').drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  let out = tmp;
+  if (orient === 'h') {
+    const rt = document.createElement('canvas'); rt.width = sh; rt.height = sw;
+    const cx = rt.getContext('2d'); cx.translate(sh / 2, sw / 2); cx.rotate(Math.PI / 2); cx.drawImage(tmp, -sw / 2, -sh / 2);
+    out = rt;
+  }
+  const long = Math.max(out.width, out.height), s = Math.min(1, cap / long);
+  if (s < 1) { const fc = document.createElement('canvas'); fc.width = Math.round(out.width * s); fc.height = Math.round(out.height * s); fc.getContext('2d').drawImage(out, 0, 0, fc.width, fc.height); out = fc; }
+  try { return out.toDataURL('image/jpeg', 0.82); } catch { return null; }
+}
+
+// NUMERAR POR LOMOS (serie de libros): fotos de los cantos → SEGMENTACIÓN local (sin IA) en lomos aislados →
+// el admin afina (dividir/quitar, girar orientación) → la IA lee título+nº de cada recorte limpio → revisión
+// (libro/nº, adjuntar) → /numerar + adjunta recortes. Fotos: cámara o archivos existentes.
 function numerarPorLomos() {
   const r = _colR;
   if (!r) return;
   const c = r.coleccion;
   const miembros = r.miembros || [];
   let fotos = [];        // File[] seleccionados
-  let imgsCargadas = []; // Image[] (de las fotos ya reducidas) para recortar, por índice de imagen
+  let canvases = [];     // canvas a resolución (por foto) para segmentar/recortar
+  let imgsCargadas = []; // Image[] (para el camino de reserva por bbox)
+  let lomos = [];        // bandas planas { foto, orient, a, b } (a,b = fracciones del eje perpendicular)
+  let forz = null;       // orientación forzada: null=auto, 'v', 'h'
   const scrim = $('#cmpScrim'), modal = $('#cmpModal');
   const optsMiembros = (sel) =>
     `<option value="">— sin asignar —</option>` +
     miembros.map((m) => `<option value="${esc(m._id)}"${String(m._id) === String(sel || '') ? ' selected' : ''}>${esc(recortar(m.titulo || '(sin título)', 46))}</option>`).join('');
+  const cropDeLomo = (l) => _recortarBanda(canvases[l.foto], l.orient, l.a, l.b);
 
   function pintarCaptura() {
     modal.innerHTML = `<div class="box card" style="max-width:560px;width:94vw">
         <h3 style="margin-top:0">📷 Numerar por lomos — ${esc(recortar(c.nombre, 36))}</h3>
-        <div class="muted" style="font-size:12px;margin-bottom:10px">Haz una o varias fotos de los <b>lomos</b> (cantos) de los libros de esta colección, alineados y con el texto legible. La IA leerá el título y el número de cada uno para renumerar la colección.</div>
-        <label class="btn" style="display:inline-block">➕ Añadir fotos<input type="file" id="lomFile" accept="image/*" capture="environment" multiple hidden></label>
+        <div class="muted" style="font-size:12px;margin-bottom:10px">Fotos de los <b>lomos</b> (cantos) alineados y con el texto legible — de la cámara o ya existentes. Se separarán en el navegador y la IA leerá el título y el número de cada uno.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <label class="btn" style="display:inline-block">📷 Cámara<input type="file" id="lomCam" accept="image/*" capture="environment" multiple hidden></label>
+          <label class="btn" style="display:inline-block">🖼️ Archivos<input type="file" id="lomFile" accept="image/*" multiple hidden></label>
+        </div>
         <div id="lomThumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px"></div>
-        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="lomCancel">Cancelar</button><button class="btn pri" id="lomAnalizar" disabled>🔍 Analizar lomos</button></div>
+        <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="lomCancel">Cancelar</button><button class="btn pri" id="lomSeg" disabled>✂️ Separar lomos</button></div>
       </div>`;
     scrim.style.display = 'block';
     modal.style.display = 'grid';
     scrim.onclick = cerrarCmp;
     $('#lomCancel').onclick = cerrarCmp;
-    $('#lomFile').onchange = (e) => { fotos = fotos.concat([...e.target.files]); e.target.value = ''; pintarThumbs(); };
-    $('#lomAnalizar').onclick = analizar;
+    const add = (e) => { fotos = fotos.concat([...e.target.files]); e.target.value = ''; canvases = []; imgsCargadas = []; pintarThumbs(); };
+    $('#lomCam').onchange = add;
+    $('#lomFile').onchange = add;
+    $('#lomSeg').onclick = segmentarTodo;
     pintarThumbs();
   }
   function pintarThumbs() {
@@ -1681,37 +1780,96 @@ function numerarPorLomos() {
     cont.innerHTML = fotos
       .map((f, i) => `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(f)}" style="width:78px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`)
       .join('');
-    $$('#lomThumbs [data-rm]').forEach((b) => (b.onclick = () => { fotos.splice(+b.dataset.rm, 1); pintarThumbs(); }));
-    if ($('#lomAnalizar')) $('#lomAnalizar').disabled = fotos.length === 0;
+    $$('#lomThumbs [data-rm]').forEach((b) => (b.onclick = () => { fotos.splice(+b.dataset.rm, 1); canvases = []; imgsCargadas = []; pintarThumbs(); }));
+    if ($('#lomSeg')) $('#lomSeg').disabled = fotos.length === 0;
   }
-  async function analizar() {
-    const btn = $('#lomAnalizar');
-    btn.disabled = true;
-    btn.textContent = 'Analizando…';
+  async function cargarCanvases() {
+    if (canvases.length) return;
+    canvases = []; imgsCargadas = [];
+    for (const f of fotos) {
+      const red = await reducirImagen(f, 1800, 0.85);
+      const du = await fileADataURL(red);
+      const im = new Image();
+      await new Promise((ok) => { im.onload = ok; im.onerror = ok; im.src = du; });
+      const cv = document.createElement('canvas');
+      cv.width = im.naturalWidth || 1; cv.height = im.naturalHeight || 1;
+      cv.getContext('2d').drawImage(im, 0, 0);
+      canvases.push(cv); imgsCargadas.push(im);
+    }
+  }
+  async function segmentarTodo() {
+    const btn = $('#lomSeg');
+    if (btn) { btn.disabled = true; btn.textContent = 'Separando…'; }
     try {
-      // Reduce cada foto (≤1600 px) y guárdala como data-URL + Image (para recortar los lomos localmente).
-      const dataurls = [];
-      imgsCargadas = [];
-      for (const f of fotos) {
-        const red = await reducirImagen(f, 1600, 0.82);
-        const du = await fileADataURL(red);
-        dataurls.push(du);
-        const im = new Image();
-        await new Promise((ok) => { im.onload = ok; im.onerror = ok; im.src = du; });
-        imgsCargadas.push(im);
-      }
-      const resp = await api('/colecciones/' + encodeURIComponent(c._id) + '/lomos', { method: 'POST', body: JSON.stringify({ imagenes: dataurls }) });
-      pintarRevision(resp);
+      await cargarCanvases();
+      lomos = [];
+      canvases.forEach((cv, fi) => {
+        const { orient, bandas } = segmentarLomos(cv, forz);
+        bandas.forEach((bd) => lomos.push({ foto: fi, orient, a: bd.a, b: bd.b }));
+      });
+      pintarLomos();
     } catch (e) {
-      btn.disabled = false;
-      btn.textContent = '🔍 Analizar lomos';
+      if (btn) { btn.disabled = false; btn.textContent = '✂️ Separar lomos'; }
+      alert('No se pudo separar los lomos: ' + e.message);
+    }
+  }
+  function pintarLomos() {
+    if (!lomos.length) {
+      modal.innerHTML = `<div class="box card" style="max-width:520px;width:94vw"><h3 style="margin-top:0">✂️ Separar lomos</h3>
+        <div class="muted">No detecté lomos automáticamente (mejor con la alfombrilla y los cantos bien alineados). Puedes enviar las fotos completas a la IA para que los localice ella.</div>
+        <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" id="lomVolver">← Fotos</button><button class="btn" id="lomFallback">Enviar fotos completas</button></div></div>`;
+      $('#lomVolver').onclick = pintarCaptura;
+      $('#lomFallback').onclick = analizarCompletas;
+      return;
+    }
+    const cards = lomos.map((l, i) => `<div style="flex:none;text-align:center">
+        <img src="${cropDeLomo(l)}" style="height:150px;max-width:120px;object-fit:contain;border-radius:5px;border:1px solid var(--line);background:#0002">
+        <div style="margin-top:3px;display:flex;gap:4px;justify-content:center"><button class="btn" data-split="${i}" title="Dividir en dos (si juntó dos libros)">✂️</button><button class="btn bad" data-del="${i}" title="Quitar (no es un lomo)">✕</button></div>
+      </div>`).join('');
+    const orLbl = forz === 'v' ? 'vertical' : forz === 'h' ? 'horizontal' : 'auto';
+    modal.innerHTML = `<div class="box card" style="max-width:640px;width:96vw">
+        <h3 style="margin-top:0">✂️ Lomos separados — ${esc(recortar(c.nombre, 28))}</h3>
+        <div class="muted" style="font-size:12px;margin-bottom:6px">${lomos.length} lomo(s). Revisa: <b>✂️</b> divide uno que junte dos libros, <b>✕</b> quita lo que no sea un lomo. Si la orientación falla, cámbiala y re-separa.</div>
+        <div id="lomStrip" style="display:flex;gap:8px;overflow-x:auto;padding:6px 2px">${cards}</div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap">
+          <button class="btn" id="lomOrient" title="Orientación de la detección">↻ Orientación: ${orLbl}</button>
+          <div style="display:flex;gap:8px"><button class="btn" id="lomAtrasCap">← Fotos</button><button class="btn pri" id="lomLeer">🔍 Leer con IA (${lomos.length})</button></div>
+        </div>
+      </div>`;
+    $$('#lomStrip [data-del]').forEach((b) => (b.onclick = () => { lomos.splice(+b.dataset.del, 1); pintarLomos(); }));
+    $$('#lomStrip [data-split]').forEach((b) => (b.onclick = () => { const i = +b.dataset.split, l = lomos[i], mid = (l.a + l.b) / 2; lomos.splice(i, 1, { ...l, b: mid }, { ...l, a: mid }); pintarLomos(); }));
+    $('#lomOrient').onclick = () => { forz = forz === null ? 'v' : forz === 'v' ? 'h' : null; segmentarTodo(); };
+    $('#lomAtrasCap').onclick = pintarCaptura;
+    $('#lomLeer').onclick = leerIA;
+  }
+  async function leerIA() {
+    const btn = $('#lomLeer');
+    if (btn) { btn.disabled = true; btn.textContent = 'Leyendo…'; }
+    try {
+      const crops = lomos.map(cropDeLomo).filter(Boolean);
+      const resp = await api('/colecciones/' + encodeURIComponent(c._id) + '/lomos', { method: 'POST', body: JSON.stringify({ recortados: 1, imagenes: crops }) });
+      pintarRevision(resp, (p) => crops[p.img] || null);
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = `🔍 Leer con IA (${lomos.length})`; }
       alert('No se pudieron leer los lomos: ' + e.message);
     }
   }
-  function pintarRevision(resp) {
+  async function analizarCompletas() {
+    // Reserva: la segmentación no encontró lomos → se mandan las fotos completas y la IA da los bbox.
+    try {
+      await cargarCanvases();
+      const dataurls = [];
+      for (const im of imgsCargadas) { const du = im.src; dataurls.push(du); }
+      const resp = await api('/colecciones/' + encodeURIComponent(c._id) + '/lomos', { method: 'POST', body: JSON.stringify({ imagenes: dataurls }) });
+      pintarRevision(resp, (p) => (p.bbox ? _recortarLomo(imgsCargadas[p.img], p.bbox) : null));
+    } catch (e) {
+      alert('No se pudieron leer los lomos: ' + e.message);
+    }
+  }
+  function pintarRevision(resp, cropDe) {
     const props = (resp && resp.propuesta) || [];
-    // Precalcula el recorte de cada lomo (miniatura + para adjuntar) desde la imagen de origen.
-    props.forEach((p) => { p._crop = p.bbox ? _recortarLomo(imgsCargadas[p.img], p.bbox) : null; });
+    // Recorte de cada lomo para la miniatura de revisión y para adjuntar (del recorte local o del bbox).
+    props.forEach((p) => { p._crop = cropDe(p); });
     const sinEmp = (resp && resp.sin_emparejar_miembros) || [];
     if (!props.length) {
       modal.innerHTML = `<div class="box card" style="max-width:520px;width:94vw"><h3 style="margin-top:0">📷 Numerar por lomos</h3>
@@ -1748,9 +1906,9 @@ function numerarPorLomos() {
         <div id="lomFilas" style="max-height:52vh;overflow:auto">${props.map(fila).join('')}</div>
         ${sinEmpHTML}
         <div id="lomProg" class="muted" style="font-size:12px;margin-top:8px"></div>
-        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="lomAtras">← Otras fotos</button><button class="btn" id="lomCancel2">Cancelar</button><button class="btn pri" id="lomAplicar">✅ Aplicar</button></div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="lomAtras">← Lomos</button><button class="btn" id="lomCancel2">Cancelar</button><button class="btn pri" id="lomAplicar">✅ Aplicar</button></div>
       </div>`;
-    $('#lomAtras').onclick = pintarCaptura;
+    $('#lomAtras').onclick = () => (lomos.length ? pintarLomos() : pintarCaptura());
     $('#lomCancel2').onclick = cerrarCmp;
     $('#lomAplicar').onclick = () => aplicar(props);
   }

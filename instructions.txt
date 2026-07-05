@@ -351,15 +351,21 @@ de ficheros clasificado por CDU.
     «rehacer también los auto»— conserva o rehace los automáticos, rellenando huecos y
     continuando desde el más alto; editar un nº a mano lo vuelve editorial.
     (POST /colecciones/:id/numerar {numeros:{docId:nº|""}, auto:{docId:true}}.)
-    · 📷 NUMERAR POR LOMOS (admin, series de libros): foto(s) de los CANTOS alineados →
-      la VISIÓN lee el título y el nº impreso de cada lomo (+ su rectángulo) y los
-      EMPAREJA con los libros de la colección por parecido de título. Se abre una
-      revisión (miniatura del lomo recortado + libro emparejado editable + nº editable +
-      casilla «adjuntar lomo»); al aplicar renumera (nº del lomo = editorial) y adjunta
-      los recortes marcados como imagen de cada libro. Fotos reducidas y recorte de
-      lomos en el NAVEGADOR; la visión, por la rotación multi-proveedor (gratis→pago).
-      (POST /colecciones/:id/lomos {imagenes:[dataURL]} → propuesta; el cliente aplica
-      con /numerar + /documentos/:id/imagenes/anadir. src/utils/lector-lomos.js.)
+    · 📷 NUMERAR POR LOMOS (admin, series de libros): foto(s) de los CANTOS alineados
+      (de la CÁMARA o ARCHIVOS existentes) → el NAVEGADOR SEGMENTA cada lomo SIN IA
+      (perfil de proyección: detecta los SURCOS entre libros; orientación AUTO por foto,
+      así una en horizontal y otra en vertical se resuelven cada una) → filmstrip donde
+      el admin AFINA (✂️ dividir un recorte que junte dos, ✕ quitar lo que no sea un lomo,
+      ↻ cambiar orientación) → la VISIÓN lee el título y el nº de cada recorte YA AISLADO
+      (mucho más preciso que pedir bbox; forzada a Gemini como los códigos de barras, en
+      lotes de 10) → EMPAREJA con los libros por parecido de título (F1 sobre el título
+      leído) → revisión (libro/nº editables + «adjuntar lomo») → renumera (nº del lomo =
+      editorial) y adjunta los recortes. Si la segmentación no encuentra lomos (sin
+      alfombrilla), reserva: envía las fotos completas y la IA da los bbox.
+      (POST /colecciones/:id/lomos {recortados:1, imagenes:[dataURL]} — recortes ya
+      aislados — ó {imagenes:[dataURL]} — fotos completas → propuesta; el cliente aplica
+      con /numerar + /documentos/:id/imagenes/anadir. Segmentación: segmentarLomos() en
+      public/app.js; lectura+emparejado: src/utils/lector-lomos.js.)
 
   ── INBOX (ALTA MANUAL desde el panel) ───────────────────────────────────────
     Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la

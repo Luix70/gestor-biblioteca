@@ -14,7 +14,7 @@ import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalog
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen } from './utils/imagenes-doc.js';
-import { leerLomosImagen, emparejarLomos } from './utils/lector-lomos.js';
+import { leerLomosImagen, leerLomosRecortados, emparejarLomos } from './utils/lector-lomos.js';
 import { editarDocumento } from './utils/editar-doc.js';
 import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
@@ -848,7 +848,8 @@ export function rutasPanel() {
             const colId = new ObjectId(req.params.id);
             const col = await db.collection('colecciones').findOne({ _id: colId });
             if (!col) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
-            const imagenes = Array.isArray(req.body?.imagenes) ? req.body.imagenes.slice(0, 8) : [];
+            const recortados = !!req.body?.recortados; // true = cada imagen ya es UN lomo aislado (por el navegador)
+            const imagenes = Array.isArray(req.body?.imagenes) ? req.body.imagenes.slice(0, recortados ? 60 : 8) : [];
             if (!imagenes.length) return res.status(400).json({ ok: false, motivo: 'no se recibieron fotos de los lomos' });
             const miembros = await db.collection('biblioteca')
                 .find({ coleccion: colId })
@@ -861,15 +862,26 @@ export function rutasPanel() {
                 if (m) return { mimeType: m[1], base64: m[2] };
                 return { mimeType: 'image/jpeg', base64: String(s || '').replace(/^data:[^,]*,/, '') };
             };
-            // Lee los lomos de cada imagen (secuencial: la rotación de visión ya paraleliza poco y así no
-            // dispara 429). Cada lomo se etiqueta con el índice de imagen del que salió (para recortarlo).
+            // Reúne los lomos leídos, cada uno etiquetado con el índice de imagen del que salió.
             const todos = [];
-            for (let i = 0; i < imagenes.length; i++) {
+            if (recortados) {
+                // El navegador ya aisló y enderezó cada lomo (segmentación por surcos, revisada por el admin):
+                // UNA sola llamada de visión con todas las imágenes en orden → una lectura por imagen (sin bbox).
                 try {
-                    const ls = await leerLomosImagen(partirDataURL(imagenes[i]));
-                    for (const l of ls) todos.push({ ...l, img: i });
+                    const ls = await leerLomosRecortados(imagenes.map(partirDataURL));
+                    ls.forEach((l, i) => { if (l.titulo || l.numero || l.texto) todos.push({ ...l, orden: i + 1, bbox: null, img: i }); });
                 } catch (e) {
-                    console.warn(`   ↻ lomos: la imagen ${i + 1} falló (${e.message}).`);
+                    console.warn(`   ↻ lomos (recortados): la visión falló (${e.message}).`);
+                }
+            } else {
+                // Fotos completas: la visión localiza y lee cada lomo (con bbox). Secuencial (no dispara 429).
+                for (let i = 0; i < imagenes.length; i++) {
+                    try {
+                        const ls = await leerLomosImagen(partirDataURL(imagenes[i]));
+                        for (const l of ls) todos.push({ ...l, img: i });
+                    } catch (e) {
+                        console.warn(`   ↻ lomos: la imagen ${i + 1} falló (${e.message}).`);
+                    }
                 }
             }
             if (!todos.length) return res.json({ ok: true, propuesta: [], sin_emparejar_miembros: miembros.map((m) => ({ _id: String(m._id), titulo: m.titulo })), imagenes_n: imagenes.length, aviso: 'La visión no detectó lomos legibles.' });
