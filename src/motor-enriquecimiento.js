@@ -3,7 +3,7 @@ import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores
 import { esTituloArtefacto } from './utils/parsear-nombre.js';
 import { parsearVolumen, totalDeclarado } from './utils/multivolumen.js';
 import { tituloCabecera } from './utils/revistas.js';
-import { buscarISSNporTitulo, buscarNombrePorISSN } from './utils/buscador-issn-titulo.js';
+import { buscarISSNporTitulo, buscarNombreDeISSNs } from './utils/buscador-issn-titulo.js';
 
 // "Editoriales" que en realidad son grupos de difusión/maquetación, no casas editoriales.
 // Si el archivo trae una de estas, NO es autoritativa: una editorial real de las APIs prevalece.
@@ -313,10 +313,12 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // un fallo deja la colección con su ISSN (recuperable). motor-catalogo 2e usa este coleccion_nombre.
     if (!esRevista && documento.issn && !contexto.sinApis
         && (!primerValido(documento.coleccion_nombre) || esTituloArtefacto(documento.coleccion_nombre))) {
-        const r = await buscarNombrePorISSN(documento.issn, { idioma: documento.idioma });
+        // Prueba TODOS los ISSN capturados (impreso + e-ISSN del CIP): uno puede no estar indexado y el otro sí.
+        const issns = [documento.issn, ...(Array.isArray(datosBase.issn_candidatos) ? datosBase.issn_candidatos : [])];
+        const r = await buscarNombreDeISSNs(issns, { idioma: documento.idioma });
         if (r?.nombre) {
             documento.coleccion_nombre = r.nombre;
-            documento.alertas_agente.push(`Nombre de serie «${r.nombre}» resuelto por ISSN ${documento.issn} vía ${r.fuente}.`);
+            documento.alertas_agente.push(`Nombre de serie «${r.nombre}» resuelto por ISSN vía ${r.fuente}.`);
         }
     }
 

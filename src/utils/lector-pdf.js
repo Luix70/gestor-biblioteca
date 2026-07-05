@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'path';
-import { extraerISSN, validarISBN, variantesISBN } from './identificadores.js';
+import { extraerISSNs, validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre, esTituloArtefacto, esAutorArtefacto } from './parsear-nombre.js';
 import { extraerISBNsConRol, parsearVolumen } from './multivolumen.js';
 import { parsearBloqueCatalogacion } from './cip.js';
@@ -173,7 +173,12 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // Un PDF válido (incl. escaneado) siempre tiene ≥1 página; 0 = xref/estructura dañada.
         // Se marca aquí, en el primer paso, para descartarlo a Cuarentena cuanto antes.
         if ((info.pages || 0) === 0 && !datos.texto_legible) datos.pdf_ilegible = true;
-        datos.issn = extraerISSN(texto);
+        // ISSN: TODOS los del texto (impreso + e-ISSN del CIP). El primero es el `issn` principal; el resto
+        // quedan como candidatos para resolver el nombre de la serie/cabecera (más caminos, ver principio
+        // «identificar primero»). Campo interno (no se persiste).
+        const issns = extraerISSNs(texto);
+        datos.issn = issns[0] || null;
+        datos.issn_candidatos = issns;
 
         // 3. Pistas del nombre de archivo (revista fechada, ISBN en el nombre, colección, etc.)
         const parsed = parsearNombre(nombre);

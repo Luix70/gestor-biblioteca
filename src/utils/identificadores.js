@@ -81,14 +81,22 @@ export function validarISSN(valor) {
 
 /** Extrae un ISSN válido de texto libre (p. ej. capa de texto de un PDF de revista). */
 export function extraerISSN(texto) {
-    if (!texto) return null;
-    // Tolerante a separadores raros entre "ISSN" y el número (p. ej. el espacio fino
-    // francés U+202F antes de ':' → "ISSN : 2267-4284"). \D = cualquier no-dígito.
+    return extraerISSNs(texto)[0] || null;
+}
+
+// TODOS los ISSN válidos del texto, en orden de aparición y sin repetir. Una serie/revista suele llevar
+// VARIOS en el CIP (impreso + electrónico; p. ej. Astronomers' Universe: 1614-659X impreso + 2197-6651
+// e-ISSN). Capturarlos TODOS abre más caminos para resolver el nombre de la serie/cabecera por ISSN.
+export function extraerISSNs(texto) {
+    if (!texto) return [];
+    // Tolerante a separadores raros entre "ISSN" y el número (p. ej. el espacio fino francés U+202F antes
+    // de ':' → "ISSN : 2267-4284"). \D = cualquier no-dígito.
     const re = /ISSN\D{0,6}(\d{4}[-\s]?\d{3}[\dXx])/gi;
+    const out = new Set();
     let m;
     while ((m = re.exec(texto)) !== null) {
         const v = validarISSN(m[1]);
-        if (v) return v;
+        if (v) out.add(v);
     }
-    return null;
+    return [...out];
 }
