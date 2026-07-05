@@ -474,9 +474,16 @@ de ficheros clasificado por CDU.
     Gestiona la ubicación física como colecciones de estanterías: crear (incluso
     por lotes, p. ej. "Estanteria_pared_01..10"), renombrar, fusionar, mover,
     "explotar" (dejar sus libros sin ubicar), eliminar, añadir libros desde la
-    búsqueda, y grabar la etiqueta NFC de una estantería (o de un ÁMBITO). Los
-    desplegables de ámbito/estantería son <select> (fiables en móvil) y se
-    reutilizan en el Inbox y en la edición de la ficha.
+    búsqueda. Los desplegables de ámbito/estantería son <select> (fiables en móvil)
+    y se reutilizan en el Inbox y en la edición de la ficha.
+    · CADA FILA (ámbito/estante) muestra INLINE solo lo frecuente: el nombre (clic =
+      ver sus libros en el Catálogo) y DOS iconos NFC DISTINTOS —📶 graba la etiqueta
+      del PROPIO estante/ámbito; 🏷️ graba la NFC de CADA LIBRO que contiene (en lote,
+      uno a uno, mismo flujo que «Etiquetar» del Catálogo)—. El resto de acciones
+      (📋 ordenar · ➕ insertar · ✏️ renombrar · ➡️ mover · 🔀 fusionar · 🧹 explotar ·
+      🗑 eliminar) van en un menú «⋯» para no llenar la fila de botones idénticos.
+    · La asignación de estantería EN LOTE (📍 del Catálogo) IGNORA los DIGITALES (no
+      van a un estante físico) y avisa cuántos saltó.
     · ESCANEAR la etiqueta NFC de una estantería/ámbito (o abrir su enlace ?amb=&est=)
       lleva al Catálogo FILTRADO por esa ubicación; si es una estantería concreta, ya
       ORDENADO por posición física (visible en «↕️ Ordenar», ajustable).

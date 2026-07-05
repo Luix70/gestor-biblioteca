@@ -9804,6 +9804,9 @@ const _guardarUbicExp = () => {
 };
 const ubBtn = (act, a, e, ico, tit) =>
   `<button type="button" class="ubx" data-act="${act}" data-a="${esc(a)}"${e != null ? ` data-e="${esc(e)}"` : ''} title="${esc(tit)}">${ico}</button>`;
+// Ítem de un menú «⋯» (icono + rótulo, para las acciones secundarias — así la fila no es un bosque de botones).
+const ubMenuItem = (act, a, e, label, extra = '') =>
+  `<button type="button" class="ubmi${extra}" data-act="${act}" data-a="${esc(a)}"${e != null ? ` data-e="${esc(e)}"` : ''}>${label}</button>`;
 function ambitosNombres() {
   return ubicArbol.map((x) => x.ambito);
 }
@@ -9828,7 +9831,8 @@ function pintarUbic() {
   if (!cont) return;
   const arbol = ubicArbol;
   cont.innerHTML = `<style>
-    #p-ubic .ubamb{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;overflow:hidden;background:var(--card)}
+    #p-ubic .ubamb{border:1px solid var(--line);border-radius:11px;margin-bottom:10px;background:var(--card)}
+    #p-ubic .ubhdr{border-radius:11px 11px 0 0}
     #p-ubic .ubrow{display:flex;gap:10px;align-items:center;padding:9px 11px;flex-wrap:wrap}
     #p-ubic .ubhdr{background:var(--card2);border-bottom:1px solid var(--line)}
     #p-ubic .ubests{background:var(--bg2)}
@@ -9848,6 +9852,22 @@ function pintarUbic() {
     #p-ubic .ubest{cursor:default}
     #p-ubic .ubest.dragging{opacity:.45}
     #p-ubic .ubest.dragover{box-shadow:inset 0 2px 0 var(--acc)}
+    /* nombre destacado (clicable) + recuento discreto */
+    #p-ubic .ubname{font-size:14.5px;font-weight:600}
+    #p-ubic .ubcount{font-size:12px;white-space:nowrap}
+    #p-ubic .ubnfctag{opacity:.8}
+    /* NFC de LIBROS (🏷️) con un tinte propio para distinguirlo del NFC del estante (📶) */
+    #p-ubic button.ubx[data-act$="nfc-libros"]{border-color:var(--acc2)}
+    /* menú «⋯» de acciones secundarias: quita el bosque de botones de la fila */
+    #p-ubic .ubmenu{position:relative;display:inline-block}
+    #p-ubic .ubmenu>summary{list-style:none;cursor:pointer;background:var(--card2);border:1px solid var(--line);color:var(--txt);min-width:40px;height:40px;padding:0 9px;border-radius:10px;font-size:20px;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:.12s}
+    #p-ubic .ubmenu>summary::-webkit-details-marker{display:none}
+    #p-ubic .ubmenu>summary:hover{border-color:var(--acc);color:#fff}
+    #p-ubic .ubmenu[open]>summary{border-color:var(--acc);color:#fff}
+    #p-ubic .ubpop{position:absolute;right:0;top:46px;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px;min-width:210px;display:flex;flex-direction:column;gap:2px;box-shadow:0 8px 22px rgba(0,0,0,.45)}
+    #p-ubic .ubmi{background:none;border:0;color:var(--txt);text-align:left;padding:9px 10px;border-radius:8px;font-size:13.5px;cursor:pointer;white-space:nowrap}
+    #p-ubic .ubmi:hover{background:var(--card2);color:#fff}
+    #p-ubic .ubmi.bad:hover{background:rgba(255,92,122,.18);color:var(--bad)}
     #p-ubic .ubgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px}
     #p-ubic .ubcard{background:var(--card2);border-radius:10px;padding:6px}
   </style>
@@ -9882,20 +9902,37 @@ function pintarUbic() {
 }
 function ubicAmbHTML(a) {
   const folded = !ubicExp.has(a.ambito);
-  const nfc = a.nfc ? ` <span title="NFC ${esc(a.nfc)}">📶</span>` : '';
-  const acts = `<span class="ubacts">${ubBtn('amb-add', a.ambito, null, '➕', 'Añadir estantería')}${ubBtn('amb-ren', a.ambito, null, '✏️', 'Renombrar ámbito')}${ubBtn('amb-nfc', a.ambito, null, '📶', 'Grabar NFC del ámbito')}${ubBtn('amb-explotar', a.ambito, null, '🧹', 'Sus libros → sin ubicación')}${ubBtn('amb-del', a.ambito, null, '🗑', 'Eliminar (si está vacío)')}</span>`;
+  const nfc = a.nfc ? ` <span class="ubnfctag" title="NFC del ámbito: ${esc(a.nfc)}">📶</span>` : '';
+  // Inline solo lo frecuente y DISTINGUIBLE: 📶 = NFC del ámbito · 🏷️ = NFC de sus libros en lote. El
+  // resto (crear/renombrar/explotar/eliminar) va en el menú «⋯» para no saturar la cabecera.
+  const nfcBtns = `${ubBtn('amb-nfc', a.ambito, null, '📶', 'Grabar la etiqueta NFC del ÁMBITO (al tocarla se abren sus libros)')}${ubBtn('amb-nfc-libros', a.ambito, null, '🏷️', 'Grabar la NFC de CADA LIBRO del ámbito (en lote, uno a uno)')}`;
+  const mas = `<details class="ubmenu"><summary class="ubx" title="Más acciones">⋯</summary><div class="ubpop">
+      ${ubMenuItem('amb-add', a.ambito, null, '➕ Añadir estantería')}
+      ${ubMenuItem('amb-ren', a.ambito, null, '✏️ Renombrar ámbito')}
+      ${ubMenuItem('amb-explotar', a.ambito, null, '🧹 Sus libros → sin ubicación')}
+      ${ubMenuItem('amb-del', a.ambito, null, '🗑 Eliminar (si está vacío)', ' bad')}
+    </div></details>`;
   const ests = a.estanterias.length
     ? a.estanterias.map((e) => ubicEstHTML(a.ambito, e)).join('')
     : `<div class="ubrow ubest"><span class="muted" style="font-size:12px">— sin estanterías —</span></div>`;
-  return `<div class="ubamb"><div class="ubrow ubhdr"><span class="ubx" data-act="amb-fold" data-a="${esc(a.ambito)}" title="Plegar/desplegar" style="opacity:1;width:20px;text-align:center">${folded ? '▸' : '▾'}</span><b class="ubx" data-act="amb-ver" data-a="${esc(a.ambito)}" style="font-size:14px;opacity:1" title="Ver sus libros en el Catálogo (interactivo)">📍 ${esc(a.ambito)}</b><span class="muted">${a.estanterias.length} estante(s) · ${a.n} libro(s)</span>${nfc}${acts}</div><div class="ubests"${folded ? ' style="display:none"' : ''}>${ests}</div></div>`;
+  return `<div class="ubamb"><div class="ubrow ubhdr"><span class="ubx" data-act="amb-fold" data-a="${esc(a.ambito)}" title="Plegar/desplegar" style="opacity:1;width:20px;text-align:center">${folded ? '▸' : '▾'}</span><b class="ubx ubname" data-act="amb-ver" data-a="${esc(a.ambito)}" title="Ver sus libros en el Catálogo (interactivo)">📍 ${esc(a.ambito)}</b><span class="muted ubcount">${a.estanterias.length} estante(s) · ${a.n} libro(s)</span>${nfc}<span class="ubacts">${nfcBtns}${mas}</span></div><div class="ubests"${folded ? ' style="display:none"' : ''}>${ests}</div></div>`;
 }
 function ubicEstHTML(amb, e) {
-  const nfc = e.nfc ? ` <span title="NFC ${esc(e.nfc)}">📶</span>` : '';
-  // Reordenar la ESTANTERÍA dentro del ámbito: ↑/↓ (fiable en móvil) — la fila también es arrastrable en
-  // escritorio (wireUbic). El 📋 ordena los LIBROS de dentro por su posición física (feature distinta).
+  const nfc = e.nfc ? ` <span class="ubnfctag" title="NFC del estante: ${esc(e.nfc)}">📶</span>` : '';
+  // ↑/↓ reordenan la ESTANTERÍA (móvil; en escritorio se arrastra la fila). Inline solo lo frecuente y
+  // DISTINGUIBLE: 📶 = NFC del ESTANTE · 🏷️ = NFC de sus LIBROS en lote. El resto, en el menú «⋯».
   const reord = `<span class="ubreord">${ubBtn('est-subir', amb, e.estanteria, '↑', 'Subir una posición')}${ubBtn('est-bajar', amb, e.estanteria, '↓', 'Bajar una posición')}</span>`;
-  const acts = `<span class="ubacts">${ubBtn('est-orden', amb, e.estanteria, '📋', 'Ordenar los libros por su posición física')}${ubBtn('est-insertar', amb, e.estanteria, '➕', 'Insertar una estantería DEBAJO de esta')}${ubBtn('est-ren', amb, e.estanteria, '✏️', 'Renombrar')}${ubBtn('est-mover', amb, e.estanteria, '➡️', 'Mover a otro ámbito')}${ubBtn('est-fus', amb, e.estanteria, '🔀', 'Fusionar en otra estantería')}${ubBtn('est-nfc', amb, e.estanteria, '📶', 'Grabar NFC')}${ubBtn('est-explotar', amb, e.estanteria, '🧹', 'Libros → sin ubicación')}${ubBtn('est-del', amb, e.estanteria, '🗑', 'Eliminar (si vacía)')}</span>`;
-  return `<div class="ubrow ubest" draggable="true" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}">${reord}<span class="ubx" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" style="opacity:1" title="Ver sus libros en el Catálogo (interactivo)">📚 ${esc(e.estanteria)}</span><span class="muted">${e.n}</span>${nfc}${acts}</div>`;
+  const nfcBtns = `${ubBtn('est-nfc', amb, e.estanteria, '📶', 'Grabar la etiqueta NFC del ESTANTE (al tocarla se abren sus libros)')}${ubBtn('est-nfc-libros', amb, e.estanteria, '🏷️', 'Grabar la NFC de CADA LIBRO de este estante (en lote, uno a uno)')}`;
+  const mas = `<details class="ubmenu"><summary class="ubx" title="Más acciones">⋯</summary><div class="ubpop">
+      ${ubMenuItem('est-orden', amb, e.estanteria, '📋 Ordenar libros por posición')}
+      ${ubMenuItem('est-insertar', amb, e.estanteria, '➕ Insertar estantería debajo')}
+      ${ubMenuItem('est-ren', amb, e.estanteria, '✏️ Renombrar')}
+      ${ubMenuItem('est-mover', amb, e.estanteria, '➡️ Mover a otro ámbito')}
+      ${ubMenuItem('est-fus', amb, e.estanteria, '🔀 Fusionar en otra')}
+      ${ubMenuItem('est-explotar', amb, e.estanteria, '🧹 Libros → sin ubicación')}
+      ${ubMenuItem('est-del', amb, e.estanteria, '🗑 Eliminar (si vacía)', ' bad')}
+    </div></details>`;
+  return `<div class="ubrow ubest" draggable="true" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}">${reord}<span class="ubx ubname" data-act="est-ver" data-a="${esc(amb)}" data-e="${esc(e.estanteria)}" title="Ver sus libros en el Catálogo (interactivo)">📚 ${esc(e.estanteria)}</span><span class="muted ubcount">${e.n}</span>${nfc}<span class="ubacts">${nfcBtns}${mas}</span></div>`;
 }
 function wireUbic() {
   const modo = $('#ubModo');
@@ -10062,6 +10099,23 @@ async function ubicAccion(act, a, e) {
     }
     if (act === 'amb-nfc') return grabarNFCUbic(a, null);
     if (act === 'est-nfc') return grabarNFCUbic(a, e);
+    // NFC en LOTE de los LIBROS que contiene el estante/ámbito (distinto de grabar la etiqueta del propio
+    // estante): reúne sus ids y arranca el etiquetado uno a uno (iniciarEtiquetadoLote, mismo flujo que el Catálogo).
+    if (act === 'est-nfc-libros' || act === 'amb-nfc-libros') {
+      let ids = [];
+      try {
+        if (act === 'est-nfc-libros') {
+          const r = await api('/ubicaciones/libros?' + new URLSearchParams({ ambito: a, estanteria: e }).toString());
+          ids = (r.docs || []).map((d) => d._id);
+        } else {
+          const r = await api('/catalogo?' + new URLSearchParams({ ambito: a, soporte: 'papel', soloIds: '1' }).toString());
+          ids = r.ids || [];
+        }
+      } catch (err) { toast(err.message, 'bad'); return; }
+      if (!ids.length) { toast('No hay libros en papel aquí', 'warn'); return; }
+      if (!('NDEFReader' in window)) { toast('Este dispositivo no puede escribir NFC (Android + Chrome)', 'warn'); return; }
+      return void iniciarEtiquetadoLote(ids, false);
+    }
     // Ordenar los LIBROS de la estantería por su posición física (localizar / inventario).
     if (act === 'est-orden') return ordenarLibrosEstanteria(a, e);
     // Reordenar las ESTANTERÍAS del ámbito: ↑/↓ mueven una posición; «insertar» crea una nueva justo debajo.
