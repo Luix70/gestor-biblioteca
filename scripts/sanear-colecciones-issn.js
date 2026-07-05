@@ -51,15 +51,18 @@ async function main() {
     let nRen = 0, nFus = 0, nDocs = 0, nDel = 0;
     for (const p of plan) {
         if (p.gemela) {
-            // FUNDIR: los miembros de la placeholder → la gemela real; pásale el ISSN si le falta; borra la placeholder.
+            // FUNDIR: los miembros de la placeholder → la gemela real; borra la placeholder; y SOLO ENTONCES
+            // pásale su ISSN a la gemela (el índice único de issn no admite dos colecciones con el mismo →
+            // hay que borrar la placeholder ANTES de escribir su issn en la gemela).
             const res = await bib.updateMany({ coleccion: p.col._id }, { $set: { coleccion: p.gemela._id, coleccion_nombre: p.nombre } });
             nDocs += res.modifiedCount || 0;
-            const set = {};
-            if (!p.gemela.issn) set.issn = p.col.issn;
-            if (!p.gemela.clave_canonica && claveCanonica(p.nombre)) set.clave_canonica = claveCanonica(p.nombre);
-            if (Object.keys(set).length) await cols.updateOne({ _id: p.gemela._id }, { $set: set }).catch(() => {});
+            const issnHuerfano = p.col.issn;
             await cols.deleteOne({ _id: p.col._id }).catch((e) => console.warn(`  ⚠️ borrar ${p.col._id}: ${e.message}`));
             nFus++; nDel++;
+            const set = {};
+            if (!p.gemela.issn && issnHuerfano) set.issn = issnHuerfano;
+            if (!p.gemela.clave_canonica && claveCanonica(p.nombre)) set.clave_canonica = claveCanonica(p.nombre);
+            if (Object.keys(set).length) await cols.updateOne({ _id: p.gemela._id }, { $set: set }).catch((e) => console.warn(`  ⚠️ issn gemela ${p.gemela._id}: ${e.message}`));
         } else {
             // RENOMBRAR la placeholder al nombre real (+ tipo libro si era revista de relleno) y sus miembros.
             const set = { nombre: p.nombre, fecha_actualizacion: new Date() };
