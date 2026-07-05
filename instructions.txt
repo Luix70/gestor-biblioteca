@@ -994,3 +994,102 @@ de ficheros clasificado por CDU.
     usar "down -v" antes de "up --build".
 
 ================================================================================
+APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarlos)
+================================================================================
+  Etiquetas:
+    [PANEL]       también se lanza desde la web (Actividad); no hace falta CLI.
+    [PERIÓDICO]   conviene ejecutarlo cada cierto tiempo (o programado en DSM).
+    [RETROACTIVO] el fallo que corrige YA está resuelto en el flujo de ingesta; el
+                  script solo SANEA datos VIEJOS. Se corre cuando aparezcan restos;
+                  idempotente. (No hace falta en cada ingesta.)
+    [UNA VEZ]     tarea puntual / de instalación; no se repite.
+    [MIGRACIÓN]   cambio de modelo histórico (varias ya SUPERADAS).
+    [DIAGNÓSTICO] solo lectura, no toca nada.
+  Casi todos los que ESCRIBEN son DRY-RUN por defecto y aplican con --ejecutar.
+
+  ── Instalación / infraestructura ────────────────────────────────────────────
+    setup-mongo.js          [UNA VEZ/tras cambios de esquema] índices + validadores
+                            $jsonSchema. Idempotente; córrelo tras tocar el esquema.
+    etl-fichero.js          [UNA VEZ] construye Fichero/fichero.db desde los volcados
+                            OL+BNE (en un PC potente; luego copias el .db al NAS). El
+                            esquema/mapeo vive en etl-map.js (módulo, no ejecutable).
+    reindexar-busqueda.js   [PANEL: Búsqueda] tras el 1er despliegue o recuperación
+                            reconstruye el índice FTS busqueda.db (luego se automantiene).
+
+  ── Mantenimiento periódico ──────────────────────────────────────────────────
+    integridad.js           [PANEL: Integridad][PERIÓDICO] diagnostica/repara
+                            (--reparar) DB↔disco en UNA pasada (consolida
+                            auditoria-integridad + resolver-duplicados + recolector-cdu
+                            + dedup por hash). Programable con la Tarea de DSM.
+    sanear-catalogo.js      [PANEL: Sanear catálogo] re-home + portadas con el
+                            pipeline actual, sin red, sin pérdida de datos.
+    describir-clasificaciones.js  backfill de descripciones CDU/Dewey/LCC que faltan
+                            (IA+caché). Ya lo hace poco a poco el Conformador; esto es
+                            la versión "de una sentada". (describir-cdus.js = variante
+                            solo-CDU, predecesora.)
+    regenerar-registros.js  regenera los sidecars registro.json/.marc.xml desde Mongo.
+                            Útil tras correcciones masivas.
+
+  ── Saneos RETROACTIVOS (el fix ya está en la ingesta; sanean lo VIEJO) ───────
+    sanear-colecciones-issn.js  [RETROACTIVO] colecciones con nombre-PLACEHOLDER (su
+                            ISSN, un DOI de Springer «10.1007%40978-…», «Creator:…») →
+                            nombre real por ISSN (Wikidata) + funde duplicados. Fix en
+                            resolverCabecera. Re-lánzalo si reaparecen placeholders.
+    consolidar-colecciones.js   [RETROACTIVO] colecciones duplicadas por volumen-en-
+                            nombre («Alianza Cien 15») → una + coleccion_numero.
+    unificar-colecciones.js     [RETROACTIVO] funde colecciones iguales por
+                            mayúsc/acentos/ISSN. (Ambas: fix en ingesta por clave_canonica.)
+    agrupar-hermanos.js     [RETROACTIVO] agrupa en OBRAS los tomos con nº en el título
+                            («Título, I/II») que la ingesta no detecta en solitario
+                            (necesita corroboración entre hermanos).
+    reclasificar-libros.js  [RETROACTIVO] libros mal clasificados como revista → libro.
+    backfill-autores.js     [RETROACTIVO] normaliza nombres de autor a la forma canónica.
+    roles-autores.js        [RETROACTIVO] rellena contribuciones (traductor/ilustrador/…)
+                            e idioma original de libros con ISBN, SIN IA (OL + Fichero).
+    enriquecer-autores.js   [RETROACTIVO][también campaña] foto+bio+seudónimos de autores
+                            desde OL+Wikidata+Wikipedia (gratis, sin IA), tandas de 25.
+    re-enriquecer-degradados.js  [RETROACTIVO] re-enriquece SOBRESCRIBIENDO lotes
+                            ingeridos con las APIs caídas (título=nombre de archivo, cdu «00»…).
+    reingestar-multiarchivo.js  [UNA VEZ] separa carpetas CDU con varios documentos.
+    retirar-bne-cdus.js     [UNA VEZ] elimina la colección retirada bne_cdus.
+
+  ── Cuarentena / recuperación de ficheros ────────────────────────────────────
+    organizar-cuarentena.js  ordena Cuarentena en subcarpetas por categoría.
+    reprocesar-cuarentena.js devuelve depósitos de Cuarentena al Inbox para
+                            recatalogarlos con el pipeline actual.
+    purgar-duplicados.js    purga SEGURA de Cuarentena/duplicados (re-verifica que el
+                            gemelo catalogado sigue en disco antes de borrar).
+    purgar-ilegibles.js     retira PDFs catalogados ILEGIBLES (estructura dañada).
+    purgar-multipart.js     purga una obra multivolumen mal catalogada (a Papelera)
+                            para re-ingerirla; lógica compartida con el panel.
+    resolver-duplicados.js  auto-resuelve el backlog Cuarentena/duplicados (mismo
+                            hash→borra; formato distinto→ambos; si no, el mayor).
+                            [Ya incluido en integridad.js.]
+    restaurar-originales.js recupera ficheros "desaparecidos" desde Reintentos/Inbox/
+                            Cuarentena (copia NO destructiva).
+    recolector-cdu.js       recolector de basura del árbol CDU (1 doc ↔ 1 carpeta).
+                            [Ya incluido en integridad.js.]
+
+  ── Migraciones (históricas; varias SUPERADAS) ───────────────────────────────
+    migrar-revistas-a-colecciones.js  [MIGRACIÓN vigente] cabeceras de revista y series
+                            → modelo COLECCIONES. Sustituye a las dos de abajo.
+    migrar-revistas.js      [SUPERADA] paso 2 de la vieja migración de revistas.
+    reparar-revistas.js     [SUPERADA] deshacía el daño de aquella migración.
+    migrar-arbol-cdu.js     [UNA VEZ] reorganizó las carpetas planas de CDU/ en árbol.
+    nestar-sueltos.js       [UNA VEZ] limpió las carpetas sueltas de la raíz de CDU/.
+
+  ── Diagnóstico (SOLO LECTURA) ───────────────────────────────────────────────
+    diagnostico-revistas.js  revistas conflacionadas / carpetas colisionadas.
+    auditoria-integridad.js  auditoría detallada por-ítem (salida CLI minuciosa; el
+                            paso consolidado y con reparación es integridad.js).
+    muestra-fichero.js       mide qué roles/idioma son recuperables del Fichero.
+    verificar-gemini.js      comprueba que las claves Gemini del .env funcionan.
+
+  ── Tests de desarrollo (no son mantenimiento) ───────────────────────────────
+    test-*.js               batería de comprobaciones del pipeline (discriminador, cip,
+                            multivolumen, título-artefacto, papelera, override…). Para
+                            desarrollo en local, NO para el NAS.
+
+  REGLA: al AÑADIR un script nuevo a scripts/, documéntalo aquí (categoría + 1 línea)
+  y, si escribe en la base/disco, que sea DRY-RUN por defecto (aplica con --ejecutar).
+================================================================================
