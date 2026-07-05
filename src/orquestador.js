@@ -367,6 +367,20 @@ export async function procesarRecurso(entrada) {
         }
         formatos = ['papel'];
         tipo_recurso = datosBase.tipo_recurso || 'libro';
+        // CONSOLIDACIÓN (fase 2, unifica el escaneo con el PDF): la visión da su propio veredicto de tipo,
+        // pero puede equivocarse (una monografía con ISSN de serie —Springer— leída como «revista»). Si dijo
+        // REVISTA y hay un ISBN que el Fichero CORROBORA como un libro real (su título casa), es un LIBRO. Es
+        // seguro: una revista de verdad no tiene un ISBN de libro cuyo título coincida con el suyo. Offline.
+        if (tipo_recurso === 'revista' && !datosBase.esFechada && (datosBase.isbn_candidatos || []).length) {
+            const refTitulo = datosBase.titulo || path.basename(rutas[0]).replace(/\.[^.]+$/, '');
+            const isbnOk = await corroborarISBNporTitulo({ candidatos: datosBase.isbn_candidatos, titulo: refTitulo });
+            if (isbnOk) {
+                tipo_recurso = 'libro';
+                datosBase.isbn_propio = datosBase.isbn_propio || isbnOk;
+                if (!datosBase.isbn) datosBase.isbn = isbnOk;
+                datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Reclasificado a LIBRO: ISBN ${isbnOk} corroborado por título en el Fichero.`];
+            }
+        }
         // Cada imagen aportada es un activo local; la primera se marca como portada.
         rutas.forEach((r, i) => activos.push({
             tipo: i === 0 ? 'portada' : 'otra',
