@@ -6456,6 +6456,7 @@ async function camaraEnVivo() {
         <div id="cvInfo" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.62);color:#fff;font-size:13px;font-weight:600;padding:5px 12px;border-radius:14px;pointer-events:none;white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis">Encuadra el libro sobre el tapete</div>
         <div id="cvZoomWrap" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);flex-direction:column;align-items:center;gap:6px;background:rgba(0,0,0,.42);border-radius:16px;padding:8px 6px"></div>
         <button id="cvFloat" title="Capturar (mantén y arrastra para moverlo)" style="display:none;position:absolute;z-index:20;width:66px;height:66px;border-radius:50%;border:4px solid rgba(255,255,255,.92);background:rgba(255,255,255,.26);box-shadow:0 4px 16px rgba(0,0,0,.5);place-items:center;font-size:26px;touch-action:none;cursor:grab;color:#fff">📸</button>
+        <button id="cvFloatDone" title="Catalogar las fotos tomadas y seguir en la cámara para el siguiente libro" style="display:none;position:absolute;z-index:20;right:14px;bottom:18px;min-width:66px;height:56px;border-radius:28px;border:3px solid rgba(40,217,168,.95);background:rgba(40,217,168,.9);color:#04231b;font-weight:800;font-size:15px;box-shadow:0 4px 16px rgba(0,0,0,.5);padding:0 16px;cursor:pointer">✅ 0</button>
       </div>
     </div>
     <div id="cvStrip" style="display:none;gap:8px;padding:8px 12px;background:#0a0a0a;overflow-x:auto;white-space:nowrap"></div>
@@ -6537,7 +6538,13 @@ async function camaraEnVivo() {
   const capCanvas = document.createElement('canvas');
   const work = document.createElement('canvas');
   const mcan = document.createElement('canvas'); // canvas de MEDICIÓN (mayor resolución, throttled)
-  const actualizarN = () => { const n = camFotos.length; overlay.querySelector('#cvN').textContent = `${n} foto(s)`; overlay.querySelector('#cvDone').textContent = `✅ Catalogar (${n})`; };
+  const actualizarN = () => {
+    const n = camFotos.length;
+    overlay.querySelector('#cvN').textContent = `${n} foto(s)`;
+    overlay.querySelector('#cvDone').textContent = `✅ Catalogar (${n})`;
+    const fd = overlay.querySelector('#cvFloatDone');
+    if (fd) { fd.style.display = n ? 'block' : 'none'; fd.textContent = `✅ ${n}`; }
+  };
   actualizarN();
 
   // MEDIR SIN DISPARAR: sobre un frame a ~1024 px, detecta el libro y la rejilla del tapete y devuelve
@@ -6677,10 +6684,20 @@ async function camaraEnVivo() {
   });
   fab.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  overlay.querySelector('#cvDone').onclick = () => {
-    cerrar();
-    if (camFotos.length) camCatalogar();
+  // Catalogar SIN salir de la cámara: envía las fotos actuales como un libro y sigue filmando (encadenar
+  // libros). El envío va en segundo plano; la cola y las tiras se vacían para el siguiente. «✕ Cerrar» sale.
+  const catalogarYSeguir = () => {
+    if (!camFotos.length) { toast('Haz al menos una foto', 'warn'); return; }
+    const files = camFotos.slice();
+    camFotos = [];
+    renderCamStrip();
+    renderCamThumbs();
+    actualizarN();
+    toast(`📚 ${files.length} foto(s) enviadas a catalogar`);
+    subirInbox(files).catch((e) => toast('Error al enviar: ' + (e.message || e), 'bad'));
   };
+  overlay.querySelector('#cvDone').onclick = catalogarYSeguir;
+  overlay.querySelector('#cvFloatDone').onclick = catalogarYSeguir;
 }
 
 // Detecta un ISBN (EAN-13 978/979) en las IMÁGENES (sin tocar el DOM): lo lee EN EL MÓVIL con
