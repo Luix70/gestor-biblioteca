@@ -10358,7 +10358,8 @@ async function pickerUbic() {
       }
       cerrarCmp();
       toast(
-        `${r.n} doc(s) → ${r.ambito}${r.estanteria && r.estanteria !== 'Sin asignar' ? ' · ' + r.estanteria : ''}`,
+        `${r.n} doc(s) → ${r.ambito}${r.estanteria && r.estanteria !== 'Sin asignar' ? ' · ' + r.estanteria : ''}${r.saltadosDigital ? ` · ${r.saltadosDigital} digital(es) ignorado(s)` : ''}`,
+        r.saltadosDigital ? 'warn' : 'ok',
       );
       selDocs.clear();
       buscarCatalogo(estadoBusqueda.page || 1);

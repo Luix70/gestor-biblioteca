@@ -157,11 +157,17 @@ export async function asignarUbicacion(db, { ids = [], ambito, estanteria } = {}
     const oids = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
     if (!oids.length) return { ok: false, motivo: 'sin documentos' };
     const bib = db.collection('biblioteca'), reg = db.collection('ubicaciones');
+    // Los medios DIGITALES (sin formato 'papel') NO van a un estante físico: se IGNORAN. Su "estante" es su
+    // CDU (ver la ficha: la ubicación de un digital es su clasificación). Solo se asigna a los FÍSICOS.
+    const fisicos = await bib.find({ _id: { $in: oids }, formatos: 'papel' }, { projection: { _id: 1 } }).toArray();
+    const idsFisicos = fisicos.map(d => d._id);
+    const saltadosDigital = oids.length - idsFisicos.length;
+    if (!idsFisicos.length) return { ok: false, motivo: `los ${saltadosDigital} seleccionado(s) son digitales: no van a un estante físico`, saltadosDigital };
     // Al cambiar de estantería, la posición física antigua deja de valer → se limpia (entrará al final de la nueva).
-    const r = await bib.updateMany({ _id: { $in: oids } },
+    const r = await bib.updateMany({ _id: { $in: idsFisicos } },
         { $set: { ubicacion: { ambito: a, estanteria: e || SIN }, fecha_actualizacion: new Date() }, $unset: { orden_estanteria: '' } });
     await reg.updateOne({ ambito: a, estanteria: e }, { $setOnInsert: { ambito: a, estanteria: e, fecha_creacion: new Date() } }, { upsert: true });
-    return { ok: true, n: r.modifiedCount, ambito: a, estanteria: e || SIN };
+    return { ok: true, n: r.modifiedCount, ambito: a, estanteria: e || SIN, saltadosDigital };
 }
 
 // Reordenar las estanterías de un ámbito (Fase 2). `orden` es la LISTA de nombres en el orden deseado; a cada
