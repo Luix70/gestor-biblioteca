@@ -4648,7 +4648,7 @@ function renderBulk() {
     if ($('#bkNfc')) $('#bkNfc').onclick = () => iniciarEtiquetadoLote([...selDocs], false);
     if ($('#bkConformar')) $('#bkConformar').onclick = () => accionLoteFicha('conformar', { verbo: 'Conformar' });
     if ($('#bkEnriquecer')) $('#bkEnriquecer').onclick = () => accionLoteFicha('enriquecer', { verbo: 'Enriquecer' });
-    if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', confirmar: true });
+    if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     // «Mostrar selección»: alterna la vista restringida a lo seleccionado (y re-busca).
     if ($('#bkMostrarSel'))
       $('#bkMostrarSel').onclick = () => {
@@ -4826,21 +4826,31 @@ async function eliminarSeleccionados() {
 // Secuencial (una a una, para no saturar el servidor ni las APIs/IA), con progreso en la barra. Reutiliza
 // los MISMOS endpoints por-documento que la ficha individual. «Medir» y las que necesitan interacción
 // (editar/imágenes) NO se ofrecen aquí.
-async function accionLoteFicha(tipo, { verbo = 'Procesar', confirmar = false } = {}) {
+async function accionLoteFicha(tipo, { verbo = 'Procesar', password = false } = {}) {
   const ids = [...selDocs];
   if (!ids.length) return;
-  if (confirmar && !window.confirm(`¿${verbo} ${ids.length} documento(s)? Cada uno vuelve al Inbox para re-catalogarse (se recicla su registro actual).`)) return;
+  // Reprocesar (como en la ficha individual) EXIGE contraseña de admin: se pide UNA sola vez y viaja en
+  // cada petición. Conformar/Enriquecer no la necesitan (solo un aviso de confirmación).
+  let pw = null;
+  if (password) {
+    pw = await modalPassword({
+      titulo: `♻️ ${verbo} ${ids.length} documento(s)`,
+      aviso: `Cada uno vuelve al <b>Inbox</b> para re-catalogarse y su carpeta actual va a la <b>Papelera</b> (recuperable). Acción MASIVA. Confirma con tu contraseña de administrador.`,
+    });
+    if (pw == null) return; // cancelado
+  } else if (!window.confirm(`¿${verbo} ${ids.length} documento(s) seleccionado(s)?`)) return;
+  const body = JSON.stringify(password ? { password: pw } : {});
   const bar = $('#searchBulk');
-  let ok = 0, err = 0, cambios = 0;
+  let ok = 0, err = 0, cambios = 0, ultErr = '';
   for (let i = 0; i < ids.length; i++) {
     if (bar) bar.innerHTML = `<div class="bulkbar"><b>${esc(verbo)}…</b> ${i + 1}/${ids.length} · ✓${ok} ✕${err}</div>`;
     try {
-      const r = await api('/documentos/' + encodeURIComponent(ids[i]) + '/' + tipo, { method: 'POST', body: '{}' });
+      const r = await api('/documentos/' + encodeURIComponent(ids[i]) + '/' + tipo, { method: 'POST', body });
       if (r && r.ok !== false) { ok++; cambios += (r.cambios ? r.cambios.length : 0); }
-      else err++;
-    } catch (_) { err++; }
+      else { err++; ultErr = (r && r.motivo) || ultErr; }
+    } catch (e) { err++; ultErr = e.message || ultErr; }
   }
-  toast(`${verbo}: ${ok} ok${err ? ` · ${err} con error` : ''}${tipo !== 'reprocesar' ? ` · ${cambios} cambio(s)` : ''}`, err ? 'warn' : 'ok');
+  toast(`${verbo}: ${ok} ok${err ? ` · ${err} con error${ultErr ? ' (' + recortar(ultErr, 50) + ')' : ''}` : ''}${tipo !== 'reprocesar' ? ` · ${cambios} cambio(s)` : ''}`, err ? 'warn' : 'ok');
   if (tipo === 'reprocesar') { selDocs.clear(); soloSeleccion = false; } // reciclados: la selección ya no aplica
   buscarCatalogo(estadoBusqueda.page || 1);
 }
