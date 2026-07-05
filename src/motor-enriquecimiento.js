@@ -3,7 +3,7 @@ import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores
 import { esTituloArtefacto } from './utils/parsear-nombre.js';
 import { parsearVolumen, totalDeclarado } from './utils/multivolumen.js';
 import { tituloCabecera } from './utils/revistas.js';
-import { buscarISSNporTitulo } from './utils/buscador-issn-titulo.js';
+import { buscarISSNporTitulo, buscarNombrePorISSN } from './utils/buscador-issn-titulo.js';
 
 // "Editoriales" que en realidad son grupos de difusión/maquetación, no casas editoriales.
 // Si el archivo trae una de estas, NO es autoritativa: una editorial real de las APIs prevalece.
@@ -303,6 +303,20 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         else {
             documento.alertas_agente.push(`ISSN descartado por dígito de control inválido: "${documento.issn}".`);
             delete documento.issn;
+        }
+    }
+
+    // SERIE de LIBROS con ISSN de serie pero SIN nombre de colección válido (o con uno-artefacto del fichero
+    // —p. ej. un DOI de Springer—): resuelve el NOMBRE AUTORITATIVO de la serie por ISSN vía Wikidata
+    // («Studies in Big Data», ISSN 2197-6503) para NO nombrar la colección con el nombre críptico del
+    // fichero. Conservador: solo libros, solo si falta un nombre válido y hay ISSN registrado en Wikidata;
+    // un fallo deja la colección con su ISSN (recuperable). motor-catalogo 2e usa este coleccion_nombre.
+    if (!esRevista && documento.issn && !contexto.sinApis
+        && (!primerValido(documento.coleccion_nombre) || esTituloArtefacto(documento.coleccion_nombre))) {
+        const r = await buscarNombrePorISSN(documento.issn, { idioma: documento.idioma });
+        if (r?.nombre) {
+            documento.coleccion_nombre = r.nombre;
+            documento.alertas_agente.push(`Nombre de serie «${r.nombre}» resuelto por ISSN ${documento.issn} vía ${r.fuente}.`);
         }
     }
 

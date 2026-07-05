@@ -42,3 +42,30 @@ export async function buscarISSNporTitulo(titulo, { idioma = null } = {}) {
     } catch { /* red/timeout: degradar (sin ISSN) */ }
     return null;
 }
+
+// ISSN → NOMBRE de la publicación/serie (Wikidata, inverso de lo anterior). Para dar nombre AUTORITATIVO a
+// la colección/serie de un libro que trae un ISSN de serie (p. ej. Springer «Studies in Big Data», ISSN
+// 2197-6503) en vez de caer al nombre críptico del fichero. Wikidata indexa el ISSN (P236): se busca el
+// ítem con ese P236 (`haswbstatement`) y se devuelve su etiqueta (preferido el idioma dado, luego inglés,
+// luego cualquiera). Libre, sin clave, sin IA. Devuelve { nombre, fuente } o null.
+export async function buscarNombrePorISSN(issn, { idioma = null } = {}) {
+    const s = validarISSN(issn);
+    if (!s) return null;
+    const langs = [...new Set([(idioma && /^[a-z]{2}$/i.test(idioma)) ? idioma.toLowerCase() : null, 'en', 'es'].filter(Boolean))];
+    try {
+        const { data: q } = await axios.get(API, {
+            params: { action: 'query', list: 'search', srsearch: `haswbstatement:P236=${s}`, format: 'json' },
+            headers: { 'User-Agent': UA }, timeout: TIMEOUT,
+        });
+        const id = q?.query?.search?.[0]?.title;
+        if (!id) return null;
+        const { data: e } = await axios.get(API, {
+            params: { action: 'wbgetentities', ids: id, props: 'labels', languages: langs.join('|'), format: 'json' },
+            headers: { 'User-Agent': UA }, timeout: TIMEOUT,
+        });
+        const labels = e?.entities?.[id]?.labels || {};
+        const etiqueta = (langs.map((l) => labels[l]).find(Boolean) || Object.values(labels)[0])?.value || null;
+        return etiqueta ? { nombre: String(etiqueta).trim(), fuente: `wikidata:${id}` } : null;
+    } catch { /* red/timeout: degradar (colección sin nombre autoritativo) */ }
+    return null;
+}
