@@ -4612,6 +4612,7 @@ function renderBulk() {
     ${'NDEFReader' in window ? '<button class="btn pri" id="bkNfc">📶 Etiquetar</button>' : ''}
     <button class="btn" id="bkConformar" title="Conformar (perfeccionar registro) cada documento seleccionado">🧹 Conformar</button>
     <button class="btn" id="bkEnriquecer" title="Enriquecer (rellenar huecos con APIs) cada documento seleccionado">✨ Enriquecer</button>
+    <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`
@@ -4648,6 +4649,7 @@ function renderBulk() {
     if ($('#bkNfc')) $('#bkNfc').onclick = () => iniciarEtiquetadoLote([...selDocs], false);
     if ($('#bkConformar')) $('#bkConformar').onclick = () => accionLoteFicha('conformar', { verbo: 'Conformar' });
     if ($('#bkEnriquecer')) $('#bkEnriquecer').onclick = () => accionLoteFicha('enriquecer', { verbo: 'Enriquecer' });
+    if ($('#bkAFondo')) $('#bkAFondo').onclick = aFondoLote;
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     // «Mostrar selección»: alterna la vista restringida a lo seleccionado (y re-busca).
     if ($('#bkMostrarSel'))
@@ -4852,6 +4854,32 @@ async function accionLoteFicha(tipo, { verbo = 'Procesar', password = false } = 
   }
   toast(`${verbo}: ${ok} ok${err ? ` · ${err} con error${ultErr ? ' (' + recortar(ultErr, 50) + ')' : ''}` : ''}${tipo !== 'reprocesar' ? ` · ${cambios} cambio(s)` : ''}`, err ? 'warn' : 'ok');
   if (tipo === 'reprocesar') { selDocs.clear(); soloSeleccion = false; } // reciclados: la selección ya no aplica
+  buscarCatalogo(estadoBusqueda.page || 1);
+}
+// «Completar a fondo» EN LOTE: por cada documento, ANALIZA (lee el libro con la visión) y APLICA
+// automáticamente todo lo aplicable (lo que en la ficha individual elegirías en el balance). Secuencial
+// (usa visión/IA, más lento y con límites); progreso en la barra. Reutiliza los MISMOS endpoints a-fondo.
+async function aFondoLote() {
+  const ids = [...selDocs];
+  if (!ids.length) return;
+  if (!window.confirm(`¿Completar a fondo ${ids.length} documento(s)? Lee cada libro con la VISIÓN (IA, más lento) y aplica automáticamente lo que aporte. Va uno a uno.`)) return;
+  const bar = $('#searchBulk');
+  let ok = 0, err = 0, aplicados = 0, sinCambios = 0, ultErr = '';
+  for (let i = 0; i < ids.length; i++) {
+    if (bar) bar.innerHTML = `<div class="bulkbar"><b>Completar a fondo…</b> ${i + 1}/${ids.length} · ✓${ok} ✕${err} · ${aplicados} campos</div>`;
+    try {
+      const r = await api('/documentos/' + encodeURIComponent(ids[i]) + '/a-fondo', { method: 'POST', body: '{}' });
+      if (!r || r.ok === false) { err++; ultErr = (r && r.motivo) || ultErr; continue; }
+      const campos = (r.balance || []).filter((b) => !b.soloSugerencia).map((b) => b.campo);
+      if (!campos.length) { ok++; sinCambios++; continue; } // leído pero sin mejoras aplicables
+      const r2 = await api('/documentos/' + encodeURIComponent(ids[i]) + '/a-fondo/aplicar', {
+        method: 'POST',
+        body: JSON.stringify({ propuesta: r.propuesta || {}, campos, reclasificar: r.reclasificar === true }),
+      });
+      ok++; aplicados += (r2 && r2.aplicados ? r2.aplicados.length : 0);
+    } catch (e) { err++; ultErr = e.message || ultErr; }
+  }
+  toast(`A fondo: ${ok} ok${err ? ` · ${err} con error${ultErr ? ' (' + recortar(ultErr, 40) + ')' : ''}` : ''} · ${aplicados} campo(s) aplicados${sinCambios ? ` · ${sinCambios} sin mejoras` : ''}`, err ? 'warn' : 'ok');
   buscarCatalogo(estadoBusqueda.page || 1);
 }
 // Selector con FILTRO + PREVISUALIZACIÓN (en vez de un desplegable largo): clic en una tarjeta → añade
