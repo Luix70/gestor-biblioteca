@@ -5,7 +5,7 @@ import { extraerMetadatosPdf, textoPagina } from './utils/lector-pdf.js';
 import { medirImagen } from './utils/medir-imagen.js';
 import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
-import { buscarEnFicheroLocal } from './utils/buscador-local.js';
+import { buscarEnFicheroLocal, corroborarISBNporTitulo } from './utils/buscador-local.js';
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from './errores.js';
 import { parsearNombre } from './utils/parsear-nombre.js';
 import { pareceSerieLibros } from './utils/revistas.js';
@@ -201,6 +201,24 @@ export async function procesarRecurso(entrada) {
             datosBase.texto_legible = false;
             datosBase.texto_util = false;
             if (!datosBase.paginas && renders.length) datosBase.paginas = Math.max(...renders.map(r => r.pagina));
+        }
+
+        // CORROBORACIÓN AUTORITATIVA (offline, Fichero) — «identificar PRIMERO, clasificar después»: un
+        // ISBN del CUERPO es solo pista… salvo que el Fichero lo resuelva a un LIBRO REAL cuyo TÍTULO casa
+        // con el del doc / su nombre. Entonces el documento ES ese libro y su ISBN pasa a PROPIO → se
+        // clasifica libro aunque traiga un ISSN de serie y aunque el nombre sea significativo (no un
+        // ISBN/DOI). Se intenta SIEMPRE que aún no hay ISBN propio y el nombre no es fechado (un nombre
+        // fechado / un 977 son señal fuerte de periódico y mandan). El falso positivo «revista que reseña
+        // un libro» se descarta solo: el título de la revista NO casa con el del libro reseñado.
+        if (!datosBase.isbn_propio && (datosBase.isbn_candidatos || []).length && !datosBase.esFechada) {
+            const refTitulo = datosBase.titulo || path.basename(rutas[0]).replace(/\.[^.]+$/, '');
+            const isbnOk = await corroborarISBNporTitulo({ candidatos: datosBase.isbn_candidatos, titulo: refTitulo });
+            if (isbnOk) {
+                datosBase.isbn_propio = isbnOk;
+                if (!datosBase.isbn) datosBase.isbn = isbnOk;
+                datosBase.alertas_agente = datosBase.alertas_agente || [];
+                datosBase.alertas_agente.push(`ISBN ${isbnOk} corroborado por título en el Fichero → libro.`);
+            }
         }
 
         // libro vs revista (DISCRIMINADOR por confianza): una señal débil (ISBN del CUERPO del texto, que

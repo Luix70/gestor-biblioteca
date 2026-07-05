@@ -145,6 +145,46 @@ export async function buscarEnFicheroLocal({ isbns }) {
     }
 }
 
+// Normaliza un título para comparar (minúsculas, sin acentos ni puntuación, espacios colapsados).
+const RE_DIACR = new RegExp('[\\u0300-\\u036f]', 'g');
+const normTitulo = (s) => String(s || '').toLowerCase().normalize('NFD').replace(RE_DIACR, '')
+    .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+// ¿Casan dos títulos? ≥60% de los tokens (≥3 letras) del MÁS CORTO están en el otro (subconjunto tolerante:
+// «Big Data Analytics» ⊂ «Big Data Analytics a Management Perspective»). Evita falsos casamientos por 1 palabra.
+function tituloCasa(a, b) {
+    const ta = new Set(a.split(' ').filter((t) => t.length >= 3));
+    const tb = new Set(b.split(' ').filter((t) => t.length >= 3));
+    if (ta.size < 1 || tb.size < 1) return false;
+    let inter = 0;
+    for (const t of (ta.size <= tb.size ? ta : tb)) if ((ta.size <= tb.size ? tb : ta).has(t)) inter++;
+    return inter / Math.min(ta.size, tb.size) >= 0.6;
+}
+
+/**
+ * CORROBORACIÓN AUTORITATIVA de un ISBN por TÍTULO. ¿Alguno de los `candidatos` (típicamente ISBN del
+ * CUERPO del texto, que por sí solos son pista débil) corresponde a un libro REAL del Fichero cuyo TÍTULO
+ * casa con `titulo` (el título nativo del doc o su nombre de archivo)? Si sí, ese ISBN deja de ser una
+ * pista: el documento ES ese libro, aunque traiga un ISSN de serie. Offline, sin coste, sin IA.
+ *
+ * Evita el falso positivo clásico (una revista que reseña/anuncia un libro lleva su ISBN en el cuerpo): el
+ * título de la revista NO casa con el del libro reseñado → no corrobora. Devuelve el isbn13 o null.
+ */
+export async function corroborarISBNporTitulo({ candidatos, titulo }) {
+    const ref = normTitulo(titulo);
+    const cands = [...new Set((Array.isArray(candidatos) ? candidatos : [candidatos]).map(isbn13).filter(Boolean))];
+    if (!ref || ref.split(' ').filter((t) => t.length >= 3).length < 1 || !cands.length) return null;
+    if (!(await asegurarDB())) return null;
+    for (const c of cands) {
+        try {
+            const filas = stmt.all(c);
+            if (!filas.length) continue;
+            const r = fusionar(filas);
+            if (r?.titulo && tituloCasa(ref, normTitulo(r.titulo))) return c;
+        } catch { /* omitir candidato */ }
+    }
+    return null;
+}
+
 /**
  * DESCUBRIR: búsqueda de TEXTO en el Fichero (OL+BNE, 58,7 M) por título/subtítulo/autores (FTS5), para
  * proponer libros que NO están en la biblioteca. Dedup por ISBN (o título|autores si no hay ISBN).
