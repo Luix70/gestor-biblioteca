@@ -107,6 +107,17 @@ function extraerISBNs(texto) {
     return [...out];
 }
 
+// Normaliza un NOMBRE DE ARCHIVO antes de buscarle un ISBN. Los ficheros de Springer se descargan como su
+// DOI: «10.1007@978-3-319-38992-9.pdf», y el «@» suele venir URL-CODIFICADO como «%40» → los dígitos «40»
+// se pegan al «978» y rompen la extracción del ISBN (que ES el 978-3-319-38992-9). Se decodifica el %XX y
+// se sustituyen los separadores de DOI (@,/) por un carácter NO-dígito que corta la ristra sin ser un
+// separador de ISBN válido (un espacio SÍ lo sería y volvería a pegar los dígitos del prefijo «10.1007»).
+function nombreParaISBN(nombre) {
+    let t = String(nombre || '');
+    try { t = decodeURIComponent(t); } catch (_) { /* %XX inválido: se usa tal cual */ }
+    return t.replace(/[@/\\]/g, '#');
+}
+
 /**
  * Extrae metadatos de un PDF: info-dict, capa de texto e ISBN.
  * Usa pdfinfo + pdftotext (poppler) en lugar de pdf.js/unpdf para evitar OOM en el NAS:
@@ -214,7 +225,7 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         const propios = new Set();
         for (const x of extraerISBNs(texto)) for (const v of variantesISBN(x)) candidatos.add(v);                 // cuerpo → pista
         if (parsed.isbn) for (const v of variantesISBN(parsed.isbn)) { candidatos.add(v); propios.add(v); }       // el nombre ES un ISBN
-        for (const x of extraerISBNs(nombre)) for (const v of variantesISBN(x)) { candidatos.add(v); propios.add(v); } // ISBN incrustado en el nombre
+        for (const x of extraerISBNs(nombreParaISBN(nombre))) for (const v of variantesISBN(x)) { candidatos.add(v); propios.add(v); } // ISBN incrustado en el nombre (incl. DOI Springer)
         for (const c of (cip?.isbns || [])) for (const v of variantesISBN(c.isbn || c)) { candidatos.add(v); propios.add(v); } // CIP
         datos.isbn_candidatos = [...candidatos];
         datos.isbn = datos.isbn_candidatos.find(c => c.length === 13) || datos.isbn_candidatos[0] || null;
