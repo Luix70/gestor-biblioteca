@@ -4610,6 +4610,9 @@ function renderBulk() {
     <button class="btn pri" id="bkUbic">📍 Estantería</button>
     <button class="btn" id="bkQuitUbic" title="Quitar de su estantería/ámbito (pasan a «Sin asignar»)">🚫 Quitar de estantería</button>
     ${'NDEFReader' in window ? '<button class="btn pri" id="bkNfc">📶 Etiquetar</button>' : ''}
+    <button class="btn" id="bkConformar" title="Conformar (perfeccionar registro) cada documento seleccionado">🧹 Conformar</button>
+    <button class="btn" id="bkEnriquecer" title="Enriquecer (rellenar huecos con APIs) cada documento seleccionado">✨ Enriquecer</button>
+    <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`
     : '';
@@ -4643,6 +4646,9 @@ function renderBulk() {
     $('#bkUbic').onclick = () => pickerUbic();
     if ($('#bkQuitUbic')) $('#bkQuitUbic').onclick = quitarSeleccionDeUbic;
     if ($('#bkNfc')) $('#bkNfc').onclick = () => iniciarEtiquetadoLote([...selDocs], false);
+    if ($('#bkConformar')) $('#bkConformar').onclick = () => accionLoteFicha('conformar', { verbo: 'Conformar' });
+    if ($('#bkEnriquecer')) $('#bkEnriquecer').onclick = () => accionLoteFicha('enriquecer', { verbo: 'Enriquecer' });
+    if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', confirmar: true });
     // «Mostrar selección»: alterna la vista restringida a lo seleccionado (y re-busca).
     if ($('#bkMostrarSel'))
       $('#bkMostrarSel').onclick = () => {
@@ -4815,6 +4821,28 @@ async function eliminarSeleccionados() {
   } catch (e) {
     toast(e.message, 'bad');
   }
+}
+// Aplica EN LOTE una acción de la ficha (conformar/enriquecer/reprocesar) a la selección del Catálogo.
+// Secuencial (una a una, para no saturar el servidor ni las APIs/IA), con progreso en la barra. Reutiliza
+// los MISMOS endpoints por-documento que la ficha individual. «Medir» y las que necesitan interacción
+// (editar/imágenes) NO se ofrecen aquí.
+async function accionLoteFicha(tipo, { verbo = 'Procesar', confirmar = false } = {}) {
+  const ids = [...selDocs];
+  if (!ids.length) return;
+  if (confirmar && !window.confirm(`¿${verbo} ${ids.length} documento(s)? Cada uno vuelve al Inbox para re-catalogarse (se recicla su registro actual).`)) return;
+  const bar = $('#searchBulk');
+  let ok = 0, err = 0, cambios = 0;
+  for (let i = 0; i < ids.length; i++) {
+    if (bar) bar.innerHTML = `<div class="bulkbar"><b>${esc(verbo)}…</b> ${i + 1}/${ids.length} · ✓${ok} ✕${err}</div>`;
+    try {
+      const r = await api('/documentos/' + encodeURIComponent(ids[i]) + '/' + tipo, { method: 'POST', body: '{}' });
+      if (r && r.ok !== false) { ok++; cambios += (r.cambios ? r.cambios.length : 0); }
+      else err++;
+    } catch (_) { err++; }
+  }
+  toast(`${verbo}: ${ok} ok${err ? ` · ${err} con error` : ''}${tipo !== 'reprocesar' ? ` · ${cambios} cambio(s)` : ''}`, err ? 'warn' : 'ok');
+  if (tipo === 'reprocesar') { selDocs.clear(); soloSeleccion = false; } // reciclados: la selección ya no aplica
+  buscarCatalogo(estadoBusqueda.page || 1);
 }
 // Selector con FILTRO + PREVISUALIZACIÓN (en vez de un desplegable largo): clic en una tarjeta → añade
 // los seleccionados a esa colección/obra; o crear una nueva abajo. kind: 'coleccion' | 'obra'.

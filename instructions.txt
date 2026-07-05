@@ -285,7 +285,9 @@ de ficheros clasificado por CDU.
       «🖱 Modo selección…» + realce de las tarjetas. En las listas fuera del Catálogo la
       acción es «🔍 Mostrar en Catálogo» (lleva la selección al Catálogo, ya marcada).
       La selección NO se pierde al conmutar el modo. Con selección hay acciones: 👁 Ver · 📚 Colección · 📖 Obra · 📍
-      Estantería · 🚫 Quitar de estantería · 📶 Etiquetar · 🗑 Eliminar (pide
+      Estantería · 🚫 Quitar de estantería · 📶 Etiquetar · 🧹 Conformar · ✨ Enriquecer ·
+      ♻️ Reprocesar (las MISMAS acciones de la ficha individual que proceden en lote —«medir»
+      no—, aplicadas una a una con progreso) · 🗑 Eliminar (pide
       contraseña) · Limpiar. «🗂 Todos los resultados» selecciona todas las páginas.
       «👁 Mostrar selección» es un TOGGLE que restringe el Catálogo a SOLO los
       documentos seleccionados (para revisar la selección y, en Modo selección, quitar
