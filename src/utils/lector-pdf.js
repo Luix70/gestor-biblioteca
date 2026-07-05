@@ -177,7 +177,15 @@ export async function extraerMetadatosPdf(rutaArchivo) {
 
         // 3. Pistas del nombre de archivo (revista fechada, ISBN en el nombre, colección, etc.)
         const parsed = parsearNombre(nombre);
-        if (!datos.titulo)         datos.titulo  = parsed.titulo;
+        // Título del NOMBRE solo si no es un ARTEFACTO (un DOI «10.1007@978-…», etc.): se DECODIFICA antes
+        // el %-encoding (para recuperar un título real codificado, «C%C3%B3digo»→«Código»; y para que un DOI
+        // URL-codificado se reconozca como artefacto). Si es artefacto, se deja null → lo rellena el
+        // Fichero/APIs por ISBN (mucho más fiable que un nombre de descarga).
+        if (!datos.titulo && parsed.titulo) {
+            let t = parsed.titulo;
+            try { if (/%[0-9A-Fa-f]{2}/.test(t)) t = decodeURIComponent(t); } catch (_) { /* %XX inválido */ }
+            if (!esTituloArtefacto(t)) datos.titulo = t;
+        }
         if (!datos.autores.length) datos.autores = parsed.autores;
         if (parsed.coleccion_nombre) {
             datos.coleccion_nombre = parsed.coleccion_nombre;
@@ -228,8 +236,11 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         for (const x of extraerISBNs(nombreParaISBN(nombre))) for (const v of variantesISBN(x)) { candidatos.add(v); propios.add(v); } // ISBN incrustado en el nombre (incl. DOI Springer)
         for (const c of (cip?.isbns || [])) for (const v of variantesISBN(c.isbn || c)) { candidatos.add(v); propios.add(v); } // CIP
         datos.isbn_candidatos = [...candidatos];
-        datos.isbn = datos.isbn_candidatos.find(c => c.length === 13) || datos.isbn_candidatos[0] || null;
         datos.isbn_propio = [...propios].find(c => c.length === 13) || [...propios][0] || null;
+        // El ISBN principal PREFIERE el PROPIO (del nombre/DOI/CIP: autoritativo) al del cuerpo: un libro
+        // lista en el cuerpo su ISBN de tapa dura Y el de ebook; el del DOI/nombre es el que resuelve en el
+        // Fichero/OL (caso Springer: cuerpo ...912 de papel, DOI ...929 de ebook = el catalogado).
+        datos.isbn = datos.isbn_propio || datos.isbn_candidatos.find(c => c.length === 13) || datos.isbn_candidatos[0] || null;
 
         return datos;
     } catch (e) {

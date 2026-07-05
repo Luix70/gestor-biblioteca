@@ -6,6 +6,19 @@
  *     in Physics», con ISSN de serie); cada libro conserva su PROPIO ISBN.
  * El ISSN es la AUTORIDAD del grupo (análogo a obras.isbn_obra para una obra multivolumen).
  */
+import { esTituloArtefacto } from './parsear-nombre.js';
+import { validarISSN } from './identificadores.js';
+
+// ¿El nombre de una colección es un PLACEHOLDER/ARTEFACTO (no un nombre real)? Su propio ISSN, un ISSN
+// suelto, un DOI o una cadena URL-codificada (restos de una 1ª ingesta fallida). Sirve para RENOMBRARLA
+// cuando luego aparece el nombre real (p. ej. resuelto por ISSN vía Wikidata).
+const nombreEsPlaceholder = (nombre, issn) => {
+    const s = String(nombre || '').trim();
+    if (!s) return true;
+    if (issn && s === String(issn)) return true;
+    if (validarISSN(s)) return true;
+    return esTituloArtefacto(s);
+};
 
 /**
  * Resuelve una cabecera/serie a un documento de 'colecciones' (check-then-create), keyed por ISSN
@@ -49,6 +62,17 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
         if (naturaleza && !existente.naturaleza) set.naturaleza = naturaleza;
         // Rellena la clave canónica si la existente aún no la tenía (para futuros emparejamientos).
         if (claveCan && !existente.clave_canonica) set.clave_canonica = claveCan;
+        // SANEO: la existente se reencontró por ISSN pero tiene un nombre-PLACEHOLDER/ARTEFACTO (un DOI, su
+        // ISSN…, resto de una ingesta fallida) y ahora traemos un nombre REAL → RENÓMBRALA (si no choca con
+        // otra). Y si era una 'revista' de relleno SIN números y ahora es una serie de libros, corrige el tipo.
+        if (n && existente.nombre !== n && nombreEsPlaceholder(existente.nombre, existente.issn)) {
+            const choca = await col.findOne({ nombre: n, _id: { $ne: existente._id } }, { collation: { locale: 'es', strength: 1 } });
+            if (!choca) {
+                set.nombre = n;
+                if (claveCan) set.clave_canonica = claveCan;
+                if (tipo === 'libro' && existente.tipo === 'revista' && !(existente.numeros && existente.numeros.length)) set.tipo = 'libro';
+            }
+        }
         if (Object.keys(set).length) {
             set.fecha_actualizacion = new Date();
             await col.updateOne({ _id: existente._id }, { $set: set });
