@@ -38,6 +38,21 @@ export class ErrorRecursoIlegible extends Error {
 }
 
 /**
+ * ErrorOmitir: el recurso NO se puede (ni se debe) procesar todavía, pero debe quedar INTACTO. Casos:
+ * fichero con DRM (MOBI/AZW cifrado, no legible sin la clave del dispositivo), audio (audiolibros, aún sin
+ * tratamiento) u otro formato sin lector. NO es un fallo ni una identificación imposible: no va a Cuarentena
+ * ni se borra — se DEJA en el Inbox y el vigilante deposita un testigo `.noborrar` en su carpeta de más alto
+ * nivel para que el recolector de basura la respete.
+ */
+export class ErrorOmitir extends Error {
+    constructor(mensaje) {
+        super(mensaje);
+        this.name = 'ErrorOmitir';
+        this.tipo = 'omitir';
+    }
+}
+
+/**
  * Clasifica un error de axios: distingue un fallo de RED/transporte (sin respuesta del
  * servidor, timeout, DNS, 5xx, 429) de una respuesta legítima "no encontrado" (4xx).
  * Devuelve true si es un problema de infraestructura (reintentable).
