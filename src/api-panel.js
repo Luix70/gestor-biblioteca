@@ -20,7 +20,7 @@ import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexad
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
-import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs } from './utils/gestion-autores.js';
+import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor } from './utils/gestion-autores.js';
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -1363,6 +1363,14 @@ export function rutasPanel() {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
             res.json(await quitarAutorDeDocs(await conectarDB(), req.params.id, req.body?.ids || null));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Reasignar los documentos indicados de ESTE autor (:id) a OTRO (body.destino) — «enviar los
+    // seleccionados a otro autor». El viejo se conserva si le quedan libros; si no, se borra.
+    r.post('/autores/:id/reasignar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await reasignarDocsAAutor(await conectarDB(), req.body?.ids || [], req.params.id, req.body?.destino));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/autores/:id/editar', async (req, res) => {

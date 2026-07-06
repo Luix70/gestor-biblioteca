@@ -289,6 +289,48 @@ export async function quitarAutorDeDocs(db, autorId, ids = null) {
     return { ok: true, quitados: r.modifiedCount, restantes, autorBorrado };
 }
 
+/**
+ * REASIGNA la autoría de unos DOCUMENTOS de un autor a OTRO (para «enviar los seleccionados a otro autor»):
+ * en cada doc de `docIds` reemplaza `viejoId` por `nuevoId` en `autores[]` y en `contribuciones[]` (mismo
+ * rol, sin duplicar). El autor viejo se CONSERVA si le quedan otros libros; si se queda sin ninguno, se
+ * BORRA. Devuelve { reasignados, restantes, autorBorrado }.
+ */
+export async function reasignarDocsAAutor(db, docIds, viejoId, nuevoId) {
+    const viejo = oid(viejoId), nuevo = oid(nuevoId);
+    if (!viejo || !nuevo) return { ok: false, motivo: 'ids inválidos' };
+    if (String(viejo) === String(nuevo)) return { ok: false, motivo: 'el autor de destino es el mismo' };
+    const bib = db.collection('biblioteca');
+    const ids = (Array.isArray(docIds) ? docIds : []).map(oid).filter(Boolean);
+    if (!ids.length) return { ok: false, motivo: 'no se indicaron documentos' };
+    let n = 0;
+    for (const did of ids) {
+        const doc = await bib.findOne({ _id: did }, { projection: { autores: 1, contribuciones: 1 } });
+        if (!doc) continue;
+        const set = {};
+        // autores[]: viejo → nuevo, dedup.
+        if ((doc.autores || []).some(a => String(a) === String(viejo))) {
+            const vistos = new Set(), nuevos = [];
+            for (const a of doc.autores || []) { const rep = String(a) === String(viejo) ? nuevo : a; if (!vistos.has(String(rep))) { vistos.add(String(rep)); nuevos.push(rep); } }
+            set.autores = nuevos;
+        }
+        // contribuciones[]: persona viejo → nuevo (mismo rol), dedup por (persona,rol).
+        if ((doc.contribuciones || []).some(c => c && String(c.persona) === String(viejo))) {
+            const vistos = new Set(), nuevas = [];
+            for (const c of doc.contribuciones || []) {
+                const rep = String(c.persona) === String(viejo) ? nuevo : c.persona;
+                const k = String(rep) + '|' + c.rol;
+                if (!vistos.has(k)) { vistos.add(k); nuevas.push({ persona: rep, rol: c.rol }); }
+            }
+            set.contribuciones = nuevas;
+        }
+        if (Object.keys(set).length) { set.fecha_actualizacion = new Date(); await bib.updateOne({ _id: did }, { $set: set }); n++; }
+    }
+    const restantes = await bib.countDocuments({ $or: [{ autores: viejo }, { 'contribuciones.persona': viejo }] });
+    let autorBorrado = false;
+    if (restantes === 0) { await db.collection('autores').deleteOne({ _id: viejo }); autorBorrado = true; }
+    return { ok: true, reasignados: n, restantes, autorBorrado };
+}
+
 // data URL o base64 puro → { buf, ext } (jpg|png|webp) o null. (Mismo criterio que utils/imagenes-doc.js.)
 const MAX_FOTO_BYTES = 12 * 1024 * 1024;
 function decodificarImagen(b64) {

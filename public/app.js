@@ -11203,7 +11203,7 @@ async function autorFicha(id) {
     ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
          <button class="btn" id="autFoto">📷 Foto</button>
          <button class="btn" id="autEnriquecer" title="Rellena foto, biografía, seudónimos y fechas desde OpenLibrary, Wikidata y Wikipedia (sin IA)">✨ Autocompletar (web)</button>
-         <button class="btn" id="autFusionar" title="Buscar OTRO autor y fundirlo EN este (sus libros pasan aquí; el otro se borra)">🔀 Fusionar otro aquí</button>
+         <button class="btn" id="autFusionar" title="Fundir ESTE autor en otro que elijas: sus libros pasan al otro y este se borra">🔀 Fusionar este en…</button>
          ${libros.length ? `<button class="btn" id="autQuitarTodos" title="Quitar este autor de TODOS sus libros (quedan sin este autor); si se queda sin obras, se borra">🚫 Quitar de todos</button>` : ''}
          <button class="btn pri" id="autGuardarTop">💾 Guardar</button>
          <button class="btn" id="autCerrarTop">Cerrar</button>
@@ -11231,6 +11231,7 @@ async function autorFicha(id) {
         <button class="btn" id="autSelTodos" style="padding:2px 8px;font-size:12px">Todos</button>
         <button class="btn" id="autSelNinguno" style="padding:2px 8px;font-size:12px">Ninguno</button>
         <button class="btn pri" id="autSelEnviar" style="padding:2px 8px;font-size:12px">🔍 Mostrar en Catálogo</button>
+        ${admin ? '<button class="btn" id="autSelMover" style="padding:2px 8px;font-size:12px" title="Enviar los libros seleccionados a OTRO autor (este los deja de tener)">➡️ A otro autor</button>' : ''}
         ${admin ? '<button class="btn" id="autSelQuitar" style="padding:2px 8px;font-size:12px" title="Quitar este autor de los libros seleccionados">🚫 Quitar autoría</button>' : ''}
       </div>
       ${librosHtml}
@@ -11328,11 +11329,30 @@ async function autorFicha(id) {
     if ($('#autEnriquecer')) $('#autEnriquecer').onclick = () => autorEnriquecer(id);
     if ($('#autGuardar')) $('#autGuardar').onclick = () => autorGuardar(id);
     if ($('#autGuardarTop')) $('#autGuardarTop').onclick = () => autorGuardar(id);
-    if ($('#autFusionar')) $('#autFusionar').onclick = () => autorFusionar(id, nombreAutor);
+    // Fusionar ESTE autor en otro (el actual se absorbe en el elegido y se borra).
+    if ($('#autFusionar')) $('#autFusionar').onclick = () =>
+      elegirAutorOverlay(id, `🔀 Fusionar «${recortar(nombreAutor, 24)}» en…`, 'Sus libros pasarán al autor que elijas y este se borrará.', async (bId, bNom) => {
+        if (!confirm(`¿Fundir «${nombreAutor}» EN «${bNom}»?\n\nTodos sus libros pasan a «${bNom}» y «${nombreAutor}» se borra.`)) return;
+        const rr = await api('/autores/fusionar', { method: 'POST', body: JSON.stringify({ destino: bId, ids: [id] }) });
+        cerrarCmp();
+        toast(`✔ Fusionado en «${bNom}» · ${rr.reasignados || 0} libro(s)`);
+        autoresBuscar();
+      });
     if ($('#autQuitarTodos')) $('#autQuitarTodos').onclick = () => autorQuitar(id, nombreAutor, null, libros.length);
     if ($('#autSelQuitar')) $('#autSelQuitar').onclick = () => {
       if (!_autFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
       autorQuitar(id, nombreAutor, [..._autFichaSel], _autFichaSel.size);
+    };
+    // Enviar los libros SELECCIONADOS a otro autor (el actual conserva los no seleccionados).
+    if ($('#autSelMover')) $('#autSelMover').onclick = () => {
+      if (!_autFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
+      const ids = [..._autFichaSel];
+      elegirAutorOverlay(id, `➡️ Mover ${ids.length} libro(s) a…`, 'Los libros seleccionados pasan al autor elegido; este los deja de tener.', async (bId, bNom) => {
+        const rr = await api('/autores/' + encodeURIComponent(id) + '/reasignar', { method: 'POST', body: JSON.stringify({ destino: bId, ids }) });
+        cerrarCmp();
+        toast(`✔ ${rr.reasignados || 0} libro(s) → «${bNom}»${rr.autorBorrado ? ' · autor vaciado y borrado' : ''}`);
+        autoresBuscar();
+      });
     };
   }
 }
@@ -11350,13 +11370,14 @@ async function autorQuitar(id, nombre, ids, count) {
   } catch (e) { toast('Error: ' + e.message, 'bad'); }
 }
 
-// Fusionar OTRO autor EN este: overlay de búsqueda; el elegido se ABSORBE (sus libros pasan aquí, se borra).
-async function autorFusionar(destinoId, destinoNombre) {
+// Overlay de BÚSQUEDA de autor (para fusionar/reasignar). `excluir` = id a no ofrecer (el actual). Al elegir
+// uno llama a onPick(id, nombre); la propia acción cierra el overlay. Reutilizable por varias acciones.
+function elegirAutorOverlay(excluir, titulo, subtitulo, onPick) {
   const ov = document.createElement('div');
   ov.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px';
   ov.innerHTML = `<div class="box card" style="max-width:460px;width:94vw;max-height:82vh;overflow:auto">
-      <h3 style="margin-top:0">🔀 Fusionar en «${esc(recortar(destinoNombre, 28))}»</h3>
-      <div class="muted" style="font-size:12px;margin-bottom:8px">Busca el autor a ABSORBER: sus libros pasarán a «${esc(recortar(destinoNombre, 22))}» y ese autor se borrará.</div>
+      <h3 style="margin-top:0">${esc(titulo)}</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(subtitulo)}</div>
       <input id="fusBuscar" placeholder="Buscar autor por nombre…" autocomplete="off" style="width:100%;box-sizing:border-box">
       <div id="fusRes" class="muted" style="margin-top:10px;max-height:46vh;overflow:auto;font-size:13px">Escribe para buscar…</div>
       <div style="margin-top:12px;text-align:right"><button class="btn" id="fusX">Cancelar</button></div>
@@ -11374,18 +11395,13 @@ async function autorFusionar(destinoId, destinoNombre) {
     res.textContent = 'Buscando…';
     try {
       const r = await api('/autores?q=' + encodeURIComponent(q) + '&limite=40');
-      const cand = (r.autores || []).filter((x) => String(x._id) !== String(destinoId));
+      const cand = (r.autores || []).filter((x) => String(x._id) !== String(excluir));
       if (!cand.length) { res.textContent = 'Sin resultados.'; return; }
       res.innerHTML = cand.map((x) =>
         `<button type="button" class="btn fusPick" data-id="${esc(x._id)}" data-nom="${esc(x.nombre)}" style="display:block;width:100%;text-align:left;margin-top:5px">${esc(x.nombre)} <span class="muted">· ${x.libros || 0} libro(s)</span></button>`).join('');
       res.querySelectorAll('.fusPick').forEach((b) => (b.onclick = async () => {
-        if (!confirm(`Fundir «${b.dataset.nom}» EN «${destinoNombre}»?\n\nLos libros de «${b.dataset.nom}» pasarán a «${destinoNombre}» y «${b.dataset.nom}» se borrará.`)) return;
-        try {
-          const rr = await api('/autores/fusionar', { method: 'POST', body: JSON.stringify({ destino: destinoId, ids: [b.dataset.id] }) });
-          cerrar(); cerrarCmp();
-          toast(`✔ Fusionado · ${rr.reasignados || 0} libro(s) reasignados`);
-          autoresBuscar();
-        } catch (e) { toast('Error: ' + e.message, 'bad'); }
+        try { await onPick(b.dataset.id, b.dataset.nom); cerrar(); }
+        catch (e) { toast('Error: ' + e.message, 'bad'); }
       }));
     } catch (e) { res.textContent = 'Error: ' + e.message; }
   };
