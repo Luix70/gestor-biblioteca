@@ -36,6 +36,35 @@ function extraerIsbnDublinCore($, metadata) {
  *                         + <meta refines="#x" property="group-position">N</meta>
  * Normaliza el índice "10.0" → "10". Devuelve { nombre, numero } (ambos pueden ser null).
  */
+// Códigos MARC relator (opf:role / EPUB3 meta property="role") → rol canónico del sistema.
+const MARC_A_ROL = {
+    trl: 'traductor',
+    ill: 'ilustrador', pht: 'ilustrador', drm: 'ilustrador', art: 'ilustrador',
+    edt: 'editor', edc: 'editor', edm: 'editor',
+    aui: 'prologuista', win: 'prologuista', wpr: 'prologuista', aft: 'prologuista', wst: 'prologuista',
+    ann: 'anotador',
+    com: 'compilador', cmp: 'compilador',
+};
+// Contribuidores (traductor/ilustrador/editor/…) del OPF: dc:contributor con su rol MARC. EPUB2 usa el
+// atributo `opf:role="trl"`; EPUB3 lo refina con <meta refines="#id" property="role">trl</meta>. Devuelve
+// [{nombre, rol}] con NOMBRES CRUDOS (el llamador aplica repararMojibake). Fuente de archivo = fiable.
+function extraerContribucionesEpub($, metadata) {
+    const out = [];
+    metadata.find('dc\\:contributor').each((i, el) => {
+        const $el = $(el);
+        const nombre = ($el.attr('opf:file-as') || $el.text() || '').trim();
+        if (!nombre) return;
+        let code = ($el.attr('opf:role') || '').trim().toLowerCase();
+        if (!code) {
+            const id = $el.attr('id');
+            if (id) code = (metadata.find(`meta[refines="#${id}"][property="role"]`).first().text() || '').trim().toLowerCase();
+        }
+        const rol = MARC_A_ROL[code];
+        if (rol) out.push({ nombre, rol });
+    });
+    return out;
+}
+
 function extraerSerieEpub($, metadata) {
     const normNum = (v) => {
         if (!v) return null;
@@ -211,6 +240,11 @@ export async function extraerMetadatosEpub(rutaArchivo) {
                 coleccion_numero: serie.numero || null,
                 cubierta_base64: null // Reservado para la imagen que enviaremos a Gemini
             };
+
+            // Contribuidores (traductor/ilustrador/editor/…) del OPF — fuente de archivo, fiable. Se
+            // resuelven a personas en motor-catalogo (contribuciones_nombres → contribuciones[persona,rol]).
+            const contribs = extraerContribucionesEpub($, metadata).map(c => ({ nombre: repararMojibake(c.nombre), rol: c.rol }));
+            if (contribs.length) metadatos.contribuciones_nombres = contribs;
 
             // 3. Cubierta: extracción robusta (varias convenciones; elige la imagen más grande).
             metadatos.cubierta_base64 = extraerCubiertaEpub(zip, $, opfPath);

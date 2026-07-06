@@ -8,9 +8,13 @@
 //   node scripts/recuperar-contribuciones.js            (diagnostica)
 //   node scripts/recuperar-contribuciones.js --ejecutar (repara)
 import 'dotenv/config';
+import path from 'node:path';
+import fs from 'node:fs';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';
 import { buscarMetadatosExternos } from '../src/utils/proveedor-metadatos.js';
+import { extraerMetadatosEpub } from '../src/utils/lector-epub.js';
+import { carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
 import { resolverPersona } from '../src/utils/resolver-persona.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
@@ -20,7 +24,7 @@ async function main() {
     const db = await conectarDB();
     const bib = db.collection('biblioteca');
     const docs = await bib.find({ contribuciones: { $exists: true, $ne: [] } })
-        .project({ contribuciones: 1, isbn: 1, isbn_candidatos: 1, titulo: 1 }).toArray();
+        .project({ contribuciones: 1, isbn: 1, isbn_candidatos: 1, titulo: 1, formatos: 1, ruta_base: 1, nombre_archivo: 1 }).toArray();
 
     // Autores que SÍ existen (para saber qué personas están rotas).
     const todas = new Set();
@@ -39,7 +43,19 @@ async function main() {
         // Proveedor completo (Fichero → OpenLibrary online → by_statement), SIN IA (sin CDU/sinopsis/visión).
         let dx = null;
         try { if (isbns.length) dx = await buscarMetadatosExternos(d.titulo || '', '', null, { isbnsArchivo: isbns, incluirSinopsis: false, incluirCdu: false }); } catch { /* sigue */ }
-        const nombres = dx && Array.isArray(dx.contribuciones_nombres) ? dx.contribuciones_nombres : [];
+        let nombres = dx && Array.isArray(dx.contribuciones_nombres) ? dx.contribuciones_nombres : [];
+        // Fallback: si el Fichero/OL no traen contribuidores, leerlos del PROPIO FICHERO (EPUB: dc:contributor
+        // con rol MARC). Solo lee contribuciones; NO toca título/colección/número. Requiere el fichero en disco
+        // (correr en el NAS, donde está PATH_CDU). Otros formatos (pdf/papel/cbr) no llevan estos metadatos.
+        if (!nombres.length && (d.formatos || []).includes('epub')) {
+            try {
+                const ruta = path.join(carpetaDeDoc(d), d.nombre_archivo || '');
+                if (d.nombre_archivo && fs.existsSync(ruta)) {
+                    const meta = await extraerMetadatosEpub(ruta);
+                    if (Array.isArray(meta.contribuciones_nombres) && meta.contribuciones_nombres.length) nombres = meta.contribuciones_nombres;
+                }
+            } catch { /* sigue */ }
+        }
         if (!nombres.length) { sinFichero++; sinRecuperar += rotas.length; pendientes.push({ t: d.titulo, isbn: d.isbn, n: rotas.length }); continue; }
 
         // Cola de nombres por rol (para casar cada ref rota con el nombre de su mismo rol, por orden).

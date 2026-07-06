@@ -2331,9 +2331,11 @@ function pintarDoc(r, ctx) {
     _autores: (() => {
       const lineas = [];
       (r.autores || []).forEach((n, i) => lineas.push(enlaceAutor(n, r.autores_ids && r.autores_ids[i])));
-      (r.contribuciones || []).forEach((c) =>
-        lineas.push(`${enlaceAutor(c.nombre, c.persona)} <span class="muted" style="font-size:12px">(${esc(capRol(c.rol))})</span>`),
-      );
+      (r.contribuciones || []).forEach((c) => {
+        // Contribución no resuelta (persona borrada): se MUESTRA el id (marcado ⚠) pero SIN enlace (no hay ficha).
+        const nom = c.desconocido ? `<span class="muted" title="Autor no encontrado (referencia rota)">${esc(c.nombre)}</span>` : enlaceAutor(c.nombre, c.persona);
+        lineas.push(`${nom} <span class="muted" style="font-size:12px">(${esc(capRol(c.rol))})</span>`);
+      });
       return lineas.length ? lineas.join('<br>') : null;
     })(),
     _editorial: r.editorial ? esc(r.editorial) : null,
