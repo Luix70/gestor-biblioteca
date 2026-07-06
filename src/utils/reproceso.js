@@ -82,6 +82,9 @@ const nombreSeguro = (s) => (String(s || '').replace(/[<>:"/\\|?*\x00-\x1f]+/g, 
 // lo vuelve a calcular el pipeline. Así reprocesar para arreglar la ficha NO pierde ubicación/colección/nº.
 function sidecarPreservar(doc) {
     const s = {};
+    // El _id se PRESERVA: reprocesar es «los mismos datos de identidad, solo enriquecer». Así la etiqueta
+    // NFC (que lleva grabado ?doc=<_id>), la obra (volumenes[]) y cualquier deep-link siguen apuntando bien.
+    if (doc._id) s._id = String(doc._id);
     if (doc.coleccion_nombre) s.coleccion_nombre = doc.coleccion_nombre;
     if (doc.coleccion_numero != null) s.coleccion_numero = doc.coleccion_numero;
     if (doc.obra_titulo) s.obra_titulo = doc.obra_titulo;

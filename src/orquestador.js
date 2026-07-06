@@ -115,6 +115,9 @@ function aplicarOverride(datosBase, override) {
     if (override.isbn) { const v = validarISBN(override.isbn); if (v) { datosBase.isbn = v; datosBase.isbn_candidatos = variantesISBN(v); } }
     if (override.issn) { const v = validarISSN(override.issn); if (v) datosBase.issn = v; }
     if (override.sin_isbn === true) { delete datosBase.isbn; datosBase.isbn_candidatos = []; datosBase._isbnBloqueado = true; }
+    // _id PRESERVADO (reprocesado): se marca para reusarlo al insertar (motor-catalogo), así el documento
+    // re-catalogado conserva su identidad y la etiqueta NFC / obra / deep-links siguen siendo válidos.
+    if (override._id) datosBase._id_preservado = String(override._id);
     // Campos CURADOS por el usuario que se PRESERVAN en un reprocesado (no bibliográficos, no se re-derivan).
     if (override.valoracion != null) datosBase.valoracion = override.valoracion;
     if (override.nsfw != null) datosBase.nsfw = override.nsfw;

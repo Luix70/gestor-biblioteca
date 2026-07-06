@@ -1,3 +1,4 @@
+import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
 import { resolverColeccion, resolverCabecera, registrarNumeroEnColeccion, separarNumeroColeccion } from './utils/colecciones.js';
@@ -426,6 +427,13 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         // 121). El enriquecimiento ya los limpia; el alta rápida por ISBN no, así que se limpia aquí para TODOS
         // los caminos. Los campos requeridos nunca son vacíos, así que no se tocan.
         for (const k of Object.keys(docFinal)) if (vacio(docFinal[k])) delete docFinal[k];
+
+        // _id PRESERVADO (reprocesado): reusar el _id original para NO cambiar la identidad del documento
+        // (la etiqueta NFC lleva grabado ?doc=<_id>, la obra referencia el tomo por _id, hay deep-links…).
+        // El doc viejo ya se borró en el reprocesado, así que no hay colisión.
+        const idPreservado = docFinal._id_preservado;
+        delete docFinal._id_preservado;
+        if (idPreservado && ObjectId.isValid(idPreservado)) docFinal._id = new ObjectId(idPreservado);
 
         docFinal.fecha_ingreso = new Date();
         const resultado = await coleccionBiblioteca.insertOne(docFinal);
