@@ -351,6 +351,16 @@ de ficheros clasificado por CDU.
     «rehacer también los auto»— conserva o rehace los automáticos, rellenando huecos y
     continuando desde el más alto; editar un nº a mano lo vuelve editorial.
     (POST /colecciones/:id/numerar {numeros:{docId:nº|""}, auto:{docId:true}}.)
+    · Los miembros se muestran ORDENADOS por Nº de colección NUMÉRICO (1,2,…,11, no
+      1,11,2 — coleccion_numero es string, se ordena con $convert). Igual el orden
+      «posición en la colección/obra» del Catálogo.
+    · RENUMERAR DIRECTO (admin): el chip del nº de cada libro/tomo es un botón (✏️) →
+      mini-modal para cambiar ese nº al vuelo, sin abrir el editor completo.
+    · SELECCIÓN: en modo selección hay «☑ Todos / ☐ Ninguno» (marca/desmarca toda la
+      página). «🔍 Mostrar en Catálogo» de la selección ORDENA por Nº de colección
+      (o de tomo en obras) — numérico y ascendente, reflejado en el selector de orden.
+    · Lo mismo aplica a las OBRAS (tomos): botón «☑ Todos», renumerar tomo directo,
+      y «Mostrar en Catálogo» ordenado por Nº de tomo.
     · 📷 NUMERAR POR LOMOS (admin, series de libros): foto(s) de los CANTOS alineados
       (de la CÁMARA o ARCHIVOS existentes) → el NAVEGADOR SEGMENTA cada lomo SIN IA
       (perfil de proyección: detecta los SURCOS entre libros; orientación AUTO por foto,

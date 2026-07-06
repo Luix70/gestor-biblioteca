@@ -1353,7 +1353,10 @@ function tomoCard(d, numero, falta) {
     .slice(0, 3)
     .map((f) => `<span class="fmt">${esc(f)}</span>`)
     .join('');
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">Tomo ${numero ?? '?'} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.volumen_titulo || d.titulo || '—')}</div></div></div>`;
+  const numChip = ROL === 'admin'
+    ? `<button class="btn" style="padding:1px 7px;font-size:11px;line-height:1.6" data-renum="${esc(d._id)}" title="Cambiar el nº de tomo">Tomo ${esc(numero ?? '?')} ✏️</button>`
+    : `Tomo ${numero ?? '?'}`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${numChip} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.volumen_titulo || d.titulo || '—')}</div></div></div>`;
 }
 
 let _obraR = null; // última obra pintada (para el editor «Numerar tomos»)
@@ -1389,8 +1392,15 @@ function pintarObra(r) {
     head +
     `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">Tomos</h3>${numBtn}</div><div class="vol-grid" style="margin-top:10px">${vols}</div></div>` +
     sin;
-  montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { obra: { _id: o._id, titulo: o.titulo } }, titulo: `📚 ${recortar(o.titulo || 'obra', 30)}` });
+  // «Mostrar en Catálogo» de la selección → orden por Nº de tomo (numérico).
+  montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { obra: { _id: o._id, titulo: o.titulo } }, titulo: `📚 ${recortar(o.titulo || 'obra', 30)}`, orden: 'obra' });
   attachRating('#p-detalle');
+  // Renumerado directo de un tomo (admin). r.volumenes = [{doc, numero, presente}]; r.sin_numero = [doc].
+  const docsObra = [...(r.volumenes || []).filter((v) => v.doc).map((v) => ({ d: v.doc, n: v.numero })), ...(r.sin_numero || []).map((d) => ({ d, n: d.volumen_numero }))];
+  $$('#p-detalle [data-renum]').forEach((b) => (b.onclick = () => {
+    const it = docsObra.find((x) => String(x.d._id) === b.dataset.renum);
+    if (it) renumerarVolumenRapido({ tipo: 'obra', grupoId: o._id, docId: it.d._id, actual: it.n, titulo: it.d.volumen_titulo || it.d.titulo, total: o.total_volumenes });
+  }));
   if ($('#obraNumerar')) $('#obraNumerar').onclick = () => numerarTomos();
 }
 
@@ -1487,7 +1497,7 @@ async function verColeccion(id) {
   }
 }
 
-function miembroCard(d, etiqueta) {
+function miembroCard(d, numeroHTML) {
   const cov = d.portada
     ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`
     : '<div class="ph">📕</div>';
@@ -1495,7 +1505,7 @@ function miembroCard(d, etiqueta) {
     .slice(0, 3)
     .map((f) => `<span class="fmt">${esc(f)}</span>`)
     .join('');
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${esc(etiqueta || '')} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo || '—')}</div></div></div>`;
+  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${numeroHTML || ''} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo || '—')}</div></div></div>`;
 }
 
 let _colR = null; // última colección pintada (para el editor «Numerar»)
@@ -1520,20 +1530,28 @@ function pintarColeccion(r) {
         ${c.cdu ? `<div class="mono muted" style="margin-top:8px">CDU ${esc(c.cdu)}${desc && desc.titulo_es ? ' · ' + esc(desc.titulo_es) : ''}</div>` : ''}
         ${c.descripcion ? `<p class="muted" style="font-size:12px;margin-top:6px">${esc(c.descripcion)}</p>` : ''}
       </div></div>`;
-  const etiq = (d) =>
-    esRev
-      ? d.clave_numero || (d.año_edicion ? String(d.año_edicion) : '') || 'nº ?'
-      : d.coleccion_numero
-        ? 'nº ' + d.coleccion_numero
-        : '';
+  // Nº de cada miembro. En LIBROS y admin, es un botón: toca = renumerar ese volumen directo (mini-modal).
+  const numeroChip = (d) => {
+    if (esRev) return esc(d.clave_numero || (d.año_edicion ? String(d.año_edicion) : '') || 'nº ?');
+    const lbl = d.coleccion_numero ? 'nº ' + d.coleccion_numero : 'nº —';
+    return ROL === 'admin'
+      ? `<button class="btn" style="padding:1px 7px;font-size:11px;line-height:1.6" data-renum="${esc(d._id)}" title="Cambiar el nº en la colección">${esc(lbl)} ✏️</button>`
+      : esc(d.coleccion_numero ? 'nº ' + d.coleccion_numero : '');
+  };
   const cards = r.miembros.length
-    ? r.miembros.map((d) => miembroCard(d, etiq(d))).join('')
+    ? r.miembros.map((d) => miembroCard(d, numeroChip(d))).join('')
     : `<div class="empty">Sin ${esRev ? 'números' : 'libros'} registrados</div>`;
   $('#p-detalle').innerHTML =
     head +
     `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${esRev ? 'Números' : 'Libros'}</h3>${numBtn}</div><div class="vol-grid" style="margin-top:10px">${cards}</div></div>`;
-  montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}` });
+  // «Mostrar en Catálogo» de la selección → orden por Nº de colección (numérico), salvo en revistas.
+  montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}`, orden: esRev ? undefined : 'coleccion' });
   attachRating('#p-detalle');
+  // Renumerado directo de un volumen (solo libros/admin).
+  $$('#p-detalle [data-renum]').forEach((b) => (b.onclick = () => {
+    const d = r.miembros.find((m) => String(m._id) === b.dataset.renum);
+    if (d) renumerarVolumenRapido({ tipo: 'coleccion', grupoId: c._id, docId: d._id, actual: d.coleccion_numero, titulo: d.titulo });
+  }));
   if ($('#colNumerar')) $('#colNumerar').onclick = () => numerarColeccion();
   if ($('#colLomos')) $('#colLomos').onclick = () => numerarPorLomos();
 }
@@ -1626,6 +1644,35 @@ function numerarColeccion() {
       alert('No se pudo guardar la numeración: ' + e.message);
     }
   };
+}
+
+// Renumerar DIRECTAMENTE un solo volumen/tomo desde la ficha de la colección u obra (sin abrir el editor
+// completo): mini-modal con un campo de nº. El nº puesto a mano es EDITORIAL (coleccion_numero_auto:false).
+function renumerarVolumenRapido({ tipo, grupoId, docId, actual, titulo, total }) {
+  const modal = $('#cmpModal'), scrim = $('#cmpScrim');
+  const cual = tipo === 'obra' ? 'la obra' : 'la colección';
+  modal.innerHTML = `<div class="box card" style="max-width:360px;width:92vw">
+      <h3 style="margin-top:0">Nº en ${cual}</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">${esc(recortar(titulo || '', 64))}</div>
+      <input type="number" min="1" id="rvNum" value="${esc(actual != null ? actual : '')}" placeholder="—" inputmode="numeric" style="width:100%;text-align:center;font-size:20px;padding:10px;box-sizing:border-box">
+      <div style="margin-top:8px;font-size:12px" class="muted">Vacío = sin número.</div>
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="rvCancel">Cancelar</button><button class="btn pri" id="rvSave">Guardar</button></div>
+    </div>`;
+  scrim.style.display = 'block'; modal.style.display = 'grid';
+  scrim.onclick = cerrarCmp; $('#rvCancel').onclick = cerrarCmp;
+  setTimeout(() => { const i = $('#rvNum'); if (i) { i.focus(); i.select(); } }, 40);
+  const guardar = async () => {
+    const val = $('#rvNum').value.trim();
+    const btn = $('#rvSave'); btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      if (tipo === 'obra') await api('/obras/' + encodeURIComponent(grupoId) + '/numerar', { method: 'POST', body: JSON.stringify({ numeros: { [docId]: val }, total }) });
+      else await api('/colecciones/' + encodeURIComponent(grupoId) + '/numerar', { method: 'POST', body: JSON.stringify({ numeros: { [docId]: val }, auto: { [docId]: false } }) });
+      cerrarCmp();
+      tipo === 'obra' ? verObra(grupoId) : verColeccion(grupoId);
+    } catch (e) { btn.disabled = false; btn.textContent = 'Guardar'; alert('No se pudo cambiar el nº: ' + e.message); }
+  };
+  $('#rvSave').onclick = guardar;
+  $('#rvNum').onkeydown = (e) => { if (e.key === 'Enter') guardar(); };
 }
 
 // Recorta el rectángulo `bbox` (fracciones 0..1) de una imagen ya cargada y lo devuelve como data-URL JPEG.
@@ -2006,7 +2053,7 @@ function pintarNavFicha(id, ctx) {
 // «Mostrar en Catálogo» de lo seleccionado. Mismo comportamiento y diseño que el Catálogo.
 //   scopeSel = contenedor con las tarjetas [data-doc]; barSel = dónde pintar la barra; verCtx = contexto de
 //   verDoc (volver/etiqueta); titulo = etiqueta del chip en el Catálogo.
-function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo }) {
+function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo, orden }) {
   const scope = $(scopeSel);
   const bar = $(barSel);
   if (!scope || !bar) return;
@@ -2019,13 +2066,20 @@ function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo }) {
   const soloAdmin = ROL === 'admin';
   const alternar = () => { if (!soloAdmin) return; modo = !modo; scope.classList.toggle('selmode', modo); setModoVisual(modo); pintarBar(); };
   const pintarBar = () => {
+    // En modo selección: botón «Todos/Ninguno» (selecciona/deselecciona todas las tarjetas de la página).
+    const todos = modo ? ` <button class="btn" id="selall">${sel.size >= cards.length && cards.length ? '☐ Ninguno' : '☑ Todos'}</button>` : '';
     const acc = sel.size
       ? `<span style="margin-left:auto"></span><b>${sel.size}</b> sel. <button class="btn pri" id="selcat">🔍 Mostrar en Catálogo</button> <button class="btn" id="selclr">Limpiar</button>`
       : '';
-    bar.innerHTML = `<div class="bulkbar"><button class="btn${modo ? ' pri' : ''}" id="selmodo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre su ficha. Doble clic / pulsación larga en una tarjeta también conmuta. La selección se conserva.">${modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>${acc}</div>`;
+    bar.innerHTML = `<div class="bulkbar"><button class="btn${modo ? ' pri' : ''}" id="selmodo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre su ficha. Doble clic / pulsación larga en una tarjeta también conmuta. La selección se conserva.">${modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>${todos}${acc}</div>`;
     $('#selmodo').onclick = alternar;
+    if ($('#selall')) $('#selall').onclick = () => {
+      const marcarTodas = sel.size < cards.length;
+      cards.forEach((c) => { if (marcarTodas) { sel.add(c.dataset.doc); c.classList.add('sel'); } else { sel.delete(c.dataset.doc); c.classList.remove('sel'); } });
+      pintarBar();
+    };
     if (sel.size) {
-      $('#selcat').onclick = () => mostrarEnCatalogo([...sel], titulo || `${sel.size} libros`);
+      $('#selcat').onclick = () => mostrarEnCatalogo([...sel], titulo || `${sel.size} libros`, orden);
       $('#selclr').onclick = () => { sel.clear(); cards.forEach((c) => c.classList.remove('sel')); pintarBar(); };
     }
   };
@@ -4962,10 +5016,23 @@ function alternarModoSel() {
 }
 // Envía una lista de libros al Catálogo YA SELECCIONADOS (en modo selección), filtrando por esos ids.
 // Reutilizable desde cualquier origen (ficha de autor, colección, editorial, obra…).
-function mostrarEnCatalogo(ids, etiqueta) {
+function mostrarEnCatalogo(ids, etiqueta, orden) {
   selDocs = new Set(ids);
   modoSeleccion = ROL === 'admin';
-  irBusquedaFiltro({ ids: ids.join(','), etiqueta });
+  estadoBusqueda.extra = { ids: ids.join(','), etiqueta };
+  estadoBusqueda.page = 1;
+  go('search');
+  if (!$('#sqQ')) construirSearch();
+  if ($('#sqQ')) $('#sqQ').value = '';
+  if ($('#sqCdu')) $('#sqCdu').value = '';
+  // Orden pedido (p. ej. por Nº de colección/obra al venir de la ficha de una serie): lo reflejamos en el
+  // selector (numérico y ascendente), como hace verEstanteriaEnCatalogo con «posición».
+  if (orden && $('#sqOrden')) {
+    $('#sqOrden').value = orden;
+    const b = $('#sqDir'); if (b) { b.dataset.dir = 'asc'; b.textContent = '↑ Asc'; }
+    const w = $('#sqDirWrap'); if (w) w.style.display = '';
+  }
+  buscarCatalogo(1);
 }
 function renderBulk() {
   const el = $('#searchBulk');

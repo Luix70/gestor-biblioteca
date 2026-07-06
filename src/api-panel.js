@@ -794,9 +794,18 @@ export function rutasPanel() {
             const matchMiembros = { coleccion: col._id };
             if (await ocultarNsfw(req.usuario?.rol)) matchMiembros.nsfw = { $ne: true };
             const proy = { ...PROY_VOL, clave_numero: 1, 'año_edicion': 1, mes_publicacion: 1, numero_issue: 1, coleccion_numero: 1, coleccion_numero_auto: 1 };
-            const miembros = await db.collection('biblioteca')
-                .find(matchMiembros, { projection: proy })
-                .sort(esRevista ? { clave_numero: 1, 'año_edicion': 1 } : { titulo: 1 }).limit(2000).toArray();
+            // Revista → por clave/fecha. Libro → por Nº de colección NUMÉRICO (coleccion_numero es string, así
+            // que $convert a double; sin número al final) para que la ficha de la serie salga 1,2,…,11 (no 1,11,2).
+            const miembros = esRevista
+                ? await db.collection('biblioteca').find(matchMiembros, { projection: proy })
+                    .sort({ clave_numero: 1, 'año_edicion': 1 }).limit(2000).toArray()
+                : await db.collection('biblioteca').aggregate([
+                    { $match: matchMiembros },
+                    { $addFields: { _cnum: { $convert: { input: '$coleccion_numero', to: 'double', onError: 1e9, onNull: 1e9 } } } },
+                    { $sort: { _cnum: 1, titulo: 1 } },
+                    { $limit: 2000 },
+                    { $project: proy },
+                  ]).toArray();
 
             res.json({
                 ok: true,
