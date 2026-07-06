@@ -28,9 +28,9 @@ async function refsAutor(db) {
     for (const col of ['biblioteca', 'obras', 'colecciones']) {
         for (const id of await db.collection(col).distinct('autores')) if (id) set.add(S(id));
     }
-    // contribuciones[].autor (traductor/ilustrador/…)
+    // contribuciones[].persona (traductor/ilustrador/editor/…). ¡El campo es `persona`, NO `autor`!
     for (const d of await db.collection('biblioteca').find({ contribuciones: { $exists: true, $ne: [] } }).project({ contribuciones: 1 }).toArray())
-        for (const c of (d.contribuciones || [])) if (c && c.autor) set.add(S(c.autor));
+        for (const c of (d.contribuciones || [])) { const p = c && (c.persona || c.autor); if (p) set.add(S(p)); }
     return set;
 }
 
