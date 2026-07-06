@@ -1086,6 +1086,12 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
                             reconstruye el nombre por ISBN (Fichero + OpenLibrary, sin IA) y
                             lo re-resuelve con resolverPersona. Solo toca refs rotas. Dry-run;
                             --ejecutar.
+    unificar-autores-grafia.js  [RETROACTIVO] funde autores que son la MISMA persona escrita
+                            distinto SOLO por mayúsculas/acentos («JEAN TOUCHARD»=«Jean
+                            Touchard», «José»=«Jose»): agrupa por nombre normalizado (minús. +
+                            sin diacríticos), destino = mejor grafía, funde con fusionarAutores.
+                            ESTRICTO (nunca por parecido). El fix vive en resolverPersona
+                            (collation strength:1); esto sanea lo viejo. Dry-run; --ejecutar.
 
   ── Saneos RETROACTIVOS (el fix ya está en la ingesta; sanean lo VIEJO) ───────
     sanear-colecciones-issn.js  [RETROACTIVO] colecciones con nombre-PLACEHOLDER (su
