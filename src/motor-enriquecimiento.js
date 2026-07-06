@@ -208,6 +208,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
 
     // Fusión CONSERVADORA: el dato del archivo manda; lo externo solo rellena huecos.
     documento.sinopsis    = primerValido(documento.sinopsis, datosExtra.sinopsis);
+    documento.subtitulo   = primerValido(documento.subtitulo, datosExtra.subtitulo);
 
     // Editorial: excepción al conservadurismo. Si el archivo trae un grupo de difusión
     // (ePubLibre, etc.), una editorial real encontrada en las APIs tiene prioridad.
@@ -361,7 +362,9 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Limpieza 1: descartar campos internos de los lectores que no deben persistirse
     // (evita guardar la portada base64 completa o banderas de proceso en MongoDB).
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
-    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_candidatos', 'isbn_propio', 'issn_candidatos', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado'];
+    // isbn_candidatos / issn_candidatos SE PERSISTEN (todos los identificadores vistos, para búsquedas más
+    // refinadas). El resto son de proceso y no se guardan.
+    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_propio', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).

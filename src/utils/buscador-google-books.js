@@ -26,6 +26,7 @@ function normalizar(volumen) {
     return {
         isbn: isbn,
         titulo: info.title || null,
+        subtitulo: info.subtitle || null,
         autores: Array.isArray(info.authors) ? info.authors : [],
         editorial: info.publisher || null,
         año_edicion: info.publishedDate ? (parseInt(info.publishedDate.substring(0, 4)) || null) : null,

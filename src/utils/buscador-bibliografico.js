@@ -43,6 +43,7 @@ function normalizar(data) {
     return {
         isbn: isbnFinal,
         titulo: data.title || null,
+        subtitulo: data.subtitle || null,
         editorial: editorial,
         año_edicion: data.first_publish_year || parseInt(data.publish_date) || null,
         dewey: dewey,

@@ -61,6 +61,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     let datosExtra = {
         isbn: null,
         titulo: null,        // título de la autoridad (solo se usa si el archivo no aporta uno fiable)
+        subtitulo: null,     // subtítulo de la autoridad (rellena hueco)
         autores: [],         // autores de la autoridad (idem)
         sinopsis: null,
         editorial: null,
@@ -127,6 +128,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         // sea el camino de entrada (fichero, alta por ISBN…).
         rellenar('isbn', infoLocal.isbn);
         rellenar('titulo', infoLocal.titulo);
+        rellenar('subtitulo', infoLocal.subtitulo);
         rellenar('autores', infoLocal.autores);
         rellenar('editorial', infoLocal.editorial);
         rellenar('sinopsis', infoLocal.sinopsis);
@@ -184,6 +186,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     if (infoOL) {
         rellenar('isbn', infoOL.isbn);
         rellenar('titulo', infoOL.titulo);
+        rellenar('subtitulo', infoOL.subtitulo);
         rellenar('autores', infoOL.autores);
         rellenar('editorial', infoOL.editorial);
         rellenar('sinopsis', infoOL.sinopsis);
@@ -218,6 +221,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     if (infoGB) {
         rellenar('isbn', infoGB.isbn);
         rellenar('titulo', infoGB.titulo);
+        rellenar('subtitulo', infoGB.subtitulo);
         rellenar('autores', infoGB.autores);
         rellenar('editorial', infoGB.editorial);
         if (incluirSinopsis) rellenar('sinopsis', infoGB.sinopsis);

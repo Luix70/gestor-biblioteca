@@ -2155,6 +2155,7 @@ const CAMPOS_FICHA = [
   ['_isbn', 'ISBN'],
   ['_isbns_alt', 'Otras ediciones'],
   ['_issn', 'ISSN'],
+  ['_issns_alt', 'Otros ISSN'],
   ['lccn', 'LCCN'],
   ['obra_titulo', 'Obra'],
   ['_isbn_obra', 'ISBN obra'],
@@ -2393,6 +2394,13 @@ function pintarDoc(r, ctx) {
     _isbn_obra: d.isbn_obra
       ? `<a class="rowlink" data-q="${esc(d.isbn_obra)}" title="Ver todo lo que comparte este ISBN de obra">${esc(d.isbn_obra)}</a>`
       : null,
+    // Otros ISSN vistos (e-ISSN, ISSN de serie…) además del principal — drillables. Se filtra el primario.
+    _issns_alt: (() => {
+      const extra = (d.issn_candidatos || []).filter((x) => x && x !== d.issn);
+      return extra.length
+        ? [...new Set(extra)].map((x) => `<a class="rowlink" data-q="${esc(x)}" title="Buscar este ISSN">${esc(x)}</a>`).join('<br>')
+        : null;
+    })(),
   };
   const valor = (k) => {
     if (k in especiales) return especiales[k];
