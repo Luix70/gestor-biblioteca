@@ -20,6 +20,26 @@ export const nombreEsPlaceholder = (nombre, issn) => {
     return esTituloArtefacto(s);
 };
 
+// Normaliza un texto para comparar títulos (minúsculas, sin acentos ni puntuación, espacios colapsados).
+const _normTit = (s) => String(s || '').toLowerCase().normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '')
+    .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * ¿El nombre de la colección es en realidad el TÍTULO de uno de sus miembros? Entonces NO es un nombre de
+ * serie, sino un título de LIBRO usado por error como nombre de la colección (p. ej. la primera monografía
+ * de una serie Springer se llevó su propio título a la cabecera). Señal de que hay que corregirlo desde la
+ * autoridad (el ISSN de serie). Compara normalizado, con «contiene» (el nombre suele traer subtítulo/edición).
+ */
+export async function nombreEsTituloDeMiembro(db, coleccionId, nombre) {
+    const nn = _normTit(nombre);
+    if (nn.length < 6) return false;
+    const miembros = await db.collection('biblioteca').find({ coleccion: coleccionId }).project({ titulo: 1 }).limit(60).toArray();
+    return miembros.some((m) => {
+        const t = _normTit(m.titulo);
+        return t.length >= 6 && (nn === t || nn.includes(t) || t.includes(nn));
+    });
+}
+
 /**
  * Resuelve una cabecera/serie a un documento de 'colecciones' (check-then-create), keyed por ISSN
  * (autoridad) y, en su defecto, por nombre. Completa huecos (issn, tipo, editorial, cdu, descripcion)
@@ -65,7 +85,8 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
         // SANEO: la existente se reencontró por ISSN pero tiene un nombre-PLACEHOLDER/ARTEFACTO (un DOI, su
         // ISSN…, resto de una ingesta fallida) y ahora traemos un nombre REAL → RENÓMBRALA (si no choca con
         // otra). Y si era una 'revista' de relleno SIN números y ahora es una serie de libros, corrige el tipo.
-        if (n && existente.nombre !== n && nombreEsPlaceholder(existente.nombre, existente.issn)) {
+        if (n && existente.nombre !== n
+            && (nombreEsPlaceholder(existente.nombre, existente.issn) || await nombreEsTituloDeMiembro(db, existente._id, existente.nombre))) {
             const choca = await col.findOne({ nombre: n, _id: { $ne: existente._id } }, { collation: { locale: 'es', strength: 1 } });
             if (!choca) {
                 set.nombre = n;
