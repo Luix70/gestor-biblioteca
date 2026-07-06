@@ -239,7 +239,7 @@ de ficheros clasificado por CDU.
       Queda como icono propio ("Bibliotheca Ludoviciana").
 
   NAVEGACIÓN (menú ≡): Catálogo · Dashboard · Obras · Colecciones · Autores ·
-  Ubicaciones · Inbox · Actividad · Cuarentena · Papelera.
+  Editoriales · Ubicaciones · Inbox · Actividad · Cuarentena · Papelera.
   En móvil el botón Atrás del teléfono navega hacia atrás (doble-atrás = salir).
 
   ── CATÁLOGO (búsqueda + selección) ──────────────────────────────────────────
@@ -607,6 +607,27 @@ de ficheros clasificado por CDU.
         docker exec gestor-biblioteca node scripts/enriquecer-autores.js --ejecutar
       (sin --ejecutar = cuenta cuántos faltan; --limite N para probar; es
       reanudable: cada pasada coge los que aún no tienen bio/foto).
+
+  ── EDITORIALES ──────────────────────────────────────────────────────────────
+    Página GEMELA de Autores para consultar y DEPURAR editoriales. Buscador por
+    nombre o grafía alternativa; sin búsqueda, salen las editoriales CON libros,
+    las más usadas primero (orden por nº de libros o por nombre). Cada tarjeta:
+    nombre + nº de libros (+ «a.k.a.» si tiene nombres alternativos).
+    · FICHA (clic en una tarjeta): nombre y «también conocida como» EDITABLES
+      (admin), y los LIBROS que publica (clic → ficha del libro). «🔍 Ver en
+      Catálogo» abre todos sus libros filtrados (GET /catalogo?editorial=<id>).
+    · SELECCIÓN: MISMA mecánica y pista visual que el resto (Catálogo/Autores) —
+      «🖱 Modo selección» (botón o pulsación larga / doble clic en una tarjeta),
+      círculo de selección en cada tarjeta, la marcada se «hunde».
+    · COMBINAR (admin): marca 2+ editoriales → «🔗 Combinar» → elige la que se
+      CONSERVA (B; por defecto la de más libros). Las demás (A) se funden en B:
+      sus nombres pasan a «también conocida como» de B y TODOS sus libros se
+      reasignan a B (biblioteca.editorial); luego se borran las A. Sin pérdida
+      (los libros y sus ficheros no se tocan). En la ficha: «🔀 Fusionar esta en…»
+      (elige la destino en un overlay). (POST /editoriales/fusionar.)
+    · BORRAR (admin, en la ficha): solo una editorial SIN libros (fantasma tras
+      una fusión/corrección; nunca se borra una con obras). (POST /editoriales/
+      :id/borrar.) Backend: src/utils/gestion-editoriales.js.
 
   ── ACTIVIDAD (administración) ───────────────────────────────────────────────
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del

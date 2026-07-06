@@ -214,6 +214,7 @@ const titles = {
   obras: 'Obras',
   colecciones: 'Colecciones',
   autores: 'Autores',
+  editoriales: 'Editoriales',
   inbox: 'Inbox',
   search: 'Catálogo',
 };
@@ -11550,6 +11551,396 @@ function autorCombinar() {
   };
 }
 
+// ── EDITORIALES (página «Editoriales», GEMELA de Autores) ────────────────────────────────────────────
+// buscar/listar (con nº de libros) · ficha (nombre/alternativos editables + libros que publica) ·
+// COMBINAR duplicadas (A→B) · fusionar ESTA en otra · borrar (solo sin libros). Misma mecánica de
+// selección que el resto (tap-para-marcar, círculo .selmark, hundido; ver loadAutores).
+let _editoriales = []; // último listado recibido
+const _editorialesSel = new Set(); // ids marcadas para combinar
+let _editorialesSelModo = false; // Modo selección (tap = marcar)
+let _editorialesBuscarTimer = null; // debounce del buscador
+
+async function loadEditoriales() {
+  const cont = $('#p-editoriales');
+  if (!cont) return;
+  _editorialesSel.clear();
+  _editorialesSelModo = false;
+  cont.innerHTML = `
+    <div class="sec-h"><h2>Editoriales</h2></div>
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+      <input id="edBuscar" placeholder="🔍 Buscar editorial (nombre o variante)…" autocomplete="off" style="flex:1;min-width:200px" />
+      <span id="edCombinaBar"></span>
+    </div>
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <label class="muted" style="font-size:12px">Orden
+        <select id="edOrden"><option value="libros">nº de libros</option><option value="nombre">nombre</option></select>
+      </label>
+    </div>
+    <div id="edGrid" class="muted">Cargando…</div>`;
+  const inp = $('#edBuscar');
+  if (inp)
+    inp.oninput = () => {
+      clearTimeout(_editorialesBuscarTimer);
+      _editorialesBuscarTimer = setTimeout(editorialesBuscar, 300);
+    };
+  const so = $('#edOrden');
+  if (so) so.onchange = editorialesBuscar;
+  editorialesBuscar();
+}
+
+// Lee los controles (texto + orden) y pide la lista al servidor.
+async function editorialesBuscar() {
+  const grid = $('#edGrid');
+  if (grid) grid.textContent = 'Cargando…';
+  const params = new URLSearchParams({
+    q: ($('#edBuscar') && $('#edBuscar').value.trim()) || '',
+    orden: ($('#edOrden') && $('#edOrden').value) || 'libros',
+  });
+  try {
+    const r = await api('/editoriales?' + params.toString());
+    _editoriales = r.editoriales || [];
+  } catch (e) {
+    if (grid) grid.textContent = 'Error: ' + e.message;
+    return;
+  }
+  editorialesPintar();
+}
+
+function editorialesPintar() {
+  const grid = $('#edGrid');
+  if (!grid) return;
+  if (!_editoriales.length) {
+    grid.innerHTML = '<div class="empty">Sin editoriales.</div>';
+    editorialesBarra();
+    return;
+  }
+  const admin = ROL === 'admin';
+  grid.innerHTML = `<div class="${admin && _editorialesSelModo ? 'selmode' : ''}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">${_editoriales
+    .map(editorialCard)
+    .join('')}</div>`;
+  // Interacción unificada (igual que Autores/Catálogo): clic/toque = abrir la ficha (o MARCAR en Modo
+  // selección); doble clic / pulsación larga = conmutar el modo (conservando lo ya marcado).
+  grid.querySelectorAll('[data-edi]').forEach((el) =>
+    attachGesto(
+      el,
+      () => {
+        const id = el.dataset.edi;
+        if (admin && _editorialesSelModo) {
+          _editorialesSel.has(id) ? _editorialesSel.delete(id) : _editorialesSel.add(id);
+          el.classList.toggle('sel', _editorialesSel.has(id));
+          editorialesBarra();
+        } else editorialFicha(id);
+      },
+      () => alternarEditorialesModo(el.dataset.edi),
+    ),
+  );
+  setModoVisual(admin && _editorialesSelModo);
+  editorialesBarra();
+}
+
+// Conmuta el Modo selección de la LISTA de editoriales (botón o gesto doble-clic / pulsación-larga).
+function alternarEditorialesModo(selId) {
+  if (ROL !== 'admin') return;
+  const entrando = !_editorialesSelModo;
+  _editorialesSelModo = !_editorialesSelModo;
+  if (entrando && _editorialesSelModo && selId) _editorialesSel.add(selId);
+  editorialesPintar();
+}
+
+function editorialCard(e) {
+  const sel = _editorialesSel.has(e._id);
+  const alt =
+    e.nombres_alternativos && e.nombres_alternativos.length
+      ? `<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(e.nombres_alternativos.join(' · '))}">a.k.a. ${esc(e.nombres_alternativos.join(' · '))}</div>`
+      : '';
+  // Misma mecánica de selección que Autores: círculo .selmark (visible en Modo selección), .sel al marcar.
+  return `<div data-edi="${esc(e._id)}" class="card${sel ? ' sel' : ''}" style="position:relative;display:flex;gap:10px;align-items:center;padding:10px">
+    <span class="selmark">✓</span>
+    <div style="width:52px;height:52px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:24px;flex:0 0 auto">🏢</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.nombre || '—')}</div>
+      <div class="muted" style="font-size:12px">${e.n_libros} libro(s)</div>
+      ${alt}
+    </div></div>`;
+}
+
+// Barra de acción: botón de Modo selección (admin) + «Combinar» al marcar 2+ editoriales.
+function editorialesBarra() {
+  const bar = $('#edCombinaBar');
+  if (!bar) return;
+  const admin = ROL === 'admin';
+  const n = _editorialesSel.size;
+  const modoBtn = admin
+    ? `<button class="btn${_editorialesSelModo ? ' pri' : ''}" id="edModo" title="Modo selección: tocar una tarjeta la marca (para combinar). Modo previsualización: tocar abre la ficha. Doble clic / pulsación larga en una tarjeta también conmuta. Lo marcado se conserva.">${_editorialesSelModo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`
+    : '';
+  const acciones =
+    n >= 2
+      ? ` <button class="btn pri admin-only" id="edCombinar">🔗 Combinar ${n}…</button> <button class="btn" id="edSelClear">✕ deseleccionar</button>`
+      : n === 1
+        ? ` <span class="muted" style="font-size:12px">1 marcada (marca 2+ para combinar)</span> <button class="btn" id="edSelClear">✕</button>`
+        : '';
+  bar.innerHTML = modoBtn + acciones;
+  if ($('#edModo')) $('#edModo').onclick = () => alternarEditorialesModo();
+  if ($('#edCombinar')) $('#edCombinar').onclick = editorialCombinar;
+  if ($('#edSelClear'))
+    $('#edSelClear').onclick = () => {
+      _editorialesSel.clear();
+      editorialesPintar();
+    };
+}
+
+// Combinar (A→B): elige entre las seleccionadas cuál es el DESTINO (B, se conserva) y funde el resto en ella.
+function editorialCombinar() {
+  const ids = [..._editorialesSel];
+  if (ids.length < 2) return;
+  const sel = ids.map((id) => _editoriales.find((e) => e._id === id)).filter(Boolean);
+  const porDefecto = sel.slice().sort((a, b) => b.n_libros - a.n_libros)[0];
+  const opciones = sel
+    .map(
+      (e) =>
+        `<label style="display:flex;gap:8px;align-items:center;padding:6px;border-bottom:1px solid var(--line);cursor:pointer">
+          <input type="radio" name="ediDest" value="${esc(e._id)}" ${e._id === porDefecto._id ? 'checked' : ''}>
+          <span style="flex:1">${esc(e.nombre)} <span class="muted" style="font-size:11px">· ${e.n_libros} libro(s)</span></span>
+        </label>`,
+    )
+    .join('');
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px">
+    <h3 style="margin-top:0">🔗 Combinar editoriales</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Elige la editorial que se CONSERVA (destino). El resto se fundirán en ella: sus nombres pasarán a «también conocida como» y todos sus libros se reasignarán.</div>
+    ${opciones}
+    <div id="ediCombMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
+    <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn pri" id="ediCombOk">🔗 Combinar</button>
+      <button class="btn" id="ediCombX">Cancelar</button>
+    </div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#ediCombX').onclick = cerrarCmp;
+  $('#ediCombOk').onclick = async () => {
+    const destino = ($('#cmpModal input[name="ediDest"]:checked') || {}).value;
+    if (!destino) return;
+    const msg = $('#ediCombMsg');
+    if (msg) msg.textContent = 'Combinando…';
+    try {
+      const r = await api('/editoriales/fusionar', { method: 'POST', body: JSON.stringify({ destino, ids }) });
+      cerrarCmp();
+      toast(`🔗 ${r.fusionadas} fundida(s) en «${r.destino.nombre}» · ${r.reasignados} libro(s) reasignados`);
+      _editorialesSel.clear();
+      editorialesBuscar();
+    } catch (e) {
+      if (msg) msg.textContent = 'Error: ' + e.message;
+    }
+  };
+}
+
+// Ficha de editorial (modal): nombre/alternativos (editables si admin) + libros que publica (clic → ficha
+// del libro). Acciones admin: fusionar ESTA en otra, borrar (solo sin libros).
+async function editorialFicha(id) {
+  let r;
+  try {
+    r = await api('/editoriales/' + encodeURIComponent(id));
+  } catch (e) {
+    toast(e.message, 'bad');
+    return;
+  }
+  const ed = r.editorial || {};
+  const libros = r.libros || [];
+  const admin = ROL === 'admin';
+  const alt = Array.isArray(ed.nombres_alternativos) ? ed.nombres_alternativos.join('; ') : '';
+  const campos = admin
+    ? `<div><label>Nombre</label><input id="ediNombre" value="${esc(ed.nombre || '')}" autocomplete="off"></div>
+       <div style="margin-top:6px"><label>También conocida como (separa con ;)</label><input id="ediAlt" value="${esc(alt)}" autocomplete="off"></div>`
+    : `<h3 style="margin:0">${esc(ed.nombre || '—')}</h3>
+       ${alt ? `<div class="muted" style="font-size:12px;margin-top:4px">a.k.a. ${esc(alt)}</div>` : ''}`;
+  const nfcBadge = (l) =>
+    l.nfc
+      ? `<span title="Tiene etiqueta NFC" style="position:absolute;top:3px;right:3px;font-size:11px;background:var(--card);border-radius:6px;padding:0 3px">📶</span>`
+      : '';
+  const tipoBadge = (l) =>
+    l.comic
+      ? '<span class="docbadge" style="background:rgba(180,120,255,.18);color:#b478ff">📓 cómic</span>'
+      : l.tipo_recurso === 'revista'
+        ? '<span class="docbadge" style="background:rgba(120,160,255,.18);color:#78a0ff">📰 revista</span>'
+        : '<span class="docbadge" style="background:rgba(120,160,255,.14);color:var(--muted)">📕 libro</span>';
+  const soporteBadge = (l) =>
+    l.papel
+      ? '<span class="docbadge" style="background:rgba(200,160,90,.18);color:#d0a860">📄 papel</span>'
+      : '<span class="docbadge" style="background:rgba(40,217,168,.16);color:var(--acc)">💾 digital</span>';
+  const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
+      ${nfcBadge(l)}
+      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${l.comic ? '📓' : l.tipo_recurso === 'revista' ? '📰' : '📕'}</div>`}
+      <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
+      <div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin-top:3px">${tipoBadge(l)}${soporteBadge(l)}</div>
+    </div>`;
+  const librosHtml = libros.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:10px;margin-top:8px">${libros.map(cardLibro).join('')}</div>`
+    : '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
+  const acciones = admin
+    ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
+         <button class="btn" id="ediFusionar" title="Fundir ESTA editorial en otra que elijas: sus libros pasan a la otra y esta se borra">🔀 Fusionar esta en…</button>
+         ${!libros.length ? `<button class="btn" id="ediBorrar" title="Borrar esta editorial (solo si no tiene libros)">🗑️ Borrar</button>` : ''}
+         <button class="btn pri" id="ediGuardarTop">💾 Guardar</button>
+         <button class="btn" id="ediCerrarTop">Cerrar</button>
+       </div>`
+    : `<div style="margin-top:6px"><button class="btn" id="ediCerrarTop">Cerrar</button></div>`;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:660px;max-height:92vh;overflow:auto">
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div style="text-align:center">
+        <div style="width:110px;height:110px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:44px">🏢</div>
+        ${acciones}
+      </div>
+      <div style="flex:1;min-width:250px">${campos}</div>
+    </div>
+    <div style="margin-top:12px">
+      <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})</div>
+        ${libros.length ? `<button class="btn" id="ediVerBusqueda" style="padding:3px 9px;font-size:12px" title="Ver todos sus libros en el Catálogo (con filtros, orden y selección)">🔍 Ver en Catálogo</button>` : ''}
+      </div>
+      ${librosHtml}
+    </div>
+    <div class="row" style="gap:8px;margin-top:14px;justify-content:flex-end">
+      ${admin ? '<button class="btn pri" id="ediGuardar">💾 Guardar</button>' : ''}
+      <button class="btn" id="ediCerrar">Cerrar</button>
+    </div>
+    <div id="ediMsg" class="muted" style="font-size:12px;margin-top:6px"></div>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#ediCerrar').onclick = cerrarCmp;
+  if ($('#ediCerrarTop')) $('#ediCerrarTop').onclick = cerrarCmp;
+  const nombreEd = ed.nombre || 'Editorial';
+  const listaLibros = libros.map((l) => l._id);
+  $('#cmpModal')
+    .querySelectorAll('[data-libro]')
+    .forEach(
+      (el) =>
+        (el.onclick = () => {
+          cerrarCmp();
+          verDoc(el.dataset.libro, { volver: 'editoriales', etiqueta: 'Editoriales', lista: listaLibros });
+        }),
+    );
+  if ($('#ediVerBusqueda'))
+    $('#ediVerBusqueda').onclick = () => {
+      cerrarCmp();
+      irBusquedaFiltro({ editorial: id, etiqueta: '🏢 ' + nombreEd });
+    };
+  if (admin) {
+    if ($('#ediGuardar')) $('#ediGuardar').onclick = () => editorialGuardar(id);
+    if ($('#ediGuardarTop')) $('#ediGuardarTop').onclick = () => editorialGuardar(id);
+    // Fusionar ESTA editorial en otra (la actual se absorbe en la elegida y se borra).
+    if ($('#ediFusionar'))
+      $('#ediFusionar').onclick = () =>
+        elegirEditorialOverlay(id, `🔀 Fusionar «${recortar(nombreEd, 24)}» en…`, 'Sus libros pasarán a la editorial que elijas y esta se borrará.', async (bId, bNom) => {
+          if (!confirm(`¿Fundir «${nombreEd}» EN «${bNom}»?\n\nTodos sus libros pasan a «${bNom}» y «${nombreEd}» se borra.`)) return;
+          const rr = await api('/editoriales/fusionar', { method: 'POST', body: JSON.stringify({ destino: bId, ids: [id] }) });
+          cerrarCmp();
+          toast(`✔ Fusionada en «${bNom}» · ${rr.reasignados || 0} libro(s)`);
+          editorialesBuscar();
+        });
+    if ($('#ediBorrar'))
+      $('#ediBorrar').onclick = async () => {
+        if (!confirm(`¿Borrar la editorial «${nombreEd}»?\n\nSolo se borra si no tiene libros.`)) return;
+        try {
+          const rr = await api('/editoriales/' + encodeURIComponent(id) + '/borrar', { method: 'POST', body: JSON.stringify({}) });
+          if (!rr.ok) {
+            toast(rr.motivo || 'No se pudo borrar', 'warn');
+            return;
+          }
+          cerrarCmp();
+          toast('🗑️ Editorial borrada');
+          editorialesBuscar();
+        } catch (e) {
+          toast('Error: ' + e.message, 'bad');
+        }
+      };
+  }
+}
+
+async function editorialGuardar(id) {
+  const cambios = {
+    nombre: ($('#ediNombre') && $('#ediNombre').value) || '',
+    nombres_alternativos: (($('#ediAlt') && $('#ediAlt').value) || '')
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  };
+  const msg = $('#ediMsg');
+  if (msg) msg.textContent = 'Guardando…';
+  try {
+    await api('/editoriales/' + encodeURIComponent(id) + '/editar', { method: 'POST', body: JSON.stringify(cambios) });
+  } catch (e) {
+    if (msg) msg.textContent = 'Error: ' + e.message;
+    return;
+  }
+  cerrarCmp();
+  toast('✔ Editorial guardada');
+  editorialesBuscar();
+}
+
+// Overlay reutilizable para elegir OTRA editorial (fusión): busca por nombre y llama onPick(id, nombre).
+function elegirEditorialOverlay(excluir, titulo, subtitulo, onPick) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px';
+  ov.innerHTML = `<div class="box card" style="max-width:460px;width:94vw;max-height:82vh;overflow:auto">
+      <h3 style="margin-top:0">${esc(titulo)}</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(subtitulo)}</div>
+      <input id="fusBuscar" placeholder="Buscar editorial por nombre…" autocomplete="off" style="width:100%;box-sizing:border-box">
+      <div id="fusRes" class="muted" style="margin-top:10px;max-height:46vh;overflow:auto;font-size:13px">Escribe para buscar…</div>
+      <div style="margin-top:12px;text-align:right"><button class="btn" id="fusX">Cancelar</button></div>
+    </div>`;
+  document.body.appendChild(ov);
+  const cerrar = () => ov.remove();
+  ov.onclick = (e) => {
+    if (e.target === ov) cerrar();
+  };
+  ov.querySelector('#fusX').onclick = cerrar;
+  const inp = ov.querySelector('#fusBuscar'),
+    res = ov.querySelector('#fusRes');
+  inp.focus();
+  let t;
+  const buscar = async () => {
+    const q = inp.value.trim();
+    if (q.length < 2) {
+      res.textContent = 'Escribe al menos 2 letras…';
+      return;
+    }
+    res.textContent = 'Buscando…';
+    try {
+      const r = await api('/editoriales?q=' + encodeURIComponent(q) + '&limite=40');
+      const cand = (r.editoriales || []).filter((x) => String(x._id) !== String(excluir));
+      if (!cand.length) {
+        res.textContent = 'Sin resultados.';
+        return;
+      }
+      res.innerHTML = cand
+        .map(
+          (x) =>
+            `<button type="button" class="btn fusPick" data-id="${esc(x._id)}" data-nom="${esc(x.nombre)}" style="display:block;width:100%;text-align:left;margin-top:5px">${esc(x.nombre)} <span class="muted">· ${x.n_libros || 0} libro(s)</span></button>`,
+        )
+        .join('');
+      res.querySelectorAll('.fusPick').forEach(
+        (b) =>
+          (b.onclick = async () => {
+            try {
+              await onPick(b.dataset.id, b.dataset.nom);
+              cerrar();
+            } catch (e) {
+              toast('Error: ' + e.message, 'bad');
+            }
+          }),
+      );
+    } catch (e) {
+      res.textContent = 'Error: ' + e.message;
+    }
+  };
+  inp.oninput = () => {
+    clearTimeout(t);
+    t = setTimeout(buscar, 300);
+  };
+}
+
 const loaders = {
   dashboard: loadDashboard,
   activity: loadActivity,
@@ -11558,6 +11949,7 @@ const loaders = {
   obras: loadObras,
   colecciones: loadColecciones,
   autores: loadAutores,
+  editoriales: loadEditoriales,
   ubic: loadUbic,
   inbox: loadInbox,
   search: loadSearch,

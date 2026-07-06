@@ -21,6 +21,7 @@ import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor } from './utils/gestion-autores.js';
+import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial } from './utils/gestion-editoriales.js';
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -491,6 +492,9 @@ export function rutasPanel() {
                 const oid = new ObjectId(autId);
                 extras.push({ $or: [{ autores: oid }, { 'contribuciones.persona': oid }] });
             }
+            // Filtro por EDITORIAL (clic en «Ver en Catálogo» desde la ficha de editorial). Por ObjectId.
+            const ediId = String(req.query.editorial || '').trim();
+            if (ediId && ObjectId.isValid(ediId)) extras.push({ editorial: new ObjectId(ediId) });
             // Filtro por lista EXPLÍCITA de ids (una selección enviada desde la ficha del autor a la
             // Búsqueda). CSV de ObjectId; se acota a 1000 para no abusar del pipeline. Si el CSV no trae
             // ningún id válido, fuerza "sin resultados" (id imposible) en vez de ignorar el filtro.
@@ -1391,6 +1395,37 @@ export function rutasPanel() {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
             res.json(await enriquecerAutor(await conectarDB(), req.params.id, { sobrescribir: !!(req.body || {}).sobrescribir }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ── EDITORIALES (página «Editoriales», gemela de Autores): buscar/listar + ficha (lectura, cualquier
+    //    rol); editar/fusionar/borrar (mutaciones → solo admin, ya lo garantiza el guardián global). ────────
+    r.get('/editoriales', async (req, res) => {
+        try {
+            const q = String(req.query.q || '');
+            const limite = Number(req.query.limite) || 300;
+            const orden = String(req.query.orden || 'libros'); // 'libros' | 'nombre'
+            res.json({ ok: true, editoriales: await listarEditoriales(await conectarDB(), { q, limite, orden }) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.get('/editoriales/:id', async (req, res) => {
+        try {
+            const ficha = await fichaEditorial(await conectarDB(), req.params.id);
+            if (!ficha) return res.status(404).json({ ok: false, motivo: 'editorial no encontrada' });
+            res.json({ ok: true, ...ficha });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/editoriales/fusionar', grupo(fusionarEditoriales, b => [b.destino, b.ids || []]));
+    r.post('/editoriales/:id/editar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await editarEditorial(await conectarDB(), req.params.id, req.body || {}));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/editoriales/:id/borrar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await borrarEditorial(await conectarDB(), req.params.id));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
