@@ -124,14 +124,13 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // sobre las APIs y —lo más valioso— aporta Dewey/LC para clasificar la CDU SIN IA.
     const cip = datosBase.cip || null;
     if (cip) {
-        const tituloEsId = !!(validarISBN(documento.titulo) || validarISSN(documento.titulo));
-        // Un título que es en realidad el NOMBRE DE FICHERO (palabras unidas por puntos, sin espacios: p. ej.
-        // «Oxford.Faith.And.Its.Critics.») NO es un título real → el CIP (autoritativo, del propio libro) lo sustituye.
-        const t = String(documento.titulo || '').trim();
-        const tituloEsFichero = !/\s/.test(t) && /^\S+(?:\.\S+){2,}$/.test(t);
-        if ((!primerValido(documento.titulo) || tituloEsId || tituloEsFichero) && cip.titulo) documento.titulo = cip.titulo;
-        if (cip.subtitulo && !primerValido(documento.subtitulo)) documento.subtitulo = cip.subtitulo;
-        if ((!documento.autores || documento.autores.length === 0) && cip.autor) documento.autores = [cip.autor];
+        // El CIP rellena título/subtítulo/autor si faltan o NO son fiables (ISBN/ISSN/nombre-de-fichero/
+        // artefacto). Se MARCA lo que viene del CIP (_cip*): su regex es FRÁGIL (mal-parsea subtítulos/autor),
+        // así que luego la AUTORIDAD (fichero.db → OL → Google Books, por ISBN) lo sustituirá si la tiene.
+        const tituloNoFiableCip = !!(validarISBN(documento.titulo) || validarISSN(documento.titulo) || esTituloArtefacto(documento.titulo));
+        if ((!primerValido(documento.titulo) || tituloNoFiableCip) && cip.titulo) { documento.titulo = cip.titulo; documento._cipTitulo = true; }
+        if (cip.subtitulo && !primerValido(documento.subtitulo)) { documento.subtitulo = cip.subtitulo; documento._cipSub = true; }
+        if ((!documento.autores || documento.autores.length === 0) && cip.autor) { documento.autores = [cip.autor]; documento._cipAutor = true; }
         if (!primerValido(documento.coleccion_nombre) && cip.serie) documento.coleccion_nombre = cip.serie;
         if (!primerValido(documento.isbn) && cip.isbns?.length) documento.isbn = cip.isbns[0].isbn;
         if (cip.lccn) documento.lccn = cip.lccn;
@@ -192,29 +191,23 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
             cipLcc: cip?.lc || null,
         });
 
-    // Título y autores: el archivo manda, SALVO que su "título" no sea fiable, es decir,
-    // que falte o sea en realidad un identificador (p. ej. un PDF llamado "0071769234.pdf",
-    // cuyo nombre-ISBN se guardó como título). En ese caso la autoridad lo sustituye.
-    // Título NO fiable = falta, es un identificador (ISBN/ISSN) o un artefacto del productor
-    // ("C:\X.DVI", "…​.indd", "Microsoft Word - …"). En esos casos la autoridad lo sustituye.
+    // JERARQUÍA DE FIABILIDAD (usuario): la AUTORIDAD (fichero.db → OL → Google Books, por ISBN) es la fuente
+    // PRINCIPAL de TÍTULO y AUTORES. MANDA sobre lo derivado del CIP-regex (frágil: mal-parsea el subtítulo o
+    // pega el autor al título) y sobre un título/autor NO fiable (identificador, nombre-de-fichero, artefacto).
+    // Solo un título/autor de FICHERO fiable y NO-CIP (p. ej. metadatos de un EPUB) se conserva (conservador).
     const tituloNoFiable = !!(validarISBN(documento.titulo) || validarISSN(documento.titulo) || esTituloArtefacto(documento.titulo));
-    if (!primerValido(documento.titulo) || tituloNoFiable) {
-        if (datosExtra.titulo) {
-            if (tituloNoFiable) {
-                documento.alertas_agente.push(`Título "${documento.titulo}" no fiable (identificador/artefacto); sustituido por el de la autoridad: "${datosExtra.titulo}".`);
-            }
-            documento.titulo = datosExtra.titulo;
-        }
+    if ((documento._cipTitulo || tituloNoFiable || !primerValido(documento.titulo)) && datosExtra.titulo) {
+        if (primerValido(documento.titulo) && documento.titulo !== datosExtra.titulo)
+            documento.alertas_agente.push(`Título "${String(documento.titulo).slice(0, 50)}" sustituido por el de la autoridad (más fiable que el CIP/nombre): "${String(datosExtra.titulo).slice(0, 50)}".`);
+        documento.titulo = datosExtra.titulo;
+        // El subtítulo del CIP acompaña al título del CIP: al sustituir el título, se toma el subtítulo de la autoridad.
+        if (documento._cipSub) documento.subtitulo = datosExtra.subtitulo || null;
     }
-    // Autores: el archivo manda, SALVO que sus autores NO sean fiables (falta, o son ARTEFACTOS: una frase del
-    // texto, una URL, metadatos de producción…). Igual que el título: un identificador correcto + un autor
-    // basura NO deben tapar al autor real de la AUTORIDAD (fichero.db → OL → Google Books). En ese caso la
-    // autoridad los sustituye. (Jerarquía de fiabilidad: la autoridad manda sobre un dato-basura del fichero.)
     const autoresNoFiables = !documento.autores || documento.autores.length === 0
         || documento.autores.every((a) => esAutorArtefacto(a));
-    if (autoresNoFiables && datosExtra.autores && datosExtra.autores.length > 0) {
-        if (documento.autores && documento.autores.length)
-            documento.alertas_agente.push(`Autor "${String(documento.autores[0]).slice(0, 40)}…" no fiable (artefacto); sustituido por el de la autoridad: "${String(datosExtra.autores[0]).slice(0, 40)}".`);
+    if ((documento._cipAutor || autoresNoFiables) && datosExtra.autores && datosExtra.autores.length > 0) {
+        if (documento.autores && documento.autores.length && String(documento.autores[0]) !== String(datosExtra.autores[0]))
+            documento.alertas_agente.push(`Autor "${String(documento.autores[0]).slice(0, 40)}" sustituido por el de la autoridad: "${String(datosExtra.autores[0]).slice(0, 40)}".`);
         documento.autores = datosExtra.autores;
     }
 
@@ -385,7 +378,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
     // isbn_candidatos / issn_candidatos SE PERSISTEN (todos los identificadores vistos, para búsquedas más
     // refinadas). El resto son de proceso y no se guardan.
-    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_propio', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado'];
+    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_propio', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado', '_cipTitulo', '_cipAutor', '_cipSub'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).

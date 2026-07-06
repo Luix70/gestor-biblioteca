@@ -36,6 +36,9 @@ export function esTituloArtefacto(s) {
         const letras = (t.match(/[a-záéíóúñü]/gi) || []).length;
         if (digitos >= 9 && letras <= 2 && /\d{9,13}/.test(t.replace(/[\s\-–—]/g, ''))) return true;
     }
+    // El "título" es un NOMBRE DE FICHERO: palabras.unidas.por.puntos SIN espacios (≥3 segmentos), típico de
+    // un release («Oxford.Descartes.And.The.Puzzle.Of.Sensory.Representation»). No es un título → a la autoridad.
+    if (!/\s/.test(t) && /^\S+(?:\.\S+){2,}$/.test(t)) return true;
     // Prefijo de campo del info-dict del PDF grabado como título: "Creator: …", "Producer: …".
     // Un título real NO empieza así. Caso real: "Creator:        Adobe InDesign CC 2014 (Windows)".
     if (/^\s*(?:creator|producer|created\s+by)\s*[:_]/i.test(t)) return true;
