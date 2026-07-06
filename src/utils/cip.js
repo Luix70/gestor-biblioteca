@@ -11,6 +11,10 @@ import { validarISBN } from './identificadores.js';
  * sin IA; e ISBN(s) para identificar. Devuelve null si el texto no contiene un bloque CIP.
  */
 
+// Guiones tipográficos (U+2010–2015: ‐‑‒–—―) y el signo menos (U+2212) → '-'. En new RegExp para evitar la
+// corrupción de literales regex con rangos de guion. Los CIP están tipografiados y meten estos en los ISBN.
+const RE_GUIONES = new RegExp('[\\u2010-\\u2015\\u2212]', 'g');
+
 const MARCADORES = [
     { re: /Library of Congress Cataloging[- ]?in[- ]?Publication/i, fuente: 'cip-lc' },
     { re: /British Library Cataloguing[- ]?in[- ]?Publication/i,    fuente: 'cip-bl' },
@@ -24,7 +28,10 @@ export function parsearBloqueCatalogacion(texto) {
     if (!marcador) return null; // no hay bloque CIP reconocible
 
     const idx = texto.search(marcador.re);
-    const bloque = texto.slice(idx, idx + 1500); // el bloque CIP es corto
+    // Los CIP están TIPOGRAFIADOS: usan guiones largos (– —, U+2010–2015, y el signo menos U+2212) donde una
+    // regex espera '-'. Sin normalizar, un ISBN «978–0–19–956938–0» (en-dash) se PIERDE y se cuela otro
+    // equivocado. Se normalizan a '-' en todo el bloque (todas las regex de abajo esperan '-').
+    const bloque = texto.slice(idx, idx + 1500).replace(RE_GUIONES, '-'); // el bloque CIP es corto
     const lineas = bloque.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const plano = bloque.replace(/\s+/g, ' ');
 

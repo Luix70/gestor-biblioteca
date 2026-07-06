@@ -125,7 +125,11 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     const cip = datosBase.cip || null;
     if (cip) {
         const tituloEsId = !!(validarISBN(documento.titulo) || validarISSN(documento.titulo));
-        if ((!primerValido(documento.titulo) || tituloEsId) && cip.titulo) documento.titulo = cip.titulo;
+        // Un título que es en realidad el NOMBRE DE FICHERO (palabras unidas por puntos, sin espacios: p. ej.
+        // «Oxford.Faith.And.Its.Critics.») NO es un título real → el CIP (autoritativo, del propio libro) lo sustituye.
+        const t = String(documento.titulo || '').trim();
+        const tituloEsFichero = !/\s/.test(t) && /^\S+(?:\.\S+){2,}$/.test(t);
+        if ((!primerValido(documento.titulo) || tituloEsId || tituloEsFichero) && cip.titulo) documento.titulo = cip.titulo;
         if (cip.subtitulo && !primerValido(documento.subtitulo)) documento.subtitulo = cip.subtitulo;
         if ((!documento.autores || documento.autores.length === 0) && cip.autor) documento.autores = [cip.autor];
         if (!primerValido(documento.coleccion_nombre) && cip.serie) documento.coleccion_nombre = cip.serie;
