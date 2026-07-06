@@ -187,8 +187,12 @@ de ficheros clasificado por CDU.
     · .pdf                Libros/revistas PDF (con texto o escaneados)
     · .jpg .jpeg .png     Imágenes de páginas escaneadas
     · .webp .heic         Otros formatos de imagen
-    · .mobi .cbr .djvu    Catalogados por nombre de archivo (sin lector)
-    · .zip .rar           Catalogados por nombre de archivo (sin lector)
+    · .mobi .azw .azw3    Kindle/Mobipocket: lector propio (EXTH → título/autor/
+                          editorial/ISBN + portada embebida). El ISBN sirve de pivote.
+                          Con DRM NO se puede leer → se OMITE (se deja en el Inbox).
+    · .cbr .cbz .cb7      Cómics (primera imagen = portada)
+    · .djvu               Catalogado por nombre de archivo (sin lector de contenido)
+    · .zip .rar .7z       Se EXPANDEN a carpeta (drop) antes de catalogar
 
   Agrupación de imágenes:
     · Varias imágenes en la MISMA CARPETA dentro de Inbox se tratan como
@@ -220,6 +224,12 @@ de ficheros clasificado por CDU.
     · Éxito     → desaparece del Inbox, aparece en CDU/ con todos sus datos
     · Error de identificación → va a Cuarentena/ con un estado.json descriptivo
     · Error de red/BD        → va a Reintentos/ (el Conformador lo reintentará)
+    · NO se puede procesar (DRM, audio, formato sin lector) → NO se borra ni va a
+      Cuarentena: se DEJA en el Inbox intacto. El vigilante deposita un testigo
+      «.noborrar» en la carpeta de PRIMER NIVEL del drop y el recolector de basura la
+      respeta (no la disuelve ni recicla su contenido). Borra el «.noborrar» si quieres
+      que se reintente. El AUDIO (audiolibros, aún sin tratamiento) es «conservable»:
+      nunca se recicla. (Un fichero omitido no se reintenta en cada escaneo.)
 
 
 ────────────────────────────────────────────────────────────────────────────────

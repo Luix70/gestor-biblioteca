@@ -32,7 +32,7 @@ const PAUSA_MS = Number(process.env.PAUSA_INGESTA_MS || 1500);   // ritmo entre 
 const REPOSO_MS = Number(process.env.REPOSO_INBOX_MS || 2500);   // espera tras el último cambio antes de procesar
 const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse
 const HUERFANO_TIMEOUT_MS = Number(process.env.INBOX_HUERFANO_MS || 600000);  // 10 min a 0 bytes → fantasma
-const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.cbr', '.cbz', '.cb7', '.djvu', '.zip', '.rar', '.7z'];
+const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.zip', '.rar', '.7z'];
 // Ubicación por defecto para libros/revistas físicos llegados por Inbox (sin POST que la fije).
 const UBICACION_INBOX = { ambito: 'Sin asignar', estanteria: 'Sin asignar (Inbox)' };
 
@@ -90,6 +90,40 @@ const soloMetadatos = (n) => n.startsWith('@') || n.startsWith('#') || n.startsW
 // contenido restante es TODO basura ya no tiene nada que catalogar → se disuelve CON su basura dentro (así
 // el Inbox no se congestiona con carpetas de reprocesado, sidecars y .txt tras verificar el documento).
 const soloBasura = (n) => soloMetadatos(n) || !esValida(n);
+
+// CONTENIDO CONSERVABLE: material que el catalogador NO puede procesar todavía pero que NO debe borrarse
+// (audio → audiolibros, aún sin tratamiento). El recolector de basura lo RESPETA y su carpeta se marca con
+// un testigo .noborrar. (Ampliable a otros formatos cuando toque.)
+const EXT_AUDIO = ['.mp3', '.m4a', '.m4b', '.aac', '.ogg', '.oga', '.opus', '.flac', '.wav', '.wma', '.aax', '.aa', '.ape', '.alac'];
+const esAudio = (n) => EXT_AUDIO.includes(path.extname(n).toLowerCase());
+const esConservable = (n) => esAudio(n);
+
+// TESTIGO .noborrar: fichero que el usuario/vigilante deposita en la carpeta de PRIMER NIVEL de un drop con
+// material no procesable (DRM, audio, formato desconocido) para que el recolector de basura NO la borre.
+const TESTIGO = '.noborrar';
+const tieneTestigo = (carpeta) => fs.access(path.join(carpeta, TESTIGO)).then(() => true).catch(() => false);
+async function depositarTestigo(carpeta, motivo) {
+    if (!carpeta || await tieneTestigo(carpeta)) return false;
+    const txt = `Esta carpeta contiene material que el catalogador NO puede procesar todavía (${motivo}).\n`
+        + `Se DEJA intacta a propósito; el recolector de basura la respeta por la presencia de este fichero.\n`
+        + `Bórralo si quieres que se vuelva a intentar / se pueda limpiar.\n`;
+    await fs.writeFile(path.join(carpeta, TESTIGO), txt, 'utf8').catch(() => {});
+    return true;
+}
+// ¿La carpeta (o alguna subcarpeta) contiene material conservable? (recursivo, con tope de profundidad).
+async function carpetaConservable(dir, nivel = 8) {
+    if (nivel < 0) return false;
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+    for (const e of entradas) {
+        if (e.isFile() && esConservable(e.name)) return true;
+        if (e.isDirectory() && !soloMetadatos(e.name) && await carpetaConservable(path.join(dir, e.name), nivel - 1)) return true;
+    }
+    return false;
+}
+// Ficheros omitidos (DRM/formato) YA vistos, para no reintentar leerlos en cada escaneo (se dejan en el
+// Inbox pero no se reprocesan). En memoria (por sesión); el testigo .noborrar persiste en disco.
+const _omitidos = new Set();
 
 /** Subcarpeta "covers"/"Covers" (insensible a mayúsculas) dentro de 'carpeta', o null. */
 async function subcarpetaCovers(carpeta) {
@@ -154,7 +188,9 @@ async function podarSubcarpetasVacias(top) {
         const sub = path.join(top, e.name);
         await podarSubcarpetasVacias(sub); // primero las anidadas
         let restantes; try { restantes = await fs.readdir(sub); } catch { continue; }
-        if (restantes.every(soloBasura)) await fs.rm(sub, { recursive: true, force: true }).catch(() => {});
+        // No borrar si queda material CONSERVABLE (audio…) —a cualquier profundidad— o hay un testigo .noborrar.
+        if (restantes.every(soloBasura) && !restantes.includes(TESTIGO) && !(await carpetaConservable(sub)))
+            await fs.rm(sub, { recursive: true, force: true }).catch(() => {});
     }
 }
 
@@ -163,7 +199,29 @@ async function podarVaciosInbox() {
     let entradas;
     try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
     for (const e of entradas) {
-        if (e.isDirectory() && !ignorarEntrada(e.name)) await podarSubcarpetasVacias(path.join(INBOX, e.name));
+        if (!e.isDirectory() || ignorarEntrada(e.name)) continue;
+        const top = path.join(INBOX, e.name);
+        if (await tieneTestigo(top)) continue;          // protegida por .noborrar: no se toca
+        await podarSubcarpetasVacias(top);
+    }
+}
+
+/**
+ * Deposita el testigo .noborrar en las carpetas de PRIMER NIVEL del Inbox que contienen material no
+ * procesable (audio, y lo que quede de un fichero OMITIDO por DRM/formato), para que el recolector de basura
+ * NO las borre y quede constancia visible de que se dejan a propósito. No toca la RAÍZ del Inbox.
+ */
+async function protegerConservables() {
+    let entradas;
+    try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+        if (!e.isDirectory() || ignorarEntrada(e.name)) continue;
+        const top = path.join(INBOX, e.name);
+        if (await tieneTestigo(top)) continue;
+        if (await carpetaConservable(top)) {
+            await depositarTestigo(top, 'audio u otro formato sin tratamiento');
+            console.log(`  🛡️  «${e.name}»: material no procesable (audio/…) → protegida con ${TESTIGO} (no se borra).`);
+        }
     }
 }
 
@@ -178,6 +236,8 @@ async function disolverDropsVacios() {
         let restantes;
         try { restantes = await fs.readdir(carpeta); }
         catch { dropsADisolver.delete(carpeta); continue; } // ya no existe
+        // No disolver si queda material CONSERVABLE (audio…) o hay un testigo .noborrar (se deja intacta).
+        if (restantes.includes(TESTIGO) || await carpetaConservable(carpeta)) { dropsADisolver.delete(carpeta); continue; }
         if (restantes.every(soloBasura)) {
             await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
             dropsADisolver.delete(carpeta);
@@ -371,7 +431,8 @@ export async function limpiarInbox(unidad, { borrarCatalogados = false } = {}) {
         if (!unidad.conservarCarpeta) {
             let entradas; try { entradas = await fs.readdir(unidad.carpeta, { withFileTypes: true }); } catch { entradas = []; }
             for (const e of entradas) {
-                if (e.isFile() && !soloMetadatos(e.name) && !esValida(e.name)) aReciclar.push(path.join(unidad.carpeta, e.name));
+                // NUNCA reciclar material CONSERVABLE (audio…): se deja intacto (lo protege .noborrar).
+                if (e.isFile() && !soloMetadatos(e.name) && !esValida(e.name) && !esConservable(e.name)) aReciclar.push(path.join(unidad.carpeta, e.name));
             }
         }
     }
@@ -394,6 +455,8 @@ export async function limpiarInbox(unidad, { borrarCatalogados = false } = {}) {
 
 async function procesarUnidad(unidad) {
     const etiqueta = `${path.basename(unidad.rutas[0])}${unidad.rutas.length > 1 ? ` (+${unidad.rutas.length - 1})` : ''}`;
+    // Ya OMITIDO antes (DRM/formato): se dejó en el Inbox intacto; no reintentar leerlo en cada escaneo.
+    if (unidad.rutas.every((r) => _omitidos.has(r))) return 'omitido';
     const contexto = unidad.esImagenes ? { ubicacion: UBICACION_INBOX } : {};
     // Drop por carpeta: ligar el recurso a la colección (nombre de carpeta) y autonumerar la serie.
     if (unidad.coleccion) { contexto.coleccion = unidad.coleccion; contexto.serieAuto = true; }
@@ -434,7 +497,15 @@ async function procesarUnidad(unidad) {
             return 'conservado';
         }
     } catch (e) {
-        if (e.tipo === 'infraestructura') {
+        if (e.tipo === 'omitir') {
+            // No se puede (ni se debe) procesar todavía (DRM, formato sin tratamiento): NO se borra, NO va a
+            // Cuarentena. Se DEJA en el Inbox intacto; se marca su carpeta con .noborrar (para el recolector)
+            // y su ruta como omitida (para no reintentar en cada escaneo).
+            for (const r of unidad.rutas) _omitidos.add(r);
+            if (unidad.carpeta) await depositarTestigo(unidad.carpeta, e.message || 'formato no procesable');
+            console.warn(`  🚫 ${etiqueta} → OMITIDO (se deja en el Inbox): ${e.message}`);
+            return 'omitido';
+        } else if (e.tipo === 'infraestructura') {
             const destino = await enviarAReintentos(unidad.rutas, {
                 error: { tipo: e.tipo, mensaje: e.message },
                 documento: e.documentoParcial || null,
@@ -463,6 +534,7 @@ async function procesarUnidad(unidad) {
 function resumenLote(t, totalUnidades) {
     const orden = [['nuevo', '✅ nuevos'], ['actualizado', '♻️ actualizados'], ['reciclado', '⏭️ duplicados idénticos'],
         ['duplicado', '⚠️ duplicados a Cuarentena'], ['cuarentena', '🚫 sin identificar'], ['ilegible', '📛 ilegibles'],
+        ['omitido', '🚫 omitidos (DRM/audio/formato) — se dejan en el Inbox'],
         ['reintento', '🔁 a Reintentos'], ['conservado', '⛔ conservados (copia no íntegra)']];
     const partes = orden.filter(([k]) => t[k]).map(([k, lab]) => `${lab}: ${t[k]}`);
     return `📊 Lote terminado: ${totalUnidades} unidad(es) — ${partes.length ? partes.join(' · ') : 'sin cambios'}`;
@@ -562,6 +634,7 @@ async function procesarCola() {
         // SALVO los de obras multivolumen ya completas, que sí se retiran.
         if (totalProcesadas > 0) {
             console.log(resumenLote(tally, totalProcesadas)); // RESUMEN del lote (visible también en modo simple)
+            await protegerConservables().catch(() => {}); // marca .noborrar (audio/omitidos) ANTES de podar
             await podarVaciosInbox().catch(() => {});
             await disolverDropsVacios().catch(() => {});
         }
