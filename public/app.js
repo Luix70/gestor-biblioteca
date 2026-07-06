@@ -3036,11 +3036,11 @@ function modalReprocesar({ n = 1 } = {}) {
       <h3 style="margin-top:0">♻️ Reprocesar ${n > 1 ? n + ' documentos' : 'documento'}</h3>
       <div class="muted" style="margin:-4px 0 12px">${n > 1 ? 'Cada uno vuelve' : 'El fichero vuelve'} al <b>Inbox</b> para re-catalogarse; su carpeta actual (sidecars e imágenes) va a la <b>Papelera</b> (recuperable). El Vigilante debe estar activo.${n > 1 ? ' <b>Acción masiva.</b>' : ''}</div>
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;padding:9px 10px;border:1px solid var(--line);border-radius:9px">
-        <input type="radio" name="reprocMode" value="cons" checked style="margin-top:3px;flex:0 0 auto">
+        <input type="radio" name="reprocMode" value="cons" checked style="margin-top:3px;flex:0 0 auto;width:16px;height:16px">
         <span><b>Conservador</b> (con sidecar) — mantiene ubicación, colección, obra, ISBN, valoración, NSFW y etiqueta NFC; solo re-deriva los metadatos bibliográficos. <span class="muted">Recomendado.</span></span>
       </label>
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;padding:9px 10px;border:1px solid var(--line);border-radius:9px;margin-top:6px">
-        <input type="radio" name="reprocMode" value="nuevo" style="margin-top:3px;flex:0 0 auto">
+        <input type="radio" name="reprocMode" value="nuevo" style="margin-top:3px;flex:0 0 auto;width:16px;height:16px">
         <span><b>Nuevo desde cero</b> (sin sidecar) — re-identifica TODO (nuevo ID; re-lee el CIP y recalcula ISBN/título/autor/colección…). <span class="muted">Úsalo si el dato guardado es erróneo (p. ej. un ISBN equivocado).</span></span>
       </label>
       <label style="margin-top:12px">Contraseña de administrador</label>
