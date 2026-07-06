@@ -15,7 +15,12 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { conectarDB } from '../database.js';
 
-const COOLDOWN_MS = Number(process.env.VISION_COOLDOWN_MS) || 5 * 60 * 1000;
+// Cooldown por-clave tras un 429, PROPORCIONAL a la cuota: corto para límite por-minuto (RPM/TPM, se recupera
+// en ~1 min), largo solo para la cuota diaria (RPD). Antes era fijo 5 min → tras un pico las 3 gratis quedaban
+// enfriando 5 min a la vez y la visión caía a la de PAGO. Con 70s vuelven enseguida y el pago casi no se toca.
+const COOLDOWN_MIN_MS = Number(process.env.VISION_COOLDOWN_MIN_MS) || 70 * 1000;
+const COOLDOWN_DIA_MS = Number(process.env.VISION_COOLDOWN_DIA_MS) || 30 * 60 * 1000;
+const cooldownPorCuota = (e) => /per\s*day|\bdaily\b/i.test(String(e?.message || '') + ' ' + String(e?.response?.data?.error?.message || '')) ? COOLDOWN_DIA_MS : COOLDOWN_MIN_MS;
 const TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS) || Number(process.env.HTTP_TIMEOUT_MS) || 30000;
 const limpia = (k) => (k && String(k).trim()) || null;
 
@@ -163,7 +168,7 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
             return txt;
         } catch (e) {
             ultimo = e;
-            if (esCuota(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_MS;
+            if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
             errores[c.id] = { n: (errores[c.id]?.n || 0) + 1, ultimo: String(motivo(e)), ts: Date.now() };
             console.warn(`   ↻ Visión[${c.id}] falló (${motivo(e)}); siguiente proveedor.`);
         }
@@ -191,7 +196,7 @@ export async function conTexto({ prompt, json = true, maxTokens } = {}) {
             return txt;
         } catch (e) {
             ultimo = e;
-            if (esCuota(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_MS;
+            if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
             errores[c.id] = { n: (errores[c.id]?.n || 0) + 1, ultimo: String(motivo(e)), ts: Date.now() };
             console.warn(`   ↻ IA-texto[${c.id}] falló (${motivo(e)}); siguiente proveedor.`);
         }
@@ -238,7 +243,7 @@ export async function probarProveedor(id) {
         delete cooldownHasta[c.id];
         return { ok: true, ms: Date.now() - t0, respuesta: String(txt || '').trim().slice(0, 40) };
     } catch (e) {
-        if (esCuota(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_MS;
+        if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
         return { ok: false, ms: Date.now() - t0, motivo: String(motivo(e)) };
     }
 }

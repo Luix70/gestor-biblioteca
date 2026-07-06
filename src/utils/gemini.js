@@ -11,8 +11,13 @@
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const COOLDOWN_MS = Number(process.env.GEMINI_FREE_COOLDOWN_MS) || 5 * 60 * 1000; // 5 min por defecto
-let freeAgotadaHasta = 0; // timestamp hasta el que se omite la clave free
+// Cooldown de una clave GRATIS tras un 429, PROPORCIONAL a la cuota: CORTO si es límite por-minuto (RPM/TPM,
+// se recupera en ~1 min), LARGO solo si es la cuota DIARIA (RPD, agotada hasta mañana). Antes era fijo 5 min
+// y GLOBAL → un 429 por-minuto desterraba TODAS las gratis 5 min y todo caía a la de PAGO. Ahora es POR CLAVE.
+const COOLDOWN_MIN_MS = Number(process.env.GEMINI_COOLDOWN_MIN_MS) || 70 * 1000;      // límite por minuto
+const COOLDOWN_DIA_MS = Number(process.env.GEMINI_COOLDOWN_DIA_MS) || 30 * 60 * 1000; // cuota diaria
+const cooldownKey = {}; // key → timestamp hasta el que se omite ESA clave free
+const cooldownPorCuota = (e) => /per\s*day|\bdaily\b/i.test(String(e?.message || '')) ? COOLDOWN_DIA_MS : COOLDOWN_MIN_MS;
 
 const limpia = (k) => (k && String(k).trim()) || null;
 const esCuota = (e) => {
@@ -39,10 +44,11 @@ function descubrirEnv(prefijos) {
 function clavesOrdenadas() {
     const free = descubrirEnv(['GEMINI_API_FREE_KEY']);                       // *_FREE_KEY[_N]
     const paid = descubrirEnv(['GEMINI_API_KEY_PAID', 'GEMINI_API_KEY']).filter(k => !free.includes(k)); // _PAID + legado
+    const now = Date.now();
     const orden = [];
-    if (Date.now() >= freeAgotadaHasta) for (const k of free) orden.push(['free', k]);
+    for (const k of free) if ((cooldownKey[k] || 0) <= now) orden.push(['free', k]); // free NO enfriando (por clave)
     for (const k of paid) orden.push(['paid', k]);
-    if (!orden.length) for (const k of free) orden.push(['free', k]); // free en cooldown pero sin alternativa
+    if (!orden.length) for (const k of free) orden.push(['free', k]); // todas enfriando y sin pago → intentar free igual
     return orden;
 }
 
@@ -67,7 +73,7 @@ export async function conGemini(opcionesModelo, fn) {
             return await fn(model);
         } catch (e) {
             ultimo = e;
-            if (etiqueta === 'free' && esCuota(e)) freeAgotadaHasta = Date.now() + COOLDOWN_MS;
+            if (etiqueta === 'free' && esCuota(e)) cooldownKey[key] = Date.now() + cooldownPorCuota(e);
             if (i < orden.length - 1) {
                 // En un 429 se vuelca el mensaje COMPLETO: nombra la cuota agotada (…PerDay = RPD diaria,
                 // …PerMinute = RPM, …InputTokensPerMinute = TPM por tokens). Así sabemos si reducir el
