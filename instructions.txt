@@ -572,6 +572,16 @@ de ficheros clasificado por CDU.
       ficha) → «🔍 Mostrar en Catálogo» los manda YA SELECCIONADOS (llegan en modo
       selección, listos para actuar). (Debajo, /catalogo acepta ?autor= —autor o
       contribuyente— y ?ids= —CSV de libros—.)
+    · DEPURAR AUTORES (admin, desde la ficha):
+      · 🔀 FUSIONAR OTRO AQUÍ: busca otro autor y lo ABSORBE en este (sus libros pasan
+        aquí; el otro se borra). Para unificar duplicados. (POST /autores/fusionar
+        {destino, ids}; resuelve por resolverPersona insensible a grafía.)
+      · 🚫 QUITAR AUTORÍA: quita este autor de TODOS sus libros, o solo de los
+        SELECCIONADOS (en modo selección). Los documentos quedan SIN ese autor; si se
+        queda sin obras, el autor se BORRA (nunca se borra un autor con obras). Ideal
+        para REVISTAS/anónimos (recomendado: dejarlas SIN autor — su identidad es la
+        cabecera/ISSN, no una persona) o para deshacer una autoría errónea.
+        (POST /autores/:id/quitar {ids?}.)
     · ROLES de contribuyente: la ficha del LIBRO muestra «Contribuciones» (traductor:
       X · ilustrador: Y) e «Idioma original». Se capturan en la ingesta desde
       OpenLibrary (mención `by_statement`) + la MENCIÓN de la BNE del Fichero (roles y

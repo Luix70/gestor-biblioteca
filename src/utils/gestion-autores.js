@@ -264,6 +264,31 @@ export async function fusionarAutores(db, destinoId, ids = []) {
     };
 }
 
+/**
+ * QUITA un autor de documentos: lo saca del array `autores[]` y de `contribuciones[]` (si era colaborador)
+ * de los documentos indicados (`ids`), o de TODOS los suyos si no se pasan. Un documento puede quedar SIN
+ * autor (válido: revistas, anónimos…). Si el autor deja de estar en NINGÚN documento, se BORRA (nunca se
+ * borra un autor con obras). Devuelve { quitados, restantes, autorBorrado }.
+ */
+export async function quitarAutorDeDocs(db, autorId, ids = null) {
+    const aid = oid(autorId);
+    if (!aid) return { ok: false, motivo: 'id de autor inválido' };
+    const bib = db.collection('biblioteca');
+    const refDelAutor = { $or: [{ autores: aid }, { 'contribuciones.persona': aid }] };
+    const match = (Array.isArray(ids) && ids.length)
+        ? { $and: [{ _id: { $in: ids.map(oid).filter(Boolean) } }, refDelAutor] }
+        : refDelAutor;
+    const r = await bib.updateMany(match, {
+        $pull: { autores: aid, contribuciones: { persona: aid } },
+        $set: { fecha_actualizacion: new Date() },
+    });
+    // ¿Sigue referenciado por algún documento? Si no, se borra (nunca con obras).
+    const restantes = await bib.countDocuments(refDelAutor);
+    let autorBorrado = false;
+    if (restantes === 0) { await db.collection('autores').deleteOne({ _id: aid }); autorBorrado = true; }
+    return { ok: true, quitados: r.modifiedCount, restantes, autorBorrado };
+}
+
 // data URL o base64 puro → { buf, ext } (jpg|png|webp) o null. (Mismo criterio que utils/imagenes-doc.js.)
 const MAX_FOTO_BYTES = 12 * 1024 * 1024;
 function decodificarImagen(b64) {

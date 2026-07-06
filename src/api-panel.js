@@ -20,7 +20,7 @@ import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexad
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
-import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor } from './utils/gestion-autores.js';
+import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs } from './utils/gestion-autores.js';
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -1357,6 +1357,14 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/autores/fusionar', grupo(fusionarAutores, b => [b.destino, b.ids || []]));
+    // Quitar el autor de sus documentos (todos o los `ids` dados) → doc SIN ese autor; borra el autor si
+    // queda sin obras (nunca con obras). Para revistas/anónimos o para deshacer una autoría errónea.
+    r.post('/autores/:id/quitar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await quitarAutorDeDocs(await conectarDB(), req.params.id, req.body?.ids || null));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
     r.post('/autores/:id/editar', async (req, res) => {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });

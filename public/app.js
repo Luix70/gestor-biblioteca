@@ -11203,6 +11203,8 @@ async function autorFicha(id) {
     ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
          <button class="btn" id="autFoto">📷 Foto</button>
          <button class="btn" id="autEnriquecer" title="Rellena foto, biografía, seudónimos y fechas desde OpenLibrary, Wikidata y Wikipedia (sin IA)">✨ Autocompletar (web)</button>
+         <button class="btn" id="autFusionar" title="Buscar OTRO autor y fundirlo EN este (sus libros pasan aquí; el otro se borra)">🔀 Fusionar otro aquí</button>
+         ${libros.length ? `<button class="btn" id="autQuitarTodos" title="Quitar este autor de TODOS sus libros (quedan sin este autor); si se queda sin obras, se borra">🚫 Quitar de todos</button>` : ''}
          <button class="btn pri" id="autGuardarTop">💾 Guardar</button>
          <button class="btn" id="autCerrarTop">Cerrar</button>
          <input type="file" id="autFotoFile" accept="image/*" style="display:none">
@@ -11229,6 +11231,7 @@ async function autorFicha(id) {
         <button class="btn" id="autSelTodos" style="padding:2px 8px;font-size:12px">Todos</button>
         <button class="btn" id="autSelNinguno" style="padding:2px 8px;font-size:12px">Ninguno</button>
         <button class="btn pri" id="autSelEnviar" style="padding:2px 8px;font-size:12px">🔍 Mostrar en Catálogo</button>
+        ${admin ? '<button class="btn" id="autSelQuitar" style="padding:2px 8px;font-size:12px" title="Quitar este autor de los libros seleccionados">🚫 Quitar autoría</button>' : ''}
       </div>
       ${librosHtml}
     </div>
@@ -11325,7 +11328,68 @@ async function autorFicha(id) {
     if ($('#autEnriquecer')) $('#autEnriquecer').onclick = () => autorEnriquecer(id);
     if ($('#autGuardar')) $('#autGuardar').onclick = () => autorGuardar(id);
     if ($('#autGuardarTop')) $('#autGuardarTop').onclick = () => autorGuardar(id);
+    if ($('#autFusionar')) $('#autFusionar').onclick = () => autorFusionar(id, nombreAutor);
+    if ($('#autQuitarTodos')) $('#autQuitarTodos').onclick = () => autorQuitar(id, nombreAutor, null, libros.length);
+    if ($('#autSelQuitar')) $('#autSelQuitar').onclick = () => {
+      if (!_autFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
+      autorQuitar(id, nombreAutor, [..._autFichaSel], _autFichaSel.size);
+    };
   }
+}
+
+// Quitar un autor de sus documentos (todos o los `ids` seleccionados): quedan SIN ese autor; si se queda
+// sin obras, el servidor lo borra. Útil para revistas/anónimos o para deshacer una autoría errónea.
+async function autorQuitar(id, nombre, ids, count) {
+  const ambito = ids ? `de los ${count} libro(s) seleccionados` : 'de TODOS sus libros';
+  if (!confirm(`¿Quitar a «${nombre}» ${ambito}?\n\nEsos documentos quedarán sin este autor/colaborador. Si se queda sin obras, el autor se borrará. (Nunca se borra un autor con obras.)`)) return;
+  try {
+    const r = await api('/autores/' + encodeURIComponent(id) + '/quitar', { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) });
+    cerrarCmp();
+    toast(`✔ Quitado de ${r.quitados} doc(s)${r.autorBorrado ? ' · autor borrado (se quedó sin obras)' : ''}`);
+    autoresBuscar();
+  } catch (e) { toast('Error: ' + e.message, 'bad'); }
+}
+
+// Fusionar OTRO autor EN este: overlay de búsqueda; el elegido se ABSORBE (sus libros pasan aquí, se borra).
+async function autorFusionar(destinoId, destinoNombre) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px';
+  ov.innerHTML = `<div class="box card" style="max-width:460px;width:94vw;max-height:82vh;overflow:auto">
+      <h3 style="margin-top:0">🔀 Fusionar en «${esc(recortar(destinoNombre, 28))}»</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Busca el autor a ABSORBER: sus libros pasarán a «${esc(recortar(destinoNombre, 22))}» y ese autor se borrará.</div>
+      <input id="fusBuscar" placeholder="Buscar autor por nombre…" autocomplete="off" style="width:100%;box-sizing:border-box">
+      <div id="fusRes" class="muted" style="margin-top:10px;max-height:46vh;overflow:auto;font-size:13px">Escribe para buscar…</div>
+      <div style="margin-top:12px;text-align:right"><button class="btn" id="fusX">Cancelar</button></div>
+    </div>`;
+  document.body.appendChild(ov);
+  const cerrar = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) cerrar(); };
+  ov.querySelector('#fusX').onclick = cerrar;
+  const inp = ov.querySelector('#fusBuscar'), res = ov.querySelector('#fusRes');
+  inp.focus();
+  let t;
+  const buscar = async () => {
+    const q = inp.value.trim();
+    if (q.length < 2) { res.textContent = 'Escribe al menos 2 letras…'; return; }
+    res.textContent = 'Buscando…';
+    try {
+      const r = await api('/autores?q=' + encodeURIComponent(q) + '&limite=40');
+      const cand = (r.autores || []).filter((x) => String(x._id) !== String(destinoId));
+      if (!cand.length) { res.textContent = 'Sin resultados.'; return; }
+      res.innerHTML = cand.map((x) =>
+        `<button type="button" class="btn fusPick" data-id="${esc(x._id)}" data-nom="${esc(x.nombre)}" style="display:block;width:100%;text-align:left;margin-top:5px">${esc(x.nombre)} <span class="muted">· ${x.libros || 0} libro(s)</span></button>`).join('');
+      res.querySelectorAll('.fusPick').forEach((b) => (b.onclick = async () => {
+        if (!confirm(`Fundir «${b.dataset.nom}» EN «${destinoNombre}»?\n\nLos libros de «${b.dataset.nom}» pasarán a «${destinoNombre}» y «${b.dataset.nom}» se borrará.`)) return;
+        try {
+          const rr = await api('/autores/fusionar', { method: 'POST', body: JSON.stringify({ destino: destinoId, ids: [b.dataset.id] }) });
+          cerrar(); cerrarCmp();
+          toast(`✔ Fusionado · ${rr.reasignados || 0} libro(s) reasignados`);
+          autoresBuscar();
+        } catch (e) { toast('Error: ' + e.message, 'bad'); }
+      }));
+    } catch (e) { res.textContent = 'Error: ' + e.message; }
+  };
+  inp.oninput = () => { clearTimeout(t); t = setTimeout(buscar, 300); };
 }
 
 async function autorGuardar(id) {
