@@ -1,6 +1,6 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
-import { esTituloArtefacto } from './utils/parsear-nombre.js';
+import { esTituloArtefacto, esAutorArtefacto } from './utils/parsear-nombre.js';
 import { parsearVolumen, totalDeclarado } from './utils/multivolumen.js';
 import { tituloCabecera } from './utils/revistas.js';
 import { buscarISSNporTitulo, buscarNombreDeISSNs } from './utils/buscador-issn-titulo.js';
@@ -206,7 +206,15 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
             documento.titulo = datosExtra.titulo;
         }
     }
-    if ((!documento.autores || documento.autores.length === 0) && datosExtra.autores && datosExtra.autores.length > 0) {
+    // Autores: el archivo manda, SALVO que sus autores NO sean fiables (falta, o son ARTEFACTOS: una frase del
+    // texto, una URL, metadatos de producción…). Igual que el título: un identificador correcto + un autor
+    // basura NO deben tapar al autor real de la AUTORIDAD (fichero.db → OL → Google Books). En ese caso la
+    // autoridad los sustituye. (Jerarquía de fiabilidad: la autoridad manda sobre un dato-basura del fichero.)
+    const autoresNoFiables = !documento.autores || documento.autores.length === 0
+        || documento.autores.every((a) => esAutorArtefacto(a));
+    if (autoresNoFiables && datosExtra.autores && datosExtra.autores.length > 0) {
+        if (documento.autores && documento.autores.length)
+            documento.alertas_agente.push(`Autor "${String(documento.autores[0]).slice(0, 40)}…" no fiable (artefacto); sustituido por el de la autoridad: "${String(datosExtra.autores[0]).slice(0, 40)}".`);
         documento.autores = datosExtra.autores;
     }
 
