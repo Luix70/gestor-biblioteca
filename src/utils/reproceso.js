@@ -77,6 +77,28 @@ const nombreSeguro = (s) => (String(s || '').replace(/[<>:"/\\|?*\x00-\x1f]+/g, 
  *     imágenes de contenido: una sola tal cual, o VARIAS empaquetadas en un ZIP (el Vigilante lo expande a
  *     una carpeta-drop y las re-cataloga como un único libro escaneado). Así no se pierde ninguna.
  */
+// Sidecar de PRESERVACIÓN (.meta.json) para un reprocesado: los datos CURADOS por el usuario que deben
+// SOBREVIVIR a la reingesta (no se re-derivan). El resto —título, autores, CDU, subtítulo, identificadores…—
+// lo vuelve a calcular el pipeline. Así reprocesar para arreglar la ficha NO pierde ubicación/colección/nº.
+function sidecarPreservar(doc) {
+    const s = {};
+    if (doc.coleccion_nombre) s.coleccion_nombre = doc.coleccion_nombre;
+    if (doc.coleccion_numero != null) s.coleccion_numero = doc.coleccion_numero;
+    if (doc.obra_titulo) s.obra_titulo = doc.obra_titulo;
+    if (doc.volumen_numero != null) s.volumen_numero = doc.volumen_numero;
+    if (doc.isbn_obra) s.isbn_obra = doc.isbn_obra;
+    if (doc.isbn) s.isbn = doc.isbn;
+    if (doc.ubicacion && (doc.ubicacion.ambito || doc.ubicacion.estanteria)) s.ubicacion = doc.ubicacion;
+    if (doc.valoracion) s.valoracion = doc.valoracion;
+    if (doc.nsfw) s.nsfw = true;
+    if (doc.nfc && (doc.nfc.uid || doc.nfc.fecha_vinculacion)) s.nfc = doc.nfc;
+    return s;
+}
+async function escribirSidecar(rutaFichero, doc) {
+    const s = sidecarPreservar(doc);
+    if (Object.keys(s).length) { try { await fs.writeFile(rutaFichero + '.meta.json', JSON.stringify(s, null, 2)); } catch { /* best-effort */ } }
+}
+
 export async function reprocesarDocumento(db, doc) {
     const carpeta = carpetaDeDoc(doc);
     const nombre = doc.nombre_archivo || '';
@@ -96,6 +118,7 @@ export async function reprocesarDocumento(db, doc) {
             destino = path.join(DIR_INBOX, `${path.basename(nombre, ext)} (reproc ${id6})${ext}`);
         }
         await fs.copyFile(origen, destino);
+        await escribirSidecar(destino, doc); // preserva ubicación/colección/nº/isbn/valoración/nsfw/nfc
         const reciclada = await desvincularYReciclar(db, doc, 'reprocesado');
         return { ok: true, inbox: path.basename(destino), reciclada };
     }
@@ -111,18 +134,29 @@ export async function reprocesarDocumento(db, doc) {
     if (!imgs.length && nombre) { const p = path.join(carpeta, nombre); if (await existe(p)) imgs.push(p); }
     if (!imgs.length) return { ok: false, motivo: 'no se encontraron las imágenes del escaneo en su carpeta CDU: no se puede reprocesar' };
 
+    // Orden CURADO: la PORTADA primero, luego el resto en el orden guardado (doc.imagenes). Al reingerir, la
+    // 1ª imagen se toma como portada — sin esto, la reingesta reordena y elige una portada equivocada.
+    const portadaBase = doc.portada && path.basename(doc.portada);
+    if (portadaBase) { const i = imgs.findIndex((p) => path.basename(p) === portadaBase); if (i > 0) imgs.unshift(imgs.splice(i, 1)[0]); }
+
     const base = nombreSeguro(doc.titulo);
     let inbox;
     if (imgs.length === 1) {
-        // Una sola imagen → enviarla tal cual.
+        // Una sola imagen → enviarla tal cual + su sidecar de preservación.
         let destino = path.join(DIR_INBOX, path.basename(imgs[0]));
         if (await existe(destino)) destino = path.join(DIR_INBOX, `${base} (reproc ${id6})${path.extname(imgs[0]) || '.jpg'}`);
         await fs.copyFile(imgs[0], destino);
+        await escribirSidecar(destino, doc);
         inbox = path.basename(destino);
     } else {
-        // Varias imágenes → ZIP (el Vigilante lo expande y re-cataloga como un único libro escaneado).
+        // Varias imágenes → ZIP (el Vigilante lo expande y re-cataloga como un único libro escaneado). Se
+        // PREFIJAN 001_,002_… para que la expansión conserve el orden y la 1ª (portada) siga siendo la portada.
         const zip = new AdmZip();
-        for (const p of imgs) zip.addLocalFile(p);
+        const nombres = imgs.map((p, i) => `${String(i + 1).padStart(3, '0')}_${path.basename(p)}`);
+        imgs.forEach((p, i) => zip.addLocalFile(p, '', nombres[i]));
+        // Sidecar de preservación DENTRO del zip, emparejado con la 1ª imagen (para que leerOverride lo halle).
+        const s = sidecarPreservar(doc);
+        if (Object.keys(s).length && nombres[0]) zip.addFile(`${nombres[0]}.meta.json`, Buffer.from(JSON.stringify(s, null, 2)));
         let destino = path.join(DIR_INBOX, `${base} (reproc ${id6}).zip`);
         if (await existe(destino)) destino = path.join(DIR_INBOX, `${base} (reproc ${id6}-${Date.now().toString().slice(-4)}).zip`);
         zip.writeZip(destino);

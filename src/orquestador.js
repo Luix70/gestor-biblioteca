@@ -96,7 +96,7 @@ function fusionarOcr(base, ocr) {
 // realidad son ediciones/ejemplares diferentes).
 const CAMPOS_OVERRIDE = ['titulo', 'subtitulo', 'autores', 'editorial', 'cdu', 'idioma', 'año_edicion',
     'sinopsis', 'palabras_clave', 'coleccion_nombre', 'coleccion_numero', 'tipo_recurso',
-    'obra_titulo', 'volumen_numero', 'isbn_obra'];
+    'obra_titulo', 'volumen_numero', 'isbn_obra', 'ubicacion'];
 
 export async function leerOverride(rutaArchivo) {
     const sinExt = path.join(path.dirname(rutaArchivo), path.basename(rutaArchivo, path.extname(rutaArchivo)));
@@ -115,6 +115,10 @@ function aplicarOverride(datosBase, override) {
     if (override.isbn) { const v = validarISBN(override.isbn); if (v) { datosBase.isbn = v; datosBase.isbn_candidatos = variantesISBN(v); } }
     if (override.issn) { const v = validarISSN(override.issn); if (v) datosBase.issn = v; }
     if (override.sin_isbn === true) { delete datosBase.isbn; datosBase.isbn_candidatos = []; datosBase._isbnBloqueado = true; }
+    // Campos CURADOS por el usuario que se PRESERVAN en un reprocesado (no bibliográficos, no se re-derivan).
+    if (override.valoracion != null) datosBase.valoracion = override.valoracion;
+    if (override.nsfw != null) datosBase.nsfw = override.nsfw;
+    if (override.nfc) datosBase.nfc = override.nfc;
     const sinApis = override.sin_apis === true || override.forzar === true;
     const forzarNuevo = override.forzar_nuevo === true;
     datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
