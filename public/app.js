@@ -4519,7 +4519,7 @@ function fichaEditar(d, r, opts) {
       ([val, lab]) => `<option value="${val}"${val === sel ? ' selected' : ''}>${lab}</option>`,
     ).join('');
   const edAltFila = (a) =>
-    `<div class="edAltRow" style="display:flex;gap:6px;margin-top:6px;align-items:center"><input class="edAltIsbn" value="${esc((a && a.isbn) || '')}" placeholder="ISBN" autocomplete="off" style="flex:1"><select class="edAltRol" style="flex:0 0 auto">${rolOpts((a && a.rol) || 'otro')}</select><button type="button" class="btn bad edAltDel" title="Quitar" style="padding:2px 9px">✕</button></div>`;
+    `<div class="edAltRow" style="display:flex;gap:6px;margin-top:6px;align-items:center"><input class="edAltIsbn" value="${esc((a && a.isbn) || '')}" placeholder="ISBN" autocomplete="off" style="flex:1 1 auto;min-width:0;width:auto"><select class="edAltRol" style="flex:0 0 140px;width:140px">${rolOpts((a && a.rol) || 'otro')}</select><button type="button" class="btn bad edAltDel" title="Quitar" style="flex:none;padding:2px 9px">✕</button></div>`;
   const edAltWire = (b) => {
     b.onclick = () => b.closest('.edAltRow').remove();
   };
@@ -4543,7 +4543,7 @@ function fichaEditar(d, r, opts) {
   const ROLES_PERSONA = [['autor', 'Autor'], ['traductor', 'Traductor'], ['ilustrador', 'Ilustrador'], ['editor', 'Editor'], ['prologuista', 'Prologuista'], ['anotador', 'Anotador'], ['compilador', 'Compilador']];
   const rolPersonaOpts = (sel) => ROLES_PERSONA.map(([v, l]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${l}</option>`).join('');
   const edAutFila = (nombre, rol) =>
-    `<div class="edAutRow" style="display:flex;gap:6px;margin-top:6px;align-items:center"><input class="edAutNom" value="${esc(nombre || '')}" placeholder="Apellido, Nombre" autocomplete="off" style="flex:1"><select class="edAutRol" style="flex:0 0 auto">${rolPersonaOpts(rol || 'autor')}</select><button type="button" class="btn bad edAutDel" title="Quitar" style="padding:2px 9px">✕</button></div>`;
+    `<div class="edAutRow" style="display:flex;gap:6px;margin-top:6px;align-items:center"><input class="edAutNom" value="${esc(nombre || '')}" placeholder="Apellido, Nombre" autocomplete="off" style="flex:1 1 auto;min-width:0;width:auto"><select class="edAutRol" style="flex:0 0 140px;width:140px">${rolPersonaOpts(rol || 'autor')}</select><button type="button" class="btn bad edAutDel" title="Quitar" style="flex:none;padding:2px 9px">✕</button></div>`;
   const edAutWire = (b) => { b.onclick = () => b.closest('.edAutRow').remove(); };
   {
     const L = $('#edAutList');
