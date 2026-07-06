@@ -541,12 +541,16 @@ export function rutasPanel() {
                   ]
                 : campoOrden === 'obra'
                 ? [
-                    { $addFields: { _ot: { $ifNull: ['$obra_titulo', 'zzzzzzzz'] }, _vn: { $ifNull: ['$volumen_numero', 1e9] } } },
+                    // _vn NUMÉRICO ($convert): volumen_numero puede venir como string → sin convertir, el orden
+                    // sería alfanumérico (11 antes que 2). onError/onNull 1e9 = sin número al final.
+                    { $addFields: { _ot: { $ifNull: ['$obra_titulo', 'zzzzzzzz'] }, _vn: { $convert: { input: '$volumen_numero', to: 'double', onError: 1e9, onNull: 1e9 } } } },
                     { $sort: { _ot: s, _vn: s, titulo: 1 } },
                   ]
                 : campoOrden === 'coleccion'
                 ? [
-                    { $addFields: { _cn: { $ifNull: ['$coleccion_nombre', 'zzzzzzzz'] }, _cnum: { $ifNull: ['$coleccion_numero', 1e9] } } },
+                    // _cnum NUMÉRICO ($convert): coleccion_numero SE GUARDA COMO STRING → sin convertir, «11»
+                    // ordenaría antes que «2». onError/onNull 1e9 = sin número (o no numérico) al final.
+                    { $addFields: { _cn: { $ifNull: ['$coleccion_nombre', 'zzzzzzzz'] }, _cnum: { $convert: { input: '$coleccion_numero', to: 'double', onError: 1e9, onNull: 1e9 } } } },
                     { $sort: { _cn: s, _cnum: s, titulo: 1 } },
                   ]
                 : [{ $sort: campoOrden === 'titulo' ? { titulo: s } : { fecha_ingreso: s } }];
