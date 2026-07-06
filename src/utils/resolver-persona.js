@@ -22,7 +22,13 @@ export async function resolverPersona(db, autorStr) {
     const { nombre, alternativos } = latinizarNombre(limpio);
     const col = db.collection('autores');
 
-    const existente = await col.findOne({ $or: [{ nombre }, { nombre: limpio }, { nombres_alternativos: limpio }] });
+    // Emparejado INSENSIBLE a mayúsculas Y acentos (collation strength:1): «JEAN TOUCHARD» = «Jean Touchard»
+    // = «Jean Tóuchard» → la MISMA persona, no un autor nuevo. Sin esto, la visión (que lee el nombre en
+    // mayúsculas de una portada) creaba un duplicado. El nombre canónico es el del PRIMERO creado; la grafía
+    // distinta se guarda como nombres_alternativos (más abajo).
+    const existente = await col.findOne(
+        { $or: [{ nombre }, { nombre: limpio }, { nombres_alternativos: limpio }] },
+        { collation: { locale: 'es', strength: 1 } });
     if (existente) {
         const upd = {};
         if (limpio !== existente.nombre) upd.$addToSet = { nombres_alternativos: limpio };
