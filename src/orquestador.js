@@ -135,6 +135,25 @@ function metadatosDesdeNombre(ruta) {
     return datos;
 }
 
+// Aprovecha los EXTRAS que la lectura de identificador por visión (leerIdentificadorDeImagenes) captó de
+// paso —título/subtítulo/autores/editorial/año/idioma/nº de ejemplar— para rellenar HUECOS de datosBase, y
+// suma TODOS los ISBN/ISSN vistos como candidatos. Conservador: NUNCA pisa un valor ya presente (manda el
+// archivo/nombre); solo llena lo vacío. Así una llamada de visión que ya se paga da el máximo de info sin
+// una 2ª llamada (útil en cómic/djvu, que no ejecutan analizarImagenesRecurso).
+function fusionarExtrasVision(datosBase, id) {
+    if (!id) return;
+    const vacio = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
+    if (vacio(datosBase.titulo) && id.titulo) datosBase.titulo = id.titulo;
+    if (vacio(datosBase.subtitulo) && id.subtitulo) datosBase.subtitulo = id.subtitulo;
+    if (vacio(datosBase.autores) && id.autores?.length) datosBase.autores = id.autores;
+    if (vacio(datosBase.editorial) && id.editorial) datosBase.editorial = id.editorial;
+    if (vacio(datosBase.año_edicion) && id.anio) datosBase.año_edicion = id.anio;
+    if (vacio(datosBase.idioma) && id.idioma) datosBase.idioma = id.idioma;
+    if (vacio(datosBase.numero_issue) && id.numero_issue != null) datosBase.numero_issue = id.numero_issue;
+    if (id.isbns?.length) datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...id.isbns.flatMap(variantesISBN)])];
+    if (id.issns?.length) datosBase.issn_candidatos = [...new Set([...(datosBase.issn_candidatos || []), ...id.issns])];
+}
+
 // Heurística: ¿el título parece el de una publicación periódica?
 // Señales: marcadores de número/año, palabras clave, "review/magazine", o un mes + año
 // (es/en/fr), patrón muy típico de revistas (p. ej. "… Février-Mars 2017").
@@ -419,6 +438,8 @@ export async function procesarRecurso(entrada) {
                     datosBase.alertas_agente.push(`ISSN leído de las páginas (visión): ${id.issn}.`);
                     console.log(`[Cómic] ISSN de las páginas → ${id.issn}`);
                 }
+                // Aprovecha la MISMA llamada: título/autores/editorial/año/nº + todos los ISBN/ISSN vistos.
+                fusionarExtrasVision(datosBase, id);
             } catch (e) {
                 datosBase.alertas_agente.push(`Lectura de identificador por visión falló: ${e.message}`);
             }
@@ -473,6 +494,8 @@ export async function procesarRecurso(entrada) {
                     datosBase.alertas_agente.push(`ISSN leído de las páginas (visión): ${id.issn}.`);
                     console.log(`[DjVu] ISSN de las páginas → ${id.issn}`);
                 }
+                // Aprovecha la MISMA llamada: título/autores/editorial/año/idioma + todos los ISBN/ISSN vistos.
+                fusionarExtrasVision(datosBase, id);
             } catch (e) {
                 datosBase.alertas_agente.push(`Lectura de identificador por visión falló: ${e.message}`);
             }

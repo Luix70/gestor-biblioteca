@@ -105,20 +105,33 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInterno
     return { issn, isbn, esRevista: !!issn, mes_publicacion: mes };
 }
 
-const PROMPT_IMGS = `Tienes varias PÁGINAS (portada, créditos, contraportada) de un CÓMIC, libro o revista. Busca su
-IDENTIFICADOR y devuelve SOLO un JSON con estos campos (deja vacío lo que no veas con seguridad; NO inventes):
+const PROMPT_IMGS = `Tienes varias PÁGINAS (portada, créditos, contraportada) de un CÓMIC, libro o revista. Como ESTA llamada
+ya se paga, extrae TODA la información fiable que veas (no solo el identificador) y devuelve SOLO un JSON con
+estos campos (deja vacío/[] lo que no veas con seguridad; NO inventes):
 - "codigo_barras": los 13 dígitos del EAN-13 (cubierta/contraportada), SIN guiones ni espacios, leídos en
   CUALQUIER orientación (horizontal o GIRADO 90°/vertical). (977→ISSN de revista; 978/979→ISBN de libro.)
 - "add_on": el pequeño add-on de 2 dígitos a la derecha del código de barras, o vacío.
-- "isbn_impreso": un ISBN IMPRESO en los créditos/colofón (10 o 13 cifras, normalmente junto a "ISBN"),
-  transcrito con sus guiones. Útil cuando el código de barras no se lee bien.
-- "issn_impreso": un ISSN IMPRESO (formato NNNN-NNNX, junto a "ISSN"), o vacío.`;
+- "isbns_impresos": TODOS los ISBN impresos que veas (créditos/colofón/CIP; 10 o 13 cifras), con sus guiones.
+  Incluye el de la OBRA completa y el del VOLUMEN si aparecen ambos.
+- "issns_impresos": TODOS los ISSN impresos (formato NNNN-NNNX), incluido un ISSN de SERIE/colección.
+- "titulo": el título principal. "subtitulo": el subtítulo si lo hay.
+- "autores": lista de autores/autoras (nombre completo, uno por elemento).
+- "editorial": la editorial.
+- "anio": año de edición (4 cifras). "idioma": código ISO del idioma (es, en, fr…).
+- "numero_issue": si es una REVISTA, su número de ejemplar (entero), o vacío.
+Responde EXCLUSIVAMENTE el JSON.`;
+
+const _str = (v) => { const s = String(v ?? '').trim(); return s && s.toLowerCase() !== 'null' ? s : null; };
+const _arrStr = (v) => (Array.isArray(v) ? v : v ? [v] : []).map(_str).filter(Boolean);
 
 /**
  * Lee el IDENTIFICADOR (código de barras EAN-13, o ISBN/ISSN impreso) a partir de un puñado de PÁGINAS ya
- * extraídas como imágenes (p. ej. las 5 primeras + la última de un cómic). UNA sola llamada de visión.
+ * extraídas como imágenes (p. ej. las 5 primeras + la última de un cómic). UNA sola llamada de visión que,
+ * ya que se paga, aprovecha para EXTRAER TAMBIÉN metadatos (título/autores/editorial/año/idioma/nº de
+ * ejemplar) y TODOS los ISBN/ISSN impresos — para rellenar huecos sin una 2ª llamada de visión. El
+ * PASO-PREVIO local (zxing) sigue devolviendo SOLO el identificador (no gasta IA: nada que aprovechar).
  * @param {Array<{base64:string, mimeType?:string}>} muestras
- * @returns {Promise<{issn:?string,isbn:?string,esRevista:boolean,mes_publicacion:?number}|null>}
+ * @returns {Promise<{issn:?string,isbn:?string,esRevista:boolean,mes_publicacion:?number,isbns?:string[],issns?:string[],titulo?:?string,subtitulo?:?string,autores?:string[],editorial?:?string,anio?:?number,idioma?:?string,numero_issue?:?number}|null>}
  */
 export async function leerIdentificadorDeImagenes(muestras) {
     const imagenes = (muestras || []).filter(m => m && m.base64).map(m => ({ base64: m.base64, mimeType: m.mimeType || 'image/jpeg' }));
@@ -138,14 +151,29 @@ export async function leerIdentificadorDeImagenes(muestras) {
     try {
         datos = extraerJSON(await conVision({ prompt: PROMPT_IMGS, imagenes, soloGemini: true })) || {};
     } catch (e) { console.warn(`[Barras/img] visión falló: ${e.message}`); return null; }
-    console.log(`[Barras/img] codigo_barras="${datos.codigo_barras || ''}" isbn_impreso="${datos.isbn_impreso || ''}" issn_impreso="${datos.issn_impreso || ''}"`);
 
+    // TODOS los ISBN/ISSN impresos válidos (plural; tolera el singular antiguo). El del barras manda como el
+    // identificador principal; los impresos rellenan y aportan candidatos (p. ej. obra + volumen de un CIP).
+    const isbns = [...new Set([..._arrStr(datos.isbns_impresos), ..._arrStr(datos.isbn_impreso)]
+        .map(v => validarISBN(v)).filter(Boolean))];
+    const issns = [...new Set([..._arrStr(datos.issns_impresos), ..._arrStr(datos.issn_impreso)]
+        .map(v => validarISSN(v) ? v.replace(/[^0-9Xx]/g, '').replace(/^(\d{4})(\d{3}[\dXx])$/, '$1-$2').toUpperCase() : null).filter(Boolean))];
     const bc = decodificarCodigoBarras(datos.codigo_barras);
     let issn = bc?.issn || null, isbn = bc?.isbn || null;
-    if (!isbn && datos.isbn_impreso) { const v = validarISBN(datos.isbn_impreso); if (v) { isbn = v; console.log(`[Barras/img] ISBN impreso: ${v}.`); } }
-    if (!issn && datos.issn_impreso) { const v = validarISSN(datos.issn_impreso); if (v) { issn = v; console.log(`[Barras/img] ISSN impreso: ${v}.`); } }
-    if (!issn && !isbn) { console.log('[Barras/img] sin identificador legible en las páginas.'); return null; }
+    if (!isbn && isbns.length) { isbn = isbns[0]; console.log(`[Barras/img] ISBN impreso: ${isbn}.`); }
+    if (!issn && issns.length) { issn = issns[0]; console.log(`[Barras/img] ISSN impreso: ${issn}.`); }
+    console.log(`[Barras/img] barras="${datos.codigo_barras || ''}" isbns=[${isbns.join(',')}] issns=[${issns.join(',')}] titulo="${_str(datos.titulo) || ''}"`);
+    if (!issn && !isbn && !_str(datos.titulo)) { console.log('[Barras/img] sin identificador ni título legibles.'); return null; }
     const add = String(datos.add_on || '').replace(/\D/g, '');
     const mes = add && Number(add) >= 1 && Number(add) <= 12 ? Number(add) : null;
-    return { issn, isbn, esRevista: !!issn && !isbn, mes_publicacion: mes };
+    const anio = /^\d{4}$/.test(String(datos.anio || '').trim()) ? Number(datos.anio) : null;
+    const nissue = Number.isFinite(+datos.numero_issue) && String(datos.numero_issue).trim() !== '' ? parseInt(datos.numero_issue, 10) : null;
+    const idioma = _str(datos.idioma) && String(datos.idioma).trim().length <= 3 ? String(datos.idioma).trim().toLowerCase() : null;
+    return {
+        issn, isbn, esRevista: !!issn && !isbn, mes_publicacion: mes,
+        isbns, issns,                                   // TODOS los identificadores impresos (candidatos)
+        titulo: _str(datos.titulo), subtitulo: _str(datos.subtitulo),
+        autores: _arrStr(datos.autores), editorial: _str(datos.editorial),
+        anio, idioma, numero_issue: nissue,
+    };
 }
