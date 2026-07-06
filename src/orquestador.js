@@ -348,7 +348,15 @@ export async function procesarRecurso(entrada) {
             // el curador lo nombró con la fecha real del número; un nº mensual NO es un libro. (En
             // ESCANEADOS no se aplica: su nombre es la fecha del escaneo.)
             const fechaNombre = parsearNombre(path.basename(rutas[0]));
-            if (fechaNombre.esFechada) {
+            // El nombre fechado marca «nº de revista» SOLO si NO hay señal FUERTE de libro. Un bloque CIP o
+            // un ISBN PROPIO ⇒ LIBRO (regla de confianza de CLAUDE.md: CIP/ISBN propio mandan sobre todo),
+            // aunque el nombre lleve una fecha: en un ripeo suele ser la etiqueta de RELEASE del grupo
+            // («…Jan.2010.eBook-ELOHiM»), no un número mensual. Sin esta guarda, un libro con su ISBN en el
+            // bloque CIP («Oxford.Extreme.Politics.Jan.2010…») se catalogaba como revista y PERDÍA su ISBN
+            // (descartado a la espera de un ISSN inexistente), creando además una cabecera/colección falsa.
+            const señalFuerteLibro = !!datosBase.cip || !!datosBase.isbn_propio
+                || (Array.isArray(datosBase.isbns_rol) && datosBase.isbns_rol.length > 0);
+            if (fechaNombre.esFechada && !señalFuerteLibro) {
                 datosBase.año_edicion = fechaNombre.año_edicion;
                 if (fechaNombre.mes_publicacion != null) datosBase.mes_publicacion = fechaNombre.mes_publicacion;
                 if (datosBase.isbn) datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
@@ -356,6 +364,12 @@ export async function procesarRecurso(entrada) {
                 tipo_recurso = 'revista';
                 delete datosBase.isbn;
                 datosBase.isbn_candidatos = [];
+            } else if (fechaNombre.esFechada) {
+                // Nombre fechado PERO con CIP/ISBN propio → es un LIBRO: se CONSERVA el ISBN y NO se toma la
+                // fecha del nombre como año/mes (es la fecha del release, no la de edición; la resolverán el
+                // CIP/las APIs por el ISBN).
+                datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
+                    `Fecha del nombre ignorada: hay bloque CIP/ISBN propio → es un LIBRO (la fecha del nombre es una etiqueta de release, no un nº de revista).`];
             }
         }
 
