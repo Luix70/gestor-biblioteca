@@ -2503,6 +2503,7 @@ function pintarDoc(r, ctx) {
     datosHTML: filasFmin,
     obraColHTML: obraColFmin,
     ubicacionHTML: ubicFmin,
+    editable: ROL === 'admin',
     origen,
   });
   // Debajo de la ficha, secciones PLEGABLES y colapsadas por defecto (acciones, imágenes, lectura, datos, sinopsis).
@@ -2568,6 +2569,7 @@ function pintarDoc(r, ctx) {
     const ce2 = $('#actEdit');
     if (ce2) ce2.onclick = () => fichaEditar(d, r);
     if ($('#actEditCover')) $('#actEditCover').onclick = () => fichaEditar(d, r);
+    if ($('#fminEdit')) $('#fminEdit').onclick = () => fichaEditar(d, r); // «✏️ Editar» de la cabecera
     const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []));
     if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
     if ($('#actImgsCar')) $('#actImgsCar').onclick = editarImgs; // duplicado en el encabezado del carrusel
@@ -9540,8 +9542,15 @@ function fichaMinima(o) {
       : o.esDigital
         ? ''
         : `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">📍 ${esc(o.ubicacion || 'Sin asignar')}</div></div>`;
+  // Botón «Editar» en la CABECERA (junto al título), centrado bajo las estrellas: acceso directo al modo
+  // edición sin desplegar el acordeón «⚙️ Acciones». Solo si el llamador lo habilita (admin; nunca en la
+  // ficha compartida). Se cablea en pintarDoc con id="fminEdit".
+  const editBtn = o.editable
+    ? `<div style="margin-top:10px"><button id="fminEdit" class="btn" title="Editar los datos a mano" style="padding:4px 14px;font-size:13px">✏️ Editar</button></div>`
+    : '';
   return `<div class="fmin card">${badge}
     <h1 class="fmin-tit">${esc(o.titulo || '(sin título)')}</h1>${o.subtitulo ? `<div class="fmin-sub">${esc(o.subtitulo)}</div>` : ''}${starsInner ? `<div class="fmin-stars">${starsInner}</div>` : ''}
+    ${editBtn}
     ${hero ? `<div style="margin-top:14px">${hero}</div>` : ''}
     ${o.obraColHTML || ''}
     ${filas ? `<dl class="dl fmin-data">${filas}</dl>` : ''}
