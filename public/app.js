@@ -10975,12 +10975,14 @@ async function editarUbicacionRapida(doc) {
 // INTERACTIVA de scripts/backfill-autores.js. Las mutaciones son solo admin (las exige el backend).
 let _autores = []; // último listado recibido
 const _autoresSel = new Set(); // ids marcados para combinar
+let _autoresSelModo = false; // Modo selección (tap = marcar) — mismo patrón que Catálogo/estantes
 let _autoresBuscarTimer = null; // debounce del buscador
 
 async function loadAutores() {
   const cont = $('#p-autores');
   if (!cont) return;
   _autoresSel.clear();
+  _autoresSelModo = false;
   cont.innerHTML = `
     <div class="sec-h"><h2>Autores</h2></div>
     <div class="row" style="gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
@@ -11045,24 +11047,38 @@ function autoresPintar() {
     autoresBarraCombinar();
     return;
   }
-  grid.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">${_autores
+  const admin = ROL === 'admin';
+  grid.innerHTML = `<div class="${admin && _autoresSelModo ? 'selmode' : ''}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">${_autores
     .map(autorCard)
     .join('')}</div>`;
-  grid.querySelectorAll('[data-aut]').forEach(
-    (el) =>
-      (el.onclick = (e) => {
-        if (e.target.closest('[data-autchk]')) return; // clic en la casilla: no abre la ficha
-        autorFicha(el.dataset.aut);
-      }),
+  // Interacción unificada (igual que Catálogo/estantes): clic/toque = abrir la ficha (o MARCAR en Modo
+  // selección); doble clic / pulsación larga = conmutar el modo (conservando lo ya marcado).
+  grid.querySelectorAll('[data-aut]').forEach((el) =>
+    attachGesto(
+      el,
+      () => {
+        const id = el.dataset.aut;
+        if (admin && _autoresSelModo) {
+          _autoresSel.has(id) ? _autoresSel.delete(id) : _autoresSel.add(id);
+          el.classList.toggle('sel', _autoresSel.has(id));
+          autoresBarraCombinar();
+        } else autorFicha(id);
+      },
+      () => alternarAutoresModo(el.dataset.aut),
+    ),
   );
-  grid.querySelectorAll('[data-autchk]').forEach(
-    (cb) =>
-      (cb.onchange = () => {
-        cb.checked ? _autoresSel.add(cb.dataset.autchk) : _autoresSel.delete(cb.dataset.autchk);
-        autoresBarraCombinar();
-      }),
-  );
+  setModoVisual(admin && _autoresSelModo);
   autoresBarraCombinar();
+}
+
+// Conmuta el Modo selección de la LISTA de autores (botón «Modo selección» o gesto doble-clic /
+// pulsación-larga en una tarjeta). Al entrar por gesto, marca ya esa tarjeta. Re-pinta para aplicar el modo.
+function alternarAutoresModo(selId) {
+  if (ROL !== 'admin') return;
+  const entrando = !_autoresSelModo;
+  _autoresSelModo = !_autoresSelModo;
+  if (entrando && _autoresSelModo && selId) _autoresSel.add(selId);
+  autoresPintar();
 }
 
 function autorCard(a) {
@@ -11078,8 +11094,10 @@ function autorCard(a) {
     a.nombres_alternativos && a.nombres_alternativos.length
       ? `<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.nombres_alternativos.join(' · '))}">a.k.a. ${esc(a.nombres_alternativos.join(' · '))}</div>`
       : '';
-  return `<div data-aut="${esc(a._id)}" class="card" style="display:flex;gap:10px;align-items:center;cursor:pointer;padding:10px${sel ? ';outline:2px solid var(--acc)' : ''}">
-    <input type="checkbox" class="admin-only" data-autchk="${esc(a._id)}" ${sel ? 'checked' : ''} title="Seleccionar para combinar" style="width:16px;height:16px;flex:0 0 auto">
+  // Tarjeta con la MISMA mecánica de selección que el resto: círculo .selmark (visible en Modo selección),
+  // .sel al marcar. Sin checkbox: se marca tocando en Modo selección (toggle o pulsación larga).
+  return `<div data-aut="${esc(a._id)}" class="card${sel ? ' sel' : ''}" style="position:relative;display:flex;gap:10px;align-items:center;padding:10px">
+    <span class="selmark">✓</span>
     ${foto}
     <div style="flex:1;min-width:0">
       <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.nombre || '—')}</div>
@@ -11088,17 +11106,23 @@ function autorCard(a) {
     </div></div>`;
 }
 
-// Barra de acción de «Combinar»: aparece al marcar 2+ autores.
+// Barra de acción: botón de Modo selección (admin) + «Combinar» al marcar 2+ autores.
 function autoresBarraCombinar() {
   const bar = $('#autCombinaBar');
   if (!bar) return;
+  const admin = ROL === 'admin';
   const n = _autoresSel.size;
-  bar.innerHTML =
+  const modoBtn = admin
+    ? `<button class="btn${_autoresSelModo ? ' pri' : ''}" id="autModo" title="Modo selección: tocar una tarjeta la marca (para combinar). Modo previsualización: tocar abre la ficha. Doble clic / pulsación larga en una tarjeta también conmuta. Lo marcado se conserva.">${_autoresSelModo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`
+    : '';
+  const acciones =
     n >= 2
-      ? `<button class="btn pri admin-only" id="autCombinar">🔗 Combinar ${n}…</button> <button class="btn" id="autSelClear">✕ deseleccionar</button>`
+      ? ` <button class="btn pri admin-only" id="autCombinar">🔗 Combinar ${n}…</button> <button class="btn" id="autSelClear">✕ deseleccionar</button>`
       : n === 1
-        ? `<span class="muted" style="font-size:12px">1 marcado (marca 2+ para combinar)</span> <button class="btn" id="autSelClear">✕</button>`
+        ? ` <span class="muted" style="font-size:12px">1 marcado (marca 2+ para combinar)</span> <button class="btn" id="autSelClear">✕</button>`
         : '';
+  bar.innerHTML = modoBtn + acciones;
+  if ($('#autModo')) $('#autModo').onclick = () => alternarAutoresModo();
   if ($('#autCombinar')) $('#autCombinar').onclick = autorCombinar;
   if ($('#autSelClear'))
     $('#autSelClear').onclick = () => {

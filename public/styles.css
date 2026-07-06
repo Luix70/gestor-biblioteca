@@ -1290,13 +1290,15 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .selmode .vol,
 .selmode .drow,
 .selmode .ubcard,
-.selmode [data-libro] {
+.selmode [data-libro],
+.selmode [data-aut] {
   transition: transform 0.12s ease;
 }
 .selmode .vol.sel,
 .selmode .drow.sel,
 .selmode .ubcard.sel,
-.selmode [data-libro].sel {
+.selmode [data-libro].sel,
+.selmode [data-aut].sel {
   transform: scale(0.94);
 }
 /* Tarjetas con gesto (clic abre / doble-largo conmuta selección): sin callout ni selección de texto
@@ -1305,6 +1307,7 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .drow,
 .ubcard,
 [data-libro],
+[data-aut],
 #ubicChip {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -1313,14 +1316,16 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .vol img,
 .drow img,
 .ubcard img,
-[data-libro] img {
+[data-libro] img,
+[data-aut] img {
   -webkit-touch-callout: none;
   -webkit-user-drag: none;
 }
 /* Rejilla en modo selección: el cursor y un ligero realce invitan a tocar para seleccionar. */
 .selmode .vol,
 .selmode .drow,
-.selmode .ubcard {
+.selmode .ubcard,
+.selmode [data-aut] {
   cursor: pointer;
 }
 /* MODO SELECCIÓN activo: fondo un punto más claro + pastilla explicativa abajo, para que se vea de un
@@ -1348,12 +1353,14 @@ body.modo-seleccion::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ubcard.sel {
+.ubcard.sel,
+[data-aut].sel {
   outline: 2px solid var(--acc);
   outline-offset: -2px;
 }
 .selmode .vol:not(.sel):active,
-.selmode .drow:not(.sel):active {
+.selmode .drow:not(.sel):active,
+.selmode [data-aut]:not(.sel):active {
   outline: 2px dashed var(--acc);
   outline-offset: -2px;
 }

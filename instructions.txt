@@ -592,7 +592,10 @@ de ficheros clasificado por CDU.
       (por ISBN, tandas de 25, reanudable):
         docker exec gestor-biblioteca node scripts/roles-autores.js --ejecutar
       (sin --ejecutar cuenta; --limite N para probar).
-    · COMBINAR (admin): marca 2+ autores (casilla) → «🔗 Combinar» → elige el que
+    · COMBINAR (admin): activa «🖱 Modo selección» (o pulsación larga / doble clic en
+      una tarjeta) — MISMA mecánica y pista visual que el Catálogo/estantes: cada
+      tarjeta muestra su círculo de selección y la marcada se «hunde». Marca 2+
+      autores → «🔗 Combinar» → elige el que
       se CONSERVA (destino B; por defecto el que más libros tiene). Los demás (A)
       se funden en B: sus nombres pasan a «también conocido como» de B y TODOS sus
       libros se reasignan a B; luego se borran las A. Sin pérdida (los libros y sus
