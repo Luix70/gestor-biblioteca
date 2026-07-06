@@ -2503,6 +2503,7 @@ function pintarDoc(r, ctx) {
     datosHTML: filasFmin,
     obraColHTML: obraColFmin,
     ubicacionHTML: ubicFmin,
+    tipoFormatoHTML: badgesTipoFormato(d),
     editable: ROL === 'admin',
     origen,
   });
@@ -6136,6 +6137,26 @@ function wireOrdList() {
 // Distintivos de admin: 🔞 NSFW (oculto a invitados) y 🔒 bloqueado (el Conformador no lo altera).
 const badgesDoc = (d) =>
   `${d.nsfw ? ' <span class="fmt" style="background:rgba(255,92,122,.18);color:var(--bad)" title="NSFW: oculto a invitados">🔞</span>' : ''}${d.locked ? ' <span class="fmt" style="background:rgba(255,180,84,.18);color:var(--warn)" title="Bloqueado: el Conformador no lo altera">🔒</span>' : ''}${d.nfc && (d.nfc.fecha_vinculacion || d.nfc.uid) ? ' <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)" title="Tiene etiqueta NFC vinculada">📶</span>' : ''}`;
+// Píldoras GRANDES y legibles de TIPO (libro/revista/cómic) + FORMATO(S) (papel/pdf/epub/mobi/cbr…) para la
+// CABECERA de la ficha, donde el usuario quiere ver de un vistazo qué es y en qué soporte está.
+function badgesTipoFormato(d) {
+  const nat = String(d.naturaleza || '').toLowerCase();
+  const esComic = ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(nat);
+  const chip = (txt, bg, col) => `<span style="display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;padding:3px 11px;border-radius:999px;background:${bg};color:${col}">${txt}</span>`;
+  const tipo = esComic
+    ? chip('📓 Cómic', 'rgba(180,120,255,.20)', '#c79cff')
+    : d.tipo_recurso === 'revista'
+      ? chip('📰 Revista', 'rgba(120,160,255,.22)', '#9db8ff')
+      : chip('📕 Libro', 'rgba(120,160,255,.16)', '#9db8ff');
+  const fmts = (d.formatos || [])
+    .map((f) =>
+      f === 'papel'
+        ? chip('📄 Papel', 'rgba(200,160,90,.22)', '#d8b878')
+        : chip('💾 ' + esc(String(f).toUpperCase()), 'rgba(40,217,168,.18)', 'var(--acc)'),
+    )
+    .join('');
+  return `<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:10px">${tipo}${fmts}</div>`;
+}
 function docCard(d) {
   const ph = d.tipo_recurso === 'revista' ? '📰' : '📕';
   const cov = d.portada
@@ -9550,6 +9571,7 @@ function fichaMinima(o) {
     : '';
   return `<div class="fmin card">${badge}
     <h1 class="fmin-tit">${esc(o.titulo || '(sin título)')}</h1>${o.subtitulo ? `<div class="fmin-sub">${esc(o.subtitulo)}</div>` : ''}${starsInner ? `<div class="fmin-stars">${starsInner}</div>` : ''}
+    ${o.tipoFormatoHTML || ''}
     ${editBtn}
     ${hero ? `<div style="margin-top:14px">${hero}</div>` : ''}
     ${o.obraColHTML || ''}
