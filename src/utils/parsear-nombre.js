@@ -49,6 +49,12 @@ export function esAutorArtefacto(s) {
     if (!t) return false;
     if (/\d{1,2}:\d{2}/.test(t)) return true; // lleva una hora (HH:MM[:SS]) → sello de build
     if (/\b(typesett|typograph|composici[óo]n|compositor|dvips|distiller|quark|indesign|pdftex|latex|acrobat|ghostscript|framemaker)\b/i.test(t)) return true;
+    // Trozos del NOMBRE DE ARCHIVO que NO son un autor (nombres tipo "ISBN - {avaxhome.ws} - 2013-11-09"):
+    if (/^[\d\W]+$/.test(t)) return true;                        // solo dígitos/puntuación: "2013", "11", "09", "-"
+    if (/^(?:19|20)\d{2}$/.test(t)) return true;                 // un año suelto
+    if (/^\{.*\}$/.test(t)) return true;                         // marca de agua entre llaves: "{avaxhome.ws}"
+    if (/(?:^|\b)(?:www\.|https?:\/\/)/i.test(t)) return true;   // URL / web
+    if (/\.(?:ws|com|net|org|se|ru|io|co|info|to|cc|me|onion)\b/i.test(t)) return true; // dominio: "avaxhome.ws"
     return false;
 }
 
@@ -153,7 +159,7 @@ export function parsearNombre(nombreArchivo) {
     if (col.esEpl) {
         const idx = trabajo.indexOf(' - ');
         if (idx >= 0) {
-            const autores = trabajo.slice(0, idx).split(/\s*&\s*/).map(s => s.trim()).filter(Boolean);
+            const autores = trabajo.slice(0, idx).split(/\s*&\s*/).map(s => s.trim()).filter(Boolean).filter(a => !esAutorArtefacto(a));
             const titulo = trabajo.slice(idx + 3).trim();
             return { titulo, autores, esFechada: false, ...colExtra };
         }
@@ -207,8 +213,18 @@ export function parsearNombre(nombreArchivo) {
 
     // Libro: separar título y autores por " - ".
     const partes = trabajo.split(' - ');
-    const autores = partes.length > 1
+    const tituloCand = partes[0].trim();
+    // Si el "título" del nombre es en realidad un IDENTIFICADOR (un ISBN suelto) o un ARTEFACTO (DOI,
+    // ruta…), el nombre es «<id> - ruido - fecha» y NO contiene ni título ni autores fiables: se deja
+    // vacío para que los aporte el ISBN/autoridad (principio «identificar primero, el nombre es el ÚLTIMO
+    // recurso»). Se extrae el ISBN incrustado si lo hay. Caso real: «1461474213 - {avaxhome.ws} - 2013-11-09».
+    const isbnTitulo = validarISBN(tituloCand.replace(/[^0-9Xx]/g, ''));
+    if (isbnTitulo || esTituloArtefacto(tituloCand)) {
+        return { titulo: null, autores: [], ...(isbnTitulo ? { isbn: isbnTitulo } : {}), esFechada: false, ...colExtra };
+    }
+    // Autores tras el 1er " - ", descartando los que sean ARTEFACTO (números, fechas, marcas de agua…).
+    const autores = (partes.length > 1
         ? partes.slice(1).join(' - ').split(/\s*-\s*/).map(s => s.trim()).filter(Boolean)
-        : [];
-    return { titulo: partes[0].trim(), autores, esFechada: false, ...colExtra };
+        : []).filter(a => !esAutorArtefacto(a));
+    return { titulo: tituloCand, autores, esFechada: false, ...colExtra };
 }
