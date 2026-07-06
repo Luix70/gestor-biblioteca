@@ -11,6 +11,7 @@ import 'dotenv/config';
 import { conectarDB } from '../src/database.js';
 import { nombreEsPlaceholder, nombreEsTituloDeMiembro } from '../src/utils/colecciones.js';
 import { buscarNombrePorISSN } from '../src/utils/buscador-issn-titulo.js';
+import { fusionarColecciones } from '../src/utils/gestion-grupos.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const _norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -20,7 +21,7 @@ async function main() {
     const col = db.collection('colecciones');
     // Series de LIBROS con ISSN (las revistas con inventario cronológico numeros[] se dejan aparte).
     const todas = await col.find({ issn: { $exists: true, $ne: null } }).toArray();
-    let renombradas = 0, omitidas = 0, revisados = 0;
+    let renombradas = 0, fundidas = 0, omitidas = 0, revisados = 0;
     for (const c of todas) {
         if ((c.numeros || []).length) continue; // revista con inventario → no aplica
         const sospechoso = nombreEsPlaceholder(c.nombre, c.issn) || await nombreEsTituloDeMiembro(db, c._id, c.nombre);
@@ -32,16 +33,33 @@ async function main() {
         if (_norm(real.nombre) === _norm(c.nombre)) continue; // ya está bien
         const choca = await col.findOne({ nombre: real.nombre, _id: { $ne: c._id } }, { collation: { locale: 'es', strength: 1 } });
         if (choca) {
-            omitidas++;
-            console.log(`  ⚠ «${String(c.nombre).slice(0, 34)}» → «${real.nombre}» OMITIDA (ya existe otra con ese nombre: ${choca._id}; fusión manual).`);
+            // Ya existe una colección con el nombre autoritativo. Si es la MISMA serie (mismo ISSN, o el
+            // destino aún SIN ISSN), se FUNDE c → choca: mover miembros + transferir ISSN/tipo + borrar c.
+            // Si el destino tiene OTRO ISSN (serie distinta con nombre coincidente), se OMITE (revisión manual).
+            const compatible = !choca.issn || choca.issn === c.issn;
+            if (!compatible) {
+                omitidas++;
+                console.log(`  ⚠ «${String(c.nombre).slice(0, 30)}» → «${real.nombre}» OMITIDA (destino ${choca._id} tiene OTRO ISSN ${choca.issn}; revisar a mano).`);
+                continue;
+            }
+            fundidas++;
+            const nMove = await db.collection('biblioteca').countDocuments({ coleccion: c._id });
+            console.log(`  ⇄ FUNDIR «${String(c.nombre).slice(0, 30)}» (ISSN ${c.issn}, ${nMove} miembro/s) → «${real.nombre}» (${choca._id}).`);
+            if (EJECUTAR) {
+                const set = {};                              // transferir ISSN/tipo al destino antes de fundir
+                if (!choca.issn && c.issn) set.issn = c.issn;
+                if (c.tipo === 'libro' && choca.tipo !== 'libro') set.tipo = 'libro';
+                if (Object.keys(set).length) await col.updateOne({ _id: choca._id }, { $set: set });
+                await fusionarColecciones(db, [c._id], choca._id);
+            }
             continue;
         }
         renombradas++;
         console.log(`  ✓ «${String(c.nombre).slice(0, 34)}» → «${real.nombre}» (ISSN ${c.issn}, ${real.fuente}).`);
         if (EJECUTAR) await col.updateOne({ _id: c._id }, { $set: { nombre: real.nombre, fecha_actualizacion: new Date() } });
     }
-    console.log(`\nCon ISSN: ${todas.length} · sospechosas revisadas: ${revisados} · renombradas: ${renombradas} · omitidas (colisión): ${omitidas}`);
-    if (!EJECUTAR) console.log('(dry-run) Relanza con --ejecutar para renombrar.');
+    console.log(`\nCon ISSN: ${todas.length} · sospechosas: ${revisados} · renombradas: ${renombradas} · FUNDIDAS: ${fundidas} · omitidas: ${omitidas}`);
+    if (!EJECUTAR) console.log('(dry-run) Relanza con --ejecutar. ⚠ FUNDIR borra la colección redundante → haz BACKUP antes.');
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
