@@ -1040,6 +1040,12 @@ de ficheros clasificado por CDU.
                                   borra su registro
         reprocesar-cuarentena.js  Devuelve depósitos al Inbox para recatalogar
         migrar-arbol-cdu.js       (Hecho) Migración al árbol CDU jerárquico
+        reclasificar-revistas-a-libros.js  Repara LIBROS mal clasificados como
+                                  revista (colección-revista de 1 miembro con bloque
+                                  CIP o prefijo de editorial): los devuelve al Inbox
+                                  forzando tipo=libro y borra la colección falsa.
+                                  --limite N por tandas. Correr en el NAS (los
+                                  ficheros están en el árbol CDU).
         Todos aceptan DRY-RUN por defecto; --ejecutar aplica.
 
 
