@@ -85,6 +85,11 @@ const EXT_PORTADA = ['.jpg', '.jpeg', '.png', '.webp'];
 
 // Entradas que NO cuentan como contenido real (metadatos de Synology, ocultos).
 const soloMetadatos = (n) => n.startsWith('@') || n.startsWith('#') || n.startsWith('.');
+// Una entrada es "basura" en el Inbox si NO es un documento/imagen CATALOGABLE: metadatos de Synology y
+// ocultos (@eaDir, #recycle, .*), y sidecars/accesorios (.meta.json, .txt, .url, .nfo…). Una carpeta cuyo
+// contenido restante es TODO basura ya no tiene nada que catalogar → se disuelve CON su basura dentro (así
+// el Inbox no se congestiona con carpetas de reprocesado, sidecars y .txt tras verificar el documento).
+const soloBasura = (n) => soloMetadatos(n) || !esValida(n);
 
 /** Subcarpeta "covers"/"Covers" (insensible a mayúsculas) dentro de 'carpeta', o null. */
 async function subcarpetaCovers(carpeta) {
@@ -149,7 +154,7 @@ async function podarSubcarpetasVacias(top) {
         const sub = path.join(top, e.name);
         await podarSubcarpetasVacias(sub); // primero las anidadas
         let restantes; try { restantes = await fs.readdir(sub); } catch { continue; }
-        if (restantes.every(soloMetadatos)) await fs.rm(sub, { recursive: true, force: true }).catch(() => {});
+        if (restantes.every(soloBasura)) await fs.rm(sub, { recursive: true, force: true }).catch(() => {});
     }
 }
 
@@ -173,7 +178,7 @@ async function disolverDropsVacios() {
         let restantes;
         try { restantes = await fs.readdir(carpeta); }
         catch { dropsADisolver.delete(carpeta); continue; } // ya no existe
-        if (restantes.every(soloMetadatos)) {
+        if (restantes.every(soloBasura)) {
             await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
             dropsADisolver.delete(carpeta);
             console.log(`  🗑️  Carpeta vacía disuelta: «${path.basename(carpeta)}» retirada del Inbox.`);
@@ -334,7 +339,11 @@ async function listarUnidades() {
                     unidades.push({ rutas: filtrarDuplicadosNombre(imagenes), esImagenes: true, carpeta: ruta, conservarCarpeta: false });
                 }
             }
-        } else if (esValida(e.name)) {
+        } else if (esValida(e.name) && !EXT_COMPRIMIDO.includes(path.extname(e.name).toLowerCase())) {
+            // Un COMPRIMIDO suelto (.zip/.rar/.7z) NO se cataloga NUNCA como documento crudo: lo maneja EN
+            // EXCLUSIVA expandirComprimidos (expandir → carpeta → drop). Si aún se está copiando, se saltó
+            // allí y debe ESPERAR al próximo escaneo — sin esta guarda se colaba aquí como unidad y se
+            // catalogaba como «fmt:zip» sin contenido (perdía el escaneo real). Caso de reprocesado.
             sueltos.push(ruta);
         }
     }
