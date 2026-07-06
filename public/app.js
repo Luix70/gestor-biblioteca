@@ -4485,7 +4485,7 @@ function fichaEditar(d, r, opts) {
     ${campo('edSub', 'Subtítulo', d.subtitulo)}
     <label style="display:block;margin-top:8px">Tipo</label>
     <select id="edTipo"><option value="libro"${d.tipo_recurso !== 'revista' ? ' selected' : ''}>📕 Libro</option><option value="revista"${d.tipo_recurso === 'revista' ? ' selected' : ''}>📰 Revista</option></select>
-    ${campo('edAut', 'Autores (coma)', (r.autores || []).join(', '))}
+    <div style="margin-top:8px"><label style="display:block">Autores y colaboradores</label><div id="edAutList"></div><button type="button" class="btn" id="edAutAdd" style="margin-top:6px">➕ Añadir persona</button></div>
     ${campo('edEdi', 'Editorial', r.editorial || '')}
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno', 'Año', d.año_edicion)}</div><div style="flex:1">${campo('edIdi', 'Idioma', d.idioma)}</div><div style="flex:1">${campo('edPag', 'Páginas', d.paginas)}</div>`}</div>
     <div class="row" style="gap:8px"><div style="flex:1"><label style="display:block;margin-top:8px">ISBN</label><div style="display:flex;gap:6px"><input id="edIsbn" value="${esc(d.isbn || '')}" autocomplete="off" style="flex:1">${btnScanIsbn}</div></div><div style="flex:1">${campo('edIssn', 'ISSN', d.issn)}</div></div>
@@ -4537,13 +4537,44 @@ function fichaEditar(d, r, opts) {
       L.insertAdjacentHTML('beforeend', edAltFila(null));
       edAltWire(L.lastElementChild.querySelector('.edAltDel'));
     };
+  // Editor de AUTORES + COLABORADORES (nombre + rol). Filas añadibles/borrables. El nombre puede llevar
+  // COMAS («Touchard, Jean»): cada fila es una persona (no se parte por comas). El rol 'autor' va a
+  // autores[]; los demás (traductor/ilustrador/editor/…) a contribuciones[].
+  const ROLES_PERSONA = [['autor', 'Autor'], ['traductor', 'Traductor'], ['ilustrador', 'Ilustrador'], ['editor', 'Editor'], ['prologuista', 'Prologuista'], ['anotador', 'Anotador'], ['compilador', 'Compilador']];
+  const rolPersonaOpts = (sel) => ROLES_PERSONA.map(([v, l]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${l}</option>`).join('');
+  const edAutFila = (nombre, rol) =>
+    `<div class="edAutRow" style="display:flex;gap:6px;margin-top:6px;align-items:center"><input class="edAutNom" value="${esc(nombre || '')}" placeholder="Apellido, Nombre" autocomplete="off" style="flex:1"><select class="edAutRol" style="flex:0 0 auto">${rolPersonaOpts(rol || 'autor')}</select><button type="button" class="btn bad edAutDel" title="Quitar" style="padding:2px 9px">✕</button></div>`;
+  const edAutWire = (b) => { b.onclick = () => b.closest('.edAutRow').remove(); };
+  {
+    const L = $('#edAutList');
+    if (L) {
+      const filas = [
+        ...(r.autores || []).map((n) => edAutFila(n, 'autor')),
+        ...(r.contribuciones || []).filter((c) => !c.desconocido).map((c) => edAutFila(c.nombre, c.rol)),
+      ];
+      L.innerHTML = filas.join('') || edAutFila('', 'autor');
+      $$('#edAutList .edAutDel').forEach(edAutWire);
+    }
+  }
+  if ($('#edAutAdd'))
+    $('#edAutAdd').onclick = () => {
+      const L = $('#edAutList');
+      if (!L) return;
+      L.insertAdjacentHTML('beforeend', edAutFila('', 'autor'));
+      edAutWire(L.lastElementChild.querySelector('.edAutDel'));
+    };
   if ($('#edScan')) $('#edScan').onclick = () => escanearISBN('edIsbn'); // escanear ISBN en la ficha (supervisado)
   const onGuardar = async () => {
+    // Personas: cada fila es una (nombre con comas incluido). rol 'autor' → autores[]; el resto → contribuciones[].
+    const personas = [...document.querySelectorAll('#edAutList .edAutRow')]
+      .map((row) => ({ nombre: row.querySelector('.edAutNom').value.trim(), rol: row.querySelector('.edAutRol').value }))
+      .filter((p) => p.nombre);
     const campos = {
       titulo: $('#edTit').value,
       subtitulo: $('#edSub').value,
       tipo_recurso: $('#edTipo').value,
-      autores: $('#edAut').value,
+      autores: personas.filter((p) => p.rol === 'autor').map((p) => p.nombre),
+      contribuciones: personas.filter((p) => p.rol !== 'autor'),
       editorial: $('#edEdi').value,
       año_edicion: $('#edAno').value,
       idioma: $('#edIdi').value,

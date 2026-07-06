@@ -311,7 +311,12 @@ de ficheros clasificado por CDU.
       exacta); clic en el ámbito = todo lo que cuelga de él (CDU por prefijo). En las
       tarjetas del Catálogo, un digital sin ubicación física muestra «CDU <código>».
     Acciones (admin):
-      ✏️ Editar (y bloquear para que el Conformador no lo cambie)
+      ✏️ Editar (y bloquear para que el Conformador no lo cambie). AUTORES+COLABORADORES:
+         editor de FILAS (nombre + rol: autor/traductor/ilustrador/editor/prologuista/
+         anotador/compilador), añadir/quitar/corregir. Cada fila es UNA persona, así el
+         nombre puede llevar comas («Touchard, Jean») sin partirse (antes el separador por
+         comas lo rompía). Se resuelve con resolverPersona (insensible a mayús./acentos →
+         no crea duplicados). El rol 'autor' va a autores[]; los demás a contribuciones[].
       🖼️ Imágenes — reordenar/añadir/borrar + editor en el navegador: rotar,
          recortar, corregir PERSPECTIVA (4 esquinas) con «✨ Auto bordes». Auto-bordes
          detecta la cubierta en 3 pasadas (todas locales, sin IA): tapete verde →

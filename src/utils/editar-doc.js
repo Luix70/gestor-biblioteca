@@ -8,16 +8,19 @@ import { ObjectId } from 'mongodb';
 import { validarISBN, validarISSN } from './identificadores.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { reubicarPorCdu } from '../mantenimiento/util-mantenimiento.js';
+import { resolverPersona } from './resolver-persona.js';
+import { ROLES_VALIDOS } from './contribuciones.js';
 
 const TEXTO = ['subtitulo', 'idioma', 'numero_edicion', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'obra_titulo'];
 const NUM = ['año_edicion', 'paginas', 'volumen_numero'];
 
+// Resuelve nombres → ObjectId con resolverPersona (INSENSIBLE a mayúsculas/acentos + normalización BNE):
+// así editar «JEAN TOUCHARD» reusa «Touchard, Jean» en vez de crear un duplicado.
 async function resolverAutores(db, nombres) {
     const out = [];
     for (const n of nombres) {
-        const t = String(n).trim(); if (!t) continue;
-        const ex = await db.collection('autores').findOne({ nombre: t });
-        out.push(ex ? ex._id : (await db.collection('autores').insertOne({ nombre: t })).insertedId);
+        const r = await resolverPersona(db, n);
+        if (r?._id) out.push(r._id);
     }
     return out;
 }
@@ -85,8 +88,26 @@ export async function editarDocumento(db, id, campos = {}) {
     }
 
     if ('autores' in campos) {
-        const arr = (Array.isArray(campos.autores) ? campos.autores : String(campos.autores || '').split(',')).map(s => s.trim()).filter(Boolean);
+        // Separador «;» (NO coma): un nombre puede llevar coma («Touchard, Jean»). Acepta también array.
+        const arr = (Array.isArray(campos.autores) ? campos.autores : String(campos.autores || '').split(';')).map(s => s.trim()).filter(Boolean);
         if (arr.length) set.autores = await resolverAutores(db, arr); else unset.autores = '';
+    }
+    // CONTRIBUCIONES con rol (traductor/ilustrador/editor/…): [{nombre, rol}] → [{persona, rol}] (resueltos,
+    // insensible a grafía). Se excluye 'autor' (va en autores[]); rol no válido → se descarta; dedup (persona,rol).
+    if ('contribuciones' in campos) {
+        const arr = Array.isArray(campos.contribuciones) ? campos.contribuciones : [];
+        const out = [], vistos = new Set();
+        for (const c of arr) {
+            const nombre = String(c?.nombre || '').trim();
+            const rol = String(c?.rol || '').trim().toLowerCase();
+            if (!nombre || rol === 'autor' || !ROLES_VALIDOS.includes(rol)) continue;
+            const r = await resolverPersona(db, nombre);
+            if (!r?._id) continue;
+            const key = String(r._id) + '|' + rol;
+            if (vistos.has(key)) continue; vistos.add(key);
+            out.push({ persona: r._id, rol });
+        }
+        if (out.length) set.contribuciones = out; else unset.contribuciones = '';
     }
     if ('editorial' in campos) {
         const e = await resolverEditorial(db, campos.editorial);
