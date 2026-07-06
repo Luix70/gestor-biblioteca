@@ -29,6 +29,13 @@ export function esTituloArtefacto(s) {
     // («10.1007@978-3-319-38992-9», «10.1007/978-…», o URL-codificado «10.1007%40978-…»). Un DOI NO es un
     // título — hay que caer al Fichero/APIs por su ISBN (que va DENTRO del DOI). Caso real de este proyecto.
     if (/^10\.\d{3,}\s*[/@%]/.test(t)) return true;                 // DOI (10.<registrante>/… o @/%40)
+    // El "título" es en realidad un ISBN con poco más (caso real de metadatos MOBI/AZW: alguien grabó el
+    // ISBN del nombre como título, p. ej. «0393333590 (N)»). Un título real no es un ISBN → al ISBN/APIs.
+    {
+        const digitos = (t.match(/\d/g) || []).length;
+        const letras = (t.match(/[a-záéíóúñü]/gi) || []).length;
+        if (digitos >= 9 && letras <= 2 && /\d{9,13}/.test(t.replace(/[\s\-–—]/g, ''))) return true;
+    }
     // Prefijo de campo del info-dict del PDF grabado como título: "Creator: …", "Producer: …".
     // Un título real NO empieza así. Caso real: "Creator:        Adobe InDesign CC 2014 (Windows)".
     if (/^\s*(?:creator|producer|created\s+by)\s*[:_]/i.test(t)) return true;
