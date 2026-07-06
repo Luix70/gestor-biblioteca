@@ -1071,9 +1071,15 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
                             Útil tras correcciones masivas.
     limpiar-huerfanos.js    [PERIÓDICO] poda lo que NADA más limpia: autores/editoriales
                             referenciados por 0 documentos (ni por colecciones/obras las
-                            editoriales) y obras/colecciones vacías. Invisibles/vacíos; se
-                            recrean solos si un doc futuro los necesita. Dry-run por defecto;
-                            --ejecutar borra. (node scripts/limpiar-huerfanos.js [--ejecutar])
+                            editoriales, ni por contribuciones[].persona los autores) y
+                            obras/colecciones vacías. Invisibles/vacíos; se recrean solos si
+                            un doc futuro los necesita. Dry-run por defecto; --ejecutar borra.
+                            (node scripts/limpiar-huerfanos.js [--ejecutar])
+    recuperar-contribuciones.js  [RECUPERACIÓN] repara docs cuyas contribuciones[].persona
+                            (traductor/ilustrador/editor) apuntan a un autor inexistente:
+                            reconstruye el nombre por ISBN (Fichero + OpenLibrary, sin IA) y
+                            lo re-resuelve con resolverPersona. Solo toca refs rotas. Dry-run;
+                            --ejecutar.
 
   ── Saneos RETROACTIVOS (el fix ya está en la ingesta; sanean lo VIEJO) ───────
     sanear-colecciones-issn.js  [RETROACTIVO] colecciones con nombre-PLACEHOLDER (su
