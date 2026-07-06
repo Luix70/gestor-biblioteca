@@ -3029,12 +3029,12 @@ async function fichaReprocesar(id) {
   }
 }
 // Modal de reproceso: elige MODO (conservador = con sidecar / nuevo desde cero = sin sidecar) + contraseña.
-// Devuelve { password, conservar } o null si se cancela.
-function modalReprocesar() {
+// `n` = nº de documentos (1 = ficha individual; >1 = lote). Devuelve { password, conservar } o null si cancela.
+function modalReprocesar({ n = 1 } = {}) {
   return new Promise((resolver) => {
     $('#cmpModal').innerHTML = `<div class="box card" style="max-width:470px">
-      <h3 style="margin-top:0">♻️ Reprocesar documento</h3>
-      <div class="muted" style="margin:-4px 0 12px">El fichero vuelve al <b>Inbox</b> para re-catalogarse; su carpeta actual (sidecars e imágenes) va a la <b>Papelera</b> (recuperable). El Vigilante debe estar activo.</div>
+      <h3 style="margin-top:0">♻️ Reprocesar ${n > 1 ? n + ' documentos' : 'documento'}</h3>
+      <div class="muted" style="margin:-4px 0 12px">${n > 1 ? 'Cada uno vuelve' : 'El fichero vuelve'} al <b>Inbox</b> para re-catalogarse; su carpeta actual (sidecars e imágenes) va a la <b>Papelera</b> (recuperable). El Vigilante debe estar activo.${n > 1 ? ' <b>Acción masiva.</b>' : ''}</div>
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;padding:9px 10px;border:1px solid var(--line);border-radius:9px">
         <input type="radio" name="reprocMode" value="cons" checked style="margin-top:3px;flex:0 0 auto">
         <span><b>Conservador</b> (con sidecar) — mantiene ubicación, colección, obra, ISBN, valoración, NSFW y etiqueta NFC; solo re-deriva los metadatos bibliográficos. <span class="muted">Recomendado.</span></span>
@@ -5370,17 +5370,22 @@ async function eliminarSeleccionados() {
 async function accionLoteFicha(tipo, { verbo = 'Procesar', password = false } = {}) {
   const ids = [...selDocs];
   if (!ids.length) return;
-  // Reprocesar (como en la ficha individual) EXIGE contraseña de admin: se pide UNA sola vez y viaja en
-  // cada petición. Conformar/Enriquecer no la necesitan (solo un aviso de confirmación).
-  let pw = null;
-  if (password) {
+  // Reprocesar: MISMO modal que la ficha individual (elige modo CONSERVADOR / NUEVO DESDE CERO + contraseña
+  // de admin). La contraseña se pide UNA vez y viaja en cada petición (si falta → 403). Conformar/Enriquecer
+  // no la necesitan (solo un aviso de confirmación).
+  let pw = null, conservar = true;
+  if (tipo === 'reprocesar') {
+    const el = await modalReprocesar({ n: ids.length });
+    if (el == null) return; // cancelado
+    pw = el.password; conservar = el.conservar;
+  } else if (password) {
     pw = await modalPassword({
       titulo: `♻️ ${verbo} ${ids.length} documento(s)`,
-      aviso: `Cada uno vuelve al <b>Inbox</b> para re-catalogarse y su carpeta actual va a la <b>Papelera</b> (recuperable). Acción MASIVA. Confirma con tu contraseña de administrador.`,
+      aviso: `Acción MASIVA. Confirma con tu contraseña de administrador.`,
     });
     if (pw == null) return; // cancelado
   } else if (!window.confirm(`¿${verbo} ${ids.length} documento(s) seleccionado(s)?`)) return;
-  const body = JSON.stringify(password ? { password: pw } : {});
+  const body = JSON.stringify(tipo === 'reprocesar' ? { password: pw, conservar } : (password ? { password: pw } : {}));
   const bar = $('#searchBulk');
   let ok = 0, err = 0, cambios = 0, ultErr = '';
   for (let i = 0; i < ids.length; i++) {
