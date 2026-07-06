@@ -205,13 +205,48 @@ export async function conTexto({ prompt, json = true, maxTokens } = {}) {
 }
 
 /** Limpia y parsea JSON de una respuesta de modelo (tolera fences ```json y texto alrededor). */
+// Extrae un objeto JSON de la respuesta de un modelo, tolerante a lo que sueltan los modelos pequeños
+// (Groq/OpenRouter llama): fences markdown ``` en cualquier posición, texto antes/después, comas colgantes,
+// y JSON TRUNCADO por el límite de tokens (se balancean las llaves/strings pendientes). Devuelve null si no hay.
 export function extraerJSON(txt) {
     if (!txt) return null;
-    let s = String(txt).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-    try { return JSON.parse(s); } catch { /* intentar recortar al primer objeto */ }
-    const a = s.indexOf('{'), b = s.lastIndexOf('}');
-    if (a >= 0 && b > a) { try { return JSON.parse(s.slice(a, b + 1)); } catch { /* */ } }
-    return null;
+    const intentar = (str) => { try { return JSON.parse(str); } catch { return undefined; } };
+    const sinComasColgantes = (str) => str.replace(/,\s*([}\]])/g, '$1'); // ,} y ,]
+    let s = String(txt).replace(/```(?:json)?/gi, '').trim();            // quita fences en cualquier sitio
+    let r = intentar(s); if (r !== undefined) return r;
+
+    const a = s.indexOf('{');
+    if (a < 0) return null;
+
+    // 1) Del primer '{' al último '}' (caso normal con preámbulo/epílogo de texto).
+    const b = s.lastIndexOf('}');
+    if (b > a) {
+        const cand = s.slice(a, b + 1);
+        r = intentar(cand) ?? intentar(sinComasColgantes(cand));
+        if (r !== undefined) return r;
+    }
+
+    // 2) Primer objeto BALANCEADO con una PILA de llaves/corchetes (ignora los que van dentro de strings). Si
+    //    quedó TRUNCADO (el modelo se cortó), se cierran el string y los {/[ pendientes en orden antes de parsear.
+    const pila = []; let enStr = false, esc = false, fin = -1;
+    for (let i = a; i < s.length; i++) {
+        const ch = s[i];
+        if (esc) { esc = false; continue; }
+        if (ch === '\\') { esc = true; continue; }
+        if (ch === '"') { enStr = !enStr; continue; }
+        if (enStr) continue;
+        if (ch === '{') pila.push('}');
+        else if (ch === '[') pila.push(']');
+        else if (ch === '}' || ch === ']') { pila.pop(); if (pila.length === 0) { fin = i; break; } }
+    }
+    let cand = fin >= 0 ? s.slice(a, fin + 1) : s.slice(a);
+    if (fin < 0) { // truncado: cerrar lo pendiente (string, coma final, y {/[ en orden inverso)
+        if (enStr) cand += '"';
+        cand = sinComasColgantes(cand.replace(/,\s*$/, ''));
+        while (pila.length) cand += pila.pop();
+    }
+    r = intentar(cand) ?? intentar(sinComasColgantes(cand));
+    return r !== undefined ? r : null;
 }
 
 // ── Para el panel (sin secretos) ──
