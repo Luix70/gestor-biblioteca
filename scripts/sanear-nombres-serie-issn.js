@@ -46,11 +46,14 @@ async function main() {
             const nMove = await db.collection('biblioteca').countDocuments({ coleccion: c._id });
             console.log(`  ⇄ FUNDIR «${String(c.nombre).slice(0, 30)}» (ISSN ${c.issn}, ${nMove} miembro/s) → «${real.nombre}» (${choca._id}).`);
             if (EJECUTAR) {
-                const set = {};                              // transferir ISSN/tipo al destino antes de fundir
+                // FUNDIR PRIMERO: mueve los miembros y BORRA el origen c → libera su ISSN (hay índice ÚNICO
+                // en colecciones.issn, así que no puede haber dos con el mismo a la vez). LUEGO se transfiere
+                // el ISSN/tipo al destino, ya sin colisión de clave.
+                await fusionarColecciones(db, [c._id], choca._id);
+                const set = {};
                 if (!choca.issn && c.issn) set.issn = c.issn;
                 if (c.tipo === 'libro' && choca.tipo !== 'libro') set.tipo = 'libro';
                 if (Object.keys(set).length) await col.updateOne({ _id: choca._id }, { $set: set });
-                await fusionarColecciones(db, [c._id], choca._id);
             }
             continue;
         }
