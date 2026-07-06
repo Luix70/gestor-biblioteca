@@ -51,10 +51,13 @@ export async function resolverNombres(db, doc) {
     const amap = new Map(personaDocs.map(a => [String(a._id), a.nombre]));
     const autores = autorIds.map(id => amap.get(String(id)) || String(id));
     const autores_ids = autorIds.map(String); // alineado con `autores` (para enlazar a la ficha del autor)
-    // Contribuciones (traductor/ilustrador/…) con el nombre Y el id de persona resueltos (drillables).
+    // Contribuciones (traductor/ilustrador/…) con el nombre Y el id de persona resueltos (drillables). Se
+    // OMITEN las que no resuelven a un nombre real (persona inexistente): así nunca se muestra un ObjectId
+    // crudo en la ficha (p. ej. si el autor-persona se borró). El dato crudo permanece en Mongo (recuperable
+    // reprocesando el fichero); solo no se muestra.
     const contribuciones = (doc.contribuciones || [])
-        .filter(c => c && c.persona)
-        .map(c => ({ rol: c.rol, nombre: amap.get(String(c.persona)) || String(c.persona), persona: String(c.persona) }));
+        .filter(c => c && c.persona && amap.get(String(c.persona)))
+        .map(c => ({ rol: c.rol, nombre: amap.get(String(c.persona)), persona: String(c.persona) }));
 
     let editorial = null;
     if (doc.editorial) {
