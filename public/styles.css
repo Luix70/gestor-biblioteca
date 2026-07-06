@@ -1270,8 +1270,34 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
   box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5);
   pointer-events: none;
 }
-.sel .selmark {
+/* En MODO SELECCIÓN, TODA tarjeta muestra su círculo de selección: VACÍO (aro) = sin marcar, RELLENO con ✓
+   = marcada. Es la señal más clara de que estás seleccionando (se ve en cada tarjeta, mires donde mires;
+   patrón iOS/Google Photos) — no solo el fondo o la pastilla del pie. */
+.selmode .selmark {
   display: block;
+  background: rgba(0, 0, 0, 0.4);
+  color: transparent; /* oculta el ✓ mientras no está marcada */
+  border: 2px solid #fff;
+}
+.sel .selmark,
+.selmode .sel .selmark {
+  display: block;
+  background: var(--acc);
+  color: #04231b; /* muestra el ✓ */
+  border: 2px solid var(--acc);
+}
+/* Tarjeta MARCADA: se «hunde» un poco (escala 96%) — refuerzo 3D del estado seleccionado. */
+.selmode .vol,
+.selmode .drow,
+.selmode .ubcard,
+.selmode [data-libro] {
+  transition: transform 0.12s ease;
+}
+.selmode .vol.sel,
+.selmode .drow.sel,
+.selmode .ubcard.sel,
+.selmode [data-libro].sel {
+  transform: scale(0.94);
 }
 /* Tarjetas con gesto (clic abre / doble-largo conmuta selección): sin callout ni selección de texto
    nativos, para que la PULSACIÓN LARGA sea NUESTRA y no abra el menú de Android (copiar/descargar imagen). */

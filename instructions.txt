@@ -281,8 +281,10 @@ de ficheros clasificado por CDU.
           Modo selección (sin perder lo ya seleccionado).
       Sigue existiendo el BOTÓN que alterna «👁 Modo previsualización» ↔ «🖱 Modo
       selección» (por si acaso; hace lo mismo que el gesto). Cuando el Modo selección
-      está ACTIVO se ve de un vistazo: fondo un punto más claro + PASTILLA inferior
-      «🖱 Modo selección…» + realce de las tarjetas. En las listas fuera del Catálogo la
+      está ACTIVO se ve de un vistazo: CADA tarjeta muestra su CÍRCULO de selección
+      (aro vacío = sin marcar, relleno ✓ = marcada; patrón iOS/Google Photos — la
+      señal más clara, mires donde mires), la marcada se «hunde» un poco (escala 96%),
+      fondo un punto más claro + PASTILLA inferior «🖱 Modo selección…». En las listas fuera del Catálogo la
       acción es «🔍 Mostrar en Catálogo» (lleva la selección al Catálogo, ya marcada).
       La selección NO se pierde al conmutar el modo. Con selección hay acciones: 👁 Ver · 📚 Colección · 📖 Obra · 📍
       Estantería · 🚫 Quitar de estantería · 📶 Etiquetar · 🧹 Conformar · ✨ Enriquecer ·

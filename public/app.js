@@ -2427,9 +2427,14 @@ function pintarDoc(r, ctx) {
   const imgs =
     r.imagenes && r.imagenes.length ? r.imagenes : r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : [];
   const nfcOv = nfcBadge(d);
+  // Botón de edición SIEMPRE visible (admin), superpuesto en la portada JUNTO al icono NFC (esquina), para
+  // entrar en modo edición de un toque sin bajar a la fila de acciones.
+  const editOv = ROL === 'admin'
+    ? `<button id="actEditCover" title="Editar los datos a mano" style="position:absolute;top:6px;left:6px;z-index:3;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:8px;padding:3px 8px;font-size:14px;cursor:pointer">✏️</button>`
+    : '';
   const carrusel = imgs.length
-    ? `<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map((im) => `<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length > 1 ? `<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>` : ''}</div>`
-    : `<div class="filebox" style="position:relative">${nfcOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
+    ? `<div class="carousel" style="position:relative">${nfcOv}${editOv}<div class="track" id="carTrack">${imgs.map((im) => `<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length > 1 ? `<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>` : ''}</div>`
+    : `<div class="filebox" style="position:relative">${nfcOv}${editOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
   // ── FICHA MÍNIMA (encabezado vistoso): título → estrellas → [papel: ex-libris | digital: descarga] →
   //    datos (autor/editorial/colección/CDU/ISBN/ISSN, drillables) → [papel: ubicación clicable]. Un badge
   //    en la esquina superior derecha explica al pulsarlo de dónde salen los datos (etiqueta NFC / base). ──
@@ -2467,7 +2472,7 @@ function pintarDoc(r, ctx) {
         : '';
       return `<div class="fmin-ubic"><div class="lbl">Ubicación digital</div><div class="val">${estante}${amb}</div></div>`;
     }
-    return `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val">${_txtUbic(d) || ROL === 'admin' ? `<span class="rowlink" id="ubicChip" style="color:var(--acc);cursor:pointer" title="Toca para ver los libros de esta estantería${ROL === 'admin' ? '; doble clic / pulsación larga para cambiar la ubicación' : ''}">📍 ${esc(_txtUbic(d) || 'Sin asignar')}</span>` : '<span class="muted">Sin asignar</span>'}</div></div>`;
+    return `<div class="fmin-ubic"><div class="lbl">Ubicación</div><div class="val" style="display:flex;align-items:center;gap:8px">${_txtUbic(d) || ROL === 'admin' ? `<span class="rowlink" id="ubicChip" style="color:var(--acc);cursor:pointer" title="Toca para ver los libros de esta estantería">📍 ${esc(_txtUbic(d) || 'Sin asignar')}</span>${ROL === 'admin' ? '<button id="ubicEditBtn" class="btn" title="Cambiar la ubicación" style="padding:1px 8px;font-size:12px">✏️</button>' : ''}` : '<span class="muted">Sin asignar</span>'}</div></div>`;
   })();
   // Bajo el exlibris: la OBRA (con el ordinal del volumen, «Vol.: III») y la COLECCIÓN (con el nº del
   // libro/obra dentro de la colección, «Nº 678»). Primero la obra, luego la colección. Ambas clicables.
@@ -2561,6 +2566,7 @@ function pintarDoc(r, ctx) {
     if (cd) cd.onclick = () => fichaEliminar(d._id);
     const ce2 = $('#actEdit');
     if (ce2) ce2.onclick = () => fichaEditar(d, r);
+    if ($('#actEditCover')) $('#actEditCover').onclick = () => fichaEditar(d, r);
     const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []));
     if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
     if ($('#actImgsCar')) $('#actImgsCar').onclick = editarImgs; // duplicado en el encabezado del carrusel
@@ -2601,10 +2607,11 @@ function pintarDoc(r, ctx) {
         verEstanteriaEnCatalogo(u.ambito, u.estanteria && u.estanteria !== 'Sin asignar' ? u.estanteria : '');
       };
       // Clic/toque = ver los libros de la estantería; doble clic / pulsación larga (admin) = cambiar la
-      // ubicación (acción frecuente). Los invitados solo filtran.
+      // ubicación. Además, el botón ✏️ contiguo la cambia directamente (acceso rápido y evidente).
       if (ROL === 'admin') attachGesto(uc, filtrar, () => editarUbicacionRapida(d));
       else uc.onclick = filtrar;
     }
+    if ($('#ubicEditBtn')) $('#ubicEditBtn').onclick = () => editarUbicacionRapida(d);
   }
   $$('#p-detalle [data-colid]').forEach((a) => (a.onclick = () => verColeccion(a.dataset.colid)));
   $$('#p-detalle [data-q]').forEach((a) => (a.onclick = () => buscarTexto(a.dataset.q)));
@@ -11264,6 +11271,8 @@ async function autorFicha(id) {
     _autFichaSelModo = !_autFichaSelModo;
     if ($('#autSelModo')) $('#autSelModo').classList.toggle('pri', _autFichaSelModo);
     if ($('#autSelBarra')) $('#autSelBarra').style.display = _autFichaSelModo ? 'flex' : 'none';
+    // Añade el círculo de selección en CADA tarjeta + el realce (misma pista visual que en el resto).
+    const cont = $('#cmpModal'); if (cont) cont.classList.toggle('selmode', _autFichaSelModo);
     if (!_autFichaSelModo) { _autFichaSel.clear(); tarjetas.forEach((el) => pintarSel(el, false)); } // al salir, limpiar
     actualizarCuenta();
   };
