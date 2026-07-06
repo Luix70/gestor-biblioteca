@@ -6,8 +6,9 @@ import { medirImagen } from './utils/medir-imagen.js';
 import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from './utils/buscador-local.js';
-import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible } from './errores.js';
-import { parsearNombre } from './utils/parsear-nombre.js';
+import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible, ErrorOmitir } from './errores.js';
+import { parsearNombre, esTituloArtefacto } from './utils/parsear-nombre.js';
+import { leerMobi } from './utils/lector-mobi.js';
 import { pareceSerieLibros } from './utils/revistas.js';
 import { clasificarTipo } from './utils/discriminador.js';
 import { interpretarIdentificadores } from './utils/interpretar-identificadores.js';
@@ -43,9 +44,14 @@ const mimeDeImagen = (ruta) => MIME_IMAGEN[path.extname(ruta).toLowerCase()] || 
 // el contenido todavía) y quedan 'pendiente' hasta implementar su lector.
 const EXT_COMIC = ['.cbr', '.cbz', '.cb7'];
 
+// AZW/AZW3 (Kindle) son de la familia MOBI: se leen con el mismo lector y se etiquetan como formato 'mobi'
+// (evita ampliar el enum del esquema; el fichero conserva su extensión real en disco).
+const EXT_MOBI = ['.mobi', '.azw', '.azw3'];
+
 const FORMATO_POR_EXT = {
     '.epub': 'epub', '.pdf': 'pdf',
-    '.mobi': 'mobi', '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.zip': 'zip', '.rar': 'rar',
+    '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi',
+    '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.zip': 'zip', '.rar': 'rar',
 };
 
 export function detectarTipo(ruta) {
@@ -55,6 +61,7 @@ export function detectarTipo(ruta) {
     if (EXT_IMAGEN.includes(ext)) return 'imagen';
     if (EXT_COMIC.includes(ext)) return 'comic';
     if (ext === '.djvu') return 'djvu';
+    if (EXT_MOBI.includes(ext)) return 'mobi';     // MOBI/AZW/AZW3 → lector propio (EXTH + DRM + portada)
     if (FORMATO_POR_EXT[ext]) return 'otro-formato';
     return 'desconocido';
 }
@@ -526,8 +533,32 @@ export async function procesarRecurso(entrada) {
         tipo_recurso = clasif.tipo_recurso;               // libro (por defecto) | revista (ISSN / título de revista)
         delete datosBase.muestra_paginas;                 // solo para la visión, no se persiste
 
+    } else if (tipo === 'mobi') {
+        // MOBI / AZW / AZW3 (Kindle/Mobipocket): lector propio en JS puro (EXTH → título/autor/editorial/
+        // ISBN + portada embebida). El EXTH del fichero MANDA sobre el nombre (más fiable) y el ISBN sirve
+        // de PIVOTE barato para el enriquecimiento (minimiza IA). DRM ⇒ no legible → se OMITE (el vigilante
+        // lo deja intacto en el Inbox con un testigo .noborrar; nunca se borra ni va a Cuarentena).
+        const ext = path.extname(rutas[0]).toLowerCase();
+        let mobi;
+        try { mobi = await leerMobi(rutas[0]); }
+        catch (e) { mobi = { drm: false, error: e.message }; }   // error de E/S → seguir por nombre
+        if (mobi.drm) throw new ErrorOmitir(`Fichero con DRM (${ext}): no se puede leer su contenido; se deja intacto en el Inbox.`);
+
+        datosBase = metadatosDesdeNombre(rutas[0]);              // respaldo por nombre
+        if (mobi.titulo && !esTituloArtefacto(mobi.titulo)) datosBase.titulo = mobi.titulo;
+        if (mobi.autores?.length) datosBase.autores = mobi.autores;
+        if (mobi.editorial) datosBase.editorial = mobi.editorial;
+        if (mobi.isbn) {
+            const v = validarISBN(mobi.isbn);
+            if (v) { datosBase.isbn = v; datosBase.isbn_propio = v; datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(v)])]; }
+        }
+        if (mobi.portada?.buf) datosBase.cubierta_base64 = mobi.portada.buf.toString('base64'); // la mide resolverPortada
+        datosBase.alertas_agente = [`Formato ${ext}: leído con el lector MOBI${mobi.isbn ? ` · ISBN ${mobi.isbn}` : ''}${mobi.portada ? ' · portada embebida' : ''}${mobi.error ? ` · (${mobi.error}, se cataloga por nombre)` : ''}.`];
+        formatos = [FORMATO_POR_EXT[ext] || 'mobi'];
+        tipo_recurso = 'libro';
+
     } else if (tipo === 'otro-formato') {
-        // Puerta abierta: formato conocido sin lector propio aún (mobi/djvu/zip/rar; los cómics .cbz/.cbr/.cb7 tienen su rama).
+        // Puerta abierta: formato conocido sin lector propio aún (djvu/zip/rar; los cómics .cbz/.cbr/.cb7 tienen su rama).
         datosBase = metadatosDesdeNombre(rutas[0]);
         datosBase.alertas_agente = [`Formato "${path.extname(rutas[0])}" sin lector de contenido: catalogado por nombre + APIs.`];
         formatos = [FORMATO_POR_EXT[path.extname(rutas[0]).toLowerCase()]];
