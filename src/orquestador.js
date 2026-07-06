@@ -118,7 +118,15 @@ function aplicarOverride(datosBase, override) {
     // Campos CURADOS por el usuario que se PRESERVAN en un reprocesado (no bibliográficos, no se re-derivan).
     if (override.valoracion != null) datosBase.valoracion = override.valoracion;
     if (override.nsfw != null) datosBase.nsfw = override.nsfw;
-    if (override.nfc) datosBase.nfc = override.nfc;
+    if (override.nfc) {
+        // El sidecar es JSON: las FECHAS viajan como string. Hay que REVIVIRLAS a Date o el $jsonSchema
+        // (nfc.fecha_vinculacion es 'date') rechaza el documento y lo manda a Cuarentena.
+        const nfc = { ...override.nfc };
+        for (const k of ['fecha_vinculacion', 'fecha']) {
+            if (typeof nfc[k] === 'string') { const d = new Date(nfc[k]); if (!isNaN(d)) nfc[k] = d; }
+        }
+        datosBase.nfc = nfc;
+    }
     const sinApis = override.sin_apis === true || override.forzar === true;
     const forzarNuevo = override.forzar_nuevo === true;
     datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
