@@ -92,6 +92,7 @@ function sidecarPreservar(doc) {
     if (doc.isbn_obra) s.isbn_obra = doc.isbn_obra;
     if (doc.isbn) s.isbn = doc.isbn;
     if (doc.ubicacion && (doc.ubicacion.ambito || doc.ubicacion.estanteria)) s.ubicacion = doc.ubicacion;
+    if (doc.orden_estanteria != null) s.orden_estanteria = doc.orden_estanteria; // posición física en la balda
     if (doc.valoracion) s.valoracion = doc.valoracion;
     if (doc.nsfw) s.nsfw = true;
     if (doc.nfc && (doc.nfc.uid || doc.nfc.fecha_vinculacion)) s.nfc = doc.nfc;

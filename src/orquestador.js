@@ -119,6 +119,7 @@ function aplicarOverride(datosBase, override) {
     // re-catalogado conserva su identidad y la etiqueta NFC / obra / deep-links siguen siendo válidos.
     if (override._id) datosBase._id_preservado = String(override._id);
     // Campos CURADOS por el usuario que se PRESERVAN en un reprocesado (no bibliográficos, no se re-derivan).
+    if (override.orden_estanteria != null) datosBase.orden_estanteria = override.orden_estanteria; // posición en la balda
     if (override.valoracion != null) datosBase.valoracion = override.valoracion;
     if (override.nsfw != null) datosBase.nsfw = override.nsfw;
     if (override.nfc) {

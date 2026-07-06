@@ -29,7 +29,7 @@ export async function buscarDocPorHash(hash) {
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza'];
+    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza', 'orden_estanteria'];
 
     // (1) Rellenar huecos (añadir información donde FALTA nunca borra).
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
