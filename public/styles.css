@@ -1328,16 +1328,16 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .selmode [data-aut] {
   cursor: pointer;
 }
-/* MODO SELECCIÓN: TODOS los thumbnails con el fondo un punto MÁS CLARO (no solo el marcado) — pista de un
-   vistazo de que estás seleccionando, en modo icono y en modo lista. El mismo gris, algo más claro. */
+/* MODO SELECCIÓN: TODOS los thumbnails viran a BURDEOS OSCURO (no solo el marcado) — pista inequívoca, de un
+   vistazo, de que estás seleccionando; en modo icono y en modo lista. Contrasta con el gris-azulado normal. */
 .selmode .vol {
-  background: #29334a; /* --card2 (#202938) aclarado */
+  background: #3f1f2b; /* burdeos oscuro (tarjeta) */
 }
 .selmode .vol .cov {
-  background: #202a38; /* --bg2 (#151a22) aclarado */
+  background: #351923; /* burdeos algo más oscuro (fondo de la carátula) */
 }
 .selmode .drow {
-  background: #1c2431; /* la fila (transparente) recibe un fondo tenue */
+  background: #2c151d; /* la fila (transparente) recibe un fondo burdeos tenue */
 }
 /* MODO SELECCIÓN activo: fondo un punto más claro + pastilla explicativa abajo, para que se vea de un
    vistazo en qué modo estamos (además del botón «🖱 Modo selección» y del realce de las tarjetas). */
