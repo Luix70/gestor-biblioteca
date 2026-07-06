@@ -31,11 +31,13 @@ REGLAS DE EXTRACCIÓN Y VALIDACIÓN:
    - 'isbn_obra': el ISBN de la OBRA COMPLETA / del SET, que en la página de créditos suele figurar JUNTO al del volumen ("ISBN obra completa:", "ISBN O.C.:", "ISBN de la obra:"). Es DISTINTO del 'isbn' de este volumen. Solo dígitos, sin guiones; '' si no aparece.
    OJO: en la página de créditos de estos libros HAY DOS ISBN — el de ESTE volumen (→ 'isbn') y el de la OBRA COMPLETA (→ 'isbn_obra'). Distínguelos con cuidado; no los mezcles.
 14. COLECCIÓN/SERIE editorial: si el ejemplar pertenece a una colección/serie con nombre y número (p. ej. "Círculo Universidad, 8", "Biblioteca Básica, 12"), rellena 'coleccion_nombre' (el nombre de la colección) y 'coleccion_numero' (su número DENTRO de la colección). OJO: este número es DISTINTO de 'volumen_numero' (el tomo dentro de la OBRA). Una obra en 2 tomos puede ocupar UN SOLO número de colección (p. ej. ambos tomos son el nº 8 de la colección "Círculo Universidad", pero volumen 1 y 2 de la obra "Historia de las Ideas Políticas"). No confundas colección (serie editorial amplia, con muchos títulos distintos) con obra (un único título en varios tomos).
+15. COLABORADORES: además de los AUTORES, identifica TODAS las personas que colaboran en la obra con su ROL, leyendo la portada, la mención de responsabilidad y los créditos: TRADUCTOR ("traducción de", "translated by"), ILUSTRADOR ("ilustraciones de", "dibujos de", "grabados de"), EDITOR/coordinador ("edición de", "a cargo de", "edited by"), PROLOGUISTA ("prólogo de", "introducción de", "estudio preliminar"), ANOTADOR ("notas de"), COMPILADOR ("selección de", "antología de"). Devuélvelos en 'contribuciones' como {nombre, rol}. NO metas a los autores aquí (van en 'autores'). Cuantos más colaboradores reales encuentres, mejor.
 ESTRUCTURA JSON REQUERIDA:
 {
   "tipo_recurso": "libro|revista",
   "titulo": "string",
   "autores": ["string"],
+  "contribuciones": [{ "nombre": "string", "rol": "traductor|ilustrador|editor|prologuista|anotador|compilador" }],
   "cdu": "string",
   "idioma": "string",
   "formatos": ["papel"],
@@ -155,6 +157,21 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
             }
             delete recursoEstructurado.isbns;   // ya volcados a las estructuras internas
             delete recursoEstructurado.issns;
+        }
+
+        // COLABORADORES leídos por la VISIÓN → contribuciones_nombres [{nombre, rol}] (mismo formato que la
+        // mención de la BNE/OpenLibrary), que motor-catalogo resuelve a contribuciones[persona,rol]. Solo
+        // roles válidos; se ACUMULAN (no se pisan) con los que ya hubiera.
+        {
+            const ROLES = new Set(['traductor', 'ilustrador', 'editor', 'prologuista', 'anotador', 'compilador']);
+            const cn = [];
+            for (const c of (Array.isArray(recursoEstructurado.contribuciones) ? recursoEstructurado.contribuciones : [])) {
+                const nombre = String((c && c.nombre) || '').trim();
+                const rol = String((c && c.rol) || '').trim().toLowerCase();
+                if (nombre && ROLES.has(rol)) cn.push({ nombre, rol });
+            }
+            if (cn.length) recursoEstructurado.contribuciones_nombres = [...(recursoEstructurado.contribuciones_nombres || []), ...cn];
+            delete recursoEstructurado.contribuciones;
         }
 
         recursoEstructurado.fecha_ingreso = new Date();

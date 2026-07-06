@@ -235,9 +235,18 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.lcc   = primerValido(documento.lcc, datosExtra.lcc);
     documento.palabras_clave = primerValido(documento.palabras_clave, datosExtra.categorias);
 
-    // Contribuciones con ROL (traductor/ilustrador/…) e IDIOMA ORIGINAL: el archivo manda; lo externo
-    // rellena el hueco. `contribuciones_nombres` [{nombre,rol}] lo resuelve motor-catalogo a personas.
-    documento.contribuciones_nombres = primerValido(documento.contribuciones_nombres, datosExtra.contribuciones_nombres);
+    // Contribuciones con ROL (traductor/ilustrador/…): se ACUMULAN de TODAS las fuentes (archivo/visión +
+    // Fichero + OpenLibrary), dedup por (nombre, rol) — «más información: bien». Antes se tomaba solo una
+    // fuente (primerValido), perdiendo colaboradores. motor-catalogo las resuelve a personas.
+    {
+        const key = (c) => `${String(c.nombre || '').trim().toLowerCase()}|${c.rol || ''}`;
+        const vistos = new Set(), combinadas = [];
+        for (const c of [...(documento.contribuciones_nombres || []), ...(datosExtra.contribuciones_nombres || [])]) {
+            if (!c || !c.nombre || !c.rol) continue;
+            const k = key(c); if (vistos.has(k)) continue; vistos.add(k); combinadas.push({ nombre: String(c.nombre).trim(), rol: c.rol });
+        }
+        documento.contribuciones_nombres = combinadas.length ? combinadas : documento.contribuciones_nombres;
+    }
     documento.idioma_original = primerValido(documento.idioma_original, datosExtra.idioma_original);
 
     // Colección/serie: el archivo (metadatos Calibre / nombre) manda; la visión rellena el hueco.

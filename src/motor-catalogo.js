@@ -28,15 +28,17 @@ export async function buscarDocPorHash(hash) {
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza', 'isbn_candidatos', 'issn_candidatos'];
+    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza'];
 
-    // (1) Rellenar huecos.
+    // (1) Rellenar huecos (añadir información donde FALTA nunca borra).
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
 
-    // (2) Upgrade pendiente -> completado: la nueva pasada es más fiable.
+    // (2) Upgrade pendiente -> completado: la nueva pasada REEMPLAZA los escalares… SALVO si el doc está
+    // BLOQUEADO (locked = curado a mano ≈ no_override): entonces solo se RELLENAN huecos y se UNEN listas,
+    // pero NUNCA se reemplaza lo que el usuario fijó. «Más información: bien. Borrar información: mal.»
     const mejora = existente.estado_verificacion === 'pendiente' && nuevo.estado_verificacion === 'completado';
     if (mejora) {
-        for (const c of CAMPOS) if (!vacio(nuevo[c])) set[c] = nuevo[c];
+        if (!existente.locked) for (const c of CAMPOS) if (!vacio(nuevo[c])) set[c] = nuevo[c];
         set.estado_verificacion = 'completado';
     }
 
@@ -46,6 +48,12 @@ function calcularActualizacion(existente, nuevo) {
 
     const palabras = union(existente.palabras_clave, nuevo.palabras_clave);
     if (palabras.length !== (existente.palabras_clave || []).length) set.palabras_clave = palabras;
+
+    // Identificadores vistos (todos los ISBN/ISSN): ADITIVO (unir, nunca perder los ya guardados).
+    const isbnC = union(existente.isbn_candidatos, nuevo.isbn_candidatos);
+    if (isbnC.length !== (existente.isbn_candidatos || []).length) set.isbn_candidatos = isbnC;
+    const issnC = union(existente.issn_candidatos, nuevo.issn_candidatos);
+    if (issnC.length !== (existente.issn_candidatos || []).length) set.issn_candidatos = issnC;
 
     const imgs = [...(existente.imagenes || [])];
     for (const im of (nuevo.imagenes || [])) if (!imgs.some(x => x.ruta === im.ruta)) imgs.push(im);
