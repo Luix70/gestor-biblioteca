@@ -4,7 +4,7 @@
 // despliegues se ven al instante), y solo si no hay red se sirve la copia cacheada. La API (/api) y los
 // recursos en vivo (/recursos) NUNCA se cachean (necesitan datos frescos).
 const SHARE_CACHE = 'compartidos-v1';
-const APP_CACHE = 'app-v4';
+const APP_CACHE = 'app-v5';
 const PRECACHE = ['/', '/index.html', '/styles.css', '/app.js', '/qrcode.js'];
 
 self.addEventListener('install', (e) => {
@@ -29,9 +29,11 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET' || url.origin !== location.origin) return;          // otros orígenes / mutaciones: red directa
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/recursos/')) return; // datos en vivo: nunca caché
   // Cáscara de la app + estáticos: NETWORK-FIRST con respaldo en caché (para cargar sin red).
+  // `cache: 'reload'` SALTA la caché HTTP del navegador → siempre trae la última versión del servidor (los
+  // despliegues aterrizan sin borrar caché a mano); igualmente se guarda en APP_CACHE para el modo offline.
   event.respondWith((async () => {
     try {
-      const net = await fetch(req);
+      const net = await fetch(req, { cache: 'reload' });
       if (net && net.ok) { const c = await caches.open(APP_CACHE); c.put(req, net.clone()); }
       return net;
     } catch (_) {
