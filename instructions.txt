@@ -337,11 +337,15 @@ de ficheros clasificado por CDU.
       📐 Medir — estima el tamaño físico (cm) sobre la alfombrilla reglada.
       🧹 Conformar · ✨ Enriquecer · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
       📶 Grabar NFC (ver más abajo)
-      ♻️ REPROCESAR PRESERVA la curación: al devolver el fichero al Inbox se escribe un
-         sidecar .meta.json con los datos CURADOS (ubicación, colección + nº, obra +
-         volumen, isbn, isbn_obra, valoración, nsfw, NFC) que SOBREVIVEN a la reingesta;
-         el resto (título, autores, CDU, subtítulo, identificadores) se RE-DERIVA. En
-         escaneos, las imágenes se re-empaquetan con prefijos 001_,002_… y la PORTADA
+      ♻️ REPROCESAR ofrece DOS MODOS (se elige en el modal, con la contraseña):
+         · CONSERVADOR (con sidecar, por defecto): escribe un sidecar .meta.json con los
+           datos CURADOS (ubicación, colección + nº, obra + volumen, isbn, isbn_obra,
+           valoración, nsfw, NFC) que SOBREVIVEN a la reingesta; el resto (título, autores,
+           CDU, subtítulo, identificadores) se RE-DERIVA.
+         · NUEVO DESDE CERO (sin sidecar): re-identifica TODO (nuevo _id; re-lee el CIP y
+           recalcula ISBN/título/autor/colección…). Para arreglar un dato guardado ERRÓNEO
+           (p. ej. un ISBN equivocado que el modo conservador volvería a imponer).
+         En escaneos, las imágenes se re-empaquetan con prefijos 001_,002_… y la PORTADA
          primero, para conservar orden y portada.
     En «Datos catalográficos» el bloque de agrupación va en orden: Obra · ISBN obra ·
     Volumen nº · Título del volumen · Colección · Nº en colección (el nº de colección

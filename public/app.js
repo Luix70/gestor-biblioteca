@@ -3011,26 +3011,58 @@ function mostrarBalanceAFondo(id, r) {
     };
 }
 async function fichaReprocesar(id) {
-  const pw = await modalPassword({
-    titulo: '♻️ Reprocesar documento',
-    aviso:
-      'Se borrará el documento, su fichero volverá al <b>Inbox</b> para re-catalogarse y su carpeta actual (sidecars e imágenes) irá a la <b>Papelera</b> (recuperable). El Vigilante debe estar activo para que se vuelva a procesar.',
-  });
-  if (pw == null) return;
+  const eleccion = await modalReprocesar();
+  if (eleccion == null) return; // cancelado
   try {
     const r = await api('/documentos/' + encodeURIComponent(id) + '/reprocesar', {
       method: 'POST',
-      body: JSON.stringify({ password: pw }),
+      body: JSON.stringify({ password: eleccion.password, conservar: eleccion.conservar }),
     });
     if (!r.ok) {
       toast(r.motivo, 'bad');
       return;
     }
-    toast('Reprocesando: «' + r.inbox + '» devuelto al Inbox');
+    toast(`Reprocesando (${eleccion.conservar ? 'conservador' : 'nuevo desde cero'}): «${r.inbox}» al Inbox`);
     go('search');
   } catch (e) {
     toast(e.message, 'bad');
   }
+}
+// Modal de reproceso: elige MODO (conservador = con sidecar / nuevo desde cero = sin sidecar) + contraseña.
+// Devuelve { password, conservar } o null si se cancela.
+function modalReprocesar() {
+  return new Promise((resolver) => {
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:470px">
+      <h3 style="margin-top:0">♻️ Reprocesar documento</h3>
+      <div class="muted" style="margin:-4px 0 12px">El fichero vuelve al <b>Inbox</b> para re-catalogarse; su carpeta actual (sidecars e imágenes) va a la <b>Papelera</b> (recuperable). El Vigilante debe estar activo.</div>
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;padding:9px 10px;border:1px solid var(--line);border-radius:9px">
+        <input type="radio" name="reprocMode" value="cons" checked style="margin-top:3px;flex:0 0 auto">
+        <span><b>Conservador</b> (con sidecar) — mantiene ubicación, colección, obra, ISBN, valoración, NSFW y etiqueta NFC; solo re-deriva los metadatos bibliográficos. <span class="muted">Recomendado.</span></span>
+      </label>
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;padding:9px 10px;border:1px solid var(--line);border-radius:9px;margin-top:6px">
+        <input type="radio" name="reprocMode" value="nuevo" style="margin-top:3px;flex:0 0 auto">
+        <span><b>Nuevo desde cero</b> (sin sidecar) — re-identifica TODO (nuevo ID; re-lee el CIP y recalcula ISBN/título/autor/colección…). <span class="muted">Úsalo si el dato guardado es erróneo (p. ej. un ISBN equivocado).</span></span>
+      </label>
+      <label style="margin-top:12px">Contraseña de administrador</label>
+      <input type="password" id="pwInput" autocomplete="current-password">
+      <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+        <button class="btn" id="pwCancel">Cancelar</button><button class="btn pri" id="pwOk">♻️ Reprocesar</button>
+      </div></div>`;
+    $('#cmpScrim').style.display = 'block';
+    $('#cmpModal').style.display = 'grid';
+    const input = $('#pwInput');
+    setTimeout(() => input.focus(), 30);
+    const cerrarCon = (valor) => { cerrarCmp(); resolver(valor); };
+    $('#pwCancel').onclick = () => cerrarCon(null);
+    $('#cmpScrim').onclick = () => cerrarCon(null);
+    $('#pwOk').onclick = () => {
+      if (!input.value) { $('#pwErr').textContent = 'Escribe la contraseña'; input.focus(); return; }
+      const conservar = (($('#cmpModal input[name="reprocMode"]:checked') || {}).value) !== 'nuevo';
+      cerrarCon({ password: input.value, conservar });
+    };
+    input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('#pwOk').click(); } else if (ev.key === 'Escape') cerrarCon(null); };
+  });
 }
 async function fichaEliminar(id) {
   const pw = await modalPassword({

@@ -1152,7 +1152,11 @@ export function rutasPanel() {
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            const r2 = await reprocesarDocumento(db, doc);
+            // conservar=true (por defecto): reproceso CONSERVADOR (sidecar → mantiene ubicación/colección/ISBN/
+            // NFC…). conservar=false: proceso NUEVO desde cero (sin sidecar → re-identifica todo; para arreglar
+            // un dato guardado erróneo, p. ej. un ISBN equivocado que se re-leería del CIP).
+            const conservar = req.body?.conservar !== false;
+            const r2 = await reprocesarDocumento(db, doc, { conservar });
             res.json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

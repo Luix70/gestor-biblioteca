@@ -103,7 +103,15 @@ async function escribirSidecar(rutaFichero, doc) {
     if (Object.keys(s).length) { try { await fs.writeFile(rutaFichero + '.meta.json', JSON.stringify(s, null, 2)); } catch { /* best-effort */ } }
 }
 
-export async function reprocesarDocumento(db, doc) {
+/**
+ * @param {object} [opciones]
+ * @param {boolean} [opciones.conservar=true]  true = CONSERVADOR (escribe el sidecar .meta.json → preserva
+ *   _id, ubicación, colección, obra, ISBN, valoración, NSFW, NFC; solo re-deriva los metadatos bibliográficos).
+ *   false = PROCESO COMPLETAMENTE NUEVO (sin sidecar): re-identifica TODO desde cero (nuevo _id; se re-lee el
+ *   CIP y se recalcula ISBN/título/autor/colección…). Útil cuando el dato guardado es ERRÓNEO (p. ej. un ISBN
+ *   equivocado que un reproceso conservador volvería a imponer).
+ */
+export async function reprocesarDocumento(db, doc, { conservar = true } = {}) {
     const carpeta = carpetaDeDoc(doc);
     const nombre = doc.nombre_archivo || '';
     const tieneDocOriginal = nombre && EXT_DOC.includes(path.extname(nombre).toLowerCase());
@@ -122,9 +130,9 @@ export async function reprocesarDocumento(db, doc) {
             destino = path.join(DIR_INBOX, `${path.basename(nombre, ext)} (reproc ${id6})${ext}`);
         }
         await fs.copyFile(origen, destino);
-        await escribirSidecar(destino, doc); // preserva ubicación/colección/nº/isbn/valoración/nsfw/nfc
+        if (conservar) await escribirSidecar(destino, doc); // preserva ubicación/colección/nº/isbn/valoración/nsfw/nfc
         const reciclada = await desvincularYReciclar(db, doc, 'reprocesado');
-        return { ok: true, inbox: path.basename(destino), reciclada };
+        return { ok: true, inbox: path.basename(destino), reciclada, conservar };
     }
 
     // ── Escaneo (imágenes = dato del usuario): reunir TODAS las imágenes de contenido y enviarlas. ──
@@ -150,7 +158,7 @@ export async function reprocesarDocumento(db, doc) {
         let destino = path.join(DIR_INBOX, path.basename(imgs[0]));
         if (await existe(destino)) destino = path.join(DIR_INBOX, `${base} (reproc ${id6})${path.extname(imgs[0]) || '.jpg'}`);
         await fs.copyFile(imgs[0], destino);
-        await escribirSidecar(destino, doc);
+        if (conservar) await escribirSidecar(destino, doc);
         inbox = path.basename(destino);
     } else {
         // Varias imágenes → ZIP (el Vigilante lo expande y re-cataloga como un único libro escaneado). Se
@@ -159,7 +167,7 @@ export async function reprocesarDocumento(db, doc) {
         const nombres = imgs.map((p, i) => `${String(i + 1).padStart(3, '0')}_${path.basename(p)}`);
         imgs.forEach((p, i) => zip.addLocalFile(p, '', nombres[i]));
         // Sidecar de preservación DENTRO del zip, emparejado con la 1ª imagen (para que leerOverride lo halle).
-        const s = sidecarPreservar(doc);
+        const s = conservar ? sidecarPreservar(doc) : {};
         if (Object.keys(s).length && nombres[0]) zip.addFile(`${nombres[0]}.meta.json`, Buffer.from(JSON.stringify(s, null, 2)));
         let destino = path.join(DIR_INBOX, `${base} (reproc ${id6}).zip`);
         if (await existe(destino)) destino = path.join(DIR_INBOX, `${base} (reproc ${id6}-${Date.now().toString().slice(-4)}).zip`);
@@ -168,7 +176,7 @@ export async function reprocesarDocumento(db, doc) {
     }
 
     const reciclada = await desvincularYReciclar(db, doc, 'reprocesado');
-    return { ok: true, inbox, imagenes: imgs.length, reciclada };
+    return { ok: true, inbox, imagenes: imgs.length, reciclada, conservar };
 }
 
 /** Elimina el documento del catálogo: borra el registro y recicla su carpeta CDU (recuperable en Papelera). */
