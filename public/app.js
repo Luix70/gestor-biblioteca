@@ -6157,15 +6157,22 @@ function badgesTipoFormato(d) {
     .join('');
   return `<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:10px">${tipo}${fmts}</div>`;
 }
+// Etiqueta COMPACTA «tipo · formato» para las tarjetas/filas del Catálogo (p. ej. «📕 Libro · papel»,
+// «📰 Revista · pdf»): el usuario quiere ver de un vistazo QUÉ es y en qué soporte, no solo el formato.
+function tipoFmtCompacto(d) {
+  const nat = String(d.naturaleza || '').toLowerCase();
+  const esComic = ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(nat);
+  const ic = esComic ? '📓' : d.tipo_recurso === 'revista' ? '📰' : '📕';
+  const tipo = esComic ? 'Cómic' : d.tipo_recurso === 'revista' ? 'Revista' : 'Libro';
+  const fmts = (d.formatos || []).slice(0, 2).map((f) => esc(String(f))).join('·');
+  return `<span class="fmt" style="background:rgba(120,160,255,.16);color:#9db8ff">${ic} ${tipo}${fmts ? ' · ' + fmts : ''}</span>`;
+}
 function docCard(d) {
   const ph = d.tipo_recurso === 'revista' ? '📰' : '📕';
   const cov = d.portada
     ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`
     : `<div class="ph">${ph}</div>`;
-  const fmt = (d.formatos || [])
-    .slice(0, 2)
-    .map((f) => `<span class="fmt">${esc(f)}</span>`)
-    .join('');
+  const fmt = tipoFmtCompacto(d);
   const sub =
     (d.autores && d.autores.length ? d.autores.slice(0, 2).join(', ') : '') ||
     (d.año_edicion ? String(d.año_edicion) : '') ||
@@ -6183,11 +6190,8 @@ function docRow(d) {
     d.isbn || d.issn || '',
     d.cdu ? 'CDU ' + d.cdu : '',
   ].filter(Boolean);
-  const fmt = (d.formatos || [])
-    .slice(0, 3)
-    .map((f) => `<span class="fmt">${esc(f)}</span>`)
-    .join('');
-  return `<div class="drow${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><span class="dtit">${d.tipo_recurso === 'revista' ? '📰 ' : ''}${esc(recortar(d.titulo || '(sin título)', 90))}${badgesDoc(d)}</span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${fmt}</span></div>`;
+  const fmt = tipoFmtCompacto(d);
+  return `<div class="drow${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><span class="dtit">${esc(recortar(d.titulo || '(sin título)', 90))}${badgesDoc(d)}</span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${fmt}</span></div>`;
 }
 // Nº de POSICIÓN física en la estantería — solo al ver UNA estantería (ayuda a localizar el libro / inventario).
 function posBadge(d) {
