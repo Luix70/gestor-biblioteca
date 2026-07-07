@@ -24,6 +24,7 @@ import { resolverPersona } from '../src/utils/resolver-persona.js';
 import { validarISBN, validarISSN, variantesISBN } from '../src/utils/identificadores.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
+const SOLO_SIN_AUTOR = process.argv.includes('--sin-autor'); // apuntar SOLO a los libros sin autor (mayor acierto)
 const idxLim = process.argv.indexOf('--limite');
 const LIMITE = idxLim >= 0 ? Number(process.argv[idxLim + 1]) : Infinity;
 const PAUSA_MS = 1200; // ritmo entre documentos para no saturar las APIs
@@ -74,10 +75,11 @@ async function main() {
     const db = await conectarDB();
     const col = db.collection('biblioteca');
 
-    // Candidatos: con ISBN (ancla fiable) y señal de degradación.
+    // Candidatos: con ISBN (ancla fiable) y señal de degradación. Con --sin-autor, SOLO los que no tienen autor
+    // (mucho mayor acierto: el objetivo es rellenar el autor por ISBN, sin mezclar 'pendientes' que ya lo tienen).
     const todos = await col.find({ isbn: { $exists: true, $ne: null } }).toArray();
-    const candidatos = todos.filter(esDegradado).slice(0, LIMITE);
-    console.log(`Candidatos (con ISBN + señal de degradación): ${candidatos.length}\n`);
+    const candidatos = todos.filter(SOLO_SIN_AUTOR ? sinAutor : esDegradado).slice(0, LIMITE);
+    console.log(`Candidatos (con ISBN${SOLO_SIN_AUTOR ? ' · SOLO sin autor' : ' + señal de degradación'}): ${candidatos.length}\n`);
 
     let mejorados = 0, sinCambios = 0, fallos = 0;
 
