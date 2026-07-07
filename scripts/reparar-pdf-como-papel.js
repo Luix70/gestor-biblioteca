@@ -64,7 +64,7 @@ async function main() {
     const docs = await bib.find({
         $or: [
             { formatos: 'papel' },
-            { 'imagenes.5': { $exists: true } }, // ≥7 imágenes (índice 6)
+            { 'imagenes.6': { $exists: true } }, // >6 imágenes (índice 6 = la 7.ª)
         ],
     }).toArray();
 
