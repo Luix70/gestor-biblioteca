@@ -270,7 +270,8 @@ export async function procesarRecurso(entrada) {
         // Intérprete unificado de identificadores (fase 2·2): reúne TODOS los ISBN/ISSN y decide qué es
         // cada uno → señales por confianza para el discriminador. El 977/impreso lo resuelve luego el lector
         // de barras (aquí el ISSN del cuerpo es solo pista, vía issnCandidatos).
-        const clasif = clasificarTipo(interpretarIdentificadores({
+        const edLibro = esEditorialDeLibros(path.basename(rutas[0])) || esEditorialDeLibros(datosBase.coleccion_nombre);
+        const interp = interpretarIdentificadores({
             isbnCandidatos: datosBase.isbn_candidatos || (datosBase.isbn ? [datosBase.isbn] : []),
             isbnPropio: datosBase.isbn_propio,                          // CIP / nombre-es-ISBN / incrustado
             isbnsRol: datosBase.isbns_rol,
@@ -281,12 +282,24 @@ export async function procesarRecurso(entrada) {
             volumenNumero: datosBase.volumen_numero,
             obraTitulo: datosBase.obra_titulo,
             pareceSerieLibros: pareceSerieLibros(datosBase.titulo),
-            editorialLibro: esEditorialDeLibros(path.basename(rutas[0])) || esEditorialDeLibros(datosBase.coleccion_nombre),
+            editorialLibro: edLibro,
             pareceRevista: pareceRevista(datosBase.titulo),
             titulo: datosBase.titulo,
-        }).senales);
+        });
+        const clasif = clasificarTipo(interp.senales);
         tipo_recurso = clasif.tipo_recurso;
         isbnDelArchivo = !!datosBase.isbn_propio; // solo el ISBN PROPIO (no el del cuerpo) cuenta como fiable
+        // LIBRO con ISSN de SERIE: el ISBN identifica el LIBRO, el ISSN identifica su COLECCIÓN. Se da cuando
+        // hay señal de libro (ISBN/CIP propio, o editorial de-solo-libros como Apress) + un ISSN → issn_clase
+        // 'serie'. Se GUARDA el ISSN en el libro; motor-catalogo (2e) crea/reusa la colección tipo:'libro' por
+        // ese ISSN y luego lo retira del libro (su identidad sigue siendo el ISBN). Así cualquier libro con
+        // ISBN e ISSN queda AGRUPADO en su serie por el ISSN (Springer «Lecture Notes…», series Apress, etc.).
+        if (tipo_recurso === 'libro' && !datosBase.issn
+            && interp.identidad && interp.identidad.issn && interp.identidad.issn_clase === 'serie') {
+            datosBase.issn = interp.identidad.issn;
+            datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
+                `ISSN de SERIE ${interp.identidad.issn} guardado para agrupar la colección de libros.`];
+        }
 
         // ¿Es realmente un ESCANEO? Tres señales (cualquiera basta):
         //  1) sin capa de texto;
