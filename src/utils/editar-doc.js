@@ -10,6 +10,7 @@ import { indexarDoc } from './indice-busqueda.js';
 import { reubicarPorCdu } from '../mantenimiento/util-mantenimiento.js';
 import { resolverPersona } from './resolver-persona.js';
 import { ROLES_VALIDOS } from './contribuciones.js';
+import { claveNumero } from './revistas.js';
 
 const TEXTO = ['subtitulo', 'idioma', 'numero_edicion', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'obra_titulo'];
 const NUM = ['año_edicion', 'paginas', 'volumen_numero'];
@@ -34,8 +35,10 @@ export async function editarDocumento(db, id, campos = {}) {
     if (!ObjectId.isValid(id)) return { ok: false, motivo: 'id inválido' };
     const set = {}, unset = {};
     const avisos = [];
-    // Documento actual: solo se necesita si cambia la CDU a mano (para reubicar su carpeta desde la ruta vieja).
-    const docActual = ('cdu' in campos) ? await db.collection('biblioteca').findOne({ _id: new ObjectId(id) }) : null;
+    // Campos de fecha/nº de una REVISTA (mes/año/nº de ejemplar) → recomputan la clave del número.
+    const tocaClave = ['año_edicion', 'mes_publicacion', 'numero_issue'].some((k) => k in campos);
+    // Documento actual: se necesita para reubicar por CDU y para recomputar clave_numero (mezclar con lo actual).
+    const docActual = (('cdu' in campos) || tocaClave) ? await db.collection('biblioteca').findOne({ _id: new ObjectId(id) }) : null;
 
     // Título: requerido por el esquema → solo se actualiza si viene NO vacío (nunca se borra).
     if ('titulo' in campos && String(campos.titulo).trim()) set.titulo = String(campos.titulo).trim();
@@ -51,6 +54,17 @@ export async function editarDocumento(db, id, campos = {}) {
         if (raw === '' || raw == null) { unset[k] = ''; continue; }
         const v = parseInt(raw, 10);
         if (Number.isFinite(v)) set[k] = v; else unset[k] = '';
+    }
+
+    // Revistas: mes de publicación (1-12) y número de ejemplar. Junto con año_edicion (NUM) definen la
+    // identidad del número dentro de su cabecera (clave_numero), que se recomputa más abajo.
+    if ('mes_publicacion' in campos) {
+        const m = parseInt(campos.mes_publicacion, 10);
+        if (m >= 1 && m <= 12) set.mes_publicacion = m; else unset.mes_publicacion = '';
+    }
+    if ('numero_issue' in campos) {
+        const v = String(campos.numero_issue ?? '').trim();
+        if (v) set.numero_issue = v; else unset.numero_issue = '';
     }
 
     // Identificadores: validar checksum; si es inválido, NO se guarda (aviso) para no violar el esquema.
@@ -142,6 +156,21 @@ export async function editarDocumento(db, id, campos = {}) {
             avisos.push(`No se pudo reubicar la carpeta por la nueva CDU: ${e.message}`);
         }
         set.cdu_manual = true;
+    }
+
+    // Recomputa la clave del número si el doc es una REVISTA y cambió mes/año/nº (AAAA-MM → n<nº> → AAAA →
+    // sin clave). Un LIBRO nunca lleva clave_numero (año_edicion se envía siempre, así que se limpia si lo tuviera).
+    if (tocaClave) {
+        const tipoFinal = ('tipo_recurso' in campos && ['libro', 'revista'].includes(campos.tipo_recurso))
+            ? campos.tipo_recurso : (docActual && docActual.tipo_recurso);
+        if (tipoFinal === 'revista') {
+            const base = docActual || {};
+            const valor = (k) => (k in set ? set[k] : (k in unset ? undefined : base[k]));
+            const clave = claveNumero({ año_edicion: valor('año_edicion'), mes_publicacion: valor('mes_publicacion'), numero_issue: valor('numero_issue') });
+            if (clave) set.clave_numero = clave; else unset.clave_numero = '';
+        } else if (!('clave_numero' in set)) {
+            unset.clave_numero = '';
+        }
     }
 
     if (!Object.keys(set).length && !Object.keys(unset).length) return { ok: true, sinCambios: true, avisos };

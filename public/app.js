@@ -1092,17 +1092,20 @@ function pintarShelf(kind) {
   const cont = kind === 'obra' ? $('#obrasBody') : $('#colsBody');
   if (!cont) return;
   const st = shelf[kind];
-  cont.innerHTML = `<div class="row" style="margin-bottom:10px"><input id="shf_${kind}" placeholder="🔍 filtrar por nombre…" autocomplete="off" style="flex:1"></div>
+  cont.innerHTML = `<div class="row" style="margin-bottom:10px"><input id="shf_${kind}" placeholder="🔍 filtrar por nombre…" autocomplete="off" style="flex:1" value="${esc(st.filtro || '')}"></div>
     <div id="shbulk_${kind}"></div>
     ${st.items.length ? `<div class="vol-grid${st.modo && ROL === 'admin' ? ' selmode' : ''}">${st.items.map((x) => shelfCard(kind, x)).join('')}</div>` : `<div class="empty">Sin ${kind === 'obra' ? 'obras' : 'colecciones'}</div>`}`;
   const fi = $('#shf_' + kind);
-  if (fi)
-    fi.oninput = () => {
-      const q = fi.value.toLowerCase();
-      $$(`#${cont.id} .vol[data-${kind}]`).forEach((c) => {
-        c.style.display = (c.dataset.nombre || '').includes(q) ? '' : 'none';
-      });
-    };
+  // El filtro por nombre se CONSERVA entre re-renders (p. ej. al entrar en Modo selección): se guarda en
+  // st.filtro y se re-aplica tras cada pintado, en vez de perderse al reconstruir el input.
+  const aplicarFiltro = () => {
+    const q = st.filtro || '';
+    $$(`#${cont.id} .vol[data-${kind}]`).forEach((c) => {
+      c.style.display = (c.dataset.nombre || '').includes(q) ? '' : 'none';
+    });
+  };
+  if (fi) fi.oninput = () => { st.filtro = fi.value.toLowerCase(); aplicarFiltro(); };
+  if (st.filtro) aplicarFiltro();
   // Interacción unificada: clic/toque = abrir la colección/obra (o marcar en Modo selección); doble clic /
   // pulsación larga = conmutar el modo (conservando la selección).
   $$(`#${cont.id} .vol[data-${kind}]`).forEach((el) =>
@@ -4689,6 +4692,16 @@ function medirDimensiones(id, imagenes) {
   };
   src.src = encUrl(im.ruta) + '?t=' + Date.now();
 }
+// Opciones <option> de meses (para revistas). `cur` puede ser nº 1-12 o nombre de mes; deja el actual marcado.
+function mesesOptions(cur) {
+  const nombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  let n = parseInt(cur, 10);
+  if (!(n >= 1 && n <= 12) && cur) {
+    const i = nombres.findIndex((m) => m.toLowerCase() === String(cur).toLowerCase());
+    if (i >= 0) n = i + 1;
+  }
+  return '<option value="">—</option>' + nombres.map((m, i) => `<option value="${i + 1}"${n === i + 1 ? ' selected' : ''}>${m}</option>`).join('');
+}
 function fichaEditar(d, r, opts) {
   opts = opts || {};
   const sup = !!opts.supervisado;
@@ -4712,6 +4725,10 @@ function fichaEditar(d, r, opts) {
     <div style="margin-top:8px"><label style="display:block">Autores y colaboradores</label><div id="edAutList"></div><button type="button" class="btn" id="edAutAdd" style="margin-top:6px">➕ Añadir persona</button></div>
     ${campo('edEdi', 'Editorial', r.editorial || '')}
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno', 'Año', d.año_edicion)}</div><div style="flex:1">${campo('edIdi', 'Idioma', d.idioma)}</div><div style="flex:1">${campo('edPag', 'Páginas', d.paginas)}</div>`}</div>
+    <div id="edRevBlk" style="${d.tipo_recurso === 'revista' ? '' : 'display:none'}"><div class="row" style="gap:8px">
+      <div style="flex:1"><label style="display:block;margin-top:8px">Mes (ejemplar)</label><select id="edMes">${mesesOptions(d.mes_publicacion)}</select></div>
+      <div style="flex:1">${campo('edNum', 'Nº de ejemplar', d.numero_issue)}</div>
+    </div><div class="muted" style="font-size:11px;margin-top:2px">El mes/año/nº definen la identidad del ejemplar dentro de su cabecera.</div></div>
     <div class="row" style="gap:8px"><div style="flex:1"><label style="display:block;margin-top:8px">ISBN</label><div style="display:flex;gap:6px"><input id="edIsbn" value="${esc(d.isbn || '')}" autocomplete="off" style="flex:1">${btnScanIsbn}</div></div><div style="flex:1">${campo('edIssn', 'ISSN', d.issn)}</div></div>
     <div style="margin-top:8px"><label style="display:block">Otras ediciones (ISBN)</label><div id="edAltList"></div><button type="button" class="btn" id="edAltAdd" style="margin-top:6px">➕ Añadir edición</button></div>
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edCdu', 'CDU', d.cdu)}</div><div style="flex:1">${campo('edEd', 'Edición nº', d.numero_edicion)}</div></div>`}
@@ -4737,6 +4754,8 @@ function fichaEditar(d, r, opts) {
     });
   if (mapaUbicaciones.length) setupUbicEdit();
   else cargarUbicaciones().then(setupUbicEdit);
+  // Los campos de revista (mes/nº) solo se muestran si el tipo es «revista» (se alterna al cambiar el tipo).
+  if ($('#edTipo')) $('#edTipo').onchange = () => { const b = $('#edRevBlk'); if (b) b.style.display = $('#edTipo').value === 'revista' ? '' : 'none'; };
   // Editor de OTRAS EDICIONES (ISBN alternativo + rol). Filas añadibles/borrables.
   const rolOpts = (sel) =>
     ROL_ISBN_OPC.map(
@@ -4801,6 +4820,8 @@ function fichaEditar(d, r, opts) {
       contribuciones: personas.filter((p) => p.rol !== 'autor'),
       editorial: $('#edEdi').value,
       año_edicion: $('#edAno').value,
+      mes_publicacion: $('#edMes') ? $('#edMes').value : '',
+      numero_issue: $('#edNum') ? $('#edNum').value : '',
       idioma: $('#edIdi').value,
       paginas: $('#edPag').value,
       isbn: $('#edIsbn').value,
