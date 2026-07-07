@@ -3442,9 +3442,10 @@ async function extraerDePdf(archivo) {
 }
 
 // EPUB: extrae las imágenes embebidas (JSZip) → miniaturas → el usuario marca → se añaden al carrusel.
+// Además, «📄 Página de texto» rasteriza el primer contenido con texto (como en MOBI).
 async function extraerDeEpub(archivo) {
   const cont = $('#cmpModal');
-  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del EPUB</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando imágenes…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del EPUB</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando imágenes…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exX">Cancelar</button><button class="btn" id="exTexto">📄 Página de texto</button></div><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
   $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
   $('#exX').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
 
@@ -3453,8 +3454,9 @@ async function extraerDeEpub(archivo) {
   if (!JSZip) throw new Error('JSZip no disponible');
   const blob = await _descargarArchivo(archivo.url);
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  if ($('#exTexto')) $('#exTexto').onclick = () => epubPaginaTexto(zip); // rasteriza el primer contenido de texto
   const entradas = Object.values(zip.files).filter((f) => !f.dir && /\.(jpe?g|png|webp|gif)$/i.test(f.name));
-  if (!entradas.length) { $('#exMsg').textContent = 'Este EPUB no tiene imágenes embebidas.'; return; }
+  if (!entradas.length) { $('#exMsg').textContent = 'Este EPUB no tiene imágenes embebidas. Usa «📄 Página de texto».'; return; }
   $('#exMsg').textContent = `${entradas.length} imágenes · toca las que quieras añadir`;
   const marcadas = new Map(); // idx → dataURL
   const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
@@ -3564,6 +3566,29 @@ async function mobiPaginaTexto(id) {
   if (!r.html) { toast('No se pudo extraer texto del documento', 'warn'); return; }
   try {
     const b64 = await htmlAPaginaImagen(r.titulo || '', r.html);
+    await apiImg('anadir', { base64: b64 });
+    toast('📄 Página de texto añadida');
+  } catch (e) { toast('No se pudo rasterizar: ' + e.message, 'bad'); }
+}
+
+// EPUB: rasteriza el PRIMER contenido con texto sustancial (salta portada/legal cortos). El EPUB ya está
+// abierto (JSZip). Misma decisión que MOBI: se conserva la estructura (encabezados/negrita/cursiva), no la
+// hoja de estilos del ebook.
+async function epubPaginaTexto(zip) {
+  try {
+    const htmls = Object.keys(zip.files).filter((n) => !zip.files[n].dir && /\.(x?html)$/i.test(n)).sort();
+    let body = '', titulo = '';
+    for (const n of htmls) {
+      const c = await zip.files[n].async('string');
+      if (c.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length < 200) continue; // salta páginas casi vacías
+      const mb = c.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      body = (mb ? mb[1] : c).slice(0, 9000); // una página basta; DOMParser cierra lo que quede
+      const mt = c.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      titulo = mt ? mt[1].replace(/<[^>]+>/g, '').trim() : '';
+      break;
+    }
+    if (!body) { toast('El EPUB no tiene texto extraíble', 'warn'); return; }
+    const b64 = await htmlAPaginaImagen(titulo, body);
     await apiImg('anadir', { base64: b64 });
     toast('📄 Página de texto añadida');
   } catch (e) { toast('No se pudo rasterizar: ' + e.message, 'bad'); }
