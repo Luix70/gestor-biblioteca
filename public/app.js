@@ -2512,14 +2512,11 @@ function pintarDoc(r, ctx) {
   const imgs =
     r.imagenes && r.imagenes.length ? r.imagenes : r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : [];
   const nfcOv = nfcBadge(d);
-  // Botón de edición SIEMPRE visible (admin), superpuesto en la portada JUNTO al icono NFC (esquina), para
-  // entrar en modo edición de un toque sin bajar a la fila de acciones.
-  const editOv = ROL === 'admin'
-    ? `<button id="actEditCover" title="Editar los datos a mano" style="position:absolute;top:6px;left:6px;z-index:3;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:8px;padding:3px 8px;font-size:14px;cursor:pointer">✏️</button>`
-    : '';
+  // (Se retiró el botón ✏️ superpuesto sobre el carrusel: sobraba ahí. La edición está en la fila de
+  //  acciones «✏️ Editar», en la cabecera «✏️ Editar» y en el encabezado de la sección Imágenes.)
   const carrusel = imgs.length
-    ? `<div class="carousel" style="position:relative">${nfcOv}${editOv}<div class="track" id="carTrack">${imgs.map((im) => `<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length > 1 ? `<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>` : ''}</div>`
-    : `<div class="filebox" style="position:relative">${nfcOv}${editOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
+    ? `<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map((im) => `<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length > 1 ? `<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>` : ''}</div>`
+    : `<div class="filebox" style="position:relative">${nfcOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
   // ── FICHA MÍNIMA (encabezado vistoso): título → estrellas → [papel: ex-libris | digital: descarga] →
   //    datos (autor/editorial/colección/CDU/ISBN/ISSN, drillables) → [papel: ubicación clicable]. Un badge
   //    en la esquina superior derecha explica al pulsarlo de dónde salen los datos (etiqueta NFC / base). ──
@@ -2655,7 +2652,6 @@ function pintarDoc(r, ctx) {
     if (cd) cd.onclick = () => fichaEliminar(d._id);
     const ce2 = $('#actEdit');
     if (ce2) ce2.onclick = () => fichaEditar(d, r);
-    if ($('#actEditCover')) $('#actEditCover').onclick = () => fichaEditar(d, r);
     if ($('#fminEdit')) $('#fminEdit').onclick = () => fichaEditar(d, r); // «✏️ Editar» de la cabecera
     const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []), { url: r.archivo_url, nombre: r.nombre_archivo });
     if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
@@ -3329,11 +3325,13 @@ function pintarGestorImagenes() {
   if ($('#imgExtraer')) $('#imgExtraer').onclick = extraerImagenDocumento;
 }
 
-// ¿El documento tiene un fichero digital del que se pueden extraer imágenes en el navegador? (PDF o EPUB)
+// ¿El documento tiene un fichero digital del que se pueden extraer imágenes? PDF/EPUB se procesan EN EL
+// NAVEGADOR (pdf.js / JSZip); los PAGINABLES (cbz/cbr/cb7/djvu) los sirve el backend página a página.
 function _imgExtraible() {
   const a = _imgState && _imgState.archivo;
-  if (!a || !a.url || !a.nombre) return false;
-  return /\.(pdf|epub)$/i.test(a.nombre);
+  if (!a || !a.nombre) return false;
+  if (/\.(cbz|cbr|cb7|djvu)$/i.test(a.nombre)) return true;   // paginable por el backend (no necesita a.url)
+  return !!a.url && /\.(pdf|epub)$/i.test(a.nombre);
 }
 
 // EXTRAER una imagen del propio documento (PDF → páginas con pdf.js; EPUB → imágenes embebidas con JSZip)
@@ -3345,7 +3343,8 @@ async function extraerImagenDocumento() {
   try {
     if (ext === 'pdf') return await extraerDePdf(a);
     if (ext === 'epub') return await extraerDeEpub(a);
-    toast(`Extracción no disponible para .${ext} (por ahora PDF y EPUB)`, 'warn');
+    if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext)) return await extraerDePaginado(_imgState.id);
+    toast(`Extracción no disponible para .${ext}`, 'warn');
   } catch (e) { toast('No se pudo leer el documento: ' + e.message, 'bad'); }
 }
 
@@ -3457,6 +3456,68 @@ async function extraerDeEpub(archivo) {
       for (const url of marcadas.values()) {
         // Normaliza a JPG/ancho razonable reutilizando reducirImagen (evita PNG enormes).
         const file = new File([await (await fetch(url)).blob()], 'img', { type: url.slice(5, url.indexOf(';')) });
+        const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
+        await apiImg('anadir', { base64: b64 });
+      }
+      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
+    } catch (e) { toast(e.message, 'bad'); }
+    pintarGestorImagenes();
+  };
+}
+
+// Descarga una página (0-based) de un documento PAGINABLE (cbz/cbr/cb7/djvu) servida por el backend (con
+// auth) como Blob. Mismo patrón que el visor de cómic (comicBlob).
+async function _paginaBlob(id, n) {
+  const res = await fetch('/api/documentos/' + encodeURIComponent(id) + '/paginas/' + n, { headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {} });
+  if (!res.ok) throw new Error('página ' + (n + 1));
+  return await res.blob();
+}
+
+// PAGINABLE (cbz/cbr/cb7/djvu): el backend sirve cada página como imagen. Miniaturas perezosas (0-based) →
+// el usuario marca las que quiera → se añaden al carrusel a plena resolución.
+async function extraerDePaginado(id) {
+  const cont = $('#cmpModal');
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del documento</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando páginas…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
+  $('#exX').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
+
+  let total = 0;
+  try { const r = await api('/documentos/' + encodeURIComponent(id) + '/paginas'); total = r.paginas || 0; }
+  catch (e) { $('#exMsg').textContent = 'No se pudieron leer las páginas: ' + e.message; return; }
+  if (!total) { $('#exMsg').textContent = 'Este documento no tiene páginas extraíbles.'; return; }
+  const MAX = 120;
+  const n = Math.min(total, MAX);
+  $('#exMsg').textContent = `${total} páginas${total > MAX ? ` (primeras ${MAX})` : ''} · toca las que quieras añadir`;
+  const marcadas = new Set();
+  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
+  const grid = $('#exGrid');
+  // Miniaturas perezosas: solo se descargan las páginas visibles (IntersectionObserver).
+  const io = new IntersectionObserver((entradas) => {
+    for (const en of entradas) {
+      if (!en.isIntersecting) continue;
+      const cel = en.target; io.unobserve(cel);
+      _paginaBlob(id, +cel.dataset.n).then((b) => { const im = cel.querySelector('img'); if (im) im.src = URL.createObjectURL(b); }).catch(() => {});
+    }
+  }, { root: grid, rootMargin: '200px' });
+  for (let i = 0; i < n; i++) {
+    const cel = document.createElement('div');
+    cel.dataset.n = i;
+    cel.style.cssText = 'position:relative;cursor:pointer';
+    cel.innerHTML = `<img loading="lazy" style="width:100%;height:120px;object-fit:cover;border-radius:6px;border:2px solid transparent;background:var(--card)"><span style="position:absolute;top:2px;left:4px;font-size:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:0 4px">${i + 1}</span>`;
+    cel.onclick = () => {
+      marcadas.has(i) ? marcadas.delete(i) : marcadas.add(i);
+      cel.querySelector('img').style.borderColor = marcadas.has(i) ? 'var(--acc)' : 'transparent';
+      actualizarBtn();
+    };
+    grid.appendChild(cel);
+    io.observe(cel);
+  }
+  $('#exOk').onclick = async () => {
+    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
+    try {
+      for (const num of [...marcadas].sort((x, y) => x - y)) {
+        const blob = await _paginaBlob(id, num);
+        const file = new File([blob], `pag-${num + 1}.jpg`, { type: blob.type || 'image/jpeg' });
         const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
         await apiImg('anadir', { base64: b64 });
       }
