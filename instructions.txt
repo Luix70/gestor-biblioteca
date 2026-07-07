@@ -342,9 +342,11 @@ de ficheros clasificado por CDU.
          ángulo, sin tapete) → líneas (Sobel/Hough). Ajusta las esquinas antes de aplicar.
          🖹 «Del documento» extrae imágenes del propio fichero y las añade al carrusel —
          p. ej. para rescatar la foto del autor del interior. Cubre: PDF (páginas, pdf.js),
-         EPUB (imágenes embebidas, JSZip), cbz/cbr/cb7/djvu (páginas servidas por el backend)
-         y mobi/azw3 (imágenes embebidas, GET /documentos/:id/imagenes-embebidas). Miniaturas
-         + selección múltiple → carrusel a plena resolución.
+         EPUB (imágenes embebidas, JSZip), cbz/cbr/cb7/djvu (páginas del backend) y mobi/azw3
+         (imágenes embebidas). Rejilla PEREZOSA (solo descarga la miniatura visible) + selección
+         múltiple → carrusel a plena resolución. En MOBI/AZW3 sin imágenes (o a voluntad), «📄
+         Página de texto» rasteriza el HTML del libro (SVG foreignObject→canvas) conservando
+         estructura (encabezados/negrita/cursiva/párrafos) + serif; no la fuente embebida.
       📐 Medir — estima el tamaño físico (cm) sobre la alfombrilla reglada.
       🧹 Conformar · ✨ Enriquecer · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
       📶 Grabar NFC (ver más abajo)
