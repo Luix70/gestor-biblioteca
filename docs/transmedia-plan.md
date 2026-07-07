@@ -39,6 +39,10 @@ Dos PDF de la MISMA unidad con **el mismo hash** (`Red Roses [1].pdf` == `[2].pd
 diferentes) → dos documentos. El dedup global por hash **excluye** los `ruta_fija` (nunca borra sus ficheros).
 
 ## Ingesta (preservar árbol)
+0. **Espera a que TERMINE la copia** (HECHO, vigilante): un drop grande (aquí 4.400 ficheros / 19 GB) tarda
+   MINUTOS en copiarse. El vigilante NO construye unidades de una carpeta hasta que su HUELLA (nº de ficheros
+   + bytes) lleva quieta `VIGILANTE_CARPETA_ESTABLE_MS` (8 s) — así no empieza a tratarla al escribirse el
+   primer PDF. `huellaCarpeta`/`carpetaEstable` + compuerta en `listarUnidades` (`src/vigilante.js`).
 1. **Detección** (vigilante): carpeta con subcarpetas anidadas que MEZCLAN PDF + audio → modo transmedia
    (override manual: marcador `.transmedia` en la raíz, o elección al soltar).
 2. **Copia VERBATIM** del árbol a `<cdu>/transmedia/<nombre-colección>/…` (incluye `.txt`, `cover.jpg`, `Audio/`,

@@ -31,6 +31,10 @@ const INBOX   = resolver(process.env.PATH_INBOX,   'Inbox');
 const PAUSA_MS = Number(process.env.PAUSA_INGESTA_MS || 1500);   // ritmo entre recursos (no saturar APIs)
 const REPOSO_MS = Number(process.env.REPOSO_INBOX_MS || 2500);   // espera tras el último cambio antes de procesar
 const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse
+// Ventana de estabilidad de una CARPETA-drop entera: una carpeta grande (un transmedia de miles de ficheros)
+// tarda MINUTOS en copiarse. No se procesa hasta que su HUELLA (nº de ficheros + bytes) no cambia durante
+// esta ventana — así el vigilante no empieza a tratarla en cuanto se escribe el primer PDF.
+const CARPETA_ESTABLE_MS = Number(process.env.VIGILANTE_CARPETA_ESTABLE_MS || 8000);
 const HUERFANO_TIMEOUT_MS = Number(process.env.INBOX_HUERFANO_MS || 600000);  // 10 min a 0 bytes → fantasma
 const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.zip', '.rar', '.7z'];
 // Ubicación por defecto para libros/revistas físicos llegados por Inbox (sin POST que la fije).
@@ -321,6 +325,57 @@ async function verificarEstabilidad(rutas) {
     return a.every((s, i) => s === b[i] && s > 0) ? 'estable' : 'escribiendo';
 }
 
+// ── Estabilidad de una CARPETA-drop completa (para drops grandes que tardan minutos) ────────────────────
+// Firma anterior de cada carpeta del Inbox: `dir → { firma:'nFicheros:bytes', desde:epoch }`. Se compara
+// entre escaneos para saber si la carpeta SIGUE creciendo (copiándose) o ya está QUIETA.
+const huellaCarpetas = new Map();
+
+/**
+ * Huella de un árbol de carpeta: nº total de ficheros, bytes totales y el mtime MÁS RECIENTE. Recorre TODO
+ * (pdf, mp3, covers, .txt…), no solo los documentos: así detecta que aún se están copiando audios o portadas.
+ * Nunca lanza (ignora lo que desaparezca a media copia).
+ */
+async function huellaCarpeta(dir) {
+    let nFicheros = 0, bytes = 0, maxMtime = 0;
+    const pila = [dir];
+    while (pila.length) {
+        const actual = pila.pop();
+        let entradas;
+        try { entradas = await fs.readdir(actual, { withFileTypes: true }); } catch { continue; }
+        for (const e of entradas) {
+            if (ignorarEntrada(e.name)) continue;
+            const p = path.join(actual, e.name);
+            if (e.isDirectory()) { pila.push(p); continue; }
+            try {
+                const s = await fs.stat(p);
+                nFicheros++;
+                bytes += s.size;
+                if (s.mtimeMs > maxMtime) maxMtime = s.mtimeMs;
+            } catch { /* fichero desaparecido a media copia: se ignora */ }
+        }
+    }
+    return { nFicheros, bytes, maxMtime };
+}
+
+/**
+ * ¿La carpeta-drop TERMINÓ de copiarse? true si su huella (nº ficheros + bytes) lleva QUIETA al menos
+ * CARPETA_ESTABLE_MS. Dos vías: (a) el fichero más nuevo ya es antiguo (nada se ha tocado en la ventana →
+ * estable de inmediato, sin esperar otro escaneo); (b) la firma no cambia respecto al escaneo anterior
+ * durante la ventana. Mientras la copia crece, la firma cambia y el reloj se reinicia → nunca se procesa a medias.
+ */
+async function carpetaEstable(dir) {
+    const { nFicheros, bytes, maxMtime } = await huellaCarpeta(dir);
+    if (nFicheros === 0) return false; // vacía / aún sin ficheros escritos
+    const firma = `${nFicheros}:${bytes}`;
+    const ahora = Date.now();
+    // (a) Ya asentada: nada se tocó en la ventana → estable sin esperar otro escaneo.
+    if (ahora - maxMtime >= CARPETA_ESTABLE_MS) { huellaCarpetas.set(dir, { firma, desde: maxMtime }); return true; }
+    // (b) Comparar con el escaneo anterior: si la firma cambió, sigue copiándose (reinicia el reloj).
+    const previo = huellaCarpetas.get(dir);
+    if (!previo || previo.firma !== firma) { huellaCarpetas.set(dir, { firma, desde: ahora }); return false; }
+    return ahora - previo.desde >= CARPETA_ESTABLE_MS;
+}
+
 /**
  * Construye las unidades de trabajo del Inbox:
  *   - cada subcarpeta se agrupa por su cuenta (imágenes juntas = un libro),
@@ -352,6 +407,14 @@ async function listarUnidades() {
         if (ignorarEntrada(e.name)) continue; // ocultos + carpetas de sistema (@eaDir, #recycle...)
         const ruta = path.join(INBOX, e.name);
         if (e.isDirectory()) {
+            // COPIA EN CURSO: no tocar la carpeta hasta que TERMINE de copiarse. Un drop grande (transmedia
+            // de miles de ficheros) tarda minutos; si empezáramos al escribirse el primer PDF, lo trataríamos
+            // como colección/pdf incompleto. Se salta y se reintenta en el próximo escaneo, cuando la huella
+            // (nº de ficheros + bytes) lleve quieta la ventana de estabilidad.
+            if (!(await carpetaEstable(ruta))) {
+                console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
+                continue;
+            }
             // Documentos del drop: directos o en subcarpetas (Books/, Magazines/…; se excluye
             // covers/). Las imágenes son PORTADAS (no libros), y .txt/.url/etc. se descartan. La
             // COLECCIÓN y la carpeta persistente son el nombre del DROP (carpeta superior).
@@ -408,6 +471,12 @@ async function listarUnidades() {
         }
     }
     for (const u of agrupar(sueltos)) unidades.push({ ...u, carpeta: null });
+
+    // Poda del mapa de huellas: olvida las carpetas que ya no están en el Inbox (procesadas/retiradas),
+    // para que no crezca sin fin entre escaneos.
+    const dirsActuales = new Set(entradas.filter(e => e.isDirectory()).map(e => path.join(INBOX, e.name)));
+    for (const dir of huellaCarpetas.keys()) if (!dirsActuales.has(dir)) huellaCarpetas.delete(dir);
+
     return unidades;
 }
 
