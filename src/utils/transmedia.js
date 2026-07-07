@@ -204,12 +204,20 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
 
 // ── Ejecución: copiar VERBATIM + crear colección + insertar miembros + reciclar origen ──────────────────
 
-/** Copia un árbol de origen→destino y VERIFICA que el nº de ficheros y los bytes coinciden. Nunca borra. */
+/**
+ * Copia un árbol origen→destino y VERIFICA que el nº de ficheros y los bytes coinciden (el origen no cambió
+ * durante la copia). LIMPIA una copia parcial de un intento previo antes de empezar y, si la verificación
+ * falla, la retira (evita que un reintento con ficheros truncados se atasque). Nunca toca el ORIGEN.
+ * @returns {Promise<{integra:boolean, huella:{n:number,bytes:number}}>}
+ */
 async function copiarVerificado(origen, destino) {
+    await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // parcial de un intento anterior
     await fs.mkdir(path.dirname(destino), { recursive: true });
-    await fs.cp(origen, destino, { recursive: true, force: false, errorOnExist: false });
-    const [a, b] = await Promise.all([huella(origen), huella(destino)]);
-    return a.n === b.n && a.bytes === b.bytes; // íntegra si coinciden nº de ficheros y bytes totales
+    await fs.cp(origen, destino, { recursive: true });
+    const [orig, dest] = await Promise.all([huella(origen), huella(destino)]);
+    const integra = orig.n === dest.n && orig.bytes === dest.bytes;
+    if (!integra) await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // no dejar la parcial
+    return { integra, huella: dest };
 }
 async function huella(dir) {
     let n = 0, bytes = 0;
@@ -252,9 +260,10 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
     const carpetaColeccion = path.join(DIR_CDU, ...segsCdu, 'transmedia', plan.nombreColeccion);
     const webColeccion = webDe(carpetaColeccion);
 
-    // 1) COPIA VERBATIM + verificación (nunca se borra el origen si la copia no quedó íntegra).
-    const integra = await copiarVerificado(plan.raiz, carpetaColeccion);
-    if (!integra) return { ok: false, motivo: 'la copia al árbol CDU no quedó íntegra (nº de ficheros/bytes no coincide): se CONSERVA el origen' };
+    // 1) COPIA VERBATIM + verificación (nunca se borra el origen si la copia no quedó íntegra; si el origen
+    //    seguía copiándose, orig≠dest → falla, se limpia la parcial y se reintenta en el próximo escaneo).
+    const { integra, huella: copiado } = await copiarVerificado(plan.raiz, carpetaColeccion);
+    if (!integra) return { ok: false, motivo: 'la copia al árbol CDU no cuadró (el origen aún cambiaba): se CONSERVA el origen y se limpió la copia parcial' };
     // Marcador que protege TODO el subárbol de Integridad/Conformador (no podar/mover/reciclar).
     await fs.writeFile(path.join(carpetaColeccion, MARCA_RUTA_FIJA), `transmedia: ${plan.nombreColeccion}\n`).catch(() => {});
 
@@ -326,10 +335,22 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         insertados++;
     }
 
-    // 4) Solo AHORA (todo copiado y catalogado) se recicla el origen del Inbox a la Papelera (recuperable).
-    if (reciclarOrigen) await reciclarCarpeta(dirOrigen, 'transmedia-ingerido').catch(() => {});
+    // 4) Reciclar el origen del Inbox — pero SOLO si NO ha cambiado desde que se copió (por si la copia había
+    //    pausado durante la verificación y luego resumió: no mover una carpeta que aún se está escribiendo).
+    let origenReciclado = false;
+    if (reciclarOrigen) {
+        const ahora = await huella(plan.raiz);
+        if (ahora.n === copiado.n && ahora.bytes === copiado.bytes) {
+            await reciclarCarpeta(dirOrigen, 'transmedia-ingerido').catch(() => {});
+            origenReciclado = true;
+        }
+        // Si cambió, se CONSERVA el origen (el usuario lo retira a mano cuando termine); el catálogo ya está.
+    }
 
-    return { ok: true, coleccion: plan.nombreColeccion, cdu: plan.cdu, insertados, deduplicados, web: webColeccion };
+    return {
+        ok: true, coleccion: plan.nombreColeccion, cdu: plan.cdu, insertados, deduplicados, web: webColeccion,
+        origenReciclado,
+    };
 }
 
 /** Quita las claves con valor undefined (para no persistir campos vacíos y no violar el $jsonSchema). */

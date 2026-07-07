@@ -32,10 +32,12 @@ const INBOX   = resolver(process.env.PATH_INBOX,   'Inbox');
 const PAUSA_MS = Number(process.env.PAUSA_INGESTA_MS || 1500);   // ritmo entre recursos (no saturar APIs)
 const REPOSO_MS = Number(process.env.REPOSO_INBOX_MS || 2500);   // espera tras el último cambio antes de procesar
 const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse
-// Ventana de estabilidad de una CARPETA-drop entera: una carpeta grande (un transmedia de miles de ficheros)
-// tarda MINUTOS en copiarse. No se procesa hasta que su HUELLA (nº de ficheros + bytes) no cambia durante
-// esta ventana — así el vigilante no empieza a tratarla en cuanto se escribe el primer PDF.
-const CARPETA_ESTABLE_MS = Number(process.env.VIGILANTE_CARPETA_ESTABLE_MS || 8000);
+// Ventana de estabilidad de una CARPETA-drop entera: una carpeta grande (un transmedia de miles de ficheros /
+// GB) tarda MINUTOS en copiarse y su copia tiene PAUSAS (red/SMB, creación de subcarpetas). No se procesa
+// hasta que su HUELLA (nº de ficheros + bytes) no cambia durante esta ventana — generosa a propósito para no
+// confundir una pausa con el fin de la copia. Bájala/súbela con VIGILANTE_CARPETA_ESTABLE_MS (ms). Aunque se
+// disparara antes de tiempo, la ingesta lo detecta (la copia al CDU no cuadra) y CONSERVA el origen.
+const CARPETA_ESTABLE_MS = Number(process.env.VIGILANTE_CARPETA_ESTABLE_MS || 45000);
 const HUERFANO_TIMEOUT_MS = Number(process.env.INBOX_HUERFANO_MS || 600000);  // 10 min a 0 bytes → fantasma
 const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.zip', '.rar', '.7z'];
 // Ubicación por defecto para libros/revistas físicos llegados por Inbox (sin POST que la fije).
@@ -330,6 +332,10 @@ async function verificarEstabilidad(rutas) {
 // Firma anterior de cada carpeta del Inbox: `dir → { firma:'nFicheros:bytes', desde:epoch }`. Se compara
 // entre escaneos para saber si la carpeta SIGUE creciendo (copiándose) o ya está QUIETA.
 const huellaCarpetas = new Map();
+// Carpetas ya detectadas como TRANSMEDIA (detección PEGAJOSA): una vez que una carpeta tiene audio, se trata
+// SIEMPRE como transmedia aunque un escaneo posterior (copia a medias) no vea el audio todavía — así nunca
+// cae por error a la vía normal (que fragmentaría el árbol). Se olvida cuando la carpeta desaparece del Inbox.
+const transmediaVistas = new Set();
 
 /**
  * Huella de un árbol de carpeta: nº total de ficheros, bytes totales y el mtime MÁS RECIENTE. Recorre TODO
@@ -418,8 +424,10 @@ async function listarUnidades() {
             }
             // TRANSMEDIA: una carpeta con AUDIO (o marcador .transmedia) es una colección con estructura
             // preservada — un doc por PDF + audios enlazados, SIN reorganizar ni pasar cada PDF por el
-            // pipeline normal (evita 863 llamadas de IA y respeta el árbol). Se procesa aparte (procesarUnidad).
-            if (await esCarpetaTransmedia(ruta)) {
+            // pipeline normal (evita 863 llamadas de IA y respeta el árbol). Detección PEGAJOSA: una vez vista
+            // como transmedia, se mantiene aunque un escaneo posterior (aún copiándose) no vea el audio.
+            if (transmediaVistas.has(ruta) || await esCarpetaTransmedia(ruta)) {
+                transmediaVistas.add(ruta);
                 unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
@@ -484,6 +492,7 @@ async function listarUnidades() {
     // para que no crezca sin fin entre escaneos.
     const dirsActuales = new Set(entradas.filter(e => e.isDirectory()).map(e => path.join(INBOX, e.name)));
     for (const dir of huellaCarpetas.keys()) if (!dirsActuales.has(dir)) huellaCarpetas.delete(dir);
+    for (const dir of transmediaVistas) if (!dirsActuales.has(dir)) transmediaVistas.delete(dir);
 
     return unidades;
 }
