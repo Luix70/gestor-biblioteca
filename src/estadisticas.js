@@ -48,6 +48,8 @@ export async function obtenerEstadisticas({ detalle = true } = {}) {
     const ausente = (campo) => ({ $or: [{ [campo]: { $exists: false } }, { [campo]: null }, { [campo]: '' }] });
     const defectos = {
         libros_sin_isbn:  await col.countDocuments({ tipo_recurso: 'libro', ...ausente('isbn') }),
+        // LIBROS sin autor (solo libros, no revistas: la identidad de una revista es su cabecera/ISSN, no un autor).
+        libros_sin_autor: await col.countDocuments({ tipo_recurso: 'libro', $or: [{ autores: { $exists: false } }, { autores: { $size: 0 } }] }),
         sin_hash:         await col.countDocuments(ausente('hash_contenido')),
         sin_portada:      await col.countDocuments(ausente('portada')),
         cdu_generica:     await col.countDocuments({ cdu: { $in: ['00', '0', '000'] } }),

@@ -398,9 +398,10 @@ async function loadDashboard() {
       ${rowN('Tomos sin número (?)', anom.tomos_sin_numero, anom.tomos_sin_numero ? 'bad' : 'ok', 'tomos_sin_numero', 'Tomos sin número')}
       ${rowN('Docs a revisar', anom.docs_revision, anom.docs_revision ? 'bad' : 'ok', 'revision', 'Documentos a revisar')}</table>`;
     $('#defs').innerHTML = `<table>
-      ${rowN('Libros sin ISBN', def.libros_sin_isbn, 'mut', 'sin_isbn', 'Libros sin ISBN')}${rowN('Sin hash', def.sin_hash, 'mut', 'sin_hash', 'Sin hash')}
-      ${rowN('Sin portada', def.sin_portada, 'mut', 'sin_portada', 'Sin portada')}${rowN('CDU genérica', def.cdu_generica, 'mut', 'cdu_generica', 'CDU genérica')}
-      ${rowN('Pendientes', def.pendientes, def.pendientes ? 'warn' : 'ok', 'pendientes', 'Pendientes')}${rowN('Sin colección', def.sin_coleccion, 'mut', 'sin_coleccion', 'Sin colección')}</table>`;
+      ${rowN('Libros sin ISBN', def.libros_sin_isbn, 'mut', 'sin_isbn', 'Libros sin ISBN')}${rowN('Libros sin autor', def.libros_sin_autor, def.libros_sin_autor ? 'warn' : 'ok', 'sin_autor', 'Libros sin autor')}
+      ${rowN('Sin hash', def.sin_hash, 'mut', 'sin_hash', 'Sin hash')}${rowN('Sin portada', def.sin_portada, 'mut', 'sin_portada', 'Sin portada')}
+      ${rowN('CDU genérica', def.cdu_generica, 'mut', 'cdu_generica', 'CDU genérica')}${rowN('Pendientes', def.pendientes, def.pendientes ? 'warn' : 'ok', 'pendientes', 'Pendientes')}
+      ${rowN('Sin colección', def.sin_coleccion, 'mut', 'sin_coleccion', 'Sin colección')}</table>`;
     $$('#aten [data-filtro],#defs [data-filtro]').forEach(
       (el) => (el.onclick = () => filtrarCatalogo(el.dataset.filtro, el.dataset.etq)),
     );

@@ -82,6 +82,7 @@ const ausenteCampo = (campo) => ({ $or: [{ [campo]: { $exists: false } }, { [cam
 async function filtroEspecial(db, nombre) {
     switch (nombre) {
         case 'sin_isbn':         return { tipo_recurso: 'libro', ...ausenteCampo('isbn') };
+        case 'sin_autor':        return { tipo_recurso: 'libro', $or: [{ autores: { $exists: false } }, { autores: { $size: 0 } }] };
         case 'sin_hash':         return ausenteCampo('hash_contenido');
         case 'sin_portada':      return ausenteCampo('portada');
         case 'cdu_generica':     return { cdu: { $in: ['00', '0', '000'] } };
