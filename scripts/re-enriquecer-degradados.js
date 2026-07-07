@@ -1,7 +1,8 @@
 /**
  * Re-enriquece documentos catalogados con metadatos POBRES (lotes ingestados con las APIs
- * caídas: título = nombre de archivo, autor basura, cdu "00"…). A diferencia del flujo normal
- * (conservador: nunca sobrescribe), aquí SÍ se sobrescriben los campos no fiables, porque:
+ * caídas: título = nombre de archivo, autor basura, cdu "00"…) O que se quedaron SIN AUTOR (p. ej. tras
+ * limpiar los autores-artefacto [?]_): con un ISBN, rellena el autor/editorial desde OL/Fichero. A diferencia
+ * del flujo normal (conservador: nunca sobrescribe), aquí SÍ se sobrescriben los campos no fiables, porque:
  *   (a) sabemos que el registro viene de un lote degradado, y
  *   (b) tenemos un ISBN válido → la búsqueda por ISBN es autoritativa.
  *
@@ -19,6 +20,7 @@ import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { buscarMetadatosExternos } from '../src/utils/proveedor-metadatos.js';
 import { resolverColeccion } from '../src/utils/colecciones.js';
+import { resolverPersona } from '../src/utils/resolver-persona.js';
 import { validarISBN, validarISSN, variantesISBN } from '../src/utils/identificadores.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
@@ -39,20 +41,24 @@ function tituloNoFiable(doc) {
     return false;
 }
 
+/** ¿El documento NO tiene autor ni contribuyente? (p. ej. tras limpiar autores-artefacto quedó sin autor). */
+function sinAutor(doc) {
+    return (!doc.autores || doc.autores.length === 0) && (!doc.contribuciones || doc.contribuciones.length === 0);
+}
+
 /** ¿El documento parece degradado (merece re-enriquecerse)? */
 function esDegradado(doc) {
     const cduMala = ['00', '0', '000'].includes(String(doc.cdu || ''));
     const apisCaidas = (doc.alertas_agente || []).some(a => /inalcanzable/i.test(a));
     const pendiente = doc.estado_verificacion === 'pendiente';
-    return tituloNoFiable(doc) || cduMala || apisCaidas || pendiente;
+    return tituloNoFiable(doc) || cduMala || apisCaidas || pendiente || sinAutor(doc);
 }
 
 async function resolverAutores(db, nombres) {
+    // resolverPersona = check-then-create INSENSIBLE a mayúsculas/acentos → no crea autores duplicados
+    // («JEAN TOUCHARD» reusa «Touchard, Jean»), importante tras la limpieza de autores.
     const out = [];
-    for (const n of nombres) {
-        const ex = await db.collection('autores').findOne({ nombre: n });
-        out.push(ex ? ex._id : (await db.collection('autores').insertOne({ nombre: n })).insertedId);
-    }
+    for (const n of nombres) { const r = await resolverPersona(db, n); if (r?._id) out.push(r._id); }
     return out;
 }
 async function resolverEditorial(db, nombre) {
@@ -90,13 +96,15 @@ async function main() {
         }
 
         const garbage = tituloNoFiable(doc);
+        const faltaAutor = sinAutor(doc);
         const set = {};
         const nombres = {}; // para el log legible
 
-        // Título/autor/editorial: se SOBRESCRIBEN solo si el título actual es basura.
+        // Título/editorial: se SOBRESCRIBEN solo si el título actual es basura.
         if (garbage && datos.titulo) { set.titulo = datos.titulo; nombres.titulo = datos.titulo; }
         if (garbage && datos.editorial) { set.editorial = await resolverEditorial(db, datos.editorial); nombres.editorial = datos.editorial; }
-        if (garbage && datos.autores?.length) { set.autores = await resolverAutores(db, datos.autores); nombres.autores = datos.autores; }
+        // Autor: se rellena si el título es basura O si el doc se quedó SIN autor (aunque el título sea bueno).
+        if ((garbage || faltaAutor) && datos.autores?.length) { set.autores = await resolverAutores(db, datos.autores); nombres.autores = datos.autores; }
 
         // Gaps (siempre que falten): sinopsis, año, idioma, palabras clave, colección.
         if (datos.sinopsis && !doc.sinopsis) set.sinopsis = datos.sinopsis;
