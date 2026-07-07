@@ -30,6 +30,7 @@ import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fondo.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
+import { leerImagenesMobi } from './utils/lector-mobi.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
 import path from 'node:path';
@@ -1362,6 +1363,23 @@ export function rutasPanel() {
             res.set('Content-Type', pag.mimeType);
             res.set('Cache-Control', 'private, max-age=600');
             res.send(pag.buffer);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Imágenes EMBEBIDAS de un MOBI/AZW/AZW3 (para «🖹 Del documento»: no tienen «páginas», sí imágenes
+    // embebidas). Devuelve hasta 60 en base64. drm:true si el fichero está cifrado.
+    r.get('/documentos/:id/imagenes-embebidas', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const ext = path.extname(doc.nombre_archivo || '').toLowerCase();
+            if (!['.mobi', '.azw', '.azw3'].includes(ext)) return res.status(400).json({ ok: false, motivo: 'no es un MOBI/AZW/AZW3' });
+            const r = await leerImagenesMobi(path.join(carpetaDeDoc(doc), doc.nombre_archivo), { max: 60 });
+            if (r.drm) return res.json({ ok: true, drm: true, imagenes: [] });
+            res.json({ ok: true, total: r.total, imagenes: r.imagenes.map((im) => ({ b64: im.buf.toString('base64'), ext: im.ext })) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

@@ -109,3 +109,33 @@ export async function leerMobi(ruta) {
     autores = [...new Set(autores.map((a) => a.trim()).filter(Boolean))];
     return { drm: false, titulo: titulo || '', autores, editorial: editorial || '', isbn: isbn || '', portada };
 }
+
+/**
+ * Enumera TODAS las imágenes EMBEBIDAS de un MOBI/AZW/AZW3 (portada + figuras): recorre los registros PalmDB
+ * y devuelve los que empiezan por una firma de imagen (JPEG/PNG/GIF). Para el «Extraer del documento» del
+ * panel (mobi es texto reflowable: no hay «páginas», pero sí imágenes embebidas). No lanza por contenido
+ * corrupto. `drm:true` ⇒ cifrado (no legible).
+ * @returns {{ drm:boolean, total:number, imagenes:{buf:Buffer, ext:string}[] }}
+ */
+export async function leerImagenesMobi(ruta, { max = 60, minBytes = 256 } = {}) {
+    const data = await fs.readFile(ruta);
+    const vacio = { drm: false, total: 0, imagenes: [] };
+    if (data.length < 78) return vacio;
+    const numRegistros = data.readUInt16BE(76);
+    if (!numRegistros || 78 + numRegistros * 8 > data.length) return vacio;
+    const offsets = [];
+    for (let i = 0; i < numRegistros; i++) offsets.push(data.readUInt32BE(78 + i * 8));
+    offsets.push(data.length);
+    const registro = (i) => data.subarray(offsets[i], offsets[i + 1]);
+    const r0 = registro(0);
+    if (r0.length >= 16 && r0.readUInt16BE(12) !== 0) return { drm: true, total: 0, imagenes: [] }; // cifrado
+
+    const imagenes = [];
+    for (let i = 1; i < numRegistros && imagenes.length < max; i++) {
+        const rr = registro(i);
+        if (rr.length < minBytes) continue;             // descarta restos minúsculos (íconos 1×1, basura)
+        const ext = magiaImagen(rr);
+        if (ext) imagenes.push({ buf: Buffer.from(rr), ext });
+    }
+    return { drm: false, total: imagenes.length, imagenes };
+}

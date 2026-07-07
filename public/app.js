@@ -3331,7 +3331,7 @@ function pintarGestorImagenes() {
 function _imgExtraible() {
   const a = _imgState && _imgState.archivo;
   if (!a || !a.nombre) return false;
-  if (/\.(cbz|cbr|cb7|djvu)$/i.test(a.nombre)) return true;   // paginable por el backend (no necesita a.url)
+  if (/\.(cbz|cbr|cb7|djvu|mobi|azw|azw3)$/i.test(a.nombre)) return true; // servidos por el backend (no necesitan a.url)
   return !!a.url && /\.(pdf|epub)$/i.test(a.nombre);
 }
 
@@ -3345,6 +3345,7 @@ async function extraerImagenDocumento() {
     if (ext === 'pdf') return await extraerDePdf(a);
     if (ext === 'epub') return await extraerDeEpub(a);
     if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext)) return await extraerDePaginado(_imgState.id);
+    if (['mobi', 'azw', 'azw3'].includes(ext)) return await extraerDeMobi(_imgState.id);
     toast(`Extracción no disponible para .${ext}`, 'warn');
   } catch (e) { toast('No se pudo leer el documento: ' + e.message, 'bad'); }
 }
@@ -3519,6 +3520,50 @@ async function extraerDePaginado(id) {
       for (const num of [...marcadas].sort((x, y) => x - y)) {
         const blob = await _paginaBlob(id, num);
         const file = new File([blob], `pag-${num + 1}.jpg`, { type: blob.type || 'image/jpeg' });
+        const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
+        await apiImg('anadir', { base64: b64 });
+      }
+      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
+    } catch (e) { toast(e.message, 'bad'); }
+    pintarGestorImagenes();
+  };
+}
+
+// MOBI/AZW/AZW3: el backend enumera las imágenes EMBEBIDAS (base64; no hay «páginas»). Miniaturas → el
+// usuario marca las que quiera → se añaden al carrusel (normalizadas con reducirImagen).
+async function extraerDeMobi(id) {
+  const cont = $('#cmpModal');
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del documento</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando imágenes…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
+  $('#exX').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
+
+  let r;
+  try { r = await api('/documentos/' + encodeURIComponent(id) + '/imagenes-embebidas'); }
+  catch (e) { $('#exMsg').textContent = 'No se pudo leer el documento: ' + e.message; return; }
+  if (r.drm) { $('#exMsg').textContent = 'Fichero con DRM: no se pueden extraer sus imágenes.'; return; }
+  const imgs = r.imagenes || [];
+  if (!imgs.length) { $('#exMsg').textContent = 'Este MOBI/AZW3 no tiene imágenes embebidas extraíbles.'; return; }
+  $('#exMsg').textContent = `${imgs.length} imágenes · toca las que quieras añadir`;
+  const marcadas = new Map();
+  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
+  const grid = $('#exGrid');
+  imgs.forEach((im, i) => {
+    const url = `data:image/${im.ext === 'jpg' ? 'jpeg' : im.ext};base64,${im.b64}`;
+    const cel = document.createElement('div');
+    cel.style.cssText = 'position:relative;cursor:pointer';
+    cel.innerHTML = `<img src="${url}" loading="lazy" style="width:100%;height:110px;object-fit:cover;border-radius:6px;border:2px solid transparent;background:var(--card)">`;
+    cel.onclick = () => {
+      if (marcadas.has(i)) marcadas.delete(i); else marcadas.set(i, url);
+      cel.firstChild.style.borderColor = marcadas.has(i) ? 'var(--acc)' : 'transparent';
+      actualizarBtn();
+    };
+    grid.appendChild(cel);
+  });
+  $('#exOk').onclick = async () => {
+    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
+    try {
+      for (const url of marcadas.values()) {
+        const file = new File([await (await fetch(url)).blob()], 'img', { type: url.slice(5, url.indexOf(';')) });
         const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
         await apiImg('anadir', { base64: b64 });
       }
