@@ -1404,7 +1404,8 @@ export function rutasPanel() {
             const orden = String(req.query.orden || 'libros'); // 'libros' | 'nombre'
             const rol = String(req.query.rol || '');      // '' | autor | traductor | ilustrador | …
             const minLibros = Number(req.query.minLibros) || 0; // ≥ N obras
-            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite, foto, bio, orden, rol, minLibros }) });
+            const sinLibros = req.query.sinLibros === '1' || req.query.sinLibros === 'true'; // solo autores con 0 libros
+            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite, foto, bio, orden, rol, minLibros, sinLibros }) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     // Eliminar autores por id, SOLO los que no figuran en ningún documento (los referenciados se conservan).

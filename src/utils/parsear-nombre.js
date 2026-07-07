@@ -36,6 +36,10 @@ export function esTituloArtefacto(s) {
         const letras = (t.match(/[a-záéíóúñü]/gi) || []).length;
         if (digitos >= 9 && letras <= 2 && /\d{9,13}/.test(t.replace(/[\s\-–—]/g, ''))) return true;
     }
+    // El "título" EMPIEZA por un ISBN/id numérico largo (10-13 cifras) pegado por _/-/./espacio a un
+    // fragmento del nombre de fichero («1568814739_Interactiverj», «9780470040010-title»): salió del NOMBRE,
+    // no del contenido → hay que caer a la autoridad por ISBN. (Caso real de una lectura a fondo.)
+    if (/^\d{9,13}[\s_.\-]/.test(t)) return true;
     // El "título" es un NOMBRE DE FICHERO: palabras.unidas.por.puntos SIN espacios (≥3 segmentos), típico de
     // un release («Oxford.Descartes.And.The.Puzzle.Of.Sensory.Representation»). No es un título → a la autoridad.
     if (!/\s/.test(t) && /^\S+(?:\.\S+){2,}$/.test(t)) return true;
@@ -58,7 +62,10 @@ export function esAutorArtefacto(s) {
     const t = String(s || '').trim();
     if (!t) return false;
     if (/\d{1,2}:\d{2}/.test(t)) return true; // lleva una hora (HH:MM[:SS]) → sello de build
-    if (/\b(typesett|typograph|composici[óo]n|compositor|dvips|distiller|quark|indesign|pdftex|latex|acrobat|ghostscript|framemaker)\b/i.test(t)) return true;
+    // Prefijo de campo del info-dict del PDF grabado como "autor": "Creator: …", "Producer: …", "Created by:".
+    // Un autor real NO empieza así. Caso real: el campo /Creator del PDF acabó como autor «Creator:».
+    if (/^\s*(?:creator|producer|created\s+by|application)\s*[:_]/i.test(t)) return true;
+    if (/\b(typesett|typograph|composici[óo]n|compositor|dvips|distiller|quark|indesign|pdftex|latex|acrobat|ghostscript|framemaker|pscript\d?\.dll|datanumen|advanced\s+pdf\s+repair|pdfcreator|wkhtmltopdf|calibre|aspose|itext)\b/i.test(t)) return true;
     // Trozos del NOMBRE DE ARCHIVO que NO son un autor (nombres tipo "ISBN - {avaxhome.ws} - 2013-11-09"):
     if (/^[\d\W]+$/.test(t)) return true;                        // solo dígitos/puntuación: "2013", "11", "09", "-"
     if (/^(?:19|20)\d{2}$/.test(t)) return true;                 // un año suelto

@@ -57,7 +57,7 @@ function condicionCampo(campo, valor) {
  * SIN búsqueda ni rol muestra los autores QUE TIENEN LIBROS (los miles del volcado sin libros son ruido;
  * aparecen al buscarlos por nombre). foto/bio se aplican siempre.
  */
-export async function listarAutores(db, { q = '', limite = 300, foto = '', bio = '', orden = 'libros', rol = '', minLibros = 0 } = {}) {
+export async function listarAutores(db, { q = '', limite = 300, foto = '', bio = '', orden = 'libros', rol = '', minLibros = 0, sinLibros = false } = {}) {
     const tope = Math.min(1000, Math.max(1, limite));
     const min = Math.max(0, Number(minLibros) || 0); // ≥ N obras (en el rol filtrado). 0 = no filtra.
     const consulta = String(q || '').trim();
@@ -73,7 +73,8 @@ export async function listarAutores(db, { q = '', limite = 300, foto = '', bio =
     //  · con q y sin rol → búsqueda por nombre en TODA la colección (aunque tengan 0 libros) (+ foto/bio);
     //  · sin q y sin rol → los que tienen libros como autor (+ foto/bio).
     const filtro = {};
-    if (rolContrib || !consulta) {
+    // Restringir a autores CON libros solo cuando NO se piden los «sin libros» y (rol de contribución o sin q).
+    if (!sinLibros && (rolContrib || !consulta)) {
         const ids = [...conteo.keys()].map(oid).filter(Boolean);
         if (!ids.length) return [];
         filtro._id = { $in: ids };
@@ -82,11 +83,13 @@ export async function listarAutores(db, { q = '', limite = 300, foto = '', bio =
     if (and.length) filtro.$and = and;
 
     const cur = db.collection('autores').find(filtro, { projection: PROY_AUTOR });
-    if (consulta && !rolContrib) cur.limit(tope * 2); // búsqueda global: acota antes de puntuar
+    // Búsqueda global o «sin libros» (pueden ser miles del volcado): acota el escaneo antes de puntuar/filtrar.
+    if ((consulta && !rolContrib) || sinLibros) cur.limit(tope * 3);
     const docs = await cur.toArray();
 
     let autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteo.get(String(a._id)) || 0 }));
-    if (min > 0) autores = autores.filter((a) => a.n_libros >= min); // filtro «≥ N obras»
+    if (sinLibros) autores = autores.filter((a) => a.n_libros === 0);       // SOLO los que no tienen libros
+    else if (min > 0) autores = autores.filter((a) => a.n_libros >= min);   // filtro «≥ N obras»
     if (orden === 'nombre') {
         autores.sort((x, y) => String(x.nombre || '').localeCompare(String(y.nombre || '')));
     } else {

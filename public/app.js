@@ -11357,8 +11357,8 @@ async function loadAutores() {
       <label class="muted" style="font-size:12px">Rol
         <select id="autRol"><option value="">todos</option><option value="autor">autor</option><option value="traductor">traductor</option><option value="ilustrador">ilustrador</option><option value="prologuista">prologuista</option><option value="anotador">anotador</option><option value="editor">editor</option><option value="compilador">compilador</option></select>
       </label>
-      <label class="muted" style="font-size:12px">Mín. obras
-        <select id="autMin"><option value="0">todas</option><option value="1">≥ 1</option><option value="2">≥ 2</option><option value="3">≥ 3</option><option value="5">≥ 5</option><option value="10">≥ 10</option></select>
+      <label class="muted" style="font-size:12px">Obras
+        <select id="autMin"><option value="0">todas</option><option value="sin">0 (sin libros)</option><option value="1">≥ 1</option><option value="2">≥ 2</option><option value="3">≥ 3</option><option value="5">≥ 5</option><option value="10">≥ 10</option></select>
       </label>
       <label class="muted" style="font-size:12px">Orden
         <select id="autOrden"><option value="libros">nº de obras</option><option value="nombre">nombre</option></select>
@@ -11388,9 +11388,12 @@ async function autoresBuscar() {
     foto: ($('#autFotoFiltro') && $('#autFotoFiltro').value) || '',
     bio: ($('#autBioFiltro') && $('#autBioFiltro').value) || '',
     rol: ($('#autRol') && $('#autRol').value) || '',
-    minLibros: ($('#autMin') && $('#autMin').value) || '0',
     orden: ($('#autOrden') && $('#autOrden').value) || 'libros',
   });
+  // «Obras»: «sin» = solo autores con 0 libros; un número = «≥ N».
+  const min = ($('#autMin') && $('#autMin').value) || '0';
+  if (min === 'sin') params.set('sinLibros', '1');
+  else params.set('minLibros', min);
   try {
     const r = await api('/autores?' + params.toString());
     _autores = r.autores || [];
@@ -11839,7 +11842,7 @@ function elegirAutorOverlay(excluir, titulo, subtitulo, onPick) {
       const cand = (r.autores || []).filter((x) => String(x._id) !== String(excluir));
       if (!cand.length) { res.textContent = 'Sin resultados.'; return; }
       res.innerHTML = cand.map((x) =>
-        `<button type="button" class="btn fusPick" data-id="${esc(x._id)}" data-nom="${esc(x.nombre)}" style="display:block;width:100%;text-align:left;margin-top:5px">${esc(x.nombre)} <span class="muted">· ${x.libros || 0} libro(s)</span></button>`).join('');
+        `<button type="button" class="btn fusPick" data-id="${esc(x._id)}" data-nom="${esc(x.nombre)}" style="display:block;width:100%;text-align:left;margin-top:5px">${esc(x.nombre)} <span class="muted">· ${x.n_libros || 0} libro(s)</span></button>`).join('');
       res.querySelectorAll('.fusPick').forEach((b) => (b.onclick = async () => {
         try { await onPick(b.dataset.id, b.dataset.nom); cerrar(); }
         catch (e) { toast('Error: ' + e.message, 'bad'); }
