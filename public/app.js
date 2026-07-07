@@ -5861,6 +5861,7 @@ function construirSearch() {
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
+        <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="papel">Papel</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
         <div><label>Estantería</label><select id="sqEstanteria" disabled><option value="">Todas</option></select></div>
         <div class="admin-only" style="display:flex;align-items:flex-end"><button class="btn" id="sqGoUbic" title="Gestionar ubicaciones (o ver esta estantería)">📍 Gestionar</button></div>
@@ -5934,6 +5935,7 @@ function construirSearch() {
   };
   $('#sqTipo').onchange = () => buscarCatalogo(1);
   if ($('#sqSoporte')) $('#sqSoporte').onchange = () => buscarCatalogo(1);
+  if ($('#sqFormato')) $('#sqFormato').onchange = () => buscarCatalogo(1);
   // Ubicación: al cambiar el ámbito, refrescar la estantería (asociada a ese ámbito) y buscar.
   if ($('#sqAmbito'))
     $('#sqAmbito').onchange = () => {
@@ -5985,6 +5987,7 @@ function construirSearch() {
     $('#sqCdu').value = '';
     $('#sqTipo').value = '';
     if ($('#sqSoporte')) $('#sqSoporte').value = '';
+    if ($('#sqFormato')) $('#sqFormato').value = '';
     $('#sqOrden').value = 'reciente';
     setOrdenDir('desc');
     if ($('#sqAmbito')) $('#sqAmbito').value = '';
@@ -6029,6 +6032,7 @@ function hayOtrosCriteriosBusqueda() {
     v('sqQ') ||
     v('sqTipo') ||
     v('sqSoporte') ||
+    v('sqFormato') ||
     v('sqCdu') ||
     v('sqAmbito') ||
     v('sqEstanteria') ||
@@ -6077,6 +6081,7 @@ function _paramsBusqueda() {
     q: $('#sqQ').value.trim(),
     tipo: $('#sqTipo').value,
     soporte: $('#sqSoporte') ? $('#sqSoporte').value : '',
+    formato: $('#sqFormato') ? $('#sqFormato').value : '',
     cdu: $('#sqCdu').value.trim(),
     orden: $('#sqOrden').value,
     porPagina: _porPaginaVista(),
