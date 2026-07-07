@@ -238,6 +238,15 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
     const plan = await analizarTransmedia(dirOrigen);
     if (!plan.miembros.length && !plan.audiolibros.length) return { ok: false, motivo: 'no hay PDFs ni audios que catalogar' };
 
+    // Anti-duplicados: si ya existe una colección con ese nombre Y tiene miembros, NO se re-cataloga (un
+    // re-drop no debe duplicar los 863 documentos). Se comprueba ANTES de copiar 19 GB en balde.
+    const colPrevia = await db.collection('colecciones').findOne(
+        { nombre: plan.nombreColeccion }, { collation: { locale: 'es', strength: 1 }, projection: { _id: 1 } });
+    if (colPrevia) {
+        const yaMiembros = await db.collection('biblioteca').countDocuments({ coleccion: colPrevia._id });
+        if (yaMiembros > 0) return { ok: false, motivo: `ya existe la colección «${plan.nombreColeccion}» con ${yaMiembros} documentos: no se re-cataloga (evita duplicados)` };
+    }
+
     // Destino: <árbol CDU>/transmedia/<nombre-colección>/… (una sola rama; la estructura interna se preserva).
     const segsCdu = arbolCDU(plan.cdu).segmentos;
     const carpetaColeccion = path.join(DIR_CDU, ...segsCdu, 'transmedia', plan.nombreColeccion);

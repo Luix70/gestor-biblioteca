@@ -2249,6 +2249,9 @@ const CAMPOS_FICHA = [
   ['volumen_titulo', 'Título del volumen'],
   ['_coleccion', 'Colección'],
   ['coleccion_numero', 'Nº en colección'],
+  ['nivel', 'Nivel'],
+  ['unidad', 'Unidad'],
+  ['rol_material', 'Material'],
   ['numero_issue', 'Número'],
   ['mes_publicacion', 'Mes'],
   ['_estado', 'Estado'],
@@ -2722,6 +2725,7 @@ function pintarDoc(r, ctx) {
     if (r.archivo_url && _nom.endsWith('.epub')) iniciarLectorEpub(encUrl(r.archivo_url));
     else if (r.archivo_url && _nom.endsWith('.pdf')) iniciarLectorPdf(encUrl(r.archivo_url));
     else if (/\.(cbz|cbr|cb7|djvu)$/.test(_nom)) iniciarLectorComic(d._id);
+    if (r.audios && r.audios.length) iniciarReproductorAudio(); // audiolibro / lectura con audio: playlist
   };
   const ld = $('#lectDet');
   if (ld) {
@@ -5138,26 +5142,59 @@ function fichaEditar(d, r, opts) {
   if (sup) $('#cmpScrim').onclick = null;
 }
 
+// Reproductor de AUDIO con playlist (audiolibros / lecturas con audio de un transmedia). Los mp3 se sirven
+// desde /recursos (estático). Se inicializa tras pintar con iniciarReproductorAudio.
+function reproductorAudioHtml(audios) {
+  const lista = (audios || []).slice().sort((a, b) => (a.orden || 0) - (b.orden || 0));
+  if (!lista.length) return '';
+  const pistas = lista.map((a, i) =>
+    `<button type="button" class="audiotrack" data-src="${esc(encUrl(a.ruta))}" title="${esc(a.titulo || '')}" style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:8px 10px;border:none;border-top:1px solid var(--line);background:none;color:inherit;cursor:pointer;font-size:13px">`
+    + `<span style="opacity:.55;min-width:22px;text-align:right">${i + 1}</span>`
+    + `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.titulo || 'Pista ' + (i + 1))}</span></button>`).join('');
+  return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">🔊 Audio · ${lista.length} pista${lista.length > 1 ? 's' : ''}</h3>`
+    + `<audio id="audioPlayer" controls preload="none" style="width:100%;margin-bottom:8px"></audio>`
+    + `<div id="audioLista" style="border-bottom:1px solid var(--line);border-radius:8px;overflow:hidden">${pistas}</div></div>`;
+}
+// Carga la 1ª pista, resalta la activa, y al terminar una AVANZA a la siguiente (comportamiento de playlist).
+function iniciarReproductorAudio() {
+  const player = $('#audioPlayer'), lista = $('#audioLista');
+  if (!player || !lista) return;
+  const tracks = [...lista.querySelectorAll('.audiotrack')];
+  if (!tracks.length) return;
+  let actual = -1;
+  const cargar = (i, reproducir) => {
+    if (i < 0 || i >= tracks.length) return;
+    actual = i;
+    player.src = tracks[i].dataset.src;
+    tracks.forEach((t, j) => { t.style.background = j === i ? 'rgba(40,217,168,.14)' : 'none'; });
+    if (reproducir) player.play().catch(() => {});
+  };
+  tracks.forEach((t, i) => (t.onclick = () => cargar(i, true)));
+  player.onended = () => { if (actual + 1 < tracks.length) cargar(actual + 1, true); };
+  cargar(0, false); // deja la 1ª cargada, sin reproducir
+}
+
 function previewArchivo(r) {
-  if (!r.archivo_url) return '';
+  const audio = reproductorAudioHtml(r.audios); // audiolibro (con o sin PDF): reproductor arriba
+  if (!r.archivo_url) return audio;             // audio-only: solo el reproductor
   const nombre = r.nombre_archivo || 'archivo',
     url = encUrl(r.archivo_url),
     ext = (nombre.split('.').pop() || '').toLowerCase();
-  if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) return ''; // un set de imágenes ya se ve en el carrusel
+  if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) return audio; // set de imágenes: ya se ve en el carrusel
   // Solo "Descargar": PDF y EPUB se LEEN EMBEBIDOS aquí (visores propios). Ya no se ofrece "Abrir en
   // pestaña" (en PC, según la config del navegador, descargaba el PDF en vez de previsualizarlo).
   const acc = `<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a></div>`;
   // PDF: visor PDF.js embebido (vendored) — render propio en canvas → previsualiza IGUAL en PC y móvil,
   // sin depender de la config de PDF del navegador. Se inicializa tras pintar (iniciarLectorPdf).
   if (ext === 'pdf')
-    return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3>
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3>
     <div class="pdfwrap" id="pdfWrap"><div class="pdfscroll" id="pdfScroll"></div>
       <button class="epubfs" id="pdfFs" title="Pantalla completa" style="display:none">⛶</button>
       <div class="epubbar" id="pdfBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="pdfCur">1</span> / <span id="pdfTotal">?</span></span></div>
       <div class="epubmsg" id="pdfMsg">Cargando PDF…</div></div>${acc}</div>`;
   // EPUB: lector epub.js (vendored en /vendor) — se inicializa tras pintar (iniciarLectorEpub).
   if (ext === 'epub')
-    return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📗 ${esc(nombre)}</h3>
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📗 ${esc(nombre)}</h3>
     <div class="epubwrap" id="epubWrap"><div id="epubArea"></div>
       <button class="cnav prev" id="epubPrev" style="display:none">‹</button><button class="cnav next" id="epubNext" style="display:none">›</button>
       <button class="epubfs" id="epubFs" title="Pantalla completa" style="display:none">⛶</button>
@@ -5173,7 +5210,7 @@ function previewArchivo(r) {
   // PAGINADO (cómic .cbz/.cbr/.cb7 y .djvu): visor de páginas servidas BAJO DEMANDA por el backend
   // (cómic→del comprimido; DjVu→rasterizando esa página). Se inicializa tras pintar (iniciarLectorComic).
   if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext))
-    return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">${ext === 'djvu' ? '📘' : '🗂️'} ${esc(nombre)}</h3>
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">${ext === 'djvu' ? '📘' : '🗂️'} ${esc(nombre)}</h3>
     <div class="pdfwrap" id="comicWrap"><img id="comicImg" class="comicpg" alt="">
       <button class="cnav prev" id="comicPrev" style="display:none">‹</button><button class="cnav next" id="comicNext" style="display:none">›</button>
       <button class="epubfs" id="comicFs" title="Pantalla completa" style="display:none">⛶</button>
@@ -5181,7 +5218,7 @@ function previewArchivo(r) {
       <div class="epubmsg" id="comicMsg">Cargando cómic…</div></div>${acc}</div>`;
   // Resto de formatos: sin vista previa integrada — solo descarga.
   const ic = { djvu: '📘', mobi: '📙', azw3: '📙' }[ext] || '📦';
-  return `<div class="fileprev"><div class="filebox"><div class="ic">${ic}</div><div style="font-weight:600;word-break:break-word">${esc(nombre)}</div>
+  return audio + `<div class="fileprev"><div class="filebox"><div class="ic">${ic}</div><div style="font-weight:600;word-break:break-word">${esc(nombre)}</div>
     <div class="muted" style="font-size:12px;margin-top:4px">Formato ${esc((ext || '—').toUpperCase())} — el navegador no lo previsualiza de forma integrada.</div>${acc}</div></div>`;
 }
 

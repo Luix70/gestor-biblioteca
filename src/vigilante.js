@@ -14,6 +14,7 @@ import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
 import { reciclar } from './utils/papelera.js';
+import { esCarpetaTransmedia, ingestarTransmedia } from './utils/transmedia.js';
 import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
@@ -415,6 +416,13 @@ async function listarUnidades() {
                 console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
                 continue;
             }
+            // TRANSMEDIA: una carpeta con AUDIO (o marcador .transmedia) es una colección con estructura
+            // preservada — un doc por PDF + audios enlazados, SIN reorganizar ni pasar cada PDF por el
+            // pipeline normal (evita 863 llamadas de IA y respeta el árbol). Se procesa aparte (procesarUnidad).
+            if (await esCarpetaTransmedia(ruta)) {
+                unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
             // Documentos del drop: directos o en subcarpetas (Books/, Magazines/…; se excluye
             // covers/). Las imágenes son PORTADAS (no libros), y .txt/.url/etc. se descartan. La
             // COLECCIÓN y la carpeta persistente son el nombre del DROP (carpeta superior).
@@ -671,6 +679,17 @@ async function procesarCola() {
                 // PAUSA desde el panel: se detiene tras el documento en curso; el resto espera en el
                 // Inbox y se reanuda al reactivar el vigilante (igual que el Mantenimiento cede el turno).
                 if (!vigilanteActivo) break;
+                // TRANSMEDIA: copia el árbol verbatim al CDU + cataloga (un doc por PDF, audios, ruta_fija) y
+                // recicla el origen SOLO tras verificar la copia. No pasa por el pipeline normal por-fichero.
+                if (u.esTransmedia) {
+                    console.log(`\n📦 Transmedia «${path.basename(u.carpeta)}»: catalogando (estructura preservada)…`);
+                    try {
+                        const rt = await ingestarTransmedia(u.carpeta);
+                        if (rt.ok) { console.log(`  ✔ ${rt.insertados} documento(s) · CDU ${rt.cdu} · ${rt.web}`); tally.transmedia = (tally.transmedia || 0) + 1; procesadas++; }
+                        else console.warn(`  ✗ transmedia: ${rt.motivo} (se CONSERVA el origen)`);
+                    } catch (err) { console.error(`  ✗ transmedia falló: ${err.message} (se CONSERVA el origen)`); }
+                    continue;
+                }
                 // Comprobar si el archivo terminó de escribirse (o es un fantasma de 0 bytes).
                 const estabilidad = await verificarEstabilidad(u.rutas);
                 if (estabilidad === 'fantasma') {
