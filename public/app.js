@@ -2517,6 +2517,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actAFondo" title="Lee las PÁGINAS del propio libro (portadilla/contraportada) con la visión y propone autores/roles reales, sinopsis e identificadores. Muestra un balance antes/después para aplicar lo que elijas.">🎯 Completar a fondo</button>
       <button class="fbtn admin-only" id="actShare" title="Genera un QR/enlace para compartir esta ficha (y su descarga, si es digital)">🔗 Compartir</button>
       <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
+      <button class="fbtn admin-only" id="actTipo" title="Cambiar el tipo a mano: libro / revista / cómic">🔀 Cambiar tipo</button>
       <button class="fbtn bad admin-only" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
       <button class="fbtn bad admin-only" id="actDel" title="Borra el documento y su carpeta (sidecars/imágenes → Papelera, recuperable)">🗑 Eliminar</button>
     </div>`;
@@ -2554,6 +2555,7 @@ function pintarDoc(r, ctx) {
     if (cf) cf.onclick = () => fichaAccion('conformar', d._id, cf);
     if (ce) ce.onclick = () => fichaAccion('enriquecer', d._id, ce);
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
+    if ($('#actTipo')) $('#actTipo').onclick = () => cambiarTipoDocs([d._id]);
     const caf = $('#actAFondo');
     if (caf) caf.onclick = () => completarAFondo(d._id, caf);
     // 🩺 Salud: carga perezosa del checklist la primera vez que se despliega la sección.
@@ -3060,6 +3062,47 @@ function modalReprocesar({ n = 1 } = {}) {
       if (!input.value) { $('#pwErr').textContent = 'Escribe la contraseña'; input.focus(); return; }
       const conservar = (($('#cmpModal input[name="reprocMode"]:checked') || {}).value) !== 'nuevo';
       cerrarCon({ password: input.value, conservar });
+    };
+    input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('#pwOk').click(); } else if (ev.key === 'Escape') cerrarCon(null); };
+  });
+}
+// CAMBIAR TIPO (individual o lote): reclasifica a mano tipo_recurso (libro/revista) o marca cómic.
+async function cambiarTipoDocs(ids) {
+  if (!ids || !ids.length) return;
+  const el = await modalCambiarTipo(ids.length);
+  if (el == null) return;
+  try {
+    const r = await api('/documentos/cambiar-tipo', { method: 'POST', body: JSON.stringify({ ids, tipo: el.tipo, comic: el.comic, password: el.password }) });
+    if (!r.ok) { toast(r.motivo, 'bad'); return; }
+    toast(`🔀 ${r.modificados} documento(s) → ${el.comic ? 'cómic' : el.tipo}`);
+    if (ids.length === 1 && $('#p-detalle') && $('#p-detalle').classList.contains('on')) verDoc(ids[0]);
+    else { selDocs.clear(); buscarCatalogo(estadoBusqueda.page || 1); }
+  } catch (e) { toast(e.message, 'bad'); }
+}
+// Modal de cambio de tipo: elige Libro / Revista / Cómic + contraseña. Devuelve { tipo, comic, password } o null.
+function modalCambiarTipo(n) {
+  const opc = (v, ic, tit, sub) => `<label style="display:flex;gap:8px;align-items:center;cursor:pointer;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-top:6px"><input type="radio" name="ctTipo" value="${v}"${v === 'libro' ? ' checked' : ''} style="width:16px;height:16px;flex:0 0 auto"><span>${ic} <b>${tit}</b>${sub ? ` <span class="muted" style="font-size:12px">${sub}</span>` : ''}</span></label>`;
+  return new Promise((resolver) => {
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:440px">
+      <h3 style="margin-top:0">🔀 Cambiar tipo${n > 1 ? ` · ${n} documentos` : ''}</h3>
+      <div class="muted" style="margin:-4px 0 10px">Reclasifica a mano. NO mueve la carpeta (la Integridad/un reproceso la re-alojan luego en libros/ o revistas/).</div>
+      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}
+      <label style="margin-top:12px">Contraseña de administrador</label>
+      <input type="password" id="pwInput" autocomplete="current-password">
+      <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="pwCancel">Cancelar</button><button class="btn pri" id="pwOk">🔀 Cambiar</button></div>
+    </div>`;
+    $('#cmpScrim').style.display = 'block';
+    $('#cmpModal').style.display = 'grid';
+    const input = $('#pwInput');
+    setTimeout(() => input.focus(), 30);
+    const cerrarCon = (v) => { cerrarCmp(); resolver(v); };
+    $('#pwCancel').onclick = () => cerrarCon(null);
+    $('#cmpScrim').onclick = () => cerrarCon(null);
+    $('#pwOk').onclick = () => {
+      if (!input.value) { $('#pwErr').textContent = 'Escribe la contraseña'; input.focus(); return; }
+      const v = (($('#cmpModal input[name="ctTipo"]:checked') || {}).value) || 'libro';
+      cerrarCon({ tipo: v === 'revista' ? 'revista' : 'libro', comic: v === 'comic', password: input.value });
     };
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('#pwOk').click(); } else if (ev.key === 'Escape') cerrarCon(null); };
   });
@@ -5152,6 +5195,7 @@ function renderBulk() {
     <button class="btn" id="bkConformar" title="Conformar (perfeccionar registro) cada documento seleccionado">🧹 Conformar</button>
     <button class="btn" id="bkEnriquecer" title="Enriquecer (rellenar huecos con APIs) cada documento seleccionado">✨ Enriquecer</button>
     <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
+    <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`
@@ -5189,6 +5233,7 @@ function renderBulk() {
     if ($('#bkConformar')) $('#bkConformar').onclick = () => accionLoteFicha('conformar', { verbo: 'Conformar' });
     if ($('#bkEnriquecer')) $('#bkEnriquecer').onclick = () => accionLoteFicha('enriquecer', { verbo: 'Enriquecer' });
     if ($('#bkAFondo')) $('#bkAFondo').onclick = aFondoLote;
+    if ($('#bkTipo')) $('#bkTipo').onclick = () => cambiarTipoDocs([...selDocs]);
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     // «Mostrar selección»: alterna la vista restringida a lo seleccionado (y re-busca).
     if ($('#bkMostrarSel'))

@@ -1161,6 +1161,25 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // CAMBIAR TIPO (individual o LOTE): reclasifica a mano el tipo_recurso (libro/revista) y/o marca cómic
+    // (naturaleza). Rápido y fiable cuando el usuario SABE lo que es (p. ej. una serie de libros Apress con
+    // ISSN que la ingesta temprana marcó revista). NO re-aloja el fichero por sí solo (la Integridad/Conformador
+    // ajustan ruta_base luego, o un reproceso lo re-archiva en libros/). Solo admin.
+    r.post('/documentos/cambiar-tipo', async (req, res) => {
+        try {
+            if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id));
+            const tipo = req.body?.tipo === 'revista' ? 'revista' : 'libro'; // libro por defecto
+            const comic = !!req.body?.comic;
+            if (!ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos' });
+            const db = await conectarDB();
+            const set = { tipo_recurso: tipo, fecha_actualizacion: new Date() };
+            if (comic) set.naturaleza = 'comic';
+            const r2 = await db.collection('biblioteca').updateMany({ _id: { $in: ids } }, { $set: set });
+            res.json({ ok: true, modificados: r2.modifiedCount, tipo, comic });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // ELIMINAR un documento (botón de la ficha): borra el registro de Mongo y RECICLA su carpeta CDU
     // (sidecars/imágenes/original) a la Papelera — recuperable. Requiere contraseña de admin.
     r.post('/documentos/:id/eliminar', async (req, res) => {
