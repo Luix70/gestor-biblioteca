@@ -405,7 +405,7 @@ export function rutasPanel() {
             const match = {};
             // Tipo: libro/revista por tipo_recurso; 'comic' por naturaleza (un cómic puede ser libro=GN o
             // revista/serie, así que se filtra por su clase, no por tipo_recurso).
-            if (tipo === 'libro' || tipo === 'revista') match.tipo_recurso = tipo;
+            if (['libro', 'revista', 'articulo', 'apuntes'].includes(tipo)) match.tipo_recurso = tipo;
             else if (tipo === 'comic') match.naturaleza = { $in: ['comic', 'novela-grafica'] };
             // Soporte: 'papel' = escaneado/físico (formatos incluye 'papel'); 'digital' = el resto
             // (epub/pdf/mobi/djvu/cbz…). Vacío = ambos.
@@ -1206,7 +1206,7 @@ export function rutasPanel() {
         try {
             if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
             const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id));
-            const tipo = req.body?.tipo === 'revista' ? 'revista' : 'libro'; // libro por defecto
+            const tipo = ['libro', 'revista', 'articulo', 'apuntes'].includes(req.body?.tipo) ? req.body.tipo : 'libro'; // libro por defecto
             const comic = !!req.body?.comic;
             if (!ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos' });
             const db = await conectarDB();

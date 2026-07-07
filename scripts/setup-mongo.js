@@ -199,6 +199,32 @@ async function main() {
         console.warn(`  ⚠️  no se pudo ampliar el enum de formatos: ${e.codeName || e.message}`);
     }
 
+    // Ampliar (sin quitar) el enum de `tipo_recurso` para admitir NUEVOS tipos de documento (articulo,
+    // apuntes) además de libro/revista. Mismo patrón defensivo que formatos: leer el validador y re-aplicarlo.
+    try {
+        const info = (await db.listCollections({ name: 'biblioteca' }).toArray())[0];
+        const js = info?.options?.validator?.$jsonSchema;
+        const tr = js?.properties?.tipo_recurso;
+        if (tr && Array.isArray(tr.enum)) {
+            const faltan = ['articulo', 'apuntes'].filter(v => !tr.enum.includes(v));
+            if (faltan.length) {
+                tr.enum = [...tr.enum, ...faltan];
+                await db.command({
+                    collMod: 'biblioteca', validator: { $jsonSchema: js },
+                    validationLevel: info.options.validationLevel || 'moderate',
+                    validationAction: info.options.validationAction || 'error',
+                });
+                console.log(`  ✅ tipo_recurso: enum ampliado (+${faltan.join(', ')}).`);
+            } else {
+                console.log('  ✓ tipo_recurso: el enum ya admite los nuevos tipos.');
+            }
+        } else {
+            console.log('  ⓘ biblioteca sin enum de tipo_recurso (o estructura distinta): no se modifica.');
+        }
+    } catch (e) {
+        console.warn(`  ⚠️  no se pudo ampliar el enum de tipo_recurso: ${e.codeName || e.message}`);
+    }
+
     // ── colecciones: crear con validador (o aplicarlo si ya existe) ───────────
     console.log('\ncolecciones:');
     const existentes = await db.listCollections({ name: 'colecciones' }).toArray();

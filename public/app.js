@@ -3167,7 +3167,7 @@ function modalCambiarTipo(n) {
     $('#cmpModal').innerHTML = `<div class="box card" style="max-width:440px">
       <h3 style="margin-top:0">🔀 Cambiar tipo${n > 1 ? ` · ${n} documentos` : ''}</h3>
       <div class="muted" style="margin:-4px 0 10px">Reclasifica a mano. NO mueve la carpeta (la Integridad/un reproceso la re-alojan luego en libros/ o revistas/).</div>
-      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}
+      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}${opc('articulo', '📃', 'Artículo', '(científico, de revista…)')}${opc('apuntes', '🗒️', 'Apuntes')}
       <label style="margin-top:12px">Contraseña de administrador</label>
       <input type="password" id="pwInput" autocomplete="current-password">
       <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
@@ -3183,7 +3183,8 @@ function modalCambiarTipo(n) {
     $('#pwOk').onclick = () => {
       if (!input.value) { $('#pwErr').textContent = 'Escribe la contraseña'; input.focus(); return; }
       const v = (($('#cmpModal input[name="ctTipo"]:checked') || {}).value) || 'libro';
-      cerrarCon({ tipo: v === 'revista' ? 'revista' : 'libro', comic: v === 'comic', password: input.value });
+      // 'comic' es una NATURALEZA sobre 'libro'; el resto son tipo_recurso directos.
+      cerrarCon({ tipo: v === 'comic' ? 'libro' : v, comic: v === 'comic', password: input.value });
     };
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('#pwOk').click(); } else if (ev.key === 'Escape') cerrarCon(null); };
   });
@@ -4961,7 +4962,7 @@ function fichaEditar(d, r, opts) {
     ${campo('edTit', 'Título', d.titulo)}
     ${campo('edSub', 'Subtítulo', d.subtitulo)}
     <label style="display:block;margin-top:8px">Tipo</label>
-    <select id="edTipo"><option value="libro"${d.tipo_recurso !== 'revista' ? ' selected' : ''}>📕 Libro</option><option value="revista"${d.tipo_recurso === 'revista' ? ' selected' : ''}>📰 Revista</option></select>
+    <select id="edTipo">${['libro', 'revista', 'articulo', 'apuntes'].map((t) => `<option value="${t}"${(d.tipo_recurso || 'libro') === t ? ' selected' : ''}>${tipoIcono(t)} ${tipoNombre(t)}</option>`).join('')}</select>
     <div style="margin-top:8px"><label style="display:block">Autores y colaboradores</label><div id="edAutList"></div><button type="button" class="btn" id="edAutAdd" style="margin-top:6px">➕ Añadir persona</button></div>
     ${campo('edEdi', 'Editorial', r.editorial || '')}
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno', 'Año', d.año_edicion)}</div><div style="flex:1">${campo('edIdi', 'Idioma', d.idioma)}</div><div style="flex:1">${campo('edPag', 'Páginas', d.paginas)}</div>`}</div>
@@ -5959,7 +5960,7 @@ function construirSearch() {
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
-        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option></select></div>
+        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="apuntes">Apuntes</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="papel">Papel</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
@@ -6628,15 +6629,17 @@ const badgesDoc = (d) =>
   `${d.nsfw ? ' <span class="fmt" style="background:rgba(255,92,122,.18);color:var(--bad)" title="NSFW: oculto a invitados">🔞</span>' : ''}${d.locked ? ' <span class="fmt" style="background:rgba(255,180,84,.18);color:var(--warn)" title="Bloqueado: el Conformador no lo altera">🔒</span>' : ''}${d.nfc && (d.nfc.fecha_vinculacion || d.nfc.uid) ? ' <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)" title="Tiene etiqueta NFC vinculada">📶</span>' : ''}`;
 // Píldoras GRANDES y legibles de TIPO (libro/revista/cómic) + FORMATO(S) (papel/pdf/epub/mobi/cbr…) para la
 // CABECERA de la ficha, donde el usuario quiere ver de un vistazo qué es y en qué soporte está.
+// Icono y nombre del TIPO de documento (para badges/tarjetas/placeholders). El cómic (por `naturaleza`)
+// manda sobre el tipo_recurso. Los tipos nuevos (artículo/apuntes) tienen su propio icono/nombre.
+function tipoIcono(tr, esComic) { return esComic ? '📓' : ({ revista: '📰', articulo: '📃', apuntes: '🗒️' }[tr] || '📕'); }
+function tipoNombre(tr, esComic) { return esComic ? 'Cómic' : ({ revista: 'Revista', articulo: 'Artículo', apuntes: 'Apuntes' }[tr] || 'Libro'); }
 function badgesTipoFormato(d) {
   const nat = String(d.naturaleza || '').toLowerCase();
   const esComic = ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(nat);
   const chip = (txt, bg, col) => `<span style="display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;padding:3px 11px;border-radius:999px;background:${bg};color:${col}">${txt}</span>`;
   const tipo = esComic
     ? chip('📓 Cómic', 'rgba(180,120,255,.20)', '#c79cff')
-    : d.tipo_recurso === 'revista'
-      ? chip('📰 Revista', 'rgba(120,160,255,.22)', '#9db8ff')
-      : chip('📕 Libro', 'rgba(120,160,255,.16)', '#9db8ff');
+    : chip(`${tipoIcono(d.tipo_recurso)} ${tipoNombre(d.tipo_recurso)}`, 'rgba(120,160,255,.20)', '#9db8ff');
   const fmts = (d.formatos || [])
     .map((f) =>
       f === 'papel'
@@ -6651,13 +6654,13 @@ function badgesTipoFormato(d) {
 function tipoFmtCompacto(d) {
   const nat = String(d.naturaleza || '').toLowerCase();
   const esComic = ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(nat);
-  const ic = esComic ? '📓' : d.tipo_recurso === 'revista' ? '📰' : '📕';
-  const tipo = esComic ? 'Cómic' : d.tipo_recurso === 'revista' ? 'Revista' : 'Libro';
+  const ic = tipoIcono(d.tipo_recurso, esComic);
+  const tipo = tipoNombre(d.tipo_recurso, esComic);
   const fmts = (d.formatos || []).slice(0, 2).map((f) => esc(String(f))).join('·');
   return `<span class="fmt" style="background:rgba(120,160,255,.16);color:#9db8ff">${ic} ${tipo}${fmts ? ' · ' + fmts : ''}</span>`;
 }
 function docCard(d) {
-  const ph = d.tipo_recurso === 'revista' ? '📰' : '📕';
+  const ph = tipoIcono(d.tipo_recurso);
   const cov = d.portada
     ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`
     : `<div class="ph">${ph}</div>`;
@@ -11778,9 +11781,7 @@ async function autorFicha(id) {
   const tipoBadge = (l) =>
     l.comic
       ? '<span class="docbadge" style="background:rgba(180,120,255,.18);color:#b478ff">📓 cómic</span>'
-      : l.tipo_recurso === 'revista'
-        ? '<span class="docbadge" style="background:rgba(120,160,255,.18);color:#78a0ff">📰 revista</span>'
-        : '<span class="docbadge" style="background:rgba(120,160,255,.14);color:var(--muted)">📕 libro</span>';
+      : `<span class="docbadge" style="background:rgba(120,160,255,.16);color:#78a0ff">${tipoIcono(l.tipo_recurso)} ${tipoNombre(l.tipo_recurso).toLowerCase()}</span>`;
   const soporteBadge = (l) =>
     l.papel
       ? '<span class="docbadge" style="background:rgba(200,160,90,.18);color:#d0a860">📄 papel</span>'
@@ -11789,7 +11790,7 @@ async function autorFicha(id) {
   const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
       <span class="selmark">✓</span>
       ${nfcBadge(l)}
-      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${l.comic ? '📓' : l.tipo_recurso === 'revista' ? '📰' : '📕'}</div>`}
+      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${tipoIcono(l.tipo_recurso, l.comic)}</div>`}
       <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
       <div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin-top:3px">${tipoBadge(l)}${soporteBadge(l)}</div>
     </div>`;
@@ -12415,16 +12416,14 @@ async function editorialFicha(id) {
   const tipoBadge = (l) =>
     l.comic
       ? '<span class="docbadge" style="background:rgba(180,120,255,.18);color:#b478ff">📓 cómic</span>'
-      : l.tipo_recurso === 'revista'
-        ? '<span class="docbadge" style="background:rgba(120,160,255,.18);color:#78a0ff">📰 revista</span>'
-        : '<span class="docbadge" style="background:rgba(120,160,255,.14);color:var(--muted)">📕 libro</span>';
+      : `<span class="docbadge" style="background:rgba(120,160,255,.16);color:#78a0ff">${tipoIcono(l.tipo_recurso)} ${tipoNombre(l.tipo_recurso).toLowerCase()}</span>`;
   const soporteBadge = (l) =>
     l.papel
       ? '<span class="docbadge" style="background:rgba(200,160,90,.18);color:#d0a860">📄 papel</span>'
       : '<span class="docbadge" style="background:rgba(40,217,168,.16);color:var(--acc)">💾 digital</span>';
   const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
       ${nfcBadge(l)}
-      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${l.comic ? '📓' : l.tipo_recurso === 'revista' ? '📰' : '📕'}</div>`}
+      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${tipoIcono(l.tipo_recurso, l.comic)}</div>`}
       <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
       <div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin-top:3px">${tipoBadge(l)}${soporteBadge(l)}</div>
     </div>`;

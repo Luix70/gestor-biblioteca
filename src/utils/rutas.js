@@ -57,7 +57,9 @@ export function rutaCatalogo({ cdu, tipo_recurso, isbn, issn, id, año_edicion, 
         return { segmentos, relativa: path.join(...segmentos), web: '/recursos/' + segmentos.join('/') };
     }
 
-    const tipoSeg = tipo_recurso === 'revista' ? 'revistas' : 'libros';
+    // Carpeta por tipo de documento. Los tipos nuevos (artículo/apuntes) tienen su propia rama; el resto
+    // (libro y cualquier tipo no listado) cae en 'libros'. Las revistas llevan además cabecera/año (abajo).
+    const tipoSeg = { revista: 'revistas', articulo: 'articulos', apuntes: 'apuntes' }[tipo_recurso] || 'libros';
 
     if (tipo_recurso === 'revista') {
         const cabeceraSeg = sanitizarSegmento(issn || titulo || String(id));

@@ -139,9 +139,9 @@ export async function editarDocumento(db, id, campos = {}) {
     }
     if ('locked' in campos) set.locked = !!campos.locked;
     if ('estado_verificacion' in campos && ['pendiente', 'completado'].includes(campos.estado_verificacion)) set.estado_verificacion = campos.estado_verificacion;
-    // Corregir un tipo mal detectado (revista↔libro). No re-aloja el fichero por sí solo: el Conformador/
-    // reprocesar re-archiva en revistas/ o libros/ según corresponda; aquí solo se fija el campo.
-    if ('tipo_recurso' in campos && ['libro', 'revista'].includes(campos.tipo_recurso)) set.tipo_recurso = campos.tipo_recurso;
+    // Corregir un tipo mal detectado (libro/revista/artículo/apuntes). No re-aloja el fichero por sí solo:
+    // el Conformador/reprocesar re-archiva en la carpeta que corresponda; aquí solo se fija el campo.
+    if ('tipo_recurso' in campos && ['libro', 'revista', 'articulo', 'apuntes'].includes(campos.tipo_recurso)) set.tipo_recurso = campos.tipo_recurso;
 
     // CDU cambiada A MANO: la clasificación manual manda → mover la carpeta a su árbol nuevo al instante y
     // proteger el valor (cdu_manual) para que el Conformador (re-clasificar-cdu) no lo recalcule ni lo pise.
