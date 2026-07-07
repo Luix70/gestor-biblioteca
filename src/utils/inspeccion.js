@@ -39,7 +39,9 @@ export async function infoPapelera() {
     for (const e of ents) {
         if (!e.isDirectory()) continue;
         const { bytes, ficheros } = await tamanoDir(path.join(DIR_RECICLAJE, e.name));
-        subcarpetas.push({ nombre: e.name, ficheros, bytes });
+        // ¿Tiene manifiesto de origen? → se puede restaurar a su sitio (Papelera de Windows).
+        const restaurable = await fs.access(path.join(DIR_RECICLAJE, e.name, '.papelera.json')).then(() => true).catch(() => false);
+        subcarpetas.push({ nombre: e.name, ficheros, bytes, restaurable });
     }
     subcarpetas.sort((a, b) => b.nombre.localeCompare(a.nombre)); // serial desc → más reciente primero
     const bytes = subcarpetas.reduce((s, x) => s + x.bytes, 0);
@@ -52,7 +54,7 @@ export async function contenidoPapelera(sub) {
     const out = [];
     let ents; try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
     for (const e of ents) {
-        if (!e.isFile()) continue;
+        if (!e.isFile() || e.name === '.papelera.json') continue; // el manifiesto es metadato, no contenido
         let size = 0; try { size = (await fs.stat(path.join(dir, e.name))).size; } catch { /* ignora */ }
         out.push({ nombre: e.name, bytes: size });
     }

@@ -7,6 +7,7 @@ import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
     listarCuarentena, reingestarCuarentena, descartarCuarentena, descartarCategoria, reingestarTodosDuplicados, ingestaPorDia,
 } from './utils/inspeccion.js';
+import { restaurar } from './utils/papelera.js';
 import { verificarPasswordAdmin, firmarCompartir, validarCompartir } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad } from './integridad.js';
@@ -170,6 +171,14 @@ export function rutasPanel() {
     });
     r.post('/papelera/vaciar', async (req, res) => {
         try { res.json(await vaciarPapelera(req.body?.sub || null)); } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Restaurar una subcarpeta a su ubicación original (usa el manifiesto). Solo admin.
+    r.post('/papelera/restaurar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!req.body?.sub) return res.status(400).json({ ok: false, motivo: 'falta la subcarpeta' });
+            res.json(await restaurar(req.body.sub));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
     // ── Cuarentena ──

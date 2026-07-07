@@ -967,10 +967,26 @@ async function loadPap() {
         (
           sub,
         ) => `<tr><td class="mono">${esc(sub.nombre)}</td><td>${sub.ficheros}</td><td>${fmtBytes(sub.bytes)}</td>
-      <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}">ver</button> <button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
+      <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}">ver</button> ${sub.restaurable ? `<button class="btn admin-only" data-restore="${esc(sub.nombre)}" title="Devolver el fichero/carpeta a su ubicación original (no pisa lo que ya exista allí)">↩️ restaurar</button> ` : ''}<button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
       )
       .join('')}</table>`
       : '<div class="empty">Papelera vacía</div>';
+    $$('#papBody [data-restore]').forEach(
+      (b) =>
+        (b.onclick = async () => {
+          if (!confirm('¿Restaurar «' + b.dataset.restore + '» a su ubicación original?')) return;
+          b.disabled = true;
+          try {
+            const r = await api('/papelera/restaurar', { method: 'POST', body: JSON.stringify({ sub: b.dataset.restore }) });
+            if (!r.ok) { toast(r.motivo, 'bad'); b.disabled = false; return; }
+            const partes = [`↩️ ${r.restaurados} restaurado(s)`];
+            if (r.conflictos && r.conflictos.length) partes.push(`${r.conflictos.length} ya existían (conservados en Papelera)`);
+            if (r.errores && r.errores.length) partes.push(`${r.errores.length} con error`);
+            toast(partes.join(' · '), r.conflictos?.length || r.errores?.length ? 'warn' : 'ok');
+            loadPap();
+          } catch (e) { toast(e.message, 'bad'); b.disabled = false; }
+        }),
+    );
     $$('#papBody [data-del]').forEach(
       (b) =>
         (b.onclick = async () => {
