@@ -20,7 +20,7 @@ import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexad
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
-import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor } from './utils/gestion-autores.js';
+import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor, eliminarAutoresVacios, imagenesDeObras } from './utils/gestion-autores.js';
 import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial } from './utils/gestion-editoriales.js';
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
@@ -1373,7 +1373,21 @@ export function rutasPanel() {
             const bio = String(req.query.bio || '');      // 'si' | 'no' | ''
             const orden = String(req.query.orden || 'libros'); // 'libros' | 'nombre'
             const rol = String(req.query.rol || '');      // '' | autor | traductor | ilustrador | …
-            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite, foto, bio, orden, rol }) });
+            const minLibros = Number(req.query.minLibros) || 0; // ≥ N obras
+            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite, foto, bio, orden, rol, minLibros }) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Eliminar autores por id, SOLO los que no figuran en ningún documento (los referenciados se conservan).
+    r.post('/autores/eliminar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await eliminarAutoresVacios(await conectarDB(), req.body?.ids || []));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Todas las imágenes de las obras del autor (para elegir su foto de una de ellas).
+    r.get('/autores/:id/imagenes-obras', async (req, res) => {
+        try {
+            res.json(await imagenesDeObras(await conectarDB(), req.params.id));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.get('/autores/:id', async (req, res) => {

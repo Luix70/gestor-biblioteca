@@ -57,8 +57,9 @@ function condicionCampo(campo, valor) {
  * SIN búsqueda ni rol muestra los autores QUE TIENEN LIBROS (los miles del volcado sin libros son ruido;
  * aparecen al buscarlos por nombre). foto/bio se aplican siempre.
  */
-export async function listarAutores(db, { q = '', limite = 300, foto = '', bio = '', orden = 'libros', rol = '' } = {}) {
+export async function listarAutores(db, { q = '', limite = 300, foto = '', bio = '', orden = 'libros', rol = '', minLibros = 0 } = {}) {
     const tope = Math.min(1000, Math.max(1, limite));
+    const min = Math.max(0, Number(minLibros) || 0); // ≥ N obras (en el rol filtrado). 0 = no filtra.
     const consulta = String(q || '').trim();
     const rolContrib = rol && rol !== 'autor' && ROLES_VALIDOS.includes(rol);
     const and = [condicionCampo('foto', foto), condicionCampo('biografia', bio)].filter(Boolean);
@@ -84,13 +85,53 @@ export async function listarAutores(db, { q = '', limite = 300, foto = '', bio =
     if (consulta && !rolContrib) cur.limit(tope * 2); // búsqueda global: acota antes de puntuar
     const docs = await cur.toArray();
 
-    const autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteo.get(String(a._id)) || 0 }));
+    let autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteo.get(String(a._id)) || 0 }));
+    if (min > 0) autores = autores.filter((a) => a.n_libros >= min); // filtro «≥ N obras»
     if (orden === 'nombre') {
         autores.sort((x, y) => String(x.nombre || '').localeCompare(String(y.nombre || '')));
     } else {
         autores.sort((x, y) => y.n_libros - x.n_libros || String(x.nombre || '').localeCompare(String(y.nombre || '')));
     }
     return autores.slice(0, tope);
+}
+
+/**
+ * Borra autores POR ID, pero SOLO los que no figuran en NINGÚN documento (ni como autor ni como
+ * contribuyente) — salvaguarda anti-pérdida: los que sigan referenciados se CONSERVAN. Devuelve el
+ * recuento de borrados/conservados. (No recicla la foto: es un fichero pequeño; se limpia en Integridad.)
+ */
+export async function eliminarAutoresVacios(db, ids = []) {
+    const objs = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
+    if (!objs.length) return { ok: false, motivo: 'sin autores' };
+    const borrados = [], conservados = [];
+    for (const _id of objs) {
+        const usadoAutor = await db.collection('biblioteca').countDocuments({ autores: _id }, { limit: 1 });
+        const usadoContrib = usadoAutor ? 1 : await db.collection('biblioteca').countDocuments({ 'contribuciones.persona': _id }, { limit: 1 });
+        if (usadoAutor || usadoContrib) { conservados.push(String(_id)); continue; }
+        await db.collection('autores').deleteOne({ _id });
+        borrados.push(String(_id));
+    }
+    return { ok: true, borrados: borrados.length, conservados: conservados.length };
+}
+
+/**
+ * Todas las imágenes (portada + carrusel) de las OBRAS en las que interviene este autor (como autor o
+ * contribuyente) — para elegir una como foto del autor (p. ej. una foto suya del interior del libro).
+ */
+export async function imagenesDeObras(db, id) {
+    const _id = oid(id);
+    if (!_id) return { ok: false, motivo: 'id inválido' };
+    const docs = await db.collection('biblioteca')
+        .find({ $or: [{ autores: _id }, { 'contribuciones.persona': _id }] }, { projection: { titulo: 1, portada: 1, imagenes: 1 } })
+        .toArray();
+    const obras = [];
+    for (const d of docs) {
+        const imgs = [];
+        if (d.portada) imgs.push(d.portada);
+        for (const im of (d.imagenes || [])) if (im?.ruta && !imgs.includes(im.ruta)) imgs.push(im.ruta);
+        if (imgs.length) obras.push({ doc_id: String(d._id), titulo: d.titulo || '', imagenes: imgs });
+    }
+    return { ok: true, obras };
 }
 
 /**

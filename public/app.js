@@ -2573,7 +2573,7 @@ function pintarDoc(r, ctx) {
     if (ce2) ce2.onclick = () => fichaEditar(d, r);
     if ($('#actEditCover')) $('#actEditCover').onclick = () => fichaEditar(d, r);
     if ($('#fminEdit')) $('#fminEdit').onclick = () => fichaEditar(d, r); // «✏️ Editar» de la cabecera
-    const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []));
+    const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []), { url: r.archivo_url, nombre: r.nombre_archivo });
     if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
     if ($('#actImgsCar')) $('#actImgsCar').onclick = editarImgs; // duplicado en el encabezado del carrusel
     const cm2 = $('#actMedir');
@@ -3139,8 +3139,8 @@ const fileADataURL = (blob) =>
     lector.readAsDataURL(blob);
   });
 let _imgState = null;
-function editarImagenes(id, imagenes) {
-  _imgState = { id, imgs: (imagenes || []).map((im) => ({ ...im })) };
+function editarImagenes(id, imagenes, archivo) {
+  _imgState = { id, imgs: (imagenes || []).map((im) => ({ ...im })), archivo: archivo || null };
   pintarGestorImagenes();
 }
 async function apiImg(op, body) {
@@ -3184,7 +3184,7 @@ function pintarGestorImagenes() {
     `<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">🖼️ Imágenes (${imgs.length})</h3>
     <p class="muted" style="font-size:12px;margin:0 0 6px">La 1.ª es la PORTADA. Reordena con ↑/↓; ✎ abre el editor (rotar/recortar/corregir perspectiva).</p>
     ${imgs.length ? filas : '<div class="muted">Sin imágenes.</div>'}
-    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px"><div class="row" style="gap:8px"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn" id="imgCam">📷 Cámara</button></div><button class="btn pri" id="imgCerrar">Cerrar</button></div>
+    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn" id="imgCam">📷 Cámara</button>${_imgExtraible() ? '<button class="btn" id="imgExtraer" title="Extraer una página/imagen del propio documento (PDF o EPUB) y añadirla — p. ej. la foto del autor del interior">🖹 Del documento</button>' : ''}</div><button class="btn pri" id="imgCerrar">Cerrar</button></div>
     <input type="file" id="imgAddInput" accept="image/*" style="display:none">
     <input type="file" id="imgCamInput" accept="image/*" capture="environment" style="display:none"></div>`;
   $('#cmpScrim').style.display = 'block';
@@ -3242,6 +3242,144 @@ function pintarGestorImagenes() {
   fi.onchange = () => anadirDe(fi);
   if ($('#imgCam')) $('#imgCam').onclick = () => fc.click();
   if (fc) fc.onchange = () => anadirDe(fc);
+  if ($('#imgExtraer')) $('#imgExtraer').onclick = extraerImagenDocumento;
+}
+
+// ¿El documento tiene un fichero digital del que se pueden extraer imágenes en el navegador? (PDF o EPUB)
+function _imgExtraible() {
+  const a = _imgState && _imgState.archivo;
+  if (!a || !a.url || !a.nombre) return false;
+  return /\.(pdf|epub)$/i.test(a.nombre);
+}
+
+// EXTRAER una imagen del propio documento (PDF → páginas con pdf.js; EPUB → imágenes embebidas con JSZip)
+// y añadirla al carrusel. Pensado para rescatar la foto del autor que suele ir en el interior del libro.
+async function extraerImagenDocumento() {
+  const a = _imgState && _imgState.archivo;
+  if (!a || !a.url) { toast('Este documento no tiene fichero digital', 'warn'); return; }
+  const ext = (a.nombre.split('.').pop() || '').toLowerCase();
+  try {
+    if (ext === 'pdf') return await extraerDePdf(a);
+    if (ext === 'epub') return await extraerDeEpub(a);
+    toast(`Extracción no disponible para .${ext} (por ahora PDF y EPUB)`, 'warn');
+  } catch (e) { toast('No se pudo leer el documento: ' + e.message, 'bad'); }
+}
+
+// Descarga el fichero como Blob (mismo origen /recursos).
+async function _descargarArchivo(url) {
+  const resp = await fetch(encUrl(url));
+  if (!resp.ok) throw new Error('descarga ' + resp.status);
+  return await resp.blob();
+}
+
+// PDF: renderiza miniaturas de todas las páginas (pdf.js) → el usuario marca las que quiera → cada una se
+// re-renderiza a mayor resolución y se añade al carrusel.
+async function extraerDePdf(archivo) {
+  const cont = $('#cmpModal');
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del PDF</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando páginas…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
+  const volver = () => pintarGestorImagenes();
+  $('#exX').onclick = volver; $('#cmpScrim').onclick = cerrarCmp;
+
+  await cargarPdfLib();
+  const lib = window.pdfjsLib;
+  lib.GlobalWorkerOptions.workerSrc = '/vendor/pdf.worker.min.js';
+  const blob = await _descargarArchivo(archivo.url);
+  const pdf = await lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+  const total = pdf.numPages;
+  const MAX = 80; // tope de miniaturas (rendimiento en el Atom/móvil)
+  const n = Math.min(total, MAX);
+  $('#exMsg').textContent = `${total} páginas${total > MAX ? ` (mostrando las primeras ${MAX})` : ''} · toca las que quieras añadir`;
+  const marcadas = new Set();
+  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
+  // Render de una página a canvas al ancho dado.
+  const render = async (num, ancho) => {
+    const pagina = await pdf.getPage(num);
+    const base = pagina.getViewport({ scale: 1 });
+    const vista = pagina.getViewport({ scale: Math.max(0.2, Math.min(3, ancho / base.width)) });
+    const c = document.createElement('canvas');
+    c.width = Math.round(vista.width); c.height = Math.round(vista.height);
+    await pagina.render({ canvasContext: c.getContext('2d'), viewport: vista }).promise;
+    return c;
+  };
+  const grid = $('#exGrid');
+  for (let i = 1; i <= n; i++) {
+    const c = await render(i, 180);
+    const url = c.toDataURL('image/jpeg', 0.7);
+    c.width = c.height = 0;
+    const cel = document.createElement('div');
+    cel.style.cssText = 'position:relative;cursor:pointer';
+    cel.innerHTML = `<img src="${url}" style="width:100%;border-radius:6px;border:2px solid transparent;background:var(--card)"><span style="position:absolute;top:2px;left:4px;font-size:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:0 4px">${i}</span>`;
+    cel.onclick = () => {
+      marcadas.has(i) ? marcadas.delete(i) : marcadas.add(i);
+      cel.firstChild.style.borderColor = marcadas.has(i) ? 'var(--acc)' : 'transparent';
+      actualizarBtn();
+    };
+    grid.appendChild(cel);
+  }
+  $('#exOk').onclick = async () => {
+    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
+    try {
+      for (const num of [...marcadas].sort((x, y) => x - y)) {
+        const c = await render(num, 1600); // alta resolución para la imagen definitiva
+        const b64 = c.toDataURL('image/jpeg', 0.9);
+        c.width = c.height = 0;
+        await apiImg('anadir', { base64: b64 });
+      }
+      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
+    } catch (e) { toast(e.message, 'bad'); }
+    try { pdf.destroy(); } catch (_) {}
+    pintarGestorImagenes();
+  };
+}
+
+// EPUB: extrae las imágenes embebidas (JSZip) → miniaturas → el usuario marca → se añaden al carrusel.
+async function extraerDeEpub(archivo) {
+  const cont = $('#cmpModal');
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del EPUB</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando imágenes…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
+  $('#exX').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
+
+  await cargarEpubLib(); // deja JSZip global (epub.js lo requiere)
+  const JSZip = window.JSZip;
+  if (!JSZip) throw new Error('JSZip no disponible');
+  const blob = await _descargarArchivo(archivo.url);
+  const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+  const entradas = Object.values(zip.files).filter((f) => !f.dir && /\.(jpe?g|png|webp|gif)$/i.test(f.name));
+  if (!entradas.length) { $('#exMsg').textContent = 'Este EPUB no tiene imágenes embebidas.'; return; }
+  $('#exMsg').textContent = `${entradas.length} imágenes · toca las que quieras añadir`;
+  const marcadas = new Map(); // idx → dataURL
+  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
+  const grid = $('#exGrid');
+  const MAX = 120;
+  for (let i = 0; i < Math.min(entradas.length, MAX); i++) {
+    const ent = entradas[i];
+    const b64 = await ent.async('base64');
+    const mime = /\.png$/i.test(ent.name) ? 'image/png' : /\.webp$/i.test(ent.name) ? 'image/webp' : /\.gif$/i.test(ent.name) ? 'image/gif' : 'image/jpeg';
+    const url = `data:${mime};base64,${b64}`;
+    const cel = document.createElement('div');
+    cel.style.cssText = 'position:relative;cursor:pointer';
+    cel.innerHTML = `<img src="${url}" loading="lazy" style="width:100%;height:110px;object-fit:cover;border-radius:6px;border:2px solid transparent;background:var(--card)">`;
+    cel.onclick = () => {
+      if (marcadas.has(i)) marcadas.delete(i); else marcadas.set(i, url);
+      cel.firstChild.style.borderColor = marcadas.has(i) ? 'var(--acc)' : 'transparent';
+      actualizarBtn();
+    };
+    grid.appendChild(cel);
+  }
+  $('#exOk').onclick = async () => {
+    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
+    try {
+      for (const url of marcadas.values()) {
+        // Normaliza a JPG/ancho razonable reutilizando reducirImagen (evita PNG enormes).
+        const file = new File([await (await fetch(url)).blob()], 'img', { type: url.slice(5, url.indexOf(';')) });
+        const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
+        await apiImg('anadir', { base64: b64 });
+      }
+      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
+    } catch (e) { toast(e.message, 'bad'); }
+    pintarGestorImagenes();
+  };
 }
 async function moverImg(i, dir) {
   const { imgs } = _imgState;
@@ -11117,6 +11255,9 @@ async function loadAutores() {
       <label class="muted" style="font-size:12px">Rol
         <select id="autRol"><option value="">todos</option><option value="autor">autor</option><option value="traductor">traductor</option><option value="ilustrador">ilustrador</option><option value="prologuista">prologuista</option><option value="anotador">anotador</option><option value="editor">editor</option><option value="compilador">compilador</option></select>
       </label>
+      <label class="muted" style="font-size:12px">Mín. obras
+        <select id="autMin"><option value="0">todas</option><option value="1">≥ 1</option><option value="2">≥ 2</option><option value="3">≥ 3</option><option value="5">≥ 5</option><option value="10">≥ 10</option></select>
+      </label>
       <label class="muted" style="font-size:12px">Orden
         <select id="autOrden"><option value="libros">nº de obras</option><option value="nombre">nombre</option></select>
       </label>
@@ -11129,7 +11270,7 @@ async function loadAutores() {
       _autoresBuscarTimer = setTimeout(autoresBuscar, 300);
     };
   // Los selectores de filtro/orden/rol recargan al instante.
-  ['#autFotoFiltro', '#autBioFiltro', '#autRol', '#autOrden'].forEach((sel) => {
+  ['#autFotoFiltro', '#autBioFiltro', '#autRol', '#autMin', '#autOrden'].forEach((sel) => {
     const el = $(sel);
     if (el) el.onchange = autoresBuscar;
   });
@@ -11145,6 +11286,7 @@ async function autoresBuscar() {
     foto: ($('#autFotoFiltro') && $('#autFotoFiltro').value) || '',
     bio: ($('#autBioFiltro') && $('#autBioFiltro').value) || '',
     rol: ($('#autRol') && $('#autRol').value) || '',
+    minLibros: ($('#autMin') && $('#autMin').value) || '0',
     orden: ($('#autOrden') && $('#autOrden').value) || 'libros',
   });
   try {
@@ -11233,20 +11375,37 @@ function autoresBarraCombinar() {
   const modoBtn = admin
     ? `<button class="btn${_autoresSelModo ? ' pri' : ''}" id="autModo" title="Modo selección: tocar una tarjeta la marca (para combinar). Modo previsualización: tocar abre la ficha. Doble clic / pulsación larga en una tarjeta también conmuta. Lo marcado se conserva.">${_autoresSelModo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`
     : '';
-  const acciones =
-    n >= 2
-      ? ` <button class="btn pri admin-only" id="autCombinar">🔗 Combinar ${n}…</button> <button class="btn" id="autSelClear">✕ deseleccionar</button>`
-      : n === 1
-        ? ` <span class="muted" style="font-size:12px">1 marcado (marca 2+ para combinar)</span> <button class="btn" id="autSelClear">✕</button>`
-        : '';
+  let acciones = '';
+  if (n >= 1) {
+    const combinar = n >= 2 ? `<button class="btn pri admin-only" id="autCombinar">🔗 Combinar ${n}…</button> ` : '';
+    const marca1 = n === 1 ? '<span class="muted" style="font-size:12px">1 marcado (marca 2+ para combinar)</span> ' : '';
+    const elim = admin ? `<button class="btn admin-only" id="autEliminar" title="Borra los marcados que NO figuren en ningún documento (ni como autor ni como contribuyente); los que tengan obras se conservan intactos">🗑 Eliminar ${n}</button> ` : '';
+    acciones = ` ${combinar}${marca1}${elim}<button class="btn" id="autSelClear">✕ deseleccionar</button>`;
+  }
   bar.innerHTML = modoBtn + acciones;
   if ($('#autModo')) $('#autModo').onclick = () => alternarAutoresModo();
   if ($('#autCombinar')) $('#autCombinar').onclick = autorCombinar;
+  if ($('#autEliminar')) $('#autEliminar').onclick = autoresEliminarSel;
   if ($('#autSelClear'))
     $('#autSelClear').onclick = () => {
       _autoresSel.clear();
       autoresPintar();
     };
+}
+
+// Elimina los autores MARCADOS, pero solo los que no figuran en ningún documento (salvaguarda en el server).
+async function autoresEliminarSel() {
+  const ids = [..._autoresSel];
+  if (!ids.length) return;
+  const nombres = ids.map((id) => (_autores.find((a) => a._id === id) || {}).nombre).filter(Boolean);
+  if (!confirm(`¿Eliminar ${ids.length} autor(es)?\n\nSolo se borran los que NO figuren en ningún documento (ni autor ni contribuyente); los que tengan obras se CONSERVAN.\n\n${nombres.slice(0, 10).join('\n')}${nombres.length > 10 ? '\n…' : ''}`)) return;
+  try {
+    const r = await api('/autores/eliminar', { method: 'POST', body: JSON.stringify({ ids }) });
+    if (!r.ok) { toast(r.motivo, 'bad'); return; }
+    toast(`🗑 ${r.borrados} borrado(s)${r.conservados ? ` · ${r.conservados} conservado(s) (tienen obras)` : ''}`);
+    _autoresSel.clear();
+    autoresBuscar();
+  } catch (e) { toast(e.message, 'bad'); }
 }
 
 // Ficha de autor (modal): foto, datos (editables si admin) y sus libros (clic → ficha del libro).
@@ -11358,17 +11517,25 @@ async function autorFicha(id) {
   // Resumen de roles que desempeña esta persona (autor/traductor/…).
   // Botones de la columna de la foto (arriba): admin ve Foto/Autocompletar + Guardar/Cerrar DUPLICADOS aquí
   // (cómodos sin bajar hasta el pie); el invitado solo Cerrar.
+  const bm = 'padding:4px 9px;font-size:12px'; // botones compactos: menos distancia con la lista de libros
   const botonesFoto = admin
-    ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
-         <button class="btn" id="autFoto">📷 Foto</button>
-         <button class="btn" id="autEnriquecer" title="Rellena foto, biografía, seudónimos y fechas desde OpenLibrary, Wikidata y Wikipedia (sin IA)">✨ Autocompletar (web)</button>
-         <button class="btn" id="autFusionar" title="Fundir ESTE autor en otro que elijas: sus libros pasan al otro y este se borra">🔀 Fusionar este en…</button>
-         ${libros.length ? `<button class="btn" id="autQuitarTodos" title="Quitar este autor de TODOS sus libros (quedan sin este autor); si se queda sin obras, se borra">🚫 Quitar de todos</button>` : ''}
-         <button class="btn pri" id="autGuardarTop">💾 Guardar</button>
-         <button class="btn" id="autCerrarTop">Cerrar</button>
+    ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">
+         <div class="row" style="gap:4px;justify-content:center">
+           <button class="btn" id="autFoto" style="${bm}" title="Subir una foto desde archivo">📷 Foto</button>
+           ${libros.length ? `<button class="btn" id="autFotoObra" style="${bm}" title="Usar como foto una imagen del interior/portada de uno de sus libros">🖼️ De obra</button>` : ''}
+         </div>
+         <button class="btn" id="autEnriquecer" style="${bm}" title="Rellena foto, biografía, seudónimos y fechas desde OpenLibrary, Wikidata y Wikipedia (sin IA)">✨ Autocompletar</button>
+         <button class="btn" id="autFusionar" style="${bm}" title="Fundir ESTE autor en otro que elijas: sus libros pasan al otro y este se borra">🔀 Fusionar en…</button>
+         ${libros.length
+           ? `<button class="btn" id="autQuitarTodos" style="${bm}" title="Quitar este autor de TODOS sus libros (quedan sin este autor); si se queda sin obras, se borra">🚫 Quitar de todos</button>`
+           : `<button class="btn bad" id="autEliminarUno" style="${bm}" title="Eliminar este autor (no tiene ninguna obra asociada)">🗑 Eliminar autor</button>`}
+         <div class="row" style="gap:4px;justify-content:center">
+           <button class="btn pri" id="autGuardarTop" style="${bm}">💾 Guardar</button>
+           <button class="btn" id="autCerrarTop" style="${bm}">Cerrar</button>
+         </div>
          <input type="file" id="autFotoFile" accept="image/*" style="display:none">
        </div>`
-    : `<div style="margin-top:6px"><button class="btn" id="autCerrarTop">Cerrar</button></div>`;
+    : `<div style="margin-top:6px"><button class="btn" id="autCerrarTop" style="${bm}">Cerrar</button></div>`;
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:660px;max-height:92vh;overflow:auto">
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div style="text-align:center">
@@ -11487,6 +11654,17 @@ async function autorFicha(id) {
   if (admin) {
     if ($('#autFoto')) $('#autFoto').onclick = () => $('#autFotoFile').click();
     if ($('#autFotoFile')) $('#autFotoFile').onchange = () => autorSubirFoto(id, $('#autFotoFile'));
+    if ($('#autFotoObra')) $('#autFotoObra').onclick = () => autorFotoDeObras(id);
+    if ($('#autEliminarUno')) $('#autEliminarUno').onclick = async () => {
+      if (!confirm(`¿Eliminar el autor «${nombreAutor}»?\n\nNo tiene obras asociadas; se borrará su ficha.`)) return;
+      try {
+        const rr = await api('/autores/eliminar', { method: 'POST', body: JSON.stringify({ ids: [id] }) });
+        if (!rr.ok) { toast(rr.motivo, 'bad'); return; }
+        cerrarCmp();
+        toast(rr.borrados ? '🗑 Autor eliminado' : 'Conservado (tiene obras)');
+        autoresBuscar();
+      } catch (e) { toast(e.message, 'bad'); }
+    };
     if ($('#autEnriquecer')) $('#autEnriquecer').onclick = () => autorEnriquecer(id);
     if ($('#autGuardar')) $('#autGuardar').onclick = () => autorGuardar(id);
     if ($('#autGuardarTop')) $('#autGuardarTop').onclick = () => autorGuardar(id);
@@ -11609,6 +11787,46 @@ async function autorSubirFoto(id, inp) {
   }
   toast('📷 Foto guardada');
   autorFicha(id); // recargar la ficha para mostrar la nueva foto
+}
+
+// Elegir la foto del autor de entre las imágenes (portada + carrusel) de sus obras — p. ej. una foto suya
+// del interior del libro (ver «Extraer del documento» en la ficha del libro). Toca una imagen → se fija.
+async function autorFotoDeObras(id) {
+  let r;
+  try { r = await api('/autores/' + encodeURIComponent(id) + '/imagenes-obras'); }
+  catch (e) { toast(e.message, 'bad'); return; }
+  const obras = (r && r.obras) || [];
+  if (!obras.length) { toast('Sus obras no tienen imágenes', 'warn'); return; }
+  const bloques = obras.map((o) => `
+    <div style="margin-bottom:10px">
+      <div class="muted" style="font-size:11px;margin-bottom:4px">${esc(recortar(o.titulo || '—', 60))}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px">
+        ${o.imagenes.map((u) => `<img data-foto="${esc(u)}" src="${esc(encUrl(u))}" loading="lazy" style="width:100%;height:96px;object-fit:cover;border-radius:6px;background:var(--card);cursor:pointer;border:2px solid transparent">`).join('')}
+      </div>
+    </div>`).join('');
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:600px;max-height:88vh;overflow:auto">
+    <h3 style="margin-top:0">🖼️ Elegir foto de una obra</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">Toca una imagen (portada o interior) de sus libros para usarla como foto del autor.</div>
+    ${bloques}
+    <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="afoX">Volver a la ficha</button></div>
+    <div id="afoMsg" class="muted" style="font-size:12px;margin-top:6px"></div>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#afoX').onclick = () => autorFicha(id);
+  $('#cmpScrim').onclick = cerrarCmp;
+  $$('#cmpModal [data-foto]').forEach((im) => (im.onclick = async () => {
+    const msg = $('#afoMsg'); if (msg) msg.textContent = 'Guardando foto…';
+    try {
+      const resp = await fetch(encUrl(im.dataset.foto));
+      const blob = await resp.blob();
+      const file = new File([blob], 'foto.jpg', { type: blob.type || 'image/jpeg' });
+      const base64 = await fileADataURL(await reducirImagen(file));
+      await api('/autores/' + encodeURIComponent(id) + '/foto', { method: 'POST', body: JSON.stringify({ base64 }) });
+      toast('📷 Foto guardada');
+      autorFicha(id);
+    } catch (e) { if (msg) msg.textContent = 'Error: ' + e.message; }
+  }));
 }
 
 // Autocompletar (web): rellena huecos (foto/biografía/seudónimos/fechas) desde OpenLibrary + Wikidata +
