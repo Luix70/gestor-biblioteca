@@ -389,6 +389,39 @@ de ficheros clasificado por CDU.
     (un cambio de CDU aquí es de metadatos; cada miembro conserva el suyo).
     (POST /colecciones/:id/editar · POST /obras/:id/editar. editar-grupos.js.)
 
+  ── COLECCIONES TRANSMEDIA (estructura de carpetas = una colección) ──────────
+    Una carpeta con material heterogéneo (p. ej. «Oxford Bookworms Library»: PDFs de
+    lectura + tests/ejercicios/soluciones + AUDIOS + portadas, en «Stage N/…») se cataloga
+    como UNA colección tipo:'transmedia' cuya estructura de disco se CONSERVA VERBATIM,
+    colgando de UNA sola rama CDU (…/<cdu>/transmedia/<colección>/). NO se reorganiza nada.
+    Principio: AÑADIR siempre, BORRAR nunca, VERIFICAR la copia íntegra ANTES de reciclar
+    el origen (src/utils/transmedia.js · ingestarTransmedia; copiarVerificado compara nº
+    de ficheros y bytes; si el origen aún se copiaba, falla sin tocar el origen y reintenta).
+    · DETECCIÓN (vigilante): una carpeta con AUDIO en su árbol (o un marcador «.transmedia»)
+      = transmedia. El vigilante ESPERA a que la carpeta esté ESTABLE (nº ficheros+bytes sin
+      cambios durante CARPETA_ESTABLE_MS) antes de operar — una copia de 19 GB tarda; una vez
+      vista como transmedia lo sigue siendo (pegajoso), no cae a la vía normal.
+    · MIEMBROS PLANOS (sin IA, 100% estructural): un documento por PDF, con nivel (Stage),
+      unidad (el libro) y rol_material (lectura / test / ejercicios / solucionario / glosario
+      / guia). Autor/título salen del nombre de la carpeta de unidad («S0 Autor - Título»).
+      Dedup por hash: PDFs de igual hash → UN doc (los ficheros permanecen, no se borra ninguno).
+    · AUDIOLIBRO = unidad con audio y SIN PDF de lectura → doc naturaleza:'audiolibro',
+      formatos:['audio']. Una lectura CON audio se queda como libro + su playlist. Los audios
+      (audios[]) se reproducen desde la ficha (visor PDF + playlist si además hay PDF).
+    · PORTADAS: la lectura usa la cover.jpg de su unidad; los materiales/guías reciben su
+      PROPIA 1ª página rasterizada (poppler) en «<colección>/.portadas/» (oculta) → ni
+      portadas repetidas ni docs con icono genérico.
+    · ruta_fija:true en la colección y en cada miembro (+ marcador «.ruta_fija» en la raíz):
+      Integridad/Conformador NO podan, mueven ni deduplican ese subárbol.
+    · FICHA DE COLECCIÓN: barra de filtros por NIVEL (Stage) y por MATERIAL (rol), con
+      contador «N de total»; filtra en cliente (muestra/oculta) sin recargar.
+    · CDU e IDIOMA se DEDUCEN (editables luego en «✏️ Editar datos»).
+    · CLI: node scripts/ingestar-transmedia.js <carpeta>           (dry-run: imprime el plan)
+           node scripts/ingestar-transmedia.js <carpeta> --ejecutar (cataloga)
+      Reparar una colección ya catalogada antes de estos fixes (fecha_ingreso ausente →
+      no salían en el Catálogo; portadas repetidas; sin indexar en la Búsqueda):
+           node scripts/reparar-transmedia.js [--ejecutar]          (dry-run por defecto)
+
   ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
     El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos
     o del nombre — PREVALECE) o AUTOMÁTICO (asignado por el sistema — cede). Se distingue
@@ -1239,6 +1272,13 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
                             el formato digital, recorta las imágenes a 6 (5+1; el resto a la
                             Papelera), restaura el fichero desde la Papelera si faltaba y
                             corrige la BD. Dry-run por defecto; lista los irrecuperables.
+    ingestar-transmedia.js  cataloga una carpeta TRANSMEDIA (estructura verbatim = 1
+                            colección; ver sección «COLECCIONES TRANSMEDIA»). Dry-run
+                            (imprime el plan) por defecto; aplica con --ejecutar.
+    reparar-transmedia.js   arregla colecciones transmedia ya catalogadas: pone
+                            fecha_ingreso (para que salgan en el Catálogo), da portada
+                            propia a materiales/guías y (re)indexa en la Búsqueda. Solo
+                            aditivo. Dry-run por defecto (--ejecutar).
     recolector-cdu.js       recolector de basura del árbol CDU (1 doc ↔ 1 carpeta).
                             [Ya incluido en integridad.js.]
 

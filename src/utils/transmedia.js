@@ -14,19 +14,45 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { ObjectId } from 'mongodb';
 import { conectarDB } from '../database.js';
 import { DIR_CDU, MARCA_RUTA_FIJA } from '../mantenimiento/util-mantenimiento.js';
 import { arbolCDU } from './cdu-arbol.js';
 import { resolverCabecera } from './colecciones.js';
 import { calcularHashArchivo } from './hash-archivo.js';
+import { indexarDoc } from './indice-busqueda.js';
 import { reciclarCarpeta } from './papelera.js';
+import { rasterizarPaginas } from './rasterizar-pdf.js';
 import { resolverPersona } from './resolver-persona.js';
 
 const EXT_AUDIO = ['.mp3', '.m4a', '.m4b', '.ogg', '.oga', '.opus', '.wav', '.aac', '.flac', '.wma'];
+// Subcarpeta OCULTA con las portadas DERIVADAS (1ª página rasterizada). El prefijo «.» hace que `ignorar`
+// (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
+// la estructura visible; queda dentro del subárbol `ruta_fija`, así que Integridad tampoco la poda.
+const DIR_PORTADAS = '.portadas';
 const ext = (n) => path.extname(n).toLowerCase();
 const esPdf = (n) => ext(n) === '.pdf';
 const esAudio = (n) => EXT_AUDIO.includes(ext(n));
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#');
+
+/**
+ * Renderiza la 1ª página de un PDF como portada JPEG en `<colección>/.portadas/<id>.jpg` y devuelve su ruta
+ * web (`/recursos/…`) o null. BEST-EFFORT: si no hay pdftoppm o el PDF es ilegible, devuelve null sin romper
+ * la ingesta (el doc se queda con el icono genérico, recuperable luego). Da portada PROPIA a materiales/guías
+ * (evita heredar —repetida— la `cover.jpg` del lector) y a los que no tienen `cover.jpg`.
+ */
+export async function renderizarPortadaMiembro(absPdf, carpetaColeccion, webColeccion, id) {
+    try {
+        const [primera] = await rasterizarPaginas(absPdf, { numPaginas: 1 });
+        if (!primera?.buffer) return null;
+        const dir = path.join(carpetaColeccion, DIR_PORTADAS);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(path.join(dir, `${id}.jpg`), primera.buffer);
+        return `${webColeccion}/${DIR_PORTADAS}/${id}.jpg`;
+    } catch {
+        return null;
+    }
+}
 
 // Segmentos web (/recursos/...) de una ruta absoluta dentro del árbol CDU.
 const webDe = (abs) => '/recursos/' + path.relative(DIR_CDU, abs).split(path.sep).join('/');
@@ -298,7 +324,9 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
     const baseDoc = (extra) => ({
         cdu: plan.cdu, idioma: plan.idioma, ubicacion: { ambito: 'Sin asignar', estanteria: 'Sin asignar' },
         coleccion: coleccionId, coleccion_nombre: plan.nombreColeccion, ruta_fija: true,
-        estado_verificacion: 'completado', fecha_creacion: new Date(), ...extra,
+        // `fecha_ingreso` es el campo por el que el Catálogo ordena («reciente»/«antiguo») y filtra por día;
+        // sin él, los documentos caen al final (nulos al final) y NO se ven al navegar → hay que ponerlo.
+        estado_verificacion: 'completado', fecha_ingreso: new Date(), fecha_creacion: new Date(), ...extra,
     });
 
     for (const m of plan.miembros) {
@@ -308,30 +336,42 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         if (hash) hashesVistos.add(hash);
         const autores = await resolverAutores(m.autores);
         const audios = (m.audios_rel || []).map((r, i) => ({ ruta: webDeRel(r), titulo: tituloDeArchivo(path.basename(r)), orden: i + 1 }));
+        // El _id se pre-genera para nombrar su portada derivada (`.portadas/<id>.jpg`). Portada: la LECTURA
+        // usa la `cover.jpg` de su unidad; los materiales/guías (o una lectura sin cover) reciben su PROPIA
+        // 1ª página rasterizada → ni portadas repetidas ni docs con icono genérico.
+        const _id = new ObjectId();
+        const esLectura = m.rol_material === 'lectura';
+        let portada = esLectura ? webDeRel(m.portada_rel) : null;
+        if (!portada) portada = await renderizarPortadaMiembro(abs, carpetaColeccion, webColeccion, _id);
         const doc = baseDoc({
+            _id,
             titulo: m.titulo, tipo_recurso: 'libro', formatos: ['pdf'],
             autores: autores.length ? autores : undefined,
             nombre_archivo: m.nombre_archivo, ruta_base: carpetaWebDeRel(m.rel),
             nivel: m.nivel || undefined, unidad: m.unidad || undefined, rol_material: m.rol_material,
-            portada: webDeRel(m.portada_rel) || undefined,
+            portada: portada || undefined,
             audios: audios.length ? audios : undefined,   // una lectura con audio se deja como libro (+ audios)
             hash_contenido: hash || undefined,
         });
         await bib.insertOne(limpiarUndefined(doc));
+        await indexarDoc(db, _id).catch(() => {});   // índice FTS: para que salga en la Búsqueda de texto
         insertados++;
     }
 
     for (const a of plan.audiolibros) {
         const autores = await resolverAutores(a.autores);
+        const _id = new ObjectId();
         const doc = baseDoc({
+            _id,
             titulo: a.titulo, tipo_recurso: 'libro', naturaleza: 'audiolibro', formatos: ['audio'],
             autores: autores.length ? autores : undefined,
             ruta_base: webDeRel(a.carpeta_rel), rol_material: 'audiolibro',
             nivel: a.nivel || undefined, unidad: a.unidad || undefined,
-            portada: webDeRel(a.portada_rel) || undefined,
+            portada: webDeRel(a.portada_rel) || undefined,   // audio-only: su cover.jpg si la hay (no hay PDF que rasterizar)
             audios: a.audios_rel.map((r, i) => ({ ruta: webDeRel(r), titulo: tituloDeArchivo(path.basename(r)), orden: i + 1 })),
         });
         await bib.insertOne(limpiarUndefined(doc));
+        await indexarDoc(db, _id).catch(() => {});
         insertados++;
     }
 

@@ -825,7 +825,9 @@ export function rutasPanel() {
             const esRevista = col.tipo === 'revista';
             const matchMiembros = { coleccion: col._id };
             if (await ocultarNsfw(req.usuario?.rol)) matchMiembros.nsfw = { $ne: true };
-            const proy = { ...PROY_VOL, clave_numero: 1, 'año_edicion': 1, mes_publicacion: 1, numero_issue: 1, coleccion_numero: 1, coleccion_numero_auto: 1 };
+            const proy = { ...PROY_VOL, clave_numero: 1, 'año_edicion': 1, mes_publicacion: 1, numero_issue: 1, coleccion_numero: 1, coleccion_numero_auto: 1,
+                // Transmedia: para agrupar/filtrar los miembros por nivel (Stage) y rol del material.
+                nivel: 1, rol_material: 1, unidad: 1, naturaleza: 1 };
             // Revista → por clave/fecha. Libro → por Nº de colección NUMÉRICO (coleccion_numero es string, así
             // que $convert a double; sin número al final) para que la ficha de la serie salga 1,2,…,11 (no 1,11,2).
             const miembros = esRevista
@@ -1013,6 +1015,7 @@ export function rutasPanel() {
                 cdu_desc: cdesc, clasificaciones, obra,
                 archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
                 imagenes: doc.imagenes || [], portada: doc.portada || null,
+                audios: doc.audios || [],   // audiolibro / lectura con audio: playlist para el reproductor
             });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

@@ -1531,7 +1531,10 @@ function miembroCard(d, numeroHTML) {
     .slice(0, 3)
     .map((f) => `<span class="fmt">${esc(f)}</span>`)
     .join('');
-  return `<div class="vol" data-doc="${esc(d._id)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${numeroHTML || ''} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo || '—')}</div></div></div>`;
+  // data-nivel/data-rol: los usa el filtro por CSS (mostrar/ocultar) de las colecciones transmedia, sin
+  // re-renderizar (así no se pierde el cableado de selección). Vacíos e inocuos en revistas/series.
+  const rol = d.rol_material || (d.naturaleza === 'audiolibro' ? 'audiolibro' : '');
+  return `<div class="vol" data-doc="${esc(d._id)}" data-nivel="${esc(d.nivel || '')}" data-rol="${esc(rol)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${numeroHTML || ''} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo || '—')}</div></div></div>`;
 }
 
 let _colR = null; // última colección pintada (para el editor «Numerar»)
@@ -1539,21 +1542,23 @@ function pintarColeccion(r) {
   _colR = r;
   const c = r.coleccion,
     desc = c.cdu_desc,
-    esRev = c.tipo === 'revista';
-  // «Numerar» solo tiene sentido en SERIES DE LIBROS (las revistas se ordenan por fecha/clave).
+    esRev = c.tipo === 'revista',
+    esTrans = c.tipo === 'transmedia';
+  // «Numerar» solo tiene sentido en SERIES DE LIBROS (las revistas se ordenan por fecha/clave; la transmedia
+  // conserva su estructura y no se numera).
   const numBtn =
-    !esRev && ROL === 'admin'
+    !esRev && !esTrans && ROL === 'admin'
       ? `<button class="btn" id="colNumerar" title="Asignar o corregir el nº de cada libro dentro de la colección">🔢 Numerar</button>
          <button class="btn" id="colLomos" title="Foto de los lomos → la IA lee título y nº de cada uno y renumera la colección (y adjunta el recorte del lomo)">📷 Numerar por lomos</button>`
       : '';
-  const tipoLabel = esRev ? '📰 Revista (cabecera)' : '📚 Serie de libros';
+  const tipoLabel = esRev ? '📰 Revista (cabecera)' : esTrans ? '🎬 Colección transmedia' : '📚 Serie de libros';
   const rango = rangoFechas(c.fecha_inicio, c.fecha_fin);
   const sub = [c.issn ? 'ISSN ' + c.issn : '', c.editorial, rango].filter(Boolean).map(esc).join(' · ') || '—';
   const editBtn = ROL === 'admin' ? '<button class="btn admin-only" id="colEditar" style="margin-top:8px;padding:4px 10px;font-size:12px" title="Editar nombre, presentación, ISSN, editorial, CDU y fechas de la colección">✏️ Editar datos</button>' : '';
   const head = `<div class="crumb"><a onclick="go('colecciones')">Colecciones</a> › <span>${esc(recortar(c.nombre, 50))}</span></div>
     <div class="det-head"><button class="det-back" title="Volver" onclick="volverAtras()">←</button>
       <div class="det-title"><h2>${esc(c.nombre || '(sin título)')}</h2><div class="sub">${tipoLabel} · ${sub}</div>
-        <div style="margin-top:8px"><span class="muted">${r.miembros.length} ${esRev ? 'número(s)' : 'libro(s)'}</span> ${c.revision_requerida ? '<span class="tag bad">revisar</span>' : ''}</div>
+        <div style="margin-top:8px"><span class="muted">${r.miembros.length} ${esRev ? 'número(s)' : esTrans ? 'documento(s)' : 'libro(s)'}</span> ${c.revision_requerida ? '<span class="tag bad">revisar</span>' : ''}</div>
         <div style="margin-top:8px">${ratingBar('colecciones', c._id, c.valoracion, c.nsfw)}</div>
         ${c.cdu ? `<div class="mono muted" style="margin-top:8px">CDU ${esc(c.cdu)}${desc && desc.titulo_es ? ' · ' + esc(desc.titulo_es) : ''}</div>` : ''}
         ${c.descripcion ? `<p class="muted" style="font-size:12px;margin-top:6px">${esc(c.descripcion)}</p>` : ''}
@@ -1561,6 +1566,13 @@ function pintarColeccion(r) {
       </div></div>`;
   // Nº de cada miembro. En LIBROS y admin, es un botón: toca = renumerar ese volumen directo (mini-modal).
   const numeroChip = (d) => {
+    if (esTrans) {
+      // Transmedia: en vez de nº, se muestra el nivel (Stage) y el rol del material (el rol no-lectura ya
+      // va en el título, pero un chip lo hace escaneable de un vistazo).
+      const niv = d.nivel ? `<span class="tag">${esc(d.nivel)}</span>` : '';
+      const rolT = d.naturaleza === 'audiolibro' ? '🔊 audio' : (d.rol_material && d.rol_material !== 'lectura' ? d.rol_material : '');
+      return niv + (rolT ? ` <span class="tag">${esc(rolT)}</span>` : '');
+    }
     if (esRev) return esc(d.clave_numero || (d.año_edicion ? String(d.año_edicion) : '') || 'nº ?');
     const lbl = d.coleccion_numero ? 'nº ' + d.coleccion_numero : 'nº —';
     return ROL === 'admin'
@@ -1569,10 +1581,53 @@ function pintarColeccion(r) {
   };
   const cards = r.miembros.length
     ? r.miembros.map((d) => miembroCard(d, numeroChip(d))).join('')
-    : `<div class="empty">Sin ${esRev ? 'números' : 'libros'} registrados</div>`;
+    : `<div class="empty">Sin ${esRev ? 'números' : esTrans ? 'documentos' : 'libros'} registrados</div>`;
+  // Barra de filtros SOLO en transmedia: por nivel (Stage) y por rol del material. Filtra por CSS
+  // (mostrar/ocultar tarjetas) sin re-renderizar → no rompe la selección ni recarga imágenes.
+  const rolDe = (d) => d.rol_material || (d.naturaleza === 'audiolibro' ? 'audiolibro' : '');
+  const niveles = [...new Set(r.miembros.map((m) => m.nivel).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+  const ORDEN_ROL = ['lectura', 'ejercicios', 'test', 'solucionario', 'glosario', 'guia', 'audiolibro'];
+  const roles = ORDEN_ROL.filter((rol) => r.miembros.some((m) => rolDe(m) === rol));
+  const chipf = (val, txt) => `<button class="btn filtChip" data-val="${esc(val)}" style="padding:3px 10px;font-size:12px">${esc(txt)}</button>`;
+  const filtroBar = esTrans
+    ? `<div class="row filtRow" data-grupo="nivel" style="flex-wrap:wrap;gap:6px;margin-bottom:6px">
+         <span class="muted" style="align-self:center;font-size:12px">Nivel:</span>${chipf('', 'Todos')}${niveles.map((n) => chipf(n, n)).join('')}
+       </div>
+       <div class="row filtRow" data-grupo="rol" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
+         <span class="muted" style="align-self:center;font-size:12px">Material:</span>${chipf('', 'Todos')}${roles.map((x) => chipf(x, x)).join('')}
+       </div>`
+    : '';
+  const tituloGrid = esRev ? 'Números' : esTrans ? 'Documentos' : 'Libros';
   $('#p-detalle').innerHTML =
     head +
-    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${esRev ? 'Números' : 'Libros'}</h3>${numBtn}</div><div class="vol-grid" style="margin-top:10px">${cards}</div></div>`;
+    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${tituloGrid} ${esTrans ? '<span id="colCount" class="muted" style="font-size:13px;font-weight:400"></span>' : ''}</h3>${numBtn}</div>${filtroBar}<div class="vol-grid" id="colGrid" style="margin-top:10px">${cards}</div></div>`;
+  // Filtro transmedia (cliente): marca el chip activo de su grupo y muestra/oculta las tarjetas que casan
+  // con la combinación nivel+rol seleccionada. Un contador refleja «N de total».
+  if (esTrans) {
+    const sel = { nivel: '', rol: '' };
+    const aplicar = () => {
+      let visibles = 0;
+      $$('#colGrid .vol').forEach((v) => {
+        const ok = (!sel.nivel || v.dataset.nivel === sel.nivel) && (!sel.rol || v.dataset.rol === sel.rol);
+        v.style.display = ok ? '' : 'none';
+        if (ok) visibles++;
+      });
+      if ($('#colCount')) $('#colCount').textContent = `${visibles} de ${r.miembros.length}`;
+    };
+    $$('#p-detalle .filtRow').forEach((row) => {
+      const grupo = row.dataset.grupo;
+      row.querySelectorAll('.filtChip').forEach((btn) => (btn.onclick = () => {
+        sel[grupo] = btn.dataset.val;
+        row.querySelectorAll('.filtChip').forEach((b) => b.classList.toggle('active', b === btn));
+        aplicar();
+      }));
+      // Deja marcado «Todos» por defecto.
+      const todos = row.querySelector('.filtChip');
+      if (todos) todos.classList.add('active');
+    });
+    aplicar();
+  }
   // «Mostrar en Catálogo» de la selección → orden por Nº de colección (numérico), salvo en revistas.
   montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}`, orden: esRev ? undefined : 'coleccion' });
   attachRating('#p-detalle');

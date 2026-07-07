@@ -248,6 +248,13 @@ nav .soon {
   color: #04231b;
   font-weight: 600;
 }
+/* Chip de filtro activo (colección transmedia: nivel / material). */
+.filtChip.active {
+  background: linear-gradient(135deg, var(--acc), var(--acc2));
+  border-color: transparent;
+  color: #04231b;
+  font-weight: 600;
+}
 .btn.pri:hover {
   filter: brightness(1.08);
 }
