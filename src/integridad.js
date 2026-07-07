@@ -31,6 +31,10 @@ const DIR_CUARENTENA = dir('PATH_CUARENTENA', 'Cuarentena');
 
 const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
 const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
+// Marcador de ÁRBOL PRESERVADO (transmedia/audiolibro): un fichero .ruta_fija en la raíz de un árbol
+// protege TODO su subárbol — Integridad no lo poda, ni lo recicla como huérfano, ni lo reubica (estructura
+// intacta, política «borrar nunca»). Los documentos de dentro llevan además `ruta_fija:true`.
+const MARCA_RUTA_FIJA = '.ruta_fija';
 const ignorar = (n) => n.startsWith('@') || n.startsWith('.') || n.startsWith('#');
 const ext = (n) => path.extname(n).toLowerCase();
 const existe = (p) => fs.access(p).then(() => true).catch(() => false);
@@ -67,7 +71,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     prog('cargando');
     const db = await conectarDB();
     const col = db.collection('biblioteca');
-    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1 } }).toArray();
+    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1 } }).toArray();
     const rutasWeb = new Set(docs.map(d => d.ruta_base).filter(Boolean));
     const porId = new Map(docs.map(d => [String(d._id), d]));
 
@@ -104,6 +108,10 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     async function recorrer(d) {
         if (++_carp % 50 === 0) prog('recorrido-arbol', { carpetas: _carp });
         let ents; try { ents = await fs.readdir(d, { withFileTypes: true }); } catch { return false; }
+        // ÁRBOL PRESERVADO: el marcador .ruta_fija protege TODO el subárbol. Se cuenta como "con contenido"
+        // (para que el padre no sea rama muerta) y NO se desciende → no se poda/recicla nada de dentro
+        // (Audio/, Activities/, portadas…). (ignorar() filtra los «.», por eso se mira sobre las entradas crudas.)
+        if (ents.some(e => e.isFile() && e.name === MARCA_RUTA_FIJA)) return true;
         const files = ents.filter(e => e.isFile() && !ignorar(e.name)).map(e => e.name);
         const subdirs = ents.filter(e => e.isDirectory() && !ignorar(e.name));
         const tieneDoc = files.some(n => EXT_DOC.includes(ext(n)));
@@ -142,7 +150,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     //     distintos y separarlos automáticamente sin riesgo no es trivial. ──
     const porRuta = new Map();
     for (const d of docs) {
-        if (!d.ruta_base) continue;
+        if (!d.ruta_base || d.ruta_fija) continue; // transmedia: varios miembros comparten carpeta A PROPÓSITO
         if (!porRuta.has(d.ruta_base)) porRuta.set(d.ruta_base, []);
         porRuta.get(d.ruta_base).push(d);
     }
@@ -156,7 +164,9 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     // ── C. Duplicados exactos por hash ──
     prog('duplicados-hash');
     const hashDups = await col.aggregate([
-        { $match: { hash_contenido: { $exists: true, $ne: null } } },
+        // Se EXCLUYEN los árboles preservados (ruta_fija): en transmedia, ficheros de igual hash conviven a
+        // propósito y NUNCA se reciclan; ni se diagnostican como duplicados.
+        { $match: { hash_contenido: { $exists: true, $ne: null }, ruta_fija: { $ne: true } } },
         { $group: { _id: '$hash_contenido', n: { $sum: 1 }, ids: { $push: '$_id' } } },
         { $match: { n: { $gt: 1 } } },
     ]).toArray();
@@ -200,7 +210,9 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     let hashEliminados = 0;
     for (const g of hashDups) {
         const grupo = g.ids.map(id => porId.get(String(id))).filter(Boolean);
-        if (grupo.length < 2 || grupo.some(d => d.obra)) continue; // tomos de obra: no tocar
+        // No tocar: tomos de obra (identidad = obra+nº) NI árboles preservados (transmedia: dos PDF de igual
+        // hash → un doc, pero AMBOS ficheros permanecen; el dedup no debe reciclar ninguno).
+        if (grupo.length < 2 || grupo.some(d => d.obra || d.ruta_fija)) continue;
         grupo.sort((a, b) => puntuaDoc(b) - puntuaDoc(a));
         const [, ...perdedores] = grupo;
         for (const p of perdedores) {

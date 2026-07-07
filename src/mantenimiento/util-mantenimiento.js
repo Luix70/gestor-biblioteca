@@ -17,6 +17,10 @@ export const DIR_CDU = (() => {
 
 // Extensiones del archivo "original" del recurso (no las imágenes/sidecars que generamos).
 export const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
+// Marcador de ÁRBOL PRESERVADO (transmedia/audiolibro): un fichero .ruta_fija en la raíz de un árbol lo
+// protege ENTERO de Integridad/Conformador (no se poda, recicla ni reubica). Los documentos llevan además
+// `ruta_fija:true`. Se escribe al copiar el árbol en la ingesta transmedia.
+export const MARCA_RUTA_FIJA = '.ruta_fija';
 
 // Zonas "aparcadas" donde puede sobrevivir un original que desapareció de su carpeta CDU.
 // NO incluye el Inbox (zona viva: la vigila el watcher) ni el árbol CDU.
@@ -227,6 +231,12 @@ const union = (a, b, clave) => {
 export async function reubicarPorCdu(doc, nuevaCdu) {
     const destinoCdu = String(nuevaCdu || '').trim();
     if (!destinoCdu || destinoCdu === doc.cdu) return null;
+    // ÁRBOL PRESERVADO (transmedia/audiolibro): se conserva la estructura de disco intacta → se actualiza la
+    // CDU en la BD pero NO se mueve la carpeta. La CDU de la COLECCIÓN es lo que define su rama; cada miembro
+    // la comparte y su fichero no se toca.
+    if (doc.ruta_fija) {
+        return { set: { cdu: destinoCdu }, alertas: ['CDU actualizada en BD; documento de árbol preservado (transmedia): no se reubica la carpeta.'] };
+    }
     if (doc.obra) {
         return { set: { cdu: destinoCdu }, alertas: ['CDU actualizada en BD; es tomo de obra: no se reubica la carpeta.'] };
     }
