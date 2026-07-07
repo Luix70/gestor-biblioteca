@@ -16,7 +16,7 @@ import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
-import { rasterizarPaginas, pdfEsImagen } from './utils/rasterizar-pdf.js';
+import { pdfEsImagen } from './utils/rasterizar-pdf.js';
 import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/lector-barras.js';
 import { paginasMuestraDjvu } from './utils/djvu.js';
 
@@ -26,10 +26,9 @@ const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 // se considera que la página 1 de un PDF es texto (no cubierta).
 const PORTADA_ANCHO_MINIMO = Number(process.env.PORTADA_ANCHO_MINIMO || 100);
 const PAG1_TEXTO_UMBRAL = Number(process.env.PORTADA_PAG1_TEXTO_UMBRAL || 250);
-// PDF ESCANEADO → EXPLOTAR en imágenes (una por página) para que la ficha sea idéntica a un escaneo de
-// cámara. Cap de páginas (proteger al Atom de un escaneo gigante) y ancho de cada página-imagen.
-const PDF_EXPLOTAR_MAX = Number(process.env.PDF_EXPLOTAR_MAX || 60);
-const PDF_EXPLOTAR_ANCHO = Number(process.env.PDF_EXPLOTAR_ANCHO || 1400);
+// (Antes existían PDF_EXPLOTAR_MAX/ANCHO para EXPLOTAR un PDF escaneado a decenas de JPG marcándolo 'papel';
+//  eso perdía el enlace al PDF y bloateaba la ficha — retirado. Un PDF escaneado se CONSERVA como fichero
+//  digital + ≤6 páginas frontales de vista previa; ver la rama esEscaneado más abajo.)
 
 // Tipo MIME real de cada imagen (Gemini soporta jpeg/png/webp/heic de forma nativa).
 // Ya no reprocesamos con sharp: enviamos los bytes originales etiquetados con su MIME correcto.
@@ -296,25 +295,20 @@ export async function procesarRecurso(entrada) {
         // Así un escaneo con OCR ilegible deja de catalogarse como "libro digital en PDF".
         const esEscaneado = !datosBase.texto_legible || !datosBase.texto_util || await pdfEsImagen(rutas[0]);
         if (esEscaneado) {
-            // PDF ESCANEADO = fotos de un libro FÍSICO (Adobe Scan / cámara / Lens), NO un PDF digital.
-            // Se trata IGUAL que el grupo de imágenes de la cámara (que sí identifica bien): se identifican
-            // las páginas rasterizadas con la MISMA visión (analizarImagenesRecurso) y el soporte es
-            // 'papel'. Su nombre suele ser la FECHA del escaneo ("Adobe Scan Jun 29, 2024"), por eso aquí
-            // NO se aplica la heurística nombre-fechado→revista (eso archivaba escaneos de libros como revistas).
+            // PDF cuyo TEXTO no es fiable (escaneo con/sin OCR: Adobe Scan / cámara / Lens). Se IDENTIFICA por
+            // VISIÓN sobre las páginas rasterizadas (como un grupo de imágenes), pero SIGUE SIENDO UN FICHERO
+            // DIGITAL que CONSERVAMOS: el formato queda 'pdf' (no 'papel') y el PDF se copia a la carpeta como
+            // el fichero del documento (copiarArchivos). Su nombre suele ser la FECHA del escaneo ("Adobe Scan
+            // Jun 29, 2024"), por eso aquí NO se aplica la heurística nombre-fechado→revista.
+            //
+            // ⚠ NO se EXPLOTA el PDF a decenas de JPG (antes: hasta PDF_EXPLOTAR_MAX páginas + formatos=['papel']).
+            // Aquello PERDÍA el enlace al PDF y bloateaba la ficha con 60 imágenes — bug de PÉRDIDA DE DATOS al
+            // ingerir/reprocesar. Ahora solo se guardan las páginas FRONTALES (≤6: 5 primeras + última) como
+            // sidecars de vista previa; el PDF completo queda accesible como el fichero del documento.
             escaneadoSinTexto = true;
-            formatos = ['papel'];
-            // EXPLOTAR el PDF en imágenes: una por página (todas, con un cap) → se guardan como las
-            // imágenes del libro (carrusel), igual que un escaneo de cámara. Así la ficha es idéntica
-            // para todos los libros escaneados. Se conservan TODAS las páginas escaneadas.
-            const totalPag = datosBase.paginas || (renders.length ? Math.max(...renders.map(r => r.pagina)) : 0);
-            let paginasImg = renders;
-            if (totalPag > renders.length) {
-                const nums = Array.from({ length: Math.min(totalPag, PDF_EXPLOTAR_MAX) }, (_, i) => i + 1);
-                const todas = await rasterizarPaginas(rutas[0], { paginas: nums, ancho: PDF_EXPLOTAR_ANCHO });
-                if (todas.length) paginasImg = todas;
-            }
-            for (const r of paginasImg) {
-                activos.push({ tipo: r.pagina === 1 ? 'portada' : 'otra', origen: `pdf:pag-${r.pagina}`, base64: r.buffer.toString('base64') });
+            // formatos queda ['pdf'] (fijado arriba) — es un PDF digital, no 'papel'.
+            for (const r of renders) {
+                activos.push({ tipo: r.etiqueta === 'portada' ? 'portada' : 'otra', origen: `pdf:${r.etiqueta}`, base64: r.buffer.toString('base64') });
             }
             const tecnicos = { paginas: datosBase.paginas, isbns_rol: datosBase.isbns_rol, cip: datosBase.cip };
             const isbnForm = contexto.isbn ? validarISBN(contexto.isbn) : null;
@@ -335,7 +329,7 @@ export async function procesarRecurso(entrada) {
                     datosBase = { ...visto, paginas: tecnicos.paginas, texto_legible: false };
                     isbnDelArchivo = !!visto.isbn;
                     tipo_recurso = visto.tipo_recurso || tipo_recurso;
-                    datosBase.alertas_agente = ['PDF escaneado tratado como libro físico: identificado por visión sobre las páginas (soporte: papel).'];
+                    datosBase.alertas_agente = ['PDF con texto no fiable: identificado por VISIÓN sobre las páginas; se CONSERVA el PDF (digital) + páginas frontales como vista previa.'];
                     if (visto.isbn) datosBase.alertas_agente.push(`ISBN ${visto.isbn} leído de las páginas por VISIÓN IA (servidor); no se usó lector de código de barras dedicado.`);
                 } else {
                     // Reserva: OCR clásico sobre los renders.
