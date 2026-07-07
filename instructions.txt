@@ -329,11 +329,20 @@ de ficheros clasificado por CDU.
          nombre puede llevar comas («Touchard, Jean») sin partirse (antes el separador por
          comas lo rompía). Se resuelve con resolverPersona (insensible a mayús./acentos →
          no crea duplicados). El rol 'autor' va a autores[]; los demás a contribuciones[].
+         En REVISTAS aparece además «Mes (ejemplar)» + «Nº de ejemplar»: definen la
+         identidad del número (recomputan clave_numero: AAAA-MM → n<nº> → AAAA).
+      🔀 Cambiar tipo — reclasifica a mano a Libro / Revista / Cómic (individual y en
+         LOTE desde la selección del Catálogo). No mueve la carpeta (la Integridad/un
+         reproceso re-alojan luego en libros/ o revistas/). Útil para series de libros con
+         ISSN que la ingesta temprana marcó revista.
       🖼️ Imágenes — reordenar/añadir/borrar + editor en el navegador: rotar,
          recortar, corregir PERSPECTIVA (4 esquinas) con «✨ Auto bordes». Auto-bordes
          detecta la cubierta en 3 pasadas (todas locales, sin IA): tapete verde →
          SEGMENTACIÓN por el color del FONDO (libro sobre superficie uniforme, foto en
          ángulo, sin tapete) → líneas (Sobel/Hough). Ajusta las esquinas antes de aplicar.
+         🖹 «Del documento» extrae páginas de un PDF (miniaturas + selección múltiple, con
+         pdf.js) o imágenes embebidas de un EPUB (JSZip) y las añade al carrusel — p. ej.
+         para rescatar la foto del autor del interior del libro.
       📐 Medir — estima el tamaño físico (cm) sobre la alfombrilla reglada.
       🧹 Conformar · ✨ Enriquecer · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
       📶 Grabar NFC (ver más abajo)
@@ -365,6 +374,16 @@ de ficheros clasificado por CDU.
     enriquecedor deduce el tomo del PROPIO TEXTO cuando el título/subtítulo/nombre de
     archivo trae «Vol./Tomo N» con el título de la obra delante (motor-enriquecimiento).
     Conservador: solo si no hay ya nº de volumen, y no en revistas ni cómics.
+
+  ── EDITAR COLECCIÓN / OBRA (admin, en su ficha) ─────────────────────────────
+    «✏️ Editar datos» abre un modal (MISMA interfaz para ambas): presentación/sinopsis,
+    editorial (por nombre → check-then-create), CDU (cdu_manual) y FECHAS de publicación
+    inicio/fin (año; fin vacío = «actualidad» — p. ej. una revista de 1920-1960 o de 1980
+    a hoy). La colección lleva además su ISSN (autoridad de la cabecera/serie); la obra su
+    ISBN de obra + total de tomos. Identificadores validados por checksum (los malos se
+    descartan con aviso). El rango de años se muestra en la cabecera. No mueve ficheros
+    (un cambio de CDU aquí es de metadatos; cada miembro conserva el suyo).
+    (POST /colecciones/:id/editar · POST /obras/:id/editar. editar-grupos.js.)
 
   ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
     El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos
@@ -574,14 +593,22 @@ de ficheros clasificado por CDU.
     (los miles de nombres del volcado sin libros aparecen al buscarlos). Cada
     tarjeta muestra foto, nombre, «a.k.a.» (variantes), nº de libros y fechas.
     · Filtros: Foto (con/sin), Biografía (con/sin), ROL (autor/traductor/ilustrador/
-      prologuista/anotador/editor/compilador) y Orden (nº de obras / nombre). El
-      filtro de rol lista a quienes intervienen en ese rol (nº = libros en ese rol).
+      prologuista/anotador/editor/compilador), MÍN. OBRAS (≥1/2/3/5/10, por el rol
+      filtrado) y Orden (nº de obras / nombre). El filtro de rol lista a quienes
+      intervienen en ese rol (nº = libros en ese rol).
+    · ELIMINAR (admin): en Modo selección, «🗑 Eliminar N» borra los autores marcados
+      pero SOLO los que no figuran en NINGÚN documento (ni autor ni contribuyente); los
+      referenciados se conservan (salvaguarda anti-pérdida). En la ficha de un autor SIN
+      obras aparece «🗑 Eliminar autor». (POST /autores/eliminar {ids}.)
     · Clic en una tarjeta → FICHA del autor: foto, biografía, fechas, «también
       conocido como», sus ROLES y sus libros. Los libros EN PAPEL se listan primero
       (subtítulo «📖 En papel») y los ELECTRÓNICOS después; los que ya tienen etiqueta
       NFC llevan un badge 📶. El admin puede EDITAR esos datos y SUBIR una foto; los
-      botones Guardar/Cerrar están DUPLICADOS arriba (bajo la foto, junto a
-      Autocompletar) para no bajar hasta el pie.
+      botones (compactos, para no distanciar de la lista de libros) Guardar/Cerrar están
+      DUPLICADOS arriba (bajo la foto, junto a Autocompletar) para no bajar hasta el pie.
+      «🖼️ De obra» fija como foto una imagen (portada o interior) de uno de sus libros
+      —combinado con «🖹 Del documento» de la ficha del libro, permite usar la foto del
+      autor del interior del libro. (GET /autores/:id/imagenes-obras.)
     · MOSTRAR LIBROS EN EL CATÁLOGO (desde la ficha): «🔍 Ver en Catálogo» abre el
       Catálogo con TODOS sus libros (como autor o contribuyente). Para mandar solo
       ALGUNOS: «🖱 Modo selección» (tocar una tarjeta la marca, ✓, en vez de abrir su
@@ -690,6 +717,18 @@ de ficheros clasificado por CDU.
       · duplicados (mismo identificador, distinto contenido): dedup manual.
     Cualquier depósito se puede DESCARTAR (va a la Papelera, recuperable), por ítem
     o por categoría entera (re-pide contraseña).
+
+  ── PAPELERA (Recycling) ─────────────────────────────────────────────────────
+    Todo lo que se «borra» (ficheros reemplazados, carpetas de documentos eliminados,
+    depósitos descartados…) se MUEVE aquí en subcarpetas serializadas, nunca se elimina
+    de verdad (política anti-pérdida). Tabla con tamaño/ficheros por subcarpeta + «ver».
+    · ↩️ RESTAURAR (admin): devuelve el fichero/carpeta a su UBICACIÓN ORIGINAL, como la
+      Papelera de Windows. Funciona con un MANIFIESTO (.papelera.json) que registra el
+      origen al reciclar; NUNCA pisa lo que ya exista en el destino (esa parte se conserva
+      en la Papelera y se informa como conflicto). Las entradas recicladas ANTES de esta
+      función no tienen manifiesto → no ofrecen «restaurar». (POST /papelera/restaurar
+      {sub}. papelera.js·restaurar.)
+    · 🗑 Vaciar (subcarpeta o toda): borrado DEFINITIVO explícito del usuario.
 
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -1204,6 +1243,10 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
 
   ── Diagnóstico (SOLO LECTURA) ───────────────────────────────────────────────
     diagnostico-revistas.js  revistas conflacionadas / carpetas colisionadas.
+    diagnostico-revistas-libro.js  revistas que en realidad son LIBROS: colecciones-
+                            revista de 1 miembro + docs revista con señal de libro
+                            (CIP/ISBN propio/editorial/serie-libros), por categoría.
+                            --lista da el detalle. No escribe nada.
     auditoria-integridad.js  auditoría detallada por-ítem (salida CLI minuciosa; el
                             paso consolidado y con reparación es integridad.js).
     muestra-fichero.js       mide qué roles/idioma son recuperables del Fichero.
