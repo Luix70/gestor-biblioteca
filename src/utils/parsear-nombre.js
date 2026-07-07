@@ -68,12 +68,17 @@ export function esAutorArtefacto(s) {
     // Una FRASE del texto capturada como "autor" (no un nombre): lleva palabras funcionales de PROSA que un
     // nombre nunca contiene, o es larguísima. Un nombre real es corto ("Apellido, Nombre [Medio]"). Caso real:
     // "There are even a few exercises for you, but they are so subtly presented that" (para ISBN 9780470040010).
-    const palabras = t.split(/\s+/).filter(Boolean);
-    if (palabras.length > 7) return true;                        // ningún nombre tiene >7 palabras
-    // Palabras inequívocas de PROSA (verbos/pronombres/conjunciones que no aparecen en un nombre, ni personal
-    // ni corporativo). Se EXCLUYEN a propósito the/and/for/of/to (salen en autores corporativos: "University
-    // of X", "Institute of Physics") y so (apellido coreano/chino).
-    if (palabras.length >= 3 && /\b(you|your|they|we|are|were|was|is|been|have|has|had|will|would|but|because|when|while|which|that|this|there|here|not|with|from)\b/i.test(t)) return true;
+    // OJO: una LISTA de varios autores unida por «&» o «;» ("Anderson, Poul & Asimov, Isaac & Gardner, Martin")
+    // NO es prosa aunque sea larga → NO se marca (es multi-autor sin dividir, no basura).
+    const esListaAutores = /[&;]/.test(t) || / y \b/i.test(t);
+    if (!esListaAutores) {
+        const palabras = t.split(/\s+/).filter(Boolean);
+        if (palabras.length > 7) return true;                    // ningún NOMBRE (individual) tiene >7 palabras
+        // Palabras inequívocas de PROSA (verbos/pronombres/conjunciones que no aparecen en un nombre, ni personal
+        // ni corporativo). Se EXCLUYEN a propósito the/and/for/of/to (salen en autores corporativos: "University
+        // of X", "Institute of Physics") y so (apellido coreano/chino).
+        if (palabras.length >= 3 && /\b(you|your|they|we|are|were|was|is|been|have|has|had|will|would|but|because|when|while|which|that|this|there|here|not|with|from)\b/i.test(t)) return true;
+    }
     return false;
 }
 

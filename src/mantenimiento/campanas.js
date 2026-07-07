@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import { conectarDB } from '../database.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
 import { resolverPersona } from '../utils/resolver-persona.js';
+import { esAutorArtefacto } from '../utils/parsear-nombre.js';
 import { variantesISBN } from '../utils/identificadores.js';
 import { ROLES_VALIDOS } from '../utils/contribuciones.js';
 import { enriquecerAutor, autoresEnriquecibles } from '../utils/enriquecer-autor.js';
@@ -41,6 +42,21 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
 // Condición «campo vacío» reutilizable (ausente / null / '' / array vacío).
 const VACIO = (f) => ({ $or: [{ [f]: { $exists: false } }, { [f]: null }, { [f]: '' }] });
 const CON_ISBN = { isbn: { $exists: true, $nin: [null, ''] } };
+
+// ¿El nombre de un autor es ARTEFACTO (basura del texto/producción: frases, «Creator:…», URLs…) o está
+// marcado como sospechoso con el prefijo «[?]_»? → debe descartarse y sustituirse por el de la autoridad.
+const esAutorMalo = (nombre) => String(nombre || '').startsWith('[?]_') || esAutorArtefacto(nombre);
+// _ids de los autores cuyo NOMBRE es artefacto/[?]_ (para localizar los docs que los referencian).
+async function idsAutoresArtefacto(db) {
+    const autores = await db.collection('autores').find({}, { projection: { nombre: 1 } }).toArray();
+    return autores.filter((a) => esAutorMalo(a.nombre)).map((a) => a._id);
+}
+// Nombres de los autores actuales de un doc (para decidir si son artefacto y hay que reemplazarlos).
+async function nombresAutoresDoc(db, ids) {
+    if (!ids?.length) return [];
+    const docs = await db.collection('autores').find({ _id: { $in: ids } }, { projection: { nombre: 1 } }).toArray();
+    return docs.map((a) => a.nombre);
+}
 
 // Resuelve un nombre de editorial a su ObjectId (check-then-create), como en la ingesta.
 async function resolverEditorialRef(db, nombre) {
@@ -104,23 +120,27 @@ export const CAMPANAS = [
         id: 'enriquecer',
         etiqueta: 'Huecos de metadatos',
         coste: 'apis',
-        descripcion: 'Rellena por ISBN los huecos de sinopsis, año, editorial, autores, palabras clave e Dewey/LCC desde OpenLibrary / Google Books / DNB. APIs gratuitas (con límite de llamadas). Conservador: nunca pisa lo que ya haya.',
-        version: 1,
+        descripcion: 'Rellena por ISBN los huecos de sinopsis, año, editorial, autores, palabras clave e Dewey/LCC desde OpenLibrary / Google Books / DNB. APIs gratuitas. Conservador: nunca pisa lo bueno, PERO descarta y sustituye los autores-ARTEFACTO (basura del texto / marcados [?]_) por el de la autoridad.',
+        version: 2, // v2: además reemplaza autores-artefacto (re-evalúa los docs ya sellados)
         loteDefecto: 50,
         cadenciaDefecto: 15,
         activaDefecto: false,
         coleccion: 'biblioteca',
         proyeccion: { isbn: 1, sinopsis: 1, año_edicion: 1, editorial: 1, autores: 1, palabras_clave: 1, dewey: 1, lcc: 1, idioma: 1, titulo: 1 },
-        // Con ISBN y con AL MENOS un hueco de los que esta campaña rellena.
-        candidatos: () => ({
-            ...CON_ISBN,
-            $or: [
-                VACIO('sinopsis'), VACIO('año_edicion'), VACIO('editorial'), VACIO('idioma'),
-                { autores: { $exists: false } }, { autores: null }, { autores: [] },
-                { palabras_clave: { $exists: false } }, { palabras_clave: null }, { palabras_clave: [] },
-                { $and: [VACIO('dewey'), VACIO('lcc')] },
-            ],
-        }),
+        // Con ISBN y con AL MENOS un hueco de los que esta campaña rellena, O con un autor ARTEFACTO/[?]_.
+        async candidatos(db) {
+            const artefactoIds = await idsAutoresArtefacto(db);
+            return {
+                ...CON_ISBN,
+                $or: [
+                    VACIO('sinopsis'), VACIO('año_edicion'), VACIO('editorial'), VACIO('idioma'),
+                    { autores: { $exists: false } }, { autores: null }, { autores: [] },
+                    { palabras_clave: { $exists: false } }, { palabras_clave: null }, { palabras_clave: [] },
+                    { $and: [VACIO('dewey'), VACIO('lcc')] },
+                    ...(artefactoIds.length ? [{ autores: { $in: artefactoIds } }] : []), // autor artefacto/[?]_ → sustituir
+                ],
+            };
+        },
         async procesarDoc(db, doc) {
             const ext = await buscarMetadatosExternos(doc.titulo || '', '', null, {
                 isbnsArchivo: variantesISBN(doc.isbn), incluirCdu: false, incluirSinopsis: true, idioma: doc.idioma || null,
@@ -134,9 +154,12 @@ export const CAMPANAS = [
             if (ext.categorias?.length && !(doc.palabras_clave?.length)) set.palabras_clave = ext.categorias;
             if (ext.dewey && !doc.dewey) set.dewey = String(ext.dewey).trim();
             if (ext.lcc && !doc.lcc) set.lcc = String(ext.lcc).trim();
-            // Referencias (editorial/autores): solo si faltan por completo.
+            // Editorial: solo si falta por completo.
             if (ext.editorial && !doc.editorial) set.editorial = await resolverEditorialRef(db, ext.editorial);
-            if (ext.autores?.length && !(doc.autores?.length)) {
+            // Autores: rellenar si FALTAN, o REEMPLAZAR si el actual es un ARTEFACTO ([?]_ / basura del texto).
+            const nombresActuales = await nombresAutoresDoc(db, doc.autores);
+            const autorArtefacto = nombresActuales.length > 0 && nombresActuales.every(esAutorMalo);
+            if (ext.autores?.length && (!(doc.autores?.length) || autorArtefacto)) {
                 const refs = [];
                 for (const nombre of ext.autores) {
                     const p = await resolverPersona(db, nombre);
