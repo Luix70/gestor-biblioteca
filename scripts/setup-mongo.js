@@ -180,7 +180,7 @@ async function main() {
         const fmt = js?.properties?.formatos;
         const ref = fmt?.items?.enum ? fmt.items : (Array.isArray(fmt?.enum) ? fmt : null);
         if (ref) {
-            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'mobi'].filter(v => !ref.enum.includes(v));
+            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'mobi', 'audio'].filter(v => !ref.enum.includes(v));
             if (faltan.length) {
                 ref.enum = [...ref.enum, ...faltan];
                 await db.command({
