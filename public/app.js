@@ -11229,18 +11229,32 @@ async function autorFicha(id) {
     : `<div style="width:110px;height:110px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:44px">👤</div>`;
   const alt = Array.isArray(a.nombres_alternativos) ? a.nombres_alternativos.join('; ') : '';
   // Datos: editables (admin) o de solo lectura (invitado).
+  // Roles que desempeña (autor/traductor/…), como línea plegada junto al resto de datos.
+  const rolesLinea = Array.isArray(r.roles) && r.roles.length
+    ? `<div class="muted" style="font-size:11px;margin-top:8px">Roles: ${r.roles.map((x) => esc(x)).join(' · ')}</div>`
+    : '';
+  // DATOS COLAPSADOS: solo el NOMBRE (y la foto, en su columna) quedan visibles; alias/fechas/biografía/roles
+  // van dentro de un <details> colapsado y se despliegan al tocar. Los <input> siguen en el DOM (para Guardar).
   const campos = admin
     ? `<div><label>Nombre</label><input id="autNombre" value="${esc(a.nombre || '')}" autocomplete="off"></div>
-       <div style="margin-top:6px"><label>También conocido como (separa con ;)</label><input id="autAlt" value="${esc(alt)}" autocomplete="off"></div>
-       <div class="row" style="margin-top:6px">
-         <div><label>Nacimiento</label><input id="autNac" value="${esc(a.nacimiento || '')}" inputmode="numeric" autocomplete="off"></div>
-         <div><label>Fallecimiento</label><input id="autFall" value="${esc(a.fallecimiento || '')}" inputmode="numeric" autocomplete="off"></div>
-       </div>
-       <div style="margin-top:6px"><label>Biografía</label><textarea id="autBio" rows="4" style="width:100%;resize:vertical;font-family:inherit">${esc(a.biografia || '')}</textarea></div>`
+       <details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--mut)">✏️ Alias, fechas y biografía…</summary>
+         <div style="margin-top:8px"><label>También conocido como (separa con ;)</label><input id="autAlt" value="${esc(alt)}" autocomplete="off"></div>
+         <div class="row" style="margin-top:6px">
+           <div><label>Nacimiento</label><input id="autNac" value="${esc(a.nacimiento || '')}" inputmode="numeric" autocomplete="off"></div>
+           <div><label>Fallecimiento</label><input id="autFall" value="${esc(a.fallecimiento || '')}" inputmode="numeric" autocomplete="off"></div>
+         </div>
+         <div style="margin-top:6px"><label>Biografía</label><textarea id="autBio" rows="4" style="width:100%;resize:vertical;font-family:inherit">${esc(a.biografia || '')}</textarea></div>
+         ${rolesLinea}
+       </details>`
     : `<h3 style="margin:0">${esc(a.nombre || '—')}</h3>
-       ${alt ? `<div class="muted" style="font-size:12px;margin-top:4px">a.k.a. ${esc(alt)}</div>` : ''}
-       ${a.nacimiento || a.fallecimiento ? `<div class="muted" style="font-size:12px;margin-top:4px">${a.nacimiento || '?'}–${a.fallecimiento || ''}</div>` : ''}
-       ${a.biografia ? `<p class="sinopsis-text" style="margin-top:8px">${esc(a.biografia)}</p>` : ''}`;
+       ${(alt || a.nacimiento || a.fallecimiento || a.biografia || rolesLinea)
+        ? `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px;color:var(--mut)">▸ Más datos…</summary>
+           ${alt ? `<div class="muted" style="font-size:12px;margin-top:6px">a.k.a. ${esc(alt)}</div>` : ''}
+           ${a.nacimiento || a.fallecimiento ? `<div class="muted" style="font-size:12px;margin-top:4px">${a.nacimiento || '?'}–${a.fallecimiento || ''}</div>` : ''}
+           ${a.biografia ? `<p class="sinopsis-text" style="margin-top:8px">${esc(a.biografia)}</p>` : ''}
+           ${rolesLinea}
+         </details>`
+        : ''}`;
   // Badge de etiqueta NFC (el libro ya tiene una grabada).
   const nfcBadge = (l) =>
     l.nfc
@@ -11297,10 +11311,6 @@ async function autorFicha(id) {
   if (!libros.length) librosHtml = '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
   else librosHtml = ROL_SECCION.map(([rol, lab]) => seccionRol(rol, lab)).join('') || gridLibros(libros);
   // Resumen de roles que desempeña esta persona (autor/traductor/…).
-  const rolesResumen =
-    Array.isArray(r.roles) && r.roles.length
-      ? `<div class="muted" style="font-size:11px;margin-top:4px">Roles: ${r.roles.map((x) => esc(x)).join(' · ')}</div>`
-      : '';
   // Botones de la columna de la foto (arriba): admin ve Foto/Autocompletar + Guardar/Cerrar DUPLICADOS aquí
   // (cómodos sin bajar hasta el pie); el invitado solo Cerrar.
   const botonesFoto = admin
@@ -11320,7 +11330,7 @@ async function autorFicha(id) {
         ${foto}
         ${botonesFoto}
       </div>
-      <div style="flex:1;min-width:250px">${campos}${rolesResumen}</div>
+      <div style="flex:1;min-width:250px">${campos}</div>
     </div>
     <div style="margin-top:12px">
       <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
