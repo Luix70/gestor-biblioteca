@@ -57,13 +57,16 @@ function condicionCampo(campo, valor) {
  * SIN búsqueda ni rol muestra los autores QUE TIENEN LIBROS (los miles del volcado sin libros son ruido;
  * aparecen al buscarlos por nombre). foto/bio se aplican siempre.
  */
-export async function listarAutores(db, { q = '', limite = 300, foto = '', bio = '', orden = 'libros', rol = '', minLibros = 0, sinLibros = false } = {}) {
-    const tope = Math.min(1000, Math.max(1, limite));
+export async function listarAutores(db, { q = '', limite = 60, foto = '', bio = '', orden = 'libros', rol = '', minLibros = 0, sinLibros = false, pagina = 1 } = {}) {
+    const porPagina = Math.min(200, Math.max(1, Number(limite) || 60)); // autores por página
+    const pag = Math.max(1, Number(pagina) || 1);
+    const MAX_ESCANEO = 5000; // tope de autores a puntuar (para el recuento y la paginación)
     const min = Math.max(0, Number(minLibros) || 0); // ≥ N obras (en el rol filtrado). 0 = no filtra.
     const consulta = String(q || '').trim();
     const rolContrib = rol && rol !== 'autor' && ROLES_VALIDOS.includes(rol);
     const and = [condicionCampo('foto', foto), condicionCampo('biografia', bio)].filter(Boolean);
     const rx = consulta ? new RegExp(escapeRegex(consulta), 'i') : null;
+    const vacio = { autores: [], total: 0, pagina: pag, porPagina, capado: false };
 
     // Recuento base (como autor, o en el rol pedido). Es también el conjunto de candidatos por defecto.
     const conteo = await recuentoPorAutor(db, rol);
@@ -76,16 +79,15 @@ export async function listarAutores(db, { q = '', limite = 300, foto = '', bio =
     // Restringir a autores CON libros solo cuando NO se piden los «sin libros» y (rol de contribución o sin q).
     if (!sinLibros && (rolContrib || !consulta)) {
         const ids = [...conteo.keys()].map(oid).filter(Boolean);
-        if (!ids.length) return [];
+        if (!ids.length) return vacio;
         filtro._id = { $in: ids };
     }
     if (rx) filtro.$or = [{ nombre: rx }, { nombres_alternativos: rx }];
     if (and.length) filtro.$and = and;
 
-    const cur = db.collection('autores').find(filtro, { projection: PROY_AUTOR });
-    // Búsqueda global o «sin libros» (pueden ser miles del volcado): acota el escaneo antes de puntuar/filtrar.
-    if ((consulta && !rolContrib) || sinLibros) cur.limit(tope * 3);
-    const docs = await cur.toArray();
+    // Se escanea hasta MAX_ESCANEO (los «sin libros»/búsqueda global pueden ser miles del volcado): se puntúa
+    // n_libros, se filtra y se ORDENA todo el conjunto, y luego se pagina en memoria devolviendo el TOTAL.
+    const docs = await db.collection('autores').find(filtro, { projection: PROY_AUTOR }).limit(MAX_ESCANEO).toArray();
 
     let autores = docs.map((a) => ({ ...a, _id: String(a._id), n_libros: conteo.get(String(a._id)) || 0 }));
     if (sinLibros) autores = autores.filter((a) => a.n_libros === 0);       // SOLO los que no tienen libros
@@ -95,7 +97,13 @@ export async function listarAutores(db, { q = '', limite = 300, foto = '', bio =
     } else {
         autores.sort((x, y) => y.n_libros - x.n_libros || String(x.nombre || '').localeCompare(String(y.nombre || '')));
     }
-    return autores.slice(0, tope);
+    const total = autores.length;
+    const inicio = (pag - 1) * porPagina;
+    return {
+        autores: autores.slice(inicio, inicio + porPagina),
+        total, pagina: pag, porPagina,
+        capado: docs.length >= MAX_ESCANEO, // el recuento puede quedarse corto (se escaneó el tope)
+    };
 }
 
 /**

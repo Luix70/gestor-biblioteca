@@ -11392,7 +11392,8 @@ async function editarUbicacionRapida(doc) {
 // Buscar autores, ver su ficha (foto/bio/libros) y COMBINAR duplicados (A→B): se mantiene el nombre de B,
 // los de las A pasan a sus «también conocido como» y todos sus libros se reasignan a B. Es la versión
 // INTERACTIVA de scripts/backfill-autores.js. Las mutaciones son solo admin (las exige el backend).
-let _autores = []; // último listado recibido
+let _autores = []; // último listado recibido (página actual)
+let _autoresPagina = 1, _autoresTotal = 0, _autoresPorPagina = 60, _autoresCapado = false; // paginación
 const _autoresSel = new Set(); // ids marcados para combinar
 let _autoresSelModo = false; // Modo selección (tap = marcar) — mismo patrón que Catálogo/estantes
 let _autoresBuscarTimer = null; // debounce del buscador
@@ -11430,13 +11431,14 @@ async function loadAutores() {
   if (inp)
     inp.oninput = () => {
       clearTimeout(_autoresBuscarTimer);
-      _autoresBuscarTimer = setTimeout(autoresBuscar, 300);
+      _autoresBuscarTimer = setTimeout(autoresBuscarReset, 300); // texto nuevo → página 1
     };
-  // Los selectores de filtro/orden/rol recargan al instante.
+  // Los selectores de filtro/orden/rol recargan al instante (desde la página 1).
   ['#autFotoFiltro', '#autBioFiltro', '#autRol', '#autMin', '#autOrden'].forEach((sel) => {
     const el = $(sel);
-    if (el) el.onchange = autoresBuscar;
+    if (el) el.onchange = autoresBuscarReset;
   });
+  _autoresPagina = 1;
   autoresBuscar();
 }
 
@@ -11455,9 +11457,14 @@ async function autoresBuscar() {
   const min = ($('#autMin') && $('#autMin').value) || '0';
   if (min === 'sin') params.set('sinLibros', '1');
   else params.set('minLibros', min);
+  params.set('pagina', String(_autoresPagina));
+  params.set('limite', String(_autoresPorPagina));
   try {
     const r = await api('/autores?' + params.toString());
     _autores = r.autores || [];
+    _autoresTotal = r.total || _autores.length;
+    _autoresPorPagina = r.porPagina || _autoresPorPagina;
+    _autoresCapado = !!r.capado;
   } catch (e) {
     if (grid) grid.textContent = 'Error: ' + e.message;
     return;
@@ -11465,18 +11472,49 @@ async function autoresBuscar() {
   autoresPintar();
 }
 
+// Re-busca desde la PÁGINA 1 (al cambiar el texto o un filtro). Los botones de paginación llaman a
+// autoresBuscar directamente conservando _autoresPagina.
+function autoresBuscarReset() { _autoresPagina = 1; autoresBuscar(); }
+function autoresIrPagina(p) {
+  const paginas = Math.max(1, Math.ceil(_autoresTotal / _autoresPorPagina));
+  _autoresPagina = Math.min(paginas, Math.max(1, p));
+  autoresBuscar();
+}
+
+// Barra de recuento + paginación (arriba de la rejilla). Muestra «desde–hasta de TOTAL autores» y ‹ N/M ›.
+function autoresPager() {
+  const paginas = Math.max(1, Math.ceil(_autoresTotal / _autoresPorPagina));
+  const desde = _autoresTotal ? (_autoresPagina - 1) * _autoresPorPagina + 1 : 0;
+  const hasta = Math.min(_autoresPagina * _autoresPorPagina, _autoresTotal);
+  const cuenta = _autoresTotal
+    ? `${desde}–${hasta} de ${_autoresTotal}${_autoresCapado ? '+' : ''} autor(es)`
+    : 'Sin autores';
+  const nav = paginas > 1
+    ? `<span class="row" style="gap:6px;align-items:center">
+        <button class="btn" id="autPagPrev"${_autoresPagina <= 1 ? ' disabled' : ''} style="padding:3px 11px">‹</button>
+        <span class="muted" style="font-size:12px">${_autoresPagina} / ${paginas}</span>
+        <button class="btn" id="autPagNext"${_autoresPagina >= paginas ? ' disabled' : ''} style="padding:3px 11px">›</button>
+      </span>` : '';
+  return `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="muted" style="font-size:12px">${cuenta}</span>${nav}</div>`;
+}
+function autoresWirePager() {
+  if ($('#autPagPrev')) $('#autPagPrev').onclick = () => autoresIrPagina(_autoresPagina - 1);
+  if ($('#autPagNext')) $('#autPagNext').onclick = () => autoresIrPagina(_autoresPagina + 1);
+}
 function autoresPintar() {
   const grid = $('#autGrid');
   if (!grid) return;
   if (!_autores.length) {
-    grid.innerHTML = '<div class="empty">Sin autores.</div>';
+    grid.innerHTML = autoresPager() + '<div class="empty">Sin autores.</div>';
+    autoresWirePager();
     autoresBarraCombinar();
     return;
   }
   const admin = ROL === 'admin';
-  grid.innerHTML = `<div class="${admin && _autoresSelModo ? 'selmode' : ''}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">${_autores
+  grid.innerHTML = autoresPager() + `<div class="${admin && _autoresSelModo ? 'selmode' : ''}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">${_autores
     .map(autorCard)
     .join('')}</div>`;
+  autoresWirePager();
   // Interacción unificada (igual que Catálogo/estantes): clic/toque = abrir la ficha (o MARCAR en Modo
   // selección); doble clic / pulsación larga = conmutar el modo (conservando lo ya marcado).
   grid.querySelectorAll('[data-aut]').forEach((el) =>

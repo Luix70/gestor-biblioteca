@@ -1398,14 +1398,16 @@ export function rutasPanel() {
     r.get('/autores', async (req, res) => {
         try {
             const q = String(req.query.q || '');
-            const limite = Number(req.query.limite) || 300;
+            const limite = Number(req.query.limite) || 60; // autores por página
+            const pagina = Number(req.query.pagina) || 1;
             const foto = String(req.query.foto || '');   // 'si' | 'no' | ''
             const bio = String(req.query.bio || '');      // 'si' | 'no' | ''
             const orden = String(req.query.orden || 'libros'); // 'libros' | 'nombre'
             const rol = String(req.query.rol || '');      // '' | autor | traductor | ilustrador | …
             const minLibros = Number(req.query.minLibros) || 0; // ≥ N obras
             const sinLibros = req.query.sinLibros === '1' || req.query.sinLibros === 'true'; // solo autores con 0 libros
-            res.json({ ok: true, autores: await listarAutores(await conectarDB(), { q, limite, foto, bio, orden, rol, minLibros, sinLibros }) });
+            const r = await listarAutores(await conectarDB(), { q, limite, pagina, foto, bio, orden, rol, minLibros, sinLibros });
+            res.json({ ok: true, ...r }); // { autores, total, pagina, porPagina, capado }
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     // Eliminar autores por id, SOLO los que no figuran en ningún documento (los referenciados se conservan).
