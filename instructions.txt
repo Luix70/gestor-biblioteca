@@ -1230,6 +1230,11 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
                             [Ya incluido en integridad.js.]
     restaurar-originales.js recupera ficheros "desaparecidos" desde Reintentos/Inbox/
                             Cuarentena (copia NO destructiva).
+    reparar-pdf-como-papel.js  repara PDF/EPUB digitales que un ingest/reproceso marcó
+                            'papel' + explotó a decenas de JPG (bug corregido): re-etiqueta
+                            el formato digital, recorta las imágenes a 6 (5+1; el resto a la
+                            Papelera), restaura el fichero desde la Papelera si faltaba y
+                            corrige la BD. Dry-run por defecto; lista los irrecuperables.
     recolector-cdu.js       recolector de basura del árbol CDU (1 doc ↔ 1 carpeta).
                             [Ya incluido en integridad.js.]
 
