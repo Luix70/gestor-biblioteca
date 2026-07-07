@@ -17,6 +17,7 @@ import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen } from './utils/imagenes-doc.js';
 import { leerLomosImagen, leerLomosRecortados, emparejarLomos } from './utils/lector-lomos.js';
 import { editarDocumento } from './utils/editar-doc.js';
+import { editarColeccion, editarObra } from './utils/editar-grupos.js';
 import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
@@ -668,14 +669,25 @@ export function rutasPanel() {
                 obra: {
                     _id: String(obra._id), titulo: obra.titulo, isbn_obra: obra.isbn_obra || null,
                     cdu: obra.cdu || null, cdu_desc: await cduDesc(db, obra.cdu),
+                    descripcion: obra.descripcion || null,
                     editorial: await nombrePorId(db, 'editoriales', obra.editorial),
                     coleccion: await nombrePorId(db, 'colecciones', obra.coleccion),
+                    fecha_inicio: obra.fecha_inicio || null, fecha_fin: obra.fecha_fin || null,
                     total_volumenes: obra.total_volumenes || 0, volumenes_presentes: obra.volumenes_presentes || 0,
                     completa: !!obra.completa, revision_requerida: !!obra.revision_requerida,
                     valoracion: obra.valoracion || 0, nsfw: !!obra.nsfw,
                 },
                 volumenes, sin_numero,
             });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Editar los datos propios de la OBRA (título, descripción, ISBN de obra, editorial, CDU, total de tomos,
+    // fechas inicio/fin).
+    r.post('/obras/:id/editar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await editarObra(await conectarDB(), req.params.id, req.body || {}));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
@@ -826,12 +838,21 @@ export function rutasPanel() {
                     _id: String(col._id), nombre: col.nombre, tipo: col.tipo || 'libro', issn: col.issn || null,
                     descripcion: col.descripcion || null, cdu: col.cdu || null, cdu_desc: await cduDesc(db, col.cdu),
                     editorial: await nombrePorId(db, 'editoriales', col.editorial),
+                    fecha_inicio: col.fecha_inicio || null, fecha_fin: col.fecha_fin || null,
                     numeros_presentes: col.numeros_presentes || (esRevista ? miembros.length : 0),
                     revision_requerida: !!col.revision_requerida,
                     valoracion: col.valoracion || 0, nsfw: !!col.nsfw,
                 },
                 miembros: miembros.map(d => ({ ...d, _id: String(d._id) })),
             });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Editar los datos propios de la COLECCIÓN (nombre, descripción, ISSN, editorial, CDU, fechas inicio/fin).
+    r.post('/colecciones/:id/editar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await editarColeccion(await conectarDB(), req.params.id, req.body || {}));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

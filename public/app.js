@@ -1388,18 +1388,22 @@ function pintarObra(r) {
     ROL === 'admin'
       ? `<button class="btn" id="obraNumerar" title="Asignar o corregir el número de tomo de cada libro de la obra">🔢 Numerar tomos</button>`
       : '';
+  const rango = rangoFechas(o.fecha_inicio, o.fecha_fin);
   const sub =
-    [o.isbn_obra ? 'ISBN obra ' + o.isbn_obra : '', o.editorial, o.coleccion]
+    [o.isbn_obra ? 'ISBN obra ' + o.isbn_obra : '', o.editorial, o.coleccion, rango]
       .filter(Boolean)
       .map(esc)
       .join(' · ') || '—';
+  const editBtn = ROL === 'admin' ? '<button class="btn admin-only" id="obraEditar" style="margin-top:8px;padding:4px 10px;font-size:12px" title="Editar título, sinopsis, ISBN de obra, editorial, CDU, total de tomos y fechas">✏️ Editar datos</button>' : '';
   const head = `<div class="crumb"><a onclick="go('obras')">Obras</a> › <span>${esc(recortar(o.titulo, 50))}</span></div>
     <div class="det-head"><button class="det-back" title="Volver" onclick="volverAtras()">←</button>
       <div class="det-title"><h2>${esc(o.titulo || '(sin título)')}</h2><div class="sub">${sub}</div>
         <div style="margin-top:8px">${o.completa ? '<span class="tag ok">completa</span>' : '<span class="tag warn">incompleta</span>'} ${o.revision_requerida ? '<span class="tag bad">revisar</span>' : ''} <span class="muted">${o.volumenes_presentes || 0} presentes · ${Math.max(0, (o.total_volumenes || 0) - (o.volumenes_presentes || 0))} ausentes · ${o.total_volumenes || '?'} total</span></div>
         <div style="margin-top:8px">${ratingBar('obras', o._id, o.valoracion, o.nsfw)}</div>
         ${o.cdu ? `<div class="mono muted" style="margin-top:8px">CDU ${esc(o.cdu)}${desc && desc.titulo_es ? ' · ' + esc(desc.titulo_es) : ''}</div>` : ''}
+        ${o.descripcion ? `<p class="muted" style="font-size:12px;margin-top:6px">${esc(o.descripcion)}</p>` : ''}
         ${desc && desc.descripcion_es ? `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">Descripción CDU</summary><p class="muted" style="font-size:12px;margin-top:6px">${esc(desc.descripcion_es)}</p></details>` : ''}
+        ${editBtn}
       </div></div>`;
   const vols = r.volumenes.length
     ? r.volumenes.map((v) => tomoCard(v.doc, v.numero, !v.presente)).join('')
@@ -1422,6 +1426,7 @@ function pintarObra(r) {
     if (it) renumerarVolumenRapido({ tipo: 'obra', grupoId: o._id, docId: it.d._id, actual: it.n, titulo: it.d.volumen_titulo || it.d.titulo, total: o.total_volumenes });
   }));
   if ($('#obraNumerar')) $('#obraNumerar').onclick = () => numerarTomos();
+  if ($('#obraEditar')) $('#obraEditar').onclick = () => editarGrupo('obra', o);
 }
 
 // Editor «Numerar tomos»: lista cada libro de la obra con un campo para su nº de tomo (vacío = sin
@@ -1541,7 +1546,9 @@ function pintarColeccion(r) {
          <button class="btn" id="colLomos" title="Foto de los lomos → la IA lee título y nº de cada uno y renumera la colección (y adjunta el recorte del lomo)">📷 Numerar por lomos</button>`
       : '';
   const tipoLabel = esRev ? '📰 Revista (cabecera)' : '📚 Serie de libros';
-  const sub = [c.issn ? 'ISSN ' + c.issn : '', c.editorial].filter(Boolean).map(esc).join(' · ') || '—';
+  const rango = rangoFechas(c.fecha_inicio, c.fecha_fin);
+  const sub = [c.issn ? 'ISSN ' + c.issn : '', c.editorial, rango].filter(Boolean).map(esc).join(' · ') || '—';
+  const editBtn = ROL === 'admin' ? '<button class="btn admin-only" id="colEditar" style="margin-top:8px;padding:4px 10px;font-size:12px" title="Editar nombre, presentación, ISSN, editorial, CDU y fechas de la colección">✏️ Editar datos</button>' : '';
   const head = `<div class="crumb"><a onclick="go('colecciones')">Colecciones</a> › <span>${esc(recortar(c.nombre, 50))}</span></div>
     <div class="det-head"><button class="det-back" title="Volver" onclick="volverAtras()">←</button>
       <div class="det-title"><h2>${esc(c.nombre || '(sin título)')}</h2><div class="sub">${tipoLabel} · ${sub}</div>
@@ -1549,6 +1556,7 @@ function pintarColeccion(r) {
         <div style="margin-top:8px">${ratingBar('colecciones', c._id, c.valoracion, c.nsfw)}</div>
         ${c.cdu ? `<div class="mono muted" style="margin-top:8px">CDU ${esc(c.cdu)}${desc && desc.titulo_es ? ' · ' + esc(desc.titulo_es) : ''}</div>` : ''}
         ${c.descripcion ? `<p class="muted" style="font-size:12px;margin-top:6px">${esc(c.descripcion)}</p>` : ''}
+        ${editBtn}
       </div></div>`;
   // Nº de cada miembro. En LIBROS y admin, es un botón: toca = renumerar ese volumen directo (mini-modal).
   const numeroChip = (d) => {
@@ -1574,6 +1582,63 @@ function pintarColeccion(r) {
   }));
   if ($('#colNumerar')) $('#colNumerar').onclick = () => numerarColeccion();
   if ($('#colLomos')) $('#colLomos').onclick = () => numerarPorLomos();
+  if ($('#colEditar')) $('#colEditar').onclick = () => editarGrupo('coleccion', c);
+}
+
+// Rango de años de publicación: «1920–1960», «1980–actualidad» (fin vacío), «?–1960» (solo fin), '' si nada.
+function rangoFechas(ini, fin) {
+  if (!ini && !fin) return '';
+  if (ini && fin) return `${ini}–${fin}`;
+  if (ini) return `${ini}–actualidad`;
+  return `?–${fin}`;
+}
+
+// Modal de edición de una COLECCIÓN u OBRA (misma interfaz). tipo: 'coleccion' | 'obra'; g = objeto actual.
+function editarGrupo(tipo, g) {
+  const esCol = tipo === 'coleccion';
+  const nombreLbl = esCol ? 'Nombre' : 'Título';
+  const nombreVal = esCol ? (g.nombre || '') : (g.titulo || '');
+  // Campo identificador propio: colección → ISSN; obra → ISBN de obra.
+  const idFila = esCol
+    ? `<div style="flex:1"><label style="display:block;margin-top:8px">ISSN</label><input id="egIssn" value="${esc(g.issn || '')}" autocomplete="off"></div>`
+    : `<div style="flex:1"><label style="display:block;margin-top:8px">ISBN de obra</label><input id="egIsbn" value="${esc(g.isbn_obra || '')}" autocomplete="off"></div>`;
+  const extraObra = esCol ? '' : `<div style="flex:1"><label style="display:block;margin-top:8px">Total de tomos</label><input id="egTotal" value="${esc(g.total_volumenes || '')}" inputmode="numeric" autocomplete="off"></div>`;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;max-height:90vh;overflow:auto">
+    <h3 style="margin-top:0">✏️ Editar ${esCol ? 'colección' : 'obra'}</h3>
+    <label style="display:block;margin-top:4px">${nombreLbl}</label><input id="egNombre" value="${esc(nombreVal)}" autocomplete="off">
+    <div class="row" style="gap:8px">${idFila}<div style="flex:1"><label style="display:block;margin-top:8px">Editorial</label><input id="egEdi" value="${esc(g.editorial || '')}" autocomplete="off"></div></div>
+    <div class="row" style="gap:8px"><div style="flex:1"><label style="display:block;margin-top:8px">CDU</label><input id="egCdu" value="${esc(g.cdu || '')}" autocomplete="off"></div>${extraObra}</div>
+    <div class="row" style="gap:8px">
+      <div style="flex:1"><label style="display:block;margin-top:8px">Año de inicio</label><input id="egIni" value="${esc(g.fecha_inicio || '')}" inputmode="numeric" placeholder="p. ej. 1920" autocomplete="off"></div>
+      <div style="flex:1"><label style="display:block;margin-top:8px">Año de fin</label><input id="egFin" value="${esc(g.fecha_fin || '')}" inputmode="numeric" placeholder="vacío = actualidad" autocomplete="off"></div>
+    </div>
+    <label style="display:block;margin-top:8px">${esCol ? 'Presentación / descripción' : 'Sinopsis / descripción'}</label>
+    <textarea id="egDesc" rows="5" style="width:100%;resize:vertical;font-family:inherit">${esc(g.descripcion || '')}</textarea>
+    <div id="egErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="egX">Cancelar</button><button class="btn pri" id="egOk">💾 Guardar</button></div>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#egX').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#egOk').onclick = async () => {
+    const campos = {
+      editorial: $('#egEdi').value,
+      cdu: $('#egCdu').value,
+      fecha_inicio: $('#egIni').value,
+      fecha_fin: $('#egFin').value,
+      descripcion: $('#egDesc').value,
+    };
+    if (esCol) { campos.nombre = $('#egNombre').value; campos.issn = $('#egIssn').value; }
+    else { campos.titulo = $('#egNombre').value; campos.isbn_obra = $('#egIsbn').value; campos.total_volumenes = $('#egTotal').value; }
+    try {
+      const res = await api('/' + (esCol ? 'colecciones' : 'obras') + '/' + encodeURIComponent(g._id) + '/editar', { method: 'POST', body: JSON.stringify(campos) });
+      if (!res.ok) { $('#egErr').textContent = res.motivo; toast(res.motivo, 'bad'); return; }
+      cerrarCmp();
+      toast('Guardado' + ((res.avisos || []).length ? ' · ' + res.avisos.join('; ') : ''));
+      esCol ? verColeccion(g._id) : verObra(g._id);
+    } catch (e) { $('#egErr').textContent = e.message; }
+  };
 }
 
 // Editor «Numerar» de una serie de libros: un nº por libro (vacío = sin número, permitido). Distingue el
