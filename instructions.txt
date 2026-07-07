@@ -340,9 +340,11 @@ de ficheros clasificado por CDU.
          detecta la cubierta en 3 pasadas (todas locales, sin IA): tapete verde →
          SEGMENTACIÓN por el color del FONDO (libro sobre superficie uniforme, foto en
          ángulo, sin tapete) → líneas (Sobel/Hough). Ajusta las esquinas antes de aplicar.
-         🖹 «Del documento» extrae páginas de un PDF (miniaturas + selección múltiple, con
-         pdf.js) o imágenes embebidas de un EPUB (JSZip) y las añade al carrusel — p. ej.
-         para rescatar la foto del autor del interior del libro.
+         🖹 «Del documento» extrae imágenes del propio fichero y las añade al carrusel —
+         p. ej. para rescatar la foto del autor del interior. Cubre: PDF (páginas, pdf.js),
+         EPUB (imágenes embebidas, JSZip), cbz/cbr/cb7/djvu (páginas servidas por el backend)
+         y mobi/azw3 (imágenes embebidas, GET /documentos/:id/imagenes-embebidas). Miniaturas
+         + selección múltiple → carrusel a plena resolución.
       📐 Medir — estima el tamaño físico (cm) sobre la alfombrilla reglada.
       🧹 Conformar · ✨ Enriquecer · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
       📶 Grabar NFC (ver más abajo)
