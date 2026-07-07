@@ -5303,17 +5303,20 @@ async function iniciarLectorEpub(url) {
       if (!loc || !loc.start) return;
       const bi = $('#epubProg>i'),
         pc = $('#epubPct');
-      let pct = null;
+      let pct = null, idx = null, total = 0;
       if (locsReady) {
         try {
           pct = book.locations.percentageFromCfi(loc.start.cfi);
+          idx = book.locations.locationFromCfi(loc.start.cfi); // "página" global (0-based) de las locations
+          total = book.locations.total || 0;
         } catch {}
       }
       if (pct != null) {
         if (bi) bi.style.width = Math.round(pct * 100) + '%';
-        if (pc) pc.textContent = Math.round(pct * 100) + '%';
+        // Nº de página GLOBAL (de las locations de epub.js) + %. Antes de generarse, cae a página/total del capítulo.
+        if (pc) pc.textContent = (total ? `pág. ${idx + 1}/${total} · ` : '') + Math.round(pct * 100) + '%';
       } else if (pc && loc.start.displayed)
-        pc.textContent = `${loc.start.displayed.page}/${loc.start.displayed.total}`;
+        pc.textContent = `pág. ${loc.start.displayed.page}/${loc.start.displayed.total}`;
     };
     epubRendition.on('relocated', (loc) => {
       pin();
