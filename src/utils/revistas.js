@@ -59,6 +59,23 @@ export function pareceSerieLibros(titulo) {
     return RE_SERIE_LIBROS.test(t) || RE_EDICION.test(t);
 }
 
+// Editoriales que publican SOLO libros (no journals/revistas): un nombre de archivo con este prefijo/marca
+// es señal FUERTE de LIBRO aunque el ejemplar lleve un ISSN de SERIE (p. ej. las colecciones de informática
+// de Apress con ISSN de serie). Lista CONSERVADORA a propósito: se EXCLUYEN las que también editan revistas
+// científicas (Springer, Elsevier, Wiley, Cambridge, Oxford, IEEE, CRC…), donde un prefijo en el nombre no
+// distingue un libro de un número de journal. También se evitan tokens ambiguos ('que', 'osborne'…).
+// Fronteras con lookarounds (NO \b): el nombre de archivo separa con «_» y «.», que son caracteres de
+// palabra para \b (Wrox_Professional no casaría con \bwrox\b). Aquí la frontera es «no letra/dígito».
+const RE_EDITORIAL_LIBROS = /(?<![a-z0-9])(?:apress|wrox|o'?reilly|packt|manning|peachpit|sams|no[-\s._]?starch|course[-\s._]?technology|addison[-\s._]?wesley|prentice[-\s._]?hall|microsoft[-\s._]?press|new[-\s._]?riders|sybex)(?![a-z0-9])/i;
+
+/**
+ * ¿El texto (típicamente el NOMBRE DE ARCHIVO) contiene una EDITORIAL de solo-libros? Señal fuerte de libro
+ * para el discriminador: una serie de libros con ISSN (Apress, Wrox…) NO es una revista aunque no traiga ISBN.
+ */
+export function esEditorialDeLibros(texto) {
+    return RE_EDITORIAL_LIBROS.test(String(texto || ''));
+}
+
 /**
  * Discriminador REVISTA vs SERIE-DE-LIBROS para un grupo de documentos que comparten un mismo ISSN.
  *

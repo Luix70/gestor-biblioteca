@@ -9,7 +9,7 @@ import { buscarEnFicheroLocal, corroborarISBNporTitulo } from './utils/buscador-
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible, ErrorOmitir } from './errores.js';
 import { parsearNombre, esTituloArtefacto } from './utils/parsear-nombre.js';
 import { leerMobi } from './utils/lector-mobi.js';
-import { pareceSerieLibros } from './utils/revistas.js';
+import { pareceSerieLibros, esEditorialDeLibros } from './utils/revistas.js';
 import { clasificarTipo } from './utils/discriminador.js';
 import { interpretarIdentificadores } from './utils/interpretar-identificadores.js';
 import { extraerMetadatosComic } from './utils/lector-comic.js';
@@ -282,6 +282,7 @@ export async function procesarRecurso(entrada) {
             volumenNumero: datosBase.volumen_numero,
             obraTitulo: datosBase.obra_titulo,
             pareceSerieLibros: pareceSerieLibros(datosBase.titulo),
+            editorialLibro: esEditorialDeLibros(path.basename(rutas[0])) || esEditorialDeLibros(datosBase.coleccion_nombre),
             pareceRevista: pareceRevista(datosBase.titulo),
             titulo: datosBase.titulo,
         }).senales);
@@ -541,6 +542,8 @@ export async function procesarRecurso(entrada) {
             isbnPropio: datosBase.isbn_propio || null,
             isbnCandidatos: datosBase.isbn_candidatos,
             issnBarras977: datosBase.issn,                // un 977-ISSN escaneado ⇒ revista
+            pareceSerieLibros: pareceSerieLibros(datosBase.titulo),
+            editorialLibro: esEditorialDeLibros(path.basename(rutas[0])) || esEditorialDeLibros(datosBase.coleccion_nombre),
             pareceRevista: pareceRevista(datosBase.titulo || ''),
             titulo: datosBase.titulo,
         }).senales);

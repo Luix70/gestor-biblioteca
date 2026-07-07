@@ -22,7 +22,7 @@
 /**
  * @param {object} s  señales ya extraídas/validadas:
  *   { esComic, esGrupoImagenes,                       // estructural (T3)
- *     isbnPropio, cip, pareceSerieLibros,             // libro FUERTE (T1)
+ *     isbnPropio, cip, pareceSerieLibros, editorialLibro,  // libro FUERTE (T1/T2: id propio, serie, editorial de libros)
  *     esFechada, issnFuerte,                          // periódico FUERTE (T1/T2: nombre fechado, 977/impreso)
  *     multiparte,                                      // obra multivolumen (T1/T2: ISBN-con-rol, "Vol N")
  *     pareceRevista, issnHint, isbnHint }             // PISTAS (T4)
@@ -42,7 +42,7 @@ export function clasificarTipo(s = {}) {
     // T1/T2 · multivolumen: ISBN con rol (obra completa + tomo) o "Vol N" en el nombre → obra de LIBRO.
     if (s.multiparte) return { tipo_recurso: 'libro', naturaleza: null, multiparte: true };
 
-    const libroFuerte = !!(s.isbnPropio || s.cip || s.pareceSerieLibros);   // identificador/serie PROPIOS de libro (T1)
+    const libroFuerte = !!(s.isbnPropio || s.cip || s.pareceSerieLibros || s.editorialLibro); // id/serie propios o editorial de-solo-libros
     const periodicoFuerte = !!(s.esFechada || s.issnFuerte);                // nombre fechado (T2) o ISSN fiable 977/impreso (T1)
 
     // LIBRO FUERTE manda (regla de CLAUDE.md: «un ISBN PROPIO o un bloque CIP ⇒ libro, aun con ISSN de

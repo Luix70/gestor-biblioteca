@@ -64,21 +64,25 @@ export function interpretarIdentificadores(raw = {}) {
 
     const cip = !!raw.cip;
     const hayIdPropioLibro = !!(isbnPropio || cip);
+    // Editorial de-solo-libros en el nombre (Apress/Wrox/O'Reilly…): a efectos del ISSN cuenta como
+    // señal de libro (su ISSN es de SERIE, no de revista), igual que un ISBN/CIP propio.
+    const esLibroPorEditorial = !!raw.editorialLibro;
+    const señalLibro = hayIdPropioLibro || esLibroPorEditorial;
     // ISBN-pista: existe algún ISBN válido en el cuerpo/nombre aunque no sea el propio.
     const isbnHint = isbnsValidos.length > 0;
 
-    // ── ISSN: ¿de REVISTA (fuerte) o de SERIE de libros (débil)? EN CONJUNTO manda el ISBN propio/CIP:
+    // ── ISSN: ¿de REVISTA (fuerte) o de SERIE de libros (débil)? EN CONJUNTO manda la señal de libro:
     //   · 977 del barras                     → SIEMPRE ISSN de revista (una revista no lleva 978).
-    //   · ISSN impreso y SIN ISBN/CIP propio → ISSN de revista (masthead sin identificador de libro).
-    //   · ISSN impreso CON ISBN/CIP propio   → ISSN de SERIE (Springer «Lecture Notes…» 1868-…): el libro
-    //     conserva su ISBN y el ISSN vive en la colección — NO convierte el libro en revista.
+    //   · ISSN impreso y SIN señal de libro  → ISSN de revista (masthead sin identificador de libro).
+    //   · ISSN impreso CON señal de libro    → ISSN de SERIE (Springer «Lecture Notes…», serie Apress…): el
+    //     libro conserva su identidad y el ISSN vive en la colección — NO convierte el libro en revista.
     let issnMagazine = null, issnSerie = null;
     if (issnOk(raw.issnBarras977)) { issnMagazine = norm(raw.issnBarras977); notas.push(`ISSN de revista (barras 977): ${issnMagazine}.`); }
-    else if (issnOk(raw.issnImpreso) && !hayIdPropioLibro) { issnMagazine = norm(raw.issnImpreso); notas.push(`ISSN de revista (impreso, sin ISBN/CIP): ${issnMagazine}.`); }
-    // Cualquier ISSN válido restante, con ISBN/CIP propio, es de SERIE.
+    else if (issnOk(raw.issnImpreso) && !señalLibro) { issnMagazine = norm(raw.issnImpreso); notas.push(`ISSN de revista (impreso, sin señal de libro): ${issnMagazine}.`); }
+    // Cualquier ISSN válido restante, con señal de libro (ISBN/CIP propio o editorial de libros), es de SERIE.
     const issnRestante = issnsValidos.find((x) => x !== issnMagazine) || (issnOk(raw.issnImpreso) ? norm(raw.issnImpreso) : null);
-    if (!issnMagazine && issnRestante && hayIdPropioLibro) { issnSerie = issnRestante; notas.push(`ISSN tratado como de SERIE (hay ISBN/CIP propio): ${issnSerie}.`); }
-    else if (!issnMagazine && issnRestante) { issnSerie = issnRestante; } // sin ISBN propio: será pista de periódico
+    if (!issnMagazine && issnRestante && señalLibro) { issnSerie = issnRestante; notas.push(`ISSN tratado como de SERIE (hay señal de libro): ${issnSerie}.`); }
+    else if (!issnMagazine && issnRestante) { issnSerie = issnRestante; } // sin señal de libro: será pista de periódico
 
     const multiparte = !!(isbnObra || (raw.isbnsRol && raw.isbnsRol.length > 1) || raw.volumenNumero != null || raw.obraTitulo);
 
@@ -94,10 +98,11 @@ export function interpretarIdentificadores(raw = {}) {
         isbnPropio,                                    // string|null (clasificarTipo lo trata como booleano)
         cip,
         pareceSerieLibros: raw.pareceSerieLibros != null ? !!raw.pareceSerieLibros : pareceSerieLibros(raw.titulo || ''),
+        editorialLibro: esLibroPorEditorial,           // editorial de-solo-libros en el nombre → libro FUERTE
         esFechada: !!raw.esFechada,
-        issnFuerte: !!issnMagazine,                    // 977/impreso-sin-ISBN → periódico fuerte
+        issnFuerte: !!issnMagazine,                    // 977/impreso-sin-señal-de-libro → periódico fuerte
         pareceRevista,
-        issnHint: !!(issnSerie && !hayIdPropioLibro) || (!!issnRestante && !hayIdPropioLibro),
+        issnHint: (!!issnSerie || !!issnRestante) && !señalLibro,
         isbnHint,
     };
 
