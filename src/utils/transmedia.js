@@ -345,7 +345,8 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         if (!portada) portada = await renderizarPortadaMiembro(abs, carpetaColeccion, webColeccion, _id);
         const doc = baseDoc({
             _id,
-            titulo: m.titulo, tipo_recurso: 'libro', formatos: ['pdf'],
+            // Una lectura CON audio se etiqueta pdf + audio (así el thumbnail avisa de que trae audiolibro).
+            titulo: m.titulo, tipo_recurso: 'libro', formatos: audios.length ? ['pdf', 'audio'] : ['pdf'],
             autores: autores.length ? autores : undefined,
             nombre_archivo: m.nombre_archivo, ruta_base: carpetaWebDeRel(m.rel),
             nivel: m.nivel || undefined, unidad: m.unidad || undefined, rol_material: m.rol_material,

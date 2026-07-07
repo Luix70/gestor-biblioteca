@@ -33,7 +33,7 @@ async function main() {
     }
     console.log(`${EJECUTAR ? '⚙️  EJECUTANDO' : '🔎 DRY-RUN (nada se modifica)'} · ${cols.length} colección(es) transmedia\n`);
 
-    let totFecha = 0, totPortada = 0, totIndex = 0;
+    let totFecha = 0, totPortada = 0, totFormato = 0, totIndex = 0;
 
     for (const col of cols) {
         const carpetaColeccion = absDe(col.raiz_web);
@@ -41,7 +41,7 @@ async function main() {
         const miembros = await db.collection('biblioteca').find({ coleccion: col._id }).toArray();
         console.log(`📦 «${col.nombre}» · ${miembros.length} miembros · ${webColeccion || '(sin raiz_web)'}`);
 
-        let nFecha = 0, nPortada = 0, nIndex = 0;
+        let nFecha = 0, nPortada = 0, nFormato = 0, nIndex = 0;
         for (const doc of miembros) {
             const set = {};
 
@@ -49,10 +49,12 @@ async function main() {
             if (!doc.fecha_ingreso) { set.fecha_ingreso = doc._id.getTimestamp(); nFecha++; }
 
             // 2) Portada propia para materiales/guías en PDF, y para lecturas sin portada. (Audiolibros y
-            //    otros sin PDF se saltan: no hay página que rasterizar.)
+            //    otros sin PDF se saltan: no hay página que rasterizar. Y si YA se renderizó en un pase
+            //    anterior —portada en «/.portadas/»— no se re-renderiza: el script es re-ejecutable barato.)
             const esPdf = /\.pdf$/i.test(doc.nombre_archivo || '');
             const esLectura = doc.rol_material === 'lectura';
-            const necesitaPortada = esPdf && webColeccion && (!esLectura || !doc.portada);
+            const yaPropia = /\/\.portadas\//.test(doc.portada || '');
+            const necesitaPortada = esPdf && webColeccion && !yaPropia && (!esLectura || !doc.portada);
             if (necesitaPortada) {
                 if (EJECUTAR) {
                     const absPdf = path.join(absDe(doc.ruta_base), doc.nombre_archivo);
@@ -63,6 +65,13 @@ async function main() {
                 }
             }
 
+            // 2b) formatos: una lectura con audios debe declarar 'audio' junto a 'pdf' (así el thumbnail
+            //     avisa de que trae audiolibro; hasta ahora solo se veía como PDF).
+            if (doc.audios?.length && Array.isArray(doc.formatos) && doc.formatos.includes('pdf') && !doc.formatos.includes('audio')) {
+                set.formatos = [...doc.formatos, 'audio'];
+                nFormato++;
+            }
+
             if (Object.keys(set).length && EJECUTAR) {
                 await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
             }
@@ -71,12 +80,12 @@ async function main() {
             if (EJECUTAR) { if (await indexarDoc(db, doc._id)) nIndex++; } else { nIndex++; }
         }
 
-        console.log(`   → fecha_ingreso: ${nFecha} · portadas: ${nPortada} · reindexados: ${nIndex}\n`);
-        totFecha += nFecha; totPortada += nPortada; totIndex += nIndex;
+        console.log(`   → fecha_ingreso: ${nFecha} · portadas: ${nPortada} · formatos: ${nFormato} · reindexados: ${nIndex}\n`);
+        totFecha += nFecha; totPortada += nPortada; totFormato += nFormato; totIndex += nIndex;
     }
 
     console.log('─'.repeat(60));
-    console.log(`Total → fecha_ingreso: ${totFecha} · portadas: ${totPortada} · reindexados: ${totIndex}`);
+    console.log(`Total → fecha_ingreso: ${totFecha} · portadas: ${totPortada} · formatos: ${totFormato} · reindexados: ${totIndex}`);
     if (!EJECUTAR) console.log('\n(DRY-RUN) Repite con  --ejecutar  para aplicar los cambios.');
 }
 

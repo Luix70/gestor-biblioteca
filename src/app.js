@@ -90,6 +90,11 @@ app.use((req, res, next) => {
 // para que los PREVISUALICE en lugar de descargarlos (algunos navegadores de escritorio, sin esta
 // cabecera, descargan el PDF embebido). Los demás formatos se sirven tal cual (el front ofrece descarga).
 app.use('/recursos', express.static(DIR_CDU, {
+    // `dotfiles:'allow'` sirve rutas con carpetas/archivos que empiezan por punto — necesario para las
+    // portadas derivadas de las colecciones transmedia, que viven en «<colección>/.portadas/» (oculta a
+    // propósito para que la verificación de copia la ignore). Por defecto express.static las 404. Aquí no
+    // hay secretos bajo el árbol CDU (solo marcadores .ruta_fija/.transmedia y estas portadas).
+    dotfiles: 'allow',
     setHeaders: (res, ruta) => {
         if (/\.(pdf|jpe?g|png|webp|gif|svg)$/i.test(ruta)) res.setHeader('Content-Disposition', 'inline');
     },

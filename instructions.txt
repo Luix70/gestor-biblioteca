@@ -406,11 +406,13 @@ de ficheros clasificado por CDU.
       / guia). Autor/título salen del nombre de la carpeta de unidad («S0 Autor - Título»).
       Dedup por hash: PDFs de igual hash → UN doc (los ficheros permanecen, no se borra ninguno).
     · AUDIOLIBRO = unidad con audio y SIN PDF de lectura → doc naturaleza:'audiolibro',
-      formatos:['audio']. Una lectura CON audio se queda como libro + su playlist. Los audios
-      (audios[]) se reproducen desde la ficha (visor PDF + playlist si además hay PDF).
+      formatos:['audio']. Una lectura CON audio se queda como libro con formatos:['pdf','audio']
+      (el thumbnail avisa) + su playlist; los audios (audios[]) se reproducen desde la ficha
+      (visor PDF + playlist si además hay PDF).
     · PORTADAS: la lectura usa la cover.jpg de su unidad; los materiales/guías reciben su
       PROPIA 1ª página rasterizada (poppler) en «<colección>/.portadas/» (oculta) → ni
-      portadas repetidas ni docs con icono genérico.
+      portadas repetidas ni docs con icono genérico. Esa carpeta empieza por punto, así que
+      /recursos se sirve con dotfiles:'allow' (si no, express.static la 404).
     · ruta_fija:true en la colección y en cada miembro (+ marcador «.ruta_fija» en la raíz):
       Integridad/Conformador NO podan, mueven ni deduplican ese subárbol.
     · FICHA DE COLECCIÓN: barra de filtros por NIVEL (Stage) y por MATERIAL (rol), con
