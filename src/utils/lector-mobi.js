@@ -139,3 +139,75 @@ export async function leerImagenesMobi(ruta, { max = 60, minBytes = 256 } = {}) 
     }
     return { drm: false, total: imagenes.length, imagenes };
 }
+
+// Descompresión PalmDOC (LZ77) de un registro de texto MOBI. Con guardas para no salirse de rango si el
+// registro está corrupto (nunca lanza).
+function descomprimirPalmDoc(buf) {
+    const out = [];
+    let i = 0;
+    while (i < buf.length) {
+        const c = buf[i++];
+        if (c === 0) out.push(0);
+        else if (c <= 8) { for (let j = 0; j < c && i < buf.length; j++) out.push(buf[i++]); } // literales
+        else if (c <= 0x7f) out.push(c);                                                        // ASCII directo
+        else if (c <= 0xbf) {                                                                   // back-reference
+            if (i >= buf.length) break;
+            const c2 = buf[i++];
+            const dist = (((c << 8) | c2) >> 3) & 0x7ff;
+            const len = (c2 & 7) + 3;
+            const start = out.length - dist;
+            if (start < 0 || dist === 0) break;
+            for (let j = 0; j < len; j++) out.push(out[start + j] ?? 32);
+        } else { out.push(32); out.push(c ^ 0x80); }                                            // espacio + carácter
+    }
+    return Buffer.from(out);
+}
+
+/**
+ * HTML (best-effort) del comienzo de un MOBI/AZW/AZW3, para RASTERIZAR una «página» conservando la
+ * ESTRUCTURA (encabezados, negrita/cursiva, párrafos) — el navegador lo pinta con foreignObject. Descomprime
+ * los registros de texto (PalmDOC / sin comprimir), retira lo no renderizable (script/style/head/img externas)
+ * y conserva las etiquetas de estructura. `noSoportado:true` si la compresión es HUFF/CDIC (no trivial) o KF8.
+ * `drm:true` ⇒ cifrado.
+ * @returns {{ drm:boolean, html:string, noSoportado?:boolean }}
+ */
+export async function leerTextoMobi(ruta, { maxChars = 4000 } = {}) {
+    const data = await fs.readFile(ruta);
+    const nada = { drm: false, html: '' };
+    if (data.length < 78) return nada;
+    const numRegistros = data.readUInt16BE(76);
+    if (!numRegistros || 78 + numRegistros * 8 > data.length) return nada;
+    const offsets = [];
+    for (let i = 0; i < numRegistros; i++) offsets.push(data.readUInt32BE(78 + i * 8));
+    offsets.push(data.length);
+    const registro = (i) => data.subarray(offsets[i], offsets[i + 1]);
+    const r0 = registro(0);
+    if (r0.length < 16) return nada;
+    if (r0.readUInt16BE(12) !== 0) return { drm: true, html: '' };      // cifrado
+    const compresion = r0.readUInt16BE(0);                              // 1=ninguna, 2=PalmDOC, 17480=HUFF/CDIC
+    const numRegTexto = r0.readUInt16BE(8);
+    if (compresion !== 1 && compresion !== 2) return { drm: false, html: '', noSoportado: true };
+    const encoding = (r0.length >= 32 && r0.toString('ascii', 16, 20) === 'MOBI') ? r0.readUInt32BE(28) : 1252;
+
+    const bufs = [];
+    let bytes = 0;
+    for (let i = 1; i <= Math.min(numRegTexto, numRegistros - 1) && bytes < maxChars * 4; i++) {
+        const rr = compresion === 2 ? descomprimirPalmDoc(registro(i)) : Buffer.from(registro(i));
+        bufs.push(rr); bytes += rr.length;
+    }
+    const raw = Buffer.concat(bufs).toString(encoding === 65001 ? 'utf8' : 'latin1');
+    // Conserva la estructura (h1-6/p/b/i/…); quita lo no renderizable y las imágenes (referencian recindex://).
+    let html = raw
+        .replace(/<(script|style|head)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<\/?(html|body|meta|link|base|title)[^>]*>/gi, ' ')
+        .replace(/<img[^>]*>/gi, '')
+        .replace(/<\/?mbp:[^>]*>/gi, ' ')
+        .replace(/<a\b[^>]*>/gi, '<span>').replace(/<\/a>/gi, '</span>') // enlaces → texto (no navegan en una imagen)
+        .trim();
+    // Recorta a ~maxChars sin cortar en medio de una etiqueta (el DOMParser del cliente cerrará lo que quede).
+    if (html.length > maxChars) {
+        const g = html.indexOf('>', maxChars);
+        html = html.slice(0, g > 0 && g - maxChars < 300 ? g + 1 : maxChars);
+    }
+    return { drm: false, html };
+}

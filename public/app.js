@@ -3342,10 +3342,23 @@ async function extraerImagenDocumento() {
   if (!a || !a.url) { toast('Este documento no tiene fichero digital', 'warn'); return; }
   const ext = (a.nombre.split('.').pop() || '').toLowerCase();
   try {
+    const id = _imgState.id;
+    const enc = encodeURIComponent(id);
     if (ext === 'pdf') return await extraerDePdf(a);
     if (ext === 'epub') return await extraerDeEpub(a);
-    if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext)) return await extraerDePaginado(_imgState.id);
-    if (['mobi', 'azw', 'azw3'].includes(ext)) return await extraerDeMobi(_imgState.id);
+    if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext)) return await extraerLazy(id, {
+      titulo: 'Extraer del documento',
+      contar: { path: '/documentos/' + enc + '/paginas', key: 'paginas' },
+      item: (nn) => '/api/documentos/' + enc + '/paginas/' + nn,
+      vacio: 'Este documento no tiene páginas extraíbles.',
+    });
+    if (['mobi', 'azw', 'azw3'].includes(ext)) return await extraerLazy(id, {
+      titulo: 'Extraer del MOBI/AZW3',
+      contar: { path: '/documentos/' + enc + '/imagenes-embebidas', key: 'total' },
+      item: (nn) => '/api/documentos/' + enc + '/imagenes-embebidas/' + nn,
+      vacio: 'No tiene imágenes embebidas. Usa «📄 Página de texto» para rasterizar el texto.',
+      extras: [{ etq: '📄 Página de texto', fn: () => mobiPaginaTexto(id) }],
+    });
     toast(`Extracción no disponible para .${ext}`, 'warn');
   } catch (e) { toast('No se pudo leer el documento: ' + e.message, 'bad'); }
 }
@@ -3388,19 +3401,29 @@ async function extraerDePdf(archivo) {
     return c;
   };
   const grid = $('#exGrid');
+  // Miniaturas PEREZOSAS: cada página se rasteriza SOLO cuando su celda entra en pantalla (no las 80 de golpe).
+  const io = new IntersectionObserver((entradas) => {
+    for (const en of entradas) {
+      if (!en.isIntersecting) continue;
+      const cel = en.target; io.unobserve(cel);
+      render(+cel.dataset.n, 180).then((c) => {
+        const im = cel.querySelector('img'); if (im) im.src = c.toDataURL('image/jpeg', 0.7);
+        c.width = c.height = 0;
+      }).catch(() => {});
+    }
+  }, { root: grid, rootMargin: '300px' });
   for (let i = 1; i <= n; i++) {
-    const c = await render(i, 180);
-    const url = c.toDataURL('image/jpeg', 0.7);
-    c.width = c.height = 0;
     const cel = document.createElement('div');
+    cel.dataset.n = i;
     cel.style.cssText = 'position:relative;cursor:pointer';
-    cel.innerHTML = `<img src="${url}" style="width:100%;border-radius:6px;border:2px solid transparent;background:var(--card)"><span style="position:absolute;top:2px;left:4px;font-size:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:0 4px">${i}</span>`;
+    cel.innerHTML = `<img loading="lazy" style="width:100%;min-height:120px;border-radius:6px;border:2px solid transparent;background:var(--card)"><span style="position:absolute;top:2px;left:4px;font-size:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:0 4px">${i}</span>`;
     cel.onclick = () => {
       marcadas.has(i) ? marcadas.delete(i) : marcadas.add(i);
-      cel.firstChild.style.borderColor = marcadas.has(i) ? 'var(--acc)' : 'transparent';
+      cel.querySelector('img').style.borderColor = marcadas.has(i) ? 'var(--acc)' : 'transparent';
       actualizarBtn();
     };
     grid.appendChild(cel);
+    io.observe(cel);
   }
   $('#exOk').onclick = async () => {
     const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
@@ -3467,40 +3490,40 @@ async function extraerDeEpub(archivo) {
   };
 }
 
-// Descarga una página (0-based) de un documento PAGINABLE (cbz/cbr/cb7/djvu) servida por el backend (con
-// auth) como Blob. Mismo patrón que el visor de cómic (comicBlob).
-async function _paginaBlob(id, n) {
-  const res = await fetch('/api/documentos/' + encodeURIComponent(id) + '/paginas/' + n, { headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {} });
-  if (!res.ok) throw new Error('página ' + (n + 1));
-  return await res.blob();
-}
-
-// PAGINABLE (cbz/cbr/cb7/djvu): el backend sirve cada página como imagen. Miniaturas perezosas (0-based) →
-// el usuario marca las que quiera → se añaden al carrusel a plena resolución.
-async function extraerDePaginado(id) {
+// Rejilla PEREZOSA para documentos servidos por el backend (paginables cbz/cbr/cb7/djvu y las imágenes
+// EMBEBIDAS de MOBI/AZW3): solo se descarga la miniatura VISIBLE (IntersectionObserver, con auth → blob), NO
+// se precargan decenas. Se marcan las que se quieran → se añaden al carrusel a plena resolución.
+// cfg: { titulo, contar:{path,key}, item:(n)=>url, vacio, extras:[{etq,fn}] }.
+async function extraerLazy(id, cfg) {
   const cont = $('#cmpModal');
-  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del documento</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando páginas…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  const extraHtml = (cfg.extras || []).map((_, i) => `<button class="btn" id="exExtra${i}"></button>`).join('');
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 ${esc(cfg.titulo || 'Extraer del documento')}</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exCancel">Cancelar</button>${extraHtml}</div><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
   $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
-  $('#exX').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
+  $('#exCancel').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
+  (cfg.extras || []).forEach((e, i) => { const b = $('#exExtra' + i); if (b) { b.textContent = e.etq; b.onclick = e.fn; } });
 
-  let total = 0;
-  try { const r = await api('/documentos/' + encodeURIComponent(id) + '/paginas'); total = r.paginas || 0; }
-  catch (e) { $('#exMsg').textContent = 'No se pudieron leer las páginas: ' + e.message; return; }
-  if (!total) { $('#exMsg').textContent = 'Este documento no tiene páginas extraíbles.'; return; }
-  const MAX = 120;
-  const n = Math.min(total, MAX);
-  $('#exMsg').textContent = `${total} páginas${total > MAX ? ` (primeras ${MAX})` : ''} · toca las que quieras añadir`;
+  const fetchBlob = async (n) => {
+    const res = await fetch(cfg.item(n), { headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {} });
+    if (!res.ok) throw new Error('elemento ' + (n + 1));
+    return await res.blob();
+  };
+  let r;
+  try { r = await api(cfg.contar.path); } catch (e) { $('#exMsg').textContent = 'No se pudo leer: ' + e.message; return; }
+  if (r.drm) { $('#exMsg').textContent = 'Fichero con DRM: no se puede leer el contenido.'; return; }
+  const total = r[cfg.contar.key] || 0;
+  if (!total) { $('#exMsg').textContent = cfg.vacio || 'No hay imágenes extraíbles.'; return; }
+  const MAX = 200, n = Math.min(total, MAX);
+  $('#exMsg').textContent = `${total}${total > MAX ? ` (primeras ${MAX})` : ''} · toca las que quieras añadir`;
   const marcadas = new Set();
   const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
   const grid = $('#exGrid');
-  // Miniaturas perezosas: solo se descargan las páginas visibles (IntersectionObserver).
   const io = new IntersectionObserver((entradas) => {
     for (const en of entradas) {
       if (!en.isIntersecting) continue;
       const cel = en.target; io.unobserve(cel);
-      _paginaBlob(id, +cel.dataset.n).then((b) => { const im = cel.querySelector('img'); if (im) im.src = URL.createObjectURL(b); }).catch(() => {});
+      fetchBlob(+cel.dataset.n).then((b) => { const im = cel.querySelector('img'); if (im) im.src = URL.createObjectURL(b); }).catch(() => {});
     }
-  }, { root: grid, rootMargin: '200px' });
+  }, { root: grid, rootMargin: '250px' });
   for (let i = 0; i < n; i++) {
     const cel = document.createElement('div');
     cel.dataset.n = i;
@@ -3518,8 +3541,8 @@ async function extraerDePaginado(id) {
     const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
     try {
       for (const num of [...marcadas].sort((x, y) => x - y)) {
-        const blob = await _paginaBlob(id, num);
-        const file = new File([blob], `pag-${num + 1}.jpg`, { type: blob.type || 'image/jpeg' });
+        const blob = await fetchBlob(num);
+        const file = new File([blob], `img-${num + 1}.jpg`, { type: blob.type || 'image/jpeg' });
         const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
         await apiImg('anadir', { base64: b64 });
       }
@@ -3529,48 +3552,52 @@ async function extraerDePaginado(id) {
   };
 }
 
-// MOBI/AZW/AZW3: el backend enumera las imágenes EMBEBIDAS (base64; no hay «páginas»). Miniaturas → el
-// usuario marca las que quiera → se añaden al carrusel (normalizadas con reducirImagen).
-async function extraerDeMobi(id) {
-  const cont = $('#cmpModal');
-  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del documento</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando imágenes…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
-  $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
-  $('#exX').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
-
+// Rasteriza UNA página de texto de un MOBI/AZW3 CONSERVANDO la estructura (encabezados, negrita/cursiva,
+// párrafos, tamaños relativos): el HTML del libro se pinta con SVG <foreignObject> → canvas. La fuente
+// EMBEBIDA del ebook NO se preserva (serif del sistema); las clases CSS del ebook, solo las semánticas.
+async function mobiPaginaTexto(id) {
   let r;
-  try { r = await api('/documentos/' + encodeURIComponent(id) + '/imagenes-embebidas'); }
-  catch (e) { $('#exMsg').textContent = 'No se pudo leer el documento: ' + e.message; return; }
-  if (r.drm) { $('#exMsg').textContent = 'Fichero con DRM: no se pueden extraer sus imágenes.'; return; }
-  const imgs = r.imagenes || [];
-  if (!imgs.length) { $('#exMsg').textContent = 'Este MOBI/AZW3 no tiene imágenes embebidas extraíbles.'; return; }
-  $('#exMsg').textContent = `${imgs.length} imágenes · toca las que quieras añadir`;
-  const marcadas = new Map();
-  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
-  const grid = $('#exGrid');
-  imgs.forEach((im, i) => {
-    const url = `data:image/${im.ext === 'jpg' ? 'jpeg' : im.ext};base64,${im.b64}`;
-    const cel = document.createElement('div');
-    cel.style.cssText = 'position:relative;cursor:pointer';
-    cel.innerHTML = `<img src="${url}" loading="lazy" style="width:100%;height:110px;object-fit:cover;border-radius:6px;border:2px solid transparent;background:var(--card)">`;
-    cel.onclick = () => {
-      if (marcadas.has(i)) marcadas.delete(i); else marcadas.set(i, url);
-      cel.firstChild.style.borderColor = marcadas.has(i) ? 'var(--acc)' : 'transparent';
-      actualizarBtn();
-    };
-    grid.appendChild(cel);
-  });
-  $('#exOk').onclick = async () => {
-    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
-    try {
-      for (const url of marcadas.values()) {
-        const file = new File([await (await fetch(url)).blob()], 'img', { type: url.slice(5, url.indexOf(';')) });
-        const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
-        await apiImg('anadir', { base64: b64 });
-      }
-      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
-    } catch (e) { toast(e.message, 'bad'); }
-    pintarGestorImagenes();
+  try { r = await api('/documentos/' + encodeURIComponent(id) + '/pagina-texto'); }
+  catch (e) { toast(e.message, 'bad'); return; }
+  if (r.drm) { toast('Fichero con DRM: no se puede leer el texto', 'warn'); return; }
+  if (r.noSoportado) { toast('Compresión no soportada (HUFF/CDIC): no se pudo extraer el texto', 'warn'); return; }
+  if (!r.html) { toast('No se pudo extraer texto del documento', 'warn'); return; }
+  try {
+    const b64 = await htmlAPaginaImagen(r.titulo || '', r.html);
+    await apiImg('anadir', { base64: b64 });
+    toast('📄 Página de texto añadida');
+  } catch (e) { toast('No se pudo rasterizar: ' + e.message, 'bad'); }
+}
+
+// HTML → imagen de página (SVG foreignObject → canvas). Sanea el fragmento con DOMParser (cierra etiquetas,
+// quita lo externo: src/href/style → el canvas NO se «tinta» y se puede exportar). Conserva las etiquetas de
+// estructura y mapea las clases semánticas comunes (bold/italic/center) por si el ebook usa CSS.
+async function htmlAPaginaImagen(titulo, html) {
+  const W = 1000, H = 1414;
+  const PERMITIDAS = new Set(['DIV', 'P', 'SPAN', 'BR', 'B', 'I', 'EM', 'STRONG', 'U', 'FONT', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'SUP', 'SUB', 'SMALL', 'CENTER']);
+  const docp = new DOMParser().parseFromString('<!doctype html><body><div id="r">' + html + '</div>', 'text/html');
+  const root = docp.getElementById('r');
+  const limpiar = (nodo) => {
+    for (const hijo of [...nodo.childNodes]) {
+      if (hijo.nodeType !== 1) continue;
+      if (!PERMITIDAS.has(hijo.tagName)) { while (hijo.firstChild) nodo.insertBefore(hijo.firstChild, hijo); nodo.removeChild(hijo); continue; }
+      for (const at of [...hijo.attributes]) if (!['class', 'align', 'size'].includes(at.name)) hijo.removeAttribute(at.name);
+      limpiar(hijo);
+    }
   };
+  limpiar(root);
+  const cuerpo = new XMLSerializer().serializeToString(root);
+  const escT = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const tit = titulo ? `<div class="_tit">${escT(titulo)}</div>` : '';
+  const estilo = `*{box-sizing:border-box;max-width:100%} body{margin:0} .pg{width:${W}px;height:${H}px;padding:80px 90px;background:#faf8f4;color:#1a1a1a;font-family:Georgia,'Times New Roman',serif;font-size:30px;line-height:1.5;overflow:hidden} ._tit{font-size:40px;font-weight:bold;border-bottom:2px solid #ccc;padding-bottom:14px;margin-bottom:24px} h1{font-size:46px}h2{font-size:38px}h3{font-size:33px} h1,h2,h3,h4,h5,h6{font-weight:bold;margin:.4em 0} p{margin:0 0 .7em} blockquote{margin:.6em 1.4em;font-style:italic} .bold{font-weight:bold} .italic{font-style:italic} .center,[align=center]{text-align:center}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject width="100%" height="100%"><body xmlns="http://www.w3.org/1999/xhtml"><style>${estilo}</style><div class="pg">${tit}${cuerpo}</div></body></foreignObject></svg>`;
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('render del HTML')); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+  const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#faf8f4'; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.92);
 }
 async function moverImg(i, dir) {
   const { imgs } = _imgState;

@@ -30,7 +30,7 @@ import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fondo.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
-import { leerImagenesMobi } from './utils/lector-mobi.js';
+import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
 import path from 'node:path';
@@ -1366,20 +1366,44 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
-    // Imágenes EMBEBIDAS de un MOBI/AZW/AZW3 (para «🖹 Del documento»: no tienen «páginas», sí imágenes
-    // embebidas). Devuelve hasta 60 en base64. drm:true si el fichero está cifrado.
+    // MOBI/AZW/AZW3 para «🖹 Del documento» (no tienen «páginas», pero sí imágenes embebidas y texto).
+    // Se resuelve el fichero .mobi/.azw/.azw3 del documento (o null con el error ya enviado).
+    const docMobi = async (req, res) => {
+        if (!ObjectId.isValid(req.params.id)) { res.status(400).json({ ok: false, motivo: 'id inválido' }); return null; }
+        const db = await conectarDB();
+        const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+        if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (!['.mobi', '.azw', '.azw3'].includes(path.extname(doc.nombre_archivo || '').toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es un MOBI/AZW/AZW3' }); return null; }
+        return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo) };
+    };
+    // Nº de imágenes embebidas (para la rejilla perezosa; NO devuelve las imágenes: se piden una a una).
     r.get('/documentos/:id/imagenes-embebidas', async (req, res) => {
         try {
-            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-            const db = await conectarDB();
-            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
-            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            const ext = path.extname(doc.nombre_archivo || '').toLowerCase();
-            if (!['.mobi', '.azw', '.azw3'].includes(ext)) return res.status(400).json({ ok: false, motivo: 'no es un MOBI/AZW/AZW3' });
-            const r = await leerImagenesMobi(path.join(carpetaDeDoc(doc), doc.nombre_archivo), { max: 60 });
-            if (r.drm) return res.json({ ok: true, drm: true, imagenes: [] });
-            res.json({ ok: true, total: r.total, imagenes: r.imagenes.map((im) => ({ b64: im.buf.toString('base64'), ext: im.ext })) });
+            const m = await docMobi(req, res); if (!m) return;
+            const r0 = await leerImagenesMobi(m.ruta, { max: 120 });
+            res.json({ ok: true, total: r0.total, drm: !!r0.drm });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Imagen embebida N (0-based) — servida como binario para la miniatura/extracción.
+    r.get('/documentos/:id/imagenes-embebidas/:n', async (req, res) => {
+        try {
+            const m = await docMobi(req, res); if (!m) return;
+            const r0 = await leerImagenesMobi(m.ruta, { max: 120 });
+            const im = r0.imagenes[Math.max(0, parseInt(req.params.n, 10) || 0)];
+            if (!im) return res.status(404).json({ ok: false, motivo: 'imagen no encontrada' });
+            res.set('Content-Type', im.ext === 'png' ? 'image/png' : im.ext === 'gif' ? 'image/gif' : 'image/jpeg');
+            res.set('Cache-Control', 'private, max-age=600');
+            res.send(im.buf);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Texto plano (best-effort) para RASTERIZAR una página cuando el MOBI no tiene imágenes (o se quiere una
+    // página de texto). El navegador lo dibuja en un canvas. Devuelve también el título catalogado del doc.
+    r.get('/documentos/:id/pagina-texto', async (req, res) => {
+        try {
+            const m = await docMobi(req, res); if (!m) return;
+            const r0 = await leerTextoMobi(m.ruta, { maxChars: 4000 });
+            res.json({ ok: true, drm: !!r0.drm, noSoportado: !!r0.noSoportado, html: r0.html || '', titulo: m.doc.titulo || '' });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
