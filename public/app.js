@@ -2827,7 +2827,7 @@ function pintarDoc(r, ctx) {
     if (r.archivo_url && _nom.endsWith('.epub')) iniciarLectorEpub(encUrl(r.archivo_url));
     else if (r.archivo_url && _nom.endsWith('.pdf')) iniciarLectorPdf(encUrl(r.archivo_url));
     else if (/\.(cbz|cbr|cb7|djvu)$/.test(_nom)) iniciarLectorComic(d._id);
-    if (r.audios && r.audios.length) iniciarReproductorAudio(); // audiolibro / lectura con audio: playlist
+    if (r.audios && r.audios.length) iniciarReproductorAudio(r.doc && r.doc._id, r.audios); // audiolibro / lectura con audio: playlist
   };
   const ld = $('#lectDet');
   if (ld) {
@@ -5246,34 +5246,77 @@ function fichaEditar(d, r, opts) {
 
 // Reproductor de AUDIO con playlist (audiolibros / lecturas con audio de un transmedia). Los mp3 se sirven
 // desde /recursos (estático). Se inicializa tras pintar con iniciarReproductorAudio.
+// Duración en mm:ss (o h:mm:ss). '' si no hay.
+function fmtDur(s) {
+  if (!s) return '';
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + ':' + String(sec).padStart(2, '0');
+}
+// Etiqueta de disco (CD1/CD2…) del lado cliente: usa `grupo` si viene del servidor; si no, la deriva de la
+// carpeta padre de la ruta (para audiolibros catalogados antes de guardar `grupo`).
+const RE_DISCO_CLI = new RegExp('[\\s._-]*(?:cd|dis[ck]o?|disque|parte?|vol(?:umen)?)\\s*\\.?\\s*\\d+\\s*$', 'i');
+function etiquetaDiscoCli(nombre) {
+  const m = String(nombre || '').match(RE_DISCO_CLI);
+  return m ? m[0].replace(/^[\s._-]+/, '').replace(/\s+/g, ' ').trim() : String(nombre || '');
+}
+function grupoDeAudio(a) {
+  if (a.grupo) return a.grupo;
+  const segs = decodeURIComponent(String(a.ruta || '')).split('/').filter(Boolean);
+  return segs.length >= 2 ? etiquetaDiscoCli(segs[segs.length - 2]) : '';
+}
+
 function reproductorAudioHtml(audios, id) {
   const lista = (audios || []).slice().sort((a, b) => (a.orden || 0) - (b.orden || 0));
   if (!lista.length) return '';
+  // Selector de DISCO (Todo / CD1 / CD2…): solo si las pistas se reparten en ≥2 grupos (multi-CD).
+  const grupos = [...new Set(lista.map(grupoDeAudio).filter(Boolean))];
+  const multi = grupos.length >= 2;
   const pistas = lista.map((a, i) =>
-    `<button type="button" class="audiotrack" data-src="${esc(encUrl(a.ruta))}" title="${esc(a.titulo || '')}" style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:8px 10px;border:none;border-top:1px solid var(--line);background:none;color:inherit;cursor:pointer;font-size:13px">`
+    `<button type="button" class="audiotrack" data-src="${esc(encUrl(a.ruta))}" data-grupo="${esc(grupoDeAudio(a))}" title="${esc(a.titulo || '')}" style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:8px 10px;border:none;border-top:1px solid var(--line);background:none;color:inherit;cursor:pointer;font-size:13px">`
     + `<span style="opacity:.55;min-width:22px;text-align:right">${i + 1}</span>`
-    + `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.titulo || 'Pista ' + (i + 1))}</span></button>`).join('');
+    + `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.titulo || 'Pista ' + (i + 1))}</span>`
+    + (a.duracion ? `<span class="muted" style="font-size:11px;flex-shrink:0">${fmtDur(a.duracion)}</span>` : '')
+    + `</button>`).join('');
   // Descargas (streaming ZIP por bsdtar, público como /recursos): la playlist completa (solo audio) y la
   // carpeta entera (audio + imágenes + lo que haya). Enlaces normales <a download> → sin token.
   const descargas = id
-    ? `<div class="row" style="gap:6px">
-         <a class="btn" href="/api/descargar/${esc(id)}?que=audio" download title="Descargar todas las pistas en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Playlist</a>
-         <a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar TODO el contenido (audio + imágenes + extras) en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Todo (ZIP)</a>
+    ? `<a class="btn" href="/api/descargar/${esc(id)}?que=audio" download title="Descargar todas las pistas en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Playlist</a>
+       <a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar TODO el contenido (audio + imágenes + extras) en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Todo (ZIP)</a>`
+    : '';
+  // «Reordenar» (admin): ordenar por pista/título/duración y/o mover a mano; se persiste.
+  const reord = (id && ROL === 'admin')
+    ? `<button class="btn admin-only" id="audioReord" title="Ordenar / reordenar las pistas" style="padding:4px 10px;font-size:12px">🎚️ Reordenar</button>`
+    : '';
+  // Selector de disco (chips). Filtra la lista visible; la reproducción sigue el orden completo.
+  const selector = multi
+    ? `<div class="row" id="cdSel" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
+         <button class="btn filtCD active" data-cd="">Todo</button>${grupos.map((g) => `<button class="btn filtCD" data-cd="${esc(g)}">${esc(g)}</button>`).join('')}
        </div>`
     : '';
   return `<div class="fileprev">
       <div class="row" style="align-items:center;justify-content:space-between;gap:8px;margin:16px 0 8px">
-        <h3 style="margin:0;color:var(--mut);font-size:13px">🔊 Audio · ${lista.length} pista${lista.length > 1 ? 's' : ''}</h3>${descargas}
-      </div>`
+        <h3 style="margin:0;color:var(--mut);font-size:13px">🔊 Audio · ${lista.length} pista${lista.length > 1 ? 's' : ''}</h3>
+        <div class="row" style="gap:6px;flex-wrap:wrap">${reord}${descargas}</div>
+      </div>${selector}`
     + `<audio id="audioPlayer" controls preload="none" style="width:100%;margin-bottom:8px"></audio>`
     + `<div id="audioLista" style="border-bottom:1px solid var(--line);border-radius:8px;overflow:hidden">${pistas}</div></div>`;
 }
+
 // Carga la 1ª pista, resalta la activa, y al terminar una AVANZA a la siguiente (comportamiento de playlist).
-function iniciarReproductorAudio() {
+// El selector de disco filtra la lista visible; el botón «Reordenar» (admin) abre el reordenador.
+function iniciarReproductorAudio(id, audios) {
   const player = $('#audioPlayer'), lista = $('#audioLista');
   if (!player || !lista) return;
   const tracks = [...lista.querySelectorAll('.audiotrack')];
   if (!tracks.length) return;
+  // Filtro por disco (Todo / CD1 / CD2…): muestra/oculta pistas; NO altera el orden de reproducción.
+  const filtros = [...document.querySelectorAll('#cdSel .filtCD')];
+  filtros.forEach((b) => (b.onclick = () => {
+    filtros.forEach((x) => x.classList.toggle('active', x === b));
+    const cd = b.dataset.cd;
+    tracks.forEach((t) => (t.style.display = (!cd || t.dataset.grupo === cd) ? 'flex' : 'none'));
+  }));
   let actual = -1;
   const cargar = (i, reproducir) => {
     if (i < 0 || i >= tracks.length) return;
@@ -5285,6 +5328,92 @@ function iniciarReproductorAudio() {
   tracks.forEach((t, i) => (t.onclick = () => cargar(i, true)));
   player.onended = () => { if (actual + 1 < tracks.length) cargar(actual + 1, true); };
   cargar(0, false); // deja la 1ª cargada, sin reproducir
+  const rb = $('#audioReord');
+  if (rb) rb.onclick = () => reordenarPistas(id, audios);
+}
+
+// ════════ REORDENAR PISTAS (admin): ordenar por pista/título/duración asc/desc + mover a mano (↑↓/arrastrar) ════════
+let _plR = null; // { id, items: [audio…] }
+function reordenarPistas(id, audios) {
+  _plR = { id, items: (audios || []).slice().sort((a, b) => (a.orden || 0) - (b.orden || 0)) };
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:600px;width:94vw;max-height:90vh;overflow:auto">
+    <h3 style="margin-top:0">🎚️ Reordenar pistas</h3>
+    <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <span class="muted" style="font-size:12px">Ordenar por:</span>
+      <button class="btn plsort" data-k="pista" style="padding:4px 10px;font-size:12px">Nº de pista</button>
+      <button class="btn plsort" data-k="titulo" style="padding:4px 10px;font-size:12px">Título</button>
+      <button class="btn plsort" data-k="duracion" style="padding:4px 10px;font-size:12px">Duración</button>
+      <button class="btn" id="plDir" data-dir="asc" title="Ascendente / descendente" style="padding:4px 10px;font-size:12px">▲ Asc</button>
+      <span class="muted" style="font-size:11px;margin-left:auto">o arrastra / usa ↑↓</span>
+    </div>
+    <div id="plList"></div>
+    <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
+      <button class="btn" id="plCancel">Cancelar</button>
+      <button class="btn pri" id="plSave">Guardar orden</button>
+    </div></div>`;
+  $('#cmpModal').style.display = 'grid';
+  pintarPlList();
+  $('#plDir').onclick = () => {
+    const d = $('#plDir').dataset.dir === 'asc' ? 'desc' : 'asc';
+    $('#plDir').dataset.dir = d;
+    $('#plDir').textContent = d === 'asc' ? '▲ Asc' : '▼ Desc';
+  };
+  $$('#cmpModal .plsort').forEach((b) => (b.onclick = () => ordenarPl(b.dataset.k, $('#plDir').dataset.dir)));
+  $('#plCancel').onclick = cerrarCmp;
+  $('#plSave').onclick = guardarPl;
+}
+function pintarPlList() {
+  const box = $('#plList'); if (!box || !_plR) return;
+  box.innerHTML = _plR.items.map((a, i) => {
+    const sub = [a.grupo || '', a.duracion ? fmtDur(a.duracion) : ''].filter(Boolean).join(' · ');
+    return `<div class="ordrow" draggable="true" data-ruta="${esc(a.ruta)}" style="display:flex;gap:10px;align-items:center;padding:7px 8px;border-top:1px solid var(--line)">`
+      + `<span class="ordnum" style="opacity:.5;min-width:26px;text-align:right">${i + 1}</span>`
+      + `<div style="flex:1;min-width:0"><div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.titulo || 'Pista ' + (i + 1))}</div>${sub ? `<div class="muted" style="font-size:11px">${esc(sub)}</div>` : ''}</div>`
+      + `<span class="ordmove" style="display:flex;flex-direction:column;gap:2px"><button type="button" class="btn" data-up="${i}" title="Subir" style="padding:0 8px;line-height:1.5">↑</button><button type="button" class="btn" data-dn="${i}" title="Bajar" style="padding:0 8px;line-height:1.5">↓</button></span></div>`;
+  }).join('');
+  wirePlList();
+}
+function moverPl(from, to) {
+  const it = _plR && _plR.items;
+  if (!it || to < 0 || to >= it.length || from < 0 || from >= it.length) return;
+  const [x] = it.splice(from, 1);
+  it.splice(to, 0, x);
+  pintarPlList();
+}
+function ordenarPl(k, dir) {
+  const s = dir === 'desc' ? -1 : 1;
+  _plR.items.sort((a, b) => {
+    if (k === 'titulo') { const va = normalizar(a.titulo || ''), vb = normalizar(b.titulo || ''); return (va < vb ? -1 : va > vb ? 1 : 0) * s; }
+    if (k === 'duracion') return ((a.duracion || 0) - (b.duracion || 0)) * s;
+    return ((a.orden || 0) - (b.orden || 0)) * s; // «pista» = orden original
+  });
+  pintarPlList();
+}
+function wirePlList() {
+  $$('#plList [data-up]').forEach((b) => (b.onclick = () => moverPl(+b.dataset.up, +b.dataset.up - 1)));
+  $$('#plList [data-dn]').forEach((b) => (b.onclick = () => moverPl(+b.dataset.dn, +b.dataset.dn + 1)));
+  let src = null;
+  $$('#plList .ordrow').forEach((row) => {
+    row.addEventListener('dragstart', (ev) => { src = row.dataset.ruta; row.classList.add('dragging'); try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', src); } catch (_) {} });
+    row.addEventListener('dragend', () => { row.classList.remove('dragging'); $$('#plList .ordrow.dragover').forEach((x) => x.classList.remove('dragover')); src = null; });
+    row.addEventListener('dragover', (ev) => { if (src && src !== row.dataset.ruta) { ev.preventDefault(); row.classList.add('dragover'); } });
+    row.addEventListener('dragleave', () => row.classList.remove('dragover'));
+    row.addEventListener('drop', (ev) => {
+      ev.preventDefault(); row.classList.remove('dragover');
+      if (!src || src === row.dataset.ruta) return;
+      moverPl(_plR.items.findIndex((x) => x.ruta === src), _plR.items.findIndex((x) => x.ruta === row.dataset.ruta));
+    });
+  });
+}
+async function guardarPl() {
+  try {
+    const orden = _plR.items.map((a) => a.ruta);
+    const res = await api('/documentos/' + encodeURIComponent(_plR.id) + '/audios/orden', { method: 'POST', body: JSON.stringify({ orden }) });
+    if (!res.ok) { toast(res.motivo || 'No se pudo guardar', 'bad'); return; }
+    cerrarCmp();
+    toast('Orden de pistas guardado');
+    verDoc(_plR.id); // recargar la ficha con el nuevo orden
+  } catch (e) { toast(e.message, 'bad'); }
 }
 
 function previewArchivo(r) {

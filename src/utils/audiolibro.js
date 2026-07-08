@@ -39,6 +39,12 @@ const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#
 const RE_DISCO = new RegExp('[\\s._-]*(?:cd|dis[ck]o?|disque|parte?|vol(?:umen)?)\\s*\\.?\\s*\\d+\\s*$', 'i');
 const esDisco = (nombre) => RE_DISCO.test(String(nombre || ''));
 const baseSinDisco = (nombre) => String(nombre || '').replace(RE_DISCO, '').trim();
+// Etiqueta CORTA del disco a partir del nombre de subcarpeta: «Le grand Meaulnes CD1» → «CD1» (para el
+// selector Todo/CD1/CD2… de la playlist). Si no casa el patrón, el nombre de la subcarpeta tal cual.
+const etiquetaDisco = (nombre) => {
+    const m = String(nombre || '').match(RE_DISCO);
+    return m ? m[0].replace(/^[\s._-]+/, '').replace(/\s+/g, ' ').trim() : String(nombre || '');
+};
 
 const webDe = (abs) => '/recursos/' + path.relative(DIR_CDU, abs).split(path.sep).join('/');
 
@@ -230,9 +236,12 @@ async function planUnidad(unidad) {
     const portadaImg = imagenes.find((i) => i.clase === 'portada') || imagenes[0] || null;
 
     // Playlist: título de pista del ID3 (`common.title`) si lo hay; si no, el nombre de fichero aseado.
+    // `grupo` = disco (CD1/CD2…) para el selector; `duracion` (s) para ordenar por duración.
     const audios = audiosF.map((f, i) => ({
         rel: f.rel,
         titulo: (metas[i] && metas[i].tituloPista) || tituloPistaDeArchivo(f.nombre),
+        grupo: f.rel.includes('/') ? etiquetaDisco(f.rel.split('/')[0]) : null,
+        duracion: (metas[i] && metas[i].duracion) || null,
     }));
 
     return {
@@ -321,7 +330,7 @@ export async function ingestarAudiolibro(dir, { db: dbArg, reciclarOrigen = true
             imagenes.unshift({ ruta: portada, tipo: 'portada' });
         }
 
-        const audios = u.audios.map((a, i) => ({ ruta: webRel(a.rel), titulo: a.titulo, orden: i + 1 }));
+        const audios = u.audios.map((a, i) => ({ ruta: webRel(a.rel), titulo: a.titulo, orden: i + 1, grupo: a.grupo || undefined, duracion: a.duracion || undefined }));
         // Se resuelve el autor SIEMPRE que lo haya (incluido el que aportó el Fichero por ISBN a un audiolibro
         // coral): u.autor ya viene vacío si no había fuente fiable → nunca se inventa.
         const autores = u.autor ? await resolverAutor(db, u.autor) : [];

@@ -470,6 +470,11 @@ de ficheros clasificado por CDU.
     · DESCARGAS (ficha): «⬇ Playlist» baja todas las pistas en un ZIP; «⬇ Todo (ZIP)» baja TODA
       la carpeta ruta_base (audio + imágenes + extras). Endpoint PÚBLICO en streaming (bsdtar, sin
       RAM) GET /api/descargar/:id?que=audio|todo — vale para cualquier documento (no solo audio).
+    · PLAYLIST (ficha): cada pista guarda `grupo` (disco: CD1/CD2… vía etiquetaDisco) y `duracion`.
+      El reproductor muestra la DURACIÓN por pista y, si hay ≥2 discos, un SELECTOR «Todo/CD1/CD2…»
+      que filtra la lista (la reproducción sigue el orden completo). Admin «🎚️ Reordenar»: ordena
+      por Nº de pista/Título/Duración (asc/desc) y/o mueve a mano (↑↓/arrastrar, como estanterías);
+      se PERSISTE con POST /documentos/:id/audios/orden (reordenarAudios, espejo de reordenarImagenes).
 
   ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
     El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos

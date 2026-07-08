@@ -15,6 +15,7 @@ import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalog
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen } from './utils/imagenes-doc.js';
+import { reordenarAudios } from './utils/audios-doc.js';
 import { leerLomosImagen, leerLomosRecortados, emparejarLomos } from './utils/lector-lomos.js';
 import { editarDocumento } from './utils/editar-doc.js';
 import { editarColeccion, editarObra } from './utils/editar-grupos.js';
@@ -1290,6 +1291,11 @@ export function rutasPanel() {
     //    `autenticar`). Editar (rotar/recortar/perspectiva) se hace en el CLIENTE y llega en base64. ──
     r.post('/documentos/:id/imagenes/orden', async (req, res) => {
         try { res.json(await reordenarImagenes(await conectarDB(), req.params.id, req.body?.orden || [])); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Reordenar las PISTAS (playlist) de un audiolibro: `orden` = rutas en el nuevo orden.
+    r.post('/documentos/:id/audios/orden', async (req, res) => {
+        try { res.json(await reordenarAudios(await conectarDB(), req.params.id, req.body?.orden || [])); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/documentos/:id/imagenes/eliminar', async (req, res) => {
