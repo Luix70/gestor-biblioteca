@@ -27,7 +27,8 @@ async function main() {
             const imgTxt = Object.entries(imgs).map(([k, v]) => `${v} ${k}`).join(', ') || '—';
             console.log(`📀 «${u.titulo}»`);
             console.log(`   autor:     ${u.autor || '(sin autor)'}${u.autor ? ` [${u.autorFuente || 'carpeta'}]` : ''}${u.coral ? ' · (varios narradores → sin autor de ID3)' : ''}`);
-            console.log(`   año:       ${u.anio || '—'}   ·   CDU: ${u.cdu} (deducida)   ·   idioma: ${u.idioma} (deducido)`);
+            console.log(`   año:       ${u.anio || '—'}   ·   CDU: ${u.cdu}${u.ficheroHit ? '' : ' (deducida)'}   ·   idioma: ${u.idioma}${u.ficheroHit ? '' : ' (deducido)'}`);
+            if (u.isbn) console.log(`   ISBN:      ${u.isbn} (código de barras)${u.ficheroHit ? ` · ✓ Fichero${u.editorial ? ' · ' + u.editorial : ''}` : ' · no está en el Fichero'}`);
             console.log(`   narrador:  ${u.narrador || '—'}   ·   género: ${u.genero || '—'}`);
             console.log(`   pistas:    ${u.audios.length}   ·   duración total: ${seg(u.duracionTotal)}`);
             console.log(`   imágenes:  ${u.imagenes.length} (${imgTxt})${u.tienePortadaEmbebida ? ' · +carátula embebida' : ''}`);

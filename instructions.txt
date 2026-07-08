@@ -444,7 +444,11 @@ de ficheros clasificado por CDU.
          soneto) → NO se inventa autor (queda sin autor + narradores listados). Nunca autor falso.
       2) NOMBRE de carpeta (limpiando basura de ripeo: «[Livre audio]», «[MP3]», «[192kbps]»,
          «(CD MP3)», «.partN») → rellena autor/título/año que falten.
-      3) (Siguiente fase) código de barras de la CONTRAPORTADA → EAN/ISBN → Fichero/APIs.
+      3) CÓDIGO DE BARRAS de la contra/portada (zxing local, sin IA; leerISBNdeImagenes) → EAN/ISBN
+         → PIVOTE al Fichero (OL+BNE, buscarEnFicheroLocal): rescata autor/editorial/idioma/CDU/
+         sinopsis/dewey/lcc de la edición — CLAVE en audiolibros CORALES sin autor de ID3 (sonetos).
+         CONSERVADOR: ID3/carpeta MANDA y solo se rellenan huecos, salvo CDU e IDIOMA, donde el dato
+         AUTORITATIVO del Fichero gana a la deducción (género/acentos). El ISBN se guarda en el doc.
     · CDU deducida del género (poetry→82-1, biography→929, else 82) e IDIOMA por heurística de
       acentos/palabras — ambos EDITABLES. La carátula EMBEBIDA en el audio se extrae a
       «.portadas/» si no hay imágenes sueltas. Si además trae el texto en PDF → formatos

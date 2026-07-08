@@ -20,8 +20,11 @@ import { ObjectId } from 'mongodb';
 import { conectarDB } from '../database.js';
 import { DIR_CDU, MARCA_RUTA_FIJA } from '../mantenimiento/util-mantenimiento.js';
 import { arbolCDU } from './cdu-arbol.js';
+import { buscarEnFicheroLocal } from './buscador-local.js';
+import { decodificarCodigoBarras } from './codigo-barras.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { agregarMetadatos, esAudio, leerMetadatosAudio } from './lector-audio.js';
+import { leerBarrasLocal } from './lector-barras-local.js';
 import { reciclarCarpeta } from './papelera.js';
 import { resolverPersona } from './resolver-persona.js';
 import { copiarVerificado, huella } from './transmedia.js';
@@ -119,6 +122,28 @@ function claseImagen(nombre) {
     return 'libreto';
 }
 
+/**
+ * Lee un ISBN del CÓDIGO DE BARRAS de las imágenes (zxing local, sin IA). Prioriza contraportada → portada →
+ * última del libreto (donde suele ir el EAN). Máx 3 intentos. Best-effort: null si no hay barras / no disponible.
+ * @param {Array<{abs:string,rel:string,clase:string}>} imagenes
+ */
+async function leerISBNdeImagenes(imagenes) {
+    const orden = [
+        ...imagenes.filter((i) => i.clase === 'contraportada'),
+        ...imagenes.filter((i) => i.clase === 'portada'),
+        ...imagenes.filter((i) => i.clase === 'libreto').slice(-1),
+    ].slice(0, 3);
+    for (const im of orden) {
+        try {
+            const buf = await fs.readFile(im.abs);
+            const r = await leerBarrasLocal([buf]);
+            const dec = r ? decodificarCodigoBarras(r.codigo_barras) : null;
+            if (dec?.isbn) return { isbn: dec.isbn, imagen: im.rel };
+        } catch { /* siguiente imagen */ }
+    }
+    return null;
+}
+
 // ── ANÁLISIS (sin efectos: no copia, no toca la BD) ──────────────────────────────────────────────────────
 
 /**
@@ -158,14 +183,39 @@ async function planUnidad(unidad) {
 
     // Título/autor/año: ID3 primero, nombre de carpeta como respaldo.
     const deCarpeta = parseCarpeta(unidad.nombre);
-    const titulo = agg.titulo || deCarpeta.titulo || limpiarNombreCarpeta(unidad.nombre);
-    const autor = agg.autor || deCarpeta.autor || null;
-    const anio = agg.anio || deCarpeta.anio || null;
-    const cdu = cduDeGenero(agg.genero);
-    const idioma = deducirIdioma([titulo, autor, unidad.nombre].filter(Boolean).join(' '));
+    let titulo = agg.titulo || deCarpeta.titulo || limpiarNombreCarpeta(unidad.nombre);
+    let autor = agg.autor || deCarpeta.autor || null;
+    let anio = agg.anio || deCarpeta.anio || null;
+    let cdu = cduDeGenero(agg.genero);
+    let idioma = deducirIdioma([titulo, autor, unidad.nombre].filter(Boolean).join(' '));
+
+    // Imágenes clasificadas (con ruta absoluta, para leer el código de barras).
+    const imagenes = imagenesF.map((f) => ({ abs: f.abs, rel: f.rel, clase: claseImagen(f.nombre) }));
+
+    // ISBN por CÓDIGO DE BARRAS de la contra/portada (zxing local, sin IA) → PIVOTE al Fichero (OL+BNE):
+    // rescata edición/autor/editorial/CDU/idioma/sinopsis, sobre todo cuando el ID3 no da autor (audiolibros
+    // «corales» como los sonetos). CONSERVADOR: los datos del ID3/carpeta MANDAN; el Fichero solo RELLENA
+    // huecos, salvo la CDU y el idioma, donde el dato AUTORITATIVO del Fichero gana a la deducción
+    // (por género / por acentos) que es solo una estimación.
+    const isbnInfo = await leerISBNdeImagenes(imagenes);
+    let editorial = null, sinopsis = null, dewey = null, lcc = null, ficheroHit = false;
+    if (isbnInfo) {
+        const f = await buscarEnFicheroLocal({ isbns: [isbnInfo.isbn] }).catch(() => null);
+        if (f && f.titulo) {
+            ficheroHit = true;
+            if (!autor && f.autores?.length) autor = f.autores[0];
+            if (!anio && f.año_edicion) anio = Number(f.año_edicion) || anio;
+            if (f.cdu) cdu = f.cdu;                 // CDU autoritativa > deducción por género
+            if (f.idioma) idioma = f.idioma;         // idioma autoritativo > heurística
+            editorial = f.editorial || null;
+            sinopsis = f.sinopsis || null;
+            dewey = f.dewey || null;
+            lcc = f.lcc || null;
+        }
+    }
 
     // Portada: la imagen marcada «frontal/cover»; si no, la primera; si tampoco hay imágenes, la embebida.
-    const portadaImg = imagenesF.find((f) => claseImagen(f.nombre) === 'portada') || imagenesF[0] || null;
+    const portadaImg = imagenes.find((i) => i.clase === 'portada') || imagenes[0] || null;
 
     // Playlist: título de pista del ID3 (`common.title`) si lo hay; si no, el nombre de fichero aseado.
     const audios = audiosF.map((f, i) => ({
@@ -177,12 +227,13 @@ async function planUnidad(unidad) {
         carpeta: unidad.carpeta,
         nombreCarpeta: unidad.nombre,
         titulo, autor, anio, cdu, idioma,
+        isbn: isbnInfo?.isbn || null, editorial, sinopsis, dewey, lcc, ficheroHit,
         narrador: agg.narrador, genero: agg.genero, coral: agg.coral, autorFuente: agg.autorFuente,
         duracionTotal: agg.duracionTotal,
         tienePortadaEmbebida: !!agg.portadaEmbebida,
         portadaEmbebida: agg.portadaEmbebida,   // {buffer,mime} o null (solo en ingesta)
         audios,
-        imagenes: imagenesF.map((f) => ({ rel: f.rel, clase: claseImagen(f.nombre) })),
+        imagenes: imagenes.map((i) => ({ rel: i.rel, clase: i.clase })),
         portadaRel: portadaImg ? portadaImg.rel : null,
         pdfs: pdfsF.map((f) => f.rel),
     };
@@ -259,7 +310,10 @@ export async function ingestarAudiolibro(dir, { db: dbArg, reciclarOrigen = true
         }
 
         const audios = u.audios.map((a, i) => ({ ruta: webRel(a.rel), titulo: a.titulo, orden: i + 1 }));
-        const autores = u.autor && !u.coral ? await resolverAutor(db, u.autor) : [];
+        // Se resuelve el autor SIEMPRE que lo haya (incluido el que aportó el Fichero por ISBN a un audiolibro
+        // coral): u.autor ya viene vacío si no había fuente fiable → nunca se inventa.
+        const autores = u.autor ? await resolverAutor(db, u.autor) : [];
+        const editorial = u.editorial ? await resolverEditorialRef(db, u.editorial) : null;
         const tienePdf = u.pdfs.length > 0;
 
         const doc = limpiarUndefined({
@@ -269,7 +323,11 @@ export async function ingestarAudiolibro(dir, { db: dbArg, reciclarOrigen = true
             formatos: tienePdf ? ['audio', 'pdf'] : ['audio'],
             ubicacion: { ambito: 'Sin asignar', estanteria: 'Sin asignar' },
             autores: autores.length ? autores : undefined,
+            editorial: editorial || undefined,
+            isbn: u.isbn || undefined,           // del código de barras de la contraportada
             'año_edicion': u.anio || undefined,
+            dewey: u.dewey || undefined, lcc: u.lcc || undefined,
+            sinopsis: u.sinopsis || undefined,
             narrador: u.narrador || undefined,
             ruta_base: webDest,
             // Si trae PDF del texto, se abre en el visor; se apunta el 1er PDF como archivo principal.
@@ -304,6 +362,14 @@ export async function ingestarAudiolibro(dir, { db: dbArg, reciclarOrigen = true
 async function resolverAutor(db, nombre) {
     const r = await resolverPersona(db, nombre).catch(() => null);
     return r?._id ? [r._id] : [];
+}
+
+/** Resuelve un nombre de editorial → ObjectId (check-then-create). El $jsonSchema exige ObjectId, no string. */
+async function resolverEditorialRef(db, nombre) {
+    const t = String(nombre || '').trim();
+    if (!t) return null;
+    const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });
+    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
 }
 
 function limpiarUndefined(obj) {
