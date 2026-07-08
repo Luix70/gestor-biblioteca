@@ -245,7 +245,7 @@ export async function ingestarAudiolibro(dir, { db: dbArg, reciclarOrigen = true
         // Imágenes del carrusel = TODAS las que acompañan (portada primero, contraportada al final).
         const orden = { portada: 0, libreto: 1, contraportada: 2 };
         const imgs = [...u.imagenes].sort((a, b) => (orden[a.clase] - orden[b.clase]));
-        const imagenes = imgs.map((im) => ({ ruta: webRel(im.rel), tipo: im.clase === 'portada' ? 'portada' : 'contenido' }));
+        const imagenes = imgs.map((im) => ({ ruta: webRel(im.rel), tipo: im.clase === 'portada' ? 'portada' : 'otra' }));
         let portada = u.portadaRel ? webRel(u.portadaRel) : null;
 
         // Si NO había imágenes sueltas pero SÍ carátula embebida en el audio, se extrae a `.portadas/`.
