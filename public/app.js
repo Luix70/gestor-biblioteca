@@ -8158,7 +8158,10 @@ async function camaraEnVivo() {
     if (overlayOn) try {
       const vw = video.videoWidth, vh = video.videoHeight, cw = video.clientWidth, ch = video.clientHeight;
       if (vw && vh && cw) {
-        work.width = 480; work.height = Math.max(1, Math.round((vh / vw) * 480));
+        // 720 px = MISMA resolución de detección que la foto fija («🔍 Probar» / recorte al subir). A 480 px el
+        // tapete se lava (baja la saturación) y una calibración algo desajustada dejaba de reconocerse aunque
+        // en foto sí funcionara → el recuadro «desaparecía». Igualarla lo hace tan robusto como en foto.
+        work.width = 720; work.height = Math.max(1, Math.round((vh / vw) * 720));
         work.getContext('2d').drawImage(video, 0, 0, work.width, work.height);
         const q = detectarBordesVerde(work);
         ovl.width = cw; ovl.height = ch;
@@ -8208,6 +8211,31 @@ async function camaraEnVivo() {
     overlay.remove();
   };
   overlay.querySelector('#cvX').onclick = cerrar;
+  // Píldora efímera centrada DENTRO del overlay: el toast global va en z-index 100 y quedaría TAPADO por la
+  // cámara (z-index 99999), así que los avisos de la cámara en vivo se muestran así (captura, envío…).
+  const pillOverlay = (txt, ms = 850) => {
+    const wrap = overlay.querySelector('#cvWrap');
+    if (!wrap) return;
+    const pill = document.createElement('div');
+    pill.textContent = txt;
+    pill.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(.9);background:rgba(40,217,168,.95);color:#04231b;font-weight:800;font-size:16px;padding:9px 18px;border-radius:14px;box-shadow:0 4px 18px rgba(0,0,0,.5);z-index:30;pointer-events:none;opacity:0;transition:opacity .12s,transform .12s';
+    wrap.appendChild(pill);
+    requestAnimationFrame(() => { pill.style.opacity = '1'; pill.style.transform = 'translate(-50%,-50%) scale(1)'; });
+    setTimeout(() => { pill.style.opacity = '0'; setTimeout(() => pill.remove(), 220); }, ms);
+  };
+  // FEEDBACK visible de captura: breve FLASH blanco (efecto obturador) + píldora «📸 Foto N». Complementa el
+  // sonido (sonidoCaptura) y la vibración.
+  const feedbackCaptura = (n) => {
+    const wrap = overlay.querySelector('#cvWrap');
+    if (wrap) {
+      const flash = document.createElement('div');
+      flash.style.cssText = 'position:absolute;inset:0;background:#fff;opacity:.55;z-index:29;pointer-events:none;transition:opacity .28s';
+      wrap.appendChild(flash);
+      requestAnimationFrame(() => (flash.style.opacity = '0'));
+      setTimeout(() => flash.remove(), 320);
+    }
+    pillOverlay(`📸 Foto ${n}`);
+  };
   // Capturar el frame actual a máxima resolución → File → cola camFotos (multidisparo). Reutilizable por
   // el botón de la barra y por el botón FLOTANTE.
   const capturar = async () => {
@@ -8220,7 +8248,8 @@ async function camaraEnVivo() {
         renderCamThumbs();
         renderCamStrip();
         actualizarN();
-        sonidoCaptura();
+        sonidoCaptura();                                   // «click» de obturador
+        feedbackCaptura(camFotos.length);                  // flash + píldora «📸 Foto N» (toast visible sobre la cámara)
         try { navigator.vibrate && navigator.vibrate(30); } catch (_) {}
       }
     } catch (e) { toast('No se pudo capturar: ' + e.message, 'bad'); }
@@ -8239,16 +8268,43 @@ async function camaraEnVivo() {
   }), capturar);
 
   // Catalogar SIN salir de la cámara: envía las fotos actuales como un libro y sigue filmando (encadenar
-  // libros). El envío va en segundo plano; la cola y las tiras se vacían para el siguiente. «✕ Cerrar» sale.
-  const catalogarYSeguir = () => {
+  // libros). Si «Elegir portada» está activo, el selector sale AQUÍ MISMO (sobre la cámara) y se ESPERA antes
+  // de pasar a la siguiente tanda; una vez elegida, el envío va en segundo plano y la cola se vacía. El flag
+  // `enviando` impide solapar tandas (si no, dos selectores de portada colisionarían en el mismo #cmpModal —
+  // era el bug: al fotografiar varios libros seguidos solo se catalogaba el último). «✕ Cerrar» sale.
+  let enviando = false;
+  const catalogarYSeguir = async () => {
+    if (enviando) return;
     if (!camFotos.length) { toast('Haz al menos una foto', 'warn'); return; }
-    const files = camFotos.slice();
-    camFotos = [];
-    renderCamStrip();
-    renderCamThumbs();
-    actualizarN();
-    toast(`📚 ${files.length} foto(s) enviadas a catalogar`);
-    subirInbox(files).catch((e) => toast('Error al enviar: ' + (e.message || e), 'bad'));
+    enviando = true;
+    try {
+      let files = camFotos.slice();
+      // ¿Toca elegir portada? (switch activo + varias imágenes de un mismo libro, como en la subida normal).
+      const imgs = files.filter(_esImg);
+      const pedirPortada =
+        $('#inPortada') && $('#inPortada').checked && imgs.length >= 2 && imgs.length <= 12 && imgs.length === files.length;
+      if (pedirPortada) {
+        // El selector (#cmpModal, z-206) quedaría por DEBAJO de la cámara (z-99999): bajamos la cámara
+        // temporalmente para que el selector se vea, y la restauramos al terminar.
+        const zPrev = overlay.style.zIndex;
+        overlay.style.zIndex = '150';
+        let r;
+        try { r = await elegirPortada(files); }
+        finally { overlay.style.zIndex = zPrev || '99999'; }
+        if (!r) return; // cancelado: no se envía, se CONSERVAN las fotos para reintentar (finally libera `enviando`)
+        files = r;
+      }
+      // Tanda aceptada: vaciar la cola para seguir con el siguiente libro y enviar en segundo plano. La portada
+      // ya está elegida → subirInbox NO la vuelve a pedir (saltarPortada).
+      camFotos = [];
+      renderCamStrip();
+      renderCamThumbs();
+      actualizarN();
+      pillOverlay(`📚 ${files.length} foto(s) enviadas`, 1100);
+      subirInbox(files, { saltarPortada: true }).catch((e) => toast('Error al enviar: ' + (e.message || e), 'bad'));
+    } finally {
+      enviando = false;
+    }
   };
   overlay.querySelector('#cvDone').onclick = catalogarYSeguir;
   // El botón flotante «embudo» de catalogar: mismo comportamiento arrastrable que el de disparo (por defecto
@@ -10029,6 +10085,7 @@ async function subirInbox(files, extra) {
   {
     const imgs = files.filter(_esImg);
     if (
+      !extra.saltarPortada && // la cámara en vivo ya la pidió al pulsar «Catalogar» (no volver a preguntar)
       $('#inPortada') &&
       $('#inPortada').checked &&
       imgs.length >= 2 &&

@@ -593,12 +593,19 @@ de ficheros clasificado por CDU.
         recolocar — posición persistente; misma mecánica, fabArrastrable): el de DISPARO
         (📸, círculo blanco) y el de CATALOGAR (embudo verde con insignia del nº de fotos,
         aparece con la 1.ª foto). Ambas acciones están también en la barra inferior.
-      · Sonido de captura + tira de MINIATURAS para borrar fotos (✕) antes de procesar.
+      · FEEDBACK de captura: sonido de obturador + VIBRACIÓN + flash blanco + píldora
+        «📸 Foto N» sobre el vídeo (el toast normal quedaría por debajo de la cámara por
+        z-index). Tira de MINIATURAS para borrar fotos (✕) antes de procesar.
       · 📐 Recuadro on/off: superpone el cuadro del libro y la MEDIDA del tapete en vivo
-        (verde con medida, ámbar midiendo); apágalo para fotos que no son portada.
+        (verde con medida, ámbar midiendo); apágalo para fotos que no son portada. La
+        detección corre a 720 px (igual que la foto fija) para que una calibración algo
+        desajustada no lo haga «desaparecer» aunque en foto sí funcione.
       · ZOOM por FACTORES NATIVOS (botones mín·2·3·5·10×·máx según el dispositivo — evita
         la interpolación digital), persistente. 🔦 linterna si el aparato la tiene.
-      · «✅ Catalogar» envía todas las fotos como un solo libro escaneado.
+      · «✅ Catalogar» envía las fotos como un libro y SIGUE filmando (encadena libros).
+        Con «Elegir portada» activo, el selector sale AL PULSAR Catalogar (sobre la cámara)
+        y se ESPERA la elección antes de la siguiente tanda; las tandas NO se solapan (antes
+        se lanzaban en paralelo y solo se catalogaba la última). Cancelar conserva las fotos.
 
   ── INGRESO POR ISBN (lector de código de barras o teclado) ──────────────────
     Escanea o teclea un ISBN y pulsa Enter/Buscar. Recupera los datos del FICHERO
