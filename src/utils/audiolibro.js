@@ -41,7 +41,7 @@ const esDisco = (nombre) => RE_DISCO.test(String(nombre || ''));
 const baseSinDisco = (nombre) => String(nombre || '').replace(RE_DISCO, '').trim();
 // Etiqueta CORTA del disco a partir del nombre de subcarpeta: «Le grand Meaulnes CD1» → «CD1» (para el
 // selector Todo/CD1/CD2… de la playlist). Si no casa el patrón, el nombre de la subcarpeta tal cual.
-const etiquetaDisco = (nombre) => {
+export const etiquetaDisco = (nombre) => {
     const m = String(nombre || '').match(RE_DISCO);
     return m ? m[0].replace(/^[\s._-]+/, '').replace(/\s+/g, ' ').trim() : String(nombre || '');
 };
@@ -102,7 +102,7 @@ export function parseCarpeta(nombre) {
 }
 
 // CDU deducida (editable) a partir del género del ID3. Por defecto 82 (Literatura).
-function cduDeGenero(genero) {
+export function cduDeGenero(genero) {
     const g = String(genero || '').toLowerCase();
     if (/poetry|poes[íi]a|vers/.test(g)) return '82-1';
     if (/biograph|biograf[íi]a/.test(g)) return '929';
@@ -111,7 +111,7 @@ function cduDeGenero(genero) {
 }
 
 // Idioma DEDUCIDO (editable): heurística ligera por acentos/palabras. No es autoritativo.
-function deducirIdioma(texto) {
+export function deducirIdioma(texto) {
     const t = ' ' + String(texto || '').toLowerCase() + ' ';
     if (/[ñ¿¡]|\b(por|del|los|las|mismo|él|según|niño)\b/.test(t)) return 'es';
     if (/[çœ]|\b(le|la|les|grand|livre|français|é\w+)\b/.test(t)) return 'fr';
@@ -120,10 +120,35 @@ function deducirIdioma(texto) {
 
 // Título limpio de una pista a partir del nombre de fichero, si el ID3 no trae título.
 function tituloPistaDeArchivo(nombre) {
-    return path.basename(nombre, path.extname(nombre))
-        .replace(/^\d+[\s.\-]+/, '')      // «01 - », «1-01 »
+    let n = path.basename(nombre, path.extname(nombre)).replace(/_/g, ' ');
+    const partes = n.split(/\s+--\s+/);
+    if (partes.length >= 3) n = partes.slice(1).join(' — '); // «Autor -- Obra -- Parte» → «Obra — Parte»
+    return n.replace(/^\d+[\s.\-]+/, '')      // «01 - », «1-01 »
         .replace(/\s*\[\d+\]\s*$/, '')
+        .replace(/\s{2,}/g, ' ')
         .trim();
+}
+// ¿Un título de pista es GENÉRICO (no aporta info)? «Track 05», «Disc 01 of 10», «Pista 3», vacío, un número.
+function esTituloGenerico(s) {
+    const t = String(s || '').trim();
+    return !t || t.length <= 2 || /^\d+$/.test(t) || /^(dis[ck]o?|track|pista|cd|part|parte|cara|side|vol(?:umen)?)\.?\s*\d+/i.test(t);
+}
+/**
+ * Elige el título de pista MÁS RICO entre el del ID3 y el del nombre de fichero (petición del usuario: unos
+ * mp3 traen el título completo en el fichero y el ID3 vacío, otros solo «Track 1»/«disk 0»). Reglas: descarta
+ * los genéricos; si uno CONTIENE al otro, gana el que contiene (superset); si no, el más largo (más info).
+ */
+export function mejorTituloPista(meta, nombre) {
+    const id3 = ((meta && meta.tituloPista) || '').trim();
+    const arch = tituloPistaDeArchivo(nombre);
+    const cand = [id3, arch].filter((s) => !esTituloGenerico(s));
+    if (!cand.length) return arch || id3 || path.basename(nombre, path.extname(nombre));
+    if (cand.length === 2) {
+        const [a, b] = cand.map((s) => s.toLowerCase());
+        if (a.includes(b)) return cand[0];
+        if (b.includes(a)) return cand[1];
+    }
+    return cand.sort((x, y) => y.length - x.length)[0];
 }
 
 // Clasifica una imagen por su nombre: portada frontal / contraportada / libreto.
@@ -139,7 +164,7 @@ function claseImagen(nombre) {
  * última del libreto (donde suele ir el EAN). Máx 3 intentos. Best-effort: null si no hay barras / no disponible.
  * @param {Array<{abs:string,rel:string,clase:string}>} imagenes
  */
-async function leerISBNdeImagenes(imagenes) {
+export async function leerISBNdeImagenes(imagenes) {
     const orden = [
         ...imagenes.filter((i) => i.clase === 'contraportada'),
         ...imagenes.filter((i) => i.clase === 'portada'),
@@ -239,7 +264,7 @@ async function planUnidad(unidad) {
     // `grupo` = disco (CD1/CD2…) para el selector; `duracion` (s) para ordenar por duración.
     const audios = audiosF.map((f, i) => ({
         rel: f.rel,
-        titulo: (metas[i] && metas[i].tituloPista) || tituloPistaDeArchivo(f.nombre),
+        titulo: mejorTituloPista(metas[i], f.nombre), // el más rico entre ID3 y nombre de fichero
         grupo: f.rel.includes('/') ? etiquetaDisco(f.rel.split('/')[0]) : null,
         duracion: (metas[i] && metas[i].duracion) || null,
     }));
