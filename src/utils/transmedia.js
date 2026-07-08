@@ -236,7 +236,7 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
  * falla, la retira (evita que un reintento con ficheros truncados se atasque). Nunca toca el ORIGEN.
  * @returns {Promise<{integra:boolean, huella:{n:number,bytes:number}}>}
  */
-async function copiarVerificado(origen, destino) {
+export async function copiarVerificado(origen, destino) {
     await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // parcial de un intento anterior
     await fs.mkdir(path.dirname(destino), { recursive: true });
     await fs.cp(origen, destino, { recursive: true });
@@ -245,7 +245,7 @@ async function copiarVerificado(origen, destino) {
     if (!integra) await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // no dejar la parcial
     return { integra, huella: dest };
 }
-async function huella(dir) {
+export async function huella(dir) {
     let n = 0, bytes = 0;
     const pila = [dir];
     while (pila.length) {

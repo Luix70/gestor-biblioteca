@@ -2336,6 +2336,7 @@ const CAMPOS_FICHA = [
   ['numero_edicion', 'Edición'],
   ['idioma', 'Idioma'],
   ['idioma_original', 'Idioma original'],
+  ['narrador', 'Narrador'],
   ['_formatos', 'Formatos'],
   ['paginas', 'Páginas'],
   ['_dimensiones', 'Tamaño'],

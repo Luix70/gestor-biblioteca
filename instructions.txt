@@ -424,6 +424,33 @@ de ficheros clasificado por CDU.
       no salían en el Catálogo; portadas repetidas; sin indexar en la Búsqueda):
            node scripts/reparar-transmedia.js [--ejecutar]          (dry-run por defecto)
 
+  ── AUDIOLIBROS PUROS (carpeta de audio = 1 documento) ───────────────────────
+    Una carpeta cuyo contenido es AUDIO (sin PDFs de lectura estructurados) se cataloga como
+    UN documento `naturaleza:'audiolibro'` (NO una colección): todas las pistas como PLAYLIST
+    y TODAS las imágenes que la acompañan (portada/contraportada/libreto) al CARRUSEL — nada se
+    pierde. Es el «transmedia sin PDF de lectura». Estructura verbatim (CDs, libreto) con
+    ruta_fija; destino …/<cdu>/audiolibros/<carpeta>/. (src/utils/audiolibro.js)
+    · IDENTIFICACIÓN barata, sin IA, por orden:
+      1) TAGS de audio (music-metadata; src/utils/lector-audio.js): `album`→título (quitando
+         « CDN»), `artist`/`albumartist`→autor, `year`→año, `comment`→narrador («read by…»).
+         REGLA autor: si el `artist` es CONSTANTE en todas las pistas = autor (Borges, Plutarch,
+         Fournier); si VARÍA = son narradores (p. ej. «From Shakespeare With Love», un actor por
+         soneto) → NO se inventa autor (queda sin autor + narradores listados). Nunca autor falso.
+      2) NOMBRE de carpeta (limpiando basura de ripeo: «[Livre audio]», «[MP3]», «[192kbps]»,
+         «(CD MP3)», «.partN») → rellena autor/título/año que falten.
+      3) (Siguiente fase) código de barras de la CONTRAPORTADA → EAN/ISBN → Fichero/APIs.
+    · CDU deducida del género (poetry→82-1, biography→929, else 82) e IDIOMA por heurística de
+      acentos/palabras — ambos EDITABLES. La carátula EMBEBIDA en el audio se extrae a
+      «.portadas/» si no hay imágenes sueltas. Si además trae el texto en PDF → formatos
+      ['audio','pdf'] y se abre en el visor + la playlist.
+    · Detección: audio DIRECTO en la carpeta = ella es 1 audiolibro; audio solo en subcarpetas =
+      cada subcarpeta inmediata = 1 audiolibro (contenedor). Anti-duplicados por título.
+    · CLI: node scripts/ingestar-audiolibro.js "<carpeta>"            (dry-run: imprime el plan)
+           node scripts/ingestar-audiolibro.js "<carpeta>" --ejecutar  (cataloga)
+    · OJO (aún NO cableado al vigilante): un audiolibro soltado en el Inbox ACTIVO lo cazaría el
+      detector de transmedia (ambos llevan audio). De momento, catalogar por CLI. [pendiente:
+      enrutar audio-sin-estructura → audiolibro ANTES de transmedia en vigilante.js]
+
   ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
     El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos
     o del nombre — PREVALECE) o AUTOMÁTICO (asignado por el sistema — cede). Se distingue
@@ -1277,6 +1304,9 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
     ingestar-transmedia.js  cataloga una carpeta TRANSMEDIA (estructura verbatim = 1
                             colección; ver sección «COLECCIONES TRANSMEDIA»). Dry-run
                             (imprime el plan) por defecto; aplica con --ejecutar.
+    ingestar-audiolibro.js  cataloga una carpeta de AUDIOLIBRO puro (o un contenedor con
+                            varios) = 1 documento naturaleza:'audiolibro' con playlist +
+                            carrusel (ver «AUDIOLIBROS PUROS»). Dry-run por defecto (--ejecutar).
     reparar-transmedia.js   arregla colecciones transmedia ya catalogadas: pone
                             fecha_ingreso (para que salgan en el Catálogo), da portada
                             propia a materiales/guías y (re)indexa en la Búsqueda. Solo
