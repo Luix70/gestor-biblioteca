@@ -14,8 +14,9 @@ import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
 import { reciclar } from './utils/papelera.js';
-import { esCarpetaTransmedia, ingestarTransmedia } from './utils/transmedia.js';
+import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
+import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
 import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
@@ -340,6 +341,9 @@ const transmediaVistas = new Set();
 // Carpetas ya detectadas como AUDIOLIBRO puro (misma detección PEGAJOSA que transmedia): audio suelto sin
 // estructura → 1 documento naturaleza:'audiolibro' (playlist + carrusel), no una colección.
 const audiolibroVistas = new Set();
+// Carpetas ya detectadas como COLECCIÓN de audiolibros (pegajoso): varios audiolibros → una colección con
+// un doc por libro (+ PDFs/vídeos miembros). Se comprueba tras transmedia-fuerte y antes del audiolibro suelto.
+const colAudioVistas = new Set();
 // Carpetas que dieron un resultado DEFINITIVO de duplicado (transmedia «ya existe la colección», audiolibro
 // «ya catalogado»): se DEJAN de reintentar para no entrar en bucle (se reprocesarían en cada escaneo). El
 // origen se conserva en el Inbox (con .noborrar); el usuario decide qué hacer. Se olvida al desaparecer.
@@ -433,18 +437,31 @@ async function listarUnidades() {
                 console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
                 continue;
             }
-            // TRANSMEDIA: una carpeta con AUDIO (o marcador .transmedia) es una colección con estructura
-            // preservada — un doc por PDF + audios enlazados, SIN reorganizar ni pasar cada PDF por el
-            // pipeline normal (evita 863 llamadas de IA y respeta el árbol). Detección PEGAJOSA: una vez vista
-            // como transmedia, se mantiene aunque un escaneo posterior (aún copiándose) no vea el audio.
-            if (transmediaVistas.has(ruta) || await esCarpetaTransmedia(ruta)) {
+            // ENRUTADO POR PESO (audio vs PDF). Orden:
+            // 1) TRANSMEDIA FUERTE: marcador .transmedia, contenido interactivo (CD-ROM) o estructura «Stage N»
+            //    (lecturas graduadas) → el PDF/interactivo manda. Detección PEGAJOSA.
+            if (transmediaVistas.has(ruta) || await esTransmediaFuerte(ruta)) {
                 transmediaVistas.add(ruta);
                 unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
-            // AUDIOLIBRO PURO: audio suelto (sin estructura de colección) → UN documento con playlist +
-            // carrusel (no una colección). Se comprueba DESPUÉS de transmedia (que ya se quedó con el audio
-            // estructurado/interactivo). Detección pegajosa, igual que transmedia.
+            // 2) COLECCIÓN DE AUDIOLIBROS: varios audiolibros (autor→libro→parte, o carpeta plana con las obras
+            //    en el nombre) → una colección con un doc por libro (+ PDFs/vídeos miembros). El audio manda,
+            //    aunque haya PDFs de guía. Detección pegajosa.
+            if (colAudioVistas.has(ruta) || await esColeccionAudiolibros(ruta)) {
+                colAudioVistas.add(ruta);
+                unidades.push({ esColeccionAudio: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
+            // 3) TRANSMEDIA DÉBIL: audio + ≥2 PDFs SIN estructura ni colección de audiolibros (lecturas con
+            //    audio de apoyo). Se preserva verbatim como transmedia.
+            if (await esCarpetaTransmedia(ruta)) {
+                transmediaVistas.add(ruta);
+                unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
+            // 4) AUDIOLIBRO PURO: audio suelto (una sola obra, sin estructura de colección) → UN documento con
+            //    playlist + carrusel. Detección pegajosa.
             if (audiolibroVistas.has(ruta) || await esCarpetaAudiolibro(ruta)) {
                 audiolibroVistas.add(ruta);
                 unidades.push({ esAudiolibro: true, carpeta: ruta, rutas: [ruta] });
@@ -513,6 +530,7 @@ async function listarUnidades() {
     for (const dir of huellaCarpetas.keys()) if (!dirsActuales.has(dir)) huellaCarpetas.delete(dir);
     for (const dir of transmediaVistas) if (!dirsActuales.has(dir)) transmediaVistas.delete(dir);
     for (const dir of audiolibroVistas) if (!dirsActuales.has(dir)) audiolibroVistas.delete(dir);
+    for (const dir of colAudioVistas) if (!dirsActuales.has(dir)) colAudioVistas.delete(dir);
     for (const dir of omitidasDefinitivas) if (!dirsActuales.has(dir)) omitidasDefinitivas.delete(dir);
 
     return unidades;
@@ -740,6 +758,21 @@ async function procesarCola() {
                             if (ra.permanente) omitidasDefinitivas.add(u.carpeta); // ya catalogado: no reintentar (evita bucle)
                         }
                     } catch (err) { console.error(`  ✗ audiolibro falló: ${err.message} (se CONSERVA el origen)`); }
+                    continue;
+                }
+                // COLECCIÓN DE AUDIOLIBROS: copia verbatim + una colección con un doc por libro (audiolibro),
+                // por PDF y por vídeo; recicla el origen solo tras verificar la copia.
+                if (u.esColeccionAudio) {
+                    console.log(`\n📚 Colección de audiolibros «${path.basename(u.carpeta)}»: catalogando…`);
+                    try {
+                        const rc = await ingestarColeccionAudiolibros(u.carpeta, {});
+                        const oks = (rc.resultados || []).filter((r) => r.ok);
+                        if (rc.ok) { oks.forEach((r) => console.log(`  ✔ «${r.coleccion}» · ${r.insertados} miembro(s)${r.videos ? ` (incl. ${r.videos} vídeo/s)` : ''}`)); tally.coleccionAudio = (tally.coleccionAudio || 0) + oks.length; procesadas++; }
+                        else {
+                            console.warn(`  ✗ colección de audiolibros: ${(rc.resultados || [])[0]?.motivo || 'sin resultado'} (se CONSERVA el origen)`);
+                            if (rc.permanente) omitidasDefinitivas.add(u.carpeta); // ya existe: no reintentar (evita bucle)
+                        }
+                    } catch (err) { console.error(`  ✗ colección de audiolibros falló: ${err.message} (se CONSERVA el origen)`); }
                     continue;
                 }
                 // Comprobar si el archivo terminó de escribirse (o es un fantasma de 0 bytes).
