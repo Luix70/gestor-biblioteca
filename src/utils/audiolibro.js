@@ -41,7 +41,7 @@ const esDisco = (nombre) => RE_DISCO.test(String(nombre || ''));
 const baseSinDisco = (nombre) => String(nombre || '').replace(RE_DISCO, '').trim();
 // Etiqueta CORTA del disco a partir del nombre de subcarpeta: «Le grand Meaulnes CD1» → «CD1» (para el
 // selector Todo/CD1/CD2… de la playlist). Si no casa el patrón, el nombre de la subcarpeta tal cual.
-const etiquetaDisco = (nombre) => {
+export const etiquetaDisco = (nombre) => {
     const m = String(nombre || '').match(RE_DISCO);
     return m ? m[0].replace(/^[\s._-]+/, '').replace(/\s+/g, ' ').trim() : String(nombre || '');
 };
@@ -102,7 +102,7 @@ export function parseCarpeta(nombre) {
 }
 
 // CDU deducida (editable) a partir del género del ID3. Por defecto 82 (Literatura).
-function cduDeGenero(genero) {
+export function cduDeGenero(genero) {
     const g = String(genero || '').toLowerCase();
     if (/poetry|poes[íi]a|vers/.test(g)) return '82-1';
     if (/biograph|biograf[íi]a/.test(g)) return '929';
@@ -111,7 +111,7 @@ function cduDeGenero(genero) {
 }
 
 // Idioma DEDUCIDO (editable): heurística ligera por acentos/palabras. No es autoritativo.
-function deducirIdioma(texto) {
+export function deducirIdioma(texto) {
     const t = ' ' + String(texto || '').toLowerCase() + ' ';
     if (/[ñ¿¡]|\b(por|del|los|las|mismo|él|según|niño)\b/.test(t)) return 'es';
     if (/[çœ]|\b(le|la|les|grand|livre|français|é\w+)\b/.test(t)) return 'fr';
@@ -139,7 +139,7 @@ function claseImagen(nombre) {
  * última del libreto (donde suele ir el EAN). Máx 3 intentos. Best-effort: null si no hay barras / no disponible.
  * @param {Array<{abs:string,rel:string,clase:string}>} imagenes
  */
-async function leerISBNdeImagenes(imagenes) {
+export async function leerISBNdeImagenes(imagenes) {
     const orden = [
         ...imagenes.filter((i) => i.clase === 'contraportada'),
         ...imagenes.filter((i) => i.clase === 'portada'),
