@@ -762,9 +762,12 @@ export function rutasPanel() {
                 .find(filtro, { projection: { nombre: 1, tipo: 1, issn: 1, numeros_presentes: 1, revision_requerida: 1, nsfw: 1, valoracion: 1 } })
                 .sort({ revision_requerida: -1, nombre: 1 }).limit(20000).toArray();
             // Nº de miembros + hasta 3 portadas (para la cubierta apilada) de un tirón, por agregación.
+            // OJO: `$push` de TODAS las portadas revienta el límite de 100 MB del $group en colecciones enormes
+            // (p. ej. Oxford Bookworms, 868 miembros) → error en el Atlas gratuito (sin allowDiskUse). Se usa
+            // `$firstN` (n=6, luego se filtran nulos y se cortan a 3): memoria ACOTADA, sin necesitar disco.
             const agg = cols.length ? await db.collection('biblioteca').aggregate([
                 { $match: { coleccion: { $in: cols.map(c => c._id) } } },
-                { $group: { _id: '$coleccion', n: { $sum: 1 }, portadas: { $push: '$portada' } } },
+                { $group: { _id: '$coleccion', n: { $sum: 1 }, portadas: { $firstN: { input: '$portada', n: 6 } } } },
             ]).toArray() : [];
             const mapa = new Map(agg.map(x => [String(x._id), x]));
             res.json(cols.map(c => {
