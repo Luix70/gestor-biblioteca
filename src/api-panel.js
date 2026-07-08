@@ -31,6 +31,7 @@ import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fond
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
 import { spawn } from 'node:child_process';
+import { readdir } from 'node:fs/promises';
 import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
@@ -1794,7 +1795,10 @@ export function rutasPublicas() {
                     .filter((u) => u.startsWith(base + '/')).map((u) => u.slice(base.length + 1));
                 if (!objetivos.length) return res.status(404).send('el documento no tiene pistas de audio');
             } else {
-                objetivos = ['.']; // toda la carpeta
+                // Toda la carpeta: se listan las ENTRADAS de primer nivel en vez de «.», así bsdtar no
+                // prefija cada ruta del ZIP con «./» (bsdtar -C dir . mete ese prefijo cosmético).
+                objetivos = await readdir(baseDir).catch(() => []);
+                if (!objetivos.length) objetivos = ['.'];
             }
 
             const nombreZip = (soloAudio ? `${doc.titulo || 'audio'} (audio)` : (doc.titulo || 'contenido'))
