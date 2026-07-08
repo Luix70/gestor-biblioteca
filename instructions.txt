@@ -247,6 +247,13 @@ de ficheros clasificado por CDU.
       contenedor y dura ~2 días (no hay que reloguear a cada rato).
     · Instalar como app (PWA): el navegador ofrece "Instalar"/"Añadir a inicio".
       Queda como icono propio ("Bibliotheca Ludoviciana").
+    · 📌 FIJAR ORIENTACIÓN (solo móvil): botón en la barra superior que BLOQUEA la
+      pantalla en la orientación ACTUAL (vertical u horizontal, la que haya al pulsarlo)
+      para que no rote; se resalta (pri) mientras está activo, se recuerda entre sesiones
+      y se re-aplica al cargar. Vía Screen Orientation API (ignora la autorrotación del
+      sistema). Solo aparece en dispositivos táctiles con soporte; degrada en silencio.
+      Convive con el bloqueo automático del etiquetado NFC (si el pin está activo, cerrar
+      un modal NFC no lo suelta).
 
   NAVEGACIÓN (menú ≡): Catálogo · Dashboard · Obras · Colecciones · Autores ·
   Editoriales · Ubicaciones · Inbox · Actividad · Cuarentena · Papelera.

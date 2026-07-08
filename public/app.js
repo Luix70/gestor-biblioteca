@@ -899,12 +899,66 @@ async function bloquearRotacion() {
   } catch (_) { /* sin bloqueo: el etiquetado continúa igual */ }
 }
 function desbloquearRotacion() {
-  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
   if (_fsPorRotacion) {
     _fsPorRotacion = false;
     try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); } catch (_) {}
   }
+  if (_pinRot) return; // el PIN manual manda: no soltar el bloqueo al cerrar el modal NFC
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
 }
+
+// ── PIN de orientación (manual, solo móvil): fija la pantalla en la orientación ACTUAL hasta soltarlo ──────
+// Botón 📌 en la barra superior, visible SOLO en móvil (puntero grueso) y con soporte de la Screen Orientation
+// API. Independiente del bloqueo del NFC: mientras el pin esté activo, cerrar un modal NFC NO suelta la
+// orientación (desbloquearRotacion lo respeta). Se recuerda entre sesiones y se re-aplica al cargar (en la PWA
+// instalada funciona sin más; en pestaña puede requerir volver a pulsarlo).
+let _pinRot = false, _pinTipo = null;
+function pinRotSoportado() {
+  return !!(screen.orientation && screen.orientation.lock) && matchMedia('(pointer: coarse)').matches;
+}
+async function alternarPinRot() {
+  const o = screen.orientation;
+  if (!o || !o.lock) return;
+  if (_pinRot) {
+    _pinRot = false; _pinTipo = null;
+    localStorage.removeItem('pin_rotacion');
+    try { o.unlock(); } catch (_) {}
+    toast('Orientación liberada');
+  } else {
+    _pinTipo = o.type || 'natural'; // fija la orientación ACTUAL (vertical u horizontal, la que haya)
+    try {
+      await o.lock(_pinTipo);
+      _pinRot = true;
+      localStorage.setItem('pin_rotacion', _pinTipo);
+      toast('📌 Orientación fijada');
+    } catch (_) {
+      _pinTipo = null;
+      toast('Este navegador no permite fijar la orientación aquí', 'warn');
+    }
+  }
+  pintarPinRot();
+}
+function pintarPinRot() {
+  const b = $('#pinRot');
+  if (!b) return;
+  b.classList.toggle('pri', _pinRot);
+  b.title = _pinRot
+    ? '📌 Orientación FIJADA — toca para liberar'
+    : 'Fijar la orientación actual de la pantalla (no rotará)';
+}
+function iniciarPinRot() {
+  const b = $('#pinRot');
+  if (!b || !pinRotSoportado()) return; // en escritorio / sin soporte, el botón queda oculto
+  b.style.display = '';
+  b.onclick = alternarPinRot;
+  const guardado = localStorage.getItem('pin_rotacion');
+  if (guardado) {
+    _pinTipo = guardado; // re-aplica el pin recordado (best-effort; en la PWA instalada funciona al cargar)
+    screen.orientation.lock(guardado).then(() => { _pinRot = true; pintarPinRot(); }).catch(() => {});
+  }
+  pintarPinRot();
+}
+iniciarPinRot();
 async function abrirComparador(id) {
   try {
     const d = await api('/cuarentena/duplicado?id=' + encodeURIComponent(id));
