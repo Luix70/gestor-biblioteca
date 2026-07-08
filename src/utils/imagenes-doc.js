@@ -56,16 +56,47 @@ export async function eliminarImagen(db, id, ruta) {
     return setImagenes(db, doc, nuevas, nuevas[0] ? nuevas[0].ruta : null);
 }
 
-// Añadir una imagen nueva (base64) al final del carrusel.
-export async function anadirImagen(db, id, base64) {
-    const doc = await cargarDoc(db, id); if (!doc) return { ok: false, motivo: 'documento no encontrado' };
-    const d = decodB64(base64); if (!d) return { ok: false, motivo: 'imagen inválida' };
+// Núcleo compartido: escribe el buffer de una imagen en la carpeta del doc y la inserta en el carrusel.
+// `comoPortada` = true → va la 1.ª (portada) y la portada anterior baja a 'otra' (las demás se conservan);
+// false → va al final. Devuelve el resultado de setImagenes.
+async function escribirImagen(db, doc, d, comoPortada) {
     const carpeta = carpetaDeDoc(doc); await fs.mkdir(carpeta, { recursive: true });
-    const nombre = `otra-${Date.now()}.${d.ext}`;
+    const nombre = `${comoPortada ? 'portada' : 'otra'}-${Date.now()}.${d.ext}`;
     await fs.writeFile(path.join(carpeta, nombre), d.buf);
     const web = `${webDeDoc(doc)}/${nombre}`;
-    const nuevas = [...(doc.imagenes || []), { ruta: web, tipo: (doc.imagenes && doc.imagenes.length) ? 'otra' : 'portada', origen: 'manual' }];
+    const previas = doc.imagenes || [];
+    if (comoPortada) {
+        // La entrante = portada; la portada previa (y cualquier otra marcada) baja a 'otra'; NINGUNA se borra.
+        const resto = previas.map(im => ({ ...im, tipo: im.tipo === 'portada' ? 'otra' : (im.tipo || 'otra') }));
+        return setImagenes(db, doc, [{ ruta: web, tipo: 'portada', origen: 'manual' }, ...resto], web);
+    }
+    const nuevas = [...previas, { ruta: web, tipo: previas.length ? 'otra' : 'portada', origen: 'manual' }];
     return setImagenes(db, doc, nuevas, doc.portada || web);
+}
+
+// Añadir una imagen nueva (base64) al carrusel. Por defecto al FINAL; con {comoPortada:true} la coloca
+// la PRIMERA (portada), conservando las imágenes previas.
+export async function anadirImagen(db, id, base64, opts = {}) {
+    const doc = await cargarDoc(db, id); if (!doc) return { ok: false, motivo: 'documento no encontrado' };
+    const d = decodB64(base64); if (!d) return { ok: false, motivo: 'imagen inválida' };
+    return escribirImagen(db, doc, d, opts.comoPortada === true);
+}
+
+// Asignar la MISMA imagen de portada a una SELECCIÓN de documentos: en cada uno la imagen entrante pasa a ser
+// la PORTADA (la 1.ª del carrusel) SIN borrar las imágenes que ya tuvieran (la portada anterior queda como una
+// más). Escribe una copia del fichero en la carpeta de cada documento. Decodifica el base64 una sola vez.
+export async function anadirPortadaLote(db, ids, base64) {
+    const d = decodB64(base64); if (!d) return { ok: false, motivo: 'imagen inválida' };
+    let aplicados = 0, fallidos = 0; const errores = [];
+    for (const id of (Array.isArray(ids) ? ids : [])) {
+        try {
+            const doc = await cargarDoc(db, id);
+            if (!doc) { fallidos++; continue; }
+            await escribirImagen(db, doc, d, true);
+            aplicados++;
+        } catch (e) { fallidos++; errores.push(e.message); }
+    }
+    return { ok: true, aplicados, fallidos, errores: errores.slice(0, 3) };
 }
 
 // Reemplazar una imagen por su versión EDITADA (rotada/recortada/con perspectiva): escribe un fichero

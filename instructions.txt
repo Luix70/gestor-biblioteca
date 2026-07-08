@@ -298,7 +298,10 @@ de ficheros clasificado por CDU.
       acción es «🔍 Mostrar en Catálogo» (lleva la selección al Catálogo, ya marcada).
       La selección NO se pierde al conmutar el modo. Con selección hay acciones: 👁 Ver · 📚 Colección · 📖 Obra · 📍
       Estantería · 🚫 Quitar de estantería · 📶 Etiquetar · 🧹 Conformar · ✨ Enriquecer ·
-      🎯 A fondo (lee cada libro con la visión y aplica lo que aporte) · ♻️ Reprocesar (las
+      🎯 A fondo (lee cada libro con la visión y aplica lo que aporte) · 🔀 Cambiar tipo ·
+      🖼️ Portada común (asigna la MISMA imagen de portada a toda la selección: se añade como
+      portada en cada uno; las imágenes que ya tuvieran se conservan en el carrusel —
+      POST /documentos/portada-lote) · ♻️ Reprocesar (las
       MISMAS acciones de la ficha individual que proceden en lote —«medir» no—, aplicadas una
       a una con progreso) · 🗑 Eliminar (pide
       contraseña) · Limpiar. «🗂 Todos los resultados» selecciona todas las páginas.
@@ -340,6 +343,9 @@ de ficheros clasificado por CDU.
          detecta la cubierta en 3 pasadas (todas locales, sin IA): tapete verde →
          SEGMENTACIÓN por el color del FONDO (libro sobre superficie uniforme, foto en
          ángulo, sin tapete) → líneas (Sobel/Hough). Ajusta las esquinas antes de aplicar.
+         Al ➕ Añadir / 📷 Cámara, si la foto está sobre el TAPETE reglado se recorta+endereza
+         +mide automáticamente; el interruptor «📐 Tapete» del modal lo DESACTIVA (adjunta la
+         imagen TAL CUAL, sin tocarla) y recuerda la preferencia (localStorage img_tapete).
          🖹 «Del documento» extrae imágenes del propio fichero y las añade al carrusel —
          p. ej. para rescatar la foto del autor del interior. Cubre: PDF (páginas, pdf.js),
          EPUB (imágenes embebidas, JSZip), cbz/cbr/cb7/djvu (páginas del backend) y mobi/azw3
@@ -475,6 +481,11 @@ de ficheros clasificado por CDU.
       que filtra la lista (la reproducción sigue el orden completo). Admin «🎚️ Reordenar»: ordena
       por Nº de pista/Título/Duración (asc/desc) y/o mueve a mano (↑↓/arrastrar, como estanterías);
       se PERSISTE con POST /documentos/:id/audios/orden (reordenarAudios, espejo de reordenarImagenes).
+    · CONTROLES DE REPRODUCCIÓN (ficha, si hay ≥2 pistas, además del <audio> nativo): navegación
+      ⏮ primera · ⏪ anterior · ⏩ siguiente · ⏭ última; y tres modos que PERSISTEN en el navegador
+      (localStorage): «▶️ Continuo» (al acabar una pista pasa a la siguiente vs. detenerse al final de
+      cada una), «🔁 Repetir» cíclico (ninguna → 🔂 pista → 🔁 lista) y «🔀 Aleatorio» (baraja el orden
+      conservando la pista en curso). «Repetir lista» implica seguir aunque «Continuo» esté apagado.
 
   ── COLECCIÓN DE AUDIOLIBROS (varios audiolibros = una colección) ────────────
     Una carpeta con VARIOS audiolibros (p. ej. «Joseph Campbell» con muchos títulos) se cataloga

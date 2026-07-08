@@ -3329,6 +3329,9 @@ const fileADataURL = (blob) =>
     lector.readAsDataURL(blob);
   });
 let _imgState = null;
+// ¿Aplicar el TAPETE (recorte+enderezado+medida) al adjuntar imágenes a mano? Por defecto sí; el usuario
+// puede desactivarlo (adjuntar la imagen tal cual, sin tocarla). Se recuerda entre sesiones.
+const tapeteManualOn = () => localStorage.getItem('img_tapete') !== '0';
 function editarImagenes(id, imagenes, archivo) {
   _imgState = { id, imgs: (imagenes || []).map((im) => ({ ...im })), archivo: archivo || null };
   pintarGestorImagenes();
@@ -3374,7 +3377,7 @@ function pintarGestorImagenes() {
     `<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">🖼️ Imágenes (${imgs.length})</h3>
     <p class="muted" style="font-size:12px;margin:0 0 6px">La 1.ª es la PORTADA. Reordena con ↑/↓; ✎ abre el editor (rotar/recortar/corregir perspectiva).</p>
     ${imgs.length ? filas : '<div class="muted">Sin imágenes.</div>'}
-    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn" id="imgCam">📷 Cámara</button>${_imgExtraible() ? '<button class="btn" id="imgExtraer" title="Extraer una página/imagen del propio documento (PDF o EPUB) y añadirla — p. ej. la foto del autor del interior">🖹 Del documento</button>' : ''}</div><button class="btn pri" id="imgCerrar">Cerrar</button></div>
+    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn" id="imgCam">📷 Cámara</button>${_imgExtraible() ? '<button class="btn" id="imgExtraer" title="Extraer una página/imagen del propio documento (PDF o EPUB) y añadirla — p. ej. la foto del autor del interior">🖹 Del documento</button>' : ''}<label class="muted" title="Si la foto está sobre el TAPETE reglado, la recorta, endereza y mide al añadirla. Desactívalo para adjuntar la imagen TAL CUAL (sin recorte)." style="font-size:12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="imgTapete" ${tapeteManualOn() ? 'checked' : ''}> 📐 Tapete</label></div><button class="btn pri" id="imgCerrar">Cerrar</button></div>
     <input type="file" id="imgAddInput" accept="image/*" style="display:none">
     <input type="file" id="imgCamInput" accept="image/*" capture="environment" style="display:none"></div>`;
   $('#cmpScrim').style.display = 'block';
@@ -3402,7 +3405,8 @@ function pintarGestorImagenes() {
       try {
         let file = inp.files[0];
         // Si la foto está sobre el TAPETE: recorta+endereza (misma función que Cámara) y mide; sin tapete, igual.
-        try {
+        // El interruptor «📐 Tapete» del modal permite DESACTIVARLO para adjuntar la imagen tal cual (sin tocarla).
+        if (!$('#imgTapete') || $('#imgTapete').checked) try {
           const r = await recortarYMedirTapete([file]);
           file = (r.files && r.files[0]) || file;
           if (r.dims && _imgState && _imgState.id) {
@@ -3433,6 +3437,8 @@ function pintarGestorImagenes() {
   if ($('#imgCam')) $('#imgCam').onclick = () => fc.click();
   if (fc) fc.onchange = () => anadirDe(fc);
   if ($('#imgExtraer')) $('#imgExtraer').onclick = extraerImagenDocumento;
+  // Recordar la preferencia del tapete (activarlo/desactivarlo persiste entre sesiones).
+  if ($('#imgTapete')) $('#imgTapete').onchange = (e) => localStorage.setItem('img_tapete', e.target.checked ? '1' : '0');
 }
 
 // ¿El documento tiene un fichero digital del que se pueden extraer imágenes? PDF/EPUB se procesan EN EL
@@ -5296,16 +5302,32 @@ function reproductorAudioHtml(audios, id) {
          <button class="btn filtCD active" data-cd="">Todo</button>${grupos.map((g) => `<button class="btn filtCD" data-cd="${esc(g)}">${esc(g)}</button>`).join('')}
        </div>`
     : '';
+  // Controles de reproducción (solo con ≥2 pistas): navegación (primera/anterior/siguiente/última) y modos
+  // (continuo, repetición ninguna/pista/lista, aleatorio). Su estado se cablea y persiste en iniciarReproductorAudio.
+  const controles = lista.length >= 2
+    ? `<div class="row" id="audioCtrl" style="gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+         <button class="btn" id="apFirst" title="Primera pista" style="padding:6px 10px">⏮</button>
+         <button class="btn" id="apPrev" title="Pista anterior" style="padding:6px 10px">⏪</button>
+         <button class="btn" id="apNext" title="Pista siguiente" style="padding:6px 10px">⏩</button>
+         <button class="btn" id="apLast" title="Última pista" style="padding:6px 10px">⏭</button>
+         <span style="width:1px;height:22px;background:var(--line);margin:0 3px"></span>
+         <button class="btn" id="apCont" style="padding:6px 10px;font-size:12px" title="Modo continuo: al terminar una pista pasa a la siguiente. Si lo desactivas, se detiene al final de cada pista.">▶️ Continuo</button>
+         <button class="btn" id="apRep" style="padding:6px 10px;font-size:12px" title="Repetición: ninguna → repetir la pista → repetir toda la lista">🔁 Repetir</button>
+         <button class="btn" id="apShuf" style="padding:6px 10px;font-size:12px" title="Reproducción en orden aleatorio">🔀 Aleatorio</button>
+       </div>`
+    : '';
   return `<div class="fileprev">
       <div class="row" style="align-items:center;justify-content:space-between;gap:8px;margin:16px 0 8px">
         <h3 style="margin:0;color:var(--mut);font-size:13px">🔊 Audio · ${lista.length} pista${lista.length > 1 ? 's' : ''}</h3>
         <div class="row" style="gap:6px;flex-wrap:wrap">${reord}${descargas}</div>
       </div>${selector}`
     + `<audio id="audioPlayer" controls preload="none" style="width:100%;margin-bottom:8px"></audio>`
+    + controles
     + `<div id="audioLista" style="border-bottom:1px solid var(--line);border-radius:8px;overflow:hidden">${pistas}</div></div>`;
 }
 
-// Carga la 1ª pista, resalta la activa, y al terminar una AVANZA a la siguiente (comportamiento de playlist).
+// Carga la 1ª pista, resalta la activa y gestiona la playlist: navegación (primera/anterior/siguiente/última)
+// y modos CONTINUO (auto-avance), REPETICIÓN (ninguna/pista/lista) y ALEATORIO — persistidos en localStorage.
 // El selector de disco filtra la lista visible; el botón «Reordenar» (admin) abre el reordenador.
 function iniciarReproductorAudio(id, audios) {
   const player = $('#audioPlayer'), lista = $('#audioLista');
@@ -5319,17 +5341,77 @@ function iniciarReproductorAudio(id, audios) {
     const cd = b.dataset.cd;
     tracks.forEach((t) => (t.style.display = (!cd || t.dataset.grupo === cd) ? 'flex' : 'none'));
   }));
-  let actual = -1;
+
+  // ── Preferencias de reproducción (persisten entre fichas) ──
+  let continuo = localStorage.getItem('audio_continuo') !== '0';   // por defecto ON: continúa la lista
+  let repetir = localStorage.getItem('audio_repetir') || 'no';     // 'no' | 'una' | 'lista'
+  let aleatorio = localStorage.getItem('audio_aleatorio') === '1'; // por defecto OFF
+  if (!['no', 'una', 'lista'].includes(repetir)) repetir = 'no';
+
+  // `orden` = secuencia de índices de `tracks` en el orden de reproducción (barajada si aleatorio);
+  // `pos` = posición en `orden` de la pista que suena; `actual` = índice de esa pista en `tracks`.
+  let orden = tracks.map((_, i) => i), pos = 0, actual = -1;
+  const barajar = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  // Reconstruye `orden`: en aleatorio deja `fijo` (la pista en curso) la 1.ª y baraja el resto; si no, orden natural.
+  const reconstruirOrden = (fijo) => {
+    if (aleatorio) {
+      const resto = barajar(tracks.map((_, i) => i).filter((i) => i !== fijo));
+      orden = fijo >= 0 ? [fijo, ...resto] : resto;
+    } else orden = tracks.map((_, i) => i);
+    pos = fijo >= 0 ? Math.max(0, orden.indexOf(fijo)) : 0;
+  };
+
   const cargar = (i, reproducir) => {
     if (i < 0 || i >= tracks.length) return;
-    actual = i;
+    actual = i; pos = orden.indexOf(i);
     player.src = tracks[i].dataset.src;
     tracks.forEach((t, j) => { t.style.background = j === i ? 'rgba(40,217,168,.14)' : 'none'; });
     if (reproducir) player.play().catch(() => {});
   };
+
+  // Avanza (dir=+1) o retrocede (dir=−1) en `orden`. En un extremo, «repetir lista» cicla; si no, se queda.
+  const mover = (dir) => {
+    const np = pos + dir;
+    if (np >= 0 && np < orden.length) { cargar(orden[np], true); return; }
+    if (repetir === 'lista') {
+      if (aleatorio) reconstruirOrden(-1);                 // nueva baraja en cada vuelta
+      cargar(orden[dir > 0 ? 0 : orden.length - 1], true);
+    }
+  };
+
   tracks.forEach((t, i) => (t.onclick = () => cargar(i, true)));
-  player.onended = () => { if (actual + 1 < tracks.length) cargar(actual + 1, true); };
-  cargar(0, false); // deja la 1ª cargada, sin reproducir
+  player.onended = () => {
+    if (repetir === 'una') { player.currentTime = 0; player.play().catch(() => {}); return; }
+    // «Continuo» (o «repetir lista», que implica seguir) auto-avanza; si no, se detiene al final de la pista.
+    if (continuo || repetir === 'lista') mover(1);
+  };
+
+  // ── Controles (presentes solo con ≥2 pistas) ──
+  const bFirst = $('#apFirst'), bPrev = $('#apPrev'), bNext = $('#apNext'), bLast = $('#apLast'),
+        bCont = $('#apCont'), bRep = $('#apRep'), bShuf = $('#apShuf');
+  const pintarCtrl = () => {
+    if (bCont) bCont.classList.toggle('pri', continuo);
+    if (bShuf) bShuf.classList.toggle('pri', aleatorio);
+    if (bRep) {
+      bRep.classList.toggle('pri', repetir !== 'no');
+      bRep.textContent = repetir === 'una' ? '🔂 Repetir pista' : repetir === 'lista' ? '🔁 Repetir lista' : '🔁 Repetir';
+    }
+  };
+  if (bFirst) bFirst.onclick = () => cargar(orden[0], true);
+  if (bLast) bLast.onclick = () => cargar(orden[orden.length - 1], true);
+  if (bPrev) bPrev.onclick = () => mover(-1);
+  if (bNext) bNext.onclick = () => mover(1);
+  if (bCont) bCont.onclick = () => { continuo = !continuo; localStorage.setItem('audio_continuo', continuo ? '1' : '0'); pintarCtrl(); };
+  if (bRep) bRep.onclick = () => { repetir = repetir === 'no' ? 'una' : repetir === 'una' ? 'lista' : 'no'; localStorage.setItem('audio_repetir', repetir); pintarCtrl(); };
+  if (bShuf) bShuf.onclick = () => {
+    aleatorio = !aleatorio; localStorage.setItem('audio_aleatorio', aleatorio ? '1' : '0');
+    reconstruirOrden(actual); // conserva la pista en curso y (re)baraja el resto
+    pintarCtrl();
+  };
+  pintarCtrl();
+
+  reconstruirOrden(0); // orden inicial (si aleatorio: pista 0 primero, resto barajado)
+  cargar(0, false);    // deja la 1.ª cargada, sin reproducir
   const rb = $('#audioReord');
   if (rb) rb.onclick = () => reordenarPistas(id, audios);
 }
@@ -5935,6 +6017,7 @@ function renderBulk() {
     <button class="btn" id="bkEnriquecer" title="Enriquecer (rellenar huecos con APIs) cada documento seleccionado">✨ Enriquecer</button>
     <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
     <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
+    <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`
@@ -5973,6 +6056,7 @@ function renderBulk() {
     if ($('#bkEnriquecer')) $('#bkEnriquecer').onclick = () => accionLoteFicha('enriquecer', { verbo: 'Enriquecer' });
     if ($('#bkAFondo')) $('#bkAFondo').onclick = aFondoLote;
     if ($('#bkTipo')) $('#bkTipo').onclick = () => cambiarTipoDocs([...selDocs]);
+    if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     // «Mostrar selección»: alterna la vista restringida a lo seleccionado (y re-busca).
     if ($('#bkMostrarSel'))
@@ -6146,6 +6230,31 @@ async function eliminarSeleccionados() {
   } catch (e) {
     toast(e.message, 'bad');
   }
+}
+// Asigna la MISMA imagen de portada a toda la selección: se elige un fichero (o foto), se reduce en el
+// cliente y se envía a /documentos/portada-lote. En cada documento pasa a ser la PORTADA; las imágenes que ya
+// tuviera se CONSERVAN en el carrusel (la portada anterior queda como una más). Solo admin (renderBulk ya gatea).
+async function portadaComunLote() {
+  const ids = [...selDocs];
+  if (!ids.length) return;
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0];
+    if (!file) return;
+    if (!window.confirm(`¿Asignar esta imagen como portada de ${ids.length} documento(s)? Las imágenes que ya tengan se conservan en el carrusel.`)) return;
+    const bar = $('#searchBulk');
+    try {
+      if (bar) bar.innerHTML = `<div class="bulkbar"><b>Asignando portada…</b> ${ids.length} doc(s)</div>`;
+      const b64 = await fileADataURL(await reducirImagen(file, 2200, 0.88));
+      const r = await api('/documentos/portada-lote', { method: 'POST', body: JSON.stringify({ ids, base64: b64 }) });
+      if (!r.ok) { toast(r.motivo || 'No se pudo asignar la portada', 'bad'); renderBulk(); return; }
+      toast(`Portada asignada a ${r.aplicados} doc(s)${r.fallidos ? ` · ${r.fallidos} fallido(s)` : ''}`, r.fallidos ? 'warn' : 'ok');
+      buscarCatalogo(estadoBusqueda.page || 1); // refresca las portadas de la rejilla
+    } catch (e) { toast(e.message, 'bad'); renderBulk(); }
+  };
+  inp.click();
 }
 // Aplica EN LOTE una acción de la ficha (conformar/enriquecer/reprocesar) a la selección del Catálogo.
 // Secuencial (una a una, para no saturar el servidor ni las APIs/IA), con progreso en la barra. Reutiliza

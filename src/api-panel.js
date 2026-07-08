@@ -14,7 +14,7 @@ import { lanzarIntegridad, estadoIntegridad } from './integridad.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
-import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen } from './utils/imagenes-doc.js';
+import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen, anadirPortadaLote } from './utils/imagenes-doc.js';
 import { reordenarAudios } from './utils/audios-doc.js';
 import { leerLomosImagen, leerLomosRecortados, emparejarLomos } from './utils/lector-lomos.js';
 import { editarDocumento } from './utils/editar-doc.js';
@@ -1358,6 +1358,15 @@ export function rutasPanel() {
     r.post('/documentos/:id/imagenes/reemplazar', async (req, res) => {
         try { res.json(await reemplazarImagen(await conectarDB(), req.params.id, req.body?.ruta, req.body?.base64)); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Asignar la MISMA portada (base64) a una SELECCIÓN de documentos: en cada uno se añade como portada sin
+    // borrar las imágenes que ya tenga. Solo admin (el guard global de mutación ya lo garantiza).
+    r.post('/documentos/portada-lote', async (req, res) => {
+        try {
+            const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+            if (!ids.length) return res.status(400).json({ ok: false, motivo: 'no se recibieron documentos' });
+            res.json(await anadirPortadaLote(await conectarDB(), ids, req.body?.base64));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     // Dimensiones físicas del libro (cm), estimadas en el cliente sobre la alfombrilla reglada (solo admin).
     r.post('/documentos/:id/dimensiones', async (req, res) => {
