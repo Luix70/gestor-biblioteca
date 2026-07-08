@@ -878,33 +878,42 @@ function cerrarCmp() {
   $('#cmpModal').innerHTML = '';
 }
 
-// ── Bloqueo de rotación de pantalla durante el etiquetado NFC ───────────────────────────────────────
-// Evita que la pantalla gire mientras se manipula el móvil sobre las etiquetas. Usa la Screen Orientation
-// API, que IGNORA el ajuste de autorrotación del sistema (funciona aunque el móvil lo tenga activado). En una
-// pestaña normal Chrome exige PANTALLA COMPLETA para bloquear; en la PWA INSTALADA suele bastar sin ella. Se
-// bloquea al abrir el modal de etiquetado y se LIBERA en cerrarCmp (cubre todos los cierres: único/lote/pausa).
-// Degrada EN SILENCIO si el dispositivo/navegador no lo permite (nunca rompe el etiquetado).
-let _fsPorRotacion = false; // ¿entramos NOSOTROS en pantalla completa para poder bloquear? (para salir solo de la nuestra)
-async function bloquearRotacion() {
+// ── Bloqueo de rotación de pantalla (Screen Orientation API) ────────────────────────────────────────
+// IGNORA la autorrotación del sistema. Chrome exige PANTALLA COMPLETA para bloquear en una pestaña normal;
+// en la PWA instalada (standalone) suele bastar sin ella. Por eso, si el bloqueo directo falla, se ENTRA en
+// pantalla completa y se reintenta (recordando que fuimos nosotros, para salir al soltar). Lo usan el
+// etiquetado NFC (temporal, se libera en cerrarCmp) y el PIN manual (persistente). Degrada en silencio.
+let _fsPorRotacion = false; // ¿entramos NOSOTROS en pantalla completa para poder bloquear?
+async function _fijarOrientacion(tipo) {
+  const o = screen.orientation;
+  if (!o || !o.lock) return false;
+  try { await o.lock(tipo); return true; } catch (_) { /* quizá exige pantalla completa: se intenta abajo */ }
   try {
-    const o = screen.orientation;
-    if (!o || !o.lock) return;
-    const tipo = o.type || 'natural'; // bloquea la orientación ACTUAL (no fuerza girar)
-    try { await o.lock(tipo); return; } catch (_) { /* quizá exige pantalla completa: se intenta abajo */ }
     if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
       await document.documentElement.requestFullscreen();
       _fsPorRotacion = true;
-      try { await o.lock(tipo); } catch (_) {}
+      await o.lock(tipo);
+      return true;
     }
-  } catch (_) { /* sin bloqueo: el etiquetado continúa igual */ }
+  } catch (_) {}
+  return false;
 }
-function desbloquearRotacion() {
+function _soltarOrientacion() {
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
   if (_fsPorRotacion) {
     _fsPorRotacion = false;
     try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); } catch (_) {}
   }
-  if (_pinRot) return; // el PIN manual manda: no soltar el bloqueo al cerrar el modal NFC
-  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
+}
+// NFC: bloquea la orientación ACTUAL al abrir el modal de etiquetado (no fuerza girar).
+async function bloquearRotacion() {
+  const o = screen.orientation;
+  await _fijarOrientacion((o && o.type) || 'natural');
+}
+// NFC: libera al cerrar el modal — salvo que el PIN manual esté activo (entonces manda el pin).
+function desbloquearRotacion() {
+  if (_pinRot) return;
+  _soltarOrientacion();
 }
 
 // ── PIN de orientación (manual, solo móvil): fija la pantalla en la orientación ACTUAL hasta soltarlo ──────
@@ -917,23 +926,21 @@ function pinRotSoportado() {
   return !!(screen.orientation && screen.orientation.lock) && matchMedia('(pointer: coarse)').matches;
 }
 async function alternarPinRot() {
-  const o = screen.orientation;
-  if (!o || !o.lock) return;
+  if (!(screen.orientation && screen.orientation.lock)) return;
   if (_pinRot) {
     _pinRot = false; _pinTipo = null;
     localStorage.removeItem('pin_rotacion');
-    try { o.unlock(); } catch (_) {}
+    _soltarOrientacion(); // libera y, si entramos en pantalla completa para bloquear, sale de ella
     toast('Orientación liberada');
   } else {
-    _pinTipo = o.type || 'natural'; // fija la orientación ACTUAL (vertical u horizontal, la que haya)
-    try {
-      await o.lock(_pinTipo);
+    _pinTipo = screen.orientation.type || 'natural'; // fija la orientación ACTUAL (la que haya al pulsar)
+    if (await _fijarOrientacion(_pinTipo)) {
       _pinRot = true;
       localStorage.setItem('pin_rotacion', _pinTipo);
       toast('📌 Orientación fijada');
-    } catch (_) {
+    } else {
       _pinTipo = null;
-      toast('Este navegador no permite fijar la orientación aquí', 'warn');
+      toast('No se pudo fijar la orientación en este dispositivo', 'warn');
     }
   }
   pintarPinRot();
@@ -951,6 +958,14 @@ function iniciarPinRot() {
   if (!b || !pinRotSoportado()) return; // en escritorio / sin soporte, el botón queda oculto
   b.style.display = '';
   b.onclick = alternarPinRot;
+  // Si el bloqueo usó pantalla completa y el usuario sale de ella (Atrás/Esc), el bloqueo se pierde:
+  // refleja el estado real (suelta el pin) para que el icono no mienta.
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && _fsPorRotacion) {
+      _fsPorRotacion = false;
+      if (_pinRot) { _pinRot = false; _pinTipo = null; localStorage.removeItem('pin_rotacion'); pintarPinRot(); }
+    }
+  });
   const guardado = localStorage.getItem('pin_rotacion');
   if (guardado) {
     _pinTipo = guardado; // re-aplica el pin recordado (best-effort; en la PWA instalada funciona al cargar)

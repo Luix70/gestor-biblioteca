@@ -251,9 +251,12 @@ de ficheros clasificado por CDU.
       pantalla en la orientación ACTUAL (vertical u horizontal, la que haya al pulsarlo)
       para que no rote; se resalta (pri) mientras está activo, se recuerda entre sesiones
       y se re-aplica al cargar. Vía Screen Orientation API (ignora la autorrotación del
-      sistema). Solo aparece en dispositivos táctiles con soporte; degrada en silencio.
-      Convive con el bloqueo automático del etiquetado NFC (si el pin está activo, cerrar
-      un modal NFC no lo suelta).
+      sistema). En la PWA instalada (standalone) bloquea sin más; en pestaña normal Chrome
+      EXIGE pantalla completa, así que si el bloqueo directo falla se entra en pantalla
+      completa y se reintenta (al soltar el pin, o al salir de pantalla completa con
+      Atrás/Esc, se libera). Solo aparece en dispositivos táctiles con soporte; degrada en
+      silencio. Comparte mecánica (_fijarOrientacion/_soltarOrientacion) con el bloqueo
+      automático del etiquetado NFC (si el pin está activo, cerrar un modal NFC no lo suelta).
 
   NAVEGACIÓN (menú ≡): Catálogo · Dashboard · Obras · Colecciones · Autores ·
   Editoriales · Ubicaciones · Inbox · Actividad · Cuarentena · Papelera.
