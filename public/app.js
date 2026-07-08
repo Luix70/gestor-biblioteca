@@ -5473,6 +5473,16 @@ function previewArchivo(r) {
   // «Carpeta (ZIP)» descarga TODA la carpeta ruta_base (el fichero + portadas + extras) en streaming.
   const zip = id ? `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar toda la carpeta en un ZIP">⬇ Carpeta (ZIP)</a>` : '';
   const acc = `<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a>${zip}</div>`;
+  // VÍDEO: reproductor nativo <video> para los formatos que el navegador SÍ decodifica (mp4/webm/ogv/m4v/
+  // mov-H.264). Para .avi/.mkv/.wmv/.flv/.mpg (sin códec en el navegador) → aviso + descarga (o el ZIP).
+  const VIDEO_NATIVO = ['mp4', 'webm', 'ogv', 'm4v', 'mov'];
+  const VIDEO_OTROS = ['avi', 'mkv', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', 'ts', 'vob', 'divx', '3gp'];
+  if (VIDEO_NATIVO.includes(ext))
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">🎬 ${esc(nombre)}</h3>
+      <video controls preload="metadata" playsinline style="width:100%;max-height:72vh;background:#000;border-radius:10px"><source src="${esc(url)}">Tu navegador no puede reproducir este vídeo.</video>${acc}</div>`;
+  if (VIDEO_OTROS.includes(ext))
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">🎬 ${esc(nombre)}</h3>
+      <div style="aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;background:#000;border-radius:10px;color:var(--mut);text-align:center;padding:16px"><div>🎬<br><span style="font-size:12px">El navegador no reproduce «.${esc(ext)}» de forma nativa.<br>Descárgalo para verlo en tu reproductor (VLC, etc.).</span></div></div>${acc}</div>`;
   // PDF: visor PDF.js embebido (vendored) — render propio en canvas → previsualiza IGUAL en PC y móvil,
   // sin depender de la config de PDF del navegador. Se inicializa tras pintar (iniciarLectorPdf).
   if (ext === 'pdf')

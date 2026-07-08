@@ -16,7 +16,7 @@ import { ObjectId } from 'mongodb';
 import { conectarDB } from '../database.js';
 import { DIR_CDU, MARCA_RUTA_FIJA } from '../mantenimiento/util-mantenimiento.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
-import { cduDeGenero, deducirIdioma, etiquetaDisco, leerISBNdeImagenes } from './audiolibro.js';
+import { cduDeGenero, deducirIdioma, etiquetaDisco, leerISBNdeImagenes, mejorTituloPista } from './audiolibro.js';
 import { arbolCDU } from './cdu-arbol.js';
 import { resolverCabecera } from './colecciones.js';
 import { indexarDoc } from './indice-busqueda.js';
@@ -87,18 +87,7 @@ function limpiarTitulo(nombre) {
 function tituloPista(nombre) {
     return path.basename(nombre, path.extname(nombre)).replace(/^\d+[\s.\-_]+/, '').replace(/_/g, ' ').trim();
 }
-// Mejor título de una pista SIN perder la info del nombre de fichero: se usa el título ID3 solo si es un
-// TÍTULO DE VERDAD; si es genérico («Disc 01 of 10», «Track 05», «Pista 3») o está vacío, se usa el NOMBRE
-// DE FICHERO (sin extensión, sin el prefijo de autor «X -- », guiones bajos → espacios) — que sí distingue.
-function mejorTituloPista(meta, nombre) {
-    const id3 = ((meta && meta.tituloPista) || '').trim();
-    const generico = !id3 || /^(dis[ck]o?|track|pista|cd|part|parte|cara|side|vol(?:umen)?)\.?\s*\d/i.test(id3);
-    if (!generico) return id3;
-    let n = path.basename(nombre, path.extname(nombre)).replace(/_/g, ' ').trim();
-    const partes = n.split(/\s+--\s+/);
-    if (partes.length >= 3) n = partes.slice(1).join(' — '); // «Autor -- Obra -- Disco» → «Obra — Disco»
-    return n.replace(/\s{2,}/g, ' ').trim() || tituloPista(nombre);
-}
+// (mejorTituloPista se importa de audiolibro.js: elige el título más rico entre ID3 y nombre de fichero.)
 // Grupo (obra) a partir del NOMBRE de fichero cuando el libro es una carpeta PLANA con las obras codificadas
 // en el nombre («Autor -- Obra -- Disc 01 of 10.mp3» → «Obra»). Así el selector de la playlist separa las
 // obras aunque no haya subcarpetas (caso Feynman). null si no sigue ese patrón.
@@ -107,12 +96,44 @@ function grupoDeNombre(nombre) {
     return partes.length >= 3 ? partes[1].replace(/\s{2,}/g, ' ').trim() : null;
 }
 
+// Clave de OBRA de un fichero de una carpeta PLANA con varias obras («Autor -- Obra -- Disc N of M»): la
+// obra SIN el sufijo de disco/lección, para que «Six Easy Pieces, Lecture 1..6» colapsen en «Six Easy
+// Pieces». null si el nombre no sigue el patrón «A -- B -- C».
+const RE_SUBOBRA = new RegExp('[,;:]?\\s*(lecture|lecci[óo]n|disc|disco|disque|part|parte|cd|vol(?:umen|ume)?)\\s*\\.?\\s*\\d+.*$', 'i');
+function claveObra(nombre) {
+    const partes = path.basename(nombre, path.extname(nombre)).split(/\s+--\s+/);
+    if (partes.length < 3) return null;
+    const obra = (partes[1] || '').trim();
+    return (obra.replace(RE_SUBOBRA, '').replace(/\s{2,}/g, ' ').trim() || obra) || null;
+}
+// Grupo (sub-obra) DENTRO de una obra plana: si el segmento-obra difiere de la clave (p. ej. «Six Easy
+// Pieces, Lecture 1» vs «Six Easy Pieces») → el sufijo («Lecture 1»); si coincide → null (los «Disc N of M»
+// son solo el orden de pistas, no grupos útiles).
+function grupoEnObra(nombre, clave) {
+    const partes = path.basename(nombre, path.extname(nombre)).split(/\s+--\s+/);
+    const obra = (partes[1] || '').trim();
+    if (!obra || !clave || obra.toLowerCase() === String(clave).toLowerCase()) return null;
+    return obra.slice(clave.length).replace(/^[\s,;:.\-–—]+/, '').trim() || null;
+}
+// Agrupa los AUDIOS de una carpeta PLANA en OBRAS (por claveObra) → un «libro» virtual por obra (con `plano`
+// para que la ingesta sepa que los ficheros cuelgan directamente de la raíz de la colección, no de subcarpeta).
+async function librosPlanos(dir) {
+    const audios = (await listarFicheros(dir)).filter((f) => esAudio(f.nombre));
+    const grupos = new Map();
+    for (const f of audios) {
+        const k = claveObra(f.nombre) || limpiarTitulo(path.basename(dir));
+        if (!grupos.has(k)) grupos.set(k, []);
+        grupos.get(k).push({ ...f, grupoForzado: grupoEnObra(f.nombre, k) });
+    }
+    return [...grupos.entries()].map(([nombre, fs]) => ({ nombre, files: fs, plano: true }));
+}
+
 /**
  * Analiza UN libro (subcarpeta de primer nivel de la colección): devuelve su AUDIOLIBRO (si tiene audio) con
  * la playlist agrupada por apartado/disco + ISBN/Fichero, y sus PDFs (miembros aparte). `files` son los
  * ficheros del libro con `rel` RELATIVO al propio libro.
  */
-async function analizarLibro(nombreLibro, files) {
+async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
     const audios = files.filter((f) => esAudio(f.nombre)).sort(porRelNat);
     const pdfs = files.filter((f) => esPdf(f.nombre)).sort(porRelNat);
     const imgs = files.filter((f) => esImagen(f.nombre)).sort(porRelNat);
@@ -153,8 +174,9 @@ async function analizarLibro(nombreLibro, files) {
         const pistas = audios.map((f, i) => ({
             rel: f.rel,
             titulo: mejorTituloPista(metas[i], f.nombre), // nunca pierde el nombre de fichero si el ID3 es genérico
-            // Grupo = apartado/disco (subcarpeta) o, en carpetas planas, la obra codificada en el nombre.
-            grupo: f.rel.includes('/') ? etiquetaGrupo(f.rel.split('/')[0]) : grupoDeNombre(f.nombre),
+            // Grupo: en una obra plana viene FORZADO (sub-obra/disco, p. ej. «Lecture 1»); si no, del apartado/
+            // disco (subcarpeta) o de la obra codificada en el nombre.
+            grupo: f.grupoForzado !== undefined ? f.grupoForzado : (f.rel.includes('/') ? etiquetaGrupo(f.rel.split('/')[0]) : grupoDeNombre(f.nombre)),
             duracion: (metas[i] && metas[i].duracion) || null,
         }));
         const portadaImg = imgs.find((f) => /(^|\/)(cover|folder|portada|front)/i.test(f.rel)) || imgs[0] || null;
@@ -176,7 +198,7 @@ async function analizarLibro(nombreLibro, files) {
     // que están ahí, aunque no tengan visor).
     const otros = files.filter((f) => !esAudio(f.nombre) && !esPdf(f.nombre) && !esVideo(f.nombre) && !esImagen(f.nombre) && !esRuido(f.nombre))
         .map((f) => f.rel);
-    return { nombre: nombreLibro, audiolibro, pdfs: pdfsOut, videos: videosOut, otros };
+    return { nombre: nombreLibro, audiolibro, pdfs: pdfsOut, videos: videosOut, otros, plano };
 }
 
 /** ¿Es una PARTE (disco/sección) de un libro, y no un libro/colección por sí misma? Discos «[Disc 1]»,
@@ -195,7 +217,13 @@ function esParte(nombre) {
 async function clasificar(dir) {
     let ents; try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return 'vacio'; }
     ents = ents.filter((e) => !ignorar(e.name));
-    if (ents.some((e) => e.isFile() && esAudio(e.name))) return 'libro'; // audio directo
+    const audioDir = ents.filter((e) => e.isFile() && esAudio(e.name));
+    if (audioDir.length) {
+        // Carpeta PLANA: ¿varias OBRAS codificadas en el nombre («Autor -- Obra -- Disc N»)? → colección de
+        // obras (grupo-plano); si es una sola obra → un libro.
+        const claves = new Set(audioDir.map((e) => claveObra(e.name)).filter(Boolean));
+        return claves.size >= 2 ? 'grupo-plano' : 'libro';
+    }
     const subdirs = ents.filter((e) => e.isDirectory());
     const conAudio = [];
     for (const s of subdirs) {
@@ -212,14 +240,21 @@ async function clasificar(dir) {
  * carpeta soltada con varios autores) se RECURRE. Así funciona tanto si sueltas un autor como varios.
  */
 async function recolectarColecciones(dir, salida) {
-    if ((await clasificar(dir)) !== 'grupo') return;
+    const clase = await clasificar(dir);
+    // Carpeta PLANA con varias obras en el nombre (caso Feynman) → colección de OBRAS (libros virtuales).
+    if (clase === 'grupo-plano') {
+        salida.push({ nombre: limpiarTitulo(path.basename(dir)), dir, libros: await librosPlanos(dir) });
+        return;
+    }
+    if (clase !== 'grupo') return;
     let ents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     ents = ents.filter((e) => e.isDirectory() && !ignorar(e.name));
     const hijos = [];
     for (const e of ents) { const abs = path.join(dir, e.name); hijos.push({ name: e.name, abs, clase: await clasificar(abs) }); }
-    const libros = hijos.filter((h) => h.clase === 'libro' || h.clase === 'pdf');
+    const libros = hijos.filter((h) => h.clase === 'libro' || h.clase === 'pdf').map((h) => ({ nombre: h.name, abs: h.abs }));
     if (libros.length) salida.push({ nombre: limpiarTitulo(path.basename(dir)), dir, libros });
-    for (const g of hijos.filter((h) => h.clase === 'grupo')) await recolectarColecciones(g.abs, salida); // colecciones más profundas
+    // Recurre en sub-grupos (colecciones más profundas: autores) y en carpetas planas anidadas.
+    for (const g of hijos.filter((h) => h.clase === 'grupo' || h.clase === 'grupo-plano')) await recolectarColecciones(g.abs, salida);
 }
 
 /**
@@ -234,8 +269,8 @@ export async function analizarColeccionAudiolibros(dir) {
     for (const c of encontradas) {
         const miembros = [];
         for (const l of c.libros) {
-            const files = await listarFicheros(l.abs);
-            miembros.push(await analizarLibro(l.name, files));
+            const files = l.files || await listarFicheros(l.abs); // libro-carpeta o libro virtual (obra plana)
+            miembros.push(await analizarLibro(l.nombre, files, { plano: !!l.plano }));
         }
         const nAudiolibros = miembros.filter((m) => m.audiolibro).length;
         const nPdfs = miembros.reduce((s, m) => s + m.pdfs.length, 0);
@@ -319,8 +354,10 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
         let insertados = 0;
         const manifiesto = [];
         for (const m of c.miembros) {
-            const webLibro = `${webCol}/${m.nombre}`;
-            const absLibro = path.join(carpetaCol, m.nombre);
+            // Obra PLANA: sus ficheros cuelgan directamente de la raíz de la colección (no de una subcarpeta),
+            // así que su base es la de la colección; sus `rel` ya son los nombres de fichero.
+            const webLibro = m.plano ? webCol : `${webCol}/${m.nombre}`;
+            const absLibro = m.plano ? carpetaCol : path.join(carpetaCol, m.nombre);
 
             // 3a) AUDIOLIBRO del libro.
             if (m.audiolibro) {
