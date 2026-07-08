@@ -29,7 +29,8 @@ import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEs
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fondo.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
-import { carpetaDeDoc } from './mantenimiento/util-mantenimiento.js';
+import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
+import { spawn } from 'node:child_process';
 import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
@@ -1767,6 +1768,50 @@ async function fichaCompartida(docId, permiteDescarga) {
 // NO autentica ni abre el resto de la app: devuelve EXCLUSIVAMENTE la ficha de ese documento.
 export function rutasPublicas() {
     const r = express.Router();
+
+    // Descarga en ZIP (STREAMING, sin cargar en memoria) del contenido de un documento. Pública como
+    // /recursos (mismo contenido, ya servido fichero a fichero). `que=audio` = solo las pistas (playlist
+    // completa de un audiolibro); cualquier otro valor = TODA su carpeta ruta_base (imágenes y demás
+    // incluidos). Usa bsdtar (libarchive-tools; C, sin SIMD → apto Atom) → sirve para audiolibros y para
+    // colecciones grandes sin reventar la RAM.
+    r.get('/descargar/:id', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).send('id inválido');
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne(
+                { _id: new ObjectId(req.params.id) }, { projection: { titulo: 1, ruta_base: 1, audios: 1 } });
+            if (!doc || !doc.ruta_base) return res.status(404).send('documento sin carpeta descargable');
+            const baseDir = carpetaDeDoc(doc);
+            // Seguridad: la carpeta SIEMPRE debe caer dentro del árbol CDU (ruta_base la pone el servidor, no
+            // el usuario; se valida igualmente para evitar cualquier fuga de ruta).
+            if (!path.resolve(baseDir).startsWith(path.resolve(DIR_CDU))) return res.status(400).send('ruta no permitida');
+
+            const soloAudio = req.query.que === 'audio';
+            let objetivos; // rutas RELATIVAS a baseDir que entran en el ZIP
+            if (soloAudio) {
+                const base = String(doc.ruta_base).replace(/\/$/, '');
+                objetivos = (doc.audios || []).map((a) => String(a.ruta || ''))
+                    .filter((u) => u.startsWith(base + '/')).map((u) => u.slice(base.length + 1));
+                if (!objetivos.length) return res.status(404).send('el documento no tiene pistas de audio');
+            } else {
+                objetivos = ['.']; // toda la carpeta
+            }
+
+            const nombreZip = (soloAudio ? `${doc.titulo || 'audio'} (audio)` : (doc.titulo || 'contenido'))
+                .replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120) + '.zip';
+            res.setHeader('Content-Type', 'application/zip');
+            res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(nombreZip)}`);
+            // ZIP en streaming de TODA la carpeta (o solo las pistas). Se incluye todo verbatim (los
+            // marcadores .ruta_fija/.portadas son inocuos; .portadas incluso trae la carátula extraída).
+            const args = ['-c', '--format', 'zip', '-f', '-', '-C', baseDir, ...objetivos];
+            const tar = spawn('bsdtar', args);
+            tar.stdout.pipe(res);
+            tar.stderr.on('data', (d) => console.warn('[descargar] bsdtar:', String(d).trim()));
+            tar.on('error', (e) => { if (!res.headersSent) res.status(500).end('bsdtar no disponible'); else res.destroy(); });
+            req.on('close', () => tar.kill()); // si el cliente aborta la descarga, no dejar bsdtar colgado
+        } catch (e) { if (!res.headersSent) res.status(500).send(e.message); }
+    });
+
     r.get('/compartido/:token', async (req, res) => {
         try {
             const info = validarCompartir(req.params.token);

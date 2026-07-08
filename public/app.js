@@ -5246,14 +5246,25 @@ function fichaEditar(d, r, opts) {
 
 // Reproductor de AUDIO con playlist (audiolibros / lecturas con audio de un transmedia). Los mp3 se sirven
 // desde /recursos (estático). Se inicializa tras pintar con iniciarReproductorAudio.
-function reproductorAudioHtml(audios) {
+function reproductorAudioHtml(audios, id) {
   const lista = (audios || []).slice().sort((a, b) => (a.orden || 0) - (b.orden || 0));
   if (!lista.length) return '';
   const pistas = lista.map((a, i) =>
     `<button type="button" class="audiotrack" data-src="${esc(encUrl(a.ruta))}" title="${esc(a.titulo || '')}" style="display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:8px 10px;border:none;border-top:1px solid var(--line);background:none;color:inherit;cursor:pointer;font-size:13px">`
     + `<span style="opacity:.55;min-width:22px;text-align:right">${i + 1}</span>`
     + `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.titulo || 'Pista ' + (i + 1))}</span></button>`).join('');
-  return `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">🔊 Audio · ${lista.length} pista${lista.length > 1 ? 's' : ''}</h3>`
+  // Descargas (streaming ZIP por bsdtar, público como /recursos): la playlist completa (solo audio) y la
+  // carpeta entera (audio + imágenes + lo que haya). Enlaces normales <a download> → sin token.
+  const descargas = id
+    ? `<div class="row" style="gap:6px">
+         <a class="btn" href="/api/descargar/${esc(id)}?que=audio" download title="Descargar todas las pistas en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Playlist</a>
+         <a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar TODO el contenido (audio + imágenes + extras) en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Todo (ZIP)</a>
+       </div>`
+    : '';
+  return `<div class="fileprev">
+      <div class="row" style="align-items:center;justify-content:space-between;gap:8px;margin:16px 0 8px">
+        <h3 style="margin:0;color:var(--mut);font-size:13px">🔊 Audio · ${lista.length} pista${lista.length > 1 ? 's' : ''}</h3>${descargas}
+      </div>`
     + `<audio id="audioPlayer" controls preload="none" style="width:100%;margin-bottom:8px"></audio>`
     + `<div id="audioLista" style="border-bottom:1px solid var(--line);border-radius:8px;overflow:hidden">${pistas}</div></div>`;
 }
@@ -5277,15 +5288,18 @@ function iniciarReproductorAudio() {
 }
 
 function previewArchivo(r) {
-  const audio = reproductorAudioHtml(r.audios); // audiolibro (con o sin PDF): reproductor arriba
-  if (!r.archivo_url) return audio;             // audio-only: solo el reproductor
+  const id = r.doc && r.doc._id;
+  const audio = reproductorAudioHtml(r.audios, id); // audiolibro (con o sin PDF): reproductor + descargas arriba
+  if (!r.archivo_url) return audio;                 // audio-only: solo el reproductor
   const nombre = r.nombre_archivo || 'archivo',
     url = encUrl(r.archivo_url),
     ext = (nombre.split('.').pop() || '').toLowerCase();
   if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) return audio; // set de imágenes: ya se ve en el carrusel
   // Solo "Descargar": PDF y EPUB se LEEN EMBEBIDOS aquí (visores propios). Ya no se ofrece "Abrir en
   // pestaña" (en PC, según la config del navegador, descargaba el PDF en vez de previsualizarlo).
-  const acc = `<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a></div>`;
+  // «Carpeta (ZIP)» descarga TODA la carpeta ruta_base (el fichero + portadas + extras) en streaming.
+  const zip = id ? `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar toda la carpeta en un ZIP">⬇ Carpeta (ZIP)</a>` : '';
+  const acc = `<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a>${zip}</div>`;
   // PDF: visor PDF.js embebido (vendored) — render propio en canvas → previsualiza IGUAL en PC y móvil,
   // sin depender de la config de PDF del navegador. Se inicializa tras pintar (iniciarLectorPdf).
   if (ext === 'pdf')

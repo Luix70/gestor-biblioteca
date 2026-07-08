@@ -457,6 +457,9 @@ de ficheros clasificado por CDU.
       estructura); si no, pipeline normal. Detección PEGAJOSA (audiolibroVistas), como transmedia.
     · CLI equivalente: node scripts/ingestar-audiolibro.js "<carpeta>"            (dry-run)
                        node scripts/ingestar-audiolibro.js "<carpeta>" --ejecutar  (cataloga)
+    · DESCARGAS (ficha): «⬇ Playlist» baja todas las pistas en un ZIP; «⬇ Todo (ZIP)» baja TODA
+      la carpeta ruta_base (audio + imágenes + extras). Endpoint PÚBLICO en streaming (bsdtar, sin
+      RAM) GET /api/descargar/:id?que=audio|todo — vale para cualquier documento (no solo audio).
 
   ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
     El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos
