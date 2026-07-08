@@ -872,9 +872,38 @@ $('#sanFile').onchange = async (e) => {
 
 // Comparador de duplicados: catalogado vs entrante, con la recomendación resaltada.
 function cerrarCmp() {
+  desbloquearRotacion(); // libera el bloqueo de rotación del etiquetado NFC (no-op si no estaba activo)
   $('#cmpScrim').style.display = 'none';
   $('#cmpModal').style.display = 'none';
   $('#cmpModal').innerHTML = '';
+}
+
+// ── Bloqueo de rotación de pantalla durante el etiquetado NFC ───────────────────────────────────────
+// Evita que la pantalla gire mientras se manipula el móvil sobre las etiquetas. Usa la Screen Orientation
+// API, que IGNORA el ajuste de autorrotación del sistema (funciona aunque el móvil lo tenga activado). En una
+// pestaña normal Chrome exige PANTALLA COMPLETA para bloquear; en la PWA INSTALADA suele bastar sin ella. Se
+// bloquea al abrir el modal de etiquetado y se LIBERA en cerrarCmp (cubre todos los cierres: único/lote/pausa).
+// Degrada EN SILENCIO si el dispositivo/navegador no lo permite (nunca rompe el etiquetado).
+let _fsPorRotacion = false; // ¿entramos NOSOTROS en pantalla completa para poder bloquear? (para salir solo de la nuestra)
+async function bloquearRotacion() {
+  try {
+    const o = screen.orientation;
+    if (!o || !o.lock) return;
+    const tipo = o.type || 'natural'; // bloquea la orientación ACTUAL (no fuerza girar)
+    try { await o.lock(tipo); return; } catch (_) { /* quizá exige pantalla completa: se intenta abajo */ }
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen();
+      _fsPorRotacion = true;
+      try { await o.lock(tipo); } catch (_) {}
+    }
+  } catch (_) { /* sin bloqueo: el etiquetado continúa igual */ }
+}
+function desbloquearRotacion() {
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (_) {}
+  if (_fsPorRotacion) {
+    _fsPorRotacion = false;
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen(); } catch (_) {}
+  }
 }
 async function abrirComparador(id) {
   try {
@@ -10966,6 +10995,7 @@ async function grabarNFC(d, r) {
     <div style="display:flex;gap:10px;justify-content:center;margin-top:8px"><button class="btn" id="nfcWrX">Cancelar</button></div></div>`;
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
+  bloquearRotacion(); // no gires la pantalla mientras se manipula el móvil sobre la etiqueta (se libera en cerrarCmp)
   const ctrl = new AbortController();
   const cerrar = () => {
     try {
@@ -11126,6 +11156,7 @@ async function iniciarEtiquetadoLote(ids, auto) {
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
   $('#cmpScrim').onclick = null; // no cerrar por fuera
+  bloquearRotacion(); // bloquea la rotación durante TODA la cola (se libera al terminar/pausar/vaciar → cerrarCmp)
   procesarEtq();
 }
 // Pregunta el orden para el etiquetado por lotes. Devuelve 'ingreso' | 'coleccion' | 'actual' | null(cancelar).
@@ -11963,6 +11994,7 @@ async function grabarNFCUbic(ambito, estanteria) {
     <div style="margin-top:8px"><button class="btn" id="nfcUX">Cancelar</button></div></div>`;
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
+  bloquearRotacion(); // no gires la pantalla mientras se graba la etiqueta de estantería (se libera en cerrarCmp)
   let done = false;
   const ctrl = new AbortController();
   const cerrar = () => {
