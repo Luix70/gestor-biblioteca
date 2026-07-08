@@ -453,8 +453,14 @@ de ficheros clasificado por CDU.
       acentos/palabras — ambos EDITABLES. La carátula EMBEBIDA en el audio se extrae a
       «.portadas/» si no hay imágenes sueltas. Si además trae el texto en PDF → formatos
       ['audio','pdf'] y se abre en el visor + la playlist.
-    · Detección: audio DIRECTO en la carpeta = ella es 1 audiolibro; audio solo en subcarpetas =
-      cada subcarpeta inmediata = 1 audiolibro (contenedor). Anti-duplicados por título.
+    · Detección de unidades: audio DIRECTO en la carpeta = ella es 1 audiolibro; audio solo en
+      subcarpetas = cada subcarpeta inmediata = 1 audiolibro (contenedor). EXCEPCIÓN: si TODAS las
+      subcarpetas con audio son DISCOS de la misma obra («CD1/CD2/CD3», «Título CD N», «Disco 2»…,
+      misma base) → es UN solo audiolibro repartido en CDs (no se parte; si no, CD2/CD3 caerían en
+      el anti-duplicados por título). Anti-duplicados por título.
+    · ANTI-BUCLE: un audiolibro «ya catalogado» (o una colección transmedia «ya existe») devuelve
+      `permanente:true`; el vigilante lo añade a `omitidasDefinitivas` y NO lo reintenta (si no, la
+      carpeta —conservada en el Inbox con .noborrar— se reprocesaría en cada escaneo).
     · VIGILANTE (cableado): un drop en el Inbox se enruta así — TRANSMEDIA si trae marcador
       `.transmedia`, contenido interactivo (.exe/.swf/.app) o audio CON estructura (≥2 PDFs de
       lectura o carpetas «Stage N»); si no, AUDIOLIBRO si hay audio suelto (≤1 PDF, sin

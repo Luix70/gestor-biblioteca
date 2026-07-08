@@ -340,6 +340,10 @@ const transmediaVistas = new Set();
 // Carpetas ya detectadas como AUDIOLIBRO puro (misma detección PEGAJOSA que transmedia): audio suelto sin
 // estructura → 1 documento naturaleza:'audiolibro' (playlist + carrusel), no una colección.
 const audiolibroVistas = new Set();
+// Carpetas que dieron un resultado DEFINITIVO de duplicado (transmedia «ya existe la colección», audiolibro
+// «ya catalogado»): se DEJAN de reintentar para no entrar en bucle (se reprocesarían en cada escaneo). El
+// origen se conserva en el Inbox (con .noborrar); el usuario decide qué hacer. Se olvida al desaparecer.
+const omitidasDefinitivas = new Set();
 
 /**
  * Huella de un árbol de carpeta: nº total de ficheros, bytes totales y el mtime MÁS RECIENTE. Recorre TODO
@@ -418,6 +422,9 @@ async function listarUnidades() {
         if (ignorarEntrada(e.name)) continue; // ocultos + carpetas de sistema (@eaDir, #recycle...)
         const ruta = path.join(INBOX, e.name);
         if (e.isDirectory()) {
+            // Ya resuelta como duplicado definitivo (transmedia/audiolibro ya catalogado): no reintentar
+            // (evita el bucle de reprocesar la misma carpeta en cada escaneo). Sigue en el Inbox con .noborrar.
+            if (omitidasDefinitivas.has(ruta)) continue;
             // COPIA EN CURSO: no tocar la carpeta hasta que TERMINE de copiarse. Un drop grande (transmedia
             // de miles de ficheros) tarda minutos; si empezáramos al escribirse el primer PDF, lo trataríamos
             // como colección/pdf incompleto. Se salta y se reintenta en el próximo escaneo, cuando la huella
@@ -506,6 +513,7 @@ async function listarUnidades() {
     for (const dir of huellaCarpetas.keys()) if (!dirsActuales.has(dir)) huellaCarpetas.delete(dir);
     for (const dir of transmediaVistas) if (!dirsActuales.has(dir)) transmediaVistas.delete(dir);
     for (const dir of audiolibroVistas) if (!dirsActuales.has(dir)) audiolibroVistas.delete(dir);
+    for (const dir of omitidasDefinitivas) if (!dirsActuales.has(dir)) omitidasDefinitivas.delete(dir);
 
     return unidades;
 }
@@ -712,7 +720,10 @@ async function procesarCola() {
                                 ? `  ✔ ${rt.insertados} documento(s) · CDU ${rt.cdu} · ${rt.web}`
                                 : `  ✔ contenido preservado verbatim (0 documentos catalogables, p. ej. CD interactivo) · ${rt.web}`);
                             tally.transmedia = (tally.transmedia || 0) + 1; procesadas++;
-                        } else console.warn(`  ✗ transmedia: ${rt.motivo} (se CONSERVA el origen)`);
+                        } else {
+                            console.warn(`  ✗ transmedia: ${rt.motivo} (se CONSERVA el origen)`);
+                            if (rt.permanente) omitidasDefinitivas.add(u.carpeta); // duplicado real: no reintentar (evita bucle)
+                        }
                     } catch (err) { console.error(`  ✗ transmedia falló: ${err.message} (se CONSERVA el origen)`); }
                     continue;
                 }
@@ -724,7 +735,10 @@ async function procesarCola() {
                         const ra = await ingestarAudiolibro(u.carpeta, {});
                         const oks = (ra.resultados || []).filter((r) => r.ok);
                         if (ra.ok) { oks.forEach((r) => console.log(`  ✔ «${r.titulo}» · ${r.audios} pistas · ${r.imagenes} imágenes`)); tally.audiolibro = (tally.audiolibro || 0) + oks.length; procesadas++; }
-                        else console.warn(`  ✗ audiolibro: ${(ra.resultados || [])[0]?.motivo || 'sin resultado'} (se CONSERVA el origen)`);
+                        else {
+                            console.warn(`  ✗ audiolibro: ${(ra.resultados || [])[0]?.motivo || 'sin resultado'} (se CONSERVA el origen)`);
+                            if (ra.permanente) omitidasDefinitivas.add(u.carpeta); // ya catalogado: no reintentar (evita bucle)
+                        }
                     } catch (err) { console.error(`  ✗ audiolibro falló: ${err.message} (se CONSERVA el origen)`); }
                     continue;
                 }

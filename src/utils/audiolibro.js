@@ -34,6 +34,12 @@ const esImagen = (n) => EXT_IMG.includes(path.extname(n).toLowerCase());
 const esPdf = (n) => path.extname(n).toLowerCase() === '.pdf';
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || /^thumbs\.db$/i.test(n);
 
+// Sufijo de DISCO al final del nombre de una carpeta: «CD1», «Le grand Meaulnes CD 2», «Disco 3», «Vol. 1».
+// (new RegExp para no arriesgar la corrupción de literales con clases de caracteres.)
+const RE_DISCO = new RegExp('[\\s._-]*(?:cd|dis[ck]o?|disque|parte?|vol(?:umen)?)\\s*\\.?\\s*\\d+\\s*$', 'i');
+const esDisco = (nombre) => RE_DISCO.test(String(nombre || ''));
+const baseSinDisco = (nombre) => String(nombre || '').replace(RE_DISCO, '').trim();
+
 const webDe = (abs) => '/recursos/' + path.relative(DIR_CDU, abs).split(path.sep).join('/');
 
 /** Lista TODOS los ficheros de un árbol con su ruta relativa (POSIX). Nunca lanza. */
@@ -159,6 +165,12 @@ async function detectarUnidades(dir) {
     const directos = audios.some((a) => !a.rel.includes('/'));
     if (directos) return [{ carpeta: dir, nombre: path.basename(dir), files }];
     const hijos = [...new Set(audios.map((a) => a.rel.split('/')[0]))];
+    // DISCOS de UNA obra (CD1/CD2/CD3, «Título CD N», «Disco 2»…): si TODAS las subcarpetas con audio son
+    // discos y comparten la MISMA base (sin el sufijo de disco), es UN SOLO audiolibro repartido en CDs, no
+    // obras distintas → toda la carpeta es una unidad (evita partirlo y que el anti-duplicados descarte CD2/CD3).
+    const bases = hijos.map(baseSinDisco);
+    const soloDiscos = hijos.every(esDisco) && new Set(bases.map((b) => b.toLowerCase())).size === 1;
+    if (soloDiscos) return [{ carpeta: dir, nombre: path.basename(dir), files }];
     return hijos.map((h) => ({
         carpeta: path.join(dir, h),
         nombre: h,
@@ -355,7 +367,10 @@ export async function ingestarAudiolibro(dir, { db: dbArg, reciclarOrigen = true
     }
 
     const ok = resultados.some((r) => r.ok);
-    return { ok, resultados, algunoConservado };
+    // PERMANENTE: no se catalogó nada y TODO era «ya catalogado» (duplicado real, no una copia en curso) →
+    // el vigilante debe DEJAR de reintentarlo (si no, la carpeta se reprocesa en cada escaneo = bucle).
+    const permanente = !ok && resultados.length > 0 && resultados.every((r) => r.motivo === 'ya catalogado');
+    return { ok, resultados, algunoConservado, permanente };
 }
 
 /** Resuelve un nombre de autor → [ObjectId] (check-then-create). Best-effort. */
