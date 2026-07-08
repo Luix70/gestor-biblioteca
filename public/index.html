@@ -357,9 +357,17 @@
                     class="btn"
                     type="button"
                     id="inTapeteCal"
-                    title="Sube una foto del TAPETE VACÍO para fijar su color de esta sesión (sirve para cualquier color de tapete y se rehace si cambia la luz)"
+                    title="Elige una foto del TAPETE VACÍO (de la galería) para fijar su color de esta sesión (sirve para cualquier color de tapete y se rehace si cambia la luz)"
                   >
                     🎨 Calibrar tapete
+                  </button>
+                  <button
+                    class="btn"
+                    type="button"
+                    id="inTapeteCalCam"
+                    title="Toma AHORA una foto del TAPETE VACÍO con la cámara para calibrar su color (móvil)"
+                  >
+                    📷 Foto
                   </button>
                   <button
                     class="btn"
@@ -371,6 +379,13 @@
                   </button>
                   <span class="muted" id="inTapeteCalEstado" style="font-size: 12px"></span>
                   <input type="file" id="inTapeteCalFile" accept="image/*" style="display: none" />
+                  <input
+                    type="file"
+                    id="inTapeteCalCamFile"
+                    accept="image/*"
+                    capture="environment"
+                    style="display: none"
+                  />
                   <input type="file" id="inTapeteTestFile" accept="image/*" style="display: none" />
                 </div>
               </div>

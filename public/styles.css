@@ -1762,7 +1762,27 @@ body.modo-seleccion::after {
   height: 100%;
   object-fit: contain;
   scroll-snap-align: center;
+}
+/* Lupa (esquina superior izquierda del carrusel): amplía la imagen visible a pantalla completa (lightbox). */
+.clupa {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--line);
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   cursor: zoom-in;
+  font-size: 16px;
+  display: grid;
+  place-items: center;
+}
+.clupa:hover {
+  background: var(--acc);
+  color: #04231b;
 }
 .cnav {
   position: absolute;
@@ -1798,6 +1818,75 @@ body.modo-seleccion::after {
   padding: 3px 10px;
   border-radius: 20px;
   font-size: 11px;
+}
+/* Lightbox: visor a pantalla completa de una imagen del carrusel (se abre con la lupa 🔍). */
+#lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 4500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.92);
+  padding: 20px;
+}
+#lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+#lightbox .lbx {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--line);
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+#lightbox .lbnav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 60px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--line);
+  color: #fff;
+  font-size: 26px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+#lightbox .lbnav.prev {
+  left: 14px;
+}
+#lightbox .lbnav.next {
+  right: 14px;
+}
+#lightbox .lbx:hover,
+#lightbox .lbnav:hover {
+  background: var(--acc);
+  color: #04231b;
+}
+#lightbox .lbdots {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.6);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  color: #fff;
 }
 .fileprev {
   margin-top: 16px;

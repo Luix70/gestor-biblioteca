@@ -2620,8 +2620,10 @@ function pintarDoc(r, ctx) {
   const nfcOv = nfcBadge(d);
   // (Se retiró el botón ✏️ superpuesto sobre el carrusel: sobraba ahí. La edición está en la fila de
   //  acciones «✏️ Editar», en la cabecera «✏️ Editar» y en el encabezado de la sección Imágenes.)
+  // La imagen YA NO se abre al tocarla (abría una pestaña nueva). Ahora se amplía a pantalla completa con la
+  // lupa (🔍), que abre la imagen visible del carrusel en un visor (lightbox).
   const carrusel = imgs.length
-    ? `<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map((im) => `<img src="${esc(encUrl(im.ruta))}" loading="lazy" onclick="window.open('${esc(encUrl(im.ruta))}','_blank')">`).join('')}</div>${imgs.length > 1 ? `<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>` : ''}</div>`
+    ? `<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map((im) => `<img src="${esc(encUrl(im.ruta))}" loading="lazy">`).join('')}</div><button class="clupa" onclick="abrirLightbox()" title="Ver la imagen a pantalla completa">🔍</button>${imgs.length > 1 ? `<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>` : ''}</div>`
     : `<div class="filebox" style="position:relative">${nfcOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
   // ── FICHA MÍNIMA (encabezado vistoso): título → estrellas → [papel: ex-libris | digital: descarga] →
   //    datos (autor/editorial/colección/CDU/ISBN/ISSN, drillables) → [papel: ubicación clicable]. Un badge
@@ -2926,6 +2928,57 @@ function carMove(dir) {
   t.scrollTo({ left: t.clientWidth * carIdx, behavior: 'smooth' });
   const dd = $('#carDots');
   if (dd) dd.textContent = carIdx + 1 + ' / ' + n;
+}
+
+// ── VISOR A PANTALLA COMPLETA (lightbox) del carrusel ──────────────────────────────────────────────
+// Se abre con la lupa (🔍) — ya NO al tocar la imagen. Muestra la imagen VISIBLE del carrusel sobre fondo
+// oscuro; se cierra con ✕, clic fuera o Esc, y se navega con ‹ › (o ←/→) si hay varias imágenes.
+let _lb = null; // { srcs: string[], idx }
+function abrirLightbox() {
+  const track = $('#carTrack');
+  if (!track) return;
+  const srcs = [...track.querySelectorAll('img')].map((im) => im.src);
+  if (!srcs.length) return;
+  const idx = track.clientWidth ? Math.round(track.scrollLeft / track.clientWidth) : 0;
+  _lb = { srcs, idx: Math.max(0, Math.min(srcs.length - 1, idx)) };
+  let ov = $('#lightbox');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'lightbox';
+    ov.onclick = (e) => { if (e.target === ov) cerrarLightbox(); }; // clic en el fondo (no en la imagen) cierra
+    document.body.appendChild(ov);
+  }
+  document.addEventListener('keydown', lbKey);
+  ov.style.display = 'flex';
+  pintarLightbox();
+}
+function pintarLightbox() {
+  const ov = $('#lightbox');
+  if (!ov || !_lb) return;
+  const { srcs, idx } = _lb;
+  const nav = srcs.length > 1
+    ? `<button class="lbnav prev" id="lbPrev" title="Anterior">‹</button><button class="lbnav next" id="lbNext" title="Siguiente">›</button><div class="lbdots">${idx + 1} / ${srcs.length}</div>`
+    : '';
+  ov.innerHTML = `<img src="${esc(srcs[idx])}" alt=""><button class="lbx" id="lbCerrar" title="Cerrar (Esc)">✕</button>${nav}`;
+  $('#lbCerrar').onclick = cerrarLightbox;
+  if ($('#lbPrev')) $('#lbPrev').onclick = () => lbMove(-1);
+  if ($('#lbNext')) $('#lbNext').onclick = () => lbMove(1);
+}
+function lbMove(d) {
+  if (!_lb) return;
+  _lb.idx = (_lb.idx + d + _lb.srcs.length) % _lb.srcs.length;
+  pintarLightbox();
+}
+function lbKey(e) {
+  if (e.key === 'Escape') cerrarLightbox();
+  else if (e.key === 'ArrowLeft') lbMove(-1);
+  else if (e.key === 'ArrowRight') lbMove(1);
+}
+function cerrarLightbox() {
+  const ov = $('#lightbox');
+  if (ov) ov.style.display = 'none';
+  document.removeEventListener('keydown', lbKey);
+  _lb = null;
 }
 
 // ── valoración (estrellas, estilo Lightroom) + quitar (⊘) + NSFW (🔞) — para documentos / obras / colecciones ──
@@ -8370,25 +8423,33 @@ function wireInbox() {
     inP.checked = localStorage.getItem('inbox_portada') !== '0';
     inP.onchange = () => localStorage.setItem('inbox_portada', inP.checked ? '1' : '0');
   }
-  // Calibración del tapete (foto del tapete vacío): fija su color de sesión (cualquier color / luz).
+  // Calibración del tapete (foto del tapete vacío): fija su color de sesión (cualquier color / luz). Se puede
+  // ELEGIR una foto de la galería (🎨 Calibrar tapete) o TOMARLA al momento con la cámara (📷 Foto, en móvil).
   const tcb = $('#inTapeteCal'),
-    tcf = $('#inTapeteCalFile');
+    tcf = $('#inTapeteCalFile'),
+    tccb = $('#inTapeteCalCam'),
+    tccf = $('#inTapeteCalCamFile');
+  const calibrarDesde = async (inp) => {
+    if (inp && inp.files[0]) {
+      try {
+        const c = await calibrarTapete(inp.files[0]);
+        toast(`Tapete calibrado: rgb(${c.r},${c.g},${c.b})${c.crom ? '' : ' · acromático'}`);
+      } catch (e) {
+        toast('No se pudo calibrar: ' + e.message, 'bad');
+      }
+    }
+    if (inp) inp.value = '';
+    pintarTapeteCalEstado();
+  };
   if (tcb && tcf) {
     tcb.onclick = () => tcf.click();
-    tcf.onchange = async () => {
-      if (tcf.files[0]) {
-        try {
-          const c = await calibrarTapete(tcf.files[0]);
-          toast(`Tapete calibrado: rgb(${c.r},${c.g},${c.b})${c.crom ? '' : ' · acromático'}`);
-        } catch (e) {
-          toast('No se pudo calibrar: ' + e.message, 'bad');
-        }
-      }
-      tcf.value = '';
-      pintarTapeteCalEstado();
-    };
-    pintarTapeteCalEstado();
+    tcf.onchange = () => calibrarDesde(tcf);
   }
+  if (tccb && tccf) {
+    tccb.onclick = () => tccf.click();
+    tccf.onchange = () => calibrarDesde(tccf);
+  }
+  if (tcf || tccf) pintarTapeteCalEstado();
   const ttb = $('#inTapeteTest'),
     ttf = $('#inTapeteTestFile');
   if (ttb && ttf) {

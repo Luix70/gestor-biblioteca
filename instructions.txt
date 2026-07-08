@@ -338,6 +338,9 @@ de ficheros clasificado por CDU.
          LOTE desde la selección del Catálogo). No mueve la carpeta (la Integridad/un
          reproceso re-alojan luego en libros/ o revistas/). Útil para series de libros con
          ISSN que la ingesta temprana marcó revista.
+      El CARRUSEL de la ficha ya NO abre la imagen en una pestaña nueva al tocarla:
+         la LUPA (🔍) de la esquina la amplía a pantalla completa (lightbox; se cierra
+         con ✕ / clic fuera / Esc y navega con ‹ › o ←/→).
       🖼️ Imágenes — reordenar/añadir/borrar + editor en el navegador: rotar,
          recortar, corregir PERSPECTIVA (4 esquinas) con «✨ Auto bordes». Auto-bordes
          detecta la cubierta en 3 pasadas (todas locales, sin IA): tapete verde →
@@ -634,9 +637,10 @@ de ficheros clasificado por CDU.
     rejilla, robusto al giro del tapete y del libro), RECORTA y ENDEREZA la imagen
     (quita el tapete) y guarda las DIMENSIONES en la ficha. Todo en el navegador,
     SIN IA. Botones:
-      🎨 Calibrar tapete — sube una foto del tapete VACÍO para fijar su color de
-         sesión (sirve para CUALQUIER color: verde, teal, rosa, negro…). Rehazlo
-         si cambia la luz (nublado/soleado).
+      🎨 Calibrar tapete / 📷 Foto — fija el color de sesión del tapete a partir de
+         una foto del tapete VACÍO: «🎨 Calibrar» la ELIGE de la galería y «📷 Foto»
+         la TOMA al momento con la cámara (móvil). Sirve para CUALQUIER color (verde,
+         teal, rosa, negro…). Rehazlo si cambia la luz (nublado/soleado).
       🔍 Probar — sobre una foto, pinta en ROJO lo que considera tapete y dibuja
          el contorno del libro detectado + la medida (para verificar antes de subir).
 
