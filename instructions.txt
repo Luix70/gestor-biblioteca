@@ -397,10 +397,16 @@ de ficheros clasificado por CDU.
     Principio: AÑADIR siempre, BORRAR nunca, VERIFICAR la copia íntegra ANTES de reciclar
     el origen (src/utils/transmedia.js · ingestarTransmedia; copiarVerificado compara nº
     de ficheros y bytes; si el origen aún se copiaba, falla sin tocar el origen y reintenta).
-    · DETECCIÓN (vigilante): una carpeta con AUDIO en su árbol (o un marcador «.transmedia»)
-      = transmedia. El vigilante ESPERA a que la carpeta esté ESTABLE (nº ficheros+bytes sin
+    · DETECCIÓN (vigilante): es transmedia si trae marcador «.transmedia», o CONTENIDO
+      INTERACTIVO (.exe/.swf/bundle .app/autorun.inf — CD-ROM), o AUDIO CON ESTRUCTURA (≥2 PDFs
+      de lectura o carpetas «Stage N»). El audio SUELTO sin estructura NO es transmedia → es
+      audiolibro. El vigilante ESPERA a que la carpeta esté ESTABLE (nº ficheros+bytes sin
       cambios durante CARPETA_ESTABLE_MS) antes de operar — una copia de 19 GB tarda; una vez
       vista como transmedia lo sigue siendo (pegajoso), no cae a la vía normal.
+    · CONTENIDO INTERACTIVO (CD-ROM con .exe/.swf/.app): se COPIA VERBATIM y se PRESERVA íntegro
+      (no se cataloga —no se ve en el visor— pero NO se omite ni se altera ningún fichero: romper
+      la estructura lo inutilizaría). Si la colección es SOLO interactiva (0 PDF/audio) igualmente
+      se copia y se crea la colección (0 miembros); nada se pierde.
     · MIEMBROS PLANOS (sin IA, 100% estructural): un documento por PDF, con nivel (Stage),
       unidad (el libro) y rol_material (lectura / test / ejercicios / solucionario / glosario
       / guia). Autor/título salen del nombre de la carpeta de unidad («S0 Autor - Título»).
@@ -445,11 +451,12 @@ de ficheros clasificado por CDU.
       ['audio','pdf'] y se abre en el visor + la playlist.
     · Detección: audio DIRECTO en la carpeta = ella es 1 audiolibro; audio solo en subcarpetas =
       cada subcarpeta inmediata = 1 audiolibro (contenedor). Anti-duplicados por título.
-    · CLI: node scripts/ingestar-audiolibro.js "<carpeta>"            (dry-run: imprime el plan)
-           node scripts/ingestar-audiolibro.js "<carpeta>" --ejecutar  (cataloga)
-    · OJO (aún NO cableado al vigilante): un audiolibro soltado en el Inbox ACTIVO lo cazaría el
-      detector de transmedia (ambos llevan audio). De momento, catalogar por CLI. [pendiente:
-      enrutar audio-sin-estructura → audiolibro ANTES de transmedia en vigilante.js]
+    · VIGILANTE (cableado): un drop en el Inbox se enruta así — TRANSMEDIA si trae marcador
+      `.transmedia`, contenido interactivo (.exe/.swf/.app) o audio CON estructura (≥2 PDFs de
+      lectura o carpetas «Stage N»); si no, AUDIOLIBRO si hay audio suelto (≤1 PDF, sin
+      estructura); si no, pipeline normal. Detección PEGAJOSA (audiolibroVistas), como transmedia.
+    · CLI equivalente: node scripts/ingestar-audiolibro.js "<carpeta>"            (dry-run)
+                       node scripts/ingestar-audiolibro.js "<carpeta>" --ejecutar  (cataloga)
 
   ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
     El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos

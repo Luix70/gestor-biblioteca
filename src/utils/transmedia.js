@@ -75,12 +75,29 @@ async function listarFicheros(raiz) {
     return salida;
 }
 
-/** ¿Una carpeta es un TRANSMEDIA? Heurística: hay AUDIO en el árbol (los libros/cómics normales no lo llevan)
- *  o un marcador `.transmedia` en la raíz. Un audiolibro (solo audio) también cuenta. */
+// Contenido INTERACTIVO (CD-ROM: ejecutable, Flash, bundle .app…): se preserva verbatim como transmedia
+// (no se cataloga, pero NO se pierde ni se altera —romper la estructura lo inutilizaría—). autorun.inf es la
+// firma clásica de un CD autoejecutable.
+const EXT_INTERACTIVO = ['.exe', '.swf', '.dll', '.bat', '.cmd', '.msi', '.dmg', '.jar'];
+const esInteractivo = (f) => EXT_INTERACTIVO.includes(ext(f.nombre)) || /^autorun\.inf$/i.test(f.nombre) || /(^|\/)[^/]+\.app\//i.test(f.rel);
+// Segmento de carpeta «Stage N» o fichero con prefijo «Sx » (estructura de lecturas graduadas).
+const RE_ESTRUCTURA = new RegExp('(^|/)(stage\\s*\\d+|s\\d+[\\s.\\-])', 'i');
+
+/**
+ * ¿Una carpeta es un TRANSMEDIA (colección de estructura preservada, no un audiolibro suelto)? Es transmedia si:
+ *   · trae un marcador `.transmedia`, o
+ *   · contiene CONTENIDO INTERACTIVO (.exe/.swf/.app/autorun…), que hay que preservar íntegro, o
+ *   · tiene AUDIO **con estructura** de colección (≥2 PDFs de lectura, o carpetas «Stage N»).
+ * El audio SUELTO (0-1 PDF, sin estructura) NO es transmedia: es un audiolibro → lo enruta `esCarpetaAudiolibro`.
+ */
 export async function esCarpetaTransmedia(dir) {
     try { if (await fs.access(path.join(dir, '.transmedia')).then(() => true, () => false)) return true; } catch { /* */ }
     const ficheros = await listarFicheros(dir);
-    return ficheros.some((f) => esAudio(f.nombre));
+    if (ficheros.some(esInteractivo)) return true;
+    const audios = ficheros.filter((f) => esAudio(f.nombre));
+    const pdfs = ficheros.filter((f) => esPdf(f.nombre));
+    const hayEstructura = ficheros.some((f) => RE_ESTRUCTURA.test(f.rel));
+    return audios.length > 0 && (pdfs.length >= 2 || hayEstructura);
 }
 
 // ── Deducción de metadatos ESTRUCTURALES (sin IA) ──────────────────────────────────────────────────────
@@ -223,7 +240,7 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
     const cdu = deducirCdu(nombreColeccion, pdfs.slice(0, 30).map((f) => f.nombre));
     return {
         raiz, nombreColeccion, cdu, idioma,
-        totales: { pdfs: pdfs.length, audios: audios.length, covers: covers.length, audiolibros: audiolibros.length },
+        totales: { pdfs: pdfs.length, audios: audios.length, covers: covers.length, audiolibros: audiolibros.length, ficheros: ficheros.length },
         miembros, audiolibros,
     };
 }
@@ -270,7 +287,10 @@ export async function huella(dir) {
 export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen = true } = {}) {
     const db = dbArg || await conectarDB();
     const plan = await analizarTransmedia(dirOrigen);
-    if (!plan.miembros.length && !plan.audiolibros.length) return { ok: false, motivo: 'no hay PDFs ni audios que catalogar' };
+    // Se cataloga si hay miembros (PDF/audio) O si hay CONTENIDO que preservar (p. ej. un CD interactivo sin
+    // PDF/audio: se copia verbatim y se crea la colección aunque tenga 0 miembros — nada se pierde).
+    const hayContenido = (plan.totales?.ficheros || 0) > 0;
+    if (!plan.miembros.length && !plan.audiolibros.length && !hayContenido) return { ok: false, motivo: 'carpeta vacía: nada que catalogar' };
 
     // Anti-duplicados: si ya existe una colección con ese nombre Y tiene miembros, NO se re-cataloga (un
     // re-drop no debe duplicar los 863 documentos). Se comprueba ANTES de copiar 19 GB en balde.
