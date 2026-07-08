@@ -118,14 +118,18 @@ function grupoEnObra(nombre, clave) {
 // Agrupa los AUDIOS de una carpeta PLANA en OBRAS (por claveObra) → un «libro» virtual por obra (con `plano`
 // para que la ingesta sepa que los ficheros cuelgan directamente de la raíz de la colección, no de subcarpeta).
 async function librosPlanos(dir) {
-    const audios = (await listarFicheros(dir)).filter((f) => esAudio(f.nombre));
+    const todos = await listarFicheros(dir);
+    const audios = todos.filter((f) => esAudio(f.nombre));
+    const imagenes = todos.filter((f) => esImagen(f.nombre)); // compartidas por la carpeta → al 1er libro (no perderlas)
     const grupos = new Map();
     for (const f of audios) {
         const k = claveObra(f.nombre) || limpiarTitulo(path.basename(dir));
         if (!grupos.has(k)) grupos.set(k, []);
         grupos.get(k).push({ ...f, grupoForzado: grupoEnObra(f.nombre, k) });
     }
-    return [...grupos.entries()].map(([nombre, fs]) => ({ nombre, files: fs, plano: true }));
+    const libros = [...grupos.entries()].map(([nombre, fs]) => ({ nombre, files: fs, plano: true }));
+    if (libros.length && imagenes.length) libros[0].files = [...libros[0].files, ...imagenes]; // imágenes al primero
+    return libros;
 }
 
 /**
