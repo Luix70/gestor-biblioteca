@@ -270,6 +270,14 @@ async function recolectarColecciones(dir, salida) {
  * recursiva: cada carpeta «padre de libros» es una colección; cada libro (subcarpeta con audio directo o en
  * partes disco/sección, o solo-PDF) es un miembro.
  */
+/** Detección LIGERA (sin leer ID3, solo estructura de ficheros) para el vigilante: ¿el drop es una COLECCIÓN
+ *  de audiolibros? Sí si se detecta alguna colección con ≥2 libros/obras (1 solo = audiolibro suelto). */
+export async function esColeccionAudiolibros(dir) {
+    const cols = [];
+    await recolectarColecciones(dir, cols);
+    return cols.some((c) => c.libros.length >= 2);
+}
+
 export async function analizarColeccionAudiolibros(dir) {
     const encontradas = [];
     await recolectarColecciones(dir, encontradas);

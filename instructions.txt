@@ -498,8 +498,14 @@ de ficheros clasificado por CDU.
       resto (.avi/.mkv/.wmv…). Lo demás no catalogable se lista en un MANIFIESTO «_contenido.txt» en la
       raíz de la colección. Todo se copia al árbol CDU (ruta_fija) — NUNCA va a la Papelera (a la
       Papelera va solo el ORIGEN del Inbox, un duplicado), así que vaciarla no pierde nada.
-      [pendiente: enrutar en el vigilante por PESO audio/PDF; de momento por CLI]
       (formatos +'video' en el $jsonSchema → correr setup-mongo tras desplegar.)
+    · VIGILANTE (CABLEADO, enrutado por PESO): 1) TRANSMEDIA FUERTE (marcador .transmedia /
+      interactivo / «Stage N», esTransmediaFuerte) → transmedia; 2) COLECCIÓN de audiolibros
+      (esColeccionAudiolibros: ≥2 libros/obras, sin leer ID3) → aquí; 3) transmedia DÉBIL (audio +
+      ≥2 PDFs sin estructura, esCarpetaTransmedia) → transmedia; 4) audiolibro suelto; 5) normal. Así
+      el audio DOMINANTE con PDFs de guía (Campbell) va a colección, y las lecturas graduadas con
+      audio (Oxford, «Stage») a transmedia. Pegajoso (colAudioVistas); duplicado → permanente → no se
+      reintenta (anti-bucle).
 
   ── EXPLORADOR DE ARCHIVOS (ficha: «🗂️ Archivos» y junto a Ruta base) ─────────
     Navega y descarga TODO el árbol del documento — y, si cuelga de un árbol ruta_fija (colección

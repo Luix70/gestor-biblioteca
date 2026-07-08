@@ -100,6 +100,18 @@ export async function esCarpetaTransmedia(dir) {
     return audios.length > 0 && (pdfs.length >= 2 || hayEstructura);
 }
 
+/**
+ * Señales FUERTES de transmedia que DEBEN ganar a «colección de audiolibros» en el enrutado del vigilante:
+ * marcador `.transmedia`, contenido INTERACTIVO (CD-ROM) o ESTRUCTURA de lecturas graduadas («Stage N»). El
+ * caso débil (audio + ≥2 PDFs SIN estructura) se deja para `esCarpetaTransmedia`, DESPUÉS de descartar que
+ * sea una colección de audiolibros (donde el audio es el protagonista y el PDF una guía).
+ */
+export async function esTransmediaFuerte(dir) {
+    try { if (await fs.access(path.join(dir, '.transmedia')).then(() => true, () => false)) return true; } catch { /* */ }
+    const ficheros = await listarFicheros(dir);
+    return ficheros.some(esInteractivo) || ficheros.some((f) => RE_ESTRUCTURA.test(f.rel));
+}
+
 // ── Deducción de metadatos ESTRUCTURALES (sin IA) ──────────────────────────────────────────────────────
 
 /** Nivel de dificultad: un segmento «Stage N» o un prefijo «SN » en la carpeta de unidad → «Stage N». */
