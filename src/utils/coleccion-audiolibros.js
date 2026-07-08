@@ -138,6 +138,11 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
     const pdfs = files.filter((f) => esPdf(f.nombre)).sort(porRelNat);
     const imgs = files.filter((f) => esImagen(f.nombre)).sort(porRelNat);
 
+    // Imágenes del LIBRO (a nivel de libro, NO solo del audiolibro): así, si el libro no tiene audio (p. ej.
+    // «Transformations»: PDFs+vídeos+pics), sus imágenes NO se pierden — se adjuntan a sus PDFs/vídeos.
+    const imagenesLibro = imgs.map((f) => ({ rel: f.rel }));
+    const portadaLibroRel = (imgs.find((f) => /(^|\/)(cover|folder|portada|front)/i.test(f.rel)) || imgs[0])?.rel || null;
+
     let audiolibro = null;
     if (audios.length) {
         const metas = [];
@@ -179,14 +184,13 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
             grupo: f.grupoForzado !== undefined ? f.grupoForzado : (f.rel.includes('/') ? etiquetaGrupo(f.rel.split('/')[0]) : grupoDeNombre(f.nombre)),
             duracion: (metas[i] && metas[i].duracion) || null,
         }));
-        const portadaImg = imgs.find((f) => /(^|\/)(cover|folder|portada|front)/i.test(f.rel)) || imgs[0] || null;
 
         audiolibro = {
             titulo, autor, anio, cdu, idioma, isbn, editorial, sinopsis, dewey, lcc, ficheroHit,
             narrador: agg.narrador, genero: agg.genero, coral: agg.coral, duracionTotal: agg.duracionTotal,
             audios: pistas,
-            imagenes: imgs.map((f) => ({ rel: f.rel })),
-            portadaRel: portadaImg ? portadaImg.rel : null,
+            imagenes: imagenesLibro,
+            portadaRel: portadaLibroRel,
         };
     }
 
@@ -198,7 +202,7 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
     // que están ahí, aunque no tengan visor).
     const otros = files.filter((f) => !esAudio(f.nombre) && !esPdf(f.nombre) && !esVideo(f.nombre) && !esImagen(f.nombre) && !esRuido(f.nombre))
         .map((f) => f.rel);
-    return { nombre: nombreLibro, audiolibro, pdfs: pdfsOut, videos: videosOut, otros, plano };
+    return { nombre: nombreLibro, audiolibro, pdfs: pdfsOut, videos: videosOut, otros, plano, imagenes: imagenesLibro, portadaRel: portadaLibroRel };
 }
 
 /** ¿Es una PARTE (disco/sección) de un libro, y no un libro/colección por sí misma? Discos «[Disc 1]»,
@@ -359,6 +363,13 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
             const webLibro = m.plano ? webCol : `${webCol}/${m.nombre}`;
             const absLibro = m.plano ? carpetaCol : path.join(carpetaCol, m.nombre);
 
+            // Imágenes del LIBRO (cover + ilustraciones). La PORTADA (cover.jpg) se pone en TODOS los docs del
+            // libro; las ILUSTRACIONES van al carrusel del audiolibro, o —si el libro no tiene audio (p. ej.
+            // «Transformations»: solo PDFs+vídeos)— al primer PDF/vídeo, para que NO se pierdan.
+            const webPortadaLibro = m.portadaRel ? `${webLibro}/${m.portadaRel}` : null;
+            const imagenesLibro = (m.imagenes || []).map((im) => ({ ruta: `${webLibro}/${im.rel}`, tipo: (m.portadaRel && im.rel === m.portadaRel) ? 'portada' : 'otra' }));
+            let imagenesSinDueno = m.audiolibro ? null : (imagenesLibro.length ? imagenesLibro : null); // se colocan en el 1er PDF/vídeo
+
             // 3a) AUDIOLIBRO del libro.
             if (m.audiolibro) {
                 const a = m.audiolibro;
@@ -366,30 +377,32 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
                 const autores = await resolverAutor(a.coral ? null : a.autor);
                 const editorial = a.editorial ? await resolverEditorialRef(db, a.editorial) : null;
                 const audios = a.audios.map((x, i) => ({ ruta: `${webLibro}/${x.rel}`, titulo: x.titulo, orden: i + 1, grupo: x.grupo || undefined, duracion: x.duracion || undefined }));
-                const imagenes = a.imagenes.map((im) => ({ ruta: `${webLibro}/${im.rel}`, tipo: (a.portadaRel && im.rel === a.portadaRel) ? 'portada' : 'otra' }));
                 await bib.insertOne(base({
                     _id, tipo_recurso: 'libro', naturaleza: 'audiolibro', titulo: a.titulo, cdu: a.cdu, idioma: a.idioma,
                     formatos: ['audio'], autores: autores.length ? autores : undefined, editorial: editorial || undefined,
                     isbn: a.isbn || undefined, 'año_edicion': a.anio || undefined, dewey: a.dewey || undefined, lcc: a.lcc || undefined,
                     sinopsis: a.sinopsis || undefined, narrador: a.narrador || undefined,
-                    ruta_base: webLibro, portada: a.portadaRel ? `${webLibro}/${a.portadaRel}` : undefined,
-                    imagenes: imagenes.length ? imagenes : undefined, audios,
+                    ruta_base: webLibro, portada: webPortadaLibro || undefined,
+                    imagenes: imagenesLibro.length ? imagenesLibro : undefined, audios,
                 }));
                 await indexarDoc(db, _id).catch(() => {});
                 insertados++;
             }
 
-            // 3b) PDFs del libro → documentos miembro (portada = 1ª página rasterizada).
+            // 3b) PDFs del libro → documentos miembro. Portada = cover.jpg del libro si la hay; si no, su 1ª
+            //     página rasterizada. El PRIMER PDF hereda las ilustraciones del libro si nadie más las tiene.
             for (const p of m.pdfs) {
                 const _id = new ObjectId();
                 const d = path.posix.dirname(p.rel);
                 const rutaBase = d === '.' ? webLibro : `${webLibro}/${d}`;
                 const absPdf = path.join(absLibro, ...posix(p.rel));
-                const portada = await renderizarPortadaMiembro(absPdf, carpetaCol, webCol, _id);
+                const portada = webPortadaLibro || await renderizarPortadaMiembro(absPdf, carpetaCol, webCol, _id);
                 await bib.insertOne(base({
                     _id, tipo_recurso: 'libro', titulo: p.titulo, formatos: ['pdf'],
                     ruta_base: rutaBase, nombre_archivo: path.basename(p.rel), portada: portada || undefined,
+                    imagenes: imagenesSinDueno && imagenesSinDueno.length ? imagenesSinDueno : undefined,
                 }));
+                imagenesSinDueno = null; // ya colocadas
                 await indexarDoc(db, _id).catch(() => {});
                 insertados++;
             }
@@ -402,7 +415,10 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
                 await bib.insertOne(base({
                     _id, tipo_recurso: 'libro', naturaleza: 'video', titulo: v.titulo, formatos: ['video'],
                     ruta_base: rutaBase, nombre_archivo: path.basename(v.rel),
+                    portada: webPortadaLibro || undefined,
+                    imagenes: imagenesSinDueno && imagenesSinDueno.length ? imagenesSinDueno : undefined,
                 }));
+                imagenesSinDueno = null;
                 await indexarDoc(db, _id).catch(() => {});
                 insertados++;
             }
