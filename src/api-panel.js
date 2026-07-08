@@ -827,7 +827,8 @@ export function rutasPanel() {
             if (await ocultarNsfw(req.usuario?.rol)) matchMiembros.nsfw = { $ne: true };
             const proy = { ...PROY_VOL, clave_numero: 1, 'año_edicion': 1, mes_publicacion: 1, numero_issue: 1, coleccion_numero: 1, coleccion_numero_auto: 1,
                 // Transmedia: para agrupar/filtrar los miembros por nivel (Stage) y rol del material.
-                nivel: 1, rol_material: 1, unidad: 1, naturaleza: 1 };
+                // `autores` (ObjectId) se resuelve a nombres abajo, para el filtro por título/autor del panel.
+                nivel: 1, rol_material: 1, unidad: 1, naturaleza: 1, autores: 1 };
             // Revista → por clave/fecha. Libro → por Nº de colección NUMÉRICO (coleccion_numero es string, así
             // que $convert a double; sin número al final) para que la ficha de la serie salga 1,2,…,11 (no 1,11,2).
             const miembros = esRevista
@@ -840,6 +841,17 @@ export function rutasPanel() {
                     { $limit: 2000 },
                     { $project: proy },
                   ]).toArray();
+
+            // Resolver los nombres de autor de TODOS los miembros en UNA sola consulta (para el filtro por
+            // título/autor del panel): se sustituye el array de ObjectId por el de nombres.
+            const autIds = [...new Set(miembros.flatMap((m) => (m.autores || []).map(String)))];
+            const autMap = new Map();
+            if (autIds.length) {
+                const docsAut = await db.collection('autores')
+                    .find({ _id: { $in: autIds.map((id) => new ObjectId(id)) } }, { projection: { nombre: 1 } }).toArray();
+                docsAut.forEach((a) => autMap.set(String(a._id), a.nombre));
+            }
+            for (const m of miembros) m.autores = (m.autores || []).map((id) => autMap.get(String(id))).filter(Boolean);
 
             res.json({
                 ok: true,

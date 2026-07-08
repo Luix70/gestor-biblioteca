@@ -1523,6 +1523,12 @@ async function verColeccion(id) {
   }
 }
 
+// Normaliza texto para búsquedas: minúsculas y SIN acentos ("Matemáticas" → "matematicas"), como el índice
+// FTS del servidor, para que el filtro por texto de la ficha de colección sea insensible a acentos/mayúsculas.
+function normalizar(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(new RegExp('[\u0300-\u036f]', 'g'), '');
+}
+
 function miembroCard(d, numeroHTML) {
   const cov = d.portada
     ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>📕</div>'">`
@@ -1533,8 +1539,10 @@ function miembroCard(d, numeroHTML) {
     .join('');
   // data-nivel/data-rol: los usa el filtro por CSS (mostrar/ocultar) de las colecciones transmedia, sin
   // re-renderizar (así no se pierde el cableado de selección). Vacíos e inocuos en revistas/series.
+  // data-buscar: título + autores + unidad normalizados (minúsculas, sin acentos) para el filtro por texto.
   const rol = d.rol_material || (d.naturaleza === 'audiolibro' ? 'audiolibro' : '');
-  return `<div class="vol" data-doc="${esc(d._id)}" data-nivel="${esc(d.nivel || '')}" data-rol="${esc(rol)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${numeroHTML || ''} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo || '—')}</div></div></div>`;
+  const buscar = normalizar([d.titulo, (d.autores || []).join(' '), d.unidad].filter(Boolean).join(' '));
+  return `<div class="vol" data-doc="${esc(d._id)}" data-nivel="${esc(d.nivel || '')}" data-rol="${esc(rol)}" data-buscar="${esc(buscar)}"><div class="cov">${cov}${nfcBadge(d)}</div><div class="meta"><div class="n">${numeroHTML || ''} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(d.titulo || '—')}</div></div></div>`;
 }
 
 let _colR = null; // última colección pintada (para el editor «Numerar»)
@@ -1582,51 +1590,89 @@ function pintarColeccion(r) {
   const cards = r.miembros.length
     ? r.miembros.map((d) => miembroCard(d, numeroChip(d))).join('')
     : `<div class="empty">Sin ${esRev ? 'números' : esTrans ? 'documentos' : 'libros'} registrados</div>`;
-  // Barra de filtros SOLO en transmedia: por nivel (Stage) y por rol del material. Filtra por CSS
-  // (mostrar/ocultar tarjetas) sin re-renderizar → no rompe la selección ni recarga imágenes.
+  // Con colecciones grandes conviene FILTRAR + PAGINAR (868 documentos son mucho scroll). Los controles solo
+  // aparecen si hay bastantes miembros; el filtrado es en CLIENTE por CSS (mostrar/ocultar) sin re-renderizar,
+  // así no se pierde el cableado de selección ni se recargan las imágenes (lazy).
+  const PAG = 60; // tarjetas por página
+  const filtrable = r.miembros.length > 24;
+  // Chips de nivel/material SOLO en transmedia.
   const rolDe = (d) => d.rol_material || (d.naturaleza === 'audiolibro' ? 'audiolibro' : '');
   const niveles = [...new Set(r.miembros.map((m) => m.nivel).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
   const ORDEN_ROL = ['lectura', 'ejercicios', 'test', 'solucionario', 'glosario', 'guia', 'audiolibro'];
   const roles = ORDEN_ROL.filter((rol) => r.miembros.some((m) => rolDe(m) === rol));
   const chipf = (val, txt) => `<button class="btn filtChip" data-val="${esc(val)}" style="padding:3px 10px;font-size:12px">${esc(txt)}</button>`;
-  const filtroBar = esTrans
+  const chipsBar = esTrans
     ? `<div class="row filtRow" data-grupo="nivel" style="flex-wrap:wrap;gap:6px;margin-bottom:6px">
          <span class="muted" style="align-self:center;font-size:12px">Nivel:</span>${chipf('', 'Todos')}${niveles.map((n) => chipf(n, n)).join('')}
        </div>
-       <div class="row filtRow" data-grupo="rol" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">
+       <div class="row filtRow" data-grupo="rol" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
          <span class="muted" style="align-self:center;font-size:12px">Material:</span>${chipf('', 'Todos')}${roles.map((x) => chipf(x, x)).join('')}
        </div>`
     : '';
+  // Caja de búsqueda por título/autor (solo si hay bastantes miembros).
+  const buscarBar = filtrable
+    ? `<input id="colBuscar" type="search" placeholder="🔍 Filtrar por título o autor…" autocomplete="off"
+         style="width:100%;margin-bottom:8px;padding:8px 12px;border-radius:9px;border:1px solid var(--line);background:var(--card2);color:var(--txt)">`
+    : '';
+  // Controles de paginación (aparecen solo si el resultado supera una página).
+  const pagerBar = filtrable
+    ? `<div id="colPager" class="row" style="justify-content:center;align-items:center;gap:12px;margin-top:12px;display:none">
+         <button class="btn" id="pgPrev">‹ Anterior</button>
+         <span id="pgInfo" class="muted" style="font-size:13px"></span>
+         <button class="btn" id="pgNext">Siguiente ›</button>
+       </div>`
+    : '';
   const tituloGrid = esRev ? 'Números' : esTrans ? 'Documentos' : 'Libros';
+  const contadorHtml = filtrable ? ' <span id="colCount" class="muted" style="font-size:13px;font-weight:400"></span>' : '';
   $('#p-detalle').innerHTML =
     head +
-    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${tituloGrid} ${esTrans ? '<span id="colCount" class="muted" style="font-size:13px;font-weight:400"></span>' : ''}</h3>${numBtn}</div>${filtroBar}<div class="vol-grid" id="colGrid" style="margin-top:10px">${cards}</div></div>`;
-  // Filtro transmedia (cliente): marca el chip activo de su grupo y muestra/oculta las tarjetas que casan
-  // con la combinación nivel+rol seleccionada. Un contador refleja «N de total».
-  if (esTrans) {
-    const sel = { nivel: '', rol: '' };
-    const aplicar = () => {
-      let visibles = 0;
-      $$('#colGrid .vol').forEach((v) => {
-        const ok = (!sel.nivel || v.dataset.nivel === sel.nivel) && (!sel.rol || v.dataset.rol === sel.rol);
-        v.style.display = ok ? '' : 'none';
-        if (ok) visibles++;
-      });
-      if ($('#colCount')) $('#colCount').textContent = `${visibles} de ${r.miembros.length}`;
+    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${tituloGrid}${contadorHtml}</h3>${numBtn}</div>${chipsBar}${buscarBar}<div class="vol-grid" id="colGrid" style="margin-top:10px">${cards}</div>${pagerBar}</div>`;
+
+  // ── Filtro (texto + nivel/material) + paginación, todo en CLIENTE ──────────────────────────────────────
+  if (filtrable) {
+    const sel = { nivel: '', rol: '', q: '' };
+    let pagina = 1;
+    const todas = () => [...$('#colGrid').querySelectorAll('.vol')];
+    const coincide = (v) =>
+      (!sel.nivel || v.dataset.nivel === sel.nivel) &&
+      (!sel.rol || v.dataset.rol === sel.rol) &&
+      (!sel.q || (v.dataset.buscar || '').includes(sel.q));
+    const render = () => {
+      const cs = todas();
+      const filtr = cs.filter(coincide);
+      const total = filtr.length;
+      const paginas = Math.max(1, Math.ceil(total / PAG));
+      if (pagina > paginas) pagina = paginas;
+      const ini = (pagina - 1) * PAG;
+      cs.forEach((v) => (v.style.display = 'none'));
+      filtr.slice(ini, ini + PAG).forEach((v) => (v.style.display = ''));
+      if ($('#colCount')) $('#colCount').textContent = `${total} de ${r.miembros.length}`;
+      const pager = $('#colPager');
+      if (pager) pager.style.display = total > PAG ? '' : 'none';
+      if ($('#pgInfo')) $('#pgInfo').textContent = `Página ${pagina} / ${paginas}`;
+      const prev = $('#pgPrev'), next = $('#pgNext');
+      if (prev) { prev.disabled = pagina <= 1; prev.style.opacity = pagina <= 1 ? 0.4 : 1; }
+      if (next) { next.disabled = pagina >= paginas; next.style.opacity = pagina >= paginas ? 0.4 : 1; }
     };
+    const irAPagina = (p) => { pagina = p; render(); $('#colGrid').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    // Buscador por texto (normalizado, insensible a acentos). Reinicia a la página 1.
+    const inp = $('#colBuscar');
+    if (inp) inp.oninput = () => { sel.q = normalizar(inp.value.trim()); pagina = 1; render(); };
+    // Chips nivel/material (transmedia): marcan el activo de su grupo y reinician a la página 1.
     $$('#p-detalle .filtRow').forEach((row) => {
       const grupo = row.dataset.grupo;
       row.querySelectorAll('.filtChip').forEach((btn) => (btn.onclick = () => {
         sel[grupo] = btn.dataset.val;
         row.querySelectorAll('.filtChip').forEach((b) => b.classList.toggle('active', b === btn));
-        aplicar();
+        pagina = 1; render();
       }));
-      // Deja marcado «Todos» por defecto.
       const todos = row.querySelector('.filtChip');
-      if (todos) todos.classList.add('active');
+      if (todos) todos.classList.add('active'); // «Todos» por defecto
     });
-    aplicar();
+    if ($('#pgPrev')) $('#pgPrev').onclick = () => irAPagina(pagina - 1);
+    if ($('#pgNext')) $('#pgNext').onclick = () => irAPagina(pagina + 1);
+    render();
   }
   // «Mostrar en Catálogo» de la selección → orden por Nº de colección (numérico), salvo en revistas.
   montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}`, orden: esRev ? undefined : 'coleccion' });
