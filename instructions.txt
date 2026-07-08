@@ -476,6 +476,32 @@ de ficheros clasificado por CDU.
       por Nº de pista/Título/Duración (asc/desc) y/o mueve a mano (↑↓/arrastrar, como estanterías);
       se PERSISTE con POST /documentos/:id/audios/orden (reordenarAudios, espejo de reordenarImagenes).
 
+  ── COLECCIÓN DE AUDIOLIBROS (varios audiolibros = una colección) ────────────
+    Una carpeta con VARIOS audiolibros (p. ej. «Joseph Campbell» con muchos títulos) se cataloga
+    como UNA colección (tipo:'audiolibros') cuyos miembros son documentos (src/utils/coleccion-
+    audiolibros.js · ingestarColeccionAudiolibros): un AUDIOLIBRO por libro (playlist agrupada por
+    apartado/disco), un doc por PDF, y un doc por VÍDEO (naturaleza:'video', descargable). Copia
+    verbatim + ruta_fija. CLI: node scripts/ingestar-coleccion-audiolibros.js "<carpeta>" [--ejecutar].
+    · DETECCIÓN RECURSIVA: una colección = la carpeta cuyos hijos son LIBROS (audio directo o
+      subcarpetas que son TODAS partes disco/sección: «CD2», «[Disc 1]», «1_Origins…»); si los hijos
+      son grupos (autores), se recurre → funciona sueltes un autor o varios. Carpeta plana con las
+      obras en el nombre («Autor -- Obra -- Disc N of M») → un audiolibro con las obras como grupos.
+    · TÍTULO del libro = NOMBRE DE CARPETA (fiable; el álbum ID3 en colecciones viene por disco o mal
+      etiquetado). TÍTULO de pista: ID3 solo si es un título de verdad; si es genérico («Disc 01 of
+      10», «Track 05») → NOMBRE DE FICHERO (nunca se pierde su info). ISBN del nombre de carpeta
+      (…-9781565117358) → Fichero. Duplicados por título se CONSERVAN (anti-pérdida, no se fusionan).
+    · NADA INVISIBLE: los vídeos se catalogan; lo demás no catalogable se lista en un MANIFIESTO
+      «_contenido.txt» en la raíz de la colección. Todo se copia al árbol CDU (ruta_fija) — NUNCA va
+      a la Papelera (a la Papelera va solo el ORIGEN del Inbox, un duplicado), así que vaciarla no
+      pierde nada. [pendiente: enrutar en el vigilante por PESO audio/PDF; de momento por CLI]
+      (formatos +'video' en el $jsonSchema → correr setup-mongo tras desplegar.)
+
+  ── EXPLORADOR DE ARCHIVOS (ficha: «🗂️ Archivos» y junto a Ruta base) ─────────
+    Navega y descarga TODO el árbol del documento — y, si cuelga de un árbol ruta_fija (colección
+    transmedia/audiolibros), TODA la colección desde cualquier miembro (así se ve también lo NO
+    catalogado). GET /api/documentos/:id/archivos?sub= lista la carpeta (raíz = sube hasta el
+    marcador .ruta_fija/.transmedia); confinado al árbol CDU. Descargas por /recursos.
+
   ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
     El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos
     o del nombre — PREVALECE) o AUTOMÁTICO (asignado por el sistema — cede). Se distingue

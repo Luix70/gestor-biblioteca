@@ -2556,7 +2556,7 @@ function pintarDoc(r, ctx) {
     _ruta: d.ruta_base
       ? (() => {
           const rb = d.ruta_base.replace(/^\/recursos/, '');
-          return `<span class="mono">${esc(rb)}</span> <button class="rbtn copybtn" data-copy="${esc(rb)}" title="Copiar la ruta">📋</button>`;
+          return `<span class="mono">${esc(rb)}</span> <button class="rbtn copybtn" data-copy="${esc(rb)}" title="Copiar la ruta">📋</button> <button class="rbtn" onclick="explorarArchivos('${esc(d._id)}','')" title="Explorar los archivos de esta carpeta / colección">🗂️</button>`;
         })()
       : null,
     obra_titulo: r.obra
@@ -2697,6 +2697,7 @@ function pintarDoc(r, ctx) {
   // Debajo de la ficha, secciones PLEGABLES y colapsadas por defecto (acciones, imágenes, lectura, datos, sinopsis).
   const botones = `<div class="det-acts">
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
+      <button class="fbtn" id="actArchivos" title="Explorar y descargar TODOS los archivos de este documento / su colección (también los no catalogados: vídeos, extras…)">🗂️ Archivos</button>
       <button class="fbtn admin-only" id="actImgs" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">🖼️ Imágenes</button>
       <button class="fbtn admin-only" id="actMedir" title="Estimar el tamaño físico del libro (cm) sobre la alfombrilla reglada">📐 Medir</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
@@ -2759,6 +2760,7 @@ function pintarDoc(r, ctx) {
     const ce2 = $('#actEdit');
     if (ce2) ce2.onclick = () => fichaEditar(d, r);
     if ($('#fminEdit')) $('#fminEdit').onclick = () => fichaEditar(d, r); // «✏️ Editar» de la cabecera
+    if ($('#actArchivos')) $('#actArchivos').onclick = () => explorarArchivos(d._id);
     const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []), { url: r.archivo_url, nombre: r.nombre_archivo });
     if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
     if ($('#actImgsCar')) $('#actImgsCar').onclick = editarImgs; // duplicado en el encabezado del carrusel
@@ -5414,6 +5416,48 @@ async function guardarPl() {
     toast('Orden de pistas guardado');
     verDoc(_plR.id); // recargar la ficha con el nuevo orden
   } catch (e) { toast(e.message, 'bad'); }
+}
+
+// ════════ EXPLORADOR DE ARCHIVOS (ver/descargar TODO el árbol del documento o su colección) ════════
+let _expR = null; // { id, sub }
+async function explorarArchivos(id, sub = '') {
+  _expR = { id, sub };
+  try {
+    const r = await api(`/documentos/${encodeURIComponent(id)}/archivos?sub=${encodeURIComponent(sub)}`);
+    if (!r.ok) { toast(r.motivo || 'No se pudo explorar', 'bad'); return; }
+    pintarExplorador(r);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+function iconoArchivo(e) {
+  if (e.dir) return '📁';
+  const n = e.nombre;
+  if (/\.(mp3|m4a|m4b|flac|wav|ogg|oga|aac|opus|wma)$/i.test(n)) return '🎵';
+  if (/\.(mp4|avi|mkv|mov|webm|wmv|flv|m4v|mpe?g|ogv)$/i.test(n)) return '🎬';
+  if (/\.pdf$/i.test(n)) return '📄';
+  if (/\.(jpe?g|png|webp|gif|bmp|tiff?)$/i.test(n)) return '🖼️';
+  if (/\.(epub|mobi|azw3?|djvu|cbz|cbr|cb7)$/i.test(n)) return '📚';
+  return '📎';
+}
+function pintarExplorador(r) {
+  const rowSt = 'display:flex;gap:10px;align-items:center;padding:8px 6px;border-top:1px solid var(--line)';
+  const segs = r.sub ? r.sub.split('/') : [];
+  const migas = [`<a onclick="explorarArchivos('${esc(_expR.id)}','')" style="cursor:pointer">🗂️ ${esc(r.raiz)}</a>`]
+    .concat(segs.map((s, i) => `<a onclick="explorarArchivos('${esc(_expR.id)}','${esc(segs.slice(0, i + 1).join('/'))}')" style="cursor:pointer">${esc(s)}</a>`))
+    .join(' <span class="muted">/</span> ');
+  const filas = r.entradas.length
+    ? r.entradas.map((e) => {
+        const sub2 = (r.sub ? r.sub + '/' : '') + e.nombre;
+        return e.dir
+          ? `<div style="${rowSt};cursor:pointer" onclick="explorarArchivos('${esc(_expR.id)}','${esc(sub2)}')">${iconoArchivo(e)} <span style="flex:1">${esc(e.nombre)}</span> <span class="muted">›</span></div>`
+          : `<div style="${rowSt}"><span>${iconoArchivo(e)}</span> <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.nombre)}</span> <span class="muted" style="font-size:11px">${fmtBytes(e.bytes)}</span> <a class="btn" href="${esc(encUrl(e.web))}" download title="Descargar" style="padding:2px 9px;font-size:12px">⬇</a></div>`;
+      }).join('')
+    : '<div class="muted" style="padding:12px">(carpeta vacía)</div>';
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:640px;width:94vw;max-height:90vh;overflow:auto">
+    <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">🗂️ Archivos</h3><button class="btn" id="expX">✕</button></div>
+    <div class="row" style="margin:8px 0;font-size:13px;flex-wrap:wrap;gap:4px">${migas}</div>
+    <div>${filas}</div></div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#expX').onclick = cerrarCmp;
 }
 
 function previewArchivo(r) {

@@ -32,7 +32,7 @@ import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fond
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
 import { spawn } from 'node:child_process';
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
@@ -55,6 +55,22 @@ import { buscarUnISBN, iniciarLoteISBN, estadoLoteISBN } from './utils/lote-isbn
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1, nfc: 1 };
+
+// Raíz que puede EXPLORAR el explorador de archivos: si el doc cuelga de un árbol preservado (marcador
+// `.ruta_fija`/`.transmedia` — colección transmedia o de audiolibros), sube hasta esa raíz para poder navegar
+// TODA la colección; si no, la propia carpeta del documento. Confinado al árbol CDU.
+async function raizExplorable(baseDir) {
+    let cur = baseDir;
+    for (let i = 0; i < 10; i++) {
+        const tiene = await stat(path.join(cur, '.ruta_fija')).then(() => true, () => false)
+            || await stat(path.join(cur, '.transmedia')).then(() => true, () => false);
+        if (tiene) return cur;
+        const up = path.dirname(cur);
+        if (up === cur || !path.resolve(up).startsWith(path.resolve(DIR_CDU))) break;
+        cur = up;
+    }
+    return baseDir;
+}
 
 // Ruta (en /recursos) del fichero original de un documento, SIN codificar: el front la %-codifica por
 // segmentos al usarla (así funciona aunque la carpeta tenga caracteres heredados como '#', '%', espacios).
@@ -1297,6 +1313,36 @@ export function rutasPanel() {
     r.post('/documentos/:id/audios/orden', async (req, res) => {
         try { res.json(await reordenarAudios(await conectarDB(), req.params.id, req.body?.orden || [])); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // EXPLORADOR DE ARCHIVOS (independiente del dispositivo): lista la carpeta del documento y su subárbol,
+    // para VER y DESCARGAR todo lo que hay (incluido lo no catalogado: vídeos, extras…). Raíz = la de la
+    // COLECCIÓN si el doc cuelga de un árbol `ruta_fija` (así se navega toda la colección desde cualquier
+    // miembro); si no, la propia carpeta del doc. `sub` = subcarpeta relativa (navegación). Confinado al árbol.
+    r.get('/documentos/:id/archivos', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne(
+                { _id: new ObjectId(req.params.id) }, { projection: { ruta_base: 1, titulo: 1 } });
+            if (!doc || !doc.ruta_base) return res.status(404).json({ ok: false, motivo: 'documento sin carpeta' });
+            const raiz = await raizExplorable(carpetaDeDoc(doc));
+            const sub = String(req.query.sub || '').replace(/^[\\/]+/, '');
+            const objetivo = path.resolve(path.join(raiz, sub));
+            if (objetivo !== path.resolve(raiz) && !objetivo.startsWith(path.resolve(raiz) + path.sep))
+                return res.status(400).json({ ok: false, motivo: 'ruta no permitida' });
+            let ents; try { ents = await readdir(objetivo, { withFileTypes: true }); }
+            catch { return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' }); }
+            const entradas = [];
+            for (const e of ents) {
+                if (e.name === '.ruta_fija' || e.name === '.transmedia') continue; // marcadores internos
+                const abs = path.join(objetivo, e.name);
+                let bytes = 0; if (e.isFile()) { try { bytes = (await stat(abs)).size; } catch { /* */ } }
+                entradas.push({ nombre: e.name, dir: e.isDirectory(), bytes, web: '/recursos/' + path.relative(DIR_CDU, abs).split(path.sep).join('/') });
+            }
+            entradas.sort((a, b) => (Number(b.dir) - Number(a.dir)) || a.nombre.localeCompare(b.nombre, 'es', { numeric: true }));
+            res.json({ ok: true, raiz: path.basename(raiz), sub, entradas });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/documentos/:id/imagenes/eliminar', async (req, res) => {
         try { res.json(await eliminarImagen(await conectarDB(), req.params.id, req.body?.ruta)); }
