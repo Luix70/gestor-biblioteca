@@ -6035,6 +6035,12 @@ function mostrarEnCatalogo(ids, etiqueta, orden) {
   }
   buscarCatalogo(1);
 }
+// ¿El panel colapsable de acciones de la selección arranca desplegado? Se recuerda la última preferencia; sin
+// preferencia previa, desplegado en pantalla ancha y plegado en móvil (mismo criterio que «Buscar y filtrar»).
+function accPanelAbierto() {
+  const sav = localStorage.getItem('sq_acciones');
+  return sav === null ? matchMedia('(min-width:860px)').matches : sav === '1';
+}
 function renderBulk() {
   const el = $('#searchBulk');
   if (!el) return;
@@ -6057,10 +6063,10 @@ function renderBulk() {
        <button class="btn" id="bkAllRes" title="Selecciona TODOS los resultados de esta búsqueda (todas las páginas)">🗂 Todos los resultados</button>
        ${selNfc}`
     : '';
-  // Acciones sobre la selección (aparecen cuando hay algo seleccionado).
-  const acc = selDocs.size
-    ? `<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.
-    <button class="btn${soloSeleccion ? ' pri' : ''}" id="bkMostrarSel" title="Muestra SOLO los seleccionados (para revisar la selección y, en Modo selección, quitar los que no quieras). Vuelve a pulsar para mostrar todo.">${soloSeleccion ? '🗂 Mostrar todo' : '👁 Mostrar selección'}</button>
+  // Acciones sobre la selección (aparecen cuando hay algo seleccionado). Los botones se PLIEGAN en un panel
+  // colapsable (como «🔎 Buscar y filtrar») para no saturar la barra: la CUENTA queda siempre visible.
+  const accBtns = selDocs.size
+    ? `<button class="btn${soloSeleccion ? ' pri' : ''}" id="bkMostrarSel" title="Muestra SOLO los seleccionados (para revisar la selección y, en Modo selección, quitar los que no quieras). Vuelve a pulsar para mostrar todo.">${soloSeleccion ? '🗂 Mostrar todo' : '👁 Mostrar selección'}</button>
     <button class="btn pri" id="bkCol">📚 Colección</button>
     <button class="btn pri" id="bkObra">📖 Obra</button>
     <button class="btn pri" id="bkUbic">📍 Estantería</button>
@@ -6075,12 +6081,23 @@ function renderBulk() {
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`
     : '';
+  const cuenta = selDocs.size ? `<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.` : '';
   const g = colaEtqGuardada();
   const resume =
     g && 'NDEFReader' in window && !selDocs.size
       ? `<button class="btn pri" id="bkResumeNfc" style="margin-left:auto">📶 Reanudar etiquetado (${g.ids.length})</button>`
       : '';
-  el.innerHTML = `<div class="bulkbar">${modoBtn}${herramientas}${resume}${acc}</div>`;
+  // Panel colapsable de acciones (recuerda su estado; en móvil arranca plegado, como los filtros).
+  const acciones = selDocs.size
+    ? `<details class="bulkacts" id="bulkActs"${accPanelAbierto() ? ' open' : ''}>
+         <summary>⚙️ Acciones (${selDocs.size})</summary>
+         <div class="bulkacts-body">${accBtns}</div>
+       </details>`
+    : '';
+  el.innerHTML = `<div class="bulkbar">${modoBtn}${herramientas}${resume}${cuenta}</div>${acciones}`;
+  // Recordar si el panel de acciones queda plegado o desplegado.
+  if ($('#bulkActs'))
+    $('#bulkActs').addEventListener('toggle', (e) => localStorage.setItem('sq_acciones', e.target.open ? '1' : '0'));
   // Activar/desactivar Modo selección (la selección NO se pierde al apagarlo). Mismo efecto que el gesto
   // doble-clic / pulsación-larga sobre una tarjeta.
   $('#bkModo').onclick = alternarModoSel;
@@ -8005,7 +8022,7 @@ async function camaraEnVivo() {
         <div id="cvInfo" style="position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.62);color:#fff;font-size:13px;font-weight:600;padding:5px 12px;border-radius:14px;pointer-events:none;white-space:nowrap;max-width:92%;overflow:hidden;text-overflow:ellipsis">Encuadra el libro sobre el tapete</div>
         <div id="cvZoomWrap" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);flex-direction:column;align-items:center;gap:6px;background:rgba(0,0,0,.42);border-radius:16px;padding:8px 6px"></div>
         <button id="cvFloat" title="Toca para CAPTURAR · mantén pulsado para MOVER el botón" style="display:none;position:absolute;z-index:20;width:66px;height:66px;border-radius:50%;border:4px solid rgba(255,255,255,.92);background:rgba(255,255,255,.26);box-shadow:0 4px 16px rgba(0,0,0,.5);place-items:center;font-size:26px;touch-action:none;cursor:grab;color:#fff;transition:transform .12s">📸</button>
-        <button id="cvFloatDone" title="Catalogar las fotos tomadas y seguir en la cámara para el siguiente libro" style="display:none;position:absolute;z-index:21;right:12px;top:12px;min-width:66px;height:48px;border-radius:24px;border:3px solid rgba(40,217,168,.95);background:rgba(40,217,168,.92);color:#04231b;font-weight:800;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.5);padding:0 14px;cursor:pointer">✅ Catalogar</button>
+        <button id="cvFloatDone" title="Catalogar las fotos tomadas y seguir en la cámara para el siguiente libro · mantén pulsado para MOVER el botón" style="display:none;position:absolute;z-index:21;width:66px;height:66px;border-radius:50%;border:4px solid rgba(40,217,168,.95);background:rgba(40,217,168,.9);box-shadow:0 4px 16px rgba(0,0,0,.5);place-items:center;touch-action:none;cursor:grab;transition:transform .12s"><svg viewBox="0 0 24 24" width="30" height="30" style="pointer-events:none"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" fill="#04231b"></polygon></svg><span id="cvDoneN" style="position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;padding:0 5px;border-radius:11px;background:#04231b;color:#28d9a8;font-size:12px;font-weight:800;display:grid;place-items:center;pointer-events:none">0</span></button>
       </div>
     </div>
     <div id="cvStrip" style="display:none;gap:8px;padding:8px 12px;background:#0a0a0a;overflow-x:auto;white-space:nowrap"></div>
@@ -8101,8 +8118,13 @@ async function camaraEnVivo() {
     const n = camFotos.length;
     overlay.querySelector('#cvN').textContent = `${n} foto(s)`;
     overlay.querySelector('#cvDone').textContent = `✅ Catalogar (${n})`;
+    // Botón flotante «embudo» de catalogar: aparece con la 1.ª foto; la insignia muestra cuántas hay.
     const fd = overlay.querySelector('#cvFloatDone');
-    if (fd) { fd.style.display = n ? 'block' : 'none'; fd.textContent = `✅ Catalogar (${n})`; }
+    if (fd) {
+      fd.style.display = n ? 'grid' : 'none';
+      const b = fd.querySelector('#cvDoneN');
+      if (b) b.textContent = n;
+    }
   };
   actualizarN();
 
@@ -8205,23 +8227,53 @@ async function camaraEnVivo() {
   };
   overlay.querySelector('#cvShot').onclick = capturar;
 
-  // BOTÓN FLOTANTE de disparo: cae a mano (sin estirar el pulgar hasta la barra). Un TOQUE dispara; si lo
-  // MANTIENES y ARRASTRAS, lo recolocas donde quieras (posición persistente por localStorage).
-  const fab = overlay.querySelector('#cvFloat');
+  // BOTONES FLOTANTES (caen a mano, sin estirar el pulgar hasta la barra): el de DISPARO (📸) y el de
+  // CATALOGAR (embudo). Un TOQUE ejecuta la acción; si se MANTIENE pulsado se arrastra a otra posición
+  // (persistente por localStorage). Comparten la mecánica en fabArrastrable.
   const wrapEl = overlay.querySelector('#cvWrap');
+  const fab = overlay.querySelector('#cvFloat');
   fab.style.display = 'grid';
-  const colocarFab = () => {
+  fabArrastrable(fab, wrapEl, 'cam_fab', (rw, fw, fh) => ({
+    x: (rw.width - fw) / 2, // por defecto: abajo-centro (cómodo para el pulgar)
+    y: rw.height - fh - 18,
+  }), capturar);
+
+  // Catalogar SIN salir de la cámara: envía las fotos actuales como un libro y sigue filmando (encadenar
+  // libros). El envío va en segundo plano; la cola y las tiras se vacían para el siguiente. «✕ Cerrar» sale.
+  const catalogarYSeguir = () => {
+    if (!camFotos.length) { toast('Haz al menos una foto', 'warn'); return; }
+    const files = camFotos.slice();
+    camFotos = [];
+    renderCamStrip();
+    renderCamThumbs();
+    actualizarN();
+    toast(`📚 ${files.length} foto(s) enviadas a catalogar`);
+    subirInbox(files).catch((e) => toast('Error al enviar: ' + (e.message || e), 'bad'));
+  };
+  overlay.querySelector('#cvDone').onclick = catalogarYSeguir;
+  // El botón flotante «embudo» de catalogar: mismo comportamiento arrastrable que el de disparo (por defecto
+  // arriba-derecha; su visibilidad la gobierna actualizarN según haya fotos).
+  fabArrastrable(overlay.querySelector('#cvFloatDone'), wrapEl, 'cam_fab_done', (rw, fw) => ({
+    x: rw.width - fw - 12,
+    y: 12,
+  }), catalogarYSeguir);
+}
+
+// Convierte un botón en un FLOTANTE ARRASTRABLE dentro de `wrapEl`: un TOQUE corto ejecuta `onTap`; MANTENER
+// pulsado (~280 ms) entra en «modo mover» (se agranda + vibra) y se arrastra, con la posición persistida en
+// localStorage[clave]. `posPorDefecto(rw, fw, fh)` da la posición inicial si aún no hay una guardada. Lo
+// comparten los dos flotantes de la cámara en vivo (disparo 📸 y catalogar «embudo»).
+function fabArrastrable(fab, wrapEl, clave, posPorDefecto, onTap) {
+  const colocar = () => {
     const rw = wrapEl.getBoundingClientRect(), fw = fab.offsetWidth || 66, fh = fab.offsetHeight || 66;
-    let p = null; try { p = JSON.parse(localStorage.getItem('cam_fab') || 'null'); } catch (_) {}
-    let x = p ? p.x : (rw.width - fw) / 2;       // por defecto: abajo-centro (cómodo para el pulgar)
-    let y = p ? p.y : rw.height - fh - 18;
+    let p = null; try { p = JSON.parse(localStorage.getItem(clave) || 'null'); } catch (_) {}
+    const def = posPorDefecto(rw, fw, fh);
+    let x = p ? p.x : def.x, y = p ? p.y : def.y;
     x = Math.max(6, Math.min(rw.width - fw - 6, x));
     y = Math.max(6, Math.min(rw.height - fh - 6, y));
     fab.style.left = x + 'px'; fab.style.top = y + 'px';
   };
-  setTimeout(colocarFab, 60); // tras el layout del vídeo
-  // Un TOQUE corto dispara; para MOVERLO hay que MANTENER pulsado (~280 ms) → entra en «modo mover» (se
-  // agranda + vibra) y ya se arrastra. Así no se dispara sin querer al intentar recolocarlo.
+  setTimeout(colocar, 60); // tras el layout del vídeo
   let fdrag = false, fmoved = false, fhold = null, fsx = 0, fsy = 0, foffx = 0, foffy = 0;
   const finMover = () => { fab.style.transform = ''; fab.style.cursor = 'grab'; };
   fab.addEventListener('pointerdown', (e) => {
@@ -8248,27 +8300,12 @@ async function camaraEnVivo() {
   });
   fab.addEventListener('pointerup', () => {
     clearTimeout(fhold);
-    if (fdrag) { fdrag = false; finMover(); localStorage.setItem('cam_fab', JSON.stringify({ x: parseFloat(fab.style.left), y: parseFloat(fab.style.top) })); return; }
-    if (fmoved) { fmoved = false; return; }           // fue un swipe: no disparar
-    capturar();                                        // toque corto → capturar
+    if (fdrag) { fdrag = false; finMover(); localStorage.setItem(clave, JSON.stringify({ x: parseFloat(fab.style.left), y: parseFloat(fab.style.top) })); return; }
+    if (fmoved) { fmoved = false; return; }           // fue un swipe: ni acción ni mover
+    onTap();                                           // toque corto → la acción del botón
   });
   fab.addEventListener('pointercancel', () => { clearTimeout(fhold); fdrag = false; fmoved = false; finMover(); });
   fab.addEventListener('contextmenu', (e) => e.preventDefault());
-
-  // Catalogar SIN salir de la cámara: envía las fotos actuales como un libro y sigue filmando (encadenar
-  // libros). El envío va en segundo plano; la cola y las tiras se vacían para el siguiente. «✕ Cerrar» sale.
-  const catalogarYSeguir = () => {
-    if (!camFotos.length) { toast('Haz al menos una foto', 'warn'); return; }
-    const files = camFotos.slice();
-    camFotos = [];
-    renderCamStrip();
-    renderCamThumbs();
-    actualizarN();
-    toast(`📚 ${files.length} foto(s) enviadas a catalogar`);
-    subirInbox(files).catch((e) => toast('Error al enviar: ' + (e.message || e), 'bad'));
-  };
-  overlay.querySelector('#cvDone').onclick = catalogarYSeguir;
-  overlay.querySelector('#cvFloatDone').onclick = catalogarYSeguir;
 }
 
 // Detecta un ISBN (EAN-13 978/979) en las IMÁGENES (sin tocar el DOM): lo lee EN EL MÓVIL con

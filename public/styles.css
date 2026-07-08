@@ -1588,6 +1588,43 @@ body.modo-seleccion::after {
   align-items: center;
   flex-wrap: wrap;
 }
+/* Panel COLAPSABLE de acciones de la selección (bajo la barra): pliega los botones para no saturar. */
+details.bulkacts {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 2px 12px;
+  margin: -4px 0 12px;
+  background: var(--card);
+}
+details.bulkacts > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--mut);
+  padding: 8px 2px;
+}
+details.bulkacts > summary::-webkit-details-marker {
+  display: none;
+}
+details.bulkacts > summary::before {
+  content: '▸';
+  color: var(--acc);
+  font-size: 15px;
+  transition: transform 0.15s;
+}
+details.bulkacts[open] > summary::before {
+  transform: rotate(90deg);
+}
+.bulkacts-body {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 2px 0 10px;
+}
 /* Al paginar, dejamos hueco bajo la barra superior fija para que el destino del scroll no quede tapado. */
 #searchBulk,
 #searchPagerTop,
