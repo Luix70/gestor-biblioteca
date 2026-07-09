@@ -466,13 +466,32 @@ export function rutasPanel() {
                     idsRanked = ftsIds;
                     if (ftsIds.length) or.push({ _id: { $in: ftsIds.map(id => new ObjectId(id)) } });
                     ordenRelevancia = orden === 'reciente';   // por defecto, ordenar por relevancia
+                    // VARIANTES de autor/editorial (por Mongo, como los identificadores): el FTS indexa solo el
+                    // nombre PRINCIPAL; las grafías alternativas (otros alfabetos, formas castellanizadas,
+                    // seudónimos) viven en el registro de autoridad. Se resuelven aquí y sus documentos se UNEN a
+                    // los aciertos del FTS → «Жюль Верн» o «Julio Verne» encuentran a «Verne, Jules».
+                    // A PROPÓSITO no se indexan en el FTS: engordarían la columna `autores` y el bm25 penaliza por
+                    // LONGITUD de campo, hundiendo en el ranking a los autores con muchas variantes (se comprobó:
+                    // con las variantes dentro, «Verne» devolvía «Vernet, Juan» por delante de Jules Verne).
+                    if (q.length >= 3) {
+                        const rxAlt = { $regex: escapeRegex(q), $options: 'i' };
+                        const [autsAlt, edsAlt] = await Promise.all([
+                            db.collection('autores').find({ nombres_alternativos: rxAlt }, { projection: { _id: 1 } }).limit(80).toArray(),
+                            db.collection('editoriales').find({ nombres_alternativos: rxAlt }, { projection: { _id: 1 } }).limit(80).toArray(),
+                        ]);
+                        if (autsAlt.length) or.push({ autores: { $in: autsAlt.map(a => a._id) } });
+                        if (edsAlt.length) or.push({ editorial: { $in: edsAlt.map(e => e._id) } });
+                    }
                 } else {
                     const rx = { $regex: escapeRegex(q), $options: 'i' };
                     or.push({ titulo: rx }, { subtitulo: rx }, { obra_titulo: rx },
                         { coleccion_nombre: rx }, { palabras_clave: rx }, { nombre_archivo: rx });
+                    // Autores/editoriales: se busca también por sus GRAFÍAS ALTERNATIVAS (otros alfabetos, formas
+                    // castellanizadas, seudónimos) → «Жюль Верн» o «Julio Verne» encuentran a «Verne, Jules».
+                    const porNombre = { $or: [{ nombre: rx }, { nombres_alternativos: rx }] };
                     const [autores, edits] = await Promise.all([
-                        db.collection('autores').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
-                        db.collection('editoriales').find({ nombre: rx }, { projection: { _id: 1 } }).limit(80).toArray(),
+                        db.collection('autores').find(porNombre, { projection: { _id: 1 } }).limit(80).toArray(),
+                        db.collection('editoriales').find(porNombre, { projection: { _id: 1 } }).limit(80).toArray(),
                     ]);
                     if (autores.length) or.push({ autores: { $in: autores.map(a => a._id) } });
                     if (edits.length) or.push({ editorial: { $in: edits.map(e => e._id) } });

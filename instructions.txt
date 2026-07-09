@@ -263,9 +263,20 @@ de ficheros clasificado por CDU.
   En móvil el botón Atrás del teléfono navega hacia atrás (doble-atrás = salir).
 
   ── CATÁLOGO (búsqueda + selección) ──────────────────────────────────────────
-    · Caja de búsqueda (título, autor, editorial, ISBN, ISSN, nombre de archivo).
+    · Caja de búsqueda (título, autor, editorial, ISBN, ISSN, DOI, nombre de archivo).
       Rápida e INSENSIBLE A ACENTOS gracias a un índice local SQLite-FTS
       ("matematicas" encuentra "Matemáticas"); si el índice no está, cae a Mongo.
+    · VARIANTES de nombre (autor/editorial): el FTS indexa solo el nombre PRINCIPAL; las
+      grafías alternativas (otros alfabetos, formas castellanizadas, seudónimos) viven en el
+      registro de autoridad y se resuelven por MONGO, uniendo sus documentos a los aciertos
+      del FTS. Así «Жюль Верн» o «Julio Verne» encuentran a «Verne, Jules»; «Диккенс» a
+      «Dickens, Charles». NO se indexan en el FTS A PROPÓSITO: engordarían la columna
+      `autores` y el bm25 penaliza por LONGITUD de campo, hundiendo en el ranking a los
+      autores con muchas variantes (comprobado: con las variantes dentro, «Verne» devolvía
+      «Vernet, Juan» ANTES que Jules Verne). El nombre principal se LATINIZA en la ingesta
+      (utils/transliterar.js: cirílico y griego) y la grafía original queda como variante;
+      resolver-persona empareja por principal o variante (no duplica autores) y la fusión
+      de autores conserva todas las grafías.
     · Panel de filtros PLEGABLE (desplegado en PC, colapsado en móvil). Al confirmar
       una búsqueda (Enter / «Ir» del teclado móvil) se CONTRAE solo para ver los
       resultados sin scroll; el botón «✕ Limpiar» vive en la CABECERA (a la derecha,
