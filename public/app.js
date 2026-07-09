@@ -2694,6 +2694,24 @@ function pintarDoc(r, ctx) {
     _isbn: d.isbn
       ? `<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a> <button class="rbtn copybtn" data-copy="${esc(d.isbn)}" title="Copiar el ISBN al portapapeles">📋</button>`
       : null,
+    // DOI (identificador del ARTÍCULO): abre doi.org y se puede copiar. La REVISTA de origen y la CITA
+    // (vol/nº/pp) acompañan al artículo, como el ISBN/colección a un libro/número.
+    _doi: d.doi
+      ? `<a class="rowlink" href="https://doi.org/${esc(d.doi)}" target="_blank" rel="noopener" title="Abrir el DOI en doi.org">${esc(d.doi)} ↗</a> <button class="rbtn copybtn" data-copy="${esc(d.doi)}" title="Copiar el DOI">📋</button>`
+      : null,
+    _revista: d.revista ? esc(d.revista) : null,
+    _cita:
+      d.articulo && (d.articulo.volumen || d.articulo.numero || d.articulo.paginas)
+        ? esc(
+            [
+              d.articulo.volumen ? 'vol. ' + d.articulo.volumen : '',
+              d.articulo.numero ? 'nº ' + d.articulo.numero : '',
+              d.articulo.paginas ? 'pp. ' + d.articulo.paginas : '',
+            ]
+              .filter(Boolean)
+              .join(' · '),
+          )
+        : null,
     // Otras ediciones (e-ISBN, tapa dura/blanda, obra completa, código de barras…), drillables.
     _isbns_alt:
       d.isbns_alternativos && d.isbns_alternativos.length
@@ -2762,9 +2780,12 @@ function pintarDoc(r, ctx) {
     ['Autor', especiales._autores],
     ['Editorial', especiales._editorial],
     ['Colección', especiales._coleccion],
+    ['Revista', especiales._revista],
     ['CDU', d.cdu ? `<span class="mono">${esc(d.cdu)}</span>` : null],
     ['ISBN', especiales._isbn],
     ['ISSN', especiales._issn],
+    ['DOI', especiales._doi],
+    ['Cita', especiales._cita],
   ]
     .filter((p) => p[1])
     .map((p) => `<dt>${p[0]}</dt><dd>${p[1]}</dd>`)

@@ -407,6 +407,24 @@ de ficheros clasificado por CDU.
     archivo trae «Vol./Tomo N» con el título de la obra delante (motor-enriquecimiento).
     Conservador: solo si no hay ya nº de volumen, y no en revistas ni cómics.
 
+  ── ARTÍCULOS (el DOI es el pivote, como el ISBN lo es del libro) ────────────
+    Un artículo es como un libro pero con o SIN identificador propio (igual que hay
+    libros con y sin ISBN): incluye artículos de revista, capítulos sueltos y artículos
+    escaneados. AUTO-DETECCIÓN por DOI: un DOI de revista (10.xxxx/… SIN ISBN incrustado)
+    y SIN ISBN propio ⇒ `tipo_recurso:'articulo'` (discriminador). Guardas: un DOI de LIBRO
+    Springer lleva el ISBN incrustado (…/978…) → sigue siendo libro; el ISBN del CUERPO de
+    un artículo es de un LIBRO CITADO en las referencias → se DESCARTA (no es su identidad).
+    El DOI se extrae del cuerpo + info-dict (Subject/Keywords) + nombre (lector-pdf·extraerDOI)
+    y se guarda en `doi`. PIVOTE: CROSSREF (api.crossref.org, GRATIS y sin clave) resuelve el
+    DOI → título REAL (sustituye el nombre del PDF), autores, revista de origen + ISSN, año,
+    vol/nº/pp (bajo `articulo`) — es al artículo lo que el Fichero-por-ISBN al libro
+    (buscador-crossref.js·buscarPorDOI; degrada en silencio; el DOI del dev tiene TLS
+    interceptado → probar en el NAS o con NODE_TLS_REJECT_UNAUTHORIZED=0). Ficha: filas DOI
+    (drillable a doi.org, copiable), Revista y Cita. Los artículos SIN DOI (capítulos,
+    escaneos) se marcan a mano con «🔀 Cambiar tipo» → Artículo (como un libro sin ISBN).
+    PENDIENTE: enlazar el artículo a la CABECERA de su revista (colección tipo:'revista' por
+    ISSN, como los números de una revista); editar el DOI en la ficha; búsqueda por DOI.
+
   ── EDITAR COLECCIÓN / OBRA (admin, en su ficha) ─────────────────────────────
     «✏️ Editar datos» abre un modal (MISMA interfaz para ambas): presentación/sinopsis,
     editorial (por nombre → check-then-create), CDU (cdu_manual) y FECHAS de publicación

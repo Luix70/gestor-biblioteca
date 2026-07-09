@@ -286,8 +286,19 @@ export async function procesarRecurso(entrada) {
             pareceRevista: pareceRevista(datosBase.titulo),
             titulo: datosBase.titulo,
         });
-        const clasif = clasificarTipo(interp.senales);
+        // ARTÍCULO por DOI (pivote, como el ISBN del libro): un DOI de REVISTA (sin ISBN incrustado) y SIN ISBN
+        // propio ⇒ artículo. Un DOI de LIBRO Springer lleva el ISBN incrustado (…/978…) → queda libro (no artículo).
+        const doiDigitos = String(datosBase.doi || '').replace(/[^0-9]/g, '');
+        const articuloDoi = !!datosBase.doi && !datosBase.isbn_propio && !/97[89]\d{7}/.test(doiDigitos);
+        const clasif = clasificarTipo({ ...interp.senales, articuloDoi });
         tipo_recurso = clasif.tipo_recurso;
+        // El ISBN del CUERPO de un artículo es de un LIBRO CITADO en las referencias, no del artículo: se descarta
+        // (si no, se usaría como identidad y resolvería el libro equivocado en el Fichero/APIs). El pivote es el DOI.
+        if (tipo_recurso === 'articulo' && !datosBase.isbn_propio) {
+            delete datosBase.isbn; datosBase.isbn_candidatos = [];
+            datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
+                `Artículo detectado por DOI ${datosBase.doi}; ISBN(s) del cuerpo descartados (referencias).`];
+        }
         isbnDelArchivo = !!datosBase.isbn_propio; // solo el ISBN PROPIO (no el del cuerpo) cuenta como fiable
         // LIBRO con ISSN de SERIE: el ISBN identifica el LIBRO, el ISSN identifica su COLECCIÓN. Se da cuando
         // hay señal de libro (ISBN/CIP propio, o editorial de-solo-libros como Apress) + un ISSN → issn_clase

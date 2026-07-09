@@ -26,12 +26,14 @@ async function pdfInfo(ruta) {
             return m ? m[1].trim() : null;
         };
         return {
-            title:  campo('Title'),
-            author: campo('Author'),
-            pages:  parseInt(campo('Pages') || '0') || 0,
+            title:   campo('Title'),
+            author:  campo('Author'),
+            subject: campo('Subject'),   // en artículos, la CITA completa + DOI (Frontiers/Springer la ponen aquí)
+            keywords: campo('Keywords'),
+            pages:   parseInt(campo('Pages') || '0') || 0,
         };
     } catch {
-        return { title: null, author: null, pages: 0 };
+        return { title: null, author: null, subject: null, keywords: null, pages: 0 };
     }
 }
 
@@ -105,6 +107,17 @@ function extraerISBNs(texto) {
         if (v) out.add(v);
     }
     return [...out];
+}
+
+// DOI = pivote del ARTÍCULO (como el ISBN lo es del libro). Formato: 10.<registrante 4-9 díg>/<sufijo>. En
+// artículos aparece en el cuerpo y/o el info-dict (Subject/Keywords) como «doi: 10.…» o «https://doi.org/10.…».
+// Se toma el PRIMERO, se limpia la puntuación de cierre pegada y se normaliza a minúsculas (los DOI son
+// insensibles a mayúsculas; Crossref los canoniza así). Devuelve el DOI o null. Un DOI Springer de LIBRO lleva
+// el ISBN incrustado (10.1007/978-…) → también se guarda, pero no clasifica nada por sí solo.
+export function extraerDOI(texto) {
+    const m = String(texto || '').match(/\b10\.\d{4,9}\/[^\s"'<>)\]}]+/i);
+    if (!m) return null;
+    return m[0].replace(/[.,;:)\]>]+$/, '').toLowerCase();
 }
 
 // Normaliza un NOMBRE DE ARCHIVO antes de buscarle un ISBN. Los ficheros de Springer se descargan como su
@@ -246,6 +259,11 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // lista en el cuerpo su ISBN de tapa dura Y el de ebook; el del DOI/nombre es el que resuelve en el
         // Fichero/OL (caso Springer: cuerpo ...912 de papel, DOI ...929 de ebook = el catalogado).
         datos.isbn = datos.isbn_propio || datos.isbn_candidatos.find(c => c.length === 13) || datos.isbn_candidatos[0] || null;
+
+        // DOI (pivote del artículo): del cuerpo + del info-dict (Subject/Keywords/Title) + del nombre. Se guarda
+        // tal cual; más adelante resuelve la metadata por Crossref y ayuda a clasificar 'articulo'. No fuerza tipo.
+        const doi = extraerDOI([texto, info.subject, info.keywords, info.title, nombre].filter(Boolean).join('\n'));
+        if (doi) datos.doi = doi;
 
         return datos;
     } catch (e) {

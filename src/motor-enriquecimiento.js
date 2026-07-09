@@ -1,4 +1,5 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
+import { buscarPorDOI } from './utils/buscador-crossref.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { esTituloArtefacto, esAutorArtefacto } from './utils/parsear-nombre.js';
 import { parsearVolumen, totalDeclarado } from './utils/multivolumen.js';
@@ -57,6 +58,39 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     };
     if (sinopsisEpub) documento.sinopsis = sinopsisEpub;
     delete documento.sinopsis_nativa;
+
+    // ── DOI = pivote del ARTÍCULO (Crossref). Es al artículo lo que el Fichero-por-ISBN al libro: resuelve el DOI
+    //    a su metadata AUTORITATIVA (título real, autores, revista de origen + ISSN, año, vol/nº/pp). Sustituye el
+    //    título del NOMBRE del PDF (poco fiable en artículos) y rellena huecos; degrada en silencio (red/404). Los
+    //    campos de REVISTA/CITA solo se aplican a artículos; el resto (título/autores/año) sirve a cualquier DOI. ──
+    if (documento.doi) {
+        const cr = await buscarPorDOI(documento.doi);
+        if (cr) {
+            const base = String(documento.nombre_archivo || '').replace(/\.[^.]+$/, '').trim();
+            // El "título" de un artículo suele ser el NOMBRE del PDF (código/DOI) → poco fiable: Crossref manda.
+            const tituloDudoso = !primerValido(documento.titulo) || esTituloArtefacto(documento.titulo) || documento.titulo === base;
+            if (cr.titulo && tituloDudoso) documento.titulo = cr.titulo;
+            documento.subtitulo   = primerValido(documento.subtitulo, cr.subtitulo);
+            if ((!Array.isArray(documento.autores) || !documento.autores.length) && cr.autores.length) documento.autores = cr.autores;
+            documento.editorial   = primerValido(documento.editorial, cr.editorial);
+            documento.sinopsis    = primerValido(documento.sinopsis, cr.sinopsis);
+            documento.año_edicion = primerValido(documento.año_edicion, cr.año);
+            if (documento.tipo_recurso === 'articulo') {
+                if (cr.revista) documento.revista = primerValido(documento.revista, cr.revista);   // revista de origen (→ cabecera)
+                if (cr.issn.length && !primerValido(documento.issn)) { const v = validarISSN(cr.issn[0]); if (v) documento.issn = v; }
+                // Cita (volumen/fascículo/páginas del artículo) bajo `articulo` para no colisionar con `paginas`
+                // (= nº de páginas del libro).
+                const cita = {};
+                if (cr.volumen) cita.volumen = cr.volumen;
+                if (cr.numero)  cita.numero  = cr.numero;
+                if (cr.paginas) cita.paginas = cr.paginas;
+                if (Object.keys(cita).length) documento.articulo = { ...(documento.articulo || {}), ...cita };
+                if (Array.isArray(cr.palabras_clave) && cr.palabras_clave.length && !(documento.palabras_clave || []).length)
+                    documento.palabras_clave = cr.palabras_clave;
+            }
+            documento.alertas_agente.push(`Metadata resuelta por Crossref (DOI ${documento.doi}).`);
+        }
+    }
 
     // Título NATIVO (del propio archivo), ANTES de enriquecer. Es normal que falte en PDFs sin
     // metadatos y nombrados por su ISBN: el título real se resuelve luego por identificador (no se

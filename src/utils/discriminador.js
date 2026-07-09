@@ -42,6 +42,13 @@ export function clasificarTipo(s = {}) {
     // T1/T2 · multivolumen: ISBN con rol (obra completa + tomo) o "Vol N" en el nombre → obra de LIBRO.
     if (s.multiparte) return { tipo_recurso: 'libro', naturaleza: null, multiparte: true };
 
+    // T1 · ARTÍCULO por DOI: el DOI es el identificador PROPIO del artículo, igual que el ISBN lo es del libro.
+    // Un DOI de REVISTA (10.xxxx/… SIN ISBN incrustado) y SIN ISBN propio ⇒ artículo (journal-article o capítulo
+    // suelto). Gana a las PISTAS débiles: un ISBN del CUERPO de un artículo es el de un LIBRO citado en las
+    // referencias, no la identidad del artículo. Un DOI de LIBRO Springer lleva el ISBN incrustado (…/978…) →
+    // rellena isbn_propio → NO cae aquí (queda libro). El caller (orquestador) calcula `articuloDoi` con esa guarda.
+    if (s.articuloDoi) return { tipo_recurso: 'articulo', naturaleza: null, multiparte: false };
+
     const libroFuerte = !!(s.isbnPropio || s.cip || s.pareceSerieLibros || s.editorialLibro); // id/serie propios o editorial de-solo-libros
     const periodicoFuerte = !!(s.esFechada || s.issnFuerte);                // nombre fechado (T2) o ISSN fiable 977/impreso (T1)
 
