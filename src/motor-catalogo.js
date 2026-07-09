@@ -29,7 +29,7 @@ export async function buscarDocPorHash(hash) {
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza', 'orden_estanteria'];
+    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza', 'orden_estanteria', 'doi', 'revista', 'articulo'];
 
     // (1) Rellenar huecos (añadir información donde FALTA nunca borra).
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
@@ -291,6 +291,26 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             delete docFinal.issn; // la autoridad ISSN vive en la colección, no en el libro
         }
 
+        // 2f. ARTÍCULO → CABECERA de su REVISTA de origen. El artículo se cuelga de la revista (colección
+        // tipo:'revista', pivote ISSN) como MIEMBRO, igual que un número de esa revista — así el artículo y los
+        // números de la misma revista comparten cabecera. `revista` (nombre) e `issn` los da Crossref por el DOI.
+        // El ISSN es la AUTORIDAD de la REVISTA (cabecera), no del artículo → se retira del doc (como en 2e). El
+        // artículo conserva su identidad PROPIA: el DOI.
+        if (docFinal.tipo_recurso === 'articulo' && (docFinal.issn || docFinal.revista)) {
+            const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
+            const { _id, cdu: cduCab, creada } = await resolverCabecera(db, {
+                nombre: docFinal.revista || null, issn: docFinal.issn || null, tipo: 'revista', editorialId: edId, cdu: docFinal.cdu,
+            });
+            if (creada) docFinal.alertas_agente.push(`Nueva revista registrada para el artículo: ${docFinal.revista || docFinal.issn}`);
+            if (_id) {
+                docFinal.coleccion = _id;
+                if (docFinal.revista) docFinal.coleccion_nombre = docFinal.revista;
+                if (cduCab && !docFinal.cdu) docFinal.cdu = cduCab; // sin CDU propia → hereda la de la revista
+            }
+            delete docFinal.issn;    // la autoridad ISSN vive en la cabecera, no en el artículo
+            delete docFinal.revista; // ya es la colección (coleccion_nombre); no duplicar en el doc
+        }
+
         // NSFW HEREDADO: un nuevo miembro de una obra/colección marcada NSFW nace NSFW (así la marca
         // PROPAGA a los miembros FUTUROS; los actuales se propagan al marcar el padre desde el panel).
         if (!docFinal.nsfw && (docFinal.coleccion || docFinal.obra)) {
@@ -372,6 +392,9 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 } else if (docFinal.titulo && docFinal.año_edicion) {
                     filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
                 }
+            } else if (docFinal.tipo_recurso === 'articulo' && docFinal.doi) {
+                // — Artículo: su identidad es el DOI (como el ISBN del libro). Mismo DOI = mismo artículo.
+                filtro = { doi: docFinal.doi };
             } else if (docFinal.isbn && !docFinal.obra) {
                 // — Nivel C: libros con ISBN (NUNCA tomos de obra: jamás se fusionan por ISBN).
                 //   Un mismo ISBN puede tener VARIOS documentos: UNO POR FORMATO (pdf, epub, mobi…),

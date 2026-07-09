@@ -422,8 +422,12 @@ de ficheros clasificado por CDU.
     interceptado → probar en el NAS o con NODE_TLS_REJECT_UNAUTHORIZED=0). Ficha: filas DOI
     (drillable a doi.org, copiable), Revista y Cita. Los artículos SIN DOI (capítulos,
     escaneos) se marcan a mano con «🔀 Cambiar tipo» → Artículo (como un libro sin ISBN).
-    PENDIENTE: enlazar el artículo a la CABECERA de su revista (colección tipo:'revista' por
-    ISSN, como los números de una revista); editar el DOI en la ficha; búsqueda por DOI.
+    ENLACE A LA REVISTA (motor-catalogo 2f): el artículo se cuelga de la CABECERA de su
+    revista (colección tipo:'revista', pivote ISSN — la misma donde caen los NÚMEROS de esa
+    revista) vía resolverCabecera por `revista`+`issn`; el ISSN pasa a la cabecera (se retira
+    del doc, como en 2e) y la revista queda como su Colección (drillable). Identidad/DEDUP del
+    artículo = su DOI (como el ISBN del libro). DOI editable en la ficha (campo «DOI (artículos)»)
+    y BUSCABLE en el Catálogo (pega el DOI o su URL doi.org/).
 
   ── EDITAR COLECCIÓN / OBRA (admin, en su ficha) ─────────────────────────────
     «✏️ Editar datos» abre un modal (MISMA interfaz para ambas): presentación/sinopsis,

@@ -6,6 +6,7 @@
  */
 import { ObjectId } from 'mongodb';
 import { validarISBN, validarISSN } from './identificadores.js';
+import { normalizarDOI } from './buscador-crossref.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { reubicarPorCdu } from '../mantenimiento/util-mantenimiento.js';
 import { resolverPersona } from './resolver-persona.js';
@@ -77,6 +78,12 @@ export async function editarDocumento(db, id, campos = {}) {
         const v = String(campos.issn || '').trim();
         if (!v) unset.issn = '';
         else { const ok = validarISSN(v); if (ok) set.issn = ok; else avisos.push(`ISSN inválido (ignorado): ${v}`); }
+    }
+    // DOI (identificador del artículo): se normaliza a «10.xxxx/…» en minúsculas (quita «doi.org/», «doi:»).
+    if ('doi' in campos) {
+        const bruto = String(campos.doi || '').trim();
+        if (!bruto) unset.doi = '';
+        else { const ok = normalizarDOI(bruto); if (ok) set.doi = ok; else avisos.push(`DOI inválido (ignorado): ${bruto}`); }
     }
 
     // ISBNs ALTERNATIVOS (otras ediciones/encuadernaciones, con su rol). Se validan por checksum; los

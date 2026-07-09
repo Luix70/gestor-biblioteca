@@ -8,6 +8,7 @@ import {
     listarCuarentena, reingestarCuarentena, descartarCuarentena, descartarCategoria, reingestarTodosDuplicados, ingestaPorDia,
 } from './utils/inspeccion.js';
 import { restaurar } from './utils/papelera.js';
+import { normalizarDOI } from './utils/buscador-crossref.js';
 import { verificarPasswordAdmin, firmarCompartir, validarCompartir } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad } from './integridad.js';
@@ -486,6 +487,10 @@ export function rutasPanel() {
                     const colsISSN = await db.collection('colecciones').find({ issn: irx }, { projection: { _id: 1 } }).limit(50).toArray();
                     if (colsISSN.length) or.push({ coleccion: { $in: colsISSN.map(c => c._id) } });
                 }
+                // DOI (artículos): la consulta trae «10.xxxx/…» (o su URL doi.org/) → busca por el campo `doi`
+                // (los DOI se guardan normalizados en minúsculas).
+                const qDoi = normalizarDOI(q);
+                if (qDoi) or.push({ doi: qDoi });
                 // Con q SIEMPRE filtramos por $or; si quedó vacío (FTS sin aciertos y sin identificador) →
                 // "sin resultados" en vez de devolver el catálogo entero.
                 match.$or = or.length ? or : [{ _id: { $in: [] } }];

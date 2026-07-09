@@ -5281,6 +5281,7 @@ function fichaEditar(d, r, opts) {
       <div style="flex:1">${campo('edNum', 'Nº de ejemplar', d.numero_issue)}</div>
     </div><div class="muted" style="font-size:11px;margin-top:2px">El mes/año/nº definen la identidad del ejemplar dentro de su cabecera.</div></div>
     <div class="row" style="gap:8px"><div style="flex:1"><label style="display:block;margin-top:8px">ISBN</label><div style="display:flex;gap:6px"><input id="edIsbn" value="${esc(d.isbn || '')}" autocomplete="off" style="flex:1">${btnScanIsbn}</div></div><div style="flex:1">${campo('edIssn', 'ISSN', d.issn)}</div></div>
+    ${campo('edDoi', 'DOI (artículos)', d.doi)}
     <div style="margin-top:8px"><label style="display:block">Otras ediciones (ISBN)</label><div id="edAltList"></div><button type="button" class="btn" id="edAltAdd" style="margin-top:6px">➕ Añadir edición</button></div>
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edCdu', 'CDU', d.cdu)}</div><div style="flex:1">${campo('edEd', 'Edición nº', d.numero_edicion)}</div></div>`}
     ${campo('edPal', 'Palabras clave (coma)', (d.palabras_clave || []).join(', '))}
@@ -5377,6 +5378,7 @@ function fichaEditar(d, r, opts) {
       paginas: $('#edPag').value,
       isbn: $('#edIsbn').value,
       issn: $('#edIssn').value,
+      doi: $('#edDoi') ? $('#edDoi').value : undefined,
       cdu: $('#edCdu').value,
       numero_edicion: $('#edEd').value,
       palabras_clave: $('#edPal').value,
