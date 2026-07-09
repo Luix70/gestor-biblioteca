@@ -171,6 +171,15 @@ async function main() {
     await asegurarIndice(biblioteca, { isbn: 1 }, { sparse: true, name: 'idx_isbn' });
     await asegurarIndice(biblioteca, { issn: 1 }, { sparse: true, name: 'idx_issn' });
 
+    // ÍNDICES DE ORDENACIÓN del Catálogo. Sin ellos, cada navegación ordena en MEMORIA (tope 32 MB; en Atlas
+    // M0 `allowDiskUse` NO está permitido) y las páginas hondas reventaban («Sort exceeded memory limit»).
+    // `fecha_ingreso` es el orden POR DEFECTO (relevancia/recientes). `titulo` lleva la MISMA collation
+    // española que usa la consulta: un índice solo puede servir a un $sort si comparten collation.
+    await asegurarIndice(biblioteca, { fecha_ingreso: -1 }, { name: 'idx_fecha_ingreso' });
+    await asegurarIndice(biblioteca, { titulo: 1 }, { name: 'idx_titulo_es', collation: { locale: 'es', strength: 1 } });
+    // DOI: identidad del ARTÍCULO (dedup en motor-catalogo) y búsqueda por DOI en el Catálogo.
+    await asegurarIndice(biblioteca, { doi: 1 }, { sparse: true, name: 'idx_doi' });
+
     // Ampliar (sin quitar) el enum de `formatos` del validador de biblioteca para admitir cómics/ebooks
     // (cbz/cbr/cb7/djvu/mobi). El validador de biblioteca vive en Atlas, así que se LEE y se re-aplica
     // añadiendo solo lo que falte (defensivo: si la estructura no encaja, no se toca).

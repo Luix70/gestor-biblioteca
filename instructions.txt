@@ -297,6 +297,20 @@ de ficheros clasificado por CDU.
       de página, el scroll sube al primer resultado). Controles reutilizables (mismos en
       Catálogo, miembros de colección/obra, Autores y Descubrir): ⏮ primera · ‹ anterior
       · SALTO a una página concreta (input numérico, Enter) · siguiente › · última ⏭.
+      PAGINACIÓN ESCALABLE (api-panel · /catalogo): el $sort corre sobre una PROYECCIÓN
+      LIGERA (_id + SOLO las claves de orden) y luego se traen los documentos completos de
+      la página por _id (reordenados con un Map, porque $in no conserva el orden).
+      MOTIVO: MongoDB ordena en MEMORIA (tope 32 MB) y en Atlas M0 `allowDiskUse` NO está
+      permitido; el optimizador convierte $sort+$skip+$limit en un top-K cuyo buffer vale
+      (skip+limit) DOCUMENTOS ENTEROS → a partir de la página ~410 (≈9.900 × 3,4 KB ≈ 33 MB)
+      reventaba con «Sort exceeded memory limit». Solo pasaba con los $sort SIMPLES
+      (fecha_ingreso/titulo), que se absorben en el cursor find(); los que llevan $addFields
+      (posición/autor/obra/colección) ya podaban campos en la capa de agregación. Ordenando
+      documentos diminutos el buffer cae ~60× (escala a 10× documentos) y además el orden por
+      AUTOR se acelera (descarta el array del $lookup antes de ordenar). Índices de apoyo
+      (setup-mongo): idx_fecha_ingreso (orden por defecto), idx_titulo_es (con la MISMA
+      collation española que la consulta — si no, el índice no sirve al $sort) e idx_doi.
+      ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
     · MODO SELECCIÓN (admin, patrón ergonómico y móvil, COMÚN A TODA LA APP — Catálogo,
       ficha de autor, Colecciones, Obras, ficha de colección/obra y Estanterías/

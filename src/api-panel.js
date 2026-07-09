@@ -569,67 +569,98 @@ export function rutasPanel() {
                 : orden === 'antiguo' ? 1 : campoOrden === 'fecha' ? -1 : 1; // por defecto: fecha desc, el resto asc
             const opciones = ['titulo', 'autor', 'obra', 'coleccion', 'posicion'].includes(campoOrden)
                 ? { collation: { locale: 'es', strength: 1 } } : {};
-            // RELEVANCIA cuando hay índice FTS y no se pidió un orden explícito (ranking bm25 de idsRanked; los
-            // aciertos por identificador fuera del ranking caen al final con _rank grande).
-            const etapasOrden = (ordenRelevancia && idsRanked && idsRanked.length)
-                ? [
-                    { $addFields: { _rank: { $indexOfArray: [idsRanked, { $toString: '$_id' }] } } },
-                    { $addFields: { _rank: { $cond: [{ $lt: ['$_rank', 0] }, 1e9, '$_rank'] } } },
-                    { $sort: { _rank: 1, fecha_ingreso: -1 } },
-                  ]
+            // ORDEN — se separan las etapas PREVIAS (cálculo de claves) del propio $sort para poder PROYECTAR a un
+            // documento LIGERO (solo _id + las claves de orden) ANTES de ordenar.
+            // POR QUÉ (escalabilidad): MongoDB ordena en MEMORIA (tope 32 MB) y en Atlas M0 `allowDiskUse` NO está
+            // permitido. El optimizador convierte $sort+$skip+$limit en un top-K cuyo buffer vale (skip + limit)
+            // DOCUMENTOS COMPLETOS: con 24/pág, en la página ~410 eran ~9.900 docs × ~3,4 KB ≈ 33 MB → «Sort
+            // exceeded memory limit». Ordenando documentos DIMINUTOS (~40-150 B) el mismo buffer baja a ~1 MB, así
+            // que escala a páginas hondas y a 10× documentos. Después se traen SOLO los documentos completos de la
+            // página (por _id), preservando el orden. RELEVANCIA (bm25 de idsRanked) cuando hay FTS y no se pidió
+            // un orden explícito; los aciertos por identificador fuera del ranking caen al final con _rank grande.
+            const porOrden = (ordenRelevancia && idsRanked && idsRanked.length)
+                ? { pre: [
+                        { $addFields: { _rank: { $indexOfArray: [idsRanked, { $toString: '$_id' }] } } },
+                        { $addFields: { _rank: { $cond: [{ $lt: ['$_rank', 0] }, 1e9, '$_rank'] } } },
+                    ],
+                    orden: { _rank: 1, fecha_ingreso: -1 } }
                 : campoOrden === 'posicion'
-                ? [
-                    // «Posición en la estantería» = orden FÍSICO combinado: ámbito → estantería → posición dentro
-                    // de la estantería. _pos es NUMÉRICO ($convert) para que 2 vaya antes que 11; sin posición
-                    // asignada (o sin ubicación) cae al final (1e9 / 'zzzzzzzz'). Con collation español en el texto.
-                    { $addFields: {
-                        _amb: { $ifNull: ['$ubicacion.ambito', 'zzzzzzzz'] },
-                        _est: { $ifNull: ['$ubicacion.estanteria', 'zzzzzzzz'] },
-                        _pos: { $convert: { input: '$orden_estanteria', to: 'double', onError: 1e9, onNull: 1e9 } },
-                    } },
-                    { $sort: { _amb: s, _est: s, _pos: s, titulo: 1 } },
-                  ]
+                ? { pre: [
+                        // «Posición en la estantería» = orden FÍSICO combinado: ámbito → estantería → posición dentro
+                        // de la estantería. _pos es NUMÉRICO ($convert) para que 2 vaya antes que 11; sin posición
+                        // asignada (o sin ubicación) cae al final (1e9 / 'zzzzzzzz'). Con collation español en el texto.
+                        { $addFields: {
+                            _amb: { $ifNull: ['$ubicacion.ambito', 'zzzzzzzz'] },
+                            _est: { $ifNull: ['$ubicacion.estanteria', 'zzzzzzzz'] },
+                            _pos: { $convert: { input: '$orden_estanteria', to: 'double', onError: 1e9, onNull: 1e9 } },
+                        } },
+                    ],
+                    orden: { _amb: s, _est: s, _pos: s, titulo: 1 } }
                 : campoOrden === 'autor'
-                ? [
-                    { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_auS' } },
-                    { $addFields: { _auNom: { $ifNull: [{ $arrayElemAt: ['$_auS.nombre', 0] }, 'zzzzzzzz'] } } },
-                    { $sort: { _auNom: s, titulo: 1 } },
-                  ]
+                ? { pre: [
+                        // El $lookup materializa el array _auS; la proyección ligera lo DESCARTA antes del $sort.
+                        { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_auS' } },
+                        { $addFields: { _auNom: { $ifNull: [{ $arrayElemAt: ['$_auS.nombre', 0] }, 'zzzzzzzz'] } } },
+                    ],
+                    orden: { _auNom: s, titulo: 1 } }
                 : campoOrden === 'obra'
-                ? [
-                    // _vn NUMÉRICO ($convert): volumen_numero puede venir como string → sin convertir, el orden
-                    // sería alfanumérico (11 antes que 2). onError/onNull 1e9 = sin número al final.
-                    { $addFields: { _ot: { $ifNull: ['$obra_titulo', 'zzzzzzzz'] }, _vn: { $convert: { input: '$volumen_numero', to: 'double', onError: 1e9, onNull: 1e9 } } } },
-                    { $sort: { _ot: s, _vn: s, titulo: 1 } },
-                  ]
+                ? { pre: [
+                        // _vn NUMÉRICO ($convert): volumen_numero puede venir como string → sin convertir, el orden
+                        // sería alfanumérico (11 antes que 2). onError/onNull 1e9 = sin número al final.
+                        { $addFields: { _ot: { $ifNull: ['$obra_titulo', 'zzzzzzzz'] }, _vn: { $convert: { input: '$volumen_numero', to: 'double', onError: 1e9, onNull: 1e9 } } } },
+                    ],
+                    orden: { _ot: s, _vn: s, titulo: 1 } }
                 : campoOrden === 'coleccion'
-                ? [
-                    // _cnum NUMÉRICO ($convert): coleccion_numero SE GUARDA COMO STRING → sin convertir, «11»
-                    // ordenaría antes que «2». onError/onNull 1e9 = sin número (o no numérico) al final.
-                    { $addFields: { _cn: { $ifNull: ['$coleccion_nombre', 'zzzzzzzz'] }, _cnum: { $convert: { input: '$coleccion_numero', to: 'double', onError: 1e9, onNull: 1e9 } } } },
-                    { $sort: { _cn: s, _cnum: s, titulo: 1 } },
-                  ]
-                : [{ $sort: campoOrden === 'titulo' ? { titulo: s } : { fecha_ingreso: s } }];
+                ? { pre: [
+                        // _cnum NUMÉRICO ($convert): coleccion_numero SE GUARDA COMO STRING → sin convertir, «11»
+                        // ordenaría antes que «2». onError/onNull 1e9 = sin número (o no numérico) al final.
+                        { $addFields: { _cn: { $ifNull: ['$coleccion_nombre', 'zzzzzzzz'] }, _cnum: { $convert: { input: '$coleccion_numero', to: 'double', onError: 1e9, onNull: 1e9 } } } },
+                    ],
+                    orden: { _cn: s, _cnum: s, titulo: 1 } }
+                : { pre: [], orden: campoOrden === 'titulo' ? { titulo: s } : { fecha_ingreso: s } };
+
+            // Proyección LIGERA: _id + EXACTAMENTE las claves del $sort. Nada más entra al ordenador.
+            const projClaves = { _id: 1 };
+            for (const k of Object.keys(porOrden.orden)) projClaves[k] = 1;
+            // Etapas que ORDENAN documentos diminutos y devuelven _ids ya ordenados.
+            const etapasIds = [...porOrden.pre, { $project: projClaves }, { $sort: porOrden.orden }];
+
+            // Campos de la tarjeta del Catálogo (los únicos que viajan al cliente).
+            const PROY_TARJETA = {
+                titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
+                tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
+                valoracion: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
+            };
+
             // Modo SOLO-IDS: devuelve TODOS los _id que casan (todas las páginas) para «seleccionar todos los
-            // resultados» y para la NAVEGACIÓN de la ficha. Usa el MISMO pipeline de orden que la vista (para
-            // que anterior/siguiente sigan el orden visible). Respeta cada filtro. Sin paginar; tope de seguridad.
+            // resultados» y para la NAVEGACIÓN de la ficha. Usa el MISMO orden que la vista (para que
+            // anterior/siguiente sigan el orden visible). Respeta cada filtro. Sin paginar; tope de seguridad.
             if (String(req.query.soloIds || '') === '1') {
                 const idsAll = await db.collection('biblioteca').aggregate(
-                    [{ $match: consulta }, ...etapasOrden, { $limit: 5000 }, { $project: { _id: 1 } }],
+                    [{ $match: consulta }, ...etapasIds, { $limit: 5000 }, { $project: { _id: 1 } }],
                     opciones,
                 ).toArray();
                 return res.json({ ok: true, soloIds: true, ids: idsAll.map(x => String(x._id)) });
             }
             const total = await db.collection('biblioteca').countDocuments(consulta);
-            const docs = await db.collection('biblioteca').aggregate([
-                { $match: consulta }, ...etapasOrden, { $skip: (page - 1) * porPagina }, { $limit: porPagina },
-                { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
-                { $project: {
-                    titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
-                    tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
-                    valoracion: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
-                } },
-            ], opciones).toArray();
+            // 1) _ids de la PÁGINA, ya ordenados (el $sort trabaja sobre documentos diminutos → sin tope de 32 MB).
+            const idsPagina = (await db.collection('biblioteca').aggregate([
+                { $match: consulta }, ...etapasIds,
+                { $skip: (page - 1) * porPagina }, { $limit: porPagina },
+                { $project: { _id: 1 } },
+            ], opciones).toArray()).map(x => x._id);
+            // 2) Documentos COMPLETOS de esa página (autores resueltos) y REORDENADOS como venían de la página
+            //    ($in no conserva el orden). Sin $sort aquí: son `porPagina` documentos como mucho.
+            let docs = [];
+            if (idsPagina.length) {
+                const crudos = await db.collection('biblioteca').aggregate([
+                    { $match: { _id: { $in: idsPagina } } },
+                    { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
+                    { $project: PROY_TARJETA },
+                ]).toArray();
+                const porId = new Map(crudos.map(d => [String(d._id), d]));
+                docs = idsPagina.map(id => porId.get(String(id))).filter(Boolean);
+            }
 
             res.json({
                 ok: true, total, page, porPagina, paginas: Math.max(1, Math.ceil(total / porPagina)),
