@@ -272,6 +272,9 @@ de ficheros clasificado por CDU.
       visible aun con el panel plegado). Filtros:
         - Tipo (Libros/Revistas/Cómics)
         - Soporte (Papel/Digital)
+        - Formato concreto: PDF · EPUB · MOBI/AZW · CBZ · CBR · CB7 · DjVu · 🔊 Audio ·
+          🎬 Vídeo · Papel (casa contra el array `formatos`; audio=audiolibros,
+          video=vídeos de colecciones/transmedia). Whitelist server: FORMATOS_FILTRO.
         - Ámbito y Estantería (ubicación física)
         - CDU (prefijo)
         - Estrellas (valoración, multi-selección; "sin valorar"). Dentro del mismo

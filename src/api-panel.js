@@ -429,9 +429,10 @@ export function rutasPanel() {
             // Soporte: 'papel' = escaneado/físico (formatos incluye 'papel'); 'digital' = el resto
             // (epub/pdf/mobi/djvu/cbz…). Vacío = ambos.
             const soporte = String(req.query.soporte || '').trim();
-            // Filtro por FORMATO concreto (pdf/epub/mobi/cbz/cbr/cb7/djvu/papel): 'formatos' es un array, así
-            // que casa por contenido. Un formato concreto implica soporte digital → PREVALECE sobre 'soporte'.
-            const FORMATOS_FILTRO = ['pdf', 'epub', 'mobi', 'cbz', 'cbr', 'cb7', 'djvu', 'papel'];
+            // Filtro por FORMATO concreto (pdf/epub/mobi/cbz/cbr/cb7/djvu/audio/video/papel): 'formatos' es un
+            // array, así que casa por contenido. Un formato concreto implica soporte digital → PREVALECE sobre
+            // 'soporte' (audio = audiolibros; video = vídeos de colecciones/transmedia).
+            const FORMATOS_FILTRO = ['pdf', 'epub', 'mobi', 'cbz', 'cbr', 'cb7', 'djvu', 'audio', 'video', 'papel'];
             const formato = String(req.query.formato || '').trim().toLowerCase();
             if (FORMATOS_FILTRO.includes(formato)) match.formatos = formato;
             else if (soporte === 'papel') match.formatos = 'papel';

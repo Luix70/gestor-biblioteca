@@ -6599,7 +6599,7 @@ function construirSearch() {
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="apuntes">Apuntes</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
-        <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="papel">Papel</option></select></div>
+        <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
         <div><label>Estantería</label><select id="sqEstanteria" disabled><option value="">Todas</option></select></div>
         <div class="admin-only" style="display:flex;align-items:flex-end"><button class="btn" id="sqGoUbic" title="Gestionar ubicaciones (o ver esta estantería)">📍 Gestionar</button></div>
@@ -7267,12 +7267,15 @@ function badgesTipoFormato(d) {
   const tipo = esComic
     ? chip('📓 Cómic', 'rgba(180,120,255,.20)', '#c79cff')
     : chip(`${tipoIcono(d.tipo_recurso)} ${tipoNombre(d.tipo_recurso)}`, 'rgba(120,160,255,.20)', '#9db8ff');
+  // Iconos por formato: papel/audio/vídeo tienen el suyo; el resto (pdf/epub/mobi/cbz…) el genérico 💾.
+  const ICONO_FMT = { papel: '📄', audio: '🔊', video: '🎬' };
   const fmts = (d.formatos || [])
-    .map((f) =>
-      f === 'papel'
+    .map((f) => {
+      const k = String(f).toLowerCase();
+      return f === 'papel'
         ? chip('📄 Papel', 'rgba(200,160,90,.22)', '#d8b878')
-        : chip('💾 ' + esc(String(f).toUpperCase()), 'rgba(40,217,168,.18)', 'var(--acc)'),
-    )
+        : chip(`${ICONO_FMT[k] || '💾'} ${esc(String(f).toUpperCase())}`, 'rgba(40,217,168,.18)', 'var(--acc)');
+    })
     .join('');
   return `<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:10px">${tipo}${fmts}</div>`;
 }
