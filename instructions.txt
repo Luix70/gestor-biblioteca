@@ -370,7 +370,12 @@ de ficheros clasificado por CDU.
       exacta); clic en el ámbito = todo lo que cuelga de él (CDU por prefijo). En las
       tarjetas del Catálogo, un digital sin ubicación física muestra «CDU <código>».
     Acciones (admin):
-      ✏️ Editar (y bloquear para que el Conformador no lo cambie). AUTORES+COLABORADORES:
+      ✏️ Editar (y bloquear para que el Conformador no lo cambie). Incluye CDU · Dewey ·
+         LCC · LCCN (estas tres son solo metadatos: a diferencia de la CDU NO re-alojan el
+         fichero) · DOI (artículos) · ISBN/ISSN + otras ediciones. TAMAÑO en la ficha: si
+         está MEDIDO con el tapete se muestra «ancho × alto cm»; si solo hay el DECLARADO
+         por la fuente bibliográfica (campo `dimensiones`, casi siempre solo el alto:
+         «24 cm») se muestra atenuado como «· declarado». AUTORES+COLABORADORES:
          editor de FILAS (nombre + rol: autor/traductor/ilustrador/editor/prologuista/
          anotador/compilador), añadir/quitar/corregir. Cada fila es UNA persona, así el
          nombre puede llevar comas («Touchard, Jean») sin partirse (antes el separador por

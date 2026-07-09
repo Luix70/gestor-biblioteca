@@ -2689,10 +2689,21 @@ function pintarDoc(r, ctx) {
     _ubicacion: d.ubicacion
       ? esc([d.ubicacion.ambito, d.ubicacion.estanteria].filter(Boolean).join(' · ')) || null
       : null,
-    _dimensiones:
-      d.ancho_cm && d.alto_cm
-        ? `${esc(String(d.ancho_cm).replace('.', ','))} × ${esc(String(d.alto_cm).replace('.', ','))} cm`
-        : null,
+    // Tamaño: MEDIDO con el tapete (ancho_cm × alto_cm, preciso) y/o DECLARADO por la fuente bibliográfica
+    // (`dimensiones`, una cadena que casi siempre trae solo el ALTO: «24 cm»). Si hay ambos, manda el medido y
+    // el declarado se muestra al lado, atenuado. Antes el declarado no se veía en ninguna parte (905 docs).
+    _dimensiones: (() => {
+      const medido =
+        d.ancho_cm && d.alto_cm
+          ? `${esc(String(d.ancho_cm).replace('.', ','))} × ${esc(String(d.alto_cm).replace('.', ','))} cm`
+          : null;
+      const decl = typeof d.dimensiones === 'string' && d.dimensiones.trim() ? esc(d.dimensiones.trim()) : null;
+      if (medido && decl) return `${medido} <span class="muted" style="font-size:11px" title="Tamaño declarado por la fuente bibliográfica">· declarado ${decl}</span>`;
+      if (medido) return medido;
+      if (decl)
+        return `<span title="Tamaño DECLARADO por la fuente bibliográfica (suele ser solo el alto). Mídelo con el tapete para obtener ancho × alto.">${decl} <span class="muted" style="font-size:11px">· declarado</span></span>`;
+      return null;
+    })(),
     _ingreso: d.fecha_ingreso ? fmtFecha(d.fecha_ingreso) : null,
     _actualizado: d.fecha_actualizacion ? fmtFecha(d.fecha_actualizacion) : null,
     _ruta: d.ruta_base
@@ -5304,6 +5315,13 @@ function fichaEditar(d, r, opts) {
     ${campo('edDoi', 'DOI (artículos)', d.doi)}
     <div style="margin-top:8px"><label style="display:block">Otras ediciones (ISBN)</label><div id="edAltList"></div><button type="button" class="btn" id="edAltAdd" style="margin-top:6px">➕ Añadir edición</button></div>
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edCdu', 'CDU', d.cdu)}</div><div style="flex:1">${campo('edEd', 'Edición nº', d.numero_edicion)}</div></div>`}
+    <!-- Otras clasificaciones: se veían en la ficha (fila con ⓘ) pero no se podían corregir a mano. Solo son
+         metadatos: a diferencia de la CDU, NO re-alojan el fichero en el árbol. -->
+    <div class="row" style="gap:8px">
+      <div style="flex:1">${campo('edDewey', 'Dewey', d.dewey)}</div>
+      <div style="flex:1">${campo('edLcc', 'LCC', d.lcc)}</div>
+      <div style="flex:1">${campo('edLccn', 'LCCN', d.lccn)}</div>
+    </div>
     ${campo('edPal', 'Palabras clave (coma)', (d.palabras_clave || []).join(', '))}
     ${campo('edSin', 'Sinopsis', d.sinopsis, 'textarea')}
     <div class="row" style="gap:8px"><div style="flex:1"><label>Ámbito</label><select id="edAmbSel"></select><input id="edAmb" autocomplete="off" placeholder="nuevo ámbito…" style="display:none;margin-top:6px"></div><div style="flex:1"><label>Estantería</label><select id="edEstSel"></select><input id="edEst" autocomplete="off" placeholder="nueva estantería…" style="display:none;margin-top:6px"></div></div>
@@ -5400,6 +5418,9 @@ function fichaEditar(d, r, opts) {
       issn: $('#edIssn').value,
       doi: $('#edDoi') ? $('#edDoi').value : undefined,
       cdu: $('#edCdu').value,
+      dewey: $('#edDewey') ? $('#edDewey').value : undefined,
+      lcc: $('#edLcc') ? $('#edLcc').value : undefined,
+      lccn: $('#edLccn') ? $('#edLccn').value : undefined,
       numero_edicion: $('#edEd').value,
       palabras_clave: $('#edPal').value,
       sinopsis: $('#edSin').value,
