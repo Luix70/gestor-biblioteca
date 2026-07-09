@@ -64,6 +64,11 @@ async function persistir(db, coleccion, _id, set, unset, avisos) {
     return { ok: true, avisos };
 }
 
+// Tipos de colección conmutables a mano desde la ficha. `transmedia`/`audiolibros` NO están: son
+// ESTRUCTURALES (su árbol en disco con `ruta_fija` y la naturaleza de sus miembros dependen del tipo).
+const TIPOS_COLECCION = ['libro', 'revista'];
+const TIPOS_ESTRUCTURALES = ['transmedia', 'audiolibros'];
+
 export async function editarColeccion(db, id, campos = {}) {
     const _id = oid(id);
     if (!_id) return { ok: false, motivo: 'id inválido' };
@@ -73,6 +78,17 @@ export async function editarColeccion(db, id, campos = {}) {
         const v = String(campos.issn || '').trim();
         if (!v) unset.issn = '';
         else { const ok = validarISSN(v); if (ok) set.issn = ok; else avisos.push(`ISSN inválido (ignorado): ${v}`); }
+    }
+    // TIPO: 'libro' (serie editorial) ↔ 'revista' (cabecera, pivote ISSN). Es SEGURO cambiarlo: `tipo` no
+    // participa en el emparejado de resolverCabecera (que va por ISSN → nombre → clave canónica), así que no
+    // funde ni duplica cabeceras. Solo cambia el MODELO del grupo; el tipo_recurso de cada MIEMBRO se cambia
+    // aparte con «🔀 Cambiar tipo» (ficha o lote del Catálogo). `null`/ausente = legado ⇒ se trata como libro.
+    if ('tipo' in campos) {
+        const actual = (await db.collection('colecciones').findOne({ _id }, { projection: { tipo: 1 } }))?.tipo || null;
+        const v = String(campos.tipo || '').trim().toLowerCase();
+        if (TIPOS_ESTRUCTURALES.includes(actual)) avisos.push(`El tipo «${actual}» es estructural: no se cambia desde la ficha.`);
+        else if (TIPOS_COLECCION.includes(v)) { if (v !== actual) set.tipo = v; }
+        else if (v) avisos.push(`Tipo no admitido (ignorado): ${v}`);
     }
     await aplicarComunes(db, campos, set, unset, avisos);
     return persistir(db, 'colecciones', _id, set, unset, avisos);

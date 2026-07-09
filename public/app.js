@@ -1822,15 +1822,31 @@ function editarGrupo(tipo, g) {
   const esCol = tipo === 'coleccion';
   const nombreLbl = esCol ? 'Nombre' : 'Título';
   const nombreVal = esCol ? (g.nombre || '') : (g.titulo || '');
+  // TIPO de la colección: serie de libros ↔ revista (cabecera). «transmedia»/«audiolibros» son ESTRUCTURALES
+  // (dependen del árbol en disco), así que se muestran bloqueados. Sin tipo = legado ⇒ se trata como libro.
+  const tipoActual = String(g.tipo || '').toLowerCase();
+  const estructural = ['transmedia', 'audiolibros'].includes(tipoActual);
+  const tipoCampo = !esCol
+    ? ''
+    : estructural
+      ? `<div style="flex:1"><label style="display:block;margin-top:8px">Tipo</label>
+           <input value="${esc(tipoActual)}" disabled title="Tipo estructural: no se cambia desde la ficha"></div>`
+      : `<div style="flex:1"><label style="display:block;margin-top:8px">Tipo</label>
+           <select id="egTipo">
+             ${tipoActual ? '' : '<option value="" selected>(sin definir → libro)</option>'}
+             <option value="libro"${tipoActual === 'libro' ? ' selected' : ''}>📚 Serie de libros</option>
+             <option value="revista"${tipoActual === 'revista' ? ' selected' : ''}>📰 Revista (cabecera)</option>
+           </select></div>`;
   // Campo identificador propio: colección → ISSN; obra → ISBN de obra.
   const idFila = esCol
-    ? `<div style="flex:1"><label style="display:block;margin-top:8px">ISSN</label><input id="egIssn" value="${esc(g.issn || '')}" autocomplete="off"></div>`
+    ? `${tipoCampo}<div style="flex:1"><label style="display:block;margin-top:8px">ISSN</label><input id="egIssn" value="${esc(g.issn || '')}" autocomplete="off"></div>`
     : `<div style="flex:1"><label style="display:block;margin-top:8px">ISBN de obra</label><input id="egIsbn" value="${esc(g.isbn_obra || '')}" autocomplete="off"></div>`;
   const extraObra = esCol ? '' : `<div style="flex:1"><label style="display:block;margin-top:8px">Total de tomos</label><input id="egTotal" value="${esc(g.total_volumenes || '')}" inputmode="numeric" autocomplete="off"></div>`;
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;max-height:90vh;overflow:auto">
     <h3 style="margin-top:0">✏️ Editar ${esCol ? 'colección' : 'obra'}</h3>
     <label style="display:block;margin-top:4px">${nombreLbl}</label><input id="egNombre" value="${esc(nombreVal)}" autocomplete="off">
     <div class="row" style="gap:8px">${idFila}<div style="flex:1"><label style="display:block;margin-top:8px">Editorial</label><input id="egEdi" value="${esc(g.editorial || '')}" autocomplete="off"></div></div>
+    ${esCol && !estructural ? '<div class="muted" style="font-size:11px;margin-top:4px">El tipo cambia el MODELO del grupo (serie de libros ↔ cabecera de revista, cuya autoridad es el ISSN). El tipo de cada documento miembro se cambia aparte con «🔀 Cambiar tipo».</div>' : ''}
     <div class="row" style="gap:8px"><div style="flex:1"><label style="display:block;margin-top:8px">CDU</label><input id="egCdu" value="${esc(g.cdu || '')}" autocomplete="off"></div>${extraObra}</div>
     <div class="row" style="gap:8px">
       <div style="flex:1"><label style="display:block;margin-top:8px">Año de inicio</label><input id="egIni" value="${esc(g.fecha_inicio || '')}" inputmode="numeric" placeholder="p. ej. 1920" autocomplete="off"></div>
@@ -1853,8 +1869,12 @@ function editarGrupo(tipo, g) {
       fecha_fin: $('#egFin').value,
       descripcion: $('#egDesc').value,
     };
-    if (esCol) { campos.nombre = $('#egNombre').value; campos.issn = $('#egIssn').value; }
-    else { campos.titulo = $('#egNombre').value; campos.isbn_obra = $('#egIsbn').value; campos.total_volumenes = $('#egTotal').value; }
+    if (esCol) {
+      campos.nombre = $('#egNombre').value;
+      campos.issn = $('#egIssn').value;
+      // Sin #egTipo (colección estructural) no se envía `tipo`: el backend lo deja intacto.
+      if ($('#egTipo')) campos.tipo = $('#egTipo').value;
+    } else { campos.titulo = $('#egNombre').value; campos.isbn_obra = $('#egIsbn').value; campos.total_volumenes = $('#egTotal').value; }
     try {
       const res = await api('/' + (esCol ? 'colecciones' : 'obras') + '/' + encodeURIComponent(g._id) + '/editar', { method: 'POST', body: JSON.stringify(campos) });
       if (!res.ok) { $('#egErr').textContent = res.motivo; toast(res.motivo, 'bad'); return; }
