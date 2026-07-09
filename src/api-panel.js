@@ -572,7 +572,17 @@ export function rutasPanel() {
                     { $sort: { _rank: 1, fecha_ingreso: -1 } },
                   ]
                 : campoOrden === 'posicion'
-                ? [{ $addFields: { _pos: { $ifNull: ['$orden_estanteria', 1e9] } } }, { $sort: { _pos: s, titulo: 1 } }]
+                ? [
+                    // «Posición en la estantería» = orden FÍSICO combinado: ámbito → estantería → posición dentro
+                    // de la estantería. _pos es NUMÉRICO ($convert) para que 2 vaya antes que 11; sin posición
+                    // asignada (o sin ubicación) cae al final (1e9 / 'zzzzzzzz'). Con collation español en el texto.
+                    { $addFields: {
+                        _amb: { $ifNull: ['$ubicacion.ambito', 'zzzzzzzz'] },
+                        _est: { $ifNull: ['$ubicacion.estanteria', 'zzzzzzzz'] },
+                        _pos: { $convert: { input: '$orden_estanteria', to: 'double', onError: 1e9, onNull: 1e9 } },
+                    } },
+                    { $sort: { _amb: s, _est: s, _pos: s, titulo: 1 } },
+                  ]
                 : campoOrden === 'autor'
                 ? [
                     { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_auS' } },

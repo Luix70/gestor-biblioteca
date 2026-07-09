@@ -974,6 +974,36 @@ function iniciarPinRot() {
   pintarPinRot();
 }
 iniciarPinRot();
+
+// ── Paginación reutilizable (Catálogo, miembros de colección/obra, Autores, Descubrir…) ──────────────
+// Controles: primera ⏮ · anterior ‹ · SALTO a página (input numérico) · siguiente › · última ⏭. Devuelve ''
+// con una sola página. Se cablea con wirePager(contenedor, p, tp, ir). Usa CLASES (no ids) → puede haber varios
+// pagers a la vez (arriba/abajo) sin colisionar. `ir(np)` recibe la página ya validada (1..tp).
+function pagerControles(p, tp) {
+  if (!(tp > 1)) return '';
+  const d = (cond) => (cond ? ' disabled' : '');
+  return `<button class="btn pgBtn pgFirst"${d(p <= 1)} title="Primera página">⏮</button>`
+    + `<button class="btn pgBtn pgPrev"${d(p <= 1)} title="Página anterior">‹</button>`
+    + `<span class="pgJump">Pág. <input class="pgInput" type="number" inputmode="numeric" min="1" max="${tp}" value="${p}" aria-label="Ir a la página"> / ${tp}</span>`
+    + `<button class="btn pgBtn pgNext"${d(p >= tp)} title="Página siguiente">›</button>`
+    + `<button class="btn pgBtn pgLast"${d(p >= tp)} title="Última página">⏭</button>`;
+}
+function wirePager(cont, p, tp, ir) {
+  if (!cont) return;
+  const q = (c) => cont.querySelector(c);
+  const irA = (np) => { np = Math.min(Math.max(1, np | 0), tp); if (np !== p) ir(np); };
+  const f = q('.pgFirst'), pv = q('.pgPrev'), nx = q('.pgNext'), ls = q('.pgLast'), inp = q('.pgInput');
+  if (f && !f.disabled) f.onclick = () => irA(1);
+  if (pv && !pv.disabled) pv.onclick = () => irA(p - 1);
+  if (nx && !nx.disabled) nx.onclick = () => irA(p + 1);
+  if (ls && !ls.disabled) ls.onclick = () => irA(tp);
+  if (inp) {
+    // Saltar a la página tecleada (Enter o al perder el foco); se acota a 1..tp y se refleja en el input.
+    const salto = () => { const np = Math.min(Math.max(1, parseInt(inp.value, 10) || p), tp); inp.value = np; if (np !== p) ir(np); };
+    inp.onchange = salto;
+    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); salto(); } };
+  }
+}
 async function abrirComparador(id) {
   try {
     const d = await api('/cuarentena/duplicado?id=' + encodeURIComponent(id));
@@ -1715,11 +1745,7 @@ function pintarColeccion(r) {
     : '';
   // Controles de paginación (aparecen solo si el resultado supera una página).
   const pagerBar = filtrable
-    ? `<div id="colPager" class="row" style="justify-content:center;align-items:center;gap:12px;margin-top:12px;display:none">
-         <button class="btn" id="pgPrev">‹ Anterior</button>
-         <span id="pgInfo" class="muted" style="font-size:13px"></span>
-         <button class="btn" id="pgNext">Siguiente ›</button>
-       </div>`
+    ? `<div id="colPager" class="row" style="justify-content:center;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;display:none"></div>`
     : '';
   const tituloGrid = esRev ? 'Números' : esTrans ? 'Documentos' : 'Libros';
   const contadorHtml = filtrable ? ' <span id="colCount" class="muted" style="font-size:13px;font-weight:400"></span>' : '';
@@ -1747,11 +1773,11 @@ function pintarColeccion(r) {
       filtr.slice(ini, ini + PAG).forEach((v) => (v.style.display = ''));
       if ($('#colCount')) $('#colCount').textContent = `${total} de ${r.miembros.length}`;
       const pager = $('#colPager');
-      if (pager) pager.style.display = total > PAG ? '' : 'none';
-      if ($('#pgInfo')) $('#pgInfo').textContent = `Página ${pagina} / ${paginas}`;
-      const prev = $('#pgPrev'), next = $('#pgNext');
-      if (prev) { prev.disabled = pagina <= 1; prev.style.opacity = pagina <= 1 ? 0.4 : 1; }
-      if (next) { next.disabled = pagina >= paginas; next.style.opacity = pagina >= paginas ? 0.4 : 1; }
+      if (pager) {
+        pager.style.display = total > PAG ? 'flex' : 'none';
+        pager.innerHTML = pagerControles(pagina, paginas); // primera/anterior/salto/siguiente/última
+        wirePager(pager, pagina, paginas, irAPagina);
+      }
     };
     const irAPagina = (p) => { pagina = p; render(); $('#colGrid').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
     // Buscador por texto (normalizado, insensible a acentos). Reinicia a la página 1.
@@ -1768,9 +1794,7 @@ function pintarColeccion(r) {
       const todos = row.querySelector('.filtChip');
       if (todos) todos.classList.add('active'); // «Todos» por defecto
     });
-    if ($('#pgPrev')) $('#pgPrev').onclick = () => irAPagina(pagina - 1);
-    if ($('#pgNext')) $('#pgNext').onclick = () => irAPagina(pagina + 1);
-    render();
+    render(); // pinta la rejilla + los controles de paginación (que se cablean en cada render)
   }
   // «Mostrar en Catálogo» de la selección → orden por Nº de colección (numérico), salvo en revistas.
   montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}`, orden: esRev ? undefined : 'coleccion' });
@@ -6899,25 +6923,15 @@ function pintarDescubrir() {
     tp = Math.max(1, Math.ceil(tot / DESC_POR_PAG));
   descPagina = Math.min(Math.max(1, descPagina), tp);
   const slice = descResultados.slice((descPagina - 1) * DESC_POR_PAG, descPagina * DESC_POR_PAG);
-  const pager =
-    tp > 1
-      ? `<div style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:12px"><button class="btn" id="descPrev"${descPagina <= 1 ? ' disabled' : ''}>‹ Anterior</button><span class="muted">Página ${descPagina} de ${tp}</span><button class="btn" id="descNext"${descPagina >= tp ? ' disabled' : ''}>Siguiente ›</button></div>`
-      : '';
+  const pager = tp > 1
+    ? `<div class="row" id="descPager" style="gap:10px;align-items:center;justify-content:center;margin-top:12px;flex-wrap:wrap">${pagerControles(descPagina, tp)}</div>`
+    : '';
   ext.innerHTML =
     descCaja(`<div class="row" style="align-items:center;margin-bottom:6px"><b>🔭 Fuera de tu biblioteca</b><span class="muted">${tot}${tot >= 100 ? '+' : ''} candidato${tot === 1 ? '' : 's'} del Fichero · «${esc(recortar(descQ, 36))}»</span><div style="flex:1"></div><button class="btn" id="descAgain" title="Buscar de nuevo">↻</button></div>
     ${tot ? slice.map(descRow).join('') : '<div class="muted" style="padding:6px 0">Sin candidatos en el Fichero para esa búsqueda (busca por título/autor).</div>'}
     ${pager}
     ${tot ? '<div class="muted" style="font-size:11px;margin-top:10px">No están en tu biblioteca. Los enlaces buscan una copia descargable; al obtenerla, déjala en el Inbox para catalogarla.</div>' : ''}`);
-  if ($('#descPrev'))
-    $('#descPrev').onclick = () => {
-      descPagina--;
-      pintarDescubrir();
-    };
-  if ($('#descNext'))
-    $('#descNext').onclick = () => {
-      descPagina++;
-      pintarDescubrir();
-    };
+  wirePager($('#descPager'), descPagina, tp, (np) => { descPagina = np; pintarDescubrir(); });
   if ($('#descAgain')) $('#descAgain').onclick = lanzarDescubrir;
 }
 function descRow(c) {
@@ -7338,11 +7352,9 @@ function pintarBusqueda(r) {
   renderBulk();
   const p = r.page,
     tp = r.paginas;
-  // Paginación ARRIBA y ABAJO de los thumbnails. Al cambiar de página, desliza hasta el primer resultado.
-  const pagerHtml =
-    tp > 1
-      ? `<button class="btn pgPrev" ${p <= 1 ? 'disabled' : ''}>‹ Anterior</button><span class="muted">Página ${p} de ${tp}</span><button class="btn pgNext" ${p >= tp ? 'disabled' : ''}>Siguiente ›</button>`
-      : '';
+  // Paginación ARRIBA y ABAJO de los thumbnails (primera/anterior/salto/siguiente/última). Al cambiar de
+  // página, desliza hasta el primer resultado.
+  const pagerHtml = pagerControles(p, tp);
   $('#searchPager').innerHTML = pagerHtml;
   if ($('#searchPagerTop')) $('#searchPagerTop').innerHTML = pagerHtml;
   const irA = async (np) => {
@@ -7351,14 +7363,7 @@ function pintarBusqueda(r) {
     const a = sb && sb.textContent.trim() ? sb : $('#searchPagerTop') || $('#searchResults');
     if (a) a.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }; // muestra la barra «seleccionar todos» (y la nav fija)
-  ['#searchPagerTop', '#searchPager'].forEach((sel) => {
-    const c = $(sel);
-    if (!c) return;
-    const pv = c.querySelector('.pgPrev'),
-      nx = c.querySelector('.pgNext');
-    if (pv && !pv.disabled) pv.onclick = () => irA(p - 1);
-    if (nx && !nx.disabled) nx.onclick = () => irA(p + 1);
-  });
+  ['#searchPagerTop', '#searchPager'].forEach((sel) => wirePager($(sel), p, tp, irA));
 }
 
 // ── logs ──
@@ -12300,16 +12305,13 @@ function autoresPager() {
     ? `${desde}–${hasta} de ${_autoresTotal}${_autoresCapado ? '+' : ''} autor(es)`
     : 'Sin autores';
   const nav = paginas > 1
-    ? `<span class="row" style="gap:6px;align-items:center">
-        <button class="btn" id="autPagPrev"${_autoresPagina <= 1 ? ' disabled' : ''} style="padding:3px 11px">‹</button>
-        <span class="muted" style="font-size:12px">${_autoresPagina} / ${paginas}</span>
-        <button class="btn" id="autPagNext"${_autoresPagina >= paginas ? ' disabled' : ''} style="padding:3px 11px">›</button>
-      </span>` : '';
+    ? `<span class="row" style="gap:6px;align-items:center;flex-wrap:wrap">${pagerControles(_autoresPagina, paginas)}</span>`
+    : '';
   return `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="muted" style="font-size:12px">${cuenta}</span>${nav}</div>`;
 }
 function autoresWirePager() {
-  if ($('#autPagPrev')) $('#autPagPrev').onclick = () => autoresIrPagina(_autoresPagina - 1);
-  if ($('#autPagNext')) $('#autPagNext').onclick = () => autoresIrPagina(_autoresPagina + 1);
+  const paginas = Math.max(1, Math.ceil(_autoresTotal / _autoresPorPagina));
+  wirePager($('#autGrid'), _autoresPagina, paginas, autoresIrPagina);
 }
 function autoresPintar() {
   const grid = $('#autGrid');

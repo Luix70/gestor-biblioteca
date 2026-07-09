@@ -284,12 +284,16 @@ de ficheros clasificado por CDU.
       Posición en la estantería · Posición en la obra · Posición en la colección, cada
       uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia). Al ver
       UNA estantería se ordena por POSICIÓN física (ya reflejado en el selector, ver
-      Ubicaciones · 📋).
+      Ubicaciones · 📋). «Posición en la estantería» ordena por el orden FÍSICO combinado
+      ÁMBITO → ESTANTERÍA → posición dentro de la estantería (orden_estanteria, NUMÉRICO:
+      2 antes que 11); los sin ubicación/posición caen al final.
     · VISTA (botón en la cabecera): «▦ Iconos» (rejilla con portadas, 24/pág, por
       defecto) o «☰ Detalles» (una fila de texto por documento —título · autor · año ·
       ISBN · CDU + formatos—, 100/pág, para revisar muchos de un vistazo). Se recuerda.
     · Resultados como tarjetas con miniatura; PAGINACIÓN arriba y abajo (al pasar
-      de página, el scroll sube al primer resultado).
+      de página, el scroll sube al primer resultado). Controles reutilizables (mismos en
+      Catálogo, miembros de colección/obra, Autores y Descubrir): ⏮ primera · ‹ anterior
+      · SALTO a una página concreta (input numérico, Enter) · siguiente › · última ⏭.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
     · MODO SELECCIÓN (admin, patrón ergonómico y móvil, COMÚN A TODA LA APP — Catálogo,
       ficha de autor, Colecciones, Obras, ficha de colección/obra y Estanterías/

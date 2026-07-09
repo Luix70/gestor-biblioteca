@@ -248,6 +248,34 @@ nav .soon {
   color: #04231b;
   font-weight: 600;
 }
+/* Paginación reutilizable: botones compactos (⏮ ‹ › ⏭) + salto a página con input numérico. */
+.pgBtn {
+  padding: 5px 11px;
+}
+.pgJump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mut);
+  font-size: 13px;
+}
+.pgInput {
+  width: 3.4em;
+  padding: 5px 6px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card2);
+  color: var(--txt);
+  font: inherit;
+  font-size: 13px;
+  -moz-appearance: textfield;
+}
+.pgInput::-webkit-outer-spin-button,
+.pgInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 /* Chip de filtro activo (colección transmedia: nivel / material; selector de disco del audiolibro). */
 .filtChip.active,
 .filtCD.active {
