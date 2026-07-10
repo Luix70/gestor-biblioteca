@@ -427,6 +427,10 @@ de ficheros clasificado por CDU.
     de la ficha, ahí NO se resuelven autores/editorial (salen como ObjectId en hex) ni se
     ocultan los campos internos (mantenimiento, mantenimiento_firma…): se ve lo que hay.
     El invitado ve el id y puede copiarlo, pero no abre el visor.
+    DENTRO del JSON, cada ObjectId de 24 hex lleva su 📋 y —si por su CLAVE se sabe a qué
+    colección apunta— es CLICABLE: `autores[]` y `contribuciones[].persona` → ficha de autor,
+    `editorial` → ficha de editorial, `coleccion`/`obra` → su página. El `_id` y los hex sin
+    clave conocida solo se copian; un hash de 64 hex no se confunde con un ObjectId.
 
   ── OBRAS (multivolumen) ─────────────────────────────────────────────────────
     La ficha de una obra lista sus TOMOS (presentes y los que faltan) y los «sin
@@ -1510,3 +1514,13 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
   REGLA: al AÑADIR un script nuevo a scripts/, documéntalo aquí (categoría + 1 línea)
   y, si escribe en la base/disco, que sea DRY-RUN por defecto (aplica con --ejecutar).
 ================================================================================
+
+  ── SEGURIDAD AL COMBINAR AUTORES / EDITORIALES ──────────────────────────────
+    La fusión BORRA las absorbidas y es IRREVERSIBLE. BUG corregido (2026-07-10): el
+    diálogo listaba solo las entidades VISIBLES en la búsqueda/página actual, pero enviaba
+    TODA la selección —que sobrevive a búsquedas y a la paginación—, así que podía absorber
+    entidades que el usuario no veía. (Caso real: al fusionar «Geoplaneta»+«GeoPlaneta» se
+    tragó además «Seix Barral», con 292 libros.) Ahora una CACHÉ de lo marcado
+    (_autoresSelInfo / _editorialesSelInfo, id → nombre + nº de libros) hace que el diálogo
+    liste EXACTAMENTE lo que se va a fusionar, aunque ya no esté en pantalla; y si se van a
+    reasignar más de 25 libros hay que marcar una casilla de confirmación explícita.

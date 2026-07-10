@@ -5774,14 +5774,55 @@ async function verDocumentoCrudo(id) {
         <button class="btn pri" id="crudoX" style="padding:4px 10px;font-size:12px">Cerrar</button>
       </div>
     </div>
-    <div class="muted" style="font-size:11px;margin:6px 0 8px">Registro EXACTO de MongoDB · ${fmtBytes(bytes)} · solo lectura</div>
-    <pre id="crudoJson" class="mono" style="margin:0;padding:10px;border-radius:8px;background:var(--card2);border:1px solid var(--line);font-size:12px;line-height:1.45;overflow:auto;max-height:66vh;white-space:pre">${esc(json)}</pre>
+    <div class="muted" style="font-size:11px;margin:6px 0 8px">Registro EXACTO de MongoDB · ${fmtBytes(bytes)} · solo lectura · los ObjectId son clicables (abren su ficha) y copiables (📋)</div>
+    <pre id="crudoJson" class="mono" style="margin:0;padding:10px;border-radius:8px;background:var(--card2);border:1px solid var(--line);font-size:12px;line-height:1.45;overflow:auto;max-height:66vh;white-space:pre">${resaltarOids(json)}</pre>
   </div>`;
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
   $('#crudoX').onclick = cerrarCmp;
   $('#cmpScrim').onclick = cerrarCmp;
   $('#crudoCopiar').onclick = () => copiar(json);
+  // Cada ObjectId: 📋 copia; si sabemos a qué colección apunta, el propio id ABRE su ficha.
+  $$('#cmpModal .copybtn').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); copiar(b.dataset.copy); }));
+  $$('#cmpModal .joid').forEach((a) => (a.onclick = () => abrirOid(a.dataset.jtipo, a.dataset.joid)));
+}
+
+// A qué colección apunta un ObjectId según la CLAVE que lo contiene (en `contribuciones[]` la clave es `persona`).
+const OID_DESTINO = {
+  autores: 'autor',
+  persona: 'autor',
+  editorial: 'editorial',
+  coleccion: 'coleccion',
+  obra: 'obra',
+};
+function abrirOid(tipo, id) {
+  if (tipo === 'autor') return autorFicha(id); // reutiliza el mismo #cmpModal
+  if (tipo === 'editorial') return editorialFicha(id);
+  cerrarCmp(); // colección/obra navegan a su página: hay que cerrar el visor antes
+  if (tipo === 'coleccion') return verColeccion(id);
+  if (tipo === 'obra') return verObra(id);
+}
+// Convierte el JSON (ya escapado) en HTML resaltando cada ObjectId de 24 hex: siempre COPIABLE (📋) y, cuando la
+// clave de su línea dice a qué colección apunta, también DRILLABLE. Se procesa línea a línea porque la clave da
+// el destino; en un array (`"autores": [ ... ]`) la clave se recuerda de la línea de apertura.
+function resaltarOids(json) {
+  const RE_CLAVE = new RegExp('^\\s*&quot;([^&]+)&quot;\\s*:');
+  const RE_OID = new RegExp('&quot;([a-f0-9]{24})&quot;', 'g');
+  let claveActual = '';
+  return esc(json)
+    .split('\n')
+    .map((linea) => {
+      const mk = linea.match(RE_CLAVE);
+      if (mk) claveActual = mk[1];
+      const tipo = OID_DESTINO[claveActual] || '';
+      return linea.replace(RE_OID, (_, hex) => {
+        const copia = `<button class="rbtn copybtn" data-copy="${hex}" title="Copiar este ObjectId">📋</button>`;
+        return tipo
+          ? `&quot;<a class="rowlink joid" data-joid="${hex}" data-jtipo="${tipo}" title="Abrir la ficha de ${tipo}">${hex}</a>&quot;${copia}`
+          : `&quot;<span class="mono">${hex}</span>&quot;${copia}`;
+      });
+    })
+    .join('\n');
 }
 
 // ════════ EXPLORADOR DE ARCHIVOS (ver/descargar TODO el árbol del documento o su colección) ════════
@@ -12322,13 +12363,35 @@ async function editarUbicacionRapida(doc) {
 let _autores = []; // último listado recibido (página actual)
 let _autoresPagina = 1, _autoresTotal = 0, _autoresPorPagina = 60, _autoresCapado = false; // paginación
 const _autoresSel = new Set(); // ids marcados para combinar
+// Caché de lo MARCADO (id → {nombre, n_libros}): la selección sobrevive a búsquedas Y a la paginación, así que
+// `_autores` (la página visible) puede no contener todo lo marcado. Ver marcarAutor / autorCombinar.
+const _autoresSelInfo = new Map();
 let _autoresSelModo = false; // Modo selección (tap = marcar) — mismo patrón que Catálogo/estantes
 let _autoresBuscarTimer = null; // debounce del buscador
+
+// Marca/desmarca UN autor recordando nombre y nº de libros (para poder listarlo aunque cambie de página).
+function marcarAutor(id, on) {
+  const activar = on === undefined ? !_autoresSel.has(id) : !!on;
+  if (activar) {
+    _autoresSel.add(id);
+    const a = (_autores || []).find((x) => x._id === id);
+    if (a) _autoresSelInfo.set(id, { _id: id, nombre: a.nombre, n_libros: a.n_libros || 0 });
+    else if (!_autoresSelInfo.has(id)) _autoresSelInfo.set(id, { _id: id, nombre: '(desconocido)', n_libros: 0 });
+  } else {
+    _autoresSel.delete(id);
+    _autoresSelInfo.delete(id);
+  }
+  return activar;
+}
+function limpiarSelAutores() {
+  _autoresSel.clear();
+  _autoresSelInfo.clear();
+}
 
 async function loadAutores() {
   const cont = $('#p-autores');
   if (!cont) return;
-  _autoresSel.clear();
+  limpiarSelAutores();
   _autoresSelModo = false;
   cont.innerHTML = `
     <div class="sec-h"><h2>Autores</h2></div>
@@ -12447,7 +12510,7 @@ function autoresPintar() {
       () => {
         const id = el.dataset.aut;
         if (admin && _autoresSelModo) {
-          _autoresSel.has(id) ? _autoresSel.delete(id) : _autoresSel.add(id);
+          marcarAutor(id);
           el.classList.toggle('sel', _autoresSel.has(id));
           autoresBarraCombinar();
         } else autorFicha(id);
@@ -12465,7 +12528,7 @@ function alternarAutoresModo(selId) {
   if (ROL !== 'admin') return;
   const entrando = !_autoresSelModo;
   _autoresSelModo = !_autoresSelModo;
-  if (entrando && _autoresSelModo && selId) _autoresSel.add(selId);
+  if (entrando && _autoresSelModo && selId) marcarAutor(selId, true);
   autoresPintar();
 }
 
@@ -12516,7 +12579,7 @@ function autoresBarraCombinar() {
   if ($('#autEliminar')) $('#autEliminar').onclick = autoresEliminarSel;
   if ($('#autSelClear'))
     $('#autSelClear').onclick = () => {
-      _autoresSel.clear();
+      limpiarSelAutores();
       autoresPintar();
     };
 }
@@ -12531,7 +12594,7 @@ async function autoresEliminarSel() {
     const r = await api('/autores/eliminar', { method: 'POST', body: JSON.stringify({ ids }) });
     if (!r.ok) { toast(r.motivo, 'bad'); return; }
     toast(`🗑 ${r.borrados} borrado(s)${r.conservados ? ` · ${r.conservados} conservado(s) (tienen obras)` : ''}`);
-    _autoresSel.clear();
+    limpiarSelAutores();
     autoresBuscar();
   } catch (e) { toast(e.message, 'bad'); }
 }
@@ -12977,12 +13040,15 @@ async function autorEnriquecer(id) {
 }
 
 // Combinar (A→B): elige entre los seleccionados cuál es el DESTINO (B, se conserva) y funde el resto en él.
+// SEGURIDAD (mismo arreglo que en editoriales): se listan y se funden EXACTAMENTE los mismos autores (los de
+// `_autoresSelInfo`). Antes se mostraban solo los de la PÁGINA actual pero se enviaba TODA la selección, que
+// sobrevive a búsquedas y paginación → se podían absorber autores sin verlos. La fusión borra y es irreversible.
 function autorCombinar() {
-  const ids = [..._autoresSel];
-  if (ids.length < 2) return;
-  const sel = ids.map((id) => _autores.find((a) => a._id === id)).filter(Boolean);
+  const sel = [..._autoresSelInfo.values()];
+  if (sel.length < 2) return;
   // Por defecto, destino = el que más libros tiene (menos reasignaciones).
-  const porDefecto = sel.slice().sort((a, b) => b.n_libros - a.n_libros)[0];
+  const porDefecto = sel.slice().sort((a, b) => (b.n_libros || 0) - (a.n_libros || 0))[0];
+  const total = sel.reduce((s, a) => s + (a.n_libros || 0), 0);
   const opciones = sel
     .map(
       (a) =>
@@ -12992,10 +13058,12 @@ function autorCombinar() {
         </label>`,
     )
     .join('');
-  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px">
-    <h3 style="margin-top:0">🔗 Combinar autores</h3>
-    <div class="muted" style="font-size:12px;margin-bottom:8px">Elige el autor que se CONSERVA (destino). El resto se fundirán en él: sus nombres pasarán a «también conocido como» y todos sus libros se reasignarán.</div>
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px;max-height:88vh;overflow:auto">
+    <h3 style="margin-top:0">🔗 Combinar ${sel.length} autores</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Elige el autor que se CONSERVA (destino). Los <b>${sel.length - 1}</b> restantes se FUNDIRÁN en él y <b>se borrarán</b>: sus nombres pasarán a «también conocido como» y sus libros se reasignarán. Esta lista es EXACTAMENTE lo que se va a fusionar.</div>
     ${opciones}
+    <div class="muted" style="font-size:11px;margin-top:8px">Entre todos suman <b>${total}</b> libro(s).</div>
+    <div id="autCombAviso" style="margin-top:8px"></div>
     <div id="autCombMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
     <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
       <button class="btn pri" id="autCombOk">🔗 Combinar</button>
@@ -13005,16 +13073,34 @@ function autorCombinar() {
   $('#cmpModal').style.display = 'grid';
   $('#cmpScrim').onclick = cerrarCmp;
   $('#autCombX').onclick = cerrarCmp;
+  const pintarAviso = () => {
+    const destino = ($('#cmpModal input[name="autDest"]:checked') || {}).value;
+    const mover = sel.filter((a) => a._id !== destino).reduce((s, a) => s + (a.n_libros || 0), 0);
+    const av = $('#autCombAviso');
+    if (!av) return;
+    av.innerHTML =
+      mover > UMBRAL_FUSION_GRANDE
+        ? `<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--warn)">
+             <input type="checkbox" id="autCombConfirm" style="margin-top:2px">
+             <span>⚠️ Se reasignarán <b>${mover}</b> libro(s) y se borrarán ${sel.length - 1} autor(es). Es IRREVERSIBLE. Marca para confirmar.</span>
+           </label>`
+        : `<div class="muted" style="font-size:11px">Se reasignarán ${mover} libro(s).</div>`;
+  };
+  $$('#cmpModal input[name="autDest"]').forEach((r) => (r.onchange = pintarAviso));
+  pintarAviso();
   $('#autCombOk').onclick = async () => {
     const destino = ($('#cmpModal input[name="autDest"]:checked') || {}).value;
     if (!destino) return;
+    const conf = $('#autCombConfirm');
+    if (conf && !conf.checked) { toast('Marca la casilla de confirmación', 'warn'); return; }
     const msg = $('#autCombMsg');
     if (msg) msg.textContent = 'Combinando…';
     try {
+      const ids = sel.map((a) => a._id); // exactamente los listados arriba
       const r = await api('/autores/fusionar', { method: 'POST', body: JSON.stringify({ destino, ids }) });
       cerrarCmp();
       toast(`🔗 ${r.fusionados} fundido(s) en «${r.destino.nombre}» · ${r.reasignados} libro(s) reasignados`);
-      _autoresSel.clear();
+      limpiarSelAutores();
       autoresBuscar();
     } catch (e) {
       if (msg) msg.textContent = 'Error: ' + e.message;
@@ -13028,13 +13114,37 @@ function autorCombinar() {
 // selección que el resto (tap-para-marcar, círculo .selmark, hundido; ver loadAutores).
 let _editoriales = []; // último listado recibido
 const _editorialesSel = new Set(); // ids marcadas para combinar
+// Caché de lo MARCADO (id → {nombre, n_libros}). La selección SOBREVIVE a las búsquedas, así que la lista
+// visible (`_editoriales`) puede NO contener todo lo marcado. Sin esta caché, el diálogo de combinar mostraba
+// solo lo visible pero FUNDÍA toda la selección → se absorbían editoriales sin que el usuario las viera.
+const _editorialesSelInfo = new Map();
 let _editorialesSelModo = false; // Modo selección (tap = marcar)
 let _editorialesBuscarTimer = null; // debounce del buscador
+
+// Marca/desmarca UNA editorial recordando su nombre y nº de libros (para poder enseñarla luego aunque no esté
+// en la vista actual). `on` = true marca, false desmarca, undefined conmuta.
+function marcarEditorial(id, on) {
+  const activar = on === undefined ? !_editorialesSel.has(id) : !!on;
+  if (activar) {
+    _editorialesSel.add(id);
+    const e = (_editoriales || []).find((x) => x._id === id);
+    if (e) _editorialesSelInfo.set(id, { _id: id, nombre: e.nombre, n_libros: e.n_libros || 0 });
+    else if (!_editorialesSelInfo.has(id)) _editorialesSelInfo.set(id, { _id: id, nombre: '(desconocida)', n_libros: 0 });
+  } else {
+    _editorialesSel.delete(id);
+    _editorialesSelInfo.delete(id);
+  }
+  return activar;
+}
+function limpiarSelEditoriales() {
+  _editorialesSel.clear();
+  _editorialesSelInfo.clear();
+}
 
 async function loadEditoriales() {
   const cont = $('#p-editoriales');
   if (!cont) return;
-  _editorialesSel.clear();
+  limpiarSelEditoriales();
   _editorialesSelModo = false;
   cont.innerHTML = `
     <div class="sec-h"><h2>Editoriales</h2></div>
@@ -13097,7 +13207,7 @@ function editorialesPintar() {
       () => {
         const id = el.dataset.edi;
         if (admin && _editorialesSelModo) {
-          _editorialesSel.has(id) ? _editorialesSel.delete(id) : _editorialesSel.add(id);
+          marcarEditorial(id);
           el.classList.toggle('sel', _editorialesSel.has(id));
           editorialesBarra();
         } else editorialFicha(id);
@@ -13114,7 +13224,7 @@ function alternarEditorialesModo(selId) {
   if (ROL !== 'admin') return;
   const entrando = !_editorialesSelModo;
   _editorialesSelModo = !_editorialesSelModo;
-  if (entrando && _editorialesSelModo && selId) _editorialesSel.add(selId);
+  if (entrando && _editorialesSelModo && selId) marcarEditorial(selId, true);
   editorialesPintar();
 }
 
@@ -13155,17 +13265,22 @@ function editorialesBarra() {
   if ($('#edCombinar')) $('#edCombinar').onclick = editorialCombinar;
   if ($('#edSelClear'))
     $('#edSelClear').onclick = () => {
-      _editorialesSel.clear();
+      limpiarSelEditoriales();
       editorialesPintar();
     };
 }
 
 // Combinar (A→B): elige entre las seleccionadas cuál es el DESTINO (B, se conserva) y funde el resto en ella.
+// SEGURIDAD: se listan y se funden EXACTAMENTE las mismas (las de `_editorialesSelInfo`, la caché de lo marcado).
+// Antes se mostraban solo las visibles en la búsqueda actual pero se enviaba TODA la selección, así que podían
+// absorberse editoriales que el usuario no veía (así se tragó «Seix Barral», con 292 libros, sin avisar).
+// La fusión BORRA las absorbidas y es irreversible, así que una reasignación grande pide confirmación extra.
+const UMBRAL_FUSION_GRANDE = 25; // libros a reasignar por encima de los cuales se exige confirmación explícita
 function editorialCombinar() {
-  const ids = [..._editorialesSel];
-  if (ids.length < 2) return;
-  const sel = ids.map((id) => _editoriales.find((e) => e._id === id)).filter(Boolean);
-  const porDefecto = sel.slice().sort((a, b) => b.n_libros - a.n_libros)[0];
+  const sel = [..._editorialesSelInfo.values()];
+  if (sel.length < 2) return;
+  const porDefecto = sel.slice().sort((a, b) => (b.n_libros || 0) - (a.n_libros || 0))[0];
+  const total = sel.reduce((s, e) => s + (e.n_libros || 0), 0);
   const opciones = sel
     .map(
       (e) =>
@@ -13175,10 +13290,12 @@ function editorialCombinar() {
         </label>`,
     )
     .join('');
-  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px">
-    <h3 style="margin-top:0">🔗 Combinar editoriales</h3>
-    <div class="muted" style="font-size:12px;margin-bottom:8px">Elige la editorial que se CONSERVA (destino). El resto se fundirán en ella: sus nombres pasarán a «también conocida como» y todos sus libros se reasignarán.</div>
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px;max-height:88vh;overflow:auto">
+    <h3 style="margin-top:0">🔗 Combinar ${sel.length} editoriales</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Elige la editorial que se CONSERVA (destino). Las <b>${sel.length - 1}</b> restantes se FUNDIRÁN en ella y <b>se borrarán</b>: sus nombres pasarán a «también conocida como» y sus libros se reasignarán. Esta lista es EXACTAMENTE lo que se va a fusionar.</div>
     ${opciones}
+    <div class="muted" style="font-size:11px;margin-top:8px">Entre todas suman <b>${total}</b> libro(s).</div>
+    <div id="ediCombAviso" style="margin-top:8px"></div>
     <div id="ediCombMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
     <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
       <button class="btn pri" id="ediCombOk">🔗 Combinar</button>
@@ -13188,16 +13305,35 @@ function editorialCombinar() {
   $('#cmpModal').style.display = 'grid';
   $('#cmpScrim').onclick = cerrarCmp;
   $('#ediCombX').onclick = cerrarCmp;
+  // Cuántos libros se MOVERÍAN según el destino elegido (los de todas menos el destino) → aviso si es grande.
+  const pintarAviso = () => {
+    const destino = ($('#cmpModal input[name="ediDest"]:checked') || {}).value;
+    const mover = sel.filter((e) => e._id !== destino).reduce((s, e) => s + (e.n_libros || 0), 0);
+    const av = $('#ediCombAviso');
+    if (!av) return;
+    av.innerHTML =
+      mover > UMBRAL_FUSION_GRANDE
+        ? `<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--warn)">
+             <input type="checkbox" id="ediCombConfirm" style="margin-top:2px">
+             <span>⚠️ Se reasignarán <b>${mover}</b> libro(s) y se borrarán ${sel.length - 1} editorial(es). Es IRREVERSIBLE. Marca para confirmar.</span>
+           </label>`
+        : `<div class="muted" style="font-size:11px">Se reasignarán ${mover} libro(s).</div>`;
+  };
+  $$('#cmpModal input[name="ediDest"]').forEach((r) => (r.onchange = pintarAviso));
+  pintarAviso();
   $('#ediCombOk').onclick = async () => {
     const destino = ($('#cmpModal input[name="ediDest"]:checked') || {}).value;
     if (!destino) return;
+    const conf = $('#ediCombConfirm');
+    if (conf && !conf.checked) { toast('Marca la casilla de confirmación', 'warn'); return; }
     const msg = $('#ediCombMsg');
     if (msg) msg.textContent = 'Combinando…';
     try {
+      const ids = sel.map((e) => e._id); // exactamente las listadas arriba
       const r = await api('/editoriales/fusionar', { method: 'POST', body: JSON.stringify({ destino, ids }) });
       cerrarCmp();
       toast(`🔗 ${r.fusionadas} fundida(s) en «${r.destino.nombre}» · ${r.reasignados} libro(s) reasignados`);
-      _editorialesSel.clear();
+      limpiarSelEditoriales();
       editorialesBuscar();
     } catch (e) {
       if (msg) msg.textContent = 'Error: ' + e.message;
