@@ -194,6 +194,14 @@ de ficheros clasificado por CDU.
     · .djvu               Catalogado por nombre de archivo (sin lector de contenido)
     · .zip .rar .7z       Se EXPANDEN a carpeta (drop) antes de catalogar
 
+  Papel vs digital (filtro «Soporte»):
+    · El formato lo determina el FICHERO (su extensión), no lo que la IA vea en la
+      página. Un PDF ESCANEADO se identifica por VISIÓN, pero SIGUE SIENDO DIGITAL:
+      su soporte es «pdf», se conserva el fichero y solo se guardan hasta 6 páginas
+      frontales como vista previa.
+    · «papel» se reserva a los ejemplares FÍSICOS: fotos/escaneos sueltos (.jpg/.png)
+      de un libro sin fichero digital, y las altas por ISBN sin fichero.
+
   Agrupación de imágenes:
     · Varias imágenes en la MISMA CARPETA dentro de Inbox se tratan como
       UN SOLO libro (páginas escaneadas de la misma obra).
