@@ -1413,6 +1413,19 @@ export function rutasPanel() {
             res.json({ ok: true, raiz: path.basename(raiz), sub, entradas });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+    // DOCUMENTO CRUDO: el registro EXACTO de Mongo, tal cual, en JSON (para inspección desde la ficha). No se
+    // limpia nada (a diferencia de la ficha, que resuelve autores/editorial y oculta los campos de
+    // mantenimiento): aquí se ve lo que hay. Solo ADMIN (expone rutas, hashes y campos internos). Solo lectura.
+    // El driver serializa ObjectId → hex y Date → ISO al pasar por res.json (toJSON de BSON).
+    r.get('/documentos/:id/crudo', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const doc = await (await conectarDB()).collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json({ ok: true, doc });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
     r.post('/documentos/:id/imagenes/eliminar', async (req, res) => {
         try { res.json(await eliminarImagen(await conectarDB(), req.params.id, req.body?.ruta)); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }

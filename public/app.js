@@ -2471,6 +2471,7 @@ const ROL_ISBN_OPC = [
   ['otro', 'Otra edición'],
 ];
 const CAMPOS_FICHA = [
+  ['_oid', 'ID (Mongo)'], // el primero de todo: identidad del registro en la base
   ['subtitulo', 'Subtítulo'],
   ['_autores', 'Autor(es)'],
   ['_editorial', 'Editorial'],
@@ -2717,6 +2718,12 @@ function pintarDoc(r, ctx) {
       : d.obra_titulo
         ? esc(d.obra_titulo)
         : null,
+    // _id de Mongo (ObjectId): copiable y —para el admin— DRILLABLE: abre el documento EXACTO de la base en
+    // JSON (solo lectura). Al invitado se le muestra el id a secas (el endpoint crudo es solo de admin).
+    _oid:
+      ROL === 'admin'
+        ? `<a class="rowlink mono" data-oid="${esc(d._id)}" title="Ver el documento EXACTO de la base de datos (JSON)">${esc(d._id)}</a> <button class="rbtn copybtn" data-copy="${esc(d._id)}" title="Copiar el ID al portapapeles">📋</button>`
+        : `<span class="mono">${esc(d._id)}</span> <button class="rbtn copybtn" data-copy="${esc(d._id)}" title="Copiar el ID al portapapeles">📋</button>`,
     // Identificadores DRILLABLES: clic → Búsqueda por ese ISSN/ISBN (ve TODO lo que lo comparte — útil
     // para destapar libros mal clasificados colgando de un ISSN de serie, o ediciones del mismo ISBN).
     _issn: d.issn
@@ -2987,6 +2994,8 @@ function pintarDoc(r, ctx) {
   $$('#p-detalle [data-q]').forEach((a) => (a.onclick = () => buscarTexto(a.dataset.q)));
   // Autor/contribuyente clicable → abre su ficha (modal) sobre la ficha del libro. (La editorial, en el futuro.)
   $$('#p-detalle [data-autid]').forEach((a) => (a.onclick = () => autorFicha(a.dataset.autid)));
+  // ID de Mongo → ver el documento EXACTO de la base (JSON, solo lectura).
+  $$('#p-detalle [data-oid]').forEach((a) => (a.onclick = () => verDocumentoCrudo(a.dataset.oid)));
   carIdx = 0;
   const tr = $('#carTrack');
   if (tr && tr.children.length > 1)
@@ -5737,6 +5746,42 @@ async function guardarPl() {
     toast('Orden de pistas guardado');
     verDoc(_plR.id); // recargar la ficha con el nuevo orden
   } catch (e) { toast(e.message, 'bad'); }
+}
+
+// ════════ DOCUMENTO CRUDO (el registro EXACTO de Mongo, en JSON) ════════
+// Se abre al pulsar el «ID (Mongo)» de los datos catalográficos. SOLO LECTURA (de momento): muestra el JSON tal
+// cual lo guarda la base —sin resolver autores/editorial ni ocultar los campos de mantenimiento, a diferencia de
+// la ficha— y permite copiarlo entero al portapapeles. El endpoint es solo de admin.
+async function verDocumentoCrudo(id) {
+  let r;
+  try {
+    r = await api('/documentos/' + encodeURIComponent(id) + '/crudo');
+  } catch (e) {
+    toast(e.message, 'bad');
+    return;
+  }
+  if (!r || r.ok === false) {
+    toast((r && r.motivo) || 'No se pudo leer el documento', 'bad');
+    return;
+  }
+  const json = JSON.stringify(r.doc, null, 2);
+  const bytes = new Blob([json]).size;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:760px;width:96vw;max-height:92vh;overflow:auto">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h3 style="margin:0">🗄️ Documento en la base</h3>
+      <div class="row" style="gap:6px">
+        <button class="btn" id="crudoCopiar" title="Copiar todo el JSON al portapapeles" style="padding:4px 10px;font-size:12px">📋 Copiar JSON</button>
+        <button class="btn pri" id="crudoX" style="padding:4px 10px;font-size:12px">Cerrar</button>
+      </div>
+    </div>
+    <div class="muted" style="font-size:11px;margin:6px 0 8px">Registro EXACTO de MongoDB · ${fmtBytes(bytes)} · solo lectura</div>
+    <pre id="crudoJson" class="mono" style="margin:0;padding:10px;border-radius:8px;background:var(--card2);border:1px solid var(--line);font-size:12px;line-height:1.45;overflow:auto;max-height:66vh;white-space:pre">${esc(json)}</pre>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#crudoX').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#crudoCopiar').onclick = () => copiar(json);
 }
 
 // ════════ EXPLORADOR DE ARCHIVOS (ver/descargar TODO el árbol del documento o su colección) ════════

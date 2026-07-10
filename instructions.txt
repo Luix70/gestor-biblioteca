@@ -421,6 +421,12 @@ de ficheros clasificado por CDU.
     En «Datos catalográficos» el bloque de agrupación va en orden: Obra · ISBN obra ·
     Volumen nº · Título del volumen · Colección · Nº en colección (el nº de colección
     justo tras la colección).
+    La PRIMERA fila es «ID (Mongo)»: el ObjectId del registro, COPIABLE (📋) y —para el
+    admin— DRILLABLE: al pulsarlo abre un visor con el documento EXACTO de la base en JSON
+    (GET /documentos/:id/crudo, solo admin), copiable entero y de SOLO LECTURA. A diferencia
+    de la ficha, ahí NO se resuelven autores/editorial (salen como ObjectId en hex) ni se
+    ocultan los campos internos (mantenimiento, mantenimiento_firma…): se ve lo que hay.
+    El invitado ve el id y puede copiarlo, pero no abre el visor.
 
   ── OBRAS (multivolumen) ─────────────────────────────────────────────────────
     La ficha de una obra lista sus TOMOS (presentes y los que faltan) y los «sin
