@@ -29,3 +29,6 @@ Thumbs.db
 
 # mockups de diseño (no son assets de producción)
 LoginPageMockup.jpg
+
+# Manifiestos de scripts de recuperación (llevan ids de documentos; no van a git)
+manifiesto-*.json
