@@ -16,22 +16,21 @@ REGLAS DE EXTRACCIÓN Y VALIDACIÓN:
 3. 'autores': Array con los nombres de los autores/autoras tal como aparecen (en la portada o en la página de créditos/copyright, p. ej. "© 2004 Raph Koster"). Si no hay autor visible, deja el array vacío.
 4. 'cdu': Infiere el código de Clasificación Decimal Universal más apropiado (ej. "52" para astronomía, "821" para literatura). ¡Obligatorio clasificarlo con rigor!
 5. 'idioma': Código ISO 639-1 de dos letras (ej. "es", "en", "de").
-6. 'formatos': Por defecto usa ["papel"].
-7. 'isbn' / 'issn': Revisa minuciosamente todas las imágenes: códigos de barras (contraportada) Y el texto de la página de créditos ("ISBN: ..."). Extrae el número continuo sin guiones. Si no estás seguro, déjalo vacío en vez de inventarlo. 'isbn' = el del PROPIO ejemplar; 'issn' = el principal.
-7b. 'isbns' / 'issns' — CAPTURA TODOS: en la página de créditos suele haber VARIOS ISBN (tapa dura y tapa blanda/rústica, y el del ebook/PDF) y a veces DOS ISSN (impreso y electrónico/e-ISSN). Devuélvelos TODOS. 'isbns' = lista de objetos {"numero":"solo dígitos, sin guiones","rol":"volumen|obra|tapa_dura|tapa_blanda|ebook|desconocido"} — 'volumen' = el de ESTE ejemplar; 'obra' = el de la OBRA COMPLETA/SET; usa 'tapa_dura'/'tapa_blanda'/'ebook' cuando el crédito lo indique («hardcover», «pbk», «eBook», «PDF»), si no 'desconocido'. 'issns' = lista de TODOS los ISSN (solo dígitos con o sin guion). No inventes: incluye solo los que leas con seguridad.
-8. 'estado_verificacion': Si consigues extraer con total claridad el título y el ISBN/Editorial, establece "completado". Si faltan datos o las imágenes no permiten certificar los metadatos obligatorios, establece "pendiente".
-9. 'alertas_agente': Si el estado es "pendiente", detalla los motivos en este array de texto.
-10. 'sinopsis': Genera un resumen de dos líneas con tus propias palabras. ¡PROHIBIDO copiar o transcribir textualmente párrafos de la imagen para evitar bloqueos por copyright (RECITATION)!
-11. 'codigo_barras': Lee y transcribe los 13 DÍGITOS del código de barras EAN-13 (los números impresos junto a las barras de la cubierta o contracubierta), EXACTAMENTE como aparecen y sin guiones. El código de barras PUEDE ESTAR GIRADO (en vertical / 90°): léelo igualmente, en cualquier orientación. NO inventes dígitos: si no los lees con seguridad, deja el campo vacío. (Pista: un EAN-13 que empieza por 977 es de una REVISTA; 978/979 de un LIBRO.)
-12. 'numero_issue' y 'mes_publicacion': si es una revista, extrae del TEXTO de la portada el número de ejemplar ("ISSUE 44", "Nº 145" → "44"/"145") y el mes de publicación como número 1-12 ("FEBRUARY 2010" → 2). NO los tomes del add-on del código de barras; déjalos vacíos si no aparecen en el texto.
-13. OBRA MULTIVOLUMEN (enciclopedias, diccionarios, tratados en varios TOMOS): MUY IMPORTANTE. Si este ejemplar es un VOLUMEN/TOMO de una obra mayor, rellena:
+6. 'isbn' / 'issn': Revisa minuciosamente todas las imágenes: códigos de barras (contraportada) Y el texto de la página de créditos ("ISBN: ..."). Extrae el número continuo sin guiones. Si no estás seguro, déjalo vacío en vez de inventarlo. 'isbn' = el del PROPIO ejemplar; 'issn' = el principal.
+6b. 'isbns' / 'issns' — CAPTURA TODOS: en la página de créditos suele haber VARIOS ISBN (tapa dura y tapa blanda/rústica, y el del ebook/PDF) y a veces DOS ISSN (impreso y electrónico/e-ISSN). Devuélvelos TODOS. 'isbns' = lista de objetos {"numero":"solo dígitos, sin guiones","rol":"volumen|obra|tapa_dura|tapa_blanda|ebook|desconocido"} — 'volumen' = el de ESTE ejemplar; 'obra' = el de la OBRA COMPLETA/SET; usa 'tapa_dura'/'tapa_blanda'/'ebook' cuando el crédito lo indique («hardcover», «pbk», «eBook», «PDF»), si no 'desconocido'. 'issns' = lista de TODOS los ISSN (solo dígitos con o sin guion). No inventes: incluye solo los que leas con seguridad.
+7. 'estado_verificacion': Si consigues extraer con total claridad el título y el ISBN/Editorial, establece "completado". Si faltan datos o las imágenes no permiten certificar los metadatos obligatorios, establece "pendiente".
+8. 'alertas_agente': Si el estado es "pendiente", detalla los motivos en este array de texto.
+9. 'sinopsis': Genera un resumen de dos líneas con tus propias palabras. ¡PROHIBIDO copiar o transcribir textualmente párrafos de la imagen para evitar bloqueos por copyright (RECITATION)!
+10. 'codigo_barras': Lee y transcribe los 13 DÍGITOS del código de barras EAN-13 (los números impresos junto a las barras de la cubierta o contracubierta), EXACTAMENTE como aparecen y sin guiones. El código de barras PUEDE ESTAR GIRADO (en vertical / 90°): léelo igualmente, en cualquier orientación. NO inventes dígitos: si no los lees con seguridad, deja el campo vacío. (Pista: un EAN-13 que empieza por 977 es de una REVISTA; 978/979 de un LIBRO.)
+11. 'numero_issue' y 'mes_publicacion': si es una revista, extrae del TEXTO de la portada el número de ejemplar ("ISSUE 44", "Nº 145" → "44"/"145") y el mes de publicación como número 1-12 ("FEBRUARY 2010" → 2). NO los tomes del add-on del código de barras; déjalos vacíos si no aparecen en el texto.
+12. OBRA MULTIVOLUMEN (enciclopedias, diccionarios, tratados en varios TOMOS): MUY IMPORTANTE. Si este ejemplar es un VOLUMEN/TOMO de una obra mayor, rellena:
    - 'obra_titulo': el título de la OBRA COMPLETA (p. ej. "Diccionario de Filosofía", "Historia de las ideas políticas"), tal como aparece en la portadilla/créditos; '' si es un libro suelto.
    - 'volumen_numero': el número de ESTE tomo dentro de la obra (entero: "Tomo II"/"Vol. 2"/"II" → 2); null si no consta.
    - 'obra_total': nº total de tomos si se indica ("obra en 4 volúmenes" → 4); null si no.
    - 'isbn_obra': el ISBN de la OBRA COMPLETA / del SET, que en la página de créditos suele figurar JUNTO al del volumen ("ISBN obra completa:", "ISBN O.C.:", "ISBN de la obra:"). Es DISTINTO del 'isbn' de este volumen. Solo dígitos, sin guiones; '' si no aparece.
    OJO: en la página de créditos de estos libros HAY DOS ISBN — el de ESTE volumen (→ 'isbn') y el de la OBRA COMPLETA (→ 'isbn_obra'). Distínguelos con cuidado; no los mezcles.
-14. COLECCIÓN/SERIE editorial: si el ejemplar pertenece a una colección/serie con nombre y número (p. ej. "Círculo Universidad, 8", "Biblioteca Básica, 12"), rellena 'coleccion_nombre' (el nombre de la colección) y 'coleccion_numero' (su número DENTRO de la colección). OJO: este número es DISTINTO de 'volumen_numero' (el tomo dentro de la OBRA). Una obra en 2 tomos puede ocupar UN SOLO número de colección (p. ej. ambos tomos son el nº 8 de la colección "Círculo Universidad", pero volumen 1 y 2 de la obra "Historia de las Ideas Políticas"). No confundas colección (serie editorial amplia, con muchos títulos distintos) con obra (un único título en varios tomos).
-15. COLABORADORES: además de los AUTORES, identifica TODAS las personas que colaboran en la obra con su ROL, leyendo la portada, la mención de responsabilidad y los créditos: TRADUCTOR ("traducción de", "translated by"), ILUSTRADOR ("ilustraciones de", "dibujos de", "grabados de"), EDITOR/coordinador ("edición de", "a cargo de", "edited by"), PROLOGUISTA ("prólogo de", "introducción de", "estudio preliminar"), ANOTADOR ("notas de"), COMPILADOR ("selección de", "antología de"). Devuélvelos en 'contribuciones' como {nombre, rol}. NO metas a los autores aquí (van en 'autores'). Cuantos más colaboradores reales encuentres, mejor.
+13. COLECCIÓN/SERIE editorial: si el ejemplar pertenece a una colección/serie con nombre y número (p. ej. "Círculo Universidad, 8", "Biblioteca Básica, 12"), rellena 'coleccion_nombre' (el nombre de la colección) y 'coleccion_numero' (su número DENTRO de la colección). OJO: este número es DISTINTO de 'volumen_numero' (el tomo dentro de la OBRA). Una obra en 2 tomos puede ocupar UN SOLO número de colección (p. ej. ambos tomos son el nº 8 de la colección "Círculo Universidad", pero volumen 1 y 2 de la obra "Historia de las Ideas Políticas"). No confundas colección (serie editorial amplia, con muchos títulos distintos) con obra (un único título en varios tomos).
+14. COLABORADORES: además de los AUTORES, identifica TODAS las personas que colaboran en la obra con su ROL, leyendo la portada, la mención de responsabilidad y los créditos: TRADUCTOR ("traducción de", "translated by"), ILUSTRADOR ("ilustraciones de", "dibujos de", "grabados de"), EDITOR/coordinador ("edición de", "a cargo de", "edited by"), PROLOGUISTA ("prólogo de", "introducción de", "estudio preliminar"), ANOTADOR ("notas de"), COMPILADOR ("selección de", "antología de"). Devuélvelos en 'contribuciones' como {nombre, rol}. NO metas a los autores aquí (van en 'autores'). Cuantos más colaboradores reales encuentres, mejor.
 ESTRUCTURA JSON REQUERIDA:
 {
   "tipo_recurso": "libro|revista",
@@ -40,7 +39,6 @@ ESTRUCTURA JSON REQUERIDA:
   "contribuciones": [{ "nombre": "string", "rol": "traductor|ilustrador|editor|prologuista|anotador|compilador" }],
   "cdu": "string",
   "idioma": "string",
-  "formatos": ["papel"],
   "isbn": "string",
   "issn": "string",
   "isbns": [{ "numero": "string", "rol": "volumen|obra|tapa_dura|tapa_blanda|ebook|desconocido" }],
@@ -111,6 +109,11 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
                 `Código de barras leído: ${bc.issn || bc.isbn}.`];
         }
         delete recursoEstructurado.codigo_barras;          // no se persiste (no es campo del esquema)
+        // El FORMATO no lo decide la visión: es un hecho del FICHERO (su extensión), no algo que se vea en una
+        // foto. Lo fija el orquestador (pdf/epub/mobi/…; 'papel' solo para fotos de un ejemplar físico). Si el
+        // modelo lo emite de todos modos, se descarta aquí: colaba `['papel']` en TODO PDF ESCANEADO que la
+        // visión lograba identificar, y lo convertía en un «libro de papel» sin fichero digital.
+        delete recursoEstructurado.formatos;
 
         // OBRA MULTIVOLUMEN: normaliza el ISBN de la obra (solo dígitos) y descarta si coincide con el del
         // volumen (no sería el ISBN de la obra completa). El pivote de agrupación es isbn_obra (resolverObra

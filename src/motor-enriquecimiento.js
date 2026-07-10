@@ -50,7 +50,11 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     let documento = {
         ...datosBase,
         tipo_recurso: primerValido(datosBase.tipo_recurso, contexto.tipo_recurso) || 'libro',
-        formatos: primerValido(datosBase.formatos, contexto.formatos) || ['digital'],
+        // El formato lo manda el CONTEXTO, no los datos extraídos: el orquestador lo deduce del fichero real
+        // (su extensión), que es la fuente de verdad; `datosBase.formatos` puede venir de la visión IA, que no
+        // puede saberlo. Solo se usa como reserva si el orquestador no lo fijó (lectores de cómic/djvu, que
+        // rellenan ambos con el mismo valor).
+        formatos: primerValido(contexto.formatos, datosBase.formatos) || ['digital'],
         estado_verificacion: 'pendiente',
         alertas_agente: Array.isArray(datosBase.alertas_agente) ? [...datosBase.alertas_agente] : [],
         ubicacion: primerValido(datosBase.ubicacion, contexto.ubicacion)
