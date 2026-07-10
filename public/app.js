@@ -13234,13 +13234,24 @@ function editorialCard(e) {
     e.nombres_alternativos && e.nombres_alternativos.length
       ? `<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(e.nombres_alternativos.join(' · '))}">a.k.a. ${esc(e.nombres_alternativos.join(' · '))}</div>`
       : '';
+  // Thumbnail = el LOGO si lo tiene (contain: un logo no se recorta); si no, el icono genérico.
+  const thumb = e.logo
+    ? `<img src="${esc(encUrl(e.logo))}" loading="lazy" style="width:52px;height:52px;border-radius:12px;object-fit:contain;background:var(--card);flex:0 0 auto">`
+    : `<div style="width:52px;height:52px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:24px;flex:0 0 auto">🏢</div>`;
+  // Sede y años de actividad, si se han rellenado («Barcelona · España · 1911–»).
+  const sede = [e.ciudad, e.pais].filter(Boolean).join(' · ');
+  const anios = e.fecha_fundacion || e.fecha_disolucion ? `${e.fecha_fundacion || '?'}–${e.fecha_disolucion || ''}` : '';
+  const meta = sede || anios
+    ? `<div class="muted" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(sede)}${sede && anios ? ' · ' : ''}${esc(anios)}</div>`
+    : '';
   // Misma mecánica de selección que Autores: círculo .selmark (visible en Modo selección), .sel al marcar.
   return `<div data-edi="${esc(e._id)}" class="card${sel ? ' sel' : ''}" style="position:relative;display:flex;gap:10px;align-items:center;padding:10px">
     <span class="selmark">✓</span>
-    <div style="width:52px;height:52px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:24px;flex:0 0 auto">🏢</div>
+    ${thumb}
     <div style="flex:1;min-width:0">
       <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.nombre || '—')}</div>
       <div class="muted" style="font-size:12px">${e.n_libros} libro(s)</div>
+      ${meta}
       ${alt}
     </div></div>`;
 }
@@ -13355,11 +13366,30 @@ async function editorialFicha(id) {
   const libros = r.libros || [];
   const admin = ROL === 'admin';
   const alt = Array.isArray(ed.nombres_alternativos) ? ed.nombres_alternativos.join('; ') : '';
+  // Sede y años de actividad, en una línea legible para el invitado («Barcelona (España) · 1911–»).
+  const sede = [ed.ciudad, ed.pais].filter(Boolean).join(' · ');
+  const anios = ed.fecha_fundacion || ed.fecha_disolucion
+    ? `${ed.fecha_fundacion || '?'}–${ed.fecha_disolucion || ''}`
+    : '';
   const campos = admin
     ? `<div><label>Nombre</label><input id="ediNombre" value="${esc(ed.nombre || '')}" autocomplete="off"></div>
-       <div style="margin-top:6px"><label>También conocida como (separa con ;)</label><input id="ediAlt" value="${esc(alt)}" autocomplete="off"></div>`
+       <div style="margin-top:6px"><label>También conocida como (separa con ;)</label><input id="ediAlt" value="${esc(alt)}" autocomplete="off"></div>
+       <details style="margin-top:8px"${ed.descripcion || sede || anios ? ' open' : ''}>
+         <summary style="cursor:pointer;font-size:12px;color:var(--mut)">✏️ Sede, fechas e historia…</summary>
+         <div class="row" style="margin-top:6px;gap:8px">
+           <div style="flex:1"><label>Ciudad</label><input id="ediCiudad" value="${esc(ed.ciudad || '')}" autocomplete="off"></div>
+           <div style="flex:1"><label>País</label><input id="ediPais" value="${esc(ed.pais || '')}" autocomplete="off"></div>
+         </div>
+         <div class="row" style="margin-top:6px;gap:8px">
+           <div style="flex:1"><label>Año de fundación</label><input id="ediFundacion" value="${esc(ed.fecha_fundacion || '')}" inputmode="numeric" placeholder="p. ej. 1911" autocomplete="off"></div>
+           <div style="flex:1"><label>Año de disolución</label><input id="ediDisolucion" value="${esc(ed.fecha_disolucion || '')}" inputmode="numeric" placeholder="vacío = sigue activa" autocomplete="off"></div>
+         </div>
+         <div style="margin-top:6px"><label>Historia / notas</label><textarea id="ediDesc" rows="5" style="width:100%;resize:vertical;font-family:inherit">${esc(ed.descripcion || '')}</textarea></div>
+       </details>`
     : `<h3 style="margin:0">${esc(ed.nombre || '—')}</h3>
-       ${alt ? `<div class="muted" style="font-size:12px;margin-top:4px">a.k.a. ${esc(alt)}</div>` : ''}`;
+       ${alt ? `<div class="muted" style="font-size:12px;margin-top:4px">a.k.a. ${esc(alt)}</div>` : ''}
+       ${sede || anios ? `<div class="muted" style="font-size:12px;margin-top:4px">${esc(sede)}${sede && anios ? ' · ' : ''}${esc(anios)}</div>` : ''}
+       ${ed.descripcion ? `<p class="sinopsis-text" style="margin-top:8px">${esc(ed.descripcion)}</p>` : ''}`;
   const nfcBadge = (l) =>
     l.nfc
       ? `<span title="Tiene etiqueta NFC" style="position:absolute;top:3px;right:3px;font-size:11px;background:var(--card);border-radius:6px;padding:0 3px">📶</span>`
@@ -13381,18 +13411,30 @@ async function editorialFicha(id) {
   const librosHtml = libros.length
     ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:10px;margin-top:8px">${libros.map(cardLibro).join('')}</div>`
     : '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
+  // LOGO: `object-fit: contain` (un logo no se recorta como una foto) sobre fondo de tarjeta.
+  const logo = ed.logo
+    ? `<img src="${esc(encUrl(ed.logo))}?t=${Date.now()}" style="width:110px;height:110px;object-fit:contain;border-radius:12px;background:var(--card)">`
+    : `<div style="width:110px;height:110px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:44px">🏢</div>`;
+  const bm = 'padding:4px 9px;font-size:12px';
   const acciones = admin
-    ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">
-         <button class="btn" id="ediFusionar" title="Fundir ESTA editorial en otra que elijas: sus libros pasan a la otra y esta se borra">🔀 Fusionar esta en…</button>
-         ${!libros.length ? `<button class="btn" id="ediBorrar" title="Borrar esta editorial (solo si no tiene libros)">🗑️ Borrar</button>` : ''}
-         <button class="btn pri" id="ediGuardarTop">💾 Guardar</button>
-         <button class="btn" id="ediCerrarTop">Cerrar</button>
+    ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">
+         <div class="row" style="gap:4px;justify-content:center">
+           <button class="btn" id="ediLogo" style="${bm}" title="Subir un logo desde archivo">📷 Logo</button>
+           ${libros.length ? `<button class="btn" id="ediLogoLibro" style="${bm}" title="Usar como logo una imagen (portada o interior) de uno de sus libros; luego puedes recortarla">🖼️ De un libro</button>` : ''}
+         </div>
+         <button class="btn" id="ediFusionar" style="${bm}" title="Fundir ESTA editorial en otra que elijas: sus libros pasan a la otra y esta se borra">🔀 Fusionar esta en…</button>
+         ${!libros.length ? `<button class="btn" id="ediBorrar" style="${bm}" title="Borrar esta editorial (solo si no tiene libros)">🗑️ Borrar</button>` : ''}
+         <div class="row" style="gap:4px;justify-content:center">
+           <button class="btn pri" id="ediGuardarTop" style="${bm}">💾 Guardar</button>
+           <button class="btn" id="ediCerrarTop" style="${bm}">Cerrar</button>
+         </div>
+         <input type="file" id="ediLogoFile" accept="image/*" style="display:none">
        </div>`
     : `<div style="margin-top:6px"><button class="btn" id="ediCerrarTop">Cerrar</button></div>`;
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:660px;max-height:92vh;overflow:auto">
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div style="text-align:center">
-        <div style="width:110px;height:110px;border-radius:12px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:44px">🏢</div>
+        ${logo}
         ${acciones}
       </div>
       <div style="flex:1;min-width:250px">${campos}</div>
@@ -13434,6 +13476,9 @@ async function editorialFicha(id) {
   if (admin) {
     if ($('#ediGuardar')) $('#ediGuardar').onclick = () => editorialGuardar(id);
     if ($('#ediGuardarTop')) $('#ediGuardarTop').onclick = () => editorialGuardar(id);
+    if ($('#ediLogo')) $('#ediLogo').onclick = () => $('#ediLogoFile').click();
+    if ($('#ediLogoFile')) $('#ediLogoFile').onchange = () => editorialSubirLogo(id, $('#ediLogoFile'));
+    if ($('#ediLogoLibro')) $('#ediLogoLibro').onclick = () => editorialLogoDeLibro(id);
     // Fusionar ESTA editorial en otra (la actual se absorbe en la elegida y se borra).
     if ($('#ediFusionar'))
       $('#ediFusionar').onclick = () =>
@@ -13463,24 +13508,96 @@ async function editorialFicha(id) {
   }
 }
 
+// LOGO de la editorial — subir desde archivo. Gemelo de autorSubirFoto. El logo anterior no se borra: se
+// conserva en `logos[]` y solo cambia cuál es el principal.
+async function editorialSubirLogo(id, inp) {
+  const f = inp && inp.files && inp.files[0];
+  if (inp) inp.value = '';
+  if (!f) return;
+  const msg = $('#ediMsg');
+  if (msg) msg.textContent = 'Subiendo logo…';
+  try {
+    const base64 = await fileADataURL(await reducirImagen(f));
+    const r = await api('/editoriales/' + encodeURIComponent(id) + '/logo', { method: 'POST', body: JSON.stringify({ base64 }) });
+    if (!r.ok) { toast(r.motivo || 'No se pudo guardar el logo', 'bad'); return; }
+  } catch (e) {
+    if (msg) msg.textContent = 'Error: ' + e.message;
+    return;
+  }
+  toast('📷 Logo guardado');
+  editorialFicha(id); // recargar la ficha para verlo
+}
+
+// LOGO desde una imagen de uno de sus libros (portada o interior). Después se puede recortar en el editor de
+// imágenes de la ficha del documento. Gemelo de autorFotoDeObras.
+async function editorialLogoDeLibro(id) {
+  let r;
+  try { r = await api('/editoriales/' + encodeURIComponent(id) + '/imagenes-libros'); }
+  catch (e) { toast(e.message, 'bad'); return; }
+  const obras = (r && r.obras) || [];
+  if (!obras.length) { toast('Sus libros no tienen imágenes', 'warn'); return; }
+  const bloques = obras.map((o) => `
+    <div style="margin-bottom:10px">
+      <div class="muted" style="font-size:11px;margin-bottom:4px">${esc(recortar(o.titulo || '—', 60))}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px">
+        ${o.imagenes.map((u) => `<img data-logo="${esc(u)}" src="${esc(encUrl(u))}" loading="lazy" style="width:100%;height:96px;object-fit:cover;border-radius:6px;background:var(--card);cursor:pointer;border:2px solid transparent">`).join('')}
+      </div>
+    </div>`).join('');
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:600px;max-height:88vh;overflow:auto">
+    <h3 style="margin-top:0">🖼️ Elegir logo de un libro</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:10px">Toca una imagen (portada o interior) de sus libros para usarla como logo. Luego podrás recortarla en el editor de imágenes.</div>
+    ${bloques}
+    <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="eloX">Volver a la ficha</button></div>
+    <div id="eloMsg" class="muted" style="font-size:12px;margin-top:6px"></div>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#eloX').onclick = () => editorialFicha(id);
+  $('#cmpScrim').onclick = cerrarCmp;
+  $$('#cmpModal [data-logo]').forEach((im) => (im.onclick = async () => {
+    const msg = $('#eloMsg');
+    if (msg) msg.textContent = 'Guardando logo…';
+    try {
+      // La imagen vive en /recursos: se descarga, se reduce y se sube como base64 (mismo endpoint que el archivo).
+      const resp = await fetch(encUrl(im.dataset.logo));
+      if (!resp.ok) throw new Error('no se pudo leer la imagen');
+      const base64 = await fileADataURL(await reducirImagen(new File([await resp.blob()], 'logo.jpg', { type: 'image/jpeg' })));
+      const rr = await api('/editoriales/' + encodeURIComponent(id) + '/logo', { method: 'POST', body: JSON.stringify({ base64 }) });
+      if (!rr.ok) { if (msg) msg.textContent = rr.motivo || 'No se pudo guardar'; return; }
+    } catch (e) {
+      if (msg) msg.textContent = 'Error: ' + e.message;
+      return;
+    }
+    toast('🖼️ Logo guardado');
+    editorialFicha(id);
+  }));
+}
+
 async function editorialGuardar(id) {
+  const val = (sel) => ($(sel) ? $(sel).value : undefined); // sin el campo en el DOM → no se envía la clave
   const cambios = {
     nombre: ($('#ediNombre') && $('#ediNombre').value) || '',
     nombres_alternativos: (($('#ediAlt') && $('#ediAlt').value) || '')
       .split(';')
       .map((s) => s.trim())
       .filter(Boolean),
+    ciudad: val('#ediCiudad'),
+    pais: val('#ediPais'),
+    fecha_fundacion: val('#ediFundacion'),
+    fecha_disolucion: val('#ediDisolucion'),
+    descripcion: val('#ediDesc'),
   };
   const msg = $('#ediMsg');
   if (msg) msg.textContent = 'Guardando…';
+  let r;
   try {
-    await api('/editoriales/' + encodeURIComponent(id) + '/editar', { method: 'POST', body: JSON.stringify(cambios) });
+    r = await api('/editoriales/' + encodeURIComponent(id) + '/editar', { method: 'POST', body: JSON.stringify(cambios) });
   } catch (e) {
     if (msg) msg.textContent = 'Error: ' + e.message;
     return;
   }
   cerrarCmp();
-  toast('✔ Editorial guardada');
+  toast('✔ Editorial guardada' + ((r && r.avisos || []).length ? ' · ' + r.avisos.join('; ') : ''));
   editorialesBuscar();
 }
 

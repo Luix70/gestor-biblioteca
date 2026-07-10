@@ -12,6 +12,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { ObjectId } from 'mongodb';
 import { DIR_CDU } from '../mantenimiento/util-mantenimiento.js';
+import { decodificarImagen } from './imagen-base64.js';
 import { ROLES_VALIDOS } from './contribuciones.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
@@ -383,18 +384,7 @@ export async function reasignarDocsAAutor(db, docIds, viejoId, nuevoId) {
     return { ok: true, reasignados: n, restantes, autorBorrado };
 }
 
-// data URL o base64 puro → { buf, ext } (jpg|png|webp) o null. (Mismo criterio que utils/imagenes-doc.js.)
-const MAX_FOTO_BYTES = 12 * 1024 * 1024;
-function decodificarImagen(b64) {
-    if (!b64 || typeof b64 !== 'string') return null;
-    const m = b64.match(/^data:image\/(jpe?g|png|webp);base64,(.+)$/i);
-    const data = m ? m[2] : b64.replace(/^data:[^,]*,/, '');
-    let buf;
-    try { buf = Buffer.from(data, 'base64'); } catch { return null; }
-    if (!buf.length || buf.length > MAX_FOTO_BYTES) return null;
-    const t = m ? m[1].toLowerCase() : 'jpeg';
-    return { buf, ext: t === 'png' ? 'png' : t === 'webp' ? 'webp' : 'jpg' };
-}
+// decodificarImagen se movió a utils/imagen-base64.js (la comparten la foto de autor y el logo de editorial).
 
 /**
  * Guarda una foto (base64) del autor bajo `CDU/_autores/<id>/` (servido por /recursos), la marca como

@@ -25,7 +25,7 @@ import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor, eliminarAutoresVacios, imagenesDeObras } from './utils/gestion-autores.js';
-import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial } from './utils/gestion-editoriales.js';
+import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial, guardarLogoEditorial, imagenesDeLibros } from './utils/gestion-editoriales.js';
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -1686,11 +1686,24 @@ export function rutasPanel() {
             res.json({ ok: true, editoriales: await listarEditoriales(await conectarDB(), { q, limite, orden }) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+    // Todas las imágenes de los libros de la editorial (para elegir su LOGO de una de ellas y recortarlo luego).
+    r.get('/editoriales/:id/imagenes-libros', async (req, res) => {
+        try {
+            res.json(await imagenesDeLibros(await conectarDB(), req.params.id));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
     r.get('/editoriales/:id', async (req, res) => {
         try {
             const ficha = await fichaEditorial(await conectarDB(), req.params.id);
             if (!ficha) return res.status(404).json({ ok: false, motivo: 'editorial no encontrada' });
             res.json({ ok: true, ...ficha });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // LOGO de la editorial (base64: subido del dispositivo o recortado de una imagen de un libro suyo).
+    r.post('/editoriales/:id/logo', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await guardarLogoEditorial(await conectarDB(), req.params.id, (req.body || {}).base64));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/editoriales/fusionar', grupo(fusionarEditoriales, b => [b.destino, b.ids || []]));

@@ -1524,3 +1524,22 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
     (_autoresSelInfo / _editorialesSelInfo, id → nombre + nº de libros) hace que el diálogo
     liste EXACTAMENTE lo que se va a fusionar, aunque ya no esté en pantalla; y si se van a
     reasignar más de 25 libros hay que marcar una casilla de confirmación explícita.
+
+  -- EDITORIALES: datos de la ficha --------------------------------------------
+    Ademas de nombre y "tambien conocida como", la editorial guarda (campos ADITIVOS: la
+    coleccion `editoriales` no tiene validador $jsonSchema, no hace falta setup-mongo):
+      * logo / logos[]      -- LOGO. Se SUBE (boton 'Logo') o se ELIGE de una imagen de uno
+                               de sus libros (boton 'De un libro': portadas + carrusel). El
+                               anterior no se borra: se acumula en logos[] y solo cambia el
+                               principal. Se guarda en CDU/_editoriales/<id>/ y se sirve por
+                               /recursos (como la foto de autor). Se pinta con object-fit:
+                               contain (un logo no se recorta) en la ficha y en la tarjeta.
+      * descripcion         -- historia / notas libres.
+      * fecha_fundacion     -- ano (1000-2100). Vacio = sin dato.
+      * fecha_disolucion    -- ano. Vacio = sigue activa.
+      * ciudad / pais       -- sede.
+    Endpoints: POST /editoriales/:id/logo (base64, solo admin) y
+    GET /editoriales/:id/imagenes-libros (imagenes de sus libros para elegir el logo).
+    La validacion de imagen (utils/imagen-base64.js, compartida con la foto de autor) exige
+    MAGIC BYTES reales (jpg/png/webp): antes un base64 de texto cualquiera se escribia como
+    un .jpg corrupto.
