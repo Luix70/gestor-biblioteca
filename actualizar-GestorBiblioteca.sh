@@ -74,17 +74,42 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
 API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
+RESPUESTA="$STAGE/commit.json"
 echo "==> Resolviendo el commit de ${BRANCH}…"
+
+# La respuesta se guarda en un fichero (en vez de tubería) para poder DIAGNOSTICAR el fallo: antes el
+# error se tragaba con `|| true` y el aviso no decía por qué. La API de GitHub exige un User-Agent.
+WGET_RC=0
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-    SHA="$(wget --header="Authorization: token ${GITHUB_TOKEN}" -qO- "$API_URL" | grep -m1 '"sha"' | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([0-9a-f]+)".*/\1/' || true)"
+    wget -q --header="Authorization: token ${GITHUB_TOKEN}" --header="User-Agent: actualizar-GestorBiblioteca" \
+        -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
 else
-    SHA="$(wget -qO- "$API_URL" | grep -m1 '"sha"' | sed -E 's/.*"sha"[[:space:]]*:[[:space:]]*"([0-9a-f]+)".*/\1/' || true)"
+    wget -q --header="User-Agent: actualizar-GestorBiblioteca" -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
 fi
-if [ -n "${SHA:-}" ]; then
+
+# Se extrae el SHA SOLO con grep. La BusyBox de DSM trae un `sed` antiguo que NO entiende `-E` (es `-r`),
+# así que el `sed -E` de antes fallaba SIEMPRE: bajo `pipefail` tumbaba la tubería entera, el `|| true`
+# dejaba SHA vacío y el aviso salía en CADA despliegue, aunque la API hubiera respondido perfectamente.
+SHA=""
+if [ "$WGET_RC" -eq 0 ] && [ -s "$RESPUESTA" ]; then
+    SHA="$(grep -o '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' "$RESPUESTA" | head -n1 | grep -o '[0-9a-f]\{40\}' || true)"
+fi
+
+if [ -n "$SHA" ]; then
     TARBALL_URL="https://github.com/${REPO}/archive/${SHA}.tar.gz"
     echo "==> Commit resuelto: ${SHA}"
 else
-    echo "==> AVISO: no se pudo resolver el SHA (¿sin red/API?); uso el tarball de rama (puede venir cacheado)."
+    echo "==> AVISO: no se pudo resolver el SHA; uso el tarball de RAMA, que GitHub CACHEA."
+    echo "    ⚠ El despliegue puede traer código VIEJO (minutos de retraso tras un push)."
+    if [ "$WGET_RC" -ne 0 ]; then
+        echo "    Motivo: wget falló (código $WGET_RC) al pedir $API_URL — ¿sin red, DNS o TLS?"
+    elif [ ! -s "$RESPUESTA" ]; then
+        echo "    Motivo: la API respondió vacío."
+    else
+        echo "    Motivo: la API respondió, pero no se halló un SHA. Primeros 300 bytes:"
+        head -c 300 "$RESPUESTA"
+        echo
+    fi
 fi
 
 echo "==> Descargando ${TARBALL_URL}"
