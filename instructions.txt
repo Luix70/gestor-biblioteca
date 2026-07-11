@@ -270,6 +270,12 @@ de ficheros clasificado por CDU.
   Editoriales · Ubicaciones · Inbox · Actividad · Cuarentena · Papelera.
   En móvil el botón Atrás del teléfono navega hacia atrás (doble-atrás = salir).
 
+  VERSIÓN DESPLEGADA: el pie del menú muestra «v1.<serie>», donde la serie es el
+  nº de commit (sube con cada despliegue) — así se ve de un vistazo qué build corre
+  sin adivinar. El tooltip añade el commit/rama. La calcula el script de despliegue
+  (cabecera Link de la API de GitHub) y la sirve GET /api/version (pública). Si el
+  NAS no puede leer la serie, muestra el commit corto.
+
   ── CATÁLOGO (búsqueda + selección) ──────────────────────────────────────────
     · Caja de búsqueda (título, autor, editorial, ISBN, ISSN, DOI, nombre de archivo).
       Rápida e INSENSIBLE A ACENTOS gracias a un índice local SQLite-FTS
@@ -901,21 +907,59 @@ de ficheros clasificado por CDU.
     nombre o grafía alternativa; sin búsqueda, salen las editoriales CON libros,
     las más usadas primero (orden por nº de libros o por nombre). Cada tarjeta:
     nombre + nº de libros (+ «a.k.a.» si tiene nombres alternativos).
-    · FICHA (clic en una tarjeta): nombre y «también conocida como» EDITABLES
-      (admin), y los LIBROS que publica (clic → ficha del libro). «🔍 Ver en
-      Catálogo» abre todos sus libros filtrados (GET /catalogo?editorial=<id>).
-    · SELECCIÓN: MISMA mecánica y pista visual que el resto (Catálogo/Autores) —
-      «🖱 Modo selección» (botón o pulsación larga / doble clic en una tarjeta),
-      círculo de selección en cada tarjeta, la marcada se «hunde».
+    La lista está PAGINADA (60/pág, como Autores): recuento «desde–hasta de TOTAL»
+    y controles ‹ ⏮ ‹ N/M › ⏭ ›. Buscar o cambiar el orden vuelve a la página 1.
+    · FICHA (clic en una tarjeta): nombre, «también conocida como», LOGO (subir o
+      elegir de un libro), sede (ciudad/país), años de actividad e historia —
+      EDITABLES (admin). Y los LIBROS que publica (clic → ficha del libro). «🔍 Ver
+      en Catálogo» abre todos sus libros filtrados (GET /catalogo?editorial=<id>).
+    · SELECCIÓN de editoriales (lista): MISMA mecánica y pista visual que el resto
+      (Catálogo/Autores) — «🖱 Modo selección» (botón o pulsación larga / doble clic
+      en una tarjeta), círculo de selección, la marcada se «hunde».
+    · SELECCIÓN de LIBROS dentro de la ficha (admin): «🖱 Modo selección» sobre los
+      libros de la editorial y actuar sobre los marcados:
+        – 🔍 Mostrar en Catálogo (llegan ya seleccionados);
+        – ➡️ A otra editorial — reasigna los seleccionados (POST /editoriales/:id/
+          reasignar); esta editorial conserva los no marcados (y si queda vacía, se borra);
+        – 🚫 Quitar editorial — los seleccionados quedan SIN editorial (POST
+          /editoriales/:id/quitar);
+        – 🏢 Reclasificar — ver «Reclasificar editorial» abajo.
     · COMBINAR (admin): marca 2+ editoriales → «🔗 Combinar» → elige la que se
       CONSERVA (B; por defecto la de más libros). Las demás (A) se funden en B:
       sus nombres pasan a «también conocida como» de B y TODOS sus libros se
       reasignan a B (biblioteca.editorial); luego se borran las A. Sin pérdida
       (los libros y sus ficheros no se tocan). En la ficha: «🔀 Fusionar esta en…»
       (elige la destino en un overlay). (POST /editoriales/fusionar.)
+    · 💥 EXPLOTAR (admin, en la ficha): LIBERA todos sus libros (quedan sin
+      editorial) y BORRA la editorial. Distinto de fusionar (que los reasigna a
+      otra) y de borrar (que solo permite las vacías). No se pierde ningún libro
+      (solo se les quita la referencia; se pueden reclasificar después). (POST
+      /editoriales/:id/explotar.)
     · BORRAR (admin, en la ficha): solo una editorial SIN libros (fantasma tras
       una fusión/corrección; nunca se borra una con obras). (POST /editoriales/
       :id/borrar.) Backend: src/utils/gestion-editoriales.js.
+
+    ── RECLASIFICAR EDITORIAL (de una selección de libros) ──
+    Arregla en lote el campo `editorial` de una SELECCIÓN de libros (editoriales
+    mal puestas —p. ej. «ePubLibre», que es un grupo de maquetación, no una casa—
+    o ausentes). Se lanza desde:
+      · el CATÁLOGO — selección de libros → «🏢 Reclasificar editorial»;
+      · la ficha de una editorial — libros seleccionados → «🏢 Reclasificar».
+    Busca la editorial correcta de cada libro EN CASCADA, minimizando IA/coste:
+      1) Fichero local (por ISBN, offline)  2) OpenLibrary  3) Google Books
+      4) IA (visión sobre la portada) — OPT-IN y ÚLTIMO recurso (casilla; por
+         defecto NO, más lento y con coste).
+    Decisión por libro (anti-pérdida): si halla una editorial real distinta →
+    propone el cambio; si no halla nada y la actual es FALSA (ePubLibre…) → propone
+    QUITARLA (queda sin editorial); si no halla nada y la actual es real → la DEJA.
+    Presenta un INFORME por TRANSICIÓN (no un log por libro): «N libros de «Y» a
+    «Z» [fuente]», «N quitados de «M» (sin editorial)», + sin cambio / no resueltos.
+    DRY-RUN primero (previsualiza sin tocar nada); «✅ Aplicar cambios» ejecuta lo
+    previsualizado (resuelve/crea la editorial destino por nombre). Proceso en 2º
+    plano con progreso (POST /editoriales/reclasificar[/aplicar], GET …/estado).
+    CLI en lote (NAS): node scripts/reclasificar-editoriales.js --editorial "ePubLibre"
+    [--ejecutar] [--ia] (dry-run por defecto; también --id/--sin-editorial/--todos).
+    Backend: src/utils/reclasificar-editorial.js.
 
   ── ACTIVIDAD (administración) ───────────────────────────────────────────────
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del
@@ -1532,3 +1576,22 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
     (_autoresSelInfo / _editorialesSelInfo, id → nombre + nº de libros) hace que el diálogo
     liste EXACTAMENTE lo que se va a fusionar, aunque ya no esté en pantalla; y si se van a
     reasignar más de 25 libros hay que marcar una casilla de confirmación explícita.
+
+  -- EDITORIALES: datos de la ficha --------------------------------------------
+    Ademas de nombre y "tambien conocida como", la editorial guarda (campos ADITIVOS: la
+    coleccion `editoriales` no tiene validador $jsonSchema, no hace falta setup-mongo):
+      * logo / logos[]      -- LOGO. Se SUBE (boton 'Logo') o se ELIGE de una imagen de uno
+                               de sus libros (boton 'De un libro': portadas + carrusel). El
+                               anterior no se borra: se acumula en logos[] y solo cambia el
+                               principal. Se guarda en CDU/_editoriales/<id>/ y se sirve por
+                               /recursos (como la foto de autor). Se pinta con object-fit:
+                               contain (un logo no se recorta) en la ficha y en la tarjeta.
+      * descripcion         -- historia / notas libres.
+      * fecha_fundacion     -- ano (1000-2100). Vacio = sin dato.
+      * fecha_disolucion    -- ano. Vacio = sigue activa.
+      * ciudad / pais       -- sede.
+    Endpoints: POST /editoriales/:id/logo (base64, solo admin) y
+    GET /editoriales/:id/imagenes-libros (imagenes de sus libros para elegir el logo).
+    La validacion de imagen (utils/imagen-base64.js, compartida con la foto de autor) exige
+    MAGIC BYTES reales (jpg/png/webp): antes un base64 de texto cualquiera se escribia como
+    un .jpg corrupto.
