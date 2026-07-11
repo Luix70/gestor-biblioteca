@@ -122,6 +122,9 @@ app.get('/api/yo', (req, res) => res.json(validar(tokenDe(req)) || { rol: null }
 app.post('/api/logout', (req, res) => { logout(tokenDe(req)); res.json({ ok: true }); });
 // Lista de usuarios (SIN contraseñas) para el desplegable del login. Público (antes de la puerta).
 app.get('/api/usuarios', (req, res) => res.json({ usuarios: listarUsuarios() }));
+// Versión desplegada («v1.<serie>»): PÚBLICA (antes de la puerta) para poder mostrarla en el pie del menú
+// incluso antes del login. Sin datos sensibles (solo etiqueta/commit/rama).
+app.get('/api/version', (req, res) => res.json({ ok: true, ...versionApp() }));
 // Vista COMPARTIDA por QR: pública (antes de la puerta), pero solo devuelve la ficha del documento cuyo
 // token firmado se presenta — no autentica ni abre nada más de la app.
 app.use('/api', rutasPublicas());
@@ -269,13 +272,14 @@ function versionEnEjecucion() {
     if (process.env.GIT_COMMIT) {
         return { commit: String(process.env.GIT_COMMIT).slice(0, 10), rama: process.env.GIT_BRANCH || null, origen: 'env' };
     }
-    // Fichero VERSION en la raíz (lo escribe el script de despliegue con el SHA). Funciona con TARBALL, que
-    // no trae carpeta .git — es la vía fiable en el NAS. Formato libre: «<sha>» o «<sha> <rama>».
+    // Fichero VERSION en la raíz (lo escribe el script de despliegue). Funciona con TARBALL, que no trae
+    // carpeta .git — es la vía fiable en el NAS. Formato: «<sha> <rama> <serie>» (rama y serie opcionales).
+    // La SERIE es el nº de commit (build incremental) → se muestra como «v1.<serie>» para no adivinar.
     try {
         const txt = readFileSync(path.join(RAIZ, 'VERSION'), 'utf8').trim();
         if (txt) {
-            const [sha, rama] = txt.split(/\s+/);
-            return { commit: sha.slice(0, 10), rama: rama || null, origen: 'VERSION' };
+            const [sha, rama, serie] = txt.split(/\s+/);
+            return { commit: sha.slice(0, 10), rama: rama || null, serie: serie || null, origen: 'VERSION' };
         }
     } catch { /* sin fichero VERSION */ }
     try {
@@ -302,7 +306,22 @@ function versionEnEjecucion() {
         const rama = execSync('git rev-parse --abbrev-ref HEAD', { cwd: RAIZ, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
         if (commit) return { commit, rama, origen: 'git' };
     } catch { /* sin binario git */ }
-    return { commit: 'desconocido', rama: null, origen: null };
+    return { commit: 'desconocido', rama: null, serie: null, origen: null };
+}
+
+// Versión mayor (el «1» de «v1.<serie>»), tomada de package.json. Se lee una vez; si falla, «1».
+const VERSION_MAYOR = (() => {
+    try { return String(JSON.parse(readFileSync(path.join(RAIZ, 'package.json'), 'utf8')).version || '1').split('.')[0] || '1'; }
+    catch { return '1'; }
+})();
+
+// Versión legible para mostrar en la app: «v1.<serie>» (nº de commit incremental) cuando el despliegue
+// resolvió la serie; si no, se cae al commit corto. Devuelve todo (etiqueta + commit + rama + serie) para
+// el endpoint /api/version y el log de arranque.
+function versionApp() {
+    const v = versionEnEjecucion();
+    const etiqueta = v.serie ? `v${VERSION_MAYOR}.${v.serie}` : (v.commit && v.commit !== 'desconocido' ? `commit ${v.commit}` : 'desconocida');
+    return { etiqueta, ...v };
 }
 
 app.listen(PUERTO, () => {
@@ -322,8 +341,8 @@ if (PUERTO_PANEL && PUERTO_PANEL !== PUERTO) {
         console.log(`🎛️  Panel de control: puerto ${PUERTO_PANEL} (interno del contenedor)${urlPublica ? ` · acceso: ${urlPublica}` : ' · accede por tu proxy/HTTPS configurado'}`);
         // Versión en ejecución JUNTO al log del panel (que sí se imprime siempre; los logs de arranque más
         // tempranos se pierden en el pipe del contenedor). Así tienes el commit a la vista de forma fiable.
-        const v = versionEnEjecucion();
-        console.log(`📦  Versión en ejecución: commit ${v.commit}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
+        const v = versionApp();
+        console.log(`📦  Versión en ejecución: ${v.etiqueta}${v.commit && v.commit !== 'desconocido' ? ` · commit ${v.commit}` : ''}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
         if (!process.env.ADMIN_PWD && !process.env.PANEL_ADMIN_PASSWORD)
             console.warn('⚠️  ADMIN_PWD no definido: el admin "Luis" no podrá entrar (solo "guest"/lectura). Defínelo en .env.');
     });
