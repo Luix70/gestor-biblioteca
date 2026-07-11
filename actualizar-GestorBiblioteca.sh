@@ -67,54 +67,67 @@ fi
 
 # --- 1. Resolver el COMMIT y descargar SU tarball (inmutable, sin caché de rama) ----------
 # El tarball de RAMA (archive/refs/heads/<rama>.tar.gz) lo CACHEA GitHub y puede servir código VIEJO
-# durante minutos tras un push (causa de "he desplegado y sigue lo anterior"). Resolvemos el SHA por la
-# API y bajamos archive/<SHA>.tar.gz (contenido inmutable, no cacheado "viejo"): así el despliegue trae
-# SIEMPRE lo último. Si la API no responde, se cae al tarball de rama (comportamiento anterior).
+# durante minutos tras un push (causa de "he desplegado y sigue lo anterior"). Resolvemos el SHA del commit y
+# bajamos archive/<SHA>.tar.gz (contenido inmutable, no cacheado "viejo"): así el despliegue trae SIEMPRE lo
+# último. Si no se puede resolver, se cae al tarball de rama (comportamiento anterior).
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
-API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
-RESPUESTA="$STAGE/commit.json"
 echo "==> Resolviendo el commit de ${BRANCH}…"
-
-# La respuesta se guarda en un fichero (en vez de tubería) para poder DIAGNOSTICAR el fallo: antes el
-# error se tragaba con `|| true` y el aviso no decía por qué. NO se añade `--header="User-Agent: …"`: la
-# BusyBox wget de algunos DSM no soporta `--header` y aborta; wget manda ya su propio User-Agent, que la
-# API de GitHub acepta. El header de Authorization solo se pone si hay token (repo privado).
-WGET_RC=0
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-    wget -q --header="Authorization: token ${GITHUB_TOKEN}" -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
-else
-    wget -q -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
-fi
-
-# Extracción del SHA A PRUEBA de la BusyBox de DSM: nada de `sed -E` (allí la opción es `-r`), ni `grep -o`,
-# ni intervalos `\{40\}` (no siempre soportados). CLAVE: la API devuelve el JSON MINIFICADO en UNA sola
-# línea, y ahí dentro hay VARIOS "sha" (el del commit primero, luego el del árbol, los padres y el BLOB de
-# cada fichero). Un `sed 's/.*"sha".../'` es greedy y se quedaría con el ÚLTIMO (el blob de un fichero) →
-# SHA equivocado. Por eso se trocea antes por comas y llaves (`tr ',{' '\n'`): así el "sha" del commit, que
-# es el PRIMER campo del objeto, queda solo en su fragmento y `head -n1` lo coge sin ambigüedad. `tr` final
-# deja solo hex; después se VALIDA que sean 40 (si no, SHA vacío → no se construye una URL de tarball
-# inválida que abortaría el script en la descarga por `set -e`).
 SHA=""
-if [ "$WGET_RC" -eq 0 ] && [ -s "$RESPUESTA" ]; then
-    SHA="$(tr ',{' '\n' < "$RESPUESTA" | grep '"sha"' | head -n1 | sed -e 's/.*"sha"[[:space:]]*:[[:space:]]*"//' -e 's/".*//' | tr -cd '0-9a-f')"
+
+# MÉTODO 1 (preferido): git ls-remote. Usa el PROTOCOLO git, NO la API REST → sin límite de tasa (la API
+# anónima corta a 60 peticiones/hora por IP: reintentar el deploy la agota y wget devuelve un 403 = «código
+# 8»), sin User-Agent y sin parsear JSON. Devuelve «<sha>\trefs/heads/<rama>»; se coge la 1.ª columna. Repo
+# PÚBLICO → anónimo; si hay token (repo privado), se incrusta en la URL. GIT_TERMINAL_PROMPT=0 evita que se
+# quede colgado pidiendo credenciales si algo va mal.
+if command -v git >/dev/null 2>&1; then
+    if [ -n "${GITHUB_TOKEN:-}" ]; then LS_URL="https://${GITHUB_TOKEN}@github.com/${REPO}.git"
+    else LS_URL="https://github.com/${REPO}.git"; fi
+    SHA="$(GIT_TERMINAL_PROMPT=0 git ls-remote "$LS_URL" "refs/heads/${BRANCH}" 2>/dev/null | head -n1 | cut -f1 | tr -cd '0-9a-f')"
     case "$SHA" in *[!0-9a-f]*) SHA="" ;; esac
     [ "${#SHA}" -eq 40 ] || SHA=""
+    [ -n "$SHA" ] && echo "==> Commit resuelto (git ls-remote): ${SHA}"
+fi
+
+# MÉTODO 2 (respaldo, solo si no hay git o ls-remote falló): la API REST. La respuesta va a un fichero para
+# poder DIAGNOSTICAR. Se añade User-Agent (por si un GitHub estricto lo exige) y Authorization solo con token.
+# Extracción del SHA A PRUEBA de shells viejos: sin `sed -E`/`grep -o`/intervalos `\{40\}`. La API devuelve el
+# JSON MINIFICADO en UNA línea con VARIOS "sha" (commit, árbol, padres, BLOB de cada fichero); un `sed .*"sha"`
+# es greedy → cogería el ÚLTIMO. Por eso se trocea por comas/llaves (`tr ',{' '\n'`) para aislar el "sha" del
+# commit (1.er campo) y se VALIDA que sean 40 hex.
+API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
+RESPUESTA="$STAGE/commit.json"
+WGET_RC=0
+if [ -z "$SHA" ]; then
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        wget -q --header="User-Agent: actualizar-GestorBiblioteca" --header="Authorization: token ${GITHUB_TOKEN}" -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
+    else
+        wget -q --header="User-Agent: actualizar-GestorBiblioteca" -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
+    fi
+    if [ "$WGET_RC" -eq 0 ] && [ -s "$RESPUESTA" ]; then
+        SHA="$(tr ',{' '\n' < "$RESPUESTA" | grep '"sha"' | head -n1 | sed -e 's/.*"sha"[[:space:]]*:[[:space:]]*"//' -e 's/".*//' | tr -cd '0-9a-f')"
+        case "$SHA" in *[!0-9a-f]*) SHA="" ;; esac
+        [ "${#SHA}" -eq 40 ] || SHA=""
+    fi
+    [ -n "$SHA" ] && echo "==> Commit resuelto (API): ${SHA}"
 fi
 
 if [ -n "$SHA" ]; then
     TARBALL_URL="https://github.com/${REPO}/archive/${SHA}.tar.gz"
-    echo "==> Commit resuelto: ${SHA}"
 else
     echo "==> AVISO: no se pudo resolver el SHA; uso el tarball de RAMA, que GitHub CACHEA."
     echo "    ⚠ El despliegue puede traer código VIEJO (minutos de retraso tras un push)."
+    if ! command -v git >/dev/null 2>&1; then
+        echo "    Nota: no hay 'git' en el NAS; se intentó solo la API. Instala git para la vía robusta (sin límite de tasa)."
+    fi
     if [ "$WGET_RC" -ne 0 ]; then
-        echo "    Motivo: wget falló (código $WGET_RC) al pedir $API_URL — ¿sin red, DNS o TLS?"
+        echo "    Motivo (API): wget código $WGET_RC. El 8 = respuesta de ERROR HTTP (casi siempre 403 por LÍMITE"
+        echo "                  de tasa de la API anónima: 60/hora por IP). git ls-remote no tiene ese límite."
     elif [ ! -s "$RESPUESTA" ]; then
-        echo "    Motivo: la API respondió vacío."
+        echo "    Motivo (API): respondió vacío."
     else
-        echo "    Motivo: la API respondió, pero no se halló un SHA. Primeros 300 bytes:"
+        echo "    Motivo (API): respondió sin un SHA. Primeros 300 bytes:"
         head -c 300 "$RESPUESTA"
         echo
     fi
