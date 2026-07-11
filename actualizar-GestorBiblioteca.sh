@@ -85,7 +85,9 @@ SHA=""
 ATOM_URL="https://github.com/${REPO}/commits/${BRANCH}.atom"
 if [ -z "${GITHUB_TOKEN:-}" ]; then
     if wget -q -O "$STAGE/commits.atom" "$ATOM_URL" && [ -s "$STAGE/commits.atom" ]; then
-        SHA="$(grep 'Grit::Commit/' "$STAGE/commits.atom" | head -n1 | sed -e 's|.*Grit::Commit/||' -e 's|[^0-9a-f].*||' | tr -cd '0-9a-f')"
+        # `|| true` imprescindible: bajo `set -e`+`pipefail`, si grep no casa (feed raro) la tubería falla y
+        # ABORTARÍA el script. Con `|| true` la extracción nunca tumba el deploy: como mucho deja SHA vacío.
+        SHA="$(grep 'Grit::Commit/' "$STAGE/commits.atom" | head -n1 | sed -e 's|.*Grit::Commit/||' -e 's|[^0-9a-f].*||' | tr -cd '0-9a-f' || true)"
         case "$SHA" in *[!0-9a-f]*) SHA="" ;; esac
         [ "${#SHA}" -eq 40 ] || SHA=""
         [ -n "$SHA" ] && echo "==> Commit resuelto (feed Atom): ${SHA}"
@@ -97,7 +99,7 @@ fi
 if [ -z "$SHA" ] && command -v git >/dev/null 2>&1; then
     if [ -n "${GITHUB_TOKEN:-}" ]; then LS_URL="https://${GITHUB_TOKEN}@github.com/${REPO}.git"
     else LS_URL="https://github.com/${REPO}.git"; fi
-    SHA="$(GIT_TERMINAL_PROMPT=0 git ls-remote "$LS_URL" "refs/heads/${BRANCH}" 2>/dev/null | head -n1 | cut -f1 | tr -cd '0-9a-f')"
+    SHA="$(GIT_TERMINAL_PROMPT=0 git ls-remote "$LS_URL" "refs/heads/${BRANCH}" 2>/dev/null | head -n1 | cut -f1 | tr -cd '0-9a-f' || true)"
     case "$SHA" in *[!0-9a-f]*) SHA="" ;; esac
     [ "${#SHA}" -eq 40 ] || SHA=""
     [ -n "$SHA" ] && echo "==> Commit resuelto (git ls-remote): ${SHA}"
@@ -118,7 +120,7 @@ if [ -z "$SHA" ]; then
         wget -q --header="User-Agent: actualizar-GestorBiblioteca" -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
     fi
     if [ "$WGET_RC" -eq 0 ] && [ -s "$RESPUESTA" ]; then
-        SHA="$(tr ',{' '\n' < "$RESPUESTA" | grep '"sha"' | head -n1 | sed -e 's/.*"sha"[[:space:]]*:[[:space:]]*"//' -e 's/".*//' | tr -cd '0-9a-f')"
+        SHA="$(tr ',{' '\n' < "$RESPUESTA" | grep '"sha"' | head -n1 | sed -e 's/.*"sha"[[:space:]]*:[[:space:]]*"//' -e 's/".*//' | tr -cd '0-9a-f' || true)"
         case "$SHA" in *[!0-9a-f]*) SHA="" ;; esac
         [ "${#SHA}" -eq 40 ] || SHA=""
     fi
@@ -152,8 +154,10 @@ else
     HDRS="$(wget -S -O /dev/null "$COUNT_URL" 2>&1 || true)"
 fi
 # El fragmento con rel="last" trae «…&page=<N>>; rel="last"»: se trocea por comas, se aísla ese fragmento y
-# se extrae el número de página (= nº de commits). `tr` final deja solo dígitos.
-SERIE="$(printf '%s' "$HDRS" | tr ',' '\n' | grep 'rel="last"' | sed -e 's/.*[?&]page=//' -e 's/>.*//' | tr -cd '0-9')"
+# se extrae el número de página (= nº de commits). `tr` final deja solo dígitos. `|| true` OBLIGATORIO: si la
+# API va con límite de tasa (403) NO hay «rel="last"» → grep falla → bajo `set -e`+`pipefail` ABORTARÍA el
+# script AQUÍ (justo tras resolver el SHA, sin parar/relanzar el contenedor). Con `|| true` solo queda vacío.
+SERIE="$(printf '%s' "$HDRS" | tr ',' '\n' | grep 'rel="last"' | sed -e 's/.*[?&]page=//' -e 's/>.*//' | tr -cd '0-9' || true)"
 if [ -n "$SERIE" ]; then
     echo "==> Nº de serie (commits en ${BRANCH}): ${SERIE}  → v1.${SERIE}"
 else
