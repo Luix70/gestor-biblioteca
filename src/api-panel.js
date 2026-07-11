@@ -25,7 +25,8 @@ import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
 import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor, eliminarAutoresVacios, imagenesDeObras } from './utils/gestion-autores.js';
-import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial, guardarLogoEditorial, imagenesDeLibros } from './utils/gestion-editoriales.js';
+import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial, guardarLogoEditorial, imagenesDeLibros, quitarEditorialDeDocs, reasignarDocsAEditorial, explotarEditorial } from './utils/gestion-editoriales.js';
+import { lanzarReclasificacion, estadoReclasificacion, aplicarUltimaReclasificacion } from './utils/reclasificar-editorial.js';
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
@@ -1681,9 +1682,11 @@ export function rutasPanel() {
     r.get('/editoriales', async (req, res) => {
         try {
             const q = String(req.query.q || '');
-            const limite = Number(req.query.limite) || 300;
+            const limite = Number(req.query.limite) || 60; // editoriales por página
+            const pagina = Number(req.query.pagina) || 1;
             const orden = String(req.query.orden || 'libros'); // 'libros' | 'nombre'
-            res.json({ ok: true, editoriales: await listarEditoriales(await conectarDB(), { q, limite, orden }) });
+            const r2 = await listarEditoriales(await conectarDB(), { q, limite, pagina, orden });
+            res.json({ ok: true, ...r2 }); // { editoriales, total, pagina, porPagina, capado }
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     // Todas las imágenes de los libros de la editorial (para elegir su LOGO de una de ellas y recortarlo luego).
@@ -1707,6 +1710,46 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/editoriales/fusionar', grupo(fusionarEditoriales, b => [b.destino, b.ids || []]));
+    // Quitar la editorial de los documentos indicados (o de TODOS los suyos) → quedan SIN editorial; borra la
+    // editorial si queda vacía. Para «quitar la editorial de los seleccionados» desde la ficha.
+    r.post('/editoriales/:id/quitar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await quitarEditorialDeDocs(await conectarDB(), req.params.id, req.body?.ids || null));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Reasignar los documentos indicados de ESTA editorial (:id) a OTRA (body.destino) — «enviar los
+    // seleccionados a otra editorial». La vieja se conserva si le quedan libros; si no, se borra.
+    r.post('/editoriales/:id/reasignar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await reasignarDocsAEditorial(await conectarDB(), req.body?.ids || [], req.params.id, req.body?.destino));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // EXPLOTAR: liberar TODOS los libros de la editorial (quedan sin editorial) y borrarla. Distinto de
+    // fusionar (reasigna) y de borrar (solo vacías).
+    r.post('/editoriales/:id/explotar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await explotarEditorial(await conectarDB(), req.params.id));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // ── RECLASIFICADOR del campo `editorial` de una selección de libros (cascada fichero→OL→Google→IA opt-in).
+    //    Proceso con RED por libro → 2º plano + sondeo, como Integridad/Reindexar. Flujo: 1) lanzar el DRY-RUN,
+    //    2) sondear el estado (progreso + informe por transición), 3) confirmar → aplicar el plan previsualizado.
+    r.post('/editoriales/reclasificar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(lanzarReclasificacion(await conectarDB(), req.body?.ids || [], { usarIA: !!req.body?.usarIA }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.get('/editoriales/reclasificar/estado', (req, res) => res.json({ ok: true, ...estadoReclasificacion() }));
+    r.post('/editoriales/reclasificar/aplicar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await aplicarUltimaReclasificacion(await conectarDB()));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
     r.post('/editoriales/:id/editar', async (req, res) => {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });

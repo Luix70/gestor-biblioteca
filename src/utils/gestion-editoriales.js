@@ -51,16 +51,22 @@ async function recuentoPorEditorial(db) {
 }
 
 /**
- * Lista/busca editoriales con el nº de libros de cada una. Parámetros opcionales:
- *   · q     — texto (nombre o grafía alternativa, tolerante a mayúsculas).
- *   · orden — 'libros' (por nº, desc; por defecto) | 'nombre' (alfabético).
+ * Lista/busca editoriales con el nº de libros de cada una, PAGINADO (paridad con `listarAutores`). Params:
+ *   · q      — texto (nombre o grafía alternativa, tolerante a mayúsculas).
+ *   · orden  — 'libros' (por nº, desc; por defecto) | 'nombre' (alfabético).
+ *   · limite — editoriales por página (por defecto 60, como Autores).
+ *   · pagina — página 1..N.
  * SIN búsqueda muestra las editoriales QUE TIENEN LIBROS (las del volcado sin libros son ruido; aparecen al
- * buscarlas por nombre).
+ * buscarlas por nombre). Devuelve { editoriales, total, pagina, porPagina, capado } (misma forma que Autores):
+ * se escanea hasta MAX_ESCANEO, se puntúa/ordena TODO el conjunto y se pagina en memoria devolviendo el total.
  */
-export async function listarEditoriales(db, { q = '', limite = 300, orden = 'libros' } = {}) {
-    const tope = Math.min(1000, Math.max(1, limite));
+export async function listarEditoriales(db, { q = '', limite = 60, orden = 'libros', pagina = 1 } = {}) {
+    const porPagina = Math.min(200, Math.max(1, Number(limite) || 60));
+    const pag = Math.max(1, Number(pagina) || 1);
+    const MAX_ESCANEO = 5000; // tope de editoriales a puntuar (para el recuento y la paginación)
     const consulta = String(q || '').trim();
     const rx = consulta ? new RegExp(escapeRegex(consulta), 'i') : null;
+    const vacio = { editoriales: [], total: 0, pagina: pag, porPagina, capado: false };
 
     const conteo = await recuentoPorEditorial(db);
 
@@ -68,14 +74,12 @@ export async function listarEditoriales(db, { q = '', limite = 300, orden = 'lib
     const filtro = {};
     if (!consulta) {
         const ids = [...conteo.keys()].map(oid).filter(Boolean);
-        if (!ids.length) return [];
+        if (!ids.length) return vacio;
         filtro._id = { $in: ids };
     }
     if (rx) filtro.$or = [{ nombre: rx }, { nombres_alternativos: rx }];
 
-    const cur = db.collection('editoriales').find(filtro, { projection: PROY_EDITORIAL_LISTA });
-    if (consulta) cur.limit(tope * 2); // búsqueda global: acota antes de puntuar
-    const docs = await cur.toArray();
+    const docs = await db.collection('editoriales').find(filtro, { projection: PROY_EDITORIAL_LISTA }).limit(MAX_ESCANEO).toArray();
 
     const editoriales = docs.map((e) => ({ ...e, _id: String(e._id), n_libros: conteo.get(String(e._id)) || 0 }));
     if (orden === 'nombre') {
@@ -83,7 +87,13 @@ export async function listarEditoriales(db, { q = '', limite = 300, orden = 'lib
     } else {
         editoriales.sort((x, y) => y.n_libros - x.n_libros || String(x.nombre || '').localeCompare(String(y.nombre || '')));
     }
-    return editoriales.slice(0, tope);
+    const total = editoriales.length;
+    const inicio = (pag - 1) * porPagina;
+    return {
+        editoriales: editoriales.slice(inicio, inicio + porPagina),
+        total, pagina: pag, porPagina,
+        capado: docs.length >= MAX_ESCANEO, // el recuento puede quedarse corto (se escaneó el tope)
+    };
 }
 
 /**
@@ -258,6 +268,70 @@ export async function fusionarEditoriales(db, destinoId, ids = []) {
         reasignados: r.modifiedCount,
         alternativos: set.nombres_alternativos || destino.nombres_alternativos || [],
     };
+}
+
+/**
+ * QUITA la editorial de unos documentos (o de TODOS los suyos si `ids` es null): el campo único
+ * `biblioteca.editorial` se ELIMINA ($unset) → esos libros quedan SIN editorial (válido: es opcional en el
+ * esquema). Si la editorial deja de estar en NINGÚN documento, se BORRA (nunca se borra una con libros).
+ * Es la versión para «quitar la editorial de los seleccionados». Devuelve { quitados, restantes, editorialBorrada }.
+ */
+export async function quitarEditorialDeDocs(db, editorialId, ids = null) {
+    const _id = oid(editorialId);
+    if (!_id) return { ok: false, motivo: 'id de editorial inválido' };
+    const bib = db.collection('biblioteca');
+    const match = (Array.isArray(ids) && ids.length)
+        ? { editorial: _id, _id: { $in: ids.map(oid).filter(Boolean) } }
+        : { editorial: _id };
+    const r = await bib.updateMany(match, { $unset: { editorial: '' }, $set: { fecha_actualizacion: new Date() } });
+    // ¿Sigue referenciada por algún documento? Si no, se borra (nunca con libros).
+    const restantes = await bib.countDocuments({ editorial: _id });
+    let editorialBorrada = false;
+    if (restantes === 0) { await db.collection('editoriales').deleteOne({ _id }); editorialBorrada = true; }
+    return { ok: true, quitados: r.modifiedCount, restantes, editorialBorrada };
+}
+
+/**
+ * REASIGNA unos DOCUMENTOS de ESTA editorial a OTRA (para «enviar los seleccionados a otra editorial»): en
+ * cada doc de `docIds` con esta editorial, `biblioteca.editorial` (campo único) pasa a la nueva. La vieja se
+ * CONSERVA si le quedan libros; si se queda sin ninguno, se BORRA. Devuelve { reasignados, restantes, editorialBorrada }.
+ */
+export async function reasignarDocsAEditorial(db, docIds, viejoId, nuevoId) {
+    const viejo = oid(viejoId), nuevo = oid(nuevoId);
+    if (!viejo || !nuevo) return { ok: false, motivo: 'ids inválidos' };
+    if (String(viejo) === String(nuevo)) return { ok: false, motivo: 'la editorial de destino es la misma' };
+    const nuevaEd = await db.collection('editoriales').findOne({ _id: nuevo }, { projection: { _id: 1 } });
+    if (!nuevaEd) return { ok: false, motivo: 'editorial de destino no encontrada' };
+    const bib = db.collection('biblioteca');
+    const ids = (Array.isArray(docIds) ? docIds : []).map(oid).filter(Boolean);
+    if (!ids.length) return { ok: false, motivo: 'no se indicaron documentos' };
+    const r = await bib.updateMany(
+        { editorial: viejo, _id: { $in: ids } },
+        { $set: { editorial: nuevo, fecha_actualizacion: new Date() } },
+    );
+    const restantes = await bib.countDocuments({ editorial: viejo });
+    let editorialBorrada = false;
+    if (restantes === 0) { await db.collection('editoriales').deleteOne({ _id: viejo }); editorialBorrada = true; }
+    return { ok: true, reasignados: r.modifiedCount, restantes, editorialBorrada };
+}
+
+/**
+ * EXPLOTA una editorial: LIBERA todos sus libros (quedan SIN editorial, $unset) y BORRA la editorial. Es
+ * DISTINTO de fusionar (que reasigna sus libros a otra) y de borrar (que solo permite las ya vacías): aquí la
+ * editorial desaparece aunque tenga libros, y esos libros quedan sin ninguna. Sin pérdida de LIBROS (solo se
+ * les quita la referencia, editable/reclasificable después). Devuelve { liberados, nombre }.
+ */
+export async function explotarEditorial(db, id) {
+    const _id = oid(id);
+    if (!_id) return { ok: false, motivo: 'id inválido' };
+    const editorial = await db.collection('editoriales').findOne({ _id }, { projection: { nombre: 1 } });
+    if (!editorial) return { ok: false, motivo: 'editorial no encontrada' };
+    const r = await db.collection('biblioteca').updateMany(
+        { editorial: _id },
+        { $unset: { editorial: '' }, $set: { fecha_actualizacion: new Date() } },
+    );
+    await db.collection('editoriales').deleteOne({ _id });
+    return { ok: true, liberados: r.modifiedCount, nombre: editorial.nombre || '' };
 }
 
 /**

@@ -6366,6 +6366,7 @@ function renderBulk() {
     <button class="btn" id="bkEnriquecer" title="Enriquecer (rellenar huecos con APIs) cada documento seleccionado">✨ Enriquecer</button>
     <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
     <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
+    <button class="btn" id="bkReclasEd" title="Reclasificar la EDITORIAL de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional). Muestra un informe por transición antes de aplicar.">🏢 Reclasificar editorial</button>
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
@@ -6416,6 +6417,7 @@ function renderBulk() {
     if ($('#bkEnriquecer')) $('#bkEnriquecer').onclick = () => accionLoteFicha('enriquecer', { verbo: 'Enriquecer' });
     if ($('#bkAFondo')) $('#bkAFondo').onclick = aFondoLote;
     if ($('#bkTipo')) $('#bkTipo').onclick = () => cambiarTipoDocs([...selDocs]);
+    if ($('#bkReclasEd')) $('#bkReclasEd').onclick = () => reclasificarEditorialLote([...selDocs], `${selDocs.size} seleccionado(s)`);
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     // «Mostrar selección»: alterna la vista restringida a lo seleccionado (y re-busca).
@@ -13138,6 +13140,10 @@ const _editorialesSel = new Set(); // ids marcadas para combinar
 const _editorialesSelInfo = new Map();
 let _editorialesSelModo = false; // Modo selección (tap = marcar)
 let _editorialesBuscarTimer = null; // debounce del buscador
+let _editorialesPagina = 1; // paginación (paridad con Autores)
+let _editorialesTotal = 0; // total de editoriales que casan (para el recuento)
+let _editorialesPorPagina = 60; // editoriales por página (lo confirma el servidor)
+let _editorialesCapado = false; // el escaneo llegó al tope → el recuento puede quedarse corto
 
 // Marca/desmarca UNA editorial recordando su nombre y nº de libros (para poder enseñarla luego aunque no esté
 // en la vista actual). `on` = true marca, false desmarca, undefined conmuta.
@@ -13180,24 +13186,30 @@ async function loadEditoriales() {
   if (inp)
     inp.oninput = () => {
       clearTimeout(_editorialesBuscarTimer);
-      _editorialesBuscarTimer = setTimeout(editorialesBuscar, 300);
+      _editorialesBuscarTimer = setTimeout(editorialesBuscarReset, 300); // texto nuevo → página 1
     };
   const so = $('#edOrden');
-  if (so) so.onchange = editorialesBuscar;
+  if (so) so.onchange = editorialesBuscarReset; // cambiar el orden recarga desde la página 1
+  _editorialesPagina = 1;
   editorialesBuscar();
 }
 
-// Lee los controles (texto + orden) y pide la lista al servidor.
+// Lee los controles (texto + orden) y pide la PÁGINA actual al servidor.
 async function editorialesBuscar() {
   const grid = $('#edGrid');
   if (grid) grid.textContent = 'Cargando…';
   const params = new URLSearchParams({
     q: ($('#edBuscar') && $('#edBuscar').value.trim()) || '',
     orden: ($('#edOrden') && $('#edOrden').value) || 'libros',
+    pagina: String(_editorialesPagina),
+    limite: String(_editorialesPorPagina),
   });
   try {
     const r = await api('/editoriales?' + params.toString());
     _editoriales = r.editoriales || [];
+    _editorialesTotal = r.total || _editoriales.length;
+    _editorialesPorPagina = r.porPagina || _editorialesPorPagina;
+    _editorialesCapado = !!r.capado;
   } catch (e) {
     if (grid) grid.textContent = 'Error: ' + e.message;
     return;
@@ -13205,18 +13217,47 @@ async function editorialesBuscar() {
   editorialesPintar();
 }
 
+// Re-busca desde la PÁGINA 1 (al cambiar el texto o el orden). Los botones de paginación llaman a
+// editorialesBuscar directamente conservando _editorialesPagina.
+function editorialesBuscarReset() { _editorialesPagina = 1; editorialesBuscar(); }
+function editorialesIrPagina(p) {
+  const paginas = Math.max(1, Math.ceil(_editorialesTotal / _editorialesPorPagina));
+  _editorialesPagina = Math.min(paginas, Math.max(1, p));
+  editorialesBuscar();
+}
+
+// Barra de recuento + paginación (arriba de la rejilla). «desde–hasta de TOTAL editorial(es)» y ‹ N/M ›.
+function editorialesPager() {
+  const paginas = Math.max(1, Math.ceil(_editorialesTotal / _editorialesPorPagina));
+  const desde = _editorialesTotal ? (_editorialesPagina - 1) * _editorialesPorPagina + 1 : 0;
+  const hasta = Math.min(_editorialesPagina * _editorialesPorPagina, _editorialesTotal);
+  const cuenta = _editorialesTotal
+    ? `${desde}–${hasta} de ${_editorialesTotal}${_editorialesCapado ? '+' : ''} editorial(es)`
+    : 'Sin editoriales';
+  const nav = paginas > 1
+    ? `<span class="row" style="gap:6px;align-items:center;flex-wrap:wrap">${pagerControles(_editorialesPagina, paginas)}</span>`
+    : '';
+  return `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px"><span class="muted" style="font-size:12px">${cuenta}</span>${nav}</div>`;
+}
+function editorialesWirePager() {
+  const paginas = Math.max(1, Math.ceil(_editorialesTotal / _editorialesPorPagina));
+  wirePager($('#edGrid'), _editorialesPagina, paginas, editorialesIrPagina);
+}
+
 function editorialesPintar() {
   const grid = $('#edGrid');
   if (!grid) return;
   if (!_editoriales.length) {
-    grid.innerHTML = '<div class="empty">Sin editoriales.</div>';
+    grid.innerHTML = editorialesPager() + '<div class="empty">Sin editoriales.</div>';
+    editorialesWirePager();
     editorialesBarra();
     return;
   }
   const admin = ROL === 'admin';
-  grid.innerHTML = `<div class="${admin && _editorialesSelModo ? 'selmode' : ''}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">${_editoriales
+  grid.innerHTML = editorialesPager() + `<div class="${admin && _editorialesSelModo ? 'selmode' : ''}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">${_editoriales
     .map(editorialCard)
     .join('')}</div>`;
+  editorialesWirePager();
   // Interacción unificada (igual que Autores/Catálogo): clic/toque = abrir la ficha (o MARCAR en Modo
   // selección); doble clic / pulsación larga = conmutar el modo (conservando lo ya marcado).
   grid.querySelectorAll('[data-edi]').forEach((el) =>
@@ -13370,8 +13411,15 @@ function editorialCombinar() {
   };
 }
 
-// Ficha de editorial (modal): nombre/alternativos (editables si admin) + libros que publica (clic → ficha
-// del libro). Acciones admin: fusionar ESTA en otra, borrar (solo sin libros).
+// Selección ergonómica de libros DENTRO de la ficha de editorial (gemela de la de autor): en «modo
+// selección» tocar una tarjeta la marca (en vez de abrir su ficha), para actuar luego sobre la selección
+// (mostrar en Catálogo · mover a otra editorial · quitar la editorial). Se reinicia al abrir la ficha.
+let _ediFichaSel = new Set();
+let _ediFichaSelModo = false;
+
+// Ficha de editorial (modal): nombre/alternativos/logo/sede/fechas (editables si admin) + libros que
+// publica. Acciones admin: fusionar ESTA en otra · EXPLOTAR (liberar sus libros) · borrar (solo sin libros)
+// · selección de libros con «mostrar en Catálogo / mover a otra editorial / quitar la editorial».
 async function editorialFicha(id) {
   let r;
   try {
@@ -13383,6 +13431,8 @@ async function editorialFicha(id) {
   const ed = r.editorial || {};
   const libros = r.libros || [];
   const admin = ROL === 'admin';
+  _ediFichaSel = new Set(); // selección limpia al (re)abrir la ficha
+  _ediFichaSelModo = false;
   const alt = Array.isArray(ed.nombres_alternativos) ? ed.nombres_alternativos.join('; ') : '';
   // Sede y años de actividad, en una línea legible para el invitado («Barcelona (España) · 1911–»).
   const sede = [ed.ciudad, ed.pais].filter(Boolean).join(' · ');
@@ -13421,6 +13471,7 @@ async function editorialFicha(id) {
       ? '<span class="docbadge" style="background:rgba(200,160,90,.18);color:#d0a860">📄 papel</span>'
       : '<span class="docbadge" style="background:rgba(40,217,168,.16);color:var(--acc)">💾 digital</span>';
   const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
+      <span class="selmark">✓</span>
       ${nfcBadge(l)}
       ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${tipoIcono(l.tipo_recurso, l.comic)}</div>`}
       <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
@@ -13441,6 +13492,7 @@ async function editorialFicha(id) {
            ${libros.length ? `<button class="btn" id="ediLogoLibro" style="${bm}" title="Usar como logo una imagen (portada o interior) de uno de sus libros; luego puedes recortarla">🖼️ De un libro</button>` : ''}
          </div>
          <button class="btn" id="ediFusionar" style="${bm}" title="Fundir ESTA editorial en otra que elijas: sus libros pasan a la otra y esta se borra">🔀 Fusionar esta en…</button>
+         ${libros.length ? `<button class="btn" id="ediExplotar" style="${bm}" title="Liberar TODOS sus libros (quedan sin editorial) y borrar esta editorial. Distinto de fusionar (reasigna) y de borrar (solo vacías)">💥 Explotar</button>` : ''}
          ${!libros.length ? `<button class="btn" id="ediBorrar" style="${bm}" title="Borrar esta editorial (solo si no tiene libros)">🗑️ Borrar</button>` : ''}
          <div class="row" style="gap:4px;justify-content:center">
            <button class="btn pri" id="ediGuardarTop" style="${bm}">💾 Guardar</button>
@@ -13460,7 +13512,19 @@ async function editorialFicha(id) {
     <div style="margin-top:12px">
       <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
         <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})</div>
-        ${libros.length ? `<button class="btn" id="ediVerBusqueda" style="padding:3px 9px;font-size:12px" title="Ver todos sus libros en el Catálogo (con filtros, orden y selección)">🔍 Ver en Catálogo</button>` : ''}
+        ${libros.length ? `<div class="row" style="gap:6px">
+          ${admin ? `<button class="btn" id="ediSelModo" style="padding:3px 9px;font-size:12px">🖱 Modo selección</button>` : ''}
+          <button class="btn" id="ediVerBusqueda" style="padding:3px 9px;font-size:12px" title="Ver todos sus libros en el Catálogo (con filtros, orden y selección)">🔍 Ver en Catálogo</button>
+        </div>` : ''}
+      </div>
+      <div id="ediSelBarra" class="row" style="display:none;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+        <span class="muted" id="ediSelCuenta" style="font-size:12px">0 seleccionados</span>
+        <button class="btn" id="ediSelTodos" style="padding:2px 8px;font-size:12px">Todos</button>
+        <button class="btn" id="ediSelNinguno" style="padding:2px 8px;font-size:12px">Ninguno</button>
+        <button class="btn pri" id="ediSelEnviar" style="padding:2px 8px;font-size:12px">🔍 Mostrar en Catálogo</button>
+        ${admin ? '<button class="btn" id="ediSelMover" style="padding:2px 8px;font-size:12px" title="Enviar los libros seleccionados a OTRA editorial (esta los deja de tener)">➡️ A otra editorial</button>' : ''}
+        ${admin ? '<button class="btn" id="ediSelQuitar" style="padding:2px 8px;font-size:12px" title="Quitar la editorial de los libros seleccionados (quedan sin ninguna)">🚫 Quitar editorial</button>' : ''}
+        ${admin ? '<button class="btn" id="ediSelReclas" style="padding:2px 8px;font-size:12px" title="Reclasificar la editorial de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional), con informe antes de aplicar">🏢 Reclasificar</button>' : ''}
       </div>
       ${librosHtml}
     </div>
@@ -13477,15 +13541,67 @@ async function editorialFicha(id) {
   if ($('#ediCerrarTop')) $('#ediCerrarTop').onclick = cerrarCmp;
   const nombreEd = ed.nombre || 'Editorial';
   const listaLibros = libros.map((l) => l._id);
-  $('#cmpModal')
-    .querySelectorAll('[data-libro]')
-    .forEach(
-      (el) =>
-        (el.onclick = () => {
+
+  // ── Selección de libros (modo selección), gemela de la ficha de autor ─────────────────────────────────
+  const pintarSel = (el, on) => {
+    el.classList.toggle('sel', on);
+    el.style.outline = on ? '2px solid var(--acc)' : '';
+  };
+  const actualizarCuenta = () => {
+    if ($('#ediSelCuenta')) $('#ediSelCuenta').textContent = _ediFichaSel.size + ' seleccionados';
+  };
+  const tarjetas = [...$('#cmpModal').querySelectorAll('[data-libro]')];
+  const alternarEdiFicha = () => {
+    _ediFichaSelModo = !_ediFichaSelModo;
+    if ($('#ediSelModo')) $('#ediSelModo').classList.toggle('pri', _ediFichaSelModo);
+    if ($('#ediSelBarra')) $('#ediSelBarra').style.display = _ediFichaSelModo ? 'flex' : 'none';
+    const cont = $('#cmpModal'); if (cont) cont.classList.toggle('selmode', _ediFichaSelModo);
+    if (!_ediFichaSelModo) { _ediFichaSel.clear(); tarjetas.forEach((el) => pintarSel(el, false)); } // al salir, limpiar
+    actualizarCuenta();
+  };
+  // Interacción unificada: clic/toque = abrir ficha (o marcar en Modo selección); doble clic / pulsación
+  // larga = conmutar el Modo selección.
+  tarjetas.forEach((el) =>
+    attachGesto(
+      el,
+      () => {
+        if (_ediFichaSelModo) {
+          const lid = el.dataset.libro;
+          _ediFichaSel.has(lid) ? _ediFichaSel.delete(lid) : _ediFichaSel.add(lid);
+          pintarSel(el, _ediFichaSel.has(lid));
+          actualizarCuenta();
+        } else {
           cerrarCmp();
           verDoc(el.dataset.libro, { volver: 'editoriales', etiqueta: 'Editoriales', lista: listaLibros });
-        }),
-    );
+        }
+      },
+      () => {
+        const entrando = !_ediFichaSelModo;
+        alternarEdiFicha();
+        if (entrando && _ediFichaSelModo) { _ediFichaSel.add(el.dataset.libro); pintarSel(el, true); actualizarCuenta(); } // marca la del gesto
+      },
+    ),
+  );
+  if ($('#ediSelModo')) $('#ediSelModo').onclick = alternarEdiFicha;
+  if ($('#ediSelTodos'))
+    $('#ediSelTodos').onclick = () => {
+      tarjetas.forEach((el) => { _ediFichaSel.add(el.dataset.libro); pintarSel(el, true); });
+      actualizarCuenta();
+    };
+  if ($('#ediSelNinguno'))
+    $('#ediSelNinguno').onclick = () => {
+      _ediFichaSel.clear();
+      tarjetas.forEach((el) => pintarSel(el, false));
+      actualizarCuenta();
+    };
+  if ($('#ediSelEnviar'))
+    $('#ediSelEnviar').onclick = () => {
+      if (!_ediFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
+      const ids = [..._ediFichaSel];
+      cerrarCmp();
+      // Los libros llegan al Catálogo YA SELECCIONADOS, listos para actuar sobre ellos.
+      mostrarEnCatalogo(ids, '🏢 ' + nombreEd + ' (' + ids.length + ')');
+    };
   if ($('#ediVerBusqueda'))
     $('#ediVerBusqueda').onclick = () => {
       cerrarCmp();
@@ -13522,6 +13638,52 @@ async function editorialFicha(id) {
         } catch (e) {
           toast('Error: ' + e.message, 'bad');
         }
+      };
+    // Enviar los libros SELECCIONADOS a otra editorial (esta conserva los no seleccionados; si se queda sin
+    // ninguno, el servidor la borra).
+    if ($('#ediSelMover'))
+      $('#ediSelMover').onclick = () => {
+        if (!_ediFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
+        const ids = [..._ediFichaSel];
+        elegirEditorialOverlay(id, `➡️ Mover ${ids.length} libro(s) a…`, 'Los libros seleccionados pasan a la editorial elegida; esta los deja de tener.', async (bId, bNom) => {
+          const rr = await api('/editoriales/' + encodeURIComponent(id) + '/reasignar', { method: 'POST', body: JSON.stringify({ destino: bId, ids }) });
+          if (!rr.ok) { toast(rr.motivo || 'No se pudo reasignar', 'bad'); return; }
+          cerrarCmp();
+          toast(`✔ ${rr.reasignados || 0} libro(s) → «${bNom}»${rr.editorialBorrada ? ' · editorial vaciada y borrada' : ''}`);
+          editorialesBuscar();
+        });
+      };
+    // Quitar la editorial de los libros SELECCIONADOS (quedan sin ninguna); si se queda sin libros, se borra.
+    if ($('#ediSelQuitar'))
+      $('#ediSelQuitar').onclick = async () => {
+        if (!_ediFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
+        const ids = [..._ediFichaSel];
+        if (!confirm(`¿Quitar la editorial «${nombreEd}» de ${ids.length} libro(s)?\n\nEsos libros quedarán SIN editorial. Si la editorial se queda sin ninguno, se borrará.`)) return;
+        try {
+          const rr = await api('/editoriales/' + encodeURIComponent(id) + '/quitar', { method: 'POST', body: JSON.stringify({ ids }) });
+          if (!rr.ok) { toast(rr.motivo || 'No se pudo quitar', 'bad'); return; }
+          cerrarCmp();
+          toast(`🚫 ${rr.quitados || 0} libro(s) sin editorial${rr.editorialBorrada ? ' · editorial vaciada y borrada' : ''}`);
+          editorialesBuscar();
+        } catch (e) { toast('Error: ' + e.message, 'bad'); }
+      };
+    // Reclasificar la editorial de los libros SELECCIONADOS (cascada fichero→OL→Google→IA opcional).
+    if ($('#ediSelReclas'))
+      $('#ediSelReclas').onclick = () => {
+        if (!_ediFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
+        reclasificarEditorialLote([..._ediFichaSel], `🏢 ${nombreEd} · ${_ediFichaSel.size} sel.`, () => { cerrarCmp(); editorialesBuscar(); });
+      };
+    // EXPLOTAR: liberar TODOS sus libros (quedan sin editorial) y borrar la editorial.
+    if ($('#ediExplotar'))
+      $('#ediExplotar').onclick = async () => {
+        if (!confirm(`¿EXPLOTAR la editorial «${nombreEd}»?\n\nSus ${libros.length} libro(s) quedarán SIN editorial y la editorial se BORRARÁ.\n\nNo se pierde ningún libro (solo se les quita la referencia; podrás reclasificarlos después). Distinto de fusionar (que los reasigna).`)) return;
+        try {
+          const rr = await api('/editoriales/' + encodeURIComponent(id) + '/explotar', { method: 'POST', body: JSON.stringify({}) });
+          if (!rr.ok) { toast(rr.motivo || 'No se pudo explotar', 'bad'); return; }
+          cerrarCmp();
+          toast(`💥 «${rr.nombre || nombreEd}» explotada · ${rr.liberados || 0} libro(s) liberados`);
+          editorialesBuscar();
+        } catch (e) { toast('Error: ' + e.message, 'bad'); }
       };
   }
 }
@@ -13617,6 +13779,94 @@ async function editorialGuardar(id) {
   cerrarCmp();
   toast('✔ Editorial guardada' + ((r && r.avisos || []).length ? ' · ' + r.avisos.join('; ') : ''));
   editorialesBuscar();
+}
+
+// RECLASIFICADOR de la EDITORIAL de una selección de libros. Flujo: opt-in de IA → DRY-RUN en 2º plano con
+// progreso → INFORME por transición → aplicar. Lanzable desde el Catálogo (selección) y desde la ficha de
+// editorial (libros seleccionados). `alAplicar` (opcional) se llama tras aplicar con éxito; si no se pasa,
+// refresca el Catálogo. Respeta [[minimize-ai-ingestion]]: la IA es opt-in y último recurso.
+const FUENTE_ETQ = { fichero: 'Fichero', openlibrary: 'OpenLibrary', google: 'Google', ia: 'IA' };
+async function reclasificarEditorialLote(ids, etiqueta, alAplicar) {
+  if (!ids || !ids.length) { toast('Selecciona al menos un libro', 'warn'); return; }
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto">
+    <h3 style="margin-top:0">🏢 Reclasificar editorial</h3>
+    <div class="muted" style="font-size:12px;margin-bottom:8px">Se buscará la editorial correcta de <b>${ids.length}</b> libro(s) en cascada: <b>Fichero local → OpenLibrary → Google Books</b>. Verás un informe por transición ANTES de aplicar nada.${etiqueta ? ` <span style="opacity:.8">(${esc(etiqueta)})</span>` : ''}</div>
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:8px 0">
+      <input type="checkbox" id="reclasIA" style="margin-top:2px">
+      <span>Usar <b>IA (visión sobre la portada)</b> como ÚLTIMO recurso si las fuentes gratuitas no resuelven. Más lento y con coste; por defecto <b>no</b>.</span>
+    </label>
+    <div id="reclasProg" class="muted" style="font-size:12px;margin-top:8px"></div>
+    <div id="reclasInforme" style="margin-top:8px"></div>
+    <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end" id="reclasBotones">
+      <button class="btn pri" id="reclasStart">Empezar</button>
+      <button class="btn" id="reclasX">Cancelar</button>
+    </div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  let vivo = true;
+  const cerrar = () => { vivo = false; cerrarCmp(); };
+  $('#cmpScrim').onclick = cerrar;
+  $('#reclasX').onclick = cerrar;
+
+  // Pinta el informe agregado + el botón Aplicar (o solo Cerrar si no hay cambios que proponer).
+  const pintarInforme = (inf) => {
+    if (!inf) { $('#reclasInforme').innerHTML = '<div class="muted">Sin informe.</div>'; return; }
+    const trans = (inf.transiciones || []).map((t) =>
+      `<div style="padding:5px 0;border-bottom:1px solid var(--line)"><b>${t.n}</b> libro(s): «${esc(t.de)}» → «${esc(t.a)}» <span class="muted" style="font-size:11px">· ${(t.fuentes || []).map((f) => FUENTE_ETQ[f] || f).join(', ')}</span></div>`).join('');
+    const elim = (inf.eliminados || []).map((e) =>
+      `<div style="padding:5px 0;border-bottom:1px solid var(--line)"><b>${e.n}</b> libro(s) quitados de «${esc(e.de)}» (quedan sin editorial)</div>`).join('');
+    const hayCambios = (inf.cambios || 0) + (inf.eliminadosTotal || 0) > 0;
+    $('#reclasInforme').innerHTML = `<div style="font-size:13px">
+        ${trans}${elim}
+        ${!hayCambios ? '<div class="muted">No hay cambios que proponer (todo está bien o no se pudo resolver).</div>' : ''}
+        <div class="muted" style="font-size:12px;margin-top:8px">Sin cambio: ${inf.sinCambio || 0} · No resueltos: ${(inf.noResueltos || []).length} · Total: ${inf.total || 0}${inf.usarIA ? ' · IA activada' : ''}</div>
+      </div>`;
+    $('#reclasBotones').innerHTML = `${hayCambios ? '<button class="btn pri" id="reclasAplicar">✅ Aplicar cambios</button>' : ''}<button class="btn" id="reclasCerrar">Cerrar</button>`;
+    $('#reclasCerrar').onclick = cerrar;
+    if ($('#reclasAplicar'))
+      $('#reclasAplicar').onclick = async () => {
+        $('#reclasAplicar').disabled = true;
+        $('#reclasProg').textContent = 'Aplicando…';
+        try {
+          const r = await api('/editoriales/reclasificar/aplicar', { method: 'POST', body: JSON.stringify({}) });
+          if (!r.ok) { $('#reclasProg').textContent = r.motivo || 'No se pudo aplicar'; $('#reclasAplicar').disabled = false; return; }
+          vivo = false;
+          cerrarCmp();
+          toast(`🏢 ${r.cambios || 0} reclasificado(s)${r.eliminadosTotal ? ` · ${r.eliminadosTotal} sin editorial` : ''}${r.creadas ? ` · ${r.creadas} editorial(es) nueva(s)` : ''}`);
+          if (typeof alAplicar === 'function') alAplicar();
+          else buscarCatalogo(1);
+        } catch (e) { $('#reclasProg').textContent = 'Error: ' + e.message; $('#reclasAplicar').disabled = false; }
+      };
+  };
+
+  // Sondea el estado del dry-run (2º plano) hasta que esté 'listo' (o error).
+  const poll = async () => {
+    if (!vivo) return;
+    let est;
+    try { est = await api('/editoriales/reclasificar/estado'); } catch { setTimeout(poll, 1200); return; }
+    if (est.fase === 'buscando') {
+      $('#reclasProg').textContent = `Buscando editoriales… ${est.hechos || 0}/${est.total || ids.length}`;
+      setTimeout(poll, 1000);
+    } else if (est.fase === 'error') {
+      $('#reclasProg').textContent = 'Error: ' + (est.error || 'desconocido');
+    } else if (est.fase === 'listo') {
+      $('#reclasProg').textContent = '';
+      pintarInforme(est.informe);
+    } else {
+      setTimeout(poll, 1000); // 'inactivo'/'aplicado': esperar a que arranque el nuestro
+    }
+  };
+
+  $('#reclasStart').onclick = async () => {
+    const usarIA = !!($('#reclasIA') && $('#reclasIA').checked);
+    $('#reclasStart').disabled = true;
+    $('#reclasProg').textContent = 'Lanzando…';
+    try {
+      const r = await api('/editoriales/reclasificar', { method: 'POST', body: JSON.stringify({ ids, usarIA }) });
+      if (!(r.ok && r.lanzado)) { $('#reclasProg').textContent = r.motivo || 'No se pudo lanzar'; $('#reclasStart').disabled = false; return; }
+    } catch (e) { $('#reclasProg').textContent = 'Error: ' + e.message; $('#reclasStart').disabled = false; return; }
+    poll();
+  };
 }
 
 // Overlay reutilizable para elegir OTRA editorial (fusión): busca por nombre y llama onPick(id, nombre).
