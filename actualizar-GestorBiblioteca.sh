@@ -15,8 +15,9 @@
 # Repo privado: exporta un token antes de lanzarlo ->  sudo GITHUB_TOKEN=ghp_xxx bash ...
 #
 # Qué hace, en orden:
-#   1. Resuelve el SHA del commit (API) y descarga archive/<SHA>.tar.gz (inmutable, sin caché de rama;
-#      wget+tar, sin git). Fallback al tarball de rama si la API no responde. Escribe un fichero VERSION.
+#   1. Resuelve el SHA del commit (feed Atom de github.com → git ls-remote → API) y descarga
+#      archive/<SHA>.tar.gz (inmutable, esquiva la caché del tarball de RAMA). Si no lo resuelve, cae al
+#      tarball de rama y despliega igual (solo es una optimización). Escribe un fichero VERSION.
 #   2. down -v: para el contenedor (libera los montajes Inbox/CDU/... ) y elimina el
 #      volumen anónimo de node_modules, que "ensombrecía" módulos viejos (sharp/undici@7).
 #   3. Sincroniza el código PRESERVANDO .env, node_modules y los datos del host.
@@ -76,12 +77,24 @@ mkdir -p "$STAGE"
 echo "==> Resolviendo el commit de ${BRANCH}…"
 SHA=""
 
-# MÉTODO 1 (preferido): git ls-remote. Usa el PROTOCOLO git, NO la API REST → sin límite de tasa (la API
-# anónima corta a 60 peticiones/hora por IP: reintentar el deploy la agota y wget devuelve un 403 = «código
-# 8»), sin User-Agent y sin parsear JSON. Devuelve «<sha>\trefs/heads/<rama>»; se coge la 1.ª columna. Repo
-# PÚBLICO → anónimo; si hay token (repo privado), se incrusta en la URL. GIT_TERMINAL_PROMPT=0 evita que se
-# quede colgado pidiendo credenciales si algo va mal.
-if command -v git >/dev/null 2>&1; then
+# MÉTODO 1 (el que funciona en el NAS): el FEED ATOM de commits de GitHub. Se sirve desde github.com (el MISMO
+# host que raw.githubusercontent.com, que el NAS alcanza sin problema), NO desde api.github.com → SIN el límite
+# de tasa de la API (60/h por IP, que al reintentar el deploy se agota y da un 403 = wget «código 8»). No
+# necesita git (el NAS no lo tiene) ni parsear JSON. El feed lista los commits recientes, el PRIMER
+# «Grit::Commit/<sha>» del <id> es el último commit. (Solo repos PÚBLICOS; para privados van los métodos 2/3.)
+ATOM_URL="https://github.com/${REPO}/commits/${BRANCH}.atom"
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    if wget -q -O "$STAGE/commits.atom" "$ATOM_URL" && [ -s "$STAGE/commits.atom" ]; then
+        SHA="$(grep 'Grit::Commit/' "$STAGE/commits.atom" | head -n1 | sed -e 's|.*Grit::Commit/||' -e 's|[^0-9a-f].*||' | tr -cd '0-9a-f')"
+        case "$SHA" in *[!0-9a-f]*) SHA="" ;; esac
+        [ "${#SHA}" -eq 40 ] || SHA=""
+        [ -n "$SHA" ] && echo "==> Commit resuelto (feed Atom): ${SHA}"
+    fi
+fi
+
+# MÉTODO 2 (si hay git): git ls-remote. Protocolo git, sin límite de tasa, cubre repos PRIVADOS (token en la
+# URL). El NAS no tiene git hoy, así que normalmente se salta; queda por robustez para otros entornos.
+if [ -z "$SHA" ] && command -v git >/dev/null 2>&1; then
     if [ -n "${GITHUB_TOKEN:-}" ]; then LS_URL="https://${GITHUB_TOKEN}@github.com/${REPO}.git"
     else LS_URL="https://github.com/${REPO}.git"; fi
     SHA="$(GIT_TERMINAL_PROMPT=0 git ls-remote "$LS_URL" "refs/heads/${BRANCH}" 2>/dev/null | head -n1 | cut -f1 | tr -cd '0-9a-f')"
@@ -90,11 +103,10 @@ if command -v git >/dev/null 2>&1; then
     [ -n "$SHA" ] && echo "==> Commit resuelto (git ls-remote): ${SHA}"
 fi
 
-# MÉTODO 2 (respaldo, solo si no hay git o ls-remote falló): la API REST. La respuesta va a un fichero para
-# poder DIAGNOSTICAR. Se añade User-Agent (por si un GitHub estricto lo exige) y Authorization solo con token.
-# Extracción del SHA A PRUEBA de shells viejos: sin `sed -E`/`grep -o`/intervalos `\{40\}`. La API devuelve el
-# JSON MINIFICADO en UNA línea con VARIOS "sha" (commit, árbol, padres, BLOB de cada fichero); un `sed .*"sha"`
-# es greedy → cogería el ÚLTIMO. Por eso se trocea por comas/llaves (`tr ',{' '\n'`) para aislar el "sha" del
+# MÉTODO 3 (último recurso): la API REST. Es la que tiene el límite de tasa; solo se usa si lo anterior falló
+# (p. ej. repo privado sin git). La respuesta va a un fichero para DIAGNOSTICAR. La API devuelve el JSON
+# MINIFICADO en UNA línea con VARIOS "sha" (commit, árbol, padres, BLOB de cada fichero); un `sed .*"sha"` es
+# greedy → cogería el ÚLTIMO. Por eso se trocea por comas/llaves (`tr ',{' '\n'`) para aislar el "sha" del
 # commit (1.er campo) y se VALIDA que sean 40 hex.
 API_URL="https://api.github.com/repos/${REPO}/commits/${BRANCH}"
 RESPUESTA="$STAGE/commit.json"
@@ -118,18 +130,11 @@ if [ -n "$SHA" ]; then
 else
     echo "==> AVISO: no se pudo resolver el SHA; uso el tarball de RAMA, que GitHub CACHEA."
     echo "    ⚠ El despliegue puede traer código VIEJO (minutos de retraso tras un push)."
-    if ! command -v git >/dev/null 2>&1; then
-        echo "    Nota: no hay 'git' en el NAS; se intentó solo la API. Instala git para la vía robusta (sin límite de tasa)."
-    fi
+    echo "    (El feed Atom debería funcionar en un repo público sin git; revisa la conexión a github.com.)"
     if [ "$WGET_RC" -ne 0 ]; then
-        echo "    Motivo (API): wget código $WGET_RC. El 8 = respuesta de ERROR HTTP (casi siempre 403 por LÍMITE"
-        echo "                  de tasa de la API anónima: 60/hora por IP). git ls-remote no tiene ese límite."
-    elif [ ! -s "$RESPUESTA" ]; then
-        echo "    Motivo (API): respondió vacío."
-    else
-        echo "    Motivo (API): respondió sin un SHA. Primeros 300 bytes:"
-        head -c 300 "$RESPUESTA"
-        echo
+        echo "    Motivo (API): wget código $WGET_RC (el 8 = error HTTP, típicamente 403 por límite de tasa)."
+    elif [ -s "$RESPUESTA" ]; then
+        echo "    Motivo (API): respondió sin un SHA. Primeros 300 bytes:"; head -c 300 "$RESPUESTA"; echo
     fi
 fi
 
