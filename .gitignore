@@ -32,3 +32,7 @@ LoginPageMockup.jpg
 
 # Manifiestos de scripts de recuperación (llevan ids de documentos; no van a git)
 manifiesto-*.json
+
+# Sello de versión: lo GENERA el script de despliegue en el NAS (sha + rama + nº de serie). Derivado, no
+# va a git; el rsync ya lo excluye para no pisar el del NAS.
+/VERSION

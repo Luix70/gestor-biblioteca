@@ -273,6 +273,24 @@ $('#refresh').onclick = () => {
 };
 setInterval(() => ($('#clock').textContent = new Date().toLocaleTimeString('es-ES')), 1000);
 
+// Versión desplegada en el pie del menú («v1.<serie>»), para saber de un vistazo qué build corre tras un
+// despliegue sin adivinar. Es pública (sin auth) → se pide al cargar, incluso antes del login. El tooltip
+// muestra el commit/rama por si hace falta el detalle. Degrada en silencio si el endpoint no responde.
+(async () => {
+  try {
+    const r = await fetch('/api/version');
+    if (!r.ok) return;
+    const v = await r.json();
+    const el = $('#appVer');
+    if (el && v && v.etiqueta) {
+      el.textContent = v.etiqueta;
+      el.title = `Versión desplegada: ${v.etiqueta}${v.commit ? ` · commit ${v.commit}` : ''}${v.rama ? ` (${v.rama})` : ''}`;
+    }
+  } catch (_) {
+    /* sin red / endpoint viejo: se queda el «v1» por defecto */
+  }
+})();
+
 // ── Historial de navegación (clave en móvil): el botón ATRÁS del navegador/sistema navega DENTRO de la
 //    app (entre pantallas visitadas) y, al llegar a la raíz, pide confirmación (doble-atrás) en vez de
 //    salir y perderlo todo. Cada go()/verDoc/verObra/verColeccion apila una entrada (history.pushState);

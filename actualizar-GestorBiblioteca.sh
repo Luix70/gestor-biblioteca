@@ -78,21 +78,29 @@ RESPUESTA="$STAGE/commit.json"
 echo "==> Resolviendo el commit de ${BRANCH}…"
 
 # La respuesta se guarda en un fichero (en vez de tubería) para poder DIAGNOSTICAR el fallo: antes el
-# error se tragaba con `|| true` y el aviso no decía por qué. La API de GitHub exige un User-Agent.
+# error se tragaba con `|| true` y el aviso no decía por qué. NO se añade `--header="User-Agent: …"`: la
+# BusyBox wget de algunos DSM no soporta `--header` y aborta; wget manda ya su propio User-Agent, que la
+# API de GitHub acepta. El header de Authorization solo se pone si hay token (repo privado).
 WGET_RC=0
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-    wget -q --header="Authorization: token ${GITHUB_TOKEN}" --header="User-Agent: actualizar-GestorBiblioteca" \
-        -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
+    wget -q --header="Authorization: token ${GITHUB_TOKEN}" -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
 else
-    wget -q --header="User-Agent: actualizar-GestorBiblioteca" -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
+    wget -q -O "$RESPUESTA" "$API_URL" || WGET_RC=$?
 fi
 
-# Se extrae el SHA SOLO con grep. La BusyBox de DSM trae un `sed` antiguo que NO entiende `-E` (es `-r`),
-# así que el `sed -E` de antes fallaba SIEMPRE: bajo `pipefail` tumbaba la tubería entera, el `|| true`
-# dejaba SHA vacío y el aviso salía en CADA despliegue, aunque la API hubiera respondido perfectamente.
+# Extracción del SHA A PRUEBA de la BusyBox de DSM: nada de `sed -E` (allí la opción es `-r`), ni `grep -o`,
+# ni intervalos `\{40\}` (no siempre soportados). CLAVE: la API devuelve el JSON MINIFICADO en UNA sola
+# línea, y ahí dentro hay VARIOS "sha" (el del commit primero, luego el del árbol, los padres y el BLOB de
+# cada fichero). Un `sed 's/.*"sha".../'` es greedy y se quedaría con el ÚLTIMO (el blob de un fichero) →
+# SHA equivocado. Por eso se trocea antes por comas y llaves (`tr ',{' '\n'`): así el "sha" del commit, que
+# es el PRIMER campo del objeto, queda solo en su fragmento y `head -n1` lo coge sin ambigüedad. `tr` final
+# deja solo hex; después se VALIDA que sean 40 (si no, SHA vacío → no se construye una URL de tarball
+# inválida que abortaría el script en la descarga por `set -e`).
 SHA=""
 if [ "$WGET_RC" -eq 0 ] && [ -s "$RESPUESTA" ]; then
-    SHA="$(grep -o '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]\{40\}"' "$RESPUESTA" | head -n1 | grep -o '[0-9a-f]\{40\}' || true)"
+    SHA="$(tr ',{' '\n' < "$RESPUESTA" | grep '"sha"' | head -n1 | sed -e 's/.*"sha"[[:space:]]*:[[:space:]]*"//' -e 's/".*//' | tr -cd '0-9a-f')"
+    case "$SHA" in *[!0-9a-f]*) SHA="" ;; esac
+    [ "${#SHA}" -eq 40 ] || SHA=""
 fi
 
 if [ -n "$SHA" ]; then
@@ -110,6 +118,28 @@ else
         head -c 300 "$RESPUESTA"
         echo
     fi
+fi
+
+# --- 1b. Nº de SERIE incremental (v1.<n>) --------------------------------------------------
+# Número de build legible que SUBE con cada commit, para VER en la app qué versión corre sin adivinar. Es el
+# nº de commits de la rama, que se saca de la cabecera `Link` del endpoint de commits (con per_page=1, la
+# página "last" == total de commits). BEST-EFFORT: si el wget del NAS no sabe volcar cabeceras (`-S`) o la
+# API no responde, SERIE queda vacío y no pasa nada — la app mostrará el SHA. Ojo: NO se usa `-q` junto a
+# `-S` (el modo silencioso también calla las cabeceras).
+SERIE=""
+COUNT_URL="https://api.github.com/repos/${REPO}/commits?sha=${BRANCH}&per_page=1"
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    HDRS="$(wget -S -O /dev/null --header="Authorization: token ${GITHUB_TOKEN}" "$COUNT_URL" 2>&1 || true)"
+else
+    HDRS="$(wget -S -O /dev/null "$COUNT_URL" 2>&1 || true)"
+fi
+# El fragmento con rel="last" trae «…&page=<N>>; rel="last"»: se trocea por comas, se aísla ese fragmento y
+# se extrae el número de página (= nº de commits). `tr` final deja solo dígitos.
+SERIE="$(printf '%s' "$HDRS" | tr ',' '\n' | grep 'rel="last"' | sed -e 's/.*[?&]page=//' -e 's/>.*//' | tr -cd '0-9')"
+if [ -n "$SERIE" ]; then
+    echo "==> Nº de serie (commits en ${BRANCH}): ${SERIE}  → v1.${SERIE}"
+else
+    echo "==> AVISO: no se pudo leer el nº de serie (la app mostrará el SHA). No es grave."
 fi
 
 echo "==> Descargando ${TARBALL_URL}"
@@ -156,9 +186,10 @@ rsync -a --delete \
     --exclude='/temp' \
     "$SRC_DIR"/ "$APP_DIR"/
 
-# Sello de versión: la app lo lee al arrancar y muestra «📦 Versión en ejecución: commit <sha>». Se escribe
-# TRAS el rsync (que lo excluye) y ANTES del build, para que quede dentro de la imagen (COPY . .).
-echo "${SHA:-desconocido} ${BRANCH}" > "$APP_DIR/VERSION"
+# Sello de versión: la app lo lee al arrancar y muestra «v1.<serie> · commit <sha>». Formato de VERSION:
+# «<sha> <rama> <serie>» (la serie puede faltar). Se escribe TRAS el rsync (que lo excluye) y ANTES del
+# build, para que quede dentro de la imagen (COPY . .).
+echo "${SHA:-desconocido} ${BRANCH} ${SERIE:-}" > "$APP_DIR/VERSION"
 
 # --- 4. Reconstruir e iniciar -------------------------------------------
 echo "==> Reconstruyendo e iniciando (esto reinstala dependencias; en el Atom tarda un poco)"
