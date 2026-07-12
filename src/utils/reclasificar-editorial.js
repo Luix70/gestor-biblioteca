@@ -31,13 +31,12 @@ import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { analizarImagenesRecurso } from '../agente.js';
 import { validarISBN, variantesISBN } from './identificadores.js';
+// «Editoriales» que en realidad son grupos de maquetación/difusión o re-editores de dominio público (no
+// casas editoriales): si un libro tiene una de estas y no hallamos una real, se propone quitarla. Lista
+// compartida — ver `utils/editoriales-falsas.js`.
+import { esEditorialFalsa } from './editoriales-falsas.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
-
-// «Editoriales» que en realidad son grupos de difusión/maquetación (no casas editoriales): si un libro tiene
-// una de estas y no hallamos una real, se propone quitarla. Misma lista que motor-enriquecimiento.
-const EDITORIALES_FALSAS = [/epub\s*libre/i, /lectulandia/i, /oz\s*epub/i, /todo\s*epub/i];
-const esEditorialFalsa = (n) => !!n && EDITORIALES_FALSAS.some((re) => re.test(String(n)));
 
 // Normaliza un nombre de editorial para COMPARAR (no para mostrar): minúsculas, sin acentos ni puntuación,
 // espacios colapsados, y se quitan sufijos societarios comunes (S.A., Ltd, Inc, GmbH, & Sons…) que hacen que

@@ -1595,3 +1595,25 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
     La validacion de imagen (utils/imagen-base64.js, compartida con la foto de autor) exige
     MAGIC BYTES reales (jpg/png/webp): antes un base64 de texto cualquiera se escribia como
     un .jpg corrupto.
+
+  -- INGESTA: colaboradores, editorial real y titulo original --------------------
+    Tres mejoras en la extraccion (la mayoria en la PRIMERA llamada a la IA, sin coste extra):
+      * COLABORADORES separados: una mencion con VARIOS ilustradores/traductores unidos por
+        « & »/« ; »/« / » (p. ej. "Rochegrosse & Rackham & Clarke (Ilustrador)") se reparte
+        ahora en UNA persona por cada nombre (antes se guardaba como un unico "autor" fusionado).
+        El split (utils/autor-normalizar.js · separarAutores, que respeta "Ortega y Gasset")
+        se aplica en motor-catalogo y en el Conformador (enriquecer-a-fondo). Para lo YA
+        catalogado hay backfill: scripts/separar-autores-fusionados.js (dry-run por defecto).
+      * EDITORIAL REAL desde el principio: los maquetadores/re-editores de ebooks (ePubLibre,
+        Lectulandia, DigiCat, Good Press, epubGratis, e-artnow, Musaicum) NO son editoriales
+        (lista unica en utils/editoriales-falsas.js). La IA recibe instruccion de deducir la
+        casa REAL del colofon/creditos o de la COLECCION ("Tus Libros"=Anaya, "Austral"=Espasa,
+        "El Barco de Vapor"=SM…) e ignorar el maquetador; si el manifiesto EPUB trae uno de
+        esos, se le dice explicitamente que NO lo tome como verdad. Al ser un nombre real, el
+        motor de enriquecimiento ya no deja que una API lo pise con otro re-editor.
+      * TITULO ORIGINAL (obras traducidas): nuevo campo `titulo_original` (y `titulos_originales`
+        para antologias de relatos, cuyos originales figuran en la pagina de creditos). Lo pide
+        la plantilla de vision y lo rellena tambien el Conformador. Campos ADITIVOS (biblioteca
+        es additionalProperties-abierto: sin setup-mongo). Backfill para lo ya catalogado:
+        scripts/recuperar-titulo-original.js (lee la pagina de copyright del EPUB/PDF, SIN IA;
+        dry-run por defecto).

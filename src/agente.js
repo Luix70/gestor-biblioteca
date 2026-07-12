@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { conVision, extraerJSON } from './utils/vision.js';
 import { decodificarCodigoBarras } from './utils/codigo-barras.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
+import { esEditorialFalsa } from './utils/editoriales-falsas.js';
 
 dotenv.config();
 
@@ -30,7 +31,9 @@ REGLAS DE EXTRACCIÓN Y VALIDACIÓN:
    - 'isbn_obra': el ISBN de la OBRA COMPLETA / del SET, que en la página de créditos suele figurar JUNTO al del volumen ("ISBN obra completa:", "ISBN O.C.:", "ISBN de la obra:"). Es DISTINTO del 'isbn' de este volumen. Solo dígitos, sin guiones; '' si no aparece.
    OJO: en la página de créditos de estos libros HAY DOS ISBN — el de ESTE volumen (→ 'isbn') y el de la OBRA COMPLETA (→ 'isbn_obra'). Distínguelos con cuidado; no los mezcles.
 13. COLECCIÓN/SERIE editorial: si el ejemplar pertenece a una colección/serie con nombre y número (p. ej. "Círculo Universidad, 8", "Biblioteca Básica, 12"), rellena 'coleccion_nombre' (el nombre de la colección) y 'coleccion_numero' (su número DENTRO de la colección). OJO: este número es DISTINTO de 'volumen_numero' (el tomo dentro de la OBRA). Una obra en 2 tomos puede ocupar UN SOLO número de colección (p. ej. ambos tomos son el nº 8 de la colección "Círculo Universidad", pero volumen 1 y 2 de la obra "Historia de las Ideas Políticas"). No confundas colección (serie editorial amplia, con muchos títulos distintos) con obra (un único título en varios tomos).
-14. COLABORADORES: además de los AUTORES, identifica TODAS las personas que colaboran en la obra con su ROL, leyendo la portada, la mención de responsabilidad y los créditos: TRADUCTOR ("traducción de", "translated by"), ILUSTRADOR ("ilustraciones de", "dibujos de", "grabados de"), EDITOR/coordinador ("edición de", "a cargo de", "edited by"), PROLOGUISTA ("prólogo de", "introducción de", "estudio preliminar"), ANOTADOR ("notas de"), COMPILADOR ("selección de", "antología de"). Devuélvelos en 'contribuciones' como {nombre, rol}. NO metas a los autores aquí (van en 'autores'). Cuantos más colaboradores reales encuentres, mejor.
+14. COLABORADORES: además de los AUTORES, identifica TODAS las personas que colaboran en la obra con su ROL, leyendo la portada, la mención de responsabilidad y los créditos: TRADUCTOR ("traducción de", "translated by"), ILUSTRADOR ("ilustraciones de", "dibujos de", "grabados de"), EDITOR/coordinador ("edición de", "a cargo de", "edited by"), PROLOGUISTA ("prólogo de", "introducción de", "estudio preliminar"), ANOTADOR ("notas de"), COMPILADOR ("selección de", "antología de"). Devuélvelos en 'contribuciones' como {nombre, rol}. NO metas a los autores aquí (van en 'autores'). Cuantos más colaboradores reales encuentres, mejor. IMPORTANTE: cada 'nombre' es UNA SOLA persona; si en la mención hay VARIOS (unidos por "&", ";", "y", "/"), devuelve UN objeto {nombre, rol} POR CADA persona (NO los juntes en un solo nombre).
+15. 'editorial': la EDITORIAL REAL (la casa que publicó ESTA edición). Búscala en la página de créditos/copyright, el colofón o el sello de la colección. Si el ejemplar pertenece a una COLECCIÓN editorial reconocible, dedúcela de ella (p. ej. la colección "Tus Libros" es de ANAYA; "Austral", de Espasa; "El Barco de Vapor", de SM; "Alianza Bolsillo", de Alianza). OJO: los GRUPOS DE MAQUETACIÓN/DIFUSIÓN de ebooks —ePubLibre, Lectulandia, DigiCat, Good Press, epubGratis, e-artnow, Musaicum— NO son editoriales: si el manifiesto o los créditos ponen uno de esos, IGNÓRALO y busca la editorial real (colofón/colección); si no la lees con seguridad, deja 'editorial' en "".
+16. TÍTULO ORIGINAL (obras traducidas): si en la página de créditos/copyright figura el título original ("Título original:", "Original title:", "Titre original:"), transcríbelo en 'titulo_original'. Si es una ANTOLOGÍA de relatos traducidos, cada relato suele llevar SU propio título original en la página de créditos: recógelos TODOS en 'titulos_originales' (array). Deja "" / [] si la obra no es traducción o no consta.
 ESTRUCTURA JSON REQUERIDA:
 {
   "tipo_recurso": "libro|revista",
@@ -39,6 +42,9 @@ ESTRUCTURA JSON REQUERIDA:
   "contribuciones": [{ "nombre": "string", "rol": "traductor|ilustrador|editor|prologuista|anotador|compilador" }],
   "cdu": "string",
   "idioma": "string",
+  "idioma_original": "string",
+  "titulo_original": "string",
+  "titulos_originales": ["string"],
   "isbn": "string",
   "issn": "string",
   "isbns": [{ "numero": "string", "rol": "volumen|obra|tapa_dura|tapa_blanda|ebook|desconocido" }],
@@ -85,6 +91,12 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
         let instruccionesContextuales = INSTRUCCIONES_SISTEMA;
         if (datosEpub) {
             instruccionesContextuales += `\n\n⚠️ ENTORNO DIGITAL - NOTA PRIORITARIA:\nEl recurso actual es un libro digital (EPUB). El analizador nativo ha extraído el siguiente manifiesto:\n${JSON.stringify(datosEpub, null, 2)}\nUsa estos datos como fuente de verdad absoluta. Tu tarea principal aquí es verificar si el ISBN es correcto, estructurar la sinopsis final, e inferir con el máximo rigor la Clasificación Decimal Universal ('cdu') y las 'palabras_clave'.`;
+            // …salvo la EDITORIAL: el manifiesto de un ebook de la comunidad suele traer el maquetador
+            // (ePubLibre/Lectulandia…) en lugar de la casa editorial. Si es uno de esos, NO lo tomes como
+            // verdad: busca la editorial REAL en los créditos/colofón o dedúcela de la colección (regla 15).
+            if (esEditorialFalsa(datosEpub.editorial)) {
+                instruccionesContextuales += `\n\n⚠️ EDITORIAL: el manifiesto declara "${datosEpub.editorial}", que es un grupo de MAQUETACIÓN de ebooks, NO la editorial. IGNÓRALA y determina la editorial REAL (colofón/créditos o, si el ejemplar pertenece a una colección reconocible, la casa a la que pertenece esa colección). Si no la lees con seguridad, deja 'editorial' en "".`;
+            }
         }
 
         console.log(`\n──> [IA] Enviando ${imageParts.length}/${todas.length} imagen(es) CLAVE a la visión (rotación multi-proveedor)...`);
@@ -175,6 +187,21 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
             }
             if (cn.length) recursoEstructurado.contribuciones_nombres = [...(recursoEstructurado.contribuciones_nombres || []), ...cn];
             delete recursoEstructurado.contribuciones;
+        }
+
+        // TÍTULO ORIGINAL (obras traducidas): normaliza los dos campos (uno o varios en antologías). Se dejan
+        // solo si tienen contenido — motor-catalogo elimina los vacíos, así que no ensucian el esquema.
+        {
+            const to = String(recursoEstructurado.titulo_original || '').trim();
+            const tos = [...new Set(
+                (Array.isArray(recursoEstructurado.titulos_originales) ? recursoEstructurado.titulos_originales : [])
+                    .map((t) => String(t || '').trim())
+                    .filter(Boolean),
+            )];
+            if (to) recursoEstructurado.titulo_original = to; else delete recursoEstructurado.titulo_original;
+            if (tos.length) recursoEstructurado.titulos_originales = tos; else delete recursoEstructurado.titulos_originales;
+            // Antología con un único original detectado → sirve también como titulo_original (comodidad de ficha).
+            if (!recursoEstructurado.titulo_original && tos.length === 1) recursoEstructurado.titulo_original = tos[0];
         }
 
         recursoEstructurado.fecha_ingreso = new Date();

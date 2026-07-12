@@ -146,6 +146,12 @@ export async function analizarAFondo(db, doc, { maxImagenes = 6 } = {}) {
         if (vis.palabras_clave.length && !(doc.palabras_clave || []).length) proponer('palabras_clave', '—', vis.palabras_clave.join(', '), vis.palabras_clave, 'portadilla·IA');
         if (vis['año_edicion'] && !doc['año_edicion']) proponer('año_edicion', '—', vis['año_edicion'], vis['año_edicion'], 'portadilla·IA');
     }
+    // TÍTULO ORIGINAL (traducciones/antologías) — de la portadilla·IA; hueco, nunca pisa lo que ya hubiera.
+    if (vis && !doc.titulo_original && (vis.titulo_original || (vis.titulos_originales || []).length)) {
+        const tos = vis.titulos_originales || [];
+        proponer('titulo_original', '—', vis.titulo_original || tos.join(' · '),
+            { titulo_original: vis.titulo_original || (tos.length === 1 ? tos[0] : null), titulos_originales: tos }, 'portadilla·IA');
+    }
 
     // OBRA multivolumen (pivote isbn_obra) — APLICABLE: agrupa el tomo con su obra (enciclopedias/diccionarios).
     const obraTit = vis && vis.obra_titulo;
@@ -191,12 +197,16 @@ export async function aplicarAFondo(db, doc, propuesta = {}, campos = null, { re
         const out = []; const vistos = new Set();
         for (const c of propuesta.contribuciones) {
             if (!ROLES_VALIDOS.includes(c.rol) || c.rol === 'autor') continue;
-            const r = await resolverPersona(db, c.nombre);
-            if (!r) continue;
-            const clave = `${String(r._id)}|${c.rol}`;
-            if (vistos.has(clave)) continue;
-            vistos.add(clave);
-            out.push({ persona: r._id, rol: c.rol });
+            // Una misma contribución puede traer VARIAS personas unidas por « & »/« ; »/« / »: se separan en
+            // personas distintas con el MISMO rol (igual que los autores arriba) — nunca un nombre fusionado.
+            for (const nombre of separarAutores(c.nombre)) {
+                const r = await resolverPersona(db, nombre);
+                if (!r) continue;
+                const clave = `${String(r._id)}|${c.rol}`;
+                if (vistos.has(clave)) continue;
+                vistos.add(clave);
+                out.push({ persona: r._id, rol: c.rol });
+            }
         }
         if (out.length) { set.contribuciones = out; aplicados.push('contribuciones'); }
     }
@@ -211,6 +221,12 @@ export async function aplicarAFondo(db, doc, propuesta = {}, campos = null, { re
         }
     }
     if (elegidos.includes('idioma_original') && propuesta.idioma_original) { set.idioma_original = propuesta.idioma_original; aplicados.push('idioma_original'); }
+    if (elegidos.includes('titulo_original') && propuesta.titulo_original && !doc.titulo_original) {
+        const p = propuesta.titulo_original; // { titulo_original, titulos_originales }
+        if (p.titulo_original) set.titulo_original = String(p.titulo_original).trim();
+        if (Array.isArray(p.titulos_originales) && p.titulos_originales.length) set.titulos_originales = p.titulos_originales;
+        if (set.titulo_original || set.titulos_originales) aplicados.push('titulo_original');
+    }
     if (elegidos.includes('palabras_clave') && Array.isArray(propuesta.palabras_clave) && propuesta.palabras_clave.length) { set.palabras_clave = propuesta.palabras_clave; aplicados.push('palabras_clave'); }
     if (elegidos.includes('año_edicion') && propuesta['año_edicion']) { set['año_edicion'] = propuesta['año_edicion']; aplicados.push('año_edicion'); }
     // EDITORIAL (nombre → ObjectId, check-then-create). Solo si el doc no tenía (anti-pérdida).

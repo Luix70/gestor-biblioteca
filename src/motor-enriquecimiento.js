@@ -5,19 +5,9 @@ import { esTituloArtefacto, esAutorArtefacto } from './utils/parsear-nombre.js';
 import { parsearVolumen, totalDeclarado } from './utils/multivolumen.js';
 import { tituloCabecera } from './utils/revistas.js';
 import { buscarISSNporTitulo, buscarNombreDeISSNs } from './utils/buscador-issn-titulo.js';
-
-// "Editoriales" que en realidad son grupos de difusión/maquetación, no casas editoriales.
-// Si el archivo trae una de estas, NO es autoritativa: una editorial real de las APIs prevalece.
-const EDITORIALES_NO_VALIDAS = [
-    /epub\s*libre/i,
-    /lectulandia/i,
-    /oz\s*epub/i,
-    /todo\s*epub/i,
-];
-
-function esEditorialFalsa(nombre) {
-    return !!nombre && EDITORIALES_NO_VALIDAS.some(re => re.test(String(nombre)));
-}
+// La lista de «editoriales» que no lo son (repackagers/re-editores de dominio público) es compartida —
+// si el archivo/una API trae una de estas, una editorial real (APIs/colofón/colección) prevalece.
+import { esEditorialFalsa } from './utils/editoriales-falsas.js';
 
 /**
  * Devuelve el primer valor "con contenido" de la lista.

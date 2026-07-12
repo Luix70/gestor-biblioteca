@@ -16,6 +16,7 @@ import { ROLES_VALIDOS } from './contribuciones.js';
 export const PLANTILLA_JSON = {
     tipo_documento: '', // libro | revista | articulo | comic | otro
     titulo: '', subtitulo: '',
+    titulo_original: '', titulos_originales: [], // obra traducida (uno) / antología de relatos traducidos (varios)
     contribuciones: [{ nombre: '', rol: '' }], // rol ∈ autor|traductor|ilustrador|editor|prologuista|anotador|compilador
     idioma: '', idioma_original: '',
     editorial: '', 'año_edicion': null,
@@ -34,7 +35,13 @@ Identifica primero el TIPO de documento (a partir del conjunto): "libro", "revis
 suelto/separata), "comic" u "otro".
 Si es LIBRO:
 - Colaboradores con su ROL (autor, traductor, ilustrador, editor, prologuista, anotador, compilador), tal
-  como aparecen (portada/portadilla/créditos). IGNORA la editorial (no es persona).
+  como aparecen (portada/portadilla/créditos). IGNORA la editorial (no es persona). Cada 'nombre' es UNA
+  persona: si hay VARIOS unidos por "&"/";"/"y"/"/", devuelve UN objeto por cada una (no los juntes).
+- EDITORIAL: la casa REAL de ESTA edición (créditos/colofón, o inferida de la colección: "Tus Libros"=Anaya,
+  "Austral"=Espasa, "El Barco de Vapor"=SM…). Los maquetadores/re-editores de ebooks (ePubLibre, Lectulandia,
+  DigiCat, Good Press, epubGratis, e-artnow, Musaicum) NO son editoriales: ignóralos y busca la real; "" si no.
+- TÍTULO ORIGINAL (si es traducción): 'titulo_original' del bloque de créditos ("Título original:"). Si es una
+  ANTOLOGÍA de relatos traducidos, cada relato lleva su original: recógelos todos en 'titulos_originales'.
 - ¿Pertenece a una COLECCIÓN/SERIE? su nombre y el número que ocupa.
 - ¿Es un VOLUMEN de una obra en varios tomos? título de la obra, número de volumen y total si se indica.
 - Identificadores: TODOS los ISBN que veas (rústica, tapa dura, e-ISBN) y, si aparece, el ISBN de la OBRA
@@ -48,7 +55,7 @@ Siempre: idioma (ISO 639-1), idioma_original si es traducción y se indica, edit
 (con rigor), palabras_clave (materias), y el código de barras EAN-13 (13 dígitos; puede estar girado;
 977=revista, 978/979=libro).
 Devuelve SOLO este JSON (sin markdown ni texto fuera):
-{"tipo_documento":"","titulo":"","subtitulo":"","contribuciones":[{"nombre":"","rol":""}],"idioma":"","idioma_original":"","editorial":"","año_edicion":null,"coleccion":{"nombre":"","numero":""},"obra":{"titulo":"","volumen":"","total_volumenes":""},"isbn":[],"issn":[],"isbn_obra":"","codigo_barras":"","cdu":"","palabras_clave":[],"sinopsis":"","revista":{"issn_cabecera":"","tematica":"","periodicidad":"","fecha_ejemplar":"","numero_ejemplar":""},"estado_verificacion":"","alertas":[]}`;
+{"tipo_documento":"","titulo":"","subtitulo":"","titulo_original":"","titulos_originales":[],"contribuciones":[{"nombre":"","rol":""}],"idioma":"","idioma_original":"","editorial":"","año_edicion":null,"coleccion":{"nombre":"","numero":""},"obra":{"titulo":"","volumen":"","total_volumenes":""},"isbn":[],"issn":[],"isbn_obra":"","codigo_barras":"","cdu":"","palabras_clave":[],"sinopsis":"","revista":{"issn_cabecera":"","tematica":"","periodicidad":"","fecha_ejemplar":"","numero_ejemplar":""},"estado_verificacion":"","alertas":[]}`;
 
 const soloDigitos = (s) => String(s || '').replace(/[^0-9Xx]/g, '');
 const limpio = (s) => String(s || '').trim();
@@ -74,10 +81,13 @@ export function normalizarExtraccionVision(j) {
     const col = j.coleccion || {};
     const obra = j.obra || {};
     const rev = j.revista || {};
+    const titulosOrig = [...new Set((Array.isArray(j.titulos_originales) ? j.titulos_originales : []).map(limpio).filter(Boolean))];
     return {
         tipo_documento: limpio(j.tipo_documento) || null,
         titulo: limpio(j.titulo) || null,
         subtitulo: limpio(j.subtitulo) || null,
+        titulo_original: limpio(j.titulo_original) || (titulosOrig.length === 1 ? titulosOrig[0] : null),
+        titulos_originales: titulosOrig,
         autores,
         contribuciones,
         idioma: limpio(j.idioma) || null,
