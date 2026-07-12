@@ -28,7 +28,7 @@ const valorDe = (f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] 
 const EJECUTAR = tieneFlag('--ejecutar');
 const USAR_IA = tieneFlag('--ia');
 const LIMITE = parseInt(valorDe('--limite') || '0', 10) || 0;
-const FUENTE_ETQ = { fichero: 'Fichero', openlibrary: 'OpenLibrary', google: 'Google', ia: 'IA' };
+const FUENTE_ETQ = { archivo: 'Nombre', fichero: 'Fichero', coleccion: 'Colección', openlibrary: 'OpenLibrary', google: 'Google', 'coleccion-ia': 'Colección·IA', ia: 'IA·visión' };
 
 async function seleccionarIds(db) {
     const bib = db.collection('biblioteca');

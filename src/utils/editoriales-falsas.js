@@ -23,6 +23,12 @@ export const EDITORIALES_NO_VALIDAS = [
     /good\s*press/i,
     /e-?artnow/i,
     /musaicum/i,
+    // Plataformas de AUTOPUBLICACIÓN (Amazon KDP/CreateSpace, Lulu…): no son casas editoriales — las APIs las
+    // devuelven como «editorial» de reediciones baratas de clásicos. Mismo tratamiento que los repackagers.
+    /createspace/i,
+    /independently\s+published/i,
+    /\bkdp\b|kindle\s+direct/i,
+    /\blulu(\.com|\s+press)?\b/i,
 ];
 
 /** ¿Es `nombre` uno de esos grupos/re-editores (no una editorial real)? */

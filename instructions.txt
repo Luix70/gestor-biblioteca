@@ -945,10 +945,23 @@ de ficheros clasificado por CDU.
     o ausentes). Se lanza desde:
       · el CATÁLOGO — selección de libros → «🏢 Reclasificar editorial»;
       · la ficha de una editorial — libros seleccionados → «🏢 Reclasificar».
-    Busca la editorial correcta de cada libro EN CASCADA, minimizando IA/coste:
-      1) Fichero local (por ISBN, offline)  2) OpenLibrary  3) Google Books
-      4) IA (visión sobre la portada) — OPT-IN y ÚLTIMO recurso (casilla; por
-         defecto NO, más lento y con coste).
+    Busca la editorial correcta de cada libro EN CASCADA, de lo mas BARATO a lo mas
+    caro (minimiza IA/coste):
+      0) EDITORIAL en el nombre de archivo (corchete «[Catedra] …» que puso el
+         curador) — GRATIS.
+      1) Fichero local (por ISBN, offline).
+      2) COLECCION -> editorial (GRATIS): muchas colecciones son marca de UNA casa
+         («Biblioteca Clasica Gredos»->Gredos, «Ancora y Delfin»->Destino, «Letras
+         Hispanicas»->Catedra, «Tus Libros»->Anaya…). Mapa determinista en
+         src/utils/coleccion-editorial.js. Clave para los libros SIN editorial (ebooks
+         sin ISBN): el dato ya esta guardado, sin abrir ficheros ni vision.
+      3) OpenLibrary  4) Google Books.
+      5) COLECCION -> IA de TEXTO (barata, SIN vision) — OPT-IN: el modelo suele
+         conocer la casa de una coleccion por su nombre. Antes de la vision.
+      6) IA (VISION sobre la portada) — OPT-IN y ULTIMO recurso (la portada NO muestra
+         la coleccion/colofon, asi que aqui rara vez aporta la editorial; lenta y con
+         coste). Las plataformas de autopublicacion (CreateSpace/KDP/Lulu) y los
+         repackagers (ePubLibre/DigiCat…) NO cuentan como editorial (utils/editoriales-falsas.js).
     Decisión por libro (anti-pérdida): si halla una editorial real distinta →
     propone el cambio; si no halla nada y la actual es FALSA (ePubLibre…) → propone
     QUITARLA (queda sin editorial); si no halla nada y la actual es real → la DEJA.

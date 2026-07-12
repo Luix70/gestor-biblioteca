@@ -31,6 +31,8 @@ import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { analizarImagenesRecurso } from '../agente.js';
 import { validarISBN, variantesISBN } from './identificadores.js';
+import { parsearNombre } from './parsear-nombre.js';
+import { editorialDeColeccionMapa, editorialDeColeccionIA } from './coleccion-editorial.js';
 // «Editoriales» que en realidad son grupos de maquetación/difusión o re-editores de dominio público (no
 // casas editoriales): si un libro tiene una de estas y no hallamos una real, se propone quitarla. Lista
 // compartida — ver `utils/editoriales-falsas.js`.
@@ -89,11 +91,28 @@ async function imagenesDelDoc(doc, max = 3) {
 }
 
 /**
- * Cascada de búsqueda de la editorial de un libro. Devuelve { editorial, fuente } o { editorial:null }.
- * `criterios` = { isbns, titulo, autor, idioma }. `usarIA` habilita el 4.º nivel (visión).
+ * Cascada de búsqueda de la editorial de un libro, de lo MÁS BARATO a lo más caro (ver [[minimize-ai-ingestion]]).
+ * Devuelve { editorial, fuente } o { editorial:null }. `criterios` = { isbns, titulo, autor, idioma, coleccion }.
+ * `usarIA` habilita SOLO los dos últimos niveles de IA (colección→texto y, por último, visión).
+ *
+ * Novedad clave para los libros SIN editorial (típicamente ebooks de la comunidad, sin ISBN de imprenta): la
+ * editorial suele estar en el NOMBRE DE ARCHIVO (corchete «[Cátedra]…») o deducirse de la COLECCIÓN («Áncora y
+ * Delfín»→Destino), datos que ya tenemos guardados. Eso resuelve la mayoría GRATIS, sin pisar la visión —que
+ * solo ve la portada y no la colección/colofón, y encima gasta IA de pago.
  */
 async function buscarEditorialEnCascada(doc, criterios, usarIA) {
-    // 1) Fichero local (offline, por ISBN).
+    // Nombre de colección: el resuelto de la BD (criterios.coleccion) o, si no, el del corchete del nombre de
+    // archivo. Del nombre sacamos además la editorial que el propio curador etiquetó («[Cátedra] …»).
+    const parsed = (() => { try { return parsearNombre(doc.nombre_archivo || ''); } catch { return {}; } })();
+    const nombreColeccion = criterios.coleccion || parsed.coleccion_nombre || null;
+
+    // 0) EDITORIAL en el nombre de archivo (corchete «[Editorial]» estilo ePubLibre/Cátedra). Es la etiqueta del
+    //    propio curador para ESTE ejemplar: fiable y GRATIS.
+    if (parsed.editorial) {
+        const e = editorialDeProveedor({ editorial: parsed.editorial });
+        if (e) return { editorial: e, fuente: 'archivo' };
+    }
+    // 1) Fichero local (offline, por ISBN) — autoritativo para la edición de ese ISBN.
     if (criterios.isbns.length) {
         try {
             const loc = await buscarEnFicheroLocal({ isbns: criterios.isbns });
@@ -101,19 +120,31 @@ async function buscarEditorialEnCascada(doc, criterios, usarIA) {
             if (e) return { editorial: e, fuente: 'fichero' };
         } catch { /* fichero no disponible: se sigue */ }
     }
-    // 2) OpenLibrary (ISBN → texto).
+    // 2) COLECCIÓN → mapa determinista (GRATIS). Antes de OL/Google porque para clásicos en dominio público esas
+    //    APIs devuelven re-editores (DigiCat…) que ya filtramos, y la colección da la casa real y consistente.
+    if (nombreColeccion) {
+        const e = editorialDeColeccionMapa(nombreColeccion);
+        if (e) return { editorial: e, fuente: 'coleccion' };
+    }
+    // 3) OpenLibrary (ISBN → texto).
     try {
         const ol = await buscarPorCriterios({ ...criterios, incluirSinopsis: false });
         const e = editorialDeProveedor(ol);
         if (e) return { editorial: e, fuente: 'openlibrary' };
     } catch { /* red/OL: se sigue con el siguiente proveedor */ }
-    // 3) Google Books (ISBN → texto).
+    // 4) Google Books (ISBN → texto).
     try {
         const gb = await buscarEnGoogleBooks(criterios);
         const e = editorialDeProveedor(gb);
         if (e) return { editorial: e, fuente: 'google' };
     } catch { /* red/GB: se sigue */ }
-    // 4) IA (visión) — ÚLTIMO recurso, opt-in, con coste. Solo si lo anterior no resolvió.
+    // 5) COLECCIÓN → IA de TEXTO (barata, SIN visión): el modelo suele conocer la casa de una colección por su
+    //    nombre. Opt-in y antes de la visión, para que esta casi nunca haga falta.
+    if (usarIA && nombreColeccion) {
+        const e = await editorialDeColeccionIA(nombreColeccion, { titulo: criterios.titulo, autor: criterios.autor });
+        if (e) return { editorial: e, fuente: 'coleccion-ia' };
+    }
+    // 6) IA (VISIÓN) — ÚLTIMO recurso, opt-in, caro. Solo si nada de lo anterior resolvió.
     if (usarIA) {
         try {
             const imgs = await imagenesDelDoc(doc);
@@ -142,7 +173,7 @@ export async function calcularReclasificacion(db, docIds, { usarIA = false, alPa
 
     const docs = await bib.find(
         { _id: { $in: ids } },
-        { projection: { titulo: 1, isbn: 1, isbn_propio: 1, isbn_candidatos: 1, idioma: 1, editorial: 1, autores: 1, portada: 1, imagenes: 1 } },
+        { projection: { titulo: 1, isbn: 1, isbn_propio: 1, isbn_candidatos: 1, idioma: 1, editorial: 1, autores: 1, coleccion: 1, nombre_archivo: 1, portada: 1, imagenes: 1 } },
     ).toArray();
 
     // Cachés de nombres (id→nombre) para editoriales (mostrar la actual) y autores (mejorar la búsqueda por texto).
@@ -152,6 +183,10 @@ export async function calcularReclasificacion(db, docIds, { usarIA = false, alPa
     const autIds = [...new Set(docs.flatMap((d) => (d.autores || []).slice(0, 1)).map(String))].map(oid).filter(Boolean);
     const nombreAut = new Map();
     if (autIds.length) for (const a of await colAut.find({ _id: { $in: autIds } }, { projection: { nombre: 1 } }).toArray()) nombreAut.set(String(a._id), a.nombre || '');
+    // Nombre de la COLECCIÓN (id→nombre): para deducir la editorial de la serie (mapa/IA-texto), sin abrir ficheros.
+    const nombreCol = new Map();
+    const colIds = [...new Set(docs.map((d) => d.coleccion).filter(Boolean).map(String))].map(oid).filter(Boolean);
+    if (colIds.length) for (const c of await db.collection('colecciones').find({ _id: { $in: colIds } }, { projection: { nombre: 1 } }).toArray()) nombreCol.set(String(c._id), c.nombre || '');
 
     // Acumuladores del informe.
     const transiciones = new Map(); // clave `de→a` → { de, a, n, fuentes:Set }
@@ -169,7 +204,8 @@ export async function calcularReclasificacion(db, docIds, { usarIA = false, alPa
             ...(Array.isArray(doc.isbn_candidatos) ? doc.isbn_candidatos : []),
         ].filter(Boolean))];
         const autor = doc.autores && doc.autores.length ? (nombreAut.get(String(doc.autores[0])) || '') : '';
-        const criterios = { isbns, titulo: doc.titulo || '', autor, idioma: doc.idioma || null };
+        const coleccion = doc.coleccion ? (nombreCol.get(String(doc.coleccion)) || '') : '';
+        const criterios = { isbns, titulo: doc.titulo || '', autor, idioma: doc.idioma || null, coleccion };
 
         const { editorial: hallada, fuente } = await buscarEditorialEnCascada(doc, criterios, usarIA);
 
