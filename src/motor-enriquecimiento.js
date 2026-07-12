@@ -8,6 +8,9 @@ import { buscarISSNporTitulo, buscarNombreDeISSNs } from './utils/buscador-issn-
 // La lista de «editoriales» que no lo son (repackagers/re-editores de dominio público) es compartida —
 // si el archivo/una API trae una de estas, una editorial real (APIs/colofón/colección) prevalece.
 import { esEditorialFalsa } from './utils/editoriales-falsas.js';
+// Mapa determinista COLECCIÓN → editorial (gratis): muchas colecciones célebres son marca de UNA casa
+// («Biblioteca Clásica Gredos»→Gredos…). Resuelve la editorial de los ebooks sin depender de la IA.
+import { editorialDeColeccionMapa } from './utils/coleccion-editorial.js';
 
 /**
  * Devuelve el primer valor "con contenido" de la lista.
@@ -243,17 +246,34 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.sinopsis    = primerValido(documento.sinopsis, datosExtra.sinopsis);
     documento.subtitulo   = primerValido(documento.subtitulo, datosExtra.subtitulo);
 
-    // Editorial: excepción al conservadurismo. Si el archivo trae un grupo de difusión
-    // (ePubLibre, etc.), una editorial real encontrada en las APIs tiene prioridad.
+    // Editorial: excepción al conservadurismo. En los ebooks el nombre suele venir MAL (un grupo de
+    // maquetación: ePubLibre…) o vacío. La COLECCIÓN lo resuelve GRATIS y fiable para muchas casas célebres
+    // («Áncora y Delfín»→Destino, «Letras Hispánicas»→Cátedra…) — mejor que las APIs, que para clásicos en
+    // dominio público devuelven re-editores. El nombre de colección se toma del archivo o de las APIs.
+    const nombreColeccion = primerValido(documento.coleccion_nombre, datosExtra.coleccion_nombre);
+    const editorialDeColeccion = editorialDeColeccionMapa(nombreColeccion);
+    // Una editorial de las APIs que sea a su vez un repackager/autopublicación (DigiCat, CreateSpace…) NO
+    // vale como editorial real: se descarta aquí para que nunca gane (era el caso «DigiCat» original).
+    const editorialAPI = esEditorialFalsa(datosExtra.editorial) ? null : datosExtra.editorial;
     if (esEditorialFalsa(documento.editorial)) {
-        const editorialReal = primerValido(datosExtra.editorial);
+        // El archivo trae un maquetador → prioriza la editorial real: colección (gratis) > APIs.
+        const editorialReal = primerValido(editorialDeColeccion, editorialAPI);
         if (editorialReal) {
-            documento.alertas_agente.push(`Editorial "${documento.editorial}" sustituida por la editorial real: "${editorialReal}".`);
+            const via = editorialReal === editorialDeColeccion ? ' (deducida de la colección)' : '';
+            documento.alertas_agente.push(`Editorial "${documento.editorial}" sustituida por la editorial real: "${editorialReal}"${via}.`);
             documento.editorial = editorialReal;
         }
-        // Si las APIs no aportan una editorial real, se conserva la del archivo.
+        // Si nada aporta una real, se conserva la del archivo.
+    } else if (documento.editorial) {
+        // Ya hay una editorial real del archivo/visión: manda (conservador); las APIs no la pisan.
+        documento.editorial = primerValido(documento.editorial, editorialAPI);
     } else {
-        documento.editorial = primerValido(documento.editorial, datosExtra.editorial);
+        // Sin editorial: rellena el hueco. Colección (gratis, fiable) antes que las APIs.
+        const relleno = primerValido(editorialDeColeccion, editorialAPI);
+        if (relleno) {
+            if (relleno === editorialDeColeccion) documento.alertas_agente.push(`Editorial "${relleno}" deducida de la colección "${nombreColeccion}".`);
+            documento.editorial = relleno;
+        }
     }
     documento.año_edicion = primerValido(documento.año_edicion, datosExtra.año_edicion);
     documento.idioma      = primerValido(documento.idioma, datosExtra.idioma) || 'es';

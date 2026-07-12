@@ -1618,12 +1618,16 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
         se aplica en motor-catalogo y en el Conformador (enriquecer-a-fondo). Para lo YA
         catalogado hay backfill: scripts/separar-autores-fusionados.js (dry-run por defecto).
       * EDITORIAL REAL desde el principio: los maquetadores/re-editores de ebooks (ePubLibre,
-        Lectulandia, DigiCat, Good Press, epubGratis, e-artnow, Musaicum) NO son editoriales
-        (lista unica en utils/editoriales-falsas.js). La IA recibe instruccion de deducir la
-        casa REAL del colofon/creditos o de la COLECCION ("Tus Libros"=Anaya, "Austral"=Espasa,
-        "El Barco de Vapor"=SM…) e ignorar el maquetador; si el manifiesto EPUB trae uno de
-        esos, se le dice explicitamente que NO lo tome como verdad. Al ser un nombre real, el
-        motor de enriquecimiento ya no deja que una API lo pise con otro re-editor.
+        Lectulandia, DigiCat, Good Press, epubGratis, e-artnow, Musaicum) y las plataformas de
+        AUTOPUBLICACION (CreateSpace/KDP/Lulu) NO son editoriales (lista unica en
+        utils/editoriales-falsas.js). El motor de enriquecimiento deduce la casa REAL asi:
+        (1) MAPA determinista COLECCION->editorial, GRATIS ("Biblioteca Clasica Gredos"->Gredos,
+        "Ancora y Delfin"->Destino, "Letras Hispanicas"->Catedra, "Tus Libros"->Anaya…, en
+        utils/coleccion-editorial.js) — gana a las APIs cuando el archivo trae un maquetador o
+        no hay editorial; (2) la IA de vision recibe instruccion de leer la casa del colofon/
+        creditos o de la coleccion e ignorar el maquetador. Una editorial de las APIs que sea a
+        su vez un repackager (DigiCat…) se descarta, para que nunca gane (era el caso original).
+        El mismo mapa lo usa el reclasificador de editorial en lote (ver su seccion).
       * TITULO ORIGINAL (obras traducidas): nuevo campo `titulo_original` (y `titulos_originales`
         para antologias de relatos, cuyos originales figuran en la pagina de creditos). Lo pide
         la plantilla de vision y lo rellena tambien el Conformador. Campos ADITIVOS (biblioteca
