@@ -162,13 +162,18 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             const vistos = new Set();
             for (const c of docFinal.contribuciones_nombres) {
                 if (!c || !c.nombre || !ROLES_VALIDOS.includes(c.rol) || c.rol === 'autor') continue;
-                const r = await resolverPersona(db, c.nombre);
-                if (!r) continue;
-                const clave = `${String(r._id)}|${c.rol}`;
-                if (vistos.has(clave)) continue;
-                vistos.add(clave);
-                contribs.push({ persona: r._id, rol: c.rol });
-                if (r.creada) docFinal.alertas_agente.push(`Nuevo contribuyente (${c.rol}): ${r.nombre}`);
+                // Una MISMA contribución puede traer VARIAS personas unidas por « & »/« ; »/« / » (p. ej. la IA
+                // devolvió 5 ilustradores en un solo `nombre`: «Rochegrosse, Georges & Rackham, Arthur & …») →
+                // se separan en personas distintas, cada una con el MISMO rol (igual que los autores en 1a).
+                for (const nombre of separarAutores(c.nombre)) {
+                    const r = await resolverPersona(db, nombre);
+                    if (!r) continue;
+                    const clave = `${String(r._id)}|${c.rol}`;
+                    if (vistos.has(clave)) continue;
+                    vistos.add(clave);
+                    contribs.push({ persona: r._id, rol: c.rol });
+                    if (r.creada) docFinal.alertas_agente.push(`Nuevo contribuyente (${c.rol}): ${r.nombre}`);
+                }
             }
             if (contribs.length) docFinal.contribuciones = contribs;
         }
