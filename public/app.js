@@ -10827,14 +10827,17 @@ let EX_LIBRIS = localStorage.getItem('exlibris') || 'BIBLIOTHECA LUDOVICIANA · 
 // (NOMBRE_BIBLIOTECARIO, EMAIL, TELEFONO, NOMBRE_BIBLIOTECA). Se pide al endpoint PÚBLICO /api/exlibris —a
 // propósito, para que quien ENCUENTRE un libro fuera de la biblioteca vea de quién es y cómo devolverlo— y se
 // cachea en localStorage (así la lectura NFC OFFLINE también muestra el contacto). Cada « · » = una línea.
-// Compone la cadena del ex-libris (biblioteca · propietario · «Devolver a: email-teléfono») desde la config
-// del .env. Cada « · » es una LÍNEA en heroExlibris; el contacto usa «-» entre email y teléfono (sin « · »,
-// reservado para separar líneas).
+// Compone la cadena del ex-libris (biblioteca · propietario · contacto) desde la config del .env. « · » separa
+// BLOQUES (heroExlibris pone una regla entre ellos); «\n» es un salto de línea DENTRO de un bloque (sin regla).
+// El contacto es «Devolver a: <email>» + el <teléfono> en su propia línea, agrupados sin regla entre ambos.
 function _construirExLibris(c) {
   const partes = [(c && c.biblioteca) || 'BIBLIOTHECA LUDOVICIANA'];
   if (c && c.nombre) partes.push('Este libro pertenece a ' + c.nombre);
-  const contacto = [c && c.email, c && c.telefono].filter(Boolean).join('-');
-  if (contacto) partes.push('Devolver a: ' + contacto);
+  const email = c && c.email, tel = c && c.telefono;
+  if (email || tel) {
+    const l1 = 'Devolver a: ' + (email || tel);
+    partes.push(email && tel ? l1 + '\n' + tel : l1);
+  }
   return partes.join(' · ');
 }
 (async () => {
@@ -10942,8 +10945,13 @@ function heroExlibris(ex) {
     lineas = p.slice(1); // propietario, «Devolver a: email-teléfono»
   // PRIORIDAD: que se lea TODO (no recortar). El texto ENVUELVE si hace falta (nada de nowrap/ellipsis) y las
   // palabras largas (emails) parten limpiamente. Entre línea y línea, una REGLA fina centrada al 50% del ancho.
+  // Un BLOQUE puede tener varias líneas (separadas por «\n») que se pintan juntas SIN regla entre ellas
+  // (p. ej. «Devolver a: email» + «teléfono»). La regla solo va ENTRE bloques.
   const linea = (txt, css) =>
-    `<div style="overflow-wrap:anywhere;${css}">${esc(txt)}</div>`;
+    String(txt)
+      .split('\n')
+      .map((sub) => `<div style="overflow-wrap:anywhere;${css}">${esc(sub.trim())}</div>`)
+      .join('');
   const regla = '<div style="width:50%;height:1px;margin:9px auto;background:rgba(42,29,14,.35)"></div>';
   const bloques = [
     linea(lib, 'font-size:17px;font-weight:700;letter-spacing:1px;text-transform:uppercase;line-height:1.2'),
