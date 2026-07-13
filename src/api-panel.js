@@ -459,10 +459,14 @@ export function rutasPanel() {
             // INSENSIBLE A ACENTOS: "matematicas" encuentra "Matemáticas"), devolviendo _id por relevancia;
             // si no, CAE a la búsqueda Mongo $regex de siempre. Los IDENTIFICADORES (ISBN/ISSN, tolerando
             // separadores + ISSN de serie en la colección) van SIEMPRE por Mongo, en unión con el texto.
+            // Búsqueda ESTRICTA (frase exacta): con estricto=1, el FTS exige la frase completa adyacente en
+            // orden («history of philosophy»), no cada palabra suelta. Por defecto (laxo) casa todas las palabras
+            // en cualquier posición.
+            const estricto = String(req.query.estricto || '') === '1';
             let idsRanked = null, ordenRelevancia = false;
             if (q) {
                 const or = [];
-                const ftsIds = await buscarIndice(q, { limite: 1000 }).catch(() => null);
+                const ftsIds = await buscarIndice(q, { limite: 1000, estricto }).catch(() => null);
                 if (ftsIds) {
                     idsRanked = ftsIds;
                     if (ftsIds.length) or.push({ _id: { $in: ftsIds.map(id => new ObjectId(id)) } });

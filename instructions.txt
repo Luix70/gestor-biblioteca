@@ -280,6 +280,11 @@ de ficheros clasificado por CDU.
     · Caja de búsqueda (título, autor, editorial, ISBN, ISSN, DOI, nombre de archivo).
       Rápida e INSENSIBLE A ACENTOS gracias a un índice local SQLite-FTS
       ("matematicas" encuentra "Matemáticas"); si el índice no está, cae a Mongo.
+    · «🎯 Frase exacta» (casilla bajo la caja): modo ESTRICTO. Por defecto la búsqueda es
+      LAXA (casa TODAS las palabras sueltas, en cualquier posición: «history of philosophy»
+      encuentra también «Philosophy and the History of Science»). Con la casilla marcada solo
+      salen los que tienen la FRASE EXACTA adyacente y en ese orden (FTS: «"history of
+      philosophy"»; &estricto=1). Sigue siendo insensible a acentos/mayúsculas.
     · VARIANTES de nombre (autor/editorial): el FTS indexa solo el nombre PRINCIPAL; las
       grafías alternativas (otros alfabetos, formas castellanizadas, seudónimos) viven en el
       registro de autoridad y se resuelven por MONGO, uniendo sus documentos a los aciertos

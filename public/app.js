@@ -6805,7 +6805,8 @@ function construirSearch() {
     <details class="card foldcard" id="sqFiltros" style="margin-bottom:16px">
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
-        <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search"></div>
+        <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search">
+          <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="apuntes">Apuntes</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
@@ -6885,6 +6886,7 @@ function construirSearch() {
     }
   };
   $('#sqTipo').onchange = () => buscarCatalogo(1);
+  if ($('#sqEstricto')) $('#sqEstricto').onchange = () => buscarCatalogo(1); // frase exacta ↔ laxa
   if ($('#sqSoporte')) $('#sqSoporte').onchange = () => buscarCatalogo(1);
   if ($('#sqFormato')) $('#sqFormato').onchange = () => buscarCatalogo(1);
   // Ubicación: al cambiar el ámbito, refrescar la estantería (asociada a ese ámbito) y buscar.
@@ -7037,6 +7039,8 @@ function _paramsBusqueda() {
     orden: $('#sqOrden').value,
     porPagina: _porPaginaVista(),
   });
+  // Búsqueda ESTRICTA (frase exacta) en vez de laxa (todas las palabras sueltas).
+  if ($('#sqEstricto') && $('#sqEstricto').checked) params.set('estricto', '1');
   // Sentido asc/desc (salvo en «Relevancia / recientes», que no lo usa).
   if ($('#sqOrden').value !== 'reciente') params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
   const est = estrellasSel();

@@ -138,11 +138,17 @@ export async function desindexarDoc(id) {
  * @returns {Promise<string[]|null>} array de ids · [] sin términos/sin resultados · null = índice NO
  *          disponible (el llamante debe CAER a la búsqueda Mongo).
  */
-export async function buscar(q, { limite = 1000 } = {}) {
+export async function buscar(q, { limite = 1000, estricto = false } = {}) {
     if (!(await asegurar())) return null;
     const tokens = String(q || '').toLowerCase().match(/[\p{L}\p{N}]+/gu);
     if (!tokens || !tokens.length) return [];
-    const match = tokens.map(t => t + '*').join(' ');  // prefijo + AND implícito
+    // LAXO (por defecto): cada término como PREFIJO con AND implícito → todas las palabras, en cualquier
+    // posición y orden («history* of* philosophy*»). ESTRICTO: FRASE EXACTA entre comillas → esos términos
+    // ADYACENTES y en ese orden («"history of philosophy"»). El tokenizer quita acentos, así que la frase
+    // también es insensible a acentos/mayúsculas.
+    const match = estricto
+        ? '"' + tokens.join(' ') + '"'
+        : tokens.map(t => t + '*').join(' ');
     try {
         return stmtBuscar.all(match, limite).map(r => r.id);
     } catch (e) {
