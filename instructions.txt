@@ -1015,6 +1015,13 @@ de ficheros clasificado por CDU.
       Campañas actuales:
         · 🆓 Roles e idioma original — traductor/ilustrador/… e idioma original por
           ISBN (mención de la BNE del Fichero + OpenLibrary).
+        · 🆓 Título e idioma original (del fichero) — lee la PÁGINA DE CRÉDITOS del
+          EPUB/PDF y recupera el «Título original» (y todos, en antologías) + un indicio
+          de idioma original, SIN IA (utils/titulo-original.js, el mismo parser que el
+          backfill scripts/recuperar-titulo-original.js). Título e idioma original se
+          intentan SIEMPRE, de cualquier fuente (APIs + este fichero); solo se guardan/
+          muestran si DIFIEREN del título/idioma del propio documento. Ambos salen en la
+          ficha (Datos catalográficos).
         · 🌐 Huecos de metadatos — sinopsis, año, editorial, autores, palabras clave
           y Dewey/LCC por ISBN (OpenLibrary/Google Books/DNB). Conservador.
         · 🌐 Fotos y biografías de autor — OpenLibrary + Wikidata + Wikipedia.

@@ -2491,6 +2491,7 @@ const ROL_ISBN_OPC = [
 const CAMPOS_FICHA = [
   ['_oid', 'ID (Mongo)'], // el primero de todo: identidad del registro en la base
   ['subtitulo', 'Subtítulo'],
+  ['titulo_original', 'Título original'], // obras traducidas; solo se muestra si difiere del título (ver especiales)
   ['_autores', 'Autor(es)'],
   ['_editorial', 'Editorial'],
   ['año_edicion', 'Año'],
@@ -2788,6 +2789,18 @@ function pintarDoc(r, ctx) {
         ? [...new Set(extra)].map((x) => `<a class="rowlink" data-q="${esc(x)}" title="Buscar este ISSN">${esc(x)}</a>`).join('<br>')
         : null;
     })(),
+    // TÍTULO ORIGINAL (obras traducidas): SOLO si difiere del título del propio documento. En antologías con
+    // varios originales, se listan todos. Insensible a acentos/mayúsculas al comparar.
+    titulo_original: (() => {
+      const nrm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+      const lista = d.titulos_originales && d.titulos_originales.length > 1
+        ? d.titulos_originales
+        : d.titulo_original ? [d.titulo_original] : [];
+      const dif = lista.filter((t) => t && nrm(t) !== nrm(d.titulo));
+      return dif.length ? dif.map((t) => `<i>${esc(t)}</i>`).join('<br>') : null;
+    })(),
+    // IDIOMA ORIGINAL: SOLO si difiere del idioma del propio documento.
+    idioma_original: d.idioma_original && d.idioma_original !== d.idioma ? esc(d.idioma_original) : null,
   };
   const valor = (k) => {
     if (k in especiales) return especiales[k];

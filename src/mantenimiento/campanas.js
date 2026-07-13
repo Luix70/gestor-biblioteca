@@ -32,6 +32,9 @@ import { enriquecerAutor, autoresEnriquecibles } from '../utils/enriquecer-autor
 import { rellenarDescripcionesFaltantes, contarFaltantes } from './backfill-descripciones.js';
 import { enriquecerAFondo } from './enriquecer-a-fondo.js';
 import { PLACEHOLDERS_AUTOR } from '../utils/creditos-portada.js';
+import path from 'node:path';
+import { carpetaDeDoc } from './util-mantenimiento.js';
+import { recuperarOriginalesDeFichero } from '../utils/titulo-original.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -108,8 +111,37 @@ export const CAMPANAS = [
                 const contribs = await resolverContribuciones(db, ext.contribuciones_nombres);
                 if (contribs.length) set.contribuciones = contribs;
             }
-            if (!doc.idioma_original && ext.idioma_original) set.idioma_original = ext.idioma_original;
+            // idioma_original solo si es DISTINTO del idioma del documento (no aporta si coinciden).
+            if (!doc.idioma_original && ext.idioma_original && ext.idioma_original !== doc.idioma) set.idioma_original = ext.idioma_original;
             if (!Object.keys(set).length) return false;
+            set.fecha_actualizacion = new Date();
+            await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
+            return true;
+        },
+    },
+
+    {
+        id: 'original',
+        etiqueta: 'Título e idioma original (del fichero)',
+        coste: 'gratis',
+        descripcion: 'Lee la PÁGINA DE CRÉDITOS/copyright del EPUB/PDF y recupera el «Título original» (y, en antologías, todos) más un indicio de idioma original. SIN IA. Solo se guardan si DIFIEREN del título/idioma del propio documento. Complementa a «Roles e idioma original» (que va por APIs): aquí la fuente es el propio fichero.',
+        version: 1,
+        loteDefecto: 60,
+        cadenciaDefecto: 12,
+        activaDefecto: false,
+        coleccion: 'biblioteca',
+        proyeccion: { titulo: 1, idioma: 1, idioma_original: 1, nombre_archivo: 1, ruta_base: 1, cdu: 1, formatos: 1, isbn: 1, issn: 1, 'año_edicion': 1, mes_publicacion: 1, obra: 1, isbn_obra: 1, obra_titulo: 1, volumen_numero: 1 },
+        // Libros digitales (epub/pdf) que aún no tienen título original. El sello evita reprocesar los que no lo traen.
+        candidatos: () => ({ tipo_recurso: 'libro', formatos: { $in: ['epub', 'pdf'] }, titulo_original: { $exists: false } }),
+        async procesarDoc(db, doc) {
+            if (!doc.nombre_archivo) return false;
+            const ruta = path.join(carpetaDeDoc(doc), doc.nombre_archivo);
+            if (!fs.existsSync(ruta)) return false;                       // fichero fuera del NAS → se sella igual
+            const res = await recuperarOriginalesDeFichero(ruta, doc.titulo).catch(() => null);
+            if (!res || !res.titulo_original) return false;
+            const set = { titulo_original: res.titulo_original };          // el parser ya lo garantiza ≠ título
+            if (res.titulos_originales.length) set.titulos_originales = res.titulos_originales;
+            if (res.idioma_original && res.idioma_original !== doc.idioma && !doc.idioma_original) set.idioma_original = res.idioma_original;
             set.fecha_actualizacion = new Date();
             await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
             return true;
