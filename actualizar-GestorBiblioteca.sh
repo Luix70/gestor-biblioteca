@@ -217,6 +217,15 @@ echo "${SHA:-desconocido} ${BRANCH} ${SERIE:-}" > "$APP_DIR/VERSION"
 echo "==> Reconstruyendo e iniciando (esto reinstala dependencias; en el Atom tarda un poco)"
 $COMPOSE up -d --build
 
+# --- Poda de imágenes/caché del build ANTERIOR (evita "No space left on device") -----------
+# Cada deploy reconstruye la imagen: la ANTERIOR queda "dangling" (sin tag) y la caché de build crece. Sin
+# podar, se acumulan hasta LLENAR el disco (fwrite: No space left on device). `image prune -f` borra SOLO las
+# dangling (NO la imagen en uso, que acaba de arrancar); `builder prune -f` vacía la caché de build. Seguro:
+# no toca volúmenes ni datos (Mongo=Atlas; Fichero/CDU/Inbox son bind-mounts). Best-effort: no aborta el deploy.
+echo "==> Podando imágenes y caché de build huérfanas del deploy anterior…"
+docker image prune -f   >/dev/null 2>&1 || true
+docker builder prune -f >/dev/null 2>&1 || true
+
 # --- Limpieza y estado ----------------------------------------------------
 rm -rf "$STAGE"
 
