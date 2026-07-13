@@ -277,9 +277,12 @@ de ficheros clasificado por CDU.
   NAS no puede leer la serie, muestra el commit corto.
 
   ── CATÁLOGO (búsqueda + selección) ──────────────────────────────────────────
-    · Caja de búsqueda (título, autor, editorial, ISBN, ISSN, DOI, nombre de archivo).
-      Rápida e INSENSIBLE A ACENTOS gracias a un índice local SQLite-FTS
-      ("matematicas" encuentra "Matemáticas"); si el índice no está, cae a Mongo.
+    · Caja de búsqueda (título, TÍTULO ORIGINAL, autor, editorial, ISBN, ISSN, DOI,
+      nombre de archivo). El título original se pliega en la columna `titulo` del índice,
+      así «War and Peace» encuentra «Guerra y paz» (requiere REINDEXAR tras desplegar:
+      panel → Búsqueda → reindexar, o scripts/reindexar-busqueda.js; las altas/ediciones
+      nuevas ya lo incluyen solas). Rápida e INSENSIBLE A ACENTOS gracias a un índice
+      local SQLite-FTS ("matematicas" encuentra "Matemáticas"); si no está, cae a Mongo.
     · «🎯 Frase exacta» (casilla bajo la caja): modo ESTRICTO. Por defecto la búsqueda es
       LAXA (casa TODAS las palabras sueltas, en cualquier posición: «history of philosophy»
       encuentra también «Philosophy and the History of Science»). Con la casilla marcada solo

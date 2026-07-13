@@ -489,8 +489,8 @@ export function rutasPanel() {
                     }
                 } else {
                     const rx = { $regex: escapeRegex(q), $options: 'i' };
-                    or.push({ titulo: rx }, { subtitulo: rx }, { obra_titulo: rx },
-                        { coleccion_nombre: rx }, { palabras_clave: rx }, { nombre_archivo: rx });
+                    or.push({ titulo: rx }, { titulo_original: rx }, { titulos_originales: rx }, { subtitulo: rx },
+                        { obra_titulo: rx }, { coleccion_nombre: rx }, { palabras_clave: rx }, { nombre_archivo: rx });
                     // Autores/editoriales: se busca también por sus GRAFÍAS ALTERNATIVAS (otros alfabetos, formas
                     // castellanizadas, seudónimos) → «Жюль Верн» o «Julio Verne» encuentran a «Verne, Jules».
                     const porNombre = { $or: [{ nombre: rx }, { nombres_alternativos: rx }] };

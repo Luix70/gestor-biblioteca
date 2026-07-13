@@ -37,7 +37,7 @@ function resolverRutaIndice() {
 // Columnas del FTS: `id` UNINDEXED (el _id de Mongo en texto; no se busca, solo se recupera) + los
 // campos de texto buscables. unicode61 + remove_diacritics 2 → acentos/mayúsculas indiferentes.
 const COLUMNAS = ['titulo', 'subtitulo', 'obra', 'autores', 'editorial', 'coleccion', 'palabras_clave', 'identificadores', 'nombre_archivo'];
-const PROY = { titulo: 1, subtitulo: 1, obra_titulo: 1, autores: 1, editorial: 1, coleccion: 1, coleccion_nombre: 1, palabras_clave: 1, isbn: 1, issn: 1, isbn_obra: 1, nombre_archivo: 1 };
+const PROY = { titulo: 1, titulo_original: 1, titulos_originales: 1, subtitulo: 1, obra_titulo: 1, autores: 1, editorial: 1, coleccion: 1, coleccion_nombre: 1, palabras_clave: 1, isbn: 1, issn: 1, isbn_obra: 1, nombre_archivo: 1 };
 
 let db = null, intentado = false, disponible = false;
 let stmtInsert = null, stmtDelete = null, stmtCount = null, stmtBuscar = null;
@@ -76,9 +76,14 @@ function filaDe(doc, { autores = '', editorial = '', coleccion = '' } = {}) {
     const issn = doc.issn || '';
     // Identificadores: ISBN(s) + ISSN con y sin guion, para encontrarlo se escriba como se escriba.
     const identificadores = [doc.isbn, issn, issn.replace(/-/g, ''), doc.isbn_obra].filter(Boolean).join(' ');
+    // El TÍTULO ORIGINAL (y los de una antología) se pliegan en la columna `titulo` para poder buscar también
+    // por él (p. ej. «War and Peace» encuentra «Guerra y paz»), sin añadir una columna nueva (que obligaría a
+    // recrear la tabla FTS). Se re-poblará al reindexar.
+    const titulo = [doc.titulo, doc.titulo_original, ...(Array.isArray(doc.titulos_originales) ? doc.titulos_originales : [])]
+        .filter(Boolean).join(' · ');
     return {
         id: String(doc._id),
-        titulo: doc.titulo || '',
+        titulo,
         subtitulo: doc.subtitulo || '',
         obra: doc.obra_titulo || '',
         autores, editorial, coleccion,
