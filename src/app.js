@@ -125,6 +125,16 @@ app.get('/api/usuarios', (req, res) => res.json({ usuarios: listarUsuarios() }))
 // Versión desplegada («v1.<serie>»): PÚBLICA (antes de la puerta) para poder mostrarla en el pie del menú
 // incluso antes del login. Sin datos sensibles (solo etiqueta/commit/rama).
 app.get('/api/version', (req, res) => res.json({ ok: true, ...versionApp() }));
+// EX-LIBRIS (cartela «Este libro pertenece a…» del panel y de las etiquetas NFC): nombre del bibliotecario +
+// contacto para «devolver si se pierde», desde el .env. PÚBLICA a propósito (antes de la puerta): la idea es
+// que quien ENCUENTRE un libro fuera de la biblioteca pueda ver de quién es y cómo devolverlo (datos que el
+// dueño expone voluntariamente). Admite E-MAIL (con guion) o EMAIL; NOMBRE_BIBLIOTECA opcional.
+app.get('/api/exlibris', (req, res) => res.json({
+    biblioteca: process.env.NOMBRE_BIBLIOTECA || 'BIBLIOTHECA LUDOVICIANA',
+    nombre: process.env.NOMBRE_BIBLIOTECARIO || '',
+    email: process.env['E-MAIL'] || process.env.EMAIL || '',
+    telefono: process.env.TELEFONO || '',
+}));
 // Vista COMPARTIDA por QR: pública (antes de la puerta), pero solo devuelve la ficha del documento cuyo
 // token firmado se presenta — no autentica ni abre nada más de la app.
 app.use('/api', rutasPublicas());

@@ -10822,7 +10822,28 @@ function inspeccionarTagNFC(message) {
 }
 // Ex-libris / propietario: se graba como registro de texto LEGIBLE en TODA etiqueta (libro, estantería,
 // sala). Editable aquí (o por un ajuste en el futuro).
-const EX_LIBRIS = 'BIBLIOTHECA LUDOVICIANA · Este libro pertenece a Luis Ortuño Molina';
+let EX_LIBRIS = localStorage.getItem('exlibris') || 'BIBLIOTHECA LUDOVICIANA · Este libro pertenece a Luis Ortuño Molina';
+// La cartela (biblioteca · propietario · contacto) es CONFIGURABLE desde el .env del servidor
+// (NOMBRE_BIBLIOTECARIO, E-MAIL, TELEFONO, NOMBRE_BIBLIOTECA). Se pide al endpoint PÚBLICO /api/exlibris —a
+// propósito, para que quien ENCUENTRE un libro fuera de la biblioteca vea de quién es y cómo devolverlo— y se
+// cachea en localStorage (así la lectura NFC OFFLINE también muestra el contacto). Cada « · » = una línea.
+// Compone la cadena del ex-libris (biblioteca · propietario · contacto) desde la config del .env. Cada « · »
+// es una LÍNEA en heroExlibris; el contacto usa « — » para no partirse.
+function _construirExLibris(c) {
+  const partes = [(c && c.biblioteca) || 'BIBLIOTHECA LUDOVICIANA'];
+  if (c && c.nombre) partes.push('Este libro pertenece a ' + c.nombre);
+  const contacto = [c && c.email, c && c.telefono].filter(Boolean).join(' — ');
+  if (contacto) partes.push(contacto);
+  return partes.join(' · ');
+}
+(async () => {
+  try {
+    const c = await fetch('/api/exlibris').then((r) => (r.ok ? r.json() : null));
+    if (!c) return;
+    EX_LIBRIS = _construirExLibris(c);
+    localStorage.setItem('exlibris', EX_LIBRIS);
+  } catch (_) { /* sin red: se queda la cacheada / la de por defecto */ }
+})();
 // Registros de una etiqueta de LIBRO: enlace ?doc= + ex-libris + datos offline (BIB1), recortando los datos
 // para CABER junto al enlace y el ex-libris. Devuelve {url, records}.
 function _recordsDoc(d, r) {
@@ -10917,9 +10938,9 @@ function heroExlibris(ex) {
     .map((s) => s.trim())
     .filter(Boolean);
   const lib = p[0] || ex,
-    prop = p.slice(1).join(' · ');
+    lineas = p.slice(1); // propietario, contacto (email — teléfono)… cada parte en SU línea
   return `<div style="text-align:center;font-family:Georgia,'Times New Roman',serif;background:linear-gradient(#cdab6c,#9c7a44);color:#2a1d0e;border:1px solid #6e5226;border-radius:10px;padding:16px 12px;margin:0 0 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 3px 10px rgba(0,0,0,.45)">
-    <div style="font-size:19px;font-weight:700;letter-spacing:2px;text-transform:uppercase">${esc(lib)}</div>${prop ? `<div style="font-size:13px;margin-top:5px;font-style:italic">${esc(prop)}</div>` : ''}</div>`;
+    <div style="font-size:19px;font-weight:700;letter-spacing:2px;text-transform:uppercase">${esc(lib)}</div>${lineas.map((l, i) => `<div style="font-size:13px;margin-top:${i === 0 ? 5 : 2}px;font-style:italic">${esc(l)}</div>`).join('')}</div>`;
 }
 // Estrellas estáticas (solo lectura) para la valoración guardada en la etiqueta.
 const estrellasHTML = (n) => {
@@ -11249,6 +11270,32 @@ function mostrarOfflineNFC(o, ex) {
   const cl = $('#nfcCerr');
   if (cl) cl.onclick = cerrarCmp;
   $('#cmpScrim').onclick = cerrarCmp;
+}
+// DEVOLVER-SI-SE-PIERDE: página PÚBLICA (sin login) para quien ENCUENTRE un libro fuera de la biblioteca y
+// escanee su etiqueta. Muestra la propiedad (ex-libris con nombre + contacto del .env) y los datos del
+// ejemplar leídos de la propia etiqueta (?o=), más un botón discreto «Entrar» para el propietario. Usa datos
+// OFFLINE (no requiere que el finder tenga sesión ni que el servidor devuelva la ficha).
+async function mostrarRetornoPublico(off) {
+  // Refresca el contacto del ex-libris por si el fetch de arranque aún no había resuelto.
+  try {
+    const c = await fetch('/api/exlibris').then((r) => (r.ok ? r.json() : null));
+    if (c) { EX_LIBRIS = _construirExLibris(c); localStorage.setItem('exlibris', EX_LIBRIS); }
+  } catch (_) {}
+  const fmin = fichaMinima({
+    titulo: off.t, estrellas: off.s, esDigital: false, exlibris: EX_LIBRIS,
+    autor: off.a || '', editorial: off.e || '', coleccion: off.x || '', cdu: off.c || '',
+    isbn: off.i || '', ubicacion: off.u || '',
+    origen: 'Datos leídos de la etiqueta NFC de este ejemplar.',
+  });
+  const cont = _sharedCont();
+  cont.innerHTML = `<div style="max-width:460px;margin:0 auto">
+      <p class="muted" style="text-align:center;font-size:13px;margin:6px 0 14px">📚 Has encontrado un libro de esta biblioteca. Aquí verás de quién es y cómo devolverlo.</p>
+      ${fmin}
+      <div style="text-align:center;margin-top:16px"><button class="btn" id="retLogin" style="font-size:12px">Soy el propietario · Entrar</button></div>
+      <div style="margin-top:22px">${_brandLine}</div>
+    </div>`;
+  const b = $('#retLogin');
+  if (b) b.onclick = () => mostrarLogin();
 }
 // Lectura de una etiqueta de ESTANTERÍA: ex-libris (hero) + nombre + «Ver libros» (lista esa ubicación).
 function mostrarEstanteriaNFC(label, amb, est, ex) {
@@ -14263,7 +14310,15 @@ $('#logout').onclick = async () => {
     localStorage.setItem('panel_token', TOKEN);
     limpiarCookieToken();
   }
-  if (!TOKEN) return mostrarLogin();
+  if (!TOKEN) {
+    // Etiqueta de un LIBRO abierta por alguien SIN sesión (típicamente quien lo ENCONTRÓ): en vez del login,
+    // se muestra la tarjeta PÚBLICA de propiedad + contacto para devolverlo (datos offline de la propia
+    // etiqueta, ?o=). El propietario tiene un botón «Entrar». Sin ?o= (o ilegible) → login normal.
+    if (_deepOff) {
+      try { const off = _parseOffline(_b64uDec(_deepOff)); if (off) return mostrarRetornoPublico(off); } catch (_) {}
+    }
+    return mostrarLogin();
+  }
   try {
     const me = await fetch('/api/yo', { headers: { Authorization: 'Bearer ' + TOKEN } }).then((r) =>
       r.json(),

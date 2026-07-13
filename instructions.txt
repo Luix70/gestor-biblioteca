@@ -757,6 +757,14 @@ de ficheros clasificado por CDU.
     · Etiqueta de LIBRO (📶 en la ficha): graba un enlace que abre la ficha al
       acercar el móvil, MÁS datos OFFLINE en la propia etiqueta (ubicación, título,
       autor, editorial, colección, CDU, ISBN) para recolocarlo SIN conexión.
+    · EX-LIBRIS CONFIGURABLE + DEVOLVER-SI-SE-PIERDE: la cartela «Este libro pertenece
+      a…» es configurable desde el .env (NOMBRE_BIBLIOTECA / NOMBRE_BIBLIOTECARIO /
+      EMAIL / TELEFONO), vía el endpoint PÚBLICO /api/exlibris (cacheado en el móvil
+      para la lectura offline). Se muestra en 3 líneas (biblioteca · propietario ·
+      «email — teléfono») y se graba en la etiqueta. Si alguien que NO tiene sesión
+      escanea la etiqueta de un libro (típicamente quien lo ENCONTRÓ), en vez del login
+      ve una TARJETA PÚBLICA con la propiedad + contacto para devolverlo (datos offline
+      de la etiqueta, ?o=), con un botón «Entrar» para el propietario.
     · Etiqueta de ESTANTERÍA (desde Ubicaciones): al acercar el móvil lista los
       libros que contiene.
     · Leer (📲 en el Inbox): con conexión abre la ficha; SIN conexión muestra una
