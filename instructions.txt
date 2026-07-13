@@ -311,7 +311,8 @@ de ficheros clasificado por CDU.
       enorme): Relevancia/recientes (defecto) · Fecha de ingreso · Título · Autor ·
       Posición en la estantería · Posición en la obra · Posición en la colección · Nº de
       páginas (los sin nº de páginas caen SIEMPRE al final, en asc y desc), cada
-      uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia).
+      uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia). El Nº de
+      páginas se muestra ademas en la etiqueta de cada tarjeta/fila («📕 Libro · pdf · 298p»).
       En MÓVIL, al ejecutar la búsqueda (Intro / «Buscar» del teclado) se COLAPSA el panel
       de filtros y se cierra el teclado para ver los resultados (el input lleva
       enterkeyhint="search" para que el teclado muestre «Buscar» y no «Siguiente»). Al ver

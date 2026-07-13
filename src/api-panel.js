@@ -658,7 +658,7 @@ export function rutasPanel() {
 
             // Campos de la tarjeta del Catálogo (los únicos que viajan al cliente).
             const PROY_TARJETA = {
-                titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1,
+                titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1, paginas: 1,
                 tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
                 valoracion: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
             };

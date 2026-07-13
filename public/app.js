@@ -7500,7 +7500,8 @@ function tipoFmtCompacto(d) {
   const ic = tipoIcono(d.tipo_recurso, esComic);
   const tipo = tipoNombre(d.tipo_recurso, esComic);
   const fmts = (d.formatos || []).slice(0, 2).map((f) => esc(String(f))).join('·');
-  return `<span class="fmt" style="background:rgba(120,160,255,.16);color:#9db8ff">${ic} ${tipo}${fmts ? ' · ' + fmts : ''}</span>`;
+  const pag = Number(d.paginas) > 0 ? ` · ${Number(d.paginas)}p` : ''; // nº de páginas (si se conoce)
+  return `<span class="fmt" style="background:rgba(120,160,255,.16);color:#9db8ff">${ic} ${tipo}${fmts ? ' · ' + fmts : ''}${pag}</span>`;
 }
 function docCard(d) {
   const ph = tipoIcono(d.tipo_recurso);
