@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { extraerMetadatosEpub } from './utils/lector-epub.js';
+import { recuperarOriginalesDeFichero } from './utils/titulo-original.js';
 import { extraerMetadatosPdf, textoPagina } from './utils/lector-pdf.js';
 import { medirImagen } from './utils/medir-imagen.js';
 import { analizarImagenesRecurso } from './agente.js';
@@ -157,6 +158,19 @@ function metadatosDesdeNombre(ruta) {
     return datos;
 }
 
+// TÍTULO/IDIOMA ORIGINAL (obras traducidas) desde la PÁGINA DE CRÉDITOS del propio fichero (EPUB/PDF), GRATIS
+// y sin IA — ya en la INGESTA (la IA solo mira la portada, no el texto de créditos, así que se le escapaba y
+// quedaba para el Conformador). Solo se rellenan HUECOS y solo si DIFIEREN del título/idioma del documento.
+// Best-effort: nunca rompe la ingesta (fichero raro, escaneado sin texto, etc.).
+async function rellenarOriginalesDesdeFichero(datosBase, ruta) {
+    try {
+        const res = await recuperarOriginalesDeFichero(ruta, datosBase.titulo);
+        if (res.titulo_original && !datosBase.titulo_original) datosBase.titulo_original = res.titulo_original;
+        if (res.titulos_originales.length && !(datosBase.titulos_originales || []).length) datosBase.titulos_originales = res.titulos_originales;
+        if (res.idioma_original && res.idioma_original !== datosBase.idioma && !datosBase.idioma_original) datosBase.idioma_original = res.idioma_original;
+    } catch { /* best-effort */ }
+}
+
 // Aprovecha los EXTRAS que la lectura de identificador por visión (leerIdentificadorDeImagenes) captó de
 // paso —título/subtítulo/autores/editorial/año/idioma/nº de ejemplar— para rellenar HUECOS de datosBase, y
 // suma TODOS los ISBN/ISSN vistos como candidatos. Conservador: NUNCA pisa un valor ya presente (manda el
@@ -216,6 +230,8 @@ export async function procesarRecurso(entrada) {
         if (datosBase.recurso_ilegible) {
             throw new ErrorRecursoIlegible(`EPUB ilegible (ZIP/OPF dañado): ${path.basename(rutas[0])}. Requiere una copia mejor.`);
         }
+        // Título/idioma original del propio EPUB (página de créditos), gratis y sin IA.
+        await rellenarOriginalesDesdeFichero(datosBase, rutas[0]);
         // La cubierta embebida se resuelve más abajo (resolverPortada), midiéndola frente a las
         // portadas remotas; aquí solo se conserva en datosBase para la pista de visión.
 
@@ -244,6 +260,9 @@ export async function procesarRecurso(entrada) {
             datosBase.texto_util = false;
             if (!datosBase.paginas && renders.length) datosBase.paginas = Math.max(...renders.map(r => r.pagina));
         }
+        // Título/idioma original de la página de créditos del PDF (capa de texto), gratis y sin IA. En un PDF
+        // escaneado sin texto devuelve vacío y no hace nada (lo recuperará el Conformador con la visión CIP).
+        await rellenarOriginalesDesdeFichero(datosBase, rutas[0]);
 
         // CORROBORACIÓN AUTORITATIVA (offline, Fichero) — «identificar PRIMERO, clasificar después»: un
         // ISBN del CUERPO es solo pista… salvo que el Fichero lo resuelva a un LIBRO REAL cuyo TÍTULO casa
