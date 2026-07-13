@@ -1,7 +1,10 @@
 /**
  * Resuelve una obra multivolumen a un documento de la colección 'obras' (check-then-create).
  * Dedup por ISBN de obra si lo hay; si no, por título. Completa huecos (isbn_obra, editorial,
- * colección, cdu) de una obra ya existente. Devuelve { _id, cdu, creada }.
+ * colección, cdu) de una obra ya existente. Devuelve { _id, cdu, titulo, isbn_obra, creada }.
+ * `titulo`/`isbn_obra` son los CANÓNICOS de la obra (los del registro): TODOS sus tomos deben usarlos para
+ * vivir JUNTOS en /CDU/<cdu>/obras/<isbn_obra | titulo>/ — carpeta por isbn_obra si la obra lo tiene, si no
+ * por título (ver servicio-ingesta). Así un tomo añadido después cae SIEMPRE en la misma carpeta.
  *
  * La obra guarda su CDU: TODOS sus tomos comparten ese classmark (así se archivan juntos), igual
  * que una colección de varios volúmenes en una biblioteca física.
@@ -22,7 +25,7 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
         // total_volumenes: solo sube (nunca degrada un total ya conocido a uno menor).
         if (total && total > (existente.total_volumenes || 0)) set.total_volumenes = total;
         if (Object.keys(set).length) await col.updateOne({ _id: existente._id }, { $set: set });
-        return { _id: existente._id, cdu: existente.cdu || cdu || null, creada: false };
+        return { _id: existente._id, cdu: existente.cdu || cdu || null, titulo: existente.titulo || t, isbn_obra: existente.isbn_obra || isbn_obra || null, creada: false };
     }
 
     const nueva = { titulo: t, fecha_creacion: new Date() };
@@ -33,11 +36,13 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
     if (total)       nueva.total_volumenes = total;
     try {
         const r = await col.insertOne(nueva);
-        return { _id: r.insertedId, cdu: cdu || null, creada: true };
+        return { _id: r.insertedId, cdu: cdu || null, titulo: t, isbn_obra: isbn_obra || null, creada: true };
     } catch {
         // Carrera con el índice único de isbn_obra: devolver el existente.
         const ya = isbn_obra ? await col.findOne({ isbn_obra }) : await col.findOne({ titulo: t });
-        return ya ? { _id: ya._id, cdu: ya.cdu || cdu || null, creada: false } : { _id: null, cdu: null, creada: false };
+        return ya
+            ? { _id: ya._id, cdu: ya.cdu || cdu || null, titulo: ya.titulo || t, isbn_obra: ya.isbn_obra || isbn_obra || null, creada: false }
+            : { _id: null, cdu: null, titulo: t, isbn_obra: isbn_obra || null, creada: false };
     }
 }
 

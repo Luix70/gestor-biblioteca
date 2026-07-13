@@ -240,13 +240,18 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         if (docFinal.obra_titulo && typeof docFinal.obra_titulo === 'string' && docFinal.tipo_recurso !== 'revista') {
             const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
             const colId = (docFinal.coleccion && typeof docFinal.coleccion !== 'string') ? docFinal.coleccion : null;
-            const { _id, cdu: cduObra, creada } = await resolverObra(db, {
+            const { _id, cdu: cduObra, titulo: tituloObra, isbn_obra: isbnObra, creada } = await resolverObra(db, {
                 titulo: docFinal.obra_titulo, isbn_obra: docFinal.isbn_obra,
                 editorialId: edId, coleccionId: colId, cdu: docFinal.cdu, total: docFinal.obra_total,
             });
             if (creada) docFinal.alertas_agente.push(`Nueva obra multivolumen registrada: ${docFinal.obra_titulo}`);
             if (_id) docFinal.obra = _id;
             if (cduObra) docFinal.cdu = cduObra; // todos los tomos comparten la CDU de la obra
+            // …y el ISBN de la obra + el TÍTULO CANÓNICOS: todos los tomos usan los MISMOS → misma carpeta
+            // /CDU/<cdu>/obras/<isbn_obra | titulo>/. Evita que un tomo con/sin isbn_obra, o con una variante
+            // del título, caiga en otra carpeta. (La carpeta prefiere el isbn_obra; si la obra no lo tiene, el título.)
+            if (tituloObra) docFinal.obra_titulo = tituloObra;
+            if (isbnObra) docFinal.isbn_obra = isbnObra;
 
             // Al CREAR la obra: resolver su título/sinopsis reales por el isbn_obra (autoridad), ya —
             // no esperar al Conformador. Fire-and-forget para NO añadir latencia a la ingesta del tomo

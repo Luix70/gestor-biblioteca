@@ -283,7 +283,10 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         año_edicion: resultado.año_edicion || documento.año_edicion,
         mes_publicacion: resultado.mes_publicacion || documento.mes_publicacion,
         titulo: resultado.titulo || documento.titulo,
-        // Tomo de obra multivolumen: agrupa los tomos bajo la obra (isbn_obra | título | id).
+        // Tomo de obra multivolumen: TODOS los tomos viven JUNTOS en /CDU/<cdu>/obras/<isbn_obra | título>/.
+        // motor-catalogo IGUALA isbn_obra, obra_titulo y CDU de todos los tomos al valor CANÓNICO de la obra,
+        // así que un tomo añadido después cae SIEMPRE en la misma carpeta (carpeta por isbn_obra si la obra lo
+        // tiene, si no por título).
         obra: (resultado.obra || documento.obra)
             ? (resultado.isbn_obra || documento.isbn_obra || resultado.obra_titulo || documento.obra_titulo || String(resultado.obra || documento.obra))
             : null,

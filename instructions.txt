@@ -465,6 +465,14 @@ de ficheros clasificado por CDU.
     enriquecedor deduce el tomo del PROPIO TEXTO cuando el título/subtítulo/nombre de
     archivo trae «Vol./Tomo N» con el título de la obra delante (motor-enriquecimiento).
     Conservador: solo si no hay ya nº de volumen, y no en revistas ni cómics.
+    CARPETA ÚNICA POR OBRA: todos los tomos viven JUNTOS en
+    /CDU/<cdu>/obras/<isbn_obra | título>/vol-N/ (carpeta por isbn_obra si la obra lo
+    tiene; si no, por su título). motor-catalogo IGUALA en todos los tomos el CDU, el
+    isbn_obra y el obra_titulo al valor CANÓNICO del registro de obra, así que un tomo
+    añadido DESPUÉS cae siempre en la misma carpeta (antes se derivaba de campos del
+    tomo y podía caer aparte). Para consolidar lo ya catalogado (obras cuyos tomos
+    quedaron dispersos): node scripts/consolidar-obras.js (dry-run; --ejecutar mueve las
+    carpetas con verificación y actualiza ruta_base/portada/imágenes; BACKUP antes).
 
   ── ARTÍCULOS (el DOI es el pivote, como el ISBN lo es del libro) ────────────
     Un artículo es como un libro pero con o SIN identificador propio (igual que hay
