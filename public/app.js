@@ -2846,7 +2846,11 @@ function pintarDoc(r, ctx) {
       : 'Ficha reconstruida a partir de la base de datos (este ejemplar aún no tiene etiqueta NFC).'
     : 'Ejemplar digital: en vez de ubicación física se ofrece la descarga.';
   const filasFmin = [
-    ['Título original', especiales.titulo_original], // solo si difiere del título (guarda en `especiales`)
+    // Título original (solo si difiere del título) + el IDIOMA original entre paréntesis al lado (solo si
+    // difiere del idioma del doc). Ambas guardas viven en `especiales`.
+    ['Título original', especiales.titulo_original
+      ? especiales.titulo_original + (especiales.idioma_original ? ` <span class="muted">(${especiales.idioma_original})</span>` : '')
+      : null],
     ['Autor', especiales._autores],
     ['Editorial', especiales._editorial],
     ['Colección', especiales._coleccion],

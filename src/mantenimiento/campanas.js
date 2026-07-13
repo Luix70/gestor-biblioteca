@@ -35,6 +35,7 @@ import { PLACEHOLDERS_AUTOR } from '../utils/creditos-portada.js';
 import path from 'node:path';
 import { carpetaDeDoc } from './util-mantenimiento.js';
 import { recuperarOriginalesDeFichero } from '../utils/titulo-original.js';
+import { indexarDoc } from '../utils/indice-busqueda.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -398,7 +399,12 @@ export async function ejecutarCampana(db, id, { limite, debeAbortar = async () =
                 return { procesados, cambios, pendientes, abortado: true };
             }
             try {
-                if (await camp.procesarDoc(db, doc)) cambios++;
+                if (await camp.procesarDoc(db, doc)) {
+                    cambios++;
+                    // Refresca el índice de búsqueda de ESE doc (una campaña puede cambiar título/título
+                    // original/autores/editorial, que son buscables). Best-effort: nunca rompe la campaña.
+                    if (camp.coleccion === 'biblioteca') await indexarDoc(db, doc._id).catch(() => {});
+                }
             } catch (e) {
                 console.warn(`   ⚠️ campaña ${id} falló en ${doc._id}: ${e.message}`);
             }

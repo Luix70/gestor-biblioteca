@@ -18,6 +18,7 @@ import path from 'node:path';
 import { conectarDB } from '../src/database.js';
 import { carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
 import { recuperarOriginalesDeFichero } from '../src/utils/titulo-original.js';
+import { indexarDoc } from '../src/utils/indice-busqueda.js';
 
 const args = process.argv.slice(2);
 const EJECUTAR = args.includes('--ejecutar');
@@ -64,6 +65,7 @@ async function main() {
       // idioma_original solo si es DISTINTO del idioma del documento y aún no lo tiene.
       if (res.idioma_original && res.idioma_original !== doc.idioma && !doc.idioma_original) set.idioma_original = res.idioma_original;
       await bib.updateOne({ _id: doc._id }, { $set: set });
+      await indexarDoc(db, doc._id).catch(() => {}); // refresca el índice FTS (título original ya buscable)
       nAplicados++;
     }
   }
