@@ -10827,13 +10827,14 @@ let EX_LIBRIS = localStorage.getItem('exlibris') || 'BIBLIOTHECA LUDOVICIANA · 
 // (NOMBRE_BIBLIOTECARIO, EMAIL, TELEFONO, NOMBRE_BIBLIOTECA). Se pide al endpoint PÚBLICO /api/exlibris —a
 // propósito, para que quien ENCUENTRE un libro fuera de la biblioteca vea de quién es y cómo devolverlo— y se
 // cachea en localStorage (así la lectura NFC OFFLINE también muestra el contacto). Cada « · » = una línea.
-// Compone la cadena del ex-libris (biblioteca · propietario · contacto) desde la config del .env. Cada « · »
-// es una LÍNEA en heroExlibris; el contacto usa « — » para no partirse.
+// Compone la cadena del ex-libris (biblioteca · propietario · «Devolver a: email-teléfono») desde la config
+// del .env. Cada « · » es una LÍNEA en heroExlibris; el contacto usa «-» entre email y teléfono (sin « · »,
+// reservado para separar líneas).
 function _construirExLibris(c) {
   const partes = [(c && c.biblioteca) || 'BIBLIOTHECA LUDOVICIANA'];
   if (c && c.nombre) partes.push('Este libro pertenece a ' + c.nombre);
-  const contacto = [c && c.email, c && c.telefono].filter(Boolean).join(' — ');
-  if (contacto) partes.push(contacto);
+  const contacto = [c && c.email, c && c.telefono].filter(Boolean).join('-');
+  if (contacto) partes.push('Devolver a: ' + contacto);
   return partes.join(' · ');
 }
 (async () => {
@@ -10938,9 +10939,14 @@ function heroExlibris(ex) {
     .map((s) => s.trim())
     .filter(Boolean);
   const lib = p[0] || ex,
-    lineas = p.slice(1); // propietario, contacto (email — teléfono)… cada parte en SU línea
-  return `<div style="text-align:center;font-family:Georgia,'Times New Roman',serif;background:linear-gradient(#cdab6c,#9c7a44);color:#2a1d0e;border:1px solid #6e5226;border-radius:10px;padding:16px 12px;margin:0 0 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 3px 10px rgba(0,0,0,.45)">
-    <div style="font-size:19px;font-weight:700;letter-spacing:2px;text-transform:uppercase">${esc(lib)}</div>${lineas.map((l, i) => `<div style="font-size:13px;margin-top:${i === 0 ? 5 : 2}px;font-style:italic">${esc(l)}</div>`).join('')}</div>`;
+    lineas = p.slice(1); // propietario, «Devolver a: email-teléfono»… cada parte en SU línea (una sola)
+  // Cada línea a TODO EL ANCHO y en UNA SOLA línea: nowrap + fuente RESPONSIVA (clamp con vw) que se encoge en
+  // móviles estrechos para caber sin envolver ni recortar. El card ocupa el 100% (box-sizing) y clipa cualquier
+  // desbordamiento extremo. La 1.ª línea (nombre de la biblioteca) va más grande; las demás, más discretas.
+  const linea = (txt, css) =>
+    `<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${css}">${esc(txt)}</div>`;
+  return `<div style="width:100%;box-sizing:border-box;overflow:hidden;text-align:center;font-family:Georgia,'Times New Roman',serif;background:linear-gradient(#cdab6c,#9c7a44);color:#2a1d0e;border:1px solid #6e5226;border-radius:10px;padding:14px 12px;margin:0 0 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 3px 10px rgba(0,0,0,.45)">
+    ${linea(lib, 'font-size:clamp(13px,4.6vw,19px);font-weight:700;letter-spacing:1.5px;text-transform:uppercase')}${lineas.map((l, i) => linea(l, `font-size:clamp(11px,3.6vw,13px);margin-top:${i === 0 ? 5 : 2}px;font-style:italic`)).join('')}</div>`;
 }
 // Estrellas estáticas (solo lectura) para la valoración guardada en la etiqueta.
 const estrellasHTML = (n) => {
