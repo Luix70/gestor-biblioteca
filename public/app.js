@@ -3708,8 +3708,12 @@ function _imgExtraible() {
 // y añadirla al carrusel. Pensado para rescatar la foto del autor que suele ir en el interior del libro.
 async function extraerImagenDocumento() {
   const a = _imgState && _imgState.archivo;
-  if (!a || !a.url) { toast('Este documento no tiene fichero digital', 'warn'); return; }
+  if (!a || !a.nombre) { toast('Este documento no tiene fichero digital', 'warn'); return; }
   const ext = (a.nombre.split('.').pop() || '').toLowerCase();
+  // pdf/epub se procesan EN EL NAVEGADOR y necesitan el fichero descargable (a.url); los formatos servidos por
+  // el BACKEND (cbz/cbr/cb7/djvu/mobi/azw/azw3) NO lo necesitan — se piden por id. Antes se exigía a.url a
+  // TODOS, lo que bloqueaba la extracción de imágenes y la «Página de texto» de MOBI/AZW3 (y paginables sin url).
+  if (['pdf', 'epub'].includes(ext) && !a.url) { toast('Este documento no tiene fichero digital', 'warn'); return; }
   try {
     const id = _imgState.id;
     const enc = encodeURIComponent(id);
@@ -6766,14 +6770,14 @@ function construirSearch() {
     <details class="card foldcard" id="sqFiltros" style="margin-bottom:16px">
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
-        <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off"></div>
+        <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search"></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="apuntes">Apuntes</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
         <div><label>Estantería</label><select id="sqEstanteria" disabled><option value="">Todas</option></select></div>
         <div class="admin-only" style="display:flex;align-items:flex-end"><button class="btn" id="sqGoUbic" title="Gestionar ubicaciones (o ver esta estantería)">📍 Gestionar</button></div>
-        <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off"></div>
+        <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off" enterkeyhint="search"></div>
         <div><label>Estrellas${ROL === 'admin' ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
           <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' ? '<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"> 🔞 NSFW</label>' : ''}</div>
         </details></div>
@@ -6793,6 +6797,7 @@ function construirSearch() {
             <option value="posicion">Posición en la estantería</option>
             <option value="obra">Posición en la obra</option>
             <option value="coleccion">Posición en la colección</option>
+            <option value="paginas">Nº de páginas</option>
           </select></div>
         <div id="sqDirWrap" style="display:none"><label>Sentido</label><button class="btn" id="sqDir" data-dir="desc" title="Cambiar entre ascendente y descendente">↓ Desc</button></div>
       </div>
@@ -6817,6 +6822,9 @@ function construirSearch() {
   const colapsarFiltros = () => {
     const fl = $('#sqFiltros');
     if (fl) fl.open = false;
+    // Móvil: el input de búsqueda vive DENTRO del panel; al plegarlo hay que soltar el foco para que se
+    // cierre el teclado y los resultados queden a la vista.
+    if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
   };
   $('#sqQ').oninput = () => {
     clearTimeout(busqTimer);
@@ -6866,7 +6874,7 @@ function construirSearch() {
       fo.addEventListener('toggle', () => localStorage.setItem('sq_ordenar', fo.open ? '1' : '0'));
     }
   }
-  const DIR_DEF = { reciente: 'desc', fecha: 'desc', titulo: 'asc', autor: 'asc', posicion: 'asc', obra: 'asc', coleccion: 'asc' };
+  const DIR_DEF = { reciente: 'desc', fecha: 'desc', titulo: 'asc', autor: 'asc', posicion: 'asc', obra: 'asc', coleccion: 'asc', paginas: 'desc' };
   const setOrdenDir = (d) => {
     const b = $('#sqDir');
     if (b) { b.dataset.dir = d; b.textContent = d === 'asc' ? '↑ Asc' : '↓ Desc'; }

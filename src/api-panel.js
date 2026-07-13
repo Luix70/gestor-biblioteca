@@ -582,7 +582,7 @@ export function rutasPanel() {
             // (alfabético), autor, posicion (físico en estantería), obra (obra+volumen), coleccion
             // (colección+nº). Compatibilidad: 'reciente'=fecha desc, 'antiguo'=fecha asc. Los nulos van al
             // final. Con collation español (acentos/mayúsculas indiferentes) en los órdenes de texto.
-            const CAMPO_ORDEN = { reciente: 'fecha', antiguo: 'fecha', fecha: 'fecha', titulo: 'titulo', autor: 'autor', posicion: 'posicion', obra: 'obra', coleccion: 'coleccion' };
+            const CAMPO_ORDEN = { reciente: 'fecha', antiguo: 'fecha', fecha: 'fecha', titulo: 'titulo', autor: 'autor', posicion: 'posicion', obra: 'obra', coleccion: 'coleccion', paginas: 'paginas' };
             const campoOrden = CAMPO_ORDEN[orden] || 'fecha';
             const dirRaw = String(req.query.dir || '').toLowerCase();
             const s = dirRaw === 'asc' ? 1 : dirRaw === 'desc' ? -1
@@ -637,6 +637,17 @@ export function rutasPanel() {
                         { $addFields: { _cn: { $ifNull: ['$coleccion_nombre', 'zzzzzzzz'] }, _cnum: { $convert: { input: '$coleccion_numero', to: 'double', onError: 1e9, onNull: 1e9 } } } },
                     ],
                     orden: { _cn: s, _cnum: s, titulo: 1 } }
+                : campoOrden === 'paginas'
+                ? { pre: [
+                        // Nº de PÁGINAS: _pag NUMÉRICO ($convert; `paginas` puede faltar o venir como string).
+                        // _pagFalta=1 para los que NO tienen páginas → van SIEMPRE al final (en asc y desc),
+                        // como el resto de nulos; el desempate final es por título.
+                        { $addFields: {
+                            _pag: { $convert: { input: '$paginas', to: 'double', onError: 0, onNull: 0 } },
+                            _pagFalta: { $cond: [{ $gt: [{ $convert: { input: '$paginas', to: 'double', onError: 0, onNull: 0 } }, 0] }, 0, 1] },
+                        } },
+                    ],
+                    orden: { _pagFalta: 1, _pag: s, titulo: 1 } }
                 : { pre: [], orden: campoOrden === 'titulo' ? { titulo: s } : { fecha_ingreso: s } };
 
             // Proyección LIGERA: _id + EXACTAMENTE las claves del $sort. Nada más entra al ordenador.

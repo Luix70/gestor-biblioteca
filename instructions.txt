@@ -309,8 +309,12 @@ de ficheros clasificado por CDU.
         - Etiqueta NFC (admin): Todas / Con etiqueta (📶) / Sin etiqueta
       El ORDEN está en su PROPIO colapsable «↕️ Ordenar» (el panel de búsqueda era
       enorme): Relevancia/recientes (defecto) · Fecha de ingreso · Título · Autor ·
-      Posición en la estantería · Posición en la obra · Posición en la colección, cada
-      uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia). Al ver
+      Posición en la estantería · Posición en la obra · Posición en la colección · Nº de
+      páginas (los sin nº de páginas caen SIEMPRE al final, en asc y desc), cada
+      uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia).
+      En MÓVIL, al ejecutar la búsqueda (Intro / «Buscar» del teclado) se COLAPSA el panel
+      de filtros y se cierra el teclado para ver los resultados (el input lleva
+      enterkeyhint="search" para que el teclado muestre «Buscar» y no «Siguiente»). Al ver
       UNA estantería se ordena por POSICIÓN física (ya reflejado en el selector, ver
       Ubicaciones · 📋). «Posición en la estantería» ordena por el orden FÍSICO combinado
       ÁMBITO → ESTANTERÍA → posición dentro de la estantería (orden_estanteria, NUMÉRICO:
