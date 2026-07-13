@@ -26,14 +26,21 @@ const LIMITE = parseInt((args[args.indexOf('--limite') + 1] || '0'), 10) || 0;
 async function main() {
   const db = await conectarDB();
   const bib = db.collection('biblioteca');
-  const cur = bib.find(
+  const PROY = { titulo: 1, nombre_archivo: 1, ruta_base: 1, cdu: 1, formatos: 1, isbn: 1, issn: 1, idioma: 1, idioma_original: 1, 'año_edicion': 1, mes_publicacion: 1, obra: 1, isbn_obra: 1, obra_titulo: 1, volumen_numero: 1 };
+  // Sacamos PRIMERO todos los _id (consulta rápida que se drena de golpe). Procesar cada libro abre y parsea
+  // su fichero (LENTO en el Atom); mantener un cursor abierto durante ese trabajo lo agota en Atlas
+  // (CursorNotFound, code 43, a los ~10 min de inactividad). Con los _id en memoria no hay cursor vivo.
+  const ids = (await bib.find(
     { tipo_recurso: 'libro', titulo_original: { $exists: false }, formatos: { $in: ['epub', 'pdf'] } },
-    { projection: { titulo: 1, nombre_archivo: 1, ruta_base: 1, cdu: 1, formatos: 1, isbn: 1, issn: 1, idioma: 1, idioma_original: 1, 'año_edicion': 1, mes_publicacion: 1, obra: 1, isbn_obra: 1, obra_titulo: 1, volumen_numero: 1 } },
-  );
+    { projection: { _id: 1 } },
+  ).toArray()).map((d) => d._id);
+  console.log(`Candidatos (libros epub/pdf sin título original): ${ids.length}`);
 
   let nEscaneados = 0, nSinFichero = 0, nConOriginal = 0, nAplicados = 0, nErrores = 0;
-  for await (const doc of cur) {
+  for (const _id of ids) {
     if (LIMITE && nEscaneados >= LIMITE) break;
+    const doc = await bib.findOne({ _id }, { projection: PROY });
+    if (!doc) continue;
     const ruta = path.join(carpetaDeDoc(doc), doc.nombre_archivo || '');
     let existe = true;
     try { await fs.access(ruta); } catch { existe = false; }
