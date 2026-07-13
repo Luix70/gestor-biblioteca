@@ -10824,7 +10824,7 @@ function inspeccionarTagNFC(message) {
 // sala). Editable aquí (o por un ajuste en el futuro).
 let EX_LIBRIS = localStorage.getItem('exlibris') || 'BIBLIOTHECA LUDOVICIANA · Este libro pertenece a Luis Ortuño Molina';
 // La cartela (biblioteca · propietario · contacto) es CONFIGURABLE desde el .env del servidor
-// (NOMBRE_BIBLIOTECARIO, E-MAIL, TELEFONO, NOMBRE_BIBLIOTECA). Se pide al endpoint PÚBLICO /api/exlibris —a
+// (NOMBRE_BIBLIOTECARIO, EMAIL, TELEFONO, NOMBRE_BIBLIOTECA). Se pide al endpoint PÚBLICO /api/exlibris —a
 // propósito, para que quien ENCUENTRE un libro fuera de la biblioteca vea de quién es y cómo devolverlo— y se
 // cachea en localStorage (así la lectura NFC OFFLINE también muestra el contacto). Cada « · » = una línea.
 // Compone la cadena del ex-libris (biblioteca · propietario · contacto) desde la config del .env. Cada « · »

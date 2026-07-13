@@ -128,11 +128,11 @@ app.get('/api/version', (req, res) => res.json({ ok: true, ...versionApp() }));
 // EX-LIBRIS (cartela «Este libro pertenece a…» del panel y de las etiquetas NFC): nombre del bibliotecario +
 // contacto para «devolver si se pierde», desde el .env. PÚBLICA a propósito (antes de la puerta): la idea es
 // que quien ENCUENTRE un libro fuera de la biblioteca pueda ver de quién es y cómo devolverlo (datos que el
-// dueño expone voluntariamente). Admite E-MAIL (con guion) o EMAIL; NOMBRE_BIBLIOTECA opcional.
+// dueño expone voluntariamente). NOMBRE_BIBLIOTECA opcional (por defecto «BIBLIOTHECA LUDOVICIANA»).
 app.get('/api/exlibris', (req, res) => res.json({
     biblioteca: process.env.NOMBRE_BIBLIOTECA || 'BIBLIOTHECA LUDOVICIANA',
     nombre: process.env.NOMBRE_BIBLIOTECARIO || '',
-    email: process.env['E-MAIL'] || process.env.EMAIL || '',
+    email: process.env.EMAIL || '',
     telefono: process.env.TELEFONO || '',
 }));
 // Vista COMPARTIDA por QR: pública (antes de la puerta), pero solo devuelve la ficha del documento cuyo
