@@ -22,8 +22,20 @@ export function esTituloArtefacto(s) {
     if (/\.(pdf|epub|mobi|azw3|fb2|djvu|cbr|cbz|cb7)$/i.test(t)) return true; // el "título" es un nombre de fichero (p. ej. "jan09-1.pdf")
     if (/[\\]/.test(t)) return true;                                // contiene barra invertida → es una ruta
     if (/^[a-z]:[\\/]?/i.test(t) && /\.[a-z0-9]{2,4}$/i.test(t)) return true; // "C:…algo.ext" (ruta Windows)
-    if (/^microsoft\s+(word|powerpoint|excel|publisher)\b/i.test(t)) return true; // "Microsoft Word - documento1"
+    if (/^microsoft\s+(word|powerpoint|excel|publisher|frontpage)\b/i.test(t)) return true; // "Microsoft Word - documento1"
     if (/^(untitled|sin\s*t[íi]tulo|documento?\s*\d*|document\s*\d+|presentaci[óo]n\s*\d*)$/i.test(t)) return true;
+    // "New Page N" / "Untitled Page" / "Page N" / "Página N": página por defecto de editores HTML
+    // (FrontPage/Mobipocket…) grabada como título. Caso real de una ingesta masiva: «New Page 12».
+    if (/^(new\s+page|untitled\s+page|page|p[áa]gina)\s*\d*$/i.test(t)) return true;
+    // Cabecera de correo/mensaje colada como título ("Subject: Ebooks from TeAM YYePG", "From: …"). Un título
+    // real no empieza por un campo de email.
+    if (/^\s*(subject|from|sender|to|date|sent|reply-to)\s*:/i.test(t)) return true;
+    // Marca de grupos de "scene"/pirateo de ebooks incrustada en los metadatos (no es un título): TeAM YYePG,
+    // DDU, "ebooks from …". Casos reales de una ingesta masiva.
+    if (/\byyepg\b|team\s+(?:yyepg|ddu)|ebooks?\s+from\b/i.test(t)) return true;
+    // "<algo> FM/DVI/TEX/INDD…": el productor grabó el nombre del fichero FUENTE (FrameMaker .fm, TeX .dvi/.tex,
+    // InDesign .indd) con la extensión separada por un espacio. Caso real: «Hawking FM». Cae a la autoridad/nombre.
+    if (/^[\w.'-]+\s+(fm|dvi|tex|indd|idml|qx[dpb]|p65|sla|pmd)$/i.test(t)) return true;
     if (/https?:\/\//i.test(t)) return true;                        // un título no lleva una URL → artefacto
     // DOI como "título": los ficheros de Springer/editoriales se descargan con su DOI por nombre
     // («10.1007@978-3-319-38992-9», «10.1007/978-…», o URL-codificado «10.1007%40978-…»). Un DOI NO es un

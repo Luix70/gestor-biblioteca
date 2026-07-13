@@ -399,9 +399,19 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Estado de verificación: completado solo si hay título, CDU y un identificador válido
     // (ISBN para libros, ISSN para revistas).
     const tieneIdentificador = !!(documento.isbn || documento.issn);
+    // Si el título SIGUE siendo un ARTEFACTO tras todo el enriquecimiento (ninguna autoridad lo sustituyó —
+    // p. ej. no hay ISBN que buscar), NO se da por bueno aunque tenga CDU/identificador: se marca pendiente y
+    // se SEÑALA para una investigación MÁS PROFUNDA (visión del propio libro en el Conformador / revisión en el
+    // panel). Cubre las alucinaciones/artefactos de la última ingesta masiva («New Page 12», «Subject: … TeAM
+    // YYePG», «Hawking FM»), que antes colaban como título real.
+    const tituloEsArtefacto = !documento.titulo || esTituloArtefacto(documento.titulo);
     documento.estado_verificacion =
-        (documento.titulo && documento.cdu && tieneIdentificador) ? 'completado' : 'pendiente';
-    if (documento.estado_verificacion === 'pendiente') {
+        (documento.titulo && !tituloEsArtefacto && documento.cdu && tieneIdentificador) ? 'completado' : 'pendiente';
+    if (tituloEsArtefacto) {
+        documento.revision_requerida = true;   // lo prioriza la cola de revisión del panel
+        documento.titulo_artefacto = true;     // señal para el Conformador: relanzar la visión del libro
+        documento.alertas_agente.push(`Título no fiable ("${String(documento.titulo || '—').slice(0, 50)}"): parece un artefacto del productor/OCR, no un título real → requiere investigación más profunda (visión del libro).`);
+    } else if (documento.estado_verificacion === 'pendiente') {
         documento.alertas_agente.push("Identificación incompleta (sin ISBN/ISSN o sin CDU): requiere revisión humana.");
     }
 

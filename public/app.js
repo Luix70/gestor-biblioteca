@@ -3032,6 +3032,7 @@ function pintarDoc(r, ctx) {
     if (r.archivo_url && _nom.endsWith('.epub')) iniciarLectorEpub(encUrl(r.archivo_url));
     else if (r.archivo_url && _nom.endsWith('.pdf')) iniciarLectorPdf(encUrl(r.archivo_url));
     else if (/\.(cbz|cbr|cb7|djvu)$/.test(_nom)) iniciarLectorComic(d._id);
+    else if (/\.(mobi|azw3?)$/.test(_nom)) iniciarLectorMobi(d._id);
     if (r.audios && r.audios.length) iniciarReproductorAudio(r.doc && r.doc._id, r.audios); // audiolibro / lectura con audio: playlist
   };
   const ld = $('#lectDet');
@@ -3925,6 +3926,33 @@ async function extraerLazy(id, cfg) {
     } catch (e) { toast(e.message, 'bad'); }
     pintarGestorImagenes();
   };
+}
+
+// MOBI/AZW3: PREVISUALIZACIÓN en la ficha (no hay lector nativo en el navegador como para EPUB/PDF). El
+// backend extrae el TEXTO best-effort conservando la estructura (títulos, negrita/cursiva) y detecta DRM /
+// compresión no soportada (HUFF/CDIC). Se renderiza en un iframe SANDBOX (sin scripts) para AISLAR el HTML
+// del libro. Con DRM → aviso + descarga (como pedía el usuario: "siempre que no fueran DRM").
+async function iniciarLectorMobi(id) {
+  const wrap = $('#mobiWrap'), msg = $('#mobiMsg');
+  if (!wrap) return;
+  let r;
+  try { r = await api('/documentos/' + encodeURIComponent(id) + '/pagina-texto'); }
+  catch (e) { if (msg) msg.textContent = 'No se pudo leer el documento: ' + e.message; return; }
+  if (r.drm) { if (msg) msg.innerHTML = '🔒 Fichero con DRM: no se puede previsualizar. Descárgalo para abrirlo en tu lector.'; return; }
+  if (r.noSoportado) { if (msg) msg.textContent = 'Compresión no soportada (HUFF/CDIC): no se pudo extraer el texto para previsualizar.'; return; }
+  if (!r.html) { if (msg) msg.textContent = 'No se pudo extraer texto para previsualizar este documento.'; return; }
+  // srcdoc = documento HTML mínimo con el texto del libro. sandbox="" ⇒ sin scripts (aislado y seguro).
+  const doc =
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<style>html,body{margin:0}body{font:16px/1.65 Georgia,'Times New Roman',serif;color:#1a1a1a;background:#fff;padding:18px 20px}` +
+    `img{max-width:100%;height:auto}h1,h2,h3,h4{line-height:1.25}p{margin:.6em 0}</style>` +
+    `<div style="max-width:40em;margin:0 auto">${r.titulo ? '<h2>' + esc(r.titulo) + '</h2>' : ''}${r.html}</div>`;
+  const ifr = document.createElement('iframe');
+  ifr.setAttribute('sandbox', ''); // sin scripts: el HTML del libro se renderiza aislado
+  ifr.srcdoc = doc;
+  ifr.style.cssText = 'width:100%;height:62vh;border:0;border-radius:10px;background:#fff';
+  wrap.innerHTML = '';
+  wrap.appendChild(ifr);
 }
 
 // Rasteriza UNA página de texto de un MOBI/AZW3 CONSERVANDO la estructura (encabezados, negrita/cursiva,
@@ -5944,6 +5972,13 @@ function previewArchivo(r) {
       <button class="epubfs" id="comicFs" title="Pantalla completa" style="display:none">⛶</button>
       <div class="epubbar" id="comicBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="comicCur">1</span> / <span id="comicTotal">?</span></span></div>
       <div class="epubmsg" id="comicMsg">Cargando cómic…</div></div>${acc}</div>`;
+  // MOBI/AZW3: previsualización PROPIA (no hay lector nativo en el navegador). El backend extrae el TEXTO
+  // best-effort conservando la estructura y detecta DRM/compresión no soportada. Se inicializa tras pintar
+  // (iniciarLectorMobi) renderizándolo en un iframe SANDBOX (sin scripts). La portada/imágenes embebidas ya
+  // viajan al carrusel de la ficha.
+  if (['mobi', 'azw', 'azw3'].includes(ext))
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📙 ${esc(nombre)}</h3>
+    <div class="epubwrap" id="mobiWrap"><div class="epubmsg" id="mobiMsg">Cargando previsualización…</div></div>${acc}</div>`;
   // Resto de formatos: sin vista previa integrada — solo descarga.
   const ic = { djvu: '📘', mobi: '📙', azw3: '📙' }[ext] || '📦';
   return audio + `<div class="fileprev"><div class="filebox"><div class="ic">${ic}</div><div style="font-weight:600;word-break:break-word">${esc(nombre)}</div>
@@ -12731,6 +12766,13 @@ async function autorFicha(id) {
   let librosHtml;
   if (!libros.length) librosHtml = '<div class="muted" style="font-size:12px;margin-top:6px">Sin libros asociados.</div>';
   else librosHtml = ROL_SECCION.map(([rol, lab]) => seccionRol(rol, lab)).join('') || gridLibros(libros);
+  // DESGLOSE por rol junto al total: resuelve la confusión del «0 libros» (p. ej. Arthur Rackham no es AUTOR
+  // de ninguno pero es ILUSTRADOR de 3). Se muestra SIEMPRE «autor N» (aunque sea 0) y luego cada función con
+  // libros (>0), en el orden de las secciones.
+  const nRol = (rol) => (porRol.get(rol) || []).length;
+  const desgloseRoles = libros.length
+    ? [`autor ${nRol('autor')}`, ...ROL_SECCION.filter(([rol]) => rol !== 'autor' && nRol(rol)).map(([rol]) => `${rol} ${nRol(rol)}`)].join(' · ')
+    : '';
   // Resumen de roles que desempeña esta persona (autor/traductor/…).
   // Botones de la columna de la foto (arriba): admin ve Foto/Autocompletar + Guardar/Cerrar DUPLICADOS aquí
   // (cómodos sin bajar hasta el pie); el invitado solo Cerrar.
@@ -12763,7 +12805,7 @@ async function autorFicha(id) {
     </div>
     <div style="margin-top:12px">
       <div class="row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})</div>
+        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600">Libros (${libros.length})${desgloseRoles ? `<span style="text-transform:none;letter-spacing:0;font-weight:400"> · ${esc(desgloseRoles)}</span>` : ''}</div>
         ${libros.length ? `<div class="row" style="gap:6px">
           <button class="btn" id="autSelModo" style="padding:3px 9px;font-size:12px">🖱 Modo selección</button>
           <button class="btn" id="autVerBusqueda" style="padding:3px 9px;font-size:12px" title="Ver todos sus libros en el Catálogo (con filtros, orden y selección)">🔍 Ver en Catálogo</button>

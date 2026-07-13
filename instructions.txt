@@ -1638,3 +1638,21 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
         es additionalProperties-abierto: sin setup-mongo). Backfill para lo ya catalogado:
         scripts/recuperar-titulo-original.js (lee la pagina de copyright del EPUB/PDF, SIN IA;
         dry-run por defecto).
+
+  -- FICHA: previsualizar MOBI/AZW3 · autores por rol · titulos artefacto ----------
+    * MOBI/AZW3 se PREVISUALIZAN en la ficha («📖 Leer»): el backend extrae el TEXTO
+      (/documentos/:id/pagina-texto, conservando estructura) y el front lo renderiza en
+      un iframe SANDBOX (sin scripts, aislado). Con DRM o compresion no soportada
+      (HUFF/CDIC) → aviso + descarga. (No hay lector nativo de mobi en el navegador como
+      para EPUB/PDF; esto es una previsualizacion del texto, no un lector paginado.)
+    * Ficha de AUTOR: junto a «Libros (N)» se muestra el DESGLOSE por rol —siempre
+      «autor N» (aunque sea 0) + cada funcion con libros (ilustrador/traductor/…)—, para
+      que un ilustrador no parezca «autor de 0 libros». (El recuento de la LISTA de
+      autores sigue siendo por rol AUTOR; filtra por rol para ver los de contribucion.)
+    * TITULOS ARTEFACTO: esTituloArtefacto (utils/parsear-nombre.js) detecta mas casos —
+      «New Page N», cabeceras de correo («Subject:/From:…»), marcas de scene («TeAM
+      YYePG», «ebooks from…») y nombres de fichero fuente con extension separada («Hawking
+      FM» = FrameMaker). Si tras enriquecer el titulo SIGUE siendo artefacto (ninguna
+      autoridad lo sustituyo), el doc NO se da por completado: se marca `pendiente` +
+      `revision_requerida` + `titulo_artefacto` (para relanzar una investigacion mas
+      profunda —vision del libro— en el Conformador / revision en el panel).
