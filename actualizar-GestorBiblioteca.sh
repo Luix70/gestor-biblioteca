@@ -184,6 +184,13 @@ echo "==> Código extraído en $SRC_DIR"
 # puntos de montaje OCUPADOS dentro de $APP_DIR y bloquean el rsync. Además, down -v
 # elimina el volumen anónimo de node_modules (el que ensombrecía dependencias viejas).
 cd "$APP_DIR"
+
+# `docker-compose` v1 (PyInstaller) se AUTO-EXTRAE a /tmp/_MEIxxxx en cada ejecución y lo borra al salir…
+# salvo si el proceso muere/lo matan (p. ej. al quedarse sin espacio), dejando restos de ~24 MB. En el tmpfs
+# /tmp (solo ~496 MB en RAM) se acumulan hasta LLENARLO → "No space left on device" y el daemon se cuelga.
+# Purga los restos ANTIGUOS (>60 min: nunca uno en uso) antes de invocar compose. Best-effort.
+find /tmp -maxdepth 1 -name '_MEI*' -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+
 echo "==> Parando contenedor y eliminando volumen de node_modules"
 $COMPOSE down -v
 
