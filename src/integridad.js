@@ -31,6 +31,16 @@ const DIR_CUARENTENA = dir('PATH_CUARENTENA', 'Cuarentena');
 
 const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
 const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
+// Formatos de DOCUMENTO (los que sí deben tener un fichero original tipo EXT_DOC). Un AUDIOLIBRO sin ninguno
+// de estos es audio-only: su «original» son las pistas de audio, no un pdf/epub → NO cuenta como «sin fichero».
+const FORMATOS_DOC = ['pdf', 'epub', 'mobi', 'azw3', 'cbr', 'cbz', 'cb7', 'djvu'];
+// ¿Es un audiolibro audio-only (tiene audio y NO espera un fichero de documento)? Entonces la comprobación
+// «falta el fichero original» (que busca EXT_DOC) no aplica. Un audiolibro CON pdf sí se comprueba.
+const esAudioSinDoc = (d) => {
+    const f = d.formatos || [];
+    const tieneAudio = (Array.isArray(d.audios) && d.audios.length) || d.naturaleza === 'audiolibro' || f.includes('audio');
+    return tieneAudio && !f.some((x) => FORMATOS_DOC.includes(x));
+};
 // Marcador de ÁRBOL PRESERVADO (transmedia/audiolibro): un fichero .ruta_fija en la raíz de un árbol
 // protege TODO su subárbol — Integridad no lo poda, ni lo recicla como huérfano, ni lo reubica (estructura
 // intacta, política «borrar nunca»). Los documentos de dentro llevan además `ruta_fija:true`.
@@ -71,7 +81,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     prog('cargando');
     const db = await conectarDB();
     const col = db.collection('biblioteca');
-    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1 } }).toArray();
+    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1 } }).toArray();
     const rutasWeb = new Set(docs.map(d => d.ruta_base).filter(Boolean));
     const porId = new Map(docs.map(d => [String(d._id), d]));
 
@@ -94,7 +104,8 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     let _iD = 0;
     for (const d of docs) {
         if (++_iD % 50 === 0) prog('docs-sin-fichero', { i: _iD, total: docs.length });
-        if ((d.formatos || []).includes('papel') || !d.ruta_base) continue;
+        // 'papel' (sin fichero digital) y AUDIOLIBROS audio-only (su original es el audio, no un EXT_DOC) no aplican.
+        if ((d.formatos || []).includes('papel') || !d.ruta_base || esAudioSinDoc(d)) continue;
         const carpeta = absDe(d.ruta_base);
         if (await existe(carpeta) && !await tieneDocFichero(carpeta)) sinFichero.push(d);
     }
