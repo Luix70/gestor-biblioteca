@@ -97,13 +97,15 @@ export function logout(token) { if (token) revocados.add(token); }
  * autoriza a ver ESA ficha (y, si `descarga`, a descargar el fichero, para medios digitales). El marcador
  * `c:1` lo distingue de un token de sesión (que lleva `u`), así que uno no vale como el otro.
  */
-export function firmarCompartir(docId, opciones = {}) {
-    const payload = Buffer.from(JSON.stringify({ c: 1, d: String(docId), dl: !!opciones.descarga })).toString('base64url');
+// Firma un token de compartir. `opciones.tipo` = 'doc' (por defecto) | 'coleccion' | 'obra' — así el MISMO
+// token/vista pública sirve para compartir un documento suelto o un GRUPO (colección/obra) con sus miembros.
+export function firmarCompartir(id, opciones = {}) {
+    const payload = Buffer.from(JSON.stringify({ c: 1, d: String(id), dl: !!opciones.descarga, t: opciones.tipo || 'doc' })).toString('base64url');
     const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
     return payload + '.' + sig;
 }
 
-/** Valida un token de compartir → { docId, descarga } o null. */
+/** Valida un token de compartir → { docId, descarga, tipo } o null. (tipo='doc' si el token es antiguo.) */
 export function validarCompartir(token) {
     if (!token || typeof token !== 'string') return null;
     const i = token.lastIndexOf('.');
@@ -114,7 +116,7 @@ export function validarCompartir(token) {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     let data; try { data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { return null; }
     if (!data || data.c !== 1 || !data.d) return null;   // no es un token de compartir
-    return { docId: data.d, descarga: !!data.dl };
+    return { docId: data.d, descarga: !!data.dl, tipo: ['coleccion', 'obra'].includes(data.t) ? data.t : 'doc' };
 }
 
 /** Verifica una contraseña contra la de CUALQUIER admin (re-confirmación de acciones destructivas). */

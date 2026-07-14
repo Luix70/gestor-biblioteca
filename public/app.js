@@ -1550,7 +1550,7 @@ function pintarObra(r) {
         ${o.cdu ? `<div class="mono muted" style="margin-top:8px">CDU ${esc(o.cdu)}${desc && desc.titulo_es ? ' · ' + esc(desc.titulo_es) : ''}</div>` : ''}
         ${o.descripcion ? `<p class="muted" style="font-size:12px;margin-top:6px">${esc(o.descripcion)}</p>` : ''}
         ${desc && desc.descripcion_es ? `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">Descripción CDU</summary><p class="muted" style="font-size:12px;margin-top:6px">${esc(desc.descripcion_es)}</p></details>` : ''}
-        ${editBtn}
+        ${editBtn}<button class="btn" id="obraCompartir" style="margin-top:8px;margin-left:6px;padding:4px 10px;font-size:12px" title="Compartir un enlace a esta obra (todos sus tomos + descarga)">🔗 Compartir</button>
       </div></div>`;
   const vols = r.volumenes.length
     ? r.volumenes.map((v) => tomoCard(v.doc, v.numero, !v.presente)).join('')
@@ -1574,6 +1574,7 @@ function pintarObra(r) {
   }));
   if ($('#obraNumerar')) $('#obraNumerar').onclick = () => numerarTomos();
   if ($('#obraEditar')) $('#obraEditar').onclick = () => editarGrupo('obra', o);
+  if ($('#obraCompartir')) $('#obraCompartir').onclick = () => compartirGrupo('obra', o._id, o.titulo);
 }
 
 // Editor «Numerar tomos»: lista cada libro de la obra con un campo para su nº de tomo (vacío = sin
@@ -1716,7 +1717,7 @@ function pintarColeccion(r) {
         <div style="margin-top:8px">${ratingBar('colecciones', c._id, c.valoracion, c.nsfw)}</div>
         ${c.cdu ? `<div class="mono muted" style="margin-top:8px">CDU ${esc(c.cdu)}${desc && desc.titulo_es ? ' · ' + esc(desc.titulo_es) : ''}</div>` : ''}
         ${c.descripcion ? `<p class="muted" style="font-size:12px;margin-top:6px">${esc(c.descripcion)}</p>` : ''}
-        ${editBtn}
+        ${editBtn}<button class="btn" id="colCompartir" style="margin-top:8px;margin-left:6px;padding:4px 10px;font-size:12px" title="Compartir un enlace a esta colección (todos sus documentos + descarga)">🔗 Compartir</button>
       </div></div>`;
   // Nº de cada miembro. En LIBROS y admin, es un botón: toca = renumerar ese volumen directo (mini-modal).
   const numeroChip = (d) => {
@@ -1825,6 +1826,7 @@ function pintarColeccion(r) {
   if ($('#colNumerar')) $('#colNumerar').onclick = () => numerarColeccion();
   if ($('#colLomos')) $('#colLomos').onclick = () => numerarPorLomos();
   if ($('#colEditar')) $('#colEditar').onclick = () => editarGrupo('coleccion', c);
+  if ($('#colCompartir')) $('#colCompartir').onclick = () => compartirGrupo('coleccion', c._id, c.nombre);
 }
 
 // Rango de años de publicación: «1920–1960», «1980–actualidad» (fin vacío), «?–1960» (solo fin), '' si nada.
@@ -11116,6 +11118,54 @@ function qrCanvas(qr, px) {
       if (qr.mod[y][x]) g.fillRect((quiet + x) * scale, (quiet + y) * scale, scale, scale);
   return cv;
 }
+// Modal de compartir (QR + Web Share nativo + copiar enlace/imagen) para una URL ya generada. `titulo` va al
+// share nativo; `descHtml` es el texto del modal. Reutilizado por documento y por grupo (colección/obra).
+function _modalCompartir(url, titulo, descHtml) {
+  $('#cmpModal').innerHTML =
+    `<div class="box card" style="max-width:360px;text-align:center"><h3 style="margin-top:0">🔗 Compartir</h3>
+    <div id="qrBox" style="display:flex;justify-content:center;margin:4px 0 12px"></div>
+    <p class="muted" style="font-size:12px;line-height:1.5">${descHtml}</p>
+    <div class="row" style="gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap">
+      <button class="btn pri" id="cmpShare">📤 Compartir</button>
+      <button class="btn" id="cmpCopyImg">🖼️ Copiar imagen</button>
+      <button class="btn" id="cmpCopy">📋 Copiar enlace</button>
+      <button class="btn" id="cmpXq">Cerrar</button></div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrarCmp;
+  let cv = null;
+  try { cv = qrCanvas(qrGenerar(url), 260); const box = $('#qrBox'); if (box) box.appendChild(cv); }
+  catch (e) { const box = $('#qrBox'); if (box) box.innerHTML = '<span class="muted" style="font-size:12px">No se pudo generar el QR; usa el enlace.</span>'; }
+  $('#cmpXq').onclick = cerrarCmp;
+  $('#cmpCopy').onclick = () => { copiar(url); toast('Enlace copiado'); };
+  const ci = $('#cmpCopyImg');
+  if (ci && cv && navigator.clipboard && window.ClipboardItem && cv.toBlob) {
+    ci.onclick = () => { try { cv.toBlob(async (b) => { try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Imagen del QR copiada'); } catch (e) { toast('No se pudo copiar la imagen — usa «Copiar enlace»', 'warn'); } }, 'image/png'); } catch (e) { toast('No se pudo copiar la imagen — usa «Copiar enlace»', 'warn'); } };
+  } else if (ci) ci.style.display = 'none';
+  const sh = $('#cmpShare');
+  if (navigator.share) {
+    sh.onclick = async () => {
+      try {
+        if (cv && cv.toBlob && navigator.canShare) {
+          const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
+          const file = blob && new File([blob], 'qr.png', { type: 'image/png' });
+          if (file && navigator.canShare({ files: [file] })) { await navigator.share({ title: titulo || 'Compartir', text: url, files: [file] }); return; }
+        }
+        await navigator.share({ title: titulo || 'Compartir', url });
+      } catch (_) { /* cancelado */ }
+    };
+  } else sh.style.display = 'none';
+}
+// Compartir una COLECCIÓN u OBRA: token firmado del grupo → mismo modal; abre todos sus documentos y su descarga.
+async function compartirGrupo(tipo, id, nombre) {
+  let token;
+  try {
+    const res = await api('/' + (tipo === 'obra' ? 'obras' : 'colecciones') + '/' + encodeURIComponent(id) + '/compartir', { method: 'POST', body: '{}' });
+    token = res.token;
+  } catch (e) { toast(e.message, 'bad'); return; }
+  _modalCompartir(location.origin + '/?s=' + token, nombre || (tipo === 'obra' ? 'Obra' : 'Colección'),
+    `Escanea el QR o comparte el enlace. Abre ${tipo === 'obra' ? 'la obra' : 'la colección'} con <b>todos sus documentos</b> y su descarga — sin acceso al resto de la biblioteca.`);
+}
 // Compartir por QR: pide al servidor un token firmado de ESTE documento y muestra el QR + enlace. Abre solo
 // la ficha (y, si es digital, permite la descarga); no da acceso al resto de la app.
 async function compartirDoc(d) {
@@ -11131,73 +11181,8 @@ async function compartirDoc(d) {
     toast(e.message, 'bad');
     return;
   }
-  const url = location.origin + '/?s=' + token;
-  $('#cmpModal').innerHTML =
-    `<div class="box card" style="max-width:360px;text-align:center"><h3 style="margin-top:0">🔗 Compartir ficha</h3>
-    <div id="qrBox" style="display:flex;justify-content:center;margin:4px 0 12px"></div>
-    <p class="muted" style="font-size:12px;line-height:1.5">Escanea el QR o comparte el enlace. Abre ${esDigital ? 'la ficha y permite la <b>descarga</b>' : 'solo la ficha'} — sin acceso al resto de la biblioteca.</p>
-    <div class="row" style="gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap">
-      <button class="btn pri" id="cmpShare">📤 Compartir</button>
-      <button class="btn" id="cmpCopyImg">🖼️ Copiar imagen</button>
-      <button class="btn" id="cmpCopy">📋 Copiar enlace</button>
-      <button class="btn" id="cmpXq">Cerrar</button></div></div>`;
-  $('#cmpScrim').style.display = 'block';
-  $('#cmpModal').style.display = 'grid';
-  $('#cmpScrim').onclick = cerrarCmp;
-  let cv = null;
-  try {
-    cv = qrCanvas(qrGenerar(url), 260);
-    const box = $('#qrBox');
-    if (box) box.appendChild(cv);
-  } catch (e) {
-    const box = $('#qrBox');
-    if (box)
-      box.innerHTML =
-        '<span class="muted" style="font-size:12px">No se pudo generar el QR; usa el enlace.</span>';
-  }
-  $('#cmpXq').onclick = cerrarCmp;
-  $('#cmpCopy').onclick = () => {
-    copiar(url);
-    toast('Enlace copiado');
-  };
-  // Copiar la IMAGEN del QR al portapapeles (Clipboard API; requiere contexto seguro). Si no hay soporte
-  // o no hay canvas, se oculta el botón y queda «Copiar enlace».
-  const ci = $('#cmpCopyImg');
-  if (ci && cv && navigator.clipboard && window.ClipboardItem && cv.toBlob) {
-    ci.onclick = () => {
-      try {
-        cv.toBlob(async (b) => {
-          try {
-            await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]);
-            toast('Imagen del QR copiada');
-          } catch (e) {
-            toast('No se pudo copiar la imagen — usa «Copiar enlace»', 'warn');
-          }
-        }, 'image/png');
-      } catch (e) {
-        toast('No se pudo copiar la imagen — usa «Copiar enlace»', 'warn');
-      }
-    };
-  } else if (ci) ci.style.display = 'none';
-  const sh = $('#cmpShare');
-  // Compartir nativo: preferimos compartir la IMAGEN (si el sistema admite ficheros); si no, el enlace.
-  if (navigator.share) {
-    sh.onclick = async () => {
-      try {
-        if (cv && cv.toBlob && navigator.canShare) {
-          const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
-          const file = blob && new File([blob], 'qr.png', { type: 'image/png' });
-          if (file && navigator.canShare({ files: [file] })) {
-            await navigator.share({ title: d.titulo || 'Ficha', text: url, files: [file] });
-            return;
-          }
-        }
-        await navigator.share({ title: d.titulo || 'Ficha', url });
-      } catch (_) {
-        /* cancelado */
-      }
-    };
-  } else sh.style.display = 'none';
+  _modalCompartir(location.origin + '/?s=' + token, d.titulo || 'Ficha',
+    `Escanea el QR o comparte el enlace. Abre ${esDigital ? 'la ficha y permite la <b>descarga</b>' : 'solo la ficha'} — sin acceso al resto de la biblioteca.`);
 }
 // Contenedor de PÁGINA AUTÓNOMA (oculta el resto del panel): vista compartida por QR y lectura NFC offline.
 function _sharedCont() {
@@ -11238,6 +11223,34 @@ function pantallaEsperaNFC() {
     }, 300);
 }
 // VISTA COMPARTIDA (?s=<token>): página autónoma de SOLO la ficha (sin login ni resto de la app).
+// Vista pública de un GRUPO compartido (colección u obra): ex-libris + nombre + lista de sus documentos con
+// descarga individual. Sin acceso al resto de la biblioteca.
+function renderGrupoCompartido(cont, g) {
+  const tipoLbl = g.tipo === 'obra' ? 'Obra' : 'Colección';
+  const filas = (g.miembros || []).map((m) => {
+    const cov = m.portada
+      ? `<img src="${esc(encUrl(m.portada))}" loading="lazy" style="width:44px;height:60px;object-fit:cover;border-radius:5px;background:var(--card)">`
+      : `<div style="width:44px;height:60px;border-radius:5px;background:var(--card);display:flex;align-items:center;justify-content:center">📗</div>`;
+    const meta = [m.volumen != null ? 'Vol. ' + m.volumen : '', m['año_edicion'] || '', (m.formatos || []).join('·')].filter(Boolean).join(' · ');
+    const dl = m.descarga_url
+      ? `<a class="btn pri" href="${esc(encUrl(m.descarga_url))}" download title="Descargar" style="padding:4px 11px;font-size:13px">⬇</a>`
+      : '<span class="muted" style="font-size:11px">papel</span>';
+    return `<div class="row" style="align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
+      ${cov}
+      <div style="flex:1;min-width:0"><div style="font-weight:600;word-break:break-word">${esc(m.titulo)}</div>${meta ? `<div class="muted" style="font-size:11px">${esc(meta)}</div>` : ''}</div>
+      ${dl}</div>`;
+  }).join('');
+  cont.innerHTML = `${_brandLine}
+    <div style="max-width:560px;margin:0 auto">
+      ${heroExlibris(EX_LIBRIS)}
+      <div style="text-align:center;margin:6px 0 14px">
+        <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">${tipoLbl}</div>
+        <h2 style="margin:2px 0">${esc(g.nombre)}</h2>
+        <div class="muted" style="font-size:12px">${g.total} documento${g.total === 1 ? '' : 's'} · descarga individual</div>
+      </div>
+      ${filas || '<p class="muted" style="text-align:center">Sin documentos.</p>'}
+    </div>`;
+}
 async function vistaCompartida(token) {
   const cont = _sharedCont();
   cont.innerHTML = '<p class="muted" style="text-align:center;margin-top:50px">Cargando ficha…</p>';
@@ -11253,6 +11266,7 @@ async function vistaCompartida(token) {
     return;
   }
   const f = data.ficha;
+  if (f.grupo) { renderGrupoCompartido(cont, f); return; } // colección/obra: lista de documentos con descarga
   const portada = f.portada
     ? `<div style="text-align:center;margin-bottom:14px"><img src="${esc(encUrl(f.portada))}" style="max-height:260px;max-width:78%;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.5)"></div>`
     : '';

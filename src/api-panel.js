@@ -1949,6 +1949,17 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // Compartir una COLECCIÓN o una OBRA: un enlace público con TODOS sus miembros y su descarga. Mismo token
+    // firmado, con `tipo`. (Los ficheros bajo /recursos ya son públicos; esto solo acota la vista a ese grupo.)
+    r.post('/colecciones/:id/compartir', (req, res) => {
+        if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'coleccion', descarga: true }) });
+    });
+    r.post('/obras/:id/compartir', (req, res) => {
+        if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'obra', descarga: true }) });
+    });
+
     return r;
 }
 
@@ -1976,6 +1987,43 @@ async function fichaCompartida(docId, permiteDescarga) {
         portada: doc.portada || null,
         descarga_url: (permiteDescarga && esDigital) ? urlArchivo(doc) : null,
         nombre_archivo: (permiteDescarga && esDigital) ? (doc.nombre_archivo || null) : null,
+    };
+}
+
+// Datos PÚBLICOS de un GRUPO compartido (colección u obra): su nombre + la lista de MIEMBROS (título, portada,
+// año, volumen) con la URL de descarga de cada uno. SIN ubicación física ni acceso al resto del catálogo.
+async function grupoCompartido(tipo, id) {
+    if (!ObjectId.isValid(id)) return null;
+    const db = await conectarDB();
+    const grupo = await db.collection(tipo === 'obra' ? 'obras' : 'colecciones').findOne({ _id: new ObjectId(id) });
+    if (!grupo) return null;
+    const campo = tipo === 'obra' ? 'obra' : 'coleccion';
+    const miembros = await db.collection('biblioteca')
+        .find({ [campo]: grupo._id }, { projection: { titulo: 1, portada: 1, formatos: 1, 'año_edicion': 1, volumen_numero: 1, coleccion_numero: 1, ruta_base: 1, nombre_archivo: 1 } })
+        .toArray();
+    // Orden: obra por volumen; colección por nº de colección (numérico) → título.
+    const num = (x) => { const n = parseInt(x, 10); return Number.isFinite(n) ? n : 1e9; };
+    miembros.sort(tipo === 'obra'
+        ? (a, b) => num(a.volumen_numero) - num(b.volumen_numero) || String(a.titulo || '').localeCompare(String(b.titulo || ''))
+        : (a, b) => num(a.coleccion_numero) - num(b.coleccion_numero) || String(a.titulo || '').localeCompare(String(b.titulo || '')));
+    return {
+        grupo: true, tipo,
+        nombre: grupo.nombre || grupo.titulo || '(sin nombre)',
+        total: miembros.length,
+        miembros: miembros.map((m) => {
+            const esDigital = !(m.formatos || []).includes('papel');
+            const directo = urlArchivo(m);   // fichero directo (bajo /recursos, público) si es de un solo fichero
+            return {
+                id: String(m._id),
+                titulo: m.titulo || '(sin título)',
+                portada: m.portada || null,
+                'año_edicion': m['año_edicion'] || null,
+                volumen: m.volumen_numero ?? null,
+                formatos: m.formatos || [],
+                // Directo si hay un fichero; si no (escaneado multi-imagen), la carpeta en ZIP.
+                descarga_url: !esDigital ? null : (directo || (m.ruta_base ? '/api/descargar/' + String(m._id) + '?que=todo' : null)),
+            };
+        }),
     };
 }
 
@@ -2034,8 +2082,10 @@ export function rutasPublicas() {
         try {
             const info = validarCompartir(req.params.token);
             if (!info) return res.status(404).json({ ok: false, motivo: 'enlace no válido' });
-            const ficha = await fichaCompartida(info.docId, info.descarga);
-            if (!ficha) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const ficha = info.tipo === 'doc'
+                ? await fichaCompartida(info.docId, info.descarga)
+                : await grupoCompartido(info.tipo, info.docId);
+            if (!ficha) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
             res.json({ ok: true, ficha });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

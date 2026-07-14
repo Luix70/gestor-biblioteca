@@ -781,6 +781,14 @@ de ficheros clasificado por CDU.
       escanea la etiqueta de un libro (típicamente quien lo ENCONTRÓ), en vez del login
       ve una TARJETA PÚBLICA con la propiedad + contacto para devolverlo (datos offline
       de la etiqueta, ?o=), con un botón «Entrar» para el propietario.
+    · COMPARTIR (🔗, con QR + Web Share nativo → WhatsApp/Telegram/…): genera un enlace
+      PÚBLICO firmado (?s=<token>) a un DOCUMENTO (ficha + descarga si es digital) o a un
+      GRUPO —una COLECCIÓN u OBRA— con la lista de todos sus documentos y descarga
+      individual. La vista pública es autónoma (sin login ni acceso al resto del catálogo).
+      Botón en la ficha del documento y en las páginas de obra/colección. Backend:
+      firmarCompartir/validarCompartir (token con `tipo` doc|coleccion|obra) +
+      /compartido/:token (público). AVISO: el token NO caduca (enlace permanente hasta que
+      cambie el secreto) y los ficheros bajo /recursos ya son públicos por ruta.
     · Etiqueta de ESTANTERÍA (desde Ubicaciones): al acercar el móvil lista los
       libros que contiene.
     · Leer (📲 en el Inbox): con conexión abre la ficha; SIN conexión muestra una
