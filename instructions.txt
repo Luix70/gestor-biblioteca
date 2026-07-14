@@ -144,6 +144,7 @@ de ficheros clasificado por CDU.
   PDF_OCR_ANCHO                 1600         Ancho del rasterizado para OCR
   CLASIF_PAPEL_MAX_PAGINAS      12           Escaneado < N páginas → «papel»
   CLASIF_CAPITULO_MAX_PAGINAS   20           Legible < N páginas sin ISBN → capítulo/artículo
+  DJVU_CONCURRENCIA             1            Páginas DjVu rasterizadas a la vez (1 = seguro en el Atom)
 
   Para un cambio permanente: editar src/config.js y actualizar.
   Para un override puntual en el NAS: añadir la variable al .env.

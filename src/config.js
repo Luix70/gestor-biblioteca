@@ -76,6 +76,12 @@ export const AJUSTES = {
     // propio) → 'articulo' (si trae DOI) o 'capitulo' (fragmento de un libro), no un libro. Con N o más
     // páginas se decide libro/revista por el contenido (ISBN/ISSN), como siempre.
     CLASIF_CAPITULO_MAX_PAGINAS: 20,
+
+    // --- DjVu (rasterizado bajo demanda para el visor / la extracción de imágenes) ---
+    // Nº MÁXIMO de páginas DjVu que se rasterizan A LA VEZ. Cada una lanza ddjvu+pdftoppm (procesos nativos
+    // pesados): el visor pide muchas miniaturas de golpe y, sin cola, una docena simultánea COLGABA el NAS
+    // (Atom, 2 núcleos). 1 = seguro en el Atom; súbelo en una máquina con más núcleos.
+    DJVU_CONCURRENCIA: 1,
 };
 
 // Siembra process.env con los valores de AJUSTES que .env NO haya definido (env > config).

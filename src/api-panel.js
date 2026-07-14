@@ -1534,7 +1534,10 @@ export function rutasPanel() {
             const ruta = await docPaginable(req, res);
             if (!ruta) return;
             const n = Math.max(0, parseInt(req.params.n, 10) || 0);
-            const pag = esDjvu(ruta) ? await leerPaginaDjvu(ruta, n) : await leerPaginaComic(ruta, n);
+            // `?r=` (DPI) SOLO para DjVu: el visor pide las miniaturas a baja resolución (rápidas y ligeras,
+            // no asfixian al Atom) y la imagen a añadir al carrusel a resolución plena. Los cómics lo ignoran.
+            const dpi = req.query.r ? Math.max(36, Math.min(200, parseInt(req.query.r, 10) || 150)) : 150;
+            const pag = esDjvu(ruta) ? await leerPaginaDjvu(ruta, n, dpi) : await leerPaginaComic(ruta, n);
             if (!pag) return res.status(404).json({ ok: false, motivo: 'página no encontrada' });
             res.set('Content-Type', pag.mimeType);
             res.set('Cache-Control', 'private, max-age=600');

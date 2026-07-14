@@ -3743,7 +3743,10 @@ async function extraerImagenDocumento() {
     if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext)) return await extraerLazy(id, {
       titulo: 'Extraer del documento',
       contar: { path: '/documentos/' + enc + '/paginas', key: 'paginas' },
-      item: (nn) => '/api/documentos/' + enc + '/paginas/' + nn,
+      // DjVu: las miniaturas se piden a baja resolución (?r=72) para que la rejilla no lance rasterizaciones
+      // pesadas (ddjvu+pdftoppm) a plena resolución; la imagen a añadir va a 150 DPI (sin ?r). Los cómics
+      // (cbz/cbr/cb7) sirven el JPEG almacenado y el ?r no les afecta.
+      item: (nn, o) => '/api/documentos/' + enc + '/paginas/' + nn + (o && o.thumb ? '?r=72' : ''),
       vacio: 'Este documento no tiene páginas extraíbles.',
     });
     if (['mobi', 'azw', 'azw3'].includes(ext)) return await extraerLazy(id, {
@@ -3898,8 +3901,10 @@ async function extraerLazy(id, cfg) {
   $('#exCancel').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
   (cfg.extras || []).forEach((e, i) => { const b = $('#exExtra' + i); if (b) { b.textContent = e.etq; b.onclick = e.fn; } });
 
-  const fetchBlob = async (n) => {
-    const res = await fetch(cfg.item(n), { headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {} });
+  // `thumb`=true → miniatura de la rejilla (baja resolución: rápida y ligera, no ahoga al Atom con DjVu);
+  // false → imagen definitiva a plena resolución para añadir al carrusel.
+  const fetchBlob = async (n, thumb) => {
+    const res = await fetch(cfg.item(n, { thumb }), { headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {} });
     if (!res.ok) throw new Error('elemento ' + (n + 1));
     return await res.blob();
   };
@@ -3917,7 +3922,7 @@ async function extraerLazy(id, cfg) {
     for (const en of entradas) {
       if (!en.isIntersecting) continue;
       const cel = en.target; io.unobserve(cel);
-      fetchBlob(+cel.dataset.n).then((b) => { const im = cel.querySelector('img'); if (im) im.src = URL.createObjectURL(b); }).catch(() => {});
+      fetchBlob(+cel.dataset.n, true).then((b) => { const im = cel.querySelector('img'); if (im) im.src = URL.createObjectURL(b); }).catch(() => {});
     }
   }, { root: grid, rootMargin: '250px' });
   for (let i = 0; i < n; i++) {

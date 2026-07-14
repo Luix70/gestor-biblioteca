@@ -18,6 +18,29 @@ const execFileP = promisify(execFile);
 const PAG_FRENTE = Number(process.env.DJVU_PAGINAS_FRENTE || 5);
 const PAG_FONDO  = Number(process.env.DJVU_PAGINAS_FONDO  || 1);
 
+// ── COLA de rasterización (evita CUELGUES del NAS) ────────────────────────────────────────────────
+// Cada página DjVu lanza DOS procesos nativos PESADOS (ddjvu→PDF + pdftoppm) con una página escaneada
+// entera en memoria. El visor del panel pide MUCHAS miniaturas A LA VEZ (el IntersectionObserver dispara
+// toda la primera pantalla de golpe) → una docena de ddjvu+pdftoppm simultáneos saturaban CPU/RAM y
+// COLGABAN TODO EL NAS (Atom, 2 núcleos, poca RAM). Con esta cola solo se rasterizan DJVU_CONCURRENCIA
+// páginas a la vez (por defecto 1): el visor se va rellenando poco a poco, pero el NAS nunca se ahoga.
+const DJVU_CONCURRENCIA = Math.max(1, Number(process.env.DJVU_CONCURRENCIA) || 1);
+let _enCurso = 0;
+const _pendientes = [];
+function _adquirir() {
+    if (_enCurso < DJVU_CONCURRENCIA) { _enCurso++; return Promise.resolve(); }
+    return new Promise(resolver => _pendientes.push(resolver));
+}
+function _liberar() {
+    const siguiente = _pendientes.shift();
+    if (siguiente) siguiente();          // cede el turno (mantiene _enCurso)
+    else _enCurso--;                     // nadie espera → baja el contador
+}
+async function enCola(fn) {
+    await _adquirir();
+    try { return await fn(); } finally { _liberar(); }
+}
+
 function indicesMuestra(n) {
     const s = new Set();
     for (let i = 0; i < Math.min(PAG_FRENTE, n); i++) s.add(i);
@@ -34,22 +57,33 @@ export async function contarPaginasDjvu(ruta) {
     } catch { return 0; }
 }
 
-/** Rasteriza la página `n1` (1-indexada) de un DjVu a JPEG: ddjvu→PDF de 1 página → pdftoppm→JPEG. */
-async function paginaDjvuJpeg(ruta, n1) {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'djvu-pg-'));
-    try {
-        const pdf = path.join(dir, 'p.pdf');
-        await execFileP('ddjvu', ['-format=pdf', `-page=${n1}`, ruta, pdf], { timeout: 120000 });
-        await execFileP('pdftoppm', ['-jpeg', '-r', '150', '-singlefile', pdf, path.join(dir, 'out')], { timeout: 120000 });
-        return await fs.readFile(path.join(dir, 'out.jpg'));
-    } finally {
-        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-    }
+/**
+ * Rasteriza la página `n1` (1-indexada) de un DjVu a JPEG: ddjvu→PDF de 1 página → pdftoppm→JPEG.
+ * SIEMPRE a través de la COLA (`enCola`): impide que varias rasterizaciones simultáneas cuelguen el NAS.
+ * `dpi` = resolución del pdftoppm (150 para la imagen definitiva; ~72 para miniaturas de la rejilla, ~4×
+ * más rápido y ligero). Se acota para no disparar el coste en el Atom.
+ */
+async function paginaDjvuJpeg(ruta, n1, dpi = 150) {
+    const r = Math.max(36, Math.min(200, Number(dpi) || 150));
+    return enCola(async () => {
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'djvu-pg-'));
+        try {
+            const pdf = path.join(dir, 'p.pdf');
+            await execFileP('ddjvu', ['-format=pdf', `-page=${n1}`, ruta, pdf], { timeout: 120000 });
+            await execFileP('pdftoppm', ['-jpeg', '-r', String(r), '-singlefile', pdf, path.join(dir, 'out')], { timeout: 120000 });
+            return await fs.readFile(path.join(dir, 'out.jpg'));
+        } finally {
+            await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+        }
+    });
 }
 
-/** Página `n0` (0-indexada) de un DjVu como { buffer, mimeType }, o null si no se pudo. (Para el visor.) */
-export async function leerPaginaDjvu(ruta, n0) {
-    try { return { buffer: await paginaDjvuJpeg(ruta, n0 + 1), mimeType: 'image/jpeg' }; }
+/**
+ * Página `n0` (0-indexada) de un DjVu como { buffer, mimeType }, o null si no se pudo. (Para el visor.)
+ * `dpi` opcional: el visor pide las MINIATURAS a baja resolución (rápidas) y la imagen a añadir a 150.
+ */
+export async function leerPaginaDjvu(ruta, n0, dpi = 150) {
+    try { return { buffer: await paginaDjvuJpeg(ruta, n0 + 1, dpi), mimeType: 'image/jpeg' }; }
     catch { return null; }
 }
 
