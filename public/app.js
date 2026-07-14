@@ -3899,13 +3899,23 @@ async function extraerLazy(id, cfg) {
   const extraHtml = (cfg.extras || []).map((_, i) => `<button class="btn" id="exExtra${i}"></button>`).join('');
   cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 ${esc(cfg.titulo || 'Extraer del documento')}</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exCancel">Cancelar</button>${extraHtml}</div><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
   $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
-  $('#exCancel').onclick = () => pintarGestorImagenes(); $('#cmpScrim').onclick = cerrarCmp;
+  // CANCELACIÓN: las miniaturas pendientes se ABORTAN al cerrar/cancelar/añadir. Así el servidor deja de
+  // rasterizar páginas que ya nadie va a ver (clave con DjVu: al elegir una página no sigue con las 82).
+  const ctrlMin = new AbortController();
+  let ioRef = null;
+  const limpiar = () => { try { ctrlMin.abort(); } catch {} if (ioRef) ioRef.disconnect(); };
+  $('#exCancel').onclick = () => { limpiar(); pintarGestorImagenes(); };
+  $('#cmpScrim').onclick = () => { limpiar(); cerrarCmp(); };
   (cfg.extras || []).forEach((e, i) => { const b = $('#exExtra' + i); if (b) { b.textContent = e.etq; b.onclick = e.fn; } });
 
   // `thumb`=true → miniatura de la rejilla (baja resolución: rápida y ligera, no ahoga al Atom con DjVu);
-  // false → imagen definitiva a plena resolución para añadir al carrusel.
+  // false → imagen definitiva a plena resolución para añadir al carrusel. Las miniaturas llevan `signal` para
+  // poder abortarlas; la imagen definitiva (thumb=false) NO se aborta (es la que el usuario quiere).
   const fetchBlob = async (n, thumb) => {
-    const res = await fetch(cfg.item(n, { thumb }), { headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {} });
+    const res = await fetch(cfg.item(n, { thumb }), {
+      headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
+      signal: thumb ? ctrlMin.signal : undefined,
+    });
     if (!res.ok) throw new Error('elemento ' + (n + 1));
     return await res.blob();
   };
@@ -3926,6 +3936,7 @@ async function extraerLazy(id, cfg) {
       fetchBlob(+cel.dataset.n, true).then((b) => { const im = cel.querySelector('img'); if (im) im.src = URL.createObjectURL(b); }).catch(() => {});
     }
   }, { root: grid, rootMargin: '250px' });
+  ioRef = io;   // para poder desconectarlo (dejar de pedir miniaturas) al cerrar/cancelar/añadir
   for (let i = 0; i < n; i++) {
     const cel = document.createElement('div');
     cel.dataset.n = i;
@@ -3940,6 +3951,7 @@ async function extraerLazy(id, cfg) {
     io.observe(cel);
   }
   $('#exOk').onclick = async () => {
+    limpiar();   // deja de pedir/rasterizar miniaturas: ya solo importan las páginas ELEGIDAS
     const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
     try {
       for (const num of [...marcadas].sort((x, y) => x - y)) {

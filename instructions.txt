@@ -150,6 +150,7 @@ de ficheros clasificado por CDU.
   CLASIF_PAPEL_MAX_PAGINAS      12           Escaneado < N páginas → «papel»
   CLASIF_CAPITULO_MAX_PAGINAS   20           Legible < N páginas sin ISBN → capítulo/artículo
   DJVU_CONCURRENCIA             1            Páginas DjVu rasterizadas a la vez (1 = seguro en el Atom)
+  DJVU_CACHE_PAGINAS            300          Páginas DjVu cacheadas (re-ver/re-seleccionar = instantáneo)
 
   Para un cambio permanente: editar src/config.js y actualizar.
   Para un override puntual en el NAS: añadir la variable al .env.

@@ -97,6 +97,9 @@ export const AJUSTES = {
     // pesados): el visor pide muchas miniaturas de golpe y, sin cola, una docena simultánea COLGABA el NAS
     // (Atom, 2 núcleos). 1 = seguro en el Atom; súbelo en una máquina con más núcleos.
     DJVU_CONCURRENCIA: 1,
+    // Nº de páginas DjVu ya rasterizadas que se guardan en caché (memoria): re-ver o re-seleccionar una
+    // página es instantáneo y no vuelve a gastar el Atom. Una página a 72 dpi ~30 KB, a 150 ~300 KB.
+    DJVU_CACHE_PAGINAS: 300,
 };
 
 // Siembra process.env con los valores de AJUSTES que .env NO haya definido (env > config).

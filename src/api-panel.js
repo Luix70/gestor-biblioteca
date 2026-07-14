@@ -1538,7 +1538,11 @@ export function rutasPanel() {
             // `?r=` (DPI) SOLO para DjVu: el visor pide las miniaturas a baja resolución (rápidas y ligeras,
             // no asfixian al Atom) y la imagen a añadir al carrusel a resolución plena. Los cómics lo ignoran.
             const dpi = req.query.r ? Math.max(36, Math.min(200, parseInt(req.query.r, 10) || 150)) : 150;
-            const pag = esDjvu(ruta) ? await leerPaginaDjvu(ruta, n, dpi) : await leerPaginaComic(ruta, n);
+            // Si el CLIENTE se desconecta (cerró la rejilla, cambió de página, canceló), no rasterizar de
+            // balde: la cola DjVu comprueba `vivo` antes de gastar el Atom en una página que ya nadie verá.
+            let vivo = true;
+            res.on('close', () => { if (!res.writableEnded) vivo = false; });
+            const pag = esDjvu(ruta) ? await leerPaginaDjvu(ruta, n, dpi, () => vivo) : await leerPaginaComic(ruta, n);
             if (!pag) return res.status(404).json({ ok: false, motivo: 'página no encontrada' });
             res.set('Content-Type', pag.mimeType);
             res.set('Cache-Control', 'private, max-age=600');

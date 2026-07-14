@@ -36,10 +36,24 @@ function _liberar() {
     if (siguiente) siguiente();          // cede el turno (mantiene _enCurso)
     else _enCurso--;                     // nadie espera → baja el contador
 }
-async function enCola(fn) {
+// `estaVivo` (opcional): se comprueba JUSTO ANTES de rasterizar (ya con el turno). Si la petición se
+// CANCELÓ mientras esperaba en la cola (p. ej. el usuario cerró la rejilla de miniaturas o añadió su
+// página), NO se rasteriza — así no se malgasta el Atom renderizando páginas que ya nadie quiere ver.
+async function enCola(fn, estaVivo) {
     await _adquirir();
-    try { return await fn(); } finally { _liberar(); }
+    try {
+        if (estaVivo && !estaVivo()) return null;   // cancelada mientras hacía cola → se salta
+        return await fn();
+    } finally { _liberar(); }
 }
+
+// ── CACHÉ en memoria de páginas ya rasterizadas ───────────────────────────────────────────────────
+// Clave: ruta|mtime|página|dpi. Re-ver o RE-SELECCIONAR una página es INSTANTÁNEO (sin cola ni procesos):
+// atajo directo que descarga el Atom. LRU acotada por nº de entradas (una página a 72 dpi ~30 KB, a 150 ~300 KB).
+const CACHE_MAX = Math.max(20, Number(process.env.DJVU_CACHE_PAGINAS) || 300);
+const _cache = new Map();
+function _cacheGet(clave) { const v = _cache.get(clave); if (v) { _cache.delete(clave); _cache.set(clave, v); } return v; }
+function _cacheSet(clave, buf) { _cache.set(clave, buf); while (_cache.size > CACHE_MAX) _cache.delete(_cache.keys().next().value); }
 
 function indicesMuestra(n) {
     const s = new Set();
@@ -63,28 +77,37 @@ export async function contarPaginasDjvu(ruta) {
  * `dpi` = resolución del pdftoppm (150 para la imagen definitiva; ~72 para miniaturas de la rejilla, ~4×
  * más rápido y ligero). Se acota para no disparar el coste en el Atom.
  */
-async function paginaDjvuJpeg(ruta, n1, dpi = 150) {
+async function paginaDjvuJpeg(ruta, n1, dpi = 150, estaVivo) {
     const r = Math.max(36, Math.min(200, Number(dpi) || 150));
+    let mtime = 0; try { mtime = (await fs.stat(ruta)).mtimeMs; } catch { /* sin stat → clave sin mtime */ }
+    const clave = `${ruta}|${mtime}|${n1}|${r}`;
+    const cacheado = _cacheGet(clave);
+    if (cacheado) return cacheado;                       // atajo instantáneo (sin cola ni procesos)
     return enCola(async () => {
         const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'djvu-pg-'));
         try {
             const pdf = path.join(dir, 'p.pdf');
             await execFileP('ddjvu', ['-format=pdf', `-page=${n1}`, ruta, pdf], { timeout: 120000 });
             await execFileP('pdftoppm', ['-jpeg', '-r', String(r), '-singlefile', pdf, path.join(dir, 'out')], { timeout: 120000 });
-            return await fs.readFile(path.join(dir, 'out.jpg'));
+            const buf = await fs.readFile(path.join(dir, 'out.jpg'));
+            _cacheSet(clave, buf);
+            return buf;
         } finally {
             await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
         }
-    });
+    }, estaVivo);
 }
 
 /**
- * Página `n0` (0-indexada) de un DjVu como { buffer, mimeType }, o null si no se pudo. (Para el visor.)
+ * Página `n0` (0-indexada) de un DjVu como { buffer, mimeType }, o null si no se pudo (o se canceló). (Visor.)
  * `dpi` opcional: el visor pide las MINIATURAS a baja resolución (rápidas) y la imagen a añadir a 150.
+ * `estaVivo` opcional: función que devuelve false si la petición se canceló (para no rasterizar de balde).
  */
-export async function leerPaginaDjvu(ruta, n0, dpi = 150) {
-    try { return { buffer: await paginaDjvuJpeg(ruta, n0 + 1, dpi), mimeType: 'image/jpeg' }; }
-    catch { return null; }
+export async function leerPaginaDjvu(ruta, n0, dpi = 150, estaVivo) {
+    try {
+        const buf = await paginaDjvuJpeg(ruta, n0 + 1, dpi, estaVivo);
+        return buf ? { buffer: buf, mimeType: 'image/jpeg' } : null;
+    } catch { return null; }
 }
 
 /**
