@@ -10174,15 +10174,27 @@ function fdDesdeSnap(snap, files) {
   for (const fichero of files) formData.append('files', fichero, fichero.name);
   return formData;
 }
-// POST multipart /api/ingestar con el FormData de la subida. 403 = no admin. Devuelve el JSON (o {}).
-async function enviarIngesta(formData) {
-  const resp = await fetch('/api/ingestar', {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + TOKEN },
-    body: formData,
+// POST multipart /api/ingestar con PROGRESO DE SUBIDA. Se usa XHR (no fetch) porque fetch NO expone
+// `upload.onprogress`: sin él, subir un fichero grande (p. ej. un PDF de 100+ MB) dejaba la UI en
+// «⏳ Subiendo…» sin avanzar, y si el servidor tardaba en responder parecía un fallo SILENCIOSO. `onProgress`
+// recibe (bytesSubidos, bytesTotales) mientras sube; al 100% el servidor pasa a catalogar. 403 = no admin.
+function enviarIngesta(formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/ingestar');
+    if (TOKEN) xhr.setRequestHeader('Authorization', 'Bearer ' + TOKEN);
+    if (onProgress && xhr.upload) {
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded, e.total); };
+    }
+    xhr.onload = () => {
+      if (xhr.status === 403) return reject(new Error('Solo los administradores pueden dar de alta recursos.'));
+      let j = {};
+      try { j = JSON.parse(xhr.responseText); } catch { /* respuesta no-JSON → {} */ }
+      resolve(j);
+    };
+    xhr.onerror = () => reject(new Error('Error de red durante la subida (¿fichero demasiado grande o conexión caída?).'));
+    xhr.send(formData);
   });
-  if (resp.status === 403) throw new Error('Solo los administradores pueden dar de alta recursos.');
-  return await resp.json().catch(() => ({}));
 }
 // Línea de estado del Inbox (bajo la zona de subida). Texto vacío = la limpia.
 function setInboxEstado(texto) {
@@ -10483,8 +10495,19 @@ async function subirInbox(files, extra) {
     const snap = metaSnapshot();
     if (isbn && !snap.isbn) snap.isbn = isbn;
     if (snap.isbn && origenMovil) snap.isbnOrigen = 'movil';
+    // Progreso de subida (0-100%) → al 100% avisa de que la subida TERMINÓ y ahora cataloga el servidor
+    // (que en ficheros grandes puede tardar). Así el proceso nunca se ve "colgado en silencio".
+    const prefijoIsbn = isbn ? `📱 ISBN ${isbn} · ` : '';
+    const onProg = (subido, total) => {
+      const pct = total ? Math.round((subido / total) * 100) : 0;
+      setInboxEstado(
+        pct >= 100
+          ? `${prefijoIsbn}✅ Subida completa · el servidor está catalogando… (los ficheros grandes pueden tardar un poco)`
+          : `${prefijoIsbn}⏳ Subiendo… ${pct}%${total ? ` (${(subido / 1048576).toFixed(1)}/${(total / 1048576).toFixed(1)} MB)` : ''}`,
+      );
+    };
     try {
-      const j = await enviarIngesta(fdDesdeSnap(snap, files));
+      const j = await enviarIngesta(fdDesdeSnap(snap, files), onProg);
       await guardarDimsResultados(j.resultados, extra.dims); // tapete → dimensiones en la ficha
       setInboxEstado('');
       jobsHechos.unshift({ estado: 'ok', resultados: j.resultados || [], mensajes: msgs });
@@ -10543,7 +10566,12 @@ async function procesarCola() {
           job.mensajes.push(`📱 ISBN ${isbn} leído en el móvil`);
         }
       }
-      const resp = await enviarIngesta(fdDesdeSnap(job.snap, job.files));
+      const onProg = (subido, total) => {
+        const pct = total ? Math.round((subido / total) * 100) : 0;
+        job.prog = pct >= 100 ? 'catalogando…' : `subiendo ${pct}%`;
+        pintarCola();
+      };
+      const resp = await enviarIngesta(fdDesdeSnap(job.snap, job.files), onProg);
       await guardarDimsResultados(resp.resultados, job.dims); // tapete → dimensiones en la ficha
       job.estado = 'ok';
       job.resultados = resp.resultados || [];
@@ -10607,7 +10635,7 @@ function pintarCola() {
   const cola = colaInbox
     .map((j) =>
       _filaInb(
-        `<span class="tag ${j.estado === 'procesando' ? 'warn' : 'mut'}">${j.estado === 'procesando' ? '⏳ procesando' : '🕒 en cola'}</span> <span class="muted">${esc(recortar(j.titulo, 56))} · ${j.n} fich.</span>${msgsHtml(j)}`,
+        `<span class="tag ${j.estado === 'procesando' ? 'warn' : 'mut'}">${j.estado === 'procesando' ? `⏳ ${esc(j.prog || 'procesando')}` : '🕒 en cola'}</span> <span class="muted">${esc(recortar(j.titulo, 56))} · ${j.n} fich.</span>${msgsHtml(j)}`,
       ),
     )
     .join('');

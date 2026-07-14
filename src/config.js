@@ -27,6 +27,10 @@ export const AJUSTES = {
         { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
     ]),
     HTTP_TIMEOUT_MS: 20000,         // timeout de TODA llamada HTTP a las APIs bibliográficas
+    // Cota de tiempo por RECURSO ingerido: si el pipeline se atasca (p. ej. un PDF de cientos de MB que
+    // poppler relee una y otra vez), se corta y el fichero va a Cuarentena con aviso — nunca un cuelgue
+    // silencioso de la petición. 8 min: holgado para ficheros grandes legítimos, cota para los patológicos.
+    INGESTA_TIMEOUT_MS: 480000,
     OL_TIMEOUT_MS: 20000,           // timeout de OpenLibrary; el circuit-breaker evita esperar en cada fallo
     DNB_TIMEOUT_MS: 15000,          // timeout de Deutsche Nationalbibliothek (SRU público)
     BNF_TIMEOUT_MS: 15000,          // timeout de la Bibliothèque nationale de France (SRU público)

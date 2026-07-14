@@ -154,6 +154,20 @@ function ubicacionDe(body) {
     return undefined;
 }
 
+// Cota de tiempo por recurso ingerido (env > config). Si el pipeline se atasca con un fichero enorme,
+// la carrera la gana el timeout → el `catch` lo manda a Cuarentena con aviso (nunca un cuelgue silencioso).
+// El pipeline subyacente (poppler) tiene sus propios timeouts, así que la promesa perdedora termina sola;
+// le colgamos un `.catch` para que no genere un rechazo sin gestionar.
+const INGESTA_TIMEOUT_MS = Number(process.env.INGESTA_TIMEOUT_MS) || 480000;
+function conTimeoutIngesta(promesa, mensaje) {
+    let t;
+    const limite = new Promise((_, rej) => {
+        t = setTimeout(() => { const e = new Error(mensaje); e.tipo = 'timeout'; rej(e); }, INGESTA_TIMEOUT_MS);
+    });
+    promesa.catch(() => {});   // la promesa que pierde la carrera no debe provocar un unhandledRejection
+    return Promise.race([promesa, limite]).finally(() => clearTimeout(t));
+}
+
 app.post('/api/ingestar', upload.array('files'), async (req, res) => {
     const archivos = (req.files || []).map(f => f.path);
     if (archivos.length === 0) {
@@ -182,7 +196,10 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
         // El ISBN del formulario solo aplica a UN libro (un grupo de imágenes, o una única unidad subida).
         if (isbnForm && (unidad.esImagenes || unidades.length === 1)) { ctx.isbn = isbnForm; if (isbnOrigen) ctx.isbn_origen = isbnOrigen; }
         try {
-            const r = await ingestarRecurso({ rutas: unidad.rutas, contexto: ctx });
+            const r = await conTimeoutIngesta(
+                ingestarRecurso({ rutas: unidad.rutas, contexto: ctx }),
+                `La ingesta tardó más de ${Math.round(INGESTA_TIMEOUT_MS / 1000)} s y se detuvo (fichero demasiado grande o pesado). Enviado a Cuarentena para revisión manual.`,
+            );
             resultados.push({
                 ok: true, operacion: r.operacion, estado: r.estado,
                 id: String(r._id), isbn: r.isbn, issn: r.issn,
