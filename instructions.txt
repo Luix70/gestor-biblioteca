@@ -200,7 +200,8 @@ de ficheros clasificado por CDU.
                           Con DRM NO se puede leer → se OMITE (se deja en el Inbox).
     · .cbr .cbz .cb7      Cómics (primera imagen = portada; visor paginado bajo demanda)
     · .djvu               Libro escaneado: rasteriza páginas para la visión (ISBN/portada) y el visor
-    · .chm                HTML compilado (manuales/libros): libchm-bin extrae título/ISBN/portada
+    · .chm                HTML compilado (manuales/libros): libchm-bin extrae título/ISBN/portada;
+                          previsualizable en la ficha (índice lateral + temas en iframe sandbox)
     · .zip .rar .7z .iso  Se EXPANDEN a carpeta (drop) antes de catalogar (bsdtar; .iso = ISO9660)
 
   Papel vs digital (filtro «Soporte»):

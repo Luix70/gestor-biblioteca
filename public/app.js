@@ -3053,6 +3053,7 @@ function pintarDoc(r, ctx) {
     else if (r.archivo_url && _nom.endsWith('.pdf')) iniciarLectorPdf(encUrl(r.archivo_url));
     else if (/\.(cbz|cbr|cb7|djvu)$/.test(_nom)) iniciarLectorComic(d._id);
     else if (/\.(mobi|azw3?)$/.test(_nom)) iniciarLectorMobi(d._id);
+    else if (_nom.endsWith('.chm')) iniciarLectorChm(d._id);
     if (r.audios && r.audios.length) iniciarReproductorAudio(r.doc && r.doc._id, r.audios); // audiolibro / lectura con audio: playlist
   };
   const ld = $('#lectDet');
@@ -3978,6 +3979,54 @@ async function iniciarLectorMobi(id) {
   ifr.style.cssText = 'width:100%;height:62vh;border:0;border-radius:10px;background:#fff';
   wrap.innerHTML = '';
   wrap.appendChild(ifr);
+}
+
+// CHM (HTML compilado): visor propio. El backend extrae el CHM (cacheado) y sirve cada tema como HTML
+// AUTOCONTENIDO (imágenes/CSS incrustados como data-URI) → se pinta en un iframe SANDBOX (sin scripts),
+// mismo patrón seguro que MOBI. Índice lateral (del .hhc) para navegar por los temas.
+async function iniciarLectorChm(id) {
+  const body = $('#chmBody'), toc = $('#chmToc'), msg = $('#chmMsg');
+  if (!body) return;
+  let r;
+  try { r = await api('/documentos/' + encodeURIComponent(id) + '/chm'); }
+  catch (e) { if (msg) msg.textContent = 'No se pudo leer el CHM: ' + e.message; return; }
+  if (!r.ok) { if (msg) msg.textContent = r.motivo || 'No se pudo previsualizar el CHM.'; return; }
+  // Pinta un tema (HTML autocontenido) en un iframe sandbox (sin scripts).
+  const pintar = (html, titulo) => {
+    const doc =
+      `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<style>html,body{margin:0}body{font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a;background:#fff;padding:14px 16px}img{max-width:100%;height:auto}a{color:#06c}</style>` +
+      (html || (titulo ? '<h3>' + esc(titulo) + '</h3><p>(sin contenido)</p>' : '<p>(sin contenido)</p>'));
+    const ifr = document.createElement('iframe');
+    ifr.setAttribute('sandbox', ''); // sin scripts: HTML del CHM aislado
+    ifr.srcdoc = doc;
+    ifr.style.cssText = 'width:100%;height:100%;border:0;background:#fff';
+    body.innerHTML = '';
+    body.appendChild(ifr);
+  };
+  // Navega a un tema por su href (relativo a la raíz del CHM).
+  const abrir = async (href, el) => {
+    if (el) { $$('#chmToc a').forEach((a) => (a.style.fontWeight = '')); el.style.fontWeight = '700'; }
+    body.innerHTML = '<div class="epubmsg" style="color:#555">Cargando…</div>';
+    try {
+      const p = await api('/documentos/' + encodeURIComponent(id) + '/chm/pagina?href=' + encodeURIComponent(href));
+      pintar(p.ok ? p.html : '', href);
+    } catch { pintar('', href); }
+  };
+  // Índice lateral (del .hhc); si no hay, un único enlace a la entrada.
+  const items = r.toc && r.toc.length ? r.toc : r.entrada ? [{ titulo: 'Inicio', href: r.entrada }] : [];
+  if (toc) {
+    toc.innerHTML =
+      items
+        .map(
+          (t, i) =>
+            `<a data-i="${i}" style="display:block;padding:4px 8px;color:#06c;cursor:pointer;text-decoration:none;border-radius:6px" title="${esc(t.titulo || t.href)}">${esc(recortar(t.titulo || t.href, 40))}</a>`,
+        )
+        .join('') || '<span style="color:#888;padding:6px">Sin índice</span>';
+    toc.querySelectorAll('a').forEach((a) => (a.onclick = () => abrir(items[+a.dataset.i].href, a)));
+  }
+  // Pinta la entrada inicial (ya viene en la primera respuesta).
+  pintar(r.html, r.titulo);
 }
 
 // Rasteriza UNA página de texto de un MOBI/AZW3 CONSERVANDO la estructura (encabezados, negrita/cursiva,
@@ -6008,6 +6057,15 @@ function previewArchivo(r) {
   if (['mobi', 'azw', 'azw3'].includes(ext))
     return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📙 ${esc(nombre)}</h3>
     <div class="epubwrap" id="mobiWrap"><div class="epubmsg" id="mobiMsg">Cargando previsualización…</div></div>${acc}</div>`;
+  // CHM (HTML compilado): visor propio. El backend extrae el CHM (cacheado) y sirve cada tema como HTML
+  // AUTOCONTENIDO (imágenes/CSS incrustados) → iframe SANDBOX (sin scripts) + índice lateral (del .hhc) para
+  // navegar. Se inicializa tras pintar (iniciarLectorChm).
+  if (ext === 'chm')
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📗 ${esc(nombre)}</h3>
+    <div id="chmWrap" style="display:flex;gap:8px;height:62vh;border:1px solid rgba(128,128,128,.3);border-radius:10px;overflow:hidden;background:#fff">
+      <nav id="chmToc" style="flex:0 0 38%;max-width:250px;overflow:auto;border-right:1px solid rgba(0,0,0,.12);padding:6px 2px;font-size:13px;background:#fafafa"></nav>
+      <div id="chmBody" style="flex:1;min-width:0;position:relative"><div class="epubmsg" id="chmMsg" style="color:#555">Cargando previsualización…</div></div>
+    </div>${acc}</div>`;
   // Resto de formatos: sin vista previa integrada — solo descarga.
   const ic = { djvu: '📘', mobi: '📙', azw3: '📙' }[ext] || '📦';
   return audio + `<div class="fileprev"><div class="filebox"><div class="ic">${ic}</div><div style="font-weight:600;word-break:break-word">${esc(nombre)}</div>

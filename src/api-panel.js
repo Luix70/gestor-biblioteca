@@ -38,6 +38,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
+import { indiceChm, paginaChmInline } from './utils/lector-chm.js';
 import path from 'node:path';
 
 const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu']);
@@ -1583,6 +1584,41 @@ export function rutasPanel() {
             const m = await docMobi(req, res); if (!m) return;
             const r0 = await leerTextoMobi(m.ruta, { maxChars: 4000 });
             res.json({ ok: true, drm: !!r0.drm, noSoportado: !!r0.noSoportado, html: r0.html || '', titulo: m.doc.titulo || '' });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // CHM (HTML compilado): PREVISUALIZACIÓN en el panel. El fichero se extrae una vez (cacheado) y cada tema
+    // se sirve como HTML AUTOCONTENIDO (imágenes/CSS incrustados) → el cliente lo pinta en un iframe sandbox.
+    // Resuelve el .chm del documento (o null con el error ya enviado).
+    const docChm = async (req, res) => {
+        if (!ObjectId.isValid(req.params.id)) { res.status(400).json({ ok: false, motivo: 'id inválido' }); return null; }
+        const db = await conectarDB();
+        const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+        if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (path.extname(doc.nombre_archivo || '').toLowerCase() !== '.chm') { res.status(400).json({ ok: false, motivo: 'no es un CHM' }); return null; }
+        return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo) };
+    };
+    // Índice + página de entrada (autocontenida) del CHM.
+    r.get('/documentos/:id/chm', async (req, res) => {
+        try {
+            const m = await docChm(req, res); if (!m) return;
+            const { toc, entrada } = await indiceChm(m.ruta);
+            if (!entrada) return res.json({ ok: true, toc, entrada: null, html: '', titulo: m.doc.titulo || '' });
+            const html = await paginaChmInline(m.ruta, entrada);
+            res.json({ ok: true, toc, entrada, html: html || '', titulo: m.doc.titulo || '' });
+        } catch (e) {
+            // Sin libchm-bin (extract_chmLib ENOENT) o CHM corrupto: aviso claro, no 500 opaco.
+            res.status(200).json({ ok: false, motivo: /ENOENT/.test(e.message) ? 'La previsualización de CHM requiere libchm-bin en el servidor.' : e.message });
+        }
+    });
+    // Un tema concreto (autocontenido) — al navegar por el índice. href relativo a la raíz del CHM.
+    r.get('/documentos/:id/chm/pagina', async (req, res) => {
+        try {
+            const m = await docChm(req, res); if (!m) return;
+            const html = await paginaChmInline(m.ruta, String(req.query.href || ''));
+            if (html == null) return res.status(404).json({ ok: false, motivo: 'tema no encontrado' });
+            res.json({ ok: true, html });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

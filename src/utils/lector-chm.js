@@ -16,6 +16,7 @@ import { promisify } from 'node:util';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import * as cheerio from 'cheerio';
 import { validarISBN, extraerISSNs } from './identificadores.js';
 
 const execFileP = promisify(execFile);
@@ -112,4 +113,113 @@ export async function leerChm(ruta) {
     } finally {
         await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+// PREVISUALIZACIÓN en el panel: se extrae el CHM UNA vez a un temporal (cacheado por ruta + TTL, como los
+// cómics) y se sirve cada tema (HTML) como un documento AUTOCONTENIDO —imágenes y CSS INCRUSTADOS como
+// data-URI—. Así el cliente lo pinta en un iframe `srcdoc` SANDBOX (sin scripts, sin peticiones extra que
+// tendrían que llevar el token): mismo patrón seguro que el visor de MOBI.
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+const MIME_PREVIEW = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+const CHM_TTL = Number(process.env.CHM_CACHE_TTL_MS || 20 * 60 * 1000);
+const cacheChm = new Map();   // ruta → { dir, ts }
+
+async function podarChm() {
+    const ahora = Date.now();
+    for (const [k, v] of cacheChm) {
+        if (ahora - v.ts <= CHM_TTL) continue;
+        cacheChm.delete(k);
+        await fs.rm(v.dir, { recursive: true, force: true }).catch(() => {});
+    }
+}
+
+/** Extrae (y cachea) el CHM a un temporal; devuelve el directorio. Lanza si falta libchm-bin / CHM corrupto. */
+async function prepararChm(ruta) {
+    await podarChm();
+    const ya = cacheChm.get(ruta);
+    if (ya) { ya.ts = Date.now(); return ya.dir; }
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chm-prev-'));
+    try { await extraerChm(ruta, dir); }
+    catch (e) { await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); throw e; }
+    cacheChm.set(ruta, { dir, ts: Date.now() });
+    return dir;
+}
+
+/** Resuelve `partes` DENTRO de `dir` (bloquea el path-traversal: nunca sale del árbol extraído). null si escapa. */
+function resolverDentro(dir, ...partes) {
+    const limpio = partes.map(s => String(s || '').split(/[?#]/)[0].replace(/^[/\\]+/, ''));
+    const abs = path.resolve(dir, ...limpio);
+    const raiz = path.resolve(dir);
+    return (abs === raiz || abs.startsWith(raiz + path.sep)) ? abs : null;
+}
+
+/**
+ * ÍNDICE del CHM para el visor: { toc: [{titulo, href}], entrada: <href de la página inicial> }.
+ * El TOC sale del `.hhc` (objetos con param Name/Local); la entrada, del `.hhp` (Default topic) o el 1er tema.
+ * Los href son relativos a la raíz del CHM (= `dir`).
+ */
+export async function indiceChm(ruta) {
+    const dir = await prepararChm(ruta);
+    const ficheros = await listarFicheros(dir);
+    const rel = (f) => path.relative(dir, f).replace(/\\/g, '/');
+
+    const toc = [];
+    const hhc = ficheros.find(f => f.toLowerCase().endsWith('.hhc'));
+    if (hhc) {
+        const txt = await fs.readFile(hhc, 'utf8').catch(() => '');
+        for (const m of txt.matchAll(/<object[^>]*>([\s\S]*?)<\/object>/gi)) {
+            const bloque = m[1];
+            const name = (bloque.match(/name="Name"\s+value="([^"]*)"/i) || [])[1];
+            const local = (bloque.match(/name="Local"\s+value="([^"]*)"/i) || [])[1];
+            if (name && local) toc.push({ titulo: decodificarEntidades(name), href: local.replace(/\\/g, '/') });
+        }
+    }
+
+    let entrada = null;
+    const hhp = ficheros.find(f => f.toLowerCase().endsWith('.hhp'));
+    if (hhp) {
+        const txt = await fs.readFile(hhp, 'utf8').catch(() => '');
+        const m = txt.match(/^\s*Default topic\s*=\s*(.+?)\s*$/im);
+        if (m) entrada = m[1].trim().replace(/\\/g, '/');
+    }
+    if (!entrada) entrada = toc[0]?.href || (ficheros.filter(f => /\.html?$/i.test(f)).map(rel).sort()[0] || null);
+    return { toc, entrada };
+}
+
+/**
+ * Página (tema) del CHM como HTML AUTOCONTENIDO: se leen sus <img> y <link rel=stylesheet> del árbol
+ * extraído y se INCRUSTAN como data-URI / <style>, se quitan los <script> y se neutralizan los enlaces
+ * internos (la navegación es por el índice lateral). Devuelve la cadena HTML o null si no existe el tema.
+ */
+export async function paginaChmInline(ruta, href) {
+    const dir = await prepararChm(ruta);
+    const archivo = resolverDentro(dir, href);
+    if (!archivo) return null;
+    let html;
+    try { html = await fs.readFile(archivo, 'utf8'); } catch { return null; }
+    const baseDir = path.dirname(archivo);
+    const $ = cheerio.load(html);
+    $('script').remove();                               // defensa en profundidad (el iframe ya es sandbox)
+
+    // <img src> → data-URI (imágenes locales; se dejan las remotas/data tal cual)
+    for (const img of $('img').toArray()) {
+        const src = $(img).attr('src');
+        if (!src || /^(data:|https?:|\/\/)/i.test(src)) continue;
+        const f = resolverDentro(baseDir, src);
+        if (!f) continue;
+        try {
+            const buf = await fs.readFile(f);
+            $(img).attr('src', `data:${MIME_PREVIEW[path.extname(f).toLowerCase()] || 'image/png'};base64,${buf.toString('base64')}`);
+        } catch { /* imagen ausente: se deja el src roto, no rompe la página */ }
+    }
+    // <link rel=stylesheet href> → <style> incrustado
+    for (const link of $('link[rel=stylesheet], link[type="text/css"]').toArray()) {
+        const h = $(link).attr('href');
+        if (!h || /^(https?:|\/\/)/i.test(h)) continue;
+        const f = resolverDentro(baseDir, h);
+        if (!f) continue;
+        try { $(link).replaceWith(`<style>${await fs.readFile(f, 'utf8')}</style>`); } catch { /* css ausente */ }
+    }
+    return $.html();
 }
