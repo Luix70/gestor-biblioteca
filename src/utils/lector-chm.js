@@ -222,6 +222,12 @@ export async function paginaChmInline(ruta, href) {
     if (!archivo) return null;
     let bytes;
     try { bytes = await fs.readFile(archivo); } catch { return null; }        // buffer (para detectar codificación)
+    // Si el «tema» es una IMAGEN (algunas portadas son un .jpg/.png DIRECTO, no un HTML), se envuelve en una
+    // página que la MUESTRA — si no, se renderizaban sus bytes crudos como texto (ÿØÿà…JFIF…).
+    const extArch = path.extname(archivo).toLowerCase();
+    if (MIME_PREVIEW[extArch]) {
+        return `<div style="margin:0;text-align:center"><img src="data:${MIME_PREVIEW[extArch]};base64,${bytes.toString('base64')}" style="max-width:100%;height:auto"></div>`;
+    }
     const baseDir = path.dirname(archivo);
     const $ = cheerio.load(decodificarTexto(bytes));
     $('script').remove();                               // defensa en profundidad (el iframe ya es sandbox)
