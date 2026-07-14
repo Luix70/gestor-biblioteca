@@ -75,6 +75,12 @@ export const AJUSTES = {
                                     // página de CRÉDITOS/ISBN suele ser la 4ª-5ª → con menos se perdía. Mín. 5.
     PDF_OCR_ANCHO: 1600,            // ancho del rasterizado para OCR/barras (alto = ISBN en letra pequeña legible)
     PDF_BARRAS_ANCHO: 2000,         // ancho equivalente de los recortes del código de barras (alto pero acotado para no asfixiar al Atom)
+    // Timeout de CADA llamada a poppler (pdfinfo/pdftotext/pdftoppm), ADAPTATIVO al tamaño del fichero: cada
+    // llamada relee el PDF entero, y uno de cientos de MB no cabía en el timeout fijo de 30/60 s en el Atom
+    // → un PDF VÁLIDO se declaraba «ilegible» y acababa en Cuarentena. Ahora: base + porMB·MB, acotado a max.
+    PDF_TIMEOUT_BASE_MS: 45000,     // suelo (ficheros pequeños)
+    PDF_TIMEOUT_POR_MB: 700,        // ms extra por MB (177 MB → ~168 s)
+    PDF_TIMEOUT_MAX_MS: 240000,     // techo (4 min por llamada; un fichero pequeño roto sigue fallando rápido)
 
     // --- Clasificación por nº de páginas (solo PDF) ---
     // Un PDF ESCANEADO con MENOS de N páginas → libro de 'papel' (un ejemplar físico fino escaneado); el

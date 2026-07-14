@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { timeoutPoppler } from './timeout-poppler.js';
 
 const execFileP = promisify(execFile);
 
@@ -23,14 +24,14 @@ function paginasObjetivo(numPaginas) {
     return [...set].sort((a, b) => a - b);
 }
 
-async function rasterizarUna(ruta, pagina, dir, ancho) {
+async function rasterizarUna(ruta, pagina, dir, ancho, timeout) {
     const prefijo = path.join(dir, `pag-${pagina}`);
     await execFileP('pdftoppm', [
         '-jpeg', '-singlefile',
         '-f', String(pagina), '-l', String(pagina),
         '-scale-to-x', String(ancho), '-scale-to-y', '-1',
         ruta, prefijo,
-    ], { timeout: 60000 });
+    ], { timeout: timeout || 60000 });
     return fs.readFile(`${prefijo}.jpg`);
 }
 
@@ -54,11 +55,14 @@ export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, 
         return [];
     }
 
+    // Timeout ADAPTATIVO al tamaño (se calcula UNA vez): en el Atom, un PDF de cientos de MB no se rasteriza
+    // en 60 s → antes daba renders=[] y el PDF (válido) acababa declarado ilegible.
+    const to = await timeoutPoppler(ruta);
     const salida = [];
     try {
         for (const p of objetivo) {
             try {
-                const buffer = await rasterizarUna(ruta, p, dir, ancho);
+                const buffer = await rasterizarUna(ruta, p, dir, ancho, to);
                 const etiqueta = p === 1 ? 'portada' : (p === total ? 'contraportada' : `pagina-${p}`);
                 salida.push({ buffer, pagina: p, etiqueta });
             } catch (e) {
@@ -90,12 +94,13 @@ export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, 
  */
 const APPS_ESCANEO = /adobe scan|camscanner|office lens|microsoft lens|genius scan|scanbot|swiftscan|tiny scanner|tapscanner|clear ?scanner|fast scanner|notebloc|photomyne|simple scan|naps2|vflat/i;
 export async function pdfEsImagen(ruta) {
+    const to = await timeoutPoppler(ruta);   // adaptativo: un PDF grande no cabe en 15 s en el Atom
     try {
-        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: 15000 });
+        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: to });
         if (APPS_ESCANEO.test(stdout)) return true;
     } catch { /* sin pdfinfo o PDF raro */ }
     try {
-        const { stdout } = await execFileP('pdffonts', [ruta], { timeout: 15000 });
+        const { stdout } = await execFileP('pdffonts', [ruta], { timeout: to });
         const filas = stdout.split('\n').slice(2).filter(l => l.trim()); // saltar las 2 líneas de cabecera
         if (filas.length === 0) return true;                              // sin fuentes → página = imagen
         if (filas.every(l => /glyphlessfont/i.test(l))) return true;      // solo la fuente invisible del OCR
@@ -109,7 +114,7 @@ export async function pdfEsImagen(ruta) {
  */
 export async function tamanoPagina(ruta) {
     try {
-        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: 30000 });
+        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: await timeoutPoppler(ruta) });
         const m = stdout.match(/Page size:\s*([\d.]+)\s*x\s*([\d.]+)\s*pts/i);
         if (m) return { anchoPts: parseFloat(m[1]), altoPts: parseFloat(m[2]) };
     } catch { /* sin pdfinfo o PDF ilegible */ }
@@ -132,7 +137,7 @@ export async function rasterizarRecorte(ruta, pagina, { dpi, x, y, w, h }) {
             '-x', String(Math.max(0, Math.round(x))), '-y', String(Math.max(0, Math.round(y))),
             '-W', String(Math.max(1, Math.round(w))), '-H', String(Math.max(1, Math.round(h))),
             ruta, prefijo,
-        ], { timeout: 60000 });
+        ], { timeout: await timeoutPoppler(ruta) });
         return await fs.readFile(`${prefijo}.jpg`);
     } catch (e) {
         if (e.code !== 'ENOENT') console.warn(`[Raster] recorte p${pagina} no generado: ${e.message}`);

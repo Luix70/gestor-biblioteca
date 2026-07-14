@@ -5,6 +5,7 @@ import { extraerISSNs, validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre, esTituloArtefacto, esAutorArtefacto } from './parsear-nombre.js';
 import { extraerISBNsConRol, parsearVolumen } from './multivolumen.js';
 import { parsearBloqueCatalogacion } from './cip.js';
+import { timeoutPoppler } from './timeout-poppler.js';
 
 const execFileP = promisify(execFile);
 
@@ -12,15 +13,15 @@ const execFileP = promisify(execFile);
 // páginas iniciales (portada, créditos, colofón). Configurable por si hiciera falta.
 const PAG_FRENTE = Number(process.env.PDF_PAGINAS_FRENTE || 15);
 const PAG_FONDO  = Number(process.env.PDF_PAGINAS_FONDO  || 5);
-const TIMEOUT    = 30000; // ms por llamada a poppler
 
 /**
  * Extrae metadatos del PDF (título, autor, número de páginas) mediante pdfinfo.
  * Al ser un proceso externo, no consume heap de Node aunque el PDF sea enorme.
  */
-async function pdfInfo(ruta) {
+async function pdfInfo(ruta, timeout) {
     try {
-        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: TIMEOUT });
+        const to = timeout || await timeoutPoppler(ruta);
+        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: to });
         const campo = (nombre) => {
             const m = stdout.match(new RegExp(`^${nombre}:\\s*(.+)`, 'mi'));
             return m ? m[1].trim() : null;
@@ -42,13 +43,14 @@ async function pdfInfo(ruta) {
  * Devuelve cadena vacía ante cualquier error (PDF escaneado, cifrado, poppler ausente).
  * El texto va a stdout (-) y nunca toca el disco; el buffer máximo limita el uso de RAM.
  */
-async function pdfText(ruta, desde, hasta) {
+async function pdfText(ruta, desde, hasta, timeout) {
     if (desde > hasta) return '';
     try {
+        const to = timeout || await timeoutPoppler(ruta);
         const { stdout } = await execFileP(
             'pdftotext',
             ['-f', String(desde), '-l', String(hasta), '-nopgbrk', '-enc', 'UTF-8', ruta, '-'],
-            { timeout: TIMEOUT, maxBuffer: 8 * 1024 * 1024 }, // 8 MB: ~8000 pág de texto puro
+            { timeout: to, maxBuffer: 8 * 1024 * 1024 }, // 8 MB: ~8000 pág de texto puro
         );
         return stdout;
     } catch {
@@ -141,8 +143,11 @@ function nombreParaISBN(nombre) {
 export async function extraerMetadatosPdf(rutaArchivo) {
     const nombre = path.basename(rutaArchivo);
     try {
+        // Timeout de poppler ADAPTATIVO al tamaño (se calcula UNA vez y se reutiliza en todas las llamadas):
+        // un PDF de cientos de MB no cabe en 30 s en el Atom → antes se declaraba «ilegible» sin serlo.
+        const to = await timeoutPoppler(rutaArchivo);
         // 1. Info-dict + número de páginas vía pdfinfo
-        const info = await pdfInfo(rutaArchivo);
+        const info = await pdfInfo(rutaArchivo, to);
 
         // Descartar títulos que son artefactos de metadatos mal formados: campo vacío, solo
         // espacio, el nombre de otro campo seguido de ":" (ej. "Subject:"), o un artefacto del
@@ -168,14 +173,14 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         const total = info.pages;
         if (total > 0) {
             const hastaFrente = Math.min(PAG_FRENTE, total);
-            texto += await pdfText(rutaArchivo, 1, hastaFrente);
+            texto += await pdfText(rutaArchivo, 1, hastaFrente, to);
             const desdeFondo = Math.max(hastaFrente + 1, total - PAG_FONDO + 1);
             if (desdeFondo <= total) {
-                texto += await pdfText(rutaArchivo, desdeFondo, total);
+                texto += await pdfText(rutaArchivo, desdeFondo, total, to);
             }
         } else {
             // pdfinfo no devolvió páginas (PDF cifrado/dañado): intentar las primeras
-            texto = await pdfText(rutaArchivo, 1, PAG_FRENTE);
+            texto = await pdfText(rutaArchivo, 1, PAG_FRENTE, to);
         }
 
         datos.texto_legible = texto.replace(/\s/g, '').length > 200;

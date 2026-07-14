@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { rutaCatalogo } from '../utils/rutas.js';
 import { arbolCDU } from '../utils/cdu-arbol.js';
 import { aMARCXML } from '../marc21.js';
+import { timeoutPoppler } from '../utils/timeout-poppler.js';
 
 const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -124,7 +125,7 @@ export async function archivoOriginal(carpeta) {
 /** Número de páginas de un PDF vía pdfinfo (poppler), o null si no está disponible. */
 export async function numeroPaginasPdf(ruta) {
     try {
-        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: 30000 });
+        const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: await timeoutPoppler(ruta) });
         const m = stdout.match(/Pages:\s*(\d+)/i);
         return m ? Number(m[1]) : null;
     } catch {

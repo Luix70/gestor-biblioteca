@@ -144,6 +144,9 @@ de ficheros clasificado por CDU.
   PDF_RASTER_ANCHO              1024         Ancho del rasterizado de portada
   PDF_OCR_PAGINAS               5            Páginas a OCR-ear si es escaneado
   PDF_OCR_ANCHO                 1600         Ancho del rasterizado para OCR
+  PDF_TIMEOUT_BASE_MS           45000        Timeout poppler: suelo (ficheros pequeños)
+  PDF_TIMEOUT_POR_MB            700          Timeout poppler: ms extra por MB (adaptativo)
+  PDF_TIMEOUT_MAX_MS            240000       Timeout poppler: techo por llamada (4 min)
   CLASIF_PAPEL_MAX_PAGINAS      12           Escaneado < N páginas → «papel»
   CLASIF_CAPITULO_MAX_PAGINAS   20           Legible < N páginas sin ISBN → capítulo/artículo
   DJVU_CONCURRENCIA             1            Páginas DjVu rasterizadas a la vez (1 = seguro en el Atom)
