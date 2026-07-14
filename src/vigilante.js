@@ -41,7 +41,7 @@ const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); 
 // disparara antes de tiempo, la ingesta lo detecta (la copia al CDU no cuadra) y CONSERVA el origen.
 const CARPETA_ESTABLE_MS = Number(process.env.VIGILANTE_CARPETA_ESTABLE_MS || 45000);
 const HUERFANO_TIMEOUT_MS = Number(process.env.INBOX_HUERFANO_MS || 600000);  // 10 min a 0 bytes → fantasma
-const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.zip', '.rar', '.7z'];
+const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.chm', '.zip', '.rar', '.7z', '.iso'];
 // Ubicación por defecto para libros/revistas físicos llegados por Inbox (sin POST que la fije).
 const UBICACION_INBOX = { ambito: 'Sin asignar', estanteria: 'Sin asignar (Inbox)' };
 
@@ -668,7 +668,9 @@ function resumenLote(t, totalUnidades) {
 // Formatos comprimidos GENÉRICOS que se EXPANDEN como si fueran una CARPETA (misma lógica de drop):
 // imágenes sueltas → un libro escaneado; varios documentos → colección; "Vol N" → obra. NO incluye
 // .cbz/.cbr/.cb7 (cómics = UN documento) ni .epub (es un zip, pero es un libro).
-const EXT_COMPRIMIDO = ['.zip', '.rar', '.7z'];   // bsdtar los lee todos (C plano, apto Atom)
+// bsdtar (libarchive) los lee todos (C plano, apto Atom): ZIP/RAR/RAR5/7z e ISO9660 (.iso → imagen de
+// disco de una colección/escaneo, se expande igual que un .zip). Se recicla el original tras expandir.
+const EXT_COMPRIMIDO = ['.zip', '.rar', '.7z', '.iso'];
 const rutaExiste = (p) => fs.access(p).then(() => true).catch(() => false);
 
 /**

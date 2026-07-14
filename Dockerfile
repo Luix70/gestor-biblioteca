@@ -26,8 +26,10 @@ FROM node:18-bullseye-slim
 #   · unar (`unar`/`lsar`, también MAIN/libre) se mantiene como RESPALDO (cubre algún RAR4/7z que
 #     libarchive no lea). OJO: unar NO soporta RAR5 — de ahí que bsdtar sea el principal.
 # djvulibre-bin aporta `ddjvu` para convertir un .djvu a PDF y verlo con el visor PDF del panel.
+# libchm-bin aporta `extract_chmLib` para desempaquetar CHM (HTML compilado: manuales/libros) → título/
+# ISBN/portada. bsdtar (libarchive-tools) ya lee además ISO9660, así que un .iso se expande como un .zip.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin \
+    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

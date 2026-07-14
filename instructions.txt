@@ -193,9 +193,10 @@ de ficheros clasificado por CDU.
     · .mobi .azw .azw3    Kindle/Mobipocket: lector propio (EXTH → título/autor/
                           editorial/ISBN + portada embebida). El ISBN sirve de pivote.
                           Con DRM NO se puede leer → se OMITE (se deja en el Inbox).
-    · .cbr .cbz .cb7      Cómics (primera imagen = portada)
-    · .djvu               Catalogado por nombre de archivo (sin lector de contenido)
-    · .zip .rar .7z       Se EXPANDEN a carpeta (drop) antes de catalogar
+    · .cbr .cbz .cb7      Cómics (primera imagen = portada; visor paginado bajo demanda)
+    · .djvu               Libro escaneado: rasteriza páginas para la visión (ISBN/portada) y el visor
+    · .chm                HTML compilado (manuales/libros): libchm-bin extrae título/ISBN/portada
+    · .zip .rar .7z .iso  Se EXPANDEN a carpeta (drop) antes de catalogar (bsdtar; .iso = ISO9660)
 
   Papel vs digital (filtro «Soporte»):
     · El formato lo determina el FICHERO (su extensión), no lo que la IA vea en la

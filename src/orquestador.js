@@ -10,6 +10,7 @@ import { buscarEnFicheroLocal, corroborarISBNporTitulo } from './utils/buscador-
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible, ErrorOmitir } from './errores.js';
 import { parsearNombre, esTituloArtefacto } from './utils/parsear-nombre.js';
 import { leerMobi } from './utils/lector-mobi.js';
+import { leerChm } from './utils/lector-chm.js';
 import { pareceSerieLibros, esEditorialDeLibros } from './utils/revistas.js';
 import { clasificarTipo, clasificarPorPaginas } from './utils/discriminador.js';
 import { interpretarIdentificadores } from './utils/interpretar-identificadores.js';
@@ -51,7 +52,7 @@ const EXT_MOBI = ['.mobi', '.azw', '.azw3'];
 const FORMATO_POR_EXT = {
     '.epub': 'epub', '.pdf': 'pdf',
     '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi',
-    '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.zip': 'zip', '.rar': 'rar',
+    '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.chm': 'chm', '.zip': 'zip', '.rar': 'rar',
 };
 
 export function detectarTipo(ruta) {
@@ -61,6 +62,7 @@ export function detectarTipo(ruta) {
     if (EXT_IMAGEN.includes(ext)) return 'imagen';
     if (EXT_COMIC.includes(ext)) return 'comic';
     if (ext === '.djvu') return 'djvu';
+    if (ext === '.chm') return 'chm';              // CHM → lector propio (libchm-bin: título/ISBN/portada)
     if (EXT_MOBI.includes(ext)) return 'mobi';     // MOBI/AZW/AZW3 → lector propio (EXTH + DRM + portada)
     if (FORMATO_POR_EXT[ext]) return 'otro-formato';
     return 'desconocido';
@@ -609,6 +611,28 @@ export async function procesarRecurso(entrada) {
         if (mobi.portada?.buf) datosBase.cubierta_base64 = mobi.portada.buf.toString('base64'); // la mide resolverPortada
         datosBase.alertas_agente = [`Formato ${ext}: leído con el lector MOBI${mobi.isbn ? ` · ISBN ${mobi.isbn}` : ''}${mobi.portada ? ' · portada embebida' : ''}${mobi.error ? ` · (${mobi.error}, se cataloga por nombre)` : ''}.`];
         formatos = [FORMATO_POR_EXT[ext] || 'mobi'];
+        tipo_recurso = 'libro';
+
+    } else if (tipo === 'chm') {
+        // CHM (HTML compilado: manuales/libros técnicos): lector propio con libchm-bin (extract_chmLib →
+        // título/ISBN/ISSN/portada del HTML+imágenes, sin IA). El título del CHM y su ISBN son el PIVOTE
+        // barato para el enriquecimiento. Si falta libchm-bin o el CHM está corrupto → catalogación por nombre.
+        let chm;
+        try { chm = await leerChm(rutas[0]); }
+        catch (e) { chm = { error: e.message }; }        // sin libchm-bin / corrupto → seguir por nombre
+        datosBase = metadatosDesdeNombre(rutas[0]);       // respaldo por nombre
+        if (chm.titulo && !esTituloArtefacto(chm.titulo)) datosBase.titulo = chm.titulo;
+        if ((chm.isbn_candidatos || []).length) {
+            // El ISBN del CUERPO del CHM es PISTA (podría ser de un libro citado): entra como candidato para el
+            // enriquecimiento (el Fichero/APIs lo corroboran), y se usa como pivote provisional si no hay otro.
+            const cands = [...new Set([...(chm.isbn_candidatos || []).flatMap(variantesISBN)])];
+            datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...cands])];
+            if (chm.isbn && !datosBase.isbn) datosBase.isbn = validarISBN(chm.isbn) || null;
+        }
+        if (chm.issn && !datosBase.issn) datosBase.issn = validarISSN(chm.issn) || datosBase.issn;
+        if (chm.portada?.buf) datosBase.cubierta_base64 = chm.portada.buf.toString('base64'); // la mide resolverPortada
+        datosBase.alertas_agente = [`Formato chm: leído con libchm-bin${chm.titulo ? ` · título "${chm.titulo}"` : ''}${chm.isbn ? ` · ISBN ${chm.isbn} (del cuerpo, pista)` : ''}${chm.portada ? ' · portada' : ''}${chm.error ? ` · (${chm.error}, catalogado por nombre)` : ''}.`];
+        formatos = ['chm'];
         tipo_recurso = 'libro';
 
     } else if (tipo === 'otro-formato') {
