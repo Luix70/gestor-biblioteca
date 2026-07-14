@@ -26,6 +26,29 @@ const MAX_BYTES_HTML = 400000;  // no leer enteros los HTML gigantes (basta el p
 // Igual que en lector-pdf: captura candidatos a ISBN; validarISBN filtra los que tienen checksum válido.
 const RE_ISBN = /(?:ISBN(?:-1[03])?:?\s*)?((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])/g;
 
+// Decodifica un buffer de texto (HTML/HHC) a string DETECTANDO su codificación. Muchos CHM usan
+// codificaciones LEGACY (windows-1252 occidental —comillas curvas, °, ©—, windows-1251 cirílico, gbk/big5
+// CJK, shift_jis…): leerlos como UTF-8 produce «caracteres raros» (mojibake). Node trae ICU completo, así
+// que TextDecoder soporta esas etiquetas. Orden: charset declarado en un <meta> → UTF-8 (si el buffer es
+// UTF-8 válido) → windows-1252 (reserva occidental, superset de latin-1 que nunca falla).
+function decodificarTexto(buf) {
+    const cabecera = buf.subarray(0, 4096).toString('latin1');
+    const m = cabecera.match(/charset\s*=\s*["']?\s*([\w-]+)/i);
+    const etiqueta = m ? m[1].toLowerCase() : null;
+    if (etiqueta && etiqueta !== 'utf-8' && etiqueta !== 'utf8') {
+        try { return new TextDecoder(etiqueta).decode(buf); } catch { /* etiqueta desconocida → seguir */ }
+    }
+    // UTF-8 ESTRICTO: si el buffer NO es UTF-8 válido, TextDecoder(fatal) lanza → caemos a windows-1252.
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { /* no era UTF-8 */ }
+    try { return new TextDecoder('windows-1252').decode(buf); } catch { return buf.toString('utf-8'); }
+}
+
+// decodeURIComponent tolerante: los href del .hhc suelen venir URL-encodeados (%20=espacio, subcarpetas);
+// hay que decodificarlos para resolver el fichero real. Si la cadena tiene un % suelto (no escape), no rompe.
+function decodeURITolerante(s) {
+    try { return decodeURIComponent(String(s)); } catch { return String(s); }
+}
+
 // Decodifica las entidades HTML más comunes de un título (sin cargar un parser entero para una línea).
 function decodificarEntidades(s) {
     return String(s)
@@ -71,7 +94,7 @@ export async function leerChm(ruta) {
         let titulo = null;
         const hhp = ficheros.find(f => f.toLowerCase().endsWith('.hhp'));
         if (hhp) {
-            const txt = await fs.readFile(hhp, 'utf8').catch(() => '');
+            const txt = await fs.readFile(hhp).then(decodificarTexto).catch(() => '');
             const m = txt.match(/^\s*Title\s*=\s*(.+?)\s*$/im);
             if (m && m[1].trim()) titulo = decodificarEntidades(m[1]);
         }
@@ -83,7 +106,7 @@ export async function leerChm(ruta) {
         for (const h of htmls) {
             if (escaneados >= MAX_HTML_ESCANEO) break;
             let raw;
-            try { raw = await fs.readFile(h, 'utf8'); } catch { continue; }
+            try { raw = decodificarTexto(await fs.readFile(h)); } catch { continue; }
             if (raw.length > MAX_BYTES_HTML) raw = raw.slice(0, MAX_BYTES_HTML);
             escaneados++;
             if (!titulo) {
@@ -167,7 +190,7 @@ export async function indiceChm(ruta) {
     const toc = [];
     const hhc = ficheros.find(f => f.toLowerCase().endsWith('.hhc'));
     if (hhc) {
-        const txt = await fs.readFile(hhc, 'utf8').catch(() => '');
+        const txt = await fs.readFile(hhc).then(decodificarTexto).catch(() => '');
         for (const m of txt.matchAll(/<object[^>]*>([\s\S]*?)<\/object>/gi)) {
             const bloque = m[1];
             const name = (bloque.match(/name="Name"\s+value="([^"]*)"/i) || [])[1];
@@ -179,7 +202,7 @@ export async function indiceChm(ruta) {
     let entrada = null;
     const hhp = ficheros.find(f => f.toLowerCase().endsWith('.hhp'));
     if (hhp) {
-        const txt = await fs.readFile(hhp, 'utf8').catch(() => '');
+        const txt = await fs.readFile(hhp).then(decodificarTexto).catch(() => '');
         const m = txt.match(/^\s*Default topic\s*=\s*(.+?)\s*$/im);
         if (m) entrada = m[1].trim().replace(/\\/g, '/');
     }
@@ -194,32 +217,39 @@ export async function indiceChm(ruta) {
  */
 export async function paginaChmInline(ruta, href) {
     const dir = await prepararChm(ruta);
-    const archivo = resolverDentro(dir, href);
+    // El href del .hhc/enlaces viene URL-encodeado (%20=espacio, subcarpetas) → decodificar para hallar el fichero.
+    const archivo = resolverDentro(dir, decodeURITolerante(href));
     if (!archivo) return null;
-    let html;
-    try { html = await fs.readFile(archivo, 'utf8'); } catch { return null; }
+    let bytes;
+    try { bytes = await fs.readFile(archivo); } catch { return null; }        // buffer (para detectar codificación)
     const baseDir = path.dirname(archivo);
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(decodificarTexto(bytes));
     $('script').remove();                               // defensa en profundidad (el iframe ya es sandbox)
+    // El charset del CONTENIDO ya no aplica: servimos texto YA decodificado y el iframe declara UTF-8. Dejar
+    // un <meta charset=windows-1252> haría que el navegador reinterpretara el texto → mojibake de nuevo.
+    $('meta').each((_, el) => {
+        const $el = $(el);
+        if ($el.attr('charset') != null || /content-type/i.test($el.attr('http-equiv') || '')) $el.remove();
+    });
 
-    // <img src> → data-URI (imágenes locales; se dejan las remotas/data tal cual)
+    // <img src> → data-URI (imágenes locales; se dejan las remotas/data tal cual). La ruta va URL-decodificada.
     for (const img of $('img').toArray()) {
         const src = $(img).attr('src');
         if (!src || /^(data:|https?:|\/\/)/i.test(src)) continue;
-        const f = resolverDentro(baseDir, src);
+        const f = resolverDentro(baseDir, decodeURITolerante(src));
         if (!f) continue;
         try {
             const buf = await fs.readFile(f);
             $(img).attr('src', `data:${MIME_PREVIEW[path.extname(f).toLowerCase()] || 'image/png'};base64,${buf.toString('base64')}`);
         } catch { /* imagen ausente: se deja el src roto, no rompe la página */ }
     }
-    // <link rel=stylesheet href> → <style> incrustado
+    // <link rel=stylesheet href> → <style> incrustado (decodificando su codificación también)
     for (const link of $('link[rel=stylesheet], link[type="text/css"]').toArray()) {
         const h = $(link).attr('href');
         if (!h || /^(https?:|\/\/)/i.test(h)) continue;
-        const f = resolverDentro(baseDir, h);
+        const f = resolverDentro(baseDir, decodeURITolerante(h));
         if (!f) continue;
-        try { $(link).replaceWith(`<style>${await fs.readFile(f, 'utf8')}</style>`); } catch { /* css ausente */ }
+        try { $(link).replaceWith(`<style>${decodificarTexto(await fs.readFile(f))}</style>`); } catch { /* css ausente */ }
     }
     return $.html();
 }
