@@ -24,15 +24,39 @@ function paginasObjetivo(numPaginas) {
     return [...set].sort((a, b) => a - b);
 }
 
-async function rasterizarUna(ruta, pagina, dir, ancho, timeout) {
-    const prefijo = path.join(dir, `pag-${pagina}`);
+// Agrupa una lista de páginas en TRAMOS contiguos [desde, hasta]. Rasterizar cada tramo en UNA sola llamada
+// a pdftoppm ahorra RELECTURAS del PDF: en un PDF grande NO-linealizado (Acrobat sin «fast web view»),
+// poppler relee el fichero ENTERO en CADA invocación, así que rasterizar 6 páginas por separado = 6 lecturas
+// de 177 MB (~50 s cada una en el Atom → timeouts). Por tramos: frontales [1..5] en 1 lectura + contraportada.
+function tramosContiguos(paginas) {
+    const orden = [...new Set(paginas)].filter(p => p >= 1).sort((a, b) => a - b);
+    const tramos = [];
+    for (const p of orden) {
+        const ultimo = tramos[tramos.length - 1];
+        if (ultimo && p === ultimo[1] + 1) ultimo[1] = p;
+        else tramos.push([p, p]);
+    }
+    return tramos;
+}
+
+// Rasteriza el tramo [desde, hasta] a JPEG en `dir` con UNA llamada a pdftoppm. pdftoppm nombra la salida
+// `<prefijo>-NNNN.jpg` (NNNN = nº de página relleno con ceros al ancho del TOTAL de páginas del documento,
+// que no conocemos aquí) → se GLOBEA el directorio y se mapea por el número del nombre. Devuelve
+// [{ pagina, buffer }] ordenado. Lanza (para que el caller distinga ENOENT/ilegible/timeout).
+async function rasterizarTramo(ruta, desde, hasta, dir, ancho, timeout, idx) {
+    const prefijo = path.join(dir, `t${idx}`);
     await execFileP('pdftoppm', [
-        '-jpeg', '-singlefile',
-        '-f', String(pagina), '-l', String(pagina),
+        '-jpeg', '-f', String(desde), '-l', String(hasta),
         '-scale-to-x', String(ancho), '-scale-to-y', '-1',
         ruta, prefijo,
     ], { timeout: timeout || 60000 });
-    return fs.readFile(`${prefijo}.jpg`);
+    const nombres = (await fs.readdir(dir)).filter(n => n.startsWith(`t${idx}-`) && n.endsWith('.jpg'));
+    const paginas = [];
+    for (const n of nombres) {
+        const m = n.match(/-(\d+)\.jpg$/);
+        if (m) paginas.push({ pagina: parseInt(m[1], 10), buffer: await fs.readFile(path.join(dir, n)) });
+    }
+    return paginas.sort((a, b) => a.pagina - b.pagina);
 }
 
 /**
@@ -40,14 +64,15 @@ async function rasterizarUna(ruta, pagina, dir, ancho, timeout) {
  *   - { numPaginas }      → páginas clave para portada (1, 2 y la última).
  *   - { paginas: [..] }   → lista explícita (p. ej. la portadilla/créditos para OCR).
  *   - { ancho }           → ancho objetivo en px (1024 portada; más alto para OCR legible).
- * Devuelve [{ buffer, pagina, etiqueta }] (la 1ª = 'portada'). Si pdftoppm no está instalado
- * (ENOENT, p. ej. en desarrollo local) o algo falla, devuelve [] → degradación elegante.
+ * Devuelve [{ buffer, pagina, etiqueta }] (la 1ª = 'portada'). Rasteriza por TRAMOS contiguos (menos
+ * relecturas del PDF). Si pdftoppm no está instalado (ENOENT) o el PDF está dañado, devuelve lo que pudo
+ * (posiblemente []) → degradación elegante.
  */
 export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, ancho = ANCHO } = {}) {
-    const total = paginas && paginas.length ? Math.max(...paginas) : numPaginas;
     const objetivo = (paginas && paginas.length)
         ? [...new Set(paginas)].filter(p => p >= 1).sort((a, b) => a - b)
         : paginasObjetivo(numPaginas);
+    const total = objetivo.length ? Math.max(...objetivo) : numPaginas;
     let dir;
     try {
         dir = await fs.mkdtemp(path.join(os.tmpdir(), 'raster-'));
@@ -60,28 +85,32 @@ export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, 
     const to = await timeoutPoppler(ruta);
     const salida = [];
     try {
-        for (const p of objetivo) {
+        let idx = 0;
+        for (const [desde, hasta] of tramosContiguos(objetivo)) {
             try {
-                const buffer = await rasterizarUna(ruta, p, dir, ancho, to);
-                const etiqueta = p === 1 ? 'portada' : (p === total ? 'contraportada' : `pagina-${p}`);
-                salida.push({ buffer, pagina: p, etiqueta });
+                for (const { pagina, buffer } of await rasterizarTramo(ruta, desde, hasta, dir, ancho, to, idx++)) {
+                    const etiqueta = pagina === 1 ? 'portada' : (pagina === total ? 'contraportada' : `pagina-${pagina}`);
+                    salida.push({ buffer, pagina, etiqueta });
+                }
             } catch (e) {
                 if (e.code === 'ENOENT') {
                     console.warn('[Raster] pdftoppm (poppler-utils) no disponible: se omite el rasterizado del PDF.');
                     break;
                 }
-                if (PDF_ILEGIBLE.test(e.message || '')) {
-                    // El PDF está estructuralmente dañado: las demás páginas fallarían igual.
+                if (PDF_ILEGIBLE.test(e.message || '') || PDF_ILEGIBLE.test(e.stderr || '')) {
                     console.warn(`[Raster] PDF ilegible (estructura dañada, p. ej. xref): se omite el rasterizado de "${path.basename(ruta)}". Requiere una copia mejor.`);
                     break;
                 }
-                console.warn(`[Raster] página ${p} no rasterizada: ${e.message}`);
+                // Timeout (proceso matado) o error del tramo: DIAGNÓSTICO explícito (para verlo en los logs del
+                // NAS) y se sigue con el resto de tramos (otro puede salir bien).
+                const motivo = e.killed ? `TIMEOUT tras ${to} ms` : ((e.stderr || e.message || '').split('\n')[0] || 'error');
+                console.warn(`[Raster] tramo ${desde}-${hasta} de "${path.basename(ruta)}" no rasterizado: ${motivo}.`);
             }
         }
     } finally {
         await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
-    return salida;
+    return salida.sort((a, b) => a.pagina - b.pagina);
 }
 
 /**

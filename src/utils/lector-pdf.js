@@ -19,8 +19,8 @@ const PAG_FONDO  = Number(process.env.PDF_PAGINAS_FONDO  || 5);
  * Al ser un proceso externo, no consume heap de Node aunque el PDF sea enorme.
  */
 async function pdfInfo(ruta, timeout) {
+    const to = timeout || await timeoutPoppler(ruta);
     try {
-        const to = timeout || await timeoutPoppler(ruta);
         const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: to });
         const campo = (nombre) => {
             const m = stdout.match(new RegExp(`^${nombre}:\\s*(.+)`, 'mi'));
@@ -33,7 +33,9 @@ async function pdfInfo(ruta, timeout) {
             keywords: campo('Keywords'),
             pages:   parseInt(campo('Pages') || '0') || 0,
         };
-    } catch {
+    } catch (e) {
+        // DIAGNÓSTICO (visible en el log del NAS): distingue TIMEOUT (fichero grande/lento) de error real.
+        console.warn(`[lector-pdf] pdfinfo falló en "${path.basename(ruta)}": ${e.killed ? `TIMEOUT tras ${to} ms` : ((e.stderr || e.message || '').split('\n')[0])}`);
         return { title: null, author: null, subject: null, keywords: null, pages: 0 };
     }
 }
@@ -45,15 +47,18 @@ async function pdfInfo(ruta, timeout) {
  */
 async function pdfText(ruta, desde, hasta, timeout) {
     if (desde > hasta) return '';
+    const to = timeout || await timeoutPoppler(ruta);
     try {
-        const to = timeout || await timeoutPoppler(ruta);
         const { stdout } = await execFileP(
             'pdftotext',
             ['-f', String(desde), '-l', String(hasta), '-nopgbrk', '-enc', 'UTF-8', ruta, '-'],
             { timeout: to, maxBuffer: 8 * 1024 * 1024 }, // 8 MB: ~8000 pág de texto puro
         );
         return stdout;
-    } catch {
+    } catch (e) {
+        // DIAGNÓSTICO: TIMEOUT (fichero grande) o desbordamiento de maxBuffer (texto enorme) o error real.
+        const motivo = e.killed ? `TIMEOUT tras ${to} ms` : (/maxBuffer/i.test(e.message || '') ? 'maxBuffer excedido (texto muy largo)' : (e.stderr || e.message || '').split('\n')[0]);
+        console.warn(`[lector-pdf] pdftotext p${desde}-${hasta} falló en "${path.basename(ruta)}": ${motivo}.`);
         return '';
     }
 }
