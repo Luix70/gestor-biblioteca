@@ -6061,7 +6061,7 @@ function previewArchivo(r) {
       <button class="cnav prev" id="comicPrev" style="display:none">‹</button><button class="cnav next" id="comicNext" style="display:none">›</button>
       <button class="epubfs" id="comicFs" title="Pantalla completa" style="display:none">⛶</button>
       <div class="epubbar" id="comicBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="comicCur">1</span> / <span id="comicTotal">?</span></span></div>
-      <div class="epubmsg" id="comicMsg">Cargando cómic…</div></div>${acc}</div>`;
+      <div class="epubmsg" id="comicMsg">${ext === 'djvu' ? 'Cargando documento…' : 'Cargando cómic…'}</div></div>${acc}</div>`;
   // MOBI/AZW3: previsualización PROPIA (no hay lector nativo en el navegador). El backend extrae el TEXTO
   // best-effort conservando la estructura y detecta DRM/compresión no soportada. Se inicializa tras pintar
   // (iniciarLectorMobi) renderizándolo en un iframe SANDBOX (sin scripts). La portada/imágenes embebidas ya
