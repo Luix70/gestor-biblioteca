@@ -399,7 +399,11 @@ de ficheros clasificado por CDU.
     Acciones (admin):
       ✏️ Editar (y bloquear para que el Conformador no lo cambie). Incluye CDU · Dewey ·
          LCC · LCCN (estas tres son solo metadatos: a diferencia de la CDU NO re-alojan el
-         fichero) · DOI (artículos) · ISBN/ISSN + otras ediciones. TAMAÑO en la ficha: si
+         fichero) · DOI (artículos) · ISBN/ISSN + otras ediciones. SOPORTE (papel↔digital):
+         al pasar a «Digital», el editor busca el FICHERO ORIGINAL en la carpeta del
+         documento (archivoOriginal) y, si lo encuentra (p. ej. un PDF que se catalogó por
+         error como 'papel'), fija su formato real (pdf/epub/…) y su nombre → queda
+         descargable y previsualizable; si no hay fichero, avisa (súbelo por Cuarentena). TAMAÑO en la ficha: si
          está MEDIDO con el tapete se muestra «ancho × alto cm»; si solo hay el DECLARADO
          por la fuente bibliográfica (campo `dimensiones`, casi siempre solo el alto:
          «24 cm») se muestra atenuado como «· declarado». AUTORES+COLABORADORES:

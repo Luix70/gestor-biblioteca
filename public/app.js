@@ -5383,6 +5383,9 @@ function fichaEditar(d, r, opts) {
     ${campo('edSub', 'Subtítulo', d.subtitulo)}
     <label style="display:block;margin-top:8px">Tipo</label>
     <select id="edTipo">${['libro', 'revista', 'articulo', 'apuntes'].map((t) => `<option value="${t}"${(d.tipo_recurso || 'libro') === t ? ' selected' : ''}>${tipoIcono(t)} ${tipoNombre(t)}</option>`).join('')}</select>
+    <div class="row" style="gap:8px;margin-top:8px;align-items:flex-end"><div><label style="display:block">Soporte</label>
+      <select id="edSoporte"><option value="digital"${!(d.formatos || []).includes('papel') ? ' selected' : ''}>💾 Digital</option><option value="papel"${(d.formatos || []).includes('papel') ? ' selected' : ''}>📄 Papel</option></select></div>
+      <div class="muted" style="font-size:11px;flex:1">Cambiar a «Digital» intenta recuperar el PDF/EPUB original de la carpeta del documento.</div></div>
     <div style="margin-top:8px"><label style="display:block">Autores y colaboradores</label><div id="edAutList"></div><button type="button" class="btn" id="edAutAdd" style="margin-top:6px">➕ Añadir persona</button></div>
     ${campo('edEdi', 'Editorial', r.editorial || '')}
     <div class="row" style="gap:8px">${`<div style="flex:1">${campo('edAno', 'Año', d.año_edicion)}</div><div style="flex:1">${campo('edIdi', 'Idioma', d.idioma)}</div><div style="flex:1">${campo('edPag', 'Páginas', d.paginas)}</div>`}</div>
@@ -5485,6 +5488,7 @@ function fichaEditar(d, r, opts) {
       titulo: $('#edTit').value,
       subtitulo: $('#edSub').value,
       tipo_recurso: $('#edTipo').value,
+      soporte: $('#edSoporte') ? $('#edSoporte').value : undefined, // papel↔digital; a digital recupera el fichero
       autores: personas.filter((p) => p.rol === 'autor').map((p) => p.nombre),
       contribuciones: personas.filter((p) => p.rol !== 'autor'),
       editorial: $('#edEdi').value,

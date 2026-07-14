@@ -8,13 +8,16 @@ import { ObjectId } from 'mongodb';
 import { validarISBN, validarISSN } from './identificadores.js';
 import { normalizarDOI } from './buscador-crossref.js';
 import { indexarDoc } from './indice-busqueda.js';
-import { reubicarPorCdu } from '../mantenimiento/util-mantenimiento.js';
+import { reubicarPorCdu, carpetaDeDoc, archivoOriginal } from '../mantenimiento/util-mantenimiento.js';
 import { resolverPersona } from './resolver-persona.js';
 import { ROLES_VALIDOS } from './contribuciones.js';
 import { claveNumero } from './revistas.js';
+import path from 'node:path';
 
 const TEXTO = ['subtitulo', 'idioma', 'numero_edicion', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'obra_titulo'];
 const NUM = ['año_edicion', 'paginas', 'volumen_numero'];
+// Extensión del fichero original → su formato (para cuando se recupera el fichero al pasar papel→digital).
+const FORMATO_POR_EXT = { '.pdf': 'pdf', '.epub': 'epub', '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi', '.djvu': 'djvu', '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7' };
 
 // Resuelve nombres → ObjectId con resolverPersona (INSENSIBLE a mayúsculas/acentos + normalización BNE):
 // así editar «JEAN TOUCHARD» reusa «Touchard, Jean» en vez de crear un duplicado.
@@ -39,7 +42,7 @@ export async function editarDocumento(db, id, campos = {}) {
     // Campos de fecha/nº de una REVISTA (mes/año/nº de ejemplar) → recomputan la clave del número.
     const tocaClave = ['año_edicion', 'mes_publicacion', 'numero_issue'].some((k) => k in campos);
     // Documento actual: se necesita para reubicar por CDU y para recomputar clave_numero (mezclar con lo actual).
-    const docActual = (('cdu' in campos) || tocaClave) ? await db.collection('biblioteca').findOne({ _id: new ObjectId(id) }) : null;
+    const docActual = (('cdu' in campos) || ('soporte' in campos) || tocaClave) ? await db.collection('biblioteca').findOne({ _id: new ObjectId(id) }) : null;
 
     // Título: requerido por el esquema → solo se actualiza si viene NO vacío (nunca se borra).
     if ('titulo' in campos && String(campos.titulo).trim()) set.titulo = String(campos.titulo).trim();
@@ -177,6 +180,29 @@ export async function editarDocumento(db, id, campos = {}) {
             if (clave) set.clave_numero = clave; else unset.clave_numero = '';
         } else if (!('clave_numero' in set)) {
             unset.clave_numero = '';
+        }
+    }
+
+    // SOPORTE (papel ↔ digital) a mano. Pasar a DIGITAL intenta RECUPERAR el fichero original de la carpeta del
+    // documento (p. ej. un PDF escaneado que se catalogó por error como 'papel'): si lo encuentra, fija el
+    // formato real (pdf/epub/…) y su nombre_archivo; si no, avisa (se puede subir una copia por Cuarentena).
+    if ('soporte' in campos && docActual) {
+        const soporte = String(campos.soporte);
+        const esPapelAhora = (docActual.formatos || []).includes('papel');
+        if (soporte === 'digital' && esPapelAhora) {
+            let orig = null;
+            try { orig = await archivoOriginal(carpetaDeDoc(docActual)); } catch { /* sin carpeta accesible */ }
+            if (orig) {
+                const fmt = FORMATO_POR_EXT[path.extname(orig).toLowerCase()] || path.extname(orig).slice(1).toLowerCase() || 'pdf';
+                set.formatos = [fmt];
+                set.nombre_archivo = path.basename(orig);
+                avisos.push(`Formato → digital (${fmt}); fichero original recuperado: «${path.basename(orig)}».`);
+            } else {
+                avisos.push('No se encontró ningún fichero digital en la carpeta del documento. Sube una copia desde Cuarentena → «ilegibles» para completarlo.');
+            }
+        } else if (soporte === 'papel' && !esPapelAhora) {
+            set.formatos = ['papel'];
+            avisos.push('Formato → papel.');
         }
     }
 
