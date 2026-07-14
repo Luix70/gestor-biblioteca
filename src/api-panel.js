@@ -426,7 +426,7 @@ export function rutasPanel() {
             const match = {};
             // Tipo: libro/revista por tipo_recurso; 'comic' por naturaleza (un cómic puede ser libro=GN o
             // revista/serie, así que se filtra por su clase, no por tipo_recurso).
-            if (['libro', 'revista', 'articulo', 'apuntes'].includes(tipo)) match.tipo_recurso = tipo;
+            if (['libro', 'revista', 'articulo', 'apuntes', 'capitulo'].includes(tipo)) match.tipo_recurso = tipo;
             else if (tipo === 'comic') match.naturaleza = { $in: ['comic', 'novela-grafica'] };
             // Soporte: 'papel' = escaneado/físico (formatos incluye 'papel'); 'digital' = el resto
             // (epub/pdf/mobi/djvu/cbz…). Vacío = ambos.

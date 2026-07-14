@@ -142,6 +142,8 @@ de ficheros clasificado por CDU.
   PDF_RASTER_ANCHO              1024         Ancho del rasterizado de portada
   PDF_OCR_PAGINAS               5            Páginas a OCR-ear si es escaneado
   PDF_OCR_ANCHO                 1600         Ancho del rasterizado para OCR
+  CLASIF_PAPEL_MAX_PAGINAS      12           Escaneado < N páginas → «papel»
+  CLASIF_CAPITULO_MAX_PAGINAS   20           Legible < N páginas sin ISBN → capítulo/artículo
 
   Para un cambio permanente: editar src/config.js y actualizar.
   Para un override puntual en el NAS: añadir la variable al .env.
@@ -196,11 +198,26 @@ de ficheros clasificado por CDU.
 
   Papel vs digital (filtro «Soporte»):
     · El formato lo determina el FICHERO (su extensión), no lo que la IA vea en la
-      página. Un PDF ESCANEADO se identifica por VISIÓN, pero SIGUE SIENDO DIGITAL:
+      página. Un PDF ESCANEADO se identifica por VISIÓN pero SIGUE SIENDO DIGITAL:
       su soporte es «pdf», se conserva el fichero y solo se guardan hasta 6 páginas
-      frontales como vista previa.
+      frontales como vista previa. (Al subir un PDF por el panel se envía ÍNTEGRO;
+      NUNCA se explota en páginas-JPG en el navegador —eso lo convertía en «papel»
+      con decenas de imágenes y perdía el PDF—.)
     · «papel» se reserva a los ejemplares FÍSICOS: fotos/escaneos sueltos (.jpg/.png)
-      de un libro sin fichero digital, y las altas por ISBN sin fichero.
+      de un libro sin fichero digital, las altas por ISBN sin fichero, y —por la
+      política de páginas— los ESCANEOS FINOS (ver abajo). En ese último caso el PDF
+      original SE CONSERVA en la carpeta junto a las páginas extraídas (salvaguarda).
+
+  Clasificación por nº de PÁGINAS (solo PDF):
+    · Escaneado con MENOS de 12 páginas → libro de «papel» (folleto/ejemplar físico
+      fino); el PDF se conserva igual. Entre 12 y 20 → libro PDF digital.
+    · PDF LEGIBLE (con texto) con MENOS de 20 páginas y SIN ISBN/CIP propio →
+      «Artículo» (si trae DOI) o «Capítulo» (fragmento de un libro). Con ISBN/CIP
+      propio es un librito real y queda como «Libro».
+    · 20 páginas o más → libro o revista, según su ISBN/ISSN (como siempre). Una
+      REVISTA ya detectada (ISSN/fecha) nunca se reclasifica por páginas.
+    · Umbrales configurables: CLASIF_PAPEL_MAX_PAGINAS (12), CLASIF_CAPITULO_MAX_PAGINAS
+      (20). Tipos de documento: Libro · Revista · Cómic · Artículo · Capítulo · Apuntes.
 
   Agrupación de imágenes:
     · Varias imágenes en la MISMA CARPETA dentro de Inbox se tratan como

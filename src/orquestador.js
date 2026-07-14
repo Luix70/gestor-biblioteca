@@ -11,7 +11,7 @@ import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible, ErrorO
 import { parsearNombre, esTituloArtefacto } from './utils/parsear-nombre.js';
 import { leerMobi } from './utils/lector-mobi.js';
 import { pareceSerieLibros, esEditorialDeLibros } from './utils/revistas.js';
-import { clasificarTipo } from './utils/discriminador.js';
+import { clasificarTipo, clasificarPorPaginas } from './utils/discriminador.js';
 import { interpretarIdentificadores } from './utils/interpretar-identificadores.js';
 import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
@@ -644,6 +644,26 @@ export async function procesarRecurso(entrada) {
                 ? `ISBN ${v} leído del CÓDIGO DE BARRAS en el móvil (cliente, antes de subir).`
                 : `ISBN ${v} aportado en el formulario de la subida.`];
             console.log(`[Orquestador] ISBN del formulario aplicado a ${path.basename(rutas[0])}: ${v}.`);
+        }
+    }
+
+    // POLÍTICA POR Nº DE PÁGINAS (solo PDF), tras identificar (ISBN/ISSN/visión) para no pisar una identidad
+    // fuerte: un ESCANEO fino (< umbral) → libro de 'papel' (el PDF se conserva igual); un PDF LEGIBLE y corto
+    // SIN ISBN/CIP propio → 'articulo' (si trae DOI) o 'capitulo' (fragmento). ≥ umbral: sin cambios (manda
+    // el discriminador: libro/revista por ISBN/ISSN). Ver `clasificarPorPaginas` (discriminador.js).
+    if (tipo === 'pdf') {
+        const pol = clasificarPorPaginas({
+            paginas: datosBase.paginas,
+            escaneado: escaneadoSinTexto,
+            tipoActual: tipo_recurso,
+            doi: datosBase.doi,
+            idFuerte: !!(datosBase.isbn_propio || datosBase.cip),
+        });
+        if (pol.tipo_recurso) tipo_recurso = pol.tipo_recurso;
+        if (pol.formato) formatos = [pol.formato];
+        if (pol.alerta) {
+            datosBase.alertas_agente = [...(datosBase.alertas_agente || []), pol.alerta];
+            console.log(`[Orquestador] Política por páginas: ${pol.alerta}`);
         }
     }
 

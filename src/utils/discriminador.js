@@ -68,3 +68,54 @@ export function clasificarTipo(s = {}) {
     if (s.pareceRevista || s.issnHint) return { tipo_recurso: 'revista', naturaleza: null, multiparte: false };
     return { tipo_recurso: 'libro', naturaleza: null, multiparte: false };
 }
+
+// Umbrales de la política por nº de páginas (config.js · overridables por .env).
+const PAG_PAPEL_MAX = Number(process.env.CLASIF_PAPEL_MAX_PAGINAS) || 12;      // escaneado < N pág → papel
+const PAG_CAPITULO_MAX = Number(process.env.CLASIF_CAPITULO_MAX_PAGINAS) || 20; // legible < N pág → capítulo/artículo
+
+/**
+ * POLÍTICA POR NÚMERO DE PÁGINAS (solo PDF). Refina el tipo/formato YA decididos por `clasificarTipo` +
+ * la identificación (ISBN/ISSN/visión), aplicando el criterio del usuario:
+ *
+ *   - ESCANEADO  · menos de PAG_PAPEL_MAX páginas ....... libro de 'papel'
+ *                · PAG_PAPEL_MAX … PAG_CAPITULO_MAX ..... libro (pdf digital)
+ *                · PAG_CAPITULO_MAX o más ............... libro/revista (por ISBN/ISSN)
+ *   - LEGIBLE    · menos de PAG_CAPITULO_MAX páginas .... capítulo/artículo (si no hay ISBN/CIP propio)
+ *                · PAG_CAPITULO_MAX o más ............... libro/revista (por ISBN/ISSN)
+ *
+ * Reglas:
+ *  - Un ESCANEO fino (< PAG_PAPEL_MAX páginas) es casi siempre un folleto/ejemplar físico delgado → se
+ *    cataloga como libro de 'papel'. El PDF se CONSERVA igualmente (servicio-ingesta copia el fichero
+ *    fuente a la carpeta pase lo que pase con el formato: salvaguarda inherente).
+ *  - Un PDF LEGIBLE y corto (< PAG_CAPITULO_MAX páginas) SIN identidad propia de libro (ISBN/CIP propio)
+ *    es un fragmento: 'articulo' si trae DOI (identificador propio del artículo), si no 'capitulo'. Con
+ *    ISBN/CIP propio es un LIBRITO real (mantiene 'libro').
+ *  - A partir de PAG_CAPITULO_MAX páginas NO se toca nada: manda la decisión libro/revista del discriminador.
+ *  - NUNCA reclasifica una REVISTA ya detectada (ISSN/fechada) ni una OBRA multivolumen.
+ *
+ * @param {{ paginas?:number, escaneado?:boolean, tipoActual?:string, doi?:string, idFuerte?:boolean, multiparte?:boolean }} s
+ * @returns {{ tipo_recurso?:string, formato?:string, alerta?:string }}  cambios a aplicar (vacío = sin cambios)
+ */
+export function clasificarPorPaginas(s = {}) {
+    const n = Number(s.paginas) || 0;
+    // Sin nº de páginas fiable, o ya es revista/obra → no se toca (respetamos la identidad ya resuelta).
+    if (!n || s.multiparte || s.tipoActual === 'revista') return {};
+
+    // Escaneo fino → ejemplar físico → papel (el PDF se conserva).
+    if (s.escaneado && n < PAG_PAPEL_MAX) {
+        return {
+            formato: 'papel',
+            tipo_recurso: 'libro',
+            alerta: `Escaneo de ${n} páginas (< ${PAG_PAPEL_MAX}) → libro de PAPEL (el PDF se conserva junto a las páginas).`,
+        };
+    }
+    // Legible y corto, sin identidad propia de libro → capítulo/artículo (fragmento).
+    if (!s.escaneado && n < PAG_CAPITULO_MAX && !s.idFuerte && s.tipoActual === 'libro') {
+        const t = s.doi ? 'articulo' : 'capitulo';
+        return {
+            tipo_recurso: t,
+            alerta: `Documento legible de ${n} páginas (< ${PAG_CAPITULO_MAX})${s.doi ? ' con DOI' : ' sin ISBN propio'} → clasificado como ${t}.`,
+        };
+    }
+    return {};
+}

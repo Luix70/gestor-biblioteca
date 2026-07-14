@@ -66,6 +66,16 @@ export const AJUSTES = {
                                     // página de CRÉDITOS/ISBN suele ser la 4ª-5ª → con menos se perdía. Mín. 5.
     PDF_OCR_ANCHO: 1600,            // ancho del rasterizado para OCR/barras (alto = ISBN en letra pequeña legible)
     PDF_BARRAS_ANCHO: 2000,         // ancho equivalente de los recortes del código de barras (alto pero acotado para no asfixiar al Atom)
+
+    // --- Clasificación por nº de páginas (solo PDF) ---
+    // Un PDF ESCANEADO con MENOS de N páginas → libro de 'papel' (un ejemplar físico fino escaneado); el
+    // PDF se CONSERVA igualmente en la carpeta junto a las páginas extraídas (salvaguarda). Con N o más
+    // páginas se mantiene como PDF digital.
+    CLASIF_PAPEL_MAX_PAGINAS: 12,
+    // Un PDF LEGIBLE (con capa de texto) con MENOS de N páginas y SIN identidad propia de libro (ISBN/CIP
+    // propio) → 'articulo' (si trae DOI) o 'capitulo' (fragmento de un libro), no un libro. Con N o más
+    // páginas se decide libro/revista por el contenido (ISBN/ISSN), como siempre.
+    CLASIF_CAPITULO_MAX_PAGINAS: 20,
 };
 
 // Siembra process.env con los valores de AJUSTES que .env NO haya definido (env > config).

@@ -3550,7 +3550,7 @@ function modalCambiarTipo(n) {
     $('#cmpModal').innerHTML = `<div class="box card" style="max-width:440px">
       <h3 style="margin-top:0">🔀 Cambiar tipo${n > 1 ? ` · ${n} documentos` : ''}</h3>
       <div class="muted" style="margin:-4px 0 10px">Reclasifica a mano. NO mueve la carpeta (la Integridad/un reproceso la re-alojan luego en libros/ o revistas/).</div>
-      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}${opc('articulo', '📃', 'Artículo', '(científico, de revista…)')}${opc('apuntes', '🗒️', 'Apuntes')}
+      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}${opc('articulo', '📃', 'Artículo', '(científico, de revista…)')}${opc('capitulo', '📑', 'Capítulo', '(fragmento de un libro)')}${opc('apuntes', '🗒️', 'Apuntes')}
       <label style="margin-top:12px">Contraseña de administrador</label>
       <input type="password" id="pwInput" autocomplete="current-password">
       <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
@@ -5382,7 +5382,7 @@ function fichaEditar(d, r, opts) {
     ${campo('edTit', 'Título', d.titulo)}
     ${campo('edSub', 'Subtítulo', d.subtitulo)}
     <label style="display:block;margin-top:8px">Tipo</label>
-    <select id="edTipo">${['libro', 'revista', 'articulo', 'apuntes'].map((t) => `<option value="${t}"${(d.tipo_recurso || 'libro') === t ? ' selected' : ''}>${tipoIcono(t)} ${tipoNombre(t)}</option>`).join('')}</select>
+    <select id="edTipo">${['libro', 'revista', 'articulo', 'capitulo', 'apuntes'].map((t) => `<option value="${t}"${(d.tipo_recurso || 'libro') === t ? ' selected' : ''}>${tipoIcono(t)} ${tipoNombre(t)}</option>`).join('')}</select>
     <div class="row" style="gap:8px;margin-top:8px;align-items:flex-end"><div><label style="display:block">Soporte</label>
       <select id="edSoporte"><option value="digital"${!(d.formatos || []).includes('papel') ? ' selected' : ''}>💾 Digital</option><option value="papel"${(d.formatos || []).includes('papel') ? ' selected' : ''}>📄 Papel</option></select></div>
       <div class="muted" style="font-size:11px;flex:1">Cambiar a «Digital» intenta recuperar el PDF/EPUB original de la carpeta del documento.</div></div>
@@ -6831,7 +6831,7 @@ function construirSearch() {
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search">
           <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label></div>
-        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="apuntes">Apuntes</option></select></div>
+        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="capitulo">Capítulos</option><option value="apuntes">Apuntes</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
@@ -7499,8 +7499,8 @@ const badgesDoc = (d) =>
 // CABECERA de la ficha, donde el usuario quiere ver de un vistazo qué es y en qué soporte está.
 // Icono y nombre del TIPO de documento (para badges/tarjetas/placeholders). El cómic (por `naturaleza`)
 // manda sobre el tipo_recurso. Los tipos nuevos (artículo/apuntes) tienen su propio icono/nombre.
-function tipoIcono(tr, esComic) { return esComic ? '📓' : ({ revista: '📰', articulo: '📃', apuntes: '🗒️' }[tr] || '📕'); }
-function tipoNombre(tr, esComic) { return esComic ? 'Cómic' : ({ revista: 'Revista', articulo: 'Artículo', apuntes: 'Apuntes' }[tr] || 'Libro'); }
+function tipoIcono(tr, esComic) { return esComic ? '📓' : ({ revista: '📰', articulo: '📃', apuntes: '🗒️', capitulo: '📑' }[tr] || '📕'); }
+function tipoNombre(tr, esComic) { return esComic ? 'Cómic' : ({ revista: 'Revista', articulo: 'Artículo', apuntes: 'Apuntes', capitulo: 'Capítulo' }[tr] || 'Libro'); }
 function badgesTipoFormato(d) {
   const nat = String(d.naturaleza || '').toLowerCase();
   const esComic = ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(nat);
@@ -10383,21 +10383,30 @@ async function subirInbox(files, extra) {
       if (vivo) setInboxEstado(m);
     }
   };
-  // PDF (Adobe Scan/cámara/importado) → explotar en páginas JPG EN EL NAVEGADOR + leer el código de barras.
+  // PDF elegido de disco → se sube ÍNTEGRO. NO se explota en páginas-JPG en el cliente: hacerlo lo
+  // catalogaba como libro de 'papel' con decenas de imágenes y, peor, PERDÍA el PDF (no quedaba fichero
+  // digital en la carpeta del documento). El SERVIDOR ya clasifica el PDF correctamente —pdf digital, o
+  // 'papel' solo si es un escaneo de <12 páginas— leyendo su ISBN/ISSN por código de barras + visión sobre
+  // las páginas frontales, y CONSERVA el fichero. La explosión cliente→JPG es SOLO para la CÁMARA en vivo
+  // (fotos de un ejemplar físico), que llega como .jpg (no .pdf) y por tanto no entra en esta rama.
+  // Únicamente leemos el código de barras del PDF como PISTA barata de ISBN (sin sustituir el fichero).
   if (files.length === 1 && esPdf(files[0]) && !extra.isbn) {
     try {
-      setInboxEstado('🧩 Explotando el PDF en páginas y leyendo el código de barras…');
-      const res = await pdfAImagenes(files[0]);
+      setInboxEstado('📄 Leyendo el código de barras del PDF (el fichero se sube íntegro)…');
+      // Solo las primeras páginas (portada/créditos) para la PISTA de ISBN — no las 60: el fichero se sube
+      // entero y el servidor hace la lectura completa (frontales + contraportada) de todos modos.
+      const res = await pdfAImagenes(files[0], { maxPag: 6 });
       if (res.escaneo && res.pages.length) {
         const isbn = await detectarISBNenFiles(res.pages);
-        extra = { isbn: isbn || undefined, isbnOrigen: isbn ? 'movil' : undefined, titulo: files[0].name };
-        files = res.pages;
+        if (isbn) extra = { ...extra, isbn, isbnOrigen: 'movil' };
         log(
-          `🧩 PDF → ${res.pages.length} página(s)${isbn ? ` · 📱 ISBN ${isbn} leído en el móvil` : ' · sin código de barras (lo leerá el servidor)'}`,
+          isbn
+            ? `📄 PDF escaneado (se sube íntegro) · 📱 ISBN ${isbn} leído del código de barras`
+            : '📄 PDF escaneado: se sube íntegro; el servidor lo clasifica (ISBN/ISSN + nº de páginas)',
         );
       }
     } catch (e) {
-      console.warn('[PDF cliente] no explotado:', e.message);
+      console.warn('[PDF cliente] lectura de barras omitida:', e.message);
       setInboxEstado('');
     }
   }

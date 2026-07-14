@@ -209,13 +209,15 @@ async function main() {
     }
 
     // Ampliar (sin quitar) el enum de `tipo_recurso` para admitir NUEVOS tipos de documento (articulo,
-    // apuntes) además de libro/revista. Mismo patrón defensivo que formatos: leer el validador y re-aplicarlo.
+    // apuntes, capitulo) además de libro/revista. Mismo patrón defensivo que formatos: leer el validador y
+    // re-aplicarlo. ('capitulo' = fragmento de un libro / PDF legible corto sin ISBN propio, ver
+    // clasificarPorPaginas.)
     try {
         const info = (await db.listCollections({ name: 'biblioteca' }).toArray())[0];
         const js = info?.options?.validator?.$jsonSchema;
         const tr = js?.properties?.tipo_recurso;
         if (tr && Array.isArray(tr.enum)) {
-            const faltan = ['articulo', 'apuntes'].filter(v => !tr.enum.includes(v));
+            const faltan = ['articulo', 'apuntes', 'capitulo'].filter(v => !tr.enum.includes(v));
             if (faltan.length) {
                 tr.enum = [...tr.enum, ...faltan];
                 await db.command({
