@@ -27,10 +27,15 @@ export const AJUSTES = {
         { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
     ]),
     HTTP_TIMEOUT_MS: 20000,         // timeout de TODA llamada HTTP a las APIs bibliográficas
-    // Cota de tiempo por RECURSO ingerido: si el pipeline se atasca (p. ej. un PDF de cientos de MB que
-    // poppler relee una y otra vez), se corta y el fichero va a Cuarentena con aviso — nunca un cuelgue
-    // silencioso de la petición. 8 min: holgado para ficheros grandes legítimos, cota para los patológicos.
-    INGESTA_TIMEOUT_MS: 480000,
+    // Cota de tiempo por RECURSO ingerido: si el pipeline se ATASCA de verdad, se corta y el fichero va a
+    // Cuarentena con aviso — nunca un cuelgue silencioso. HOLGADO (20 min): un PDF de cientos de MB tarda
+    // VARIOS minutos legítimamente (poppler lo relee), y NO queremos mandar a Cuarentena un fichero bueno
+    // solo por lento; es una red de seguridad para atascos reales, no una cota del camino normal.
+    INGESTA_TIMEOUT_MS: 1200000,
+    // Timeout de RECEPCIÓN de una petición HTTP (Node corta a los 5 min por defecto): una SUBIDA grande
+    // (100+ MB) por un enlace lento se abortaría. Se sube a 20 min. (El PROCESADO posterior no lo limita
+    // Node; su cota es INGESTA_TIMEOUT_MS.) OJO: un PROXY inverso delante (DSM) tiene su propio timeout.
+    REQUEST_TIMEOUT_MS: 1200000,
     OL_TIMEOUT_MS: 20000,           // timeout de OpenLibrary; el circuit-breaker evita esperar en cada fallo
     DNB_TIMEOUT_MS: 15000,          // timeout de Deutsche Nationalbibliothek (SRU público)
     BNF_TIMEOUT_MS: 15000,          // timeout de la Bibliothèque nationale de France (SRU público)

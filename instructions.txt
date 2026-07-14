@@ -123,7 +123,8 @@ de ficheros clasificado por CDU.
   ────────────────────────────  ───────────  ────────────────────────────────
   PORT                          3000         Puerto de la API REST
   HTTP_TIMEOUT_MS               20000        Timeout de llamadas HTTP (APIs)
-  INGESTA_TIMEOUT_MS            480000       Cota por recurso; si se excede → Cuarentena (8 min)
+  INGESTA_TIMEOUT_MS            1200000      Cota por recurso; si se excede → Cuarentena (20 min)
+  REQUEST_TIMEOUT_MS            1200000      Recepción de una petición (subidas grandes; 20 min)
   PAUSA_INGESTA_MS              1500         Pausa entre recursos del Inbox
   REPOSO_INBOX_MS               2500         Espera tras el último evento
                                              antes de procesar el Inbox
@@ -717,11 +718,13 @@ de ficheros clasificado por CDU.
     conserva); solo se lee su código de barras de las primeras páginas como pista
     de ISBN, sin gastar IA.
     PROGRESO DE SUBIDA: la barra de estado muestra el % subido y, al 100%, «Subida
-    completa · el servidor está catalogando…» (los ficheros grandes tardan un poco;
-    ya no hay esperas «en silencio»). Si la ingesta se atasca (fichero enorme/pesado,
-    INGESTA_TIMEOUT_MS = 8 min) o falla, el documento va a Cuarentena CON UN AVISO
-    en la lista del Inbox (nunca desaparece sin más). Interruptores PERSISTENTES
-    (ficha «Modos y escaneo»):
+    completa · el servidor está catalogando…» (los ficheros grandes tardan VARIOS
+    minutos legítimamente —un PDF de 100+ MB obliga a poppler a releerlo—; ya no hay
+    esperas «en silencio»). Si la ingesta se ATASCA de verdad (INGESTA_TIMEOUT_MS =
+    20 min) o falla, el documento va a Cuarentena CON UN AVISO en la lista del Inbox
+    (nunca desaparece sin más). NOTA: si tienes un PROXY inverso delante (DSM), sube
+    su timeout de lectura para que no corte las subidas/catalogaciones grandes.
+    Interruptores PERSISTENTES (ficha «Modos y escaneo»):
       🚥 Supervisado — tras cada alta abre la ficha para revisar/corregir; con
          "Cancelar" DESCARTA el alta (no se queda en la base). Si está apagado,
          AUTOPILOTO: encola y procesa en segundo plano (no bloquea; sigues subiendo).

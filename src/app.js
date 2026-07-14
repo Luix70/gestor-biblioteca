@@ -158,7 +158,7 @@ function ubicacionDe(body) {
 // la carrera la gana el timeout → el `catch` lo manda a Cuarentena con aviso (nunca un cuelgue silencioso).
 // El pipeline subyacente (poppler) tiene sus propios timeouts, así que la promesa perdedora termina sola;
 // le colgamos un `.catch` para que no genere un rechazo sin gestionar.
-const INGESTA_TIMEOUT_MS = Number(process.env.INGESTA_TIMEOUT_MS) || 480000;
+const INGESTA_TIMEOUT_MS = Number(process.env.INGESTA_TIMEOUT_MS) || 1200000;
 function conTimeoutIngesta(promesa, mensaje) {
     let t;
     const limite = new Promise((_, rej) => {
@@ -351,17 +351,28 @@ function versionApp() {
     return { etiqueta, ...v };
 }
 
-app.listen(PUERTO, () => {
+// Node corta la RECEPCIÓN de una petición a los 5 min por defecto (requestTimeout) → una subida grande
+// (100+ MB) por un enlace lento se abortaría a mitad. Lo subimos a REQUEST_TIMEOUT_MS en cada servidor.
+// El socket no tiene timeout de INACTIVIDAD por defecto (server.timeout=0), así que el PROCESADO largo
+// posterior NO se corta (su cota es INGESTA_TIMEOUT_MS a nivel de app). OJO: un proxy inverso delante
+// (DSM) puede tener su propio timeout de lectura (p. ej. 60 s) — súbelo allí si las subidas grandes fallan.
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS) || 1200000;
+function ajustarTimeoutsServidor(servidor) {
+    servidor.requestTimeout = REQUEST_TIMEOUT_MS;
+    if (servidor.headersTimeout && servidor.headersTimeout > REQUEST_TIMEOUT_MS) servidor.headersTimeout = REQUEST_TIMEOUT_MS;
+}
+
+ajustarTimeoutsServidor(app.listen(PUERTO, () => {
     console.log(`🚀 API REST de ingesta activa en el puerto ${PUERTO}`);
     if (process.env.DESACTIVAR_VIGILANTE !== '1') {
         iniciarVigilante().catch(e => console.error('No se pudo iniciar el vigilante:', e.message));
     }
-});
+}));
 
 // El mismo servidor (API + estáticos + panel) escucha también en el puerto del PANEL, para
 // acceder al cuadro de mando sin CORS (la página y su /api comparten origen).
 if (PUERTO_PANEL && PUERTO_PANEL !== PUERTO) {
-    app.listen(PUERTO_PANEL, () => {
+    ajustarTimeoutsServidor(app.listen(PUERTO_PANEL, () => {
         // El puerto es el INTERNO del contenedor; el acceso real suele ser por proxy inverso + HTTPS
         // (p. ej. https://j56.diskstation.me:4443). Se muestra PANEL_PUBLIC_URL si está definida en .env.
         const urlPublica = process.env.PANEL_PUBLIC_URL || '';
@@ -372,5 +383,5 @@ if (PUERTO_PANEL && PUERTO_PANEL !== PUERTO) {
         console.log(`📦  Versión en ejecución: ${v.etiqueta}${v.commit && v.commit !== 'desconocido' ? ` · commit ${v.commit}` : ''}${v.rama ? ` (${v.rama})` : ''}${v.origen ? ` · vía ${v.origen}` : ''}`);
         if (!process.env.ADMIN_PWD && !process.env.PANEL_ADMIN_PASSWORD)
             console.warn('⚠️  ADMIN_PWD no definido: el admin "Luis" no podrá entrar (solo "guest"/lectura). Defínelo en .env.');
-    });
+    }));
 }
