@@ -849,6 +849,37 @@ async function aplicarAccionesGuiaFs() {
     }
 }
 
+/**
+ * PRE-PASO del Inbox (agrupado B): los GRUPOS declarados en un `_guia.json` (ficheros sueltos que forman UN
+ * audiolibro/obra) se materializan MOVIÉNDOLOS a una subcarpeta, para que la autodetección del vigilante los
+ * trate como una unidad (audio→audiolibro; una obra se marca con accion:'obra' en la subcarpeta). Recursivo
+ * y acotado; solo carpetas ESTABLES; los grupos ya procesados se vacían del _guia.json.
+ */
+async function procesarGruposGuia(dir = INBOX, nivel = 8) {
+    if (nivel < 0) return;
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+        if (e.isDirectory() && !ignorarEntrada(e.name)) await procesarGruposGuia(path.join(dir, e.name), nivel - 1);
+    }
+    let guia;
+    try { guia = await leerGuia(dir); } catch { guia = null; }
+    if (!guia || !guia.grupos || !guia.grupos.length) return;
+    if (!(await carpetaEstable(dir))) return;
+    for (const grupo of guia.grupos) {
+        const nombre = (grupo.nombre || (grupo.tipo === 'obra' ? 'Obra' : 'Audiolibro')).replace(/[/\\:*?"<>|]/g, '_');
+        const destino = path.join(dir, nombre);
+        const presentes = [];
+        for (const rel of grupo.archivos) { const a = path.join(dir, ...rel.split('/')); if (await rutaExiste(a)) presentes.push(a); }
+        if (!presentes.length) continue; // ya movidos/desaparecidos → se descarta al vaciar grupos
+        await fs.mkdir(destino, { recursive: true });
+        for (const a of presentes) await fs.rename(a, await nombreLibre(destino, path.basename(a))).catch(() => {});
+        if (grupo.tipo === 'obra') await escribirGuia(destino, { accion: 'obra' }).catch(() => {});
+        console.log(`  🧩 Grupo «${nombre}» (${grupo.tipo}): ${presentes.length} fichero(s) → subcarpeta (se agrupará como una unidad).`);
+    }
+    await escribirGuia(dir, { ...guia, grupos: [] }).catch(() => {}); // grupos consumidos
+}
+
 async function procesarCola() {
     if (procesando || !vigilanteActivo) return; // pausado desde el panel → los ficheros esperan en el Inbox
     procesando = true;
@@ -857,6 +888,7 @@ async function procesarCola() {
         let totalProcesadas = 0;
         const tally = {};
         await expandirComprimidos();          // .zip suelto → carpeta (drop) ANTES de listar unidades
+        await procesarGruposGuia();           // guía: grupos de ficheros → subcarpetas (agrupado B)
         await aplicarAccionesGuiaFs();        // guía: explotar/aplanar (mutan FS) ANTES de listar unidades
         let unidades = await listarUnidades();
         if (unidades.length) ultimaActividad = Date.now(); // hay trabajo: posponer el mantenimiento

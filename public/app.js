@@ -10797,12 +10797,18 @@ async function cargarArbolInbox() {
     const ev = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
     el[ev] = () => { _guiaDirty.add(el.dataset.ruta); if ($('#guiaGuardar')) $('#guiaGuardar').disabled = false; };
   });
+  // Casillas de SELECCIÓN de ficheros (para agrupar: A mover a carpeta · B marcar audiolibro/obra).
+  _guiaSel.clear();
+  actualizarSelBar();
+  $$('#guiaArbol .guiaSel').forEach((el) => {
+    el.onchange = () => { el.checked ? _guiaSel.add(el.dataset.ruta) : _guiaSel.delete(el.dataset.ruta); actualizarSelBar(); };
+  });
 }
 function nodoGuiaHTML(n) {
   if (n.tipo === 'file') {
     const ic = _ICONO_CLASE[n.clase] || '📄';
     const col = n.clase === 'noclasificable' ? ';color:#c60' : '';
-    return `<div style="padding:2px 0 2px 24px;font-size:12.5px${col}">${ic} ${esc(n.nombre)}${n.clase === 'noclasificable' ? ' <span class="muted">· no clasificable</span>' : ''}</div>`;
+    return `<div style="padding:2px 0 2px 20px;font-size:12.5px${col}"><label style="cursor:pointer"><input type="checkbox" class="guiaSel" data-ruta="${esc(n.ruta)}" style="vertical-align:-1px"> ${ic} ${esc(n.nombre)}</label>${n.clase === 'noclasificable' ? ' <span class="muted">· no clasificable</span>' : ''}</div>`;
   }
   const g = n.guia || { perfil: {}, accion: 'normal' };
   const sel = (k, opts, val) =>
@@ -10843,6 +10849,39 @@ async function guardarGuiasInbox() {
 }
 if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
 if ($('#guiaGuardar')) $('#guiaGuardar').onclick = guardarGuiasInbox;
+
+// ── Selección de ficheros para AGRUPAR (dos vías): A) mover a una nueva subcarpeta ahora; B) marcar como
+//    1 audiolibro / 1 obra en el _guia.json (el vigilante los agrupa al procesar). Ambas reutilizan la
+//    autodetección de carpetas del vigilante. ──
+const _guiaSel = new Set();
+function actualizarSelBar() {
+  const bar = $('#guiaSelBar');
+  if (!bar) return;
+  bar.style.display = _guiaSel.size ? 'flex' : 'none';
+  if ($('#guiaSelN')) $('#guiaSelN').textContent = _guiaSel.size;
+}
+async function agruparEnCarpeta() {
+  if (!_guiaSel.size) return;
+  const nombre = prompt(`Nombre de la NUEVA carpeta para agrupar ${_guiaSel.size} fichero(s) (se moverán ahí):`, 'Audiolibro');
+  if (!nombre || !nombre.trim()) return;
+  try {
+    const r = await api('/inbox/agrupar-carpeta', { method: 'POST', body: JSON.stringify({ rutas: [..._guiaSel], nombre: nombre.trim() }) });
+    r.ok ? toast(`📁 ${r.movidos} fichero(s) → «${r.carpeta}»`) : toast(r.motivo || 'error', 'bad');
+  } catch (e) { toast(e.message, 'bad'); }
+  cargarArbolInbox();
+}
+async function marcarGrupo(tipo) {
+  if (!_guiaSel.size) return;
+  try {
+    const r = await api('/inbox/grupo', { method: 'POST', body: JSON.stringify({ rutas: [..._guiaSel], tipo }) });
+    r.ok ? toast(`${tipo === 'obra' ? '📚' : '🎧'} grupo marcado (${r.n} fichero(s)) en «${r.carpeta}»`) : toast(r.motivo || 'error', 'bad');
+  } catch (e) { toast(e.message, 'bad'); }
+  cargarArbolInbox();
+}
+if ($('#guiaMover')) $('#guiaMover').onclick = agruparEnCarpeta;
+if ($('#guiaGrpAudio')) $('#guiaGrpAudio').onclick = () => marcarGrupo('audiolibro');
+if ($('#guiaGrpObra')) $('#guiaGrpObra').onclick = () => marcarGrupo('obra');
+if ($('#guiaSelNada')) $('#guiaSelNada').onclick = () => { _guiaSel.clear(); $$('#guiaArbol .guiaSel').forEach((el) => (el.checked = false)); actualizarSelBar(); };
 // Supervisado: trae la ficha recién creada y abre el formulario de edición como PREVIEW (sin navegar).
 async function revisarSupervisado(id) {
   try {

@@ -56,8 +56,19 @@ export function normalizarPerfil(p) {
 
 /** Normaliza una guía cruda (de disco o del explorador). Devuelve un objeto guía siempre válido. */
 export function normalizarGuia(g) {
-    const guia = { perfil: {}, accion: 'normal', adjuntar_a: null, archivos: {} };
+    const guia = { perfil: {}, accion: 'normal', adjuntar_a: null, archivos: {}, grupos: [] };
     if (!g || typeof g !== 'object') return guia;
+    // GRUPOS de ficheros sueltos que forman UN documento (agrupado B del Inspector): audiolibro / obra.
+    // `archivos` = nombres RELATIVOS a esta carpeta. El vigilante los mueve a una subcarpeta y los agrupa.
+    if (Array.isArray(g.grupos)) {
+        guia.grupos = g.grupos
+            .filter((gr) => gr && ['audiolibro', 'obra'].includes(gr.tipo) && Array.isArray(gr.archivos) && gr.archivos.length)
+            .map((gr) => ({
+                tipo: gr.tipo,
+                nombre: typeof gr.nombre === 'string' && gr.nombre.trim() ? gr.nombre.trim() : (gr.tipo === 'obra' ? 'Obra' : 'Audiolibro'),
+                archivos: gr.archivos.filter((a) => typeof a === 'string' && a).map((a) => a.replace(/^[/\\]+/, '')),
+            }));
+    }
     guia.perfil = normalizarPerfil(g.perfil);
     if (ACCIONES_CARPETA.includes(g.accion)) guia.accion = g.accion;
     if (guia.accion === 'intacta' && g.adjuntar_a && typeof g.adjuntar_a === 'object') {

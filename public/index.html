@@ -331,6 +331,18 @@
                 <button class="btn" id="guiaCargar" type="button">↻ Cargar árbol del Inbox</button>
                 <button class="btn pri" id="guiaGuardar" type="button" disabled>💾 Guardar guías</button>
               </div>
+              <!-- Barra de SELECCIÓN de ficheros (aparece al marcar casillas): agrupar mp3, obra, etc. -->
+              <div
+                id="guiaSelBar"
+                style="display: none; gap: 8px; align-items: center; margin-top: 10px; padding: 6px 8px; background: rgba(120, 120, 255, 0.1); border-radius: 8px; flex-wrap: wrap"
+              >
+                <b id="guiaSelN" style="font-size: 13px">0</b>
+                <span class="muted" style="font-size: 12px">fichero(s) — agrupar como:</span>
+                <button class="btn" id="guiaMover" type="button" title="A: mover a una NUEVA subcarpeta ahora (la autodetección la tratará como un audiolibro/colección)">📁 Nueva carpeta…</button>
+                <button class="btn" id="guiaGrpAudio" type="button" title="B: marcar como UN audiolibro (se registra en _guia.json; el vigilante los une al procesar)">🎧 = 1 audiolibro</button>
+                <button class="btn" id="guiaGrpObra" type="button" title="B: marcar como UNA obra multivolumen">📚 = 1 obra</button>
+                <button class="btn" id="guiaSelNada" type="button">✕</button>
+              </div>
               <div id="guiaArbol" style="margin-top: 10px"></div>
             </details>
             <!-- 1) CÁMARA — forma PREFERIDA para libros físicos (autorecorte + automedida con el tapete). DESPLEGADA -->

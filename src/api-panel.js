@@ -2,7 +2,7 @@ import express from 'express';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
 import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora, ejecutarCampanaCompleta, pararCampanaCompleta, estadoDrenaje, INBOX } from './vigilante.js';
-import { arbolInbox, escribirGuia, rutaInboxSegura } from './utils/guia-ingesta.js';
+import { arbolInbox, escribirGuia, leerGuia, rutaInboxSegura } from './utils/guia-ingesta.js';
 import { listarCampanas, guardarAjusteCampana } from './mantenimiento/campanas.js';
 import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
@@ -35,7 +35,7 @@ import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fond
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
 import { spawn } from 'node:child_process';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, stat, mkdir, rename } from 'node:fs/promises';
 import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
@@ -1642,6 +1642,53 @@ export function rutasPanel() {
             if (!st || !st.isDirectory()) return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' });
             const guia = await escribirGuia(abs, req.body?.guia || {});
             res.json({ ok: true, guia });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Padre común (absoluto) de varias rutas absolutas (dónde crear la subcarpeta / dónde guardar el grupo).
+    const padreComunAbs = (abss) => {
+        const dirs = abss.map((a) => path.dirname(a).split(path.sep));
+        let comun = dirs[0] || [];
+        for (const d of dirs.slice(1)) { let i = 0; while (i < comun.length && i < d.length && comun[i] === d[i]) i++; comun = comun.slice(0, i); }
+        return comun.join(path.sep) || path.parse(abss[0]).root;
+    };
+    // AGRUPADO A: mueve los ficheros seleccionados a una NUEVA subcarpeta (en su padre común) — ahora mismo.
+    // La autodetección del vigilante la tratará luego (audio→audiolibro, docs→colección, etc.).
+    r.post('/inbox/agrupar-carpeta', async (req, res) => {
+        try {
+            const rutas = Array.isArray(req.body?.rutas) ? req.body.rutas : [];
+            const nombre = String(req.body?.nombre || '').trim().replace(/[/\\:*?"<>|]/g, '_');
+            if (!rutas.length || !nombre) return res.status(400).json({ ok: false, motivo: 'faltan ficheros o nombre' });
+            const abss = [];
+            for (const r0 of rutas) { const a = rutaInboxSegura(INBOX, r0); if (!a) return res.status(400).json({ ok: false, motivo: 'ruta fuera del Inbox' }); abss.push(a); }
+            const destino = path.join(padreComunAbs(abss), nombre);
+            await mkdir(destino, { recursive: true });
+            let movidos = 0;
+            for (const a of abss) {
+                const st = await stat(a).catch(() => null); if (!st || !st.isFile()) continue;
+                const ext = path.extname(a), base = path.basename(a, ext);
+                let d = path.join(destino, path.basename(a));
+                for (let i = 2; await stat(d).then(() => true).catch(() => false); i++) d = path.join(destino, `${base} (${i})${ext}`);
+                await rename(a, d); movidos++;
+            }
+            res.json({ ok: true, movidos, carpeta: path.relative(INBOX, destino).split(path.sep).join('/') });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // AGRUPADO B: marca los ficheros seleccionados como UN grupo (audiolibro/obra) en el _guia.json de su
+    // padre común. NO mueve nada ahora: el vigilante los agrupa al procesar (aplicarAccionesGuiaFs).
+    r.post('/inbox/grupo', async (req, res) => {
+        try {
+            const rutas = Array.isArray(req.body?.rutas) ? req.body.rutas : [];
+            const tipo = req.body?.tipo === 'obra' ? 'obra' : 'audiolibro';
+            if (!rutas.length) return res.status(400).json({ ok: false, motivo: 'faltan ficheros' });
+            const abss = [];
+            for (const r0 of rutas) { const a = rutaInboxSegura(INBOX, r0); if (!a) return res.status(400).json({ ok: false, motivo: 'ruta fuera del Inbox' }); abss.push(a); }
+            const padre = padreComunAbs(abss);
+            const archivos = abss.map((a) => path.relative(padre, a).split(path.sep).join('/'));
+            const guia = (await leerGuia(padre)) || {};
+            guia.grupos = [...(guia.grupos || []), { tipo, nombre: tipo === 'obra' ? 'Obra' : 'Audiolibro', archivos }];
+            await escribirGuia(padre, guia);
+            res.json({ ok: true, n: archivos.length, tipo, carpeta: path.relative(INBOX, padre).split(path.sep).join('/') || '(raíz del Inbox)' });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
