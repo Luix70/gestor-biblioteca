@@ -3771,12 +3771,46 @@ async function _descargarArchivo(url) {
 
 // PDF: renderiza miniaturas de todas las páginas (pdf.js) → el usuario marca las que quiera → cada una se
 // re-renderiza a mayor resolución y se añade al carrusel.
+// Parsea un rango de páginas de texto libre → lista de nºs (1-indexados) DENTRO de [1, total], ordenada y sin
+// repetir. Acepta: «primera», «última»/«últimas N», tramos «2-5», y sueltos «25». Ej.: «1-6, últimas 2».
+function parsearRangoPaginas(texto, total) {
+  const out = new Set();
+  let t = String(texto || '').toLowerCase();
+  t = t.replace(/[úu]ltimas?\s*(\d+)/g, (_, n) => { for (let i = Math.max(1, total - (+n) + 1); i <= total; i++) out.add(i); return ' '; });
+  t = t.replace(/[úu]ltima/g, String(total)).replace(/primera/g, '1');
+  for (const parte of t.split(/[,;]+/)) {
+    const p = parte.trim();
+    if (!p) continue;
+    const m = p.match(/^(\d+)\s*[-–a]\s*(\d+)$/);
+    if (m) { let a = +m[1], b = +m[2]; if (a > b) [a, b] = [b, a]; for (let i = a; i <= b; i++) if (i >= 1 && i <= total) out.add(i); }
+    else { const n = parseInt(p, 10); if (n >= 1 && n <= total) out.add(n); }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+// Rango por defecto para el selector de páginas: «1-6» + las dos últimas (sin solaparse en docs cortos).
+function rangoPorDefecto(total) {
+  if (!total) return '1-6';
+  const frente = `1-${Math.min(6, total)}`;
+  return total > 8 ? `${frente}, últimas 2` : frente;
+}
+
 async function extraerDePdf(archivo) {
   const cont = $('#cmpModal');
-  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del PDF</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando páginas…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del PDF</h3>
+    <div class="row" id="exTop" style="gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 8px;position:sticky;top:0;background:var(--card);padding:4px 0;z-index:1">
+      <span class="muted" id="exTotal" style="font-size:12px">…</span>
+      <input id="exRango" placeholder="1-6, última" title="Páginas a extraer. Ej.: primera, 2-5, 25, última" style="font-size:12px;width:150px;padding:2px 6px">
+      <button class="btn" id="exAddRango" type="button">➕ Añadir rango</button>
+      <span style="flex:1;min-width:8px"></span>
+      <button class="btn" id="exCancelTop" type="button">Cerrar</button>
+      <button class="btn pri" id="exOkTop" type="button" disabled>Añadir 0</button>
+    </div>
+    <div class="muted" id="exMsg" style="font-size:12px">Cargando páginas…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
   $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
   const volver = () => pintarGestorImagenes();
-  $('#exX').onclick = volver; $('#cmpScrim').onclick = cerrarCmp;
+  $('#exX').onclick = volver;
+  if ($('#exCancelTop')) $('#exCancelTop').onclick = volver;
+  $('#cmpScrim').onclick = cerrarCmp;
 
   await cargarPdfLib();
   const lib = window.pdfjsLib;
@@ -3786,9 +3820,11 @@ async function extraerDePdf(archivo) {
   const total = pdf.numPages;
   const MAX = 80; // tope de miniaturas (rendimiento en el Atom/móvil)
   const n = Math.min(total, MAX);
-  $('#exMsg').textContent = `${total} páginas${total > MAX ? ` (mostrando las primeras ${MAX})` : ''} · toca las que quieras añadir`;
+  $('#exMsg').textContent = `${total} páginas${total > MAX ? ` (rejilla: primeras ${MAX})` : ''} · toca las que quieras, o usa el rango arriba`;
+  if ($('#exTotal')) $('#exTotal').textContent = `${total} pág.`;
+  if ($('#exRango')) $('#exRango').value = rangoPorDefecto(total);
   const marcadas = new Set();
-  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
+  const actualizarBtn = () => { const nn = marcadas.size; ['#exOk', '#exOkTop'].forEach((s) => { const b = $(s); if (b) { b.textContent = `Añadir ${nn}`; b.disabled = nn === 0; } }); };
   // Render de una página a canvas al ancho dado.
   const render = async (num, ancho) => {
     const pagina = await pdf.getPage(num);
@@ -3824,20 +3860,27 @@ async function extraerDePdf(archivo) {
     grid.appendChild(cel);
     io.observe(cel);
   }
-  $('#exOk').onclick = async () => {
-    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
+  // Añade las páginas indicadas (1-based, marcadas o de un rango) rasterizándolas a alta resolución.
+  const añadir = async (nums1) => {
+    const lista = [...new Set(nums1)].filter((x) => x >= 1 && x <= total).sort((a, b) => a - b);
+    if (!lista.length) { toast('Indica alguna página (marca miniaturas o escribe un rango)', 'warn'); return; }
+    ['#exOk', '#exOkTop', '#exAddRango'].forEach((s) => { const b = $(s); if (b) { b.disabled = true; if (s !== '#exAddRango') b.textContent = 'Añadiendo…'; } });
+    let ok = 0;
     try {
-      for (const num of [...marcadas].sort((x, y) => x - y)) {
+      for (const num of lista) {
         const c = await render(num, 1600); // alta resolución para la imagen definitiva
         const b64 = c.toDataURL('image/jpeg', 0.9);
         c.width = c.height = 0;
-        await apiImg('anadir', { base64: b64 });
+        await apiImg('anadir', { base64: b64 }); ok++;
       }
-      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
+      toast(`🖹 ${ok} imagen(es) añadida(s)`);
     } catch (e) { toast(e.message, 'bad'); }
     try { pdf.destroy(); } catch (_) {}
     pintarGestorImagenes();
   };
+  $('#exOk').onclick = () => añadir([...marcadas]);
+  if ($('#exOkTop')) $('#exOkTop').onclick = () => añadir([...marcadas]);
+  if ($('#exAddRango')) $('#exAddRango').onclick = () => añadir(parsearRangoPaginas($('#exRango') ? $('#exRango').value : '', total));
 }
 
 // EPUB: extrae las imágenes embebidas (JSZip) → miniaturas → el usuario marca → se añaden al carrusel.
@@ -3898,14 +3941,25 @@ async function extraerDeEpub(archivo) {
 async function extraerLazy(id, cfg) {
   const cont = $('#cmpModal');
   const extraHtml = (cfg.extras || []).map((_, i) => `<button class="btn" id="exExtra${i}"></button>`).join('');
-  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 ${esc(cfg.titulo || 'Extraer del documento')}</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exCancel">Cancelar</button>${extraHtml}</div><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 ${esc(cfg.titulo || 'Extraer del documento')}</h3>
+    <div class="row" id="exTop" style="gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 8px;position:sticky;top:0;background:var(--card);padding:4px 0;z-index:1">
+      <span class="muted" id="exTotal" style="font-size:12px">…</span>
+      <input id="exRango" placeholder="1-6, última" title="Páginas a extraer. Ej.: primera, 2-5, 25, última" style="font-size:12px;width:150px;padding:2px 6px">
+      <button class="btn" id="exAddRango" type="button">➕ Añadir rango</button>
+      <span style="flex:1;min-width:8px"></span>
+      <button class="btn" id="exCancelTop" type="button">Cerrar</button>
+      <button class="btn pri" id="exOkTop" type="button" disabled>Añadir 0</button>
+    </div>
+    <div class="muted" id="exMsg" style="font-size:12px">Cargando…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exCancel">Cancelar</button>${extraHtml}</div><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
   $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
   // CANCELACIÓN: las miniaturas pendientes se ABORTAN al cerrar/cancelar/añadir. Así el servidor deja de
   // rasterizar páginas que ya nadie va a ver (clave con DjVu: al elegir una página no sigue con las 82).
   const ctrlMin = new AbortController();
   let ioRef = null;
   const limpiar = () => { try { ctrlMin.abort(); } catch {} if (ioRef) ioRef.disconnect(); };
-  $('#exCancel').onclick = () => { limpiar(); pintarGestorImagenes(); };
+  const cerrar = () => { limpiar(); pintarGestorImagenes(); };
+  $('#exCancel').onclick = cerrar;
+  if ($('#exCancelTop')) $('#exCancelTop').onclick = cerrar;
   $('#cmpScrim').onclick = () => { limpiar(); cerrarCmp(); };
   (cfg.extras || []).forEach((e, i) => { const b = $('#exExtra' + i); if (b) { b.textContent = e.etq; b.onclick = e.fn; } });
 
@@ -3926,9 +3980,11 @@ async function extraerLazy(id, cfg) {
   const total = r[cfg.contar.key] || 0;
   if (!total) { $('#exMsg').textContent = cfg.vacio || 'No hay imágenes extraíbles.'; return; }
   const MAX = 200, n = Math.min(total, MAX);
-  $('#exMsg').textContent = `${total}${total > MAX ? ` (primeras ${MAX})` : ''} · toca las que quieras añadir`;
+  $('#exMsg').textContent = `${total}${total > MAX ? ` (rejilla: primeras ${MAX})` : ''} · toca las que quieras, o usa el rango arriba`;
+  if ($('#exTotal')) $('#exTotal').textContent = `${total} pág.`;
+  if ($('#exRango')) $('#exRango').value = rangoPorDefecto(total);
   const marcadas = new Set();
-  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
+  const actualizarBtn = () => { const nn = marcadas.size; ['#exOk', '#exOkTop'].forEach((s) => { const b = $(s); if (b) { b.textContent = `Añadir ${nn}`; b.disabled = nn === 0; } }); };
   const grid = $('#exGrid');
   const io = new IntersectionObserver((entradas) => {
     for (const en of entradas) {
@@ -3951,20 +4007,28 @@ async function extraerLazy(id, cfg) {
     grid.appendChild(cel);
     io.observe(cel);
   }
-  $('#exOk').onclick = async () => {
-    limpiar();   // deja de pedir/rasterizar miniaturas: ya solo importan las páginas ELEGIDAS
-    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
+  // Añade al carrusel las páginas indicadas (índices 0-based, sean marcadas o de un rango). Reutilizado por
+  // los botones «Añadir» (arriba y abajo) y por «Añadir rango» — así no hay que bajar 200 miniaturas.
+  const añadir = async (nums0) => {
+    limpiar(); // deja de pedir/rasterizar miniaturas: ya solo importan las páginas elegidas
+    const lista = [...new Set(nums0)].filter((x) => x >= 0 && x < total).sort((a, b) => a - b);
+    if (!lista.length) { toast('Indica alguna página (marca miniaturas o escribe un rango)', 'warn'); return; }
+    ['#exOk', '#exOkTop', '#exAddRango'].forEach((s) => { const b = $(s); if (b) { b.disabled = true; if (s !== '#exAddRango') b.textContent = 'Añadiendo…'; } });
+    let ok = 0;
     try {
-      for (const num of [...marcadas].sort((x, y) => x - y)) {
+      for (const num of lista) {
         const blob = await fetchBlob(num);
         const file = new File([blob], `img-${num + 1}.jpg`, { type: blob.type || 'image/jpeg' });
         const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
-        await apiImg('anadir', { base64: b64 });
+        await apiImg('anadir', { base64: b64 }); ok++;
       }
-      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
+      toast(`🖹 ${ok} imagen(es) añadida(s)`);
     } catch (e) { toast(e.message, 'bad'); }
     pintarGestorImagenes();
   };
+  $('#exOk').onclick = () => añadir([...marcadas]);
+  if ($('#exOkTop')) $('#exOkTop').onclick = () => añadir([...marcadas]);
+  if ($('#exAddRango')) $('#exAddRango').onclick = () => añadir(parsearRangoPaginas($('#exRango') ? $('#exRango').value : '', total).map((p) => p - 1));
 }
 
 // MOBI/AZW3: PREVISUALIZACIÓN en la ficha (no hay lector nativo en el navegador como para EPUB/PDF). El
