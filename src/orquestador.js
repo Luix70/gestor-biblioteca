@@ -372,7 +372,7 @@ export async function procesarRecurso(entrada) {
             } else {
                 const imgs = renders.map(r => ({ data: r.buffer, mimeType: 'image/png' }));
                 let visto = null;
-                if (imgs.length) { try { visto = await analizarImagenesRecurso(imgs); } catch (e) { console.warn(`[PDF escaneado] visión falló: ${e.message}; OCR de reserva.`); } }
+                if (imgs.length) { try { visto = await analizarImagenesRecurso(imgs, null, { perfil: contexto.perfil }); } catch (e) { console.warn(`[PDF escaneado] visión falló: ${e.message}; OCR de reserva.`); } }
                 if (visto && (visto.titulo || visto.isbn || visto.issn)) {
                     datosBase = { ...visto, paginas: tecnicos.paginas, texto_legible: false };
                     isbnDelArchivo = !!visto.isbn;
@@ -463,7 +463,7 @@ export async function procesarRecurso(entrada) {
                 imagenes.push({ data: await fs.readFile(r), mimeType: mimeDeImagen(r) });
             }
             try {
-                datosBase = await analizarImagenesRecurso(imagenes);
+                datosBase = await analizarImagenesRecurso(imagenes, null, { perfil: contexto.perfil });
             } catch (e) {
                 // Sin texto ni metadatos, si la visión falla no hay forma de identificar el libro.
                 throw new ErrorIdentificacion(`Visión IA falló sobre el grupo de imágenes: ${e.message}`);
