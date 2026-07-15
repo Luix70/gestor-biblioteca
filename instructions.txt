@@ -669,6 +669,15 @@ de ficheros clasificado por CDU.
       el audio DOMINANTE con PDFs de guía (Campbell) va a colección, y las lecturas graduadas con
       audio (Oxford, «Stage») a transmedia. Pegajoso (colAudioVistas); duplicado → permanente → no se
       reintenta (anti-bucle).
+    · LAS GUÍAS MANDAN (mini-Inbox recursivo): si una carpeta contiene DESCENDIENTES guiados en el
+      Inspector (una subcarpeta con acción≠normal —obra/software/omitir/intacta—, con grupos, o con
+      un perfil de pistas), el vigilante NO deja que la autodetección agresiva (transmedia/colección
+      de audiolibros) se la trague entera: la trata como un mini-Inbox y RECURRE, clasificando cada
+      hijo por su cuenta (obra→multivolumen, software→software, mp3→audiolibro, 2+ libros→colección,
+      suelto→individual). Así una carpeta MIXTA (libros + audio + subcarpetas) se cataloga granular y
+      DESATENDIDA tras marcar las piezas una vez. Una carpeta SIN guías se comporta igual que siempre
+      (la mejora es opt-in). Bonus: en las unidades recurridas la ruta completa de carpetas viaja como
+      pista de CDU (materia_ruta). (vigilante.js · clasificarDirectorio/tieneDescendientesGuiados.)
 
   ── EXPLORADOR DE ARCHIVOS (ficha: «🗂️ Archivos» y junto a Ruta base) ─────────
     Navega y descarga TODO el árbol del documento — y, si cuelga de un árbol ruta_fija (colección
