@@ -3054,6 +3054,7 @@ function pintarDoc(r, ctx) {
     else if (/\.(cbz|cbr|cb7|djvu)$/.test(_nom)) iniciarLectorComic(d._id);
     else if (/\.(mobi|azw3?)$/.test(_nom)) iniciarLectorMobi(d._id);
     else if (_nom.endsWith('.chm')) iniciarLectorChm(d._id);
+    else if (d.tipo_recurso === 'software') iniciarExploradorSoftware(d._id);
     if (r.audios && r.audios.length) iniciarReproductorAudio(r.doc && r.doc._id, r.audios); // audiolibro / lectura con audio: playlist
   };
   const ld = $('#lectDet');
@@ -3551,7 +3552,7 @@ function modalCambiarTipo(n) {
     $('#cmpModal').innerHTML = `<div class="box card" style="max-width:440px">
       <h3 style="margin-top:0">🔀 Cambiar tipo${n > 1 ? ` · ${n} documentos` : ''}</h3>
       <div class="muted" style="margin:-4px 0 10px">Reclasifica a mano. NO mueve la carpeta (la Integridad/un reproceso la re-alojan luego en libros/ o revistas/).</div>
-      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}${opc('articulo', '📃', 'Artículo', '(científico, de revista…)')}${opc('capitulo', '📑', 'Capítulo', '(fragmento de un libro)')}${opc('apuntes', '🗒️', 'Apuntes')}
+      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}${opc('articulo', '📃', 'Artículo', '(científico, de revista…)')}${opc('capitulo', '📑', 'Capítulo', '(fragmento de un libro)')}${opc('apuntes', '🗒️', 'Apuntes')}${opc('software', '💿', 'Software', '(paquete verbatim en bloque)')}
       <label style="margin-top:12px">Contraseña de administrador</label>
       <input type="password" id="pwInput" autocomplete="current-password">
       <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
@@ -4039,6 +4040,26 @@ async function iniciarLectorChm(id) {
   }
   // Pinta la entrada inicial (ya viene en la primera respuesta).
   pintar(r.html, r.titulo);
+}
+
+// SOFTWARE (naturaleza:'software'): explorador de ficheros de SOLO LECTURA en la ficha. Muestra el árbol
+// del paquete (nombres + tamaño + icono por clase); no sirve ni edita los binarios (se mueven en bloque).
+async function iniciarExploradorSoftware(id) {
+  const cont = $('#swArbol');
+  if (!cont) return;
+  let r;
+  try { r = await api('/documentos/' + encodeURIComponent(id) + '/arbol'); }
+  catch (e) { cont.innerHTML = 'No se pudo leer el paquete: ' + esc(e.message); return; }
+  if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">(paquete vacío)</div>'; return; }
+  cont.innerHTML = r.arbol.map(nodoArbolRO).join('');
+}
+function nodoArbolRO(n) {
+  if (n.tipo === 'file') {
+    const ic = _ICONO_CLASE[n.clase] || '📄';
+    return `<div style="padding:1px 0 1px 20px">${ic} ${esc(n.nombre)} <span class="muted" style="font-size:11px">${n.tam ? fmtBytes(n.tam) : ''}</span></div>`;
+  }
+  const hijos = (n.hijos || []).map(nodoArbolRO).join('') || '<div class="muted" style="padding-left:20px">(vacía)</div>';
+  return `<details open style="margin-left:4px"><summary style="cursor:pointer">📁 ${esc(n.nombre)}</summary><div style="margin-left:14px">${hijos}</div></details>`;
 }
 
 // Rasteriza UNA página de texto de un MOBI/AZW3 CONSERVANDO la estructura (encabezados, negrita/cursiva,
@@ -5448,7 +5469,7 @@ function fichaEditar(d, r, opts) {
     ${campo('edTit', 'Título', d.titulo)}
     ${campo('edSub', 'Subtítulo', d.subtitulo)}
     <label style="display:block;margin-top:8px">Tipo</label>
-    <select id="edTipo">${['libro', 'revista', 'articulo', 'capitulo', 'apuntes'].map((t) => `<option value="${t}"${(d.tipo_recurso || 'libro') === t ? ' selected' : ''}>${tipoIcono(t)} ${tipoNombre(t)}</option>`).join('')}</select>
+    <select id="edTipo">${['libro', 'revista', 'articulo', 'capitulo', 'apuntes', 'software'].map((t) => `<option value="${t}"${(d.tipo_recurso || 'libro') === t ? ' selected' : ''}>${tipoIcono(t)} ${tipoNombre(t)}</option>`).join('')}</select>
     <div class="row" style="gap:8px;margin-top:8px;align-items:flex-end"><div><label style="display:block">Soporte</label>
       <select id="edSoporte"><option value="digital"${!(d.formatos || []).includes('papel') ? ' selected' : ''}>💾 Digital</option><option value="papel"${(d.formatos || []).includes('papel') ? ' selected' : ''}>📄 Papel</option></select></div>
       <div class="muted" style="font-size:11px;flex:1">Cambiar a «Digital» intenta recuperar el PDF/EPUB original de la carpeta del documento.</div></div>
@@ -6010,6 +6031,18 @@ function pintarExplorador(r) {
 function previewArchivo(r) {
   const id = r.doc && r.doc._id;
   const audio = reproductorAudioHtml(r.audios, id); // audiolibro (con o sin PDF): reproductor + descargas arriba
+  // SOFTWARE (paquete verbatim en bloque): no hay un fichero único → EXPLORADOR de ficheros de SOLO LECTURA.
+  const esSoftware = r.tipo_recurso === 'software' || (r.doc && r.doc.tipo_recurso === 'software') || r.naturaleza === 'software';
+  if (esSoftware && id) {
+    const zip = `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar todo el paquete en un ZIP">⬇ Paquete (ZIP)</a>`;
+    return (
+      audio +
+      `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">💿 Paquete de software</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Explorador de SOLO LECTURA · los ficheros se conservan y se mueven en bloque.</div>
+      <div id="swArbol" style="max-height:62vh;overflow:auto;border:1px solid rgba(128,128,128,.3);border-radius:10px;padding:8px;font-size:13px">Cargando…</div>
+      <div class="row" style="margin-top:12px">${zip}</div></div>`
+    );
+  }
   if (!r.archivo_url) return audio;                 // audio-only: solo el reproductor
   const nombre = r.nombre_archivo || 'archivo',
     url = encUrl(r.archivo_url),
@@ -6906,7 +6939,7 @@ function construirSearch() {
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search">
           <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label></div>
-        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="capitulo">Capítulos</option><option value="apuntes">Apuntes</option></select></div>
+        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="capitulo">Capítulos</option><option value="apuntes">Apuntes</option><option value="software">Software</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
@@ -7574,8 +7607,8 @@ const badgesDoc = (d) =>
 // CABECERA de la ficha, donde el usuario quiere ver de un vistazo qué es y en qué soporte está.
 // Icono y nombre del TIPO de documento (para badges/tarjetas/placeholders). El cómic (por `naturaleza`)
 // manda sobre el tipo_recurso. Los tipos nuevos (artículo/apuntes) tienen su propio icono/nombre.
-function tipoIcono(tr, esComic) { return esComic ? '📓' : ({ revista: '📰', articulo: '📃', apuntes: '🗒️', capitulo: '📑' }[tr] || '📕'); }
-function tipoNombre(tr, esComic) { return esComic ? 'Cómic' : ({ revista: 'Revista', articulo: 'Artículo', apuntes: 'Apuntes', capitulo: 'Capítulo' }[tr] || 'Libro'); }
+function tipoIcono(tr, esComic) { return esComic ? '📓' : ({ revista: '📰', articulo: '📃', apuntes: '🗒️', capitulo: '📑', software: '💿' }[tr] || '📕'); }
+function tipoNombre(tr, esComic) { return esComic ? 'Cómic' : ({ revista: 'Revista', articulo: 'Artículo', apuntes: 'Apuntes', capitulo: 'Capítulo', software: 'Software' }[tr] || 'Libro'); }
 function badgesTipoFormato(d) {
   const nat = String(d.naturaleza || '').toLowerCase();
   const esComic = ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(nat);

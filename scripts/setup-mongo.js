@@ -189,7 +189,7 @@ async function main() {
         const fmt = js?.properties?.formatos;
         const ref = fmt?.items?.enum ? fmt.items : (Array.isArray(fmt?.enum) ? fmt : null);
         if (ref) {
-            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'chm', 'mobi', 'audio', 'video'].filter(v => !ref.enum.includes(v));
+            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'chm', 'mobi', 'audio', 'video', 'software'].filter(v => !ref.enum.includes(v));
             if (faltan.length) {
                 ref.enum = [...ref.enum, ...faltan];
                 await db.command({
@@ -217,7 +217,7 @@ async function main() {
         const js = info?.options?.validator?.$jsonSchema;
         const tr = js?.properties?.tipo_recurso;
         if (tr && Array.isArray(tr.enum)) {
-            const faltan = ['articulo', 'apuntes', 'capitulo'].filter(v => !tr.enum.includes(v));
+            const faltan = ['articulo', 'apuntes', 'capitulo', 'software'].filter(v => !tr.enum.includes(v));
             if (faltan.length) {
                 tr.enum = [...tr.enum, ...faltan];
                 await db.command({

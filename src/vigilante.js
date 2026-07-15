@@ -14,7 +14,7 @@ import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
 import { reciclar } from './utils/papelera.js';
-import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia } from './utils/transmedia.js';
+import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
 import { leerGuia, aplicarPerfilAContexto, NOMBRE_GUIA } from './utils/guia-ingesta.js';
@@ -490,11 +490,10 @@ async function listarUnidades() {
                 continue;
             }
             if (guiaCarpeta?.accion === 'software') {
-                // Software (Libronix, etc.): se conserva VERBATIM en bloque + un registro. v1 por la ruta
-                // transmedia (preserva la estructura y crea la cabecera aunque haya 0 ficheros catalogables);
-                // la categoría 'software' DEDICADA (1 registro naturaleza:'software' + explorador de solo
-                // lectura) es el siguiente paso.
-                unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta], software: true });
+                // Software (Libronix, etc.): categoría DEDICADA — se copia verbatim en BLOQUE y se cataloga
+                // como UN registro naturaleza:'software' (ingestarSoftware). Su ficha lleva un explorador de
+                // ficheros de solo lectura.
+                unidades.push({ esSoftware: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
             if (guiaCarpeta?.accion === 'obra') {
@@ -860,6 +859,22 @@ async function procesarCola() {
                 // PAUSA desde el panel: se detiene tras el documento en curso; el resto espera en el
                 // Inbox y se reanuda al reactivar el vigilante (igual que el Mantenimiento cede el turno).
                 if (!vigilanteActivo) break;
+                // SOFTWARE (guía): copia verbatim EN BLOQUE + UN registro naturaleza:'software'. No pasa por
+                // el pipeline por-fichero (no cataloga cada .exe/.dll). Recicla el origen tras verificar la copia.
+                if (u.esSoftware) {
+                    console.log(`\n💿 Software «${path.basename(u.carpeta)}»: catalogando (bloque verbatim, 1 registro)…`);
+                    try {
+                        const rs = await ingestarSoftware(u.carpeta);
+                        if (rs.ok) {
+                            console.log(`  ✔ software «${rs.titulo}» · ${rs.ficheros} ficheros · CDU ${rs.cdu} · ${rs.web}`);
+                            tally.software = (tally.software || 0) + 1; procesadas++;
+                        } else {
+                            console.warn(`  ✗ software: ${rs.motivo} (se CONSERVA el origen)`);
+                            if (rs.permanente) omitidasDefinitivas.add(u.carpeta);
+                        }
+                    } catch (err) { console.error(`  ✗ software falló: ${err.message} (se CONSERVA el origen)`); }
+                    continue;
+                }
                 // TRANSMEDIA: copia el árbol verbatim al CDU + cataloga (un doc por PDF, audios, ruta_fija) y
                 // recicla el origen SOLO tras verificar la copia. No pasa por el pipeline normal por-fichero.
                 if (u.esTransmedia) {

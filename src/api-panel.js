@@ -428,7 +428,7 @@ export function rutasPanel() {
             const match = {};
             // Tipo: libro/revista por tipo_recurso; 'comic' por naturaleza (un cómic puede ser libro=GN o
             // revista/serie, así que se filtra por su clase, no por tipo_recurso).
-            if (['libro', 'revista', 'articulo', 'apuntes', 'capitulo'].includes(tipo)) match.tipo_recurso = tipo;
+            if (['libro', 'revista', 'articulo', 'apuntes', 'capitulo', 'software'].includes(tipo)) match.tipo_recurso = tipo;
             else if (tipo === 'comic') match.naturaleza = { $in: ['comic', 'novela-grafica'] };
             // Soporte: 'papel' = escaneado/físico (formatos incluye 'papel'); 'digital' = el resto
             // (epub/pdf/mobi/djvu/cbz…). Vacío = ambos.
@@ -1642,6 +1642,19 @@ export function rutasPanel() {
             if (!st || !st.isDirectory()) return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' });
             const guia = await escribirGuia(abs, req.body?.guia || {});
             res.json({ ok: true, guia });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ÁRBOL de ficheros de un documento (SOLO LECTURA) — para la previsualización del SOFTWARE (paquete
+    // verbatim en bloque): explorador navegable, sin editar ni servir binarios. Reutiliza arbolInbox.
+    r.get('/documentos/:id/arbol', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json({ ok: true, arbol: await arbolInbox(carpetaDeDoc(doc), { profundidad: 8, maxNodos: 5000 }) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
