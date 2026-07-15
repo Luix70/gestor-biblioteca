@@ -265,10 +265,27 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
  * falla, la retira (evita que un reintento con ficheros truncados se atasque). Nunca toca el ORIGEN.
  * @returns {Promise<{integra:boolean, huella:{n:number,bytes:number}}>}
  */
+// Copia recursiva RESILIENTE: usa los nombres EXACTOS del readdir (evita el ENOENT de fs.cp por desajuste de
+// normalización Unicode NFC/NFD —típico en Synology/SMB con acentos, «Religión»— o por una entrada que
+// desaparece a mitad, p. ej. una guía que movió una subcarpeta). Salta lo que dé ENOENT; propaga otros errores.
+async function copiarArbolResiliente(origen, destino) {
+    let ents;
+    try { ents = await fs.readdir(origen, { withFileTypes: true }); } catch (e) { if (e.code === 'ENOENT') return; throw e; }
+    await fs.mkdir(destino, { recursive: true });
+    for (const e of ents) {
+        if (ignorar(e.name)) continue;
+        const src = path.join(origen, e.name), dst = path.join(destino, e.name);
+        try {
+            if (e.isDirectory()) await copiarArbolResiliente(src, dst);
+            else await fs.copyFile(src, dst);
+        } catch (err) { if (err.code !== 'ENOENT') throw err; /* entrada desaparecida/normalización → se salta */ }
+    }
+}
+
 export async function copiarVerificado(origen, destino) {
     await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // parcial de un intento anterior
     await fs.mkdir(path.dirname(destino), { recursive: true });
-    await fs.cp(origen, destino, { recursive: true });
+    await copiarArbolResiliente(origen, destino);
     const [orig, dest] = await Promise.all([huella(origen), huella(destino)]);
     const integra = orig.n === dest.n && orig.bytes === dest.bytes;
     if (!integra) await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // no dejar la parcial
