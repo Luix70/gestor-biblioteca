@@ -319,6 +319,20 @@
                 muchos a la vez y procesarlos cuando quieras.
               </p>
             </div>
+            <!-- 🧭 INGESTA GUIADA: explorador del Inbox. Marca por carpeta una acción + pistas → _guia.json. -->
+            <details class="card foldcard admin-only" id="fcGuiaInbox" data-fold="pc">
+              <summary><h3>🧭 Guiar la ingesta (explorador)</h3></summary>
+              <p class="muted" style="font-size: 12px; margin-top: 0">
+                Con el Vigilante <b>pausado</b>, suelta un lote en el Inbox y marca por carpeta qué hacer
+                (omitir · aplanar · explotar · intacta) y da <b>pistas</b> (tipo probable, colección). El
+                vigilante lo obedece al reactivarlo; la <b>realidad manda</b> (un ISBN/ISSN corrige la pista).
+              </p>
+              <div class="row" style="gap: 8px">
+                <button class="btn" id="guiaCargar" type="button">↻ Cargar árbol del Inbox</button>
+                <button class="btn pri" id="guiaGuardar" type="button" disabled>💾 Guardar guías</button>
+              </div>
+              <div id="guiaArbol" style="margin-top: 10px"></div>
+            </details>
             <!-- 1) CÁMARA — forma PREFERIDA para libros físicos (autorecorte + automedida con el tapete). DESPLEGADA -->
             <details class="card foldcard admin-only" id="camCard" open>
               <summary>

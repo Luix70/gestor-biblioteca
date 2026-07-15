@@ -10741,6 +10741,74 @@ function pintarInboxResultados(res) {
   }
   pintarCola();
 }
+
+// ── INGESTA GUIADA · explorador del Inbox: árbol + marcar acción/pistas por carpeta → _guia.json ──────
+// El usuario recorre el árbol del Inbox y, por CARPETA, elige una acción (omitir/aplanar/explotar/intacta)
+// y da pistas (tipo probable, colección). Se guarda como _guia.json y el vigilante lo obedece al procesar.
+const _guiaDirty = new Set(); // rutas de carpeta tocadas por el usuario (las que se guardarán)
+const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta']];
+const _TIPOS_GUIA = [['', 'tipo…'], ['comic', 'cómic'], ['revista', 'revista'], ['libro', 'libro'], ['articulo', 'artículo'], ['capitulo', 'capítulo'], ['apuntes', 'apuntes']];
+const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '🎬', comprimido: '🗜️', noclasificable: '⚠️' };
+
+async function cargarArbolInbox() {
+  const cont = $('#guiaArbol');
+  if (!cont) return;
+  cont.innerHTML = '<div class="muted">Cargando…</div>';
+  _guiaDirty.clear();
+  if ($('#guiaGuardar')) $('#guiaGuardar').disabled = true;
+  let r;
+  try { r = await api('/inbox/arbol'); } catch (e) { cont.innerHTML = 'No se pudo cargar: ' + esc(e.message); return; }
+  if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">El Inbox está vacío.</div>'; return; }
+  cont.innerHTML = r.arbol.map(nodoGuiaHTML).join('');
+  $$('#guiaArbol .guiaCtl').forEach((el) => {
+    const ev = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
+    el[ev] = () => { _guiaDirty.add(el.dataset.ruta); if ($('#guiaGuardar')) $('#guiaGuardar').disabled = false; };
+  });
+}
+function nodoGuiaHTML(n) {
+  if (n.tipo === 'file') {
+    const ic = _ICONO_CLASE[n.clase] || '📄';
+    const col = n.clase === 'noclasificable' ? ';color:#c60' : '';
+    return `<div style="padding:2px 0 2px 24px;font-size:12.5px${col}">${ic} ${esc(n.nombre)}${n.clase === 'noclasificable' ? ' <span class="muted">· no clasificable</span>' : ''}</div>`;
+  }
+  const g = n.guia || { perfil: {}, accion: 'normal' };
+  const sel = (k, opts, val) =>
+    `<select class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="${k}" style="font-size:12px;padding:1px 3px">${opts
+      .map(([v, t]) => `<option value="${v}"${v === (val || '') ? ' selected' : ''}>${t}</option>`)
+      .join('')}</select>`;
+  const cab = `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <b style="font-size:13px">📁 ${esc(n.nombre)}</b>
+      ${sel('accion', _ACCIONES_GUIA, g.accion)}
+      ${sel('tipo_probable', _TIPOS_GUIA, g.perfil && g.perfil.tipo_probable)}
+      <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />
+    </span>`;
+  const hijos = (n.hijos || []).map(nodoGuiaHTML).join('') || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
+  return `<details class="foldcard" style="margin:2px 0;border:0;border-left:2px solid rgba(128,128,128,.3);border-radius:0;padding:2px 0 2px 8px"><summary style="cursor:pointer">${cab}</summary><div>${hijos}</div></details>`;
+}
+async function guardarGuiasInbox() {
+  if (!_guiaDirty.size) return;
+  const btn = $('#guiaGuardar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  // Recoge el estado ACTUAL de los controles, solo de las carpetas tocadas.
+  const porRuta = new Map();
+  $$('#guiaArbol .guiaCtl').forEach((el) => {
+    const ruta = el.dataset.ruta;
+    if (!_guiaDirty.has(ruta)) return;
+    const gg = porRuta.get(ruta) || { accion: 'normal', perfil: {} };
+    if (el.dataset.k === 'accion') gg.accion = el.value || 'normal';
+    else if (el.value && el.value.trim()) gg.perfil[el.dataset.k] = el.value.trim();
+    porRuta.set(ruta, gg);
+  });
+  let ok = 0, err = 0;
+  for (const [ruta, guia] of porRuta) {
+    try { const r = await api('/inbox/guia', { method: 'POST', body: JSON.stringify({ ruta, guia }) }); r.ok ? ok++ : err++; } catch { err++; }
+  }
+  toast(`🧭 ${ok} guía(s) guardada(s)${err ? ` · ${err} error(es)` : ''}`, err ? 'warn' : 'ok');
+  if (btn) btn.textContent = '💾 Guardar guías';
+  cargarArbolInbox();
+}
+if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
+if ($('#guiaGuardar')) $('#guiaGuardar').onclick = guardarGuiasInbox;
 // Supervisado: trae la ficha recién creada y abre el formulario de edición como PREVIEW (sin navegar).
 async function revisarSupervisado(id) {
   try {
