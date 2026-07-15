@@ -489,6 +489,28 @@ async function listarUnidades() {
                 unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta], intacta: true });
                 continue;
             }
+            if (guiaCarpeta?.accion === 'software') {
+                // Software (Libronix, etc.): se conserva VERBATIM en bloque + un registro. v1 por la ruta
+                // transmedia (preserva la estructura y crea la cabecera aunque haya 0 ficheros catalogables);
+                // la categoría 'software' DEDICADA (1 registro naturaleza:'software' + explorador de solo
+                // lectura) es el siguiente paso.
+                unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta], software: true });
+                continue;
+            }
+            if (guiaCarpeta?.accion === 'obra') {
+                // FORZAR obra multivolumen: TODOS los documentos de la carpeta son tomos de UNA obra cuyo
+                // título es el nombre de la carpeta; el nº de tomo va por orden natural del nombre de fichero.
+                const docsObra = filtrarDuplicadosNombre(await recopilarDocumentos(ruta))
+                    .sort((a, b) => path.basename(a).localeCompare(path.basename(b), undefined, { numeric: true }));
+                if (docsObra.length) {
+                    dropsADisolver.add(ruta);
+                    docsObra.forEach((d, i) => unidades.push({
+                        rutas: [d], esImagenes: false, carpeta: ruta, conservarCarpeta: false, esObra: true,
+                        obra: { titulo: e.name, numero: i + 1, titulo_volumen: path.basename(d, path.extname(d)), total: docsObra.length },
+                    }));
+                }
+                continue;
+            }
             // ENRUTADO POR PESO (audio vs PDF). Orden:
             // 1) TRANSMEDIA FUERTE: marcador .transmedia, contenido interactivo (CD-ROM) o estructura «Stage N»
             //    (lecturas graduadas) → el PDF/interactivo manda. Detección PEGAJOSA.

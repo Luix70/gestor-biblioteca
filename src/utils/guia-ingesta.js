@@ -34,7 +34,10 @@ export const NOMBRE_GUIA = '_guia.json';
 //   · explotar → libera SUS ficheros en la carpeta que la contiene y la elimina (los trata como sueltos allí).
 //   · intacta  → NO se procesa su contenido: se conserva VERBATIM (como transmedia) adjunta a un doc/colección
 //                (p. ej. carpeta de código junto a un PDF de programación, multimedia de una colección).
-export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta'];
+//   · obra     → TODOS los documentos de la carpeta son TOMOS de UNA obra multivolumen (título = la carpeta).
+//   · software → paquete de software: se conserva VERBATIM en BLOQUE y se cataloga como UN registro
+//                (naturaleza:'software'); su previsualización es un explorador de ficheros de solo lectura.
+export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta', 'obra', 'software'];
 
 const TIPOS_PROBABLES = ['comic', 'revista', 'libro', 'articulo', 'apuntes', 'capitulo'];
 

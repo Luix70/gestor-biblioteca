@@ -10746,7 +10746,7 @@ function pintarInboxResultados(res) {
 // El usuario recorre el árbol del Inbox y, por CARPETA, elige una acción (omitir/aplanar/explotar/intacta)
 // y da pistas (tipo probable, colección). Se guarda como _guia.json y el vigilante lo obedece al procesar.
 const _guiaDirty = new Set(); // rutas de carpeta tocadas por el usuario (las que se guardarán)
-const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta']];
+const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta'], ['obra', '📚 obra'], ['software', '💿 software']];
 const _TIPOS_GUIA = [['', 'tipo…'], ['comic', 'cómic'], ['revista', 'revista'], ['libro', 'libro'], ['articulo', 'artículo'], ['capitulo', 'capítulo'], ['apuntes', 'apuntes']];
 const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '🎬', comprimido: '🗜️', noclasificable: '⚠️' };
 
@@ -10783,7 +10783,8 @@ function nodoGuiaHTML(n) {
       <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />
     </span>`;
   const hijos = (n.hijos || []).map(nodoGuiaHTML).join('') || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
-  return `<details class="foldcard" style="margin:2px 0;border:0;border-left:2px solid rgba(128,128,128,.3);border-radius:0;padding:2px 0 2px 8px"><summary style="cursor:pointer">${cab}</summary><div>${hijos}</div></details>`;
+  // Cada sub-nivel se INDENTA (margin-left) además del borde izquierdo, para que la jerarquía se lea bien.
+  return `<details class="foldcard" open style="margin:2px 0;border:0;border-left:2px solid rgba(128,128,128,.3);border-radius:0;padding:2px 0 2px 8px"><summary style="cursor:pointer">${cab}</summary><div style="margin-left:18px">${hijos}</div></details>`;
 }
 async function guardarGuiasInbox() {
   if (!_guiaDirty.size) return;
