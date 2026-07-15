@@ -17,6 +17,7 @@ import { reciclar } from './utils/papelera.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
+import { leerGuia, aplicarPerfilAContexto } from './utils/guia-ingesta.js';
 import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
@@ -348,6 +349,8 @@ const colAudioVistas = new Set();
 // «ya catalogado»): se DEJAN de reintentar para no entrar en bucle (se reprocesarían en cada escaneo). El
 // origen se conserva en el Inbox (con .noborrar); el usuario decide qué hacer. Se olvida al desaparecer.
 const omitidasDefinitivas = new Set();
+// Carpetas con acción OMITIR en su _guia.json (para no repetir el log en cada escaneo). Se olvida al desaparecer.
+const omitidasGuia = new Set();
 
 /**
  * Huella de un árbol de carpeta: nº total de ficheros, bytes totales y el mtime MÁS RECIENTE. Recorre TODO
@@ -435,6 +438,13 @@ async function listarUnidades() {
             // (nº de ficheros + bytes) lleve quieta la ventana de estabilidad.
             if (!(await carpetaEstable(ruta))) {
                 console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
+                continue;
+            }
+            // GUÍA de ingesta (_guia.json): acción OMITIR → NO catalogar nada de esta carpeta; se deja intacta
+            // en el Inbox (útil para material que aún no quieres procesar). El resto de acciones (aplanar/
+            // explotar/intacta) las aplica una pasada previa / ramas dedicadas.
+            if ((await leerGuia(ruta))?.accion === 'omitir') {
+                if (!omitidasGuia.has(ruta)) { omitidasGuia.add(ruta); console.log(`  ⏭️  ${e.name}: OMITIR (guía) — no se cataloga.`); }
                 continue;
             }
             // ENRUTADO POR PESO (audio vs PDF). Orden:
@@ -532,6 +542,7 @@ async function listarUnidades() {
     for (const dir of audiolibroVistas) if (!dirsActuales.has(dir)) audiolibroVistas.delete(dir);
     for (const dir of colAudioVistas) if (!dirsActuales.has(dir)) colAudioVistas.delete(dir);
     for (const dir of omitidasDefinitivas) if (!dirsActuales.has(dir)) omitidasDefinitivas.delete(dir);
+    for (const dir of omitidasGuia) if (!dirsActuales.has(dir)) omitidasGuia.delete(dir);
 
     return unidades;
 }
@@ -582,10 +593,16 @@ async function procesarUnidad(unidad) {
     const etiqueta = `${path.basename(unidad.rutas[0])}${unidad.rutas.length > 1 ? ` (+${unidad.rutas.length - 1})` : ''}`;
     // Ya OMITIDO antes (DRM/formato): se dejó en el Inbox intacto; no reintentar leerlo en cada escaneo.
     if (unidad.rutas.every((r) => _omitidos.has(r))) return 'omitido';
-    const contexto = unidad.esImagenes ? { ubicacion: UBICACION_INBOX } : {};
+    let contexto = unidad.esImagenes ? { ubicacion: UBICACION_INBOX } : {};
     // Drop por carpeta: ligar el recurso a la colección (nombre de carpeta) y autonumerar la serie.
     if (unidad.coleccion) { contexto.coleccion = unidad.coleccion; contexto.serieAuto = true; }
     if (unidad.obra) contexto.obra = unidad.obra; // tomo de obra multivolumen
+    // PERFIL de ingesta: pistas del usuario en el `_guia.json` de la carpeta (sesga tipo/APIs/prompts, T4).
+    // Solo rellena huecos; la colección/obra REAL del drop manda sobre la pista (ver aplicarPerfilAContexto).
+    if (unidad.carpeta) {
+        const guia = await leerGuia(unidad.carpeta);
+        if (guia && Object.keys(guia.perfil).length) contexto = aplicarPerfilAContexto(contexto, guia.perfil);
+    }
     // Portada pre-extraída en covers/ (si existe): candidata para la resolución de portada.
     if (!unidad.esImagenes && unidad.carpeta) {
         const portadaLocal = await buscarPortadaPreextraida(unidad.carpeta, unidad.rutas[0]);
