@@ -96,6 +96,7 @@ function preambuloPerfil(perfil) {
     if (perfil.editorial_probable) partes.push(`editorial probable «${perfil.editorial_probable}»`);
     if (perfil.idioma_probable) partes.push(`idioma probable «${perfil.idioma_probable}»`);
     if (perfil.materia_cdu) partes.push(`materia/CDU orientativa «${perfil.materia_cdu}»`);
+    if (perfil.materia_ruta) partes.push(`archivado en las carpetas «${perfil.materia_ruta}» (fuerte pista de MATERIA para la CDU)`);
     if (!partes.length) return '';
     return `\n\n⚠️ PISTA DE CONTEXTO (el usuario está ingiriendo un lote y ha indicado que este documento ${partes.join(', ')}). Úsala para ORIENTAR la extracción y la clasificación. PERO LA REALIDAD MANDA: si en las imágenes hay evidencia CLARA de que es OTRA cosa (ISBN/ISSN, portada, colofón, CIP), clasifícalo por esa evidencia y NO fuerces el tipo sugerido.`;
 }

@@ -666,6 +666,14 @@ async function procesarUnidad(unidad) {
         const guia = await leerGuia(unidad.carpeta);
         if (guia && Object.keys(guia.perfil).length) contexto = aplicarPerfilAContexto(contexto, guia.perfil);
     }
+    // PISTA DE RUTA: los nombres de las carpetas contenedoras (p. ej. «PSEUDOCIENCIAS / BIBLIOTECA DE
+    // RELIGION») orientan la MATERIA/CDU. Viaja como pista en el perfil → prompts de IA (y clasificador CDU);
+    // la realidad (ISBN/Fichero/CIP) sigue mandando. Se captura al procesar, ANTES de que el fichero salga
+    // del Inbox — así, aunque luego se aplane/explote la carpeta, la pista ya viajó con el documento.
+    if (unidad.rutas[0]) {
+        const rel = path.relative(INBOX, path.dirname(unidad.rutas[0]));
+        if (rel && !rel.startsWith('..')) contexto.perfil = { ...(contexto.perfil || {}), materia_ruta: rel.split(path.sep).join(' / ') };
+    }
     // Portada pre-extraída en covers/ (si existe): candidata para la resolución de portada.
     if (!unidad.esImagenes && unidad.carpeta) {
         const portadaLocal = await buscarPortadaPreextraida(unidad.carpeta, unidad.rutas[0]);
