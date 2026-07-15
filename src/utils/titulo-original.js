@@ -8,7 +8,7 @@
  */
 import fs from 'node:fs/promises';
 import AdmZip from 'adm-zip';
-import { textoPagina } from './lector-pdf.js';
+import { textoRango } from './lector-pdf.js';
 
 const PDF_PAGINAS = Number(process.env.TITULO_ORIGINAL_PDF_PAGINAS) || 8;
 
@@ -42,12 +42,9 @@ async function textoEpub(ruta) {
 }
 
 async function textoPdf(ruta) {
-    let out = '';
-    for (let n = 1; n <= PDF_PAGINAS; n++) {
-        const t = await textoPagina(ruta, n).catch(() => '');
-        if (t) out += '\n' + t;
-    }
-    return out;
+    // UNA sola llamada de rango [1..PDF_PAGINAS]: poppler recorta al total del doc (sin tantear página a
+    // página, que en PDFs cortos generaba errores «rango fuera de límites» repetidos en el log).
+    return await textoRango(ruta, 1, PDF_PAGINAS).catch(() => '');
 }
 
 /** Texto de la página de créditos del fichero (auto-detecta EPUB/PDF por extensión). '' ante cualquier error. */

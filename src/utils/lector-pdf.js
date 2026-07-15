@@ -56,8 +56,12 @@ async function pdfText(ruta, desde, hasta, timeout) {
         );
         return stdout;
     } catch (e) {
-        // DIAGNÓSTICO: TIMEOUT (fichero grande) o desbordamiento de maxBuffer (texto enorme) o error real.
-        const motivo = e.killed ? `TIMEOUT tras ${to} ms` : (/maxBuffer/i.test(e.message || '') ? 'maxBuffer excedido (texto muy largo)' : (e.stderr || e.message || '').split('\n')[0]);
+        const err = (e.stderr || e.message || '');
+        // PÁGINA FUERA DE RANGO (el doc tiene menos páginas de las pedidas): benigno y ESPERADO en PDFs
+        // cortos (p. ej. tantear páginas de créditos). Se devuelve '' SIN loguear (no es un fallo real).
+        if (/Wrong page range|can not be after the last page/i.test(err)) return '';
+        // DIAGNÓSTICO real: TIMEOUT (fichero grande) o desbordamiento de maxBuffer (texto enorme) o error.
+        const motivo = e.killed ? `TIMEOUT tras ${to} ms` : (/maxBuffer/i.test(e.message || '') ? 'maxBuffer excedido (texto muy largo)' : err.split('\n')[0]);
         console.warn(`[lector-pdf] pdftotext p${desde}-${hasta} falló en "${path.basename(ruta)}": ${motivo}.`);
         return '';
     }
@@ -70,6 +74,12 @@ async function pdfText(ruta, desde, hasta, timeout) {
  */
 export async function textoPagina(rutaArchivo, n) {
     return pdfText(rutaArchivo, n, n);
+}
+
+/** Texto de un RANGO de páginas [desde, hasta] en UNA sola llamada. poppler recorta 'hasta' al total del
+ *  documento (no falla si el doc es más corto, mientras 'desde' sea válida) → evita tantear página a página. */
+export async function textoRango(rutaArchivo, desde, hasta) {
+    return pdfText(rutaArchivo, desde, hasta);
 }
 
 /**
