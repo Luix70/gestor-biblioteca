@@ -17,7 +17,7 @@ import { reciclar } from './utils/papelera.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
-import { leerGuia, aplicarPerfilAContexto } from './utils/guia-ingesta.js';
+import { leerGuia, aplicarPerfilAContexto, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
@@ -440,11 +440,16 @@ async function listarUnidades() {
                 console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
                 continue;
             }
-            // GUÍA de ingesta (_guia.json): acción OMITIR → NO catalogar nada de esta carpeta; se deja intacta
-            // en el Inbox (útil para material que aún no quieres procesar). El resto de acciones (aplanar/
-            // explotar/intacta) las aplica una pasada previa / ramas dedicadas.
-            if ((await leerGuia(ruta))?.accion === 'omitir') {
+            // GUÍA de ingesta (_guia.json). aplanar/explotar ya se aplicaron en la pasada previa; aquí:
+            //   · OMITIR  → NO catalogar nada de esta carpeta (se deja intacta en el Inbox).
+            //   · INTACTA → conservar VERBATIM por la ruta transmedia (preserva la estructura + agrupa en colección).
+            const guiaCarpeta = await leerGuia(ruta);
+            if (guiaCarpeta?.accion === 'omitir') {
                 if (!omitidasGuia.has(ruta)) { omitidasGuia.add(ruta); console.log(`  ⏭️  ${e.name}: OMITIR (guía) — no se cataloga.`); }
+                continue;
+            }
+            if (guiaCarpeta?.accion === 'intacta') {
+                unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta], intacta: true });
                 continue;
             }
             // ENRUTADO POR PESO (audio vs PDF). Orden:
@@ -729,6 +734,55 @@ async function expandirComprimidos() {
     }
 }
 
+// Nombre libre en `dir` a partir de `nombre` (evita pisar; añade « (2)», « (3)»…).
+async function nombreLibre(dir, nombre) {
+    const ext = path.extname(nombre), base = path.basename(nombre, ext);
+    let destino = path.join(dir, nombre);
+    for (let i = 2; await rutaExiste(destino); i++) destino = path.join(dir, `${base} (${i})${ext}`);
+    return destino;
+}
+
+/**
+ * PRE-PASO del Inbox: aplica las ACCIONES ESTRUCTURALES de `_guia.json` que MUTAN el sistema de ficheros,
+ * ANTES de listar unidades (como expandirComprimidos). Cada acción es «mover» (nunca borrar contenido):
+ *   · explotar → mueve el contenido de la carpeta a la carpeta que la contiene (el Inbox) y borra la envoltura.
+ *   · aplanar  → si contiene UNA sola subcarpeta y ningún fichero suelto, promociona esa subcarpeta un nivel
+ *                arriba (deshace `Descarga/NombreReal/…` → `NombreReal/…`) y borra la envoltura.
+ * omitir/intacta NO mutan el FS (se resuelven en listarUnidades). Solo se tocan carpetas ESTABLES (copiadas).
+ */
+async function aplicarAccionesGuiaFs() {
+    let entradas;
+    try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+        if (!e.isDirectory() || ignorarEntrada(e.name)) continue;
+        const dir = path.join(INBOX, e.name);
+        let guia;
+        try { guia = await leerGuia(dir); } catch { guia = null; }
+        if (!guia || (guia.accion !== 'explotar' && guia.accion !== 'aplanar')) continue;
+        if (!(await carpetaEstable(dir))) continue; // aún copiándose → esperar al próximo escaneo
+        try {
+            const hijos = (await fs.readdir(dir, { withFileTypes: true })).filter((h) => !ignorarEntrada(h.name) && h.name !== NOMBRE_GUIA);
+            if (guia.accion === 'explotar') {
+                for (const h of hijos) await fs.rename(path.join(dir, h.name), await nombreLibre(INBOX, h.name));
+                await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); // solo queda el _guia.json
+                console.log(`  💥 «${e.name}»: EXPLOTAR (guía) → ${hijos.length} elemento(s) liberados en el Inbox.`);
+            } else { // aplanar
+                const subs = hijos.filter((h) => h.isDirectory());
+                const files = hijos.filter((h) => !h.isDirectory());
+                if (subs.length === 1 && files.length === 0) {
+                    const inner = path.join(dir, subs[0].name);
+                    await fs.rename(inner, await nombreLibre(INBOX, subs[0].name)); // promociona la subcarpeta única
+                    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+                    console.log(`  📂 «${e.name}»: APLANAR (guía) → «${subs[0].name}» promocionada un nivel.`);
+                }
+                // Si no cumple (no es una carpeta sola), se deja como está y se procesa normal.
+            }
+        } catch (err) {
+            console.warn(`  ⚠️  Acción de guía «${guia.accion}» sobre «${e.name}» falló: ${err.message} (se conserva intacta).`);
+        }
+    }
+}
+
 async function procesarCola() {
     if (procesando || !vigilanteActivo) return; // pausado desde el panel → los ficheros esperan en el Inbox
     procesando = true;
@@ -737,6 +791,7 @@ async function procesarCola() {
         let totalProcesadas = 0;
         const tally = {};
         await expandirComprimidos();          // .zip suelto → carpeta (drop) ANTES de listar unidades
+        await aplicarAccionesGuiaFs();        // guía: explotar/aplanar (mutan FS) ANTES de listar unidades
         let unidades = await listarUnidades();
         if (unidades.length) ultimaActividad = Date.now(); // hay trabajo: posponer el mantenimiento
         while (unidades.length) {
