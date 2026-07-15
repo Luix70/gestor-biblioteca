@@ -17,7 +17,7 @@ import { reciclar } from './utils/papelera.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
-import { leerGuia, aplicarPerfilAContexto, NOMBRE_GUIA } from './utils/guia-ingesta.js';
+import { leerGuia, escribirGuia, aplicarPerfilAContexto, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
