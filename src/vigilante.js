@@ -188,8 +188,8 @@ async function rutasPortadasCandidatas(carpetaTop, ficheroRuta) {
     return out;
 }
 
-/** Poda (bottom-up) las SUBcarpetas de 'top' que quedaron vacías o solo con metadatos Synology.
- *  No toca 'top' (la carpeta-colección persiste como buzón de depósito). */
+/** Poda (bottom-up) las SUBcarpetas de 'top' que quedaron vacías o solo con basura. No toca 'top' aquí; la
+ *  retirada de la carpeta de primer nivel (cuando ya no queda nada que catalogar) la hace podarVaciosInbox. */
 async function podarSubcarpetasVacias(top) {
     let entradas;
     try { entradas = await fs.readdir(top, { withFileTypes: true }); } catch { return; }
@@ -204,7 +204,14 @@ async function podarSubcarpetasVacias(top) {
     }
 }
 
-/** Tras una pasada: poda subcarpetas vacías dentro de cada carpeta-colección del Inbox. */
+/**
+ * Tras una pasada: poda subcarpetas vacías y, si la carpeta de PRIMER NIVEL ya no tiene NADA que catalogar,
+ * la RETIRA del Inbox. NUEVA DIRECTIVA: las carpetas-colección YA NO se conservan como buzón vacío — se
+ * borran cuando quedan vacías, con solo basura evidente (metadatos, sidecars _guia.json/.txt/.url, thumbs.db)
+ * o con subcarpetas a su vez vacías. Se conservan SOLO mientras quede un documento no trivial (o material
+ * conservable / testigo .noborrar). Para RE-añadir a una colección basta re-soltar una carpeta con su nombre
+ * (listarUnidades la re-liga por coleccionExiste).
+ */
 async function podarVaciosInbox() {
     let entradas;
     try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
@@ -212,7 +219,11 @@ async function podarVaciosInbox() {
         if (!e.isDirectory() || ignorarEntrada(e.name)) continue;
         const top = path.join(INBOX, e.name);
         if (await tieneTestigo(top)) continue;          // protegida por .noborrar: no se toca
-        await podarSubcarpetasVacias(top);
+        await podarSubcarpetasVacias(top);              // primero las subcarpetas vacías (más adentro)
+        if (await nadaQueCatalogar(top)) {              // ya no queda nada catalogable → retirar la carpeta top
+            await fs.rm(top, { recursive: true, force: true }).catch(() => {});
+            console.log(`  🗑️  «${e.name}»: sin nada que catalogar (vacía / solo basura / subcarpetas vacías) → retirada del Inbox.`);
+        }
     }
 }
 
@@ -279,6 +290,32 @@ async function recopilarDocumentos(dir, nivel = 8) {
         }
     }
     return out;
+}
+
+// ¿Queda alguna IMAGEN catalogable (recursivo)? Un libro escaneado es una carpeta de imágenes: no se retira
+// mientras tenga imágenes sin procesar. (covers/ se ignora: son portadas, no contenido.)
+async function tieneImagenes(dir, nivel = 8) {
+    if (nivel < 0) return false;
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+    for (const e of entradas) {
+        if (ignorarEntrada(e.name)) continue;
+        if (e.isFile() && esImagen(e.name)) return true;
+        if (e.isDirectory() && !/^covers$/i.test(e.name) && await tieneImagenes(path.join(dir, e.name), nivel - 1)) return true;
+    }
+    return false;
+}
+
+// NUEVA DIRECTIVA de limpieza: ¿la carpeta ya NO tiene NADA que catalogar (recursivo)? Es decir, ni un
+// documento no trivial, ni imágenes, ni material conservable (audio). Solo queda BASURA (metadatos de
+// Synology, ocultos, sidecars como _guia.json/.txt/.url, thumbs.db) y/o subcarpetas vacías. Antes las
+// COLECCIONES se conservaban como buzón vacío; ahora se retiran en cuanto no queda nada que catalogar.
+// (Comprobación RECURSIVA y por contenido —no por nombre— para nunca borrar una carpeta con documentos dentro.)
+async function nadaQueCatalogar(dir) {
+    if (await carpetaConservable(dir)) return false;            // audio u otro conservable
+    if ((await recopilarDocumentos(dir)).length) return false; // documentos no triviales pendientes
+    if (await tieneImagenes(dir)) return false;                // libro escaneado pendiente
+    return true;
 }
 
 // Entradas a ignorar SIEMPRE en el Inbox: ocultos y carpetas de sistema de Synology
@@ -876,9 +913,10 @@ async function procesarCola() {
             if (procesadas === 0) break;
             unidades = await listarUnidades(); // recoger lo que llegó mientras procesábamos
         }
-        // Tras procesar: poda subcarpetas vacías (docs ya catalogados, covers/ ya consumidas)
-        // dentro de las carpetas-colección persistentes; los buzones (carpeta raíz) se conservan,
-        // SALVO los de obras multivolumen ya completas, que sí se retiran.
+        // Tras procesar: poda subcarpetas vacías (docs ya catalogados, covers/ ya consumidas) y RETIRA las
+        // carpetas de primer nivel que ya no tienen nada que catalogar (vacías / solo basura / subcarpetas
+        // vacías) — incluidas las colecciones (ya NO se conservan como buzón vacío). Se conserva solo lo que
+        // aún tenga un documento no trivial, material conservable (audio) o testigo .noborrar.
         if (totalProcesadas > 0) {
             console.log(resumenLote(tally, totalProcesadas)); // RESUMEN del lote (visible también en modo simple)
             await protegerConservables().catch(() => {}); // marca .noborrar (audio/omitidos) ANTES de podar

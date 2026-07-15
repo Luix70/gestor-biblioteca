@@ -238,8 +238,11 @@ de ficheros clasificado por CDU.
     · Una subcarpeta del Inbox con 2+ documentos (a cualquier profundidad) se
       cataloga como una colección con el NOMBRE de la carpeta; cada documento va
       bajo su propia CDU pero queda ligado (coleccion + nº de serie autoincremental
-      o el del nombre de fichero). La carpeta NO se borra (buzón persistente): se
-      puede seguir soltando ahí y se FUSIONA con la colección previa.
+      o el del nombre de fichero). Al terminar, la carpeta SE RETIRA cuando ya no
+      queda nada que catalogar (vacía / solo basura: metadatos, sidecars _guia.json/
+      .txt/.url, thumbs.db / subcarpetas vacías); se conserva SOLO mientras quede un
+      documento no trivial (o audio, o testigo .noborrar). Para AÑADIR más a la
+      colección, re-suelta una carpeta con su NOMBRE: se re-liga a la colección previa.
     · Una subcarpeta "Covers/" (o un Book.jpg junto al doc) aporta portadas
       candidatas (compiten por tamaño con la embebida/remota; "gana la más ancha").
     · 1 solo documento = NO es colección; los .txt/.url sueltos se descartan.
