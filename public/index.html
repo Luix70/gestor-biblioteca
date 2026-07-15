@@ -76,22 +76,6 @@
           <section class="page" id="p-activity">
             <div class="sec-h"><h2>Actividad</h2></div>
             <div class="grid g2">
-              <div class="card">
-                <h3>👁 Vigilante del Inbox</h3>
-                <div style="display: flex; align-items: center; gap: 16px; margin: 8px 0">
-                  <label class="switch admin-only"
-                    ><input type="checkbox" id="vSwitch" /><span class="slider"></span
-                  ></label>
-                  <div>
-                    <b id="vLabel">—</b>
-                    <div class="muted" style="font-size: 12px" id="vSub"></div>
-                  </div>
-                </div>
-                <p class="muted" style="font-size: 12px; margin-top: 10px">
-                  Al pausarlo, los ficheros que sueltes en el Inbox esperan sin catalogarse. Útil para soltar
-                  muchos a la vez y procesarlos cuando quieras.
-                </p>
-              </div>
               <details class="card foldcard" id="fcConformador" data-fold="open" open>
                 <summary><h3>🧭 Estado del Conformador</h3></summary>
                 <div id="mEstado"></div>
@@ -316,6 +300,24 @@
             <div class="sec-h">
               <h2>Inbox — alta de recursos</h2>
               <span class="muted" id="inboxHint"></span>
+            </div>
+            <!-- 👁 Vigilante del Inbox: activa/pausa el catalogado automático de lo que se suelte aquí. Su sitio
+                 SEMÁNTICO es el Inbox (antes estaba en Actividad). El cableado JS es por id → no cambia. -->
+            <div class="card">
+              <h3>👁 Vigilante del Inbox</h3>
+              <div style="display: flex; align-items: center; gap: 16px; margin: 8px 0">
+                <label class="switch admin-only"
+                  ><input type="checkbox" id="vSwitch" /><span class="slider"></span
+                ></label>
+                <div>
+                  <b id="vLabel">—</b>
+                  <div class="muted" style="font-size: 12px" id="vSub"></div>
+                </div>
+              </div>
+              <p class="muted" style="font-size: 12px; margin-top: 10px">
+                Al pausarlo, los ficheros que sueltes en el Inbox esperan sin catalogarse. Útil para soltar
+                muchos a la vez y procesarlos cuando quieras.
+              </p>
             </div>
             <!-- 1) CÁMARA — forma PREFERIDA para libros físicos (autorecorte + automedida con el tapete). DESPLEGADA -->
             <details class="card foldcard admin-only" id="camCard" open>
