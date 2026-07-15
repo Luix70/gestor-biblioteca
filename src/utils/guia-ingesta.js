@@ -85,6 +85,20 @@ export function normalizarGuia(g) {
     return guia;
 }
 
+/**
+ * ¿La guía expresa INTENCIÓN GRANULAR sobre la carpeta? (una acción distinta de «normal», grupos declarados,
+ * o un perfil con pistas). El vigilante lo usa para decidir que una carpeta contenedora NO debe ser tragada
+ * entera por la autodetección agresiva (colección de audiolibros / transmedia) cuando el usuario ha guiado su
+ * interior: en ese caso se recurre en ella tratándola como un mini-Inbox. Una guía vacía/«normal» no cuenta.
+ */
+export function guiaEsSignificativa(g) {
+    if (!g) return false;
+    if (g.accion && g.accion !== 'normal') return true;
+    if (Array.isArray(g.grupos) && g.grupos.length) return true;
+    if (g.perfil && Object.keys(g.perfil).length) return true;
+    return false;
+}
+
 /** Lee el `_guia.json` de `carpeta`. Devuelve la guía normalizada, o null si no existe / no se puede leer. */
 export async function leerGuia(carpeta) {
     if (!carpeta) return null;

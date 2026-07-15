@@ -17,7 +17,7 @@ import { reciclar } from './utils/papelera.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
-import { leerGuia, escribirGuia, aplicarPerfilAContexto, NOMBRE_GUIA } from './utils/guia-ingesta.js';
+import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
@@ -454,28 +454,69 @@ async function coleccionExiste(nombre) {
     } catch { return false; }
 }
 
-async function listarUnidades() {
+// ¿La carpeta `dir` tiene DESCENDIENTES con intención granular (una subcarpeta con guía significativa: acción
+// ≠ normal, grupos, o un perfil con pistas)? Si es así, la carpeta NO debe ser tragada entera por la
+// autodetección agresiva (colAudio/transmedia): se recurre en ella como un mini-Inbox. Recursivo y acotado.
+async function tieneDescendientesGuiados(dir, nivel = 8) {
+    if (nivel < 0) return false;
     let entradas;
-    try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); }
-    catch { return []; }
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+    for (const e of entradas) {
+        if (!e.isDirectory() || ignorarEntrada(e.name)) continue;
+        const sub = path.join(dir, e.name);
+        if (guiaEsSignificativa(await leerGuia(sub))) return true;
+        if (await tieneDescendientesGuiados(sub, nivel - 1)) return true;
+    }
+    return false;
+}
 
+async function listarUnidades() {
     const unidades = [];
+    await clasificarDirectorio(INBOX, true, unidades);
+
+    // Poda de las cachés por-carpeta: olvida las de PRIMER NIVEL que ya no están en el Inbox (procesadas/
+    // retiradas), para que no crezcan sin fin. Una carpeta anidada (recurrida) no persiste su stickiness —
+    // se re-evalúa en cada escaneo, lo cual es inocuo (la detección es determinista y, una vez catalogada,
+    // desaparece del árbol).
+    let dirs;
+    try { dirs = (await fs.readdir(INBOX, { withFileTypes: true })).filter((e) => e.isDirectory()); } catch { dirs = []; }
+    const dirsActuales = new Set(dirs.map((e) => path.join(INBOX, e.name)));
+    for (const dir of huellaCarpetas.keys()) if (!dirsActuales.has(dir)) huellaCarpetas.delete(dir);
+    for (const dir of transmediaVistas) if (!dirsActuales.has(dir)) transmediaVistas.delete(dir);
+    for (const dir of audiolibroVistas) if (!dirsActuales.has(dir)) audiolibroVistas.delete(dir);
+    for (const dir of colAudioVistas) if (!dirsActuales.has(dir)) colAudioVistas.delete(dir);
+    for (const dir of omitidasDefinitivas) if (!dirsActuales.has(dir)) omitidasDefinitivas.delete(dir);
+    for (const dir of omitidasGuia) if (!dirsActuales.has(dir)) omitidasGuia.delete(dir);
+
+    return unidades;
+}
+
+/**
+ * Clasifica las entradas de UN directorio en unidades de trabajo. Se usa para el Inbox (esRaiz=true) y,
+ * recursivamente, para una carpeta con intención granular dentro (esRaiz=false), tratada como un mini-Inbox:
+ * cada hijo se detecta/guía por su cuenta en vez de ser tragado entero por la autodetección agresiva.
+ */
+async function clasificarDirectorio(dir, esRaiz, unidades) {
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); }
+    catch { return; }
+
     const sueltos = [];
 
     for (const e of entradas) {
         if (ignorarEntrada(e.name)) continue; // ocultos + carpetas de sistema (@eaDir, #recycle...)
-        const ruta = path.join(INBOX, e.name);
+        const ruta = path.join(dir, e.name);
         if (e.isDirectory()) {
-            // Ya resuelta como duplicado definitivo (transmedia/audiolibro ya catalogado): no reintentar
-            // (evita el bucle de reprocesar la misma carpeta en cada escaneo). Sigue en el Inbox con .noborrar.
-            if (omitidasDefinitivas.has(ruta)) continue;
-            // COPIA EN CURSO: no tocar la carpeta hasta que TERMINE de copiarse. Un drop grande (transmedia
-            // de miles de ficheros) tarda minutos; si empezáramos al escribirse el primer PDF, lo trataríamos
-            // como colección/pdf incompleto. Se salta y se reintenta en el próximo escaneo, cuando la huella
-            // (nº de ficheros + bytes) lleve quieta la ventana de estabilidad.
-            if (!(await carpetaEstable(ruta))) {
-                console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
-                continue;
+            // En la RAÍZ del Inbox: no reintentar un duplicado definitivo (evita reprocesar la misma carpeta en
+            // cada escaneo) y ESPERAR a que termine la copia (un drop grande de miles de ficheros tarda minutos;
+            // a medias se trataría como colección/pdf incompleto). En una carpeta ya recurrida no hace falta: su
+            // carpeta de primer nivel ya superó ambas comprobaciones antes de recurrir.
+            if (esRaiz) {
+                if (omitidasDefinitivas.has(ruta)) continue;
+                if (!(await carpetaEstable(ruta))) {
+                    console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
+                    continue;
+                }
             }
             // GUÍA de ingesta (_guia.json). aplanar/explotar ya se aplicaron en la pasada previa; aquí:
             //   · OMITIR  → NO catalogar nada de esta carpeta (se deja intacta en el Inbox).
@@ -508,6 +549,15 @@ async function listarUnidades() {
                         obra: { titulo: e.name, numero: i + 1, titulo_volumen: path.basename(d, path.extname(d)), total: docsObra.length },
                     }));
                 }
+                continue;
+            }
+            // GRANULAR: la carpeta tiene DESCENDIENTES guiados (obra/software/audiolibro/perfil dentro) → se
+            // trata como un mini-Inbox y se RECURRE, para NO dejar que la autodetección agresiva (transmedia /
+            // colección de audiolibros) se trague todo el bloque e ignore las guías internas. Cada hijo se
+            // detecta/guía por su cuenta (obra, software, audiolibro, colección, doc suelto…).
+            if (await tieneDescendientesGuiados(ruta)) {
+                dropsADisolver.add(ruta); // buzón que se disuelve al vaciarse (sus hijos se catalogan aparte)
+                await clasificarDirectorio(ruta, false, unidades);
                 continue;
             }
             // ENRUTADO POR PESO (audio vs PDF). Orden:
@@ -595,19 +645,11 @@ async function listarUnidades() {
             sueltos.push(ruta);
         }
     }
-    for (const u of agrupar(sueltos)) unidades.push({ ...u, carpeta: null });
-
-    // Poda del mapa de huellas: olvida las carpetas que ya no están en el Inbox (procesadas/retiradas),
-    // para que no crezca sin fin entre escaneos.
-    const dirsActuales = new Set(entradas.filter(e => e.isDirectory()).map(e => path.join(INBOX, e.name)));
-    for (const dir of huellaCarpetas.keys()) if (!dirsActuales.has(dir)) huellaCarpetas.delete(dir);
-    for (const dir of transmediaVistas) if (!dirsActuales.has(dir)) transmediaVistas.delete(dir);
-    for (const dir of audiolibroVistas) if (!dirsActuales.has(dir)) audiolibroVistas.delete(dir);
-    for (const dir of colAudioVistas) if (!dirsActuales.has(dir)) colAudioVistas.delete(dir);
-    for (const dir of omitidasDefinitivas) if (!dirsActuales.has(dir)) omitidasDefinitivas.delete(dir);
-    for (const dir of omitidasGuia) if (!dirsActuales.has(dir)) omitidasGuia.delete(dir);
-
-    return unidades;
+    // Sueltos de ESTE directorio. En la raíz: cada uno por su cuenta, sin carpeta. En una carpeta recurrida:
+    // agrupados igual (imágenes juntas = un libro; docs por su cuenta), pero LIGADOS a la carpeta para poder
+    // disolverla al vaciarse.
+    for (const u of agrupar(sueltos)) unidades.push({ ...u, carpeta: esRaiz ? null : dir });
+    if (!esRaiz && sueltos.length) dropsADisolver.add(dir);
 }
 
 
