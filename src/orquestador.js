@@ -218,6 +218,9 @@ export async function procesarRecurso(entrada) {
 
     const tipo = detectarTipo(rutas[0]);
     console.log(`[Orquestador] ${path.basename(rutas[0])} · tipo=${tipo} · extrayendo metadatos del archivo...`);
+    // PISTA del PERFIL de ingesta (usuario, vía _guia.json / tarjeta «Condicionar»): sesgo T4 para el
+    // discriminador — NUNCA pisa una señal fuerte (ISBN/CIP/ISSN/serie); solo orienta lo ambiguo.
+    const hintPerfil = { hintTipo: contexto.perfil?.tipo_probable || null, hintNaturaleza: contexto.perfil?.naturaleza || null };
     let datosBase, formatos, tipo_recurso;
     let activos = [];
     let escaneadoSinTexto = false;
@@ -311,7 +314,7 @@ export async function procesarRecurso(entrada) {
         // propio ⇒ artículo. Un DOI de LIBRO Springer lleva el ISBN incrustado (…/978…) → queda libro (no artículo).
         const doiDigitos = String(datosBase.doi || '').replace(/[^0-9]/g, '');
         const articuloDoi = !!datosBase.doi && !datosBase.isbn_propio && !/97[89]\d{7}/.test(doiDigitos);
-        const clasif = clasificarTipo({ ...interp.senales, articuloDoi });
+        const clasif = clasificarTipo({ ...interp.senales, articuloDoi, ...hintPerfil });
         tipo_recurso = clasif.tipo_recurso;
         // El ISBN del CUERPO de un artículo es de un LIBRO CITADO en las referencias, no del artículo: se descarta
         // (si no, se usaría como identidad y resolvería el libro equivocado en el Fichero/APIs). El pivote es el DOI.
@@ -369,7 +372,7 @@ export async function procesarRecurso(entrada) {
             } else {
                 const imgs = renders.map(r => ({ data: r.buffer, mimeType: 'image/png' }));
                 let visto = null;
-                if (imgs.length) { try { visto = await analizarImagenesRecurso(imgs); } catch (e) { console.warn(`[PDF escaneado] visión falló: ${e.message}; OCR de reserva.`); } }
+                if (imgs.length) { try { visto = await analizarImagenesRecurso(imgs, null, { perfil: contexto.perfil }); } catch (e) { console.warn(`[PDF escaneado] visión falló: ${e.message}; OCR de reserva.`); } }
                 if (visto && (visto.titulo || visto.isbn || visto.issn)) {
                     datosBase = { ...visto, paginas: tecnicos.paginas, texto_legible: false };
                     isbnDelArchivo = !!visto.isbn;
@@ -460,7 +463,7 @@ export async function procesarRecurso(entrada) {
                 imagenes.push({ data: await fs.readFile(r), mimeType: mimeDeImagen(r) });
             }
             try {
-                datosBase = await analizarImagenesRecurso(imagenes);
+                datosBase = await analizarImagenesRecurso(imagenes, null, { perfil: contexto.perfil });
             } catch (e) {
                 // Sin texto ni metadatos, si la visión falla no hay forma de identificar el libro.
                 throw new ErrorIdentificacion(`Visión IA falló sobre el grupo de imágenes: ${e.message}`);
@@ -521,7 +524,7 @@ export async function procesarRecurso(entrada) {
                 datosBase.alertas_agente.push(`Lectura de identificador por visión falló: ${e.message}`);
             }
         }
-        const clasif = clasificarTipo(interpretarIdentificadores({
+        const clasif = clasificarTipo({ ...interpretarIdentificadores({
             esComic: true,
             comicSerie: datosBase.comic_serie,
             esFechada: !!datosBase.esFechada,
@@ -529,7 +532,7 @@ export async function procesarRecurso(entrada) {
             isbnCandidatos: datosBase.isbn_candidatos,
             issnBarras977: datosBase.issn,           // el ISSN del cómic viene del barras 977 ⇒ cómic-revista
             titulo: datosBase.titulo,
-        }).senales);
+        }).senales, ...hintPerfil });
         tipo_recurso = clasif.tipo_recurso;          // revista (nº de serie / ISSN) | libro (álbum/novela gráfica)
         datosBase.naturaleza = clasif.naturaleza;    // 'comic'
         // Un cómic-LIBRO (álbum/novela gráfica suelto) NO es una obra multivolumen: obra_titulo se fijó
@@ -577,7 +580,7 @@ export async function procesarRecurso(entrada) {
                 datosBase.alertas_agente.push(`Lectura de identificador por visión falló: ${e.message}`);
             }
         }
-        const clasif = clasificarTipo(interpretarIdentificadores({
+        const clasif = clasificarTipo({ ...interpretarIdentificadores({
             isbnPropio: datosBase.isbn_propio || null,
             isbnCandidatos: datosBase.isbn_candidatos,
             issnBarras977: datosBase.issn,                // un 977-ISSN escaneado ⇒ revista
@@ -585,7 +588,7 @@ export async function procesarRecurso(entrada) {
             editorialLibro: esEditorialDeLibros(path.basename(rutas[0])) || esEditorialDeLibros(datosBase.coleccion_nombre),
             pareceRevista: pareceRevista(datosBase.titulo || ''),
             titulo: datosBase.titulo,
-        }).senales);
+        }).senales, ...hintPerfil });
         tipo_recurso = clasif.tipo_recurso;               // libro (por defecto) | revista (ISSN / título de revista)
         delete datosBase.muestra_paginas;                 // solo para la visión, no se persiste
 

@@ -238,8 +238,11 @@ de ficheros clasificado por CDU.
     · Una subcarpeta del Inbox con 2+ documentos (a cualquier profundidad) se
       cataloga como una colección con el NOMBRE de la carpeta; cada documento va
       bajo su propia CDU pero queda ligado (coleccion + nº de serie autoincremental
-      o el del nombre de fichero). La carpeta NO se borra (buzón persistente): se
-      puede seguir soltando ahí y se FUSIONA con la colección previa.
+      o el del nombre de fichero). Al terminar, la carpeta SE RETIRA cuando ya no
+      queda nada que catalogar (vacía / solo basura: metadatos, sidecars _guia.json/
+      .txt/.url, thumbs.db / subcarpetas vacías); se conserva SOLO mientras quede un
+      documento no trivial (o audio, o testigo .noborrar). Para AÑADIR más a la
+      colección, re-suelta una carpeta con su NOMBRE: se re-liga a la colección previa.
     · Una subcarpeta "Covers/" (o un Book.jpg junto al doc) aporta portadas
       candidatas (compiten por tamaño con la embebida/remota; "gana la más ancha").
     · 1 solo documento = NO es colección; los .txt/.url sueltos se descartan.
@@ -666,6 +669,15 @@ de ficheros clasificado por CDU.
       el audio DOMINANTE con PDFs de guía (Campbell) va a colección, y las lecturas graduadas con
       audio (Oxford, «Stage») a transmedia. Pegajoso (colAudioVistas); duplicado → permanente → no se
       reintenta (anti-bucle).
+    · LAS GUÍAS MANDAN (mini-Inbox recursivo): si una carpeta contiene DESCENDIENTES guiados en el
+      Inspector (una subcarpeta con acción≠normal —obra/software/omitir/intacta—, con grupos, o con
+      un perfil de pistas), el vigilante NO deja que la autodetección agresiva (transmedia/colección
+      de audiolibros) se la trague entera: la trata como un mini-Inbox y RECURRE, clasificando cada
+      hijo por su cuenta (obra→multivolumen, software→software, mp3→audiolibro, 2+ libros→colección,
+      suelto→individual). Así una carpeta MIXTA (libros + audio + subcarpetas) se cataloga granular y
+      DESATENDIDA tras marcar las piezas una vez. Una carpeta SIN guías se comporta igual que siempre
+      (la mejora es opt-in). Bonus: en las unidades recurridas la ruta completa de carpetas viaja como
+      pista de CDU (materia_ruta). (vigilante.js · clasificarDirectorio/tieneDescendientesGuiados.)
 
   ── EXPLORADOR DE ARCHIVOS (ficha: «🗂️ Archivos» y junto a Ruta base) ─────────
     Navega y descarga TODO el árbol del documento — y, si cuelga de un árbol ruta_fija (colección

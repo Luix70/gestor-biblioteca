@@ -82,13 +82,36 @@ function paginasClave(partes) {
  * Procesa un grupo de imágenes (`{ data: Buffer, mimeType: string }`) del mismo recurso y
  * extrae la ficha técnica unificada. Asimila metadatos de texto nativos si provienen de un EPUB.
  */
-export async function analizarImagenesRecurso(imagenes, datosEpub = null) {
+// Construye un PREÁMBULO de prompt a partir del perfil de ingesta (pistas del usuario). Orienta a la visión
+// («este documento probablemente es X») pero SIEMPRE con la cláusula «la realidad manda»: si ve evidencia
+// clara de otra cosa (ISBN/ISSN/portada/colofón/CIP), debe clasificar por eso. '' si no hay perfil útil.
+function preambuloPerfil(perfil) {
+    if (!perfil || typeof perfil !== 'object') return '';
+    const TIPO = { comic: 'un CÓMIC / novela gráfica', revista: 'una REVISTA / publicación periódica', libro: 'un LIBRO', articulo: 'un ARTÍCULO', apuntes: 'unos APUNTES', capitulo: 'un CAPÍTULO' };
+    const partes = [];
+    if (perfil.tipo_probable && TIPO[perfil.tipo_probable]) partes.push(`probablemente es ${TIPO[perfil.tipo_probable]}`);
+    if (perfil.naturaleza) partes.push(`de naturaleza «${perfil.naturaleza}»`);
+    if (perfil.enciclopedia) partes.push(`parte de la enciclopedia «${perfil.enciclopedia}»`);
+    if (perfil.coleccion) partes.push(`de la colección «${perfil.coleccion}»`);
+    if (perfil.editorial_probable) partes.push(`editorial probable «${perfil.editorial_probable}»`);
+    if (perfil.idioma_probable) partes.push(`idioma probable «${perfil.idioma_probable}»`);
+    if (perfil.materia_cdu) partes.push(`materia/CDU orientativa «${perfil.materia_cdu}»`);
+    if (perfil.materia_ruta) partes.push(`archivado en las carpetas «${perfil.materia_ruta}» (fuerte pista de MATERIA para la CDU)`);
+    if (!partes.length) return '';
+    return `\n\n⚠️ PISTA DE CONTEXTO (el usuario está ingiriendo un lote y ha indicado que este documento ${partes.join(', ')}). Úsala para ORIENTAR la extracción y la clasificación. PERO LA REALIDAD MANDA: si en las imágenes hay evidencia CLARA de que es OTRA cosa (ISBN/ISSN, portada, colofón, CIP), clasifícalo por esa evidencia y NO fuerces el tipo sugerido.`;
+}
+
+export async function analizarImagenesRecurso(imagenes, datosEpub = null, opciones = {}) {
     try {
         const todas = imagenes.map(({ data, mimeType }) => ({ base64: data.toString("base64"), mimeType: mimeType || "image/jpeg" }));
         const imageParts = paginasClave(todas);   // solo las páginas clave (portada + créditos + contraportada)
 
         // Inyección dinámica de metadatos nativos para dar máxima prioridad a los datos del archivo
         let instruccionesContextuales = INSTRUCCIONES_SISTEMA;
+        // PISTA DEL PERFIL de ingesta (el usuario dijo «este lote es de cómics/revistas/una colección…»): orienta
+        // la extracción, PERO la realidad manda (reality wins) — si hay evidencia clara de otra cosa, se indica.
+        const preambulo = preambuloPerfil(opciones.perfil);
+        if (preambulo) instruccionesContextuales += preambulo;
         if (datosEpub) {
             instruccionesContextuales += `\n\n⚠️ ENTORNO DIGITAL - NOTA PRIORITARIA:\nEl recurso actual es un libro digital (EPUB). El analizador nativo ha extraído el siguiente manifiesto:\n${JSON.stringify(datosEpub, null, 2)}\nUsa estos datos como fuente de verdad absoluta. Tu tarea principal aquí es verificar si el ISBN es correcto, estructurar la sinopsis final, e inferir con el máximo rigor la Clasificación Decimal Universal ('cdu') y las 'palabras_clave'.`;
             // …salvo la EDITORIAL: el manifiesto de un ebook de la comunidad suele traer el maquetador

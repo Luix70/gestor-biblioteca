@@ -66,7 +66,13 @@ export function clasificarTipo(s = {}) {
     // Sin señales fuertes → pistas (T4). Periódico-pista antes que libro-pista (un ISBN del cuerpo es lo
     // más débil); si nada apunta a periódico, un ISBN/CIP del cuerpo lo hace libro (caso libro normal).
     if (s.pareceRevista || s.issnHint) return { tipo_recurso: 'revista', naturaleza: null, multiparte: false };
-    return { tipo_recurso: 'libro', naturaleza: null, multiparte: false };
+    // T4 (la MÁS débil) · PISTA del PERFIL de ingesta (el usuario dijo «esto es una descarga de cómics/
+    // revistas/…»): ÚLTIMO desempate cuando NADA más ha decidido. La realidad ya ganó arriba (un ISBN/CIP/
+    // ISSN/serie propios → libro/revista aquí NO se tocan); esto solo orienta lo genuinamente ambiguo.
+    if (s.hintTipo === 'revista') return { tipo_recurso: 'revista', naturaleza: s.hintNaturaleza || null, multiparte: false };
+    if (s.hintTipo === 'comic') return { tipo_recurso: 'libro', naturaleza: 'comic', multiparte: false };
+    if (['articulo', 'apuntes', 'capitulo'].includes(s.hintTipo)) return { tipo_recurso: s.hintTipo, naturaleza: null, multiparte: false };
+    return { tipo_recurso: 'libro', naturaleza: s.hintNaturaleza || null, multiparte: false };
 }
 
 // Umbrales de la política por nº de páginas (config.js · overridables por .env).

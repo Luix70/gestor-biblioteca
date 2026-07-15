@@ -3054,6 +3054,7 @@ function pintarDoc(r, ctx) {
     else if (/\.(cbz|cbr|cb7|djvu)$/.test(_nom)) iniciarLectorComic(d._id);
     else if (/\.(mobi|azw3?)$/.test(_nom)) iniciarLectorMobi(d._id);
     else if (_nom.endsWith('.chm')) iniciarLectorChm(d._id);
+    else if (d.tipo_recurso === 'software') iniciarExploradorSoftware(d._id);
     if (r.audios && r.audios.length) iniciarReproductorAudio(r.doc && r.doc._id, r.audios); // audiolibro / lectura con audio: playlist
   };
   const ld = $('#lectDet');
@@ -3551,7 +3552,7 @@ function modalCambiarTipo(n) {
     $('#cmpModal').innerHTML = `<div class="box card" style="max-width:440px">
       <h3 style="margin-top:0">🔀 Cambiar tipo${n > 1 ? ` · ${n} documentos` : ''}</h3>
       <div class="muted" style="margin:-4px 0 10px">Reclasifica a mano. NO mueve la carpeta (la Integridad/un reproceso la re-alojan luego en libros/ o revistas/).</div>
-      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}${opc('articulo', '📃', 'Artículo', '(científico, de revista…)')}${opc('capitulo', '📑', 'Capítulo', '(fragmento de un libro)')}${opc('apuntes', '🗒️', 'Apuntes')}
+      ${opc('libro', '📕', 'Libro')}${opc('revista', '📰', 'Revista')}${opc('comic', '📓', 'Cómic', '(novela gráfica / tebeo)')}${opc('articulo', '📃', 'Artículo', '(científico, de revista…)')}${opc('capitulo', '📑', 'Capítulo', '(fragmento de un libro)')}${opc('apuntes', '🗒️', 'Apuntes')}${opc('software', '💿', 'Software', '(paquete verbatim en bloque)')}
       <label style="margin-top:12px">Contraseña de administrador</label>
       <input type="password" id="pwInput" autocomplete="current-password">
       <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
@@ -3770,12 +3771,46 @@ async function _descargarArchivo(url) {
 
 // PDF: renderiza miniaturas de todas las páginas (pdf.js) → el usuario marca las que quiera → cada una se
 // re-renderiza a mayor resolución y se añade al carrusel.
+// Parsea un rango de páginas de texto libre → lista de nºs (1-indexados) DENTRO de [1, total], ordenada y sin
+// repetir. Acepta: «primera», «última»/«últimas N», tramos «2-5», y sueltos «25». Ej.: «1-6, últimas 2».
+function parsearRangoPaginas(texto, total) {
+  const out = new Set();
+  let t = String(texto || '').toLowerCase();
+  t = t.replace(/[úu]ltimas?\s*(\d+)/g, (_, n) => { for (let i = Math.max(1, total - (+n) + 1); i <= total; i++) out.add(i); return ' '; });
+  t = t.replace(/[úu]ltima/g, String(total)).replace(/primera/g, '1');
+  for (const parte of t.split(/[,;]+/)) {
+    const p = parte.trim();
+    if (!p) continue;
+    const m = p.match(/^(\d+)\s*[-–a]\s*(\d+)$/);
+    if (m) { let a = +m[1], b = +m[2]; if (a > b) [a, b] = [b, a]; for (let i = a; i <= b; i++) if (i >= 1 && i <= total) out.add(i); }
+    else { const n = parseInt(p, 10); if (n >= 1 && n <= total) out.add(n); }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+// Rango por defecto para el selector de páginas: «1-6» + las dos últimas (sin solaparse en docs cortos).
+function rangoPorDefecto(total) {
+  if (!total) return '1-6';
+  const frente = `1-${Math.min(6, total)}`;
+  return total > 8 ? `${frente}, últimas 2` : frente;
+}
+
 async function extraerDePdf(archivo) {
   const cont = $('#cmpModal');
-  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del PDF</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando páginas…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del PDF</h3>
+    <div class="row" id="exTop" style="gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 8px;position:sticky;top:0;background:var(--card);padding:4px 0;z-index:1">
+      <span class="muted" id="exTotal" style="font-size:12px">…</span>
+      <input id="exRango" placeholder="1-6, última" title="Páginas a extraer. Ej.: primera, 2-5, 25, última" style="font-size:12px;width:150px;padding:2px 6px">
+      <button class="btn" id="exAddRango" type="button">➕ Añadir rango</button>
+      <span style="flex:1;min-width:8px"></span>
+      <button class="btn" id="exCancelTop" type="button">Cerrar</button>
+      <button class="btn pri" id="exOkTop" type="button" disabled>Añadir 0</button>
+    </div>
+    <div class="muted" id="exMsg" style="font-size:12px">Cargando páginas…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px"><button class="btn" id="exX">Cancelar</button><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
   $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
   const volver = () => pintarGestorImagenes();
-  $('#exX').onclick = volver; $('#cmpScrim').onclick = cerrarCmp;
+  $('#exX').onclick = volver;
+  if ($('#exCancelTop')) $('#exCancelTop').onclick = volver;
+  $('#cmpScrim').onclick = cerrarCmp;
 
   await cargarPdfLib();
   const lib = window.pdfjsLib;
@@ -3785,9 +3820,11 @@ async function extraerDePdf(archivo) {
   const total = pdf.numPages;
   const MAX = 80; // tope de miniaturas (rendimiento en el Atom/móvil)
   const n = Math.min(total, MAX);
-  $('#exMsg').textContent = `${total} páginas${total > MAX ? ` (mostrando las primeras ${MAX})` : ''} · toca las que quieras añadir`;
+  $('#exMsg').textContent = `${total} páginas${total > MAX ? ` (rejilla: primeras ${MAX})` : ''} · toca las que quieras, o usa el rango arriba`;
+  if ($('#exTotal')) $('#exTotal').textContent = `${total} pág.`;
+  if ($('#exRango')) $('#exRango').value = rangoPorDefecto(total);
   const marcadas = new Set();
-  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
+  const actualizarBtn = () => { const nn = marcadas.size; ['#exOk', '#exOkTop'].forEach((s) => { const b = $(s); if (b) { b.textContent = `Añadir ${nn}`; b.disabled = nn === 0; } }); };
   // Render de una página a canvas al ancho dado.
   const render = async (num, ancho) => {
     const pagina = await pdf.getPage(num);
@@ -3823,20 +3860,27 @@ async function extraerDePdf(archivo) {
     grid.appendChild(cel);
     io.observe(cel);
   }
-  $('#exOk').onclick = async () => {
-    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
+  // Añade las páginas indicadas (1-based, marcadas o de un rango) rasterizándolas a alta resolución.
+  const añadir = async (nums1) => {
+    const lista = [...new Set(nums1)].filter((x) => x >= 1 && x <= total).sort((a, b) => a - b);
+    if (!lista.length) { toast('Indica alguna página (marca miniaturas o escribe un rango)', 'warn'); return; }
+    ['#exOk', '#exOkTop', '#exAddRango'].forEach((s) => { const b = $(s); if (b) { b.disabled = true; if (s !== '#exAddRango') b.textContent = 'Añadiendo…'; } });
+    let ok = 0;
     try {
-      for (const num of [...marcadas].sort((x, y) => x - y)) {
+      for (const num of lista) {
         const c = await render(num, 1600); // alta resolución para la imagen definitiva
         const b64 = c.toDataURL('image/jpeg', 0.9);
         c.width = c.height = 0;
-        await apiImg('anadir', { base64: b64 });
+        await apiImg('anadir', { base64: b64 }); ok++;
       }
-      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
+      toast(`🖹 ${ok} imagen(es) añadida(s)`);
     } catch (e) { toast(e.message, 'bad'); }
     try { pdf.destroy(); } catch (_) {}
     pintarGestorImagenes();
   };
+  $('#exOk').onclick = () => añadir([...marcadas]);
+  if ($('#exOkTop')) $('#exOkTop').onclick = () => añadir([...marcadas]);
+  if ($('#exAddRango')) $('#exAddRango').onclick = () => añadir(parsearRangoPaginas($('#exRango') ? $('#exRango').value : '', total));
 }
 
 // EPUB: extrae las imágenes embebidas (JSZip) → miniaturas → el usuario marca → se añaden al carrusel.
@@ -3897,14 +3941,25 @@ async function extraerDeEpub(archivo) {
 async function extraerLazy(id, cfg) {
   const cont = $('#cmpModal');
   const extraHtml = (cfg.extras || []).map((_, i) => `<button class="btn" id="exExtra${i}"></button>`).join('');
-  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 ${esc(cfg.titulo || 'Extraer del documento')}</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exCancel">Cancelar</button>${extraHtml}</div><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
+  cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 ${esc(cfg.titulo || 'Extraer del documento')}</h3>
+    <div class="row" id="exTop" style="gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 8px;position:sticky;top:0;background:var(--card);padding:4px 0;z-index:1">
+      <span class="muted" id="exTotal" style="font-size:12px">…</span>
+      <input id="exRango" placeholder="1-6, última" title="Páginas a extraer. Ej.: primera, 2-5, 25, última" style="font-size:12px;width:150px;padding:2px 6px">
+      <button class="btn" id="exAddRango" type="button">➕ Añadir rango</button>
+      <span style="flex:1;min-width:8px"></span>
+      <button class="btn" id="exCancelTop" type="button">Cerrar</button>
+      <button class="btn pri" id="exOkTop" type="button" disabled>Añadir 0</button>
+    </div>
+    <div class="muted" id="exMsg" style="font-size:12px">Cargando…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exCancel">Cancelar</button>${extraHtml}</div><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
   $('#cmpScrim').style.display = 'block'; cont.style.display = 'grid';
   // CANCELACIÓN: las miniaturas pendientes se ABORTAN al cerrar/cancelar/añadir. Así el servidor deja de
   // rasterizar páginas que ya nadie va a ver (clave con DjVu: al elegir una página no sigue con las 82).
   const ctrlMin = new AbortController();
   let ioRef = null;
   const limpiar = () => { try { ctrlMin.abort(); } catch {} if (ioRef) ioRef.disconnect(); };
-  $('#exCancel').onclick = () => { limpiar(); pintarGestorImagenes(); };
+  const cerrar = () => { limpiar(); pintarGestorImagenes(); };
+  $('#exCancel').onclick = cerrar;
+  if ($('#exCancelTop')) $('#exCancelTop').onclick = cerrar;
   $('#cmpScrim').onclick = () => { limpiar(); cerrarCmp(); };
   (cfg.extras || []).forEach((e, i) => { const b = $('#exExtra' + i); if (b) { b.textContent = e.etq; b.onclick = e.fn; } });
 
@@ -3925,9 +3980,11 @@ async function extraerLazy(id, cfg) {
   const total = r[cfg.contar.key] || 0;
   if (!total) { $('#exMsg').textContent = cfg.vacio || 'No hay imágenes extraíbles.'; return; }
   const MAX = 200, n = Math.min(total, MAX);
-  $('#exMsg').textContent = `${total}${total > MAX ? ` (primeras ${MAX})` : ''} · toca las que quieras añadir`;
+  $('#exMsg').textContent = `${total}${total > MAX ? ` (rejilla: primeras ${MAX})` : ''} · toca las que quieras, o usa el rango arriba`;
+  if ($('#exTotal')) $('#exTotal').textContent = `${total} pág.`;
+  if ($('#exRango')) $('#exRango').value = rangoPorDefecto(total);
   const marcadas = new Set();
-  const actualizarBtn = () => { const b = $('#exOk'); if (b) { b.textContent = `Añadir ${marcadas.size}`; b.disabled = marcadas.size === 0; } };
+  const actualizarBtn = () => { const nn = marcadas.size; ['#exOk', '#exOkTop'].forEach((s) => { const b = $(s); if (b) { b.textContent = `Añadir ${nn}`; b.disabled = nn === 0; } }); };
   const grid = $('#exGrid');
   const io = new IntersectionObserver((entradas) => {
     for (const en of entradas) {
@@ -3950,20 +4007,28 @@ async function extraerLazy(id, cfg) {
     grid.appendChild(cel);
     io.observe(cel);
   }
-  $('#exOk').onclick = async () => {
-    limpiar();   // deja de pedir/rasterizar miniaturas: ya solo importan las páginas ELEGIDAS
-    const b = $('#exOk'); b.disabled = true; b.textContent = 'Añadiendo…';
+  // Añade al carrusel las páginas indicadas (índices 0-based, sean marcadas o de un rango). Reutilizado por
+  // los botones «Añadir» (arriba y abajo) y por «Añadir rango» — así no hay que bajar 200 miniaturas.
+  const añadir = async (nums0) => {
+    limpiar(); // deja de pedir/rasterizar miniaturas: ya solo importan las páginas elegidas
+    const lista = [...new Set(nums0)].filter((x) => x >= 0 && x < total).sort((a, b) => a - b);
+    if (!lista.length) { toast('Indica alguna página (marca miniaturas o escribe un rango)', 'warn'); return; }
+    ['#exOk', '#exOkTop', '#exAddRango'].forEach((s) => { const b = $(s); if (b) { b.disabled = true; if (s !== '#exAddRango') b.textContent = 'Añadiendo…'; } });
+    let ok = 0;
     try {
-      for (const num of [...marcadas].sort((x, y) => x - y)) {
+      for (const num of lista) {
         const blob = await fetchBlob(num);
         const file = new File([blob], `img-${num + 1}.jpg`, { type: blob.type || 'image/jpeg' });
         const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
-        await apiImg('anadir', { base64: b64 });
+        await apiImg('anadir', { base64: b64 }); ok++;
       }
-      toast(`🖹 ${marcadas.size} imagen(es) añadida(s)`);
+      toast(`🖹 ${ok} imagen(es) añadida(s)`);
     } catch (e) { toast(e.message, 'bad'); }
     pintarGestorImagenes();
   };
+  $('#exOk').onclick = () => añadir([...marcadas]);
+  if ($('#exOkTop')) $('#exOkTop').onclick = () => añadir([...marcadas]);
+  if ($('#exAddRango')) $('#exAddRango').onclick = () => añadir(parsearRangoPaginas($('#exRango') ? $('#exRango').value : '', total).map((p) => p - 1));
 }
 
 // MOBI/AZW3: PREVISUALIZACIÓN en la ficha (no hay lector nativo en el navegador como para EPUB/PDF). El
@@ -4039,6 +4104,26 @@ async function iniciarLectorChm(id) {
   }
   // Pinta la entrada inicial (ya viene en la primera respuesta).
   pintar(r.html, r.titulo);
+}
+
+// SOFTWARE (naturaleza:'software'): explorador de ficheros de SOLO LECTURA en la ficha. Muestra el árbol
+// del paquete (nombres + tamaño + icono por clase); no sirve ni edita los binarios (se mueven en bloque).
+async function iniciarExploradorSoftware(id) {
+  const cont = $('#swArbol');
+  if (!cont) return;
+  let r;
+  try { r = await api('/documentos/' + encodeURIComponent(id) + '/arbol'); }
+  catch (e) { cont.innerHTML = 'No se pudo leer el paquete: ' + esc(e.message); return; }
+  if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">(paquete vacío)</div>'; return; }
+  cont.innerHTML = r.arbol.map(nodoArbolRO).join('');
+}
+function nodoArbolRO(n) {
+  if (n.tipo === 'file') {
+    const ic = _ICONO_CLASE[n.clase] || '📄';
+    return `<div style="padding:1px 0 1px 20px">${ic} ${esc(n.nombre)} <span class="muted" style="font-size:11px">${n.tam ? fmtBytes(n.tam) : ''}</span></div>`;
+  }
+  const hijos = (n.hijos || []).map(nodoArbolRO).join('') || '<div class="muted" style="padding-left:20px">(vacía)</div>';
+  return `<details open style="margin-left:4px"><summary style="cursor:pointer">📁 ${esc(n.nombre)}</summary><div style="margin-left:14px">${hijos}</div></details>`;
 }
 
 // Rasteriza UNA página de texto de un MOBI/AZW3 CONSERVANDO la estructura (encabezados, negrita/cursiva,
@@ -5448,7 +5533,7 @@ function fichaEditar(d, r, opts) {
     ${campo('edTit', 'Título', d.titulo)}
     ${campo('edSub', 'Subtítulo', d.subtitulo)}
     <label style="display:block;margin-top:8px">Tipo</label>
-    <select id="edTipo">${['libro', 'revista', 'articulo', 'capitulo', 'apuntes'].map((t) => `<option value="${t}"${(d.tipo_recurso || 'libro') === t ? ' selected' : ''}>${tipoIcono(t)} ${tipoNombre(t)}</option>`).join('')}</select>
+    <select id="edTipo">${['libro', 'revista', 'articulo', 'capitulo', 'apuntes', 'software'].map((t) => `<option value="${t}"${(d.tipo_recurso || 'libro') === t ? ' selected' : ''}>${tipoIcono(t)} ${tipoNombre(t)}</option>`).join('')}</select>
     <div class="row" style="gap:8px;margin-top:8px;align-items:flex-end"><div><label style="display:block">Soporte</label>
       <select id="edSoporte"><option value="digital"${!(d.formatos || []).includes('papel') ? ' selected' : ''}>💾 Digital</option><option value="papel"${(d.formatos || []).includes('papel') ? ' selected' : ''}>📄 Papel</option></select></div>
       <div class="muted" style="font-size:11px;flex:1">Cambiar a «Digital» intenta recuperar el PDF/EPUB original de la carpeta del documento.</div></div>
@@ -6010,6 +6095,18 @@ function pintarExplorador(r) {
 function previewArchivo(r) {
   const id = r.doc && r.doc._id;
   const audio = reproductorAudioHtml(r.audios, id); // audiolibro (con o sin PDF): reproductor + descargas arriba
+  // SOFTWARE (paquete verbatim en bloque): no hay un fichero único → EXPLORADOR de ficheros de SOLO LECTURA.
+  const esSoftware = r.tipo_recurso === 'software' || (r.doc && r.doc.tipo_recurso === 'software') || r.naturaleza === 'software';
+  if (esSoftware && id) {
+    const zip = `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar todo el paquete en un ZIP">⬇ Paquete (ZIP)</a>`;
+    return (
+      audio +
+      `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">💿 Paquete de software</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Explorador de SOLO LECTURA · los ficheros se conservan y se mueven en bloque.</div>
+      <div id="swArbol" style="max-height:62vh;overflow:auto;border:1px solid rgba(128,128,128,.3);border-radius:10px;padding:8px;font-size:13px">Cargando…</div>
+      <div class="row" style="margin-top:12px">${zip}</div></div>`
+    );
+  }
   if (!r.archivo_url) return audio;                 // audio-only: solo el reproductor
   const nombre = r.nombre_archivo || 'archivo',
     url = encUrl(r.archivo_url),
@@ -6906,7 +7003,7 @@ function construirSearch() {
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search">
           <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label></div>
-        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="capitulo">Capítulos</option><option value="apuntes">Apuntes</option></select></div>
+        <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="capitulo">Capítulos</option><option value="apuntes">Apuntes</option><option value="software">Software</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
@@ -7574,8 +7671,8 @@ const badgesDoc = (d) =>
 // CABECERA de la ficha, donde el usuario quiere ver de un vistazo qué es y en qué soporte está.
 // Icono y nombre del TIPO de documento (para badges/tarjetas/placeholders). El cómic (por `naturaleza`)
 // manda sobre el tipo_recurso. Los tipos nuevos (artículo/apuntes) tienen su propio icono/nombre.
-function tipoIcono(tr, esComic) { return esComic ? '📓' : ({ revista: '📰', articulo: '📃', apuntes: '🗒️', capitulo: '📑' }[tr] || '📕'); }
-function tipoNombre(tr, esComic) { return esComic ? 'Cómic' : ({ revista: 'Revista', articulo: 'Artículo', apuntes: 'Apuntes', capitulo: 'Capítulo' }[tr] || 'Libro'); }
+function tipoIcono(tr, esComic) { return esComic ? '📓' : ({ revista: '📰', articulo: '📃', apuntes: '🗒️', capitulo: '📑', software: '💿' }[tr] || '📕'); }
+function tipoNombre(tr, esComic) { return esComic ? 'Cómic' : ({ revista: 'Revista', articulo: 'Artículo', apuntes: 'Apuntes', capitulo: 'Capítulo', software: 'Software' }[tr] || 'Libro'); }
 function badgesTipoFormato(d) {
   const nat = String(d.naturaleza || '').toLowerCase();
   const esComic = ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(nat);
@@ -10741,6 +10838,166 @@ function pintarInboxResultados(res) {
   }
   pintarCola();
 }
+
+// ── INGESTA GUIADA · explorador del Inbox: árbol + marcar acción/pistas por carpeta → _guia.json ──────
+// El usuario recorre el árbol del Inbox y, por CARPETA, elige una acción (omitir/aplanar/explotar/intacta)
+// y da pistas (tipo probable, colección). Se guarda como _guia.json y el vigilante lo obedece al procesar.
+const _guiaDirty = new Set(); // rutas de carpeta tocadas por el usuario (las que se guardarán)
+const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta'], ['obra', '📚 obra'], ['software', '💿 software']];
+const _TIPOS_GUIA = [['', 'tipo…'], ['comic', 'cómic'], ['revista', 'revista'], ['libro', 'libro'], ['articulo', 'artículo'], ['capitulo', 'capítulo'], ['apuntes', 'apuntes']];
+const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '🎬', comprimido: '🗜️', noclasificable: '⚠️' };
+
+async function cargarArbolInbox() {
+  const cont = $('#guiaArbol');
+  if (!cont) return;
+  cont.innerHTML = '<div class="muted">Cargando…</div>';
+  _guiaDirty.clear();
+  ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = true; });
+  let r;
+  try { r = await api('/inbox/arbol'); } catch (e) { cont.innerHTML = 'No se pudo cargar: ' + esc(e.message); return; }
+  if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">El Inbox está vacío.</div>'; return; }
+  cont.innerHTML = r.arbol.map(nodoGuiaHTML).join('');
+  const habilitarGuardar = () => ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = false; });
+  $$('#guiaArbol .guiaCtl').forEach((el) => {
+    const ev = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
+    el[ev] = () => { _guiaDirty.add(el.dataset.ruta); habilitarGuardar(); };
+  });
+  // Casillas de SELECCIÓN de ficheros (agrupar) y de CARPETAS (acción en bloque).
+  _guiaSel.clear();
+  _guiaSelCarp.clear();
+  actualizarSelBar();
+  $$('#guiaArbol .guiaSel').forEach((el) => {
+    el.onchange = () => { el.checked ? _guiaSel.add(el.dataset.ruta) : _guiaSel.delete(el.dataset.ruta); actualizarSelBar(); };
+  });
+  $$('#guiaArbol .guiaSelCarp').forEach((el) => {
+    el.onclick = (e) => e.stopPropagation(); // no desplegar/colapsar la carpeta al marcar
+    el.onchange = () => { el.checked ? _guiaSelCarp.add(el.dataset.ruta) : _guiaSelCarp.delete(el.dataset.ruta); actualizarSelBar(); };
+  });
+  // «☑ todos»: marca/desmarca todos los ficheros de la carpeta (recursivo si «incluir subcarpetas» está activo).
+  $$('#guiaArbol .guiaTodos').forEach((btn) => {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const det = btn.closest('details');
+      if (!det) return;
+      const recursivo = $('#guiaRecursivo') && $('#guiaRecursivo').checked;
+      const casillas = [...det.querySelectorAll('.guiaSel')].filter((cb) => recursivo || cb.closest('details') === det);
+      if (!casillas.length) return;
+      const marcar = !casillas.every((cb) => cb.checked); // si no están todas marcadas → marcar; si sí → desmarcar
+      casillas.forEach((cb) => { cb.checked = marcar; marcar ? _guiaSel.add(cb.dataset.ruta) : _guiaSel.delete(cb.dataset.ruta); });
+      actualizarSelBar();
+    };
+  });
+}
+function nodoGuiaHTML(n) {
+  if (n.tipo === 'file') {
+    const ic = _ICONO_CLASE[n.clase] || '📄';
+    const col = n.clase === 'noclasificable' ? ';color:#c60' : '';
+    return `<div style="padding:2px 0 2px 20px;font-size:12.5px${col}"><label style="cursor:pointer"><input type="checkbox" class="guiaSel" data-ruta="${esc(n.ruta)}" style="vertical-align:-1px"> ${ic} ${esc(n.nombre)}</label>${n.clase === 'noclasificable' ? ' <span class="muted">· no clasificable</span>' : ''}</div>`;
+  }
+  const g = n.guia || { perfil: {}, accion: 'normal' };
+  const sel = (k, opts, val) =>
+    `<select class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="${k}" style="font-size:12px;padding:1px 3px">${opts
+      .map(([v, t]) => `<option value="${v}"${v === (val || '') ? ' selected' : ''}>${t}</option>`)
+      .join('')}</select>`;
+  const cab = `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <input type="checkbox" class="guiaSelCarp" data-ruta="${esc(n.ruta)}" title="Seleccionar esta CARPETA (para acción en bloque: explotar/aplanar/omitir)" style="vertical-align:-1px" />
+      <b style="font-size:13px">📁 ${esc(n.nombre)}</b>
+      <button type="button" class="btn guiaTodos" title="Seleccionar todos los ficheros de esta carpeta (respeta «incluir subcarpetas»)" style="font-size:11px;padding:1px 6px">☑ todos</button>
+      ${sel('accion', _ACCIONES_GUIA, g.accion)}
+      ${sel('tipo_probable', _TIPOS_GUIA, g.perfil && g.perfil.tipo_probable)}
+      <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />
+    </span>`;
+  const hijos = (n.hijos || []).map(nodoGuiaHTML).join('') || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
+  // Cada sub-nivel se INDENTA (margin-left) además del borde izquierdo, para que la jerarquía se lea bien.
+  return `<details class="foldcard" open style="margin:2px 0;border:0;border-left:2px solid rgba(128,128,128,.3);border-radius:0;padding:2px 0 2px 8px"><summary style="cursor:pointer">${cab}</summary><div style="margin-left:18px">${hijos}</div></details>`;
+}
+async function guardarGuiasInbox() {
+  if (!_guiaDirty.size) return;
+  const btn = $('#guiaGuardar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  // Recoge el estado ACTUAL de los controles, solo de las carpetas tocadas.
+  const porRuta = new Map();
+  $$('#guiaArbol .guiaCtl').forEach((el) => {
+    const ruta = el.dataset.ruta;
+    if (!_guiaDirty.has(ruta)) return;
+    const gg = porRuta.get(ruta) || { accion: 'normal', perfil: {} };
+    if (el.dataset.k === 'accion') gg.accion = el.value || 'normal';
+    else if (el.value && el.value.trim()) gg.perfil[el.dataset.k] = el.value.trim();
+    porRuta.set(ruta, gg);
+  });
+  let ok = 0, err = 0;
+  for (const [ruta, guia] of porRuta) {
+    try { const r = await api('/inbox/guia', { method: 'POST', body: JSON.stringify({ ruta, guia }) }); r.ok ? ok++ : err++; } catch { err++; }
+  }
+  toast(`🧭 ${ok} guía(s) guardada(s)${err ? ` · ${err} error(es)` : ''}`, err ? 'warn' : 'ok');
+  if (btn) btn.textContent = '💾 Guardar guías';
+  cargarArbolInbox();
+}
+if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
+if ($('#guiaGuardar')) $('#guiaGuardar').onclick = guardarGuiasInbox;
+
+// ── Selección de ficheros para AGRUPAR (dos vías): A) mover a una nueva subcarpeta ahora; B) marcar como
+//    1 audiolibro / 1 obra en el _guia.json (el vigilante los agrupa al procesar). Ambas reutilizan la
+//    autodetección de carpetas del vigilante. ──
+const _guiaSel = new Set();      // ficheros seleccionados (rutas)
+const _guiaSelCarp = new Set();  // CARPETAS seleccionadas (rutas) — para acción en bloque
+function actualizarSelBar() {
+  const bar = $('#guiaSelBar');
+  if (!bar) return;
+  const nf = _guiaSel.size, nc = _guiaSelCarp.size;
+  bar.style.display = nf || nc ? 'flex' : 'none';
+  const secF = $('#guiaSelFiles'), secC = $('#guiaSelCarps');
+  if (secF) secF.style.display = nf ? 'flex' : 'none';
+  if (secC) secC.style.display = nc ? 'flex' : 'none';
+  if ($('#guiaSelN')) $('#guiaSelN').textContent = nf;
+  if ($('#guiaSelNC')) $('#guiaSelNC').textContent = nc;
+}
+// Aplica una acción EN BLOQUE a las carpetas seleccionadas: fija su desplegable de acción y las marca
+// «sucias» para que «Guardar guías» las persista (mismo camino que editar el desplegable a mano).
+function aplicarAccionCarpetas(accion) {
+  if (!_guiaSelCarp.size) return;
+  let n = 0;
+  $$('#guiaArbol .guiaCtl').forEach((el) => {
+    if (el.dataset.k === 'accion' && _guiaSelCarp.has(el.dataset.ruta)) { el.value = accion; _guiaDirty.add(el.dataset.ruta); n++; }
+  });
+  ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = false; });
+  toast(`${n} carpeta(s) → «${accion}». Pulsa 💾 Guardar guías.`);
+}
+async function agruparEnCarpeta() {
+  if (!_guiaSel.size) return;
+  const nombre = prompt(`Nombre de la NUEVA carpeta para agrupar ${_guiaSel.size} fichero(s) (se moverán ahí):`, 'Audiolibro');
+  if (!nombre || !nombre.trim()) return;
+  try {
+    const r = await api('/inbox/agrupar-carpeta', { method: 'POST', body: JSON.stringify({ rutas: [..._guiaSel], nombre: nombre.trim() }) });
+    r.ok ? toast(`📁 ${r.movidos} fichero(s) → «${r.carpeta}»`) : toast(r.motivo || 'error', 'bad');
+  } catch (e) { toast(e.message, 'bad'); }
+  cargarArbolInbox();
+}
+async function marcarGrupo(tipo) {
+  if (!_guiaSel.size) return;
+  try {
+    const r = await api('/inbox/grupo', { method: 'POST', body: JSON.stringify({ rutas: [..._guiaSel], tipo }) });
+    r.ok ? toast(`${tipo === 'obra' ? '📚' : '🎧'} grupo marcado (${r.n} fichero(s)) en «${r.carpeta}»`) : toast(r.motivo || 'error', 'bad');
+  } catch (e) { toast(e.message, 'bad'); }
+  cargarArbolInbox();
+}
+if ($('#guiaGuardar2')) $('#guiaGuardar2').onclick = guardarGuiasInbox; // guardar también desde el final
+if ($('#guiaMover')) $('#guiaMover').onclick = agruparEnCarpeta;
+if ($('#guiaGrpAudio')) $('#guiaGrpAudio').onclick = () => marcarGrupo('audiolibro');
+if ($('#guiaGrpObra')) $('#guiaGrpObra').onclick = () => marcarGrupo('obra');
+// Acciones EN BLOQUE sobre las carpetas seleccionadas (fijan su desplegable + marcan sucio → Guardar).
+if ($('#guiaCarpExplotar')) $('#guiaCarpExplotar').onclick = () => aplicarAccionCarpetas('explotar');
+if ($('#guiaCarpAplanar')) $('#guiaCarpAplanar').onclick = () => aplicarAccionCarpetas('aplanar');
+if ($('#guiaCarpOmitir')) $('#guiaCarpOmitir').onclick = () => aplicarAccionCarpetas('omitir');
+if ($('#guiaCarpNormal')) $('#guiaCarpNormal').onclick = () => aplicarAccionCarpetas('normal');
+if ($('#guiaSelNada'))
+  $('#guiaSelNada').onclick = () => {
+    _guiaSel.clear();
+    _guiaSelCarp.clear();
+    $$('#guiaArbol .guiaSel, #guiaArbol .guiaSelCarp').forEach((el) => (el.checked = false));
+    actualizarSelBar();
+  };
 // Supervisado: trae la ficha recién creada y abre el formulario de edición como PREVIEW (sin navegar).
 async function revisarSupervisado(id) {
   try {
