@@ -75,13 +75,17 @@
           <!-- MANTENIMIENTO -->
           <section class="page" id="p-activity">
             <div class="sec-h"><h2>Actividad</h2></div>
-            <div class="grid g2">
+            <!-- Tarjetas COMPACTADAS en columnas (masonry): las de distinta altura se empaquetan sin huecos
+                 (las pequeñas caen juntas y las grandes también). 2 columnas ≥340px → 1 en móvil. -->
+            <style>
+              #p-activity .actmason { columns: 2 340px; column-gap: 16px; }
+              #p-activity .actmason > .card { break-inside: avoid; margin: 0 0 16px; }
+            </style>
+            <div class="actmason">
               <details class="card foldcard" id="fcConformador" data-fold="open" open>
                 <summary><h3>🧭 Estado del Conformador</h3></summary>
                 <div id="mEstado"></div>
               </details>
-            </div>
-            <div class="grid g2" style="margin-top: 16px">
               <details class="card foldcard admin-only" id="fcMantenimiento" data-fold="open" open>
                 <summary><h3>🧹 Lanzar mantenimiento</h3></summary>
                 <div class="row">
