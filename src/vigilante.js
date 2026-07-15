@@ -14,7 +14,7 @@ import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
 import { reciclar } from './utils/papelera.js';
-import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware } from './utils/transmedia.js';
+import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarLibroConMaterial } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
@@ -537,6 +537,13 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 unidades.push({ esSoftware: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
+            if (guiaCarpeta?.accion === 'libro-material') {
+                // LIBRO + MATERIAL AUXILIAR: el documento principal se cataloga por el PIPELINE NORMAL
+                // (tipo_recurso:'libro' de pleno derecho) y el material (código, datasets…) se conserva
+                // verbatim junto a él (ruta_fija), visible en el explorador de la ficha. NO es transmedia.
+                unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
             if (guiaCarpeta?.accion === 'obra') {
                 // FORZAR obra multivolumen: TODOS los documentos de la carpeta son tomos de UNA obra cuyo
                 // título es el nombre de la carpeta; el nº de tomo va por orden natural del nombre de fichero.
@@ -955,6 +962,23 @@ async function procesarCola() {
                             if (rs.permanente) omitidasDefinitivas.add(u.carpeta);
                         }
                     } catch (err) { console.error(`  ✗ software falló: ${err.message} (se CONSERVA el origen)`); }
+                    continue;
+                }
+                // LIBRO + MATERIAL AUXILIAR (guía): el documento principal por el PIPELINE NORMAL (libro de
+                // pleno derecho, ISBN/CDU/metadatos) + el material (código, datasets…) conservado verbatim junto
+                // a él (ruta_fija), visible en el explorador de la ficha. NO es transmedia ni colección.
+                if (u.esLibroMaterial) {
+                    console.log(`\n📖 Libro + material «${path.basename(u.carpeta)}»: catalogando el libro (pipeline normal) y adjuntando el material…`);
+                    try {
+                        const rlm = await ingestarLibroConMaterial(u.carpeta);
+                        if (rlm.ok) {
+                            console.log(`  ✔ libro «${rlm.titulo}»${rlm.duplicado ? ' (ya existía)' : ''} · ${rlm.material} elemento(s) de material adjunto · CDU ${rlm.cdu || '—'} · ${rlm.web || ''}`);
+                            tally.libroMaterial = (tally.libroMaterial || 0) + 1; procesadas++;
+                        } else {
+                            console.warn(`  ✗ libro + material: ${rlm.motivo} (se CONSERVA el origen)`);
+                            if (rlm.permanente) omitidasDefinitivas.add(u.carpeta);
+                        }
+                    } catch (err) { console.error(`  ✗ libro + material falló: ${err.message} (se CONSERVA el origen)`); }
                     continue;
                 }
                 // TRANSMEDIA: copia el árbol verbatim al CDU + cataloga (un doc por PDF, audios, ruta_fija) y

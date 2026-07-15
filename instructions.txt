@@ -678,6 +678,14 @@ de ficheros clasificado por CDU.
       DESATENDIDA tras marcar las piezas una vez. Una carpeta SIN guías se comporta igual que siempre
       (la mejora es opt-in). Bonus: en las unidades recurridas la ruta completa de carpetas viaja como
       pista de CDU (materia_ruta). (vigilante.js · clasificarDirectorio/tieneDescendientesGuiados.)
+    · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
+      principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
+      El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`
+      de pleno derecho: NO transmedia, NO colección, NO «audiolibro+pdf» — y el material se copia VERBATIM
+      JUNTO a él en su carpeta CDU, protegido por `ruta_fija` (Integridad no lo poda) y visible en el
+      explorador «🗂️ Archivos» de la ficha. Documento principal = el fichero bibliográfico MAYOR de la raíz
+      (pdf/epub/mobi/djvu/cbz/chm…); todo lo demás = material. El origen se recicla a la Papelera tras copiar.
+      (transmedia.js · ingestarLibroConMaterial; unidad esLibroMaterial en el vigilante.)
 
   ── EXPLORADOR DE ARCHIVOS (ficha: «🗂️ Archivos» y junto a Ruta base) ─────────
     Navega y descarga TODO el árbol del documento — y, si cuelga de un árbol ruta_fija (colección

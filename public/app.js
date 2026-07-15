@@ -10843,7 +10843,7 @@ function pintarInboxResultados(res) {
 // El usuario recorre el árbol del Inbox y, por CARPETA, elige una acción (omitir/aplanar/explotar/intacta)
 // y da pistas (tipo probable, colección). Se guarda como _guia.json y el vigilante lo obedece al procesar.
 const _guiaDirty = new Set(); // rutas de carpeta tocadas por el usuario (las que se guardarán)
-const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta'], ['obra', '📚 obra'], ['software', '💿 software']];
+const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta'], ['obra', '📚 obra'], ['software', '💿 software'], ['libro-material', '📖 libro + material']];
 const _TIPOS_GUIA = [['', 'tipo…'], ['comic', 'cómic'], ['revista', 'revista'], ['libro', 'libro'], ['articulo', 'artículo'], ['capitulo', 'capítulo'], ['apuntes', 'apuntes']];
 const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '🎬', comprimido: '🗜️', noclasificable: '⚠️' };
 
