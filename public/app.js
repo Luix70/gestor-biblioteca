@@ -10867,6 +10867,21 @@ async function cargarArbolInbox() {
   $$('#guiaArbol .guiaSel').forEach((el) => {
     el.onchange = () => { el.checked ? _guiaSel.add(el.dataset.ruta) : _guiaSel.delete(el.dataset.ruta); actualizarSelBar(); };
   });
+  // «☑ todos»: marca/desmarca todos los ficheros de la carpeta (recursivo si «incluir subcarpetas» está activo).
+  $$('#guiaArbol .guiaTodos').forEach((btn) => {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const det = btn.closest('details');
+      if (!det) return;
+      const recursivo = $('#guiaRecursivo') && $('#guiaRecursivo').checked;
+      const casillas = [...det.querySelectorAll('.guiaSel')].filter((cb) => recursivo || cb.closest('details') === det);
+      if (!casillas.length) return;
+      const marcar = !casillas.every((cb) => cb.checked); // si no están todas marcadas → marcar; si sí → desmarcar
+      casillas.forEach((cb) => { cb.checked = marcar; marcar ? _guiaSel.add(cb.dataset.ruta) : _guiaSel.delete(cb.dataset.ruta); });
+      actualizarSelBar();
+    };
+  });
 }
 function nodoGuiaHTML(n) {
   if (n.tipo === 'file') {
@@ -10881,6 +10896,7 @@ function nodoGuiaHTML(n) {
       .join('')}</select>`;
   const cab = `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
       <b style="font-size:13px">📁 ${esc(n.nombre)}</b>
+      <button type="button" class="btn guiaTodos" title="Seleccionar todos los ficheros de esta carpeta (respeta «incluir subcarpetas»)" style="font-size:11px;padding:1px 6px">☑ todos</button>
       ${sel('accion', _ACCIONES_GUIA, g.accion)}
       ${sel('tipo_probable', _TIPOS_GUIA, g.perfil && g.perfil.tipo_probable)}
       <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />
