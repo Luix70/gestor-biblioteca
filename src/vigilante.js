@@ -31,7 +31,7 @@ const resolver = (p, def) => {
     return path.isAbsolute(v) ? v : path.resolve(RAIZ, v);
 };
 
-const INBOX   = resolver(process.env.PATH_INBOX,   'Inbox');
+export const INBOX = resolver(process.env.PATH_INBOX, 'Inbox');
 const PAUSA_MS = Number(process.env.PAUSA_INGESTA_MS || 1500);   // ritmo entre recursos (no saturar APIs)
 const REPOSO_MS = Number(process.env.REPOSO_INBOX_MS || 2500);   // espera tras el último cambio antes de procesar
 const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); // ventana para confirmar que un archivo terminó de escribirse

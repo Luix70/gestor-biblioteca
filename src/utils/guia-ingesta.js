@@ -106,3 +106,66 @@ export function aplicarPerfilAContexto(contexto, perfil) {
     ctx.perfil = { ...(ctx.perfil || {}), ...p };
     return ctx;
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+// EXPLORADOR del Inbox (para el panel): árbol de carpetas/ficheros + la guía actual de cada carpeta.
+// ──────────────────────────────────────────────────────────────────────────────────────────────────
+const EXT_DOC = new Set(['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.chm']);
+const EXT_IMG = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.gif', '.bmp']);
+const EXT_AUDIO = new Set(['.mp3', '.m4a', '.m4b', '.flac', '.ogg', '.opus', '.aac', '.wav']);
+const EXT_VIDEO = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm']);
+const EXT_COMPR = new Set(['.zip', '.rar', '.7z', '.iso']);
+const _ignorar = (n) => n.startsWith('@') || n.startsWith('.') || n.startsWith('#');
+
+/** Clase de un fichero por su extensión (para colorear el explorador y marcar los NO CLASIFICABLES). */
+export function claseFichero(ext) {
+    ext = String(ext || '').toLowerCase();
+    if (EXT_DOC.has(ext)) return 'doc';
+    if (EXT_IMG.has(ext)) return 'imagen';
+    if (EXT_AUDIO.has(ext)) return 'audio';
+    if (EXT_VIDEO.has(ext)) return 'video';
+    if (EXT_COMPR.has(ext)) return 'comprimido';
+    return 'noclasificable';   // .txt/.lit/.docx/.nrg… → el usuario decide (omitir / catalogar por nombre)
+}
+
+/**
+ * Árbol de `raizInbox` (recursivo, acotado en profundidad y nº de nodos para no reventar la API con un Inbox
+ * enorme). Cada CARPETA incluye su guía actual (perfil + acción). Ignora ocultos/sistema y el propio _guia.json.
+ */
+export async function arbolInbox(raizInbox, { profundidad = 6, maxNodos = 3000 } = {}) {
+    let n = 0;
+    async function rec(dir, prof) {
+        let entradas;
+        try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return []; }
+        const hijos = [];
+        for (const e of entradas.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
+            if (_ignorar(e.name) || e.name === NOMBRE_GUIA) continue;
+            if (++n > maxNodos) break;
+            const abs = path.join(dir, e.name);
+            const rel = path.relative(raizInbox, abs).split(path.sep).join('/');
+            if (e.isDirectory()) {
+                const guia = await leerGuia(abs);
+                const nodo = {
+                    nombre: e.name, ruta: rel, tipo: 'dir',
+                    guia: guia ? { perfil: guia.perfil, accion: guia.accion, adjuntar_a: guia.adjuntar_a } : null,
+                    hijos: prof > 0 ? await rec(abs, prof - 1) : [],
+                };
+                hijos.push(nodo);
+            } else {
+                let tam = 0;
+                try { tam = (await fs.stat(abs)).size; } catch { /* sin stat */ }
+                const ext = path.extname(e.name).toLowerCase();
+                hijos.push({ nombre: e.name, ruta: rel, tipo: 'file', ext, tam, clase: claseFichero(ext) });
+            }
+        }
+        return hijos;
+    }
+    return rec(raizInbox, profundidad);
+}
+
+/** Resuelve `sub` DENTRO de `raizInbox` (anti path-traversal). Devuelve el absoluto, o null si escapa. */
+export function rutaInboxSegura(raizInbox, sub) {
+    const abs = path.resolve(raizInbox, String(sub || '').replace(/^[/\\]+/, ''));
+    const raiz = path.resolve(raizInbox);
+    return (abs === raiz || abs.startsWith(raiz + path.sep)) ? abs : null;
+}

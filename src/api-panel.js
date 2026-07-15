@@ -1,7 +1,8 @@
 import express from 'express';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
-import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora, ejecutarCampanaCompleta, pararCampanaCompleta, estadoDrenaje } from './vigilante.js';
+import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora, ejecutarCampanaCompleta, pararCampanaCompleta, estadoDrenaje, INBOX } from './vigilante.js';
+import { arbolInbox, escribirGuia, rutaInboxSegura } from './utils/guia-ingesta.js';
 import { listarCampanas, guardarAjusteCampana } from './mantenimiento/campanas.js';
 import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
@@ -1623,6 +1624,24 @@ export function rutasPanel() {
             const html = await paginaChmInline(m.ruta, String(req.query.href || ''));
             if (html == null) return res.status(404).json({ ok: false, motivo: 'tema no encontrado' });
             res.json({ ok: true, html });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // INGESTA GUIADA · EXPLORADOR del Inbox. El usuario recorre el árbol y marca por CARPETA una acción
+    // (normal/omitir/aplanar/explotar/intacta) + un perfil de pistas; se registra en `_guia.json` y el
+    // vigilante lo obedece. GET público (solo lista nombres); POST (guardar) lo restringe `autenticar` a admin.
+    r.get('/inbox/arbol', async (req, res) => {
+        try { res.json({ ok: true, arbol: await arbolInbox(INBOX) }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/inbox/guia', async (req, res) => {
+        try {
+            const abs = rutaInboxSegura(INBOX, String(req.body?.ruta || ''));
+            if (!abs) return res.status(400).json({ ok: false, motivo: 'ruta fuera del Inbox' });
+            const st = await stat(abs).catch(() => null);
+            if (!st || !st.isDirectory()) return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' });
+            const guia = await escribirGuia(abs, req.body?.guia || {});
+            res.json({ ok: true, guia });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
