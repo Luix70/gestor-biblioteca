@@ -37,7 +37,11 @@ export const NOMBRE_GUIA = '_guia.json';
 //   · obra     → TODOS los documentos de la carpeta son TOMOS de UNA obra multivolumen (título = la carpeta).
 //   · software → paquete de software: se conserva VERBATIM en BLOQUE y se cataloga como UN registro
 //                (naturaleza:'software'); su previsualización es un explorador de ficheros de solo lectura.
-export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta', 'obra', 'software'];
+//   · libro-material → UN libro (el documento principal de la carpeta) + material auxiliar (código de ejemplo,
+//                datasets, multimedia…). El LIBRO se cataloga por el PIPELINE NORMAL (ISBN/CDU/metadatos
+//                completos → `tipo_recurso:'libro'` de pleno derecho, NO transmedia/colección/audiolibro), y el
+//                material se conserva VERBATIM junto a él (ruta_fija) y se ve en el explorador «🗂️ Archivos».
+export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta', 'obra', 'software', 'libro-material'];
 
 const TIPOS_PROBABLES = ['comic', 'revista', 'libro', 'articulo', 'apuntes', 'capitulo'];
 
