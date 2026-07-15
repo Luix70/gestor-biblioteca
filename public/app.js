@@ -10852,20 +10852,26 @@ async function cargarArbolInbox() {
   if (!cont) return;
   cont.innerHTML = '<div class="muted">Cargando…</div>';
   _guiaDirty.clear();
-  if ($('#guiaGuardar')) $('#guiaGuardar').disabled = true;
+  ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = true; });
   let r;
   try { r = await api('/inbox/arbol'); } catch (e) { cont.innerHTML = 'No se pudo cargar: ' + esc(e.message); return; }
   if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">El Inbox está vacío.</div>'; return; }
   cont.innerHTML = r.arbol.map(nodoGuiaHTML).join('');
+  const habilitarGuardar = () => ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = false; });
   $$('#guiaArbol .guiaCtl').forEach((el) => {
     const ev = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
-    el[ev] = () => { _guiaDirty.add(el.dataset.ruta); if ($('#guiaGuardar')) $('#guiaGuardar').disabled = false; };
+    el[ev] = () => { _guiaDirty.add(el.dataset.ruta); habilitarGuardar(); };
   });
-  // Casillas de SELECCIÓN de ficheros (para agrupar: A mover a carpeta · B marcar audiolibro/obra).
+  // Casillas de SELECCIÓN de ficheros (agrupar) y de CARPETAS (acción en bloque).
   _guiaSel.clear();
+  _guiaSelCarp.clear();
   actualizarSelBar();
   $$('#guiaArbol .guiaSel').forEach((el) => {
     el.onchange = () => { el.checked ? _guiaSel.add(el.dataset.ruta) : _guiaSel.delete(el.dataset.ruta); actualizarSelBar(); };
+  });
+  $$('#guiaArbol .guiaSelCarp').forEach((el) => {
+    el.onclick = (e) => e.stopPropagation(); // no desplegar/colapsar la carpeta al marcar
+    el.onchange = () => { el.checked ? _guiaSelCarp.add(el.dataset.ruta) : _guiaSelCarp.delete(el.dataset.ruta); actualizarSelBar(); };
   });
   // «☑ todos»: marca/desmarca todos los ficheros de la carpeta (recursivo si «incluir subcarpetas» está activo).
   $$('#guiaArbol .guiaTodos').forEach((btn) => {
@@ -10895,6 +10901,7 @@ function nodoGuiaHTML(n) {
       .map(([v, t]) => `<option value="${v}"${v === (val || '') ? ' selected' : ''}>${t}</option>`)
       .join('')}</select>`;
   const cab = `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <input type="checkbox" class="guiaSelCarp" data-ruta="${esc(n.ruta)}" title="Seleccionar esta CARPETA (para acción en bloque: explotar/aplanar/omitir)" style="vertical-align:-1px" />
       <b style="font-size:13px">📁 ${esc(n.nombre)}</b>
       <button type="button" class="btn guiaTodos" title="Seleccionar todos los ficheros de esta carpeta (respeta «incluir subcarpetas»)" style="font-size:11px;padding:1px 6px">☑ todos</button>
       ${sel('accion', _ACCIONES_GUIA, g.accion)}
@@ -10933,12 +10940,29 @@ if ($('#guiaGuardar')) $('#guiaGuardar').onclick = guardarGuiasInbox;
 // ── Selección de ficheros para AGRUPAR (dos vías): A) mover a una nueva subcarpeta ahora; B) marcar como
 //    1 audiolibro / 1 obra en el _guia.json (el vigilante los agrupa al procesar). Ambas reutilizan la
 //    autodetección de carpetas del vigilante. ──
-const _guiaSel = new Set();
+const _guiaSel = new Set();      // ficheros seleccionados (rutas)
+const _guiaSelCarp = new Set();  // CARPETAS seleccionadas (rutas) — para acción en bloque
 function actualizarSelBar() {
   const bar = $('#guiaSelBar');
   if (!bar) return;
-  bar.style.display = _guiaSel.size ? 'flex' : 'none';
-  if ($('#guiaSelN')) $('#guiaSelN').textContent = _guiaSel.size;
+  const nf = _guiaSel.size, nc = _guiaSelCarp.size;
+  bar.style.display = nf || nc ? 'flex' : 'none';
+  const secF = $('#guiaSelFiles'), secC = $('#guiaSelCarps');
+  if (secF) secF.style.display = nf ? 'flex' : 'none';
+  if (secC) secC.style.display = nc ? 'flex' : 'none';
+  if ($('#guiaSelN')) $('#guiaSelN').textContent = nf;
+  if ($('#guiaSelNC')) $('#guiaSelNC').textContent = nc;
+}
+// Aplica una acción EN BLOQUE a las carpetas seleccionadas: fija su desplegable de acción y las marca
+// «sucias» para que «Guardar guías» las persista (mismo camino que editar el desplegable a mano).
+function aplicarAccionCarpetas(accion) {
+  if (!_guiaSelCarp.size) return;
+  let n = 0;
+  $$('#guiaArbol .guiaCtl').forEach((el) => {
+    if (el.dataset.k === 'accion' && _guiaSelCarp.has(el.dataset.ruta)) { el.value = accion; _guiaDirty.add(el.dataset.ruta); n++; }
+  });
+  ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = false; });
+  toast(`${n} carpeta(s) → «${accion}». Pulsa 💾 Guardar guías.`);
 }
 async function agruparEnCarpeta() {
   if (!_guiaSel.size) return;
@@ -10958,10 +10982,22 @@ async function marcarGrupo(tipo) {
   } catch (e) { toast(e.message, 'bad'); }
   cargarArbolInbox();
 }
+if ($('#guiaGuardar2')) $('#guiaGuardar2').onclick = guardarGuiasInbox; // guardar también desde el final
 if ($('#guiaMover')) $('#guiaMover').onclick = agruparEnCarpeta;
 if ($('#guiaGrpAudio')) $('#guiaGrpAudio').onclick = () => marcarGrupo('audiolibro');
 if ($('#guiaGrpObra')) $('#guiaGrpObra').onclick = () => marcarGrupo('obra');
-if ($('#guiaSelNada')) $('#guiaSelNada').onclick = () => { _guiaSel.clear(); $$('#guiaArbol .guiaSel').forEach((el) => (el.checked = false)); actualizarSelBar(); };
+// Acciones EN BLOQUE sobre las carpetas seleccionadas (fijan su desplegable + marcan sucio → Guardar).
+if ($('#guiaCarpExplotar')) $('#guiaCarpExplotar').onclick = () => aplicarAccionCarpetas('explotar');
+if ($('#guiaCarpAplanar')) $('#guiaCarpAplanar').onclick = () => aplicarAccionCarpetas('aplanar');
+if ($('#guiaCarpOmitir')) $('#guiaCarpOmitir').onclick = () => aplicarAccionCarpetas('omitir');
+if ($('#guiaCarpNormal')) $('#guiaCarpNormal').onclick = () => aplicarAccionCarpetas('normal');
+if ($('#guiaSelNada'))
+  $('#guiaSelNada').onclick = () => {
+    _guiaSel.clear();
+    _guiaSelCarp.clear();
+    $$('#guiaArbol .guiaSel, #guiaArbol .guiaSelCarp').forEach((el) => (el.checked = false));
+    actualizarSelBar();
+  };
 // Supervisado: trae la ficha recién creada y abre el formulario de edición como PREVIEW (sin navegar).
 async function revisarSupervisado(id) {
   try {

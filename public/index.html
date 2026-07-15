@@ -338,19 +338,33 @@
                   <input type="checkbox" id="guiaRecursivo" /> incluir subcarpetas
                 </label>
               </div>
-              <!-- Barra de SELECCIÓN de ficheros (aparece al marcar casillas): agrupar mp3, obra, etc. -->
+              <!-- Barra de SELECCIÓN (aparece al marcar casillas): FICHEROS → agrupar · CARPETAS → acción en bloque. -->
               <div
                 id="guiaSelBar"
-                style="display: none; gap: 8px; align-items: center; margin-top: 10px; padding: 6px 8px; background: rgba(120, 120, 255, 0.1); border-radius: 8px; flex-wrap: wrap"
+                style="display: none; flex-direction: column; gap: 6px; margin-top: 10px; padding: 6px 8px; background: rgba(120, 120, 255, 0.1); border-radius: 8px"
               >
-                <b id="guiaSelN" style="font-size: 13px">0</b>
-                <span class="muted" style="font-size: 12px">fichero(s) — agrupar como:</span>
-                <button class="btn" id="guiaMover" type="button" title="A: mover a una NUEVA subcarpeta ahora (la autodetección la tratará como un audiolibro/colección)">📁 Nueva carpeta…</button>
-                <button class="btn" id="guiaGrpAudio" type="button" title="B: marcar como UN audiolibro (se registra en _guia.json; el vigilante los une al procesar)">🎧 = 1 audiolibro</button>
-                <button class="btn" id="guiaGrpObra" type="button" title="B: marcar como UNA obra multivolumen">📚 = 1 obra</button>
-                <button class="btn" id="guiaSelNada" type="button">✕</button>
+                <div id="guiaSelFiles" class="row" style="gap: 8px; align-items: center; flex-wrap: wrap; display: none">
+                  <b id="guiaSelN" style="font-size: 13px">0</b>
+                  <span class="muted" style="font-size: 12px">fichero(s) — agrupar como:</span>
+                  <button class="btn" id="guiaMover" type="button" title="A: mover a una NUEVA subcarpeta ahora (la autodetección la tratará como audiolibro/colección)">📁 Nueva carpeta…</button>
+                  <button class="btn" id="guiaGrpAudio" type="button" title="B: marcar como UN audiolibro (se registra en _guia.json; el vigilante los une al procesar)">🎧 = 1 audiolibro</button>
+                  <button class="btn" id="guiaGrpObra" type="button" title="B: marcar como UNA obra multivolumen">📚 = 1 obra</button>
+                </div>
+                <div id="guiaSelCarps" class="row" style="gap: 8px; align-items: center; flex-wrap: wrap; display: none">
+                  <b id="guiaSelNC" style="font-size: 13px">0</b>
+                  <span class="muted" style="font-size: 12px">carpeta(s) — acción en bloque:</span>
+                  <button class="btn" id="guiaCarpExplotar" type="button" title="Explotar: liberar sus ficheros en la carpeta que las contiene">💥 explotar</button>
+                  <button class="btn" id="guiaCarpAplanar" type="button" title="Aplanar: promocionar la subcarpeta única un nivel">📂 aplanar</button>
+                  <button class="btn" id="guiaCarpOmitir" type="button" title="Omitir: no catalogar nada de esas carpetas">⏭️ omitir</button>
+                  <button class="btn" id="guiaCarpNormal" type="button" title="Volver a normal">↩︎ normal</button>
+                </div>
+                <div class="row"><button class="btn" id="guiaSelNada" type="button">✕ limpiar selección</button></div>
               </div>
               <div id="guiaArbol" style="margin-top: 10px"></div>
+              <!-- Guardar TAMBIÉN al final, para no volver arriba tras revisar un árbol largo. -->
+              <div class="row" style="margin-top: 10px">
+                <button class="btn pri" id="guiaGuardar2" type="button" disabled>💾 Guardar guías</button>
+              </div>
             </details>
             <!-- 1) CÁMARA — forma PREFERIDA para libros físicos (autorecorte + automedida con el tapete). DESPLEGADA -->
             <details class="card foldcard admin-only" id="camCard" open>
