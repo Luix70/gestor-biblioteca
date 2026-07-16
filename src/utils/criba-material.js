@@ -19,6 +19,15 @@
  */
 import path from 'node:path';
 
+// VÍDEO — FUENTE ÚNICA (la usan transmedia y colección-de-audiolibros). Un vídeo se cataloga SIEMPRE
+// (naturaleza:'video'): sin visor para los códecs que el navegador no decodifica, pero VISIBLE y descargable
+// → nunca se queda solo en disco.
+export const EXT_VIDEO = ['.avi', '.mp4', '.mkv', '.mov', '.webm', '.wmv', '.flv', '.m4v', '.mpg', '.mpeg', '.ogv', '.m2ts', '.ts', '.vob', '.divx', '.3gp'];
+export const esVideo = (n) => EXT_VIDEO.includes(path.extname(String(n || '')).toLowerCase());
+
+// IMAGEN — para excluirlas del reparto (son portadas/ilustraciones, no documentos sueltos).
+export const esImagenArchivo = (n) => /\.(jpe?g|png|webp|gif|bmp|tiff?|heic)$/i.test(String(n || ''));
+
 // 1) FORMATOS que son un documento por derecho propio (y que los visores no abren → sin visor, pero con ficha,
 //    buscables y descargables; mismo criterio que ya se aplicó a los vídeos: «sin visor, pero VISIBLES»).
 export const EXT_MATERIAL = new Set([

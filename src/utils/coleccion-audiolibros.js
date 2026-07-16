@@ -20,17 +20,16 @@ import { cduDeGenero, deducirIdioma, etiquetaDisco, leerISBNdeImagenes, mejorTit
 import { arbolCDU } from './cdu-arbol.js';
 import { resolverCabecera } from './colecciones.js';
 import { indexarDoc } from './indice-busqueda.js';
-import { esMaterialNotable } from './criba-material.js';
+import { esMaterialNotable, esVideo } from './criba-material.js';
 import { agregarMetadatos, esAudio, leerMetadatosAudio } from './lector-audio.js';
 import { reciclarCarpeta } from './papelera.js';
 import { resolverPersona } from './resolver-persona.js';
 import { copiarVerificado, huella, renderizarPortadaMiembro } from './transmedia.js';
 
 const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff'];
-const EXT_VIDEO = ['.avi', '.mp4', '.mkv', '.mov', '.webm', '.wmv', '.flv', '.m4v', '.mpg', '.mpeg', '.ogv'];
 const esImagen = (n) => EXT_IMG.includes(path.extname(n).toLowerCase());
 const esPdf = (n) => path.extname(n).toLowerCase() === '.pdf';
-const esVideo = (n) => EXT_VIDEO.includes(path.extname(n).toLowerCase());
+// `esVideo` viene de criba-material.js (FUENTE ÚNICA, compartida con transmedia).
 // Basura de sistema/descargas parciales que NO se cataloga NI se lista en el manifiesto (ruido, no contenido).
 const esRuido = (n) => /^thumbs\.db$/i.test(n) || /\.(!ut|part|crdownload|tmp|ds_store|nfo|sfv|url|m3u|m3u8)$/i.test(n);
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || /^thumbs\.db$/i.test(n);
