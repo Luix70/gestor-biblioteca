@@ -11027,7 +11027,11 @@ async function cargarArbolInbox() {
   try { r = await api('/inbox/arbol'); } catch (e) { cont.innerHTML = 'No se pudo cargar: ' + esc(e.message); return; }
   if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">El Inbox está vacío.</div>'; return; }
   cont.innerHTML = r.arbol.map(nodoGuiaHTML).join('');
-  const habilitarGuardar = () => ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = false; });
+  // Marcar un cambio habilita «Guardar» y hace aparecer la barra flotante (que lo lleva) al instante.
+  const habilitarGuardar = () => {
+    ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = false; });
+    actualizarSelBar();
+  };
   $$('#guiaArbol .guiaCtl').forEach((el) => {
     const ev = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
     el[ev] = () => { _guiaDirty.add(el.dataset.ruta); habilitarGuardar(); };
@@ -11142,7 +11146,12 @@ async function guardarGuiasInbox() {
   }
   toast(`🧭 ${ok} guía(s) guardada(s)${err ? ` · ${err} error(es)` : ''}`, err ? 'warn' : 'ok');
   if (btn) btn.textContent = '💾 Guardar guías';
-  cargarArbolInbox();
+  // NO se repinta el árbol: hacerlo perdía las SELECCIONES, el SCROLL y las carpetas desplegadas justo después
+  // de guardar (y en un árbol largo eso obliga a volver a empezar). Lo que se ve YA es lo que se guardó; solo
+  // se limpian los pendientes y se actualiza la barra flotante.
+  if (!err) _guiaDirty.clear();
+  ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = !_guiaDirty.size; });
+  actualizarSelBar();
 }
 if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
 if ($('#guiaGuardar')) $('#guiaGuardar').onclick = guardarGuiasInbox;
@@ -11166,8 +11175,13 @@ function anclarSelBar() {
 function actualizarSelBar() {
   const bar = $('#guiaSelBar');
   if (!bar) return;
-  const nf = _guiaSel.size, nc = _guiaSelCarp.size;
-  bar.style.display = nf || nc ? 'flex' : 'none';
+  const nf = _guiaSel.size, nc = _guiaSelCarp.size, nd = _guiaDirty.size;
+  // La barra flotante muestra TAMBIÉN «Guardar guías» cuando hay cambios pendientes: antes el botón vivía al
+  // final del árbol y, con una lista larga, quedaba fuera de vista justo cuando hacía falta.
+  bar.style.display = nf || nc || nd ? 'flex' : 'none';
+  const secG = $('#guiaSelGuardar');
+  if (secG) secG.style.display = nd ? 'flex' : 'none';
+  if ($('#guiaDirtyN')) $('#guiaDirtyN').textContent = nd;
   anclarSelBar();
   const bpos = $('#guiaSelPos');
   if (bpos && !bpos._cableado) {

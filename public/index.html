@@ -356,13 +356,14 @@
                   <button class="btn" id="guiaCarpOmitir" type="button" title="Omitir: no catalogar nada de esas carpetas">⏭️ omitir</button>
                   <button class="btn" id="guiaCarpNormal" type="button" title="Volver a normal">↩︎ normal</button>
                 </div>
+                <div id="guiaSelGuardar" class="row" style="gap: 8px; align-items: center; flex-wrap: wrap; display: none">
+                  <b id="guiaDirtyN" style="font-size: 13px">0</b>
+                  <span class="muted" style="font-size: 12px">cambio(s) sin guardar:</span>
+                  <button class="btn pri" id="guiaGuardar2" type="button">💾 Guardar guías</button>
+                </div>
                 <div class="row"><button class="btn" id="guiaSelNada" type="button">✕ limpiar selección</button></div>
               </div>
               <div id="guiaArbol" style="margin-top: 10px"></div>
-              <!-- Guardar TAMBIÉN al final, para no volver arriba tras revisar un árbol largo. -->
-              <div class="row" style="margin-top: 10px">
-                <button class="btn pri" id="guiaGuardar2" type="button" disabled>💾 Guardar guías</button>
-              </div>
             </details>
             <!-- 1) CÁMARA — forma PREFERIDA para libros físicos (autorecorte + automedida con el tapete). DESPLEGADA -->
             <details class="card foldcard admin-only" id="camCard" open>
