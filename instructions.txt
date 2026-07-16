@@ -203,6 +203,18 @@ de ficheros clasificado por CDU.
     · .djvu               Libro escaneado: rasteriza páginas para la visión (ISBN/portada) y el visor
     · .chm                HTML compilado (manuales/libros): libchm-bin extrae título/ISBN/portada;
                           previsualizable en la ficha (índice lateral + temas en iframe sandbox)
+    · .docx .doc          WORD, documentos de pleno derecho CON VISOR (utils/lector-word.js). El .docx es un
+                          ZIP OOXML → se lee con adm-zip + cheerio, SIN dependencias nuevas (JS puro, apto para
+                          el Atom): `docProps/core.xml` da TÍTULO/AUTOR/IDIOMA de verdad —identificación GRATIS
+                          y sin IA, la fuente más barata, como el ID3 de un audiolibro— y manda sobre el nombre
+                          de fichero; `word/document.xml` → HTML (encabezados, negrita/cursiva, tablas) que la
+                          ficha pinta en un iframe sandbox (GET /documentos/:id/word[?f=<otro texto>]). El ISBN
+                          del CUERPO es solo PISTA (podría ser de un libro citado): entra como candidato y lo
+                          corrobora el Fichero/APIs. El .doc (binario OLE 97-2003) no tiene parser JS razonable
+                          → se delega en `antiword` o `catdoc` SI están instalados (como poppler/libchm-bin); si
+                          no lo están, el documento SE CATALOGA IGUAL (por nombre) y la ficha ofrece la descarga
+                          con un aviso claro: nunca se pierde, solo no se previsualiza.
+                          (Por eso .doc/.docx NO están en la criba de «material»: tienen visor propio.)
     · .zip .rar .7z .iso  Se EXPANDEN a carpeta (drop) antes de catalogar (bsdtar; .iso = ISO9660)
 
   Papel vs digital (filtro «Soporte»):

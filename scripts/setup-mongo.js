@@ -191,7 +191,7 @@ async function main() {
         if (ref) {
             // 'material' = material NOTABLE que ningún visor abre (.docx/.lit/.nrg/.iso…): se cataloga con
             // ficha (buscable + descargable) para que NUNCA quede solo en disco. Ver utils/criba-material.js.
-            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'chm', 'mobi', 'audio', 'video', 'software', 'material'].filter(v => !ref.enum.includes(v));
+            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'chm', 'mobi', 'audio', 'video', 'software', 'material', 'docx', 'doc'].filter(v => !ref.enum.includes(v));
             if (faltan.length) {
                 ref.enum = [...ref.enum, ...faltan];
                 await db.command({

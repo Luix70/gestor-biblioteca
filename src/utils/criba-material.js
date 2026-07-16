@@ -31,8 +31,9 @@ export const esImagenArchivo = (n) => /\.(jpe?g|png|webp|gif|bmp|tiff?|heic)$/i.
 // 1) FORMATOS que son un documento por derecho propio (y que los visores no abren → sin visor, pero con ficha,
 //    buscables y descargables; mismo criterio que ya se aplicó a los vídeos: «sin visor, pero VISIBLES»).
 export const EXT_MATERIAL = new Set([
-    // Documentos de texto / ofimática
-    '.txt', '.rtf', '.doc', '.docx', '.odt', '.wpd', '.pages', '.tex',
+    // Documentos de texto / ofimática. OJO: .doc/.docx NO están aquí — son DOCUMENTOS DE PLENO DERECHO con
+    // lector propio (utils/lector-word.js) y su propia rama en el orquestador; no «material sin visor».
+    '.txt', '.rtf', '.odt', '.wpd', '.pages', '.tex',
     '.ppt', '.pptx', '.odp', '.xls', '.xlsx', '.ods',
     // Ebooks que ningún lector propio abre (los que sí se abren van por FORMATO_TEXTO, no por aquí)
     '.lit', '.fb2', '.pdb', '.prc', '.lrf', '.lrx', '.snb', '.tcr', '.rb',

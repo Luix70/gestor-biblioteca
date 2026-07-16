@@ -114,7 +114,7 @@ function textoPdfUtil(texto) {
     return alphaRatio >= 0.6 && reales >= 40;                     // bastantes letras y palabras reales
 }
 
-function extraerISBNs(texto) {
+export function extraerISBNs(texto) {   // exportada: la reutiliza el lector de Word (mismo criterio de captura)
     if (!texto) return [];
     const re = /(?:ISBN(?:-1[03])?:?\s*)?((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])/g;
     const out = new Set();

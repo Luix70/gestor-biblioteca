@@ -26,6 +26,7 @@ import { indexarDoc } from './indice-busqueda.js';
 const FORMATO_TEXTO = {
     '.pdf': 'pdf', '.epub': 'epub', '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi',
     '.djvu': 'djvu', '.cbz': 'cbz', '.cbr': 'cbr', '.cb7': 'cb7', '.chm': 'chm',
+    '.docx': 'docx', '.doc': 'doc',
 };
 const formatoDe = (n) => FORMATO_TEXTO[path.extname(n).toLowerCase()] || null;
 const esTexto = (n) => !!formatoDe(n);

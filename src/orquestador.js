@@ -11,6 +11,8 @@ import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible, ErrorO
 import { parsearNombre, esTituloArtefacto } from './utils/parsear-nombre.js';
 import { leerMobi } from './utils/lector-mobi.js';
 import { leerChm } from './utils/lector-chm.js';
+import { leerWord } from './utils/lector-word.js';
+import { extraerISBNs } from './utils/lector-pdf.js';
 import { pareceSerieLibros, esEditorialDeLibros } from './utils/revistas.js';
 import { clasificarTipo, clasificarPorPaginas } from './utils/discriminador.js';
 import { interpretarIdentificadores } from './utils/interpretar-identificadores.js';
@@ -53,6 +55,7 @@ const FORMATO_POR_EXT = {
     '.epub': 'epub', '.pdf': 'pdf',
     '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi',
     '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.chm': 'chm', '.zip': 'zip', '.rar': 'rar',
+    '.docx': 'docx', '.doc': 'doc',
 };
 
 export function detectarTipo(ruta) {
@@ -63,6 +66,7 @@ export function detectarTipo(ruta) {
     if (EXT_COMIC.includes(ext)) return 'comic';
     if (ext === '.djvu') return 'djvu';
     if (ext === '.chm') return 'chm';              // CHM → lector propio (libchm-bin: título/ISBN/portada)
+    if (ext === '.docx' || ext === '.doc') return 'word'; // Word → lector propio (.docx=ZIP OOXML; .doc=antiword)
     if (EXT_MOBI.includes(ext)) return 'mobi';     // MOBI/AZW/AZW3 → lector propio (EXTH + DRM + portada)
     if (FORMATO_POR_EXT[ext]) return 'otro-formato';
     return 'desconocido';
@@ -636,6 +640,29 @@ export async function procesarRecurso(entrada) {
         if (chm.portada?.buf) datosBase.cubierta_base64 = chm.portada.buf.toString('base64'); // la mide resolverPortada
         datosBase.alertas_agente = [`Formato chm: leído con libchm-bin${chm.titulo ? ` · título "${chm.titulo}"` : ''}${chm.isbn ? ` · ISBN ${chm.isbn} (del cuerpo, pista)` : ''}${chm.portada ? ' · portada' : ''}${chm.error ? ` · (${chm.error}, catalogado por nombre)` : ''}.`];
         formatos = ['chm'];
+        tipo_recurso = 'libro';
+
+    } else if (tipo === 'word') {
+        // WORD (.docx/.doc): lector propio SIN dependencias nuevas (.docx = ZIP OOXML → adm-zip + cheerio).
+        // `docProps/core.xml` da TÍTULO/AUTOR/IDIOMA de verdad: identificación GRATIS y sin IA (la fuente más
+        // barata, como el ID3 de un audiolibro) → manda sobre el nombre de fichero. El ISBN del CUERPO es solo
+        // PISTA (podría ser de un libro citado): entra como candidato y lo corrobora el Fichero/APIs.
+        // Un .doc sin antiword/catdoc, o un fichero corrupto → catalogación por nombre (nunca se pierde).
+        const w = await leerWord(rutas[0]);
+        datosBase = metadatosDesdeNombre(rutas[0]);              // respaldo por nombre
+        if (w.titulo && !esTituloArtefacto(w.titulo)) datosBase.titulo = w.titulo;
+        if (w.autor && !(datosBase.autores || []).length) datosBase.autores = [w.autor];
+        if (w.idioma && !datosBase.idioma) datosBase.idioma = String(w.idioma).slice(0, 2).toLowerCase();
+        if (w.descripcion && !datosBase.sinopsis) datosBase.sinopsis = w.descripcion;
+        const isbnsW = extraerISBNs(`${w.texto || ''}\n${path.basename(rutas[0])}`);
+        if (isbnsW.length) {
+            datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...isbnsW.flatMap(variantesISBN)])];
+            if (!datosBase.isbn) datosBase.isbn = validarISBN(isbnsW[0]) || null;
+        }
+        datosBase.alertas_agente = [`Formato ${w.formato}: ${w.sinHerramienta
+            ? 'sin antiword/catdoc → catalogado por nombre (instálalos para previsualizar .doc)'
+            : `leído${w.titulo ? ` · título "${w.titulo}"` : ''}${w.autor ? ` · autor "${w.autor}"` : ''}${w.texto ? ` · ${w.texto.length} car.` : ''}`}${w.error ? ` · (${w.error})` : ''}.`];
+        formatos = [w.formato];
         tipo_recurso = 'libro';
 
     } else if (tipo === 'otro-formato') {
