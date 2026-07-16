@@ -672,6 +672,7 @@ export function rutasPanel() {
                 titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1, paginas: 1,
                 tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
                 valoracion: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
+                coleccion: 1, coleccion_nombre: 1,   // para el distintivo «pertenece a una colección»
             };
 
             // Modo SOLO-IDS: devuelve TODOS los _id que casan (todas las páginas) para «seleccionar todos los
@@ -704,9 +705,29 @@ export function rutasPanel() {
                 docs = idsPagina.map(id => porId.get(String(id))).filter(Boolean);
             }
 
+            // DISTINTIVO «pertenece a una colección»: solo tiene sentido si la colección tiene MÁS DE UN
+            // documento (una de uno no agrupa nada). Contar por tarjeta sería un $lookup por documento (caro);
+            // se resuelve con UN solo $group sobre las colecciones DE ESTA PÁGINA (≤ porPagina ids distintos).
+            const idsCol = [...new Set(docs.filter(d => d.coleccion).map(d => String(d.coleccion)))].map(x => new ObjectId(x));
+            const nCol = new Map();
+            if (idsCol.length) {
+                const cuentas = await db.collection('biblioteca').aggregate([
+                    { $match: { coleccion: { $in: idsCol } } },
+                    { $group: { _id: '$coleccion', n: { $sum: 1 } } },
+                ]).toArray();
+                for (const c of cuentas) nCol.set(String(c._id), c.n);
+            }
+
             res.json({
                 ok: true, total, page, porPagina, paginas: Math.max(1, Math.ceil(total / porPagina)),
-                docs: docs.map(d => ({ ...d, _id: String(d._id) })),
+                docs: docs.map(d => {
+                    const n = d.coleccion ? (nCol.get(String(d.coleccion)) || 0) : 0;
+                    return {
+                        ...d, _id: String(d._id),
+                        coleccion: d.coleccion ? String(d.coleccion) : undefined,
+                        coleccion_n: n > 1 ? n : undefined,   // solo si AGRUPA (más de un documento)
+                    };
+                }),
             });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

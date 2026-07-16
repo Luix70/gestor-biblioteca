@@ -7834,9 +7834,16 @@ function wireOrdList() {
     });
   });
 }
+// Distintivo «pertenece a una COLECCIÓN». Solo se pinta si la colección AGRUPA de verdad (más de un documento:
+// `coleccion_n` solo llega del servidor en ese caso — una colección de uno no agrupa nada y sería ruido).
+// Es clicable: lleva a la ficha de la colección, como el resto de enlaces del panel.
+const badgeColeccion = (d) =>
+  d.coleccion_n
+    ? ` <span class="fmt" onclick="event.stopPropagation();verColeccion('${esc(d.coleccion)}')" style="background:rgba(27,163,255,.18);color:var(--acc2);cursor:pointer" title="Pertenece a la colección «${esc(d.coleccion_nombre || '')}» (${d.coleccion_n} documentos) — pulsa para verla">📚 ${d.coleccion_n}</span>`
+    : '';
 // Distintivos de admin: 🔞 NSFW (oculto a invitados) y 🔒 bloqueado (el Conformador no lo altera).
 const badgesDoc = (d) =>
-  `${d.nsfw ? ' <span class="fmt" style="background:rgba(255,92,122,.18);color:var(--bad)" title="NSFW: oculto a invitados">🔞</span>' : ''}${d.locked ? ' <span class="fmt" style="background:rgba(255,180,84,.18);color:var(--warn)" title="Bloqueado: el Conformador no lo altera">🔒</span>' : ''}${d.nfc && (d.nfc.fecha_vinculacion || d.nfc.uid) ? ' <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)" title="Tiene etiqueta NFC vinculada">📶</span>' : ''}`;
+  `${badgeColeccion(d)}${d.nsfw ? ' <span class="fmt" style="background:rgba(255,92,122,.18);color:var(--bad)" title="NSFW: oculto a invitados">🔞</span>' : ''}${d.locked ? ' <span class="fmt" style="background:rgba(255,180,84,.18);color:var(--warn)" title="Bloqueado: el Conformador no lo altera">🔒</span>' : ''}${d.nfc && (d.nfc.fecha_vinculacion || d.nfc.uid) ? ' <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)" title="Tiene etiqueta NFC vinculada">📶</span>' : ''}`;
 // Píldoras GRANDES y legibles de TIPO (libro/revista/cómic) + FORMATO(S) (papel/pdf/epub/mobi/cbr…) para la
 // CABECERA de la ficha, donde el usuario quiere ver de un vistazo qué es y en qué soporte está.
 // Icono y nombre del TIPO de documento (para badges/tarjetas/placeholders). El cómic (por `naturaleza`)

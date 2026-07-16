@@ -412,6 +412,11 @@ de ficheros clasificado por CDU.
       collation española que la consulta — si no, el índice no sirve al $sort) e idx_doi.
       ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
+    · DISTINTIVO DE COLECCIÓN (📚 N) en tarjeta y fila: indica que el documento pertenece a una colección, y
+      solo se pinta si la colección AGRUPA de verdad (más de un documento — una de uno no agrupa nada y sería
+      ruido). Es clicable → ficha de la colección. El recuento NO se hace por tarjeta ($lookup por documento
+      sería caro): un solo $group sobre las colecciones DE LA PÁGINA (≤ porPagina ids) → `coleccion_n`, que el
+      servidor solo envía cuando es > 1.
     · BORRADO MASIVO (🗑, admin + contraseña) = TRABAJO DE FONDO con PROGRESO y CANCELACIÓN. Borrar N
       documentos mueve N carpetas a la Papelera: 500 tardan MINUTOS, así que hacerlo dentro de la petición
       dejaba al usuario a ciegas y sin salida (y el navegador acababa cortando por timeout). Ahora POST
