@@ -703,6 +703,28 @@ de ficheros clasificado por CDU.
       (pdf/epub/mobi/djvu/cbz/chm…); todo lo demás = material. El origen se recicla a la Papelera tras copiar.
       (transmedia.js · ingestarLibroConMaterial; unidad esLibroMaterial en el vigilante.)
 
+  ── COMPLETAR UN DOCUMENTO (ficha: «📎 Adjuntar audio/texto», admin) ──────────
+    La biblioteca real se completa POR PARTES: primero aparece el audio y meses después el texto (o al revés).
+    «📎 Adjuntar audio/texto» (ficha) sube ficheros a un documento YA catalogado → POST /api/documentos/:id/
+    completar (multer; la puerta `autenticar` ya exige admin). Los ficheros se COPIAN a la carpeta del propio
+    documento y se registran EN ÉL (src/utils/completar-doc.js · completarDoc):
+      · audio → `audios[]` (playlist del reproductor)   · texto → `textos[]` (selector del visor)
+      · lo demás → material en su carpeta, visible en «🗂️ Archivos» (sin visor).
+    El árbol se protege con `ruta_fija` + marcador (Integridad NO poda lo añadido). SOLO AÑADE: nunca pisa ni
+    borra; si el nombre choca se renombra « (2)». El diálogo deja ELEGIR el destino cuando añades audio:
+    «📕 Libro con audio» (el texto manda) o «📀 Audiolibro» (el audio manda) — un manual con audio de apoyo NO
+    es un audiolibro, una novela leída sí. Los temporales de la subida van a la Papelera, nunca se borran.
+    · `textos[]` — SIMÉTRICO a `audios[]`: {ruta, titulo, formato, orden}. RETROCOMPATIBLE: `nombre_archivo`
+      sigue siendo el texto PRINCIPAL (el que abre el visor por defecto); al añadir un 2º texto se SIEMBRA
+      `textos[]` con el que ya había para que el selector los ofrezca todos. La ficha muestra el selector solo
+      con 2+ textos; elegir otro es un cambio de VISTA (no toca el principal). Los lectores servidos por el
+      servidor (cómic/mobi/chm) solo abren el fichero principal → ahí el cambio se nota en la descarga.
+      `ingestarAudiolibro` ya rellena `textos[]` con los PDFs que acompañan al audio. $jsonSchema abierto → NO
+      requiere setup-mongo.
+    · LÍMITE conocido: la DETECCIÓN de la ingesta sigue exigiendo `pdfs <= 1` para tratar una carpeta como
+      audiolibro (audio + 2 o más PDFs = transmedia, que es otra cosa legítima: lecturas graduadas). Un
+      audiolibro con VARIOS textos se consigue completándolo a mano con «📎 Adjuntar».
+
   ── EXPLORADOR DE ARCHIVOS (ficha: «🗂️ Archivos» y junto a Ruta base) ─────────
     Navega y descarga TODO el árbol del documento — y, si cuelga de un árbol ruta_fija (colección
     transmedia/audiolibros), TODA la colección desde cualquier miembro (así se ve también lo NO

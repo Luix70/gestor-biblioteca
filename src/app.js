@@ -22,6 +22,8 @@ import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoCon
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel, rutasPublicas } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
+import { completarDoc } from './utils/completar-doc.js';   // adjuntar audio/texto a un doc ya catalogado
+import { conectarDB } from './database.js';
 import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
 
 // stdout/stderr a un PIPE (contenedor Docker) es ASÍNCRONO: los logs muy tempranos del arranque pueden
@@ -246,6 +248,27 @@ app.post('/api/saneamiento/reemplazar', upload.single('file'), async (req, res) 
         res.status(r.ok ? 200 : 400).json(r);
     } catch (e) {
         await reciclar([req.file.path], 'saneamiento-error').catch(() => {});
+        res.status(500).json({ ok: false, motivo: e.message });
+    }
+});
+
+// COMPLETAR un documento ya catalogado: adjuntarle los ficheros que le faltaban (el PDF de un audiolibro, los
+// audios de un libro…). El audio entra en `audios[]` (playlist) y el texto en `textos[]` (selector del visor);
+// lo demás se queda como material en su carpeta. Mutación → la puerta `autenticar` ya exige rol admin.
+// Body: files[] (multipart) + `naturaleza` opcional ('audiolibro' | 'libro') = destino elegido en el diálogo.
+app.post('/api/documentos/:id/completar', upload.array('files'), async (req, res) => {
+    const subidos = req.files || [];
+    if (!subidos.length) return res.status(400).json({ ok: false, motivo: 'no se recibió ningún fichero' });
+    try {
+        const r = await completarDoc(await conectarDB(), req.params.id, {
+            ficheros: subidos.map((f) => ({ ruta: f.path, nombre: f.originalname })),
+            naturaleza: ['audiolibro', 'libro'].includes(req.body?.naturaleza) ? req.body.naturaleza : null,
+        });
+        // Los temporales de multer ya se copiaron a la carpeta del doc: se retiran a la Papelera (nunca borrar).
+        await reciclar(subidos.map((f) => f.path), r.ok ? 'completar-ingerido' : 'completar-error').catch(() => {});
+        res.status(r.ok ? 200 : 400).json(r);
+    } catch (e) {
+        await reciclar(subidos.map((f) => f.path), 'completar-error').catch(() => {});
         res.status(500).json({ ok: false, motivo: e.message });
     }
 });
