@@ -806,7 +806,18 @@ function resumenLote(t, totalUnidades) {
 // .cbz/.cbr/.cb7 (cómics = UN documento) ni .epub (es un zip, pero es un libro).
 // bsdtar (libarchive) los lee todos (C plano, apto Atom): ZIP/RAR/RAR5/7z e ISO9660 (.iso → imagen de
 // disco de una colección/escaneo, se expande igual que un .zip). Se recicla el original tras expandir.
+// Contenedores que bsdtar SÍ sabe abrir → su defecto es EXPANDIR (comportamiento histórico).
 const EXT_COMPRIMIDO = ['.zip', '.rar', '.7z', '.iso'];
+// Contenedores OPACOS: bsdtar NO los abre (imagen de Nero, paquete de app iOS/macOS, imagen de disco…), así
+// que «expandir» ni siquiera es una opción para ellos → su defecto es SOFTWARE INTACTO (1 registro). Antes se
+// quedaban INVISIBLES: no están en EXT_VALIDAS (el pipeline por-fichero no los mira) ni se expandían, así que
+// nadie los tocaba — violaban el invariante de que todo lo que entra acabe con un registro que apunte a él.
+const EXT_CONTENEDOR_OPACO = ['.nrg', '.ipa', '.dmg', '.mdf', '.mds', '.cdi', '.ccd', '.img', '.bin', '.cue'];
+const esContenedor = (n) => {
+    const x = path.extname(n).toLowerCase();
+    return EXT_COMPRIMIDO.includes(x) || EXT_CONTENEDOR_OPACO.includes(x);
+};
+const defectoContenedor = (n) => (EXT_CONTENEDOR_OPACO.includes(path.extname(n).toLowerCase()) ? 'software' : 'expandir');
 // VENTANA DE DECISIÓN de un contenedor sin acción explícita en la guía (ver expandirComprimidos): tiempo que
 // se espera a que elijas en el Inspector antes de expandirlo por defecto. Sin ella, con el vigilante activo el
 // .iso/.rar se expandía en el primer escaneo y la acción del Inspector era inalcanzable.
@@ -831,7 +842,7 @@ async function expandirComprimidos() {
     const guiaRaiz = await leerGuia(INBOX);
     for (const e of entradas) {
         if (!e.isFile() || ignorarEntrada(e.name)) continue;
-        if (!EXT_COMPRIMIDO.includes(path.extname(e.name).toLowerCase())) continue;
+        if (!esContenedor(e.name)) continue;
         const zip = path.join(INBOX, e.name);
         const spec = guiaRaiz?.archivos?.[e.name] || {};
         const decidido = spec.accion || (spec.omitir ? 'omitir' : null);   // null = el usuario aún no ha dicho nada
@@ -849,19 +860,21 @@ async function expandirComprimidos() {
         // NO hay decisión explícita, se espera CONTENEDOR_ESPERA_MS a que la tomes; pasada la ventana se expande
         // (comportamiento histórico → la ingesta desatendida sigue funcionando sola).
         //   ·  0  → expandir de inmediato (como antes)     · -1 → NUNCA expandir sin decisión explícita
+        const porDefecto = defectoContenedor(e.name);   // opaco (.nrg/.ipa/.dmg…) → software; abrible → expandir
         if (!decidido && CONTENEDOR_ESPERA_MS !== 0) {
             const edad = await fs.stat(zip).then((s) => Date.now() - (s.mtimeMs || 0)).catch(() => Infinity);
             if (CONTENEDOR_ESPERA_MS < 0 || edad < CONTENEDOR_ESPERA_MS) {
                 if (!esperandoDecision.has(zip)) {
                     esperandoDecision.add(zip);
                     const cuanto = CONTENEDOR_ESPERA_MS < 0 ? 'indefinidamente' : `${Math.round(CONTENEDOR_ESPERA_MS / 60000)} min`;
-                    console.log(`  🤔 «${e.name}»: contenedor — esperando ${cuanto} tu decisión en el Inspector (📂 abrir y catalogar dentro · 💿 software intacto · ⏭️ omitir).${CONTENEDOR_ESPERA_MS < 0 ? '' : ' Si no dices nada, se abrirá.'}`);
+                    const dice = porDefecto === 'software' ? 'se guardará INTACTO (1 registro)' : 'se abrirá';
+                    console.log(`  🤔 «${e.name}»: contenedor — esperando ${cuanto} tu decisión en el Inspector (📂 abrir y catalogar dentro · 💿 software intacto · ⏭️ omitir).${CONTENEDOR_ESPERA_MS < 0 ? '' : ` Si no dices nada, ${dice}.`}`);
                 }
                 continue;
             }
-            console.log(`  ⌛ «${e.name}»: sin decisión en la ventana → se abre (comportamiento por defecto).`);
+            console.log(`  ⌛ «${e.name}»: sin decisión en la ventana → ${porDefecto === 'software' ? 'se guarda INTACTO' : 'se abre'} (por defecto).`);
         }
-        const accion = decidido || 'expandir';
+        const accion = decidido || porDefecto;
         esperandoDecision.delete(zip);   // se actúa: deja de estar «a la espera» (y no crece el Set sin fin)
         const base = path.basename(e.name, path.extname(e.name)).trim() || 'archivo';
         if (accion === 'software') {
