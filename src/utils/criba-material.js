@@ -37,8 +37,11 @@ export const EXT_MATERIAL = new Set([
     '.ppt', '.pptx', '.odp', '.xls', '.xlsx', '.ods',
     // Ebooks que ningún lector propio abre (los que sí se abren van por FORMATO_TEXTO, no por aquí)
     '.lit', '.fb2', '.pdb', '.prc', '.lrf', '.lrx', '.snb', '.tcr', '.rb',
-    // Imágenes de disco: en una biblioteca son la OBRA (un CD-ROM, un curso), no un accesorio
-    '.iso', '.nrg', '.mdf', '.mds', '.bin', '.cue', '.img', '.ccd', '.cdi',
+    // Imágenes de disco y paquetes: en una biblioteca son la OBRA (un CD-ROM, un curso), no un accesorio. Se
+    // catalogan como UNA ficha, INTACTOS: abrir un .ipa/.dmg/.nrg metería cientos de recursos como fichas
+    // sueltas. (El .iso suelto en la raíz del Inbox SÍ se expande por defecto —bsdtar lo lee—, salvo que en el
+    // Inspector se marque «software»; aquí entra el .iso que aparece DENTRO de una colección.)
+    '.iso', '.nrg', '.mdf', '.mds', '.bin', '.cue', '.img', '.ccd', '.cdi', '.dmg', '.ipa',
 ]);
 
 // Texto plano: por debajo de este tamaño casi siempre es una nota/apunte del ripeo, no un documento.

@@ -43,6 +43,16 @@ export const NOMBRE_GUIA = '_guia.json';
 //                material se conserva VERBATIM junto a él (ruta_fija) y se ve en el explorador «🗂️ Archivos».
 export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta', 'obra', 'software', 'libro-material'];
 
+// Acciones por FICHERO (`archivos: { "X.iso": { accion: "software" } }`). Pensadas para los CONTENEDORES
+// complejos (.iso .nrg .zip .rar .7z .ipa .dmg…), donde la máquina NO puede acertar sola: el MISMO .iso puede
+// ser un archivo de documentos (→ abrir y catalogar su contenido) o una enciclopedia/instalador de software
+// (→ conservarlo INTACTO como un registro; abrirlo metería cientos de vídeos/recursos como fichas sueltas).
+// Solo el humano lo sabe, así que se elige en el Inspector ANTES de que el vigilante lo toque.
+//   · expandir → se abre y su contenido se cataloga individualmente (comportamiento por defecto)
+//   · software → NO se abre: se conserva verbatim y se cataloga como UN registro (naturaleza:'software')
+//   · omitir   → no se cataloga (se deja en el Inbox)
+export const ACCIONES_FICHERO = ['expandir', 'software', 'omitir'];
+
 const TIPOS_PROBABLES = ['comic', 'revista', 'libro', 'articulo', 'apuntes', 'capitulo'];
 
 /** Normaliza (y valida laxamente) el objeto perfil. Descarta campos vacíos/desconocidos. Devuelve {} si nada. */
@@ -81,9 +91,14 @@ export function normalizarGuia(g) {
         if (col) guia.adjuntar_a = { coleccion: col };
         else if (doc) guia.adjuntar_a = { doc };
     }
+    // Overrides por FICHERO: `{ omitir:true }` (histórico) y/o `{ accion:'expandir'|'software'|'omitir' }`.
     if (g.archivos && typeof g.archivos === 'object') {
         for (const [nombre, spec] of Object.entries(g.archivos)) {
-            if (spec && typeof spec === 'object' && spec.omitir) guia.archivos[nombre] = { omitir: true };
+            if (!spec || typeof spec !== 'object') continue;
+            const o = {};
+            if (spec.omitir) o.omitir = true;
+            if (ACCIONES_FICHERO.includes(spec.accion) && spec.accion !== 'expandir') o.accion = spec.accion; // 'expandir' = defecto: no se guarda
+            if (Object.keys(o).length) guia.archivos[nombre] = o;
         }
     }
     return guia;
@@ -147,7 +162,9 @@ const EXT_IMG = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.gif', '.bm
 // Mismo rango AMPLIADO que lector-audio.js (fuente única): Audible (.aax/.aa), Apple Lossless, .wma, etc.
 const EXT_AUDIO = new Set(['.mp3', '.m4a', '.m4b', '.m4p', '.aac', '.ogg', '.oga', '.opus', '.flac', '.wav', '.wma', '.aax', '.aa', '.ape', '.alac', '.aiff', '.aif', '.mka', '.wv']);
 const EXT_VIDEO = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm']);
-const EXT_COMPR = new Set(['.zip', '.rar', '.7z', '.iso']);
+// CONTENEDORES complejos: pueden traer documentos (→ abrir) o ser un paquete de software (→ intacto). El
+// Inspector ofrece la acción por fichero (ACCIONES_FICHERO) justo para estos.
+const EXT_COMPR = new Set(['.zip', '.rar', '.7z', '.iso', '.nrg', '.ipa', '.dmg', '.mdf', '.img', '.cdi', '.ccd', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.cab']);
 const _ignorar = (n) => n.startsWith('@') || n.startsWith('.') || n.startsWith('#');
 
 /** Clase de un fichero por su extensión (para colorear el explorador y marcar los NO CLASIFICABLES). */
@@ -170,6 +187,7 @@ export async function arbolInbox(raizInbox, { profundidad = 6, maxNodos = 3000 }
     async function rec(dir, prof) {
         let entradas;
         try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return []; }
+        const gCarp = await leerGuia(dir);   // UNA vez por carpeta: las acciones por FICHERO viven en su guía
         const hijos = [];
         for (const e of entradas.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
             if (_ignorar(e.name) || e.name === NOMBRE_GUIA) continue;
@@ -188,7 +206,13 @@ export async function arbolInbox(raizInbox, { profundidad = 6, maxNodos = 3000 }
                 let tam = 0;
                 try { tam = (await fs.stat(abs)).size; } catch { /* sin stat */ }
                 const ext = path.extname(e.name).toLowerCase();
-                hijos.push({ nombre: e.name, ruta: rel, tipo: 'file', ext, tam, clase: claseFichero(ext) });
+                // La acción por fichero (contenedores: expandir/software/omitir) vive en la guía de SU CARPETA
+                // → se adjunta al nodo para que el Inspector la pinte ya elegida.
+                const spec = gCarp?.archivos?.[e.name] || null;
+                hijos.push({
+                    nombre: e.name, ruta: rel, tipo: 'file', ext, tam, clase: claseFichero(ext),
+                    accion: spec?.accion || (spec?.omitir ? 'omitir' : null),
+                });
             }
         }
         return hijos;

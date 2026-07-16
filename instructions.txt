@@ -215,7 +215,20 @@ de ficheros clasificado por CDU.
                           no lo están, el documento SE CATALOGA IGUAL (por nombre) y la ficha ofrece la descarga
                           con un aviso claro: nunca se pierde, solo no se previsualiza.
                           (Por eso .doc/.docx NO están en la criba de «material»: tienen visor propio.)
-    · .zip .rar .7z .iso  Se EXPANDEN a carpeta (drop) antes de catalogar (bsdtar; .iso = ISO9660)
+    · .zip .rar .7z .iso  Se EXPANDEN a carpeta (drop) antes de catalogar (bsdtar; .iso = ISO9660) — POR
+                          DEFECTO. Pero un CONTENEDOR es ambiguo y la máquina NO puede acertar sola: el MISMO
+                          .iso puede ser un archivo de documentos (→ abrir) o una enciclopedia/instalador de
+                          SOFTWARE (→ dejarlo intacto). Abrir este último metía CIENTOS de vídeos y recursos
+                          como fichas sueltas. Por eso el INSPECTOR ofrece una ACCIÓN POR FICHERO en cada
+                          contenedor (`_guia.json` → `archivos: {"X.iso": {"accion": "software"}}`):
+                            · expandir (defecto) → se abre y su contenido se cataloga individualmente
+                            · software           → NO se abre: el vigilante lo envuelve en su carpeta con una
+                                                   guía accion:'software' → ingestarSoftware = 1 registro
+                                                   verbatim (reutiliza la maquinaria existente)
+                            · omitir             → no se cataloga
+                          `ACCIONES_FICHERO` en guia-ingesta.js; lo aplica vigilante.js·expandirComprimidos.
+                          Los contenedores que bsdtar NO sabe abrir (.nrg .dmg .mdf .ipa .img…) no se expanden
+                          nunca: caen en la criba como `material` → 1 ficha INTACTA, que es lo correcto.
 
   Papel vs digital (filtro «Soporte»):
     · El formato lo determina el FICHERO (su extensión), no lo que la IA vea en la

@@ -10995,6 +10995,11 @@ async function cargarArbolInbox() {
     const ev = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
     el[ev] = () => { _guiaDirty.add(el.dataset.ruta); habilitarGuardar(); };
   });
+  // Acción por FICHERO (contenedores): lo tocado es el fichero, pero se guarda en la guía de SU carpeta → se
+  // marca sucia con el prefijo «@f:» para no confundirlo con haber tocado los controles de la propia carpeta.
+  $$('#guiaArbol .guiaCtlFile').forEach((el) => {
+    el.onchange = () => { _guiaDirty.add('@f:' + (el.dataset.carpeta || '')); habilitarGuardar(); };
+  });
   // Casillas de SELECCIÓN de ficheros (agrupar) y de CARPETAS (acción en bloque).
   _guiaSel.clear();
   _guiaSelCarp.clear();
@@ -11022,11 +11027,27 @@ async function cargarArbolInbox() {
     };
   });
 }
+// Acciones por FICHERO (solo para CONTENEDORES: .iso .nrg .zip .rar .7z .ipa…). La máquina no puede adivinar
+// si un .iso es un archivo de documentos o una enciclopedia de software: abrirlo por las bravas mete cientos
+// de vídeos/recursos como fichas sueltas. Aquí lo decides tú ANTES de que el vigilante lo toque.
+const _ACCIONES_FICHERO = [
+  ['expandir', '📂 abrir y catalogar dentro'],
+  ['software', '💿 software (intacto, 1 ficha)'],
+  ['omitir', '⏭️ omitir'],
+];
 function nodoGuiaHTML(n) {
   if (n.tipo === 'file') {
     const ic = _ICONO_CLASE[n.clase] || '📄';
     const col = n.clase === 'noclasificable' ? ';color:#c60' : '';
-    return `<div style="padding:2px 0 2px 20px;font-size:12.5px${col}"><label style="cursor:pointer"><input type="checkbox" class="guiaSel" data-ruta="${esc(n.ruta)}" style="vertical-align:-1px"> ${ic} ${esc(n.nombre)}</label>${n.clase === 'noclasificable' ? ' <span class="muted">· no clasificable</span>' : ''}</div>`;
+    // CONTENEDOR: selector de acción. La guía vive en la carpeta que lo contiene → data-carpeta + data-nombre.
+    let selAcc = '';
+    if (n.clase === 'comprimido') {
+      const carpetaRel = n.ruta.split('/').slice(0, -1).join('/');   // '' = raíz del Inbox
+      selAcc = ` <select class="guiaCtlFile" data-carpeta="${esc(carpetaRel)}" data-nombre="${esc(n.nombre)}" title="Un contenedor puede traer documentos (abrir y catalogar cada uno) o ser un paquete de software (dejarlo intacto, 1 ficha)" style="font-size:11px;padding:1px 3px">${_ACCIONES_FICHERO
+        .map(([v, t]) => `<option value="${v}"${v === (n.accion || 'expandir') ? ' selected' : ''}>${t}</option>`)
+        .join('')}</select>`;
+    }
+    return `<div style="padding:2px 0 2px 20px;font-size:12.5px${col}"><label style="cursor:pointer"><input type="checkbox" class="guiaSel" data-ruta="${esc(n.ruta)}" style="vertical-align:-1px"> ${ic} ${esc(n.nombre)}</label>${selAcc}${n.clase === 'noclasificable' ? ' <span class="muted">· no clasificable</span>' : ''}</div>`;
   }
   const g = n.guia || { perfil: {}, accion: 'normal' };
   const sel = (k, opts, val) =>
@@ -11050,14 +11071,33 @@ async function guardarGuiasInbox() {
   const btn = $('#guiaGuardar');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
   // Recoge el estado ACTUAL de los controles, solo de las carpetas tocadas.
+  // Carpetas a guardar: las tocadas por sus PROPIOS controles, más aquellas donde solo cambió la acción de un
+  // FICHERO contenedor (marcadas «@f:<carpeta>»).
+  const porFichero = new Set(
+    [...$$('#guiaArbol .guiaCtlFile')].map((el) => el.dataset.carpeta || '').filter((c) => _guiaDirty.has('@f:' + c)),
+  );
   const porRuta = new Map();
+  const guiaDe = (ruta) => {
+    if (!porRuta.has(ruta)) porRuta.set(ruta, { accion: 'normal', perfil: {} });
+    return porRuta.get(ruta);
+  };
+  // Estado ACTUAL de los controles de CARPETA. Se leen también en las carpetas que solo cambiaron por una
+  // acción de fichero: si no, al guardar se les mandaría accion:'normal'/perfil vacío y se BORRARÍA lo suyo.
   $$('#guiaArbol .guiaCtl').forEach((el) => {
     const ruta = el.dataset.ruta;
-    if (!_guiaDirty.has(ruta)) return;
-    const gg = porRuta.get(ruta) || { accion: 'normal', perfil: {} };
+    if (!_guiaDirty.has(ruta) && !porFichero.has(ruta)) return;
+    const gg = guiaDe(ruta);
     if (el.dataset.k === 'accion') gg.accion = el.value || 'normal';
     else if (el.value && el.value.trim()) gg.perfil[el.dataset.k] = el.value.trim();
-    porRuta.set(ruta, gg);
+  });
+  // Acciones por FICHERO (contenedores) → `archivos{}` de la guía de SU carpeta. 'expandir' es el defecto: no
+  // se guarda (así la guía queda limpia y el comportamiento por defecto sigue siendo abrir).
+  $$('#guiaArbol .guiaCtlFile').forEach((el) => {
+    const carpeta = el.dataset.carpeta || '';
+    if (!porFichero.has(carpeta)) return;
+    const gg = guiaDe(carpeta);
+    gg.archivos = gg.archivos || {};
+    if (el.value && el.value !== 'expandir') gg.archivos[el.dataset.nombre] = { accion: el.value };
   });
   let ok = 0, err = 0;
   for (const [ruta, guia] of porRuta) {

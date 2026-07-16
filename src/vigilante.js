@@ -818,15 +818,42 @@ const rutaExiste = (p) => fs.access(p).then(() => true).catch(() => false);
 async function expandirComprimidos() {
     let entradas;
     try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
+    // ACCIÓN POR FICHERO elegida en el Inspector (guía de la carpeta): un contenedor complejo NO se puede
+    // adivinar. El MISMO .iso puede ser un archivo de documentos (→ abrir) o una enciclopedia/instalador de
+    // software (→ INTACTO): abrir este último metía cientos de vídeos y recursos como fichas sueltas. Por
+    // defecto se sigue expandiendo (comportamiento histórico); el humano decide lo contrario en el Inspector.
+    const guiaRaiz = await leerGuia(INBOX);
     for (const e of entradas) {
         if (!e.isFile() || ignorarEntrada(e.name)) continue;
         if (!EXT_COMPRIMIDO.includes(path.extname(e.name).toLowerCase())) continue;
         const zip = path.join(INBOX, e.name);
-        if (await verificarEstabilidad([zip]) !== 'estable') {   // no expandir un zip a medio copiar
-            console.log(`  ⏳ ${e.name}: comprimido aún copiándose; se expandirá en el próximo escaneo.`);
+        const spec = guiaRaiz?.archivos?.[e.name] || {};
+        const accion = spec.accion || (spec.omitir ? 'omitir' : 'expandir');
+        if (accion === 'omitir') {
+            if (!omitidasGuia.has(zip)) { omitidasGuia.add(zip); console.log(`  ⏭️  ${e.name}: OMITIR (guía) — no se cataloga.`); }
+            continue;
+        }
+        if (await verificarEstabilidad([zip]) !== 'estable') {   // no tocar un contenedor a medio copiar
+            console.log(`  ⏳ ${e.name}: comprimido aún copiándose; se tratará en el próximo escaneo.`);
             continue;
         }
         const base = path.basename(e.name, path.extname(e.name)).trim() || 'archivo';
+        if (accion === 'software') {
+            // NO se abre: se conserva INTACTO y se cataloga como UN registro. Se envuelve en su propia carpeta
+            // con una guía `accion:'software'` → lo recoge la unidad esSoftware (ingestarSoftware: copia
+            // verbatim en bloque + 1 documento naturaleza:'software'). Reutiliza toda la maquinaria existente.
+            const dirSw = await nombreLibre(INBOX, base);
+            try {
+                await fs.mkdir(dirSw, { recursive: true });
+                await fs.rename(zip, path.join(dirSw, e.name));
+                await escribirGuia(dirSw, { accion: 'software' });
+                console.log(`  💿 «${e.name}»: SOFTWARE (guía) — se conserva INTACTO, sin abrir → 1 registro.`);
+            } catch (err) {
+                console.warn(`  ⚠️  No se pudo preparar «${e.name}» como software: ${err.message} (se conserva).`);
+                await fs.rm(dirSw, { recursive: true, force: true }).catch(() => {});
+            }
+            continue;
+        }
         let destino = path.join(INBOX, base);
         for (let i = 2; await rutaExiste(destino); i++) destino = path.join(INBOX, `${base} (${i})`);
         const tmp = path.join(INBOX, `.expand-${Date.now()}`);   // oculto → ignorarEntrada lo salta
