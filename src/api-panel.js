@@ -751,9 +751,21 @@ export function rutasPanel() {
                 for (const c of cuentas) nCol.set(String(c._id), c.n);
             }
 
+            // Nº de tomos de las obras de ESTA PÁGINA. Se calcula SIEMPRE, agrupando o no: colapsado lo usa
+            // para la tarjeta única; EXPANDIDO lo usa para TEÑIR los tomos de una obra mayor (y distinguirlos
+            // de las obras de un solo volumen). Un solo $group sobre las obras de la página, como en colecciones.
+            const idsObraPag = [...new Set(docs.filter(d => d.obra).map(d => String(d.obra)))].map(x => new ObjectId(x));
+            if (idsObraPag.length) {
+                const cuentasO = await db.collection('biblioteca').aggregate([
+                    { $match: { obra: { $in: idsObraPag } } },
+                    { $group: { _id: '$obra', n: { $sum: 1 } } },
+                ]).toArray();
+                for (const c of cuentasO) nPorObra.set(String(c._id), c.n);   // completa/confirma lo del grupo
+            }
+
             // Portadas para la cubierta APILADA de las obras colapsadas de esta página (mismo patrón que la
-            // Estantería): un solo $group, hasta 3 portadas por obra.
-            const idsObra = [...nPorObra.keys()].map(x => new ObjectId(x));
+            // Estantería): un solo $group, hasta 3 portadas por obra. Solo hacen falta al COLAPSAR.
+            const idsObra = agrupar ? [...nPorObra.keys()].map(x => new ObjectId(x)) : [];
             const portObra = new Map();
             if (idsObra.length) {
                 const po = await db.collection('biblioteca').aggregate([
@@ -775,10 +787,11 @@ export function rutasPanel() {
                         coleccion: d.coleccion ? String(d.coleccion) : undefined,
                         coleccion_n: nc > 1 ? nc : undefined,   // solo si AGRUPA (más de un documento)
                         obra: claveObra || undefined,
-                        // Tarjeta COLAPSADA de obra: solo cuando agrupa de verdad (n > 1). El cliente la pinta
-                        // con la cubierta apilada y abre la ficha de la OBRA en vez de la del tomo.
-                        obra_n: nObra,
-                        obra_portadas: nObra ? (portObra.get(claveObra) || (d.portada ? [d.portada] : [])) : undefined,
+                        // `obra_n` = tomos de su obra (solo si son VARIOS). Con `agrupado`, el cliente decide:
+                        //   · colapsado → UNA tarjeta con cubierta apilada, abre la ficha de la OBRA
+                        //   · expandido → tarjeta normal TEÑIDA (es un tomo de una obra mayor, no un libro suelto)
+                        obra_n: nObra && nObra > 1 ? nObra : undefined,
+                        obra_portadas: agrupar && nObra > 1 ? (portObra.get(claveObra) || (d.portada ? [d.portada] : [])) : undefined,
                     };
                 }),
             });

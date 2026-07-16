@@ -2570,12 +2570,24 @@ async function infoClasificacion(sist, cod) {
 // objeto `extra` con los parámetros que entiende /catalogo + una `etiqueta` para el chip. Limpia la
 // caja de texto y abre la Búsqueda con EXACTAMENTE esos documentos.
 function irBusquedaFiltro(extra) {
+  // Si el filtro va sobre OBRAS (o sobre tomos concretos de una), el modo COLAPSADO no sirve: devolvería la
+  // tarjeta de la obra, no los tomos que quieres ver/seleccionar. Se conmuta a EXPANDIDO automáticamente —
+  // el usuario siempre puede volver a colapsar con la casilla (el modo se recuerda).
+  if (extra && (extra.obras || extra.expandirObras)) modoTomos(true);
   estadoBusqueda.extra = extra;
   estadoBusqueda.page = 1;
   if ($('#sqQ')) $('#sqQ').value = '';
   if ($('#sqCdu')) $('#sqCdu').value = '';
   go('search');
 }
+// MODO del catálogo respecto a las obras: colapsado (una tarjeta por obra, por defecto) ↔ expandido (un tomo
+// por tarjeta, teñidos). Se RECUERDA entre sesiones: es una preferencia de trabajo, no un capricho por búsqueda.
+function modoTomos(expandido) {
+  localStorage.setItem('cat_tomos', expandido ? '1' : '0');
+  const c = $('#sqTomos');
+  if (c) c.checked = !!expandido;
+}
+const modoTomosExpandido = () => localStorage.getItem('cat_tomos') === '1';
 // Ver los libros de UNA ubicación (ámbito/estantería) en el Catálogo: FILTRA por esa ubicación y —si es
 // una estantería concreta— ordena por su POSICIÓN física (visible y ajustable en el selector de orden).
 // Punto ÚNICO usado por el deep-link ?amb=&est= (arranque) y por la lectura NFC de una etiqueta de
@@ -7254,7 +7266,11 @@ function construirSearch() {
   };
   $('#sqTipo').onchange = () => buscarCatalogo(1);
   if ($('#sqEstricto')) $('#sqEstricto').onchange = () => buscarCatalogo(1); // frase exacta ↔ laxa
-  if ($('#sqTomos')) $('#sqTomos').onchange = () => buscarCatalogo(1);       // obras colapsadas ↔ tomos sueltos
+  // Obras colapsadas ↔ tomos sueltos: es un MODO de trabajo, así que se recuerda entre sesiones.
+  if ($('#sqTomos')) {
+    $('#sqTomos').checked = modoTomosExpandido();
+    $('#sqTomos').onchange = (e) => { modoTomos(e.target.checked); buscarCatalogo(1); };
+  }
   if ($('#sqSoporte')) $('#sqSoporte').onchange = () => buscarCatalogo(1);
   if ($('#sqFormato')) $('#sqFormato').onchange = () => buscarCatalogo(1);
   // Ubicación: al cambiar el ámbito, refrescar la estantería (asociada a ese ámbito) y buscar.
@@ -7884,13 +7900,16 @@ function tipoFmtCompacto(d) {
   const pag = Number(d.paginas) > 0 ? ` · ${Number(d.paginas)}p` : ''; // nº de páginas (si se conoce)
   return `<span class="fmt" style="background:rgba(120,160,255,.16);color:#9db8ff">${ic} ${tipo}${fmts ? ' · ' + fmts : ''}${pag}</span>`;
 }
+// ¿La última página del catálogo vino colapsada por obras? La fija pintarResultados desde la respuesta.
+let _catAgrupado = true;
+
 function docCard(d) {
   const ph = tipoIcono(d.tipo_recurso);
   // OBRA MULTIVOLUMEN COLAPSADA: sus N tomos son UNA tarjeta, visualmente distinta (cubierta APILADA, la misma
   // que la Estantería) y con el nº de tomos. Abre la ficha de la OBRA —donde ya se listan los tomos— en vez de
   // la de un tomo suelto. Solo llega colapsada si agrupa de verdad (obra_n > 1): una obra de un tomo se pinta
   // como un documento normal.
-  if (d.obra_n > 1) {
+  if (_catAgrupado && d.obra_n > 1) {
     const cov = stackCover(d.obra_portadas && d.obra_portadas.length ? d.obra_portadas : d.portada ? [d.portada] : [], ph);
     const titulo = d.obra_titulo || d.titulo || '(obra)';
     const sub = (d.autores && d.autores.length ? d.autores.slice(0, 2).join(', ') : '') || (d.año_edicion ? String(d.año_edicion) : '') || '—';
@@ -7911,7 +7930,13 @@ function docCard(d) {
     d.isbn ||
     '—';
   const nfcTag = nfcBadge(d);
-  return `<div class="vol${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><div class="cov">${cov}${nfcTag}${posBadge(d)}</div><div class="meta"><div class="n">${esc(recortar(d.titulo || '(sin título)', 64))} ${fmt}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos', d._id, d.valoracion, d.nsfw)}</div></div></div>`;
+  // TOMO de una obra mayor (modo expandido): fondo más claro para distinguirlo de un libro de un solo volumen,
+  // tanto en gris como en burdeos (selección). La marca «📚 N» dice de cuántos tomos es y abre la obra.
+  const esVol = d.obra_n > 1 ? ' esvol' : '';
+  const volTag = d.obra_n > 1
+    ? ` <span class="fmt" onclick="event.stopPropagation();verObra('${esc(d.obra)}')" style="background:rgba(40,217,168,.18);color:var(--acc);cursor:pointer" title="Tomo de «${esc(d.obra_titulo || '')}» (${d.obra_n} tomos) — pulsa para ver la obra">📚 ${d.obra_n}</span>`
+    : '';
+  return `<div class="vol${esVol}${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><div class="cov">${cov}${nfcTag}${posBadge(d)}</div><div class="meta"><div class="n">${esc(recortar(d.titulo || '(sin título)', 64))} ${fmt}${volTag}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos', d._id, d.valoracion, d.nsfw)}</div></div></div>`;
 }
 // Vista DETALLES: una FILA por documento, solo texto (título · autor · año · identificador · CDU + formatos).
 // Comparte data-doc, .selmark y .sel con la vista iconos (misma mecánica de selección).
@@ -7923,11 +7948,13 @@ function docRow(d) {
     d.cdu ? 'CDU ' + d.cdu : '',
   ].filter(Boolean);
   // Obra colapsada: también en Detalles (consistencia de patrones) — una fila por OBRA, no por tomo.
-  if (d.obra_n > 1) {
+  if (_catAgrupado && d.obra_n > 1) {
     return `<div class="drow" data-obra="${esc(d.obra)}" onclick="verObra('${esc(d.obra)}')" style="cursor:pointer" title="Obra en ${d.obra_n} tomos — pulsa para ver la obra y sus tomos"><span class="dtit">${esc(recortar(d.obra_titulo || d.titulo || '(obra)', 90))} <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)">📚 ${d.obra_n} tomos</span></span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${tipoFmtCompacto(d)}</span></div>`;
   }
   const fmt = tipoFmtCompacto(d);
-  return `<div class="drow${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><span class="dtit">${esc(recortar(d.titulo || '(sin título)', 90))}${badgesDoc(d)}</span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${fmt}</span></div>`;
+  const esVol = d.obra_n > 1 ? ' esvol' : '';   // tomo de una obra mayor (expandido) → fondo más claro
+  const volTag = d.obra_n > 1 ? ` <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)" title="Tomo de «${esc(d.obra_titulo || '')}» (${d.obra_n} tomos)">📚 ${d.obra_n}</span>` : '';
+  return `<div class="drow${esVol}${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><span class="dtit">${esc(recortar(d.titulo || '(sin título)', 90))}${volTag}${badgesDoc(d)}</span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${fmt}</span></div>`;
 }
 // Nº de POSICIÓN física en la estantería — solo al ver UNA estantería (ayuda a localizar el libro / inventario).
 function posBadge(d) {
@@ -7937,7 +7964,10 @@ function posBadge(d) {
 }
 function pintarBusqueda(r) {
   paginaIds = r.docs.map((d) => d._id); // ids de la página actual (para «seleccionar todos»)
-  $('#searchCount').textContent = `${r.total.toLocaleString('es-ES')} resultado${r.total === 1 ? '' : 's'}`;
+  // ¿La página vino COLAPSADA por obras? Lo decide el servidor (es quien agrupa); las tarjetas lo consultan:
+  // colapsado → tarjeta única de obra · expandido → tomo normal TEÑIDO (pertenece a una obra mayor).
+  _catAgrupado = r.agrupado !== false;
+  $('#searchCount').textContent = `${r.total.toLocaleString('es-ES')} ${_catAgrupado ? 'resultado' : 'documento'}${r.total === 1 ? '' : 's'}`;
   $('#searchResults').dataset.solo = soloSeleccion ? '1' : ''; // marca si la vista está restringida a la selección
   // Vista según el modo elegido: iconos (rejilla de portadas) o detalles (filas de texto).
   const cuerpo =

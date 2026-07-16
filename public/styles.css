@@ -1285,6 +1285,14 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
   outline: 2px solid var(--acc);
   outline-offset: -2px;
 }
+/* TOMO de una obra mayor (catálogo en modo EXPANDIDO): fondo más CLARO que el de un libro de un solo volumen,
+   para leer de un vistazo que forma parte de algo. Se hace con una capa translúcida que ACLARA lo que haya
+   debajo, así vale igual sobre el gris normal que sobre el fondo de selección — sin depender del color base
+   ni duplicar reglas por estado. (En modo colapsado no aplica: ahí la obra es una sola tarjeta apilada.) */
+.vol.esvol,
+.drow.esvol {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.075));
+}
 /* Patrón de SELECCIÓN reutilizable (Catálogo, ficha de autor, obras, editoriales…): en «Modo
    selección» tocar la tarjeta la marca con un tick ✓ bien visible + recuadro (en vez de abrir su
    ficha). El tick solo se ve cuando la tarjeta está seleccionada (.sel). */

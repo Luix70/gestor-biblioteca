@@ -412,6 +412,15 @@ de ficheros clasificado por CDU.
       collation española que la consulta — si no, el índice no sirve al $sort) e idx_doi.
       ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
+    · MODO del catálogo respecto a las obras (se RECUERDA en localStorage `cat_tomos`: es una preferencia de
+      trabajo, no un capricho por búsqueda). COLAPSADO (defecto) ↔ EXPANDIDO (casilla «📖 Ver tomos sueltos»).
+      En EXPANDIDO cada tomo es su propia tarjeta —seleccionable, para hacer selecciones finas y moverlas a una
+      estantería— con FONDO MÁS CLARO (`.esvol`) y la marca «📚 N» que abre su obra: se distingue de un libro de
+      un solo volumen. El aclarado se hace con una capa translúcida sobre el fondo, así vale igual en gris que
+      en selección, sin depender del color base. `irBusquedaFiltro` CONMUTA A EXPANDIDO automáticamente cuando
+      el filtro va sobre obras (`obras=` / `expandirObras`): en colapsado devolvería la tarjeta de la obra, no
+      los tomos que quieres ver/seleccionar — pero siempre puedes volver a colapsar. El servidor calcula
+      `obra_n` SIEMPRE (agrupando o no): colapsado lo usa para la tarjeta única, expandido para teñir.
     · OBRAS MULTIVOLUMEN COLAPSADAS (por defecto; casilla «📖 Ver tomos sueltos» las despliega, `agrupar=0`):
       los N tomos de una obra salen como UNA tarjeta, visualmente distinta —cubierta APILADA (stackCover, la
       misma que la Estantería) + «📚 N tomos»— y abren la ficha de la OBRA, donde ya se listan sus tomos. Una
