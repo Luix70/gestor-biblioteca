@@ -24,7 +24,7 @@ import { editarColeccion, editarObra } from './utils/editar-grupos.js';
 import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
-import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia } from './utils/gestion-grupos.js';
+import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia, expulsarDeGrupo } from './utils/gestion-grupos.js';
 import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor, eliminarAutoresVacios, imagenesDeObras } from './utils/gestion-autores.js';
 import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial, guardarLogoEditorial, imagenesDeLibros, quitarEditorialDeDocs, reasignarDocsAEditorial, explotarEditorial } from './utils/gestion-editoriales.js';
 import { lanzarReclasificacion, estadoReclasificacion, aplicarUltimaReclasificacion } from './utils/reclasificar-editorial.js';
@@ -1844,6 +1844,18 @@ export function rutasPanel() {
             const { ids, coleccionId, nombre, tipo } = req.body || {};
             if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos seleccionados' });
             res.json(await asignarColeccion(await conectarDB(), ids, { coleccionId, nombre, tipo }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // EXPULSAR de su obra / colección los documentos seleccionados (no el grupo entero: eso es «explotar»).
+    // El documento NO se borra: queda suelto, con sus ficheros. Se limpian los datos de pertenencia
+    // (`volumen_numero`/`obra_titulo` en obra) y, si el grupo se queda vacío, se borra.
+    r.post('/documentos/expulsar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const { ids, tipo } = req.body || {};
+            if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos seleccionados' });
+            if (!['obra', 'coleccion'].includes(tipo)) return res.status(400).json({ ok: false, motivo: 'tipo debe ser obra|coleccion' });
+            res.json(await expulsarDeGrupo(await conectarDB(), tipo, ids));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/documentos/agrupar/obra', async (req, res) => {

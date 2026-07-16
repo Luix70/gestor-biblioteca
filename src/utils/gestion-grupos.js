@@ -10,7 +10,7 @@
 import { ObjectId } from 'mongodb';
 import { claveNumero } from './revistas.js';
 import { registrarNumeroEnColeccion } from './colecciones.js';
-import { registrarVolumenEnObra } from './obras.js';
+import { registrarVolumenEnObra, reconstruirInventarioObra } from './obras.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
@@ -79,6 +79,40 @@ export async function explotarObra(db, id) {
     const r = await bib.updateMany({ obra: o._id }, { $unset: { obra: '', obra_titulo: '', volumen_numero: '', volumen_titulo: '', isbn_obra: '' }, $set: { fecha_actualizacion: new Date() } });
     await obras.deleteOne({ _id: o._id });
     return { ok: true, liberados: r.modifiedCount, titulo: o.titulo };
+}
+
+/**
+ * EXPULSAR documentos de su obra / colección (selección concreta, no el grupo entero como `explotar*`).
+ * El documento NO se borra: queda suelto en el catálogo, con sus mismos ficheros. Se limpian SOLO los datos de
+ * pertenencia (mismos campos que explotar*: en obra, también `volumen_numero`, que fuera de ella no significa
+ * nada). Si el grupo se queda VACÍO se BORRA: una obra/colección sin miembros es un fantasma que solo estorba
+ * en las estanterías y en los selectores.
+ * @param tipo 'obra' | 'coleccion'
+ */
+export async function expulsarDeGrupo(db, tipo, ids = []) {
+    const esObra = tipo === 'obra';
+    const bib = db.collection('biblioteca');
+    const grupos = db.collection(esObra ? 'obras' : 'colecciones');
+    const campo = esObra ? 'obra' : 'coleccion';
+    const limpiar = esObra
+        ? { obra: '', obra_titulo: '', volumen_numero: '', volumen_titulo: '', isbn_obra: '' }
+        : { coleccion: '', coleccion_nombre: '', clave_numero: '', coleccion_numero: '' };
+
+    const docs = (await bib.find({ _id: { $in: ids.map(oid).filter(Boolean) } }, { projection: { [campo]: 1 } }).toArray());
+    const afectados = [...new Set(docs.map(d => d[campo]).filter(Boolean).map(String))];
+    if (!docs.length) return { ok: false, motivo: 'sin documentos válidos' };
+
+    const r = await bib.updateMany({ _id: { $in: docs.map(d => d._id) } }, { $unset: limpiar, $set: { fecha_actualizacion: new Date() } });
+
+    // Los grupos que se quedan sin miembros se borran; los que sobreviven, reconstruyen su inventario para que
+    // no sigan listando tomos que ya no están.
+    const vaciados = [];
+    for (const g of afectados) {
+        const quedan = await bib.countDocuments({ [campo]: oid(g) });
+        if (quedan === 0) { await grupos.deleteOne({ _id: oid(g) }); vaciados.push(g); }
+        else if (esObra) await reconstruirInventarioObra(db, oid(g)).catch(() => {});
+    }
+    return { ok: true, n: r.modifiedCount, vaciados: vaciados.length };
 }
 
 export async function eliminarObraVacia(db, id) {

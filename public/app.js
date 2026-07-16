@@ -2428,8 +2428,15 @@ function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo, orden }) {
   const pintarBar = () => {
     // En modo selección: botón «Todos/Ninguno» (selecciona/deselecciona todas las tarjetas de la página).
     const todos = modo ? ` <button class="btn" id="selall">${sel.size >= cards.length && cards.length ? '☐ Ninguno' : '☑ Todos'}</button>` : '';
+    // ACCIONES DE PERTENENCIA: solo cuando estamos DENTRO de una obra/colección (verCtx lo dice). `montarSelDocs`
+    // es compartido (ficha de autor, editoriales…), y ahí «expulsar de la obra» no significaría nada.
+    const grupo = verCtx.obra ? 'obra' : verCtx.coleccion ? 'coleccion' : null;
+    const accGrupo = grupo && sel.size
+      ? ` <button class="btn" id="selMover" title="Mover los seleccionados a OTRA ${grupo === 'obra' ? 'obra' : 'colección'} (se conserva el nº de tomo; se reemplaza a cuál pertenece)">↗ Mover a otra ${grupo === 'obra' ? 'obra' : 'colección'}</button>
+         <button class="btn bad" id="selExp" title="Sacar los seleccionados de esta ${grupo === 'obra' ? 'obra' : 'colección'}. NO se borran: quedan sueltos en el catálogo.">⏏ Expulsar</button>`
+      : '';
     const acc = sel.size
-      ? `<span style="margin-left:auto"></span><b>${sel.size}</b> sel. <button class="btn pri" id="selcat">🔍 Mostrar en Catálogo</button> <button class="btn" id="selclr">Limpiar</button>`
+      ? `<span style="margin-left:auto"></span><b>${sel.size}</b> sel. <button class="btn pri" id="selcat">🔍 Mostrar en Catálogo</button>${accGrupo} <button class="btn" id="selclr">Limpiar</button>`
       : '';
     bar.innerHTML = `<div class="bulkbar"><button class="btn${modo ? ' pri' : ''}" id="selmodo" title="Modo selección: tocar una tarjeta la marca. Modo previsualización: tocar abre su ficha. Doble clic / pulsación larga en una tarjeta también conmuta. La selección se conserva.">${modo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>${todos}${acc}</div>`;
     $('#selmodo').onclick = alternar;
@@ -2441,6 +2448,8 @@ function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo, orden }) {
     if (sel.size) {
       $('#selcat').onclick = () => mostrarEnCatalogo([...sel], titulo || `${sel.size} libros`, orden);
       $('#selclr').onclick = () => { sel.clear(); cards.forEach((c) => c.classList.remove('sel')); pintarBar(); };
+      if ($('#selExp')) $('#selExp').onclick = () => expulsarDeGrupoUI(grupo, [...sel]);
+      if ($('#selMover')) $('#selMover').onclick = () => pickerGrupo(grupo, [...sel]);
     }
   };
   // Interacción unificada: clic/toque = abrir ficha (o marcar en Modo selección); doble clic / pulsación
@@ -7131,7 +7140,39 @@ async function aFondoLote() {
 }
 // Selector con FILTRO + PREVISUALIZACIÓN (en vez de un desplegable largo): clic en una tarjeta → añade
 // los seleccionados a esa colección/obra; o crear una nueva abajo. kind: 'coleccion' | 'obra'.
-async function pickerGrupo(kind) {
+// Repinta la vista de obra/colección abierta (tras mover o expulsar tomos). `detalle` guarda qué se está
+// viendo; si no hay nada abierto, no hace nada.
+function recargarVistaActual() {
+  if (detalle && detalle.tipo === 'obra') verObra(detalle.id);
+  else if (detalle && detalle.tipo === 'coleccion') verColeccion(detalle.id);
+}
+
+// EXPULSAR de su obra/colección los documentos seleccionados. NO los borra: quedan sueltos en el catálogo. Se
+// avisa de lo que implica (se pierden nº de tomo y pertenencia) porque no es deshacible con un clic.
+async function expulsarDeGrupoUI(tipo, ids) {
+  const esObra = tipo === 'obra';
+  const nom = esObra ? 'la obra' : 'la colección';
+  // Mismo patrón de confirmación que «Explotar» (confirm nativo): no es destructivo —los documentos y sus
+  // ficheros se conservan— pero sí pierde datos de pertenencia, así que se avisa de qué implica exactamente.
+  if (!confirm(
+    `Expulsar ${ids.length} documento(s) de ${nom}: quedarán SUELTOS en el catálogo. No se borra nada (conservan sus ficheros), pero ` +
+    `${esObra ? 'pierden su nº de tomo y la pertenencia a la obra' : 'pierden su pertenencia a la colección'}. ` +
+    `Si ${nom} se queda vacía, se elimina. ¿Seguir?`,
+  )) return;
+  try {
+    const r = await api('/documentos/expulsar', { method: 'POST', body: JSON.stringify({ ids, tipo }) });
+    if (!r.ok) return toast(r.motivo || 'No se pudo expulsar', 'bad');
+    toast(`⏏ ${r.n} documento(s) fuera de ${nom}${r.vaciados ? ` · ${nom} vacía eliminada` : ''}`);
+    if (r.vaciados) go(esObra ? 'obras' : 'colecciones');   // la vista abierta ya no existe
+    else recargarVistaActual();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+// Selector de obra/colección con BUSCADOR + «crear nueva». `ids` permite usarlo desde la vista de una obra o
+// colección (donde la selección es local, no `selDocs`) para MOVER tomos a otro grupo; sin `ids` opera sobre la
+// selección del Catálogo, como siempre.
+async function pickerGrupo(kind, ids = null) {
+  const objetivo = ids && ids.length ? ids : [...selDocs];
   const esCol = kind === 'coleccion';
   let items = [];
   try {
@@ -7144,7 +7185,7 @@ async function pickerGrupo(kind) {
       ? `${o.tipo === 'revista' ? '📰 revista' : '📚 libro'} · ${o.miembros || 0} miembro(s)`
       : `${o.volumenes_presentes || 0}/${o.total_volumenes || '?'} tomos`;
   $('#cmpModal').innerHTML =
-    `<div class="box card" style="max-width:560px"><h3 style="margin-top:0">${ico} Añadir <b>${selDocs.size}</b> doc(s) a una ${esCol ? 'colección' : 'obra'}</h3>
+    `<div class="box card" style="max-width:560px"><h3 style="margin-top:0">${ico} Añadir <b>${objetivo.length}</b> doc(s) a una ${esCol ? 'colección' : 'obra'}</h3>
     <input id="pkFiltro" placeholder="🔍 filtrar por nombre…" autocomplete="off">
     <div id="pkLista" class="pklist"></div>
     <div style="margin:10px 0;text-align:center;color:var(--mut)">— o crear nueva —</div>
@@ -7168,7 +7209,7 @@ async function pickerGrupo(kind) {
           )
           .join('')
       : '<div class="muted" style="padding:14px">Sin resultados</div>';
-    $$('#pkLista .pkitem').forEach((el) => (el.onclick = () => aplicarGrupo(kind, { id: el.dataset.id })));
+    $$('#pkLista .pkitem').forEach((el) => (el.onclick = () => aplicarGrupo(kind, { id: el.dataset.id, ids: objetivo })));
   };
   pintar('');
   $('#pkFiltro').oninput = () => pintar($('#pkFiltro').value);
@@ -7179,14 +7220,15 @@ async function pickerGrupo(kind) {
       $('#pkErr').textContent = 'Escribe un nombre';
       return;
     }
-    aplicarGrupo(kind, { nombre, tipo: esCol ? $('#pkTipo').value : undefined });
+    aplicarGrupo(kind, { nombre, tipo: esCol ? $('#pkTipo').value : undefined, ids: objetivo });
   };
 }
-async function aplicarGrupo(kind, { id, nombre, tipo }) {
+async function aplicarGrupo(kind, { id, nombre, tipo, ids = null }) {
   const esCol = kind === 'coleccion';
+  const objetivo = ids && ids.length ? ids : [...selDocs];
   const body = esCol
-    ? { ids: [...selDocs], coleccionId: id || null, nombre: nombre || null, tipo }
-    : { ids: [...selDocs], obraId: id || null, titulo: nombre || null };
+    ? { ids: objetivo, coleccionId: id || null, nombre: nombre || null, tipo }
+    : { ids: objetivo, obraId: id || null, titulo: nombre || null };
   try {
     const r = await api(esCol ? '/documentos/agrupar/coleccion' : '/documentos/agrupar/obra', {
       method: 'POST',
@@ -7199,9 +7241,15 @@ async function aplicarGrupo(kind, { id, nombre, tipo }) {
       return;
     }
     cerrarCmp();
-    toast(`${r.n} doc(s) → ${esCol ? 'colección «' + r.coleccion.nombre : 'obra «' + r.obra.titulo}»`);
-    selDocs.clear();
-    buscarCatalogo(estadoBusqueda.page || 1);
+    const vaciadas = r.vaciadas ? ` · ${r.vaciadas} ${esCol ? 'colección(es)' : 'obra(s)'} vacía(s) eliminada(s)` : '';
+    toast(`${r.n} doc(s) → ${esCol ? 'colección «' + r.coleccion.nombre : 'obra «' + r.obra.titulo}»${vaciadas}`);
+    // Si nos llamaron con ids EXPLÍCITOS venimos de la ficha de una obra/colección (selección local, no
+    // `selDocs`): allí hay que repintar ESA vista, no el Catálogo — y no tocar la selección del Catálogo.
+    if (ids && ids.length) recargarVistaActual();
+    else {
+      selDocs.clear();
+      buscarCatalogo(estadoBusqueda.page || 1);
+    }
   } catch (e) {
     const el = $('#pkErr');
     if (el) el.textContent = e.message;
@@ -7939,10 +7987,13 @@ function docCard(d) {
     const cov = stackCover(d.obra_portadas && d.obra_portadas.length ? d.obra_portadas : d.portada ? [d.portada] : [], ph);
     const titulo = d.obra_titulo || d.titulo || '(obra)';
     const sub = (d.autores && d.autores.length ? d.autores.slice(0, 2).join(', ') : '') || (d.año_edicion ? String(d.año_edicion) : '') || '—';
+    // La COLECCIÓN es de jerarquía SUPERIOR a la obra (una colección puede contener obras; una obra no
+    // contiene colecciones), así que la obra colapsada muestra su colección igual que un documento suelto:
+    // `badgeColeccion` sobre el tomo representante — si la obra está en una colección, sus tomos lo están.
     return `<div class="vol obracard" data-obra="${esc(d.obra)}" onclick="verObra('${esc(d.obra)}')" style="cursor:pointer" title="Obra en ${d.obra_n} tomos — pulsa para ver la obra y sus tomos">
       <div class="cov">${cov}</div>
       <div class="meta">
-        <div class="n">${esc(recortar(titulo, 64))} <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)">📚 ${d.obra_n} tomos</span></div>
+        <div class="n">${esc(recortar(titulo, 64))} <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)">📚 ${d.obra_n} tomos</span>${badgeColeccion(d)}</div>
         <div class="t">${esc(sub)}</div>
       </div></div>`;
   }
@@ -7975,7 +8026,7 @@ function docRow(d) {
   ].filter(Boolean);
   // Obra colapsada: también en Detalles (consistencia de patrones) — una fila por OBRA, no por tomo.
   if (_catAgrupado && d.obra_n > 1) {
-    return `<div class="drow" data-obra="${esc(d.obra)}" onclick="verObra('${esc(d.obra)}')" style="cursor:pointer" title="Obra en ${d.obra_n} tomos — pulsa para ver la obra y sus tomos"><span class="dtit">${esc(recortar(d.obra_titulo || d.titulo || '(obra)', 90))} <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)">📚 ${d.obra_n} tomos</span></span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${tipoFmtCompacto(d)}</span></div>`;
+    return `<div class="drow" data-obra="${esc(d.obra)}" onclick="verObra('${esc(d.obra)}')" style="cursor:pointer" title="Obra en ${d.obra_n} tomos — pulsa para ver la obra y sus tomos"><span class="dtit">${esc(recortar(d.obra_titulo || d.titulo || '(obra)', 90))} <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)">📚 ${d.obra_n} tomos</span>${badgeColeccion(d)}</span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${tipoFmtCompacto(d)}</span></div>`;
   }
   const fmt = tipoFmtCompacto(d);
   const esVol = d.obra_n > 1 ? ' esvol' : '';   // tomo de una obra mayor (expandido) → fondo más claro
