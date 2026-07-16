@@ -227,6 +227,14 @@ de ficheros clasificado por CDU.
                                                    verbatim (reutiliza la maquinaria existente)
                             · omitir             → no se cataloga
                           `ACCIONES_FICHERO` en guia-ingesta.js; lo aplica vigilante.js·expandirComprimidos.
+                          ⚠ VENTANA DE DECISIÓN (`CONTENEDOR_ESPERA_MS`, 5 min por defecto): sin ella la acción
+                          era INALCANZABLE — con el vigilante activo el .iso/.rar se expandía en el PRIMER
+                          escaneo tras el drop, así que al ir a «inspeccionar antes» el fichero ya no existía
+                          (era una carpeta) y solo se podía marcar el resultado ya expandido. Ahora, si no hay
+                          decisión explícita, el vigilante ESPERA esa ventana (lo avisa en el log una vez) y
+                          luego expande por defecto → la ingesta desatendida sigue funcionando sola.
+                            · 0  → expandir de inmediato (comportamiento histórico)
+                            · -1 → NUNCA expandir sin decisión explícita (máximo control)
                           Los contenedores que bsdtar NO sabe abrir (.nrg .dmg .mdf .ipa .img…) no se expanden
                           nunca: caen en la criba como `material` → 1 ficha INTACTA, que es lo correcto.
 

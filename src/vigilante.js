@@ -807,6 +807,12 @@ function resumenLote(t, totalUnidades) {
 // bsdtar (libarchive) los lee todos (C plano, apto Atom): ZIP/RAR/RAR5/7z e ISO9660 (.iso → imagen de
 // disco de una colección/escaneo, se expande igual que un .zip). Se recicla el original tras expandir.
 const EXT_COMPRIMIDO = ['.zip', '.rar', '.7z', '.iso'];
+// VENTANA DE DECISIÓN de un contenedor sin acción explícita en la guía (ver expandirComprimidos): tiempo que
+// se espera a que elijas en el Inspector antes de expandirlo por defecto. Sin ella, con el vigilante activo el
+// .iso/.rar se expandía en el primer escaneo y la acción del Inspector era inalcanzable.
+//   0 → expandir de inmediato (comportamiento histórico)   ·   -1 → nunca expandir sin decisión explícita
+const CONTENEDOR_ESPERA_MS = Number(process.env.CONTENEDOR_ESPERA_MS ?? 300000);   // 5 min por defecto
+const esperandoDecision = new Set();   // contenedores ya anunciados (para no repetir el aviso en cada escaneo)
 const rutaExiste = (p) => fs.access(p).then(() => true).catch(() => false);
 
 /**
@@ -828,8 +834,8 @@ async function expandirComprimidos() {
         if (!EXT_COMPRIMIDO.includes(path.extname(e.name).toLowerCase())) continue;
         const zip = path.join(INBOX, e.name);
         const spec = guiaRaiz?.archivos?.[e.name] || {};
-        const accion = spec.accion || (spec.omitir ? 'omitir' : 'expandir');
-        if (accion === 'omitir') {
+        const decidido = spec.accion || (spec.omitir ? 'omitir' : null);   // null = el usuario aún no ha dicho nada
+        if (decidido === 'omitir') {
             if (!omitidasGuia.has(zip)) { omitidasGuia.add(zip); console.log(`  ⏭️  ${e.name}: OMITIR (guía) — no se cataloga.`); }
             continue;
         }
@@ -837,6 +843,26 @@ async function expandirComprimidos() {
             console.log(`  ⏳ ${e.name}: comprimido aún copiándose; se tratará en el próximo escaneo.`);
             continue;
         }
+        // VENTANA DE DECISIÓN. Sin esto, la acción del Inspector era INALCANZABLE: con el vigilante activo el
+        // contenedor se expandía en el primer escaneo tras el drop, así que cuando ibas a «inspeccionar antes»
+        // el fichero ya no existía (era una carpeta) y solo podías marcar el resultado ya expandido. Ahora, si
+        // NO hay decisión explícita, se espera CONTENEDOR_ESPERA_MS a que la tomes; pasada la ventana se expande
+        // (comportamiento histórico → la ingesta desatendida sigue funcionando sola).
+        //   ·  0  → expandir de inmediato (como antes)     · -1 → NUNCA expandir sin decisión explícita
+        if (!decidido && CONTENEDOR_ESPERA_MS !== 0) {
+            const edad = await fs.stat(zip).then((s) => Date.now() - (s.mtimeMs || 0)).catch(() => Infinity);
+            if (CONTENEDOR_ESPERA_MS < 0 || edad < CONTENEDOR_ESPERA_MS) {
+                if (!esperandoDecision.has(zip)) {
+                    esperandoDecision.add(zip);
+                    const cuanto = CONTENEDOR_ESPERA_MS < 0 ? 'indefinidamente' : `${Math.round(CONTENEDOR_ESPERA_MS / 60000)} min`;
+                    console.log(`  🤔 «${e.name}»: contenedor — esperando ${cuanto} tu decisión en el Inspector (📂 abrir y catalogar dentro · 💿 software intacto · ⏭️ omitir).${CONTENEDOR_ESPERA_MS < 0 ? '' : ' Si no dices nada, se abrirá.'}`);
+                }
+                continue;
+            }
+            console.log(`  ⌛ «${e.name}»: sin decisión en la ventana → se abre (comportamiento por defecto).`);
+        }
+        const accion = decidido || 'expandir';
+        esperandoDecision.delete(zip);   // se actúa: deja de estar «a la espera» (y no crece el Set sin fin)
         const base = path.basename(e.name, path.extname(e.name)).trim() || 'archivo';
         if (accion === 'software') {
             // NO se abre: se conserva INTACTO y se cataloga como UN registro. Se envuelve en su propia carpeta
