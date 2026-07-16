@@ -584,22 +584,25 @@ async function primeraImagenDe(raizAbs) {
 }
 
 /**
- * INGESTA de un PAQUETE DE SOFTWARE (marcado `software` en la guía / Inspector). Se COPIA VERBATIM EN BLOQUE
- * al árbol CDU (`004/software/<nombre>/`, protegido con ruta_fija) y se cataloga como UN ÚNICO documento
- * `tipo_recurso:'software'` / `naturaleza:'software'` — NO uno por fichero. Comparte los atributos de un
- * documento (CDU, portada/carrusel, valoración, ubicación); su previsualización es un explorador de ficheros
- * de SOLO LECTURA (endpoint /documentos/:id/arbol). Los ficheros se mueven siempre juntos.
+ * BLOQUE VERBATIM: copia una carpeta ÍNTEGRA al árbol CDU (protegida con ruta_fija) y la cataloga como UN
+ * ÚNICO documento — NO uno por fichero. Es la forma de decir «esto es UNA COSA: consérvala tal cual y déjame
+ * un registro que apunte a ella». Comparte los atributos de un documento (CDU, portada, valoración,
+ * ubicación) y su previsualización es un explorador de ficheros de SOLO LECTURA. Dos sabores:
+ *   · SOFTWARE  (`accion:'software'`)  → naturaleza:'software', CDU 004, rama `software/`
+ *   · INTACTA   (`accion:'intacta'`)   → naturaleza:'material',  CDU deducida del nombre, rama `intacta/`
+ * `intacta` NO es transmedia: transmedia es una colección de ficheros de VARIOS tipos que se catalogan por
+ * separado (un doc por PDF, por audiolibro…). Enrutarla por ahí era el error que dejaba una carpeta de solo
+ * imágenes con CERO documentos (test 67): su análisis no cuenta las imágenes y salían 0 miembros.
  */
-export async function ingestarSoftware(dirOrigen, { db: dbArg, reciclarOrigen = true } = {}) {
+async function ingestarBloqueVerbatim(dirOrigen, { db: dbArg, reciclarOrigen = true, naturaleza, cdu, rama, nombreDefecto } = {}) {
     const db = dbArg || await conectarDB();
-    const nombre = path.basename(dirOrigen).trim() || 'Software';
-    const cdu = '004'; // Informática/software por defecto (editable en la ficha)
-    const carpetaDestino = path.join(DIR_CDU, ...arbolCDU(cdu).segmentos, 'software', nombre);
+    const nombre = path.basename(dirOrigen).trim() || nombreDefecto;
+    const carpetaDestino = path.join(DIR_CDU, ...arbolCDU(cdu).segmentos, rama, nombre);
     const webBase = webDe(carpetaDestino);
 
-    // Anti-duplicado: si ya hay un software con esta ruta_base, no re-catalogar (evita duplicar un re-drop).
-    const previa = await db.collection('biblioteca').findOne({ naturaleza: 'software', ruta_base: webBase }, { projection: { _id: 1 } });
-    if (previa) return { ok: false, permanente: true, motivo: `ya catalogado el software «${nombre}»` };
+    // Anti-duplicado: si ya hay un documento con esta ruta_base, no re-catalogar (evita duplicar un re-drop).
+    const previa = await db.collection('biblioteca').findOne({ naturaleza, ruta_base: webBase }, { projection: { _id: 1 } });
+    if (previa) return { ok: false, permanente: true, motivo: `ya catalogado «${nombre}»` };
 
     const totales = await huella(dirOrigen);
     if (!totales.n) return { ok: false, motivo: 'carpeta vacía: nada que catalogar' };
@@ -607,15 +610,19 @@ export async function ingestarSoftware(dirOrigen, { db: dbArg, reciclarOrigen = 
     // 1) Copia verbatim + verificación (nunca se borra el origen si no quedó íntegra).
     const { integra, huella: copiado } = await copiarVerificado(dirOrigen, carpetaDestino);
     if (!integra) return { ok: false, motivo: 'la copia al árbol CDU no cuadró (el origen aún cambiaba): se conserva el origen' };
-    await fs.writeFile(path.join(carpetaDestino, MARCA_RUTA_FIJA), `software: ${nombre}\n`).catch(() => {});
+    await fs.writeFile(path.join(carpetaDestino, MARCA_RUTA_FIJA), `${naturaleza}: ${nombre}\n`).catch(() => {});
 
-    // 2) UN documento naturaleza:'software' (+ portada = 1ª imagen del paquete, si hay).
+    // 2) UN documento (+ portada = 1ª imagen del bloque, si hay). El software es su propio tipo_recurso; el
+    //    resto va como 'libro' + naturaleza:'material' (no es un libro, pero es LA cosa que se conserva: con
+    //    ficha, buscable y con su explorador de ficheros).
+    const esSw = naturaleza === 'software';
     const _id = new ObjectId();
     const doc = limpiarUndefined({
-        _id, tipo_recurso: 'software', naturaleza: 'software', titulo: nombre, cdu, idioma: 'es',
-        formatos: ['software'], ubicacion: { ambito: 'Sin asignar', estanteria: 'Sin asignar' },
+        _id, tipo_recurso: esSw ? 'software' : 'libro', naturaleza, titulo: nombre, cdu, idioma: 'es',
+        formatos: [esSw ? 'software' : 'material'], ubicacion: { ambito: 'Sin asignar', estanteria: 'Sin asignar' },
         ruta_base: webBase, ruta_fija: true, portada: (await primeraImagenDe(carpetaDestino)) || undefined,
-        software: { ficheros: totales.n, bytes: totales.bytes },
+        software: esSw ? { ficheros: totales.n, bytes: totales.bytes } : undefined,
+        bloque: esSw ? undefined : { ficheros: totales.n, bytes: totales.bytes },
         estado_verificacion: 'completado', fecha_ingreso: new Date(), fecha_creacion: new Date(),
     });
     await db.collection('biblioteca').insertOne(doc);
@@ -625,10 +632,26 @@ export async function ingestarSoftware(dirOrigen, { db: dbArg, reciclarOrigen = 
     let origenReciclado = false;
     if (reciclarOrigen) {
         const ahora = await huella(dirOrigen);
-        if (ahora.n === copiado.n && ahora.bytes === copiado.bytes) { await reciclarCarpeta(dirOrigen, 'software-ingerido').catch(() => {}); origenReciclado = true; }
+        if (ahora.n === copiado.n && ahora.bytes === copiado.bytes) { await reciclarCarpeta(dirOrigen, `${naturaleza}-ingerido`).catch(() => {}); origenReciclado = true; }
     }
     return { ok: true, _id: String(_id), titulo: nombre, cdu, web: webBase, ficheros: totales.n, origenReciclado };
 }
+
+/** SOFTWARE (`accion:'software'`): bloque verbatim en `004/software/<nombre>/`, 1 registro naturaleza:'software'. */
+export const ingestarSoftware = (dirOrigen, opts = {}) =>
+    ingestarBloqueVerbatim(dirOrigen, { ...opts, naturaleza: 'software', cdu: '004', rama: 'software', nombreDefecto: 'Software' });
+
+/**
+ * INTACTA (`accion:'intacta'`): la carpeta es UNA COSA — se conserva ÍNTEGRA y deja UN registro que apunta a
+ * ella. NO es transmedia (eso es una colección de ficheros de varios tipos, catalogados por separado) y no
+ * pretende decidir qué es: por eso `naturaleza:'material'`, con su explorador de ficheros. La CDU se deduce
+ * del nombre (editable en la ficha; el Conformador puede afinarla después).
+ */
+export const ingestarIntacta = (dirOrigen, opts = {}) =>
+    ingestarBloqueVerbatim(dirOrigen, {
+        ...opts, naturaleza: 'material', rama: 'intacta', nombreDefecto: 'Carpeta',
+        cdu: deducirCdu(path.basename(dirOrigen), []),
+    });
 
 /** Quita las claves con valor undefined (para no persistir campos vacíos y no violar el $jsonSchema). */
 function limpiarUndefined(obj) {

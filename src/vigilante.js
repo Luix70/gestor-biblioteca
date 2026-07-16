@@ -14,7 +14,7 @@ import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
 import { reciclar, reciclarCarpeta } from './utils/papelera.js';
-import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarLibroConMaterial } from './utils/transmedia.js';
+import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarIntacta, ingestarLibroConMaterial } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
 import { esAudio } from './utils/lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
@@ -554,7 +554,11 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 continue;
             }
             if (guiaCarpeta?.accion === 'intacta') {
-                unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta], intacta: true });
+                // INTACTA = «esto es UNA COSA: consérvala íntegra y déjame un registro». NO es transmedia (eso
+                // es una colección de ficheros de VARIOS tipos que se catalogan por separado). Enrutarla por
+                // transmedia era el fallo del test 67: su análisis no cuenta las imágenes, así que una carpeta
+                // de 142 páginas escaneadas salía con CERO documentos y quedaba invisible.
+                unidades.push({ esIntacta: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
             if (guiaCarpeta?.accion === 'software') {
@@ -1098,6 +1102,22 @@ async function procesarCola() {
                             if (rs.permanente) omitidasDefinitivas.add(u.carpeta);
                         }
                     } catch (err) { console.error(`  ✗ software falló: ${err.message} (se CONSERVA el origen)`); }
+                    continue;
+                }
+                // INTACTA (guía): la carpeta se conserva ÍNTEGRA en el árbol CDU y deja UN registro que apunta
+                // a ella (naturaleza:'material', con su explorador). No se procesa su contenido.
+                if (u.esIntacta) {
+                    console.log(`\n📦 Intacta «${path.basename(u.carpeta)}»: conservando íntegra (1 registro)…`);
+                    try {
+                        const ri = await ingestarIntacta(u.carpeta);
+                        if (ri.ok) {
+                            console.log(`  ✔ «${ri.titulo}» · ${ri.ficheros} ficheros · CDU ${ri.cdu} · ${ri.web}`);
+                            tally.intacta = (tally.intacta || 0) + 1; procesadas++;
+                        } else {
+                            console.warn(`  ✗ intacta: ${ri.motivo} (se CONSERVA el origen)`);
+                            if (ri.permanente) omitidasDefinitivas.add(u.carpeta);
+                        }
+                    } catch (err) { console.error(`  ✗ intacta falló: ${err.message} (se CONSERVA el origen)`); }
                     continue;
                 }
                 // LIBRO + MATERIAL AUXILIAR (guía): el documento principal por el PIPELINE NORMAL (libro de

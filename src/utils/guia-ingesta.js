@@ -32,8 +32,12 @@ export const NOMBRE_GUIA = '_guia.json';
 //   · omitir   → NO catalogar nada de esta carpeta (se deja intacta en el Inbox).
 //   · aplanar  → si contiene UNA sola subcarpeta, sube su contenido un nivel (deshace anidamientos inútiles).
 //   · explotar → libera SUS ficheros en la carpeta que la contiene y la elimina (los trata como sueltos allí).
-//   · intacta  → NO se procesa su contenido: se conserva VERBATIM (como transmedia) adjunta a un doc/colección
-//                (p. ej. carpeta de código junto a un PDF de programación, multimedia de una colección).
+//   · intacta  → la carpeta es UNA COSA: se conserva ÍNTEGRA en el árbol CDU y deja UN registro que apunta a
+//                ella (naturaleza:'material', con explorador de ficheros). Su contenido NO se procesa ni se
+//                decide qué es. NO es transmedia: eso es una colección de ficheros de VARIOS tipos que se
+//                catalogan POR SEPARADO (un doc por PDF, por audiolibro…). Enrutar `intacta` por transmedia era
+//                el fallo del test 67: su análisis no cuenta las imágenes → una carpeta de 142 páginas
+//                escaneadas salía con CERO documentos y quedaba invisible.
 //   · obra     → TODOS los documentos de la carpeta son TOMOS de UNA obra multivolumen (título = la carpeta).
 //   · software → paquete de software: se conserva VERBATIM en BLOQUE y se cataloga como UN registro
 //                (naturaleza:'software'); su previsualización es un explorador de ficheros de solo lectura.
