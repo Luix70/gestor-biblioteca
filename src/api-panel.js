@@ -61,6 +61,10 @@ import { buscarUnISBN, iniciarLoteISBN, estadoLoteISBN } from './utils/lote-isbn
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1, nfc: 1 };
 
+// Estado del BORRADO MASIVO en curso (trabajo de fondo con progreso + cancelación). Vive lo que dure el
+// proceso, como el de reindexado: borrar N documentos mueve N carpetas a la Papelera y eso tarda minutos.
+let trabajoBorrado = { en_curso: false, total: 0, hechos: 0, eliminados: 0, fallidos: 0, cancelar: false, titulo: '', error: null };
+
 // Raíz que puede EXPLORAR el explorador de archivos: si el doc cuelga de un árbol preservado (marcador
 // `.ruta_fija`/`.transmedia` — colección transmedia o de audiolibros), sube hasta esa raíz para poder navegar
 // TODA la colección; si no, la propia carpeta del documento. Confinado al árbol CDU.
@@ -1371,25 +1375,44 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
-    // Borrado MASIVO desde la Búsqueda (solo admin, contraseña). Recicla la carpeta de cada doc a la
-    // Papelera (recuperable), igual que el borrado individual. Devuelve cuántos se borraron / fallaron.
+    // Borrado MASIVO desde la Búsqueda (solo admin, contraseña). Recicla la carpeta de cada doc a la Papelera
+    // (recuperable), igual que el borrado individual. Es un TRABAJO DE FONDO con progreso y CANCELACIÓN: cada
+    // documento implica mover su carpeta a la Papelera, así que 500 tardan minutos — hacerlo dentro de la
+    // petición dejaba al usuario a ciegas y sin salida (y el navegador acababa cortando por timeout). Mismo
+    // patrón que Integridad / reindexar Búsqueda: POST lanza, GET .../estado informa, POST .../cancelar para.
     r.post('/documentos/eliminar-lote', async (req, res) => {
         try {
             if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
             const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter(id => ObjectId.isValid(id));
             if (!ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos válidos' });
+            if (trabajoBorrado.en_curso) return res.status(409).json({ ok: false, motivo: 'ya hay un borrado en curso' });
             const db = await conectarDB();
-            let eliminados = 0; const fallidos = [];
-            for (const id of ids) {
-                try {
-                    const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(id) });
-                    if (!doc) { fallidos.push(id); continue; }
-                    const r2 = await eliminarDocumento(db, doc);
-                    if (r2?.ok !== false) eliminados++; else fallidos.push(id);
-                } catch { fallidos.push(id); }
-            }
-            res.json({ ok: true, eliminados, fallidos: fallidos.length, total: ids.length });
+            trabajoBorrado = { en_curso: true, total: ids.length, hechos: 0, eliminados: 0, fallidos: 0, cancelar: false, titulo: '', error: null };
+            (async () => {
+                for (const id of ids) {
+                    if (trabajoBorrado.cancelar) break;   // CANCELADO: lo ya borrado se queda borrado (está en la Papelera)
+                    try {
+                        const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(id) });
+                        if (!doc) { trabajoBorrado.fallidos++; continue; }
+                        trabajoBorrado.titulo = doc.titulo || '';
+                        const r2 = await eliminarDocumento(db, doc);
+                        if (r2?.ok !== false) trabajoBorrado.eliminados++; else trabajoBorrado.fallidos++;
+                    } catch { trabajoBorrado.fallidos++; }
+                    finally { trabajoBorrado.hechos++; }
+                }
+                trabajoBorrado.en_curso = false;
+            })().catch((e) => { trabajoBorrado.error = e.message; trabajoBorrado.en_curso = false; });
+            res.json({ ok: true, lanzado: true, total: ids.length });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Progreso del borrado en curso (lo consulta el panel para pintar la barra).
+    r.get('/documentos/eliminar-lote/estado', (req, res) => res.json({ ok: true, ...trabajoBorrado }));
+    // CANCELAR: se detiene ANTES del siguiente documento. Lo ya borrado se queda borrado, pero está en la
+    // Papelera (recuperable), fiel a la política de nunca perder nada.
+    r.post('/documentos/eliminar-lote/cancelar', (req, res) => {
+        if (!trabajoBorrado.en_curso) return res.json({ ok: false, motivo: 'no hay ningún borrado en curso' });
+        trabajoBorrado.cancelar = true;
+        res.json({ ok: true, cancelando: true, hechos: trabajoBorrado.hechos, total: trabajoBorrado.total });
     });
 
     // ── Imágenes del carrusel (gestión manual desde la ficha; las mutaciones ya las restringe a admin

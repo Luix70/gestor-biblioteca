@@ -404,6 +404,13 @@ de ficheros clasificado por CDU.
       collation española que la consulta — si no, el índice no sirve al $sort) e idx_doi.
       ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
+    · BORRADO MASIVO (🗑, admin + contraseña) = TRABAJO DE FONDO con PROGRESO y CANCELACIÓN. Borrar N
+      documentos mueve N carpetas a la Papelera: 500 tardan MINUTOS, así que hacerlo dentro de la petición
+      dejaba al usuario a ciegas y sin salida (y el navegador acababa cortando por timeout). Ahora POST
+      /documentos/eliminar-lote solo LANZA (devuelve al instante), GET /documentos/eliminar-lote/estado da
+      {en_curso,total,hechos,eliminados,fallidos,titulo} para la barra, y POST /documentos/eliminar-lote/cancelar
+      detiene ANTES del siguiente documento. Lo ya borrado se queda borrado, pero está en la Papelera
+      (recuperable): fiel a la política de nunca perder nada. Mismo patrón que Integridad / reindexar Búsqueda.
     · MODO SELECCIÓN (admin, patrón ergonómico y móvil, COMÚN A TODA LA APP — Catálogo,
       ficha de autor, Colecciones, Obras, ficha de colección/obra y Estanterías/
       Ubicaciones; helpers reutilizables montarSelDocs + attachGesto). INTERACCIÓN

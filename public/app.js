@@ -6935,6 +6935,43 @@ async function seleccionarPorNFC() {
 }
 // Borrado MASIVO de los seleccionados (solo admin; renderBulk ya gatea ROL). Pide contraseña. Las
 // carpetas van a la Papelera (recuperable), como el borrado individual.
+// Sigue el BORRADO MASIVO en curso: barra de progreso + botón de CANCELAR. Sin esto, borrar 500 documentos
+// dejaba al usuario a ciegas varios minutos y sin salida (y el navegador acababa cortando la petición).
+// Cancelar detiene ANTES del siguiente documento; lo ya borrado está en la Papelera (recuperable).
+async function seguirBorradoLote(total) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;width:94vw">
+    <h3 style="margin:0 0 10px">🗑 Eliminando documentos…</h3>
+    <div style="height:10px;border-radius:6px;background:rgba(128,128,128,.25);overflow:hidden">
+      <div id="delBar" style="height:100%;width:0%;background:var(--acc);transition:width .3s"></div>
+    </div>
+    <div id="delTxt" class="muted" style="font-size:13px;margin-top:8px">0 / ${total}</div>
+    <div id="delTit" class="muted" style="font-size:12px;margin-top:2px;min-height:1.2em"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn bad" id="delCancel">✕ Cancelar</button></div>
+  </div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#delCancel').onclick = async () => {
+    $('#delCancel').disabled = true;
+    $('#delCancel').textContent = 'Cancelando…';
+    try { await api('/documentos/eliminar-lote/cancelar', { method: 'POST' }); } catch { /* ya habrá acabado */ }
+  };
+  let e = {};
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 700));
+    try { e = await api('/documentos/eliminar-lote/estado'); } catch { break; }
+    const pct = e.total ? Math.round((e.hechos / e.total) * 100) : 0;
+    if ($('#delBar')) $('#delBar').style.width = pct + '%';
+    if ($('#delTxt')) $('#delTxt').textContent = `${e.hechos} / ${e.total}${e.fallidos ? ` · ${e.fallidos} fallido(s)` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
+    if ($('#delTit')) $('#delTit').textContent = e.titulo ? recortar(e.titulo, 60) : '';
+    if (!e.en_curso) break;
+  }
+  cerrarCmp();
+  const cancelado = e.cancelar && e.hechos < e.total;
+  toast(
+    `Eliminado(s) ${e.eliminados || 0} libro(s)${e.fallidos ? ` · ${e.fallidos} fallido(s)` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''} → Papelera`,
+    cancelado || e.fallidos ? 'warn' : 'ok',
+  );
+}
+
 async function eliminarSeleccionados() {
   const n = selDocs.size;
   if (!n) return;
@@ -6944,6 +6981,8 @@ async function eliminarSeleccionados() {
   });
   if (pw == null) return;
   try {
+    // El borrado es un TRABAJO DE FONDO (cada documento mueve su carpeta a la Papelera: 500 tardan minutos).
+    // El POST solo lo LANZA; el progreso se sigue con /estado y se puede CANCELAR.
     const r = await api('/documentos/eliminar-lote', {
       method: 'POST',
       body: JSON.stringify({ ids: [...selDocs], password: pw }),
@@ -6952,10 +6991,8 @@ async function eliminarSeleccionados() {
       toast(r.motivo || 'No se pudo eliminar', 'bad');
       return;
     }
-    toast(
-      `Eliminado(s) ${r.eliminados} libro(s)${r.fallidos ? ` · ${r.fallidos} fallido(s)` : ''} → Papelera`,
-    );
     selDocs.clear();
+    await seguirBorradoLote(r.total || n);
     buscarCatalogo(estadoBusqueda.page || 1);
   } catch (e) {
     toast(e.message, 'bad');
