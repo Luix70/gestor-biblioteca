@@ -6752,8 +6752,7 @@ function renderBulk() {
   // Acciones sobre la selección (aparecen cuando hay algo seleccionado). Los botones se PLIEGAN en un panel
   // colapsable (como «🔎 Buscar y filtrar») para no saturar la barra: la CUENTA queda siempre visible.
   const accBtns = selDocs.size
-    ? `<button class="btn${soloSeleccion ? ' pri' : ''}" id="bkMostrarSel" title="Muestra SOLO los seleccionados (para revisar la selección y, en Modo selección, quitar los que no quieras). Vuelve a pulsar para mostrar todo.">${soloSeleccion ? '🗂 Mostrar todo' : '👁 Mostrar selección'}</button>
-    <button class="btn pri" id="bkCol">📚 Colección</button>
+    ? `<button class="btn pri" id="bkCol">📚 Colección</button>
     <button class="btn pri" id="bkObra">📖 Obra</button>
     <button class="btn pri" id="bkUbic">📍 Estantería</button>
     <button class="btn" id="bkQuitUbic" title="Quitar de su estantería/ámbito (pasan a «Sin asignar»)">🚫 Quitar de estantería</button>
@@ -6765,14 +6764,16 @@ function renderBulk() {
     <button class="btn" id="bkReclasEd" title="Reclasificar la EDITORIAL de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional). Muestra un informe por transición antes de aplicar.">🏢 Reclasificar editorial</button>
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
-    <button class="btn bad" id="bkDel">🗑 Eliminar</button>
-    <button class="btn" id="bkClear">Limpiar</button>`
+    <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
     : '';
-  // CUENTA + «Limpiar» SIEMPRE VISIBLES en la barra. «Limpiar» ya existía, pero enterrado dentro del panel
-  // plegable «⚙️ Acciones»: si la selección arrastraba documentos ya borrados, «Mostrar selección» no enseñaba
-  // nada y no había forma VISIBLE de vaciarla — te quedabas con un contador zombi y sin salida.
+  // GESTIÓN de la selección, SIEMPRE VISIBLE en la barra: contar · aislar · vaciar. Es lo que se hace CON la
+  // selección, y va aquí a propósito — el panel plegable «⚙️ Acciones» es para lo que se hace A los documentos
+  // (colección, obra, estantería, borrar…). Antes «Mostrar selección» y «Limpiar» vivían dentro del panel: si
+  // la selección arrastraba documentos ya borrados no se veía nada y no había forma VISIBLE de vaciarla —
+  // contador zombi y sin salida.
   const cuenta = selDocs.size
     ? `<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.
+       <button class="btn${soloSeleccion ? ' pri' : ''}" id="bkMostrarSel" title="Muestra SOLO los seleccionados (para revisar la selección y, en Modo selección, quitar los que no quieras). Vuelve a pulsar para mostrar todo.">${soloSeleccion ? '🗂 Mostrar todo' : '👁 Mostrar selección'}</button>
        <button class="btn bad" id="bkClearTop" title="Vaciar la selección. NO borra nada: solo desmarca.">✕ Limpiar selección</button>`
     : '';
   const g = colaEtqGuardada();
@@ -6824,16 +6825,16 @@ function renderBulk() {
     if ($('#bkReclasEd')) $('#bkReclasEd').onclick = () => reclasificarEditorialLote([...selDocs], `${selDocs.size} seleccionado(s)`);
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
-    // «Mostrar selección»: alterna la vista restringida a lo seleccionado (y re-busca).
-    if ($('#bkMostrarSel'))
-      $('#bkMostrarSel').onclick = () => {
-        soloSeleccion = !soloSeleccion;
-        buscarCatalogo(1);
-      };
     $('#bkDel').onclick = eliminarSeleccionados;
-    $('#bkClear').onclick = limpiarSeleccion;
   }
-  // El «Limpiar» de la barra (fuera del panel plegable) hace exactamente lo mismo.
+  // GESTIÓN de la selección (aislar / vaciar): viven en la BARRA, no en el panel de acciones → se cablean
+  // FUERA del bloque de arriba, que solo corre si el panel está montado.
+  //   · Mostrar selección: alterna la vista restringida a lo seleccionado (y re-busca).
+  if ($('#bkMostrarSel'))
+    $('#bkMostrarSel').onclick = () => {
+      soloSeleccion = !soloSeleccion;
+      buscarCatalogo(1);
+    };
   if ($('#bkClearTop')) $('#bkClearTop').onclick = limpiarSeleccion;
 }
 // Vacía la selección del catálogo. NO borra documentos: solo desmarca. Sale de «Mostrar selección» y, si la
