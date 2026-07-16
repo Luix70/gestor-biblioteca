@@ -189,7 +189,9 @@ async function main() {
         const fmt = js?.properties?.formatos;
         const ref = fmt?.items?.enum ? fmt.items : (Array.isArray(fmt?.enum) ? fmt : null);
         if (ref) {
-            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'chm', 'mobi', 'audio', 'video', 'software'].filter(v => !ref.enum.includes(v));
+            // 'material' = material NOTABLE que ningún visor abre (.docx/.lit/.nrg/.iso…): se cataloga con
+            // ficha (buscable + descargable) para que NUNCA quede solo en disco. Ver utils/criba-material.js.
+            const faltan = ['cbr', 'cbz', 'cb7', 'djvu', 'chm', 'mobi', 'audio', 'video', 'software', 'material'].filter(v => !ref.enum.includes(v));
             if (faltan.length) {
                 ref.enum = [...ref.enum, ...faltan];
                 await db.command({

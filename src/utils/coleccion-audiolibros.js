@@ -20,6 +20,7 @@ import { cduDeGenero, deducirIdioma, etiquetaDisco, leerISBNdeImagenes, mejorTit
 import { arbolCDU } from './cdu-arbol.js';
 import { resolverCabecera } from './colecciones.js';
 import { indexarDoc } from './indice-busqueda.js';
+import { esMaterialNotable } from './criba-material.js';
 import { agregarMetadatos, esAudio, leerMetadatosAudio } from './lector-audio.js';
 import { reciclarCarpeta } from './papelera.js';
 import { resolverPersona } from './resolver-persona.js';
@@ -202,11 +203,21 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
     // VÍDEOS: se catalogan como documentos miembro (descargables) → nada de contenido queda invisible.
     const videosOut = files.filter((f) => esVideo(f.nombre)).sort(porRelNat)
         .map((f) => ({ rel: f.rel, titulo: limpiarTitulo(path.basename(f.nombre, path.extname(f.nombre))), ext: path.extname(f.nombre).slice(1).toLowerCase() }));
-    // «otros» = ficheros que NO se catalogan pero tampoco son ruido → van al MANIFIESTO (para que se SEPA
-    // que están ahí, aunque no tengan visor).
-    const otros = files.filter((f) => !esAudio(f.nombre) && !esPdf(f.nombre) && !esVideo(f.nombre) && !esImagen(f.nombre) && !esRuido(f.nombre))
-        .map((f) => f.rel);
-    return { nombre: nombreLibro, audiolibro, pdfs: pdfsOut, videos: videosOut, otros, plano, imagenes: imagenesLibro, portadaRel: portadaLibroRel };
+    // Lo que NINGÚN visor abre (ni audio, ni PDF, ni vídeo, ni imagen) se parte en dos con la CRIBA:
+    //   · MATERIAL notable (.docx/.lit/.nrg/.iso…) → FICHA propia: buscable y descargable, nunca se queda solo
+    //     en disco (invariante: lo que entra y no es duplicado exacto acaba con un registro que apunta a él).
+    //   · el RESTO (código fuente, recursos de una app, READMEs…) → MANIFIESTO: se preserva y se deja
+    //     constancia, pero no ensucia el catálogo con miles de .cpp/.h. Ver utils/criba-material.js.
+    const sinVisor = files.filter((f) => !esAudio(f.nombre) && !esPdf(f.nombre) && !esVideo(f.nombre) && !esImagen(f.nombre) && !esRuido(f.nombre));
+    const material = [], otros = [];
+    for (const f of sinVisor.sort(porRelNat)) {
+        let bytes = null;
+        try { bytes = (await fs.stat(f.abs)).size; } catch { /* sin stat: la criba decide por formato y nombre */ }
+        if (esMaterialNotable(f.rel, bytes))
+            material.push({ rel: f.rel, titulo: limpiarTitulo(path.basename(f.nombre, path.extname(f.nombre))), ext: path.extname(f.nombre).slice(1).toLowerCase() });
+        else otros.push(f.rel);
+    }
+    return { nombre: nombreLibro, audiolibro, pdfs: pdfsOut, videos: videosOut, material, otros, plano, imagenes: imagenesLibro, portadaRel: portadaLibroRel };
 }
 
 /** ¿Es una PARTE (disco/sección) de un libro, y no un libro/colección por sí misma? Discos «[Disc 1]»,
@@ -292,7 +303,8 @@ export async function analizarColeccionAudiolibros(dir) {
         const nPdfs = miembros.reduce((s, m) => s + m.pdfs.length, 0);
         const nVideos = miembros.reduce((s, m) => s + m.videos.length, 0);
         const nOtros = miembros.reduce((s, m) => s + m.otros.length, 0);
-        colecciones.push({ nombre: c.nombre, dir: c.dir, miembros, totales: { audiolibros: nAudiolibros, pdfs: nPdfs, videos: nVideos, otros: nOtros } });
+        const nMaterial = miembros.reduce((s, m) => s + (m.material?.length || 0), 0);
+        colecciones.push({ nombre: c.nombre, dir: c.dir, miembros, totales: { audiolibros: nAudiolibros, pdfs: nPdfs, videos: nVideos, material: nMaterial, otros: nOtros } });
     }
     return { colecciones };
 }
@@ -342,7 +354,8 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
             const falta = c.miembros.some((m) =>
                 (m.audiolibro && !yaAudio.has(m.audiolibro.titulo))
                 || (m.pdfs || []).some((p) => !yaFichero.has(path.basename(p.rel)))
-                || (m.videos || []).some((v) => !yaFichero.has(path.basename(v.rel))));
+                || (m.videos || []).some((v) => !yaFichero.has(path.basename(v.rel)))
+                || (m.material || []).some((x) => !yaFichero.has(path.basename(x.rel))));
             if (!falta) {
                 resultados.push({ coleccion: c.nombre, ok: false, permanente: true, motivo: `ya existe COMPLETA (${previos.length} documento/s): no se re-cataloga` });
                 continue;
@@ -454,6 +467,25 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
                 insertados++;
             }
 
+            // 3d) MATERIAL NOTABLE (.docx/.lit/.nrg/.iso…): documento miembro SIN visor pero VISIBLE (buscable y
+            //      descargable) → cumple el invariante de no dejar nada solo en disco. Lo que NO pasa la criba
+            //      (código fuente, recursos, READMEs) va al manifiesto: preservado, pero sin ensuciar el catálogo.
+            for (const x of m.material || []) {
+                if (yaFichero.has(path.basename(x.rel))) continue;   // ya catalogado → no duplicar
+                const _id = new ObjectId();
+                const d = path.posix.dirname(x.rel);
+                const rutaBase = d === '.' ? webLibro : `${webLibro}/${d}`;
+                await bib.insertOne(base({
+                    _id, tipo_recurso: 'libro', naturaleza: 'material', titulo: x.titulo, formatos: ['material'],
+                    ruta_base: rutaBase, nombre_archivo: path.basename(x.rel),
+                    portada: webPortadaLibro || undefined,
+                    imagenes: imagenesSinDueno && imagenesSinDueno.length ? imagenesSinDueno : undefined,
+                }));
+                imagenesSinDueno = null;
+                await indexarDoc(db, _id).catch(() => {});
+                insertados++;
+            }
+
             for (const o of m.otros) manifiesto.push(`${m.nombre}/${o}`);
         }
 
@@ -461,7 +493,7 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
         //    deja constancia de que se revisó). Va en la raíz de la colección (ruta_fija, no se poda).
         const manif = [
             `Colección: ${c.nombre}`,
-            `Catalogado: ${c.totales.audiolibros} audiolibro(s), ${c.totales.pdfs} PDF(s), ${c.totales.videos} vídeo(s).`,
+            `Catalogado: ${c.totales.audiolibros} audiolibro(s), ${c.totales.pdfs} PDF(s), ${c.totales.videos} vídeo(s), ${c.totales.material || 0} material notable.`,
             '',
             manifiesto.length ? `Ficheros PRESERVADOS pero NO catalogados (${manifiesto.length}) — están aquí, en esta carpeta:` : 'No hay ficheros sin catalogar.',
             ...manifiesto.map((x) => `  · ${x}`),
