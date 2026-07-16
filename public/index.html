@@ -17,18 +17,22 @@
           <div class="logo">📚<img class="logoimg" src="/logo.png" alt="" onerror="this.remove()" /></div>
           <div><b>Bibliotheca Ludoviciana</b><small>Panel de control</small></div>
         </div>
+        <!-- Orden del menú: primero LA BIBLIOTECA (lo que se consulta a diario, del todo a las partes:
+             catálogo → obras → colecciones → autores → editoriales → dónde está), luego EL TRABAJO (dar de
+             alta y ver qué hace el sistema), y al final LO EXCEPCIONAL (lo que falló, lo que se tiró) y la
+             vista de conjunto. -->
         <nav id="nav">
           <button data-p="search" class="on"><span class="ic">🔍</span> Catálogo</button>
-          <button data-p="dashboard"><span class="ic">▥</span> Dashboard</button>
-          <button data-p="activity"><span class="ic">📡</span> Actividad</button>
-          <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
-          <button data-p="pap"><span class="ic">♻</span> Papelera</button>
           <button data-p="obras"><span class="ic">📖</span> Obras</button>
           <button data-p="colecciones"><span class="ic">🗂️</span> Colecciones</button>
           <button data-p="autores"><span class="ic">👤</span> Autores</button>
           <button data-p="editoriales"><span class="ic">🏢</span> Editoriales</button>
           <button class="admin-only" data-p="ubic"><span class="ic">📍</span> Ubicaciones</button>
           <button class="admin-only" data-p="inbox"><span class="ic">📥</span> Inbox</button>
+          <button data-p="activity"><span class="ic">📡</span> Actividad</button>
+          <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
+          <button data-p="pap"><span class="ic">♻</span> Papelera</button>
+          <button data-p="dashboard"><span class="ic">▥</span> Dashboard</button>
         </nav>
         <div class="sb-foot"><span id="appVer" title="Versión desplegada">v1</span> · cuadro de mando<br /><span id="clock"></span></div>
       </aside>
