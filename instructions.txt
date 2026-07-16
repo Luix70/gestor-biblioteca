@@ -656,8 +656,11 @@ de ficheros clasificado por CDU.
       4 KB: un .txt diminuto es una nota, no un documento). Lo que PASA la criba se cataloga como documento
       miembro `naturaleza:'material'` / `formatos:['material']` — SIN visor pero VISIBLE: buscable, con ficha y
       descargable (mismo criterio que los vídeos). Lo que NO pasa se conserva verbatim y se lista en el
-      manifiesto `_contenido.txt`. (Ya en colección-de-audiolibros; el enum `formatos` gana 'material' → correr
-      setup-mongo tras desplegar.)
+      manifiesto `_contenido.txt`. Aplica en COLECCIÓN-DE-AUDIOLIBROS **y en TRANSMEDIA** (que antes solo
+      catalogaba PDFs y audiolibros: sus vídeos y su material quedaban invisibles; ahora los vídeos se
+      catalogan SIEMPRE —naturaleza:'video'— y escribe también su `_contenido.txt`). `esVideo`/`esImagenArchivo`
+      viven en criba-material.js como FUENTE ÚNICA. El enum `formatos` gana 'material' → correr setup-mongo
+      tras desplegar.
     · VIGILANTE (cableado): un drop en el Inbox se enruta así — TRANSMEDIA si trae marcador
       `.transmedia`, contenido interactivo (.exe/.swf/.app) o audio CON estructura (≥2 PDFs de
       lectura o carpetas «Stage N»); si no, AUDIOLIBRO si hay audio suelto (≤1 PDF, sin

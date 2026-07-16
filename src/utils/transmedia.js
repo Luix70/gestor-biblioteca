@@ -25,6 +25,7 @@ import { reciclarCarpeta } from './papelera.js';
 import { rasterizarPaginas } from './rasterizar-pdf.js';
 import { resolverPersona } from './resolver-persona.js';
 import { esAudio } from './lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
+import { esImagenArchivo, esMaterialNotable, esVideo } from './criba-material.js';
 
 // Subcarpeta OCULTA con las portadas DERIVADAS (1ª página rasterizada). El prefijo «.» hace que `ignorar`
 // (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
@@ -267,11 +268,29 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
         });
     }
 
+    // VÍDEOS y MATERIAL NOTABLE. Hasta ahora transmedia SOLO catalogaba PDFs y audiolibros: los vídeos y los
+    // documentos que ningún visor abre (.docx/.lit/.nrg/.iso…) se copiaban verbatim pero quedaban INVISIBLES —
+    // justo lo que el invariante prohíbe (lo que entra y no es duplicado exacto debe tener un registro que
+    // apunte a él). Los vídeos se catalogan SIEMPRE (como ya hacía colección-de-audiolibros); del resto decide
+    // la CRIBA: lo notable recibe ficha y la basura (código fuente, node_modules, READMEs) va al manifiesto.
+    const videos = [], material = [], sinCatalogar = [];
+    for (const f of ficheros) {
+        if (esPdf(f.nombre) || esAudio(f.nombre) || esImagenArchivo(f.nombre)) continue; // ya tratados arriba
+        if (esVideo(f.nombre)) { videos.push({ rel: f.rel, titulo: tituloDeArchivo(f.nombre) }); continue; }
+        let bytes = null;
+        try { bytes = (await fs.stat(f.abs)).size; } catch { /* sin stat: la criba decide por formato y nombre */ }
+        if (esMaterialNotable(f.rel, bytes)) material.push({ rel: f.rel, titulo: tituloDeArchivo(f.nombre) });
+        else sinCatalogar.push(f.rel);
+    }
+
     const cdu = deducirCdu(nombreColeccion, pdfs.slice(0, 30).map((f) => f.nombre));
     return {
         raiz, nombreColeccion, cdu, idioma,
-        totales: { pdfs: pdfs.length, audios: audios.length, covers: covers.length, audiolibros: audiolibros.length, ficheros: ficheros.length },
-        miembros, audiolibros,
+        totales: {
+            pdfs: pdfs.length, audios: audios.length, covers: covers.length, audiolibros: audiolibros.length,
+            videos: videos.length, material: material.length, sinCatalogar: sinCatalogar.length, ficheros: ficheros.length,
+        },
+        miembros, audiolibros, videos, material, sinCatalogar,
     };
 }
 
@@ -356,7 +375,7 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
     // balde). Claves: los PDFs por `nombre_archivo`; los audiolibros por `titulo` (no tienen fichero único).
     const colPrevia = await db.collection('colecciones').findOne(
         { nombre: plan.nombreColeccion }, { collation: { locale: 'es', strength: 1 }, projection: { _id: 1 } });
-    let miembros = plan.miembros, audiolibros = plan.audiolibros;
+    let miembros = plan.miembros, audiolibros = plan.audiolibros, videos = plan.videos, material = plan.material;
     if (colPrevia) {
         const previos = await db.collection('biblioteca')
             .find({ coleccion: colPrevia._id }, { projection: { nombre_archivo: 1, titulo: 1, rol_material: 1 } }).toArray();
@@ -364,9 +383,11 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         const yaAudio = new Set(previos.filter((d) => d.rol_material === 'audiolibro').map((d) => d.titulo).filter(Boolean));
         miembros = plan.miembros.filter((m) => !yaFichero.has(m.nombre_archivo));
         audiolibros = plan.audiolibros.filter((a) => !yaAudio.has(a.titulo));
-        if (!miembros.length && !audiolibros.length)
+        videos = plan.videos.filter((v) => !yaFichero.has(path.basename(v.rel)));
+        material = plan.material.filter((x) => !yaFichero.has(path.basename(x.rel)));
+        if (!miembros.length && !audiolibros.length && !videos.length && !material.length)
             return { ok: false, permanente: true, motivo: `ya existe la colección «${plan.nombreColeccion}» COMPLETA (${previos.length} documento/s): no se re-cataloga (evita duplicados)` };
-        console.log(`  ↻ «${plan.nombreColeccion}» ya existe con ${previos.length} documento/s: se COMPLETA con lo que falta (${miembros.length} PDF · ${audiolibros.length} audiolibro/s).`);
+        console.log(`  ↻ «${plan.nombreColeccion}» ya existe con ${previos.length} documento/s: se COMPLETA con lo que falta (${miembros.length} PDF · ${audiolibros.length} audiolibro/s · ${videos.length} vídeo/s · ${material.length} material).`);
     }
 
     // Destino: <árbol CDU>/transmedia/<nombre-colección>/… (una sola rama; la estructura interna se preserva).
@@ -465,6 +486,43 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         await indexarDoc(db, _id).catch(() => {});
         insertados++;
     }
+
+    // 3c) VÍDEOS → documento propio (naturaleza:'video'): sin visor para los códecs que el navegador no
+    //     decodifica, pero VISIBLE y descargable. Antes NO se catalogaban en transmedia (solo en colAudio).
+    for (const v of videos) {
+        const _id = new ObjectId();
+        await bib.insertOne(limpiarUndefined(baseDoc({
+            _id, titulo: v.titulo, tipo_recurso: 'libro', naturaleza: 'video', formatos: ['video'],
+            nombre_archivo: path.basename(v.rel), ruta_base: carpetaWebDeRel(v.rel),
+        })));
+        await indexarDoc(db, _id).catch(() => {});
+        insertados++;
+    }
+
+    // 3d) MATERIAL NOTABLE (.docx/.lit/.nrg/.iso…) que pasó la CRIBA → ficha propia (sin visor, pero buscable y
+    //     descargable). Lo que NO pasó (código fuente, node_modules, READMEs) va al manifiesto de abajo.
+    for (const x of material) {
+        const _id = new ObjectId();
+        await bib.insertOne(limpiarUndefined(baseDoc({
+            _id, titulo: x.titulo, tipo_recurso: 'libro', naturaleza: 'material', formatos: ['material'],
+            nombre_archivo: path.basename(x.rel), ruta_base: carpetaWebDeRel(x.rel),
+        })));
+        await indexarDoc(db, _id).catch(() => {});
+        insertados++;
+    }
+
+    // 3e) MANIFIESTO de lo PRESERVADO pero NO catalogado (lo que la criba dejó fuera): deja constancia de que
+    //     está ahí y de que se revisó. En la raíz de la colección (ruta_fija → no se poda).
+    const manif = [
+        `Colección transmedia: ${plan.nombreColeccion}`,
+        `Catalogado: ${plan.miembros.length} PDF · ${plan.audiolibros.length} audiolibro(s) · ${plan.videos.length} vídeo(s) · ${plan.material.length} material notable.`,
+        '',
+        plan.sinCatalogar.length
+            ? `Ficheros PRESERVADOS pero NO catalogados (${plan.sinCatalogar.length}) — están aquí, en esta carpeta:`
+            : 'No hay ficheros sin catalogar.',
+        ...plan.sinCatalogar.map((x) => `  · ${x}`),
+    ].join('\n');
+    await fs.writeFile(path.join(carpetaColeccion, '_contenido.txt'), manif + '\n').catch(() => {});
 
     // 4) Reciclar el origen del Inbox — pero SOLO si NO ha cambiado desde que se copió (por si la copia había
     //    pausado durante la verificación y luego resumió: no mover una carpeta que aún se está escribiendo).
