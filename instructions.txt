@@ -616,6 +616,22 @@ de ficheros clasificado por CDU.
       subcarpetas con audio son DISCOS de la misma obra («CD1/CD2/CD3», «Título CD N», «Disco 2»…,
       misma base) → es UN solo audiolibro repartido en CDs (no se parte; si no, CD2/CD3 caerían en
       el anti-duplicados por título). Anti-duplicados por título.
+    · FORMATOS DE AUDIO — FUENTE ÚNICA en `utils/lector-audio.js` (EXT_AUDIO/esAudio), que importan el
+      vigilante y transmedia (antes cada uno tenía su lista, más ESTRECHA → audiolibros invisibles).
+      Rango AMPLIO a propósito: .mp3 .m4a .m4b .m4p .aac .ogg .oga .opus .flac .wav .wma .aax .aa .ape
+      .alac .aiff .aif .mka .wv (Audible .aax/.aa incluidos). `music-metadata` no lee TODOS (p. ej. .aax
+      con DRM), pero la DETECCIÓN por extensión debe reconocerlos igual para NO PERDERLOS: sin tags, el
+      audiolibro se identifica por el NOMBRE (parseCarpeta) — nunca se ignora.
+    · AUDIO MONOLÍTICO (un fichero = un audiolibro entero). Dos vías, antes AMBAS lo perdían:
+      (a) SUELTO en la raíz del Inbox: el pipeline por-fichero no lo cataloga (detectarTipo='desconocido')
+          → el vigilante lo ENVUELVE en su propia subcarpeta (pre-paso `envolverAudiosSueltos`, solo si el
+          fichero está ESTABLE vía `ficheroEstable`; mueve, nunca borra) y así lo cataloga la maquinaria de
+          audiolibro (ID3, portada embebida, playlist, ruta_fija). Cada audio suelto = 1 audiolibro.
+      (b) DENTRO de una carpeta TRANSMEDIA: `analizarTransmedia` solo catalogaba el audio que colgaba de una
+          carpeta-unidad; el de la RAÍZ (carpetaUnidad=null) se SALTABA → se copiaba verbatim pero NO se
+          catalogaba (invisible en Búsqueda; el origen iba a la Papelera como «transmedia-ingerido»). Ahora
+          cada audio monolítico de la raíz se cataloga como su propio audiolibro (ruta_base = la raíz de la
+          colección). Nada se pierde: la copia al árbol CDU se VERIFICA (huella) antes de reciclar el origen.
     · ANTI-BUCLE: un audiolibro «ya catalogado» (o una colección transmedia «ya existe») devuelve
       `permanente:true`; el vigilante lo añade a `omitidasDefinitivas` y NO lo reintenta (si no, la
       carpeta —conservada en el Inbox con .noborrar— se reprocesaría en cada escaneo).

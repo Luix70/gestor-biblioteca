@@ -9,7 +9,15 @@
 import { parseFile } from 'music-metadata';
 import path from 'node:path';
 
-export const EXT_AUDIO = ['.mp3', '.m4a', '.m4b', '.ogg', '.oga', '.opus', '.wav', '.aac', '.flac', '.wma'];
+// FUENTE ÚNICA de extensiones de audio de TODO el sistema (detección de audiolibro/transmedia + vigilante +
+// explorador). Amplia a propósito: audiolibros comerciales (Audible .aax/.aa), Apple Lossless (.m4b/.m4p/.alac),
+// sin comprimir (.wav/.aiff), Windows Media (.wma), APE, Matroska audio (.mka), WavPack (.wv). `music-metadata`
+// no lee TODOS (p. ej. .aax con DRM), pero la DETECCIÓN por extensión debe reconocerlos igualmente para NO
+// perderlos: si no se leen los tags, el audiolibro se identifica por el nombre (parseCarpeta) — nunca se ignora.
+export const EXT_AUDIO = [
+    '.mp3', '.m4a', '.m4b', '.m4p', '.aac', '.ogg', '.oga', '.opus', '.flac', '.wav',
+    '.wma', '.aax', '.aa', '.ape', '.alac', '.aiff', '.aif', '.mka', '.wv',
+];
 export const esAudio = (n) => EXT_AUDIO.includes(path.extname(n).toLowerCase());
 
 // Quita el sufijo de DISCO del álbum: «Le grand Meaulnes CD1» / «… (CD 2)» / «… Disco 3» → «Le grand Meaulnes».

@@ -144,7 +144,8 @@ export function aplicarPerfilAContexto(contexto, perfil) {
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 const EXT_DOC = new Set(['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.chm']);
 const EXT_IMG = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.gif', '.bmp']);
-const EXT_AUDIO = new Set(['.mp3', '.m4a', '.m4b', '.flac', '.ogg', '.opus', '.aac', '.wav']);
+// Mismo rango AMPLIADO que lector-audio.js (fuente única): Audible (.aax/.aa), Apple Lossless, .wma, etc.
+const EXT_AUDIO = new Set(['.mp3', '.m4a', '.m4b', '.m4p', '.aac', '.ogg', '.oga', '.opus', '.flac', '.wav', '.wma', '.aax', '.aa', '.ape', '.alac', '.aiff', '.aif', '.mka', '.wv']);
 const EXT_VIDEO = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm']);
 const EXT_COMPR = new Set(['.zip', '.rar', '.7z', '.iso']);
 const _ignorar = (n) => n.startsWith('@') || n.startsWith('.') || n.startsWith('#');
