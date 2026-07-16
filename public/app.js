@@ -6768,7 +6768,13 @@ function renderBulk() {
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>
     <button class="btn" id="bkClear">Limpiar</button>`
     : '';
-  const cuenta = selDocs.size ? `<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.` : '';
+  // CUENTA + «Limpiar» SIEMPRE VISIBLES en la barra. «Limpiar» ya existía, pero enterrado dentro del panel
+  // plegable «⚙️ Acciones»: si la selección arrastraba documentos ya borrados, «Mostrar selección» no enseñaba
+  // nada y no había forma VISIBLE de vaciarla — te quedabas con un contador zombi y sin salida.
+  const cuenta = selDocs.size
+    ? `<span style="margin-left:auto"></span><b>${selDocs.size}</b> sel.
+       <button class="btn bad" id="bkClearTop" title="Vaciar la selección. NO borra nada: solo desmarca.">✕ Limpiar selección</button>`
+    : '';
   const g = colaEtqGuardada();
   const resume =
     g && 'NDEFReader' in window && !selDocs.size
@@ -6825,14 +6831,20 @@ function renderBulk() {
         buscarCatalogo(1);
       };
     $('#bkDel').onclick = eliminarSeleccionados;
-    $('#bkClear').onclick = () => {
-      selDocs.clear();
-      soloSeleccion = false; // al vaciar la selección, salir de «Mostrar selección»
-      $$('#searchResults .sel').forEach((c) => c.classList.remove('sel'));
-      renderBulk();
-      if ($('#searchResults').dataset.solo === '1') buscarCatalogo(1); // estaba filtrando por selección
-    };
+    $('#bkClear').onclick = limpiarSeleccion;
   }
+  // El «Limpiar» de la barra (fuera del panel plegable) hace exactamente lo mismo.
+  if ($('#bkClearTop')) $('#bkClearTop').onclick = limpiarSeleccion;
+}
+// Vacía la selección del catálogo. NO borra documentos: solo desmarca. Sale de «Mostrar selección» y, si la
+// vista estaba filtrada por la selección, la recarga (si no, quedaría mostrando un filtro ya vacío).
+function limpiarSeleccion() {
+  selDocs.clear();
+  soloSeleccion = false;
+  $$('#searchResults .sel').forEach((c) => c.classList.remove('sel'));
+  const estabaFiltrado = $('#searchResults').dataset.solo === '1';
+  renderBulk();
+  if (estabaFiltrado) buscarCatalogo(1);
 }
 // Selecciona TODOS los resultados de la búsqueda actual (todas las páginas, respeta filtros incl. con/sin NFC).
 async function selTodosResultados() {
