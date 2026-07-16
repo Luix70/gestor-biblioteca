@@ -645,6 +645,19 @@ de ficheros clasificado por CDU.
       (`copiarVerificado(..., {limpiarDestino:false})`): se fusiona, para no borrar las portadas derivadas ni
       los ficheros de los documentos ya catalogados. → RE-SOLTAR UNA COLECCIÓN INCOMPLETA LA COMPLETA.
       (transmedia.js · ingestarTransmedia; coleccion-audiolibros.js · ingestarColeccionAudiolibros.)
+    · MATERIAL NOTABLE + CRIBA (utils/criba-material.js · esMaterialNotable). INVARIANTE: lo que entra y no es
+      un duplicado exacto debe acabar con un REGISTRO en la BD que apunte a él — preservarlo en disco NO basta
+      (sin registro es invisible, y eso equivale a perderlo). Pero catalogar TODO lo no leíble sería peor: una
+      carpeta con código fuente o un node_modules metería miles de .cpp/.h —y de README/LICENSE, que también
+      son .txt— como documentos. Por eso la criba tiene TRES capas: (1) FORMATO documental (.txt .rtf .doc/.docx
+      .odt .ppt .xls .lit .fb2 .pdb .prc .iso .nrg .mdf .bin .cue .img…; el código fuente nunca entra);
+      (2) RUIDO ESTRUCTURAL (nada bajo node_modules/.git/dist/build/__MACOSX/venv…); (3) NOMBRE de
+      acompañamiento (README/LICENSE/CHANGELOG/package…) + tamaño mínimo para texto plano (CRIBA_MIN_BYTES_TXT,
+      4 KB: un .txt diminuto es una nota, no un documento). Lo que PASA la criba se cataloga como documento
+      miembro `naturaleza:'material'` / `formatos:['material']` — SIN visor pero VISIBLE: buscable, con ficha y
+      descargable (mismo criterio que los vídeos). Lo que NO pasa se conserva verbatim y se lista en el
+      manifiesto `_contenido.txt`. (Ya en colección-de-audiolibros; el enum `formatos` gana 'material' → correr
+      setup-mongo tras desplegar.)
     · VIGILANTE (cableado): un drop en el Inbox se enruta así — TRANSMEDIA si trae marcador
       `.transmedia`, contenido interactivo (.exe/.swf/.app) o audio CON estructura (≥2 PDFs de
       lectura o carpetas «Stage N»); si no, AUDIOLIBRO si hay audio suelto (≤1 PDF, sin
