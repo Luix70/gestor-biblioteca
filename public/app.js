@@ -2919,6 +2919,7 @@ function pintarDoc(r, ctx) {
   const botones = `<div class="det-acts">
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
       <button class="fbtn" id="actArchivos" title="Explorar y descargar TODOS los archivos de este documento / su colección (también los no catalogados: vídeos, extras…)">🗂️ Archivos</button>
+      <button class="fbtn admin-only" id="actAdjuntar" title="COMPLETAR el documento con los ficheros que le faltan: el PDF/EPUB de un audiolibro que solo tiene audio, o los audios de un libro que solo tiene texto. Se adjuntan a su carpeta: el audio va a la playlist y el texto al selector del visor.">📎 Adjuntar audio/texto</button>
       <button class="fbtn admin-only" id="actImgs" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">🖼️ Imágenes</button>
       <button class="fbtn admin-only" id="actMedir" title="Estimar el tamaño físico del libro (cm) sobre la alfombrilla reglada">📐 Medir</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
@@ -2982,6 +2983,7 @@ function pintarDoc(r, ctx) {
     if (ce2) ce2.onclick = () => fichaEditar(d, r);
     if ($('#fminEdit')) $('#fminEdit').onclick = () => fichaEditar(d, r); // «✏️ Editar» de la cabecera
     if ($('#actArchivos')) $('#actArchivos').onclick = () => explorarArchivos(d._id);
+    if ($('#actAdjuntar')) $('#actAdjuntar').onclick = () => adjuntarADoc(d._id, r);
     const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []), { url: r.archivo_url, nombre: r.nombre_archivo });
     if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
     if ($('#actImgsCar')) $('#actImgsCar').onclick = editarImgs; // duplicado en el encabezado del carrusel
@@ -3047,15 +3049,33 @@ function pintarDoc(r, ctx) {
     };
   // Lector embebido (PDF/EPUB/cómic): se inicializa PEREZOSAMENTE al abrir su sección plegable (evita
   // renderizar en un contenedor oculto de tamaño 0 y no descarga el fichero hasta que se pide leerlo).
-  const _nom = (r.nombre_archivo || '').toLowerCase();
+  // VARIOS TEXTOS (`textos[]`): al elegir otro en el selector pasa a ser el que abre el visor. Es un cambio de
+  // VISTA (solo cliente): el texto PRINCIPAL del documento (`nombre_archivo`) no se toca. Se re-pinta la sección
+  // de lectura y se re-inicializa el lector con el texto elegido.
+  const cableaSelTextos = () => {
+    const s = $('#txtSel');
+    if (!s) return;
+    s.onchange = () => {
+      const t = (r.textos || [])[+s.value];
+      if (!t || !t.ruta) return;
+      r.archivo_url = t.ruta;
+      r.nombre_archivo = t.ruta.split('/').pop();
+      const cont = $('#lectDet') && $('#lectDet').querySelector('div');
+      if (!cont) return;
+      cont.innerHTML = previewArchivo(r);   // re-pinta el visor del texto elegido (y el selector, ya marcado)
+      initLector();
+    };
+  };
   const initLector = () => {
-    if (r.archivo_url && _nom.endsWith('.epub')) iniciarLectorEpub(encUrl(r.archivo_url));
-    else if (r.archivo_url && _nom.endsWith('.pdf')) iniciarLectorPdf(encUrl(r.archivo_url));
-    else if (/\.(cbz|cbr|cb7|djvu)$/.test(_nom)) iniciarLectorComic(d._id);
-    else if (/\.(mobi|azw3?)$/.test(_nom)) iniciarLectorMobi(d._id);
-    else if (_nom.endsWith('.chm')) iniciarLectorChm(d._id);
+    const nom = (r.nombre_archivo || '').toLowerCase();   // se lee en CADA init: puede cambiar con el selector
+    if (r.archivo_url && nom.endsWith('.epub')) iniciarLectorEpub(encUrl(r.archivo_url));
+    else if (r.archivo_url && nom.endsWith('.pdf')) iniciarLectorPdf(encUrl(r.archivo_url));
+    else if (/\.(cbz|cbr|cb7|djvu)$/.test(nom)) iniciarLectorComic(d._id);
+    else if (/\.(mobi|azw3?)$/.test(nom)) iniciarLectorMobi(d._id);
+    else if (nom.endsWith('.chm')) iniciarLectorChm(d._id);
     else if (d.tipo_recurso === 'software') iniciarExploradorSoftware(d._id);
     if (r.audios && r.audios.length) iniciarReproductorAudio(r.doc && r.doc._id, r.audios); // audiolibro / lectura con audio: playlist
+    cableaSelTextos();
   };
   const ld = $('#lectDet');
   if (ld) {
@@ -6092,7 +6112,88 @@ function pintarExplorador(r) {
   $('#expX').onclick = cerrarCmp;
 }
 
+// COMPLETAR un documento con los ficheros que le faltan: el PDF/EPUB de un audiolibro que solo tiene audio, o
+// los audios de un libro que solo tiene texto. Sube a POST /api/documentos/:id/completar → el audio entra en la
+// playlist (`audios[]`), el texto en el selector del visor (`textos[]`) y el resto queda como material en su
+// carpeta. Solo AÑADE: nunca pisa ni borra lo que ya había.
+async function adjuntarADoc(id, r) {
+  const esAudiolibro = (r.naturaleza || (r.doc && r.doc.naturaleza)) === 'audiolibro';
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;width:94vw;max-height:90vh;overflow:auto">
+    <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">📎 Adjuntar audio/texto</h3><button class="btn" id="adjX">✕</button></div>
+    <p class="muted" style="font-size:13px;margin:8px 0">
+      Completa este documento con lo que le falte: el <b>PDF/EPUB</b> de un audiolibro, o los <b>audios</b> de un libro.
+      El audio se añade a la playlist y el texto al selector del visor. Solo se AÑADE: nada se pisa ni se borra.
+    </p>
+    <label class="btn" style="display:inline-block">📂 Elegir ficheros<input type="file" id="adjFiles" multiple hidden></label>
+    <div id="adjLista" class="muted" style="font-size:13px;margin:8px 0">(ninguno elegido)</div>
+    <div style="margin:10px 0">
+      <label style="font-size:13px">Si añades audio, ¿en qué se convierte el documento?</label>
+      <select id="adjNat" style="width:100%;margin-top:4px">
+        <option value="">Dejarlo como está</option>
+        <option value="libro"${!esAudiolibro ? ' selected' : ''}>📕 Libro con audio (el texto manda)</option>
+        <option value="audiolibro"${esAudiolibro ? ' selected' : ''}>📀 Audiolibro (el audio manda)</option>
+      </select>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="adjCancel">Cancelar</button>
+      <button class="btn ok" id="adjOk" disabled>Adjuntar</button>
+    </div>
+    <div id="adjMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#adjX').onclick = cerrarCmp;
+  $('#adjCancel').onclick = cerrarCmp;
+
+  let elegidos = [];
+  $('#adjFiles').onchange = (e) => {
+    elegidos = [...(e.target.files || [])];
+    $('#adjLista').textContent = elegidos.length ? elegidos.map((f) => f.name).join(' · ') : '(ninguno elegido)';
+    $('#adjOk').disabled = !elegidos.length;
+  };
+  $('#adjOk').onclick = async () => {
+    $('#adjOk').disabled = true;
+    $('#adjMsg').textContent = 'Subiendo…';
+    const fd = new FormData();
+    for (const f of elegidos) fd.append('files', f);
+    const nat = $('#adjNat').value;
+    if (nat) fd.append('naturaleza', nat);
+    try {
+      const res = await fetch(`/api/documentos/${encodeURIComponent(id)}/completar`, {
+        method: 'POST',
+        headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},   // FormData: NO fijar Content-Type (lo pone el navegador con su boundary)
+        body: fd,
+      });
+      const j = await res.json();
+      if (!j.ok) { $('#adjMsg').textContent = '✗ ' + (j.motivo || 'no se pudo adjuntar'); $('#adjOk').disabled = false; return; }
+      $('#adjMsg').textContent = `✔ adjuntado: ${j.anadidos.audio} audio · ${j.anadidos.texto} texto · ${j.anadidos.material} material`;
+      setTimeout(() => { cerrarCmp(); verDoc(id); }, 900);   // recargar la ficha con la playlist/selector nuevos
+    } catch (err) {
+      $('#adjMsg').textContent = '✗ ' + err.message;
+      $('#adjOk').disabled = false;
+    }
+  };
+}
+
+// SELECTOR de TEXTOS: un documento puede llevar VARIOS (el PDF + el EPUB + un anexo) — `textos[]` es simétrico
+// a la playlist de `audios[]`. Se ofrece cuando hay 2+; el elegido pasa a abrirse en el visor. Los formatos con
+// lector servido por el servidor (cómic/mobi/chm) solo saben abrir el fichero PRINCIPAL del doc, así que para
+// esos el cambio se nota en la descarga, no en el visor embebido.
+function selectorTextosHtml(r) {
+  const textos = (r.textos || []).filter((t) => t && t.ruta);
+  if (textos.length < 2) return '';
+  const actual = r.archivo_url || '';
+  return `<div class="row" style="gap:8px;align-items:center;margin:0 0 8px">
+      <span class="muted" style="font-size:12px">📄 Texto:</span>
+      <select id="txtSel" style="flex:1" title="Este documento tiene varios textos: elige cuál abrir">${textos
+        .map((t, i) => `<option value="${i}"${t.ruta === actual ? ' selected' : ''}>${esc(t.titulo || t.ruta.split('/').pop())}${t.formato ? ' · ' + esc(t.formato) : ''}</option>`)
+        .join('')}</select>
+    </div>`;
+}
+
 function previewArchivo(r) {
+  return selectorTextosHtml(r) + previewArchivoBase(r);
+}
+
+function previewArchivoBase(r) {
   const id = r.doc && r.doc._id;
   const audio = reproductorAudioHtml(r.audios, id); // audiolibro (con o sin PDF): reproductor + descargas arriba
   // SOFTWARE (paquete verbatim en bloque): no hay un fichero único → EXPLORADOR de ficheros de SOLO LECTURA.

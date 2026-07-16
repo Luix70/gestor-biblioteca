@@ -361,6 +361,15 @@ export async function ingestarAudiolibro(dir, { db: dbArg, reciclarOrigen = true
         const autores = u.autor ? await resolverAutor(db, u.autor) : [];
         const editorial = u.editorial ? await resolverEditorialRef(db, u.editorial) : null;
         const tienePdf = u.pdfs.length > 0;
+        // VARIOS TEXTOS: los PDFs que acompañan al audio entran en `textos[]` (selector del visor de la ficha,
+        // simétrico a la playlist de `audios[]`); el 1º sigue siendo el principal (`nombre_archivo`). Así, si
+        // más tarde se COMPLETA el audiolibro con su EPUB (📎 Adjuntar), el selector los ofrece todos.
+        const textos = u.pdfs.map((rel, i) => ({
+            ruta: webRel(rel),
+            titulo: path.basename(rel, path.extname(rel)).replace(/[_.]+/g, ' ').replace(/\s{2,}/g, ' ').trim(),
+            formato: 'pdf',
+            orden: i + 1,
+        }));
 
         const doc = limpiarUndefined({
             _id,
@@ -378,6 +387,7 @@ export async function ingestarAudiolibro(dir, { db: dbArg, reciclarOrigen = true
             ruta_base: webDest,
             // Si trae PDF del texto, se abre en el visor; se apunta el 1er PDF como archivo principal.
             nombre_archivo: tienePdf ? path.basename(u.pdfs[0]) : undefined,
+            textos: textos.length ? textos : undefined,   // selector del visor (varios textos)
             portada: portada || undefined,
             imagenes: imagenes.length ? imagenes : undefined,
             audios,

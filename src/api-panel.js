@@ -1134,6 +1134,7 @@ export function rutasPanel() {
                 archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
                 imagenes: doc.imagenes || [], portada: doc.portada || null,
                 audios: doc.audios || [],   // audiolibro / lectura con audio: playlist para el reproductor
+                textos: doc.textos || [],   // varios textos (PDF/EPUB/anexo…): selector del visor
             });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
