@@ -28,8 +28,18 @@ FROM node:18-bullseye-slim
 # djvulibre-bin aporta `ddjvu` para convertir un .djvu a PDF y verlo con el visor PDF del panel.
 # libchm-bin aporta `extract_chmLib` para desempaquetar CHM (HTML compilado: manuales/libros) → título/
 # ISBN/portada. bsdtar (libarchive-tools) ya lee además ISO9660, así que un .iso se expande como un .zip.
+#
+# WORD: el .docx NO necesita nada (es un ZIP OOXML: adm-zip + cheerio, JS puro). El .doc antiguo (binario OLE
+# de Word 97-2003) sí: no hay parser JS razonable, así que la previsualización se delega en `catdoc` (o
+# `antiword`, que upstream abandonó y puede no estar ya en el índice de Debian). Por eso se instalan APARTE y
+# de forma NO FATAL: si el paquete no existe en esta versión de Debian, la imagen se construye igual y
+# utils/lector-word.js DEGRADA con elegancia — el .doc se cataloga por nombre y la ficha ofrece la descarga
+# (nunca se pierde: solo no se previsualiza). Mismo criterio que el resto de herramientas de sistema.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin \
+    && (apt-get install -y --no-install-recommends catdoc antiword \
+        || apt-get install -y --no-install-recommends catdoc \
+        || echo 'ⓘ catdoc/antiword no disponibles: los .doc se catalogarán sin previsualización (el .docx no los necesita).') \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
