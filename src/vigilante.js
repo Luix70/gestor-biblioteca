@@ -13,7 +13,7 @@ import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js';
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
-import { reciclar } from './utils/papelera.js';
+import { reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarLibroConMaterial } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
@@ -220,8 +220,13 @@ async function podarVaciosInbox() {
         if (await tieneTestigo(top)) continue;          // protegida por .noborrar: no se toca
         await podarSubcarpetasVacias(top);              // primero las subcarpetas vacías (más adentro)
         if (await nadaQueCatalogar(top)) {              // ya no queda nada catalogable → retirar la carpeta top
-            await fs.rm(top, { recursive: true, force: true }).catch(() => {});
-            console.log(`  🗑️  «${e.name}»: sin nada que catalogar (vacía / solo basura / subcarpetas vacías) → retirada del Inbox.`);
+            // A la PAPELERA, no `fs.rm`: aunque el criterio diga «solo basura», borrar PERMANENTEMENTE una
+            // carpeta del Inbox contradice la política de no perder nada — si el criterio se equivocara alguna
+            // vez, se iría sin dejar rastro y sin vuelta atrás. Reciclada es recuperable y cuesta lo mismo.
+            await reciclarCarpeta(top, 'inbox-sin-nada-que-catalogar').catch(async () => {
+                await fs.rm(top, { recursive: true, force: true }).catch(() => {});  // si la Papelera falla, no bloquear
+            });
+            console.log(`  🗑️  «${e.name}»: sin nada que catalogar (vacía / solo basura / subcarpetas vacías) → a la Papelera.`);
         }
     }
     await limpiarGuiaRaiz();

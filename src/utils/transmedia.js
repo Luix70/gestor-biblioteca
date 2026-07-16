@@ -511,6 +511,28 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         insertados++;
     }
 
+    // 3d-bis) RED DE SEGURIDAD DEL INVARIANTE. Si tras TODO lo anterior no se catalogó NI UN documento pero la
+    // carpeta SÍ tiene contenido, ese contenido quedaría preservado en disco y COMPLETAMENTE INVISIBLE: la
+    // colección existiría con 0 miembros, y el catálogo lista `biblioteca`, no `colecciones`. Es justo lo que
+    // el invariante prohíbe (lo que entra y no es duplicado exacto debe acabar con un registro que apunte a
+    // él), y además pasaba BAJO EL RADAR: se devolvía ok:true con un «✔ contenido preservado verbatim (0
+    // documentos catalogables)» y se reciclaba el origen — nada fallaba, simplemente no se catalogaba nada.
+    // Caso real: 142 páginas escaneadas marcadas «intacta» → analizarTransmedia no cuenta las IMÁGENES (las
+    // trata como portadas) → 0 miembros → carpeta entera invisible.
+    // Ahora ese contenido recibe UN documento propio (como un paquete de software): buscable, con ficha y con
+    // su explorador de archivos. Mejor un registro imperfecto que una carpeta fantasma.
+    if (insertados === 0 && hayContenido) {
+        const _id = new ObjectId();
+        await bib.insertOne(limpiarUndefined(baseDoc({
+            _id, tipo_recurso: 'libro', naturaleza: 'material', titulo: plan.nombreColeccion,
+            formatos: ['material'], ruta_base: webColeccion,
+            portada: (await primeraImagenDe(carpetaColeccion)) || undefined,
+        })));
+        await indexarDoc(db, _id).catch(() => {});
+        insertados++;
+        console.warn(`  ⚠️  «${plan.nombreColeccion}»: 0 documentos catalogables (${plan.totales.ficheros} ficheros: ni PDF, ni audio, ni vídeo, ni material notable) → se cataloga como UN registro del contenido preservado, para que NO quede invisible.`);
+    }
+
     // 3e) MANIFIESTO de lo PRESERVADO pero NO catalogado (lo que la criba dejó fuera): deja constancia de que
     //     está ahí y de que se revisó. En la raíz de la colección (ruta_fija → no se poda).
     const manif = [

@@ -715,6 +715,16 @@ de ficheros clasificado por CDU.
       (`copiarVerificado(..., {limpiarDestino:false})`): se fusiona, para no borrar las portadas derivadas ni
       los ficheros de los documentos ya catalogados. → RE-SOLTAR UNA COLECCIÓN INCOMPLETA LA COMPLETA.
       (transmedia.js · ingestarTransmedia; coleccion-audiolibros.js · ingestarColeccionAudiolibros.)
+    · RED DE SEGURIDAD DEL INVARIANTE (transmedia): si una carpeta tiene CONTENIDO pero se cataloga con CERO
+      documentos, ese contenido recibe UN documento propio (naturaleza:'material', con la 1ª imagen de portada)
+      en vez de quedar invisible. Antes se creaba la colección con 0 miembros, se reciclaba el origen y se
+      devolvía ok:true con «✔ contenido preservado verbatim (0 documentos catalogables)» → NADA fallaba y la
+      carpeta desaparecía del radar: el catálogo lista `biblioteca`, no `colecciones`. Caso real (test 67): 142
+      páginas escaneadas marcadas «intacta» → analizarTransmedia NO cuenta las imágenes (las trata como
+      portadas) → 0 miembros → carpeta entera invisible. Mejor un registro imperfecto que una carpeta fantasma.
+    · La PODA del Inbox (`podarVaciosInbox`) manda las carpetas «sin nada que catalogar» a la PAPELERA, no las
+      borra con fs.rm: aunque el criterio diga «solo basura», un borrado PERMANENTE contradice la política de
+      no perder nada — si el criterio se equivocara, se iría sin rastro y sin vuelta atrás.
     · MATERIAL NOTABLE + CRIBA (utils/criba-material.js · esMaterialNotable). INVARIANTE: lo que entra y no es
       un duplicado exacto debe acabar con un REGISTRO en la BD que apunte a él — preservarlo en disco NO basta
       (sin registro es invisible, y eso equivale a perderlo). Pero catalogar TODO lo no leíble sería peor: una
