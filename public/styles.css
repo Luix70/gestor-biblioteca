@@ -1285,13 +1285,36 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
   outline: 2px solid var(--acc);
   outline-offset: -2px;
 }
-/* TOMO de una obra mayor (catálogo en modo EXPANDIDO): fondo más CLARO que el de un libro de un solo volumen,
-   para leer de un vistazo que forma parte de algo. Se hace con una capa translúcida que ACLARA lo que haya
-   debajo, así vale igual sobre el gris normal que sobre el fondo de selección — sin depender del color base
-   ni duplicar reglas por estado. (En modo colapsado no aplica: ahí la obra es una sola tarjeta apilada.) */
+/* MULTIVOLUMEN vs UN SOLO VOLUMEN — se distinguen por el FONDO, y con contraste de verdad:
+     · `.esvol`    = un TOMO de una obra mayor (catálogo en modo EXPANDIDO)
+     · `.obracard` = la obra COLAPSADA (una tarjeta por obra)
+   Ambos van CLAROS; el libro de un solo volumen se queda en el gris-azulado normal (--card2), más oscuro.
+   Se declara con COLOR EXPLÍCITO —y también para el modo selección— a propósito: `.selmode .vol` usa el ATAJO
+   `background`, que RESETEA `background-image`, así que una capa translúcida se perdía justo ahí (de ahí que
+   en modo selección no se notara ninguna diferencia). Y `.selmode .vol.esvol` (0,3,0) gana en especificidad a
+   `.selmode .vol` (0,2,0), pase lo que pase con el orden del fichero. */
 .vol.esvol,
+.vol.obracard {
+  background: #33425c; /* claro (vs #202938 del libro suelto) */
+}
+.vol.esvol .cov,
+.vol.obracard .cov {
+  background: #2a3750;
+}
 .drow.esvol {
-  background-image: linear-gradient(rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.075));
+  background: #2e3b52;
+}
+/* Los mismos, en MODO SELECCIÓN: burdeos CLARO frente al burdeos oscuro (#3f1f2b) del libro suelto. */
+.selmode .vol.esvol,
+.selmode .vol.obracard {
+  background: #663647;
+}
+.selmode .vol.esvol .cov,
+.selmode .vol.obracard .cov {
+  background: #582d3d;
+}
+.selmode .drow.esvol {
+  background: #4a2532;
 }
 /* Patrón de SELECCIÓN reutilizable (Catálogo, ficha de autor, obras, editoriales…): en «Modo
    selección» tocar la tarjeta la marca con un tick ✓ bien visible + recuadro (en vez de abrir su
