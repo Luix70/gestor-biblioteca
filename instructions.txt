@@ -412,6 +412,19 @@ de ficheros clasificado por CDU.
       collation española que la consulta — si no, el índice no sirve al $sort) e idx_doi.
       ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
+    · OBRAS MULTIVOLUMEN COLAPSADAS (por defecto; casilla «📖 Ver tomos sueltos» las despliega, `agrupar=0`):
+      los N tomos de una obra salen como UNA tarjeta, visualmente distinta —cubierta APILADA (stackCover, la
+      misma que la Estantería) + «📚 N tomos»— y abren la ficha de la OBRA, donde ya se listan sus tomos. Una
+      obra de UN tomo NO se colapsa: se pinta como un documento normal.
+      ⚠ Se agrupa en el SERVIDOR, en la etapa de ids (la que ya trabaja con documentos diminutos, así que la
+      memoria del $sort aguanta): $sort → $group por {$ifNull:['$obra','$_id']} (con $first para que el
+      representante sea el tomo que toca según el orden) → $sort otra vez (el $group no conserva el orden) →
+      $skip/$limit. El TOTAL cuenta GRUPOS ($count sobre el mismo $group), no documentos. Hacerlo en el CLIENTE
+      sería falso: una página de 24 con 12 tomos mostraría 13 tarjetas, una obra a caballo entre dos páginas se
+      colapsaría PARTIDA y el contador mentiría. Y de paso resuelve la CONTIGÜIDAD sin pelearse con el orden
+      elegido: la obra es una tarjeta. Las portadas de la cubierta apilada se traen con un solo $group (≤3 por
+      obra), como en la Estantería. `soloIds` (seleccionar todo / navegación de ficha) NO agrupa: opera sobre
+      documentos reales. La tarjeta de obra lleva `data-obra` (no `data-doc`) → el modo selección no la coge.
     · DISTINTIVO DE COLECCIÓN (📚 N) en tarjeta y fila: indica que el documento pertenece a una colección, y
       solo se pinta si la colección AGRUPA de verdad (más de un documento — una de uno no agrupa nada y sería
       ruido). Es clicable → ficha de la colección. El recuento NO se hace por tarjeta ($lookup por documento

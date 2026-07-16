@@ -7172,7 +7172,8 @@ function construirSearch() {
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search">
-          <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label></div>
+          <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label>
+          <label class="muted" title="Por defecto, los tomos de una obra multivolumen se colapsan en UNA tarjeta (📚 N tomos). Márcalo para verlos uno a uno." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqTomos"> 📖 Ver tomos sueltos</label></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="capitulo">Capítulos</option><option value="apuntes">Apuntes</option><option value="software">Software</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
@@ -7253,6 +7254,7 @@ function construirSearch() {
   };
   $('#sqTipo').onchange = () => buscarCatalogo(1);
   if ($('#sqEstricto')) $('#sqEstricto').onchange = () => buscarCatalogo(1); // frase exacta ↔ laxa
+  if ($('#sqTomos')) $('#sqTomos').onchange = () => buscarCatalogo(1);       // obras colapsadas ↔ tomos sueltos
   if ($('#sqSoporte')) $('#sqSoporte').onchange = () => buscarCatalogo(1);
   if ($('#sqFormato')) $('#sqFormato').onchange = () => buscarCatalogo(1);
   // Ubicación: al cambiar el ámbito, refrescar la estantería (asociada a ese ámbito) y buscar.
@@ -7407,6 +7409,8 @@ function _paramsBusqueda() {
   });
   // Búsqueda ESTRICTA (frase exacta) en vez de laxa (todas las palabras sueltas).
   if ($('#sqEstricto') && $('#sqEstricto').checked) params.set('estricto', '1');
+  // Obras multivolumen COLAPSADAS en una tarjeta (por defecto). Desmarcar = ver los tomos uno a uno.
+  if ($('#sqTomos') && $('#sqTomos').checked) params.set('agrupar', '0');
   // Sentido asc/desc (salvo en «Relevancia / recientes», que no lo usa).
   if ($('#sqOrden').value !== 'reciente') params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
   const est = estrellasSel();
@@ -7882,6 +7886,21 @@ function tipoFmtCompacto(d) {
 }
 function docCard(d) {
   const ph = tipoIcono(d.tipo_recurso);
+  // OBRA MULTIVOLUMEN COLAPSADA: sus N tomos son UNA tarjeta, visualmente distinta (cubierta APILADA, la misma
+  // que la Estantería) y con el nº de tomos. Abre la ficha de la OBRA —donde ya se listan los tomos— en vez de
+  // la de un tomo suelto. Solo llega colapsada si agrupa de verdad (obra_n > 1): una obra de un tomo se pinta
+  // como un documento normal.
+  if (d.obra_n > 1) {
+    const cov = stackCover(d.obra_portadas && d.obra_portadas.length ? d.obra_portadas : d.portada ? [d.portada] : [], ph);
+    const titulo = d.obra_titulo || d.titulo || '(obra)';
+    const sub = (d.autores && d.autores.length ? d.autores.slice(0, 2).join(', ') : '') || (d.año_edicion ? String(d.año_edicion) : '') || '—';
+    return `<div class="vol obracard" data-obra="${esc(d.obra)}" onclick="verObra('${esc(d.obra)}')" style="cursor:pointer" title="Obra en ${d.obra_n} tomos — pulsa para ver la obra y sus tomos">
+      <div class="cov">${cov}</div>
+      <div class="meta">
+        <div class="n">${esc(recortar(titulo, 64))} <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)">📚 ${d.obra_n} tomos</span></div>
+        <div class="t">${esc(sub)}</div>
+      </div></div>`;
+  }
   const cov = d.portada
     ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`
     : `<div class="ph">${ph}</div>`;
@@ -7903,6 +7922,10 @@ function docRow(d) {
     d.isbn || d.issn || '',
     d.cdu ? 'CDU ' + d.cdu : '',
   ].filter(Boolean);
+  // Obra colapsada: también en Detalles (consistencia de patrones) — una fila por OBRA, no por tomo.
+  if (d.obra_n > 1) {
+    return `<div class="drow" data-obra="${esc(d.obra)}" onclick="verObra('${esc(d.obra)}')" style="cursor:pointer" title="Obra en ${d.obra_n} tomos — pulsa para ver la obra y sus tomos"><span class="dtit">${esc(recortar(d.obra_titulo || d.titulo || '(obra)', 90))} <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)">📚 ${d.obra_n} tomos</span></span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${tipoFmtCompacto(d)}</span></div>`;
+  }
   const fmt = tipoFmtCompacto(d);
   return `<div class="drow${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><span class="dtit">${esc(recortar(d.titulo || '(sin título)', 90))}${badgesDoc(d)}</span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${fmt}</span></div>`;
 }

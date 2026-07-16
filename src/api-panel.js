@@ -667,12 +667,33 @@ export function rutasPanel() {
             // Etapas que ORDENAN documentos diminutos y devuelven _ids ya ordenados.
             const etapasIds = [...porOrden.pre, { $project: projClaves }, { $sort: porOrden.orden }];
 
+            // COLAPSO DE OBRAS (por defecto; `agrupar=0` lo desactiva): los N tomos de una obra multivolumen
+            // salen como UNA tarjeta, no como N casi idénticas que inundan el catálogo. Se agrupa AQUÍ, en la
+            // etapa de ids, porque hacerlo en el cliente sería falso: una página de 24 con 12 tomos mostraría
+            // 13 tarjetas (páginas irregulares), una obra a caballo entre dos páginas se colapsaría PARTIDA y
+            // el contador de resultados mentiría. Además así los tomos quedan CONTIGUOS por construcción, sin
+            // pelearse con el orden elegido (reciente/título/autor).
+            // El $group va DESPUÉS del $sort para que `$first` sea el tomo que toca según ese orden; como
+            // $group no conserva el orden, se re-ordena por las MISMAS claves (que se arrastran con $first).
+            const agrupar = String(req.query.agrupar ?? '1') !== '0';
+            const clavesOrden = Object.keys(porOrden.orden);
+            const grupoObra = { _id: { $ifNull: ['$obra', '$_id'] }, id: { $first: '$_id' }, obra: { $first: '$obra' }, n: { $sum: 1 } };
+            for (const k of clavesOrden) grupoObra[k] = { $first: `$${k}` };
+            const etapasIdsAgr = [
+                ...porOrden.pre,
+                { $project: { ...projClaves, obra: 1 } },
+                { $sort: porOrden.orden },
+                { $group: grupoObra },
+                { $sort: porOrden.orden },
+            ];
+
             // Campos de la tarjeta del Catálogo (los únicos que viajan al cliente).
             const PROY_TARJETA = {
                 titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1, paginas: 1,
                 tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
                 valoracion: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
                 coleccion: 1, coleccion_nombre: 1,   // para el distintivo «pertenece a una colección»
+                obra: 1,                             // para colapsar la obra multivolumen en una tarjeta
             };
 
             // Modo SOLO-IDS: devuelve TODOS los _id que casan (todas las páginas) para «seleccionar todos los
@@ -685,13 +706,25 @@ export function rutasPanel() {
                 ).toArray();
                 return res.json({ ok: true, soloIds: true, ids: idsAll.map(x => String(x._id)) });
             }
-            const total = await db.collection('biblioteca').countDocuments(consulta);
+            // Total: con colapso, lo que se cuenta son GRUPOS (una obra = 1 resultado), no documentos — si no,
+            // la paginación y el «N resultados» mentirían respecto a lo que se ve.
+            const total = agrupar
+                ? ((await db.collection('biblioteca').aggregate([
+                    { $match: consulta },
+                    { $group: { _id: { $ifNull: ['$obra', '$_id'] } } },
+                    { $count: 'n' },
+                ], opciones).toArray())[0]?.n || 0)
+                : await db.collection('biblioteca').countDocuments(consulta);
             // 1) _ids de la PÁGINA, ya ordenados (el $sort trabaja sobre documentos diminutos → sin tope de 32 MB).
-            const idsPagina = (await db.collection('biblioteca').aggregate([
-                { $match: consulta }, ...etapasIds,
+            //    Con colapso, cada fila es un GRUPO: `_id` = el tomo REPRESENTANTE y `n` = cuántos tomos tiene.
+            const filasPagina = await db.collection('biblioteca').aggregate([
+                { $match: consulta }, ...(agrupar ? etapasIdsAgr : etapasIds),
                 { $skip: (page - 1) * porPagina }, { $limit: porPagina },
-                { $project: { _id: 1 } },
-            ], opciones).toArray()).map(x => x._id);
+                agrupar ? { $project: { _id: '$id', obra: 1, n: 1 } } : { $project: { _id: 1 } },
+            ], opciones).toArray();
+            const idsPagina = filasPagina.map(x => x._id);
+            // Tomos por obra, SOLO de las que agrupan de verdad (n > 1): una «obra» de un tomo se pinta normal.
+            const nPorObra = new Map(filasPagina.filter(f => f.obra && f.n > 1).map(f => [String(f.obra), f.n]));
             // 2) Documentos COMPLETOS de esa página (autores resueltos) y REORDENADOS como venían de la página
             //    ($in no conserva el orden). Sin $sort aquí: son `porPagina` documentos como mucho.
             let docs = [];
@@ -718,14 +751,34 @@ export function rutasPanel() {
                 for (const c of cuentas) nCol.set(String(c._id), c.n);
             }
 
+            // Portadas para la cubierta APILADA de las obras colapsadas de esta página (mismo patrón que la
+            // Estantería): un solo $group, hasta 3 portadas por obra.
+            const idsObra = [...nPorObra.keys()].map(x => new ObjectId(x));
+            const portObra = new Map();
+            if (idsObra.length) {
+                const po = await db.collection('biblioteca').aggregate([
+                    { $match: { obra: { $in: idsObra }, portada: { $exists: true, $ne: null } } },
+                    { $group: { _id: '$obra', portadas: { $push: '$portada' } } },
+                ]).toArray();
+                for (const x of po) portObra.set(String(x._id), (x.portadas || []).slice(0, 3));
+            }
+
             res.json({
                 ok: true, total, page, porPagina, paginas: Math.max(1, Math.ceil(total / porPagina)),
+                agrupado: agrupar,
                 docs: docs.map(d => {
-                    const n = d.coleccion ? (nCol.get(String(d.coleccion)) || 0) : 0;
+                    const nc = d.coleccion ? (nCol.get(String(d.coleccion)) || 0) : 0;
+                    const claveObra = d.obra ? String(d.obra) : null;
+                    const nObra = claveObra ? nPorObra.get(claveObra) : undefined;
                     return {
                         ...d, _id: String(d._id),
                         coleccion: d.coleccion ? String(d.coleccion) : undefined,
-                        coleccion_n: n > 1 ? n : undefined,   // solo si AGRUPA (más de un documento)
+                        coleccion_n: nc > 1 ? nc : undefined,   // solo si AGRUPA (más de un documento)
+                        obra: claveObra || undefined,
+                        // Tarjeta COLAPSADA de obra: solo cuando agrupa de verdad (n > 1). El cliente la pinta
+                        // con la cubierta apilada y abre la ficha de la OBRA en vez de la del tomo.
+                        obra_n: nObra,
+                        obra_portadas: nObra ? (portObra.get(claveObra) || (d.portada ? [d.portada] : [])) : undefined,
                     };
                 }),
             });
