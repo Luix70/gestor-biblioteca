@@ -327,12 +327,27 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
     const resultados = [];
 
     for (const c of colecciones) {
-        // Anti-duplicados: colección con ese nombre Y con miembros → no re-catalogar (evita duplicar la copia).
+        // Anti-duplicados MIEMBRO A MIEMBRO (mismo criterio que transmedia.js). El guardián «todo o nada»
+        // anterior rechazaba la colección ENTERA si ya existía con aunque fuera 1 documento → lo que FALTABA no
+        // entraba NUNCA: una colección incompleta era INCOMPLETABLE. Ahora se compara el plan con lo YA
+        // catalogado y se cataloga SOLO LO QUE FALTA. Claves: audiolibros por `titulo`, PDFs/vídeos por
+        // `nombre_archivo`. Si ya está TODO → permanente, sin copiar en balde (un re-drop no duplica ni malgasta).
         const prev = await db.collection('colecciones').findOne(
             { nombre: c.nombre }, { collation: { locale: 'es', strength: 1 }, projection: { _id: 1 } });
-        if (prev && (await bib.countDocuments({ coleccion: prev._id })) > 0) {
-            resultados.push({ coleccion: c.nombre, ok: false, permanente: true, motivo: 'ya existe (no se re-cataloga)' });
-            continue;
+        let yaFichero = new Set(), yaAudio = new Set();
+        if (prev) {
+            const previos = await bib.find({ coleccion: prev._id }, { projection: { nombre_archivo: 1, titulo: 1, naturaleza: 1 } }).toArray();
+            yaFichero = new Set(previos.map((d) => d.nombre_archivo).filter(Boolean));
+            yaAudio = new Set(previos.filter((d) => d.naturaleza === 'audiolibro').map((d) => d.titulo).filter(Boolean));
+            const falta = c.miembros.some((m) =>
+                (m.audiolibro && !yaAudio.has(m.audiolibro.titulo))
+                || (m.pdfs || []).some((p) => !yaFichero.has(path.basename(p.rel)))
+                || (m.videos || []).some((v) => !yaFichero.has(path.basename(v.rel))));
+            if (!falta) {
+                resultados.push({ coleccion: c.nombre, ok: false, permanente: true, motivo: `ya existe COMPLETA (${previos.length} documento/s): no se re-cataloga` });
+                continue;
+            }
+            console.log(`  ↻ «${c.nombre}» ya existe con ${previos.length} documento/s: se COMPLETA con lo que falta.`);
         }
 
         // CDU / idioma de la colección: los más comunes entre sus audiolibros (o por defecto).
@@ -343,7 +358,9 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
         const webCol = webDe(carpetaCol);
 
         // 1) COPIA VERBATIM + verificación (conserva el origen si el origen aún cambiaba).
-        const { integra, huella: copiado } = await copiarVerificado(c.dir, carpetaCol);
+        // Al COMPLETAR (la colección ya existía) NO se limpia el destino: se fusiona sobre lo que hay, para no
+        // borrar las portadas derivadas ni los ficheros de los documentos ya catalogados.
+        const { integra, huella: copiado } = await copiarVerificado(c.dir, carpetaCol, { limpiarDestino: !prev });
         if (!integra) { resultados.push({ coleccion: c.nombre, ok: false, motivo: 'copia no íntegra (origen aún cambiaba): se conserva el origen' }); continue; }
         await fs.writeFile(path.join(carpetaCol, MARCA_RUTA_FIJA), `coleccion-audiolibros: ${c.nombre}\n`).catch(() => {});
 
@@ -382,8 +399,8 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
             const imagenesLibro = (m.imagenes || []).map((im) => ({ ruta: `${webLibro}/${im.rel}`, tipo: (m.portadaRel && im.rel === m.portadaRel) ? 'portada' : 'otra' }));
             let imagenesSinDueno = m.audiolibro ? null : (imagenesLibro.length ? imagenesLibro : null); // se colocan en el 1er PDF/vídeo
 
-            // 3a) AUDIOLIBRO del libro.
-            if (m.audiolibro) {
+            // 3a) AUDIOLIBRO del libro (si ya estaba catalogado, se salta: no se duplica).
+            if (m.audiolibro && !yaAudio.has(m.audiolibro.titulo)) {
                 const a = m.audiolibro;
                 const _id = new ObjectId();
                 const autores = await resolverAutor(a.coral ? null : a.autor);
@@ -404,6 +421,7 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
             // 3b) PDFs del libro → documentos miembro. Portada = cover.jpg del libro si la hay; si no, su 1ª
             //     página rasterizada. El PRIMER PDF hereda las ilustraciones del libro si nadie más las tiene.
             for (const p of m.pdfs) {
+                if (yaFichero.has(path.basename(p.rel))) continue;   // ya catalogado → no duplicar
                 const _id = new ObjectId();
                 const d = path.posix.dirname(p.rel);
                 const rutaBase = d === '.' ? webLibro : `${webLibro}/${d}`;
@@ -421,6 +439,7 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
 
             // 3c) VÍDEOS del libro → documentos miembro (descargables; sin visor, pero VISIBLES → no se pierden).
             for (const v of m.videos) {
+                if (yaFichero.has(path.basename(v.rel))) continue;   // ya catalogado → no duplicar
                 const _id = new ObjectId();
                 const d = path.posix.dirname(v.rel);
                 const rutaBase = d === '.' ? webLibro : `${webLibro}/${d}`;

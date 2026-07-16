@@ -635,15 +635,16 @@ de ficheros clasificado por CDU.
     · ANTI-BUCLE: un audiolibro «ya catalogado» (o una colección transmedia «ya existe») devuelve
       `permanente:true`; el vigilante lo añade a `omitidasDefinitivas` y NO lo reintenta (si no, la
       carpeta —conservada en el Inbox con .noborrar— se reprocesaría en cada escaneo).
-    · COLECCIÓN INCOMPLETA — el anti-duplicados de TRANSMEDIA es MIEMBRO A MIEMBRO, no «todo o nada». Antes,
-      si la colección existía con AUNQUE FUERA 1 documento se rechazaba el drop ENTERO → una colección a la que
-      le faltaban miembros (caso real: se catalogó el audiolibro y sus 3 PDFs se quedaron fuera) NO se podía
-      completar NUNCA: cada re-drop se rechazaba y los que faltaban no entraban jamás. Ahora se compara el plan
-      con lo ya catalogado y se inserta SOLO LO QUE FALTA (claves: PDFs por `nombre_archivo`, audiolibros por
-      `titulo`); si ya está TODO, se omite `permanente` SIN copiar (no malgasta los 19 GB). Al completar NO se
-      limpia el destino (`copiarVerificado(..., {limpiarDestino:false})`): se fusiona, para no borrar las
-      portadas derivadas ni los ficheros de los documentos ya catalogados. → Re-soltar una colección incompleta
-      la COMPLETA. (PENDIENTE: `coleccion-audiolibros.js` conserva el guardián «todo o nada» — mismo bug.)
+    · COLECCIÓN INCOMPLETA — el anti-duplicados de TRANSMEDIA y de COLECCIÓN DE AUDIOLIBROS es MIEMBRO A
+      MIEMBRO, no «todo o nada». Antes, si la colección existía con AUNQUE FUERA 1 documento se rechazaba el
+      drop ENTERO → una colección a la que le faltaban miembros (caso real: se catalogó el audiolibro y sus 3
+      PDFs se quedaron fuera) NO se podía completar NUNCA: cada re-drop se rechazaba y los que faltaban no
+      entraban jamás. Ahora se compara el plan con lo ya catalogado y se inserta SOLO LO QUE FALTA (claves:
+      PDFs/vídeos por `nombre_archivo`, audiolibros por `titulo`); si ya está TODO, se omite `permanente` SIN
+      copiar (no malgasta los 19 GB de un re-drop grande). Al completar NO se limpia el destino
+      (`copiarVerificado(..., {limpiarDestino:false})`): se fusiona, para no borrar las portadas derivadas ni
+      los ficheros de los documentos ya catalogados. → RE-SOLTAR UNA COLECCIÓN INCOMPLETA LA COMPLETA.
+      (transmedia.js · ingestarTransmedia; coleccion-audiolibros.js · ingestarColeccionAudiolibros.)
     · VIGILANTE (cableado): un drop en el Inbox se enruta así — TRANSMEDIA si trae marcador
       `.transmedia`, contenido interactivo (.exe/.swf/.app) o audio CON estructura (≥2 PDFs de
       lectura o carpetas «Stage N»); si no, AUDIOLIBRO si hay audio suelto (≤1 PDF, sin
