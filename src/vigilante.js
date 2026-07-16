@@ -17,6 +17,7 @@ import { reciclar } from './utils/papelera.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarLibroConMaterial } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
+import { esAudio } from './utils/lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
@@ -104,9 +105,7 @@ const soloBasura = (n) => soloMetadatos(n) || !esValida(n);
 // CONTENIDO CONSERVABLE: material que el catalogador NO puede procesar todavía pero que NO debe borrarse
 // (audio → audiolibros, aún sin tratamiento). El recolector de basura lo RESPETA y su carpeta se marca con
 // un testigo .noborrar. (Ampliable a otros formatos cuando toque.)
-const EXT_AUDIO = ['.mp3', '.m4a', '.m4b', '.aac', '.ogg', '.oga', '.opus', '.flac', '.wav', '.wma', '.aax', '.aa', '.ape', '.alac'];
-const esAudio = (n) => EXT_AUDIO.includes(path.extname(n).toLowerCase());
-const esConservable = (n) => esAudio(n);
+const esConservable = (n) => esAudio(n); // `esAudio` importado de lector-audio.js (fuente única, ampliada)
 
 // TESTIGO .noborrar: fichero que el usuario/vigilante deposita en la carpeta de PRIMER NIVEL de un drop con
 // material no procesable (DRM, audio, formato desconocido) para que el recolector de basura NO la borre.
@@ -857,6 +856,48 @@ async function nombreLibre(dir, nombre) {
     return destino;
 }
 
+// ¿Un FICHERO suelto ya terminó de copiarse? (mismo criterio que carpetaEstable pero por tamaño+mtime): un
+// audio monolítico grande tarda en copiarse; moverlo a medias sería un error. Estable si (a) nada se tocó en
+// la ventana, o (b) el tamaño no cambió respecto al escaneo anterior durante CARPETA_ESTABLE_MS.
+const huellaFicheros = new Map(); // ruta → { tam, desde }
+async function ficheroEstable(abs) {
+    let st;
+    try { st = await fs.stat(abs); } catch { return false; }
+    if (!st.isFile() || st.size === 0) return false;
+    const ahora = Date.now();
+    if (ahora - (st.mtimeMs || 0) >= CARPETA_ESTABLE_MS) { huellaFicheros.set(abs, { tam: st.size, desde: st.mtimeMs || 0 }); return true; }
+    const previo = huellaFicheros.get(abs);
+    if (!previo || previo.tam !== st.size) { huellaFicheros.set(abs, { tam: st.size, desde: ahora }); return false; }
+    return ahora - previo.desde >= CARPETA_ESTABLE_MS;
+}
+
+// PRE-PASO del Inbox: un audio MONOLÍTICO suelto en la RAÍZ (un fichero = un audiolibro entero) NO lo cataloga
+// el pipeline por-fichero (detectarTipo='desconocido') → antes se ignoraba/perdía. Se ENVUELVE cada uno en su
+// propia subcarpeta (nombre = el del fichero sin extensión) para que la autodetección lo trate como AUDIOLIBRO
+// (esCarpetaAudiolibro → ingestarAudiolibro: ID3, portada embebida, playlist, ruta_fija). Solo ficheros ESTABLES
+// (no a medio copiar) y NUNCA borra: mueve (rename) dentro del propio Inbox. Un audio que el usuario haya
+// AGRUPADO en el Inspector ya lo movió antes procesarGruposGuia, así que aquí solo caen los realmente sueltos.
+async function envolverAudiosSueltos() {
+    let entradas;
+    try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
+    for (const e of entradas) {
+        if (!e.isFile() || ignorarEntrada(e.name) || !esAudio(e.name)) continue;
+        const abs = path.join(INBOX, e.name);
+        if (!(await ficheroEstable(abs))) { console.log(`  ⏳ audio «${e.name}»: aún copiándose — se espera a que termine.`); continue; }
+        const base = path.basename(e.name, path.extname(e.name)).trim() || 'Audiolibro';
+        const destinoDir = await nombreLibre(INBOX, base);
+        try {
+            await fs.mkdir(destinoDir, { recursive: true });
+            await fs.rename(abs, path.join(destinoDir, e.name));
+            huellaFicheros.delete(abs);
+            console.log(`  🎧 Audio monolítico «${e.name}» → «${path.basename(destinoDir)}/» (se catalogará como audiolibro).`);
+        } catch (err) {
+            console.warn(`  ⚠️  No se pudo envolver el audio «${e.name}»: ${err.message} (se conserva suelto).`);
+            await fs.rm(destinoDir, { recursive: true, force: true }).catch(() => {});
+        }
+    }
+}
+
 /**
  * PRE-PASO del Inbox: aplica las ACCIONES ESTRUCTURALES de `_guia.json` que MUTAN el sistema de ficheros,
  * ANTES de listar unidades (como expandirComprimidos). Cada acción es «mover» (nunca borrar contenido):
@@ -938,6 +979,7 @@ async function procesarCola() {
         const tally = {};
         await expandirComprimidos();          // .zip suelto → carpeta (drop) ANTES de listar unidades
         await procesarGruposGuia();           // guía: grupos de ficheros → subcarpetas (agrupado B)
+        await envolverAudiosSueltos();        // audio monolítico suelto → subcarpeta → audiolibro (no ignorar)
         await aplicarAccionesGuiaFs();        // guía: explotar/aplanar (mutan FS) ANTES de listar unidades
         let unidades = await listarUnidades();
         if (unidades.length) ultimaActividad = Date.now(); // hay trabajo: posponer el mantenimiento

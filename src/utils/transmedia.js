@@ -24,15 +24,14 @@ import { indexarDoc } from './indice-busqueda.js';
 import { reciclarCarpeta } from './papelera.js';
 import { rasterizarPaginas } from './rasterizar-pdf.js';
 import { resolverPersona } from './resolver-persona.js';
+import { esAudio } from './lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 
-const EXT_AUDIO = ['.mp3', '.m4a', '.m4b', '.ogg', '.oga', '.opus', '.wav', '.aac', '.flac', '.wma'];
 // Subcarpeta OCULTA con las portadas DERIVADAS (1ª página rasterizada). El prefijo «.» hace que `ignorar`
 // (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
 // la estructura visible; queda dentro del subárbol `ruta_fija`, así que Integridad tampoco la poda.
 const DIR_PORTADAS = '.portadas';
 const ext = (n) => path.extname(n).toLowerCase();
 const esPdf = (n) => ext(n) === '.pdf';
-const esAudio = (n) => EXT_AUDIO.includes(ext(n));
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#');
 
 /**
@@ -196,9 +195,10 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
         if (u && !coverPorUnidad.has(u)) coverPorUnidad.set(u, c.rel);
     }
     const audiosPorUnidad = new Map();
+    const audiosSueltos = []; // audio MONOLÍTICO en la RAÍZ (no cuelga de una carpeta-unidad): cada uno = 1 audiolibro
     for (const a of audios.sort((x, y) => x.rel.localeCompare(y.rel, 'es', { numeric: true }))) {
         const u = carpetaUnidadDe(a.rel);
-        if (!u) continue;
+        if (!u) { audiosSueltos.push(a); continue; } // suelto en la raíz → audiolibro monolítico (más abajo)
         if (!audiosPorUnidad.has(u)) audiosPorUnidad.set(u, []);
         audiosPorUnidad.get(u).push(a.rel);
     }
@@ -246,6 +246,24 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
             autores: autor ? [autor] : [],
             portada_rel: coverPorUnidad.get(carpetaUnidad) || null,
             audios_rel: lista,
+        });
+    }
+
+    // AUDIO MONOLÍTICO suelto en la RAÍZ de la carpeta transmedia (un fichero = un audiolibro entero). ANTES se
+    // PERDÍA para el catálogo: se copiaba verbatim pero NO se catalogaba (al no colgar de una carpeta-unidad, su
+    // carpetaUnidad era null y el bucle lo saltaba). Ahora cada uno se cataloga como su PROPIO audiolibro
+    // (naturaleza:'audiolibro', título del nombre de fichero) → queda BUSCABLE, no solo preservado en disco.
+    for (const a of audiosSueltos) {
+        const base = tituloDeArchivo(a.nombre);
+        const { autor, titulo } = parseUnidad(base);
+        audiolibros.push({
+            unidad: null,
+            carpeta_rel: '',                        // raíz de la colección → ruta_base = webColeccion (en la ingesta)
+            nivel: 0,
+            titulo: titulo || base,
+            autores: autor ? [autor] : [],
+            portada_rel: null,
+            audios_rel: [a.rel],
         });
     }
 
@@ -415,7 +433,7 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
             _id,
             titulo: a.titulo, tipo_recurso: 'libro', naturaleza: 'audiolibro', formatos: ['audio'],
             autores: autores.length ? autores : undefined,
-            ruta_base: webDeRel(a.carpeta_rel), rol_material: 'audiolibro',
+            ruta_base: webDeRel(a.carpeta_rel) || webColeccion, rol_material: 'audiolibro', // '' (monolítico) → la raíz de la colección
             nivel: a.nivel || undefined, unidad: a.unidad || undefined,
             portada: webDeRel(a.portada_rel) || undefined,   // audio-only: su cover.jpg si la hay (no hay PDF que rasterizar)
             audios: a.audios_rel.map((r, i) => ({ ruta: webDeRel(r), titulo: tituloDeArchivo(path.basename(r)), orden: i + 1 })),
