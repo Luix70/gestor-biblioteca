@@ -28,8 +28,8 @@
           <button data-p="autores"><span class="ic">👤</span> Autores</button>
           <button data-p="editoriales"><span class="ic">🏢</span> Editoriales</button>
           <button class="admin-only" data-p="ubic"><span class="ic">📍</span> Ubicaciones</button>
-          <button class="admin-only" data-p="inbox"><span class="ic">📥</span> Inbox</button>
-          <button data-p="activity"><span class="ic">📡</span> Actividad</button>
+          <button class="admin-only" data-p="inbox"><span class="ic">📥</span> Entrada</button>
+          <button data-p="activity"><span class="ic">🛠️</span> Mantenimiento</button>
           <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
           <button data-p="pap"><span class="ic">♻</span> Papelera</button>
           <button data-p="dashboard"><span class="ic">▥</span> Dashboard</button>
@@ -78,7 +78,7 @@
 
           <!-- MANTENIMIENTO -->
           <section class="page" id="p-activity">
-            <div class="sec-h"><h2>Actividad</h2></div>
+            <div class="sec-h"><h2>Mantenimiento</h2></div>
             <!-- Tarjetas COMPACTADAS en columnas (masonry): las de distinta altura se empaquetan sin huecos
                  (las pequeñas caen juntas y las grandes también). 2 columnas ≥340px → 1 en móvil. -->
             <style>
@@ -207,7 +207,10 @@
                 </div>
               </details>
             </div>
-            <div class="card" style="margin-top: 16px">
+            <!-- Tarjeta de LOGS: es ÚNICA (sus ids lo son) y `go()` la MUEVE al final de la página activa —
+                 Entrada o Mantenimiento—, en vez de duplicarla. Así hay un solo visor, un solo temporizador y
+                 ningún id repetido. -->
+            <div class="card" id="logCard" style="margin-top: 16px">
               <div class="row" style="align-items: center; margin-bottom: 12px">
                 <h3 style="margin: 0">📜 Logs</h3>
                 <span class="muted" id="logInfo" style="font-size: 12px"></span>
@@ -306,7 +309,7 @@
           <!-- INBOX (maqueta) -->
           <section class="page" id="p-inbox">
             <div class="sec-h">
-              <h2>Inbox — alta de recursos</h2>
+              <h2>Entrada — alta de recursos</h2>
               <span class="muted" id="inboxHint"></span>
             </div>
             <!-- 👁 Vigilante del Inbox: activa/pausa el catalogado automático de lo que se suelte aquí. Su sitio

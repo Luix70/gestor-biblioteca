@@ -206,16 +206,18 @@ function copiarFallback(texto, avisarOk) {
 
 // ── nav (navegación entre las páginas del panel) ─────────────────────────────────────────────────────
 // Título de la barra superior según la página activa.
+// Etiquetas de las páginas. Los IDs internos (`inbox`, `activity`) se mantienen a propósito: renombrarlos
+// obligaría a tocar deep-links, `loaders`, el historial de vistas y decenas de `go(...)` sin ganar nada.
 const titles = {
   dashboard: 'Dashboard',
-  activity: 'Actividad',
+  activity: 'Mantenimiento',
   cuar: 'Cuarentena',
   pap: 'Papelera',
   obras: 'Obras',
   colecciones: 'Colecciones',
   autores: 'Autores',
   editoriales: 'Editoriales',
-  inbox: 'Inbox',
+  inbox: 'Entrada',
   search: 'Catálogo',
 };
 let logTimer = null; // intervalo de refresco de los logs en vivo (solo activo en la página Actividad)
@@ -229,7 +231,16 @@ function go(pagina) {
   $$('.page').forEach((seccion) => seccion.classList.remove('on'));
   $('#p-' + pagina).classList.add('on');
   $('#title').textContent = titles[pagina] || pagina;
-  if (logTimer && pagina !== 'activity') {
+  // LOGS al final de ENTRADA y de MANTENIMIENTO: en las dos quieres ver qué está haciendo el sistema (qué
+  // cataloga el vigilante / qué hace el Conformador). La tarjeta es ÚNICA y se MUEVE a la página activa —
+  // duplicarla habría repetido ids (#logView, #logAuto…) y roto el visor. En el resto de páginas se para el
+  // temporizador: nadie está mirando.
+  const conLogs = pagina === 'inbox' || pagina === 'activity';
+  const card = $('#logCard');
+  if (conLogs && card) {
+    $('#p-' + pagina).appendChild(card);   // appendChild MUEVE el nodo (no lo copia): conserva sus handlers
+    logAuto();                             // (si hay tarjeta, están sus controles: #logAuto, #logView…)
+  } else if (logTimer) {
     clearInterval(logTimer);
     logTimer = null;
   }
