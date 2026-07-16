@@ -1602,6 +1602,40 @@ body.modo-seleccion::after {
   font-size: 14px;
   line-height: 1;
 }
+/* Barra de SELECCIÓN FLOTANTE (Inspector del Inbox). Antes iba inline dentro de la tarjeta: con un árbol
+   largo quedaba arriba, fuera de vista al scrollear, y los botones eran inmanejables. Ahora ACOMPAÑA siempre,
+   anclada al PIE por defecto; el botón ⇅ la mueve a la CABECERA y la preferencia se recuerda (localStorage).
+   Mismo lenguaje visual que .bulkbar (var(--card) + borde de acento) por consistencia de patrones. */
+.selflot {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 14px;
+  z-index: 60;
+  width: min(820px, 94vw);
+  max-height: 42vh;
+  overflow: auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 38px 10px 10px; /* hueco a la derecha para el botón de anclaje */
+  background: var(--card);
+  border: 1px solid var(--acc);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.selflot.arriba {
+  bottom: auto;
+  top: 14px;
+}
+.selflot .selpos {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 7px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
 .bulkbar {
   position: sticky;
   top: 0;

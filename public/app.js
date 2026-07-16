@@ -11043,11 +11043,32 @@ if ($('#guiaGuardar')) $('#guiaGuardar').onclick = guardarGuiasInbox;
 //    autodetección de carpetas del vigilante. ──
 const _guiaSel = new Set();      // ficheros seleccionados (rutas)
 const _guiaSelCarp = new Set();  // CARPETAS seleccionadas (rutas) — para acción en bloque
+// La barra de selección del Inspector es FLOTANTE y su anclaje (pie por defecto / cabecera) se RECUERDA: con
+// un árbol largo, una barra inline quedaba arriba y fuera de vista al scrollear. El ⇅ la mueve; según dónde
+// estés mirando (la cabecera con el árbol desplegado, o el final de la lista) conviene una u otra.
+function anclarSelBar() {
+  const bar = $('#guiaSelBar');
+  if (!bar) return;
+  const arriba = localStorage.getItem('guia_selbar_pos') === 'arriba';
+  bar.classList.toggle('arriba', arriba);
+  const b = $('#guiaSelPos');
+  if (b) b.title = arriba ? 'Mover la barra al PIE de la pantalla' : 'Mover la barra a la CABECERA de la pantalla';
+}
 function actualizarSelBar() {
   const bar = $('#guiaSelBar');
   if (!bar) return;
   const nf = _guiaSel.size, nc = _guiaSelCarp.size;
   bar.style.display = nf || nc ? 'flex' : 'none';
+  anclarSelBar();
+  const bpos = $('#guiaSelPos');
+  if (bpos && !bpos._cableado) {
+    bpos._cableado = true;
+    bpos.onclick = () => {
+      const arriba = localStorage.getItem('guia_selbar_pos') === 'arriba';
+      localStorage.setItem('guia_selbar_pos', arriba ? 'pie' : 'arriba');
+      anclarSelBar();
+    };
+  }
   const secF = $('#guiaSelFiles'), secC = $('#guiaSelCarps');
   if (secF) secF.style.display = nf ? 'flex' : 'none';
   if (secC) secC.style.display = nc ? 'flex' : 'none';

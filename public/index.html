@@ -339,10 +339,8 @@
                 </label>
               </div>
               <!-- Barra de SELECCIÓN (aparece al marcar casillas): FICHEROS → agrupar · CARPETAS → acción en bloque. -->
-              <div
-                id="guiaSelBar"
-                style="display: none; flex-direction: column; gap: 6px; margin-top: 10px; padding: 6px 8px; background: rgba(120, 120, 255, 0.1); border-radius: 8px"
-              >
+              <div id="guiaSelBar" class="selflot" style="display: none">
+                <button class="btn selpos" id="guiaSelPos" type="button" title="Mover la barra al pie o a la cabecera de la pantalla">⇅</button>
                 <div id="guiaSelFiles" class="row" style="gap: 8px; align-items: center; flex-wrap: wrap; display: none">
                   <b id="guiaSelN" style="font-size: 13px">0</b>
                   <span class="muted" style="font-size: 12px">fichero(s) — agrupar como:</span>
