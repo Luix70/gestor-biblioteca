@@ -3073,6 +3073,7 @@ function pintarDoc(r, ctx) {
     else if (/\.(cbz|cbr|cb7|djvu)$/.test(nom)) iniciarLectorComic(d._id);
     else if (/\.(mobi|azw3?)$/.test(nom)) iniciarLectorMobi(d._id);
     else if (nom.endsWith('.chm')) iniciarLectorChm(d._id);
+    else if (/\.docx?$/.test(nom)) iniciarLectorWord(d._id, r.nombre_archivo);  // `f`: el texto elegido en el selector
     else if (d.tipo_recurso === 'software') iniciarExploradorSoftware(d._id);
     if (r.audios && r.audios.length) iniciarReproductorAudio(r.doc && r.doc._id, r.audios); // audiolibro / lectura con audio: playlist
     cableaSelTextos();
@@ -4081,6 +4082,30 @@ async function iniciarLectorMobi(id) {
 // CHM (HTML compilado): visor propio. El backend extrae el CHM (cacheado) y sirve cada tema como HTML
 // AUTOCONTENIDO (imágenes/CSS incrustados como data-URI) → se pinta en un iframe SANDBOX (sin scripts),
 // mismo patrón seguro que MOBI. Índice lateral (del .hhc) para navegar por los temas.
+// WORD (.docx/.doc): el servidor devuelve el documento ya convertido a HTML y se pinta en un iframe SANDBOX
+// (sin scripts), igual que el CHM. `f` permite abrir OTRO texto del documento (selector de `textos[]`).
+async function iniciarLectorWord(id, f) {
+  const wrap = $('#wordWrap'), msg = $('#wordMsg');
+  if (!wrap) return;
+  let r;
+  const q = f ? '?f=' + encodeURIComponent(f) : '';
+  try { r = await api('/documentos/' + encodeURIComponent(id) + '/word' + q); }
+  catch (e) { if (msg) msg.textContent = 'No se pudo leer el documento: ' + e.message; return; }
+  if (!r.ok) { if (msg) msg.textContent = r.motivo || 'No se pudo previsualizar el documento.'; return; }
+  const doc =
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<style>html,body{margin:0}body{font:15px/1.7 -apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a;background:#fff;padding:18px 22px;max-width:46em;margin:0 auto}` +
+    `h1,h2,h3,h4,h5,h6{line-height:1.3;margin:1.2em 0 .5em}p{margin:0 0 .8em}img{max-width:100%;height:auto}` +
+    `table{border-collapse:collapse;margin:1em 0;width:100%}td{border:1px solid #ccc;padding:6px 8px;vertical-align:top}td p{margin:0}</style>` +
+    (r.html || '<p>(sin contenido)</p>');
+  const ifr = document.createElement('iframe');
+  ifr.setAttribute('sandbox', '');   // HTML del documento aislado: sin scripts
+  ifr.srcdoc = doc;
+  ifr.style.cssText = 'width:100%;height:100%;border:0;background:#fff';
+  wrap.innerHTML = '';
+  wrap.appendChild(ifr);
+}
+
 async function iniciarLectorChm(id) {
   const body = $('#chmBody'), toc = $('#chmToc'), msg = $('#chmMsg');
   if (!body) return;
@@ -6275,6 +6300,13 @@ function previewArchivoBase(r) {
     <div id="chmWrap" style="display:flex;gap:8px;height:62vh;border:1px solid rgba(128,128,128,.3);border-radius:10px;overflow:hidden;background:#fff">
       <nav id="chmToc" style="flex:0 0 38%;max-width:250px;overflow:auto;border-right:1px solid rgba(0,0,0,.12);padding:6px 2px;font-size:13px;background:#fafafa"></nav>
       <div id="chmBody" style="flex:1;min-width:0;position:relative"><div class="epubmsg" id="chmMsg" style="color:#555">Cargando previsualización…</div></div>
+    </div>${acc}</div>`;
+  // WORD (.docx/.doc): el servidor lo convierte a HTML (.docx = ZIP OOXML, sin dependencias; .doc necesita
+  // antiword/catdoc) y se pinta en un iframe sandbox, igual que el CHM.
+  if (ext === 'docx' || ext === 'doc')
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📝 ${esc(nombre)}</h3>
+    <div id="wordWrap" style="height:62vh;border:1px solid rgba(128,128,128,.3);border-radius:10px;overflow:hidden;background:#fff;position:relative">
+      <div class="epubmsg" id="wordMsg" style="color:#555">Cargando previsualización…</div>
     </div>${acc}</div>`;
   // Resto de formatos: sin vista previa integrada — solo descarga.
   const ic = { djvu: '📘', mobi: '📙', azw3: '📙' }[ext] || '📦';

@@ -40,6 +40,7 @@ import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
 import { indiceChm, paginaChmInline } from './utils/lector-chm.js';
+import { leerWord } from './utils/lector-word.js';
 import path from 'node:path';
 
 const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu']);
@@ -1605,6 +1606,25 @@ export function rutasPanel() {
         if (path.extname(doc.nombre_archivo || '').toLowerCase() !== '.chm') { res.status(400).json({ ok: false, motivo: 'no es un CHM' }); return null; }
         return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo) };
     };
+    // WORD (.docx/.doc) → HTML para el visor de la ficha. El .docx se lee con adm-zip+cheerio (sin dependencias
+    // nuevas); el .doc necesita antiword/catdoc en el servidor y, si no están, se avisa con claridad y queda la
+    // descarga (el documento SIGUE catalogado: nunca se pierde, solo no se previsualiza).
+    r.get('/documentos/:id/word', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const sub = String(req.query.f || doc.nombre_archivo || '');   // `f`: otro texto del doc (selector de textos[])
+            if (!/\.(docx?)$/i.test(sub)) return res.status(400).json({ ok: false, motivo: 'no es un documento de Word' });
+            const abs = path.join(carpetaDeDoc(doc), path.basename(sub));
+            const w = await leerWord(abs);
+            if (w.sinHerramienta) return res.json({ ok: false, motivo: 'La previsualización de .doc (Word 97-2003) requiere antiword o catdoc en el servidor. El documento está catalogado: puedes descargarlo.' });
+            if (!w.html) return res.json({ ok: false, motivo: w.error ? `No se pudo leer el documento: ${w.error}` : 'El documento no tiene contenido legible.' });
+            res.json({ ok: true, html: w.html, titulo: w.titulo || doc.titulo || '', autor: w.autor || null, formato: w.formato });
+        } catch (e) { res.status(200).json({ ok: false, motivo: e.message }); }
+    });
     // Índice + página de entrada (autocontenida) del CHM.
     r.get('/documentos/:id/chm', async (req, res) => {
         try {
