@@ -2583,9 +2583,7 @@ function irBusquedaFiltro(extra) {
 // MODO del catálogo respecto a las obras: colapsado (una tarjeta por obra, por defecto) ↔ expandido (un tomo
 // por tarjeta, teñidos). Se RECUERDA entre sesiones: es una preferencia de trabajo, no un capricho por búsqueda.
 function modoTomos(expandido) {
-  localStorage.setItem('cat_tomos', expandido ? '1' : '0');
-  const c = $('#sqTomos');
-  if (c) c.checked = !!expandido;
+  localStorage.setItem('cat_tomos', expandido ? '1' : '0');   // el botón de la barra se repinta al buscar
 }
 const modoTomosExpandido = () => localStorage.getItem('cat_tomos') === '1';
 // Ver los libros de UNA ubicación (ámbito/estantería) en el Catálogo: FILTRA por esa ubicación y —si es
@@ -6723,6 +6721,13 @@ function renderBulk() {
   // Botón que alterna Modo selección (tocar la portada la marca) ↔ Modo previsualización (tocar abre la
   // ficha). El texto refleja el modo ACTUAL; la selección se conserva al cambiar de modo.
   const modoBtn = `<button class="btn${modoSeleccion ? ' pri' : ''}" id="bkModo" title="Modo selección: tocar una portada la marca. Modo previsualización: tocar abre su ficha. Doble clic / pulsación larga en una portada también conmuta. La selección se conserva.">${modoSeleccion ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`;
+  // MODO respecto a las obras multivolumen, junto a los otros modos de la barra (aquí se ve y se usa; como
+  // casilla diminuta entre los filtros pasaba desapercibida). Colapsado = una tarjeta por obra; expandido =
+  // un tomo por tarjeta (teñidos y seleccionables, para elegir tomos sueltos y moverlos en lote).
+  const expandido = modoTomosExpandido();
+  const tomosBtn = `<button class="btn${expandido ? ' pri' : ''}" id="bkTomos" title="${expandido
+    ? 'Viendo los TOMOS uno a uno (seleccionables). Pulsa para colapsar cada obra en una sola tarjeta.'
+    : 'Las obras multivolumen se ven COLAPSADAS (una tarjeta por obra). Pulsa para desplegar sus tomos y poder seleccionarlos.'}">${expandido ? '📖 Tomos sueltos' : '📚 Obras colapsadas'}</button>`;
   // Herramientas de selección masiva (solo tienen sentido en modo selección).
   const selNfc =
     'NDEFReader' in window
@@ -6765,13 +6770,15 @@ function renderBulk() {
          <div class="bulkacts-body">${accBtns}</div>
        </details>`
     : '';
-  el.innerHTML = `<div class="bulkbar">${modoBtn}${herramientas}${resume}${cuenta}</div>${acciones}`;
+  el.innerHTML = `<div class="bulkbar">${modoBtn}${tomosBtn}${herramientas}${resume}${cuenta}</div>${acciones}`;
   // Recordar si el panel de acciones queda plegado o desplegado.
   if ($('#bulkActs'))
     $('#bulkActs').addEventListener('toggle', (e) => localStorage.setItem('sq_acciones', e.target.open ? '1' : '0'));
   // Activar/desactivar Modo selección (la selección NO se pierde al apagarlo). Mismo efecto que el gesto
   // doble-clic / pulsación-larga sobre una tarjeta.
   $('#bkModo').onclick = alternarModoSel;
+  // Colapsar/desplegar obras: es un MODO (se recuerda) → se repinta la búsqueda desde la página 1.
+  if ($('#bkTomos')) $('#bkTomos').onclick = () => { modoTomos(!modoTomosExpandido()); buscarCatalogo(1); };
   if ($('#bkResumeNfc'))
     $('#bkResumeNfc').onclick = () => {
       const s = colaEtqGuardada();
@@ -7184,8 +7191,7 @@ function construirSearch() {
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search">
-          <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label>
-          <label class="muted" title="Por defecto, los tomos de una obra multivolumen se colapsan en UNA tarjeta (📚 N tomos). Márcalo para verlos uno a uno." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqTomos"> 📖 Ver tomos sueltos</label></div>
+          <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="capitulo">Capítulos</option><option value="apuntes">Apuntes</option><option value="software">Software</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
@@ -7266,11 +7272,6 @@ function construirSearch() {
   };
   $('#sqTipo').onchange = () => buscarCatalogo(1);
   if ($('#sqEstricto')) $('#sqEstricto').onchange = () => buscarCatalogo(1); // frase exacta ↔ laxa
-  // Obras colapsadas ↔ tomos sueltos: es un MODO de trabajo, así que se recuerda entre sesiones.
-  if ($('#sqTomos')) {
-    $('#sqTomos').checked = modoTomosExpandido();
-    $('#sqTomos').onchange = (e) => { modoTomos(e.target.checked); buscarCatalogo(1); };
-  }
   if ($('#sqSoporte')) $('#sqSoporte').onchange = () => buscarCatalogo(1);
   if ($('#sqFormato')) $('#sqFormato').onchange = () => buscarCatalogo(1);
   // Ubicación: al cambiar el ámbito, refrescar la estantería (asociada a ese ámbito) y buscar.
@@ -7425,8 +7426,9 @@ function _paramsBusqueda() {
   });
   // Búsqueda ESTRICTA (frase exacta) en vez de laxa (todas las palabras sueltas).
   if ($('#sqEstricto') && $('#sqEstricto').checked) params.set('estricto', '1');
-  // Obras multivolumen COLAPSADAS en una tarjeta (por defecto). Desmarcar = ver los tomos uno a uno.
-  if ($('#sqTomos') && $('#sqTomos').checked) params.set('agrupar', '0');
+  // Obras multivolumen COLAPSADAS en una tarjeta (por defecto). El MODO vive en localStorage y se conmuta con
+  // el botón «📚 Obras colapsadas / 📖 Tomos sueltos» de la barra de modos (junto a selección/previsualización).
+  if (modoTomosExpandido()) params.set('agrupar', '0');
   // Sentido asc/desc (salvo en «Relevancia / recientes», que no lo usa).
   if ($('#sqOrden').value !== 'reciente') params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
   const est = estrellasSel();

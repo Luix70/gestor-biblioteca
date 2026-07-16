@@ -413,7 +413,10 @@ de ficheros clasificado por CDU.
       ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
     · MODO del catálogo respecto a las obras (se RECUERDA en localStorage `cat_tomos`: es una preferencia de
-      trabajo, no un capricho por búsqueda). COLAPSADO (defecto) ↔ EXPANDIDO (casilla «📖 Ver tomos sueltos»).
+      trabajo, no un capricho por búsqueda). COLAPSADO (defecto) ↔ EXPANDIDO. Se conmuta con un BOTÓN en la
+      barra de modos —«📚 Obras colapsadas» / «📖 Tomos sueltos», junto a «🖱 Modo selección / 👁 Modo
+      previsualización»—, que es donde se busca y donde se ve: como casilla entre los filtros pasaba
+      desapercibida. Se ilumina (.pri) cuando está en expandido, igual que los otros modos.
       En EXPANDIDO cada tomo es su propia tarjeta —seleccionable, para hacer selecciones finas y moverlas a una
       estantería— con FONDO MÁS CLARO (`.esvol`) y la marca «📚 N» que abre su obra: se distingue de un libro de
       un solo volumen. El aclarado se hace con una capa translúcida sobre el fondo, así vale igual en gris que
