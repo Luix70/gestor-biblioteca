@@ -115,6 +115,7 @@ export function guiaEsSignificativa(g) {
     if (g.accion && g.accion !== 'normal') return true;
     if (Array.isArray(g.grupos) && g.grupos.length) return true;
     if (g.perfil && Object.keys(g.perfil).length) return true;
+    if (g.archivos && Object.keys(g.archivos).length) return true;   // acciones por fichero (contenedores) = intención
     return false;
 }
 

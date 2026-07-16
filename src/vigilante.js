@@ -224,6 +224,29 @@ async function podarVaciosInbox() {
             console.log(`  🗑️  «${e.name}»: sin nada que catalogar (vacía / solo basura / subcarpetas vacías) → retirada del Inbox.`);
         }
     }
+    await limpiarGuiaRaiz();
+}
+
+/**
+ * Limpia el `_guia.json` de la RAÍZ del Inbox. Las guías de las subcarpetas se van con su carpeta al podarla,
+ * pero la raíz NO se poda nunca (es el Inbox), así que su guía se quedaba para siempre — y con acciones por
+ * fichero que apuntaban a ficheros YA catalogados/retirados: sidecar obsoleto contaminando un Inbox vacío.
+ * Se retiran las entradas de `archivos` cuyo fichero ya no está y, si la guía se queda sin nada que guiar, se
+ * borra. Si aún guía algo (una acción pendiente, un perfil), se conserva.
+ */
+async function limpiarGuiaRaiz() {
+    const guia = await leerGuia(INBOX);
+    if (!guia) return;
+    let cambia = false;
+    for (const nombre of Object.keys(guia.archivos || {})) {
+        if (!(await rutaExiste(path.join(INBOX, nombre)))) { delete guia.archivos[nombre]; cambia = true; }
+    }
+    if (!guiaEsSignificativa(guia)) {
+        await fs.rm(path.join(INBOX, NOMBRE_GUIA), { force: true }).catch(() => {});
+        console.log(`  🧹 Inbox: «${NOMBRE_GUIA}» retirado (ya no guiaba nada).`);
+        return;
+    }
+    if (cambia) await escribirGuia(INBOX, guia).catch(() => {});
 }
 
 /**
