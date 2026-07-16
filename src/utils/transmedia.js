@@ -300,8 +300,16 @@ async function copiarArbolResiliente(origen, destino) {
     }
 }
 
-export async function copiarVerificado(origen, destino) {
-    await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // parcial de un intento anterior
+/**
+ * Copia `origen` → `destino` y VERIFICA la copia (misma huella: nº de ficheros + bytes). Solo con `integra`
+ * el llamante debe reciclar el origen.
+ * @param limpiarDestino  true (por defecto) = borra el destino antes (parcial de un intento anterior). FALSE al
+ *   COMPLETAR una colección ya catalogada: se FUSIONA sobre lo que hay, para no borrar las portadas derivadas
+ *   (.portadas/) ni los ficheros de los documentos que ya existen. `huella` ignora lo oculto, así que la
+ *   verificación sigue cuadrando.
+ */
+export async function copiarVerificado(origen, destino, { limpiarDestino = true } = {}) {
+    if (limpiarDestino) await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // parcial de un intento anterior
     await fs.mkdir(path.dirname(destino), { recursive: true });
     await copiarArbolResiliente(origen, destino);
     const [orig, dest] = await Promise.all([huella(origen), huella(destino)]);
@@ -339,13 +347,26 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
     const hayContenido = (plan.totales?.ficheros || 0) > 0;
     if (!plan.miembros.length && !plan.audiolibros.length && !hayContenido) return { ok: false, motivo: 'carpeta vacía: nada que catalogar' };
 
-    // Anti-duplicados: si ya existe una colección con ese nombre Y tiene miembros, NO se re-cataloga (un
-    // re-drop no debe duplicar los 863 documentos). Se comprueba ANTES de copiar 19 GB en balde.
+    // Anti-duplicados MIEMBRO A MIEMBRO. Un re-drop no debe duplicar los cientos de documentos de una colección
+    // ya catalogada... pero TAMPOCO debe impedir COMPLETAR una colección INCOMPLETA. El guardián «todo o nada»
+    // anterior rechazaba el drop ENTERO si la colección existía con aunque fuera 1 documento → a una colección a
+    // la que le faltaban miembros (caso real: se catalogó el audiolibro y sus 3 PDFs se quedaron fuera) NO se le
+    // podían añadir NUNCA: cada re-drop se rechazaba y los que faltaban no entraban jamás. Ahora se compara el
+    // plan con lo YA catalogado y se inserta SOLO LO QUE FALTA (y si ya está todo, se omite sin copiar 19 GB en
+    // balde). Claves: los PDFs por `nombre_archivo`; los audiolibros por `titulo` (no tienen fichero único).
     const colPrevia = await db.collection('colecciones').findOne(
         { nombre: plan.nombreColeccion }, { collation: { locale: 'es', strength: 1 }, projection: { _id: 1 } });
+    let miembros = plan.miembros, audiolibros = plan.audiolibros;
     if (colPrevia) {
-        const yaMiembros = await db.collection('biblioteca').countDocuments({ coleccion: colPrevia._id });
-        if (yaMiembros > 0) return { ok: false, permanente: true, motivo: `ya existe la colección «${plan.nombreColeccion}» con ${yaMiembros} documentos: no se re-cataloga (evita duplicados)` };
+        const previos = await db.collection('biblioteca')
+            .find({ coleccion: colPrevia._id }, { projection: { nombre_archivo: 1, titulo: 1, rol_material: 1 } }).toArray();
+        const yaFichero = new Set(previos.map((d) => d.nombre_archivo).filter(Boolean));
+        const yaAudio = new Set(previos.filter((d) => d.rol_material === 'audiolibro').map((d) => d.titulo).filter(Boolean));
+        miembros = plan.miembros.filter((m) => !yaFichero.has(m.nombre_archivo));
+        audiolibros = plan.audiolibros.filter((a) => !yaAudio.has(a.titulo));
+        if (!miembros.length && !audiolibros.length)
+            return { ok: false, permanente: true, motivo: `ya existe la colección «${plan.nombreColeccion}» COMPLETA (${previos.length} documento/s): no se re-cataloga (evita duplicados)` };
+        console.log(`  ↻ «${plan.nombreColeccion}» ya existe con ${previos.length} documento/s: se COMPLETA con lo que falta (${miembros.length} PDF · ${audiolibros.length} audiolibro/s).`);
     }
 
     // Destino: <árbol CDU>/transmedia/<nombre-colección>/… (una sola rama; la estructura interna se preserva).
@@ -355,7 +376,9 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
 
     // 1) COPIA VERBATIM + verificación (nunca se borra el origen si la copia no quedó íntegra; si el origen
     //    seguía copiándose, orig≠dest → falla, se limpia la parcial y se reintenta en el próximo escaneo).
-    const { integra, huella: copiado } = await copiarVerificado(plan.raiz, carpetaColeccion);
+    // Al COMPLETAR una colección existente NO se limpia el destino: se fusiona, para no borrar las portadas
+    // derivadas (.portadas/) ni los ficheros de los documentos ya catalogados.
+    const { integra, huella: copiado } = await copiarVerificado(plan.raiz, carpetaColeccion, { limpiarDestino: !colPrevia });
     if (!integra) return { ok: false, motivo: 'la copia al árbol CDU no cuadró (el origen aún cambiaba): se CONSERVA el origen y se limpió la copia parcial' };
     // Marcador que protege TODO el subárbol de Integridad/Conformador (no podar/mover/reciclar).
     await fs.writeFile(path.join(carpetaColeccion, MARCA_RUTA_FIJA), `transmedia: ${plan.nombreColeccion}\n`).catch(() => {});
@@ -396,7 +419,7 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         estado_verificacion: 'completado', fecha_ingreso: new Date(), fecha_creacion: new Date(), ...extra,
     });
 
-    for (const m of plan.miembros) {
+    for (const m of miembros) {   // `miembros` = los que FALTAN (todos, si la colección es nueva)
         const abs = path.join(carpetaColeccion, ...m.rel.split('/'));
         const hash = await calcularHashArchivo(abs).catch(() => null);
         if (hash && hashesVistos.has(hash)) { deduplicados++; continue; } // igual hash → un solo doc (fichero intacto)
@@ -426,7 +449,7 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         insertados++;
     }
 
-    for (const a of plan.audiolibros) {
+    for (const a of audiolibros) {   // `audiolibros` = los que FALTAN (todos, si la colección es nueva)
         const autores = await resolverAutores(a.autores);
         const _id = new ObjectId();
         const doc = baseDoc({
