@@ -8625,6 +8625,7 @@ function pintarInteg(r) {
   const et = {
     docsSinCarpeta: 'Docs sin carpeta',
     docsSinFicheroOriginal: 'Docs sin fichero original',
+    docsConAudiosRotos: 'Audiolibros con pistas que faltan',
     rutaBaseCompartida: 'Varios docs en la misma carpeta',
     ramasMuertas: 'Ramas vacías / muertas',
     registroSinDocumento: 'Registro sin documento',
@@ -8638,6 +8639,7 @@ function pintarInteg(r) {
   const mDe = {
     docsSinCarpeta: 'docsSinCarpeta',
     docsSinFicheroOriginal: 'docsSinFicheroOriginal',
+    docsConAudiosRotos: 'docsConAudiosRotos',
     rutaBaseCompartida: 'rutaBaseCompartida',
     ramasMuertas: 'ramasMuertas',
     registroSinDocumento: 'registroSinDocumento',

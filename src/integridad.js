@@ -112,6 +112,31 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     D.docsSinFicheroOriginal = sinFichero.length;
     M.docsSinFicheroOriginal = sinFichero.slice(0, 10).map(d => ({ id: String(d._id), titulo: d.titulo, archivo: d.nombre_archivo }));
 
+    // ── D-bis. AUDIOS ROTOS: docs cuyo `audios[]` apunta a ficheros que NO están en disco (solo informa) ──
+    // PUNTO CIEGO que esto tapa: la comprobación de arriba EXCLUYE a los audiolibros (`esAudioSinDoc`) porque
+    // su original no es un EXT_DOC — razonable, pero dejaba SIN AUDITAR justo a los que solo tienen audio. Un
+    // audiolibro cuyos mp3 desaparecieron era INVISIBLE para la auditoría: el documento existe, se lista en el
+    // catálogo, y solo al pulsar «reproducir» descubres que no hay nada. Caso real: una colección anidada cuya
+    // padre recicló el origen antes de que se copiara la hija → docs apuntando a una carpeta vacía.
+    prog('audios-rotos', { i: 0, total: docs.length });
+    const audiosRotos = [];
+    let _iAR = 0;
+    for (const d of docs) {
+        if (++_iAR % 50 === 0) prog('audios-rotos', { i: _iAR, total: docs.length });
+        const pistas = Array.isArray(d.audios) ? d.audios : [];
+        if (!pistas.length) continue;
+        let faltan = 0;
+        for (const a of pistas) {
+            const abs = absDe(a?.ruta);
+            if (!abs || !(await existe(abs))) faltan++;
+        }
+        if (faltan) audiosRotos.push({ d, faltan, total: pistas.length });
+    }
+    D.docsConAudiosRotos = audiosRotos.length;
+    M.docsConAudiosRotos = audiosRotos.slice(0, 10).map(x => ({
+        id: String(x.d._id), titulo: x.d.titulo, faltan: `${x.faltan}/${x.total} pistas`, ruta_base: x.d.ruta_base,
+    }));
+
     // ── Recorrido del árbol CDU: hojas (registro/doc/img), ramas muertas, registro sin doc, huérfanas/desync ──
     prog('recorrido-arbol', { carpetas: 0 });
     const carpetasHuerfanas = [], rutaBaseDesync = [], registroSinDoc = [], sinHoja = new Set();
