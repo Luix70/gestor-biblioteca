@@ -19,7 +19,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
-import { reciclar } from './utils/papelera.js';
+import { reciclar, reciclarCarpeta as reciclarArbolAPapelera } from './utils/papelera.js';
 import { esTituloArtefacto } from './utils/parsear-nombre.js';
 import { esDocumentoLeible, esMaterialNotable, esVideo } from './utils/criba-material.js';
 import { metricasFichero, ganaEntrante, reemplazarFicheroDeDoc } from './utils/duplicados.js';
@@ -63,11 +63,31 @@ const absDe = (web) => web ? path.join(DIR_CDU, ...(web.startsWith('/recursos/')
 const tieneDocFichero = async (d) => { if (!d) return false; try { return (await fs.readdir(d)).some(esFicheroOriginal); } catch { return false; } };
 const ficheroOriginal = async (carpeta) => { if (!carpeta) return null; try { const n = (await fs.readdir(carpeta)).find(esFicheroOriginal); return n ? path.join(carpeta, n) : null; } catch { return null; } };
 
+/** ¿Hay ALGÚN fichero, a CUALQUIER profundidad, que no sea basura del sistema (@eaDir, .DS_Store, Thumbs.db)? */
+async function tieneAlgunFichero(dir) {
+    let ents; try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+    for (const e of ents) {
+        if (e.isFile() && !ignorar(e.name)) return true;
+        if (e.isDirectory() && !ignorar(e.name) && await tieneAlgunFichero(path.join(dir, e.name))) return true;
+    }
+    return false;
+}
+
+/**
+ * Retira una carpeta del árbol CDU. Si tiene CUALQUIER contenido —a cualquier profundidad— se va ENTERA a la
+ * Papelera, con su manifiesto, restaurable a su sitio exacto. Solo se BORRA lo que está literalmente vacío.
+ *
+ * ESTO ERA EL AGUJERO. Antes había aquí una `reciclarCarpeta` propia (ignorando la de papelera.js) que
+ * reciclaba los ficheros del PRIMER NIVEL y hacía `fs.rm(recursive)` de todo lo demás: lo que colgara de una
+ * subcarpeta NO pasaba por la Papelera, se BORRABA. Con un audiolibro cuyas pistas viven en
+ * `.../Audio/Version 1/*.mp3`, podar la «rama muerta» Audio/ (que no tiene ficheros directos) borraba los mp3
+ * sin dejar rastro en ninguna parte. Por ahí se fue «una carpeta entera sin dejar rastro en Mongo».
+ * La de papelera.js copia el ÁRBOL, lo verifica, y solo entonces borra el origen; y anota el manifiesto.
+ */
 async function reciclarCarpeta(carpeta, etiqueta) {
-    let ents; try { ents = await fs.readdir(carpeta, { withFileTypes: true }); } catch { return; }
-    const ficheros = ents.filter(e => e.isFile()).map(e => path.join(carpeta, e.name));
-    if (ficheros.length) await reciclar(ficheros, etiqueta);
-    await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
+    if (!carpeta) return;
+    if (await tieneAlgunFichero(carpeta)) await reciclarArbolAPapelera(carpeta, etiqueta);
+    else await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
 }
 
 // Puntúa un documento para elegir el "mejor" de un grupo de copias idénticas (hash).
@@ -186,15 +206,21 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         if (ents.some(e => e.isFile() && e.name === MARCA_RUTA_FIJA)) return true;
         const files = ents.filter(e => e.isFile() && !ignorar(e.name)).map(e => e.name);
         const subdirs = ents.filter(e => e.isDirectory() && !ignorar(e.name));
-        // OJO: esto no es solo diagnóstico — de aquí sale `ramasMuertas`, que --reparar RECICLA. Con la lista
-        // estrecha de antes, una carpeta con solo un .cbz/.azw3/.avi (y sin registro.json) parecía VACÍA y se
-        // iba a la Papelera. Por eso se pregunta a la fuente única, que conoce todos los formatos.
+        // Estos tres son para el DIAGNÓSTICO (distinguir «registro sin documento»), no para decidir qué se poda.
         const tieneDoc = files.some(esFicheroOriginal);
         const tieneImg = files.some(n => EXT_IMG.includes(ext(n)));
         const tieneReg = files.includes('registro.json');
         let hojaAbajo = false;
         for (const s of subdirs) hojaAbajo = (await recorrer(path.join(d, s.name))) || hojaAbajo;
-        const contenido = tieneDoc || tieneImg || tieneReg;
+        // CONTENIDO (lo que decide si esto es una «rama muerta» PODABLE) = CUALQUIER fichero que no sea basura
+        // del sistema. NO una lista blanca de formatos.
+        //
+        // Esto es la lección del día entero. La lista blanca decide «no reconozco esta extensión → esto está
+        // vacío → se poda», y ni la lista vieja ni la nueva contemplan .mp3/.m4b/.flac: una carpeta Audio/ con
+        // las pistas de un audiolibro se declaraba VACÍA. Lo mismo le pasaría a cualquier formato que no
+        // hayamos previsto — y siempre habrá uno. Una lista blanca puede fallar decidiendo qué se INDEXA; no
+        // puede fallar decidiendo qué se BORRA. Aquí el defecto es CONSERVAR: se poda lo literalmente vacío.
+        const contenido = files.length > 0;
         if (d !== DIR_CDU) {
             if (!contenido && !hojaAbajo) sinHoja.add(d);
             else if (tieneReg && !tieneDoc && !tieneImg) registroSinDoc.push(d);
