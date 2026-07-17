@@ -319,6 +319,35 @@ export function rutasPanel() {
     r.get('/integridad/informe.html', servirInforme(true));
     r.get('/integridad/informe.txt', servirInforme(false));
 
+    /**
+     * EXPLORAR una carpeta del árbol CDU (solo lectura). Existe para que TODA ruta del informe de integridad
+     * sea abrible: el usuario quiere entrar en las 160 «ramas vacías» y comprobar con sus ojos que están
+     * vacías, y una ruta que no se puede abrir no sirve de nada.
+     *
+     * ¿Por qué un endpoint y no enlazar a /recursos? Porque `express.static` NO lista directorios (eso es
+     * serve-index, que no está montado) y /recursos es PÚBLICO: activar el listado ahí dejaría la biblioteca
+     * entera navegable por cualquiera que llegue al NAS. Aquí se lista bajo sesión de ADMIN y sin servir un
+     * solo byte de contenido (solo nombres y tamaños; los ficheros los sigue sirviendo /recursos).
+     */
+    r.get('/carpeta', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const web = String(req.query.ruta || '');
+            const rel = web.startsWith('/recursos/') ? web.slice('/recursos/'.length) : web;
+            // Blindaje: se resuelve contra la raíz y se comprueba con `path.relative` que no se sale con «..».
+            // (No con `startsWith`: path.resolve normaliza los separadores y comparar cadenas a pelo mezcla
+            //  «/» con «\» y rechaza rutas legítimas — o peor, acepta «CDU-otro» como si fuera «CDU».)
+            const raiz = path.resolve(DIR_CDU);
+            const abs = path.resolve(raiz, ...rel.split('/').filter(Boolean));
+            const dentro = path.relative(raiz, abs);
+            if (dentro.startsWith('..') || path.isAbsolute(dentro)) return res.status(400).json({ ok: false, motivo: 'ruta fuera del árbol CDU' });
+            const st = await stat(abs).catch(() => null);
+            if (!st || !st.isDirectory()) return res.status(404).json({ ok: false, motivo: 'la carpeta no existe' });
+            const t = await arbolInbox(DIR_CDU, { desde: abs, profundidad: 4 });
+            res.json({ ok: true, ruta: web, arbol: t.hijos, truncado: t.truncado });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // ── Campañas de fondo (backfill autorreparable al reposo): listar estado+config+pendientes,
     //    ajustar (activa/lote/cada-N-min) y disparar una tanda ahora. Config y disparo = solo admin. ──
     r.get('/campanas', async (req, res) => {

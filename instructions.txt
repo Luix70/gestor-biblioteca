@@ -1275,6 +1275,17 @@ de ficheros clasificado por CDU.
     IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🔞 Permisos de invitados
     (permitir/restringir NSFW), 📜 Logs en vivo.
 
+    · 🩺 INTEGRIDAD — TODA RUTA DEL INFORME SE ABRE. Cada carpeta del informe HTML enlaza a
+      `<panel>/?carpeta=/recursos/…` → deep-link que abre un EXPLORADOR de solo lectura (modal) con lo que
+      hay dentro. Es lo que permite entrar en las 160 «ramas vacías» y comprobar con tus ojos que están
+      vacías ANTES de reparar: una ruta que no se puede abrir no sirve de nada.
+      ¿Por qué por el panel y no enlazando a /recursos? Porque express.static NO lista directorios (eso es
+      serve-index, que no está montado) y /recursos es PÚBLICO (se monta en app.js:94, antes de
+      `autenticar`): activar el listado ahí dejaría la biblioteca entera navegable por cualquiera que
+      llegue al NAS. `GET /api/carpeta?ruta=` lista bajo sesión de ADMIN y no sirve ni un byte de
+      contenido (solo nombres y tamaños). Los FICHEROS sí se enlazan directos a /recursos (esos sí se
+      sirven, y pdf/imágenes salen inline). Blindaje con path.relative (no startsWith: resolve normaliza
+      los separadores y comparar cadenas mezcla «/» con «\» → rechaza rutas legítimas y acepta «CDU-otro»).
     · 🩺 INTEGRIDAD — el informe .txt (admin): la tabla del panel enseña los
       recuentos y, al pinchar una fila, una MUESTRA de 12 casos. Para trabajar de
       verdad está «⬇ Informe (.txt)»: descarga el informe COMPLETO del diagnóstico

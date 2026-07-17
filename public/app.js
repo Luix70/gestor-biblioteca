@@ -4192,6 +4192,40 @@ async function iniciarExploradorSoftware(id) {
   if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">(paquete vacío)</div>'; return; }
   cont.innerHTML = r.arbol.map(nodoArbolRO).join('');
 }
+/**
+ * Explorador de UNA carpeta del árbol CDU (solo lectura). Lo abre el deep-link `?carpeta=…` de los enlaces del
+ * informe de integridad: el usuario quiere entrar en las «ramas vacías» y COMPROBAR con sus ojos que están
+ * vacías antes de reparar. Una ruta que no se puede abrir no sirve de nada.
+ * Va por el panel (sesión de admin) y no por /recursos porque express.static no lista directorios, y activar
+ * el listado ahí dejaría la biblioteca entera navegable por cualquiera (es público).
+ */
+async function explorarCarpeta(ruta) {
+  // Reutiliza el overlay que ya existe (#cmpModal/#cmpScrim) en vez de inventar otro.
+  $('#cmpModal').innerHTML =
+    `<div class="box card" style="max-width:680px;text-align:left">
+       <h3 style="margin-top:0;font-size:15px">🗂️ Carpeta</h3>
+       <div class="mono muted" style="font-size:12px;word-break:break-all;margin-bottom:10px">${esc(ruta)}</div>
+       <div id="expCuerpo" style="max-height:60vh;overflow:auto;font-size:13px"><div class="muted">Cargando…</div></div>
+       <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" id="expX">Cerrar</button></div>
+     </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#expX').onclick = cerrarCmp;
+  let r;
+  try { r = await api('/carpeta?ruta=' + encodeURIComponent(ruta)); }
+  catch (e) { const el = $('#expCuerpo'); if (el) el.innerHTML = `<div class="muted">No se pudo abrir: ${esc(e.message)}</div>`; return; }
+  const el = $('#expCuerpo');
+  if (!el) return;
+  if (!r.arbol || !r.arbol.length) {
+    // Justo lo que hay que verificar en las 160 «ramas vacías»: que de verdad no hay NADA dentro.
+    el.innerHTML = '<div class="muted">La carpeta está <b>vacía</b>: ni un fichero ni una subcarpeta.</div>';
+    return;
+  }
+  el.innerHTML = (r.truncado ? '<div class="muted" style="font-size:12px;margin-bottom:6px">Listado recortado: se muestran los primeros.</div>' : '')
+    + r.arbol.map(nodoArbolRO).join('');
+}
+
 function nodoArbolRO(n) {
   if (n.tipo === 'file') {
     const ic = _ICONO_CLASE[n.clase] || '📄';
@@ -14977,11 +15011,19 @@ let estadoTimer = null;
 let _deepDoc = null,
   _deepUbic = null,
   _deepOff = null,
+  _deepCarpeta = null,
   _compartido = false;
 function abrirEnlaceProfundo() {
   try {
     history.replaceState(null, '', location.pathname);
   } catch (_) {}
+  // ?carpeta=/recursos/… → explorador de esa carpeta. Lo usan los enlaces del informe de integridad: toda
+  // ruta del informe tiene que poder ABRIRSE (si no, no puedes verificar nada antes de reparar).
+  if (_deepCarpeta) {
+    const ruta = _deepCarpeta;
+    _deepCarpeta = null;
+    return explorarCarpeta(ruta);
+  }
   if (_deepDoc) {
     const id = _deepDoc;
     _deepDoc = null;
@@ -15223,6 +15265,7 @@ $('#logout').onclick = async () => {
     _deepDoc = qp.get('doc') || null;
     _deepOff = qp.get('o') || null;
     _compartido = qp.get('compartido') === '1';
+    _deepCarpeta = qp.get('carpeta') || null; // ?carpeta=/recursos/… → explorador (informe de integridad)
     const amb = qp.get('amb');
     if (amb) _deepUbic = { amb, est: qp.get('est') || '' };
   } catch (_) {}

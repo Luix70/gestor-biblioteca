@@ -23,6 +23,20 @@ const num = (n) => new Intl.NumberFormat('es-ES').format(n || 0);
 const escH = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /**
+ * TODA ruta de carpeta del informe se enlaza a su explorador. Petición del usuario, y es de sentido común: una
+ * ruta que no se puede abrir no sirve de nada — quiere entrar en las 160 «ramas vacías» y comprobar con sus
+ * ojos que están vacías ANTES de reparar.
+ * Apunta al PANEL (`?carpeta=…`), no a /recursos: express.static no lista directorios, y activar el listado
+ * ahí dejaría la biblioteca entera navegable por cualquiera (es público). El panel lo lista bajo sesión.
+ */
+const carpetaHtml = (ruta, base, texto = ruta) => {
+    if (!ruta) return '';
+    const t = `<span class="mono">${escH(texto)}</span>`;
+    if (!base) return t;
+    return `<a href="${escH(`${base}/?carpeta=${encodeURIComponent(ruta)}`)}" target="_blank" rel="noopener" title="Abrir esta carpeta en el panel">${t}</a>`;
+};
+
+/**
  * Catálogo de categorías: etiqueta, si la arregla el botón «Reparar» o pide mano, qué significa y qué hacer.
  * El orden es el de la tabla del panel (primero lo que puede implicar pérdida, luego la limpieza rutinaria).
  * `muestra` dice de qué lista de `detalles` sale cada una (las dos filas de hash comparten lista).
@@ -295,6 +309,8 @@ function docHtml(x, base) {
     const t = escH(x.titulo || '(sin título)');
     const cab = base && x.id ? `<a href="${escH(base)}/?doc=${escH(x.id)}" target="_blank" rel="noopener">${t}</a>` : `<b>${t}</b>`;
     const campo = (k, v) => (v ? `<div><span class="k">${k}</span><span class="mono">${escH(v)}</span></div>` : '');
+    // Las rutas de CARPETA se enlazan a su explorador: toda ruta del informe tiene que poder abrirse.
+    const campoRuta = (k, v) => (v ? `<div><span class="k">${k}</span>${carpetaHtml(v, base)}</div>` : '');
     const pistas = Array.isArray(x.pistas) && x.pistas.length
         ? `<ul class="pistas mono">${x.pistas.map((p) => `<li>${escH(p)}</li>`).join('')}</ul>` : '';
     // LO QUE SÍ HAY en la carpeta, con cada fichero ENLAZADO. Se enlazan los FICHEROS, no la carpeta: el árbol
@@ -311,18 +327,19 @@ function docHtml(x, base) {
             : `<div><span class="k">hay dentro</span><span class="mono">nada: la carpeta está vacía</span></div>`;
     }
     return cab + `<div class="campos">`
-        + campo('id', x.id) + campo('archivo', x.archivo) + campo('ruta', x.ruta)
+        + campo('id', x.id) + campo('archivo', x.archivo) + campoRuta('ruta', x.ruta)
         + campo('isbn', x.isbn) + campo('issn', x.issn) + campo('cdu', x.cdu)
         + campo('formatos', (x.formatos || []).join(', ')) + campo('faltan', x.faltan)
-        + (x.enDisco ? campo('en disco', x.enDisco) + campo('en BD', x.enBD) : '')
+        + (x.enDisco ? campoRuta('en disco', x.enDisco) + campoRuta('en BD', x.enBD) : '')
         + pistas + contenido + `</div>`;
 }
 
 /** Un elemento del listado, en cualquiera de sus tres formas (ruta suelta · grupo · ficha de documento). */
 function elementoHtml(x, base) {
-    if (typeof x === 'string') return `<li class="mono">${escH(x)}</li>`;
-    // CARPETA con su contenido: cada fichero ENLAZADO a /recursos (los ficheros sí se sirven; la carpeta no,
-    // express.static no lista directorios — y /recursos es público, así que activarlo expondría la biblioteca).
+    // Ruta suelta (ramas muertas, depósitos): ENLAZADA — es justo la que hay que poder abrir para verificar.
+    if (typeof x === 'string') return `<li>${x.startsWith('/recursos/') ? carpetaHtml(x, base) : `<span class="mono">${escH(x)}</span>`}</li>`;
+    // CARPETA con su contenido: la carpeta abre el explorador; cada fichero abre el fichero (/recursos sí
+    // sirve ficheros — lo que no hace es listar directorios).
     if (x.ruta && Array.isArray(x.contenido) && !x.id) {
         const items = x.contenido.length
             ? x.contenido.map((c) => {
@@ -330,10 +347,10 @@ function elementoHtml(x, base) {
                 return `<li class="mono">${url ? `<a href="${escH(url)}" target="_blank" rel="noopener">${escH(c)}</a>` : escH(c)}</li>`;
             }).join('')
             : '<li class="mono" style="opacity:.6">(vacía)</li>';
-        return `<li><span class="mono">${escH(x.ruta)}</span><ul class="grp">${items}</ul></li>`;
+        return `<li>${carpetaHtml(x.ruta, base)}<ul class="grp">${items}</ul></li>`;
     }
     if (Array.isArray(x.docs)) {
-        const cab = x.ruta ? `<span class="mono">${escH(x.ruta)}</span>` : `<span class="mono">hash ${escH(x.hash || '?')}</span>`;
+        const cab = x.ruta ? carpetaHtml(x.ruta, base) : `<span class="mono">hash ${escH(x.hash || '?')}</span>`;
         return `<li>${cab}<ul class="grp">${x.docs.map((d) => `<li>${docHtml(d, base)}</li>`).join('')}</ul></li>`;
     }
     return `<li>${docHtml(x, base)}</li>`;
@@ -389,7 +406,7 @@ export function informeHtml(informe, { base = '' } = {}) {
         const cons = T.carpetasConservadas || [];
         if (cons.length) {
             h.push(`<div class="expl" style="margin-top:12px"><b>Ojo:</b> ${num(cons.length)} carpeta(s) NO se han tocado porque tienen ficheros dentro. La reparación las ha dejado a propósito: míralas y decide.</div>`);
-            h.push(`<ol class="items">${cons.map((c) => `<li class="mono">${escH(c.carpeta)} <span class="tag man">${escH(c.motivo)}</span></li>`).join('')}</ol>`);
+            h.push(`<ol class="items">${cons.map((c) => `<li>${carpetaHtml(c.carpeta, base)} <span class="tag man">${escH(c.motivo)}</span></li>`).join('')}</ol>`);
         }
         h.push('</div>');
     }
