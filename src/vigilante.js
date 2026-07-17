@@ -518,6 +518,114 @@ async function listarUnidades() {
     return unidades;
 }
 
+// ══════════════════════════════ DRY-RUN: el PLAN, sin tocar nada ══════════════════════════════
+/**
+ * Qué HARÍA el vigilante con el Inbox tal y como está ahora, sin catalogar, mover ni borrar nada.
+ *
+ * LA DECISIÓN DE DISEÑO, y es la única que importa aquí: esto llama a `listarUnidades()`, la MISMA función que
+ * decide de verdad. No hay un simulador aparte. Un simulador se desincronizaría del vigilante en la primera
+ * semana y te enseñaría un plan que no es el que se va a ejecutar — que es exactamente la enfermedad (listas
+ * paralelas que divergen) que llevamos días arreglando. Si el plan miente, es que el vigilante hace eso.
+ *
+ * Y LO QUE DE VERDAD RESPONDE: no solo qué se va a catalogar, sino **qué se va a quedar fuera y por qué**. Eso
+ * es lo que no se puede averiguar mirando el resultado («muchos de esos libros fueron a la papelera sin
+ * catalogarse… ¿por qué unos sí y otros no?»): lo que no sale, no sale, y no deja rastro que mirar.
+ *
+ * Es de SOLO LECTURA: no escribe en disco ni en Mongo. Sí ceba las cachés de detección pegajosa del vigilante
+ * (transmediaVistas y compañía), que es lo que hace que el plan y la ejecución posterior COINCIDAN. La única
+ * cola de acciones (`dropsADisolver`) se salva y se restaura: un plan no puede dejar trabajo pendiente.
+ *
+ * @returns {Promise<{unidades: object[], excluidos: object[], resumen: object}>}
+ */
+export async function planificarInbox() {
+    const dropsAntes = new Set(dropsADisolver);
+    let unidades;
+    try {
+        unidades = await listarUnidades();
+    } finally {
+        dropsADisolver.clear();
+        for (const d of dropsAntes) dropsADisolver.add(d);
+    }
+
+    const plan = unidades.map(describirUnidad);
+
+    // ── Lo que NO va a entrar. Se calcula por DIFERENCIA: todo lo de primer nivel del Inbox que no aparece en
+    //    ninguna unidad. Se hace así (y no anotándolo dentro de clasificarDirectorio) para no tener que tocar
+    //    la ruta de decisión real por un informe: el plan observa, no interfiere.
+    const tocado = new Set();
+    for (const u of unidades) {
+        for (const r of u.rutas || []) tocado.add(primerNivel(r));
+        if (u.carpeta) tocado.add(primerNivel(u.carpeta));
+    }
+    const excluidos = [];
+    let entradas;
+    try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { entradas = []; }
+    for (const e of entradas) {
+        if (ignorarEntrada(e.name)) continue;
+        const ruta = path.join(INBOX, e.name);
+        if (tocado.has(ruta)) continue;
+        excluidos.push({ nombre: e.name, ruta: e.name, ...(await porQueFuera(ruta, e)) });
+    }
+
+    const resumen = { unidades: plan.length, documentos: plan.reduce((s, u) => s + (u.documentos || 0), 0), excluidos: excluidos.length };
+    return { ts: new Date().toISOString(), unidades: plan, excluidos, resumen };
+}
+
+/** La entrada de PRIMER NIVEL del Inbox de la que cuelga una ruta (para casar unidades con lo que ves). */
+function primerNivel(ruta) {
+    const rel = path.relative(INBOX, ruta);
+    if (!rel || rel.startsWith('..')) return ruta;
+    return path.join(INBOX, rel.split(path.sep)[0]);
+}
+
+/** Por qué una entrada del Inbox no produce ninguna unidad. El orden replica el de clasificarDirectorio. */
+async function porQueFuera(ruta, ent) {
+    if (!ent.isDirectory()) {
+        const ext = path.extname(ent.name).toLowerCase();
+        if (EXT_COMPRIMIDO.includes(ext)) {
+            const g = await leerGuia(INBOX);
+            const acc = g?.archivos?.[ent.name]?.accion;
+            if (acc === 'omitir') return { motivo: 'omitir (guía)', detalle: 'marcado «omitir» en el Inspector.', grave: false };
+            if (acc === 'software') return { motivo: 'software (guía)', detalle: 'se envolverá y catalogará INTACTO como 1 registro.', grave: false };
+            return { motivo: 'contenedor', detalle: `se expandirá a carpeta antes de catalogar (o elige acción en el Inspector; ventana de ${Math.round(CONTENEDOR_ESPERA_MS / 60000)} min).`, grave: false };
+        }
+        if (!esValida(ent.name)) return { motivo: 'no catalogable', detalle: 'extensión que no se cataloga (.txt, .url, .nfo…).', grave: false };
+        return { motivo: 'sin reconocer', detalle: 'no se ha reconocido como documento. NO se cataloga.', grave: true };
+    }
+    if (omitidasDefinitivas.has(ruta)) return { motivo: 'duplicado', detalle: 'ya catalogado (mismo hash): no se reintenta.', grave: false };
+    const guia = await leerGuia(ruta);
+    if (guia?.accion === 'omitir') return { motivo: 'omitir (guía)', detalle: 'marcada «omitir» en el Inspector.', grave: false };
+    // VACÍA antes que «copiándose»: `carpetaEstable` devuelve false con 0 ficheros («vacía / aún sin ficheros
+    // escritos»), así que sin esto una carpeta vacía se anunciaba como «aún se está copiando». Mentira, y de
+    // las que te dejan esperando a que pase algo que no va a pasar.
+    const { nFicheros } = await huellaCarpeta(ruta);
+    if (!nFicheros) return { motivo: 'vacía', detalle: 'no hay ningún fichero dentro.', grave: false };
+    if (!(await carpetaEstable(ruta))) return { motivo: 'copiándose', detalle: 'aún se está copiando: se procesará cuando termine.', grave: false };
+    if (await nadaQueCatalogar(ruta)) return { motivo: 'sin contenido', detalle: 'no hay dentro nada catalogable (ni documentos, ni imágenes, ni audio).', grave: false };
+    // Estable, con contenido, y aun así no produjo unidad: esto es un AGUJERO y hay que decirlo así.
+    return { motivo: '⚠ sin explicación', detalle: 'tiene contenido y no se está copiando, pero no genera ninguna unidad. Avisa: es un fallo.', grave: true };
+}
+
+/** Traduce una unidad interna a lo que significa para el usuario: qué es, qué saldrá y qué pasa con la carpeta. */
+function describirUnidad(u) {
+    const nombre = (p) => path.basename(p || '');
+    const base = { ficheros: (u.rutas || []).length, carpeta: u.carpeta ? path.relative(INBOX, u.carpeta) : null };
+    if (u.esIntacta) return { ...base, tipo: 'intacta', titulo: nombre(u.carpeta), documentos: 1, efecto: 'se conserva la carpeta ÍNTEGRA y se cataloga como 1 registro.' };
+    if (u.esSoftware) return { ...base, tipo: 'software', titulo: nombre(u.carpeta), documentos: 1, efecto: 'se copia verbatim y se cataloga como 1 registro de software (no se abre).' };
+    if (u.esLibroMaterial) return { ...base, tipo: 'libro + material', titulo: nombre(u.carpeta), documentos: 1, efecto: 'el documento se cataloga como libro normal; el material viaja con él (verbatim).' };
+    if (u.esObra) return { ...base, tipo: 'obra (tomo)', titulo: `${u.obra.titulo} · vol. ${u.obra.numero}/${u.obra.total}`, documentos: 1, efecto: `tomo ${u.obra.numero} de «${u.obra.titulo}»; la carpeta se disuelve al vaciarse.`, fichero: nombre(u.rutas?.[0]) };
+    if (u.esTransmedia) return { ...base, tipo: 'transmedia', titulo: nombre(u.carpeta), documentos: null, efecto: 'estructura preservada (ruta_fija): un documento por cada fichero legible + el resto como material.' };
+    if (u.esColeccionAudio) return { ...base, tipo: 'colección de audiolibros', titulo: nombre(u.carpeta), documentos: null, efecto: 'una colección con un documento por libro (el audio manda).' };
+    if (u.esAudiolibro) return { ...base, tipo: 'audiolibro', titulo: nombre(u.carpeta), documentos: 1, efecto: '1 documento con playlist; las pistas se conservan (ruta_fija).' };
+    if (u.esImagenes) return { ...base, tipo: 'libro escaneado', titulo: nombre(u.carpeta) || nombre(u.rutas?.[0]), documentos: 1, efecto: `1 documento a partir de ${(u.rutas || []).length} imágenes.` };
+    return {
+        ...base, tipo: u.coleccion ? 'documento (en colección)' : 'documento suelto',
+        titulo: nombre(u.rutas?.[0]), documentos: 1, fichero: nombre(u.rutas?.[0]),
+        efecto: u.coleccion ? `miembro de la colección «${u.coleccion}» (la carpeta se conserva).`
+            : (u.carpeta ? 'se cataloga por su cuenta; la carpeta se disuelve al vaciarse.' : 'se cataloga por su cuenta.'),
+    };
+}
+
 /**
  * Clasifica las entradas de UN directorio en unidades de trabajo. Se usa para el Inbox (esRaiz=true) y,
  * recursivamente, para una carpeta con intención granular dentro (esRaiz=false), tratada como un mini-Inbox:

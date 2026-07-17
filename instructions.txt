@@ -800,6 +800,20 @@ de ficheros clasificado por CDU.
       DESATENDIDA tras marcar las piezas una vez. Una carpeta SIN guías se comporta igual que siempre
       (la mejora es opt-in). Bonus: en las unidades recurridas la ruta completa de carpetas viaja como
       pista de CDU (materia_ruta). (vigilante.js · clasificarDirectorio/tieneDescendientesGuiados.)
+    · DRY-RUN (`node scripts/dry-run.js` [--json]; en el NAS: `docker exec gestor-biblioteca node
+      scripts/dry-run.js`): qué HARÍA el vigilante con el Inbox tal como está, sin catalogar, mover ni
+      borrar nada. Llama a la MISMA función que decide de verdad (vigilante.js · planificarInbox →
+      listarUnidades), NO a un simulador: un simulador se desincroniza en una semana y te enseña un plan
+      que no es el que se ejecuta. Si el plan miente, es que el vigilante hace eso.
+      Lo importante no es solo qué se cataloga: es QUÉ SE QUEDA FUERA Y POR QUÉ (omitir/duplicado/vacía/
+      copiándose/sin contenido/contenedor), que es lo que NO puedes averiguar mirando el resultado — lo
+      que no entra no deja rastro. Lo que se queda fuera SIN una razón buena sale marcado «⚠ sin
+      explicación»: eso es un fallo, no un aviso.
+      Es de solo lectura (ni disco ni Mongo); ceba las cachés de detección pegajosa (por eso el plan y la
+      ejecución posterior COINCIDEN) y salva/restaura `dropsADisolver` (un plan no deja trabajo pendiente).
+      ⚠ Los scripts que importan el vigilante DEBEN escribir con process.stdout, NO con console.log:
+      utils/consola-timestamp.js silencia los log/info sin marcador de titular salvo con LOG_VERBOSE=1 —
+      el informe entero se traga sin dejar ni una línea ni un error (parece que el import «muere»).
     · EL ÁRBOL DEL INSPECTOR (guia-ingesta.js · arbolInbox): tope POR CARPETA (200 entradas), no global.
       Antes el contador era ÚNICO para todo el recorrido (maxNodos=3000) y al agotarse rompía TODOS los
       bucles: una carpeta con miles de láminas se comía el cupo ella sola y sus HERMANAS no se listaban
