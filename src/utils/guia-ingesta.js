@@ -45,7 +45,15 @@ export const NOMBRE_GUIA = '_guia.json';
 //                datasets, multimedia…). El LIBRO se cataloga por el PIPELINE NORMAL (ISBN/CDU/metadatos
 //                completos → `tipo_recurso:'libro'` de pleno derecho, NO transmedia/colección/audiolibro), y el
 //                material se conserva VERBATIM junto a él (ruta_fija) y se ve en el explorador «🗂️ Archivos».
-export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta', 'obra', 'software', 'libro-material'];
+export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta', 'obra', 'software', 'libro-material', 'empaquetar'];
+/**
+ * Alcance de `empaquetar` (láminas sueltas → cbz). Sin él, una carpeta de miles de imágenes (o de miles de
+ * .rar con una lámina cada uno) genera MILES DE FICHAS BASURA, una por lámina.
+ *   · 'subcarpetas' → un tomo por subcarpeta → obra multivolumen (Grabados de la Encyclopedie).
+ *   · 'todo'        → todas las láminas en un solo documento (un diccionario escaneado).
+ * Se parte por TAMAÑO (config.CBZ_MAX_BYTES) y solo si hace falta: el visor abre el cbz en memoria.
+ */
+export const ALCANCES_EMPAQUETAR = ['subcarpetas', 'todo'];
 
 // Acciones por FICHERO (`archivos: { "X.iso": { accion: "software" } }`). Pensadas para los CONTENEDORES
 // complejos (.iso .nrg .zip .rar .7z .ipa .dmg…), donde la máquina NO puede acertar sola: el MISMO .iso puede
@@ -89,6 +97,9 @@ export function normalizarGuia(g) {
     }
     guia.perfil = normalizarPerfil(g.perfil);
     if (ACCIONES_CARPETA.includes(g.accion)) guia.accion = g.accion;
+    // Alcance de «empaquetar»: por subcarpeta (obra multivolumen) o todo junto (un documento). Por defecto,
+    // 'subcarpetas': respeta la estructura que el usuario ya tiene, que es la lectura menos destructiva.
+    if (guia.accion === 'empaquetar') guia.alcance = ALCANCES_EMPAQUETAR.includes(g.alcance) ? g.alcance : 'subcarpetas';
     if (guia.accion === 'intacta' && g.adjuntar_a && typeof g.adjuntar_a === 'object') {
         const col = typeof g.adjuntar_a.coleccion === 'string' ? g.adjuntar_a.coleccion.trim() : '';
         const doc = typeof g.adjuntar_a.doc === 'string' ? g.adjuntar_a.doc.trim() : '';

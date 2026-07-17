@@ -19,6 +19,7 @@ import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
 import { esAudio } from './utils/lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
+import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
@@ -520,6 +521,38 @@ async function listarUnidades() {
 
 // ══════════════════════════════ DRY-RUN: el PLAN, sin tocar nada ══════════════════════════════
 /**
+ * El PLAN quiere VER cosas que la ejecución debe saltarse (una carpeta pendiente de empaquetar: en ejecución
+ * la resuelve el pre-paso antes de listar; en el plan hay que anunciarla). Es un interruptor, no una copia de
+ * la lógica: la ruta de decisión sigue siendo UNA.
+ */
+let modoPlan = false;
+
+/**
+ * Qué saldría de empaquetar esta carpeta. `planEmpaquetado` ES el dry-run del empaquetado: lo escribí para
+ * esto — cuenta las láminas (incluidas las que viven DENTRO de comprimidos) y calcula los tomos por tamaño,
+ * sin escribir ni un byte.
+ */
+async function describirEmpaquetado(u) {
+    const nombre = path.basename(u.carpeta);
+    const base = { ficheros: 0, carpeta: path.relative(INBOX, u.carpeta), tipo: 'empaquetar → cbz', titulo: nombre };
+    try {
+        const p = await planEmpaquetado(u.carpeta, { alcance: u.alcance });
+        if (!p.tomos.length) return { ...base, documentos: 0, grave: true, motivo: 'sin láminas', efecto: 'no se han encontrado imágenes que empaquetar: la carpeta se quedaría como está. Revisa la acción.' };
+        const paginas = p.tomos.reduce((s, t) => s + t.imagenes, 0);
+        const mb = (p.tomos.reduce((s, t) => s + (t.bytes || 0), 0) / 1048576).toFixed(0);
+        const deCompr = p.tomos.reduce((s, t) => s + (t.desdeComprimidos || 0), 0);
+        return {
+            ...base, documentos: p.tomos.length,
+            efecto: `${paginas} láminas${deCompr ? ` (${deCompr} extraídas de comprimidos)` : ''} · ${mb} MB → `
+                + `${p.tomos.length} cbz${p.multivolumen ? ' → obra multivolumen' : ' (1 documento)'}`
+                + `: ${p.tomos.slice(0, 4).map((t) => `«${t.nombre}» ${t.imagenes} págs`).join(', ')}`
+                + `${p.tomos.length > 4 ? `, … y ${p.tomos.length - 4} más` : ''}. Los originales van a la Papelera TRAS verificar el paquete.`,
+        };
+    } catch (e) {
+        return { ...base, documentos: 0, grave: true, motivo: 'no se pudo planificar', efecto: `${e.message}. La carpeta se quedaría como está.` };
+    }
+}
+/**
  * Qué HARÍA el vigilante con el Inbox tal y como está ahora, sin catalogar, mover ni borrar nada.
  *
  * LA DECISIÓN DE DISEÑO, y es la única que importa aquí: esto llama a `listarUnidades()`, la MISMA función que
@@ -541,13 +574,16 @@ export async function planificarInbox() {
     const dropsAntes = new Set(dropsADisolver);
     let unidades;
     try {
+        modoPlan = true;
         unidades = await listarUnidades();
     } finally {
+        modoPlan = false;
         dropsADisolver.clear();
         for (const d of dropsAntes) dropsADisolver.add(d);
     }
 
-    const plan = unidades.map(describirUnidad);
+    const plan = [];
+    for (const u of unidades) plan.push(u.esEmpaquetar ? await describirEmpaquetado(u) : describirUnidad(u));
 
     // ── Lo que se queda DENTRO de una carpeta que sí se procesa. Aquí es donde se pierden las cosas de
     //    verdad: un .tgz dentro de «Mammoth Books» no es una unidad, así que no sale en el plan ni deja
@@ -743,6 +779,15 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 // transmedia era el fallo del test 67: su análisis no cuenta las imágenes, así que una carpeta
                 // de 142 páginas escaneadas salía con CERO documentos y quedaba invisible.
                 unidades.push({ esIntacta: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
+            if (guiaCarpeta?.accion === 'empaquetar') {
+                // En EJECUCIÓN no se toca: la empaqueta `aplicarAccionesGuiaFs` ANTES de listar unidades, y
+                // cuando se llega aquí la guía ya es 'obra'/'normal' y dentro hay cbz. Si se colara como
+                // unidad (p. ej. si el empaquetado falló), procesarUnidad intentaría catalogar una CARPETA
+                // como si fuera un fichero. Solo el PLAN la declara, que es justo donde hace falta saber en
+                // qué se va a convertir ANTES de que pase.
+                if (modoPlan) unidades.push({ esEmpaquetar: true, alcance: guiaCarpeta.alcance || 'subcarpetas', carpeta: ruta, rutas: [ruta] });
                 continue;
             }
             if (guiaCarpeta?.accion === 'software') {
@@ -1196,8 +1241,9 @@ async function aplicarAccionesGuiaFs() {
         const dir = path.join(INBOX, e.name);
         let guia;
         try { guia = await leerGuia(dir); } catch { guia = null; }
-        if (!guia || (guia.accion !== 'explotar' && guia.accion !== 'aplanar')) continue;
+        if (!guia || !['explotar', 'aplanar', 'empaquetar'].includes(guia.accion)) continue;
         if (!(await carpetaEstable(dir))) continue; // aún copiándose → esperar al próximo escaneo
+        if (guia.accion === 'empaquetar') { await empaquetarCarpetaGuiada(dir, guia); continue; }
         try {
             const hijos = (await fs.readdir(dir, { withFileTypes: true })).filter((h) => !ignorarEntrada(h.name) && h.name !== NOMBRE_GUIA);
             if (guia.accion === 'explotar') {
@@ -1219,6 +1265,67 @@ async function aplicarAccionesGuiaFs() {
             console.warn(`  ⚠️  Acción de guía «${guia.accion}» sobre «${e.name}» falló: ${err.message} (se conserva intacta).`);
         }
     }
+}
+
+/**
+ * ACCIÓN «empaquetar»: una carpeta de LÁMINAS SUELTAS (o de miles de .rar con una lámina cada uno) se
+ * convierte en uno o varios `.cbz` ANTES de listar unidades. A partir de ahí no hay nada nuevo que inventar:
+ * un cbz entra por la maquinaria de CÓMIC que ya existe y está probada (visor paginado, portada, descarga de
+ * página suelta). Sin esto, esa carpeta genera MILES DE FICHAS BASURA, una por lámina.
+ *
+ * ORDEN DE OPERACIONES (política «nunca perder»): se empaqueta a un TEMPORAL y se VERIFICA lámina a lámina
+ * (byte a byte, dentro de `empaquetarImagenes`) ANTES de retirar un solo original. Si algo falla, no se toca
+ * nada y la carpeta se queda como estaba. Los originales van a la PAPELERA, jamás se borran.
+ *
+ * Y al terminar, si salieron VARIOS tomos, se reescribe la guía como `accion:'obra'`: así los cbz se catalogan
+ * como los tomos de UNA obra multivolumen (el título es el nombre de la carpeta y el nº va por orden natural)
+ * en vez de como una colección de cómics sueltos. Reutiliza lo que ya hace clasificarDirectorio.
+ */
+async function empaquetarCarpetaGuiada(dir, guia) {
+    const nombre = path.basename(dir);
+    const alcance = guia.alcance === 'todo' ? 'todo' : 'subcarpetas';
+    const tmp = path.join(path.dirname(dir), `.empaquetando-${Date.now()}`);
+    try {
+        const r = await empaquetarImagenes(dir, tmp, { alcance });
+        if (!r.ok) {
+            console.warn(`  ⚠️  «${nombre}»: no se pudo empaquetar (${r.motivo}) → se CONSERVA intacta, sin tocar nada.`);
+            await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+            return;
+        }
+        // Verificado: ya se puede retirar el original. A la PAPELERA (nunca borrar), ficheros primero.
+        const originales = await recopilarTodo(dir);
+        await reciclar(originales, `empaquetado-cbz-${nombre}`);
+        for (const h of (await fs.readdir(dir, { withFileTypes: true })).filter((h) => h.isDirectory())) {
+            await fs.rm(path.join(dir, h.name), { recursive: true, force: true }).catch(() => {});
+        }
+        // Los cbz ocupan ahora el sitio de las láminas.
+        for (const t of r.tomos) await fs.rename(t.ruta, path.join(dir, path.basename(t.ruta)));
+        await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+
+        // Varios tomos = UNA obra multivolumen; uno solo = un documento normal (la carpeta se disuelve sola).
+        await escribirGuia(dir, { ...guia, accion: r.tomos.length > 1 ? 'obra' : 'normal', alcance: undefined });
+        const paginas = r.tomos.reduce((s, t) => s + t.paginas, 0);
+        console.log(`  📦 «${nombre}»: EMPAQUETAR (guía, ${alcance}) → ${r.tomos.length} cbz · ${paginas} páginas`
+            + `${r.tomos.length > 1 ? ' → obra multivolumen' : ''}. Originales a la Papelera.`);
+    } catch (err) {
+        await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+        console.warn(`  ⚠️  «${nombre}»: empaquetado falló (${err.message}) → se conserva intacta.`);
+    }
+}
+
+/** Todos los ficheros de un árbol (para reciclarlos tras verificar el empaquetado). Ignora la guía. */
+async function recopilarTodo(dir, nivel = 8) {
+    const out = [];
+    if (nivel < 0) return out;
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
+    for (const e of ents) {
+        if (ignorarEntrada(e.name) || e.name === NOMBRE_GUIA) continue;
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) out.push(...await recopilarTodo(p, nivel - 1));
+        else out.push(p);
+    }
+    return out;
 }
 
 /**

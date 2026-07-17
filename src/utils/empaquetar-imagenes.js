@@ -57,6 +57,8 @@ function partirPorTamano(imagenes) {
     return tomos;
 }
 const sumaBytes = (ims) => ims.reduce((s, i) => s + (i.bytes || 0), 0);
+/** Borra los temporales de extracción. Nunca lanza: un temporal que se resiste no puede tumbar la ingesta. */
+const limpiar = async (tmps) => { for (const t of (tmps || []).filter(Boolean)) await fs.rm(t, { recursive: true, force: true }).catch(() => {}); };
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
@@ -99,6 +101,30 @@ async function imagenesDe(dir) {
     return { imagenes, desdeComprimidos, tmp };
 }
 
+/**
+ * TODAS las imágenes de un árbol (recursivo), en orden natural y con su tamaño, incluidas las que vengan
+ * dentro de comprimidos a cualquier profundidad. Para el alcance 'todo': ahí las subcarpetas son un detalle de
+ * cómo se guardó el escaneo, no tomos. El orden lo da la ruta relativa, que respeta la jerarquía.
+ */
+async function todasLasImagenes(dir) {
+    const imagenes = [];
+    let desdeComprimidos = 0;
+    const tmps = [];
+    async function rec(d, prefijo) {
+        const r = await imagenesDe(d);
+        if (r.tmp) tmps.push(r.tmp);
+        desdeComprimidos += r.desdeComprimidos;
+        for (const im of r.imagenes) imagenes.push({ ...im, nombre: prefijo + im.nombre });
+        for (const e of await leer(d)) if (e.isDirectory()) await rec(path.join(d, e.name), `${prefijo}${e.name}/`);
+    }
+    await rec(dir, '');
+    imagenes.sort((a, b) => ORDEN(a.nombre, b.nombre));
+    // Los nombres dentro del cbz no pueden llevar «/» de subcarpeta si queremos un tomo PLANO: se aplana
+    // sustituyendo el separador, conservando el orden que ya se fijó arriba.
+    for (const im of imagenes) im.nombre = im.nombre.replace(/\//g, ' · ');
+    return { imagenes, desdeComprimidos, tmp: tmps[0] || null, tmps };
+}
+
 /** Imágenes de un árbol (recursivo), en orden natural. */
 async function listarImgs(dir) {
     const out = [];
@@ -115,9 +141,21 @@ async function listarImgs(dir) {
  * imágenes sueltas, esas forman su propio tomo. Una carpeta plana con más de MAX_IMGS se parte.
  * Pensado para el dry-run: el usuario ve qué va a pasar ANTES de que se toque nada.
  */
-export async function planEmpaquetado(dir) {
+export async function planEmpaquetado(dir, { alcance = 'subcarpetas' } = {}) {
     const nombre = path.basename(dir);
     const tomos = [];
+    // ALCANCE 'todo': TODAS las láminas del árbol en un solo documento (un diccionario escaneado: sus
+    // subcarpetas son un detalle de cómo se guardó, no tomos). Solo se parte si pesa demasiado.
+    if (alcance === 'todo') {
+        const todas = await todasLasImagenes(dir);
+        const trozos = partirPorTamano(todas.imagenes);
+        await limpiar(todas.tmps);   // un árbol con comprimidos crea VARIOS temporales, no uno
+        trozos.forEach((t, i) => tomos.push({
+            nombre: nombre + (trozos.length > 1 ? ` (${i + 1})` : ''),
+            imagenes: t.length, bytes: sumaBytes(t), desdeComprimidos: todas.desdeComprimidos,
+        }));
+        return { raiz: dir, nombre, tomos, multivolumen: tomos.length > 1, total: todas.imagenes.length };
+    }
     const añadir = (base, imgs, desdeCompr) => {
         const trozos = partirPorTamano(imgs);
         trozos.forEach((trozo, i) => {
@@ -171,19 +209,25 @@ async function escribirCbz(imagenes, destino) {
  * es el LLAMANTE quien decide reciclarlos, y solo si `ok`.
  * @returns {Promise<{ok, tomos: [{nombre, ruta, paginas}], multivolumen, motivo?}>}
  */
-export async function empaquetarImagenes(dir, dirDestino) {
-    const plan = await planEmpaquetado(dir);
+export async function empaquetarImagenes(dir, dirDestino, { alcance = 'subcarpetas' } = {}) {
+    const plan = await planEmpaquetado(dir, { alcance });
     if (!plan.tomos.length) return { ok: false, motivo: 'no se encontraron imágenes que empaquetar' };
 
     const hechos = [];
     const grupos = [];
-    // Se recogen igual que en el plan (raíz + una subcarpeta por tomo), pero AHORA sí extrayendo de verdad.
-    const propias = await imagenesDe(dir);
-    if (propias.imagenes.length) grupos.push({ base: path.basename(dir), ...propias });
-    for (const e of await leer(dir)) {
-        if (!e.isDirectory()) continue;
-        const r = await imagenesDe(path.join(dir, e.name));
-        if (r.imagenes.length) grupos.push({ base: e.name, ...r });
+    if (alcance === 'todo') {
+        // TODO el árbol en un documento: un grupo único (se partirá por tamaño si hace falta).
+        const todas = await todasLasImagenes(dir);
+        grupos.push({ base: path.basename(dir), imagenes: todas.imagenes, tmps: todas.tmps });
+    } else {
+        // Se recogen igual que en el plan (raíz + una subcarpeta por tomo), pero AHORA sí extrayendo de verdad.
+        const propias = await imagenesDe(dir);
+        if (propias.imagenes.length) grupos.push({ base: path.basename(dir), ...propias, tmps: [propias.tmp] });
+        for (const e of await leer(dir)) {
+            if (!e.isDirectory()) continue;
+            const r = await imagenesDe(path.join(dir, e.name));
+            if (r.imagenes.length) grupos.push({ base: e.name, ...r, tmps: [r.tmp] });
+        }
     }
 
     try {
@@ -198,7 +242,7 @@ export async function empaquetarImagenes(dir, dirDestino) {
             }
         }
     } finally {
-        for (const g of grupos) if (g.tmp) await fs.rm(g.tmp, { recursive: true, force: true }).catch(() => {});
+        for (const g of grupos) await limpiar(g.tmps);
     }
     return { ok: true, tomos: hechos, multivolumen: hechos.length > 1 };
 }

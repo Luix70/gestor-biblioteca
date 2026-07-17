@@ -11202,7 +11202,10 @@ function pintarInboxResultados(res) {
 // El usuario recorre el árbol del Inbox y, por CARPETA, elige una acción (omitir/aplanar/explotar/intacta)
 // y da pistas (tipo probable, colección). Se guarda como _guia.json y el vigilante lo obedece al procesar.
 const _guiaDirty = new Set(); // rutas de carpeta tocadas por el usuario (las que se guardarán)
-const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta'], ['obra', '📚 obra'], ['software', '💿 software'], ['libro-material', '📖 libro + material']];
+const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta'], ['obra', '📚 obra'], ['software', '💿 software'], ['libro-material', '📖 libro + material'], ['empaquetar', '🖼️ empaquetar (cbz)']];
+// Alcance de «empaquetar»: una carpeta de láminas sueltas genera MILES de fichas basura (una por lámina) si no
+// se empaqueta. Por subcarpeta = un tomo cada una (obra multivolumen); todo junto = un solo documento.
+const _ALCANCES_EMPAQUETAR = [['subcarpetas', 'un cbz por subcarpeta (obra)'], ['todo', 'un solo cbz con todo']];
 const _TIPOS_GUIA = [['', 'tipo…'], ['comic', 'cómic'], ['revista', 'revista'], ['libro', 'libro'], ['articulo', 'artículo'], ['capitulo', 'capítulo'], ['apuntes', 'apuntes']];
 const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '🎬', comprimido: '🗜️', noclasificable: '⚠️' };
 
@@ -11241,7 +11244,16 @@ function enlazarControlesGuia(raiz) {
   };
   $$r('.guiaCtl').forEach((el) => {
     const ev = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
-    el[ev] = () => { _guiaDirty.add(el.dataset.ruta); habilitarGuardar(); };
+    el[ev] = () => {
+      _guiaDirty.add(el.dataset.ruta);
+      // El «alcance» solo tiene sentido con «empaquetar»: aparece y desaparece con la acción, para no ser
+      // ruido en todas las demás carpetas.
+      if (el.dataset.k === 'accion') {
+        const alc = el.parentElement && el.parentElement.querySelector('[data-k="alcance"]');
+        if (alc) alc.hidden = el.value !== 'empaquetar';
+      }
+      habilitarGuardar();
+    };
   });
   // Acción por FICHERO (contenedores): lo tocado es el fichero, pero se guarda en la guía de SU carpeta → se
   // marca sucia con el prefijo «@f:» para no confundirlo con haber tocado los controles de la propia carpeta.
@@ -11320,8 +11332,8 @@ function nodoGuiaHTML(n) {
     return `<div style="padding:2px 0 2px 20px;font-size:12.5px${col}"><label style="cursor:pointer"><input type="checkbox" class="guiaSel" data-ruta="${esc(n.ruta)}" style="vertical-align:-1px"> ${ic} ${esc(n.nombre)}</label>${selAcc}${n.clase === 'noclasificable' ? ' <span class="muted">· no clasificable</span>' : ''}</div>`;
   }
   const g = n.guia || { perfil: {}, accion: 'normal' };
-  const sel = (k, opts, val) =>
-    `<select class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="${k}" style="font-size:12px;padding:1px 3px">${opts
+  const sel = (k, opts, val, extra = '') =>
+    `<select class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="${k}"${extra} style="font-size:12px;padding:1px 3px">${opts
       .map(([v, t]) => `<option value="${v}"${v === (val || '') ? ' selected' : ''}>${t}</option>`)
       .join('')}</select>`;
   // Si el listado de esta carpeta se recortó, SE DICE. Un árbol incompleto y silencioso te haría decidir la
@@ -11334,6 +11346,7 @@ function nodoGuiaHTML(n) {
       <b style="font-size:13px">📁 ${esc(n.nombre)}</b>
       <button type="button" class="btn guiaTodos" title="Seleccionar todos los ficheros de esta carpeta (respeta «incluir subcarpetas»)" style="font-size:11px;padding:1px 6px">☑ todos</button>
       ${sel('accion', _ACCIONES_GUIA, g.accion)}
+      ${sel('alcance', _ALCANCES_EMPAQUETAR, g.alcance || 'subcarpetas', g.accion === 'empaquetar' ? '' : ' hidden')}
       ${sel('tipo_probable', _TIPOS_GUIA, g.perfil && g.perfil.tipo_probable)}
       <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />${trunc}
     </span>`;
@@ -11367,7 +11380,9 @@ async function guardarGuiasInbox() {
     const ruta = el.dataset.ruta;
     if (!_guiaDirty.has(ruta) && !porFichero.has(ruta)) return;
     const gg = guiaDe(ruta);
+    // `accion` y `alcance` viven en la RAÍZ de la guía; lo demás son pistas y van al `perfil`.
     if (el.dataset.k === 'accion') gg.accion = el.value || 'normal';
+    else if (el.dataset.k === 'alcance') gg.alcance = el.value || 'subcarpetas';
     else if (el.value && el.value.trim()) gg.perfil[el.dataset.k] = el.value.trim();
   });
   // Acciones por FICHERO (contenedores) → `archivos{}` de la guía de SU carpeta. 'expandir' es el defecto: no

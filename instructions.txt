@@ -800,6 +800,25 @@ de ficheros clasificado por CDU.
       DESATENDIDA tras marcar las piezas una vez. Una carpeta SIN guías se comporta igual que siempre
       (la mejora es opt-in). Bonus: en las unidades recurridas la ruta completa de carpetas viaja como
       pista de CDU (materia_ruta). (vigilante.js · clasificarDirectorio/tieneDescendientesGuiados.)
+    · EMPAQUETAR LÁMINAS → CBZ (accion:'empaquetar' en el Inspector, con ALCANCE): una carpeta de láminas
+      sueltas —o de miles de .rar con UNA lámina cada uno, como «Grabados de la Encyclopedie»— genera
+      MILES DE FICHAS BASURA, una por lámina. Con esta acción se convierten en cbz ANTES de listar
+      unidades (vigilante.js·empaquetarCarpetaGuiada, en aplicarAccionesGuiaFs) y a partir de ahí entran
+      por la maquinaria de CÓMIC que ya existe: visor paginado, portada, descarga de página suelta.
+        · alcance 'subcarpetas' (defecto) → un cbz por subcarpeta. Si salen VARIOS, la guía se reescribe
+          como accion:'obra' → se catalogan como los tomos de UNA obra multivolumen (reutiliza
+          clasificarDirectorio; el título es el nombre de la carpeta y el nº va por orden natural).
+        · alcance 'todo' → TODAS las láminas del árbol en UN documento (un diccionario escaneado: sus
+          subcarpetas son cómo se guardó, no tomos). El orden lo da la ruta relativa (A-M → N-Z).
+      CBZ, NUNCA CBR: el visor abre un .cbz con acceso aleatorio (la página N lee solo esa entrada); un
+      .cbr obliga a extraer el archivo ENTERO a un temporal — inviable en el Atom con miles de láminas.
+      STORE (method=0): los bytes quedan IDÉNTICOS (verificado por SHA-256) → cero pérdida de calidad y
+      cualquier lámina se recupera intacta. Se parte por TAMAÑO (config.CBZ_MAX_BYTES, 400 MB), no por
+      número de páginas: lo que tumba al Atom son los bytes (adm-zip carga el cbz en memoria).
+      ANTI-PÉRDIDA: se empaqueta a un TEMPORAL y se verifica lámina a lámina ANTES de retirar un solo
+      original; si algo falla, la carpeta se queda intacta. Los originales van a la PAPELERA, nunca se
+      borran. `planEmpaquetado` ES el dry-run de esto: el plan dice «500 láminas → 2 cbz → obra
+      multivolumen» sin escribir un byte.
     · DRY-RUN (`node scripts/dry-run.js` [--json]; en el NAS: `docker exec gestor-biblioteca node
       scripts/dry-run.js`): qué HARÍA el vigilante con el Inbox tal como está, sin catalogar, mover ni
       borrar nada. Llama a la MISMA función que decide de verdad (vigilante.js · planificarInbox →
