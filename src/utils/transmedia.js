@@ -336,6 +336,15 @@ export async function copiarVerificado(origen, destino, { limpiarDestino = true 
     await fs.mkdir(path.dirname(destino), { recursive: true });
     await copiarArbolResiliente(origen, destino);
     const [orig, dest] = await Promise.all([huella(origen), huella(destino)]);
+    // ORIGEN VACÍO O DESAPARECIDO ⇒ NUNCA íntegra. Sin esta guarda, `0 === 0` daba `integra:true`: una copia de
+    // NADA se daba por buena y el llamante catalogaba documentos apuntando a una carpeta VACÍA (y reciclaba un
+    // origen que ya no estaba). Caso real: colecciones ANIDADAS —la padre recicla su carpeta entera y, al tocarle
+    // a la hija, su origen ya no existe—; `copiarArbolResiliente` se traga el ENOENT en silencio (por diseño:
+    // resiste a que una entrada desaparezca a mitad) y la verificación no lo veía. De ahí los mp3 inalcanzables.
+    if (orig.n === 0) {
+        await fs.rm(destino, { recursive: true, force: true }).catch(() => {});
+        return { integra: false, huella: dest, vacio: true };
+    }
     const integra = orig.n === dest.n && orig.bytes === dest.bytes;
     if (!integra) await fs.rm(destino, { recursive: true, force: true }).catch(() => {}); // no dejar la parcial
     return { integra, huella: dest };

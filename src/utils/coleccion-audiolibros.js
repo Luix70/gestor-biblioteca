@@ -343,6 +343,13 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
     const db = dbArg || await conectarDB();
     const { colecciones } = await analizarColeccionAudiolibros(dir);
     if (!colecciones.length) return { ok: false, motivo: 'no se detectó ninguna colección de audiolibros' };
+    // DE DENTRO HACIA FUERA. La detección puede devolver colecciones ANIDADAS (una colección dentro de otra:
+    // «mammoth Books» y, dentro, «…Best New Horror-Volume 17»). Como cada una copia su carpeta y luego RECICLA
+    // su origen, procesar la PADRE primero se llevaba la carpeta entera —incluida la hija— y al llegar a la
+    // hija su origen ya no existía: se copiaba NADA y sus documentos quedaban apuntando a una carpeta vacía
+    // (los mp3 inalcanzables del caso real). Procesando las más PROFUNDAS primero, cada colección copia y
+    // recicla lo suyo, la padre ya no la incluye, y no hay contenido duplicado ni rutas colgando.
+    colecciones.sort((a, b) => b.dir.split(/[\\/]/).length - a.dir.split(/[\\/]/).length);
 
     const bib = db.collection('biblioteca');
     const resultados = [];
