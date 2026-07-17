@@ -30,6 +30,28 @@ if (JSON_OUT) {
 }
 
 const RAYA = '─'.repeat(78);
+const nf = (n) => new Intl.NumberFormat('es-ES').format(n);
+
+/**
+ * Agrupa las entradas que dicen LO MISMO. Una carpeta de láminas suelta 3.000 avisos idénticos de
+ * «contenedor anidado» y el informe deja de leerse: la explicación es una sola, lo que cambia es el nombre del
+ * fichero. Se agrupan por [tipo|motivo|efecto], se enseñan unos cuantos ejemplos y se cuenta el resto.
+ * Un informe que no se puede leer no informa de nada — es el mismo error que los 174 falsos positivos.
+ */
+function agrupar(items, clave) {
+    const g = new Map();
+    for (const x of items) {
+        const k = clave(x);
+        if (!g.has(k)) g.set(k, []);
+        g.get(k).push(x);
+    }
+    return [...g.values()];
+}
+/** «I02236.rar, I02238.rar, I02239.rar … y 2.997 más» */
+function ejemplos(nombres, cuantos = 3) {
+    const m = nombres.slice(0, cuantos).join(', ');
+    return nombres.length > cuantos ? `${m} … y ${nf(nombres.length - cuantos)} más` : m;
+}
 escribir(`\n${'═'.repeat(78)}`);
 escribir('  DRY-RUN DEL INBOX — lo que PASARÍA. No se ha tocado nada.');
 escribir('═'.repeat(78));
@@ -48,10 +70,12 @@ if (plan.unidades.length) {
         porCarpeta.get(k).push(u);
     }
     for (const [carpeta, us] of porCarpeta) {
-        escribir(`\n  📁 ${carpeta}`);
-        for (const u of us) {
-            escribir(`     ${u.grave ? '⚠' : '·'} [${u.tipo}] ${u.titulo}`);
-            escribir(`       ${u.efecto}`);
+        escribir(`\n  📁 ${carpeta}${us.length > 1 ? `  (${nf(us.length)} entradas)` : ''}`);
+        for (const grupo of agrupar(us, (u) => `${u.tipo}|${u.motivo || ''}|${u.efecto}`)) {
+            const u = grupo[0];
+            if (grupo.length === 1) escribir(`     ${u.grave ? '⚠' : '·'} [${u.tipo}] ${u.titulo}`);
+            else escribir(`     ${u.grave ? '⚠' : '·'} ${nf(grupo.length)} × [${u.tipo}]  ${ejemplos(grupo.map((x) => x.titulo))}`);
+            escribir(`       ${u.efecto}`);   // la explicación, UNA vez: es la misma para todo el grupo
         }
     }
     escribir('');
@@ -64,8 +88,11 @@ if (perdidos.length) {
     escribir(RAYA);
     escribir('  ⚠ SE PROCESA LA CARPETA, PERO ESTO NO ENTRA  ← lo que se pierde sin enterarte');
     escribir(RAYA);
-    for (const u of perdidos) {
-        escribir(`  ⚠ ${u.carpeta ? u.carpeta + ' → ' : ''}${u.titulo}`);
+    for (const grupo of agrupar(perdidos, (u) => `${u.carpeta}|${u.tipo}|${u.motivo || ''}`)) {
+        const u = grupo[0];
+        const donde = u.carpeta ? u.carpeta + ' → ' : '';
+        if (grupo.length === 1) escribir(`  ⚠ ${donde}${u.titulo}`);
+        else escribir(`  ⚠ ${donde}${nf(grupo.length)} ficheros: ${ejemplos(grupo.map((x) => x.titulo))}`);
         escribir(`      ${u.motivo ? u.motivo + ': ' : ''}${u.efecto}`);
     }
     escribir('');
