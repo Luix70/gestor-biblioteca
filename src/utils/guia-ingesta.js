@@ -184,29 +184,64 @@ export function claseFichero(ext) {
 }
 
 /**
- * Árbol de `raizInbox` (recursivo, acotado en profundidad y nº de nodos para no reventar la API con un Inbox
- * enorme). Cada CARPETA incluye su guía actual (perfil + acción). Ignora ocultos/sistema y el propio _guia.json.
+ * Árbol de `raizInbox` (recursivo). Cada CARPETA incluye su guía actual (perfil + acción). Ignora
+ * ocultos/sistema y el propio _guia.json.
+ *
+ * EL TOPE ES POR CARPETA, NO GLOBAL. Antes había un contador ÚNICO para todo el recorrido (`maxNodos = 3000`)
+ * y un `break` al agotarlo: una carpeta con miles de láminas («Grabados de l'Encyclopédie») se comía el cupo
+ * ella sola y sus HERMANAS no llegaban a listarse — «si le doy al inspector solo me recupera la primera, y no
+ * entera». Ahora cada carpeta tiene su propio cupo, así que todas salen.
+ *
+ * Y NUNCA SE RECORTA EN SILENCIO: lo que no se lista se RESUME (`total_hijos`, `truncado`, `resumen` por
+ * clase) para que el Inspector lo diga. Enseñar un árbol incompleto sin avisar es peor que no enseñarlo: el
+ * usuario decide qué hacer con una carpeta creyendo que la ve entera.
+ *
+ * Para el Inspector esto no pierde nada útil: la acción se le asigna a la CARPETA, no a cada una de sus 5.000
+ * láminas. Solo los ficheros que admiten acción propia (contenedores) necesitan salir uno a uno.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.maxHijos=200] - cuántas entradas se listan por carpeta antes de resumir el resto.
+ * @param {number} [opts.maxNodos=20000] - tope global de seguridad (que la respuesta no se vaya a megas).
+ * @param {string} [opts.desde] - carpeta por la que EMPEZAR (una rama, para la carga diferida). Las `ruta` de
+ *        los nodos se siguen midiendo desde `raizInbox`: son la CLAVE con la que se guarda cada guía, así que
+ *        tienen que ser las mismas se pida el árbol entero o una rama suelta.
+ * @returns {Promise<{hijos: object[], truncado: boolean, nodos: number}>}
  */
-export async function arbolInbox(raizInbox, { profundidad = 6, maxNodos = 3000 } = {}) {
+export async function arbolInbox(raizInbox, { profundidad = 6, maxHijos = 200, maxNodos = 20000, desde = null } = {}) {
     let n = 0;
+    let recortado = false;   // ¿se ha dejado algo fuera en ALGUNA parte del árbol?
+
     async function rec(dir, prof) {
         let entradas;
-        try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return []; }
+        try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return { hijos: [], total: 0, truncado: false }; }
         const gCarp = await leerGuia(dir);   // UNA vez por carpeta: las acciones por FICHERO viven en su guía
+        const utiles = entradas
+            .filter((e) => !_ignorar(e.name) && e.name !== NOMBRE_GUIA)
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
         const hijos = [];
-        for (const e of entradas.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) {
-            if (_ignorar(e.name) || e.name === NOMBRE_GUIA) continue;
-            if (++n > maxNodos) break;
+        let i = 0;
+        for (; i < utiles.length; i++) {
+            if (hijos.length >= maxHijos || n >= maxNodos) break;   // el resto se resume, no se oculta
+            const e = utiles[i];
+            n++;
             const abs = path.join(dir, e.name);
             const rel = path.relative(raizInbox, abs).split(path.sep).join('/');
             if (e.isDirectory()) {
                 const guia = await leerGuia(abs);
-                const nodo = {
+                // Si se agotó la profundidad NO se desciende, pero se marca `pendiente` para que el Inspector
+                // la pida al desplegarla (carga diferida). Sin esta marca, una carpeta sin explorar y una
+                // carpeta VACÍA se veían igual (`hijos: []`) — y eso es mentirle al usuario.
+                const sub = prof > 0 ? await rec(abs, prof - 1) : null;
+                hijos.push({
                     nombre: e.name, ruta: rel, tipo: 'dir',
                     guia: guia ? { perfil: guia.perfil, accion: guia.accion, adjuntar_a: guia.adjuntar_a } : null,
-                    hijos: prof > 0 ? await rec(abs, prof - 1) : [],
-                };
-                hijos.push(nodo);
+                    hijos: sub ? sub.hijos : [],
+                    pendiente: sub ? undefined : true,
+                    total_hijos: sub ? sub.total : undefined,
+                    truncado: (sub && sub.truncado) || undefined,
+                    resumen: sub ? sub.resumen : undefined,
+                });
             } else {
                 let tam = 0;
                 try { tam = (await fs.stat(abs)).size; } catch { /* sin stat */ }
@@ -220,9 +255,22 @@ export async function arbolInbox(raizInbox, { profundidad = 6, maxNodos = 3000 }
                 });
             }
         }
-        return hijos;
+
+        // Lo que se queda fuera se CUENTA y se clasifica (sin stat: solo por extensión, para que sea barato).
+        let resumen;
+        if (i < utiles.length) {
+            recortado = true;
+            resumen = {};
+            for (const e of utiles.slice(i)) {
+                const k = e.isDirectory() ? 'carpetas' : claseFichero(path.extname(e.name).toLowerCase());
+                resumen[k] = (resumen[k] || 0) + 1;
+            }
+        }
+        return { hijos, total: utiles.length, truncado: i < utiles.length, resumen };
     }
-    return rec(raizInbox, profundidad);
+
+    const raiz = await rec(desde || raizInbox, profundidad);
+    return { hijos: raiz.hijos, truncado: recortado, nodos: n };
 }
 
 /** Resuelve `sub` DENTRO de `raizInbox` (anti path-traversal). Devuelve el absoluto, o null si escapa. */

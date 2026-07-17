@@ -1781,9 +1781,20 @@ export function rutasPanel() {
     // INGESTA GUIADA · EXPLORADOR del Inbox. El usuario recorre el árbol y marca por CARPETA una acción
     // (normal/omitir/aplanar/explotar/intacta) + un perfil de pistas; se registra en `_guia.json` y el
     // vigilante lo obedece. GET público (solo lista nombres); POST (guardar) lo restringe `autenticar` a admin.
+    // CARGA DIFERIDA: por defecto se mandan solo los primeros niveles (rápido con un Inbox enorme) y el
+    // Inspector pide cada rama al desplegarla, con `?sub=<ruta relativa>`. `rutaInboxSegura` impide que un
+    // «sub» con «..» se salga del Inbox.
     r.get('/inbox/arbol', async (req, res) => {
-        try { res.json({ ok: true, arbol: await arbolInbox(INBOX) }); }
-        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+        try {
+            const sub = String(req.query.sub || '');
+            const raiz = sub ? rutaInboxSegura(INBOX, sub) : INBOX;
+            if (!raiz) return res.status(400).json({ ok: false, motivo: 'ruta fuera del Inbox' });
+            const prof = Math.min(Math.max(Number(req.query.profundidad) || 2, 1), 8);
+            // Las rutas de los nodos son SIEMPRE relativas a la raíz del Inbox (son la clave de la guía), así
+            // que al pedir una rama se sigue midiendo desde INBOX, no desde la subcarpeta.
+            const r2 = await arbolInbox(INBOX, { profundidad: prof, desde: raiz });
+            res.json({ ok: true, arbol: r2.hijos, truncado: r2.truncado, nodos: r2.nodos });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/inbox/guia', async (req, res) => {
         try {
