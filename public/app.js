@@ -11210,34 +11210,49 @@ async function cargarArbolInbox() {
   let r;
   try { r = await api('/inbox/arbol'); } catch (e) { cont.innerHTML = 'No se pudo cargar: ' + esc(e.message); return; }
   if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">El Inbox está vacío.</div>'; return; }
-  cont.innerHTML = r.arbol.map(nodoGuiaHTML).join('');
+  // Si en ALGUNA parte se recortó el listado, se dice arriba del todo (cada carpeta afectada lo repite en su
+  // línea). El recorte no cambia lo que hace la ingesta: la acción se aplica a la carpeta ENTERA.
+  const aviso = r.truncado
+    ? '<div class="muted" style="font-size:12px;border-left:3px solid var(--warn);padding:4px 0 4px 8px;margin-bottom:8px">Alguna carpeta trae demasiados ficheros para listarlos todos: se muestran los primeros y el resto va resumido. La acción que elijas se aplica a la carpeta entera.</div>'
+    : '';
+  cont.innerHTML = aviso + r.arbol.map(nodoGuiaHTML).join('');
+  _guiaSel.clear();
+  _guiaSelCarp.clear();
+  actualizarSelBar();
+  enlazarControlesGuia(cont);
+}
+
+/**
+ * Enlaza los controles de un TROZO del árbol de guías. Se llama al pintarlo y OTRA VEZ sobre cada rama que
+ * llega por carga diferida (los nodos nuevos necesitan sus manejadores). Es idempotente: los manejadores se
+ * asignan como propiedades (`el.onchange = …`), no con addEventListener, así que reasignar no duplica nada.
+ */
+function enlazarControlesGuia(raiz) {
+  const $$r = (sel) => [...raiz.querySelectorAll(sel)];
   // Marcar un cambio habilita «Guardar» y hace aparecer la barra flotante (que lo lleva) al instante.
   const habilitarGuardar = () => {
     ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = false; });
     actualizarSelBar();
   };
-  $$('#guiaArbol .guiaCtl').forEach((el) => {
+  $$r('.guiaCtl').forEach((el) => {
     const ev = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
     el[ev] = () => { _guiaDirty.add(el.dataset.ruta); habilitarGuardar(); };
   });
   // Acción por FICHERO (contenedores): lo tocado es el fichero, pero se guarda en la guía de SU carpeta → se
   // marca sucia con el prefijo «@f:» para no confundirlo con haber tocado los controles de la propia carpeta.
-  $$('#guiaArbol .guiaCtlFile').forEach((el) => {
+  $$r('.guiaCtlFile').forEach((el) => {
     el.onchange = () => { _guiaDirty.add('@f:' + (el.dataset.carpeta || '')); habilitarGuardar(); };
   });
   // Casillas de SELECCIÓN de ficheros (agrupar) y de CARPETAS (acción en bloque).
-  _guiaSel.clear();
-  _guiaSelCarp.clear();
-  actualizarSelBar();
-  $$('#guiaArbol .guiaSel').forEach((el) => {
+  $$r('.guiaSel').forEach((el) => {
     el.onchange = () => { el.checked ? _guiaSel.add(el.dataset.ruta) : _guiaSel.delete(el.dataset.ruta); actualizarSelBar(); };
   });
-  $$('#guiaArbol .guiaSelCarp').forEach((el) => {
+  $$r('.guiaSelCarp').forEach((el) => {
     el.onclick = (e) => e.stopPropagation(); // no desplegar/colapsar la carpeta al marcar
     el.onchange = () => { el.checked ? _guiaSelCarp.add(el.dataset.ruta) : _guiaSelCarp.delete(el.dataset.ruta); actualizarSelBar(); };
   });
   // «☑ todos»: marca/desmarca todos los ficheros de la carpeta (recursivo si «incluir subcarpetas» está activo).
-  $$('#guiaArbol .guiaTodos').forEach((btn) => {
+  $$r('.guiaTodos').forEach((btn) => {
     btn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -11245,10 +11260,35 @@ async function cargarArbolInbox() {
       if (!det) return;
       const recursivo = $('#guiaRecursivo') && $('#guiaRecursivo').checked;
       const casillas = [...det.querySelectorAll('.guiaSel')].filter((cb) => recursivo || cb.closest('details') === det);
+      // Si cuelga algo SIN CARGAR o RECORTADO, «todos» no puede marcar lo que no está en la página. Se avisa,
+      // en vez de dejarte creer que has seleccionado la carpeta entera.
+      if (det.querySelector('details[data-lazy]:not([data-cargado])') || det.querySelector('[data-trunc]') || det.dataset.trunc) {
+        toast('Esta carpeta tiene contenido sin cargar o recortado: «todos» solo marca lo que se ve.', 'warn');
+      }
       if (!casillas.length) return;
       const marcar = !casillas.every((cb) => cb.checked); // si no están todas marcadas → marcar; si sí → desmarcar
       casillas.forEach((cb) => { cb.checked = marcar; marcar ? _guiaSel.add(cb.dataset.ruta) : _guiaSel.delete(cb.dataset.ruta); });
       actualizarSelBar();
+    };
+  });
+  // CARGA DIFERIDA: una carpeta más honda que lo que trajo el árbol se pide al DESPLEGARLA. Así un Inbox con
+  // miles de ficheros abre al instante y solo se baja lo que de verdad vas a mirar.
+  $$r('details[data-lazy]').forEach((det) => {
+    det.ontoggle = async () => {
+      if (!det.open || det.dataset.cargado) return;
+      det.dataset.cargado = '1';
+      const cuerpo = det.querySelector('.guiaCuerpo');
+      if (!cuerpo) return;
+      cuerpo.innerHTML = '<div class="muted" style="padding-left:24px;font-size:12px">Cargando…</div>';
+      try {
+        const r = await api('/inbox/arbol?sub=' + encodeURIComponent(det.dataset.lazy) + '&profundidad=2');
+        cuerpo.innerHTML = (r.arbol || []).map(nodoGuiaHTML).join('')
+          || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
+        enlazarControlesGuia(cuerpo);
+      } catch (e) {
+        cuerpo.innerHTML = '<div class="muted" style="padding-left:24px;font-size:12px">No se pudo cargar: ' + esc(e.message) + '</div>';
+        delete det.dataset.cargado; // que se pueda reintentar plegando y volviendo a desplegar
+      }
     };
   });
 }
@@ -11279,17 +11319,27 @@ function nodoGuiaHTML(n) {
     `<select class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="${k}" style="font-size:12px;padding:1px 3px">${opts
       .map(([v, t]) => `<option value="${v}"${v === (val || '') ? ' selected' : ''}>${t}</option>`)
       .join('')}</select>`;
+  // Si el listado de esta carpeta se recortó, SE DICE. Un árbol incompleto y silencioso te haría decidir la
+  // acción de una carpeta creyendo que la ves entera.
+  const trunc = n.truncado
+    ? ` <span class="muted" style="font-size:11px" title="Se listan los primeros ${(n.hijos || []).length}; la acción se aplica a la carpeta ENTERA, no solo a lo listado">· mostrados ${(n.hijos || []).length} de ${n.total_hijos} (${Object.entries(n.resumen || {}).map(([k, v]) => `${v} ${k}`).join(', ')} más)</span>`
+    : '';
   const cab = `<span style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap">
       <input type="checkbox" class="guiaSelCarp" data-ruta="${esc(n.ruta)}" title="Seleccionar esta CARPETA (para acción en bloque: explotar/aplanar/omitir)" style="vertical-align:-1px" />
       <b style="font-size:13px">📁 ${esc(n.nombre)}</b>
       <button type="button" class="btn guiaTodos" title="Seleccionar todos los ficheros de esta carpeta (respeta «incluir subcarpetas»)" style="font-size:11px;padding:1px 6px">☑ todos</button>
       ${sel('accion', _ACCIONES_GUIA, g.accion)}
       ${sel('tipo_probable', _TIPOS_GUIA, g.perfil && g.perfil.tipo_probable)}
-      <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />
+      <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />${trunc}
     </span>`;
-  const hijos = (n.hijos || []).map(nodoGuiaHTML).join('') || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
+  // `pendiente` = el servidor no la descendió (carga diferida): nace PLEGADA y se pide al desplegarla. Ojo con
+  // no confundirla con una carpeta VACÍA: por eso el servidor las distingue y aquí también.
+  const hijos = n.pendiente
+    ? '<div class="muted" style="padding-left:24px;font-size:12px">…</div>'
+    : (n.hijos || []).map(nodoGuiaHTML).join('') || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
+  const attrs = n.pendiente ? `data-lazy="${esc(n.ruta)}"` : 'open';
   // Cada sub-nivel se INDENTA (margin-left) además del borde izquierdo, para que la jerarquía se lea bien.
-  return `<details class="foldcard" open style="margin:2px 0;border:0;border-left:2px solid rgba(128,128,128,.3);border-radius:0;padding:2px 0 2px 8px"><summary style="cursor:pointer">${cab}</summary><div style="margin-left:18px">${hijos}</div></details>`;
+  return `<details class="foldcard" ${attrs}${n.truncado ? ' data-trunc="1"' : ''} style="margin:2px 0;border:0;border-left:2px solid rgba(128,128,128,.3);border-radius:0;padding:2px 0 2px 8px"><summary style="cursor:pointer">${cab}</summary><div class="guiaCuerpo" style="margin-left:18px">${hijos}</div></details>`;
 }
 async function guardarGuiasInbox() {
   if (!_guiaDirty.size) return;

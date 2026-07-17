@@ -800,6 +800,17 @@ de ficheros clasificado por CDU.
       DESATENDIDA tras marcar las piezas una vez. Una carpeta SIN guías se comporta igual que siempre
       (la mejora es opt-in). Bonus: en las unidades recurridas la ruta completa de carpetas viaja como
       pista de CDU (materia_ruta). (vigilante.js · clasificarDirectorio/tieneDescendientesGuiados.)
+    · EL ÁRBOL DEL INSPECTOR (guia-ingesta.js · arbolInbox): tope POR CARPETA (200 entradas), no global.
+      Antes el contador era ÚNICO para todo el recorrido (maxNodos=3000) y al agotarse rompía TODOS los
+      bucles: una carpeta con miles de láminas se comía el cupo ella sola y sus HERMANAS no se listaban
+      («solo me recupera la primera, y no entera»). Lo que no se lista se RESUME (`total_hijos`,
+      `truncado`, `resumen` por clase), NUNCA se oculta en silencio: decidirías la acción de una carpeta
+      creyendo que la ves entera. No se pierde nada útil — la acción se aplica a la CARPETA, no a cada
+      lámina. CARGA DIFERIDA: por defecto llegan 2 niveles y cada rama se pide al DESPLEGARLA
+      (`GET /inbox/arbol?sub=<ruta>&profundidad=N`; rutaInboxSegura corta cualquier «..»); una carpeta no
+      explorada se marca `pendiente:true` para distinguirla de una VACÍA (antes las dos eran `hijos:[]`).
+      Las `ruta` se miden SIEMPRE desde la raíz del Inbox: son la clave con la que se guarda cada guía.
+      «☑ todos» avisa si cuelga algo sin cargar o recortado (no puede marcar lo que no está en la página).
     · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
       principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
       El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`
