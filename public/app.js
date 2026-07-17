@@ -8661,8 +8661,17 @@ function pintarInteg(r) {
         : '';
     return `<tr ${tiene ? `class="integrow" data-k="${esc(mk)}" title="Ver qué documentos"` : ''}><td>${esc(et[k])}${tiene ? ' <span class="muted">▸</span>' : ''}</td><td style="text-align:center">${sello}</td><td style="text-align:right"><b ${v > 0 ? 'style="color:var(--warn)"' : ''}>${v}</b></td></tr>`;
   };
-  let h = `<div class="card" style="margin-bottom:14px"><h3>Diagnóstico · ${esc(new Date(r.ts).toLocaleString('es-ES'))} · ${r.totalDocs} docs</h3>
-    <table>${Object.keys(et).map(fila).join('')}</table>
+  // El .txt lo sirve un endpoint solo-admin (es un volcado de la estructura entera del archivo), así que a un
+  // invitado ni se le enseña el botón: nada de ofrecer algo que va a devolver un 403.
+  const btnTxt =
+    ROL === 'admin'
+      ? `<button class="btn" id="integTxt" title="Descargar el informe COMPLETO en .txt (todos los casos, no solo la muestra)" style="padding:4px 10px;font-size:12px">⬇ Informe (.txt)</button>`
+      : '';
+  let h = `<div class="card" style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <h3 style="margin:0">Diagnóstico · ${esc(new Date(r.ts).toLocaleString('es-ES'))} · ${r.totalDocs} docs</h3>${btnTxt}
+    </div>
+    <table style="margin-top:10px">${Object.keys(et).map(fila).join('')}</table>
     <div class="muted" style="font-size:11px;margin-top:8px"><span class="tag ok">auto</span> lo arregla el botón «Reparar» · <span class="tag warn">manual</span> requiere abrir la ficha (Reprocesar/Eliminar). Pincha una fila para ver qué documentos.</div>
     <div id="integDetalle" style="margin-top:12px"></div></div>`;
   if (r.reparado) {
@@ -8683,6 +8692,36 @@ function pintarInteg(r) {
   }
   $('#integOut').innerHTML = h;
   $$('#integOut tr.integrow').forEach((tr) => (tr.onclick = () => drillInteg(tr.dataset.k, m)));
+  if ($('#integTxt')) $('#integTxt').onclick = () => descargarInformeInteg();
+}
+// Descarga el informe DETALLADO (.txt) del diagnóstico que YA se ha corrido: el servidor lo rinde de memoria,
+// no lo repite. Va por fetch con el token en la CABECERA (no en la URL: acabaría en el historial) y se entrega
+// como blob, el mismo patrón que las páginas del visor de cómic.
+async function descargarInformeInteg() {
+  const b = $('#integTxt');
+  if (b) b.disabled = true;
+  try {
+    const res = await fetch('/api/integridad/informe.txt', {
+      headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
+    });
+    if (!res.ok) throw new Error((await res.text()) || 'no se pudo generar el informe');
+    // El nombre lo pone el servidor (lleva la fecha del diagnóstico); si no llega, uno razonable.
+    const cd = res.headers.get('Content-Disposition') || '';
+    const nombre = (cd.match(/filename="([^"]+)"/) || [])[1] || 'integridad.txt';
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('Informe descargado: ' + nombre);
+  } catch (e) {
+    toast(e.message, 'bad');
+  } finally {
+    if (b) b.disabled = false;
+  }
 }
 // Detalle drillable de una fila del diagnóstico: lista los documentos/carpetas afectados (docs → ficha).
 function drillInteg(mk, m) {

@@ -97,16 +97,30 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
 
     const informe = {
         ts: new Date().toISOString(), reparar, totalDocs: docs.length,
-        diagnostico: {}, reparado: reparar ? {} : null, muestras: {},
+        diagnostico: {}, reparado: reparar ? {} : null, muestras: {}, detalles: {},
     };
-    const D = informe.diagnostico, R = informe.reparado, M = informe.muestras;
+    const D = informe.diagnostico, R = informe.reparado, M = informe.muestras, T = informe.detalles;
+
+    // `muestras` = lo que ve el panel (RECORTADA: se sondea cada 1,5 s, no puede ir cargada).
+    // `detalles`  = la lista COMPLETA, para el informe .txt descargable (`estadoIntegridad` la quita del sondeo).
+    // Las dos salen del MISMO mapeador: así jamás pueden contar cosas distintas.
+    const anotar = (clave, lista, mapear, tope = 12) => {
+        M[clave] = lista.slice(0, tope).map(mapear);
+        T[clave] = lista.map(mapear);
+    };
+    // Ficha de un documento para los listados: lo justo para IDENTIFICARLO sin tener que abrir Mongo.
+    const fichaDoc = (d, extra = {}) => ({
+        id: String(d._id), titulo: d.titulo || '(sin título)', archivo: d.nombre_archivo || null,
+        ruta: d.ruta_base || null, isbn: d.isbn || null, issn: d.issn || null,
+        cdu: d.cdu || null, formatos: d.formatos || [], ...extra,
+    });
 
     // ── A. Docs sin carpeta en disco (solo informa) ──
     const sinCarpeta = [];
     let _iA = 0;
     for (const d of docs) { if (d.ruta_base && !await existe(absDe(d.ruta_base))) sinCarpeta.push(d); if (++_iA % 50 === 0) prog('docs-sin-carpeta', { i: _iA, total: docs.length }); }
     D.docsSinCarpeta = sinCarpeta.length;
-    M.docsSinCarpeta = sinCarpeta.slice(0, 10).map(d => ({ id: String(d._id), titulo: d.titulo, ruta: d.ruta_base }));
+    anotar('docsSinCarpeta', sinCarpeta, d => fichaDoc(d));
 
     // ── D. Docs cuya carpeta existe pero falta el fichero original (solo informa) ──
     prog('docs-sin-fichero', { i: 0, total: docs.length });
@@ -130,7 +144,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         if (falta) sinFichero.push(d);
     }
     D.docsSinFicheroOriginal = sinFichero.length;
-    M.docsSinFicheroOriginal = sinFichero.slice(0, 10).map(d => ({ id: String(d._id), titulo: d.titulo, archivo: d.nombre_archivo }));
+    anotar('docsSinFicheroOriginal', sinFichero, d => fichaDoc(d));
 
     // ── D-bis. AUDIOS ROTOS: docs cuyo `audios[]` apunta a ficheros que NO están en disco (solo informa) ──
     // PUNTO CIEGO que esto tapa: la comprobación de arriba EXCLUYE a los audiolibros (`esAudioSinDoc`) porque
@@ -145,16 +159,18 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         if (++_iAR % 50 === 0) prog('audios-rotos', { i: _iAR, total: docs.length });
         const pistas = Array.isArray(d.audios) ? d.audios : [];
         if (!pistas.length) continue;
-        let faltan = 0;
+        // Se anota QUÉ pistas faltan, no solo cuántas: en el informe, «faltan 3 de 12» no sirve para arreglar
+        // nada — hace falta saber cuáles para ir a buscarlas a la Papelera o al origen.
+        const rotas = [];
         for (const a of pistas) {
             const abs = absDe(a?.ruta);
-            if (!abs || !(await existe(abs))) faltan++;
+            if (!abs || !(await existe(abs))) rotas.push(a?.ruta || '(pista sin ruta)');
         }
-        if (faltan) audiosRotos.push({ d, faltan, total: pistas.length });
+        if (rotas.length) audiosRotos.push({ d, faltan: rotas.length, total: pistas.length, rotas });
     }
     D.docsConAudiosRotos = audiosRotos.length;
-    M.docsConAudiosRotos = audiosRotos.slice(0, 10).map(x => ({
-        id: String(x.d._id), titulo: x.d.titulo, faltan: `${x.faltan}/${x.total} pistas`, ruta_base: x.d.ruta_base,
+    anotar('docsConAudiosRotos', audiosRotos, x => fichaDoc(x.d, {
+        faltan: `${x.faltan}/${x.total} pistas`, pistas: x.rotas,
     }));
 
     // ── Recorrido del árbol CDU: hojas (registro/doc/img), ramas muertas, registro sin doc, huérfanas/desync ──
@@ -199,10 +215,10 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     D.registroSinDocumento = registroSinDoc.length;
     D.carpetasHuerfanas = carpetasHuerfanas.length;
     D.rutaBaseDesajustada = rutaBaseDesync.length;
-    M.ramasMuertas = ramasMuertas.slice(0, 15).map(webDe);
-    M.carpetasHuerfanas = carpetasHuerfanas.slice(0, 10).map(webDe);
-    M.registroSinDocumento = registroSinDoc.slice(0, 15).map(webDe);
-    M.rutaBaseDesajustada = rutaBaseDesync.slice(0, 10).map(x => ({ id: String(x.doc._id), titulo: x.doc.titulo, enDisco: x.web, enBD: x.doc.ruta_base }));
+    anotar('ramasMuertas', ramasMuertas, webDe, 15);
+    anotar('carpetasHuerfanas', carpetasHuerfanas, webDe);
+    anotar('registroSinDocumento', registroSinDoc, webDe, 15);
+    anotar('rutaBaseDesajustada', rutaBaseDesync, x => fichaDoc(x.doc, { enDisco: x.web, enBD: x.doc.ruta_base }));
 
     // ── F. Varios documentos comparten la MISMA ruta_base (rompe 1-doc↔1-carpeta). Solo informa: se
     //     arregla recatalogando a mano (botón «Reprocesar» de la ficha) — la carpeta tiene 2+ ficheros
@@ -215,10 +231,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     }
     const rutaCompartida = [...porRuta.values()].filter(g => g.length > 1);
     D.rutaBaseCompartida = rutaCompartida.length;
-    M.rutaBaseCompartida = rutaCompartida.slice(0, 10).map(g => ({
-        ruta: g[0].ruta_base,
-        docs: g.map(d => ({ id: String(d._id), titulo: d.titulo, archivo: d.nombre_archivo })),
-    }));
+    anotar('rutaBaseCompartida', rutaCompartida, g => ({ ruta: g[0].ruta_base, docs: g.map(d => fichaDoc(d)) }));
 
     // ── C. Duplicados exactos por hash ──
     prog('duplicados-hash');
@@ -231,16 +244,16 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     ]).toArray();
     D.hashDuplicadosGrupos = hashDups.length;
     D.hashDuplicadosDocs = hashDups.reduce((s, g) => s + (g.n - 1), 0); // sobrantes
-    M.hashDuplicados = hashDups.slice(0, 10).map(g => ({
-        docs: g.ids.map(id => porId.get(String(id))).filter(Boolean)
-            .map(d => ({ id: String(d._id), titulo: d.titulo, isbn: d.isbn || null, archivo: d.nombre_archivo })),
+    anotar('hashDuplicados', hashDups, g => ({
+        hash: g._id,
+        docs: g.ids.map(id => porId.get(String(id))).filter(Boolean).map(d => fichaDoc(d)),
     }));
 
     // ── Cuarentena/duplicados pendientes ──
     let depositos = [];
     try { depositos = (await fs.readdir(path.join(DIR_CUARENTENA, 'duplicados'), { withFileTypes: true })).filter(e => e.isDirectory()); } catch { /* */ }
     D.cuarentenaDuplicados = depositos.length;
-    M.cuarentenaDuplicados = depositos.slice(0, 15).map(e => e.name);
+    anotar('cuarentenaDuplicados', depositos, e => e.name, 15);
 
     if (!reparar) { prog('hecho'); return informe; }
 
@@ -309,7 +322,15 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
 // ── Ejecución en SEGUNDO PLANO (para el panel): la POST arranca y devuelve al instante; el progreso y el
 //    informe final se consultan con estadoIntegridad(). Evita que un proxy corte la petición larga (405). ──
 let trabajoInteg = { en_curso: false, fase: null, progreso: {}, reparar: false, ts: null, informe: null, error: null };
-export function estadoIntegridad() { return { ...trabajoInteg }; }
+// El panel SONDEA esto cada 1,5 s → se le manda el informe SIN `detalles` (que puede traer miles de entradas:
+// mandarlas en cada sondeo sería absurdo). El detalle completo se sirve UNA vez, bajo demanda, como .txt.
+export function estadoIntegridad() {
+    if (!trabajoInteg.informe) return { ...trabajoInteg };
+    const { detalles, ...informeLigero } = trabajoInteg.informe;
+    return { ...trabajoInteg, informe: informeLigero };
+}
+/** Informe COMPLETO (con `detalles`) del último diagnóstico, para el .txt descargable. */
+export function ultimoInformeIntegridad() { return trabajoInteg.informe || null; }
 export function lanzarIntegridad({ reparar = false } = {}) {
     if (trabajoInteg.en_curso) return { ok: false, motivo: 'ya hay una verificación en curso' };
     trabajoInteg = { en_curso: true, fase: 'cargando', progreso: {}, reparar: !!reparar, ts: new Date().toISOString(), informe: null, error: null };

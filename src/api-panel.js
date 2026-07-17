@@ -12,7 +12,8 @@ import { restaurar } from './utils/papelera.js';
 import { normalizarDOI } from './utils/buscador-crossref.js';
 import { verificarPasswordAdmin, firmarCompartir, validarCompartir } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
-import { lanzarIntegridad, estadoIntegridad } from './integridad.js';
+import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './integridad.js';
+import { informeTexto } from './utils/informe-integridad.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
@@ -276,6 +277,18 @@ export function rutasPanel() {
         res.json(lanzarIntegridad({ reparar: req.body?.reparar === true }));
     });
     r.get('/integridad/estado', (req, res) => res.json(estadoIntegridad()));
+    // Informe DETALLADO en .txt del último diagnóstico. No lo vuelve a ejecutar: rinde el que ya está en
+    // memoria (con las listas COMPLETAS, que el sondeo de arriba no manda). Solo admin: es un volcado de la
+    // estructura entera del archivo (títulos y rutas de todo lo que cojea).
+    r.get('/integridad/informe.txt', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).type('text/plain').send('Solo administradores.');
+        const inf = ultimoInformeIntegridad();
+        if (!inf) return res.status(404).type('text/plain').send('No hay ningún diagnóstico ejecutado en esta sesión. Pulsa «Diagnosticar» primero.');
+        const sello = new Date(inf.ts).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+        res.type('text/plain; charset=utf-8')
+            .set('Content-Disposition', `attachment; filename="integridad-${sello}.txt"`)
+            .send(informeTexto(inf));
+    });
 
     // ── Campañas de fondo (backfill autorreparable al reposo): listar estado+config+pendientes,
     //    ajustar (activa/lote/cada-N-min) y disparar una tanda ahora. Config y disparo = solo admin. ──

@@ -1220,6 +1220,15 @@ de ficheros clasificado por CDU.
     IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🔞 Permisos de invitados
     (permitir/restringir NSFW), 📜 Logs en vivo.
 
+    · 🩺 INTEGRIDAD — el informe .txt (admin): la tabla del panel enseña los
+      recuentos y, al pinchar una fila, una MUESTRA de 12 casos. Para trabajar de
+      verdad está «⬇ Informe (.txt)»: descarga el informe COMPLETO del diagnóstico
+      que acabas de correr (no lo repite: lo rinde de memoria), con TODOS los casos
+      y, en cada categoría, qué significa y qué hacer. Los audiolibros rotos listan
+      QUÉ pistas faltan, no solo cuántas. Se descarga por fetch con el token en la
+      cabecera (no en la URL: acabaría en el historial del navegador). El detalle
+      NO viaja en el sondeo de progreso (que va cada 1,5 s): solo al pedir el .txt.
+
     · 🎯 CAMPAÑAS DE FONDO (admin): rellenan información INCOMPLETA del catálogo
       cuando el sistema está en REPOSO (Inbox inactivo), cada una con su interruptor,
       su tamaño de LOTE y su periodicidad (cada N minutos). Comparten el candado con
@@ -1717,6 +1726,14 @@ APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarl
                             (--reparar) DB↔disco en UNA pasada (consolida
                             auditoria-integridad + resolver-duplicados + recolector-cdu
                             + dedup por hash). Programable con la Tarea de DSM.
+                            Por consola escupe SOLO el resumen (en una tarea
+                            programada, volcar el detalle al log no ayuda);
+                            con --informe <ruta.txt> deja además el informe
+                            DETALLADO: todos los casos, con qué significa cada
+                            categoría y qué hacer con ella. Mismo texto que el
+                            botón «⬇ Informe (.txt)» del panel — un solo
+                            renderizador (utils/informe-integridad.js), así que
+                            las dos salidas no pueden contar cosas distintas.
     sanear-catalogo.js      [PANEL: Sanear catálogo] re-home + portadas con el
                             pipeline actual, sin red, sin pérdida de datos.
     describir-clasificaciones.js  backfill de descripciones CDU/Dewey/LCC que faltan
