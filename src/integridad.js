@@ -78,20 +78,37 @@ async function tieneAlgunFichero(dir) {
 }
 
 /**
- * Retira una carpeta del árbol CDU. Si tiene CUALQUIER contenido —a cualquier profundidad— se va ENTERA a la
- * Papelera, con su manifiesto, restaurable a su sitio exacto. Solo se BORRA lo que está literalmente vacío.
+ * Retira una carpeta del árbol CDU. Tres desenlaces:
+ *   · VACÍA (ni un fichero a ninguna profundidad) → se borra. No hay nada que perder.
+ *   · CON FICHEROS → **NO SE TOCA**. Se marca «conservada» y el informe la señala para que la mires TÚ.
+ *   · `aunConFicheros` → a la Papelera ENTERA (con manifiesto, restaurable). ÚNICO caso: el dedup por hash
+ *     exacto, donde el fichero es byte a byte idéntico a otro que se conserva → no se pierde nada. Es la
+ *     única eliminación que permite la política.
  *
- * ESTO ERA EL AGUJERO. Antes había aquí una `reciclarCarpeta` propia (ignorando la de papelera.js) que
- * reciclaba los ficheros del PRIMER NIVEL y hacía `fs.rm(recursive)` de todo lo demás: lo que colgara de una
- * subcarpeta NO pasaba por la Papelera, se BORRABA. Con un audiolibro cuyas pistas viven en
- * `.../Audio/Version 1/*.mp3`, podar la «rama muerta» Audio/ (que no tiene ficheros directos) borraba los mp3
- * sin dejar rastro en ninguna parte. Por ahí se fue «una carpeta entera sin dejar rastro en Mongo».
- * La de papelera.js copia el ÁRBOL, lo verifica, y solo entonces borra el origen; y anota el manifiesto.
+ * La regla «si tiene ficheros, no se toca» la fija el usuario, y es mejor que lo que yo había puesto (mandarlo
+ * a la Papelera con manifiesto): un manifiesto sirve para DESHACER, y él quiere DECIDIR antes. Además la
+ * Papelera se vacía cada cierto tiempo, así que «reciclado» no es un sitio seguro para siempre.
+ *
+ * Y AQUÍ ESTABA EL AGUJERO GORDO: antes había una `reciclarCarpeta` propia (ignorando la de papelera.js) que
+ * reciclaba los ficheros del PRIMER NIVEL y hacía `fs.rm(recursive)` con todo lo demás — lo que colgara de una
+ * subcarpeta NO pasaba por la Papelera, se BORRABA. Con las pistas en `.../Audio/Version 1/*.mp3`, podar la
+ * «rama muerta» Audio/ (sin ficheros directos) se llevaba los mp3 sin dejar rastro. Por ahí se fue «una
+ * carpeta entera sin dejar rastro en Mongo».
+ *
+ * @returns {Promise<'borrada'|'reciclada'|'conservada'>}
  */
-async function reciclarCarpeta(carpeta, etiqueta) {
-    if (!carpeta) return;
-    if (await tieneAlgunFichero(carpeta)) await reciclarArbolAPapelera(carpeta, etiqueta);
-    else await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
+async function reciclarCarpeta(carpeta, etiqueta, { aunConFicheros = false } = {}) {
+    if (!carpeta) return 'conservada';
+    if (!(await tieneAlgunFichero(carpeta))) {
+        await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
+        return 'borrada';
+    }
+    if (!aunConFicheros) {
+        console.warn(`  ⚠ ${webDe(carpeta)}: tiene ficheros → NO se toca (${etiqueta}). Revísala a mano.`);
+        return 'conservada';
+    }
+    await reciclarArbolAPapelera(carpeta, etiqueta);
+    return 'reciclada';
 }
 
 // Puntúa un documento para elegir el "mejor" de un grupo de copias idénticas (hash).
@@ -290,25 +307,42 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
 
     if (!reparar) { prog('hecho'); return informe; }
 
-    // ════════════════════════ REPARACIÓN (todo a la Papelera) ════════════════════════
+    // ════════════════════════ REPARACIÓN ════════════════════════
+    // REGLA: si una carpeta tiene FICHEROS, no se toca — se deja y se señala para revisarla a mano. Solo
+    // desaparece lo literalmente vacío (y los duplicados de hash exacto, que no pierden nada). Todas las
+    // conservadas se juntan aquí para que el informe las liste: seguirán saliendo en el próximo diagnóstico.
     prog('reparando');
-    // E. Podar ramas muertas.
+    const conservadas = [];
+    const retirar = async (carpeta, etiqueta, opts) => {
+        const r = await reciclarCarpeta(carpeta, etiqueta, opts);
+        if (r === 'conservada' && carpeta) conservadas.push({ carpeta: webDe(carpeta), motivo: etiqueta });
+        return r;
+    };
+
+    // E. Podar ramas muertas (solo las vacías de verdad).
     let podadas = 0;
-    for (const d of ramasMuertas) { await reciclarCarpeta(d, 'rama-muerta'); podadas++; }
+    for (const d of ramasMuertas) if (await retirar(d, 'rama-muerta') !== 'conservada') podadas++;
     R.ramasPodadas = podadas;
 
-    // B. ruta_base desajustada: que la BD apunte a la carpeta con el fichero; reciclar la otra.
+    // B. ruta_base desajustada: que la BD apunte a la carpeta con el fichero; retirar la otra si procede.
     let rutasReparadas = 0;
     for (const { carpeta, web, doc } of rutaBaseDesync) {
         const rbFolder = absDe(doc.ruta_base);
-        if (await tieneDocFichero(rbFolder)) { await reciclarCarpeta(carpeta, 'carpeta-stale'); rutasReparadas++; }
-        else if (await tieneDocFichero(carpeta)) { await col.updateOne({ _id: doc._id }, { $set: { ruta_base: web } }); if (rbFolder) await reciclarCarpeta(rbFolder, 'carpeta-vacia'); rutasReparadas++; }
+        // La carpeta sobrante casi siempre TIENE ficheros (es una copia), así que ahora se conserva y se
+        // señala: el usuario decide. El ajuste de la BD (que es la reparación de verdad) sí se hace.
+        if (await tieneDocFichero(rbFolder)) { if (await retirar(carpeta, 'carpeta-stale') !== 'conservada') rutasReparadas++; }
+        else if (await tieneDocFichero(carpeta)) {
+            await col.updateOne({ _id: doc._id }, { $set: { ruta_base: web } });
+            await retirar(rbFolder, 'carpeta-vacia');
+            rutasReparadas++;
+        }
     }
     R.rutasReparadas = rutasReparadas;
 
-    // B. Carpetas huérfanas (registro sin doc en Mongo) → reciclar.
+    // B. Carpetas huérfanas (registro sin doc en Mongo). Las que tengan ficheros NO se tocan: ahí puede estar
+    // el documento de alguien, y el registro.json de dentro dice qué era → es justo lo que hay que mirar.
     let huerfanasRecicladas = 0;
-    for (const d of carpetasHuerfanas) { await reciclarCarpeta(d, 'carpeta-huerfana'); huerfanasRecicladas++; }
+    for (const d of carpetasHuerfanas) if (await retirar(d, 'carpeta-huerfana') !== 'conservada') huerfanasRecicladas++;
     R.carpetasHuerfanasRecicladas = huerfanasRecicladas;
 
     // C. Deduplicar por hash: conservar el mejor, reciclar el resto + borrar sus docs.
@@ -321,12 +355,20 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         grupo.sort((a, b) => puntuaDoc(b) - puntuaDoc(a));
         const [, ...perdedores] = grupo;
         for (const p of perdedores) {
-            if (p.ruta_base) await reciclarCarpeta(absDe(p.ruta_base), `hashdup-${p.isbn || p._id}`);
+            // ÚNICA excepción a «si tiene ficheros no se toca»: el fichero es BYTE A BYTE idéntico al del que
+            // se conserva, así que no se pierde absolutamente nada. Aun así va a la Papelera ENTERA (con
+            // manifiesto), no se borra.
+            if (p.ruta_base) await reciclarCarpeta(absDe(p.ruta_base), `hashdup-${p.isbn || p._id}`, { aunConFicheros: true });
             await col.deleteOne({ _id: p._id });
             hashEliminados++;
         }
     }
     R.hashDuplicadosEliminados = hashEliminados;
+
+    // Las carpetas que NO se han tocado por tener ficheros. Van al informe: seguirán apareciendo en el próximo
+    // diagnóstico bajo su categoría, y ahora además se sabe que la reparación las dejó a propósito.
+    R.carpetasConservadas = conservadas.length;
+    anotar('carpetasConservadas', conservadas, x => x);
 
     // Cuarentena/duplicados: resolver por la política tamaño/fecha (reusa utils/duplicados).
     let cuarentenaResueltos = 0;

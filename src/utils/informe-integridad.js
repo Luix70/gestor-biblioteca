@@ -55,8 +55,8 @@ const CATEGORIAS = [
     {
         clave: 'ramasMuertas', lista: 'ramasMuertas', auto: true,
         etiqueta: 'Ramas vacías / muertas',
-        que: 'Carpetas del árbol CDU sin ningún contenido útil (ni fichero, ni imagen, ni registro) y sin hojas vivas por debajo. Restos normales de mover/borrar documentos.',
-        hacer: 'Las poda el botón «Diagnosticar y reparar». Van a la Papelera, no se borran.',
+        que: 'Carpetas del árbol CDU LITERALMENTE vacías: ni un fichero, a ninguna profundidad, y sin hojas vivas por debajo. Restos normales de mover/borrar documentos.',
+        hacer: 'Las borra el botón «Diagnosticar y reparar». Si alguna tuviera un solo fichero dentro, NO se toca: se conserva y se señala para que la mires tú.',
     },
     {
         clave: 'registroSinDocumento', lista: 'registroSinDocumento', auto: false,
@@ -65,16 +65,16 @@ const CATEGORIAS = [
         hacer: 'El registro.json dice qué había (título, ISBN): úsalo para buscar el fichero en la Papelera o para reingerirlo.',
     },
     {
-        clave: 'carpetasHuerfanas', lista: 'carpetasHuerfanas', auto: true,
+        clave: 'carpetasHuerfanas', lista: 'carpetasHuerfanas', auto: false,
         etiqueta: 'Carpetas huérfanas',
-        que: 'Carpetas con registro.json cuyo documento ya NO está en Mongo (borrado sin limpiar el disco).',
-        hacer: 'Las recicla el botón «Reparar». Ojo: si el fichero te interesa, sácalo ANTES o restáuralo luego de la Papelera.',
+        que: 'Carpetas con registro.json cuyo documento ya NO está en Mongo (borrado sin limpiar el disco). Ahí dentro puede estar el fichero de alguien, y el registro.json dice qué era.',
+        hacer: 'Míralas TÚ. La reparación NO las toca si tienen ficheros (solo se lleva las vacías): decide si reingerir el fichero o retirar la carpeta a mano.',
     },
     {
         clave: 'rutaBaseDesajustada', lista: 'rutaBaseDesajustada', auto: true,
         etiqueta: 'ruta_base desajustada',
         que: 'El documento en Mongo apunta a una carpeta y el fichero está en otra (típico tras renombrar o reclasificar).',
-        hacer: 'Lo cuadra el botón «Reparar»: deja la BD apuntando a donde de verdad está el fichero y recicla la carpeta sobrante.',
+        hacer: 'El botón «Reparar» cuadra la BD con donde de verdad está el fichero. La carpeta sobrante solo se retira si está VACÍA; si tiene ficheros se conserva y se señala, para que decidas tú.',
     },
     {
         clave: 'hashDuplicadosGrupos', lista: 'hashDuplicados', auto: true,
@@ -192,18 +192,19 @@ export function informeTexto(informe, { detalle = true } = {}) {
 
     // ── Reparaciones hechas ──
     if (R) {
-        const et = {
-            ramasPodadas: 'Ramas podadas',
-            rutasReparadas: 'ruta_base reparadas',
-            carpetasHuerfanasRecicladas: 'Carpetas huérfanas recicladas',
-            hashDuplicadosEliminados: 'Copias exactas eliminadas',
-            cuarentenaResueltos: 'Depósitos de Cuarentena resueltos',
-        };
         out.push(RAYA);
-        out.push('  REPARADO EN ESTA PASADA (todo lo retirado está en la Papelera)');
+        out.push('  REPARADO EN ESTA PASADA');
         out.push(RAYA);
-        for (const k of Object.keys(et)) out.push(linea(et[k], num(R[k] ?? 0)));
+        for (const k of Object.keys(ET_REPARADO)) out.push(linea(ET_REPARADO[k], num(R[k] ?? 0)));
         out.push('');
+        // Las conservadas se LISTAN: son las que hay que mirar a mano, y sin la lista el recuento no sirve.
+        const cons = T.carpetasConservadas || [];
+        if (cons.length) {
+            out.push(envolver('Ojo:', `${num(cons.length)} carpeta(s) NO se han tocado porque tienen ficheros dentro. La reparación las ha dejado a propósito: míralas y decide. Siguen saliendo arriba, en su categoría.`));
+            out.push('');
+            cons.forEach((c, i) => out.push(`${String(i + 1).padStart(4, ' ')}. ${c.carpeta}   (${c.motivo})`));
+            out.push('');
+        }
     }
 
     // ── Detalle por categoría ──
@@ -362,15 +363,16 @@ export function informeHtml(informe, { base = '' } = {}) {
 
     // ── Reparaciones hechas ──
     if (R) {
-        const et = {
-            ramasPodadas: 'Ramas podadas', rutasReparadas: 'ruta_base reparadas',
-            carpetasHuerfanasRecicladas: 'Carpetas huérfanas recicladas',
-            hashDuplicadosEliminados: 'Copias exactas eliminadas',
-            cuarentenaResueltos: 'Depósitos de Cuarentena resueltos',
-        };
-        h.push('<div class="card"><b>🛠 Reparado en esta pasada</b> <span class="sub">(todo lo retirado está en la Papelera)</span><table style="margin-top:8px">');
-        for (const k of Object.keys(et)) h.push(`<tr><td>${escH(et[k])}</td><td class="n">${num(R[k] ?? 0)}</td></tr>`);
-        h.push('</table></div>');
+        h.push('<div class="card"><b>🛠 Reparado en esta pasada</b><table style="margin-top:8px">');
+        for (const k of Object.keys(ET_REPARADO)) h.push(`<tr><td>${escH(ET_REPARADO[k])}</td><td class="n ${k === 'carpetasConservadas' && R[k] ? 'hay' : ''}">${num(R[k] ?? 0)}</td></tr>`);
+        h.push('</table>');
+        // Las conservadas se LISTAN: son justo las que hay que mirar a mano.
+        const cons = T.carpetasConservadas || [];
+        if (cons.length) {
+            h.push(`<div class="expl" style="margin-top:12px"><b>Ojo:</b> ${num(cons.length)} carpeta(s) NO se han tocado porque tienen ficheros dentro. La reparación las ha dejado a propósito: míralas y decide.</div>`);
+            h.push(`<ol class="items">${cons.map((c) => `<li class="mono">${escH(c.carpeta)} <span class="tag man">${escH(c.motivo)}</span></li>`).join('')}</ol>`);
+        }
+        h.push('</div>');
     }
 
     // ── Detalle por categoría, cada una en su rama desplegable ──
@@ -396,6 +398,16 @@ export function informeHtml(informe, { base = '' } = {}) {
 
 /** A partir de cuántos elementos una rama nace PLEGADA (por debajo se abre sola). */
 const LIMITE_ABIERTA = 30;
+
+/** Qué hizo la reparación. Compartido por los dos renderizadores (una sola vez, como todo lo de aquí). */
+const ET_REPARADO = {
+    ramasPodadas: 'Ramas vacías borradas',
+    rutasReparadas: 'ruta_base reparadas',
+    carpetasHuerfanasRecicladas: 'Carpetas huérfanas retiradas (vacías)',
+    hashDuplicadosEliminados: 'Copias exactas eliminadas (a la Papelera)',
+    cuarentenaResueltos: 'Depósitos de Cuarentena resueltos',
+    carpetasConservadas: 'Carpetas NO tocadas (tienen ficheros → míralas tú)',
+};
 
 /**
  * Párrafo «Etiqueta: texto» partido a 78 columnas, con la continuación alineada BAJO EL TEXTO (no bajo la
