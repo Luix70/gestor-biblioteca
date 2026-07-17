@@ -1885,7 +1885,11 @@ export function rutasPanel() {
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            res.json({ ok: true, arbol: await arbolInbox(carpetaDeDoc(doc), { profundidad: 8, maxNodos: 5000 }) });
+            // `arbolInbox` devuelve {hijos, truncado, nodos}; el cliente espera el ARRAY en `arbol`. (Aquí se
+            // pide el árbol ENTERO —profundidad 8, sin carga diferida—: el paquete de un documento es
+            // acotado, y el tope POR CARPETA ya evita que una carpeta gigante se desmadre.)
+            const t = await arbolInbox(carpetaDeDoc(doc), { profundidad: 8, maxNodos: 5000 });
+            res.json({ ok: true, arbol: t.hijos, truncado: t.truncado });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
