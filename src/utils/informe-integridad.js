@@ -129,6 +129,15 @@ function elemento(x, i) {
         l.push('      pistas que faltan:');
         for (const p of x.pistas) l.push(`        · ${p}`);
     }
+    // Y lo que SÍ hay en la carpeta: si están la portada y los sidecars pero no el pdf, el fichero se perdió;
+    // si no hay nada, la carpeta es un cascarón. Eso decide qué hacer, y aquí se ve sin ir al NAS.
+    if (Array.isArray(x.contenido)) {
+        if (!x.contenido.length) l.push('      hay dentro: nada, la carpeta está vacía');
+        else {
+            l.push('      hay dentro:');
+            for (const c of x.contenido) l.push(`        · ${c}`);
+        }
+    }
     return l.join('\n');
 }
 
@@ -279,12 +288,25 @@ function docHtml(x, base) {
     const campo = (k, v) => (v ? `<div><span class="k">${k}</span><span class="mono">${escH(v)}</span></div>` : '');
     const pistas = Array.isArray(x.pistas) && x.pistas.length
         ? `<ul class="pistas mono">${x.pistas.map((p) => `<li>${escH(p)}</li>`).join('')}</ul>` : '';
+    // LO QUE SÍ HAY en la carpeta, con cada fichero ENLAZADO. Se enlazan los FICHEROS, no la carpeta: el árbol
+    // CDU se sirve estático en /recursos, pero express.static NO lista directorios (eso es serve-index, que no
+    // está montado) — y encima /recursos es PÚBLICO, así que activar el listado expondría la biblioteca entera
+    // a cualquiera. Un fichero sí se abre en el navegador (pdf/imágenes salen inline).
+    let contenido = '';
+    if (Array.isArray(x.contenido)) {
+        contenido = x.contenido.length
+            ? `<div><span class="k">hay dentro</span></div><ul class="grp">${x.contenido.map((c) => {
+                const url = base && x.ruta ? encodeURI(`${base}${x.ruta}/${c}`) : null;
+                return `<li class="mono">${url ? `<a href="${escH(url)}" target="_blank" rel="noopener">${escH(c)}</a>` : escH(c)}</li>`;
+            }).join('')}</ul>`
+            : `<div><span class="k">hay dentro</span><span class="mono">nada: la carpeta está vacía</span></div>`;
+    }
     return cab + `<div class="campos">`
         + campo('id', x.id) + campo('archivo', x.archivo) + campo('ruta', x.ruta)
         + campo('isbn', x.isbn) + campo('issn', x.issn) + campo('cdu', x.cdu)
         + campo('formatos', (x.formatos || []).join(', ')) + campo('faltan', x.faltan)
         + (x.enDisco ? campo('en disco', x.enDisco) + campo('en BD', x.enBD) : '')
-        + pistas + `</div>`;
+        + pistas + contenido + `</div>`;
 }
 
 /** Un elemento del listado, en cualquiera de sus tres formas (ruta suelta · grupo · ficha de documento). */

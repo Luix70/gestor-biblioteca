@@ -61,6 +61,10 @@ const existe = (p) => fs.access(p).then(() => true).catch(() => false);
 const webDe = (carpeta) => '/recursos/' + path.relative(DIR_CDU, carpeta).split(path.sep).join('/');
 const absDe = (web) => web ? path.join(DIR_CDU, ...(web.startsWith('/recursos/') ? web.slice('/recursos/'.length) : web).split('/')) : null;
 const tieneDocFichero = async (d) => { if (!d) return false; try { return (await fs.readdir(d)).some(esFicheroOriginal); } catch { return false; } };
+/** Qué hay DE VERDAD en una carpeta (hasta 30 entradas, sin la basura del sistema), para el informe. */
+const listarCarpeta = async (carpeta) => {
+    try { return (await fs.readdir(carpeta)).filter(n => !ignorar(n)).sort().slice(0, 30); } catch { return []; }
+};
 const ficheroOriginal = async (carpeta) => { if (!carpeta) return null; try { const n = (await fs.readdir(carpeta)).find(esFicheroOriginal); return n ? path.join(carpeta, n) : null; } catch { return null; } };
 
 /** ¿Hay ALGÚN fichero, a CUALQUIER profundidad, que no sea basura del sistema (@eaDir, .DS_Store, Thumbs.db)? */
@@ -161,10 +165,13 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         const falta = d.nombre_archivo
             ? !await existe(path.join(carpeta, d.nombre_archivo))
             : !await tieneDocFichero(carpeta);   // sin nombre_archivo (docs antiguos) → respaldo por extensión
-        if (falta) sinFichero.push(d);
+        // Se apunta QUÉ HAY de verdad en la carpeta: con «falta el original», lo primero que quieres saber es
+        // qué quedó. Si están la portada y los sidecars y no el pdf, el fichero se perdió; si no hay nada, la
+        // carpeta es un cascarón. Sin esto hay que ir al NAS a mirar, y entonces el informe no sirve de nada.
+        if (falta) sinFichero.push({ d, contenido: await listarCarpeta(carpeta) });
     }
     D.docsSinFicheroOriginal = sinFichero.length;
-    anotar('docsSinFicheroOriginal', sinFichero, d => fichaDoc(d));
+    anotar('docsSinFicheroOriginal', sinFichero, x => fichaDoc(x.d, { contenido: x.contenido }));
 
     // ── D-bis. AUDIOS ROTOS: docs cuyo `audios[]` apunta a ficheros que NO están en disco (solo informa) ──
     // PUNTO CIEGO que esto tapa: la comprobación de arriba EXCLUYE a los audiolibros (`esAudioSinDoc`) porque
