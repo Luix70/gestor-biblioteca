@@ -67,6 +67,12 @@ export const AJUSTES = {
     PORTADA_ANCHO_DECENTE: 500,     // si ya hay algo así de ancho, no se descargan portadas remotas
     PORTADA_ANCHO_MINIMO: 100,      // por debajo = imagen degenerada y se descarta (el 1x1 de OL)
 
+    // --- Empaquetado de láminas sueltas en cbz (empaquetar-imagenes) ---
+    // Tope POR TOMO, en BYTES (no en nº de páginas): el visor abre el cbz cargándolo en MEMORIA (adm-zip), así
+    // que lo que puede tumbar al Atom son los bytes. Por número se hacían las dos cosas mal: partía en dos un
+    // diccionario de 400 páginas ligeras, y dejaba pasar un tomo de 300 escaneos enormes.
+    CBZ_MAX_BYTES: 400 * 1024 * 1024,
+
     // --- PDF: extracción de texto, rasterizado y OCR ---
     PDF_PAGINAS_FRENTE: 15,         // nº de primeras páginas de las que se extrae texto (ISBN/título)
     PDF_PAGINAS_FONDO: 5,           // nº de últimas páginas de las que se extrae texto

@@ -32,8 +32,31 @@ const ES_COMPR = /\.(rar|zip|7z|cbz|cbr|cb7|tar|tgz|gz)$/i;
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#');
 const ORDEN = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 
-// Tope por tomo: si una carpeta PLANA trae más, se parte en varios cbz (evita el ZIP gigante en memoria).
-const MAX_IMGS = Number(process.env.CBZ_MAX_IMAGENES) || 300;
+/**
+ * Tope por tomo, POR TAMAÑO. El visor abre el cbz cargándolo en MEMORIA (adm-zip), así que lo que puede
+ * tumbar al Atom son los BYTES, no el número de páginas. Partir por recuento (los 300 de antes) hacía las dos
+ * cosas mal: partía en dos un diccionario de 400 páginas ligeras sin necesidad, y dejaba pasar un tomo de 300
+ * escaneos enormes de varios GB. Decisión del usuario: ~400 MB.
+ */
+const MAX_BYTES = Number(process.env.CBZ_MAX_BYTES) || 400 * 1024 * 1024;
+
+/**
+ * Parte una lista de imágenes en tomos de ~MAX_BYTES, respetando su orden (son páginas: no se pueden barajar).
+ * Una imagen SIEMPRE cabe en algún tomo: si ella sola pasa del tope, va en el suyo — partir una lámina no
+ * tiene sentido, y dejarla fuera sería perderla.
+ */
+function partirPorTamano(imagenes) {
+    const tomos = [];
+    let act = [], bytes = 0;
+    for (const im of imagenes) {
+        if (act.length && bytes + im.bytes > MAX_BYTES) { tomos.push(act); act = []; bytes = 0; }
+        act.push(im);
+        bytes += im.bytes;
+    }
+    if (act.length) tomos.push(act);
+    return tomos;
+}
+const sumaBytes = (ims) => ims.reduce((s, i) => s + (i.bytes || 0), 0);
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
@@ -51,6 +74,7 @@ async function leer(dir) {
 async function imagenesDe(dir) {
     const ents = await leer(dir);
     const imagenes = ents.filter((e) => e.isFile() && ES_IMG.test(e.name)).map((e) => ({ nombre: e.name, abs: path.join(dir, e.name) }));
+    const medir = async (im) => { try { im.bytes = (await fs.stat(im.abs)).size; } catch { im.bytes = 0; } return im; };
     const comprimidos = ents.filter((e) => e.isFile() && ES_COMPR.test(e.name));
     let tmp = null, desdeComprimidos = 0;
     if (comprimidos.length) {
@@ -70,6 +94,8 @@ async function imagenesDe(dir) {
         }
     }
     imagenes.sort((a, b) => ORDEN(a.nombre, b.nombre));
+    // El tamaño hace falta para partir los tomos: se mide aquí, una vez, para todas.
+    for (const im of imagenes) await medir(im);
     return { imagenes, desdeComprimidos, tmp };
 }
 
@@ -93,11 +119,11 @@ export async function planEmpaquetado(dir) {
     const nombre = path.basename(dir);
     const tomos = [];
     const añadir = (base, imgs, desdeCompr) => {
-        for (let i = 0; i < imgs.length; i += MAX_IMGS) {
-            const trozo = imgs.slice(i, i + MAX_IMGS);
-            const parte = imgs.length > MAX_IMGS ? ` (${Math.floor(i / MAX_IMGS) + 1})` : '';
-            tomos.push({ nombre: base + parte, imagenes: trozo.length, desdeComprimidos: desdeCompr });
-        }
+        const trozos = partirPorTamano(imgs);
+        trozos.forEach((trozo, i) => {
+            const parte = trozos.length > 1 ? ` (${i + 1})` : '';
+            tomos.push({ nombre: base + parte, imagenes: trozo.length, bytes: sumaBytes(trozo), desdeComprimidos: desdeCompr });
+        });
     };
     // Imágenes propias de la carpeta raíz.
     const propias = await imagenesDe(dir);
@@ -162,13 +188,13 @@ export async function empaquetarImagenes(dir, dirDestino) {
 
     try {
         for (const g of grupos) {
-            for (let i = 0; i < g.imagenes.length; i += MAX_IMGS) {
-                const trozo = g.imagenes.slice(i, i + MAX_IMGS);
-                const parte = g.imagenes.length > MAX_IMGS ? ` (${Math.floor(i / MAX_IMGS) + 1})` : '';
+            const trozos = partirPorTamano(g.imagenes);
+            for (const [i, trozo] of trozos.entries()) {
+                const parte = trozos.length > 1 ? ` (${i + 1})` : '';
                 const nombre = `${g.base}${parte}`;
                 const r = await escribirCbz(trozo, path.join(dirDestino, `${nombre.replace(/[/\\:*?"<>|]/g, '_')}.cbz`));
                 if (!r.ok) return { ok: false, motivo: `«${nombre}»: ${r.motivo}` };
-                hechos.push({ nombre, ruta: r.ruta, paginas: r.paginas });
+                hechos.push({ nombre, ruta: r.ruta, paginas: r.paginas, bytes: sumaBytes(trozo) });
             }
         }
     } finally {
