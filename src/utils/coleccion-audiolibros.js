@@ -20,7 +20,7 @@ import { cduDeGenero, deducirIdioma, etiquetaDisco, leerISBNdeImagenes, mejorTit
 import { arbolCDU } from './cdu-arbol.js';
 import { resolverCabecera } from './colecciones.js';
 import { indexarDoc } from './indice-busqueda.js';
-import { esMaterialNotable, esVideo } from './criba-material.js';
+import { esDocumentoLeible, esMaterialNotable, esVideo, formatoDocumento } from './criba-material.js';
 import { agregarMetadatos, esAudio, leerMetadatosAudio } from './lector-audio.js';
 import { reciclarCarpeta } from './papelera.js';
 import { resolverPersona } from './resolver-persona.js';
@@ -139,7 +139,10 @@ async function librosPlanos(dir) {
  */
 async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
     const audios = files.filter((f) => esAudio(f.nombre)).sort(porRelNat);
-    const pdfs = files.filter((f) => esPdf(f.nombre)).sort(porRelNat);
+    // DOCUMENTOS del libro: TODOS los formatos con lector propio (pdf, epub, mobi, azw3, djvu, cbz, chm,
+    // docx…), no solo PDF. Antes solo se miraban los PDF y un EPUB/MOBI caía en «otros» → manifiesto →
+    // INVISIBLE, con el origen ya reciclado a la Papelera (caso real: «Mammoth Books», 59 epub + 16 mobi).
+    const pdfs = files.filter((f) => esDocumentoLeible(f.nombre)).sort(porRelNat);
     const imgs = files.filter((f) => esImagen(f.nombre)).sort(porRelNat);
 
     // Imágenes del LIBRO (a nivel de libro, NO solo del audiolibro): así, si el libro no tiene audio (p. ej.
@@ -198,7 +201,12 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
         };
     }
 
-    const pdfsOut = pdfs.map((f) => ({ rel: f.rel, titulo: limpiarTitulo(path.basename(f.nombre, path.extname(f.nombre))) }));
+    // Cada documento lleva su FORMATO real (no todos son 'pdf'), para que la ficha lo abra con su lector.
+    const pdfsOut = pdfs.map((f) => ({
+        rel: f.rel,
+        titulo: limpiarTitulo(path.basename(f.nombre, path.extname(f.nombre))),
+        formato: formatoDocumento(f.nombre) || 'pdf',
+    }));
     // VÍDEOS: se catalogan como documentos miembro (descargables) → nada de contenido queda invisible.
     const videosOut = files.filter((f) => esVideo(f.nombre)).sort(porRelNat)
         .map((f) => ({ rel: f.rel, titulo: limpiarTitulo(path.basename(f.nombre, path.extname(f.nombre))), ext: path.extname(f.nombre).slice(1).toLowerCase() }));
@@ -207,7 +215,9 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
     //     en disco (invariante: lo que entra y no es duplicado exacto acaba con un registro que apunta a él).
     //   · el RESTO (código fuente, recursos de una app, READMEs…) → MANIFIESTO: se preserva y se deja
     //     constancia, pero no ensucia el catálogo con miles de .cpp/.h. Ver utils/criba-material.js.
-    const sinVisor = files.filter((f) => !esAudio(f.nombre) && !esPdf(f.nombre) && !esVideo(f.nombre) && !esImagen(f.nombre) && !esRuido(f.nombre));
+    // OJO: hay que excluir TODOS los documentos leíbles (no solo los PDF). Si no, un EPUB entraba a la vez en
+    // `pdfs` (catalogado) y en `otros` (manifiesto): contado dos veces y anunciado como «sin catalogar».
+    const sinVisor = files.filter((f) => !esAudio(f.nombre) && !esDocumentoLeible(f.nombre) && !esVideo(f.nombre) && !esImagen(f.nombre) && !esRuido(f.nombre));
     const material = [], otros = [];
     for (const f of sinVisor.sort(porRelNat)) {
         let bytes = null;
@@ -430,8 +440,10 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
                 insertados++;
             }
 
-            // 3b) PDFs del libro → documentos miembro. Portada = cover.jpg del libro si la hay; si no, su 1ª
-            //     página rasterizada. El PRIMER PDF hereda las ilustraciones del libro si nadie más las tiene.
+            // 3b) DOCUMENTOS del libro (pdf, epub, mobi, azw3, djvu, cbz, chm…) → documentos miembro, cada uno
+            //     con SU formato. Portada = cover.jpg del libro si la hay; si no, la 1ª página rasterizada (solo
+            //     sale en PDF; en los demás devuelve null sin romper nada). El PRIMER documento hereda las
+            //     ilustraciones del libro si nadie más las tiene.
             for (const p of m.pdfs) {
                 if (yaFichero.has(path.basename(p.rel))) continue;   // ya catalogado → no duplicar
                 const _id = new ObjectId();
@@ -440,7 +452,7 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
                 const absPdf = path.join(absLibro, ...posix(p.rel));
                 const portada = webPortadaLibro || await renderizarPortadaMiembro(absPdf, carpetaCol, webCol, _id);
                 await bib.insertOne(base({
-                    _id, tipo_recurso: 'libro', titulo: p.titulo, formatos: ['pdf'],
+                    _id, tipo_recurso: 'libro', titulo: p.titulo, formatos: [p.formato || 'pdf'],
                     ruta_base: rutaBase, nombre_archivo: path.basename(p.rel), portada: portada || undefined,
                     imagenes: imagenesSinDueno && imagenesSinDueno.length ? imagenesSinDueno : undefined,
                 }));

@@ -25,7 +25,7 @@ import { reciclarCarpeta } from './papelera.js';
 import { rasterizarPaginas } from './rasterizar-pdf.js';
 import { resolverPersona } from './resolver-persona.js';
 import { esAudio } from './lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
-import { esImagenArchivo, esMaterialNotable, esVideo } from './criba-material.js';
+import { esDocumentoLeible, esImagenArchivo, esMaterialNotable, esVideo, formatoDocumento } from './criba-material.js';
 
 // Subcarpeta OCULTA con las portadas DERIVADAS (1ª página rasterizada). El prefijo «.» hace que `ignorar`
 // (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
@@ -172,7 +172,10 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
 
     const nombreColeccion = path.basename(raiz);
     const ficheros = await listarFicheros(raiz);
-    const pdfs = ficheros.filter((f) => esPdf(f.nombre));
+    // MIEMBROS = todos los documentos con lector propio (pdf, epub, mobi, azw3, djvu, cbz, chm, docx…), no solo
+    // PDF: un EPUB dentro de una colección caía en «material»/manifiesto → invisible, con el origen ya
+    // reciclado. Cada uno se cataloga con SU formato.
+    const pdfs = ficheros.filter((f) => esDocumentoLeible(f.nombre));
     const audios = ficheros.filter((f) => esAudio(f.nombre));
     const covers = ficheros.filter((f) => /^cover\.(jpe?g|png|webp)$/i.test(f.nombre)); // solo la portada, no páginas
 
@@ -223,6 +226,7 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
             unidad: nombreUnidad || null,
             rol_material: rol,
             titulo,
+            formato: formatoDocumento(f.nombre) || 'pdf',   // pdf/epub/mobi/djvu/cbz/chm… cada uno el suyo
             autores: esLectura && autor ? [autor] : [],
             // La lectura de una unidad lleva su portada y sus audios; los materiales, solo la portada.
             portada_rel: carpetaUnidad ? (coverPorUnidad.get(carpetaUnidad) || null) : null,
@@ -275,7 +279,7 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
     // la CRIBA: lo notable recibe ficha y la basura (código fuente, node_modules, READMEs) va al manifiesto.
     const videos = [], material = [], sinCatalogar = [];
     for (const f of ficheros) {
-        if (esPdf(f.nombre) || esAudio(f.nombre) || esImagenArchivo(f.nombre)) continue; // ya tratados arriba
+        if (esDocumentoLeible(f.nombre) || esAudio(f.nombre) || esImagenArchivo(f.nombre)) continue; // ya tratados arriba
         if (esVideo(f.nombre)) { videos.push({ rel: f.rel, titulo: tituloDeArchivo(f.nombre) }); continue; }
         let bytes = null;
         try { bytes = (await fs.stat(f.abs)).size; } catch { /* sin stat: la criba decide por formato y nombre */ }
@@ -457,7 +461,9 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         const doc = baseDoc({
             _id,
             // Una lectura CON audio se etiqueta pdf + audio (así el thumbnail avisa de que trae audiolibro).
-            titulo: m.titulo, tipo_recurso: 'libro', formatos: audios.length ? ['pdf', 'audio'] : ['pdf'],
+            titulo: m.titulo, tipo_recurso: 'libro',
+            // Cada miembro con SU formato (no todo es pdf). Una lectura CON audio se etiqueta además 'audio'.
+            formatos: audios.length ? [m.formato || 'pdf', 'audio'] : [m.formato || 'pdf'],
             autores: autores.length ? autores : undefined,
             nombre_archivo: m.nombre_archivo, ruta_base: carpetaWebDeRel(m.rel),
             nivel: m.nivel || undefined, unidad: m.unidad || undefined, rol_material: m.rol_material,

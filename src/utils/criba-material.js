@@ -28,6 +28,19 @@ export const esVideo = (n) => EXT_VIDEO.includes(path.extname(String(n || '')).t
 // IMAGEN — para excluirlas del reparto (son portadas/ilustraciones, no documentos sueltos).
 export const esImagenArchivo = (n) => /\.(jpe?g|png|webp|gif|bmp|tiff?|heic)$/i.test(String(n || ''));
 
+// DOCUMENTO BIBLIOGRÁFICO LEÍBLE: los formatos que el panel SÍ sabe abrir (tienen lector propio). Dentro de
+// una colección (transmedia / colección de audiolibros) cada uno merece SU ficha, igual que un PDF — antes solo
+// se catalogaban los PDF y un EPUB/MOBI caía en «otros» (manifiesto) → INVISIBLE. Caso real (test 68, «Mammoth
+// Books»): 1 audiolibro + 7 PDFs catalogados, y 59 epub + 16 mobi al manifiesto, con el origen reciclado a la
+// Papelera. Por eso NO están en EXT_MATERIAL: no son «material sin visor», son documentos de pleno derecho.
+export const FORMATO_DOC = {
+    '.pdf': 'pdf', '.epub': 'epub', '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi',
+    '.djvu': 'djvu', '.cbz': 'cbz', '.cbr': 'cbr', '.cb7': 'cb7', '.chm': 'chm',
+    '.docx': 'docx', '.doc': 'doc',
+};
+export const formatoDocumento = (n) => FORMATO_DOC[path.extname(String(n || '')).toLowerCase()] || null;
+export const esDocumentoLeible = (n) => !!formatoDocumento(n);
+
 // 1) FORMATOS que son un documento por derecho propio (y que los visores no abren → sin visor, pero con ficha,
 //    buscables y descargables; mismo criterio que ya se aplicó a los vídeos: «sin visor, pero VISIBLES»).
 export const EXT_MATERIAL = new Set([
