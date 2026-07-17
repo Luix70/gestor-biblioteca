@@ -105,8 +105,16 @@ function linea(etiqueta, valor, sello = '') {
  */
 function elemento(x, i) {
     const n = String(i + 1).padStart(4, ' ');
-    // 1) Ruta suelta (ramas muertas, huérfanas, registro sin doc, depósitos de cuarentena).
+    // 1) Ruta suelta (ramas muertas, depósitos de cuarentena).
     if (typeof x === 'string') return `${n}. ${x}`;
+    // 2) CARPETA con su contenido (huérfanas, registro sin doc): las tienes que mirar TÚ, así que se enseña
+    //    qué hay dentro. Sin esto habría que entrar al NAS a mirarlas una a una.
+    if (x.ruta && Array.isArray(x.contenido) && !x.id) {
+        const l = [`${n}. ${x.ruta}`];
+        if (!x.contenido.length) l.push('        (vacía)');
+        else for (const c of x.contenido) l.push(`        · ${c}`);
+        return l.join('\n');
+    }
     // 2) Grupo (varios docs en la misma carpeta / duplicados por hash).
     if (Array.isArray(x.docs)) {
         const cab = x.ruta ? `${n}. carpeta: ${x.ruta}` : `${n}. hash: ${x.hash || '(?)'}`;
@@ -313,6 +321,17 @@ function docHtml(x, base) {
 /** Un elemento del listado, en cualquiera de sus tres formas (ruta suelta · grupo · ficha de documento). */
 function elementoHtml(x, base) {
     if (typeof x === 'string') return `<li class="mono">${escH(x)}</li>`;
+    // CARPETA con su contenido: cada fichero ENLAZADO a /recursos (los ficheros sí se sirven; la carpeta no,
+    // express.static no lista directorios — y /recursos es público, así que activarlo expondría la biblioteca).
+    if (x.ruta && Array.isArray(x.contenido) && !x.id) {
+        const items = x.contenido.length
+            ? x.contenido.map((c) => {
+                const url = base ? encodeURI(`${base}${x.ruta}/${c}`) : null;
+                return `<li class="mono">${url ? `<a href="${escH(url)}" target="_blank" rel="noopener">${escH(c)}</a>` : escH(c)}</li>`;
+            }).join('')
+            : '<li class="mono" style="opacity:.6">(vacía)</li>';
+        return `<li><span class="mono">${escH(x.ruta)}</span><ul class="grp">${items}</ul></li>`;
+    }
     if (Array.isArray(x.docs)) {
         const cab = x.ruta ? `<span class="mono">${escH(x.ruta)}</span>` : `<span class="mono">hash ${escH(x.hash || '?')}</span>`;
         return `<li>${cab}<ul class="grp">${x.docs.map((d) => `<li>${docHtml(d, base)}</li>`).join('')}</ul></li>`;

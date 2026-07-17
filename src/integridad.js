@@ -265,9 +265,16 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     D.registroSinDocumento = registroSinDoc.length;
     D.carpetasHuerfanas = carpetasHuerfanas.length;
     D.rutaBaseDesajustada = rutaBaseDesync.length;
+    // Las carpetas que hay que MIRAR A MANO se listan CON SU CONTENIDO. Desde que la reparación no toca nada
+    // que tenga ficheros, la decisión es del usuario — y no puede decidir a ciegas: sin esto hay que entrar al
+    // NAS a mirarlas una a una, y entonces el informe no sirve para nada.
+    // (Las ramas muertas NO: por definición están literalmente vacías, no hay nada que enseñar.)
+    const conContenido = async (carpetas) => Promise.all(
+        carpetas.map(async (c) => ({ ruta: webDe(c), contenido: await listarCarpeta(c) })),
+    );
     anotar('ramasMuertas', ramasMuertas, webDe, 15);
-    anotar('carpetasHuerfanas', carpetasHuerfanas, webDe);
-    anotar('registroSinDocumento', registroSinDoc, webDe, 15);
+    anotar('carpetasHuerfanas', await conContenido(carpetasHuerfanas), x => x);
+    anotar('registroSinDocumento', await conContenido(registroSinDoc), x => x, 15);
     anotar('rutaBaseDesajustada', rutaBaseDesync, x => fichaDoc(x.doc, { enDisco: x.web, enBD: x.doc.ruta_base }));
 
     // ── F. Varios documentos comparten la MISMA ruta_base (rompe 1-doc↔1-carpeta). Solo informa: se
