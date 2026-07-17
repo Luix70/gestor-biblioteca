@@ -1,19 +1,26 @@
 /**
- * INFORME DE INTEGRIDAD EN TEXTO PLANO — el informe .txt que descarga el panel.
+ * INFORME DE INTEGRIDAD — el informe descargable del panel, en DOS formatos que salen del MISMO sitio.
  *
  * El panel enseña una tabla con los recuentos y una muestra de 12 elementos por fila. Eso vale para echar un
- * vistazo, pero no para TRABAJAR: si hay 174 casos, ni los ves todos ni te los puedes llevar. Esto rinde el
- * informe COMPLETO (`informe.detalles`, sin recortar) a un texto que se lee en cualquier sitio, se archiva y
- * se puede comparar con el del mes que viene para ver si algo empeora.
+ * vistazo, pero no para TRABAJAR: si hay 174 casos, ni los ves todos ni te los puedes llevar.
  *
- * La decisión de diseño: NO es un volcado del JSON. Cada categoría explica QUÉ SIGNIFICA y QUÉ HACER, porque
- * un informe que solo dice «rutaBaseDesajustada: 6» obliga a venir a leer el código para saber si eso es grave.
- * El objetivo es que quien lo abra pueda actuar sin preguntarle a nadie.
+ *  · `informeHtml` — para TRABAJAR el informe: ramas desplegables (las 160 ramas muertas no te tapan el resto)
+ *    y cada documento ENLAZA a su ficha, que es lo que el texto plano no puede hacer.
+ *  · `informeTexto` — para ARCHIVARLO: se lee en cualquier parte, se busca con grep y se compara con el del mes
+ *    que viene para ver si algo empeora. Un diff de HTML no lo lee nadie.
+ *
+ * Los dos comen de la MISMA tabla `CATEGORIAS`: qué es cada cosa y qué hacer con ella se escribe UNA vez. Todo
+ * el trabajo de estos días ha salido de listas paralelas que se desincronizan; esto no va a ser otra.
+ *
+ * La decisión de diseño: NO es un volcado del JSON. Un informe que solo dice «rutaBaseDesajustada: 6» obliga a
+ * leerse el código para saber si eso es grave. Quien lo abra debe poder actuar sin preguntarle a nadie.
  */
 
 const RAYA = '─'.repeat(78);
 const DOBLE = '═'.repeat(78);
 const num = (n) => new Intl.NumberFormat('es-ES').format(n || 0);
+/** Escape HTML. Los títulos y las rutas vienen de la BD y del disco: pueden traer <, >, & y comillas. */
+const escH = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /**
  * Catálogo de categorías: etiqueta, si la arregla el botón «Reparar» o pide mano, qué significa y qué hacer.
@@ -220,6 +227,153 @@ export function informeTexto(informe, { detalle = true } = {}) {
     out.push(DOBLE);
     return out.join('\n') + '\n';
 }
+
+// ════════════════════════════════ INFORME EN HTML ════════════════════════════════
+// Autocontenido (estilos embebidos, sin red: se abre desde el disco años después y se ve igual) y sin JS: las
+// ramas desplegables son <details>/<summary> del propio navegador.
+
+const CSS = `
+:root{--bg:#fff;--fg:#1c2027;--mut:#5d6672;--line:#e2e6ec;--card:#f7f9fc;--card2:#eef2f7;--warn:#b3541e;--ok:#1f7a4c;--link:#1a5fb4}
+@media (prefers-color-scheme:dark){:root{--bg:#161b22;--fg:#e6e9ef;--mut:#98a2b3;--line:#2b3240;--card:#1c222c;--card2:#232b37;--warn:#e8a33d;--ok:#4ec98a;--link:#7cb0f0}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:1080px;padding:28px 18px 60px;background:var(--bg);color:var(--fg);
+     font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+h1{font-size:21px;margin:0 0 4px}
+.sub{color:var(--mut);font-size:13px;margin-bottom:22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td{padding:7px 4px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:none}
+td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;width:80px}
+td.s{text-align:center;width:78px}
+a{color:var(--link)}
+.tag{font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.tag.auto{color:var(--ok)}.tag.man{color:var(--warn)}
+.hay{color:var(--warn)}
+details{border:1px solid var(--line);border-radius:10px;margin-bottom:12px;background:var(--card);overflow:hidden}
+summary{cursor:pointer;padding:12px 16px;font-weight:600;list-style:none;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"▸";color:var(--mut);font-weight:400}
+details[open]>summary::before{content:"▾"}
+details[open]>summary{border-bottom:1px solid var(--line)}
+.body{padding:14px 16px}
+.expl{background:var(--card2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13.5px}
+.expl b{color:var(--mut);font-weight:600}
+ol.items{margin:0;padding-left:26px}
+ol.items>li{margin-bottom:12px}
+.campos{color:var(--mut);font-size:12.5px;margin-top:2px}
+.campos div{white-space:nowrap;overflow-x:auto}
+.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12.5px}
+.k{display:inline-block;min-width:74px;opacity:.75}
+ul.grp{margin:6px 0 0;padding-left:18px;font-size:13.5px}
+.pistas{margin:4px 0 0;padding-left:18px}
+.pistas li{color:var(--warn)}
+.foot{color:var(--mut);font-size:12px;text-align:center;margin-top:30px}
+.ok{color:var(--ok);font-weight:600}
+`;
+
+/** Un documento: enlace a su ficha (si sabemos la URL del panel) + los campos que lo identifican. */
+function docHtml(x, base) {
+    const t = escH(x.titulo || '(sin título)');
+    const cab = base && x.id ? `<a href="${escH(base)}/?doc=${escH(x.id)}" target="_blank" rel="noopener">${t}</a>` : `<b>${t}</b>`;
+    const campo = (k, v) => (v ? `<div><span class="k">${k}</span><span class="mono">${escH(v)}</span></div>` : '');
+    const pistas = Array.isArray(x.pistas) && x.pistas.length
+        ? `<ul class="pistas mono">${x.pistas.map((p) => `<li>${escH(p)}</li>`).join('')}</ul>` : '';
+    return cab + `<div class="campos">`
+        + campo('id', x.id) + campo('archivo', x.archivo) + campo('ruta', x.ruta)
+        + campo('isbn', x.isbn) + campo('issn', x.issn) + campo('cdu', x.cdu)
+        + campo('formatos', (x.formatos || []).join(', ')) + campo('faltan', x.faltan)
+        + (x.enDisco ? campo('en disco', x.enDisco) + campo('en BD', x.enBD) : '')
+        + pistas + `</div>`;
+}
+
+/** Un elemento del listado, en cualquiera de sus tres formas (ruta suelta · grupo · ficha de documento). */
+function elementoHtml(x, base) {
+    if (typeof x === 'string') return `<li class="mono">${escH(x)}</li>`;
+    if (Array.isArray(x.docs)) {
+        const cab = x.ruta ? `<span class="mono">${escH(x.ruta)}</span>` : `<span class="mono">hash ${escH(x.hash || '?')}</span>`;
+        return `<li>${cab}<ul class="grp">${x.docs.map((d) => `<li>${docHtml(d, base)}</li>`).join('')}</ul></li>`;
+    }
+    return `<li>${docHtml(x, base)}</li>`;
+}
+
+/**
+ * Rinde el informe a una página HTML autocontenida.
+ * @param {object} informe - lo devuelto por `verificarIntegridad` (CON `detalles`).
+ * @param {object} [opts]
+ * @param {string} [opts.base] - URL del panel (p.ej. «http://nas:3000») para enlazar cada documento a su ficha.
+ *        Tiene que ser ABSOLUTA: el fichero se descarga y se abre desde el disco, donde un enlace relativo
+ *        apuntaría a file:/// y no llevaría a ninguna parte.
+ * @returns {string}
+ */
+export function informeHtml(informe, { base = '' } = {}) {
+    if (!informe) return '<!doctype html><meta charset="utf-8"><p>No hay ningún diagnóstico ejecutado todavía.';
+    const D = informe.diagnostico || {}, T = informe.detalles || {}, R = informe.reparado;
+    const fecha = new Date(informe.ts).toLocaleString('es-ES');
+    const h = [];
+
+    h.push('<!doctype html><html lang="es"><head><meta charset="utf-8">');
+    h.push('<meta name="viewport" content="width=device-width,initial-scale=1">');
+    h.push(`<title>Integridad · ${escH(fecha)}</title><style>${CSS}</style></head><body>`);
+    h.push(`<h1>🩺 Informe de integridad</h1>`);
+    h.push(`<div class="sub">${escH(fecha)} · ${num(informe.totalDocs)} documentos en el catálogo · `
+        + `${informe.reparar ? 'diagnóstico + <b>REPARACIÓN</b> (lo retirado está en la Papelera)' : 'solo diagnóstico (no se ha tocado nada)'}</div>`);
+
+    // ── Resumen: cada fila con casos salta a su sección ──
+    let problemas = 0;
+    const filas = [];
+    for (const c of CATEGORIAS) {
+        const v = D[c.clave] ?? 0;
+        problemas += v;
+        const et = v > 0 ? `<a href="#c-${c.clave}">${escH(c.etiqueta)}</a>` : escH(c.etiqueta);
+        const sello = v > 0 ? `<span class="tag ${c.auto ? 'auto' : 'man'}">${c.auto ? 'auto' : 'manual'}</span>` : '';
+        filas.push(`<tr><td>${et}</td><td class="s">${sello}</td><td class="n ${v > 0 ? 'hay' : ''}">${num(v)}</td></tr>`);
+        if (c.clave === 'hashDuplicadosGrupos' && D.hashDuplicadosDocs)
+            filas.push(`<tr><td style="padding-left:18px;color:var(--mut)">└ copias sobrantes que se reciclarían</td><td></td><td class="n">${num(D.hashDuplicadosDocs)}</td></tr>`);
+    }
+    h.push(`<div class="card"><table>${filas.join('')}</table>`);
+    h.push('<div class="sub" style="margin:12px 0 0;font-size:12px">'
+        + '<span class="tag auto">auto</span> lo arregla el botón «Diagnosticar y reparar»; todo lo retirado va a la Papelera, nunca se borra. '
+        + '<span class="tag man">manual</span> requiere decidir: abre la ficha del documento y usa Reprocesar / Eliminar.</div>');
+    if (!problemas) h.push('<p class="ok">✔ Sin incidencias. El catálogo y el disco están cuadrados.</p>');
+    h.push('</div>');
+
+    // ── Reparaciones hechas ──
+    if (R) {
+        const et = {
+            ramasPodadas: 'Ramas podadas', rutasReparadas: 'ruta_base reparadas',
+            carpetasHuerfanasRecicladas: 'Carpetas huérfanas recicladas',
+            hashDuplicadosEliminados: 'Copias exactas eliminadas',
+            cuarentenaResueltos: 'Depósitos de Cuarentena resueltos',
+        };
+        h.push('<div class="card"><b>🛠 Reparado en esta pasada</b> <span class="sub">(todo lo retirado está en la Papelera)</span><table style="margin-top:8px">');
+        for (const k of Object.keys(et)) h.push(`<tr><td>${escH(et[k])}</td><td class="n">${num(R[k] ?? 0)}</td></tr>`);
+        h.push('</table></div>');
+    }
+
+    // ── Detalle por categoría, cada una en su rama desplegable ──
+    let n = 0;
+    for (const c of CATEGORIAS) {
+        const v = D[c.clave] ?? 0;
+        if (!v) continue;
+        const lista = T[c.lista] || [];
+        // Las listas cortas se abren solas; las largas (160 ramas muertas) van plegadas para que la página no
+        // sea un muro y se pueda ojear el conjunto de un vistazo.
+        const abierta = lista.length <= LIMITE_ABIERTA ? ' open' : '';
+        h.push(`<details id="c-${c.clave}"${abierta}><summary>${++n}) ${escH(c.etiqueta)} — ${num(v)} ${v === 1 ? 'caso' : 'casos'}`
+            + ` <span class="tag ${c.auto ? 'auto' : 'man'}">${c.auto ? 'auto' : 'manual'}</span></summary><div class="body">`);
+        h.push(`<div class="expl"><b>Qué es:</b> ${escH(c.que)}<br><b>Qué hacer:</b> ${escH(c.hacer)}</div>`);
+        h.push(`<ol class="items">${lista.map((x) => elementoHtml(x, base)).join('')}</ol>`);
+        if (lista.length !== v) h.push(`<div class="sub">(listados ${lista.length} de ${num(v)})</div>`);
+        h.push('</div></details>');
+    }
+
+    h.push('<div class="foot">Gestor de Biblioteca · Integridad</div></body></html>');
+    return h.join('\n');
+}
+
+/** A partir de cuántos elementos una rama nace PLEGADA (por debajo se abre sola). */
+const LIMITE_ABIERTA = 30;
 
 /**
  * Párrafo «Etiqueta: texto» partido a 78 columnas, con la continuación alineada BAJO EL TEXTO (no bajo la

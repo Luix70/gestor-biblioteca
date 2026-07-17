@@ -13,7 +13,7 @@ import { normalizarDOI } from './utils/buscador-crossref.js';
 import { verificarPasswordAdmin, firmarCompartir, validarCompartir } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './integridad.js';
-import { informeTexto } from './utils/informe-integridad.js';
+import { informeTexto, informeHtml } from './utils/informe-integridad.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
@@ -277,18 +277,25 @@ export function rutasPanel() {
         res.json(lanzarIntegridad({ reparar: req.body?.reparar === true }));
     });
     r.get('/integridad/estado', (req, res) => res.json(estadoIntegridad()));
-    // Informe DETALLADO en .txt del último diagnóstico. No lo vuelve a ejecutar: rinde el que ya está en
-    // memoria (con las listas COMPLETAS, que el sondeo de arriba no manda). Solo admin: es un volcado de la
-    // estructura entera del archivo (títulos y rutas de todo lo que cojea).
-    r.get('/integridad/informe.txt', (req, res) => {
+    // Informe DETALLADO del último diagnóstico, en HTML (para trabajarlo: ramas desplegables + enlace a la
+    // ficha de cada documento) o en texto plano (para archivarlo y compararlo con el del mes que viene).
+    // NO vuelve a ejecutar nada: rinde el informe que ya está en memoria (con las listas COMPLETAS, que el
+    // sondeo de progreso no manda). Solo admin: es un volcado de la estructura entera del archivo.
+    const servirInforme = (html) => (req, res) => {
         if (req.usuario?.rol !== 'admin') return res.status(403).type('text/plain').send('Solo administradores.');
         const inf = ultimoInformeIntegridad();
         if (!inf) return res.status(404).type('text/plain').send('No hay ningún diagnóstico ejecutado en esta sesión. Pulsa «Diagnosticar» primero.');
         const sello = new Date(inf.ts).toISOString().slice(0, 16).replace(/[:T]/g, '-');
-        res.type('text/plain; charset=utf-8')
-            .set('Content-Disposition', `attachment; filename="integridad-${sello}.txt"`)
-            .send(informeTexto(inf));
-    });
+        // Los enlaces a las fichas tienen que ser ABSOLUTOS: el fichero se descarga y se abre desde el disco,
+        // donde uno relativo apuntaría a file:/// y no llevaría a ninguna parte. Se toma del propio host de
+        // esta petición, que es exactamente la dirección por la que el usuario está entrando al panel.
+        const base = html ? `${req.protocol}://${req.get('host')}` : '';
+        res.type(html ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8')
+            .set('Content-Disposition', `attachment; filename="integridad-${sello}.${html ? 'html' : 'txt'}"`)
+            .send(html ? informeHtml(inf, { base }) : informeTexto(inf));
+    };
+    r.get('/integridad/informe.html', servirInforme(true));
+    r.get('/integridad/informe.txt', servirInforme(false));
 
     // ── Campañas de fondo (backfill autorreparable al reposo): listar estado+config+pendientes,
     //    ajustar (activa/lote/cada-N-min) y disparar una tanda ahora. Config y disparo = solo admin. ──

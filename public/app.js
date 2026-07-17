@@ -8661,11 +8661,16 @@ function pintarInteg(r) {
         : '';
     return `<tr ${tiene ? `class="integrow" data-k="${esc(mk)}" title="Ver qué documentos"` : ''}><td>${esc(et[k])}${tiene ? ' <span class="muted">▸</span>' : ''}</td><td style="text-align:center">${sello}</td><td style="text-align:right"><b ${v > 0 ? 'style="color:var(--warn)"' : ''}>${v}</b></td></tr>`;
   };
-  // El .txt lo sirve un endpoint solo-admin (es un volcado de la estructura entera del archivo), así que a un
-  // invitado ni se le enseña el botón: nada de ofrecer algo que va a devolver un 403.
+  // El informe lo sirve un endpoint solo-admin (es un volcado de la estructura entera del archivo), así que a
+  // un invitado ni se le enseña el botón: nada de ofrecer algo que va a devolver un 403.
+  // Dos formatos a propósito: el HTML es para TRABAJARLO (ramas desplegables, cada doc enlaza a su ficha); el
+  // .txt es para ARCHIVARLO y compararlo con el del mes que viene — un diff de HTML no lo lee nadie.
   const btnTxt =
     ROL === 'admin'
-      ? `<button class="btn" id="integTxt" title="Descargar el informe COMPLETO en .txt (todos los casos, no solo la muestra)" style="padding:4px 10px;font-size:12px">⬇ Informe (.txt)</button>`
+      ? `<span style="display:flex;gap:6px">
+           <button class="btn" id="integHtml" title="Informe COMPLETO en HTML: todos los casos, plegables, con enlace a la ficha de cada documento" style="padding:4px 10px;font-size:12px">⬇ Informe</button>
+           <button class="btn" id="integTxt" title="El mismo informe en texto plano, para archivarlo o compararlo" style="padding:4px 10px;font-size:12px">.txt</button>
+         </span>`
       : '';
   let h = `<div class="card" style="margin-bottom:14px">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -8692,22 +8697,23 @@ function pintarInteg(r) {
   }
   $('#integOut').innerHTML = h;
   $$('#integOut tr.integrow').forEach((tr) => (tr.onclick = () => drillInteg(tr.dataset.k, m)));
-  if ($('#integTxt')) $('#integTxt').onclick = () => descargarInformeInteg();
+  if ($('#integHtml')) $('#integHtml').onclick = () => descargarInformeInteg('html');
+  if ($('#integTxt')) $('#integTxt').onclick = () => descargarInformeInteg('txt');
 }
-// Descarga el informe DETALLADO (.txt) del diagnóstico que YA se ha corrido: el servidor lo rinde de memoria,
-// no lo repite. Va por fetch con el token en la CABECERA (no en la URL: acabaría en el historial) y se entrega
-// como blob, el mismo patrón que las páginas del visor de cómic.
-async function descargarInformeInteg() {
-  const b = $('#integTxt');
+// Descarga el informe DETALLADO del diagnóstico que YA se ha corrido: el servidor lo rinde de memoria, no lo
+// repite. Va por fetch con el token en la CABECERA (no en la URL: acabaría en el historial) y se entrega como
+// blob, el mismo patrón que las páginas del visor de cómic.
+async function descargarInformeInteg(fmt) {
+  const b = $(fmt === 'html' ? '#integHtml' : '#integTxt');
   if (b) b.disabled = true;
   try {
-    const res = await fetch('/api/integridad/informe.txt', {
+    const res = await fetch('/api/integridad/informe.' + fmt, {
       headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
     });
     if (!res.ok) throw new Error((await res.text()) || 'no se pudo generar el informe');
     // El nombre lo pone el servidor (lleva la fecha del diagnóstico); si no llega, uno razonable.
     const cd = res.headers.get('Content-Disposition') || '';
-    const nombre = (cd.match(/filename="([^"]+)"/) || [])[1] || 'integridad.txt';
+    const nombre = (cd.match(/filename="([^"]+)"/) || [])[1] || 'integridad.' + fmt;
     const url = URL.createObjectURL(await res.blob());
     const a = document.createElement('a');
     a.href = url;

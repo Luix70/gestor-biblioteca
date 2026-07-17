@@ -19,7 +19,7 @@ import 'dotenv/config';
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import { verificarIntegridad } from '../src/integridad.js';
-import { informeTexto } from '../src/utils/informe-integridad.js';
+import { informeTexto, informeHtml } from '../src/utils/informe-integridad.js';
 
 const REPARAR = process.argv.includes('--reparar');
 const iFlag = process.argv.indexOf('--informe');
@@ -34,7 +34,11 @@ const inf = await verificarIntegridad({ reparar: REPARAR });
 console.log(informeTexto(inf, { detalle: false }));
 
 if (RUTA_INFORME) {
-    await fs.writeFile(RUTA_INFORME, informeTexto(inf), 'utf8');
+    // El formato lo manda la EXTENSIÓN, que es lo que uno espera al escribir «--informe algo.html». En HTML no
+    // se pasa `base`: desde el CLI no hay petición de la que sacar la dirección del panel, así que los
+    // documentos salen sin enlace a su ficha (el resto va igual). Para el informe enlazado, el botón del panel.
+    const html = /\.html?$/i.test(RUTA_INFORME);
+    await fs.writeFile(RUTA_INFORME, html ? informeHtml(inf) : informeTexto(inf), 'utf8');
     console.log(`  Informe detallado escrito en: ${RUTA_INFORME}`);
 }
 if (!REPARAR) console.log('  (diagnóstico) Re-ejecuta con --reparar para aplicar las correcciones seguras.\n');
