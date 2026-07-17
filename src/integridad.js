@@ -21,6 +21,7 @@ import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
 import { reciclar } from './utils/papelera.js';
 import { esTituloArtefacto } from './utils/parsear-nombre.js';
+import { esDocumentoLeible, esMaterialNotable, esVideo } from './utils/criba-material.js';
 import { metricasFichero, ganaEntrante, reemplazarFicheroDeDoc } from './utils/duplicados.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,15 @@ const dir = (env, def) => { const v = process.env[env] || def; return path.isAbs
 const DIR_CDU = dir('PATH_CDU', 'CDU');
 const DIR_CUARENTENA = dir('PATH_CUARENTENA', 'Cuarentena');
 
-const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
+// Respaldo para documentos ANTIGUOS sin `nombre_archivo`. Se apoya en la FUENTE ÚNICA (criba-material.js) en
+// vez de mantener otra lista: la de antes (['.epub','.pdf','.mobi','.cbr','.djvu','.zip','.rar']) ni siquiera
+// cuadraba con FORMATOS_DOC de aquí abajo —le faltaban .cbz, .azw3, .cb7, .chm, .docx— y por eso denunciaba
+// cómics y ebooks perfectamente presentes. Se añaden .zip/.rar (originales que no se llegaron a expandir).
+// Sidecars que escribe el propio sistema: NUNCA son «el original» de nada (si contaran, una carpeta con solo
+// el manifiesto parecería tener contenido y taparíamos un caso real).
+const ES_SIDECAR = /^(registro\.json|registro\.marc\.xml|_contenido\.txt)$/i;
+const esFicheroOriginal = (n) =>
+    !ES_SIDECAR.test(n) && (esDocumentoLeible(n) || esVideo(n) || esMaterialNotable(n, Infinity) || /\.(zip|rar)$/i.test(n));
 const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 // Formatos de DOCUMENTO (los que sí deben tener un fichero original tipo EXT_DOC). Un AUDIOLIBRO sin ninguno
 // de estos es audio-only: su «original» son las pistas de audio, no un pdf/epub → NO cuenta como «sin fichero».
@@ -50,8 +59,8 @@ const ext = (n) => path.extname(n).toLowerCase();
 const existe = (p) => fs.access(p).then(() => true).catch(() => false);
 const webDe = (carpeta) => '/recursos/' + path.relative(DIR_CDU, carpeta).split(path.sep).join('/');
 const absDe = (web) => web ? path.join(DIR_CDU, ...(web.startsWith('/recursos/') ? web.slice('/recursos/'.length) : web).split('/')) : null;
-const tieneDocFichero = async (d) => { if (!d) return false; try { return (await fs.readdir(d)).some(n => EXT_DOC.includes(ext(n))); } catch { return false; } };
-const ficheroOriginal = async (carpeta) => { if (!carpeta) return null; try { const n = (await fs.readdir(carpeta)).find(x => EXT_DOC.includes(ext(x))); return n ? path.join(carpeta, n) : null; } catch { return null; } };
+const tieneDocFichero = async (d) => { if (!d) return false; try { return (await fs.readdir(d)).some(esFicheroOriginal); } catch { return false; } };
+const ficheroOriginal = async (carpeta) => { if (!carpeta) return null; try { const n = (await fs.readdir(carpeta)).find(esFicheroOriginal); return n ? path.join(carpeta, n) : null; } catch { return null; } };
 
 async function reciclarCarpeta(carpeta, etiqueta) {
     let ents; try { ents = await fs.readdir(carpeta, { withFileTypes: true }); } catch { return; }
@@ -104,10 +113,20 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     let _iD = 0;
     for (const d of docs) {
         if (++_iD % 50 === 0) prog('docs-sin-fichero', { i: _iD, total: docs.length });
-        // 'papel' (sin fichero digital) y AUDIOLIBROS audio-only (su original es el audio, no un EXT_DOC) no aplican.
+        // 'papel' (sin fichero digital) y AUDIOLIBROS audio-only (su original son las pistas) no aplican.
         if ((d.formatos || []).includes('papel') || !d.ruta_base || esAudioSinDoc(d)) continue;
         const carpeta = absDe(d.ruta_base);
-        if (await existe(carpeta) && !await tieneDocFichero(carpeta)) sinFichero.push(d);
+        if (!await existe(carpeta)) continue;   // eso ya lo cuenta «docs sin carpeta»
+        // NO SE ADIVINA POR EXTENSIÓN: el documento YA SABE cómo se llama su fichero (`nombre_archivo`), así
+        // que se comprueba ESE. Antes se buscaba «algún fichero con una extensión de la lista EXT_DOC», una
+        // lista estrecha que ni siquiera coincidía con FORMATOS_DOC de aquí al lado: le faltaban .cbz, .azw3,
+        // .cb7, .chm, .docx y los vídeos → un cómic .cbz se denunciaba «sin fichero original» CON el .cbz al
+        // lado (174 falsos positivos, confirmado por el usuario con «Don Miki 101»). Y lo peor: tanto ruido
+        // ESCONDE los casos reales — una alarma que miente no la mira nadie.
+        const falta = d.nombre_archivo
+            ? !await existe(path.join(carpeta, d.nombre_archivo))
+            : !await tieneDocFichero(carpeta);   // sin nombre_archivo (docs antiguos) → respaldo por extensión
+        if (falta) sinFichero.push(d);
     }
     D.docsSinFicheroOriginal = sinFichero.length;
     M.docsSinFicheroOriginal = sinFichero.slice(0, 10).map(d => ({ id: String(d._id), titulo: d.titulo, archivo: d.nombre_archivo }));
