@@ -277,6 +277,31 @@ export function rutasPanel() {
         res.json(lanzarIntegridad({ reparar: req.body?.reparar === true }));
     });
     r.get('/integridad/estado', (req, res) => res.json(estadoIntegridad()));
+    /**
+     * Origen ABSOLUTO del panel, para los enlaces del informe HTML (se descarga y se abre desde el DISCO: uno
+     * relativo apuntaría a file:/// y no llevaría a ninguna parte).
+     *
+     * Lo dice el CLIENTE (`?base=`), no el servidor, porque solo el navegador sabe por dónde entra de verdad.
+     * Detrás de un proxy inverso `req.protocol` vale «http» aunque el usuario esté en https://…:4443 —Express
+     * no mira X-Forwarded-Proto sin `trust proxy`— y los enlaces salían con http contra un puerto HTTPS:
+     * «400 Bad Request · The plain HTTP request was sent to HTTPS port» (nginx). Adivinarlo desde aquí es
+     * frágil: depende de cómo esté configurado un nginx que no controlamos.
+     * Se VALIDA (solo http/https, y se queda el origen): acaba dentro de un href del fichero descargado.
+     */
+    const origenDelPanel = (req) => {
+        const dado = String(req.query.base || '');
+        if (dado) {
+            try {
+                const u = new URL(dado);
+                if (u.protocol === 'http:' || u.protocol === 'https:') return u.origin;
+            } catch { /* base inservible → se cae al respaldo */ }
+        }
+        // Respaldo (CLI, o un cliente que no lo mande): X-Forwarded-Proto si el proxy lo pone, y si no, lo que
+        // vea Express. Puede equivocarse de esquema, pero es lo único que hay sin preguntar al navegador.
+        const proto = String(req.get('x-forwarded-proto') || req.protocol).split(',')[0].trim();
+        return `${proto}://${req.get('host')}`;
+    };
+
     // Informe DETALLADO del último diagnóstico, en HTML (para trabajarlo: ramas desplegables + enlace a la
     // ficha de cada documento) o en texto plano (para archivarlo y compararlo con el del mes que viene).
     // NO vuelve a ejecutar nada: rinde el informe que ya está en memoria (con las listas COMPLETAS, que el
@@ -286,10 +311,7 @@ export function rutasPanel() {
         const inf = ultimoInformeIntegridad();
         if (!inf) return res.status(404).type('text/plain').send('No hay ningún diagnóstico ejecutado en esta sesión. Pulsa «Diagnosticar» primero.');
         const sello = new Date(inf.ts).toISOString().slice(0, 16).replace(/[:T]/g, '-');
-        // Los enlaces a las fichas tienen que ser ABSOLUTOS: el fichero se descarga y se abre desde el disco,
-        // donde uno relativo apuntaría a file:/// y no llevaría a ninguna parte. Se toma del propio host de
-        // esta petición, que es exactamente la dirección por la que el usuario está entrando al panel.
-        const base = html ? `${req.protocol}://${req.get('host')}` : '';
+        const base = html ? origenDelPanel(req) : '';
         res.type(html ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8')
             .set('Content-Disposition', `attachment; filename="integridad-${sello}.${html ? 'html' : 'txt'}"`)
             .send(html ? informeHtml(inf, { base }) : informeTexto(inf));

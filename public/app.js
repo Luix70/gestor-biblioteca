@@ -8707,7 +8707,12 @@ async function descargarInformeInteg(fmt) {
   const b = $(fmt === 'html' ? '#integHtml' : '#integTxt');
   if (b) b.disabled = true;
   try {
-    const res = await fetch('/api/integridad/informe.' + fmt, {
+    // El HTML lleva enlaces ABSOLUTOS a cada ficha (se abre desde el disco, donde uno relativo iría a
+    // file:///). El origen se lo decimos NOSOTROS: detrás del proxy, el servidor cree que entras por http y
+    // los enlaces salían con http contra el puerto HTTPS → nginx: «400 · plain HTTP request sent to HTTPS
+    // port». `location.origin` es la dirección por la que estás entrando de verdad.
+    const q = fmt === 'html' ? '?base=' + encodeURIComponent(location.origin) : '';
+    const res = await fetch('/api/integridad/informe.' + fmt + q, {
       headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
     });
     if (!res.ok) throw new Error((await res.text()) || 'no se pudo generar el informe');
