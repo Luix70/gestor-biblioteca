@@ -40,11 +40,12 @@ const ES_SIDECAR = /^(registro\.json|registro\.marc\.xml|_contenido\.txt)$/i;
 const esFicheroOriginal = (n) =>
     !ES_SIDECAR.test(n) && (esDocumentoLeible(n) || esVideo(n) || esMaterialNotable(n, Infinity) || /\.(zip|rar)$/i.test(n));
 const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
-// Formatos de DOCUMENTO (los que sí deben tener un fichero original tipo EXT_DOC). Un AUDIOLIBRO sin ninguno
-// de estos es audio-only: su «original» son las pistas de audio, no un pdf/epub → NO cuenta como «sin fichero».
+// Formatos de DOCUMENTO: los que sí deben tener un fichero de texto/imagen como original. Un AUDIOLIBRO sin
+// ninguno de estos es audio-only: su «original» son las pistas de audio, no un pdf/epub → NO cuenta como «sin
+// fichero» (sus pistas las audita `docsConAudiosRotos`).
 const FORMATOS_DOC = ['pdf', 'epub', 'mobi', 'azw3', 'cbr', 'cbz', 'cb7', 'djvu'];
 // ¿Es un audiolibro audio-only (tiene audio y NO espera un fichero de documento)? Entonces la comprobación
-// «falta el fichero original» (que busca EXT_DOC) no aplica. Un audiolibro CON pdf sí se comprueba.
+// «falta el fichero original» no aplica. Un audiolibro CON pdf sí se comprueba.
 const esAudioSinDoc = (d) => {
     const f = d.formatos || [];
     const tieneAudio = (Array.isArray(d.audios) && d.audios.length) || d.naturaleza === 'audiolibro' || f.includes('audio');
@@ -169,7 +170,10 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         if (ents.some(e => e.isFile() && e.name === MARCA_RUTA_FIJA)) return true;
         const files = ents.filter(e => e.isFile() && !ignorar(e.name)).map(e => e.name);
         const subdirs = ents.filter(e => e.isDirectory() && !ignorar(e.name));
-        const tieneDoc = files.some(n => EXT_DOC.includes(ext(n)));
+        // OJO: esto no es solo diagnóstico — de aquí sale `ramasMuertas`, que --reparar RECICLA. Con la lista
+        // estrecha de antes, una carpeta con solo un .cbz/.azw3/.avi (y sin registro.json) parecía VACÍA y se
+        // iba a la Papelera. Por eso se pregunta a la fuente única, que conoce todos los formatos.
+        const tieneDoc = files.some(esFicheroOriginal);
         const tieneImg = files.some(n => EXT_IMG.includes(ext(n)));
         const tieneReg = files.includes('registro.json');
         let hojaAbajo = false;
