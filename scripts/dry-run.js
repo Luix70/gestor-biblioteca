@@ -50,9 +50,23 @@ if (plan.unidades.length) {
     for (const [carpeta, us] of porCarpeta) {
         escribir(`\n  📁 ${carpeta}`);
         for (const u of us) {
-            escribir(`     · [${u.tipo}] ${u.titulo}`);
+            escribir(`     ${u.grave ? '⚠' : '·'} [${u.tipo}] ${u.titulo}`);
             escribir(`       ${u.efecto}`);
         }
+    }
+    escribir('');
+}
+
+// Lo que se pierde DENTRO de una carpeta que sí se procesa. Es lo más traicionero del informe: la carpeta se
+// cataloga, tú la das por buena, y ahí dentro se queda un .tgz con tres libros. Por eso va aparte y al final.
+const perdidos = plan.unidades.filter((u) => u.grave);
+if (perdidos.length) {
+    escribir(RAYA);
+    escribir('  ⚠ SE PROCESA LA CARPETA, PERO ESTO NO ENTRA  ← lo que se pierde sin enterarte');
+    escribir(RAYA);
+    for (const u of perdidos) {
+        escribir(`  ⚠ ${u.carpeta ? u.carpeta + ' → ' : ''}${u.titulo}`);
+        escribir(`      ${u.motivo ? u.motivo + ': ' : ''}${u.efecto}`);
     }
     escribir('');
 }

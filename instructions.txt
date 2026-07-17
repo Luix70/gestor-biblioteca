@@ -809,6 +809,17 @@ de ficheros clasificado por CDU.
       copiándose/sin contenido/contenedor), que es lo que NO puedes averiguar mirando el resultado — lo
       que no entra no deja rastro. Lo que se queda fuera SIN una razón buena sale marcado «⚠ sin
       explicación»: eso es un fallo, no un aviso.
+      Y AUDITA DENTRO de cada carpeta que sí se procesa («⚠ se procesa la carpeta, pero esto no entra»),
+      que es lo más traicionero: la carpeta se cataloga, la das por buena, y dentro se queda un .tgz con
+      tres libros. Dos casos, los dos reales del caso Mammoth:
+        · CONTENEDOR NO SOPORTADO (.tgz/.tar.gz/.nrg/.ipa/.cab/.dmg…): no está en EXT_VALIDAS (nadie lo
+          recoge) NI en EXT_COMPRIMIDO (nadie lo expande) → INVISIBLE: ni ficha, ni contenido, ni rastro.
+          `EXT_CONTENEDOR_NO_SOPORTADO` NO los soporta: los DENUNCIA (callarlos es lo que costó el día).
+        · CONTENEDOR ANIDADO (.zip/.rar/.7z/.iso dentro de una carpeta): sí está en EXT_VALIDAS, así que
+          se cataloga… como UNA ficha del propio .zip, SIN abrirlo — expandirComprimidos solo mira la
+          RAÍZ del Inbox. Parece catalogado y los documentos de dentro no han entrado. Sácalo a la raíz.
+      Las carpetas preservadas enteras (transmedia/software/intacta/libro-material/audiolibro/colección
+      de audio) NO se auditan: ahí no se queda nada fuera, la carpeta va íntegra.
       Es de solo lectura (ni disco ni Mongo); ceba las cachés de detección pegajosa (por eso el plan y la
       ejecución posterior COINCIDEN) y salva/restaura `dropsADisolver` (un plan no deja trabajo pendiente).
       ⚠ Los scripts que importan el vigilante DEBEN escribir con process.stdout, NO con console.log:

@@ -549,6 +549,25 @@ export async function planificarInbox() {
 
     const plan = unidades.map(describirUnidad);
 
+    // ── Lo que se queda DENTRO de una carpeta que sí se procesa. Aquí es donde se pierden las cosas de
+    //    verdad: un .tgz dentro de «Mammoth Books» no es una unidad, así que no sale en el plan ni deja
+    //    rastro — el usuario ve la carpeta catalogada y no sabe que 3 libros no han entrado. Solo se auditan
+    //    las carpetas que se catalogan FICHERO A FICHERO: en transmedia/software/intacta/audiolibro la
+    //    carpeta se conserva ENTERA, así que ahí nada se queda fuera.
+    const preservada = (u) => u.esTransmedia || u.esSoftware || u.esIntacta || u.esLibroMaterial || u.esColeccionAudio || u.esAudiolibro;
+    const porCarpeta = new Map();
+    for (const u of unidades) {
+        if (!u.carpeta || preservada(u)) continue;
+        if (!porCarpeta.has(u.carpeta)) porCarpeta.set(u.carpeta, new Set());
+        for (const r of u.rutas || []) porCarpeta.get(u.carpeta).add(r);
+    }
+    for (const [carpeta, usadas] of porCarpeta) {
+        for (const s of await auditarSobrantes(carpeta, usadas)) plan.push({
+            tipo: 'sobrante', carpeta: path.relative(INBOX, carpeta), titulo: s.fichero,
+            documentos: 0, efecto: s.detalle, motivo: s.motivo, grave: s.grave,
+        });
+    }
+
     // ── Lo que NO va a entrar. Se calcula por DIFERENCIA: todo lo de primer nivel del Inbox que no aparece en
     //    ninguna unidad. Se hace así (y no anotándolo dentro de clasificarDirectorio) para no tener que tocar
     //    la ruta de decisión real por un informe: el plan observa, no interfiere.
@@ -569,6 +588,56 @@ export async function planificarInbox() {
 
     const resumen = { unidades: plan.length, documentos: plan.reduce((s, u) => s + (u.documentos || 0), 0), excluidos: excluidos.length };
     return { ts: new Date().toISOString(), unidades: plan, excluidos, resumen };
+}
+
+/**
+ * Contenedores que NO se reconocen de ninguna manera: no están en EXT_VALIDAS (nadie los recoge como
+ * documento) NI en EXT_COMPRIMIDO (nadie los expande). Son INVISIBLES: ni ficha, ni contenido, ni rastro.
+ * Por aquí se fueron los Mammoth metidos en un .tgz — el usuario ya lo olió: «¿controlamos este tipo de
+ * archivo comprimido?». No. Esta lista NO los soporta: sirve para DENUNCIARLOS en el plan, que es el primer
+ * paso honesto (callarlos es lo que nos ha costado el día).
+ */
+const EXT_CONTENEDOR_NO_SOPORTADO = [
+    '.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tbz', '.txz', '.tar', '.gz', '.bz2', '.xz',
+    '.cab', '.arj', '.lzh', '.lha', '.ace', '.zipx', '.nrg', '.mdf', '.ipa', '.dmg',
+];
+/** Extensión, contemplando las dobles («.tar.gz»), que path.extname() parte en «.gz» y despista. */
+function extLarga(nombre) {
+    const n = nombre.toLowerCase();
+    for (const e of EXT_CONTENEDOR_NO_SOPORTADO) if (e.includes('.tar.') && n.endsWith(e)) return e;
+    return path.extname(n);
+}
+
+/**
+ * Qué se queda DENTRO de una carpeta que sí se cataloga, sin entrar. Recursivo, ignorando covers/.
+ * Solo se denuncia lo que puede DOLER: contenedores que no se abren (con documentos dentro que se pierden de
+ * vista). Las imágenes son portadas y los .txt/.nfo/.url no se catalogan a propósito → no son noticia.
+ */
+async function auditarSobrantes(carpeta, usadas, nivel = 8) {
+    const fuera = [];
+    async function rec(dir, n) {
+        if (n < 0) return;
+        let ents;
+        try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of ents) {
+            if (ignorarEntrada(e.name)) continue;
+            const p = path.join(dir, e.name);
+            if (e.isDirectory()) { if (!/^covers$/i.test(e.name)) await rec(p, n - 1); continue; }
+            if (usadas.has(p)) continue;
+            const x = extLarga(e.name);
+            const rel = path.relative(carpeta, p);
+            if (EXT_CONTENEDOR_NO_SOPORTADO.includes(x)) {
+                fuera.push({ fichero: rel, motivo: 'contenedor NO soportado', grave: true,
+                    detalle: `«${x}» no se reconoce: ni se cataloga ni se abre. Lo que haya dentro NO entra y no queda rastro. Extráelo a mano.` });
+            } else if (esValida(e.name) && !esImagen(e.name)) {
+                // Es un formato que SÍ se cataloga y aun así nadie lo recogió: eso no debería pasar nunca.
+                fuera.push({ fichero: rel, motivo: '⚠ sin explicación', grave: true,
+                    detalle: 'es un formato catalogable y no entra en ninguna unidad. Avisa: es un fallo.' });
+            }
+        }
+    }
+    await rec(carpeta, nivel);
+    return fuera;
 }
 
 /** La entrada de PRIMER NIVEL del Inbox de la que cuelga una ruta (para casar unidades con lo que ves). */
@@ -618,6 +687,13 @@ function describirUnidad(u) {
     if (u.esColeccionAudio) return { ...base, tipo: 'colección de audiolibros', titulo: nombre(u.carpeta), documentos: null, efecto: 'una colección con un documento por libro (el audio manda).' };
     if (u.esAudiolibro) return { ...base, tipo: 'audiolibro', titulo: nombre(u.carpeta), documentos: 1, efecto: '1 documento con playlist; las pistas se conservan (ruta_fija).' };
     if (u.esImagenes) return { ...base, tipo: 'libro escaneado', titulo: nombre(u.carpeta) || nombre(u.rutas?.[0]), documentos: 1, efecto: `1 documento a partir de ${(u.rutas || []).length} imágenes.` };
+    // CONTENEDOR ANIDADO: está en EXT_VALIDAS, así que recopilarDocumentos SÍ lo recoge y se cataloga… como
+    // una ficha del propio .zip, SIN abrirlo — los contenedores solo se expanden en la RAÍZ del Inbox
+    // (expandirComprimidos). Los documentos de dentro no entran. Se avisa: parece catalogado y no lo está.
+    if (EXT_COMPRIMIDO.includes(path.extname(u.rutas?.[0] || '').toLowerCase())) {
+        return { ...base, tipo: 'contenedor anidado', titulo: nombre(u.rutas?.[0]), documentos: 1, grave: true, fichero: nombre(u.rutas?.[0]),
+            efecto: 'se catalogará como UNA ficha del contenedor, SIN abrirlo: los documentos de dentro NO entran (solo se expanden los contenedores de la raíz del Inbox). Sácalo a la raíz del Inbox para que se abra.' };
+    }
     return {
         ...base, tipo: u.coleccion ? 'documento (en colección)' : 'documento suelto',
         titulo: nombre(u.rutas?.[0]), documentos: 1, fichero: nombre(u.rutas?.[0]),
