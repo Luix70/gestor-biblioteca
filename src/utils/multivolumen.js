@@ -27,7 +27,15 @@ export function aArabigo(s) {
 }
 
 // Palabras "tomo/volumen" en varios idiomas (ES/EN/FR/DE/PT/IT) seguidas de su número.
-const VOL_RE = /\b(?:vols?|vol[úu]men|volume|tomo|tome|band|teil|livre|livro|fasc[íi]culo)\b\.?\s*([0-9]{1,3}|[IVXLCDM]{1,7})\b/i;
+// OJO con la ausencia de \b TRAS la palabra: el número puede ir PEGADO ("Vol1", "Tomo4", "Volume3"), que es
+// un patrón habitual de nombre de fichero. El \b de antes lo exigía separado ("Vol. 1"/"Vol 1") y con "Vol1"
+// devolvía null → el tomo salía SIN número → todos los tomos caían en la misma carpeta 'vol-x' y se pisaban
+// (caso real: los 4 tomos de «Endangered Species.2nd Ed.VolN.pdf»). El \b DELANTE se conserva: protege
+// "reVOLver"/"deVOLver" (la palabra clave debe empezar en frontera). El separador es opcional: `[.\s_·-]*`.
+// El «no precedido de letra» `(?<![^\W\d_])` sustituye al \b DELANTE: como el «_» es carácter de palabra, un
+// \b no salta en "Obra_volumen_5" (separador de guion bajo, habitual en ficheros). Esto protege igual
+// "reVOLver"/"deVOLver" (van precedidos de letra) pero acepta el «_», el espacio, el punto y el inicio.
+const VOL_RE = /(?<![^\W\d_])(?:vols?|vol[úu]men|volume|tomo|tome|band|teil|livre|livro|fasc[íi]culo)[.\s_·-]*([0-9]{1,3}|[IVXLCDM]{1,7})\b/i;
 
 /**
  * Detecta "Vol. N - Título" en un nombre de fichero (o título). Devuelve

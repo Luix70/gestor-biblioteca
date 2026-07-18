@@ -29,7 +29,24 @@ const DIR_CDU = resolver(process.env.PATH_CDU, 'CDU');
  * Lee el registro.json de la carpeta y compara su _id con el nuestro. Si difiere, hay colisión
  * y el llamante debe disambiguar la hoja para no pisar los ficheros del documento existente.
  */
-async function carpetaOcupadaPorOtroDoc(carpeta, miId) {
+/**
+ * ¿La ruta destino ya la ocupa OTRO documento? Se pregunta a las DOS fuentes, y basta que UNA lo confirme:
+ *   1) la BASE DE DATOS (autoritativa y SIEMPRE presente): ¿hay otro doc con esta `ruta_base`?
+ *   2) el `registro.json` del disco (respaldo): por si el otro doc aún no tuviera ruta_base persistida.
+ *
+ * Antes solo miraba el disco, y por eso la red FALLÓ (caso real «Endangered Species»): si el registro.json del
+ * primer tomo no estaba en la carpeta al llegar el segundo —carpeta reciclada, a medio escribir, o un
+ * mantenimiento que la tocó— la red no veía nada y el segundo se instalaba ENCIMA, pisando fichero y sidecars.
+ * La BD no tiene ese punto ciego: el doc anterior está ahí aunque su carpeta no. Mongo manda.
+ * @param {string} webRuta  la ruta /recursos/... candidata (clave de `ruta_base`)
+ */
+async function carpetaOcupadaPorOtroDoc(carpeta, webRuta, miId) {
+    try {
+        const db = await conectarDB();
+        const otro = await db.collection('biblioteca').findOne(
+            { ruta_base: webRuta, _id: { $ne: miId } }, { projection: { _id: 1 } });
+        if (otro) return true;
+    } catch { /* si la BD no responde, queda el respaldo del disco */ }
     try {
         const reg = JSON.parse(await fs.readFile(path.join(carpeta, 'registro.json'), 'utf8'));
         return !!reg._id && String(reg._id) !== String(miId);
@@ -301,7 +318,7 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     // (1 doc ↔ 1 carpeta) y nunca se pisan ficheros ni sidecars (registro.json/portada). Aplica también
     // a revistas (antes excluidas, lo que mezclaba números del mismo año en una sola carpeta).
     if (resultado.operacion === 'insercion'
-        && await carpetaOcupadaPorOtroDoc(carpetaFs, resultado._id)) {
+        && await carpetaOcupadaPorOtroDoc(carpetaFs, rc.web, resultado._id)) {
         rc = rutaCatalogo({ ...argsRuta, discriminador: String(resultado._id).slice(-6) });
         carpetaFs = path.join(DIR_CDU, rc.relativa);
     }
@@ -456,7 +473,7 @@ export async function altaPorISBN({ base = {}, activos = [], contexto = {}, comp
     };
     let rc = rutaCatalogo(argsRuta);
     let carpetaFs = path.join(DIR_CDU, rc.relativa);
-    if (resultado.operacion === 'insercion' && await carpetaOcupadaPorOtroDoc(carpetaFs, resultado._id)) {
+    if (resultado.operacion === 'insercion' && await carpetaOcupadaPorOtroDoc(carpetaFs, rc.web, resultado._id)) {
         rc = rutaCatalogo({ ...argsRuta, discriminador: String(resultado._id).slice(-6) });
         carpetaFs = path.join(DIR_CDU, rc.relativa);
     }
