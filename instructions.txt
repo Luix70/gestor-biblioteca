@@ -827,6 +827,14 @@ de ficheros clasificado por CDU.
       original; si algo falla, la carpeta se queda intacta. Los originales van a la PAPELERA, nunca se
       borran. `planEmpaquetado` ES el dry-run de esto: el plan dice «500 láminas → 2 cbz → obra
       multivolumen» sin escribir un byte.
+    · INFORME DEL PLAN (botón «📋 Informe del plan» del Inspector, admin → GET /api/inbox/plan.html):
+      HTML autocontenido con el plan Y el COTEJO contra el catálogo — la otra mitad del dry-run. El
+      dry-run dice qué VA a pasar; esto dice si de verdad entró. Cotejo por `nombre_archivo` (lo único
+      que sobrevive a la ingesta: el título se normaliza y la ruta cambia). Por entrada: ✔ dentro ·
+      ◐ a medias (lista los que faltan) · ✗ NO entró; y arriba, el % de FICHEROS en el catálogo, que es
+      el número que dice si se perdió algo. Antes de ingerir sale como «previsión» (pendiente, no fallo);
+      después juzga. Cada fichero que entró ENLAZA a su ficha. Una sola consulta a Mongo con todos los
+      nombres. Reutiliza el CSS del informe de Integridad (CSS_INFORME) — un solo lenguaje visual.
     · DRY-RUN (`node scripts/dry-run.js` [--json]; en el NAS: `docker exec gestor-biblioteca node
       scripts/dry-run.js`): qué HARÍA el vigilante con el Inbox tal como está, sin catalogar, mover ni
       borrar nada. Llama a la MISMA función que decide de verdad (vigilante.js · planificarInbox →

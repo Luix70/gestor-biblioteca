@@ -651,6 +651,9 @@ export async function planificarInbox() {
         const soloRuta = (u.rutas || []).length === 1 ? u.rutas[0] : null;
         if (soloRuta && esContenedor(path.basename(soloRuta))) continue;
         const d = u.esEmpaquetar ? await describirEmpaquetado(u) : describirUnidad(u);
+        // Nombres de fichero de la unidad: con ellos, el informe puede COTEJAR después contra el catálogo
+        // (biblioteca.nombre_archivo) y decir si cada cosa planeada acabó realmente dentro.
+        d.ficheros = (u.rutas || []).filter((r) => !r.endsWith(path.sep)).map((r) => path.basename(r));
         // Nº de PISTAS de las unidades de audio: sin él no se puede verificar de un vistazo que cada
         // audiolibro es el que crees (el usuario detectó así que yo había contado dos como uno).
         if (d.contarAudio) {

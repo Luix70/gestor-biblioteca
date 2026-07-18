@@ -14,6 +14,8 @@ import { verificarPasswordAdmin, firmarCompartir, validarCompartir } from './aut
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './integridad.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
+import { informePlanHtml } from './utils/informe-plan.js';
+import { planificarInbox } from './vigilante.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
@@ -1847,6 +1849,32 @@ export function rutasPanel() {
             res.json({ ok: true, arbol: r2.hijos, truncado: r2.truncado, nodos: r2.nodos });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+    // INFORME DEL PLAN (HTML, admin): qué se va a ingerir y —cotejando contra el catálogo— qué entró de
+    // verdad. Es la otra mitad del dry-run: sin esto, comprobar una ingesta de 121 unidades es ir a mano por
+    // el catálogo, y con ese esfuerzo nadie comprueba nada. El cotejo va por `nombre_archivo`, que es lo que
+    // sobrevive a la ingesta (el título se normaliza y la ruta cambia; el nombre del fichero se conserva).
+    r.get('/inbox/plan.html', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).type('text/plain').send('Solo administradores.');
+            const plan = await planificarInbox();
+            // Un solo viaje a Mongo con TODOS los nombres del plan (nada de una consulta por fichero).
+            const nombres = [...new Set((plan.unidades || []).flatMap((u) => u.ficheros || []))];
+            const catalogados = new Map();
+            if (nombres.length) {
+                const db = await conectarDB();
+                const docs = await db.collection('biblioteca')
+                    .find({ nombre_archivo: { $in: nombres } }, { projection: { titulo: 1, nombre_archivo: 1 } }).toArray();
+                for (const d of docs) catalogados.set(d.nombre_archivo, d);
+            }
+            // «ejecutado» = ya hay algo de este plan en el catálogo → se JUZGA. Si no, es una previsión.
+            const html = informePlanHtml(plan, { catalogados, ejecutado: catalogados.size > 0, base: origenDelPanel(req) });
+            const sello = new Date(plan.ts).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+            res.type('text/html; charset=utf-8')
+                .set('Content-Disposition', `attachment; filename="plan-ingesta-${sello}.html"`)
+                .send(html);
+        } catch (e) { res.status(500).type('text/plain').send('No se pudo generar el informe: ' + e.message); }
+    });
+
     r.post('/inbox/guia', async (req, res) => {
         try {
             const abs = rutaInboxSegura(INBOX, String(req.body?.ruta || ''));

@@ -11303,6 +11303,32 @@ const _ALCANCES_EMPAQUETAR = [['subcarpetas', 'un cbz por subcarpeta (obra)'], [
 const _TIPOS_GUIA = [['', 'tipo…'], ['comic', 'cómic'], ['revista', 'revista'], ['libro', 'libro'], ['articulo', 'artículo'], ['capitulo', 'capítulo'], ['apuntes', 'apuntes']];
 const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '🎬', comprimido: '🗜️', noclasificable: '⚠️' };
 
+// Informe HTML del PLAN de ingesta: qué se va a ingerir y —cotejando contra el catálogo por nombre_archivo—
+// qué ha entrado de verdad. Se descarga por fetch con el token en la cabecera (no en la URL) y se entrega como
+// blob, igual que el informe de Integridad.
+async function descargarInformePlan() {
+  const b = $('#guiaInforme');
+  if (b) { b.disabled = true; b.textContent = 'Generando…'; }
+  try {
+    const res = await fetch('/api/inbox/plan.html?base=' + encodeURIComponent(location.origin), {
+      headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
+    });
+    if (!res.ok) throw new Error((await res.text()) || 'no se pudo generar');
+    const cd = res.headers.get('Content-Disposition') || '';
+    const nombre = (cd.match(/filename="([^"]+)"/) || [])[1] || 'plan-ingesta.html';
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast('Informe descargado: ' + nombre);
+  } catch (e) {
+    toast(e.message, 'bad');
+  } finally {
+    if (b) { b.disabled = false; b.textContent = '📋 Informe del plan'; }
+  }
+}
+
 async function cargarArbolInbox() {
   const cont = $('#guiaArbol');
   if (!cont) return;
@@ -11502,6 +11528,7 @@ async function guardarGuiasInbox() {
   actualizarSelBar();
 }
 if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
+if ($('#guiaInforme')) $('#guiaInforme').onclick = descargarInformePlan;
 if ($('#guiaGuardar')) $('#guiaGuardar').onclick = guardarGuiasInbox;
 
 // ── Selección de ficheros para AGRUPAR (dos vías): A) mover a una nueva subcarpeta ahora; B) marcar como

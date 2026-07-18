@@ -270,7 +270,7 @@ export function informeTexto(informe, { detalle = true } = {}) {
 // Autocontenido (estilos embebidos, sin red: se abre desde el disco años después y se ve igual) y sin JS: las
 // ramas desplegables son <details>/<summary> del propio navegador.
 
-const CSS = `
+export const CSS_INFORME = `
 :root{--bg:#fff;--fg:#1c2027;--mut:#5d6672;--line:#e2e6ec;--card:#f7f9fc;--card2:#eef2f7;--warn:#b3541e;--ok:#1f7a4c;--link:#1a5fb4}
 @media (prefers-color-scheme:dark){:root{--bg:#161b22;--fg:#e6e9ef;--mut:#98a2b3;--line:#2b3240;--card:#1c222c;--card2:#232b37;--warn:#e8a33d;--ok:#4ec98a;--link:#7cb0f0}}
 *{box-sizing:border-box}
@@ -386,7 +386,7 @@ export function informeHtml(informe, { base = '' } = {}) {
 
     h.push('<!doctype html><html lang="es"><head><meta charset="utf-8">');
     h.push('<meta name="viewport" content="width=device-width,initial-scale=1">');
-    h.push(`<title>Integridad · ${escH(fecha)}</title><style>${CSS}</style></head><body>`);
+    h.push(`<title>Integridad · ${escH(fecha)}</title><style>${CSS_INFORME}</style></head><body>`);
     h.push(`<h1>🩺 Informe de integridad</h1>`);
     h.push(`<div class="sub">${escH(fecha)} · ${num(informe.totalDocs)} documentos en el catálogo · `
         + `${informe.reparar ? 'diagnóstico + <b>REPARACIÓN</b> (lo retirado está en la Papelera)' : 'solo diagnóstico (no se ha tocado nada)'}</div>`);
