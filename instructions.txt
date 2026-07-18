@@ -216,6 +216,14 @@ de ficheros clasificado por CDU.
                           con un aviso claro: nunca se pierde, solo no se previsualiza.
                           (Por eso .doc/.docx NO están en la criba de «material»: tienen visor propio.)
     · .zip .rar .7z .iso  Se EXPANDEN a carpeta (drop) antes de catalogar (bsdtar; .iso = ISO9660) — POR
+      .tar .tgz .tar.gz   (la familia TAR incluida: bsdtar la abre nativamente). La expansión es RECURSIVA:
+      .tbz .txz …         un contenedor DENTRO de una carpeta-drop también se abre, y lo expandido queda
+                          JUNTO a él (dentro de su drop), para que se clasifique con él. Antes solo se miraba
+                          la RAÍZ del Inbox, así que «Mammoth Books/The Mammoth Book of Tasteless Jokes.tgz»
+                          no se tocaba nunca y sus libros no llegaban al catálogo. Las carpetas marcadas
+                          intacta/software/omitir NO se recorren (el usuario dijo que el bloque va tal cual).
+                          OJO con las extensiones COMPUESTAS: path.extname('x.tar.gz') da '.gz' → se usa
+                          `extContenedor`/`baseSinContenedor` (si no, la carpeta creada se llamaría «x.tar»).
                           DEFECTO. Pero un CONTENEDOR es ambiguo y la máquina NO puede acertar sola: el MISMO
                           .iso puede ser un archivo de documentos (→ abrir) o una enciclopedia/instalador de
                           SOFTWARE (→ dejarlo intacto). Abrir este último metía CIENTOS de vídeos y recursos

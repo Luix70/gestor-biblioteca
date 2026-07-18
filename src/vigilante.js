@@ -1068,17 +1068,32 @@ function resumenLote(t, totalUnidades) {
 // bsdtar (libarchive) los lee todos (C plano, apto Atom): ZIP/RAR/RAR5/7z e ISO9660 (.iso → imagen de
 // disco de una colección/escaneo, se expande igual que un .zip). Se recicla el original tras expandir.
 // Contenedores que bsdtar SÍ sabe abrir → su defecto es EXPANDIR (comportamiento histórico).
-const EXT_COMPRIMIDO = ['.zip', '.rar', '.7z', '.iso'];
+// La familia TAR va incluida: bsdtar (libarchive) la abre NATIVAMENTE —detecta la compresión sola—, así que
+// solo faltaba reconocerla. Sin ella, «The Mammoth Book of Tasteless Jokes.tgz» era INVISIBLE: ni se expandía
+// (no estaba aquí) ni se catalogaba (no está en EXT_VALIDAS). Ni ficha, ni contenido, ni rastro.
+const EXT_COMPRIMIDO = ['.zip', '.rar', '.7z', '.iso', '.tar', '.tgz', '.tar.gz', '.tbz', '.tbz2', '.tar.bz2', '.txz', '.tar.xz'];
 // Contenedores OPACOS: bsdtar NO los abre (imagen de Nero, paquete de app iOS/macOS, imagen de disco…), así
 // que «expandir» ni siquiera es una opción para ellos → su defecto es SOFTWARE INTACTO (1 registro). Antes se
 // quedaban INVISIBLES: no están en EXT_VALIDAS (el pipeline por-fichero no los mira) ni se expandían, así que
 // nadie los tocaba — violaban el invariante de que todo lo que entra acabe con un registro que apunte a él.
 const EXT_CONTENEDOR_OPACO = ['.nrg', '.ipa', '.dmg', '.mdf', '.mds', '.cdi', '.ccd', '.img', '.bin', '.cue'];
+// Extensión de contenedor, contemplando las COMPUESTAS: path.extname('x.tar.gz') devuelve solo '.gz', así que
+// mirar por extname dejaba fuera todo el tar comprimido.
+const extContenedor = (n) => {
+    const b = String(n).toLowerCase();
+    for (const e of ['.tar.gz', '.tar.bz2', '.tar.xz']) if (b.endsWith(e)) return e;
+    return path.extname(b);
+};
 const esContenedor = (n) => {
-    const x = path.extname(n).toLowerCase();
+    const x = extContenedor(n);
     return EXT_COMPRIMIDO.includes(x) || EXT_CONTENEDOR_OPACO.includes(x);
 };
-const defectoContenedor = (n) => (EXT_CONTENEDOR_OPACO.includes(path.extname(n).toLowerCase()) ? 'software' : 'expandir');
+const defectoContenedor = (n) => (EXT_CONTENEDOR_OPACO.includes(extContenedor(n)) ? 'software' : 'expandir');
+/** Nombre base sin la extensión de contenedor (soporta «.tar.gz» → «X», no «X.tar»). */
+const baseSinContenedor = (n) => {
+    const x = extContenedor(n);
+    return (x && n.toLowerCase().endsWith(x) ? n.slice(0, -x.length) : path.basename(n, path.extname(n))).trim() || 'archivo';
+};
 // VENTANA DE DECISIÓN de un contenedor sin acción explícita en la guía (ver expandirComprimidos): tiempo que
 // se espera a que elijas en el Inspector antes de expandirlo por defecto. Sin ella, con el vigilante activo el
 // .iso/.rar se expandía en el primer escaneo y la acción del Inspector era inalcanzable.
@@ -1093,18 +1108,31 @@ const rutaExiste = (p) => fs.access(p).then(() => true).catch(() => false);
  * colección, "Vol N"→obra). El zip original se RECICLA (nunca se borra). Un zip corrupto → Cuarentena/
  * ilegibles. Aplana un único directorio raíz (evita Inbox/<base>/<base>/… y que las imágenes queden anidadas).
  */
-async function expandirComprimidos() {
+async function expandirComprimidos(dir = INBOX, nivel = 6) {
+    if (nivel < 0) return;
     let entradas;
-    try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    // RECURSIVO: un contenedor DENTRO de una carpeta-drop también se abre. Antes solo se miraba la raíz del
+    // Inbox, así que «Mammoth Books/The Mammoth Book of Tasteless Jokes.tgz» no se tocaba NUNCA y sus libros
+    // no llegaban al catálogo. Se recurre ANTES de procesar esta carpeta, para que al clasificar el drop su
+    // contenido ya esté expandido. Las carpetas marcadas «intacta/software/omitir» NO se tocan: ahí el usuario
+    // ha dicho explícitamente que el bloque se conserva tal cual.
+    for (const sub of entradas) {
+        if (!sub.isDirectory() || ignorarEntrada(sub.name)) continue;
+        const rutaSub = path.join(dir, sub.name);
+        const g = await leerGuia(rutaSub);
+        if (['intacta', 'software', 'omitir'].includes(g?.accion)) continue;
+        await expandirComprimidos(rutaSub, nivel - 1);
+    }
     // ACCIÓN POR FICHERO elegida en el Inspector (guía de la carpeta): un contenedor complejo NO se puede
     // adivinar. El MISMO .iso puede ser un archivo de documentos (→ abrir) o una enciclopedia/instalador de
     // software (→ INTACTO): abrir este último metía cientos de vídeos y recursos como fichas sueltas. Por
     // defecto se sigue expandiendo (comportamiento histórico); el humano decide lo contrario en el Inspector.
-    const guiaRaiz = await leerGuia(INBOX);
+    const guiaRaiz = await leerGuia(dir);
     for (const e of entradas) {
         if (!e.isFile() || ignorarEntrada(e.name)) continue;
         if (!esContenedor(e.name)) continue;
-        const zip = path.join(INBOX, e.name);
+        const zip = path.join(dir, e.name);
         const spec = guiaRaiz?.archivos?.[e.name] || {};
         const decidido = spec.accion || (spec.omitir ? 'omitir' : null);   // null = el usuario aún no ha dicho nada
         if (decidido === 'omitir') {
@@ -1137,12 +1165,12 @@ async function expandirComprimidos() {
         }
         const accion = decidido || porDefecto;
         esperandoDecision.delete(zip);   // se actúa: deja de estar «a la espera» (y no crece el Set sin fin)
-        const base = path.basename(e.name, path.extname(e.name)).trim() || 'archivo';
+        const base = baseSinContenedor(e.name);
         if (accion === 'software') {
             // NO se abre: se conserva INTACTO y se cataloga como UN registro. Se envuelve en su propia carpeta
             // con una guía `accion:'software'` → lo recoge la unidad esSoftware (ingestarSoftware: copia
             // verbatim en bloque + 1 documento naturaleza:'software'). Reutiliza toda la maquinaria existente.
-            const dirSw = await nombreLibre(INBOX, base);
+            const dirSw = await nombreLibre(dir, base);
             try {
                 await fs.mkdir(dirSw, { recursive: true });
                 await fs.rename(zip, path.join(dirSw, e.name));
@@ -1154,9 +1182,11 @@ async function expandirComprimidos() {
             }
             continue;
         }
-        let destino = path.join(INBOX, base);
-        for (let i = 2; await rutaExiste(destino); i++) destino = path.join(INBOX, `${base} (${i})`);
-        const tmp = path.join(INBOX, `.expand-${Date.now()}`);   // oculto → ignorarEntrada lo salta
+        // El destino se crea JUNTO al contenedor (no siempre en la raíz del Inbox): así lo expandido queda
+        // dentro de su drop y se clasifica con él.
+        let destino = path.join(dir, base);
+        for (let i = 2; await rutaExiste(destino); i++) destino = path.join(dir, `${base} (${i})`);
+        const tmp = path.join(dir, `.expand-${Date.now()}`);   // oculto → ignorarEntrada lo salta
         try {
             await fs.mkdir(tmp, { recursive: true });
             await extraerComprimido(zip, tmp);                   // bsdtar (zip/rar/7z) → al temporal
