@@ -26,13 +26,19 @@ const resolverDir = (envVar, def) => {
     return path.isAbsolute(v) ? v : path.resolve(RAIZ, v);
 };
 const DIR_CDU = resolverDir('PATH_CDU', 'CDU');
-// Orden de preferencia de búsqueda del original.
+// Orden de preferencia de búsqueda del original. La PAPELERA (Recycling) es clave: es donde acaba un fichero
+// que una poda/re-alojo retiró, y por tanto donde suele estar el original «desaparecido» de su carpeta CDU
+// (caso Vol1 de «Endangered Species»: otro tomo se instaló encima y su PDF se fue de la carpeta).
 const ZONAS = [
     ['Reintentos', resolverDir('PATH_REINTENTOS', 'Reintentos')],
     ['Inbox',      resolverDir('PATH_INBOX', 'Inbox')],
     ['Cuarentena', resolverDir('PATH_CUARENTENA', 'Cuarentena')],
+    ['Papelera',   resolverDir('PATH_RECICLAJE', 'Recycling')],
 ];
-const EXT_DOC = ['.epub', '.pdf', '.mobi', '.cbr', '.djvu', '.zip', '.rar'];
+// Formatos que se consideran «el original» de un documento. La lista de antes (epub/pdf/mobi/cbr/djvu/zip/rar)
+// se quedaba corta —sin .cbz/.azw3/.cb7/.chm/.docx— y un cómic o ebook de esos formatos ni se indexaba en el
+// respaldo ni se detectaba como «ya presente»: la misma lista estrecha que nos ha dado guerra toda la semana.
+const EXT_DOC = ['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.fb2', '.cbr', '.cbz', '.cb7', '.djvu', '.chm', '.docx', '.doc', '.zip', '.rar'];
 const EJECUTAR = process.argv.includes('--ejecutar');
 
 const existe = (p) => fs.access(p).then(() => true).catch(() => false);
@@ -101,10 +107,18 @@ async function main() {
         const carpeta = path.join(DIR_CDU, ...rel.split('/'));
         let entradas;
         try { entradas = await fs.readdir(carpeta); } catch { continue; } // sin carpeta: otro problema
-        if (entradas.some(n => EXT_DOC.includes(path.extname(n).toLowerCase()))) { yaEstaban++; continue; }
+
+        // ¿Falta el original? Se comprueba que esté el fichero CONCRETO del doc (`nombre_archivo`), NO que haya
+        // «algún fichero-doc» en la carpeta: dos documentos pueden compartir carpeta (colisión de ruta_base) y
+        // el PDF que hay ser el del OTRO — justo el caso Vol1, cuya carpeta tiene el PDF de Benson. Con la
+        // comprobación vieja se daba por presente y no se rescataba nunca.
+        const nombres = [doc.nombre_archivo, ...(doc.archivos_originales || [])].filter(Boolean);
+        if (nombres.length && nombres.every(n => entradas.includes(n))) { yaEstaban++; continue; }
+        if (!nombres.length) { // doc antiguo sin nombre_archivo → respaldo por extensión
+            if (entradas.some(n => EXT_DOC.includes(path.extname(n).toLowerCase()))) { yaEstaban++; continue; }
+        }
 
         // Falta el original: localizarlo por nombre.
-        const nombres = [doc.nombre_archivo, ...(doc.archivos_originales || [])].filter(Boolean);
         const origen = nombres.map(n => indice.get(n)).find(Boolean);
         if (!origen) { noLocalizados++; sinRastro.push(doc); continue; }
 

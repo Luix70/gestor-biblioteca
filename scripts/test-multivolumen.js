@@ -13,6 +13,14 @@ for (const [n, num, tit] of [
     ['Volumen 3. Américas.epub', 3, 'Américas'],
     ['Band 2 — Die Welt.pdf', 2, 'Die Welt'],
     ['Tome IV.pdf', 4, null],
+    // Número PEGADO a la palabra (sin separador): el bug que mandó los 4 tomos de «Endangered Species» a la
+    // misma carpeta vol-x. El \b de detrás lo daba por null.
+    ['Endangered Species.2nd Ed.Vol1.pdf', 1, null],
+    ['Algo Volume3.pdf', 3, null],
+    ['Obra_volumen_5.pdf', 5, null],   // guion bajo como separador
+    // Y NO debe picar con palabras que CONTIENEN la clave.
+    ['Devolver el libro.pdf', null, null],
+    ['La evolución.pdf', null, null],
     ['Un libro normal sin tomo.pdf', null, null],
 ]) {
     const r = parsearVolumen(n);
