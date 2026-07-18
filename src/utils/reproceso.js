@@ -56,6 +56,18 @@ async function desvincularYReciclar(db, doc, etiqueta) {
         }
     }
 
+    // NO reciclar la carpeta si OTRO documento sigue apuntando a ella: es una carpeta COMPARTIDA por colisión
+    // de ruta_base (varios docs, misma carpeta). Reciclarla se llevaría los ficheros de los demás a la Papelera
+    // — y al reprocesar el siguiente su fichero ya no estaría. Se recicla solo cuando la deja el ÚLTIMO doc
+    // (para entonces los ficheros de todos ya se copiaron al Inbox, así que no se pierde nada). Esto además
+    // hace SEGURO el botón «Reprocesar» del panel sobre una carpeta compartida, que antes no lo era.
+    let compartida = false;
+    if (doc.ruta_base) {
+        const otro = await db.collection('biblioteca').findOne(
+            { ruta_base: doc.ruta_base, _id: { $ne: doc._id } }, { projection: { _id: 1 } });
+        compartida = !!otro;
+    }
+    if (compartida) { console.log(`  ↔ carpeta compartida por otros docs: NO se recicla (se dejará al último).`); return false; }
     const reciclada = await reciclarCarpeta(carpeta, etiqueta, path.basename(path.dirname(carpeta)));
     return !!reciclada;
 }
