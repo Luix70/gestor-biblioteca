@@ -106,30 +106,40 @@ for (const g of grupos) {
             fallos++;
             continue;
         }
-        // Imágenes que referencia el doc y que EXISTEN en la carpeta base (se COPIAN, no se mueven: pueden ser
-        // compartidas por nombre con el keeper; rebase de sus rutas web a la carpeta nueva).
+        // PORTADAS. Si el doc tiene un ORIGINAL re-extraíble (pdf/epub…), su portada compartida era la del
+        // ÚLTIMO número que se catalogó (todos sobrescribieron portada-1.jpg) → copiarla propagaría la portada
+        // equivocada, y reparar-portadas NO la corregiría (la vería «presente»). Se LIMPIA portada/imagenes:
+        // reparar-portadas re-extrae después la de CADA número de su propio PDF. No se pierde nada: las
+        // imágenes son extracciones re-derivables y los ficheros siguen en la carpeta base.
+        // Si NO es re-extraíble (un ESCANEO: las imágenes SON el contenido), se COPIAN y se conservan.
+        const reextraible = /\.(pdf|epub|mobi|azw3?|fb2|djvu|cbr|cbz|cb7|chm|docx?)$/i.test(nombre);
         const imgs = [];
-        for (const im of (doc.imagenes || [])) {
-            const b = im?.ruta ? path.basename(im.ruta) : null;
-            if (b && await existe(path.join(baseDir, b))) imgs.push(b);
+        if (!reextraible) {
+            for (const im of (doc.imagenes || [])) {
+                const b = im?.ruta ? path.basename(im.ruta) : null;
+                if (b && await existe(path.join(baseDir, b))) imgs.push(b);
+            }
+            const portadaB = doc.portada ? path.basename(doc.portada) : null;
+            if (portadaB && !imgs.includes(portadaB) && await existe(path.join(baseDir, portadaB))) imgs.push(portadaB);
         }
-        const portadaB = doc.portada ? path.basename(doc.portada) : null;
-        if (portadaB && !imgs.includes(portadaB) && await existe(path.join(baseDir, portadaB))) imgs.push(portadaB);
 
-        console.log(`   → [${doc._id}] «${nombre}»  →  ${nuevaWeb}${imgs.length ? `  (+${imgs.length} img)` : ''}`);
+        console.log(`   → [${doc._id}] «${nombre}»  →  ${nuevaWeb}${reextraible ? '  (portada se re-extrae)' : imgs.length ? `  (+${imgs.length} img)` : ''}`);
         if (!EJECUTAR) { movidos++; continue; }
 
-        // 1) Copiar+verificar el fichero y las imágenes en la carpeta nueva.
+        // 1) Copiar+verificar el fichero y las imágenes (solo si escaneo) en la carpeta nueva.
         if (!(await copiaVerificada(src, path.join(nuevaDir, nombre)))) { console.error(`     ⛔ copia fallida → SE OMITE`); fallos++; continue; }
         let imgsOk = true;
         for (const b of imgs) if (!(await copiaVerificada(path.join(baseDir, b), path.join(nuevaDir, b)))) { imgsOk = false; break; }
         if (!imgsOk) { console.error(`     ⛔ copia de imágenes fallida → SE OMITE (fichero ya copiado, se limpia)`); await fs.rm(path.join(nuevaDir, nombre), { force: true }).catch(() => {}); fallos++; continue; }
 
-        // 2) Actualizar la BD: ruta_base + rebase de portada/imagenes al prefijo nuevo.
+        // 2) Actualizar la BD: ruta_base + portada/imagenes (rebase si escaneo; limpiar si re-extraíble).
         const rebase = (w) => (typeof w === 'string' && w.startsWith(base) ? nuevaWeb + w.slice(base.length) : w);
         const set = { ruta_base: nuevaWeb };
-        if (doc.portada) set.portada = rebase(doc.portada);
-        if (Array.isArray(doc.imagenes)) set.imagenes = doc.imagenes.map(im => ({ ...im, ruta: rebase(im.ruta) }));
+        if (reextraible) { set.portada = null; set.imagenes = []; }
+        else {
+            if (doc.portada) set.portada = rebase(doc.portada);
+            if (Array.isArray(doc.imagenes)) set.imagenes = doc.imagenes.map(im => ({ ...im, ruta: rebase(im.ruta) }));
+        }
         await col.updateOne({ _id: doc._id }, { $set: set });
 
         // 3) Regenerar los sidecars del doc en su carpeta nueva.
@@ -142,9 +152,15 @@ for (const g of grupos) {
         movidos++;
     }
 
-    // El keeper se queda, pero sus sidecars en la carpeta base pueden ser de OTRO doc (el último que escribió).
-    // Se regeneran a su nombre para que registro.json/marc reflejen al keeper.
-    if (EJECUTAR) { try { await escribirSidecars(baseDir, sidecarsDe(keeper)); } catch (e) { console.warn(`   ⚠ sidecars keeper: ${e.message}`); } }
+    // El keeper se queda, pero sus sidecars Y su portada en la carpeta base pueden ser de OTRO doc (el último
+    // que escribió). Se regeneran los sidecars a su nombre; y si es re-extraíble, se limpia su portada para que
+    // reparar-portadas saque la SUYA (si no, el keeper se quedaría con la portada del último número).
+    if (EJECUTAR) {
+        const keeperReextraible = /\.(pdf|epub|mobi|azw3?|fb2|djvu|cbr|cbz|cb7|chm|docx?)$/i.test(keeper.nombre_archivo || '');
+        if (keeperReextraible) await col.updateOne({ _id: keeper._id }, { $set: { portada: null, imagenes: [] } });
+        const keeperAct = keeperReextraible ? { ...keeper, portada: null, imagenes: [] } : keeper;
+        try { await escribirSidecars(baseDir, sidecarsDe(keeperAct)); } catch (e) { console.warn(`   ⚠ sidecars keeper: ${e.message}`); }
+    }
     gruposOk++;
     console.log('');
 }
