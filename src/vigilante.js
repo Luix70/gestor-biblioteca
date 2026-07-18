@@ -650,7 +650,15 @@ export async function planificarInbox() {
         // nunca llegará aquí como unidad real). Repetirlo sería contarlo dos veces y contradecirse.
         const soloRuta = (u.rutas || []).length === 1 ? u.rutas[0] : null;
         if (soloRuta && esContenedor(path.basename(soloRuta))) continue;
-        plan.push(u.esEmpaquetar ? await describirEmpaquetado(u) : describirUnidad(u));
+        const d = u.esEmpaquetar ? await describirEmpaquetado(u) : describirUnidad(u);
+        // Nº de PISTAS de las unidades de audio: sin él no se puede verificar de un vistazo que cada
+        // audiolibro es el que crees (el usuario detectó así que yo había contado dos como uno).
+        if (d.contarAudio) {
+            const { audio } = await contarPorTipo(d.contarAudio);
+            d.efecto = `${audio} pista(s) · ${d.efecto}`;
+            delete d.contarAudio;
+        }
+        plan.push(d);
     }
 
     // ── Lo que se queda DENTRO de una carpeta que sí se procesa. Aquí es donde se pierden las cosas de
@@ -841,8 +849,10 @@ function describirUnidad(u) {
     if (u.esLibroMaterial) return { ...base, tipo: 'libro + material', titulo: nombre(u.carpeta), documentos: 1, efecto: 'el documento se cataloga como libro normal; el material viaja con él (verbatim).' };
     if (u.esObra) return { ...base, tipo: 'obra (tomo)', titulo: `${u.obra.titulo} · vol. ${u.obra.numero}/${u.obra.total}`, documentos: 1, efecto: `tomo ${u.obra.numero} de «${u.obra.titulo}»; la carpeta se disuelve al vaciarse.`, fichero: nombre(u.rutas?.[0]) };
     if (u.esTransmedia) return { ...base, tipo: 'transmedia', titulo: nombre(u.carpeta), documentos: null, efecto: 'estructura preservada (ruta_fija): un documento por cada fichero legible + el resto como material.' };
-    if (u.esColeccionAudio) return { ...base, tipo: 'colección de audiolibros', titulo: nombre(u.carpeta), documentos: null, efecto: 'una colección con un documento por libro (el audio manda).' };
-    if (u.esAudiolibro) return { ...base, tipo: 'audiolibro', titulo: nombre(u.carpeta), documentos: 1, efecto: '1 documento con playlist; las pistas se conservan (ruta_fija).' };
+    if (u.esColeccionAudio) return { ...base, tipo: 'colección de audiolibros', titulo: nombre(u.carpeta), documentos: null, contarAudio: u.carpeta,
+        efecto: 'una colección con un documento por libro (el audio manda).' };
+    if (u.esAudiolibro) return { ...base, tipo: 'audiolibro', titulo: nombre(u.carpeta), documentos: 1, contarAudio: u.carpeta,
+        efecto: '1 documento con playlist; las pistas se conservan (ruta_fija).' };
     if (u.esImagenes) return { ...base, tipo: 'libro escaneado', titulo: nombre(u.carpeta) || nombre(u.rutas?.[0]), documentos: 1, efecto: `1 documento a partir de ${(u.rutas || []).length} imágenes.` };
     return {
         ...base, tipo: u.coleccion ? 'documento (en colección)' : 'documento suelto',
