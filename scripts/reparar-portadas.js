@@ -15,9 +15,13 @@
  * ⚠ Antes de `--ejecutar`: haz COPIA DE SEGURIDAD de la BD — escribe ficheros de portada y actualiza documentos.
  *
  * Uso:
- *   node scripts/reparar-portadas.js                 (dry-run, todo el catálogo)
- *   node scripts/reparar-portadas.js --id <ObjectId> (dry-run, un documento)
- *   node scripts/reparar-portadas.js --ejecutar      (aplica)
+ *   node scripts/reparar-portadas.js                    (dry-run, TODO el catálogo — auditoría completa, lenta)
+ *   node scripts/reparar-portadas.js --sin-portada     (dry-run, solo los que NO tienen portada — rápido)
+ *   node scripts/reparar-portadas.js --id <ObjectId>   (dry-run, un documento)
+ *   node scripts/reparar-portadas.js --ejecutar        (aplica; combinable con --sin-portada / --id)
+ *
+ * Progreso: imprime una línea [i/N] por documento. Con `docker exec` AÑADE -t, si no Node bufferiza la salida
+ * al no haber TTY y parece congelado: `docker exec -t gestor-biblioteca node scripts/reparar-portadas.js …`
  */
 import 'dotenv/config';
 import path from 'path';
@@ -65,7 +69,14 @@ async function portadaDelFichero(doc, carpeta) {
 async function main() {
     const db = await conectarDB();
     const col = db.collection('biblioteca');
-    const filtro = idArg ? { _id: new ObjectId(idArg) } : {};
+    // Sin filtro se revisa el catálogo ENTERO (16k+ docs), comprobando en disco todas las imágenes de cada uno:
+    // es la auditoría completa, pero tarda muchísimo. `--sin-portada` va directo a los que NO tienen portada —
+    // que es el caso típico tras una operación (p. ej. separar carpetas compartidas deja las portadas a null
+    // para re-extraerlas). Órdenes de magnitud más rápido y hace exactamente lo que hace falta.
+    const soloSinPortada = process.argv.includes('--sin-portada');
+    const filtro = idArg
+        ? { _id: new ObjectId(idArg) }
+        : soloSinPortada ? { $or: [{ portada: null }, { portada: { $exists: false } }, { portada: '' }] } : {};
     const proj = {
         titulo: 1, portada: 1, imagenes: 1, ruta_base: 1, cdu: 1, tipo_recurso: 1, isbn: 1, issn: 1, formatos: 1,
         nombre_archivo: 1, obra: 1, isbn_obra: 1, obra_titulo: 1, volumen_numero: 1, año_edicion: 1, mes_publicacion: 1,
@@ -125,8 +136,13 @@ async function main() {
         const marca = `${!portadaOk ? '🖼️ ' : ''}${rotas.length ? `🧹${rotas.length} ` : ''}`;
         const cola = set.portada
             ? ` → portada (${accion === 'extraer' ? 'extraída de la 1.ª página' : 'reusada'}): ${path.basename(String(set.portada))}`
-            : (!portadaOk ? ' → SIN reparar (sin imágenes ni fichero)' : '');
-        console.log(`${marca}${doc._id} · ${(doc.titulo || '(sin título)').slice(0, 60)}${cola}`);
+            : accion === 'extraer' ? ' → se extraería la portada de su fichero (ejecuta con --ejecutar)'
+            : (!portadaOk ? ' → SIN reparar: no tiene imágenes válidas NI fichero original en su carpeta' : '');
+        // Contador i/N: rasterizar la 1.ª página de un PDF tarda segundos, así que sin saber cuánto queda el
+        // proceso PARECE colgado. Se escribe por stdout directamente (no console.log) por si algún import
+        // trajera consola-timestamp, que silencia las líneas sin marcador de titular.
+        const pos = `[${String(st.revisados).padStart(String(ids.length).length)}/${ids.length}]`;
+        process.stdout.write(`${pos} ${marca}${doc._id} · ${(doc.titulo || '(sin título)').slice(0, 60)}${cola}\n`);
 
         if (EJECUTAR && Object.keys(set).length) {
             await col.updateOne({ _id }, { $set: set });

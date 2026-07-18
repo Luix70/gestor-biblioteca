@@ -142,6 +142,21 @@ function extraerCubiertaEpub(zip, $, opfPath) {
         }
     });
 
+    // ÚLTIMO RECURSO: el EPUB no DECLARA cubierta por ninguna de las convenciones de arriba, pero lleva
+    // imágenes dentro. Antes se devolvía null y el libro se quedaba sin portada para siempre (ni la ingesta ni
+    // reparar-portadas tenían de dónde sacarla, porque un epub no se rasteriza como un pdf). Se coge la imagen
+    // MÁS GRANDE del epub, que casi siempre ES la cubierta —y si no, una ilustración del propio libro es mejor
+    // que una ficha en blanco, y siempre se puede cambiar a mano.
+    // Se descartan el ruido conocido (logos, ex-libris, sellos del repackager) y las miniaturas (<8 KB), que
+    // son iconos y adornos: elegir uno de esos sería peor que no elegir nada.
+    if (!candidatas.length) {
+        for (const e of zip.getEntries()) {
+            if (e.isDirectory || !/\.(jpe?g|png|gif|webp)$/i.test(e.entryName)) continue;
+            if (RE_RUIDO.test(e.entryName) || e.header.size < 8 * 1024) continue;
+            candidatas.push(e);
+        }
+    }
+
     let mejor = null;
     for (const e of candidatas) if (!mejor || e.header.size > mejor.header.size) mejor = e;
     return mejor ? mejor.getData().toString('base64') : null;
