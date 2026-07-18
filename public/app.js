@@ -8660,6 +8660,7 @@ function pintarInteg(r) {
     docsSinCarpeta: 'Docs sin carpeta',
     docsSinFicheroOriginal: 'Docs sin fichero original',
     docsConAudiosRotos: 'Audiolibros con pistas que faltan',
+    docsSinPortada: 'Documentos sin portada',
     rutaBaseCompartida: 'Varios docs en la misma carpeta',
     ramasMuertas: 'Ramas vacías / muertas',
     registroSinDocumento: 'Registro sin documento',
@@ -8674,6 +8675,7 @@ function pintarInteg(r) {
     docsSinCarpeta: 'docsSinCarpeta',
     docsSinFicheroOriginal: 'docsSinFicheroOriginal',
     docsConAudiosRotos: 'docsConAudiosRotos',
+    docsSinPortada: 'docsSinPortada',
     rutaBaseCompartida: 'rutaBaseCompartida',
     ramasMuertas: 'ramasMuertas',
     registroSinDocumento: 'registroSinDocumento',
@@ -8693,7 +8695,14 @@ function pintarInteg(r) {
           ? '<span class="tag ok" title="Se arregla con «Diagnosticar y reparar»">auto</span>'
           : '<span class="tag warn" title="Acción manual: abre la ficha y usa Reprocesar/Eliminar">manual</span>'
         : '';
-    return `<tr ${tiene ? `class="integrow" data-k="${esc(mk)}" title="Ver qué documentos"` : ''}><td>${esc(et[k])}${tiene ? ' <span class="muted">▸</span>' : ''}</td><td style="text-align:center">${sello}</td><td style="text-align:right"><b ${v > 0 ? 'style="color:var(--warn)"' : ''}>${v}</b></td></tr>`;
+    // Filas que tienen un FILTRO del Catálogo equivalente: además del detalle desplegable, un enlace directo
+    // que los abre TODOS en la Búsqueda, que es donde se puede actuar sobre ellos (abrir ficha, poner portada
+    // a mano). El filtro `sin_portada` ya existía en la API (filtroEspecial) y lo usa el Dashboard.
+    const irA = { docsSinPortada: ['sin_portada', 'Sin portada'] }[k];
+    const enlace = v > 0 && irA
+      ? ` <a class="rowlink" data-filtro="${esc(irA[0])}" data-etq="${esc(irA[1])}" title="Abrirlos todos en el Catálogo para actuar">↗ ver en Catálogo</a>`
+      : '';
+    return `<tr ${tiene ? `class="integrow" data-k="${esc(mk)}" title="Ver qué documentos"` : ''}><td>${esc(et[k])}${tiene ? ' <span class="muted">▸</span>' : ''}${enlace}</td><td style="text-align:center">${sello}</td><td style="text-align:right"><b ${v > 0 ? 'style="color:var(--warn)"' : ''}>${v}</b></td></tr>`;
   };
   // El informe lo sirve un endpoint solo-admin (es un volcado de la estructura entera del archivo), así que a
   // un invitado ni se le enseña el botón: nada de ofrecer algo que va a devolver un 403.
@@ -8731,6 +8740,11 @@ function pintarInteg(r) {
   }
   $('#integOut').innerHTML = h;
   $$('#integOut tr.integrow').forEach((tr) => (tr.onclick = () => drillInteg(tr.dataset.k, m)));
+  // El «↗ ver en Catálogo» va DENTRO de la fila: hay que parar la propagación o además desplegaría el detalle.
+  $$('#integOut [data-filtro]').forEach((a) => (a.onclick = (e) => {
+    e.stopPropagation();
+    filtrarCatalogo(a.dataset.filtro, a.dataset.etq);
+  }));
   if ($('#integHtml')) $('#integHtml').onclick = () => descargarInformeInteg('html');
   if ($('#integTxt')) $('#integTxt').onclick = () => descargarInformeInteg('txt');
 }

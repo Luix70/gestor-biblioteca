@@ -132,7 +132,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     prog('cargando');
     const db = await conectarDB();
     const col = db.collection('biblioteca');
-    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1 } }).toArray();
+    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1, portada: 1 } }).toArray();
     const rutasWeb = new Set(docs.map(d => d.ruta_base).filter(Boolean));
     const porId = new Map(docs.map(d => [String(d._id), d]));
 
@@ -162,6 +162,14 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     for (const d of docs) { if (d.ruta_base && !await existe(absDe(d.ruta_base))) sinCarpeta.push(d); if (++_iA % 50 === 0) prog('docs-sin-carpeta', { i: _iA, total: docs.length }); }
     D.docsSinCarpeta = sinCarpeta.length;
     anotar('docsSinCarpeta', sinCarpeta, d => fichaDoc(d));
+
+    // ── Docs SIN PORTADA (solo informa; es cosmético, no una pérdida). Se listan para poder atacarlos a mano:
+    //    lo que `reparar-portadas` no puede resolver (un .chm, un audiolibro cuyos mp3 no traen carátula ni hay
+    //    imagen en la carpeta) solo se arregla poniéndosela tú desde la ficha. El panel enlaza esta fila al
+    //    Catálogo con el filtro `sin_portada`, que YA existía, para verlos todos juntos y actuar. ──
+    const sinPortada = docs.filter(d => !d.portada);
+    D.docsSinPortada = sinPortada.length;
+    anotar('docsSinPortada', sinPortada, d => fichaDoc(d));
 
     // ── D. Docs cuya carpeta existe pero falta el fichero original (solo informa) ──
     prog('docs-sin-fichero', { i: 0, total: docs.length });

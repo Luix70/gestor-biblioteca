@@ -61,6 +61,12 @@ const CATEGORIAS = [
         hacer: 'Restaurar las pistas desde la Papelera, o volver a ingerir la colección de origen.',
     },
     {
+        clave: 'docsSinPortada', lista: 'docsSinPortada', auto: false,
+        etiqueta: 'Documentos sin portada',
+        que: 'Documentos que no tienen imagen de portada. NO es una pérdida —el fichero está y se lee—, es cosmético: la ficha sale en blanco en el catálogo.',
+        hacer: 'Primero `node scripts/reparar-portadas.js --sin-portada --ejecutar`, que la saca del propio fichero (1.ª página del PDF/DjVu/cómic, cubierta del EPUB, carátula ID3 del audiolibro o una imagen suelta de su carpeta). Lo que quede es que esa imagen NO existe en ninguna parte (típico: .chm, y audiolibros cuyos mp3 no traen carátula) → ponla a mano desde la ficha. En el panel, «↗ ver en Catálogo» los abre todos juntos.',
+    },
+    {
         clave: 'rutaBaseCompartida', lista: 'rutaBaseCompartida', auto: false,
         etiqueta: 'Varios docs en la misma carpeta',
         que: 'Dos o más documentos comparten `ruta_base`, rompiendo la regla 1 documento ↔ 1 carpeta. Se pisan los sidecars (registro.json, portadas) entre ellos.',
