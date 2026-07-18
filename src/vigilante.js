@@ -431,6 +431,12 @@ async function huellaCarpeta(dir) {
         try { entradas = await fs.readdir(actual, { withFileTypes: true }); } catch { continue; }
         for (const e of entradas) {
             if (ignorarEntrada(e.name)) continue;
+            // El `_guia.json` es NUESTRO sidecar, no contenido que el usuario esté copiando. Contaba (empieza
+            // por «_», no por «.», así que ignorarEntrada no lo salta) y su mtime era el más nuevo → al marcar
+            // una acción en el Inspector la carpeta pasaba por «aún copiándose» durante toda la ventana de
+            // estabilidad: el dry-run decía «copiándose» justo después de guardar la guía, y el vigilante
+            // retrasaba el drop por haberlo guiado. Marcar una guía NO es copiar.
+            if (e.name === NOMBRE_GUIA) continue;
             const p = path.join(actual, e.name);
             if (e.isDirectory()) { pila.push(p); continue; }
             try {
@@ -639,10 +645,9 @@ export async function planificarInbox() {
  * archivo comprimido?». No. Esta lista NO los soporta: sirve para DENUNCIARLOS en el plan, que es el primer
  * paso honesto (callarlos es lo que nos ha costado el día).
  */
-const EXT_CONTENEDOR_NO_SOPORTADO = [
-    '.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tbz', '.txz', '.tar', '.gz', '.bz2', '.xz',
-    '.cab', '.arj', '.lzh', '.lha', '.ace', '.zipx', '.nrg', '.mdf', '.ipa', '.dmg',
-];
+// (La familia TAR y .nrg/.ipa/.dmg YA NO están aquí: se reconocen como contenedores — tar se expande, los
+// opacos se conservan como software. Se quedan solo los que de verdad no sabemos abrir.)
+const EXT_CONTENEDOR_NO_SOPORTADO = ['.gz', '.bz2', '.xz', '.cab', '.arj', '.lzh', '.lha', '.ace', '.zipx'];
 /** Extensión, contemplando las dobles («.tar.gz»), que path.extname() parte en «.gz» y despista. */
 function extLarga(nombre) {
     const n = nombre.toLowerCase();
@@ -666,6 +671,10 @@ async function auditarSobrantes(carpeta, usadas, nivel = 8) {
             const p = path.join(dir, e.name);
             if (e.isDirectory()) { if (!/^covers$/i.test(e.name)) await rec(p, n - 1); continue; }
             if (usadas.has(p)) continue;
+            // Un contenedor RECONOCIDO no es un sobrante: ya lo anuncia `contenedoresPendientes` (se expandirá
+            // o se conservará como software). Sin esta guarda el plan se contradecía: decía a la vez que el
+            // .tgz «se abre» y que «no se reconoce».
+            if (esContenedor(e.name)) continue;
             const x = extLarga(e.name);
             const rel = path.relative(carpeta, p);
             if (EXT_CONTENEDOR_NO_SOPORTADO.includes(x)) {
