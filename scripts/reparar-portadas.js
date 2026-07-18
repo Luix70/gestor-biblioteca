@@ -121,7 +121,7 @@ async function main() {
         const set = {};
         if (rotas.length) { st.conImagenesRotas++; set.imagenes = validas; }
 
-        let accion = '';
+        let accion = '', motivo = '';
         if (!portadaOk) {
             st.sinPortada++;
             const reusar = validas.find((im) => im.tipo === 'portada') || validas[0];
@@ -131,6 +131,7 @@ async function main() {
             } else if (!(await archivoOriginal(carpeta)) && !(doc.audios || []).length) {
                 // Sin imágenes válidas, sin fichero-documento Y sin pistas de audio → no hay de dónde sacarla.
                 accion = 'irreparable';
+                motivo = 'no hay fichero original NI pistas de audio en su carpeta';
             } else if (EJECUTAR) {
                 const buf = await portadaDelFichero(doc, carpeta);
                 if (Buffer.isBuffer(buf) && buf.length) {
@@ -138,7 +139,15 @@ async function main() {
                     set.portada = web;
                     set.imagenes = [{ ruta: web, tipo: 'portada', origen: 'reparacion' }, ...validas];
                     accion = 'extraer';
-                } else accion = 'irreparable';
+                } else {
+                    // SÍ había de dónde sacarla (fichero o pistas) pero la extracción no dio imagen. Es un
+                    // motivo MUY distinto del anterior y hay que decirlo: si no, un fallo del extractor se
+                    // confunde con «no hay fichero» y se persigue el problema equivocado.
+                    accion = 'irreparable';
+                    motivo = (doc.audios || []).length
+                        ? `${doc.audios.length} pista(s) de audio, pero ninguna trae carátula embebida (ID3)`
+                        : 'hay fichero original, pero no se pudo extraer una imagen de él';
+                }
             } else {
                 accion = 'extraer'; // dry-run: hay fichero → se PODRÍA extraer la 1.ª página
             }
@@ -151,7 +160,7 @@ async function main() {
         const cola = set.portada
             ? ` → portada (${accion === 'extraer' ? 'extraída de la 1.ª página' : 'reusada'}): ${path.basename(String(set.portada))}`
             : accion === 'extraer' ? ' → se extraería la portada de su fichero (ejecuta con --ejecutar)'
-            : (!portadaOk ? ' → SIN reparar: no tiene imágenes válidas NI fichero original en su carpeta' : '');
+            : (!portadaOk ? ` → SIN reparar: ${motivo || 'no tiene imágenes válidas ni fichero original'}` : '');
         // Contador i/N: rasterizar la 1.ª página de un PDF tarda segundos, así que sin saber cuánto queda el
         // proceso PARECE colgado. Se escribe por stdout directamente (no console.log) por si algún import
         // trajera consola-timestamp, que silencia las líneas sin marcador de titular.
