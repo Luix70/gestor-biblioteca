@@ -50,6 +50,36 @@ const absDe = (web) => (web ? path.join(DIR_CDU, ...(web.startsWith('/recursos/'
 const existe = (p) => (p ? fs.access(p).then(() => true).catch(() => false) : Promise.resolve(false));
 const urlPortadaOL = (isbn) => `https://covers.openlibrary.org/b/isbn/${String(isbn).replace(/[^0-9Xx]/g, '')}-L.jpg`;
 
+const RE_IMG = /\.(jpe?g|png|webp)$/i;
+const RE_NOMBRE_PORTADA = /(cover|folder|front|portada|car[áa]tula|caratula|album)/i;
+// CONTRAportada/back/trasera NO son portada. Ojo: «contraportada» CONTIENE «portada», así que sin esta
+// exclusión casaba como portada y, si pesaba más, GANABA — el libro se quedaba con la contracubierta de
+// portada. Mismo criterio que audiolibro.js·clasificarImagen, que ya distinguía las dos caras.
+const RE_NO_PORTADA = /(contra|back|trasera|reverso|spine|lomo)/i;
+/**
+ * Busca una imagen SUELTA en la carpeta del documento (recursiva, acotada) y devuelve su buffer.
+ * Prefiere las que se llaman como una portada (cover/folder/front/portada…); si no, la MÁS GRANDE.
+ * Descarta las miniaturas (<8 KB): son iconos y adornos, peor portada que ninguna.
+ */
+async function imagenSueltaEnCarpeta(carpeta, nivel = 3) {
+    if (!carpeta || nivel < 0) return null;
+    let ents;
+    try { ents = await fs.readdir(carpeta, { withFileTypes: true }); } catch { return null; }
+    const candidatas = [];
+    for (const e of ents) {
+        if (e.name.startsWith('.') || e.name.startsWith('@')) continue;
+        const p = path.join(carpeta, e.name);
+        if (e.isDirectory()) { const sub = await imagenSueltaEnCarpeta(p, nivel - 1); if (sub) return sub; continue; }
+        if (!RE_IMG.test(e.name)) continue;
+        const st = await fs.stat(p).catch(() => null);
+        if (st && st.size >= 8 * 1024)
+            candidatas.push({ p, size: st.size, portada: RE_NOMBRE_PORTADA.test(e.name) && !RE_NO_PORTADA.test(e.name) });
+    }
+    if (!candidatas.length) return null;
+    candidatas.sort((a, b) => (b.portada - a.portada) || (b.size - a.size));
+    return await fs.readFile(candidatas[0].p).catch(() => null);
+}
+
 // Extrae un buffer JPEG de la 1.ª página/cubierta del fichero ORIGINAL (según su tipo). null si no se puede.
 async function portadaDelFichero(doc, carpeta) {
     // AUDIOLIBRO: no tiene fichero-documento (su contenido son las pistas), así que archivoOriginal no
@@ -65,7 +95,13 @@ async function portadaDelFichero(doc, carpeta) {
     }
 
     const original = await archivoOriginal(carpeta);
-    if (!original) return null; // sin fichero (p. ej. 'papel' con las fotos perdidas) → no se puede extraer
+    if (!original) {
+        // ÚLTIMO RECURSO (sin fichero-documento: audiolibros y demás): buscar una IMAGEN SUELTA en la carpeta,
+        // RECURSIVAMENTE. Los rips de audiolibro suelen traer cover.jpg/folder.jpg junto a las pistas, y aquí
+        // las pistas viven en una SUBCARPETA (…/VSI - Hinduism/VSI - Hinduism/01…mp3), así que un vistazo al
+        // primer nivel no la ve. Se prefiere un nombre de portada; si no, la imagen más grande.
+        return await imagenSueltaEnCarpeta(carpeta);
+    }
     const tipo = detectarTipo(original);
     // DjVu / cómic: la 1.ª página YA es un JPEG (leerPaginaDjvu/Comic) → se usa directamente (evita pdftoppm).
     if (tipo === 'djvu') { const p = await leerPaginaDjvu(original, 0).catch(() => null); return p?.buffer || null; }
@@ -128,10 +164,11 @@ async function main() {
             if (reusar) {
                 set.portada = reusar.ruta;
                 accion = 'reusar';
-            } else if (!(await archivoOriginal(carpeta)) && !(doc.audios || []).length) {
-                // Sin imágenes válidas, sin fichero-documento Y sin pistas de audio → no hay de dónde sacarla.
+            } else if (!(await archivoOriginal(carpeta)) && !(doc.audios || []).length && !(await imagenSueltaEnCarpeta(carpeta))) {
+                // No hay NADA de donde sacarla: ni fichero-documento, ni pistas de audio, ni una imagen suelta
+                // en su carpeta. Esto sí es genuinamente irreparable.
                 accion = 'irreparable';
-                motivo = 'no hay fichero original NI pistas de audio en su carpeta';
+                motivo = 'no hay fichero original, ni pistas de audio, ni ninguna imagen en su carpeta';
             } else if (EJECUTAR) {
                 const buf = await portadaDelFichero(doc, carpeta);
                 if (Buffer.isBuffer(buf) && buf.length) {
@@ -145,7 +182,7 @@ async function main() {
                     // confunde con «no hay fichero» y se persigue el problema equivocado.
                     accion = 'irreparable';
                     motivo = (doc.audios || []).length
-                        ? `${doc.audios.length} pista(s) de audio, pero ninguna trae carátula embebida (ID3)`
+                        ? `${doc.audios.length} pista(s) de audio: ninguna trae carátula ID3 y no hay imagen suelta en su carpeta`
                         : 'hay fichero original, pero no se pudo extraer una imagen de él';
                 }
             } else {
