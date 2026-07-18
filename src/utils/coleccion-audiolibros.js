@@ -24,6 +24,9 @@ import { esDocumentoLeible, esMaterialNotable, esVideo, formatoDocumento } from 
 import { agregarMetadatos, esAudio, leerMetadatosAudio } from './lector-audio.js';
 import { reciclarCarpeta } from './papelera.js';
 import { resolverPersona } from './resolver-persona.js';
+
+// Carpeta OCULTA de portadas derivadas, misma convención que audiolibro.js (la sirve express con dotfiles:allow).
+const DIR_PORTADAS = '.portadas';
 import { copiarVerificado, huella, renderizarPortadaMiembro } from './transmedia.js';
 
 const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff'];
@@ -198,6 +201,9 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
             audios: pistas,
             imagenes: imagenesLibro,
             portadaRel: portadaLibroRel,
+            // Carátula EMBEBIDA en los mp3 (ID3/APIC). `agregarMetadatos` ya la busca en TODAS las pistas; aquí
+            // solo se conserva por si el libro no trae imagen suelta (ver más abajo, al insertar el doc).
+            portadaEmbebida: agg.portadaEmbebida || null,
         };
     }
 
@@ -424,7 +430,22 @@ export async function ingestarColeccionAudiolibros(dir, { db: dbArg, reciclarOri
             // Imágenes del LIBRO (cover + ilustraciones). La PORTADA (cover.jpg) se pone en TODOS los docs del
             // libro; las ILUSTRACIONES van al carrusel del audiolibro, o —si el libro no tiene audio (p. ej.
             // «Transformations»: solo PDFs+vídeos)— al primer PDF/vídeo, para que NO se pierdan.
-            const webPortadaLibro = m.portadaRel ? `${webLibro}/${m.portadaRel}` : null;
+            let webPortadaLibro = m.portadaRel ? `${webLibro}/${m.portadaRel}` : null;
+            // Si el libro NO trae imagen suelta (cover.jpg…) pero sus mp3 SÍ llevan carátula embebida (ID3),
+            // se extrae a `.portadas/`. Esto ya lo hacía el audiolibro SUELTO (audiolibro.js) y aquí faltaba:
+            // dos caminos paralelos y a este le faltaba la capacidad, así que los miembros de una colección se
+            // quedaban SIN portada aunque la carátula estuviera en los ficheros (caso «The Mammoth Book of Best
+            // New Horror v17», 23 pistas con carátula y ficha en blanco).
+            if (!webPortadaLibro && m.audiolibro?.portadaEmbebida?.buffer?.length) {
+                const emb = m.audiolibro.portadaEmbebida;
+                const dirP = path.join(absLibro, DIR_PORTADAS);
+                const nom = `portada.${String(emb.mime || '').includes('png') ? 'png' : 'jpg'}`;
+                try {
+                    await fs.mkdir(dirP, { recursive: true });
+                    await fs.writeFile(path.join(dirP, nom), emb.buffer);
+                    webPortadaLibro = `${webLibro}/${DIR_PORTADAS}/${nom}`;
+                } catch { /* si no se puede escribir, el doc queda sin portada: reparar-portadas la sacará luego */ }
+            }
             const imagenesLibro = (m.imagenes || []).map((im) => ({ ruta: `${webLibro}/${im.rel}`, tipo: (m.portadaRel && im.rel === m.portadaRel) ? 'portada' : 'otra' }));
             let imagenesSinDueno = m.audiolibro ? null : (imagenesLibro.length ? imagenesLibro : null); // se colocan en el 1er PDF/vídeo
 

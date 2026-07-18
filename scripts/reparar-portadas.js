@@ -86,8 +86,12 @@ async function portadaDelFichero(doc, carpeta) {
     // encuentra nada y se daba por «irreparable». Pero la carátula va EMBEBIDA en los propios mp3 (ID3/APIC) y
     // `leerMetadatosAudio` ya la devuelve. Se prueban las primeras pistas: la carátula suele estar en todas,
     // pero no siempre en la primera.
+    // Se miran TODAS las pistas (tope de seguridad 40), no solo las primeras: la carátula no siempre está en
+    // la pista 1 — en un audiolibro de 23 la puede llevar solo alguna. La ingesta ya hacía esto
+    // (`agregarMetadatos` → `validas.find(p => p.portada)`), así que reparar debe mirar igual de lejos; con un
+    // tope de 5 se perdían carátulas que SÍ estaban. Leer el ID3 es barato (parseFile no escanea el audio).
     const pistas = Array.isArray(doc.audios) ? doc.audios : [];
-    for (const a of pistas.slice(0, 5)) {
+    for (const a of pistas.slice(0, 40)) {
         const abs = absDe(a?.ruta);
         if (!abs || !(await existe(abs))) continue;
         const meta = await leerMetadatosAudio(abs).catch(() => null);
