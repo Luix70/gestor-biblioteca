@@ -37,6 +37,7 @@ import { resolverPortada } from '../src/utils/resolver-portada.js';
 import { extraerMetadatosEpub } from '../src/utils/lector-epub.js';
 import { leerPaginaDjvu } from '../src/utils/djvu.js';
 import { leerPaginaComic } from '../src/utils/comic-paginas.js';
+import { leerMetadatosAudio } from '../src/utils/lector-audio.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const idArg = (() => { const i = process.argv.indexOf('--id'); return i >= 0 ? process.argv[i + 1] : null; })();
@@ -51,6 +52,18 @@ const urlPortadaOL = (isbn) => `https://covers.openlibrary.org/b/isbn/${String(i
 
 // Extrae un buffer JPEG de la 1.ª página/cubierta del fichero ORIGINAL (según su tipo). null si no se puede.
 async function portadaDelFichero(doc, carpeta) {
+    // AUDIOLIBRO: no tiene fichero-documento (su contenido son las pistas), así que archivoOriginal no
+    // encuentra nada y se daba por «irreparable». Pero la carátula va EMBEBIDA en los propios mp3 (ID3/APIC) y
+    // `leerMetadatosAudio` ya la devuelve. Se prueban las primeras pistas: la carátula suele estar en todas,
+    // pero no siempre en la primera.
+    const pistas = Array.isArray(doc.audios) ? doc.audios : [];
+    for (const a of pistas.slice(0, 5)) {
+        const abs = absDe(a?.ruta);
+        if (!abs || !(await existe(abs))) continue;
+        const meta = await leerMetadatosAudio(abs).catch(() => null);
+        if (meta?.portada?.buffer?.length) return meta.portada.buffer;
+    }
+
     const original = await archivoOriginal(carpeta);
     if (!original) return null; // sin fichero (p. ej. 'papel' con las fotos perdidas) → no se puede extraer
     const tipo = detectarTipo(original);
@@ -79,7 +92,7 @@ async function main() {
         : soloSinPortada ? { $or: [{ portada: null }, { portada: { $exists: false } }, { portada: '' }] } : {};
     const proj = {
         titulo: 1, portada: 1, imagenes: 1, ruta_base: 1, cdu: 1, tipo_recurso: 1, isbn: 1, issn: 1, formatos: 1,
-        nombre_archivo: 1, obra: 1, isbn_obra: 1, obra_titulo: 1, volumen_numero: 1, año_edicion: 1, mes_publicacion: 1,
+        nombre_archivo: 1, audios: 1, obra: 1, isbn_obra: 1, obra_titulo: 1, volumen_numero: 1, año_edicion: 1, mes_publicacion: 1,
     };
     // Snapshot de ids primero (el trabajo por-doc es lento: rasteriza; evita CursorNotFound de Atlas).
     const ids = (await col.find(filtro, { projection: { _id: 1 } }).toArray()).map((d) => d._id);
@@ -115,8 +128,9 @@ async function main() {
             if (reusar) {
                 set.portada = reusar.ruta;
                 accion = 'reusar';
-            } else if (!(await archivoOriginal(carpeta))) {
-                accion = 'irreparable'; // sin imágenes válidas y sin fichero → no hay de dónde sacar portada
+            } else if (!(await archivoOriginal(carpeta)) && !(doc.audios || []).length) {
+                // Sin imágenes válidas, sin fichero-documento Y sin pistas de audio → no hay de dónde sacarla.
+                accion = 'irreparable';
             } else if (EJECUTAR) {
                 const buf = await portadaDelFichero(doc, carpeta);
                 if (Buffer.isBuffer(buf) && buf.length) {
