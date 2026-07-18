@@ -583,6 +583,12 @@ export async function planificarInbox() {
     }
 
     const plan = [];
+    // PRIMERO lo que pasa ANTES de clasificar: `procesarCola` corre `expandirComprimidos()` antes de listar
+    // unidades, así que un contenedor pendiente SE VA A ABRIR y su contenido se clasificará después. El plan
+    // tiene que decirlo: si no, enseña el árbol de AHORA y calla un paso que sí ocurre (y el usuario se queda
+    // pensando que su .tgz no se toca). No se expande nada aquí: solo se anuncia.
+    for (const c of await contenedoresPendientes(INBOX)) plan.push(c);
+
     for (const u of unidades) plan.push(u.esEmpaquetar ? await describirEmpaquetado(u) : describirUnidad(u));
 
     // ── Lo que se queda DENTRO de una carpeta que sí se procesa. Aquí es donde se pierden las cosas de
@@ -676,6 +682,38 @@ async function auditarSobrantes(carpeta, usadas, nivel = 8) {
     return fuera;
 }
 
+/**
+ * Contenedores que `expandirComprimidos` abriría en la próxima pasada (recursivo, mismas reglas: guía de cada
+ * carpeta, carpetas intacta/software/omitir no se recorren). SOLO OBSERVA: no expande ni toca nada.
+ * Existe porque el plan se calcula sobre el árbol de AHORA, y la expansión ocurre ANTES de clasificar.
+ */
+async function contenedoresPendientes(dir, nivel = 6, out = []) {
+    if (nivel < 0) return out;
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
+    const guia = await leerGuia(dir);
+    for (const e of ents) {
+        if (ignorarEntrada(e.name)) continue;
+        const ruta = path.join(dir, e.name);
+        if (e.isDirectory()) {
+            const g = await leerGuia(ruta);
+            if (!['intacta', 'software', 'omitir'].includes(g?.accion)) await contenedoresPendientes(ruta, nivel - 1, out);
+            continue;
+        }
+        if (!esContenedor(e.name)) continue;
+        const spec = guia?.archivos?.[e.name] || {};
+        const decidida = spec.accion || (spec.omitir ? 'omitir' : null);
+        if (decidida === 'omitir') continue;   // ya sale como excluido por su propia vía
+        const accion = decidida || defectoContenedor(e.name);
+        const rel = path.relative(INBOX, ruta).split(path.sep).join('/');
+        out.push(accion === 'software'
+            ? { tipo: 'contenedor → software', titulo: rel, documentos: 1, carpeta: path.relative(INBOX, dir) || null,
+                efecto: 'NO se abre: se conserva intacto y se cataloga como 1 registro de software.' }
+            : { tipo: 'contenedor → se abre', titulo: rel, documentos: null, carpeta: path.relative(INBOX, dir) || null,
+                efecto: `se EXPANDE a la carpeta «${baseSinContenedor(e.name)}» (junto a él) ANTES de clasificar, y su contenido se cataloga con este drop. El original va a la Papelera.` });
+    }
+    return out;
+}
 /** La entrada de PRIMER NIVEL del Inbox de la que cuelga una ruta (para casar unidades con lo que ves). */
 function primerNivel(ruta) {
     const rel = path.relative(INBOX, ruta);
