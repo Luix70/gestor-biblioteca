@@ -17,7 +17,8 @@ import { reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarIntacta, ingestarLibroConMaterial } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
-import { esAudio } from './utils/lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
+import { esAudio } from './utils/lector-audio.js';
+import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB } from './database.js';
@@ -504,6 +505,55 @@ async function tieneDescendientesGuiados(dir, nivel = 8) {
     return false;
 }
 
+/** Cuenta, recursivamente, ficheros de AUDIO y de DOCUMENTO bajo `dir` (para decidir qué manda dentro). */
+async function contarPorTipo(dir, nivel = 6) {
+    let audio = 0, docs = 0;
+    if (nivel < 0) return { audio, docs };
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return { audio, docs }; }
+    for (const e of ents) {
+        if (ignorarEntrada(e.name) || e.name === NOMBRE_GUIA) continue;
+        if (e.isDirectory()) {
+            const s = await contarPorTipo(path.join(dir, e.name), nivel - 1);
+            audio += s.audio; docs += s.docs;
+        } else if (esAudio(e.name)) audio++;
+        else if (esDocumentoLeible(e.name) || esContenedor(e.name)) docs++;
+    }
+    return { audio, docs };
+}
+
+/**
+ * ¿Carpeta MIXTA? Sus HIJOS son de dos naturalezas distintas: unos mandan audio y otros documentos.
+ *
+ * Sin esto, una descarga como «mammoth Books» (91 ebooks sueltos + UN audiolibro de 102 mp3) la reclamaba
+ * entera `esColeccionAudiolibros` —que dispara si encuentra CUALQUIER colección anidada— y se procesaba con el
+ * molde del audio: de ahí que «la mitad de los libros» no llegara al catálogo. La carpeta no es una colección
+ * de audiolibros: es una BOLSA de cosas distintas.
+ *
+ * Se mira a nivel de HIJO, no de fichero, y eso es lo que preserva el caso legítimo: en una colección de
+ * audiolibros de verdad (Campbell, Oxford) los PDF de guía viven DENTRO de cada libro-carpeta junto a su audio,
+ * así que todos los hijos son «de audio» → NO es mixta y sigue yendo a colección. Aquí, en cambio, los ebooks
+ * son hijos HERMANOS del audiolibro → mixta → se recorre como mini-Inbox y cada hijo se clasifica por su
+ * cuenta. Cero intervención del usuario.
+ */
+async function esCarpetaMixta(dir) {
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+    let hijosDoc = 0, hijosAudio = 0;
+    for (const e of ents) {
+        if (ignorarEntrada(e.name) || e.name === NOMBRE_GUIA) continue;
+        if (!e.isDirectory()) {
+            if (esAudio(e.name)) hijosAudio++;
+            else if (esDocumentoLeible(e.name) || esContenedor(e.name)) hijosDoc++;
+            continue;
+        }
+        const { audio, docs } = await contarPorTipo(path.join(dir, e.name));
+        if (audio > docs) hijosAudio++;
+        else if (docs > 0) hijosDoc++;
+    }
+    return hijosDoc >= 2 && hijosAudio >= 1;
+}
+
 async function listarUnidades() {
     const unidades = [];
     await clasificarDirectorio(INBOX, true, unidades);
@@ -595,7 +645,13 @@ export async function planificarInbox() {
     // pensando que su .tgz no se toca). No se expande nada aquí: solo se anuncia.
     for (const c of await contenedoresPendientes(INBOX)) plan.push(c);
 
-    for (const u of unidades) plan.push(u.esEmpaquetar ? await describirEmpaquetado(u) : describirUnidad(u));
+    for (const u of unidades) {
+        // Un contenedor RECONOCIDO ya lo anunció `contenedoresPendientes` (se expandirá antes de clasificar y
+        // nunca llegará aquí como unidad real). Repetirlo sería contarlo dos veces y contradecirse.
+        const soloRuta = (u.rutas || []).length === 1 ? u.rutas[0] : null;
+        if (soloRuta && esContenedor(path.basename(soloRuta))) continue;
+        plan.push(u.esEmpaquetar ? await describirEmpaquetado(u) : describirUnidad(u));
+    }
 
     // ── Lo que se queda DENTRO de una carpeta que sí se procesa. Aquí es donde se pierden las cosas de
     //    verdad: un .tgz dentro de «Mammoth Books» no es una unidad, así que no sale en el plan ni deja
@@ -603,17 +659,27 @@ export async function planificarInbox() {
     //    las carpetas que se catalogan FICHERO A FICHERO: en transmedia/software/intacta/audiolibro la
     //    carpeta se conserva ENTERA, así que ahí nada se queda fuera.
     const preservada = (u) => u.esTransmedia || u.esSoftware || u.esIntacta || u.esLibroMaterial || u.esColeccionAudio || u.esAudiolibro;
-    const porCarpeta = new Map();
-    for (const u of unidades) {
-        if (!u.carpeta || preservada(u)) continue;
-        if (!porCarpeta.has(u.carpeta)) porCarpeta.set(u.carpeta, new Set());
-        for (const r of u.rutas || []) porCarpeta.get(u.carpeta).add(r);
-    }
-    for (const [carpeta, usadas] of porCarpeta) {
-        for (const s of await auditarSobrantes(carpeta, usadas)) plan.push({
-            tipo: 'sobrante', carpeta: path.relative(INBOX, carpeta), titulo: s.fichero,
-            documentos: 0, efecto: s.detalle, motivo: s.motivo, grave: s.grave,
-        });
+    // Los ficheros «usados» se cuentan de TODAS las unidades, no solo de las de esa carpeta: la auditoría es
+    // RECURSIVA, así que al mirar una carpeta padre se topa con ficheros que pertenecen a unidades de sus
+    // HIJAS. Con un conjunto por-carpeta se denunciaban como «no entran» 72 libros que sí se catalogan —
+    // exactamente el ruido que hace que un informe deje de creerse.
+    const usadas = new Set();
+    for (const u of unidades) for (const r of u.rutas || []) usadas.add(r);
+    const carpetas = new Set();
+    for (const u of unidades) if (u.carpeta && !preservada(u)) carpetas.add(u.carpeta);
+    // Las auditorías se solapan (se recorre desde la padre Y desde la hija) → un mismo fichero saldría varias
+    // veces. Se deduplica por ruta: un aviso repetido es ruido, y el ruido es lo que hace que no se lea.
+    const yaAvisado = new Set();
+    for (const carpeta of carpetas) {
+        for (const s of await auditarSobrantes(carpeta, usadas)) {
+            const clave = path.join(carpeta, s.fichero);
+            if (yaAvisado.has(clave)) continue;
+            yaAvisado.add(clave);
+            plan.push({
+                tipo: 'sobrante', carpeta: path.relative(INBOX, carpeta), titulo: s.fichero,
+                documentos: 0, efecto: s.detalle, motivo: s.motivo, grave: s.grave,
+            });
+        }
     }
 
     // ── Lo que NO va a entrar. Se calcula por DIFERENCIA: todo lo de primer nivel del Inbox que no aparece en
@@ -677,6 +743,14 @@ async function auditarSobrantes(carpeta, usadas, nivel = 8) {
             if (esContenedor(e.name)) continue;
             const x = extLarga(e.name);
             const rel = path.relative(carpeta, p);
+            // DESCARGA INCOMPLETA: no es un libro (está a medias), pero tampoco es basura — el usuario querrá
+            // completarla o borrarla. Se AVISA en vez de ignorarla en silencio: «mínimas pérdidas» empieza por
+            // saber qué hay. No es grave (no se pierde nada: el fichero se queda donde está).
+            if (/\.(part|crdownload|opdownload|!ut|partial)$/i.test(e.name)) {
+                fuera.push({ fichero: rel, motivo: 'descarga incompleta', grave: false,
+                    detalle: 'está a medio bajar, así que NO se cataloga (sería un libro roto). Complétala o bórrala; se queda donde está.' });
+                continue;
+            }
             if (EXT_CONTENEDOR_NO_SOPORTADO.includes(x)) {
                 fuera.push({ fichero: rel, motivo: 'contenedor NO soportado', grave: true,
                     detalle: `«${x}» no se reconoce: ni se cataloga ni se abre. Lo que haya dentro NO entra y no queda rastro. Extráelo a mano.` });
@@ -770,13 +844,6 @@ function describirUnidad(u) {
     if (u.esColeccionAudio) return { ...base, tipo: 'colección de audiolibros', titulo: nombre(u.carpeta), documentos: null, efecto: 'una colección con un documento por libro (el audio manda).' };
     if (u.esAudiolibro) return { ...base, tipo: 'audiolibro', titulo: nombre(u.carpeta), documentos: 1, efecto: '1 documento con playlist; las pistas se conservan (ruta_fija).' };
     if (u.esImagenes) return { ...base, tipo: 'libro escaneado', titulo: nombre(u.carpeta) || nombre(u.rutas?.[0]), documentos: 1, efecto: `1 documento a partir de ${(u.rutas || []).length} imágenes.` };
-    // CONTENEDOR ANIDADO: está en EXT_VALIDAS, así que recopilarDocumentos SÍ lo recoge y se cataloga… como
-    // una ficha del propio .zip, SIN abrirlo — los contenedores solo se expanden en la RAÍZ del Inbox
-    // (expandirComprimidos). Los documentos de dentro no entran. Se avisa: parece catalogado y no lo está.
-    if (EXT_COMPRIMIDO.includes(path.extname(u.rutas?.[0] || '').toLowerCase())) {
-        return { ...base, tipo: 'contenedor anidado', titulo: nombre(u.rutas?.[0]), documentos: 1, grave: true, fichero: nombre(u.rutas?.[0]),
-            efecto: 'se catalogará como UNA ficha del contenedor, SIN abrirlo: los documentos de dentro NO entran (solo se expanden los contenedores de la raíz del Inbox). Sácalo a la raíz del Inbox para que se abra.' };
-    }
     return {
         ...base, tipo: u.coleccion ? 'documento (en colección)' : 'documento suelto',
         titulo: nombre(u.rutas?.[0]), documentos: 1, fichero: nombre(u.rutas?.[0]),
@@ -871,6 +938,15 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
             // detecta/guía por su cuenta (obra, software, audiolibro, colección, doc suelto…).
             if (await tieneDescendientesGuiados(ruta)) {
                 dropsADisolver.add(ruta); // buzón que se disuelve al vaciarse (sus hijos se catalogan aparte)
+                await clasificarDirectorio(ruta, false, unidades);
+                continue;
+            }
+            // MIXTA: hijos de dos naturalezas (unos audio, otros documentos) → NO dejar que una heurística se
+            // trague el bloque. Se recurre igual que con las guías, pero SIN que el usuario tenga que marcar
+            // nada: es una bolsa de cosas distintas y cada hija se clasifica por su cuenta.
+            if (await esCarpetaMixta(ruta)) {
+                console.log(`  🧩 ${e.name}: carpeta MIXTA (audio + documentos) → se recorre por dentro.`);
+                dropsADisolver.add(ruta);
                 await clasificarDirectorio(ruta, false, unidades);
                 continue;
             }
