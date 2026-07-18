@@ -311,6 +311,13 @@ function docHtml(x, base) {
     const campo = (k, v) => (v ? `<div><span class="k">${k}</span><span class="mono">${escH(v)}</span></div>` : '');
     // Las rutas de CARPETA se enlazan a su explorador: toda ruta del informe tiene que poder abrirse.
     const campoRuta = (k, v) => (v ? `<div><span class="k">${k}</span>${carpetaHtml(v, base)}</div>` : '');
+    // El ARCHIVO del propio doc, enlazado al fichero real (/recursos/<ruta>/<archivo>): abrir el pdf/epub sin
+    // salir del informe. Si su carpeta falta, cae a texto plano (no hay a dónde apuntar).
+    const campoArchivo = (v) => {
+        if (!v) return '';
+        const url = base && x.ruta ? encodeURI(`${base}${x.ruta}/${v}`) : null;
+        return `<div><span class="k">archivo</span>${url ? `<a class="mono" href="${escH(url)}" target="_blank" rel="noopener">${escH(v)}</a>` : `<span class="mono">${escH(v)}</span>`}</div>`;
+    };
     const pistas = Array.isArray(x.pistas) && x.pistas.length
         ? `<ul class="pistas mono">${x.pistas.map((p) => `<li>${escH(p)}</li>`).join('')}</ul>` : '';
     // LO QUE SÍ HAY en la carpeta, con cada fichero ENLAZADO. Se enlazan los FICHEROS, no la carpeta: el árbol
@@ -327,7 +334,7 @@ function docHtml(x, base) {
             : `<div><span class="k">hay dentro</span><span class="mono">nada: la carpeta está vacía</span></div>`;
     }
     return cab + `<div class="campos">`
-        + campo('id', x.id) + campo('archivo', x.archivo) + campoRuta('ruta', x.ruta)
+        + campo('id', x.id) + campoArchivo(x.archivo) + campoRuta('ruta', x.ruta)
         + campo('isbn', x.isbn) + campo('issn', x.issn) + campo('cdu', x.cdu)
         + campo('formatos', (x.formatos || []).join(', ')) + campo('faltan', x.faltan)
         + (x.enDisco ? campoRuta('en disco', x.enDisco) + campoRuta('en BD', x.enBD) : '')

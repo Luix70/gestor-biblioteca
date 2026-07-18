@@ -1286,6 +1286,12 @@ de ficheros clasificado por CDU.
       contenido (solo nombres y tamaños). Los FICHEROS sí se enlazan directos a /recursos (esos sí se
       sirven, y pdf/imágenes salen inline). Blindaje con path.relative (no startsWith: resolve normaliza
       los separadores y comparar cadenas mezcla «/» con «\» → rechaza rutas legítimas y acepta «CDU-otro»).
+      Lo mismo EN EL PANEL, no solo en el informe descargable: al abrir el detalle de una fila del
+      diagnóstico (drillInteg), CADA elemento trae sus tres enlaces para la visión completa — el TÍTULO
+      → ficha en el Catálogo, el ARCHIVO → el fichero real (/recursos, pestaña nueva), la RUTA → el
+      explorador de carpeta (modal popup, sin perder el detalle debajo) + «hay dentro» con cada fichero
+      abrible. Ramas muertas, huérfanas y registro-sin-doc muestran su ruta clicable (antes las dos
+      últimas caían a JSON en crudo).
     · 🩺 INTEGRIDAD — el informe .txt (admin): la tabla del panel enseña los
       recuentos y, al pinchar una fila, una MUESTRA de 12 casos. Para trabajar de
       verdad está «⬇ Informe (.txt)»: descarga el informe COMPLETO del diagnóstico

@@ -8777,35 +8777,79 @@ function drillInteg(mk, m) {
     el.innerHTML = '';
     return;
   }
-  const dl = (x) =>
-    `<a class="rowlink" data-doc="${esc(x.id)}">${esc(x.titulo || x.id)}</a>${x.archivo ? ` <span class="muted mono">(${esc(x.archivo)})</span>` : ''}${x.isbn ? ` <span class="muted mono">ISBN ${esc(x.isbn)}</span>` : ''}`;
+  // TODA ruta de carpeta es CLICABLE → abre el explorador (modal). Es lo que el usuario pidió: poder entrar en
+  // las 160 «ramas vacías» y verificar su contenido SIN salir del panel (no solo desde el informe HTML). Es
+  // una ruta /recursos/…; los nombres de depósito de Cuarentena (que no lo son) se pintan en plano.
+  const carp = (ruta) =>
+    ruta && String(ruta).startsWith('/recursos/')
+      ? `<a class="rowlink mono" data-carp="${esc(ruta)}" title="Explorar esta carpeta">${esc(ruta)}</a>`
+      : `<span class="mono">${esc(ruta || '')}</span>`;
+  // Fichero clicable → /recursos (estático público; pdf/imágenes salen inline). Abre en pestaña nueva.
+  const fich = (ruta, nombre) =>
+    `<a href="${esc(encUrl(ruta + '/' + nombre))}" target="_blank" rel="noopener" class="mono">${esc(nombre)}</a>`;
+  // «Hay dentro»: los ficheros REALES de la carpeta, cada uno abrible. Vacía → se dice.
+  const dentro = (ruta, contenido) => {
+    if (!Array.isArray(contenido)) return '';
+    if (!contenido.length) return `<div class="muted" style="font-size:12px;padding-left:16px">(vacía)</div>`;
+    return `<div style="padding-left:16px;font-size:12px;line-height:1.7">${contenido
+      .map((c) => `· ${fich(ruta, c)}`)
+      .join('<br>')}</div>`;
+  };
+  // Un documento con sus TRES enlaces, para tener la visión completa sin salir del detalle:
+  //   · el TÍTULO → su ficha en el Catálogo (data-doc → verDoc)
+  //   · el ARCHIVO → el fichero real (pdf/epub…) en /recursos, en pestaña nueva
+  //   · (la carpeta y el «hay dentro» los añade cada categoría con carp()/dentro())
+  const dl = (x) => {
+    const ficha = `<a class="rowlink" data-doc="${esc(x.id)}">${esc(x.titulo || x.id)}</a>`;
+    const arch = x.archivo
+      ? x.ruta
+        ? ` (${fich(x.ruta, x.archivo)})`
+        : ` <span class="muted mono">(${esc(x.archivo)})</span>`
+      : '';
+    const isbn = x.isbn ? ` <span class="muted mono">ISBN ${esc(x.isbn)}</span>` : '';
+    return ficha + arch + isbn;
+  };
   let h = '';
   if (mk === 'hashDuplicados')
     h = arr.map((g) => `<div class="intgrp">${g.docs.map(dl).join(' · ')}</div>`).join('');
   else if (mk === 'rutaBaseCompartida')
     h = arr
-      .map(
-        (g) =>
-          `<div class="intgrp"><span class="mono">${esc(g.ruta || '')}</span><br>${g.docs.map(dl).join('<br>')}</div>`,
-      )
+      .map((g) => `<div class="intgrp">${carp(g.ruta)}<br>${g.docs.map(dl).join('<br>')}</div>`)
       .join('');
   else if (mk === 'rutaBaseDesajustada')
     h = arr
       .map(
         (x) =>
-          `<div class="intgrp">${dl(x)}<br><span class="muted">disco</span> <span class="mono">${esc(x.enDisco || '')}</span></div>`,
+          `<div class="intgrp">${dl(x)}<br><span class="muted">disco</span> ${carp(x.enDisco)}<br><span class="muted">BD</span> ${carp(x.enBD)}</div>`,
       )
       .join('');
-  else if (mk === 'docsSinCarpeta' || mk === 'docsSinFicheroOriginal')
+  else if (mk === 'docsSinFicheroOriginal')
+    // El caso más importante: doc + su carpeta explorable + lo que HAY dentro (el fichero puede estar con otro
+    // nombre, o ser el de otro doc que comparte carpeta — el caso «Endangered Species»).
+    h = arr
+      .map((x) => `<div class="intgrp">${dl(x)}<br>${carp(x.ruta)}${dentro(x.ruta, x.contenido)}</div>`)
+      .join('');
+  else if (mk === 'docsSinCarpeta')
+    h = arr.map((x) => `<div class="intgrp">${dl(x)}<br>${carp(x.ruta)}</div>`).join('');
+  else if (mk === 'docsConAudiosRotos')
     h = arr
       .map(
         (x) =>
-          `<div class="intgrp">${dl(x)}${x.ruta ? ` → <span class="mono">${esc(x.ruta)}</span>` : ''}</div>`,
+          `<div class="intgrp">${dl(x)} <span class="muted">${esc(x.faltan || '')}</span>${carp(x.ruta) && x.ruta ? '<br>' + carp(x.ruta) : ''}${Array.isArray(x.pistas) ? `<div style="padding-left:16px;font-size:12px;color:var(--warn)">${x.pistas.map((p) => '· ' + esc(p)).join('<br>')}</div>` : ''}</div>`,
       )
       .join('');
+  else if (mk === 'carpetasHuerfanas' || mk === 'registroSinDocumento')
+    // Objetos {ruta, contenido}: carpeta explorable + sus ficheros. (Antes caían en el else → JSON en crudo.)
+    h = arr.map((x) => `<div class="intgrp">${carp(x.ruta)}${dentro(x.ruta, x.contenido)}</div>`).join('');
+  else if (mk === 'ramasMuertas')
+    // Rutas sueltas: clicables para VERIFICAR que están vacías antes de podar. Justo lo que pidió el usuario.
+    h = arr.map((x) => `<div class="intgrp">${carp(x)}</div>`).join('');
   else
     h = arr
-      .map((x) => `<div class="intgrp mono">${esc(typeof x === 'string' ? x : JSON.stringify(x))}</div>`)
+      .map(
+        (x) =>
+          `<div class="intgrp">${typeof x === 'string' ? carp(x) : `<span class="mono">${esc(JSON.stringify(x))}</span>`}</div>`,
+      )
       .join('');
   el.innerHTML = `<div class="card" style="background:var(--card2);margin:0"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><b>Detalle (${arr.length})</b><button class="btn" id="intX">✕</button></div><div style="margin-top:8px;font-size:13px;line-height:1.6">${h}</div></div>`;
   $('#intX').onclick = () => {
@@ -8814,6 +8858,8 @@ function drillInteg(mk, m) {
   $$('#integDetalle [data-doc]').forEach(
     (a) => (a.onclick = () => verDoc(a.dataset.doc, { volver: 'activity', etiqueta: 'Integridad' })),
   );
+  // Cada ruta abre el explorador de carpeta (mismo modal que el deep-link del informe).
+  $$('#integDetalle [data-carp]').forEach((a) => (a.onclick = () => explorarCarpeta(a.dataset.carp)));
 }
 // ── Inbox OPERATIVO: subir ficheros/fotos con METADATOS que VIAJAN (ISBN/colección/obra/ubicación) ──
 let inboxWired = false,
