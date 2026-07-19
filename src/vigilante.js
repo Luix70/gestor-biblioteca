@@ -1479,14 +1479,24 @@ async function empaquetarCarpetaGuiada(dir, guia) {
     }
 }
 
-/** Todos los ficheros de un árbol (para reciclarlos tras verificar el empaquetado). Ignora la guía. */
+/**
+ * TODOS los ficheros de un árbol, para reciclarlos tras verificar el empaquetado.
+ *
+ * OJO con lo que se salta: aquí NO vale `ignorarEntrada`, que descarta todo lo que empieza por punto. Una
+ * carpeta de datos del usuario puede llamarse «.jpg» (las enciclopedias de grabados traen ahí las versiones de
+ * baja resolución) y entonces sus imágenes NO se recogían… pero la línea siguiente del llamante borra las
+ * subcarpetas SIN filtrar los puntos → se BORRABAN sin pasar por la Papelera. El mismo fallo que cerramos en
+ * integridad.js. Aquí el defecto es RECICLAR DE MÁS: la Papelera es recuperable; borrar, no.
+ * Solo se saltan la basura real del sistema (@eaDir de Synology, #recycle, .DS_Store, Thumbs.db) y la guía.
+ */
+const ES_BASURA_SISTEMA = (n) => n.startsWith('@') || n.startsWith('#') || n === '.DS_Store' || n === 'Thumbs.db';
 async function recopilarTodo(dir, nivel = 8) {
     const out = [];
     if (nivel < 0) return out;
     let ents;
     try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
     for (const e of ents) {
-        if (ignorarEntrada(e.name) || e.name === NOMBRE_GUIA) continue;
+        if (ES_BASURA_SISTEMA(e.name) || e.name === NOMBRE_GUIA) continue;
         const p = path.join(dir, e.name);
         if (e.isDirectory()) out.push(...await recopilarTodo(p, nivel - 1));
         else out.push(p);
