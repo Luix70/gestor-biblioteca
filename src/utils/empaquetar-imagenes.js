@@ -311,30 +311,47 @@ async function escribirCbz(imagenes, destino) {
  * @returns {Promise<{ok, tomos: [{nombre, ruta, paginas}], multivolumen, motivo?}>}
  */
 export async function empaquetarImagenes(dir, dirDestino, { alcance = 'subcarpetas' } = {}) {
-    const plan = await planEmpaquetado(dir, { alcance });
-    if (!plan.tomos.length) return { ok: false, motivo: 'no se encontraron imágenes que empaquetar' };
-    // RED DE SEGURIDAD: si alguna lámina no se pudo convertir a imagen, NO se empaqueta. Hacerlo dejaría esas
-    // láminas fuera del cbz y, acto seguido, el llamante reciclaría los originales a la Papelera: pérdida real.
-    // Mejor no empaquetar y que el usuario lo vea.
-    if (plan.fallidos?.length)
-        return { ok: false, motivo: `no se pudieron convertir a imagen ${plan.fallidos.length} lámina(s): ${plan.fallidos.slice(0, 3).join(', ')}${plan.fallidos.length > 3 ? '…' : ''}` };
-
+    // OJO: aquí NO se llama a `planEmpaquetado`. Hacerlo duplicaba TODO el trabajo pesado —extraer cada
+    // comprimido y convertir cada PDF— porque el plan recorre lo mismo que luego se empaqueta. Con una
+    // enciclopedia de miles de láminas eso son horas de más, en silencio. Se recoge UNA vez y de ahí salen
+    // tanto los tomos como los fallos.
     const hechos = [];
     const grupos = [];
+    const fallidos = [];
+    const log = (m) => { try { console.log(`  📚 ${m}`); } catch { /* el log nunca rompe */ } };
+
     if (alcance === 'todo') {
         // TODO el árbol en un documento: un grupo único (se partirá por tamaño si hace falta).
+        log(`empaquetando «${path.basename(dir)}» (todo el árbol): recogiendo láminas…`);
         const todas = await todasLasImagenes(dir);
+        fallidos.push(...(todas.fallidos || []));
         grupos.push({ base: path.basename(dir), imagenes: todas.imagenes, tmps: todas.tmps });
+        log(`«${path.basename(dir)}»: ${todas.imagenes.length} lámina(s) listas`);
     } else {
-        // Se recogen igual que en el plan (raíz + una subcarpeta por tomo), pero AHORA sí extrayendo de verdad.
+        const subs = (await leer(dir)).filter((e) => e.isDirectory());
+        log(`empaquetando «${path.basename(dir)}»: ${subs.length} subcarpeta(s) que revisar…`);
         const propias = await imagenesDe(dir);
+        fallidos.push(...(propias.fallidos || []));
         if (propias.imagenes.length) grupos.push({ base: path.basename(dir), ...propias, tmps: [propias.tmp] });
-        for (const e of await leer(dir)) {
-            if (!e.isDirectory()) continue;
+        let i = 0;
+        for (const e of subs) {
+            i++;
             const r = await imagenesDe(path.join(dir, e.name));
+            fallidos.push(...(r.fallidos || []));
             if (r.imagenes.length) grupos.push({ base: e.name, ...r, tmps: [r.tmp] });
+            // Progreso por subcarpeta: extraer y convertir cientos de láminas tarda, y sin esto el proceso
+            // PARECE colgado (es justo lo que le pasó al usuario: media hora sin una línea).
+            log(`[${i}/${subs.length}] «${e.name}»: ${r.imagenes.length} lámina(s)`);
         }
     }
+
+    if (fallidos.length) {
+        await limpiar(grupos.flatMap((g) => g.tmps || []));
+        // RED DE SEGURIDAD: si alguna lámina no se pudo convertir a imagen, NO se empaqueta. Empaquetar
+        // dejándolas fuera y reciclar después los originales sería una pérdida real.
+        return { ok: false, motivo: `no se pudieron convertir a imagen ${fallidos.length} lámina(s): ${fallidos.slice(0, 3).join(', ')}${fallidos.length > 3 ? '…' : ''}` };
+    }
+    if (!grupos.length) return { ok: false, motivo: 'no se encontraron imágenes que empaquetar' };
 
     try {
         for (const g of grupos) {
@@ -345,6 +362,7 @@ export async function empaquetarImagenes(dir, dirDestino, { alcance = 'subcarpet
                 const r = await escribirCbz(trozo, path.join(dirDestino, `${nombre.replace(/[/\\:*?"<>|]/g, '_')}.cbz`));
                 if (!r.ok) return { ok: false, motivo: `«${nombre}»: ${r.motivo}` };
                 hechos.push({ nombre, ruta: r.ruta, paginas: r.paginas, bytes: sumaBytes(trozo) });
+                log(`✔ «${nombre}.cbz» escrito y verificado: ${r.paginas} página(s)`);
             }
         }
     } finally {
