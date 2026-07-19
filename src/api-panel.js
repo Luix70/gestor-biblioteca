@@ -1908,6 +1908,12 @@ export function rutasPanel() {
             if (!OPERACIONES.includes(operacion)) return res.status(400).json({ ok: false, motivo: 'operación no válida' });
             const rutas = Array.isArray(req.body?.rutas) ? req.body.rutas : [];
             if (!rutas.length) return res.status(400).json({ ok: false, motivo: 'no has seleccionado nada' });
+            // GUARDA: preparar el árbol a mano MIENTRAS el vigilante lo está catalogando es una condición de
+            // carrera — él expande y mueve por su cuenta, tú aplanas por la tuya, y el resultado es imprevisible
+            // (ficheros a medio mover, unidades clasificadas sobre un árbol que ya cambió). Se exige pausarlo.
+            // Solo bloquea la EJECUCIÓN: previsualizar es de solo lectura y siempre se permite.
+            if (req.body?.ejecutar === true && estadoVigilante()?.activo)
+                return res.status(409).json({ ok: false, motivo: 'PAUSA el Vigilante antes de preparar el árbol: si él cataloga mientras tú mueves ficheros, os pisáis.' });
             // Cada ruta se valida contra el Inbox: nada de «..» ni de salirse del árbol.
             const absolutas = [];
             for (const r0 of rutas) {

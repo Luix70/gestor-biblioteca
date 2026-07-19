@@ -78,6 +78,20 @@ const EJECUTAR = flag('--ejecutar');
 escribir(`\n${EJECUTAR ? '⚙️  EJECUTAR' : '🔍 DRY-RUN'} · ${operacion}${extra.soloUnicas ? ' (solo carpetas de 1 fichero)' : ''}${flag('--propagar') ? ' (propagando)' : ''}`);
 escribir(`   ${absolutas.length} ruta(s) · Inbox: ${INBOX}\n`);
 
+// GUARDA: si el Vigilante está ACTIVO, él también está moviendo ficheros del Inbox (expandiendo, agrupando,
+// catalogando). Preparar el árbol a la vez es una condición de carrera con resultado imprevisible. Solo se
+// bloquea la EJECUCIÓN: el dry-run es de solo lectura y siempre corre.
+if (EJECUTAR) {
+    const { estadoVigilante } = await import('../src/vigilante.js');
+    if (estadoVigilante()?.activo) {
+        escribir('');
+        escribir('⛔ El Vigilante está ACTIVO. Pausa el Vigilante antes de preparar el árbol:');
+        escribir('   si él cataloga mientras tú mueves ficheros, os pisáis.');
+        escribir('');
+        process.exit(1);
+    }
+}
+
 const r = await utilidadInbox({ operacion, absolutas, propagar: flag('--propagar'), ejecutar: EJECUTAR, extra });
 if (!r.ok) { escribir(`⛔ ${r.motivo}\n`); process.exit(1); }
 
