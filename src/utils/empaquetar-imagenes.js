@@ -82,6 +82,19 @@ const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
  * DEBE tratarlo como fallo (nunca omitir la lámina en silencio: los originales se reciclan después).
  */
 const PDF_DPI = Number(process.env.CBZ_PDF_DPI) || 300;
+// Cada cuántas láminas se informa. Dentro de un tomo pueden ser cientos y cada conversión tarda segundos: sin
+// esto el proceso parece MUERTO durante una hora (le pasó al usuario dos veces).
+const AVISO_CADA = Number(process.env.CBZ_AVISO_CADA) || 25;
+let _convertidos = 0, _rasterizados = 0;
+export function progresoConversion() { return { convertidos: _convertidos, rasterizados: _rasterizados }; }
+function _avisar(nombre, via) {
+    _convertidos++;
+    if (via === 'raster') _rasterizados++;
+    if (_convertidos % AVISO_CADA === 0) {
+        const extra = _rasterizados ? ` · ${_rasterizados} rasterizadas (más lento)` : '';
+        try { console.log(`  📚 … ${_convertidos} lámina(s) convertidas${extra}`); } catch { /* */ }
+    }
+}
 async function imagenesDePdf(pdf, destDir) {
     await fs.mkdir(destDir, { recursive: true });
     const base = path.join(destDir, 'p');
@@ -96,7 +109,20 @@ async function imagenesDePdf(pdf, destDir) {
         try {
             await execFileP('pdfimages', ['-j', pdf, base], { timeout: 300000 });
             const salidas = (await fs.readdir(destDir)).filter((n) => n.startsWith('p-') && ES_IMG.test(n)).sort();
-            if (salidas.length === paginas) return salidas.map((n) => path.join(destDir, n));
+            if (salidas.length === paginas) { _avisar(pdf, 'embebida'); return salidas.map((n) => path.join(destDir, n)); }
+            // UNA página con VARIAS imágenes embebidas: es el caso típico de una lámina escaneada que lleva el
+            // escaneo + una máscara/estarcido (JBIG2) o una miniatura. Se coge la MÁS GRANDE, que es el escaneo
+            // — sigue siendo sin pérdida y evita el rasterizado, que en el Atom cuesta 10-30 s por lámina
+            // frente a menos de uno. Sin esto, una colección entera se iba por el camino lento.
+            if (paginas === 1 && salidas.length > 1) {
+                let mejor = null, mejorTam = -1;
+                for (const n of salidas) {
+                    const t = (await fs.stat(path.join(destDir, n)).catch(() => ({ size: 0 }))).size;
+                    if (t > mejorTam) { mejorTam = t; mejor = n; }
+                }
+                for (const n of salidas) if (n !== mejor) await fs.rm(path.join(destDir, n), { force: true }).catch(() => {});
+                if (mejor) { _avisar(pdf, 'embebida'); return [path.join(destDir, mejor)]; }
+            }
             // No cuadra: se descarta lo extraído y se rasteriza (mejor una página fiel que trozos sueltos).
             for (const n of salidas) await fs.rm(path.join(destDir, n), { force: true }).catch(() => {});
         } catch { /* pdfimages no pudo: se rasteriza */ }
@@ -104,6 +130,7 @@ async function imagenesDePdf(pdf, destDir) {
     // 2) Rasterizado fiel, una imagen por página.
     try {
         await execFileP('pdftoppm', ['-jpeg', '-r', String(PDF_DPI), pdf, base], { timeout: 600000 });
+        _avisar(pdf, 'raster');
         return (await fs.readdir(destDir)).filter((n) => n.startsWith('p-') && ES_IMG.test(n)).sort()
             .map((n) => path.join(destDir, n));
     } catch { return []; }
