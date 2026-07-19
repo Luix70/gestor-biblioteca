@@ -25,10 +25,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { extraerArchivoComic } from './extraer-archivo.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileP = promisify(execFile);
 
 const ES_IMG = /\.(jpe?g|png|webp|gif|bmp|avif|tiff?)$/i;
 // Comprimidos que pueden traer imágenes dentro (una lámina por fichero es un patrón habitual de archivo).
 const ES_COMPR = /\.(rar|zip|7z|cbz|cbr|cb7|tar|tgz|gz)$/i;
+const ES_PDF = /\.pdf$/i;
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#');
 const ORDEN = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 
@@ -62,6 +66,49 @@ const limpiar = async (tmps) => { for (const t of (tmps || []).filter(Boolean)) 
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
+/**
+ * PDF → imágenes, para que una lámina en PDF pueda entrar en el cbz (un cbz es un archivo de IMÁGENES: un
+ * visor paginado no renderiza un pdf de dentro). Muy habitual en colecciones de grabados: cada lámina viene
+ * como un pdf de UNA página, a veces dentro de su propio comprimido.
+ *
+ * Dos vías, y la primera es la buena:
+ *  1) `pdfimages -j` EXTRAE la imagen embebida con SUS BYTES ORIGINALES (un escaneo es un JPEG dentro de un
+ *     pdf) → CERO pérdida de calidad. Solo se acepta si salen tantas imágenes como páginas: así se sabe que
+ *     cada página ES una imagen, y no una página compuesta por trozos (que saldría despedazada).
+ *  2) Si no cuadra (pdf vectorial, o página hecha de varias piezas) se RASTERIZA con `pdftoppm -jpeg`, que da
+ *     una imagen fiel por página. Se pierde algo frente al original, pero es la representación correcta.
+ *
+ * Devuelve las rutas de las imágenes generadas, en orden de página. Vacío = no se pudo convertir; el llamante
+ * DEBE tratarlo como fallo (nunca omitir la lámina en silencio: los originales se reciclan después).
+ */
+const PDF_DPI = Number(process.env.CBZ_PDF_DPI) || 300;
+async function imagenesDePdf(pdf, destDir) {
+    await fs.mkdir(destDir, { recursive: true });
+    const base = path.join(destDir, 'p');
+    let paginas = 0;
+    try {
+        const { stdout } = await execFileP('pdfinfo', [pdf], { timeout: 60000 });
+        paginas = Number((stdout.match(/Pages:\s*(\d+)/i) || [])[1]) || 0;
+    } catch { /* sin pdfinfo no se puede validar el cuadre → se irá a rasterizar */ }
+
+    // 1) Extracción SIN pérdida de las imágenes embebidas.
+    if (paginas > 0) {
+        try {
+            await execFileP('pdfimages', ['-j', pdf, base], { timeout: 300000 });
+            const salidas = (await fs.readdir(destDir)).filter((n) => n.startsWith('p-') && ES_IMG.test(n)).sort();
+            if (salidas.length === paginas) return salidas.map((n) => path.join(destDir, n));
+            // No cuadra: se descarta lo extraído y se rasteriza (mejor una página fiel que trozos sueltos).
+            for (const n of salidas) await fs.rm(path.join(destDir, n), { force: true }).catch(() => {});
+        } catch { /* pdfimages no pudo: se rasteriza */ }
+    }
+    // 2) Rasterizado fiel, una imagen por página.
+    try {
+        await execFileP('pdftoppm', ['-jpeg', '-r', String(PDF_DPI), pdf, base], { timeout: 600000 });
+        return (await fs.readdir(destDir)).filter((n) => n.startsWith('p-') && ES_IMG.test(n)).sort()
+            .map((n) => path.join(destDir, n));
+    } catch { return []; }
+}
+
 /** Entradas de un directorio, ya filtradas y ordenadas naturalmente. Nunca lanza. */
 async function leer(dir) {
     try { return (await fs.readdir(dir, { withFileTypes: true })).filter((e) => !ignorar(e.name)).sort((a, b) => ORDEN(a.name, b.name)); }
@@ -78,6 +125,10 @@ async function imagenesDe(dir) {
     const imagenes = ents.filter((e) => e.isFile() && ES_IMG.test(e.name)).map((e) => ({ nombre: e.name, abs: path.join(dir, e.name) }));
     const medir = async (im) => { try { im.bytes = (await fs.stat(im.abs)).size; } catch { im.bytes = 0; } return im; };
     const comprimidos = ents.filter((e) => e.isFile() && ES_COMPR.test(e.name));
+    const pdfs = ents.filter((e) => e.isFile() && ES_PDF.test(e.name));
+    // Láminas que NO se pudieron convertir. El llamante ABORTA si hay alguna: omitirlas en silencio sería
+    // fatal, porque tras empaquetar «con éxito» los originales se reciclan a la Papelera.
+    const fallidos = [];
     let tmp = null, desdeComprimidos = 0;
     if (comprimidos.length) {
         tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'cbz-'));
@@ -93,6 +144,16 @@ async function imagenesDe(dir) {
             // nombre a secas todas se llamarían igual, el cbz tendría entradas duplicadas y la verificación
             // byte a byte abortaría el empaquetado entero — la carpeta quedaba intacta y sin cbz, sin que se
             // entendiera por qué. El caso habitual (un comprimido = una lámina) conserva el nombre limpio.
+            // Dentro del comprimido puede venir la lámina como PDF (muy común en colecciones de grabados):
+            // se convierte a imagen para que pueda entrar en el cbz.
+            for (const pdf of await listarPdfs(sub)) {
+                const salidas = await imagenesDePdf(pdf, path.join(sub, '_pdf_' + path.basename(pdf, '.pdf')));
+                if (!salidas.length) { fallidos.push(`${c.name} → ${path.basename(pdf)}`); continue; }
+                salidas.forEach((abs, i) => imagenes.push({
+                    nombre: `${path.basename(c.name, path.extname(c.name))}${salidas.length > 1 ? '-' + String(i + 1).padStart(String(salidas.length).length, '0') : ''}${path.extname(abs)}`, abs,
+                }));
+                desdeComprimidos += salidas.length;
+            }
             const extraidas = await listarImgs(sub);
             const base = path.basename(c.name, path.extname(c.name));
             const ancho = String(extraidas.length).length;
@@ -103,10 +164,24 @@ async function imagenesDe(dir) {
             });
         }
     }
+    // PDFs SUELTOS de la carpeta: cada lámina en pdf se convierte a imagen y entra en el cbz.
+    if (pdfs.length) {
+        tmp = tmp || await fs.mkdtemp(path.join(os.tmpdir(), 'cbz-'));
+        for (const f of pdfs) {
+            const base = path.basename(f.name, path.extname(f.name));
+            const salidas = await imagenesDePdf(path.join(dir, f.name), path.join(tmp, '_pdf_' + base));
+            if (!salidas.length) { fallidos.push(f.name); continue; }
+            const ancho = String(salidas.length).length;
+            salidas.forEach((abs, i) => imagenes.push({
+                nombre: `${base}${salidas.length > 1 ? '-' + String(i + 1).padStart(ancho, '0') : ''}${path.extname(abs)}`, abs,
+            }));
+        }
+    }
+
     imagenes.sort((a, b) => ORDEN(a.nombre, b.nombre));
     // El tamaño hace falta para partir los tomos: se mide aquí, una vez, para todas.
     for (const im of imagenes) await medir(im);
-    return { imagenes, desdeComprimidos, tmp };
+    return { imagenes, desdeComprimidos, tmp, fallidos };
 }
 
 /**
@@ -133,6 +208,17 @@ async function todasLasImagenes(dir) {
     return { imagenes, desdeComprimidos, tmp: tmps[0] || null, tmps };
 }
 
+/** PDFs de un árbol (recursivo), en orden natural. Hermano de `listarImgs`. */
+async function listarPdfs(dir) {
+    const out = [];
+    for (const e of await leer(dir)) {
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) out.push(...await listarPdfs(abs));
+        else if (ES_PDF.test(e.name)) out.push(abs);
+    }
+    return out.sort(ORDEN);
+}
+
 /** Imágenes de un árbol (recursivo), en orden natural. */
 async function listarImgs(dir) {
     const out = [];
@@ -152,17 +238,22 @@ async function listarImgs(dir) {
 export async function planEmpaquetado(dir, { alcance = 'subcarpetas' } = {}) {
     const nombre = path.basename(dir);
     const tomos = [];
+    // Láminas que NO se pudieron convertir a imagen (p. ej. un pdf ilegible). Se propagan al plan para que el
+    // dry-run las enseñe ANTES de tocar nada: empaquetar dejándolas fuera y luego reciclar los originales
+    // sería una pérdida real.
+    const fallidos = [];
     // ALCANCE 'todo': TODAS las láminas del árbol en un solo documento (un diccionario escaneado: sus
     // subcarpetas son un detalle de cómo se guardó, no tomos). Solo se parte si pesa demasiado.
     if (alcance === 'todo') {
         const todas = await todasLasImagenes(dir);
         const trozos = partirPorTamano(todas.imagenes);
+        fallidos.push(...(todas.fallidos || []));
         await limpiar(todas.tmps);   // un árbol con comprimidos crea VARIOS temporales, no uno
         trozos.forEach((t, i) => tomos.push({
             nombre: nombre + (trozos.length > 1 ? ` (${i + 1})` : ''),
             imagenes: t.length, bytes: sumaBytes(t), desdeComprimidos: todas.desdeComprimidos,
         }));
-        return { raiz: dir, nombre, tomos, multivolumen: tomos.length > 1, total: todas.imagenes.length };
+        return { raiz: dir, nombre, tomos, multivolumen: tomos.length > 1, total: todas.imagenes.length, fallidos };
     }
     const añadir = (base, imgs, desdeCompr) => {
         const trozos = partirPorTamano(imgs);
@@ -173,6 +264,7 @@ export async function planEmpaquetado(dir, { alcance = 'subcarpetas' } = {}) {
     };
     // Imágenes propias de la carpeta raíz.
     const propias = await imagenesDe(dir);
+    fallidos.push(...(propias.fallidos || []));
     if (propias.tmp) await fs.rm(propias.tmp, { recursive: true, force: true }).catch(() => {});
     if (propias.imagenes.length) añadir(nombre, propias.imagenes, propias.desdeComprimidos);
     // Cada subcarpeta con imágenes = un tomo.
@@ -180,10 +272,11 @@ export async function planEmpaquetado(dir, { alcance = 'subcarpetas' } = {}) {
         if (!e.isDirectory()) continue;
         const sub = path.join(dir, e.name);
         const r = await imagenesDe(sub);
+        fallidos.push(...(r.fallidos || []));
         if (r.tmp) await fs.rm(r.tmp, { recursive: true, force: true }).catch(() => {});
         if (r.imagenes.length) añadir(e.name, r.imagenes, r.desdeComprimidos);
     }
-    return { raiz: dir, nombre, tomos, multivolumen: tomos.length > 1, total: tomos.reduce((s, t) => s + t.imagenes, 0) };
+    return { raiz: dir, nombre, tomos, multivolumen: tomos.length > 1, total: tomos.reduce((s, t) => s + t.imagenes, 0), fallidos };
 }
 
 /** Escribe UN cbz (STORE) y lo VERIFICA byte a byte. Devuelve {ok, ruta, paginas, motivo?}. */
@@ -220,6 +313,11 @@ async function escribirCbz(imagenes, destino) {
 export async function empaquetarImagenes(dir, dirDestino, { alcance = 'subcarpetas' } = {}) {
     const plan = await planEmpaquetado(dir, { alcance });
     if (!plan.tomos.length) return { ok: false, motivo: 'no se encontraron imágenes que empaquetar' };
+    // RED DE SEGURIDAD: si alguna lámina no se pudo convertir a imagen, NO se empaqueta. Hacerlo dejaría esas
+    // láminas fuera del cbz y, acto seguido, el llamante reciclaría los originales a la Papelera: pérdida real.
+    // Mejor no empaquetar y que el usuario lo vea.
+    if (plan.fallidos?.length)
+        return { ok: false, motivo: `no se pudieron convertir a imagen ${plan.fallidos.length} lámina(s): ${plan.fallidos.slice(0, 3).join(', ')}${plan.fallidos.length > 3 ? '…' : ''}` };
 
     const hechos = [];
     const grupos = [];
