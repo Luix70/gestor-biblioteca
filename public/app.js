@@ -11325,6 +11325,9 @@ async function ejecutarUtilidad(operacion) {
   // RENOMBRAR necesita saber QUÉ nombre. Con uno seleccionado se pide el nombre nuevo; con varios, un
   // buscar-y-reemplazar sobre sus nombres (para limpiar de golpe la basura de los release groups).
   const extra = {};
+  // Al aplanar: disolver SOLO los envoltorios de un único fichero (deja intactas las carpetas con un conjunto
+  // aparte, como «jpg» con las versiones de baja resolución).
+  if (operacion === 'aplanar' && $('#utilUnicas') && $('#utilUnicas').checked) extra.soloUnicas = true;
   if (operacion === 'renombrar') {
     if (rutas.length === 1) {
       const actual = corto0(rutas[0]);

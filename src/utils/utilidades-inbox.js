@@ -79,7 +79,7 @@ export async function utilidadInbox({ operacion, absolutas = [], propagar = fals
             if (operacion === 'expandir') await opExpandir(abs, st, propagar, ejecutar, anota, false);
             else if (operacion === 'expandir-aqui') await opExpandir(abs, st, propagar, ejecutar, anota, true);
             else if (operacion === 'renombrar') await opRenombrar(abs, st, ejecutar, anota, extra);
-            else if (operacion === 'aplanar') await opAplanar(abs, st, propagar, ejecutar, anota);
+            else if (operacion === 'aplanar') await opAplanar(abs, st, propagar, ejecutar, anota, extra);
             else if (operacion === 'limpiar') await opLimpiar(abs, st, propagar, ejecutar, anota);
             else if (operacion === 'comprimir') await opComprimir(abs, st, ejecutar, anota);
         } catch (e) { anota(abs, false, 'falló', e.message); }
@@ -135,7 +135,7 @@ async function opExpandir(abs, st, propagar, ejecutar, anota, aqui) {
 }
 
 // ── aplanar: el contenido sube un nivel, resolviendo colisiones (jamás se pisa nada) ────────────────────────
-async function opAplanar(abs, st, propagar, ejecutar, anota) {
+async function opAplanar(abs, st, propagar, ejecutar, anota, extra = {}) {
     if (!st.isDirectory()) { anota(abs, false, 'aplanar solo aplica a carpetas'); return; }
     // Las subcarpetas se aplanan de DENTRO hacia FUERA (las más hondas primero): si no, al mover una carpeta
     // padre se arrastran las hijas sin procesar y el resultado depende del orden.
@@ -147,8 +147,21 @@ async function opAplanar(abs, st, propagar, ejecutar, anota) {
     for (const dir of objetivos) {
         let hijos;
         try { hijos = (await fs.readdir(dir, { withFileTypes: true })).filter((e) => !ignorar(e.name)); } catch { continue; }
-        const subdirs = hijos.filter((e) => e.isDirectory());
-        if (!subdirs.length) { if (dir === abs) anota(dir, false, 'no tiene subcarpetas que aplanar'); continue; }
+        let subdirs = hijos.filter((e) => e.isDirectory());
+        // «solo carpetas de un único fichero»: disuelve los envoltorios de un solo elemento —el patrón que deja
+        // extraer cientos de comprimidos: «I02236/I02236.pdf»— y NO toca las carpetas con varios ficheros, que
+        // suelen ser un conjunto aparte (p. ej. «jpg/» con las versiones de baja resolución). Sin esta opción
+        // había que elegir entre aplanarlo todo (mezclando ese conjunto) o no aplanar nada.
+        if (extra.soloUnicas) {
+            const filtradas = [];
+            for (const sd of subdirs) {
+                const dentro = (await fs.readdir(path.join(dir, sd.name)).catch(() => []))
+                    .filter((n) => !ignorar(n));
+                if (dentro.length === 1) filtradas.push(sd);
+            }
+            subdirs = filtradas;
+        }
+        if (!subdirs.length) { if (dir === abs) anota(dir, false, extra.soloUnicas ? 'ninguna subcarpeta tiene un único fichero' : 'no tiene subcarpetas que aplanar'); continue; }
         let movidos = 0;
         for (const sd of subdirs) {
             const origen = path.join(dir, sd.name);

@@ -850,7 +850,11 @@ de ficheros clasificado por CDU.
         · 📂 expandir en carpeta — cada comprimido se abre en UNA carpeta con su nombre.
         · 📤 expandir aquí — el contenido se suelta en la carpeta actual, sin envoltorio (colisión → « (2)»).
           (En ambos el original va a la Papelera TRAS extraer.)
-        · ⬆ aplanar   — sube el contenido de las subcarpetas un nivel. Si dos ficheros se llaman igual,
+        · ⬆ aplanar   — sube el contenido de las subcarpetas un nivel. Con «solo carpetas de 1 fichero»
+                         disuelve ÚNICAMENTE los envoltorios de un solo elemento (el patrón que deja extraer
+                         cientos de comprimidos: «I02236/I02236.pdf») y NO toca las carpetas con varios
+                         ficheros, que suelen ser un conjunto aparte («jpg/» con las de baja resolución).
+                         Si dos ficheros se llaman igual,
                          se renombra « (2)»: NUNCA se pisa nada. Con propagación va de dentro afuera (las
                          más hondas primero), si no el resultado dependería del orden.
         · 🧹 limpiar   — basura conocida (@eaDir, Thumbs.db, .url, .nfo, restos de torrent, 0 bytes) → PAPELERA.
