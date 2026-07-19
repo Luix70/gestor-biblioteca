@@ -844,6 +844,21 @@ de ficheros clasificado por CDU.
       el número que dice si se perdió algo. Antes de ingerir sale como «previsión» (pendiente, no fallo);
       después juzga. Cada fichero que entró ENLAZA a su ficha. Una sola consulta a Mongo con todos los
       nombres. Reutiliza el CSS del informe de Integridad (CSS_INFORME) — un solo lenguaje visual.
+    · UTILIDADES DEL INBOX (barra de selección del Inspector, admin → POST /api/inbox/utilidad):
+      operaciones MANUALES para dejar un árbol complejo listo ANTES de ingerir, en vez de depender solo de
+      las heurísticas automáticas. Sobre lo SELECCIONADO en el árbol (ficheros y/o carpetas):
+        · 📂 expandir  — abre los comprimidos en su sitio; el original a la Papelera tras extraer.
+        · ⬆ aplanar   — sube el contenido de las subcarpetas un nivel. Si dos ficheros se llaman igual,
+                         se renombra « (2)»: NUNCA se pisa nada. Con propagación va de dentro afuera (las
+                         más hondas primero), si no el resultado dependería del orden.
+        · 🧹 limpiar   — basura conocida (@eaDir, Thumbs.db, .url, .nfo, restos de torrent, 0 bytes) → PAPELERA.
+        · 🗜️ comprimir — la carpeta pasa a ser UN .zip a su lado (verificado antes de retirar el original).
+      Interruptor «propagar a subcarpetas». SIEMPRE se PREVISUALIZA primero (`ejecutar:false`) y se pide
+      confirmación enseñando los elementos afectados y su número: con propagación un clic puede tocar
+      cientos. Ninguna borra: lo retirado va a la Papelera.
+      CLAVE: llaman a las MISMAS funciones que el vigilante (extraerArchivoComic, reciclar) — no hay una
+      segunda implementación «manual» que pueda divergir de la automática, que es el fallo que ha causado
+      casi todos los problemas de este proyecto.
     · DRY-RUN (`node scripts/dry-run.js` [--json]; en el NAS: `docker exec gestor-biblioteca node
       scripts/dry-run.js`): qué HARÍA el vigilante con el Inbox tal como está, sin catalogar, mover ni
       borrar nada. Llama a la MISMA función que decide de verdad (vigilante.js · planificarInbox →

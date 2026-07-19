@@ -11308,6 +11308,43 @@ const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '�
 // blob, igual que el informe de Integridad.
 // Rellena el desplegable de planes GUARDADOS. Existen porque el plan se calcula del Inbox, y tras ingerir el
 // Inbox está vacío: sin guardarlo no habría contra qué comparar horas (o un reinicio) después.
+/**
+ * Ejecuta una UTILIDAD sobre lo seleccionado en el árbol del Inbox. SIEMPRE previsualiza primero y pide
+ * confirmación con el recuento: con «propagar a subcarpetas» un clic puede tocar cientos de elementos, y eso
+ * hay que verlo ANTES, no descubrirlo después. Nada se borra: lo que se retira va a la Papelera.
+ */
+async function ejecutarUtilidad(operacion) {
+  const rutas = [...new Set([..._guiaSel, ..._guiaSelCarp])];
+  if (!rutas.length) { toast('No has seleccionado nada', 'warn'); return; }
+  const propagar = $('#utilPropagar') && $('#utilPropagar').checked;
+  const etq = { expandir: 'expandir comprimidos', aplanar: 'aplanar', limpiar: 'limpiar basura', comprimir: 'comprimir' }[operacion] || operacion;
+  try {
+    // 1) PREVISUALIZAR: qué pasaría, sin tocar nada.
+    const prev = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: false }) });
+    if (!prev.ok) { toast(prev.motivo || 'no se pudo previsualizar', 'bad'); return; }
+    const haran = (prev.acciones || []).filter((a) => a.hecho);
+    if (!haran.length) {
+      toast(`Nada que hacer: ${(prev.acciones || [])[0]?.detalle || 'sin cambios'}`, 'warn');
+      return;
+    }
+    // 2) Confirmar enseñando EXACTAMENTE lo que va a pasar (los primeros, y cuántos más).
+    // El servidor corre en Linux: las rutas que devuelve llevan «/». Se parte por ahí (nada de regex con
+    // barras invertidas, que este entorno corrompe al escribirlas).
+    const corto = (r) => String(r).split('/').pop();
+    const muestra = haran.slice(0, 8).map((a) => '· ' + corto(a.ruta) + ' → ' + a.detalle).join('\n');
+    const resto = haran.length > 8 ? '\n… y ' + (haran.length - 8) + ' más' : '';
+    const cabecera = etq.toUpperCase() + (propagar ? ' (propagando a subcarpetas)' : '');
+    if (!confirm(cabecera + '\n\n' + haran.length + ' elemento(s):\n\n' + muestra + resto
+        + '\n\nLo retirado va a la Papelera. ¿Aplicar?')) return;
+    // 3) Aplicar.
+    const r = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: true }) });
+    const fallos = (r.acciones || []).filter((a) => !a.hecho);
+    toast(`${etq}: ${r.resumen.hechas} hecho(s)${fallos.length ? ` · ${fallos.length} fallo(s)` : ''}`, fallos.length ? 'warn' : 'ok');
+    if (fallos.length) console.warn('Utilidad con fallos:', fallos);
+    await cargarArbolInbox();   // el árbol ha cambiado: se recarga
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
 async function cargarPlanesGuardados() {
   const sel = $('#guiaPlanes');
   if (!sel) return;
@@ -11547,6 +11584,7 @@ async function guardarGuiasInbox() {
   actualizarSelBar();
 }
 if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
+$$('#guiaSelUtil [data-util]').forEach((b) => (b.onclick = () => ejecutarUtilidad(b.dataset.util)));
 if ($('#guiaInforme')) $('#guiaInforme').onclick = () => descargarInformePlan(null);
 if ($('#guiaPlanes')) {
   cargarPlanesGuardados();
@@ -11593,6 +11631,9 @@ function actualizarSelBar() {
   const secF = $('#guiaSelFiles'), secC = $('#guiaSelCarps');
   if (secF) secF.style.display = nf ? 'flex' : 'none';
   if (secC) secC.style.display = nc ? 'flex' : 'none';
+  // Las utilidades valen para ficheros Y carpetas (expandir un .zip suelto, aplanar una carpeta…).
+  const secU = $('#guiaSelUtil');
+  if (secU) secU.style.display = nf || nc ? 'flex' : 'none';
   if ($('#guiaSelN')) $('#guiaSelN').textContent = nf;
   if ($('#guiaSelNC')) $('#guiaSelNC').textContent = nc;
 }

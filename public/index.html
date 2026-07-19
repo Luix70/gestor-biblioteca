@@ -367,6 +367,19 @@
                   <button class="btn" id="guiaCarpOmitir" type="button" title="Omitir: no catalogar nada de esas carpetas">⏭️ omitir</button>
                   <button class="btn" id="guiaCarpNormal" type="button" title="Volver a normal">↩︎ normal</button>
                 </div>
+                <!-- UTILIDADES: operaciones que se aplican AHORA sobre lo seleccionado, para dejar un árbol
+                     complejo listo antes de ingerir. Llaman a las mismas funciones que el vigilante. Siempre
+                     previsualizan primero: con «propagar» un clic puede tocar cientos de elementos. -->
+                <div id="guiaSelUtil" class="row" style="gap: 8px; align-items: center; flex-wrap: wrap; display: none">
+                  <span class="muted" style="font-size: 12px">preparar ahora:</span>
+                  <button class="btn" data-util="expandir" type="button" title="Abrir los comprimidos en su sitio (el original va a la Papelera)">📂 expandir</button>
+                  <button class="btn" data-util="aplanar" type="button" title="Subir el contenido de las subcarpetas un nivel (si dos ficheros se llaman igual, se renombra: nunca se pisa)">⬆ aplanar</button>
+                  <button class="btn" data-util="limpiar" type="button" title="Retirar basura conocida (@eaDir, Thumbs.db, .url, .nfo, restos de torrent, ficheros de 0 bytes) a la Papelera">🧹 limpiar</button>
+                  <button class="btn" data-util="comprimir" type="button" title="Convertir la carpeta en UN .zip a su lado, para que viaje como bloque">🗜️ comprimir</button>
+                  <label class="muted" style="font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer" title="Aplicar también dentro de las subcarpetas (ojo: puede afectar a muchos elementos)">
+                    <input type="checkbox" id="utilPropagar" /> propagar a subcarpetas
+                  </label>
+                </div>
                 <div id="guiaSelGuardar" class="row" style="gap: 8px; align-items: center; flex-wrap: wrap; display: none">
                   <b id="guiaDirtyN" style="font-size: 13px">0</b>
                   <span class="muted" style="font-size: 12px">cambio(s) sin guardar:</span>

@@ -17,6 +17,7 @@ import { informeTexto, informeHtml } from './utils/informe-integridad.js';
 import { informePlanHtml } from './utils/informe-plan.js';
 import { planificarInbox } from './vigilante.js';
 import { guardarPlan, listarPlanes, leerPlan } from './utils/planes-guardados.js';
+import { utilidadInbox, OPERACIONES } from './utils/utilidades-inbox.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
@@ -1894,6 +1895,32 @@ export function rutasPanel() {
         if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
         try { res.json({ ok: true, planes: await listarPlanes() }); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // UTILIDADES del Inbox: preparar a mano un árbol complejo ANTES de ingerir (expandir, aplanar, limpiar,
+    // comprimir). Llaman a las MISMAS funciones que el vigilante — no hay una segunda implementación «manual»
+    // que pueda divergir. `previsualizar` (por defecto) informa sin tocar nada: con «propagar» un clic puede
+    // afectar a cientos de elementos y eso hay que verlo ANTES.
+    r.post('/inbox/utilidad', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const operacion = String(req.body?.operacion || '');
+            if (!OPERACIONES.includes(operacion)) return res.status(400).json({ ok: false, motivo: 'operación no válida' });
+            const rutas = Array.isArray(req.body?.rutas) ? req.body.rutas : [];
+            if (!rutas.length) return res.status(400).json({ ok: false, motivo: 'no has seleccionado nada' });
+            // Cada ruta se valida contra el Inbox: nada de «..» ni de salirse del árbol.
+            const absolutas = [];
+            for (const r0 of rutas) {
+                const a = rutaInboxSegura(INBOX, String(r0 || ''));
+                if (!a) return res.status(400).json({ ok: false, motivo: `ruta fuera del Inbox: ${r0}` });
+                absolutas.push(a);
+            }
+            res.json(await utilidadInbox({
+                operacion, absolutas,
+                propagar: req.body?.propagar === true,
+                ejecutar: req.body?.ejecutar === true,
+            }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
     r.post('/inbox/guia', async (req, res) => {
