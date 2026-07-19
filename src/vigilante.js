@@ -791,7 +791,9 @@ async function contenedoresPendientes(dir, nivel = 6, out = []) {
         const ruta = path.join(dir, e.name);
         if (e.isDirectory()) {
             const g = await leerGuia(ruta);
-            if (!['intacta', 'software', 'omitir'].includes(g?.accion)) await contenedoresPendientes(ruta, nivel - 1, out);
+            // «empaquetar» también queda fuera: el empaquetador abre los comprimidos ÉL MISMO (imagenesDe los
+            // extrae a un temporal), así que pre-expandirlos aquí solo estorba.
+            if (!['intacta', 'software', 'omitir', 'empaquetar'].includes(g?.accion)) await contenedoresPendientes(ruta, nivel - 1, out);
             continue;
         }
         if (!esContenedor(e.name)) continue;
@@ -1257,7 +1259,11 @@ async function expandirComprimidos(dir = INBOX, nivel = 6) {
         if (!sub.isDirectory() || ignorarEntrada(sub.name)) continue;
         const rutaSub = path.join(dir, sub.name);
         const g = await leerGuia(rutaSub);
-        if (['intacta', 'software', 'omitir'].includes(g?.accion)) continue;
+        // NO se pre-expanden los comprimidos de una carpeta marcada «empaquetar»: el empaquetador los abre él
+        // mismo (a un temporal, sin dejar rastro). Pre-expandirlos dejaba el contenido UN NIVEL MÁS ABAJO —
+        // cada .rar en su propia carpeta— y entonces `imagenesDe`, que mira los ficheros DIRECTOS, no
+        // encontraba ninguna lámina: cientos de carpetas creadas y ningún cbz.
+        if (['intacta', 'software', 'omitir', 'empaquetar'].includes(g?.accion)) continue;
         await expandirComprimidos(rutaSub, nivel - 1);
     }
     // ACCIÓN POR FICHERO elegida en el Inspector (guía de la carpeta): un contenedor complejo NO se puede
