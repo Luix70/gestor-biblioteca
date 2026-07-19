@@ -33,6 +33,9 @@ const ES_IMG = /\.(jpe?g|png|webp|gif|bmp|avif|tiff?)$/i;
 // Comprimidos que pueden traer imágenes dentro (una lámina por fichero es un patrón habitual de archivo).
 const ES_COMPR = /\.(rar|zip|7z|cbz|cbr|cb7|tar|tgz|gz)$/i;
 const ES_PDF = /\.pdf$/i;
+// Lo que ESCUPE `pdfimages`: con «-j» saca .jpg solo si la imagen va en JPEG dentro del pdf; si es bitonal
+// (grabado escaneado en CCITT/JBIG2) saca .pbm, y si es color sin comprimir, .ppm. Esos NO se ven en un cbz.
+const ES_SALIDA_PDFIMAGES = /\.(jpe?g|png|ppm|pbm|pgm)$/i;
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#');
 const ORDEN = (a, b) => String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 
@@ -105,10 +108,24 @@ async function imagenesDePdf(pdf, destDir) {
     } catch { /* sin pdfinfo no se puede validar el cuadre → se irá a rasterizar */ }
 
     // 1) Extracción SIN pérdida de las imágenes embebidas.
+    const listar = async (re) => (await fs.readdir(destDir)).filter((n) => n.startsWith('p-') && re.test(n)).sort();
+    const limpiarSalidas = async () => { for (const n of await listar(ES_SALIDA_PDFIMAGES)) await fs.rm(path.join(destDir, n), { force: true }).catch(() => {}); };
     if (paginas > 0) {
         try {
             await execFileP('pdfimages', ['-j', pdf, base], { timeout: 300000 });
-            const salidas = (await fs.readdir(destDir)).filter((n) => n.startsWith('p-') && ES_IMG.test(n)).sort();
+            let salidas = await listar(ES_SALIDA_PDFIMAGES);
+            // Si alguna salió en un formato que el visor NO abre (.pbm/.ppm/.pgm — el caso de un grabado
+            // BITONAL, que es justo lo que trae una enciclopedia escaneada), se repite la extracción en PNG:
+            // sigue siendo SIN PÉRDIDA, se ve en cualquier navegador y, en bitonal, ocupa muchísimo menos que
+            // un rasterizado. Sin esto se ignoraban esas salidas, parecía que no se había extraído nada y se
+            // caía al rasterizado a 300 dpi: 30 veces más lento, peor calidad y 15 veces más tamaño.
+            if (salidas.length && salidas.some((n) => !ES_IMG.test(n))) {
+                await limpiarSalidas();
+                await execFileP('pdfimages', ['-png', pdf, base], { timeout: 300000 });
+                salidas = await listar(ES_IMG);
+            } else {
+                salidas = salidas.filter((n) => ES_IMG.test(n));
+            }
             if (salidas.length === paginas) { _avisar(pdf, 'embebida'); return salidas.map((n) => path.join(destDir, n)); }
             // UNA página con VARIAS imágenes embebidas: es el caso típico de una lámina escaneada que lleva el
             // escaneo + una máscara/estarcido (JBIG2) o una miniatura. Se coge la MÁS GRANDE, que es el escaneo
@@ -124,7 +141,7 @@ async function imagenesDePdf(pdf, destDir) {
                 if (mejor) { _avisar(pdf, 'embebida'); return [path.join(destDir, mejor)]; }
             }
             // No cuadra: se descarta lo extraído y se rasteriza (mejor una página fiel que trozos sueltos).
-            for (const n of salidas) await fs.rm(path.join(destDir, n), { force: true }).catch(() => {});
+            await limpiarSalidas();
         } catch { /* pdfimages no pudo: se rasteriza */ }
     }
     // 2) Rasterizado fiel, una imagen por página.
