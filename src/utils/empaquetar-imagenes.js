@@ -89,10 +89,18 @@ async function imagenesDe(dir) {
             } catch { continue; }   // comprimido ilegible → se ignora aquí; el llamante lo verá en la verificación
             // Las imágenes extraídas se nombran con el comprimido de origen, para conservar SU orden natural
             // («I02236.rar» → «I02236.jpg»): es lo que da el orden de las láminas dentro del tomo.
-            for (const f of await listarImgs(sub)) {
-                imagenes.push({ nombre: `${path.basename(c.name, path.extname(c.name))}${path.extname(f)}`, abs: f });
+            // Si el comprimido trae MÁS DE UNA imagen se numeran («I02240-01.jpg», «I02240-02.jpg»): con el
+            // nombre a secas todas se llamarían igual, el cbz tendría entradas duplicadas y la verificación
+            // byte a byte abortaría el empaquetado entero — la carpeta quedaba intacta y sin cbz, sin que se
+            // entendiera por qué. El caso habitual (un comprimido = una lámina) conserva el nombre limpio.
+            const extraidas = await listarImgs(sub);
+            const base = path.basename(c.name, path.extname(c.name));
+            const ancho = String(extraidas.length).length;
+            extraidas.forEach((f, i) => {
+                const sufijo = extraidas.length > 1 ? `-${String(i + 1).padStart(ancho, '0')}` : '';
+                imagenes.push({ nombre: `${base}${sufijo}${path.extname(f)}`, abs: f });
                 desdeComprimidos++;
-            }
+            });
         }
     }
     imagenes.sort((a, b) => ORDEN(a.nombre, b.nombre));

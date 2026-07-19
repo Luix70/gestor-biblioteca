@@ -341,7 +341,10 @@
               <div class="row" style="gap: 8px; align-items: center; flex-wrap: wrap">
                 <button class="btn" id="guiaCargar" type="button">↻ Cargar árbol del Inbox</button>
                 <button class="btn pri" id="guiaGuardar" type="button" disabled>💾 Guardar guías</button>
-                <button class="btn admin-only" id="guiaInforme" type="button" title="Informe HTML: qué se va a ingerir y, cotejando con el catálogo, qué ha entrado de verdad">📋 Informe del plan</button>
+                <button class="btn admin-only" id="guiaInforme" type="button" title="Informe HTML del Inbox ACTUAL: qué se va a ingerir. Se GUARDA para poder comprobarlo después.">📋 Informe del plan</button>
+                <select class="admin-only" id="guiaPlanes" title="Planes guardados: elige uno y se comprueba contra el catálogo (tras ingerir, el Inbox está vacío y no hay contra qué comparar)" style="font-size: 12px; padding: 2px 4px">
+                  <option value="">— comprobar un plan guardado —</option>
+                </select>
                 <label class="muted" style="font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer" title="Al pulsar «☑ todos» en una carpeta, incluir también los ficheros de sus subcarpetas">
                   <input type="checkbox" id="guiaRecursivo" /> incluir subcarpetas
                 </label>
