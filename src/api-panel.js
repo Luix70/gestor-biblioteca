@@ -16,6 +16,7 @@ import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './i
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
 import { informePlanHtml } from './utils/informe-plan.js';
 import { planificarInbox } from './vigilante.js';
+import { guardarPlan, listarPlanes, leerPlan } from './utils/planes-guardados.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
@@ -1856,7 +1857,19 @@ export function rutasPanel() {
     r.get('/inbox/plan.html', async (req, res) => {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).type('text/plain').send('Solo administradores.');
-            const plan = await planificarInbox();
+            // ?plan=<id> → COTEJA un plan GUARDADO (el Inbox ya estará vacío tras ingerir: sin esto no hay
+            // contra qué comparar, y entre planificar y comprobar pueden pasar horas o reiniciarse la máquina).
+            // Sin ?plan → se calcula del Inbox actual y se GUARDA, para poder comprobarlo más tarde.
+            const idPlan = String(req.query.plan || '');
+            let plan, guardado = null;
+            if (idPlan) {
+                plan = await leerPlan(idPlan);
+                if (!plan) return res.status(404).type('text/plain').send('No existe ese plan guardado.');
+                guardado = idPlan;
+            } else {
+                plan = await planificarInbox();
+                guardado = await guardarPlan(plan);
+            }
             // Un solo viaje a Mongo con TODOS los nombres del plan (nada de una consulta por fichero).
             const nombres = [...new Set((plan.unidades || []).flatMap((u) => u.ficheros || []))];
             const catalogados = new Map();
@@ -1870,9 +1883,17 @@ export function rutasPanel() {
             const html = informePlanHtml(plan, { catalogados, ejecutado: catalogados.size > 0, base: origenDelPanel(req) });
             const sello = new Date(plan.ts).toISOString().slice(0, 16).replace(/[:T]/g, '-');
             res.type('text/html; charset=utf-8')
+                .set('X-Plan-Guardado', guardado || '')
                 .set('Content-Disposition', `attachment; filename="plan-ingesta-${sello}.html"`)
                 .send(html);
         } catch (e) { res.status(500).type('text/plain').send('No se pudo generar el informe: ' + e.message); }
+    });
+
+    // Planes guardados, para poder volver a comprobarlos días después.
+    r.get('/inbox/planes', async (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        try { res.json({ ok: true, planes: await listarPlanes() }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
     r.post('/inbox/guia', async (req, res) => {

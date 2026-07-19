@@ -827,6 +827,15 @@ de ficheros clasificado por CDU.
       original; si algo falla, la carpeta se queda intacta. Los originales van a la PAPELERA, nunca se
       borran. `planEmpaquetado` ES el dry-run de esto: el plan dice «500 láminas → 2 cbz → obra
       multivolumen» sin escribir un byte.
+    · PLANES GUARDADOS: el plan se calcula MIRANDO EL INBOX, así que tras ingerir ya no se puede
+      reconstruir (el Inbox está vacío) — y entre planificar y comprobar pueden pasar horas, irse la luz o
+      reiniciarse la máquina. Por eso al generar el informe el plan se PERSISTE en `PATH_PLANES`
+      (por defecto `Planes/` bajo la raíz de la app: bind mount en el NAS, sobrevive a reinicios y
+      rebuilds) y el desplegable del Inspector permite RECARGAR uno y cotejarlo cuando quieras
+      (`?plan=<id>`). Se conservan los últimos PLANES_MAX (40). El id se valida antes de tocar el disco
+      (se usa como nombre de fichero). ⚠ El despliegue hace `rsync --delete`: `/Planes` va EXCLUIDA en
+      actualizar-GestorBiblioteca.sh igual que Inbox/CDU — sin esa exclusión, cada deploy se llevaría el
+      historial por delante.
     · INFORME DEL PLAN (botón «📋 Informe del plan» del Inspector, admin → GET /api/inbox/plan.html):
       HTML autocontenido con el plan Y el COTEJO contra el catálogo — la otra mitad del dry-run. El
       dry-run dice qué VA a pasar; esto dice si de verdad entró. Cotejo por `nombre_archivo` (lo único

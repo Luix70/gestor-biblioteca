@@ -210,6 +210,7 @@ rsync -a --delete \
     --exclude='/Cuarentena' \
     --exclude='/Reintentos' \
     --exclude='/Recycling' \
+    --exclude='/Planes' \
     --exclude='/Fichero' \
     --exclude='/logs' \
     --exclude='/temp' \

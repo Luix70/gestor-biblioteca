@@ -11306,11 +11306,29 @@ const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '�
 // Informe HTML del PLAN de ingesta: qué se va a ingerir y —cotejando contra el catálogo por nombre_archivo—
 // qué ha entrado de verdad. Se descarga por fetch con el token en la cabecera (no en la URL) y se entrega como
 // blob, igual que el informe de Integridad.
-async function descargarInformePlan() {
+// Rellena el desplegable de planes GUARDADOS. Existen porque el plan se calcula del Inbox, y tras ingerir el
+// Inbox está vacío: sin guardarlo no habría contra qué comparar horas (o un reinicio) después.
+async function cargarPlanesGuardados() {
+  const sel = $('#guiaPlanes');
+  if (!sel) return;
+  try {
+    const r = await api('/inbox/planes');
+    const previo = sel.value;
+    sel.innerHTML = '<option value="">— comprobar un plan guardado —</option>'
+      + (r.planes || []).map((p) => {
+          const f = p.ts ? new Date(p.ts).toLocaleString('es-ES') : p.id;
+          return `<option value="${esc(p.id)}">${esc(f)} · ${p.unidades} unidad(es)</option>`;
+        }).join('');
+    sel.value = previo;
+  } catch (e) { /* el desplegable es un extra: si falla, el botón sigue funcionando */ }
+}
+
+async function descargarInformePlan(idGuardado) {
   const b = $('#guiaInforme');
   if (b) { b.disabled = true; b.textContent = 'Generando…'; }
   try {
-    const res = await fetch('/api/inbox/plan.html?base=' + encodeURIComponent(location.origin), {
+    const q = idGuardado ? '?plan=' + encodeURIComponent(idGuardado) + '&base=' : '?base=';
+    const res = await fetch('/api/inbox/plan.html' + q + encodeURIComponent(location.origin), {
       headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
     });
     if (!res.ok) throw new Error((await res.text()) || 'no se pudo generar');
@@ -11322,6 +11340,7 @@ async function descargarInformePlan() {
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
     toast('Informe descargado: ' + nombre);
+    if (!idGuardado) await cargarPlanesGuardados();   // el plan recién calculado ya está guardado: aparece en la lista
   } catch (e) {
     toast(e.message, 'bad');
   } finally {
@@ -11528,7 +11547,11 @@ async function guardarGuiasInbox() {
   actualizarSelBar();
 }
 if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
-if ($('#guiaInforme')) $('#guiaInforme').onclick = descargarInformePlan;
+if ($('#guiaInforme')) $('#guiaInforme').onclick = () => descargarInformePlan(null);
+if ($('#guiaPlanes')) {
+  cargarPlanesGuardados();
+  $('#guiaPlanes').onchange = (e) => { const id = e.target.value; if (id) descargarInformePlan(id); };
+}
 if ($('#guiaGuardar')) $('#guiaGuardar').onclick = guardarGuiasInbox;
 
 // ── Selección de ficheros para AGRUPAR (dos vías): A) mover a una nueva subcarpeta ahora; B) marcar como
