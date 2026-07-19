@@ -20,7 +20,9 @@ import AdmZip from 'adm-zip';
 import { extraerArchivoComic as extraerComprimido } from './extraer-archivo.js';
 import { reciclar, reciclarCarpeta } from './papelera.js';
 
-export const OPERACIONES = ['expandir', 'expandir-aqui', 'aplanar', 'limpiar', 'comprimir', 'renombrar'];
+export const OPERACIONES = ['expandir', 'expandir-aqui', 'aplanar', 'limpiar', 'comprimir', 'renombrar', 'papelera', 'eliminar'];
+/** Las que DESTRUYEN (o retiran) por decisión explícita del usuario: el llamante exige contraseña de admin. */
+export const OPERACIONES_PELIGROSAS = ['papelera', 'eliminar'];
 
 // Basura conocida: metadatos del sistema y restos de descarga que nunca son contenido.
 const ES_BASURA = (n) =>
@@ -82,6 +84,8 @@ export async function utilidadInbox({ operacion, absolutas = [], propagar = fals
             else if (operacion === 'aplanar') await opAplanar(abs, st, propagar, ejecutar, anota, extra);
             else if (operacion === 'limpiar') await opLimpiar(abs, st, propagar, ejecutar, anota);
             else if (operacion === 'comprimir') await opComprimir(abs, st, ejecutar, anota);
+            else if (operacion === 'papelera') await opRetirar(abs, st, ejecutar, anota, false);
+            else if (operacion === 'eliminar') await opRetirar(abs, st, ejecutar, anota, true);
         } catch (e) { anota(abs, false, 'falló', e.message); }
     }
     const hechas = acciones.filter((a) => a.hecho).length;
@@ -265,4 +269,41 @@ async function opRenombrar(abs, st, ejecutar, anota, extra = {}) {
         await fs.rename(abs, destino);
         anota(abs, true, `«${actual}» → «${path.basename(destino)}»`);
     } catch (e) { anota(abs, false, 'no se pudo renombrar', e.message); }
+}
+
+// ── papelera / eliminar: retirar lo seleccionado ────────────────────────────────────────────────────────────
+/**
+ * Dos operaciones con la MISMA mecánica y consecuencias muy distintas:
+ *   · papelera → va a la Papelera. Recuperable. Es la que debería usarse casi siempre.
+ *   · eliminar → BORRADO DIRECTO, sin Papelera. NO tiene vuelta atrás.
+ *
+ * `eliminar` existe porque el usuario lo pidió explícitamente, pero es el único punto de todo el sistema donde
+ * un error no se puede deshacer — y con selección múltiple un clic se lleva mucho. Por eso el llamante exige
+ * CONTRASEÑA de administrador, y la previsualización dice cuántos ficheros hay dentro de cada cosa: borrar una
+ * carpeta «vacía» y borrar uña con 4.000 láminas se parecen demasiado en un listado.
+ */
+async function opRetirar(abs, st, ejecutar, anota, definitivo) {
+    // Cuántos ficheros hay ahí dentro: el dato que evita un borrado a ciegas.
+    let n = 1;
+    if (st.isDirectory()) {
+        const { files } = await recorrer(abs, true);
+        n = files.length;
+    }
+    const que = st.isDirectory() ? `carpeta con ${n} fichero(s)` : 'fichero';
+    if (!ejecutar) {
+        anota(abs, true, definitivo ? `se ELIMINARÍA (${que}) — SIN Papelera, irreversible` : `iría a la Papelera (${que})`);
+        return;
+    }
+    try {
+        if (definitivo) {
+            await fs.rm(abs, { recursive: true, force: true });
+            anota(abs, true, `ELIMINADO (${que})`);
+        } else if (st.isDirectory()) {
+            await reciclarCarpeta(abs, 'utilidad-papelera');
+            anota(abs, true, `a la Papelera (${que})`);
+        } else {
+            await reciclar([abs], 'utilidad-papelera');
+            anota(abs, true, 'a la Papelera');
+        }
+    } catch (e) { anota(abs, false, 'no se pudo retirar', e.message); }
 }

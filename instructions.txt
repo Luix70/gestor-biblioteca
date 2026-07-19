@@ -852,6 +852,10 @@ de ficheros clasificado por CDU.
       consola-timestamp). Ejemplo real:
         node scripts/utilidades.js aplanar "Grabados de la Encyclopedie/*" --solo-unicas
         …y con --ejecutar cuando el informe cuadre.
+    · 🧰 UTILIDADES en el MENÚ: NO es una página aparte —eso obligaría a duplicar el explorador, las
+      casillas y el estado de selección, que es la enfermedad que ha causado casi todos los fallos del
+      proyecto—. La entrada lleva a ENTRADA, despliega el Inspector y carga el árbol: visibilidad sin
+      duplicación. Las operaciones viven en la barra flotante de selección.
     · UTILIDADES DEL INBOX (barra de selección del Inspector, admin → POST /api/inbox/utilidad):
       operaciones MANUALES para dejar un árbol complejo listo ANTES de ingerir, en vez de depender solo de
       las heurísticas automáticas. Sobre lo SELECCIONADO en el árbol (ficheros y/o carpetas):
@@ -867,6 +871,18 @@ de ficheros clasificado por CDU.
                          más hondas primero), si no el resultado dependería del orden.
         · 🧹 limpiar   — basura conocida (@eaDir, Thumbs.db, .url, .nfo, restos de torrent, 0 bytes) → PAPELERA.
         · 🗜️ comprimir — la carpeta pasa a ser UN .zip a su lado (verificado antes de retirar el original).
+        · ♻ a la Papelera / 🗑 eliminar — retirar lo seleccionado. Las DOS piden CONTRASEÑA de admin; la
+          previsualización dice cuántos ficheros hay DENTRO de cada carpeta (borrar una «vacía» y una con
+          4.000 láminas se parecen demasiado en un listado). «eliminar» es BORRADO DIRECTO, sin Papelera,
+          irreversible: el único punto del sistema donde un error no se puede deshacer, así que además pide
+          una confirmación aparte. Ante la duda, «a la Papelera», que es recuperable.
+        · 🔗 adjuntar a… (barra de CARPETAS) — «esta carpeta VIAJA con este documento» (código de ejemplo,
+          datasets, imágenes). Se guarda en el `_guia.json` del PADRE como `adjuntos` (carpeta → fichero) y el
+          vigilante lo MATERIALIZA moviendo ambos a una subcarpeta marcada `libro-material`: a partir de ahí
+          no hay nada nuevo, `ingestarLibroConMaterial` cataloga el libro por el pipeline normal y conserva el
+          material verbatim (ruta_fija, visible en «🗂️ Archivos»). Resuelve lo que `libro-material` a secas NO
+          puede expresar: esa acción coge el documento MÁS GRANDE y le cuelga TODO, así que con N pdfs y varias
+          carpetas no había forma de decir cuál va con cuál. El resto de la carpeta se sigue catalogando normal.
         · ✏️ renombrar — con UNO seleccionado pide el nombre nuevo; con VARIOS hace buscar-y-reemplazar en
           sus nombres (para quitar de golpe la basura de release group: «[Team Nanban][TPB]», «(gnv64)»…).
           La sustitución es LITERAL (split/join), no regex: lo que escribes es lo que se busca. Un nombre no

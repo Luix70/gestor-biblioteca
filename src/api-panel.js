@@ -17,7 +17,7 @@ import { informeTexto, informeHtml } from './utils/informe-integridad.js';
 import { informePlanHtml } from './utils/informe-plan.js';
 import { planificarInbox } from './vigilante.js';
 import { guardarPlan, listarPlanes, leerPlan } from './utils/planes-guardados.js';
-import { utilidadInbox, OPERACIONES } from './utils/utilidades-inbox.js';
+import { utilidadInbox, OPERACIONES, OPERACIONES_PELIGROSAS } from './utils/utilidades-inbox.js';
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
@@ -1912,6 +1912,12 @@ export function rutasPanel() {
             // carrera — él expande y mueve por su cuenta, tú aplanas por la tuya, y el resultado es imprevisible
             // (ficheros a medio mover, unidades clasificadas sobre un árbol que ya cambió). Se exige pausarlo.
             // Solo bloquea la EJECUCIÓN: previsualizar es de solo lectura y siempre se permite.
+            // Retirar/BORRAR exige la contraseña de admin. `eliminar` no tiene vuelta atrás y con selección
+            // múltiple un clic se lleva mucho: la contraseña obliga a parar y pensar.
+            if (req.body?.ejecutar === true && OPERACIONES_PELIGROSAS.includes(operacion)) {
+                if (!verificarPasswordAdmin(String(req.body?.password || '')))
+                    return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            }
             if (req.body?.ejecutar === true && estadoVigilante()?.activo)
                 return res.status(409).json({ ok: false, motivo: 'PAUSA el Vigilante antes de preparar el árbol: si él cataloga mientras tú mueves ficheros, os pisáis.' });
             // Cada ruta se valida contra el Inbox: nada de «..» ni de salirse del árbol.

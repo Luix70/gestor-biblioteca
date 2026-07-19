@@ -82,7 +82,7 @@ export function normalizarPerfil(p) {
 
 /** Normaliza una guía cruda (de disco o del explorador). Devuelve un objeto guía siempre válido. */
 export function normalizarGuia(g) {
-    const guia = { perfil: {}, accion: 'normal', adjuntar_a: null, archivos: {}, grupos: [] };
+    const guia = { perfil: {}, accion: 'normal', adjuntar_a: null, archivos: {}, grupos: [], adjuntos: {} };
     if (!g || typeof g !== 'object') return guia;
     // GRUPOS de ficheros sueltos que forman UN documento (agrupado B del Inspector): audiolibro / obra.
     // `archivos` = nombres RELATIVOS a esta carpeta. El vigilante los mueve a una subcarpeta y los agrupa.
@@ -97,6 +97,21 @@ export function normalizarGuia(g) {
     }
     guia.perfil = normalizarPerfil(g.perfil);
     if (ACCIONES_CARPETA.includes(g.accion)) guia.accion = g.accion;
+    // ADJUNTOS: «esta CARPETA viaja con ESTE documento». Mapa carpeta → fichero, ambos hijos de la carpeta
+    // guiada. Resuelve lo que `libro-material` NO puede expresar: esa acción coge el documento bibliográfico
+    // MÁS GRANDE de la raíz y le cuelga TODO lo demás, así que con varios documentos y varias carpetas
+    // (N pdfs + Carpeta1 + Carpeta2) no hay forma de decir cuál va con cuál.
+    if (g.adjuntos && typeof g.adjuntos === 'object') {
+        for (const [carpeta, doc] of Object.entries(g.adjuntos)) {
+            const c = String(carpeta || '').trim(), d = String(doc || '').trim();
+            // Son NOMBRES de hijos, no rutas: nada de separadores ni «..».
+            const SEP = String.fromCharCode(92);   // «\» sin literal: el entorno lo corrompe
+            const malo = (x) => !x || x.includes('/') || x.includes(SEP) || x === '.' || x === '..';
+            if (malo(c) || malo(d)) continue;
+            guia.adjuntos[c] = d;
+        }
+    }
+
     // Alcance de «empaquetar»: por subcarpeta (obra multivolumen) o todo junto (un documento). Por defecto,
     // 'subcarpetas': respeta la estructura que el usuario ya tiene, que es la lectura menos destructiva.
     if (guia.accion === 'empaquetar') guia.alcance = ALCANCES_EMPAQUETAR.includes(g.alcance) ? g.alcance : 'subcarpetas';

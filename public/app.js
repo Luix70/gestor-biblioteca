@@ -11314,6 +11314,42 @@ const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '�
  * hay que verlo ANTES, no descubrirlo después. Nada se borra: lo que se retira va a la Papelera.
  */
 const corto0 = (r) => String(r).split('/').pop();
+/**
+ * «Esta CARPETA viaja con ESTE documento». Se guarda en el `_guia.json` del PADRE como `adjuntos`
+ * (carpeta → fichero); el vigilante lo materializa moviendo ambos a una subcarpeta «libro + material».
+ * Resuelve lo que `libro-material` no puede expresar: con varios documentos y varias carpetas en la misma
+ * carpeta, decir CUÁL va con CUÁL.
+ */
+async function adjuntarCarpetasADoc() {
+  const carpetas = [..._guiaSelCarp];
+  if (!carpetas.length) { toast('Marca la carpeta (o carpetas) que quieres adjuntar', 'warn'); return; }
+  // Todas deben colgar del MISMO padre: el adjunto se anota en la guía de ese padre.
+  const padres = new Set(carpetas.map((r) => r.split('/').slice(0, -1).join('/')));
+  if (padres.size > 1) { toast('Selecciona carpetas de una misma carpeta madre', 'warn'); return; }
+  const padre = [...padres][0];
+  // Documentos HERMANOS entre los que elegir (los ficheros del mismo nivel que se pintaron en el árbol).
+  const hermanos = $$('#guiaArbol .guiaSel')
+    .map((cb) => cb.dataset.ruta)
+    .filter((r) => r.split('/').slice(0, -1).join('/') === padre)
+    .map((r) => r.split('/').pop())
+    .filter((n) => /\.(pdf|epub|mobi|azw3?|djvu|cbz|cbr|chm|docx?)$/i.test(n));
+  if (!hermanos.length) { toast('No hay documentos en esa carpeta a los que adjuntar', 'warn'); return; }
+  const lista = hermanos.map((n, i) => (i + 1) + ". " + n).join(String.fromCharCode(10));
+  const cab = "Adjuntar " + carpetas.length + " carpeta(s) a…" + String.fromCharCode(10, 10);
+  const elegido = prompt(cab + lista + String.fromCharCode(10, 10) + "Escribe el número:");
+  if (elegido === null) return;
+  const doc = hermanos[parseInt(elegido, 10) - 1];
+  if (!doc) { toast('Número no válido', 'warn'); return; }
+  try {
+    const g = (await api('/inbox/arbol?sub=' + encodeURIComponent(padre) + '&profundidad=1')).guia || {};
+    const adjuntos = { ...(g.adjuntos || {}) };
+    for (const c of carpetas) adjuntos[c.split('/').pop()] = doc;
+    await api('/inbox/guia', { method: 'POST', body: JSON.stringify({ ruta: padre, guia: { ...g, adjuntos } }) });
+    toast(`${carpetas.length} carpeta(s) viajarán con «${doc}»`, 'ok');
+    await cargarArbolInbox();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
 async function ejecutarUtilidad(operacion) {
   const rutas = [...new Set([..._guiaSel, ..._guiaSelCarp])];
   if (!rutas.length) { toast('No has seleccionado nada', 'warn'); return; }
@@ -11321,7 +11357,19 @@ async function ejecutarUtilidad(operacion) {
   const etq = {
     expandir: 'expandir en carpeta', 'expandir-aqui': 'expandir aquí', aplanar: 'aplanar',
     limpiar: 'limpiar basura', comprimir: 'comprimir', renombrar: 'renombrar',
+    papelera: 'retirar a la Papelera', eliminar: 'ELIMINAR (sin Papelera)',
   }[operacion] || operacion;
+  // Retirar/borrar exige contraseña. `eliminar` NO tiene vuelta atrás, así que además se avisa aparte: es el
+  // único punto del sistema donde equivocarse no se puede deshacer.
+  let password = null;
+  if (operacion === 'papelera' || operacion === 'eliminar') {
+    if (operacion === 'eliminar' &&
+        !confirm('BORRADO DIRECTO, SIN PAPELERA.' + String.fromCharCode(10, 10)
+          + 'Esto NO se puede deshacer. Si dudas, usa «♻ a la Papelera», que es recuperable.'
+          + String.fromCharCode(10, 10) + '¿Seguro?')) return;
+    password = prompt('Contraseña de administrador:');
+    if (password === null || !password) return;
+  }
   // RENOMBRAR necesita saber QUÉ nombre. Con uno seleccionado se pide el nombre nuevo; con varios, un
   // buscar-y-reemplazar sobre sus nombres (para limpiar de golpe la basura de los release groups).
   const extra = {};
@@ -11346,7 +11394,7 @@ Texto a QUITAR (p. ej. « [Team Nanban][TPB]»):`);
   }
   try {
     // 1) PREVISUALIZAR: qué pasaría, sin tocar nada.
-    const prev = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: false, extra }) });
+    const prev = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: false, extra, password }) });
     if (!prev.ok) { toast(prev.motivo || 'no se pudo previsualizar', 'bad'); return; }
     const haran = (prev.acciones || []).filter((a) => a.hecho);
     if (!haran.length) {
@@ -11363,7 +11411,7 @@ Texto a QUITAR (p. ej. « [Team Nanban][TPB]»):`);
     if (!confirm(cabecera + '\n\n' + haran.length + ' elemento(s):\n\n' + muestra + resto
         + '\n\nLo retirado va a la Papelera. ¿Aplicar?')) return;
     // 3) Aplicar.
-    const r = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: true, extra }) });
+    const r = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: true, extra, password }) });
     const fallos = (r.acciones || []).filter((a) => !a.hecho);
     toast(`${etq}: ${r.resumen.hechas} hecho(s)${fallos.length ? ` · ${fallos.length} fallo(s)` : ''}`, fallos.length ? 'warn' : 'ok');
     if (fallos.length) console.warn('Utilidad con fallos:', fallos);
@@ -11610,7 +11658,18 @@ async function guardarGuiasInbox() {
   actualizarSelBar();
 }
 if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
+// «🧰 Utilidades» del menú: NO es una página aparte —eso obligaría a duplicar el explorador, las casillas y el
+// estado de selección—. Lleva a Entrada, despliega el Inspector y carga el árbol: visibilidad sin duplicar.
+if ($('#navUtil')) {
+  $('#navUtil').onclick = () => {
+    go('inbox');
+    const card = $('#fcGuiaInbox');
+    if (card) { card.open = true; card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    cargarArbolInbox();
+  };
+}
 $$('#guiaSelUtil [data-util]').forEach((b) => (b.onclick = () => ejecutarUtilidad(b.dataset.util)));
+if ($('#guiaCarpAdjuntar')) $('#guiaCarpAdjuntar').onclick = adjuntarCarpetasADoc;
 if ($('#guiaInforme')) $('#guiaInforme').onclick = () => descargarInformePlan(null);
 if ($('#guiaPlanes')) {
   cargarPlanesGuardados();

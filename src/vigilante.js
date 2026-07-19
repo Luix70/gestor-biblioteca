@@ -1413,6 +1413,8 @@ async function aplicarAccionesGuiaFs() {
         const dir = path.join(INBOX, e.name);
         let guia;
         try { guia = await leerGuia(dir); } catch { guia = null; }
+        // ADJUNTOS: se materializan SIEMPRE (con cualquier acción), porque son ortogonales a ella.
+        if (guia?.adjuntos && Object.keys(guia.adjuntos).length) await materializarAdjuntos(dir, guia);
         if (!guia || !['explotar', 'aplanar', 'empaquetar'].includes(guia.accion)) continue;
         if (!(await carpetaEstable(dir))) continue; // aún copiándose → esperar al próximo escaneo
         if (guia.accion === 'empaquetar') { await empaquetarCarpetaGuiada(dir, guia); continue; }
@@ -1437,6 +1439,46 @@ async function aplicarAccionesGuiaFs() {
             console.warn(`  ⚠️  Acción de guía «${guia.accion}» sobre «${e.name}» falló: ${err.message} (se conserva intacta).`);
         }
     }
+}
+
+/**
+ * ADJUNTOS: «esta CARPETA viaja con ESTE documento» (código de ejemplo, datasets, imágenes de un libro).
+ *
+ * Se MATERIALIZA moviendo el documento y su(s) carpeta(s) a una subcarpeta propia marcada `libro-material`.
+ * A partir de ahí no hay nada nuevo: `ingestarLibroConMaterial` cataloga el libro por el pipeline NORMAL y
+ * conserva el material verbatim a su lado (ruta_fija, visible en el explorador «🗂️ Archivos» de la ficha).
+ * Reusar en vez de inventar — y de paso el resto de la carpeta se sigue clasificando como siempre, que es lo
+ * que `libro-material` a secas no permitía: esa acción se lleva TODO lo que haya en la carpeta.
+ */
+async function materializarAdjuntos(dir, guia) {
+    // Se agrupa al revés: un documento puede llevarse VARIAS carpetas.
+    const porDoc = new Map();
+    for (const [carpeta, doc] of Object.entries(guia.adjuntos || {})) {
+        if (!porDoc.has(doc)) porDoc.set(doc, []);
+        porDoc.get(doc).push(carpeta);
+    }
+    let hechos = 0;
+    for (const [doc, carpetas] of porDoc) {
+        const absDoc = path.join(dir, doc);
+        if (!(await rutaExiste(absDoc))) { console.warn(`  ⚠️  adjuntos: no está «${doc}» en «${path.basename(dir)}».`); continue; }
+        const presentes = [];
+        for (const c of carpetas) if (await rutaExiste(path.join(dir, c))) presentes.push(c);
+        if (!presentes.length) { console.warn(`  ⚠️  adjuntos: ninguna carpeta de «${doc}» existe ya.`); continue; }
+        try {
+            const destino = await nombreLibre(dir, path.basename(doc, path.extname(doc)));
+            await fs.mkdir(destino, { recursive: true });
+            await fs.rename(absDoc, path.join(destino, doc));
+            for (const c of presentes) await fs.rename(path.join(dir, c), path.join(destino, c));
+            await escribirGuia(destino, { accion: 'libro-material' });
+            console.log(`  🔗 «${doc}» + ${presentes.length} carpeta(s) → «${path.basename(destino)}» (libro + material).`);
+            hechos++;
+        } catch (err) {
+            console.warn(`  ⚠️  adjuntos: no se pudo preparar «${doc}» (${err.message}); se deja como estaba.`);
+        }
+    }
+    // Los adjuntos ya materializados se quitan de la guía: si no, en el siguiente escaneo se buscarían ficheros
+    // que ya no están ahí y se avisaría en falso una y otra vez.
+    if (hechos) { try { await escribirGuia(dir, { ...guia, adjuntos: {} }); } catch { /* */ } }
 }
 
 /**
