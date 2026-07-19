@@ -372,10 +372,12 @@
                      previsualizan primero: con «propagar» un clic puede tocar cientos de elementos. -->
                 <div id="guiaSelUtil" class="row" style="gap: 8px; align-items: center; flex-wrap: wrap; display: none">
                   <span class="muted" style="font-size: 12px">preparar ahora:</span>
-                  <button class="btn" data-util="expandir" type="button" title="Abrir los comprimidos en su sitio (el original va a la Papelera)">📂 expandir</button>
+                  <button class="btn" data-util="expandir" type="button" title="Abrir cada comprimido en UNA CARPETA con su nombre (el original va a la Papelera)">📂 expandir en carpeta</button>
+                  <button class="btn" data-util="expandir-aqui" type="button" title="Abrir cada comprimido soltando su contenido AQUÍ mismo, sin carpeta (si un nombre choca, se renombra: nunca se pisa)">📤 expandir aquí</button>
                   <button class="btn" data-util="aplanar" type="button" title="Subir el contenido de las subcarpetas un nivel (si dos ficheros se llaman igual, se renombra: nunca se pisa)">⬆ aplanar</button>
                   <button class="btn" data-util="limpiar" type="button" title="Retirar basura conocida (@eaDir, Thumbs.db, .url, .nfo, restos de torrent, ficheros de 0 bytes) a la Papelera">🧹 limpiar</button>
                   <button class="btn" data-util="comprimir" type="button" title="Convertir la carpeta en UN .zip a su lado, para que viaje como bloque">🗜️ comprimir</button>
+                  <button class="btn" data-util="renombrar" type="button" title="Renombrar: uno solo, o sustituir un texto en el nombre de TODOS los seleccionados (p. ej. quitar «[Team Nanban][TPB]»)">✏️ renombrar</button>
                   <label class="muted" style="font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer" title="Aplicar también dentro de las subcarpetas (ojo: puede afectar a muchos elementos)">
                     <input type="checkbox" id="utilPropagar" /> propagar a subcarpetas
                   </label>

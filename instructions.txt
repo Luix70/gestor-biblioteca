@@ -847,12 +847,18 @@ de ficheros clasificado por CDU.
     · UTILIDADES DEL INBOX (barra de selección del Inspector, admin → POST /api/inbox/utilidad):
       operaciones MANUALES para dejar un árbol complejo listo ANTES de ingerir, en vez de depender solo de
       las heurísticas automáticas. Sobre lo SELECCIONADO en el árbol (ficheros y/o carpetas):
-        · 📂 expandir  — abre los comprimidos en su sitio; el original a la Papelera tras extraer.
+        · 📂 expandir en carpeta — cada comprimido se abre en UNA carpeta con su nombre.
+        · 📤 expandir aquí — el contenido se suelta en la carpeta actual, sin envoltorio (colisión → « (2)»).
+          (En ambos el original va a la Papelera TRAS extraer.)
         · ⬆ aplanar   — sube el contenido de las subcarpetas un nivel. Si dos ficheros se llaman igual,
                          se renombra « (2)»: NUNCA se pisa nada. Con propagación va de dentro afuera (las
                          más hondas primero), si no el resultado dependería del orden.
         · 🧹 limpiar   — basura conocida (@eaDir, Thumbs.db, .url, .nfo, restos de torrent, 0 bytes) → PAPELERA.
         · 🗜️ comprimir — la carpeta pasa a ser UN .zip a su lado (verificado antes de retirar el original).
+        · ✏️ renombrar — con UNO seleccionado pide el nombre nuevo; con VARIOS hace buscar-y-reemplazar en
+          sus nombres (para quitar de golpe la basura de release group: «[Team Nanban][TPB]», «(gnv64)»…).
+          La sustitución es LITERAL (split/join), no regex: lo que escribes es lo que se busca. Un nombre no
+          puede llevar «/», «\» ni «..» (renombrar NO es mover), y si el destino existe se añade « (2)».
       Interruptor «propagar a subcarpetas». SIEMPRE se PREVISUALIZA primero (`ejecutar:false`) y se pide
       confirmación enseñando los elementos afectados y su número: con propagación un clic puede tocar
       cientos. Ninguna borra: lo retirado va a la Papelera.

@@ -20,7 +20,7 @@ import AdmZip from 'adm-zip';
 import { extraerArchivoComic as extraerComprimido } from './extraer-archivo.js';
 import { reciclar, reciclarCarpeta } from './papelera.js';
 
-export const OPERACIONES = ['expandir', 'aplanar', 'limpiar', 'comprimir'];
+export const OPERACIONES = ['expandir', 'expandir-aqui', 'aplanar', 'limpiar', 'comprimir', 'renombrar'];
 
 // Basura conocida: metadatos del sistema y restos de descarga que nunca son contenido.
 const ES_BASURA = (n) =>
@@ -67,7 +67,7 @@ async function recorrer(raiz, propagar, nivel = 8) {
  * @param {boolean} o.ejecutar   false = solo informa de lo que haría
  * @returns {Promise<{ok, operacion, ejecutar, acciones: [{ruta, hecho, detalle, error?}], resumen}>}
  */
-export async function utilidadInbox({ operacion, absolutas = [], propagar = false, ejecutar = false }) {
+export async function utilidadInbox({ operacion, absolutas = [], propagar = false, ejecutar = false, extra = {} }) {
     if (!OPERACIONES.includes(operacion)) return { ok: false, motivo: `operación desconocida: ${operacion}` };
     const acciones = [];
     const anota = (ruta, hecho, detalle, error) => acciones.push({ ruta, hecho, detalle, ...(error ? { error } : {}) });
@@ -76,7 +76,9 @@ export async function utilidadInbox({ operacion, absolutas = [], propagar = fals
         const st = await fs.stat(abs).catch(() => null);
         if (!st) { anota(abs, false, 'no existe'); continue; }
         try {
-            if (operacion === 'expandir') await opExpandir(abs, st, propagar, ejecutar, anota);
+            if (operacion === 'expandir') await opExpandir(abs, st, propagar, ejecutar, anota, false);
+            else if (operacion === 'expandir-aqui') await opExpandir(abs, st, propagar, ejecutar, anota, true);
+            else if (operacion === 'renombrar') await opRenombrar(abs, st, ejecutar, anota, extra);
             else if (operacion === 'aplanar') await opAplanar(abs, st, propagar, ejecutar, anota);
             else if (operacion === 'limpiar') await opLimpiar(abs, st, propagar, ejecutar, anota);
             else if (operacion === 'comprimir') await opComprimir(abs, st, ejecutar, anota);
@@ -87,7 +89,7 @@ export async function utilidadInbox({ operacion, absolutas = [], propagar = fals
 }
 
 // ── expandir: cada contenedor se abre en su sitio; el original va a la Papelera tras verificar ──────────────
-async function opExpandir(abs, st, propagar, ejecutar, anota) {
+async function opExpandir(abs, st, propagar, ejecutar, anota, aqui) {
     const objetivos = [];
     if (st.isFile()) { if (ES_CONTENEDOR(path.basename(abs))) objetivos.push(abs); }
     else {
@@ -99,8 +101,7 @@ async function opExpandir(abs, st, propagar, ejecutar, anota) {
     for (const zip of objetivos) {
         const dir = path.dirname(zip);
         const base = path.basename(zip).replace(/\.tar\.(gz|bz2|xz)$|\.[^.]+$/i, '') || 'archivo';
-        if (!ejecutar) { anota(zip, true, `se expandiría en «${base}»`); continue; }
-        const destino = await nombreLibre(dir, base);
+        if (!ejecutar) { anota(zip, true, aqui ? 'se expandiría AQUÍ (contenido suelto)' : `se expandiría en «${base}»`); continue; }
         const tmp = path.join(dir, `.expand-${Date.now()}`);
         try {
             await fs.mkdir(tmp, { recursive: true });
@@ -108,10 +109,24 @@ async function opExpandir(abs, st, propagar, ejecutar, anota) {
             // Un único directorio dentro → se promociona su contenido (evita «X/X/…»).
             const top = (await fs.readdir(tmp, { withFileTypes: true })).filter((d) => !ignorar(d.name));
             const raiz = (top.length === 1 && top[0].isDirectory()) ? path.join(tmp, top[0].name) : tmp;
-            await fs.rename(raiz, destino);
-            if (raiz !== tmp) await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+            let detalle;
+            if (aqui) {
+                // AQUÍ: el contenido va suelto a la carpeta que contiene el comprimido, resolviendo colisiones
+                // con « (2)» — nunca se pisa un fichero que ya estuviera.
+                let n = 0;
+                for (const nombre of await fs.readdir(raiz)) {
+                    await fs.rename(path.join(raiz, nombre), await nombreLibre(dir, nombre));
+                    n++;
+                }
+                detalle = `${n} elemento(s) expandidos aquí`;
+            } else {
+                const destino = await nombreLibre(dir, base);
+                await fs.rename(raiz, destino);
+                detalle = `expandido en «${path.basename(destino)}»`;
+            }
+            await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
             await reciclar([zip], 'utilidad-expandir');   // el original a la Papelera, ya extraído
-            anota(zip, true, `expandido en «${path.basename(destino)}»`);
+            anota(zip, true, detalle);
         } catch (e) {
             await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
             anota(zip, false, 'no se pudo expandir', e.message);
@@ -203,4 +218,38 @@ async function opComprimir(abs, st, ejecutar, anota) {
         await fs.rm(destino, { force: true }).catch(() => {});
         anota(abs, false, 'no se pudo comprimir', e.message);
     }
+}
+
+// ── renombrar: uno a uno, o BUSCAR-Y-REEMPLAZAR sobre varios ────────────────────────────────────────────────
+/**
+ * Dos modos, según lo que mande el cliente en `extra`:
+ *   · {nuevo:'…'}      → renombra ESE elemento (solo tiene sentido con uno seleccionado).
+ *   · {de:'…', a:'…'}  → sustituye un texto en el nombre de TODOS los seleccionados. Es lo que sirve para
+ *                        limpiar la basura de los release groups («[Team Nanban][TPB]», «(gnv64)»…) de golpe.
+ * La sustitución es LITERAL (split/join), no una expresión regular: el usuario escribe «[TPB]» y eso es lo que
+ * se busca, sin que los corchetes signifiquen otra cosa ni se pueda colar un patrón que reviente.
+ * NUNCA sobrescribe: si el nombre resultante ya existe, se añade « (2)».
+ */
+async function opRenombrar(abs, st, ejecutar, anota, extra = {}) {
+    const dir = path.dirname(abs), actual = path.basename(abs);
+    let destinoNombre = null;
+
+    if (typeof extra.nuevo === 'string' && extra.nuevo.trim()) destinoNombre = extra.nuevo.trim();
+    else if (typeof extra.de === 'string' && extra.de) {
+        if (!actual.includes(extra.de)) { anota(abs, false, `no contiene «${extra.de}»`); return; }
+        destinoNombre = actual.split(extra.de).join(String(extra.a ?? '')).trim();
+    } else { anota(abs, false, 'falta el nombre nuevo (o el texto a sustituir)'); return; }
+
+    // Un nombre no puede llevar separadores ni «..»: renombrar NO es mover a otra carpeta.
+    const SEP = String.fromCharCode(92);   // «\» sin escribirlo literal (este entorno lo corrompe)
+    if (!destinoNombre || destinoNombre.includes('/') || destinoNombre.includes(SEP) || destinoNombre === '.' || destinoNombre === '..') {
+        anota(abs, false, 'nombre no válido'); return;
+    }
+    if (destinoNombre === actual) { anota(abs, false, 'el nombre no cambia'); return; }
+    if (!ejecutar) { anota(abs, true, `«${actual}» → «${destinoNombre}»`); return; }
+    try {
+        const destino = await nombreLibre(dir, destinoNombre);
+        await fs.rename(abs, destino);
+        anota(abs, true, `«${actual}» → «${path.basename(destino)}»`);
+    } catch (e) { anota(abs, false, 'no se pudo renombrar', e.message); }
 }

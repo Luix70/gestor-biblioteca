@@ -11313,14 +11313,37 @@ const _ICONO_CLASE = { doc: '📗', imagen: '🖼️', audio: '🎵', video: '�
  * confirmación con el recuento: con «propagar a subcarpetas» un clic puede tocar cientos de elementos, y eso
  * hay que verlo ANTES, no descubrirlo después. Nada se borra: lo que se retira va a la Papelera.
  */
+const corto0 = (r) => String(r).split('/').pop();
 async function ejecutarUtilidad(operacion) {
   const rutas = [...new Set([..._guiaSel, ..._guiaSelCarp])];
   if (!rutas.length) { toast('No has seleccionado nada', 'warn'); return; }
   const propagar = $('#utilPropagar') && $('#utilPropagar').checked;
-  const etq = { expandir: 'expandir comprimidos', aplanar: 'aplanar', limpiar: 'limpiar basura', comprimir: 'comprimir' }[operacion] || operacion;
+  const etq = {
+    expandir: 'expandir en carpeta', 'expandir-aqui': 'expandir aquí', aplanar: 'aplanar',
+    limpiar: 'limpiar basura', comprimir: 'comprimir', renombrar: 'renombrar',
+  }[operacion] || operacion;
+  // RENOMBRAR necesita saber QUÉ nombre. Con uno seleccionado se pide el nombre nuevo; con varios, un
+  // buscar-y-reemplazar sobre sus nombres (para limpiar de golpe la basura de los release groups).
+  const extra = {};
+  if (operacion === 'renombrar') {
+    if (rutas.length === 1) {
+      const actual = corto0(rutas[0]);
+      const nuevo = prompt('Nombre nuevo:', actual);
+      if (nuevo === null || !nuevo.trim() || nuevo === actual) return;
+      extra.nuevo = nuevo.trim();
+    } else {
+      const de = prompt(`Sustituir en el nombre de ${rutas.length} elementos.
+
+Texto a QUITAR (p. ej. « [Team Nanban][TPB]»):`);
+      if (de === null || !de) return;
+      const a = prompt('Sustituir por (deja vacío para quitarlo):', '');
+      if (a === null) return;
+      extra.de = de; extra.a = a;
+    }
+  }
   try {
     // 1) PREVISUALIZAR: qué pasaría, sin tocar nada.
-    const prev = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: false }) });
+    const prev = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: false, extra }) });
     if (!prev.ok) { toast(prev.motivo || 'no se pudo previsualizar', 'bad'); return; }
     const haran = (prev.acciones || []).filter((a) => a.hecho);
     if (!haran.length) {
@@ -11337,7 +11360,7 @@ async function ejecutarUtilidad(operacion) {
     if (!confirm(cabecera + '\n\n' + haran.length + ' elemento(s):\n\n' + muestra + resto
         + '\n\nLo retirado va a la Papelera. ¿Aplicar?')) return;
     // 3) Aplicar.
-    const r = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: true }) });
+    const r = await api('/inbox/utilidad', { method: 'POST', body: JSON.stringify({ operacion, rutas, propagar, ejecutar: true, extra }) });
     const fallos = (r.acciones || []).filter((a) => !a.hecho);
     toast(`${etq}: ${r.resumen.hechas} hecho(s)${fallos.length ? ` · ${fallos.length} fallo(s)` : ''}`, fallos.length ? 'warn' : 'ok');
     if (fallos.length) console.warn('Utilidad con fallos:', fallos);
