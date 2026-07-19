@@ -844,6 +844,14 @@ de ficheros clasificado por CDU.
       el número que dice si se perdió algo. Antes de ingerir sale como «previsión» (pendiente, no fallo);
       después juzga. Cada fichero que entró ENLAZA a su ficha. Una sola consulta a Mongo con todos los
       nombres. Reutiliza el CSS del informe de Integridad (CSS_INFORME) — un solo lenguaje visual.
+    · UTILIDADES POR CONSOLA (`node scripts/utilidades.js <op> <ruta…> [--ejecutar] [--propagar]
+      [--solo-unicas] [--de … --a …] [--nuevo …]`): las MISMAS operaciones sin depender del navegador —
+      la vía del panel puede fallar por algo tan tonto como un app.js cacheado y entonces el botón «no
+      hace nada» sin decir por qué. Rutas RELATIVAS al Inbox, con comodín «carpeta/*» para no escribir
+      quince. Dry-run por defecto. Escribe por process.stdout (console.log lo silenciaría
+      consola-timestamp). Ejemplo real:
+        node scripts/utilidades.js aplanar "Grabados de la Encyclopedie/*" --solo-unicas
+        …y con --ejecutar cuando el informe cuadre.
     · UTILIDADES DEL INBOX (barra de selección del Inspector, admin → POST /api/inbox/utilidad):
       operaciones MANUALES para dejar un árbol complejo listo ANTES de ingerir, en vez de depender solo de
       las heurísticas automáticas. Sobre lo SELECCIONADO en el árbol (ficheros y/o carpetas):
