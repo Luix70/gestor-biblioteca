@@ -72,6 +72,10 @@ export const AJUSTES = {
     // que lo que puede tumbar al Atom son los bytes. Por número se hacían las dos cosas mal: partía en dos un
     // diccionario de 400 páginas ligeras, y dejaba pasar un tomo de 300 escaneos enormes.
     CBZ_MAX_BYTES: 400 * 1024 * 1024,
+    // Conversiones de PDF en paralelo. Son procesos externos (poppler) que esperan CPU/disco, así que de una
+    // en una se desaprovechan los demás hilos del NAS. Con 3 el trabajo baja a menos de la mitad; no se sube
+    // más porque cada pdftoppm puede comer bastante RAM y el contenedor tiene 1 GB.
+    CBZ_CONCURRENCIA: 3,
 
     // --- PDF: extracción de texto, rasterizado y OCR ---
     PDF_PAGINAS_FRENTE: 15,         // nº de primeras páginas de las que se extrae texto (ISBN/título)

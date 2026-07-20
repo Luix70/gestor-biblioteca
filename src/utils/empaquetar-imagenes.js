@@ -70,6 +70,27 @@ const limpiar = async (tmps) => { for (const t of (tmps || []).filter(Boolean)) 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 /**
+ * Ejecuta `tarea` sobre cada elemento con un tope de CONCURRENCIA. Las conversiones de pdf son procesos
+ * externos independientes (poppler) que pasan casi todo el tiempo esperando CPU/disco: hacerlas de una en una
+ * dejaba parados los demás hilos del NAS. Con 3 en paralelo el trabajo se reduce a menos de la mitad.
+ * No se sube más: cada pdftoppm puede comer bastante RAM y el Atom tiene 1 GB para el contenedor.
+ */
+const CONCURRENCIA = Math.max(1, Number(process.env.CBZ_CONCURRENCIA) || 3);
+async function enParalelo(items, tarea, limite = CONCURRENCIA) {
+    const resultados = new Array(items.length);
+    let siguiente = 0;
+    const obrero = async () => {
+        while (true) {
+            const i = siguiente++;
+            if (i >= items.length) return;
+            resultados[i] = await tarea(items[i], i);
+        }
+    };
+    await Promise.all(Array.from({ length: Math.min(limite, items.length) }, obrero));
+    return resultados;
+}
+
+/**
  * PDF → imágenes, para que una lámina en PDF pueda entrar en el cbz (un cbz es un archivo de IMÁGENES: un
  * visor paginado no renderiza un pdf de dentro). Muy habitual en colecciones de grabados: cada lámina viene
  * como un pdf de UNA página, a veces dentro de su propio comprimido.
@@ -176,30 +197,37 @@ async function imagenesDe(dir) {
     let tmp = null, desdeComprimidos = 0;
     if (comprimidos.length) {
         tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'cbz-'));
-        for (const c of comprimidos) {
-            const sub = path.join(tmp, path.basename(c.name, path.extname(c.name)));
+        const raizC = tmp;
+        // Extraer + convertir en PARALELO: en «.14»/«.15» son cientos de comprimidos con una lámina dentro y
+        // hacerlo de uno en uno era el grueso del tiempo. Cada uno va a su propio subdirectorio, así que no se
+        // pisan; el orden final lo fija el ordenado por nombre de más abajo.
+        const lotes = await enParalelo(comprimidos, async (c) => {
+            const sub = path.join(raizC, path.basename(c.name, path.extname(c.name)));
             try {
                 await fs.mkdir(sub, { recursive: true });
                 await extraerArchivoComic(path.join(dir, c.name), sub);
-            } catch { continue; }   // comprimido ilegible → se ignora aquí; el llamante lo verá en la verificación
-            // Las imágenes extraídas se nombran con el comprimido de origen, para conservar SU orden natural
-            // («I02236.rar» → «I02236.jpg»): es lo que da el orden de las láminas dentro del tomo.
-            // Si el comprimido trae MÁS DE UNA imagen se numeran («I02240-01.jpg», «I02240-02.jpg»): con el
-            // nombre a secas todas se llamarían igual, el cbz tendría entradas duplicadas y la verificación
-            // byte a byte abortaría el empaquetado entero — la carpeta quedaba intacta y sin cbz, sin que se
-            // entendiera por qué. El caso habitual (un comprimido = una lámina) conserva el nombre limpio.
-            // Dentro del comprimido puede venir la lámina como PDF (muy común en colecciones de grabados):
-            // se convierte a imagen para que pueda entrar en el cbz.
+            } catch { return null; }   // comprimido ilegible → el llamante lo verá en la verificación
+            // Dentro puede venir la lámina como PDF (muy común en colecciones de grabados): se convierte.
+            const dePdf = [];
             for (const pdf of await listarPdfs(sub)) {
-                const salidas = await imagenesDePdf(pdf, path.join(sub, '_pdf_' + path.basename(pdf, '.pdf')));
+                dePdf.push({ pdf, salidas: await imagenesDePdf(pdf, path.join(sub, '_pdf_' + path.basename(pdf, '.pdf'))) });
+            }
+            return { c, dePdf, extraidas: await listarImgs(sub) };
+        });
+        for (const lote of lotes) {
+            if (!lote) continue;
+            const { c, dePdf, extraidas } = lote;
+            const base = path.basename(c.name, path.extname(c.name));
+            for (const { pdf, salidas } of dePdf) {
                 if (!salidas.length) { fallidos.push(`${c.name} → ${path.basename(pdf)}`); continue; }
                 salidas.forEach((abs, i) => imagenes.push({
-                    nombre: `${path.basename(c.name, path.extname(c.name))}${salidas.length > 1 ? '-' + String(i + 1).padStart(String(salidas.length).length, '0') : ''}${path.extname(abs)}`, abs,
+                    nombre: `${base}${salidas.length > 1 ? '-' + String(i + 1).padStart(String(salidas.length).length, '0') : ''}${path.extname(abs)}`, abs,
                 }));
                 desdeComprimidos += salidas.length;
             }
-            const extraidas = await listarImgs(sub);
-            const base = path.basename(c.name, path.extname(c.name));
+            // Las imágenes ya extraídas se nombran con el comprimido de origen, para conservar SU orden natural
+            // («I02236.rar» → «I02236.jpg»). Si trae varias se numeran, o todas se llamarían igual y el cbz
+            // tendría entradas duplicadas.
             const ancho = String(extraidas.length).length;
             extraidas.forEach((f, i) => {
                 const sufijo = extraidas.length > 1 ? `-${String(i + 1).padStart(ancho, '0')}` : '';
@@ -208,13 +236,28 @@ async function imagenesDe(dir) {
             });
         }
     }
+    // SI YA HAY IMÁGENES SUELTAS, LOS PDF SE IGNORAN. Cuando alguien convierte a mano las láminas (más rápido
+    // con una herramienta de escritorio) y deja los pdf al lado, el pdf es el ORIGEN y el jpg el resultado: si
+    // se procesaran los dos, cada lámina entraría DOS VECES en el cbz. Se avisa con los recuentos para que se
+    // vea en el log lo que se ha decidido, que es justo donde se descubren las sorpresas.
+    if (imagenes.length && pdfs.length) {
+        try {
+            console.log(`  📚 «${path.basename(dir)}»: ${imagenes.length} imagen(es) sueltas y ${pdfs.length} pdf → se usan las IMÁGENES (los pdf son el origen; no se tocan).`);
+        } catch { /* el log nunca rompe */ }
+    }
     // PDFs SUELTOS de la carpeta: cada lámina en pdf se convierte a imagen y entra en el cbz.
-    if (pdfs.length) {
+    if (pdfs.length && !imagenes.length) {
         tmp = tmp || await fs.mkdtemp(path.join(os.tmpdir(), 'cbz-'));
-        for (const f of pdfs) {
+        const raiz = tmp;
+        // En PARALELO: son procesos externos independientes. El orden se conserva porque cada resultado vuelve
+        // en su índice y se vuelca después (y de todas formas se ordena por nombre más abajo).
+        const res = await enParalelo(pdfs, async (f) => {
             const base = path.basename(f.name, path.extname(f.name));
-            const salidas = await imagenesDePdf(path.join(dir, f.name), path.join(tmp, '_pdf_' + base));
-            if (!salidas.length) { fallidos.push(f.name); continue; }
+            const salidas = await imagenesDePdf(path.join(dir, f.name), path.join(raiz, '_pdf_' + base));
+            return { nombre: f.name, base, salidas };
+        });
+        for (const { nombre, base, salidas } of res) {
+            if (!salidas.length) { fallidos.push(nombre); continue; }
             const ancho = String(salidas.length).length;
             salidas.forEach((abs, i) => imagenes.push({
                 nombre: `${base}${salidas.length > 1 ? '-' + String(i + 1).padStart(ancho, '0') : ''}${path.extname(abs)}`, abs,
