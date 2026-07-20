@@ -41,6 +41,12 @@ import { leerMetadatosAudio } from '../src/utils/lector-audio.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const idArg = (() => { const i = process.argv.indexOf('--id'); return i >= 0 ? process.argv[i + 1] : null; })();
+const patronArg = (() => { const i = process.argv.indexOf('--patron'); return i >= 0 ? process.argv[i + 1] : null; })();
+// `--forzar`: RE-EXTRAE la portada aunque ya haya una válida. Hace falta cuando la portada existente es
+// correcta como fichero pero MALA como imagen — el caso real: las láminas bitonales se extrajeron en negativo,
+// se arreglaron dentro del cbz, y las portadas (jpg, ya derivadas) siguieron invertidas. Reusar una imagen del
+// carrusel no vale entonces: hay que volver al fichero original, que ahora sí está bien.
+const FORZAR = process.argv.includes('--forzar');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -129,7 +135,15 @@ async function main() {
     const soloSinPortada = process.argv.includes('--sin-portada');
     const filtro = idArg
         ? { _id: new ObjectId(idArg) }
+        : patronArg ? { nombre_archivo: { $regex: patronArg, $options: 'i' } }
         : soloSinPortada ? { $or: [{ portada: null }, { portada: { $exists: false } }, { portada: '' }] } : {};
+
+    // `--forzar` sin acotar re-extraería la portada de TODO el catálogo (16k+ documentos, rasterizando cada
+    // uno). Eso no se hace por accidente: hay que decir a cuáles.
+    if (FORZAR && !idArg && !patronArg) {
+        console.error('⛔ --forzar necesita acotar el conjunto: usa --id <ObjectId> o --patron "<regex>".');
+        process.exit(1);
+    }
     const proj = {
         titulo: 1, portada: 1, imagenes: 1, ruta_base: 1, cdu: 1, tipo_recurso: 1, isbn: 1, issn: 1, formatos: 1,
         nombre_archivo: 1, audios: 1, obra: 1, isbn_obra: 1, obra_titulo: 1, volumen_numero: 1, año_edicion: 1, mes_publicacion: 1,
@@ -156,15 +170,17 @@ async function main() {
         const portadaDisco = doc.portada ? (absDe(doc.portada) || path.join(carpeta, path.basename(doc.portada))) : null;
         const portadaOk = !!doc.portada && (await existe(portadaDisco));
 
-        if (!rotas.length && portadaOk) continue; // nada que reparar
+        if (!FORZAR && !rotas.length && portadaOk) continue; // nada que reparar
 
         const set = {};
         if (rotas.length) { st.conImagenesRotas++; set.imagenes = validas; }
 
         let accion = '', motivo = '';
-        if (!portadaOk) {
-            st.sinPortada++;
-            const reusar = validas.find((im) => im.tipo === 'portada') || validas[0];
+        if (FORZAR || !portadaOk) {
+            if (!portadaOk) st.sinPortada++;
+            // Al FORZAR no se reusa nada del carrusel: esas imágenes son precisamente las que están mal.
+            // Se vuelve al fichero original, que es el que se ha corregido.
+            const reusar = FORZAR ? null : (validas.find((im) => im.tipo === 'portada') || validas[0]);
             if (reusar) {
                 set.portada = reusar.ruta;
                 accion = 'reusar';
@@ -178,7 +194,8 @@ async function main() {
                 if (Buffer.isBuffer(buf) && buf.length) {
                     const { web } = await escribirImagen(carpeta, webDeDoc(doc), buf, 'portada');
                     set.portada = web;
-                    set.imagenes = [{ ruta: web, tipo: 'portada', origen: 'reparacion' }, ...validas];
+                    const resto = FORZAR ? validas.filter((im) => im.ruta !== doc.portada) : validas;
+                    set.imagenes = [{ ruta: web, tipo: 'portada', origen: 'reparacion' }, ...resto];
                     accion = 'extraer';
                 } else {
                     // SÍ había de dónde sacarla (fichero o pistas) pero la extracción no dio imagen. Es un
@@ -197,11 +214,13 @@ async function main() {
             else st.irreparables++;
         }
 
-        const marca = `${!portadaOk ? '🖼️ ' : ''}${rotas.length ? `🧹${rotas.length} ` : ''}`;
+        const marca = `${!portadaOk || FORZAR ? '🖼️ ' : ''}${rotas.length ? `🧹${rotas.length} ` : ''}`;
         const cola = set.portada
             ? ` → portada (${accion === 'extraer' ? 'extraída de la 1.ª página' : 'reusada'}): ${path.basename(String(set.portada))}`
             : accion === 'extraer' ? ' → se extraería la portada de su fichero (ejecuta con --ejecutar)'
-            : (!portadaOk ? ` → SIN reparar: ${motivo || 'no tiene imágenes válidas ni fichero original'}` : '');
+            // Al FORZAR también hay que decir por qué NO se pudo: si no, un documento con portada válida
+            // que falla al re-extraer no imprimiría nada y parecería que ha ido bien.
+            : (!portadaOk || FORZAR ? ` → SIN reparar: ${motivo || 'no tiene imágenes válidas ni fichero original'}` : '');
         // Contador i/N: rasterizar la 1.ª página de un PDF tarda segundos, así que sin saber cuánto queda el
         // proceso PARECE colgado. Se escribe por stdout directamente (no console.log) por si algún import
         // trajera consola-timestamp, que silencia las líneas sin marcador de titular.

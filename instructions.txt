@@ -850,6 +850,15 @@ de ficheros clasificado por CDU.
       anterior). Una carpeta solo se borra si quedó VACÍA. ⚠ Lo que hacía inútil toda esta red: el
       `return {ok:false}` NO propagaba `fallidos`, así que `apartarNoConvertibles` —escrito justo para
       esto— nunca llegaba a ejecutarse y la guía se desmarcaba pidiendo intervención manual.
+    · REGENERAR PORTADAS YA EXISTENTES: `node scripts/reparar-portadas.js --patron "<regex>" --forzar
+      [--ejecutar]` (o `--id <ObjectId> --forzar`). Normal­mente el script solo actúa si FALTA la portada o
+      si hay imágenes rotas; `--forzar` la RE-EXTRAE aunque exista y sea válida como fichero. Hace falta
+      cuando la portada es correcta como fichero pero MALA como imagen: las láminas bitonales salieron en
+      negativo, se corrigieron dentro del cbz, y las portadas —jpg ya derivados— siguieron invertidas.
+      Al forzar NO se reusa ninguna imagen del carrusel (son justo las malas): se vuelve al fichero
+      original, que es el que se ha arreglado, y la portada vieja sale del carrusel (el fichero se queda en
+      disco: no se borra nada). `--forzar` EXIGE acotar con --id o --patron; sin eso re-extraería la
+      portada del catálogo entero (16k+ documentos, rasterizando cada uno).
     · UNIFICAR UNA SERIE DE NÚMEROS (revista/cómic): `node scripts/unificar-serie-revista.js --coleccion
       <id> --cdu <cdu> [--esperados n] [--ejecutar]` (dry-run por defecto). Hermano del anterior, pero para
       una COLECCIÓN de números, no una obra multivolumen. Caso real (Don Miki, 692 números, ISSN
