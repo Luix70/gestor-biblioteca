@@ -826,6 +826,18 @@ de ficheros clasificado por CDU.
       ANTI-PÉRDIDA: se empaqueta a un TEMPORAL y se verifica lámina a lámina ANTES de retirar un solo
       original. Los originales van a la PAPELERA, nunca se borran. `planEmpaquetado` ES el dry-run de
       esto: el plan dice «500 láminas → 2 cbz → obra multivolumen» sin escribir un byte.
+      POLARIDAD (láminas en NEGATIVO): `pdfimages` vuelca la imagen TAL COMO ESTÁ GUARDADA en el PDF, y
+      en un *stencil* (ImageMask, que es como viene un grabado escaneado en blanco y negro) el bit 0 significa
+      «pinta», no «blanco» → al pasarlo a PNG en gris sale el NEGATIVO. Medido: 85,1% de píxeles negros en
+      una lámina que debería ser 85% blanca. Renderizar con pdftoppm sí respeta la semántica pero cuesta
+      7,0 s por lámina frente a 1,46 s extrayendo (horas de más en el Atom), así que se extrae rápido y se
+      corrige: `utils/png-polaridad.js` decide POR CONTENIDO (una página escaneada es abrumadoramente
+      blanca; si sale negra, está invertida — no por el tipo declarado, porque un stencil puede traer un
+      `Decode` que ya invierta) y da la vuelta al PNG SIN RECOMPRIMIR: de gris de 1 bit a indexado con una
+      paleta de dos entradas al revés, dejando los IDAT byte a byte. Para los cbz YA hechos no hace falta
+      reconvertir los PDF (horas): `node scripts/corregir-polaridad-cbz.js <ruta|carpeta> [--ejecutar]`
+      los arregla por dentro en minutos, reescribiendo a un temporal y verificando página a página antes de
+      sustituir. Es idempotente (una segunda pasada no vuelve a invertir).
       TOMO A TOMO, y una lámina ILEGIBLE NO TUMBA LA COLECCIÓN (las dos cosas se aprendieron a base de
       perder trabajo): cada subcarpeta se convierte, se escribe y se verifica por su cuenta, y su temporal
       se libera antes de pasar a la siguiente. Antes se recogían las 15 subcarpetas y solo AL FINAL se

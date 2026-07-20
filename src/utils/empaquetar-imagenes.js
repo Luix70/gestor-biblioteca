@@ -20,6 +20,7 @@
  * el llamante retire nada. Los originales van a la Papelera, jamás se borran.
  */
 import AdmZip from 'adm-zip';
+import { corregirPolaridadPng } from './png-polaridad.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -109,13 +110,14 @@ const PDF_DPI = Number(process.env.CBZ_PDF_DPI) || 300;
 // Cada cuántas láminas se informa. Dentro de un tomo pueden ser cientos y cada conversión tarda segundos: sin
 // esto el proceso parece MUERTO durante una hora (le pasó al usuario dos veces).
 const AVISO_CADA = Number(process.env.CBZ_AVISO_CADA) || 25;
-let _convertidos = 0, _rasterizados = 0;
-export function progresoConversion() { return { convertidos: _convertidos, rasterizados: _rasterizados }; }
+let _convertidos = 0, _rasterizados = 0, _invertidos = 0;
+export function progresoConversion() { return { convertidos: _convertidos, rasterizados: _rasterizados, invertidos: _invertidos }; }
 function _avisar(nombre, via) {
     _convertidos++;
     if (via === 'raster') _rasterizados++;
     if (_convertidos % AVISO_CADA === 0) {
-        const extra = _rasterizados ? ` · ${_rasterizados} rasterizadas (más lento)` : '';
+        const extra = (_rasterizados ? ` · ${_rasterizados} rasterizadas (más lento)` : '')
+            + (_invertidos ? ` · ${_invertidos} en negativo corregidas` : '');
         try { console.log(`  📚 … ${_convertidos} lámina(s) convertidas${extra}`); } catch { /* */ }
     }
 }
@@ -127,6 +129,16 @@ async function imagenesDePdf(pdf, destDir) {
         const { stdout } = await execFileP('pdfinfo', [pdf], { timeout: 60000 });
         paginas = Number((stdout.match(/Pages:\s*(\d+)/i) || [])[1]) || 0;
     } catch { /* sin pdfinfo no se puede validar el cuadre → se irá a rasterizar */ }
+
+    // Toda lámina extraída pasa por la corrección de POLARIDAD: `pdfimages` vuelca el bitonal tal como está
+    // guardado y en un stencil (ImageMask) eso sale en NEGATIVO. Le pasó a los 14 tomos de la Encyclopédie que
+    // no habían sido convertidos a mano. Solo toca PNG de 1 bit y decide por contenido; el resto ni se abre.
+    const conPolaridadOk = async (rutas) => {
+        for (const r of rutas) {
+            if (/\.png$/i.test(r) && await corregirPolaridadPng(r)) _invertidos++;
+        }
+        return rutas;
+    };
 
     // 1) Extracción SIN pérdida de las imágenes embebidas.
     const listar = async (re) => (await fs.readdir(destDir)).filter((n) => n.startsWith('p-') && re.test(n)).sort();
@@ -147,7 +159,7 @@ async function imagenesDePdf(pdf, destDir) {
             } else {
                 salidas = salidas.filter((n) => ES_IMG.test(n));
             }
-            if (salidas.length === paginas) { _avisar(pdf, 'embebida'); return salidas.map((n) => path.join(destDir, n)); }
+            if (salidas.length === paginas) { _avisar(pdf, 'embebida'); return conPolaridadOk(salidas.map((n) => path.join(destDir, n))); }
             // UNA página con VARIAS imágenes embebidas: es el caso típico de una lámina escaneada que lleva el
             // escaneo + una máscara/estarcido (JBIG2) o una miniatura. Se coge la MÁS GRANDE, que es el escaneo
             // — sigue siendo sin pérdida y evita el rasterizado, que en el Atom cuesta 10-30 s por lámina
@@ -159,7 +171,7 @@ async function imagenesDePdf(pdf, destDir) {
                     if (t > mejorTam) { mejorTam = t; mejor = n; }
                 }
                 for (const n of salidas) if (n !== mejor) await fs.rm(path.join(destDir, n), { force: true }).catch(() => {});
-                if (mejor) { _avisar(pdf, 'embebida'); return [path.join(destDir, mejor)]; }
+                if (mejor) { _avisar(pdf, 'embebida'); return conPolaridadOk([path.join(destDir, mejor)]); }
             }
             // No cuadra: se descarta lo extraído y se rasteriza (mejor una página fiel que trozos sueltos).
             await limpiarSalidas();
@@ -415,7 +427,7 @@ export async function empaquetarImagenes(dir, dirDestino, { alcance = 'subcarpet
     const omitidos = [];
     const fallidos = [];
     const log = (m) => { try { console.log(`  📚 ${m}`); } catch { /* el log nunca rompe */ } };
-    _convertidos = 0; _rasterizados = 0;   // el contador es POR PASADA (era de módulo y acumulaba entre reintentos)
+    _convertidos = 0; _rasterizados = 0; _invertidos = 0;   // el contador es POR PASADA (era de módulo y acumulaba entre reintentos)
 
     /**
      * Escribe los cbz de UN grupo ya recogido. Un grupo puede dar varios cbz si excede CBZ_MAX_BYTES.
