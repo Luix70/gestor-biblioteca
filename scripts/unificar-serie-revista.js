@@ -84,6 +84,12 @@ const col = await db.collection('colecciones').findOne({ _id: _idCol });
 if (!col) { escribir('\n⛔ colección no encontrada\n'); process.exit(1); }
 
 const docs = await db.collection('biblioteca').find({ coleccion: _idCol }).toArray();
+
+// Todas las rutas ocupadas por CUALQUIER documento. Hace falta para no arrastrar carpetas ajenas: ver la
+// guarda de más abajo. Se trae una sola vez (solo la ruta) en vez de preguntar por documento.
+const TODAS_RUTAS = (await db.collection('biblioteca')
+    .find({ ruta_base: { $exists: true, $ne: null } }, { projection: { ruta_base: 1 } }).toArray())
+    .map((x) => ({ id: String(x._id), ruta: x.ruta_base }));
 escribir(`\n${EJECUTAR ? '⚙️  EJECUTAR' : '🔍 DRY-RUN'} · «${col.nombre || col.titulo}» (issn ${col.issn || '—'})`);
 escribir(`   ${docs.length} número(s) · CDU → ${cduNueva} · tipo_recurso → revista\n`);
 
@@ -159,9 +165,25 @@ for (const p of plan) {
             resumen.saltados++;
             continue;
         }
+        // GUARDA: el origen puede NO ser la carpeta propia de este documento, sino una que CONTIENE las de
+        // otros. Pasa con los números ingeridos sin año por la versión antigua de `rutaCatalogo`, que no les
+        // añadía segmento: su ruta_base era la carpeta de la CABECERA. Mover eso con `rename` se lleva dentro
+        // a todos sus hermanos —ocurrió: 27 números acabaron colgando de «n343»—. Cuando se detecta, se
+        // mueven SOLO los ficheros sueltos del primer nivel y las subcarpetas ajenas se quedan donde están.
+        const ajenos = TODAS_RUTAS.filter((x) => x.id !== String(d._id) && x.ruta.startsWith(d.ruta_base + '/'));
         try {
             await fs.mkdir(path.dirname(destinoDisco), { recursive: true });
-            await fs.rename(origenDisco, destinoDisco);
+            if (ajenos.length) {
+                await fs.mkdir(destinoDisco, { recursive: true });
+                for (const e of await fs.readdir(origenDisco, { withFileTypes: true }).catch(() => [])) {
+                    if (e.isDirectory()) continue;   // carpeta de otro documento: NO se toca
+                    await fs.rename(path.join(origenDisco, e.name), path.join(destinoDisco, e.name));
+                }
+                escribir(`  ↪ «${d.titulo}»: su carpeta contenía ${ajenos.length} carpeta(s) de otros documentos`
+                    + ' → se han movido solo sus ficheros y las ajenas se quedan en su sitio.');
+            } else {
+                await fs.rename(origenDisco, destinoDisco);
+            }
         } catch (e) {
             escribir(`  ✖ «${d.titulo}»: no se pudo mover (${e.message}) → se salta`);
             resumen.saltados++;
