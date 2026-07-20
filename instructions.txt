@@ -824,9 +824,20 @@ de ficheros clasificado por CDU.
       cualquier lámina se recupera intacta. Se parte por TAMAÑO (config.CBZ_MAX_BYTES, 400 MB), no por
       número de páginas: lo que tumba al Atom son los bytes (adm-zip carga el cbz en memoria).
       ANTI-PÉRDIDA: se empaqueta a un TEMPORAL y se verifica lámina a lámina ANTES de retirar un solo
-      original; si algo falla, la carpeta se queda intacta. Los originales van a la PAPELERA, nunca se
-      borran. `planEmpaquetado` ES el dry-run de esto: el plan dice «500 láminas → 2 cbz → obra
-      multivolumen» sin escribir un byte.
+      original. Los originales van a la PAPELERA, nunca se borran. `planEmpaquetado` ES el dry-run de
+      esto: el plan dice «500 láminas → 2 cbz → obra multivolumen» sin escribir un byte.
+      TOMO A TOMO, y una lámina ILEGIBLE NO TUMBA LA COLECCIÓN (las dos cosas se aprendieron a base de
+      perder trabajo): cada subcarpeta se convierte, se escribe y se verifica por su cuenta, y su temporal
+      se libera antes de pasar a la siguiente. Antes se recogían las 15 subcarpetas y solo AL FINAL se
+      miraban los fallos: un pdf roto en la .03 descartaba 2.225 conversiones buenas y no se escribía ni
+      un cbz (91 minutos perdidos). Y la lámina que no se puede convertir ya no bloquea su tomo: se
+      empaqueta el resto y ELLA SE CONSERVA en «_no-convertibles/», dentro de la propia carpeta — se
+      aparta ANTES de reciclar, así que nunca se va a la Papelera mezclada con las buenas. El reciclado
+      es POR TOMO (cada uno lleva su `origen`) y excluye siempre lo apartado y los .cbz de la raíz (son
+      el resultado, no material de origen: reciclarlos borraría los tomos ya buenos de una pasada
+      anterior). Una carpeta solo se borra si quedó VACÍA. ⚠ Lo que hacía inútil toda esta red: el
+      `return {ok:false}` NO propagaba `fallidos`, así que `apartarNoConvertibles` —escrito justo para
+      esto— nunca llegaba a ejecutarse y la guía se desmarcaba pidiendo intervención manual.
     · PLANES GUARDADOS: el plan se calcula MIRANDO EL INBOX, así que tras ingerir ya no se puede
       reconstruir (el Inbox está vacío) — y entre planificar y comprobar pueden pasar horas, irse la luz o
       reiniciarse la máquina. Por eso al generar el informe el plan se PERSISTE en `PATH_PLANES`

@@ -185,11 +185,14 @@ async function leer(dir) {
  * comprimidos se extraen a un temporal; el llamante debe limpiarlo con `limpiar()`.
  * @returns {Promise<{imagenes: {nombre, abs}[], desdeComprimidos: number, tmp: string|null}>}
  */
-async function imagenesDe(dir) {
+async function imagenesDe(dir, { excluirCbz = false } = {}) {
     const ents = await leer(dir);
     const imagenes = ents.filter((e) => e.isFile() && ES_IMG.test(e.name)).map((e) => ({ nombre: e.name, abs: path.join(dir, e.name) }));
     const medir = async (im) => { try { im.bytes = (await fs.stat(im.abs)).size; } catch { im.bytes = 0; } return im; };
-    const comprimidos = ents.filter((e) => e.isFile() && ES_COMPR.test(e.name));
+    // `excluirCbz`: un .cbz es la SALIDA de esta tarea, no una entrada. Al empaquetar tomo a tomo los cbz ya
+    // terminados quedan en la raíz junto a las subcarpetas que faltan; sin esto, la pasada siguiente los
+    // volvería a expandir (ES_COMPR los incluye) y reempaquetaría su propio resultado en bucle.
+    const comprimidos = ents.filter((e) => e.isFile() && ES_COMPR.test(e.name) && !(excluirCbz && /\.cbz$/i.test(e.name)));
     const pdfs = ents.filter((e) => e.isFile() && ES_PDF.test(e.name));
     // Láminas que NO se pudieron convertir. El llamante ABORTA si hay alguna: omitirlas en silencio sería
     // fatal, porque tras empaquetar «con éxito» los originales se reciclan a la Papelera.
@@ -395,66 +398,133 @@ async function escribirCbz(imagenes, destino) {
 /**
  * EMPAQUETA `dir` en uno o varios cbz dentro de `dirDestino`. NO toca los originales: devuelve el resultado y
  * es el LLAMANTE quien decide reciclarlos, y solo si `ok`.
- * @returns {Promise<{ok, tomos: [{nombre, ruta, paginas}], multivolumen, motivo?}>}
+ * @returns {Promise<{ok, tomos: [{nombre, ruta, paginas, origen}], omitidos, fallidos, parcial, multivolumen, motivo?}>}
  */
 export async function empaquetarImagenes(dir, dirDestino, { alcance = 'subcarpetas' } = {}) {
     // OJO: aquí NO se llama a `planEmpaquetado`. Hacerlo duplicaba TODO el trabajo pesado —extraer cada
     // comprimido y convertir cada PDF— porque el plan recorre lo mismo que luego se empaqueta. Con una
     // enciclopedia de miles de láminas eso son horas de más, en silencio. Se recoge UNA vez y de ahí salen
     // tanto los tomos como los fallos.
+    //
+    // TOMO A TOMO (no todo al final). Antes se recogían las 15 subcarpetas, y SOLO entonces se miraba si
+    // alguna lámina había fallado: una sola mala tiraba las 2.225 conversiones buenas y no se escribía ni un
+    // cbz — 91 minutos a la basura por un PDF. Ahora cada carpeta se convierte, se escribe y se VERIFICA por
+    // su cuenta; la que falla se queda fuera (`omitidos`) sin arrastrar a las demás. Además libera su
+    // temporal al terminar, en vez de mantener los 15 a la vez en /tmp.
     const hechos = [];
-    const grupos = [];
+    const omitidos = [];
     const fallidos = [];
     const log = (m) => { try { console.log(`  📚 ${m}`); } catch { /* el log nunca rompe */ } };
     _convertidos = 0; _rasterizados = 0;   // el contador es POR PASADA (era de módulo y acumulaba entre reintentos)
 
+    /**
+     * Escribe los cbz de UN grupo ya recogido. Un grupo puede dar varios cbz si excede CBZ_MAX_BYTES.
+     * `origen` = carpeta cuyos originales podrá reciclar el llamante SI este grupo se empaquetó bien
+     * (null = las imágenes sueltas de la raíz). Devuelve true si se escribió todo.
+     */
+    const escribirGrupo = async (g) => {
+        const trozos = partirPorTamano(g.imagenes);
+        for (const [i, trozo] of trozos.entries()) {
+            const parte = trozos.length > 1 ? ` (${i + 1})` : '';
+            const nombre = `${g.base}${parte}`;
+            const limpio = nombre.replace(/[/\\:*?"<>|]/g, '_');
+            const r = await escribirCbz(trozo, path.join(dirDestino, `${limpio}.cbz`));
+            if (!r.ok) {
+                omitidos.push({ base: g.base, motivo: r.motivo });
+                log(`✖ «${nombre}»: NO se pudo escribir el cbz (${r.motivo}) — se conservan sus originales`);
+                return false;
+            }
+            hechos.push({
+                nombre, ruta: r.ruta, paginas: r.paginas, bytes: sumaBytes(trozo),
+                origen: g.origen ?? null, conservar: g.conservar || [],
+            });
+            log(`✔ «${nombre}.cbz» escrito y verificado: ${r.paginas} página(s)`);
+        }
+        return true;
+    };
+
+    /**
+     * Recoge una carpeta y escribe su cbz en el acto.
+     *
+     * Una lámina DAÑADA O ILEGIBLE no tumba el tomo: se empaqueta el resto y ella se CONSERVA en disco (el
+     * llamante la aparta en «_no-convertibles/» y jamás la recicla). Antes se descartaba el tomo entero para
+     * no perderla —el reciclado posterior se la llevaría—, pero eso convertía un pdf roto en 15 tomos sin
+     * empaquetar. Conservar el fichero da la misma garantía de no-pérdida sin bloquear nada.
+     */
+    const procesar = async (carpeta, base, origen, opciones) => {
+        const r = await imagenesDe(carpeta, opciones);
+        try {
+            const malas = r.fallidos || [];
+            if (malas.length) {
+                fallidos.push(...malas);
+                log(`⚠ «${base}»: ${malas.length} lámina(s) ilegibles → fuera del cbz, pero SE CONSERVAN en disco`);
+            }
+            if (!r.imagenes.length) {
+                if (malas.length) omitidos.push({ base, motivo: `sin ninguna lámina legible (${malas.length} ilegibles)` });
+                return;
+            }
+            await escribirGrupo({ base, imagenes: r.imagenes, origen, conservar: malas.map(ficheroDelFallo) });
+        } finally {
+            await limpiar([r.tmp]);   // el temporal de ESTE tomo, ya no hace falta
+        }
+    };
+
     if (alcance === 'todo') {
-        // TODO el árbol en un documento: un grupo único (se partirá por tamaño si hace falta).
+        // TODO el árbol en un documento: no hay tomos que aislar, es un único grupo (partido por tamaño).
         log(`empaquetando «${path.basename(dir)}» (todo el árbol): recogiendo láminas…`);
         const todas = await todasLasImagenes(dir);
-        fallidos.push(...(todas.fallidos || []));
-        grupos.push({ base: path.basename(dir), imagenes: todas.imagenes, tmps: todas.tmps });
-        log(`«${path.basename(dir)}»: ${todas.imagenes.length} lámina(s) listas`);
+        try {
+            const malas = todas.fallidos || [];
+            if (malas.length) {
+                return { ok: false, fallidos: malas, omitidos, motivo: motivoFallidos(malas) };
+            }
+            if (!todas.imagenes.length) return { ok: false, fallidos, omitidos, motivo: 'no se encontraron imágenes que empaquetar' };
+            log(`«${path.basename(dir)}»: ${todas.imagenes.length} lámina(s) listas`);
+            await escribirGrupo({ base: path.basename(dir), imagenes: todas.imagenes, origen: null });
+        } finally {
+            await limpiar(todas.tmps);
+        }
     } else {
         const subs = (await leer(dir)).filter((e) => e.isDirectory());
         log(`empaquetando «${path.basename(dir)}»: ${subs.length} subcarpeta(s) que revisar…`);
-        const propias = await imagenesDe(dir);
-        fallidos.push(...(propias.fallidos || []));
-        if (propias.imagenes.length) grupos.push({ base: path.basename(dir), ...propias, tmps: [propias.tmp] });
+        // Las imágenes SUELTAS de la raíz forman su propio tomo. Se excluyen los .cbz: son la salida de esta
+        // misma tarea (los de una pasada anterior parcial) y reexpandirlos sería reempaquetar el resultado.
+        await procesar(dir, path.basename(dir), null, { excluirCbz: true });
         let i = 0;
         for (const e of subs) {
             i++;
-            const r = await imagenesDe(path.join(dir, e.name));
-            fallidos.push(...(r.fallidos || []));
-            if (r.imagenes.length) grupos.push({ base: e.name, ...r, tmps: [r.tmp] });
+            const sub = path.join(dir, e.name);
             // Progreso por subcarpeta: extraer y convertir cientos de láminas tarda, y sin esto el proceso
             // PARECE colgado (es justo lo que le pasó al usuario: media hora sin una línea).
-            log(`[${i}/${subs.length}] «${e.name}»: ${r.imagenes.length} lámina(s)`);
+            log(`[${i}/${subs.length}] «${e.name}»…`);
+            await procesar(sub, e.name, sub);
         }
     }
 
-    if (fallidos.length) {
-        await limpiar(grupos.flatMap((g) => g.tmps || []));
-        // RED DE SEGURIDAD: si alguna lámina no se pudo convertir a imagen, NO se empaqueta. Empaquetar
-        // dejándolas fuera y reciclar después los originales sería una pérdida real.
-        return { ok: false, motivo: `no se pudieron convertir a imagen ${fallidos.length} lámina(s): ${fallidos.slice(0, 3).join(', ')}${fallidos.length > 3 ? '…' : ''}` };
+    if (!hechos.length) {
+        return {
+            ok: false, fallidos, omitidos,
+            motivo: fallidos.length ? motivoFallidos(fallidos) : 'no se encontraron imágenes que empaquetar',
+        };
     }
-    if (!grupos.length) return { ok: false, motivo: 'no se encontraron imágenes que empaquetar' };
-
-    try {
-        for (const g of grupos) {
-            const trozos = partirPorTamano(g.imagenes);
-            for (const [i, trozo] of trozos.entries()) {
-                const parte = trozos.length > 1 ? ` (${i + 1})` : '';
-                const nombre = `${g.base}${parte}`;
-                const r = await escribirCbz(trozo, path.join(dirDestino, `${nombre.replace(/[/\\:*?"<>|]/g, '_')}.cbz`));
-                if (!r.ok) return { ok: false, motivo: `«${nombre}»: ${r.motivo}` };
-                hechos.push({ nombre, ruta: r.ruta, paginas: r.paginas, bytes: sumaBytes(trozo) });
-                log(`✔ «${nombre}.cbz» escrito y verificado: ${r.paginas} página(s)`);
-            }
-        }
-    } finally {
-        for (const g of grupos) await limpiar(g.tmps);
-    }
-    return { ok: true, tomos: hechos, multivolumen: hechos.length > 1 };
+    // PARCIAL: hay cbz escritos pero algún tomo se quedó fuera. Es `ok` —lo hecho es válido y verificado— y
+    // el llamante recicla SOLO los originales de los tomos de `hechos` (cada uno lleva su `origen`).
+    return { ok: true, tomos: hechos, omitidos, fallidos, parcial: omitidos.length > 0, multivolumen: hechos.length > 1 };
 }
+
+/**
+ * Fichero REAL en disco al que se refiere un fallo. Los fallos vienen en dos formas: el nombre suelto
+ * («I04178.pdf») o «contenedor → lámina» cuando la lámina venía dentro de un comprimido («I02236.rar →
+ * x.pdf»). En el segundo caso lo que existe en disco es el CONTENEDOR: es lo que hay que conservar.
+ */
+export function ficheroDelFallo(f) {
+    const i = String(f).indexOf(' → ');
+    return i >= 0 ? String(f).slice(0, i) : String(f);
+}
+
+/** Motivo legible de un fallo de conversión (se muestra en el log y en el panel). */
+function motivoFallidos(malas) {
+    return `no se pudieron convertir a imagen ${malas.length} lámina(s): `
+        + `${malas.slice(0, 3).join(', ')}${malas.length > 3 ? '…' : ''}`;
+}
+

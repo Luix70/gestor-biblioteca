@@ -1575,9 +1575,49 @@ async function empaquetarCarpetaGuiada(dir, guia) {
             return;
         }
         // Verificado: ya se puede retirar el original. A la PAPELERA (nunca borrar), ficheros primero.
-        const originales = await recopilarTodo(dir);
+        const paginas = r.tomos.reduce((s, t) => s + t.paginas, 0);
+
+        // PRIMERO, las láminas DAÑADAS o ILEGIBLES: se apartan a «_no-convertibles/», dentro de la propia
+        // carpeta. No entran en el cbz (no se pudieron convertir) pero TAMPOCO se reciclan con el resto de
+        // originales: se quedan en disco, agrupadas y a la vista. Hacerlo ANTES del reciclado es lo que da la
+        // garantía — después ya se habrían ido a la Papelera mezcladas con las 2.000 buenas.
+        const malas = r.fallidos || [];
+        const apartadas = malas.length ? await apartarNoConvertibles(dir, malas) : 0;
+        const avisoMalas = malas.length
+            ? ` · ${malas.length} lámina(s) ilegibles conservadas en «_no-convertibles/»`
+              + `${apartadas < malas.length ? ` (${malas.length - apartadas} no localizadas)` : ''}`
+            : '';
+
+        // Lo que NUNCA se recicla: los cbz de la raíz (son el RESULTADO —de esta pasada o de una parcial
+        // anterior—, no material de origen) y lo apartado por ilegible.
+        // Comparando por SEGMENTO, no por prefijo de texto: `NO_CONV + path.sep` dependía del separador del
+        // sistema y decidía qué se va a la Papelera. Aquí no se juega con eso.
+        const enNoConvertibles = (f) => path.relative(dir, f).split(SEPARADOR)[0] === '_no-convertibles';
+        const conservado = (f) => (path.dirname(f) === dir && /\.cbz$/i.test(f)) || enNoConvertibles(f);
+        const reciclarCarpetaTomo = async (o) => {
+            await reciclar((await recopilarTodo(o)).filter((f) => !conservado(f)), `empaquetado-cbz-${nombre}`);
+            // Solo se borra si quedó VACÍA: si algo sigue dentro, la regla es no tocarla.
+            if (!(await fs.readdir(o).catch(() => ['x'])).length) await fs.rm(o, { recursive: true, force: true }).catch(() => {});
+        };
+
+        if (r.parcial) {
+            // Algún tomo no dio NI UNA lámina legible: no hay cbz suyo. Se recicla solo lo que sí quedó
+            // empaquetado y verificado (cada tomo trae su `origen`); lo demás se queda como está.
+            for (const o of [...new Set(r.tomos.map((t) => t.origen).filter(Boolean))]) await reciclarCarpetaTomo(o);
+            for (const t of r.tomos) await fs.rename(t.ruta, path.join(dir, path.basename(t.ruta)));
+            await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+            const quedan = r.omitidos.map((o) => o.base).join(', ');
+            console.warn(`  ⚠️  «${nombre}»: ${r.tomos.length} cbz hechos (${paginas} páginas)${avisoMalas}.`
+                + ` SIN empaquetar por no tener ninguna lámina legible: ${quedan}.`);
+            if (apartadas > 0) return;   // la guía sigue en «empaquetar»: la próxima pasada remata lo que queda
+            await escribirGuia(dir, { ...guia, accion: 'omitir', alcance: undefined }).catch(() => {});
+            return;
+        }
+
+        const originales = (await recopilarTodo(dir)).filter((f) => !conservado(f));
         await reciclar(originales, `empaquetado-cbz-${nombre}`);
         for (const h of (await fs.readdir(dir, { withFileTypes: true })).filter((h) => h.isDirectory())) {
+            if (h.name === '_no-convertibles') continue;   // es lo que hemos decidido conservar
             await fs.rm(path.join(dir, h.name), { recursive: true, force: true }).catch(() => {});
         }
         // Los cbz ocupan ahora el sitio de las láminas.
@@ -1585,10 +1625,12 @@ async function empaquetarCarpetaGuiada(dir, guia) {
         await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
 
         // Varios tomos = UNA obra multivolumen; uno solo = un documento normal (la carpeta se disuelve sola).
-        await escribirGuia(dir, { ...guia, accion: r.tomos.length > 1 ? 'obra' : 'normal', alcance: undefined });
-        const paginas = r.tomos.reduce((s, t) => s + t.paginas, 0);
+        // Se cuentan los cbz REALES de la carpeta, no los de esta pasada: con pasadas parciales, la última
+        // puede traer un solo tomo y la obra tener quince.
+        const totalCbz = (await fs.readdir(dir).catch(() => [])).filter((f) => /\.cbz$/i.test(f)).length;
+        await escribirGuia(dir, { ...guia, accion: totalCbz > 1 ? 'obra' : 'normal', alcance: undefined });
         console.log(`  📦 «${nombre}»: EMPAQUETAR (guía, ${alcance}) → ${r.tomos.length} cbz · ${paginas} páginas`
-            + `${r.tomos.length > 1 ? ' → obra multivolumen' : ''}. Originales a la Papelera.`);
+            + ` (${totalCbz} en total)${totalCbz > 1 ? ' → obra multivolumen' : ''}${avisoMalas}. Originales a la Papelera.`);
     } catch (err) {
         await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
         console.warn(`  ⚠️  «${nombre}»: empaquetado falló (${err.message}) → se conserva intacta.`);
@@ -1605,6 +1647,7 @@ async function empaquetarCarpetaGuiada(dir, guia) {
  * integridad.js. Aquí el defecto es RECICLAR DE MÁS: la Papelera es recuperable; borrar, no.
  * Solo se saltan la basura real del sistema (@eaDir de Synology, #recycle, .DS_Store, Thumbs.db) y la guía.
  */
+const SEPARADOR = new RegExp('[/' + String.fromCharCode(92, 92) + ']');   // «/» o «\», sea cual sea el sistema
 const ES_BASURA_SISTEMA = (n) => n.startsWith('@') || n.startsWith('#') || n === '.DS_Store' || n === 'Thumbs.db';
 async function recopilarTodo(dir, nivel = 8) {
     const out = [];
