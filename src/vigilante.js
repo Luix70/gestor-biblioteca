@@ -1493,7 +1493,17 @@ async function materializarAdjuntos(dir, guia) {
  * por el ÚLTIMO tramo, que es el nombre real del fichero en disco.
  */
 async function apartarNoConvertibles(dir, fallidos, nivel = 6) {
-    const nombres = new Set(fallidos.map((f) => String(f).split('→').pop().trim()));
+    // Un fallo puede venir de un pdf SUELTO («I04178.pdf») o de uno DENTRO de un comprimido
+    // («I04178.rar → lamina.pdf»). En el segundo caso el pdf NO existe en disco —lo que hay es el .rar—, así
+    // que hay que poder mover CUALQUIERA de los dos nombres. Sin esto no se apartaría nada y volveríamos al
+    // bucle infinito, justo lo que este arreglo venía a cerrar.
+    const nombres = new Set();
+    for (const f of fallidos) {
+        for (const parte of String(f).split('→')) {
+            const n = parte.trim();
+            if (n) nombres.add(n);
+        }
+    }
     const destino = path.join(dir, '_no-convertibles');
     let movidas = 0;
     async function rec(d, n) {
@@ -1549,8 +1559,14 @@ async function empaquetarCarpetaGuiada(dir, guia) {
             const malas = r.fallidos || [];
             if (malas.length) {
                 const apartadas = await apartarNoConvertibles(dir, malas);
-                console.warn(`  ⚠️  «${nombre}»: ${malas.length} lámina(s) no se pudieron convertir → apartadas en «_no-convertibles/» (${apartadas} movida(s)). Se empaquetará el resto en la próxima pasada.`);
-                return;   // sin marcar nada: la próxima vuelta ya no las encuentra y termina
+                if (apartadas > 0) {
+                    console.warn(`  ⚠️  «${nombre}»: ${malas.length} lámina(s) no se pudieron convertir → apartadas en «_no-convertibles/» (${apartadas} movida(s)). Se empaquetará el resto en la próxima pasada.`);
+                    return;   // la próxima vuelta ya no las encuentra y termina
+                }
+                // No se pudo apartar NINGUNA (no se localizan en disco): si se reintentara, volvería el bucle.
+                console.warn(`  ⚠️  «${nombre}»: ${malas.length} lámina(s) no convertibles y NO se han podido localizar para apartarlas (${malas.slice(0, 3).join(', ')}). Se desmarca «empaquetar» para NO reintentar en bucle: revísalas y vuelve a marcar la carpeta.`);
+                await escribirGuia(dir, { ...guia, accion: 'omitir', alcance: undefined }).catch(() => {});
+                return;
             }
             // Otro motivo (no hay láminas, un cbz que no verifica…): NO se reintenta en bucle. Se desmarca la
             // acción para que el usuario lo vea y decida, en vez de dejar el Inbox girando en vano.
