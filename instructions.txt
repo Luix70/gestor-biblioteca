@@ -929,6 +929,12 @@ de ficheros clasificado por CDU.
       explorada se marca `pendiente:true` para distinguirla de una VACÍA (antes las dos eran `hijos:[]`).
       Las `ruta` se miden SIEMPRE desde la raíz del Inbox: son la clave con la que se guarda cada guía.
       «☑ todos» avisa si cuelga algo sin cargar o recortado (no puede marcar lo que no está en la página).
+    · MATERIAL ADJUNTO EN LA FICHA: cuando un libro viaja con material (accion 'libro-material' o un
+      `adjuntos` de la guía), la ingesta guarda `material_adjunto` (nº de elementos) y protege el árbol con
+      ruta_fija. La FICHA lo muestra ahora en su propia fila («Material adjunto: N elemento(s)… 🗂️ ver»):
+      antes el dato estaba en Mongo y la carpeta en disco, pero la ficha NO lo decía por ningún sitio —
+      había que adivinar que hay que pulsar «🗂️ Archivos». Que algo viaje con el libro y no se vea es como
+      si no viajara.
     · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
       principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
       El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`

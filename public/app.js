@@ -2543,6 +2543,7 @@ const CAMPOS_FICHA = [
   ['_estado', 'Estado'],
   ['_ubicacion', 'Ubicación'],
   ['nombre_archivo', 'Archivo'],
+  ['_material', 'Material adjunto'],
   ['_ruta', 'Ruta'],
   ['hash_contenido', 'Hash'],
   ['_ingreso', 'Ingresado'],
@@ -2756,6 +2757,14 @@ function pintarDoc(r, ctx) {
         return `<span title="Tamaño DECLARADO por la fuente bibliográfica (suele ser solo el alto). Mídelo con el tapete para obtener ancho × alto.">${decl} <span class="muted" style="font-size:11px">· declarado</span></span>`;
       return null;
     })(),
+    // MATERIAL ADJUNTO: el libro viaja con carpetas/ficheros auxiliares (código de ejemplo, datasets…). El
+    // dato ya se guardaba al ingerir (`material_adjunto`) pero NO se mostraba en ninguna parte: el material
+    // estaba ahí, protegido con ruta_fija, y la ficha no lo decía — había que adivinar que hay que pulsar
+    // «🗂️ Archivos». Que algo viaje con el libro y no se vea es como si no viajara.
+    _material: d.material_adjunto
+      ? `<b>${d.material_adjunto}</b> elemento(s) acompañan a este libro (código, datasets, extras) `
+        + `<button class="rbtn" onclick="explorarArchivos('${esc(d._id)}','')" title="Ver y descargar el material">🗂️ ver</button>`
+      : null,
     _ingreso: d.fecha_ingreso ? fmtFecha(d.fecha_ingreso) : null,
     _actualizado: d.fecha_actualizacion ? fmtFecha(d.fecha_actualizacion) : null,
     _ruta: d.ruta_base
