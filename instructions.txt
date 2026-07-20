@@ -850,6 +850,16 @@ de ficheros clasificado por CDU.
       anterior). Una carpeta solo se borra si quedó VACÍA. ⚠ Lo que hacía inútil toda esta red: el
       `return {ok:false}` NO propagaba `fallidos`, así que `apartarNoConvertibles` —escrito justo para
       esto— nunca llegaba a ejecutarse y la guía se desmarcaba pidiendo intervención manual.
+    · MEMORIA en la rejilla de EXTRAER IMAGEN (Out of Memory): una miniatura no se pinta metiendo el blob
+      crudo en un <img> — una página de ESCANEO viene a 6000+ px y el navegador la descodifica a bitmap
+      COMPLETO (6367×9328 ≈ 237 MB) solo para pintarla; con varias a la vez la pestaña muere con «Out of
+      Memory» (pasó con los grabados). En `extraerLazy` (public/app.js) las miniaturas se descodifican
+      REDUCIDAS con `createImageBitmap({resizeWidth})` y DE UNA EN UNA (cola de concurrencia 1 + rootMargin
+      pequeño): el pico es UNA descodificación transitoria, liberada con `bitmap.close()` antes de la
+      siguiente. Sin librería de imagen en el servidor (el Atom no tiene sharp): el trabajo lo hace el
+      navegador. La causa de fondo es que `leerPaginaComic` sirve la página al TAMAÑO ORIGINAL; la misma raíz
+      hincha las PORTADAS de cómic (son la 1.ª página a plena resolución) y por eso el CATÁLOGO también
+      podía quedarse sin memoria — eso se ataca encogiendo la portada al generarla (pendiente/aparte).
     · REGENERAR PORTADAS YA EXISTENTES: `node scripts/reparar-portadas.js --patron "<regex>" --forzar
       [--ejecutar]` (o `--id <ObjectId> --forzar`). Normal­mente el script solo actúa si FALTA la portada o
       si hay imágenes rotas; `--forzar` la RE-EXTRAE aunque exista y sea válida como fichero. Hace falta

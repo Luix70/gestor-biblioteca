@@ -4054,14 +4054,34 @@ async function extraerLazy(id, cfg) {
   if ($('#exRango')) $('#exRango').value = rangoPorDefecto(total);
   const marcadas = new Set();
   const actualizarBtn = () => { const nn = marcadas.size; ['#exOk', '#exOkTop'].forEach((s) => { const b = $(s); if (b) { b.textContent = `Añadir ${nn}`; b.disabled = nn === 0; } }); };
+  // MEMORIA: una miniatura NO se pinta metiendo el blob crudo en un <img> — una página de escaneo puede venir
+  // a 6000+ px y el navegador la descodifica a BITMAP COMPLETO (6367×9328 ≈ 237 MB) SOLO para pintarla. Con
+  // varias a la vez la pestaña se queda «Out of Memory» (los grabados de la Encyclopédie). Se descodifica
+  // reducida con createImageBitmap({resizeWidth}) y, sobre todo, DE UNA EN UNA (cola de concurrencia 1): así
+  // el pico es UNA descodificación transitoria, que se libera con bitmap.close() antes de la siguiente.
   const grid = $('#exGrid');
+  let cadena = Promise.resolve();   // cola serie: encadena las miniaturas para no descodificar dos a la vez
+  const pintarMini = (cel, blob) => new Promise((resolver) => {
+    const im = cel.querySelector('img');
+    if (!im) return resolver();
+    const listo = (url) => { im.src = url; resolver(); };
+    if (typeof createImageBitmap !== 'function') return listo(URL.createObjectURL(blob)); // navegador viejo: sin reducir
+    createImageBitmap(blob, { resizeWidth: 240, resizeQuality: 'low' }).then((bmp) => {
+      const c = document.createElement('canvas');
+      c.width = bmp.width; c.height = bmp.height;
+      c.getContext('2d').drawImage(bmp, 0, 0);
+      bmp.close();   // libera el bitmap grande de inmediato (lo que evita el OOM)
+      listo(c.toDataURL('image/jpeg', 0.72));
+    }).catch(() => listo(URL.createObjectURL(blob)));
+  });
   const io = new IntersectionObserver((entradas) => {
     for (const en of entradas) {
       if (!en.isIntersecting) continue;
       const cel = en.target; io.unobserve(cel);
-      fetchBlob(+cel.dataset.n, true).then((b) => { const im = cel.querySelector('img'); if (im) im.src = URL.createObjectURL(b); }).catch(() => {});
+      // rootMargin pequeño + cola: solo se descodifica lo que se va viendo, y nunca dos imágenes a la vez.
+      cadena = cadena.then(() => ctrlMin.signal.aborted ? null : fetchBlob(+cel.dataset.n, true).then((b) => pintarMini(cel, b)).catch(() => {}));
     }
-  }, { root: grid, rootMargin: '250px' });
+  }, { root: grid, rootMargin: '120px' });
   ioRef = io;   // para poder desconectarlo (dejar de pedir miniaturas) al cerrar/cancelar/añadir
   for (let i = 0; i < n; i++) {
     const cel = document.createElement('div');
