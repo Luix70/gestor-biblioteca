@@ -8,6 +8,7 @@ import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
 import { enviarACuarentena } from './gestor-fallos.js';
+import { esFalloDeConexionMongo } from './database.js';
 import { carpetaDeDoc, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
 import { conectarDB } from './database.js';
 import { indexarDoc } from './utils/indice-busqueda.js';
@@ -235,6 +236,11 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     try {
         resultado = await procesarCatalogo(documento, { serieAuto: !!contexto.serieAuto, forzarNuevo: !!forzarNuevo });
     } catch (e) {
+        // Un fallo de CONEXIÓN con Mongo ES infraestructura, aunque el driver no lo etiquete. Se marca AQUÍ,
+        // en origen, para que todo el enrutado aguas abajo (vigilante y API) lo mande a Reintentos —copia y
+        // reproceso— en vez de a Cuarentena como «sin identificar», que es un juicio sobre el contenido de un
+        // fichero que ni siquiera se pudo consultar.
+        if (!e.tipo && esFalloDeConexionMongo(e)) e.tipo = 'infraestructura';
         if (e.tipo === 'infraestructura') e.documentoParcial = documento;
         throw e;
     }

@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
+import { esFalloDeConexionMongo } from './database.js';
 import { reciclar } from './utils/papelera.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
 import { obtenerEstadisticas } from './estadisticas.js';
@@ -218,7 +219,9 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
                 nota: (r.documento.alertas_agente || []).slice(-1)[0] || null,
             });
         } catch (e) {
-            if (e.tipo === 'infraestructura') {
+            // Igual que en el Vigilante: un error crudo del driver de Mongo no trae `.tipo` y acababa en
+            // Cuarentena como «sin identificar». Es infraestructura → Reintentos, que es reversible.
+            if (e.tipo === 'infraestructura' || esFalloDeConexionMongo(e)) {
                 await enviarAReintentos(unidad.rutas, { error: { tipo: e.tipo, mensaje: e.message }, documento: e.documentoParcial || null });
                 resultados.push({ ok: false, destino: 'reintentos', error: e.message });
             } else {

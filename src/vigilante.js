@@ -21,7 +21,7 @@ import { esAudio } from './utils/lector-audio.js';
 import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
-import { conectarDB } from './database.js';
+import { conectarDB, esFalloDeConexionMongo } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
 import { ejecutarMantenimiento } from './mantenimiento/conformador.js';
 import { rellenarDescripcionesFaltantes } from './mantenimiento/backfill-descripciones.js';
@@ -1165,7 +1165,11 @@ async function procesarUnidad(unidad) {
             if (unidad.carpeta) await depositarTestigo(unidad.carpeta, e.message || 'formato no procesable');
             console.warn(`  🚫 ${etiqueta} → OMITIDO (se deja en el Inbox): ${e.message}`);
             return 'omitido';
-        } else if (e.tipo === 'infraestructura') {
+        } else if (e.tipo === 'infraestructura' || esFalloDeConexionMongo(e)) {
+            // `esFalloDeConexionMongo`: un error CRUDO del driver no trae `.tipo`, así que caía en el `else`
+            // final y el fichero se archivaba como «sin identificar» —un juicio sobre su contenido— cuando en
+            // realidad no se había podido ni consultar la BD. Pasó con 17 unidades seguidas («Topology is
+            // closed»): 16 cbz recién empaquetados a Cuarentena. A Reintentos, que es reversible.
             const destino = await enviarAReintentos(unidad.rutas, {
                 error: { tipo: e.tipo, mensaje: e.message },
                 documento: e.documentoParcial || null,
