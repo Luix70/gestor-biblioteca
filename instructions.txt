@@ -859,7 +859,11 @@ de ficheros clasificado por CDU.
       siguiente. Sin librería de imagen en el servidor (el Atom no tiene sharp): el trabajo lo hace el
       navegador. La causa de fondo es que `leerPaginaComic` sirve la página al TAMAÑO ORIGINAL; la misma raíz
       hincha las PORTADAS de cómic (son la 1.ª página a plena resolución) y por eso el CATÁLOGO también
-      podía quedarse sin memoria — eso se ataca encogiendo la portada al generarla (pendiente/aparte).
+      podía quedarse sin memoria — eso se ataca encogiendo la portada al generarla. Y al AÑADIR una página
+      extraída al carrusel, el cliente la pide con `?w=1800` y el SERVIDOR la encoge (leerPaginaComic ·
+      reducirPngBuffer) antes de mandarla, así que ni siquiera esa única descodificación llega a 237 MB
+      (baja a ~18 MB). Las miniaturas siguen encogiéndose en el cliente (createImageBitmap, de una en una);
+      el servidor solo encoge la imagen definitiva, para no cargar al Atom con 200 reducciones por rejilla.
     · PORTADAS DE CÓMIC ENCOGIDAS + POLARIDAD (fin del OOM del catálogo): la portada de un cómic es su 1.ª
       página a PLENA resolución (leerPaginaComic), y una lámina de 6000 px se descodifica a ~237 MB solo para
       pintar la miniatura del catálogo → «Out of Memory». `reparar-portadas` ahora ACONDICIONA la portada de

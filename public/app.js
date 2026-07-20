@@ -3814,10 +3814,13 @@ async function extraerImagenDocumento() {
     if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext)) return await extraerLazy(id, {
       titulo: 'Extraer del documento',
       contar: { path: '/documentos/' + enc + '/paginas', key: 'paginas' },
-      // DjVu: las miniaturas se piden a baja resolución (?r=72) para que la rejilla no lance rasterizaciones
-      // pesadas (ddjvu+pdftoppm) a plena resolución; la imagen a añadir va a 150 DPI (sin ?r). Los cómics
-      // (cbz/cbr/cb7) sirven el JPEG almacenado y el ?r no les afecta.
-      item: (nn, o) => '/api/documentos/' + enc + '/paginas/' + nn + (o && o.thumb ? '?r=72' : ''),
+      // Miniaturas de la rejilla (thumb): DjVu a baja resolución (?r=72, evita rasterizar a plena resolución);
+      // los cómics ignoran ?r y sirven el JPEG/PNG almacenado — la rejilla ya los descodifica reducidos y de
+      // uno en uno en el cliente (ver más abajo), así que no ahogan la memoria.
+      // Imagen a AÑADIR (no thumb): se pide con ?w=1800 → el servidor ENCOGE la lámina PNG desmesurada (los
+      // grabados a 6000+ px) antes de mandarla, y así el navegador no descodifica un bitmap de 237 MB para
+      // una sola página. El DjVu ignora ?w (se acota por DPI). Es el mismo reductor que usan las portadas.
+      item: (nn, o) => '/api/documentos/' + enc + '/paginas/' + nn + (o && o.thumb ? '?r=72' : '?w=1800'),
       vacio: 'Este documento no tiene páginas extraíbles.',
     });
     if (['mobi', 'azw', 'azw3'].includes(ext)) return await extraerLazy(id, {

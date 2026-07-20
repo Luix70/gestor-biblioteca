@@ -13,6 +13,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { extraerArchivoComic } from './extraer-archivo.js';
+import { reducirPngBuffer } from './reducir-png.js';
 
 const ES_IMG = /\.(jpe?g|png|webp|gif|bmp|avif)$/i;
 const ORDEN = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
@@ -79,14 +80,25 @@ export async function contarPaginasComic(ruta) {
 }
 
 /** Página `n` (0-indexada) de un cómic como { buffer, mimeType }, o null si no existe. */
-export async function leerPaginaComic(ruta, n) {
+export async function leerPaginaComic(ruta, n, { anchoMax = null } = {}) {
     const e = await preparar(ruta);
+    let buffer, nombre;
     if (e.tipo === 'cbz') {
         const ent = e.entradas[n];
         if (!ent) return null;
-        return { buffer: ent.getData(), mimeType: mimeDe(ent.entryName) };
+        buffer = ent.getData(); nombre = ent.entryName;
+    } else {
+        const f = e.files[n];
+        if (!f) return null;
+        buffer = await fs.readFile(f); nombre = f;
     }
-    const f = e.files[n];
-    if (!f) return null;
-    return { buffer: await fs.readFile(f), mimeType: mimeDe(f) };
+    // Encoge una lámina PNG desmesurada (grabados a 6000+ px) para no reventar la memoria del navegador al
+    // extraer/previsualizar. En JS puro (el Atom no tiene sharp); si no aplica, devuelve el original.
+    if (anchoMax) {
+        try {
+            const chico = reducirPngBuffer(buffer, { anchoMax });
+            if (chico) return { buffer: chico, mimeType: 'image/png' };
+        } catch { /* se sirve el original */ }
+    }
+    return { buffer, mimeType: mimeDe(nombre) };
 }

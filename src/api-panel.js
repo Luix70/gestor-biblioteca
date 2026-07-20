@@ -1726,11 +1726,15 @@ export function rutasPanel() {
             // `?r=` (DPI) SOLO para DjVu: el visor pide las miniaturas a baja resolución (rápidas y ligeras,
             // no asfixian al Atom) y la imagen a añadir al carrusel a resolución plena. Los cómics lo ignoran.
             const dpi = req.query.r ? Math.max(36, Math.min(200, parseInt(req.query.r, 10) || 150)) : 150;
+            // `?w=` (solo cómics): tope de ANCHO en px para no servir una lámina de 6000 px que el navegador
+            // descodificaría a ~237 MB. Lo pide la EXTRACCIÓN al añadir una página al carrusel. Los cómics
+            // ignoran `?r` (eso es DPI de DjVu); el DjVu ignora `?w` (ya se acota por DPI).
+            const anchoMax = req.query.w ? Math.max(200, Math.min(4000, parseInt(req.query.w, 10) || 0)) || null : null;
             // Si el CLIENTE se desconecta (cerró la rejilla, cambió de página, canceló), no rasterizar de
             // balde: la cola DjVu comprueba `vivo` antes de gastar el Atom en una página que ya nadie verá.
             let vivo = true;
             res.on('close', () => { if (!res.writableEnded) vivo = false; });
-            const pag = esDjvu(ruta) ? await leerPaginaDjvu(ruta, n, dpi, () => vivo) : await leerPaginaComic(ruta, n);
+            const pag = esDjvu(ruta) ? await leerPaginaDjvu(ruta, n, dpi, () => vivo) : await leerPaginaComic(ruta, n, { anchoMax });
             if (!pag) return res.status(404).json({ ok: false, motivo: 'página no encontrada' });
             res.set('Content-Type', pag.mimeType);
             res.set('Cache-Control', 'private, max-age=600');
