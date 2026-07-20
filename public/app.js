@@ -2982,12 +2982,21 @@ function pintarDoc(r, ctx) {
     : '';
   // 🩺 Salud: plegable, admin-only, carga perezosa al abrir (checklist de tareas de mantenimiento).
   const secSalud = `<details class="card foldcard admin-only" id="saludDet" style="margin-top:14px"><summary>🩺 Salud del documento</summary><div id="saludBody" class="muted" style="margin-top:10px">Abre para ver el estado de mantenimiento…</div></details>`;
+  // MATERIAL ADJUNTO: sección PROPIA y ABIERTA, con los ficheros listados dentro. La fila que puse en «Datos
+  // catalográficos» no valía: esa sección nace COLAPSADA, igual que «Acciones» (donde está «🗂️ Archivos»), así
+  // que para descubrir que un libro trae su código de ejemplo había que abrir dos plegables a ciegas. Si el
+  // material viaja con el libro, tiene que VERSE al abrir la ficha.
+  const secMaterial = d.material_adjunto
+    ? `<details class="card foldcard" id="matDet" open style="margin-top:14px"><summary>📎 Material que acompaña al libro</summary>`
+      + `<div id="matBody" class="muted" style="margin-top:10px">Cargando…</div></details>`
+    : '';
   // Navegación entre documentos (⏮◀ N/M ▶⏭): recorre TODOS los resultados de la búsqueda del Catálogo
   // (no solo la página). El contenedor #fichaNav se rellena async (los ids se traen y cachean por búsqueda).
   // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos, salud) plegado, después.
   $('#p-detalle').innerHTML =
-    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}${secImg}${secSin}${secAcc}${secLect}${secCat}${secSalud}`;
+    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}${secImg}${secSin}${secMaterial}${secAcc}${secLect}${secCat}${secSalud}`;
   pintarNavFicha(d._id, ctx);
+  if (d.material_adjunto) cargarMaterialFicha(d._id);
   attachClas('#p-detalle');
   attachRating('#p-detalle');
   $$('#p-detalle .copybtn').forEach(
@@ -6170,6 +6179,23 @@ function resaltarOids(json) {
 
 // ════════ EXPLORADOR DE ARCHIVOS (ver/descargar TODO el árbol del documento o su colección) ════════
 let _expR = null; // { id, sub }
+/** Lista, dentro de la ficha, los ficheros que acompañan al libro (reusa el árbol de solo lectura). */
+async function cargarMaterialFicha(id) {
+  const el = $('#matBody');
+  if (!el) return;
+  try {
+    const r = await api('/documentos/' + encodeURIComponent(id) + '/arbol');
+    const arbol = r.arbol || [];
+    if (!arbol.length) { el.textContent = 'No se han podido listar los archivos.'; return; }
+    el.innerHTML =
+      '<div class="muted" style="font-size:12px;margin-bottom:8px">Viaja con el libro y se conserva tal cual '
+      + '(código de ejemplo, datasets, extras). Pulsa un fichero para descargarlo.</div>'
+      + arbol.map(nodoArbolRO).join('');
+  } catch (e) {
+    el.textContent = 'No se pudo cargar: ' + e.message;
+  }
+}
+
 async function explorarArchivos(id, sub = '') {
   _expR = { id, sub };
   try {
