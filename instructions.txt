@@ -860,6 +860,16 @@ de ficheros clasificado por CDU.
       navegador. La causa de fondo es que `leerPaginaComic` sirve la página al TAMAÑO ORIGINAL; la misma raíz
       hincha las PORTADAS de cómic (son la 1.ª página a plena resolución) y por eso el CATÁLOGO también
       podía quedarse sin memoria — eso se ataca encogiendo la portada al generarla (pendiente/aparte).
+    · PORTADAS DE CÓMIC ENCOGIDAS + POLARIDAD (fin del OOM del catálogo): la portada de un cómic es su 1.ª
+      página a PLENA resolución (leerPaginaComic), y una lámina de 6000 px se descodifica a ~237 MB solo para
+      pintar la miniatura del catálogo → «Out of Memory». `reparar-portadas` ahora ACONDICIONA la portada de
+      cómic: corrige el negativo (auto por contenido, o forzado con `--invertir` para los frontispicios muy
+      densos que la heurística no acierta) y la ENCOGE a ~1200 px, todo en JS puro (el Atom no tiene sharp):
+      `utils/reducir-png.js` (promedio en caja; gris o indexado → PNG gris de 8 bits) y
+      `utils/png-polaridad.js·invertirPngBuffer` (inversión incondicional). Para los grabados: reejecuta
+      `reparar-portadas --patron "Encyclopedie.*\.cbz$" --forzar --ejecutar` (encoge las 16) y, para los 3
+      frontispicios que quedaron en negativo (vol 13/14/15 = tomos .12/.13/.14), añade `--invertir` con
+      `--id` de cada uno. `escribirImagen` nombra el sidecar por los BYTES reales (PNG→.png), no fijo .jpg.
     · REGENERAR PORTADAS YA EXISTENTES: `node scripts/reparar-portadas.js --patron "<regex>" --forzar
       [--ejecutar]` (o `--id <ObjectId> --forzar`). Normal­mente el script solo actúa si FALTA la portada o
       si hay imágenes rotas; `--forzar` la RE-EXTRAE aunque exista y sea válida como fichero. Hace falta

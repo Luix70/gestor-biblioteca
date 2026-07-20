@@ -37,6 +37,8 @@ import { resolverPortada } from '../src/utils/resolver-portada.js';
 import { extraerMetadatosEpub } from '../src/utils/lector-epub.js';
 import { leerPaginaDjvu } from '../src/utils/djvu.js';
 import { leerPaginaComic } from '../src/utils/comic-paginas.js';
+import { corregirPolaridadBuffer, invertirPngBuffer } from '../src/utils/png-polaridad.js';
+import { reducirPngBuffer } from '../src/utils/reducir-png.js';
 import { leerMetadatosAudio } from '../src/utils/lector-audio.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
@@ -47,6 +49,9 @@ const patronArg = (() => { const i = process.argv.indexOf('--patron'); return i 
 // se arreglaron dentro del cbz, y las portadas (jpg, ya derivadas) siguieron invertidas. Reusar una imagen del
 // carrusel no vale entonces: hay que volver al fichero original, que ahora sí está bien.
 const FORZAR = process.argv.includes('--forzar');
+// `--invertir`: fuerza la vuelta del NEGATIVO de la portada, para los frontispicios MUY densos donde la
+// heurística de polaridad no acierta (lámina correcta ya oscura). Exige acotar, como --forzar.
+const INVERTIR = process.argv.includes('--invertir');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -86,6 +91,23 @@ async function imagenSueltaEnCarpeta(carpeta, nivel = 3) {
     return await fs.readFile(candidatas[0].p).catch(() => null);
 }
 
+/**
+ * Deja una portada de cómic lista para servir: (1) corrige el NEGATIVO —automático por contenido, o forzado
+ * con --invertir para los frontispicios densos que la heurística no acierta— y (2) la ENCOGE a ~1200 px, que
+ * es lo que evita el «Out of Memory» del catálogo (una lámina de 6000 px se descodifica a ~237 MB solo para
+ * pintar la miniatura). Todo en JS puro (el Atom no tiene sharp). Si algo no aplica, devuelve el buffer tal
+ * cual: nunca se pierde la portada por no saber tratarla.
+ */
+function acondicionarPortada(buf) {
+    let b = buf;
+    try {
+        if (INVERTIR) b = invertirPngBuffer(b) || b;
+        else b = corregirPolaridadBuffer(b) || b;
+    } catch { /* la portada se sirve igual */ }
+    try { b = reducirPngBuffer(b, { anchoMax: 1200 }) || b; } catch { /* idem */ }
+    return b;
+}
+
 // Extrae un buffer JPEG de la 1.ª página/cubierta del fichero ORIGINAL (según su tipo). null si no se puede.
 async function portadaDelFichero(doc, carpeta) {
     // AUDIOLIBRO: no tiene fichero-documento (su contenido son las pistas), así que archivoOriginal no
@@ -115,7 +137,10 @@ async function portadaDelFichero(doc, carpeta) {
     const tipo = detectarTipo(original);
     // DjVu / cómic: la 1.ª página YA es un JPEG (leerPaginaDjvu/Comic) → se usa directamente (evita pdftoppm).
     if (tipo === 'djvu') { const p = await leerPaginaDjvu(original, 0).catch(() => null); return p?.buffer || null; }
-    if (tipo === 'comic') { const p = await leerPaginaComic(original, 0).catch(() => null); return p?.buffer || null; }
+    if (tipo === 'comic') {
+        const p = await leerPaginaComic(original, 0).catch(() => null);
+        return p?.buffer ? acondicionarPortada(p.buffer) : null;
+    }
     // PDF / EPUB / otros: resolverPortada (rasteriza la 1.ª página, o cubierta embebida del EPUB, o remota por ISBN).
     let embebida = null, numPaginas = 2;
     if (tipo === 'epub') embebida = (await extraerMetadatosEpub(original).catch(() => ({}))).cubierta_base64 || null;
@@ -140,8 +165,12 @@ async function main() {
 
     // `--forzar` sin acotar re-extraería la portada de TODO el catálogo (16k+ documentos, rasterizando cada
     // uno). Eso no se hace por accidente: hay que decir a cuáles.
-    if (FORZAR && !idArg && !patronArg) {
-        console.error('⛔ --forzar necesita acotar el conjunto: usa --id <ObjectId> o --patron "<regex>".');
+    if ((FORZAR || INVERTIR) && !idArg && !patronArg) {
+        console.error('⛔ --forzar / --invertir necesitan acotar el conjunto: usa --id <ObjectId> o --patron "<regex>".');
+        process.exit(1);
+    }
+    if (INVERTIR && !FORZAR) {
+        console.error('⛔ --invertir se usa junto a --forzar (hay que RE-EXTRAER la portada para invertirla).');
         process.exit(1);
     }
     const proj = {

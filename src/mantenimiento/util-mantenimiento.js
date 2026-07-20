@@ -139,12 +139,16 @@ export async function numeroPaginasPdf(ruta) {
 
 /** Escribe un buffer de imagen en la carpeta con un nombre libre y devuelve { archivo, web }. */
 export async function escribirImagen(carpeta, web, buffer, nombreBase) {
-    let nombre = `${nombreBase}.jpg`;
+    // La extensión, por los BYTES reales, no fija: la portada de un cómic reducida sale en PNG (gris), no en
+    // JPEG. Servir PNG con nombre .jpg hace que el estático lo etiquete como image/jpeg — los navegadores lo
+    // pintan igual (olfatean), pero medir la imagen o el MARC podían tropezar. PNG → png; si no, jpg.
+    const ext = buffer && buffer.length > 3 && buffer[0] === 0x89 && buffer[1] === 0x50 ? 'png' : 'jpg';
+    let nombre = `${nombreBase}.${ext}`;
     let i = 1;
     // Evita pisar un sidecar existente.
     // eslint-disable-next-line no-await-in-loop
     while (await fs.access(path.join(carpeta, nombre)).then(() => true).catch(() => false)) {
-        nombre = `${nombreBase}-${++i}.jpg`;
+        nombre = `${nombreBase}-${++i}.${ext}`;
     }
     await fs.writeFile(path.join(carpeta, nombre), buffer);
     return { archivo: path.join(carpeta, nombre), web: `${web}/${nombre}` };

@@ -18,7 +18,7 @@
 import zlib from 'node:zlib';
 import fs from 'node:fs/promises';
 
-const FIRMA = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+export const FIRMA = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 // CRC32 propio: `zlib.crc32` no existe en Node 18, que es lo que corre en el NAS.
 const TABLA_CRC = (() => {
@@ -31,14 +31,14 @@ const TABLA_CRC = (() => {
     return t;
 })();
 
-function crc32(buf) {
+export function crc32(buf) {
     let c = -1;
     for (let i = 0; i < buf.length; i++) c = TABLA_CRC[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
     return (c ^ -1) >>> 0;
 }
 
 /** Un chunk PNG completo: longitud + tipo + datos + CRC(tipo+datos). */
-function chunk(tipo, datos) {
+export function chunk(tipo, datos) {
     const cuerpo = Buffer.concat([Buffer.from(tipo, 'ascii'), datos]);
     const out = Buffer.alloc(cuerpo.length + 8);
     out.writeUInt32BE(datos.length, 0);
@@ -48,7 +48,7 @@ function chunk(tipo, datos) {
 }
 
 /** Recorre los chunks de un PNG. Devuelve null si no lo es. */
-function leerChunks(buf) {
+export function leerChunks(buf) {
     if (buf.length < 8 || !buf.subarray(0, 8).equals(FIRMA)) return null;
     const chunks = [];
     let p = 8;
@@ -166,6 +166,46 @@ export function corregirPolaridadBuffer(buf, { umbral = 0.45 } = {}) {
     for (const c of chunks) {
         if (c.tipo === 'IHDR') continue;
         partes.push(buf.subarray(c.inicio, c.fin));                    // el resto, tal cual (IDAT incluido)
+    }
+    return Buffer.concat(partes);
+}
+
+
+/**
+ * Invierte un PNG de 1 bit en gris SIN mirar el contenido (a diferencia de `corregirPolaridadBuffer`, que
+ * decide por la proporción de blanco). Para las láminas MUY densas —un frontispicio recargado de tinta— la
+ * heurística falla: la página correcta ya es oscura, así que hay que poder forzar la vuelta a mano.
+ * Devuelve el PNG invertido, o null si no es un PNG de 1 bit en gris que se pueda tratar así.
+ */
+export function invertirPngBuffer(buf) {
+    const chunks = leerChunks(buf);
+    if (!chunks) return null;
+    const ihdr = chunks.find((c) => c.tipo === 'IHDR');
+    if (!ihdr || ihdr.datos.length < 13) return null;
+    const profundidad = ihdr.datos[8];
+    const tipoColor = ihdr.datos[9];
+    const entrelazado = ihdr.datos[12];
+    if (profundidad !== 1 || (tipoColor !== 0 && tipoColor !== 3) || entrelazado !== 0) return null;
+
+    // Gris de 1 bit → indexado con la paleta al revés (0→blanco, 1→negro), IDAT intactos. Si YA es indexado
+    // (una corrección previa), basta con voltear su paleta de dos entradas.
+    if (tipoColor === 0) {
+        const nuevoIhdr = Buffer.from(ihdr.datos);
+        nuevoIhdr[9] = 3;
+        const paleta = Buffer.from([255, 255, 255, 0, 0, 0]);
+        const partes = [FIRMA, chunk('IHDR', nuevoIhdr), chunk('PLTE', paleta)];
+        for (const c of chunks) { if (c.tipo !== 'IHDR') partes.push(buf.subarray(c.inicio, c.fin)); }
+        return Buffer.concat(partes);
+    }
+    const plte = chunks.find((c) => c.tipo === 'PLTE');
+    if (!plte || plte.datos.length < 6) return null;
+    const nuevaPaleta = Buffer.from(plte.datos);
+    // intercambia las dos primeras entradas (índice 0 ↔ 1)
+    for (let k = 0; k < 3; k++) { const t = nuevaPaleta[k]; nuevaPaleta[k] = nuevaPaleta[3 + k]; nuevaPaleta[3 + k] = t; }
+    const partes = [FIRMA];
+    for (const c of chunks) {
+        if (c.tipo === 'PLTE') partes.push(chunk('PLTE', nuevaPaleta));
+        else partes.push(buf.subarray(c.inicio, c.fin));
     }
     return Buffer.concat(partes);
 }
