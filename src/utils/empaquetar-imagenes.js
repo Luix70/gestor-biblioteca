@@ -363,6 +363,7 @@ export async function empaquetarImagenes(dir, dirDestino, { alcance = 'subcarpet
     const grupos = [];
     const fallidos = [];
     const log = (m) => { try { console.log(`  📚 ${m}`); } catch { /* el log nunca rompe */ } };
+    _convertidos = 0; _rasterizados = 0;   // el contador es POR PASADA (era de módulo y acumulaba entre reintentos)
 
     if (alcance === 'todo') {
         // TODO el árbol en un documento: un grupo único (se partirá por tamaño si hace falta).

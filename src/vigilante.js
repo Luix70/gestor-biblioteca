@@ -1482,6 +1482,41 @@ async function materializarAdjuntos(dir, guia) {
 }
 
 /**
+ * Mueve a «_no-convertibles/» las láminas que el empaquetador no pudo convertir a imagen, para que la
+ * siguiente pasada empaquete el resto sin volver a tropezar con ellas.
+ *
+ * NO se borran: quedan ahí, con su nombre, para que el usuario las mire (un pdf corrupto, un formato raro).
+ * El nombre de la carpeta empieza por «_», así que el recolector del vigilante ya la ignora — igual que hace
+ * con `_guia.json` — y no se cataloga ni estorba.
+ *
+ * `fallidos` trae nombres de fichero (o «archivo.rar → lamina.pdf» si venía dentro de un comprimido); se busca
+ * por el ÚLTIMO tramo, que es el nombre real del fichero en disco.
+ */
+async function apartarNoConvertibles(dir, fallidos, nivel = 6) {
+    const nombres = new Set(fallidos.map((f) => String(f).split('→').pop().trim()));
+    const destino = path.join(dir, '_no-convertibles');
+    let movidas = 0;
+    async function rec(d, n) {
+        if (n < 0) return;
+        let ents;
+        try { ents = await fs.readdir(d, { withFileTypes: true }); } catch { return; }
+        for (const e of ents) {
+            if (ignorarEntrada(e.name) || e.name === '_no-convertibles') continue;
+            const p = path.join(d, e.name);
+            if (e.isDirectory()) { await rec(p, n - 1); continue; }
+            if (!nombres.has(e.name)) continue;
+            try {
+                await fs.mkdir(destino, { recursive: true });
+                await fs.rename(p, await nombreLibre(destino, e.name));
+                movidas++;
+            } catch { /* si no se puede mover, se deja: peor sería perderla */ }
+        }
+    }
+    await rec(dir, nivel);
+    return movidas;
+}
+
+/**
  * ACCIÓN «empaquetar»: una carpeta de LÁMINAS SUELTAS (o de miles de .rar con una lámina cada uno) se
  * convierte en uno o varios `.cbz` ANTES de listar unidades. A partir de ahí no hay nada nuevo que inventar:
  * un cbz entra por la maquinaria de CÓMIC que ya existe y está probada (visor paginado, portada, descarga de
@@ -1502,8 +1537,25 @@ async function empaquetarCarpetaGuiada(dir, guia) {
     try {
         const r = await empaquetarImagenes(dir, tmp, { alcance });
         if (!r.ok) {
-            console.warn(`  ⚠️  «${nombre}»: no se pudo empaquetar (${r.motivo}) → se CONSERVA intacta, sin tocar nada.`);
             await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+            // APARTAR las láminas que no se pudieron convertir y DEJAR QUE EL RESTO SE EMPAQUETE.
+            //
+            // Antes se abortaba y la carpeta se quedaba intacta… pero la guía seguía diciendo «empaquetar», así
+            // que el siguiente escaneo REPETÍA el trabajo entero: 12 horas por vuelta, para siempre. Un fallo
+            // irrecuperable no puede reintentarse en bucle. Y abortar por UNA lámina mala de 2.766 tampoco es
+            // proporcionado.
+            // Las láminas problemáticas se MUEVEN a «_no-convertibles/» (no se borran: siguen ahí para que las
+            // mires) y el subárbol queda listo para que la próxima pasada lo empaquete sin ellas.
+            const malas = r.fallidos || [];
+            if (malas.length) {
+                const apartadas = await apartarNoConvertibles(dir, malas);
+                console.warn(`  ⚠️  «${nombre}»: ${malas.length} lámina(s) no se pudieron convertir → apartadas en «_no-convertibles/» (${apartadas} movida(s)). Se empaquetará el resto en la próxima pasada.`);
+                return;   // sin marcar nada: la próxima vuelta ya no las encuentra y termina
+            }
+            // Otro motivo (no hay láminas, un cbz que no verifica…): NO se reintenta en bucle. Se desmarca la
+            // acción para que el usuario lo vea y decida, en vez de dejar el Inbox girando en vano.
+            console.warn(`  ⚠️  «${nombre}»: no se pudo empaquetar (${r.motivo}) → se CONSERVA intacta. Se desmarca «empaquetar» para NO reintentar en bucle; revísala y vuelve a marcarla.`);
+            await escribirGuia(dir, { ...guia, accion: 'omitir', alcance: undefined }).catch(() => {});
             return;
         }
         // Verificado: ya se puede retirar el original. A la PAPELERA (nunca borrar), ficheros primero.
