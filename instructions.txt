@@ -850,6 +850,18 @@ de ficheros clasificado por CDU.
       anterior). Una carpeta solo se borra si quedó VACÍA. ⚠ Lo que hacía inútil toda esta red: el
       `return {ok:false}` NO propagaba `fallidos`, así que `apartarNoConvertibles` —escrito justo para
       esto— nunca llegaba a ejecutarse y la guía se desmarcaba pidiendo intervención manual.
+    · AGRUPAR TOMOS SUELTOS EN UNA OBRA: `node scripts/agrupar-en-obra.js --patron "<regex sobre
+      nombre_archivo>" --titulo "<obra>" --cdu <cdu> [--esperados <n>] [--ejecutar]` (dry-run por defecto).
+      POR QUÉ hace falta: una colección que se cataloga tomo a tomo SIN ISBN y SIN capa de texto (unos cbz
+      de láminas) obliga al clasificador a ADIVINAR la CDU en cada volumen. Con los grabados de la
+      Encyclopédie salieron 16 documentos en SEIS CDU distintas (siete en el comodín `000`, uno en
+      «literatura española»), cada uno en su carpeta. No es un error recuperable con más datos: es que no
+      hay datos. El script deja lo mismo que una ingesta normal de obra —<cdu>/obras/<obra>/vol-N— fijando
+      cdu+obra+volumen_numero, moviendo la carpeta, rebasando portada/imágenes, limpiando las colecciones
+      de un solo miembro que arrastraba cada tomo y podando las carpetas que quedan VACÍAS. `--esperados`
+      es una red: si el patrón no casa ese número exacto, no toca nada (un regex de más arrastraría
+      documentos ajenos). Los ficheros se MUEVEN, nunca se borran, y si el destino ya existe ese tomo se
+      salta en vez de fusionar a ciegas. ⚠ Copia de seguridad de la BD antes de `--ejecutar`.
     · PLANES GUARDADOS: el plan se calcula MIRANDO EL INBOX, así que tras ingerir ya no se puede
       reconstruir (el Inbox está vacío) — y entre planificar y comprobar pueden pasar horas, irse la luz o
       reiniciarse la máquina. Por eso al generar el informe el plan se PERSISTE en `PATH_PLANES`
