@@ -850,6 +850,24 @@ de ficheros clasificado por CDU.
       anterior). Una carpeta solo se borra si quedó VACÍA. ⚠ Lo que hacía inútil toda esta red: el
       `return {ok:false}` NO propagaba `fallidos`, así que `apartarNoConvertibles` —escrito justo para
       esto— nunca llegaba a ejecutarse y la guía se desmarcaba pidiendo intervención manual.
+    · UNIFICAR UNA SERIE DE NÚMEROS (revista/cómic): `node scripts/unificar-serie-revista.js --coleccion
+      <id> --cdu <cdu> [--esperados n] [--ejecutar]` (dry-run por defecto). Hermano del anterior, pero para
+      una COLECCIÓN de números, no una obra multivolumen. Caso real (Don Miki, 692 números, ISSN
+      0212-5285): 57 CDU distintas (214 en `000`), tipo_recurso partido en 451 «libro» / 233 «revista», y
+      `serie_numero` a null en los 692. Unifica cdu + tipo_recurso:'revista', deduce la clave de cada
+      número, mueve su carpeta a <cdu>/revistas/<issn>/<clave> y pone la cabecera en tipo:'revista'.
+      ⚠ EL TÍTULO MANDA sobre el campo `numero_issue` guardado: el dry-run destapó que muchos numero_issue
+      capturados en la ingesta están MAL («Don Miki 054» tenía 84; «141»→147; «330»→33) mientras el título
+      es inequívoco. Los ejemplares SIN número de serie (los «Extra Navidad 1986» y los álbumes sueltos
+      tipo «Manual de Tarconi») reciben como clave un resumen de su título: coger su primera cifra daría el
+      AÑO y los amontonaría a todos bajo la misma clave. Con eso las claves repetidas bajaron de 189 a 2, y
+      esas 2 son el mismo título en .cbr y .pdf — dos documentos legítimos, cada uno con su carpeta.
+    · RUTA DE UN NÚMERO DE REVISTA (cambio en `utils/rutas.js`): la carpeta del número usa AAAA-MM →
+      clave (`n97`) → AAAA, la MISMA prioridad que `revistas.js · claveNumero`, que es quien define la
+      identidad. Antes solo se añadía segmento si había `año_edicion`, así que una cabecera cuyos números
+      no traen año metía TODOS sus ejemplares en la misma carpeta, resueltos a golpe de discriminador (692
+      carpetas hermanas «<issn>-<id>» en el caso de Don Miki, del que solo 150 de 692 traen año). Ojo con
+      el orden: preferir el AÑO SUELTO al número metía los 52 ejemplares de 1977 en una sola carpeta.
     · AGRUPAR TOMOS SUELTOS EN UNA OBRA: `node scripts/agrupar-en-obra.js --patron "<regex sobre
       nombre_archivo>" --titulo "<obra>" --cdu <cdu> [--esperados <n>] [--ejecutar]` (dry-run por defecto).
       POR QUÉ hace falta: una colección que se cataloga tomo a tomo SIN ISBN y SIN capa de texto (unos cbz

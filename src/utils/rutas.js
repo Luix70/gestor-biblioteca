@@ -38,7 +38,7 @@ export function sanitizarSegmento(s) {
  * el mismo ISBN (p. ej. dos revisiones de ePubLibre del mismo libro → dos documentos Mongo,
  * pero el ISBN como hoja colisionaría). El llamante lo añade solo cuando detecta esa colisión.
  */
-export function rutaCatalogo({ cdu, tipo_recurso, isbn, issn, id, año_edicion, mes_publicacion, titulo, discriminador, obra, volumen_numero }) {
+export function rutaCatalogo({ cdu, tipo_recurso, isbn, issn, id, año_edicion, mes_publicacion, titulo, discriminador, obra, volumen_numero, clave_numero }) {
     const cduSegs = arbolCDU(cdu || '').segmentos;   // [clase, division, cdu] (o [_sin_clasificar, …])
 
     // Tomo de obra multivolumen DE LIBROS: <clase>/<division>/<cdu>/obras/<obra>/<vol-N>/ (todos los
@@ -64,14 +64,18 @@ export function rutaCatalogo({ cdu, tipo_recurso, isbn, issn, id, año_edicion, 
     if (tipo_recurso === 'revista') {
         const cabeceraSeg = sanitizarSegmento(issn || titulo || String(id));
         const segmentos = [...cduSegs, tipoSeg, cabeceraSeg];
-        if (año_edicion) {
-            const numeroSeg = sanitizarSegmento(
-                mes_publicacion
-                    ? `${año_edicion}-${String(mes_publicacion).padStart(2, '0')}`
-                    : String(año_edicion)
-            );
-            segmentos.push(numeroSeg);
-        }
+        // Carpeta del NÚMERO. Se prefiere la fecha (AAAA-MM → AAAA), que ordena cronológicamente; si no se
+        // conoce, vale la CLAVE del número (`n97`). Antes, sin año no se añadía segmento y TODOS los números
+        // de la cabecera caían en la misma carpeta, resueltos a golpe de discriminador: 692 carpetas hermanas
+        // «<issn>-<id>» para una sola colección (los Don Miki, de los que solo 150 de 692 traen año). La
+        // identidad de un número ES (colección, clave_numero) — la carpeta debe poder reflejarla.
+        // MISMA prioridad que `revistas.js · claveNumero`, que es quien define la identidad del número:
+        // AAAA-MM → n<nº> → AAAA. Ojo con el orden: preferir el AÑO SUELTO al número metía los 52 ejemplares
+        // de 1977 en una sola carpeta, cuando cada uno tiene su nº. El año solo manda si trae mes.
+        const numeroSeg = (año_edicion && mes_publicacion)
+            ? `${año_edicion}-${String(mes_publicacion).padStart(2, '0')}`
+            : (clave_numero || (año_edicion ? String(año_edicion) : null));
+        if (numeroSeg) segmentos.push(sanitizarSegmento(String(numeroSeg)));
         // discriminador: dos números que caerían en la MISMA carpeta (mismo año sin mes) → cada
         // documento conserva SU carpeta (1 doc ↔ 1 carpeta), sin pisar ficheros ni sidecars.
         if (discriminador) segmentos[segmentos.length - 1] = sanitizarSegmento(`${segmentos[segmentos.length - 1]}-${discriminador}`);
