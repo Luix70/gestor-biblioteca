@@ -702,12 +702,22 @@ export async function planificarInbox() {
         if (u.carpeta) tocado.add(primerNivel(u.carpeta));
     }
     const excluidos = [];
+    // Adjuntos declarados en la RAÍZ: un dry-run es de solo lectura, así que NO materializa (no mueve el libro
+    // y su carpeta a una subcarpeta libro-material). Sin esto, la carpeta adjunta se denunciaba como «sin
+    // explicación → fallo», cuando en realidad SÍ tiene destino: viajará con su libro. Se lee la guía y se
+    // reporta como tal (informativo), en vez de asustar con un falso agujero.
+    const adjuntosRaiz = (await leerGuia(INBOX).catch(() => null))?.adjuntos || {};
     let entradas;
     try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { entradas = []; }
     for (const e of entradas) {
         if (ignorarEntrada(e.name)) continue;
         const ruta = path.join(INBOX, e.name);
         if (tocado.has(ruta)) continue;
+        if (adjuntosRaiz[e.name]) {
+            excluidos.push({ nombre: e.name, ruta: e.name, motivo: '🔗 material adjunto',
+                detalle: `viajará junto a «${adjuntosRaiz[e.name]}» (se conserva a su lado, no se cataloga aparte).`, grave: false });
+            continue;
+        }
         excluidos.push({ nombre: e.name, ruta: e.name, ...(await porQueFuera(ruta, e)) });
     }
 
@@ -1443,6 +1453,14 @@ async function aplicarAccionesGuiaFs() {
             console.warn(`  ⚠️  Acción de guía «${guia.accion}» sobre «${e.name}» falló: ${err.message} (se conserva intacta).`);
         }
     }
+    // ADJUNTOS A NIVEL RAÍZ: cuando el documento es un fichero SUELTO del Inbox y su carpeta también cuelga de
+    // la raíz, el `_guia.json` con los adjuntos vive en la RAÍZ. El bucle de arriba solo mira SUBcarpetas, así
+    // que esos adjuntos nunca se materializaban: el libro se catalogaba solo y su carpeta acababa en la
+    // Papelera por «no genera unidad». (Caso real: «LaTeX Cookbook.pdf» + carpeta «LaTeX Cookbook_Code».)
+    try {
+        const guiaRaiz = await leerGuia(INBOX);
+        if (guiaRaiz?.adjuntos && Object.keys(guiaRaiz.adjuntos).length) await materializarAdjuntos(INBOX, guiaRaiz);
+    } catch { /* la raíz sin guía es lo normal */ }
 }
 
 /**
@@ -1461,28 +1479,42 @@ async function materializarAdjuntos(dir, guia) {
         if (!porDoc.has(doc)) porDoc.set(doc, []);
         porDoc.get(doc).push(carpeta);
     }
-    let hechos = 0;
+    // Estabilidad: no mover a MEDIO COPIAR (rename de un fichero que aún se escribe = corrupción). Carpeta →
+    // carpetaEstable; fichero → ficheroEstable. Si algo no está listo, se espera al próximo escaneo.
+    const estable = async (abs) => {
+        try { return (await fs.stat(abs)).isDirectory() ? await carpetaEstable(abs) : await ficheroEstable(abs); }
+        catch { return false; }
+    };
+    const materializados = new Set();   // claves «carpeta» YA movidas → se quitan de la guía (las demás esperan)
     for (const [doc, carpetas] of porDoc) {
         const absDoc = path.join(dir, doc);
         if (!(await rutaExiste(absDoc))) { console.warn(`  ⚠️  adjuntos: no está «${doc}» en «${path.basename(dir)}».`); continue; }
         const presentes = [];
         for (const c of carpetas) if (await rutaExiste(path.join(dir, c))) presentes.push(c);
         if (!presentes.length) { console.warn(`  ⚠️  adjuntos: ninguna carpeta de «${doc}» existe ya.`); continue; }
+        // El documento y TODO su material tienen que estar copiados del todo antes de moverlos juntos.
+        if (!(await estable(absDoc))) { console.log(`  ⏳ adjuntos: «${doc}» aún copiándose — se espera al próximo escaneo.`); continue; }
+        let materialListo = true;
+        for (const c of presentes) if (!(await estable(path.join(dir, c)))) { materialListo = false; break; }
+        if (!materialListo) { console.log(`  ⏳ adjuntos: el material de «${doc}» aún se copia — se espera.`); continue; }
         try {
             const destino = await nombreLibre(dir, path.basename(doc, path.extname(doc)));
             await fs.mkdir(destino, { recursive: true });
             await fs.rename(absDoc, path.join(destino, doc));
-            for (const c of presentes) await fs.rename(path.join(dir, c), path.join(destino, c));
+            for (const c of presentes) { await fs.rename(path.join(dir, c), path.join(destino, c)); materializados.add(c); }
             await escribirGuia(destino, { accion: 'libro-material' });
             console.log(`  🔗 «${doc}» + ${presentes.length} carpeta(s) → «${path.basename(destino)}» (libro + material).`);
-            hechos++;
         } catch (err) {
             console.warn(`  ⚠️  adjuntos: no se pudo preparar «${doc}» (${err.message}); se deja como estaba.`);
         }
     }
-    // Los adjuntos ya materializados se quitan de la guía: si no, en el siguiente escaneo se buscarían ficheros
-    // que ya no están ahí y se avisaría en falso una y otra vez.
-    if (hechos) { try { await escribirGuia(dir, { ...guia, adjuntos: {} }); } catch { /* */ } }
+    // Se quitan de la guía SOLO los adjuntos ya materializados; los que aún se copian se conservan para el
+    // próximo escaneo (borrar el mapa entero, como antes, perdía los que no estaban listos todavía).
+    if (materializados.size) {
+        const resto = {};
+        for (const [c, d] of Object.entries(guia.adjuntos || {})) if (!materializados.has(c)) resto[c] = d;
+        try { await escribirGuia(dir, { ...guia, adjuntos: resto }); } catch { /* */ }
+    }
 }
 
 /**
