@@ -1438,8 +1438,26 @@ de ficheros clasificado por CDU.
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del
     Conformador, 🧹 Lanzar mantenimiento, 🎯 Campañas de fondo (ver abajo), 🩺
     Integridad (diagnosticar/reparar a la Papelera), 🧼 Sanear catálogo, 👁️ Visión
-    IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🔞 Permisos de invitados
-    (permitir/restringir NSFW), 📜 Logs en vivo.
+    IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🧰 Ejecutar script (ver
+    abajo), 🔞 Permisos de invitados (permitir/restringir NSFW), 📜 Logs en vivo.
+
+    · 🧰 EJECUTAR SCRIPT — lanzar los scripts de scripts/ desde el panel, con la salida en el visor de Logs.
+      Un desplegable AGRUPADO por categoría + un buscador (filtra por nombre/resumen/propósito); al elegir uno
+      se ve su propósito, su alcance (👁 solo lectura · ✎ escribe · ⚠ destructivo) y un formulario con SUS
+      parámetros (cajas de texto para patrón/ids/título/CDU…, números, y switches para los flags). Un
+      interruptor «APLICAR» añade el flag de aplicación (--ejecutar, o --reparar en integridad); sin marcarlo
+      es DRY-RUN. Botón ▶ Ejecutar, ⏹ Detener y un estado «ejecutando… N líneas».
+      SEGURIDAD (es ejecución de procesos desde la web): (1) LISTA BLANCA — el cliente manda un `id` de
+      `src/utils/catalogo-scripts.js` y unos VALORES, nunca una ruta ni un comando; (2) el argv se construye
+      en el servidor y se lanza con spawn PASANDO UN ARRAY (sin shell), así un valor con «; rm -rf» viaja como
+      UN argumento y no se interpreta; los valores con saltos de línea/NUL se rechazan; (3) solo ADMIN; (4) en
+      modo APLICAR se re-confirma la CONTRASEÑA de admin (los diagnósticos y las reconstrucciones derivadas
+      —reindexar— corren sin ella); (5) UN script a la vez (dos moviendo carpetas se pisarían); ⏹ Detener manda
+      SIGTERM. Endpoints (todos admin): GET /scripts (catálogo), GET /scripts/estado, POST /scripts/ejecutar
+      ({id,valores,aplicar,password}), POST /scripts/detener. Ejecutor: src/utils/ejecutor-scripts.js (vuelca
+      stdout/stderr al buffer de logs con `anotar`, línea a línea, con LOG_VERBOSE=1). El catálogo es una
+      SELECCIÓN curada (no están los test-* ni etl-fichero); al añadir un script nuevo, si va al panel,
+      regístralo en catalogo-scripts.js con sus params. ⚠ NO expone terminal libre: solo lo declarado.
 
     · 🩺 INTEGRIDAD — TODA RUTA DEL INFORME SE ABRE. Cada carpeta del informe HTML enlaza a
       `<panel>/?carpeta=/recursos/…` → deep-link que abre un EXPLORADOR de solo lectura (modal) con lo que

@@ -52,6 +52,8 @@ const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu']);
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { reconstruirInventarioObra } from './utils/obras.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
+import { CATEGORIAS_SCRIPTS, catalogoParaPanel, scriptPorId, construirArgv } from './utils/catalogo-scripts.js';
+import { lanzarScript, estadoEjecutor, detenerScript } from './utils/ejecutor-scripts.js';
 import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
 import { estadoVision, configurarProveedor, probarProveedor } from './utils/vision.js';
 import { resolverNombres } from './utils/registro.js';
@@ -470,6 +472,40 @@ export function rutasPanel() {
         if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
         setVerboso(req.body?.verbose === true);
         res.json({ ok: true, verbose: getVerboso() });
+    });
+
+    // ── Ejecutar SCRIPTS de mantenimiento desde el panel (Mantenimiento) ──
+    // Lista blanca en catalogo-scripts.js: el cliente manda un `id` + valores, NUNCA una ruta ni un comando.
+    // El argv se construye aquí (array → spawn sin shell) y la salida va al visor de logs. Solo admin; y si es
+    // APLICAR (no dry-run), se re-confirma la contraseña de admin, como el resto de acciones destructivas.
+    r.get('/scripts', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json({ ok: true, categorias: CATEGORIAS_SCRIPTS, scripts: catalogoParaPanel() });
+    });
+    r.get('/scripts/estado', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(estadoEjecutor());
+    });
+    r.post('/scripts/ejecutar', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        const { id, valores, aplicar, password } = req.body || {};
+        const script = scriptPorId(id);
+        if (!script) return res.status(400).json({ ok: false, motivo: 'script no permitido' });
+        // APLICAR (de verdad) exige contraseña; los scripts SIN modo de aplicación (diagnóstico / reconstrucción
+        // derivada) se ejecutan sin ella. Un script con `aplica` que se lanza en dry-run tampoco la pide.
+        const esAplicar = !!aplicar && !!script.aplica;
+        if (esAplicar && !verificarPasswordAdmin(password)) {
+            return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+        }
+        const armado = construirArgv(script, valores, esAplicar);
+        if (!armado.ok) return res.status(400).json({ ok: false, motivo: armado.motivo });
+        const r0 = lanzarScript({ id: script.id, argv: armado.argv, aplicar: esAplicar });
+        if (!r0.ok) return res.status(409).json(r0);
+        res.json({ ok: true, aplicar: esAplicar, argv: armado.argv });
+    });
+    r.post('/scripts/detener', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(detenerScript());
     });
 
     // Lista de obras (con su estado de completitud) para el panel.

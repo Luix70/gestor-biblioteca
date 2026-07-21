@@ -8623,7 +8623,190 @@ function loadActivity() {
   loadInteg();
   logAuto();
   aplicarPliegueActividad();
+  initScriptsCard();
 }
+// ── TARJETA «Ejecutar script» (Mantenimiento) ────────────────────────────────────────────────────────
+// Lista blanca servida por /scripts. El cliente NUNCA manda una ruta ni un comando: manda el id + los valores
+// de los parámetros declarados. En modo APLICAR pide la contraseña de admin. La salida sale en el visor de logs.
+let _scriptsCat = null; // {categorias, scripts} cacheado
+let _scriptSel = null; // script seleccionado
+let _scriptPollTimer = null;
+
+async function initScriptsCard() {
+  const sel = $('#scrSel');
+  if (!sel || sel._wired) {
+    if (sel && _scriptSel) refrescarEstadoScript();
+    return;
+  }
+  sel._wired = 1;
+  try {
+    _scriptsCat = await api('/scripts');
+  } catch (e) {
+    $('#scrFicha').innerHTML = `<span class="muted">No se pudo cargar la lista: ${esc(e.message)}</span>`;
+    return;
+  }
+  pintarSelectScripts('');
+  $('#scrBuscar').oninput = (e) => pintarSelectScripts(e.target.value);
+  sel.onchange = () => {
+    _scriptSel = (_scriptsCat.scripts || []).find((x) => x.id === sel.value) || null;
+    renderScriptFicha();
+  };
+  refrescarEstadoScript();
+}
+
+// Rellena el desplegable agrupado por categoría, filtrando por texto (nombre/resumen/propósito).
+function pintarSelectScripts(filtro) {
+  const sel = $('#scrSel');
+  const f = (filtro || '').trim().toLowerCase();
+  const casa = (x) =>
+    !f ||
+    x.id.includes(f) ||
+    (x.resumen || '').toLowerCase().includes(f) ||
+    (x.proposito || '').toLowerCase().includes(f);
+  let html = '<option value="">— elige un script —</option>';
+  for (const cat of _scriptsCat.categorias || []) {
+    const items = (_scriptsCat.scripts || []).filter((x) => x.cat === cat && casa(x));
+    if (!items.length) continue;
+    html += `<optgroup label="${esc(cat)}">`;
+    for (const x of items) html += `<option value="${esc(x.id)}">${esc(x.id)} — ${esc(x.resumen)}</option>`;
+    html += '</optgroup>';
+  }
+  sel.innerHTML = html;
+  if (_scriptSel && [...sel.options].some((o) => o.value === _scriptSel.id)) sel.value = _scriptSel.id;
+}
+
+// Ficha del script seleccionado: propósito, alcance, parámetros, modo y botón.
+function renderScriptFicha() {
+  const cont = $('#scrFicha');
+  if (!cont) return;
+  const x = _scriptSel;
+  if (!x) {
+    cont.innerHTML = '';
+    return;
+  }
+  const badge = x.peligroso
+    ? '<span style="color:#c0392b;font-weight:600">⚠ destructivo</span>'
+    : x.escribe
+      ? '<span style="color:#b9770e">✎ escribe en la base/disco</span>'
+      : '<span style="color:#2d7d46">👁 solo lectura</span>';
+  const tieneAplicar = !!x.aplica;
+
+  const paramsHtml = (x.params || [])
+    .map((p) => {
+      const req = p.requerido ? ' <span style="color:#c0392b">*</span>' : '';
+      const ayuda = p.ayuda ? `<div class="muted" style="font-size:11px">${esc(p.ayuda)}</div>` : '';
+      const ph = p.ejemplo ? ` placeholder="${esc(p.ejemplo)}"` : '';
+      if (p.tipo === 'switch') {
+        return `<label style="display:flex;align-items:center;gap:8px;margin:6px 0">
+          <input type="checkbox" data-sp="${esc(p.nombre)}" /> <span>${esc(p.etiqueta)}</span></label>${ayuda}`;
+      }
+      const campo = p.multi
+        ? `<textarea data-sp="${esc(p.nombre)}" rows="2"${ph} style="width:100%;box-sizing:border-box"></textarea>`
+        : `<input type="${p.tipo === 'numero' ? 'number' : 'text'}" data-sp="${esc(p.nombre)}"${ph} style="width:100%;box-sizing:border-box" />`;
+      return `<div style="margin:6px 0"><label style="font-size:12px;font-weight:600">${esc(p.etiqueta)}${req}</label>${campo}${ayuda}</div>`;
+    })
+    .join('');
+
+  const modoHtml = tieneAplicar
+    ? `<label style="display:flex;align-items:center;gap:8px;margin:10px 0 4px">
+         <input type="checkbox" id="scrAplicar" /> <span><b>APLICAR</b> de verdad (añade <span class="mono">${esc(x.aplica)}</span>) — sin marcar es dry-run</span></label>
+       <div id="scrPassWrap" style="display:none;margin:6px 0">
+         <input type="password" id="scrPass" placeholder="Contraseña de administrador" style="width:100%;box-sizing:border-box" />
+         <div class="muted" style="font-size:11px">${x.peligroso ? '⚠ Acción destructiva. Haz copia de seguridad antes.' : 'Requerida para aplicar.'}</div>
+       </div>`
+    : '<div class="muted" style="font-size:12px;margin:8px 0">Este script no modifica nada (o reconstruye datos derivados): se ejecuta sin contraseña.</div>';
+
+  cont.innerHTML = `
+    <div style="font-size:12px;margin-bottom:4px">${badge}</div>
+    <p style="margin:4px 0 8px;font-size:13px;line-height:1.5">${esc(x.proposito)}</p>
+    <div class="mono muted" style="font-size:11px;margin-bottom:8px">node scripts/${esc(x.id)}.js</div>
+    ${paramsHtml}
+    ${modoHtml}
+    <div class="row" style="align-items:center;gap:8px;margin-top:10px">
+      <button class="btn pri" id="scrLanzar">▶ Ejecutar</button>
+      <button class="btn" id="scrDetener" style="display:none">⏹ Detener</button>
+      <span class="muted" id="scrEstado" style="font-size:12px"></span>
+    </div>`;
+
+  if (tieneAplicar) {
+    $('#scrAplicar').onchange = (e) => {
+      $('#scrPassWrap').style.display = e.target.checked ? 'block' : 'none';
+      $('#scrLanzar').textContent = e.target.checked ? '⚙️ Aplicar' : '▶ Ejecutar (dry-run)';
+    };
+    $('#scrLanzar').textContent = '▶ Ejecutar (dry-run)';
+  }
+  $('#scrLanzar').onclick = lanzarScriptUI;
+  $('#scrDetener').onclick = async () => {
+    try {
+      await api('/scripts/detener', { method: 'POST', body: '{}' });
+    } catch (e) {
+      toast(e.message, 'bad');
+    }
+  };
+  refrescarEstadoScript();
+}
+
+async function lanzarScriptUI() {
+  const x = _scriptSel;
+  if (!x) return;
+  const aplicar = !!(x.aplica && $('#scrAplicar') && $('#scrAplicar').checked);
+  const valores = {};
+  document.querySelectorAll('#scrFicha [data-sp]').forEach((el) => {
+    valores[el.dataset.sp] = el.type === 'checkbox' ? el.checked : el.value;
+  });
+  const password = aplicar && $('#scrPass') ? $('#scrPass').value : undefined;
+  if (aplicar && !password) {
+    toast('Escribe la contraseña de administrador', 'warn');
+    return;
+  }
+  const btn = $('#scrLanzar');
+  btn.disabled = true;
+  try {
+    await api('/scripts/ejecutar', {
+      method: 'POST',
+      body: JSON.stringify({ id: x.id, valores, aplicar, password }),
+    });
+    toast(`▶ «${x.id}» lanzado — mira el visor de logs`, 'ok');
+    if ($('#scrPass')) $('#scrPass').value = '';
+    logAuto(); // asegura que el log se refresca
+    const lc = $('#logCard');
+    if (lc) lc.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    refrescarEstadoScript();
+  } catch (e) {
+    toast(e.message, 'bad');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Sondea el estado del ejecutor para habilitar/deshabilitar los botones y mostrar «ejecutando…».
+async function refrescarEstadoScript() {
+  if (_scriptPollTimer) {
+    clearTimeout(_scriptPollTimer);
+    _scriptPollTimer = null;
+  }
+  if (!$('#scrSel')) return; // ya no estamos en Mantenimiento
+  let est = {};
+  try {
+    est = await api('/scripts/estado');
+  } catch {
+    return;
+  }
+  const info = $('#scrEstado'),
+    det = $('#scrDetener'),
+    lan = $('#scrLanzar');
+  if (est.activo) {
+    if (info) info.textContent = `⏳ ejecutando «${est.id}» (${est.lineas} líneas)…`;
+    if (det) det.style.display = '';
+    if (lan) lan.disabled = true;
+    _scriptPollTimer = setTimeout(refrescarEstadoScript, 1500);
+  } else {
+    if (info) info.textContent = est.id ? `✔ «${est.id}» terminó (código ${est.codigo})` : '';
+    if (det) det.style.display = 'none';
+    if (lan) lan.disabled = false;
+  }
+}
+
 // Pliegue de las fichas de Actividad: data-fold="open" siempre desplegada; data-fold="pc" desplegada en
 // PC y colapsada en móvil. Se recuerda la última preferencia por ficha (localStorage).
 function aplicarPliegueActividad() {

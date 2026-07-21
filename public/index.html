@@ -194,6 +194,18 @@
                   <span class="mono">docker exec gestor-biblioteca node scripts/reindexar-busqueda.js</span>.
                 </p>
               </details>
+              <details class="card foldcard admin-only" id="fcScripts" data-fold="pc">
+                <summary><h3>🧰 Ejecutar script</h3></summary>
+                <p class="muted" style="margin-top: 0; font-size: 12px">
+                  Lanza los scripts de mantenimiento con la salida en el visor de logs (abajo). Elige uno para
+                  ver su propósito, su alcance y sus parámetros. Casi todos son <b>dry-run</b> por defecto
+                  (informan, no tocan nada); el modo <b>APLICAR</b> pide la contraseña de administrador.
+                </p>
+                <input id="scrBuscar" placeholder="🔎 Buscar script por nombre o descripción…"
+                  style="width: 100%; box-sizing: border-box; margin-bottom: 6px; padding: 6px 8px" />
+                <select id="scrSel" style="width: 100%; box-sizing: border-box; padding: 6px 8px"></select>
+                <div id="scrFicha" style="margin-top: 12px"></div>
+              </details>
               <details class="card foldcard admin-only" id="fcPermisos" data-fold="pc">
                 <summary><h3>🔞 Permisos de invitados</h3></summary>
                 <p class="muted" style="margin-top: 0; font-size: 12px">
