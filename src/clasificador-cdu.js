@@ -60,7 +60,59 @@ export async function guardarEquivalencia(sistema, codigo, cdu, fuente = 'IA', d
  * Punto de extensión: equivalencia desde APIs/webs públicas (p. ej. servicios de mapeo
  * Dewey↔UDC). De momento no hay una API libre fiable; se deja preparado.
  */
-async function buscarEquivalenciaExterna(/* sistema, codigo */) {
+// ── CROSSWALK DETERMINISTA Dewey/LC → CDU ────────────────────────────────────────────────────────────────
+// La CDU se construyó SOBRE el Dewey, así que para las clases de CIENCIAS (5), TÉCNICA (6) y ARTES (7) la
+// división de las decenas COINCIDE (Dewey 510 Matemáticas = CDU 51; 530 Física = 53; 610 Medicina = 61;
+// 720 Arquitectura = 72; 780 Música = 78…). Ahí NO hace falta IA: un libro con Dewey 510 debe ser CDU 51,
+// gratis y aunque la IA esté caída (que es justo lo que dejaba estos libros en el saco «000»). Se mapea SOLO
+// lo que alinea con CERTEZA; lo divergente (Dewey 4xx lengua → CDU 81, 8xx literatura → 82, y las
+// subdivisiones finas) devuelve null y sigue a la IA, que sí distingue el idioma/tradición. Nunca se
+// «adivina»: un mapeo dudoso envenenaría la caché aprendida, así que ante la duda → null → IA.
+function deweyACDU(codigo) {
+    const m = String(codigo || '').match(/\d{3}/);   // «510/.3» → «510»
+    if (!m) return null;
+    const d = m[0];
+    const c0 = d[0], c1 = d[1];
+    // Informática: Dewey 004/005/006 → CDU 004.
+    if (d === '004' || d === '005' || d === '006') return '004';
+    // Ciencias / técnica / artes: la decena coincide (5N, 6N, 7N); las unidades divergen, así que se mapea a
+    // la DIVISIÓN de 2 cifras (segura), no a 3.
+    if ('567'.includes(c0)) return c1 !== '0' ? c0 + c1 : c0;
+    // Suelos de clase principal + las decenas cuya división coincide con la CDU SIN ambigüedad. Se DEJAN FUERA
+    // a propósito (→ IA): Dewey 130 (paranormal ≠ CDU 13 filosofía de la mente), 150 (psicología → CDU 159.9),
+    // 4xx (lengua → CDU 81), 8xx (literatura → 82) y la historia regional 93x-99x (necesita el área). Un mapeo
+    // dudoso envenenaría la caché, así que ante la duda NO se mapea.
+    const EXACTAS = {
+        '000': '0', '010': '01', '020': '02', '030': '03', '050': '05', '060': '06', '070': '07', '080': '08', '090': '09',
+        '100': '1', '110': '11', '140': '14', '160': '16', '170': '17',
+        '200': '2', '220': '22', '230': '23', '290': '29',
+        '300': '3', '310': '31', '320': '32', '330': '33', '340': '34', '350': '35', '360': '36', '370': '37', '390': '39',
+        '900': '9', '910': '91', '920': '929',
+    };
+    return EXACTAS[d] || null;   // el resto (130, 15x, 4xx, 8xx, historia regional…) → IA
+}
+
+// LC → CDU: solo las clases de CIENCIA/TÉCNICA de correspondencia clara (la mayoría de libros técnicos traen
+// TAMBIÉN Dewey, que se prueba primero; esto es la red para los que solo llevan signatura LC).
+const LCC_A_CDU = {
+    Q: '5', QA: '51', QB: '52', QC: '53', QD: '54', QE: '55', QH: '57', QK: '58', QL: '59',
+    R: '61', S: '63', T: '6',
+};
+function lccACDU(codigo) {
+    const m = String(codigo || '').trim().toUpperCase().match(/^[A-Z]{1,3}/);
+    if (!m) return null;
+    const letras = m[0];
+    return LCC_A_CDU[letras.slice(0, 2)] || LCC_A_CDU[letras[0]] || null;
+}
+
+/**
+ * «Fuente externa» = crosswalk DETERMINISTA (no una API: la CDU deriva del Dewey). Devuelve la CDU o null.
+ * Lo que devuelve se APRENDE en la caché de equivalencias (como 'Manual'), así que debe ser CORRECTO — por eso
+ * es conservador: mapea solo lo que alinea con certeza y deja lo dudoso a la IA.
+ */
+async function buscarEquivalenciaExterna(sistema, codigo) {
+    if (sistema === 'dewey') return deweyACDU(codigo);
+    if (sistema === 'lcc') return lccACDU(codigo);
     return null;
 }
 
