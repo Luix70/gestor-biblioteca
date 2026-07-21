@@ -549,7 +549,7 @@ function sincMaster(card) {
 }
 // Modal de confirmación con contraseña ENMASCARADA (reutiliza el overlay del comparador).
 // Resuelve con la contraseña escrita, o null si se cancela.
-function modalPassword({ titulo, aviso }) {
+function modalPassword({ titulo, aviso, boton = '🗑 Eliminar' }) {
   return new Promise((resolver) => {
     $('#cmpModal').innerHTML = `<div class="box card" style="max-width:420px">
     <h3 style="margin-top:0">${titulo}</h3>
@@ -558,7 +558,7 @@ function modalPassword({ titulo, aviso }) {
     <input type="password" id="pwInput" autocomplete="current-password">
     <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
-      <button class="btn" id="pwCancel">Cancelar</button><button class="btn bad" id="pwOk">🗑 Eliminar</button>
+      <button class="btn" id="pwCancel">Cancelar</button><button class="btn bad" id="pwOk">${boton}</button>
     </div></div>`;
     $('#cmpScrim').style.display = 'block';
     $('#cmpModal').style.display = 'grid';
@@ -11608,8 +11608,15 @@ async function ejecutarUtilidad(operacion) {
         !confirm('BORRADO DIRECTO, SIN PAPELERA.' + String.fromCharCode(10, 10)
           + 'Esto NO se puede deshacer. Si dudas, usa «♻ a la Papelera», que es recuperable.'
           + String.fromCharCode(10, 10) + '¿Seguro?')) return;
-    password = prompt('Contraseña de administrador:');
-    if (password === null || !password) return;
+    // Contraseña por MODAL (input type=password) — no `prompt()`, que la mostraba en texto plano.
+    password = await modalPassword({
+      titulo: operacion === 'eliminar' ? '🗑 Eliminar sin Papelera' : '♻ Retirar a la Papelera',
+      aviso: operacion === 'eliminar'
+        ? `Se ELIMINARÁN <b>${rutas.length}</b> elemento(s) SIN pasar por la Papelera (no se puede deshacer).`
+        : `Se retirarán <b>${rutas.length}</b> elemento(s) a la Papelera (recuperable).`,
+      boton: operacion === 'eliminar' ? '🗑 Eliminar' : '♻ A la Papelera',
+    });
+    if (!password) return; // cancelado o vacío
   }
   // RENOMBRAR necesita saber QUÉ nombre. Con uno seleccionado se pide el nombre nuevo; con varios, un
   // buscar-y-reemplazar sobre sus nombres (para limpiar de golpe la basura de los release groups).
