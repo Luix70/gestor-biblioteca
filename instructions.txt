@@ -1937,148 +1937,292 @@ de ficheros clasificado por CDU.
     usar "down -v" antes de "up --build".
 
 ================================================================================
-APÉNDICE — SCRIPTS DE scripts/ (qué son, cuáles tienen valor, cuándo usarlos)
+APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cuándo)
 ================================================================================
+  CÓMO SE LEE ESTE MANUAL
+    · Casi todos los que ESCRIBEN en la BD o el disco son DRY-RUN por defecto:
+      informan de lo que harían y NO tocan nada. Se APLICAN añadiendo --ejecutar.
+      Lee siempre el dry-run antes de aplicar.
+    · En el NAS se lanzan dentro del contenedor:
+        sudo docker exec gestor-biblioteca node scripts/<script>.js [opciones]
+      (en desarrollo local, sin el «docker exec», desde la raíz del repo).
+    · ⚠ COPIA DE SEGURIDAD de la base antes de CUALQUIER --ejecutar que toque
+      muchos documentos (mover carpetas, reasignar, fusionar, borrar).
+    · Pausa el VIGILANTE antes de un script que MUEVA carpetas del árbol o del
+      Inbox: si él cataloga a la vez, os pisáis (condición de carrera).
+    · Los ficheros NUNCA se borran de verdad salvo un duplicado EXACTO por hash;
+      todo lo demás va a la Papelera (recuperable). Es política de la casa.
+
   Etiquetas:
-    [PANEL]       también se lanza desde la web (Actividad); no hace falta CLI.
+    [PANEL]       también se lanza desde la web (Mantenimiento / Actividad).
     [PERIÓDICO]   conviene ejecutarlo cada cierto tiempo (o programado en DSM).
-    [RETROACTIVO] el fallo que corrige YA está resuelto en el flujo de ingesta; el
-                  script solo SANEA datos VIEJOS. Se corre cuando aparezcan restos;
-                  idempotente. (No hace falta en cada ingesta.)
+    [RETROACTIVO] el fallo que corrige YA está resuelto en la ingesta; el script
+                  solo SANEA datos VIEJOS. Idempotente; córrelo si aparecen restos.
     [UNA VEZ]     tarea puntual / de instalación; no se repite.
-    [MIGRACIÓN]   cambio de modelo histórico (varias ya SUPERADAS).
+    [MIGRACIÓN]   cambio de modelo histórico (algunas ya SUPERADAS).
     [DIAGNÓSTICO] solo lectura, no toca nada.
-  Casi todos los que ESCRIBEN son DRY-RUN por defecto y aplican con --ejecutar.
 
-  ── Instalación / infraestructura ────────────────────────────────────────────
-    setup-mongo.js          [UNA VEZ/tras cambios de esquema] índices + validadores
-                            $jsonSchema. Idempotente; córrelo tras tocar el esquema.
-    etl-fichero.js          [UNA VEZ] construye Fichero/fichero.db desde los volcados
-                            OL+BNE (en un PC potente; luego copias el .db al NAS). El
-                            esquema/mapeo vive en etl-map.js (módulo, no ejecutable).
-    reindexar-busqueda.js   [PANEL: Búsqueda] tras el 1er despliegue o recuperación
-                            reconstruye el índice FTS busqueda.db (luego se automantiene).
+  ── 1. INSTALACIÓN / INFRAESTRUCTURA ─────────────────────────────────────────
+    setup-mongo.js            [UNA VEZ / tras tocar el esquema] crea índices de
+                              `biblioteca` y el validador $jsonSchema de `colecciones`.
+                              Idempotente (createIndex/collMod no duplican). Sin flags.
+    etl-fichero.js            [UNA VEZ] construye Fichero/fichero.db desde los volcados
+                              OL (TSV ~92 GB) + BNE (JSON ~2,4 GB). Se corre en un PC
+                              potente y luego COPIAS el .db al NAS. Reanudable (commitea
+                              filas + offset juntos). --ol <f> --bne <f> --out <f> [--raw].
+                              El mapeo/esquema vive en etl-map.js (módulo, NO ejecutable).
+    reindexar-busqueda.js     [PANEL: Búsqueda] reconstruye el índice FTS busqueda.db
+                              desde Mongo. Úsalo tras el 1er despliegue o para recuperar;
+                              luego se automantiene al ingerir/editar/borrar. Sin --ejecutar
+                              (solo reindexa). Mientras no exista, /catalogo cae a $regex.
+    verificar-gemini.js       [DIAGNÓSTICO] comprueba que cada clave Gemini del .env
+                              responde (llamada mínima por clave). Enmascara las claves.
 
-  ── Mantenimiento periódico ──────────────────────────────────────────────────
-    integridad.js           [PANEL: Integridad][PERIÓDICO] diagnostica/repara
-                            (--reparar) DB↔disco en UNA pasada (consolida
-                            auditoria-integridad + resolver-duplicados + recolector-cdu
-                            + dedup por hash). Programable con la Tarea de DSM.
-                            Por consola escupe SOLO el resumen (en una tarea
-                            programada, volcar el detalle al log no ayuda);
-                            con --informe <ruta.txt> deja además el informe
-                            DETALLADO: todos los casos, con qué significa cada
-                            categoría y qué hacer con ella. Mismo texto que el
-                            botón «⬇ Informe (.txt)» del panel — un solo
-                            renderizador (utils/informe-integridad.js), así que
-                            las dos salidas no pueden contar cosas distintas.
-    sanear-catalogo.js      [PANEL: Sanear catálogo] re-home + portadas con el
-                            pipeline actual, sin red, sin pérdida de datos.
-    describir-clasificaciones.js  backfill de descripciones CDU/Dewey/LCC que faltan
-                            (IA+caché). Ya lo hace poco a poco el Conformador; esto es
-                            la versión "de una sentada". (describir-cdus.js = variante
-                            solo-CDU, predecesora.)
-    regenerar-registros.js  regenera los sidecars registro.json/.marc.xml desde Mongo.
-                            Útil tras correcciones masivas.
-    limpiar-huerfanos.js    [PERIÓDICO] poda lo que NADA más limpia: autores/editoriales
-                            referenciados por 0 documentos (ni por colecciones/obras las
-                            editoriales, ni por contribuciones[].persona los autores) y
-                            obras/colecciones vacías. Invisibles/vacíos; se recrean solos si
-                            un doc futuro los necesita. Dry-run por defecto; --ejecutar borra.
-                            (node scripts/limpiar-huerfanos.js [--ejecutar])
-    recuperar-contribuciones.js  [RECUPERACIÓN] repara docs cuyas contribuciones[].persona
-                            (traductor/ilustrador/editor) apuntan a un autor inexistente:
-                            reconstruye el nombre por ISBN (Fichero + OpenLibrary, sin IA) y
-                            lo re-resuelve con resolverPersona. Solo toca refs rotas. Dry-run;
-                            --ejecutar.
-    unificar-autores-grafia.js  [RETROACTIVO] funde autores que son la MISMA persona escrita
-                            distinto SOLO por mayúsculas/acentos («JEAN TOUCHARD»=«Jean
-                            Touchard», «José»=«Jose»): agrupa por nombre normalizado (minús. +
-                            sin diacríticos), destino = mejor grafía, funde con fusionarAutores.
-                            ESTRICTO (nunca por parecido). El fix vive en resolverPersona
-                            (collation strength:1); esto sanea lo viejo. Dry-run; --ejecutar.
+  ── 2. ANTES DE INGERIR: mirar el Inbox y prepararlo a mano ──────────────────
+    dry-run.js                [DIAGNÓSTICO] qué HARÍA el vigilante con lo que hay AHORA en
+                              el Inbox, sin catalogar/mover/borrar. Llama a la MISMA función
+                              que decide de verdad (planificarInbox), así que no miente; y
+                              enseña lo importante: QUÉ SE QUEDA FUERA Y POR QUÉ. --json para
+                              volcarlo. No confundir con el dry-run de otros scripts.
+    utilidades.js             Operaciones MANUALES sobre carpetas del Inbox, previas a la
+                              ingesta (lo mismo que la barra del Inspector, pero por consola):
+                              expandir · expandir-aqui · aplanar · limpiar · comprimir ·
+                              renombrar. Dry-run por defecto; --ejecutar aplica; --propagar
+                              baja a las subcarpetas; --solo-unicas (aplanar) disuelve solo
+                              las carpetas de UN fichero (deja intacta «jpg/» y compañía);
+                              --de/--a o --nuevo para renombrar. Admite comodín «carpeta/*».
+                              REHÚSA ejecutar si el vigilante está activo.
 
-  ── Saneos RETROACTIVOS (el fix ya está en la ingesta; sanean lo VIEJO) ───────
-    sanear-colecciones-issn.js  [RETROACTIVO] colecciones con nombre-PLACEHOLDER (su
-                            ISSN, un DOI de Springer «10.1007%40978-…», «Creator:…») →
-                            nombre real por ISSN (Wikidata) + funde duplicados. Fix en
-                            resolverCabecera. Re-lánzalo si reaparecen placeholders.
-    consolidar-colecciones.js   [RETROACTIVO] colecciones duplicadas por volumen-en-
-                            nombre («Alianza Cien 15») → una + coleccion_numero.
-    unificar-colecciones.js     [RETROACTIVO] funde colecciones iguales por
-                            mayúsc/acentos/ISSN. (Ambas: fix en ingesta por clave_canonica.)
-    agrupar-hermanos.js     [RETROACTIVO] agrupa en OBRAS los tomos con nº en el título
-                            («Título, I/II») que la ingesta no detecta en solitario
-                            (necesita corroboración entre hermanos).
-    reclasificar-libros.js  [RETROACTIVO] libros mal clasificados como revista → libro.
-    backfill-autores.js     [RETROACTIVO] normaliza nombres de autor a la forma canónica.
-    roles-autores.js        [RETROACTIVO] rellena contribuciones (traductor/ilustrador/…)
-                            e idioma original de libros con ISBN, SIN IA (OL + Fichero).
-    enriquecer-autores.js   [RETROACTIVO][también campaña] foto+bio+seudónimos de autores
-                            desde OL+Wikidata+Wikipedia (gratis, sin IA), tandas de 25.
-    re-enriquecer-degradados.js  [RETROACTIVO] re-enriquece SOBRESCRIBIENDO lotes
-                            ingeridos con las APIs caídas (título=nombre de archivo, cdu «00»…).
-    reingestar-multiarchivo.js  [UNA VEZ] separa carpetas CDU con varios documentos.
-    retirar-bne-cdus.js     [UNA VEZ] elimina la colección retirada bne_cdus.
+  ── 3. INGESTA MANUAL (CLI) ──────────────────────────────────────────────────
+    ingestar-audiolibro.js    Cataloga una carpeta de AUDIOLIBRO puro (o un contenedor con
+                              varios) = 1 doc naturaleza:'audiolibro' (playlist + carrusel).
+                              Sin IA (tags + nombre). Dry-run; "<carpeta>" [--ejecutar].
+    ingestar-coleccion-audiolibros.js  Una carpeta con VARIOS audiolibros → colección: un
+                              audiolibro por libro + un doc por PDF + un doc por vídeo +
+                              manifiesto de lo no catalogado. Dry-run; "<carpeta>" [--ejecutar].
+    ingestar-transmedia.js    Cataloga una carpeta TRANSMEDIA (estructura verbatim = 1
+                              colección: PDFs + audios + portadas). Dry-run (imprime el plan:
+                              colección, CDU, nivel/unidad/rol por PDF); --ejecutar copia e
+                              INSERTA en Atlas.
+    reingestar-multiarchivo.js [UNA VEZ] carpetas CDU con VARIOS documentos: respalda cada
+                              doc a un JSON y los re-ingiere para que cada uno tenga su
+                              registro y su carpeta. Dry-run; --ejecutar.
 
-  ── Cuarentena / recuperación de ficheros ────────────────────────────────────
-    organizar-cuarentena.js  ordena Cuarentena en subcarpetas por categoría.
-    reprocesar-cuarentena.js devuelve depósitos de Cuarentena al Inbox para
-                            recatalogarlos con el pipeline actual.
-    purgar-duplicados.js    purga SEGURA de Cuarentena/duplicados (re-verifica que el
-                            gemelo catalogado sigue en disco antes de borrar).
-    purgar-ilegibles.js     retira PDFs catalogados ILEGIBLES (estructura dañada).
-    purgar-multipart.js     purga una obra multivolumen mal catalogada (a Papelera)
-                            para re-ingerirla; lógica compartida con el panel.
-    resolver-duplicados.js  auto-resuelve el backlog Cuarentena/duplicados (mismo
-                            hash→borra; formato distinto→ambos; si no, el mayor).
-                            [Ya incluido en integridad.js.]
-    restaurar-originales.js recupera ficheros "desaparecidos" desde Reintentos/Inbox/
-                            Cuarentena (copia NO destructiva).
-    reparar-pdf-como-papel.js  repara PDF/EPUB digitales que un ingest/reproceso marcó
-                            'papel' + explotó a decenas de JPG (bug corregido): re-etiqueta
-                            el formato digital, recorta las imágenes a 6 (5+1; el resto a la
-                            Papelera), restaura el fichero desde la Papelera si faltaba y
-                            corrige la BD. Dry-run por defecto; lista los irrecuperables.
-    ingestar-transmedia.js  cataloga una carpeta TRANSMEDIA (estructura verbatim = 1
-                            colección; ver sección «COLECCIONES TRANSMEDIA»). Dry-run
-                            (imprime el plan) por defecto; aplica con --ejecutar.
-    ingestar-audiolibro.js  cataloga una carpeta de AUDIOLIBRO puro (o un contenedor con
-                            varios) = 1 documento naturaleza:'audiolibro' con playlist +
-                            carrusel (ver «AUDIOLIBROS PUROS»). Dry-run por defecto (--ejecutar).
-    reparar-transmedia.js   arregla colecciones transmedia ya catalogadas: pone
-                            fecha_ingreso (para que salgan en el Catálogo), da portada
-                            propia a materiales/guías y (re)indexa en la Búsqueda. Solo
-                            aditivo. Dry-run por defecto (--ejecutar).
-    recolector-cdu.js       recolector de basura del árbol CDU (1 doc ↔ 1 carpeta).
-                            [Ya incluido en integridad.js.]
+  ── 4. INTEGRIDAD Y DISCO (DB ↔ árbol CDU) ───────────────────────────────────
+    integridad.js             [PANEL: Integridad][PERIÓDICO] LA tarea de integridad:
+                              diagnostica y, con --reparar, repara en UNA pasada (consolida
+                              auditoria-integridad + resolver-duplicados + recolector-cdu +
+                              dedup por hash). Repara SEGURO: solo poda ramas literalmente
+                              vacías y dedup por hash exacto (todo a la Papelera con
+                              manifiesto); una carpeta CON ficheros NO se toca. --informe
+                              <ruta.txt> deja el informe DETALLADO (todos los casos + qué
+                              hacer con cada uno); por consola solo el resumen. Programable
+                              en DSM: docker exec … integridad.js --reparar.
+    auditoria-integridad.js   [DIAGNÓSTICO] la auditoría por-ítem antigua (salida CLI
+                              minuciosa); el paso consolidado y con reparación es integridad.js.
+    recolector-cdu.js         Recolector de basura del árbol (1 doc ↔ 1 carpeta): conserva
+                              OWNED, elimina el DUPLICADO obsoleto (mismo _id en otra carpeta),
+                              recicla la HUÉRFANA. Dry-run; --ejecutar. [Ya en integridad.js.]
+    limpiar-huerfanos.js      [PERIÓDICO] poda lo que NADA más limpia: autores/editoriales
+                              con 0 referencias y obras/colecciones vacías. Se recrean solas si
+                              un doc futuro las necesita. Dry-run; --ejecutar.
+    regenerar-registros.js    Regenera los sidecars registro.json / registro.marc.xml desde
+                              Mongo (resuelve los ObjectId a nombres). Útil tras correcciones
+                              masivas. Dry-run; --ejecutar. Solo escribe los dos sidecars.
+    separar-carpetas-compartidas.js  Varios documentos comparten UNA carpeta por colisión de
+                              ruta_base y se pisan los sidecars/portadas (el catálogo los tiene
+                              bien: solo están mal alojados). Da a cada uno SU carpeta adyacente
+                              y corrige la BD. No reingesta, no IA. Dry-run; --ejecutar.
+    relocalizar-documentos.js Repara `ruta_base` OBSOLETAS: cuando la carpeta de un doc no está
+                              donde dice la BD (p. ej. tras mover una carpeta que contenía las de
+                              otros), BUSCA el fichero por nombre en el árbol y corrige la ruta
+                              (+ portada/imágenes). No mueve nada. Si el nombre aparece en varios
+                              sitios, no elige: lo señala. [--coleccion <id>] Dry-run; --ejecutar.
+    restaurar-originales.js   Recupera el .epub/.pdf «desaparecido» de la carpeta de un doc,
+                              buscándolo por nombre en Reintentos/Inbox/Cuarentena y copiándolo
+                              de vuelta (copia NO destructiva; no borra el respaldo). No toca
+                              Mongo. Dry-run; --ejecutar.
+    nestar-sueltos.js         [UNA VEZ] limpió las carpetas «sueltas» que quedaron en la RAÍZ de
+                              CDU/ tras migrar al árbol (solo elimina si están vacías de
+                              documentos). Dry-run; --ejecutar.
 
-  ── Migraciones (históricas; varias SUPERADAS) ───────────────────────────────
-    migrar-revistas-a-colecciones.js  [MIGRACIÓN vigente] cabeceras de revista y series
-                            → modelo COLECCIONES. Sustituye a las dos de abajo.
-    migrar-revistas.js      [SUPERADA] paso 2 de la vieja migración de revistas.
-    reparar-revistas.js     [SUPERADA] deshacía el daño de aquella migración.
-    migrar-arbol-cdu.js     [UNA VEZ] reorganizó las carpetas planas de CDU/ en árbol.
-    nestar-sueltos.js       [UNA VEZ] limpió las carpetas sueltas de la raíz de CDU/.
+  ── 5. CUARENTENA / DUPLICADOS / ILEGIBLES ───────────────────────────────────
+    organizar-cuarentena.js   Ordena Cuarentena en subcarpetas por categoría (duplicados /
+                              no-identificados / otros). Hashea cada fichero y lo compara con la
+                              biblioteca para detectar duplicados reales. Dry-run; --ejecutar.
+    reprocesar-cuarentena.js  Devuelve depósitos de Cuarentena al Inbox para recatalogarlos con
+                              el pipeline actual (ya no descarta lo que tiene ISBN/ISSN válido).
+                              Mueve (rename atómico); borra el depósito solo tras confirmar la
+                              salida. Dry-run; --ejecutar.
+    resolver-duplicados.js    Auto-resuelve el backlog Cuarentena/duplicados: mismo hash→borra
+                              el entrante; formato distinto→conserva ambos; mismo formato y hash
+                              distinto→conserva el mayor. Dry-run; --ejecutar. [Ya en integridad.js.]
+    purgar-duplicados.js      Purga SEGURA de Cuarentena/duplicados: re-verifica por contenido
+                              que el gemelo catalogado sigue en disco ANTES de borrar (si no
+                              está, no borra: podría ser la única copia). Dry-run; --ejecutar.
+    purgar-ilegibles.js       Retira PDFs ya catalogados ILEGIBLES (pdfinfo no halla páginas):
+                              mueve el fichero a Cuarentena/ilegibles y borra su doc + carpeta.
+                              Necesita poppler. Dry-run; --ejecutar.
+    sanear-catalogo.js        [PANEL: Sanear catálogo] sanea el catálogo con el pipeline ACTUAL
+                              (re-home + portadas), sin red, sin pérdida. --limite N para probar;
+                              --reclasificar re-ingiere cómics mal archivados (usa IA). Dry-run;
+                              --ejecutar.
 
-  ── Diagnóstico (SOLO LECTURA) ───────────────────────────────────────────────
-    diagnostico-revistas.js  revistas conflacionadas / carpetas colisionadas.
-    diagnostico-revistas-libro.js  revistas que en realidad son LIBROS: colecciones-
-                            revista de 1 miembro + docs revista con señal de libro
-                            (CIP/ISBN propio/editorial/serie-libros), por categoría.
-                            --lista da el detalle. No escribe nada.
-    auditoria-integridad.js  auditoría detallada por-ítem (salida CLI minuciosa; el
-                            paso consolidado y con reparación es integridad.js).
-    muestra-fichero.js       mide qué roles/idioma son recuperables del Fichero.
-    verificar-gemini.js      comprueba que las claves Gemini del .env funcionan.
+  ── 6. OBRAS MULTIVOLUMEN · SERIES · COLECCIONES ─────────────────────────────
+    agrupar-en-obra.js        Agrupa varios documentos SUELTOS en UNA obra multivolumen, bajo
+                              UNA sola CDU y UNA carpeta (<cdu>/obras/<obra>/vol-N). Para una
+                              colección catalogada tomo a tomo sin ISBN (p. ej. los grabados de
+                              la Encyclopédie: 16 docs en 6 CDU distintas). --patron "<regex sobre
+                              nombre_archivo>" --titulo "<obra>" --cdu <cdu> [--esperados N].
+                              --esperados aborta si el patrón no casa ESE número exacto. Mueve
+                              ficheros (nunca borra); si el destino existe, salta ese tomo.
+                              Dry-run; --ejecutar. ⚠ Backup antes.
+    unificar-serie-revista.js Unifica una SERIE (colección de números) catalogada a trozos: un
+                              tipo, una CDU, una carpeta (<cdu>/revistas/<issn>/<clave>). Caso
+                              Don Miki (692 números en 57 CDU, mitad libro/mitad revista). El
+                              TÍTULO manda sobre el numero_issue guardado (viene mal de la
+                              ingesta). --coleccion <id> --cdu <cdu> [--esperados N]. Dry-run;
+                              --ejecutar. ⚠ Backup antes (toca cientos de docs).
+    agrupar-hermanos.js       [RETROACTIVO] agrupa en OBRAS los tomos cuyo nº va en el TÍTULO como
+                              romano/número final («Título, I» · «Título, II») que la ingesta no
+                              detecta sola. SEGURO: exige ≥2 hermanos con el mismo prefijo (≥2
+                              palabras) y números distintos. Dry-run; --ejecutar.
+    consolidar-obras.js       [RETROACTIVO] reúne los tomos DISPERSOS de una misma obra en su
+                              carpeta canónica (<cdu>/obras/<obra>/vol-N): un bug derivaba la
+                              carpeta de campos del tomo, no del registro de obra. Corre DESPUÉS
+                              de backfill-volumen-tomo si hubo colisiones «vol-x». Dry-run; --ejecutar.
+    backfill-volumen-tomo.js  [RETROACTIVO] rellena `volumen_numero` en tomos que lo tenían null
+                              (el nº iba pegado en el nombre, «…Vol1.pdf»). No mueve carpetas
+                              (eso lo hace consolidar-obras después). Dry-run; --ejecutar.
+    consolidar-colecciones.js [RETROACTIVO] funde colecciones de LIBROS duplicadas por llevar el
+                              nº de volumen en el nombre («Alianza Cien 15», «Alianza 100 10») →
+                              una + coleccion_numero. Dry-run; --ejecutar.
+    unificar-colecciones.js   [RETROACTIVO] funde colecciones que son la MISMA por mayúsculas/
+                              acentos/espacios o por ISSN compartido (componentes conexos). Elige
+                              canónica y reasigna miembros. Dry-run; --ejecutar.
+    limpiar-colecciones-falsas.js [RETROACTIVO] libro colgando de una colección-BASURA (1 miembro
+                              que es el nombre del fichero, o una colección-revista con un libro
+                              dentro): reprocesa «nuevo desde cero» (re-lee el CIP) y borra la
+                              colección vacía. Dry-run; --ejecutar.
+    sanear-colecciones-issn.js [RETROACTIVO] colecciones cuyo nombre es un PLACEHOLDER (su propio
+                              ISSN, un DOI de Springer, «Creator:…») pero con ISSN de serie →
+                              nombre real por ISSN (Wikidata, sin IA); funde o renombra. Dry-run;
+                              --ejecutar.
+    sanear-nombres-serie-issn.js [RETROACTIVO] colección de serie cuyo nombre es un TÍTULO DE
+                              LIBRO (la 1ª monografía se llevó su título a la cabecera) → nombre
+                              autoritativo por ISSN (Wikidata → ISSN Portal). Solo renombra.
+                              Dry-run; --ejecutar.
+    purgar-multipart.js       Purga una obra multivolumen mal catalogada para re-ingerirla:
+                              borra la obra + tomos de la BD y MUEVE sus carpetas a la Papelera.
+                              <isbn_obra|título> [...más]. Dry-run; --ejecutar. [Lógica del panel.]
 
-  ── Tests de desarrollo (no son mantenimiento) ───────────────────────────────
-    test-*.js               batería de comprobaciones del pipeline (discriminador, cip,
-                            multivolumen, título-artefacto, papelera, override…). Para
-                            desarrollo en local, NO para el NAS.
+  ── 7. REVISTAS (modelo de colecciones por ISSN) ─────────────────────────────
+    migrar-revistas-a-colecciones.js [MIGRACIÓN vigente] cabeceras de revista y series de libros
+                              → modelo COLECCIONES (cabecera = colección por ISSN; cada número =
+                              doc miembro). Sustituye a las dos siguientes. Dry-run; --ejecutar.
+    migrar-revistas.js        [MIGRACIÓN SUPERADA] paso 2 de la vieja migración de revistas.
+    reparar-revistas.js       [MIGRACIÓN SUPERADA] deshacía el daño de aquella migración (recicla-
+                              solo, reversible).
+    diagnostico-revistas.js   [DIAGNÓSTICO] revistas conflacionadas / carpetas colisionadas:
+                              distingue REGISTRO PERDIDO (fichero sin doc) de COLISIÓN DE CARPETA
+                              (varios docs en la misma carpeta).
+    diagnostico-revistas-libro.js [DIAGNÓSTICO] revistas que en realidad son LIBROS: colecciones-
+                              revista de 1 miembro + docs revista con señal de libro (CIP/ISBN
+                              propio/editorial/serie). --lista da el detalle.
+    reclasificar-libros.js    [RETROACTIVO] libros mal clasificados como revista → libro, por señal
+                              fuerte (ISBN en el nombre, título-artefacto). Solo BD. Dry-run; --ejecutar.
+    reclasificar-revistas-a-libros.js [RETROACTIVO] «revista» que es LIBRO por colección-de-1 con
+                              señal fuerte (CIP o prefijo de editorial) y sin ISSN: reprocesa nuevo
+                              desde cero y borra la colección falsa. Dry-run; --ejecutar.
+    reclasificar-revistas-por-senal.js [RETROACTIVO] complementa al anterior: revistas con CIP /
+                              ISBN propio / prefijo de editorial (no por colección). Dry-run; --ejecutar.
 
-  REGLA: al AÑADIR un script nuevo a scripts/, documéntalo aquí (categoría + 1 línea)
-  y, si escribe en la base/disco, que sea DRY-RUN por defecto (aplica con --ejecutar).
+  ── 8. AUTORES Y EDITORIALES ─────────────────────────────────────────────────
+    backfill-autores.js       [RETROACTIVO] normaliza los nombres de `autores` a la forma canónica
+                              de la ingesta (separa colaboradores, saca fechas de vida, latiniza) y
+                              deduplica los que colapsan. Dry-run; --ejecutar.
+    separar-autores-fusionados.js [RETROACTIVO] un registro de autor que es en realidad VARIAS
+                              personas unidas por «&»/«;»/«/» → una persona por nombre, resuelta como
+                              en la ingesta. Dry-run; --ejecutar.
+    unificar-autores-grafia.js [RETROACTIVO] funde autores que son la MISMA persona escrita distinto
+                              SOLO por mayúsculas/acentos («JEAN TOUCHARD»=«Jean Touchard»). ESTRICTO
+                              (por nombre normalizado, nunca por parecido). Dry-run; --ejecutar.
+    roles-autores.js          [RETROACTIVO] rellena contribuciones (traductor/ilustrador/…) e idioma
+                              original de libros con ISBN, SIN IA (OL + Fichero), tandas de 25.
+                              Conservador. Dry-run; --ejecutar; --limite; --sobrescribir.
+    enriquecer-autores.js     [RETROACTIVO / campaña] foto + bio + seudónimos + fechas de autores CON
+                              libros, desde OL+Wikidata+Wikipedia (gratis, sin IA), tandas de 25.
+                              Dry-run; --ejecutar; --limite N; --sobrescribir.
+    recuperar-contribuciones.js [RECUPERACIÓN] repara contribuciones[].persona que apuntan a un autor
+                              inexistente: reconstruye el nombre por ISBN (Fichero + OL, sin IA) y lo
+                              re-resuelve. Solo refs rotas. Dry-run; --ejecutar.
+    marcar-autores-basura.js  Antepone «[?]_» a los autores ARTEFACTO (Creator:…, URLs, ISBNs sueltos)
+                              para filtrarlos en el panel y reingerir a mano. NO borra. Dry-run;
+                              --ejecutar marca; --quitar retira el prefijo.
+    buscar-sin-autor.js       [DIAGNÓSTICO] lista los documentos SIN ningún autor/contribuyente
+                              (opcional: filtro por texto). No escribe.
+    reclasificar-editoriales.js [PANEL] reclasifica el campo `editorial` en lote buscando la casa real
+                              en cascada (Fichero→OL→Google→IA opcional) e informa por transición. Para
+                              depurar en masa (p. ej. «ePubLibre», que es maquetación). --editorial
+                              "<nombre>" | --id <id> | --sin-editorial | --todos; --ia opt-in. Dry-run;
+                              --ejecutar.
+    deshacer-fusion-editorial.js [RECUPERACIÓN puntual] revierte una fusión de editoriales que absorbió
+                              de más (identifica los reasignados por su fecha_actualizacion común).
+                              Dry-run; --ejecutar.
+
+  ── 9. METADATOS · CLASIFICACIÓN · FORMATO ───────────────────────────────────
+    re-enriquecer-degradados.js [RETROACTIVO] re-enriquece SOBRESCRIBIENDO documentos de lotes
+                              ingeridos con las APIs caídas (título=nombre de archivo, autor basura,
+                              cdu «00») o sin autor: con un ISBN, rellena autor/editorial desde
+                              OL/Fichero (autoritativo). No mueve ficheros. Dry-run; --ejecutar.
+    recuperar-titulo-original.js [RETROACTIVO] backfill SIN IA de `titulo_original`: abre el EPUB/PDF y
+                              lee «Título original:» de la página de créditos. Corre donde estén los
+                              ficheros. Dry-run; --ejecutar.
+    reparar-pdf-como-papel.js [RETROACTIVO] repara PDF/EPUB digitales que un bug marcó «papel» y explotó
+                              a decenas de JPG: re-etiqueta digital, recorta a 6 imágenes (resto a la
+                              Papelera), restaura el fichero si faltaba, corrige la BD. Dry-run; --ejecutar.
+    describir-clasificaciones.js Backfill «de una sentada» de descripciones CDU+Dewey+LCC que faltan
+                              (IA + caché); el Conformador ya lo hace en tandas. --limite N; --ejecutar.
+    describir-cdus.js         Variante SOLO-CDU del anterior (predecesora). --limite N; --ejecutar.
+    retirar-bne-cdus.js       [UNA VEZ] elimina de Atlas la colección retirada `bne_cdus` (redundante:
+                              el Fichero trae el volcado BNE completo). Dry-run; --ejecutar.
+
+  ── 10. IMÁGENES · PORTADAS · EMPAQUETADO ────────────────────────────────────
+    reparar-portadas.js       Repara documentos SIN portada o con imágenes de carrusel ROTAS (referencias
+                              a ficheros que ya no están): poda las muertas y re-resuelve la portada
+                              (reusa una imagen válida o EXTRAE la 1ª página del fichero, encogida). Sin
+                              filtro revisa TODO el catálogo (lento, pero solo actúa en lo roto);
+                              --sin-portada va directo a los que no tienen (rápido); --id / --patron
+                              acotan; --forzar RE-EXTRAE aunque exista (exige --id/--patron; encoge la
+                              portada a ~1200 px → evita el OOM del catálogo); --invertir fuerza la vuelta
+                              del negativo (junto a --forzar, para frontispicios densos). Dry-run; --ejecutar.
+    corregir-polaridad-cbz.js Corrige EN SITIO las láminas bitonales en NEGATIVO dentro de un cbz ya
+                              hecho (pdfimages vuelca el stencil invertido): reescribe cada PNG con la
+                              paleta al revés SIN recomprimir (minutos, no re-convertir los PDF). Verifica
+                              página a página; idempotente. <ruta.cbz | carpeta> [...]. Dry-run; --ejecutar.
+
+  ── 11. MIGRACIONES DE ÁRBOL (históricas) ────────────────────────────────────
+    migrar-arbol-cdu.js       [UNA VEZ] reorganizó las ~1000 carpetas planas de CDU/ en el árbol
+                              <clase>/<división>/<cdu>/<libros|revistas>/<hoja>. Transaccional, no
+                              destructivo. Con la app PARADA. Dry-run; --ejecutar.
+
+  ── 12. DIAGNÓSTICO DEL FICHERO ──────────────────────────────────────────────
+    muestra-fichero.js        [DIAGNÓSTICO] mide qué roles/idioma son recuperables del Fichero local
+                              (sin mover el .db), para afinar las campañas de fondo.
+
+  ── 13. TESTS DE DESARROLLO (no son mantenimiento) ───────────────────────────
+    test-*.js                 batería de comprobaciones del pipeline, para desarrollo en LOCAL, no para
+                              el NAS: test-discriminador (tipo de recurso), test-cip (bloque CIP),
+                              test-isbn (qué da cada fuente por ISBN — sí corre en el NAS: tiene red),
+                              test-multivolumen / test-multipart-catalogo / test-obras-inventario
+                              (obras; las «-catalogo» escriben en Atlas y limpian), test-titulo-artefacto,
+                              test-papelera, test-limpiar-inbox (regresión de pérdida de datos),
+                              test-cdu-arbol, test-etl-map, test-buscadores, test-override.
+
+  REGLA: al AÑADIR un script nuevo a scripts/, documéntalo aquí (categoría +
+  invocación + flags + dry-run/seguridad + cuándo usarlo) Y, si va a exponerse en
+  el panel, en el registro `src/utils/catalogo-scripts.js`. Si escribe en la base
+  o el disco, que sea DRY-RUN por defecto (aplica con --ejecutar).
 ================================================================================
 
   ── SEGURIDAD AL COMBINAR AUTORES / EDITORIALES ──────────────────────────────
