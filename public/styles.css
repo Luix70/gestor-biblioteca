@@ -877,6 +877,15 @@ input[type='checkbox'] {
   grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 14px;
 }
+/* Catálogo: 6 columnas FIJAS (no auto-fill) para que una página de 24 salga en filas completas
+   (24 / 6 = 4 filas exactas; con 7 columnas la última fila quedaba descuadrada). Las carátulas salen
+   un poco más grandes al repartir el mismo ancho entre 6. Solo el catálogo (#searchResults); obras,
+   colecciones y tomos conservan su rejilla responsive. En móvil (≤640px) manda la regla de abajo. */
+@media (min-width: 641px) {
+  #searchResults .vol-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
 .vol {
   background: var(--card2);
   border: 1px solid var(--line);
