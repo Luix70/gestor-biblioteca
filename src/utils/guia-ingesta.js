@@ -188,7 +188,7 @@ export function aplicarPerfilAContexto(contexto, perfil) {
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
 // EXPLORADOR del Inbox (para el panel): árbol de carpetas/ficheros + la guía actual de cada carpeta.
 // ──────────────────────────────────────────────────────────────────────────────────────────────────
-const EXT_DOC = new Set(['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.chm', '.docx', '.doc']);
+const EXT_DOC = new Set(['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.djv', '.chm', '.docx', '.doc']);
 const EXT_IMG = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.gif', '.bmp']);
 // Mismo rango AMPLIADO que lector-audio.js (fuente única): Audible (.aax/.aa), Apple Lossless, .wma, etc.
 const EXT_AUDIO = new Set(['.mp3', '.m4a', '.m4b', '.m4p', '.aac', '.ogg', '.oga', '.opus', '.flac', '.wav', '.wma', '.aax', '.aa', '.ape', '.alac', '.aiff', '.aif', '.mka', '.wv']);

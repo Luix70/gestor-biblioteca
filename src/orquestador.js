@@ -8,7 +8,7 @@ import { analizarImagenesRecurso } from './agente.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from './utils/buscador-local.js';
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible, ErrorOmitir } from './errores.js';
-import { parsearNombre, esTituloArtefacto } from './utils/parsear-nombre.js';
+import { parsearNombre, esTituloArtefacto, tituloDesdeNombre } from './utils/parsear-nombre.js';
 import { leerMobi } from './utils/lector-mobi.js';
 import { leerChm } from './utils/lector-chm.js';
 import { leerWord } from './utils/lector-word.js';
@@ -54,7 +54,7 @@ const EXT_MOBI = ['.mobi', '.azw', '.azw3'];
 const FORMATO_POR_EXT = {
     '.epub': 'epub', '.pdf': 'pdf',
     '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi',
-    '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.chm': 'chm', '.zip': 'zip', '.rar': 'rar',
+    '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.djv': 'djvu', '.chm': 'chm', '.zip': 'zip', '.rar': 'rar',
     '.docx': 'docx', '.doc': 'doc',
 };
 
@@ -64,7 +64,7 @@ export function detectarTipo(ruta) {
     if (ext === '.pdf') return 'pdf';
     if (EXT_IMAGEN.includes(ext)) return 'imagen';
     if (EXT_COMIC.includes(ext)) return 'comic';
-    if (ext === '.djvu') return 'djvu';
+    if (ext === '.djvu' || ext === '.djv') return 'djvu';
     if (ext === '.chm') return 'chm';              // CHM → lector propio (libchm-bin: título/ISBN/portada)
     if (ext === '.docx' || ext === '.doc') return 'word'; // Word → lector propio (.docx=ZIP OOXML; .doc=antiword)
     if (EXT_MOBI.includes(ext)) return 'mobi';     // MOBI/AZW/AZW3 → lector propio (EXTH + DRM + portada)
@@ -280,12 +280,24 @@ export async function procesarRecurso(entrada) {
         // ISBN/DOI). Se intenta SIEMPRE que aún no hay ISBN propio y el nombre no es fechado (un nombre
         // fechado / un 977 son señal fuerte de periódico y mandan). El falso positivo «revista que reseña
         // un libro» se descarta solo: el título de la revista NO casa con el del libro reseñado.
-        if (!datosBase.isbn_propio && (datosBase.isbn_candidatos || []).length && !datosBase.esFechada) {
-            const refTitulo = datosBase.titulo || path.basename(rutas[0]).replace(/\.[^.]+$/, '');
+        // Antes esto se saltaba si el nombre era FECHADO (por miedo a un periódico). Pero la corroboración ES
+        // la salvaguarda: solo promociona el ISBN si el TÍTULO que le da el Fichero CASA con el del doc/nombre
+        // — un libro con nombre de release fechado («JQuery.UI.Themes.Beginners.Guide.Jul.2011», ISBN válido en
+        // la página de créditos) casa y pasa a LIBRO; el ISBN de un anuncio dentro de una revista NO casa (su
+        // título no es el de la revista) → la revista sigue siendo revista. Sin esto, un libro con fecha en el
+        // nombre veía su ISBN degradado a «pista» y acababa en Cuarentena. El nombre se des-puntúa para que
+        // case con el título del Fichero (que va con espacios, no con puntos).
+        if (!datosBase.isbn_propio && (datosBase.isbn_candidatos || []).length) {
+            const refTitulo = datosBase.titulo || tituloDesdeNombre(path.basename(rutas[0]))
+                || path.basename(rutas[0]).replace(/\.[^.]+$/, '');
             const isbnOk = await corroborarISBNporTitulo({ candidatos: datosBase.isbn_candidatos, titulo: refTitulo });
             if (isbnOk) {
                 datosBase.isbn_propio = isbnOk;
                 if (!datosBase.isbn) datosBase.isbn = isbnOk;
+                // Un release fechado NO es un número de revista: al confirmarse como libro por ISBN, se retira la
+                // marca de «fechado» y el mes (un libro no tiene mes de publicación) para que no lo arrastre a revista.
+                datosBase.esFechada = false;
+                delete datosBase.mes_publicacion;
                 datosBase.alertas_agente = datosBase.alertas_agente || [];
                 datosBase.alertas_agente.push(`ISBN ${isbnOk} corroborado por título en el Fichero → libro.`);
             }
@@ -793,10 +805,20 @@ export async function procesarRecurso(entrada) {
     // Solo va a Cuarentena lo que NO tiene ni título ni identificador (irreconocible de verdad).
     if (!documento.titulo || !String(documento.titulo).trim()) {
         const identificador = documento.isbn || documento.issn;
+        // ÚLTIMO RECURSO antes de Cuarentena: el NOMBRE DE FICHERO, des-puntuado, como título provisional.
+        // Un release con puntos («McGraw.Hill,.Calculus.Demystified.(2003)») no es título AS-IS —por eso el
+        // parser lo dejó vacío— pero quitados los puntos SÍ lo es. Sin esto, un libro perfectamente legible
+        // sin ISBN resoluble (un escaneo, o un ISBN que se descartó) acababa en Cuarentena. Los artefactos
+        // de verdad (watermark de productor, DOI, un ISBN suelto) siguen dando null → siguen yendo a Cuarentena.
+        const tituloNombre = tituloDesdeNombre(path.basename(rutas[0]));
         if (identificador) {
-            documento.titulo = String(identificador);
+            documento.titulo = tituloNombre || String(identificador);
             documento.estado_verificacion = 'pendiente';
             documento.alertas_agente.push(`Sin título resoluble ahora; catalogado como pendiente con ${documento.isbn ? 'ISBN' : 'ISSN'} ${identificador} (se reintentará por identificador).`);
+        } else if (tituloNombre) {
+            documento.titulo = tituloNombre;
+            documento.estado_verificacion = 'pendiente';
+            documento.alertas_agente.push(`Sin identificador ni título en el contenido; catalogado como PENDIENTE con el título tomado del nombre del fichero («${tituloNombre}»). El Conformador lo perfeccionará.`);
         } else {
             throw new ErrorIdentificacion(`No se pudo identificar ni título ni ISBN/ISSN para: ${path.basename(rutas[0])}`);
         }

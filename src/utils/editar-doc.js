@@ -17,7 +17,7 @@ import path from 'node:path';
 const TEXTO = ['subtitulo', 'idioma', 'numero_edicion', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'obra_titulo'];
 const NUM = ['año_edicion', 'paginas', 'volumen_numero'];
 // Extensión del fichero original → su formato (para cuando se recupera el fichero al pasar papel→digital).
-const FORMATO_POR_EXT = { '.pdf': 'pdf', '.epub': 'epub', '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi', '.djvu': 'djvu', '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7' };
+const FORMATO_POR_EXT = { '.pdf': 'pdf', '.epub': 'epub', '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi', '.djvu': 'djvu', '.djv': 'djvu', '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7' };
 
 // Resuelve nombres → ObjectId con resolverPersona (INSENSIBLE a mayúsculas/acentos + normalización BNE):
 // así editar «JEAN TOUCHARD» reusa «Touchard, Jean» en vez de crear un duplicado.

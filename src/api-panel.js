@@ -48,7 +48,7 @@ import { indiceChm, paginaChmInline } from './utils/lector-chm.js';
 import { leerWord } from './utils/lector-word.js';
 import path from 'node:path';
 
-const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu']);
+const EXT_PAGINABLE = new Set(['.cbz', '.cbr', '.cb7', '.djvu', '.djv']);
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { reconstruirInventarioObra } from './utils/obras.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
@@ -1746,7 +1746,7 @@ export function rutasPanel() {
         if (!doc.nombre_archivo || !EXT_PAGINABLE.has(path.extname(doc.nombre_archivo).toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es paginable (.cbz/.cbr/.cb7/.djvu)' }); return null; }
         return path.join(carpetaDeDoc(doc), doc.nombre_archivo);
     };
-    const esDjvu = (ruta) => path.extname(ruta).toLowerCase() === '.djvu';
+    const esDjvu = (ruta) => ['.djvu', '.djv'].includes(path.extname(ruta).toLowerCase());
     r.get('/documentos/:id/paginas', async (req, res) => {
         try {
             const ruta = await docPaginable(req, res);

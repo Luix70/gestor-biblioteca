@@ -45,7 +45,7 @@ const ESTABILIDAD_MS    = Number(process.env.VIGILANTE_ESTABILIDAD_MS || 1500); 
 // disparara antes de tiempo, la ingesta lo detecta (la copia al CDU no cuadra) y CONSERVA el origen.
 const CARPETA_ESTABLE_MS = Number(process.env.VIGILANTE_CARPETA_ESTABLE_MS || 45000);
 const HUERFANO_TIMEOUT_MS = Number(process.env.INBOX_HUERFANO_MS || 600000);  // 10 min a 0 bytes → fantasma
-const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.chm', '.docx', '.doc', '.zip', '.rar', '.7z', '.iso'];
+const EXT_VALIDAS = ['.epub', '.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.mobi', '.azw', '.azw3', '.cbr', '.cbz', '.cb7', '.djvu', '.djv', '.chm', '.docx', '.doc', '.zip', '.rar', '.7z', '.iso'];
 // Ubicación por defecto para libros/revistas físicos llegados por Inbox (sin POST que la fije).
 const UBICACION_INBOX = { ambito: 'Sin asignar', estanteria: 'Sin asignar (Inbox)' };
 

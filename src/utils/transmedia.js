@@ -676,7 +676,7 @@ function limpiarUndefined(obj) {
 }
 
 // Extensiones de DOCUMENTO PRINCIPAL (el "libro" de un drop «libro + material»). El resto = material auxiliar.
-const EXT_DOC_PRINCIPAL = new Set(['.pdf', '.epub', '.mobi', '.azw', '.azw3', '.djvu', '.cbz', '.cbr', '.cb7', '.chm']);
+const EXT_DOC_PRINCIPAL = new Set(['.pdf', '.epub', '.mobi', '.azw', '.azw3', '.djvu', '.djv', '.cbz', '.cbr', '.cb7', '.chm']);
 
 /**
  * LIBRO + MATERIAL AUXILIAR (un solo drop; accion:'libro-material' en el Inspector): una carpeta con UN

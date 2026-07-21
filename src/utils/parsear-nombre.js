@@ -66,6 +66,29 @@ export function esTituloArtefacto(s) {
 }
 
 /**
+ * TÍTULO DE ÚLTIMO RECURSO a partir del NOMBRE DE FICHERO, quitándole los puntos.
+ *
+ * `esTituloArtefacto` marca como artefacto un nombre de *release* con puntos («McGraw.Hill,.Calculus.
+ * Demystified.(2003)»), y hace bien: as-is no es un título, hay que resolverlo por ISBN. Pero cuando la
+ * autoridad NO resuelve (un escaneo sin ISBN, o un ISBN que se descartó), ese nombre era lo único que
+ * había y el libro —perfectamente legible— acababa en Cuarentena. La clave: un nombre de puntos, quitados
+ * los puntos, SÍ es un título válido («McGraw Hill, Calculus Demystified (2003)»). Esta función lo
+ * des-puntúa y lo devuelve SOLO si el resultado ya no es un artefacto (un watermark de productor o un DOI
+ * lo siguen siendo tras des-puntuar → devuelve null y el fichero va a Cuarentena, como debe).
+ *
+ * @returns {string|null} un título usable (provisional, `pendiente`), o null si el nombre no da para uno.
+ */
+export function tituloDesdeNombre(nombreArchivo) {
+    const base = String(nombreArchivo || '').replace(/\.[^.]+$/, '');
+    if (!base.trim()) return null;
+    if (validarISBN(base.replace(/[^0-9Xx]/g, ''))) return null;         // el nombre ES un ISBN, no un título
+    const limpio = base.replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!limpio || esTituloArtefacto(limpio)) return null;              // sigue siendo artefacto tras des-puntuar
+    if ((limpio.match(/[a-záéíóúñü]/gi) || []).length < 3) return null; // sin apenas letras → no es un título
+    return limpio;
+}
+
+/**
  * ¿El campo "autor" del info-dict del PDF es en realidad un metadato de PRODUCCIÓN (crédito de
  * composición tipográfica con fecha/hora, nombre de herramienta) y NO un autor real? Caso real:
  * "Pat Hufnagle (Sherman Typography) 893 1998 May 29 10:37:50". Conservador: solo señales claras.

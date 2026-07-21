@@ -25,7 +25,7 @@ import { indexarDoc } from './indice-busqueda.js';
 // Textos ABRIBLES en el visor de la ficha (los que sabe abrir `initLector`), ext → formato del $jsonSchema.
 const FORMATO_TEXTO = {
     '.pdf': 'pdf', '.epub': 'epub', '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi',
-    '.djvu': 'djvu', '.cbz': 'cbz', '.cbr': 'cbr', '.cb7': 'cb7', '.chm': 'chm',
+    '.djvu': 'djvu', '.djv': 'djvu', '.cbz': 'cbz', '.cbr': 'cbr', '.cb7': 'cb7', '.chm': 'chm',
     '.docx': 'docx', '.doc': 'doc',
 };
 const formatoDe = (n) => FORMATO_TEXTO[path.extname(n).toLowerCase()] || null;

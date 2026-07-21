@@ -3118,7 +3118,7 @@ function pintarDoc(r, ctx) {
     const nom = (r.nombre_archivo || '').toLowerCase();   // se lee en CADA init: puede cambiar con el selector
     if (r.archivo_url && nom.endsWith('.epub')) iniciarLectorEpub(encUrl(r.archivo_url));
     else if (r.archivo_url && nom.endsWith('.pdf')) iniciarLectorPdf(encUrl(r.archivo_url));
-    else if (/\.(cbz|cbr|cb7|djvu)$/.test(nom)) iniciarLectorComic(d._id);
+    else if (/\.(cbz|cbr|cb7|djvu|djv)$/.test(nom)) iniciarLectorComic(d._id);
     else if (/\.(mobi|azw3?)$/.test(nom)) iniciarLectorMobi(d._id);
     else if (nom.endsWith('.chm')) iniciarLectorChm(d._id);
     else if (/\.docx?$/.test(nom)) iniciarLectorWord(d._id, r.nombre_archivo);  // `f`: el texto elegido en el selector
@@ -3792,7 +3792,7 @@ function pintarGestorImagenes() {
 function _imgExtraible() {
   const a = _imgState && _imgState.archivo;
   if (!a || !a.nombre) return false;
-  if (/\.(cbz|cbr|cb7|djvu|mobi|azw|azw3)$/i.test(a.nombre)) return true; // servidos por el backend (no necesitan a.url)
+  if (/\.(cbz|cbr|cb7|djvu|djv|mobi|azw|azw3)$/i.test(a.nombre)) return true; // servidos por el backend (no necesitan a.url)
   return !!a.url && /\.(pdf|epub)$/i.test(a.nombre);
 }
 
@@ -3811,7 +3811,7 @@ async function extraerImagenDocumento() {
     const enc = encodeURIComponent(id);
     if (ext === 'pdf') return await extraerDePdf(a);
     if (ext === 'epub') return await extraerDeEpub(a);
-    if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext)) return await extraerLazy(id, {
+    if (['cbz', 'cbr', 'cb7', 'djvu', 'djv'].includes(ext)) return await extraerLazy(id, {
       titulo: 'Extraer del documento',
       contar: { path: '/documentos/' + enc + '/paginas', key: 'paginas' },
       // Miniaturas de la rejilla (thumb): DjVu a baja resolución (?r=72, evita rasterizar a plena resolución);
@@ -6234,7 +6234,7 @@ function iconoArchivo(e) {
   if (/\.(mp4|avi|mkv|mov|webm|wmv|flv|m4v|mpe?g|ogv)$/i.test(n)) return '🎬';
   if (/\.pdf$/i.test(n)) return '📄';
   if (/\.(jpe?g|png|webp|gif|bmp|tiff?)$/i.test(n)) return '🖼️';
-  if (/\.(epub|mobi|azw3?|djvu|cbz|cbr|cb7)$/i.test(n)) return '📚';
+  if (/\.(epub|mobi|azw3?|djvu|djv|cbz|cbr|cb7)$/i.test(n)) return '📚';
   return '📎';
 }
 function pintarExplorador(r) {
@@ -6400,13 +6400,13 @@ function previewArchivoBase(r) {
       <div class="epubmsg" id="epubMsg">Cargando lector…</div></div>${acc}</div>`;
   // PAGINADO (cómic .cbz/.cbr/.cb7 y .djvu): visor de páginas servidas BAJO DEMANDA por el backend
   // (cómic→del comprimido; DjVu→rasterizando esa página). Se inicializa tras pintar (iniciarLectorComic).
-  if (['cbz', 'cbr', 'cb7', 'djvu'].includes(ext))
-    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">${ext === 'djvu' ? '📘' : '🗂️'} ${esc(nombre)}</h3>
+  if (['cbz', 'cbr', 'cb7', 'djvu', 'djv'].includes(ext))
+    return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">${ext === 'djvu' || ext === 'djv' ? '📘' : '🗂️'} ${esc(nombre)}</h3>
     <div class="pdfwrap" id="comicWrap"><img id="comicImg" class="comicpg" alt="">
       <button class="cnav prev" id="comicPrev" style="display:none">‹</button><button class="cnav next" id="comicNext" style="display:none">›</button>
       <button class="epubfs" id="comicFs" title="Pantalla completa" style="display:none">⛶</button>
       <div class="epubbar" id="comicBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="comicCur">1</span> / <span id="comicTotal">?</span></span></div>
-      <div class="epubmsg" id="comicMsg">${ext === 'djvu' ? 'Cargando documento…' : 'Cargando cómic…'}</div></div>${acc}</div>`;
+      <div class="epubmsg" id="comicMsg">${ext === 'djvu' || ext === 'djv' ? 'Cargando documento…' : 'Cargando cómic…'}</div></div>${acc}</div>`;
   // MOBI/AZW3: previsualización PROPIA (no hay lector nativo en el navegador). El backend extrae el TEXTO
   // best-effort conservando la estructura y detecta DRM/compresión no soportada. Se inicializa tras pintar
   // (iniciarLectorMobi) renderizándolo en un iframe SANDBOX (sin scripts). La portada/imágenes embebidas ya
@@ -6431,7 +6431,7 @@ function previewArchivoBase(r) {
       <div class="epubmsg" id="wordMsg" style="color:#555">Cargando previsualización…</div>
     </div>${acc}</div>`;
   // Resto de formatos: sin vista previa integrada — solo descarga.
-  const ic = { djvu: '📘', mobi: '📙', azw3: '📙' }[ext] || '📦';
+  const ic = { djvu: '📘', djv: '📘', mobi: '📙', azw3: '📙' }[ext] || '📦';
   return audio + `<div class="fileprev"><div class="filebox"><div class="ic">${ic}</div><div style="font-weight:600;word-break:break-word">${esc(nombre)}</div>
     <div class="muted" style="font-size:12px;margin-top:4px">Formato ${esc((ext || '—').toUpperCase())} — el navegador no lo previsualiza de forma integrada.</div>${acc}</div></div>`;
 }
@@ -11573,7 +11573,7 @@ async function adjuntarCarpetasADoc() {
     .map((cb) => cb.dataset.ruta)
     .filter((r) => r.split('/').slice(0, -1).join('/') === padre)
     .map((r) => r.split('/').pop())
-    .filter((n) => /\.(pdf|epub|mobi|azw3?|djvu|cbz|cbr|chm|docx?)$/i.test(n));
+    .filter((n) => /\.(pdf|epub|mobi|azw3?|djvu|djv|cbz|cbr|chm|docx?)$/i.test(n));
   if (!hermanos.length) { toast('No hay documentos en esa carpeta a los que adjuntar', 'warn'); return; }
   const lista = hermanos.map((n, i) => (i + 1) + ". " + n).join(String.fromCharCode(10));
   const cab = "Adjuntar " + carpetas.length + " carpeta(s) a…" + String.fromCharCode(10, 10);

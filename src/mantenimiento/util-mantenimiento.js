@@ -21,7 +21,7 @@ export const DIR_CDU = (() => {
 // `archivoOriginal`, y si un formato falta, el documento se declara SIN FICHERO con el fichero delante —
 // reparar-portadas daba 24 libros .chm por «irreparables» teniendo su .chm en la carpeta. Faltaban además
 // .cbz/.azw3/.cb7/.docx (la misma lista estrecha que ha dado guerra por todo el proyecto).
-export const EXT_DOC = ['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.fb2', '.cbr', '.cbz', '.cb7', '.djvu', '.chm', '.docx', '.doc', '.zip', '.rar'];
+export const EXT_DOC = ['.epub', '.pdf', '.mobi', '.azw', '.azw3', '.fb2', '.cbr', '.cbz', '.cb7', '.djvu', '.djv', '.chm', '.docx', '.doc', '.zip', '.rar'];
 // Marcador de ÁRBOL PRESERVADO (transmedia/audiolibro): un fichero .ruta_fija en la raíz de un árbol lo
 // protege ENTERO de Integridad/Conformador (no se poda, recicla ni reubica). Los documentos llevan además
 // `ruta_fija:true`. Se escribe al copiar el árbol en la ingesta transmedia.
