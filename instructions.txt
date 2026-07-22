@@ -1085,7 +1085,10 @@ de ficheros clasificado por CDU.
       nuevo» — la versión vieja va a la Papelera, la nueva ocupa su sitio CONSERVANDO el `nombre` (mismo enlace)
       y la marca `soloAdmin`; solo para tipo:'fichero' (una carpeta no se reemplaza por un fichero). La sección
       «📎 Material» de la ficha lista los adjuntos con su descarga y, para admin, los controles 🔄/🔒/🗑 +
-      «Adjuntar más». Al adjuntar se puede marcar «🔒 Solo administradores».
+      «Adjuntar más». Al adjuntar se puede marcar «🔒 Solo administradores». (5) EXPLORAR una carpeta adjunta:
+      su nombre es clicable y lleva un botón 🔍 → abre el explorador de ficheros en un modal (#cmpModal),
+      acotado a esa subcarpeta (reutiliza explorarArchivos → GET /documentos/:id/archivos?sub=<nombre>, que ya
+      oculta a los invitados lo marcado «solo admin»). Descargar una carpeta baja un zip.
     · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
       principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
       El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`

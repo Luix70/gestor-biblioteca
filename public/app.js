@@ -6317,12 +6317,21 @@ function materialSeccionHTML(d) {
   const adj = Array.isArray(d.adjuntos) ? d.adjuntos : [];
   const filas = adj
     .map((a) => {
-      const ic = a.tipo === 'carpeta' ? '📁' : '📄';
-      const tam = a.tipo === 'carpeta' ? '' : a.bytes ? ` · ${fmtBytes(a.bytes)}` : '';
+      const esCarpeta = a.tipo === 'carpeta';
+      const ic = esCarpeta ? '📁' : '📄';
+      const tam = esCarpeta ? '' : a.bytes ? ` · ${fmtBytes(a.bytes)}` : '';
       const lock = a.soloAdmin ? ' <span class="tag mut" title="Solo administradores">🔒</span>' : '';
-      const bajar = `<a class="rbtn" href="${dl('adjunto=' + encodeURIComponent(a.nombre))}" download title="Descargar este adjunto">⬇</a>`;
+      // Una CARPETA adjunta es explorable (abre el explorador de ficheros en un modal, acotado a esa carpeta):
+      // el nombre es clicable y hay un botón 🔍. La descarga de una carpeta baja un zip.
+      const explorar = esCarpeta
+        ? `<button class="rbtn" data-adjexpl="${esc(a.nombre)}" title="Explorar el contenido de esta carpeta">🔍</button>`
+        : '';
+      const nombreHtml = esCarpeta
+        ? `<span data-adjexpl="${esc(a.nombre)}" style="cursor:pointer;text-decoration:underline dotted" title="Explorar esta carpeta">${esc(a.nombre)}</span>`
+        : esc(a.nombre);
+      const bajar = `<a class="rbtn" href="${dl('adjunto=' + encodeURIComponent(a.nombre))}" download title="${esCarpeta ? 'Descargar esta carpeta (zip)' : 'Descargar este adjunto'}">⬇</a>`;
       // Reemplazar SOLO tiene sentido para un fichero (una carpeta no se sustituye por un fichero).
-      const repl = a.tipo !== 'carpeta'
+      const repl = !esCarpeta
         ? `<button class="rbtn" data-adjrepl="${esc(a.nombre)}" title="Reemplazar este fichero por una versión editada (descárgalo, edítalo y súbelo de nuevo)">🔄</button>`
         : '';
       const acc = admin
@@ -6330,7 +6339,7 @@ function materialSeccionHTML(d) {
           `<button class="rbtn" data-adjlock="${esc(a.nombre)}" data-on="${a.soloAdmin ? 1 : 0}" title="${a.soloAdmin ? 'Hacerlo visible a invitados' : 'Marcar «solo administradores»'}">${a.soloAdmin ? '🔓' : '🔒'}</button>` +
           `<button class="rbtn bad" data-adjdel="${esc(a.nombre)}" title="Quitar este adjunto (va a la Papelera)">🗑</button>`
         : '';
-      return `<div class="row" style="align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--line)"><span>${ic}</span><span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(a.nombre)}<span class="muted" style="font-size:11px">${tam}</span>${lock}</span>${bajar}${acc}</div>`;
+      return `<div class="row" style="align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--line)"><span>${ic}</span><span style="flex:1;min-width:0;overflow-wrap:anywhere">${nombreHtml}<span class="muted" style="font-size:11px">${tam}</span>${lock}</span>${explorar}${bajar}${acc}</div>`;
     })
     .join('');
   const cuerpo = adj.length
@@ -6376,6 +6385,10 @@ function attachMaterial(id) {
   );
   document.querySelectorAll('#matBody [data-adjrepl]').forEach(
     (b) => (b.onclick = () => reemplazarAdjuntoDoc(id, b.dataset.adjrepl)),
+  );
+  // Carpeta adjunta → explorador de ficheros (modal), acotado a esa subcarpeta del documento.
+  document.querySelectorAll('#matBody [data-adjexpl]').forEach(
+    (b) => (b.onclick = () => explorarArchivos(id, b.dataset.adjexpl)),
   );
   const add = $('#matAddMore');
   if (add) add.onclick = () => adjuntarMaterialADoc(id);
