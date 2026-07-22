@@ -26,7 +26,7 @@ import { reordenarAudios } from './utils/audios-doc.js';
 import { leerLomosImagen, leerLomosRecortados, emparejarLomos } from './utils/lector-lomos.js';
 import { editarDocumento } from './utils/editar-doc.js';
 import { editarColeccion, editarObra } from './utils/editar-grupos.js';
-import { buscar as buscarIndice, estadoIndice, lanzarReindexado, estadoReindexado } from './utils/indice-busqueda.js';
+import { buscar as buscarIndice, buscarPalabrasClave, estadoIndice, lanzarReindexado, estadoReindexado, indexarDoc } from './utils/indice-busqueda.js';
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia, expulsarDeGrupo } from './utils/gestion-grupos.js';
@@ -584,6 +584,25 @@ export function rutasPanel() {
             let idsRanked = null, ordenRelevancia = false;
             if (q) {
                 const or = [];
+                // MODO PALABRAS CLAVE: «#kw1 #kw2 …» busca EXCLUSIVAMENTE en las palabras clave (NO en título/
+                // autor/etc.), con los que casan MÁS keywords delante. El «_» dentro de un #token = espacio
+                // (keyword de varias palabras). Insensible a acentos/mayúsculas (lo da el tokenizer del índice).
+                const tokensQ = q.trim().split(/\s+/).filter(Boolean);
+                const modoKw = tokensQ.length > 0 && tokensQ.every(t => t.startsWith('#') && t.length > 1);
+                const keywords = modoKw ? tokensQ.map(t => t.slice(1).replace(/_/g, ' ').trim()).filter(Boolean) : [];
+                if (modoKw) {
+                    const ids = await buscarPalabrasClave(keywords, { limite: 1000 }).catch(() => null);
+                    if (ids) {
+                        idsRanked = ids;
+                        ordenRelevancia = orden === 'reciente';   // por defecto, por nº de keywords + relevancia
+                        or.push(ids.length ? { _id: { $in: ids.map(id => new ObjectId(id)) } } : { _id: { $in: [] } });
+                    } else {
+                        // Índice no disponible → Mongo directo sobre palabras_clave (case-insensitive; no quita
+                        // acentos, pero es solo el respaldo mientras no exista el índice).
+                        const rxs = keywords.map(k => ({ palabras_clave: { $regex: escapeRegex(k), $options: 'i' } }));
+                        or.push(rxs.length ? { $or: rxs } : { _id: { $in: [] } });
+                    }
+                } else {
                 const ftsIds = await buscarIndice(q, { limite: 1000, estricto }).catch(() => null);
                 if (ftsIds) {
                     idsRanked = ftsIds;
@@ -633,6 +652,7 @@ export function rutasPanel() {
                 // (los DOI se guardan normalizados en minúsculas).
                 const qDoi = normalizarDOI(q);
                 if (qDoi) or.push({ doi: qDoi });
+                } // fin del modo normal (no #kw)
                 // Con q SIEMPRE filtramos por $or; si quedó vacío (FTS sin aciertos y sin identificador) →
                 // "sin resultados" en vez de devolver el catálogo entero.
                 match.$or = or.length ? or : [{ _id: { $in: [] } }];
@@ -1666,6 +1686,29 @@ export function rutasPanel() {
         if (!trabajoBorrado.en_curso) return res.json({ ok: false, motivo: 'no hay ningún borrado en curso' });
         trabajoBorrado.cancelar = true;
         res.json({ ok: true, cancelando: true, hechos: trabajoBorrado.hechos, total: trabajoBorrado.total });
+    });
+
+    // AÑADIR PALABRAS CLAVE A UN LOTE (admin): las palabras (CSV) se AÑADEN —union con $addToSet— a las que ya
+    // tiene cada documento; NUNCA se reemplazan. Se reindexa cada afectado (palabras_clave alimenta el índice
+    // FTS, y así la búsqueda «#kw» las ve al instante).
+    r.post('/documentos/palabras-clave-lote', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter(id => ObjectId.isValid(id));
+            if (!ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos válidos' });
+            // Separadas por comas; se limpian, se quitan vacías y las repetidas EXACTAS (el $addToSet dedup el
+            // resto contra lo que ya tuviera cada doc). Tope de 50 para no abusar de una sola llamada.
+            const palabras = [...new Set(String(req.body?.palabras || '').split(',').map(s => s.trim()).filter(Boolean))];
+            if (!palabras.length) return res.status(400).json({ ok: false, motivo: 'no hay palabras clave que añadir' });
+            if (palabras.length > 50) return res.status(400).json({ ok: false, motivo: 'demasiadas palabras clave de golpe (máx 50)' });
+            const db = await conectarDB();
+            const r2 = await db.collection('biblioteca').updateMany(
+                { _id: { $in: ids.map(id => new ObjectId(id)) } },
+                { $addToSet: { palabras_clave: { $each: palabras } }, $set: { fecha_actualizacion: new Date() } },
+            );
+            for (const id of ids) await indexarDoc(db, id);   // best-effort (indexarDoc nunca lanza)
+            res.json({ ok: true, documentos: r2.modifiedCount, palabras });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
     // ── Imágenes del carrusel (gestión manual desde la ficha; las mutaciones ya las restringe a admin

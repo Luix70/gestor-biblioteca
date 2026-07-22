@@ -6951,6 +6951,7 @@ function renderBulk() {
     <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
     <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
     <button class="btn" id="bkReclasEd" title="Reclasificar la EDITORIAL de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional). Muestra un informe por transición antes de aplicar.">🏢 Reclasificar editorial</button>
+    <button class="btn" id="bkKw" title="Añadir palabras clave COMUNES (separadas por comas) a los seleccionados. Se AÑADEN a las que ya tenga cada uno; no las reemplazan. Luego se pueden buscar con «#palabra».">🏷 Palabras clave</button>
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
@@ -7012,6 +7013,7 @@ function renderBulk() {
     if ($('#bkAFondo')) $('#bkAFondo').onclick = aFondoLote;
     if ($('#bkTipo')) $('#bkTipo').onclick = () => cambiarTipoDocs([...selDocs]);
     if ($('#bkReclasEd')) $('#bkReclasEd').onclick = () => reclasificarEditorialLote([...selDocs], `${selDocs.size} seleccionado(s)`);
+    if ($('#bkKw')) $('#bkKw').onclick = () => anadirPalabrasClaveLote([...selDocs]);
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     $('#bkDel').onclick = eliminarSeleccionados;
@@ -7442,7 +7444,7 @@ function construirSearch() {
     <details class="card foldcard" id="sqFiltros" style="margin-bottom:16px">
       <summary>🔎 Buscar y filtrar</summary>
       <div class="row">
-        <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo…" autocomplete="off" enterkeyhint="search">
+        <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo… · #palabra_clave" title="Escribe «#palabra» (una o varias, p. ej. «#Mathematica #Algebra») para buscar SOLO en las palabras clave; salen primero los que tienen más." autocomplete="off" enterkeyhint="search">
           <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label></div>
         <div><label>Tipo</label><select id="sqTipo"><option value="">Todos</option><option value="libro">Libros</option><option value="revista">Revistas</option><option value="comic">Cómics</option><option value="articulo">Artículos</option><option value="capitulo">Capítulos</option><option value="apuntes">Apuntes</option><option value="software">Software</option></select></div>
         <div><label>Soporte</label><select id="sqSoporte"><option value="">Ambos</option><option value="papel">Papel</option><option value="digital">Digital</option></select></div>
@@ -15448,6 +15450,26 @@ async function editorialGuardar(id) {
 // editorial (libros seleccionados). `alAplicar` (opcional) se llama tras aplicar con éxito; si no se pasa,
 // refresca el Catálogo. Respeta [[minimize-ai-ingestion]]: la IA es opt-in y último recurso.
 const FUENTE_ETQ = { fichero: 'Fichero', openlibrary: 'OpenLibrary', google: 'Google', ia: 'IA' };
+// Añadir palabras clave COMUNES a una selección: se SUMAN (union) a las que ya tenga cada documento, nunca
+// las reemplazan. Luego se pueden buscar con la sintaxis «#palabra» en el Catálogo.
+async function anadirPalabrasClaveLote(ids) {
+  if (!ids || !ids.length) { toast('Selecciona al menos un documento', 'warn'); return; }
+  const txt = prompt(
+    `Palabras clave a AÑADIR a ${ids.length} documento(s), separadas por comas.\n\n` +
+      'Se SUMAN a las que ya tenga cada uno (no las reemplazan). Luego búscalas con «#palabra».',
+    '',
+  );
+  if (txt === null) return; // cancelado
+  const palabras = txt.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!palabras.length) { toast('No has escrito ninguna palabra clave', 'warn'); return; }
+  try {
+    const r = await api('/documentos/palabras-clave-lote', { method: 'POST', body: JSON.stringify({ ids, palabras }) });
+    toast(`🏷 ${palabras.length} palabra(s) clave añadida(s) a ${r.documentos} documento(s)`, 'ok');
+  } catch (e) {
+    toast(e.message, 'bad');
+  }
+}
+
 async function reclasificarEditorialLote(ids, etiqueta, alAplicar) {
   if (!ids || !ids.length) { toast('Selecciona al menos un libro', 'warn'); return; }
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto">

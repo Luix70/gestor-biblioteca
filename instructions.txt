@@ -420,6 +420,20 @@ de ficheros clasificado por CDU.
       collation española que la consulta — si no, el índice no sirve al $sort) e idx_doi.
       ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
+    · PALABRAS CLAVE EN LOTE + BÚSQUEDA «#»:
+      - AÑADIR en lote (admin): botón «🏷 Palabras clave» de la barra de selección → pide una lista separada
+        por comas y las AÑADE ($addToSet, union) a las que ya tenga cada documento seleccionado — NUNCA las
+        reemplaza. Reindexa cada afectado (palabras_clave alimenta el índice FTS). POST /documentos/
+        palabras-clave-lote {ids, palabras}. Tope 50 por llamada.
+      - BUSCAR solo en palabras clave: el texto normal ya casa también las palabras clave (como título/autor);
+        pero si la consulta son SOLO tokens «#» («#Mathematica #Algebra»), se busca EXCLUSIVAMENTE en las
+        palabras clave, NO en título/autor/etc. Salen primero los que casan MÁS keywords (los que tienen
+        «ambas» delante) y dentro de cada nivel por relevancia. El «_» dentro de un #token = espacio
+        («#Computer_Science» = keyword «computer science»). Insensible a acentos/mayúsculas (lo da el
+        tokenizer del índice, remove_diacritics 2). Implementación: indice-busqueda.js·buscarPalabrasClave
+        consulta keyword a keyword acotando a la COLUMNA palabras_clave del FTS5 ({palabras_clave}:(…)) y
+        puntúa por nº de aciertos — NO con un solo MATCH OR, porque bm25 penaliza por longitud de campo y
+        hundía a los que casan varias. Sin índice, cae a un $regex Mongo sobre palabras_clave (sin acentos).
     · LEÍDO (progreso de lectura) y ME GUSTA (👍/👎) — SOLO ADMIN, solo en documentos, en la ficha (junto a
       las estrellas). `leido` NO es una nota: es cuánto se ha leído (empezado / un cuarto / a medias / casi /
       terminado), por eso se pinta como una BARRA DE PROGRESO verde de 5 segmentos que se llena de izquierda a

@@ -162,6 +162,41 @@ export async function buscar(q, { limite = 1000, estricto = false } = {}) {
     }
 }
 
+/**
+ * Busca EXCLUSIVAMENTE en las PALABRAS CLAVE (modo «#kw1 #kw2 …» del Catálogo). Devuelve los _id ordenados
+ * primero por CUÁNTAS keywords casa cada documento (los que tienen «ambas» delante), y dentro de cada nivel
+ * por relevancia bm25. No se puede hacer con un solo MATCH `OR` porque bm25 penaliza por longitud de campo:
+ * un doc con las dos keywords en una lista larga quedaba DETRÁS de otro con una sola en una lista corta. Así
+ * que se consulta keyword a keyword (cada una restringida a la columna palabras_clave, insensible a acentos/
+ * mayúsculas por el tokenizer) y se puntúa por nº de aciertos. Una keyword con «_» ya viene con espacios.
+ * @returns {Promise<string[]|null>} ids · [] sin keywords · null = índice no disponible (caer a Mongo).
+ */
+export async function buscarPalabrasClave(keywords, { limite = 1000 } = {}) {
+    if (!(await asegurar())) return null;
+    const porId = new Map();
+    let alguna = false;
+    for (const kw of keywords || []) {
+        const toks = String(kw).toLowerCase().match(/[\p{L}\p{N}]+/gu);
+        if (!toks || !toks.length) continue;
+        const clausula = toks.length === 1 ? toks[0] : '"' + toks.join(' ') + '"';
+        let ids;
+        try { ids = stmtBuscar.all(`{palabras_clave} : (${clausula})`, limite).map(r => r.id); }
+        catch (e) { console.warn(`[Índice] palabras clave falló (${e.message}); se usará Mongo.`); return null; }
+        alguna = true;
+        ids.forEach((id, idx) => {
+            const e = porId.get(id) || { hits: 0, mejor: Infinity };
+            e.hits++;
+            e.mejor = Math.min(e.mejor, idx);
+            porId.set(id, e);
+        });
+    }
+    if (!alguna) return [];
+    return [...porId.entries()]
+        .sort((a, b) => b[1].hits - a[1].hits || a[1].mejor - b[1].mejor)
+        .slice(0, limite)
+        .map(([id]) => id);
+}
+
 /** Estado del índice (para el panel): disponible, nº de filas, ruta. */
 export async function estadoIndice() {
     const ruta = resolverRutaIndice();
