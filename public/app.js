@@ -2996,9 +2996,10 @@ function pintarDoc(r, ctx) {
   // catalográficos» no valía: esa sección nace COLAPSADA, igual que «Acciones» (donde está «🗂️ Archivos»), así
   // que para descubrir que un libro trae su código de ejemplo había que abrir dos plegables a ciegas. Si el
   // material viaja con el libro, tiene que VERSE al abrir la ficha.
-  const secMaterial = d.material_adjunto
+  const _tieneAdj = Array.isArray(d.adjuntos) && d.adjuntos.length;
+  const secMaterial = (_tieneAdj || d.material_adjunto)
     ? `<details class="card foldcard" id="matDet" open style="margin-top:14px"><summary>📎 Material que acompaña al libro</summary>`
-      + `<div id="matBody" class="muted" style="margin-top:10px">Cargando…</div></details>`
+      + `<div id="matBody" style="margin-top:10px">${_tieneAdj ? materialSeccionHTML(d) : '<span class="muted">Cargando…</span>'}</div></details>`
     : '';
   // Navegación entre documentos (⏮◀ N/M ▶⏭): recorre TODOS los resultados de la búsqueda del Catálogo
   // (no solo la página). El contenedor #fichaNav se rellena async (los ids se traen y cachean por búsqueda).
@@ -3006,7 +3007,8 @@ function pintarDoc(r, ctx) {
   $('#p-detalle').innerHTML =
     `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}${secImg}${secSin}${secMaterial}${secAcc}${secLect}${secCat}${secSalud}`;
   pintarNavFicha(d._id, ctx);
-  if (d.material_adjunto) cargarMaterialFicha(d._id);
+  if (_tieneAdj) attachMaterial(d._id);
+  else if (d.material_adjunto) cargarMaterialFicha(d._id);
   attachClas('#p-detalle');
   attachRating('#p-detalle');
   attachLeidoLike('#p-detalle'); // leído (progreso) + me gusta — solo admin, solo en la ficha del documento
@@ -6293,6 +6295,74 @@ function resaltarOids(json) {
 // ════════ EXPLORADOR DE ARCHIVOS (ver/descargar TODO el árbol del documento o su colección) ════════
 let _expR = null; // { id, sub }
 /** Lista, dentro de la ficha, los ficheros que acompañan al libro (reusa el árbol de solo lectura). */
+// Sección «📎 Material» a partir del registro estructurado `adjuntos[]`: cada adjunto (carpeta o fichero) con
+// su descarga y, para admin, marcar «solo admin» / quitarlo. Más descargas globales (todo / solo el libro).
+// Los enlaces llevan `?token=` porque un <a download> no manda el Bearer y el servidor necesita saber el rol
+// (para dejar —o no— bajar lo «solo admin»).
+function materialSeccionHTML(d) {
+  const id = d._id;
+  const admin = ROL === 'admin';
+  const tk = TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '';
+  const dl = (params) => `/api/descargar/${encodeURIComponent(id)}?${params}${tk}`;
+  const adj = Array.isArray(d.adjuntos) ? d.adjuntos : [];
+  const filas = adj
+    .map((a) => {
+      const ic = a.tipo === 'carpeta' ? '📁' : '📄';
+      const tam = a.tipo === 'carpeta' ? '' : a.bytes ? ` · ${fmtBytes(a.bytes)}` : '';
+      const lock = a.soloAdmin ? ' <span class="tag mut" title="Solo administradores">🔒</span>' : '';
+      const bajar = `<a class="rbtn" href="${dl('adjunto=' + encodeURIComponent(a.nombre))}" download title="Descargar este adjunto">⬇</a>`;
+      const acc = admin
+        ? `<button class="rbtn" data-adjlock="${esc(a.nombre)}" data-on="${a.soloAdmin ? 1 : 0}" title="${a.soloAdmin ? 'Hacerlo visible a invitados' : 'Marcar «solo administradores»'}">${a.soloAdmin ? '🔓' : '🔒'}</button>` +
+          `<button class="rbtn bad" data-adjdel="${esc(a.nombre)}" title="Quitar este adjunto (va a la Papelera)">🗑</button>`
+        : '';
+      return `<div class="row" style="align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--line)"><span>${ic}</span><span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(a.nombre)}<span class="muted" style="font-size:11px">${tam}</span>${lock}</span>${bajar}${acc}</div>`;
+    })
+    .join('');
+  const cuerpo = adj.length
+    ? filas
+    : '<div class="muted" style="font-size:12px">Este material se catalogó con la ingesta; explóralo con «🗂️ Archivos».</div>';
+  const botones =
+    '<div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">' +
+    `<a class="btn" href="${dl('que=todo')}" download title="Descargar el libro y TODOS sus adjuntos en un ZIP">⬇ Todo (ZIP)</a>` +
+    (d.nombre_archivo ? `<a class="btn" href="${dl('que=principal')}" download title="Descargar SOLO el documento principal">⬇ Solo el libro</a>` : '') +
+    (admin ? '<button class="btn" id="matAddMore">📦 Adjuntar más</button>' : '') +
+    '</div>';
+  return `<div class="muted" style="font-size:12px;margin-bottom:8px">Viaja con el libro y se conserva tal cual (código de ejemplo, datasets, una crítica…).</div>${cuerpo}${botones}`;
+}
+// Engancha los controles de la sección de material (marcar solo-admin, quitar, adjuntar más).
+function attachMaterial(id) {
+  document.querySelectorAll('#matBody [data-adjlock]').forEach(
+    (b) =>
+      (b.onclick = async () => {
+        const nombre = b.dataset.adjlock,
+          nuevo = b.dataset.on !== '1';
+        try {
+          await api('/documentos/' + encodeURIComponent(id) + '/adjuntos/soloadmin', { method: 'POST', body: JSON.stringify({ nombre, soloAdmin: nuevo }) });
+          toast(nuevo ? '🔒 Marcado solo administradores' : '🔓 Visible a invitados');
+          verDoc(id);
+        } catch (e) {
+          toast(e.message, 'bad');
+        }
+      }),
+  );
+  document.querySelectorAll('#matBody [data-adjdel]').forEach(
+    (b) =>
+      (b.onclick = async () => {
+        const nombre = b.dataset.adjdel;
+        if (!confirm(`¿Quitar «${nombre}» del libro?\n\nVa a la Papelera (recuperable), no se borra.`)) return;
+        try {
+          await api('/documentos/' + encodeURIComponent(id) + '/adjuntos/borrar', { method: 'POST', body: JSON.stringify({ nombre }) });
+          toast('Adjunto retirado a la Papelera');
+          verDoc(id);
+        } catch (e) {
+          toast(e.message, 'bad');
+        }
+      }),
+  );
+  const add = $('#matAddMore');
+  if (add) add.onclick = () => adjuntarMaterialADoc(id);
+}
+
 async function cargarMaterialFicha(id) {
   const el = $('#matBody');
   if (!el) return;
@@ -6369,6 +6439,9 @@ async function adjuntarMaterialADoc(id) {
       <label class="btn" style="display:inline-block">📁 Elegir una carpeta<input type="file" id="matDir" webkitdirectory directory hidden></label>
     </div>
     <div id="matLista" class="muted" style="font-size:13px;margin:8px 0">(nada elegido)</div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0;cursor:pointer">
+      <input type="checkbox" id="matSoloAdmin"> 🔒 Solo administradores (los invitados no lo ven ni lo descargan)
+    </label>
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
       <button class="btn" id="matCancel">Cancelar</button>
       <button class="btn ok" id="matOk" disabled>Adjuntar</button>
@@ -6403,6 +6476,7 @@ async function adjuntarMaterialADoc(id) {
       rutas.push(f.webkitRelativePath || f.name); // preserva la subcarpeta al subir una carpeta
     }
     fd.append('rutas', JSON.stringify(rutas));
+    if ($('#matSoloAdmin') && $('#matSoloAdmin').checked) fd.append('soloAdmin', '1');
     try {
       const resp = await fetch('/api/documentos/' + encodeURIComponent(id) + '/adjuntar', {
         method: 'POST',

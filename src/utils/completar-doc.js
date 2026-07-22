@@ -71,7 +71,7 @@ async function rutaLibrePreservando(base, rel) {
  * aquí NADA se interpreta: es material que ACOMPAÑA al libro, tal cual. Solo AÑADE; nunca pisa (renombra « (2)»).
  * @param items [{ ruta: <abs temporal>, rel: <ruta relativa que preserva la carpeta, p. ej. "Soft/bin/x.exe"> }]
  */
-export async function adjuntarMaterial(db, id, { items = [] } = {}) {
+export async function adjuntarMaterial(db, id, { items = [], soloAdmin = false } = {}) {
     if (!ObjectId.isValid(String(id))) return { ok: false, motivo: 'id inválido' };
     if (!items.length) return { ok: false, motivo: 'no se recibió nada que adjuntar' };
     const bib = db.collection('biblioteca');
@@ -91,21 +91,31 @@ export async function adjuntarMaterial(db, id, { items = [] } = {}) {
             await fs.mkdir(path.dirname(destino), { recursive: true });
             await fs.copyFile(it.ruta, destino);
             copiados++;
-            topNuevos.add(rel.split(path.sep)[0]);
+            // Elemento de PRIMER NIVEL: si el rel llevaba subcarpeta se toma la raíz; si no, el propio fichero
+            // (con su posible « (2)» de la ruta libre → path.relative sobre el destino real).
+            topNuevos.add(path.relative(carpeta, destino).split(path.sep)[0]);
         } catch (e) {
             console.warn(`[Adjuntar] no se pudo copiar «${rel}»: ${e.message}`);
         }
     }
     if (!copiados) return { ok: false, motivo: 'no se pudo copiar ningún fichero' };
 
-    // `material_adjunto` es el CONTADOR de la sección «📎 Material» (lo fija también la ingesta transmedia). Se
-    // SUMA el nº de elementos de primer nivel nuevos. `ruta_fija` + marcador = Integridad no lo poda y el
-    // explorador de la ficha sube hasta la raíz y lo muestra.
-    const material = (Number(doc.material_adjunto) || 0) + topNuevos.size;
-    await bib.updateOne({ _id: doc._id }, { $set: { ruta_fija: true, material_adjunto: material, fecha_actualizacion: new Date() } });
+    // REGISTRO ESTRUCTURADO `adjuntos[]`: una entrada por elemento de PRIMER NIVEL (carpeta o fichero). Es lo
+    // que permite marcar «solo admin» por adjunto, la descarga selectiva y el viaje en el reprocesado. Se FUNDE
+    // con lo que ya hubiera (por `nombre`, que es único en disco). `material_adjunto` = nº de entradas (badge).
+    const previos = Array.isArray(doc.adjuntos) ? doc.adjuntos : [];
+    const porNombre = new Map(previos.map((a) => [a.nombre, a]));
+    for (const nombre of topNuevos) {
+        let tipo = 'fichero', bytes = 0;
+        try { const st = await fs.stat(path.join(carpeta, nombre)); tipo = st.isDirectory() ? 'carpeta' : 'fichero'; bytes = st.isDirectory() ? 0 : st.size; } catch { /* recién copiado */ }
+        porNombre.set(nombre, { nombre, tipo, soloAdmin: !!soloAdmin, bytes, fecha: new Date() });
+    }
+    const adjuntos = [...porNombre.values()];
+
+    await bib.updateOne({ _id: doc._id }, { $set: { adjuntos, ruta_fija: true, material_adjunto: adjuntos.length, fecha_actualizacion: new Date() } });
     await fs.writeFile(path.join(carpeta, MARCA_RUTA_FIJA), `material adjunto: ${doc.titulo || doc._id}\n`).catch(() => {});
     await indexarDoc(db, doc._id).catch(() => { /* índice best-effort */ });
-    return { ok: true, _id: String(doc._id), copiados, elementos: topNuevos.size, material_adjunto: material };
+    return { ok: true, _id: String(doc._id), copiados, elementos: topNuevos.size, material_adjunto: adjuntos.length };
 }
 
 /**

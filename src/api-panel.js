@@ -8,7 +8,7 @@ import {
     infoPapelera, contenidoPapelera, vaciarPapelera,
     listarCuarentena, reingestarCuarentena, descartarCuarentena, descartarCategoria, reingestarTodosDuplicados, ingestaPorDia,
 } from './utils/inspeccion.js';
-import { restaurar } from './utils/papelera.js';
+import { restaurar, reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { normalizarDOI } from './utils/buscador-crossref.js';
 import { verificarPasswordAdmin, firmarCompartir, validarCompartir } from './auth.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
@@ -1355,6 +1355,11 @@ export function rutasPanel() {
             const limpio = { ...doc, _id: String(doc._id) };
             for (const k of ['autores', 'editorial', 'coleccion', 'coleccion_nombre', 'obra', 'contribuciones',
                 '_portadas_remotas', 'mantenimiento', 'mantenimiento_firma']) delete limpio[k];
+            // Adjuntos marcados «solo admin»: un INVITADO no los ve (ni en la lista ni en el badge). El admin sí.
+            if (Array.isArray(limpio.adjuntos) && req.usuario?.rol !== 'admin') {
+                limpio.adjuntos = limpio.adjuntos.filter((a) => !a.soloAdmin);
+                limpio.material_adjunto = limpio.adjuntos.length;
+            }
 
             // Clasificaciones (CDU/Dewey/LCC): código + título CONCISO (de caché, SIN IA aquí) + nº de
             // documentos con ese mismo código. El texto extenso se pide aparte en GET /clasificacion.
@@ -1465,6 +1470,48 @@ export function rutasPanel() {
             const r2 = await db.collection('biblioteca').updateOne({ _id: new ObjectId(req.params.id) }, upd);
             if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
             res.json({ ok: true, leido: v });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // ADJUNTOS (admin): marcar/quitar «solo admin» y BORRAR un adjunto (a la Papelera, recuperable). El
+    // `nombre` es la entrada de PRIMER NIVEL en la carpeta (única en disco); se valida que sea un segmento
+    // simple (sin «/», «\» ni «..») para no salir de la carpeta.
+    const segmentoSimple = (n) => !!n && !/[\\/]/.test(n) && n !== '..' && n !== '.';
+    r.post('/documentos/:id/adjuntos/soloadmin', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const nombre = String(req.body?.nombre || '');
+            const soloAdmin = !!req.body?.soloAdmin;
+            if (!segmentoSimple(nombre)) return res.status(400).json({ ok: false, motivo: 'adjunto no válido' });
+            const db = await conectarDB();
+            const r2 = await db.collection('biblioteca').updateOne(
+                { _id: new ObjectId(req.params.id), 'adjuntos.nombre': nombre },
+                { $set: { 'adjuntos.$.soloAdmin': soloAdmin, fecha_actualizacion: new Date() } });
+            if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'adjunto no encontrado' });
+            res.json({ ok: true, nombre, soloAdmin });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/:id/adjuntos/borrar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const nombre = String(req.body?.nombre || '');
+            if (!segmentoSimple(nombre)) return res.status(400).json({ ok: false, motivo: 'adjunto no válido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) }, { projection: { ruta_base: 1, adjuntos: 1, titulo: 1 } });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const carpeta = carpetaDeDoc(doc);
+            const abs = path.resolve(path.join(carpeta, nombre));
+            if (abs !== path.resolve(carpeta) && !abs.startsWith(path.resolve(carpeta) + path.sep))
+                return res.status(400).json({ ok: false, motivo: 'ruta no permitida' });
+            // A la PAPELERA (nunca borrar): reciclar el fichero/carpeta del adjunto.
+            const conta = await stat(abs).then((s) => s.isDirectory(), () => null);
+            if (conta === null) { /* ya no está en disco: solo se quita del registro */ }
+            else if (conta) await reciclarCarpeta(abs, `adjunto-borrado-${doc.titulo || doc._id}`).catch(() => {});
+            else await reciclar([abs], `adjunto-borrado-${doc.titulo || doc._id}`).catch(() => {});
+            const adjuntos = (doc.adjuntos || []).filter((a) => a.nombre !== nombre);
+            await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { adjuntos, material_adjunto: adjuntos.length, fecha_actualizacion: new Date() } });
+            res.json({ ok: true, nombre, material_adjunto: adjuntos.length });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/documentos/:id/like', async (req, res) => {
@@ -1734,18 +1781,24 @@ export function rutasPanel() {
             if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne(
-                { _id: new ObjectId(req.params.id) }, { projection: { ruta_base: 1, titulo: 1 } });
+                { _id: new ObjectId(req.params.id) }, { projection: { ruta_base: 1, titulo: 1, adjuntos: 1 } });
             if (!doc || !doc.ruta_base) return res.status(404).json({ ok: false, motivo: 'documento sin carpeta' });
             const raiz = await raizExplorable(carpetaDeDoc(doc));
             const sub = String(req.query.sub || '').replace(/^[\\/]+/, '');
             const objetivo = path.resolve(path.join(raiz, sub));
             if (objetivo !== path.resolve(raiz) && !objetivo.startsWith(path.resolve(raiz) + path.sep))
                 return res.status(400).json({ ok: false, motivo: 'ruta no permitida' });
+            // Adjuntos «solo admin»: un INVITADO no los ve en la lista NI puede entrar en ellos con ?sub=.
+            const esAdmin = req.usuario?.rol === 'admin';
+            const adjSoloAdmin = new Set((doc.adjuntos || []).filter((a) => a.soloAdmin).map((a) => a.nombre));
+            if (!esAdmin && sub && adjSoloAdmin.has(sub.split(/[\\/]/)[0]))
+                return res.status(403).json({ ok: false, motivo: 'material solo para administradores' });
             let ents; try { ents = await readdir(objetivo, { withFileTypes: true }); }
             catch { return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' }); }
             const entradas = [];
             for (const e of ents) {
                 if (e.name === '.ruta_fija' || e.name === '.transmedia') continue; // marcadores internos
+                if (!esAdmin && !sub && adjSoloAdmin.has(e.name)) continue; // adjunto solo-admin: oculto a invitados
                 const abs = path.join(objetivo, e.name);
                 let bytes = 0; if (e.isFile()) { try { bytes = (await stat(abs)).size; } catch { /* */ } }
                 entradas.push({ nombre: e.name, dir: e.isDirectory(), bytes, web: '/recursos/' + path.relative(DIR_CDU, abs).split(path.sep).join('/') });
@@ -2621,28 +2674,45 @@ export function rutasPublicas() {
             if (!ObjectId.isValid(req.params.id)) return res.status(400).send('id inválido');
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne(
-                { _id: new ObjectId(req.params.id) }, { projection: { titulo: 1, ruta_base: 1, audios: 1 } });
+                { _id: new ObjectId(req.params.id) }, { projection: { titulo: 1, ruta_base: 1, audios: 1, nombre_archivo: 1, adjuntos: 1 } });
             if (!doc || !doc.ruta_base) return res.status(404).send('documento sin carpeta descargable');
             const baseDir = carpetaDeDoc(doc);
             // Seguridad: la carpeta SIEMPRE debe caer dentro del árbol CDU (ruta_base la pone el servidor, no
             // el usuario; se valida igualmente para evitar cualquier fuga de ruta).
             if (!path.resolve(baseDir).startsWith(path.resolve(DIR_CDU))) return res.status(400).send('ruta no permitida');
 
-            const soloAudio = req.query.que === 'audio';
+            const esAdmin = req.usuario?.rol === 'admin';
+            const adjSoloAdmin = new Set((doc.adjuntos || []).filter((a) => a.soloAdmin).map((a) => a.nombre));
+            const que = String(req.query.que || 'todo');
+            const adjuntoQ = String(req.query.adjunto || '');
+            const segmentoSimple = (n) => !!n && !/[\\/]/.test(n) && n !== '..' && n !== '.';
             let objetivos; // rutas RELATIVAS a baseDir que entran en el ZIP
-            if (soloAudio) {
+            let etq = '';
+            if (que === 'audio') {
                 const base = String(doc.ruta_base).replace(/\/$/, '');
                 objetivos = (doc.audios || []).map((a) => String(a.ruta || ''))
                     .filter((u) => u.startsWith(base + '/')).map((u) => u.slice(base.length + 1));
                 if (!objetivos.length) return res.status(404).send('el documento no tiene pistas de audio');
+                etq = ' (audio)';
+            } else if (que === 'principal') {
+                // SOLO el documento principal (el libro), sin adjuntos ni sidecars.
+                if (!doc.nombre_archivo) return res.status(404).send('el documento no tiene fichero principal');
+                objetivos = [doc.nombre_archivo];
+            } else if (adjuntoQ) {
+                // UN adjunto concreto (carpeta o fichero de primer nivel). Un invitado no puede bajar los «solo admin».
+                if (!segmentoSimple(adjuntoQ)) return res.status(400).send('adjunto no válido');
+                if (!esAdmin && adjSoloAdmin.has(adjuntoQ)) return res.status(403).send('adjunto solo para administradores');
+                if (!(await stat(path.join(baseDir, adjuntoQ)).then(() => true, () => false))) return res.status(404).send('adjunto no encontrado');
+                objetivos = [adjuntoQ];
+                etq = ` (${adjuntoQ})`;
             } else {
-                // Toda la carpeta: se listan las ENTRADAS de primer nivel en vez de «.», así bsdtar no
-                // prefija cada ruta del ZIP con «./» (bsdtar -C dir . mete ese prefijo cosmético).
-                objetivos = await readdir(baseDir).catch(() => []);
+                // TODA la carpeta: entradas de primer nivel (sin «./» que mete bsdtar con «.»). Un INVITADO no se
+                // lleva los adjuntos marcados «solo admin».
+                objetivos = (await readdir(baseDir).catch(() => [])).filter((n) => esAdmin || !adjSoloAdmin.has(n));
                 if (!objetivos.length) objetivos = ['.'];
             }
 
-            const nombreZip = (soloAudio ? `${doc.titulo || 'audio'} (audio)` : (doc.titulo || 'contenido'))
+            const nombreZip = ((doc.titulo || 'contenido') + etq)
                 .replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120) + '.zip';
             res.setHeader('Content-Type', 'application/zip');
             res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(nombreZip)}`);

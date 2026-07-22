@@ -1062,6 +1062,17 @@ de ficheros clasificado por CDU.
       la rama nueva. Ese mover se hizo además robusto para SUBCARPETAS en el camino cross-device (fs.cp
       recursivo en vez de copyFile por entrada, que dejaba el material sin copiar). (Reprocesar un libro con
       material: el material va a la Papelera —recuperable— hasta que se implemente el viaje automático.)
+    · MODELO ESTRUCTURADO `adjuntos[]` (por documento): cada elemento de PRIMER NIVEL adjuntado es una entrada
+      {nombre (único en disco), tipo:'carpeta'|'fichero', soloAdmin, bytes, fecha}. `material_adjunto` =
+      adjuntos.length (el badge). Habilita: (1) marcar cada adjunto «SOLO ADMIN» (POST /documentos/:id/
+      adjuntos/soloadmin) → un INVITADO no lo ve en la ficha, ni en el explorador «🗂️ Archivos» (ni entrando
+      con ?sub=), ni lo puede descargar; la ficha (GET /documentos/:id) FILTRA los soloAdmin para invitados y
+      recalcula el badge. (2) DESCARGA SELECTIVA: GET /descargar/:id?que=todo (libro+adjuntos) · ?que=principal
+      (solo el documento) · ?adjunto=<nombre> (uno concreto, carpeta→zip). Un invitado no baja los soloAdmin
+      (ni sueltos ni dentro del ZIP «todo»). Los enlaces <a download> llevan `?token=` porque no mandan el
+      Bearer y el servidor necesita el rol. (3) QUITAR un adjunto (POST /documentos/:id/adjuntos/borrar) → a la
+      Papelera (nunca borra). La sección «📎 Material» de la ficha lista los adjuntos con su descarga y, para
+      admin, los controles 🔒/🗑 + «Adjuntar más». Al adjuntar se puede marcar «🔒 Solo administradores».
     · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
       principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
       El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`

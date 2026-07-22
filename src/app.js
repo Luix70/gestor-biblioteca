@@ -291,7 +291,8 @@ app.post('/api/documentos/:id/adjuntar', upload.array('files'), async (req, res)
             // La ruta relativa (con subcarpetas) viaja en `rutas[i]`; si falta, se agrupa bajo «adjuntos/».
             rel: (Array.isArray(rutas) && rutas[i]) ? String(rutas[i]) : ('adjuntos/' + (f.originalname || 'archivo')),
         }));
-        const r = await adjuntarMaterial(await conectarDB(), req.params.id, { items });
+        const soloAdmin = req.body?.soloAdmin === '1' || req.body?.soloAdmin === 'true';
+        const r = await adjuntarMaterial(await conectarDB(), req.params.id, { items, soloAdmin });
         await reciclar(subidos.map((f) => f.path), r.ok ? 'adjuntar-ingerido' : 'adjuntar-error').catch(() => {});
         res.status(r.ok ? 200 : 400).json(r);
     } catch (e) {
