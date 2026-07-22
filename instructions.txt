@@ -420,6 +420,14 @@ de ficheros clasificado por CDU.
       collation española que la consulta — si no, el índice no sirve al $sort) e idx_doi.
       ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
+    · LEÍDO (progreso de lectura) y ME GUSTA (👍/👎) — SOLO ADMIN, solo en documentos, en la ficha (junto a
+      las estrellas). `leido` NO es una nota: es cuánto se ha leído (empezado / un cuarto / a medias / casi /
+      terminado), por eso se pinta como una BARRA DE PROGRESO verde de 5 segmentos que se llena de izquierda a
+      derecha (distinta de las estrellas doradas, que van al revés). `like` es un pulgar arriba/abajo (tri-
+      estado: 👍 / 👎 / sin voto). Campos PRIVADOS del admin (invisibles a invitados). Se guardan con $set y se
+      BORRAN con $unset (0 / sin voto → el campo desaparece). Endpoints POST /documentos/:id/{leido,like}
+      (admin). FILTRABLES en el Catálogo (solo admin): «📖 Leído» (multi-selección de niveles + «Sin leer»,
+      igual que Estrellas) y «Me gusta» (👍/👎/Sin voto); el backend ignora estos parámetros para invitados.
     · MODO del catálogo respecto a las obras (se RECUERDA en localStorage `cat_tomos`: es una preferencia de
       trabajo, no un capricho por búsqueda). COLAPSADO (defecto) ↔ EXPANDIDO. Se conmuta con un BOTÓN en la
       barra de modos —«📚 Obras colapsadas» / «📖 Tomos sueltos», junto a «🖱 Modo selección / 👁 Modo

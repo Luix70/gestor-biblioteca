@@ -2954,7 +2954,8 @@ function pintarDoc(r, ctx) {
     exlibris: EX_LIBRIS,
     descargaUrl: r.archivo_url ? encUrl(r.archivo_url) : '',
     descargaNombre: r.nombre_archivo || '',
-    estrellasHTML: ratingBar('documentos', d._id, d.valoracion, d.nsfw) + ' ' + badgesDoc(d),
+    estrellasHTML: ratingBar('documentos', d._id, d.valoracion, d.nsfw)
+      + leidoBar(d._id, d.leido) + likeBar(d._id, d.like) + ' ' + badgesDoc(d),
     datosHTML: filasFmin,
     obraColHTML: obraColFmin,
     ubicacionHTML: ubicFmin,
@@ -3007,6 +3008,7 @@ function pintarDoc(r, ctx) {
   if (d.material_adjunto) cargarMaterialFicha(d._id);
   attachClas('#p-detalle');
   attachRating('#p-detalle');
+  attachLeidoLike('#p-detalle'); // leído (progreso) + me gusta — solo admin, solo en la ficha del documento
   $$('#p-detalle .copybtn').forEach(
     (b) =>
       (b.onclick = (e) => {
@@ -3360,6 +3362,80 @@ function attachRating(scope) {
           toast(err.message, 'bad');
         }
       };
+  });
+}
+
+// ── LEÍDO (progreso de lectura, 0-5) + ME GUSTA (👍/👎) — SOLO ADMIN, SOLO documentos ──────────────────────
+// `leido` NO es una nota (para eso están las estrellas): es cuánto has LEÍDO (empezado / medio / entero…).
+// Por eso se pinta como una barra de PROGRESO, no como estrellas. `like` es un pulgar arriba/abajo. Ambos son
+// privados del admin: para un invitado, estas funciones devuelven '' (ni se ven).
+const LEIDO_ETIQ = { 1: 'Empezado', 2: 'Un cuarto', 3: 'A medias', 4: 'Casi entero', 5: 'Terminado' };
+function leidoBar(id, leido) {
+  if (ROL !== 'admin') return '';
+  leido = Number(leido) || 0;
+  const segs = [1, 2, 3, 4, 5]
+    .map((n) => `<span class="lsg${n <= leido ? ' on' : ''}" data-v="${n}" title="${LEIDO_ETIQ[n]}"></span>`)
+    .join('');
+  return (
+    `<span class="leidobar" data-id="${esc(id)}" data-v="${leido}" title="Progreso de lectura (leído)">` +
+    `📖<span class="lsegs">${segs}</span>` +
+    `<button class="rbtn lclear" title="Marcar como SIN leer">⊘</button></span>`
+  );
+}
+function likeBar(id, like) {
+  if (ROL !== 'admin') return '';
+  like = like === 'up' || like === 'down' ? like : '';
+  return (
+    `<span class="likebar" data-id="${esc(id)}" data-like="${like}">` +
+    `<button class="lkbtn up${like === 'up' ? ' on' : ''}" data-v="up" title="Me gustó">👍</button>` +
+    `<button class="lkbtn down${like === 'down' ? ' on' : ''}" data-v="down" title="No me gustó">👎</button></span>`
+  );
+}
+// Engancha los clics de leído/like (admin). Espejo de attachRating.
+function attachLeidoLike(scope) {
+  $$(scope + ' .leidobar').forEach((bar) => {
+    const id = bar.dataset.id;
+    const set = async (nv) => {
+      try {
+        await api('/documentos/' + encodeURIComponent(id) + '/leido', { method: 'POST', body: JSON.stringify({ leido: nv }) });
+        bar.dataset.v = nv;
+        bar.querySelectorAll('.lsg').forEach((x) => x.classList.toggle('on', Number(x.dataset.v) <= nv));
+        toast(nv ? 'Leído: ' + LEIDO_ETIQ[nv] : 'Marcado como sin leer');
+      } catch (e) {
+        toast(e.message, 'bad');
+      }
+    };
+    // Clic en un segmento = fijar el progreso a ese nivel; repetir el mismo nivel = quitar (sin leer).
+    bar.querySelectorAll('.lsg').forEach(
+      (s) =>
+        (s.onclick = (e) => {
+          e.stopPropagation();
+          const n = Number(s.dataset.v),
+            cur = Number(bar.dataset.v) || 0;
+          set(n === cur ? 0 : n);
+        }),
+    );
+    const clr = bar.querySelector('.lclear');
+    if (clr) clr.onclick = (e) => { e.stopPropagation(); set(0); };
+  });
+  $$(scope + ' .likebar').forEach((bar) => {
+    const id = bar.dataset.id;
+    bar.querySelectorAll('.lkbtn').forEach(
+      (b) =>
+        (b.onclick = async (e) => {
+          e.stopPropagation();
+          const v = b.dataset.v;
+          const nv = bar.dataset.like === v ? null : v; // repetir el mismo pulgar = quitar el voto
+          try {
+            await api('/documentos/' + encodeURIComponent(id) + '/like', { method: 'POST', body: JSON.stringify({ like: nv }) });
+            bar.dataset.like = nv || '';
+            bar.querySelectorAll('.lkbtn').forEach((x) => x.classList.toggle('on', x.dataset.v === nv));
+            toast(nv === 'up' ? '👍 Me gustó' : nv === 'down' ? '👎 No me gustó' : 'Voto quitado');
+          } catch (err) {
+            toast(err.message, 'bad');
+          }
+        }),
+    );
   });
 }
 
@@ -7378,6 +7454,10 @@ function construirSearch() {
         <div><label>Estrellas${ROL === 'admin' ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
           <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' ? '<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"> 🔞 NSFW</label>' : ''}</div>
         </details></div>
+        ${ROL === 'admin' ? `<div class="admin-only"><label>📖 Leído</label><details class="ddown" id="sqLeidoDD"><summary id="sqLeidoSum">Todos</summary>
+          <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqLeido" value="${n}">${LEIDO_ETIQ[n]}</label>`).join('')}<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px"><input type="checkbox" class="sqLeido" value="0">Sin leer</label></div>
+        </details></div>
+        <div class="admin-only"><label>Me gusta</label><select id="sqLike"><option value="">Todos</option><option value="up">👍 Me gustó</option><option value="down">👎 No me gustó</option><option value="sin">Sin voto</option></select></div>` : ''}
         <div class="admin-only"><label>Etiqueta NFC</label><select id="sqNfc"><option value="">Todas</option><option value="con">📶 Con etiqueta</option><option value="sin">Sin etiqueta</option></select></div>
         <div class="admin-only"><label>Descubrir</label><div style="display:flex;align-items:center;gap:6px;height:36px"><label class="switch" style="flex:0 0 auto"><input type="checkbox" id="sqDescubrir"><span class="slider"></span></label><span class="muted" title="Busca en el Fichero (58,7 M) libros que NO tienes, con enlaces para conseguirlos">🔭 Fichero</span></div></div>
       </div>
@@ -7496,6 +7576,9 @@ function construirSearch() {
       actualizarSumEstrellas();
       buscarCatalogo(1);
     };
+  // Filtros admin: leído (progreso, multi-selección) y me gusta (👍/👎/sin voto).
+  $$('#p-search .sqLeido').forEach((c) => (c.onchange = () => { actualizarSumLeido(); buscarCatalogo(1); }));
+  if ($('#sqLike')) $('#sqLike').onchange = () => buscarCatalogo(1);
   $('#sqClear').onclick = () => {
     $('#sqQ').value = '';
     $('#sqCdu').value = '';
@@ -7514,9 +7597,12 @@ function construirSearch() {
     if ($('#sqNsfw')) $('#sqNsfw').checked = false;
     if ($('#sqNfc')) $('#sqNfc').value = '';
     $$('#p-search .sqStar').forEach((c) => (c.checked = false));
+    $$('#p-search .sqLeido').forEach((c) => (c.checked = false));
+    if ($('#sqLike')) $('#sqLike').value = '';
     estadoBusqueda.extra = null;
     soloSeleccion = false; // «Limpiar» también sale de «Mostrar selección»
     actualizarSumEstrellas();
+    actualizarSumLeido();
     buscarCatalogo(1);
   };
   // Toggle de vista iconos/detalles (el botón muestra la vista a la que se cambiaría).
@@ -7555,8 +7641,22 @@ function hayOtrosCriteriosBusqueda() {
     return true;
   const e = estrellasSel();
   if (e.length && e.length < 6) return true; // subconjunto de estrellas (no "Todas")
+  if (ROL === 'admin') { // filtros admin de lectura
+    const l = $$('#p-search .sqLeido:checked').map((c) => c.value);
+    if (l.length && l.length < 6) return true;
+    if ($('#sqLike') && $('#sqLike').value) return true;
+  }
   if (estadoBusqueda && estadoBusqueda.extra) return true; // viene de un chip/enlace (ubicación, clasificación…)
   return false;
+}
+// Resumen del desplegable «Leído» (admin): «Todos» o la lista de niveles marcados.
+function actualizarSumLeido() {
+  const s = $('#sqLeidoSum');
+  if (!s) return;
+  const sel = $$('#p-search .sqLeido:checked').map((c) => c.value);
+  s.textContent = !sel.length || sel.length === 6
+    ? 'Todos'
+    : sel.map((n) => (n === '0' ? 'Sin leer' : LEIDO_ETIQ[n])).sort().join(' · ');
 }
 function actualizarSumEstrellas() {
   const s = $('#sqStarsSum');
@@ -7609,6 +7709,14 @@ function _paramsBusqueda() {
   if ($('#sqOrden').value !== 'reciente') params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
   const est = estrellasSel();
   if (est.length && est.length < 6) params.set('estrellas', est.join(','));
+  // Filtros PRIVADOS DEL ADMIN: progreso de lectura (leído) y pulgar (me gusta). El backend los ignora para
+  // invitados, pero ni siquiera existen los controles para ellos.
+  if (ROL === 'admin') {
+    const leidoSel = $$('#p-search .sqLeido:checked').map((c) => c.value);
+    if (leidoSel.length && leidoSel.length < 6) params.set('leido', leidoSel.join(','));
+    const lk = ($('#sqLike') && $('#sqLike').value) || '';
+    if (lk) params.set('like', lk);
+  }
   const ambS = ($('#sqAmbito') && $('#sqAmbito').value) || '';
   if (ambS) params.set('ambito', ambS);
   const estS = ($('#sqEstanteria') && $('#sqEstanteria').value) || '';

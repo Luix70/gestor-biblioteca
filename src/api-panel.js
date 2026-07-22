@@ -659,6 +659,25 @@ export function rutasPanel() {
                 if (estrellas.includes(0)) ors.push({ valoracion: { $in: [0, null] } }, { valoracion: { $exists: false } });
                 extras.push({ $or: ors });
             }
+            // Filtros PRIVADOS DEL ADMIN (progreso de lectura y pulgar). Son campos del administrador, no
+            // visibles a invitados: si un invitado colara el parámetro, se IGNORA (solo se aplican para admin).
+            if (req.usuario?.rol === 'admin') {
+                // LEÍDO (progreso 0..5): CSV multi-selección, IGUAL que estrellas. 0 = sin leer (ausente/null/0).
+                const leidos = [...new Set(String(req.query.leido || '').split(',')
+                    .map(s => parseInt(s, 10)).filter(n => n >= 0 && n <= 5))];
+                if (leidos.length && leidos.length < 6) {
+                    const ors = [];
+                    const pos = leidos.filter(n => n > 0);
+                    if (pos.length) ors.push({ leido: { $in: pos } });
+                    if (leidos.includes(0)) ors.push({ leido: { $in: [0, null] } }, { leido: { $exists: false } });
+                    extras.push({ $or: ors });
+                }
+                // ME GUSTA: 'up' 👍 / 'down' 👎 / 'sin' (sin voto).
+                const lk = String(req.query.like || '');
+                if (lk === 'up') extras.push({ like: 'up' });
+                else if (lk === 'down') extras.push({ like: 'down' });
+                else if (lk === 'sin') extras.push({ $or: [{ like: { $exists: false } }, { like: null }] });
+            }
             // Control 🔞 NSFW de la Búsqueda (junto a Estrellas): 'solo' = únicamente lo marcado nsfw;
             // 'excluir' = ocultar todo lo nsfw (los docs sin el campo cuentan como no-nsfw).
             const nf = String(req.query.nsfw || '');
@@ -802,7 +821,7 @@ export function rutasPanel() {
             const PROY_TARJETA = {
                 titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1, paginas: 1,
                 tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
-                valoracion: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
+                valoracion: 1, leido: 1, like: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
                 coleccion: 1, coleccion_nombre: 1,   // para el distintivo «pertenece a una colección»
                 obra: 1,                             // para colapsar la obra multivolumen en una tarjeta
             };
@@ -1406,6 +1425,41 @@ export function rutasPanel() {
             } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
         });
     }
+
+    // LEÍDO (PROGRESO de lectura 0..5) y ME GUSTA (👍/👎) — SOLO documentos, SOLO admin. Son marcas PRIVADAS del
+    // administrador (progreso personal de lectura + pulgar), invisibles a invitados. Análogas a la valoración,
+    // pero: 'leido' es PROGRESO (leí el libro entero / medio / algunos capítulos), no una nota; 'like' es un
+    // pulgar arriba/abajo. Se guardan con $set y se BORRAN con $unset (0 / sin voto → el campo desaparece).
+    r.post('/documentos/:id/leido', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const v = Math.round(Number(req.body?.leido));
+            if (!(v >= 0 && v <= 5)) return res.status(400).json({ ok: false, motivo: 'leído fuera de rango (0..5)' });
+            const db = await conectarDB();
+            const upd = v > 0
+                ? { $set: { leido: v, fecha_actualizacion: new Date() } }
+                : { $unset: { leido: '' }, $set: { fecha_actualizacion: new Date() } };
+            const r2 = await db.collection('biblioteca').updateOne({ _id: new ObjectId(req.params.id) }, upd);
+            if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
+            res.json({ ok: true, leido: v });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/:id/like', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const raw = req.body?.like;
+            const like = raw === 'up' || raw === 'down' ? raw : null;
+            const db = await conectarDB();
+            const upd = like
+                ? { $set: { like, fecha_actualizacion: new Date() } }
+                : { $unset: { like: '' }, $set: { fecha_actualizacion: new Date() } };
+            const r2 = await db.collection('biblioteca').updateOne({ _id: new ObjectId(req.params.id) }, upd);
+            if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
+            res.json({ ok: true, like });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
 
     // Campos relevantes a comparar antes/después de conformar para mostrar "qué cambió".
     const CAMPOS_DIFF = ['titulo', 'subtitulo', 'cdu', 'dewey', 'lcc', 'lccn', 'portada', 'ruta_base',

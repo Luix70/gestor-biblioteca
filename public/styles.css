@@ -1135,6 +1135,60 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .vol .stars {
   font-size: 13px;
 }
+/* LEÍDO (solo admin): PROGRESO de lectura, no una nota. Barra de 5 segmentos que se llena de IZQUIERDA a
+   DERECHA (a diferencia de las estrellas, que van al revés) en verde «lectura», para no confundirla con la
+   valoración dorada. Empezado · un cuarto · medio · casi · terminado. */
+.leidobar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  font-size: 13px;
+}
+.leidobar .lsegs {
+  display: inline-flex;
+  gap: 3px;
+}
+.leidobar .lsg {
+  width: 15px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--mut);
+  opacity: 0.3;
+  cursor: pointer;
+  transition: 0.1s;
+}
+.leidobar .lsg.on {
+  background: #27c06a;
+  opacity: 1;
+}
+.leidobar:not(.ro) .lsg:hover {
+  opacity: 0.75;
+}
+/* ME GUSTA (solo admin): pulgar arriba/abajo, gris cuando está inactivo y a color cuando se elige. */
+.likebar {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.likebar .lkbtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 3px;
+  opacity: 0.45;
+  filter: grayscale(1);
+  transition: 0.1s;
+}
+.likebar .lkbtn:hover {
+  opacity: 0.85;
+}
+.likebar .lkbtn.on {
+  opacity: 1;
+  filter: none;
+}
 .ratebar {
   display: inline-flex;
   align-items: center;
