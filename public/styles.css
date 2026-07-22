@@ -1207,6 +1207,16 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .rbtn:hover {
   opacity: 1;
 }
+/* Variante DESTRUCTIVA del botón-icono (🗑 quitar adjunto / borrar ficha de lectura): más presente que un
+   .rbtn normal —borrar no debe pasar desapercibido, «se veía poco»— y con affordance roja al pasar por encima. */
+.rbtn.bad {
+  opacity: 0.9;
+  border-radius: 6px;
+}
+.rbtn.bad:hover {
+  opacity: 1;
+  background: rgba(220, 60, 60, 0.16);
+}
 .rbtn.rnsfw {
   filter: grayscale(1);
 }
