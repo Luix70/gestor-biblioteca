@@ -26,6 +26,7 @@ import { rasterizarPaginas } from './rasterizar-pdf.js';
 import { resolverPersona } from './resolver-persona.js';
 import { esAudio } from './lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { esDocumentoLeible, esImagenArchivo, esMaterialNotable, esVideo, formatoDocumento } from './criba-material.js';
+import { leerGuia } from './guia-ingesta.js'; // pistas del reproceso (principal fijado + soloAdmin de adjuntos)
 
 // Subcarpeta OCULTA con las portadas DERIVADAS (1ª página rasterizada). El prefijo «.» hace que `ignorar`
 // (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
@@ -688,12 +689,19 @@ const EXT_DOC_PRINCIPAL = new Set(['.pdf', '.epub', '.mobi', '.azw', '.azw3', '.
  * capítulo de muestra); todo lo demás (subcarpetas + otros ficheros) es material.
  */
 export async function ingestarLibroConMaterial(dirOrigen, { reciclarOrigen = true } = {}) {
-    const esAccesorio = (n) => ignorar(n) || n === '_guia.json' || /^\.(ruta_fija|transmedia|noborrar|override)/.test(n);
+    // Accesorios que NO son ni el libro ni material: la guía, los marcadores del árbol y CUALQUIER «*.meta.json»
+    // (override de identidad que el pipeline lee aparte → no se copia ni cuenta como material).
+    const esAccesorio = (n) => ignorar(n) || n === '_guia.json' || /\.meta\.json$/i.test(n) || /^\.(ruta_fija|transmedia|noborrar|override)/.test(n);
     let entradas;
     try { entradas = await fs.readdir(dirOrigen, { withFileTypes: true }); }
     catch (e) { return { ok: false, motivo: `no se puede leer la carpeta: ${e.message}` }; }
 
-    // 1) DOCUMENTO PRINCIPAL: el fichero bibliográfico MAYOR de la RAÍZ (pdf/epub/…).
+    // Pistas de la guía (las escribe el REPROCESO): principal FIJADO + metadatos de adjuntos (soloAdmin).
+    const lm = (await leerGuia(dirOrigen))?.libro_material || null;
+
+    // 1) DOCUMENTO PRINCIPAL: el que FIJA la guía (reproceso) o, en su defecto, el fichero bibliográfico MAYOR
+    //    de la RAÍZ (un libro pesa más que un capítulo de muestra). Fijarlo evita que una crítica/anexo grande
+    //    usurpe el papel de libro al reprocesar.
     const docsRaiz = [];
     for (const e of entradas) {
         if (!e.isFile() || esAccesorio(e.name)) continue;
@@ -703,7 +711,7 @@ export async function ingestarLibroConMaterial(dirOrigen, { reciclarOrigen = tru
     }
     if (!docsRaiz.length) return { ok: false, motivo: 'no hay documento principal (pdf/epub/…) en la raíz: ¿marcaste bien la carpeta?' };
     docsRaiz.sort((a, b) => b.size - a.size);
-    const principal = docsRaiz[0];
+    const principal = (lm?.principal && docsRaiz.find((d) => d.name === lm.principal)) || docsRaiz[0];
 
     // 2) Catalogar el LIBRO por el pipeline normal (import dinámico → evita cualquier ciclo de carga).
     const { ingestarRecurso } = await import('../servicio-ingesta.js');
@@ -718,27 +726,40 @@ export async function ingestarLibroConMaterial(dirOrigen, { reciclarOrigen = tru
     if (!destino) return { ok: false, motivo: 'el pipeline no devolvió carpeta destino para el libro (no se adjunta material)' };
 
     // 3) Copiar el MATERIAL AUXILIAR verbatim JUNTO al libro (subcarpetas y otros ficheros de la raíz). El
-    //    documento principal ya lo copió el pipeline; el resto (código, datasets, un README…) es material.
-    let material = 0;
+    //    documento principal ya lo copió el pipeline; el resto (código, datasets, un README…) es material. Se
+    //    anota cada elemento de PRIMER NIVEL para reconstruir el registro estructurado `adjuntos[]`.
+    const topMaterial = [];
     for (const e of entradas) {
         if (esAccesorio(e.name)) continue;
         const src = path.join(dirOrigen, e.name);
         if (src === principal.abs) continue;
         const dst = path.join(destino, e.name);
         try {
-            if (e.isDirectory()) { await copiarArbolResiliente(src, dst); material++; }
-            else { await fs.copyFile(src, dst); material++; }
+            if (e.isDirectory()) { await copiarArbolResiliente(src, dst); }
+            else { await fs.copyFile(src, dst); }
+            topMaterial.push(e.name);
         } catch (err) { if (err.code !== 'ENOENT') console.warn(`  ⚠️  material «${e.name}» no copiado: ${err.message}`); }
     }
+    const material = topMaterial.length;
 
-    // 4) Proteger el árbol: marcador .ruta_fija + ruta_fija:true en el doc (Integridad NO poda el material; el
-    //    explorador de la ficha sube al marcador y lo muestra). El doc SIGUE siendo tipo_recurso:'libro'.
+    // 4) Proteger el árbol (marcador .ruta_fija + ruta_fija:true → Integridad NO poda el material) y REGISTRAR
+    //    el material como `adjuntos[]` ESTRUCTURADO — una entrada por elemento de primer nivel, con el flag
+    //    «solo admin» que la guía preserve (reproceso). Antes solo se guardaba un CONTADOR (`material_adjunto`),
+    //    así que al reprocesar se perdía la lista y las marcas «solo admin»; ahora viajan. El doc SIGUE siendo
+    //    tipo_recurso:'libro'. (Esto mejora también un drop libro-material nuevo: su ficha ya lista los adjuntos.)
     if (material > 0 && res._id) {
         await fs.writeFile(path.join(destino, MARCA_RUTA_FIJA), `libro-con-material: ${res.documento?.titulo || principal.name}\n`).catch(() => {});
+        const soloAdminDe = new Map((lm?.adjuntos || []).map((a) => [a.nombre, !!a.soloAdmin]));
+        const adjuntos = [];
+        for (const nombre of topMaterial) {
+            let tipo = 'fichero', bytes = 0;
+            try { const st = await fs.stat(path.join(destino, nombre)); tipo = st.isDirectory() ? 'carpeta' : 'fichero'; bytes = st.isDirectory() ? 0 : st.size; } catch { /* recién copiado */ }
+            adjuntos.push({ nombre, tipo, soloAdmin: soloAdminDe.get(nombre) || false, bytes, fecha: new Date() });
+        }
         try {
             const db = await conectarDB();
-            await db.collection('biblioteca').updateOne({ _id: new ObjectId(String(res._id)) }, { $set: { ruta_fija: true, material_adjunto: material } });
-        } catch (e) { console.warn(`  ⚠️  no se pudo marcar ruta_fija del libro: ${e.message}`); }
+            await db.collection('biblioteca').updateOne({ _id: new ObjectId(String(res._id)) }, { $set: { ruta_fija: true, material_adjunto: adjuntos.length, adjuntos } });
+        } catch (e) { console.warn(`  ⚠️  no se pudo marcar ruta_fija/adjuntos del libro: ${e.message}`); }
     }
 
     // 5) Reciclar el origen (Papelera) si la copia del libro fue íntegra, o si era un duplicado (su PDF ya lo

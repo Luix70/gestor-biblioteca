@@ -1060,8 +1060,17 @@ de ficheros clasificado por CDU.
       colección (doc.coleccion / naturaleza audiolibro|software), de modo que un LIBRO SUELTO con material SÍ
       se reubica y el `rename` de moverCarpetaConVerificacion se lleva la carpeta ENTERA (libro + material) a
       la rama nueva. Ese mover se hizo además robusto para SUBCARPETAS en el camino cross-device (fs.cp
-      recursivo en vez de copyFile por entrada, que dejaba el material sin copiar). (Reprocesar un libro con
-      material: el material va a la Papelera —recuperable— hasta que se implemente el viaje automático.)
+      recursivo en vez de copyFile por entrada, que dejaba el material sin copiar).
+      ⚠ QUE EL MATERIAL VIAJE AL REPROCESAR (♻️): reprocesar un libro con `adjuntos[]` ya NO deja el material en
+      la Papelera. `reprocesarDocumento` (utils/reproceso.js) detecta el material y, en vez de mandar solo el
+      fichero al Inbox, arma una CARPETA-DROP «libro-material» «<título> (reproc <id6>)/» con: el libro + su
+      sidecar `.meta.json` de identidad (preserva _id/ubicación/colección/valoración/nsfw/nfc) + cada adjunto de
+      primer nivel (carpeta→copia recursiva) + un `_guia.json` accion:'libro-material' con
+      `libro_material:{ principal, adjuntos:[{nombre,soloAdmin}] }`. El vigilante la recataloga por el pipeline
+      normal y re-adjunta el material. FIJAR el principal es clave: sin ello `ingestarLibroConMaterial` elige el
+      fichero MÁS GRANDE y una crítica/anexo podría usurpar el papel de libro. Requiere fichero principal: un
+      ESCANEO puro (solo imágenes) no puede ser libro-material → su material queda en la Papelera (recuperable) y
+      se avisa por consola. (El campo `libro_material` de la guía lo declara `normalizarGuia` en guia-ingesta.js.)
     · MODELO ESTRUCTURADO `adjuntos[]` (por documento): cada elemento de PRIMER NIVEL adjuntado es una entrada
       {nombre (único en disco), tipo:'carpeta'|'fichero', soloAdmin, bytes, fecha}. `material_adjunto` =
       adjuntos.length (el badge). Habilita: (1) marcar cada adjunto «SOLO ADMIN» (POST /documentos/:id/
@@ -1079,8 +1088,13 @@ de ficheros clasificado por CDU.
       de pleno derecho: NO transmedia, NO colección, NO «audiolibro+pdf» — y el material se copia VERBATIM
       JUNTO a él en su carpeta CDU, protegido por `ruta_fija` (Integridad no lo poda) y visible en el
       explorador «🗂️ Archivos» de la ficha. Documento principal = el fichero bibliográfico MAYOR de la raíz
-      (pdf/epub/mobi/djvu/cbz/chm…); todo lo demás = material. El origen se recicla a la Papelera tras copiar.
-      (transmedia.js · ingestarLibroConMaterial; unidad esLibroMaterial en el vigilante.)
+      (pdf/epub/mobi/djvu/cbz/chm…) SALVO que la guía lo FIJE (`libro_material.principal`, lo hace el reproceso);
+      todo lo demás = material. El material se registra ahora como `adjuntos[]` ESTRUCTURADO (una entrada por
+      elemento de primer nivel, con su `soloAdmin` si la guía lo trae), no solo como el contador `material_adjunto`
+      — así un drop libro-material nuevo YA lista sus adjuntos en «📎 Material», y el reproceso preserva las marcas
+      «solo admin». Los `*.meta.json` (sidecar de identidad) NO se copian ni cuentan como material. El origen se
+      recicla a la Papelera tras copiar. (transmedia.js · ingestarLibroConMaterial; unidad esLibroMaterial en el
+      vigilante.)
 
   ── FICHAS DE LECTURA (biblioteca personal; ficha → «📖 Fichas de lectura», SOLO ADMIN) ──────────
     Convierte el catálogo en una biblioteca PERSONAL: el administrador lleva un registro de sus lecturas con

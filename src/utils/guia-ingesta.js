@@ -82,7 +82,7 @@ export function normalizarPerfil(p) {
 
 /** Normaliza una guía cruda (de disco o del explorador). Devuelve un objeto guía siempre válido. */
 export function normalizarGuia(g) {
-    const guia = { perfil: {}, accion: 'normal', adjuntar_a: null, archivos: {}, grupos: [], adjuntos: {} };
+    const guia = { perfil: {}, accion: 'normal', adjuntar_a: null, archivos: {}, grupos: [], adjuntos: {}, libro_material: null };
     if (!g || typeof g !== 'object') return guia;
     // GRUPOS de ficheros sueltos que forman UN documento (agrupado B del Inspector): audiolibro / obra.
     // `archivos` = nombres RELATIVOS a esta carpeta. El vigilante los mueve a una subcarpeta y los agrupa.
@@ -110,6 +110,24 @@ export function normalizarGuia(g) {
             if (malo(c) || malo(d)) continue;
             guia.adjuntos[c] = d;
         }
+    }
+
+    // LIBRO-MATERIAL con pistas (lo usa el REPROCESO de un libro que lleva material adjunto): fija el documento
+    // PRINCIPAL explícitamente (no por TAMAÑO — una crítica en PDF podría pesar más que el libro y usurpar su
+    // sitio) y conserva los metadatos de cada adjunto (`soloAdmin`) para RE-APLICARLOS tras recatalogar. Ambos
+    // son NOMBRES de hijos de la carpeta (sin separadores). Solo tiene sentido con accion:'libro-material'.
+    if (g.libro_material && typeof g.libro_material === 'object') {
+        const SEP = String.fromCharCode(92);   // «\» sin literal: el entorno lo corrompe
+        const malo = (x) => !x || x.includes('/') || x.includes(SEP) || x === '.' || x === '..';
+        const lm = {};
+        const pr = String(g.libro_material.principal || '').trim();
+        if (pr && !malo(pr)) lm.principal = pr;
+        if (Array.isArray(g.libro_material.adjuntos)) {
+            lm.adjuntos = g.libro_material.adjuntos
+                .filter((a) => a && typeof a === 'object' && !malo(String(a.nombre || '').trim()))
+                .map((a) => ({ nombre: String(a.nombre).trim(), soloAdmin: !!a.soloAdmin }));
+        }
+        if (lm.principal || (lm.adjuntos && lm.adjuntos.length)) guia.libro_material = lm;
     }
 
     // Alcance de «empaquetar»: por subcarpeta (obra multivolumen) o todo junto (un documento). Por defecto,

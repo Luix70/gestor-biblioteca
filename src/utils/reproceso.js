@@ -15,6 +15,7 @@ import AdmZip from 'adm-zip';
 import { carpetaDeDoc, EXT_DOC } from '../mantenimiento/util-mantenimiento.js';
 import { reciclarCarpeta } from './papelera.js';
 import { desindexarDoc } from './indice-busqueda.js';
+import { escribirGuia } from './guia-ingesta.js'; // folder-drop «libro-material» (el material viaja al reprocesar)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..', '..');
@@ -116,6 +117,54 @@ async function escribirSidecar(rutaFichero, doc) {
 }
 
 /**
+ * Reprocesa un LIBRO que lleva MATERIAL ADJUNTO (`adjuntos[]`): lo devuelve al Inbox como una CARPETA-DROP
+ * «libro-material» con el libro + su sidecar de identidad + el material (cada adjunto de primer nivel) + una
+ * guía que FIJA el principal (para que una crítica/anexo grande no lo usurpe) y PRESERVA el flag «solo admin»
+ * de cada adjunto. El vigilante recataloga el libro por el pipeline normal y re-adjunta el material intacto
+ * (ingestarLibroConMaterial). Así el material VIAJA con el libro en vez de quedarse (recuperable) en la Papelera.
+ */
+async function reprocesarLibroConMaterial(db, doc, { conservar, carpeta, nombre, id6 }) {
+    const origenPrincipal = path.join(carpeta, nombre);
+    let tam = -1;
+    try { tam = (await fs.stat(origenPrincipal)).size; } catch { /* no existe */ }
+    if (tam <= 0) return { ok: false, motivo: 'no se encuentra el fichero del libro en su carpeta CDU: no se puede reprocesar' };
+
+    // Carpeta-drop propia en el Inbox: «<título> (reproc <id6>)» (nombre seguro + único).
+    const base = `${nombreSeguro(doc.titulo)} (reproc ${id6})`;
+    let dropDir = path.join(DIR_INBOX, base);
+    if (await existe(dropDir)) dropDir = path.join(DIR_INBOX, `${base}-${id6}b`);
+    await fs.mkdir(dropDir, { recursive: true });
+
+    // 1) El LIBRO + su sidecar de preservación (identidad: _id, ubicación, colección, valoración, nsfw, nfc…).
+    await fs.copyFile(origenPrincipal, path.join(dropDir, nombre));
+    if (conservar) await escribirSidecar(path.join(dropDir, nombre), doc);
+
+    // 2) El MATERIAL: cada adjunto de primer nivel (adjuntos[].nombre) viaja tal cual (carpeta → copia recursiva).
+    //    Se conservan sus metadatos (soloAdmin) para re-aplicarlos tras recatalogar.
+    const adjuntosMeta = [];
+    let copiados = 0, ausentes = 0;
+    for (const a of doc.adjuntos) {
+        const src = path.join(carpeta, a.nombre);
+        if (!(await existe(src))) { console.warn(`  ⚠️  adjunto «${a.nombre}» no está en disco: no viaja.`); ausentes++; continue; }
+        const dst = path.join(dropDir, a.nombre);
+        try {
+            const st = await fs.stat(src);
+            if (st.isDirectory()) await fs.cp(src, dst, { recursive: true, force: true });
+            else await fs.copyFile(src, dst);
+            adjuntosMeta.push({ nombre: a.nombre, soloAdmin: !!a.soloAdmin });
+            copiados++;
+        } catch (e) { console.warn(`  ⚠️  adjunto «${a.nombre}» no copiado: ${e.message}`); }
+    }
+
+    // 3) La GUÍA «libro-material»: PRINCIPAL fijado explícitamente + metadatos de adjuntos (soloAdmin).
+    await escribirGuia(dropDir, { accion: 'libro-material', libro_material: { principal: nombre, adjuntos: adjuntosMeta } });
+
+    // 4) TODO copiado al Inbox → ahora sí se recicla la carpeta CDU original (su material ya está duplicado).
+    const reciclada = await desvincularYReciclar(db, doc, 'reprocesado');
+    return { ok: true, inbox: path.basename(dropDir), material: copiados, materialAusente: ausentes, libroMaterial: true, reciclada, conservar };
+}
+
+/**
  * @param {object} [opciones]
  * @param {boolean} [opciones.conservar=true]  true = CONSERVADOR (escribe el sidecar .meta.json → preserva
  *   _id, ubicación, colección, obra, ISBN, valoración, NSFW, NFC; solo re-deriva los metadatos bibliográficos).
@@ -129,6 +178,17 @@ export async function reprocesarDocumento(db, doc, { conservar = true } = {}) {
     const tieneDocOriginal = nombre && EXT_DOC.includes(path.extname(nombre).toLowerCase());
     const id6 = String(doc._id).slice(-6);
     await fs.mkdir(DIR_INBOX, { recursive: true });
+
+    // ── LIBRO CON MATERIAL ADJUNTO (adjuntos[]): el material debe VIAJAR con el libro al reprocesar. Se arma un
+    //    folder-drop «libro-material» (recatalogado por el pipeline normal + material re-adjuntado). Requiere
+    //    fichero principal (un escaneo puro no es libro-material; ahí el material queda recuperable en Papelera). ──
+    const conMaterial = Array.isArray(doc.adjuntos) && doc.adjuntos.length > 0;
+    if (conMaterial && tieneDocOriginal) {
+        return reprocesarLibroConMaterial(db, doc, { conservar, carpeta, nombre, id6 });
+    }
+    if (conMaterial && !tieneDocOriginal) {
+        console.warn(`  ⚠️  ${doc._id}: material adjunto en un escaneo (sin fichero principal): irá a la Papelera (recuperable), no viaja al reprocesar.`);
+    }
 
     // ── Documento con fichero original (pdf/epub/…): enviar el fichero; descartar sidecars del sistema. ──
     if (tieneDocOriginal) {

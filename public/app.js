@@ -3660,7 +3660,8 @@ async function fichaReprocesar(id) {
       toast(r.motivo, 'bad');
       return;
     }
-    toast(`Reprocesando (${eleccion.conservar ? 'conservador' : 'nuevo desde cero'}): «${r.inbox}» al Inbox`);
+    const materialMsg = r.libroMaterial ? ` · 📎 ${r.material} adjunto(s) viajan con el libro` : '';
+    toast(`Reprocesando (${eleccion.conservar ? 'conservador' : 'nuevo desde cero'}): «${r.inbox}» al Inbox${materialMsg}`);
     go('search');
   } catch (e) {
     toast(e.message, 'bad');
