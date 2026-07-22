@@ -23,7 +23,7 @@ import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoCon
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel, rutasPublicas } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
-import { completarDoc } from './utils/completar-doc.js';   // adjuntar audio/texto a un doc ya catalogado
+import { completarDoc, adjuntarMaterial } from './utils/completar-doc.js';   // adjuntar audio/texto o material a un doc ya catalogado
 import { conectarDB } from './database.js';
 import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
 
@@ -272,6 +272,30 @@ app.post('/api/documentos/:id/completar', upload.array('files'), async (req, res
         res.status(r.ok ? 200 : 400).json(r);
     } catch (e) {
         await reciclar(subidos.map((f) => f.path), 'completar-error').catch(() => {});
+        res.status(500).json({ ok: false, motivo: e.message });
+    }
+});
+
+// ADJUNTAR MATERIAL VERBATIM a un documento ya catalogado: una CARPETA entera (software, datasets) o ficheros
+// sueltos (un PDF con la crítica del libro). Se copian a la carpeta del doc CONSERVANDO subcarpetas y quedan en
+// «🗂️ Archivos» + «📎 Material». El cliente manda los ficheros en `files` y, en paralelo, `rutas` = JSON con la
+// ruta relativa de cada uno (webkitRelativePath, para preservar la estructura al subir una carpeta).
+app.post('/api/documentos/:id/adjuntar', upload.array('files'), async (req, res) => {
+    const subidos = req.files || [];
+    if (!subidos.length) return res.status(400).json({ ok: false, motivo: 'no se recibió ningún fichero' });
+    let rutas = [];
+    try { rutas = JSON.parse(req.body?.rutas || '[]'); } catch { rutas = []; }
+    try {
+        const items = subidos.map((f, i) => ({
+            ruta: f.path,
+            // La ruta relativa (con subcarpetas) viaja en `rutas[i]`; si falta, se agrupa bajo «adjuntos/».
+            rel: (Array.isArray(rutas) && rutas[i]) ? String(rutas[i]) : ('adjuntos/' + (f.originalname || 'archivo')),
+        }));
+        const r = await adjuntarMaterial(await conectarDB(), req.params.id, { items });
+        await reciclar(subidos.map((f) => f.path), r.ok ? 'adjuntar-ingerido' : 'adjuntar-error').catch(() => {});
+        res.status(r.ok ? 200 : 400).json(r);
+    } catch (e) {
+        await reciclar(subidos.map((f) => f.path), 'adjuntar-error').catch(() => {});
         res.status(500).json({ ok: false, motivo: e.message });
     }
 });

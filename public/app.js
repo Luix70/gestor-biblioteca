@@ -2968,6 +2968,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
       <button class="fbtn" id="actArchivos" title="Explorar y descargar TODOS los archivos de este documento / su colección (también los no catalogados: vídeos, extras…)">🗂️ Archivos</button>
       <button class="fbtn admin-only" id="actAdjuntar" title="COMPLETAR el documento con los ficheros que le faltan: el PDF/EPUB de un audiolibro que solo tiene audio, o los audios de un libro que solo tiene texto. Se adjuntan a su carpeta: el audio va a la playlist y el texto al selector del visor.">📎 Adjuntar audio/texto</button>
+      <button class="fbtn admin-only" id="actMaterial" title="Adjuntar MATERIAL que acompaña al libro (una carpeta entera de software/datasets, o un PDF con su crítica…). Se guarda VERBATIM en su carpeta y se ve en «📎 Material» / «🗂️ Archivos». No se interpreta: acompaña al libro tal cual.">📦 Adjuntar material</button>
       <button class="fbtn admin-only" id="actImgs" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">🖼️ Imágenes</button>
       <button class="fbtn admin-only" id="actMedir" title="Estimar el tamaño físico del libro (cm) sobre la alfombrilla reglada">📐 Medir</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
@@ -3042,6 +3043,7 @@ function pintarDoc(r, ctx) {
     if ($('#fminEdit')) $('#fminEdit').onclick = () => fichaEditar(d, r); // «✏️ Editar» de la cabecera
     if ($('#actArchivos')) $('#actArchivos').onclick = () => explorarArchivos(d._id);
     if ($('#actAdjuntar')) $('#actAdjuntar').onclick = () => adjuntarADoc(d._id, r);
+    if ($('#actMaterial')) $('#actMaterial').onclick = () => adjuntarMaterialADoc(d._id);
     const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []), { url: r.archivo_url, nombre: r.nombre_archivo });
     if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
     if ($('#actImgsCar')) $('#actImgsCar').onclick = editarImgs; // duplicado en el encabezado del carrusel
@@ -6351,6 +6353,74 @@ function pintarExplorador(r) {
 // los audios de un libro que solo tiene texto. Sube a POST /api/documentos/:id/completar → el audio entra en la
 // playlist (`audios[]`), el texto en el selector del visor (`textos[]`) y el resto queda como material en su
 // carpeta. Solo AÑADE: nunca pisa ni borra lo que ya había.
+// Adjuntar MATERIAL VERBATIM (una carpeta entera o ficheros sueltos) a la carpeta del documento: software que
+// acompaña al libro, un PDF con su crítica, etc. Preserva la estructura de subcarpetas (webkitRelativePath) y
+// lo deja visible en «📎 Material» / «🗂️ Archivos». No se interpreta nada: acompaña al libro tal cual.
+async function adjuntarMaterialADoc(id) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;width:94vw;max-height:90vh;overflow:auto">
+    <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">📦 Adjuntar material</h3><button class="btn" id="matX">✕</button></div>
+    <p class="muted" style="font-size:13px;margin:8px 0">
+      Adjunta lo que ACOMPAÑA a este libro y encontraste después: el <b>software</b> de ejemplo (una carpeta
+      entera), un <b>PDF con su crítica</b>, datasets… Se guarda <b>tal cual</b> en la carpeta del documento
+      (conservando subcarpetas) y se ve en «📎 Material» y «🗂️ Archivos». Solo se AÑADE: nada se pisa.
+    </p>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <label class="btn" style="display:inline-block">📄 Elegir ficheros<input type="file" id="matFiles" multiple hidden></label>
+      <label class="btn" style="display:inline-block">📁 Elegir una carpeta<input type="file" id="matDir" webkitdirectory directory hidden></label>
+    </div>
+    <div id="matLista" class="muted" style="font-size:13px;margin:8px 0">(nada elegido)</div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="matCancel">Cancelar</button>
+      <button class="btn ok" id="matOk" disabled>Adjuntar</button>
+    </div>
+    <div id="matMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').style.display = 'block';
+  const cerrar = () => cerrarCmp();
+  $('#matX').onclick = cerrar;
+  $('#matCancel').onclick = cerrar;
+
+  let elegidos = [];
+  const mostrar = () => {
+    if (!elegidos.length) { $('#matLista').textContent = '(nada elegido)'; $('#matOk').disabled = true; return; }
+    // Para una carpeta, se resume por su nombre raíz + nº de ficheros; para sueltos, la lista.
+    const raices = new Set(elegidos.map((f) => (f.webkitRelativePath || f.name).split('/')[0]));
+    $('#matLista').innerHTML =
+      `<b>${elegidos.length}</b> fichero(s)` +
+      (raices.size ? ` en: ${[...raices].map((x) => esc(x)).join(' · ')}` : '');
+    $('#matOk').disabled = false;
+  };
+  $('#matFiles').onchange = (e) => { elegidos = [...(e.target.files || [])]; mostrar(); };
+  $('#matDir').onchange = (e) => { elegidos = [...(e.target.files || [])]; mostrar(); };
+
+  $('#matOk').onclick = async () => {
+    $('#matOk').disabled = true;
+    $('#matMsg').textContent = 'Subiendo…';
+    const fd = new FormData();
+    const rutas = [];
+    for (const f of elegidos) {
+      fd.append('files', f);
+      rutas.push(f.webkitRelativePath || f.name); // preserva la subcarpeta al subir una carpeta
+    }
+    fd.append('rutas', JSON.stringify(rutas));
+    try {
+      const resp = await fetch('/api/documentos/' + encodeURIComponent(id) + '/adjuntar', {
+        method: 'POST',
+        headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
+        body: fd,
+      });
+      const j = await resp.json();
+      if (!resp.ok || !j.ok) throw new Error(j.motivo || 'no se pudo adjuntar');
+      toast(`📦 ${j.copiados} fichero(s) adjuntado(s)`, 'ok');
+      cerrarCmp();
+      verDoc(id); // refrescar la ficha → aparece en «📎 Material»
+    } catch (e) {
+      $('#matMsg').textContent = e.message;
+      $('#matOk').disabled = false;
+    }
+  };
+}
+
 async function adjuntarADoc(id, r) {
   const esAudiolibro = (r.naturaleza || (r.doc && r.doc.naturaleza)) === 'audiolibro';
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;width:94vw;max-height:90vh;overflow:auto">

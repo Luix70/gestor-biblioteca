@@ -42,6 +42,72 @@ async function nombreLibre(dir, nombre) {
     return destino;
 }
 
+// Limpia una ruta RELATIVA subida (webkitRelativePath): quita «..», rutas absolutas y segmentos vacíos → nunca
+// escribe fuera de la carpeta del documento. Devuelve la ruta con el separador del sistema.
+function sanearRel(rel) {
+    const partes = String(rel || '')
+        .split(/[\\/]+/)
+        .map((s) => s.trim())
+        .filter((s) => s && s !== '.' && s !== '..');
+    return partes.join(path.sep);
+}
+// Ruta libre PRESERVANDO subcarpetas: si «Software/bin/run.exe» ya existe, prueba «Software/bin/run (2).exe».
+async function rutaLibrePreservando(base, rel) {
+    const destino0 = path.join(base, rel);
+    if (!(await fs.access(destino0).then(() => true, () => false))) return destino0;
+    const ext = path.extname(rel);
+    const sinExt = rel.slice(0, rel.length - ext.length);
+    for (let i = 2; ; i++) {
+        const d = path.join(base, `${sinExt} (${i})${ext}`);
+        if (!(await fs.access(d).then(() => true, () => false))) return d;
+    }
+}
+
+/**
+ * ADJUNTAR MATERIAL VERBATIM a un documento YA catalogado: una CARPETA entera (software de ejemplo, datasets)
+ * o un fichero suelto (un PDF con la crítica del libro), encontrados DESPUÉS de ingerir. Se copian a la carpeta
+ * del documento CONSERVANDO su estructura de subcarpetas, y quedan visibles en «🗂️ Archivos» y en la sección
+ * «📎 Material» de la ficha. A diferencia de `completarDoc` (que clasifica cada fichero como audio/texto/visor),
+ * aquí NADA se interpreta: es material que ACOMPAÑA al libro, tal cual. Solo AÑADE; nunca pisa (renombra « (2)»).
+ * @param items [{ ruta: <abs temporal>, rel: <ruta relativa que preserva la carpeta, p. ej. "Soft/bin/x.exe"> }]
+ */
+export async function adjuntarMaterial(db, id, { items = [] } = {}) {
+    if (!ObjectId.isValid(String(id))) return { ok: false, motivo: 'id inválido' };
+    if (!items.length) return { ok: false, motivo: 'no se recibió nada que adjuntar' };
+    const bib = db.collection('biblioteca');
+    const doc = await bib.findOne({ _id: new ObjectId(String(id)) });
+    if (!doc) return { ok: false, motivo: 'documento no encontrado' };
+    const carpeta = carpetaDeDoc(doc);
+    if (!carpeta) return { ok: false, motivo: 'el documento no tiene carpeta (ruta_base) donde adjuntar' };
+    await fs.mkdir(carpeta, { recursive: true });
+
+    const topNuevos = new Set();   // elementos de primer nivel (carpeta o fichero) que se han añadido
+    let copiados = 0;
+    for (const it of items) {
+        const rel = sanearRel(it.rel);
+        if (!rel) continue;
+        const destino = await rutaLibrePreservando(carpeta, rel);
+        try {
+            await fs.mkdir(path.dirname(destino), { recursive: true });
+            await fs.copyFile(it.ruta, destino);
+            copiados++;
+            topNuevos.add(rel.split(path.sep)[0]);
+        } catch (e) {
+            console.warn(`[Adjuntar] no se pudo copiar «${rel}»: ${e.message}`);
+        }
+    }
+    if (!copiados) return { ok: false, motivo: 'no se pudo copiar ningún fichero' };
+
+    // `material_adjunto` es el CONTADOR de la sección «📎 Material» (lo fija también la ingesta transmedia). Se
+    // SUMA el nº de elementos de primer nivel nuevos. `ruta_fija` + marcador = Integridad no lo poda y el
+    // explorador de la ficha sube hasta la raíz y lo muestra.
+    const material = (Number(doc.material_adjunto) || 0) + topNuevos.size;
+    await bib.updateOne({ _id: doc._id }, { $set: { ruta_fija: true, material_adjunto: material, fecha_actualizacion: new Date() } });
+    await fs.writeFile(path.join(carpeta, MARCA_RUTA_FIJA), `material adjunto: ${doc.titulo || doc._id}\n`).catch(() => {});
+    await indexarDoc(db, doc._id).catch(() => { /* índice best-effort */ });
+    return { ok: true, _id: String(doc._id), copiados, elementos: topNuevos.size, material_adjunto: material };
+}
+
 /**
  * Adjunta `ficheros` (ya subidos a un temporal) al documento `id`.
  * @param ficheros  [{ ruta: <abs del temporal>, nombre: <nombre original> }]

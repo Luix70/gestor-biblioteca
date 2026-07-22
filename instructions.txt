@@ -1048,6 +1048,20 @@ de ficheros clasificado por CDU.
       antes el dato estaba en Mongo y la carpeta en disco, pero la ficha NO lo decía por ningún sitio —
       había que adivinar que hay que pulsar «🗂️ Archivos». Que algo viaje con el libro y no se vea es como
       si no viajara.
+    · ADJUNTAR MATERIAL A POSTERIORI (ficha → «📦 Adjuntar material», admin): cuando el software/crítica/dataset
+      que acompaña a un libro aparece DESPUÉS de ingerirlo. Sube ficheros sueltos o una CARPETA entera
+      (webkitdirectory → se preserva la estructura de subcarpetas) a la carpeta del documento. Cliente manda
+      `files` + `rutas` (JSON con el webkitRelativePath de cada uno). POST /api/documentos/:id/adjuntar →
+      utils/completar-doc.js·adjuntarMaterial: copia VERBATIM conservando subcarpetas (nunca pisa: « (2)»),
+      suma a `material_adjunto`, pone ruta_fija + marcador. No interpreta nada (a diferencia de completarDoc,
+      que clasifica audio/texto): es material que ACOMPAÑA, tal cual. Se ve en «📎 Material» y «🗂️ Archivos».
+      ⚠ QUE EL MATERIAL VIAJE CON EL LIBRO: al cambiar la CDU, `reubicarPorCdu` ANTES saltaba el movimiento
+      para TODO `ruta_fija` (pensado para colecciones transmedia); ahora solo lo salta para MIEMBROS de
+      colección (doc.coleccion / naturaleza audiolibro|software), de modo que un LIBRO SUELTO con material SÍ
+      se reubica y el `rename` de moverCarpetaConVerificacion se lleva la carpeta ENTERA (libro + material) a
+      la rama nueva. Ese mover se hizo además robusto para SUBCARPETAS en el camino cross-device (fs.cp
+      recursivo en vez de copyFile por entrada, que dejaba el material sin copiar). (Reprocesar un libro con
+      material: el material va a la Papelera —recuperable— hasta que se implemente el viaje automático.)
     · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
       principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
       El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`

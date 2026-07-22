@@ -186,17 +186,16 @@ export async function moverCarpetaConVerificacion(origen, destino, archivosEnBD 
     await fs.mkdir(destino, { recursive: true });
     const archivos = await fs.readdir(origen);
 
-    // a) Copiar
-    for (const archivo of archivos) {
-        await fs.copyFile(path.join(origen, archivo), path.join(destino, archivo));
-    }
+    // a) Copiar RECURSIVO (fs.cp): un `copyFile` por entrada fallaba con SUBCARPETAS (material adjunto: código,
+    //    datasets…), que quedaban SIN copiar → se perdían al borrar el origen. fs.cp se lleva el árbol entero.
+    await fs.cp(origen, destino, { recursive: true, force: true });
 
-    // b) Verificar tamaños
+    // b) Verificar tamaños (solo FICHEROS de primer nivel: el tamaño de la ENTRADA de un directorio no es
+    //    comparable y daría un falso fallo; el contenido de los subárboles lo garantiza fs.cp).
     for (const archivo of archivos) {
-        const [stOrig, stDest] = await Promise.all([
-            fs.stat(path.join(origen, archivo)),
-            fs.stat(path.join(destino, archivo)),
-        ]);
+        const stOrig = await fs.stat(path.join(origen, archivo));
+        if (stOrig.isDirectory()) continue;
+        const stDest = await fs.stat(path.join(destino, archivo));
         if (stOrig.size !== stDest.size) {
             await fs.rm(destino, { recursive: true, force: true });
             throw new Error(
@@ -240,11 +239,15 @@ const union = (a, b, clave) => {
 export async function reubicarPorCdu(doc, nuevaCdu) {
     const destinoCdu = String(nuevaCdu || '').trim();
     if (!destinoCdu || destinoCdu === doc.cdu) return null;
-    // ÁRBOL PRESERVADO (transmedia/audiolibro): se conserva la estructura de disco intacta → se actualiza la
-    // CDU en la BD pero NO se mueve la carpeta. La CDU de la COLECCIÓN es lo que define su rama; cada miembro
-    // la comparte y su fichero no se toca.
-    if (doc.ruta_fija) {
-        return { set: { cdu: destinoCdu }, alertas: ['CDU actualizada en BD; documento de árbol preservado (transmedia): no se reubica la carpeta.'] };
+    // ÁRBOL PRESERVADO DE UNA COLECCIÓN (transmedia / audiolibro / software): su rama la define la COLECCIÓN,
+    // compartida por todos los miembros → se actualiza la CDU en la BD pero NO se mueve la carpeta.
+    // PERO un LIBRO SUELTO con material adjunto también lleva `ruta_fija` (para que Integridad no pode el
+    // material), y ESE sí debe reubicarse al cambiar su CDU: el `rename` de más abajo se lleva la carpeta
+    // ENTERA —el libro Y su material— a la rama nueva. Si lo saltáramos, cambiar la CDU dejaría la carpeta (con
+    // sus adjuntos) huérfana en la rama vieja. Se distingue por pertenecer a una colección o ser de esas
+    // naturalezas; un libro-con-material no tiene colección.
+    if (doc.ruta_fija && (doc.coleccion || doc.naturaleza === 'audiolibro' || doc.naturaleza === 'software')) {
+        return { set: { cdu: destinoCdu }, alertas: ['CDU actualizada en BD; documento de árbol preservado (colección): no se reubica la carpeta.'] };
     }
     if (doc.obra) {
         return { set: { cdu: destinoCdu }, alertas: ['CDU actualizada en BD; es tomo de obra: no se reubica la carpeta.'] };
