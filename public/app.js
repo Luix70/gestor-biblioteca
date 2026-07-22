@@ -2725,7 +2725,13 @@ function pintarDoc(r, ctx) {
       });
       return lineas.length ? lineas.join('<br>') : null;
     })(),
-    _editorial: r.editorial ? esc(r.editorial) : null,
+    // Editorial DRILLABLE → Catálogo filtrado por esa editorial (mismo destino que «Ver en Catálogo» de su
+    // ficha). Solo enlaza si tenemos su ObjectId (r.editorial_id); si no, texto plano.
+    _editorial: r.editorial
+      ? (r.editorial_id
+          ? `<a class="rowlink" data-ediid="${esc(r.editorial_id)}" data-edinom="${esc(r.editorial)}" title="Ver todos los libros de esta editorial en el Catálogo">${esc(r.editorial)}</a>`
+          : esc(r.editorial))
+      : null,
     // Los contribuyentes ya se muestran junto a los autores (arriba), no en fila aparte.
     _contribuciones: null,
     _coleccion: r.coleccion
@@ -2896,7 +2902,9 @@ function pintarDoc(r, ctx) {
     ['Editorial', especiales._editorial],
     ['Colección', especiales._coleccion],
     ['Revista', especiales._revista],
-    ['CDU', d.cdu ? `<span class="mono">${esc(d.cdu)}</span>` : null],
+    // CDU DRILLABLE → Catálogo filtrado por esa misma CDU (mismo destino que el contador de la tabla de
+    // clasificación). data-* (no onclick inline): un código CDU puede llevar apóstrofo («141.78:81'37»).
+    ['CDU', d.cdu ? `<a class="rowlink mono" data-clascdu="${esc(d.cdu)}" title="Ver todo lo de esta CDU en el Catálogo">${esc(d.cdu)}</a>` : null],
     ['ISBN', especiales._isbn],
     ['ISSN', especiales._issn],
     ['DOI', especiales._doi],
@@ -3080,8 +3088,12 @@ function pintarDoc(r, ctx) {
   }
   $$('#p-detalle [data-colid]').forEach((a) => (a.onclick = () => verColeccion(a.dataset.colid)));
   $$('#p-detalle [data-q]').forEach((a) => (a.onclick = () => buscarTexto(a.dataset.q)));
-  // Autor/contribuyente clicable → abre su ficha (modal) sobre la ficha del libro. (La editorial, en el futuro.)
+  // Autor/contribuyente clicable → abre su ficha (modal) sobre la ficha del libro.
   $$('#p-detalle [data-autid]').forEach((a) => (a.onclick = () => autorFicha(a.dataset.autid)));
+  // Editorial clicable → Catálogo filtrado por esa editorial (mismo destino que «Ver en Catálogo» de su ficha).
+  $$('#p-detalle [data-ediid]').forEach((a) => (a.onclick = () => irBusquedaFiltro({ editorial: a.dataset.ediid, etiqueta: '🏢 ' + (a.dataset.edinom || 'editorial') })));
+  // CDU clicable → Catálogo filtrado por esa misma clasificación (reusa el filtro de la tabla de clasificación).
+  $$('#p-detalle [data-clascdu]').forEach((a) => (a.onclick = () => filtrarPorClasificacion('cdu', a.dataset.clascdu)));
   // ID de Mongo → ver el documento EXACTO de la base (JSON, solo lectura).
   $$('#p-detalle [data-oid]').forEach((a) => (a.onclick = () => verDocumentoCrudo(a.dataset.oid)));
   carIdx = 0;

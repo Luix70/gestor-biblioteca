@@ -491,8 +491,13 @@ de ficheros clasificado por CDU.
 
   ── FICHA DE UN DOCUMENTO ────────────────────────────────────────────────────
     Datos catalográficos; AUTOR y contribuyentes (traductor/ilustrador/…) "clicables"
-    (abren la ficha del autor); identificadores (ISBN/ISSN) "clicables" (buscan todo
-    lo que comparte ese identificador); "otras ediciones" (ISBN alternativos con rol);
+    (abren la ficha del autor); EDITORIAL clicable → Catálogo filtrado por esa editorial
+    (mismo destino que «Ver en Catálogo» de su ficha; necesita `editorial_id`, que la API
+    de la ficha ahora incluye); la CDU de la fila de datos también clicable → Catálogo
+    filtrado por esa clasificación (mismo `filtrarPorClasificacion` que el contador de la
+    tabla de clasificación; por data-attribute, no onclick inline, porque un código CDU
+    puede llevar apóstrofo «141.78:81'37»); identificadores (ISBN/ISSN) "clicables" (buscan
+    todo lo que comparte ese identificador); "otras ediciones" (ISBN alternativos con rol);
     SINOPSIS; CDU y demás clasificaciones con su título + ⓘ (texto largo) + nº de
     documentos que comparten el código (clic = búsqueda filtrada); chip 📍 con la
     UBICACIÓN (clic = ver los libros de esa estantería; doble clic / pulsación larga

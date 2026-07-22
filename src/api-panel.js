@@ -1331,6 +1331,7 @@ export function rutasPanel() {
 
             res.json({
                 ok: true, doc: limpio, autores, autores_ids, editorial, coleccion, contribuciones,
+                editorial_id: doc.editorial ? String(doc.editorial) : null,   // para enlazar la editorial de la ficha al Catálogo filtrado
                 coleccion_id: doc.coleccion ? String(doc.coleccion) : null,
                 coleccion_tipo: colDoc?.tipo || null, coleccion_issn: colDoc?.issn || null,
                 cdu_desc: cdesc, clasificaciones, obra,
