@@ -6321,8 +6321,13 @@ function materialSeccionHTML(d) {
       const tam = a.tipo === 'carpeta' ? '' : a.bytes ? ` · ${fmtBytes(a.bytes)}` : '';
       const lock = a.soloAdmin ? ' <span class="tag mut" title="Solo administradores">🔒</span>' : '';
       const bajar = `<a class="rbtn" href="${dl('adjunto=' + encodeURIComponent(a.nombre))}" download title="Descargar este adjunto">⬇</a>`;
+      // Reemplazar SOLO tiene sentido para un fichero (una carpeta no se sustituye por un fichero).
+      const repl = a.tipo !== 'carpeta'
+        ? `<button class="rbtn" data-adjrepl="${esc(a.nombre)}" title="Reemplazar este fichero por una versión editada (descárgalo, edítalo y súbelo de nuevo)">🔄</button>`
+        : '';
       const acc = admin
-        ? `<button class="rbtn" data-adjlock="${esc(a.nombre)}" data-on="${a.soloAdmin ? 1 : 0}" title="${a.soloAdmin ? 'Hacerlo visible a invitados' : 'Marcar «solo administradores»'}">${a.soloAdmin ? '🔓' : '🔒'}</button>` +
+        ? repl +
+          `<button class="rbtn" data-adjlock="${esc(a.nombre)}" data-on="${a.soloAdmin ? 1 : 0}" title="${a.soloAdmin ? 'Hacerlo visible a invitados' : 'Marcar «solo administradores»'}">${a.soloAdmin ? '🔓' : '🔒'}</button>` +
           `<button class="rbtn bad" data-adjdel="${esc(a.nombre)}" title="Quitar este adjunto (va a la Papelera)">🗑</button>`
         : '';
       return `<div class="row" style="align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--line)"><span>${ic}</span><span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(a.nombre)}<span class="muted" style="font-size:11px">${tam}</span>${lock}</span>${bajar}${acc}</div>`;
@@ -6369,8 +6374,43 @@ function attachMaterial(id) {
         }
       }),
   );
+  document.querySelectorAll('#matBody [data-adjrepl]').forEach(
+    (b) => (b.onclick = () => reemplazarAdjuntoDoc(id, b.dataset.adjrepl)),
+  );
   const add = $('#matAddMore');
   if (add) add.onclick = () => adjuntarMaterialADoc(id);
+}
+
+// Reemplazar un adjunto (fichero) por una versión editada: abre el selector de ficheros, sube el elegido a
+// POST /documentos/:id/adjuntos/reemplazar (conserva el nombre y la marca «solo admin»; la versión vieja va a
+// la Papelera) y refresca la ficha. Flujo pensado para «descargo el .docx del comentario, lo edito y lo re-subo».
+function reemplazarAdjuntoDoc(id, nombre) {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.style.display = 'none';
+  document.body.appendChild(inp);
+  inp.onchange = async () => {
+    const file = (inp.files || [])[0];
+    inp.remove();
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('nombre', nombre);
+    try {
+      const resp = await fetch('/api/documentos/' + encodeURIComponent(id) + '/adjuntos/reemplazar', {
+        method: 'POST',
+        headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
+        body: fd,
+      });
+      const j = await resp.json();
+      if (!resp.ok || !j.ok) throw new Error(j.motivo || 'no se pudo reemplazar');
+      toast(`🔄 «${nombre}» reemplazado (${fmtBytes(j.bytes)})`);
+      verDoc(id);
+    } catch (e) {
+      toast(e.message, 'bad');
+    }
+  };
+  inp.click();
 }
 
 async function cargarMaterialFicha(id) {
@@ -6409,8 +6449,11 @@ function ensureFlCss() {
     + '.fl-notas ul,.fl-editor ul,.fl-notas ol,.fl-editor ol{margin:.3em 0 .3em 1.3em}'
     + '.fl-notas{overflow-wrap:anywhere}'
     + '.fl-editor{min-height:180px;max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg)}'
-    + '.fl-tb{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}'
-    + '.fl-tb button{padding:4px 9px;font-size:13px;line-height:1.1}';
+    + '.fl-tb{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;align-items:center}'
+    + '.fl-tb button{padding:4px 9px;font-size:13px;line-height:1.1}'
+    // Selector de color: pastilla compacta con el emoji + el swatch nativo pequeño.
+    + '.fl-swatch{display:inline-flex;align-items:center;gap:3px;padding:2px 5px;border:1px solid var(--line);border-radius:6px;cursor:pointer;font-size:13px}'
+    + '.fl-swatch input[type=color]{width:22px;height:20px;padding:0;border:none;background:none;cursor:pointer}';
   document.head.appendChild(s);
 }
 const _fechaCorta = (v) => { try { return v ? new Date(v).toLocaleDateString('es-ES') : ''; } catch { return ''; } };
@@ -6501,14 +6544,15 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
         <button data-cmd="bold" title="Negrita"><b>B</b></button>
         <button data-cmd="italic" title="Cursiva"><i>I</i></button>
         <button data-cmd="underline" title="Subrayado"><u>U</u></button>
+        <label class="fl-swatch" title="Color del texto: elige y se aplica a lo seleccionado">🎨<input type="color" id="flColor" value="#e23b3b"></label>
         <button data-block="h2" title="Título">T1</button>
         <button data-block="h3" title="Subtítulo">T2</button>
         <button data-cmd="insertUnorderedList" title="Lista">• Lista</button>
         <button data-cmd="insertOrderedList" title="Lista numerada">1. Lista</button>
         <button data-block="blockquote" title="Cita">❝ Cita</button>
+        <button data-normal="1" title="Texto normal: quita título/cita, negrita, cursiva y color de lo seleccionado">¶ Normal</button>
         <button data-cmd="createLink" title="Enlace">🔗</button>
         <button data-img="1" title="Insertar imagen">🖼️</button>
-        <button data-cmd="removeFormat" title="Quitar formato">✖ Formato</button>
       </div>
       <div class="fl-editor" id="flNotas" contenteditable="true">${f.notas_html || ''}</div>
       <input type="file" id="flImgFile" accept="image/*" hidden>
@@ -6531,19 +6575,25 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
   stars.querySelectorAll('.fl-star').forEach((s) => (s.onclick = () => { valoracion = Number(s.dataset.v); pintarStars(); }));
   $('#flStarClr').onclick = () => { valoracion = 0; pintarStars(); };
 
-  // Barra de formato. styleWithCSS=false → etiquetas semánticas (no `style=`). Los bloques (h2/h3/cita) usan
-  // formatBlock; alternan (si ya estás en un h2, vuelve a párrafo). El foco se devuelve al editor tras pulsar.
+  // Barra de formato. styleWithCSS=false → etiquetas semánticas (no `style=`) para negrita/cursiva/títulos; el
+  // COLOR sí usa CSS (span style="color:…", que el saneador conserva). Los bloques NO CONMUTAN (aplican siempre,
+  // predecible); para volver a texto normal está el botón «¶ Normal» (antes había que re-pulsar el título, poco
+  // descubrible). Guardamos la selección para restaurarla tras abrir el color / el selector de imagen (que quitan
+  // el foco del editor y perderían la selección → el formato se aplicaría en el sitio equivocado).
   const notas = $('#flNotas');
+  let rangoFicha = null;
+  const guardarRango = () => { const s = window.getSelection(); if (s && s.rangeCount && notas.contains(s.anchorNode)) rangoFicha = s.getRangeAt(0).cloneRange(); };
+  const restaurarRango = () => { if (!rangoFicha) return; const s = window.getSelection(); s.removeAllRanges(); s.addRange(rangoFicha); };
+  ['keyup', 'mouseup', 'blur'].forEach((ev) => notas.addEventListener(ev, guardarRango));
   const ejecutar = (fn) => { notas.focus(); try { document.execCommand('styleWithCSS', false, false); } catch {} fn(); };
   $('#flTb').querySelectorAll('button').forEach((b) => (b.onclick = (e) => {
     e.preventDefault();
     if (b.dataset.img) { $('#flImgFile').click(); return; }
-    if (b.dataset.block) {
-      const tag = b.dataset.block;
-      const dentro = document.queryCommandValue('formatBlock').toLowerCase().includes(tag);
-      ejecutar(() => document.execCommand('formatBlock', false, dentro ? 'p' : tag));
+    if (b.dataset.normal) { // «Normal»: bloque a párrafo + limpia negrita/cursiva/color de lo seleccionado
+      ejecutar(() => { document.execCommand('formatBlock', false, 'p'); document.execCommand('removeFormat', false, null); });
       return;
     }
+    if (b.dataset.block) { ejecutar(() => document.execCommand('formatBlock', false, b.dataset.block)); return; } // aplica siempre
     if (b.dataset.cmd === 'createLink') {
       const url = prompt('Dirección del enlace (https://…):', 'https://');
       if (url) ejecutar(() => document.execCommand('createLink', false, url));
@@ -6551,6 +6601,15 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
     }
     ejecutar(() => document.execCommand(b.dataset.cmd, false, null));
   }));
+  // Color de texto: input nativo. Aplica foreColor CON CSS (→ span style="color:…") a la selección guardada.
+  const colorInp = $('#flColor');
+  if (colorInp) colorInp.onchange = () => {
+    notas.focus();
+    restaurarRango();
+    try { document.execCommand('styleWithCSS', false, true); } catch {}
+    document.execCommand('foreColor', false, colorInp.value);
+    try { document.execCommand('styleWithCSS', false, false); } catch {} // volver a etiquetas semánticas
+  };
 
   // Crea el borrador en Mongo la primera vez que hace falta un id (imagen o guardar) → no deja fichas vacías.
   async function asegurarId() {
@@ -6575,6 +6634,7 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
       const j = await resp.json();
       if (!resp.ok || !j.ok) throw new Error(j.motivo || 'no se pudo subir');
       notas.focus();
+      restaurarRango(); // el selector de ficheros quitó el foco: volver a donde estaba el cursor
       document.execCommand('insertImage', false, j.url);
       $('#flMsg').textContent = '';
     } catch (err) { $('#flMsg').textContent = 'Imagen: ' + err.message; }

@@ -21,6 +21,7 @@ import { ObjectId } from 'mongodb';
 import { carpetaDeDoc, DIR_CDU, MARCA_RUTA_FIJA } from '../mantenimiento/util-mantenimiento.js';
 import { esAudio } from './lector-audio.js';
 import { indexarDoc } from './indice-busqueda.js';
+import { reciclar } from './papelera.js'; // la versión vieja de un adjunto reemplazado va a la Papelera (nunca borrar)
 
 // Textos ABRIBLES en el visor de la ficha (los que sabe abrir `initLector`), ext → formato del $jsonSchema.
 const FORMATO_TEXTO = {
@@ -116,6 +117,46 @@ export async function adjuntarMaterial(db, id, { items = [], soloAdmin = false }
     await fs.writeFile(path.join(carpeta, MARCA_RUTA_FIJA), `material adjunto: ${doc.titulo || doc._id}\n`).catch(() => {});
     await indexarDoc(db, doc._id).catch(() => { /* índice best-effort */ });
     return { ok: true, _id: String(doc._id), copiados, elementos: topNuevos.size, material_adjunto: adjuntos.length };
+}
+
+/**
+ * REEMPLAZAR un adjunto de tipo FICHERO por una versión nueva (flujo «descárgalo, edítalo, vuélvelo a subir»):
+ * se recicla la versión vieja a la Papelera (nunca se pierde) y el fichero nuevo ocupa su sitio CONSERVANDO el
+ * `nombre` del adjunto (su identidad y su enlace de descarga no cambian) y su marca `soloAdmin`. Solo aplica a
+ * un adjunto `tipo:'fichero'` — una carpeta no se «reemplaza» por un fichero. Se actualizan bytes y fecha.
+ * @param nombre  nombre del adjunto (entrada de primer nivel, única en disco).
+ * @param rutaTmp ruta absoluta del fichero subido (temporal de multer).
+ */
+export async function reemplazarAdjunto(db, id, { nombre, rutaTmp } = {}) {
+    if (!ObjectId.isValid(String(id))) return { ok: false, motivo: 'id inválido' };
+    if (!nombre || /[\\/]/.test(nombre) || nombre === '..' || nombre === '.') return { ok: false, motivo: 'adjunto no válido' };
+    if (!rutaTmp) return { ok: false, motivo: 'no se recibió el fichero de reemplazo' };
+    const bib = db.collection('biblioteca');
+    const doc = await bib.findOne({ _id: new ObjectId(String(id)) });
+    if (!doc) return { ok: false, motivo: 'documento no encontrado' };
+    const carpeta = carpetaDeDoc(doc);
+    if (!carpeta) return { ok: false, motivo: 'el documento no tiene carpeta (ruta_base)' };
+    const adj = (doc.adjuntos || []).find((a) => a.nombre === nombre);
+    if (!adj) return { ok: false, motivo: 'adjunto no encontrado' };
+    if (adj.tipo === 'carpeta') return { ok: false, motivo: 'no se puede reemplazar una carpeta (solo un fichero)' };
+
+    // Destino DENTRO de la carpeta del documento (guarda contra path traversal).
+    const destino = path.resolve(path.join(carpeta, nombre));
+    const raiz = path.resolve(carpeta);
+    if (destino !== raiz && !destino.startsWith(raiz + path.sep)) return { ok: false, motivo: 'ruta no permitida' };
+
+    // Reciclar la versión vieja (si está en disco) a la Papelera y colocar la nueva con el MISMO nombre.
+    if (await fs.access(destino).then(() => true, () => false)) {
+        await reciclar([destino], `adjunto-reemplazado-${doc.titulo || doc._id}`).catch(() => { /* best-effort */ });
+    }
+    await fs.copyFile(rutaTmp, destino);
+    let bytes = 0; try { bytes = (await fs.stat(destino)).size; } catch { /* recién copiado */ }
+
+    // Actualizar SOLO esta entrada de adjuntos[] (bytes + fecha); conservar soloAdmin y el resto.
+    const adjuntos = (doc.adjuntos || []).map((a) => (a.nombre === nombre ? { ...a, tipo: 'fichero', bytes, fecha: new Date() } : a));
+    await bib.updateOne({ _id: doc._id }, { $set: { adjuntos, ruta_fija: true, fecha_actualizacion: new Date() } });
+    await indexarDoc(db, doc._id).catch(() => { /* índice best-effort */ });
+    return { ok: true, _id: String(doc._id), nombre, bytes };
 }
 
 /**

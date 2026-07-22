@@ -23,7 +23,7 @@ import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoCon
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel, rutasPublicas } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
-import { completarDoc, adjuntarMaterial } from './utils/completar-doc.js';   // adjuntar audio/texto o material a un doc ya catalogado
+import { completarDoc, adjuntarMaterial, reemplazarAdjunto } from './utils/completar-doc.js';   // adjuntar audio/texto o material a un doc ya catalogado
 import { conectarDB } from './database.js';
 import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
 import { ObjectId } from 'mongodb';
@@ -298,6 +298,22 @@ app.post('/api/documentos/:id/adjuntar', upload.array('files'), async (req, res)
         res.status(r.ok ? 200 : 400).json(r);
     } catch (e) {
         await reciclar(subidos.map((f) => f.path), 'adjuntar-error').catch(() => {});
+        res.status(500).json({ ok: false, motivo: e.message });
+    }
+});
+
+// REEMPLAZAR un adjunto (fichero) por una versión editada: «descárgalo, edítalo, súbelo de nuevo». Mantiene el
+// nombre del adjunto y su marca «solo admin»; la versión vieja va a la Papelera (recuperable). Solo admin (la
+// puerta global ya lo exige). Body: `file` (multipart) + `nombre` (el adjunto a reemplazar).
+app.post('/api/documentos/:id/adjuntos/reemplazar', upload.single('file'), async (req, res) => {
+    const sub = req.file;
+    if (!sub) return res.status(400).json({ ok: false, motivo: 'no se recibió ningún fichero' });
+    try {
+        const r = await reemplazarAdjunto(await conectarDB(), req.params.id, { nombre: String(req.body?.nombre || ''), rutaTmp: sub.path });
+        await reciclar([sub.path], r.ok ? 'reemplazar-ingerido' : 'reemplazar-error').catch(() => {});
+        res.status(r.ok ? 200 : 400).json(r);
+    } catch (e) {
+        await reciclar([sub.path], 'reemplazar-error').catch(() => {});
         res.status(500).json({ ok: false, motivo: e.message });
     }
 });

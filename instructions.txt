@@ -1080,8 +1080,12 @@ de ficheros clasificado por CDU.
       (solo el documento) · ?adjunto=<nombre> (uno concreto, carpeta→zip). Un invitado no baja los soloAdmin
       (ni sueltos ni dentro del ZIP «todo»). Los enlaces <a download> llevan `?token=` porque no mandan el
       Bearer y el servidor necesita el rol. (3) QUITAR un adjunto (POST /documentos/:id/adjuntos/borrar) → a la
-      Papelera (nunca borra). La sección «📎 Material» de la ficha lista los adjuntos con su descarga y, para
-      admin, los controles 🔒/🗑 + «Adjuntar más». Al adjuntar se puede marcar «🔒 Solo administradores».
+      Papelera (nunca borra). (4) REEMPLAZAR un fichero adjunto (POST /documentos/:id/adjuntos/reemplazar,
+      multer `file`+`nombre`; utils/completar-doc.js·reemplazarAdjunto): flujo «descárgalo, edítalo y súbelo de
+      nuevo» — la versión vieja va a la Papelera, la nueva ocupa su sitio CONSERVANDO el `nombre` (mismo enlace)
+      y la marca `soloAdmin`; solo para tipo:'fichero' (una carpeta no se reemplaza por un fichero). La sección
+      «📎 Material» de la ficha lista los adjuntos con su descarga y, para admin, los controles 🔄/🔒/🗑 +
+      «Adjuntar más». Al adjuntar se puede marcar «🔒 Solo administradores».
     · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
       principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
       El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`
@@ -1111,14 +1115,20 @@ de ficheros clasificado por CDU.
     · UI: sección plegable «📖 Fichas de lectura» en la ficha del DOCUMENTO, la OBRA y la COLECCIÓN (carga
       perezosa al desplegar). Lista cada ficha (título, estado, lector, rango de fechas, ★valoración y las
       notas ya renderizadas) con ✏️ editar / 🗑 borrar, y «➕ Nueva ficha de lectura». El EDITOR (modal) trae
-      los campos + un editor de TEXTO RICO (contenteditable + barra: negrita/cursiva/subrayado, T1/T2 títulos,
-      listas, cita, enlace, IMAGEN, quitar formato). Usa execCommand con styleWithCSS=false → el formato llega
-      como etiquetas SEMÁNTICAS (<b>/<h2>/…), que el saneador conserva.
+      los campos + un editor de TEXTO RICO (contenteditable + barra: negrita/cursiva/subrayado, COLOR de texto
+      (🎨), T1/T2 títulos, listas, cita, IMAGEN, enlace, y «¶ Normal»). Usa execCommand con styleWithCSS=false →
+      el formato llega como etiquetas SEMÁNTICAS (<b>/<h2>/…), que el saneador conserva; el COLOR sí usa CSS
+      (foreColor con styleWithCSS=true → span style="color:…"). Los bloques (T1/T2/Cita) NO CONMUTAN (aplican
+      siempre, predecible); «¶ Normal» vuelve a párrafo y limpia negrita/cursiva/color de lo seleccionado (antes
+      había que RE-pulsar el título para revertir, poco descubrible). La selección se guarda/restaura al abrir el
+      color o el selector de imagen (que quitan el foco del editor).
     · TEXTO RICO SEGURO: el HTML se SANEA siempre en el servidor al guardar (src/utils/sanear-html.js, cheerio,
       lista blanca de etiquetas/atributos) — se almacena y se re-inyecta, así que un <script>/onclick guardado
-      sería un XSS persistente. Se quitan style/class/on*; los enlaces solo http(s)/mailto (target=_blank
-      rel=noopener); las imágenes SOLO /recursos/… (nada remoto ni data:). Como el saneador quita `style`, las
-      imágenes se acotan por CSS del CONTENEDOR (.fl-notas img), no con estilo inline.
+      sería un XSS persistente. Se quitan class/on* y todo atributo no listado; el `style` se PERMITE pero
+      SANEADO a solo `color`/`background-color` con valor seguro (nombre/#hex/rgb(); nada de url()/expression()) →
+      así sobrevive el «texto de colores» sin abrir la puerta a un style arbitrario (CSS_OK + sanearStyle). Los
+      enlaces solo http(s)/mailto (target=_blank rel=noopener); las imágenes SOLO /recursos/… (nada remoto ni
+      data:). Las imágenes se acotan además por CSS del CONTENEDOR (.fl-notas img), no con estilo inline.
     · IMÁGENES del texto: se SUBEN al servidor (nunca base64 → no infla Mongo) a POST /api/fichas-lectura/:id/
       imagen (multer; valida que es imagen por sus BYTES: JPG/PNG/GIF/WebP, máx 8 MB) → se guardan en
       DIR_CDU/.fichas-lectura/<id>/ (carpeta OCULTA con punto: express.static la sirve por dotfiles:'allow' e
