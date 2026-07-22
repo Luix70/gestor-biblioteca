@@ -53,6 +53,7 @@ import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { reconstruirInventarioObra } from './utils/obras.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { CATEGORIAS_SCRIPTS, catalogoParaPanel, scriptPorId, construirArgv } from './utils/catalogo-scripts.js';
+import { listarFichas, crearFicha, actualizarFicha, borrarFicha, entidadExiste, COL_POR_AMBITO } from './utils/fichas-lectura.js';
 import { lanzarScript, estadoEjecutor, detenerScript } from './utils/ejecutor-scripts.js';
 import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
 import { estadoVision, configurarProveedor, probarProveedor } from './utils/vision.js';
@@ -1527,6 +1528,61 @@ export function rutasPanel() {
             const r2 = await db.collection('biblioteca').updateOne({ _id: new ObjectId(req.params.id) }, upd);
             if (!r2.matchedCount) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
             res.json({ ok: true, like });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+    // FICHAS DE LECTURA (todas admin): registros de lectura privados enlazados a un documento/obra/colección.
+    // La imagen del texto rico se sube por multipart en app.js (POST /documentos/../fichas-lectura/:id/imagen);
+    // aquí vive el CRUD sobre Mongo. Carpeta de imágenes de una ficha: DIR_CDU/_fichas-lectura/<fichaId>/.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────
+    const soloAdminFicha = (req, res) => {
+        if (req.usuario?.rol !== 'admin') { res.status(403).json({ ok: false, motivo: 'solo administradores' }); return false; }
+        return true;
+    };
+    // LISTAR las fichas de una entidad: GET /fichas-lectura?ambito=documento&ref=<id>
+    r.get('/fichas-lectura', async (req, res) => {
+        try {
+            if (!soloAdminFicha(req, res)) return;
+            const { ambito, ref } = req.query;
+            if (!COL_POR_AMBITO[ambito] || !ObjectId.isValid(ref)) return res.status(400).json({ ok: false, motivo: 'ámbito/ref inválidos' });
+            const fichas = await listarFichas(await conectarDB(), ambito, ref);
+            res.json({ ok: true, fichas });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // CREAR una ficha (borrador) enlazada a una entidad: POST /fichas-lectura { ambito, ref, ...campos }
+    r.post('/fichas-lectura', async (req, res) => {
+        try {
+            if (!soloAdminFicha(req, res)) return;
+            const { ambito, ref } = req.body || {};
+            if (!COL_POR_AMBITO[ambito] || !ObjectId.isValid(ref)) return res.status(400).json({ ok: false, motivo: 'ámbito/ref inválidos' });
+            const db = await conectarDB();
+            if (!(await entidadExiste(db, ambito, ref))) return res.status(404).json({ ok: false, motivo: 'la entidad enlazada no existe' });
+            const ficha = await crearFicha(db, req.body || {});
+            res.json({ ok: true, ficha });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // ACTUALIZAR los campos presentes de una ficha: POST /fichas-lectura/:id { ...campos }
+    r.post('/fichas-lectura/:id', async (req, res) => {
+        try {
+            if (!soloAdminFicha(req, res)) return;
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const ficha = await actualizarFicha(await conectarDB(), req.params.id, req.body || {});
+            if (!ficha) return res.status(404).json({ ok: false, motivo: 'ficha no encontrada' });
+            res.json({ ok: true, ficha });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // BORRAR una ficha (y reciclar su carpeta de imágenes a la Papelera, nunca borrado duro).
+    r.post('/fichas-lectura/:id/borrar', async (req, res) => {
+        try {
+            if (!soloAdminFicha(req, res)) return;
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const ficha = await borrarFicha(await conectarDB(), req.params.id);
+            if (!ficha) return res.status(404).json({ ok: false, motivo: 'ficha no encontrada' });
+            const carpetaImgs = path.join(DIR_CDU, '.fichas-lectura', String(ficha._id));
+            const existe = await stat(carpetaImgs).then((s) => s.isDirectory(), () => false);
+            if (existe) await reciclarCarpeta(carpetaImgs, `ficha-lectura-borrada-${ficha._id}`).catch(() => {});
+            res.json({ ok: true });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

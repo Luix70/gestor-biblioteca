@@ -26,6 +26,7 @@ import { prepararReemplazo } from './utils/saneamiento.js';
 import { completarDoc, adjuntarMaterial } from './utils/completar-doc.js';   // adjuntar audio/texto o material a un doc ya catalogado
 import { conectarDB } from './database.js';
 import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
+import { ObjectId } from 'mongodb';
 
 // stdout/stderr a un PIPE (contenedor Docker) es ASÍNCRONO: los logs muy tempranos del arranque pueden
 // perderse (por eso no salían 📦/🚀 pero sí los posteriores, ya con el event loop drenando). Forzar
@@ -297,6 +298,48 @@ app.post('/api/documentos/:id/adjuntar', upload.array('files'), async (req, res)
         res.status(r.ok ? 200 : 400).json(r);
     } catch (e) {
         await reciclar(subidos.map((f) => f.path), 'adjuntar-error').catch(() => {});
+        res.status(500).json({ ok: false, motivo: e.message });
+    }
+});
+
+// SUBIR una imagen para el texto rico de una FICHA DE LECTURA. Se guarda bajo el árbol servido
+// (DIR_CDU/_fichas-lectura/<id>/) y NUNCA en base64 (evitamos inflar Mongo). Devuelve su URL /recursos/…,
+// que es la única forma de `src` que el saneador de notas (utils/sanear-html.js) admite. Solo admin: la
+// puerta global `autenticar` ya bloquea POST a no-admins; además comprobamos que la ficha existe.
+const FIRMAS_IMG = [
+    { ext: '.jpg', bytes: [0xff, 0xd8, 0xff] },
+    { ext: '.png', bytes: [0x89, 0x50, 0x4e, 0x47] },
+    { ext: '.gif', bytes: [0x47, 0x49, 0x46, 0x38] },
+    { ext: '.webp', off: 8, bytes: [0x57, 0x45, 0x42, 0x50] }, // "WEBP" en offset 8 (tras «RIFF»+tamaño)
+];
+const extImagen = (buf) => (FIRMAS_IMG.find((f) => f.bytes.every((b, i) => buf[(f.off || 0) + i] === b)) || {}).ext || null;
+app.post('/api/fichas-lectura/:id/imagen', upload.single('imagen'), async (req, res) => {
+    const sub = req.file;
+    if (!sub) return res.status(400).json({ ok: false, motivo: 'no se recibió imagen' });
+    try {
+        if (!ObjectId.isValid(req.params.id)) throw new Error('id inválido');
+        if (sub.size > 8 * 1024 * 1024) { await reciclar([sub.path], 'ficha-imagen-grande').catch(() => {}); return res.status(400).json({ ok: false, motivo: 'imagen demasiado grande (máx 8 MB)' }); }
+        const db = await conectarDB();
+        const ficha = await db.collection('fichas_lectura').findOne({ _id: new ObjectId(req.params.id) }, { projection: { _id: 1 } });
+        if (!ficha) { await reciclar([sub.path], 'ficha-imagen-sin-ficha').catch(() => {}); return res.status(404).json({ ok: false, motivo: 'ficha no encontrada' }); }
+        // Validar que ES una imagen por sus BYTES (no por la extensión/mimetype, falsificables).
+        const cab = (await fs.readFile(sub.path)).subarray(0, 16);
+        const ext = extImagen(cab);
+        if (!ext) { await reciclar([sub.path], 'ficha-imagen-no-imagen').catch(() => {}); return res.status(400).json({ ok: false, motivo: 'el fichero no es una imagen válida (JPG/PNG/GIF/WebP)' }); }
+        // Carpeta OCULTA (con punto) bajo el árbol servido: express.static la sirve (dotfiles:'allow') y en
+        // cambio Integridad la ignora por completo (utils…/integridad `ignorar()` salta lo que empieza por «.»),
+        // igual que «.portadas»/«.transmedia». Así no se confunde con una carpeta de catálogo.
+        const carpeta = path.join(DIR_CDU, '.fichas-lectura', String(req.params.id));
+        await fs.mkdir(carpeta, { recursive: true });
+        const nombre = `img-${Date.now()}${ext}`;
+        const destino = path.join(carpeta, nombre);
+        await fs.rename(sub.path, destino).catch(async () => { // EXDEV (tmp en otro volumen) → copiar+reciclar
+            await fs.copyFile(sub.path, destino);
+            await reciclar([sub.path], 'ficha-imagen-copiada').catch(() => {});
+        });
+        res.json({ ok: true, url: `/recursos/.fichas-lectura/${req.params.id}/${nombre}` });
+    } catch (e) {
+        await reciclar([sub.path], 'ficha-imagen-error').catch(() => {});
         res.status(500).json({ ok: false, motivo: e.message });
     }
 });

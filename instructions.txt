@@ -1082,6 +1082,42 @@ de ficheros clasificado por CDU.
       (pdf/epub/mobi/djvu/cbz/chm…); todo lo demás = material. El origen se recicla a la Papelera tras copiar.
       (transmedia.js · ingestarLibroConMaterial; unidad esLibroMaterial en el vigilante.)
 
+  ── FICHAS DE LECTURA (biblioteca personal; ficha → «📖 Fichas de lectura», SOLO ADMIN) ──────────
+    Convierte el catálogo en una biblioteca PERSONAL: el administrador lleva un registro de sus lecturas con
+    texto RICO (formato, títulos, imágenes) y campos típicos de una ficha de lectura. Son PRIVADAS del admin
+    (un invitado no las ve ni por API): la sección solo se pinta con ROL=admin y todos los endpoints exigen
+    admin (además del guardián global `autenticar`, que ya bloquea POST a no-admins).
+    · MODELO: colección Mongo PROPIA `fichas_lectura` (NO en `biblioteca` — son datos del propietario, no del
+      pipeline, así no ensucian el $jsonSchema). Cada ficha ENLAZA a una entidad por (`ambito`, `ref`):
+      ambito ∈ {documento, obra, coleccion}, ref = _id en su colección (biblioteca/obras/colecciones). Una
+      entidad puede tener VARIAS fichas (relecturas, varios lectores). Índice `idx_ambito_ref` (setup-mongo).
+      Campos: titulo_ficha, lector, estado (por_leer|leyendo|leido|abandonado), fecha_inicio, fecha_fin,
+      valoracion (0..5), notas_html (texto rico saneado), fecha_creacion/actualizacion. (src/utils/
+      fichas-lectura.js: listarFichas/crearFicha/actualizarFicha/borrarFicha + camposFicha + entidadExiste.)
+    · UI: sección plegable «📖 Fichas de lectura» en la ficha del DOCUMENTO, la OBRA y la COLECCIÓN (carga
+      perezosa al desplegar). Lista cada ficha (título, estado, lector, rango de fechas, ★valoración y las
+      notas ya renderizadas) con ✏️ editar / 🗑 borrar, y «➕ Nueva ficha de lectura». El EDITOR (modal) trae
+      los campos + un editor de TEXTO RICO (contenteditable + barra: negrita/cursiva/subrayado, T1/T2 títulos,
+      listas, cita, enlace, IMAGEN, quitar formato). Usa execCommand con styleWithCSS=false → el formato llega
+      como etiquetas SEMÁNTICAS (<b>/<h2>/…), que el saneador conserva.
+    · TEXTO RICO SEGURO: el HTML se SANEA siempre en el servidor al guardar (src/utils/sanear-html.js, cheerio,
+      lista blanca de etiquetas/atributos) — se almacena y se re-inyecta, así que un <script>/onclick guardado
+      sería un XSS persistente. Se quitan style/class/on*; los enlaces solo http(s)/mailto (target=_blank
+      rel=noopener); las imágenes SOLO /recursos/… (nada remoto ni data:). Como el saneador quita `style`, las
+      imágenes se acotan por CSS del CONTENEDOR (.fl-notas img), no con estilo inline.
+    · IMÁGENES del texto: se SUBEN al servidor (nunca base64 → no infla Mongo) a POST /api/fichas-lectura/:id/
+      imagen (multer; valida que es imagen por sus BYTES: JPG/PNG/GIF/WebP, máx 8 MB) → se guardan en
+      DIR_CDU/.fichas-lectura/<id>/ (carpeta OCULTA con punto: express.static la sirve por dotfiles:'allow' e
+      Integridad la ignora por completo, como «.portadas»/«.transmedia») y se inserta su URL /recursos/… en el
+      cursor. El borrador en Mongo se crea de forma PEREZOSA (al insertar la 1ª imagen o al guardar) para no
+      dejar fichas vacías si se cancela.
+    · ENDPOINTS (todos admin): GET /api/fichas-lectura?ambito=&ref= (listar) · POST /api/fichas-lectura
+      {ambito,ref,...campos} (crear) · POST /api/fichas-lectura/:id {...campos} (actualizar; solo toca los
+      campos presentes) · POST /api/fichas-lectura/:id/borrar (borra; su carpeta de imágenes va a la Papelera)
+      · POST /api/fichas-lectura/:id/imagen (subir imagen). Tras desplegar en el NAS: `docker exec
+      gestor-biblioteca node scripts/setup-mongo.js` para crear la colección + índice (o se auto-crea al
+      insertar la primera ficha; el índice solo mejora la consulta).
+
   ── COMPLETAR UN DOCUMENTO (ficha: «📎 Adjuntar audio/texto», admin) ──────────
     La biblioteca real se completa POR PARTES: primero aparece el audio y meses después el texto (o al revés).
     «📎 Adjuntar audio/texto» (ficha) sube ficheros a un documento YA catalogado → POST /api/documentos/:id/

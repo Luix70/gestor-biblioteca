@@ -308,6 +308,19 @@ async function main() {
     await asegurarIndice(biblioteca, { 'contribuciones.persona': 1 }, { sparse: true, name: 'idx_contrib_persona' });
     await asegurarIndice(biblioteca, { 'contribuciones.rol': 1 }, { sparse: true, name: 'idx_contrib_rol' });
 
+    // ── fichas_lectura: registros de lectura (privados del admin) enlazados a un documento/obra/colección ──
+    // Un mismo entidad puede tener VARIAS (relecturas, varios lectores). La consulta clave es «dame las fichas
+    // de esta entidad» → índice por (ambito, ref). Campos abiertos (sin validador $jsonSchema): son datos del
+    // propietario, no del pipeline. Se crea la colección para que exista aunque aún no haya ninguna ficha.
+    console.log('\nfichas_lectura:');
+    if ((await db.listCollections({ name: 'fichas_lectura' }).toArray()).length === 0) {
+        await db.createCollection('fichas_lectura');
+        console.log('  ✅ colección creada.');
+    } else {
+        console.log('  ✓ ya existía.');
+    }
+    await asegurarIndice(db.collection('fichas_lectura'), { ambito: 1, ref: 1 }, { name: 'idx_ambito_ref' });
+
     console.log('\nListo.\n');
     process.exit(0);
 }

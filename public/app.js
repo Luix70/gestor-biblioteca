@@ -1570,13 +1570,16 @@ function pintarObra(r) {
     r.sin_numero && r.sin_numero.length
       ? `<div class="card" style="margin-top:14px"><h3 style="color:var(--warn)">Tomos sin número (${r.sin_numero.length})</h3><div class="vol-grid">${r.sin_numero.map((d) => tomoCard(d, '?', false)).join('')}</div></div>`
       : '';
+  const secFichasLectura = ROL === 'admin' ? fichasLecturaSeccionHTML() : '';
   $('#p-detalle').innerHTML =
     head +
     `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">Tomos</h3>${numBtn}</div><div class="vol-grid" style="margin-top:10px">${vols}</div></div>` +
-    sin;
+    sin +
+    secFichasLectura;
   // «Mostrar en Catálogo» de la selección → orden por Nº de tomo (numérico).
   montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { obra: { _id: o._id, titulo: o.titulo } }, titulo: `📚 ${recortar(o.titulo || 'obra', 30)}`, orden: 'obra' });
   attachRating('#p-detalle');
+  attachFichasLectura('obra', o._id); // 📖 fichas de lectura de la obra (carga perezosa)
   // Renumerado directo de un tomo (admin). r.volumenes = [{doc, numero, presente}]; r.sin_numero = [doc].
   const docsObra = [...(r.volumenes || []).filter((v) => v.doc).map((v) => ({ d: v.doc, n: v.numero })), ...(r.sin_numero || []).map((d) => ({ d, n: d.volumen_numero }))];
   $$('#p-detalle [data-renum]').forEach((b) => (b.onclick = () => {
@@ -1779,9 +1782,11 @@ function pintarColeccion(r) {
     : '';
   const tituloGrid = esRev ? 'Números' : esTrans ? 'Documentos' : 'Libros';
   const contadorHtml = filtrable ? ' <span id="colCount" class="muted" style="font-size:13px;font-weight:400"></span>' : '';
+  const secFichasLectura = ROL === 'admin' ? fichasLecturaSeccionHTML() : '';
   $('#p-detalle').innerHTML =
     head +
-    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${tituloGrid}${contadorHtml}</h3>${numBtn}</div>${chipsBar}${buscarBar}<div class="vol-grid" id="colGrid" style="margin-top:10px">${cards}</div>${pagerBar}</div>`;
+    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${tituloGrid}${contadorHtml}</h3>${numBtn}</div>${chipsBar}${buscarBar}<div class="vol-grid" id="colGrid" style="margin-top:10px">${cards}</div>${pagerBar}</div>` +
+    secFichasLectura;
 
   // ── Filtro (texto + nivel/material) + paginación, todo en CLIENTE ──────────────────────────────────────
   if (filtrable) {
@@ -1829,6 +1834,7 @@ function pintarColeccion(r) {
   // «Mostrar en Catálogo» de la selección → orden por Nº de colección (numérico), salvo en revistas.
   montarSelDocs({ scopeSel: '#p-detalle', barSel: '#selbarDet', verCtx: { coleccion: { _id: c._id, nombre: c.nombre } }, titulo: `🗂️ ${recortar(c.nombre || 'colección', 30)}`, orden: esRev ? undefined : 'coleccion' });
   attachRating('#p-detalle');
+  attachFichasLectura('coleccion', c._id); // 📖 fichas de lectura de la colección (carga perezosa)
   // Renumerado directo de un volumen (solo libros/admin).
   $$('#p-detalle [data-renum]').forEach((b) => (b.onclick = () => {
     const d = r.miembros.find((m) => String(m._id) === b.dataset.renum);
@@ -3001,17 +3007,20 @@ function pintarDoc(r, ctx) {
     ? `<details class="card foldcard" id="matDet" open style="margin-top:14px"><summary>📎 Material que acompaña al libro</summary>`
       + `<div id="matBody" style="margin-top:10px">${_tieneAdj ? materialSeccionHTML(d) : '<span class="muted">Cargando…</span>'}</div></details>`
     : '';
+  // 📖 Fichas de lectura (admin-only): registros de lectura personales enlazados a ESTE documento.
+  const secFichasLectura = ROL === 'admin' ? fichasLecturaSeccionHTML() : '';
   // Navegación entre documentos (⏮◀ N/M ▶⏭): recorre TODOS los resultados de la búsqueda del Catálogo
   // (no solo la página). El contenedor #fichaNav se rellena async (los ids se traen y cachean por búsqueda).
   // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos, salud) plegado, después.
   $('#p-detalle').innerHTML =
-    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}${secImg}${secSin}${secMaterial}${secAcc}${secLect}${secCat}${secSalud}`;
+    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}${secImg}${secSin}${secMaterial}${secFichasLectura}${secAcc}${secLect}${secCat}${secSalud}`;
   pintarNavFicha(d._id, ctx);
   if (_tieneAdj) attachMaterial(d._id);
   else if (d.material_adjunto) cargarMaterialFicha(d._id);
   attachClas('#p-detalle');
   attachRating('#p-detalle');
   attachLeidoLike('#p-detalle'); // leído (progreso) + me gusta — solo admin, solo en la ficha del documento
+  attachFichasLectura('documento', d._id); // 📖 fichas de lectura (carga perezosa al desplegar)
   $$('#p-detalle .copybtn').forEach(
     (b) =>
       (b.onclick = (e) => {
@@ -6377,6 +6386,222 @@ async function cargarMaterialFicha(id) {
   } catch (e) {
     el.textContent = 'No se pudo cargar: ' + e.message;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+// FICHAS DE LECTURA (privadas del admin): registros de lectura enlazados a un documento, obra o colección.
+// Una entidad puede tener VARIAS (relecturas, varios lectores). El texto es RICO (contenteditable + barra) y
+// se SANEA en el servidor al guardar. Reutilizable para los tres ámbitos: la sección recibe (ambito, ref).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+const EST_FICHA = { por_leer: '📕 Por leer', leyendo: '📖 Leyendo', leido: '✅ Leído', abandonado: '🚫 Abandonado' };
+// El editor quita los `style`/`class` al sanear, así que las imágenes NO pueden llevar estilo inline: se
+// acotan por CSS del CONTENEDOR. Se inyecta una sola vez (idempotente).
+function ensureFlCss() {
+  if (document.getElementById('flCss')) return;
+  const s = document.createElement('style');
+  s.id = 'flCss';
+  s.textContent =
+    '.fl-notas img,.fl-editor img{max-width:100%;height:auto;border-radius:6px;margin:6px 0}'
+    + '.fl-notas h2,.fl-editor h2{font-size:1.25em;margin:.5em 0 .3em}'
+    + '.fl-notas h3,.fl-editor h3{font-size:1.1em;margin:.5em 0 .3em}'
+    + '.fl-notas blockquote,.fl-editor blockquote{border-left:3px solid var(--line);margin:.4em 0;padding:.1em 0 .1em .8em;color:var(--muted)}'
+    + '.fl-notas ul,.fl-editor ul,.fl-notas ol,.fl-editor ol{margin:.3em 0 .3em 1.3em}'
+    + '.fl-notas{overflow-wrap:anywhere}'
+    + '.fl-editor{min-height:180px;max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg)}'
+    + '.fl-tb{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}'
+    + '.fl-tb button{padding:4px 9px;font-size:13px;line-height:1.1}';
+  document.head.appendChild(s);
+}
+const _fechaCorta = (v) => { try { return v ? new Date(v).toLocaleDateString('es-ES') : ''; } catch { return ''; } };
+const _fechaInput = (v) => { try { return v ? new Date(v).toISOString().slice(0, 10) : ''; } catch { return ''; } };
+const _estrellasFicha = (n) => (n > 0 ? '★'.repeat(n) + '☆'.repeat(5 - n) : '');
+
+// HTML de la SECCIÓN plegable (admin-only). Carga perezosa al abrir (attachFichasLectura).
+function fichasLecturaSeccionHTML() {
+  return '<details class="card foldcard admin-only" id="flDet" style="margin-top:14px"><summary>📖 Fichas de lectura</summary>'
+    + '<div id="flBody" class="muted" style="margin-top:10px">Abre para ver tus fichas de lectura…</div></details>';
+}
+// Engancha la sección: carga perezosa la primera vez que se despliega.
+function attachFichasLectura(ambito, ref) {
+  const det = $('#flDet');
+  if (!det || ROL !== 'admin') return;
+  det.addEventListener('toggle', () => {
+    if (det.open && !det._cargada) { det._cargada = true; cargarFichasLectura(ambito, ref); }
+  });
+}
+// Carga y pinta la lista de fichas de una entidad.
+async function cargarFichasLectura(ambito, ref) {
+  const el = $('#flBody');
+  if (!el) return;
+  el.innerHTML = '<span class="muted">Cargando…</span>';
+  try {
+    const r = await api('/fichas-lectura?ambito=' + encodeURIComponent(ambito) + '&ref=' + encodeURIComponent(ref));
+    pintarFichasLectura(el, r.fichas || [], ambito, ref);
+  } catch (e) {
+    el.innerHTML = '<span class="muted">No se pudieron cargar: ' + esc(e.message) + '</span>';
+  }
+}
+function pintarFichasLectura(el, fichas, ambito, ref) {
+  ensureFlCss();
+  const nueva = '<button class="btn ok" id="flNueva" style="margin-bottom:10px">➕ Nueva ficha de lectura</button>';
+  const tarjetas = fichas.map((f) => {
+    const tit = esc(f.titulo_ficha || 'Ficha de lectura');
+    const est = EST_FICHA[f.estado] || '';
+    const val = _estrellasFicha(f.valoracion);
+    const lector = f.lector ? '👤 ' + esc(f.lector) : '';
+    const fi = _fechaCorta(f.fecha_inicio), ff = _fechaCorta(f.fecha_fin);
+    const rango = fi || ff ? '📅 ' + [fi, ff].filter(Boolean).join(' → ') : '';
+    const meta = [est, lector, rango, val ? '<span title="Valoración">' + val + '</span>' : ''].filter(Boolean).join(' · ');
+    const notas = f.notas_html ? '<div class="fl-notas" style="margin-top:8px;font-size:14px">' + f.notas_html + '</div>' : '';
+    return '<div class="card" data-flid="' + f._id + '" style="padding:12px;margin-bottom:10px">'
+      + '<div class="row" style="align-items:flex-start;gap:8px">'
+      + '<div style="flex:1;min-width:0"><b style="font-size:15px">' + tit + '</b>'
+      + (meta ? '<div class="muted" style="font-size:12px;margin-top:3px">' + meta + '</div>' : '') + '</div>'
+      + '<button class="rbtn" data-fledit="' + f._id + '" title="Editar">✏️</button>'
+      + '<button class="rbtn bad" data-fldel="' + f._id + '" title="Borrar (a la Papelera)">🗑</button>'
+      + '</div>' + notas + '</div>';
+  }).join('');
+  el.innerHTML = nueva + (fichas.length ? tarjetas : '<div class="muted" style="font-size:13px">Aún no hay fichas. Crea la primera con «➕ Nueva ficha de lectura».</div>');
+  const fichaPorId = new Map(fichas.map((f) => [String(f._id), f]));
+  $('#flNueva').onclick = () => abrirEditorFicha({ ficha: null, ambito, ref });
+  el.querySelectorAll('[data-fledit]').forEach((b) => (b.onclick = () => abrirEditorFicha({ ficha: fichaPorId.get(b.dataset.fledit), ambito, ref })));
+  el.querySelectorAll('[data-fldel]').forEach((b) => (b.onclick = () => borrarFichaLectura(b.dataset.fldel, ambito, ref)));
+}
+async function borrarFichaLectura(id, ambito, ref) {
+  if (!confirm('¿Borrar esta ficha de lectura?\n\nVa a la Papelera (sus imágenes son recuperables), pero el texto se pierde.')) return;
+  try {
+    await api('/fichas-lectura/' + encodeURIComponent(id) + '/borrar', { method: 'POST', body: '{}' });
+    toast('Ficha de lectura borrada');
+    cargarFichasLectura(ambito, ref);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+// EDITOR de una ficha (modal). `ficha` = null → nueva (el borrador en Mongo se crea de forma perezosa: al
+// insertar la primera imagen o al guardar, para no dejar fichas vacías si se cancela). Usa execCommand con
+// styleWithCSS=false → el formato llega como etiquetas SEMÁNTICAS (<b>/<i>/<h2>…), que el saneador conserva.
+function abrirEditorFicha({ ficha, ambito, ref }) {
+  ensureFlCss();
+  const f = ficha || {};
+  let fichaId = f._id || null;
+  const opcEstado = Object.entries(EST_FICHA).map(([k, v]) => `<option value="${k}"${(f.estado || 'por_leer') === k ? ' selected' : ''}>${v}</option>`).join('');
+  const estrellas = [1, 2, 3, 4, 5].map((n) => `<span class="fl-star" data-v="${n}" style="cursor:pointer;font-size:22px;color:${n <= (f.valoracion || 0) ? '#f5b301' : 'var(--line)'}">★</span>`).join('');
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:720px;width:96vw;max-height:92vh;overflow:auto">
+    <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">📖 Ficha de lectura</h3><button class="btn" id="flX">✕</button></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:10px">
+      <label style="font-size:13px">Título de la ficha<input id="flTit" placeholder="p. ej. «Primera lectura»" value="${esc(f.titulo_ficha || '')}"></label>
+      <label style="font-size:13px">Lector<input id="flLector" placeholder="Quién lo lee" value="${esc(f.lector || '')}"></label>
+      <label style="font-size:13px">Estado<select id="flEstado">${opcEstado}</select></label>
+      <label style="font-size:13px">Valoración<div id="flStars" style="padding-top:4px">${estrellas} <span class="rbtn" id="flStarClr" title="Sin valoración" style="cursor:pointer">✕</span></div></label>
+      <label style="font-size:13px">Inicio de lectura<input type="date" id="flIni" value="${_fechaInput(f.fecha_inicio)}"></label>
+      <label style="font-size:13px">Fin de lectura<input type="date" id="flFin" value="${_fechaInput(f.fecha_fin)}"></label>
+    </div>
+    <div style="margin-top:12px">
+      <div class="fl-tb" id="flTb">
+        <button data-cmd="bold" title="Negrita"><b>B</b></button>
+        <button data-cmd="italic" title="Cursiva"><i>I</i></button>
+        <button data-cmd="underline" title="Subrayado"><u>U</u></button>
+        <button data-block="h2" title="Título">T1</button>
+        <button data-block="h3" title="Subtítulo">T2</button>
+        <button data-cmd="insertUnorderedList" title="Lista">• Lista</button>
+        <button data-cmd="insertOrderedList" title="Lista numerada">1. Lista</button>
+        <button data-block="blockquote" title="Cita">❝ Cita</button>
+        <button data-cmd="createLink" title="Enlace">🔗</button>
+        <button data-img="1" title="Insertar imagen">🖼️</button>
+        <button data-cmd="removeFormat" title="Quitar formato">✖ Formato</button>
+      </div>
+      <div class="fl-editor" id="flNotas" contenteditable="true">${f.notas_html || ''}</div>
+      <input type="file" id="flImgFile" accept="image/*" hidden>
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="flCancel">Cancelar</button>
+      <button class="btn ok" id="flGuardar">💾 Guardar</button>
+    </div>
+    <div id="flMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').style.display = 'block';
+  const cerrar = () => cerrarCmp();
+  $('#flX').onclick = cerrar;
+  $('#flCancel').onclick = cerrar;
+
+  // Valoración: estrellas clicables (0..5). El valor vive en el dataset del contenedor.
+  const stars = $('#flStars');
+  let valoracion = f.valoracion || 0;
+  const pintarStars = () => stars.querySelectorAll('.fl-star').forEach((s) => (s.style.color = Number(s.dataset.v) <= valoracion ? '#f5b301' : 'var(--line)'));
+  stars.querySelectorAll('.fl-star').forEach((s) => (s.onclick = () => { valoracion = Number(s.dataset.v); pintarStars(); }));
+  $('#flStarClr').onclick = () => { valoracion = 0; pintarStars(); };
+
+  // Barra de formato. styleWithCSS=false → etiquetas semánticas (no `style=`). Los bloques (h2/h3/cita) usan
+  // formatBlock; alternan (si ya estás en un h2, vuelve a párrafo). El foco se devuelve al editor tras pulsar.
+  const notas = $('#flNotas');
+  const ejecutar = (fn) => { notas.focus(); try { document.execCommand('styleWithCSS', false, false); } catch {} fn(); };
+  $('#flTb').querySelectorAll('button').forEach((b) => (b.onclick = (e) => {
+    e.preventDefault();
+    if (b.dataset.img) { $('#flImgFile').click(); return; }
+    if (b.dataset.block) {
+      const tag = b.dataset.block;
+      const dentro = document.queryCommandValue('formatBlock').toLowerCase().includes(tag);
+      ejecutar(() => document.execCommand('formatBlock', false, dentro ? 'p' : tag));
+      return;
+    }
+    if (b.dataset.cmd === 'createLink') {
+      const url = prompt('Dirección del enlace (https://…):', 'https://');
+      if (url) ejecutar(() => document.execCommand('createLink', false, url));
+      return;
+    }
+    ejecutar(() => document.execCommand(b.dataset.cmd, false, null));
+  }));
+
+  // Crea el borrador en Mongo la primera vez que hace falta un id (imagen o guardar) → no deja fichas vacías.
+  async function asegurarId() {
+    if (fichaId) return fichaId;
+    const j = await api('/fichas-lectura', { method: 'POST', body: JSON.stringify({ ambito, ref }) });
+    fichaId = j.ficha._id;
+    return fichaId;
+  }
+  // Insertar imagen: se sube al servidor (NO base64) y se inserta su URL /recursos/… en el cursor.
+  $('#flImgFile').onchange = async (e) => {
+    const file = (e.target.files || [])[0];
+    e.target.value = '';
+    if (!file) return;
+    $('#flMsg').textContent = 'Subiendo imagen…';
+    try {
+      const id = await asegurarId();
+      const fd = new FormData();
+      fd.append('imagen', file);
+      const resp = await fetch('/api/fichas-lectura/' + encodeURIComponent(id) + '/imagen', {
+        method: 'POST', headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}, body: fd,
+      });
+      const j = await resp.json();
+      if (!resp.ok || !j.ok) throw new Error(j.motivo || 'no se pudo subir');
+      notas.focus();
+      document.execCommand('insertImage', false, j.url);
+      $('#flMsg').textContent = '';
+    } catch (err) { $('#flMsg').textContent = 'Imagen: ' + err.message; }
+  };
+
+  $('#flGuardar').onclick = async () => {
+    $('#flGuardar').disabled = true;
+    $('#flMsg').textContent = 'Guardando…';
+    const campos = {
+      titulo_ficha: $('#flTit').value,
+      lector: $('#flLector').value,
+      estado: $('#flEstado').value,
+      valoracion,
+      fecha_inicio: $('#flIni').value,
+      fecha_fin: $('#flFin').value,
+      notas_html: notas.innerHTML,
+    };
+    try {
+      if (fichaId) await api('/fichas-lectura/' + encodeURIComponent(fichaId), { method: 'POST', body: JSON.stringify(campos) });
+      else await api('/fichas-lectura', { method: 'POST', body: JSON.stringify({ ambito, ref, ...campos }) });
+      toast('📖 Ficha de lectura guardada');
+      cerrarCmp();
+      cargarFichasLectura(ambito, ref);
+    } catch (e) {
+      $('#flMsg').textContent = e.message;
+      $('#flGuardar').disabled = false;
+    }
+  };
 }
 
 async function explorarArchivos(id, sub = '') {
