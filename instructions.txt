@@ -1136,8 +1136,11 @@ de ficheros clasificado por CDU.
       imagen (multer; valida que es imagen por sus BYTES: JPG/PNG/GIF/WebP, máx 8 MB) → se guardan en
       DIR_CDU/.fichas-lectura/<id>/ (carpeta OCULTA con punto: express.static la sirve por dotfiles:'allow' e
       Integridad la ignora por completo, como «.portadas»/«.transmedia») y se inserta su URL /recursos/… en el
-      cursor. El borrador en Mongo se crea de forma PEREZOSA (al insertar la 1ª imagen o al guardar) para no
-      dejar fichas vacías si se cancela.
+      cursor. Vale tanto el botón 🖼️ (selector) como PEGAR una captura (Ctrl+V): el manejador de `paste` del
+      editor intercepta la imagen y la SUBE como fichero en vez de dejar un data:base64 de varios MB en el DOM
+      (era un foco de OOM; además el saneador descarta los data: al guardar, así que se perdería). El borrador en
+      Mongo se crea de forma PEREZOSA (al insertar la 1ª imagen o al guardar) para no dejar fichas vacías si se
+      cancela.
     · ENDPOINTS (todos admin): GET /api/fichas-lectura?ambito=&ref= (listar) · POST /api/fichas-lectura
       {ambito,ref,...campos} (crear) · POST /api/fichas-lectura/:id {...campos} (actualizar; solo toca los
       campos presentes) · POST /api/fichas-lectura/:id/borrar (borra; su carpeta de imágenes va a la Papelera)

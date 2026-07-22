@@ -2191,7 +2191,7 @@ function numerarPorLomos() {
     const cont = $('#lomThumbs');
     if (!cont) return;
     cont.innerHTML = fotos
-      .map((f, i) => `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(f)}" style="width:78px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`)
+      .map((f, i) => `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(f)}" onload="URL.revokeObjectURL(this.src)" style="width:78px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`)
       .join('');
     $$('#lomThumbs [data-rm]').forEach((b) => (b.onclick = () => { fotos.splice(+b.dataset.rm, 1); canvases = []; imgsCargadas = []; pintarThumbs(); }));
     if ($('#lomSeg')) $('#lomSeg').disabled = fotos.length === 0;
@@ -4333,7 +4333,7 @@ async function iniciarExploradorSoftware(id) {
   try { r = await api('/documentos/' + encodeURIComponent(id) + '/arbol'); }
   catch (e) { cont.innerHTML = 'No se pudo leer el paquete: ' + esc(e.message); return; }
   if (!r.arbol || !r.arbol.length) { cont.innerHTML = '<div class="muted">(paquete vacío)</div>'; return; }
-  cont.innerHTML = r.arbol.map(nodoArbolRO).join('');
+  cont.innerHTML = r.arbol.map((n) => nodoArbolRO(n)).join('');
 }
 /**
  * Explorador de UNA carpeta del árbol CDU (solo lectura). Lo abre el deep-link `?carpeta=…` de los enlaces del
@@ -4366,15 +4366,18 @@ async function explorarCarpeta(ruta) {
     return;
   }
   el.innerHTML = (r.truncado ? '<div class="muted" style="font-size:12px;margin-bottom:6px">Listado recortado: se muestran los primeros.</div>' : '')
-    + r.arbol.map(nodoArbolRO).join('');
+    + r.arbol.map((n) => nodoArbolRO(n)).join('');
 }
 
-function nodoArbolRO(n) {
+function nodoArbolRO(n, prof = 0) {
   if (n.tipo === 'file') {
     const ic = _ICONO_CLASE[n.clase] || '📄';
     return `<div style="padding:1px 0 1px 20px">${ic} ${esc(n.nombre)} <span class="muted" style="font-size:11px">${n.tam ? fmtBytes(n.tam) : ''}</span></div>`;
   }
-  const hijos = (n.hijos || []).map(nodoArbolRO).join('') || '<div class="muted" style="padding-left:20px">(vacía)</div>';
+  // Tope de profundidad: un árbol patológicamente anidado (miles de niveles) desbordaría la pila del
+  // navegador (STATUS_STACK_OVERFLOW). A 40 niveles se corta con un aviso en vez de tumbar la pestaña.
+  if (prof > 40) return `<div class="muted" style="padding-left:20px">📁 ${esc(n.nombre)} … (anidamiento demasiado profundo, cortado)</div>`;
+  const hijos = (n.hijos || []).map((h) => nodoArbolRO(h, prof + 1)).join('') || '<div class="muted" style="padding-left:20px">(vacía)</div>';
   return `<details open style="margin-left:4px"><summary style="cursor:pointer">📁 ${esc(n.nombre)}</summary><div style="margin-left:14px">${hijos}</div></details>`;
 }
 
@@ -6436,7 +6439,7 @@ async function cargarMaterialFicha(id) {
     el.innerHTML =
       '<div class="muted" style="font-size:12px;margin-bottom:8px">Viaja con el libro y se conserva tal cual '
       + '(código de ejemplo, datasets, extras). Pulsa un fichero para descargarlo.</div>'
-      + arbol.map(nodoArbolRO).join('');
+      + arbol.map((n) => nodoArbolRO(n)).join('');
   } catch (e) {
     el.textContent = 'No se pudo cargar: ' + e.message;
   }
@@ -6631,10 +6634,9 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
     fichaId = j.ficha._id;
     return fichaId;
   }
-  // Insertar imagen: se sube al servidor (NO base64) y se inserta su URL /recursos/… en el cursor.
-  $('#flImgFile').onchange = async (e) => {
-    const file = (e.target.files || [])[0];
-    e.target.value = '';
+  // Insertar imagen: se sube al servidor (NO base64) y se inserta su URL /recursos/… en el cursor. Un helper
+  // reutilizado por el botón 🖼️ (selector de ficheros) y por PEGAR una captura (más abajo).
+  async function subirImagenFicha(file) {
     if (!file) return;
     $('#flMsg').textContent = 'Subiendo imagen…';
     try {
@@ -6647,11 +6649,27 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
       const j = await resp.json();
       if (!resp.ok || !j.ok) throw new Error(j.motivo || 'no se pudo subir');
       notas.focus();
-      restaurarRango(); // el selector de ficheros quitó el foco: volver a donde estaba el cursor
+      restaurarRango(); // el selector/pegado quitó el foco o movió el cursor: volver a donde estaba
       document.execCommand('insertImage', false, j.url);
       $('#flMsg').textContent = '';
     } catch (err) { $('#flMsg').textContent = 'Imagen: ' + err.message; }
-  };
+  }
+  $('#flImgFile').onchange = (e) => { const file = (e.target.files || [])[0]; e.target.value = ''; subirImagenFicha(file); };
+  // PEGAR una imagen (captura de pantalla, Ctrl+V): en vez de meter un data:base64 de VARIOS MB en el DOM —pico
+  // de memoria (era uno de los focos del OOM) y además el saneador lo descartaría al guardar, perdiéndose— se
+  // SUBE como fichero y se inserta su URL /recursos/…. El texto/HTML pegado se deja pasar (el saneador lo limpia
+  // al guardar). Cubre el hueco que faltaba: el editor no tenía manejador de `paste`.
+  notas.addEventListener('paste', (e) => {
+    const items = (e.clipboardData && e.clipboardData.items) || [];
+    for (const it of items) {
+      if (it.kind === 'file' && it.type && it.type.startsWith('image/')) {
+        e.preventDefault();      // no dejar que el navegador pegue el base64
+        guardarRango();          // fijar dónde insertar (el pegado puede mover el cursor)
+        subirImagenFicha(it.getAsFile());
+        return;
+      }
+    }
+  });
 
   $('#flGuardar').onclick = async () => {
     $('#flGuardar').disabled = true;
@@ -9886,7 +9904,7 @@ async function camaraEnVivo() {
   const renderCamStrip = () => {
     strip.style.display = camFotos.length ? 'flex' : 'none';
     strip.innerHTML = camFotos
-      .map((foto, i) => `<span style="position:relative;display:inline-block;flex:none"><img src="${URL.createObjectURL(foto)}" style="width:54px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #333"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-6px;right:-6px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`)
+      .map((foto, i) => `<span style="position:relative;display:inline-block;flex:none"><img src="${URL.createObjectURL(foto)}" onload="URL.revokeObjectURL(this.src)" style="width:54px;height:72px;object-fit:cover;border-radius:6px;border:1px solid #333"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-6px;right:-6px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`)
       .join('');
     strip.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => { camFotos.splice(+b.dataset.rm, 1); renderCamStrip(); actualizarN(); renderCamThumbs(); }));
   };
@@ -11544,7 +11562,7 @@ function renderCamThumbs() {
     cont.innerHTML = camFotos
       .map(
         (foto, i) =>
-          `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(foto)}" style="width:62px;height:82px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`,
+          `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(foto)}" onload="URL.revokeObjectURL(this.src)" style="width:62px;height:82px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" title="Quitar" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`,
       )
       .join('');
   $$('#camThumbs [data-rm]').forEach(
@@ -12286,7 +12304,7 @@ async function cargarArbolInbox() {
   const aviso = r.truncado
     ? '<div class="muted" style="font-size:12px;border-left:3px solid var(--warn);padding:4px 0 4px 8px;margin-bottom:8px">Alguna carpeta trae demasiados ficheros para listarlos todos: se muestran los primeros y el resto va resumido. La acción que elijas se aplica a la carpeta entera.</div>'
     : '';
-  cont.innerHTML = aviso + r.arbol.map(nodoGuiaHTML).join('');
+  cont.innerHTML = aviso + r.arbol.map((n) => nodoGuiaHTML(n)).join('');
   _guiaSel.clear();
   _guiaSelCarp.clear();
   actualizarSelBar();
@@ -12362,7 +12380,7 @@ function enlazarControlesGuia(raiz) {
       cuerpo.innerHTML = '<div class="muted" style="padding-left:24px;font-size:12px">Cargando…</div>';
       try {
         const r = await api('/inbox/arbol?sub=' + encodeURIComponent(det.dataset.lazy) + '&profundidad=2');
-        cuerpo.innerHTML = (r.arbol || []).map(nodoGuiaHTML).join('')
+        cuerpo.innerHTML = (r.arbol || []).map((n) => nodoGuiaHTML(n)).join('')
           || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
         enlazarControlesGuia(cuerpo);
       } catch (e) {
@@ -12380,7 +12398,7 @@ const _ACCIONES_FICHERO = [
   ['software', '💿 software (intacto, 1 ficha)'],
   ['omitir', '⏭️ omitir'],
 ];
-function nodoGuiaHTML(n) {
+function nodoGuiaHTML(n, prof = 0) {
   if (n.tipo === 'file') {
     const ic = _ICONO_CLASE[n.clase] || '📄';
     const col = n.clase === 'noclasificable' ? ';color:#c60' : '';
@@ -12394,6 +12412,8 @@ function nodoGuiaHTML(n) {
     }
     return `<div style="padding:2px 0 2px 20px;font-size:12.5px${col}"><label style="cursor:pointer"><input type="checkbox" class="guiaSel" data-ruta="${esc(n.ruta)}" style="vertical-align:-1px"> ${ic} ${esc(n.nombre)}</label>${selAcc}${n.clase === 'noclasificable' ? ' <span class="muted">· no clasificable</span>' : ''}</div>`;
   }
+  // Tope de profundidad (como en nodoArbolRO): evita que un árbol patológicamente anidado desborde la pila.
+  if (prof > 40) return `<div class="muted" style="padding-left:24px;font-size:12px">📁 ${esc(n.nombre)} … (anidamiento demasiado profundo, cortado)</div>`;
   const g = n.guia || { perfil: {}, accion: 'normal' };
   const sel = (k, opts, val, extra = '') =>
     `<select class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="${k}"${extra} style="font-size:12px;padding:1px 3px">${opts
@@ -12417,7 +12437,7 @@ function nodoGuiaHTML(n) {
   // no confundirla con una carpeta VACÍA: por eso el servidor las distingue y aquí también.
   const hijos = n.pendiente
     ? '<div class="muted" style="padding-left:24px;font-size:12px">…</div>'
-    : (n.hijos || []).map(nodoGuiaHTML).join('') || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
+    : (n.hijos || []).map((h) => nodoGuiaHTML(h, prof + 1)).join('') || '<div class="muted" style="padding-left:24px;font-size:12px">(vacía)</div>';
   const attrs = n.pendiente ? `data-lazy="${esc(n.ruta)}"` : 'open';
   // Cada sub-nivel se INDENTA (margin-left) además del borde izquierdo, para que la jerarquía se lea bien.
   return `<details class="foldcard" ${attrs}${n.truncado ? ' data-trunc="1"' : ''} style="margin:2px 0;border:0;border-left:2px solid rgba(128,128,128,.3);border-radius:0;padding:2px 0 2px 8px"><summary style="cursor:pointer">${cab}</summary><div class="guiaCuerpo" style="margin-left:18px">${hijos}</div></details>`;
