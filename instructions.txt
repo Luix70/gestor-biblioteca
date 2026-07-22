@@ -426,10 +426,10 @@ de ficheros clasificado por CDU.
         reemplaza. Reindexa cada afectado (palabras_clave alimenta el índice FTS). POST /documentos/
         palabras-clave-lote {ids, palabras}. Tope 50 por llamada.
       - BUSCAR solo en palabras clave: el texto normal ya casa también las palabras clave (como título/autor);
-        pero si la consulta son SOLO tokens «#» («#Mathematica #Algebra»), se busca EXCLUSIVAMENTE en las
+        pero si la consulta EMPIEZA por «#», se busca EXCLUSIVAMENTE en las
         palabras clave, NO en título/autor/etc. Salen primero los que casan MÁS keywords (los que tienen
-        «ambas» delante) y dentro de cada nivel por relevancia. El «_» dentro de un #token = espacio
-        («#Computer_Science» = keyword «computer science»). Insensible a acentos/mayúsculas (lo da el
+        «ambas» delante) y dentro de cada nivel por relevancia. Cada palabra clave va de un «#» AL SIGUIENTE, así que PUEDE llevar ESPACIOS («#Divulgación
+        científica #Álgebra» = dos keywords); el «_» también vale como espacio, por compatibilidad. Insensible a acentos/mayúsculas (lo da el
         tokenizer del índice, remove_diacritics 2). Implementación: indice-busqueda.js·buscarPalabrasClave
         consulta keyword a keyword acotando a la COLUMNA palabras_clave del FTS5 ({palabras_clave}:(…)) y
         puntúa por nº de aciertos — NO con un solo MATCH OR, porque bm25 penaliza por longitud de campo y

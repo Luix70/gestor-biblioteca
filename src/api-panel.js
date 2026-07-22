@@ -584,12 +584,14 @@ export function rutasPanel() {
             let idsRanked = null, ordenRelevancia = false;
             if (q) {
                 const or = [];
-                // MODO PALABRAS CLAVE: «#kw1 #kw2 …» busca EXCLUSIVAMENTE en las palabras clave (NO en título/
-                // autor/etc.), con los que casan MÁS keywords delante. El «_» dentro de un #token = espacio
-                // (keyword de varias palabras). Insensible a acentos/mayúsculas (lo da el tokenizer del índice).
-                const tokensQ = q.trim().split(/\s+/).filter(Boolean);
-                const modoKw = tokensQ.length > 0 && tokensQ.every(t => t.startsWith('#') && t.length > 1);
-                const keywords = modoKw ? tokensQ.map(t => t.slice(1).replace(/_/g, ' ').trim()).filter(Boolean) : [];
+                // MODO PALABRAS CLAVE: si la consulta EMPIEZA por «#», busca EXCLUSIVAMENTE en las palabras
+                // clave (NO en título/autor/etc.), con los que casan MÁS keywords delante. Cada palabra clave va
+                // de un «#» AL SIGUIENTE, así que PUEDE llevar ESPACIOS: «#Divulgación científica #Álgebra» = dos
+                // keywords (la primera con espacio). El «_» también vale como espacio, por compatibilidad
+                // («#Divulgación_científica»). Insensible a acentos/mayúsculas (lo da el tokenizer del índice).
+                const qTrim = q.trim();
+                const modoKw = qTrim.startsWith('#');
+                const keywords = modoKw ? qTrim.split('#').map(s => s.replace(/_/g, ' ').trim()).filter(Boolean) : [];
                 if (modoKw) {
                     const ids = await buscarPalabrasClave(keywords, { limite: 1000 }).catch(() => null);
                     if (ids) {
