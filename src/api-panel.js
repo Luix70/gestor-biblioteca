@@ -291,7 +291,13 @@ export function rutasPanel() {
             const p = await rutaReemplazo(String(req.query?.id || ''));
             if (!p) return res.status(404).json({ ok: false, motivo: 'no hay candidato preparado en ese depósito' });
             res.setHeader('Content-Disposition', 'inline');
-            res.sendFile(p);
+            // `dotfiles:'allow'` es IMPRESCINDIBLE: el candidato vive en la subcarpeta oculta «.reemplazo/» y
+            // res.sendFile, por defecto (dotfiles:'ignore'), responde 404 a CUALQUIER ruta que contenga un
+            // segmento que empiece por punto — aunque el fichero exista. Es el mismo motivo por el que el
+            // estático de /recursos lo lleva puesto (para «.portadas»/«.fichas-lectura»).
+            res.sendFile(p, { dotfiles: 'allow' }, (err) => {
+                if (err && !res.headersSent) res.status(500).json({ ok: false, motivo: err.message });
+            });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
