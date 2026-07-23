@@ -1159,6 +1159,31 @@ de ficheros clasificado por CDU.
       recicla a la Papelera tras copiar. (transmedia.js · ingestarLibroConMaterial; unidad esLibroMaterial en el
       vigilante.)
 
+  -- SELECCIONES PERSONALES (menu: Selecciones; admin para crear/editar) ----------
+    Agrupaciones ARBITRARIAS y curadas por el usuario ("Libros para leer este verano"). Un libro puede estar
+    en VARIAS a la vez. NO se toca `colecciones`: eso es una construccion de IDENTIDAD (dedup por
+    (coleccion,clave_numero) + ruta en disco) y la cardinalidad 1:1 ahi es CORRECTA. "Cambridge University
+    Press" ya esta cubierto por `editorial`, que es entidad propia.
+    - MODELO: coleccion Mongo `selecciones` { nombre, descripcion, docs:[ObjectId], fechas }. La PERTENENCIA
+      vive AQUI (relacion invertida), no en el libro: anadir/quitar es $addToSet/$pull y el pipeline ni se
+      entera. Indice sobre `docs` para la consulta inversa. (utils/selecciones.js)
+    - CREAR: la via natural es la SELECCION MULTIPLE del catalogo -> "Guardar como seleccion" (nace ya
+      poblada) y "Anadir a seleccion" (a una existente; no duplica).
+    - PAGINA Selecciones: nombre, descripcion, nº de documentos, fechas; "Ver documentos" delega en el
+      Catalogo con ?seleccion=<id> (se traduce a `_id $in`), "Editar", "Borrar" (NO borra libros: una
+      seleccion es solo una vista) y "Compartir".
+    - COMENTARIO de una seleccion = sus FICHAS DE LECTURA con ambito:'seleccion' (texto rico, imagenes,
+      fechas, valoracion). Sin modelo nuevo: literalmente "una ficha de lectura de la coleccion".
+    - En la ficha del libro: "En mis selecciones: ..." (chips clicables), admin.
+    - COMPARTIR (solo lectura, enlace/QR): quien lo recibe VE y DESCARGA, nunca modifica. Antes de generar el
+      enlace se pregunta si incluir el MATERIAL ADJUNTO; por defecto NO (solo el documento principal) y la
+      decision viaja FIRMADA en el token, asi que el destinatario no puede cambiarla manipulando la URL.
+      PRIVACIDAD (corregido): `registro.json` es una COPIA del documento y conservaba `leido`, `like`, `nsfw`,
+      la UBICACION fisica y el inventario `adjuntos[]` con los nombres de los "solo admin" -> iba dentro del
+      ZIP de ?que=todo. Ahora NINGUN no-admin recibe los sidecars (registro.json / .marc.xml), ni a traves de
+      un enlace compartido ni como invitado. Las fichas de lectura no se consultan en la ruta publica y sus
+      imagenes viven fuera de la carpeta del documento.
+
   ── FICHAS DE LECTURA (biblioteca personal; ficha → «📖 Fichas de lectura», SOLO ADMIN) ──────────
     Convierte el catálogo en una biblioteca PERSONAL: el administrador lleva un registro de sus lecturas con
     texto RICO (formato, títulos, imágenes) y campos típicos de una ficha de lectura. Son PRIVADAS del admin

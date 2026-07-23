@@ -26,6 +26,7 @@
           <button data-p="obras"><span class="ic">📖</span> Obras</button>
           <button data-p="colecciones"><span class="ic">🗂️</span> Colecciones</button>
           <button data-p="autores"><span class="ic">👤</span> Autores</button>
+          <button data-p="sel"><span class="ic">📌</span> Selecciones</button>
           <button data-p="editoriales"><span class="ic">🏢</span> Editoriales</button>
           <button class="admin-only" data-p="ubic"><span class="ic">📍</span> Ubicaciones</button>
           <button class="admin-only" data-p="inbox"><span class="ic">📥</span> Entrada</button>
@@ -308,6 +309,19 @@
           </section>
 
           <!-- COLECCIONES (cabeceras de revista + series de libros) -->
+          <!-- SELECCIONES PERSONALES: agrupaciones arbitrarias y curadas (un libro puede estar en varias).
+               Se crean desde la seleccion multiple del Catalogo ("Guardar como seleccion"). -->
+          <section class="page" id="p-sel">
+            <div class="sec-h"><h2>Selecciones</h2></div>
+            <div class="card">
+              <h3>Mis selecciones</h3>
+              <p class="muted" style="font-size: 13px">
+                Agrupaciones personales y libres: un libro puede estar en varias. Se crean marcando
+                documentos en el Catalogo y pulsando <b>&#128204; Guardar como seleccion</b>.
+              </p>
+              <div id="selBody" style="margin-top: 10px"></div>
+            </div>
+          </section>
           <section class="page" id="p-colecciones">
             <div class="sec-h"><h2>Colecciones</h2></div>
             <div class="card">

@@ -215,6 +215,7 @@ const titles = {
   pap: 'Papelera',
   obras: 'Obras',
   colecciones: 'Colecciones',
+  sel: 'Selecciones',
   autores: 'Autores',
   editoriales: 'Editoriales',
   inbox: 'Entrada',
@@ -3068,6 +3069,7 @@ function pintarDoc(r, ctx) {
   attachRating('#p-detalle');
   attachLeidoLike('#p-detalle'); // leído (progreso) + me gusta — solo admin, solo en la ficha del documento
   attachFichasLectura('documento', d._id); // 📖 fichas de lectura (carga perezosa al desplegar)
+  pintarSeleccionesDeDoc(d._id);           // 📌 «en mis selecciones» (consulta inversa, admin)
   $$('#p-detalle .copybtn').forEach(
     (b) =>
       (b.onclick = (e) => {
@@ -7464,6 +7466,8 @@ function renderBulk() {
     <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
     <button class="btn" id="bkReclasEd" title="Reclasificar la EDITORIAL de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional). Muestra un informe por transición antes de aplicar.">🏢 Reclasificar editorial</button>
     <button class="btn" id="bkKw" title="Añadir palabras clave COMUNES (separadas por comas) a los seleccionados. Se AÑADEN a las que ya tenga cada uno; no las reemplazan. Luego se pueden buscar con «#palabra».">🏷 Palabras clave</button>
+    <button class="btn pri" id="bkSelNueva" title="Crear una SELECCIÓN PERSONAL nueva con los documentos seleccionados. Es la forma más rápida de empezar una: «Libros para leer este verano»…">📌 Guardar como selección</button>
+    <button class="btn pri" id="bkSelAdd" title="Añadir los documentos seleccionados a una selección personal YA EXISTENTE (no duplica los que ya estén)">➕ Añadir a selección</button>
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
@@ -7526,6 +7530,10 @@ function renderBulk() {
     if ($('#bkTipo')) $('#bkTipo').onclick = () => cambiarTipoDocs([...selDocs]);
     if ($('#bkReclasEd')) $('#bkReclasEd').onclick = () => reclasificarEditorialLote([...selDocs], `${selDocs.size} seleccionado(s)`);
     if ($('#bkKw')) $('#bkKw').onclick = () => anadirPalabrasClaveLote([...selDocs]);
+    // SELECCIONES PERSONALES desde la selección múltiple del catálogo: es la vía natural para crear una
+    // («marco 20 libros → guardar como selección») y para ampliarla después.
+    if ($('#bkSelNueva')) $('#bkSelNueva').onclick = () => guardarComoSeleccion([...selDocs]);
+    if ($('#bkSelAdd')) $('#bkSelAdd').onclick = () => anadirASeleccion([...selDocs]);
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     $('#bkDel').onclick = eliminarSeleccionados;
@@ -13195,14 +13203,222 @@ function _modalCompartir(url, titulo, descHtml) {
   } else sh.style.display = 'none';
 }
 // Compartir una COLECCIÓN u OBRA: token firmado del grupo → mismo modal; abre todos sus documentos y su descarga.
+// Pregunta si el enlace debe incluir el MATERIAL ADJUNTO. Por defecto NO: el material puede ser privado y,
+// además, bajar la carpeta entera arrastraría datos que no son del libro. La decisión viaja FIRMADA en el
+// token (el destinatario no puede cambiarla manipulando la URL). Devuelve true/false, o null si se cancela.
+function _preguntarAdjuntosCompartir(queEs) {
+  return new Promise((resolve) => {
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:420px">
+      <h3 style="margin-top:0">🔗 Compartir ${esc(queEs)}</h3>
+      <p class="muted" style="font-size:13px;line-height:1.5">Se comparte <b>solo lectura</b>: quien reciba el enlace puede
+      ver y descargar, nunca modificar. Sus <b>datos personales no viajan</b> (fichas de lectura, progreso de lectura,
+      ubicación física) ni el material marcado «solo administradores».</p>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;margin:12px 0;cursor:pointer">
+        <input type="checkbox" id="cmpAdj" style="margin-top:3px">
+        <span>Incluir también el <b>material adjunto</b> de cada documento (código de ejemplo, anexos…).
+        <span class="muted">Por defecto solo se comparte el documento principal.</span></span>
+      </label>
+      <div class="row" style="justify-content:flex-end;gap:8px">
+        <button class="btn" id="cmpAdjX">Cancelar</button>
+        <button class="btn pri" id="cmpAdjOk">Generar enlace</button>
+      </div></div>`;
+    $('#cmpScrim').style.display = 'block';
+    $('#cmpModal').style.display = 'grid';
+    const fin = (v) => { cerrarCmp(); resolve(v); };
+    $('#cmpAdjX').onclick = () => fin(null);
+    $('#cmpAdjOk').onclick = () => fin(!!$('#cmpAdj').checked);
+  });
+}
+
 async function compartirGrupo(tipo, id, nombre) {
+  const etiq = tipo === 'obra' ? 'la obra' : tipo === 'seleccion' ? 'la selección' : 'la colección';
+  const adjuntos = await _preguntarAdjuntosCompartir(etiq);
+  if (adjuntos === null) return;   // cancelado
+  const ruta = tipo === 'obra' ? 'obras' : tipo === 'seleccion' ? 'selecciones' : 'colecciones';
   let token;
   try {
-    const res = await api('/' + (tipo === 'obra' ? 'obras' : 'colecciones') + '/' + encodeURIComponent(id) + '/compartir', { method: 'POST', body: '{}' });
+    const res = await api('/' + ruta + '/' + encodeURIComponent(id) + '/compartir', { method: 'POST', body: JSON.stringify({ adjuntos }) });
     token = res.token;
   } catch (e) { toast(e.message, 'bad'); return; }
-  _modalCompartir(location.origin + '/?s=' + token, nombre || (tipo === 'obra' ? 'Obra' : 'Colección'),
-    `Escanea el QR o comparte el enlace. Abre ${tipo === 'obra' ? 'la obra' : 'la colección'} con <b>todos sus documentos</b> y su descarga — sin acceso al resto de la biblioteca.`);
+  _modalCompartir(location.origin + '/?s=' + token, nombre || (tipo === 'obra' ? 'Obra' : tipo === 'seleccion' ? 'Selección' : 'Colección'),
+    `Escanea el QR o comparte el enlace. Abre ${etiq} con <b>todos sus documentos</b> y su descarga — sin acceso al resto de la biblioteca`
+    + (adjuntos ? ' e <b>incluyendo el material adjunto</b>.' : ' y <b>solo el documento principal</b> de cada uno.'));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+// SELECCIONES PERSONALES — agrupaciones arbitrarias y curadas; un libro puede estar en VARIAS. La
+// pertenencia vive en la selección (no en el libro), así que añadir/quitar no toca el pipeline.
+// El «comentario» de una selección son sus FICHAS DE LECTURA (ambito:'seleccion').
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Crea una selección NUEVA con los documentos marcados en el catálogo (la vía natural para empezar una). */
+async function guardarComoSeleccion(ids) {
+  if (!ids.length) { toast('No hay documentos seleccionados', 'warn'); return; }
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:460px">
+    <h3 style="margin-top:0">📌 Guardar como selección</h3>
+    <p class="muted" style="font-size:13px">Se creará una selección personal con los <b>${ids.length}</b> documento(s) marcados.</p>
+    <label style="font-size:13px">Nombre<input id="selNom" placeholder="p. ej. «Libros para leer este verano»"></label>
+    <label style="font-size:13px;display:block;margin-top:8px">Descripción (opcional)<textarea id="selDesc" rows="2" style="min-height:auto"></textarea></label>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="selX">Cancelar</button><button class="btn ok" id="selOk">Crear</button></div>
+    <div id="selMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#selX').onclick = cerrarCmp;
+  setTimeout(() => $('#selNom') && $('#selNom').focus(), 50);
+  $('#selOk').onclick = async () => {
+    const nombre = $('#selNom').value.trim();
+    if (!nombre) { $('#selMsg').textContent = 'Ponle un nombre.'; return; }
+    $('#selOk').disabled = true;
+    try {
+      const r = await api('/selecciones', { method: 'POST', body: JSON.stringify({ nombre, descripcion: $('#selDesc').value, docs: ids }) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo crear');
+      toast(`📌 «${r.nombre}» creada con ${r.n} documento(s)`);
+      cerrarCmp();
+    } catch (e) { $('#selMsg').textContent = e.message; $('#selOk').disabled = false; }
+  };
+}
+
+/** Añade los documentos marcados a una selección YA EXISTENTE ($addToSet: no duplica). */
+async function anadirASeleccion(ids) {
+  if (!ids.length) { toast('No hay documentos seleccionados', 'warn'); return; }
+  let lista = [];
+  try { lista = (await api('/selecciones')).selecciones || []; } catch (e) { toast(e.message, 'bad'); return; }
+  if (!lista.length) { toast('Aún no tienes ninguna selección: usa «📌 Guardar como selección»', 'warn'); return; }
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:460px">
+    <h3 style="margin-top:0">➕ Añadir a selección</h3>
+    <p class="muted" style="font-size:13px">Se añadirán <b>${ids.length}</b> documento(s). Los que ya estén no se duplican.</p>
+    <select id="selCual" size="${Math.min(8, lista.length)}" style="width:100%">
+      ${lista.map((s) => `<option value="${esc(s._id)}">${esc(s.nombre)} · ${s.n} doc.</option>`).join('')}
+    </select>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="addX">Cancelar</button><button class="btn ok" id="addOk">Añadir</button></div>
+    <div id="addMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#addX').onclick = cerrarCmp;
+  $('#addOk').onclick = async () => {
+    const id = $('#selCual').value;
+    if (!id) { $('#addMsg').textContent = 'Elige una selección.'; return; }
+    $('#addOk').disabled = true;
+    try {
+      const r = await api('/selecciones/' + encodeURIComponent(id) + '/anadir', { method: 'POST', body: JSON.stringify({ ids }) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo añadir');
+      toast(`➕ «${r.nombre}» tiene ahora ${r.n} documento(s)`);
+      cerrarCmp();
+    } catch (e) { $('#addMsg').textContent = e.message; $('#addOk').disabled = false; }
+  };
+}
+
+/** Página «Selecciones»: tarjetas con nombre, descripción, nº de documentos y fechas. */
+async function loadSelecciones() {
+  const cont = $('#selBody');
+  if (!cont) return;
+  cont.innerHTML = '<div class="muted">Cargando…</div>';
+  try {
+    const lista = (await api('/selecciones')).selecciones || [];
+    if (!lista.length) {
+      cont.innerHTML = '<div class="empty">Aún no tienes selecciones.<br><span class="muted" style="font-size:13px">'
+        + 'Marca varios documentos en el Catálogo y pulsa «📌 Guardar como selección».</span></div>';
+      return;
+    }
+    cont.innerHTML = lista.map((s) => `<div class="card" style="padding:14px;margin-bottom:10px">
+      <div class="row" style="align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <b style="font-size:16px;cursor:pointer" data-selver="${esc(s._id)}">📌 ${esc(s.nombre)}</b>
+          <div class="muted" style="font-size:12px;margin-top:3px">${s.n} documento(s) · creada ${_fechaCorta(s.fecha_creacion)}
+            ${s.fecha_actualizacion ? '· actualizada ' + _fechaCorta(s.fecha_actualizacion) : ''}</div>
+          ${s.descripcion ? `<div class="muted" style="font-size:13px;margin-top:6px">${esc(s.descripcion)}</div>` : ''}
+        </div>
+      </div>
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="btn pri" data-selver="${esc(s._id)}">👁 Ver documentos</button>
+        <button class="btn admin-only" data-selcom="${esc(s._id)}" title="Comentario de la selección: usa las mismas fichas de lectura (texto rico, imágenes, fechas). Privado del administrador.">💬 Comentario</button>
+        <button class="btn" data-selshare="${esc(s._id)}" data-nom="${esc(s.nombre)}" title="Enlace/QR de solo lectura para enviar a alguien">🔗 Compartir</button>
+        <button class="btn admin-only" data-seledit="${esc(s._id)}" data-nom="${esc(s.nombre)}" data-desc="${esc(s.descripcion || '')}">✏️ Editar</button>
+        <button class="btn bad admin-only" data-seldel="${esc(s._id)}" data-nom="${esc(s.nombre)}">🗑 Borrar</button>
+      </div></div>`).join('');
+    cont.querySelectorAll('[data-selver]').forEach((b) => (b.onclick = () => verSeleccion(b.dataset.selver)));
+    // 💬 Comentario: monta la sección de FICHAS DE LECTURA (ambito 'seleccion') dentro de esa tarjeta. Los ids
+    // de esa sección son únicos, así que solo puede haber una abierta: se retira la anterior antes de montar.
+    cont.querySelectorAll('[data-selcom]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          const tarjeta = b.closest('.card');
+          const yaAqui = tarjeta.querySelector('#flDet');
+          cont.querySelectorAll('#flDet').forEach((d) => d.remove());   // cerrar cualquier otra
+          if (yaAqui) return;                                            // segundo clic = plegar
+          tarjeta.insertAdjacentHTML('beforeend', fichasLecturaSeccionHTML());
+          attachFichasLectura('seleccion', b.dataset.selcom);
+          const det = tarjeta.querySelector('#flDet');
+          if (det) det.open = true;                                      // abrir → dispara la carga perezosa
+        }),
+    );
+    cont.querySelectorAll('[data-selshare]').forEach((b) => (b.onclick = () => compartirGrupo('seleccion', b.dataset.selshare, b.dataset.nom)));
+    cont.querySelectorAll('[data-seledit]').forEach((b) => (b.onclick = () => editarSeleccion(b.dataset.seledit, b.dataset.nom, b.dataset.desc)));
+    cont.querySelectorAll('[data-seldel]').forEach((b) => (b.onclick = () => borrarSeleccionUI(b.dataset.seldel, b.dataset.nom)));
+  } catch (e) {
+    cont.innerHTML = '<div class="muted">No se pudieron cargar: ' + esc(e.message) + '</div>';
+  }
+}
+
+/**
+ * «📌 En mis selecciones» en la ficha del documento: consulta INVERSA (el índice sobre `docs` la resuelve).
+ * Se pinta al final de la cabecera de la ficha solo si el libro pertenece a alguna; cada una es clicable y
+ * lleva al Catálogo filtrado por esa selección. Solo admin (son agrupaciones personales).
+ */
+async function pintarSeleccionesDeDoc(id) {
+  if (ROL !== 'admin') return;
+  let lista = [];
+  try { lista = (await api('/documentos/' + encodeURIComponent(id) + '/selecciones')).selecciones || []; } catch { return; }
+  if (!lista.length) return;
+  const cont = $('#p-detalle');
+  if (!cont) return;
+  const chips = lista.map((s) => `<a class="tag" data-selir="${esc(s._id)}" style="cursor:pointer">📌 ${esc(s.nombre)}</a>`).join(' ');
+  const caja = document.createElement('div');
+  caja.className = 'card admin-only';
+  caja.style.cssText = 'margin-top:14px;padding:10px 14px';
+  caja.innerHTML = `<span class="muted" style="font-size:12px">En mis selecciones:</span> ${chips}`;
+  cont.appendChild(caja);
+  caja.querySelectorAll('[data-selir]').forEach((a) => (a.onclick = () => verSeleccion(a.dataset.selir)));
+}
+
+/** Ver los documentos de una selección: se delega en el Catálogo con el filtro ?seleccion=<id>. */
+function verSeleccion(id) {
+  irBusquedaFiltro({ seleccion: id, etiqueta: '📌 selección' });
+}
+
+async function editarSeleccion(id, nombre, descripcion) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:460px">
+    <h3 style="margin-top:0">✏️ Editar selección</h3>
+    <label style="font-size:13px">Nombre<input id="edNom" value="${esc(nombre || '')}"></label>
+    <label style="font-size:13px;display:block;margin-top:8px">Descripción<textarea id="edDesc" rows="2" style="min-height:auto">${esc(descripcion || '')}</textarea></label>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="edX">Cancelar</button><button class="btn ok" id="edOk">Guardar</button></div>
+    <div id="edMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#edX').onclick = cerrarCmp;
+  $('#edOk').onclick = async () => {
+    try {
+      const r = await api('/selecciones/' + encodeURIComponent(id) + '/editar', { method: 'POST', body: JSON.stringify({ nombre: $('#edNom').value, descripcion: $('#edDesc').value }) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo guardar');
+      toast('Selección actualizada');
+      cerrarCmp();
+      loadSelecciones();
+    } catch (e) { $('#edMsg').textContent = e.message; }
+  };
+}
+
+async function borrarSeleccionUI(id, nombre) {
+  // Borrar una selección NO borra libros: una selección es solo una vista sobre el catálogo.
+  if (!confirm(`¿Borrar la selección «${nombre}»?\n\nLos libros NO se borran: una selección es solo una vista. Se pierde la lista y su comentario.`)) return;
+  try {
+    const r = await api('/selecciones/' + encodeURIComponent(id) + '/borrar', { method: 'POST', body: '{}' });
+    if (!r.ok) throw new Error(r.motivo || 'no se pudo borrar');
+    toast('Selección borrada');
+    loadSelecciones();
+  } catch (e) { toast(e.message, 'bad'); }
 }
 // Compartir por QR: pide al servidor un token firmado de ESTE documento y muestra el QR + enlace. Abre solo
 // la ficha (y, si es digital, permite la descarga); no da acceso al resto de la app.
@@ -16148,6 +16364,7 @@ const loaders = {
   pap: loadPap,
   obras: loadObras,
   colecciones: loadColecciones,
+  sel: loadSelecciones,
   autores: loadAutores,
   editoriales: loadEditoriales,
   ubic: loadUbic,
