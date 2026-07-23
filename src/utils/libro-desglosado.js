@@ -159,25 +159,42 @@ export function ordenarPartesLibro(nombres) {
         .map((x) => x.n);
 }
 
+const MIN_PAGS_PARTE = 3;   // un capítulo tiene páginas; una lámina/página suelta, una
+
 /**
- * ¿Las partes tienen CAPA DE TEXTO? Es la señal que distingue de verdad un LIBRO despiezado (capítulos con
- * texto) de una carpeta de LÁMINAS o páginas escaneadas (imagen pura), que debe seguir su propio camino
- * («empaquetar» → cbz, como los Grabados de la Encyclopédie). Se muestrean como mucho 2 partes, solo su 1ª
- * página, para no penalizar el escaneo del Inbox. Si poppler no está o falla, se DA POR BUENO (no bloquear
- * por una herramienta ausente; las otras dos barreras —guía y evidencia estructural— siguen en pie).
+ * ¿Las partes PARECEN CAPÍTULOS de un libro (y no láminas/páginas sueltas escaneadas, que deben ir por
+ * «empaquetar» → cbz, como los Grabados)? Se miran DOS cosas sobre una muestra de 3 partes:
+ *
+ *   1) PÁGINAS POR FICHERO (la señal fuerte, e INMUNE AL OCR): un capítulo trae muchas páginas
+ *      (aquí 10–25); una lámina o una página escaneada trae UNA. Medido: Grabados = 1 pág./fichero en los
+ *      seis; Automotive Engines = 20/25/10. Basar la barrera solo en la «capa de texto» era un colador: un
+ *      escaneo PASADO POR OCR sí tiene texto y habría colado.
+ *   2) CAPA DE TEXTO real en alguna muestra (señal de apoyo).
+ *
+ * FALLA EN CERRADO a propósito: si no se puede medir (poppler ausente/PDF ilegible) se devuelve false y NO se
+ * cose. Coser fabrica un fichero derivado; ante la duda, que lo decida el humano en el Inspector.
  */
-async function tienenCapaDeTexto(dir, partes) {
-    const muestra = [partes[0], partes[Math.floor(partes.length / 2)]].filter(Boolean);
-    let conTexto = 0, evaluadas = 0;
+async function parecenCapitulosDeLibro(dir, partes) {
+    const indices = [...new Set([0, Math.floor(partes.length / 2), partes.length - 1])];
+    const muestra = indices.map((i) => partes[i]).filter(Boolean);
+    const paginas = [], textos = [];
     for (const p of muestra) {
+        const ruta = path.join(dir, p);
         try {
-            const { stdout } = await ejecutarCmd('pdftotext', ['-f', '1', '-l', '1', path.join(dir, p), '-'], { timeout: 20000, maxBuffer: 1 << 20 });
-            evaluadas++;
-            if ((stdout || '').replace(/\s/g, '').length >= 200) conTexto++;   // 200 caracteres = página de texto real
-        } catch { /* poppler ausente o PDF raro: no cuenta */ }
+            const { stdout } = await ejecutarCmd('pdfinfo', [ruta], { timeout: 20000, maxBuffer: 1 << 20 });
+            const m = stdout.match(/^Pages:\s+(\d+)/m);
+            if (m) paginas.push(Number(m[1]));
+        } catch { /* ilegible: no cuenta */ }
+        try {
+            const { stdout } = await ejecutarCmd('pdftotext', ['-f', '1', '-l', '1', ruta, '-'], { timeout: 20000, maxBuffer: 1 << 20 });
+            textos.push((stdout || '').replace(/\s/g, '').length);
+        } catch { /* sin texto extraíble */ }
     }
-    if (!evaluadas) return true;          // no se pudo comprobar → no bloquear
-    return conTexto > 0;                   // basta con que UNA muestra sea texto de verdad
+    if (!paginas.length) return false;                       // no medible → NO se cose (fallo en cerrado)
+    paginas.sort((a, b) => a - b);
+    const mediana = paginas[Math.floor(paginas.length / 2)];
+    if (mediana < MIN_PAGS_PARTE) return false;              // ~1 página por fichero = láminas, no capítulos
+    return textos.some((n) => n >= 200);                     // y alguna muestra con texto de verdad
 }
 
 const MIN_PARTES_PURO = 6;      // coser tiene sentido con un libro de verdad, no con 3 ficheros
@@ -222,10 +239,9 @@ export async function detectarDesglosePuro(dir) {
     // Y sobre todo: que se vea el ESQUELETO de un libro (preliminares / material final / capítulos nombrados).
     // Sin esto, una carpeta de láminas sueltas numeradas se «cosería» como si fuera un libro inexistente.
     if (!evidenciaLibro(pdfs)) return null;
-    // Y una señal de CONTENIDO, no de nombres: los capítulos de un libro tienen CAPA DE TEXTO; una carpeta de
-    // LÁMINAS/escaneos (que va por «empaquetar» → cbz, como los Grabados) no. Esto separa los dos caminos
-    // aunque los nombres despistaran. Se muestrean 2 partes (1ª página) para no penalizar el escaneo del Inbox.
-    if (!(await tienenCapaDeTexto(dir, ordenarPartesLibro(pdfs)))) return null;
+    // Y una señal de CONTENIDO, no de nombres: los capítulos traen MUCHAS páginas (inmune al OCR), las láminas
+    // una. Separa el cosido del camino «empaquetar»→cbz aunque los nombres despistaran. Falla en cerrado.
+    if (!(await parecenCapitulosDeLibro(dir, ordenarPartesLibro(pdfs)))) return null;
 
     return { partes: ordenarPartesLibro(pdfs), titulo: path.basename(dir), ratioPartes: Number((nPartes / pdfs.length).toFixed(2)) };
 }

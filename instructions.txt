@@ -1125,8 +1125,13 @@ de ficheros clasificado por CDU.
         (1) la GUIA del usuario manda: si la carpeta esta guiada, la deteccion automatica ni se ejecuta;
         (2) EVIDENCIA ESTRUCTURAL de libro: hace falta ver preliminares, material final o >=3 capitulos
             NOMBRADOS como tales — «I03133.pdf … I03138.pdf» (identificadores opacos) no la tiene;
-        (3) CAPA DE TEXTO: se muestrean 2 partes con pdftotext; un capitulo tiene texto, una lamina escaneada
-            no. Si poppler falla, no bloquea (las otras dos barreras siguen).
+        (3) CONTENIDO — PAGINAS POR FICHERO (senal fuerte, INMUNE AL OCR): se muestrean 3 partes con pdfinfo y
+            se exige una MEDIANA >= 3 paginas. Un capitulo trae muchas (medido: 20/25/10); una lamina o pagina
+            suelta trae UNA (Grabados: 1 en los seis). Ademas se pide capa de texto real en alguna muestra.
+            OJO: basar esta barrera solo en la capa de texto era un COLADOR — un escaneo pasado por OCR si
+            tiene texto y habria colado. FALLA EN CERRADO: si no se puede medir, NO se cose (coser fabrica un
+            fichero derivado; ante la duda decide el humano). Probado con una carpeta ADVERSARIA (laminas
+            renombradas a FrontMatter/Chapter/Index para burlar las capas 1 y 2): rechazada.
       Si algo no cuadra (falta qpdf, la union falla, o salen menos paginas que partes) NO se toca nada y la
       carpeta queda para el Inspector. Verificado: 0 falsos positivos en todo el Test Battery.
     · REPARAR UN PDF ROTO (Cuarentena/ilegibles -> «🔧 Reparar», admin): qpdf reconstruye la tabla xref a partir
