@@ -39,9 +39,13 @@ FROM node:18-bullseye-slim
 #   2) COSER en un solo PDF los capítulos sueltos de un «libro desglosado» (`--empty --pages … --`), copiando
 #      los objetos de página originales.
 # Es C++ plano, ~2 MB, en Debian MAIN y sin SIMD → apto para el Atom D525, igual que poppler. Si algún día
+# ghostscript es la SEGUNDA FASE de reparacion: qpdf solo reconstruye el xref (daño estructural), mientras
+# que gs REINTERPRETA y REESCRIBE el documento entero, que es lo que recupera los daños severos (y es, en
+# esencia, lo que hacen por dentro iLovePDF/pdf24). Pesa mas (~40 MB) y es lento en el Atom, por eso solo
+# se invoca si qpdf no logro un PDF legible. C plano, sin SIMD.
 # faltara, los dos usos DEGRADAN con elegancia (se detecta con `qpdf --version` y no se rompe nada).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin antiword catdoc qpdf \
+    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin antiword catdoc qpdf ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

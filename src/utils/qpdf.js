@@ -34,13 +34,36 @@ export async function hayQpdf() {
 
 const tam = async (p) => { try { return (await fs.stat(p)).size; } catch { return 0; } };
 
-/** Nº de páginas de un PDF según poppler (pdfinfo). null si no se puede leer. */
+/**
+ * Nº de páginas de un PDF según poppler. null si de verdad no se puede leer.
+ *
+ * OJO CON EL CÓDIGO DE SALIDA: `pdfinfo` devuelve 1 o 99 en cuanto encuentra avisos de sintaxis, AUNQUE haya
+ * podido leer el documento e imprimir «Pages:». Como execFile RECHAZA la promesa con código ≠ 0, la versión
+ * anterior devolvía null en esos casos y se daba por «ilegible» un PDF reparado que sí valía — y encima se
+ * borraba. Aquí se mira SIEMPRE la salida, venga por resolución o por excepción.
+ */
 export async function paginasPdf(ruta) {
+    let salida = '';
     try {
         const { stdout } = await ejecutar('pdfinfo', [ruta], { timeout: 60000, maxBuffer: 1 << 20 });
-        const m = stdout.match(/^Pages:\s+(\d+)/m);
-        return m ? Number(m[1]) : null;
-    } catch { return null; }
+        salida = stdout || '';
+    } catch (e) {
+        salida = (e && e.stdout) || '';   // pdfinfo pudo imprimir el informe y salir con código de aviso
+    }
+    const m = salida.match(/^Pages:\s+(\d+)/m);
+    return m ? Number(m[1]) : null;
+}
+
+/** ¿Está Ghostscript disponible? (segunda fase de reparación, para daños que qpdf no arregla) */
+let _hayGs = null;
+export async function hayGs() {
+    if (_hayGs !== null) return _hayGs;
+    for (const bin of ['gs', 'gsc']) {
+        try { await ejecutar(bin, ['--version'], { timeout: 10000 }); _hayGs = bin; return _hayGs; }
+        catch { /* siguiente */ }
+    }
+    _hayGs = false;
+    return _hayGs;
 }
 
 /**
@@ -76,28 +99,63 @@ export async function unirPdfs(rutas, destino, { timeout = TIEMPO } = {}) {
  * dan los números para que mire el resultado y decida.
  */
 export async function repararPdf(origen, destino, { timeout = TIEMPO } = {}) {
-    if (!(await hayQpdf())) return { ok: false, sinQpdf: true, motivo: 'qpdf no está instalado' };
+    // Basta con tener UNA de las dos: qpdf (estructural) o Ghostscript (reconstructiva). Antes se exigía qpdf
+    // y, si solo estaba gs, ni se intentaba.
+    const conQpdf = await hayQpdf(), conGs = await hayGs();
+    if (!conQpdf && !conGs) return { ok: false, sinQpdf: true, motivo: 'no hay ninguna herramienta de reparación (qpdf / ghostscript)' };
     const bytesOrigen = await tam(origen);
     if (!bytesOrigen) return { ok: false, motivo: 'el fichero de origen está vacío o no existe' };
     // Páginas que poppler logra ver ANTES de reparar (a veces reconstruye por su cuenta): sirve de contraste.
     const paginasAntes = await paginasPdf(origen);
 
+    await fs.mkdir(path.dirname(destino), { recursive: true });
+    // ── FASE 1 · qpdf: reparación ESTRUCTURAL (reconstruye la tabla xref a partir de los objetos que están).
+    //    Arregla los casos «el índice está roto pero el contenido está entero». NUNCA se usa --replace-input:
+    //    el original dañado se conserva intacto para poder reintentar con otra herramienta.
+    let herramienta = null;
     try {
-        await fs.mkdir(path.dirname(destino), { recursive: true });
-        // Sin --replace-input: NUNCA se toca el original (queda intacto para reintentar con otra herramienta).
+        if (!conQpdf) throw new Error('sin qpdf');
         await ejecutar('qpdf', ['--decrypt', origen, destino], { timeout, maxBuffer: 1 << 22 });
+        herramienta = 'qpdf';
     } catch (e) {
-        // qpdf devuelve código 3 en «warnings» (típico al reconstruir un xref roto) PERO sí escribe el PDF.
-        const b = await tam(destino);
-        if (!b) return { ok: false, motivo: (e.stderr || e.message || 'qpdf no pudo reparar').slice(0, 300) };
+        // Código 3 = «terminó con avisos» (lo normal al reconstruir un xref): el PDF SÍ se escribió.
+        if (await tam(destino)) herramienta = 'qpdf';
+    }
+    let paginas = herramienta ? await paginasPdf(destino) : null;
+
+    // ── FASE 2 · Ghostscript: reparación RECONSTRUCTIVA. Reinterpreta el documento y lo REESCRIBE entero, así
+    //    que recupera daños que qpdf no puede tocar (es, en esencia, lo que hacen por dentro iLovePDF/pdf24).
+    //    Es más lento y re-codifica, por eso se deja como SEGUNDA fase: solo si la primera no dio un PDF legible.
+    if (!paginas) {
+        const gs = conGs;
+        if (gs) {
+            const tmpGs = destino + '.gs.pdf';
+            try {
+                await ejecutar(gs, ['-q', '-dNOPAUSE', '-dBATCH', '-dPDFSTOPONERROR=false', '-sDEVICE=pdfwrite',
+                    '-sOutputFile=' + tmpGs, origen], { timeout, maxBuffer: 1 << 22 });
+            } catch { /* gs también avisa por stderr; lo que manda es si produjo un PDF legible */ }
+            const pagsGs = (await tam(tmpGs)) ? await paginasPdf(tmpGs) : null;
+            if (pagsGs) {
+                await fs.rm(destino, { force: true }).catch(() => {});
+                await fs.rename(tmpGs, destino);
+                paginas = pagsGs;
+                herramienta = 'ghostscript';
+            } else {
+                await fs.rm(tmpGs, { force: true }).catch(() => {});
+            }
+        }
     }
 
     const bytesDestino = await tam(destino);
-    if (!bytesDestino) return { ok: false, motivo: 'la reparación no produjo ningún fichero' };
-    const paginas = await paginasPdf(destino);
     if (!paginas) {
         await fs.rm(destino, { force: true }).catch(() => {});
-        return { ok: false, motivo: 'el resultado sigue sin ser un PDF legible (daño demasiado severo)' };
+        return {
+            ok: false,
+            motivo: bytesDestino
+                ? 'el resultado sigue sin ser un PDF legible (daño demasiado severo)'
+                : 'ninguna herramienta pudo reconstruir el fichero',
+            sinGs: !conGs,   // el panel puede sugerir instalar Ghostscript si falta la segunda fase
+        };
     }
 
     // ── SOSPECHA DE MUTILACIÓN ──────────────────────────────────────────────────────────────────────────
@@ -113,7 +171,7 @@ export async function repararPdf(origen, destino, { timeout = TIEMPO } = {}) {
     if (mbOrigen > 5 && paginas < mbOrigen * 2) motivos.push(`${paginas} páginas para ${mbOrigen.toFixed(1)} MB de original: parecen pocas`);
 
     return {
-        ok: true, paginas, paginasAntes, bytesOrigen, bytesDestino,
+        ok: true, paginas, paginasAntes, bytesOrigen, bytesDestino, herramienta,
         ratio: Number(ratio.toFixed(2)),
         sospecha: motivos.length > 0,
         motivoSospecha: motivos.join(' · '),
