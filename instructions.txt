@@ -1105,6 +1105,20 @@ de ficheros clasificado por CDU.
       señales A LA VEZ: (1) NOMBRE — hay un documento cuyo título se PARECE al de la carpeta (contención de
       palabras ≥0,6; en una colección ningún fichero se parece al nombre de la carpeta); (2) TAMAÑO — ese
       documento DOMINA (≥2,5× el mayor de los demás: el libro entero pesa mucho más que cualquier capítulo);
+      
+      INCIDENTE (2026-07-23) y ENDURECIMIENTO: una carpeta con 433 LIBROS INDEPENDIENTES se detecto como
+      desglose y los 433 acabaron como «Desglose/» adjunto de UN solo documento. Tres fallos a la vez:
+        a) la regla «acaba en digitos» (/\d{1,3}$/) casaba con casi todo libro (anio/edicion/id) -> el ratio
+           de «partes» salia 1.00. ELIMINADA: una regla que casa con todo no informa.
+        b) el «parecido con el nombre de la carpeta» daba 1.0 a cualquier fichero que compartiera las palabras
+           de la carpeta (contencion sobre el conjunto MENOR). No es un discriminador fiable: una coleccion
+           suele llamarse como su tema y siempre hay dentro un volumen que comparte esas palabras.
+        c) esta rama no comprobaba NADA del contenido ni de la forma de los nombres.
+      AHORA se exige ademas que los nombres sean SISTEMATICOS (nombresSistematicos): >=70% de las partes han
+      de pertenecer a una FAMILIA = empezar por numero, o compartir «esqueleto» (nombre sin digitos) con >=3
+      partes. Un desglose viene numerado por el editor (Chapter01..15, 01_..74_, ste30670_chNN); una coleccion
+      tiene titulos UNICOS, ningun esqueleto se repite y el ratio se desploma. Verificado: rechaza una
+      coleccion de 60 titulos unicos, mantiene los 5 casos reales y 0 falsos positivos en el Test Battery.
       (3) APOYO — ≥60% de los demás tienen nombre de PARTE (Chapter07, 01_title, 05-CH, App2, _ch10, TOC/index/
       preface…). El vigilante lo MATERIALIZA como un drop `libro-material`: mueve las partes a «Desglose/» y fija
       el principal en el `_guia.json` (`libro_material.principal`), y de ahí sigue el camino normal. La guía del

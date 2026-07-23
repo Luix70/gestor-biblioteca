@@ -59,8 +59,36 @@ const RE_PARTE = [
     /(chapter|cap[ií]tulo|\bcap\b|unit|unidad|secci[oó]n|section|part[e]?|app(endix)?|anexo)[ _\-]*\d+/i,
     /[_\-](ch|cap|sec|app|unit)[ _\-]*\d+/i,                   // ste30670_ch10 · x-app2
     /(^|[_\-])(fm|bm|toc|index|indice|preface|prefacio|title|titulo|copyri|adboard|glossar|glosario|biblio|apendice|appendix|cover|portada|contents)/i,
-    /\d{1,3}$/,                                                 // ENGLI001 · algo_12
+    // ⚠ AQUÍ HABÍA UN /\d{1,3}$/ («acaba en dígitos») y fue la causa de un incidente REAL: casi todo libro
+    // acaba en dígitos (año, edición, identificador), así que una carpeta de 433 libros independientes daba
+    // ratio de «partes» = 1.00 y se tragó entera como desglose de uno solo. Una regla que casa con casi todo
+    // no aporta información: fuera.
 ];
+
+/**
+ * ¿Los nombres de las partes son SISTEMÁTICOS (una serie generada por el editor) y no títulos heterogéneos?
+ * ESTA es la señal fiable para distinguir un desglose de una COLECCIÓN, porque el «parecido con el nombre de
+ * la carpeta» NO sirve: una colección suele llamarse como su tema («Historia de España») y siempre habrá
+ * dentro un libro que comparta esas palabras. Un desglose, en cambio, viene numerado por el editor:
+ *   · Chapter01…Chapter15  → mismo ESQUELETO al quitar los dígitos, o
+ *   · 01_title…74_replycard / 00-FM…15-CH → EMPIEZAN por número.
+ * Una colección de obras independientes no cumple ninguna de las dos.
+ */
+function nombresSistematicos(nombres) {
+    if (!nombres.length) return false;
+    const bases = nombres.map((n) => path.basename(n, path.extname(n)));
+    // ESQUELETO = el nombre sin dígitos ni separadores. «Chapter07»→"chapter", «ste30670_ch10»→"stech",
+    // «01»→"" (numeración pura). Una FAMILIA es un esqueleto con ≥3 miembros: eso es una serie generada por
+    // el editor, no una coincidencia. Un desglose puede tener VARIAS familias a la vez (p. ej. los capítulos
+    // numerados «01…40» conviviendo con «ste30670_chNN» y «AppN»), y todas cuentan.
+    const esqueleto = (b) => b.replace(/\d+/g, '').replace(/[\s_\-.]+/g, '').toLowerCase();
+    const cuenta = new Map();
+    for (const b of bases) { const e = esqueleto(b); cuenta.set(e, (cuenta.get(e) || 0) + 1); }
+    const enFamilia = bases.filter((b) => /^\d/.test(b) || (cuenta.get(esqueleto(b)) || 0) >= 3).length;
+    // Una COLECCIÓN de obras independientes tiene títulos ÚNICOS: ningún esqueleto se repite y casi ninguno
+    // empieza por número → el ratio se desploma y no pasa.
+    return enFamilia / bases.length >= 0.7;
+}
 const pareceParte = (n) => { const base = path.basename(n, path.extname(n)); return RE_PARTE.some((re) => re.test(base)); };
 
 // Umbrales (conservadores: ante la duda, NO es un desglose y lo decide el humano).
@@ -106,6 +134,12 @@ export async function detectarLibroDesglosado(dir) {
     // 3) APOYO: la mayoría del resto tiene nombre de PARTE (esto es lo que no cumple una colección de obras).
     const nPartes = resto.filter((d) => pareceParte(d.nombre)).length;
     if (nPartes / resto.length < MIN_RATIO_PARTES) return null;
+
+    // 4) DECISIVO: las partes han de venir NUMERADAS/SISTEMÁTICAS por el editor. Sin esto, una colección de
+    //    libros independientes cuya carpeta se llama como su tema colaba entera (incidente real: 433 libros
+    //    adjuntados a uno solo). El parecido del nombre y el dominio de tamaño NO bastan: en una colección
+    //    siempre hay un volumen grande que comparte palabras con la carpeta.
+    if (!nombresSistematicos(resto.map((d) => d.nombre))) return null;
 
     return {
         principal: principal.nombre,
