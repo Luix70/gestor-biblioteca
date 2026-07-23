@@ -1097,6 +1097,21 @@ de ficheros clasificado por CDU.
       su nombre es clicable y lleva un botón 🔍 → abre el explorador de ficheros en un modal (#cmpModal),
       acotado a esa subcarpeta (reutiliza explorarArchivos → GET /documentos/:id/archivos?sub=<nombre>, que ya
       oculta a los invitados lo marcado «solo admin»). Descargar una carpeta baja un zip.
+    · LIBRO DESGLOSADO (AUTOMÁTICO, sin guía): patrón muy común en material académico — una carpeta con el
+      LIBRO ENTERO más su DESGLOSE al lado (cada capítulo suelto, portadilla, índice, apéndices, material
+      adicional). Se cataloga el LIBRO de forma ORDINARIA (pipeline normal: ISBN/CDU/metadatos) y TODO lo demás
+      viaja con él como UNA carpeta adjunta «Desglose/» (explorable con 🔍 desde «📎 Material»). SIN PÉRDIDAS.
+      CÓMO SE DISTINGUE DE UNA COLECCIÓN DE LIBROS (utils/libro-desglosado.js · detectarLibroDesglosado), tres
+      señales A LA VEZ: (1) NOMBRE — hay un documento cuyo título se PARECE al de la carpeta (contención de
+      palabras ≥0,6; en una colección ningún fichero se parece al nombre de la carpeta); (2) TAMAÑO — ese
+      documento DOMINA (≥2,5× el mayor de los demás: el libro entero pesa mucho más que cualquier capítulo);
+      (3) APOYO — ≥60% de los demás tienen nombre de PARTE (Chapter07, 01_title, 05-CH, App2, _ch10, TOC/index/
+      preface…). El vigilante lo MATERIALIZA como un drop `libro-material`: mueve las partes a «Desglose/» y fija
+      el principal en el `_guia.json` (`libro_material.principal`), y de ahí sigue el camino normal. La guía del
+      usuario SIEMPRE manda: solo se aplica si la carpeta no está guiada. Si NO hay libro principal claro (una
+      carpeta que solo trae los capítulos) NO se dispara a propósito —no se adivina cuál capítulo «es el libro»—
+      y se deja para el Inspector. Verificado contra el Test Battery: 4/4 casos con principal detectados
+      (dominio ×6,8–11,4) y 0 falsos positivos en las otras 47 carpetas.
     · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
       principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
       El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`

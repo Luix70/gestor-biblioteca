@@ -20,6 +20,7 @@ import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/co
 import { esAudio } from './utils/lector-audio.js';
 import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
+import { detectarLibroDesglosado } from './utils/libro-desglosado.js'; // libro + su desglose en capítulos
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB, esFalloDeConexionMongo } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
@@ -943,6 +944,17 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
+            // LIBRO DESGLOSADO (AUTOMÁTICO): carpeta con UN libro entero + su desglose en capítulos/material.
+            // Se distingue de una COLECCIÓN de libros por tres señales a la vez (nombre del fichero ≈ nombre de
+            // la carpeta, dominio de tamaño y nombres de «parte»); ver utils/libro-desglosado.js. Solo se aplica
+            // si el usuario NO ha guiado la carpeta: su guía siempre manda. Se espera a que termine de copiarse.
+            if (!guiaEsSignificativa(guiaCarpeta)) {
+                const desg = await detectarLibroDesglosado(ruta);
+                if (desg && await carpetaEstable(ruta) && await materializarDesglose(ruta, desg)) {
+                    unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
+                    continue;
+                }
+            }
             if (guiaCarpeta?.accion === 'obra') {
                 // FORZAR obra multivolumen: TODOS los documentos de la carpeta son tomos de UNA obra cuyo
                 // título es el nombre de la carpeta; el nº de tomo va por orden natural del nombre de fichero.
@@ -1472,6 +1484,34 @@ async function aplicarAccionesGuiaFs() {
  * Reusar en vez de inventar — y de paso el resto de la carpeta se sigue clasificando como siempre, que es lo
  * que `libro-material` a secas no permitía: esa acción se lleva TODO lo que haya en la carpeta.
  */
+/**
+ * LIBRO DESGLOSADO → drop «libro-material». Una carpeta con UN libro entero MÁS su desglose (capítulos,
+ * portadilla, índice, apéndices…) se materializa moviendo las PARTES a una subcarpeta «Desglose» y fijando el
+ * libro como principal en la guía. A partir de ahí es un `libro-material` normal: el libro se cataloga por el
+ * PIPELINE ORDINARIO (ISBN/CDU/metadatos) y el desglose viaja con él como UNA carpeta adjunta —explorable
+ * desde la ficha— sin perder nada. Fijar el principal es imprescindible: por tamaño se elegiría bien aquí,
+ * pero el detector ya sabe CUÁL es y así no queda al azar.
+ */
+async function materializarDesglose(dir, desg) {
+    try {
+        const sub = path.join(dir, 'Desglose');
+        await fs.mkdir(sub, { recursive: true });
+        let movidas = 0;
+        for (const parte of desg.partes) {
+            const src = path.join(dir, parte);
+            if (!(await rutaExiste(src))) continue;
+            await fs.rename(src, path.join(sub, parte));
+            movidas++;
+        }
+        await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: desg.principal } });
+        console.log(`  📚 «${path.basename(dir)}»: LIBRO DESGLOSADO → «${desg.principal}» (×${desg.dominio} de tamaño) + ${movidas} parte(s) a «Desglose/» (adjunto).`);
+        return true;
+    } catch (err) {
+        console.warn(`  ⚠️  desglose: no se pudo preparar «${path.basename(dir)}» (${err.message}); se deja como estaba.`);
+        return false;
+    }
+}
+
 async function materializarAdjuntos(dir, guia) {
     // Se agrupa al revés: un documento puede llevarse VARIAS carpetas.
     const porDoc = new Map();
