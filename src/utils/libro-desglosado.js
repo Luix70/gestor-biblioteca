@@ -84,7 +84,11 @@ function nombresSistematicos(nombres) {
     const esqueleto = (b) => b.replace(/\d+/g, '').replace(/[\s_\-.]+/g, '').toLowerCase();
     const cuenta = new Map();
     for (const b of bases) { const e = esqueleto(b); cuenta.set(e, (cuenta.get(e) || 0) + 1); }
-    const enFamilia = bases.filter((b) => /^\d/.test(b) || (cuenta.get(esqueleto(b)) || 0) >= 3).length;
+    // «Empieza por número» ha de ser una NUMERACIÓN CORTA del editor (01_, 05-, 12.), no un identificador
+    // largo: los ficheros del incidente empezaban por el ISBN («0521880092.Cambridge…») y con un simple
+    // /^\d/ habrían pasado por sistemáticos. Se exige 1-3 dígitos NO seguidos de más dígitos.
+    const numeracionCorta = (b) => /^\d{1,3}(?!\d)/.test(b);
+    const enFamilia = bases.filter((b) => numeracionCorta(b) || (cuenta.get(esqueleto(b)) || 0) >= 3).length;
     // Una COLECCIÓN de obras independientes tiene títulos ÚNICOS: ningún esqueleto se repite y casi ninguno
     // empieza por número → el ratio se desploma y no pasa.
     return enFamilia / bases.length >= 0.7;
@@ -96,6 +100,7 @@ const MIN_PARTES = 4;        // un libro desglosado trae varias partes, no una o
 const MIN_PARECIDO = 0.6;    // parecido nombre-fichero ↔ nombre-carpeta
 const MIN_DOMINIO = 2.5;     // el libro entero pesa al menos 2,5× la mayor de sus partes
 const MIN_RATIO_PARTES = 0.6; // ≥60% de los demás documentos tienen pinta de parte
+const MAX_PARTES = 120;      // por encima no es un libro despiezado, es un fondo de libros (acota el daño)
 
 /**
  * ¿`dir` es un LIBRO DESGLOSADO? Devuelve { principal, partes, dominio, parecido } o null.
@@ -115,6 +120,10 @@ export async function detectarLibroDesglosado(dir) {
         docs.push({ nombre: e.name, size });
     }
     if (docs.length < MIN_PARTES + 1) return null;   // hace falta el libro + varias partes
+    // TOPE de partes: un libro se desglosa en decenas de piezas (el máximo real observado son 74), no en
+    // cientos. Por encima, lo más probable es que sea un FONDO de libros y no un desglose — y el coste de
+    // equivocarse ahí es enorme (el incidente adjuntó 433 libros a uno solo). Acota el daño por diseño.
+    if (docs.length - 1 > MAX_PARTES) return null;
 
     // 1) PRINCIPAL: el documento MAYOR de entre los que se parecen al nombre de la carpeta.
     const nombreCarpeta = path.basename(dir);
