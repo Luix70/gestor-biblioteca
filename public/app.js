@@ -718,6 +718,7 @@ async function loadCuar() {
             ? `<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`
             : d.listo
               ? `<button class="btn pri admin-only" data-proc="${esc(d.id)}" title="Catalogar esta copia ya">▶ Procesar</button> <button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir otra copia">⤓ Cambiar</button>`
+                + ` <button class="btn admin-only" data-undo="${esc(d.id)}" title="Descartar ESTE candidato y quedarte con el fichero ORIGINAL en Cuarentena (no borra el depósito)">↩ Descartar ${d.reparado ? 'reparación' : 'copia'}</button>`
               : `<button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir una copia sana (queda lista para procesar)">⤓ Reemplazar</button>`
                 + (cat === 'ilegibles' && esPdf ? ` <button class="btn admin-only" data-fix="${esc(d.id)}" title="Intentar REPARAR el PDF roto (reconstruye su índice interno). No cataloga nada: podrás inspeccionar el resultado y decidir">🔧 Reparar</button>` : '')
                 + (cat === 'ilegibles' ? '' : ` <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`);
@@ -778,6 +779,19 @@ async function loadCuar() {
         }),
     );
     $$('#cuarBody [data-proc]').forEach((b) => (b.onclick = () => procesarSaneados([b.dataset.proc])));
+    // ↩ Descartar el candidato preparado y quedarse con el ORIGINAL en Cuarentena (no toca el depósito).
+    $$('#cuarBody [data-undo]').forEach(
+      (b) =>
+        (b.onclick = async () => {
+          if (!confirm('¿Descartar el candidato preparado?\n\nEl fichero ORIGINAL sigue en Cuarentena para que puedas reintentar o buscar una copia sana. El candidato va a la Papelera.')) return;
+          try {
+            const r = await api('/saneamiento/descartar-reemplazo', { method: 'POST', body: JSON.stringify({ id: b.dataset.undo }) });
+            if (!r.ok) throw new Error(r.motivo || 'no se pudo descartar');
+            toast('↩ Candidato descartado: el original sigue en Cuarentena');
+            loadCuar();
+          } catch (e) { toast(e.message, 'bad'); }
+        }),
+    );
     // 🔧 Reparar un PDF roto: NO cataloga: deja el candidato listo y muestra el informe (páginas, % recuperado
     // y aviso si puede estar mutilado) para que lo inspecciones y decidas si procesarlo.
     $$('#cuarBody [data-fix]').forEach(

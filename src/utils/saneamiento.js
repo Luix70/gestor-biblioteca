@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { reciclar } from './papelera.js';
+import { reciclar, reciclarCarpeta } from './papelera.js';
 import { ingestarRecurso } from '../servicio-ingesta.js';
 import { repararPdf } from './qpdf.js'; // reparación de PDF rotos (reconstruye el xref)
 
@@ -154,6 +154,37 @@ export async function repararDeposito(idDeposito) {
 
     console.log(`🔧 Reparación de ${idDeposito}: ${inf.paginas} págs., ${inf.ratio}× del original${inf.sospecha ? ` ⚠️ SOSPECHA: ${inf.motivoSospecha}` : ''}.`);
     return { ok: true, nombre: roto.name, ...inf };
+}
+
+/**
+ * DESCARTA el candidato en staging (una reparación que no convence, o una copia subida que no valía) y deja el
+ * depósito EXACTAMENTE como estaba: con su fichero ORIGINAL intacto y marcado como NO listo.
+ *
+ * Hacía falta porque el único «descartar» que existía tiraba el DEPÓSITO ENTERO —original incluido— a la
+ * Papelera. Si una reparación no convence, lo que quieres es quedarte con el original en Cuarentena para
+ * reintentar con otra herramienta o buscar una copia sana, no perderlo. Y quitar el `listo` importa: si no, el
+ * depósito seguiría entrando en el «Procesar» por lotes y se catalogaría un documento mutilado sin querer.
+ *
+ * El candidato descartado va a la Papelera (no se borra) por coherencia con el resto del proyecto, aunque sea
+ * un fichero DERIVADO y siempre reproducible a partir del original.
+ */
+export async function descartarReemplazo(idDeposito) {
+    const { dir: depDir, error } = depDirDe(idDeposito);
+    if (error) return { ok: false, motivo: error };
+    try { await fs.access(depDir); } catch { return { ok: false, motivo: 'el depósito ya no existe' }; }
+
+    const repDir = path.join(depDir, SUBDIR_REEMPLAZO);
+    if (await fs.access(repDir).then(() => true, () => false)) {
+        await reciclarCarpeta(repDir, `candidato-descartado-${path.basename(depDir)}`).catch(() => {});
+        await fs.rm(repDir, { recursive: true, force: true }).catch(() => {});   // si el reciclado ya lo movió, no-op
+    }
+    const estadoPath = path.join(depDir, 'estado.json');
+    let estado = {}; try { estado = JSON.parse(await fs.readFile(estadoPath, 'utf8')); } catch { /* sin estado */ }
+    for (const k of ['listo', 'reemplazo', 'reemplazo_bytes', 'reemplazo_fecha', 'reparado', 'reparacion', 'error_proceso'])
+        delete estado[k];
+    await fs.writeFile(estadoPath, JSON.stringify(estado, null, 2), 'utf8');
+    console.log(`↩️  Candidato descartado en ${idDeposito}: el original sigue en Cuarentena.`);
+    return { ok: true };
 }
 
 /** Ruta ABSOLUTA del candidato en staging de un depósito (para inspeccionarlo antes de decidir). null si no hay. */

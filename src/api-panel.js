@@ -61,7 +61,7 @@ import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
 import { estadoVision, configurarProveedor, probarProveedor } from './utils/vision.js';
 import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
-import { fuentesCopia, procesarSaneamiento, estadoSaneamiento, repararDeposito, rutaReemplazo } from './utils/saneamiento.js';
+import { fuentesCopia, procesarSaneamiento, estadoSaneamiento, repararDeposito, rutaReemplazo, descartarReemplazo } from './utils/saneamiento.js';
 import { describirCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 import { altaPorISBN } from './servicio-ingesta.js';
@@ -283,6 +283,12 @@ export function rutasPanel() {
     // el INFORME (páginas recuperadas, bytes, sospecha de mutilación) para que lo inspecciones y decidas.
     r.post('/saneamiento/reparar', async (req, res) => {
         try { res.json(await repararDeposito(String(req.body?.id || ''))); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // DESCARTAR el candidato (reparación que no convence / copia que no valía) conservando el ORIGINAL en
+    // Cuarentena. El otro «descartar» tira el depósito ENTERO; este solo deshace el intento.
+    r.post('/saneamiento/descartar-reemplazo', async (req, res) => {
+        try { res.json(await descartarReemplazo(String(req.body?.id || ''))); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     // INSPECCIONAR el candidato reparado ANTES de decidir: sirve el PDF en staging (inline, para el visor).
