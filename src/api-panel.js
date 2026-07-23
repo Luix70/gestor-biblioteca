@@ -2219,10 +2219,15 @@ export function rutasPanel() {
                 if (!a) return res.status(400).json({ ok: false, motivo: `ruta fuera del Inbox: ${r0}` });
                 absolutas.push(a);
             }
+            // `extra` lleva los parámetros propios de cada operación: `soloUnicas` (aplanar: disolver solo los
+            // envoltorios de un único fichero) y `nuevo`/`de`/`a` (renombrar). El panel YA los enviaba, pero
+            // aquí se descartaban: la casilla de aplanar no hacía nada y RENOMBRAR se quedaba sin el nombre.
+            const extra = (req.body && typeof req.body.extra === 'object' && req.body.extra) || {};
             res.json(await utilidadInbox({
                 operacion, absolutas,
                 propagar: req.body?.propagar === true,
                 ejecutar: req.body?.ejecutar === true,
+                extra,
             }));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
