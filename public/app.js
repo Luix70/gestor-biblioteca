@@ -3061,7 +3061,7 @@ function pintarDoc(r, ctx) {
   // (no solo la página). El contenedor #fichaNav se rellena async (los ids se traen y cachean por búsqueda).
   // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos, salud) plegado, después.
   $('#p-detalle').innerHTML =
-    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}${secImg}${secSin}${secMaterial}${secFichasLectura}${secAcc}${secLect}${secCat}${secSalud}`;
+    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}<div id="selDocBox"></div>${secImg}${secSin}${secMaterial}${secFichasLectura}${secAcc}${secLect}${secCat}${secSalud}`;
   pintarNavFicha(d._id, ctx);
   if (_tieneAdj) attachMaterial(d._id);
   else if (d.material_adjunto) cargarMaterialFicha(d._id);
@@ -13372,14 +13372,14 @@ async function pintarSeleccionesDeDoc(id) {
   let lista = [];
   try { lista = (await api('/documentos/' + encodeURIComponent(id) + '/selecciones')).selecciones || []; } catch { return; }
   if (!lista.length) return;
-  const cont = $('#p-detalle');
-  if (!cont) return;
+  // Va JUSTO DEBAJO de la ficha mínima (contenedor #selDocBox), no al final de la página: saber en qué
+  // selecciones está un libro es contexto de cabecera, no un apéndice tras las secciones plegables.
+  const caja = $('#selDocBox');
+  if (!caja) return;
   const chips = lista.map((s) => `<a class="tag" data-selir="${esc(s._id)}" style="cursor:pointer">📌 ${esc(s.nombre)}</a>`).join(' ');
-  const caja = document.createElement('div');
   caja.className = 'card admin-only';
   caja.style.cssText = 'margin-top:14px;padding:10px 14px';
   caja.innerHTML = `<span class="muted" style="font-size:12px">En mis selecciones:</span> ${chips}`;
-  cont.appendChild(caja);
   caja.querySelectorAll('[data-selir]').forEach((a) => (a.onclick = () => verSeleccion(a.dataset.selir)));
 }
 
@@ -13479,8 +13479,8 @@ function pantallaEsperaNFC() {
 // VISTA COMPARTIDA (?s=<token>): página autónoma de SOLO la ficha (sin login ni resto de la app).
 // Vista pública de un GRUPO compartido (colección u obra): ex-libris + nombre + lista de sus documentos con
 // descarga individual. Sin acceso al resto de la biblioteca.
-function renderGrupoCompartido(cont, g) {
-  const tipoLbl = g.tipo === 'obra' ? 'Obra' : 'Colección';
+function renderGrupoCompartido(cont, g, token) {
+  const tipoLbl = g.tipo === 'obra' ? 'Obra' : g.tipo === 'seleccion' ? 'Selección' : 'Colección';
   const filas = (g.miembros || []).map((m) => {
     const cov = m.portada
       ? `<img src="${esc(encUrl(m.portada))}" loading="lazy" style="width:44px;height:60px;object-fit:cover;border-radius:5px;background:var(--card)">`
@@ -13494,14 +13494,23 @@ function renderGrupoCompartido(cont, g) {
       <div style="flex:1;min-width:0"><div style="font-weight:600;word-break:break-word">${esc(m.titulo)}</div>${meta ? `<div class="muted" style="font-size:11px">${esc(meta)}</div>` : ''}</div>
       ${dl}</div>`;
   }).join('');
+  // SIN ex-libris: la cartela «este libro pertenece a… / devolver a…» es para un PRÉSTAMO DE PAPEL. Lo que se
+  // comparte por enlace son documentos ELECTRÓNICOS —no hay nada que devolver—, así que exhibir el correo y el
+  // teléfono del propietario a quien reciba el enlace es ruido y exposición de datos personales sin motivo.
+  const hayDescargas = (g.miembros || []).some((m) => m.descarga_url);
+  const zip = (hayDescargas && token)
+    ? `<div style="text-align:center;margin:10px 0 16px"><a class="btn pri" href="/api/compartido/${encodeURIComponent(token)}/zip" download
+         title="Descargar todos los documentos en un solo archivo comprimido">⬇ Descargar todo (ZIP)</a></div>`
+    : '';
   cont.innerHTML = `${_brandLine}
     <div style="max-width:560px;margin:0 auto">
-      ${heroExlibris(EX_LIBRIS)}
-      <div style="text-align:center;margin:6px 0 14px">
+      <div style="text-align:center;margin:18px 0 14px">
         <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:1px">${tipoLbl}</div>
         <h2 style="margin:2px 0">${esc(g.nombre)}</h2>
-        <div class="muted" style="font-size:12px">${g.total} documento${g.total === 1 ? '' : 's'} · descarga individual</div>
+        ${g.descripcion ? `<p class="muted" style="font-size:13px;margin:6px 0 0">${esc(g.descripcion)}</p>` : ''}
+        <div class="muted" style="font-size:12px;margin-top:4px">${g.total} documento${g.total === 1 ? '' : 's'}</div>
       </div>
+      ${zip}
       ${filas || '<p class="muted" style="text-align:center">Sin documentos.</p>'}
     </div>`;
 }
@@ -13520,7 +13529,7 @@ async function vistaCompartida(token) {
     return;
   }
   const f = data.ficha;
-  if (f.grupo) { renderGrupoCompartido(cont, f); return; } // colección/obra: lista de documentos con descarga
+  if (f.grupo) { renderGrupoCompartido(cont, f, token); return; } // colección/obra/selección: lista + ZIP
   const portada = f.portada
     ? `<div style="text-align:center;margin-bottom:14px"><img src="${esc(encUrl(f.portada))}" style="max-height:260px;max-width:78%;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.5)"></div>`
     : '';

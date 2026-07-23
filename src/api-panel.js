@@ -2897,6 +2897,66 @@ export function rutasPublicas() {
         } catch (e) { if (!res.headersSent) res.status(500).send(e.message); }
     });
 
+    // DESCARGAR TODO en un ZIP lo compartido (colección / obra / selección). Complementa la descarga
+    // individual: quien recibe una selección de 20 libros no debería pulsar 20 veces.
+    //
+    // Las rutas van RELATIVAS AL ÁRBOL CDU a propósito: así cada entrada del ZIP es única aunque dos
+    // documentos se llamen igual (dos «libro.pdf» aplastarían uno al otro con nombres planos).
+    // PRIVACIDAD: por defecto solo el fichero PRINCIPAL de cada documento; si quien compartió autorizó el
+    // material adjunto, va la carpeta entera pero EXCLUYENDO los sidecars (registro.json/.marc.xml, que son
+    // una copia del registro con progreso de lectura, ubicación y el inventario de los «solo admin») y los
+    // propios adjuntos marcados «solo administradores».
+    r.get('/compartido/:token/zip', async (req, res) => {
+        try {
+            const info = validarCompartir(req.params.token);
+            if (!info || info.tipo === 'doc') return res.status(404).send('enlace no válido');
+            const db = await conectarDB();
+            let ids = [];
+            if (info.tipo === 'seleccion') {
+                const sel = await db.collection('selecciones').findOne({ _id: new ObjectId(info.docId) }, { projection: { docs: 1, nombre: 1 } });
+                if (!sel) return res.status(404).send('no encontrado');
+                ids = sel.docs || [];
+                var nombreGrupo = sel.nombre;
+            } else {
+                const campo = info.tipo === 'obra' ? 'obra' : 'coleccion';
+                const grupo = await db.collection(info.tipo === 'obra' ? 'obras' : 'colecciones')
+                    .findOne({ _id: new ObjectId(info.docId) }, { projection: { nombre: 1, titulo: 1 } });
+                if (!grupo) return res.status(404).send('no encontrado');
+                nombreGrupo = grupo.nombre || grupo.titulo;
+                ids = (await db.collection('biblioteca').find({ [campo]: new ObjectId(info.docId) }, { projection: { _id: 1 } }).toArray()).map((d) => d._id);
+            }
+            if (!ids.length) return res.status(404).send('no hay documentos');
+
+            const docs = await db.collection('biblioteca')
+                .find({ _id: { $in: ids } }, { projection: { ruta_base: 1, nombre_archivo: 1, formatos: 1, adjuntos: 1 } }).toArray();
+            const raizCdu = path.resolve(DIR_CDU);
+            const objetivos = [];   // rutas relativas al árbol CDU
+            const excluir = ['--exclude', 'registro.json', '--exclude', 'registro.marc.xml'];
+            for (const d of docs) {
+                if (!d.ruta_base || (d.formatos || []).includes('papel')) continue;   // el papel no se descarga
+                const carpeta = path.resolve(carpetaDeDoc(d));
+                if (!carpeta.startsWith(raizCdu)) continue;                            // nunca fuera del árbol
+                const relCarpeta = path.relative(raizCdu, carpeta).split(path.sep).join('/');
+                if (info.adjuntos) {
+                    objetivos.push(relCarpeta);
+                    for (const a of (d.adjuntos || [])) if (a.soloAdmin) excluir.push('--exclude', `${relCarpeta}/${a.nombre}`);
+                } else if (d.nombre_archivo) {
+                    objetivos.push(`${relCarpeta}/${d.nombre_archivo}`);
+                }
+            }
+            if (!objetivos.length) return res.status(404).send('no hay nada descargable');
+
+            const nombreZip = String(nombreGrupo || 'documentos').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 100) + '.zip';
+            res.setHeader('Content-Type', 'application/zip');
+            res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(nombreZip)}`);
+            const hijo = spawn('bsdtar', ['-c', '--format', 'zip', ...excluir, '-f', '-', '-C', raizCdu, ...objetivos], { stdio: ['ignore', 'pipe', 'pipe'] });
+            hijo.stdout.pipe(res);
+            hijo.stderr.on('data', (b) => console.warn(`[zip compartido] ${String(b).trim()}`));
+            hijo.on('error', () => { if (!res.headersSent) res.status(500).send('no se pudo generar el ZIP'); });
+            req.on('close', () => hijo.kill('SIGKILL'));   // el cliente abortó: no dejar el proceso colgado
+        } catch (e) { if (!res.headersSent) res.status(500).send(e.message); }
+    });
+
     r.get('/compartido/:token', async (req, res) => {
         try {
             const info = validarCompartir(req.params.token);
