@@ -385,6 +385,9 @@ async function refrescarEstado() {
     // Página Vigilante
     $('#vSwitch').checked = vigilanteActivo;
     $('#vLabel').textContent = vigilanteActivo ? 'Activo' : 'Pausado';
+    // La COPIA del menú refleja siempre el mismo estado (aunque se cambie desde el otro mando o por el servidor).
+    if ($('#vSwitch2')) $('#vSwitch2').checked = vigilanteActivo;
+    if ($('#vLabel2')) $('#vLabel2').textContent = vigilanteActivo ? 'Activo' : 'Pausado';
     $('#vSub').textContent = vigilanteProcesando
       ? 'procesando el Inbox…'
       : vigilanteActivo
@@ -499,18 +502,24 @@ $('#mStop').onclick = async () => {
 };
 
 // ── vigilante del Inbox: interruptor activar/pausar ──────────────────────────────────────────────────
-$('#vSwitch').onchange = async (ev) => {
+// Hay DOS mandos con la misma función: el de la página Entrada (#vSwitch, el «oficial») y una COPIA al final
+// del menú (#vSwitch2), que se usa constantemente y así queda a mano desde cualquier página. Comparten acción
+// y `refrescarEstado` los deja a los dos con el estado real del servidor (también si cambia por otra vía).
+async function conmutarVigilante(activo, origen) {
   try {
-    const resp = await api('/vigilante', {
-      method: 'POST',
-      body: JSON.stringify({ activo: ev.target.checked }),
-    });
+    const resp = await api('/vigilante', { method: 'POST', body: JSON.stringify({ activo }) });
     toast('Vigilante ' + (resp.activo ? 'activado' : 'pausado'), resp.activo ? 'ok' : 'warn');
     refrescarEstado();
   } catch (err) {
     toast(err.message, 'bad');
+    // La acción falló: devolver el interruptor a como estaba (si no, miente sobre el estado real).
+    if (origen) origen.checked = !activo;
   }
-};
+}
+for (const sel of ['#vSwitch', '#vSwitch2']) {
+  const sw = $(sel);
+  if (sw) sw.onchange = (ev) => conmutarVigilante(ev.target.checked, ev.target);
+}
 
 // ── cuarentena ──
 // Consulta de búsqueda: limpia serializaciones (Epublibre [id]/(rN), marcas de fuente, hashes de

@@ -142,6 +142,22 @@ nav .soon {
   padding: 2px 6px;
   border-radius: 6px;
 }
+/* Copia del interruptor del Vigilante al final del menú (se usa constantemente: así está a mano desde
+   cualquier página). Misma franja visual que el pie de la barra lateral. */
+.sb-vig {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+.sb-vig-txt {
+  font-size: 12px;
+  color: var(--mut);
+}
+.sb-vig-txt b {
+  color: var(--txt);
+}
 .sb-foot {
   padding: 14px 18px;
   border-top: 1px solid var(--line);

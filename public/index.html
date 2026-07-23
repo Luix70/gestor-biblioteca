@@ -35,6 +35,13 @@
           <button data-p="pap"><span class="ic">♻</span> Papelera</button>
           <button data-p="dashboard"><span class="ic">▥</span> Dashboard</button>
         </nav>
+        <!-- COPIA del interruptor del Vigilante al final del menú: se usa constantemente y así queda a mano
+             desde CUALQUIER página, sin tener que ir a Entrada. Mismo estado y misma acción que el original
+             (el de Entrada sigue siendo el «oficial»); los ids llevan sufijo 2 y el JS sincroniza los dos. -->
+        <div class="sb-vig admin-only">
+          <label class="switch"><input type="checkbox" id="vSwitch2" /><span class="slider"></span></label>
+          <span class="sb-vig-txt"><span class="ic">👁</span> Vigilante: <b id="vLabel2">—</b></span>
+        </div>
         <div class="sb-foot"><span id="appVer" title="Versión desplegada">v1</span> · cuadro de mando<br /><span id="clock"></span></div>
       </aside>
       <div class="scrim" id="scrim"></div>

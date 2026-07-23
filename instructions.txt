@@ -1610,6 +1610,12 @@ de ficheros clasificado por CDU.
 
   ── ACTIVIDAD (administración) ───────────────────────────────────────────────
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del
+
+    · COPIA DEL INTERRUPTOR DEL VIGILANTE AL FINAL DEL MENU (admin): el mando de Entrada sigue siendo el
+      «oficial», pero como se usa constantemente hay una copia al pie de la barra lateral (#vSwitch2),
+      accesible desde CUALQUIER pagina sin ir a Entrada. Comparten accion (conmutarVigilante) y
+      refrescarEstado deja los DOS con el estado real del servidor, aunque cambie por otra via. Si la
+      llamada falla, el interruptor vuelve a su posicion (no debe mentir sobre el estado real).
     Conformador, 🧹 Lanzar mantenimiento, 🎯 Campañas de fondo (ver abajo), 🩺
     Integridad (diagnosticar/reparar a la Papelera), 🧼 Sanear catálogo, 👁️ Visión
     IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🧰 Ejecutar script (ver
