@@ -54,6 +54,8 @@ import { reconstruirInventarioObra } from './utils/obras.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { CATEGORIAS_SCRIPTS, catalogoParaPanel, scriptPorId, construirArgv } from './utils/catalogo-scripts.js';
 import { listarFichas, crearFicha, actualizarFicha, borrarFicha, entidadExiste, COL_POR_AMBITO } from './utils/fichas-lectura.js';
+import { listarSelecciones, crearSeleccion, editarSeleccion, borrarSeleccion, anadirDocs, quitarDocs,
+         fichaSeleccion, docsDeSeleccion, seleccionesDeDoc } from './utils/selecciones.js';
 import { lanzarScript, estadoEjecutor, detenerScript } from './utils/ejecutor-scripts.js';
 import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
 import { estadoVision, configurarProveedor, probarProveedor } from './utils/vision.js';
@@ -753,6 +755,12 @@ export function rutasPanel() {
             if (colsCsv.length) extras.push({ coleccion: { $in: colsCsv } });
             const obrasCsv = oidsDe(req.query.obras);
             if (obrasCsv.length) extras.push({ obra: { $in: obrasCsv } });
+            // SELECCIÓN PERSONAL: la pertenencia vive en la selección, así que se traduce a un `_id $in` —
+            // el mismo mecanismo que ya usan el filtro por ids y los aciertos del índice de búsqueda.
+            if (req.query.seleccion) {
+                const idsSel = await docsDeSeleccion(db, String(req.query.seleccion));
+                extras.push({ _id: { $in: idsSel.length ? idsSel : [new ObjectId()] } });
+            }
             // NSFW: los invitados no ven material marcado (ni el que cuelga de una obra/colección nsfw).
             const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
             if (nsfwCond) extras.push(...nsfwCond);
@@ -2668,7 +2676,7 @@ export function rutasPanel() {
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) }, { projection: { formatos: 1 } });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             const esDigital = !(doc.formatos || []).includes('papel');
-            res.json({ ok: true, token: firmarCompartir(req.params.id, { descarga: esDigital }), descarga: esDigital });
+            res.json({ ok: true, token: firmarCompartir(req.params.id, { descarga: esDigital, adjuntos: !!req.body?.adjuntos }), descarga: esDigital });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
@@ -2676,11 +2684,58 @@ export function rutasPanel() {
     // firmado, con `tipo`. (Los ficheros bajo /recursos ya son públicos; esto solo acota la vista a ese grupo.)
     r.post('/colecciones/:id/compartir', (req, res) => {
         if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'coleccion', descarga: true }) });
+        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'coleccion', descarga: true, adjuntos: !!req.body?.adjuntos }) });
     });
+    // ── SELECCIONES PERSONALES: agrupaciones arbitrarias y curadas (un libro puede estar en VARIAS). La
+    //    pertenencia vive en la propia selección (`docs[]`), no en el libro → el pipeline ni se entera.
+    //    El «comentario» de una selección son sus FICHAS DE LECTURA con ambito:'seleccion'. ──
+    r.get('/selecciones', async (req, res) => {
+        try { res.json({ ok: true, selecciones: await listarSelecciones(await conectarDB()) }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.get('/selecciones/:id', async (req, res) => {
+        try {
+            const sel = await fichaSeleccion(await conectarDB(), req.params.id);
+            if (!sel) return res.status(404).json({ ok: false, motivo: 'selección no encontrada' });
+            res.json({ ok: true, seleccion: sel });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // CREAR: admite `docs` para que nazca YA poblada desde la selección múltiple del catálogo.
+    r.post('/selecciones', async (req, res) => {
+        try { res.json(await crearSeleccion(await conectarDB(), req.body || {})); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/selecciones/:id/editar', async (req, res) => {
+        try { res.json(await editarSeleccion(await conectarDB(), req.params.id, req.body || {})); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/selecciones/:id/borrar', async (req, res) => {
+        try { res.json(await borrarSeleccion(await conectarDB(), req.params.id)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // AÑADIR / QUITAR miembros ($addToSet / $pull: añadir dos veces es inofensivo; los libros no se tocan).
+    r.post('/selecciones/:id/anadir', async (req, res) => {
+        try { res.json(await anadirDocs(await conectarDB(), req.params.id, req.body?.ids)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/selecciones/:id/quitar', async (req, res) => {
+        try { res.json(await quitarDocs(await conectarDB(), req.params.id, req.body?.ids)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // ¿En qué selecciones está este documento? (consulta inversa por el índice sobre `docs`).
+    r.get('/documentos/:id/selecciones', async (req, res) => {
+        try { res.json({ ok: true, selecciones: await seleccionesDeDoc(await conectarDB(), req.params.id) }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // COMPARTIR una selección: enlace/QR de SOLO LECTURA (previsualizar y descargar; nunca modificar).
+    r.post('/selecciones/:id/compartir', (req, res) => {
+        if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'seleccion', descarga: true, adjuntos: !!req.body?.adjuntos }) });
+    });
+
     r.post('/obras/:id/compartir', (req, res) => {
         if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'obra', descarga: true }) });
+        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'obra', descarga: true, adjuntos: !!req.body?.adjuntos }) });
     });
 
     return r;
@@ -2689,7 +2744,7 @@ export function rutasPanel() {
 // Datos PÚBLICOS de una ficha (vista compartida por QR): solo lo bibliográfico + portada. SIN ubicación
 // física, sin campos internos ni acceso al resto del catálogo. La descarga solo si el token la autoriza
 // y el medio es digital (un libro en papel no tiene fichero que bajar).
-async function fichaCompartida(docId, permiteDescarga) {
+async function fichaCompartida(docId, permiteDescarga, incluirAdjuntos = false) {
     if (!ObjectId.isValid(docId)) return null;
     const db = await conectarDB();
     const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(docId) });
@@ -2708,30 +2763,43 @@ async function fichaCompartida(docId, permiteDescarga) {
         formatos: doc.formatos || [], es_digital: esDigital,
         valoracion: doc.valoracion || 0, sinopsis: doc.sinopsis || null,
         portada: doc.portada || null,
-        descarga_url: (permiteDescarga && esDigital) ? urlArchivo(doc) : null,
+        descarga_url: !(permiteDescarga && esDigital) ? null
+            : (incluirAdjuntos && doc.ruta_base ? '/api/descargar/' + String(doc._id) + '?que=todo' : urlArchivo(doc)),
         nombre_archivo: (permiteDescarga && esDigital) ? (doc.nombre_archivo || null) : null,
     };
 }
 
 // Datos PÚBLICOS de un GRUPO compartido (colección u obra): su nombre + la lista de MIEMBROS (título, portada,
 // año, volumen) con la URL de descarga de cada uno. SIN ubicación física ni acceso al resto del catálogo.
-async function grupoCompartido(tipo, id) {
+async function grupoCompartido(tipo, id, incluirAdjuntos = false) {
     if (!ObjectId.isValid(id)) return null;
     const db = await conectarDB();
-    const grupo = await db.collection(tipo === 'obra' ? 'obras' : 'colecciones').findOne({ _id: new ObjectId(id) });
-    if (!grupo) return null;
-    const campo = tipo === 'obra' ? 'obra' : 'coleccion';
-    const miembros = await db.collection('biblioteca')
-        .find({ [campo]: grupo._id }, { projection: { titulo: 1, portada: 1, formatos: 1, 'año_edicion': 1, volumen_numero: 1, coleccion_numero: 1, ruta_base: 1, nombre_archivo: 1 } })
-        .toArray();
-    // Orden: obra por volumen; colección por nº de colección (numérico) → título.
-    const num = (x) => { const n = parseInt(x, 10); return Number.isFinite(n) ? n : 1e9; };
-    miembros.sort(tipo === 'obra'
-        ? (a, b) => num(a.volumen_numero) - num(b.volumen_numero) || String(a.titulo || '').localeCompare(String(b.titulo || ''))
-        : (a, b) => num(a.coleccion_numero) - num(b.coleccion_numero) || String(a.titulo || '').localeCompare(String(b.titulo || '')));
+    const PROY = { titulo: 1, portada: 1, formatos: 1, 'año_edicion': 1, volumen_numero: 1, coleccion_numero: 1, ruta_base: 1, nombre_archivo: 1 };
+    let grupo, miembros;
+    if (tipo === 'seleccion') {
+        // SELECCIÓN PERSONAL: la pertenencia vive en la propia selección (`docs[]`) y su ORDEN es el que curó
+        // el usuario, así que se respeta tal cual (no se re-ordena por volumen/nº como en obra/colección).
+        grupo = await db.collection('selecciones').findOne({ _id: new ObjectId(id) });
+        if (!grupo) return null;
+        const ids = grupo.docs || [];
+        const docs = ids.length ? await db.collection('biblioteca').find({ _id: { $in: ids } }, { projection: PROY }).toArray() : [];
+        const porId = new Map(docs.map((d) => [String(d._id), d]));
+        miembros = ids.map((i) => porId.get(String(i))).filter(Boolean);   // los borrados simplemente no salen
+    } else {
+        grupo = await db.collection(tipo === 'obra' ? 'obras' : 'colecciones').findOne({ _id: new ObjectId(id) });
+        if (!grupo) return null;
+        const campo = tipo === 'obra' ? 'obra' : 'coleccion';
+        miembros = await db.collection('biblioteca').find({ [campo]: grupo._id }, { projection: PROY }).toArray();
+        // Orden: obra por volumen; colección por nº de colección (numérico) → título.
+        const num = (x) => { const n = parseInt(x, 10); return Number.isFinite(n) ? n : 1e9; };
+        miembros.sort(tipo === 'obra'
+            ? (a, b) => num(a.volumen_numero) - num(b.volumen_numero) || String(a.titulo || '').localeCompare(String(b.titulo || ''))
+            : (a, b) => num(a.coleccion_numero) - num(b.coleccion_numero) || String(a.titulo || '').localeCompare(String(b.titulo || '')));
+    }
     return {
         grupo: true, tipo,
         nombre: grupo.nombre || grupo.titulo || '(sin nombre)',
+        descripcion: grupo.descripcion || null,
         total: miembros.length,
         miembros: miembros.map((m) => {
             const esDigital = !(m.formatos || []).includes('papel');
@@ -2743,8 +2811,13 @@ async function grupoCompartido(tipo, id) {
                 'año_edicion': m['año_edicion'] || null,
                 volumen: m.volumen_numero ?? null,
                 formatos: m.formatos || [],
-                // Directo si hay un fichero; si no (escaneado multi-imagen), la carpeta en ZIP.
-                descarga_url: !esDigital ? null : (directo || (m.ruta_base ? '/api/descargar/' + String(m._id) + '?que=todo' : null)),
+                // Directo si hay un fichero (= SOLO el libro). Si no lo hay (escaneado multi-imagen) no queda
+                // más remedio que la carpeta en ZIP, pero el endpoint ya excluye para no-admins los adjuntos
+                // «solo admin» y los sidecars con datos personales. El MATERIAL adjunto solo viaja si quien
+                // comparte lo autorizó al crear el enlace (`incluirAdjuntos`), nunca por defecto.
+                descarga_url: !esDigital ? null
+                    : (incluirAdjuntos && m.ruta_base ? '/api/descargar/' + String(m._id) + '?que=todo'
+                        : directo || (m.ruta_base ? '/api/descargar/' + String(m._id) + '?que=principal' : null)),
             };
         }),
     };
@@ -2802,6 +2875,12 @@ export function rutasPublicas() {
                 objetivos = (await readdir(baseDir).catch(() => [])).filter((n) => esAdmin || !adjSoloAdmin.has(n));
                 if (!objetivos.length) objetivos = ['.'];
             }
+            // FUGA DE DATOS PERSONALES: `registro.json` es una COPIA del documento y solo se le quitan unos
+            // pocos campos internos — conserva `leido` (progreso de lectura), `like`, `nsfw`, la UBICACIÓN
+            // física y hasta el inventario `adjuntos[]` con los nombres de los marcados «solo admin». Nadie que
+            // no sea admin debe recibirlo: ni un invitado ni, sobre todo, alguien con un enlace compartido.
+            // (El .marc.xml se deriva de lo mismo.) El admin sí se los lleva: son SUS datos.
+            if (!esAdmin) objetivos = objetivos.filter((n) => n !== 'registro.json' && n !== 'registro.marc.xml');
 
             const nombreZip = ((doc.titulo || 'contenido') + etq)
                 .replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120) + '.zip';
@@ -2823,8 +2902,8 @@ export function rutasPublicas() {
             const info = validarCompartir(req.params.token);
             if (!info) return res.status(404).json({ ok: false, motivo: 'enlace no válido' });
             const ficha = info.tipo === 'doc'
-                ? await fichaCompartida(info.docId, info.descarga)
-                : await grupoCompartido(info.tipo, info.docId);
+                ? await fichaCompartida(info.docId, info.descarga, info.adjuntos)
+                : await grupoCompartido(info.tipo, info.docId, info.adjuntos);
             if (!ficha) return res.status(404).json({ ok: false, motivo: 'no encontrado' });
             res.json({ ok: true, ficha });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }

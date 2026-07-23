@@ -321,6 +321,20 @@ async function main() {
     }
     await asegurarIndice(db.collection('fichas_lectura'), { ambito: 1, ref: 1 }, { name: 'idx_ambito_ref' });
 
+    // ── selecciones: agrupaciones PERSONALES y arbitrarias («Libros para leer este verano»). Un documento
+    // puede estar en VARIAS, y la pertenencia vive AQUÍ (`docs[]`), no en el libro — al revés que `colecciones`,
+    // que es una construcción de IDENTIDAD (dedup + ruta en disco) y por eso no se toca. El índice sobre `docs`
+    // resuelve la consulta inversa «¿en qué selecciones está este libro?».
+    console.log('\nselecciones:');
+    if ((await db.listCollections({ name: 'selecciones' }).toArray()).length === 0) {
+        await db.createCollection('selecciones');
+        console.log('  ✅ colección creada.');
+    } else {
+        console.log('  ✓ ya existía.');
+    }
+    await asegurarIndice(db.collection('selecciones'), { docs: 1 }, { name: 'idx_docs' });
+    await asegurarIndice(db.collection('selecciones'), { nombre: 1 }, { name: 'idx_nombre' });
+
     console.log('\nListo.\n');
     process.exit(0);
 }

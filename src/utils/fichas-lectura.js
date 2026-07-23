@@ -14,7 +14,9 @@ import { ObjectId } from 'mongodb';
 import { sanearHtml } from './sanear-html.js';
 
 // Colección Mongo de la entidad enlazada, por ámbito. Sirve además para VALIDAR que la entidad existe.
-export const COL_POR_AMBITO = { documento: 'biblioteca', obra: 'obras', coleccion: 'colecciones' };
+// `seleccion` reutiliza toda esta maquinaria para el COMENTARIO de una selección personal: es, literalmente,
+// «una ficha de lectura de la colección» (texto rico, saneado, con imágenes) sin inventar un modelo nuevo.
+export const COL_POR_AMBITO = { documento: 'biblioteca', obra: 'obras', coleccion: 'colecciones', seleccion: 'selecciones' };
 const ESTADOS = new Set(['por_leer', 'leyendo', 'leido', 'abandonado']);
 
 // 'YYYY-MM-DD' (o ISO) → Date; vacío/ inválido → null.

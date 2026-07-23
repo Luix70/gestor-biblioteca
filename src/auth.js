@@ -99,8 +99,15 @@ export function logout(token) { if (token) revocados.add(token); }
  */
 // Firma un token de compartir. `opciones.tipo` = 'doc' (por defecto) | 'coleccion' | 'obra' — así el MISMO
 // token/vista pública sirve para compartir un documento suelto o un GRUPO (colección/obra) con sus miembros.
+// `opciones.adjuntos` (por defecto NO) = el enlace permite además bajar el MATERIAL ADJUNTO del documento. Por
+// defecto un enlace compartido solo da el LIBRO: el material puede ser privado y, sobre todo, el ZIP de la
+// carpeta entera arrastraría el sidecar `registro.json`, que es una copia del documento (con progreso de
+// lectura, ubicación física y hasta el inventario de los adjuntos «solo admin»). Va FIRMADO en el token para
+// que la decisión no dependa de la URL que le llegue al destinatario.
 export function firmarCompartir(id, opciones = {}) {
-    const payload = Buffer.from(JSON.stringify({ c: 1, d: String(id), dl: !!opciones.descarga, t: opciones.tipo || 'doc' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+        c: 1, d: String(id), dl: !!opciones.descarga, t: opciones.tipo || 'doc', adj: !!opciones.adjuntos,
+    })).toString('base64url');
     const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
     return payload + '.' + sig;
 }
@@ -116,7 +123,10 @@ export function validarCompartir(token) {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     let data; try { data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { return null; }
     if (!data || data.c !== 1 || !data.d) return null;   // no es un token de compartir
-    return { docId: data.d, descarga: !!data.dl, tipo: ['coleccion', 'obra'].includes(data.t) ? data.t : 'doc' };
+    return {
+        docId: data.d, descarga: !!data.dl, adjuntos: !!data.adj,
+        tipo: ['coleccion', 'obra', 'seleccion'].includes(data.t) ? data.t : 'doc',
+    };
 }
 
 /** Verifica una contraseña contra la de CUALQUIER admin (re-confirmación de acciones destructivas). */
