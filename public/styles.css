@@ -13,6 +13,7 @@
   --ok: #28d9a8;
   --radius: 14px;
   --sb: 248px;
+  --sb-peek: 14px; /* franja que asoma cuando el menú está autocomprimido (zona sensible al ratón) */
 }
 * {
   box-sizing: border-box;
@@ -2641,6 +2642,64 @@ body.guest .admin-only {
   #p-cuar .cuar-body td:last-child .btn {
     flex: 1 1 auto;
     min-width: 128px;
+  }
+}
+/* ── MENÚ AUTOCOMPRIMIBLE (solo escritorio) ────────────────────────────────────────────────────────────
+   Con `body.sb-auto` la barra lateral se recoge contra el borde izquierdo dejando una franja estrecha, y se
+   despliega al pasar el ratón por ella (o al recibir el foco por teclado). Se despliega ENCIMA del contenido
+   —no lo reflowea— porque reordenar toda la página cada vez que rozas el borde marearía. La chincheta la deja
+   FIJA. Todo esto vive bajo `min-width:901px`: en móvil manda el patrón de siempre (fuera de pantalla + ☰). */
+.sb-pin {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 15px;
+  opacity: 0.45;
+  padding: 2px 4px;
+  border-radius: 6px;
+  transition: 0.15s;
+}
+.sb-pin:hover {
+  opacity: 1;
+  background: var(--card);
+}
+.sb-pin.on {
+  opacity: 1;
+}
+@media (max-width: 900px) {
+  .sb-pin {
+    display: none;
+  }
+}
+@media (min-width: 901px) {
+  body.sb-auto .sidebar {
+    transform: translateX(calc(-100% + var(--sb-peek, 14px)));
+  }
+  body.sb-auto .sidebar:hover,
+  body.sb-auto .sidebar:focus-within {
+    transform: none;
+    box-shadow: 8px 0 28px rgba(0, 0, 0, 0.5);
+  }
+  body.sb-auto .main {
+    margin-left: var(--sb-peek, 14px);
+  }
+  /* Asidero visible en la franja recogida: indica que ahí hay algo que se abre. */
+  body.sb-auto .sidebar::after {
+    content: '›';
+    position: absolute;
+    right: 0;
+    top: 50%;
+    width: var(--sb-peek, 14px);
+    text-align: center;
+    transform: translateY(-50%);
+    color: var(--mut);
+    font-size: 15px;
+    pointer-events: none;
+    transition: opacity 0.15s;
+  }
+  body.sb-auto .sidebar:hover::after {
+    opacity: 0;
   }
 }
 @media (max-width: 900px) {

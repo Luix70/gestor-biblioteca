@@ -502,6 +502,29 @@ $('#mStop').onclick = async () => {
   }
 };
 
+// ── Barra lateral: FIJA ↔ AUTOCOMPRIMIBLE (chincheta) ────────────────────────────────────────────────
+// Autocomprimible = se recoge contra el borde izquierdo y se despliega al pasar el ratón (todo el efecto es
+// CSS; aquí solo se conmuta la clase y se recuerda la preferencia). Por defecto FIJA: el cambio de modo debe
+// ser una decisión del usuario, no una sorpresa. Solo tiene efecto en escritorio (en móvil manda el ☰).
+function aplicarModoBarra() {
+  const auto = localStorage.getItem('sb_auto') === '1';
+  document.body.classList.toggle('sb-auto', auto);
+  const b = $('#sbPin');
+  if (b) {
+    b.classList.toggle('on', !auto);   // resaltada = fijada
+    b.title = auto
+      ? 'El menú se recoge solo (pasa el ratón por el borde para abrirlo). Pulsa para FIJARLO.'
+      : 'Menú fijo. Pulsa para que se RECOJA solo y ganar ancho.';
+  }
+}
+if ($('#sbPin')) {
+  $('#sbPin').onclick = () => {
+    localStorage.setItem('sb_auto', localStorage.getItem('sb_auto') === '1' ? '0' : '1');
+    aplicarModoBarra();
+  };
+}
+aplicarModoBarra();
+
 // ── vigilante del Inbox: interruptor activar/pausar ──────────────────────────────────────────────────
 // Hay DOS mandos con la misma función: el de la página Entrada (#vSwitch, el «oficial») y una COPIA al final
 // del menú (#vSwitch2), que se usa constantemente y así queda a mano desde cualquier página. Comparten acción
