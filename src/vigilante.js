@@ -20,7 +20,8 @@ import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/co
 import { esAudio } from './utils/lector-audio.js';
 import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
-import { detectarLibroDesglosado } from './utils/libro-desglosado.js'; // libro + su desglose en capítulos
+import { detectarLibroDesglosado, detectarDesglosePuro } from './utils/libro-desglosado.js'; // libro + su desglose
+import { unirPdfs } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB, esFalloDeConexionMongo } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
@@ -954,6 +955,15 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                     unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
                     continue;
                 }
+                // DESGLOSE PURO (solo las partes, sin el libro entero): se COSE con qpdf y pasa a ser el caso
+                // de arriba. Si no se puede coser, no se toca nada y la carpeta queda para el Inspector.
+                if (!desg) {
+                    const puro = await detectarDesglosePuro(ruta);
+                    if (puro && await carpetaEstable(ruta) && await materializarDesglosePuro(ruta, puro)) {
+                        unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
+                        continue;
+                    }
+                }
             }
             if (guiaCarpeta?.accion === 'obra') {
                 // FORZAR obra multivolumen: TODOS los documentos de la carpeta son tomos de UNA obra cuyo
@@ -1508,6 +1518,46 @@ async function materializarDesglose(dir, desg) {
         return true;
     } catch (err) {
         console.warn(`  ⚠️  desglose: no se pudo preparar «${path.basename(dir)}» (${err.message}); se deja como estaba.`);
+        return false;
+    }
+}
+
+/**
+ * DESGLOSE PURO → se COSE el libro y luego es el caso de arriba. La carpeta solo trae las partes (FrontMatter +
+ * Chapter01..N + Appendix + Glossary + Index), sin el libro entero. Se unen en orden de lectura con qpdf (copia
+ * de páginas, SIN re-renderizar → sin pérdida de calidad) en «<carpeta> (recompuesto).pdf», que pasa a ser el
+ * principal, y los ORIGINALES viajan intactos en «Desglose/». Ventaja añadida: las primeras páginas del PDF
+ * resultante SON el front matter, justo donde el pipeline busca ISBN/CIP → identificación autoritativa y sin IA.
+ * Si qpdf no está o la unión falla, NO se toca nada: la carpeta queda para que la decidas en el Inspector.
+ */
+async function materializarDesglosePuro(dir, puro) {
+    const nombre = `${path.basename(dir)} (recompuesto).pdf`;
+    const destino = path.join(dir, nombre);
+    const rutas = puro.partes.map((p) => path.join(dir, p));
+    const r = await unirPdfs(rutas, destino);
+    if (!r.ok) {
+        await fs.rm(destino, { force: true }).catch(() => {});
+        console.warn(`  ⚠️  «${path.basename(dir)}»: desglose puro pero NO se pudo coser (${r.sinQpdf ? 'falta qpdf' : r.motivo}). Se deja para el Inspector.`);
+        return false;
+    }
+    // Invariante barato: cada parte aporta al menos una página; menos páginas que partes = algo salió mal.
+    if (r.paginas && r.paginas < puro.partes.length) {
+        await fs.rm(destino, { force: true }).catch(() => {});
+        console.warn(`  ⚠️  «${path.basename(dir)}»: el cosido salió con ${r.paginas} páginas para ${puro.partes.length} partes — se descarta por seguridad.`);
+        return false;
+    }
+    try {
+        const sub = path.join(dir, 'Desglose');
+        await fs.mkdir(sub, { recursive: true });
+        for (const parte of puro.partes) {
+            const src = path.join(dir, parte);
+            if (await rutaExiste(src)) await fs.rename(src, path.join(sub, parte));
+        }
+        await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: nombre } });
+        console.log(`  🧵 «${path.basename(dir)}»: DESGLOSE PURO cosido → «${nombre}» (${r.paginas} págs. de ${puro.partes.length} partes); originales a «Desglose/».`);
+        return true;
+    } catch (err) {
+        console.warn(`  ⚠️  desglose puro: no se pudo preparar «${path.basename(dir)}» (${err.message}); se deja como estaba.`);
         return false;
     }
 }

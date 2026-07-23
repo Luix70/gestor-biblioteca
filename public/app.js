@@ -665,16 +665,29 @@ async function loadCuar() {
           const chk = d.listo
             ? `<input type="checkbox" class="admin-only" data-sel="${esc(d.id)}" ${sanSel.has(d.id) ? 'checked' : ''}>`
             : '';
+          // INFORME de una reparación (qpdf). NUNCA se dice «reparado» a secas: se enseñan las páginas y el
+          // porcentaje recuperados y, si hay sospecha de mutilación, un aviso ROJO. Es justo lo que evita la
+          // falsa seguridad de creer que tienes un libro entero cuando solo se salvaron unas páginas.
+          const rep = d.reparado && d.reparacion ? d.reparacion : null;
+          const infRep = rep
+            ? `<div style="margin-top:4px"><span class="tag ${rep.sospecha ? 'warn' : 'ok'}">🔧 reparado</span> `
+              + `<span class="muted" style="font-size:11px">${rep.paginas} pág. · ${Math.round((rep.ratio || 0) * 100)}% del tamaño original</span>`
+              + (rep.sospecha ? `<div class="tag bad" style="margin-top:4px">⚠️ Puede estar INCOMPLETO: ${esc(rep.motivoSospecha || '')}</div>` : '')
+              + `<div style="margin-top:4px"><a class="btn" href="/api/saneamiento/reemplazo?id=${encodeURIComponent(d.id)}${TOKEN ? '&token=' + encodeURIComponent(TOKEN) : ''}" target="_blank" rel="noopener" title="Abre el PDF reparado para comprobar que está COMPLETO antes de catalogarlo">🔍 Inspeccionar</a></div></div>`
+            : '';
+          const esPdf = (d.archivos || []).some((a) => /\.pdf$/i.test(a));
           const estado = dup
             ? `<span class="muted">${esc(d.error || '—')}</span>`
             : d.listo
-              ? `<span class="tag ok">✓ lista</span> <span class="muted mono" style="font-size:11px">${esc(d.reemplazo || '')}</span>${d.error_proceso ? `<div class="tag bad" style="margin-top:4px">⛔ ${esc(d.error_proceso)}</div>` : ''}`
+              ? `<span class="tag ok">✓ lista</span> <span class="muted mono" style="font-size:11px">${esc(d.reemplazo || '')}</span>${infRep}${d.error_proceso ? `<div class="tag bad" style="margin-top:4px">⛔ ${esc(d.error_proceso)}</div>` : ''}`
               : `<span class="muted">${esc(d.error || '—')}</span>`;
           let acc = dup
             ? `<button class="btn" data-cmp="${esc(d.id)}">⚖ Comparar</button> <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`
             : d.listo
               ? `<button class="btn pri admin-only" data-proc="${esc(d.id)}" title="Catalogar esta copia ya">▶ Procesar</button> <button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir otra copia">⤓ Cambiar</button>`
-              : `<button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir una copia sana (queda lista para procesar)">⤓ Reemplazar</button>${cat === 'ilegibles' ? '' : ` <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`}`;
+              : `<button class="btn admin-only" data-rep="${esc(d.id)}" title="Subir una copia sana (queda lista para procesar)">⤓ Reemplazar</button>`
+                + (cat === 'ilegibles' && esPdf ? ` <button class="btn admin-only" data-fix="${esc(d.id)}" title="Intentar REPARAR el PDF roto (reconstruye su índice interno). No cataloga nada: podrás inspeccionar el resultado y decidir">🔧 Reparar</button>` : '')
+                + (cat === 'ilegibles' ? '' : ` <button class="btn admin-only" data-re="${esc(d.id)}">↻ Reingestar</button>`);
           acc += ` <button class="btn bad admin-only" data-desc="${esc(d.id)}" data-tit="${esc(d.titulo || d.archivos[0] || d.nombre || '')}" title="Descartar: carpeta completa → Papelera, fuera de Cuarentena">🗑</button>`;
           return `<tr${d.listo ? ' style="background:rgba(40,217,168,.05)"' : ''}>
         <td style="width:24px">${chk}</td>
@@ -732,6 +745,31 @@ async function loadCuar() {
         }),
     );
     $$('#cuarBody [data-proc]').forEach((b) => (b.onclick = () => procesarSaneados([b.dataset.proc])));
+    // 🔧 Reparar un PDF roto: NO cataloga: deja el candidato listo y muestra el informe (páginas, % recuperado
+    // y aviso si puede estar mutilado) para que lo inspecciones y decidas si procesarlo.
+    $$('#cuarBody [data-fix]').forEach(
+      (b) =>
+        (b.onclick = async () => {
+          const id = b.dataset.fix;
+          b.disabled = true;
+          b.textContent = '🔧 Reparando…';
+          try {
+            const r = await api('/saneamiento/reparar', { method: 'POST', body: JSON.stringify({ id }) });
+            if (!r.ok) { toast(r.motivo || 'no se pudo reparar', 'bad'); b.disabled = false; b.textContent = '🔧 Reparar'; return; }
+            toast(
+              r.sospecha
+                ? `🔧 Reparado con AVISO: ${r.paginas} pág. — revísalo antes de procesar`
+                : `🔧 Reparado: ${r.paginas} pág. — inspecciónalo y procesa si está completo`,
+              r.sospecha ? 'warn' : 'ok',
+            );
+            loadCuar();
+          } catch (e) {
+            toast(e.message, 'bad');
+            b.disabled = false;
+            b.textContent = '🔧 Reparar';
+          }
+        }),
+    );
     $$('#cuarBody [data-desc]').forEach(
       (b) =>
         (b.onclick = async () => {

@@ -33,8 +33,15 @@ FROM node:18-bullseye-slim
 # en `antiword` (y `catdoc` como respaldo: lector-word.js prueba los dos). Ambos son C plano, minúsculos y
 # están en bullseye/main (verificado: antiword 0.37-16, catdoc 1:0.95-4.1) → aptos para el Atom, como poppler.
 # Si algún día faltaran, lector-word.js DEGRADA: el .doc se cataloga por nombre y la ficha ofrece la descarga.
+# qpdf: DOS usos, ambos estructurales (NO re-renderiza → sin pérdida de calidad ni de capa de texto):
+#   1) REPARAR un PDF dañado reconstruyendo su tabla xref a partir de los objetos que sí están en el fichero
+#      (`qpdf --replace-input`). Es lo que hacen por dentro las webs tipo iLovePDF para «hacerlo legible».
+#   2) COSER en un solo PDF los capítulos sueltos de un «libro desglosado» (`--empty --pages … --`), copiando
+#      los objetos de página originales.
+# Es C++ plano, ~2 MB, en Debian MAIN y sin SIMD → apto para el Atom D525, igual que poppler. Si algún día
+# faltara, los dos usos DEGRADAN con elegancia (se detecta con `qpdf --version` y no se rompe nada).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin antiword catdoc \
+    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin antiword catdoc qpdf \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

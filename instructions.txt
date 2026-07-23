@@ -1112,6 +1112,34 @@ de ficheros clasificado por CDU.
       carpeta que solo trae los capítulos) NO se dispara a propósito —no se adivina cuál capítulo «es el libro»—
       y se deja para el Inspector. Verificado contra el Test Battery: 4/4 casos con principal detectados
       (dominio ×6,8–11,4) y 0 falsos positivos en las otras 47 carpetas.
+    · DESGLOSE PURO → SE COSE EL LIBRO (qpdf): variante del anterior en la que la carpeta trae SOLO las partes
+      (FrontMatter + Chapter01..N + Appendix + Glossary + Index), sin el libro entero. No se usa el FrontMatter
+      como principal (separaria la obra de forma arbitraria: el visor abriria 20 paginas haciendolas pasar por un
+      libro de 700). Se UNEN en orden de lectura con qpdf -> «<carpeta> (recompuesto).pdf», que pasa a ser el
+      principal, y los ORIGINALES viajan intactos en «Desglose/». qpdf COPIA las paginas (no re-renderiza): sin
+      perdida de calidad ni de capa de texto. VENTAJA: las primeras paginas del resultado SON el front matter,
+      justo donde el pipeline busca ISBN/CIP -> identificacion autoritativa y GRATIS (sin IA).
+      ORDEN de cosido (utils/libro-desglosado.js · ordenarPartesLibro): preliminares -> partes numeradas ->
+      apendices -> glosarios -> indice -> bibliografia -> soluciones.
+      TRES BARRERAS para no colisionar con «empaquetar» (laminas/escaneos -> cbz, p. ej. los Grabados):
+        (1) la GUIA del usuario manda: si la carpeta esta guiada, la deteccion automatica ni se ejecuta;
+        (2) EVIDENCIA ESTRUCTURAL de libro: hace falta ver preliminares, material final o >=3 capitulos
+            NOMBRADOS como tales — «I03133.pdf … I03138.pdf» (identificadores opacos) no la tiene;
+        (3) CAPA DE TEXTO: se muestrean 2 partes con pdftotext; un capitulo tiene texto, una lamina escaneada
+            no. Si poppler falla, no bloquea (las otras dos barreras siguen).
+      Si algo no cuadra (falta qpdf, la union falla, o salen menos paginas que partes) NO se toca nada y la
+      carpeta queda para el Inspector. Verificado: 0 falsos positivos en todo el Test Battery.
+    · REPARAR UN PDF ROTO (Cuarentena/ilegibles -> «🔧 Reparar», admin): qpdf reconstruye la tabla xref a partir
+      de los objetos que si estan en el fichero (es lo que hacen por dentro las webs tipo iLovePDF). NO cataloga
+      nada: deja el candidato en el MISMO staging que una copia subida (`.reemplazo/` + estado.listo) y devuelve
+      un INFORME. El original ROTO se conserva intacto.
+      NUNCA se afirma «reparado» a secas: una reparacion puede devolver un documento MUTILADO (a veces se
+      reconstruyen 25 paginas de un libro de cientos) y darlo por bueno seria FALSA SEGURIDAD. El panel muestra
+      paginas recuperadas y % del tamano original, un aviso ROJO «Puede estar INCOMPLETO» cuando hay sospecha
+      (pesa <60% del original / antes se veian mas paginas / muy pocas paginas para el tamano), y un boton
+      «🔍 Inspeccionar» que abre el PDF reparado para comprobarlo ANTES de procesarlo. Tu decides si se reingesta.
+      (utils/qpdf.js · repararPdf/unirPdfs + saneamiento.js · repararDeposito/rutaReemplazo; endpoints
+      POST /api/saneamiento/reparar y GET /api/saneamiento/reemplazo.)
     · LIBRO + MATERIAL AUXILIAR (accion:'libro-material' en el Inspector): una carpeta con UN documento
       principal (el libro) + material de apoyo (código de ejemplo, datasets, multimedia…) en un SOLO drop.
       El LIBRO se cataloga por el PIPELINE NORMAL — ISBN/CDU/metadatos completos, un `tipo_recurso:'libro'`

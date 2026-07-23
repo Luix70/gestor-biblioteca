@@ -98,6 +98,11 @@ export async function listarCuarentena() {
                 listo: !!estado?.listo,
                 reemplazo: estado?.reemplazo || null,
                 error_proceso: estado?.error_proceso || null,
+                // Reparación de un PDF roto: el candidato en staging viene de qpdf, no de una copia sana subida.
+                // `reparacion` lleva el INFORME (páginas, bytes, sospecha) para que el panel avise antes de
+                // catalogar: una reparación puede devolver un documento MUTILADO y no queremos falsa seguridad.
+                reparado: !!estado?.reparado,
+                reparacion: estado?.reparacion || null,
             });
         }
         if (depositos.length) categorias[c.name] = depositos;

@@ -59,7 +59,7 @@ import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
 import { estadoVision, configurarProveedor, probarProveedor } from './utils/vision.js';
 import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
-import { fuentesCopia, procesarSaneamiento, estadoSaneamiento } from './utils/saneamiento.js';
+import { fuentesCopia, procesarSaneamiento, estadoSaneamiento, repararDeposito, rutaReemplazo } from './utils/saneamiento.js';
 import { describirCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 import { altaPorISBN } from './servicio-ingesta.js';
@@ -276,6 +276,22 @@ export function rutasPanel() {
     });
     // Progreso del trabajo de saneamiento por lotes (para el panel).
     r.get('/saneamiento/estado', (req, res) => res.json(estadoSaneamiento()));
+
+    // INTENTAR REPARAR el PDF roto de un depósito (qpdf). NO cataloga: deja el candidato en staging y devuelve
+    // el INFORME (páginas recuperadas, bytes, sospecha de mutilación) para que lo inspecciones y decidas.
+    r.post('/saneamiento/reparar', async (req, res) => {
+        try { res.json(await repararDeposito(String(req.body?.id || ''))); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // INSPECCIONAR el candidato reparado ANTES de decidir: sirve el PDF en staging (inline, para el visor).
+    r.get('/saneamiento/reemplazo', async (req, res) => {
+        try {
+            const p = await rutaReemplazo(String(req.query?.id || ''));
+            if (!p) return res.status(404).json({ ok: false, motivo: 'no hay candidato preparado en ese depósito' });
+            res.setHeader('Content-Disposition', 'inline');
+            res.sendFile(p);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
 
     // ── Integridad: proceso PESADO → se ejecuta en 2º plano y el panel sondea el progreso (así un proxy
     //    no corta la petición larga, que daba 405). POST arranca; GET /integridad/estado da fase + informe. ──

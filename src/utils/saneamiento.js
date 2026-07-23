@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { reciclar } from './papelera.js';
 import { ingestarRecurso } from '../servicio-ingesta.js';
+import { repararPdf } from './qpdf.js'; // reparación de PDF rotos (reconstruye el xref)
 
 /**
  * SANEAMIENTO de ficheros problemáticos de la Cuarentena (ilegibles / no-identificados / otros):
@@ -99,6 +100,73 @@ export async function prepararReemplazo(idDeposito, rutaSubida, { nombreOriginal
 
     console.log(`🩹 Saneamiento: copia LISTA para ${idDeposito} («${nombre}», ${st.size} B).`);
     return { ok: true, reemplazo: nombre, bytes: st.size };
+}
+
+/**
+ * INTENTA REPARAR el PDF roto de un depósito (qpdf reconstruye el xref) y deja el resultado en el MISMO
+ * staging que una copia subida (`.reemplazo/` + `estado.listo`), para que el flujo «inspeccionar → Procesar»
+ * ya existente sirva igual. NO cataloga nada: la decisión es tuya.
+ *
+ * CLAVE (lo pide el usuario): NUNCA se afirma «reparado» a secas. Una reparación puede devolver un documento
+ * MUTILADO —las webs tipo iLovePDF a veces reconstruyen 25 páginas de un libro de cientos— y dar eso por bueno
+ * sería FALSA SEGURIDAD: creerías tener un libro que no tienes. Por eso se devuelve (y se guarda en el estado)
+ * el INFORME: páginas recuperadas, bytes antes/después y la sospecha razonada de mutilación. El original ROTO
+ * se conserva intacto por si quieres reintentar con otra herramienta.
+ */
+export async function repararDeposito(idDeposito) {
+    const { dir: depDir, error } = depDirDe(idDeposito);
+    if (error) return { ok: false, motivo: error };
+    try { await fs.access(depDir); } catch { return { ok: false, motivo: 'el depósito ya no existe' }; }
+
+    // El fichero ROTO es el documento del primer nivel del depósito (sin contar sidecars ni el staging).
+    let entradas = [];
+    try { entradas = await fs.readdir(depDir, { withFileTypes: true }); } catch { /* vacío */ }
+    const roto = entradas.find((e) => e.isFile() && !e.name.startsWith('.') && e.name !== 'estado.json'
+        && path.extname(e.name).toLowerCase() === '.pdf');
+    if (!roto) return { ok: false, motivo: 'en este depósito no hay un PDF que reparar (solo se pueden reparar PDF)' };
+
+    const origen = path.join(depDir, roto.name);
+    const repDir = path.join(depDir, SUBDIR_REEMPLAZO);
+    await fs.rm(repDir, { recursive: true, force: true }).catch(() => {});
+    await fs.mkdir(repDir, { recursive: true });
+    const destino = path.join(repDir, roto.name);
+
+    const inf = await repararPdf(origen, destino);
+    if (!inf.ok) {
+        await fs.rm(repDir, { recursive: true, force: true }).catch(() => {});
+        return { ok: false, sinQpdf: !!inf.sinQpdf, motivo: inf.sinQpdf ? 'qpdf no está instalado en el contenedor' : inf.motivo };
+    }
+
+    const estadoPath = path.join(depDir, 'estado.json');
+    let estado = {}; try { estado = JSON.parse(await fs.readFile(estadoPath, 'utf8')); } catch { /* sin estado previo */ }
+    estado.listo = true;                 // hay candidato en staging → el botón «Procesar» ya lo ve
+    estado.reemplazo = roto.name;
+    estado.reemplazo_bytes = inf.bytesDestino;
+    estado.reemplazo_fecha = new Date().toISOString();
+    estado.reparado = true;              // distingue «reparado por nosotros» de «copia sana subida»
+    estado.reparacion = {                 // el INFORME, para que la UI lo enseñe tal cual
+        paginas: inf.paginas, paginasAntes: inf.paginasAntes ?? null,
+        bytesOrigen: inf.bytesOrigen, bytesDestino: inf.bytesDestino, ratio: inf.ratio,
+        sospecha: inf.sospecha, motivoSospecha: inf.motivoSospecha,
+    };
+    delete estado.error_proceso;
+    await fs.writeFile(estadoPath, JSON.stringify(estado, null, 2), 'utf8');
+
+    console.log(`🔧 Reparación de ${idDeposito}: ${inf.paginas} págs., ${inf.ratio}× del original${inf.sospecha ? ` ⚠️ SOSPECHA: ${inf.motivoSospecha}` : ''}.`);
+    return { ok: true, nombre: roto.name, ...inf };
+}
+
+/** Ruta ABSOLUTA del candidato en staging de un depósito (para inspeccionarlo antes de decidir). null si no hay. */
+export async function rutaReemplazo(idDeposito) {
+    const { dir: depDir, error } = depDirDe(idDeposito);
+    if (error) return null;
+    try {
+        const estado = JSON.parse(await fs.readFile(path.join(depDir, 'estado.json'), 'utf8'));
+        if (!estado.reemplazo) return null;
+        const p = path.join(depDir, SUBDIR_REEMPLAZO, path.basename(estado.reemplazo));
+        await fs.access(p);
+        return p;
+    } catch { return null; }
 }
 
 /** Cataloga la copia preparada de UN depósito y, si entra, retira el depósito a la Papelera. */
