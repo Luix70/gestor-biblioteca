@@ -7304,6 +7304,10 @@ function liberarPdfPage(el) {
 // ── búsqueda + catálogo ──
 let estadoBusqueda = { page: 1 },
   busqTimer = null;
+// Semilla del orden ALEATORIO (🎲). Se fija al elegir «aleatorio» y se mantiene entre páginas (para que la
+// paginación sea coherente); «🎲 Rebarajar» genera una nueva. Math.random del navegador (no del sandbox).
+let _seedAzar = '';
+const nuevoSeedAzar = () => Math.random().toString(36).slice(2, 12);
 // ── selección múltiple + agrupado (añadir a colección / obra) ──
 // Patrón de selección ERGONÓMICO y móvil (mismo que la ficha de autor): en «Modo selección» tocar una
 // portada la marca (tick ✓ + recuadro) en vez de abrir su ficha; fuera de modo, tocar abre la ficha.
@@ -7938,8 +7942,10 @@ function construirSearch() {
             <option value="obra">Posición en la obra</option>
             <option value="coleccion">Posición en la colección</option>
             <option value="paginas">Nº de páginas</option>
+            <option value="azar">🎲 Aleatorio (tomos de una obra juntos)</option>
           </select></div>
         <div id="sqDirWrap" style="display:none"><label>Sentido</label><button class="btn" id="sqDir" data-dir="desc" title="Cambiar entre ascendente y descendente">↓ Desc</button></div>
+        <div id="sqRebarajarWrap" style="display:none"><label>&nbsp;</label><button class="btn" id="sqRebarajar" title="Volver a barajar (otro orden aleatorio)">🎲 Rebarajar</button></div>
       </div>
     </details>
     <div id="searchChip" style="margin-bottom:12px"></div>
@@ -8019,12 +8025,20 @@ function construirSearch() {
   const setOrdenDir = (d) => {
     const b = $('#sqDir');
     if (b) { b.dataset.dir = d; b.textContent = d === 'asc' ? '↑ Asc' : '↓ Desc'; }
+    const azar = $('#sqOrden').value === 'azar';
     const w = $('#sqDirWrap');
-    if (w) w.style.display = $('#sqOrden').value === 'reciente' ? 'none' : ''; // relevancia no lleva sentido
+    if (w) w.style.display = ($('#sqOrden').value === 'reciente' || azar) ? 'none' : ''; // relevancia/azar no llevan sentido
+    const rb = $('#sqRebarajarWrap');
+    if (rb) rb.style.display = azar ? '' : 'none'; // «Rebarajar» solo en aleatorio
   };
   setOrdenDir($('#sqDir') && $('#sqDir').dataset.dir || 'desc');
-  $('#sqOrden').onchange = () => { setOrdenDir(DIR_DEF[$('#sqOrden').value] || 'asc'); buscarCatalogo(1); };
+  $('#sqOrden').onchange = () => {
+    if ($('#sqOrden').value === 'azar') _seedAzar = nuevoSeedAzar(); // elegir «aleatorio» = una barajada nueva
+    setOrdenDir(DIR_DEF[$('#sqOrden').value] || 'asc');
+    buscarCatalogo(1);
+  };
   if ($('#sqDir')) $('#sqDir').onclick = () => { setOrdenDir($('#sqDir').dataset.dir === 'asc' ? 'desc' : 'asc'); buscarCatalogo(1); };
+  if ($('#sqRebarajar')) $('#sqRebarajar').onclick = () => { _seedAzar = nuevoSeedAzar(); buscarCatalogo(1); }; // otra barajada
   if ($('#sqNfc')) $('#sqNfc').onchange = () => buscarCatalogo(1);
   if ($('#sqDescubrir')) $('#sqDescubrir').onchange = () => buscarCatalogo(1);
   $$('#p-search .sqStar').forEach(
@@ -8168,8 +8182,10 @@ function _paramsBusqueda() {
   // Obras multivolumen COLAPSADAS en una tarjeta (por defecto). El MODO vive en localStorage y se conmuta con
   // el botón «📚 Obras colapsadas / 📖 Tomos sueltos» de la barra de modos (junto a selección/previsualización).
   if (modoTomosExpandido()) params.set('agrupar', '0');
-  // Sentido asc/desc (salvo en «Relevancia / recientes», que no lo usa).
-  if ($('#sqOrden').value !== 'reciente') params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
+  // Orden ALEATORIO: la semilla hace la barajada estable entre páginas (sin ella la paginación se rompería).
+  if ($('#sqOrden').value === 'azar') { if (!_seedAzar) _seedAzar = nuevoSeedAzar(); params.set('seed', _seedAzar); }
+  // Sentido asc/desc (salvo en «Relevancia / recientes» y «Aleatorio», que no lo usan).
+  if (!['reciente', 'azar'].includes($('#sqOrden').value)) params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
   const est = estrellasSel();
   if (est.length && est.length < 6) params.set('estrellas', est.join(','));
   // Filtros PRIVADOS DEL ADMIN: progreso de lectura (leído) y pulgar (me gusta). El backend los ignora para

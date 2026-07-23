@@ -388,8 +388,16 @@ de ficheros clasificado por CDU.
       El ORDEN está en su PROPIO colapsable «↕️ Ordenar» (el panel de búsqueda era
       enorme): Relevancia/recientes (defecto) · Fecha de ingreso · Título · Autor ·
       Posición en la estantería · Posición en la obra · Posición en la colección · Nº de
-      páginas (los sin nº de páginas caen SIEMPRE al final, en asc y desc), cada
-      uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia). El Nº de
+      páginas (los sin nº de páginas caen SIEMPRE al final, en asc y desc) · 🎲 ALEATORIO,
+      cada uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia y en
+      Aleatorio). ALEATORIO baraja el catálogo manteniendo JUNTOS y en orden de volumen los
+      tomos de una misma obra: la clave de barajado es POR GRUPO (la obra, o el propio _id si
+      es un doc suelto) vía $toHashedIndexKey(seed:grupo) — pseudo-aleatorio DETERMINISTA por
+      grupo, así los tomos quedan contiguos (verificado: 0 obras multi-tomo rotas) y la
+      paginación es coherente (barrido completo sin duplicados ni huecos). La SEMILLA la fija
+      el cliente al elegir «aleatorio» y se mantiene entre páginas; «🎲 Rebarajar» genera otra
+      barajada. Se integra como un orden más (api-panel `/catalogo`, campoOrden 'azar' + param
+      `seed`): colapso de obras, soloIds (navegación de ficha) y filtros funcionan igual. El Nº de
       páginas se muestra ademas en la etiqueta de cada tarjeta/fila («📕 Libro · pdf · 298p»).
       En MÓVIL, al ejecutar la búsqueda (Intro / «Buscar» del teclado) se COLAPSA el panel
       de filtros y se cierra el teclado para ver los resultados (el input lleva

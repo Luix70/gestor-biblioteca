@@ -746,7 +746,7 @@ export function rutasPanel() {
             // (alfabético), autor, posicion (físico en estantería), obra (obra+volumen), coleccion
             // (colección+nº). Compatibilidad: 'reciente'=fecha desc, 'antiguo'=fecha asc. Los nulos van al
             // final. Con collation español (acentos/mayúsculas indiferentes) en los órdenes de texto.
-            const CAMPO_ORDEN = { reciente: 'fecha', antiguo: 'fecha', fecha: 'fecha', titulo: 'titulo', autor: 'autor', posicion: 'posicion', obra: 'obra', coleccion: 'coleccion', paginas: 'paginas' };
+            const CAMPO_ORDEN = { reciente: 'fecha', antiguo: 'fecha', fecha: 'fecha', titulo: 'titulo', autor: 'autor', posicion: 'posicion', obra: 'obra', coleccion: 'coleccion', paginas: 'paginas', azar: 'azar' };
             const campoOrden = CAMPO_ORDEN[orden] || 'fecha';
             const dirRaw = String(req.query.dir || '').toLowerCase();
             const s = dirRaw === 'asc' ? 1 : dirRaw === 'desc' ? -1
@@ -762,12 +762,31 @@ export function rutasPanel() {
             // que escala a páginas hondas y a 10× documentos. Después se traen SOLO los documentos completos de la
             // página (por _id), preservando el orden. RELEVANCIA (bm25 de idsRanked) cuando hay FTS y no se pidió
             // un orden explícito; los aciertos por identificador fuera del ranking caen al final con _rank grande.
+            // SEMILLA del orden aleatorio: hace que cada barajada sea distinta pero ESTABLE entre páginas (si
+            // cambiara por página, la paginación se rompería: docs repetidos o saltados). El cliente la fija al
+            // elegir «aleatorio» y la renueva al «rebarajar». Se sanea (va como literal en $concat).
+            const seedAzar = String(req.query.seed || '1').replace(/[^0-9A-Za-z_-]/g, '').slice(0, 40) || '1';
             const porOrden = (ordenRelevancia && idsRanked && idsRanked.length)
                 ? { pre: [
                         { $addFields: { _rank: { $indexOfArray: [idsRanked, { $toString: '$_id' }] } } },
                         { $addFields: { _rank: { $cond: [{ $lt: ['$_rank', 0] }, 1e9, '$_rank'] } } },
                     ],
                     orden: { _rank: 1, fecha_ingreso: -1 } }
+                : campoOrden === 'azar'
+                ? { pre: [
+                        // ALEATORIO manteniendo JUNTOS los tomos de una obra: la clave de barajado es POR GRUPO
+                        // (obra, o el propio _id si es suelto). $toHashedIndexKey(seed:grupo) da un pseudo-aleatorio
+                        // DETERMINISTA por grupo (misma obra → misma clave → tomos contiguos), estable para una
+                        // semilla dada. Dentro de la obra se ordena por nº de volumen. _grp desempata para que dos
+                        // obras que colisionen en el hash NO se entrelacen. (MongoDB 8; operador verificado.)
+                        { $addFields: { _grp: { $ifNull: ['$obra', '$_id'] } } },
+                        { $addFields: {
+                            _rk: { $toHashedIndexKey: { $concat: [seedAzar, ':', { $toString: '$_grp' }] } },
+                            _vn: { $convert: { input: '$volumen_numero', to: 'double', onError: 1e9, onNull: 1e9 } },
+                            _tb: '$_id',   // desempate ÚNICO (orden total → paginación estable aunque haya empates de (_rk,_grp,_vn))
+                        } },
+                    ],
+                    orden: { _rk: 1, _grp: 1, _vn: 1, _tb: 1 } }
                 : campoOrden === 'posicion'
                 ? { pre: [
                         // «Posición en la estantería» = orden FÍSICO combinado: ámbito → estantería → posición dentro
