@@ -1182,7 +1182,12 @@ de ficheros clasificado por CDU.
       vive AQUI (relacion invertida), no en el libro: anadir/quitar es $addToSet/$pull y el pipeline ni se
       entera. Indice sobre `docs` para la consulta inversa. (utils/selecciones.js)
     - CREAR: la via natural es la SELECCION MULTIPLE del catalogo -> "Guardar como seleccion" (nace ya
-      poblada) y "Anadir a seleccion" (a una existente; no duplica).
+      poblada). Sobre una seleccion EXISTENTE, tres operaciones mas desde la misma barra:
+        + Anadir a seleccion    ($addToSet: no duplica los que ya esten)
+        - Quitar de seleccion   (p. ej. un libro ya leido sale de "Para leer este verano")
+        Reemplazar seleccion    (sustituye TODO su contenido por lo marcado; pide confirmacion aparte
+                                 porque es la unica que pierde la lista anterior, e informa n->n)
+      En los tres casos los LIBROS no se tocan: una seleccion es solo una vista sobre el catalogo.
     - PAGINA Selecciones: nombre, descripcion, nº de documentos, fechas; "Ver documentos" delega en el
       Catalogo con ?seleccion=<id> (se traduce a `_id $in`), "Editar", "Borrar" (NO borra libros: una
       seleccion es solo una vista) y "Compartir".

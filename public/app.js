@@ -7505,6 +7505,8 @@ function renderBulk() {
     <button class="btn" id="bkKw" title="Añadir palabras clave COMUNES (separadas por comas) a los seleccionados. Se AÑADEN a las que ya tenga cada uno; no las reemplazan. Luego se pueden buscar con «#palabra».">🏷 Palabras clave</button>
     <button class="btn pri" id="bkSelNueva" title="Crear una SELECCIÓN PERSONAL nueva con los documentos seleccionados. Es la forma más rápida de empezar una: «Libros para leer este verano»…">📌 Guardar como selección</button>
     <button class="btn pri" id="bkSelAdd" title="Añadir los documentos seleccionados a una selección personal YA EXISTENTE (no duplica los que ya estén)">➕ Añadir a selección</button>
+    <button class="btn" id="bkSelQuitar" title="Quitar los documentos seleccionados de una selección personal (p. ej. un libro ya leído sale de «Para leer este verano»). Los libros NO se borran.">➖ Quitar de selección</button>
+    <button class="btn" id="bkSelRepl" title="Sustituir TODO el contenido de una selección por los documentos marcados ahora. Los libros no se borran, solo salen de la lista.">🔁 Reemplazar selección</button>
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
@@ -7570,7 +7572,9 @@ function renderBulk() {
     // SELECCIONES PERSONALES desde la selección múltiple del catálogo: es la vía natural para crear una
     // («marco 20 libros → guardar como selección») y para ampliarla después.
     if ($('#bkSelNueva')) $('#bkSelNueva').onclick = () => guardarComoSeleccion([...selDocs]);
-    if ($('#bkSelAdd')) $('#bkSelAdd').onclick = () => anadirASeleccion([...selDocs]);
+    if ($('#bkSelAdd')) $('#bkSelAdd').onclick = () => opSeleccion([...selDocs], 'anadir');
+    if ($('#bkSelQuitar')) $('#bkSelQuitar').onclick = () => opSeleccion([...selDocs], 'quitar');
+    if ($('#bkSelRepl')) $('#bkSelRepl').onclick = () => opSeleccion([...selDocs], 'reemplazar');
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     $('#bkDel').onclick = eliminarSeleccionados;
@@ -13316,20 +13320,41 @@ async function guardarComoSeleccion(ids) {
   };
 }
 
-/** Añade los documentos marcados a una selección YA EXISTENTE ($addToSet: no duplica). */
-async function anadirASeleccion(ids) {
+// Operaciones sobre una selección EXISTENTE con los documentos marcados en el catálogo. Un solo diálogo con
+// tres modos, en vez de tres casi idénticos: cambian el texto, el botón y el endpoint.
+const _MODOS_SEL = {
+  anadir: {
+    titulo: '➕ Añadir a selección', boton: 'Añadir', clase: 'ok', ruta: 'anadir',
+    aviso: (n) => `Se añadirán <b>${n}</b> documento(s). Los que ya estén no se duplican.`,
+    hecho: (r) => `➕ «${r.nombre}» tiene ahora ${r.n} documento(s)`,
+  },
+  quitar: {
+    titulo: '➖ Quitar de una selección', boton: 'Quitar', clase: 'bad', ruta: 'quitar',
+    aviso: (n) => `Se quitarán <b>${n}</b> documento(s) de la selección elegida. <b>Los libros no se borran</b>: solo dejan de estar en esa lista.`,
+    hecho: (r) => `➖ La selección queda con ${r.n} documento(s)`,
+  },
+  reemplazar: {
+    titulo: '🔁 Reemplazar el contenido de una selección', boton: 'Reemplazar', clase: 'bad', ruta: 'reemplazar',
+    aviso: (n) => `La selección elegida pasará a contener EXACTAMENTE estos <b>${n}</b> documento(s): los que tuviera ahora <b>se sustituyen</b>. Los libros no se borran, solo salen de la lista.`,
+    hecho: (r) => `🔁 «${r.nombre}»: ${r.nAntes} → ${r.n} documento(s)`,
+  },
+};
+
+/** Aplica `modo` ('anadir' | 'quitar' | 'reemplazar') sobre una selección existente. */
+async function opSeleccion(ids, modo) {
+  const m = _MODOS_SEL[modo];
   if (!ids.length) { toast('No hay documentos seleccionados', 'warn'); return; }
   let lista = [];
   try { lista = (await api('/selecciones')).selecciones || []; } catch (e) { toast(e.message, 'bad'); return; }
   if (!lista.length) { toast('Aún no tienes ninguna selección: usa «📌 Guardar como selección»', 'warn'); return; }
-  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:460px">
-    <h3 style="margin-top:0">➕ Añadir a selección</h3>
-    <p class="muted" style="font-size:13px">Se añadirán <b>${ids.length}</b> documento(s). Los que ya estén no se duplican.</p>
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px">
+    <h3 style="margin-top:0">${m.titulo}</h3>
+    <p class="muted" style="font-size:13px">${m.aviso(ids.length)}</p>
     <select id="selCual" size="${Math.min(8, lista.length)}" style="width:100%">
       ${lista.map((s) => `<option value="${esc(s._id)}">${esc(s.nombre)} · ${s.n} doc.</option>`).join('')}
     </select>
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
-      <button class="btn" id="addX">Cancelar</button><button class="btn ok" id="addOk">Añadir</button></div>
+      <button class="btn" id="addX">Cancelar</button><button class="btn ${m.clase}" id="addOk">${m.boton}</button></div>
     <div id="addMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
@@ -13337,11 +13362,16 @@ async function anadirASeleccion(ids) {
   $('#addOk').onclick = async () => {
     const id = $('#selCual').value;
     if (!id) { $('#addMsg').textContent = 'Elige una selección.'; return; }
+    // Reemplazar es el único que PIERDE información (la lista anterior): se confirma aparte.
+    if (modo === 'reemplazar') {
+      const sel = lista.find((s) => String(s._id) === String(id));
+      if (!confirm(`«${sel ? sel.nombre : ''}» tiene ahora ${sel ? sel.n : '?'} documento(s) y pasará a tener ${ids.length}.\n\n¿Sustituir su contenido?`)) return;
+    }
     $('#addOk').disabled = true;
     try {
-      const r = await api('/selecciones/' + encodeURIComponent(id) + '/anadir', { method: 'POST', body: JSON.stringify({ ids }) });
-      if (!r.ok) throw new Error(r.motivo || 'no se pudo añadir');
-      toast(`➕ «${r.nombre}» tiene ahora ${r.n} documento(s)`);
+      const r = await api('/selecciones/' + encodeURIComponent(id) + '/' + m.ruta, { method: 'POST', body: JSON.stringify({ ids }) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo aplicar');
+      toast(m.hecho(r));
       cerrarCmp();
     } catch (e) { $('#addMsg').textContent = e.message; $('#addOk').disabled = false; }
   };

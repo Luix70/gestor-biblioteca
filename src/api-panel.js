@@ -54,7 +54,7 @@ import { reconstruirInventarioObra } from './utils/obras.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { CATEGORIAS_SCRIPTS, catalogoParaPanel, scriptPorId, construirArgv } from './utils/catalogo-scripts.js';
 import { listarFichas, crearFicha, actualizarFicha, borrarFicha, entidadExiste, COL_POR_AMBITO } from './utils/fichas-lectura.js';
-import { listarSelecciones, crearSeleccion, editarSeleccion, borrarSeleccion, anadirDocs, quitarDocs,
+import { listarSelecciones, crearSeleccion, editarSeleccion, borrarSeleccion, anadirDocs, quitarDocs, reemplazarDocs,
          fichaSeleccion, docsDeSeleccion, seleccionesDeDoc } from './utils/selecciones.js';
 import { lanzarScript, estadoEjecutor, detenerScript } from './utils/ejecutor-scripts.js';
 import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
@@ -2733,6 +2733,10 @@ export function rutasPanel() {
     // AÑADIR / QUITAR miembros ($addToSet / $pull: añadir dos veces es inofensivo; los libros no se tocan).
     r.post('/selecciones/:id/anadir', async (req, res) => {
         try { res.json(await anadirDocs(await conectarDB(), req.params.id, req.body?.ids)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/selecciones/:id/reemplazar', async (req, res) => {
+        try { res.json(await reemplazarDocs(await conectarDB(), req.params.id, req.body?.ids)); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/selecciones/:id/quitar', async (req, res) => {

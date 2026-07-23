@@ -116,6 +116,22 @@ export async function quitarDocs(db, id, ids) {
     return { ok: true, n: (sel.docs || []).length };
 }
 
+/**
+ * REEMPLAZA por completo los miembros de la selección por `ids`. Pensado para «rehacer» una selección desde
+ * el catálogo sin tener que vaciarla a mano. Devuelve también cuántos había ANTES, para poder decir con
+ * claridad qué se ha sustituido (no es lo mismo reemplazar 3 que 300).
+ */
+export async function reemplazarDocs(db, id, ids) {
+    const _id = oid(id);
+    if (!_id) return { ok: false, motivo: 'id inválido' };
+    const nuevos = idsValidos(ids);
+    if (!nuevos.length) return { ok: false, motivo: 'no se recibió ningún documento (para vaciarla, bórrala)' };
+    const antes = await db.collection('selecciones').findOne({ _id }, { projection: { docs: 1, nombre: 1 } });
+    if (!antes) return { ok: false, motivo: 'selección no encontrada' };
+    await db.collection('selecciones').updateOne({ _id }, { $set: { docs: nuevos, fecha_actualizacion: new Date() } });
+    return { ok: true, nombre: antes.nombre, n: nuevos.length, nAntes: (antes.docs || []).length };
+}
+
 /** Una selección con sus datos (los documentos se piden al catálogo con ?seleccion=<id>, que ya pagina). */
 export async function fichaSeleccion(db, id) {
     const _id = oid(id);
