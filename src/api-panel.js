@@ -22,6 +22,7 @@ import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalog
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen, anadirPortadaLote } from './utils/imagenes-doc.js';
+import { asignarAutorLote, asignarContribuidorLote, asignarEditorialLote, asignarCduLote } from './utils/lote-metadatos.js';
 import { reordenarAudios } from './utils/audios-doc.js';
 import { leerLomosImagen, leerLomosRecortados, emparejarLomos } from './utils/lector-lomos.js';
 import { editarDocumento } from './utils/editar-doc.js';
@@ -1851,6 +1852,23 @@ export function rutasPanel() {
     // AÑADIR PALABRAS CLAVE A UN LOTE (admin): las palabras (CSV) se AÑADEN —union con $addToSet— a las que ya
     // tiene cada documento; NUNCA se reemplazan. Se reindexa cada afectado (palabras_clave alimenta el índice
     // FTS, y así la búsqueda «#kw» las ve al instante).
+    // ASIGNAR EN LOTE metadatos a una selección: autor / contribuidor(rol) / editorial / CDU(+reubica). Un solo
+    // endpoint que despacha por `op`. (Palabras clave y portada tienen los suyos, ya existentes, más abajo.)
+    r.post('/documentos/lote/metadatos', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            const { op, ids } = req.body || {};
+            const db = await conectarDB();
+            let r2;
+            if (op === 'autor') r2 = await asignarAutorLote(db, ids, req.body);
+            else if (op === 'contribuidor') r2 = await asignarContribuidorLote(db, ids, req.body);
+            else if (op === 'editorial') r2 = await asignarEditorialLote(db, ids, req.body);
+            else if (op === 'cdu') r2 = await asignarCduLote(db, ids, req.body?.cdu);
+            else return res.status(400).json({ ok: false, motivo: 'operación no válida' });
+            res.status(r2.ok ? 200 : 400).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     r.post('/documentos/palabras-clave-lote', async (req, res) => {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });

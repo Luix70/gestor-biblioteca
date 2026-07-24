@@ -429,7 +429,21 @@ de ficheros clasificado por CDU.
       ⚠ Hay que correr `node scripts/setup-mongo.js` para crearlos.
     · VALORACIÓN por estrellas (estilo Lightroom) y marca 🔞 NSFW desde cada tarjeta.
     · PALABRAS CLAVE EN LOTE + BÚSQUEDA «#»:
-      - AÑADIR en lote (admin): botón «🏷 Palabras clave» de la barra de selección → pide una lista separada
+
+    · ASIGNAR DATOS EN LOTE (barra de seleccion del catalogo -> «Asignar datos», admin): un solo dialogo
+      con selector de campo -> POST /documentos/lote/metadatos {op, ids, ...} (utils/lote-metadatos.js).
+      Cuatro operaciones, reutilizando la maquinaria de la edicion de UN doc (sin segunda implementacion):
+        · AUTOR: anade la persona a autores[] ($addToSet; ADITIVO, no pisa la autoria existente).
+        · CONTRIBUIDOR con ROL: anade {persona,rol} a contribuciones[] (aditivo, dedup exacto). rol de
+          ROLES_VALIDOS salvo 'autor'.
+        · EDITORIAL: REEMPLAZA (un doc tiene una). Resuelve por nombre insensible a mayus/acentos (crea si
+          es nuevo), como la persona (resolverPersona).
+        · CDU: REEMPLAZA y MUEVE la carpeta de cada doc a su arbol nuevo -> se hace doc a doc con
+          editarDocumento (reubicarPorCdu + remapeo ruta_base/portada/imagenes + cdu_manual). Pide
+          confirmacion (mueve ficheros).
+      Todas reindexan la busqueda. PORTADA COMUN (bkPortada/anadirPortadaLote) y PALABRAS CLAVE (bkKw) ya
+      existian: la portada entrante pasa a portada de cada doc y la previa baja a 'otra' en el carrusel
+      (ninguna se borra; una copia de la imagen por documento).      - AÑADIR en lote (admin): botón «🏷 Palabras clave» de la barra de selección → pide una lista separada
         por comas y las AÑADE ($addToSet, union) a las que ya tenga cada documento seleccionado — NUNCA las
         reemplaza. Reindexa cada afectado (palabras_clave alimenta el índice FTS). POST /documentos/
         palabras-clave-lote {ids, palabras}. Tope 50 por llamada.

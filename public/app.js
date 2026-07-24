@@ -7502,6 +7502,7 @@ function renderBulk() {
     <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
     <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
     <button class="btn" id="bkReclasEd" title="Reclasificar la EDITORIAL de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional). Muestra un informe por transición antes de aplicar.">🏢 Reclasificar editorial</button>
+    <button class="btn" id="bkAsignar" title="Asignar a los seleccionados: autor · contribuidor con rol · editorial · CDU (mueve la carpeta al árbol nuevo)">✏️ Asignar datos</button>
     <button class="btn" id="bkKw" title="Añadir palabras clave COMUNES (separadas por comas) a los seleccionados. Se AÑADEN a las que ya tenga cada uno; no las reemplazan. Luego se pueden buscar con «#palabra».">🏷 Palabras clave</button>
     <button class="btn pri" id="bkSelNueva" title="Crear una SELECCIÓN PERSONAL nueva con los documentos seleccionados. Es la forma más rápida de empezar una: «Libros para leer este verano»…">📌 Guardar como selección</button>
     <button class="btn pri" id="bkSelAdd" title="Añadir los documentos seleccionados a una selección personal YA EXISTENTE (no duplica los que ya estén)">➕ Añadir a selección</button>
@@ -7568,6 +7569,7 @@ function renderBulk() {
     if ($('#bkAFondo')) $('#bkAFondo').onclick = aFondoLote;
     if ($('#bkTipo')) $('#bkTipo').onclick = () => cambiarTipoDocs([...selDocs]);
     if ($('#bkReclasEd')) $('#bkReclasEd').onclick = () => reclasificarEditorialLote([...selDocs], `${selDocs.size} seleccionado(s)`);
+    if ($('#bkAsignar')) $('#bkAsignar').onclick = () => asignarDatosLote([...selDocs]);
     if ($('#bkKw')) $('#bkKw').onclick = () => anadirPalabrasClaveLote([...selDocs]);
     // SELECCIONES PERSONALES desde la selección múltiple del catálogo: es la vía natural para crear una
     // («marco 20 libros → guardar como selección») y para ampliarla después.
@@ -16311,6 +16313,73 @@ async function editorialGuardar(id) {
 const FUENTE_ETQ = { fichero: 'Fichero', openlibrary: 'OpenLibrary', google: 'Google', ia: 'IA' };
 // Añadir palabras clave COMUNES a una selección: se SUMAN (union) a las que ya tenga cada documento, nunca
 // las reemplazan. Luego se pueden buscar con la sintaxis «#palabra» en el Catálogo.
+// ASIGNAR DATOS EN LOTE a la selección del catálogo: autor · contribuidor(rol) · editorial · CDU. Un solo
+// diálogo con selector de campo; el servidor despacha por `op`. autor/contribuidor son ADITIVOS (no pisan lo
+// que ya haya); editorial reemplaza; CDU reemplaza y MUEVE la carpeta (por eso pide confirmación).
+async function asignarDatosLote(ids) {
+  if (!ids || !ids.length) { toast('Selecciona al menos un documento', 'warn'); return; }
+  const rolesOpts = ROLES_PERSONA.filter(([v]) => v !== 'autor').map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  const n = ids.length;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px">
+    <h3 style="margin-top:0">✏️ Asignar datos · ${n} documento(s)</h3>
+    <label style="font-size:13px">¿Qué quieres asignar?
+      <select id="adOp" style="width:100%">
+        <option value="autor">✍️ Autor (se añade)</option>
+        <option value="contribuidor">🎭 Contribuidor con rol (se añade)</option>
+        <option value="editorial">🏢 Editorial (reemplaza)</option>
+        <option value="cdu">🗂 CDU (reemplaza y MUEVE la carpeta)</option>
+      </select>
+    </label>
+    <div id="adFields" style="margin-top:10px"></div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="adX">Cancelar</button><button class="btn pri" id="adOk">Aplicar</button></div>
+    <div id="adMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#adX').onclick = cerrarCmp;
+
+  const pintarCampos = () => {
+    const op = $('#adOp').value;
+    const C = {
+      autor: `<label style="font-size:13px">Nombre del autor<input id="adPersona" placeholder="p. ej. Jorge Luis Borges"></label>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">Se AÑADE como autor (no borra los que ya tuviera cada libro). Coincide por nombre sin distinguir mayúsculas/acentos; si no existe, se crea.</p>`,
+      contribuidor: `<label style="font-size:13px">Nombre de la persona<input id="adPersona" placeholder="p. ej. Alberto Durero"></label>
+        <label style="font-size:13px;display:block;margin-top:8px">Rol<select id="adRol" style="width:100%">${rolesOpts}</select></label>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">Se AÑADE con ese rol (traductor, ilustrador, prologuista…). No duplica si ya lo tenía.</p>`,
+      editorial: `<label style="font-size:13px">Editorial<input id="adEditorial" placeholder="p. ej. Cambridge University Press"></label>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">REEMPLAZA la editorial de cada libro. Coincide sin distinguir mayúsculas/acentos; si no existe, se crea.</p>`,
+      cdu: `<label style="font-size:13px">CDU<input id="adCdu" placeholder="p. ej. 82-3" style="font-family:monospace"></label>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">⚠️ REEMPLAZA la CDU y MUEVE la carpeta de cada libro a su árbol nuevo (y protege el valor para que el Conformador no lo recalcule). Puede tardar en un lote grande.</p>`,
+    };
+    $('#adFields').innerHTML = C[op];
+  };
+  $('#adOp').onchange = pintarCampos;
+  pintarCampos();
+
+  $('#adOk').onclick = async () => {
+    const op = $('#adOp').value;
+    const body = { op, ids };
+    if (op === 'autor') { body.persona = ($('#adPersona').value || '').trim(); if (!body.persona) { $('#adMsg').textContent = 'Escribe el nombre del autor.'; return; } }
+    else if (op === 'contribuidor') { body.persona = ($('#adPersona').value || '').trim(); body.rol = $('#adRol').value; if (!body.persona) { $('#adMsg').textContent = 'Escribe el nombre.'; return; } }
+    else if (op === 'editorial') { body.editorial = ($('#adEditorial').value || '').trim(); if (!body.editorial) { $('#adMsg').textContent = 'Escribe la editorial.'; return; } }
+    else if (op === 'cdu') {
+      body.cdu = ($('#adCdu').value || '').trim();
+      if (!body.cdu) { $('#adMsg').textContent = 'Escribe la CDU.'; return; }
+      if (!confirm(`Se cambiará la CDU de ${n} documento(s) a «${body.cdu}» y se MOVERÁ la carpeta de cada uno.\n\n¿Continuar?`)) return;
+    }
+    $('#adOk').disabled = true;
+    $('#adMsg').textContent = 'Aplicando…';
+    try {
+      const r = await api('/documentos/lote/metadatos', { method: 'POST', body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo aplicar');
+      const extra = op === 'cdu' ? ` · ${r.reubicadas || 0} carpeta(s) movida(s)${r.fallidos ? ` · ${r.fallidos} con error` : ''}` : '';
+      toast(`✏️ Aplicado a ${r.aplicados} documento(s)${extra}`);
+      cerrarCmp();
+      buscarCatalogo(estadoBusqueda.page || 1); // refrescar la vista
+    } catch (e) { $('#adMsg').textContent = e.message; $('#adOk').disabled = false; }
+  };
+}
+
 async function anadirPalabrasClaveLote(ids) {
   if (!ids || !ids.length) { toast('Selecciona al menos un documento', 'warn'); return; }
   const txt = prompt(
