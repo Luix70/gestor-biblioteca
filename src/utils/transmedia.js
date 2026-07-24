@@ -104,6 +104,23 @@ function interactivoEsEsencia(ficheros) {
 }
 
 /**
+ * ¿La ESTRUCTURA «Stage N» / «Sx » es la de un GRADED READER (organiza la colección), y no un fichero suelto
+ * que coincide con el patrón? MISMO principio que el interactivo, y motivo del 2º incidente (2026-07-24): una
+ * carpeta de 694 libros de matemáticas se catalogó como transmedia porque UN nombre casaba con `s\d+[\s.\-]`
+ * (p. ej. «S1 Álgebra.pdf»), un patrón muy laxo. Ahora, con muchos documentos, la estructura debe organizar una
+ * FRACCIÓN grande de ellos (≥40%), no uno solo. Los graded readers legítimos (Oxford Bookworms) la cumplen: casi
+ * todos sus documentos cuelgan de «Stage N/Sx Autor - Título». Con pocos documentos basta la mera presencia.
+ */
+const MIN_FRACCION_ESTRUCTURA = 0.4;
+function estructuraDeGradedReader(ficheros) {
+    if (!ficheros.some((f) => RE_ESTRUCTURA.test(f.rel))) return false;
+    const docs = ficheros.filter((f) => esDocumentoLeible(f.nombre));
+    if (docs.length <= MAX_DOCS_PARA_INTERACTIVO) return true;   // pocos docs: la presencia de estructura basta
+    const conEstructura = docs.filter((f) => RE_ESTRUCTURA.test(f.rel)).length;
+    return conEstructura / docs.length >= MIN_FRACCION_ESTRUCTURA;
+}
+
+/**
  * ¿Una carpeta es un TRANSMEDIA (colección de estructura preservada, no un audiolibro suelto)? Es transmedia si:
  *   · trae un marcador `.transmedia`, o
  *   · contiene CONTENIDO INTERACTIVO (.exe/.swf/.app/autorun…), que hay que preservar íntegro, o
@@ -116,8 +133,7 @@ export async function esCarpetaTransmedia(dir) {
     if (interactivoEsEsencia(ficheros)) return true;   // interactivo ESENCIAL (no un accesorio entre 600 libros)
     const audios = ficheros.filter((f) => esAudio(f.nombre));
     const pdfs = ficheros.filter((f) => esPdf(f.nombre));
-    const hayEstructura = ficheros.some((f) => RE_ESTRUCTURA.test(f.rel));
-    return audios.length > 0 && (pdfs.length >= 2 || hayEstructura);
+    return audios.length > 0 && (pdfs.length >= 2 || estructuraDeGradedReader(ficheros));
 }
 
 /**
@@ -129,7 +145,7 @@ export async function esCarpetaTransmedia(dir) {
 export async function esTransmediaFuerte(dir) {
     try { if (await fs.access(path.join(dir, '.transmedia')).then(() => true, () => false)) return true; } catch { /* */ }
     const ficheros = await listarFicheros(dir);
-    return interactivoEsEsencia(ficheros) || ficheros.some((f) => RE_ESTRUCTURA.test(f.rel));
+    return interactivoEsEsencia(ficheros) || estructuraDeGradedReader(ficheros);
 }
 
 // ── Deducción de metadatos ESTRUCTURALES (sin IA) ──────────────────────────────────────────────────────
