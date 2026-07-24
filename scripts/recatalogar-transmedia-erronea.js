@@ -108,14 +108,24 @@ async function main() {
         process.exit(0);
     }
 
-    // 1) Mover los documentos legibles, SUELTOS, al Inbox → se catalogan como libros independientes.
+    // 1) COPIAR los documentos legibles, SUELTOS, al Inbox → se catalogan como libros independientes. Se COPIA
+    //    (fs.copyFile), no se mueve: el Inbox y el árbol CDU están en VOLÚMENES distintos (fs.rename da EXDEV),
+    //    y además copiar deja el origen intacto hasta que se recicla entero al final (nada en el limbo).
     await fs.mkdir(DIR_INBOX, { recursive: true });
-    let movidos = 0;
+    let movidos = 0, fallidos = 0;
     for (const f of docs) {
-        try { await fs.rename(f.abs, await nombreLibre(f.nombre)); movidos++; }
-        catch (e) { console.warn(`  ⚠ no se pudo mover «${f.nombre}»: ${e.message}`); }
+        try { await fs.copyFile(f.abs, await nombreLibre(f.nombre)); movidos++; }
+        catch (e) { fallidos++; console.warn(`  ⚠ no se pudo copiar «${f.nombre}»: ${e.message}`); }
     }
-    console.log(`\n✅ ${movidos} libro(s) movidos al Inbox (se recatalogarán uno a uno).`);
+    console.log(`\n${fallidos ? '⚠' : '✅'} ${movidos} libro(s) copiados al Inbox${fallidos ? ` · ${fallidos} FALLIDOS` : ''}.`);
+
+    // SALVAGUARDA: NO borrar nada de Mongo ni reciclar si la copia no fue ÍNTEGRA. Antes seguía adelante aunque
+    // se copiaran 0 → habría borrado los miembros dejando los libros solo en la Papelera. Ahora se aborta.
+    if (fallidos > 0 || movidos < docs.length) {
+        console.error(`\n⛔ ABORTADO: no se copiaron todos los documentos (${movidos}/${docs.length}). NO se ha borrado`);
+        console.error(`   nada de Mongo ni reciclado nada. Revisa los errores de copia y vuelve a intentarlo.`);
+        process.exit(1);
+    }
 
     // 2) Borrar de Mongo los miembros (+ índice) y la colección.
     let borrados = 0;
