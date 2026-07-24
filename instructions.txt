@@ -1563,7 +1563,16 @@ de ficheros clasificado por CDU.
     (los miles de nombres del volcado sin libros aparecen al buscarlos). Cada
 
     · LIMPIAR AUTORES HUERFANOS: un autor se BORRA al quedarse sin ninguna referencia (ni autor ni
-      contribuidor en ningun documento) — «Quitar autoria» ya lo hace, y «Cambiar rol» NO (solo mueve la
+
+      RECUENTO: el n_libros de un autor (lista/thumbnail y autocompletado) cuenta ahora la IMPLICACION
+      TOTAL: como autor O como contribuidor (traductor/prologuista/…), cada documento una vez por persona
+      (recuentoPorAutor sin rol → $setUnion autores+contribuciones). Antes contaba solo «como autor», por
+      lo que Borges (20 autor + 19 prologuista + 1 compilador) salia como «20». La ficha (fichaAutor) ya
+      mezclaba ambos. Con un rol filtrado se sigue contando en ESE rol.
+      OJO — la limpieza puede borrar un CONTRIBUIDOR si su referencia estaba corrupta (persona como objeto,
+      invisible al recuento) en ese momento: paso con 3 (editores/compilador). scripts/
+      reparar-contribuidores-colgantes.js re-crea los autores borrados aun referenciados, recuperando el
+      nombre del registro.json del documento (contribuciones {nombre,rol}) y reusando su _id original.      contribuidor en ningun documento) — «Quitar autoria» ya lo hace, y «Cambiar rol» NO (solo mueve la
       referencia). Los del volcado OL+BNE que nunca tuvieron libro (+ menciones mal parseadas creadas como
       autor) quedan huerfanos. Se ven en la pagina Autores con el filtro «Minimo de obras → 0 (sin
       libros)» (?sinLibros=1). REGLA DE CONSERVACION (autorTieneInversion): un huerfano se conserva si

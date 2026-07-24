@@ -25,14 +25,28 @@ const PROY_AUTOR = {
     nombre: 1, nombres_alternativos: 1, nacimiento: 1, fallecimiento: 1, biografia: 1, foto: 1, fotos: 1,
 };
 
-// Recuento id→nº de libros. Si `rol` es un rol de CONTRIBUCIÓN (traductor/…), cuenta libros EN ESE ROL
-// (biblioteca.contribuciones); si no, cuenta libros como AUTOR (biblioteca.autores). Una sola agregación.
+// Recuento id→nº de libros. Con un rol de CONTRIBUCIÓN (traductor/…) cuenta libros EN ESE ROL; con 'autor'
+// cuenta solo como autor principal; SIN rol cuenta la IMPLICACIÓN TOTAL (autor O contribuidor), contando cada
+// DOCUMENTO una sola vez por persona (aunque sea autor Y traductor del mismo). Antes el total contaba solo
+// «como autor», por lo que la lista/ficha decía «20» para alguien con 20 como autor + 19 como prologuista.
 async function recuentoPorAutor(db, rol) {
     const rolContrib = rol && rol !== 'autor' && ROLES_VALIDOS.includes(rol);
+    const soloAutor = rol === 'autor';
     const pipeline = rolContrib
         ? [{ $match: { 'contribuciones.rol': rol } }, { $unwind: '$contribuciones' },
             { $match: { 'contribuciones.rol': rol } }, { $group: { _id: '$contribuciones.persona', n: { $sum: 1 } } }]
-        : [{ $unwind: '$autores' }, { $group: { _id: '$autores', n: { $sum: 1 } } }];
+        : soloAutor
+        ? [{ $unwind: '$autores' }, { $group: { _id: '$autores', n: { $sum: 1 } } }]
+        : [
+            // TOTAL: por documento, la UNIÓN de sus autores y las personas de sus contribuciones (así un doc
+            // cuenta una sola vez por persona), luego se agrupa por persona.
+            { $project: { personas: { $setUnion: [
+                { $ifNull: ['$autores', []] },
+                { $map: { input: { $ifNull: ['$contribuciones', []] }, as: 'c', in: '$$c.persona' } },
+            ] } } },
+            { $unwind: '$personas' },
+            { $group: { _id: '$personas', n: { $sum: 1 } } },
+        ];
     const conteo = new Map();
     for (const f of await db.collection('biblioteca').aggregate(pipeline).toArray()) conteo.set(String(f._id), f.n);
     return conteo;
