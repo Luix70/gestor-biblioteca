@@ -8368,6 +8368,36 @@ async function buscarCduDescripciones(q) {
 // Cerrar el desplegable al tocar fuera del campo CDU.
 document.addEventListener('click', (e) => { if (!e.target.closest('#sqCdu, #sqCduPop, #sqCduBtn')) cerrarCduPop(); });
 
+// Autocompletado GENÉRICO para un <input>: al teclear, muestra sugerencias de entidades EXISTENTES (para no
+// duplicar «Jorge Luis Borges» con «J.L. Borges»). `buscar(q)`→[items]; `fila(item)`→HTML; `elegir(item|null)`
+// al pulsar una (o null al reescribir, para descartar la selección previa). El desplegable reutiliza .cdupop.
+function attachAutocomplete(input, { buscar, fila, elegir, minLen = 2 }) {
+  if (!input) return;
+  if (input.parentElement) input.parentElement.style.position = 'relative';
+  const pop = document.createElement('div');
+  pop.className = 'cdupop';
+  pop.style.display = 'none';
+  input.insertAdjacentElement('afterend', pop);
+  let t = null;
+  const cerrar = () => { pop.style.display = 'none'; pop.innerHTML = ''; };
+  input.addEventListener('input', () => {
+    elegir(null);   // al reescribir se descarta la coincidencia elegida (vuelve a resolverse por nombre)
+    clearTimeout(t);
+    const q = input.value.trim();
+    if (q.length < minLen) { cerrar(); return; }
+    t = setTimeout(async () => {
+      let items = [];
+      try { items = await buscar(q); } catch { cerrar(); return; }
+      if (!items || !items.length) { pop.innerHTML = '<div class="cdupop-empty">Sin coincidencias — se creará nuevo al aplicar</div>'; pop.style.display = 'block'; return; }
+      pop.innerHTML = items.map((it, i) => `<div class="cdupop-row" data-i="${i}">${fila(it)}</div>`).join('');
+      pop.style.display = 'block';
+      pop.querySelectorAll('.cdupop-row').forEach((row) => (row.onclick = () => { elegir(items[+row.dataset.i]); cerrar(); }));
+    }, 250);
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrar(); });
+  input.addEventListener('blur', () => setTimeout(cerrar, 180));   // margen para que registre el clic en una fila
+}
+
 async function buscarCatalogo(page) {
   estadoBusqueda.page = page;
   const params = _paramsBusqueda();
@@ -16391,9 +16421,13 @@ async function asignarDatosLote(ids) {
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
   $('#adX').onclick = cerrarCmp;
+  // IDs de la entidad ELEGIDA en el autocompletado (para asignar la MISMA, no crear un duplicado). null = se
+  // resolverá por el nombre tecleado (insensible a mayúsculas/acentos; crea solo si es realmente nueva).
+  let adPersonaId = null, adEditorialId = null;
 
   const pintarCampos = () => {
     const op = $('#adOp').value;
+    adPersonaId = null; adEditorialId = null;
     const C = {
       autor: `<label style="font-size:13px">Nombre del autor<input id="adPersona" placeholder="p. ej. Jorge Luis Borges"></label>
         <p class="muted" style="font-size:12px;margin:6px 0 0">Se AÑADE como autor (no borra los que ya tuviera cada libro). Coincide por nombre sin distinguir mayúsculas/acentos; si no existe, se crea.</p>`,
@@ -16406,6 +16440,27 @@ async function asignarDatosLote(ids) {
         <p class="muted" style="font-size:12px;margin:6px 0 0">⚠️ REEMPLAZA la CDU y MUEVE la carpeta de cada libro a su árbol nuevo (y protege el valor para que el Conformador no lo recalcule). Puede tardar en un lote grande.</p>`,
     };
     $('#adFields').innerHTML = C[op];
+    // Autocompletado de entidades EXISTENTES (evita duplicados): persona↔autores, editorial↔editoriales,
+    // CDU↔materias. Al elegir una, se guarda su id y se envía ese (no el nombre).
+    if (op === 'autor' || op === 'contribuidor') {
+      attachAutocomplete($('#adPersona'), {
+        buscar: (q) => api('/autores?q=' + encodeURIComponent(q) + '&limite=12').then((r) => r.autores || []),
+        fila: (a) => `<span>${esc(a.nombre)}</span> <span class="muted" style="margin-left:auto;font-size:11px">${a.n_libros || 0} libro(s)</span>`,
+        elegir: (a) => { adPersonaId = a ? a._id : null; if (a) $('#adPersona').value = a.nombre; },
+      });
+    } else if (op === 'editorial') {
+      attachAutocomplete($('#adEditorial'), {
+        buscar: (q) => api('/editoriales?q=' + encodeURIComponent(q) + '&limite=12').then((r) => r.editoriales || []),
+        fila: (e) => `<span>${esc(e.nombre)}</span> <span class="muted" style="margin-left:auto;font-size:11px">${e.n_libros || 0} libro(s)</span>`,
+        elegir: (e) => { adEditorialId = e ? e._id : null; if (e) $('#adEditorial').value = e.nombre; },
+      });
+    } else if (op === 'cdu') {
+      attachAutocomplete($('#adCdu'), {
+        buscar: (q) => api('/cdu/descripciones?q=' + encodeURIComponent(q)).then((r) => r.resultados || []),
+        fila: (x) => `<span class="mono cdupop-cod">${esc(x.codigo)}</span> <span>${esc(x.titulo)}</span>`,
+        elegir: (x) => { if (x) $('#adCdu').value = x.codigo; },
+      });
+    }
   };
   $('#adOp').onchange = pintarCampos;
   pintarCampos();
@@ -16413,9 +16468,11 @@ async function asignarDatosLote(ids) {
   $('#adOk').onclick = async () => {
     const op = $('#adOp').value;
     const body = { op, ids };
-    if (op === 'autor') { body.persona = ($('#adPersona').value || '').trim(); if (!body.persona) { $('#adMsg').textContent = 'Escribe el nombre del autor.'; return; } }
-    else if (op === 'contribuidor') { body.persona = ($('#adPersona').value || '').trim(); body.rol = $('#adRol').value; if (!body.persona) { $('#adMsg').textContent = 'Escribe el nombre.'; return; } }
-    else if (op === 'editorial') { body.editorial = ($('#adEditorial').value || '').trim(); if (!body.editorial) { $('#adMsg').textContent = 'Escribe la editorial.'; return; } }
+    // Si se ELIGIÓ una entidad del autocompletado se manda su id (asigna la MISMA, sin duplicar); si no, el
+    // nombre tecleado (el servidor lo resuelve insensible a mayúsculas/acentos y solo crea si es nuevo).
+    if (op === 'autor') { if (adPersonaId) body.personaId = adPersonaId; else { body.persona = ($('#adPersona').value || '').trim(); if (!body.persona) { $('#adMsg').textContent = 'Escribe el nombre del autor.'; return; } } }
+    else if (op === 'contribuidor') { body.rol = $('#adRol').value; if (adPersonaId) body.personaId = adPersonaId; else { body.persona = ($('#adPersona').value || '').trim(); if (!body.persona) { $('#adMsg').textContent = 'Escribe el nombre.'; return; } } }
+    else if (op === 'editorial') { if (adEditorialId) body.editorialId = adEditorialId; else { body.editorial = ($('#adEditorial').value || '').trim(); if (!body.editorial) { $('#adMsg').textContent = 'Escribe la editorial.'; return; } } }
     else if (op === 'cdu') {
       body.cdu = ($('#adCdu').value || '').trim();
       if (!body.cdu) { $('#adMsg').textContent = 'Escribe la CDU.'; return; }

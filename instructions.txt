@@ -440,7 +440,13 @@ de ficheros clasificado por CDU.
     · PALABRAS CLAVE EN LOTE + BÚSQUEDA «#»:
 
     · ASIGNAR DATOS EN LOTE (barra de seleccion del catalogo -> «Asignar datos», admin): un solo dialogo
-      con selector de campo -> POST /documentos/lote/metadatos {op, ids, ...} (utils/lote-metadatos.js).
+
+      AUTOCOMPLETADO (evita duplicados): al escribir en Autor/Contribuidor/Editorial se ofrece un
+      desplegable de las entidades EXISTENTES (autores↔GET /autores?q=, editoriales↔GET /editoriales?q=)
+      con su nº de libros; al elegir una se envía su ID (personaId/editorialId → se asigna la MISMA, no un
+      duplicado como «Jorge Luis Borges» vs «J.L. Borges»). El campo CDU ofrece las MATERIAS
+      (GET /cdu/descripciones). Si no se elige, se resuelve por nombre (insensible a mayúsc/acentos). El
+      helper attachAutocomplete(input,{buscar,fila,elegir}) es genérico (reutiliza el desplegable .cdupop).      con selector de campo -> POST /documentos/lote/metadatos {op, ids, ...} (utils/lote-metadatos.js).
       Cuatro operaciones, reutilizando la maquinaria de la edicion de UN doc (sin segunda implementacion):
         · AUTOR: anade la persona a autores[] ($addToSet; ADITIVO, no pisa la autoria existente).
         · CONTRIBUIDOR con ROL: anade {persona,rol} a contribuciones[] (aditivo, dedup exacto). rol de
