@@ -30,7 +30,7 @@ import { buscar as buscarIndice, buscarPalabrasClave, estadoIndice, lanzarReinde
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia, expulsarDeGrupo } from './utils/gestion-grupos.js';
-import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor, eliminarAutoresVacios, imagenesDeObras } from './utils/gestion-autores.js';
+import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor, cambiarRolEnDocs, eliminarAutoresVacios, imagenesDeObras } from './utils/gestion-autores.js';
 import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial, guardarLogoEditorial, imagenesDeLibros, quitarEditorialDeDocs, reasignarDocsAEditorial, explotarEditorial } from './utils/gestion-editoriales.js';
 import { lanzarReclasificacion, estadoReclasificacion, aplicarUltimaReclasificacion } from './utils/reclasificar-editorial.js';
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
@@ -2409,6 +2409,14 @@ export function rutasPanel() {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
             res.json(await quitarAutorDeDocs(await conectarDB(), req.params.id, req.body?.ids || null));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Cambiar el ROL de esta persona (:id) en los documentos indicados (body.ids; null = todos): p. ej. de
+    // «autor» a «prologuista». Mueve la persona entre autores[] y contribuciones[] según el rol destino.
+    r.post('/autores/:id/rol', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json(await cambiarRolEnDocs(await conectarDB(), req.params.id, String(req.body?.rol || ''), req.body?.ids || null));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     // Reasignar los documentos indicados de ESTE autor (:id) a OTRO (body.destino) — «enviar los

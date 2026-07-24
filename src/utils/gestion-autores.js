@@ -343,6 +343,53 @@ export async function quitarAutorDeDocs(db, autorId, ids = null) {
 }
 
 /**
+ * CAMBIA EL ROL de una persona en unos documentos: p. ej. de «autor» a «prologuista». El modelo tiene el
+ * autor principal en `autores[]` (solo ObjectId) y los roles secundarios en `contribuciones[{persona,rol}]`,
+ * así que cambiar el rol NO es un simple $set: es MOVER la persona de un sitio a otro.
+ *   · destino 'autor'  → se añade a `autores[]` y se quita de `contribuciones[]`.
+ *   · destino <rol>    → se quita de `autores[]` (si estaba) y entra en `contribuciones[]` con ese rol.
+ * Solo se tocan los documentos donde la persona interviene HOY (como autor o en cualquier rol). No duplica
+ * (autores[] con $addToSet; contribuciones se reconstruye sin la persona y se le añade la entrada nueva).
+ * @param rolDestino  uno de ROLES_VALIDOS.
+ * @param ids         documentos concretos; null/[] = TODOS los del autor (como quitarAutorDeDocs).
+ */
+export async function cambiarRolEnDocs(db, personaId, rolDestino, ids = null) {
+    const pid = oid(personaId);
+    if (!pid) return { ok: false, motivo: 'id de persona inválido' };
+    if (!ROLES_VALIDOS.includes(rolDestino)) return { ok: false, motivo: `rol no válido: ${rolDestino}` };
+    const bib = db.collection('biblioteca');
+    const refPersona = { $or: [{ autores: pid }, { 'contribuciones.persona': pid }] };
+    const filtroIds = (Array.isArray(ids) && ids.length) ? { _id: { $in: ids.map(oid).filter(Boolean) } } : null;
+    const match = filtroIds ? { $and: [filtroIds, refPersona] } : refPersona;
+
+    // Se procesa documento a documento porque contribuciones[] hay que RECONSTRUIRLA (quitar la persona de
+    // cualquier rol y volver a añadirla en el nuevo) — no se puede con un solo updateMany atómico.
+    const docs = await bib.find(match, { projection: { autores: 1, contribuciones: 1 } }).toArray();
+    let cambiados = 0;
+    for (const d of docs) {
+        const enAutores = (d.autores || []).some((a) => String(a) === String(pid));
+        // contribuciones SIN esta persona (se re-crea su entrada abajo con el rol destino).
+        const contribs = (d.contribuciones || []).filter((c) => String(c.persona) !== String(pid));
+        const yaCorrecto = rolDestino === 'autor'
+            ? (enAutores && (d.contribuciones || []).every((c) => String(c.persona) !== String(pid)))
+            : (!enAutores && (d.contribuciones || []).some((c) => String(c.persona) === String(pid) && c.rol === rolDestino));
+        if (yaCorrecto) continue;
+
+        const upd = { $set: { fecha_actualizacion: new Date() } };
+        if (rolDestino === 'autor') {
+            upd.$addToSet = { autores: pid };
+            upd.$set.contribuciones = contribs;                       // la quita de contribuciones
+        } else {
+            upd.$set.contribuciones = [...contribs, { persona: pid, rol: rolDestino }];
+            if (enAutores) upd.$pull = { autores: pid };              // deja de ser autor principal
+        }
+        await bib.updateOne({ _id: d._id }, upd);
+        cambiados++;
+    }
+    return { ok: true, cambiados, total: docs.length, rol: rolDestino };
+}
+
+/**
  * REASIGNA la autoría de unos DOCUMENTOS de un autor a OTRO (para «enviar los seleccionados a otro autor»):
  * en cada doc de `docIds` reemplaza `viejoId` por `nuevoId` en `autores[]` y en `contribuciones[]` (mismo
  * rol, sin duplicar). El autor viejo se CONSERVA si le quedan otros libros; si se queda sin ninguno, se

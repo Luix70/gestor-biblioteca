@@ -15249,6 +15249,7 @@ async function autorFicha(id) {
         <button class="btn" id="autSelNinguno" style="padding:2px 8px;font-size:12px">Ninguno</button>
         <button class="btn pri" id="autSelEnviar" style="padding:2px 8px;font-size:12px">🔍 Mostrar en Catálogo</button>
         ${admin ? '<button class="btn" id="autSelMover" style="padding:2px 8px;font-size:12px" title="Enviar los libros seleccionados a OTRO autor (este los deja de tener)">➡️ A otro autor</button>' : ''}
+        ${admin ? '<button class="btn" id="autSelRol" style="padding:2px 8px;font-size:12px" title="Cambiar el ROL de esta persona en los libros seleccionados (p. ej. de autor a prologuista/traductor/ilustrador…)">🎭 Cambiar rol</button>' : ''}
         ${admin ? '<button class="btn" id="autSelQuitar" style="padding:2px 8px;font-size:12px" title="Quitar este autor de los libros seleccionados">🚫 Quitar autoría</button>' : ''}
       </div>
       ${librosHtml}
@@ -15373,6 +15374,11 @@ async function autorFicha(id) {
       if (!_autFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
       autorQuitar(id, nombreAutor, [..._autFichaSel], _autFichaSel.size);
     };
+    // Cambiar el ROL de esta persona en los libros seleccionados (autor → prologuista/traductor/…).
+    if ($('#autSelRol')) $('#autSelRol').onclick = () => {
+      if (!_autFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
+      cambiarRolAutor(id, nombreAutor, [..._autFichaSel]);
+    };
     // Enviar los libros SELECCIONADOS a otro autor (el actual conserva los no seleccionados).
     if ($('#autSelMover')) $('#autSelMover').onclick = () => {
       if (!_autFichaSel.size) { toast('Selecciona al menos un libro', 'warn'); return; }
@@ -15398,6 +15404,41 @@ async function autorQuitar(id, nombre, ids, count) {
     toast(`✔ Quitado de ${r.quitados} doc(s)${r.autorBorrado ? ' · autor borrado (se quedó sin obras)' : ''}`);
     autoresBuscar();
   } catch (e) { toast('Error: ' + e.message, 'bad'); }
+}
+
+// Roles que puede desempeñar una persona (el mismo conjunto que el servidor · ROLES_VALIDOS).
+const ROLES_PERSONA = [
+  ['autor', '✍️ Autor'], ['traductor', '🌐 Traductor'], ['ilustrador', '🎨 Ilustrador'],
+  ['prologuista', '📖 Prologuista'], ['anotador', '🖊️ Anotador'], ['editor', '🧑‍💼 Editor'], ['compilador', '🗃️ Compilador'],
+];
+// Cambia el ROL de una persona en los libros seleccionados. Un rol es una VISTA de intervención: cambiarlo NO
+// borra a la persona, solo la mueve entre «autor principal» y «colaborador con rol».
+async function cambiarRolAutor(id, nombre, ids) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:440px">
+    <h3 style="margin-top:0">🎭 Cambiar rol</h3>
+    <p class="muted" style="font-size:13px">Nuevo rol de <b>${esc(nombre)}</b> en los <b>${ids.length}</b> libro(s) seleccionados.
+      No se borra nada: solo cambia CÓMO interviene (autor principal ↔ colaborador).</p>
+    <select id="rolCual" style="width:100%">
+      ${ROLES_PERSONA.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}
+    </select>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="rolX">Cancelar</button><button class="btn pri" id="rolOk">Aplicar</button></div>
+    <div id="rolMsg" class="muted" style="font-size:13px;margin-top:8px"></div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#rolX').onclick = cerrarCmp;
+  $('#rolOk').onclick = async () => {
+    const rol = $('#rolCual').value;
+    $('#rolOk').disabled = true;
+    try {
+      const r = await api('/autores/' + encodeURIComponent(id) + '/rol', { method: 'POST', body: JSON.stringify({ rol, ids }) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo cambiar');
+      cerrarCmp();
+      const etq = (ROLES_PERSONA.find((x) => x[0] === rol) || [, rol])[1];
+      toast(`🎭 «${nombre}» → ${etq} en ${r.cambiados} de ${r.total} libro(s)`);
+      autorFicha(id);   // re-pinta la ficha con los roles actualizados
+    } catch (e) { $('#rolMsg').textContent = e.message; $('#rolOk').disabled = false; }
+  };
 }
 
 // Overlay de BÚSQUEDA de autor (para fusionar/reasignar). `excluir` = id a no ofrecer (el actual). Al elegir
