@@ -689,7 +689,17 @@ de ficheros clasificado por CDU.
       cambios durante CARPETA_ESTABLE_MS) antes de operar — una copia de 19 GB tarda; una vez
       vista como transmedia lo sigue siendo (pegajoso), no cae a la vía normal.
     · CONTENIDO INTERACTIVO (CD-ROM con .exe/.swf/.app): se COPIA VERBATIM y se PRESERVA íntegro
-      (no se cataloga —no se ve en el visor— pero NO se omite ni se altera ningún fichero: romper
+
+    · INCIDENTE (2026-07-24) y ARREGLO — un fichero INTERACTIVO ya no funde una biblioteca en UNA
+      transmedia: una carpeta de ~600 libros de matematicas se catalogo como UNA sola coleccion
+      transmedia porque contenia UN .exe/.dll. esInteractivo (any .exe/.dll/.swf/.jar/.bat/autorun/.app en
+      el arbol) ganaba a la evidencia de 594 documentos independientes. Ahora la senal «hay interactivo»
+      solo declara transmedia si los DOCUMENTOS NO DOMINAN (interactivoEsEsencia: nDocs legibles <= 12);
+      por encima es una biblioteca con un accesorio colado -> se cataloga cada libro y el interactivo
+      viaja como material. Calibrado con el Test Battery: 54.Contenido Interactivo (0 docs) SIGUE siendo
+      transmedia; 52.Archivos transmedia (Oxford Bookworms, 887 docs) NO usa esta senal -> lo detecta la
+      ESTRUCTURA «Stage N», que es especifica y no se toca. Aplica a esTransmediaFuerte y a
+      esCarpetaTransmedia.      (no se cataloga —no se ve en el visor— pero NO se omite ni se altera ningún fichero: romper
       la estructura lo inutilizaría). Si la colección es SOLO interactiva (0 PDF/audio) igualmente
       se copia y se crea la colección (0 miembros); nada se pierde.
     · MIEMBROS PLANOS (sin IA, 100% estructural): un documento por PDF, con nivel (Stage),

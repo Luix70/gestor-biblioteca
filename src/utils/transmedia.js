@@ -84,6 +84,25 @@ const esInteractivo = (f) => EXT_INTERACTIVO.includes(ext(f.nombre)) || /^autoru
 // Segmento de carpeta «Stage N» o fichero con prefijo «Sx » (estructura de lecturas graduadas).
 const RE_ESTRUCTURA = new RegExp('(^|/)(stage\\s*\\d+|s\\d+[\\s.\\-])', 'i');
 
+// Nº MÁXIMO de documentos legibles para que un fichero INTERACTIVO (.exe/.dll/.swf/.jar/autorun…) declare la
+// carpeta «transmedia». Por encima, NO es un CD-ROM interactivo: es una BIBLIOTECA con un accesorio colado (un
+// .dll, un instalador, un .jar de muestra…) → hay que catalogar cada libro por su cuenta y que el interactivo
+// viaje como material, no fundir cientos de libros en UNA transmedia.
+//   ⚠ INCIDENTE que lo motivó (2026-07-24): una carpeta de ~600 libros de matemáticas se catalogó como UNA
+//     sola colección transmedia porque contenía UN fichero interactivo. La señal «hay un .exe» ganaba a la
+//     evidencia abrumadora de «hay 594 documentos independientes».
+//   · Los transmedia legítimos con MUCHOS documentos (Oxford Bookworms, 887) NO dependen de esta señal: los
+//     detecta la ESTRUCTURA «Stage N», que es específica y no se toca.
+//   · Los interactivos legítimos (un CD-ROM) tienen POCOS o CERO documentos legibles (54.Contenido Interactivo
+//     = 0), así que siguen detectándose.
+const MAX_DOCS_PARA_INTERACTIVO = 12;
+/** ¿El contenido INTERACTIVO es la ESENCIA de la carpeta y no un accesorio colado entre muchos documentos? */
+function interactivoEsEsencia(ficheros) {
+    if (!ficheros.some(esInteractivo)) return false;
+    const nDocs = ficheros.filter((f) => esDocumentoLeible(f.nombre)).length;
+    return nDocs <= MAX_DOCS_PARA_INTERACTIVO;
+}
+
 /**
  * ¿Una carpeta es un TRANSMEDIA (colección de estructura preservada, no un audiolibro suelto)? Es transmedia si:
  *   · trae un marcador `.transmedia`, o
@@ -94,7 +113,7 @@ const RE_ESTRUCTURA = new RegExp('(^|/)(stage\\s*\\d+|s\\d+[\\s.\\-])', 'i');
 export async function esCarpetaTransmedia(dir) {
     try { if (await fs.access(path.join(dir, '.transmedia')).then(() => true, () => false)) return true; } catch { /* */ }
     const ficheros = await listarFicheros(dir);
-    if (ficheros.some(esInteractivo)) return true;
+    if (interactivoEsEsencia(ficheros)) return true;   // interactivo ESENCIAL (no un accesorio entre 600 libros)
     const audios = ficheros.filter((f) => esAudio(f.nombre));
     const pdfs = ficheros.filter((f) => esPdf(f.nombre));
     const hayEstructura = ficheros.some((f) => RE_ESTRUCTURA.test(f.rel));
@@ -110,7 +129,7 @@ export async function esCarpetaTransmedia(dir) {
 export async function esTransmediaFuerte(dir) {
     try { if (await fs.access(path.join(dir, '.transmedia')).then(() => true, () => false)) return true; } catch { /* */ }
     const ficheros = await listarFicheros(dir);
-    return ficheros.some(esInteractivo) || ficheros.some((f) => RE_ESTRUCTURA.test(f.rel));
+    return interactivoEsEsencia(ficheros) || ficheros.some((f) => RE_ESTRUCTURA.test(f.rel));
 }
 
 // ── Deducción de metadatos ESTRUCTURALES (sin IA) ──────────────────────────────────────────────────────
