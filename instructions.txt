@@ -1536,7 +1536,17 @@ de ficheros clasificado por CDU.
     Página para consultar y DEPURAR autores. Buscador por nombre o grafía
     alternativa; sin búsqueda, salen los autores CON libros, más usados primero
     (los miles de nombres del volcado sin libros aparecen al buscarlos). Cada
-    tarjeta muestra foto, nombre, «a.k.a.» (variantes), nº de libros y fechas.
+
+    · LIMPIAR AUTORES HUERFANOS: un autor se BORRA al quedarse sin ninguna referencia (ni autor ni
+      contribuidor en ningun documento) — «Quitar autoria» ya lo hace, y «Cambiar rol» NO (solo mueve la
+      referencia). Los del volcado OL+BNE que nunca tuvieron libro (+ menciones mal parseadas creadas como
+      autor) quedan huerfanos. Se ven en la pagina Autores con el filtro «Minimo de obras → 0 (sin
+      libros)» (?sinLibros=1). REGLA DE CONSERVACION (autorTieneInversion): un huerfano se conserva si
+      tiene INVERSION — biografia, foto o fechas de nacimiento/fallecimiento; si esta vacio se borra (se
+      recrea solo si entra un libro que lo cite: check-then-create). Vive en eliminarAutoresVacios (la
+      usan el borrado multiple del panel Y el script), asi que la regla no puede divergir. Limpieza de un
+      tiro: node scripts/limpiar-autores-huerfanos.js (dry-run) / --ejecutar (BORRA; copia de seguridad
+      antes). El endpoint del panel es POST /autores/eliminar {ids}.    tarjeta muestra foto, nombre, «a.k.a.» (variantes), nº de libros y fechas.
     · Filtros: Foto (con/sin), Biografía (con/sin), ROL (autor/traductor/ilustrador/
       prologuista/anotador/editor/compilador), MÍN. OBRAS (≥1/2/3/5/10, por el rol
       filtrado) y Orden (nº de obras / nombre). El filtro de rol lista a quienes

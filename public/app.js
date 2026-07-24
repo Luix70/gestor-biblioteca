@@ -15086,11 +15086,13 @@ async function autoresEliminarSel() {
   const ids = [..._autoresSel];
   if (!ids.length) return;
   const nombres = ids.map((id) => (_autores.find((a) => a._id === id) || {}).nombre).filter(Boolean);
-  if (!confirm(`¿Eliminar ${ids.length} autor(es)?\n\nSolo se borran los que NO figuren en ningún documento (ni autor ni contribuyente); los que tengan obras se CONSERVAN.\n\n${nombres.slice(0, 10).join('\n')}${nombres.length > 10 ? '\n…' : ''}`)) return;
+  if (!confirm(`¿Eliminar ${ids.length} autor(es)?\n\nSolo se borran los HUÉRFANOS y VACÍOS. Se CONSERVAN los que tengan obras y también los que, aun sin libros, tengan datos (biografía, foto o fechas). Se recrean solos si entra un libro que los cite.\n\n${nombres.slice(0, 10).join('\n')}${nombres.length > 10 ? '\n…' : ''}`)) return;
   try {
     const r = await api('/autores/eliminar', { method: 'POST', body: JSON.stringify({ ids }) });
     if (!r.ok) { toast(r.motivo, 'bad'); return; }
-    toast(`🗑 ${r.borrados} borrado(s)${r.conservados ? ` · ${r.conservados} conservado(s) (tienen obras)` : ''}`);
+    // Se conservan por dos causas: tienen obras, o están sin libros pero con inversión (bio/foto/fechas).
+    const causas = [r.conObras ? `${r.conObras} con obras` : '', r.conInversion ? `${r.conInversion} con datos (bio/foto)` : ''].filter(Boolean).join(' · ');
+    toast(`🗑 ${r.borrados} borrado(s)${causas ? ` · conservados: ${causas}` : ''}`);
     limpiarSelAutores();
     autoresBuscar();
   } catch (e) { toast(e.message, 'bad'); }

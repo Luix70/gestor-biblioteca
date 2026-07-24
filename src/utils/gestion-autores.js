@@ -112,18 +112,38 @@ export async function listarAutores(db, { q = '', limite = 60, foto = '', bio = 
  * contribuyente) — salvaguarda anti-pérdida: los que sigan referenciados se CONSERVAN. Devuelve el
  * recuento de borrados/conservados. (No recicla la foto: es un fichero pequeño; se limpia en Integridad.)
  */
+// ¿Hemos INVERTIDO algo en este autor que no queramos perder aunque se quede sin libros? Datos biográficos
+// (biografía, fechas de nacimiento/fallecimiento) o una FOTO. Si no hay nada de eso, es ruido del volcado o una
+// mención mal parseada, y se puede borrar (se recreará solo si entra un libro que lo cite). Grafías alternativas
+// NO cuentan como inversión: son un residuo de fusiones, no información obtenida sobre la persona.
+export function autorTieneInversion(a) {
+    return !!(
+        (a?.biografia && String(a.biografia).trim()) ||
+        (a?.foto && String(a.foto).trim()) ||
+        (Array.isArray(a?.fotos) && a.fotos.length) ||
+        a?.nacimiento || a?.fallecimiento
+    );
+}
+
+/**
+ * Borra los autores indicados que estén HUÉRFANOS (no figuran en ningún documento), SALVO los que tengan
+ * inversión (bio/foto/fechas → autorTieneInversion), que se conservan. Devuelve el desglose por categoría.
+ */
 export async function eliminarAutoresVacios(db, ids = []) {
     const objs = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
     if (!objs.length) return { ok: false, motivo: 'sin autores' };
-    const borrados = [], conservados = [];
+    let borrados = 0, conObras = 0, conInversion = 0;
     for (const _id of objs) {
         const usadoAutor = await db.collection('biblioteca').countDocuments({ autores: _id }, { limit: 1 });
         const usadoContrib = usadoAutor ? 1 : await db.collection('biblioteca').countDocuments({ 'contribuciones.persona': _id }, { limit: 1 });
-        if (usadoAutor || usadoContrib) { conservados.push(String(_id)); continue; }
+        if (usadoAutor || usadoContrib) { conObras++; continue; }             // tiene libros → se conserva
+        const autor = await db.collection('autores').findOne({ _id }, { projection: { biografia: 1, foto: 1, fotos: 1, nacimiento: 1, fallecimiento: 1 } });
+        if (autorTieneInversion(autor)) { conInversion++; continue; }          // sin libros pero con datos → se conserva
         await db.collection('autores').deleteOne({ _id });
-        borrados.push(String(_id));
+        borrados++;
     }
-    return { ok: true, borrados: borrados.length, conservados: conservados.length };
+    // `conservados` = total conservados (retrocompatible con la UI); se detallan las dos causas.
+    return { ok: true, borrados, conservados: conObras + conInversion, conObras, conInversion };
 }
 
 /**
