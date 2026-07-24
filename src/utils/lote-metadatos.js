@@ -28,7 +28,10 @@ async function resolverPersonaFlex(db, { persona, personaId } = {}) {
     }
     const nombre = String(persona || '').trim();
     if (!nombre) return null;
-    return resolverPersona(db, nombre);
+    // resolverPersona devuelve { _id, creada, nombre } (NO el ObjectId): hay que quedarse con el _id, o se
+    // guardaría el objeto entero como `persona` y la ficha mostraría «⚠ [object Object]».
+    const r = await resolverPersona(db, nombre);
+    return r ? r._id : null;
 }
 
 /** Resuelve una editorial por id, o por nombre con match INSENSIBLE a mayúsculas/acentos (evita duplicar «Cambridge»/«cambridge»). */
