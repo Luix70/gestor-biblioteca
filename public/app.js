@@ -3045,6 +3045,7 @@ function pintarDoc(r, ctx) {
     exlibris: EX_LIBRIS,
     descargaUrl: r.archivo_url ? encUrl(r.archivo_url) : '',
     descargaNombre: r.nombre_archivo || '',
+    descargaBytes: d.tamanos ? d.tamanos.principal : null,
     estrellasHTML: ratingBar('documentos', d._id, d.valoracion, d.nsfw)
       + leidoBar(d._id, d.leido) + likeBar(d._id, d.like) + ' ' + badgesDoc(d),
     datosHTML: filasFmin,
@@ -6088,7 +6089,7 @@ function grupoDeAudio(a) {
   return segs.length >= 2 ? etiquetaDiscoCli(segs[segs.length - 2]) : '';
 }
 
-function reproductorAudioHtml(audios, id) {
+function reproductorAudioHtml(audios, id, tamanos) {
   const lista = (audios || []).slice().sort((a, b) => (a.orden || 0) - (b.orden || 0));
   if (!lista.length) return '';
   // Selector de DISCO (Todo / CD1 / CD2…): solo si las pistas se reparten en ≥2 grupos (multi-CD).
@@ -6102,9 +6103,12 @@ function reproductorAudioHtml(audios, id) {
     + `</button>`).join('');
   // Descargas (streaming ZIP por bsdtar, público como /recursos): la playlist completa (solo audio) y la
   // carpeta entera (audio + imágenes + lo que haya). Enlaces normales <a download> → sin token.
+  // Tamaño esperado del ZIP (con «~»: se comprime al vuelo). `tamanos` lo calcula el servidor en la ficha.
+  const tz = tamanos || {};
+  const sufZip = (b) => (b ? ` · ~${fmtBytes(b)}` : '');
   const descargas = id
-    ? `<a class="btn" href="/api/descargar/${esc(id)}?que=audio" download title="Descargar todas las pistas en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Playlist</a>
-       <a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar TODO el contenido (audio + imágenes + extras) en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Todo (ZIP)</a>`
+    ? `<a class="btn" href="/api/descargar/${esc(id)}?que=audio" download title="Descargar todas las pistas en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Playlist${sufZip(tz.audio)}</a>
+       <a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar TODO el contenido (audio + imágenes + extras) en un ZIP" style="padding:4px 10px;font-size:12px">⬇ Todo (ZIP)${sufZip(tz.total)}</a>`
     : '';
   // «Reordenar» (admin): ordenar por pista/título/duración y/o mover a mano; se persiste.
   const reord = (id && ROL === 'admin')
@@ -6403,12 +6407,17 @@ function materialSeccionHTML(d) {
   const admin = ROL === 'admin';
   const tk = TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '';
   const dl = (params) => `/api/descargar/${encodeURIComponent(id)}?${params}${tk}`;
+  // Tamaños esperados que calcula el servidor (recorriendo la carpeta): total del ZIP, fichero principal y por
+  // adjunto (una carpeta adjunta no trae `bytes` en el inventario, así que su tamaño sale de aquí).
+  const tz = d.tamanos || {};
+  const tamAdj = (nombre) => tz.adjuntos && tz.adjuntos[nombre];
   const adj = Array.isArray(d.adjuntos) ? d.adjuntos : [];
   const filas = adj
     .map((a) => {
       const esCarpeta = a.tipo === 'carpeta';
       const ic = esCarpeta ? '📁' : '📄';
-      const tam = esCarpeta ? '' : a.bytes ? ` · ${fmtBytes(a.bytes)}` : '';
+      const bytesAdj = a.bytes || tamAdj(a.nombre);
+      const tam = bytesAdj ? ` · ${fmtBytes(bytesAdj)}` : '';
       const lock = a.soloAdmin ? ' <span class="tag mut" title="Solo administradores">🔒</span>' : '';
       // Una CARPETA adjunta es explorable (abre el explorador de ficheros en un modal, acotado a esa carpeta):
       // el nombre es clicable y hay un botón 🔍. La descarga de una carpeta baja un zip.
@@ -6434,10 +6443,13 @@ function materialSeccionHTML(d) {
   const cuerpo = adj.length
     ? filas
     : '<div class="muted" style="font-size:12px">Este material se catalogó con la ingesta; explóralo con «🗂️ Archivos».</div>';
+  // El sufijo de tamaño es «~» porque el ZIP se comprime al vuelo: el peso real suele ser algo menor que la
+  // suma de los ficheros (para PDF/imágenes, ya comprimidos, prácticamente idéntico).
+  const sufZip = (b) => (b ? ` · ~${fmtBytes(b)}` : '');
   const botones =
     '<div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">' +
-    `<a class="btn" href="${dl('que=todo')}" download title="Descargar el libro y TODOS sus adjuntos en un ZIP">⬇ Todo (ZIP)</a>` +
-    (d.nombre_archivo ? `<a class="btn" href="${dl('que=principal')}" download title="Descargar SOLO el documento principal">⬇ Solo el libro</a>` : '') +
+    `<a class="btn" href="${dl('que=todo')}" download title="Descargar el libro y TODOS sus adjuntos en un ZIP">⬇ Todo (ZIP)${sufZip(tz.total)}</a>` +
+    (d.nombre_archivo ? `<a class="btn" href="${dl('que=principal')}" download title="Descargar SOLO el documento principal">⬇ Solo el libro${sufZip(tz.principal)}</a>` : '') +
     (admin ? '<button class="btn" id="matAddMore">📦 Adjuntar más</button>' : '') +
     '</div>';
   return `<div class="muted" style="font-size:12px;margin-bottom:8px">Viaja con el libro y se conserva tal cual (código de ejemplo, datasets, una crítica…).</div>${cuerpo}${botones}`;
@@ -6977,11 +6989,15 @@ function previewArchivo(r) {
 
 function previewArchivoBase(r) {
   const id = r.doc && r.doc._id;
-  const audio = reproductorAudioHtml(r.audios, id); // audiolibro (con o sin PDF): reproductor + descargas arriba
+  // Tamaño esperado en los botones: «~» para los ZIP (se comprimen al vuelo), exacto para el fichero directo.
+  const tz = (r.doc && r.doc.tamanos) || {};
+  const sufZip = (b) => (b ? ` · ~${fmtBytes(b)}` : '');
+  const sufEx = (b) => (b ? ` · ${fmtBytes(b)}` : '');
+  const audio = reproductorAudioHtml(r.audios, id, r.doc && r.doc.tamanos); // audiolibro (con o sin PDF): reproductor + descargas arriba
   // SOFTWARE (paquete verbatim en bloque): no hay un fichero único → EXPLORADOR de ficheros de SOLO LECTURA.
   const esSoftware = r.tipo_recurso === 'software' || (r.doc && r.doc.tipo_recurso === 'software') || r.naturaleza === 'software';
   if (esSoftware && id) {
-    const zip = `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar todo el paquete en un ZIP">⬇ Paquete (ZIP)</a>`;
+    const zip = `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar todo el paquete en un ZIP">⬇ Paquete (ZIP)${sufZip(tz.total)}</a>`;
     return (
       audio +
       `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">💿 Paquete de software</h3>
@@ -6998,8 +7014,8 @@ function previewArchivoBase(r) {
   // Solo "Descargar": PDF y EPUB se LEEN EMBEBIDOS aquí (visores propios). Ya no se ofrece "Abrir en
   // pestaña" (en PC, según la config del navegador, descargaba el PDF en vez de previsualizarlo).
   // «Carpeta (ZIP)» descarga TODA la carpeta ruta_base (el fichero + portadas + extras) en streaming.
-  const zip = id ? `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar toda la carpeta en un ZIP">⬇ Carpeta (ZIP)</a>` : '';
-  const acc = `<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar</a>${zip}</div>`;
+  const zip = id ? `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar toda la carpeta en un ZIP">⬇ Carpeta (ZIP)${sufZip(tz.total)}</a>` : '';
+  const acc = `<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar${sufEx(tz.principal)}</a>${zip}</div>`;
   // VÍDEO: reproductor nativo <video> para los formatos que el navegador SÍ decodifica (mp4/webm/ogv/m4v/
   // mov-H.264). Para .avi/.mkv/.wmv/.flv/.mpg (sin códec en el navegador) → aviso + descarga (o el ZIP).
   const VIDEO_NATIVO = ['mp4', 'webm', 'ogv', 'm4v', 'mov'];
@@ -13180,9 +13196,12 @@ function fichaMinima(o) {
     : '';
   const starsInner =
     o.estrellasHTML != null ? o.estrellasHTML : o.estrellas ? estrellasHTML(o.estrellas) : '';
+  // Tamaño en el botón de descarga: EXACTO para el fichero directo (/recursos/…), aproximado («~») cuando la
+  // descarga es un ZIP que se comprime al vuelo (p. ej. una ficha compartida con adjuntos).
+  const tamDesc = o.descargaBytes ? ` · ${o.descargaAprox ? '~' : ''}${fmtBytes(o.descargaBytes)}` : '';
   const hero = o.esDigital
     ? o.descargaUrl
-      ? `<a class="btn pri fmin-dl" href="${esc(o.descargaUrl)}" download="${esc(o.descargaNombre || '')}">⬇ Descargar</a>`
+      ? `<a class="btn pri fmin-dl" href="${esc(o.descargaUrl)}" download="${esc(o.descargaNombre || '')}">⬇ Descargar${tamDesc}</a>`
       : ''
     : heroExlibris(o.exlibris || EX_LIBRIS);
   let filas = o.datosHTML;
@@ -13636,9 +13655,11 @@ function renderGrupoCompartido(cont, g, token) {
     const cov = m.portada
       ? `<img src="${esc(encUrl(m.portada))}" loading="lazy" style="width:44px;height:60px;object-fit:cover;border-radius:5px;background:var(--card)">`
       : `<div style="width:44px;height:60px;border-radius:5px;background:var(--card);display:flex;align-items:center;justify-content:center">📗</div>`;
-    const meta = [m.volumen != null ? 'Vol. ' + m.volumen : '', m['año_edicion'] || '', (m.formatos || []).join('·')].filter(Boolean).join(' · ');
+    // Tamaño esperado de la descarga de cada miembro (exacto para un fichero, «~» si es un ZIP que se comprime).
+    const tam = m.descarga_bytes ? `${m.descarga_zip ? '~' : ''}${fmtBytes(m.descarga_bytes)}` : '';
+    const meta = [m.volumen != null ? 'Vol. ' + m.volumen : '', m['año_edicion'] || '', (m.formatos || []).join('·'), tam].filter(Boolean).join(' · ');
     const dl = m.descarga_url
-      ? `<a class="btn pri" href="${esc(encUrl(m.descarga_url))}" download title="Descargar" style="padding:4px 11px;font-size:13px">⬇</a>`
+      ? `<a class="btn pri" href="${esc(encUrl(m.descarga_url))}" download title="Descargar${tam ? ' (' + tam + ')' : ''}" style="padding:4px 11px;font-size:13px">⬇</a>`
       : '<span class="muted" style="font-size:11px">papel</span>';
     return `<div class="row" style="align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">
       ${cov}
@@ -13649,9 +13670,10 @@ function renderGrupoCompartido(cont, g, token) {
   // comparte por enlace son documentos ELECTRÓNICOS —no hay nada que devolver—, así que exhibir el correo y el
   // teléfono del propietario a quien reciba el enlace es ruido y exposición de datos personales sin motivo.
   const hayDescargas = (g.miembros || []).some((m) => m.descarga_url);
+  const totZip = g.bytes_total ? ` · ~${fmtBytes(g.bytes_total)}` : '';   // suma esperada del ZIP (aprox: se comprime)
   const zip = (hayDescargas && token)
     ? `<div style="text-align:center;margin:10px 0 16px"><a class="btn pri" href="/api/compartido/${encodeURIComponent(token)}/zip" download
-         title="Descargar todos los documentos en un solo archivo comprimido">⬇ Descargar todo (ZIP)</a></div>`
+         title="Descargar todos los documentos en un solo archivo comprimido">⬇ Descargar todo (ZIP)${totZip}</a></div>`
     : '';
   cont.innerHTML = `${_brandLine}
     <div style="max-width:560px;margin:0 auto">
@@ -13693,6 +13715,8 @@ async function vistaCompartida(token) {
     ocultarUbicacion: true, // nunca se expone la ubicación física
     descargaUrl: f.descarga_url ? encUrl(f.descarga_url) : '',
     descargaNombre: f.nombre_archivo || '',
+    descargaBytes: f.descarga_bytes || null,
+    descargaAprox: !!f.descarga_zip,
     autor: (f.autores || []).join(', '),
     editorial: f.editorial || '',
     coleccion: f.coleccion || '',

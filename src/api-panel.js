@@ -97,6 +97,59 @@ async function raizExplorable(baseDir) {
 const urlArchivo = (doc) => (doc.ruta_base && doc.nombre_archivo)
     ? `${doc.ruta_base}/${doc.nombre_archivo}` : null;
 
+// Bytes de un fichero o suma recursiva de una carpeta — para reflejar en la ficha el TAMAÑO ESPERADO de las
+// descargas (el ZIP «Todo», «Solo el libro», cada adjunto). Best-effort: NUNCA lanza (un fichero que se borre
+// a mitad no debe tumbar la ficha) y acota la profundidad por si un symlink crea un ciclo.
+async function bytesDeRuta(p, prof = 0) {
+    if (prof > 12) return 0;
+    let st;
+    try { st = await stat(p); } catch { return 0; }
+    if (st.isFile()) return st.size;
+    if (!st.isDirectory()) return 0;
+    let ents;
+    try { ents = await readdir(p, { withFileTypes: true }); } catch { return 0; }
+    let total = 0;
+    for (const e of ents) total += await bytesDeRuta(path.join(p, e.name), prof + 1);
+    return total;
+}
+
+// Tamaños esperados de las descargas de un documento, RESPETANDO lo que ESE rol se llevaría (un invitado no
+// descarga los adjuntos «solo admin» ni los sidecars registro.json/.marc.xml — que son una copia del registro).
+// Un único recorrido del árbol; `total` = ZIP «Todo», `principal` = «Solo el libro», `adjuntos` = por adjunto,
+// `audio` = la playlist. Devuelve null si la carpeta no existe (la UI simplemente no muestra tamaño).
+async function tamanosDescarga(doc, esAdmin) {
+    const baseDir = carpetaDeDoc(doc);
+    if (!baseDir || !path.resolve(baseDir).startsWith(path.resolve(DIR_CDU))) return null;
+    let ents;
+    try { ents = await readdir(baseDir, { withFileTypes: true }); } catch { return null; }
+    const adjSoloAdmin = new Set((doc.adjuntos || []).filter((a) => a.soloAdmin).map((a) => a.nombre));
+    const nombresAdj = new Set((doc.adjuntos || []).map((a) => a.nombre));
+    const SIDECARS = new Set(['registro.json', 'registro.marc.xml']);
+    const adjuntos = {};
+    let total = 0, principal = null;
+    for (const e of ents) {
+        const b = await bytesDeRuta(path.join(baseDir, e.name));
+        if (e.name === doc.nombre_archivo) principal = b;
+        if (nombresAdj.has(e.name)) adjuntos[e.name] = b;
+        // Lo que ESTE rol se llevaría con «Todo (ZIP)».
+        if (!esAdmin && (adjSoloAdmin.has(e.name) || SIDECARS.has(e.name))) continue;
+        total += b;
+    }
+    // Playlist del audiolibro (que=audio): suma de las pistas, resueltas dentro de la carpeta.
+    let audio = null;
+    if (Array.isArray(doc.audios) && doc.audios.length) {
+        const base = String(doc.ruta_base).replace(/\/$/, '');
+        let s = 0;
+        for (const a of doc.audios) {
+            const u = String(a?.ruta || '');
+            if (!u.startsWith(base + '/')) continue;
+            s += await bytesDeRuta(path.join(baseDir, u.slice(base.length + 1)));
+        }
+        audio = s;
+    }
+    return { total, principal, adjuntos, audio };
+}
+
 // Descripción legible (ES/EN) de un código CDU desde 'cdu_descripciones' (clave = código saneado).
 async function cduDesc(db, cdu) {
     if (!cdu) return null;
@@ -1433,6 +1486,10 @@ export function rutasPanel() {
             if (doc.cdu)   clasificaciones.push({ sistema: 'cdu',   codigo: doc.cdu,   titulo: cdesc?.titulo_es || null, n: await coll.countDocuments({ cdu: doc.cdu }) });
             if (doc.dewey) clasificaciones.push({ sistema: 'dewey', codigo: doc.dewey, titulo: await tituloCache('dewey', doc.dewey), n: await coll.countDocuments({ dewey: doc.dewey }) });
             if (doc.lcc)   clasificaciones.push({ sistema: 'lcc',   codigo: doc.lcc,   titulo: await tituloCache('lcc', doc.lcc), n: await coll.countDocuments({ lcc: doc.lcc }) });
+
+            // Tamaño esperado de las descargas (ZIP «Todo», «Solo el libro», cada adjunto, la playlist) para
+            // reflejarlo en los enlaces. Best-effort: si la carpeta no está, `tamanos` viene null y no se muestra.
+            limpio.tamanos = await tamanosDescarga(doc, req.usuario?.rol === 'admin').catch(() => null);
 
             res.json({
                 ok: true, doc: limpio, autores, autores_ids, editorial, coleccion, contribuciones,
@@ -2832,6 +2889,16 @@ async function fichaCompartida(docId, permiteDescarga, incluirAdjuntos = false) 
     const colDoc = doc.coleccion ? await db.collection('colecciones').findOne({ _id: doc.coleccion }, { projection: { nombre: 1 } }) : null;
     const cdesc = await cduDesc(db, doc.cdu);
     const esDigital = !(doc.formatos || []).includes('papel');
+    const descargable = permiteDescarga && esDigital;
+    const enZip = !!(incluirAdjuntos && doc.ruta_base);   // con adjuntos → ZIP «Todo»; si no, el fichero directo
+
+    // Tamaño esperado de la descarga: el ZIP «Todo» (aproximado, se comprime) si van los adjuntos, o el fichero
+    // principal (exacto) si no. Quien recibe el enlace nunca es admin → el tamaño ya viene filtrado.
+    let descarga_bytes = null;
+    if (descargable) {
+        const t = await tamanosDescarga(doc, false).catch(() => null);
+        if (t) descarga_bytes = enZip ? t.total : t.principal;
+    }
     return {
         titulo: doc.titulo || '', subtitulo: doc.subtitulo || '',
         autores: autores || [], editorial: editorial || null,
@@ -2842,9 +2909,11 @@ async function fichaCompartida(docId, permiteDescarga, incluirAdjuntos = false) 
         formatos: doc.formatos || [], es_digital: esDigital,
         valoracion: doc.valoracion || 0, sinopsis: doc.sinopsis || null,
         portada: doc.portada || null,
-        descarga_url: !(permiteDescarga && esDigital) ? null
-            : (incluirAdjuntos && doc.ruta_base ? '/api/descargar/' + String(doc._id) + '?que=todo' : urlArchivo(doc)),
-        nombre_archivo: (permiteDescarga && esDigital) ? (doc.nombre_archivo || null) : null,
+        descarga_url: !descargable ? null
+            : (enZip ? '/api/descargar/' + String(doc._id) + '?que=todo' : urlArchivo(doc)),
+        nombre_archivo: descargable ? (doc.nombre_archivo || null) : null,
+        descarga_bytes,
+        descarga_zip: descargable && enZip,
     };
 }
 
@@ -2875,30 +2944,47 @@ async function grupoCompartido(tipo, id, incluirAdjuntos = false) {
             ? (a, b) => num(a.volumen_numero) - num(b.volumen_numero) || String(a.titulo || '').localeCompare(String(b.titulo || ''))
             : (a, b) => num(a.coleccion_numero) - num(b.coleccion_numero) || String(a.titulo || '').localeCompare(String(b.titulo || '')));
     }
+    // Tamaño esperado por miembro (y el total del ZIP grupal). Se recorre la carpeta de cada uno, así que se
+    // acota a grupos no enormes para no cargar un endpoint PÚBLICO; por encima del tope, no se muestra tamaño.
+    const calcularTam = miembros.length <= 150;
+    let bytesTotal = 0, algunTam = false;
+    const listaMiembros = [];
+    for (const m of miembros) {
+        const esDigital = !(m.formatos || []).includes('papel');
+        const directo = urlArchivo(m);   // fichero directo (bajo /recursos, público) si es de un solo fichero
+        // El material adjunto solo viaja si quien comparte lo autorizó (`incluirAdjuntos`), nunca por defecto.
+        const zipCarpeta = incluirAdjuntos && m.ruta_base;
+        let bytes = null;
+        if (calcularTam && esDigital && m.ruta_base) {
+            const t = await tamanosDescarga(m, false).catch(() => null);
+            // Lo que ESE enlace descarga: la carpeta entera (con adjuntos) o solo el fichero principal.
+            if (t) { bytes = zipCarpeta ? t.total : (t.principal ?? t.total); algunTam = true; if (bytes) bytesTotal += bytes; }
+        }
+        listaMiembros.push({
+            id: String(m._id),
+            titulo: m.titulo || '(sin título)',
+            portada: m.portada || null,
+            'año_edicion': m['año_edicion'] || null,
+            volumen: m.volumen_numero ?? null,
+            formatos: m.formatos || [],
+            // Directo si hay un fichero (= SOLO el libro). Si no lo hay (escaneado multi-imagen) no queda
+            // más remedio que la carpeta en ZIP, pero el endpoint ya excluye para no-admins los adjuntos
+            // «solo admin» y los sidecars con datos personales.
+            descarga_url: !esDigital ? null
+                : (zipCarpeta ? '/api/descargar/' + String(m._id) + '?que=todo'
+                    : directo || (m.ruta_base ? '/api/descargar/' + String(m._id) + '?que=principal' : null)),
+            descarga_bytes: bytes,
+            // El fichero directo es exacto; una descarga en ZIP (carpeta con adjuntos, o escaneo multi-imagen) es aproximada.
+            descarga_zip: !!(zipCarpeta || (esDigital && !directo && m.ruta_base)),
+        });
+    }
     return {
         grupo: true, tipo,
         nombre: grupo.nombre || grupo.titulo || '(sin nombre)',
         descripcion: grupo.descripcion || null,
         total: miembros.length,
-        miembros: miembros.map((m) => {
-            const esDigital = !(m.formatos || []).includes('papel');
-            const directo = urlArchivo(m);   // fichero directo (bajo /recursos, público) si es de un solo fichero
-            return {
-                id: String(m._id),
-                titulo: m.titulo || '(sin título)',
-                portada: m.portada || null,
-                'año_edicion': m['año_edicion'] || null,
-                volumen: m.volumen_numero ?? null,
-                formatos: m.formatos || [],
-                // Directo si hay un fichero (= SOLO el libro). Si no lo hay (escaneado multi-imagen) no queda
-                // más remedio que la carpeta en ZIP, pero el endpoint ya excluye para no-admins los adjuntos
-                // «solo admin» y los sidecars con datos personales. El MATERIAL adjunto solo viaja si quien
-                // comparte lo autorizó al crear el enlace (`incluirAdjuntos`), nunca por defecto.
-                descarga_url: !esDigital ? null
-                    : (incluirAdjuntos && m.ruta_base ? '/api/descargar/' + String(m._id) + '?que=todo'
-                        : directo || (m.ruta_base ? '/api/descargar/' + String(m._id) + '?que=principal' : null)),
-            };
-        }),
+        bytes_total: algunTam ? bytesTotal : null,   // suma esperada del ZIP «Descargar todo» (aprox: se comprime)
+        miembros: listaMiembros,
     };
 }
 
