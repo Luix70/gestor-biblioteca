@@ -380,7 +380,16 @@ de ficheros clasificado por CDU.
           video=vídeos de colecciones/transmedia). Whitelist server: FORMATOS_FILTRO.
         - Ámbito y Estantería (ubicación física)
         - CDU (prefijo)
-        - Estrellas (valoración, multi-selección; "sin valorar"). Dentro del mismo
+
+    · BÚSQUEDA DE CDU POR MATERIA + toggle estricta/sub-CDUs (campo «CDU / materia» del catálogo):
+        - Al teclear TEXTO (p. ej. «Historia») se abre un desplegable con las materias cuyo titulo_es lo
+          contiene (insensible a mayúsculas/ACENTOS), SOLO las que tienen libros. Elegir una fija su CÓDIGO
+          en el campo y busca. Endpoint GET /api/cdu/descripciones?q= (escanea cdu_descripciones —pequeña—
+          en memoria sobre titulo_es; filtra a las CDUs presentes vía distinct('cdu'), incluyendo sub).
+          Al teclear un CÓDIGO se filtra directamente (sin desplegable).
+        - TOGGLE «incluir sub-CDUs» (marcado por defecto): + sub-CDUs = filtro por PREFIJO (159 → 159.1,
+          159.9…; el comportamiento de siempre); ESTRICTA (desmarcado) = solo ese código exacto (param
+          cduExacto=1). Medido: cdu ^159 = 236 libros vs =159 exacto = 3.        - Estrellas (valoración, multi-selección; "sin valorar"). Dentro del mismo
           desplegable, 🔞 NSFW (admin), con TRES estados: SIN marcar = OCULTA lo
           NSFW (por defecto); MARCADA junto a otros filtros = lo INCLUYE también;
           MARCADA y sola (sin otro criterio) = SOLO NSFW.

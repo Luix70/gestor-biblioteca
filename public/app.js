@@ -8015,7 +8015,9 @@ function construirSearch() {
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
         <div><label>Estantería</label><select id="sqEstanteria" disabled><option value="">Todas</option></select></div>
         <div class="admin-only" style="display:flex;align-items:flex-end"><button class="btn" id="sqGoUbic" title="Gestionar ubicaciones (o ver esta estantería)">📍 Gestionar</button></div>
-        <div><label>CDU (prefijo)</label><input id="sqCdu" placeholder="ej. 82" autocomplete="off" enterkeyhint="search"></div>
+        <div style="position:relative"><label>CDU / materia</label><input id="sqCdu" placeholder="código (82) o materia (Historia)" autocomplete="off" enterkeyhint="search">
+          <div id="sqCduPop" class="cdupop" style="display:none"></div>
+          <label style="font-size:11px;display:flex;align-items:center;gap:5px;margin-top:4px;cursor:pointer" title="Estricta: SOLO ese código. + sub-CDUs: incluye las subclasificaciones (159 → 159.1, 159.9…)"><input type="checkbox" id="sqCduSub" checked style="width:auto"> incluir sub-CDUs</label></div>
         <div><label>Estrellas${ROL === 'admin' ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
           <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' ? '<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"> 🔞 NSFW</label>' : ''}</div>
         </details></div>
@@ -8083,16 +8085,24 @@ function construirSearch() {
     }
   };
   $('#sqCdu').oninput = () => {
+    const v = $('#sqCdu').value.trim();
+    // Si escribe TEXTO (una materia, «Historia»), se ofrece el desplegable de descripciones y NO se busca el
+    // catálogo aún (un texto como CDU no casa ningún código → daría 0 hasta elegir). Si escribe un CÓDIGO, se
+    // filtra como siempre (por prefijo/estricto según el toggle).
+    const esTexto = /[a-záéíóúüñ]/i.test(v);
     clearTimeout(busqTimer);
-    busqTimer = setTimeout(() => buscarCatalogo(1), 350);
+    if (esTexto) { buscarCduDescripciones(v); }
+    else { cerrarCduPop(); busqTimer = setTimeout(() => buscarCatalogo(1), 350); }
   };
   $('#sqCdu').onkeydown = (e) => {
     if (e.key === 'Enter') {
       clearTimeout(busqTimer);
+      cerrarCduPop();
       buscarCatalogo(1);
       colapsarFiltros();
-    }
+    } else if (e.key === 'Escape') cerrarCduPop();
   };
+  if ($('#sqCduSub')) $('#sqCduSub').onchange = () => { if ($('#sqCdu').value.trim()) buscarCatalogo(1); };
   $('#sqTipo').onchange = () => buscarCatalogo(1);
   if ($('#sqEstricto')) $('#sqEstricto').onchange = () => buscarCatalogo(1); // frase exacta ↔ laxa
   if ($('#sqSoporte')) $('#sqSoporte').onchange = () => buscarCatalogo(1);
@@ -8275,6 +8285,8 @@ function _paramsBusqueda() {
     orden: $('#sqOrden').value,
     porPagina: _porPaginaVista(),
   });
+  // CDU ESTRICTA (solo ese código) vs + sub-CDUs (prefijo, por defecto). Solo aplica si hay un código en el campo.
+  if ($('#sqCduSub') && !$('#sqCduSub').checked && $('#sqCdu').value.trim()) params.set('cduExacto', '1');
   // Búsqueda ESTRICTA (frase exacta) en vez de laxa (todas las palabras sueltas).
   if ($('#sqEstricto') && $('#sqEstricto').checked) params.set('estricto', '1');
   // Obras multivolumen COLAPSADAS en una tarjeta (por defecto). El MODO vive en localStorage y se conmuta con
@@ -8316,6 +8328,35 @@ function _paramsBusqueda() {
     params.set('orden', 'posicion');
   return params;
 }
+// ── Búsqueda de CDU por DESCRIPCIÓN (materia → código) ───────────────────────────────────────────────
+// Al teclear texto en el campo CDU se ofrece un desplegable con las materias que contienen ese texto (solo
+// las que tienen libros). Elegir una fija su CÓDIGO en el campo y busca (respetando el toggle estricta/sub).
+let _cduPopTimer = null;
+function cerrarCduPop() { const p = $('#sqCduPop'); if (p) { p.style.display = 'none'; p.innerHTML = ''; } }
+async function buscarCduDescripciones(q) {
+  clearTimeout(_cduPopTimer);
+  _cduPopTimer = setTimeout(async () => {
+    const pop = $('#sqCduPop');
+    if (!pop) return;
+    if (q.trim().length < 2) { cerrarCduPop(); return; }
+    let r;
+    try { r = await api('/cdu/descripciones?q=' + encodeURIComponent(q.trim())); } catch { cerrarCduPop(); return; }
+    const res = (r && r.resultados) || [];
+    if (!res.length) { pop.innerHTML = '<div class="cdupop-empty">Sin materias con libros para «' + esc(q) + '»</div>'; pop.style.display = 'block'; return; }
+    pop.innerHTML = res.map((x) =>
+      `<div class="cdupop-row" data-cod="${esc(x.codigo)}"><span class="mono cdupop-cod">${esc(x.codigo)}</span> <span>${esc(x.titulo)}</span></div>`).join('');
+    pop.style.display = 'block';
+    pop.querySelectorAll('.cdupop-row').forEach((row) => (row.onclick = () => {
+      $('#sqCdu').value = row.dataset.cod;   // fija el CÓDIGO; el toggle decide prefijo/estricto
+      cerrarCduPop();
+      buscarCatalogo(1);
+      colapsarFiltros();
+    }));
+  }, 250);
+}
+// Cerrar el desplegable al tocar fuera del campo CDU.
+document.addEventListener('click', (e) => { if (!e.target.closest('#sqCdu, #sqCduPop')) cerrarCduPop(); });
+
 async function buscarCatalogo(page) {
   estadoBusqueda.page = page;
   const params = _paramsBusqueda();

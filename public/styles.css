@@ -162,6 +162,47 @@ nav .soon {
 .sb-vig-txt b {
   color: var(--txt);
 }
+/* Desplegable de materias (búsqueda de CDU por descripción). Flota bajo el campo CDU. */
+.cdupop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 40;
+  max-height: 300px;
+  overflow: auto;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  margin-top: 2px;
+}
+.cdupop-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.cdupop-row:last-child {
+  border-bottom: none;
+}
+.cdupop-row:hover {
+  background: var(--card);
+}
+.cdupop-cod {
+  color: var(--acc);
+  font-weight: 600;
+  flex: none;
+  min-width: 64px;
+}
+.cdupop-empty {
+  padding: 8px 10px;
+  color: var(--mut);
+  font-size: 12px;
+}
 .sb-foot {
   padding: 14px 18px;
   border-top: 1px solid var(--line);

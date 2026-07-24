@@ -597,7 +597,9 @@ export function rutasPanel() {
                 const estanteria = String(req.query.estanteria || '').trim();
                 if (estanteria) match['ubicacion.estanteria'] = estanteria;
             }
-            if (cdu) match.cdu = { $regex: '^' + escapeRegex(cdu) };
+            // CDU: por defecto por PREFIJO (incluye las sub-CDUs: «159» trae «159.1», «159.9»…). Con
+            // `cduExacto=1` («CDU estricta») casa SOLO ese código, sin descendientes.
+            if (cdu) match.cdu = (String(req.query.cduExacto || '') === '1') ? cdu : { $regex: '^' + escapeRegex(cdu) };
             // Filtro EXACTO por clasificación (clic en el contador de la ficha/dashboard).
             const clasSistema = String(req.query.clasSistema || '').toLowerCase();
             const clasCodigo = String(req.query.clasCodigo || '').trim();
@@ -2577,6 +2579,36 @@ export function rutasPanel() {
                 return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null });
             }
             return res.status(400).json({ ok: false, motivo: 'sistema inválido (cdu|dewey|lcc)' });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // BUSCAR CDU POR DESCRIPCIÓN: «Historia» → lista de códigos cuya materia (titulo_es) contiene ese texto,
+    // para poder elegir el código sin conocerlo. También casa un CÓDIGO tecleado (prefijo). Insensible a
+    // mayúsculas y ACENTOS: se filtra en memoria sobre titulo_es (corto; la descripción larga NO se proyecta,
+    // pesa mucho). cdu_descripciones es pequeña (~6k) → un escaneo por consulta es barato. Solo se ofrecen
+    // códigos que TIENEN documentos en la biblioteca (una materia sin libros no sirve para filtrar el catálogo).
+    r.get('/cdu/descripciones', async (req, res) => {
+        try {
+            const q = String(req.query.q || '').trim();
+            if (q.length < 2) return res.json({ ok: true, resultados: [] });
+            const DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
+            const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(DIACRITICOS, '');
+            const nq = norm(q);
+            const db = await conectarDB();
+            const descs = await db.collection('cdu_descripciones')
+                .find({ titulo_es: { $ne: null } }, { projection: { codigo: 1, titulo_es: 1 } }).toArray();
+            const esCodigo = /^[\d.\-:'()/+ ]+$/.test(q);
+            // CDUs que TIENEN al menos un libro (distinct es barato) → solo se ofrecen materias con las que se
+            // puede filtrar de verdad. Una materia con libros bajo una SUB-CDU también cuenta (prefijo).
+            const presentes = (await db.collection('biblioteca').distinct('cdu')).filter(Boolean).map(String);
+            const tieneLibros = (cod) => presentes.some((c) => c === cod || c.startsWith(cod + '.') || c.startsWith(cod));
+            const cand = descs
+                .filter((d) => norm(d.titulo_es).includes(nq) || (esCodigo && String(d.codigo).startsWith(q)))
+                .filter((d) => tieneLibros(String(d.codigo)))
+                .sort((a, b) => String(a.codigo).localeCompare(String(b.codigo), 'es', { numeric: true }))
+                .slice(0, 30)
+                .map((d) => ({ codigo: String(d.codigo), titulo: d.titulo_es }));
+            res.json({ ok: true, resultados: cand });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
