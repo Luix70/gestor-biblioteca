@@ -166,16 +166,20 @@ nav .soon {
 .cdupop {
   position: absolute;
   left: 0;
-  right: 0;
   top: 100%;
-  z-index: 40;
-  max-height: 300px;
-  overflow: auto;
+  z-index: 60;
+  /* Ancho PROPIO (no el de la celda estrecha del filtro): tan ancho como su contenido, con un mínimo cómodo
+     y un tope que no se salga de la pantalla. Ningún contenedor lo recorta (card/row no ocultan overflow). */
+  width: max-content;
+  min-width: 280px;
+  max-width: min(520px, 92vw);
+  max-height: 320px;
+  overflow-y: auto;
   background: var(--bg2);
   border: 1px solid var(--line);
   border-radius: 9px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  margin-top: 2px;
+  margin-top: 3px;
 }
 .cdupop-row {
   display: flex;
@@ -184,6 +188,7 @@ nav .soon {
   padding: 7px 10px;
   cursor: pointer;
   font-size: 13px;
+  line-height: 1.35;
   border-bottom: 1px solid var(--line);
 }
 .cdupop-row:last-child {
