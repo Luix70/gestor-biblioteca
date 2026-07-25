@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { http } from './http.js';
 import { medirImagen } from './medir-imagen.js';
 import { rasterizarPaginas } from './rasterizar-pdf.js';
 
@@ -21,7 +21,7 @@ function evaluar(buffer, origen, aceptarSinMedir = false) {
 
 async function descargar(url) {
     try {
-        const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000 });
+        const res = await http.get(url, { responseType: 'arraybuffer', timeout: 15000 });
         return Buffer.from(res.data);
     } catch {
         return null;

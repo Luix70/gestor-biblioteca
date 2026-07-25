@@ -1,11 +1,12 @@
-import axios from 'axios';
+import { crearHttp } from './http.js';
 import { ErrorInfraestructura, esErrorDeRed } from '../errores.js';
 
 const BASE = 'https://openlibrary.org';
 
 // OpenLibrary es significativamente más lento que otras APIs (30–40 s en búsquedas de texto).
-// Se le da su propio timeout en vez de depender del global HTTP_TIMEOUT_MS (20 s).
-const olAxios = axios.create({ timeout: Number(process.env.OL_TIMEOUT_MS || 45000) });
+// Se le da su propio timeout en vez de depender del global HTTP_TIMEOUT_MS (20 s), pero SÍ pasa por el
+// mismo endurecimiento (User-Agent, throttle global y backoff ante 429/5xx) que el resto de clientes.
+const olAxios = crearHttp({ timeout: Number(process.env.OL_TIMEOUT_MS || 45000) });
 
 /**
  * Normaliza la respuesta de OpenLibrary a nuestro esquema interno.

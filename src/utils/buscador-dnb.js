@@ -8,7 +8,7 @@
  * SRU: https://services.dnb.de/sru/dnb
  * MARC 082 $a = DDC,  MARC 080 $a = CDU (rara vez presente)
  */
-import axios from 'axios';
+import { http } from './http.js';
 import * as cheerio from 'cheerio';
 import { esErrorDeRed } from '../errores.js';
 
@@ -26,7 +26,7 @@ export async function buscarEnDNB({ isbn }) {
     const isbnLimpio = String(isbn).replace(/-/g, '');
 
     try {
-        const res = await axios.get(SRU, {
+        const res = await http.get(SRU, {
             params: {
                 version: '1.1',
                 operation: 'searchRetrieve',

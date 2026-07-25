@@ -13,7 +13,7 @@
  *
  * Para libros marcados por OpenLibrary con LCC, obtenemos el LCCN y descargamos MODS.
  */
-import axios from 'axios';
+import { http } from './http.js';
 import * as cheerio from 'cheerio';
 import { esErrorDeRed } from '../errores.js';
 
@@ -28,7 +28,7 @@ async function modsDesdeLC(lccn) {
     if (!lccn) return null;
     const id = String(lccn).trim().replace(/\s+/g, '');
     try {
-        const res = await axios.get(`${BASE_MODS}/${id}.mods.xml`, { timeout: TIMEOUT });
+        const res = await http.get(`${BASE_MODS}/${id}.mods.xml`, { timeout: TIMEOUT });
         const $ = cheerio.load(res.data, { xmlMode: true });
         const dewey = $('classification[authority="ddc"]').first().text().trim() || null;
         const lcc = $('classification[authority="lcc"]').first().text().trim() || null;
@@ -57,7 +57,7 @@ export async function buscarEnLOC({ isbn, lccn }) {
         // El SRU de la LOC devuelve una página HTML con registros MARC embebidos en JSON.
         // Usamos el endpoint de búsqueda con formato brief para obtener el LCCN y luego
         // descargamos el MODS completo.
-        const res = await axios.get(BASE_SRU, {
+        const res = await http.get(BASE_SRU, {
             params: {
                 searchCode: 'ISAB',
                 searchArg: isbnLimpio,

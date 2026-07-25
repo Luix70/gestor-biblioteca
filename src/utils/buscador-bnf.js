@@ -18,7 +18,7 @@
  *
  * Degradación elegante: error de red → null (se omite); ISBN no hallado → {} ; hallado → objeto.
  */
-import axios from 'axios';
+import { http } from './http.js';
 import * as cheerio from 'cheerio';
 import { esErrorDeRed } from '../errores.js';
 
@@ -73,7 +73,7 @@ export async function buscarEnBNF({ isbns }) {
     for (const isbn of candidatos) {
         let res;
         try {
-            res = await axios.get(SRU, {
+            res = await http.get(SRU, {
                 params: {
                     version: '1.2', operation: 'searchRetrieve',
                     query: `bib.isbn all "${isbn}"`,

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { http } from './http.js';
 import { ErrorInfraestructura, esErrorDeRed } from '../errores.js';
 
 const BASE = 'https://www.googleapis.com/books/v1/volumes';
@@ -51,7 +51,7 @@ async function consultar(query, idioma = null) {
     try {
         const lang = idioma ? `&langRestrict=${idioma}` : '';
         const url = `${BASE}?q=${encodeURIComponent(query)}&maxResults=1&country=ES${lang}${clave()}`;
-        const res = await axios.get(url);
+        const res = await http.get(url);
         const item = res.data && Array.isArray(res.data.items) ? res.data.items[0] : null;
         return normalizar(item);
     } catch (e) {

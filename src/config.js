@@ -27,6 +27,11 @@ export const AJUSTES = {
         { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
     ]),
     HTTP_TIMEOUT_MS: 20000,         // timeout de TODA llamada HTTP a las APIs bibliográficas
+    // Endurecimiento de las llamadas SALIENTES (utils/http.js) para no parecer un bot y evitar baneos de IP
+    // (WAF/anti-bot). MIN_INTERVALO = separación mínima entre peticiones (ritmo de salida GLOBAL; ~5 req/s);
+    // REINTENTOS = cuántas veces reintentar con backoff ante 429/502/503/504 o error de red (respeta Retry-After).
+    HTTP_MIN_INTERVALO_MS: 200,
+    HTTP_REINTENTOS: 3,
     // Cota de tiempo por RECURSO ingerido: si el pipeline se ATASCA de verdad, se corta y el fichero va a
     // Cuarentena con aviso — nunca un cuelgue silencioso. HOLGADO (20 min): un PDF de cientos de MB tarda
     // VARIOS minutos legítimamente (poppler lo relee), y NO queremos mandar a Cuarentena un fichero bueno

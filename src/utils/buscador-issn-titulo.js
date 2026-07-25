@@ -8,7 +8,7 @@
  *   2) wbgetentities(candidatos, claims) → el PRIMERO que tenga P236 (ISSN) gana.
  * Si ningún candidato bien emparejado tiene ISSN → null (la revista se queda sin ISSN, recuperable a mano).
  */
-import axios from 'axios';
+import { http } from './http.js';
 import { validarISSN } from './identificadores.js';
 
 const API = 'https://www.wikidata.org/w/api.php';
@@ -20,14 +20,14 @@ export async function buscarISSNporTitulo(titulo, { idioma = null } = {}) {
     if (t.length < 3) return null;
     const lang = (idioma && /^[a-z]{2}$/i.test(idioma)) ? idioma.toLowerCase() : 'en';
     try {
-        const { data: s } = await axios.get(API, {
+        const { data: s } = await http.get(API, {
             params: { action: 'wbsearchentities', search: t, language: lang, uselang: lang, type: 'item', limit: 6, format: 'json' },
             headers: { 'User-Agent': UA }, timeout: TIMEOUT,
         });
         const ids = (s?.search || []).map(x => x.id).filter(Boolean).slice(0, 6);
         if (!ids.length) return null;
 
-        const { data: e } = await axios.get(API, {
+        const { data: e } = await http.get(API, {
             params: { action: 'wbgetentities', ids: ids.join('|'), props: 'claims', format: 'json' },
             headers: { 'User-Agent': UA }, timeout: TIMEOUT,
         });
@@ -53,7 +53,7 @@ export async function buscarISSNporTitulo(titulo, { idioma = null } = {}) {
 const PORTAL = 'https://portal.issn.org/resource/ISSN/';
 async function nombrePorISSNPortal(s) {
     try {
-        const resp = await axios.get(PORTAL + s, {
+        const resp = await http.get(PORTAL + s, {
             headers: { 'User-Agent': UA, Accept: 'application/ld+json' }, timeout: TIMEOUT,
         });
         let data = resp.data;
@@ -82,13 +82,13 @@ const CLASES_SERIE = new Set(['Q5633421', 'Q277759', 'Q1002697', 'Q41298', 'Q737
 async function nombrePorISSNWikidata(s, { idioma = null } = {}) {
     const langs = [...new Set([(idioma && /^[a-z]{2}$/i.test(idioma)) ? idioma.toLowerCase() : null, 'en', 'es'].filter(Boolean))];
     try {
-        const { data: q } = await axios.get(API, {
+        const { data: q } = await http.get(API, {
             params: { action: 'query', list: 'search', srsearch: `haswbstatement:P236=${s}`, srlimit: 6, format: 'json' },
             headers: { 'User-Agent': UA }, timeout: TIMEOUT,
         });
         const ids = (q?.query?.search || []).map((x) => x.title).filter(Boolean).slice(0, 6);
         if (!ids.length) return null;
-        const { data: e } = await axios.get(API, {
+        const { data: e } = await http.get(API, {
             params: { action: 'wbgetentities', ids: ids.join('|'), props: 'labels|claims', languages: langs.join('|'), format: 'json' },
             headers: { 'User-Agent': UA }, timeout: TIMEOUT,
         });

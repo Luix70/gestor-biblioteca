@@ -123,6 +123,8 @@ de ficheros clasificado por CDU.
   ────────────────────────────  ───────────  ────────────────────────────────
   PORT                          3000         Puerto de la API REST
   HTTP_TIMEOUT_MS               20000        Timeout de llamadas HTTP (APIs)
+  HTTP_MIN_INTERVALO_MS         200          Separación mínima entre peticiones salientes (ritmo anti-bot)
+  HTTP_REINTENTOS               3            Reintentos con backoff ante 429/5xx (respeta Retry-After)
   INGESTA_TIMEOUT_MS            1200000      Cota por recurso; si se excede → Cuarentena (20 min)
   REQUEST_TIMEOUT_MS            1200000      Recepción de una petición (subidas grandes; 20 min)
   PAUSA_INGESTA_MS              1500         Pausa entre recursos del Inbox
@@ -291,6 +293,13 @@ de ficheros clasificado por CDU.
   Pipeline de catalogación (automático):
     1. Extracción de metadatos del fichero (título, ISBN, autor…)
     2. Enriquecimiento con APIs gratuitas: OpenLibrary, Google Books
+       · Todas las llamadas SALIENTES (OpenLibrary, Google Books, DNB, BnF, LOC,
+         Wikidata y la descarga de portadas) pasan por utils/http.js: User-Agent
+         descriptivo con el EMAIL de contacto, THROTTLE global (HTTP_MIN_INTERVALO_MS,
+         ~5 req/s) y BACKOFF con reintentos ante 429/502/503/504 respetando
+         Retry-After (HTTP_REINTENTOS). Es «buena ciudadanía web»: evita parecer un
+         bot agresivo y que un WAF/anti-bot banee la IP pública (que en el NAS se
+         comparte con la navegación de casa). CrossRef ya iba con User-Agent+mailto.
     3. Si faltan datos: Gemini (visión IA) extrae lo que no se encontró
     4. Clasificación CDU (caché aprendida → API → IA)
     5. Guardado en MongoDB Atlas
