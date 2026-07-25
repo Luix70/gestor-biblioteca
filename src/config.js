@@ -32,6 +32,9 @@ export const AJUSTES = {
     // REINTENTOS = cuántas veces reintentar con backoff ante 429/502/503/504 o error de red (respeta Retry-After).
     HTTP_MIN_INTERVALO_MS: 200,
     HTTP_REINTENTOS: 3,
+    // Registro de actividad (accesos/búsquedas/aperturas/descargas): días que se conserva cada evento antes de
+    // caducar solo (índice TTL en registro_actividad.ts). Cambiarlo re-aplica el TTL al ejecutar setup-mongo.
+    REGISTRO_TTL_DIAS: 365,
     // Cota de tiempo por RECURSO ingerido: si el pipeline se ATASCA de verdad, se corta y el fichero va a
     // Cuarentena con aviso — nunca un cuelgue silencioso. HOLGADO (20 min): un PDF de cientos de MB tarda
     // VARIOS minutos legítimamente (poppler lo relee), y NO queremos mandar a Cuarentena un fichero bueno

@@ -220,6 +220,7 @@ const titles = {
   editoriales: 'Editoriales',
   inbox: 'Entrada',
   search: 'Catálogo',
+  usuarios: 'Usuarios',
 };
 let logTimer = null; // intervalo de refresco de los logs en vivo (solo activo en la página Actividad)
 
@@ -3043,7 +3044,11 @@ function pintarDoc(r, ctx) {
     subtitulo: d.subtitulo || subDoc,
     esDigital: !_fisico,
     exlibris: EX_LIBRIS,
-    descargaUrl: r.archivo_url ? encUrl(r.archivo_url) : '',
+    // La descarga va por la API (?que=archivo: fichero crudo, tamaño exacto) en vez de por /recursos directo,
+    // para que quede REGISTRADA. Lleva &token= porque un <a download> no manda el Bearer.
+    descargaUrl: r.archivo_url
+      ? '/api/descargar/' + encodeURIComponent(d._id) + '?que=archivo' + (TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '')
+      : '',
     descargaNombre: r.nombre_archivo || '',
     descargaBytes: d.tamanos ? d.tamanos.principal : null,
     estrellasHTML: ratingBar('documentos', d._id, d.valoracion, d.nsfw)
@@ -7015,7 +7020,10 @@ function previewArchivoBase(r) {
   // pestaña" (en PC, según la config del navegador, descargaba el PDF en vez de previsualizarlo).
   // «Carpeta (ZIP)» descarga TODA la carpeta ruta_base (el fichero + portadas + extras) en streaming.
   const zip = id ? `<a class="btn" href="/api/descargar/${esc(id)}?que=todo" download title="Descargar toda la carpeta en un ZIP">⬇ Carpeta (ZIP)${sufZip(tz.total)}</a>` : '';
-  const acc = `<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(url)}" download="${esc(nombre)}">⬇ Descargar${sufEx(tz.principal)}</a>${zip}</div>`;
+  // La descarga va por la API (?que=archivo: fichero crudo, registrado); `url` (/recursos) se reserva para los
+  // visores embebidos. &token= porque el <a download> no manda el Bearer.
+  const urlDescarga = id ? '/api/descargar/' + encodeURIComponent(id) + '?que=archivo' + (TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '') : url;
+  const acc = `<div class="row" style="margin-top:12px;gap:8px"><a class="btn pri" href="${esc(urlDescarga)}" download="${esc(nombre)}">⬇ Descargar${sufEx(tz.principal)}</a>${zip}</div>`;
   // VÍDEO: reproductor nativo <video> para los formatos que el navegador SÍ decodifica (mp4/webm/ogv/m4v/
   // mov-H.264). Para .avi/.mkv/.wmv/.flv/.mpg (sin códec en el navegador) → aviso + descarga (o el ZIP).
   const VIDEO_NATIVO = ['mp4', 'webm', 'ogv', 'm4v', 'mov'];
@@ -16690,6 +16698,200 @@ function elegirEditorialOverlay(excluir, titulo, subtitulo, onPick) {
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// USUARIOS (solo admin): alta/baja de credenciales (admin / invitado) + VISOR del registro de actividad
+// (accesos, búsquedas, aperturas y descargas, con IP). El acceso genérico «guest» está desactivado: cada
+// invitado tiene su credencial con nombre. Todo cuelga de /api/usuarios/* y /api/registro (admin).
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+const _fFechaReg = (x) => (x ? new Date(x).toLocaleString('es-ES') : '—');
+const _rolBadge = (rol) => (rol === 'admin' ? '🛡 admin' : '👤 invitado');
+const REG_TIPOS = { acceso: '🔑 acceso', acceso_fallido: '⛔ intento fallido', busqueda: '🔍 búsqueda', vista: '👁 abrió', descarga: '⬇ descarga' };
+// Texto legible del detalle de un evento del registro.
+function _detalleTextoReg(ev) {
+  const d = ev.detalle || {};
+  if (ev.tipo === 'busqueda') {
+    const partes = [];
+    if (d.q) partes.push(`«${d.q}»`);
+    if (d.cdu) partes.push(`CDU ${d.cdu}`);
+    if (d.tipo) partes.push(`tipo ${d.tipo}`);
+    return partes.join(' · ') || '(búsqueda)';
+  }
+  if (ev.tipo === 'vista') return `${d.entidad || 'ficha'}: ${d.titulo || d.id || ''}`;
+  if (ev.tipo === 'descarga') return `${d.titulo || d.id || ''}${d.modo ? ' (' + d.modo + ')' : ''}${d.via === 'compartido' ? ' · enlace compartido' : ''}`;
+  if (ev.tipo === 'acceso' || ev.tipo === 'acceso_fallido') return d.via ? `vía ${d.via}` : '';
+  return d ? JSON.stringify(d) : '';
+}
+
+let _regEstado = { page: 1, tipo: '', usuario: '', entidad: '', q: '' };
+
+async function loadUsuarios() {
+  if (ROL !== 'admin') { $('#p-usuarios').innerHTML = '<div class="empty">Solo el administrador puede ver esta página.</div>'; return; }
+  $('#p-usuarios').innerHTML = `
+    <div class="crumb"><span>Usuarios</span></div>
+    <div class="card">
+      <h3 style="margin:0 0 4px">👥 Credenciales</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">Dos roles: <b>administrador</b> (puede todo) e <b>invitado</b> (solo lectura). El acceso genérico «guest» está desactivado — crea una credencial con nombre por persona.</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+        <div><label>Usuario</label><input id="nuUser" placeholder="nombre" style="min-width:140px"></div>
+        <div><label>Contraseña</label><input id="nuPass" type="text" placeholder="mín. 4" style="min-width:120px"></div>
+        <div><label>Rol</label><select id="nuRol"><option value="guest">Invitado</option><option value="admin">Administrador</option></select></div>
+        <div style="flex:1 1 160px"><label>Nota (opcional)</label><input id="nuNota" placeholder="p. ej. sobrino, sala de lectura…"></div>
+        <button class="btn pri" id="nuCrear">➕ Crear</button>
+      </div>
+      <div id="usuList"><div class="muted">Cargando…</div></div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 4px">🧾 Registro de actividad</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Accesos, búsquedas (texto y CDU), aperturas de fichas/autores/obras/colecciones y descargas, con la IP. Se conserva 1 año (caduca solo).</div>
+      <div id="regResumen" class="muted" style="font-size:12px;margin-bottom:10px"></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+        <div><label>Tipo</label><select id="rfTipo"><option value="">Todos</option><option value="acceso">Accesos</option><option value="acceso_fallido">Fallidos</option><option value="busqueda">Búsquedas</option><option value="vista">Aperturas</option><option value="descarga">Descargas</option></select></div>
+        <div><label>Usuario</label><select id="rfUsuario"><option value="">Todos</option></select></div>
+        <div><label>Entidad</label><select id="rfEntidad"><option value="">Todas</option><option value="documento">Documento</option><option value="autor">Autor</option><option value="obra">Obra</option><option value="coleccion">Colección</option></select></div>
+        <div style="flex:1 1 160px"><label>Texto</label><input id="rfQ" placeholder="título o término…"></div>
+        <button class="btn" id="rfAplicar">Filtrar</button>
+      </div>
+      <div id="regLista"><div class="muted">Cargando…</div></div>
+      <div id="regPag" class="row" style="gap:8px;justify-content:center;margin-top:10px"></div>
+    </div>`;
+
+  // Crear credencial.
+  $('#nuCrear').onclick = async () => {
+    const body = { user: $('#nuUser').value.trim(), password: $('#nuPass').value, rol: $('#nuRol').value, nota: $('#nuNota').value.trim() };
+    if (!body.user || !body.password) return toast('Indica usuario y contraseña', 'warn');
+    try {
+      await api('/usuarios/crear', { method: 'POST', body: JSON.stringify(body) });
+      $('#nuUser').value = ''; $('#nuPass').value = ''; $('#nuNota').value = '';
+      toast('Credencial creada');
+      refrescarUsuarios();
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+
+  // Filtros del registro.
+  const aplicar = () => {
+    _regEstado = { page: 1, tipo: $('#rfTipo').value, usuario: $('#rfUsuario').value, entidad: $('#rfEntidad').value, q: $('#rfQ').value.trim() };
+    refrescarRegistro();
+  };
+  $('#rfAplicar').onclick = aplicar;
+  $('#rfTipo').onchange = aplicar;
+  $('#rfUsuario').onchange = aplicar;
+  $('#rfEntidad').onchange = aplicar;
+  $('#rfQ').onkeydown = (e) => { if (e.key === 'Enter') aplicar(); };
+
+  _regEstado = { page: 1, tipo: '', usuario: '', entidad: '', q: '' };
+  refrescarUsuarios();
+  refrescarRegistro();
+  // Poblar el selector de usuarios del filtro.
+  try {
+    const r = await api('/registro/usuarios');
+    const sel = $('#rfUsuario');
+    if (sel) sel.innerHTML = '<option value="">Todos</option>' + (r.usuarios || []).map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
+  } catch {}
+}
+
+// Lista de credenciales (BD editables + fila de solo lectura para los de arranque del .env).
+async function refrescarUsuarios() {
+  const cont = $('#usuList');
+  if (!cont) return;
+  let data;
+  try { data = await api('/usuarios/gestion'); } catch (e) { cont.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const filaBD = (u) => `
+    <div class="card" data-uid="${esc(u.id)}" style="padding:10px;margin:0 0 8px">
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+        <input class="uEdUser" value="${esc(u.user)}" style="min-width:120px" title="Nombre de usuario">
+        <select class="uEdRol"><option value="guest"${u.rol !== 'admin' ? ' selected' : ''}>Invitado</option><option value="admin"${u.rol === 'admin' ? ' selected' : ''}>Administrador</option></select>
+        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="uEdActivo"${u.activo ? ' checked' : ''}> activo</label>
+        <input class="uEdNota" value="${esc(u.nota || '')}" placeholder="nota" style="flex:1 1 120px">
+        <button class="btn uEdGuardar">💾 Guardar</button>
+        <button class="btn uEdPass" title="Cambiar la contraseña">🔑 Contraseña</button>
+        <button class="btn bad uEdDel" title="Borrar credencial">🗑</button>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Último acceso: ${_fFechaReg(u.ultimo_acceso)}${u.creado ? ' · creada ' + _fFechaReg(u.creado) : ''}</div>
+    </div>`;
+  const filaArranque = (u) => `
+    <div class="card" style="padding:10px;margin:0 0 8px;opacity:.75">
+      <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+        <b>${esc(u.user)}</b> <span class="tag">${_rolBadge(u.rol)}</span>
+        <span class="tag mut" title="Definido en el .env; se gestiona en el servidor, no aquí">⚙ arranque (.env)</span>
+        <span class="muted" style="font-size:11px;margin-left:auto">Último acceso: ${_fFechaReg(u.ultimo_acceso)}</span>
+      </div>
+    </div>`;
+  const bd = (data.usuarios || []).map(filaBD).join('');
+  const arr = (data.arranque || []).map(filaArranque).join('');
+  cont.innerHTML =
+    (bd || '<div class="muted" style="font-size:12px;margin-bottom:8px">No hay credenciales en la base de datos todavía.</div>') +
+    (arr ? `<div class="muted" style="font-size:12px;margin:12px 0 6px">Cuentas de arranque (del .env, salvavidas anti-bloqueo):</div>${arr}` : '');
+
+  // Wire de cada fila de BD.
+  $$('#usuList [data-uid]').forEach((card) => {
+    const id = card.dataset.uid;
+    const g = card.querySelector('.uEdGuardar');
+    if (g) g.onclick = async () => {
+      const body = {
+        user: card.querySelector('.uEdUser').value.trim(),
+        rol: card.querySelector('.uEdRol').value,
+        activo: card.querySelector('.uEdActivo').checked,
+        nota: card.querySelector('.uEdNota').value.trim(),
+      };
+      try { await api('/usuarios/' + encodeURIComponent(id) + '/editar', { method: 'POST', body: JSON.stringify(body) }); toast('Guardado'); refrescarUsuarios(); }
+      catch (e) { toast(e.message, 'bad'); }
+    };
+    const p = card.querySelector('.uEdPass');
+    if (p) p.onclick = async () => {
+      const pass = prompt('Nueva contraseña (mín. 4 caracteres):');
+      if (pass == null) return;
+      try { await api('/usuarios/' + encodeURIComponent(id) + '/editar', { method: 'POST', body: JSON.stringify({ password: pass }) }); toast('Contraseña cambiada'); }
+      catch (e) { toast(e.message, 'bad'); }
+    };
+    const d = card.querySelector('.uEdDel');
+    if (d) d.onclick = async () => {
+      const nombre = card.querySelector('.uEdUser').value.trim();
+      if (!confirm(`¿Borrar la credencial «${nombre}»? No se puede deshacer.`)) return;
+      try { await api('/usuarios/' + encodeURIComponent(id) + '/eliminar', { method: 'POST', body: '{}' }); toast('Credencial borrada'); refrescarUsuarios(); }
+      catch (e) { toast(e.message, 'bad'); }
+    };
+  });
+}
+
+// Visor del registro de actividad (paginado) + resumen.
+async function refrescarRegistro() {
+  const cont = $('#regLista');
+  if (!cont) return;
+  // Resumen (últimos 30 días).
+  api('/registro/resumen').then((r) => {
+    const res = $('#regResumen');
+    if (!res) return;
+    const pt = r.porTipo || {};
+    const chips = [['acceso', 'accesos'], ['busqueda', 'búsquedas'], ['vista', 'aperturas'], ['descarga', 'descargas'], ['acceso_fallido', 'fallidos']]
+      .map(([k, lbl]) => `${lbl}: <b>${pt[k] || 0}</b>`).join(' · ');
+    const top = (r.topUsuarios || []).slice(0, 5).map((u) => `${esc(u.usuario)} (${u.n})`).join(', ');
+    res.innerHTML = `Últimos ${r.dias} días — ${chips}. Total histórico: <b>${r.total || 0}</b>.${top ? ` Más activos: ${top}.` : ''}`;
+  }).catch(() => {});
+
+  const p = new URLSearchParams({ page: _regEstado.page, porPagina: 50 });
+  for (const k of ['tipo', 'usuario', 'entidad', 'q']) if (_regEstado[k]) p.set(k, _regEstado[k]);
+  let data;
+  try { data = await api('/registro?' + p.toString()); } catch (e) { cont.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  if (!data.items || !data.items.length) { cont.innerHTML = '<div class="muted" style="font-size:12px">Sin eventos que coincidan.</div>'; $('#regPag').innerHTML = ''; return; }
+  cont.innerHTML = data.items.map((ev) => `
+    <div class="row" style="gap:8px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px">
+      <span class="muted" style="min-width:150px;font-size:11px">${_fFechaReg(ev.ts)}</span>
+      <span style="min-width:110px">${esc(ev.usuario || '—')}${ev.rol ? ` <span class="muted" style="font-size:10px">${esc(ev.rol)}</span>` : ''}</span>
+      <span style="min-width:110px">${REG_TIPOS[ev.tipo] || esc(ev.tipo)}</span>
+      <span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(_detalleTextoReg(ev))}</span>
+      <span class="muted" style="font-size:11px;min-width:110px;text-align:right">${esc(ev.ip || '')}</span>
+    </div>`).join('');
+  // Paginación.
+  const totalPags = Math.max(1, Math.ceil(data.total / data.porPagina));
+  const pag = $('#regPag');
+  pag.innerHTML =
+    `<button class="btn" ${_regEstado.page <= 1 ? 'disabled' : ''} id="regPrev">← Anterior</button>` +
+    `<span class="muted" style="font-size:12px">Página ${data.page} de ${totalPags} · ${data.total} eventos</span>` +
+    `<button class="btn" ${_regEstado.page >= totalPags ? 'disabled' : ''} id="regNext">Siguiente →</button>`;
+  if ($('#regPrev')) $('#regPrev').onclick = () => { if (_regEstado.page > 1) { _regEstado.page--; refrescarRegistro(); } };
+  if ($('#regNext')) $('#regNext').onclick = () => { if (_regEstado.page < totalPags) { _regEstado.page++; refrescarRegistro(); } };
+}
+
 const loaders = {
   dashboard: loadDashboard,
   activity: loadActivity,
@@ -16703,6 +16905,7 @@ const loaders = {
   ubic: loadUbic,
   inbox: loadInbox,
   search: loadSearch,
+  usuarios: loadUsuarios,
 };
 
 // ── auth ──
@@ -16810,19 +17013,15 @@ function pintarCompartidosPendientes() {
 }
 // Registrar el service worker (necesario para el share target + instalación como PWA). Best-effort.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-// Rellena el desplegable de usuarios del login (sin contraseñas; de /api/usuarios).
+// Sugerencias de usuario para el login (SIN contraseñas; de /api/usuarios, que solo devuelve los de ARRANQUE).
+// Es un datalist (no un desplegable): los invitados con credencial en BD TECLEAN su nombre — no se listan todos
+// los usuarios en un endpoint público. Con el guest genérico desactivado, aquí normalmente solo sale el admin.
 async function cargarUsuariosLogin() {
   try {
     const r = await fetch('/api/usuarios').then((x) => x.json());
-    const sel = $('#lgUser');
-    if (!sel) return;
-    sel.innerHTML =
-      (r.usuarios || [])
-        .map(
-          (u) =>
-            `<option value="${esc(u.user)}">${esc(u.user)}${u.rol === 'admin' ? ' · admin' : ''}</option>`,
-        )
-        .join('') || '<option value="">—</option>';
+    const dl = $('#lgUserList');
+    if (!dl) return;
+    dl.innerHTML = (r.usuarios || []).map((u) => `<option value="${esc(u.user)}">`).join('');
   } catch {}
 }
 const tokenDeCookie = () => {

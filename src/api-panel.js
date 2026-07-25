@@ -10,7 +10,9 @@ import {
 } from './utils/inspeccion.js';
 import { restaurar, reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { normalizarDOI } from './utils/buscador-crossref.js';
-import { verificarPasswordAdmin, firmarCompartir, validarCompartir } from './auth.js';
+import { verificarPasswordAdmin, firmarCompartir, validarCompartir, validar, tokenDe, hayAdminBootstrap, listarUsuarios as listarUsuariosArranque } from './auth.js';
+import { registrar, ipDe, registrarVista, registrarDescarga, debeRegistrar, listarActividad, resumenActividad, usuariosDelRegistro, ultimoAccesoPorUsuario } from './utils/registro-actividad.js';
+import { listarUsuariosBD, crearUsuario, editarUsuario, borrarUsuario, contarAdminsActivosBD } from './utils/usuarios-db.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './integridad.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
@@ -296,7 +298,7 @@ export function rutasPanel() {
     // Descartar una CATEGORÍA entera (destructivo) → exige re-confirmar la contraseña de admin.
     r.post('/cuarentena/categoria/descartar', async (req, res) => {
         const { cat, password } = req.body || {};
-        if (!verificarPasswordAdmin(password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+        if (!(await verificarPasswordAdmin(password))) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
         try { res.json(await descartarCategoria(cat)); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
@@ -571,7 +573,7 @@ export function rutasPanel() {
         if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
         res.json(estadoEjecutor());
     });
-    r.post('/scripts/ejecutar', (req, res) => {
+    r.post('/scripts/ejecutar', async (req, res) => {
         if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
         const { id, valores, aplicar, password } = req.body || {};
         const script = scriptPorId(id);
@@ -579,7 +581,7 @@ export function rutasPanel() {
         // APLICAR (de verdad) exige contraseña; los scripts SIN modo de aplicación (diagnóstico / reconstrucción
         // derivada) se ejecutan sin ella. Un script con `aplica` que se lanza en dry-run tampoco la pide.
         const esAplicar = !!aplicar && !!script.aplica;
-        if (esAplicar && !verificarPasswordAdmin(password)) {
+        if (esAplicar && !(await verificarPasswordAdmin(password))) {
             return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
         }
         const armado = construirArgv(script, valores, esAplicar);
@@ -625,6 +627,14 @@ export function rutasPanel() {
             const page = Math.max(1, Number(req.query.page) || 1);
             // Tamaño de página: por defecto 24 (vista iconos); la vista «detalles» pide 100. Acotado a [1,100].
             const porPagina = Math.min(100, Math.max(1, Number(req.query.porPagina) || 24));
+
+            // REGISTRO DE ACTIVIDAD — búsquedas (texto y/o CDU). Solo si hay término de búsqueda (no en cada
+            // ajuste de filtro), con anti-avalancha por (usuario, q, cdu, tipo) para no anotar cada tecla ni
+            // cada página. Fire-and-forget (no bloquea la respuesta).
+            if ((q || cdu) && debeRegistrar(`b:${req.usuario?.usuario || '?'}:${q}|${cdu}|${tipo || ''}`, 15000)) {
+                registrar({ tipo: 'busqueda', usuario: req.usuario?.usuario || null, rol: req.usuario?.rol || null,
+                    ip: ipDe(req), detalle: { q: q || null, cdu: cdu || null, tipo: tipo || null } });
+            }
 
             const match = {};
             // Tipo: libro/revista por tipo_recurso; 'comic' por naturaleza (un cómic puede ser libro=GN o
@@ -1115,6 +1125,7 @@ export function rutasPanel() {
             const obra = await db.collection('obras').findOne({ _id: new ObjectId(req.params.id) });
             if (!obra) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
             if (await ocultarNsfw(req.usuario?.rol) && obra.nsfw) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
+            registrarVista(req, req.usuario, 'obra', obra._id, { titulo: obra.titulo }); // registro de actividad
 
             const idsPresentes = (obra.volumenes || []).filter(v => v && v._id).map(v => v._id);
             const idsSin = (obra.volumenes_sin_numero || []).filter(Boolean);
@@ -1283,6 +1294,7 @@ export function rutasPanel() {
             const col = await db.collection('colecciones').findOne({ _id: new ObjectId(req.params.id) });
             if (!col) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
             if (await ocultarNsfw(req.usuario?.rol) && col.nsfw) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
+            registrarVista(req, req.usuario, 'coleccion', col._id, { titulo: col.nombre }); // registro de actividad
 
             const esRevista = col.tipo === 'revista';
             const matchMiembros = { coleccion: col._id };
@@ -1490,6 +1502,8 @@ export function rutasPanel() {
             // Tamaño esperado de las descargas (ZIP «Todo», «Solo el libro», cada adjunto, la playlist) para
             // reflejarlo en los enlaces. Best-effort: si la carpeta no está, `tamanos` viene null y no se muestra.
             limpio.tamanos = await tamanosDescarga(doc, req.usuario?.rol === 'admin').catch(() => null);
+
+            registrarVista(req, req.usuario, 'documento', doc._id, { titulo: doc.titulo }); // registro de actividad
 
             res.json({
                 ok: true, doc: limpio, autores, autores_ids, editorial, coleccion, contribuciones,
@@ -1804,7 +1818,7 @@ export function rutasPanel() {
     // recicla su carpeta CDU (sidecars/imágenes) y borra el doc. Requiere contraseña de admin.
     r.post('/documentos/:id/reprocesar', async (req, res) => {
         try {
-            if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            if (!(await verificarPasswordAdmin(req.body?.password))) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
             if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
@@ -1824,7 +1838,7 @@ export function rutasPanel() {
     // ajustan ruta_base luego, o un reproceso lo re-archiva en libros/). Solo admin.
     r.post('/documentos/cambiar-tipo', async (req, res) => {
         try {
-            if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            if (!(await verificarPasswordAdmin(req.body?.password))) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
             const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter((id) => ObjectId.isValid(id)).map((id) => new ObjectId(id));
             const tipo = ['libro', 'revista', 'articulo', 'apuntes'].includes(req.body?.tipo) ? req.body.tipo : 'libro'; // libro por defecto
             const comic = !!req.body?.comic;
@@ -1841,7 +1855,7 @@ export function rutasPanel() {
     // (sidecars/imágenes/original) a la Papelera — recuperable. Requiere contraseña de admin.
     r.post('/documentos/:id/eliminar', async (req, res) => {
         try {
-            if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            if (!(await verificarPasswordAdmin(req.body?.password))) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
             if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
@@ -1875,7 +1889,7 @@ export function rutasPanel() {
     // patrón que Integridad / reindexar Búsqueda: POST lanza, GET .../estado informa, POST .../cancelar para.
     r.post('/documentos/eliminar-lote', async (req, res) => {
         try {
-            if (!verificarPasswordAdmin(req.body?.password)) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+            if (!(await verificarPasswordAdmin(req.body?.password))) return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
             const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).filter(id => ObjectId.isValid(id));
             if (!ids.length) return res.status(400).json({ ok: false, motivo: 'sin documentos válidos' });
             if (trabajoBorrado.en_curso) return res.status(409).json({ ok: false, motivo: 'ya hay un borrado en curso' });
@@ -2296,7 +2310,7 @@ export function rutasPanel() {
             // Retirar/BORRAR exige la contraseña de admin. `eliminar` no tiene vuelta atrás y con selección
             // múltiple un clic se lleva mucho: la contraseña obliga a parar y pensar.
             if (req.body?.ejecutar === true && OPERACIONES_PELIGROSAS.includes(operacion)) {
-                if (!verificarPasswordAdmin(String(req.body?.password || '')))
+                if (!(await verificarPasswordAdmin(String(req.body?.password || ""))))
                     return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
             }
             if (req.body?.ejecutar === true && estadoVigilante()?.activo)
@@ -2476,6 +2490,7 @@ export function rutasPanel() {
         try {
             const ficha = await fichaAutor(await conectarDB(), req.params.id);
             if (!ficha) return res.status(404).json({ ok: false, motivo: 'autor no encontrado' });
+            registrarVista(req, req.usuario, 'autor', req.params.id, { titulo: ficha.nombre || ficha.autor?.nombre || null }); // registro
             res.json({ ok: true, ...ficha });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
@@ -2874,6 +2889,92 @@ export function rutasPanel() {
         res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'obra', descarga: true, adjuntos: !!req.body?.adjuntos }) });
     });
 
+    // ─── GESTIÓN DE USUARIOS (solo admin) ────────────────────────────────────────────────────────────────
+    // La lista pública para el desplegable del login vive en app.js (/api/usuarios, solo los de arranque). Aquí
+    // va la gestión COMPLETA de credenciales en BD, bajo ruta distinta para no chocar con aquella. Las
+    // mutaciones ya las bloquea la puerta a no-admins; los GET necesitan comprobar el rol explícitamente.
+    const soloAdmin = (req, res) => {
+        if (req.usuario?.rol !== 'admin') { res.status(403).json({ ok: false, motivo: 'solo administradores' }); return false; }
+        return true;
+    };
+
+    r.get('/usuarios/gestion', async (req, res) => {
+        if (!soloAdmin(req, res)) return;
+        try {
+            const [bd, ultimos] = await Promise.all([listarUsuariosBD(), ultimoAccesoPorUsuario()]);
+            // Usuarios de ARRANQUE (.env): se muestran como fila de solo lectura (no se editan desde el panel).
+            const arranque = listarUsuariosArranque().map((u) => ({
+                user: u.user, rol: u.rol, arranque: true, activo: true,
+                ultimo_acceso: ultimos[u.user] || null,
+            }));
+            const usuarios = bd.map((u) => ({
+                id: String(u._id), user: u.user, rol: u.rol, activo: u.activo !== false, nota: u.nota || '',
+                creado: u.creado || null, ultimo_acceso: ultimos[u.user] || null, arranque: false,
+            }));
+            res.json({ ok: true, usuarios, arranque });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    r.post('/usuarios/crear', async (req, res) => {
+        try {
+            const r2 = await crearUsuario(req.body || {});
+            if (!r2.ok) return res.status(400).json(r2);
+            res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    r.post('/usuarios/:id/editar', async (req, res) => {
+        try {
+            const b = req.body || {};
+            // No dejar el sistema SIN admin: si esta edición quita el último admin activo (lo degrada o lo
+            // desactiva) y no hay admin de arranque en el .env, se rechaza.
+            const quitaAdmin = (b.rol && b.rol !== 'admin') || b.activo === false;
+            if (quitaAdmin && !hayAdminBootstrap() && (await contarAdminsActivosBD()) <= 1) {
+                const u = (await listarUsuariosBD()).find((x) => String(x._id) === req.params.id);
+                if (u && u.rol === 'admin' && u.activo !== false)
+                    return res.status(400).json({ ok: false, motivo: 'no puedes dejar el sistema sin ningún administrador' });
+            }
+            const r2 = await editarUsuario(req.params.id, b);
+            res.status(r2.ok ? 200 : 400).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    r.post('/usuarios/:id/eliminar', async (req, res) => {
+        try {
+            if (!hayAdminBootstrap() && (await contarAdminsActivosBD()) <= 1) {
+                const u = (await listarUsuariosBD()).find((x) => String(x._id) === req.params.id);
+                if (u && u.rol === 'admin' && u.activo !== false)
+                    return res.status(400).json({ ok: false, motivo: 'no puedes borrar el último administrador' });
+            }
+            const r2 = await borrarUsuario(req.params.id);
+            res.status(r2.ok ? 200 : 400).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ─── REGISTRO DE ACTIVIDAD (solo admin) ──────────────────────────────────────────────────────────────
+    r.get('/registro', async (req, res) => {
+        if (!soloAdmin(req, res)) return;
+        try {
+            res.json({ ok: true, ...(await listarActividad({
+                tipo: req.query.tipo, usuario: req.query.usuario, entidad: req.query.entidad,
+                q: req.query.q, desde: req.query.desde, hasta: req.query.hasta,
+                page: req.query.page, porPagina: req.query.porPagina,
+            })) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    r.get('/registro/resumen', async (req, res) => {
+        if (!soloAdmin(req, res)) return;
+        try { res.json({ ok: true, ...(await resumenActividad({ dias: Number(req.query.dias) || 30 })) }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    r.get('/registro/usuarios', async (req, res) => {
+        if (!soloAdmin(req, res)) return;
+        try { res.json({ ok: true, usuarios: await usuariosDelRegistro() }); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     return r;
 }
 
@@ -2910,7 +3011,7 @@ async function fichaCompartida(docId, permiteDescarga, incluirAdjuntos = false) 
         valoracion: doc.valoracion || 0, sinopsis: doc.sinopsis || null,
         portada: doc.portada || null,
         descarga_url: !descargable ? null
-            : (enZip ? '/api/descargar/' + String(doc._id) + '?que=todo' : urlArchivo(doc)),
+            : (enZip ? '/api/descargar/' + String(doc._id) + '?que=todo' : '/api/descargar/' + String(doc._id) + '?que=archivo'),
         nombre_archivo: descargable ? (doc.nombre_archivo || null) : null,
         descarga_bytes,
         descarga_zip: descargable && enZip,
@@ -3010,11 +3111,26 @@ export function rutasPublicas() {
             // el usuario; se valida igualmente para evitar cualquier fuga de ruta).
             if (!path.resolve(baseDir).startsWith(path.resolve(DIR_CDU))) return res.status(400).send('ruta no permitida');
 
-            const esAdmin = req.usuario?.rol === 'admin';
+            // rutasPublicas va ANTES de la puerta de autenticación, así que req.usuario no está puesto: el rol se
+            // deriva del TOKEN del enlace (el <a download> lo lleva en &token= justo para esto). Sin token válido
+            // (invitado sin sesión o enlace compartido) → NO admin → nunca se llevan los «solo admin» ni sidecars.
+            const sess = validar(tokenDe(req));
+            const esAdmin = sess?.rol === 'admin';
             const adjSoloAdmin = new Set((doc.adjuntos || []).filter((a) => a.soloAdmin).map((a) => a.nombre));
             const que = String(req.query.que || 'todo');
             const adjuntoQ = String(req.query.adjunto || '');
             const segmentoSimple = (n) => !!n && !/[\\/]/.test(n) && n !== '..' && n !== '.';
+
+            // FICHERO PRINCIPAL en crudo (sin ZIP): la descarga «⬇ Descargar» de la ficha. Se sirve el archivo
+            // tal cual (tamaño exacto) y se registra la descarga. Va aquí para no pasar por bsdtar.
+            if (que === 'archivo') {
+                if (!doc.nombre_archivo) return res.status(404).send('el documento no tiene fichero principal');
+                const abs = path.join(baseDir, doc.nombre_archivo);
+                if (!(await stat(abs).then(() => true, () => false))) return res.status(404).send('fichero no encontrado');
+                registrarDescarga(req, sess, doc._id, { titulo: doc.titulo, modo: 'archivo' });
+                return res.download(abs, doc.nombre_archivo);
+            }
+
             let objetivos; // rutas RELATIVAS a baseDir que entran en el ZIP
             let etq = '';
             if (que === 'audio') {
@@ -3046,6 +3162,8 @@ export function rutasPublicas() {
             // no sea admin debe recibirlo: ni un invitado ni, sobre todo, alguien con un enlace compartido.
             // (El .marc.xml se deriva de lo mismo.) El admin sí se los lleva: son SUS datos.
             if (!esAdmin) objetivos = objetivos.filter((n) => n !== 'registro.json' && n !== 'registro.marc.xml');
+
+            registrarDescarga(req, sess, doc._id, { titulo: doc.titulo, modo: adjuntoQ ? 'adjunto:' + adjuntoQ : que }); // registro de actividad
 
             const nombreZip = ((doc.titulo || 'contenido') + etq)
                 .replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120) + '.zip';
@@ -3110,6 +3228,10 @@ export function rutasPublicas() {
                 }
             }
             if (!objetivos.length) return res.status(404).send('no hay nada descargable');
+
+            // Registro de actividad: descarga de un GRUPO por enlace compartido (sin sesión → usuario anónimo).
+            registrar({ tipo: 'descarga', usuario: null, rol: null, ip: ipDe(req),
+                detalle: { entidad: info.tipo, id: String(info.docId), titulo: nombreGrupo || null, modo: 'grupo-zip', via: 'compartido', n: objetivos.length } });
 
             const nombreZip = String(nombreGrupo || 'documentos').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 100) + '.zip';
             res.setHeader('Content-Type', 'application/zip');

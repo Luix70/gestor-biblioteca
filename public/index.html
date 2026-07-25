@@ -38,6 +38,7 @@
           <button data-p="cuar"><span class="ic">⚠</span> Cuarentena</button>
           <button data-p="pap"><span class="ic">♻</span> Papelera</button>
           <button data-p="dashboard"><span class="ic">▥</span> Dashboard</button>
+          <button class="admin-only" data-p="usuarios"><span class="ic">👥</span> Usuarios</button>
         </nav>
         <!-- COPIA del interruptor del Vigilante al final del menú: se usa constantemente y así queda a mano
              desde CUALQUIER página, sin tener que ir a Entrada. Mismo estado y misma acción que el original
@@ -843,6 +844,9 @@
           <!-- EDITORIALES — buscar, ficha (libros que publica) y COMBINAR editoriales duplicadas. Render por JS (loadEditoriales). -->
           <section class="page" id="p-editoriales"></section>
 
+          <!-- USUARIOS (admin) — alta/baja de credenciales (admin/invitado) + registro de actividad. Render por JS (loadUsuarios). -->
+          <section class="page" id="p-usuarios"></section>
+
           <!-- BÚSQUEDA + CATÁLOGO -->
           <section class="page" id="p-search"></section>
 
@@ -857,7 +861,8 @@
         <img class="loginbanner" src="/Banner.png" alt="" onerror="this.remove()" />
         <div class="loginbody">
           <label class="loginlbl">Usuario</label>
-          <select id="lgUser" autocomplete="username"></select>
+          <input id="lgUser" autocomplete="username" list="lgUserList" placeholder="tu usuario" />
+          <datalist id="lgUserList"></datalist>
           <label class="loginlbl">Contraseña</label>
           <input id="lgPass" type="password" autocomplete="current-password" />
           <button class="btn pri" type="submit">Entrar</button>

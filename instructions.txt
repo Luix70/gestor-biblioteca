@@ -332,6 +332,27 @@ de ficheros clasificado por CDU.
       no cambia NADA en la base ni dispara IA, y por defecto no ve el contenido
       🔞 NSFW). La sesión usa un token firmado que SOBREVIVE a reinicios del
       contenedor y dura ~2 días (no hay que reloguear a cada rato).
+    · USUARIOS EN BD (página «Usuarios», solo admin): las credenciales viven en la
+      colección `usuarios` (contraseña con hash scrypt + salt) y se crean/editan/borran
+      desde el panel. El acceso genérico «guest» está DESACTIVADO: cada invitado tiene
+      su credencial CON NOMBRE (para atribuirle el registro). El admin del .env se
+      conserva como SALVAVIDAS anti-bloqueo (login sigue: BD primero, luego .env). El
+      desplegable del login es un datalist que solo sugiere los usuarios de arranque —
+      los de BD se teclean (no se listan todos en un endpoint público). No se puede
+      dejar el sistema sin ningún admin (guardas en editar/borrar). auth.login y
+      verificarPasswordAdmin son ASÍNCRONOS (consultan la BD). El SECRET del token se
+      deriva IGUAL que antes (incluye el GUEST_PASS histórico) para NO invalidar los
+      enlaces QR ya repartidos.
+    · REGISTRO DE ACTIVIDAD (colección `registro_actividad`, con la IP del cliente vía
+      `trust proxy`): accesos (y fallidos), BÚSQUEDAS (texto y CDU), APERTURAS de
+      fichas/autores/obras/colecciones (evento 'vista') y DESCARGAS ('descarga', incl.
+      el ZIP de grupos compartidos). La descarga del fichero principal va por
+      /api/descargar/:id?que=archivo (crudo, registrado) en vez de /recursos directo.
+      Un anti-avalancha en memoria colapsa los re-fetch inmediatos (volver atrás). Cada
+      evento CADUCA SOLO al año (índice TTL, REGISTRO_TTL_DIAS). El visor está en la
+      página «Usuarios» (filtros por tipo/usuario/entidad/texto, paginado + resumen).
+      Endpoints (solo admin): /usuarios/gestion, /usuarios/crear|:id/editar|:id/eliminar,
+      /registro, /registro/resumen, /registro/usuarios.
     · Instalar como app (PWA): el navegador ofrece "Instalar"/"Añadir a inicio".
       Queda como icono propio ("Bibliotheca Ludoviciana").
     · 📌 FIJAR ORIENTACIÓN (solo móvil): botón en la barra superior que BLOQUEA la

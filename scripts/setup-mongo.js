@@ -335,6 +335,43 @@ async function main() {
     await asegurarIndice(db.collection('selecciones'), { docs: 1 }, { name: 'idx_docs' });
     await asegurarIndice(db.collection('selecciones'), { nombre: 1 }, { name: 'idx_nombre' });
 
+    // ── usuarios: credenciales gestionadas desde el panel (además del admin de arranque del .env). Nombre
+    // ÚNICO e insensible a mayúsculas/acentos (no duplicar «Maria»/«maría»). Contraseñas con hash scrypt. ──
+    console.log('\nusuarios:');
+    if ((await db.listCollections({ name: 'usuarios' }).toArray()).length === 0) {
+        await db.createCollection('usuarios');
+        console.log('  ✅ colección creada.');
+    } else {
+        console.log('  ✓ ya existía.');
+    }
+    await asegurarIndice(db.collection('usuarios'), { user: 1 }, { unique: true, name: 'idx_user_unico', collation: { locale: 'es', strength: 1 } });
+
+    // ── registro_actividad: traza de accesos/búsquedas/aperturas/descargas con IP. Índice TTL: cada evento
+    // CADUCA SOLO tras REGISTRO_TTL_DIAS (por defecto 365) para no llenar Atlas M0. Índices de consulta para
+    // el visor (por usuario y por tipo, ambos ordenados por fecha desc). ──
+    console.log('\nregistro_actividad:');
+    if ((await db.listCollections({ name: 'registro_actividad' }).toArray()).length === 0) {
+        await db.createCollection('registro_actividad');
+        console.log('  ✅ colección creada.');
+    } else {
+        console.log('  ✓ ya existía.');
+    }
+    const registro = db.collection('registro_actividad');
+    const ttlDias = Math.max(1, Number(process.env.REGISTRO_TTL_DIAS) || 365);
+    const ttlSeg = ttlDias * 86400;
+    try {
+        await registro.createIndex({ ts: 1 }, { expireAfterSeconds: ttlSeg, name: 'idx_ttl_ts' });
+        console.log(`  ✅ TTL en ts = ${ttlDias} días.`);
+    } catch (e) {
+        // Ya existe con otro expireAfterSeconds → actualizar con collMod (no se puede recrear un TTL con distinto valor).
+        try {
+            await db.command({ collMod: 'registro_actividad', index: { name: 'idx_ttl_ts', expireAfterSeconds: ttlSeg } });
+            console.log(`  ✅ TTL en ts actualizado a ${ttlDias} días.`);
+        } catch (e2) { console.warn(`  ⚠️  TTL en ts: ${e2.codeName || e2.message}`); }
+    }
+    await asegurarIndice(registro, { usuario: 1, ts: -1 }, { name: 'idx_usuario_ts' });
+    await asegurarIndice(registro, { tipo: 1, ts: -1 },    { name: 'idx_tipo_ts' });
+
     console.log('\nListo.\n');
     process.exit(0);
 }

@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
+import { autenticarEnBD, verificarPasswordAdminBD } from './utils/usuarios-db.js';
 
 /**
- * Autenticación SIMPLE del panel (sin dependencias): dos usuarios y sesiones en memoria.
- *   - admin  (usuario PANEL_ADMIN_USER, por defecto "Luis"; contraseña PANEL_ADMIN_PASSWORD del .env):
- *            puede TODO (cualquier método).
- *   - guest  (usuario "guest"; contraseña PANEL_GUEST_PASSWORD, por defecto "guest"):
- *            SOLO LECTURA — peticiones GET (estadísticas/estado/búsqueda); cualquier mutación → 403.
+ * Autenticación del panel. Dos roles: 'admin' (puede TODO) y 'guest' (invitado, SOLO LECTURA — GET; cualquier
+ * mutación → 403). Las credenciales viven ahora en la BD (colección `usuarios`, gestionadas desde el panel);
+ * el .env se conserva solo como BOOTSTRAP anti-bloqueo (el admin «Luis» y PANEL_USERS). El acceso genérico
+ * compartido «guest» del .env queda DESACTIVADO: cada invitado tiene su propia credencial con nombre (para
+ * poder atribuirle el registro de actividad).
  *
  * El login devuelve un token FIRMADO (HMAC) y SIN ESTADO: lleva {usuario, rol, expiración} y se valida
  * recomputando la firma → SOBREVIVE a los reinicios del contenedor (ya no hay que re-loguear tras cada
@@ -15,7 +16,9 @@ import crypto from 'node:crypto';
  */
 const ADMIN_USER = process.env.PANEL_ADMIN_USER || 'Luis';
 const ADMIN_PASS = process.env.ADMIN_PWD || process.env.PANEL_ADMIN_PASSWORD || '';
-const GUEST_USER = 'guest';
+// GUEST_PASS ya NO crea un login «guest» (desactivado): se conserva SOLO para derivar el SECRET igual que
+// antes, de modo que los tokens de sesión y sobre todo los ENLACES DE COMPARTIR (QR) firmados con el secreto
+// anterior SIGAN válidos tras el despliegue. Cambiar el secreto invalidaría todos los QR ya repartidos.
 const GUEST_PASS = process.env.GUEST_PWD || process.env.PANEL_GUEST_PASSWORD || 'guest';
 const TTL_MS = Number(process.env.PANEL_SESION_MS || 2 * 24 * 3600 * 1000); // 2 días
 // Secreto para firmar los tokens. ESTABLE entre reinicios (de PANEL_TOKEN_SECRET, o derivado de las
@@ -30,13 +33,12 @@ function firmarSesion(user, role) {
     return payload + '.' + sig;
 }
 
-// Usuarios: legacy (admin "Luis" + "guest") + PANEL_USERS del .env (JSON [{user,rol,pwd}]). NO hay
-// alta/recuperación por UI: se editan en el .env (pocos usuarios, admin o guest). PANEL_USERS sobrescribe
-// por nombre, así que se puede redefinir "Luis"/"guest" o añadir nuevos.
+// Usuarios de ARRANQUE (bootstrap): el admin del .env + PANEL_USERS (JSON [{user,rol,pwd}]). Son el salvavidas
+// anti-bloqueo (funcionan aunque la BD falle o esté vacía); el grueso de las credenciales vive en la BD y se
+// gestiona desde el panel. El «guest» genérico ya NO se crea (desactivado).
 function cargarUsuarios() {
     const lista = [];
     if (ADMIN_PASS) lista.push({ user: ADMIN_USER, rol: 'admin', pwd: ADMIN_PASS });
-    lista.push({ user: GUEST_USER, rol: 'guest', pwd: GUEST_PASS });
     try {
         const extra = JSON.parse(process.env.PANEL_USERS || '');
         if (Array.isArray(extra)) for (const u of extra) {
@@ -51,25 +53,38 @@ function cargarUsuarios() {
 }
 const USUARIOS = cargarUsuarios();
 
+/** ¿Hay al menos un admin de ARRANQUE (.env)? Sirve para no dejar el sistema sin ningún admin al editar la BD. */
+export function hayAdminBootstrap() {
+    return USUARIOS.some((u) => u.rol === 'admin' && u.pwd);
+}
+
 /** Comparación en tiempo constante (evita fugas por temporización en la contraseña). */
 function igual(a, b) {
     const ba = Buffer.from(String(a)), bb = Buffer.from(String(b));
     return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
-export function login(usuario, password) {
-    const u = USUARIOS.find(x => x.user === usuario);
-    if (!u || !u.pwd || !igual(password, u.pwd)) return null;
-    return { token: firmarSesion(u.user, u.rol), usuario: u.user, rol: u.rol };
+export async function login(usuario, password) {
+    // 1) Credenciales de la BD (lo normal: invitados y admins creados desde el panel).
+    const bd = await autenticarEnBD(usuario, password).catch(() => null);
+    if (bd) return { token: firmarSesion(bd.user, bd.rol), usuario: bd.user, rol: bd.rol };
+    // 2) Bootstrap del .env (salvavidas: funciona aunque la BD falle o esté vacía).
+    const u = USUARIOS.find((x) => x.user === usuario);
+    if (u && u.pwd && igual(password, u.pwd)) return { token: firmarSesion(u.user, u.rol), usuario: u.user, rol: u.rol };
+    return null;
 }
 
-/** Lista de usuarios para el desplegable del login (SIN contraseñas). */
+/**
+ * Lista de usuarios para el desplegable PÚBLICO del login (SIN contraseñas). Solo los de ARRANQUE (.env): los
+ * de la BD NO se exponen aquí a propósito —enumerar todos los nombres de usuario en un endpoint público es un
+ * regalo para un atacante— así que los invitados con credencial en BD TECLEAN su nombre.
+ */
 export function listarUsuarios() {
-    return USUARIOS.map(u => ({ user: u.user, rol: u.rol }));
+    return USUARIOS.map((u) => ({ user: u.user, rol: u.rol }));
 }
 
 /** Auto-login por credenciales en la URL (https://user:pwd@host): valida la cabecera Basic → sesión. */
-export function loginBasic(authHeader) {
+export async function loginBasic(authHeader) {
     if (!authHeader || !authHeader.startsWith('Basic ')) return null;
     let dec; try { dec = Buffer.from(authHeader.slice(6), 'base64').toString('utf8'); } catch { return null; }
     const i = dec.indexOf(':');
@@ -129,9 +144,10 @@ export function validarCompartir(token) {
     };
 }
 
-/** Verifica una contraseña contra la de CUALQUIER admin (re-confirmación de acciones destructivas). */
-export function verificarPasswordAdmin(password) {
-    return USUARIOS.some(u => u.rol === 'admin' && u.pwd && igual(password, u.pwd));
+/** Verifica una contraseña contra la de CUALQUIER admin (arranque .env o BD): re-confirma acciones destructivas. */
+export async function verificarPasswordAdmin(password) {
+    if (USUARIOS.some((u) => u.rol === 'admin' && u.pwd && igual(password, u.pwd))) return true;
+    return verificarPasswordAdminBD(password).catch(() => false);
 }
 
 function tokenDe(req) {

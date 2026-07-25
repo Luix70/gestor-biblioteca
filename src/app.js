@@ -26,6 +26,7 @@ import { prepararReemplazo } from './utils/saneamiento.js';
 import { completarDoc, adjuntarMaterial, reemplazarAdjunto } from './utils/completar-doc.js';   // adjuntar audio/texto o material a un doc ya catalogado
 import { conectarDB } from './database.js';
 import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
+import { registrar, ipDe } from './utils/registro-actividad.js';
 import { ObjectId } from 'mongodb';
 
 // stdout/stderr a un PIPE (contenedor Docker) es ASÍNCRONO: los logs muy tempranos del arranque pueden
@@ -73,18 +74,24 @@ const upload = multer({
 });
 
 const app = express();
+// Detrás del proxy inverso de DSM: confiar en X-Forwarded-For para que req.ip sea la IP REAL del cliente (y no
+// la del proxy). Necesario para registrar la IP de accesos/búsquedas/descargas en el registro de actividad.
+app.set('trust proxy', true);
 app.use(express.json({ limit: '25mb' })); // 25mb: admite imágenes editadas (rotar/recortar/perspectiva) en base64
 
 // AUTO-LOGIN POR URL (https://user:pwd@host): el navegador manda esas credenciales como cabecera
 // `Authorization: Basic` en la carga de la página. Las validamos y, si son correctas, sembramos una
 // cookie `panel_token` (legible por JS, breve) que el panel recoge al cargar. Se omite si ya hay
 // cookie (la cabecera Basic llega en cada petición; no re-mintear). El token real va luego por Bearer.
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
     const auth = req.headers.authorization;
     if (auth && auth.startsWith('Basic ') && !(req.headers.cookie || '').includes('panel_token=')) {
-        const r = loginBasic(auth);
-        if (r) { res.cookie('panel_token', r.token, { maxAge: 600000, path: '/', sameSite: 'lax' }); console.log(`🔑 Auto-login por URL: ${r.usuario} (${r.rol}).`); }
-        else console.warn('🔑 Auto-login por URL: cabecera Basic recibida pero credenciales inválidas.');
+        const r = await loginBasic(auth).catch(() => null);
+        if (r) {
+            res.cookie('panel_token', r.token, { maxAge: 600000, path: '/', sameSite: 'lax' });
+            console.log(`🔑 Auto-login por URL: ${r.usuario} (${r.rol}).`);
+            registrar({ tipo: 'acceso', usuario: r.usuario, rol: r.rol, ip: ipDe(req), detalle: { via: 'url' } });
+        } else console.warn('🔑 Auto-login por URL: cabecera Basic recibida pero credenciales inválidas.');
     }
     next();
 });
@@ -116,10 +123,15 @@ app.use(express.static(DIR_PUBLIC, {
 
 // AUTENTICACIÓN: login público + estado de sesión + logout, y la PUERTA del resto de /api.
 // Regla: GET = lectura (admin y guest); cualquier mutación = solo admin.
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
     const { usuario, password } = req.body || {};
-    const r = login(usuario, password);
-    if (!r) return res.status(401).json({ ok: false, motivo: 'usuario o contraseña incorrectos' });
+    const r = await login(usuario, password).catch(() => null);
+    const ip = ipDe(req);
+    if (!r) {
+        registrar({ tipo: 'acceso_fallido', usuario: String(usuario || '').slice(0, 60) || null, ip, detalle: { via: 'form' } });
+        return res.status(401).json({ ok: false, motivo: 'usuario o contraseña incorrectos' });
+    }
+    registrar({ tipo: 'acceso', usuario: r.usuario, rol: r.rol, ip, detalle: { via: 'form' } });
     res.json({ ok: true, ...r });
 });
 app.get('/api/yo', (req, res) => res.json(validar(tokenDe(req)) || { rol: null }));
