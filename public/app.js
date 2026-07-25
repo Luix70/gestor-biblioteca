@@ -31,6 +31,7 @@ try {
 let TOKEN = localStorage.getItem('panel_token') || ''; // token HMAC de sesión (persiste en el navegador)
 let ROL = null; // rol tras el login: 'admin' | 'guest'
 let USER = null; // nombre del usuario autenticado
+let PUEDE_NSFW = false; // permiso NSFW efectivo (admin siempre; invitado según su credencial) — de /api/yo
 let detalle = null; // vista de detalle abierta: { tipo:'obra'|'doc', id, ctx? } · null = ninguna
 let FUENTES = [],
   sanCtx = null; // «buscar copia» (fuentes cacheadas) + depósito de saneamiento en curso
@@ -8049,8 +8050,8 @@ function construirSearch() {
             <div id="sqCduPop" class="cdupop" style="display:none"></div>
           </div>
           <label style="font-size:11px;display:flex;align-items:center;gap:5px;margin-top:4px;cursor:pointer" title="Estricta: SOLO ese código. + sub-CDUs: incluye las subclasificaciones (159 → 159.1, 159.9…)"><input type="checkbox" id="sqCduSub" checked style="width:auto"> incluir sub-CDUs</label></div>
-        <div><label>Estrellas${ROL === 'admin' ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
-          <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' ? '<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"> 🔞 NSFW</label>' : ''}</div>
+        <div><label>Estrellas${ROL === 'admin' || PUEDE_NSFW ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
+          <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' || PUEDE_NSFW ? '<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"> 🔞 NSFW</label>' : ''}</div>
         </details></div>
         ${ROL === 'admin' ? `<div class="admin-only"><label>📖 Leído</label><details class="ddown" id="sqLeidoDD"><summary id="sqLeidoSum">Todos</summary>
           <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqLeido" value="${n}">${LEIDO_ETIQ[n]}</label>`).join('')}<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px"><input type="checkbox" class="sqLeido" value="0">Sin leer</label></div>
@@ -16754,6 +16755,7 @@ async function loadUsuarios() {
         <div><label>Usuario</label><input id="nuUser" placeholder="nombre" style="min-width:140px"></div>
         <div><label>Contraseña</label><input id="nuPass" type="text" placeholder="mín. 4" style="min-width:120px"></div>
         <div><label>Rol</label><select id="nuRol"><option value="guest">Invitado</option><option value="admin">Administrador</option></select></div>
+        <div><label>🔞 NSFW</label><label class="muted" style="display:flex;align-items:center;gap:4px;height:36px" title="Permitir a este usuario ver el contenido marcado NSFW"><input type="checkbox" id="nuNsfw"> permitir</label></div>
         <div style="flex:1 1 160px"><label>Nota (opcional)</label><input id="nuNota" placeholder="p. ej. sobrino, sala de lectura…"></div>
         <button class="btn pri" id="nuCrear">➕ Crear</button>
       </div>
@@ -16776,7 +16778,7 @@ async function loadUsuarios() {
 
   // Crear credencial.
   $('#nuCrear').onclick = async () => {
-    const body = { user: $('#nuUser').value.trim(), password: $('#nuPass').value, rol: $('#nuRol').value, nota: $('#nuNota').value.trim() };
+    const body = { user: $('#nuUser').value.trim(), password: $('#nuPass').value, rol: $('#nuRol').value, nsfw: $('#nuNsfw').checked, nota: $('#nuNota').value.trim() };
     if (!body.user || !body.password) return toast('Indica usuario y contraseña', 'warn');
     try {
       await api('/usuarios/crear', { method: 'POST', body: JSON.stringify(body) });
@@ -16820,6 +16822,7 @@ async function refrescarUsuarios() {
         <input class="uEdUser" value="${esc(u.user)}" style="min-width:120px" title="Nombre de usuario">
         <select class="uEdRol"><option value="guest"${u.rol !== 'admin' ? ' selected' : ''}>Invitado</option><option value="admin"${u.rol === 'admin' ? ' selected' : ''}>Administrador</option></select>
         <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="uEdActivo"${u.activo ? ' checked' : ''}> activo</label>
+        <label class="muted" style="font-size:12px;display:flex;align-items:center;gap:4px" title="Permitir ver contenido NSFW"><input type="checkbox" class="uEdNsfw"${u.nsfw ? ' checked' : ''}> 🔞</label>
         <input class="uEdNota" value="${esc(u.nota || '')}" placeholder="nota" style="flex:1 1 120px">
         <button class="btn uEdGuardar">💾 Guardar</button>
         <button class="btn uEdPass" title="Cambiar la contraseña">🔑 Contraseña</button>
@@ -16850,6 +16853,7 @@ async function refrescarUsuarios() {
         user: card.querySelector('.uEdUser').value.trim(),
         rol: card.querySelector('.uEdRol').value,
         activo: card.querySelector('.uEdActivo').checked,
+        nsfw: card.querySelector('.uEdNsfw').checked,
         nota: card.querySelector('.uEdNota').value.trim(),
       };
       try { await api('/usuarios/' + encodeURIComponent(id) + '/editar', { method: 'POST', body: JSON.stringify(body) }); toast('Guardado'); refrescarUsuarios(); }
@@ -17231,6 +17235,7 @@ $('#logout').onclick = async () => {
     if (me && me.rol) {
       USER = me.usuario;
       ROL = me.rol;
+      PUEDE_NSFW = !!me.nsfw;
       _recordarSesion();
       arrancar();
     } else mostrarLogin();

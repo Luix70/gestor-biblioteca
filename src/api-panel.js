@@ -12,7 +12,7 @@ import { restaurar, reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { normalizarDOI } from './utils/buscador-crossref.js';
 import { verificarPasswordAdmin, firmarCompartir, validarCompartir, validar, tokenDe, hayAdminBootstrap, listarUsuarios as listarUsuariosArranque } from './auth.js';
 import { registrar, ipDe, registrarVista, registrarDescarga, debeRegistrar, listarActividad, resumenActividad, usuariosDelRegistro, ultimoAccesoPorUsuario } from './utils/registro-actividad.js';
-import { listarUsuariosBD, crearUsuario, editarUsuario, borrarUsuario, contarAdminsActivosBD } from './utils/usuarios-db.js';
+import { listarUsuariosBD, crearUsuario, editarUsuario, borrarUsuario, contarAdminsActivosBD, buscarUsuario } from './utils/usuarios-db.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './integridad.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
@@ -197,8 +197,9 @@ async function filtroEspecial(db, nombre) {
     }
 }
 
-// Ajuste persistido (colección `ajustes`, doc _id:'guest_nsfw'): ¿pueden los INVITADOS ver contenido
-// NSFW? Por defecto NO. Cacheado 10 s. Se conmuta desde el panel (Actividad → Permisos de invitados).
+// Ajuste GLOBAL persistido (colección `ajustes`, doc _id:'guest_nsfw'): ¿pueden ver NSFW los invitados de
+// ARRANQUE (.env), que no tienen ficha en la BD? Por defecto NO. Cacheado 10 s. (Los invitados de BD usan su
+// permiso INDIVIDUAL; este global es solo el respaldo para los de arranque.)
 let _guestNsfw = null, _guestNsfwTs = 0;
 async function guestPuedeNsfw() {
     if (_guestNsfw !== null && Date.now() - _guestNsfwTs < 10000) return _guestNsfw;
@@ -207,14 +208,36 @@ async function guestPuedeNsfw() {
     _guestNsfwTs = Date.now();
     return _guestNsfw;
 }
-// ¿Hay que OCULTAR el NSFW a este rol? Solo a invitados, y solo si el ajuste NO se lo permite.
-async function ocultarNsfw(rol) { return rol === 'guest' && !(await guestPuedeNsfw()); }
+
+// Permiso NSFW POR USUARIO. El admin lo decide por credencial (campo `nsfw` en la colección `usuarios`). Para
+// un invitado de ARRANQUE (.env, sin ficha en BD) cae al ajuste global. Cacheado por usuario 10 s (como el
+// global) para no leer la BD en cada comprobación; el cache se invalida al crear/editar un usuario.
+const _nsfwUsuario = new Map(); // usuario -> { v: bool, ts: ms }
+export async function usuarioPuedeNsfw(usuario) {
+    if (!usuario) return false;
+    const c = _nsfwUsuario.get(usuario);
+    if (c && Date.now() - c.ts < 10000) return c.v;
+    let v;
+    try {
+        const u = await buscarUsuario(usuario);
+        v = u ? !!u.nsfw : await guestPuedeNsfw(); // usuario de BD → su permiso; de arranque → ajuste global
+    } catch { v = false; }
+    _nsfwUsuario.set(usuario, { v, ts: Date.now() });
+    return v;
+}
+
+// ¿Hay que OCULTAR el NSFW a esta sesión? Nunca al admin; a un invitado, salvo que TENGA permiso (individual
+// o, si es de arranque, el global). `sess` = req.usuario ({usuario, rol}).
+async function ocultarNsfw(sess) {
+    if (!sess || sess.rol === 'admin') return false;
+    return !(await usuarioPuedeNsfw(sess.usuario));
+}
 
 // NSFW para INVITADOS (guest): no ven docs marcados nsfw NI los que pertenezcan a una obra/colección
 // marcada nsfw (propaga hacia abajo) — salvo que el ajuste les permita verlo. Array de condiciones a
 // AND-ear, o null si no hay que ocultar nada (admin, o invitados con permiso NSFW).
-async function condicionNsfwDocs(db, rol) {
-    if (!(await ocultarNsfw(rol))) return null; // admin, o invitado con permiso NSFW → ve todo
+async function condicionNsfwDocs(db, sess) {
+    if (!(await ocultarNsfw(sess))) return null; // admin, o invitado con permiso NSFW → ve todo
     const [obras, cols] = await Promise.all([
         db.collection('obras').find({ nsfw: true }, { projection: { _id: 1 } }).toArray(),
         db.collection('colecciones').find({ nsfw: true }, { projection: { _id: 1 } }).toArray(),
@@ -599,7 +622,7 @@ export function rutasPanel() {
     r.get('/obras', async (req, res) => {
         try {
             const db = await conectarDB();
-            const filtroObras = await ocultarNsfw(req.usuario?.rol) ? { nsfw: { $ne: true } } : {};
+            const filtroObras = await ocultarNsfw(req.usuario) ? { nsfw: { $ne: true } } : {};
             const obras = await db.collection('obras')
                 .find(filtroObras, { projection: { titulo: 1, isbn_obra: 1, total_volumenes: 1, volumenes_presentes: 1, completa: 1, revision_requerida: 1, nsfw: 1, valoracion: 1 } })
                 .sort({ revision_requerida: -1, completa: 1, titulo: 1 }).limit(500).toArray();
@@ -840,7 +863,7 @@ export function rutasPanel() {
                 extras.push({ _id: { $in: idsSel.length ? idsSel : [new ObjectId()] } });
             }
             // NSFW: los invitados no ven material marcado (ni el que cuelga de una obra/colección nsfw).
-            const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
+            const nsfwCond = await condicionNsfwDocs(db, req.usuario);
             if (nsfwCond) extras.push(...nsfwCond);
             const consulta = extras.length ? { $and: [...(Object.keys(match).length ? [match] : []), ...extras] } : match;
 
@@ -1079,7 +1102,7 @@ export function rutasPanel() {
             if (!ids.length) return res.json({ ok: true, docs: [] });
             const db = await conectarDB();
             const cond = { _id: { $in: ids } };
-            const nsfwCond = await condicionNsfwDocs(db, req.usuario?.rol);
+            const nsfwCond = await condicionNsfwDocs(db, req.usuario);
             const consulta = nsfwCond ? { $and: [cond, ...nsfwCond] } : cond;
             const docs = await db.collection('biblioteca').find(consulta, { projection: { titulo: 1, nfc: 1, ubicacion: 1 } }).limit(2000).toArray();
             res.json({ ok: true, docs: docs.map(d => ({ _id: String(d._id), titulo: d.titulo || null, nfc: !!(d.nfc && (d.nfc.fecha_vinculacion || d.nfc.uid)), ubicacion: d.ubicacion || null })) });
@@ -1124,7 +1147,7 @@ export function rutasPanel() {
             const db = await conectarDB();
             const obra = await db.collection('obras').findOne({ _id: new ObjectId(req.params.id) });
             if (!obra) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
-            if (await ocultarNsfw(req.usuario?.rol) && obra.nsfw) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
+            if (await ocultarNsfw(req.usuario) && obra.nsfw) return res.status(404).json({ ok: false, motivo: 'obra no encontrada' });
             registrarVista(req, req.usuario, 'obra', obra._id, { titulo: obra.titulo }); // registro de actividad
 
             const idsPresentes = (obra.volumenes || []).filter(v => v && v._id).map(v => v._id);
@@ -1202,7 +1225,7 @@ export function rutasPanel() {
         try {
             const db = await conectarDB();
             const tipo = req.query.tipo;
-            const filtro = await ocultarNsfw(req.usuario?.rol) ? { nsfw: { $ne: true } } : {};
+            const filtro = await ocultarNsfw(req.usuario) ? { nsfw: { $ne: true } } : {};
             if (tipo === 'revista') filtro.tipo = 'revista';
             else if (tipo === 'libro') filtro.tipo = { $ne: 'revista' }; // libro o legado (sin tipo)
             // La página de Colecciones filtra en el CLIENTE sobre lo que recibe, así que hay que devolverlas
@@ -1293,12 +1316,12 @@ export function rutasPanel() {
             const db = await conectarDB();
             const col = await db.collection('colecciones').findOne({ _id: new ObjectId(req.params.id) });
             if (!col) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
-            if (await ocultarNsfw(req.usuario?.rol) && col.nsfw) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
+            if (await ocultarNsfw(req.usuario) && col.nsfw) return res.status(404).json({ ok: false, motivo: 'colección no encontrada' });
             registrarVista(req, req.usuario, 'coleccion', col._id, { titulo: col.nombre }); // registro de actividad
 
             const esRevista = col.tipo === 'revista';
             const matchMiembros = { coleccion: col._id };
-            if (await ocultarNsfw(req.usuario?.rol)) matchMiembros.nsfw = { $ne: true };
+            if (await ocultarNsfw(req.usuario)) matchMiembros.nsfw = { $ne: true };
             const proy = { ...PROY_VOL, clave_numero: 1, 'año_edicion': 1, mes_publicacion: 1, numero_issue: 1, coleccion_numero: 1, coleccion_numero_auto: 1,
                 // Transmedia: para agrupar/filtrar los miembros por nivel (Stage) y rol del material.
                 // `autores` (ObjectId) se resuelve a nombres abajo, para el filtro por título/autor del panel.
@@ -1465,7 +1488,7 @@ export function rutasPanel() {
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc))
+            if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc))
                 return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
 
             const { autores, autores_ids, editorial, contribuciones } = await resolverNombres(db, doc);
@@ -2097,7 +2120,7 @@ export function rutasPanel() {
         const db = await conectarDB();
         const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
         if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
-        if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (!doc.nombre_archivo || !EXT_PAGINABLE.has(path.extname(doc.nombre_archivo).toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es paginable (.cbz/.cbr/.cb7/.djvu)' }); return null; }
         return path.join(carpetaDeDoc(doc), doc.nombre_archivo);
     };
@@ -2140,7 +2163,7 @@ export function rutasPanel() {
         const db = await conectarDB();
         const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
         if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
-        if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (!['.mobi', '.azw', '.azw3'].includes(path.extname(doc.nombre_archivo || '').toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es un MOBI/AZW/AZW3' }); return null; }
         return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo) };
     };
@@ -2182,7 +2205,7 @@ export function rutasPanel() {
         const db = await conectarDB();
         const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
         if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
-        if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
+        if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (path.extname(doc.nombre_archivo || '').toLowerCase() !== '.chm') { res.status(400).json({ ok: false, motivo: 'no es un CHM' }); return null; }
         return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo) };
     };
@@ -2195,7 +2218,7 @@ export function rutasPanel() {
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             const sub = String(req.query.f || doc.nombre_archivo || '');   // `f`: otro texto del doc (selector de textos[])
             if (!/\.(docx?)$/i.test(sub)) return res.status(400).json({ ok: false, motivo: 'no es un documento de Word' });
             const abs = path.join(carpetaDeDoc(doc), path.basename(sub));
@@ -2401,7 +2424,7 @@ export function rutasPanel() {
             const db = await conectarDB();
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
-            if (await ocultarNsfw(req.usuario?.rol) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc)) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             // `arbolInbox` devuelve {hijos, truncado, nodos}; el cliente espera el ARRAY en `arbol`. (Aquí se
             // pide el árbol ENTERO —profundidad 8, sin carga diferida—: el paquete de un documento es
             // acotado, y el tope POR CARPETA ya evita que una carpeta gigante se desmadre.)
@@ -2919,6 +2942,7 @@ export function rutasPanel() {
         try {
             const r2 = await crearUsuario(req.body || {});
             if (!r2.ok) return res.status(400).json(r2);
+            _nsfwUsuario.clear(); // que el permiso NSFW recién asignado surta efecto sin esperar al cache
             res.json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
@@ -2935,6 +2959,7 @@ export function rutasPanel() {
                     return res.status(400).json({ ok: false, motivo: 'no puedes dejar el sistema sin ningún administrador' });
             }
             const r2 = await editarUsuario(req.params.id, b);
+            if (r2.ok) _nsfwUsuario.clear(); // aplicar de inmediato el cambio de permiso NSFW / rol
             res.status(r2.ok ? 200 : 400).json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

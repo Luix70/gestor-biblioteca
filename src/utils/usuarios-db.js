@@ -70,7 +70,7 @@ export async function contarAdminsActivosBD() {
 }
 
 /** Crea una credencial. Valida nombre único (insensible a may/acentos) y longitud mínima de contraseña. */
-export async function crearUsuario({ user, password, rol, nota } = {}) {
+export async function crearUsuario({ user, password, rol, nota, nsfw } = {}) {
     const nombre = String(user || '').trim();
     if (!nombre) return { ok: false, motivo: 'indica un nombre de usuario' };
     if (!password || String(password).length < 4) return { ok: false, motivo: 'la contraseña debe tener al menos 4 caracteres' };
@@ -79,7 +79,7 @@ export async function crearUsuario({ user, password, rol, nota } = {}) {
     const { salt, hash } = hashPassword(password);
     const r = await db.collection(COL).insertOne({
         user: nombre, rol: norm(rol), pwd_salt: salt, pwd_hash: hash,
-        activo: true, nota: String(nota || '').trim(), creado: new Date(), actualizado: new Date(),
+        activo: true, nsfw: !!nsfw, nota: String(nota || '').trim(), creado: new Date(), actualizado: new Date(),
     });
     return { ok: true, id: String(r.insertedId) };
 }
@@ -110,6 +110,7 @@ export async function editarUsuario(id, cambios = {}) {
     }
     if (cambios.rol != null) set.rol = norm(cambios.rol);
     if (typeof cambios.activo === 'boolean') set.activo = cambios.activo;
+    if (typeof cambios.nsfw === 'boolean') set.nsfw = cambios.nsfw;
     if (cambios.nota != null) set.nota = String(cambios.nota).trim();
     await db.collection(COL).updateOne({ _id }, { $set: set });
     return { ok: true };

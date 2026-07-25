@@ -334,7 +334,12 @@ de ficheros clasificado por CDU.
       contenedor y dura ~2 días (no hay que reloguear a cada rato).
     · USUARIOS EN BD (página «Usuarios», solo admin): las credenciales viven en la
       colección `usuarios` (contraseña con hash scrypt + salt) y se crean/editan/borran
-      desde el panel. El acceso genérico «guest» está DESACTIVADO: cada invitado tiene
+      desde el panel. Cada credencial tiene una casilla 🔞 NSFW: el ACCESO NSFW se decide
+      POR USUARIO (campo `usuarios.nsfw`). ocultarNsfw(sess)/condicionNsfwDocs(db,sess)
+      resuelven el permiso por usuario (cache 10 s, se limpia al crear/editar); /api/yo
+      devuelve el permiso efectivo y el cliente enseña el filtro 🔞 al invitado autorizado.
+      El interruptor global «Permisos de invitados» pasa a ser solo el RESPALDO de los
+      invitados de ARRANQUE del .env (sin ficha en BD). El acceso genérico «guest» está DESACTIVADO: cada invitado tiene
       su credencial CON NOMBRE (para atribuirle el registro). El admin del .env se
       conserva como SALVAVIDAS anti-bloqueo (login sigue: BD primero, luego .env). El
       desplegable del login es un datalist que solo sugiere los usuarios de arranque —

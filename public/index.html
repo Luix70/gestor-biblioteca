@@ -221,14 +221,16 @@
               <details class="card foldcard admin-only" id="fcPermisos" data-fold="pc">
                 <summary><h3>🔞 Permisos de invitados</h3></summary>
                 <p class="muted" style="margin-top: 0; font-size: 12px">
-                  Por defecto los invitados NO ven el contenido marcado NSFW (🔞) ni lo que cuelga de una
-                  obra/colección NSFW. Actívalo para permitírselo.
+                  El acceso NSFW se decide <b>por usuario</b> en la página <b>«Usuarios»</b> (cada credencial
+                  tiene su casilla 🔞). Este interruptor es solo el <b>respaldo</b> para las cuentas de
+                  <b>arranque</b> del <code>.env</code> (que no tienen ficha en la base de datos); no afecta a
+                  las credenciales creadas desde el panel.
                 </p>
                 <div class="row" style="align-items: center">
                   <label class="switch" style="flex: 0 0 auto"
                     ><input type="checkbox" id="guestNsfw" /><span class="slider"></span
                   ></label>
-                  <span class="muted">Invitados pueden ver contenido NSFW (🔞)</span>
+                  <span class="muted">Invitados de arranque (.env) pueden ver contenido NSFW (🔞)</span>
                 </div>
               </details>
             </div>
