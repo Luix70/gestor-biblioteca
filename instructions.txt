@@ -395,7 +395,7 @@ de ficheros clasificado por CDU.
           MARCADA y sola (sin otro criterio) = SOLO NSFW.
         - Etiqueta NFC (admin): Todas / Con etiqueta (📶) / Sin etiqueta
       El ORDEN está en su PROPIO colapsable «↕️ Ordenar» (el panel de búsqueda era
-      enorme): Relevancia/recientes (defecto) · Fecha de ingreso · Título · Autor ·
+      enorme): Relevancia/recientes · Fecha de ingreso · Título · Autor ·
       Posición en la estantería · Posición en la obra · Posición en la colección · Nº de
       páginas (los sin nº de páginas caen SIEMPRE al final, en asc y desc) · 🎲 ALEATORIO,
       cada uno con un botón de SENTIDO ascendente/descendente (oculto en Relevancia y en
@@ -408,6 +408,11 @@ de ficheros clasificado por CDU.
       barajada. Se integra como un orden más (api-panel `/catalogo`, campoOrden 'azar' + param
       `seed`): colapso de obras, soloIds (navegación de ficha) y filtros funcionan igual. El Nº de
       páginas se muestra ademas en la etiqueta de cada tarjeta/fila («📕 Libro · pdf · 298p»).
+      DEFECTO DE ENTRADA = 🎲 ALEATORIO (descubrimiento). El desplegable arranca en «Aleatorio» y
+      «Limpiar» vuelve a él. Mientras el usuario no elija un orden a mano (`_ordenManual`), ese
+      defecto CEDE ante dos contextos con un orden mejor: dentro de UNA estantería → posición
+      física; con búsqueda de TEXTO → relevancia. En cuanto el usuario elige un orden, se respeta
+      siempre (client-side, en `_paramsBusqueda`·`ordenEfectivo`; el servidor no cambió).
       En MÓVIL, al ejecutar la búsqueda (Intro / «Buscar» del teclado) se COLAPSA el panel
       de filtros y se cierra el teclado para ver los resultados (el input lleva
       enterkeyhint="search" para que el teclado muestre «Buscar» y no «Siguiente»). Al ver

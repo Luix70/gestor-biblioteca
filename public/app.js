@@ -7410,6 +7410,9 @@ let estadoBusqueda = { page: 1 },
 // paginación sea coherente); «🎲 Rebarajar» genera una nueva. Math.random del navegador (no del sandbox).
 let _seedAzar = '';
 const nuevoSeedAzar = () => Math.random().toString(36).slice(2, 12);
+// El catálogo ENTRA en orden aleatorio (descubrimiento); pero si el usuario elige un orden a mano, se respeta
+// (y una búsqueda de texto pasa a RELEVANCIA mientras no se haya elegido orden). `_ordenManual` marca esa elección.
+let _ordenManual = false;
 // ── selección múltiple + agrupado (añadir a colección / obra) ──
 // Patrón de selección ERGONÓMICO y móvil (mismo que la ficha de autor): en «Modo selección» tocar una
 // portada la marca (tick ✓ + recuadro) en vez de abrir su ficha; fuera de modo, tocar abre la ficha.
@@ -8062,7 +8065,7 @@ function construirSearch() {
             <option value="obra">Posición en la obra</option>
             <option value="coleccion">Posición en la colección</option>
             <option value="paginas">Nº de páginas</option>
-            <option value="azar">🎲 Aleatorio (tomos de una obra juntos)</option>
+            <option value="azar" selected>🎲 Aleatorio (tomos de una obra juntos)</option>
           </select></div>
         <div id="sqDirWrap" style="display:none"><label>Sentido</label><button class="btn" id="sqDir" data-dir="desc" title="Cambiar entre ascendente y descendente">↓ Desc</button></div>
         <div id="sqRebarajarWrap" style="display:none"><label>&nbsp;</label><button class="btn" id="sqRebarajar" title="Volver a barajar (otro orden aleatorio)">🎲 Rebarajar</button></div>
@@ -8168,6 +8171,7 @@ function construirSearch() {
   };
   setOrdenDir($('#sqDir') && $('#sqDir').dataset.dir || 'desc');
   $('#sqOrden').onchange = () => {
+    _ordenManual = true; // el usuario ha elegido un orden → se respeta (no se auto-cambia a relevancia al buscar)
     if ($('#sqOrden').value === 'azar') _seedAzar = nuevoSeedAzar(); // elegir «aleatorio» = una barajada nueva
     setOrdenDir(DIR_DEF[$('#sqOrden').value] || 'asc');
     buscarCatalogo(1);
@@ -8197,8 +8201,9 @@ function construirSearch() {
     $('#sqTipo').value = '';
     if ($('#sqSoporte')) $('#sqSoporte').value = '';
     if ($('#sqFormato')) $('#sqFormato').value = '';
-    $('#sqOrden').value = 'reciente';
-    setOrdenDir('desc');
+    $('#sqOrden').value = 'azar'; // «Limpiar» vuelve al orden de entrada por defecto: aleatorio
+    _ordenManual = false;
+    setOrdenDir('asc');
     if ($('#sqAmbito')) $('#sqAmbito').value = '';
     if ($('#sqEstanteria')) {
       $('#sqEstanteria').value = '';
@@ -8298,18 +8303,32 @@ function _paramsBusqueda() {
   // «Mostrar selección» activo: la vista se restringe a los documentos seleccionados (ignora los demás
   // filtros; solo ids + orden). Si la selección se vació, sale del modo y busca normal.
   if (soloSeleccion && selDocs.size) {
-    const p = new URLSearchParams({ ids: [...selDocs].join(','), orden: $('#sqOrden') ? $('#sqOrden').value : 'reciente' });
+    const selOrden = $('#sqOrden') ? $('#sqOrden').value : 'azar';
+    const p = new URLSearchParams({ ids: [...selDocs].join(','), orden: selOrden });
+    if (selOrden === 'azar') { if (!_seedAzar) _seedAzar = nuevoSeedAzar(); p.set('seed', _seedAzar); }
     p.set('porPagina', _porPaginaVista());
     return p;
   }
   soloSeleccion = soloSeleccion && selDocs.size > 0;
+  // ORDEN EFECTIVO. El catálogo entra en ALEATORIO por defecto (descubrimiento). Mientras el usuario no elija
+  // un orden a mano (`_ordenManual`), ese defecto cede ante dos contextos con un orden claramente mejor:
+  //   · dentro de UNA estantería → posición FÍSICA (para verla como está colocada);
+  //   · con una búsqueda de TEXTO → RELEVANCIA (mejores coincidencias primero).
+  const selOrden = $('#sqOrden').value;
+  const q = $('#sqQ').value.trim();
+  const enEstante = !!(estadoBusqueda.extra && estadoBusqueda.extra.ambito && estadoBusqueda.extra.estanteria);
+  let ordenEfectivo = selOrden;
+  if (!_ordenManual && selOrden === 'azar') {
+    if (enEstante) ordenEfectivo = 'posicion';
+    else if (q) ordenEfectivo = 'reciente';
+  }
   const params = new URLSearchParams({
-    q: $('#sqQ').value.trim(),
+    q,
     tipo: $('#sqTipo').value,
     soporte: $('#sqSoporte') ? $('#sqSoporte').value : '',
     formato: $('#sqFormato') ? $('#sqFormato').value : '',
     cdu: $('#sqCdu').value.trim(),
-    orden: $('#sqOrden').value,
+    orden: ordenEfectivo,
     porPagina: _porPaginaVista(),
   });
   // CDU ESTRICTA (solo ese código) vs + sub-CDUs (prefijo, por defecto). Solo aplica si hay un código en el campo.
@@ -8320,9 +8339,9 @@ function _paramsBusqueda() {
   // el botón «📚 Obras colapsadas / 📖 Tomos sueltos» de la barra de modos (junto a selección/previsualización).
   if (modoTomosExpandido()) params.set('agrupar', '0');
   // Orden ALEATORIO: la semilla hace la barajada estable entre páginas (sin ella la paginación se rompería).
-  if ($('#sqOrden').value === 'azar') { if (!_seedAzar) _seedAzar = nuevoSeedAzar(); params.set('seed', _seedAzar); }
+  if (ordenEfectivo === 'azar') { if (!_seedAzar) _seedAzar = nuevoSeedAzar(); params.set('seed', _seedAzar); }
   // Sentido asc/desc (salvo en «Relevancia / recientes» y «Aleatorio», que no lo usan).
-  if (!['reciente', 'azar'].includes($('#sqOrden').value)) params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
+  if (!['reciente', 'azar'].includes(ordenEfectivo)) params.set('dir', ($('#sqDir') && $('#sqDir').dataset.dir) || 'desc');
   const est = estrellasSel();
   if (est.length && est.length < 6) params.set('estrellas', est.join(','));
   // Filtros PRIVADOS DEL ADMIN: progreso de lectura (leído) y pulgar (me gusta). El backend los ignora para
@@ -8345,14 +8364,7 @@ function _paramsBusqueda() {
     for (const [k, v] of Object.entries(estadoBusqueda.extra)) {
       if (k !== 'etiqueta' && v != null && v !== '') params.set(k, v);
     }
-  // Ver UNA estantería: por defecto ordena por POSICIÓN física (a menos que el usuario elija otro orden).
-  if (
-    estadoBusqueda.extra &&
-    estadoBusqueda.extra.ambito &&
-    estadoBusqueda.extra.estanteria &&
-    $('#sqOrden').value === 'reciente'
-  )
-    params.set('orden', 'posicion');
+  // (El caso «ver UNA estantería → orden por posición física» ya está resuelto arriba en `ordenEfectivo`.)
   return params;
 }
 // ── Búsqueda de CDU por DESCRIPCIÓN (materia → código) ───────────────────────────────────────────────
