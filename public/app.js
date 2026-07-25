@@ -16873,14 +16873,21 @@ async function refrescarRegistro() {
   let data;
   try { data = await api('/registro?' + p.toString()); } catch (e) { cont.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   if (!data.items || !data.items.length) { cont.innerHTML = '<div class="muted" style="font-size:12px">Sin eventos que coincidan.</div>'; $('#regPag').innerHTML = ''; return; }
-  cont.innerHTML = data.items.map((ev) => `
-    <div class="row" style="gap:8px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px">
-      <span class="muted" style="min-width:150px;font-size:11px">${_fFechaReg(ev.ts)}</span>
-      <span style="min-width:110px">${esc(ev.usuario || '—')}${ev.rol ? ` <span class="muted" style="font-size:10px">${esc(ev.rol)}</span>` : ''}</span>
-      <span style="min-width:110px">${REG_TIPOS[ev.tipo] || esc(ev.tipo)}</span>
-      <span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(_detalleTextoReg(ev))}</span>
-      <span class="muted" style="font-size:11px;min-width:110px;text-align:right">${esc(ev.ip || '')}</span>
-    </div>`).join('');
+  // Cada evento como BLOQUE apilado (móvil-first): línea principal = qué pasó (tipo + detalle), que ocupa
+  // TODO el ancho y parte por palabras; línea meta (cuándo · quién · IP) debajo. Antes eran columnas flex con
+  // anchos mínimos fijos que en móvil aplastaban el detalle a ~0 px y partían el título letra a letra.
+  cont.innerHTML = data.items.map((ev) => {
+    const det = _detalleTextoReg(ev);
+    return `
+    <div style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <div style="font-size:13px;overflow-wrap:break-word">
+        <b>${REG_TIPOS[ev.tipo] || esc(ev.tipo)}</b>${det ? ' ' + esc(det) : ''}
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:3px;overflow-wrap:anywhere">
+        ${_fFechaReg(ev.ts)} · ${esc(ev.usuario || '—')}${ev.rol ? ' (' + esc(ev.rol) + ')' : ''}${ev.ip ? ' · ' + esc(ev.ip) : ''}
+      </div>
+    </div>`;
+  }).join('');
   // Paginación.
   const totalPags = Math.max(1, Math.ceil(data.total / data.porPagina));
   const pag = $('#regPag');
