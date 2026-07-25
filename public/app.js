@@ -16721,6 +16721,25 @@ function _detalleTextoReg(ev) {
   if (ev.tipo === 'acceso' || ev.tipo === 'acceso_fallido') return d.via ? `vía ${d.via}` : '';
   return d ? JSON.stringify(d) : '';
 }
+// Si el evento apunta a una entidad abrible (documento/autor/obra/colección), devuelve la llamada onclick
+// que abre su ficha; si no, null (el detalle se muestra como texto plano).
+function _accionEntidadReg(d) {
+  if (!d || !d.id) return null;
+  const id = String(d.id);
+  if (!/^[a-f0-9]{24}$/i.test(id)) return null; // solo ObjectId válido (evita inyectar nada en el onclick)
+  switch (d.entidad) {
+    case 'documento': return `verDoc('${id}')`;
+    case 'obra':      return `verObra('${id}')`;
+    case 'coleccion': return `verColeccion('${id}')`;
+    case 'autor':     return `autorFicha('${id}')`;
+    default:          return null;
+  }
+}
+// La IP enlaza a una consulta WHOIS externa (dnschecker.org): variante IPv6/IPv4 según el formato.
+function _ipLookupUrl(ip) {
+  const base = String(ip).includes(':') ? 'https://dnschecker.org/ipv6-whois-lookup.php' : 'https://dnschecker.org/ip-whois-lookup.php';
+  return base + '?query=' + encodeURIComponent(ip);
+}
 
 let _regEstado = { page: 1, tipo: '', usuario: '', entidad: '', q: '' };
 
@@ -16878,13 +16897,22 @@ async function refrescarRegistro() {
   // anchos mínimos fijos que en móvil aplastaban el detalle a ~0 px y partían el título letra a letra.
   cont.innerHTML = data.items.map((ev) => {
     const det = _detalleTextoReg(ev);
+    // Detalle clicable si apunta a una ficha (documento/autor/obra/colección abiertos o descargados).
+    const accion = _accionEntidadReg(ev.detalle);
+    const detHtml = det
+      ? (accion ? ` <a class="rowlink" onclick="${accion}">${esc(det)}</a>` : ' ' + esc(det))
+      : '';
+    // IP clicable → consulta WHOIS externa.
+    const ipHtml = ev.ip
+      ? ` · <a class="rowlink" href="${esc(_ipLookupUrl(ev.ip))}" target="_blank" rel="noopener" title="Consultar esta IP (WHOIS)">${esc(ev.ip)}</a>`
+      : '';
     return `
     <div style="padding:8px 0;border-bottom:1px solid var(--line)">
       <div style="font-size:13px;overflow-wrap:break-word">
-        <b>${REG_TIPOS[ev.tipo] || esc(ev.tipo)}</b>${det ? ' ' + esc(det) : ''}
+        <b>${REG_TIPOS[ev.tipo] || esc(ev.tipo)}</b>${detHtml}
       </div>
       <div class="muted" style="font-size:11px;margin-top:3px;overflow-wrap:anywhere">
-        ${_fFechaReg(ev.ts)} · ${esc(ev.usuario || '—')}${ev.rol ? ' (' + esc(ev.rol) + ')' : ''}${ev.ip ? ' · ' + esc(ev.ip) : ''}
+        ${_fFechaReg(ev.ts)} · ${esc(ev.usuario || '—')}${ev.rol ? ' (' + esc(ev.rol) + ')' : ''}${ipHtml}
       </div>
     </div>`;
   }).join('');
