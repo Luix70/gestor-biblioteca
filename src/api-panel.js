@@ -2931,7 +2931,7 @@ export function rutasPanel() {
                 ultimo_acceso: ultimos[u.user] || null,
             }));
             const usuarios = bd.map((u) => ({
-                id: String(u._id), user: u.user, rol: u.rol, activo: u.activo !== false, nota: u.nota || '',
+                id: String(u._id), user: u.user, rol: u.rol, activo: u.activo !== false, nsfw: !!u.nsfw, nota: u.nota || '',
                 creado: u.creado || null, ultimo_acceso: ultimos[u.user] || null, arranque: false,
             }));
             res.json({ ok: true, usuarios, arranque });
