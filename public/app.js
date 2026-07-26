@@ -6664,7 +6664,8 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
         <button data-cmd="bold" title="Negrita"><b>B</b></button>
         <button data-cmd="italic" title="Cursiva"><i>I</i></button>
         <button data-cmd="underline" title="Subrayado"><u>U</u></button>
-        <label class="fl-swatch" title="Color del texto: elige y se aplica a lo seleccionado">🎨<input type="color" id="flColor" value="#e23b3b"></label>
+        <label class="fl-swatch" title="Color del texto: elige un color y pulsa «Aplicar» sobre el texto seleccionado">🎨<input type="color" id="flColor" value="#e23b3b"></label>
+        <button data-colorapply="1" title="Aplicar el color elegido al texto seleccionado">Aplicar</button>
         <button data-block="h2" title="Título">T1</button>
         <button data-block="h3" title="Subtítulo">T2</button>
         <button data-cmd="insertUnorderedList" title="Lista">• Lista</button>
@@ -6701,13 +6702,35 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
   // descubrible). Guardamos la selección para restaurarla tras abrir el color / el selector de imagen (que quitan
   // el foco del editor y perderían la selección → el formato se aplicaría en el sitio equivocado).
   const notas = $('#flNotas');
+  const colorInp = $('#flColor');
   let rangoFicha = null;
-  const guardarRango = () => { const s = window.getSelection(); if (s && s.rangeCount && notas.contains(s.anchorNode)) rangoFicha = s.getRangeAt(0).cloneRange(); };
+  // Guarda SOLO selecciones REALES (no colapsadas) dentro del editor. Antes se guardaba también en 'blur': al
+  // tocar el selector de color el editor perdía el foco, la selección se colapsaba y ese rango colapsado PISABA
+  // la selección buena → el color se aplicaba a lo que se escribía DESPUÉS, no a lo marcado. Ese era el bug.
+  const guardarRango = () => {
+    const s = window.getSelection();
+    if (s && s.rangeCount && !s.isCollapsed && notas.contains(s.anchorNode) && notas.contains(s.focusNode))
+      rangoFicha = s.getRangeAt(0).cloneRange();
+  };
   const restaurarRango = () => { if (!rangoFicha) return; const s = window.getSelection(); s.removeAllRanges(); s.addRange(rangoFicha); };
-  ['keyup', 'mouseup', 'blur'].forEach((ev) => notas.addEventListener(ev, guardarRango));
+  ['keyup', 'mouseup', 'touchend'].forEach((ev) => notas.addEventListener(ev, guardarRango));
+  // Mantener la selección al pulsar un botón de la barra: evitar que el botón robe el foco (y colapse la
+  // selección). EXCEPTO el selector de color nativo, que necesita el mousedown para abrirse.
+  $('#flTb').addEventListener('mousedown', (e) => { if (!e.target.closest('.fl-swatch')) e.preventDefault(); });
   const ejecutar = (fn) => { notas.focus(); try { document.execCommand('styleWithCSS', false, false); } catch {} fn(); };
+  // Aplica el color elegido a la selección GUARDADA (el selector de color le quitó el foco al editor, así que
+  // hay que restaurar el rango antes). Con CSS → <span style="color:…">, que el saneador conserva.
+  const aplicarColor = () => {
+    notas.focus();
+    restaurarRango();
+    try { document.execCommand('styleWithCSS', false, true); } catch {}
+    document.execCommand('foreColor', false, colorInp.value);
+    try { document.execCommand('styleWithCSS', false, false); } catch {}
+    guardarRango();
+  };
   $('#flTb').querySelectorAll('button').forEach((b) => (b.onclick = (e) => {
     e.preventDefault();
+    if (b.dataset.colorapply) { aplicarColor(); return; } // «Aplicar» color a lo seleccionado
     if (b.dataset.img) { $('#flImgFile').click(); return; }
     if (b.dataset.normal) { // «Normal»: bloque a párrafo + limpia negrita/cursiva/color de lo seleccionado
       ejecutar(() => { document.execCommand('formatBlock', false, 'p'); document.execCommand('removeFormat', false, null); });
@@ -6721,15 +6744,6 @@ function abrirEditorFicha({ ficha, ambito, ref }) {
     }
     ejecutar(() => document.execCommand(b.dataset.cmd, false, null));
   }));
-  // Color de texto: input nativo. Aplica foreColor CON CSS (→ span style="color:…") a la selección guardada.
-  const colorInp = $('#flColor');
-  if (colorInp) colorInp.onchange = () => {
-    notas.focus();
-    restaurarRango();
-    try { document.execCommand('styleWithCSS', false, true); } catch {}
-    document.execCommand('foreColor', false, colorInp.value);
-    try { document.execCommand('styleWithCSS', false, false); } catch {} // volver a etiquetas semánticas
-  };
 
   // Crea el borrador en Mongo la primera vez que hace falta un id (imagen o guardar) → no deja fichas vacías.
   async function asegurarId() {
