@@ -61,6 +61,33 @@ export async function contenidoPapelera(sub) {
     return out;
 }
 
+// EXPLORAR el árbol real de una subcarpeta de la Papelera (navegable, no solo el primer nivel): lista carpetas
+// y ficheros de `<sub>/<ruta>` con su tamaño. Guarda contra path-traversal: `objetivo` debe caer DENTRO de la
+// subcarpeta. Devuelve { sub, ruta, entradas:[{nombre,dir,bytes}] }.
+export async function explorarPapelera(sub, ruta = '') {
+    const base = path.resolve(path.join(DIR_RECICLAJE, path.basename(String(sub || ''))));
+    const rel = String(ruta || '').replace(/^[\\/]+/, '');
+    const objetivo = path.resolve(base, rel);
+    if (objetivo !== base && !objetivo.startsWith(base + path.sep)) throw new Error('ruta no permitida');
+    let ents; try { ents = await fs.readdir(objetivo, { withFileTypes: true }); } catch { throw new Error('carpeta no encontrada'); }
+    const entradas = [];
+    for (const e of ents) {
+        if (!rel && e.name === '.papelera.json') continue; // el manifiesto (solo en la raíz) es metadato, no contenido
+        let bytes = 0; if (e.isFile()) { try { bytes = (await fs.stat(path.join(objetivo, e.name))).size; } catch { /* ignora */ } }
+        entradas.push({ nombre: e.name, dir: e.isDirectory(), bytes });
+    }
+    entradas.sort((a, b) => (Number(b.dir) - Number(a.dir)) || a.nombre.localeCompare(b.nombre, 'es', { numeric: true }));
+    return { sub: path.basename(String(sub || '')), ruta: rel, entradas };
+}
+
+// Ruta absoluta (validada) de UN fichero dentro de una subcarpeta de la Papelera, para descargarlo. null si la
+// ruta se sale de la subcarpeta (debe estar ESTRICTAMENTE dentro, nunca la raíz a secas).
+export function rutaFicheroPapelera(sub, ruta) {
+    const base = path.resolve(path.join(DIR_RECICLAJE, path.basename(String(sub || ''))));
+    const objetivo = path.resolve(base, String(ruta || '').replace(/^[\\/]+/, ''));
+    return objetivo.startsWith(base + path.sep) ? objetivo : null;
+}
+
 /** Vacía la Papelera entera o una subcarpeta. Es la PAPELERA (último destino): borrar aquí es la
  *  acción explícita de "vaciar la basura" del usuario — fs.rm es correcto. */
 export async function vaciarPapelera(sub = null) {

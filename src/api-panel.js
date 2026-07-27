@@ -5,7 +5,7 @@ import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampan
 import { arbolInbox, escribirGuia, leerGuia, rutaInboxSegura } from './utils/guia-ingesta.js';
 import { listarCampanas, guardarAjusteCampana } from './mantenimiento/campanas.js';
 import {
-    infoPapelera, contenidoPapelera, vaciarPapelera,
+    infoPapelera, contenidoPapelera, vaciarPapelera, explorarPapelera, rutaFicheroPapelera,
     listarCuarentena, reingestarCuarentena, descartarCuarentena, descartarCategoria, reingestarTodosDuplicados, ingestaPorDia,
 } from './utils/inspeccion.js';
 import { restaurar, reciclar, reciclarCarpeta } from './utils/papelera.js';
@@ -197,11 +197,11 @@ async function filtroEspecial(db, nombre) {
     }
 }
 
-// Ajuste GLOBAL persistido (colección `ajustes`, doc _id:'guest_nsfw'): ¿pueden ver NSFW los invitados de
-// ARRANQUE (.env), que no tienen ficha en la BD? Por defecto NO. Cacheado 10 s. (Los invitados de BD usan su
-// permiso INDIVIDUAL; este global es solo el respaldo para los de arranque.)
+// Ajuste GLOBAL persistido (colección `ajustes`, doc _id:'guest_nsfw'): ahora NO es un permiso, sino el ESTADO
+// POR DEFECTO de la casilla 🔞 del filtro de búsqueda para quien SÍ tiene permiso (lo decide el admin en
+// «Usuarios»). enabled=true → la casilla arranca marcada (NSFW incluido por defecto). Cacheado 10 s.
 let _guestNsfw = null, _guestNsfwTs = 0;
-async function guestPuedeNsfw() {
+export async function nsfwPorDefecto() {
     if (_guestNsfw !== null && Date.now() - _guestNsfwTs < 10000) return _guestNsfw;
     try { const db = await conectarDB(); _guestNsfw = !!(await db.collection('ajustes').findOne({ _id: 'guest_nsfw' }))?.enabled; }
     catch { _guestNsfw = false; }
@@ -209,19 +209,16 @@ async function guestPuedeNsfw() {
     return _guestNsfw;
 }
 
-// Permiso NSFW POR USUARIO. El admin lo decide por credencial (campo `nsfw` en la colección `usuarios`). Para
-// un invitado de ARRANQUE (.env, sin ficha en BD) cae al ajuste global. Cacheado por usuario 10 s (como el
-// global) para no leer la BD en cada comprobación; el cache se invalida al crear/editar un usuario.
+// Permiso NSFW POR USUARIO. El admin lo decide por credencial (campo `nsfw` en la colección `usuarios`); un
+// invitado sin ficha en BD (de arranque .env) NO tiene permiso. Cacheado por usuario 10 s; el cache se
+// invalida al crear/editar un usuario.
 const _nsfwUsuario = new Map(); // usuario -> { v: bool, ts: ms }
 export async function usuarioPuedeNsfw(usuario) {
     if (!usuario) return false;
     const c = _nsfwUsuario.get(usuario);
     if (c && Date.now() - c.ts < 10000) return c.v;
     let v;
-    try {
-        const u = await buscarUsuario(usuario);
-        v = u ? !!u.nsfw : await guestPuedeNsfw(); // usuario de BD → su permiso; de arranque → ajuste global
-    } catch { v = false; }
+    try { const u = await buscarUsuario(usuario); v = !!(u && u.nsfw); } catch { v = false; }
     _nsfwUsuario.set(usuario, { v, ts: Date.now() });
     return v;
 }
@@ -288,6 +285,24 @@ export function rutasPanel() {
     r.get('/papelera/contenido', async (req, res) => {
         try { res.json({ sub: req.query.sub || null, ficheros: await contenidoPapelera(req.query.sub) }); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // EXPLORAR el árbol real de una subcarpeta (navegable) + DESCARGAR un fichero suelto de la Papelera. Solo
+    // admin (la Papelera puede contener cualquier cosa). La descarga lleva &token= (un <a download> no manda
+    // el Bearer; la puerta `autenticar` lee el token de la query).
+    r.get('/papelera/explorar', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            res.json({ ok: true, ...(await explorarPapelera(req.query.sub, req.query.ruta)) });
+        } catch (e) { res.status(400).json({ ok: false, motivo: e.message }); }
+    });
+    r.get('/papelera/fichero', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).send('solo administradores');
+            const abs = rutaFicheroPapelera(req.query.sub, req.query.ruta);
+            if (!abs) return res.status(400).send('ruta no permitida');
+            if (!(await stat(abs).then((s) => s.isFile(), () => false))) return res.status(404).send('fichero no encontrado');
+            res.download(abs, path.basename(abs));
+        } catch (e) { if (!res.headersSent) res.status(500).send(e.message); }
     });
     r.post('/papelera/vaciar', async (req, res) => {
         try { res.json(await vaciarPapelera(req.body?.sub || null)); } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
@@ -521,9 +536,10 @@ export function rutasPanel() {
     });
     r.get('/sanear/estado', (req, res) => res.json(estadoSaneador()));
 
-    // ── Permisos de invitados: ¿pueden ver contenido NSFW? (estado abierto; conmutar solo admin) ──
+    // ── NSFW por defecto en el filtro: estado por defecto de la casilla 🔞 para quien tiene permiso (conmutar
+    //    solo admin). Ya NO es un permiso: el permiso lo decide el admin por usuario en «Usuarios». ──
     r.get('/ajustes/guest-nsfw', async (req, res) => {
-        try { res.json({ ok: true, enabled: await guestPuedeNsfw() }); }
+        try { res.json({ ok: true, enabled: await nsfwPorDefecto() }); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/ajustes/guest-nsfw', async (req, res) => {

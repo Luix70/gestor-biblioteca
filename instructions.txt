@@ -338,8 +338,11 @@ de ficheros clasificado por CDU.
       POR USUARIO (campo `usuarios.nsfw`). ocultarNsfw(sess)/condicionNsfwDocs(db,sess)
       resuelven el permiso por usuario (cache 10 s, se limpia al crear/editar); /api/yo
       devuelve el permiso efectivo y el cliente enseña el filtro 🔞 al invitado autorizado.
-      El interruptor global «Permisos de invitados» pasa a ser solo el RESPALDO de los
-      invitados de ARRANQUE del .env (sin ficha en BD). El acceso genérico «guest» está DESACTIVADO: cada invitado tiene
+      El interruptor de Mantenimiento «🔞 NSFW por defecto en el filtro» ya NO es un
+      permiso: fija el ESTADO INICIAL de la casilla 🔞 del filtro de búsqueda para quien
+      tiene permiso (ajuste global `ajustes/guest_nsfw`; /api/yo lo devuelve como
+      `nsfw_defecto`). Marcada-por-defecto y sin tocar = INCLUIR (NSFW mezclado con
+      todo), no «solo NSFW» (client `_nsfwTocado`). Quien no tiene permiso ni ve la casilla. El acceso genérico «guest» está DESACTIVADO: cada invitado tiene
       su credencial CON NOMBRE (para atribuirle el registro). El admin del .env se
       conserva como SALVAVIDAS anti-bloqueo (login sigue: BD primero, luego .env). El
       desplegable del login es un datalist que solo sugiere los usuarios de arranque —
@@ -1866,7 +1869,13 @@ de ficheros clasificado por CDU.
   ── PAPELERA (Recycling) ─────────────────────────────────────────────────────
     Todo lo que se «borra» (ficheros reemplazados, carpetas de documentos eliminados,
     depósitos descartados…) se MUEVE aquí en subcarpetas serializadas, nunca se elimina
-    de verdad (política anti-pérdida). Tabla con tamaño/ficheros por subcarpeta + «ver».
+    de verdad (política anti-pérdida). Tabla con tamaño/ficheros por subcarpeta + «🗂️ explorar».
+    · 🗂️ EXPLORAR (admin): abre el árbol REAL de la subcarpeta (carpetas + ficheros
+      navegables, no solo el primer nivel) y descarga cada fichero. GET /papelera/explorar
+      ?sub=&ruta= (inspeccion.js·explorarPapelera, con guardas de path-traversal) y la
+      descarga por GET /papelera/fichero?sub=&ruta=&token= (res.download; la Papelera NO se
+      sirve como /recursos). Cliente: explorarPap/pintarExplPap (mismo aspecto que el
+      explorador de documentos, con delegación data-ruta por si hay comillas en los nombres).
     · ↩️ RESTAURAR (admin): devuelve el fichero/carpeta a su UBICACIÓN ORIGINAL, como la
       Papelera de Windows. Funciona con un MANIFIESTO (.papelera.json) que registra el
       origen al reciclar; NUNCA pisa lo que ya exista en el destino (esa parte se conserva

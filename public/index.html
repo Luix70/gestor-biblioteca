@@ -219,18 +219,19 @@
                 <div id="scrFicha" style="margin-top: 12px"></div>
               </details>
               <details class="card foldcard admin-only" id="fcPermisos" data-fold="pc">
-                <summary><h3>🔞 Permisos de invitados</h3></summary>
+                <summary><h3>🔞 NSFW por defecto en el filtro</h3></summary>
                 <p class="muted" style="margin-top: 0; font-size: 12px">
-                  El acceso NSFW se decide <b>por usuario</b> en la página <b>«Usuarios»</b> (cada credencial
-                  tiene su casilla 🔞). Este interruptor es solo el <b>respaldo</b> para las cuentas de
-                  <b>arranque</b> del <code>.env</code> (que no tienen ficha en la base de datos); no afecta a
-                  las credenciales creadas desde el panel.
+                  <b>Quién puede ver</b> el contenido NSFW se decide <b>por usuario</b> en la página
+                  <b>«Usuarios»</b> (cada credencial tiene su casilla 🔞); quien no tiene permiso ni siquiera ve
+                  el filtro. Este interruptor solo fija el <b>estado inicial</b> de la casilla 🔞 del filtro de
+                  búsqueda para quienes SÍ tienen permiso: activado = arranca marcada (NSFW incluido por
+                  defecto); desactivado = arranca desmarcada (NSFW oculto hasta que la marquen).
                 </p>
                 <div class="row" style="align-items: center">
                   <label class="switch" style="flex: 0 0 auto"
                     ><input type="checkbox" id="guestNsfw" /><span class="slider"></span
                   ></label>
-                  <span class="muted">Invitados de arranque (.env) pueden ver contenido NSFW (🔞)</span>
+                  <span class="muted">Mostrar NSFW (🔞) por defecto en el filtro de búsqueda</span>
                 </div>
               </details>
             </div>

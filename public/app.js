@@ -32,6 +32,8 @@ let TOKEN = localStorage.getItem('panel_token') || ''; // token HMAC de sesión 
 let ROL = null; // rol tras el login: 'admin' | 'guest'
 let USER = null; // nombre del usuario autenticado
 let PUEDE_NSFW = false; // permiso NSFW efectivo (admin siempre; invitado según su credencial) — de /api/yo
+let NSFW_DEFECTO = false; // estado inicial de la casilla 🔞 del filtro (ajuste global de Mantenimiento) — de /api/yo
+let _nsfwTocado = false; // ¿el usuario ha tocado la casilla 🔞? Si no, «marcada por defecto» = INCLUIR (no «solo»)
 let detalle = null; // vista de detalle abierta: { tipo:'obra'|'doc', id, ctx? } · null = ninguna
 let FUENTES = [],
   sanCtx = null; // «buscar copia» (fuentes cacheadas) + depósito de saneamiento en curso
@@ -1212,7 +1214,7 @@ async function loadPap() {
         (
           sub,
         ) => `<tr><td class="mono">${esc(sub.nombre)}</td><td>${sub.ficheros}</td><td>${fmtBytes(sub.bytes)}</td>
-      <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}">ver</button> ${sub.restaurable ? `<button class="btn admin-only" data-restore="${esc(sub.nombre)}" title="Devolver el fichero/carpeta a su ubicación original (no pisa lo que ya exista allí)">↩️ restaurar</button> ` : ''}<button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
+      <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}" title="Explorar los ficheros reales de esta carpeta y descargarlos">🗂️ explorar</button> ${sub.restaurable ? `<button class="btn admin-only" data-restore="${esc(sub.nombre)}" title="Devolver el fichero/carpeta a su ubicación original (no pisa lo que ya exista allí)">↩️ restaurar</button> ` : ''}<button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
       )
       .join('')}</table>`
       : '<div class="empty">Papelera vacía</div>';
@@ -1245,21 +1247,7 @@ async function loadPap() {
           }
         }),
     );
-    $$('#papBody [data-ver]').forEach(
-      (b) =>
-        (b.onclick = async () => {
-          try {
-            const r = await api('/papelera/contenido?sub=' + encodeURIComponent(b.dataset.ver));
-            alert(
-              b.dataset.ver +
-                '\\n\\n' +
-                (r.ficheros.map((f) => `• ${f.nombre} (${fmtBytes(f.bytes)})`).join('\\n') || '(vacía)'),
-            );
-          } catch (e) {
-            toast(e.message, 'bad');
-          }
-        }),
-    );
+    $$('#papBody [data-ver]').forEach((b) => (b.onclick = () => explorarPap(b.dataset.ver, '')));
   } catch (e) {
     toast(e.message, 'bad');
   }
@@ -6854,6 +6842,43 @@ function pintarExplorador(r) {
   $('#expX').onclick = cerrarCmp;
 }
 
+// ── Explorador de la PAPELERA: navega el árbol REAL de una subcarpeta reciclada (carpetas + ficheros) y deja
+//    descargar cada fichero. Mismo aspecto que el explorador de documentos, pero contra /papelera/* (la
+//    Papelera no se sirve como /recursos, así que la descarga va por /papelera/fichero con token). Usa
+//    delegación (data-ruta) en vez de onclick interpolado: los nombres de la Papelera pueden traer comillas.
+let _papExp = { sub: '', ruta: '' };
+async function explorarPap(sub, ruta = '') {
+  _papExp = { sub, ruta };
+  try {
+    const r = await api(`/papelera/explorar?sub=${encodeURIComponent(sub)}&ruta=${encodeURIComponent(ruta)}`);
+    if (!r.ok) { toast(r.motivo || 'No se pudo explorar', 'bad'); return; }
+    pintarExplPap(r);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+function pintarExplPap(r) {
+  const rowSt = 'display:flex;gap:10px;align-items:center;padding:8px 6px;border-top:1px solid var(--line)';
+  const tk = TOKEN ? '&token=' + encodeURIComponent(TOKEN) : '';
+  const segs = r.ruta ? r.ruta.split('/') : [];
+  const migas = [`<a class="papnav" data-ruta="" style="cursor:pointer">♻ ${esc(r.sub)}</a>`]
+    .concat(segs.map((s, i) => `<a class="papnav" data-ruta="${esc(segs.slice(0, i + 1).join('/'))}" style="cursor:pointer">${esc(s)}</a>`))
+    .join(' <span class="muted">/</span> ');
+  const filas = r.entradas.length
+    ? r.entradas.map((e) => {
+        const ruta2 = (r.ruta ? r.ruta + '/' : '') + e.nombre;
+        return e.dir
+          ? `<div class="papnav" data-ruta="${esc(ruta2)}" style="${rowSt};cursor:pointer">${iconoArchivo(e)} <span style="flex:1">${esc(e.nombre)}</span> <span class="muted">›</span></div>`
+          : `<div style="${rowSt}"><span>${iconoArchivo(e)}</span> <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.nombre)}</span> <span class="muted" style="font-size:11px">${fmtBytes(e.bytes)}</span> <a class="btn" href="/api/papelera/fichero?sub=${encodeURIComponent(r.sub)}&ruta=${encodeURIComponent(ruta2)}${tk}" download title="Descargar" style="padding:2px 9px;font-size:12px">⬇</a></div>`;
+      }).join('')
+    : '<div class="muted" style="padding:12px">(carpeta vacía)</div>';
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:640px;width:94vw;max-height:90vh;overflow:auto">
+    <div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">♻ Papelera</h3><button class="btn" id="expX">✕</button></div>
+    <div class="row" style="margin:8px 0;font-size:13px;flex-wrap:wrap;gap:4px">${migas}</div>
+    <div>${filas}</div></div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#expX').onclick = cerrarCmp;
+  $$('#cmpModal .papnav').forEach((el) => (el.onclick = () => explorarPap(_papExp.sub, el.dataset.ruta)));
+}
+
 // COMPLETAR un documento con los ficheros que le faltan: el PDF/EPUB de un audiolibro que solo tiene audio, o
 // los audios de un libro que solo tiene texto. Sube a POST /api/documentos/:id/completar → el audio entra en la
 // playlist (`audios[]`), el texto en el selector del visor (`textos[]`) y el resto queda como material en su
@@ -8065,7 +8090,7 @@ function construirSearch() {
           </div>
           <label style="font-size:11px;display:flex;align-items:center;gap:5px;margin-top:4px;cursor:pointer" title="Estricta: SOLO ese código. + sub-CDUs: incluye las subclasificaciones (159 → 159.1, 159.9…)"><input type="checkbox" id="sqCduSub" checked style="width:auto"> incluir sub-CDUs</label></div>
         <div><label>Estrellas${ROL === 'admin' || PUEDE_NSFW ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
-          <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' || PUEDE_NSFW ? '<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"> 🔞 NSFW</label>' : ''}</div>
+          <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' || PUEDE_NSFW ? `<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"${NSFW_DEFECTO ? ' checked' : ''}> 🔞 NSFW</label>` : ''}</div>
         </details></div>
         ${ROL === 'admin' ? `<div class="admin-only"><label>📖 Leído</label><details class="ddown" id="sqLeidoDD"><summary id="sqLeidoSum">Todos</summary>
           <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqLeido" value="${n}">${LEIDO_ETIQ[n]}</label>`).join('')}<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px"><input type="checkbox" class="sqLeido" value="0">Sin leer</label></div>
@@ -8212,6 +8237,7 @@ function construirSearch() {
   );
   if ($('#sqNsfw'))
     $('#sqNsfw').onchange = () => {
+      _nsfwTocado = true; // el usuario ha tocado la casilla → respetar su intención (incluir/solo/excluir)
       actualizarSumEstrellas();
       buscarCatalogo(1);
     };
@@ -8234,7 +8260,7 @@ function construirSearch() {
     }
     if ($('#sqDescubrir')) $('#sqDescubrir').checked = false;
     if ($('#searchExternal')) $('#searchExternal').innerHTML = '';
-    if ($('#sqNsfw')) $('#sqNsfw').checked = false;
+    if ($('#sqNsfw')) { $('#sqNsfw').checked = NSFW_DEFECTO; _nsfwTocado = false; } // «Limpiar» vuelve al defecto (ajuste global)
     if ($('#sqNfc')) $('#sqNfc').value = '';
     $$('#p-search .sqStar').forEach((c) => (c.checked = false));
     $$('#p-search .sqLeido').forEach((c) => (c.checked = false));
@@ -8381,8 +8407,13 @@ function _paramsBusqueda() {
   if (ambS && estS) params.set('estanteria', estS);
   if ($('#sqNfc') && $('#sqNfc').value) params.set('nfc', $('#sqNfc').value); // etiqueta NFC: con/sin
   // 🔞 NSFW: sin marcar = excluir; marcada + otros criterios = incluir (también); marcada y sola = solo NSFW.
+  // EXCEPCIÓN: si la casilla está marcada POR DEFECTO (ajuste global) y el usuario no la ha tocado, se INCLUYE
+  // el NSFW mezclado con todo (no «solo NSFW»): «mostrar NSFW por defecto» significa verlo junto al resto.
   if ($('#sqNsfw'))
-    params.set('nsfw', !$('#sqNsfw').checked ? 'excluir' : hayOtrosCriteriosBusqueda() ? 'incluir' : 'solo');
+    params.set('nsfw',
+      !$('#sqNsfw').checked ? 'excluir'
+        : !_nsfwTocado ? 'incluir'
+        : hayOtrosCriteriosBusqueda() ? 'incluir' : 'solo');
   if (estadoBusqueda.extra)
     for (const [k, v] of Object.entries(estadoBusqueda.extra)) {
       if (k !== 'etiqueta' && v != null && v !== '') params.set(k, v);
@@ -9105,7 +9136,9 @@ function loadInteg() {
           method: 'POST',
           body: JSON.stringify({ enabled: cb.checked }),
         });
-        toast(r.enabled ? 'Invitados: NSFW permitido' : 'Invitados: NSFW restringido');
+        NSFW_DEFECTO = !!r.enabled; // aplica al instante: la casilla 🔞 del filtro arrancará en este estado
+        if ($('#sqNsfw')) $('#sqNsfw').checked = NSFW_DEFECTO;
+        toast(r.enabled ? 'Filtro: NSFW marcado por defecto' : 'Filtro: NSFW desmarcado por defecto');
       } catch (e) {
         toast(e.message, 'bad');
         cb.checked = !cb.checked;
@@ -17250,6 +17283,7 @@ $('#logout').onclick = async () => {
       USER = me.usuario;
       ROL = me.rol;
       PUEDE_NSFW = !!me.nsfw;
+      NSFW_DEFECTO = !!me.nsfw_defecto;
       _recordarSesion();
       arrancar();
     } else mostrarLogin();

@@ -21,7 +21,7 @@ import { esFalloDeConexionMongo } from './database.js';
 import { reciclar } from './utils/papelera.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
 import { obtenerEstadisticas } from './estadisticas.js';
-import { rutasPanel, rutasPublicas, usuarioPuedeNsfw } from './api-panel.js';
+import { rutasPanel, rutasPublicas, usuarioPuedeNsfw, nsfwPorDefecto } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
 import { completarDoc, adjuntarMaterial, reemplazarAdjunto } from './utils/completar-doc.js';   // adjuntar audio/texto o material a un doc ya catalogado
 import { conectarDB } from './database.js';
@@ -135,12 +135,14 @@ app.post('/api/login', async (req, res) => {
     res.json({ ok: true, ...r });
 });
 // Sesión actual + permiso NSFW efectivo (admin siempre; invitado según su credencial) para que el cliente
-// muestre —o no— el filtro 🔞 a los invitados autorizados.
+// muestre —o no— el filtro 🔞; y `nsfw_defecto` (ajuste global) = estado inicial de la casilla para quien
+// tiene permiso.
 app.get('/api/yo', async (req, res) => {
     const sess = validar(tokenDe(req));
     if (!sess) return res.json({ rol: null });
     const nsfw = sess.rol === 'admin' ? true : await usuarioPuedeNsfw(sess.usuario).catch(() => false);
-    res.json({ ...sess, nsfw });
+    const nsfw_defecto = nsfw ? await nsfwPorDefecto().catch(() => false) : false;
+    res.json({ ...sess, nsfw, nsfw_defecto });
 });
 app.post('/api/logout', (req, res) => { logout(tokenDe(req)); res.json({ ok: true }); });
 // Lista de usuarios (SIN contraseñas) para el desplegable del login. Público (antes de la puerta).
