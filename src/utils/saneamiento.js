@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { reciclar, reciclarCarpeta } from './papelera.js';
+import { retirarCarpeta } from './borrado-seguro.js';
 import { ingestarRecurso } from '../servicio-ingesta.js';
 import { repararPdf } from './qpdf.js'; // reparación de PDF rotos (reconstruye el xref)
 
@@ -174,10 +175,8 @@ export async function descartarReemplazo(idDeposito) {
     try { await fs.access(depDir); } catch { return { ok: false, motivo: 'el depósito ya no existe' }; }
 
     const repDir = path.join(depDir, SUBDIR_REEMPLAZO);
-    if (await fs.access(repDir).then(() => true, () => false)) {
-        await reciclarCarpeta(repDir, `candidato-descartado-${path.basename(depDir)}`).catch(() => {});
-        await fs.rm(repDir, { recursive: true, force: true }).catch(() => {});   // si el reciclado ya lo movió, no-op
-    }
+    if (await fs.access(repDir).then(() => true, () => false))
+        await retirarCarpeta(repDir, `candidato-descartado-${path.basename(depDir)}`); // a la Papelera (nunca fs.rm de contenido)
     const estadoPath = path.join(depDir, 'estado.json');
     let estado = {}; try { estado = JSON.parse(await fs.readFile(estadoPath, 'utf8')); } catch { /* sin estado */ }
     for (const k of ['listo', 'reemplazo', 'reemplazo_bytes', 'reemplazo_fecha', 'reparado', 'reparacion', 'error_proceso'])

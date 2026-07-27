@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { conectarDB } from '../database.js';
 import { reciclar, reciclarCarpeta } from './papelera.js';
+import { retirarCarpeta } from './borrado-seguro.js';
 
 /**
  * Utilidades de INSPECCIÓN para el panel de control: tamaño/contenido de la Papelera, listado y
@@ -185,7 +186,7 @@ export async function descartarCategoria(cat) {
     for (const d of deps) {
         if (await reciclarCarpeta(path.join(catDir, d.name), `cuarentena-categoria-${c}`, c)) movidos++;
     }
-    await fs.rm(catDir, { recursive: true, force: true }).catch(() => {}); // la carpeta de categoría ya vacía
+    await retirarCarpeta(catDir, `cuarentena-categoria-${c}`); // vacía → fs.rm; si algún depósito no se recicló → Papelera
     return { ok: true, categoria: c, movidos, total: deps.length };
 }
 

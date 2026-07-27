@@ -14,6 +14,7 @@ import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
 import { reciclar, reciclarCarpeta } from './utils/papelera.js';
+import { retirarCarpeta } from './utils/borrado-seguro.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarIntacta, ingestarLibroConMaterial } from './utils/transmedia.js';
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
@@ -204,7 +205,7 @@ async function podarSubcarpetasVacias(top) {
         // el NOMBRE de una subcarpeta contaba como basura → podía borrar una subcarpeta intermedia cuyos hijos
         // eran subcarpetas LLENAS de documentos sin procesar.
         if (!restantes.includes(TESTIGO) && !(await carpetaConservable(sub)) && !(await tieneContenidoCatalogable(sub)))
-            await fs.rm(sub, { recursive: true, force: true }).catch(() => {});
+            await retirarCarpeta(sub, 'subcarpeta-vacia'); // vacía/metadatos → fs.rm; cualquier fichero real → Papelera
     }
 }
 
@@ -225,13 +226,12 @@ async function podarVaciosInbox() {
         if (await tieneTestigo(top)) continue;          // protegida por .noborrar: no se toca
         await podarSubcarpetasVacias(top);              // primero las subcarpetas vacías (más adentro)
         if (await nadaQueCatalogar(top)) {              // ya no queda nada catalogable → retirar la carpeta top
-            // A la PAPELERA, no `fs.rm`: aunque el criterio diga «solo basura», borrar PERMANENTEMENTE una
-            // carpeta del Inbox contradice la política de no perder nada — si el criterio se equivocara alguna
-            // vez, se iría sin dejar rastro y sin vuelta atrás. Reciclada es recuperable y cuesta lo mismo.
-            await reciclarCarpeta(top, 'inbox-sin-nada-que-catalogar').catch(async () => {
-                await fs.rm(top, { recursive: true, force: true }).catch(() => {});  // si la Papelera falla, no bloquear
-            });
-            console.log(`  🗑️  «${e.name}»: sin nada que catalogar (vacía / solo basura / subcarpetas vacías) → a la Papelera.`);
+            // Retirada SEGURA (borrado-seguro): si por lo que sea aún hay contenido real o pesa > 10 MB, va a la
+            // PAPELERA; solo si está vacía/metadatos se hace fs.rm. Si el reciclado falla, se CONSERVA (nunca
+            // fs.rm a ciegas: es justo lo que se eliminó como riesgo).
+            const r = await retirarCarpeta(top, 'inbox-sin-nada-que-catalogar');
+            if (r === 'reciclada') console.log(`  ♻️  «${e.name}»: sin nada que catalogar → Papelera.`);
+            else if (r === 'borrada-vacia') console.log(`  🗑️  «${e.name}»: vacía → retirada del Inbox.`);
         }
     }
     await limpiarGuiaRaiz();
@@ -288,13 +288,17 @@ async function protegerConservables() {
 // nivel (`restantes.every(soloBasura)`) tomaba el NOMBRE de una subcarpeta por «basura» (no tiene extensión
 // válida) → podía disolver una carpeta que aún tenía subcarpetas LLENAS de documentos sin procesar. Esta mira
 // recursivamente: si hay un solo documento/imagen dentro, la carpeta NO se toca (regla maestra del usuario).
+// Comprimidos de CUALQUIER tipo (incluidos los compuestos .tar.gz y los no soportados .gz/.bz2/.xz): NUNCA son
+// basura (regla del usuario). Cuentan como contenido → una carpeta que los tenga NO se retira (se deja para la
+// próxima pasada, donde expandirComprimidos los abrirá o quedarán a la vista).
+const RE_COMPRIMIDO = /(\.(zip|rar|7z|iso|tar|tgz|tbz|tbz2|txz|gz|bz2|xz|cab|arj|lzh|lha|ace|zipx))$|(\.tar\.(gz|bz2|xz))$/i;
 async function tieneContenidoCatalogable(dir, nivel = 12) {
     if (nivel < 0) return true; // ante la duda (demasiado hondo), NO borrar
     let ents;
     try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
     for (const e of ents) {
         if (soloMetadatos(e.name)) continue;
-        if (e.isFile()) { if (esValida(e.name) || esImagen(e.name)) return true; }
+        if (e.isFile()) { if (esValida(e.name) || esImagen(e.name) || RE_COMPRIMIDO.test(e.name)) return true; }
         else if (e.isDirectory() && await tieneContenidoCatalogable(path.join(dir, e.name), nivel - 1)) return true;
     }
     return false;
@@ -307,18 +311,15 @@ async function disolverDropsVacios() {
         if (!existe) { dropsADisolver.delete(carpeta); continue; } // ya no existe
         // No disolver si queda material CONSERVABLE (audio…) o hay un testigo .noborrar (se deja intacta).
         if (await carpetaConservable(carpeta)) { dropsADisolver.delete(carpeta); continue; }
-        // REGLA MAESTRA: si queda CUALQUIER documento/imagen a cualquier profundidad → NO se toca; se deja para
-        // la próxima pasada (cuando ya se hayan catalogado sus documentos). Esto evita el borrado de subcarpetas
-        // con documentos pendientes que causó la pérdida de «Alexandrina.2.Ancient Greece».
+        // REGLA MAESTRA: si queda CUALQUIER documento/imagen/comprimido a cualquier profundidad → NO se toca; se
+        // deja para la próxima pasada (cuando ya se hayan catalogado sus documentos). Esto evita el borrado de
+        // subcarpetas con documentos pendientes que causó la pérdida de «Alexandrina.2.Ancient Greece».
         if (await tieneContenidoCatalogable(carpeta)) continue;
-        // Solo queda basura/metadatos (o está literalmente vacía) → a la PAPELERA (recuperable), NUNCA fs.rm.
-        try {
-            await reciclarCarpeta(carpeta, 'drop-disuelto');
-            dropsADisolver.delete(carpeta);
-            console.log(`  ♻️  Carpeta sin contenido catalogable → Papelera: «${path.basename(carpeta)}» retirada del Inbox.`);
-        } catch (e) {
-            console.warn(`  ⚠️  No se pudo reciclar «${path.basename(carpeta)}» (${e.message}): se deja en el Inbox.`);
-        }
+        // Retirada SEGURA: contenido real o > 10 MB → Papelera; solo vacío/metadatos → fs.rm (borrado-seguro).
+        const r = await retirarCarpeta(carpeta, 'drop-disuelto');
+        if (r !== 'conservada') dropsADisolver.delete(carpeta);
+        if (r === 'reciclada') console.log(`  ♻️  «${path.basename(carpeta)}» → Papelera (retirada del Inbox).`);
+        else if (r === 'borrada-vacia') console.log(`  🗑️  «${path.basename(carpeta)}» vacía → retirada del Inbox.`);
     }
 }
 
@@ -1380,7 +1381,7 @@ async function expandirComprimidos(dir = INBOX, nivel = 6) {
                 console.log(`  💿 «${e.name}»: SOFTWARE (guía) — se conserva INTACTO, sin abrir → 1 registro.`);
             } catch (err) {
                 console.warn(`  ⚠️  No se pudo preparar «${e.name}» como software: ${err.message} (se conserva).`);
-                await fs.rm(dirSw, { recursive: true, force: true }).catch(() => {});
+                await retirarCarpeta(dirSw, 'software-prep-fallido');
             }
             continue;
         }
@@ -1452,7 +1453,7 @@ async function envolverAudiosSueltos() {
             console.log(`  🎧 Audio monolítico «${e.name}» → «${path.basename(destinoDir)}/» (se catalogará como audiolibro).`);
         } catch (err) {
             console.warn(`  ⚠️  No se pudo envolver el audio «${e.name}»: ${err.message} (se conserva suelto).`);
-            await fs.rm(destinoDir, { recursive: true, force: true }).catch(() => {});
+            await retirarCarpeta(destinoDir, 'audio-wrap-fallido'); // si el audio llegó a moverse dentro, va a la Papelera, no fs.rm
         }
     }
 }
@@ -1482,7 +1483,7 @@ async function aplicarAccionesGuiaFs() {
             const hijos = (await fs.readdir(dir, { withFileTypes: true })).filter((h) => !ignorarEntrada(h.name) && h.name !== NOMBRE_GUIA);
             if (guia.accion === 'explotar') {
                 for (const h of hijos) await fs.rename(path.join(dir, h.name), await nombreLibre(INBOX, h.name));
-                await fs.rm(dir, { recursive: true, force: true }).catch(() => {}); // solo queda el _guia.json
+                await retirarCarpeta(dir, 'guia-explotar'); // solo _guia.json → fs.rm; si algún hijo no se movió → Papelera
                 console.log(`  💥 «${e.name}»: EXPLOTAR (guía) → ${hijos.length} elemento(s) liberados en el Inbox.`);
             } else { // aplanar
                 const subs = hijos.filter((h) => h.isDirectory());
@@ -1490,7 +1491,7 @@ async function aplicarAccionesGuiaFs() {
                 if (subs.length === 1 && files.length === 0) {
                     const inner = path.join(dir, subs[0].name);
                     await fs.rename(inner, await nombreLibre(INBOX, subs[0].name)); // promociona la subcarpeta única
-                    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+                    await retirarCarpeta(dir, 'guia-aplanar'); // solo _guia.json → fs.rm; si quedara contenido → Papelera
                     console.log(`  📂 «${e.name}»: APLANAR (guía) → «${subs[0].name}» promocionada un nivel.`);
                 }
                 // Si no cumple (no es una carpeta sola), se deja como está y se procesa normal.
@@ -1768,7 +1769,7 @@ async function empaquetarCarpetaGuiada(dir, guia) {
         await reciclar(originales, `empaquetado-cbz-${nombre}`);
         for (const h of (await fs.readdir(dir, { withFileTypes: true })).filter((h) => h.isDirectory())) {
             if (h.name === '_no-convertibles') continue;   // es lo que hemos decidido conservar
-            await fs.rm(path.join(dir, h.name), { recursive: true, force: true }).catch(() => {});
+            await retirarCarpeta(path.join(dir, h.name), 'empaquetado-cbz-resto'); // originales ya reciclados; si quedara algo real → Papelera
         }
         // Los cbz ocupan ahora el sitio de las láminas.
         for (const t of r.tomos) await fs.rename(t.ruta, path.join(dir, path.basename(t.ruta)));

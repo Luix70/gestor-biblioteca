@@ -398,8 +398,9 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
             const en = await metricasFichero(entrante);
             const ex = await metricasFichero(doc ? await ficheroOriginal(absDe(doc.ruta_base)) : null);
             if (doc && ganaEntrante(ex, en)) await reemplazarFicheroDeDoc(doc, entrante);
-            for (const f of fichs) { await fs.chmod(f, 0o666).catch(() => {}); await fs.rm(f, { force: true }).catch(() => {}); }
-            await fs.rm(depDir, { recursive: true, force: true }).catch(() => {});
+            // El depósito (con el entrante) se RECICLA a la Papelera, NUNCA fs.rm: aunque el duplicado se haya
+            // resuelto, no se pierde el ejemplar entrante (política anti-pérdida).
+            await reciclarArbolAPapelera(depDir, 'cuarentena-duplicado-resuelto').catch(() => {});
             cuarentenaResueltos++;
         } catch { /* deja el depósito si algo falla */ }
     }

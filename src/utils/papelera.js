@@ -116,6 +116,21 @@ export async function reciclar(rutas, etiqueta = '') {
  * Copia → verifica → borra el origen (nunca pierde datos: si la copia falla, conserva el original).
  * @returns {Promise<string|null>} la carpeta destino, o null si no se pudo.
  */
+// Recuento de ficheros + bytes de un árbol (para verificar que la copia a la Papelera está COMPLETA antes de
+// borrar el origen: nunca borrar lo que no se ha copiado íntegro).
+async function _resumenArbol(dir, nivel = 24) {
+    let n = 0, bytes = 0;
+    if (nivel < 0) return { n: Infinity, bytes: Infinity }; // demasiado hondo → fuerza «no coincide» (no borrar)
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return { n, bytes }; }
+    for (const e of ents) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { const r = await _resumenArbol(p, nivel - 1); n += r.n; bytes += r.bytes; }
+        else { n++; try { bytes += (await fs.stat(p)).size; } catch { /* ignora */ } }
+    }
+    return { n, bytes };
+}
+
 export async function reciclarCarpeta(dirOrigen, etiqueta = '', subruta = '') {
     try { if (!(await fs.stat(dirOrigen)).isDirectory()) return null; } catch { return null; }
     const dir = dirReciclaje();
@@ -124,7 +139,12 @@ export async function reciclarCarpeta(dirOrigen, etiqueta = '', subruta = '') {
     try {
         await fs.mkdir(path.dirname(destino), { recursive: true });
         await fs.cp(dirOrigen, destino, { recursive: true });
-        if (!(await fs.stat(destino)).isDirectory()) throw new Error('copia no verificada');
+        // VERIFICACIÓN FUERTE: mismo nº de ficheros y mismos bytes en origen y destino. Antes solo se comprobaba
+        // que el destino existiera como carpeta → una copia PARCIAL (disco lleno a mitad) se daba por buena y se
+        // borraba el origen. Ahora, si no cuadra, se LANZA y el origen se CONSERVA (prioridad: no perder datos).
+        const [o, d] = await Promise.all([_resumenArbol(dirOrigen), _resumenArbol(destino)]);
+        if (o.n !== d.n || o.bytes !== d.bytes)
+            throw new Error(`copia incompleta (origen ${o.n} fich/${o.bytes} B ≠ destino ${d.n} fich/${d.bytes} B)`);
         await fs.rm(dirOrigen, { recursive: true, force: true });
         await anotarManifiesto(sub, [{ rel: path.relative(sub, destino), origen: path.resolve(dirOrigen), tipo: 'dir' }]);
         return destino;

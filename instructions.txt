@@ -850,14 +850,22 @@ de ficheros clasificado por CDU.
     · La PODA del Inbox (`podarVaciosInbox`) manda las carpetas «sin nada que catalogar» a la PAPELERA, no las
       borra con fs.rm: aunque el criterio diga «solo basura», un borrado PERMANENTE contradice la política de
       no perder nada — si el criterio se equivocara, se iría sin rastro y sin vuelta atrás.
-    · DISOLVER/PODAR CARPETAS DEL INBOX (REGLA MAESTRA — corregido tras la pérdida de «Alexandrina.2.Ancient
-      Greece»): retirar una carpeta-drop/subcarpeta ya NO usa `restantes.every(soloBasura)` (que miraba solo el
-      PRIMER NIVEL y tomaba el NOMBRE de una subcarpeta por «basura» → borraba subcarpetas LLENAS de documentos
-      sin procesar) NI `fs.rm`. Ahora: (1) `disolverDropsVacios` y `podarSubcarpetasVacias` comprueban
-      `tieneContenidoCatalogable` (RECURSIVO: si hay UN documento/imagen a cualquier profundidad, NO se toca);
-      (2) lo que se retira va a la PAPELERA (`reciclarCarpeta`), nunca borrado permanente; (3) la limpieza SOLO
-      corre si el Vigilante NO está en pausa (si se pausó a mitad, pueden quedar documentos sin procesar). El
-      disparador fue: pausar a mitad de lote → `disolverDropsVacios` corría igual y `fs.rm`-aba el drop nested.
+    · BORRADO SEGURO — POLÍTICA GLOBAL (la fija el usuario; prioridad ABSOLUTA: no perder datos), tras la
+      pérdida de «Alexandrina.2.Ancient Greece». Toda retirada de carpeta del Inbox/CDU pasa por
+      utils/borrado-seguro.js·`retirarCarpeta(dir)`:
+        · si la carpeta tiene CUALQUIER contenido real —cualquier fichero que no sea metadato del sistema,
+          INCLUIDOS los COMPRIMIDOS de cualquier tipo (.zip/.rar/.7z/.tar.gz/.gz…), que NO son basura— o pesa
+          más de BORRADO_UMBRAL_PAPELERA_MB (10 MB) → se MUEVE A LA PAPELERA (reciclarCarpeta), NUNCA fs.rm;
+        · solo si está literalmente vacía o con solo metadatos (@eaDir/#recycle/.*, Thumbs.db, sidecars
+          _guia.json/estado.json/registro.*/*.meta.json) y por debajo del umbral → fs.rm (no se pierde nada);
+        · si el reciclado falla → se CONSERVA (jamás fs.rm a ciegas).
+      El ÚNICO fs.rm de un FICHERO permitido: un re-drop byte-idéntico (mismo hash) de un doc ya archivado y con
+      su copia PRESENTE FÍSICAMENTE en la ruta (servicio-ingesta lo comprueba en disco; si falta, RESTAURA con
+      el entrante en vez de borrar). `reciclarCarpeta` verifica FUERTE (mismo nº de ficheros y bytes) antes de
+      borrar el origen. Y la limpieza del Inbox NO corre si el Vigilante está en pausa (podían quedar docs sin
+      procesar). Errores concretos que esto cerró: `restantes.every(soloBasura)` miraba solo el PRIMER NIVEL y
+      tomaba el NOMBRE de una subcarpeta por «basura» → `fs.rm` de subcarpetas LLENAS de documentos; y correr la
+      disolución tras una pausa manual.
     · RE-DROP POR HASH (servicio-ingesta·atajoPorHash → rellenarHuecosPorContexto): soltar de nuevo un fichero
       BYTE-IDÉNTICO a uno ya catalogado NO se reprocesa (ahorra OCR/visión/APIs) y el entrante se borra (es la
       MISMA copia; si la archivada faltara, se RESTAURA con el entrante). Antes de descartarlo, se aplica el

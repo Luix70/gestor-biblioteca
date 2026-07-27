@@ -35,6 +35,10 @@ export const AJUSTES = {
     // Registro de actividad (accesos/búsquedas/aperturas/descargas): días que se conserva cada evento antes de
     // caducar solo (índice TTL en registro_actividad.ts). Cambiarlo re-aplica el TTL al ejecutar setup-mongo.
     REGISTRO_TTL_DIAS: 365,
+    // Borrado seguro (utils/borrado-seguro.js): por encima de este tamaño, una carpeta NUNCA se borra con
+    // fs.rm — se mueve a la Papelera (recuperable). Solo se hace fs.rm de carpetas literalmente vacías o con
+    // solo metadatos del sistema, y por debajo de este umbral.
+    BORRADO_UMBRAL_PAPELERA_MB: 10,
     // Cota de tiempo por RECURSO ingerido: si el pipeline se ATASCA de verdad, se corta y el fichero va a
     // Cuarentena con aviso — nunca un cuelgue silencioso. HOLGADO (20 min): un PDF de cientos de MB tarda
     // VARIOS minutos legítimamente (poppler lo relee), y NO queremos mandar a Cuarentena un fichero bueno

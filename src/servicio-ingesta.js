@@ -284,12 +284,30 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
             documento: { ...resultado },
         };
         if (identico) {
-            // Contenido IDÉNTICO (mismo hash que un doc ya catalogado) = es OBVIAMENTE el mismo
-            // fichero. No aporta nada → se BORRA permanentemente (ni Papelera ni Cuarentena: la
-            // intervención humana se reserva para lo que de verdad la necesita).
-            for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
-            console.log(`  🗑️  Duplicado EXACTO (hash) de ${idExist}: «${path.basename(rutas[0])}» → borrado.`);
-            return { ...comun, operacion: 'duplicado_exacto', accion: 'borrado' };
+            // REGLA DE SEGURIDAD (usuario): el ÚNICO fs.rm de un fichero permitido es un duplicado por hash con
+            // su copia ARCHIVADA PRESENTE FÍSICAMENTE en la ruta. `hashExistente` pudo salir de la BD aunque el
+            // fichero falte, así que se comprueba el disco AQUÍ, antes de borrar el único ejemplar.
+            const original = await archivoOriginal(carpetaDeDoc(resultado)).catch(() => null);
+            if (original) {
+                for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
+                console.log(`  🗑️  Duplicado EXACTO (hash) de ${idExist}, copia archivada PRESENTE: «${path.basename(rutas[0])}» → borrado.`);
+                return { ...comun, operacion: 'duplicado_exacto', accion: 'borrado' };
+            }
+            // La copia archivada FALTA → el entrante (mismo contenido) la RESTAURA en la carpeta del doc; NUNCA
+            // se borra a ciegas dejando cero ejemplares.
+            try {
+                const carpeta = carpetaDeDoc(resultado);
+                await fs.mkdir(carpeta, { recursive: true });
+                const destino = path.join(carpeta, resultado.nombre_archivo || path.basename(rutas[0]));
+                await fs.copyFile(rutas[0], destino);
+                const [o, d] = await Promise.all([fs.stat(rutas[0]), fs.stat(destino)]);
+                if (o.size === d.size) {
+                    for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
+                    console.log(`  ♻️  Duplicado EXACTO de ${idExist} pero su fichero FALTABA → RESTAURADO con el entrante en ${carpeta}.`);
+                    return { ...comun, operacion: 'restaurado', accion: 'restaurado' };
+                }
+            } catch (e) { console.warn(`  ⚠️  No se pudo restaurar el fichero de ${idExist}: ${e.message} → a Cuarentena/duplicados.`); }
+            // No se pudo restaurar → NO borrar el entrante: cae al flujo de duplicado (Cuarentena/duplicados) de abajo.
         }
         // Hash DISTINTO (contenido distinto) → POLÍTICA "solo se borra un fichero si ya existe OTRO
         // IDÉNTICO por hash en el archivo": aquí NO se borra ni se reemplaza NADA. Se conservan AMBOS;
