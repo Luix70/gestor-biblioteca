@@ -100,11 +100,9 @@ const EXT_PORTADA = ['.jpg', '.jpeg', '.png', '.webp'];
 
 // Entradas que NO cuentan como contenido real (metadatos de Synology, ocultos).
 const soloMetadatos = (n) => n.startsWith('@') || n.startsWith('#') || n.startsWith('.');
-// Una entrada es "basura" en el Inbox si NO es un documento/imagen CATALOGABLE: metadatos de Synology y
-// ocultos (@eaDir, #recycle, .*), y sidecars/accesorios (.meta.json, .txt, .url, .nfo…). Una carpeta cuyo
-// contenido restante es TODO basura ya no tiene nada que catalogar → se disuelve CON su basura dentro (así
-// el Inbox no se congestiona con carpetas de reprocesado, sidecars y .txt tras verificar el documento).
-const soloBasura = (n) => soloMetadatos(n) || !esValida(n);
+// (El antiguo `soloBasura` —basura = metadatos O extensión no válida— se retiró: evaluado sobre el primer
+// nivel tomaba el NOMBRE de una subcarpeta por basura y podía borrar subcarpetas con documentos. Ahora la
+// decisión de retirar una carpeta la toma `tieneContenidoCatalogable` (recursivo) + Papelera, nunca fs.rm.)
 
 // CONTENIDO CONSERVABLE: material que el catalogador NO puede procesar todavía pero que NO debe borrarse
 // (audio → audiolibros, aún sin tratamiento). El recolector de basura lo RESPETA y su carpeta se marca con
@@ -201,8 +199,11 @@ async function podarSubcarpetasVacias(top) {
         const sub = path.join(top, e.name);
         await podarSubcarpetasVacias(sub); // primero las anidadas
         let restantes; try { restantes = await fs.readdir(sub); } catch { continue; }
-        // No borrar si queda material CONSERVABLE (audio…) —a cualquier profundidad— o hay un testigo .noborrar.
-        if (restantes.every(soloBasura) && !restantes.includes(TESTIGO) && !(await carpetaConservable(sub)))
+        // Solo borrar si NO queda material CONSERVABLE (audio…) ni testigo .noborrar Y no hay NINGÚN documento/
+        // imagen a cualquier profundidad. Antes se miraba solo el primer nivel (`restantes.every(soloBasura)`) y
+        // el NOMBRE de una subcarpeta contaba como basura → podía borrar una subcarpeta intermedia cuyos hijos
+        // eran subcarpetas LLENAS de documentos sin procesar.
+        if (!restantes.includes(TESTIGO) && !(await carpetaConservable(sub)) && !(await tieneContenidoCatalogable(sub)))
             await fs.rm(sub, { recursive: true, force: true }).catch(() => {});
     }
 }
@@ -283,17 +284,40 @@ async function protegerConservables() {
  * de una colección —buzón que persiste para añadir números—, estas son finitas y su carpeta se retira
  * al vaciarse. Solo se borra si no queda ningún documento (solo metadatos de Synology @eaDir, etc.).
  */
+// ¿Queda algún CONTENIDO catalogable (documento o imagen) a CUALQUIER profundidad? La comprobación de primer
+// nivel (`restantes.every(soloBasura)`) tomaba el NOMBRE de una subcarpeta por «basura» (no tiene extensión
+// válida) → podía disolver una carpeta que aún tenía subcarpetas LLENAS de documentos sin procesar. Esta mira
+// recursivamente: si hay un solo documento/imagen dentro, la carpeta NO se toca (regla maestra del usuario).
+async function tieneContenidoCatalogable(dir, nivel = 12) {
+    if (nivel < 0) return true; // ante la duda (demasiado hondo), NO borrar
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+    for (const e of ents) {
+        if (soloMetadatos(e.name)) continue;
+        if (e.isFile()) { if (esValida(e.name) || esImagen(e.name)) return true; }
+        else if (e.isDirectory() && await tieneContenidoCatalogable(path.join(dir, e.name), nivel - 1)) return true;
+    }
+    return false;
+}
+
 async function disolverDropsVacios() {
     for (const carpeta of [...dropsADisolver]) {
-        let restantes;
-        try { restantes = await fs.readdir(carpeta); }
-        catch { dropsADisolver.delete(carpeta); continue; } // ya no existe
+        let existe = true;
+        try { await fs.readdir(carpeta); } catch { existe = false; }
+        if (!existe) { dropsADisolver.delete(carpeta); continue; } // ya no existe
         // No disolver si queda material CONSERVABLE (audio…) o hay un testigo .noborrar (se deja intacta).
-        if (restantes.includes(TESTIGO) || await carpetaConservable(carpeta)) { dropsADisolver.delete(carpeta); continue; }
-        if (restantes.every(soloBasura)) {
-            await fs.rm(carpeta, { recursive: true, force: true }).catch(() => {});
+        if (await carpetaConservable(carpeta)) { dropsADisolver.delete(carpeta); continue; }
+        // REGLA MAESTRA: si queda CUALQUIER documento/imagen a cualquier profundidad → NO se toca; se deja para
+        // la próxima pasada (cuando ya se hayan catalogado sus documentos). Esto evita el borrado de subcarpetas
+        // con documentos pendientes que causó la pérdida de «Alexandrina.2.Ancient Greece».
+        if (await tieneContenidoCatalogable(carpeta)) continue;
+        // Solo queda basura/metadatos (o está literalmente vacía) → a la PAPELERA (recuperable), NUNCA fs.rm.
+        try {
+            await reciclarCarpeta(carpeta, 'drop-disuelto');
             dropsADisolver.delete(carpeta);
-            console.log(`  🗑️  Carpeta vacía disuelta: «${path.basename(carpeta)}» retirada del Inbox.`);
+            console.log(`  ♻️  Carpeta sin contenido catalogable → Papelera: «${path.basename(carpeta)}» retirada del Inbox.`);
+        } catch (e) {
+            console.warn(`  ⚠️  No se pudo reciclar «${path.basename(carpeta)}» (${e.message}): se deja en el Inbox.`);
         }
     }
 }
@@ -1970,9 +1994,14 @@ async function procesarCola() {
         // aún tenga un documento no trivial, material conservable (audio) o testigo .noborrar.
         if (totalProcesadas > 0) {
             console.log(resumenLote(tally, totalProcesadas)); // RESUMEN del lote (visible también en modo simple)
-            await protegerConservables().catch(() => {}); // marca .noborrar (audio/omitidos) ANTES de podar
-            await podarVaciosInbox().catch(() => {});
-            await disolverDropsVacios().catch(() => {});
+            // La limpieza de carpetas (poda + disolución) SOLO cuando el Vigilante NO está en pausa: si se pausó
+            // a mitad de un lote, pueden quedar documentos SIN PROCESAR en las carpetas y no deben tocarse hasta
+            // terminar. (Este era el disparador del borrado de «Alexandrina.2.Ancient Greece».)
+            if (vigilanteActivo) {
+                await protegerConservables().catch(() => {}); // marca .noborrar (audio/omitidos) ANTES de podar
+                await podarVaciosInbox().catch(() => {});
+                await disolverDropsVacios().catch(() => {});
+            }
         }
         // Anuncio de reposo: solo en la TRANSICIÓN (tras procesar algo y quedar el Inbox vacío),
         // no en cada escaneo en vacío (evita spam cada VIGILANTE_ESCANEO_MS).

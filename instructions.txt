@@ -850,6 +850,14 @@ de ficheros clasificado por CDU.
     · La PODA del Inbox (`podarVaciosInbox`) manda las carpetas «sin nada que catalogar» a la PAPELERA, no las
       borra con fs.rm: aunque el criterio diga «solo basura», un borrado PERMANENTE contradice la política de
       no perder nada — si el criterio se equivocara, se iría sin rastro y sin vuelta atrás.
+    · DISOLVER/PODAR CARPETAS DEL INBOX (REGLA MAESTRA — corregido tras la pérdida de «Alexandrina.2.Ancient
+      Greece»): retirar una carpeta-drop/subcarpeta ya NO usa `restantes.every(soloBasura)` (que miraba solo el
+      PRIMER NIVEL y tomaba el NOMBRE de una subcarpeta por «basura» → borraba subcarpetas LLENAS de documentos
+      sin procesar) NI `fs.rm`. Ahora: (1) `disolverDropsVacios` y `podarSubcarpetasVacias` comprueban
+      `tieneContenidoCatalogable` (RECURSIVO: si hay UN documento/imagen a cualquier profundidad, NO se toca);
+      (2) lo que se retira va a la PAPELERA (`reciclarCarpeta`), nunca borrado permanente; (3) la limpieza SOLO
+      corre si el Vigilante NO está en pausa (si se pausó a mitad, pueden quedar documentos sin procesar). El
+      disparador fue: pausar a mitad de lote → `disolverDropsVacios` corría igual y `fs.rm`-aba el drop nested.
     · RE-DROP POR HASH (servicio-ingesta·atajoPorHash → rellenarHuecosPorContexto): soltar de nuevo un fichero
       BYTE-IDÉNTICO a uno ya catalogado NO se reprocesa (ahorra OCR/visión/APIs) y el entrante se borra (es la
       MISMA copia; si la archivada faltara, se RESTAURA con el entrante). Antes de descartarlo, se aplica el
