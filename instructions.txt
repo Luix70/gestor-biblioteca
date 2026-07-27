@@ -483,6 +483,11 @@ de ficheros clasificado por CDU.
     · PALABRAS CLAVE EN LOTE + BÚSQUEDA «#»:
 
     · ASIGNAR DATOS EN LOTE (barra de seleccion del catalogo -> «Asignar datos», admin): un solo dialogo
+      · SOPORTE (op:'soporte'): reasigna papel ↔ digital + tipo_recurso opcional (libro/revista/capítulo/
+        artículo/apuntes). A DIGITAL, editarDocumento RECUPERA el fichero real (pdf/epub/djvu…) de la carpeta
+        de cada doc (archivoOriginal, que solo mira EXT_DOC → una portada .jpg NO cuenta) y fija su formato:
+        para PDFs mal catalogados como «papel». Los que no tengan documento digital en su carpeta se quedan
+        igual (avisa de cuántos). Por-documento está en la ficha: ✏️ Editar → Soporte (💾 Digital/📄 Papel) + Tipo.
 
       AUTOCOMPLETADO (evita duplicados): al escribir en Autor/Contribuidor/Editorial se ofrece un
       desplegable de las entidades EXISTENTES (autores↔GET /autores?q=, editoriales↔GET /editoriales?q=)

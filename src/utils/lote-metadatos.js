@@ -111,3 +111,31 @@ export async function asignarCduLote(db, ids, cdu) {
     }
     return { ok: true, aplicados, fallidos, reubicadas, errores: errores.slice(0, 3) };
 }
+
+/**
+ * REASIGNA EL SOPORTE (papel ↔ digital) de una selección, y opcionalmente el `tipo_recurso` (libro/revista/
+ * artículo/apuntes/capítulo). A DIGITAL, editarDocumento RECUPERA el fichero real (pdf/epub/djvu…) de la carpeta
+ * de cada documento y fija su formato — para PDFs mal catalogados como «papel». Documento a documento (cada uno
+ * mira SU carpeta); informa de cuántos no tenían fichero digital recuperable.
+ */
+export async function asignarSoporteLote(db, ids, { soporte, tipo } = {}) {
+    const s = soporte === 'digital' ? 'digital' : soporte === 'papel' ? 'papel' : null;
+    if (!s) return { ok: false, motivo: "indica un soporte: 'digital' o 'papel'" };
+    const lista = (Array.isArray(ids) ? ids : []).map(String).filter((x) => ObjectId.isValid(x));
+    if (!lista.length) return { ok: false, motivo: 'no hay documentos seleccionados' };
+    const t = ['libro', 'revista', 'articulo', 'apuntes', 'capitulo', 'software'].includes(tipo) ? tipo : null;
+    let aplicados = 0, fallidos = 0, sinFichero = 0;
+    const errores = [];
+    for (const id of lista) {
+        try {
+            const campos = { soporte: s };
+            if (t) campos.tipo_recurso = t;
+            const r = await editarDocumento(db, id, campos);
+            if (r.ok) {
+                aplicados++;
+                if ((r.avisos || []).some((a) => /no se encontró ningún fichero digital/i.test(a))) sinFichero++;
+            } else { fallidos++; if (r.motivo) errores.push(r.motivo); }
+        } catch (e) { fallidos++; errores.push(e.message); }
+    }
+    return { ok: true, aplicados, fallidos, sinFichero, errores: errores.slice(0, 3) };
+}

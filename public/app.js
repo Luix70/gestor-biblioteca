@@ -16504,6 +16504,7 @@ async function asignarDatosLote(ids) {
         <option value="contribuidor">🎭 Contribuidor con rol (se añade)</option>
         <option value="editorial">🏢 Editorial (reemplaza)</option>
         <option value="cdu">🗂 CDU (reemplaza y MUEVE la carpeta)</option>
+        <option value="soporte">💾 Soporte (papel ↔ digital) + tipo</option>
       </select>
     </label>
     <div id="adFields" style="margin-top:10px"></div>
@@ -16530,6 +16531,9 @@ async function asignarDatosLote(ids) {
         <p class="muted" style="font-size:12px;margin:6px 0 0">REEMPLAZA la editorial de cada libro. Coincide sin distinguir mayúsculas/acentos; si no existe, se crea.</p>`,
       cdu: `<label style="font-size:13px">CDU<input id="adCdu" placeholder="p. ej. 82-3" style="font-family:monospace"></label>
         <p class="muted" style="font-size:12px;margin:6px 0 0">⚠️ REEMPLAZA la CDU y MUEVE la carpeta de cada libro a su árbol nuevo (y protege el valor para que el Conformador no lo recalcule). Puede tardar en un lote grande.</p>`,
+      soporte: `<label style="font-size:13px">Soporte<select id="adSoporte" style="width:100%"><option value="digital">💾 Digital</option><option value="papel">📄 Papel</option></select></label>
+        <label style="font-size:13px;display:block;margin-top:8px">Tipo (opcional)<select id="adTipo" style="width:100%"><option value="">— sin cambiar —</option><option value="libro">📕 Libro</option><option value="revista">📰 Revista</option><option value="capitulo">📄 Capítulo</option><option value="articulo">📑 Artículo</option><option value="apuntes">📝 Apuntes</option></select></label>
+        <p class="muted" style="font-size:12px;margin:6px 0 0">A <b>Digital</b> se RECUPERA el fichero real (pdf/epub…) de la carpeta de cada documento y se fija su formato — para PDFs mal catalogados como «papel». Los que no tengan fichero digital en su carpeta se quedan como estaban (te aviso de cuántos).</p>`,
     };
     $('#adFields').innerHTML = C[op];
     // Autocompletado de entidades EXISTENTES (evita duplicados): persona↔autores, editorial↔editoriales,
@@ -16570,13 +16574,19 @@ async function asignarDatosLote(ids) {
       if (!body.cdu) { $('#adMsg').textContent = 'Escribe la CDU.'; return; }
       if (!confirm(`Se cambiará la CDU de ${n} documento(s) a «${body.cdu}» y se MOVERÁ la carpeta de cada uno.\n\n¿Continuar?`)) return;
     }
+    else if (op === 'soporte') {
+      body.soporte = $('#adSoporte').value;
+      const tipo = $('#adTipo') ? $('#adTipo').value : '';
+      if (tipo) body.tipo = tipo;
+    }
     $('#adOk').disabled = true;
     $('#adMsg').textContent = 'Aplicando…';
     try {
       const r = await api('/documentos/lote/metadatos', { method: 'POST', body: JSON.stringify(body) });
       if (!r.ok) throw new Error(r.motivo || 'no se pudo aplicar');
-      const extra = op === 'cdu' ? ` · ${r.reubicadas || 0} carpeta(s) movida(s)${r.fallidos ? ` · ${r.fallidos} con error` : ''}` : '';
-      toast(`✏️ Aplicado a ${r.aplicados} documento(s)${extra}`);
+      const extra = op === 'cdu' ? ` · ${r.reubicadas || 0} carpeta(s) movida(s)${r.fallidos ? ` · ${r.fallidos} con error` : ''}`
+        : op === 'soporte' ? `${r.sinFichero ? ` · ${r.sinFichero} sin fichero digital (sin cambiar)` : ''}${r.fallidos ? ` · ${r.fallidos} con error` : ''}` : '';
+      toast(`✏️ Aplicado a ${r.aplicados} documento(s)${extra}`, r.sinFichero || r.fallidos ? 'warn' : 'ok');
       cerrarCmp();
       buscarCatalogo(estadoBusqueda.page || 1); // refrescar la vista
     } catch (e) { $('#adMsg').textContent = e.message; $('#adOk').disabled = false; }

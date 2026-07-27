@@ -24,7 +24,7 @@ import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalog
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
 import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen, anadirPortadaLote } from './utils/imagenes-doc.js';
-import { asignarAutorLote, asignarContribuidorLote, asignarEditorialLote, asignarCduLote } from './utils/lote-metadatos.js';
+import { asignarAutorLote, asignarContribuidorLote, asignarEditorialLote, asignarCduLote, asignarSoporteLote } from './utils/lote-metadatos.js';
 import { reordenarAudios } from './utils/audios-doc.js';
 import { leerLomosImagen, leerLomosRecortados, emparejarLomos } from './utils/lector-lomos.js';
 import { editarDocumento } from './utils/editar-doc.js';
@@ -1976,6 +1976,7 @@ export function rutasPanel() {
             else if (op === 'contribuidor') r2 = await asignarContribuidorLote(db, ids, req.body);
             else if (op === 'editorial') r2 = await asignarEditorialLote(db, ids, req.body);
             else if (op === 'cdu') r2 = await asignarCduLote(db, ids, req.body?.cdu);
+            else if (op === 'soporte') r2 = await asignarSoporteLote(db, ids, req.body);
             else return res.status(400).json({ ok: false, motivo: 'operación no válida' });
             res.status(r2.ok ? 200 : 400).json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
