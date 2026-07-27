@@ -122,19 +122,28 @@ async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
  * manual `forzar_nuevo` (conservar ambos): en ese caso NO cortocircuita.
  */
 /**
- * GAP-FILL del re-drop: rellena SOLO los huecos del doc existente con el CONTEXTO del nuevo drop
- * (carpeta-colección, obra, o "Vol N" en el nombre). Conservador: nunca pisa lo ya puesto. Best-effort
- * (un fallo no rompe el atajo). Devuelve la lista de campos rellenados (para el log).
+ * GAP-FILL del re-drop: aplica el CONTEXTO del nuevo drop (carpeta-colección, obra, o "Vol N" en el nombre) al
+ * doc existente. Obra y volumen son CONSERVADORES (solo rellenan si faltaban). La COLECCIÓN, en cambio, se
+ * REASIGNA: si el re-drop (byte-idéntico) llega dentro de OTRA carpeta-colección, el doc se MUEVE a ella
+ * (asignarColeccion registra la anterior, renumera y borra la vieja si queda vacía) — decisión del usuario:
+ * un mismo fichero recatalogado en otra colección debe MOVERSE, no ignorarse. Best-effort (un fallo no rompe
+ * el atajo). Devuelve la lista de campos aplicados (para el log).
  */
 async function rellenarHuecosPorContexto(doc, ruta, contexto = {}) {
     const rellenos = [];
     let db;
     try { db = await conectarDB(); } catch { return rellenos; }
     try {
-        // Colección por carpeta (re-drop dentro de una carpeta-colección) → enlazar si no la tenía.
-        if (contexto.coleccion && !doc.coleccion) {
-            const r = await asignarColeccion(db, [doc._id], { nombre: String(contexto.coleccion), tipo: doc.tipo_recurso === 'revista' ? 'revista' : 'libro' });
-            if (r?.ok && r.n) rellenos.push(`colección «${contexto.coleccion}»`);
+        // Colección por carpeta (re-drop dentro de una carpeta-colección): asignar si no la tenía, o REASIGNAR
+        // (mover) si estaba en OTRA distinta. No se toca si ya está en esa misma colección (por nombre).
+        if (contexto.coleccion) {
+            const nueva = String(contexto.coleccion).trim();
+            const actual = String(doc.coleccion_nombre || '').trim();
+            const yaEnEsa = doc.coleccion && actual && actual.localeCompare(nueva, 'es', { sensitivity: 'base' }) === 0;
+            if (nueva && !yaEnEsa) {
+                const r = await asignarColeccion(db, [doc._id], { nombre: nueva, tipo: doc.tipo_recurso === 'revista' ? 'revista' : 'libro' });
+                if (r?.ok && r.n) rellenos.push(doc.coleccion ? `colección → «${nueva}» (movida)` : `colección «${nueva}»`);
+            }
         }
         // Obra por carpeta (re-drop como tomo de una obra) → enlazar si no la tenía.
         const obraTit = contexto.obra?.titulo || contexto.obra?.titulo_obra || null;

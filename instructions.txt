@@ -850,6 +850,14 @@ de ficheros clasificado por CDU.
     · La PODA del Inbox (`podarVaciosInbox`) manda las carpetas «sin nada que catalogar» a la PAPELERA, no las
       borra con fs.rm: aunque el criterio diga «solo basura», un borrado PERMANENTE contradice la política de
       no perder nada — si el criterio se equivocara, se iría sin rastro y sin vuelta atrás.
+    · RE-DROP POR HASH (servicio-ingesta·atajoPorHash → rellenarHuecosPorContexto): soltar de nuevo un fichero
+      BYTE-IDÉNTICO a uno ya catalogado NO se reprocesa (ahorra OCR/visión/APIs) y el entrante se borra (es la
+      MISMA copia; si la archivada faltara, se RESTAURA con el entrante). Antes de descartarlo, se aplica el
+      CONTEXTO del drop al doc existente: obra y «Vol N» solo rellenan huecos (conservador); la COLECCIÓN, si el
+      re-drop llega dentro de OTRA carpeta-colección, se REASIGNA (mueve el doc de la colección anterior a la
+      nueva vía asignarColeccion, que borra la vieja si queda vacía). OJO: solo aplica a la colección que viene
+      del DROP POR CARPETA; una colección que saldría de los metadatos internos del fichero no se lee (el atajo
+      corta antes de extraer).
     · MATERIAL NOTABLE + CRIBA (utils/criba-material.js · esMaterialNotable). INVARIANTE: lo que entra y no es
       un duplicado exacto debe acabar con un REGISTRO en la BD que apunte a él — preservarlo en disco NO basta
       (sin registro es invisible, y eso equivale a perderlo). Pero catalogar TODO lo no leíble sería peor: una
