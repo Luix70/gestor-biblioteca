@@ -10,6 +10,7 @@ import {
 } from './utils/inspeccion.js';
 import { restaurar, reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { normalizarDOI } from './utils/buscador-crossref.js';
+import { variantesISBN, validarISSN } from './utils/identificadores.js';
 import { verificarPasswordAdmin, firmarCompartir, validarCompartir, validar, tokenDe, hayAdminBootstrap, listarUsuarios as listarUsuariosArranque } from './auth.js';
 import { registrar, ipDe, registrarVista, registrarDescarga, debeRegistrar, listarActividad, resumenActividad, usuariosDelRegistro, ultimoAccesoPorUsuario } from './utils/registro-actividad.js';
 import { listarUsuariosBD, crearUsuario, editarUsuario, borrarUsuario, contarAdminsActivosBD, buscarUsuario } from './utils/usuarios-db.js';
@@ -171,24 +172,60 @@ async function nombrePorId(db, coleccion, id, campo = 'nombre') {
 // Escapa una cadena para usarla literal dentro de una expresión regular de MongoDB.
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// BÚSQUEDA POR CAMPOS estilo Google: «titulo:…», «autor:…», «editorial:…», «subtitulo:…», «coleccion:…» (como
-// el modo #palabras-clave, pero por campo). Extrae los pares campo:valor del texto y devuelve {campos, libre}
-// (el texto LIBRE restante, para el FTS normal). El valor de un campo llega HASTA el siguiente campo conocido,
-// así que «titulo:Osprey autor:Windrow» → { titulo:'Osprey', autor:'Windrow' }.
-const _CAMPOS_BUSQUEDA = { titulo: 'titulo', 'título': 'titulo', title: 'titulo', autor: 'autor', autores: 'autor', author: 'autor', editorial: 'editorial', publisher: 'editorial', subtitulo: 'subtitulo', 'subtítulo': 'subtitulo', coleccion: 'coleccion', 'colección': 'coleccion', serie: 'coleccion' };
+// BÚSQUEDA POR CAMPOS estilo Google: «titulo:…», «autor:…», «editorial:…», «subtitulo:…», «coleccion:…»,
+// «isbn:…», «issn:…» (como el modo #palabras-clave, pero por campo). Un campo puede ir NEGADO con un «-»
+// delante para EXCLUIR: «titulo:Osprey -isbn:0140110925» = título contiene «Osprey» pero SIN ese ISBN. Devuelve
+// {campos, camposNeg, libre}: los positivos (deben cumplirse), los negados (deben NO cumplirse) y el texto LIBRE
+// restante (para el FTS normal). El valor de un campo llega HASTA el siguiente campo, así que puede llevar
+// espacios: «titulo:Men at Arms autor:Windrow».
+const _CAMPOS_BUSQUEDA = { titulo: 'titulo', 'título': 'titulo', title: 'titulo', autor: 'autor', autores: 'autor', author: 'autor', editorial: 'editorial', publisher: 'editorial', subtitulo: 'subtitulo', 'subtítulo': 'subtitulo', coleccion: 'coleccion', 'colección': 'coleccion', serie: 'coleccion', isbn: 'isbn', issn: 'issn' };
 function parsearCamposBusqueda(q) {
     const claves = Object.keys(_CAMPOS_BUSQUEDA);
-    const re = new RegExp('\\b(' + claves.join('|') + '):', 'i');
-    if (!re.test(q)) return { campos: {}, libre: q };
-    const partes = q.split(new RegExp('\\b(' + claves.join('|') + '):', 'ig'));
-    const campos = {};
-    const libre = (partes[0] || '').trim();
-    for (let i = 1; i < partes.length; i += 2) {
-        const campo = _CAMPOS_BUSQUEDA[String(partes[i]).toLowerCase()];
-        const valor = (partes[i + 1] || '').trim();
-        if (campo && valor) campos[campo] = campos[campo] ? campos[campo] + ' ' + valor : valor;
+    // Marca de campo: un «-» opcional (exclusión) + la clave + «:». Se captura el signo y la clave, y el valor
+    // se toma hasta la SIGUIENTE marca (o el final), localizando las marcas por posición (más robusto que split).
+    const marcaRe = new RegExp('(?:^|\\s)(-?)(' + claves.join('|') + '):', 'ig');
+    const marcas = [...q.matchAll(marcaRe)];
+    if (!marcas.length) return { campos: {}, camposNeg: {}, libre: q };
+    const campos = {}, camposNeg = {};
+    const libre = q.slice(0, marcas[0].index).trim();   // lo anterior a la 1ª marca = texto libre
+    for (let i = 0; i < marcas.length; i++) {
+        const m = marcas[i];
+        const campo = _CAMPOS_BUSQUEDA[String(m[2]).toLowerCase()];
+        const desde = m.index + m[0].length;
+        const hasta = i + 1 < marcas.length ? marcas[i + 1].index : q.length;
+        const valor = q.slice(desde, hasta).trim();
+        if (!campo || !valor) continue;
+        const dest = m[1] === '-' ? camposNeg : campos;
+        dest[campo] = dest[campo] ? dest[campo] + ' ' + valor : valor;
     }
-    return { campos, libre };
+    return { campos, camposNeg, libre };
+}
+
+// Condición Mongo POSITIVA de un par campo:valor (la negación la envuelve el llamador en $nor). Devuelve null si
+// el campo no se reconoce. Autor/editorial resuelven el nombre → ids; isbn/issn casan por sus variantes/normalizado.
+async function condicionCampoBusqueda(db, campo, valor) {
+    const rxDe = (v) => ({ $regex: escapeRegex(v), $options: 'i' });
+    if (campo === 'titulo') return { $or: [{ titulo: rxDe(valor) }, { titulo_original: rxDe(valor) }, { obra_titulo: rxDe(valor) }] };
+    if (campo === 'subtitulo') return { subtitulo: rxDe(valor) };
+    if (campo === 'coleccion') return { coleccion_nombre: rxDe(valor) };
+    if (campo === 'autor') {
+        const ids = (await db.collection('autores').find({ $or: [{ nombre: rxDe(valor) }, { nombres_alternativos: rxDe(valor) }] }, { projection: { _id: 1 } }).limit(300).toArray()).map(a => a._id);
+        return { autores: { $in: ids } };   // vacío → $in:[] (positivo: nada; con $nor: excluye nada — lo correcto)
+    }
+    if (campo === 'editorial') {
+        const ids = (await db.collection('editoriales').find({ $or: [{ nombre: rxDe(valor) }, { nombres_alternativos: rxDe(valor) }] }, { projection: { _id: 1 } }).limit(300).toArray()).map(e => e._id);
+        return { editorial: { $in: ids } };
+    }
+    if (campo === 'isbn') {
+        // Un ISBN válido casa por sus DOS variantes (10/13); si no es válido (parcial), regex por los dígitos.
+        const vars = variantesISBN(valor);
+        return vars.length ? { isbn: { $in: vars } } : { isbn: { $regex: escapeRegex(valor.replace(/[^0-9Xx]/g, '')), $options: 'i' } };
+    }
+    if (campo === 'issn') {
+        const norm = validarISSN(valor);   // "NNNN-NNNC" si es válido
+        return norm ? { issn: norm } : { issn: { $regex: escapeRegex(valor.replace(/[^0-9Xx-]/g, '')), $options: 'i' } };
+    }
+    return null;
 }
 
 // Filtros "especiales" del Dashboard → condición sobre 'biblioteca' (clic en un contador para ver
@@ -748,19 +785,16 @@ export function rutasPanel() {
             // fuerza «sin resultados» (id imposible), no ignora el filtro.
             const camposExtras = [];
             if (q && !q.trim().startsWith('#')) {
-                const { campos, libre } = parsearCamposBusqueda(q);
-                if (Object.keys(campos).length) {
-                    const rxDe = (v) => ({ $regex: escapeRegex(v), $options: 'i' });
-                    if (campos.titulo) camposExtras.push({ $or: [{ titulo: rxDe(campos.titulo) }, { titulo_original: rxDe(campos.titulo) }, { obra_titulo: rxDe(campos.titulo) }] });
-                    if (campos.subtitulo) camposExtras.push({ subtitulo: rxDe(campos.subtitulo) });
-                    if (campos.coleccion) camposExtras.push({ coleccion_nombre: rxDe(campos.coleccion) });
-                    if (campos.autor) {
-                        const ids = (await db.collection('autores').find({ $or: [{ nombre: rxDe(campos.autor) }, { nombres_alternativos: rxDe(campos.autor) }] }, { projection: { _id: 1 } }).limit(300).toArray()).map(a => a._id);
-                        camposExtras.push({ autores: { $in: ids.length ? ids : [new ObjectId()] } });
+                const { campos, camposNeg, libre } = parsearCamposBusqueda(q);
+                if (Object.keys(campos).length || Object.keys(camposNeg).length) {
+                    // POSITIVOS: deben cumplirse (AND). NEGADOS: deben NO cumplirse → se envuelven en $nor.
+                    for (const [campo, valor] of Object.entries(campos)) {
+                        const cond = await condicionCampoBusqueda(db, campo, valor);
+                        if (cond) camposExtras.push(cond);
                     }
-                    if (campos.editorial) {
-                        const ids = (await db.collection('editoriales').find({ $or: [{ nombre: rxDe(campos.editorial) }, { nombres_alternativos: rxDe(campos.editorial) }] }, { projection: { _id: 1 } }).limit(300).toArray()).map(e => e._id);
-                        camposExtras.push({ editorial: { $in: ids.length ? ids : [new ObjectId()] } });
+                    for (const [campo, valor] of Object.entries(camposNeg)) {
+                        const cond = await condicionCampoBusqueda(db, campo, valor);
+                        if (cond) camposExtras.push({ $nor: [cond] });
                     }
                     q = libre; // el resto (texto sin campo) va al FTS; si queda vacío, no hay búsqueda de texto libre
                 }

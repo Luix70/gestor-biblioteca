@@ -519,6 +519,14 @@ de ficheros clasificado por CDU.
         consulta keyword a keyword acotando a la COLUMNA palabras_clave del FTS5 ({palabras_clave}:(…)) y
         puntúa por nº de aciertos — NO con un solo MATCH OR, porque bm25 penaliza por longitud de campo y
         hundía a los que casan varias. Sin índice, cae a un $regex Mongo sobre palabras_clave (sin acentos).
+      - BUSCAR POR CAMPO (estilo Google): «titulo:», «autor:», «editorial:», «subtitulo:», «coleccion:/serie:»,
+        «isbn:», «issn:». El valor llega HASTA el siguiente campo, así que admite espacios («titulo:Men at Arms
+        autor:Windrow»). Se combinan en AND; lo que quede sin campo va al FTS normal. Un campo sin coincidencias
+        NO se ignora: fuerza «sin resultados». EXCLUIR con un «-» delante del campo: «titulo:Osprey
+        -isbn:0140110925» = título «Osprey» pero SIN ese ISBN (útil para el caso Osprey). autor/editorial
+        resuelven el nombre→ids; isbn/issn casan por sus VARIANTES (10/13) o el normalizado. Implementación:
+        api-panel.js·parsearCamposBusqueda (localiza las marcas «[-]campo:» por posición) + condicionCampoBusqueda
+        (condición Mongo positiva; la negación la envuelve en $nor) → van a `camposExtras`, AND con el resto.
     · LEÍDO (progreso de lectura) y ME GUSTA (👍/👎) — SOLO ADMIN, solo en documentos, en la ficha (junto a
       las estrellas). `leido` NO es una nota: es cuánto se ha leído (empezado / un cuarto / a medias / casi /
       terminado), por eso se pinta como una BARRA DE PROGRESO verde de 5 segmentos que se llena de izquierda a
@@ -581,6 +589,11 @@ de ficheros clasificado por CDU.
       acción es «🔍 Mostrar en Catálogo» (lleva la selección al Catálogo, ya marcada).
       La selección NO se pierde al conmutar el modo. Con selección hay acciones: 👁 Ver · 📚 Colección · 📖 Obra · 📍
       Estantería · 🚫 Quitar de estantería · 📶 Etiquetar · 🧹 Conformar · ✨ Enriquecer ·
+      (📚 Colección / 📖 Obra abren el selector con buscador y «crear nueva»; al aplicar, la asignación se
+      TROCEA en el cliente y muestra una BARRA DE PROGRESO «Asignando N documentos a «X»…» con ✕ Cancelar
+      dentro del modal —decenas de docs contra Atlas tardaban segundos con la pantalla congelada—. El 1er lote
+      crea/resuelve el grupo y los siguientes se anexan por id; Cancelar detiene antes del siguiente lote, lo
+      ya asignado se conserva. aplicarGrupo en public/app.js.)
       🎯 A fondo (lee cada libro con la visión y aplica lo que aporte) · 🔀 Cambiar tipo ·
       🖼️ Portada común (asigna la MISMA imagen de portada a toda la selección: se añade como
       portada en cada uno; las imágenes que ya tuvieran se conservan en el carrusel —
@@ -1428,6 +1441,12 @@ de ficheros clasificado por CDU.
       «posición en la colección/obra» del Catálogo.
     · RENUMERAR DIRECTO (admin): el chip del nº de cada libro/tomo es un botón (✏️) →
       mini-modal para cambiar ese nº al vuelo, sin abrir el editor completo.
+    · VER TODA LA COLECCIÓN/OBRA EN EL CATÁLOGO: botón «🔍 Ver en el Catálogo» en la
+      cabecera de la ficha de colección/obra → filtra el Catálogo por la colección/obra
+      (irBusquedaFiltro {colecciones|obras:id}); el servidor resuelve los miembros por
+      `coleccion`/`obra`. Es ESCALABLE: la URL lleva solo el id, no la lista de miembros,
+      así que NO da 414 aunque la colección tenga miles (a diferencia del «Mostrar en
+      Catálogo» de una SELECCIÓN de miembros, que sí manda ids —por POST si son muchos).
     · SELECCIÓN: en modo selección hay «☑ Todos / ☐ Ninguno» (marca/desmarca toda la
       página). «🔍 Mostrar en Catálogo» de la selección ORDENA por Nº de colección
       (o de tomo en obras) — numérico y ascendente, reflejado en el selector de orden.

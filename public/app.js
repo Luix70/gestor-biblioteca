@@ -45,7 +45,8 @@ function botonAyuda(titulo, html) {
 }
 const _AYUDA_BUSQUEDA = `<p>En «Buscar» pon título, autor, editorial, ISBN/ISSN o nombre de archivo (insensible a mayúsculas y acentos).</p>
   <ul>
-    <li><b>Por campo</b> (estilo Google): <code>titulo:Osprey</code>, <code>autor:Windrow</code>, <code>editorial:Osprey</code>, <code>subtitulo:…</code>, <code>coleccion:…</code>. Se combinan: <code>titulo:Osprey autor:Windrow</code>.</li>
+    <li><b>Por campo</b> (estilo Google): <code>titulo:Osprey</code>, <code>autor:Windrow</code>, <code>editorial:Osprey</code>, <code>subtitulo:…</code>, <code>coleccion:…</code>, <code>isbn:…</code>, <code>issn:…</code>. Se combinan: <code>titulo:Osprey autor:Windrow</code>.</li>
+    <li><b>Excluir</b> con <code>-</code> delante del campo: <code>titulo:Osprey -isbn:0140110925</code> = título «Osprey» pero SIN ese ISBN. Vale con cualquier campo (<code>-autor:…</code>, <code>-editorial:…</code>).</li>
     <li><b>Palabras clave</b>: empieza por <code>#</code>. Cada clave va de un <code>#</code> al siguiente y admite espacios: <code>#Divulgación científica #Álgebra</code>.</li>
     <li><b>🎯 Frase exacta</b>: solo resultados con esa frase adyacente y en ese orden.</li>
     <li><b>ISBN/ISSN</b>: con o sin guiones. También busca por otras ediciones y por el ISSN de serie de la colección.</li>
@@ -1674,7 +1675,7 @@ function pintarObra(r) {
         ${o.cdu ? `<div class="mono muted" style="margin-top:8px">CDU ${esc(o.cdu)}${desc && desc.titulo_es ? ' · ' + esc(desc.titulo_es) : ''}</div>` : ''}
         ${o.descripcion ? `<p class="muted" style="font-size:12px;margin-top:6px">${esc(o.descripcion)}</p>` : ''}
         ${desc && desc.descripcion_es ? `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer;font-size:12px">Descripción CDU</summary><p class="muted" style="font-size:12px;margin-top:6px">${esc(desc.descripcion_es)}</p></details>` : ''}
-        ${editBtn}<button class="btn" id="obraCompartir" style="margin-top:8px;margin-left:6px;padding:4px 10px;font-size:12px" title="Compartir un enlace a esta obra (todos sus tomos + descarga)">🔗 Compartir</button>
+        ${editBtn}<button class="btn" id="obraVerCat" style="margin-top:8px;margin-left:6px;padding:4px 10px;font-size:12px" title="Ver TODOS los tomos de esta obra en el Catálogo (para trabajarlos en lote). Filtra por la obra, no por una lista de ids → escala a obras enormes">🔍 Ver en el Catálogo</button><button class="btn" id="obraCompartir" style="margin-top:8px;margin-left:6px;padding:4px 10px;font-size:12px" title="Compartir un enlace a esta obra (todos sus tomos + descarga)">🔗 Compartir</button>
       </div></div>`;
   const vols = r.volumenes.length
     ? r.volumenes.map((v) => tomoCard(v.doc, v.numero, !v.presente)).join('')
@@ -1702,6 +1703,8 @@ function pintarObra(r) {
   if ($('#obraNumerar')) $('#obraNumerar').onclick = () => numerarTomos();
   if ($('#obraEditar')) $('#obraEditar').onclick = () => editarGrupo('obra', o);
   if ($('#obraCompartir')) $('#obraCompartir').onclick = () => compartirGrupo('obra', o._id, o.titulo);
+  // Ver toda la obra en el Catálogo filtrando por su id (no por lista de ids → sin 414). Expande tomos.
+  if ($('#obraVerCat')) $('#obraVerCat').onclick = () => irBusquedaFiltro({ obras: o._id, etiqueta: '📖 ' + o.titulo });
 }
 
 // Editor «Numerar tomos»: lista cada libro de la obra con un campo para su nº de tomo (vacío = sin
@@ -1844,7 +1847,7 @@ function pintarColeccion(r) {
         <div style="margin-top:8px">${ratingBar('colecciones', c._id, c.valoracion, c.nsfw)}</div>
         ${c.cdu ? `<div class="mono muted" style="margin-top:8px">CDU ${esc(c.cdu)}${desc && desc.titulo_es ? ' · ' + esc(desc.titulo_es) : ''}</div>` : ''}
         ${c.descripcion ? `<p class="muted" style="font-size:12px;margin-top:6px">${esc(c.descripcion)}</p>` : ''}
-        ${editBtn}<button class="btn" id="colCompartir" style="margin-top:8px;margin-left:6px;padding:4px 10px;font-size:12px" title="Compartir un enlace a esta colección (todos sus documentos + descarga)">🔗 Compartir</button>
+        ${editBtn}<button class="btn" id="colVerCat" style="margin-top:8px;margin-left:6px;padding:4px 10px;font-size:12px" title="Ver TODOS los documentos de esta colección en el Catálogo (para enriquecer, reclasificar… en lote). Filtra por la colección, no por una lista de ids → escala a colecciones enormes">🔍 Ver en el Catálogo</button><button class="btn" id="colCompartir" style="margin-top:8px;margin-left:6px;padding:4px 10px;font-size:12px" title="Compartir un enlace a esta colección (todos sus documentos + descarga)">🔗 Compartir</button>
       </div></div>`;
   // Nº de cada miembro. En LIBROS y admin, es un botón: toca = renumerar ese volumen directo (mini-modal).
   const numeroChip = (d) => {
@@ -1957,6 +1960,10 @@ function pintarColeccion(r) {
   if ($('#colLomos')) $('#colLomos').onclick = () => numerarPorLomos();
   if ($('#colEditar')) $('#colEditar').onclick = () => editarGrupo('coleccion', c);
   if ($('#colCompartir')) $('#colCompartir').onclick = () => compartirGrupo('coleccion', c._id, c.nombre);
+  // Ver toda la colección en el Catálogo FILTRANDO por su id (no por una lista de ids en la URL → sin 414, y
+  // escala a colecciones enormes). El servidor resuelve los miembros por `coleccion`. Mismo camino que el
+  // «Mostrar en Catálogo» de la estantería de colecciones.
+  if ($('#colVerCat')) $('#colVerCat').onclick = () => irBusquedaFiltro({ colecciones: c._id, etiqueta: '📚 ' + c.nombre });
 }
 
 // Rango de años de publicación: «1920–1960», «1980–actualidad» (fin vacío), «?–1960» (solo fin), '' si nada.
@@ -8060,7 +8067,10 @@ async function pickerGrupo(kind, ids = null) {
           )
           .join('')
       : '<div class="muted" style="padding:14px">Sin resultados</div>';
-    $$('#pkLista .pkitem').forEach((el) => (el.onclick = () => aplicarGrupo(kind, { id: el.dataset.id, ids: objetivo })));
+    $$('#pkLista .pkitem').forEach((el) => (el.onclick = () => {
+      const o = items.find((x) => String(x._id) === el.dataset.id);
+      aplicarGrupo(kind, { id: el.dataset.id, nombreMostrar: o ? nom(o) : '', ids: objetivo });
+    }));
   };
   pintar('');
   $('#pkFiltro').oninput = () => pintar($('#pkFiltro').value);
@@ -8074,38 +8084,85 @@ async function pickerGrupo(kind, ids = null) {
     aplicarGrupo(kind, { nombre, tipo: esCol ? $('#pkTipo').value : undefined, ids: objetivo });
   };
 }
-async function aplicarGrupo(kind, { id, nombre, tipo, ids = null }) {
+// Asigna una selección (decenas de documentos) a una colección/obra. La asignación es SECUENCIAL por
+// documento en el servidor (updates contra Atlas), así que decenas de docs tardaban varios segundos con la
+// pantalla congelada y sin señal de si la pulsación había surtido efecto. Ahora se TROCEA en el cliente y se
+// pinta un PROGRESO real con opción a CANCELAR dentro del propio modal del picker (siempre abierto al llamar).
+// El endpoint acepta subconjuntos de `ids`: el 1er lote crea/resuelve la colección/obra (si es nueva) y los
+// siguientes se anexan por su id (nunca se recrea). La auto-numeración de series continúa correcta porque cada
+// lote ve ya los miembros del anterior. Cancelar detiene ANTES del siguiente lote; lo ya asignado se conserva.
+async function aplicarGrupo(kind, { id, nombre, tipo, nombreMostrar, ids = null }) {
   const esCol = kind === 'coleccion';
   const objetivo = ids && ids.length ? ids : [...selDocs];
-  const body = esCol
-    ? { ids: objetivo, coleccionId: id || null, nombre: nombre || null, tipo }
-    : { ids: objetivo, obraId: id || null, titulo: nombre || null };
-  try {
-    const r = await api(esCol ? '/documentos/agrupar/coleccion' : '/documentos/agrupar/obra', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) {
-      const e = $('#pkErr');
-      if (e) e.textContent = r.motivo;
-      else toast(r.motivo, 'bad');
-      return;
+  const total = objetivo.length;
+  if (!total) return;
+  const etqTipo = esCol ? 'colección' : 'obra';
+  const icono = esCol ? '📚' : '📖';
+  const nomGrupo = nombreMostrar || nombre || '';
+
+  // Tamaño de lote adaptativo: ~20 actualizaciones de progreso, entre 4 y 25 por lote (pocas peticiones sin
+  // perder granularidad ni capacidad de reacción al Cancelar).
+  const CHUNK = Math.min(25, Math.max(4, Math.ceil(total / 20)));
+  const lotes = [];
+  for (let i = 0; i < total; i += CHUNK) lotes.push(objetivo.slice(i, i + CHUNK));
+
+  // Progreso dentro del modal. Durante el proceso el scrim NO cierra (evita abortar a medias sin querer):
+  // solo el botón Cancelar detiene.
+  let cancelado = false;
+  const pintar = (hechos, nomFinal) => {
+    const pct = total ? Math.round((hechos / total) * 100) : 0;
+    const etq = nomFinal || nomGrupo;
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;width:94vw">
+      <h3 style="margin:0 0 10px">${icono} Asignando ${total} documento(s) a ${etqTipo}${etq ? ` «${esc(etq)}»` : ''}…</h3>
+      <div style="height:10px;border-radius:6px;background:rgba(128,128,128,.25);overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:var(--acc);transition:width .3s"></div>
+      </div>
+      <div class="muted" style="font-size:13px;margin-top:8px">${hechos} / ${total}${cancelado ? ' · cancelando…' : ''}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn bad" id="agCancel"${cancelado ? ' disabled' : ''}>✕ Cancelar</button></div>
+    </div>`;
+    const b = $('#agCancel');
+    if (b) b.onclick = () => { cancelado = true; b.disabled = true; b.textContent = 'Cancelando…'; };
+  };
+  $('#cmpScrim').onclick = null;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  pintar(0);
+
+  let colId = id || null;   // destino (existente, o se resuelve tras el 1er lote si es nuevo)
+  let hechos = 0, errores = 0, vaciadas = 0, nomFinal = nomGrupo, ultErr = '';
+  for (const lote of lotes) {
+    if (cancelado) break;
+    const body = esCol
+      ? { ids: lote, coleccionId: colId, nombre: colId ? null : (nombre || null), tipo }
+      : { ids: lote, obraId: colId, titulo: colId ? null : (nombre || null) };
+    let r;
+    try {
+      r = await api(esCol ? '/documentos/agrupar/coleccion' : '/documentos/agrupar/obra', { method: 'POST', body: JSON.stringify(body) });
+    } catch (e) { r = { ok: false, motivo: e.message }; }
+    if (!r || !r.ok) {
+      ultErr = (r && r.motivo) || 'error';
+      // Sin destino resuelto aún = la colección/obra NUEVA no se pudo crear → abortar (reintentar la crearía
+      // duplicada). Con destino ya resuelto, cuento el lote como fallido y sigo con el resto.
+      if (!colId) { cerrarCmp(); toast(`No se pudo crear la ${etqTipo}: ${ultErr}`, 'bad'); return; }
+      errores += lote.length;
+      continue;
     }
-    cerrarCmp();
-    const vaciadas = r.vaciadas ? ` · ${r.vaciadas} ${esCol ? 'colección(es)' : 'obra(s)'} vacía(s) eliminada(s)` : '';
-    toast(`${r.n} doc(s) → ${esCol ? 'colección «' + r.coleccion.nombre : 'obra «' + r.obra.titulo}»${vaciadas}`);
-    // Si nos llamaron con ids EXPLÍCITOS venimos de la ficha de una obra/colección (selección local, no
-    // `selDocs`): allí hay que repintar ESA vista, no el Catálogo — y no tocar la selección del Catálogo.
-    if (ids && ids.length) recargarVistaActual();
-    else {
-      selDocs.clear();
-      buscarCatalogo(estadoBusqueda.page || 1);
-    }
-  } catch (e) {
-    const el = $('#pkErr');
-    if (el) el.textContent = e.message;
-    else toast(e.message, 'bad');
+    if (!colId) colId = esCol ? r.coleccion && r.coleccion._id : r.obra && r.obra._id;   // fija el destino nuevo
+    nomFinal = (esCol ? r.coleccion && r.coleccion.nombre : r.obra && r.obra.titulo) || nomFinal;
+    hechos += r.n || 0;
+    vaciadas += r.vaciadas || r.vaciados || 0;
+    pintar(hechos, nomFinal);
   }
+
+  cerrarCmp();
+  const vtxt = vaciadas ? ` · ${vaciadas} ${etqTipo}(s) vacía(s) eliminada(s)` : '';
+  const etxt = errores ? ` · ${errores} con error${ultErr ? ' (' + recortar(ultErr, 40) + ')' : ''}` : '';
+  const ctxt = cancelado ? ` · CANCELADO (${Math.max(0, total - hechos - errores)} sin tocar)` : '';
+  toast(`${hechos} doc(s) → ${etqTipo} «${nomFinal}»${vtxt}${etxt}${ctxt}`, errores || cancelado ? 'warn' : 'ok');
+
+  // Con ids EXPLÍCITOS venimos de una obra/colección (selección local): repinta ESA vista. Si no, el Catálogo.
+  if (ids && ids.length) recargarVistaActual();
+  else { selDocs.clear(); buscarCatalogo(estadoBusqueda.page || 1); }
 }
 function construirSearch() {
   $('#p-search').innerHTML = `
