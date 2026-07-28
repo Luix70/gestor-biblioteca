@@ -1924,9 +1924,24 @@ de ficheros clasificado por CDU.
           calidad). Consume visión (gratis→pago).
         · 🤖 Descripciones CDU/Dewey/LCC — se generan POR LOTE (varios códigos por
           llamada de IA → menos coste; DESC_LOTE_IA=6), con fallback uno-a-uno.
+        · 🆓 Sidecars registro.json/.marc.xml — REGENERA los sidecars de los documentos
+          MODIFICADOS después de su último sidecar (cambios de CDU/autores/editorial,
+          edición manual, re-enriquecimiento…). Los sidecars son la COPIA EN DISCO desde
+          la que se puede reconstruir la BD ante una catástrofe, pero solo el Conformador
+          (aplicarCambio) los sincronizaba: Enriquecer, «asignar datos en lote» y editar-doc
+          escriben directo a Mongo y los dejaban viejos. Detección por FECHA, no por sello de
+          versión (para captar CADA re-modificación, 2/3/N veces): candidato = `sidecars_fecha`
+          ausente Ó `fecha_actualizacion > sidecars_fecha`; al regenerar se marca
+          `sidecars_fecha = fecha_actualizacion` SIN bumpear fecha_actualizacion (si no,
+          bucle). Sin IA ni APIs (disco + BD). ACTIVA por defecto (barata). Regenerador único
+          utils/registro.js·regenerarSidecarsDoc (resuelve autores/editorial/contribuciones →
+          nombres, escribe los 2 sidecars, sella); lo comparten la campaña y el backfill CLI
+          `node scripts/regenerar-registros.js [--solo-desactualizados] [--ejecutar]`. Tras el
+          PRIMER despliegue conviene correr el backfill con --ejecutar una vez (siembra
+          `sidecars_fecha` en los ~27k docs de golpe) para no dejarle a la campaña 27k pendientes.
       Cada campaña es RESUMIBLE y TERMINABLE: sella cada elemento procesado (con o sin
       datos) para no repetirlo; el contador «Pendientes» baja hasta 0. Arrancan todas
-      DESACTIVADAS (opt-in). «▶ Ahora» lanza una tanda inmediata en 2º plano y muestra
+      DESACTIVADAS (opt-in), SALVO «Sidecars», activa por defecto (sin coste). «▶ Ahora» lanza una tanda inmediata en 2º plano y muestra
       una BARRA DE PROGRESO bajo la campaña mientras corre. «⏩ Completar» hace un
       BACKFILL COMPLETO: encadena tandas hasta dejar 0 pendientes (en 2º plano, cediendo
       a la ingesta); «⏹ Detener» lo para. Solo un backfill a la vez. Si al pulsar «Ahora» sale

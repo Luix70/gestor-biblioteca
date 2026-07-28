@@ -36,6 +36,7 @@ import path from 'node:path';
 import { carpetaDeDoc } from './util-mantenimiento.js';
 import { recuperarOriginalesDeFichero } from '../utils/titulo-original.js';
 import { indexarDoc } from '../utils/indice-busqueda.js';
+import { regenerarSidecarsDoc, FILTRO_SIDECARS_DESACTUALIZADOS } from '../utils/registro.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -276,6 +277,35 @@ export const CAMPANAS = [
         async ejecutarLote(db, { limite, onProgreso }) {
             const r = await rellenarDescripcionesFaltantes({ limite, db, onProgreso });
             return { procesados: r.generadas + r.fallos, cambios: r.generadas, pendientes: r.pendientes };
+        },
+    },
+
+    {
+        id: 'sidecars',
+        etiqueta: 'Sidecars registro.json/.marc.xml',
+        coste: 'gratis',
+        descripcion: 'Regenera los sidecars registro.json y registro.marc.xml de los documentos MODIFICADOS después de su último sidecar (cambios de CDU, autores, editorial, edición manual, re-enriquecimiento…), para que la COPIA EN DISCO —desde la que se puede reconstruir la base de datos ante una catástrofe— refleje el estado real de Mongo. Sin IA ni APIs (solo disco + BD). Un documento se regenera CADA vez que se vuelve a modificar.',
+        version: 1,
+        loteDefecto: 200,
+        cadenciaDefecto: 10,
+        activaDefecto: true, // barato (local) → conviene que corra solo para no dejar sidecars viejos
+        especial: true,      // no se sella por versión: la candidatura es «fecha_actualizacion > sidecars_fecha»
+        async pendientes(db) {
+            return db.collection('biblioteca').countDocuments(FILTRO_SIDECARS_DESACTUALIZADOS);
+        },
+        async ejecutarLote(db, { limite, onProgreso }) {
+            const docs = await db.collection('biblioteca').find(FILTRO_SIDECARS_DESACTUALIZADOS).limit(limite).toArray();
+            let procesados = 0, cambios = 0;
+            for (const doc of docs) {
+                try {
+                    const r = await regenerarSidecarsDoc(db, doc, carpetaDeDoc(doc));
+                    if (r.ok) cambios++;   // (sinCarpeta también se sella, para que la cola drene)
+                } catch { /* omitir este doc; se reintentará en la próxima pasada */ }
+                procesados++;
+                if (onProgreso) onProgreso(procesados, docs.length);
+            }
+            const pendientes = await db.collection('biblioteca').countDocuments(FILTRO_SIDECARS_DESACTUALIZADOS);
+            return { procesados, cambios, pendientes };
         },
     },
 ];

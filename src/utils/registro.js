@@ -27,6 +27,7 @@ export function aRegistroLegible(doc, { autores = [], editorial = null, contribu
     delete legible.mantenimiento;
     delete legible.mantenimiento_firma;
     delete legible._portadas_remotas;
+    delete legible.sidecars_fecha; // marca interna de «sidecars al día» (no es dato bibliográfico)
     for (const k of Object.keys(legible)) {
         const v = legible[k];
         if (v === undefined || v === null || v === '') delete legible[k];
@@ -39,6 +40,40 @@ export async function escribirSidecars(carpeta, legible) {
     await fs.writeFile(path.join(carpeta, 'registro.json'), JSON.stringify(legible, null, 2), 'utf8');
     await fs.writeFile(path.join(carpeta, 'registro.marc.xml'), aMARCXML(legible), 'utf8');
 }
+
+/**
+ * Regenera los DOS sidecars (registro.json + registro.marc.xml) de un documento desde la BD (fuente de verdad),
+ * con los nombres RESUELTOS (autores/editorial/contribuciones), y marca en el doc `sidecars_fecha` = su
+ * `fecha_actualizacion` — SIN bumpear `fecha_actualizacion` (si no, el doc parecería «modificado tras el sidecar»
+ * para siempre y se regeneraría en bucle).
+ *
+ * `carpeta` = carpeta ABSOLUTA del documento. Si es null o no existe en disco, NO hay dónde escribir: se marca
+ * `sidecars_fecha` igualmente (para que la cola de la campaña DRENE y no reintente eternamente) y se devuelve
+ * `{ ok:false, sinCarpeta:true }`. Devuelve `{ ok:true }` si se escribieron.
+ *
+ * Detección de «pendiente» (para la campaña / backfill): `sidecars_fecha` ausente Ó `fecha_actualizacion >
+ * sidecars_fecha`. Así un documento se regenera CADA vez que se vuelve a modificar (2, 3, … veces).
+ */
+export async function regenerarSidecarsDoc(db, doc, carpeta) {
+    const marca = doc.fecha_actualizacion || new Date();
+    const sellar = () => db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { sidecars_fecha: marca } });
+    let existe = false;
+    if (carpeta) { try { await fs.access(carpeta); existe = true; } catch { existe = false; } }
+    if (!existe) { await sellar(); return { ok: false, sinCarpeta: true }; }
+    const { autores, editorial, contribuciones } = await resolverNombres(db, doc);
+    const legible = aRegistroLegible(doc, { autores, editorial, contribuciones });
+    await escribirSidecars(carpeta, legible);
+    await sellar();
+    return { ok: true };
+}
+
+/** Filtro Mongo de documentos con sidecars DESACTUALIZADOS (modificados tras su último sidecar, o sin marca). */
+export const FILTRO_SIDECARS_DESACTUALIZADOS = {
+    $or: [
+        { sidecars_fecha: { $exists: false } },
+        { $expr: { $gt: ['$fecha_actualizacion', '$sidecars_fecha'] } },
+    ],
+};
 
 /** Resuelve los nombres de autores/editorial/contribuciones de un documento (consultas puntuales a la BD). */
 export async function resolverNombres(db, doc) {

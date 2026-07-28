@@ -1,14 +1,21 @@
 /**
  * Regenera los sidecars registro.json y registro.marc.xml de cada documento a partir de
- * MongoDB (la fuente de verdad). Resuelve las referencias ObjectId (autores, editorial) a sus
- * NOMBRES para que el registro sea legible, igual que en la ingesta.
+ * MongoDB (la fuente de verdad). Resuelve las referencias ObjectId (autores, editorial,
+ * contribuciones) a sus NOMBRES para que el registro sea legible, igual que en la ingesta, y
+ * marca `sidecars_fecha` en el doc (para que la campaña de fondo «sidecars» sepa que están al día).
  *
- * Útil tras correcciones masivas (re-enriquecimiento, cambios de colección…) para que los
- * ficheros en disco reflejen el estado real de la base de datos.
+ * Los sidecars son la COPIA EN DISCO desde la que se puede reconstruir la base de datos ante una
+ * catástrofe: tras correcciones masivas (re-enriquecimiento, cambios de CDU/autores/colección…)
+ * hay que regenerarlos para que reflejen el estado real.
  *
- * Solo escribe los dos sidecars dentro de cada carpeta CDU existente; no toca nada más.
- *   node scripts/regenerar-registros.js                 (DRY-RUN: cuenta, no escribe)
- *   node scripts/regenerar-registros.js --ejecutar
+ *   node scripts/regenerar-registros.js                         (DRY-RUN: cuenta, no escribe)
+ *   node scripts/regenerar-registros.js --ejecutar              (regenera TODOS)
+ *   node scripts/regenerar-registros.js --solo-desactualizados  (solo los modificados tras su sidecar)
+ *   node scripts/regenerar-registros.js --solo-desactualizados --ejecutar
+ *
+ * Reutiliza el MISMO regenerador que la campaña de fondo (utils/registro.js·regenerarSidecarsDoc),
+ * así que el backfill y la campaña producen sidecars idénticos. Recomendado tras el primer despliegue
+ * (con --ejecutar) para sembrar `sidecars_fecha` y dejar la campaña casi vacía en régimen normal.
  */
 
 import 'dotenv/config';
@@ -17,7 +24,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { conectarDB } from '../src/database.js';
-import { aRegistroLegible, escribirSidecars } from '../src/utils/registro.js';
+import { regenerarSidecarsDoc, FILTRO_SIDECARS_DESACTUALIZADOS } from '../src/utils/registro.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -27,8 +34,7 @@ const resolverDir = (envVar, def) => {
 };
 const DIR_CDU = resolverDir('PATH_CDU', 'CDU');
 const EJECUTAR = process.argv.includes('--ejecutar');
-
-const existe = (p) => fs.access(p).then(() => true).catch(() => false);
+const SOLO_STALE = process.argv.includes('--solo-desactualizados');
 
 /** Carpeta absoluta del documento a partir de su ruta_base (/recursos/...). */
 function carpetaDeDoc(doc) {
@@ -36,37 +42,30 @@ function carpetaDeDoc(doc) {
     const rel = doc.ruta_base.startsWith('/recursos/') ? doc.ruta_base.slice('/recursos/'.length) : doc.ruta_base;
     return path.join(DIR_CDU, ...rel.split('/'));
 }
+const existe = (p) => fs.access(p).then(() => true).catch(() => false);
 
 async function main() {
-    console.log(`\nRegeneración de sidecars registro.json / registro.marc.xml  [${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'}]`);
+    console.log(`\nRegeneración de sidecars registro.json / registro.marc.xml  [${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'}${SOLO_STALE ? ' · solo desactualizados' : ''}]`);
     console.log(`  PATH_CDU: ${DIR_CDU}`);
     if (!EJECUTAR) console.log('  ℹ️  DRY-RUN: no se escribe nada.\n'); else console.log('');
 
     const db = await conectarDB();
     const col = db.collection('biblioteca');
+    const filtro = SOLO_STALE ? FILTRO_SIDECARS_DESACTUALIZADOS : {};
+    const docs = await col.find(filtro).toArray();
+    console.log(`Documentos a revisar: ${docs.length}\n`);
 
-    // Mapas id→nombre para resolver referencias sin una consulta por documento.
-    const autorMap = new Map();
-    for (const a of await db.collection('autores').find({}, { projection: { nombre: 1 } }).toArray())
-        autorMap.set(String(a._id), a.nombre);
-    const editorialMap = new Map();
-    for (const e of await db.collection('editoriales').find({}, { projection: { nombre: 1 } }).toArray())
-        editorialMap.set(String(e._id), e.nombre);
-
-    const docs = await col.find({}).toArray();
     let escritos = 0, sinCarpeta = 0, fallos = 0;
-
     for (const doc of docs) {
         const carpeta = carpetaDeDoc(doc);
-        if (!carpeta || !await existe(carpeta)) { sinCarpeta++; continue; }
-
-        const autores = (doc.autores || []).map(id => autorMap.get(String(id)) || String(id));
-        const editorial = doc.editorial ? (editorialMap.get(String(doc.editorial)) || null) : null;
-        const legible = aRegistroLegible(doc, { autores, editorial });
-        if (!EJECUTAR) { escritos++; continue; }
+        // DRY-RUN: solo comprueba si hay carpeta y contaría; no escribe ni sella.
+        if (!EJECUTAR) {
+            if (carpeta && await existe(carpeta)) escritos++; else sinCarpeta++;
+            continue;
+        }
         try {
-            await escribirSidecars(carpeta, legible);
-            escritos++;
+            const r = await regenerarSidecarsDoc(db, doc, carpeta);   // escribe los 2 sidecars + sella sidecars_fecha
+            if (r.ok) escritos++; else sinCarpeta++;                  // sinCarpeta también queda sellado (drena la cola)
         } catch (e) {
             console.error(`  ⛔ [${doc._id}] "${doc.titulo}": ${e.message}`);
             fallos++;
