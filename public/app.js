@@ -37,6 +37,41 @@ let _nsfwTocado = false; // ¿el usuario ha tocado la casilla 🔞? Si no, «mar
 // ¿Está autorizado a ver NSFW? (admin o invitado con permiso). Para estos usuarios, el filtro arranca con
 // TODAS las casillas marcadas (todas las estrellas + «sin valorar» + 🔞): así ven TODO el catálogo por defecto.
 const AUTORIZADO_NSFW = () => ROL === 'admin' || PUEDE_NSFW;
+
+// Botón de AYUDA «?» reutilizable con popup emergente. preventDefault/stopPropagation → dentro de un <summary>
+// NO pliega/despliega la tarjeta al abrir la ayuda. Se cierra al volver a pulsarlo.
+function botonAyuda(titulo, html) {
+  return `<span class="ayuda" onclick="event.preventDefault();event.stopPropagation();this.classList.toggle('open')" title="Ayuda">?<span class="ayuda-pop" onclick="event.stopPropagation()"><b>${esc(titulo)}</b>${html}</span></span>`;
+}
+const _AYUDA_BUSQUEDA = `<p>En «Buscar» pon título, autor, editorial, ISBN/ISSN o nombre de archivo (insensible a mayúsculas y acentos).</p>
+  <ul>
+    <li><b>Por campo</b> (estilo Google): <code>titulo:Osprey</code>, <code>autor:Windrow</code>, <code>editorial:Osprey</code>, <code>subtitulo:…</code>, <code>coleccion:…</code>. Se combinan: <code>titulo:Osprey autor:Windrow</code>.</li>
+    <li><b>Palabras clave</b>: empieza por <code>#</code>. Cada clave va de un <code>#</code> al siguiente y admite espacios: <code>#Divulgación científica #Álgebra</code>.</li>
+    <li><b>🎯 Frase exacta</b>: solo resultados con esa frase adyacente y en ese orden.</li>
+    <li><b>ISBN/ISSN</b>: con o sin guiones. También busca por otras ediciones y por el ISSN de serie de la colección.</li>
+  </ul>`;
+const _AYUDA_ORDEN = `<ul>
+    <li><b>🎲 Aleatorio</b> (por defecto al entrar): descubrimiento; mantiene juntos los tomos de una misma obra. «🎲 Rebarajar» = otro orden.</li>
+    <li><b>Relevancia / recientes</b>: al buscar por texto ordena por mejor coincidencia; al navegar, por más recientes.</li>
+    <li><b>Título · Autor · Nº de páginas</b>: alfabético/numérico, con botón de sentido ascendente/descendente.</li>
+    <li><b>Posición en la estantería / obra / colección</b>: orden físico o el de la serie.</li>
+  </ul>`;
+const _AYUDA_SELECCION = `<ul>
+    <li><b>👁 Previsualización</b> (por defecto): tocar una portada abre su ficha.</li>
+    <li><b>🖱 Modo selección</b>: tocar una portada la MARCA (✓); vuelve a tocar para desmarcar.</li>
+    <li><b>En cualquier modo</b>: <b>doble clic</b> (PC) o <b>pulsación larga</b> (móvil) sobre una portada la marca/desmarca sin cambiar de modo.</li>
+    <li>La selección se <b>conserva</b> al cambiar de modo, de página o de filtros.</li>
+    <li><b>Todos (página)</b> / <b>🗂 Todos los resultados</b>: seleccionar en bloque. <b>👁 Mostrar selección</b>: ver solo lo marcado.</li>
+    <li><b>📚 Obras colapsadas / 📖 Tomos sueltos</b>: una tarjeta por obra, o cada tomo suelto y seleccionable.</li>
+  </ul>`;
+const _AYUDA_ACCIONES = `<p>Sobre los documentos <b>seleccionados</b>:</p>
+  <ul>
+    <li><b>📚 Colección · 📖 Obra · 📍 Estantería · 🚫 Quitar de estantería</b>: agrupar / ubicar.</li>
+    <li><b>🧹 Conformar</b>: perfecciona el registro (sin IA). <b>✨ Enriquecer</b>: rellena huecos con APIs. <b>🎯 A fondo</b>: lee con visión IA (más lento).</li>
+    <li><b>🔀 Cambiar tipo · 🏢 Reclasificar editorial · ✏️ Asignar datos</b> (autor/contribuidor/editorial/CDU/soporte) <b>· 🏷 Palabras clave · 🖼️ Portada común</b>.</li>
+    <li><b>📌 Guardar como / ➕ Añadir a / ➖ Quitar de / 🔁 Reemplazar</b> una selección personal.</li>
+    <li><b>♻️ Reprocesar</b>: devuelve al Inbox para recatalogar de cero. <b>🗑 Eliminar</b>: va a la Papelera (recuperable).</li>
+  </ul>`;
 let detalle = null; // vista de detalle abierta: { tipo:'obra'|'doc', id, ctx? } · null = ninguna
 let FUENTES = [],
   sanCtx = null; // «buscar copia» (fuentes cacheadas) + depósito de saneamiento en curso
@@ -7600,11 +7635,12 @@ function renderBulk() {
   // Panel colapsable de acciones (recuerda su estado; en móvil arranca plegado, como los filtros).
   const acciones = selDocs.size
     ? `<details class="bulkacts" id="bulkActs"${accPanelAbierto() ? ' open' : ''}>
-         <summary>⚙️ Acciones (${selDocs.size})</summary>
+         <summary style="display:flex;align-items:center;gap:8px">⚙️ Acciones (${selDocs.size})<span style="flex:1"></span>${botonAyuda('Qué hace cada acción', _AYUDA_ACCIONES)}</summary>
          <div class="bulkacts-body">${accBtns}</div>
        </details>`
     : '';
-  el.innerHTML = `<div class="bulkbar">${modoBtn}${tomosBtn}${herramientas}${resume}${cuenta}</div>${acciones}`;
+  const ayudaSel = botonAyuda('Cómo seleccionar (PC y móvil)', _AYUDA_SELECCION);
+  el.innerHTML = `<div class="bulkbar">${modoBtn}${tomosBtn}${ayudaSel}${herramientas}${resume}${cuenta}</div>${acciones}`;
   // Recordar si el panel de acciones queda plegado o desplegado.
   if ($('#bulkActs'))
     $('#bulkActs').addEventListener('toggle', (e) => localStorage.setItem('sq_acciones', e.target.open ? '1' : '0'));
@@ -8075,7 +8111,7 @@ function construirSearch() {
   $('#p-search').innerHTML = `
     <div class="sec-h"><h2>Catálogo</h2><span class="muted" id="searchCount" style="margin-left:auto"></span><button class="btn" id="sqVista" title="Cambiar entre vista de iconos y vista de detalles" style="margin-left:10px"></button><button class="btn" id="sqClear" title="Limpiar la búsqueda y todos los filtros" style="margin-left:8px">✕ Limpiar</button></div>
     <details class="card foldcard" id="sqFiltros" style="margin-bottom:16px">
-      <summary>🔎 Buscar y filtrar</summary>
+      <summary>🔎 Buscar y filtrar<span style="flex:1"></span>${botonAyuda('Opciones de búsqueda', _AYUDA_BUSQUEDA)}</summary>
       <div class="row">
         <div style="flex:2 1 220px"><label>Buscar</label><input id="sqQ" placeholder="título, autor, editorial, ISBN, ISSN, archivo… · #palabra clave" title="Empieza por «#» para buscar SOLO en las palabras clave. Cada palabra clave va de un «#» al siguiente y puede llevar espacios: «#Divulgación científica #Álgebra» = dos palabras clave. Salen primero los que tienen más." autocomplete="off" enterkeyhint="search">
           <label class="muted" title="Búsqueda estricta: solo resultados con la FRASE EXACTA tecleada (p. ej. «history of philosophy» adyacente y en ese orden), en vez de casar cada palabra suelta." style="font-size:11px;display:inline-flex;align-items:center;gap:5px;margin-top:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="sqEstricto"> 🎯 Frase exacta</label></div>
@@ -8104,7 +8140,7 @@ function construirSearch() {
       </div>
     </details>
     <details class="card foldcard" id="sqOrdenar" style="margin-bottom:16px">
-      <summary>↕️ Ordenar</summary>
+      <summary>↕️ Ordenar<span style="flex:1"></span>${botonAyuda('Opciones de ordenación', _AYUDA_ORDEN)}</summary>
       <div class="row" style="align-items:flex-end">
         <div style="flex:1 1 240px"><label>Ordenar por</label>
           <select id="sqOrden">
