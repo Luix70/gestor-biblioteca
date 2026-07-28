@@ -668,6 +668,22 @@ de ficheros clasificado por CDU.
            (p. ej. un ISBN equivocado que el modo conservador volvería a imponer).
          En escaneos, las imágenes se re-empaquetan con prefijos 001_,002_… y la PORTADA
          primero, para conservar orden y portada.
+      ✨ ENRIQUECER (utils/reenriquecer.js) re-consulta las fuentes (Fichero local →
+         OpenLibrary/Google Books → …) y mejora el registro. Con ANCLA DE ISBN (el doc
+         tiene un ISBN VÁLIDO que resuelve en una autoridad y coincide con el suyo) trata
+         los datos como AUTORITATIVOS —el ISBN identifica la edición—: recupera los AUTORES
+         reales, FUERZA la COLECCIÓN/SERIE de la autoridad (aunque ya hubiera una parecida:
+         «Osprey Men at Arms» → «Men-at-arms series»), y sobrescribe el TÍTULO solo si es
+         MANIFIESTAMENTE distinto (no por un plural o un subtítulo; comparación tolerante a
+         acentos/grafía para no reescribir lo que ya coincide). Sin ISBN fiable sigue el
+         modo CONSERVADOR de siempre (solo rellena huecos y solo pisa título/autor/editorial
+         si el actual es basura). Rellena además Dewey/LCC/páginas/dimensiones/sinopsis del
+         registro MARC (BNE/OL) y, si la CDU es pobre (000) pero hay Dewey/LCC, DES-SELLA
+         «re-clasificar-cdu» para que el Conformador la resuelve (355.3 → 355) y MUEVA la
+         carpeta. Cada cambio se muestra en la ficha y se deja con su valor anterior en
+         alertas_agente (auditoría; el fichero físico nunca se toca). Arreglo así los libros
+         mal catalogados cuyo título quedó como el sello y cuyos «autores» eran la colección
+         o el propio título. Funciona igual en LOTE (✨ Enriquecer sobre la selección).
     En «Datos catalográficos» el bloque de agrupación va en orden: Obra · ISBN obra ·
     Volumen nº · Título del volumen · Colección · Nº en colección (el nº de colección
     justo tras la colección).

@@ -67,7 +67,7 @@ const _AYUDA_SELECCION = `<ul>
 const _AYUDA_ACCIONES = `<p>Sobre los documentos <b>seleccionados</b>:</p>
   <ul>
     <li><b>📚 Colección · 📖 Obra · 📍 Estantería · 🚫 Quitar de estantería</b>: agrupar / ubicar.</li>
-    <li><b>🧹 Conformar</b>: perfecciona el registro (sin IA). <b>✨ Enriquecer</b>: rellena huecos con APIs. <b>🎯 A fondo</b>: lee con visión IA (más lento).</li>
+    <li><b>🧹 Conformar</b>: perfecciona el registro (sin IA). <b>✨ Enriquecer</b>: rellena huecos con APIs y, si hay ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books). <b>🎯 A fondo</b>: lee con visión IA (más lento).</li>
     <li><b>🔀 Cambiar tipo · 🏢 Reclasificar editorial · ✏️ Asignar datos</b> (autor/contribuidor/editorial/CDU/soporte) <b>· 🏷 Palabras clave · 🖼️ Portada común</b>.</li>
     <li><b>📌 Guardar como / ➕ Añadir a / ➖ Quitar de / 🔁 Reemplazar</b> una selección personal.</li>
     <li><b>♻️ Reprocesar</b>: devuelve al Inbox para recatalogar de cero. <b>🗑 Eliminar</b>: va a la Papelera (recuperable).</li>
@@ -3096,7 +3096,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actImgs" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">🖼️ Imágenes</button>
       <button class="fbtn admin-only" id="actMedir" title="Estimar el tamaño físico del libro (cm) sobre la alfombrilla reglada">📐 Medir</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
-      <button class="fbtn admin-only" id="actEnr" title="Re-consulta las APIs/IA para mejorar este documento (rellena huecos)">✨ Enriquecer</button>
+      <button class="fbtn admin-only" id="actEnr" title="Re-consulta las fuentes para mejorar el documento: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books)">✨ Enriquecer</button>
       <button class="fbtn admin-only" id="actAFondo" title="Lee las PÁGINAS del propio libro (portadilla/contraportada) con la visión y propone autores/roles reales, sinopsis e identificadores. Muestra un balance antes/después para aplicar lo que elijas.">🎯 Completar a fondo</button>
       <button class="fbtn admin-only" id="actShare" title="Genera un QR/enlace para compartir esta ficha (y su descarga, si es digital)">🔗 Compartir</button>
       <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
@@ -7603,7 +7603,7 @@ function renderBulk() {
     <button class="btn" id="bkQuitUbic" title="Quitar de su estantería/ámbito (pasan a «Sin asignar»)">🚫 Quitar de estantería</button>
     ${'NDEFReader' in window ? '<button class="btn pri" id="bkNfc">📶 Etiquetar</button>' : ''}
     <button class="btn" id="bkConformar" title="Conformar (perfeccionar registro) cada documento seleccionado">🧹 Conformar</button>
-    <button class="btn" id="bkEnriquecer" title="Enriquecer (rellenar huecos con APIs) cada documento seleccionado">✨ Enriquecer</button>
+    <button class="btn" id="bkEnriquecer" title="Enriquecer cada documento seleccionado: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos">✨ Enriquecer</button>
     <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
     <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
     <button class="btn" id="bkReclasEd" title="Reclasificar la EDITORIAL de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional). Muestra un informe por transición antes de aplicar.">🏢 Reclasificar editorial</button>
