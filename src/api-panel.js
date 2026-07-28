@@ -171,6 +171,26 @@ async function nombrePorId(db, coleccion, id, campo = 'nombre') {
 // Escapa una cadena para usarla literal dentro de una expresión regular de MongoDB.
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// BÚSQUEDA POR CAMPOS estilo Google: «titulo:…», «autor:…», «editorial:…», «subtitulo:…», «coleccion:…» (como
+// el modo #palabras-clave, pero por campo). Extrae los pares campo:valor del texto y devuelve {campos, libre}
+// (el texto LIBRE restante, para el FTS normal). El valor de un campo llega HASTA el siguiente campo conocido,
+// así que «titulo:Osprey autor:Windrow» → { titulo:'Osprey', autor:'Windrow' }.
+const _CAMPOS_BUSQUEDA = { titulo: 'titulo', 'título': 'titulo', title: 'titulo', autor: 'autor', autores: 'autor', author: 'autor', editorial: 'editorial', publisher: 'editorial', subtitulo: 'subtitulo', 'subtítulo': 'subtitulo', coleccion: 'coleccion', 'colección': 'coleccion', serie: 'coleccion' };
+function parsearCamposBusqueda(q) {
+    const claves = Object.keys(_CAMPOS_BUSQUEDA);
+    const re = new RegExp('\\b(' + claves.join('|') + '):', 'i');
+    if (!re.test(q)) return { campos: {}, libre: q };
+    const partes = q.split(new RegExp('\\b(' + claves.join('|') + '):', 'ig'));
+    const campos = {};
+    const libre = (partes[0] || '').trim();
+    for (let i = 1; i < partes.length; i += 2) {
+        const campo = _CAMPOS_BUSQUEDA[String(partes[i]).toLowerCase()];
+        const valor = (partes[i + 1] || '').trim();
+        if (campo && valor) campos[campo] = campos[campo] ? campos[campo] + ' ' + valor : valor;
+    }
+    return { campos, libre };
+}
+
 // Filtros "especiales" del Dashboard → condición sobre 'biblioteca' (clic en un contador para ver
 // EXACTAMENTE esos documentos en la Búsqueda). Los de obras resuelven a sus tomos vía la colección 'obras'.
 const ausenteCampo = (campo) => ({ $or: [{ [campo]: { $exists: false } }, { [campo]: null }, { [campo]: '' }] });
@@ -203,8 +223,10 @@ async function filtroEspecial(db, nombre) {
 let _guestNsfw = null, _guestNsfwTs = 0;
 export async function nsfwPorDefecto() {
     if (_guestNsfw !== null && Date.now() - _guestNsfwTs < 10000) return _guestNsfw;
-    try { const db = await conectarDB(); _guestNsfw = !!(await db.collection('ajustes').findOne({ _id: 'guest_nsfw' }))?.enabled; }
-    catch { _guestNsfw = false; }
+    // Por DEFECTO (ajuste sin configurar) → TRUE: los usuarios autorizados ven todo (incluido NSFW) por defecto;
+    // el admin puede DESACTIVARLo en Mantenimiento. Si el ajuste existe, manda su valor.
+    try { const d = await conectarDB().then((db) => db.collection('ajustes').findOne({ _id: 'guest_nsfw' })); _guestNsfw = d ? !!d.enabled : true; }
+    catch { _guestNsfw = true; }
     _guestNsfwTs = Date.now();
     return _guestNsfw;
 }
@@ -659,7 +681,7 @@ export function rutasPanel() {
     r.get('/catalogo', async (req, res) => {
         try {
             const db = await conectarDB();
-            const q = (req.query.q || '').trim();
+            let q = (req.query.q || '').trim();
             const tipo = req.query.tipo;
             const cdu = (req.query.cdu || '').trim();
             const orden = req.query.orden || 'reciente';
@@ -717,6 +739,30 @@ export function rutasPanel() {
             // orden («history of philosophy»), no cada palabra suelta. Por defecto (laxo) casa todas las palabras
             // en cualquier posición.
             const estricto = String(req.query.estricto || '') === '1';
+
+            // BÚSQUEDA POR CAMPOS (titulo:/autor:/editorial:/subtitulo:/coleccion:, estilo Google): se aplican como
+            // AND (via `camposExtras` → `extras`) y lo que quede del texto pasa al FTS. Un campo sin coincidencias
+            // fuerza «sin resultados» (id imposible), no ignora el filtro.
+            const camposExtras = [];
+            if (q && !q.trim().startsWith('#')) {
+                const { campos, libre } = parsearCamposBusqueda(q);
+                if (Object.keys(campos).length) {
+                    const rxDe = (v) => ({ $regex: escapeRegex(v), $options: 'i' });
+                    if (campos.titulo) camposExtras.push({ $or: [{ titulo: rxDe(campos.titulo) }, { titulo_original: rxDe(campos.titulo) }, { obra_titulo: rxDe(campos.titulo) }] });
+                    if (campos.subtitulo) camposExtras.push({ subtitulo: rxDe(campos.subtitulo) });
+                    if (campos.coleccion) camposExtras.push({ coleccion_nombre: rxDe(campos.coleccion) });
+                    if (campos.autor) {
+                        const ids = (await db.collection('autores').find({ $or: [{ nombre: rxDe(campos.autor) }, { nombres_alternativos: rxDe(campos.autor) }] }, { projection: { _id: 1 } }).limit(300).toArray()).map(a => a._id);
+                        camposExtras.push({ autores: { $in: ids.length ? ids : [new ObjectId()] } });
+                    }
+                    if (campos.editorial) {
+                        const ids = (await db.collection('editoriales').find({ $or: [{ nombre: rxDe(campos.editorial) }, { nombres_alternativos: rxDe(campos.editorial) }] }, { projection: { _id: 1 } }).limit(300).toArray()).map(e => e._id);
+                        camposExtras.push({ editorial: { $in: ids.length ? ids : [new ObjectId()] } });
+                    }
+                    q = libre; // el resto (texto sin campo) va al FTS; si queda vacío, no hay búsqueda de texto libre
+                }
+            }
+
             let idsRanked = null, ordenRelevancia = false;
             if (q) {
                 const or = [];
@@ -798,6 +844,7 @@ export function rutasPanel() {
 
             // Filtros del Dashboard: por día de ingesta y/o por contador especial (se combinan con AND).
             const extras = [];
+            extras.push(...camposExtras); // filtros por campo (titulo:/autor:/editorial:…), AND con el resto
             const dia = String(req.query.dia || '').trim();
             if (/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
                 const d0 = new Date(dia + 'T00:00:00');

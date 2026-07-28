@@ -34,6 +34,9 @@ let USER = null; // nombre del usuario autenticado
 let PUEDE_NSFW = false; // permiso NSFW efectivo (admin siempre; invitado según su credencial) — de /api/yo
 let NSFW_DEFECTO = false; // estado inicial de la casilla 🔞 del filtro (ajuste global de Mantenimiento) — de /api/yo
 let _nsfwTocado = false; // ¿el usuario ha tocado la casilla 🔞? Si no, «marcada por defecto» = INCLUIR (no «solo»)
+// ¿Está autorizado a ver NSFW? (admin o invitado con permiso). Para estos usuarios, el filtro arranca con
+// TODAS las casillas marcadas (todas las estrellas + «sin valorar» + 🔞): así ven TODO el catálogo por defecto.
+const AUTORIZADO_NSFW = () => ROL === 'admin' || PUEDE_NSFW;
 let detalle = null; // vista de detalle abierta: { tipo:'obra'|'doc', id, ctx? } · null = ninguna
 let FUENTES = [],
   sanCtx = null; // «buscar copia» (fuentes cacheadas) + depósito de saneamiento en curso
@@ -8089,8 +8092,8 @@ function construirSearch() {
             <div id="sqCduPop" class="cdupop" style="display:none"></div>
           </div>
           <label style="font-size:11px;display:flex;align-items:center;gap:5px;margin-top:4px;cursor:pointer" title="Estricta: SOLO ese código. + sub-CDUs: incluye las subclasificaciones (159 → 159.1, 159.9…)"><input type="checkbox" id="sqCduSub" checked style="width:auto"> incluir sub-CDUs</label></div>
-        <div><label>Estrellas${ROL === 'admin' || PUEDE_NSFW ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
-          <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}">${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0">Sin valorar</label>${ROL === 'admin' || PUEDE_NSFW ? `<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"${NSFW_DEFECTO ? ' checked' : ''}> 🔞 NSFW</label>` : ''}</div>
+        <div><label>Estrellas${AUTORIZADO_NSFW() ? ' / NSFW' : ''}</label><details class="ddown" id="sqStarsDD"><summary id="sqStarsSum">Todas</summary>
+          <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqStar" value="${n}"${AUTORIZADO_NSFW() ? ' checked' : ''}>${'★'.repeat(n)}</label>`).join('')}<label><input type="checkbox" class="sqStar" value="0"${AUTORIZADO_NSFW() ? ' checked' : ''}>Sin valorar</label>${AUTORIZADO_NSFW() ? `<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px" title="Sin marcar: OCULTA lo NSFW · Marcada con otros filtros: lo INCLUYE también · Marcada y sola: SOLO NSFW"><input type="checkbox" id="sqNsfw"${NSFW_DEFECTO ? ' checked' : ''}> 🔞 NSFW</label>` : ''}</div>
         </details></div>
         ${ROL === 'admin' ? `<div class="admin-only"><label>📖 Leído</label><details class="ddown" id="sqLeidoDD"><summary id="sqLeidoSum">Todos</summary>
           <div class="pop">${[5, 4, 3, 2, 1].map((n) => `<label><input type="checkbox" class="sqLeido" value="${n}">${LEIDO_ETIQ[n]}</label>`).join('')}<label style="border-top:1px solid var(--line);margin-top:4px;padding-top:6px"><input type="checkbox" class="sqLeido" value="0">Sin leer</label></div>
@@ -8262,7 +8265,7 @@ function construirSearch() {
     if ($('#searchExternal')) $('#searchExternal').innerHTML = '';
     if ($('#sqNsfw')) { $('#sqNsfw').checked = NSFW_DEFECTO; _nsfwTocado = false; } // «Limpiar» vuelve al defecto (ajuste global)
     if ($('#sqNfc')) $('#sqNfc').value = '';
-    $$('#p-search .sqStar').forEach((c) => (c.checked = false));
+    $$('#p-search .sqStar').forEach((c) => (c.checked = AUTORIZADO_NSFW())); // autorizados: todas marcadas = ver todo
     $$('#p-search .sqLeido').forEach((c) => (c.checked = false));
     if ($('#sqLike')) $('#sqLike').value = '';
     estadoBusqueda.extra = null;
