@@ -2491,7 +2491,7 @@ async function idsDelCatalogo() {
   if (_catalogoNav.clave === clave && _catalogoNav.ids.length) return _catalogoNav.ids;
   const params = _paramsBusqueda();
   params.set('soloIds', '1');
-  const r = await api('/catalogo?' + params.toString());
+  const r = await pedirCatalogo(params);
   _catalogoNav = { clave, ids: r.ids || [] };
   return _catalogoNav.ids;
 }
@@ -7713,7 +7713,7 @@ async function selTodosResultados() {
   params.set('soloIds', '1');
   let r;
   try {
-    r = await api('/catalogo?' + params.toString());
+    r = await pedirCatalogo(params);
   } catch (e) {
     toast(e.message, 'bad');
     return;
@@ -8519,6 +8519,17 @@ function attachAutocomplete(input, { buscar, fila, elegir, minLen = 2 }) {
   input.addEventListener('blur', () => setTimeout(cerrar, 180));   // margen para que registre el clic en una fila
 }
 
+// Pide /catalogo. Si la URL saldría demasiado larga (selección grande → miles de `ids` en «Mostrar selección»),
+// manda los `ids` por POST en el body en vez de en la query (evita el 414 URI Too Long). El resto de filtros
+// van siempre en la query. El servidor registra /catalogo en GET y POST y lee `ids` de cualquiera de los dos.
+async function pedirCatalogo(params) {
+  const qs = params.toString();
+  if (qs.length <= 1800 || !params.has('ids')) return api('/catalogo?' + qs);
+  const ids = (params.get('ids') || '').split(',').filter(Boolean);
+  const sinIds = new URLSearchParams(params);
+  sinIds.delete('ids');
+  return api('/catalogo?' + sinIds.toString(), { method: 'POST', body: JSON.stringify({ ids }) });
+}
 async function buscarCatalogo(page) {
   estadoBusqueda.page = page;
   const params = _paramsBusqueda();
@@ -8527,7 +8538,7 @@ async function buscarCatalogo(page) {
   $('#searchResults').innerHTML = '<div class="muted" style="padding:22px 6px">Buscando…</div>';
   $('#searchPager').innerHTML = '';
   try {
-    const r = await api('/catalogo?' + params.toString());
+    const r = await pedirCatalogo(params);
     pintarBusqueda(r);
   } catch (e) {
     $('#searchResults').innerHTML = `<div class="empty">${esc(e.message)}</div>`;

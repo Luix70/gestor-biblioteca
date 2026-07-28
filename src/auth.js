@@ -155,12 +155,16 @@ function tokenDe(req) {
     return a.startsWith('Bearer ') ? a.slice(7) : (req.query.token || '');
 }
 
-/** Middleware: exige sesión válida; las mutaciones (método != GET) exigen rol admin. */
+// POST de SOLO LECTURA (no mutan nada): se permiten a invitados pese a la puerta de mutaciones. `/catalogo` es
+// POST (no GET) porque una selección grande manda miles de `ids` en el body (la URL del GET daría un 414).
+const POST_LECTURA = new Set(['/catalogo']);
+
+/** Middleware: exige sesión válida; las mutaciones (método != GET) exigen rol admin, salvo POST de solo lectura. */
 export function autenticar(req, res, next) {
     if (req.path === '/login') return next(); // público
     const sess = validar(tokenDe(req));
     if (!sess) return res.status(401).json({ ok: false, motivo: 'no autenticado' });
-    if (req.method !== 'GET' && sess.rol !== 'admin')
+    if (req.method !== 'GET' && sess.rol !== 'admin' && !(req.method === 'POST' && POST_LECTURA.has(req.path)))
         return res.status(403).json({ ok: false, motivo: 'permiso denegado: solo el administrador puede hacer cambios' });
     req.usuario = sess;
     next();

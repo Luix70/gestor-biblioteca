@@ -678,7 +678,10 @@ export function rutasPanel() {
     // Filtros: q (título/subtítulo/obra/colección/palabras_clave/nombre_archivo/ISBN/ISSN + autor/editorial
     // por nombre), tipo (libro|revista), cdu (prefijo), orden (reciente|titulo|antiguo). Paginado (24).
     // Devuelve fichas mínimas con autores ya resueltos (vía $lookup) para pintar tarjetas con portada.
-    r.get('/catalogo', async (req, res) => {
+    // Handler del catálogo. Registrado en GET y POST: con selecciones GRANDES (miles de ids en «Mostrar
+    // selección») la URL del GET revienta el límite (414 URI Too Long), así que el cliente manda los `ids` por
+    // POST en el body (el resto de filtros siguen en la query). `ids` se lee de la query O del body.
+    const catalogoHandler = async (req, res) => {
         try {
             const db = await conectarDB();
             let q = (req.query.q || '').trim();
@@ -906,7 +909,8 @@ export function rutasPanel() {
             // Filtro por lista EXPLÍCITA de ids (una selección enviada desde la ficha del autor a la
             // Búsqueda). CSV de ObjectId; se acota a 1000 para no abusar del pipeline. Si el CSV no trae
             // ningún id válido, fuerza "sin resultados" (id imposible) en vez de ignorar el filtro.
-            const idsCsv = String(req.query.ids || '').trim();
+            // `ids` de la query O del body (POST) — con selecciones grandes van en el body para no reventar la URL.
+            const idsCsv = String(req.query.ids || (Array.isArray(req.body?.ids) ? req.body.ids.join(',') : req.body?.ids) || '').trim();
             if (idsCsv) {
                 const oids = idsCsv.split(',').map(s => s.trim()).filter(s => ObjectId.isValid(s))
                     .slice(0, 1000).map(s => new ObjectId(s));
@@ -1156,7 +1160,9 @@ export function rutasPanel() {
                 }),
             });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
-    });
+    };
+    r.get('/catalogo', catalogoHandler);
+    r.post('/catalogo', catalogoHandler); // mismos filtros; el body puede traer `ids` (selecciones grandes)
 
     // Fichas MÍNIMAS por lista de _ids — para «ver selección» (título + si tiene NFC + ubicación). Admin.
     r.post('/documentos/por-ids', async (req, res) => {
