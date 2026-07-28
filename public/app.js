@@ -47,6 +47,7 @@ const _AYUDA_BUSQUEDA = `<p>En «Buscar» pon título, autor, editorial, ISBN/IS
   <ul>
     <li><b>Por campo</b> (estilo Google): <code>titulo:Osprey</code>, <code>autor:Windrow</code>, <code>editorial:Osprey</code>, <code>subtitulo:…</code>, <code>coleccion:…</code>, <code>isbn:…</code>, <code>issn:…</code>. Se combinan: <code>titulo:Osprey autor:Windrow</code>.</li>
     <li><b>Excluir</b> con <code>-</code> delante del campo: <code>titulo:Osprey -isbn:0140110925</code> = título «Osprey» pero SIN ese ISBN. Vale con cualquier campo (<code>-autor:…</code>, <code>-editorial:…</code>).</li>
+    <li><b>Existencia</b> con <code>*</code>: <code>isbn:*</code> = tiene ISBN; <code>-isbn:*</code> = sin ISBN. Ej.: <code>coleccion:Men at Arms isbn:* -isbn:0229986528</code> = de esa colección, con ISBN y distinto de ese.</li>
     <li><b>Palabras clave</b>: empieza por <code>#</code>. Cada clave va de un <code>#</code> al siguiente y admite espacios: <code>#Divulgación científica #Álgebra</code>.</li>
     <li><b>🎯 Frase exacta</b>: solo resultados con esa frase adyacente y en ese orden.</li>
     <li><b>ISBN/ISSN</b>: con o sin guiones. También busca por otras ediciones y por el ISSN de serie de la colección.</li>

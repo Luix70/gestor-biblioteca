@@ -205,6 +205,16 @@ function parsearCamposBusqueda(q) {
 // el campo no se reconoce. Autor/editorial resuelven el nombre → ids; isbn/issn casan por sus variantes/normalizado.
 async function condicionCampoBusqueda(db, campo, valor) {
     const rxDe = (v) => ({ $regex: escapeRegex(v), $options: 'i' });
+    // COMODÍN DE EXISTENCIA: «campo:*» = el campo está PRESENTE y no vacío (p. ej. «isbn:*» = tiene ISBN;
+    // negado, «-isbn:*» = sin ISBN). Combinable: «coleccion:X isbn:* -isbn:YYYY» = de X, con ISBN, salvo YYYY.
+    if (valor === '*') {
+        if (campo === 'autor') return { 'autores.0': { $exists: true } };
+        if (campo === 'editorial') return { editorial: { $exists: true, $ne: null } };
+        if (campo === 'coleccion') return { coleccion: { $exists: true, $ne: null } };
+        // Resto de campos = cadena presente y no vacía.
+        const f = { titulo: 'titulo', subtitulo: 'subtitulo', isbn: 'isbn', issn: 'issn' }[campo];
+        return f ? { [f]: { $exists: true, $nin: [null, ''] } } : null;
+    }
     if (campo === 'titulo') return { $or: [{ titulo: rxDe(valor) }, { titulo_original: rxDe(valor) }, { obra_titulo: rxDe(valor) }] };
     if (campo === 'subtitulo') return { subtitulo: rxDe(valor) };
     if (campo === 'coleccion') return { coleccion_nombre: rxDe(valor) };

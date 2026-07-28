@@ -523,7 +523,9 @@ de ficheros clasificado por CDU.
         «isbn:», «issn:». El valor llega HASTA el siguiente campo, así que admite espacios («titulo:Men at Arms
         autor:Windrow»). Se combinan en AND; lo que quede sin campo va al FTS normal. Un campo sin coincidencias
         NO se ignora: fuerza «sin resultados». EXCLUIR con un «-» delante del campo: «titulo:Osprey
-        -isbn:0140110925» = título «Osprey» pero SIN ese ISBN (útil para el caso Osprey). autor/editorial
+        -isbn:0140110925» = título «Osprey» pero SIN ese ISBN (útil para el caso Osprey). EXISTENCIA con «*»:
+        «isbn:*» = el campo está presente y no vacío; «-isbn:*» = ausente/vacío. Combinable: «coleccion:Men at
+        Arms isbn:* -isbn:0229986528» = de esa colección, con ISBN y distinto de ese. autor/editorial
         resuelven el nombre→ids; isbn/issn casan por sus VARIANTES (10/13) o el normalizado. Implementación:
         api-panel.js·parsearCamposBusqueda (localiza las marcas «[-]campo:» por posición) + condicionCampoBusqueda
         (condición Mongo positiva; la negación la envuelve en $nor) → van a `camposExtras`, AND con el resto.
