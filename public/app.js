@@ -16605,6 +16605,41 @@ const FUENTE_ETQ = { fichero: 'Fichero', openlibrary: 'OpenLibrary', google: 'Go
 // ASIGNAR DATOS EN LOTE a la selección del catálogo: autor · contribuidor(rol) · editorial · CDU. Un solo
 // diálogo con selector de campo; el servidor despacha por `op`. autor/contribuidor son ADITIVOS (no pisan lo
 // que ya haya); editorial reemplaza; CDU reemplaza y MUEVE la carpeta (por eso pide confirmación).
+// Ejecuta una acción en LOTE troceando la lista y pintando una BARRA DE PROGRESO con ✕ Cancelar dentro del
+// modal (mismo diseño que la asignación a colección). `porLote(lote)` procesa un trozo (el llamador acumula sus
+// propios totales por cierre); `titulo`/`icono` encabezan el progreso. Devuelve {cancelado, hechos, total}.
+// Cancelar detiene ANTES del siguiente lote; lo ya hecho se conserva. El scrim NO cierra durante el proceso.
+async function ejecutarPorLotes(items, { titulo, icono = '⚙️', porLote }) {
+  const total = items.length;
+  const CHUNK = Math.min(25, Math.max(4, Math.ceil(total / 20)));
+  const lotes = [];
+  for (let i = 0; i < total; i += CHUNK) lotes.push(items.slice(i, i + CHUNK));
+  let cancelado = false;
+  const pintar = (hechos) => {
+    const pct = total ? Math.round((hechos / total) * 100) : 0;
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;width:94vw">
+      <h3 style="margin:0 0 10px">${icono} ${esc(titulo)}…</h3>
+      <div style="height:10px;border-radius:6px;background:rgba(128,128,128,.25);overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:var(--acc);transition:width .3s"></div></div>
+      <div class="muted" style="font-size:13px;margin-top:8px">${hechos} / ${total}${cancelado ? ' · cancelando…' : ''}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn bad" id="lpCancel"${cancelado ? ' disabled' : ''}>✕ Cancelar</button></div></div>`;
+    const b = $('#lpCancel');
+    if (b) b.onclick = () => { cancelado = true; b.disabled = true; b.textContent = 'Cancelando…'; };
+  };
+  $('#cmpScrim').onclick = null;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  pintar(0);
+  let hechos = 0;
+  for (const lote of lotes) {
+    if (cancelado) break;
+    await porLote(lote);
+    hechos += lote.length;
+    pintar(hechos);
+  }
+  return { cancelado, hechos, total };
+}
+
 async function asignarDatosLote(ids) {
   if (!ids || !ids.length) { toast('Selecciona al menos un documento', 'warn'); return; }
   const rolesOpts = ROLES_PERSONA.filter(([v]) => v !== 'autor').map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
@@ -16692,17 +16727,29 @@ async function asignarDatosLote(ids) {
       const tipo = $('#adTipo') ? $('#adTipo').value : '';
       if (tipo) body.tipo = tipo;
     }
-    $('#adOk').disabled = true;
-    $('#adMsg').textContent = 'Aplicando…';
-    try {
-      const r = await api('/documentos/lote/metadatos', { method: 'POST', body: JSON.stringify(body) });
-      if (!r.ok) throw new Error(r.motivo || 'no se pudo aplicar');
-      const extra = op === 'cdu' ? ` · ${r.reubicadas || 0} carpeta(s) movida(s)${r.fallidos ? ` · ${r.fallidos} con error` : ''}`
-        : op === 'soporte' ? `${r.sinFichero ? ` · ${r.sinFichero} sin fichero digital (sin cambiar)` : ''}${r.fallidos ? ` · ${r.fallidos} con error` : ''}` : '';
-      toast(`✏️ Aplicado a ${r.aplicados} documento(s)${extra}`, r.sinFichero || r.fallidos ? 'warn' : 'ok');
-      cerrarCmp();
-      buscarCatalogo(estadoBusqueda.page || 1); // refrescar la vista
-    } catch (e) { $('#adMsg').textContent = e.message; $('#adOk').disabled = false; }
+    // Se TROCEA con progreso+cancelar: `op` y los datos no cambian entre lotes (solo la porción de ids), así
+    // que cada lote es una llamada independiente al mismo endpoint. Especialmente útil en CDU, que mueve la
+    // carpeta de cada documento (lento en lotes grandes). `body` NO lleva ids: se añaden por lote.
+    delete body.ids;
+    const ETIQUETA = { autor: 'el autor', contribuidor: 'el contribuidor', editorial: 'la editorial', cdu: 'la CDU', soporte: 'el soporte' }[op] || 'los datos';
+    let aplicados = 0, reubicadas = 0, fallidos = 0, sinFichero = 0, ultErr = '';
+    const { cancelado } = await ejecutarPorLotes(ids, {
+      titulo: `Asignando ${ETIQUETA} a ${n} documento(s)`, icono: '✏️',
+      porLote: async (lote) => {
+        try {
+          const r = await api('/documentos/lote/metadatos', { method: 'POST', body: JSON.stringify({ ...body, ids: lote }) });
+          if (r && r.ok) { aplicados += r.aplicados || 0; reubicadas += r.reubicadas || 0; fallidos += r.fallidos || 0; sinFichero += r.sinFichero || 0; }
+          else { fallidos += lote.length; ultErr = (r && r.motivo) || ultErr; }
+        } catch (e) { fallidos += lote.length; ultErr = e.message || ultErr; }
+      },
+    });
+    cerrarCmp();
+    const extra = op === 'cdu' ? ` · ${reubicadas} carpeta(s) movida(s)`
+      : op === 'soporte' && sinFichero ? ` · ${sinFichero} sin fichero digital (sin cambiar)` : '';
+    const etErr = fallidos ? ` · ${fallidos} con error${ultErr ? ' (' + recortar(ultErr, 40) + ')' : ''}` : '';
+    const etCan = cancelado ? ` · CANCELADO (${Math.max(0, n - aplicados - fallidos)} sin tocar)` : '';
+    toast(`✏️ Aplicado a ${aplicados} documento(s)${extra}${etErr}${etCan}`, fallidos || cancelado ? 'warn' : 'ok');
+    buscarCatalogo(estadoBusqueda.page || 1); // refrescar la vista
   };
 }
 
