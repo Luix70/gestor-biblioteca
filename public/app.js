@@ -63,7 +63,7 @@ const _AYUDA_SELECCION = `<ul>
     <li><b>🖱 Modo selección</b>: tocar una portada la MARCA (✓); vuelve a tocar para desmarcar.</li>
     <li><b>En cualquier modo</b>: <b>doble clic</b> (PC) o <b>pulsación larga</b> (móvil) sobre una portada la marca/desmarca sin cambiar de modo.</li>
     <li>La selección se <b>conserva</b> al cambiar de modo, de página o de filtros.</li>
-    <li><b>Todos (página)</b> / <b>🗂 Todos los resultados</b>: seleccionar en bloque. <b>👁 Mostrar selección</b>: ver solo lo marcado.</li>
+    <li><b>Todos (página)</b> / <b>🗂 Todos los resultados</b>: seleccionar en bloque. <b>👁 Mostrar selección</b>: ver solo lo marcado (y se puede ACOTAR con la búsqueda: p. ej. escribe <code>isbn:*</code> para quedarte solo con los que tienen ISBN, y luego «🗂 Todos los resultados»).</li>
     <li><b>📚 Obras colapsadas / 📖 Tomos sueltos</b>: una tarjeta por obra, o cada tomo suelto y seleccionable.</li>
   </ul>`;
 const _AYUDA_ACCIONES = `<p>Sobre los documentos <b>seleccionados</b>:</p>
@@ -8446,15 +8446,11 @@ function _porPaginaVista() {
   return vistaCatalogo === 'detalles' ? 100 : 24;
 }
 function _paramsBusqueda() {
-  // «Mostrar selección» activo: la vista se restringe a los documentos seleccionados (ignora los demás
-  // filtros; solo ids + orden). Si la selección se vació, sale del modo y busca normal.
-  if (soloSeleccion && selDocs.size) {
-    const selOrden = $('#sqOrden') ? $('#sqOrden').value : 'azar';
-    const p = new URLSearchParams({ ids: [...selDocs].join(','), orden: selOrden });
-    if (selOrden === 'azar') { if (!_seedAzar) _seedAzar = nuevoSeedAzar(); p.set('seed', _seedAzar); }
-    p.set('porPagina', _porPaginaVista());
-    return p;
-  }
+  // «Mostrar selección» activo: la vista se INTERSECTA con la selección (ids AND el resto de filtros), en vez de
+  // ignorar los filtros. Así se puede ACOTAR la selección con la búsqueda —p. ej. isbn:* = solo los
+  // seleccionados que tengan ISBN— y se respeta el colapso de obras (agrupar) igual que «Mostrar todo». El
+  // filtro de ids se añade AL FINAL (tras construir el resto). Antes esta rama salía aquí con solo ids+orden, por
+  // eso «Mostrar selección» daba distinto nº (colapsaba) y no dejaba filtrar dentro de la selección.
   soloSeleccion = soloSeleccion && selDocs.size > 0;
   // ORDEN EFECTIVO. El catálogo entra en ALEATORIO por defecto (descubrimiento). Mientras el usuario no elija
   // un orden a mano (`_ordenManual`), ese defecto cede ante dos contextos con un orden claramente mejor:
@@ -8515,6 +8511,9 @@ function _paramsBusqueda() {
     for (const [k, v] of Object.entries(estadoBusqueda.extra)) {
       if (k !== 'etiqueta' && v != null && v !== '') params.set(k, v);
     }
+  // «Mostrar selección»: la selección VIVA (que el usuario puede haber acotado) manda sobre el `ids` congelado
+  // que hubiera dejado estadoBusqueda.extra. Va al final para intersectar con todos los filtros ya puestos.
+  if (soloSeleccion && selDocs.size) params.set('ids', [...selDocs].join(','));
   // (El caso «ver UNA estantería → orden por posición física» ya está resuelto arriba en `ordenEfectivo`.)
   return params;
 }
@@ -9106,6 +9105,12 @@ function pintarBusqueda(r) {
   // colapsado → tarjeta única de obra · expandido → tomo normal TEÑIDO (pertenece a una obra mayor).
   _catAgrupado = r.agrupado !== false;
   $('#searchCount').textContent = `${r.total.toLocaleString('es-ES')} ${_catAgrupado ? 'resultado' : 'documento'}${r.total === 1 ? '' : 's'}`;
+  // Aviso VISIBLE cuando la selección superó el tope y se recortó (antes se recortaba en silencio). Se sugiere
+  // el camino escalable: ver la colección/obra por su filtro, sin lista de ids.
+  if (r.seleccionTruncada) {
+    $('#searchCount').textContent += ` · ⚠ mostrando ${r.seleccionTope.toLocaleString('es-ES')} de ${r.seleccionTruncada.toLocaleString('es-ES')} seleccionados`;
+    toast(`Selección muy grande: se muestran ${r.seleccionTope} de ${r.seleccionTruncada}. Para verla entera, ábrela desde su colección/obra («🔍 Ver en el Catálogo»).`, 'warn');
+  }
   $('#searchResults').dataset.solo = soloSeleccion ? '1' : ''; // marca si la vista está restringida a la selección
   // Vista según el modo elegido: iconos (rejilla de portadas) o detalles (filas de texto).
   const cuerpo =

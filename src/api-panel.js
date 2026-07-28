@@ -172,6 +172,10 @@ async function nombrePorId(db, coleccion, id, campo = 'nombre') {
 // Escapa una cadena para usarla literal dentro de una expresión regular de MongoDB.
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Tope de una selección por lista de ids en el catálogo (mismo que el de `soloIds`). Por encima se recorta
+// y se AVISA (no en silencio). Para ver una colección entera sin tope, usar el filtro por `coleccion`.
+const MAX_IDS_SELECCION = 5000;
+
 // BÚSQUEDA POR CAMPOS estilo Google: «titulo:…», «autor:…», «editorial:…», «subtitulo:…», «coleccion:…»,
 // «isbn:…», «issn:…» (como el modo #palabras-clave, pero por campo). Un campo puede ir NEGADO con un «-»
 // delante para EXCLUIR: «titulo:Osprey -isbn:0140110925» = título contiene «Osprey» pero SIN ese ISBN. Devuelve
@@ -891,6 +895,7 @@ export function rutasPanel() {
 
             // Filtros del Dashboard: por día de ingesta y/o por contador especial (se combinan con AND).
             const extras = [];
+            let seleccionTruncada = 0; // >0 = la selección por ids superó el tope y se recortó (se avisa en la respuesta)
             extras.push(...camposExtras); // filtros por campo (titulo:/autor:/editorial:…), AND con el resto
             const dia = String(req.query.dia || '').trim();
             if (/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
@@ -956,8 +961,11 @@ export function rutasPanel() {
             // `ids` de la query O del body (POST) — con selecciones grandes van en el body para no reventar la URL.
             const idsCsv = String(req.query.ids || (Array.isArray(req.body?.ids) ? req.body.ids.join(',') : req.body?.ids) || '').trim();
             if (idsCsv) {
-                const oids = idsCsv.split(',').map(s => s.trim()).filter(s => ObjectId.isValid(s))
-                    .slice(0, 1000).map(s => new ObjectId(s));
+                // Tope de seguridad = el mismo que `soloIds` (5000). Antes eran 1000 y una selección grande (p. ej.
+                // una colección de 1167) se recortaba EN SILENCIO; ahora, si supera el tope, se AVISA en la respuesta.
+                const validos = idsCsv.split(',').map(s => s.trim()).filter(s => ObjectId.isValid(s));
+                if (validos.length > MAX_IDS_SELECCION) seleccionTruncada = validos.length;
+                const oids = validos.slice(0, MAX_IDS_SELECCION).map(s => new ObjectId(s));
                 extras.push({ _id: { $in: oids.length ? oids : [new ObjectId()] } });
             }
             // Filtro por VARIAS colecciones / VARIAS obras (selección enviada desde la página de Colecciones/
@@ -1186,6 +1194,8 @@ export function rutasPanel() {
             res.json({
                 ok: true, total, page, porPagina, paginas: Math.max(1, Math.ceil(total / porPagina)),
                 agrupado: agrupar,
+                // Aviso de recorte: la selección por ids superó el tope (para que el cliente lo muestre, no lo oculte).
+                ...(seleccionTruncada ? { seleccionTruncada, seleccionTope: MAX_IDS_SELECCION } : {}),
                 docs: docs.map(d => {
                     const nc = d.coleccion ? (nCol.get(String(d.coleccion)) || 0) : 0;
                     const claveObra = d.obra ? String(d.obra) : null;

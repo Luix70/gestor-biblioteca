@@ -605,7 +605,16 @@ de ficheros clasificado por CDU.
       contraseña) · Limpiar. «🗂 Todos los resultados» selecciona todas las páginas.
       «👁 Mostrar selección» es un TOGGLE que restringe el Catálogo a SOLO los
       documentos seleccionados (para revisar la selección y, en Modo selección, quitar
-      los que no quieras tocándolos). Los BOTONES de acción se pliegan en un PANEL
+      los que no quieras tocándolos). Ese modo se INTERSECTA con la búsqueda (no la ignora):
+      ids AND filtros. Así se puede ACOTAR la selección con cualquier filtro —p. ej. «isbn:*»
+      = solo los seleccionados que tengan ISBN— y luego «🗂 Todos los resultados» re-selecciona
+      exactamente esos. Respeta también el colapso de obras (agrupar), igual que la vista
+      normal (antes «Mostrar selección» salía por otra rama que ignoraba filtros y siempre
+      colapsaba → daba distinto nº que «Mostrar todo»). TOPE de una selección por ids en el
+      catálogo: MAX_IDS_SELECCION=5000 (antes 1000, y recortaba EN SILENCIO); por encima se
+      recorta y se AVISA («⚠ mostrando N de M»). Para una colección/obra grande SIN tope, usar
+      «🔍 Ver en el Catálogo» de su ficha (filtra por `coleccion`/`obra`, no por lista de ids).
+      Los BOTONES de acción se pliegan en un PANEL
       COLAPSABLE «⚙️ Acciones (N)» (como «Buscar y filtrar»: recuerda su estado, en móvil
       arranca plegado) para no saturar la barra; la cuenta «N sel.» queda siempre visible.
     · 🔭 Descubrir (Fichero): busca en el volcado offline OL+BNE (58,7 M) libros
