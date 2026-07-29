@@ -37,6 +37,7 @@ import { carpetaDeDoc } from './util-mantenimiento.js';
 import { recuperarOriginalesDeFichero } from '../utils/titulo-original.js';
 import { indexarDoc } from '../utils/indice-busqueda.js';
 import { regenerarSidecarsDoc, FILTRO_SIDECARS_DESACTUALIZADOS } from '../utils/registro.js';
+import { precalentarEquivalencias, contarEquivalenciasPendientes } from '../clasificador-cdu.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -306,6 +307,25 @@ export const CAMPANAS = [
             }
             const pendientes = await db.collection('biblioteca').countDocuments(FILTRO_SIDECARS_DESACTUALIZADOS);
             return { procesados, cambios, pendientes };
+        },
+    },
+
+    {
+        id: 'equivalencias-cdu',
+        etiqueta: 'Equivalencias CDU (por lote)',
+        coste: 'ia',
+        descripcion: 'Deduce con IA la CDU de los códigos Dewey/LCC NUEVOS que usan los libros con CDU pobre (000) y que aún no están en caché ni en el crosswalk determinista — MUCHOS códigos por LLAMADA (batch → menos coste/llamadas). Los aprende en equivalencias_cdu; luego «re-clasificar-cdu» resuelve cada libro GRATIS desde caché y mueve su carpeta. Pensada para después de un lote grande ingerido con INGESTA_CDU_SIN_IA=1 (la CDU quedó en 000).',
+        version: 1,
+        loteDefecto: 60,        // códigos por tanda (no documentos)
+        cadenciaDefecto: 10,
+        activaDefecto: false,   // consume IA → opt-in
+        especial: true,         // no itera documentos: cuenta/gasta por CÓDIGOS distintos
+        async pendientes(db) {
+            return contarEquivalenciasPendientes(db);
+        },
+        async ejecutarLote(db, { limite, onProgreso }) {
+            const r = await precalentarEquivalencias(db, { limite, onProgreso });
+            return { procesados: r.procesados, cambios: r.cambios, pendientes: r.pendientes };
         },
     },
 ];

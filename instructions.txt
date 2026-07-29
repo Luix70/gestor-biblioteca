@@ -1940,6 +1940,18 @@ de ficheros clasificado por CDU.
           calidad). Consume visión (gratis→pago).
         · 🤖 Descripciones CDU/Dewey/LCC — se generan POR LOTE (varios códigos por
           llamada de IA → menos coste; DESC_LOTE_IA=6), con fallback uno-a-uno.
+        · 🤖 Equivalencias CDU (por lote) — deduce con IA la CDU de los CÓDIGOS Dewey/LCC
+          NUEVOS que usan los libros con CDU pobre (000) y que aún no están en caché ni en
+          el crosswalk determinista. Resuelve MUCHOS códigos por LLAMADA (iaCDULote, ~12/
+          llamada) y los APRENDE en equivalencias_cdu; luego «re-clasificar-cdu» resuelve
+          cada libro GRATIS desde caché y mueve su carpeta. Trabaja por CÓDIGO (la
+          equivalencia la comparten todos los libros que lo usan), así que 1000 libros con
+          decenas de códigos distintos ≈ decenas de llamadas, no 1000. Pensada para DESPUÉS
+          de un lote ingerido con INGESTA_CDU_SIN_IA=1. IMPORTANTE: ahora se cachea también
+          la LITERATURA cuando hay Dewey/LC (el 8xx ya codifica la lengua → la equivalencia
+          por código es estable); antes la ficción se re-consultaba a la IA por CADA libro
+          (el mayor gasto real en lotes de humanidades). clasificador-cdu.js·resolverCDU
+          (lee/aprende caché por código, incl. literatura) + precalentarEquivalencias.
         · 🆓 Sidecars registro.json/.marc.xml — REGENERA los sidecars de los documentos
           MODIFICADOS después de su último sidecar (cambios de CDU/autores/editorial,
           edición manual, re-enriquecimiento…). Los sidecars son la COPIA EN DISCO desde

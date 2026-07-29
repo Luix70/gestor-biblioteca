@@ -2,6 +2,25 @@ import { conectarDB } from './database.js';
 import { conTexto, extraerJSON } from './utils/vision.js';
 import { sembrarDescripcionCDU } from './utils/descripcion-cdu.js';
 
+// Tabla de tradiciones/lenguas literarias → CDU (82x). El Dewey 8xx y la LCC P* YA codifican la lengua, así que
+// la equivalencia por código es estable. Se usa en el prompt de iaCDU (por doc) y de iaCDULote (por lote).
+const TABLA_LIT = [
+    'Rusa/soviética → 821.161.1',
+    'Española       → 821.134.2',
+    'Latinoamer.    → 821.134.2-* (o código del país: ARG 821.134.2(82), MEX 821.134.2(72)…)',
+    'Inglesa/bri.   → 821.111',
+    'Norteamer.     → 821.111(73)',
+    'Francesa       → 821.133.1',
+    'Alemana/aust.  → 821.112.2',
+    'Italiana       → 821.131.1',
+    'Portuguesa     → 821.134.3',
+    'Griega antigua → 821.14',
+    'Latina clásica → 821.124',
+    'Árabe          → 821.411.21',
+    'Japonesa       → 821.521',
+    'China          → 821.581',
+].join('\n  ');
+
 const COL = 'equivalencias_cdu';
 
 /**
@@ -140,24 +159,7 @@ async function iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis }) {
     try {
         const esLiteratura = esFiccionLiteratura({ dewey, lcc, categorias });
         const categoria = Array.isArray(categorias) && categorias.length > 0 ? categorias[0] : null;
-
-        // Tabla de nacionalidades literarias conocidas, para el prompt
-        const tablaLit = [
-            'Rusa/soviética → 821.161.1',
-            'Española       → 821.134.2',
-            'Latinoamer.    → 821.134.2-* (o código del país: ARG 821.134.2(82), MEX 821.134.2(72)…)',
-            'Inglesa/bri.   → 821.111',
-            'Norteamer.     → 821.111(73)',
-            'Francesa       → 821.133.1',
-            'Alemana/aust.  → 821.112.2',
-            'Italiana       → 821.131.1',
-            'Portuguesa     → 821.134.3',
-            'Griega antigua → 821.14',
-            'Latina clásica → 821.124',
-            'Árabe          → 821.411.21',
-            'Japonesa       → 821.521',
-            'China          → 821.581',
-        ].join('\n  ');
+        const tablaLit = TABLA_LIT;
 
         const prompt = `
 Eres un bibliotecario catalogador experto en Clasificación Decimal Universal (CDU).
@@ -246,14 +248,15 @@ export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, 
     const candidatos = [['dewey', dewey], ['lcc', lcc]].filter(([, c]) => c);
     const categoria = Array.isArray(categorias) && categorias.length > 0 ? categorias[0] : null;
 
-    // 1) Caché aprendida. Solo se usa si el código NO es de literatura (para evitar cache
-    //    poisoning: una entrada dewey:891.73→616.89 incorrecta puede haberse aprendido antes).
+    // 1) Caché aprendida (por CÓDIGO Dewey/LCC). Se lee SIEMPRE que haya un código — también para literatura:
+    //    el Dewey 8xx ya CODIFICA la lengua/tradición (84x francés, 83x alemán, 82x inglés…), así que la
+    //    equivalencia «código → CDU» es ESTABLE (no depende del autor concreto). La antigua exclusión de la
+    //    ficción solo tenía sentido SIN código (inferencia por título); con Dewey/LC presente, cachear es correcto
+    //    y evita re-consultar la IA por CADA libro de literatura (el gran gasto en lotes de humanidades).
     const esLit = esFiccionLiteratura({ dewey, lcc, categorias });
-    if (!esLit) {
-        for (const [sistema, codigo] of candidatos) {
-            const hit = await buscarEquivalencia(sistema, codigo);
-            if (hit) return { cdu: hit, fuente: `cache:${sistema}`, aprendida: true };
-        }
+    for (const [sistema, codigo] of candidatos) {
+        const hit = await buscarEquivalencia(sistema, codigo);
+        if (hit) return { cdu: hit, fuente: `cache:${sistema}`, aprendida: true };
     }
 
     // 2) Fuente externa (preparada, aún sin proveedor).
@@ -269,11 +272,11 @@ export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, 
     // caché haya dado (o null). Así la CDU entrante, sin IA, es la del Fichero/APIs o la deducible sin coste.
     if (!permitirIA) return { cdu: null, fuente: 'sin-ia', aprendida: false, descripcion: null, palabras_clave: [] };
 
-    // 3) IA + aprendizaje (solo aprende equivalencias no literarias; la ficción varía por autor). La MISMA
-    //    llamada trae ya la descripción y las materias → se aprovechan sin gastar más IA.
+    // 3) IA + aprendizaje. Se aprende la equivalencia por CÓDIGO también para literatura (hay Dewey/LC → estable,
+    //    ver arriba). La MISMA llamada trae ya la descripción y las materias → se aprovechan sin gastar más IA.
     const r = await iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis });
     const cdu = r.cdu;
-    if (cdu && cdu !== '000' && candidatos.length > 0 && !esLit) {
+    if (cdu && cdu !== '000' && candidatos.length > 0) {
         const [sistema, codigo] = candidatos[0]; // el más fiable disponible (Dewey > LC)
         await guardarEquivalencia(sistema, codigo, cdu, 'IA', r.titulo_es || categoria);
     }
@@ -289,4 +292,107 @@ export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, 
         descripcion: { titulo_es: r.titulo_es, descripcion_es: r.descripcion_es, titulo_en: r.titulo_en, descripcion_en: r.descripcion_en },
         palabras_clave: r.palabras_clave || [],
     };
+}
+
+// ── EQUIVALENCIAS CDU POR LOTE (una llamada de IA por N códigos) ─────────────────────────────────────────
+// El coste real en un lote grande es deducir la CDU de códigos Dewey/LCC NUEVOS (uno por llamada). Aquí se
+// resuelven MUCHOS códigos en UNA llamada (como las descripciones), y se APRENDEN en equivalencias_cdu → luego
+// resolverCDU (y re-clasificar-cdu) los sirve gratis desde caché. Se trabaja por CÓDIGO, no por documento: la
+// equivalencia es por código y la comparten todos los libros que lo usan.
+
+// Convierte una lista de códigos Dewey/LCC a CDU en UNA llamada. Devuelve Map codigo → {cdu, titulo_es, …}.
+async function iaCDULote(items) {
+    const out = new Map();
+    if (!items.length) return out;
+    const lista = items.map((it, i) => `${i + 1}. ${String(it.sistema).toUpperCase()} "${it.codigo}"`).join('\n');
+    const prompt = `Eres un bibliotecario catalogador experto en Clasificación Decimal Universal (CDU).
+Convierte CADA código Dewey (DDC) o Library of Congress (LCC) de la lista a su código CDU equivalente.
+Formato CDU: máx. 12 caracteres, sin subdivisiones alfabéticas.
+
+LITERATURA (Dewey 8xx / LCC P*): clasifica por la TRADICIÓN/LENGUA que el propio código ya indica (Dewey 84x=francés,
+83x=alemán, 82x=inglés, 86x=español…):
+  ${TABLA_LIT}
+NO ficción: por el tema (usa el Dewey/LC como guía). Si un código es demasiado genérico, da el CDU genérico
+razonable (Dewey 800→82, 500→5, 300→3…). NUNCA inventes; ante la duda, el genérico.
+
+CÓDIGOS:
+${lista}
+
+Responde ÚNICAMENTE con JSON válido (sin markdown):
+{"resultados":[{"i":1,"cdu":"<CDU>","titulo_es":"<materia breve ES>","descripcion_es":"<1-2 frases ES>","titulo_en":"<subject EN>","descripcion_en":"<1-2 sentences EN>","palabras_clave":["m1","m2"]}]}
+Un objeto por código, en el MISMO orden, con su "i" (1..${items.length}).`;
+    let txt;
+    try { txt = await conTexto({ prompt, json: true, maxTokens: 3200 }); }
+    catch (e) { console.error(`❌ [CDU lote IA]: ${e.message}`); return out; }
+    const j = extraerJSON(txt);
+    const arr = Array.isArray(j) ? j : (j && (j.resultados || j.items)) || [];
+    for (const r of arr) {
+        const idx = Number(r.i) - 1;
+        if (!Number.isInteger(idx) || idx < 0 || idx >= items.length) continue;
+        const cdu = String(r.cdu || '').trim().replace(/^["']|["']$/g, '');
+        if (!cdu || cdu === '000') continue;
+        out.set(items[idx].codigo, {
+            cdu, titulo_es: r.titulo_es || null, descripcion_es: r.descripcion_es || null,
+            titulo_en: r.titulo_en || null, descripcion_en: r.descripcion_en || null,
+            palabras_clave: Array.isArray(r.palabras_clave) ? r.palabras_clave.map(String).map((s) => s.trim()).filter(Boolean).slice(0, 8) : [],
+        });
+    }
+    return out;
+}
+
+// Códigos Dewey/LCC (de documentos con CDU POBRE) que aún NO están ni en caché ni en el crosswalk determinista
+// → los únicos que necesitarían IA. Se cargan los códigos ya cacheados de una vez (en memoria) para no consultar
+// la BD por cada código. `limite` acota cuántos devolver (para una tanda).
+const CDU_POBRE_MATCH = { $or: [{ cdu: { $in: ['0', '00', '000'] } }, { cdu: { $exists: false } }, { cdu: null }] };
+async function codigosPendientes(db, { limite = 500 } = {}) {
+    const bib = db.collection('biblioteca');
+    const base = { $and: [CDU_POBRE_MATCH, { obra: { $exists: false } }, { cdu_manual: { $ne: true } }] };
+    const deweys = await bib.distinct('dewey', { $and: [base, { dewey: { $exists: true, $nin: [null, ''] } }] });
+    // LCC solo de los que NO tienen Dewey (resolverCDU prueba Dewey primero; aprender el Dewey ya los resuelve).
+    const lccs = await bib.distinct('lcc', { $and: [base, { $or: [{ dewey: { $exists: false } }, { dewey: { $in: [null, ''] } }] }, { lcc: { $exists: true, $nin: [null, ''] } }] });
+    const cacheDe = async (sistema) => new Set((await db.collection('equivalencias_cdu')
+        .find({ sistema_origen: sistema }, { projection: { codigo_origen: 1 } }).toArray()).map((e) => e.codigo_origen));
+    const cacheDewey = await cacheDe('dewey');
+    const cacheLcc = await cacheDe('lcc');
+    const pend = [];
+    for (const [sistema, valores, cacheSet] of [['dewey', deweys, cacheDewey], ['lcc', lccs, cacheLcc]]) {
+        for (const c of valores) {
+            if (pend.length >= limite) return pend;
+            const codigo = String(c);
+            if (cacheSet.has(normalizarCodigo(codigo))) continue;      // ya en caché
+            if (await buscarEquivalenciaExterna(sistema, codigo)) continue; // determinista (gratis, no IA)
+            pend.push({ sistema, codigo });
+        }
+    }
+    return pend;
+}
+
+/** Nº de códigos Dewey/LCC pendientes de aprender (para la campaña). */
+export async function contarEquivalenciasPendientes(db) {
+    return (await codigosPendientes(db, { limite: 100000 })).length;
+}
+
+/**
+ * PRE-CALIENTA la caché de equivalencias CDU: coge códigos Dewey/LCC pendientes (de docs con CDU pobre), los
+ * resuelve POR LOTES (una llamada de IA cada `porLlamada`) y los APRENDE. Luego re-clasificar-cdu resuelve cada
+ * documento gratis desde caché y mueve su carpeta. Devuelve { procesados, cambios, pendientes }.
+ */
+export async function precalentarEquivalencias(db, { limite = 60, porLlamada = 12, onProgreso } = {}) {
+    const pend = await codigosPendientes(db, { limite });
+    let procesados = 0, cambios = 0;
+    for (let i = 0; i < pend.length; i += porLlamada) {
+        const lote = pend.slice(i, i + porLlamada);
+        const mapa = await iaCDULote(lote);
+        for (const it of lote) {
+            procesados++;
+            const r = mapa.get(it.codigo);
+            if (r && r.cdu) {
+                await guardarEquivalencia(it.sistema, it.codigo, r.cdu, 'IA', r.titulo_es || null);
+                if (r.descripcion_es || r.titulo_es) { try { await sembrarDescripcionCDU(db, r.cdu, r); } catch { /* best-effort */ } }
+                cambios++;
+            }
+            if (onProgreso) onProgreso(procesados, pend.length);
+        }
+    }
+    return { procesados, cambios, pendientes: await contarEquivalenciasPendientes(db) };
 }
