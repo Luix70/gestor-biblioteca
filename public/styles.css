@@ -1550,7 +1550,13 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
    POR ENCIMA de la imagen hace la selección inequívoca en cualquier tarjeta con portada. Se dispara con
    body.modo-seleccion → vale en TODAS las vistas (catálogo, obras, colecciones, miembros de obra/colección).
    z-index 2: por encima de la imagen pero por debajo del tick (.selmark z5) y del distintivo NFC (z3). */
-body.modo-seleccion .vol .cov::after {
+/* Disparador DOBLE (body.modo-seleccion Y/O el .selmode del contenedor): distintas vistas activan uno u otro
+   —el catálogo y los estantes ponen body.modo-seleccion; las fichas de autor/editorial ponen .selmode en el
+   modal—, así el tinte sale en TODAS. `.acov` es la carátula del card compacto de libro (fichas autor/editorial). */
+body.modo-seleccion .vol .cov::after,
+.selmode .vol .cov::after,
+body.modo-seleccion [data-libro] .acov::after,
+.selmode [data-libro] .acov::after {
   content: '';
   position: absolute;
   inset: 0;

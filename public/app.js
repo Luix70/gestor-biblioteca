@@ -15552,7 +15552,7 @@ async function autorFicha(id) {
   const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
       <span class="selmark">✓</span>
       ${nfcBadge(l)}
-      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${tipoIcono(l.tipo_recurso, l.comic)}</div>`}
+      <div class="acov" style="position:relative">${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${tipoIcono(l.tipo_recurso, l.comic)}</div>`}</div>
       <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
       <div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin-top:3px">${tipoBadge(l)}${soporteBadge(l)}</div>
     </div>`;
@@ -16385,7 +16385,7 @@ async function editorialFicha(id) {
   const cardLibro = (l) => `<div data-libro="${esc(l._id)}" title="${esc(l.titulo || '')}" style="position:relative;cursor:pointer;text-align:center;border-radius:8px;padding:2px">
       <span class="selmark">✓</span>
       ${nfcBadge(l)}
-      ${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${tipoIcono(l.tipo_recurso, l.comic)}</div>`}
+      <div class="acov" style="position:relative">${l.portada ? `<img src="${esc(encUrl(l.portada))}" style="width:100%;height:118px;object-fit:contain;border-radius:6px;background:var(--card)" loading="lazy">` : `<div style="height:118px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:22px">${tipoIcono(l.tipo_recurso, l.comic)}</div>`}</div>
       <div class="muted" style="font-size:10px;line-height:1.2;margin-top:2px">${esc(recortar(l.titulo || '—', 40))}${l['año_edicion'] ? ` · ${l['año_edicion']}` : ''}</div>
       <div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap;margin-top:3px">${tipoBadge(l)}${soporteBadge(l)}</div>
     </div>`;
