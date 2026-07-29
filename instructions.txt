@@ -1930,15 +1930,22 @@ de ficheros clasificado por CDU.
           la que se puede reconstruir la BD ante una catástrofe, pero solo el Conformador
           (aplicarCambio) los sincronizaba: Enriquecer, «asignar datos en lote» y editar-doc
           escriben directo a Mongo y los dejaban viejos. Detección por FECHA, no por sello de
-          versión (para captar CADA re-modificación, 2/3/N veces): candidato = `sidecars_fecha`
-          ausente Ó `fecha_actualizacion > sidecars_fecha`; al regenerar se marca
-          `sidecars_fecha = fecha_actualizacion` SIN bumpear fecha_actualizacion (si no,
-          bucle). Sin IA ni APIs (disco + BD). ACTIVA por defecto (barata). Regenerador único
-          utils/registro.js·regenerarSidecarsDoc (resuelve autores/editorial/contribuciones →
+          versión (para captar CADA re-modificación, 2/3/N veces). LÍNEA BASE = cuándo se escribió
+          el sidecar por última vez: `sidecars_fecha` si ya se regeneró, y si no `fecha_ingreso` (el
+          sidecar se escribe al ingerir). Pendiente = `fecha_actualizacion > base`
+          (FILTRO_SIDECARS_DESACTUALIZADOS = {$expr:{$gt:['$fecha_actualizacion',{$ifNull:
+          ['$sidecars_fecha','$fecha_ingreso']}]}}). Así un doc NUNCA modificado (sin
+          `fecha_actualizacion`) NO es pendiente —su sidecar de la ingesta ya es correcto, no se
+          regenera de balde— y `fecha_actualizacion`, que SOLO se pone al modificar, capta
+          exactamente los cambios. Al regenerar se sella `sidecars_fecha = fecha_actualizacion` SIN
+          bumpear fecha_actualizacion (si no, bucle: `actualizado > ingreso` seguiría siendo cierto).
+          Sin IA ni APIs (disco + BD). ACTIVA por defecto (barata). Regenerador único
+          utils/registro.js·regenerarSidecarsDoc (resuelve autores/editorial/contribuciones a
           nombres, escribe los 2 sidecars, sella); lo comparten la campaña y el backfill CLI
-          `node scripts/regenerar-registros.js [--solo-desactualizados] [--ejecutar]`. Tras el
-          PRIMER despliegue conviene correr el backfill con --ejecutar una vez (siembra
-          `sidecars_fecha` en los ~27k docs de golpe) para no dejarle a la campaña 27k pendientes.
+          `node scripts/regenerar-registros.js [--solo-desactualizados] [--ejecutar]` (sin flag =
+          regenera TODOS, para rehacer el árbol entero; con flag = solo los pendientes). En el
+          catálogo actual son ~11,9k pendientes (los MODIFICADOS, no 28k): los siembra la propia
+          campaña («⏩ Completar») o el CLI con --solo-desactualizados --ejecutar.
       Cada campaña es RESUMIBLE y TERMINABLE: sella cada elemento procesado (con o sin
       datos) para no repetirlo; el contador «Pendientes» baja hasta 0. Arrancan todas
       DESACTIVADAS (opt-in), SALVO «Sidecars», activa por defecto (sin coste). «▶ Ahora» lanza una tanda inmediata en 2º plano y muestra

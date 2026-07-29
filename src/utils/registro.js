@@ -51,8 +51,8 @@ export async function escribirSidecars(carpeta, legible) {
  * `sidecars_fecha` igualmente (para que la cola de la campaña DRENE y no reintente eternamente) y se devuelve
  * `{ ok:false, sinCarpeta:true }`. Devuelve `{ ok:true }` si se escribieron.
  *
- * Detección de «pendiente» (para la campaña / backfill): `sidecars_fecha` ausente Ó `fecha_actualizacion >
- * sidecars_fecha`. Así un documento se regenera CADA vez que se vuelve a modificar (2, 3, … veces).
+ * Detección de «pendiente» (ver FILTRO_SIDECARS_DESACTUALIZADOS): un doc se regenera CADA vez que se
+ * modifica tras su último sidecar (2, 3, … veces).
  */
 export async function regenerarSidecarsDoc(db, doc, carpeta) {
     const marca = doc.fecha_actualizacion || new Date();
@@ -67,12 +67,20 @@ export async function regenerarSidecarsDoc(db, doc, carpeta) {
     return { ok: true };
 }
 
-/** Filtro Mongo de documentos con sidecars DESACTUALIZADOS (modificados tras su último sidecar, o sin marca). */
+/**
+ * Filtro Mongo de documentos con sidecars DESACTUALIZADOS = MODIFICADOS después de escribir su último sidecar.
+ * Línea BASE = cuándo se escribió el sidecar por última vez: `sidecars_fecha` si ya lo regeneramos, y si no
+ * `fecha_ingreso` (el sidecar se escribe al INGERIR). Pendiente ⇔ `fecha_actualizacion > base`.
+ *
+ * Consecuencias (bien): un doc NUNCA modificado (sin `fecha_actualizacion`) no es pendiente —su sidecar de la
+ * ingesta ya es correcto, no se regenera de balde—; en cambio, `fecha_actualizacion` SOLO se pone al modificar,
+ * así que capta exactamente los cambios (CDU/autores/edición…). Tras regenerar se sella `sidecars_fecha =
+ * fecha_actualizacion`, de modo que solo una NUEVA modificación lo vuelve a marcar (no en bucle, aunque
+ * `fecha_actualizacion > fecha_ingreso` siga siendo cierto). En Mongo, `$gt` con un lado nulo es falso salvo
+ * (fecha > null)=verdadero: un doc con `fecha_actualizacion` pero sin base (raro) también se marca.
+ */
 export const FILTRO_SIDECARS_DESACTUALIZADOS = {
-    $or: [
-        { sidecars_fecha: { $exists: false } },
-        { $expr: { $gt: ['$fecha_actualizacion', '$sidecars_fecha'] } },
-    ],
+    $expr: { $gt: ['$fecha_actualizacion', { $ifNull: ['$sidecars_fecha', '$fecha_ingreso'] }] },
 };
 
 /** Resuelve los nombres de autores/editorial/contribuciones de un documento (consultas puntuales a la BD). */
