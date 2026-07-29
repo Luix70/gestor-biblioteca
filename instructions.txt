@@ -633,7 +633,8 @@ de ficheros clasificado por CDU.
     filtrado por esa clasificación (mismo `filtrarPorClasificacion` que el contador de la
     tabla de clasificación; por data-attribute, no onclick inline, porque un código CDU
     puede llevar apóstrofo «141.78:81'37»); identificadores (ISBN/ISSN) "clicables" (buscan
-    todo lo que comparte ese identificador); "otras ediciones" (ISBN alternativos con rol);
+    todo lo que comparte ese identificador) + botón «🔎 Cotejar» (admin) junto a cada uno;
+    "otras ediciones" (ISBN alternativos con rol);
     SINOPSIS; CDU y demás clasificaciones con su título + ⓘ (texto largo) + nº de
     documentos que comparten el código (clic = búsqueda filtrada); chip 📍 con la
     UBICACIÓN (clic = ver los libros de esa estantería; doble clic / pulsación larga
@@ -644,6 +645,21 @@ de ficheros clasificado por CDU.
       Clic en el estante = ver sus COMPAÑEROS (los demás digitales con esa MISMA CDU,
       exacta); clic en el ámbito = todo lo que cuelga de él (CDU por prefijo). En las
       tarjetas del Catálogo, un digital sin ubicación física muestra «CDU <código>».
+    🔎 COTEJAR POR ISBN/ISSN (botón admin junto al identificador; utils/cotejo.js +
+      public/app.js·cotejarIdentificador): recopila TODO del Fichero local + APIs para ese
+      ISBN/ISSN y lo coteja campo a campo con el documento (título, subtítulo, autores,
+      editorial, sinopsis, año, idioma, páginas, CDU, Dewey, LCC, palabras clave). Muestra
+      ACTUAL vs ENTRANTE, con las casillas de los que DIFIEREN pre-marcadas (comparación
+      insensible a mayúsculas/acentos; nunca ofrece reemplazar por vacío). Se investiga CON
+      o SIN IA (sin IA = solo Fichero + APIs + crosswalk determinista Dewey/LCC→CDU, gratis;
+      con IA = además la IA deduce la CDU que no salga por crosswalk). Al «Reemplazar los
+      marcados» los cambios se aplican vía editarDocumento (que si cambia la CDU MUEVE la
+      carpeta al árbol nuevo) y se REGENERAN los sidecars al instante; alcance elegible:
+      ESTE documento o TODOS los que comparten el identificador (útil para arreglar de golpe
+      todos los que colgaban de un mismo ISBN/ISSN). POST /documentos/:id/cotejar {usarIA} →
+      {actual,entrante,campos[],compartidos}; POST /documentos/:id/cotejar/aplicar
+      {campos,alcance:'doc'|'compartidos'}. El flag SIN IA llega hasta resolverCDU
+      (permitirIA:false) vía buscarMetadatosExternos({sinIA}).
     Acciones (admin):
       ✏️ Editar (y bloquear para que el Conformador no lo cambie). Incluye CDU · Dewey ·
          LCC · LCCN (estas tres son solo metadatos: a diferencia de la CDU NO re-alojan el

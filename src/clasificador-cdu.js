@@ -242,7 +242,7 @@ inventes datos concretos (fechas, nombres) que no puedas justificar con lo dado.
  *   2) API/web externa (extensible),
  *   3) IA — y APRENDE la equivalencia (Dewey/LC) para la próxima vez.
  */
-export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, sinopsis }) {
+export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, sinopsis, permitirIA = true }) {
     const candidatos = [['dewey', dewey], ['lcc', lcc]].filter(([, c]) => c);
     const categoria = Array.isArray(categorias) && categorias.length > 0 ? categorias[0] : null;
 
@@ -264,6 +264,10 @@ export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, 
             return { cdu: ext, fuente: `api:${sistema}`, aprendida: false };
         }
     }
+
+    // Modo SIN IA (investigación «sin IA»): no se llama a la IA; se devuelve lo que el crosswalk determinista/
+    // caché haya dado (o null). Así la CDU entrante, sin IA, es la del Fichero/APIs o la deducible sin coste.
+    if (!permitirIA) return { cdu: null, fuente: 'sin-ia', aprendida: false, descripcion: null, palabras_clave: [] };
 
     // 3) IA + aprendizaje (solo aprende equivalencias no literarias; la ficción varía por autor). La MISMA
     //    llamada trae ya la descripción y las materias → se aprovechan sin gastar más IA.

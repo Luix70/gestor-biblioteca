@@ -40,6 +40,7 @@ import { lanzarReclasificacion, estadoReclasificacion, aplicarUltimaReclasificac
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
+import { investigarIdentificador, aplicarCotejo, docsQueComparten } from './utils/cotejo.js';
 import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fondo.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
@@ -1910,6 +1911,32 @@ export function rutasPanel() {
             if (doc.locked) return res.json({ ok: false, motivo: 'documento bloqueado (locked)' });
             const r2 = await reenriquecerDoc(db, doc);
             res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // COTEJAR POR ISBN/ISSN (botón junto al identificador): recopila TODO del Fichero + APIs (con o sin IA) y lo
+    // coteja con lo del documento, para reemplazar lo que se elija (los cambios se aplican en /aplicar). Admin
+    // (POST → la puerta de autenticar ya lo restringe; los invitados nunca disparan IA).
+    r.post('/documentos/:id/cotejar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json(await investigarIdentificador(db, doc, { usarIA: req.body?.usarIA === true }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // APLICAR el cotejo: reemplaza los campos elegidos por los entrantes (editarDocumento → reubica si cambia la
+    // CDU) y regenera sidecars. alcance: 'doc' (este) | 'compartidos' (todos los que comparten el ISBN/ISSN).
+    r.post('/documentos/:id/cotejar/aplicar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const campos = (req.body && typeof req.body.campos === 'object' && req.body.campos) || {};
+            const docIds = req.body?.alcance === 'compartidos' ? await docsQueComparten(db, doc) : [doc._id];
+            res.json({ ...(await aplicarCotejo(db, { docIds, campos })), alcanceDocs: docIds.length });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

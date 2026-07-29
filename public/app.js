@@ -2603,6 +2603,79 @@ function montarSelDocs({ scopeSel, barSel, verCtx = {}, titulo, orden }) {
   if (soloAdmin) pintarBar();
 }
 
+// 🔎 COTEJAR POR IDENTIFICADOR (botón junto al ISBN/ISSN de la ficha): recopila TODO del Fichero + APIs para
+// ese ISBN/ISSN (con o sin IA) y lo coteja campo a campo con el documento; permite REEMPLAZAR lo que se marque
+// por lo entrante (con los cambios encadenados: reubicación por CDU + sidecars), en ESTE documento o en TODOS
+// los que comparten el identificador.
+async function cotejarIdentificador(docId) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:760px;width:96vw">
+    <h3 style="margin:0 0 8px">🔎 Cotejar por ISBN/ISSN</h3>
+    <div class="row" style="gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <label style="font-size:13px;display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="ctIA"> 🤖 con IA</label>
+      <span class="muted" style="font-size:11px">sin marcar = solo Fichero + APIs + crosswalk determinista (gratis)</span>
+      <button class="btn pri" id="ctBuscar">Investigar</button>
+      <span style="flex:1"></span><button class="btn" id="ctX">Cerrar</button>
+    </div>
+    <div id="ctBody" class="muted" style="font-size:13px">Pulsa «Investigar» para recopilar los datos del identificador y cotejarlos con el documento.</div>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#ctX').onclick = cerrarCmp;
+  let ultimo = null; // último resultado de /cotejar (para construir el payload de /aplicar)
+
+  const aplicar = async () => {
+    if (!ultimo) return;
+    const campos = {};
+    $$('#ctBody .ctChk:checked').forEach((chk) => { const c = ultimo.campos[+chk.dataset.i]; if (c) campos[c.campo] = c.entrante; });
+    const alcance = ($$('#ctBody input[name=ctAlc]:checked')[0] || {}).value || 'doc';
+    const n = Object.keys(campos).length;
+    if (!n) { $('#ctMsg').textContent = 'No has marcado ningún campo.'; return; }
+    if (!confirm(`¿Reemplazar ${n} campo(s) ${alcance === 'compartidos' ? `en TODOS los que comparten el identificador (${ultimo.compartidos})` : 'en este documento'}?\n\nSi cambia la CDU se MOVERÁ la carpeta, y se regeneran los sidecars.`)) return;
+    $('#ctAplicar').disabled = true; $('#ctMsg').textContent = 'Aplicando…';
+    let r;
+    try { r = await api('/documentos/' + encodeURIComponent(docId) + '/cotejar/aplicar', { method: 'POST', body: JSON.stringify({ campos, alcance }) }); }
+    catch (e) { $('#ctMsg').textContent = e.message; $('#ctAplicar').disabled = false; return; }
+    if (!r.ok) { $('#ctMsg').textContent = r.motivo || 'no se pudo aplicar'; $('#ctAplicar').disabled = false; return; }
+    cerrarCmp();
+    toast(`✔ Cotejo aplicado a ${r.aplicados} doc(s)${r.reubicadas ? ` · ${r.reubicadas} carpeta(s) movida(s)` : ''}${r.sidecars ? ` · ${r.sidecars} sidecar(s)` : ''}${r.fallidos ? ` · ${r.fallidos} con error` : ''}`, r.fallidos ? 'warn' : 'ok');
+    verDoc(docId, detalle && detalle.ctx); // refrescar la ficha con el nuevo estado
+  };
+
+  const investigar = async () => {
+    const usarIA = $('#ctIA').checked;
+    $('#ctBody').innerHTML = `<div class="muted">Investigando${usarIA ? ' con IA' : ''}… (Fichero + APIs)</div>`;
+    let r;
+    try { r = await api('/documentos/' + encodeURIComponent(docId) + '/cotejar', { method: 'POST', body: JSON.stringify({ usarIA }) }); }
+    catch (e) { $('#ctBody').innerHTML = `<div style="color:var(--bad)">${esc(e.message)}</div>`; return; }
+    if (!r.ok) { $('#ctBody').innerHTML = `<div style="color:var(--bad)">${esc(r.motivo || 'sin datos')}</div>`; return; }
+    ultimo = r;
+    const filas = r.campos.map((c, i) => {
+      const puede = c.entrante != null && c.entrante !== ''; // solo se reemplaza por algo NO vacío
+      const dif = c.difiere;
+      return `<tr style="border-bottom:1px solid var(--bd)${dif ? '' : ';opacity:.55'}">
+        <td style="text-align:center"><input type="checkbox" class="ctChk" data-i="${i}" ${dif ? 'checked' : ''} ${puede ? '' : 'disabled'}></td>
+        <td style="font-weight:600;white-space:nowrap;padding:3px 6px">${esc(c.label)}</td>
+        <td style="color:var(--mut);padding:3px 6px">${esc(recortar(String(c.actual ?? '∅'), 90))}</td>
+        <td style="padding:3px 6px${dif ? ';color:var(--acc)' : ''}">${esc(recortar(String(c.entrante ?? '∅'), 90))}</td></tr>`;
+    }).join('');
+    const alcCompartir = r.compartidos > 1;
+    $('#ctBody').innerHTML = `
+      <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(r.identificador.toUpperCase())} <b>${esc(r.valor)}</b> · ${esc((r.fuentes || []).slice(0, 3).join(' · ') || 'sin fuentes')}${r.usarIA ? ' · 🤖' : ''}</div>
+      <div style="overflow:auto;max-height:44vh"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;border-bottom:2px solid var(--bd)"><th style="width:26px">✓</th><th style="padding:3px 6px">Campo</th><th style="padding:3px 6px">Actual</th><th style="padding:3px 6px">Entrante</th></tr></thead>
+        <tbody>${filas}</tbody></table></div>
+      <div class="row" style="gap:14px;align-items:center;margin-top:12px;flex-wrap:wrap">
+        <label style="font-size:13px;cursor:pointer"><input type="radio" name="ctAlc" value="doc" checked> Este documento</label>
+        <label style="font-size:13px${alcCompartir ? ';cursor:pointer' : ';opacity:.5'}"><input type="radio" name="ctAlc" value="compartidos" ${alcCompartir ? '' : 'disabled'}> Todos los que comparten el ${esc(r.identificador.toUpperCase())} (${r.compartidos})</label>
+        <span style="flex:1"></span>
+        <button class="btn pri" id="ctAplicar">Reemplazar los marcados</button></div>
+      <div id="ctMsg" style="color:var(--bad);font-size:12px;min-height:1.1em;margin-top:6px"></div>`;
+    $('#ctAplicar').onclick = aplicar;
+  };
+  $('#ctBuscar').onclick = investigar;
+}
+
 async function verDoc(id, ctx) {
   detalle = { tipo: 'doc', id, ctx };
   mostrarDetalle();
@@ -2920,10 +2993,10 @@ function pintarDoc(r, ctx) {
     // Identificadores DRILLABLES: clic → Búsqueda por ese ISSN/ISBN (ve TODO lo que lo comparte — útil
     // para destapar libros mal clasificados colgando de un ISSN de serie, o ediciones del mismo ISBN).
     _issn: d.issn
-      ? `<a class="rowlink" data-q="${esc(d.issn)}" title="Ver todo lo que comparte este ISSN">${esc(d.issn)}</a>`
+      ? `<a class="rowlink" data-q="${esc(d.issn)}" title="Ver todo lo que comparte este ISSN">${esc(d.issn)}</a>${ROL === 'admin' ? ` <button class="rbtn admin-only" data-cotejar="${esc(d._id)}" title="Recopilar todo del Fichero + APIs para este ISSN y cotejarlo con el documento (reemplazar lo que elijas)">🔎 Cotejar</button>` : ''}`
       : null,
     _isbn: d.isbn
-      ? `<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a> <button class="rbtn copybtn" data-copy="${esc(d.isbn)}" title="Copiar el ISBN al portapapeles">📋</button>`
+      ? `<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a> <button class="rbtn copybtn" data-copy="${esc(d.isbn)}" title="Copiar el ISBN al portapapeles">📋</button>${ROL === 'admin' ? ` <button class="rbtn admin-only" data-cotejar="${esc(d._id)}" title="Recopilar todo del Fichero + APIs para este ISBN y cotejarlo con el documento (reemplazar lo que elijas)">🔎 Cotejar</button>` : ''}`
       : null,
     // DOI (identificador del ARTÍCULO): abre doi.org y se puede copiar. La REVISTA de origen y la CITA
     // (vol/nº/pp) acompañan al artículo, como el ISBN/colección a un libro/número.
@@ -3238,6 +3311,8 @@ function pintarDoc(r, ctx) {
   $$('#p-detalle [data-clascdu]').forEach((a) => (a.onclick = () => filtrarPorClasificacion('cdu', a.dataset.clascdu)));
   // ID de Mongo → ver el documento EXACTO de la base (JSON, solo lectura).
   $$('#p-detalle [data-oid]').forEach((a) => (a.onclick = () => verDocumentoCrudo(a.dataset.oid)));
+  // 🔎 Cotejar (junto a ISBN/ISSN): recopilar del Fichero + APIs y cotejar con el documento.
+  $$('#p-detalle [data-cotejar]').forEach((b) => (b.onclick = () => cotejarIdentificador(b.dataset.cotejar)));
   carIdx = 0;
   const tr = $('#carTrack');
   if (tr && tr.children.length > 1)

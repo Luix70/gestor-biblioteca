@@ -57,7 +57,7 @@ Responde ÚNICAMENTE en JSON (null para los campos que no puedas leer):
  * Flujo maestro de enriquecimiento.
  */
 export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null, opciones = {}) {
-    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [], idioma = null, cipDewey = null, cipLcc = null } = opciones;
+    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [], idioma = null, cipDewey = null, cipLcc = null, sinIA = false } = opciones;
     let datosExtra = {
         isbn: null,
         titulo: null,        // título de la autoridad (solo se usa si el archivo no aporta uno fiable)
@@ -302,6 +302,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             titulo: datosExtra.titulo || titulo,   // el del archivo puede ser un ISBN: usa el resuelto
             autor: (datosExtra.autores && datosExtra.autores[0]) || autor || null,
             sinopsis: datosExtra.sinopsis,
+            permitirIA: !sinIA,                    // investigación «sin IA»: solo caché + crosswalk determinista
         });
         datosExtra.cdu = cdu;
         datosExtra.cdu_fuente = fuente;   // 'cache:…'|'api:…'|'ia' — para colorear la procedencia en el panel
