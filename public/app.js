@@ -2663,7 +2663,7 @@ async function cotejarIdentificador(docId) {
     $('#ctBody').innerHTML = `
       <div class="muted" style="font-size:12px;margin-bottom:8px">${esc(r.identificador.toUpperCase())} <b>${esc(r.valor)}</b> · ${esc((r.fuentes || []).slice(0, 3).join(' · ') || 'sin fuentes')}${r.usarIA ? ' · 🤖' : ''}</div>
       <div style="overflow:auto;max-height:44vh"><table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="text-align:left;border-bottom:2px solid var(--bd)"><th style="width:26px">✓</th><th style="padding:3px 6px">Campo</th><th style="padding:3px 6px">Actual</th><th style="padding:3px 6px">Entrante</th></tr></thead>
+        <thead><tr style="text-align:left;border-bottom:2px solid var(--bd)"><th style="width:26px;text-align:center"><input type="checkbox" id="ctAll" title="Marcar / desmarcar todos"></th><th style="padding:3px 6px">Campo</th><th style="padding:3px 6px">Actual</th><th style="padding:3px 6px">Entrante</th></tr></thead>
         <tbody>${filas}</tbody></table></div>
       <div class="row" style="gap:14px;align-items:center;margin-top:12px;flex-wrap:wrap">
         <label style="font-size:13px;cursor:pointer"><input type="radio" name="ctAlc" value="doc" checked> Este documento</label>
@@ -2672,6 +2672,13 @@ async function cotejarIdentificador(docId) {
         <button class="btn pri" id="ctAplicar">Reemplazar los marcados</button></div>
       <div id="ctMsg" style="color:var(--bad);font-size:12px;min-height:1.1em;margin-top:6px"></div>`;
     $('#ctAplicar').onclick = aplicar;
+    // ☑ Todos / ☐ Ninguno: marca/desmarca todas las casillas ACTIVABLES (no las deshabilitadas por venir vacías).
+    // El maestro refleja el estado (marcado/indeterminado/vacío) según las individuales.
+    const chks = $$('#ctBody .ctChk:not([disabled])');
+    const sincroAll = () => { const m = chks.filter((c) => c.checked).length; const all = $('#ctAll'); if (!all) return; all.checked = chks.length > 0 && m === chks.length; all.indeterminate = m > 0 && m < chks.length; };
+    if ($('#ctAll')) $('#ctAll').onchange = () => { const v = $('#ctAll').checked; chks.forEach((c) => (c.checked = v)); };
+    chks.forEach((c) => c.addEventListener('change', sincroAll));
+    sincroAll();
   };
   $('#ctBuscar').onclick = investigar;
 }
