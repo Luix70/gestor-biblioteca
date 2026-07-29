@@ -433,6 +433,8 @@ async function refrescarEstado() {
     // La COPIA del menú refleja siempre el mismo estado (aunque se cambie desde el otro mando o por el servidor).
     if ($('#vSwitch2')) $('#vSwitch2').checked = vigilanteActivo;
     if ($('#vLabel2')) $('#vLabel2').textContent = vigilanteActivo ? 'Activo' : 'Pausado';
+    // 🧠 CDU sin IA en la ingesta (interruptor junto al del Vigilante) — refleja el ajuste del servidor.
+    if ($('#cduSinIASwitch') && typeof estado.cduSinIA === 'boolean') $('#cduSinIASwitch').checked = estado.cduSinIA;
     $('#vSub').textContent = vigilanteProcesando
       ? 'procesando el Inbox…'
       : vigilanteActivo
@@ -588,6 +590,18 @@ for (const sel of ['#vSwitch', '#vSwitch2']) {
   const sw = $(sel);
   if (sw) sw.onchange = (ev) => conmutarVigilante(ev.target.checked, ev.target);
 }
+
+// 🧠 CDU sin IA en la ingesta: interruptor en caliente (junto al del Vigilante). Persiste en el servidor.
+async function conmutarCduSinIA(activo, origen) {
+  try {
+    const r = await api('/ingesta/cdu-sin-ia', { method: 'POST', body: JSON.stringify({ activo }) });
+    toast('CDU sin IA en la ingesta: ' + (r.cduSinIA ? 'ACTIVADO (no gasta IA)' : 'desactivado (IA al ingerir)'), r.cduSinIA ? 'ok' : 'warn');
+  } catch (err) {
+    toast(err.message, 'bad');
+    if (origen) origen.checked = !activo; // revertir si falló
+  }
+}
+if ($('#cduSinIASwitch')) $('#cduSinIASwitch').onchange = (ev) => conmutarCduSinIA(ev.target.checked, ev.target);
 
 // ── cuarentena ──
 // Consulta de búsqueda: limpia serializaciones (Epublibre [id]/(rN), marcas de fuente, hashes de

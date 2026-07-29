@@ -25,6 +25,7 @@ import { rutasPanel, rutasPublicas, usuarioPuedeNsfw, nsfwPorDefecto } from './a
 import { prepararReemplazo } from './utils/saneamiento.js';
 import { completarDoc, adjuntarMaterial, reemplazarAdjunto } from './utils/completar-doc.js';   // adjuntar audio/texto o material a un doc ya catalogado
 import { conectarDB } from './database.js';
+import { cargarAjustesIngesta } from './utils/ajustes-ingesta.js';
 import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
 import { registrar, ipDe } from './utils/registro-actividad.js';
 import { ObjectId } from 'mongodb';
@@ -495,6 +496,8 @@ function ajustarTimeoutsServidor(servidor) {
 
 ajustarTimeoutsServidor(app.listen(PUERTO, () => {
     console.log(`🚀 API REST de ingesta activa en el puerto ${PUERTO}`);
+    // Carga el ajuste persistido «CDU sin IA» (panel) para que sobreviva a los reinicios (si no, cae al .env).
+    cargarAjustesIngesta().catch(() => {});
     if (process.env.DESACTIVAR_VIGILANTE !== '1') {
         iniciarVigilante().catch(e => console.error('No se pudo iniciar el vigilante:', e.message));
     }

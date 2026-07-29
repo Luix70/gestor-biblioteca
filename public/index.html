@@ -370,6 +370,19 @@
                 Al pausarlo, los ficheros que sueltes en el Inbox esperan sin catalogarse. Útil para soltar
                 muchos a la vez y procesarlos cuando quieras.
               </p>
+              <!-- 🧠 CDU SIN IA: interruptor EN CALIENTE (junto al del Vigilante). Con él, la ingesta no gasta
+                   IA en la CDU (solo Fichero + crosswalk determinista). Lo pendiente lo afina a reposo. -->
+              <div style="display: flex; align-items: center; gap: 16px; margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--line)" class="admin-only">
+                <label class="switch"><input type="checkbox" id="cduSinIASwitch" /><span class="slider"></span></label>
+                <div>
+                  <b>🧠 CDU sin IA en la ingesta</b>
+                  <div class="muted" style="font-size: 12px">
+                    La ingesta no gasta IA en la CDU (solo Fichero + APIs + crosswalk determinista, gratis). Lo que
+                    no resuelva queda en <code>000</code> y lo afina a reposo la campaña «Equivalencias CDU» +
+                    «re-clasificar-cdu» con el cupo gratis. Ideal para lotes grandes o si las claves de IA fallan.
+                  </div>
+                </div>
+              </div>
             </div>
             <!-- 🧭 INGESTA GUIADA: explorador del Inbox. Marca por carpeta una acción + pistas → _guia.json. -->
             <details class="card foldcard admin-only" id="fcGuiaInbox" data-fold="pc">

@@ -1865,6 +1865,13 @@ de ficheros clasificado por CDU.
       accesible desde CUALQUIER pagina sin ir a Entrada. Comparten accion (conmutarVigilante) y
       refrescarEstado deja los DOS con el estado real del servidor, aunque cambie por otra via. Si la
       llamada falla, el interruptor vuelve a su posicion (no debe mentir sobre el estado real).
+    · INTERRUPTOR «🧠 CDU sin IA en la ingesta» (admin, en la tarjeta del Vigilante, id #cduSinIASwitch):
+      conmuta EN CALIENTE el ajuste INGESTA_CDU_SIN_IA sin reiniciar. Con él ON, la ingesta no gasta IA en la
+      CDU (solo Fichero + crosswalk determinista); lo que no resuelva queda en '000' y lo afina a reposo la
+      campaña «Equivalencias CDU» + re-clasificar-cdu con el cupo gratis. El valor vive en memoria (lo lee
+      motor-enriquecimiento vía utils/ajustes-ingesta.js·cduSinIAActivo) y se PERSISTE en Mongo
+      (ajustes/_id:'ingesta') para sobrevivir a reinicios (se carga al arrancar). Arranca con el valor del
+      .env. Estado en GET /estado (campo cduSinIA); cambio en POST /ingesta/cdu-sin-ia {activo}.
     Conformador, 🧹 Lanzar mantenimiento, 🎯 Campañas de fondo (ver abajo), 🩺
     Integridad (diagnosticar/reparar a la Papelera), 🧼 Sanear catálogo, 👁️ Visión
     IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🧰 Ejecutar script (ver

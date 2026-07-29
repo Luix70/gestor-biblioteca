@@ -1,4 +1,5 @@
 import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
+import { cduSinIAActivo } from './utils/ajustes-ingesta.js';
 import { buscarPorDOI } from './utils/buscador-crossref.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { esTituloArtefacto, esAutorArtefacto } from './utils/parsear-nombre.js';
@@ -220,10 +221,10 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
             idioma: documento.idioma || null,
             cipDewey: cip?.dewey || null,
             cipLcc: cip?.lc || null,
-            // DIFERIR CDU: si INGESTA_CDU_SIN_IA=1, no se gasta IA en la CDU durante la ingesta (solo caché +
-            // crosswalk determinista, gratis). Lo que no resuelva cae a '000' abajo y lo afina re-clasificar-cdu
-            // a reposo con el cupo gratis. Evita depender de las claves de IA (429/404) en la ingesta.
-            sinIA: process.env.INGESTA_CDU_SIN_IA === '1',
+            // DIFERIR CDU: si el ajuste «CDU sin IA» está activo (config/.env INGESTA_CDU_SIN_IA, o el switch del
+            // panel en caliente), no se gasta IA en la CDU durante la ingesta (solo caché + crosswalk determinista,
+            // gratis). Lo que no resuelva cae a '000' abajo y lo afina re-clasificar-cdu a reposo con el cupo gratis.
+            sinIA: cduSinIAActivo(),
         });
 
     // JERARQUÍA DE FIABILIDAD (usuario): la AUTORIDAD (fichero.db → OL → Google Books, por ISBN) es la fuente

@@ -41,6 +41,7 @@ import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { investigarIdentificador, aplicarCotejo, docsQueComparten } from './utils/cotejo.js';
+import { cduSinIAActivo, setCduSinIA } from './utils/ajustes-ingesta.js';
 import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fondo.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
@@ -334,9 +335,9 @@ async function docOcultoParaGuest(db, doc) {
 export function rutasPanel() {
     const r = express.Router();
 
-    // Estado consolidado (vigilante + conformador) para la cabecera del panel.
+    // Estado consolidado (vigilante + conformador + ajuste «CDU sin IA») para la cabecera y la página Entrada.
     r.get('/estado', (req, res) => {
-        res.json({ vigilante: estadoVigilante(), conformador: estadoConformador() });
+        res.json({ vigilante: estadoVigilante(), conformador: estadoConformador(), cduSinIA: cduSinIAActivo() });
     });
 
     // Pausar / reanudar el vigilante. Body { activo: bool }.
@@ -344,6 +345,13 @@ export function rutasPanel() {
         const { activo } = req.body || {};
         if (typeof activo !== 'boolean') return res.status(400).json({ ok: false, motivo: 'falta { activo: true|false }' });
         res.json({ ok: true, ...configurarVigilante({ activo }) });
+    });
+
+    // «CDU sin IA» en la ingesta: interruptor EN CALIENTE (junto al del Vigilante). Body { activo: bool }.
+    r.post('/ingesta/cdu-sin-ia', async (req, res) => {
+        const { activo } = req.body || {};
+        if (typeof activo !== 'boolean') return res.status(400).json({ ok: false, motivo: 'falta { activo: true|false }' });
+        res.json({ ok: true, cduSinIA: await setCduSinIA(activo) });
     });
 
     // Ingesta por día (gráfica). ?dias=30
