@@ -51,26 +51,65 @@ async function main() {
 
     const db = await conectarDB();
     const col = db.collection('biblioteca');
-    const filtro = SOLO_STALE ? FILTRO_SIDECARS_DESACTUALIZADOS : {};
-    const docs = await col.find(filtro).toArray();
-    console.log(`Documentos a revisar: ${docs.length}\n`);
 
-    let escritos = 0, sinCarpeta = 0, fallos = 0;
-    for (const doc of docs) {
+    // Mapas id→nombre de autores y editoriales (UNA consulta cada uno, en memoria): resolver los nombres de
+    // cada documento SIN 2 consultas por doc a Atlas (lo que hacía lento el backfill). Contribuciones usan el
+    // mismo mapa de autores (persona ∈ autores). Se pasan ya resueltos a regenerarSidecarsDoc.
+    const autorMap = new Map();
+    for (const a of await db.collection('autores').find({}, { projection: { nombre: 1 } }).toArray()) autorMap.set(String(a._id), a.nombre);
+    const editorialMap = new Map();
+    for (const e of await db.collection('editoriales').find({}, { projection: { nombre: 1 } }).toArray()) editorialMap.set(String(e._id), e.nombre);
+    const nombresDe = (doc) => ({
+        autores: (doc.autores || []).map((id) => autorMap.get(String(id)) || String(id)),
+        editorial: doc.editorial ? (editorialMap.get(String(doc.editorial)) || null) : null,
+        contribuciones: (doc.contribuciones || []).filter((c) => c && c.persona).map((c) => {
+            const nombre = autorMap.get(String(c.persona));
+            return nombre ? { rol: c.rol, nombre, persona: String(c.persona) } : { rol: c.rol, nombre: `⚠ ${String(c.persona)}`, persona: String(c.persona), desconocido: true };
+        }),
+    });
+
+    const filtro = SOLO_STALE ? FILTRO_SIDECARS_DESACTUALIZADOS : {};
+    // Proyección mínima para el recorrido (regenerarSidecarsDoc re-lee lo que necesita por _id). Con _id + los
+    // campos de ruta/fecha basta y no carga ~28k documentos completos en memoria.
+    const total = await col.countDocuments(filtro);
+    console.log(`Documentos a revisar: ${total}${SOLO_STALE ? ' (desactualizados)' : ''}\n`);
+    if (!total) { console.log('Nada que hacer.'); process.exit(0); }
+
+    // Progreso con ETA: se refresca una línea (\r) cada ~50 docs o cada ~2 s, para saber el ritmo real.
+    const t0 = Date.now();
+    let ultimoPint = 0;
+    const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+    const pintar = (hechos) => {
+        const seg = (Date.now() - t0) / 1000;
+        const rit = hechos / Math.max(seg, 0.001);
+        const eta = rit > 0 ? (total - hechos) / rit : 0;
+        const pct = ((hechos / total) * 100).toFixed(1);
+        process.stdout.write(`\r  ${hechos}/${total} (${pct}%) · ${rit.toFixed(1)}/s · transcurrido ${mmss(seg)} · ETA ${mmss(eta)}   `);
+    };
+
+    let escritos = 0, sinCarpeta = 0, fallos = 0, hechos = 0;
+    // Cursor (no carga todo en memoria); si el proceso se interrumpe, lo ya sellado no se repite al relanzar.
+    const cursor = col.find(filtro);
+    for await (const doc of cursor) {
         const carpeta = carpetaDeDoc(doc);
         // DRY-RUN: solo comprueba si hay carpeta y contaría; no escribe ni sella.
         if (!EJECUTAR) {
             if (carpeta && await existe(carpeta)) escritos++; else sinCarpeta++;
-            continue;
+        } else {
+            try {
+                const r = await regenerarSidecarsDoc(db, doc, carpeta, { nombres: nombresDe(doc) }); // escribe los 2 sidecars + sella
+                if (r.ok) escritos++; else sinCarpeta++;                  // sinCarpeta también queda sellado (drena la cola)
+            } catch (e) {
+                process.stdout.write('\n');
+                console.error(`  ⛔ [${doc._id}] "${doc.titulo}": ${e.message}`);
+                fallos++;
+            }
         }
-        try {
-            const r = await regenerarSidecarsDoc(db, doc, carpeta);   // escribe los 2 sidecars + sella sidecars_fecha
-            if (r.ok) escritos++; else sinCarpeta++;                  // sinCarpeta también queda sellado (drena la cola)
-        } catch (e) {
-            console.error(`  ⛔ [${doc._id}] "${doc.titulo}": ${e.message}`);
-            fallos++;
-        }
+        hechos++;
+        if (hechos - ultimoPint >= 50) { pintar(hechos); ultimoPint = hechos; }
     }
+    pintar(hechos);
+    process.stdout.write('\n');
 
     console.log(`\n${'═'.repeat(60)}`);
     console.log('RESUMEN');

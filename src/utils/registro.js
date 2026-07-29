@@ -54,13 +54,15 @@ export async function escribirSidecars(carpeta, legible) {
  * Detección de «pendiente» (ver FILTRO_SIDECARS_DESACTUALIZADOS): un doc se regenera CADA vez que se
  * modifica tras su último sidecar (2, 3, … veces).
  */
-export async function regenerarSidecarsDoc(db, doc, carpeta) {
+export async function regenerarSidecarsDoc(db, doc, carpeta, { nombres = null } = {}) {
     const marca = doc.fecha_actualizacion || new Date();
     const sellar = () => db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { sidecars_fecha: marca } });
     let existe = false;
     if (carpeta) { try { await fs.access(carpeta); existe = true; } catch { existe = false; } }
     if (!existe) { await sellar(); return { ok: false, sinCarpeta: true }; }
-    const { autores, editorial, contribuciones } = await resolverNombres(db, doc);
+    // `nombres` pre-resueltos (opcional): un backfill masivo los resuelve con mapas en memoria (una sola
+    // consulta a la BD para TODOS) en vez de 2 consultas por documento — mucho más rápido. Si no, se resuelven aquí.
+    const { autores, editorial, contribuciones } = nombres || await resolverNombres(db, doc);
     const legible = aRegistroLegible(doc, { autores, editorial, contribuciones });
     await escribirSidecars(carpeta, legible);
     await sellar();
