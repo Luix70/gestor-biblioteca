@@ -1389,7 +1389,9 @@ function shelfCard(kind, x) {
     esObra && x.isbn_obra
       ? ` <button class="rbtn shreq admin-only" data-req="${esc(x._id)}" title="Re-consultar título/sinopsis por ISBN">↻</button>`
       : '';
-  return `<div class="vol${sel ? ' sel' : ''}" data-${kind}="${esc(x._id)}" data-nombre="${esc((nombre || '').toLowerCase())}"><span class="selmark">✓</span><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(nombre || '—', 60))}${x.nsfw ? ' 🔞' : ''}${req}</div><div class="t">${estado}</div><div style="margin-top:5px">${ratingBar(esObra ? 'obras' : 'colecciones', x._id, x.valoracion, x.nsfw)}</div></div></div>`;
+  // Las OBRAS del estante llevan el MISMO look que en el Catálogo (clase `obracard`: fondo más claro + cubierta
+  // apilada + su burdeos propio en selección), para que una obra se vea igual la mires donde la mires.
+  return `<div class="vol${esObra ? ' obracard' : ''}${sel ? ' sel' : ''}" data-${kind}="${esc(x._id)}" data-nombre="${esc((nombre || '').toLowerCase())}"><span class="selmark">✓</span><div class="cov">${cov}</div><div class="meta"><div class="n">${esc(recortar(nombre || '—', 60))}${x.nsfw ? ' 🔞' : ''}${req}</div><div class="t">${estado}</div><div style="margin-top:5px">${ratingBar(esObra ? 'obras' : 'colecciones', x._id, x.valoracion, x.nsfw)}</div></div></div>`;
 }
 function pintarShelf(kind) {
   const cont = kind === 'obra' ? $('#obrasBody') : $('#colsBody');

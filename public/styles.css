@@ -1545,6 +1545,19 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
 .selmode .drow {
   background: #2c151d; /* la fila (transparente) recibe un fondo burdeos tenue */
 }
+/* MODO SELECCIÓN — TINTE sobre la propia CARÁTULA: el cambio de fondo de la tarjeta (burdeos) casi no se veía
+   porque la PORTADA llena el thumbnail y lo tapa (solo quedaba un fino borde en el pie). Un tinte translúcido
+   POR ENCIMA de la imagen hace la selección inequívoca en cualquier tarjeta con portada. Se dispara con
+   body.modo-seleccion → vale en TODAS las vistas (catálogo, obras, colecciones, miembros de obra/colección).
+   z-index 2: por encima de la imagen pero por debajo del tick (.selmark z5) y del distintivo NFC (z3). */
+body.modo-seleccion .vol .cov::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(184, 56, 86, 0.34);
+  pointer-events: none;
+  z-index: 2;
+}
 /* MODO SELECCIÓN activo: fondo un punto más claro + pastilla explicativa abajo, para que se vea de un
    vistazo en qué modo estamos (además del botón «🖱 Modo selección» y del realce de las tarjetas). */
 body.modo-seleccion {
