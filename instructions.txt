@@ -2251,7 +2251,13 @@ de ficheros clasificado por CDU.
     re-enriquecer-degradados   Docs con ISBN pero metadata pobre (lote con APIs
                                caídas): re-busca por ISBN y corrige título/autor
     re-clasificar-cdu          Re-clasifica la CDU (BNE→DNB→caché→IA) y mueve la
-                               carpeta al árbol nuevo si cambió
+                               carpeta al árbol nuevo si cambió. Con INGESTA_CDU_SIN_IA=1
+                               (.env), la INGESTA no gasta IA en la CDU (solo caché +
+                               crosswalk determinista, gratis); lo que no resuelva queda en
+                               '000' y ESTA tarea lo afina a REPOSO con el cupo GRATIS de
+                               IA (útil para lotes grandes o si las claves gratis dan
+                               429/404). Se propaga: motor-enriquecimiento → buscarMetadatos
+                               Externos({sinIA}) → resolverCDU({permitirIA:false}).
     describir-cdu              Asegura la descripción bilingüe (ES/EN) del CDU en
                                la colección cdu_descripciones
     completar-hash-contenido   Calcula el SHA-256 del fichero (identidad 1:1)

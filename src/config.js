@@ -68,6 +68,10 @@ export const AJUSTES = {
     MANTENIMIENTO_DESC_LOTE: 0,      // descripciones de clasificación (CDU/Dewey/LCC) por pasada del Conformador.
                                      // 0 = OFF (por defecto): se generan bajo demanda (al abrir el ⓘ). Para un
                                      // backfill controlado usa mejor la CAMPAÑA «descripciones» del panel (ajustable).
+    INGESTA_CDU_SIN_IA: 0,           // 1 = la INGESTA no gasta IA en la CDU: usa solo caché + crosswalk determinista
+                                     // (gratis). Lo que no resuelva queda en '000' y lo afina la tarea `re-clasificar-cdu`
+                                     // a REPOSO (IA con el cupo GRATIS, repartida en días). Útil para lotes grandes o
+                                     // cuando las claves gratis fallan (429/404); a cambio, un movimiento de carpeta posterior.
 
     // --- Campañas de fondo (backfill autorreparable al reposo; ajustables en el panel) ---
     CAMPANAS_PAUSA_MS: 700,          // ritmo entre elementos de una tanda de campaña (respeta a las APIs)

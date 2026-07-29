@@ -220,6 +220,10 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
             idioma: documento.idioma || null,
             cipDewey: cip?.dewey || null,
             cipLcc: cip?.lc || null,
+            // DIFERIR CDU: si INGESTA_CDU_SIN_IA=1, no se gasta IA en la CDU durante la ingesta (solo caché +
+            // crosswalk determinista, gratis). Lo que no resuelva cae a '000' abajo y lo afina re-clasificar-cdu
+            // a reposo con el cupo gratis. Evita depender de las claves de IA (429/404) en la ingesta.
+            sinIA: process.env.INGESTA_CDU_SIN_IA === '1',
         });
 
     // JERARQUÍA DE FIABILIDAD (usuario): la AUTORIDAD (fichero.db → OL → Google Books, por ISBN) es la fuente
@@ -278,6 +282,12 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.año_edicion = primerValido(documento.año_edicion, datosExtra.año_edicion);
     documento.idioma      = primerValido(documento.idioma, datosExtra.idioma) || 'es';
     documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
+    // Red de seguridad: si la CDU quedó sin resolver (p. ej. INGESTA_CDU_SIN_IA=1 y ni caché ni crosswalk la
+    // dieron), cae al cajón '000' (válido para el esquema). `re-clasificar-cdu` la afina a reposo y mueve la carpeta.
+    if (!primerValido(documento.cdu)) {
+        documento.cdu = '000';
+        documento.alertas_agente.push('CDU sin resolver en la ingesta (diferida): se afinará en mantenimiento (re-clasificar-cdu).');
+    }
     if (datosExtra.cdu_adicionales && datosExtra.cdu_adicionales.length > 0)
         documento.cdu_adicionales = datosExtra.cdu_adicionales;
 
