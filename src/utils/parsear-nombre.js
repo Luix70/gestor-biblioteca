@@ -36,6 +36,10 @@ export function esTituloArtefacto(s) {
     // "<algo> FM/DVI/TEX/INDD…": el productor grabó el nombre del fichero FUENTE (FrameMaker .fm, TeX .dvi/.tex,
     // InDesign .indd) con la extensión separada por un espacio. Caso real: «Hawking FM». Cae a la autoridad/nombre.
     if (/^[\w.'-]+\s+(fm|dvi|tex|indd|idml|qx[dpb]|p65|sla|pmd)$/i.test(t)) return true;
+    // Variante con la extensión de maquetación PEGADA POR UN PUNTO y, a veces, un nº de página/instancia detrás:
+    // «TT-Ven_001-TitlePage.qxd 1» (QuarkXPress), «cap03.indd 2». Es el nombre del fichero FUENTE, no un título.
+    // Caso real: la guía «DK Eyewitness Top 10 Venice», mal catalogada por ese título + un ISBN equivocado.
+    if (/\.(dvi|tex|indd|idml|qx[dpb]|p65|sla|pmd|fm)(?:\s+\d{1,4})?\s*$/i.test(t)) return true;
     if (/https?:\/\//i.test(t)) return true;                        // un título no lleva una URL → artefacto
     // DOI como "título": los ficheros de Springer/editoriales se descargan con su DOI por nombre
     // («10.1007@978-3-319-38992-9», «10.1007/978-…», o URL-codificado «10.1007%40978-…»). Un DOI NO es un
