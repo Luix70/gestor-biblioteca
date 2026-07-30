@@ -21,10 +21,15 @@
  * sean JPG/PNG (webp, gif…) no se puede embeber sin recomprimir: se OMITE y se conserva (para esas, usa cbz).
  *
  * Uso:
+ * VELOCIDAD: --concurrencia=N procesa N carpetas A LA VEZ (aprovecha los núcleos de la CPU; en el Atom del NAS
+ * déjalo en 1, en un PC potente 4-8). --sin-verificar salta la comprobación byte a byte (deja solo el chequeo de
+ * nº de páginas/entradas) → menos I/O; un pelín menos paranoico antes de borrar. Correr en un PC (o disco local)
+ * es MUCHO más rápido que en el Atom del NAS.
+ *
  *   node scripts/comics-a-cbz.js "<carpeta>"                 (DRY-RUN: solo informa; formato cbz)
  *   node scripts/comics-a-cbz.js "<carpeta>" --ejecutar      (crea los cbz y borra las carpetas puras)
  *   node scripts/comics-a-cbz.js "<carpeta>" --pdf --ejecutar        (crea .pdf en vez de .cbz)
- *   node scripts/comics-a-cbz.js "<carpeta>" --min=20 --pdf --ejecutar   (umbral distinto)
+ *   node scripts/comics-a-cbz.js "<carpeta>" --pdf --concurrencia=6 --sin-verificar --ejecutar   (rápido)
  */
 import fs from 'fs/promises';
 import path from 'path';
@@ -36,10 +41,12 @@ const args = process.argv.slice(2);
 const EJECUTAR = args.includes('--ejecutar');
 const PDF = args.includes('--pdf');
 const FORMATO = PDF ? 'pdf' : 'cbz';
+const VERIFICAR = !args.includes('--sin-verificar'); // por defecto se verifica byte a byte antes de borrar
+const CONCURRENCIA = Math.max(1, parseInt((args.find((a) => a.startsWith('--concurrencia=')) || '').split('=')[1] || '1', 10) || 1);
 const MIN = Math.max(1, parseInt((args.find((a) => a.startsWith('--min=')) || '').split('=')[1] || '10', 10) || 10);
 const RAIZ = args.find((a) => !a.startsWith('--'));
 if (!RAIZ) {
-    console.error('Uso: node scripts/comics-a-cbz.js "<carpeta>" [--min=10] [--pdf] [--ejecutar]');
+    console.error('Uso: node scripts/comics-a-cbz.js "<carpeta>" [--min=10] [--pdf] [--concurrencia=N] [--sin-verificar] [--ejecutar]');
     process.exit(1);
 }
 // Solo JPG/PNG se pueden meter en un PDF SIN recomprimir (conservando calidad). Los demás formatos → solo cbz.
@@ -85,14 +92,14 @@ async function buscarCandidatos(raiz) {
 }
 
 /** Escribe un .cbz (STORE) con las imágenes y lo VERIFICA byte a byte. { ok, paginas } | { ok:false, motivo }. */
-async function escribirCbzVerificado(dir, imagenes, destino) {
+async function escribirCbzVerificado(dir, imagenes, destino, verificar = true) {
     const zip = new AdmZip();
-    const firmas = new Map();
+    const firmas = verificar ? new Map() : null;
     for (const nombre of imagenes) {
         let buf;
         try { buf = await fs.readFile(path.join(dir, nombre)); } catch { return { ok: false, motivo: `no se pudo leer «${nombre}»` }; }
         zip.addFile(nombre, buf);
-        firmas.set(nombre, sha(buf));
+        if (verificar) firmas.set(nombre, sha(buf));
     }
     zip.getEntries().forEach((e) => { e.header.method = 0; }); // 0 = STORED: un JPG ya está comprimido; sin quemar CPU
     zip.writeZip(destino);
@@ -100,7 +107,7 @@ async function escribirCbzVerificado(dir, imagenes, destino) {
     try { leido = new AdmZip(destino); } catch (e) { return { ok: false, motivo: `el cbz no abre: ${e.message}` }; }
     const ents = leido.getEntries();
     if (ents.length !== imagenes.length) return { ok: false, motivo: `faltan páginas: ${ents.length}/${imagenes.length}` };
-    for (const e of ents) if (firmas.get(e.entryName) !== sha(e.getData())) return { ok: false, motivo: `«${e.entryName}» no coincide byte a byte` };
+    if (verificar) for (const e of ents) if (firmas.get(e.entryName) !== sha(e.getData())) return { ok: false, motivo: `«${e.entryName}» no coincide byte a byte` };
     return { ok: true, paginas: ents.length };
 }
 
@@ -115,7 +122,7 @@ async function cargarPdfLib() {
     catch { console.error('\n⛔ Falta la dependencia «pdf-lib». Instálala (o reconstruye la imagen):\n   sudo docker exec gestor-biblioteca npm install pdf-lib\n'); process.exit(1); }
     return _PDFDocument;
 }
-async function escribirPdfVerificado(dir, imagenes, destino) {
+async function escribirPdfVerificado(dir, imagenes, destino, verificar = true) {
     const PDFDocument = await cargarPdfLib();
     const doc = await PDFDocument.create();
     for (const nombre of imagenes) {
@@ -130,6 +137,7 @@ async function escribirPdfVerificado(dir, imagenes, destino) {
     }
     const bytes = await doc.save();
     await fs.writeFile(destino, bytes);
+    if (!verificar) return { ok: true, paginas: doc.getPageCount() };
     let re;
     try { re = await PDFDocument.load(bytes); } catch (e) { return { ok: false, motivo: `el pdf no abre: ${e.message}` }; }
     if (re.getPageCount() !== imagenes.length) return { ok: false, motivo: `faltan páginas: ${re.getPageCount()}/${imagenes.length}` };
@@ -160,10 +168,10 @@ function dimensionesJpeg(buf) {
  * (a diferencia de pdf-lib, que carga todo). Verifica byte a byte cada JPEG releyendo su región del fichero.
  * Solo JPEG de 1 (gris) o 3 (RGB) componentes; para PNG o JPEG CMYK devuelve { fallback:true } (usa pdf-lib).
  */
-async function escribirPdfJpegStream(dir, imagenes, destino) {
+async function escribirPdfJpegStream(dir, imagenes, destino, verificar = true) {
     const N = imagenes.length;
     const offsets = {};                 // nº de objeto → offset en bytes (para la tabla xref)
-    const jpegs = [];                   // { offset, len, sha, nombre } de cada JPEG embebido (para verificar)
+    const jpegs = [];                   // { offset, len, sha, nombre } de cada JPEG embebido (solo si se verifica)
     const fh = await fs.open(destino, 'w');
     let pos = 0;
     const wr = async (data) => { const b = Buffer.isBuffer(data) ? data : Buffer.from(data, 'latin1'); await fh.write(b); pos += b.length; };
@@ -183,7 +191,7 @@ async function escribirPdfJpegStream(dir, imagenes, destino) {
             const imgN = 3 + 3 * i, conN = 4 + 3 * i, pagN = 5 + 3 * i;
             offsets[imgN] = pos;
             await wr(`${imgN} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${d.w} /Height ${d.h} /ColorSpace ${cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`);
-            jpegs.push({ offset: pos, len: jpg.length, sha: sha(jpg), nombre });
+            if (verificar) jpegs.push({ offset: pos, len: jpg.length, sha: sha(jpg), nombre });
             await wr(jpg);
             await wr('\nendstream\nendobj\n');
             const contenido = `q\n${d.w} 0 0 ${d.h} 0 0 cm\n/Im Do\nQ\n`;
@@ -200,15 +208,18 @@ async function escribirPdfJpegStream(dir, imagenes, destino) {
         await wr(`trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
     } catch (e) { await fh.close().catch(() => {}); return { ok: false, motivo: `error al escribir: ${e.message}` }; }
     await fh.close();
-    // VERIFICACIÓN byte a byte: se relee la región de cada JPEG en el fichero (una a una → sin OOM) y se compara.
-    const rfh = await fs.open(destino, 'r');
-    try {
-        for (const f of jpegs) {
-            const buf = Buffer.alloc(f.len);
-            await rfh.read(buf, 0, f.len, f.offset);
-            if (sha(buf) !== f.sha) return { ok: false, motivo: `«${f.nombre}» no coincide byte a byte en el pdf` };
-        }
-    } finally { await rfh.close(); }
+    // VERIFICACIÓN byte a byte (salvo --sin-verificar): se relee la región de cada JPEG en el fichero (una a una
+    // → sin OOM) y se compara. Sin verificar, se confía en la escritura (nº de páginas garantizado por construcción).
+    if (verificar) {
+        const rfh = await fs.open(destino, 'r');
+        try {
+            for (const f of jpegs) {
+                const buf = Buffer.alloc(f.len);
+                await rfh.read(buf, 0, f.len, f.offset);
+                if (sha(buf) !== f.sha) return { ok: false, motivo: `«${f.nombre}» no coincide byte a byte en el pdf` };
+            }
+        } finally { await rfh.close(); }
+    }
     return { ok: true, paginas: N };
 }
 
@@ -233,10 +244,19 @@ async function yaEmpaquetado(destino, c) {
     } catch { return false; } // corrupto/parcial → no cuenta como ya empaquetado
 }
 
+// Pool de concurrencia: procesa `items` con hasta `n` en vuelo a la vez, llamando a fn(item). JS es de un solo
+// hilo (async), así que los contadores compartidos se incrementan sin condiciones de carrera entre awaits.
+async function enParalelo(items, n, fn) {
+    let i = 0;
+    const worker = async () => { while (i < items.length) { const j = i++; await fn(items[j]); } };
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(n, items.length)) }, worker));
+}
+
 async function main() {
     const raiz = path.resolve(RAIZ);
     console.log(`\nCómics a ${FORMATO.toUpperCase()}  [${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'}]  · carpeta: ${raiz}  · umbral: > ${MIN} imágenes` +
-        (PDF ? '  · PDF sin recomprimir (calidad intacta, sin OCR)' : ''));
+        (PDF ? '  · PDF sin recomprimir (calidad intacta, sin OCR)' : '') +
+        (CONCURRENCIA > 1 ? `  · concurrencia: ${CONCURRENCIA}` : '') + (!VERIFICAR ? '  · SIN verificación byte a byte' : ''));
     if (!EJECUTAR) console.log('  ℹ️  DRY-RUN: no se crea ni se borra nada.\n'); else console.log('');
 
     process.stdout.write('Explorando el árbol… ');
@@ -248,72 +268,80 @@ async function main() {
     // Motivo por el que una carpeta se CONSERVA (no se borra): sus «extras» (subcarpetas y ficheros no-imagen).
     const porQueConserva = (c) => `contiene: ${c.extras.slice(0, 5).join(', ')}${c.extras.length > 5 ? `… (+${c.extras.length - 5})` : ''}`;
 
-    let creados = 0, borradas = 0, conservadas = 0, fallidos = 0, omitidas = 0, reanudados = 0;
-    for (let i = 0; i < candidatos.length; i++) {
-        const c = candidatos[i];
+    // ── PRE-PASE (SECUENCIAL): decide la ACCIÓN y RESERVA un destino ÚNICO para cada carpeta. Se hace aquí, antes
+    // de la fase concurrente, para que dos carpetas del mismo nombre no compitan por el mismo fichero (carrera). ──
+    const reservados = new Set(); // rutas destino ya reservadas (en minúsculas) → nombres únicos con concurrencia
+    const acciones = [];
+    for (const c of candidatos) {
         const nombre = path.basename(c.dir);
         const rel = path.relative(raiz, c.dir) || nombre;
-        const marca = `[${i + 1}/${candidatos.length}]`;
-        // En PDF, una carpeta con imágenes NO-JPG/PNG no se puede embeber sin recomprimir → se omite (usa cbz).
-        const noAptaPdf = PDF && !c.pdfApto;
-        // Nombre BASE (sin sufijo) en la carpeta principal — para detectar una corrida anterior interrumpida.
+        if (PDF && !c.pdfApto) { acciones.push({ c, rel, tipo: 'omitir' }); continue; }
         const base = path.join(raiz, `${sanear(nombre)}.${FORMATO}`);
-        const reanudable = !noAptaPdf && (await yaEmpaquetado(base, c)); // ya empaquetada antes (misma carpeta)
-
-        // ── DRY-RUN: solo informa ──
-        if (!EJECUTAR) {
-            if (noAptaPdf) { console.log(`${marca} «${rel}» (${c.imagenes.length} img) · ⚠ OMITIDA en --pdf (imágenes que no son JPG/PNG; usa cbz)`); continue; }
-            if (reanudable) { console.log(`${marca} «${rel}» · ↩ YA empaquetada en ${path.basename(base)} — se ${c.puro ? 'borraría la carpeta' : 'CONSERVARÍA (' + porQueConserva(c) + ')'}`); continue; }
-            let dest = base;
-            for (let n = 2; await existe(dest); n++) dest = path.join(raiz, `${sanear(nombre)} (${n}).${FORMATO}`);
-            console.log(`${marca} «${rel}» (${c.imagenes.length} img) → ${path.basename(dest)}` +
-                (c.puro ? '  · se borrará la carpeta' : `  · ⚠ carpeta CONSERVADA (${porQueConserva(c)})`));
+        // REANUDAR: el fichero base ya existe y corresponde a esta carpeta (corrida anterior interrumpida antes de
+        // borrar). Solo el PRIMERO con ese nombre lo reclama (evita doble-reanudar de dos carpetas homónimas).
+        if (!reservados.has(base.toLowerCase()) && (await yaEmpaquetado(base, c))) {
+            reservados.add(base.toLowerCase());
+            acciones.push({ c, rel, tipo: 'reanudar', destino: base });
             continue;
         }
-
-        // ── EJECUTAR ──
-        if (noAptaPdf) { console.log(`${marca} ⚠ «${rel}» OMITIDA en --pdf (imágenes no JPG/PNG) — usa cbz`); omitidas++; continue; }
-        // BORRADO SEGURO (compartido): el fichero está verificado (cbz byte a byte / pdf páginas). Solo se borra
-        // la carpeta si es PURA (imágenes + basura); si tiene extras, se CONSERVA y se dice QUÉ la retiene.
-        const terminar = (destino, paginas, verbo) => {
-            if (c.puro) { borradas++; return fs.rm(c.dir, { recursive: true, force: true }).then(() => console.log(`${marca} ${verbo} ${path.basename(destino)} (${paginas} pág) · carpeta «${rel}» borrada`)); }
-            conservadas++;
-            console.log(`${marca} ${verbo} ${path.basename(destino)} (${paginas} pág) · ⚠ carpeta «${rel}» CONSERVADA (${porQueConserva(c)})`);
-        };
-        // REANUDAR: una corrida anterior ya escribió (y verificó) este fichero pero se cortó antes de borrar la
-        // carpeta → se termina el trabajo (borra/conserva) sin re-empaquetar. Idempotente: re-lanzar continúa.
-        if (reanudable) { reanudados++; await terminar(base, c.imagenes.length, '↩'); continue; }
-        // Si el nombre base ya existe pero es de OTRO cómic (o un parcial que no coincide), se usa sufijo (no pisa).
-        let destino = base;
-        for (let n = 2; await existe(destino); n++) destino = path.join(raiz, `${sanear(nombre)} (${n}).${FORMATO}`);
-        // PROGRESO ANTES de empaquetar: así una carpeta grande/lenta se ve YA (el resultado se imprime al acabar).
-        console.log(`${marca} «${rel}» (${c.imagenes.length} img) → ${path.basename(destino)} · empaquetando…`);
-        // PDF: JPEG → escritor en STREAMING (sin OOM en libros grandes, sin pdf-lib); PNG/CMYK → pdf-lib (en
-        // memoria; raros y pequeños). CBZ: adm-zip. Todo verificado antes de que `terminar` decida borrar.
-        const soloJpeg = c.imagenes.every((n) => /\.jpe?g$/i.test(n));
-        let r;
-        if (!PDF) r = await escribirCbzVerificado(c.dir, c.imagenes, destino);
-        else if (soloJpeg) {
-            r = await escribirPdfJpegStream(c.dir, c.imagenes, destino);
-            if (!r.ok && r.fallback) r = await escribirPdfVerificado(c.dir, c.imagenes, destino); // JPEG raro (CMYK) → pdf-lib
-        } else r = await escribirPdfVerificado(c.dir, c.imagenes, destino);                        // hay PNG → pdf-lib
-        if (!r.ok) { console.error(`${marca} ✖ «${rel}»: ${r.motivo} — NO se toca la carpeta`); fallidos++; continue; }
-        creados++;
-        await terminar(destino, r.paginas, '✔');
+        // Destino libre: base o sufijo « (n)», evitando el disco Y lo ya reservado en este pre-pase.
+        let destino = base, n = 2;
+        while (reservados.has(destino.toLowerCase()) || (await existe(destino))) destino = path.join(raiz, `${sanear(nombre)} (${n++}).${FORMATO}`);
+        reservados.add(destino.toLowerCase());
+        acciones.push({ c, rel, tipo: 'empaquetar', destino });
     }
+
+    // ── DRY-RUN: imprime el plan ──
+    if (!EJECUTAR) {
+        acciones.forEach((a, i) => {
+            const marca = `[${i + 1}/${acciones.length}]`;
+            if (a.tipo === 'omitir') console.log(`${marca} «${a.rel}» (${a.c.imagenes.length} img) · ⚠ OMITIDA en --pdf (imágenes que no son JPG/PNG; usa cbz)`);
+            else if (a.tipo === 'reanudar') console.log(`${marca} «${a.rel}» · ↩ YA empaquetada en ${path.basename(a.destino)} — se ${a.c.puro ? 'borraría la carpeta' : 'CONSERVARÍA (' + porQueConserva(a.c) + ')'}`);
+            else console.log(`${marca} «${a.rel}» (${a.c.imagenes.length} img) → ${path.basename(a.destino)}` + (a.c.puro ? '  · se borrará la carpeta' : `  · ⚠ carpeta CONSERVADA (${porQueConserva(a.c)})`));
+        });
+        const emp = acciones.filter((a) => a.tipo === 'empaquetar');
+        console.log(`\n${'═'.repeat(60)}\nRESUMEN`);
+        console.log(`  A empaquetar (${FORMATO}): ${emp.length}  (borrarían carpeta: ${emp.filter((a) => a.c.puro).length}, conservarían: ${emp.filter((a) => !a.c.puro).length}) · reanudar: ${acciones.filter((a) => a.tipo === 'reanudar').length}` +
+            (acciones.some((a) => a.tipo === 'omitir') ? ` · omitidas (no JPG/PNG): ${acciones.filter((a) => a.tipo === 'omitir').length}` : ''));
+        console.log('  (simulación) Nada tocado. Re-ejecuta con --ejecutar.');
+        process.exit(0);
+    }
+
+    // ── EJECUTAR (con concurrencia) ──
+    let creados = 0, borradas = 0, conservadas = 0, fallidos = 0, omitidas = 0, reanudados = 0, hechos = 0;
+    const total = acciones.length;
+    // BORRADO SEGURO: el fichero está verificado (o al menos con el nº de páginas correcto). Solo se borra la
+    // carpeta si es PURA (imágenes + basura); si tiene extras, se CONSERVA y se dice QUÉ la retiene. Devuelve la línea.
+    const terminar = async (c, rel, destino, paginas, verbo) => {
+        if (c.puro) { await fs.rm(c.dir, { recursive: true, force: true }); borradas++; return `${verbo} ${path.basename(destino)} (${paginas} pág) · carpeta «${rel}» borrada`; }
+        conservadas++;
+        return `${verbo} ${path.basename(destino)} (${paginas} pág) · ⚠ carpeta «${rel}» CONSERVADA (${porQueConserva(c)})`;
+    };
+    const procesar = async (a) => {
+        const { c, rel, destino, tipo } = a;
+        let linea;
+        if (tipo === 'omitir') { omitidas++; linea = `⚠ «${rel}» OMITIDA en --pdf (imágenes no JPG/PNG) — usa cbz`; }
+        else if (tipo === 'reanudar') { reanudados++; linea = await terminar(c, rel, destino, c.imagenes.length, '↩'); }
+        else {
+            // PDF: JPEG → escritor en STREAMING (sin OOM, sin pdf-lib); PNG/CMYK → pdf-lib. CBZ: adm-zip.
+            const soloJpeg = c.imagenes.every((n) => /\.jpe?g$/i.test(n));
+            let r;
+            if (!PDF) r = await escribirCbzVerificado(c.dir, c.imagenes, destino, VERIFICAR);
+            else if (soloJpeg) {
+                r = await escribirPdfJpegStream(c.dir, c.imagenes, destino, VERIFICAR);
+                if (!r.ok && r.fallback) r = await escribirPdfVerificado(c.dir, c.imagenes, destino, VERIFICAR); // JPEG CMYK → pdf-lib
+            } else r = await escribirPdfVerificado(c.dir, c.imagenes, destino, VERIFICAR);                        // hay PNG → pdf-lib
+            if (!r.ok) { fallidos++; linea = `✖ «${rel}»: ${r.motivo} — NO se toca la carpeta`; }
+            else { creados++; linea = await terminar(c, rel, destino, r.paginas, '✔'); }
+        }
+        console.log(`[${++hechos}/${total}] ${linea}`);
+    };
+    await enParalelo(acciones, CONCURRENCIA, procesar);
 
     console.log(`\n${'═'.repeat(60)}\nRESUMEN`);
-    if (!EJECUTAR) {
-        const aptas = PDF ? candidatos.filter((c) => c.pdfApto) : candidatos;
-        const noPdf = PDF ? candidatos.length - aptas.length : 0;
-        console.log(`  A empaquetar (${FORMATO}): ${aptas.length}  (puras que se borrarían: ${aptas.filter((c) => c.puro).length}, conservadas: ${aptas.filter((c) => !c.puro).length})` +
-            (noPdf ? `  · omitidas por no ser JPG/PNG: ${noPdf}` : ''));
-        console.log('  (simulación) Nada tocado. Re-ejecuta con --ejecutar.');
-    } else {
-        console.log(`  ${FORMATO.toUpperCase()} creados: ${creados} · carpetas borradas: ${borradas} · conservadas: ${conservadas} · fallidos: ${fallidos}` +
-            (reanudados ? ` · reanudados: ${reanudados}` : '') + (omitidas ? ` · omitidas (no JPG/PNG): ${omitidas}` : ''));
-        if (conservadas) console.log('  ⚠ Carpetas CONSERVADAS: revisa su contenido no-imagen (arriba se lista qué tiene cada una); el fichero ya se creó.');
-    }
+    console.log(`  ${FORMATO.toUpperCase()} creados: ${creados} · carpetas borradas: ${borradas} · conservadas: ${conservadas} · fallidos: ${fallidos}` +
+        (reanudados ? ` · reanudados: ${reanudados}` : '') + (omitidas ? ` · omitidas (no JPG/PNG): ${omitidas}` : ''));
+    if (conservadas) console.log('  ⚠ Carpetas CONSERVADAS: revisa su contenido no-imagen (arriba se lista qué tiene cada una); el fichero ya se creó.');
     process.exit(0);
 }
 

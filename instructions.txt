@@ -860,7 +860,11 @@ de ficheros clasificado por CDU.
       propio, verificación byte a byte releyendo el fichero) → soporta libros ESCANEADOS enormes SIN agotar la RAM
       del contenedor (1 GB); no necesita pdf-lib para JPEG. Solo las carpetas con PNG usan pdf-lib (en memoria; el
       contador de páginas del resume es por regex, sin pdf-lib). El .cbz (adm-zip) sí carga todo en memoria → para
-      libros muy grandes, prefiere --pdf. Recorre en profundidad;
+      libros muy grandes, prefiere --pdf. VELOCIDAD: --concurrencia=N procesa N carpetas A LA VEZ (aprovecha los
+      núcleos; en el Atom del NAS déjalo en 1, en un PC 4-8) — un PRE-PASE secuencial reserva un destino único por
+      carpeta para que la concurrencia no choque en nombres homónimos. --sin-verificar salta la comprobación byte
+      a byte (deja solo el chequeo de nº de páginas/entradas) → menos I/O. Correr en un PC (o disco local) es MUCHO
+      más rápido que en el Atom del NAS (el script es multiplataforma). Recorre en profundidad;
       todos los ficheros van a la principal (sufijo « (2)» ante choque); páginas en orden natural. Dry-run por defecto.
       PROGRESO: «Explorando…» + [i/total] por carpeta + resumen. Cuando CONSERVA una carpeta, LISTA qué la retiene
       («contiene: notas.txt, extras/…»). REANUDABLE/idempotente: interrumpir es seguro (la carpeta solo se borra
