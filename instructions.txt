@@ -857,6 +857,10 @@ de ficheros clasificado por CDU.
       lossless) → misma calidad de escaneo, SIN OCR (necesita la dep pdf-lib, puro JS); las imágenes que no sean
       JPG/PNG no se embeben sin recomprimir → esas carpetas se OMITEN en --pdf (usa cbz). Recorre en profundidad;
       todos los ficheros van a la principal (sufijo « (2)» ante choque); páginas en orden natural. Dry-run por defecto.
+      PROGRESO: «Explorando…» + [i/total] por carpeta + resumen. Cuando CONSERVA una carpeta, LISTA qué la retiene
+      («contiene: notas.txt, extras/…»). REANUDABLE/idempotente: interrumpir es seguro (la carpeta solo se borra
+      TRAS verificar el fichero); al re-lanzar, las ya hechas no son candidatas (su carpeta ya no existe) y una que
+      quedó empaquetada pero sin borrar se detecta (mismo nombre + mismas páginas → «↩») y se termina sin duplicar.
            node scripts/comics-a-cbz.js "<carpeta>" [--min=10] [--pdf] [--ejecutar]
 
   ── AUDIOLIBROS PUROS (carpeta de audio = 1 documento) ───────────────────────

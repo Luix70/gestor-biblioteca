@@ -65,11 +65,13 @@ async function buscarCandidatos(raiz) {
         try { ents = await fs.readdir(d, { withFileTypes: true }); } catch { return; }
         const imagenes = ents.filter((e) => e.isFile() && esImagenArchivo(e.name) && !esBasura(e.name)).map((e) => e.name);
         if (imagenes.length > MIN) {
-            // Puro = ni subcarpetas ni ficheros que no sean imagen/basura → se podrá borrar tras verificar el cbz.
-            const puro = !ents.some((e) => e.isDirectory()) &&
-                !ents.some((e) => e.isFile() && !esImagenArchivo(e.name) && !esBasura(e.name));
+            // EXTRAS = lo que NO es imagen ni basura (subcarpetas y ficheros varios). Si hay extras, la carpeta se
+            // CONSERVA (no se borra) y se listan para que sepas QUÉ la retiene. Puro = sin extras → se podrá borrar.
+            const extras = ents
+                .filter((e) => e.isDirectory() || (e.isFile() && !esImagenArchivo(e.name) && !esBasura(e.name)))
+                .map((e) => (e.isDirectory() ? e.name + '/' : e.name));
             const pdfApto = imagenes.every(embebiblePdf); // ¿todas JPG/PNG? (para poder hacer PDF sin recomprimir)
-            out.push({ dir: d, imagenes: imagenes.sort(natural), puro, pdfApto });
+            out.push({ dir: d, imagenes: imagenes.sort(natural), puro: extras.length === 0, extras, pdfApto });
             return; // es un cómic → no se entra en sus subcarpetas
         }
         for (const e of ents) if (e.isDirectory()) await rec(path.join(d, e.name));
@@ -134,17 +136,41 @@ async function escribirPdfVerificado(dir, imagenes, destino) {
     return { ok: true, paginas: re.getPageCount() };
 }
 
+/**
+ * ¿El fichero destino YA existe y CORRESPONDE a esta carpeta? (reanudación tras una interrupción). cbz: mismas
+ * páginas exactas (mismos nombres). pdf: mismo nº de páginas. Si coincide, la corrida anterior ya lo empaquetó
+ * (se cortó antes de borrar la carpeta) → no hay que rehacerlo. Un fichero parcial/corrupto o de OTRO cómic con
+ * el mismo nombre NO coincide → se tratará aparte (sufijo). Nunca borra nada: solo informa.
+ */
+async function yaEmpaquetado(destino, c) {
+    if (!(await existe(destino))) return false;
+    try {
+        if (PDF) {
+            const PDFDocument = await cargarPdfLib();
+            const doc = await PDFDocument.load(await fs.readFile(destino));
+            return doc.getPageCount() === c.imagenes.length;
+        }
+        const nombres = new Set(new AdmZip(destino).getEntries().map((e) => e.entryName));
+        return nombres.size === c.imagenes.length && c.imagenes.every((n) => nombres.has(n));
+    } catch { return false; } // corrupto/parcial → no cuenta como ya empaquetado
+}
+
 async function main() {
     const raiz = path.resolve(RAIZ);
     console.log(`\nCómics a ${FORMATO.toUpperCase()}  [${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'}]  · carpeta: ${raiz}  · umbral: > ${MIN} imágenes` +
         (PDF ? '  · PDF sin recomprimir (calidad intacta, sin OCR)' : ''));
     if (!EJECUTAR) console.log('  ℹ️  DRY-RUN: no se crea ni se borra nada.\n'); else console.log('');
 
+    process.stdout.write('Explorando el árbol… ');
     const candidatos = await buscarCandidatos(raiz);
+    process.stdout.write('hecho.\n');
     if (!candidatos.length) { console.log('No hay subcarpetas con más de ' + MIN + ' imágenes. Nada que hacer.'); process.exit(0); }
     console.log(`Subcarpetas de cómic encontradas: ${candidatos.length}\n`);
 
-    let creados = 0, borradas = 0, conservadas = 0, fallidos = 0, omitidas = 0;
+    // Motivo por el que una carpeta se CONSERVA (no se borra): sus «extras» (subcarpetas y ficheros no-imagen).
+    const porQueConserva = (c) => `contiene: ${c.extras.slice(0, 5).join(', ')}${c.extras.length > 5 ? `… (+${c.extras.length - 5})` : ''}`;
+
+    let creados = 0, borradas = 0, conservadas = 0, fallidos = 0, omitidas = 0, reanudados = 0;
     for (let i = 0; i < candidatos.length; i++) {
         const c = candidatos[i];
         const nombre = path.basename(c.dir);
@@ -152,36 +178,40 @@ async function main() {
         const marca = `[${i + 1}/${candidatos.length}]`;
         // En PDF, una carpeta con imágenes NO-JPG/PNG no se puede embeber sin recomprimir → se omite (usa cbz).
         const noAptaPdf = PDF && !c.pdfApto;
-        // Destino en la carpeta PRINCIPAL, con el nombre de la subcarpeta y sufijo si ya existe (no pisar ninguno).
-        let destino = path.join(raiz, `${sanear(nombre)}.${FORMATO}`);
-        for (let n = 2; await existe(destino); n++) destino = path.join(raiz, `${sanear(nombre)} (${n}).${FORMATO}`);
+        // Nombre BASE (sin sufijo) en la carpeta principal — para detectar una corrida anterior interrumpida.
+        const base = path.join(raiz, `${sanear(nombre)}.${FORMATO}`);
+        const reanudable = !noAptaPdf && (await yaEmpaquetado(base, c)); // ya empaquetada antes (misma carpeta)
 
+        // ── DRY-RUN: solo informa ──
         if (!EJECUTAR) {
-            if (noAptaPdf) { console.log(`${marca} «${rel}» (${c.imagenes.length} img) · ⚠ OMITIDA en --pdf (tiene imágenes que no son JPG/PNG; conviértela a cbz)`); continue; }
-            console.log(`${marca} «${rel}» (${c.imagenes.length} img) → ${path.basename(destino)}` +
-                (c.puro ? '  · se borrará la carpeta' : '  · ⚠ carpeta CONSERVADA (tiene contenido no-imagen/subcarpetas)'));
+            if (noAptaPdf) { console.log(`${marca} «${rel}» (${c.imagenes.length} img) · ⚠ OMITIDA en --pdf (imágenes que no son JPG/PNG; usa cbz)`); continue; }
+            if (reanudable) { console.log(`${marca} «${rel}» · ↩ YA empaquetada en ${path.basename(base)} — se ${c.puro ? 'borraría la carpeta' : 'CONSERVARÍA (' + porQueConserva(c) + ')'}`); continue; }
+            let dest = base;
+            for (let n = 2; await existe(dest); n++) dest = path.join(raiz, `${sanear(nombre)} (${n}).${FORMATO}`);
+            console.log(`${marca} «${rel}» (${c.imagenes.length} img) → ${path.basename(dest)}` +
+                (c.puro ? '  · se borrará la carpeta' : `  · ⚠ carpeta CONSERVADA (${porQueConserva(c)})`));
             continue;
         }
 
+        // ── EJECUTAR ──
         if (noAptaPdf) { console.log(`${marca} ⚠ «${rel}» OMITIDA en --pdf (imágenes no JPG/PNG) — usa cbz`); omitidas++; continue; }
-        const r = PDF ? await escribirPdfVerificado(c.dir, c.imagenes, destino) : await escribirCbzVerificado(c.dir, c.imagenes, destino);
-        if (!r.ok) {
-            console.error(`${marca} ✖ «${rel}»: ${r.motivo} — NO se toca la carpeta`);
-            fallidos++;
-            continue;
-        }
-        creados++;
-        // Borrado SEGURO: el fichero ya está VERIFICADO (cbz: byte a byte; pdf: reabre y cuenta las páginas, con
-        // las imágenes embebidas SIN recomprimir). Solo se borra si la carpeta es PURA (imágenes + basura); si
-        // tiene otro contenido, se conserva para que la revises.
-        if (c.puro) {
-            await fs.rm(c.dir, { recursive: true, force: true });
-            borradas++;
-            console.log(`${marca} ✔ ${path.basename(destino)} (${r.paginas} pág) · carpeta «${rel}» borrada`);
-        } else {
+        // BORRADO SEGURO (compartido): el fichero está verificado (cbz byte a byte / pdf páginas). Solo se borra
+        // la carpeta si es PURA (imágenes + basura); si tiene extras, se CONSERVA y se dice QUÉ la retiene.
+        const terminar = (destino, paginas, verbo) => {
+            if (c.puro) { borradas++; return fs.rm(c.dir, { recursive: true, force: true }).then(() => console.log(`${marca} ${verbo} ${path.basename(destino)} (${paginas} pág) · carpeta «${rel}» borrada`)); }
             conservadas++;
-            console.log(`${marca} ✔ ${path.basename(destino)} (${r.paginas} pág) · ⚠ carpeta «${rel}» CONSERVADA (contenido no-imagen)`);
-        }
+            console.log(`${marca} ${verbo} ${path.basename(destino)} (${paginas} pág) · ⚠ carpeta «${rel}» CONSERVADA (${porQueConserva(c)})`);
+        };
+        // REANUDAR: una corrida anterior ya escribió (y verificó) este fichero pero se cortó antes de borrar la
+        // carpeta → se termina el trabajo (borra/conserva) sin re-empaquetar. Idempotente: re-lanzar continúa.
+        if (reanudable) { reanudados++; await terminar(base, c.imagenes.length, '↩'); continue; }
+        // Si el nombre base ya existe pero es de OTRO cómic (o un parcial que no coincide), se usa sufijo (no pisa).
+        let destino = base;
+        for (let n = 2; await existe(destino); n++) destino = path.join(raiz, `${sanear(nombre)} (${n}).${FORMATO}`);
+        const r = PDF ? await escribirPdfVerificado(c.dir, c.imagenes, destino) : await escribirCbzVerificado(c.dir, c.imagenes, destino);
+        if (!r.ok) { console.error(`${marca} ✖ «${rel}»: ${r.motivo} — NO se toca la carpeta`); fallidos++; continue; }
+        creados++;
+        await terminar(destino, r.paginas, '✔');
     }
 
     console.log(`\n${'═'.repeat(60)}\nRESUMEN`);
@@ -193,7 +223,8 @@ async function main() {
         console.log('  (simulación) Nada tocado. Re-ejecuta con --ejecutar.');
     } else {
         console.log(`  ${FORMATO.toUpperCase()} creados: ${creados} · carpetas borradas: ${borradas} · conservadas: ${conservadas} · fallidos: ${fallidos}` +
-            (omitidas ? ` · omitidas (no JPG/PNG): ${omitidas}` : ''));
+            (reanudados ? ` · reanudados: ${reanudados}` : '') + (omitidas ? ` · omitidas (no JPG/PNG): ${omitidas}` : ''));
+        if (conservadas) console.log('  ⚠ Carpetas CONSERVADAS: revisa su contenido no-imagen (arriba se lista qué tiene cada una); el fichero ya se creó.');
     }
     process.exit(0);
 }
