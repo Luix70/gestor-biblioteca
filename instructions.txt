@@ -855,11 +855,15 @@ de ficheros clasificado por CDU.
       se borra si es PURA (solo imágenes+basura); si tiene otro contenido, el fichero se crea igual pero la
       carpeta se CONSERVA y se avisa. --pdf EMBEBE JPG/PNG SIN recomprimir (embedJpg guarda el JPEG tal cual;
       lossless) → misma calidad de escaneo, SIN OCR (necesita la dep pdf-lib, puro JS); las imágenes que no sean
-      JPG/PNG no se embeben sin recomprimir → esas carpetas se OMITEN en --pdf (usa cbz). MEMORIA: el PDF de JPEG
-      se escribe EN STREAMING (una imagen en memoria a la vez, DCTDecode con los bytes originales, parser de SOF
-      propio, verificación byte a byte releyendo el fichero) → soporta libros ESCANEADOS enormes SIN agotar la RAM
-      del contenedor (1 GB); no necesita pdf-lib para JPEG. Solo las carpetas con PNG usan pdf-lib (en memoria; el
-      contador de páginas del resume es por regex, sin pdf-lib). El .cbz (adm-zip) sí carga todo en memoria → para
+      JPG/PNG no se embeben sin recomprimir → esas carpetas se OMITEN en --pdf (usa cbz). MEMORIA: el PDF se
+      escribe EN STREAMING tanto para JPEG como para PNG, UNA imagen en memoria a la vez, SIN decodificar los
+      píxeles → soporta libros ESCANEADOS enormes SIN agotar la RAM del contenedor (1 GB) y sin pdf-lib. JPEG →
+      /DCTDecode con los bytes originales (parser de SOF propio); PNG → /FlateDecode + predictor PNG 15 con los
+      IDAT tal cual (gris/RGB/paleta; entrelazado o con alfa → fallback a pdf-lib) — leerPng/objetoImagen/
+      escribirPdfStream. Verificación byte a byte releyendo el fichero. (pdf-lib decodifica y ACUMULA todo → daba
+      «Array buffer allocation failed» en libros PNG grandes.) El contador de páginas del resume es por regex, sin
+      pdf-lib. Verificado: los píxeles decodificados del PDF coinciden byte a byte con el PNG original (lossless).
+      El .cbz (adm-zip) sí carga todo en memoria → para
       libros muy grandes, prefiere --pdf. VELOCIDAD: --concurrencia=N procesa N carpetas A LA VEZ (aprovecha los
       núcleos; en el Atom del NAS déjalo en 1, en un PC 4-8) — un PRE-PASE secuencial reserva un destino único por
       carpeta para que la concurrencia no choque en nombres homónimos. --sin-verificar salta la comprobación byte

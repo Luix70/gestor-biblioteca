@@ -144,6 +144,27 @@ async function escribirPdfVerificado(dir, imagenes, destino, verificar = true) {
     return { ok: true, paginas: re.getPageCount() };
 }
 
+// Lee los datos de un PNG SIN decodificar los píxeles: cabecera (IHDR) + los bloques IDAT concatenados (el flujo
+// zlib con el filtrado PNG) + la paleta (PLTE). Devuelve null si no es un PNG. Permite EMBEBER el PNG en el PDF
+// tal cual (FlateDecode + predictor PNG 15), sin decodificarlo → lossless y sin gastar memoria en píxeles crudos.
+function leerPng(buf) {
+    const firma = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    if (buf.length < 8 || !firma.every((b, i) => buf[i] === b)) return null;
+    let o = 8, ihdr = null, palette = null; const idat = [];
+    while (o + 8 <= buf.length) {
+        const len = buf.readUInt32BE(o);
+        const tipo = buf.toString('latin1', o + 4, o + 8);
+        const data = buf.subarray(o + 8, o + 8 + len);
+        if (tipo === 'IHDR') ihdr = { w: data.readUInt32BE(0), h: data.readUInt32BE(4), bitDepth: data[8], colorType: data[9], interlace: data[12] };
+        else if (tipo === 'PLTE') palette = Buffer.from(data);
+        else if (tipo === 'IDAT') idat.push(Buffer.from(data));
+        else if (tipo === 'IEND') break;
+        o += 12 + len; // 4 (long) + 4 (tipo) + len (datos) + 4 (crc)
+    }
+    if (!ihdr || !idat.length) return null;
+    return { ...ihdr, idat: Buffer.concat(idat), palette };
+}
+
 // Ancho/alto/nº de componentes de un JPEG (del marcador SOF). Sin dependencias. null si no es un JPEG legible.
 function dimensionesJpeg(buf) {
     if (buf.length < 4 || buf[0] !== 0xFF || buf[1] !== 0xD8) return null; // SOI
@@ -162,16 +183,42 @@ function dimensionesJpeg(buf) {
     return null;
 }
 
+// Prepara el objeto imagen PDF de UN fichero (JPEG o PNG) SIN decodificar los píxeles → memoria mínima, lossless:
+//   · JPEG → /DCTDecode con los bytes del JPEG tal cual (calidad exacta). 1 comp→gris, 3→RGB (CMYK → fallback).
+//   · PNG  → /FlateDecode + predictor PNG 15 con los IDAT tal cual (el PDF deshace el filtrado). Gris(0)/RGB(2)/
+//            paleta(3); entrelazado o con alfa (4/6) → fallback a pdf-lib.
+// Devuelve { w, h, dict, datos } (datos = bytes a escribir en el stream) o { fallback, motivo }.
+function objetoImagen(buf, nombre) {
+    if (/\.png$/i.test(nombre)) {
+        const p = leerPng(buf);
+        if (!p) return { fallback: true, motivo: `«${nombre}» PNG no legible` };
+        if (p.interlace !== 0) return { fallback: true, motivo: `«${nombre}» PNG entrelazado` };
+        let colors, cs;
+        if (p.colorType === 0) { colors = 1; cs = '/DeviceGray'; }
+        else if (p.colorType === 2) { colors = 3; cs = '/DeviceRGB'; }
+        else if (p.colorType === 3 && p.palette) { colors = 1; cs = `[ /Indexed /DeviceRGB ${p.palette.length / 3 - 1} < ${p.palette.toString('hex')} > ]`; }
+        else return { fallback: true, motivo: `«${nombre}» PNG colorType ${p.colorType} (alfa/paleta sin PLTE)` };
+        const dict = `/Width ${p.w} /Height ${p.h} /ColorSpace ${cs} /BitsPerComponent ${p.bitDepth} /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors ${colors} /BitsPerComponent ${p.bitDepth} /Columns ${p.w} >> /Length ${p.idat.length}`;
+        return { w: p.w, h: p.h, dict, datos: p.idat };
+    }
+    const d = dimensionesJpeg(buf);
+    if (!d) return { fallback: true, motivo: `«${nombre}» no es un JPEG legible` };
+    if (d.comp !== 1 && d.comp !== 3) return { fallback: true, motivo: `«${nombre}» JPEG de ${d.comp} componentes (CMYK)` };
+    const cs = d.comp === 1 ? '/DeviceGray' : '/DeviceRGB';
+    const dict = `/Width ${d.w} /Height ${d.h} /ColorSpace ${cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${buf.length}`;
+    return { w: d.w, h: d.h, dict, datos: buf };
+}
+
 /**
- * Escribe un .pdf EN STREAMING embebiendo cada JPEG SIN recomprimir (DCTDecode con los bytes originales →
- * calidad EXACTA, sin OCR), UNA imagen en memoria a la vez → soporta libros escaneados enormes sin agotar la RAM
- * (a diferencia de pdf-lib, que carga todo). Verifica byte a byte cada JPEG releyendo su región del fichero.
- * Solo JPEG de 1 (gris) o 3 (RGB) componentes; para PNG o JPEG CMYK devuelve { fallback:true } (usa pdf-lib).
+ * Escribe un .pdf EN STREAMING embebiendo cada imagen (JPEG o PNG) SIN recomprimir → calidad EXACTA, sin OCR, y
+ * UNA imagen en memoria a la vez → soporta libros escaneados enormes sin agotar la RAM (a diferencia de pdf-lib,
+ * que decodifica y acumula todo: «Array buffer allocation failed»). Verifica byte a byte releyendo cada imagen
+ * del fichero. Un formato/variante no soportado (JPEG CMYK, PNG con alfa o entrelazado) → { fallback:true } (pdf-lib).
  */
-async function escribirPdfJpegStream(dir, imagenes, destino, verificar = true) {
+async function escribirPdfStream(dir, imagenes, destino, verificar = true) {
     const N = imagenes.length;
     const offsets = {};                 // nº de objeto → offset en bytes (para la tabla xref)
-    const jpegs = [];                   // { offset, len, sha, nombre } de cada JPEG embebido (solo si se verifica)
+    const imgs = [];                    // { offset, len, sha, nombre } de cada imagen embebida (solo si se verifica)
     const fh = await fs.open(destino, 'w');
     let pos = 0;
     const wr = async (data) => { const b = Buffer.isBuffer(data) ? data : Buffer.from(data, 'latin1'); await fh.write(b); pos += b.length; };
@@ -183,22 +230,20 @@ async function escribirPdfJpegStream(dir, imagenes, destino, verificar = true) {
         await wr(`2 0 obj\n<< /Type /Pages /Kids [ ${kids} ] /Count ${N} >>\nendobj\n`);
         for (let i = 0; i < N; i++) {
             const nombre = imagenes[i];
-            const jpg = await fs.readFile(path.join(dir, nombre));
-            const d = dimensionesJpeg(jpg);
-            if (!d) { await fh.close(); await fs.rm(destino, { force: true }); return { ok: false, motivo: `«${nombre}» no es un JPEG legible`, fallback: true }; }
-            if (d.comp !== 1 && d.comp !== 3) { await fh.close(); await fs.rm(destino, { force: true }); return { ok: false, motivo: `«${nombre}»: JPEG de ${d.comp} componentes (CMYK)`, fallback: true }; }
-            const cs = d.comp === 1 ? '/DeviceGray' : '/DeviceRGB';
+            const buf = await fs.readFile(path.join(dir, nombre));
+            const im = objetoImagen(buf, nombre);
+            if (im.fallback) { await fh.close(); await fs.rm(destino, { force: true }); return { ok: false, motivo: im.motivo, fallback: true }; }
             const imgN = 3 + 3 * i, conN = 4 + 3 * i, pagN = 5 + 3 * i;
             offsets[imgN] = pos;
-            await wr(`${imgN} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${d.w} /Height ${d.h} /ColorSpace ${cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`);
-            if (verificar) jpegs.push({ offset: pos, len: jpg.length, sha: sha(jpg), nombre });
-            await wr(jpg);
+            await wr(`${imgN} 0 obj\n<< /Type /XObject /Subtype /Image ${im.dict} >>\nstream\n`);
+            if (verificar) imgs.push({ offset: pos, len: im.datos.length, sha: sha(im.datos), nombre });
+            await wr(im.datos);
             await wr('\nendstream\nendobj\n');
-            const contenido = `q\n${d.w} 0 0 ${d.h} 0 0 cm\n/Im Do\nQ\n`;
+            const contenido = `q\n${im.w} 0 0 ${im.h} 0 0 cm\n/Im Do\nQ\n`;
             offsets[conN] = pos;
             await wr(`${conN} 0 obj\n<< /Length ${contenido.length} >>\nstream\n${contenido}endstream\nendobj\n`);
             offsets[pagN] = pos;
-            await wr(`${pagN} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${d.w} ${d.h}] /Resources << /XObject << /Im ${imgN} 0 R >> >> /Contents ${conN} 0 R >>\nendobj\n`);
+            await wr(`${pagN} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${im.w} ${im.h}] /Resources << /XObject << /Im ${imgN} 0 R >> >> /Contents ${conN} 0 R >>\nendobj\n`);
         }
         const size = 3 + 3 * N;                 // mayor nº de objeto + 1
         const xref = pos;
@@ -208,12 +253,12 @@ async function escribirPdfJpegStream(dir, imagenes, destino, verificar = true) {
         await wr(`trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
     } catch (e) { await fh.close().catch(() => {}); return { ok: false, motivo: `error al escribir: ${e.message}` }; }
     await fh.close();
-    // VERIFICACIÓN byte a byte (salvo --sin-verificar): se relee la región de cada JPEG en el fichero (una a una
-    // → sin OOM) y se compara. Sin verificar, se confía en la escritura (nº de páginas garantizado por construcción).
+    // VERIFICACIÓN byte a byte (salvo --sin-verificar): se relee la región de cada imagen en el fichero (una a
+    // una → sin OOM) y se compara. Sin verificar, se confía en la escritura (nº de páginas garantizado por construcción).
     if (verificar) {
         const rfh = await fs.open(destino, 'r');
         try {
-            for (const f of jpegs) {
+            for (const f of imgs) {
                 const buf = Buffer.alloc(f.len);
                 await rfh.read(buf, 0, f.len, f.offset);
                 if (sha(buf) !== f.sha) return { ok: false, motivo: `«${f.nombre}» no coincide byte a byte en el pdf` };
@@ -323,14 +368,14 @@ async function main() {
         if (tipo === 'omitir') { omitidas++; linea = `⚠ «${rel}» OMITIDA en --pdf (imágenes no JPG/PNG) — usa cbz`; }
         else if (tipo === 'reanudar') { reanudados++; linea = await terminar(c, rel, destino, c.imagenes.length, '↩'); }
         else {
-            // PDF: JPEG → escritor en STREAMING (sin OOM, sin pdf-lib); PNG/CMYK → pdf-lib. CBZ: adm-zip.
-            const soloJpeg = c.imagenes.every((n) => /\.jpe?g$/i.test(n));
+            // PDF: escritor en STREAMING (JPEG y PNG, sin OOM ni pdf-lib). Solo una variante rara (JPEG CMYK, PNG
+            // con alfa/entrelazado) cae a pdf-lib (en memoria; poco frecuente y pequeño). CBZ: adm-zip.
             let r;
             if (!PDF) r = await escribirCbzVerificado(c.dir, c.imagenes, destino, VERIFICAR);
-            else if (soloJpeg) {
-                r = await escribirPdfJpegStream(c.dir, c.imagenes, destino, VERIFICAR);
-                if (!r.ok && r.fallback) r = await escribirPdfVerificado(c.dir, c.imagenes, destino, VERIFICAR); // JPEG CMYK → pdf-lib
-            } else r = await escribirPdfVerificado(c.dir, c.imagenes, destino, VERIFICAR);                        // hay PNG → pdf-lib
+            else {
+                r = await escribirPdfStream(c.dir, c.imagenes, destino, VERIFICAR);
+                if (!r.ok && r.fallback) r = await escribirPdfVerificado(c.dir, c.imagenes, destino, VERIFICAR);
+            }
             if (!r.ok) { fallidos++; linea = `✖ «${rel}»: ${r.motivo} — NO se toca la carpeta`; }
             else { creados++; linea = await terminar(c, rel, destino, r.paginas, '✔'); }
         }
