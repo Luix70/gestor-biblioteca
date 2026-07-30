@@ -136,6 +136,82 @@ async function escribirPdfVerificado(dir, imagenes, destino) {
     return { ok: true, paginas: re.getPageCount() };
 }
 
+// Ancho/alto/nº de componentes de un JPEG (del marcador SOF). Sin dependencias. null si no es un JPEG legible.
+function dimensionesJpeg(buf) {
+    if (buf.length < 4 || buf[0] !== 0xFF || buf[1] !== 0xD8) return null; // SOI
+    let o = 2;
+    while (o + 9 < buf.length) {
+        if (buf[o] !== 0xFF) { o++; continue; }        // resincroniza ante bytes de relleno
+        const m = buf[o + 1];
+        if (m === 0xD8 || m === 0xD9 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)) { o += 2; continue; } // sin longitud
+        const len = buf.readUInt16BE(o + 2);
+        // SOF0..SOF15 (baseline/progressive/…) salvo DHT(C4), JPG(C8), DAC(CC): traen alto/ancho/componentes.
+        if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) {
+            return { h: buf.readUInt16BE(o + 5), w: buf.readUInt16BE(o + 7), comp: buf[o + 9] };
+        }
+        o += 2 + len;
+    }
+    return null;
+}
+
+/**
+ * Escribe un .pdf EN STREAMING embebiendo cada JPEG SIN recomprimir (DCTDecode con los bytes originales →
+ * calidad EXACTA, sin OCR), UNA imagen en memoria a la vez → soporta libros escaneados enormes sin agotar la RAM
+ * (a diferencia de pdf-lib, que carga todo). Verifica byte a byte cada JPEG releyendo su región del fichero.
+ * Solo JPEG de 1 (gris) o 3 (RGB) componentes; para PNG o JPEG CMYK devuelve { fallback:true } (usa pdf-lib).
+ */
+async function escribirPdfJpegStream(dir, imagenes, destino) {
+    const N = imagenes.length;
+    const offsets = {};                 // nº de objeto → offset en bytes (para la tabla xref)
+    const jpegs = [];                   // { offset, len, sha, nombre } de cada JPEG embebido (para verificar)
+    const fh = await fs.open(destino, 'w');
+    let pos = 0;
+    const wr = async (data) => { const b = Buffer.isBuffer(data) ? data : Buffer.from(data, 'latin1'); await fh.write(b); pos += b.length; };
+    try {
+        await wr('%PDF-1.7\n%\xE2\xE3\xCF\xD3\n');
+        offsets[1] = pos; await wr('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+        offsets[2] = pos;
+        const kids = Array.from({ length: N }, (_, i) => `${5 + 3 * i} 0 R`).join(' ');
+        await wr(`2 0 obj\n<< /Type /Pages /Kids [ ${kids} ] /Count ${N} >>\nendobj\n`);
+        for (let i = 0; i < N; i++) {
+            const nombre = imagenes[i];
+            const jpg = await fs.readFile(path.join(dir, nombre));
+            const d = dimensionesJpeg(jpg);
+            if (!d) { await fh.close(); await fs.rm(destino, { force: true }); return { ok: false, motivo: `«${nombre}» no es un JPEG legible`, fallback: true }; }
+            if (d.comp !== 1 && d.comp !== 3) { await fh.close(); await fs.rm(destino, { force: true }); return { ok: false, motivo: `«${nombre}»: JPEG de ${d.comp} componentes (CMYK)`, fallback: true }; }
+            const cs = d.comp === 1 ? '/DeviceGray' : '/DeviceRGB';
+            const imgN = 3 + 3 * i, conN = 4 + 3 * i, pagN = 5 + 3 * i;
+            offsets[imgN] = pos;
+            await wr(`${imgN} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${d.w} /Height ${d.h} /ColorSpace ${cs} /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`);
+            jpegs.push({ offset: pos, len: jpg.length, sha: sha(jpg), nombre });
+            await wr(jpg);
+            await wr('\nendstream\nendobj\n');
+            const contenido = `q\n${d.w} 0 0 ${d.h} 0 0 cm\n/Im Do\nQ\n`;
+            offsets[conN] = pos;
+            await wr(`${conN} 0 obj\n<< /Length ${contenido.length} >>\nstream\n${contenido}endstream\nendobj\n`);
+            offsets[pagN] = pos;
+            await wr(`${pagN} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${d.w} ${d.h}] /Resources << /XObject << /Im ${imgN} 0 R >> >> /Contents ${conN} 0 R >>\nendobj\n`);
+        }
+        const size = 3 + 3 * N;                 // mayor nº de objeto + 1
+        const xref = pos;
+        let tabla = `xref\n0 ${size}\n0000000000 65535 f \n`;
+        for (let n = 1; n < size; n++) tabla += String(offsets[n] || 0).padStart(10, '0') + ' 00000 n \n';
+        await wr(tabla);
+        await wr(`trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+    } catch (e) { await fh.close().catch(() => {}); return { ok: false, motivo: `error al escribir: ${e.message}` }; }
+    await fh.close();
+    // VERIFICACIÓN byte a byte: se relee la región de cada JPEG en el fichero (una a una → sin OOM) y se compara.
+    const rfh = await fs.open(destino, 'r');
+    try {
+        for (const f of jpegs) {
+            const buf = Buffer.alloc(f.len);
+            await rfh.read(buf, 0, f.len, f.offset);
+            if (sha(buf) !== f.sha) return { ok: false, motivo: `«${f.nombre}» no coincide byte a byte en el pdf` };
+        }
+    } finally { await rfh.close(); }
+    return { ok: true, paginas: N };
+}
+
 /**
  * ¿El fichero destino YA existe y CORRESPONDE a esta carpeta? (reanudación tras una interrupción). cbz: mismas
  * páginas exactas (mismos nombres). pdf: mismo nº de páginas. Si coincide, la corrida anterior ya lo empaquetó
@@ -146,9 +222,11 @@ async function yaEmpaquetado(destino, c) {
     if (!(await existe(destino))) return false;
     try {
         if (PDF) {
-            const PDFDocument = await cargarPdfLib();
-            const doc = await PDFDocument.load(await fs.readFile(destino));
-            return doc.getPageCount() === c.imagenes.length;
+            // Cuenta páginas por los objetos «/Type /Page» (no «/Pages») — sin pdf-lib, sirve tanto para los PDF
+            // en streaming como para los de pdf-lib. Un PDF de otro cómic con el mismo nombre tendrá otro nº.
+            const txt = (await fs.readFile(destino)).toString('latin1');
+            const paginas = (txt.match(/\/Type\s*\/Page(?![s])/g) || []).length;
+            return paginas === c.imagenes.length;
         }
         const nombres = new Set(new AdmZip(destino).getEntries().map((e) => e.entryName));
         return nombres.size === c.imagenes.length && c.imagenes.every((n) => nombres.has(n));
@@ -208,7 +286,17 @@ async function main() {
         // Si el nombre base ya existe pero es de OTRO cómic (o un parcial que no coincide), se usa sufijo (no pisa).
         let destino = base;
         for (let n = 2; await existe(destino); n++) destino = path.join(raiz, `${sanear(nombre)} (${n}).${FORMATO}`);
-        const r = PDF ? await escribirPdfVerificado(c.dir, c.imagenes, destino) : await escribirCbzVerificado(c.dir, c.imagenes, destino);
+        // PROGRESO ANTES de empaquetar: así una carpeta grande/lenta se ve YA (el resultado se imprime al acabar).
+        console.log(`${marca} «${rel}» (${c.imagenes.length} img) → ${path.basename(destino)} · empaquetando…`);
+        // PDF: JPEG → escritor en STREAMING (sin OOM en libros grandes, sin pdf-lib); PNG/CMYK → pdf-lib (en
+        // memoria; raros y pequeños). CBZ: adm-zip. Todo verificado antes de que `terminar` decida borrar.
+        const soloJpeg = c.imagenes.every((n) => /\.jpe?g$/i.test(n));
+        let r;
+        if (!PDF) r = await escribirCbzVerificado(c.dir, c.imagenes, destino);
+        else if (soloJpeg) {
+            r = await escribirPdfJpegStream(c.dir, c.imagenes, destino);
+            if (!r.ok && r.fallback) r = await escribirPdfVerificado(c.dir, c.imagenes, destino); // JPEG raro (CMYK) → pdf-lib
+        } else r = await escribirPdfVerificado(c.dir, c.imagenes, destino);                        // hay PNG → pdf-lib
         if (!r.ok) { console.error(`${marca} ✖ «${rel}»: ${r.motivo} — NO se toca la carpeta`); fallidos++; continue; }
         creados++;
         await terminar(destino, r.paginas, '✔');

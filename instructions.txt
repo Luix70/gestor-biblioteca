@@ -855,7 +855,12 @@ de ficheros clasificado por CDU.
       se borra si es PURA (solo imágenes+basura); si tiene otro contenido, el fichero se crea igual pero la
       carpeta se CONSERVA y se avisa. --pdf EMBEBE JPG/PNG SIN recomprimir (embedJpg guarda el JPEG tal cual;
       lossless) → misma calidad de escaneo, SIN OCR (necesita la dep pdf-lib, puro JS); las imágenes que no sean
-      JPG/PNG no se embeben sin recomprimir → esas carpetas se OMITEN en --pdf (usa cbz). Recorre en profundidad;
+      JPG/PNG no se embeben sin recomprimir → esas carpetas se OMITEN en --pdf (usa cbz). MEMORIA: el PDF de JPEG
+      se escribe EN STREAMING (una imagen en memoria a la vez, DCTDecode con los bytes originales, parser de SOF
+      propio, verificación byte a byte releyendo el fichero) → soporta libros ESCANEADOS enormes SIN agotar la RAM
+      del contenedor (1 GB); no necesita pdf-lib para JPEG. Solo las carpetas con PNG usan pdf-lib (en memoria; el
+      contador de páginas del resume es por regex, sin pdf-lib). El .cbz (adm-zip) sí carga todo en memoria → para
+      libros muy grandes, prefiere --pdf. Recorre en profundidad;
       todos los ficheros van a la principal (sufijo « (2)» ante choque); páginas en orden natural. Dry-run por defecto.
       PROGRESO: «Explorando…» + [i/total] por carpeta + resumen. Cuando CONSERVA una carpeta, LISTA qué la retiene
       («contiene: notas.txt, extras/…»). REANUDABLE/idempotente: interrumpir es seguro (la carpeta solo se borra
