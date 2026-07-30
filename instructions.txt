@@ -848,6 +848,13 @@ de ficheros clasificado por CDU.
       Reparar una colección ya catalogada antes de estos fixes (fecha_ingreso ausente →
       no salían en el Catálogo; portadas repetidas; sin indexar en la Búsqueda):
            node scripts/reparar-transmedia.js [--ejecutar]          (dry-run por defecto)
+    · CÓMICS SUELTOS → CBZ (utilidad de carpeta, standalone; NO toca la BD): recorre las SUBCARPETAS de una
+      carpeta y, donde haya > N imágenes sueltas (--min=10), crea un .cbz (zip STORE) con TODAS ellas nombrado
+      como la subcarpeta, lo promueve a la carpeta principal y borra la subcarpeta. SEGURO: el cbz se verifica
+      byte a byte ANTES de borrar, y la carpeta solo se borra si es PURA (solo imágenes+basura); si tiene otro
+      contenido, el cbz se crea igual pero la carpeta se CONSERVA y se avisa. Recorre en profundidad; todos los
+      cbz van a la principal (sufijo « (2)» ante choque). Dry-run por defecto.
+           node scripts/comics-a-cbz.js "<carpeta>" [--min=10] [--ejecutar]
 
   ── AUDIOLIBROS PUROS (carpeta de audio = 1 documento) ───────────────────────
     Una carpeta cuyo contenido es AUDIO (sin PDFs de lectura estructurados) se cataloga como
