@@ -114,6 +114,154 @@ async function buscarGrupos(raiz) {
 
 const humano = (b) => b >= 1 << 20 ? (b / (1 << 20)).toFixed(1) + ' MB' : (b / 1024).toFixed(0) + ' KB';
 
+// ── Informe HTML interactivo (casillas) ─────────────────────────────────────
+// Se escribe junto al plan («_plan-duplicados.html»). Muestra los grupos con casillas: lo marcado ✖ se elimina
+// (va a la papelera), lo desmarcado ✔ se conserva. Permite editar y DESCARGAR el «_plan-duplicados.json» ya
+// corregido para sustituir el de la carpeta y luego ejecutar --ejecutar. Autocontenido (sin red, sin CDNs).
+const CSS_HTML = `
+:root{--bg:#f6f4ef;--surface:#fffdfa;--ink:#2a2730;--muted:#746f7b;--line:#e7e2d9;--del:#b83856;--del-bg:rgba(184,56,86,.10);--keep:#2f8f6b;--keep-bg:rgba(47,143,107,.09);--warn:#b8791f;--accent:#b83856}
+@media (prefers-color-scheme:dark){:root{--bg:#141218;--surface:#201d25;--ink:#ece8f0;--muted:#a09aa8;--line:#332e3a;--del:#e07290;--del-bg:rgba(224,114,144,.15);--keep:#57c39a;--keep-bg:rgba(87,195,154,.13);--warn:#e0a94a;--accent:#e07290}}
+:root[data-theme=light]{--bg:#f6f4ef;--surface:#fffdfa;--ink:#2a2730;--muted:#746f7b;--line:#e7e2d9;--del:#b83856;--del-bg:rgba(184,56,86,.10);--keep:#2f8f6b;--keep-bg:rgba(47,143,107,.09);--warn:#b8791f;--accent:#b83856}
+:root[data-theme=dark]{--bg:#141218;--surface:#201d25;--ink:#ece8f0;--muted:#a09aa8;--line:#332e3a;--del:#e07290;--del-bg:rgba(224,114,144,.15);--keep:#57c39a;--keep-bg:rgba(87,195,154,.13);--warn:#e0a94a;--accent:#e07290}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.top{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--line)}
+.brand h1{margin:0;font-size:19px;font-weight:650;letter-spacing:-.01em}
+.eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.stat{display:flex;flex-direction:column;padding:4px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);line-height:1.2}
+.stat b{font-size:16px;font-variant-numeric:tabular-nums}
+.stat small{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.stat.del b{color:var(--del)}
+.acciones{display:flex;gap:8px;flex-wrap:wrap}
+.btn{font:inherit;font-size:13px;font-weight:600;padding:8px 14px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink);cursor:pointer}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:disabled{opacity:.45;cursor:not-allowed}
+.ayuda{max-width:74ch;margin:16px 20px 4px;color:var(--muted);font-size:13px}
+.ayuda code{background:var(--del-bg);padding:1px 5px;border-radius:5px;color:var(--ink);font-size:12px}
+.aviso{margin:8px 20px;padding:10px 14px;border-radius:10px;background:var(--del-bg);border:1px solid var(--del);color:var(--del);font-weight:600;font-size:13px}
+#lista{display:flex;flex-direction:column;gap:14px;padding:12px 20px 60px;max-width:1120px}
+.vacio{color:var(--muted);padding:30px;text-align:center}
+.grupo{border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:hidden}
+.grupo.invalido{border-color:var(--del);box-shadow:0 0 0 1px var(--del)}
+.ghead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line)}
+.badge.fmt{font-size:11px;font-weight:700;letter-spacing:.05em;padding:2px 8px;border-radius:6px;background:var(--ink);color:var(--surface)}
+.carpeta{font-weight:600;word-break:break-word}
+.crit{font-size:12px;color:var(--muted)}
+.gacc{margin-left:auto;display:flex;gap:6px}
+.gacc button{font:inherit;font-size:11px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:7px;padding:3px 8px;cursor:pointer}
+.gacc button:hover{color:var(--ink);border-color:var(--muted)}
+.files{list-style:none;margin:0;padding:6px}
+.file label{display:grid;grid-template-columns:auto auto auto 1fr;align-items:center;gap:12px;padding:8px 10px;border-radius:9px;cursor:pointer}
+.file+.file{margin-top:2px}
+.file.elim label{background:var(--del-bg)}
+.file.keep label{background:var(--keep-bg)}
+.file input{width:17px;height:17px;accent-color:var(--del);cursor:pointer}
+.chip{font-size:11px;font-weight:700;letter-spacing:.02em;min-width:84px}
+.file.elim .chip{color:var(--del)}
+.file.keep .chip{color:var(--keep)}
+.size{font-variant-numeric:tabular-nums;color:var(--muted);text-align:right;min-width:64px;font-size:13px}
+.name{word-break:break-word}
+.name .warn{color:var(--warn);font-weight:700}
+@media (max-width:640px){.file label{grid-template-columns:auto 1fr;gap:6px}.chip,.size{grid-column:2}.stats{margin-left:0;width:100%}}
+`;
+const BODY_HTML = `
+<header class="top">
+  <div class="brand"><div class="eyebrow">Gestor de biblioteca · limpieza</div><h1>Duplicados por nombre</h1></div>
+  <div class="stats" id="stats"></div>
+  <div class="acciones">
+    <label class="btn" title="Cargar otro _plan-duplicados.json">Cargar plan…<input type="file" id="file" accept=".json,application/json" hidden></label>
+    <button class="btn" id="reset" type="button">Restablecer</button>
+    <button class="btn primary" id="download" type="button">Descargar plan editado</button>
+  </div>
+</header>
+<p class="ayuda">Marcado <b>✖</b> = se envía a la papelera · sin marcar <b>✔</b> = se conserva. Preselección: se conserva el <b>más grande</b> de cada grupo. Cada grupo mantiene al menos una copia. Edita a tu gusto, pulsa <b>Descargar plan editado</b>, sustituye con él el <code>_plan-duplicados.json</code> de la carpeta y ejecuta <code>--ejecutar</code>.</p>
+<div class="aviso" id="aviso" hidden></div>
+<main id="lista"></main>
+`;
+// OJO: este JS se incrusta tal cual en el HTML → sin literales de plantilla ni backticks (para poder guardarlo dentro
+// de un backtick en Node). Usa concatenación y createElement (a prueba de nombres con caracteres raros).
+const APP_JS = `
+(function(){
+  var $=function(s){return document.querySelector(s);};
+  var ORIG=window.PLAN||null, plan=ORIG, estados=[];
+  function humano(b){return b>=1048576?(b/1048576).toFixed(1)+' MB':Math.round(b/1024)+' KB';}
+  function construirEstados(p){estados=(p&&p.grupos?p.grupos:[]).map(function(g){return g.archivos.map(function(a){return a.accion==='eliminar';});});}
+  function idxMayor(g){var m=0;for(var i=1;i<g.archivos.length;i++){if((g.archivos[i].tamano||0)>(g.archivos[m].tamano||0))m=i;}return m;}
+  function boton(txt,fn){var b=document.createElement('button');b.type='button';b.textContent=txt;b.addEventListener('click',fn);return b;}
+  function statEl(val,label,cls){var d=document.createElement('div');d.className='stat'+(cls?' '+cls:'');var b=document.createElement('b');b.textContent=val;var s=document.createElement('small');s.textContent=label;d.appendChild(b);d.appendChild(s);return d;}
+  function pintarFila(li,gi,ai){var del=!!estados[gi][ai];li.classList.toggle('elim',del);li.classList.toggle('keep',!del);li.querySelector('.chip').textContent=del?'✖ eliminar':'✔ conservar';}
+  function setGrupo(gi,marcar){var g=plan.grupos[gi];var may=idxMayor(g);g.archivos.forEach(function(a,ai){estados[gi][ai]=marcar?ai!==may:false;});render();}
+  function render(){
+    var lista=$('#lista');lista.textContent='';
+    if(!plan||!plan.grupos||!plan.grupos.length){var v=document.createElement('div');v.className='vacio';v.textContent='No hay grupos de duplicados en el plan.';lista.appendChild(v);recompute();return;}
+    plan.grupos.forEach(function(g,gi){
+      var sec=document.createElement('section');sec.className='grupo';sec.setAttribute('data-g',gi);
+      var head=document.createElement('div');head.className='ghead';
+      var fmt=document.createElement('span');fmt.className='badge fmt';fmt.textContent=(g.formato||'?').toUpperCase();head.appendChild(fmt);
+      var carp=document.createElement('span');carp.className='carpeta';carp.textContent=g.carpeta==='.'?'(raíz)':g.carpeta;head.appendChild(carp);
+      var crit=document.createElement('span');crit.className='crit';crit.textContent='coincidencia: '+(g.criterio||'');head.appendChild(crit);
+      var acc=document.createElement('span');acc.className='gacc';
+      acc.appendChild(boton('marcar todo menos el mayor',function(){setGrupo(gi,true);}));
+      acc.appendChild(boton('no eliminar nada',function(){setGrupo(gi,false);}));
+      head.appendChild(acc);sec.appendChild(head);
+      var ul=document.createElement('ul');ul.className='files';
+      g.archivos.forEach(function(a,ai){
+        var li=document.createElement('li');li.className='file';
+        var lab=document.createElement('label');
+        var cb=document.createElement('input');cb.type='checkbox';cb.checked=!!estados[gi][ai];
+        cb.addEventListener('change',function(){estados[gi][ai]=cb.checked;pintarFila(li,gi,ai);recompute();});
+        var chip=document.createElement('span');chip.className='chip';
+        var size=document.createElement('span');size.className='size';size.textContent=a.tamano_h||humano(a.tamano||0);
+        var name=document.createElement('span');name.className='name';name.textContent=a.nombre;
+        if(a.rareza){var w=document.createElement('span');w.className='warn';w.title='nombre con caracteres extraños (?/'+String.fromCharCode(65533)+')';w.textContent=' ⚠';name.appendChild(w);}
+        lab.appendChild(cb);lab.appendChild(chip);lab.appendChild(size);lab.appendChild(name);
+        li.appendChild(lab);ul.appendChild(li);pintarFila(li,gi,ai);
+      });
+      sec.appendChild(ul);lista.appendChild(sec);
+    });
+    recompute();
+  }
+  function recompute(){
+    var grupos=plan&&plan.grupos?plan.grupos.length:0,elim=0,bytes=0,inval=0;
+    if(plan&&plan.grupos)plan.grupos.forEach(function(g,gi){
+      var keepers=0;g.archivos.forEach(function(a,ai){if(estados[gi][ai]){elim++;bytes+=(a.tamano||0);}else keepers++;});
+      if(keepers===0)inval++;
+      var sec=document.querySelector('.grupo[data-g=\"'+gi+'\"]');if(sec)sec.classList.toggle('invalido',keepers===0);
+    });
+    var st=$('#stats');st.textContent='';st.appendChild(statEl(grupos,'grupos'));st.appendChild(statEl(elim,'a eliminar','del'));st.appendChild(statEl(humano(bytes),'a liberar'));
+    var av=$('#aviso');
+    if(inval){av.hidden=false;av.textContent='⚠ '+inval+' grupo(s) sin ninguna copia conservada — no se puede eliminar toda copia. Desmarca al menos uno en cada uno.';$('#download').disabled=true;}
+    else{av.hidden=true;$('#download').disabled=false;}
+  }
+  function descargar(){
+    var out={generado:plan.generado||null,raiz:plan.raiz,papelera:plan.papelera,criterio:plan.criterio,grupos:[]},elim=0,bytes=0;
+    plan.grupos.forEach(function(g,gi){
+      var archivos=g.archivos.map(function(a,ai){
+        var accion=estados[gi][ai]?'eliminar':'conservar';if(accion==='eliminar'){elim++;bytes+=(a.tamano||0);}
+        var o={nombre:a.nombre,tamano:a.tamano,tamano_h:a.tamano_h,accion:accion};if(a.rareza)o.rareza=true;if(accion==='conservar')o.motivo='elegido en la revisión';return o;
+      });
+      out.grupos.push({carpeta:g.carpeta,formato:g.formato,criterio:g.criterio,archivos:archivos});
+    });
+    out.resumen={grupos:plan.grupos.length,a_eliminar:elim,espacio_a_liberar_h:humano(bytes)};
+    var blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='_plan-duplicados.json';document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  }
+  var fi=$('#file');if(fi)fi.addEventListener('change',function(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{plan=JSON.parse(r.result);ORIG=plan;construirEstados(plan);render();}catch(err){alert('No pude leer el plan: '+err.message);}};r.readAsText(f);});
+  $('#reset').addEventListener('click',function(){if(!ORIG)return;plan=ORIG;construirEstados(plan);render();});
+  $('#download').addEventListener('click',descargar);
+  if(plan)construirEstados(plan);render();
+})();
+`;
+function construirHTML(plan) {
+    const datos = JSON.stringify(plan).replace(/</g, '\\u003c'); // no romper </script> con nombres raros
+    return '<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        + '<title>Duplicados por nombre — plan de limpieza</title><style>' + CSS_HTML + '</style></head><body>'
+        + BODY_HTML + '<script>window.PLAN=' + datos + ';</script><script>' + APP_JS + '</script></body></html>';
+}
+
 async function generar(raiz) {
     console.log(`\nDuplicados por nombre — GENERAR PLAN · carpeta: ${raiz}\n`);
     process.stdout.write('Explorando el árbol… ');
@@ -136,6 +284,8 @@ async function generar(raiz) {
 
     const rutaPlan = path.join(raiz, PLAN_FICHERO);
     await fs.writeFile(rutaPlan, JSON.stringify(plan, null, 2), 'utf8');
+    const rutaHtml = path.join(raiz, '_plan-duplicados.html');
+    await fs.writeFile(rutaHtml, construirHTML(plan), 'utf8');
 
     // Resumen legible por consola (una muestra; el detalle completo está en el plan).
     console.log(`\nGrupos de duplicados: ${grupos.length} · a eliminar: ${aEliminar} · espacio a liberar: ${humano(bytes)}\n`);
@@ -144,8 +294,10 @@ async function generar(raiz) {
         for (const a of g.archivos) console.log(`     ${a.accion === 'conservar' ? '✔ CONSERVA' : '✖ elimina '} ${a.tamano_h.padStart(8)}  ${a.rareza ? '⚠ ' : '  '}${a.nombre}`);
     }
     if (plan.grupos.length > 20) console.log(`  … y ${plan.grupos.length - 20} grupos más (todos en el plan).`);
-    console.log(`\n📄 Plan escrito en: ${rutaPlan}`);
-    console.log('   Revísalo/edítalo (campo «accion»: "conservar" | "eliminar") y luego:');
+    console.log(`\n📄 Plan (JSON):  ${rutaPlan}`);
+    console.log(`🌐 Revisión con casillas (ábrelo en el navegador):  ${rutaHtml}`);
+    console.log('   Marca/desmarca lo que quieras y pulsa «Descargar plan editado» → sustituye el JSON de la carpeta.');
+    console.log('   O edita el JSON a mano (campo «accion»: "conservar" | "eliminar"). Luego, para aplicarlo:');
     console.log(`   node scripts/duplicados-por-nombre.js "${raiz}" --ejecutar`);
     process.exit(0);
 }
@@ -198,4 +350,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     (EJECUTAR ? ejecutar(path.resolve(RAIZ)) : generar(path.resolve(RAIZ))).catch((e) => { console.error('ERROR FATAL:', e); process.exit(1); });
 }
 
-export { normBase, mismaObra, formatoDe, elegirConservado, buscarGrupos };
+export { normBase, mismaObra, formatoDe, elegirConservado, buscarGrupos, construirHTML };
