@@ -890,13 +890,15 @@ de ficheros clasificado por CDU.
       lo cosmético (minúsculas, sin acentos vía NFKD, []{}→(), guiones unicode→'-', extensión en minúsculas
       .PDF=.pdf, y basura invisible: espacios no-separables/finos/ideográficos, ancho cero/BOM/word-joiner/guion
       suave, comillas curvas → todo normalizado — regex con new RegExp+\u para no meter bytes invisibles en el
-      fuente) y compara por IGUALDAD EXACTA; los caracteres perdidos por codificación ('?' o '�') se tratan como COMODÍN (solo
+      fuente; y PUNTUACIÓN cosmética . , ; : _ · → espacio, así «Título. Subtítulo»=«Título Subtítulo» y
+      «Autor, Otro»=«Autor Otro») y compara por IGUALDAD EXACTA; los caracteres perdidos por codificación ('?' o '�')
+      se tratan como COMODÍN, y también una LETRA corrompida en un SÍMBOLO (p. ej. «ø»→«°»: letra↔símbolo) (solo
       casan si la LONGITUD coincide y las diferencias están SOLO ahí, con tope 25%) → «750–940»=«750?940»,
       «Aršāma»=«Ar??ma». También QUITA las anotaciones cosméticas de formato/procedencia entre (), [] o {} que NO
       son parte del título — «[Retail]», «(ebook)», «[True PDF]», «[z-lib]», «(epub/mobi/kindle/pdf/scan/…)» — SOLO
       si el grupo contiene únicamente esos marcadores; si tiene algo con significado (un número, un año, «Book 24»,
-      «Volume II», un nombre de serie) se CONSERVA (quitarMarcadores). Cualquier diferencia en un carácter REAL
-      (dígito, letra, romano) → NO se agrupan, así
+      «Volume II», un nombre de serie) se CONSERVA (quitarMarcadores). Cualquier diferencia REAL entre dos
+      alfanuméricos (dígito↔dígito, letra↔letra — incl. una «о» cirílica confundible) → NO se agrupan, así
       «Volume I/II/III» y «Book 24/25» quedan SIEMPRE separados. Solo compara ficheros del MISMO formato (un .pdf y
       un .epub de la misma obra se conservan ambos). CONSERVA el mayor (empate → el marcado «Retail»/oficial →
       nombre limpio sin ?/� → más corto → alfabético). Genera también «_plan-duplicados.html»: informe interactivo

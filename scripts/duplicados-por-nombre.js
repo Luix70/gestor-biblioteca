@@ -63,6 +63,7 @@ const COMILLAS_S = new RegExp('[\\u2018\\u2019\\u201B\\u2032]', 'g');  // apostr
 const COMILLAS_D = new RegExp('[\\u201C\\u201D\\u201E\\u2033]', 'g');  // comillas dobles curvas -> "
 const REEMPLAZO = new RegExp('\\uFFFD', 'g');                          // caracter de reemplazo -> ?
 const GUIONES = new RegExp('[\\u2013\\u2014\\u2212]', 'g');            // guiones unicode (en/em/menos) -> '-'
+const PUNTUACION_COSMETICA = new RegExp('[.,;:_\\u00B7]+', 'g');       // . , ; : _ · -> espacio (diferencias cosmeticas)
 
 // Nombre BASE (sin extension) normalizado a lo COSMETICO. Conserva numeros, romanos y palabras (para no fusionar
 // tomos). Deja '?' como marca de caracter perdido (se compara como comodin en mismaObra). Robusto frente a
@@ -80,21 +81,28 @@ function normBase(base) {
     s = quitarMarcadores(s);                                 // quita [Retail], (ebook), etc. (anotaciones cosmeticas)
     return s
         .replace(/[\[{]/g, '(').replace(/[\]}]/g, ')')       // corchetes/llaves restantes -> parentesis (cosmetico)
+        .replace(PUNTUACION_COSMETICA, ' ')                  // «Título. Subtítulo» = «Título Subtítulo» (punto/coma/…)
         .replace(/\s+/g, ' ')
         .replace(/^[\s\-]+|[\s\-]+$/g, '')                   // recorta espacios/guiones sueltos que deja el hueco
         .trim();
 }
 const formatoDe = (nombre) => path.extname(nombre).slice(1).toLowerCase();
 
-// ¿Dos nombres YA normalizados representan la misma obra? Idénticos, o iguales salvo posiciones con '?' (comodín),
-// con misma longitud y pocos comodines. Cualquier diferencia en un carácter REAL → false (protege los tomos).
+const esLetra = (ch) => /\p{L}/u.test(ch);                         // letra (cualquier alfabeto)
+const esSimboloRaro = (ch) => !/[\p{L}\p{N}\s]/u.test(ch);        // ni letra, ni dígito, ni espacio → símbolo
+
+// ¿Dos nombres YA normalizados representan la misma obra? Idénticos, o iguales salvo posiciones con '?' (carácter
+// perdido) o una letra corrompida en un símbolo (p. ej. «ø»→«°»), con misma longitud y pocos comodines. Una
+// diferencia REAL entre dos alfanuméricos (dígito↔dígito, letra↔letra) → false: así los tomos y las series
+// («Book 24» vs «Book 25», «Volume I» vs «Volume II», «(1998)» vs «(2003)») NUNCA se fusionan.
 function mismaObra(a, b) {
     if (a === b) return { dup: true, criterio: 'idéntico' };
     if (a.length !== b.length) return { dup: false };
     let comodines = 0;
     for (let i = 0; i < a.length; i++) {
         if (a[i] === b[i]) continue;
-        if (a[i] === '?' || b[i] === '?') { comodines++; continue; } // uno perdió el carácter → comodín
+        if (a[i] === '?' || b[i] === '?') { comodines++; continue; } // uno perdió el carácter (?) → comodín
+        if ((esSimboloRaro(a[i]) && esLetra(b[i])) || (esLetra(a[i]) && esSimboloRaro(b[i]))) { comodines++; continue; } // letra ↔ símbolo (corrupción)
         return { dup: false };                                       // difieren en un carácter real → NO
     }
     if (comodines && comodines <= Math.max(1, Math.floor(a.length * MAX_COMODIN))) return { dup: true, criterio: 'comodín' };
