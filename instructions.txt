@@ -2757,6 +2757,20 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
                               el Fichero trae el volcado BNE completo). Dry-run; --ejecutar.
 
   ── 10. IMÁGENES · PORTADAS · EMPAQUETADO ────────────────────────────────────
+    emparejar-portadas.js     Empareja las imágenes de una carpeta «Covers» con documentos YA catalogados
+                              (por NOMBRE, difuso: reutiliza normBase/mismaObra de duplicados-por-nombre, con
+                              su tolerancia y su protección de series) y pone cada imagen como PORTADA del doc
+                              dentro del árbol CDU vía imagenes-doc·anadirImagen({comoPortada:true}) — la
+                              portada previa NO se borra: baja a «otra» en el carrusel (se conserva, se
+                              desplaza). La imagen original de Covers se mueve a «Covers/_emparejadas/»
+                              (recuperable). Ambiguos (una imagen→varios docs o varias→un doc) y sin
+                              coincidencia se listan aparte, nunca se asignan solos. Casa por nombre_archivo
+                              (sin extensión) o, si falta, por título. Mismo patrón que duplicados: escribe
+                              «_plan-portadas.json» + «_plan-portadas.html» (revisión con casillas) en Covers;
+                              editas y --ejecutar aplica. ⚠ BACKUP de la BD antes de --ejecutar (actualiza
+                              docs). Corre en el NAS (docker exec -t) donde están los ficheros y la BD.
+                                   node scripts/emparejar-portadas.js "<Covers>"              (genera el plan)
+                                   node scripts/emparejar-portadas.js "<Covers>" --ejecutar   (aplica el plan)
     reparar-portadas.js       Repara documentos SIN portada o con imágenes de carrusel ROTAS (referencias
                               a ficheros que ya no están): poda las muertas y re-resuelve la portada
                               (reusa una imagen válida o EXTRAE la 1ª página del fichero, encogida). Sin
