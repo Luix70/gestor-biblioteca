@@ -34,6 +34,13 @@ cd /volume1/docker
 # Binarios de Docker de Synology no siempre están en el PATH de un shell no interactivo.
 export PATH="$PATH:/usr/local/bin:/usr/bin"
 
+# Compose v1 en el Atom es LENTO creando/parando contenedores: el cliente HTTP de Compose corta a los 60 s
+# (COMPOSE_HTTP_TIMEOUT por defecto) aunque el DEMONIO sí termine la operación → «Read timed out (read
+# timeout=60)» en `up`/`down` y el deploy PARECE fallar (la imagen ya se construyó bien). Se amplía el margen
+# para que el cliente espere a la máquina lenta. No cambia nada en hardware rápido (solo es un tope de espera).
+export COMPOSE_HTTP_TIMEOUT=300
+export DOCKER_CLIENT_TIMEOUT=300
+
 # Sin root no se pueden sobrescribir los ficheros (los creó el contenedor) ni gestionar
 # los puntos de montaje de datos. Fallar pronto con una instrucción clara.
 if [ "$(id -u)" -ne 0 ]; then
