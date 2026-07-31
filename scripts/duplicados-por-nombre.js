@@ -36,17 +36,36 @@ const MAX_COMODIN = 0.25; // los '?' (pérdida de codificación) no pueden ser m
 
 const existe = (p) => fs.access(p).then(() => true, () => false);
 const tieneRarezas = (n) => /[?�]/.test(n);
+const tieneRetail = (n) => /\b(retail|official|oficial)\b/i.test(n);
+
+// Marcadores COSMÉTICOS de formato/procedencia que NO forman parte del título: si un grupo entre (), [] o {}
+// contiene SOLO estos (p. ej. «[Retail]», «(ebook)», «[True PDF]», «[z-lib]»), se quita para comparar. Si el
+// grupo tiene algo con SIGNIFICADO (un número, un año, «Book 24», «Volume II», un nombre de serie…), se CONSERVA.
+const MARCA_TOK = new Set(['retail', 'ebook', 'epub', 'mobi', 'azw', 'azw3', 'kindle', 'pdf', 'true', 'scan', 'scanned', 'ocr', 'drm', 'complete', 'completo', 'official', 'oficial', 'libgen', 'zlib', 'zlibrary', 'annas', 'anna', 'kobo', 'calibre', 'nook', 'repack', 'hq']);
+const MARCA_FRASE = new Set(['z lib', 'z library', 'true pdf', 'annas archive', 'anna s archive', 'ebook retail', 'retail ebook']);
+function quitarMarcadores(s) {
+    return s.replace(/[([{]([^)\]}]*)[)\]}]/g, (grupo, dentro) => {
+        const limpio = dentro.replace(/[\s,.+/|·&_-]+/g, ' ').trim(); // separadores → espacio
+        if (!limpio) return ' ';
+        if (MARCA_FRASE.has(limpio)) return ' ';
+        const toks = limpio.split(' ').filter(Boolean);
+        return toks.every((t) => MARCA_TOK.has(t)) ? ' ' : grupo; // solo marcadores → fuera; algo con sentido → se queda
+    });
+}
 
 // Nombre BASE (sin extensión) normalizado a lo COSMÉTICO. Conserva números, romanos y palabras (para no fusionar
 // tomos). Deja '?' como marca de carácter perdido (se compara como comodín en `mismaObra`).
 function normBase(base) {
-    return base
+    let s = base
         .normalize('NFD').replace(/[̀-ͯ]/g, '')   // sin acentos/diacríticos
         .replace(/�/g, '?')                             // carácter de reemplazo � → ?
         .replace(/[–—−]/g, '-')               // – — − → guion normal
-        .replace(/[\[{]/g, '(').replace(/[\]}]/g, ')')       // corchetes/llaves → paréntesis (cosmético)
-        .toLowerCase()
+        .toLowerCase();
+    s = quitarMarcadores(s);                                 // quita «[Retail]», «(ebook)»… (anotaciones cosméticas)
+    return s
+        .replace(/[\[{]/g, '(').replace(/[\]}]/g, ')')       // corchetes/llaves restantes → paréntesis (cosmético)
         .replace(/\s+/g, ' ')
+        .replace(/^[\s\-]+|[\s\-]+$/g, '')                   // recorta espacios/guiones sueltos que deja el hueco
         .trim();
 }
 const formatoDe = (nombre) => path.extname(nombre).slice(1).toLowerCase();
@@ -66,10 +85,12 @@ function mismaObra(a, b) {
     return { dup: false };
 }
 
-// Elige el fichero a CONSERVAR de un grupo: mayor tamaño → nombre limpio (sin ?/�) → más corto → alfabético.
+// Elige el fichero a CONSERVAR de un grupo: mayor tamaño → (empate) el marcado «Retail»/oficial → nombre limpio
+// (sin ?/�) → más corto → alfabético. El tamaño manda; ante igualdad, se prefiere la edición Retail/oficial.
 function elegirConservado(archivos) {
     return [...archivos].sort((x, y) =>
         (y.tamano - x.tamano) ||
+        ((tieneRetail(y.nombre) ? 1 : 0) - (tieneRetail(x.nombre) ? 1 : 0)) ||
         ((tieneRarezas(x.nombre) ? 1 : 0) - (tieneRarezas(y.nombre) ? 1 : 0)) ||
         (x.nombre.length - y.nombre.length) ||
         x.nombre.localeCompare(y.nombre),
