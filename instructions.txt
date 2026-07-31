@@ -883,6 +883,23 @@ de ficheros clasificado por CDU.
       «Libro_(1).pdf»; subcarpetas homónimas → fusión recursiva; la carpeta origen solo se borra si queda VACÍA.
       Coincidencia EXACTA del nombre limpio (sin parecido difuso). Dry-run por defecto. Reutiliza calcularHashArchivo.
            node scripts/consolidar-carpetas-similares.js "<carpeta>" [--ejecutar]
+    · DUPLICADOS POR NOMBRE (utilidad de carpeta, standalone; NO toca la BD): dentro de la MISMA carpeta localiza
+      documentos que son la MISMA obra con nombres que solo difieren en algo COSMÉTICO o de CODIFICACIÓN, se queda
+      con el MÁS GRANDE y manda el resto a papelera (nunca borra). NO es por hash (esos ya se depuraron) — es por
+      NOMBRE, comparado con cuidado para NO fusionar TOMOS de una serie. MÉTODO (sin parecido difuso): normaliza solo
+      lo cosmético (minúsculas, sin acentos, []{}→(), guiones unicode→'-', extensión en minúsculas .PDF=.pdf) y
+      compara por IGUALDAD EXACTA; los caracteres perdidos por codificación ('?' o '�') se tratan como COMODÍN (solo
+      casan si la LONGITUD coincide y las diferencias están SOLO ahí, con tope 25%) → «750–940»=«750?940»,
+      «Aršāma»=«Ar??ma». Cualquier diferencia en un carácter REAL (dígito, letra, romano) → NO se agrupan, así
+      «Volume I/II/III» y «Book 24/25» quedan SIEMPRE separados. Solo compara ficheros del MISMO formato (un .pdf y
+      un .epub de la misma obra se conservan ambos). CONSERVA el mayor (empate → nombre limpio sin ?/� → más corto →
+      alfabético). Flujo en 2 pasos con PLAN EDITABLE: (1) sin flags → escribe «_plan-duplicados.json» en la raíz
+      (preselección conservar/eliminar + tamaños) y lo resume por consola, sin tocar nada; (2) revisa/edita el campo
+      «accion» ("conservar"|"eliminar"); (3) --ejecutar → MUEVE los "eliminar" a «_papelera-duplicados/<misma ruta
+      relativa>» (recuperable), solo si en su grupo queda una copia conservada viva (no borra la última copia).
+      OJO: los ficheros con '?' en el nombre existen en el NAS (Linux); ejecútalo AHÍ (docker exec) para tratarlos.
+           node scripts/duplicados-por-nombre.js "<carpeta>"              (genera el plan)
+           node scripts/duplicados-por-nombre.js "<carpeta>" --ejecutar   (aplica el plan → papelera)
 
   ── AUDIOLIBROS PUROS (carpeta de audio = 1 documento) ───────────────────────
     Una carpeta cuyo contenido es AUDIO (sin PDFs de lectura estructurados) se cataloga como
