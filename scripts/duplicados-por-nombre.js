@@ -53,17 +53,33 @@ function quitarMarcadores(s) {
     });
 }
 
-// Nombre BASE (sin extensión) normalizado a lo COSMÉTICO. Conserva números, romanos y palabras (para no fusionar
-// tomos). Deja '?' como marca de carácter perdido (se compara como comodín en `mismaObra`).
+// Caracteres INVISIBLES / de formato que hay que ELIMINAR (basura que no se ve pero rompe la comparacion):
+// ancho cero (ZWSP/ZWNJ/ZWJ), union de palabra, BOM, guion suave, separador mongol. Y espacios unicode "raros"
+// (no-separable, finos, ideografico). Construidas con new RegExp + \u para no meter bytes invisibles en el fuente.
+const INVISIBLES = new RegExp('[\\u200B\\u200C\\u200D\\u2060\\uFEFF\\u00AD\\u180E]', 'g');
+const ESPACIOS_RAROS = new RegExp('[\\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]', 'g');
+const COMBINANTES = new RegExp('[\\u0300-\\u036F]', 'g');              // diacriticos combinantes (tras NFKD)
+const COMILLAS_S = new RegExp('[\\u2018\\u2019\\u201B\\u2032]', 'g');  // apostrofos/comillas simples curvas -> '
+const COMILLAS_D = new RegExp('[\\u201C\\u201D\\u201E\\u2033]', 'g');  // comillas dobles curvas -> "
+const REEMPLAZO = new RegExp('\\uFFFD', 'g');                          // caracter de reemplazo -> ?
+const GUIONES = new RegExp('[\\u2013\\u2014\\u2212]', 'g');            // guiones unicode (en/em/menos) -> '-'
+
+// Nombre BASE (sin extension) normalizado a lo COSMETICO. Conserva numeros, romanos y palabras (para no fusionar
+// tomos). Deja '?' como marca de caracter perdido (se compara como comodin en mismaObra). Robusto frente a
+// caracteres invisibles, espacios unicode y comillas curvas (basura que no se ve pero impide agrupar).
 function normBase(base) {
     let s = base
-        .normalize('NFD').replace(/[̀-ͯ]/g, '')   // sin acentos/diacríticos
-        .replace(/�/g, '?')                             // carácter de reemplazo � → ?
-        .replace(/[–—−]/g, '-')               // – — − → guion normal
+        .normalize('NFKD').replace(COMBINANTES, '')          // compatibilidad (ligaduras, ancho completo) + sin acentos
+        .replace(INVISIBLES, '')                             // elimina caracteres invisibles/de formato
+        .replace(ESPACIOS_RAROS, ' ')                        // espacios unicode -> espacio normal
+        .replace(COMILLAS_S, "'")                            // comillas/apostrofos simples curvos -> '
+        .replace(COMILLAS_D, '"')                            // comillas dobles curvas -> "
+        .replace(REEMPLAZO, '?')                             // caracter de reemplazo -> ?
+        .replace(GUIONES, '-')                               // guiones unicode -> '-'
         .toLowerCase();
-    s = quitarMarcadores(s);                                 // quita «[Retail]», «(ebook)»… (anotaciones cosméticas)
+    s = quitarMarcadores(s);                                 // quita [Retail], (ebook), etc. (anotaciones cosmeticas)
     return s
-        .replace(/[\[{]/g, '(').replace(/[\]}]/g, ')')       // corchetes/llaves restantes → paréntesis (cosmético)
+        .replace(/[\[{]/g, '(').replace(/[\]}]/g, ')')       // corchetes/llaves restantes -> parentesis (cosmetico)
         .replace(/\s+/g, ' ')
         .replace(/^[\s\-]+|[\s\-]+$/g, '')                   // recorta espacios/guiones sueltos que deja el hueco
         .trim();

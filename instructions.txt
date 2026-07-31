@@ -887,8 +887,10 @@ de ficheros clasificado por CDU.
       documentos que son la MISMA obra con nombres que solo difieren en algo COSMÉTICO o de CODIFICACIÓN, se queda
       con el MÁS GRANDE y manda el resto a papelera (nunca borra). NO es por hash (esos ya se depuraron) — es por
       NOMBRE, comparado con cuidado para NO fusionar TOMOS de una serie. MÉTODO (sin parecido difuso): normaliza solo
-      lo cosmético (minúsculas, sin acentos, []{}→(), guiones unicode→'-', extensión en minúsculas .PDF=.pdf) y
-      compara por IGUALDAD EXACTA; los caracteres perdidos por codificación ('?' o '�') se tratan como COMODÍN (solo
+      lo cosmético (minúsculas, sin acentos vía NFKD, []{}→(), guiones unicode→'-', extensión en minúsculas
+      .PDF=.pdf, y basura invisible: espacios no-separables/finos/ideográficos, ancho cero/BOM/word-joiner/guion
+      suave, comillas curvas → todo normalizado — regex con new RegExp+\u para no meter bytes invisibles en el
+      fuente) y compara por IGUALDAD EXACTA; los caracteres perdidos por codificación ('?' o '�') se tratan como COMODÍN (solo
       casan si la LONGITUD coincide y las diferencias están SOLO ahí, con tope 25%) → «750–940»=«750?940»,
       «Aršāma»=«Ar??ma». También QUITA las anotaciones cosméticas de formato/procedencia entre (), [] o {} que NO
       son parte del título — «[Retail]», «(ebook)», «[True PDF]», «[z-lib]», «(epub/mobi/kindle/pdf/scan/…)» — SOLO
@@ -906,6 +908,13 @@ de ficheros clasificado por CDU.
       OJO: los ficheros con '?' en el nombre existen en el NAS (Linux); ejecútalo AHÍ (docker exec) para tratarlos.
            node scripts/duplicados-por-nombre.js "<carpeta>"              (genera el plan)
            node scripts/duplicados-por-nombre.js "<carpeta>" --ejecutar   (aplica el plan → papelera)
+    · INSPECCIONAR NOMBRES (diagnóstico; NO toca nada): para «dos ficheros que parecen el mismo pero no se agrupan».
+      Recorre la carpeta y, dentro de cada una, empareja los ficheros del mismo formato casi idénticos (clave
+      flexible: minúsculas + letras confundibles cirílicas/griegas plegadas + solo alfanumérico ASCII) y REVELA los
+      caracteres invisibles/no-ASCII de cada nombre como <U+XXXX> — así se ve el byte oculto que los diferencia
+      (espacio no-separable, ancho cero, comilla curva, guion unicode, o una «о» cirílica confundible con la latina).
+      Dice si el limpiador los agruparía; si NO, hay una diferencia real o un carácter no contemplado que revisar.
+           node scripts/inspeccionar-nombres.js "<carpeta>"
 
   ── AUDIOLIBROS PUROS (carpeta de audio = 1 documento) ───────────────────────
     Una carpeta cuyo contenido es AUDIO (sin PDFs de lectura estructurados) se cataloga como
