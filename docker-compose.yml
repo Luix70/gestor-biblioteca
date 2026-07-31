@@ -3,6 +3,16 @@ services:
     build: .
     container_name: gestor-biblioteca
     restart: unless-stopped
+    # TOPE DE MEMORIA (Atom con 990 MB de RAM). Sin él, una ingesta pesada (poppler rasterizando un PDF grande,
+    # o dos operaciones a la vez) consumía TODA la RAM+swap y CONGELABA el NAS entero: el demonio de Docker dejaba
+    # de responder (`docker ps` colgado) y no quedaba ni RAM para que sshd diera el prompt. Con mem_limit el
+    # contenedor NO puede pasar de ~700 MB de RAM → a DSM siempre le quedan ~290 MB físicos y sigue vivo; si el
+    # gestor se pasa, el OOM mata un proceso DENTRO del contenedor y Docker lo reinicia (restart: unless-stopped),
+    # en vez de tumbar la máquina. memswap_limit deja ~700 MB de swap de colchón antes de matar (picos puntuales
+    # tiran de swap, pero acotado). Si ves reinicios por OOM frecuentes, se baja NODE_OPTIONS heap o la concurrencia.
+    mem_limit: 700m
+    memswap_limit: 1400m
+    mem_reservation: 256m
     volumes:
       - /volume1/docker/GestorBiblioteca:/app
       - /app/node_modules
