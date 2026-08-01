@@ -3,6 +3,10 @@ node_modules/
 
 # Variables de entorno y credenciales
 .env
+.env.pc
+
+# Datos locales de la ingesta en el PC (Fichero/busqueda copiados; ver docs/ingesta-en-pc.md)
+/datos-pc/
 
 # Carpetas locales de la aplicación
 /Inbox/

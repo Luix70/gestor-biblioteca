@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# docker-compose.pc.yml — INGESTA EN EL PC (Windows + Docker Desktop/WSL2).
+#
+# REPARTO: el NAS se queda de SERVIDOR 24/7 (API + panel + búsqueda) con la ingesta APAGADA
+# (DESACTIVAR_VIGILANTE=1 en su .env); el PC, más potente, hace el CATALOGADO pesado. Comparten la
+# BD (MongoDB Atlas, ya en la nube) y el ALMACENAMIENTO del NAS (por SMB). Reutiliza la MISMA imagen
+# (el Dockerfile ya trae poppler/ghostscript/djvu/etc.), así que no hay que instalar binarios sueltos.
+#
+# ⚠ REGLA DE ORO: UN SOLO watcher. Aquí SÍ (el PC); en el NAS NO. Dos watchers cataloganían a la vez
+#   y se pisarían en el Inbox.
+#
+# Guía completa: docs/ingesta-en-pc.md. Uso (dentro de WSL2, con Docker Desktop):
+#   docker compose -f docker-compose.pc.yml up -d --build
+# ---------------------------------------------------------------------------
+services:
+  biblioteca:
+    build: .
+    container_name: gestor-biblioteca-pc
+    restart: unless-stopped
+    # Sin mem_limit: el PC tiene RAM de sobra (el tope de 700 MB era para el Atom del NAS).
+    volumes:
+      # --- SECRETOS: el mismo .env que el NAS (Atlas + claves IA + ADMIN_PWD), leído por dotenv en /app.
+      # Copia el .env del NAS a este repo como «.env.pc» (ver la guía). Las rutas y el watcher los fija
+      # el bloque environment de abajo, así que da igual lo que traigan del NAS para eso.
+      - "./.env.pc:/app/.env:ro"
+      # --- ALMACENAMIENTO en el NAS (montado por SMB/cifs en WSL2; ajusta /mnt/biblioteca a tu montaje).
+      - "/mnt/biblioteca/Inbox:/app/Inbox"
+      - "/mnt/biblioteca/CDU:/app/CDU"
+      - "/mnt/biblioteca/Cuarentena:/app/Cuarentena"
+      - "/mnt/biblioteca/Reintentos:/app/Reintentos"
+      - "/mnt/biblioteca/Recycling:/app/Recycling"
+      # --- Fichero + índice LOCALES en el PC (NUNCA sobre SMB: SQLite en red = bloqueos/latencia).
+      # Copia una vez fichero.db del NAS a ./datos-pc/Fichero (ver la guía). busqueda.db se crea aquí
+      # al lado (índice local del PC; el índice del NAS se reindexa por separado).
+      - "./datos-pc/Fichero:/app/Fichero"
+    ports:
+      - "3000:3000"   # API
+      - "4000:4000"   # Panel (útil para ver el progreso de la ingesta en el PC: localhost:4000)
+    environment:
+      # Rutas FIJAS dentro del contenedor (ganan sobre lo que traiga el .env copiado del NAS).
+      - PATH_INBOX=/app/Inbox
+      - PATH_CDU=/app/CDU
+      - PATH_CUARENTENA=/app/Cuarentena
+      - PATH_REINTENTOS=/app/Reintentos
+      - PATH_RECICLAJE=/app/Recycling
+      - PATH_FICHERO=/app/Fichero
+      - PANEL_PORT=4000
+      # WATCHER ACTIVO en el PC (aquí es donde se cataloga):
+      - DESACTIVAR_VIGILANTE=0   # fuerza el watcher aunque el .env copiado del NAS lo apagara
+      - VIGILANTE_AUTOSTART=1    # arranca catalogando (el PC se enciende para eso); pon 0 para activarlo tú desde el panel
+      - VIGILANTE_POLLING=1      # polling ON: SMB no da eventos de fichero fiables
+      - NODE_OPTIONS=--no-warnings
+    working_dir: /app
+    # Sin `command:` → usa el CMD del Dockerfile (node src/app.js): arranca API + watcher, y con
+    # node como proceso principal los `stop` son limpios (sin la espera de npm).

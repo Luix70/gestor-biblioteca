@@ -105,6 +105,18 @@ GEMINI_API_KEY, GOOGLE_BOOKS_API_KEY) junto al `docker-compose.yml`, `chmod 600`
 **Rollback:** la etiqueta git **`nas-estable`** marca el último commit bueno desplegado;
 revertir = `git reset --hard nas-estable` + push -f + re-desplegar.
 
+**Tope de memoria (evita congelar el NAS):** el compose fija `mem_limit: 700m` / `memswap_limit: 1400m`.
+Con 990 MB de RAM, una ingesta pesada (poppler rasterizando) consumía TODA la RAM+swap y colgaba el DEMONIO
+de Docker (`docker ps` sin respuesta, ni RAM para el prompt SSH). Con el tope, si el contenedor se pasa el
+OOM mata un proceso DENTRO de él y Docker lo reinicia — la caja sobrevive. `COMPOSE_HTTP_TIMEOUT`/
+`DOCKER_CLIENT_TIMEOUT=300` en el script (el Atom tarda >60s en crear/parar el contenedor y el cliente cortaba).
+
+**Reparto opcional NAS↔PC (ingesta en el PC):** para no ahogar el Atom, se puede mover el CATALOGADO al PC
+(más potente) dejando el NAS de servidor 24/7. NAS con `DESACTIVAR_VIGILANTE=1` (API+panel+búsqueda, sin
+watcher); PC con `docker-compose.pc.yml` (misma imagen vía Docker Desktop/WSL2, watcher activo, Fichero LOCAL
+—SQLite sobre SMB no—, almacenamiento del NAS por cifs). Comparten Atlas (la verdad) y el árbol CDU. UN solo
+watcher (el del PC). Guía: [`docs/ingesta-en-pc.md`](ingesta-en-pc.md).
+
 ---
 
 ## 5. Subsistemas añadidos (historia y porqué)
