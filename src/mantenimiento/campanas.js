@@ -25,8 +25,9 @@ import fs from 'node:fs';
 import { conectarDB } from '../database.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
 import { resolverPersona } from '../utils/resolver-persona.js';
-import { esAutorArtefacto } from '../utils/parsear-nombre.js';
+import { esAutorArtefacto, esTituloArtefacto } from '../utils/parsear-nombre.js';
 import { variantesISBN } from '../utils/identificadores.js';
+import { buscarEnFicheroLocal, corroborarISBNporTitulo } from '../utils/buscador-local.js';
 import { ROLES_VALIDOS } from '../utils/contribuciones.js';
 import { enriquecerAutor, autoresEnriquecibles } from '../utils/enriquecer-autor.js';
 import { rellenarDescripcionesFaltantes, contarFaltantes } from './backfill-descripciones.js';
@@ -84,6 +85,35 @@ async function resolverContribuciones(db, nombres) {
         out.push({ persona: persona._id, rol: c.rol });
     }
     return out;
+}
+
+// Título normalizado para comparar IGUALDAD (minúsculas, sin acentos ni puntuación, espacios colapsados).
+const _RE_DIACR = new RegExp('[\\u0300-\\u036f]', 'g');
+const normTitulo = (s) => String(s || '').toLowerCase().normalize('NFD').replace(_RE_DIACR, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+const sinExtension = (n) => String(n || '').replace(/\.[^.]+$/, '');
+
+/**
+ * COTEJO SEGURO por ISBN (SIN IA, solo Fichero local). Regla del usuario: el ISBN-autoridad PRIMA sobre el
+ * título de los metadatos del fichero (no todo el mundo escanea con cuidado; casos reales: el título quedó con
+ * el nombre de la SERIE, o un artefacto). PERO con salvaguarda contra el ISBN EQUIVOCADO (p. ej. una guía de
+ * Venecia cuyo CIP mal-leído da un ISBN de «Philosophy of Plato»): solo se sustituye si el ISBN se CORROBORA
+ * por el NOMBRE DE ARCHIVO (el indicio humano fiable) contra el título del Fichero. Si difiere pero NO
+ * corrobora → a revisión (no se toca el título). Devuelve:
+ *   { accion:'aplicar', titulo, subtitulo } · { accion:'revisar', tituloFichero } · null (nada que hacer).
+ */
+export async function cotejarPorISBN(doc) {
+    const isbns = variantesISBN(doc.isbn);
+    if (!isbns.length) return null;
+    const fich = await buscarEnFicheroLocal({ isbns }).catch(() => null);
+    const tAut = fich && fich.titulo ? String(fich.titulo).trim() : '';
+    if (!tAut) return null;                                        // el ISBN no está en el Fichero → nada que hacer
+    if (normTitulo(doc.titulo) === normTitulo(tAut)) return null;  // el título ya coincide con la autoridad
+    // ¿El ISBN es REALMENTE de este libro? Se corrobora SOLO por el nombre de archivo (el título actual puede
+    // ser el genérico de la serie o un artefacto → mal referente). Sin nombre de archivo → no se puede confirmar.
+    const ref = sinExtension(doc.nombre_archivo);
+    const corrobora = ref ? await corroborarISBNporTitulo({ candidatos: isbns, titulo: ref }).catch(() => null) : null;
+    if (corrobora) return { accion: 'aplicar', titulo: tAut, subtitulo: fich.subtitulo ? String(fich.subtitulo).trim() : null };
+    return { accion: 'revisar', tituloFichero: tAut };            // difiere y el ISBN no se corrobora → posible ISBN erróneo
 }
 
 // ── REGISTRO DE CAMPAÑAS ────────────────────────────────────────────────────────────────────
@@ -205,6 +235,31 @@ export const CAMPANAS = [
             if (!Object.keys(set).length) return false;
             set.fecha_actualizacion = new Date();
             await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
+            return true;
+        },
+    },
+
+    {
+        id: 'cotejo',
+        etiqueta: 'Cotejar título por ISBN',
+        coste: 'gratis',
+        descripcion: 'El ISBN-autoridad PRIMA sobre el título de los metadatos del fichero (escaneos descuidados). Para libros con ISBN, si el título del Fichero local (OL+BNE) DIFIERE del actual y el ISBN se CORROBORA por el nombre de archivo, sustituye el título (y el subtítulo si falta) — AUTO, SIN IA, offline. Casos reales: el título quedó con el nombre de la SERIE/editorial, truncado o un artefacto. SOLO aplica el caso corroborado (100% seguro); si difiere pero el ISBN NO se corrobora (posible ISBN equivocado o compartido) NO toca nada — esos sospechosos se ven con «node scripts/cotejar-por-isbn.js» (que de paso es un cazador de ISBN erróneos).',
+        version: 1,
+        loteDefecto: 120,
+        cadenciaDefecto: 10,
+        activaDefecto: true,   // gratis (solo Fichero, offline) → conviene que corra solo
+        coleccion: 'biblioteca',
+        proyeccion: { titulo: 1, subtitulo: 1, isbn: 1, nombre_archivo: 1 },
+        candidatos: () => ({ ...CON_ISBN }),   // todos los libros con ISBN (la resolución al Fichero es local y barata)
+        async procesarDoc(db, doc) {
+            const r = await cotejarPorISBN(doc);
+            if (!r || r.accion !== 'aplicar') return false;   // solo el caso corroborado; el resto se sella sin tocar ni marcar
+            const set = { titulo: r.titulo, fecha_actualizacion: new Date() };
+            if (r.subtitulo && !doc.subtitulo) set.subtitulo = r.subtitulo;
+            await db.collection('biblioteca').updateOne({ _id: doc._id }, {
+                $set: set,
+                $push: { alertas_agente: `Título "${String(doc.titulo).slice(0, 45)}" sustituido por el del Fichero por ISBN (corroborado por el nombre): "${r.titulo.slice(0, 45)}" (campaña cotejo, sin IA).` },
+            });
             return true;
         },
     },

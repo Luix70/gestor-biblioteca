@@ -2005,6 +2005,16 @@ de ficheros clasificado por CDU.
           intentan SIEMPRE, de cualquier fuente (APIs + este fichero); solo se guardan/
           muestran si DIFIEREN del título/idioma del propio documento. Ambos salen en la
           ficha (Datos catalográficos).
+        · 🆓 Cotejar título por ISBN — el ISBN-AUTORIDAD PRIMA sobre el título de los
+          metadatos del fichero (no todo el mundo escanea con cuidado: casos reales, el
+          título quedó con el nombre de la SERIE/editorial, truncado o un artefacto). Para
+          libros con ISBN, si el título del FICHERO local (OL+BNE) DIFIERE del actual y el
+          ISBN se CORROBORA por el NOMBRE DE ARCHIVO (corroborarISBNporTitulo), sustituye
+          el título (y subtítulo si falta). AUTO, SIN IA, offline (solo Fichero) → activa
+          por defecto. SALVAGUARDA: si difiere pero el ISBN NO se corrobora (posible ISBN
+          equivocado o COMPARTIDO, estilo Osprey) NO toca nada — esos sospechosos se ven
+          con «node scripts/cotejar-por-isbn.js» (vista previa; --ejecutar aplica solo los
+          corroborados). Lógica compartida: mantenimiento/campanas.js·cotejarPorISBN.
         · 🌐 Huecos de metadatos — sinopsis, año, editorial, autores, palabras clave
           y Dewey/LCC por ISBN (OpenLibrary/Google Books/DNB). Conservador.
         · 🌐 Fotos y biografías de autor — OpenLibrary + Wikidata + Wikipedia.
@@ -2719,6 +2729,12 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
     roles-autores.js          [RETROACTIVO] rellena contribuciones (traductor/ilustrador/…) e idioma
                               original de libros con ISBN, SIN IA (OL + Fichero), tandas de 25.
                               Conservador. Dry-run; --ejecutar; --limite; --sobrescribir.
+    cotejar-por-isbn.js       [RETROACTIVO / campaña 'cotejo'] el ISBN-autoridad PRIMA sobre el título de
+                              los metadatos: si el título del Fichero (OL+BNE) difiere y el ISBN se
+                              CORROBORA por el nombre de archivo, lo sustituye (título de serie/editorial/
+                              artefacto → título real). SIN IA, offline. Reporta los ISBN que NO corroboran
+                              (posible ISBN equivocado/COMPARTIDO tipo Osprey) SIN tocarlos. Dry-run;
+                              --ejecutar (solo los corroborados); --limite N. Misma lógica que la campaña.
     enriquecer-autores.js     [RETROACTIVO / campaña] foto + bio + seudónimos + fechas de autores CON
                               libros, desde OL+Wikidata+Wikipedia (gratis, sin IA), tandas de 25.
                               Dry-run; --ejecutar; --limite N; --sobrescribir.
