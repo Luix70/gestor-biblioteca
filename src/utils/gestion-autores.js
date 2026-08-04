@@ -1,8 +1,9 @@
 /**
  * Gestión de la colección `autores` para la página «Autores» del panel (buscar · ficha · editar · fusionar
- * · foto). Sin pérdida de datos: FUSIONAR mueve las referencias de `biblioteca.autores` al autor destino,
- * conserva las grafías absorbidas en `nombres_alternativos` y borra los autores ya vacíos (es la versión
- * INTERACTIVA de lo que hace por lotes `scripts/backfill-autores.js`).
+ * · foto). Sin pérdida de datos: FUSIONAR mueve TODAS las referencias del autor absorbido al destino —
+ * tanto `biblioteca.autores[]` (autor principal) COMO `biblioteca.contribuciones[].persona` (traductor/
+ * ilustrador/…) —, conserva las grafías absorbidas en `nombres_alternativos` y borra los autores ya vacíos
+ * (es la versión INTERACTIVA de lo que hace por lotes `scripts/backfill-autores.js`).
  *
  * La colección `autores` NO tiene validador $jsonSchema (es laxa): campos usados aquí →
  *   { nombre, nombres_alternativos?: string[], nacimiento?: number, fallecimiento?: number,
@@ -14,6 +15,7 @@ import { ObjectId } from 'mongodb';
 import { DIR_CDU } from '../mantenimiento/util-mantenimiento.js';
 import { decodificarImagen } from './imagen-base64.js';
 import { ROLES_VALIDOS } from './contribuciones.js';
+import { indexarDoc } from './indice-busqueda.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
@@ -323,8 +325,13 @@ export async function fusionarAutores(db, destinoId, ids = []) {
     if (fotos.size) set.fotos = [...fotos];
     await colAutores.updateOne({ _id: destino._id }, { $set: set });
 
-    // Reasignar en biblioteca: cada doc que referencie a una A pasa a referenciar a B (dedup del array).
+    // Reasignar en biblioteca las referencias de las A a B, deduplicando. Hay que hacerlo en AMBOS sitios:
+    // `autores[]` (autor principal) Y `contribuciones[].persona` (traductor/ilustrador/…). Si solo se toca
+    // `autores[]`, al borrar una A que aparecía como COLABORADORA sus contribuciones quedan COLGADAS.
     const absorbedSet = new Set(absorbidosIds.map(String));
+    const tocados = new Set();
+
+    // 1) autores[]: cada doc que referencie a una A pasa a B (dedup del array).
     const docs = await colBiblio.find({ autores: { $in: absorbidosIds } }, { projection: { autores: 1 } }).toArray();
     let reasignados = 0;
     for (const doc of docs) {
@@ -337,16 +344,40 @@ export async function fusionarAutores(db, destinoId, ids = []) {
         }
         await colBiblio.updateOne({ _id: doc._id }, { $set: { autores: nuevos, fecha_actualizacion: new Date() } });
         reasignados++;
+        tocados.add(String(doc._id));
     }
 
-    // Borrar las A (ya sin referencias).
+    // 2) contribuciones[]: cada doc donde una A sea colaboradora pasa a B (dedup por persona+rol). ESTE PASO
+    //    FALTABA — era el bug: fusionar «Doré, Gustave» (autor) con «Gustave Doré» (ilustrador de 4 libros)
+    //    borraba al ilustrador y dejaba sus 4 contribuciones apuntando a un autor inexistente.
+    const docsC = await colBiblio.find({ 'contribuciones.persona': { $in: absorbidosIds } }, { projection: { contribuciones: 1 } }).toArray();
+    let reasignadosContrib = 0;
+    for (const doc of docsC) {
+        const vistos = new Set();
+        const nuevas = [];
+        for (const c of doc.contribuciones || []) {
+            if (!c || !c.persona) continue;
+            const persona = absorbedSet.has(String(c.persona)) ? destino._id : c.persona;
+            const k = String(persona) + '|' + c.rol;
+            if (!vistos.has(k)) { vistos.add(k); nuevas.push({ persona, rol: c.rol }); }
+        }
+        await colBiblio.updateOne({ _id: doc._id }, { $set: { contribuciones: nuevas, fecha_actualizacion: new Date() } });
+        reasignadosContrib++;
+        tocados.add(String(doc._id));
+    }
+
+    // Borrar las A (ya sin referencias en autores[] ni en contribuciones[]).
     await colAutores.deleteMany({ _id: { $in: absorbidosIds } });
+
+    // Refrescar el índice de búsqueda de los docs tocados (cambió el autor/colaborador asociado). Best-effort.
+    for (const id of tocados) await indexarDoc(db, oid(id)).catch(() => {});
 
     return {
         ok: true,
         destino: { _id: String(destino._id), nombre: destino.nombre },
         fusionados: absorbidos.length,
         reasignados,
+        reasignadosContrib,
         alternativos: set.nombres_alternativos || destino.nombres_alternativos || [],
     };
 }
