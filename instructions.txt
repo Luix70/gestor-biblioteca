@@ -2015,6 +2015,13 @@ de ficheros clasificado por CDU.
           equivocado o COMPARTIDO, estilo Osprey) NO toca nada — esos sospechosos se ven
           con «node scripts/cotejar-por-isbn.js» (vista previa; --ejecutar aplica solo los
           corroborados). Lógica compartida: mantenimiento/campanas.js·cotejarPorISBN.
+        · 🆓 Clasificación por ISBN (rellena CDU 000) — INACTIVA por defecto (switch, a
+          voluntad). RELLENA la CDU de los libros SIN clasificar (cdu ausente/«000») con la
+          del Fichero por ISBN: su CDU directa (BNE) o la del Dewey/LC por el crosswalk
+          determinista (SIN IA, offline); mueve la carpeta. SALVAGUARDA: solo si el ISBN se
+          corrobora por el nombre de archivo. NO toca los que YA tienen CDU aunque el Fichero
+          difiera (el crosswalk es grueso y la catalogada suele ser mejor) → esas divergencias
+          se ven con «node scripts/cotejar-por-isbn.js --clasificacion» (informe, solo lectura).
         · 🌐 Huecos de metadatos — sinopsis, año, editorial, autores, palabras clave
           y Dewey/LCC por ISBN (OpenLibrary/Google Books/DNB). Conservador.
         · 🌐 Fotos y biografías de autor — OpenLibrary + Wikidata + Wikipedia.
@@ -2735,6 +2742,9 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
                               artefacto → título real). SIN IA, offline. Reporta los ISBN que NO corroboran
                               (posible ISBN equivocado/COMPARTIDO tipo Osprey) SIN tocarlos. Dry-run;
                               --ejecutar (solo los corroborados); --limite N. Misma lógica que la campaña.
+                              --clasificacion: INFORME (solo lectura) que compara la CDU catalogada con la
+                              del Fichero (BNE directa o Dewey/LC por crosswalk): exacta/misma área/difiere,
+                              y cuántas 000 podría rellenar (eso lo aplica la campaña «cotejo-cdu»).
     enriquecer-autores.js     [RETROACTIVO / campaña] foto + bio + seudónimos + fechas de autores CON
                               libros, desde OL+Wikidata+Wikipedia (gratis, sin IA), tandas de 25.
                               Dry-run; --ejecutar; --limite N; --sobrescribir.

@@ -18,13 +18,52 @@ import 'dotenv/config';
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { cotejarPorISBN } from '../src/mantenimiento/campanas.js';
+import { buscarEnFicheroLocal } from '../src/utils/buscador-local.js';
+import { resolverCDU } from '../src/clasificador-cdu.js';
+import { variantesISBN } from '../src/utils/identificadores.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
+const CLASIFICACION = process.argv.includes('--clasificacion');
 const LIMITE = (() => { const i = process.argv.indexOf('--limite'); return i >= 0 ? Number(process.argv[i + 1]) : 0; })();
 const MUESTRA = 15;
 
 const db = await conectarDB();
 const bib = db.collection('biblioteca');
+
+// ── Modo INFORME de clasificación (--clasificacion): compara la CDU catalogada con la del Fichero por ISBN.
+// Solo lectura (las divergencias son para revisión manual; el relleno de CDU 000 lo hace la campaña 'cotejo-cdu').
+if (CLASIFICACION) {
+    const normCdu = (c) => String(c || '').trim().replace(/[^0-9.].*$/, '').replace(/\.+$/, '').trim();
+    const cduFichero = async (f) => {
+        if (!f) return null;
+        if (f.cdu) return String(f.cdu).trim();
+        if (f.dewey || f.lcc) { try { const r = await resolverCDU({ dewey: f.dewey, lcc: f.lcc, permitirIA: false }); const c = typeof r === 'string' ? r : (r && r.cdu); if (c && c !== '000') return String(c).trim(); } catch { /**/ } }
+        return null;
+    };
+    const filtro = { isbn: { $exists: true, $nin: [null, ''] } };
+    const total = await bib.countDocuments(filtro);
+    console.log(`\nClasificación por ISBN — INFORME (solo lectura) · libros con ISBN: ${total}${LIMITE ? ` (ojeando ${LIMITE})` : ''}\n`);
+    const cur = bib.find(filtro, { projection: { cdu: 1, isbn: 1 } });
+    let n = 0, sinFich = 0, aporta = 0, exacto = 0, area = 0, difiere = 0; const ejDif = [];
+    for await (const d of cur) {
+        if (LIMITE && n >= LIMITE) break;
+        n++;
+        if (n % 500 === 0) process.stdout.write(`  … ${n}/${LIMITE || total}\r`);
+        const f = await buscarEnFicheroLocal({ isbns: variantesISBN(d.isbn) }).catch(() => null);
+        const fic = await cduFichero(f);
+        if (!fic) { sinFich++; continue; }
+        const cat = normCdu(d.cdu);
+        if (!cat || d.cdu === '000') { aporta++; continue; }
+        if (cat === normCdu(fic)) exacto++;
+        else if (cat[0] === normCdu(fic)[0]) area++;
+        else { difiere++; if (ejDif.length < MUESTRA) ejDif.push(`  cat ${cat.padEnd(12)} vs fichero ${normCdu(fic).padEnd(12)} (ISBN ${d.isbn})`); }
+    }
+    console.log(`\nrevisados ${n} · sin dato en Fichero ${sinFich} · Fichero APORTA (CDU 000/vacía) ${aporta}`);
+    console.log(`con CDU en ambos → EXACTA ${exacto} · misma ÁREA ${area} · DIFIERE ${difiere}`);
+    if (ejDif.length) { console.log(`\nMuestra de DIVERGENCIAS (área distinta — revisión manual):`); ejDif.forEach((l) => console.log(l)); }
+    console.log(`\nℹ Rellenar las «${aporta}» sin clasificar: activa la campaña «Clasificación por ISBN» en el panel. Las divergencias NO se tocan (la CDU catalogada suele ser mejor que el crosswalk).`);
+    process.exit(0);
+}
 const filtro = { isbn: { $exists: true, $nin: [null, ''] } };
 const total = await bib.countDocuments(filtro);
 console.log(`\nCotejar título por ISBN — ${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'} · libros con ISBN: ${total}${LIMITE ? ` (ojeando ${LIMITE})` : ''}\n`);

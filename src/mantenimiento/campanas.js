@@ -38,7 +38,8 @@ import { carpetaDeDoc } from './util-mantenimiento.js';
 import { recuperarOriginalesDeFichero } from '../utils/titulo-original.js';
 import { indexarDoc } from '../utils/indice-busqueda.js';
 import { regenerarSidecarsDoc, FILTRO_SIDECARS_DESACTUALIZADOS } from '../utils/registro.js';
-import { precalentarEquivalencias, contarEquivalenciasPendientes } from '../clasificador-cdu.js';
+import { precalentarEquivalencias, contarEquivalenciasPendientes, resolverCDU } from '../clasificador-cdu.js';
+import { editarDocumento } from '../utils/editar-doc.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -114,6 +115,23 @@ export async function cotejarPorISBN(doc) {
     const corrobora = ref ? await corroborarISBNporTitulo({ candidatos: isbns, titulo: ref }).catch(() => null) : null;
     if (corrobora) return { accion: 'aplicar', titulo: tAut, subtitulo: fich.subtitulo ? String(fich.subtitulo).trim() : null };
     return { accion: 'revisar', tituloFichero: tAut };            // difiere y el ISBN no se corrobora → posible ISBN erróneo
+}
+
+/**
+ * CDU que aporta el Fichero para un registro: su CDU directa (BNE, específica) o, si no, la del Dewey/LC por el
+ * CROSSWALK DETERMINISTA (resolverCDU sin IA). Devuelve { cdu, via } o null. Sin IA ni APIs.
+ */
+async function cduDelFichero(f) {
+    if (!f) return null;
+    if (f.cdu) return { cdu: String(f.cdu).trim(), via: 'cdu-BNE' };
+    if (f.dewey || f.lcc) {
+        try {
+            const r = await resolverCDU({ dewey: f.dewey, lcc: f.lcc, permitirIA: false });
+            const c = typeof r === 'string' ? r : (r && r.cdu);
+            if (c && c !== '000') return { cdu: String(c).trim(), via: 'crosswalk' };
+        } catch { /* el crosswalk defiere a IA en los casos divergentes → aquí, sin dato */ }
+    }
+    return null;
 }
 
 // ── REGISTRO DE CAMPAÑAS ────────────────────────────────────────────────────────────────────
@@ -261,6 +279,32 @@ export const CAMPANAS = [
                 $push: { alertas_agente: `Título "${String(doc.titulo).slice(0, 45)}" sustituido por el del Fichero por ISBN (corroborado por el nombre): "${r.titulo.slice(0, 45)}" (campaña cotejo, sin IA).` },
             });
             return true;
+        },
+    },
+
+    {
+        id: 'cotejo-cdu',
+        etiqueta: 'Clasificación por ISBN (rellena CDU 000)',
+        coste: 'gratis',
+        descripcion: 'RELLENA la CDU de los libros SIN clasificar (cdu ausente o «000») con la del Fichero local por ISBN: su CDU directa (BNE) o la del Dewey/LC por el crosswalk determinista (SIN IA, offline). Mueve la carpeta al árbol nuevo (editarDocumento). SALVAGUARDA: solo si el ISBN se CORROBORA por el nombre de archivo (no clasificar por un ISBN equivocado). NO toca los libros que YA tienen CDU aunque el Fichero difiera (el crosswalk es grueso y la CDU catalogada suele ser mejor); esas divergencias se ven con «node scripts/cotejar-por-isbn.js --clasificacion». INACTIVA por defecto: actívala con su switch cuando quieras (mueve carpetas).',
+        version: 1,
+        loteDefecto: 40,        // mueve carpetas → lotes pequeños
+        cadenciaDefecto: 20,
+        activaDefecto: false,   // a voluntad (switch en el panel)
+        coleccion: 'biblioteca',
+        proyeccion: { isbn: 1, nombre_archivo: 1 },
+        // Libros con ISBN y SIN CDU (ausente/null/''/'000'). El sello evita reprocesar los que el Fichero no clasifica.
+        candidatos: () => ({ ...CON_ISBN, $or: [{ cdu: { $exists: false } }, { cdu: null }, { cdu: '' }, { cdu: '000' }] }),
+        async procesarDoc(db, doc) {
+            const isbns = variantesISBN(doc.isbn);
+            const f = await buscarEnFicheroLocal({ isbns }).catch(() => null);
+            const cf = await cduDelFichero(f);
+            if (!cf) return false;                                 // el Fichero no aporta clasificación → nada
+            const ref = sinExtension(doc.nombre_archivo);
+            const ok = ref ? await corroborarISBNporTitulo({ candidatos: isbns, titulo: ref }).catch(() => null) : null;
+            if (!ok) return false;                                 // ISBN no corroborado → no clasificar (posible ISBN erróneo)
+            const r = await editarDocumento(db, String(doc._id), { cdu: cf.cdu }).catch(() => null); // mueve la carpeta
+            return !!(r && r.ok);
         },
     },
 
