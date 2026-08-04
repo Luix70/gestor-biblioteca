@@ -121,7 +121,7 @@ export async function cotejarPorISBN(doc) {
  * CDU que aporta el Fichero para un registro: su CDU directa (BNE, específica) o, si no, la del Dewey/LC por el
  * CROSSWALK DETERMINISTA (resolverCDU sin IA). Devuelve { cdu, via } o null. Sin IA ni APIs.
  */
-async function cduDelFichero(f) {
+export async function cduDelFichero(f) {
     if (!f) return null;
     if (f.cdu) return { cdu: String(f.cdu).trim(), via: 'cdu-BNE' };
     if (f.dewey || f.lcc) {

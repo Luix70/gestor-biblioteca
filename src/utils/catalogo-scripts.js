@@ -196,6 +196,15 @@ export const CATALOGO_SCRIPTS = [
         ] }),
 
     // ── Metadatos y clasificación ────────────────────────────────────────────
+    S({ id: 'cotejar-por-isbn', cat: 'Metadatos y clasificación', escribe: true, aplica: '--ejecutar',
+        resumen: 'Corrige título y CDU con autoridad del Fichero (por ISBN, sin IA)',
+        proposito: 'Para libros con ISBN, el TÍTULO y la CDU del Fichero local (OL+BNE) PRIMAN sobre los catalogados (escaneos descuidados: título = nombre de la serie/editorial, truncado, artefacto; CDU 000). La CDU DIRECTA de BNE prima aunque difiera; la derivada del Dewey/LC por crosswalk (más gruesa) solo rellena una CDU 000/ausente. SALVAGUARDA: solo se aplica si el ISBN se CORROBORA por el nombre de archivo (evita el ISBN equivocado o COMPARTIDO tipo Osprey). Cambiar la CDU MUEVE la carpeta. Alcance con «títulos»/«CDU» (ambos si no marcas ninguno). «Solo informe CDU» compara sin tocar. Offline, sin IA. ⚠ Copia de seguridad antes de aplicar (toca muchos documentos).',
+        params: [
+            { nombre: 'titulos', flag: '--titulos', tipo: 'switch', etiqueta: 'Corregir títulos' },
+            { nombre: 'cdu', flag: '--cdu', tipo: 'switch', etiqueta: 'Corregir CDU (mueve la carpeta)' },
+            { nombre: 'clasificacion', flag: '--clasificacion', tipo: 'switch', etiqueta: 'Solo informe de CDU (lectura)' },
+            { nombre: 'limite', flag: '--limite', tipo: 'numero', etiqueta: 'Límite (para probar)', ejemplo: '200' },
+        ] }),
     S({ id: 're-enriquecer-degradados', cat: 'Metadatos y clasificación', escribe: true, aplica: '--ejecutar',
         resumen: 'Re-enriquece (sobrescribiendo) lotes ingeridos con APIs caídas',
         proposito: 'Título = nombre de archivo, cdu «00», sin autor… Con un ISBN, rellena autor/editorial desde OL/Fichero (autoritativo). No mueve ficheros.', params: [] }),
