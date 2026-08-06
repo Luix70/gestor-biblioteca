@@ -10328,7 +10328,7 @@ let colaInbox = [],
 // PERSISTENCIA de «Datos de esta alta»: para no re-teclearlos al salir a mirar una ficha y volver a catalogar.
 // El valor efectivo de ámbito/estantería vive en inAmbito/inEstanteria (montarSelUbic lo refleja ahí), así que
 // basta con guardar/restaurar esos inputs + los de ISBN/colección/obra, y refrescarInboxUbic re-monta los <select>.
-const DATOS_ALTA_IDS = ['inIsbn', 'inColeccion', 'inObra', 'inAmbito', 'inEstanteria'];
+const DATOS_ALTA_IDS = ['inIsbn', 'inColeccion', 'inObra', 'inEditorial', 'inIssn', 'inCdu', 'inTipo', 'inAmbito', 'inEstanteria'];
 function guardarDatosAlta() {
   const o = {};
   DATOS_ALTA_IDS.forEach((id) => { const el = $('#' + id); if (el) o[id] = el.value || ''; });
@@ -10346,6 +10346,7 @@ function loadInbox() {
   if ('NDEFReader' in window && $('#nfcCard')) $('#nfcCard').style.display = '';
   if ($('#inboxHint')) $('#inboxHint').textContent = '';
   cargarDatalistColecciones();
+  cargarDatalistEditoriales();
   restaurarDatosAlta();           // vuelca lo guardado en los campos ANTES de montar los <select> de ubicación
   // Guarda al vuelo cualquier cambio en la tarjeta (input y change → cubre inputs y los <select> de ubicación).
   const dac = $('#datosAltaCard');
@@ -11034,7 +11035,7 @@ function wireInbox() {
   }
   if ($('#inClear'))
     $('#inClear').onclick = () => {
-      ['inIsbn', 'inColeccion', 'inObra', 'inAmbito', 'inEstanteria'].forEach((id) => {
+      DATOS_ALTA_IDS.forEach((id) => {
         const el = $('#' + id);
         if (el) el.value = '';
       });
@@ -12035,6 +12036,17 @@ async function cargarDatalistColecciones() {
       .join('');
   } catch (e) {}
 }
+// Datalist de EDITORIALES para el campo «Editorial» de los datos de alta: escribe y filtra las existentes
+// (evita crear duplicados «Osprey» / «osprey»). Como colecciones, best-effort (un fallo no rompe nada).
+async function cargarDatalistEditoriales() {
+  const dl = $('#dlEditoriales');
+  if (!dl) return;
+  try {
+    const r = await api('/editoriales?limite=2000');
+    const eds = r.editoriales || r.items || (Array.isArray(r) ? r : []);
+    dl.innerHTML = (Array.isArray(eds) ? eds : []).map((e) => `<option value="${esc(e.nombre || '')}">`).join('');
+  } catch (e) {}
+}
 // ── Ubicaciones (ámbito → estanterías): se acumulan según se cataloga, así puedes elegirlas de un
 // desplegable. La estantería va ASOCIADA al ámbito (un «Estante 1» en «Comedor» ≠ otro en «Biblioteca»).
 let mapaUbicaciones = [];
@@ -12248,6 +12260,10 @@ function metaSnapshot() {
     isbn: valorCampo('inIsbn'),
     coleccion: valorCampo('inColeccion'),
     obra: valorCampo('inObra'),
+    editorial: valorCampo('inEditorial'),
+    issn: valorCampo('inIssn'),
+    cdu: valorCampo('inCdu'),
+    tipo: valorCampo('inTipo'),
     ambito: valorCampo('inAmbito'),
     estanteria: valorCampo('inEstanteria'),
   };
@@ -12259,6 +12275,10 @@ function fdDesdeSnap(snap, files) {
   if (snap.isbn && snap.isbnOrigen) formData.append('isbn_origen', snap.isbnOrigen);
   if (snap.coleccion) formData.append('coleccion', snap.coleccion);
   if (snap.obra) formData.append('obra', snap.obra);
+  if (snap.editorial) formData.append('editorial', snap.editorial);
+  if (snap.issn) formData.append('issn', snap.issn);
+  if (snap.cdu) formData.append('cdu', snap.cdu);
+  if (snap.tipo) formData.append('tipo', snap.tipo);
   if (snap.ambito || snap.estanteria)
     formData.append(
       'ubicacion',

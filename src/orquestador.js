@@ -713,6 +713,22 @@ export async function procesarRecurso(entrada) {
         }
     }
 
+    // Editorial / ISSN / CDU aportados en el formulario del Inbox: AUTORIDAD del usuario (para catalogar una
+    // serie larga sin re-teclear). Se aplican SOBRE lo extraído del fichero (el repackager tipo ePubLibre no
+    // vale) y el enriquecimiento conservador ya no los pisa (rellena huecos alrededor). CDU fijada = no gasta IA.
+    if (contexto.editorial) {
+        datosBase.editorial = String(contexto.editorial).trim();
+        datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Editorial «${datosBase.editorial}» aportada en el formulario de la subida.`];
+    }
+    if (contexto.issn) {
+        const vs = validarISSN(contexto.issn);
+        if (vs) { datosBase.issn = vs; datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `ISSN ${vs} aportado en el formulario de la subida.`]; }
+    }
+    if (contexto.cdu) {
+        datosBase.cdu = String(contexto.cdu).trim();
+        datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `CDU ${datosBase.cdu} fijada en el formulario de la subida.`];
+    }
+
     // POLÍTICA POR Nº DE PÁGINAS (solo PDF), tras identificar (ISBN/ISSN/visión) para no pisar una identidad
     // fuerte: un ESCANEO fino (< umbral) → libro de 'papel' (el PDF se conserva igual); un PDF LEGIBLE y corto
     // SIN ISBN/CIP propio → 'articulo' (si trae DOI) o 'capitulo' (fragmento). ≥ umbral: sin cambios (manda
@@ -731,6 +747,13 @@ export async function procesarRecurso(entrada) {
             datosBase.alertas_agente = [...(datosBase.alertas_agente || []), pol.alerta];
             console.log(`[Orquestador] Política por páginas: ${pol.alerta}`);
         }
+    }
+
+    // Tipo (libro/revista) forzado en el formulario del Inbox: autoridad del usuario, gana sobre la política por
+    // páginas y sobre la deducción por identificadores (p. ej. forzar 'revista' en un fascículo sin ISSN legible).
+    if (contexto.tipo_recurso && ['libro', 'revista'].includes(contexto.tipo_recurso)) {
+        if (tipo_recurso !== contexto.tipo_recurso) datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Tipo forzado a «${contexto.tipo_recurso}» en el formulario de la subida.`];
+        tipo_recurso = contexto.tipo_recurso;
     }
 
     // TIER 2–4 · enriquecimiento conservador (APIs + IA solo para huecos)

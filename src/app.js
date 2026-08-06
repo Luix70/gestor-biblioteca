@@ -207,11 +207,22 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
     const obraTit   = String(req.body?.obra || '').trim() || null;
     const isbnForm  = String(req.body?.isbn || '').replace(/[^0-9Xx]/g, '').toUpperCase() || null;
     const isbnOrigen = String(req.body?.isbn_origen || '').trim() || null;   // 'movil' = leído del código de barras en el cliente
+    // Autoridades adicionales del formulario que VIAJAN: editorial, ISSN, CDU y tipo (libro/revista). Las aplica
+    // el orquestador (editorial/issn/cdu como override; tipo fuerza tipo_recurso). Útiles para catalogar una
+    // serie larga de una misma editorial sin re-teclear (los datos de alta persisten en el cliente).
+    const editorialForm = String(req.body?.editorial || '').trim() || null;
+    const issnForm  = String(req.body?.issn || '').replace(/[^0-9Xx-]/g, '').toUpperCase() || null;
+    const cduForm   = String(req.body?.cdu || '').trim() || null;
+    const tipoForm  = String(req.body?.tipo || '').trim().toLowerCase() || null;
     const conformar = req.body?.conformar === '1' || req.body?.conformar === true || req.query?.conformar === '1';
     const baseCtx = {};
     if (ubicacion) baseCtx.ubicacion = ubicacion;
     if (coleccion) { baseCtx.coleccion = coleccion; baseCtx.serieAuto = true; } // serie de libros → autonumera
     if (obraTit)   baseCtx.obra = { titulo: obraTit };
+    if (editorialForm) baseCtx.editorial = editorialForm;
+    if (issnForm) baseCtx.issn = issnForm;
+    if (cduForm)  baseCtx.cdu = cduForm;
+    if (tipoForm && ['libro', 'revista'].includes(tipoForm)) baseCtx.tipo_recurso = tipoForm;
     if (conformar) baseCtx.conformar = true;
 
     const unidades = agrupar(archivos);

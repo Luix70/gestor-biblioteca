@@ -676,6 +676,32 @@
               </div>
               <div class="row" style="margin-top: 8px">
                 <div>
+                  <label>Editorial</label
+                  ><input
+                    id="inEditorial"
+                    placeholder="p. ej. Osprey"
+                    autocomplete="off"
+                    list="dlEditoriales"
+                  />
+                </div>
+                <div>
+                  <label>ISSN <span class="muted" style="font-size: 11px">(revistas)</span></label
+                  ><input id="inIssn" placeholder="0000-0000" autocomplete="off" inputmode="numeric" />
+                </div>
+                <div>
+                  <label>CDU</label><input id="inCdu" placeholder="p. ej. 355" autocomplete="off" />
+                </div>
+                <div>
+                  <label>Tipo</label
+                  ><select id="inTipo">
+                    <option value="">auto</option>
+                    <option value="libro">libro</option>
+                    <option value="revista">revista</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row" style="margin-top: 8px">
+                <div>
                   <label>Ubicación · ámbito</label
                   ><select id="inAmbSel"></select
                   ><input
@@ -700,6 +726,7 @@
                 </div>
               </div>
               <datalist id="dlColecciones"></datalist>
+              <datalist id="dlEditoriales"></datalist>
               <datalist id="dlAmbitos"></datalist>
               <datalist id="dlEstanterias"></datalist>
             </details>

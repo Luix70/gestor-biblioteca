@@ -1587,9 +1587,15 @@ de ficheros clasificado por CDU.
     Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la
     primera y siempre visible; «🏷️ Datos de esta alta» (los que VIAJAN) está
     colapsada; «⚙️ Modos y escaneo» (los interruptores) desplegada; «📷 Cámara» y
-    «📶 NFC» colapsadas. Los «Datos de esta alta» (ISBN/colección/obra/ubicación)
-    PERSISTEN (localStorage inbox_datos_alta): se restauran al volver a Entrada tras
-    mirar una ficha, y «✕ Limpiar» los olvida. (guardarDatosAlta/restaurarDatosAlta.)
+    «📶 NFC» colapsadas. Los «Datos de esta alta» (ISBN/colección/obra/EDITORIAL/ISSN/
+    CDU/TIPO/ubicación) VIAJAN con la subida y PERSISTEN (localStorage inbox_datos_alta):
+    se restauran al volver a Entrada tras mirar una ficha, y «✕ Limpiar» los olvida
+    (guardarDatosAlta/restaurarDatosAlta). Editorial/ISSN/CDU/tipo son AUTORIDAD del
+    usuario que el orquestador aplica sobre lo extraído del fichero: editorial (gana al
+    repackager tipo ePubLibre), ISSN (validado), CDU (fijada → no gasta IA al clasificar)
+    y tipo (fuerza libro/revista sobre la deducción). Editorial trae datalist dlEditoriales
+    (escribe y filtra las existentes → evita duplicados «Osprey»/«osprey»). Ideal para
+    catalogar una serie larga de una misma editorial sin re-teclear.
     Subir/arrastrar EPUB/PDF/imágenes/cómic/.zip/.chm/.iso; HACER FOTO con la
     cámara; IMPORTAR de otra app; o COMPARTIR a la PWA (Adobe Scan → Compartir →
     Bibliotheca). Antes de subir puedes fijar ISBN/colección/obra/ubicación que
