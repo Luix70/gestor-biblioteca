@@ -2297,6 +2297,7 @@ function insertarConCascada(target, N) {
 
 async function iniciarColScan() {
   if (!_colOrd || !('NDEFReader' in window)) { toast('Este dispositivo no puede leer NFC (Android + Chrome)', 'warn'); return; }
+  pararLecturaNFC(); // que ningún lector de lectura navegue a la ficha durante la ordenación
   const msg = $('#coScanMsg');
   let rd;
   try {
@@ -9248,6 +9249,7 @@ async function iniciarOrdenPorNFC() {
     toast('Este dispositivo no puede leer NFC (Android + Chrome)', 'warn');
     return;
   }
+  pararLecturaNFC(); // que ningún lector de lectura navegue a la ficha durante la ordenación
   const msg = $('#ordScanMsg');
   let rd;
   try {
@@ -13541,6 +13543,14 @@ function docIdDeURL(s) {
     return '';
   }
 }
+// Lector NFC de LECTURA (leerNFC): al leer una etiqueta nuestra NAVEGA a la ficha. Se guarda su AbortController
+// para poder PARARLO — es imprescindible al ordenar por NFC (colección/estantería): si sigue vivo, Web NFC
+// entrega la lectura a TODOS los lectores de la página y este navegaría a la ficha rompiendo la ordenación.
+let _lecturaNFC = null;
+function pararLecturaNFC() {
+  if (_lecturaNFC) { try { _lecturaNFC.ctrl.abort(); } catch (_) {} }
+  _lecturaNFC = null;
+}
 async function leerNFC() {
   if (!('NDEFReader' in window)) {
     toast('Este navegador no soporta NFC (Android + Chrome)', 'bad');
@@ -13549,9 +13559,16 @@ async function leerNFC() {
   const out = $('#nfcOut');
   if (out) out.textContent = 'Acerca la etiqueta…';
   try {
+    pararLecturaNFC(); // no acumular lectores: reemplaza cualquier lector de lectura previo
     const reader = new NDEFReader();
-    await reader.scan();
+    const ctrl = new AbortController();
+    await reader.scan({ signal: ctrl.signal });
+    _lecturaNFC = { ctrl };
     reader.onreading = async (ev) => {
+      // Mientras se ORDENA una colección o estantería por NFC, este lector NO debe navegar a la ficha (rompería
+      // el flujo): el lector de ordenación ya identifica el libro. Ignora la lectura aquí (belt-and-suspenders;
+      // además al iniciar la ordenación se aborta este lector).
+      if (_colScan || _ordScan) return;
       sonidoNfcLectura();
       let url = '',
         bib = '',

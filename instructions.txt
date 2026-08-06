@@ -1615,6 +1615,13 @@ de ficheros clasificado por CDU.
       persiste con el MISMO endpoint POST /colecciones/:id/numerar enviando el mapa completo
       — sin cambios en el backend. Funciones: ordenarColeccionPorNFC/insertarConCascada/
       colScanColocar en public/app.js.
+      IMPORTANTE (NFC concurrente): Web NFC entrega cada lectura a TODOS los lectores
+      activos de la página. El lector de LECTURA (leerNFC, «📲 Leer etiqueta») NAVEGA a la
+      ficha, así que rompería la ordenación. Se neutraliza por partida doble: al iniciar
+      cualquier ordenación por NFC (colección o estantería) se llama a pararLecturaNFC()
+      —ahora leerNFC es abortable, guarda su AbortController en _lecturaNFC— y, además,
+      leerNFC.onreading IGNORA la lectura si hay una sesión de ordenación activa
+      (_colScan || _ordScan). El de ordenación sí identifica el libro.
 
   ── INBOX (ALTA MANUAL desde el panel) ───────────────────────────────────────
     Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la
