@@ -1848,10 +1848,15 @@ function pintarColeccion(r) {
     esTrans = c.tipo === 'transmedia';
   // «Numerar» solo tiene sentido en SERIES DE LIBROS (las revistas se ordenan por fecha/clave; la transmedia
   // conserva su estructura y no se numera).
+  // «Ordenar por NFC» solo si el dispositivo lee NFC (Android + Chrome); si no, no se pinta (botón muerto).
+  const nfcOrdBtn =
+    'NDEFReader' in window
+      ? `<button class="btn" id="colNfc" title="Numera los volúmenes tocando sus etiquetas NFC en orden de lectura: cada escaneo asigna el «Próximo volumen nº» y lo autoincrementa (inserción por desplazamiento si el nº ya está usado)">📶 Ordenar por NFC</button>`
+      : '';
   const numBtn =
     !esRev && !esTrans && ROL === 'admin'
       ? `<button class="btn" id="colNumerar" title="Asignar o corregir el nº de cada libro dentro de la colección">🔢 Numerar</button>
-         <button class="btn" id="colLomos" title="Foto de los lomos → la IA lee título y nº de cada uno y renumera la colección (y adjunta el recorte del lomo)">📷 Numerar por lomos</button>`
+         <button class="btn" id="colLomos" title="Foto de los lomos → la IA lee título y nº de cada uno y renumera la colección (y adjunta el recorte del lomo)">📷 Numerar por lomos</button>${nfcOrdBtn}`
       : '';
   const tipoLabel = esRev ? '📰 Revista (cabecera)' : esTrans ? '🎬 Colección transmedia' : '📚 Serie de libros';
   const rango = rangoFechas(c.fecha_inicio, c.fecha_fin);
@@ -1975,6 +1980,7 @@ function pintarColeccion(r) {
   }));
   if ($('#colNumerar')) $('#colNumerar').onclick = () => numerarColeccion();
   if ($('#colLomos')) $('#colLomos').onclick = () => numerarPorLomos();
+  if ($('#colNfc')) $('#colNfc').onclick = () => ordenarColeccionPorNFC();
   if ($('#colEditar')) $('#colEditar').onclick = () => editarGrupo('coleccion', c);
   if ($('#colCompartir')) $('#colCompartir').onclick = () => compartirGrupo('coleccion', c._id, c.nombre);
   // Ver toda la colección en el Catálogo FILTRANDO por su id (no por una lista de ids en la URL → sin 414, y
@@ -2176,6 +2182,221 @@ function renumerarVolumenRapido({ tipo, grupoId, docId, actual, titulo, total })
   };
   $('#rvSave').onclick = guardar;
   $('#rvNum').onkeydown = (e) => { if (e.key === 'Enter') guardar(); };
+}
+
+// ── Ordenar los VOLÚMENES de una colección por LECTURA NFC ────────────────────────────────────────────
+// Numera los libros de una serie tocando sus etiquetas NFC en orden de lectura. Cada escaneo asigna al volumen
+// el valor de la casilla «Próximo volumen nº» y lo AUTOINCREMENTA. Si ese número ya lo tiene otro volumen, se
+// INSERTA POR DESPLAZAMIENTO (cascada): el ocupante pasa a N+1, el de N+1 a N+2… hasta el primer hueco (los que
+// quedan fuera de esa racha contigua NO se tocan — con 10,11,13 e insertando 10 → 11,12,13, el 13 queda igual).
+// La casilla se fija a mano antes y entre escaneos. Reutiliza el patrón de escaneo NFC continuo de la estantería
+// (docIdDeURL, ORD_DOBLE_MS, sonidoNfcLectura). Persiste con el MISMO endpoint que el editor «Numerar»
+// (POST /colecciones/:id/numerar) enviando el MAPA COMPLETO — la cascada se calcula en el cliente (como el
+// «orden automático»), sin cambios en el backend.
+let _colOrd = null;   // modelo local: { colId, colNombre, vols:[{_id,titulo,portada,isbn,numero:int|null,auto:bool}] }
+let _colScan = null;  // sesión de escaneo NFC: { ctrl:AbortController, hechos:Set<id>, ultimoId, ultimoT }
+
+function ordenarColeccionPorNFC() {
+  const r = _colR;
+  if (!r || !r.coleccion) return;
+  const c = r.coleccion;
+  const vols = (r.miembros || []).map((d) => {
+    const n = parseInt(d.coleccion_numero, 10);
+    return {
+      _id: String(d._id),
+      titulo: d.titulo || '—',
+      portada: d.portada || '',
+      isbn: d.isbn || '',
+      numero: Number.isFinite(n) ? n : null,
+      auto: d.coleccion_numero_auto === true,
+    };
+  });
+  _colOrd = { colId: String(c._id), colNombre: c.nombre || '', vols };
+  _colScan = null;
+  // «Próximo volumen nº» por defecto = siguiente por encima del máximo (append no destructivo); el usuario lo
+  // ajusta a mano antes de empezar (p. ej. a 1 para renumerar de cero, o al hueco donde quiera insertar).
+  const maxN = vols.reduce((m, v) => (v.numero != null && v.numero > m ? v.numero : m), 0);
+  const btnScan =
+    'NDEFReader' in window
+      ? `<button class="btn" id="coScanBtn" title="Toca los libros con NFC en orden de lectura; cada uno toma el «Próximo volumen nº» y este se autoincrementa">📶 Escanear</button>`
+      : '<span class="muted" style="font-size:12px">NFC no disponible en este dispositivo (Android + Chrome)</span>';
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;max-height:90vh;overflow:auto">
+      <h3 style="margin-top:0">📶 Ordenar por NFC — ${esc(recortar(c.nombre, 40))}</h3>
+      <p class="muted" style="margin:-4px 0 10px;font-size:12px">Toca las etiquetas NFC de los volúmenes en <b>orden de lectura</b>. Cada escaneo asigna el «Próximo volumen nº» y lo incrementa. Si el número ya está usado, los siguientes se <b>desplazan</b> hasta el primer hueco. También puedes editar cualquier nº a mano.</p>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <label for="coProx" style="font-size:13px;font-weight:600">Próximo volumen, nº:</label>
+        <input type="number" min="1" id="coProx" value="${maxN + 1}" inputmode="numeric" style="width:80px;text-align:center;font-size:16px;padding:6px">
+      </div>
+      <div id="coScanMsg" style="display:none;font-size:12px;margin-bottom:8px;padding:8px 10px;border:1px solid var(--acc);border-radius:9px;background:rgba(40,217,168,.08)"></div>
+      <div id="coList" style="max-height:48vh;overflow:auto"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">${btnScan}<div style="flex:1"></div><button class="btn" id="coX">Cancelar</button><button class="btn pri" id="coSave">Guardar</button></div>
+    </div>`;
+  const cerrar = () => { pararColScan(); cerrarCmp(); };
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#cmpScrim').onclick = cerrar;
+  $('#coX').onclick = cerrar;
+  pintarColOrdList();
+  if ($('#coScanBtn')) $('#coScanBtn').onclick = () => { _colScan ? pararColScan() : iniciarColScan(); };
+  $('#coSave').onclick = guardarColOrd;
+}
+
+// Volúmenes ordenados por número (los sin número al final), con el título como desempate.
+function colVolsOrdenadas() {
+  return _colOrd.vols
+    .slice()
+    .sort((a, b) => (a.numero == null ? 1e9 : a.numero) - (b.numero == null ? 1e9 : b.numero) || String(a.titulo).localeCompare(String(b.titulo), 'es'));
+}
+function colOrdRow(v) {
+  const cov = v.portada
+    ? `<img src="${esc(encUrl(v.portada))}" loading="lazy" style="width:44px;height:60px;object-fit:cover;border-radius:4px;flex:none">`
+    : '<div style="width:44px;height:60px;display:grid;place-items:center;background:var(--card2,#eee);border-radius:4px;flex:none;font-size:20px">📕</div>';
+  return `<div class="coordrow" data-id="${esc(v._id)}" style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);transition:background .3s">
+      ${cov}
+      <div style="flex:1;min-width:0"><div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(recortar(v.titulo, 60))}</div><div class="muted mono" style="font-size:11px">${esc(v.isbn || '')}</div></div>
+      <input type="number" min="1" class="conuminput" data-doc="${esc(v._id)}" value="${v.numero != null ? v.numero : ''}" placeholder="—" inputmode="numeric" style="width:60px;text-align:center">
+    </div>`;
+}
+function pintarColOrdList() {
+  const box = $('#coList');
+  if (!box || !_colOrd) return;
+  box.innerHTML = _colOrd.vols.length ? colVolsOrdenadas().map(colOrdRow).join('') : '<div class="muted">La colección no tiene libros.</div>';
+  // Edición MANUAL del nº de un volumen: aplica la misma cascada y repinta (vacío = quitar el número).
+  $$('#coList .conuminput').forEach((i) => (i.onchange = () => {
+    const v = _colOrd.vols.find((x) => x._id === i.dataset.doc);
+    if (!v) return;
+    const raw = i.value.trim();
+    if (raw === '') { v.numero = null; v.auto = false; pintarColOrdList(); return; }
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 1) { pintarColOrdList(); return; }
+    insertarConCascada(v, n);
+    pintarColOrdList();
+  }));
+}
+
+// Inserta `target` en el número N y DESPLAZA en cascada a los ocupantes: el que estuviera en N pasa a N+1, el de
+// N+1 a N+2… hasta el primer hueco. Como cada volumen sube como mucho UN escalón, basta leer el ocupante ORIGINAL
+// de cada slot (mapa `occ`) antes de mover. Trabaja sobre el modelo local (_colOrd.vols); números enteros.
+function insertarConCascada(target, N) {
+  target.numero = N;
+  target.auto = false; // asignación deliberada (escaneo o mano) = editorial, no automática
+  const occ = new Map(); // número → volumen que lo ocupaba (excluido el target)
+  for (const v of _colOrd.vols) {
+    if (v === target || v.numero == null) continue;
+    if (!occ.has(v.numero)) occ.set(v.numero, v); // ante un duplicado previo, respeta el primero
+  }
+  let k = N;
+  let mover = occ.get(k) || null; // a quién desplaza el target al ocupar N
+  while (mover) {
+    k += 1;
+    const siguiente = occ.get(k) || null; // a quién desplazará `mover` al subir a k
+    mover.numero = k;
+    mover = siguiente && siguiente !== mover ? siguiente : null; // hasta el primer hueco
+  }
+}
+
+async function iniciarColScan() {
+  if (!_colOrd || !('NDEFReader' in window)) { toast('Este dispositivo no puede leer NFC (Android + Chrome)', 'warn'); return; }
+  const msg = $('#coScanMsg');
+  let rd;
+  try {
+    rd = new NDEFReader();
+    const ctrl = new AbortController();
+    await rd.scan({ signal: ctrl.signal });
+    _colScan = { ctrl, hechos: new Set(), ultimoId: null, ultimoT: 0 };
+  } catch (e) {
+    if (msg) { msg.style.display = ''; msg.textContent = 'NFC: ' + e.message; }
+    return;
+  }
+  rd.onreading = (ev) => {
+    sonidoNfcLectura();
+    let url = '';
+    for (const rec of ev.message.records) {
+      try { if (rec.recordType === 'url') { url = new TextDecoder(rec.encoding || 'utf-8').decode(rec.data); if (url) break; } } catch (_) {}
+    }
+    const res = colScanColocar(docIdDeURL(url));
+    colScanEstado(res);
+    // Vibración distinta: toque corto al numerar bien; doble toque si hay problema (ajeno o repetido).
+    try {
+      if (navigator.vibrate) {
+        if (res.estado === 'ok') navigator.vibrate(40);
+        else if (res.estado === 'dup' || res.estado === 'fuera') navigator.vibrate([70, 55, 70]);
+      }
+    } catch (_) {}
+  };
+  rd.onreadingerror = () => { if (msg) msg.textContent = 'No se pudo leer esa etiqueta, reinténtalo.'; };
+  const btn = $('#coScanBtn');
+  if (btn) { btn.textContent = '⏸ Parar'; btn.classList.add('pri'); }
+  colScanEstado(null);
+}
+function pararColScan() {
+  if (_colScan) { try { _colScan.ctrl.abort(); } catch (_) {} }
+  _colScan = null;
+  const btn = $('#coScanBtn');
+  if (btn) { btn.textContent = '📶 Escanear'; btn.classList.remove('pri'); }
+}
+// Coloca el volumen escaneado en el «Próximo volumen nº» (con cascada) y autoincrementa la casilla. Mismas
+// salvaguardas que la estantería: doble ACCIDENTAL <5 s ignorado, repetido DELIBERADO ≥5 s avisado (no renumera),
+// libro AJENO a la colección avisado. `sinnum` si la casilla no tiene un nº válido.
+function colScanColocar(id) {
+  if (!id) return { estado: 'sinid' };
+  if (!_colOrd || !_colScan) return { estado: 'off' };
+  const now = Date.now();
+  if (id === _colScan.ultimoId && now - _colScan.ultimoT < ORD_DOBLE_MS) { _colScan.ultimoT = now; return { estado: 'accidental' }; }
+  _colScan.ultimoId = id; _colScan.ultimoT = now;
+  const v = _colOrd.vols.find((x) => x._id === id);
+  if (!v) return { estado: 'fuera' }; // el tag no es de ningún volumen de esta colección
+  if (_colScan.hechos.has(id)) return { estado: 'dup', titulo: v.titulo };
+  const prox = parseInt(($('#coProx') && $('#coProx').value) || '', 10);
+  if (!Number.isFinite(prox) || prox < 1) return { estado: 'sinnum' };
+  insertarConCascada(v, prox);
+  _colScan.hechos.add(id);
+  if ($('#coProx')) $('#coProx').value = prox + 1; // autoincremento de la casilla
+  pintarColOrdList();
+  const row = $(`#coList .coordrow[data-id="${id}"]`);
+  if (row) { row.style.background = 'rgba(40,217,168,.18)'; row.scrollIntoView({ block: 'nearest' }); setTimeout(() => { row.style.background = ''; }, 700); }
+  return { estado: 'ok', num: prox, titulo: v.titulo };
+}
+function colScanEstado(res) {
+  const msg = $('#coScanMsg');
+  if (!msg || !_colScan) return;
+  const hechos = _colScan.hechos.size, total = _colOrd.vols.length;
+  let col = 'var(--acc)', bg = 'rgba(40,217,168,.08)', linea = '';
+  if (res) {
+    if (res.estado === 'ok') linea = `✅ nº ${res.num} · ${esc(recortar(res.titulo || '', 42))}`;
+    else if (res.estado === 'accidental') linea = '↩︎ doble accidental ignorado (mismo tag < 5 s)';
+    else if (res.estado === 'dup') { col = 'var(--warn)'; bg = 'rgba(255,180,84,.10)'; linea = `⚠️ YA lo escaneaste en esta sesión — no se renumera. Corrige su nº a mano si hace falta · ${esc(recortar(res.titulo || '', 34))}`; }
+    else if (res.estado === 'fuera') { col = 'var(--bad)'; bg = 'rgba(255,92,122,.10)'; linea = '⛔ Ese libro NO pertenece a esta colección'; }
+    else if (res.estado === 'sinnum') { col = 'var(--warn)'; bg = 'rgba(255,180,84,.10)'; linea = '⚠️ Pon un «Próximo volumen nº» válido antes de escanear'; }
+    else if (res.estado === 'sinid') { col = 'var(--warn)'; bg = 'rgba(255,180,84,.10)'; linea = '⚠️ Etiqueta sin libro (¿es una etiqueta de estantería?)'; }
+  }
+  msg.style.display = '';
+  msg.style.borderColor = col;
+  msg.style.background = bg;
+  msg.innerHTML = `<b>Escaneando…</b> ${hechos}/${total} numerados. Toca los volúmenes en orden de lectura.${linea ? `<br>${linea}` : ''}`;
+}
+async function guardarColOrd() {
+  if (!_colOrd) return;
+  pararColScan();
+  // Mapa COMPLETO (todos los miembros): número como string (vacío = sin número) + `auto` solo para los que
+  // sigan siendo automáticos. Es lo que espera POST /colecciones/:id/numerar (aplica tal cual, sin cascada).
+  const numeros = {}, auto = {};
+  for (const v of _colOrd.vols) {
+    numeros[v._id] = v.numero != null ? String(v.numero) : '';
+    if (v.auto && v.numero != null) auto[v._id] = true;
+  }
+  const btn = $('#coSave');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  try {
+    await api('/colecciones/' + encodeURIComponent(_colOrd.colId) + '/numerar', { method: 'POST', body: JSON.stringify({ numeros, auto }) });
+    const id = _colOrd.colId;
+    cerrarCmp();
+    toast('Numeración guardada');
+    verColeccion(id);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; }
+    alert('No se pudo guardar la numeración: ' + e.message);
+  }
 }
 
 // Recorta el rectángulo `bbox` (fracciones 0..1) de una imagen ya cargada y lo devuelve como data-URL JPEG.

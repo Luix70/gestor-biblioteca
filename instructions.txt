@@ -1601,6 +1601,20 @@ de ficheros clasificado por CDU.
       aislados — ó {imagenes:[dataURL]} — fotos completas → propuesta; el cliente aplica
       con /numerar + /documentos/:id/imagenes/anadir. Segmentación: segmentarLomos() en
       public/app.js; lectura+emparejado: src/utils/lector-lomos.js.)
+    · 📶 ORDENAR POR NFC (admin, series de libros; solo si el dispositivo lee NFC):
+      numera los volúmenes tocando sus etiquetas NFC en ORDEN DE LECTURA. Modal con una
+      casilla «Próximo volumen, nº:» (por defecto máx+1; se fija a mano antes/entre
+      escaneos): cada tag leído (?doc=<id>, como el ordenado de estantería) asigna ese nº
+      al volumen y AUTOINCREMENTA la casilla. Si el nº ya lo tiene otro volumen, se INSERTA
+      POR DESPLAZAMIENTO (cascada): el ocupante pasa a N+1, el de N+1 a N+2… hasta el primer
+      hueco (los de fuera de esa racha contigua no se tocan — con 10,11,13 e insertando 10 →
+      11,12,13, el 13 queda igual). Cada nº se puede editar A MANO en su fila (misma cascada).
+      Salvaguardas iguales a la estantería: doble accidental <5 s ignorado, repetido
+      deliberado ≥5 s avisado (no renumera), libro AJENO a la colección avisado, vibración
+      distinta. La cascada se calcula EN EL CLIENTE (como el «orden automático») y se
+      persiste con el MISMO endpoint POST /colecciones/:id/numerar enviando el mapa completo
+      — sin cambios en el backend. Funciones: ordenarColeccionPorNFC/insertarConCascada/
+      colScanColocar en public/app.js.
 
   ── INBOX (ALTA MANUAL desde el panel) ───────────────────────────────────────
     Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la
