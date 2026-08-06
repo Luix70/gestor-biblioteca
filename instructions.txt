@@ -707,6 +707,14 @@ de ficheros clasificado por CDU.
          con onEnviar) y añade VARIAS imágenes de golpe al carrusel (enviarSerieAlCarrusel):
          recorta cada foto con el tapete (respeta el switch 📐), las sube a /imagenes/anadir y
          re-pinta una vez; se AÑADEN al final (portada/orden se ajustan en el mismo editor).
+         A diferencia de la captura para CATALOGAR (que se queda en la cámara para encadenar
+         libros), aquí el botón de confirmar (embudo/«➕ Al carrusel») envía y CIERRA la cámara,
+         volviendo a la lista de imágenes del documento (solo si el envío tuvo éxito; si falla,
+         conserva las fotos y sigue abierta). RENDIMIENTO del disparo: el feedback (sonido/flash/
+         vibración) sale en el instante del toque, ANTES de codificar el JPEG a máxima resolución;
+         mientras se codifica se PAUSA la detección del tapete (libera el hilo principal) y no se
+         admiten disparos solapados — antes la captura tardaba varios segundos en reaccionar por
+         competir con el bucle del tapete por la CPU.
          El editor de UNA imagen (recortar/rotar/perspectiva) trae «↔ Al borde» (anula el margen
          del 3% de los tiradores para llevar la selección al borde). ACCESO DIRECTO: el carrusel
          de la ficha tiene un botón ✎ (esquina inferior derecha, admin) que edita la imagen

@@ -10483,6 +10483,13 @@ async function camaraEnVivo(opts = {}) {
   video.srcObject = stream;
   try { await video.play(); } catch (_) {}
 
+  // En el modo «añadir al carrusel» (onEnviar) el embudo NO encadena libros: envía las fotos y vuelve a la
+  // ficha. Ajustamos su descripción para que no prometa «seguir en la cámara».
+  if (opts.onEnviar) {
+    const fdBtn = overlay.querySelector('#cvFloatDone');
+    if (fdBtn) fdBtn.title = 'Enviar las fotos al carrusel y volver a la ficha';
+  }
+
   const track = stream.getVideoTracks()[0];
   // Linterna (torch), si el dispositivo la soporta.
   let torchOn = false;
@@ -10542,6 +10549,10 @@ async function camaraEnVivo(opts = {}) {
   } catch (_) {}
 
   let vivo = true;
+  // Mientras se codifica un disparo (toBlob a máxima resolución, hasta 4K), esto pausa la detección del tapete:
+  // liberar el hilo principal hace que la foto se adquiera al momento en vez de pelear por la CPU (era la causa
+  // de que la captura tardara varios segundos en reaccionar en la edición de imágenes).
+  let capturando = false;
   // Recuadro/medida del tapete: ON por defecto (persistente). Para fotos que NO son de portada/
   // contraportada (ISBN, interior…) el usuario puede desactivarlo → ni se detecta ni se mide.
   let overlayOn = localStorage.getItem('cam_recuadro') !== '0';
@@ -10560,7 +10571,9 @@ async function camaraEnVivo(opts = {}) {
   const actualizarN = () => {
     const n = camFotos.length;
     overlay.querySelector('#cvN').textContent = `${n} foto(s)`;
-    overlay.querySelector('#cvDone').textContent = `✅ Catalogar (${n})`;
+    // Respeta la etiqueta que fijó el llamante (p. ej. «➕ Al carrusel» en la edición de imágenes); por defecto
+    // «✅ Catalogar». Antes se sobrescribía siempre con «Catalogar», delatando que la acción era otra.
+    overlay.querySelector('#cvDone').textContent = `${opts.etiquetaDone || '✅ Catalogar'} (${n})`;
     // Botón flotante «embudo» de catalogar: aparece con la 1.ª foto; la insignia muestra cuántas hay.
     const fd = overlay.querySelector('#cvFloatDone');
     if (fd) {
@@ -10597,6 +10610,8 @@ async function camaraEnVivo(opts = {}) {
   let iter = 0, ultDims = null, fallosMedida = 0;
   const loopTapete = () => {
     if (!vivo) return;
+    // No compitas con la codificación del disparo: reprograma pronto y sal (ver `capturando`).
+    if (capturando) { setTimeout(loopTapete, 120); return; }
     let hayQuad = false;
     if (overlayOn) try {
       const vw = video.videoWidth, vh = video.videoHeight, cw = video.clientWidth, ch = video.clientHeight;
@@ -10666,36 +10681,42 @@ async function camaraEnVivo(opts = {}) {
     requestAnimationFrame(() => { pill.style.opacity = '1'; pill.style.transform = 'translate(-50%,-50%) scale(1)'; });
     setTimeout(() => { pill.style.opacity = '0'; setTimeout(() => pill.remove(), 220); }, ms);
   };
-  // FEEDBACK visible de captura: breve FLASH blanco (efecto obturador) + píldora «📸 Foto N». Complementa el
-  // sonido (sonidoCaptura) y la vibración.
-  const feedbackCaptura = (n) => {
+  // Destello blanco (efecto obturador). Se dispara en el INSTANTE del toque, ANTES de codificar, para que la
+  // captura se sienta inmediata aunque el JPEG a máxima resolución tarde. La píldora «📸 Foto N» va después,
+  // cuando ya se conoce N.
+  const flashCaptura = () => {
     const wrap = overlay.querySelector('#cvWrap');
-    if (wrap) {
-      const flash = document.createElement('div');
-      flash.style.cssText = 'position:absolute;inset:0;background:#fff;opacity:.55;z-index:29;pointer-events:none;transition:opacity .28s';
-      wrap.appendChild(flash);
-      requestAnimationFrame(() => (flash.style.opacity = '0'));
-      setTimeout(() => flash.remove(), 320);
-    }
-    pillOverlay(`📸 Foto ${n}`);
+    if (!wrap) return;
+    const flash = document.createElement('div');
+    flash.style.cssText = 'position:absolute;inset:0;background:#fff;opacity:.55;z-index:29;pointer-events:none;transition:opacity .28s';
+    wrap.appendChild(flash);
+    requestAnimationFrame(() => (flash.style.opacity = '0'));
+    setTimeout(() => flash.remove(), 320);
   };
-  // Capturar el frame actual a máxima resolución → File → cola camFotos (multidisparo). Reutilizable por
-  // el botón de la barra y por el botón FLOTANTE.
+  // Capturar el frame actual a máxima resolución → File → cola camFotos (multidisparo). Reutilizable por el
+  // botón de la barra y por el FLOTANTE. El feedback (sonido/flash/vibración) sale YA, antes de la codificación
+  // pesada; `capturando` pausa la detección del tapete (libera CPU) y evita disparos solapados; y se cede un
+  // frame para que el destello llegue a pintarse antes de bloquear con drawImage/toBlob.
   const capturar = async () => {
+    if (capturando) return;
+    capturando = true;
+    sonidoCaptura();                                       // «click» de obturador — inmediato
+    try { navigator.vibrate && navigator.vibrate(30); } catch (_) {}
+    flashCaptura();                                        // destello — inmediato
     try {
       capCanvas.width = video.videoWidth; capCanvas.height = video.videoHeight;
       capCanvas.getContext('2d').drawImage(video, 0, 0);
+      await new Promise((r) => requestAnimationFrame(() => r())); // deja pintar el destello antes del toBlob
       const blob = await new Promise((res) => capCanvas.toBlob(res, 'image/jpeg', 0.92));
       if (blob) {
         camFotos.push(new File([blob], `camara-${Date.now()}.jpg`, { type: 'image/jpeg' }));
         renderCamThumbs();
         renderCamStrip();
         actualizarN();
-        sonidoCaptura();                                   // «click» de obturador
-        feedbackCaptura(camFotos.length);                  // flash + píldora «📸 Foto N» (toast visible sobre la cámara)
-        try { navigator.vibrate && navigator.vibrate(30); } catch (_) {}
+        pillOverlay(`📸 Foto ${camFotos.length}`);          // píldora con el nº ya real (sobre la cámara)
       }
     } catch (e) { toast('No se pudo capturar: ' + e.message, 'bad'); }
+    finally { capturando = false; }
   };
   overlay.querySelector('#cvShot').onclick = capturar;
 
@@ -10724,8 +10745,16 @@ async function camaraEnVivo(opts = {}) {
       // Destino GENÉRICO (p. ej. el carrusel de la ficha): el llamante decide qué hacer con la serie completa.
       if (opts.onEnviar) {
         const capturadas = camFotos.slice();
-        try { await opts.onEnviar(capturadas); camFotos = []; renderCamStrip(); renderCamThumbs(); actualizarN(); }
-        catch (e) { toast('No se pudo enviar: ' + (e.message || e), 'bad'); }   // fallo → se conservan las fotos para reintentar
+        try {
+          await opts.onEnviar(capturadas);
+          camFotos = []; renderCamStrip(); renderCamThumbs(); actualizarN();
+          // A diferencia de la captura para CATALOGAR (que sigue en la cámara para encadenar libros), al añadir
+          // imágenes a UN documento la tarea acaba aquí: cerramos la cámara y volvemos a su lista de imágenes.
+          // Solo al terminar CON ÉXITO — si falla, se conservan las fotos y la cámara sigue abierta para reintentar.
+          cerrar();
+        } catch (e) {
+          toast('No se pudo enviar: ' + (e.message || e), 'bad');
+        }
         return;   // (finally libera `enviando`)
       }
       let files = camFotos.slice();
