@@ -3096,13 +3096,14 @@ function pintarDoc(r, ctx) {
     : '';
   const imgs =
     r.imagenes && r.imagenes.length ? r.imagenes : r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : [];
+  _carImgs = imgs; // para editar DIRECTAMENTE la imagen activa del carrusel (editarImagenActiva)
   const nfcOv = nfcBadge(d);
   // (Se retiró el botón ✏️ superpuesto sobre el carrusel: sobraba ahí. La edición está en la fila de
   //  acciones «✏️ Editar», en la cabecera «✏️ Editar» y en el encabezado de la sección Imágenes.)
   // La imagen YA NO se abre al tocarla (abría una pestaña nueva). Ahora se amplía a pantalla completa con la
   // lupa (🔍), que abre la imagen visible del carrusel en un visor (lightbox).
   const carrusel = imgs.length
-    ? `<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map((im) => `<img src="${esc(encUrl(im.ruta))}" loading="lazy">`).join('')}</div><button class="clupa" onclick="abrirLightbox()" title="Ver la imagen a pantalla completa">🔍</button>${imgs.length > 1 ? `<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>` : ''}</div>`
+    ? `<div class="carousel" style="position:relative">${nfcOv}<div class="track" id="carTrack">${imgs.map((im) => `<img src="${esc(encUrl(im.ruta))}" loading="lazy">`).join('')}</div><button class="clupa" onclick="abrirLightbox()" title="Ver la imagen a pantalla completa">🔍</button>${ROL === 'admin' ? `<button onclick="editarImagenActiva()" title="Editar ESTA imagen (recortar/rotar/perspectiva) sin abrir el gestor de orden" style="position:absolute;right:8px;bottom:8px;z-index:6;width:34px;height:34px;border-radius:50%;border:none;background:rgba(0,0,0,.55);color:#fff;font-size:15px;cursor:pointer;display:grid;place-items:center">✎</button>` : ''}${imgs.length > 1 ? `<button class="cnav prev" onclick="carMove(-1)">‹</button><button class="cnav next" onclick="carMove(1)">›</button><div class="cdots" id="carDots">1 / ${imgs.length}</div>` : ''}</div>`
     : `<div class="filebox" style="position:relative">${nfcOv}<div class="ic">🖼️</div><div class="muted">Sin imágenes</div></div>`;
   // ── FICHA MÍNIMA (encabezado vistoso): título → estrellas → [papel: ex-libris | digital: descarga] →
   //    datos (autor/editorial/colección/CDU/ISBN/ISSN, drillables) → [papel: ubicación clicable]. Un badge
@@ -3126,8 +3127,14 @@ function pintarDoc(r, ctx) {
     ['Colección', especiales._coleccion],
     ['Revista', especiales._revista],
     // CDU DRILLABLE → Catálogo filtrado por esa misma CDU (mismo destino que el contador de la tabla de
-    // clasificación). data-* (no onclick inline): un código CDU puede llevar apóstrofo («141.78:81'37»).
-    ['CDU', d.cdu ? `<a class="rowlink mono" data-clascdu="${esc(d.cdu)}" title="Ver todo lo de esta CDU en el Catálogo">${esc(d.cdu)}</a>` : null],
+    // clasificación). data-* (no onclick inline): un código CDU puede llevar apóstrofo («141.78:81'37»). Se
+    // muestra ADEMÁS la DESCRIPCIÓN concisa de la CDU al lado (de r.clasificaciones, como la ubicación digital),
+    // para que en papel/revista se vea de un vistazo la materia sin abrir la tabla de clasificación.
+    ['CDU', d.cdu ? (() => {
+      const clasCdu = (r.clasificaciones || []).find((x) => x.sistema === 'cdu' && String(x.codigo) === String(d.cdu));
+      const descCdu = clasCdu && clasCdu.titulo ? ` <span class="muted">· ${esc(clasCdu.titulo)}</span>` : '';
+      return `<a class="rowlink mono" data-clascdu="${esc(d.cdu)}" title="Ver todo lo de esta CDU en el Catálogo">${esc(d.cdu)}</a>${descCdu}`;
+    })() : null],
     ['ISBN', especiales._isbn],
     ['ISSN', especiales._issn],
     ['DOI', especiales._doi],
@@ -3473,6 +3480,29 @@ function carMove(dir) {
   t.scrollTo({ left: t.clientWidth * carIdx, behavior: 'smooth' });
   const dd = $('#carDots');
   if (dd) dd.textContent = carIdx + 1 + ' / ' + n;
+}
+
+// Edición DIRECTA de la imagen ACTIVA del carrusel (sin pasar por el gestor que ORDENA): abre el editor de
+// una sola imagen (recortar/rotar/perspectiva) y, al cerrar o guardar, VUELVE al carrusel de la ficha. El
+// botón ✎ vive en la esquina inferior derecha del carrusel (junto a la lupa 🔍). Solo admin.
+let _carImgs = []; // imágenes del carrusel de la ficha abierta (para editar la activa por su índice visible)
+async function editarImagenActiva() {
+  const track = $('#carTrack');
+  const idx = track && track.clientWidth ? Math.round(track.scrollLeft / track.clientWidth) : (carIdx || 0);
+  const im = (_carImgs || [])[idx];
+  const id = detalle && detalle.id;
+  if (!im || !im.ruta || !id) { toast('No hay imagen para editar', 'warn'); return; }
+  _editorImagen({
+    src: encUrl(im.ruta) + '?t=' + Date.now(),
+    onClose: () => cerrarCmp(),                                   // vuelve al carrusel (la ficha sigue debajo)
+    onSave: async (b64) => {
+      try {
+        const r = await api('/documentos/' + encodeURIComponent(id) + '/imagenes/reemplazar', { method: 'POST', body: JSON.stringify({ ruta: im.ruta, base64: b64 }) });
+        if (r && r.ok) { toast('Imagen actualizada'); cerrarCmp(); verDoc(id, detalle && detalle.ctx); }
+        else toast((r && r.motivo) || 'error', 'bad');
+      } catch (e) { toast(e.message, 'bad'); }
+    },
+  });
 }
 
 // ── VISOR A PANTALLA COMPLETA (lightbox) del carrusel ──────────────────────────────────────────────
@@ -10295,6 +10325,19 @@ let colaInbox = [],
   jobsHechos = [],
   colaCorriendo = false,
   jobSeq = 0; // cola de subida (autopiloto, no bloquea)
+// PERSISTENCIA de «Datos de esta alta»: para no re-teclearlos al salir a mirar una ficha y volver a catalogar.
+// El valor efectivo de ámbito/estantería vive en inAmbito/inEstanteria (montarSelUbic lo refleja ahí), así que
+// basta con guardar/restaurar esos inputs + los de ISBN/colección/obra, y refrescarInboxUbic re-monta los <select>.
+const DATOS_ALTA_IDS = ['inIsbn', 'inColeccion', 'inObra', 'inAmbito', 'inEstanteria'];
+function guardarDatosAlta() {
+  const o = {};
+  DATOS_ALTA_IDS.forEach((id) => { const el = $('#' + id); if (el) o[id] = el.value || ''; });
+  try { localStorage.setItem('inbox_datos_alta', JSON.stringify(o)); } catch (_) {}
+}
+function restaurarDatosAlta() {
+  let o = {}; try { o = JSON.parse(localStorage.getItem('inbox_datos_alta') || '{}'); } catch (_) {}
+  DATOS_ALTA_IDS.forEach((id) => { const el = $('#' + id); if (el && o[id]) el.value = o[id]; });
+}
 function loadInbox() {
   if (!inboxWired) {
     inboxWired = true;
@@ -10303,7 +10346,11 @@ function loadInbox() {
   if ('NDEFReader' in window && $('#nfcCard')) $('#nfcCard').style.display = '';
   if ($('#inboxHint')) $('#inboxHint').textContent = '';
   cargarDatalistColecciones();
-  refrescarInboxUbic(); // monta los <select> al instante con el mapa en caché
+  restaurarDatosAlta();           // vuelca lo guardado en los campos ANTES de montar los <select> de ubicación
+  // Guarda al vuelo cualquier cambio en la tarjeta (input y change → cubre inputs y los <select> de ubicación).
+  const dac = $('#datosAltaCard');
+  if (dac && !dac._persistWired) { dac._persistWired = true; dac.addEventListener('input', guardarDatosAlta); dac.addEventListener('change', guardarDatosAlta); }
+  refrescarInboxUbic(); // monta los <select> al instante con el mapa en caché (lee inAmbito/inEstanteria restaurados)
   cargarUbicaciones(); // y lo refresca desde el servidor
 }
 // Escanear el código de barras (EAN-13) con la cámara y rellenar el ISBN. Usa el lector NATIVO del
@@ -10991,6 +11038,7 @@ function wireInbox() {
         const el = $('#' + id);
         if (el) el.value = '';
       });
+      try { localStorage.removeItem('inbox_datos_alta'); } catch (_) {}   // olvida también lo persistido
       refrescarInboxUbic();
     };
   const ci = $('#camInput');

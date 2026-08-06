@@ -700,6 +700,13 @@ de ficheros clasificado por CDU.
          con onEnviar) y añade VARIAS imágenes de golpe al carrusel (enviarSerieAlCarrusel):
          recorta cada foto con el tapete (respeta el switch 📐), las sube a /imagenes/anadir y
          re-pinta una vez; se AÑADEN al final (portada/orden se ajustan en el mismo editor).
+         El editor de UNA imagen (recortar/rotar/perspectiva) trae «↔ Al borde» (anula el margen
+         del 3% de los tiradores para llevar la selección al borde). ACCESO DIRECTO: el carrusel
+         de la ficha tiene un botón ✎ (esquina inferior derecha, admin) que edita la imagen
+         ACTIVA sin abrir el gestor de orden y vuelve al carrusel al cerrar (editarImagenActiva).
+    · En la FICHA MÍNIMA (papel/revista) la CDU se muestra con su DESCRIPCIÓN concisa al lado
+      (de r.clasificaciones, como ya hacía la ubicación digital) — se ve la materia sin abrir la
+      tabla de clasificación.
          🖹 «Del documento» extrae imágenes del propio fichero y las añade al carrusel —
          p. ej. para rescatar la foto del autor del interior. Cubre: PDF (páginas, pdf.js),
          EPUB (imágenes embebidas, JSZip), cbz/cbr/cb7/djvu (páginas del backend) y mobi/azw3
@@ -1580,7 +1587,9 @@ de ficheros clasificado por CDU.
     Organizado en fichas PLEGABLES (móvil-first): «📁 Subir ficheros» es la
     primera y siempre visible; «🏷️ Datos de esta alta» (los que VIAJAN) está
     colapsada; «⚙️ Modos y escaneo» (los interruptores) desplegada; «📷 Cámara» y
-    «📶 NFC» colapsadas.
+    «📶 NFC» colapsadas. Los «Datos de esta alta» (ISBN/colección/obra/ubicación)
+    PERSISTEN (localStorage inbox_datos_alta): se restauran al volver a Entrada tras
+    mirar una ficha, y «✕ Limpiar» los olvida. (guardarDatosAlta/restaurarDatosAlta.)
     Subir/arrastrar EPUB/PDF/imágenes/cómic/.zip/.chm/.iso; HACER FOTO con la
     cámara; IMPORTAR de otra app; o COMPARTIR a la PWA (Adobe Scan → Compartir →
     Bibliotheca). Antes de subir puedes fijar ISBN/colección/obra/ubicación que
