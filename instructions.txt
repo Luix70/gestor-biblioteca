@@ -693,6 +693,10 @@ de ficheros clasificado por CDU.
          Al ➕ Añadir / 📷 Cámara, si la foto está sobre el TAPETE reglado se recorta+endereza
          +mide automáticamente; el interruptor «📐 Tapete» del modal lo DESACTIVA (adjunta la
          imagen TAL CUAL, sin tocarla) y recuerda la preferencia (localStorage img_tapete).
+         🎥 «En vivo» abre la MISMA cámara multidisparo de Entrada (camaraEnVivo, parametrizada
+         con onEnviar) y añade VARIAS imágenes de golpe al carrusel (enviarSerieAlCarrusel):
+         recorta cada foto con el tapete (respeta el switch 📐), las sube a /imagenes/anadir y
+         re-pinta una vez; se AÑADEN al final (portada/orden se ajustan en el mismo editor).
          🖹 «Del documento» extrae imágenes del propio fichero y las añade al carrusel —
          p. ej. para rescatar la foto del autor del interior. Cubre: PDF (páginas, pdf.js),
          EPUB (imágenes embebidas, JSZip), cbz/cbr/cb7/djvu (páginas del backend) y mobi/azw3

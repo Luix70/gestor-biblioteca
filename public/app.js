@@ -4050,7 +4050,7 @@ function pintarGestorImagenes() {
     `<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">🖼️ Imágenes (${imgs.length})</h3>
     <p class="muted" style="font-size:12px;margin:0 0 6px">La 1.ª es la PORTADA. Reordena con ↑/↓; ✎ abre el editor (rotar/recortar/corregir perspectiva).</p>
     ${imgs.length ? filas : '<div class="muted">Sin imágenes.</div>'}
-    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn" id="imgCam">📷 Cámara</button>${_imgExtraible() ? '<button class="btn" id="imgExtraer" title="Extraer una página/imagen del propio documento (PDF o EPUB) y añadirla — p. ej. la foto del autor del interior">🖹 Del documento</button>' : ''}<label class="muted" title="Si la foto está sobre el TAPETE reglado, la recorta, endereza y mide al añadirla. Desactívalo para adjuntar la imagen TAL CUAL (sin recorte)." style="font-size:12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="imgTapete" ${tapeteManualOn() ? 'checked' : ''}> 📐 Tapete</label></div><button class="btn pri" id="imgCerrar">Cerrar</button></div>
+    <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn" id="imgCam">📷 Cámara</button><button class="btn" id="imgEnVivo" title="Cámara EN VIVO: multidisparo con tapete (recorta/endereza); añade VARIAS imágenes de golpe al carrusel, como en Entrada">🎥 En vivo</button>${_imgExtraible() ? '<button class="btn" id="imgExtraer" title="Extraer una página/imagen del propio documento (PDF o EPUB) y añadirla — p. ej. la foto del autor del interior">🖹 Del documento</button>' : ''}<label class="muted" title="Si la foto está sobre el TAPETE reglado, la recorta, endereza y mide al añadirla. Desactívalo para adjuntar la imagen TAL CUAL (sin recorte)." style="font-size:12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="imgTapete" ${tapeteManualOn() ? 'checked' : ''}> 📐 Tapete</label></div><button class="btn pri" id="imgCerrar">Cerrar</button></div>
     <input type="file" id="imgAddInput" accept="image/*" style="display:none">
     <input type="file" id="imgCamInput" accept="image/*" capture="environment" style="display:none"></div>`;
   $('#cmpScrim').style.display = 'block';
@@ -4109,9 +4109,40 @@ function pintarGestorImagenes() {
   fi.onchange = () => anadirDe(fi);
   if ($('#imgCam')) $('#imgCam').onclick = () => fc.click();
   if (fc) fc.onchange = () => anadirDe(fc);
+  // 🎥 En vivo: abre la MISMA cámara multidisparo de Entrada, pero el destino es el carrusel de este documento.
+  if ($('#imgEnVivo')) $('#imgEnVivo').onclick = () => camaraEnVivo({
+    etiquetaDone: '➕ Al carrusel',
+    onEnviar: (files) => enviarSerieAlCarrusel(_imgState.id, files),
+  });
   if ($('#imgExtraer')) $('#imgExtraer').onclick = extraerImagenDocumento;
   // Recordar la preferencia del tapete (activarlo/desactivarlo persiste entre sesiones).
   if ($('#imgTapete')) $('#imgTapete').onchange = (e) => localStorage.setItem('img_tapete', e.target.checked ? '1' : '0');
+}
+
+// Recibe la SERIE de fotos capturada por la cámara «En vivo» (camaraEnVivo con onEnviar) y la añade TODA al
+// carrusel del documento en edición: recorta+endereza+mide cada foto con el tapete (respetando el switch 📐
+// del editor), la reduce y la sube a /imagenes/anadir, re-pintando el gestor UNA vez. Es la versión «en serie»
+// de lo que hace `anadirDe` para una sola imagen (misma lógica de tapete/redimensionado).
+async function enviarSerieAlCarrusel(id, files) {
+  if (!id || !(files && files.length)) return;
+  const usarTapete = !$('#imgTapete') || $('#imgTapete').checked;
+  let anadidas = 0, dims = null;
+  for (const file of files) {
+    let f = file;
+    if (usarTapete) {
+      try { const r = await recortarYMedirTapete([f]); f = (r.files && r.files[0]) || f; if (r.dims && !dims) dims = r.dims; } catch (_) {}
+    }
+    try {
+      const b64 = await fileADataURL(await reducirImagen(f, 2200, 0.88));
+      const r = await api('/documentos/' + encodeURIComponent(id) + '/imagenes/anadir', { method: 'POST', body: JSON.stringify({ base64: b64 }) });
+      if (r && r.ok) { anadidas++; _imgState.imgs = (r.imagenes || []).map((im) => ({ ...im })); _imgState.cambiado = true; }
+      else if (r) toast(r.motivo || 'error al añadir', 'bad');
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+  // Dimensiones del libro: la PRIMERA foto medida (suele ser la portada) — como en «Añadir».
+  if (usarTapete && dims) { try { await api('/documentos/' + encodeURIComponent(id) + '/dimensiones', { method: 'POST', body: JSON.stringify(dims) }); _imgState.cambiado = true; } catch (_) {} }
+  if (anadidas) pintarGestorImagenes();   // re-pinta el editor (bajo la cámara) con las nuevas imágenes
+  toast(anadidas ? `🎥 ${anadidas} imagen(es) añadida(s) al carrusel` : 'No se añadió ninguna imagen', anadidas ? 'ok' : 'warn');
 }
 
 // ¿El documento tiene un fichero digital del que se pueden extraer imágenes? PDF/EPUB se procesan EN EL
@@ -10286,7 +10317,12 @@ async function escanearISBN(targetId = 'inIsbn') {
 // Overlay del TAPETE en vivo (cuadrilátero del libro detectado) para encuadrar antes de disparar; cada
 // disparo captura el frame a la mayor resolución que dé getUserMedia y lo añade a la cola `camFotos`
 // (la misma que «✅ Catalogar», que ya recorta con el tapete y envía).
-async function camaraEnVivo() {
+// `opts` (opcional) generaliza el DESTINO de la serie capturada, sin tocar el flujo de Entrada:
+//   · opts.onEnviar(files) → qué hacer con las fotos al pulsar «Enviar» (por defecto: catalogar al Inbox).
+//   · opts.etiquetaDone    → texto del botón de envío (por defecto «✅ Catalogar»).
+// Sin `opts` se comporta EXACTAMENTE como antes (Entrada/Inbox). Lo usa el editor de imágenes de la ficha
+// para mandar la serie al CARRUSEL de un documento (enviarSerieAlCarrusel).
+async function camaraEnVivo(opts = {}) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     toast('Este navegador no permite cámara en vivo. Usa «📷 Hacer foto».', 'warn');
     return;
@@ -10320,7 +10356,7 @@ async function camaraEnVivo() {
       <button class="btn pri" id="cvRect" title="Muestra u oculta el recuadro y la medida del tapete (desactívalo para fotos que no sean de portada/contraportada)">📐 Recuadro</button>
       <button class="btn pri" id="cvShot" style="font-size:18px;padding:10px 24px">📸 Capturar</button>
       <span id="cvN" style="color:#fff;font-size:13px">0 fotos</span>
-      <button class="btn pri" id="cvDone">✅ Catalogar</button>
+      <button class="btn pri" id="cvDone">${opts.etiquetaDone || '✅ Catalogar'}</button>
     </div>`;
   document.body.appendChild(overlay);
   const video = overlay.querySelector('#cvVid');
@@ -10566,6 +10602,13 @@ async function camaraEnVivo() {
     if (!camFotos.length) { toast('Haz al menos una foto', 'warn'); return; }
     enviando = true;
     try {
+      // Destino GENÉRICO (p. ej. el carrusel de la ficha): el llamante decide qué hacer con la serie completa.
+      if (opts.onEnviar) {
+        const capturadas = camFotos.slice();
+        try { await opts.onEnviar(capturadas); camFotos = []; renderCamStrip(); renderCamThumbs(); actualizarN(); }
+        catch (e) { toast('No se pudo enviar: ' + (e.message || e), 'bad'); }   // fallo → se conservan las fotos para reintentar
+        return;   // (finally libera `enviando`)
+      }
       let files = camFotos.slice();
       // ¿Toca elegir portada? (switch activo + varias imágenes de un mismo libro, como en la subida normal).
       const imgs = files.filter(_esImg);
@@ -10885,7 +10928,7 @@ function wireInbox() {
     };
   const ci = $('#camInput');
   if ($('#camShot')) $('#camShot').onclick = () => ci && ci.click();
-  if ($('#camLive')) $('#camLive').onclick = camaraEnVivo; // cámara en vivo (multidisparo + overlay tapete)
+  if ($('#camLive')) $('#camLive').onclick = () => camaraEnVivo(); // cámara en vivo (multidisparo + overlay tapete) → Inbox
   if (ci)
     ci.onchange = async () => {
       for (const f of ci.files) {
