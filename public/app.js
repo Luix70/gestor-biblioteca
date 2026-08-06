@@ -10553,9 +10553,13 @@ async function camaraEnVivo(opts = {}) {
   // liberar el hilo principal hace que la foto se adquiera al momento en vez de pelear por la CPU (era la causa
   // de que la captura tardara varios segundos en reaccionar en la edición de imágenes).
   let capturando = false;
-  // Recuadro/medida del tapete: ON por defecto (persistente). Para fotos que NO son de portada/
-  // contraportada (ISBN, interior…) el usuario puede desactivarlo → ni se detecta ni se mide.
-  let overlayOn = localStorage.getItem('cam_recuadro') !== '0';
+  // Recuadro/medida del tapete: útil al CATALOGAR (fija las dimensiones del libro), pero al AÑADIR imágenes a un
+  // libro ya escaneado suele sobrar —normalmente son páginas INTERIORES y el libro ya tiene sus dimensiones— y la
+  // medición en vivo consume CPU. Por eso cada modo recuerda su preferencia por SEPARADO y arranca distinto: ON
+  // al catalogar, OFF en la edición de imágenes (onEnviar). El botón «📐 Recuadro» lo activa/desactiva a voluntad.
+  const claveRecuadro = opts.onEnviar ? 'cam_recuadro_edit' : 'cam_recuadro';
+  const recuadroGuardado = localStorage.getItem(claveRecuadro);
+  let overlayOn = recuadroGuardado !== null ? recuadroGuardado !== '0' : !opts.onEnviar;
   // Tira de miniaturas DENTRO de la cámara: revisar y BORRAR fotos antes de procesar (sin salir).
   const strip = overlay.querySelector('#cvStrip');
   const renderCamStrip = () => {
@@ -10658,7 +10662,7 @@ async function camaraEnVivo(opts = {}) {
   pintarRectBtn();
   btnRect.onclick = () => {
     overlayOn = !overlayOn;
-    localStorage.setItem('cam_recuadro', overlayOn ? '1' : '0');
+    localStorage.setItem(claveRecuadro, overlayOn ? '1' : '0');   // preferencia por modo (catalogar vs. editar)
     if (!overlayOn) { try { ovl.getContext('2d').clearRect(0, 0, ovl.width, ovl.height); } catch (_) {} ultDims = null; }
     pintarRectBtn();
   };

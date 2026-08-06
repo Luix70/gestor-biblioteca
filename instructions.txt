@@ -710,7 +710,11 @@ de ficheros clasificado por CDU.
          A diferencia de la captura para CATALOGAR (que se queda en la cámara para encadenar
          libros), aquí el botón de confirmar (embudo/«➕ Al carrusel») envía y CIERRA la cámara,
          volviendo a la lista de imágenes del documento (solo si el envío tuvo éxito; si falla,
-         conserva las fotos y sigue abierta). RENDIMIENTO del disparo: el feedback (sonido/flash/
+         conserva las fotos y sigue abierta). El RECUADRO/MEDIDA del tapete arranca DESACTIVADO en
+         este modo (al añadir imágenes a un libro ya escaneado suelen ser páginas interiores y el
+         libro ya tiene dimensiones; y la medición en vivo consume CPU): «📐 Recuadro» lo activa a
+         voluntad y cada modo recuerda su preferencia por separado (cam_recuadro_edit al editar,
+         cam_recuadro al catalogar). RENDIMIENTO del disparo: el feedback (sonido/flash/
          vibración) sale en el instante del toque, ANTES de codificar el JPEG a máxima resolución;
          mientras se codifica se PAUSA la detección del tapete (libera el hilo principal) y no se
          admiten disparos solapados — antes la captura tardaba varios segundos en reaccionar por
