@@ -5425,7 +5425,7 @@ function _editorImagen(opts) {
       <p class="muted" id="edMsg" style="font-size:12px;margin:8px 0 4px"></p>
       <div class="row" style="gap:6px;margin-top:4px;flex-wrap:wrap">
         <button class="btn" id="edRotL" title="Girar -90°">⟲</button><button class="btn" id="edRotR" title="Girar +90°">⟳</button>
-        <button class="btn" id="edCrop">✂ Recortar</button><button class="btn" id="edPersp">▱ Perspectiva</button><button class="btn" id="edAuto" style="display:none">✨ Auto bordes</button>
+        <button class="btn" id="edCrop">✂ Recortar</button><button class="btn" id="edPersp">▱ Perspectiva</button><button class="btn" id="edAuto" style="display:none">✨ Auto bordes</button><label class="muted" title="Permite llevar los tiradores hasta el BORDE de la imagen. Por defecto se dejan a un 3% del borde para poder pinzarlos con el dedo; actívalo si necesitas la selección pegada al borde (mejor con zoom)." style="font-size:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="edBorde" ${localStorage.getItem('ed_al_borde') === '1' ? 'checked' : ''}> ↔ Al borde</label>
         <button class="btn pri" id="edApply" style="display:none">Aplicar</button></div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn" id="edX">Cancelar</button><button class="btn pri" id="edSave">Guardar</button></div></div>`;
     $('#cmpScrim').style.display = 'block';
@@ -5619,8 +5619,11 @@ function _editorImagen(opts) {
       if (drag < 0) return;
       ev.preventDefault();
       let [x, y] = pos(ev);
-      const mX = work.width * 0.03,
-        mY = work.height * 0.03;
+      // Margen para que el tirador no se pegue al borde (quedaría imposible de pinzar con el dedo). El
+      // interruptor «↔ Al borde» lo ANULA (margen 0) para poder llevar la selección justo al borde de la imagen.
+      const m = $('#edBorde') && $('#edBorde').checked ? 0 : 0.03;
+      const mX = work.width * m,
+        mY = work.height * m;
       x = Math.max(mX, Math.min(work.width - mX, x));
       y = Math.max(mY, Math.min(work.height - mY, y));
       if (modo === 'crop') {
@@ -5647,6 +5650,8 @@ function _editorImagen(opts) {
     };
     c.addEventListener('pointerup', soltar);
     c.addEventListener('pointercancel', soltar);
+    // «↔ Al borde»: recordar la preferencia entre sesiones (afecta al clamp de pointermove).
+    if ($('#edBorde')) $('#edBorde').onchange = (e) => localStorage.setItem('ed_al_borde', e.target.checked ? '1' : '0');
     $('#edApply').onclick = () => {
       if (modo === 'crop') {
         const x0 = Math.min(crop.x0, crop.x1),

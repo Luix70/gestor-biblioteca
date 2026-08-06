@@ -690,6 +690,9 @@ de ficheros clasificado por CDU.
          detecta la cubierta en 3 pasadas (todas locales, sin IA): tapete verde →
          SEGMENTACIÓN por el color del FONDO (libro sobre superficie uniforme, foto en
          ángulo, sin tapete) → líneas (Sobel/Hough). Ajusta las esquinas antes de aplicar.
+         Los tiradores se dejan a un 3% del borde para poder pinzarlos con el dedo; el
+         interruptor «↔ Al borde» ANULA ese margen para llevar la selección justo al borde de
+         la imagen (persistente en localStorage ed_al_borde; mejor con zoom).
          Al ➕ Añadir / 📷 Cámara, si la foto está sobre el TAPETE reglado se recorta+endereza
          +mide automáticamente; el interruptor «📐 Tapete» del modal lo DESACTIVA (adjunta la
          imagen TAL CUAL, sin tocarla) y recuerda la preferencia (localStorage img_tapete).
