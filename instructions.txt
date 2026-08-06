@@ -685,6 +685,13 @@ de ficheros clasificado por CDU.
       El CARRUSEL de la ficha ya NO abre la imagen en una pestaña nueva al tocarla:
          la LUPA (🔍) de la esquina la amplía a pantalla completa (lightbox; se cierra
          con ✕ / clic fuera / Esc y navega con ‹ › o ←/→).
+      CONTADOR de imágenes (badge .cnum): un número sobre la carátula con cuántas
+         imágenes tiene el carrusel. En la FICHA va arriba-derecha y aparece siempre
+         (≥1). En la MINIATURA del Catálogo (docCard) va ABAJO-DERECHA (variante
+         .cnum-br) y SOLO si hay MÁS de una (un «1» en cada tarjeta de la rejilla sería
+         ruido); avisa de un vistazo de qué documentos traen varias fotos. El backend
+         lo calcula en la proyección de la tarjeta (PROY_TARJETA.n_imagenes = tamaño de
+         imagenes[], o 1 si solo hay portada). Visible sobre fondo claro y oscuro.
       🖼️ Imágenes — reordenar/añadir/borrar + editor en el navegador: rotar,
          recortar, corregir PERSPECTIVA (4 esquinas) con «✨ Auto bordes». Auto-bordes
          detecta la cubierta en 3 pasadas (todas locales, sin IA): tapete verde →
@@ -1770,6 +1777,11 @@ de ficheros clasificado por CDU.
       🗑 eliminar) van en un menú «⋯» para no llenar la fila de botones idénticos.
     · La asignación de estantería EN LOTE (📍 del Catálogo) IGNORA los DIGITALES (no
       van a un estante físico) y avisa cuántos saltó.
+    · El diálogo «📍 Cambiar/Asignar ubicación» (tanto en LOTE como el rápido de la
+      ficha) usa el MISMO widget de desplegables dependientes que el Inbox
+      (montarSelUbic): al elegir un ÁMBITO, la ESTANTERÍA se vacía y pasa a listar
+      SOLO las estanterías dadas de alta en ese ámbito (con «➕ Otra…» para crear una
+      nueva). Se retiró el par de campos de texto libre + datalist anterior.
     · ESCANEAR la etiqueta NFC de una estantería/ámbito (o abrir su enlace ?amb=&est=)
       lleva al Catálogo FILTRADO por esa ubicación; si es una estantería concreta, ya
       ORDENADO por posición física (visible en «↕️ Ordenar», ajustable).

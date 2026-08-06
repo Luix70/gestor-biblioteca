@@ -1119,6 +1119,15 @@ export function rutasPanel() {
                 valoracion: 1, leido: 1, like: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
                 coleccion: 1, coleccion_nombre: 1,   // para el distintivo «pertenece a una colección»
                 obra: 1,                             // para colapsar la obra multivolumen en una tarjeta
+                // Nº de imágenes del carrusel (para el contador de la miniatura). Misma semántica que la ficha:
+                // el tamaño de `imagenes[]` si lo hay; si no, 1 cuando existe portada; 0 si no hay nada. Así el
+                // cliente pinta el badge solo cuando hay MÁS de una (una rejilla llena de «1» sería ruido).
+                n_imagenes: {
+                    $let: {
+                        vars: { n: { $size: { $ifNull: ['$imagenes', []] } } },
+                        in: { $cond: ['$$n', '$$n', { $cond: [{ $ifNull: ['$portada', false] }, 1, 0] }] },
+                    },
+                },
             };
 
             // Modo SOLO-IDS: devuelve TODOS los _id que casan (todas las páginas) para «seleccionar todos los

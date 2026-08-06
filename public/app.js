@@ -9299,7 +9299,11 @@ function docCard(d) {
   const volTag = d.obra_n > 1
     ? ` <span class="fmt" onclick="event.stopPropagation();verObra('${esc(d.obra)}')" style="background:rgba(40,217,168,.18);color:var(--acc);cursor:pointer" title="Tomo de «${esc(d.obra_titulo || '')}» (${d.obra_n} tomos) — pulsa para ver la obra">📚 ${d.obra_n}</span>`
     : '';
-  return `<div class="vol${esVol}${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><div class="cov">${cov}${nfcTag}${posBadge(d)}</div><div class="meta"><div class="n">${esc(recortar(d.titulo || '(sin título)', 64))} ${fmt}${volTag}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos', d._id, d.valoracion, d.nsfw)}</div></div></div>`;
+  // Contador de imágenes del carrusel, ABAJO-DERECHA sobre la miniatura (esa esquina está libre: la NFC va
+  // arriba-derecha y la posición física abajo-izquierda). Solo si hay MÁS de una: en una rejilla de miniaturas
+  // un «1» en cada tarjeta sería ruido; con >1 avisa de un vistazo de qué documentos traen carrusel.
+  const numImg = d.n_imagenes > 1 ? `<span class="cnum cnum-br" title="${d.n_imagenes} imágenes">${d.n_imagenes}</span>` : '';
+  return `<div class="vol${esVol}${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><div class="cov">${cov}${nfcTag}${posBadge(d)}${numImg}</div><div class="meta"><div class="n">${esc(recortar(d.titulo || '(sin título)', 64))} ${fmt}${volTag}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos', d._id, d.valoracion, d.nsfw)}</div></div></div>`;
 }
 // Vista DETALLES: una FILA por documento, solo texto (título · autor · año · identificador · CDU + formatos).
 // Comparte data-doc, .selmark y .sel con la vista iconos (misma mecánica de selección).
@@ -12050,11 +12054,6 @@ async function cargarDatalistEditoriales() {
 // ── Ubicaciones (ámbito → estanterías): se acumulan según se cataloga, así puedes elegirlas de un
 // desplegable. La estantería va ASOCIADA al ámbito (un «Estante 1» en «Comedor» ≠ otro en «Biblioteca»).
 let mapaUbicaciones = [];
-function llenarDatalist(id, valores) {
-  const dl = $('#' + id);
-  if (!dl) return;
-  dl.innerHTML = (valores || []).map((v) => `<option value="${esc(v)}">`).join('');
-}
 // Estanterías de un ámbito (según el mapa de ubicaciones), comparando el nombre sin distinguir may/min.
 function estanteriasDe(ambito) {
   const buscado = (ambito || '').trim().toLowerCase();
@@ -15339,20 +15338,20 @@ async function grabarNFCUbic(ambito, estanteria) {
 // Asignar los documentos SELECCIONADOS en Búsqueda a una estantería (alta masiva, como añadir a colección).
 async function pickerUbic() {
   await cargarUbicaciones();
+  // Ámbito y estantería como DESPLEGABLES fiables (mismo widget que el Inbox/Búsqueda): al elegir ámbito, la
+  // estantería se vacía y se rellena con las de ESE ámbito; «➕ Otra…» revela el campo de texto para crear una
+  // nueva. Los <input> ocultos #puAmb/#puEst portan el valor final que lee el envío.
   $('#cmpModal').innerHTML =
     `<div class="box card" style="max-width:460px"><h3 style="margin-top:0">📍 Asignar <b>${selDocs.size}</b> doc(s) a una estantería</h3>
-    <div class="row" style="gap:8px"><div style="flex:1"><label>Ámbito</label><input id="puAmb" list="puDlA" autocomplete="off"></div>
-    <div style="flex:1"><label>Estantería</label><input id="puEst" list="puDlE" autocomplete="off"></div></div>
-    <datalist id="puDlA">${mapaUbicaciones.map((x) => `<option value="${esc(x.ambito)}">`).join('')}</datalist><datalist id="puDlE"></datalist>
+    <div class="row" style="gap:8px"><div style="flex:1"><label>Ámbito</label><select id="puAmbSel"></select><input id="puAmb" autocomplete="off" placeholder="nuevo ámbito…" style="display:none;margin-top:6px"></div>
+    <div style="flex:1"><label>Estantería</label><select id="puEstSel"></select><input id="puEst" autocomplete="off" placeholder="nueva estantería…" style="display:none;margin-top:6px"></div></div>
     <div id="puErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="puX">Cancelar</button><button class="btn pri" id="puOk">Asignar</button></div></div>`;
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
   $('#puX').onclick = cerrarCmp;
   $('#cmpScrim').onclick = cerrarCmp;
-  const refE = () => llenarDatalist('puDlE', estanteriasDe($('#puAmb').value || ''));
-  refE();
-  $('#puAmb').oninput = refE;
+  montarSelUbic({ sa: 'puAmbSel', ia: 'puAmb', se: 'puEstSel', ie: 'puEst', curA: '', curE: '' });
   $('#puOk').onclick = async () => {
     const ambito = ($('#puAmb').value || '').trim(),
       estanteria = ($('#puEst').value || '').trim();
@@ -15389,20 +15388,19 @@ async function editarUbicacionRapida(doc) {
   const u = doc.ubicacion || {};
   const amb0 = u.ambito && u.ambito !== 'Sin asignar' ? u.ambito : '';
   const est0 = u.estanteria && u.estanteria !== 'Sin asignar' ? u.estanteria : '';
+  // Desplegables dependientes (mismo widget que el Inbox): al cambiar el ámbito, la estantería se vacía y pasa
+  // a listar las de ESE ámbito; «➕ Otra…» revela el campo de texto. Los <input> ocultos portan el valor final.
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:460px"><h3 style="margin-top:0">📍 Cambiar ubicación</h3>
     <div class="muted" style="font-size:12px;margin:-4px 0 10px">${esc(recortar(doc.titulo || '', 60))}</div>
-    <div class="row" style="gap:8px"><div style="flex:1"><label>Ámbito</label><input id="puAmb" list="puDlA" autocomplete="off" value="${esc(amb0)}"></div>
-    <div style="flex:1"><label>Estantería</label><input id="puEst" list="puDlE" autocomplete="off" value="${esc(est0)}"></div></div>
-    <datalist id="puDlA">${mapaUbicaciones.map((x) => `<option value="${esc(x.ambito)}">`).join('')}</datalist><datalist id="puDlE"></datalist>
+    <div class="row" style="gap:8px"><div style="flex:1"><label>Ámbito</label><select id="puAmbSel"></select><input id="puAmb" autocomplete="off" placeholder="nuevo ámbito…" style="display:none;margin-top:6px"></div>
+    <div style="flex:1"><label>Estantería</label><select id="puEstSel"></select><input id="puEst" autocomplete="off" placeholder="nueva estantería…" style="display:none;margin-top:6px"></div></div>
     <div id="puErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px"><button class="btn" id="puX">Cancelar</button><button class="btn pri" id="puOk">Guardar</button></div></div>`;
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
   $('#puX').onclick = cerrarCmp;
   $('#cmpScrim').onclick = cerrarCmp;
-  const refE = () => llenarDatalist('puDlE', estanteriasDe($('#puAmb').value || ''));
-  refE();
-  $('#puAmb').oninput = refE;
+  montarSelUbic({ sa: 'puAmbSel', ia: 'puAmb', se: 'puEstSel', ie: 'puEst', curA: amb0, curE: est0 });
   $('#puOk').onclick = async () => {
     const ambito = ($('#puAmb').value || '').trim(),
       estanteria = ($('#puEst').value || '').trim();

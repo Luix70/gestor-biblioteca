@@ -2129,6 +2129,12 @@ details.bulkacts[open] > summary::before {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
+/* Variante ABAJO-DERECHA (miniatura del catálogo): no choca con la NFC (top-right) ni la posición (bottom-left). */
+.cnum.cnum-br {
+  top: auto;
+  bottom: 8px;
+  right: 8px;
+}
 /* Lightbox: visor a pantalla completa de una imagen del carrusel (se abre con la lupa 🔍). */
 #lightbox {
   position: fixed;
