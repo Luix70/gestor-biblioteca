@@ -1611,6 +1611,48 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
+    // Lee los lomos (recortados por el navegador o fotos completas) con VISIÓN y los EMPAREJA con los
+    // `candidatos` ([{_id, titulo, portada?}]) por parecido de título (emparejarLomos, genérico). Compartido:
+    // la colección numera (ordenarPorNumero:true, ordena por el nº leído); la estantería ordena
+    // (ordenarPorNumero:false, conserva el ORDEN FÍSICO de los recortes izquierda→derecha). Función declarada
+    // (hoisted) → la usan las dos rutas. Devuelve { propuesta, sinEmparejar, vacio? }.
+    async function analizarLomos({ recortados, imagenes, candidatos, ordenarPorNumero = false }) {
+        const partir = (s) => { const m = /^data:([^;]+);base64,([\s\S]+)$/.exec(String(s || '')); return m ? { mimeType: m[1], base64: m[2] } : { mimeType: 'image/jpeg', base64: String(s || '').replace(/^data:[^,]*,/, '') }; };
+        const todos = [];
+        if (recortados) {
+            try { const ls = await leerLomosRecortados(imagenes.map(partir)); ls.forEach((l, i) => { if (l.titulo || l.numero || l.texto) todos.push({ ...l, orden: i + 1, bbox: null, img: i }); }); }
+            catch (e) { console.warn(`   ↻ lomos (recortados): la visión falló (${e.message}).`); }
+        } else {
+            for (let i = 0; i < imagenes.length; i++) { try { const ls = await leerLomosImagen(partir(imagenes[i])); for (const l of ls) todos.push({ ...l, img: i }); } catch (e) { console.warn(`   ↻ lomos: la imagen ${i + 1} falló (${e.message}).`); } }
+        }
+        if (!todos.length) return { propuesta: [], sinEmparejar: candidatos.map((m) => ({ _id: String(m._id), titulo: m.titulo })), vacio: true };
+        const { asignacion, miembroUsado } = emparejarLomos(todos, candidatos);
+        const propuesta = todos.map((l, li) => {
+            const a = asignacion.get(li); const m = a ? candidatos[a.mi] : null;
+            return { img: l.img, bbox: l.bbox, orden: l.orden, titulo_detectado: l.titulo, autor: l.autor, numero: l.numero, texto: l.texto, doc_id: m ? String(m._id) : null, doc_titulo: m ? m.titulo : null, doc_portada: m ? (m.portada || null) : null, doc_numero_actual: m && m.coleccion_numero != null ? String(m.coleccion_numero) : '', confianza: a ? Math.round(a.s * 100) : 0 };
+        });
+        if (ordenarPorNumero) propuesta.sort((x, y) => { const nx = x.numero ? parseInt(x.numero, 10) : 1e9, ny = y.numero ? parseInt(y.numero, 10) : 1e9; return nx - ny || y.confianza - x.confianza; });
+        const sinEmparejar = candidatos.filter((_, mi) => !miembroUsado.has(mi)).map((m) => ({ _id: String(m._id), titulo: m.titulo }));
+        return { propuesta, sinEmparejar };
+    }
+
+    // Ordenar una ESTANTERÍA por la foto de sus lomos: empareja cada lomo con un libro de la estantería. El
+    // orden de la propuesta = el de los recortes (izquierda→derecha); el cliente reordena la lista y el admin
+    // corrige antes de guardar (híbrido). No numera ni mueve ficheros.
+    r.post('/ubicaciones/lomos', async (req, res) => {
+        try {
+            const db = await conectarDB();
+            const recortados = !!req.body?.recortados;
+            const imagenes = Array.isArray(req.body?.imagenes) ? req.body.imagenes.slice(0, recortados ? 80 : 8) : [];
+            if (!imagenes.length) return res.status(400).json({ ok: false, motivo: 'no se recibieron fotos de los lomos' });
+            const { docs } = await librosDeEstanteria(db, { ambito: req.body?.ambito, estanteria: req.body?.estanteria });
+            const candidatos = (docs || []).map((d) => ({ _id: d._id, titulo: d.titulo, portada: d.portada }));
+            if (!candidatos.length) return res.status(400).json({ ok: false, motivo: 'la estantería no tiene libros' });
+            const r2 = await analizarLomos({ recortados, imagenes, candidatos, ordenarPorNumero: false });
+            res.json({ ok: true, propuesta: r2.propuesta, sin_emparejar: r2.sinEmparejar, imagenes_n: imagenes.length, aviso: r2.vacio ? 'La visión no detectó lomos legibles.' : undefined });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     // Ficha COMPLETA de un documento: nombres resueltos (autores/editorial/colección/CDU+descripción),
     // imágenes y portada, y la URL del fichero original (servido en /recursos) para previsualizar
     // (PDF embebido), abrir en pestaña o descargar. Se omiten los ObjectId crudos y campos internos.

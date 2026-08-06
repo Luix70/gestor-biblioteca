@@ -1771,6 +1771,14 @@ de ficheros clasificado por CDU.
           orden físico y se numeran solos 1,2,3… Detecta y avisa (con vibración
           distinta): doble ACCIDENTAL (mismo tag < 5 s → se ignora), libro AJENO
           a la balda, y repetido DELIBERADO (ya escaneado, no se recoloca).
+        - 📷 POR LOMOS (híbrido, admin): fotografías los CANTOS tal como están en la
+          balda (izquierda→derecha) → segmentación local (segmentarLomos, sin IA) en
+          lomos aislados → POST /ubicaciones/lomos: la IA lee cada uno y lo empareja
+          con un libro de la estantería (emparejarLomos, compartido con «numerar por
+          lomos» de colecciones vía analizarLomos). La lista se REORDENA por la
+          secuencia física (emparejados primero, no reconocidos al final) y tú
+          corriges (arrastre/↑↓) antes de «Guardar orden». (No adjunta el recorte del
+          lomo; pendiente: adjuntarlo con dedup por formato muy alargado si ya está.)
       Al ver una estantería, sus libros salen en ese orden y cada portada muestra
       su nº de posición (#N). "Guardar orden" lo fija. Los libros aún SIN posición se
       presentan por ORDEN DE INGRESO (no por título), así el orden inicial coincide

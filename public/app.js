@@ -8885,7 +8885,7 @@ async function ordenarLibrosEstanteria(ambito, estanteria) {
     <p class="muted" style="margin:-4px 0 8px;font-size:12px">Coloca los libros en su ORDEN FÍSICO (izquierda→derecha). Arrastra, usa ↑/↓ o <b>escanea los NFC en orden</b>. El nº es la posición.</p>
     <div id="ordScanMsg" style="display:none;font-size:12px;margin-bottom:8px;padding:8px 10px;border:1px solid var(--acc);border-radius:9px;background:rgba(40,217,168,.08)"></div>
     <div id="ordList" class="muted">Cargando…</div>
-    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">${btnScan}<div style="flex:1"></div><button class="btn" id="ordX">Cancelar</button><button class="btn pri" id="ordSave">Guardar orden</button></div></div>`;
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap"><button class="btn" id="ordLomos" title="Ordena la estantería fotografiando los LOMOS tal como están colocados: la IA los lee y coloca; tú corriges antes de guardar">📷 Por lomos</button>${btnScan}<div style="flex:1"></div><button class="btn" id="ordX">Cancelar</button><button class="btn pri" id="ordSave">Guardar orden</button></div></div>`;
   const cerrar = () => {
     pararOrdenPorNFC();
     cerrarCmp();
@@ -8909,6 +8909,7 @@ async function ordenarLibrosEstanteria(ambito, estanteria) {
     $('#ordScan').onclick = () => {
       _ordScan ? pararOrdenPorNFC() : iniciarOrdenPorNFC();
     };
+  if ($('#ordLomos')) $('#ordLomos').onclick = ordenarEstanteriaPorLomos;
   $('#ordSave').onclick = async () => {
     pararOrdenPorNFC();
     try {
@@ -8926,6 +8927,67 @@ async function ordenarLibrosEstanteria(ambito, estanteria) {
     } catch (e) {
       toast(e.message, 'bad');
     }
+  };
+}
+// Ordenar por LOMOS: fotografías los cantos tal como están en la estantería (izquierda→derecha) → segmentación
+// local (segmentarLomos, sin IA) en lomos aislados → /ubicaciones/lomos (la IA lee cada uno y lo empareja con un
+// libro de la estantería) → se REORDENA la lista según la secuencia física; los emparejados van primero (en ese
+// orden) y los no reconocidos al final. Es híbrido: la IA pre-rellena y el admin corrige (arrastre/↑↓) antes de
+// «Guardar orden». Reutiliza las piezas de «numerar por lomos» de las colecciones (segmentarLomos/_recortarBanda).
+async function ordenarEstanteriaPorLomos() {
+  if (!_ordEst || !(_ordEst.items || []).length) { toast('Carga primero la estantería', 'warn'); return; }
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.72);display:grid;place-items:center;padding:14px';
+  ov.innerHTML = `<div class="box card" style="max-width:520px;width:96vw;max-height:92vh;overflow:auto">
+      <h3 style="margin-top:0">📷 Ordenar por lomos</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">Foto(s) de los <b>lomos</b> tal como están colocados (izquierda→derecha), con el texto legible. Se separan en el navegador y la IA los lee y coloca; tú corriges antes de guardar.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <label class="btn" style="display:inline-block">📷 Cámara<input type="file" id="leCam" accept="image/*" capture="environment" multiple hidden></label>
+        <label class="btn" style="display:inline-block">🖼️ Archivos<input type="file" id="leFile" accept="image/*" multiple hidden></label>
+      </div>
+      <div id="leThumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px"></div>
+      <div id="leMsg" class="muted" style="font-size:12px;margin-top:8px"></div>
+      <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="leX">Cancelar</button><button class="btn pri" id="leGo" disabled>🔍 Leer y ordenar</button></div>
+    </div>`;
+  document.body.appendChild(ov);
+  let fotos = [];
+  ov.querySelector('#leX').onclick = () => ov.remove();
+  const thumbs = () => {
+    const c = ov.querySelector('#leThumbs');
+    c.innerHTML = fotos.map((f, i) => `<span style="position:relative;display:inline-block"><img src="${URL.createObjectURL(f)}" onload="URL.revokeObjectURL(this.src)" style="width:70px;height:70px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"><button class="btn bad" type="button" data-rm="${i}" style="position:absolute;top:-7px;right:-7px;padding:0 6px;border-radius:50%;line-height:18px">✕</button></span>`).join('');
+    c.querySelectorAll('[data-rm]').forEach((b) => (b.onclick = () => { fotos.splice(+b.dataset.rm, 1); thumbs(); }));
+    ov.querySelector('#leGo').disabled = !fotos.length;
+  };
+  const add = (e) => { fotos = fotos.concat([...e.target.files]); e.target.value = ''; thumbs(); };
+  ov.querySelector('#leCam').onchange = add;
+  ov.querySelector('#leFile').onchange = add;
+  ov.querySelector('#leGo').onclick = async () => {
+    const go = ov.querySelector('#leGo'), msg = ov.querySelector('#leMsg');
+    go.disabled = true; go.textContent = 'Leyendo…';
+    try {
+      // Segmentar cada foto en lomos (en orden) → recortes de banda.
+      const crops = [];
+      for (const f of fotos) {
+        const du = await fileADataURL(await reducirImagen(f, 1800, 0.85));
+        const im = new Image(); await new Promise((ok) => { im.onload = ok; im.onerror = ok; im.src = du; });
+        const cv = document.createElement('canvas'); cv.width = im.naturalWidth || 1; cv.height = im.naturalHeight || 1;
+        cv.getContext('2d').drawImage(im, 0, 0);
+        const { orient, bandas } = segmentarLomos(cv, null);
+        bandas.forEach((bd) => { const c = _recortarBanda(cv, orient, bd.a, bd.b); if (c) crops.push(c); });
+      }
+      if (!crops.length) { msg.textContent = 'No se separaron lomos (mejor con la alfombrilla y los cantos alineados, buena luz). Prueba con «Archivos».'; go.disabled = false; go.textContent = '🔍 Leer y ordenar'; return; }
+      const resp = await api('/ubicaciones/lomos', { method: 'POST', body: JSON.stringify({ ambito: _ordEst.ambito, estanteria: _ordEst.estanteria, recortados: 1, imagenes: crops }) });
+      const prop = (resp && resp.propuesta) || [];
+      // Reordenar la lista: emparejados primero (en el orden de los lomos), el resto conserva su posición al final.
+      const byId = new Map(_ordEst.items.map((it) => [String(it._id), it]));
+      const usados = new Set(), nuevos = [];
+      for (const p of prop) { if (p.doc_id && byId.has(p.doc_id) && !usados.has(p.doc_id)) { nuevos.push(byId.get(p.doc_id)); usados.add(p.doc_id); } }
+      for (const it of _ordEst.items) if (!usados.has(String(it._id))) nuevos.push(it);
+      _ordEst.items = nuevos;
+      ov.remove();
+      pintarOrdList();
+      toast(usados.size ? `📷 ${usados.size}/${_ordEst.items.length} colocado(s) por lomos — revisa y «Guardar orden»` : 'No se pudo emparejar ningún lomo; revisa la foto o el enfoque', usados.size ? 'ok' : 'warn');
+    } catch (e) { msg.textContent = 'Error: ' + e.message; go.disabled = false; go.textContent = '🔍 Leer y ordenar'; }
   };
 }
 // Ordenar ESCANEANDO: escaneo NFC continuo; cada libro que tocas (su etiqueta lleva ?doc=<id>) se coloca en el
