@@ -1731,6 +1731,17 @@ de ficheros clasificado por CDU.
     · Etiqueta de LIBRO (📶 en la ficha): graba un enlace que abre la ficha al
       acercar el móvil, MÁS datos OFFLINE en la propia etiqueta (ubicación, título,
       autor, editorial, colección, CDU, ISBN) para recolocarlo SIN conexión.
+    · CAPACIDAD / GRABADO ADAPTATIVO (NTAG213 vs 215): el payload completo (enlace ?doc
+      + &o= offline completo + ex-libris) ronda los ~470-490 B → requiere NTAG215 (504 B).
+      El grabado es ADAPTATIVO: intenta el completo y, si la etiqueta NO lo admite (típico
+      de NTAG213, 144 B), recae AUTOMÁTICAMENTE a una versión COMPACTA — SOLO el enlace
+      ?doc + datos offline MÍNIMOS (ubicación —para recolocar sin conexión— + ISBN + título
+      si cabe, sin ex-libris) — que sí cabe en 144 B (~110-140 B). La ficha ONLINE funciona
+      igual; en 213 se pierde el ex-libris grabado y los datos offline ricos (autor/editorial/
+      colección/CDU). Funciones: _recordsDocCompacto/_payloadOfflineMin (public/app.js);
+      aplica al grabado individual (grabarNFC, reintento automático) y al lote (etqSoloEnlace,
+      auto-reintento una vez + botón «📎 Compacta»). NOTA: las etiquetas de ESTANTERÍA
+      (?amb=&est= + ex-libris) NO se han compactado — pueden necesitar NTAG215.
     · EX-LIBRIS CONFIGURABLE + DEVOLVER-SI-SE-PIERDE: la cartela «Este libro pertenece
       a…» es configurable desde el .env (NOMBRE_BIBLIOTECA / NOMBRE_BIBLIOTECARIO /
       EMAIL / TELEFONO), vía el endpoint PÚBLICO /api/exlibris (cacheado en el móvil

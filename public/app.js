@@ -3432,7 +3432,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las fuentes para mejorar el documento: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books)">✨ Enriquecer</button>
       <button class="fbtn admin-only" id="actAFondo" title="Lee las PÁGINAS del propio libro (portadilla/contraportada) con la visión y propone autores/roles reales, sinopsis e identificadores. Muestra un balance antes/después para aplicar lo que elijas.">🎯 Completar a fondo</button>
       <button class="fbtn admin-only" id="actShare" title="Genera un QR/enlace para compartir esta ficha (y su descarga, si es digital)">🔗 Compartir</button>
-      <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
+      <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG213/215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
       <button class="fbtn admin-only" id="actTipo" title="Cambiar el tipo a mano: libro / revista / cómic">🔀 Cambiar tipo</button>
       <button class="fbtn bad admin-only" id="actRepr" title="Devuelve el fichero al Inbox y re-cataloga de cero (recicla la carpeta actual)">♻️ Reprocesar</button>
       <button class="fbtn bad admin-only" id="actDel" title="Borra el documento y su carpeta (sidecars/imágenes → Papelera, recuperable)">🗑 Eliminar</button>
@@ -13803,6 +13803,32 @@ function _recordsDoc(d, r) {
     ],
   };
 }
+// Payload offline MÍNIMO para etiquetas pequeñas (NTAG213): prioriza la UBICACIÓN (para recolocar sin conexión)
+// y el ISBN, y añade el título si cabe. Nunca desborda `budget` bytes. Omite el id (ya va en la URL ?doc=) y el
+// resto de campos. Mismas claves cortas que _payloadOffline (u,t,i) → lo entiende el mismo lector.
+function _payloadOfflineMin(d, budget) {
+  const cut = (s, n) => { s = String(s || ''); while (_blen(s) > n && s.length) s = s.slice(0, -1); return s; };
+  const build = (o) => 'BIB1:' + JSON.stringify(o);
+  const cabe = (o) => _blen(build(o)) <= budget;
+  let o = { v: 1 };
+  const u = _txtUbic(d);
+  if (u) { for (const n of [30, 24, 18]) { const t = { ...o, u: cut(u, n) }; if (cabe(t)) { o = t; break; } } } // ubicación primero
+  if (d.isbn) { const t = { ...o, i: d.isbn }; if (cabe(t)) o = t; }                                            // ISBN
+  if (d.titulo) { for (const n of [40, 30, 24, 16]) { const t = { ...o, t: cut(d.titulo, n) }; if (cabe(t)) { o = t; break; } } } // título si cabe
+  return build(o);
+}
+// Registros COMPACTOS para etiquetas pequeñas (NTAG213, 144 B): SOLO el enlace ?doc + datos offline MÍNIMOS en
+// la URL (ubicación + ISBN + título si cabe), SIN registro de ex-libris. Se dimensiona para caber en 144 B de
+// NDEF (mensaje = TLV 2 + terminador 1 + cabecera registro URL 3 + tipo 'U' 1 + prefijo URI 1 ≈ 8 B sobre el
+// contenido de la URI). Es la versión a la que se recae automáticamente si la completa no cupo (ver grabado).
+function _recordsDocCompacto(d, r) {
+  const idUrl = location.origin + '/?doc=' + encodeURIComponent(d._id);
+  // La URI que cuenta es la de DESPUÉS del prefijo NDEF (http[s]://[www.] se codifica en 1 byte).
+  const uriFijo = _blen(idUrl.replace(/^https?:\/\/(www\.)?/, '')) + _blen('&o='); // parte fija de la URI
+  const budget = Math.max(20, Math.floor(((132 - uriFijo) * 3) / 4)); // bytes del BIB1 antes de base64 (×4/3)
+  const url = idUrl + '&o=' + _b64uEnc(_payloadOfflineMin(d, budget));
+  return { url, records: [{ recordType: 'url', data: url }] };
+}
 // Graba registros en una etiqueta (escanea y escribe en el MISMO toque → capta el UID). Si la etiqueta YA
 // está grabada para OTRO documento y forzar=false, RECHAZA con {code:'OCUPADA',prev,uid} (sin escribir) para
 // pedir confirmación. Usa un AbortController interno (parable) enlazado al signal externo (cancelar).
@@ -14535,8 +14561,10 @@ function mostrarEstanteriaNFC(label, amb, est, ex) {
       verEstanteriaEnCatalogo(amb, est);
     };
 }
-// Graba en una etiqueta NFC (NTAG215, 504 B) el enlace ?doc=<id> (al acercar el móvil abre la ficha; en
-// iPhone, Safari → mismo destino) + el registro OFFLINE para recolocar sin conexión.
+// Graba en una etiqueta NFC el enlace ?doc=<id> (al acercar el móvil abre la ficha; en iPhone, Safari → mismo
+// destino) + el registro OFFLINE para recolocar sin conexión. ADAPTATIVO: intenta el payload completo (cabe en
+// NTAG215, 504 B) y, si la etiqueta es pequeña (NTAG213, 144 B), recae AUTOMÁTICAMENTE a la versión compacta
+// (enlace + ubicación offline mínima, sin ex-libris). Ver _recordsDocCompacto.
 async function grabarNFC(d, r) {
   if (!('NDEFReader' in window)) {
     toast('Este navegador no soporta NFC (Android + Chrome)', 'bad');
@@ -14545,7 +14573,7 @@ async function grabarNFC(d, r) {
   const { url, records: recs } = _recordsDoc(d, r);
   $('#cmpModal').innerHTML =
     `<div class="box card" style="max-width:420px;text-align:center"><h3 style="margin-top:0">📶 Grabar etiqueta NFC</h3>
-    <p class="muted" id="nfcWrMsg">Acerca una etiqueta NFC (NTAG215) al móvil para grabarla…</p>
+    <p class="muted" id="nfcWrMsg">Acerca una etiqueta NFC (NTAG213/215) al móvil para grabarla…</p>
     <p class="muted" style="font-size:12px">📍 ${esc(_txtUbic(d) || 'Sin asignar')} · ex-libris + datos offline</p>
     <label style="display:flex;gap:6px;align-items:center;justify-content:center;font-size:12px;margin:6px 0"><input type="checkbox" id="nfcSobrescribir"> Sobrescribir sin comprobar (re-grabar una etiqueta ya usada)</label>
     <p class="muted" style="font-size:11px;margin:0 6px 6px">Márcalo si la etiqueta YA tiene datos (antiguos o de este mismo libro): escribe en el primer toque, sin leerla antes, para que el móvil no abra la ficha vieja.</p>
@@ -14562,11 +14590,11 @@ async function grabarNFC(d, r) {
   };
   $('#nfcWrX').onclick = cerrar;
   $('#cmpScrim').onclick = cerrar;
-  const marcar = async (uid) => {
+  const marcar = async (uid, urlGrabada = url) => {
     try {
       return await api('/documentos/' + encodeURIComponent(d._id) + '/nfc', {
         method: 'POST',
-        body: JSON.stringify({ uid, url }),
+        body: JSON.stringify({ uid, url: urlGrabada }), // guarda la URL REALMENTE grabada (completa o compacta)
       });
     } catch (_) {
       return null;
@@ -14627,36 +14655,39 @@ async function grabarNFC(d, r) {
       return;
     }
     if (e && e.name === 'AbortError') return; // cancelado por el usuario
+    // No cupo (típico de NTAG213, 144 B): se reintenta AUTOMÁTICAMENTE con la versión COMPACTA (enlace + ubicación
+    // offline mínima + ISBN, SIN ex-libris), que sí cabe. La ficha online (?doc) sigue funcionando igual.
     const m = $('#nfcWrMsg');
     if (m) {
-      m.innerHTML = `No cupo con datos offline (${esc(e.message || '')}). <button class="btn" id="nfcSolo" style="margin-top:8px">Grabar solo el enlace</button>`;
-      m.style.color = 'var(--bad)';
+      m.textContent = 'Etiqueta pequeña (NTAG213): grabando versión compacta (enlace + ubicación offline)… acércala de nuevo.';
+      m.style.color = 'var(--warn)';
     }
-    const so = $('#nfcSolo');
-    if (so)
-      so.onclick = async () => {
-        try {
-          const uid = await escribir([
-            { recordType: 'url', data: url },
-            { recordType: 'text', data: EX_LIBRIS },
-          ]);
-          await marcar(uid);
-          if (m) {
-            m.textContent = '✅ Enlace grabado (sin datos offline).';
-            m.style.color = 'var(--ok)';
-          }
-          toast('Etiqueta NFC grabada');
-          setTimeout(cerrarCmp, 1100);
-        } catch (e2) {
-          if (e2 && e2.code === 'CANCELADO') {
-            cerrarCmp();
-            return;
-          }
-          if (e2 && e2.name !== 'AbortError' && m) {
-            m.textContent = 'No se pudo grabar: ' + (e2.message || '');
-          }
-        }
-      };
+    try {
+      const comp = _recordsDocCompacto(d, r);
+      const uid = await escribir(comp.records);
+      const res = await marcar(uid, comp.url);
+      const rea = res && res.reasignado;
+      if (m) {
+        m.innerHTML =
+          '✅ Etiqueta compacta grabada' +
+          (uid ? ' · UID ' + esc(uid) : '') +
+          ' (enlace + ubicación offline; sin ex-libris).' +
+          (rea ? `<br><span style="color:var(--warn)">⚠️ Estaba en «${esc(recortar(rea.titulo || '?', 40))}» — reasignada.</span>` : '');
+        m.style.color = 'var(--ok)';
+      }
+      toast(rea ? 'Etiqueta reasignada (compacta)' : 'Etiqueta NFC grabada (compacta)', rea ? 'warn' : 'ok');
+      setTimeout(cerrarCmp, rea ? 2200 : 1200);
+    } catch (e2) {
+      if (e2 && e2.code === 'CANCELADO') {
+        cerrarCmp();
+        return;
+      }
+      if (e2 && e2.name === 'AbortError') return;
+      if (m) {
+        m.textContent = 'No se pudo grabar ni la versión compacta: ' + (e2.message || '');
+        m.style.color = 'var(--bad)';
+      }
+    }
   }
 }
 // ════════ ETIQUETADO NFC POR LOTES ════════
@@ -14834,6 +14865,14 @@ async function procesarEtq() {
       pintarEtq(doc, r, 'pausa');
       return;
     }
+    // No cupo (típico de NTAG213): reintenta AUTOMÁTICAMENTE una vez con la versión compacta (enlace + ubicación
+    // offline mínima). Si vuelve a fallar, ya sí muestra el error (con los botones ↻ Reintentar / Compacta).
+    if (_etq && _etq.actual && !_etq.actual.compactoAuto) {
+      _etq.actual.compactoAuto = true;
+      pintarEtq(doc, r, 'esperando');
+      etqSoloEnlace();
+      return;
+    }
     pintarEtq(doc, r, 'error', e && e.message);
   }
 }
@@ -14861,15 +14900,14 @@ async function etqTrasGrabar(doc, r, uid, url, gen) {
       }
     }, 900);
 }
-// Reintento «solo el enlace» (si los datos offline no cupieron): graba url + ex-libris sobre el lector
-// sostenido (o recambio). No hace lectura previa de comprobación.
+// Reintento COMPACTO (si el payload completo no cupo, p. ej. NTAG213): graba SOLO el enlace ?doc + datos
+// offline mínimos (ubicación + ISBN + título si cabe), SIN ex-libris — cabe en 144 B. Sobre el lector sostenido
+// (o recambio). No hace lectura previa de comprobación.
 async function etqSoloEnlace() {
   if (!_etq || !_etq.actual) return;
-  const { doc, r, url } = _etq.actual;
-  const recs = [
-    { recordType: 'url', data: url },
-    { recordType: 'text', data: EX_LIBRIS },
-  ];
+  const { doc, r } = _etq.actual;
+  const comp = _recordsDocCompacto(doc, r);
+  const recs = comp.records;
   const gen = ++_etqGen;
   const abort = new AbortController();
   _etq.abort = abort;
@@ -14880,7 +14918,7 @@ async function etqSoloEnlace() {
       ? await grabarItemEtq(recs, abort.signal)
       : await escribirNFC(recs, doc._id, abort.signal, true);
     if (gen !== _etqGen) return;
-    await etqTrasGrabar(doc, r, uid, url, gen);
+    await etqTrasGrabar(doc, r, uid, comp.url, gen); // marca con la URL COMPACTA realmente grabada
   } catch (e) {
     if (gen !== _etqGen) return;
     if (e && e.name === 'AbortError') {
@@ -14958,7 +14996,7 @@ function pintarEtq(doc, r, estado, extra) {
   } else if (estado === 'error') {
     est = `<span style="color:var(--bad)">No se pudo grabar: ${esc(extra || '')}</span>`;
     bot =
-      `<button class="btn" id="etqReint">↻ Reintentar</button><button class="btn" id="etqSolo">Solo enlace</button>` +
+      `<button class="btn" id="etqReint">↻ Reintentar</button><button class="btn" id="etqSolo" title="Graba la versión compacta (enlace + ubicación offline, sin ex-libris): cabe en NTAG213">📎 Compacta</button>` +
       cS +
       cX;
   } else if (estado === 'pausa') {
