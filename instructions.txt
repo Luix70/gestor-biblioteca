@@ -1820,7 +1820,12 @@ de ficheros clasificado por CDU.
       (📋 ordenar · ➕ insertar · ✏️ renombrar · ➡️ mover · 🔀 fusionar · 🧹 explotar ·
       🗑 eliminar) van en un menú «⋯» para no llenar la fila de botones idénticos.
     · La asignación de estantería EN LOTE (📍 del Catálogo) IGNORA los DIGITALES (no
-      van a un estante físico) y avisa cuántos saltó.
+      van a un estante físico) y avisa cuántos saltó. ORDEN AUTOMÁTICO por defecto: al
+      asignar, a los libros de esa balda que quedan SIN posición se les da una por FECHA/
+      HORA DE INGRESO (fecha_ingreso), continuando tras la posición máxima ya fijada — así
+      una serie recién escaneada queda ordenada por ingreso en vez de sin orden. No pisa
+      las posiciones ya puestas a mano; luego se puede reordenar (arrastre/↑↓/NFC/lomos).
+      (gestion-ubicaciones.js · completarOrdenPorIngreso, llamado desde asignarUbicacion.)
     · El diálogo «📍 Cambiar/Asignar ubicación» (tanto en LOTE como el rápido de la
       ficha) usa el MISMO widget de desplegables dependientes que el Inbox
       (montarSelUbic): al elegir un ÁMBITO, la ESTANTERÍA se vacía y pasa a listar
@@ -2852,6 +2857,13 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
                               Dry-run; --ejecutar.
 
   ── 9. METADATOS · CLASIFICACIÓN · FORMATO ───────────────────────────────────
+    limpiar-titulos.js        [RETROACTIVO / PANEL] limpia la puntuación ISBD que arrastran los títulos del
+                              volcado BNE (MARC 245): «::» divide TÍTULO :: SUBTÍTULO (el resto pasa al
+                              subtítulo solo si no había uno) y suelta los «:» colgantes al final. NO toca un
+                              «:» interior legítimo («Sapiens: de animales a dioses»). Es la MISMA limpieza
+                              (src/utils/titulos.js · normalizarTituloBibliografico) que ahora aplica la
+                              ingesta al leer del Fichero (buscador-local.js · fusionar); aquí se propaga a lo
+                              ya catalogado. Solo texto (no mueve carpetas). Dry-run; --ejecutar; --limite N.
     re-enriquecer-degradados.js [RETROACTIVO] re-enriquece SOBRESCRIBIENDO documentos de lotes
                               ingeridos con las APIs caídas (título=nombre de archivo, autor basura,
                               cdu «00») o sin autor: con un ISBN, rellena autor/editorial desde

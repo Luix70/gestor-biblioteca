@@ -21,6 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { extraerContribucionesBNE } from './contribuciones.js';
+import { normalizarTituloBibliografico } from './titulos.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -95,14 +96,16 @@ function isbn13(raw) {
 function fusionar(filas) {
     const orden = [...filas.filter(f => f.fuente === 'bne'), ...filas.filter(f => f.fuente !== 'bne')];
     const primero = (c) => { for (const f of orden) { const v = f[c]; if (v !== null && v !== undefined && v !== '') return v; } return null; };
-    const titulo = primero('titulo');
-    if (!titulo) return null; // sin título no es un acierto útil
+    const tituloBruto = primero('titulo');
+    if (!tituloBruto) return null; // sin título no es un acierto útil
+    // Limpia la puntuación ISBD del dump BNE (MARC 245): «::» → título/subtítulo y «:» colgante al final.
+    const { titulo, subtitulo } = normalizarTituloBibliografico(tituloBruto, primero('subtitulo'));
     const lista = (s) => s ? String(s).split(';').map(x => x.trim()).filter(Boolean) : [];
     const { autores, contribuciones_nombres } = separarAutoresYRoles(primero('autores'));
     return {
         isbn: primero('isbn'),
         titulo,
-        subtitulo: primero('subtitulo'),
+        subtitulo,
         autores,
         contribuciones_nombres,   // [{nombre,rol}] (traductor/ilustrador/…) parseados de la mención BNE
         editorial: primero('editorial'),

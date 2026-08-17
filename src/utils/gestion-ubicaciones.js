@@ -150,6 +150,23 @@ export async function eliminarUbicacion(db, { ambito, estanteria } = {}) {
     return { ok: true };
 }
 
+// Da posición física (orden_estanteria) a los libros de una estantería que aún NO la tienen, por ORDEN DE
+// INGRESO (fecha_ingreso), CONTINUANDO tras la posición máxima ya asignada. No toca las posiciones existentes
+// (respeta un orden manual previo). Así, al asignar una tanda a un estante, queda ordenada por defecto (por
+// fecha/hora de ingreso) en vez de sin orden. Solo para estanterías reales (no a nivel de ámbito / «Sin asignar»).
+async function completarOrdenPorIngreso(bib, a, e) {
+    if (!e || e === SIN) return 0;
+    // Posición máxima ya fijada en la estantería (los libros ya colocados no se tocan).
+    const top = await bib.find({ 'ubicacion.ambito': a, 'ubicacion.estanteria': e, orden_estanteria: { $type: 'number' } },
+        { projection: { orden_estanteria: 1 } }).sort({ orden_estanteria: -1 }).limit(1).toArray();
+    let sig = (top.length ? top[0].orden_estanteria : -1) + 1;
+    // Los que NO tienen posición, por fecha de ingreso (ausente → al final por _id). Se numeran a partir de `sig`.
+    const sinPos = await bib.find({ 'ubicacion.ambito': a, 'ubicacion.estanteria': e, orden_estanteria: { $exists: false } },
+        { projection: { _id: 1 } }).sort({ fecha_ingreso: 1, _id: 1 }).toArray();
+    for (const d of sinPos) await bib.updateOne({ _id: d._id }, { $set: { orden_estanteria: sig++ } });
+    return sinPos.length;
+}
+
 // Asignar una ubicación a un conjunto de documentos (alta masiva desde la Búsqueda).
 export async function asignarUbicacion(db, { ids = [], ambito, estanteria } = {}) {
     const a = norm(ambito); if (!a) return { ok: false, motivo: 'ámbito requerido' };
@@ -167,7 +184,10 @@ export async function asignarUbicacion(db, { ids = [], ambito, estanteria } = {}
     const r = await bib.updateMany({ _id: { $in: idsFisicos } },
         { $set: { ubicacion: { ambito: a, estanteria: e || SIN }, fecha_actualizacion: new Date() }, $unset: { orden_estanteria: '' } });
     await reg.updateOne({ ambito: a, estanteria: e }, { $setOnInsert: { ambito: a, estanteria: e, fecha_creacion: new Date() } }, { upsert: true });
-    return { ok: true, n: r.modifiedCount, ambito: a, estanteria: e || SIN, saltadosDigital };
+    // Orden automático por defecto: numera por fecha de ingreso los que quedaron sin posición (los recién
+    // asignados, y de paso cualquier otro sin colocar de esa balda). El usuario puede reordenar luego a mano.
+    const ordenados = await completarOrdenPorIngreso(bib, a, e);
+    return { ok: true, n: r.modifiedCount, ambito: a, estanteria: e || SIN, saltadosDigital, ordenados };
 }
 
 // Reordenar las estanterías de un ámbito (Fase 2). `orden` es la LISTA de nombres en el orden deseado; a cada
