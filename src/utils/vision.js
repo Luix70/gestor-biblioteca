@@ -32,13 +32,18 @@ const PROVEEDORES = [
     { id: 'gemini-free', etiqueta: 'Gemini (free)', tipo: 'gemini', tier: 'free', maxImg: Number(process.env.GEMINI_MAX_IMG) || 16,
         modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
         prefijos: ['GEMINI_API_FREE_KEY'] },
-    { id: 'groq', etiqueta: 'Groq · Llama Vision', tipo: 'openai', tier: 'free', maxImg: Number(process.env.GROQ_MAX_IMG) || 5,
+    // Groq YA NO sirve modelos de VISIÓN (retiró los Llama Vision → 404), pero SÍ tiene texto gratis excelente
+    // (gpt-oss-120b). Por eso se marca `soloTexto`: aporta a la rotación de TEXTO (conTexto: CDU/descripciones,
+    // descargando a Gemini) y NO se prueba en la visión (evita el 404). Si Groq vuelve a tener un modelo de
+    // visión, pon GROQ_MODELO=<id> en .env y quita `soloTexto`.
+    { id: 'groq', etiqueta: 'Groq (texto)', tipo: 'openai', tier: 'free', soloTexto: true, maxImg: Number(process.env.GROQ_MAX_IMG) || 5,
         baseURL: () => process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
-        modelo: () => process.env.GROQ_MODELO || 'meta-llama/llama-4-scout-17b-16e-instruct',
+        modelo: () => process.env.GROQ_MODELO || 'openai/gpt-oss-120b',
         prefijos: ['GROQ_API_KEY'] },
     { id: 'openrouter', etiqueta: 'OpenRouter (free)', tipo: 'openai', tier: 'free', maxImg: Number(process.env.OPENROUTER_MAX_IMG) || 5,
         baseURL: () => process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-        modelo: () => process.env.OPENROUTER_MODELO || 'meta-llama/llama-3.2-11b-vision-instruct:free',
+        // Default vigente (el viejo llama-3.2-11b-vision-instruct:free fue retirado). Gemma 4 admite imagen+texto.
+        modelo: () => process.env.OPENROUTER_MODELO || 'google/gemma-4-31b-it:free',
         prefijos: ['OPENROUTER_API_KEY'] },
     { id: 'gemini-paid', etiqueta: 'Gemini (pago)', tipo: 'gemini', tier: 'paid', maxImg: Number(process.env.GEMINI_MAX_IMG) || 16,
         modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
@@ -153,7 +158,8 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
     // soloGemini: para tareas que exigen leer DÍGITOS con exactitud (códigos de barras) → solo Gemini
     // (free→paid), que es el preciso. Así un 429 cae a Gemini de PAGO en vez de pararse en una lectura
     // ERRÓNEA de Groq/OpenRouter (que "responden" con dígitos mal y cortan la rotación).
-    const orden = await ordenIntento(soloGemini ? (c => c.prov.tipo === 'gemini') : null);
+    // Para VISIÓN se excluyen los proveedores `soloTexto` (p. ej. Groq, que ya no tiene modelo de imagen → 404).
+    const orden = await ordenIntento(soloGemini ? (c => c.prov.tipo === 'gemini') : (c => !c.prov.soloTexto));
     if (!orden.length) throw new Error(soloGemini
         ? 'No hay proveedor Gemini disponible/activo para leer el código de barras con precisión.'
         : 'No hay proveedores de visión configurados/activos (revisa las claves en .env y los Ajustes).');

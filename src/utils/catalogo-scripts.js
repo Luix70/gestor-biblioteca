@@ -53,6 +53,9 @@ export const CATALOGO_SCRIPTS = [
     S({ id: 'verificar-gemini', cat: 'Diagnóstico', escribe: false, aplica: null,
         resumen: 'Comprueba que las claves Gemini del .env funcionan',
         proposito: 'Una llamada mínima por clave contra el modelo que usa la app. No escribe nada; enmascara las claves en la salida.', params: [] }),
+    S({ id: 'listar-modelos-groq', cat: 'Diagnóstico', escribe: false, aplica: null,
+        resumen: 'Lista los modelos que Groq ofrece HOY y marca los de visión',
+        proposito: 'Para arreglar el «404 model_not_found» cuando Groq jubila un modelo: consulta GET /models con tu clave del .env, marca los multimodales y te dice si el GROQ_MODELO configurado ya no está en la lista. Luego pones el nuevo en .env y reinicias. No escribe nada ni imprime la clave.', params: [] }),
 
     // ── Integridad y disco ───────────────────────────────────────────────────
     S({ id: 'integridad', cat: 'Integridad y disco', escribe: true, aplica: '--reparar', peligroso: true,

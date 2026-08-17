@@ -2178,9 +2178,13 @@ de ficheros clasificado por CDU.
       «Ocupado: … en curso», es que el candado ÚNICO lo tiene otro proceso (ingesta /
       mantenimiento / otra campaña): solo corre un trabajo pesado a la vez. Solo corren
       en el NAS (contenedor). Config persistida en Mongo (ajustes/campanas).
-      · IA de TEXTO (clasificación CDU + descripciones) usa la MISMA rotación
-        multi-proveedor que la visión: Gemini free → Groq/OpenRouter free → Gemini de
-        PAGO como último recurso (gestionada en «👁️ Visión IA»).
+      · IA de TEXTO (clasificación CDU + descripciones) y VISIÓN comparten la rotación
+        multi-proveedor (Gemini free → …free → Gemini de PAGO), gestionada en «👁️ Visión
+        IA». MATIZ: Groq ya NO tiene modelo de VISIÓN (retiró los Llama Vision → 404), así
+        que está marcado `soloTexto` (src/utils/vision.js): aporta a la rotación de TEXTO
+        con `openai/gpt-oss-120b` pero se EXCLUYE de la visión. Visión = Gemini + OpenRouter
+        (Gemma 4, `google/gemma-4-31b-it:free`); texto = Gemini + Groq + OpenRouter. El
+        script «listar-modelos-groq» (panel/CLI) lista los modelos vigentes de Groq.
 
   ── CUARENTENA ───────────────────────────────────────────────────────────────
     Lo que no se pudo catalogar, por categorías plegables:

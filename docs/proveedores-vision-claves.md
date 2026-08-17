@@ -23,11 +23,14 @@ Convención de variables `.env` propuesta (las cablearemos en `conVision`):
 - Gratis con límites por minuto/día (RPM/RPD/TPM). Es lo que se agota.
 - Modelo visión: `gemini-2.5-flash`. → `GEMINI_API_KEY` / `GEMINI_API_FREE_KEY`.
 
-## 2) Groq  (gratis, rápido · MUY recomendado)
+## 2) Groq  (gratis, rápido · ahora SOLO TEXTO)
 - Web: **console.groq.com** → sign up (Google/GitHub).
 - "API Keys" → "Create API Key" → cópiala (solo se muestra una vez).
 - Free tier con límites generosos; API **compatible con OpenAI** (`https://api.groq.com/openai/v1`).
-- Modelo visión: `meta-llama/llama-4-scout-17b-16e-instruct` o el Llama-Vision vigente (mira "Models").
+- ⚠️ Groq **RETIRÓ sus modelos de visión** (los Llama Vision) → apuntar a uno da 404. En el código está
+  marcado `soloTexto`: se usa para la rotación de TEXTO (CDU/descripciones) con `openai/gpt-oss-120b`, NO
+  para visión. Lista los modelos vigentes con `node scripts/listar-modelos-groq.js`. Si Groq vuelve a ofrecer
+  visión, pon `GROQ_MODELO=<id>` y quita `soloTexto` en `src/utils/vision.js`.
 - → `GROQ_API_KEY`.
 
 ## 3) OpenRouter  (agregador · modelos gratis · IDEAL para rotar)
