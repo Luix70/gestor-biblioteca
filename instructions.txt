@@ -2113,6 +2113,17 @@ de ficheros clasificado por CDU.
           corrobora por el nombre de archivo. NO toca los que YA tienen CDU aunque el Fichero
           difiera (el crosswalk es grueso y la catalogada suele ser mejor) → esas divergencias
           se ven con «node scripts/cotejar-por-isbn.js --clasificacion» (informe, solo lectura).
+        · 🌐 Nombre de serie por ISSN — ACTIVA por defecto. Colecciones cuyo NOMBRE es
+          un placeholder (su propio ISSN, un ISSN suelto o vacío) reciben su nombre
+          AUTORITATIVO resuelto por el ISSN (Wikidata → ISSN Portal, SIN IA): p. ej. una
+          serie con ISSN 2192-4333 pasa a «Springer Texts in Business and Economics».
+          Renombra la colección y refresca el coleccion_nombre denormalizado de sus
+          miembros (catálogo/búsqueda/MARC 490) + los reindexa. NO funde: si el nombre ya
+          lo tiene otra colección, lo deja para el saneo manual (scripts sanear-nombres-
+          serie-issn / sanear-colecciones-issn, que sí funden). La INGESTA ya intenta esto
+          al catalogar (motor-enriquecimiento, salvo modo sinApis); esta campaña es el
+          BACKSTOP para lo que se ingirió sin resolver. mantenimiento/campanas.js ·
+          resolverNombreSeriePorISSN (target coleccion 'colecciones').
         · 🌐 Huecos de metadatos — sinopsis, año, editorial, autores, palabras clave
           y Dewey/LCC por ISBN (OpenLibrary/Google Books/DNB). Conservador.
         · 🌐 Fotos y biografías de autor — OpenLibrary + Wikidata + Wikipedia.

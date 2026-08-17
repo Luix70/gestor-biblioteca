@@ -28,6 +28,8 @@ import { resolverPersona } from '../utils/resolver-persona.js';
 import { esAutorArtefacto, esTituloArtefacto } from '../utils/parsear-nombre.js';
 import { variantesISBN } from '../utils/identificadores.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from '../utils/buscador-local.js';
+import { buscarNombrePorISSN } from '../utils/buscador-issn-titulo.js';
+import { nombreEsPlaceholder, limpiarNombreColeccion, claveCanonica } from '../utils/colecciones.js';
 import { ROLES_VALIDOS } from '../utils/contribuciones.js';
 import { enriquecerAutor, autoresEnriquecibles } from '../utils/enriquecer-autor.js';
 import { rellenarDescripcionesFaltantes, contarFaltantes } from './backfill-descripciones.js';
@@ -132,6 +134,39 @@ export async function cduDelFichero(f) {
         } catch { /* el crosswalk defiere a IA en los casos divergentes → aquí, sin dato */ }
     }
     return null;
+}
+
+/**
+ * NOMBRE DE SERIE/CABECERA por ISSN. Una colección cuyo nombre es un PLACEHOLDER (su propio ISSN, un ISSN
+ * suelto, vacío o un artefacto) recibe su nombre AUTORITATIVO resuelto por el ISSN (Wikidata → ISSN Portal),
+ * SIN IA. Además de renombrar la colección, refresca el `coleccion_nombre` DENORMALIZADO de sus miembros (lo
+ * usan catálogo/búsqueda/MARC 490) y los reindexa. NO FUNDE: si el nombre destino ya existe en otra colección,
+ * lo deja para el saneo manual (script sanear-nombres-serie-issn, que sí funde). Devuelve true si renombró.
+ */
+export async function resolverNombreSeriePorISSN(db, coleccion) {
+    const issn = coleccion && coleccion.issn;
+    if (!issn || !nombreEsPlaceholder(coleccion.nombre, issn)) return false; // ya tiene un nombre real
+    const r = await buscarNombrePorISSN(issn).catch(() => null);
+    if (!r || !r.nombre) return false;                                       // no hay nombre autoritativo
+    const nuevo = limpiarNombreColeccion(r.nombre);
+    if (!nuevo || nombreEsPlaceholder(nuevo, issn)) return false;            // el resuelto no vale (no mejora)
+    const col = db.collection('colecciones');
+    // No se funde aquí: si otra colección ya tiene ese nombre, se deja para el saneo manual (evita el índice
+    // único de nombre y decisiones de fusión, que son cosa del script).
+    const choca = await col.findOne({ nombre: nuevo, _id: { $ne: coleccion._id } }, { collation: { locale: 'es', strength: 1 } });
+    if (choca) return false;
+    const set = { nombre: nuevo, fecha_actualizacion: new Date() };
+    const cc = claveCanonica(nuevo);
+    if (cc) set.clave_canonica = cc;
+    await col.updateOne({ _id: coleccion._id }, { $set: set });
+    // Refresca el nombre denormalizado en los miembros (catálogo/búsqueda/MARC) y reindexa cada uno.
+    const bib = db.collection('biblioteca');
+    const miembros = await bib.find({ coleccion: coleccion._id, coleccion_nombre: { $ne: nuevo } }, { projection: { _id: 1 } }).toArray();
+    for (const m of miembros) {
+        await bib.updateOne({ _id: m._id }, { $set: { coleccion_nombre: nuevo, fecha_actualizacion: new Date() } });
+        await indexarDoc(db, m._id).catch(() => {});
+    }
+    return true;
 }
 
 // ── REGISTRO DE CAMPAÑAS ────────────────────────────────────────────────────────────────────
@@ -305,6 +340,33 @@ export const CAMPANAS = [
             if (!ok) return false;                                 // ISBN no corroborado → no clasificar (posible ISBN erróneo)
             const r = await editarDocumento(db, String(doc._id), { cdu: cf.cdu }).catch(() => null); // mueve la carpeta
             return !!(r && r.ok);
+        },
+    },
+
+    {
+        id: 'nombres-serie',
+        etiqueta: 'Nombre de serie por ISSN',
+        coste: 'apis',
+        descripcion: 'Colecciones cuyo NOMBRE es un placeholder —su propio ISSN, un ISSN suelto o vacío— reciben su nombre AUTORITATIVO resuelto por el ISSN (Wikidata → ISSN Portal, sin IA): p. ej. una serie con ISSN 2192-4333 pasa a llamarse «Springer Texts in Business and Economics». Renombra la colección y refresca el coleccion_nombre de sus miembros (catálogo/búsqueda/MARC). NO funde: si el nombre ya lo tiene otra colección, lo deja para el saneo manual. APIs web con límite: lote pequeño y cadencia holgada.',
+        version: 1,
+        loteDefecto: 20,
+        cadenciaDefecto: 30,
+        activaDefecto: true,     // APIs libres (Wikidata/ISSN Portal), sin IA, y arregla un defecto visible → activa
+        coleccion: 'colecciones',
+        proyeccion: { nombre: 1, issn: 1 },
+        // Colecciones CON ISSN cuyo nombre es el propio ISSN / un ISSN suelto / vacío (el placeholder fino lo
+        // vuelve a comprobar procesarDoc con nombreEsPlaceholder, que además pilla DOIs/URLs artefacto).
+        candidatos: () => ({
+            issn: { $type: 'string', $ne: '' },
+            $or: [
+                { nombre: { $in: [null, ''] } },
+                { nombre: { $exists: false } },
+                { nombre: { $regex: '^\\s*\\d{4}-\\d{3}[\\dxX]\\s*$' } }, // el nombre ES un ISSN
+                { $expr: { $eq: ['$nombre', '$issn'] } },                // el nombre ES su propio ISSN
+            ],
+        }),
+        async procesarDoc(db, doc) {
+            return await resolverNombreSeriePorISSN(db, doc);
         },
     },
 
