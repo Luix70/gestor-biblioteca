@@ -46,31 +46,40 @@ export async function buscarISSNporTitulo(titulo, { idioma = null } = {}) {
 // ── ISSN → NOMBRE de la serie/cabecera (para nombrar AUTORITATIVAMENTE la colección de un libro con ISSN
 //    de serie, en vez del nombre críptico del fichero). Dos fuentes libres, sin clave, sin IA:
 //      1) ISSN PORTAL (registro OFICIAL del ISSN, portal.issn.org): tiene también SERIES DE LIBROS que
-//         Wikidata no indexa (p. ej. «Astronomers' Universe», e-ISSN 2197-6651). JSON-LD por negociación.
+//         Wikidata no indexa (p. ej. «Springer Texts in Business and Economics», ISSN 2192-4333). Se lee del
+//         <title> de la PÁGINA HTML (200 con cualquier User-Agent); OJO: la negociación JSON-LD del API
+//         (Accept: application/ld+json) la BLOQUEA su anti-bot con 403 — por eso NO se usa.
 //      2) WIKIDATA (fallback): ítem con P236=<issn> filtrado a publicaciones seriadas (P31).
 //    Devuelve { nombre, fuente } o null. ──────────────────────────────────────────────────────────────
 
 const PORTAL = 'https://portal.issn.org/resource/ISSN/';
+// Decodifica las entidades HTML habituales de un título (&amp;, &#39;, &quot;…).
+function _desHTML(s) {
+    return String(s || '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+        .replace(/&apos;|&#0*39;|&#x0*27;/gi, "'")
+        .replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(+d); } catch { return ''; } });
+}
 async function nombrePorISSNPortal(s) {
     try {
+        // Se pide el HTML (no la negociación JSON-LD, que da 403 anti-bot). El nombre va en el <title>:
+        // «ISSN 2192-4333 - Springer texts in business and economics (Print)».
         const resp = await http.get(PORTAL + s, {
-            headers: { 'User-Agent': UA, Accept: 'application/ld+json' }, timeout: TIMEOUT,
+            headers: { 'User-Agent': UA, Accept: 'text/html' }, timeout: TIMEOUT, responseType: 'text',
         });
-        let data = resp.data;
-        if (typeof data === 'string') { try { data = JSON.parse(data); } catch { return null; } }
-        const graph = Array.isArray(data?.['@graph']) ? data['@graph'] : (Array.isArray(data) ? data : [data]);
-        const recoge = (campo) => {
-            const out = [];
-            for (const n of graph) { const v = n && n[campo]; if (typeof v === 'string') out.push(v); else if (Array.isArray(v)) for (const x of v) if (typeof x === 'string') out.push(x); }
-            return out;
-        };
-        const limpiar = (str) => String(str)
-            .replace(/^ISSN\s*\d{4}-\d{3}[\dxX]\s*[-–—]\s*/i, '')                        // «ISSN 2197-6651 - …»
-            .replace(/\s*\((?:internet|online|print|en\s*ligne|imprim[ée]e?)\)\s*$/i, '') // medio (Internet/Print…)
+        const html = typeof resp.data === 'string' ? resp.data : String(resp.data || '');
+        const m = html.match(/<title>([^<]*)<\/title>/i);
+        if (!m) return null;
+        // Debe ser la página del REGISTRO de ESTE ISSN: «ISSN <s> - <nombre> (Medio)». Si el <title> no empieza
+        // por ese ISSN, es una página de error/landing → null (no inventar nombre).
+        const reg = new RegExp('^\\s*ISSN\\s*' + s + '\\s*[-\\u2013\\u2014]\\s*(.+)$', 'i');
+        const mm = _desHTML(m[1]).replace(/\s+/g, ' ').trim().match(reg);
+        if (!mm) return null;
+        const nombre = mm[1]
+            .replace(/\s*\((?:internet|online|print|en\s*ligne|imprim[ée]e?)\)\s*$/i, '') // sufijo del medio (Print/Online…)
             .replace(/\s*[.]\s*$/, '').trim();
-        // mainTitle (título clave) primero; si no, name. Descarta «Título / Autor» (registro de libro).
-        const cands = [...recoge('mainTitle'), ...recoge('name')].map(limpiar).filter((x) => x.length >= 3 && !x.includes(' / '));
-        return cands.length ? { nombre: cands[0], fuente: `issn-portal:${s}` } : null;
+        // Descarta «Título / Autor» (un registro de LIBRO colado) y nombres demasiado cortos.
+        return (nombre.length >= 3 && !nombre.includes(' / ')) ? { nombre, fuente: `issn-portal:${s}` } : null;
     } catch { return null; }
 }
 

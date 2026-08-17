@@ -34,7 +34,7 @@ async function main() {
     const plan = [];
     for (const c of cand) {
         const r = await buscarNombrePorISSN(c.issn);
-        if (!r?.nombre) { console.log(`  · ISSN ${c.issn} «${c.nombre}» → sin nombre en Wikidata (se deja)`); continue; }
+        if (!r?.nombre) { console.log(`  · ISSN ${c.issn} «${c.nombre}» → sin nombre autoritativo (Wikidata/ISSN Portal) (se deja)`); continue; }
         const gemela = await cols.findOne({ nombre: r.nombre, _id: { $ne: c._id } }, { collation: { locale: 'es', strength: 1 } });
         plan.push({ col: c, nombre: r.nombre, fuente: r.fuente, gemela, miembros: await nMiembros(c._id) });
     }
