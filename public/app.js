@@ -8007,6 +8007,7 @@ function renderBulk() {
     <button class="btn pri" id="bkSelAdd" title="Añadir los documentos seleccionados a una selección personal YA EXISTENTE (no duplica los que ya estén)">➕ Añadir a selección</button>
     <button class="btn" id="bkSelQuitar" title="Quitar los documentos seleccionados de una selección personal (p. ej. un libro ya leído sale de «Para leer este verano»). Los libros NO se borran.">➖ Quitar de selección</button>
     <button class="btn" id="bkSelRepl" title="Sustituir TODO el contenido de una selección por los documentos marcados ahora. Los libros no se borran, solo salen de la lista.">🔁 Reemplazar selección</button>
+    ${ROL === 'admin' ? '<button class="btn pri" id="bkSelShare" title="Compartir estos documentos: enlace/QR de SOLO LECTURA (ver + descargar), con caducidad opcional. Es una foto fija; no crea una selección guardada.">🔗 Compartir selección</button>' : ''}
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
@@ -8034,7 +8035,11 @@ function renderBulk() {
        </details>`
     : '';
   const ayudaSel = botonAyuda('Cómo seleccionar (PC y móvil)', _AYUDA_SELECCION);
-  el.innerHTML = `<div class="bulkbar">${modoBtn}${tomosBtn}${ayudaSel}${herramientas}${resume}${cuenta}</div>${acciones}`;
+  // «Compartir búsqueda» (admin): enlace/QR de solo lectura con TODOS los resultados de la búsqueda actual.
+  const compBusq = ROL === 'admin'
+    ? `<button class="btn" id="bkCompBusq" title="Compartir estos resultados: enlace/QR de solo lectura con los libros que casan la búsqueda actual (todas las páginas), con caducidad opcional">🔗 Compartir búsqueda</button>`
+    : '';
+  el.innerHTML = `<div class="bulkbar">${modoBtn}${tomosBtn}${ayudaSel}${compBusq}${herramientas}${resume}${cuenta}</div>${acciones}`;
   // Recordar si el panel de acciones queda plegado o desplegado.
   if ($('#bulkActs'))
     $('#bulkActs').addEventListener('toggle', (e) => localStorage.setItem('sq_acciones', e.target.open ? '1' : '0'));
@@ -8043,6 +8048,7 @@ function renderBulk() {
   $('#bkModo').onclick = alternarModoSel;
   // Colapsar/desplegar obras: es un MODO (se recuerda) → se repinta la búsqueda desde la página 1.
   if ($('#bkTomos')) $('#bkTomos').onclick = () => { modoTomos(!modoTomosExpandido()); buscarCatalogo(1); };
+  if ($('#bkCompBusq')) $('#bkCompBusq').onclick = compartirBusqueda;
   if ($('#bkResumeNfc'))
     $('#bkResumeNfc').onclick = () => {
       const s = colaEtqGuardada();
@@ -8077,6 +8083,7 @@ function renderBulk() {
     if ($('#bkSelAdd')) $('#bkSelAdd').onclick = () => opSeleccion([...selDocs], 'anadir');
     if ($('#bkSelQuitar')) $('#bkSelQuitar').onclick = () => opSeleccion([...selDocs], 'quitar');
     if ($('#bkSelRepl')) $('#bkSelRepl').onclick = () => opSeleccion([...selDocs], 'reemplazar');
+    if ($('#bkSelShare')) $('#bkSelShare').onclick = compartirSeleccionMarcada;
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     $('#bkDel').onclick = eliminarSeleccionados;
@@ -14062,10 +14069,20 @@ function qrCanvas(qr, px) {
   return cv;
 }
 // Modal de compartir (QR + Web Share nativo + copiar enlace/imagen) para una URL ya generada. `titulo` va al
-// share nativo; `descHtml` es el texto del modal. Reutilizado por documento y por grupo (colección/obra).
-function _modalCompartir(url, titulo, descHtml) {
+// share nativo; `descHtml` es el texto del modal. Reutilizado por documento, grupo (colección/obra), selección
+// y búsqueda. Si `regenerar(ttlMs)` viene dado, muestra el selector «Caduca en:» y, al cambiarlo, pide un token
+// NUEVO con esa vigencia (devuelve la URL nueva) y re-dibuja el QR + el enlace.
+function _modalCompartir(url, titulo, descHtml, regenerar = null) {
+  // Presets de caducidad (ms). «No caduca» = permanente (por defecto, como hasta ahora).
+  const TTLS = [['0', 'No caduca'], ['86400000', '1 día'], ['604800000', '7 días'], ['2592000000', '30 días']];
+  const ttlSel = regenerar
+    ? `<div class="row" style="justify-content:center;align-items:center;gap:6px;margin:0 0 10px;font-size:13px">
+         <label for="cmpTtl">Caduca en:</label>
+         <select id="cmpTtl" style="max-width:150px">${TTLS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>
+       </div>` : '';
   $('#cmpModal').innerHTML =
     `<div class="box card" style="max-width:360px;text-align:center"><h3 style="margin-top:0">🔗 Compartir</h3>
+    ${ttlSel}
     <div id="qrBox" style="display:flex;justify-content:center;margin:4px 0 12px"></div>
     <p class="muted" style="font-size:12px;line-height:1.5">${descHtml}</p>
     <div class="row" style="gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap">
@@ -14076,15 +14093,26 @@ function _modalCompartir(url, titulo, descHtml) {
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
   $('#cmpScrim').onclick = cerrarCmp;
-  let cv = null;
-  try { cv = qrCanvas(qrGenerar(url), 260); const box = $('#qrBox'); if (box) box.appendChild(cv); }
-  catch (e) { const box = $('#qrBox'); if (box) box.innerHTML = '<span class="muted" style="font-size:12px">No se pudo generar el QR; usa el enlace.</span>'; }
   $('#cmpXq').onclick = cerrarCmp;
-  $('#cmpCopy').onclick = () => { copiar(url); toast('Enlace copiado'); };
-  const ci = $('#cmpCopyImg');
-  if (ci && cv && navigator.clipboard && window.ClipboardItem && cv.toBlob) {
-    ci.onclick = () => { try { cv.toBlob(async (b) => { try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Imagen del QR copiada'); } catch (e) { toast('No se pudo copiar la imagen — usa «Copiar enlace»', 'warn'); } }, 'image/png'); } catch (e) { toast('No se pudo copiar la imagen — usa «Copiar enlace»', 'warn'); } };
-  } else if (ci) ci.style.display = 'none';
+
+  let urlActual = url, cv = null;
+  // (Re)dibuja el QR de la URL ACTUAL y (re)cablea «Copiar imagen» sobre el nuevo canvas.
+  const pintarQR = () => {
+    const box = $('#qrBox'); if (!box) return;
+    box.innerHTML = '';
+    try { cv = qrCanvas(qrGenerar(urlActual), 260); box.appendChild(cv); }
+    catch (e) { cv = null; box.innerHTML = '<span class="muted" style="font-size:12px">No se pudo generar el QR; usa el enlace.</span>'; }
+    const ci = $('#cmpCopyImg');
+    if (ci) {
+      if (cv && navigator.clipboard && window.ClipboardItem && cv.toBlob) {
+        ci.style.display = '';
+        ci.onclick = () => { try { cv.toBlob(async (b) => { try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]); toast('Imagen del QR copiada'); } catch (e) { toast('No se pudo copiar la imagen — usa «Copiar enlace»', 'warn'); } }, 'image/png'); } catch (e) { toast('No se pudo copiar la imagen — usa «Copiar enlace»', 'warn'); } };
+      } else ci.style.display = 'none';
+    }
+  };
+  pintarQR();
+
+  $('#cmpCopy').onclick = () => { copiar(urlActual); toast('Enlace copiado'); };
   const sh = $('#cmpShare');
   if (navigator.share) {
     sh.onclick = async () => {
@@ -14092,12 +14120,25 @@ function _modalCompartir(url, titulo, descHtml) {
         if (cv && cv.toBlob && navigator.canShare) {
           const blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
           const file = blob && new File([blob], 'qr.png', { type: 'image/png' });
-          if (file && navigator.canShare({ files: [file] })) { await navigator.share({ title: titulo || 'Compartir', text: url, files: [file] }); return; }
+          if (file && navigator.canShare({ files: [file] })) { await navigator.share({ title: titulo || 'Compartir', text: urlActual, files: [file] }); return; }
         }
-        await navigator.share({ title: titulo || 'Compartir', url });
+        await navigator.share({ title: titulo || 'Compartir', url: urlActual });
       } catch (_) { /* cancelado */ }
     };
   } else sh.style.display = 'none';
+
+  // Cambiar la caducidad → token nuevo con esa vigencia + QR/enlace actualizados.
+  if (regenerar && $('#cmpTtl')) {
+    $('#cmpTtl').onchange = async (e) => {
+      const ttlMs = Number(e.target.value) || 0;
+      e.target.disabled = true;
+      try {
+        const nueva = await regenerar(ttlMs);
+        if (nueva) { urlActual = nueva; pintarQR(); toast(ttlMs ? 'Caducidad aplicada al enlace' : 'Enlace permanente'); }
+      } catch (err) { toast(err.message || 'No se pudo actualizar la caducidad', 'bad'); }
+      finally { e.target.disabled = false; }
+    };
+  }
 }
 // Compartir una COLECCIÓN u OBRA: token firmado del grupo → mismo modal; abre todos sus documentos y su descarga.
 // Pregunta si el enlace debe incluir el MATERIAL ADJUNTO. Por defecto NO: el material puede ser privado y,
@@ -14132,14 +14173,47 @@ async function compartirGrupo(tipo, id, nombre) {
   const adjuntos = await _preguntarAdjuntosCompartir(etiq);
   if (adjuntos === null) return;   // cancelado
   const ruta = tipo === 'obra' ? 'obras' : tipo === 'seleccion' ? 'selecciones' : 'colecciones';
-  let token;
-  try {
-    const res = await api('/' + ruta + '/' + encodeURIComponent(id) + '/compartir', { method: 'POST', body: JSON.stringify({ adjuntos }) });
-    token = res.token;
-  } catch (e) { toast(e.message, 'bad'); return; }
-  _modalCompartir(location.origin + '/?s=' + token, nombre || (tipo === 'obra' ? 'Obra' : tipo === 'seleccion' ? 'Selección' : 'Colección'),
+  const gen = async (ttlMs) => {
+    const res = await api('/' + ruta + '/' + encodeURIComponent(id) + '/compartir', { method: 'POST', body: JSON.stringify({ adjuntos, ttlMs }) });
+    return location.origin + '/?s=' + res.token;
+  };
+  let url;
+  try { url = await gen(0); } catch (e) { toast(e.message, 'bad'); return; }
+  _modalCompartir(url, nombre || (tipo === 'obra' ? 'Obra' : tipo === 'seleccion' ? 'Selección' : 'Colección'),
     `Escanea el QR o comparte el enlace. Abre ${etiq} con <b>todos sus documentos</b> y su descarga — sin acceso al resto de la biblioteca`
-    + (adjuntos ? ' e <b>incluyendo el material adjunto</b>.' : ' y <b>solo el documento principal</b> de cada uno.'));
+    + (adjuntos ? ' e <b>incluyendo el material adjunto</b>.' : ' y <b>solo el documento principal</b> de cada uno.'), gen);
+}
+
+// ── Compartir un CONJUNTO ad-hoc: resultados de una BÚSQUEDA o la SELECCIÓN marcada ──────────────────────
+// Crea en el servidor una selección EFÍMERA (oculta de la página Selecciones, con caducidad opcional que la
+// auto-purga) y abre el modal de QR. Es una FOTO FIJA de esos libros (no una consulta viva). `regenerar`
+// reutiliza el compartir de selección para cambiar la caducidad sin crear otra selección.
+async function compartirConjunto(ids, nombre) {
+  if (!ids || !ids.length) { toast('No hay documentos que compartir', 'warn'); return; }
+  let sel;
+  try { sel = await api('/compartir/conjunto', { method: 'POST', body: JSON.stringify({ ids, nombre, ttlMs: 0 }) }); }
+  catch (e) { toast(e.message, 'bad'); return; }
+  if (!sel || !sel.ok) { toast((sel && sel.motivo) || 'No se pudo compartir', 'bad'); return; }
+  const gen = async (ttlMs) => {
+    const r = await api('/selecciones/' + encodeURIComponent(sel.id) + '/compartir', { method: 'POST', body: JSON.stringify({ ttlMs }) });
+    return location.origin + '/?s=' + r.token;
+  };
+  _modalCompartir(location.origin + '/?s=' + sel.token, nombre || 'Selección',
+    `Escanea el QR o comparte el enlace. Abre <b>${sel.n} libro(s)</b> en una vista de <b>solo lectura</b> con descarga — sin acceso al resto de la biblioteca. Es una foto fija: no cambia aunque luego edites la búsqueda.`, gen);
+}
+// Compartir la SELECCIÓN marcada en el catálogo (los libros tildados).
+async function compartirSeleccionMarcada() {
+  const ids = [...selDocs];
+  if (!ids.length) { toast('Marca primero algún libro', 'warn'); return; }
+  await compartirConjunto(ids, `Selección (${ids.length} libro${ids.length > 1 ? 's' : ''})`);
+}
+// Compartir los RESULTADOS de la búsqueda actual (todas las páginas): resuelve sus ids y los comparte.
+async function compartirBusqueda() {
+  let ids;
+  try { ids = await idsDelCatalogo(); } catch (e) { toast(e.message, 'bad'); return; }
+  if (!ids || !ids.length) { toast('La búsqueda actual no tiene resultados', 'warn'); return; }
+  const q = (($('#sqQ') && $('#sqQ').value) || '').trim();
+  await compartirConjunto(ids, q ? `Búsqueda: ${q}` : `Resultados (${ids.length})`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -14347,19 +14421,15 @@ async function borrarSeleccionUI(id, nombre) {
 // la ficha (y, si es digital, permite la descarga); no da acceso al resto de la app.
 async function compartirDoc(d) {
   const esDigital = !(d.formatos || []).includes('papel');
-  let token;
-  try {
-    const res = await api('/documentos/' + encodeURIComponent(d._id) + '/compartir', {
-      method: 'POST',
-      body: '{}',
-    });
-    token = res.token;
-  } catch (e) {
-    toast(e.message, 'bad');
-    return;
-  }
-  _modalCompartir(location.origin + '/?s=' + token, d.titulo || 'Ficha',
-    `Escanea el QR o comparte el enlace. Abre ${esDigital ? 'la ficha y permite la <b>descarga</b>' : 'solo la ficha'} — sin acceso al resto de la biblioteca.`);
+  // regenerar(ttlMs): pide un token con esa caducidad (el modal lo usa al cambiar «Caduca en:»).
+  const gen = async (ttlMs) => {
+    const res = await api('/documentos/' + encodeURIComponent(d._id) + '/compartir', { method: 'POST', body: JSON.stringify({ ttlMs }) });
+    return location.origin + '/?s=' + res.token;
+  };
+  let url;
+  try { url = await gen(0); } catch (e) { toast(e.message, 'bad'); return; }
+  _modalCompartir(url, d.titulo || 'Ficha',
+    `Escanea el QR o comparte el enlace. Abre ${esDigital ? 'la ficha y permite la <b>descarga</b>' : 'solo la ficha'} — sin acceso al resto de la biblioteca.`, gen);
 }
 // Contenedor de PÁGINA AUTÓNOMA (oculta el resto del panel): vista compartida por QR y lectura NFC offline.
 function _sharedCont() {

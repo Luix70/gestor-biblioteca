@@ -334,6 +334,9 @@ async function main() {
     }
     await asegurarIndice(db.collection('selecciones'), { docs: 1 }, { name: 'idx_docs' });
     await asegurarIndice(db.collection('selecciones'), { nombre: 1 }, { name: 'idx_nombre' });
+    // TTL: las selecciones EFÍMERAS (respaldo de un enlace compartido de una búsqueda/selección ad-hoc con
+    // caducidad) llevan `exp` (Date); Mongo las borra sola al vencer. Las curadas NO tienen `exp` → nunca se tocan.
+    await asegurarIndice(db.collection('selecciones'), { exp: 1 }, { name: 'idx_exp_ttl', expireAfterSeconds: 0 });
 
     // ── usuarios: credenciales gestionadas desde el panel (además del admin de arranque del .env). Nombre
     // ÚNICO e insensible a mayúsculas/acentos (no duplicar «Maria»/«maría»). Contraseñas con hash scrypt. ──

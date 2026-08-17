@@ -3047,8 +3047,12 @@ export function rutasPanel() {
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
-    // COMPARTIR (QR): genera un enlace permanente acotado a ESTE documento (admin). Para medios digitales
-    // el token autoriza además la descarga; el front construye la URL (origin + '/?s=' + token) y su QR.
+    // Caducidad OPCIONAL de un enlace compartido: `body.ttlMs` = ms de vigencia → `exp` absoluto (ms). 0/ausente
+    // = permanente (como antes). El front manda uno de los presets (1 día / 7 días / 30 días) o nada («No caduca»).
+    const expDeBody = (body) => { const t = Number(body?.ttlMs); return Number.isFinite(t) && t > 0 ? Date.now() + t : 0; };
+
+    // COMPARTIR (QR): enlace acotado a ESTE documento (admin), con caducidad opcional (ttlMs). Para medios
+    // digitales el token autoriza además la descarga; el front construye la URL (origin + '/?s=' + token) y su QR.
     r.post('/documentos/:id/compartir', async (req, res) => {
         try {
             if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
@@ -3056,7 +3060,7 @@ export function rutasPanel() {
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) }, { projection: { formatos: 1 } });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             const esDigital = !(doc.formatos || []).includes('papel');
-            res.json({ ok: true, token: firmarCompartir(req.params.id, { descarga: esDigital, adjuntos: !!req.body?.adjuntos }), descarga: esDigital });
+            res.json({ ok: true, token: firmarCompartir(req.params.id, { descarga: esDigital, adjuntos: !!req.body?.adjuntos, exp: expDeBody(req.body) }), descarga: esDigital });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
@@ -3064,7 +3068,7 @@ export function rutasPanel() {
     // firmado, con `tipo`. (Los ficheros bajo /recursos ya son públicos; esto solo acota la vista a ese grupo.)
     r.post('/colecciones/:id/compartir', (req, res) => {
         if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'coleccion', descarga: true, adjuntos: !!req.body?.adjuntos }) });
+        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'coleccion', descarga: true, adjuntos: !!req.body?.adjuntos, exp: expDeBody(req.body) }) });
     });
     // ── SELECCIONES PERSONALES: agrupaciones arbitrarias y curadas (un libro puede estar en VARIAS). La
     //    pertenencia vive en la propia selección (`docs[]`), no en el libro → el pipeline ni se entera.
@@ -3111,15 +3115,42 @@ export function rutasPanel() {
         try { res.json({ ok: true, selecciones: await seleccionesDeDoc(await conectarDB(), req.params.id) }); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
-    // COMPARTIR una selección: enlace/QR de SOLO LECTURA (previsualizar y descargar; nunca modificar).
-    r.post('/selecciones/:id/compartir', (req, res) => {
-        if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'seleccion', descarga: true, adjuntos: !!req.body?.adjuntos }) });
+    // COMPARTIR una selección: enlace/QR de SOLO LECTURA (previsualizar y descargar; nunca modificar), con
+    // caducidad opcional. Si la selección es EFÍMERA (respaldo de un enlace ad-hoc), su TTL sigue al del enlace.
+    r.post('/selecciones/:id/compartir', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const exp = expDeBody(req.body);
+            const db = await conectarDB();
+            const _id = new ObjectId(req.params.id);
+            const sel = await db.collection('selecciones').findOne({ _id }, { projection: { efimera: 1 } });
+            if (sel?.efimera) await db.collection('selecciones').updateOne({ _id }, exp ? { $set: { exp: new Date(exp) } } : { $unset: { exp: '' } });
+            res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'seleccion', descarga: true, adjuntos: !!req.body?.adjuntos, exp }) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // COMPARTIR un CONJUNTO ad-hoc (resultados de una BÚSQUEDA o la SELECCIÓN marcada): crea una selección
+    // EFÍMERA (oculta de la página Selecciones; con TTL que la auto-purga al caducar) y devuelve su enlace/QR.
+    // Reutiliza toda la maquinaria de compartir selecciones. Devuelve { id, token }: el `id` permite regenerar
+    // el enlace con otra caducidad (POST /selecciones/:id/compartir) SIN crear otra selección.
+    r.post('/compartir/conjunto', async (req, res) => {
+        try {
+            const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+            if (!ids.length) return res.status(400).json({ ok: false, motivo: 'no hay documentos que compartir' });
+            const ttlMs = Number(req.body?.ttlMs) || 0;
+            const nombre = String(req.body?.nombre || '').trim().slice(0, 120) || 'Compartido';
+            const db = await conectarDB();
+            const r2 = await crearSeleccion(db, { nombre, docs: ids, efimera: true, ttlMs });
+            if (!r2.ok) return res.status(400).json(r2);
+            const exp = ttlMs > 0 ? Date.now() + ttlMs : 0;
+            res.json({ ok: true, id: r2._id, n: r2.n,
+                token: firmarCompartir(r2._id, { tipo: 'seleccion', descarga: true, adjuntos: !!req.body?.adjuntos, exp }) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 
     r.post('/obras/:id/compartir', (req, res) => {
         if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'obra', descarga: true, adjuntos: !!req.body?.adjuntos }) });
+        res.json({ ok: true, token: firmarCompartir(req.params.id, { tipo: 'obra', descarga: true, adjuntos: !!req.body?.adjuntos, exp: expDeBody(req.body) }) });
     });
 
     // ─── GESTIÓN DE USUARIOS (solo admin) ────────────────────────────────────────────────────────────────

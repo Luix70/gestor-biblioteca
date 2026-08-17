@@ -34,17 +34,23 @@ export function idsValidos(lista) {
 
 const limpiar = (s, max) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, max);
 
-/** Todas las selecciones con su nº de documentos (para la página «Selecciones»). */
+/** Todas las selecciones con su nº de documentos (para la página «Selecciones»). Las EFÍMERAS (respaldo de un
+ *  enlace compartido de una búsqueda/selección ad-hoc) NO se listan: no son colecciones curadas del usuario. */
 export async function listarSelecciones(db) {
     const filas = await db.collection('selecciones').aggregate([
+        { $match: { efimera: { $ne: true } } },
         { $project: { nombre: 1, descripcion: 1, fecha_creacion: 1, fecha_actualizacion: 1, portada: 1, n: { $size: { $ifNull: ['$docs', []] } } } },
         { $sort: { fecha_actualizacion: -1 } },
     ]).toArray();
     return filas;
 }
 
-/** Crea una selección. `docs` (opcional) = miembros iniciales — así nace ya poblada desde el catálogo. */
-export async function crearSeleccion(db, { nombre, descripcion, docs } = {}) {
+/**
+ * Crea una selección. `docs` (opcional) = miembros iniciales — así nace ya poblada desde el catálogo.
+ * `efimera:true` la marca como RESPALDO de un enlace compartido (no se muestra en la página «Selecciones»); con
+ * `ttlMs` se le pone `exp` (fecha) para que un índice TTL la auto-purgue al caducar el enlace.
+ */
+export async function crearSeleccion(db, { nombre, descripcion, docs, efimera = false, ttlMs = 0 } = {}) {
     const nom = limpiar(nombre, 120);
     if (!nom) return { ok: false, motivo: 'la selección necesita un nombre' };
     const ahora = new Date();
@@ -55,6 +61,8 @@ export async function crearSeleccion(db, { nombre, descripcion, docs } = {}) {
         fecha_creacion: ahora,
         fecha_actualizacion: ahora,
     };
+    if (efimera) sel.efimera = true;
+    if (efimera && Number.isFinite(ttlMs) && ttlMs > 0) sel.exp = new Date(Date.now() + ttlMs); // TTL: auto-purga
     const r = await db.collection('selecciones').insertOne(sel);
     return { ok: true, _id: String(r.insertedId), nombre: sel.nombre, n: sel.docs.length };
 }

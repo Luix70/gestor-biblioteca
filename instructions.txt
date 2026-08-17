@@ -1755,9 +1755,23 @@ de ficheros clasificado por CDU.
       GRUPO —una COLECCIÓN u OBRA— con la lista de todos sus documentos y descarga
       individual. La vista pública es autónoma (sin login ni acceso al resto del catálogo).
       Botón en la ficha del documento y en las páginas de obra/colección. Backend:
-      firmarCompartir/validarCompartir (token con `tipo` doc|coleccion|obra) +
-      /compartido/:token (público). AVISO: el token NO caduca (enlace permanente hasta que
-      cambie el secreto) y los ficheros bajo /recursos ya son públicos por ruta.
+      firmarCompartir/validarCompartir (token con `tipo` doc|coleccion|obra|seleccion) +
+      /compartido/:token (público). Los ficheros bajo /recursos ya son públicos por ruta.
+    · COMPARTIR BÚSQUEDA / SELECCIÓN (admin): además de doc/obra/colección se puede
+      compartir el CONJUNTO de libros de la BÚSQUEDA actual («🔗 Compartir búsqueda» en la
+      barra del Catálogo → resuelve TODOS los ids con soloIds) o la SELECCIÓN marcada («🔗
+      Compartir selección» en el panel de acciones). Ambos POST /compartir/conjunto {ids,
+      nombre, ttlMs}: crean una selección EFÍMERA (efimera:true, oculta de la página
+      Selecciones, con índice TTL sobre `exp` que la auto-purga al caducar) y devuelven su
+      enlace/QR por el MISMO camino que una selección normal (grupoCompartido('seleccion')).
+      Es una FOTO FIJA (los ids del momento; no una consulta viva). Las selecciones
+      GUARDADAS también se comparten (compartirGrupo('seleccion')).
+    · CADUCIDAD (nuevo): TODO enlace de compartir admite vigencia. En el modal, selector
+      «Caduca en:» (No caduca / 1 día / 7 días / 30 días; por defecto permanente). El token
+      lleva `exp` FIRMADO (validarCompartir lo rechaza al vencer → 404); cambiarlo regenera
+      el token (los endpoints /…/compartir aceptan `ttlMs`). Para conjuntos efímeros, el TTL
+      del enlace también fija el `exp` de la selección de respaldo (se auto-borra). Un enlace
+      sin `exp` sigue siendo permanente (hasta que cambie el secreto).
     · Etiqueta de ESTANTERÍA (desde Ubicaciones): al acercar el móvil lista los
       libros que contiene.
     · Leer (📲 en el Inbox): con conexión abre la ficha; SIN conexión muestra una

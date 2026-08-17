@@ -120,9 +120,11 @@ export function logout(token) { if (token) revocados.add(token); }
 // lectura, ubicación física y hasta el inventario de los adjuntos «solo admin»). Va FIRMADO en el token para
 // que la decisión no dependa de la URL que le llegue al destinatario.
 export function firmarCompartir(id, opciones = {}) {
-    const payload = Buffer.from(JSON.stringify({
-        c: 1, d: String(id), dl: !!opciones.descarga, t: opciones.tipo || 'doc', adj: !!opciones.adjuntos,
-    })).toString('base64url');
+    const datos = { c: 1, d: String(id), dl: !!opciones.descarga, t: opciones.tipo || 'doc', adj: !!opciones.adjuntos };
+    // Caducidad OPCIONAL: `exp` = timestamp (ms) a partir del cual el enlace deja de valer. Sin `exp` = permanente
+    // (comportamiento anterior). Va FIRMADO en el token → el destinatario no puede alargarlo manipulando la URL.
+    if (Number.isFinite(opciones.exp) && opciones.exp > 0) datos.exp = opciones.exp;
+    const payload = Buffer.from(JSON.stringify(datos)).toString('base64url');
     const sig = crypto.createHmac('sha256', SECRET).update(payload).digest('base64url');
     return payload + '.' + sig;
 }
@@ -138,9 +140,11 @@ export function validarCompartir(token) {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     let data; try { data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { return null; }
     if (!data || data.c !== 1 || !data.d) return null;   // no es un token de compartir
+    if (Number.isFinite(data.exp) && Date.now() > data.exp) return null;   // enlace CADUCADO
     return {
         docId: data.d, descarga: !!data.dl, adjuntos: !!data.adj,
         tipo: ['coleccion', 'obra', 'seleccion'].includes(data.t) ? data.t : 'doc',
+        exp: data.exp || null,
     };
 }
 
