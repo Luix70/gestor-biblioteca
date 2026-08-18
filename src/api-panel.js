@@ -2000,6 +2000,26 @@ export function rutasPanel() {
             res.json({ ...(await aplicarCotejo(db, { docIds, campos })), alcanceDocs: docIds.length });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+    // COTEJAR + APLICAR en UN paso (para el cotejo EN LOTE): investiga por ISBN/ISSN (Fichero + APIs, con/sin IA)
+    // y aplica los `campos` ELEGIDOS solo DONDE el entrante DIFIERE. Reutiliza investigarIdentificador +
+    // aplicarCotejo (que reubica la carpeta si cambia la CDU y regenera sidecars). Admin (autenticar guarda POST).
+    r.post('/documentos/:id/cotejar-aplicar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            if (doc.locked) return res.json({ ok: false, motivo: 'documento bloqueado (locked)' });
+            const inv = await investigarIdentificador(db, doc, { usarIA: req.body?.usarIA === true });
+            if (!inv.ok) return res.json({ ok: false, motivo: inv.motivo, sinIdentificador: /ISBN ni ISSN/i.test(inv.motivo || '') });
+            const elegidos = new Set(Array.isArray(req.body?.campos) ? req.body.campos : []);
+            const campos = {};
+            for (const c of inv.campos) if (c.difiere && elegidos.has(c.campo) && c.entrante != null && c.entrante !== '') campos[c.campo] = c.entrante;
+            if (!Object.keys(campos).length) return res.json({ ok: true, cambios: [], sinCambios: true });
+            const r2 = await aplicarCotejo(db, { docIds: [doc._id], campos });
+            res.json({ ok: r2.ok !== false, cambios: Object.keys(campos), reubicada: (r2.reubicadas || 0) > 0, motivo: (r2.errores || [])[0] || null });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
 
     // COMPLETAR A FONDO — modo SUPERVISADO (ficha). Previsualizar: lee las páginas del propio libro con la
     // visión y devuelve el BALANCE (antes/después) + calidad + `propuesta`, SIN escribir nada. Admin.

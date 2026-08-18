@@ -660,6 +660,14 @@ de ficheros clasificado por CDU.
       {actual,entrante,campos[],compartidos}; POST /documentos/:id/cotejar/aplicar
       {campos,alcance:'doc'|'compartidos'}. El flag SIN IA llega hasta resolverCDU
       (permitirIA:false) vía buscarMetadatosExternos({sinIA}).
+      COTEJAR EN LOTE (botón «🔎 Cotejar (ISBN)» del panel de acciones de la selección,
+      admin): mismo cotejo pero sobre la selección. Se ELIGEN los campos a reemplazar UNA vez
+      (los de IDENTIDAD —título/subtítulo/autores/editorial— DESMARCADOS por defecto: sin
+      revisión por-doc, aplicarlos en masa es arriesgado) + con/sin IA (recordado en
+      localStorage cotejar_con_ia), y se aplican a cada doc DONDE difieran. Los sin ISBN/ISSN
+      se saltan. Endpoint por-doc POST /documentos/:id/cotejar-aplicar {usarIA,campos}
+      (investiga+aplica en un paso, reutiliza investigarIdentificador + aplicarCotejo);
+      cliente en bucle con progreso (cotejarLote / _cotejarLoteConfig).
     Acciones (admin):
       ✏️ Editar (y bloquear para que el Conformador no lo cambie). Incluye CDU · Dewey ·
          LCC · LCCN (estas tres son solo metadatos: a diferencia de la CDU NO re-alojan el

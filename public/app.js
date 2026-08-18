@@ -8001,6 +8001,7 @@ function renderBulk() {
     ${'NDEFReader' in window ? '<button class="btn pri" id="bkNfc">📶 Etiquetar</button>' : ''}
     <button class="btn" id="bkConformar" title="Conformar (perfeccionar registro) cada documento seleccionado">🧹 Conformar</button>
     <button class="btn" id="bkEnriquecer" title="Enriquecer cada documento seleccionado: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos">✨ Enriquecer</button>
+    ${ROL === 'admin' ? '<button class="btn" id="bkCotejar" title="Cotejar por ISBN/ISSN contra el Fichero + APIs y REEMPLAZAR los campos que elijas (donde difieran) en toda la selección. Cambiar la CDU mueve la carpeta. Con o sin IA (como el cotejo de la ficha).">🔎 Cotejar (ISBN)</button>' : ''}
     <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
     <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
     <button class="btn" id="bkReclasEd" title="Reclasificar la EDITORIAL de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional). Muestra un informe por transición antes de aplicar.">🏢 Reclasificar editorial</button>
@@ -8075,6 +8076,7 @@ function renderBulk() {
     if ($('#bkNfc')) $('#bkNfc').onclick = () => iniciarEtiquetadoLote([...selDocs], false);
     if ($('#bkConformar')) $('#bkConformar').onclick = () => accionLoteFicha('conformar', { verbo: 'Conformar' });
     if ($('#bkEnriquecer')) $('#bkEnriquecer').onclick = () => accionLoteFicha('enriquecer', { verbo: 'Enriquecer' });
+    if ($('#bkCotejar')) $('#bkCotejar').onclick = cotejarLote;
     if ($('#bkAFondo')) $('#bkAFondo').onclick = aFondoLote;
     if ($('#bkTipo')) $('#bkTipo').onclick = () => cambiarTipoDocs([...selDocs]);
     if ($('#bkReclasEd')) $('#bkReclasEd').onclick = () => reclasificarEditorialLote([...selDocs], `${selDocs.size} seleccionado(s)`);
@@ -8393,6 +8395,63 @@ async function accionLoteFicha(tipo, { verbo = 'Procesar', password = false } = 
   }
   toast(`${verbo}: ${ok} ok${err ? ` · ${err} con error${ultErr ? ' (' + recortar(ultErr, 50) + ')' : ''}` : ''}${tipo !== 'reprocesar' ? ` · ${cambios} cambio(s)` : ''}`, err ? 'warn' : 'ok');
   if (tipo === 'reprocesar') { selDocs.clear(); soloSeleccion = false; } // reciclados: la selección ya no aplica
+  buscarCatalogo(estadoBusqueda.page || 1);
+}
+
+// ── COTEJAR EN LOTE por ISBN/ISSN (Fichero + APIs, con/sin IA) ──────────────────────────────────────────
+// Como el cotejo de la ficha, pero para la selección: se ELIGEN los campos a reemplazar UNA vez y se aplican a
+// todos los seleccionados DONDE difieran (no hay revisión por documento). Los de IDENTIDAD (título/autores/
+// editorial) van desmarcados por defecto (aplicarlos en masa sin revisar es arriesgado). Con/sin IA (la única
+// IA es clasificar la CDU por texto). Endpoint por-doc /cotejar-aplicar; progreso en la barra.
+const _COTEJAR_CAMPOS = [
+  ['cdu', 'CDU', 1], ['año_edicion', 'Año', 1], ['sinopsis', 'Sinopsis', 1], ['dewey', 'Dewey', 1], ['lcc', 'LCC', 1],
+  ['palabras_clave', 'Palabras clave', 1], ['paginas', 'Páginas', 1], ['idioma', 'Idioma', 1],
+  ['titulo', 'Título', 0], ['subtitulo', 'Subtítulo', 0], ['autores', 'Autores', 0], ['editorial', 'Editorial', 0],
+];
+function _cotejarLoteConfig(n) {
+  return new Promise((resolve) => {
+    const conIAprev = localStorage.getItem('cotejar_con_ia') === '1';
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;max-height:90vh;overflow:auto">
+      <h3 style="margin-top:0">🔎 Cotejar ${n} documento(s) por ISBN/ISSN</h3>
+      <p class="muted" style="font-size:13px;line-height:1.5">Recopila del <b>Fichero local + APIs</b> y REEMPLAZA en cada documento los campos elegidos <b>donde difieran</b> (con ISBN válido, la autoridad manda). Cambiar la CDU <b>mueve la carpeta</b>. Los que no tengan ISBN/ISSN se saltan. ⚠ Sin revisión por documento: marca solo lo que te fíes (los de IDENTIDAD van desmarcados).</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0">${_COTEJAR_CAMPOS.map(([c, l, def]) => `<label style="font-size:13px"><input type="checkbox" class="ctlF" value="${c}" ${def ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>
+      <div class="row" style="gap:14px;align-items:center;margin:8px 0;font-size:13px"><b>IA:</b>
+        <label><input type="radio" name="ctlIA" value="0" ${conIAprev ? '' : 'checked'}> 🆓 Sin IA</label>
+        <label><input type="radio" name="ctlIA" value="1" ${conIAprev ? 'checked' : ''}> 🤖 Con IA (clasificar CDU)</label>
+      </div>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn" id="ctlX">Cancelar</button><button class="btn pri" id="ctlOk">Cotejar y aplicar</button></div></div>`;
+    $('#cmpScrim').style.display = 'block';
+    $('#cmpModal').style.display = 'grid';
+    const fin = (v) => { cerrarCmp(); resolve(v); };
+    $('#cmpScrim').onclick = () => fin(null);
+    $('#ctlX').onclick = () => fin(null);
+    $('#ctlOk').onclick = () => {
+      const campos = [...$$('#cmpModal .ctlF')].filter((c) => c.checked).map((c) => c.value);
+      if (!campos.length) { toast('Elige al menos un campo', 'warn'); return; }
+      const usarIA = ($('#cmpModal input[name="ctlIA"]:checked') || {}).value === '1';
+      localStorage.setItem('cotejar_con_ia', usarIA ? '1' : '0');
+      fin({ usarIA, campos });
+    };
+  });
+}
+async function cotejarLote() {
+  const ids = [...selDocs];
+  if (!ids.length) return;
+  const cfg = await _cotejarLoteConfig(ids.length);
+  if (cfg == null) return; // cancelado
+  const body = JSON.stringify({ usarIA: cfg.usarIA, campos: cfg.campos });
+  const bar = $('#searchBulk');
+  let ok = 0, err = 0, cambios = 0, sinCambio = 0, sinId = 0, ultErr = '';
+  for (let i = 0; i < ids.length; i++) {
+    if (bar) bar.innerHTML = `<div class="bulkbar"><b>Cotejando…</b> ${i + 1}/${ids.length} · ✓${ok} ○${sinCambio} ✕${err}</div>`;
+    try {
+      const r = await api('/documentos/' + encodeURIComponent(ids[i]) + '/cotejar-aplicar', { method: 'POST', body });
+      if (r && r.ok) { if (r.sinCambios) sinCambio++; else { ok++; cambios += (r.cambios ? r.cambios.length : 0); } }
+      else if (r && r.sinIdentificador) sinId++;
+      else { err++; ultErr = (r && r.motivo) || ultErr; }
+    } catch (e) { err++; ultErr = e.message || ultErr; }
+  }
+  toast(`Cotejo: ${ok} con cambios · ${sinCambio} sin cambios${sinId ? ` · ${sinId} sin ISBN/ISSN` : ''}${err ? ` · ${err} error(es)${ultErr ? ' (' + recortar(ultErr, 40) + ')' : ''}` : ''} · ${cambios} campo(s)`, err ? 'warn' : 'ok');
   buscarCatalogo(estadoBusqueda.page || 1);
 }
 // «Completar a fondo» EN LOTE: por cada documento, ANALIZA (lee el libro con la visión) y APLICA
