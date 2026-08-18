@@ -1247,6 +1247,22 @@ de ficheros clasificado por CDU.
       el número que dice si se perdió algo. Antes de ingerir sale como «previsión» (pendiente, no fallo);
       después juzga. Cada fichero que entró ENLAZA a su ficha. Una sola consulta a Mongo con todos los
       nombres. Reutiliza el CSS del informe de Integridad (CSS_INFORME) — un solo lenguaje visual.
+    · 🧩 PATRÓN DE NOMBRES (botón «🧩 Patrón» por carpeta en el Inspector, admin): para colecciones cuyos
+      ficheros siguen un mismo esquema de nombre (p. ej. Loeb «L035-(1914) Autor Título [trad]» o Harvard
+      «isbn.Editorial.Título.Autor.Mes.Año»). DETECTA el patrón (POST /inbox/detectar-patron) mirando la
+      carpeta entera —marcadores independientes de posición (ISBN con checksum, año 1400-2099, mes, código
+      inicial tipo «L035», [corchetes]) + separador dominante del RESTO + posiciones→campo— y propone un
+      mapeo editable. El usuario ajusta y define ALIAS por campo (código→valor real: «LO»→«Loeb Classical
+      Library», «HUP»→«Harvard University Press»); «_»=espacio y «__»=título/subtítulo; un «.» seguido de «_»
+      es una inicial dentro del campo («Eric_A._Posner»), no separador. DRY-RUN en vivo (POST
+      /inbox/patron/probar) muestra qué extraería cada fichero. Se guarda en el _guia.json de la carpeta como
+      `patron` (POST /inbox/patron, MERGE sobre la guía) y el VIGILANTE lo aplica FICHERO A FICHERO en la
+      ingesta (orquestador, capa sobre datosBase antes de los overrides de contexto), VALIDANDO cada campo con
+      extraerCamposPorPatron: un ISBN que no valida («ApolonioDER»), un año fuera de rango o un «autor» que
+      parece fecha («Jan 2002») se DESCARTAN — orientativo, nunca a rajatabla. El ISBN extraído PIVOTA (las
+      APIs resuelven título/autor reales) y el resto entra en la fusión conservadora. Motor puro y testeable:
+      src/utils/detector-patron.js (detectarPatron / extraerCamposPorPatron). El patrón cuenta como guía
+      significativa (guiaEsSignificativa) → la carpeta se trata como mini-Inbox.
     · UTILIDADES POR CONSOLA (`node scripts/utilidades.js <op> <ruta…> [--ejecutar] [--propagar]
       [--solo-unicas] [--de … --a …] [--nuevo …]`): las MISMAS operaciones sin depender del navegador —
       la vía del panel puede fallar por algo tan tonto como un app.js cacheado y entonces el botón «no

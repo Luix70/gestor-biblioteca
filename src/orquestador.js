@@ -9,6 +9,7 @@ import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from './utils/buscador-local.js';
 import { ErrorIdentificacion, ErrorInfraestructura, ErrorRecursoIlegible, ErrorOmitir } from './errores.js';
 import { parsearNombre, esTituloArtefacto, tituloDesdeNombre } from './utils/parsear-nombre.js';
+import { extraerCamposPorPatron } from './utils/detector-patron.js';
 import { leerMobi } from './utils/lector-mobi.js';
 import { leerChm } from './utils/lector-chm.js';
 import { leerWord } from './utils/lector-word.js';
@@ -697,6 +698,25 @@ export async function procesarRecurso(entrada) {
         ({ sinApis, forzarNuevo } = aplicarOverride(datosBase, override));
         if (override.tipo_recurso) tipo_recurso = override.tipo_recurso;
         console.log(`[Orquestador] Override manual aplicado a ${path.basename(rutas[0])}${sinApis ? ' (sin APIs)' : ''}${forzarNuevo ? ' (forzar nuevo)' : ''}.`);
+    }
+
+    // PATRÓN DE NOMBRES (guía de la carpeta): interpretación del USUARIO del esquema de nombre de esta colección
+    // → prima sobre lo extraído del fichero para los campos que mapea (el nombre curado es la fuente fiable en
+    // estas colecciones). ORIENTATIVO y VALIDADO: extraerCamposPorPatron ya descarta lo inverosímil (un ISBN que
+    // no valida, un «autor» que parece fecha). El ISBN extraído PIVOTA (las APIs resuelven el resto).
+    if (contexto.patronNombre) {
+        const c = extraerCamposPorPatron(path.basename(rutas[0]), contexto.patronNombre);
+        const aplicados = [];
+        if (c.isbn) { datosBase.isbn = c.isbn; datosBase.isbn_propio = c.isbn; datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(c.isbn)])]; aplicados.push('isbn'); }
+        if (c.titulo) { datosBase.titulo = c.titulo; aplicados.push('título'); }
+        if (c.subtitulo) { datosBase.subtitulo = c.subtitulo; aplicados.push('subtítulo'); }
+        if (c.autores && c.autores.length) { datosBase.autores = c.autores; aplicados.push('autor'); }
+        if (c['año_edicion']) { datosBase['año_edicion'] = c['año_edicion']; aplicados.push('año'); }
+        if (c.mes_publicacion) { datosBase.mes_publicacion = c.mes_publicacion; aplicados.push('mes'); }
+        if (c.editorial) { datosBase.editorial = c.editorial; aplicados.push('editorial'); }
+        if (c.coleccion_nombre) { datosBase.coleccion_nombre = c.coleccion_nombre; aplicados.push('colección'); }
+        if (c.coleccion_numero) { datosBase.coleccion_numero = c.coleccion_numero; aplicados.push('nº colección'); }
+        if (aplicados.length) datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Patrón de nombres de la carpeta aplicó: ${aplicados.join(', ')}.`];
     }
 
     // ISBN provisto por el usuario (formulario del Inbox): AUTORIDAD (como un override.isbn) → la

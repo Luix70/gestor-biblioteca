@@ -2,7 +2,8 @@ import express from 'express';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
 import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora, ejecutarCampanaCompleta, pararCampanaCompleta, estadoDrenaje, INBOX } from './vigilante.js';
-import { arbolInbox, escribirGuia, leerGuia, rutaInboxSegura } from './utils/guia-ingesta.js';
+import { arbolInbox, escribirGuia, leerGuia, rutaInboxSegura, normalizarPatron, NOMBRE_GUIA } from './utils/guia-ingesta.js';
+import { detectarPatron, extraerCamposPorPatron } from './utils/detector-patron.js';
 import { listarCampanas, guardarAjusteCampana } from './mantenimiento/campanas.js';
 import {
     infoPapelera, contenidoPapelera, vaciarPapelera, explorarPapelera, rutaFicheroPapelera,
@@ -2576,6 +2577,56 @@ export function rutasPanel() {
             if (!st || !st.isDirectory()) return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' });
             const guia = await escribirGuia(abs, req.body?.guia || {});
             res.json({ ok: true, guia });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // Nombres de los FICHEROS (no carpetas, no _guia.json, no ocultos) de una carpeta del Inbox — para el
+    // detector de patrones. No recursivo (una colección con patrón vive en UNA carpeta).
+    const nombresDocumentos = async (abs) => {
+        const ents = await readdir(abs, { withFileTypes: true }).catch(() => []);
+        return ents.filter((e) => e.isFile() && e.name !== NOMBRE_GUIA && !e.name.startsWith('.') && /\.[a-z0-9]{2,5}$/i.test(e.name)).map((e) => e.name);
+    };
+
+    // DETECTAR PATRÓN de nombres de una carpeta: propone un `patron` (marcadores + separador + posiciones→campo)
+    // + una vista previa (dry-run) del primer puñado de ficheros. Solo lectura. El guardado va por /inbox/guia.
+    r.post('/inbox/detectar-patron', async (req, res) => {
+        try {
+            const abs = rutaInboxSegura(INBOX, String(req.body?.sub || ''));
+            if (!abs) return res.status(400).json({ ok: false, motivo: 'ruta fuera del Inbox' });
+            const nombres = await nombresDocumentos(abs);
+            if (nombres.length < 2) return res.json({ ok: true, deteccion: null, total: nombres.length, motivo: 'hacen falta ≥2 ficheros para inferir un patrón' });
+            const det = detectarPatron(nombres);
+            const preview = nombres.slice(0, 12).map((n) => ({ nombre: n, campos: det ? extraerCamposPorPatron(n, det.patron) : {} }));
+            res.json({ ok: true, deteccion: det, total: nombres.length, preview });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // GUARDAR el patrón de una carpeta: MERGE sobre la guía existente (conserva accion/perfil/grupos…), solo
+    // fija o limpia `patron`. Un patrón vacío/nulo lo QUITA.
+    r.post('/inbox/patron', async (req, res) => {
+        try {
+            const abs = rutaInboxSegura(INBOX, String(req.body?.ruta || ''));
+            if (!abs) return res.status(400).json({ ok: false, motivo: 'ruta fuera del Inbox' });
+            const st = await stat(abs).catch(() => null);
+            if (!st || !st.isDirectory()) return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' });
+            const guia = (await leerGuia(abs)) || {};
+            const patron = normalizarPatron(req.body?.patron);
+            if (patron) guia.patron = patron; else delete guia.patron;
+            await escribirGuia(abs, guia);
+            res.json({ ok: true, patron: patron || null });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // DRY-RUN de un patrón EDITADO por el usuario: aplica el `patron` a TODOS los ficheros y devuelve, por
+    // fichero, los campos que extraería (validados). No cataloga ni escribe nada.
+    r.post('/inbox/patron/probar', async (req, res) => {
+        try {
+            const abs = rutaInboxSegura(INBOX, String(req.body?.sub || ''));
+            if (!abs) return res.status(400).json({ ok: false, motivo: 'ruta fuera del Inbox' });
+            const patron = normalizarPatron(req.body?.patron);
+            const nombres = await nombresDocumentos(abs);
+            const filas = nombres.map((n) => ({ nombre: n, campos: patron ? extraerCamposPorPatron(n, patron) : {} }));
+            res.json({ ok: true, patron, total: nombres.length, filas: filas.slice(0, 80) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

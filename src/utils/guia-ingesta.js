@@ -149,7 +149,47 @@ export function normalizarGuia(g) {
             if (Object.keys(o).length) guia.archivos[nombre] = o;
         }
     }
+    // PATRÓN de nombres (mapeo posición/marcador → campo): plantilla que el vigilante aplica fichero a fichero,
+    // validando cada campo (ver utils/detector-patron.js). Se sanea aquí para que sobreviva a leer/escribir.
+    const pat = normalizarPatron(g.patron);
+    if (pat) guia.patron = pat;
     return guia;
+}
+
+// Vocabulario del patrón (destino de cada parte). Debe coincidir con detector-patron.js·CAMPOS_PATRON.
+const CAMPOS_PATRON_OK = new Set(['ignorar', 'isbn', 'anio', 'mes', 'editorial', 'coleccion', 'coleccion_numero', 'titulo', 'autor']);
+const SEPS_PATRON_OK = new Set(['.', ' - ', ' — ', ' · ', '·', '_', '-', ' ']);
+// Alias «código → valor real» saneados (claves/valores no vacíos, acotados). p. ej. { 'LO':'Loeb Classical Library' }.
+function saneaAlias(a) {
+    const out = {};
+    if (a && typeof a === 'object') for (const [k, v] of Object.entries(a)) {
+        const kk = String(k || '').trim(), vv = String(v || '').trim();
+        if (kk && vv && kk.length <= 60 && vv.length <= 160) out[kk] = vv;
+    }
+    return out;
+}
+export function normalizarPatron(p) {
+    if (!p || typeof p !== 'object') return null;
+    const out = {
+        sep: p.sep === null || SEPS_PATRON_OK.has(p.sep) ? (p.sep ?? null) : ' ',
+        guionBajoEspacio: p.guionBajoEspacio !== false,
+        isbn: !!p.isbn, anio: !!p.anio, mes: !!p.mes,
+        corchetes: CAMPOS_PATRON_OK.has(p.corchetes) ? p.corchetes : null,
+        codigo: null,
+        posiciones: {},
+    };
+    if (p.codigo && typeof p.codigo === 'object' && ['coleccion', 'editorial'].includes(p.codigo.campo)) {
+        out.codigo = { campo: p.codigo.campo, numero: p.codigo.numero !== false, alias: saneaAlias(p.codigo.alias) };
+    }
+    if (p.posiciones && typeof p.posiciones === 'object') {
+        for (const [idx, regla] of Object.entries(p.posiciones)) {
+            if (!/^\d{1,2}$/.test(idx) || !regla || !CAMPOS_PATRON_OK.has(regla.campo) || regla.campo === 'ignorar') continue;
+            out.posiciones[idx] = { campo: regla.campo, alias: saneaAlias(regla.alias) };
+        }
+    }
+    // Un patrón sin marcadores ni posiciones no aporta nada → null (no se persiste).
+    const util = out.isbn || out.anio || out.mes || out.corchetes || out.codigo || Object.keys(out.posiciones).length;
+    return util ? out : null;
 }
 
 /**
@@ -164,6 +204,7 @@ export function guiaEsSignificativa(g) {
     if (Array.isArray(g.grupos) && g.grupos.length) return true;
     if (g.perfil && Object.keys(g.perfil).length) return true;
     if (g.archivos && Object.keys(g.archivos).length) return true;   // acciones por fichero (contenedores) = intención
+    if (g.patron) return true;                                       // patrón de nombres = intención del usuario
     return false;
 }
 

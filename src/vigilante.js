@@ -1170,6 +1170,13 @@ async function procesarUnidad(unidad) {
         const guia = await leerGuia(unidad.carpeta);
         if (guia && Object.keys(guia.perfil).length) contexto = aplicarPerfilAContexto(contexto, guia.perfil);
     }
+    // PATRÓN DE NOMBRES: se lee de la carpeta REAL del fichero (donde vive el _guia.json con el patrón), para que
+    // aplique aunque la unidad sea un documento suelto de una carpeta guiada. Lo aplica el orquestador FICHERO A
+    // FICHERO (extraerCamposPorPatron, validado): un ISBN/año/autor inverosímil se descarta para ese fichero.
+    if (unidad.rutas && unidad.rutas[0]) {
+        const gPat = await leerGuia(path.dirname(unidad.rutas[0])).catch(() => null);
+        if (gPat && gPat.patron) contexto.patronNombre = gPat.patron;
+    }
     // PISTA DE RUTA: los nombres de las carpetas contenedoras (p. ej. «PSEUDOCIENCIAS / BIBLIOTECA DE
     // RELIGION») orientan la MATERIA/CDU. Viaja como pista en el perfil → prompts de IA (y clasificador CDU);
     // la realidad (ISBN/Fichero/CIP) sigue mandando. Se captura al procesar, ANTES de que el fichero salga

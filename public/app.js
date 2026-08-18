@@ -13281,6 +13281,10 @@ function enlazarControlesGuia(raiz) {
     el.onchange = () => { el.checked ? _guiaSelCarp.add(el.dataset.ruta) : _guiaSelCarp.delete(el.dataset.ruta); actualizarSelBar(); };
   });
   // «☑ todos»: marca/desmarca todos los ficheros de la carpeta (recursivo si «incluir subcarpetas» está activo).
+  // Botón «🧩 Patrón» de cada carpeta → editor de patrón de nombres (no debe abrir/cerrar el <details>).
+  $$r('.guiaPatron').forEach((btn) => {
+    btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); editarPatronNombres(btn.dataset.ruta); };
+  });
   $$r('.guiaTodos').forEach((btn) => {
     btn.onclick = (e) => {
       e.preventDefault();
@@ -13362,7 +13366,8 @@ function nodoGuiaHTML(n, prof = 0) {
       ${sel('accion', _ACCIONES_GUIA, g.accion)}
       ${sel('alcance', _ALCANCES_EMPAQUETAR, g.alcance || 'subcarpetas', g.accion === 'empaquetar' ? '' : ' hidden')}
       ${sel('tipo_probable', _TIPOS_GUIA, g.perfil && g.perfil.tipo_probable)}
-      <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />${trunc}
+      <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />
+      <button type="button" class="btn guiaPatron" data-ruta="${esc(n.ruta)}" title="Detectar el patrón de los nombres de esta carpeta y mapear cada parte a un campo (ISBN, editorial, título, autor, año, nº de colección…). Se guarda en su _guia.json y el vigilante lo aplica validando cada campo." style="font-size:11px;padding:1px 6px">🧩 Patrón${g.patron ? ' ✓' : ''}</button>${trunc}
     </span>`;
   // `pendiente` = el servidor no la descendió (carga diferida): nace PLEGADA y se pide al desplegarla. Ojo con
   // no confundirla con una carpeta VACÍA: por eso el servidor las distingue y aquí también.
@@ -13420,6 +13425,88 @@ async function guardarGuiasInbox() {
   if (!err) _guiaDirty.clear();
   ['#guiaGuardar', '#guiaGuardar2'].forEach((s) => { if ($(s)) $(s).disabled = !_guiaDirty.size; });
   actualizarSelBar();
+}
+
+// ── 🧩 EDITOR DE PATRÓN DE NOMBRES (dentro de «Guiar la ingesta») ────────────────────────────────────────
+// Detecta el esquema de los nombres de una carpeta y deja MAPEAR cada parte (marcador o posición) a un campo,
+// con tabla de ALIAS por campo (código → valor real: «LO» → «Loeb Classical Library»). Vista previa (dry-run)
+// en vivo. Guarda en el _guia.json de la carpeta (POST /inbox/patron); el vigilante lo aplica FICHERO A FICHERO
+// validando cada campo (un ISBN/año/autor inverosímil se descarta para ese fichero).
+const _PAT_CAMPOS = [['ignorar', '—'], ['titulo', 'Título'], ['autor', 'Autor'], ['editorial', 'Editorial'], ['coleccion', 'Colección'], ['coleccion_numero', 'Nº colección'], ['isbn', 'ISBN'], ['anio', 'Año'], ['mes', 'Mes']];
+const _patOpts = (val) => _PAT_CAMPOS.map(([v, t]) => `<option value="${v}"${v === val ? ' selected' : ''}>${esc(t)}</option>`).join('');
+const _patAliasParse = (txt) => { const a = {}; String(txt || '').split(/[\n;]+/).forEach((l) => { const m = l.match(/^\s*(.+?)\s*=\s*(.+?)\s*$/); if (m) a[m[1].trim()] = m[2].trim(); }); return a; };
+const _patAliasFmt = (a) => Object.entries(a || {}).map(([k, v]) => `${k}=${v}`).join('\n');
+
+async function editarPatronNombres(ruta) {
+  const modal = $('#cmpModal'), scrim = $('#cmpScrim');
+  modal.innerHTML = `<div class="box card" style="max-width:720px;width:96vw;max-height:92vh;overflow:auto"><h3 style="margin-top:0">🧩 Patrón de nombres — ${esc(ruta.split('/').pop() || ruta)}</h3><div id="patBody" class="muted">Detectando el patrón…</div></div>`;
+  scrim.style.display = 'block'; modal.style.display = 'grid'; scrim.onclick = cerrarCmp;
+  let det;
+  try { det = await api('/inbox/detectar-patron', { method: 'POST', body: JSON.stringify({ sub: ruta }) }); }
+  catch (e) { const b = $('#patBody'); if (b) b.innerHTML = `<div style="color:var(--bad)">${esc(e.message)}</div>`; return; }
+  if (!det.deteccion) { const b = $('#patBody'); if (b) b.innerHTML = `<div class="muted">${esc(det.motivo || 'No se pudo inferir un patrón (¿pocos ficheros?).')}</div>`; return; }
+  const p = det.deteccion.patron, segs = det.deteccion.segmentos || [], codigos = det.deteccion.codigos || [];
+  const SEPS = [['.', '.'], [' - ', ' - '], ['_', '_'], ['-', '-'], [' ', '(espacio)'], ['null', '(sin separar)']];
+  const sepVal = p.sep === null ? 'null' : p.sep;
+  const filasPos = segs.map((s) => `
+    <tr class="patPosRow" data-pos="${s.pos}">
+      <td class="mono muted" style="font-size:11px;white-space:nowrap;padding-right:8px">#${s.pos} «${esc((s.valores[0] || '').slice(0, 24))}»</td>
+      <td style="padding-right:8px"><select class="patPosCampo">${_patOpts(s.sugerencia)}</select></td>
+      <td><input class="patPosAlias" placeholder="alias  CÓDIGO=Valor" style="width:100%;font-size:11px" title="Solo Editorial/Colección: p. ej. «Harvard UP=Harvard University Press» (uno por línea o separado por ;)"></td>
+    </tr>`).join('');
+  $('#patBody').innerHTML = `
+    <p class="muted" style="font-size:12px;margin:0 0 8px">${det.total} fichero(s). Ajusta el mapeo y pulsa <b>Probar</b> para el dry-run. Se aplicará <b>validando</b> cada campo.</p>
+    <div class="row" style="gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
+      <label>Separador <select id="patSep">${SEPS.map(([v, t]) => `<option value="${v}"${v === sepVal ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+      <label><input type="checkbox" id="patGbe" ${p.guionBajoEspacio !== false ? 'checked' : ''}> «_» = espacio (y «__» = subtítulo)</label>
+    </div>
+    <div class="row" style="gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:12px">
+      <b>Marcadores:</b>
+      <label><input type="checkbox" id="patIsbn" ${p.isbn ? 'checked' : ''}> ISBN</label>
+      <label><input type="checkbox" id="patAnio" ${p.anio ? 'checked' : ''}> Año</label>
+      <label><input type="checkbox" id="patMes" ${p.mes ? 'checked' : ''}> Mes</label>
+      <label>Corchetes […] → <select id="patCorch"><option value="">—</option>${['ignorar', 'titulo', 'autor', 'editorial'].map((v) => `<option value="${v}"${p.corchetes === v ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+    </div>
+    <div style="border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px">
+      <div style="font-size:12px;margin-bottom:6px"><b>Código al inicio</b> (p. ej. <span class="mono">L035</span>) →
+        <select id="patCodCampo"><option value="">— no hay —</option><option value="coleccion"${p.codigo && p.codigo.campo === 'coleccion' ? ' selected' : ''}>Colección</option><option value="editorial"${p.codigo && p.codigo.campo === 'editorial' ? ' selected' : ''}>Editorial</option></select>
+        <label style="margin-left:8px"><input type="checkbox" id="patCodNum" ${!p.codigo || p.codigo.numero !== false ? 'checked' : ''}> + número → nº colección</label>
+      </div>
+      <textarea id="patCodAlias" rows="2" placeholder="alias del código (uno por línea):  LO=Loeb Classical Library" style="width:100%;font-size:12px;box-sizing:border-box">${esc(_patAliasFmt(p.codigo && p.codigo.alias) || codigos.map((c) => c + '=').join('\n'))}</textarea>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left">Posición</th><th style="text-align:left">Campo</th><th style="text-align:left">Alias</th></tr></thead><tbody id="patPos">${filasPos || '<tr><td colspan="3" class="muted">Sin posiciones (todo el resto es un solo campo — mapéalo con «Corchetes» o el «Código», o cambia el separador).</td></tr>'}</tbody></table>
+    <div class="row" style="gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn" id="patProbar">🔍 Probar (dry-run)</button>
+      <button class="btn pri" id="patGuardar">💾 Guardar patrón</button>
+      <button class="btn" id="patCerrar">Cerrar</button>
+    </div>
+    <div id="patPreview" style="margin-top:10px"></div>`;
+  // Lee el patrón ACTUAL de los controles del formulario.
+  const leer = () => {
+    const sv = $('#patSep').value;
+    const pat = { sep: sv === 'null' ? null : sv, guionBajoEspacio: $('#patGbe').checked, isbn: $('#patIsbn').checked, anio: $('#patAnio').checked, mes: $('#patMes').checked, corchetes: $('#patCorch').value || null, codigo: null, posiciones: {} };
+    const cc = $('#patCodCampo').value;
+    if (cc) pat.codigo = { campo: cc, numero: $('#patCodNum').checked, alias: _patAliasParse($('#patCodAlias').value) };
+    $$('#patPos .patPosRow').forEach((row) => { const campo = row.querySelector('.patPosCampo').value; if (campo && campo !== 'ignorar') pat.posiciones[row.dataset.pos] = { campo, alias: _patAliasParse(row.querySelector('.patPosAlias').value) }; });
+    return pat;
+  };
+  const pintarPrev = (filas) => {
+    $('#patPreview').innerHTML = `<div class="muted" style="font-size:11px;margin-bottom:4px">Dry-run (${filas.length} muestra) — cada etiqueta = campo que se extraería (lo inverosímil se descarta):</div>` +
+      `<div style="max-height:32vh;overflow:auto">${filas.map((f) => `<div style="border-bottom:1px solid var(--line);padding:4px 0"><div class="mono" style="font-size:11px;color:var(--mut)">${esc(f.nombre.slice(0, 92))}</div><div style="font-size:12px">${Object.entries(f.campos).map(([k, v]) => `<span class="tag ok" style="font-size:11px;margin:1px">${esc(k)}: ${esc(String(Array.isArray(v) ? v.join(', ') : v).slice(0, 44))}</span>`).join('') || '<span class="muted" style="font-size:11px">— nada —</span>'}</div></div>`).join('')}</div>`;
+  };
+  $('#patCerrar').onclick = cerrarCmp;
+  $('#patProbar').onclick = async () => {
+    try { const r = await api('/inbox/patron/probar', { method: 'POST', body: JSON.stringify({ sub: ruta, patron: leer() }) }); pintarPrev(r.filas || []); }
+    catch (e) { toast(e.message, 'bad'); }
+  };
+  $('#patGuardar').onclick = async () => {
+    try {
+      const r = await api('/inbox/patron', { method: 'POST', body: JSON.stringify({ ruta, patron: leer() }) });
+      toast(r.patron ? '🧩 Patrón guardado en la carpeta' : 'Patrón vacío (no se guardó)', r.patron ? 'ok' : 'warn');
+      if (r.patron) { cerrarCmp(); cargarArbolInbox(); }
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  $('#patProbar').click();   // dry-run inicial con el patrón detectado
 }
 if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
 // «🧰 Utilidades» del menú: NO es una página aparte —eso obligaría a duplicar el explorador, las casillas y el
