@@ -1259,8 +1259,13 @@ de ficheros clasificado por CDU.
       `patron` (POST /inbox/patron, MERGE sobre la guía) y el VIGILANTE lo aplica FICHERO A FICHERO en la
       ingesta (orquestador, capa sobre datosBase antes de los overrides de contexto), VALIDANDO cada campo con
       extraerCamposPorPatron: un ISBN que no valida («ApolonioDER»), un año fuera de rango o un «autor» que
-      parece fecha («Jan 2002») se DESCARTAN — orientativo, nunca a rajatabla. El ISBN extraído PIVOTA (las
-      APIs resuelven título/autor reales) y el resto entra en la fusión conservadora. Motor puro y testeable:
+      parece fecha («Jan 2002») se DESCARTAN — orientativo, nunca a rajatabla. AHORRO DE IA: el ISBN del patrón
+      se ADELANTA a contexto.isbn al principio de procesarRecurso → alimenta el FAST-PATH del PDF escaneado
+      (identifica por el Fichero local SIN gastar VISIÓN IA); título/autor solo RELLENAN (no pisan un título ya
+      resuelto por el ISBN). Con ISBN el resto sale del Fichero/APIs (offline/gratis) y la CDU del Dewey/BNE
+      (determinista) → ~0 IA. Sin ISBN, la identificación no gasta visión (el nombre ya da título/autor), pero
+      la CDU puede costar 1 llamada de IA de TEXTO por libro salvo que se fije la materia/CDU de la carpeta en
+      la guía (perfil.materia_cdu). Motor puro y testeable:
       src/utils/detector-patron.js (detectarPatron / extraerCamposPorPatron). El patrón cuenta como guía
       significativa (guiaEsSignificativa) → la carpeta se trata como mini-Inbox.
     · UTILIDADES POR CONSOLA (`node scripts/utilidades.js <op> <ruta…> [--ejecutar] [--propagar]

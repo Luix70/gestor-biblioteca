@@ -221,6 +221,14 @@ export async function procesarRecurso(entrada) {
     const contexto = entrada.contexto || {};
     if (!rutas || rutas.length === 0) throw new Error("procesarRecurso: 'rutas' vacío");
 
+    // PATRÓN DE NOMBRES (guía de la carpeta): se EXTRAE YA, al principio, para dos cosas: (1) ADELANTAR el ISBN
+    // al fast-path del PDF escaneado (identificar por Fichero SIN gastar VISIÓN IA) y (2) reutilizar los campos
+    // más abajo sin re-extraer. Validado: extraerCamposPorPatron descarta lo inverosímil.
+    if (contexto.patronNombre) {
+        contexto._camposPatron = extraerCamposPorPatron(path.basename(rutas[0]), contexto.patronNombre);
+        if (contexto._camposPatron.isbn && !contexto.isbn) { contexto.isbn = contexto._camposPatron.isbn; contexto.isbn_origen = 'patron'; } // → fast-path sin visión
+    }
+
     const tipo = detectarTipo(rutas[0]);
     console.log(`[Orquestador] ${path.basename(rutas[0])} · tipo=${tipo} · extrayendo metadatos del archivo...`);
     // PISTA del PERFIL de ingesta (usuario, vía _guia.json / tarjeta «Condicionar»): sesgo T4 para el
@@ -700,19 +708,17 @@ export async function procesarRecurso(entrada) {
         console.log(`[Orquestador] Override manual aplicado a ${path.basename(rutas[0])}${sinApis ? ' (sin APIs)' : ''}${forzarNuevo ? ' (forzar nuevo)' : ''}.`);
     }
 
-    // PATRÓN DE NOMBRES (guía de la carpeta): interpretación del USUARIO del esquema de nombre de esta colección
-    // → prima sobre lo extraído del fichero para los campos que mapea (el nombre curado es la fuente fiable en
-    // estas colecciones). ORIENTATIVO y VALIDADO: extraerCamposPorPatron ya descarta lo inverosímil (un ISBN que
-    // no valida, un «autor» que parece fecha). El ISBN extraído PIVOTA (las APIs resuelven el resto).
-    if (contexto.patronNombre) {
-        const c = extraerCamposPorPatron(path.basename(rutas[0]), contexto.patronNombre);
+    // PATRÓN DE NOMBRES: aplica al documento los campos YA extraídos del nombre (contexto._camposPatron, sacados
+    // al principio). El ISBN ya se adelantó a contexto.isbn (fast-path sin visión). Aquí: título/autor solo
+    // RELLENAN (no pisan un título ya resuelto por el ISBN vía Fichero/metadatos nativos, mejor que un nombre de
+    // fichero); editorial/año/colección/nº se fijan como autoridad del usuario para la colección. Ya VALIDADO.
+    if (contexto._camposPatron) {
+        const c = contexto._camposPatron;
         const aplicados = [];
-        if (c.isbn) { datosBase.isbn = c.isbn; datosBase.isbn_propio = c.isbn; datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(c.isbn)])]; aplicados.push('isbn'); }
-        if (c.titulo) { datosBase.titulo = c.titulo; aplicados.push('título'); }
-        if (c.subtitulo) { datosBase.subtitulo = c.subtitulo; aplicados.push('subtítulo'); }
-        if (c.autores && c.autores.length) { datosBase.autores = c.autores; aplicados.push('autor'); }
-        if (c['año_edicion']) { datosBase['año_edicion'] = c['año_edicion']; aplicados.push('año'); }
-        if (c.mes_publicacion) { datosBase.mes_publicacion = c.mes_publicacion; aplicados.push('mes'); }
+        if (c.titulo && (!datosBase.titulo || esTituloArtefacto(datosBase.titulo))) { datosBase.titulo = c.titulo; if (c.subtitulo) datosBase.subtitulo = c.subtitulo; aplicados.push('título'); }
+        if (c.autores && c.autores.length && !(datosBase.autores || []).length) { datosBase.autores = c.autores; aplicados.push('autor'); }
+        if (c['año_edicion'] && !datosBase['año_edicion']) { datosBase['año_edicion'] = c['año_edicion']; aplicados.push('año'); }
+        if (c.mes_publicacion && !datosBase.mes_publicacion) { datosBase.mes_publicacion = c.mes_publicacion; aplicados.push('mes'); }
         if (c.editorial) { datosBase.editorial = c.editorial; aplicados.push('editorial'); }
         if (c.coleccion_nombre) { datosBase.coleccion_nombre = c.coleccion_nombre; aplicados.push('colección'); }
         if (c.coleccion_numero) { datosBase.coleccion_numero = c.coleccion_numero; aplicados.push('nº colección'); }
@@ -728,7 +734,9 @@ export async function procesarRecurso(entrada) {
             datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(v)])];
             datosBase.alertas_agente = [...(datosBase.alertas_agente || []), contexto.isbn_origen === 'movil'
                 ? `ISBN ${v} leído del CÓDIGO DE BARRAS en el móvil (cliente, antes de subir).`
-                : `ISBN ${v} aportado en el formulario de la subida.`];
+                : contexto.isbn_origen === 'patron'
+                    ? `ISBN ${v} extraído del NOMBRE por el patrón de la carpeta (→ identificación por Fichero, sin visión IA).`
+                    : `ISBN ${v} aportado en el formulario de la subida.`];
             console.log(`[Orquestador] ISBN del formulario aplicado a ${path.basename(rutas[0])}: ${v}.`);
         }
     }
