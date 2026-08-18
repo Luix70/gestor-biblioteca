@@ -2886,6 +2886,9 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
                               --clasificacion: INFORME (solo lectura) que compara la CDU catalogada con la
                               del Fichero (BNE directa o Dewey/LC por crosswalk): exacta/misma área/difiere,
                               y cuántas 000 podría rellenar (eso lo aplica la campaña «cotejo-cdu»).
+                              ACOTAR el conjunto (combinables): --solo-000 (solo cdu EXACTAMENTE '000') ·
+                              --desde YYYY-MM-DD (por fecha de ingreso) · --ultimos N / --primeros N (los N
+                              más recientes / más antiguos por ingreso) · --limite N (ojear sin ordenar).
     enriquecer-autores.js     [RETROACTIVO / campaña] foto + bio + seudónimos + fechas de autores CON
                               libros, desde OL+Wikidata+Wikipedia (gratis, sin IA), tandas de 25.
                               Dry-run; --ejecutar; --limite N; --sobrescribir.

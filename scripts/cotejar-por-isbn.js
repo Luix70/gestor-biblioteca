@@ -15,12 +15,16 @@
  * como «sospechoso» (posible ISBN erróneo). SIN IA, offline (solo Fichero).
  *
  * DRY-RUN por defecto (no toca nada). --ejecutar aplica. Alcance: --titulos y/o --cdu (si no pones ninguno, AMBOS).
- * --clasificacion = informe (solo lectura) de coincidencia de CDU catalogada vs Fichero. --limite N para probar.
+ * --clasificacion = informe (solo lectura) de coincidencia de CDU catalogada vs Fichero.
+ * ACOTAR el conjunto: --solo-000 (solo cdu EXACTAMENTE '000') · --desde YYYY-MM-DD (por fecha de ingreso) ·
+ * --ultimos N (los N más recientes por ingreso) · --primeros N (los N más antiguos) · --limite N (ojear los
+ * primeros que salgan, sin ordenar). Combinables.
  * Ejecutable desde el PANEL (Mantenimiento → «Ejecutar script»), con la MISMA autoridad del Fichero.
  *
- *   node scripts/cotejar-por-isbn.js [--titulos] [--cdu] [--limite N]     (vista previa)
- *   node scripts/cotejar-por-isbn.js --ejecutar [--titulos] [--cdu]       (aplica; COPIA DE SEGURIDAD antes)
- *   node scripts/cotejar-por-isbn.js --clasificacion [--limite N]         (informe CDU, solo lectura)
+ *   node scripts/cotejar-por-isbn.js --cdu --solo-000                     (vista previa: solo cdu 000)
+ *   node scripts/cotejar-por-isbn.js --cdu --solo-000 --ultimos 1000      (los 1000 últimos con cdu 000)
+ *   node scripts/cotejar-por-isbn.js --cdu --solo-000 --desde 2026-01-01 --ejecutar   (aplica; BACKUP antes)
+ *   node scripts/cotejar-por-isbn.js --clasificacion --solo-000          (informe CDU de los 000, solo lectura)
  */
 import 'dotenv/config';
 import '../src/config.js';
@@ -36,7 +40,13 @@ const EJECUTAR = arg('--ejecutar');
 const CLASIFICACION = arg('--clasificacion');
 let TITULOS = arg('--titulos'), CDU = arg('--cdu');
 if (!TITULOS && !CDU) { TITULOS = true; CDU = true; }   // sin alcance explícito → ambos
-const LIMITE = (() => { const i = process.argv.indexOf('--limite'); return i >= 0 ? Number(process.argv[i + 1]) : 0; })();
+const valorDe = (f) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : null; };
+const numDe = (f) => { const v = valorDe(f); const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+const LIMITE = numDe('--limite');
+const SOLO000 = arg('--solo-000');   // solo documentos con cdu EXACTAMENTE '000'
+const DESDE = valorDe('--desde');    // solo desde esta fecha de ingreso (YYYY-MM-DD)
+const ULTIMOS = numDe('--ultimos');  // los N MÁS RECIENTES por fecha de ingreso
+const PRIMEROS = numDe('--primeros'); // los N MÁS ANTIGUOS por fecha de ingreso
 const MUESTRA = 15;
 
 // Normalizaciones para comparar.
@@ -48,6 +58,22 @@ const sinExtension = (n) => String(n || '').replace(/\.[^.]+$/, '');
 const db = await conectarDB();
 const bib = db.collection('biblioteca');
 const FILTRO = { isbn: { $exists: true, $nin: [null, ''] } };
+if (SOLO000) FILTRO.cdu = '000';   // acota a los NO clasificados (cdu exactamente '000')
+if (DESDE) {
+    const d = new Date(DESDE);
+    if (Number.isNaN(d.getTime())) { console.error('❌ --desde: fecha no válida (usa YYYY-MM-DD).'); process.exit(1); }
+    FILTRO.fecha_ingreso = { $gte: d };
+}
+// Orden/límite por fecha de INGRESO: --ultimos N (los más recientes) o --primeros N (los más antiguos). Sin
+// ninguno, se recorre en el orden natural del cursor (y --limite «ojea» los primeros que salgan).
+const acotarPorFecha = (cur) => {
+    if (ULTIMOS) return cur.sort({ fecha_ingreso: -1 }).limit(ULTIMOS);
+    if (PRIMEROS) return cur.sort({ fecha_ingreso: 1 }).limit(PRIMEROS);
+    return cur;
+};
+// Cuántos se van a recorrer de verdad (para las cabeceras/progreso) y una etiqueta del alcance.
+const objetivoDe = (total) => ULTIMOS || PRIMEROS || LIMITE || total;
+const etiqAlcance = `${SOLO000 ? ' · SOLO cdu 000' : ''}${DESDE ? ` · desde ${DESDE}` : ''}${ULTIMOS ? ` · últimos ${ULTIMOS}` : PRIMEROS ? ` · primeros ${PRIMEROS}` : LIMITE ? ` · ojeando ${LIMITE}` : ''}`;
 
 // ── Modo INFORME de clasificación (--clasificacion): compara la CDU catalogada con la del Fichero. Solo lectura.
 if (CLASIFICACION) {
@@ -58,12 +84,12 @@ if (CLASIFICACION) {
         return null;
     };
     const total = await bib.countDocuments(FILTRO);
-    console.log(`\nClasificación por ISBN — INFORME (solo lectura) · libros con ISBN: ${total}${LIMITE ? ` (ojeando ${LIMITE})` : ''}\n`);
-    const cur = bib.find(FILTRO, { projection: { cdu: 1, isbn: 1 } });
+    console.log(`\nClasificación por ISBN — INFORME (solo lectura) · libros con ISBN: ${total}${etiqAlcance}\n`);
+    const cur = acotarPorFecha(bib.find(FILTRO, { projection: { cdu: 1, isbn: 1 } }));
     let n = 0, sinFich = 0, aporta = 0, exacto = 0, area = 0, difiere = 0; const ejDif = [];
     for await (const d of cur) {
         if (LIMITE && n >= LIMITE) break;
-        n++; if (n % 500 === 0) process.stdout.write(`  … ${n}/${LIMITE || total}\r`);
+        n++; if (n % 500 === 0) process.stdout.write(`  … ${n}/${objetivoDe(total)}\r`);
         const fic = await cduFich(await buscarEnFicheroLocal({ isbns: variantesISBN(d.isbn) }).catch(() => null));
         if (!fic) { sinFich++; continue; }
         const cat = normCdu(d.cdu);
@@ -108,14 +134,14 @@ async function evaluar(doc) {
 }
 
 const total = await bib.countDocuments(FILTRO);
-console.log(`\nCotejo por ISBN (autoridad Fichero) — ${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'} · alcance: ${[TITULOS && 'títulos', CDU && 'CDU'].filter(Boolean).join(' + ')} · libros con ISBN: ${total}${LIMITE ? ` (ojeando ${LIMITE})` : ''}\n`);
+console.log(`\nCotejo por ISBN (autoridad Fichero) — ${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'} · alcance: ${[TITULOS && 'títulos', CDU && 'CDU'].filter(Boolean).join(' + ')} · libros con ISBN: ${total}${etiqAlcance}\n`);
 
-const cur = bib.find(FILTRO, { projection: { titulo: 1, subtitulo: 1, cdu: 1, isbn: 1, nombre_archivo: 1 } });
+const cur = acotarPorFecha(bib.find(FILTRO, { projection: { titulo: 1, subtitulo: 1, cdu: 1, isbn: 1, nombre_archivo: 1 } }));
 let n = 0, cambT = 0, cambC = 0, sospechosos = 0, aplicados = 0;
 const ejT = [], ejC = [], ejS = [];
 for await (const doc of cur) {
     if (LIMITE && n >= LIMITE) break;
-    n++; if (n % 500 === 0) process.stdout.write(`  … ${n}/${LIMITE || total}\r`);
+    n++; if (n % 500 === 0) process.stdout.write(`  … ${n}/${objetivoDe(total)}\r`);
     let e; try { e = await evaluar(doc); } catch { continue; }
     if (!e) continue;
     if (e.difiereTitulo && !e.corroborado) { sospechosos++; if (ejS.length < MUESTRA) ejS.push(`  «${String(doc.titulo).slice(0, 30)}» (ISBN ${doc.isbn}) — difiere y NO corrobora`); }

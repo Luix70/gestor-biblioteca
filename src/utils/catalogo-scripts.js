@@ -205,8 +205,12 @@ export const CATALOGO_SCRIPTS = [
         params: [
             { nombre: 'titulos', flag: '--titulos', tipo: 'switch', etiqueta: 'Corregir títulos' },
             { nombre: 'cdu', flag: '--cdu', tipo: 'switch', etiqueta: 'Corregir CDU (mueve la carpeta)' },
+            { nombre: 'solo000', flag: '--solo-000', tipo: 'switch', etiqueta: 'Solo CDU 000 (sin clasificar)' },
             { nombre: 'clasificacion', flag: '--clasificacion', tipo: 'switch', etiqueta: 'Solo informe de CDU (lectura)' },
-            { nombre: 'limite', flag: '--limite', tipo: 'numero', etiqueta: 'Límite (para probar)', ejemplo: '200' },
+            { nombre: 'desde', flag: '--desde', tipo: 'texto', etiqueta: 'Desde fecha de ingreso (YYYY-MM-DD)', ejemplo: '2026-01-01' },
+            { nombre: 'ultimos', flag: '--ultimos', tipo: 'numero', etiqueta: 'Solo los N últimos (por ingreso)', ejemplo: '1000' },
+            { nombre: 'primeros', flag: '--primeros', tipo: 'numero', etiqueta: 'Solo los N primeros (por ingreso)', ejemplo: '1000' },
+            { nombre: 'limite', flag: '--limite', tipo: 'numero', etiqueta: 'Ojear N (sin ordenar)', ejemplo: '200' },
         ] }),
     S({ id: 'limpiar-titulos', cat: 'Metadatos y clasificación', escribe: true, aplica: '--ejecutar',
         resumen: 'Limpia la puntuación ISBD de los títulos (« :» final y «::»)',
