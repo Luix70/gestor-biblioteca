@@ -1969,7 +1969,8 @@ export function rutasPanel() {
             const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             if (doc.locked) return res.json({ ok: false, motivo: 'documento bloqueado (locked)' });
-            const r2 = await reenriquecerDoc(db, doc);
+            // `sinIA` (opción del cliente): impide la única IA del enriquecimiento (clasificar la CDU por texto).
+            const r2 = await reenriquecerDoc(db, doc, { sinIA: !!(req.body && req.body.sinIA) });
             res.json(r2);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

@@ -4018,7 +4018,10 @@ async function fichaAccion(tipo, id, btn) {
   btn.disabled = true;
   btn.textContent = tipo === 'conformar' ? '⏳ Conformando…' : '⏳ Enriqueciendo…';
   try {
-    const r = await api('/documentos/' + encodeURIComponent(id) + '/' + tipo, { method: 'POST', body: '{}' });
+    // Enriquecer respeta la preferencia IA elegida en el lote (localStorage). Por defecto (nunca elegida) =
+    // como antes (permite la IA de texto de CDU). «0» = sin IA.
+    const body = tipo === 'enriquecer' ? JSON.stringify({ sinIA: localStorage.getItem('enriquecer_con_ia') === '0' }) : '{}';
+    const r = await api('/documentos/' + encodeURIComponent(id) + '/' + tipo, { method: 'POST', body });
     if (!r.ok) {
       toast(r.motivo || 'sin cambios', 'warn');
       return;
@@ -8327,6 +8330,29 @@ async function portadaComunLote() {
   };
   inp.click();
 }
+// Chooser de ENRIQUECER: elige si permitir IA. Enriquecer NO usa visión; la ÚNICA IA que puede gastar es
+// clasificar la CDU por TEXTO cuando un libro no tiene CDU y ni el Fichero ni el crosswalk determinista la
+// resuelven. Devuelve { sinIA } o null (cancelado). Recuerda la última elección (localStorage) como defecto.
+function _preguntarEnriquecerIA(n) {
+  return new Promise((resolve) => {
+    const conIAprev = localStorage.getItem('enriquecer_con_ia') === '1';
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:460px">
+      <h3 style="margin-top:0">✨ Enriquecer ${n} documento(s)</h3>
+      <p class="muted" style="font-size:13px;line-height:1.5">Re-consulta las fuentes (Fichero local + OpenLibrary/Google Books) y rellena huecos; con ISBN válido recupera autores, colección y título autoritativos. <b>No usa visión.</b> La única IA posible es clasificar la <b>CDU por texto</b> de los libros SIN CDU cuando el Fichero y el crosswalk determinista no la resuelven.</p>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+        <button class="btn${conIAprev ? '' : ' pri'}" id="enrNoIA">🆓 Sin IA (solo fuentes gratis)</button>
+        <button class="btn${conIAprev ? ' pri' : ''}" id="enrConIA">🤖 Con IA (permite clasificar la CDU con IA de pago si hace falta)</button>
+        <button class="btn" id="enrX" style="margin-top:2px">Cancelar</button>
+      </div></div>`;
+    $('#cmpScrim').style.display = 'block';
+    $('#cmpModal').style.display = 'grid';
+    const fin = (v) => { cerrarCmp(); resolve(v); };
+    $('#cmpScrim').onclick = () => fin(null);
+    $('#enrX').onclick = () => fin(null);
+    $('#enrNoIA').onclick = () => { localStorage.setItem('enriquecer_con_ia', '0'); fin({ sinIA: true }); };
+    $('#enrConIA').onclick = () => { localStorage.setItem('enriquecer_con_ia', '1'); fin({ sinIA: false }); };
+  });
+}
 // Aplica EN LOTE una acción de la ficha (conformar/enriquecer/reprocesar) a la selección del Catálogo.
 // Secuencial (una a una, para no saturar el servidor ni las APIs/IA), con progreso en la barra. Reutiliza
 // los MISMOS endpoints por-documento que la ficha individual. «Medir» y las que necesitan interacción
@@ -8337,7 +8363,7 @@ async function accionLoteFicha(tipo, { verbo = 'Procesar', password = false } = 
   // Reprocesar: MISMO modal que la ficha individual (elige modo CONSERVADOR / NUEVO DESDE CERO + contraseña
   // de admin). La contraseña se pide UNA vez y viaja en cada petición (si falta → 403). Conformar/Enriquecer
   // no la necesitan (solo un aviso de confirmación).
-  let pw = null, conservar = true;
+  let pw = null, conservar = true, sinIA = false;
   if (tipo === 'reprocesar') {
     const el = await modalReprocesar({ n: ids.length });
     if (el == null) return; // cancelado
@@ -8348,8 +8374,13 @@ async function accionLoteFicha(tipo, { verbo = 'Procesar', password = false } = 
       aviso: `Acción MASIVA. Confirma con tu contraseña de administrador.`,
     });
     if (pw == null) return; // cancelado
+  } else if (tipo === 'enriquecer') {
+    // Enriquecer: se ELIGE si permitir la única IA que puede gastar (clasificar la CDU por texto).
+    const el = await _preguntarEnriquecerIA(ids.length);
+    if (el == null) return; // cancelado
+    sinIA = el.sinIA;
   } else if (!window.confirm(`¿${verbo} ${ids.length} documento(s) seleccionado(s)?`)) return;
-  const body = JSON.stringify(tipo === 'reprocesar' ? { password: pw, conservar } : (password ? { password: pw } : {}));
+  const body = JSON.stringify(tipo === 'reprocesar' ? { password: pw, conservar } : (password ? { password: pw } : (tipo === 'enriquecer' ? { sinIA } : {})));
   const bar = $('#searchBulk');
   let ok = 0, err = 0, cambios = 0, ultErr = '';
   for (let i = 0; i < ids.length; i++) {

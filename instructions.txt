@@ -762,6 +762,13 @@ de ficheros clasificado por CDU.
          alertas_agente (auditoría; el fichero físico nunca se toca). Arreglo así los libros
          mal catalogados cuyo título quedó como el sello y cuyos «autores» eran la colección
          o el propio título. Funciona igual en LOTE (✨ Enriquecer sobre la selección).
+         OPCIÓN IA (nuevo): Enriquecer NO usa visión; la ÚNICA IA que puede gastar es clasificar
+         la CDU por TEXTO (libros SIN CDU cuando el Fichero/crosswalk determinista no la sacan).
+         Al enriquecer en LOTE se ELIGE: «🆓 Sin IA (solo fuentes gratis)» o «🤖 Con IA»
+         (_preguntarEnriquecerIA); la elección se recuerda (localStorage enriquecer_con_ia) y la
+         respeta también el botón de la ficha. Viaja como body.sinIA → reenriquecerDoc →
+         buscarMetadatosExternos({sinIA}) → resolverCDU({permitirIA:!sinIA}). Por defecto (nunca
+         elegida) sigue como antes (permite la IA de texto de CDU).
     En «Datos catalográficos» el bloque de agrupación va en orden: Obra · ISBN obra ·
     Volumen nº · Título del volumen · Colección · Nº en colección (el nº de colección
     justo tras la colección).

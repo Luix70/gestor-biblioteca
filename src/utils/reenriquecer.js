@@ -120,15 +120,17 @@ async function nombreEditorialActual(db, doc) {
     return e?.nombre || '';
 }
 
-export async function reenriquecerDoc(db, doc, { aplicar = true } = {}) {
+export async function reenriquecerDoc(db, doc, { aplicar = true, sinIA = false } = {}) {
     const col = db.collection('biblioteca');
     const isbnValido = doc.isbn && validarISBN(doc.isbn);
     const isbnVar = isbnValido ? variantesISBN(doc.isbn) : [];
 
     let datos;
     try {
+        // `sinIA` (opción del usuario): la ÚNICA IA que puede gastar el enriquecimiento es clasificar la CDU por
+        // TEXTO cuando el Fichero/crosswalk determinista no la resuelven. Con sinIA=true no se permite → gratis.
         datos = await buscarMetadatosExternos(doc.titulo || '', '', null, {
-            incluirSinopsis: !doc.sinopsis, incluirCdu: !doc.cdu, isbnsArchivo: isbnVar, idioma: doc.idioma || null,
+            incluirSinopsis: !doc.sinopsis, incluirCdu: !doc.cdu, isbnsArchivo: isbnVar, idioma: doc.idioma || null, sinIA,
         });
     } catch (e) { return { ok: false, motivo: `la consulta a las fuentes falló: ${e.message}` }; }
 
