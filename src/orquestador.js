@@ -165,6 +165,71 @@ function metadatosDesdeNombre(ruta) {
     return datos;
 }
 
+// Un segmento de carpeta que es claramente un SELLO DE FECHA/HORA de descarga (p. ej. «15012015-1445» =
+// DDMMYYYY-HHMM): 6-8 dígitos + separador + 2-6 dígitos, TODO el nombre. NO es un ISBN, aunque 10 de sus cifras
+// pasen el dígito de control por casualidad (visto de verdad: «15012015-1445» → «1501201514» valida como ISBN-10).
+// Se salta para no consultar el Fichero en balde; la corroboración lo rechazaría igual, pero esto lo ataja antes.
+const pareceSelloDeFecha = (s) => /^\d{6,8}[-_.]\d{2,6}$/.test(String(s || '').trim());
+
+/**
+ * ISBN(s) VÁLIDOS que aparecen en el nombre de la carpeta contenedora o de sus carpetas ANIDADAS (hasta
+ * `maxNiveles` hacia arriba desde el fichero). Devuelve [{ isbn, seg }] (seg = el nombre de carpeta de origen,
+ * para el log), sin duplicados y saltando los segmentos que son sellos de fecha. No decide nada: son CANDIDATOS
+ * que luego se corroboran contra el documento.
+ */
+function isbnsDeCarpetas(rutaArchivo, maxNiveles = 4) {
+    const out = new Map();   // isbn validado (normalizado) → segmento de origen
+    let dir = path.dirname(path.resolve(rutaArchivo));
+    for (let i = 0; i < maxNiveles; i++) {
+        const seg = path.basename(dir);
+        const padre = path.dirname(dir);
+        if (!seg || padre === dir) break;          // raíz del sistema de ficheros
+        if (!pareceSelloDeFecha(seg)) {
+            for (const isbn of extraerISBNs(seg)) if (!out.has(isbn)) out.set(isbn, seg);
+        }
+        dir = padre;
+    }
+    return [...out.entries()].map(([isbn, seg]) => ({ isbn, seg }));
+}
+
+/**
+ * ISBN EN EL NOMBRE DE LA CARPETA (o de una anidada), CORROBORADO. Diseño (petición del usuario): una secuencia
+ * de la carpeta que ES un ISBN válido se toma como CANDIDATO y se VALIDA inspeccionando el documento; si no
+ * corrobora, se ignora y sigue el procedimiento habitual. Reglas (conservadoras, «identificar, no adivinar»):
+ *   · NO actúa si el fichero ya trajo un ISBN propio (manda el del fichero: p. ej. carpeta «0130970697» con dos
+ *     PDFs de ISBN distinto → cada uno conserva el SUYO) ni si el usuario marcó «sin_isbn».
+ *   · Se corrobora de dos formas, la 1ª más fuerte: (a) el candidato YA aparece entre los ISBN del propio
+ *     documento (cuerpo/nombre/visión) → CONFIRMADO por el contenido; (b) resuelve en el Fichero a un libro cuyo
+ *     TÍTULO casa con el del documento (o el de su nombre) → corroborado (`corroborarISBNporTitulo`).
+ *   · Solo al corroborar se asciende a `isbn_propio` (pivote → Fichero/APIs sin IA). Si NADA corrobora, no toca
+ *     nada (el sello de fecha «1501201514» del otro lote muere aquí: ni está en el contenido ni casa por título).
+ * Muta datosBase in situ. Best-effort: nunca lanza.
+ */
+async function corroborarISBNdeCarpeta(datosBase, rutaArchivo) {
+    try {
+        if (datosBase.isbn_propio || datosBase._isbnBloqueado) return;
+        const candidatos = isbnsDeCarpetas(rutaArchivo);
+        if (!candidatos.length) return;
+        const propios = new Set(datosBase.isbn_candidatos || []);
+        const refTitulo = datosBase.titulo || tituloDesdeNombre(path.basename(rutaArchivo)) || '';
+        for (const { isbn, seg } of candidatos) {
+            const vs = variantesISBN(isbn);
+            const enContenido = vs.some((v) => propios.has(v));
+            const ok = enContenido ? isbn : await corroborarISBNporTitulo({ candidatos: vs, titulo: refTitulo });
+            if (!ok) continue;
+            const norm = validarISBN(ok) || ok;
+            datosBase.isbn = datosBase.isbn || norm;
+            datosBase.isbn_propio = norm;
+            datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(norm)])];
+            datosBase.alertas_agente = [...(datosBase.alertas_agente || []), enContenido
+                ? `ISBN ${norm} del nombre de la carpeta «${seg}» CONFIRMADO por el contenido del documento → identificación sin IA.`
+                : `ISBN ${norm} del nombre de la carpeta «${seg}» corroborado por título en el Fichero → identificación sin IA.`];
+            console.log(`[Orquestador] ISBN de carpeta «${seg}» ${enContenido ? 'confirmado por contenido' : 'corroborado por título'} (${norm}) para ${path.basename(rutaArchivo)}.`);
+            return;
+        }
+    } catch (e) { console.warn(`[Orquestador] corroboración ISBN-de-carpeta omitida en "${path.basename(rutaArchivo)}": ${e.message}`); }
+}
+
 // TÍTULO/IDIOMA ORIGINAL (obras traducidas) desde la PÁGINA DE CRÉDITOS del propio fichero (EPUB/PDF), GRATIS
 // y sin IA — ya en la INGESTA (la IA solo mira la portada, no el texto de créditos, así que se le escapaba y
 // quedaba para el Conformador). Solo se rellenan HUECOS y solo si DIFIEREN del título/idioma del documento.
@@ -767,6 +832,13 @@ export async function procesarRecurso(entrada) {
         datosBase.cdu = String(contexto.cdu).trim();
         datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `CDU ${datosBase.cdu} fijada en el formulario de la subida.`];
     }
+
+    // ISBN EN EL NOMBRE DE LA CARPETA (o de una anidada): si el fichero no trajo un ISBN propio y una carpeta del
+    // camino lleva una secuencia que ES un ISBN válido, se toma como CANDIDATO y se VALIDA contra el documento
+    // (aparece en su contenido, o resuelve en el Fichero a un título que casa). Si corrobora → ISBN propio
+    // (identificación por Fichero/APIs sin IA); si no, se ignora y sigue el procedimiento habitual. Va DESPUÉS de
+    // override/patrón/formulario (esas fuentes mandan) y ANTES del enriquecimiento (para que el ISBN pivote).
+    await corroborarISBNdeCarpeta(datosBase, rutas[0]);
 
     // POLÍTICA POR Nº DE PÁGINAS (solo PDF), tras identificar (ISBN/ISSN/visión) para no pisar una identidad
     // fuerte: un ESCANEO fino (< umbral) → libro de 'papel' (el PDF se conserva igual); un PDF LEGIBLE y corto

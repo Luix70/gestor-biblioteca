@@ -3091,6 +3091,19 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       valido en la pagina de creditos (JQuery, Packt) CASA por titulo → pasa a LIBRO con su ISBN
       (antes: `esFechada` lo degradaba a «revista sin ISSN» → Cuarentena). El title-match es la
       salvaguarda: el ISBN de un anuncio dentro de una revista no casa con el titulo de la revista.
+    * ISBN EN EL NOMBRE DE LA CARPETA (o de una carpeta anidada) — orquestador·corroborarISBNdeCarpeta:
+      muchas descargas guardan el libro en una carpeta cuyo nombre ES/CONTIENE el ISBN («0071784225_
+      Programming/», «156396242XAtomicPhysics/»). Si el FICHERO no trajo un ISBN propio, se recogen los
+      ISBN validos de los segmentos de la ruta (hasta 4 niveles) como CANDIDATOS y se VALIDAN contra el
+      documento: (a) el candidato ya aparece entre los ISBN del propio doc (cuerpo/nombre/vision) →
+      CONFIRMADO por contenido; o (b) resuelve en el Fichero a un libro cuyo TITULO casa con el del doc
+      (o el de su nombre) → corroborado. Solo entonces pasa a `isbn_propio` (→ Fichero/APIs SIN IA); si
+      nada corrobora, se IGNORA y sigue el procedimiento habitual. GUARDARRAILES: (1) NUNCA pisa el ISBN
+      del propio fichero — carpeta «0130970697/» con dos PDFs de ISBN distinto: cada uno conserva el SUYO;
+      (2) los segmentos que son SELLOS DE FECHA/HORA de descarga («15012015-1445» = DDMMYYYY-HHMM) se
+      SALTAN — 10 de sus cifras pueden pasar el digito de control por casualidad («1501201514») y seria un
+      ISBN falso; ademas, aunque colara, no casaria por titulo. Es el mismo title-match que la corroboracion
+      del cuerpo: la validez del ISBN (checksum) NO basta, tiene que CASAR con el documento.
     * .djv = .djvu: el .djv es la misma familia DjVu (djvulibre lo lee igual). Se reconoce como
       variante en TODAS las listas de extension (ingesta, visor paginado, mantenimiento, frontend);
       su `formato` catalogado sigue siendo 'djvu'. (Caso de «lista incompleta»: se verifico que

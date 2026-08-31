@@ -51,6 +51,17 @@ Todo pasa por un único servicio compartido para que los dos puntos de entrada s
 - **El ISBN es el pivote.** Los buscadores aceptan **varios candidatos** (variantes 10/13, del
   texto y del nombre de archivo) y prueban cada uno: un libro suele estar indexado por una sola de
   sus formas (evita 404). `utils/identificadores.js` valida dígitos de control y convierte 10↔13.
+  **ISBN en el nombre de la CARPETA** (`orquestador·corroborarISBNdeCarpeta`): muchas descargas guardan
+  el libro en una carpeta cuyo nombre ES/contiene el ISBN (`0071784225_Programming/`, `156396242X…/`).
+  Si el fichero no dio ISBN propio, los ISBN válidos de los segmentos de la ruta (≤4 niveles) son
+  **candidatos** que se VALIDAN contra el documento antes de usarse: (a) el candidato ya está entre los
+  ISBN del propio doc → confirmado por contenido; o (b) resuelve en el Fichero a un título que casa →
+  corroborado. Solo entonces pasa a `isbn_propio`; si nada casa, se ignora (procedimiento habitual).
+  Dos guardarraíles nacidos de casos reales: **nunca pisa el ISBN del propio fichero** (carpeta
+  `0130970697/` con dos PDFs de ISBN distinto → cada uno conserva el suyo), y los segmentos que son
+  **sellos de fecha** (`15012015-1445`) se saltan (10 de sus cifras pasaban el checksum → ISBN falso
+  `1501201514`). La validez del checksum NO basta: el ISBN tiene que CASAR con el documento (mismo
+  principio que la corroboración del cuerpo).
 - **Modelo de imágenes:** un libro tiene VARIAS imágenes; `imagenes: [{ruta, tipo, origen}]` +
   un `portada` (string) que el front-end muestra sin recorrer el array. Cubierta del fichero/escaneo
   gana; las remotas (`portadas_remotas`) son candidatas de respaldo.
