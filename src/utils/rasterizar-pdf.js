@@ -155,7 +155,16 @@ export async function tamanoPagina(ruta) {
  * en CPU, sin SIMD; apto para el Atom). Coordenadas en el espacio de píxeles del DPI dado. Devuelve el
  * buffer JPEG o null. Se usa para enfocar el CÓDIGO DE BARRAS de la cubierta antes de pasarlo a la visión.
  */
+// Tope duro de píxeles del recorte (borde inferior-derecho): pdftoppm rasteriza la PÁGINA hasta ese punto a la
+// resolución dada, así que un mediabox descomunal/corrupto (60×200") pediría decenas de M px y REVENTARÍA la RAM
+// del contenedor (OOM → caída de la app). Por encima del tope, se rechaza (warn + null) en vez de tumbar Node.
+const MAX_PX_RECORTE = Number(process.env.PDF_RECORTE_MAX_PX || 24_000_000);
 export async function rasterizarRecorte(ruta, pagina, { dpi, x, y, w, h }) {
+    const X = Math.max(0, Math.round(x)), Y = Math.max(0, Math.round(y)), W = Math.max(1, Math.round(w)), H = Math.max(1, Math.round(h));
+    if ((X + W) * (Y + H) > MAX_PX_RECORTE) {
+        console.warn(`[Raster] recorte p${pagina} OMITIDO: región ${X + W}×${Y + H}px supera el tope anti-OOM (mediabox gigante/corrupto en "${path.basename(ruta)}").`);
+        return null;
+    }
     let dir;
     try { dir = await fs.mkdtemp(path.join(os.tmpdir(), 'crop-')); } catch { return null; }
     const prefijo = path.join(dir, `crop-${pagina}`);
@@ -163,8 +172,7 @@ export async function rasterizarRecorte(ruta, pagina, { dpi, x, y, w, h }) {
         await execFileP('pdftoppm', [
             '-jpeg', '-singlefile', '-f', String(pagina), '-l', String(pagina),
             '-r', String(Math.round(dpi)),
-            '-x', String(Math.max(0, Math.round(x))), '-y', String(Math.max(0, Math.round(y))),
-            '-W', String(Math.max(1, Math.round(w))), '-H', String(Math.max(1, Math.round(h))),
+            '-x', String(X), '-y', String(Y), '-W', String(W), '-H', String(H),
             ruta, prefijo,
         ], { timeout: await timeoutPoppler(ruta) });
         return await fs.readFile(`${prefijo}.jpg`);

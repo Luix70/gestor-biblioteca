@@ -41,7 +41,14 @@ function recortesDePagina(p) {
 export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInternos = []) {
     const tam = await tamanoPagina(ruta);
     if (!tam) { console.warn('[Barras] pdfinfo no dio el tamaño de página → se omite la lectura de barras.'); return null; }
-    const dpi = Math.max(72, Math.round(ANCHO * 72 / tam.anchoPts));
+    // DPI para que el ANCHO objetivo salga ~ANCHO px. Suelo de 72 (barcodes nítidos en páginas pequeñas) PERO
+    // TAMBIÉN techo de píxeles: una página con mediabox DESCOMUNAL/corrupto (p. ej. 60×200") se rasterizaría a
+    // decenas de M px y REVENTARÍA la RAM del contenedor (OOM → caída de la app). Se reescala el DPI para que ni
+    // el ancho ni el alto en píxeles superen MAX_PX.
+    const MAX_PX = Number(process.env.PDF_BARRAS_MAX_PX || 3000);
+    let dpi = Math.max(72, Math.round(ANCHO * 72 / tam.anchoPts));
+    const mayorPx = Math.max(tam.anchoPts, tam.altoPts) / 72 * dpi;
+    if (mayorPx > MAX_PX) dpi = Math.max(1, Math.floor(dpi * MAX_PX / mayorPx));
     const wpx = Math.round(tam.anchoPts / 72 * dpi), hpx = Math.round(tam.altoPts / 72 * dpi);
 
     const imagenes = [];

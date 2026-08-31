@@ -111,6 +111,19 @@ de Docker (`docker ps` sin respuesta, ni RAM para el prompt SSH). Con el tope, s
 OOM mata un proceso DENTRO de él y Docker lo reinicia — la caja sobrevive. `COMPOSE_HTTP_TIMEOUT`/
 `DOCKER_CLIENT_TIMEOUT=300` en el script (el Atom tarda >60s en crear/parar el contenedor y el cliente cortaba).
 
+**Página PDF DESCOMUNAL/corrupta → OOM (arreglado):** un PDF con el mediabox gigante (visto: «~60×200"», i.e.
+`Page size: 4342 x 14400 pts`) rasterizado a resolución ABSOLUTA (`pdftoppm -r`) pedía decenas de M px (~250 MB
+en pdftoppm) → el cgroup pasaba el `mem_limit` → el OOM-killer mataba **Node** (no pdftoppm) → 502 en TODO, y si
+el vigilante reintentaba el fichero, bucle de reinicios. Causa: en `lector-barras.js` el DPI era `Math.max(72,…)`
+(un SUELO que en una página enorme NO bajaba la resolución → render a tamaño completo). Arreglo: (1) el DPI del
+lector de barras se REESCALA para que ni ancho ni alto superen `PDF_BARRAS_MAX_PX` (3000); (2) guarda dura en
+`rasterizar-pdf.js·rasterizarRecorte` — si la región (X+W)×(Y+H) supera `PDF_RECORTE_MAX_PX` (24 M px) se rechaza
+(warn + null) en vez de tumbar el proceso. Los renders de página completa (portada/OCR/visión) YA iban acotados
+por `-scale-to-x ANCHO`; el único sin acotar era el recorte de barras. (Riesgo latente pendiente: `empaquetar-
+imagenes.js` rasteriza con `-r 300` fijo — acotar si se usa «empaquetar (cbz)» sobre PDFs con páginas enormes.)
+Recuperación de un fichero-veneno: sacarlo del Inbox (a un holding) + reiniciar el contenedor; el vigilante
+arranca EN PAUSA por defecto, así que sin `VIGILANTE_AUTOSTART=1` no vuelve a intentarlo solo.
+
 **Reparto opcional NAS↔PC (ingesta en el PC):** para no ahogar el Atom, se puede mover el CATALOGADO al PC
 (más potente) dejando el NAS de servidor 24/7. NAS con `DESACTIVAR_VIGILANTE=1` (API+panel+búsqueda, sin
 watcher); PC con `docker-compose.pc.yml` (misma imagen vía Docker Desktop/WSL2, watcher activo, Fichero LOCAL
