@@ -153,6 +153,9 @@ de ficheros clasificado por CDU.
   PDF_BARRAS_MAX_PX             3000         Tope del lado mayor al rasterizar el recorte de barras (anti-OOM)
   PDF_RECORTE_MAX_PX            24000000     Tope de área de un recorte de página (por encima se rechaza)
   CBZ_PDF_MAX_PX               24000000     Tope de área al rasterizar una lámina PDF para el cbz (baja el dpi)
+  PDF_TINTA_MIN                 0.005        ≥0.5% de píxeles con tinta ⇒ página significativa (si no, se salta)
+  PDF_SIGNIFICATIVA_ANCHO      120          Ancho (px) del render gris de medida de tinta (salto de páginas vacías)
+  PDF_OCR_VENTANA_EXTRA        5            Páginas de más que se sondean por delante/detrás para saltar blancos
   CLASIF_PAPEL_MAX_PAGINAS      12           Escaneado < N páginas → «papel»
   CLASIF_CAPITULO_MAX_PAGINAS   20           Legible < N páginas sin ISBN → capítulo/artículo
   DJVU_CONCURRENCIA             1            Páginas DjVu rasterizadas a la vez (1 = seguro en el Atom)
@@ -3104,6 +3107,30 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       SALTAN — 10 de sus cifras pueden pasar el digito de control por casualidad («1501201514») y seria un
       ISBN falso; ademas, aunque colara, no casaria por titulo. Es el mismo title-match que la corroboracion
       del cuerpo: la validez del ISBN (checksum) NO basta, tiene que CASAR con el documento.
+    * .opf HERMANO (Calibre) + PORTADAS SUELTAS — vigilante·buscarOpfHermano / buscarPortadaPreextraida +
+      utils/lector-opf.js: una exportacion de Calibre deja junto al libro un «Titulo - Autor.opf» (metadatos
+      FIABLES: titulo/autor/editorial/ISBN/idioma/serie/sinopsis + la PORTADA real que referencia en <guide>) y
+      a menudo su «Titulo - Autor.jpg». En la ingesta, si hay un .opf hermano (mismo nombre, o el UNICO .opf de
+      una carpeta con <=1 documento) se examina PRIMERO: sus datos RELLENAN huecos (no pisan lo del fichero) y
+      su ISBN pasa a isbn_propio; su cubierta viaja como contexto.portadaLocal. Sin .opf: se usa la imagen del
+      MISMO nombre que el documento, y si no, una GENERICA (cover.jpg/portada.jpg/cubierta.jpg) SOLO si la
+      carpeta tiene un unico documento (con varios seria ambigua). El .opf y las portadas ya consumidas se
+      RECICLAN a la Papelera tras catalogar (si no, un cover.jpg suelto se re-cataloga como libro-imagen). Antes
+      de esto, la portada salia SIEMPRE de la pagina 1 → cientos de libros sin su cubierta real.
+    * PAGINAS EN BLANCO al extraer el 5+1 — rasterizar-pdf·rasterizarSignificativas (usada por ocr-pdf y
+      resolver-portada): al sacar las 5 frontales + 1 final para OCR/vision/portada se SALTAN las paginas sin
+      contenido util (en blanco, «intentionally left blank», «scanned by…», caption pequena, adorno decorativo
+      —vineta/floron/cul-de-lampe/«* * *»—) y se coge la siguiente SIGNIFICATIVA. Se mide la TINTA con un render
+      gris diminuto de poppler (fraccionTinta): <0.5% del papel con tinta = vacia. Se sondea una ventana algo
+      mayor (PDF_OCR_VENTANA_EXTRA) para tener de donde elegir. Fallback seguro: si todo sale vacio, no se vacia
+      la salida (se conserva de mas antes que descartar contenido real).
+    * EMPAREJAR PORTADAS + .opf (rescate retroactivo) — panel Mantenimiento «🖼️ Emparejar portadas + .opf»
+      (admin) / utils/emparejar-portadas.js: para una coleccion ya catalogada SIN sus cubiertas (la portada
+      quedo en un .jpg/.opf aparte). Sueltas esa carpeta en el Inbox, eliges una SELECCION guardada con esos
+      documentos y empareja cada portada/.opf con su doc por ISBN → nombre de fichero → titulo (los AMBIGUOS se
+      listan, no se tocan). Pone la cubierta como portada (la anterior NO se borra: baja en el carrusel) y, si se
+      marca, rellena metadatos que falten (coleccion/editorial/autor/sinopsis). «Diagnosticar» es un ensayo
+      (dry-run) que solo informa. Trabajo en 2º plano con progreso, como Integridad.
     * .djv = .djvu: el .djv es la misma familia DjVu (djvulibre lo lee igual). Se reconoce como
       variante en TODAS las listas de extension (ingesta, visor paginado, mantenimiento, frontend);
       su `formato` catalogado sigue siendo 'djvu'. (Caso de «lista incompleta»: se verifico que

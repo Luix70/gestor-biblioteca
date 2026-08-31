@@ -801,6 +801,34 @@ export async function procesarRecurso(entrada) {
         if (aplicados.length) datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Patrón de nombres de la carpeta aplicó: ${aplicados.join(', ')}.`];
     }
 
+    // METADATOS DEL .opf (Calibre) hermano del fichero: catalogación FIABLE hecha por una persona. Se aplica
+    // como el patrón: título/autores/contribuciones RELLENAN huecos (manda lo extraído del propio fichero);
+    // editorial/colección/idioma/sinopsis/materias como autoridad del .opf (rellenan si faltan); y el ISBN del
+    // .opf, que es el registro de ESTE fichero, se toma como `isbn_propio` (pivote Fichero/APIs SIN IA) salvo
+    // que el usuario haya marcado sin_isbn. La PORTADA referenciada ya viajó como contexto.portadaLocal.
+    if (contexto.opfMeta) {
+        const o = contexto.opfMeta;
+        const aplic = [];
+        if (o.titulo && (!datosBase.titulo || esTituloArtefacto(datosBase.titulo))) { datosBase.titulo = o.titulo; aplic.push('título'); }
+        if (o.autores && o.autores.length && !(datosBase.autores || []).length) { datosBase.autores = o.autores; aplic.push('autores'); }
+        if (o.contribuciones && o.contribuciones.length && !(datosBase.contribuciones || []).length) { datosBase.contribuciones = o.contribuciones; aplic.push('contribuciones'); }
+        if (o.editorial && !datosBase.editorial) { datosBase.editorial = o.editorial; aplic.push('editorial'); }
+        if (o.serie_nombre && !datosBase.coleccion_nombre) { datosBase.coleccion_nombre = o.serie_nombre; if (o.serie_indice) datosBase.coleccion_numero = o.serie_indice; aplic.push('colección'); }
+        if (o.idioma && !datosBase.idioma) { datosBase.idioma = o.idioma; aplic.push('idioma'); }
+        if (o.sinopsis && !datosBase.sinopsis) { datosBase.sinopsis = o.sinopsis; aplic.push('sinopsis'); }
+        if (o.materias && o.materias.length && !(datosBase.palabras_clave || []).length) { datosBase.palabras_clave = o.materias; aplic.push('materias'); }
+        if (o.isbn && !datosBase._isbnBloqueado) {
+            const v = validarISBN(o.isbn);
+            if (v) {
+                if (!datosBase.isbn) datosBase.isbn = v;
+                datosBase.isbn_propio = datosBase.isbn_propio || v;
+                datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...variantesISBN(v)])];
+                aplic.push('ISBN');
+            }
+        }
+        if (aplic.length) datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Metadatos del .opf (Calibre) aplicaron: ${aplic.join(', ')}.`];
+    }
+
     // ISBN provisto por el usuario (formulario del Inbox): AUTORIDAD (como un override.isbn) → la
     // identificación es directa y barata, y cuenta como señal fuerte de LIBRO (isbn_propio).
     if (contexto.isbn) {

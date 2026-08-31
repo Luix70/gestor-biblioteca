@@ -17,6 +17,7 @@ import { registrar, ipDe, registrarVista, registrarDescarga, debeRegistrar, list
 import { listarUsuariosBD, crearUsuario, editarUsuario, borrarUsuario, contarAdminsActivosBD, buscarUsuario } from './utils/usuarios-db.js';
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './integridad.js';
+import { lanzarEmparejado, estadoEmparejado } from './utils/emparejar-portadas.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
 import { informePlanHtml } from './utils/informe-plan.js';
 import { planificarInbox } from './vigilante.js';
@@ -491,6 +492,20 @@ export function rutasPanel() {
         res.json(lanzarIntegridad({ reparar: req.body?.reparar === true }));
     });
     r.get('/integridad/estado', (req, res) => res.json(estadoIntegridad()));
+
+    // ── Emparejar PORTADAS/.opf de una carpeta del Inbox con una SELECCIÓN guardada (rescate de cubiertas que
+    //    quedaron sueltas al ingerir una colección Calibre). Proceso PESADO → 2º plano + sondeo. Solo admin. ──
+    r.post('/emparejar-portadas', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        const sub = String(req.body?.carpeta || '').trim();
+        const abs = sub ? rutaInboxSegura(INBOX, sub) : INBOX;
+        if (!abs) return res.status(400).json({ ok: false, motivo: 'carpeta fuera del Inbox' });
+        const seleccionId = String(req.body?.seleccion || '').trim();
+        if (!seleccionId) return res.status(400).json({ ok: false, motivo: 'falta la selección de destino' });
+        // aplicar=false ⇒ DRY-RUN (solo informa qué emparejaría); metadatos por defecto ON (rellena huecos del .opf).
+        res.json(lanzarEmparejado({ dir: abs, seleccionId, aplicar: req.body?.aplicar === true, aplicarMeta: req.body?.metadatos !== false }));
+    });
+    r.get('/emparejar-portadas/estado', (req, res) => res.json(estadoEmparejado()));
     /**
      * Origen ABSOLUTO del panel, para los enlaces del informe HTML (se descarga y se abre desde el DISCO: uno
      * relativo apuntaría a file:/// y no llevaría a ninguna parte).

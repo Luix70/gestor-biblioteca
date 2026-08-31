@@ -9786,6 +9786,11 @@ function loadInteg() {
     $('#reindexBtn').onclick = reindexar;
     loadIndice();
   }
+  if ($('#empDiag') && ROL === 'admin') {
+    $('#empDiag').onclick = () => correrEmparejado(false);
+    $('#empAplicar').onclick = () => correrEmparejado(true);
+    cargarSeleccionesEmparejado();
+  }
   if ($('#campRefresh') && ROL === 'admin') {
     $('#campRefresh').onclick = loadCampanas;
     loadCampanas();
@@ -10358,6 +10363,109 @@ const INTEG_FASES = {
   reparando: 'Reparando (a la Papelera)…',
   hecho: 'Terminado',
 };
+// ── Emparejar portadas/.opf de una carpeta del Inbox con una selección (2º plano + informe) ──
+async function cargarSeleccionesEmparejado() {
+  const sel = $('#empSel');
+  if (!sel) return;
+  try {
+    const r = await api('/selecciones');
+    const actual = sel.value;
+    sel.innerHTML =
+      '<option value="">— elige una selección —</option>' +
+      (r.selecciones || [])
+        .map((s) => `<option value="${esc(s._id)}">${esc(s.nombre)} (${s.n || 0})</option>`)
+        .join('');
+    if (actual) sel.value = actual;
+  } catch (e) {
+    /* sin selecciones: el desplegable queda con el placeholder */
+  }
+}
+let empTimer = null;
+async function correrEmparejado(aplicar) {
+  const seleccion = $('#empSel')?.value || '';
+  const carpeta = ($('#empCarpeta')?.value || '').trim();
+  const metadatos = !!$('#empMeta')?.checked;
+  if (!seleccion) return toast('Elige una selección de destino', 'bad');
+  if (!carpeta) return toast('Escribe la carpeta del Inbox a emparejar', 'bad');
+  if (aplicar && !confirm('Aplicará las portadas (y metadatos que falten) a los documentos emparejados de la selección. La portada anterior NO se borra: baja en el carrusel. ¿Seguir?')) return;
+  const est = $('#empEstado'),
+    rep = $('#empReport');
+  $('#empDiag').disabled = $('#empAplicar').disabled = true;
+  if (rep) rep.innerHTML = '';
+  if (est) est.innerHTML = '<span class="tag warn">' + (aplicar ? 'aplicando' : 'diagnosticando') + '…</span>';
+  try {
+    const r = await api('/emparejar-portadas', {
+      method: 'POST',
+      body: JSON.stringify({ carpeta, seleccion, aplicar, metadatos }),
+    });
+    if (!r.ok) {
+      if (est) est.innerHTML = '<span class="tag bad">error</span> ' + esc(r.motivo || 'no se pudo lanzar');
+      $('#empDiag').disabled = $('#empAplicar').disabled = false;
+      return;
+    }
+    if (empTimer) clearInterval(empTimer);
+    empTimer = setInterval(sondearEmparejado, 1200);
+    sondearEmparejado();
+  } catch (e) {
+    if (est) est.innerHTML = '<span class="tag bad">error</span> ' + esc(e.message);
+    $('#empDiag').disabled = $('#empAplicar').disabled = false;
+  }
+}
+async function sondearEmparejado() {
+  const est = $('#empEstado'),
+    rep = $('#empReport');
+  let s;
+  try {
+    s = await api('/emparejar-portadas/estado');
+  } catch (e) {
+    return;
+  }
+  if (s.en_curso) {
+    const p = s.progreso || {};
+    if (est) est.innerHTML = `<span class="tag warn">${esc(s.fase || 'trabajando')}</span> ${p.hechos || 0}/${p.total || '?'}`;
+    return;
+  }
+  if (empTimer) {
+    clearInterval(empTimer);
+    empTimer = null;
+  }
+  $('#empDiag').disabled = $('#empAplicar').disabled = false;
+  if (s.error) {
+    if (est) est.innerHTML = '<span class="tag bad">error</span> ' + esc(s.error);
+    return;
+  }
+  const inf = s.informe;
+  if (!inf) {
+    if (est) est.innerHTML = '';
+    return;
+  }
+  if (!inf.ok) {
+    if (est) est.innerHTML = '<span class="tag bad">' + esc(inf.motivo || 'sin resultado') + '</span>';
+    return;
+  }
+  const R = inf.resumen || {};
+  if (est)
+    est.innerHTML =
+      `<span class="tag ${inf.aplicado ? 'ok' : 'warn'}">${inf.aplicado ? 'aplicado' : 'ensayo'}</span> ` +
+      `${R.emparejados}/${R.items} emparejados · ${R.ambiguos} ambiguos · ${R.sinMatch} sin match`;
+  // Muestra hasta 12 emparejados + los problemáticos (para revisar antes de aplicar).
+  const fila = (f) =>
+    `<div>• <b>${esc(f.titulo || f.base)}</b> <span class="muted">← ${esc(f.base)} · ${esc(f.via)}` +
+    `${f.tieneCover ? '' : ' · (sin cover)'}${f.yaTenia ? ' · ya tenía portada' : ''}` +
+    `${f.acciones ? ' → ' + esc(f.acciones.join(', ')) : ''}</span></div>`;
+  let html = '';
+  if (inf.emparejados?.length)
+    html +=
+      `<div style="margin-top:6px"><b>Emparejados (${inf.emparejados.length}):</b></div>` +
+      inf.emparejados.slice(0, 12).map(fila).join('') +
+      (inf.emparejados.length > 12 ? `<div class="muted">…y ${inf.emparejados.length - 12} más</div>` : '');
+  if (inf.ambiguos?.length)
+    html += `<div style="margin-top:6px" class="muted"><b>Ambiguos (${inf.ambiguos.length}):</b> ${inf.ambiguos.slice(0, 8).map((a) => esc(a.base) + ' (' + a.n + ')').join(', ')}${inf.ambiguos.length > 8 ? '…' : ''}</div>`;
+  if (inf.sinMatch?.length)
+    html += `<div style="margin-top:6px" class="muted"><b>Sin match (${inf.sinMatch.length}):</b> ${inf.sinMatch.slice(0, 8).map((a) => esc(a.base)).join(', ')}${inf.sinMatch.length > 8 ? '…' : ''}</div>`;
+  if (rep) rep.innerHTML = html;
+  if (inf.aplicado) toast(`Emparejado: ${R.emparejados} portada(s) aplicadas`);
+}
 let integTimer = null;
 async function correrIntegridad(reparar) {
   if (

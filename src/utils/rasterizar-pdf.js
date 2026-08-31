@@ -113,6 +113,139 @@ export async function rasterizarPaginas(ruta, { numPaginas = 2, paginas = null, 
     return salida.sort((a, b) => a.pagina - b.pagina);
 }
 
+// ── DETECCIÓN DE PÁGINAS SIN CONTENIDO ÚTIL (sin IA, apta para el Atom) ──────────────────────────────────
+// Al extraer las 5 páginas frontales + 1 final para OCR/visión/portada, una página SIN CONTENIDO IDENTIFICATIVO
+// no aporta nada y desperdicia cupo. Se salta cualquiera que esté CASI VACÍA (poca tinta): página en blanco, el
+// aviso «This page is intentionally left blank», un «scanned by …», una línea o caption pequeña, o un adorno
+// gráfico decorativo (viñeta, florón, cul-de-lampe, rosetón, separador «* * *»…). Se detecta rasterizando la
+// página a un PGM GRIS diminuto con poppler (C, sin SIMD) y midiendo la fracción de píxeles con TINTA: casi vacía
+// da ~0-0.5 %; una portada/portadilla/texto, ≥ 2 %. Barato: el PGM es minúsculo (~120px). El coste real de
+// poppler es la RELECTURA del PDF, así que se mide TODA la ventana en UNA llamada (tramos contiguos), no página
+// a página. (Un adorno GRANDE y muy denso podría superar el umbral; se prefiere conservar de más a descartar
+// contenido real — dirección segura.)
+const SIG_ANCHO = Number(process.env.PDF_SIGNIFICATIVA_ANCHO || 120);   // ancho del render de medida (px)
+const TINTA_MIN = Number(process.env.PDF_TINTA_MIN || 0.005);           // ≥ 0.5 % de píxeles con tinta = significativa
+const VENTANA_EXTRA = Number(process.env.PDF_OCR_VENTANA_EXTRA || 5);   // páginas de más que se sondean para poder saltar blancos
+
+/**
+ * Fracción de píxeles OSCUROS (con tinta) de un PGM binario P5 (0..1). Cabecera ASCII «P5 <w> <h> <maxval>» +
+ * 1 byte separador + w*h bytes de gris (pdftoppm -gray es de 8 bits → maxval 255). Robusto a comentarios (#) y
+ * espacios en la cabecera. Exportada para poder testearla en aislamiento.
+ */
+export function fraccionTinta(buf, umbralGris = 200) {
+    if (!buf || buf.length < 10) return 0;
+    let pos = 0;
+    const esEsp = (c) => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
+    const token = () => {
+        while (pos < buf.length) {                                   // saltar espacios y comentarios
+            if (buf[pos] === 0x23) { while (pos < buf.length && buf[pos] !== 0x0a) pos++; }
+            else if (esEsp(buf[pos])) pos++;
+            else break;
+        }
+        let s = '';
+        while (pos < buf.length && !esEsp(buf[pos]) && buf[pos] !== 0x23) { s += String.fromCharCode(buf[pos]); pos++; }
+        return s;
+    };
+    if (token() !== 'P5') return 0;
+    const w = parseInt(token(), 10), h = parseInt(token(), 10), maxv = parseInt(token(), 10);
+    if (!w || !h || !maxv) return 0;
+    pos++;                                                            // el ÚNICO byte separador tras maxval → los píxeles empiezan aquí
+    const total = w * h, umbral = Math.round(umbralGris * maxv / 255);
+    let oscuros = 0, contados = 0;
+    for (let i = 0; i < total && pos < buf.length; i++, pos++) { contados++; if (buf[pos] < umbral) oscuros++; }
+    return contados ? oscuros / contados : 0;
+}
+
+// Rasteriza el tramo [desde, hasta] a PGM GRIS diminuto (para medir tinta). Hermano de `rasterizarTramo` pero
+// sin -jpeg y con -gray (salida .pgm). Devuelve [{ pagina, buffer }]. Lanza (el caller distingue ilegible/timeout).
+async function rasterizarGrisTramo(ruta, desde, hasta, dir, timeout, idx) {
+    const prefijo = path.join(dir, `g${idx}`);
+    await execFileP('pdftoppm', [
+        '-gray', '-f', String(desde), '-l', String(hasta),
+        '-scale-to-x', String(SIG_ANCHO), '-scale-to-y', '-1',
+        ruta, prefijo,
+    ], { timeout: timeout || 60000 });
+    const nombres = (await fs.readdir(dir)).filter(n => n.startsWith(`g${idx}-`) && n.endsWith('.pgm'));
+    const out = [];
+    for (const n of nombres) {
+        const m = n.match(/-(\d+)\.pgm$/);
+        if (m) out.push({ pagina: parseInt(m[1], 10), buffer: await fs.readFile(path.join(dir, n)) });
+    }
+    return out;
+}
+
+// Mapa pagina→fracciónTinta para un conjunto de páginas, midiéndolas por TRAMOS contiguos (menos relecturas).
+// Best-effort: una página no medida (fallo de tramo) simplemente no aparece en el mapa.
+async function medirTinta(ruta, paginas) {
+    const objetivo = [...new Set(paginas)].filter(p => p >= 1).sort((a, b) => a - b);
+    if (!objetivo.length) return new Map();
+    let dir;
+    try { dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gris-')); } catch { return new Map(); }
+    const to = await timeoutPoppler(ruta);
+    const frac = new Map();
+    try {
+        let idx = 0;
+        for (const [desde, hasta] of tramosContiguos(objetivo)) {
+            try {
+                for (const { pagina, buffer } of await rasterizarGrisTramo(ruta, desde, hasta, dir, to, idx++)) frac.set(pagina, fraccionTinta(buffer));
+            } catch (e) {
+                if (PDF_ILEGIBLE.test(e.message || '') || PDF_ILEGIBLE.test(e.stderr || '')) break; // PDF entero ilegible
+                // tramo suelto (timeout/fallo): se sigue con el resto; las no medidas se tratan como significativas.
+            }
+        }
+    } finally {
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+    return frac;
+}
+
+// De una ventana de páginas, las que superan el umbral de tinta (una NO medida se considera significativa: no se
+// descarta contenido por un fallo de medida — dirección segura).
+const significativasDe = (frac, ventana) => ventana.filter(p => (frac.has(p) ? frac.get(p) : 1) >= TINTA_MIN);
+
+/**
+ * Rasteriza a JPEG las primeras `frente` páginas SIGNIFICATIVAS (saltando las en blanco) + la última
+ * significativa, imitando el 5+1 pero sin páginas vacías. Sondea una VENTANA (`frente`+EXTRA al principio, y otra
+ * al final) midiendo la tinta con un PGM gris, elige las páginas con contenido y solo ENTONCES las rasteriza a
+ * JPEG al ancho pedido. La 1.ª significativa = 'portada'; la última = 'contraportada'. Fallbacks: si medir falla
+ * o todo sale en blanco, cae a [1..frente]+última (nunca vacía → la comprobación de legibilidad sigue valiendo).
+ */
+export async function rasterizarSignificativas(ruta, { frente = 5, incluirUltima = true, ancho = ANCHO, numPaginas = 0 } = {}) {
+    const total = numPaginas || 0;
+    const finVentana = total ? Math.min(total, frente + VENTANA_EXTRA) : frente + VENTANA_EXTRA;
+    const ventanaFrente = Array.from({ length: finVentana }, (_, i) => i + 1);
+    const fracFrente = await medirTinta(ruta, ventanaFrente);
+    const sigFrente = significativasDe(fracFrente, ventanaFrente);
+    const elegidasFrente = (sigFrente.length ? sigFrente : ventanaFrente).slice(0, frente);
+
+    // Contraportada: la ÚLTIMA página significativa (el código de barras/ISBN suele estar ahí). Si la ventana
+    // frontal ya llegó al final del documento, se toma de esa misma medida; si no, se sondea una ventana al
+    // final. Solo se etiqueta si el documento es más largo que el frente (si no, la 1.ª ya es toda la portada).
+    let paginaFinal = null;
+    if (incluirUltima && total > frente) {
+        if (finVentana >= total) {
+            paginaFinal = (sigFrente.length ? sigFrente : ventanaFrente).slice(-1)[0]; // el frente cubrió todo el doc
+        } else {
+            const iniBack = Math.max(finVentana + 1, total - VENTANA_EXTRA);
+            if (iniBack <= total) {
+                const ventanaBack = Array.from({ length: total - iniBack + 1 }, (_, i) => iniBack + i);
+                const sigBack = significativasDe(await medirTinta(ruta, ventanaBack), ventanaBack);
+                paginaFinal = (sigBack.length ? sigBack : ventanaBack).slice(-1)[0];
+            }
+        }
+    }
+
+    // Rasterizar a JPEG SOLO las elegidas (+ la final) y RE-ETIQUETAR por posición (no por número de página:
+    // la portada puede ser la pág. 3 si las 2 primeras estaban en blanco).
+    const primera = elegidasFrente[0];
+    const pags = [...new Set([...elegidasFrente, ...(paginaFinal ? [paginaFinal] : [])])];
+    const renders = await rasterizarPaginas(ruta, { paginas: pags, ancho });
+    return renders.map(r => ({
+        buffer: r.buffer, pagina: r.pagina,
+        etiqueta: r.pagina === primera ? 'portada' : (r.pagina === paginaFinal ? 'contraportada' : `pagina-${r.pagina}`),
+    })).sort((a, b) => (a.etiqueta === 'portada' ? -1 : b.etiqueta === 'portada' ? 1 : a.pagina - b.pagina));
+}
+
 /**
  * ¿Es un PDF de IMÁGENES (escaneo), aunque traiga capa de texto OCR? Adobe Scan / CamScanner / Lens…
  * generan PDFs que SON fotos de páginas con una capa de texto OCR encima → `texto_legible` da true y

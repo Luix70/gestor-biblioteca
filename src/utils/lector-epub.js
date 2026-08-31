@@ -15,7 +15,7 @@ const esImagenHref = (href, mt) => (mt && mt.startsWith('image/')) || /\.(jpe?g|
  * capta variantes (scheme en minúsculas, urn:isbn:, sin scheme con prefijo) y, sobre todo,
  * descarta los UUID: su hexadecimal contiene tiradas de 10 dígitos que parecen un ISBN-10.
  */
-function extraerIsbnDublinCore($, metadata) {
+export function extraerIsbnDublinCore($, metadata) {
     let isbn = null;
     metadata.find('dc\\:identifier').each((i, el) => {
         if (isbn) return;
@@ -48,7 +48,7 @@ const MARC_A_ROL = {
 // Contribuidores (traductor/ilustrador/editor/…) del OPF: dc:contributor con su rol MARC. EPUB2 usa el
 // atributo `opf:role="trl"`; EPUB3 lo refina con <meta refines="#id" property="role">trl</meta>. Devuelve
 // [{nombre, rol}] con NOMBRES CRUDOS (el llamador aplica repararMojibake). Fuente de archivo = fiable.
-function extraerContribucionesEpub($, metadata) {
+export function extraerContribucionesEpub($, metadata) {
     const out = [];
     metadata.find('dc\\:contributor').each((i, el) => {
         const $el = $(el);
@@ -65,7 +65,7 @@ function extraerContribucionesEpub($, metadata) {
     return out;
 }
 
-function extraerSerieEpub($, metadata) {
+export function extraerSerieEpub($, metadata) {
     const normNum = (v) => {
         if (!v) return null;
         const s = String(v).trim();

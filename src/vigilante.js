@@ -20,6 +20,7 @@ import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
 import { esAudio } from './utils/lector-audio.js';
 import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
+import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf suelto (Calibre): metadatos + portada referenciada
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { detectarLibroDesglosado, detectarDesglosePuro } from './utils/libro-desglosado.js'; // libro + su desglose
 import { unirPdfs } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
@@ -164,19 +165,57 @@ async function dirsCandidatosPortada(carpetaTop, ficheroRuta) {
     return dirs;
 }
 
+const existeRuta = (p) => fs.access(p).then(() => true).catch(() => false);
+
+// Nombres GENÉRICOS de cubierta: el escaneador suele dejar la portada aparte SIN repetir el título del libro.
+const NOMBRE_PORTADA_GENERICA = /^(cover|portada|cubierta|frontcover|front[-_ ]?cover)$/i;
+
+/**
+ * Cubierta de nombre GENÉRICO (cover.jpg/portada.jpg/cubierta.jpg…) en `dir`, SOLO si esa carpeta contiene como
+ * mucho UN documento (con varios, una cubierta genérica sería ambigua entre ellos → no se toca). Devuelve la
+ * ruta o null. Es lo que pidió el usuario: «una carpeta con el documento y un cover.jpg → úsalo de portada».
+ */
+async function portadaGenericaEn(dir) {
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return null; }
+    if (ents.filter((e) => e.isFile() && esDocumentoLeible(e.name)).length > 1) return null;
+    const gen = ents.find((e) => e.isFile()
+        && EXT_PORTADA.includes(path.extname(e.name).toLowerCase())
+        && NOMBRE_PORTADA_GENERICA.test(path.basename(e.name, path.extname(e.name))));
+    return gen ? path.join(dir, gen.name) : null;
+}
+
+/** El .opf hermano del documento: 1) mismo nombre; 2) el ÚNICO .opf de una carpeta con ≤1 documento. null si no. */
+async function buscarOpfHermano(ficheroRuta) {
+    const dir = path.dirname(ficheroRuta);
+    const mismo = path.join(dir, path.basename(ficheroRuta, path.extname(ficheroRuta)) + '.opf');
+    if (await existeRuta(mismo)) return mismo;
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return null; }
+    const opfs = ents.filter((e) => e.isFile() && /\.opf$/i.test(e.name));
+    const docs = ents.filter((e) => e.isFile() && esDocumentoLeible(e.name));
+    return (opfs.length === 1 && docs.length <= 1) ? path.join(dir, opfs[0].name) : null;
+}
+
 async function buscarPortadaPreextraida(carpetaTop, ficheroRuta) {
     if (!carpetaTop) return null;
     const base = path.basename(ficheroRuta, path.extname(ficheroRuta));
     for (const dir of await dirsCandidatosPortada(carpetaTop, ficheroRuta)) {
         for (const ext of EXT_PORTADA) {
             const p = path.join(dir, base + ext);
-            if (await fs.access(p).then(() => true).catch(() => false)) return p; // gana la más cercana
+            if (await existeRuta(p)) return p; // gana la más cercana, por nombre (más precisa)
         }
+    }
+    // Fallback: cubierta de NOMBRE GENÉRICO (cover.jpg/portada.jpg) en la carpeta del documento o su Covers/.
+    for (const dir of await dirsCandidatosPortada(carpetaTop, ficheroRuta)) {
+        const gen = await portadaGenericaEn(dir);
+        if (gen) return gen;
     }
     return null;
 }
 
-/** Rutas de TODAS las portadas candidatas EXISTENTES de un documento (para reciclarlas tras catalogarlo). */
+/** Rutas de TODAS las portadas candidatas EXISTENTES de un documento + su .opf (para reciclarlas tras
+ *  catalogarlo — si no, un cover.jpg suelto quedaría en el Inbox y se re-catalogaría como un libro-imagen). */
 async function rutasPortadasCandidatas(carpetaTop, ficheroRuta) {
     if (!carpetaTop) return [];
     const out = [];
@@ -184,10 +223,14 @@ async function rutasPortadasCandidatas(carpetaTop, ficheroRuta) {
     for (const dir of await dirsCandidatosPortada(carpetaTop, ficheroRuta)) {
         for (const ext of EXT_PORTADA) {
             const p = path.join(dir, base + ext);
-            if (await fs.access(p).then(() => true).catch(() => false)) out.push(p);
+            if (await existeRuta(p)) out.push(p);
         }
+        const gen = await portadaGenericaEn(dir);
+        if (gen) out.push(gen);
     }
-    return out;
+    const opf = await buscarOpfHermano(ficheroRuta);   // el .opf ya consumido: a la Papelera con las portadas
+    if (opf) out.push(opf);
+    return [...new Set(out)];
 }
 
 /** Poda (bottom-up) las SUBcarpetas de 'top' que quedaron vacías o solo con basura. No toca 'top' aquí; la
@@ -1189,6 +1232,19 @@ async function procesarUnidad(unidad) {
     if (!unidad.esImagenes && unidad.carpeta) {
         const portadaLocal = await buscarPortadaPreextraida(unidad.carpeta, unidad.rutas[0]);
         if (portadaLocal) contexto.portadaLocal = portadaLocal;
+    }
+    // METADATOS .opf (Calibre) hermano del fichero: se EXAMINAN AHORA para catalogar el documento que referencian
+    // — aportan título/autor/editorial/colección/ISBN/sinopsis (el orquestador los aplica sin pisar lo del propio
+    // fichero) y —clave— la PORTADA real que referencian (la que el escaneador dejó aparte y la ingesta ignoraba).
+    if (!unidad.esImagenes && unidad.rutas[0]) {
+        const opf = await buscarOpfHermano(unidad.rutas[0]);
+        if (opf) {
+            const meta = await leerOPF(opf);
+            if (opfEsSignificativo(meta)) {
+                contexto.opfMeta = meta;
+                if (!contexto.portadaLocal && meta.cover_path && await existeRuta(meta.cover_path)) contexto.portadaLocal = meta.cover_path;
+            }
+        }
     }
     try {
         const r = await ingestarRecurso({ rutas: unidad.rutas, contexto });

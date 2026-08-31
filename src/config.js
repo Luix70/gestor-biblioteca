@@ -100,6 +100,11 @@ export const AJUSTES = {
     PDF_OCR_PAGINAS: 5,             // nº de primeras páginas (+ la última) a rasterizar para OCR/barras. OJO: la
                                     // página de CRÉDITOS/ISBN suele ser la 4ª-5ª → con menos se perdía. Mín. 5.
     PDF_OCR_ANCHO: 1600,            // ancho del rasterizado para OCR/barras (alto = ISBN en letra pequeña legible)
+    // Salto de PÁGINAS EN BLANCO al extraer el 5+1: se sondea una ventana mayor midiendo la TINTA (render gris
+    // diminuto de poppler) y se cogen las páginas con contenido, saltando las vacías / «intentionally left blank».
+    PDF_SIGNIFICATIVA_ANCHO: 120,   // ancho (px) del render gris de medida de tinta (barato: solo para decidir)
+    PDF_TINTA_MIN: 0.005,           // ≥ 0.5 % de píxeles con tinta ⇒ página significativa (por debajo = en blanco)
+    PDF_OCR_VENTANA_EXTRA: 5,       // páginas de más que se sondean por delante/detrás para poder saltar blancos
     PDF_BARRAS_ANCHO: 2000,         // ancho equivalente de los recortes del código de barras (alto pero acotado para no asfixiar al Atom)
     // --- Topes ANTI-OOM del rasterizado (mediabox descomunal/corrupto) ---
     // Una página con el mediabox corrupto (p. ej. 60×200") rasterizada a resolución normal pide decenas de M px

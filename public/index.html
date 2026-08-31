@@ -206,6 +206,34 @@
                   <span class="mono">docker exec gestor-biblioteca node scripts/reindexar-busqueda.js</span>.
                 </p>
               </details>
+              <details class="card foldcard admin-only" id="fcEmparejarPortadas" data-fold="pc">
+                <summary><h3>🖼️ Emparejar portadas + .opf</h3></summary>
+                <p class="muted" style="margin-top: 0; font-size: 12px">
+                  Rescata cubiertas y catalogación que quedaron SUELTAS (una colección Calibre en la que la
+                  portada real venía en un <span class="mono">.jpg</span>/<span class="mono">.opf</span> aparte y
+                  se catalogó la página 1). Suelta esa carpeta en el <b>Inbox</b>, elige una <b>selección</b> con
+                  los documentos ya catalogados y empareja por ISBN → nombre → título. La portada entrante pasa a
+                  ser la 1.ª (la anterior NO se borra, baja en el carrusel). <b>Diagnosticar</b> es un ensayo:
+                  no toca nada.
+                </p>
+                <div class="row" style="align-items: center; gap: 8px; flex-wrap: wrap">
+                  <select id="empSel" style="min-width: 180px">
+                    <option value="">— elige una selección —</option>
+                  </select>
+                  <input id="empCarpeta" placeholder="carpeta dentro del Inbox (p. ej. Barnes &amp; Noble…)"
+                    style="min-width: 240px; flex: 1" />
+                </div>
+                <div class="row" style="align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap">
+                  <label style="font-size: 12px"><input type="checkbox" id="empMeta" checked /> rellenar metadatos
+                    (colección/editorial/autor/sinopsis) que falten</label>
+                </div>
+                <div class="row" style="align-items: center; gap: 8px; margin-top: 8px">
+                  <button class="btn" id="empDiag">🔍 Diagnosticar (ensayo)</button>
+                  <button class="btn bad admin-only" id="empAplicar">✅ Aplicar</button>
+                  <span class="muted" id="empEstado" style="font-size: 12px"></span>
+                </div>
+                <div id="empReport" style="margin-top: 10px; font-size: 12px"></div>
+              </details>
               <details class="card foldcard admin-only" id="fcScripts" data-fold="pc">
                 <summary><h3>🧰 Ejecutar script</h3></summary>
                 <p class="muted" style="margin-top: 0; font-size: 12px">

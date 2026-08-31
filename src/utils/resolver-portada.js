@@ -1,6 +1,6 @@
 import { http } from './http.js';
 import { medirImagen } from './medir-imagen.js';
-import { rasterizarPaginas } from './rasterizar-pdf.js';
+import { rasterizarSignificativas } from './rasterizar-pdf.js';
 
 // Una portada legible es ancha. Objetivo deseable y mínimo aceptable (por debajo del mínimo
 // la imagen se descarta: así cae el GIF 1x1 que OpenLibrary sirve como marcador de "sin portada").
@@ -64,10 +64,11 @@ export async function resolverPortada({ tipo, rutas = [], numPaginas = 2, embebi
         }
     }
 
-    // 3. Escalada PDF: si lo mejor no llega al objetivo, rasterizar páginas clave (poppler).
-    //    La página 1 compite como portada; las demás (portadilla, contraportada) quedan de extra.
+    // 3. Escalada PDF: si lo mejor no llega al objetivo, rasterizar páginas clave (poppler). La 1.ª página
+    //    SIGNIFICATIVA (saltando las en blanco) compite como portada; las demás (portadilla, contraportada)
+    //    quedan de extra. Así una página 1 en blanco ya no se convierte en la portada del libro.
     if ((!mejor() || mejor().ancho < ANCHO_OBJETIVO) && tipo === 'pdf' && rutas[0]) {
-        for (const p of await rasterizarPaginas(rutas[0], { numPaginas })) {
+        for (const p of await rasterizarSignificativas(rutas[0], { frente: 2, incluirUltima: true, numPaginas })) {
             const c = evaluar(p.buffer, `pdf:${p.etiqueta}`);
             if (!c) continue;
             if (p.etiqueta === 'portada') candidatas.push(c);

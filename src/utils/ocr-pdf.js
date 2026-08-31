@@ -1,4 +1,4 @@
-import { rasterizarPaginas } from './rasterizar-pdf.js';
+import { rasterizarSignificativas } from './rasterizar-pdf.js';
 import { analizarImagenesRecurso } from '../agente.js';
 
 // En un PDF escaneado, título/autor/ISBN viven en las primeras páginas (portadilla, créditos)
@@ -9,15 +9,19 @@ const PAGINAS_FRENTE = Number(process.env.PDF_OCR_PAGINAS || 5);
 const ANCHO_OCR = Number(process.env.PDF_OCR_ANCHO || 1600);
 
 /**
- * Rasteriza las primeras PAGINAS_FRENTE páginas + la última de un PDF (a alta resolución).
- * Son los sidecars de TODO PDF (preview + OCR de datos/código de barras). Devuelve
- * [{ buffer, pagina, etiqueta }] (la 1ª = 'portada') o [] si no hay poppler / PDF ilegible.
+ * Rasteriza las primeras PAGINAS_FRENTE páginas SIGNIFICATIVAS + la última de un PDF (a alta resolución).
+ * Son los sidecars de TODO PDF (preview + OCR de datos/código de barras). Las páginas EN BLANCO (o «This page
+ * is intentionally left blank») se SALTAN: se sondea una ventana un poco mayor y se cogen las que llevan tinta
+ * hasta completar el 5+1 (`rasterizarSignificativas`). Devuelve [{ buffer, pagina, etiqueta }] (la 1ª =
+ * 'portada') o [] si no hay poppler / PDF ilegible.
  */
 export async function rasterizarFrontalesPdf(ruta, numPaginas = PAGINAS_FRENTE) {
-    const n = Math.min(PAGINAS_FRENTE, numPaginas || PAGINAS_FRENTE);
-    const paginas = Array.from({ length: n }, (_, i) => i + 1);
-    if (numPaginas > PAGINAS_FRENTE) paginas.push(numPaginas); // + contraportada (código de barras)
-    return rasterizarPaginas(ruta, { paginas, ancho: ANCHO_OCR });
+    return rasterizarSignificativas(ruta, {
+        frente: PAGINAS_FRENTE,
+        incluirUltima: true,
+        ancho: ANCHO_OCR,
+        numPaginas: numPaginas || PAGINAS_FRENTE,
+    });
 }
 
 /**

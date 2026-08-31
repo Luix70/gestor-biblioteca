@@ -65,6 +65,22 @@ Todo pasa por un único servicio compartido para que los dos puntos de entrada s
 - **Modelo de imágenes:** un libro tiene VARIAS imágenes; `imagenes: [{ruta, tipo, origen}]` +
   un `portada` (string) que el front-end muestra sin recorrer el array. Cubierta del fichero/escaneo
   gana; las remotas (`portadas_remotas`) son candidatas de respaldo.
+- **Portadas SUELTAS y `.opf` (exportaciones Calibre):** el escaneador a veces deja la cubierta REAL en un
+  `.jpg`/`.opf` aparte y la ingesta sacaba la portada de la página 1 → libros sin cubierta. Ahora
+  `vigilante·procesarUnidad` examina un **`.opf` hermano** (`utils/lector-opf.js`, reusa los extractores OPF de
+  `lector-epub.js`): sus metadatos rellenan huecos, su ISBN pasa a `isbn_propio`, y su cubierta —o una imagen del
+  mismo nombre que el doc, o una **genérica** `cover.jpg`/`portada.jpg` si la carpeta tiene un único documento—
+  viaja como `contexto.portadaLocal`. El `.opf`/portada consumidos se reciclan. **Rescate retroactivo** de una
+  colección ya catalogada sin cubiertas: panel Mantenimiento «🖼️ Emparejar portadas + .opf»
+  (`utils/emparejar-portadas.js`) empareja las portadas/`.opf` de una carpeta del Inbox con una **selección
+  guardada** por ISBN → nombre → título (ambiguos se listan); pone la cubierta como portada (la previa baja, no
+  se borra — `imagenes-doc·anadirImagen{comoPortada}`) y rellena metadatos que falten. Dry-run + 2º plano.
+- **Páginas en blanco al extraer el 5+1** (`rasterizar-pdf·rasterizarSignificativas`, usada por `ocr-pdf` y
+  `resolver-portada`): al sacar las páginas frontales+final para OCR/visión/portada se **saltan las páginas sin
+  contenido** (blanco, «intentionally left blank», «scanned by…», adornos decorativos) midiendo la **tinta** con
+  un render gris diminuto de poppler (`fraccionTinta`, sin IA, apto para el Atom; <0.5 % con tinta = vacía) y se
+  coge la siguiente significativa. Sondea una ventana algo mayor; fallback seguro (si todo sale vacío no vacía la
+  salida). Así una página 1 en blanco deja de ser la portada del libro.
 - **CDU con caché de equivalencias** (`clasificador-cdu.js` + colección `equivalencias_cdu`):
   caché aprendida (Dewey/LCC→CDU) → API externa → IA; al derivar por IA, **aprende** la equivalencia
   para que el siguiente libro con ese código sea un acierto de caché gratis.
