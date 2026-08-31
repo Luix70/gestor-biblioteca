@@ -26,6 +26,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { extraerArchivoComic } from './extraer-archivo.js';
+import { tamanoDeStdout, dpiAcotado } from './rasterizar-pdf.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileP = promisify(execFile);
@@ -107,6 +108,11 @@ async function enParalelo(items, tarea, limite = CONCURRENCIA) {
  * DEBE tratarlo como fallo (nunca omitir la lámina en silencio: los originales se reciclan después).
  */
 const PDF_DPI = Number(process.env.CBZ_PDF_DPI) || 300;
+// Tope de píxeles del rasterizado de UNA lámina. A 300 dpi una página normal (8,5×11") son ~8 M px, pero una
+// con mediabox DESCOMUNAL/corrupto (60×200") pediría decenas de M px → OOM del contenedor (mismo fallo que
+// tumbó la app en la ingesta). Por encima del tope se BAJA el dpi lo justo (dpiAcotado); nunca se omite la
+// lámina (eso sí sería pérdida). 24 M px × 3 en paralelo ≈ 216 MB de pico, seguro en el contenedor de 1 GB.
+const PDF_MAX_PX = Number(process.env.CBZ_PDF_MAX_PX) || 24_000_000;
 // Cada cuántas láminas se informa. Dentro de un tomo pueden ser cientos y cada conversión tarda segundos: sin
 // esto el proceso parece MUERTO durante una hora (le pasó al usuario dos veces).
 const AVISO_CADA = Number(process.env.CBZ_AVISO_CADA) || 25;
@@ -124,10 +130,11 @@ function _avisar(nombre, via) {
 async function imagenesDePdf(pdf, destDir) {
     await fs.mkdir(destDir, { recursive: true });
     const base = path.join(destDir, 'p');
-    let paginas = 0;
+    let paginas = 0, tam = null;
     try {
         const { stdout } = await execFileP('pdfinfo', [pdf], { timeout: 60000 });
         paginas = Number((stdout.match(/Pages:\s*(\d+)/i) || [])[1]) || 0;
+        tam = tamanoDeStdout(stdout);   // para acotar el dpi del rasterizado si la página es descomunal
     } catch { /* sin pdfinfo no se puede validar el cuadre → se irá a rasterizar */ }
 
     // Toda lámina extraída pasa por la corrección de POLARIDAD: `pdfimages` vuelca el bitonal tal como está
@@ -177,9 +184,13 @@ async function imagenesDePdf(pdf, destDir) {
             await limpiarSalidas();
         } catch { /* pdfimages no pudo: se rasteriza */ }
     }
-    // 2) Rasterizado fiel, una imagen por página.
+    // 2) Rasterizado fiel, una imagen por página. El dpi se ACOTA por el tamaño de página: en una normal se
+    // queda en PDF_DPI (300); en una descomunal/corrupta baja lo justo para no pasar de PDF_MAX_PX px y evitar
+    // el OOM. Sin `tam` (pdfinfo falló) se usa PDF_DPI tal cual — el caso corrupto casi siempre trae Page size.
+    const dpi = dpiAcotado(tam, PDF_DPI, PDF_MAX_PX);
+    if (dpi < PDF_DPI) { try { console.warn(`  📚 «${path.basename(pdf)}»: página grande → rasterizado a ${dpi} dpi (tope anti-OOM).`); } catch { /* */ } }
     try {
-        await execFileP('pdftoppm', ['-jpeg', '-r', String(PDF_DPI), pdf, base], { timeout: 600000 });
+        await execFileP('pdftoppm', ['-jpeg', '-r', String(dpi), pdf, base], { timeout: 600000 });
         _avisar(pdf, 'raster');
         return (await fs.readdir(destDir)).filter((n) => n.startsWith('p-') && ES_IMG.test(n)).sort()
             .map((n) => path.join(destDir, n));

@@ -101,6 +101,15 @@ export const AJUSTES = {
                                     // página de CRÉDITOS/ISBN suele ser la 4ª-5ª → con menos se perdía. Mín. 5.
     PDF_OCR_ANCHO: 1600,            // ancho del rasterizado para OCR/barras (alto = ISBN en letra pequeña legible)
     PDF_BARRAS_ANCHO: 2000,         // ancho equivalente de los recortes del código de barras (alto pero acotado para no asfixiar al Atom)
+    // --- Topes ANTI-OOM del rasterizado (mediabox descomunal/corrupto) ---
+    // Una página con el mediabox corrupto (p. ej. 60×200") rasterizada a resolución normal pide decenas de M px
+    // (~cientos de MB) → OOM del contenedor → caída de la app. Tres redes: (1) desviar el PDF a Cuarentena antes
+    // de tocarlo si la página es descomunal; (2) acotar el dpi de cada rasterizado por px; (3) rechazar un recorte
+    // que se pase. Referencia: el mayor formato de imprenta (A0) mide ~3370 pts en el lado largo.
+    PDF_PAGINA_MAX_PTS: 7200,       // >100" en el lado mayor ⇒ mediabox corrupto → Cuarentena/ilegibles (ingesta)
+    PDF_BARRAS_MAX_PX: 3000,        // tope del lado mayor al rasterizar los recortes del código de barras
+    PDF_RECORTE_MAX_PX: 24000000,   // tope de área de un recorte (rasterizarRecorte lo rechaza por encima)
+    CBZ_PDF_MAX_PX: 24000000,       // tope de área al rasterizar una lámina PDF para el cbz (baja el dpi si hace falta)
     // Timeout de CADA llamada a poppler (pdfinfo/pdftotext/pdftoppm), ADAPTATIVO al tamaño del fichero: cada
     // llamada relee el PDF entero, y uno de cientos de MB no cabía en el timeout fijo de 30/60 s en el Atom
     // → un PDF VÁLIDO se declaraba «ilegible» y acababa en Cuarentena. Ahora: base + porMB·MB, acotado a max.

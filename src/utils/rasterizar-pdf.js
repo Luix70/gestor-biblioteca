@@ -144,10 +144,51 @@ export async function pdfEsImagen(ruta) {
 export async function tamanoPagina(ruta) {
     try {
         const { stdout } = await execFileP('pdfinfo', [ruta], { timeout: await timeoutPoppler(ruta) });
-        const m = stdout.match(/Page size:\s*([\d.]+)\s*x\s*([\d.]+)\s*pts/i);
-        if (m) return { anchoPts: parseFloat(m[1]), altoPts: parseFloat(m[2]) };
+        return tamanoDeStdout(stdout);
     } catch { /* sin pdfinfo o PDF ilegible */ }
     return null;
+}
+
+/** Extrae { anchoPts, altoPts } del stdout de `pdfinfo` (para reusar una lectura ya hecha). null si no aparece. */
+export function tamanoDeStdout(stdout) {
+    const m = String(stdout || '').match(/Page size:\s*([\d.]+)\s*x\s*([\d.]+)\s*pts/i);
+    return m ? { anchoPts: parseFloat(m[1]), altoPts: parseFloat(m[2]) } : null;
+}
+
+// Página DESCOMUNAL: por encima de esto el mediabox es basura, no un documento real. Referencia: el mayor
+// formato de imprenta, A0, mide 841×1189 mm ≈ 3370 pts en su lado largo; un póster/plano ANSI-E, ~3168 pts.
+// El PDF que tumbó la app («…Philosophy off Law…», OOM) declaraba 4342×14400 pts (60×200"): claramente corrupto.
+// El tope (100" = 7200 pts) deja MUCHO margen sobre cualquier formato legítimo y ataja el corrupto.
+const PAGINA_MAX_PTS = Number(process.env.PDF_PAGINA_MAX_PTS || 7200);
+
+/**
+ * ¿La 1ª página del PDF tiene un tamaño DESCOMUNAL (mediabox corrupto, p. ej. 60×200")? Rasterizar una página
+ * así revienta la RAM del contenedor (OOM → caída de la app), así que la ingesta la desvía a Cuarentena/ilegibles
+ * ANTES de tocar poppler. Devuelve { descomunal, anchoPts?, altoPts?, pulgadas? }. Degrada a `descomunal:false`
+ * si no hay pdfinfo o el PDF es ilegible por otra vía (eso lo trata el veredicto normal de «ilegible»).
+ */
+export async function paginaDescomunal(ruta) {
+    const tam = await tamanoPagina(ruta);
+    if (!tam) return { descomunal: false };
+    const mayorPts = Math.max(tam.anchoPts, tam.altoPts);
+    return {
+        descomunal: mayorPts > PAGINA_MAX_PTS,
+        anchoPts: tam.anchoPts, altoPts: tam.altoPts,
+        pulgadas: Math.round(mayorPts / 72),
+    };
+}
+
+/**
+ * DPI seguro para rasterizar una página de tamaño `tam` (pts) sin pasar de `maxPx` píxeles de ÁREA (ancho×alto).
+ * Con un mediabox descomunal, un DPI fijo (p. ej. 300) pediría decenas/cientos de M px → OOM; aquí se BAJA el DPI
+ * lo justo para respetar el tope. Como el área crece con el CUADRADO del DPI, el factor de reducción es
+ * √(maxPx/área). Devuelve el DPI (≥1). Si no hay tamaño (pdfinfo falló), devuelve `dpiDeseado` sin tocar.
+ */
+export function dpiAcotado(tam, dpiDeseado, maxPx) {
+    if (!tam) return dpiDeseado;
+    const area = (tam.anchoPts / 72 * dpiDeseado) * (tam.altoPts / 72 * dpiDeseado);
+    if (area <= maxPx) return dpiDeseado;
+    return Math.max(1, Math.floor(dpiDeseado * Math.sqrt(maxPx / area)));
 }
 
 /**

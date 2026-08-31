@@ -21,7 +21,7 @@ import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { resolverPortada } from './utils/resolver-portada.js';
 import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
-import { pdfEsImagen } from './utils/rasterizar-pdf.js';
+import { pdfEsImagen, paginaDescomunal } from './utils/rasterizar-pdf.js';
 import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/lector-barras.js';
 import { paginasMuestraDjvu } from './utils/djvu.js';
 
@@ -254,6 +254,17 @@ export async function procesarRecurso(entrada) {
         // portadas remotas; aquí solo se conserva en datosBase para la pista de visión.
 
     } else if (tipo === 'pdf') {
+        // PÁGINA DESCOMUNAL (mediabox corrupto, p. ej. 60×200"): se comprueba con pdfinfo ANTES de tocar el
+        // rasterizador. Una página así rasterizada pediría decenas de M px (~cientos de MB) → OOM del contenedor
+        // → caída de la app (le pasó con «…Philosophy off Law…»). No es un problema de catalogación sino de tener
+        // una COPIA SANA, así que va a Cuarentena/ilegibles sin intentar leerla. (Los topes de píxeles de
+        // lector-barras/rasterizarRecorte son la segunda red; esto evita incluso llegar ahí.)
+        const dim = await paginaDescomunal(rutas[0]);
+        if (dim.descomunal) {
+            throw new ErrorRecursoIlegible(
+                `PDF con página descomunal (${dim.pulgadas}", mediabox corrupto): ${path.basename(rutas[0])}. Requiere una copia sana.`);
+        }
+
         // TIER 1 · capa de texto + info-dict
         datosBase = await extraerMetadatosPdf(rutas[0]);
         formatos = ['pdf'];

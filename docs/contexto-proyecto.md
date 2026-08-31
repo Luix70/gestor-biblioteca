@@ -119,10 +119,19 @@ el vigilante reintentaba el fichero, bucle de reinicios. Causa: en `lector-barra
 lector de barras se REESCALA para que ni ancho ni alto superen `PDF_BARRAS_MAX_PX` (3000); (2) guarda dura en
 `rasterizar-pdf.js·rasterizarRecorte` — si la región (X+W)×(Y+H) supera `PDF_RECORTE_MAX_PX` (24 M px) se rechaza
 (warn + null) en vez de tumbar el proceso. Los renders de página completa (portada/OCR/visión) YA iban acotados
-por `-scale-to-x ANCHO`; el único sin acotar era el recorte de barras. (Riesgo latente pendiente: `empaquetar-
-imagenes.js` rasteriza con `-r 300` fijo — acotar si se usa «empaquetar (cbz)» sobre PDFs con páginas enormes.)
-Recuperación de un fichero-veneno: sacarlo del Inbox (a un holding) + reiniciar el contenedor; el vigilante
-arranca EN PAUSA por defecto, así que sin `VIGILANTE_AUTOSTART=1` no vuelve a intentarlo solo.
+por `-scale-to-x ANCHO`; el único sin acotar era el recorte de barras. **Tres redes, de fuera a dentro:**
+(0) **CORTAFUEGOS en la INGESTA** — `orquestador.js` (rama pdf), ANTES de tocar poppler, llama a
+`rasterizar-pdf.js·paginaDescomunal(ruta)` (lee `pdfinfo`): si el lado mayor pasa de `PDF_PAGINA_MAX_PTS` (7200 pts
+= 100"; A0, el mayor formato de imprenta, mide ~3370) ⇒ mediabox corrupto ⇒ `ErrorRecursoIlegible` → **Cuarentena/
+ilegibles** («necesita una copia sana»), sin intentar leerlo. (1) el DPI del lector de barras se reescala a
+`PDF_BARRAS_MAX_PX`; (2) la guarda de `rasterizarRecorte`. Además `empaquetar-imagenes.js` (empaquetar cbz) ya
+NO rasteriza a `-r 300` fijo: usa `dpiAcotado(tam, 300, CBZ_PDF_MAX_PX=24 M px)` — en una página normal se queda en
+300, en una descomunal baja el dpi lo justo (nunca omite la lámina: eso sería pérdida). `dpiAcotado` acota por
+ÁREA (px = ancho·alto), factor √(maxPx/área) porque el área crece con el cuadrado del DPI. Todos los topes viven en
+`config.js` (`PDF_PAGINA_MAX_PTS`, `PDF_BARRAS_MAX_PX`, `PDF_RECORTE_MAX_PX`, `CBZ_PDF_MAX_PX`).
+Recuperación de un fichero-veneno YA catalogándose (versión anterior sin el cortafuegos): sacarlo del Inbox (a un
+holding) + reiniciar el contenedor; el vigilante arranca EN PAUSA por defecto, así que sin `VIGILANTE_AUTOSTART=1`
+no vuelve a intentarlo solo.
 
 **Reparto opcional NAS↔PC (ingesta en el PC):** para no ahogar el Atom, se puede mover el CATALOGADO al PC
 (más potente) dejando el NAS de servidor 24/7. NAS con `DESACTIVAR_VIGILANTE=1` (API+panel+búsqueda, sin

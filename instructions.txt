@@ -149,6 +149,10 @@ de ficheros clasificado por CDU.
   PDF_TIMEOUT_BASE_MS           45000        Timeout poppler: suelo (ficheros pequeños)
   PDF_TIMEOUT_POR_MB            700          Timeout poppler: ms extra por MB (adaptativo)
   PDF_TIMEOUT_MAX_MS            240000       Timeout poppler: techo por llamada (4 min)
+  PDF_PAGINA_MAX_PTS            7200         Lado > 100" ⇒ mediabox corrupto → Cuarentena/ilegibles (anti-OOM)
+  PDF_BARRAS_MAX_PX             3000         Tope del lado mayor al rasterizar el recorte de barras (anti-OOM)
+  PDF_RECORTE_MAX_PX            24000000     Tope de área de un recorte de página (por encima se rechaza)
+  CBZ_PDF_MAX_PX               24000000     Tope de área al rasterizar una lámina PDF para el cbz (baja el dpi)
   CLASIF_PAPEL_MAX_PAGINAS      12           Escaneado < N páginas → «papel»
   CLASIF_CAPITULO_MAX_PAGINAS   20           Legible < N páginas sin ISBN → capítulo/artículo
   DJVU_CONCURRENCIA             1            Páginas DjVu rasterizadas a la vez (1 = seguro en el Atom)
@@ -2557,9 +2561,11 @@ de ficheros clasificado por CDU.
                            satura Cuarentena). Solo lo que difiere queda para revisar.
          no-identificados  Sin título/ISBN tras agotar texto/APIs/OCR/IA.
          ilegibles         Fichero DEFECTUOSO (p. ej. PDF con el xref dañado /
-                           sin páginas, EPUB con el ZIP roto). Necesita una
-                           copia mejor. Se detecta en el primer paso y NO se
-                           cataloga (no deja registro en la BD).
+                           sin páginas, EPUB con el ZIP roto, o PDF con la
+                           PÁGINA DESCOMUNAL —mediabox corrupto, > 100" de lado:
+                           rasterizarlo reventaría la RAM del contenedor—).
+                           Necesita una copia mejor. Se detecta en el primer paso
+                           y NO se cataloga (no deja registro en la BD).
          otros             Cualquier otro error.
 
        Acción: revisar; para 'ilegibles' conseguir una copia buena y soltarla en
