@@ -3128,7 +3128,10 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       (admin) / utils/emparejar-portadas.js: para una coleccion ya catalogada SIN sus cubiertas (la portada
       quedo en un .jpg/.opf aparte). Sueltas esa carpeta en el Inbox, eliges una SELECCION guardada con esos
       documentos y empareja cada portada/.opf con su doc por ISBN → nombre de fichero → titulo (los AMBIGUOS se
-      listan, no se tocan). Pone la cubierta como portada (la anterior NO se borra: baja en el carrusel) y, si se
+      listan, no se tocan). Cuenta con las SUBCARPETAS que llevan la imagen dentro (cover.jpg o única imagen): la
+      clave es el NOMBRE de la subcarpeta y casa por titulo, robusto a «&»↔«and» y al articulo inicial («The
+      Canterbury Tales» ↔ «Canterbury Tales»). Pone la cubierta como portada (la anterior NO se borra: baja en el
+      carrusel; queda como imagen adicional) y, si se
       marca, rellena metadatos que falten (coleccion/editorial/autor/sinopsis). «Diagnosticar» es un ensayo
       (dry-run) que solo informa. Trabajo en 2º plano con progreso, como Integridad.
     * .djv = .djvu: el .djv es la misma familia DjVu (djvulibre lo lee igual). Se reconoce como

@@ -27,17 +27,22 @@ const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
 const NOMBRE_GENERICO = /^(cover|portada|cubierta|frontcover|front[-_ ]?cover)$/i;
 const existe = (p) => fs.access(p).then(() => true).catch(() => false);
 
-// Normaliza un texto para comparar nombres/títulos: sin acentos, sin extensión, sin puntuación, minúsculas,
-// espacios colapsados. Así «Aesop's Fables - Aesop» y «aesops fables  aesop» casan. (Rango de diacríticos
-// combinantes U+0300–U+036F, el mismo strip NFD que usa titulo-original.js.)
+// Normaliza un texto para comparar nombres/títulos: sin acentos, sin puntuación, minúsculas, espacios
+// colapsados, y unifica «&»→«and» (una subcarpeta «… and White Fang» casa con el título «… & White Fang»). Así
+// «Aesop's Fables - Aesop» y «aesops fables  aesop» casan. (Rango de diacríticos combinantes U+0300–U+036F, el
+// mismo strip NFD que usa titulo-original.js.)
 function norm(s) {
     return String(s || '')
         .normalize('NFD').replace(/[̀-ͯ]/g, '')
         .toLowerCase()
+        .replace(/&/g, ' and ')
         .replace(/['’`]/g, '')
         .replace(/[^a-z0-9]+/g, ' ')
         .trim();
 }
+// Sin ARTÍCULO inicial: el nombre de una subcarpeta suele llevar «The»/«A» que el título catalogado no («The
+// Canterbury Tales» ↔ «Canterbury Tales»). Se prueba también esta variante al emparejar por título.
+const sinArticulo = (k) => String(k || '').replace(/^(the|a|an|el|la|los|las|un|una|le|les|il|lo)\s+/, '');
 // Quita el sufijo « - Autor» de un nombre de fichero para quedarnos con el título (heurística suave).
 const soloTitulo = (base) => norm(String(base || '').split(/\s+-\s+/)[0]);
 
@@ -104,7 +109,10 @@ function indexarDocs(docs) {
         if (d.isbn) for (const v of variantesISBN(d.isbn)) add(byIsbn, v, d);
         const arch = d.nombre_archivo ? norm(d.nombre_archivo.replace(/\.[^.]+$/, '')) : null;
         add(byArchivo, arch, d);
-        add(byTitulo, norm(d.titulo), d);
+        const t = norm(d.titulo);
+        add(byTitulo, t, d);
+        const ta = sinArticulo(t);
+        if (ta && ta !== t) add(byTitulo, ta, d);   // «Canterbury Tales» además de «The Canterbury Tales»
     }
     return { byIsbn, byArchivo, byTitulo };
 }
@@ -119,10 +127,15 @@ function emparejar(item, idx) {
     const archivo = norm(item.base);
     let r = unico(idx.byArchivo.get(archivo)); if (r) return { ...r, via: 'nombre de archivo' };
 
-    // Título: el del .opf, el nombre completo, o el nombre sin el sufijo « - Autor».
-    for (const clave of [norm(item.titulo), archivo, soloTitulo(item.base)]) {
-        r = unico(idx.byTitulo.get(clave)); if (r) return { ...r, via: 'título' };
+    // Título: el del .opf, el nombre completo, o el nombre sin el sufijo « - Autor» — y cada uno también SIN su
+    // artículo inicial (la subcarpeta «The Canterbury Tales» casa con el título «Canterbury Tales»). Dedup.
+    const claves = new Set();
+    for (const base of [norm(item.titulo), archivo, soloTitulo(item.base)]) {
+        if (!base) continue;
+        claves.add(base);
+        const sa = sinArticulo(base); if (sa && sa !== base) claves.add(sa);
     }
+    for (const clave of claves) { r = unico(idx.byTitulo.get(clave)); if (r) return { ...r, via: 'título' }; }
     return null;
 }
 
