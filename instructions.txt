@@ -812,6 +812,13 @@ de ficheros clasificado por CDU.
     enriquecedor deduce el tomo del PROPIO TEXTO cuando el título/subtítulo/nombre de
     archivo trae «Vol./Tomo N» con el título de la obra delante (motor-enriquecimiento).
     Conservador: solo si no hay ya nº de volumen, y no en revistas ni cómics.
+    NO cuenta como tomo una CITA DE REVISTA: «Vol. N, No. M» / «Vol N Issue M» / «Vol N #M»
+    es un volumen+número de una PUBLICACIÓN PERIÓDICA (p. ej. un artículo suelto llamado
+    «… [Cinema Journal Vol. 28, No. 3].pdf»), no una obra multivolumen. parsearVolumen lo
+    ignora (si tras «Vol. N» viene No./Nº/Number/Issue/# + dígito) → así un artículo de
+    revista no se cataloga como «tomo N» ni arrastra a sus vecinos de carpeta a una obra
+    falsa con el nombre de la carpeta (bug real del drop «Cinema - Ebooks»: 6 artículos de
+    Bordwell con «[… Vol. N, No. M]» se agrupaban como obra «Cinema Ebooks»).
     CARPETA ÚNICA POR OBRA: todos los tomos viven JUNTOS en
     /CDU/<cdu>/obras/<isbn_obra | título>/vol-N/ (carpeta por isbn_obra si la obra lo
     tiene; si no, por su título). motor-catalogo IGUALA en todos los tomos el CDU, el

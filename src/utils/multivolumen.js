@@ -51,7 +51,13 @@ export function parsearVolumen(nombre) {
     if (!m) return null;
     const numero = aArabigo(m[1]);
     if (!numero) return null;
-    const resto = base.slice(m.index + m[0].length).replace(/^[\s\-–—:._·]+/, '').trim();
+    const sufijo = base.slice(m.index + m[0].length);
+    // CITA DE REVISTA, no tomo de libro: «Vol. N, No. M» / «Vol. N Issue M» / «Vol N #M» es el volumen+número de
+    // una PUBLICACIÓN PERIÓDICA (p. ej. «[Cinema Journal Vol. 28, No. 3]»), no una obra multivolumen. Si tras el
+    // «Vol. N» viene un indicador de NÚMERO/ISSUE seguido de dígito, se ignora: así un artículo de revista no se
+    // cataloga como «tomo N» de una obra (ni arrastra a sus vecinos a una obra falsa con el nombre de la carpeta).
+    if (/^\s*[,.([]?\s*(?:n[ºo]|n[úu]m(?:ero)?|number|issue|iss|#)\s*\.?\s*\d/i.test(sufijo)) return null;
+    const resto = sufijo.replace(/^[\s\-–—:._·]+/, '').trim();
     // 'prefijo' = título de la OBRA (lo que va ANTES de "Vol. N"), útil cuando un tomo se cataloga
     // suelto (sin contexto de carpeta): da nombre a la obra sin el sufijo del tomo.
     const prefijo = base.slice(0, m.index).replace(/[\s\-–—:._·,]+$/, '').trim();
