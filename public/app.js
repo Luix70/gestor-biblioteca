@@ -71,6 +71,7 @@ const _AYUDA_ACCIONES = `<p>Sobre los documentos <b>seleccionados</b>:</p>
     <li><b>📚 Colección · 📖 Obra · 📍 Estantería · 🚫 Quitar de estantería</b>: agrupar / ubicar.</li>
     <li><b>🧹 Conformar</b>: perfecciona el registro (sin IA). <b>✨ Enriquecer</b>: rellena huecos con APIs y, si hay ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books). <b>🎯 A fondo</b>: lee con visión IA (más lento).</li>
     <li><b>🔀 Cambiar tipo · 🏢 Reclasificar editorial · ✏️ Asignar datos</b> (autor/contribuidor/editorial/CDU/soporte) <b>· 🏷 Palabras clave · 🖼️ Portada común</b>.</li>
+    <li><b>🖼️ Reextraer imágenes</b>: re-extrae del PROPIO fichero la portada + las imágenes de catalogación (5 páginas frontales + contraportada, saltando las en blanco) REEMPLAZANDO las actuales (para las equivocadas). Conserva las añadidas a mano. Trabajo de fondo.</li>
     <li><b>📌 Guardar como / ➕ Añadir a / ➖ Quitar de / 🔁 Reemplazar</b> una selección personal.</li>
     <li><b>♻️ Reprocesar</b>: devuelve al Inbox para recatalogar de cero. <b>🗑 Eliminar</b>: va a la Papelera (recuperable).</li>
   </ul>`;
@@ -8017,6 +8018,7 @@ function renderBulk() {
     <button class="btn" id="bkSelRepl" title="Sustituir TODO el contenido de una selección por los documentos marcados ahora. Los libros no se borran, solo salen de la lista.">🔁 Reemplazar selección</button>
     ${ROL === 'admin' ? '<button class="btn pri" id="bkSelShare" title="Compartir estos documentos: enlace/QR de SOLO LECTURA (ver + descargar), con caducidad opcional. Es una foto fija; no crea una selección guardada.">🔗 Compartir selección</button>' : ''}
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
+    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReimg" title="Re-extraer del PROPIO fichero la portada Y las imágenes de catalogación (5 páginas frontales + contraportada, saltando las páginas en blanco), reemplazando las actuales (equivocadas). Conserva las imágenes que hayas añadido a mano. Trabajo en 2º plano.">🖼️ Reextraer imágenes</button>' : ''}
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
     : '';
@@ -8094,6 +8096,7 @@ function renderBulk() {
     if ($('#bkSelRepl')) $('#bkSelRepl').onclick = () => opSeleccion([...selDocs], 'reemplazar');
     if ($('#bkSelShare')) $('#bkSelShare').onclick = compartirSeleccionMarcada;
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
+    if ($('#bkReimg')) $('#bkReimg').onclick = () => reextraerImagenesLote([...selDocs]);
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     $('#bkDel').onclick = eliminarSeleccionados;
   }
@@ -8310,6 +8313,55 @@ async function eliminarSeleccionados() {
   } catch (e) {
     toast(e.message, 'bad');
   }
+}
+// RE-EXTRAER imágenes de catalogación (portada + 5+1) de la selección desde el PROPIO fichero de cada documento
+// — para arreglar EN LOTE las portadas/imágenes equivocadas. Trabajo de fondo con progreso y cancelación (mismo
+// patrón que el borrado). Reemplaza las imágenes AUTO por las recién extraídas; conserva las AÑADIDAS A MANO.
+async function reextraerImagenesLote(ids) {
+  if (!ids.length) return;
+  if (!confirm(
+    `Se RE-EXTRAERÁN del propio fichero la portada y las imágenes de catalogación (5 páginas frontales + contraportada) de ${ids.length} documento(s), REEMPLAZANDO las actuales.\n\nLas imágenes que hayas añadido a mano se conservan. Es un trabajo de fondo (rasteriza cada documento: puede tardar). ¿Seguir?`,
+  )) return;
+  try {
+    const r = await api('/documentos/reextraer-imagenes', { method: 'POST', body: JSON.stringify({ ids, modo: 'imagenes' }) });
+    if (!r.ok) { toast(r.motivo || 'No se pudo lanzar', 'bad'); return; }
+    selDocs.clear();
+    await seguirReextraccion(r.total || ids.length);
+    buscarCatalogo(estadoBusqueda.page || 1);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function seguirReextraccion(total) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;width:94vw">
+    <h3 style="margin:0 0 10px">🖼️ Re-extrayendo imágenes…</h3>
+    <div style="height:10px;border-radius:6px;background:rgba(128,128,128,.25);overflow:hidden">
+      <div id="reBar" style="height:100%;width:0%;background:var(--acc);transition:width .3s"></div>
+    </div>
+    <div id="reTxt" class="muted" style="font-size:13px;margin-top:8px">0 / ${total}</div>
+    <div id="reTit" class="muted" style="font-size:12px;margin-top:2px;min-height:1.2em"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn bad" id="reCancel">✕ Cancelar</button></div>
+  </div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#reCancel').onclick = async () => {
+    $('#reCancel').disabled = true;
+    $('#reCancel').textContent = 'Cancelando…';
+    try { await api('/documentos/reextraer-imagenes/cancelar', { method: 'POST' }); } catch { /* ya habrá acabado */ }
+  };
+  let e = {};
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 700));
+    try { e = await api('/documentos/reextraer-imagenes/estado'); } catch { break; }
+    const pct = e.total ? Math.round((e.hechos / e.total) * 100) : 0;
+    if ($('#reBar')) $('#reBar').style.width = pct + '%';
+    if ($('#reTxt')) $('#reTxt').textContent = `${e.hechos} / ${e.total}${e.fallidos ? ` · ${e.fallidos} sin fichero/ilegibles` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
+    if ($('#reTit')) $('#reTit').textContent = e.titulo ? recortar(e.titulo, 60) : '';
+    if (!e.en_curso) break;
+  }
+  cerrarCmp();
+  const cancelado = e.cancelar && e.hechos < e.total;
+  toast(
+    `Imágenes re-extraídas en ${e.ok || 0} documento(s)${e.fallidos ? ` · ${e.fallidos} sin fichero/ilegibles` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
+    cancelado || e.fallidos ? 'warn' : 'ok',
+  );
 }
 // Asigna la MISMA imagen de portada a toda la selección: se elige un fichero (o foto), se reduce en el
 // cliente y se envía a /documentos/portada-lote. En cada documento pasa a ser la PORTADA; las imágenes que ya
