@@ -14,11 +14,23 @@
  *
  * ⚠ Antes de `--ejecutar`: haz COPIA DE SEGURIDAD de la BD — escribe ficheros de portada y actualiza documentos.
  *
+ * RE-EXTRAER portadas EQUIVOCADAS (no solo las que faltan): `--forzar` vuelve al fichero ORIGINAL y re-extrae la
+ * cubierta aunque ya haya una (para cuando la actual es válida como fichero pero errónea — p. ej. la portada
+ * compartida que heredó un miembro de colección). Debe ACOTARSE el conjunto; opciones para elegirlo:
+ *   --seleccion <id|nombre>   los documentos de una SELECCIÓN guardada (cúrala en el panel)
+ *   --desde AAAA-MM-DD        los ingresados en/desde esa fecha (combinable con lo demás)
+ *   --ultimos N               los N documentos MÁS recientes por fecha de ingreso
+ *   --primeros N              los N MENOS recientes
+ *   --id <ObjectId> | --patron "<regex del nombre de archivo>"
+ *
  * Uso:
  *   node scripts/reparar-portadas.js                    (dry-run, TODO el catálogo — auditoría completa, lenta)
  *   node scripts/reparar-portadas.js --sin-portada     (dry-run, solo los que NO tienen portada — rápido)
  *   node scripts/reparar-portadas.js --id <ObjectId>   (dry-run, un documento)
- *   node scripts/reparar-portadas.js --ejecutar        (aplica; combinable con --sin-portada / --id)
+ *   node scripts/reparar-portadas.js --forzar --seleccion "Portadas mal" --ejecutar   (re-extrae las de esa selección)
+ *   node scripts/reparar-portadas.js --forzar --ultimos 500 --ejecutar                (re-extrae los 500 últimos)
+ *   node scripts/reparar-portadas.js --forzar --desde 2026-08-30 --ejecutar           (re-extrae los de esa fecha en adelante)
+ *   node scripts/reparar-portadas.js --ejecutar        (aplica; combinable con --sin-portada / --id / --seleccion / --desde / --ultimos)
  *
  * Progreso: imprime una línea [i/N] por documento. Con `docker exec` AÑADE -t, si no Node bufferiza la salida
  * al no haber TTY y parece congelado: `docker exec -t gestor-biblioteca node scripts/reparar-portadas.js …`
@@ -52,6 +64,14 @@ const FORZAR = process.argv.includes('--forzar');
 // `--invertir`: fuerza la vuelta del NEGATIVO de la portada, para los frontispicios MUY densos donde la
 // heurística de polaridad no acierta (lámina correcta ya oscura). Exige acotar, como --forzar.
 const INVERTIR = process.argv.includes('--invertir');
+// Acotado del conjunto (además de --id/--patron): una SELECCIÓN guardada (por id o por nombre) y/o por FECHA DE
+// INGRESO. `--ultimos N` / `--primeros N` = los N más/menos recientes por fecha_ingreso. Pensado para arreglar
+// EN LOTE las portadas equivocadas: se curan «los últimos 500», «los de una selección», «desde una fecha»…
+const arg = (nombre) => { const i = process.argv.indexOf(nombre); return i >= 0 ? process.argv[i + 1] : null; };
+const selArg = arg('--seleccion');
+const desdeArg = arg('--desde');
+const ultimosN = (() => { const v = arg('--ultimos'); const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; })();
+const primerosN = (() => { const v = arg('--primeros'); const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; })();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -158,15 +178,33 @@ async function main() {
     // que es el caso típico tras una operación (p. ej. separar carpetas compartidas deja las portadas a null
     // para re-extraerlas). Órdenes de magnitud más rápido y hace exactamente lo que hace falta.
     const soloSinPortada = process.argv.includes('--sin-portada');
+    // SELECCIÓN guardada → sus documentos (acepta el _id de la selección o su nombre).
+    let idsSeleccion = null;
+    if (selArg) {
+        let sel = ObjectId.isValid(selArg) ? await db.collection('selecciones').findOne({ _id: new ObjectId(selArg) }) : null;
+        if (!sel) sel = await db.collection('selecciones').findOne({ nombre: selArg });
+        if (!sel) { console.error(`⛔ selección no encontrada: «${selArg}»`); process.exit(1); }
+        idsSeleccion = (sel.docs || []);
+        if (!idsSeleccion.length) { console.error(`⛔ la selección «${sel.nombre}» está vacía.`); process.exit(1); }
+        console.log(`📁 Selección «${sel.nombre}»: ${idsSeleccion.length} documento(s).`);
+    }
     const filtro = idArg
         ? { _id: new ObjectId(idArg) }
+        : idsSeleccion ? { _id: { $in: idsSeleccion } }
         : patronArg ? { nombre_archivo: { $regex: patronArg, $options: 'i' } }
         : soloSinPortada ? { $or: [{ portada: null }, { portada: { $exists: false } }, { portada: '' }] } : {};
+    // Acotar por FECHA DE INGRESO (combinable con lo anterior): --desde AAAA-MM-DD.
+    if (desdeArg) {
+        const d = new Date(desdeArg);
+        if (isNaN(d.getTime())) { console.error(`⛔ fecha inválida en --desde: «${desdeArg}» (usa AAAA-MM-DD).`); process.exit(1); }
+        filtro.fecha_ingreso = { $gte: d };
+    }
 
-    // `--forzar` sin acotar re-extraería la portada de TODO el catálogo (16k+ documentos, rasterizando cada
-    // uno). Eso no se hace por accidente: hay que decir a cuáles.
-    if ((FORZAR || INVERTIR) && !idArg && !patronArg) {
-        console.error('⛔ --forzar / --invertir necesitan acotar el conjunto: usa --id <ObjectId> o --patron "<regex>".');
+    // `--forzar`/`--invertir` re-extraen la portada AUNQUE ya haya una válida (para las EQUIVOCADAS) → re-extraerían
+    // TODO el catálogo (16k+, rasterizando cada uno) si no se acota. Cualquiera de estos acota el conjunto:
+    const acotado = idArg || patronArg || selArg || desdeArg || ultimosN || primerosN;
+    if ((FORZAR || INVERTIR) && !acotado) {
+        console.error('⛔ --forzar / --invertir necesitan acotar: --id / --patron / --seleccion / --desde AAAA-MM-DD / --ultimos N / --primeros N.');
         process.exit(1);
     }
     if (INVERTIR && !FORZAR) {
@@ -178,7 +216,11 @@ async function main() {
         nombre_archivo: 1, audios: 1, obra: 1, isbn_obra: 1, obra_titulo: 1, volumen_numero: 1, año_edicion: 1, mes_publicacion: 1,
     };
     // Snapshot de ids primero (el trabajo por-doc es lento: rasteriza; evita CursorNotFound de Atlas).
-    const ids = (await col.find(filtro, { projection: { _id: 1 } }).toArray()).map((d) => d._id);
+    // `--ultimos N` / `--primeros N`: ordena por FECHA DE INGRESO y limita a los N más / menos recientes.
+    let cur = col.find(filtro, { projection: { _id: 1 } });
+    if (ultimosN) cur = cur.sort({ fecha_ingreso: -1 }).limit(ultimosN);
+    else if (primerosN) cur = cur.sort({ fecha_ingreso: 1 }).limit(primerosN);
+    const ids = (await cur.toArray()).map((d) => d._id);
     console.log(`${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${ids.length} documento(s) a revisar${idArg ? ` (id ${idArg})` : ''}\n`);
 
     const st = { revisados: 0, conImagenesRotas: 0, sinPortada: 0, reusadas: 0, extraidas: 0, irreparables: 0, docsTocados: 0 };

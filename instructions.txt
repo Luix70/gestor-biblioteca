@@ -1235,8 +1235,12 @@ de ficheros clasificado por CDU.
       negativo, se corrigieron dentro del cbz, y las portadas —jpg ya derivados— siguieron invertidas.
       Al forzar NO se reusa ninguna imagen del carrusel (son justo las malas): se vuelve al fichero
       original, que es el que se ha arreglado, y la portada vieja sale del carrusel (el fichero se queda en
-      disco: no se borra nada). `--forzar` EXIGE acotar con --id o --patron; sin eso re-extraería la
-      portada del catálogo entero (16k+ documentos, rasterizando cada uno).
+      disco: no se borra nada). `--forzar` EXIGE acotar el conjunto (sin eso re-extraería la portada del
+      catálogo entero, 16k+ documentos). Se acota con: `--id <ObjectId>`, `--patron "<regex>"`, una SELECCIÓN
+      guardada `--seleccion <id|nombre>` (cúrala en el panel), o por FECHA DE INGRESO — `--desde AAAA-MM-DD`,
+      `--ultimos N` (los N más recientes), `--primeros N`. Para la MULTITUD de portadas equivocadas (p. ej. las
+      que heredaron una cubierta compartida): `reparar-portadas --forzar --ultimos 500 --ejecutar`, o
+      `--forzar --seleccion "Portadas mal" --ejecutar`, o `--forzar --desde 2026-08-30 --ejecutar`.
     · UNIFICAR UNA SERIE DE NÚMEROS (revista/cómic): `node scripts/unificar-serie-revista.js --coleccion
       <id> --cdu <cdu> [--esperados n] [--ejecutar]` (dry-run por defecto). Hermano del anterior, pero para
       una COLECCIÓN de números, no una obra multivolumen. Caso real (Don Miki, 692 números, ISSN
