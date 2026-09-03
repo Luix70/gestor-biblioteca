@@ -46,7 +46,10 @@ import { conectarDB } from '../src/database.js';
 import { detectarTipo } from '../src/orquestador.js';
 import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen } from '../src/mantenimiento/util-mantenimiento.js';
 import { resolverPortada } from '../src/utils/resolver-portada.js';
+import { bufferPortadaPorISBN } from '../src/utils/portadas-isbn.js';
 import { extraerMetadatosEpub } from '../src/utils/lector-epub.js';
+import { leerMobi } from '../src/utils/lector-mobi.js';
+import { leerChm } from '../src/utils/lector-chm.js';
 import { leerPaginaDjvu } from '../src/utils/djvu.js';
 import { leerPaginaComic } from '../src/utils/comic-paginas.js';
 import { corregirPolaridadBuffer, invertirPngBuffer } from '../src/utils/png-polaridad.js';
@@ -150,11 +153,15 @@ async function portadaDelFichero(doc, carpeta) {
     // (colección mal clasificada), sin esto se sacaría la portada del libro equivocado para todos.
     const original = await archivoOriginal(carpeta, doc.nombre_archivo);
     if (!original) {
-        // ÚLTIMO RECURSO (sin fichero-documento: audiolibros y demás): buscar una IMAGEN SUELTA en la carpeta,
-        // RECURSIVAMENTE. Los rips de audiolibro suelen traer cover.jpg/folder.jpg junto a las pistas, y aquí
-        // las pistas viven en una SUBCARPETA (…/VSI - Hinduism/VSI - Hinduism/01…mp3), así que un vistazo al
-        // primer nivel no la ve. Se prefiere un nombre de portada; si no, la imagen más grande.
-        return await imagenSueltaEnCarpeta(carpeta);
+        // ÚLTIMO RECURSO (sin fichero-documento: audiolibros, software/ISO catalogado por carpeta):
+        //   1) una IMAGEN SUELTA en la carpeta, RECURSIVAMENTE. Los rips de audiolibro suelen traer
+        //      cover.jpg/folder.jpg junto a las pistas, y aquí las pistas viven en una SUBCARPETA
+        //      (…/VSI - Hinduism/VSI - Hinduism/01…mp3), así que un vistazo al primer nivel no la ve. Se
+        //      prefiere un nombre de portada; si no, la imagen más grande.
+        //   2) si tampoco hay, la PORTADA REMOTA por ISBN — un software/ISO con ISBN aún tiene rescate.
+        const suelta = await imagenSueltaEnCarpeta(carpeta);
+        if (suelta) return suelta;
+        return await bufferPortadaPorISBN(doc.isbn);
     }
     const tipo = detectarTipo(original);
     // DjVu / cómic: la 1.ª página YA es un JPEG (leerPaginaDjvu/Comic) → se usa directamente (evita pdftoppm).
@@ -163,13 +170,22 @@ async function portadaDelFichero(doc, carpeta) {
         const p = await leerPaginaComic(original, 0).catch(() => null);
         return p?.buffer ? acondicionarPortada(p.buffer) : null;
     }
-    // PDF / EPUB / otros: resolverPortada (rasteriza la 1.ª página, o cubierta embebida del EPUB, o remota por ISBN).
+    // Cubierta EMBEBIDA según formato (gratis, sin IA, con los lectores propios que la INGESTA ya usa):
+    //   EPUB → cubierta declarada / 1.ª en orden de lectura;  MOBI/AZW → registro de imagen por EXTH+coverOffset
+    //   (los MOBI con DRM no la dan);  CHM → imagen «cover/front» o la JPG/PNG mayor del paquete (los CHM de
+    //   solo texto no traen ninguna). Word/RAR/ZIP no llevan cubierta extraíble → caen en la remota por ISBN.
+    //   PDF → resolverPortada rasteriza la 1.ª página SIGNIFICATIVA (saltando blancos).
     let embebida = null, numPaginas = 2;
     if (tipo === 'epub') embebida = (await extraerMetadatosEpub(original).catch(() => ({}))).cubierta_base64 || null;
+    else if (tipo === 'mobi') { const m = await leerMobi(original).catch(() => null); if (m?.portada?.buf?.length) embebida = m.portada.buf.toString('base64'); }
+    else if (tipo === 'chm') { const c = await leerChm(original).catch(() => null); if (c?.portada?.buf?.length) embebida = c.portada.buf.toString('base64'); }
     else if (tipo === 'pdf') numPaginas = (await numeroPaginasPdf(original)) || 2;
     const remotos = doc.isbn ? [{ origen: 'openlibrary', url: urlPortadaOL(doc.isbn) }] : [];
     const { portada } = await resolverPortada({ tipo: tipo || 'otro-formato', rutas: [original], numPaginas, embebidaBase64: embebida, remotos }).catch(() => ({}));
-    return portada ? Buffer.from(portada.base64, 'base64') : null;
+    if (portada) return Buffer.from(portada.base64, 'base64');
+    // El fichero no dio cubierta (Word/RAR/ZIP sin imágenes, CHM de solo texto, MOBI con DRM) → ÚLTIMO RECURSO:
+    // portada remota por ISBN reuniendo TODAS las fuentes que usa la ingesta (OpenLibrary + Amazon + Google Books).
+    return await bufferPortadaPorISBN(doc.isbn);
 }
 
 async function main() {
@@ -257,11 +273,11 @@ async function main() {
             if (reusar) {
                 set.portada = reusar.ruta;
                 accion = 'reusar';
-            } else if (!(await archivoOriginal(carpeta, doc.nombre_archivo)) && !(doc.audios || []).length && !(await imagenSueltaEnCarpeta(carpeta))) {
-                // No hay NADA de donde sacarla: ni fichero-documento, ni pistas de audio, ni una imagen suelta
-                // en su carpeta. Esto sí es genuinamente irreparable.
+            } else if (!(await archivoOriginal(carpeta, doc.nombre_archivo)) && !(doc.audios || []).length && !(await imagenSueltaEnCarpeta(carpeta)) && !doc.isbn) {
+                // No hay NADA de donde sacarla: ni fichero-documento, ni pistas de audio, ni una imagen suelta en
+                // su carpeta, ni ISBN para una portada remota. Esto sí es genuinamente irreparable (dry-run ya lo ve).
                 accion = 'irreparable';
-                motivo = 'no hay fichero original, ni pistas de audio, ni ninguna imagen en su carpeta';
+                motivo = 'no hay fichero original, ni pistas de audio, ni imagen en su carpeta, ni ISBN para portada remota';
             } else if (EJECUTAR) {
                 const buf = await portadaDelFichero(doc, carpeta);
                 if (Buffer.isBuffer(buf) && buf.length) {
@@ -271,13 +287,13 @@ async function main() {
                     set.imagenes = [{ ruta: web, tipo: 'portada', origen: 'reparacion' }, ...resto];
                     accion = 'extraer';
                 } else {
-                    // SÍ había de dónde sacarla (fichero o pistas) pero la extracción no dio imagen. Es un
-                    // motivo MUY distinto del anterior y hay que decirlo: si no, un fallo del extractor se
-                    // confunde con «no hay fichero» y se persigue el problema equivocado.
+                    // SÍ había de dónde intentarlo (fichero, pistas de audio o ISBN) pero NINGÚN método dio imagen.
+                    // Es un motivo MUY distinto de «no hay fichero» y hay que decirlo: si no, un fallo del extractor
+                    // se confunde con la ausencia de fichero y se persigue el problema equivocado.
                     accion = 'irreparable';
                     motivo = (doc.audios || []).length
                         ? `${doc.audios.length} pista(s) de audio: ninguna trae carátula ID3 y no hay imagen suelta en su carpeta`
-                        : 'hay fichero original, pero no se pudo extraer una imagen de él';
+                        : 'formato sin cubierta extraíble (CHM de solo texto, Word/archivo sin imágenes, MOBI con DRM) y sin portada remota por ISBN';
                 }
             } else {
                 accion = 'extraer'; // dry-run: hay fichero → se PODRÍA extraer la 1.ª página

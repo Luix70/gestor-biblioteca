@@ -14,8 +14,11 @@ import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImag
 import { detectarTipo } from '../orquestador.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
 import { extraerMetadatosEpub } from './lector-epub.js';
+import { leerMobi } from './lector-mobi.js';
+import { leerChm } from './lector-chm.js';
 import { paginasMuestraDjvu } from './djvu.js';
 import { leerPaginaComic } from './comic-paginas.js';
+import { bufferPortadaPorISBN } from './portadas-isbn.js';
 import { indexarDoc } from './indice-busqueda.js';
 
 /**
@@ -27,8 +30,7 @@ export async function reextraerImagenesDoc(db, doc, { solo5mas1 = true } = {}) {
     // Se pasa el nombre_archivo del propio documento: si la carpeta la comparten varios libros (colección mal
     // clasificada), sin esto se sacaría la portada del fichero equivocado. (Ver archivoOriginal.)
     const original = await archivoOriginal(carpeta, doc.nombre_archivo).catch(() => null);
-    if (!original) return { ok: false, motivo: 'sin fichero original en su carpeta' };
-    const tipo = detectarTipo(original);
+    const tipo = original ? detectarTipo(original) : null;
 
     let buffers = [];
     try {
@@ -46,11 +48,24 @@ export async function reextraerImagenesDoc(db, doc, { solo5mas1 = true } = {}) {
         } else if (tipo === 'comic') {
             const n = solo5mas1 ? 5 : 1;
             for (let i = 0; i < n; i++) { const p = await leerPaginaComic(original, i).catch(() => null); if (p?.buffer) buffers.push(p.buffer); else break; }
+        } else if (tipo === 'mobi') {
+            // MOBI/AZW: solo cubierta embebida (EXTH+coverOffset), no hay secuencia de páginas que rasterizar.
+            const m = await leerMobi(original).catch(() => null);
+            if (m?.portada?.buf?.length) buffers = [m.portada.buf];
+        } else if (tipo === 'chm') {
+            // CHM: imagen «cover/front» o la JPG/PNG mayor del paquete (los de solo texto no traen ninguna).
+            const c = await leerChm(original).catch(() => null);
+            if (c?.portada?.buf?.length) buffers = [c.portada.buf];
         }
     } catch (e) { return { ok: false, motivo: e.message }; }
 
+    // Último recurso: formatos sin cubierta extraíble (Word/RAR/ZIP), CHM de solo texto, MOBI con DRM, o un
+    // documento SIN fichero (software/ISO catalogado por carpeta) → PORTADA REMOTA por ISBN reuniendo TODAS las
+    // fuentes que ya usa la ingesta (OpenLibrary + Amazon + Google Books), no solo OpenLibrary.
     buffers = buffers.filter((b) => Buffer.isBuffer(b) && b.length);
-    if (!buffers.length) return { ok: false, motivo: `no se pudo extraer ninguna imagen (${tipo})` };
+    if (!buffers.length && doc.isbn) { const r = await bufferPortadaPorISBN(doc.isbn); if (r) buffers = [r]; }
+    if (!buffers.length)
+        return { ok: false, motivo: original ? `no se pudo extraer ninguna imagen (${tipo})` : 'sin fichero original ni portada remota por ISBN' };
 
     // Conserva las imágenes MANUALES (añadidas/editadas por el usuario): no se pierden. Las AUTO se reemplazan
     // por las recién extraídas (sus ficheros viejos quedan en disco, sin referenciar → nunca se borra nada aquí).

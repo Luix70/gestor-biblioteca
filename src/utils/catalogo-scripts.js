@@ -233,13 +233,20 @@ export const CATALOGO_SCRIPTS = [
     // ── Imágenes y portadas ──────────────────────────────────────────────────
     S({ id: 'reparar-portadas', cat: 'Imágenes y portadas', escribe: true, aplica: '--ejecutar',
         resumen: 'Repara portadas faltantes / imágenes de carrusel rotas',
-        proposito: 'Poda referencias muertas y re-resuelve la portada (reusa una imagen válida o extrae la 1ª página, encogida). «forzar» re-extrae aunque exista (exige acotar con id o patrón); «invertir» fuerza la vuelta del negativo.',
+        proposito: 'Poda referencias muertas y re-resuelve la portada con el LECTOR de cada formato (PDF/DjVu/cómic 1ª página, EPUB cubierta declarada, MOBI/AZW por EXTH, CHM imagen del paquete). Si el fichero no da cubierta (Word/RAR/ZIP, CHM de solo texto, MOBI con DRM) o no hay fichero (software/ISO), último recurso: portada REMOTA por ISBN (OpenLibrary + Amazon + Google Books). «forzar» re-extrae aunque exista (exige acotar con id o patrón); «invertir» fuerza la vuelta del negativo.',
         params: [
             { nombre: 'sinportada', flag: '--sin-portada', tipo: 'switch', etiqueta: 'Solo los que NO tienen portada (rápido)' },
             { nombre: 'id', flag: '--id', tipo: 'texto', etiqueta: 'Id de un documento', ejemplo: '6a5e2b291d9c072868af9ff2' },
             { nombre: 'patron', flag: '--patron', tipo: 'texto', etiqueta: 'Patrón (regex sobre nombre_archivo)', ejemplo: 'Encyclopedie.*cbz$' },
             { nombre: 'forzar', flag: '--forzar', tipo: 'switch', etiqueta: 'Re-extraer aunque exista (exige id o patrón)' },
             { nombre: 'invertir', flag: '--invertir', tipo: 'switch', etiqueta: 'Invertir el negativo (con «forzar»)' },
+        ] }),
+    S({ id: 'diagnosticar-irreparables', cat: 'Imágenes y portadas', escribe: false, aplica: null,
+        resumen: 'Por qué un documento está sin portada y si es recuperable',
+        proposito: 'Solo diagnóstico (no escribe). Para cada documento sin portada prueba en orden: fichero rasterizable → cubierta embebida (EPUB/MOBI/CHM) → imagen suelta en la carpeta → carátula ID3 de audio → portada remota por ISBN. Resume cuántos son recuperables y cuántos IRREPARABLES de verdad, con el motivo. «remoto» comprueba de verdad la portada por ISBN (hace red).',
+        params: [
+            { nombre: 'remoto', flag: '--remoto', tipo: 'switch', etiqueta: 'Comprobar de verdad la portada remota por ISBN (red)' },
+            { nombre: 'id', flag: '--id', tipo: 'texto', etiqueta: 'Id de un documento', ejemplo: '6a5e2b291d9c072868af9ff2' },
         ] }),
     S({ id: 'corregir-polaridad-cbz', cat: 'Imágenes y portadas', escribe: true, aplica: '--ejecutar',
         resumen: 'Corrige láminas bitonales en negativo dentro de un cbz',

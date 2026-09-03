@@ -1241,6 +1241,20 @@ de ficheros clasificado por CDU.
       `--ultimos N` (los N más recientes), `--primeros N`. Para la MULTITUD de portadas equivocadas (p. ej. las
       que heredaron una cubierta compartida): `reparar-portadas --forzar --ultimos 500 --ejecutar`, o
       `--forzar --seleccion "Portadas mal" --ejecutar`, o `--forzar --desde 2026-08-30 --ejecutar`.
+    · PORTADA SEGÚN EL FORMATO + REMOTA POR ISBN (reparar-portadas y la acción «Re-extraer imágenes» del
+      panel comparten estas vías): la extracción de la cubierta se hace con el LECTOR propio de cada formato,
+      los mismos que usa la ingesta — PDF (1ª página significativa), EPUB (cubierta declarada/1ª en orden),
+      DjVu/cómic (1ª página), MOBI/AZW (`lector-mobi·leerMobi`, registro por EXTH+coverOffset) y CHM
+      (`lector-chm·leerChm`, imagen «cover/front» o la JPG/PNG mayor del paquete). Antes solo se cubrían
+      PDF/EPUB/DjVu/cómic, así que los MOBI y CHM CON imagen dentro se daban por «irreparables» sin serlo.
+      Si el fichero no da cubierta (Word/RAR/ZIP, CHM de SOLO TEXTO, MOBI con DRM) o NO hay fichero
+      (software/ISO catalogado por carpeta), ÚLTIMO RECURSO: PORTADA REMOTA por ISBN reuniendo TODAS las
+      fuentes keyless que ya usa la ingesta — `utils/portadas-isbn·bufferPortadaPorISBN` (OpenLibrary Covers
+      + búsqueda cover_i, Amazon por ISBN-10, Google Books en varios tamaños), midiéndolas sin sharp y
+      quedándose con la de MAYOR resolución (descarta el 1x1 «sin portada»). Genuinamente irreparable = ni
+      imagen dentro del fichero, ni imagen suelta en la carpeta, ni carátula ID3 (audiolibros), ni ISBN.
+      Para SABER cuáles y por qué: `node scripts/diagnosticar-irreparables.js [--remoto] [--informe irr.txt]`
+      (solo diagnóstico, no escribe; en el NAS con `docker exec -t`).
     · UNIFICAR UNA SERIE DE NÚMEROS (revista/cómic): `node scripts/unificar-serie-revista.js --coleccion
       <id> --cdu <cdu> [--esperados n] [--ejecutar]` (dry-run por defecto). Hermano del anterior, pero para
       una COLECCIÓN de números, no una obra multivolumen. Caso real (Don Miki, 692 números, ISSN
@@ -2993,12 +3007,26 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
                                    node scripts/emparejar-portadas.js "<Covers>" --ejecutar   (aplica el plan)
     reparar-portadas.js       Repara documentos SIN portada o con imágenes de carrusel ROTAS (referencias
                               a ficheros que ya no están): poda las muertas y re-resuelve la portada
-                              (reusa una imagen válida o EXTRAE la 1ª página del fichero, encogida). Sin
-                              filtro revisa TODO el catálogo (lento, pero solo actúa en lo roto);
-                              --sin-portada va directo a los que no tienen (rápido); --id / --patron
-                              acotan; --forzar RE-EXTRAE aunque exista (exige --id/--patron; encoge la
+                              (reusa una imagen válida o EXTRAE la cubierta del fichero, encogida). Extrae
+                              según el FORMATO reutilizando los lectores de la ingesta: PDF (1ª página
+                              significativa), EPUB (cubierta declarada), DjVu/cómic (1ª página), MOBI/AZW
+                              (EXTH+coverOffset) y CHM (imagen del paquete). Si el fichero no da cubierta
+                              (Word/RAR/ZIP, CHM de solo texto, MOBI con DRM) o no hay fichero (software/ISO),
+                              ÚLTIMO RECURSO: portada REMOTA por ISBN reuniendo TODAS las fuentes (OpenLibrary
+                              + Amazon + Google Books, la de mayor resolución). Sin filtro revisa TODO el
+                              catálogo (lento, pero solo actúa en lo roto); --sin-portada va directo a los que
+                              no tienen (rápido); --id / --patron / --seleccion / --desde / --ultimos N /
+                              --primeros N acotan; --forzar RE-EXTRAE aunque exista (exige acotar; encoge la
                               portada a ~1200 px → evita el OOM del catálogo); --invertir fuerza la vuelta
                               del negativo (junto a --forzar, para frontispicios densos). Dry-run; --ejecutar.
+    diagnosticar-irreparables Explica, doc a doc, POR QUÉ un recurso está SIN portada y si es recuperable
+      .js                     (solo DIAGNÓSTICO, no escribe nada). Prueba en orden: fichero rasterizable →
+                              cubierta embebida (EPUB/MOBI/CHM) → imagen suelta en carpeta → carátula ID3 de
+                              audio → portada remota por ISBN (esta última solo se COMPRUEBA con --remoto;
+                              hace red). Lo que no cae en ninguna vía es IRREPARABLE de verdad, con el motivo
+                              concreto. Resumen por categorías + nº de recuperables vs irreparables. --id
+                              <ObjectId> uno solo; --informe <ruta.txt> vuelca la lista completa. Corre en el
+                              NAS (docker exec -t) donde están los ficheros.
     corregir-polaridad-cbz.js Corrige EN SITIO las láminas bitonales en NEGATIVO dentro de un cbz ya
                               hecho (pdfimages vuelca el stencil invertido): reescribe cada PNG con la
                               paleta al revés SIN recomprimir (minutos, no re-convertir los PDF). Verifica

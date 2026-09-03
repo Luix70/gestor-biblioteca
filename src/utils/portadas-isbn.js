@@ -1,4 +1,5 @@
 import { medirImagen } from './medir-imagen.js';
+import { variantesISBN } from './identificadores.js';
 
 // Descarga una imagen remota y devuelve sus dimensiones (sin sharp: se leen de la cabecera JPEG/PNG).
 // Descarta placeholders diminutos («sin imagen») por tamaño de buffer. null si no carga o no es imagen.
@@ -77,4 +78,32 @@ export async function portadasPorISBN(isbn13, isbn10, ficheroUrl) {
     }
     out.sort((a, b) => b.ancho - a.ancho);
     return out;
+}
+
+/**
+ * Portada por ISBN lista para GUARDAR (Buffer), reuniendo TODAS las fuentes keyless que ya usa la ingesta
+ * (OpenLibrary Covers + búsqueda por cover_i, Amazon por ISBN-10, Google Books en varios tamaños) vía
+ * `portadasPorISBN`, que las mide (sin sharp) y ordena por ancho. Se descarga la de MAYOR resolución (con
+ * reintento a la siguiente si la primera falla al bajar). `portadasPorISBN` ya descartó el 1x1 «sin portada».
+ * Pensado como ÚLTIMO RECURSO de portada cuando el fichero no da cubierta (CHM de solo texto, Word, MOBI con
+ * DRM, software/ISO sin fichero). Devuelve un Buffer o null (ISBN inválido o ninguna fuente la tiene).
+ */
+export async function bufferPortadaPorISBN(isbn) {
+    const vs = variantesISBN(isbn);                       // [13, 10] normalizados (o subconjunto); [] si no es válido
+    if (!vs.length) return null;
+    const isbn13 = vs.find((x) => x.length === 13) || null;
+    const isbn10 = vs.find((x) => x.length === 10) || null;
+    const candidatas = await portadasPorISBN(isbn13, isbn10).catch(() => []); // ordenadas por ancho desc
+    for (const c of candidatas) {
+        try {
+            const ctrl = new AbortController();
+            const to = setTimeout(() => ctrl.abort(), 9000);
+            const resp = await fetch(c.url, { signal: ctrl.signal, redirect: 'follow' });
+            clearTimeout(to);
+            if (!resp.ok) continue;
+            const buf = Buffer.from(await resp.arrayBuffer());
+            if (buf.length >= 800) return buf;            // 800 B = umbral anti-cuerpo-vacío (igual que medir)
+        } catch { /* siguiente candidata */ }
+    }
+    return null;
 }
