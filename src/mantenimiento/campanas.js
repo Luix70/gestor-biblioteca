@@ -110,7 +110,14 @@ export async function cotejarPorISBN(doc) {
     const fich = await buscarEnFicheroLocal({ isbns }).catch(() => null);
     const tAut = fich && fich.titulo ? String(fich.titulo).trim() : '';
     if (!tAut) return null;                                        // el ISBN no está en el Fichero → nada que hacer
-    if (normTitulo(doc.titulo) === normTitulo(tAut)) return null;  // el título ya coincide con la autoridad
+    const nDoc = normTitulo(doc.titulo), nAut = normTitulo(tAut);
+    if (nDoc === nAut) return null;                                // el título ya coincide con la autoridad
+    // NO DEGRADAR: si el título actual ya CONTIENE (como frase completa) el del Fichero, es MÁS específico y no
+    // se sustituye — el del Fichero perdería información (visto: «Cinema 1: The Movement-Image» → «Cinema»). El
+    // cotejo solo arregla títulos POBRES (nombre de serie/editorial, truncados, artefacto), no rebaja uno bueno.
+    if (nAut && nDoc.length > nAut.length && (' ' + nDoc + ' ').includes(' ' + nAut + ' ')) {
+        return { accion: 'revisar', tituloFichero: tAut, motivo: 'no-degradar (el actual es más completo)' };
+    }
     // ¿El ISBN es REALMENTE de este libro? Se corrobora SOLO por el nombre de archivo (el título actual puede
     // ser el genérico de la serie o un artefacto → mal referente). Sin nombre de archivo → no se puede confirmar.
     const ref = sinExtension(doc.nombre_archivo);

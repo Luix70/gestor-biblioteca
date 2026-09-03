@@ -162,8 +162,24 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null, opcion
         const ent = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
         if (recursoEstructurado.volumen_numero != null) recursoEstructurado.volumen_numero = ent(recursoEstructurado.volumen_numero);
         if (recursoEstructurado.obra_total != null) recursoEstructurado.obra_total = ent(recursoEstructurado.obra_total);
-        // Si trae obra_titulo o isbn_obra, es un tomo → limpia el título de la obra.
-        if (recursoEstructurado.obra_titulo) recursoEstructurado.obra_titulo = String(recursoEstructurado.obra_titulo).trim() || null;
+        // Si trae obra_titulo o isbn_obra, es un tomo → limpia el título de la obra. GUARDARRAÍL contra OBRAS
+        // FALSAS que la visión inventa en libros SUELTOS: un `obra_titulo` SIN nº de volumen NI isbn_obra no
+        // describe una obra multivolumen (visto: «The Probert Encyclopaedia» → obra con «vol. undefined»), y un
+        // `obra_titulo` IGUAL al título del propio libro tampoco (un libro no es «tomo de sí mismo»: visto «New
+        // Latin American Cinema» → obra de un solo tomo). En esos casos se descarta para no fabricar la obra.
+        if (recursoEstructurado.obra_titulo) {
+            const ot = String(recursoEstructurado.obra_titulo).trim() || null;
+            const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+            const sinPruebaDeObra = recursoEstructurado.volumen_numero == null && !recursoEstructurado.isbn_obra;
+            const esSuPropioTitulo = ot && recursoEstructurado.titulo && norm(ot) === norm(recursoEstructurado.titulo);
+            if (!ot || sinPruebaDeObra || esSuPropioTitulo) {
+                recursoEstructurado.obra_titulo = null;
+                delete recursoEstructurado.volumen_numero;
+                delete recursoEstructurado.volumen_titulo;
+            } else {
+                recursoEstructurado.obra_titulo = ot;
+            }
+        }
 
         // TODOS los identificadores leídos por la VISIÓN → mismas estructuras que el lector de texto
         // (isbn_candidatos + isbn_propio + isbns_rol + issn_candidatos), para que el interpretador (obra/
