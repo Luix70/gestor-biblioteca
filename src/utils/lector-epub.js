@@ -107,59 +107,117 @@ function imagenDesdeXhtml(zip, opfDir, href) {
     return zip.getEntry(path.posix.normalize(path.posix.join(xhtmlDir, decodeURIComponent(src))));
 }
 
-/**
- * Extrae la cubierta del EPUB probando, en orden de fiabilidad, varias convenciones y eligiendo
- * la imagen MÁS GRANDE (la más legible). Devuelve base64 o null.
- *   1. EPUB3: item con properties="cover-image".
- *   2. EPUB2: <meta name="cover" content="ID"> → item[id="ID"]  (ID puede tener un punto, p. ej.
- *      "cover.jpg": por eso se usa selector de atributo y NO $('#'+id), que interpreta el punto
- *      como clase CSS y nunca casa — era el bug que perdía la cubierta).
- *   3. Guía: <reference type="cover"> (suele apuntar a un XHTML con la imagen dentro).
- *   4. Heurística: item imagen cuyo id/href sugiera portada (y no sea un logo/ex_libris).
- */
-function extraerCubiertaEpub(zip, $, opfPath) {
-    const opfDir = path.posix.dirname(opfPath);
-    const candidatas = [];
-    const add = (entry) => { if (entry && /\.(jpe?g|png|gif|webp)$/i.test(entry.entryName)) candidatas.push(entry); };
+const esImagenEntry = (entry) => !!(entry && !entry.isDirectory && /\.(jpe?g|png|gif|webp)$/i.test(entry.entryName));
+const extDeNombre = (n) => (/\.png$/i.test(n) ? 'png' : /\.gif$/i.test(n) ? 'gif' : /\.webp$/i.test(n) ? 'webp' : 'jpg');
 
-    add(entradaPorHref(zip, opfDir, $('manifest > item[properties~="cover-image"]').attr('href')));
+/**
+ * Entry de la CUBIERTA DECLARADA por alguna convención OPF (en orden de FIABILIDAD), o null. Se devuelve la
+ * PRIMERA que resuelva a una imagen real —no la más grande—: la convención más fiable manda.
+ *   1. EPUB3: item con properties="cover-image".
+ *   2. EPUB2: <meta name="cover" content="ID"> → item[id="ID"] (ID puede llevar un punto, «cover.jpg»: por eso
+ *      selector de atributo, NO $('#'+id), que interpreta el punto como clase CSS y nunca casa).
+ *   3. Guía: <reference type="cover"> (suele apuntar a un XHTML con la imagen dentro).
+ *   4. Heurística: primer item-imagen cuyo id/href sugiera portada (y no sea un logo/ex_libris).
+ */
+function coberturaDeclarada(zip, $, opfDir) {
+    let e = entradaPorHref(zip, opfDir, $('manifest > item[properties~="cover-image"]').attr('href'));
+    if (esImagenEntry(e)) return e;
 
     const coverId = $('meta[name="cover"]').attr('content');
     if (coverId) {
         const it = $('manifest > item[id="' + coverId.replace(/"/g, '\\"') + '"]').first();
         const href = it.attr('href');
-        if (esImagenHref(href, it.attr('media-type'))) add(entradaPorHref(zip, opfDir, href));
-        else if (href) add(imagenDesdeXhtml(zip, opfDir, href));
+        e = esImagenHref(href, it.attr('media-type')) ? entradaPorHref(zip, opfDir, href) : (href ? imagenDesdeXhtml(zip, opfDir, href) : null);
+        if (esImagenEntry(e)) return e;
     }
 
     const refHref = $('reference[type="cover"]').attr('href');
-    if (refHref) add(esImagenHref(refHref) ? entradaPorHref(zip, opfDir, refHref) : imagenDesdeXhtml(zip, opfDir, refHref));
+    if (refHref) { e = esImagenHref(refHref) ? entradaPorHref(zip, opfDir, refHref) : imagenDesdeXhtml(zip, opfDir, refHref); if (esImagenEntry(e)) return e; }
 
+    let hit = null;
     $('manifest > item').each((i, el) => {
+        if (hit) return;
         const href = $(el).attr('href'); const id = $(el).attr('id') || '';
         if (esImagenHref(href, $(el).attr('media-type')) && RE_PORTADA.test(id + ' ' + href) && !RE_RUIDO.test(id + ' ' + href)) {
-            add(entradaPorHref(zip, opfDir, href));
+            const cand = entradaPorHref(zip, opfDir, href); if (esImagenEntry(cand)) hit = cand;
         }
     });
+    return hit;
+}
 
-    // ÚLTIMO RECURSO: el EPUB no DECLARA cubierta por ninguna de las convenciones de arriba, pero lleva
-    // imágenes dentro. Antes se devolvía null y el libro se quedaba sin portada para siempre (ni la ingesta ni
-    // reparar-portadas tenían de dónde sacarla, porque un epub no se rasteriza como un pdf). Se coge la imagen
-    // MÁS GRANDE del epub, que casi siempre ES la cubierta —y si no, una ilustración del propio libro es mejor
-    // que una ficha en blanco, y siempre se puede cambiar a mano.
-    // Se descartan el ruido conocido (logos, ex-libris, sellos del repackager) y las miniaturas (<8 KB), que
-    // son iconos y adornos: elegir uno de esos sería peor que no elegir nada.
-    if (!candidatas.length) {
-        for (const e of zip.getEntries()) {
-            if (e.isDirectory || !/\.(jpe?g|png|gif|webp)$/i.test(e.entryName)) continue;
-            if (RE_RUIDO.test(e.entryName) || e.header.size < 8 * 1024) continue;
-            candidatas.push(e);
-        }
-    }
+/**
+ * Imágenes del EPUB EN ORDEN DE APARICIÓN (orden de LECTURA): la cubierta declarada primero, luego las imágenes
+ * referenciadas por los XHTML en el orden del SPINE (y dentro de cada XHTML, en orden de documento) y, por
+ * último, cualquier imagen del manifest que no hubiera aparecido. Deduplicadas. Es lo correcto para EXTRAER
+ * imágenes a mano (antes salían desordenadas o —para epub— ni salían) y para elegir la portada: la cubierta
+ * suele ser la 1.ª imagen del libro.
+ *
+ * PEREZOSO (clave en el NAS, RAM escasa): devuelve [{ entry, ext, nombre, size }] con la ENTRY del zip SIN
+ * decodificar — el llamador hace `entry.getData()` SOLO de la que necesita (una portada, o la miniatura N), en
+ * vez de cargar decenas de imágenes en memoria de golpe.
+ */
+export function imagenesEnOrdenEpub(zip, $, opfPath, { max = 120, minBytes = 256 } = {}) {
+    const opfDir = path.posix.dirname(opfPath);
+    const man = new Map();
+    $('manifest > item').each((i, el) => { const id = $(el).attr('id'); if (id) man.set(id, { href: $(el).attr('href') || '', media: ($(el).attr('media-type') || '').toLowerCase() }); });
+    const vistas = new Set();
+    const salida = [];
+    const addEntry = (entry) => {
+        if (salida.length >= max || !esImagenEntry(entry) || vistas.has(entry.entryName) || entry.header.size < minBytes) return;
+        vistas.add(entry.entryName);
+        salida.push({ entry, ext: extDeNombre(entry.entryName), nombre: path.posix.basename(entry.entryName), size: entry.header.size });
+    };
 
-    let mejor = null;
-    for (const e of candidatas) if (!mejor || e.header.size > mejor.header.size) mejor = e;
-    return mejor ? mejor.getData().toString('base64') : null;
+    addEntry(coberturaDeclarada(zip, $, opfDir));   // la cubierta declarada, primero
+    // SPINE = orden de lectura. Cada itemref → un XHTML (o una imagen directa); dentro del XHTML, los <img> en orden.
+    $('spine > itemref').each((i, el) => {
+        if (salida.length >= max) return;
+        const it = man.get($(el).attr('idref'));
+        if (!it || !it.href) return;
+        if (it.media.startsWith('image/')) { addEntry(entradaPorHref(zip, opfDir, it.href)); return; }
+        const entry = entradaPorHref(zip, opfDir, it.href);
+        if (!entry) return;
+        let $$; try { $$ = cheerio.load(entry.getData().toString('utf8'), { xmlMode: true }); } catch { return; }
+        const xhtmlDir = path.posix.dirname(path.posix.join(opfDir, it.href.split('#')[0]));
+        $$('img, image').each((j, im) => {
+            const src = $$(im).attr('src') || $$(im).attr('xlink:href') || $$(im).attr('href');
+            if (src) { try { addEntry(zip.getEntry(path.posix.normalize(path.posix.join(xhtmlDir, decodeURIComponent(src.split('#')[0]))))); } catch { /* href raro */ } }
+        });
+    });
+    // Resto de imágenes del manifest (por si alguna no está referenciada en el spine).
+    $('manifest > item').each((i, el) => { if (salida.length >= max) return; const href = $(el).attr('href'); if (esImagenHref(href, ($(el).attr('media-type') || '').toLowerCase())) addEntry(entradaPorHref(zip, opfDir, href)); });
+    return salida;
+}
+
+/**
+ * Cubierta del EPUB: la DECLARADA por convención (fiable); si no hay ninguna, la PRIMERA imagen sustancial en
+ * ORDEN DE APARICIÓN (la cubierta suele ser la 1.ª imagen del libro). Antes se cogía la MÁS GRANDE, que en un
+ * libro ilustrado (SPQR y sus fotos) es una foto interior, no la portada. Devuelve base64 o null.
+ */
+function extraerCubiertaEpub(zip, $, opfPath) {
+    const declarada = coberturaDeclarada(zip, $, path.posix.dirname(opfPath));
+    if (declarada) return declarada.getData().toString('base64');
+    const orden = imagenesEnOrdenEpub(zip, $, opfPath, { max: 1, minBytes: 8 * 1024 });
+    return orden.length ? orden[0].entry.getData().toString('base64') : null;
+}
+
+/**
+ * Abre un EPUB de disco y devuelve sus imágenes EN ORDEN DE APARICIÓN (misma forma que `leerImagenesMobi`:
+ * { drm, total, imagenes:[{buf, ext}] }). Para la extracción MANUAL de imágenes / elección de portada en la
+ * ficha, que hasta ahora solo funcionaba con MOBI. Nunca lanza.
+ */
+export async function leerImagenesEpub(ruta, { max = 120, minBytes = 256 } = {}) {
+    try {
+        const zip = new AdmZip(await fs.readFile(ruta));
+        const cont = zip.getEntry('META-INF/container.xml');
+        if (!cont) return { drm: false, total: 0, imagenes: [] };
+        const opfPath = cheerio.load(cont.getData().toString('utf8'), { xmlMode: true })('rootfile').attr('full-path');
+        const opf = opfPath && zip.getEntry(opfPath);
+        if (!opf) return { drm: false, total: 0, imagenes: [] };
+        const $ = cheerio.load(opf.getData().toString('utf8'), { xmlMode: true });
+        const imagenes = imagenesEnOrdenEpub(zip, $, opfPath, { max, minBytes });
+        return { drm: false, total: imagenes.length, imagenes };
+    } catch { return { drm: false, total: 0, imagenes: [] }; }
 }
 
 /**

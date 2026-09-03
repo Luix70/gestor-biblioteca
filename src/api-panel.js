@@ -51,6 +51,7 @@ import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
 import { spawn } from 'node:child_process';
 import { readdir, stat, mkdir, rename } from 'node:fs/promises';
 import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
+import { leerImagenesEpub } from './utils/lector-epub.js';
 import { contarPaginasComic, leerPaginaComic } from './utils/comic-paginas.js';
 import { contarPaginasDjvu, leerPaginaDjvu } from './utils/djvu.js';
 import { indiceChm, paginaChmInline } from './utils/lector-chm.js';
@@ -2433,14 +2434,18 @@ export function rutasPanel() {
         const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
         if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
-        if (!['.mobi', '.azw', '.azw3'].includes(path.extname(doc.nombre_archivo || '').toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es un MOBI/AZW/AZW3' }); return null; }
-        return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo) };
+        const ext = path.extname(doc.nombre_archivo || '').toLowerCase();
+        if (!['.mobi', '.azw', '.azw3', '.epub'].includes(ext)) { res.status(400).json({ ok: false, motivo: 'no es un MOBI/AZW/EPUB' }); return null; }
+        // Usa el nombre_archivo del PROPIO documento (no el 1.º de la carpeta): correcto aunque varios libros
+        // compartan carpeta. El `formato` decide el extractor (epub ordenado por spine vs registros MOBI).
+        return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo), formato: ext === '.epub' ? 'epub' : 'mobi' };
     };
+    const leerImagenesDoc = (m) => (m.formato === 'epub' ? leerImagenesEpub(m.ruta, { max: 120 }) : leerImagenesMobi(m.ruta, { max: 120 }));
     // Nº de imágenes embebidas (para la rejilla perezosa; NO devuelve las imágenes: se piden una a una).
     r.get('/documentos/:id/imagenes-embebidas', async (req, res) => {
         try {
             const m = await docMobi(req, res); if (!m) return;
-            const r0 = await leerImagenesMobi(m.ruta, { max: 120 });
+            const r0 = await leerImagenesDoc(m);
             res.json({ ok: true, total: r0.total, drm: !!r0.drm });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
@@ -2448,12 +2453,15 @@ export function rutasPanel() {
     r.get('/documentos/:id/imagenes-embebidas/:n', async (req, res) => {
         try {
             const m = await docMobi(req, res); if (!m) return;
-            const r0 = await leerImagenesMobi(m.ruta, { max: 120 });
+            const r0 = await leerImagenesDoc(m);
             const im = r0.imagenes[Math.max(0, parseInt(req.params.n, 10) || 0)];
             if (!im) return res.status(404).json({ ok: false, motivo: 'imagen no encontrada' });
+            // epub = PEREZOSO: se decodifica SOLO esta imagen ahora (im.entry.getData()); mobi ya trae el buffer.
+            const buf = im.buf || (im.entry && im.entry.getData());
+            if (!buf) return res.status(404).json({ ok: false, motivo: 'imagen no encontrada' });
             res.set('Content-Type', im.ext === 'png' ? 'image/png' : im.ext === 'gif' ? 'image/gif' : 'image/jpeg');
             res.set('Cache-Control', 'private, max-age=600');
-            res.send(im.buf);
+            res.send(buf);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     // Texto plano (best-effort) para RASTERIZAR una página cuando el MOBI no tiene imágenes (o se quiere una

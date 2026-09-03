@@ -4575,6 +4575,47 @@ async function extraerDePdf(archivo) {
 
 // EPUB: extrae las imágenes embebidas (JSZip) → miniaturas → el usuario marca → se añaden al carrusel.
 // Además, «📄 Página de texto» rasteriza el primer contenido con texto (como en MOBI).
+// Rutas de las imágenes de un EPUB (ya cargado con JSZip) EN ORDEN DE APARICIÓN (orden de lectura): la cubierta
+// declarada primero, luego las imágenes referenciadas por los XHTML en el orden del SPINE, y por último el resto
+// del manifest. Todo en el CLIENTE (no carga el NAS). Devuelve [nombreEnZip] o null si no se pudo ordenar.
+async function ordenImagenesEpub(zip) {
+  const leer = async (n) => { const f = zip.file(n); return f ? await f.async('text') : null; };
+  const norm = (p) => { const out = []; for (const s of String(p).split('/')) { if (s === '..') out.pop(); else if (s && s !== '.') out.push(s); } return out.join('/'); };
+  const dirDe = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+  try {
+    const container = await leer('META-INF/container.xml');
+    const opfPath = container && new DOMParser().parseFromString(container, 'application/xml').querySelector('rootfile')?.getAttribute('full-path');
+    const opfXml = opfPath && (await leer(opfPath));
+    if (!opfXml) return null;
+    const opfDir = dirDe(opfPath);
+    const doc = new DOMParser().parseFromString(opfXml, 'application/xml');
+    const man = new Map();
+    doc.querySelectorAll('manifest > item').forEach((it) => { const id = it.getAttribute('id'); if (id) man.set(id, { href: it.getAttribute('href') || '', media: (it.getAttribute('media-type') || '').toLowerCase() }); });
+    const orden = [], vistas = new Set();
+    const add = (baseDir, ref) => { if (!ref) return; const full = norm((baseDir ? baseDir + '/' : '') + decodeURIComponent(String(ref).split('#')[0])); if (zip.file(full) && !vistas.has(full)) { vistas.add(full); orden.push(full); } };
+    // Cubierta declarada, primero.
+    const covImg = doc.querySelector('manifest > item[properties~="cover-image"]');
+    const covId = doc.querySelector('meta[name="cover"]')?.getAttribute('content');
+    if (covImg) add(opfDir, covImg.getAttribute('href'));
+    else if (covId && man.get(covId)?.media.startsWith('image/')) add(opfDir, man.get(covId).href);
+    // Spine (orden de lectura): imágenes de cada XHTML en orden de documento.
+    for (const itemref of doc.querySelectorAll('spine > itemref')) {
+      const it = man.get(itemref.getAttribute('idref'));
+      if (!it || !it.href) continue;
+      if (it.media.startsWith('image/')) { add(opfDir, it.href); continue; }
+      const xFull = norm((opfDir ? opfDir + '/' : '') + it.href.split('#')[0]);
+      const xhtml = await leer(xFull);
+      if (!xhtml) continue;
+      const xDir = dirDe(xFull);
+      let xdoc; try { xdoc = new DOMParser().parseFromString(xhtml, 'application/xhtml+xml'); } catch { continue; }
+      if (xdoc.querySelector('parsererror')) { try { xdoc = new DOMParser().parseFromString(xhtml, 'text/html'); } catch { continue; } }
+      xdoc.querySelectorAll('img, image').forEach((im) => add(xDir, im.getAttribute('src') || im.getAttribute('xlink:href') || im.getAttribute('href')));
+    }
+    // Resto de imágenes del manifest que no aparecieran en el spine.
+    doc.querySelectorAll('manifest > item').forEach((it) => { if ((it.getAttribute('media-type') || '').toLowerCase().startsWith('image/')) add(opfDir, it.getAttribute('href')); });
+    return orden.length ? orden : null;
+  } catch { return null; }
+}
 async function extraerDeEpub(archivo) {
   const cont = $('#cmpModal');
   cont.innerHTML = `<div class="box card" style="max-width:640px;max-height:90vh;overflow:auto"><h3 style="margin-top:0">🖹 Extraer del EPUB</h3><div class="muted" id="exMsg" style="font-size:12px">Cargando imágenes…</div><div id="exGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-top:10px"></div><div class="row" style="justify-content:space-between;margin-top:12px;gap:8px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exX">Cancelar</button><button class="btn" id="exTexto">📄 Página de texto</button></div><button class="btn pri" id="exOk" disabled>Añadir 0</button></div></div>`;
@@ -4587,7 +4628,12 @@ async function extraerDeEpub(archivo) {
   const blob = await _descargarArchivo(archivo.url);
   const zip = await JSZip.loadAsync(await blob.arrayBuffer());
   if ($('#exTexto')) $('#exTexto').onclick = () => epubPaginaTexto(zip); // rasteriza el primer contenido de texto
-  const entradas = Object.values(zip.files).filter((f) => !f.dir && /\.(jpe?g|png|webp|gif)$/i.test(f.name));
+  // EN ORDEN DE APARICIÓN (spine): la cubierta suele ser la 1.ª. Si no se puede ordenar (epub raro), cae al
+  // orden de los ficheros del zip (como antes).
+  const ordenadas = await ordenImagenesEpub(zip);
+  const entradas = (ordenadas && ordenadas.length)
+    ? ordenadas.map((n) => zip.file(n)).filter(Boolean)
+    : Object.values(zip.files).filter((f) => !f.dir && /\.(jpe?g|png|webp|gif)$/i.test(f.name));
   if (!entradas.length) { $('#exMsg').textContent = 'Este EPUB no tiene imágenes embebidas. Usa «📄 Página de texto».'; return; }
   $('#exMsg').textContent = `${entradas.length} imágenes · toca las que quieras añadir`;
   const marcadas = new Map(); // idx → dataURL
