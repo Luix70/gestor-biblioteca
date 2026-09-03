@@ -3071,6 +3071,8 @@ function verEstanteriaEnCatalogo(amb, est) {
   if ($('#sqTipo')) $('#sqTipo').value = '';
   if ($('#sqSoporte')) $('#sqSoporte').value = '';
   if ($('#sqCdu')) $('#sqCdu').value = '';
+  if ($('#sqDesde')) $('#sqDesde').value = '';
+  if ($('#sqHasta')) $('#sqHasta').value = '';
   // Estantería concreta → orden por POSICIÓN física, reflejado en el selector (y modificable a mano).
   if (est && $('#sqOrden')) {
     $('#sqOrden').value = 'posicion';
@@ -3088,6 +3090,8 @@ function buscarTexto(q) {
   $('#sqQ').value = q;
   if ($('#sqCdu')) $('#sqCdu').value = '';
   if ($('#sqTipo')) $('#sqTipo').value = '';
+  if ($('#sqDesde')) $('#sqDesde').value = '';
+  if ($('#sqHasta')) $('#sqHasta').value = '';
   buscarCatalogo(1);
 }
 function filtrarPorClasificacion(sist, cod) {
@@ -8661,6 +8665,12 @@ function construirSearch() {
         <div><label>Formato</label><select id="sqFormato"><option value="">Todos</option><option value="pdf">PDF</option><option value="epub">EPUB</option><option value="mobi">MOBI/AZW</option><option value="cbz">CBZ</option><option value="cbr">CBR</option><option value="cb7">CB7</option><option value="djvu">DjVu</option><option value="audio">🔊 Audio</option><option value="video">🎬 Vídeo</option><option value="papel">Papel</option></select></div>
         <div><label>Ámbito</label><select id="sqAmbito"><option value="">Todos</option></select></div>
         <div><label>Estantería</label><select id="sqEstanteria" disabled><option value="">Todas</option></select></div>
+        <div><label title="Filtra por la fecha en que se catalogó el documento (para localizar y SELECCIONAR una tanda: p. ej. la de una ingesta con portadas mal)">Fecha de ingreso</label>
+          <div style="display:flex;gap:4px;align-items:center">
+            <input type="date" id="sqDesde" title="Desde (fecha de ingreso)" style="flex:1;min-width:0">
+            <span class="muted">–</span>
+            <input type="date" id="sqHasta" title="Hasta (fecha de ingreso)" style="flex:1;min-width:0">
+          </div></div>
         <div class="admin-only" style="display:flex;align-items:flex-end"><button class="btn" id="sqGoUbic" title="Gestionar ubicaciones (o ver esta estantería)">📍 Gestionar</button></div>
         <div><label>CDU / materia</label>
           <div style="position:relative;display:flex;gap:4px">
@@ -8772,6 +8782,8 @@ function construirSearch() {
       buscarCatalogo(1);
     };
   if ($('#sqEstanteria')) $('#sqEstanteria').onchange = () => buscarCatalogo(1);
+  if ($('#sqDesde')) $('#sqDesde').onchange = () => buscarCatalogo(1);
+  if ($('#sqHasta')) $('#sqHasta').onchange = () => buscarCatalogo(1);
   // Ir a la página de Ubicaciones (si hay ámbito elegido, abre directamente sus libros allí).
   if ($('#sqGoUbic'))
     $('#sqGoUbic').onclick = () => {
@@ -8882,7 +8894,9 @@ function hayOtrosCriteriosBusqueda() {
     v('sqCdu') ||
     v('sqAmbito') ||
     v('sqEstanteria') ||
-    v('sqNfc')
+    v('sqNfc') ||
+    v('sqDesde') ||
+    v('sqHasta')
   )
     return true;
   const e = estrellasSel();
@@ -8982,6 +8996,9 @@ function _paramsBusqueda() {
   const estS = ($('#sqEstanteria') && $('#sqEstanteria').value) || '';
   if (ambS && estS) params.set('estanteria', estS);
   if ($('#sqNfc') && $('#sqNfc').value) params.set('nfc', $('#sqNfc').value); // etiqueta NFC: con/sin
+  // Rango de FECHA DE INGRESO (para localizar/seleccionar una tanda por su fecha de catalogación).
+  if ($('#sqDesde') && $('#sqDesde').value) params.set('desde', $('#sqDesde').value);
+  if ($('#sqHasta') && $('#sqHasta').value) params.set('hasta', $('#sqHasta').value);
   // 🔞 NSFW: sin marcar = excluir; marcada + otros criterios = incluir (también); marcada y sola = solo NSFW.
   // EXCEPCIÓN: si la casilla está marcada POR DEFECTO (ajuste global) y el usuario no la ha tocado, se INCLUYE
   // el NSFW mezclado con todo (no «solo NSFW»): «mostrar NSFW por defecto» significa verlo junto al resto.

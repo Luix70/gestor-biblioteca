@@ -810,6 +810,17 @@ export function rutasPanel() {
             // Filtro por colección (clic en la colección desde la ficha).
             const colId = String(req.query.coleccion || '').trim();
             if (colId && ObjectId.isValid(colId)) match.coleccion = new ObjectId(colId);
+            // Filtro por FECHA DE INGRESO (rango, AAAA-MM-DD). Para localizar y SELECCIONAR una tanda por su
+            // fecha de catalogación (p. ej. la de una ingesta con portadas mal, y re-extraerlas después). `hasta`
+            // cubre el día entero. Si no hay `fecha_ingreso` (docs muy antiguos), simplemente no casan.
+            const fDesde = String(req.query.desde || '').trim();
+            const fHasta = String(req.query.hasta || '').trim();
+            if (fDesde || fHasta) {
+                const rango = {};
+                if (fDesde) { const d = new Date(fDesde); if (!isNaN(d.getTime())) rango.$gte = d; }
+                if (fHasta) { const h = new Date(fHasta); if (!isNaN(h.getTime())) { h.setHours(23, 59, 59, 999); rango.$lte = h; } }
+                if (Object.keys(rango).length) match.fecha_ingreso = rango;
+            }
             // Búsqueda de texto: si el ÍNDICE FTS local está disponible lo usa (rápido, ranqueado e
             // INSENSIBLE A ACENTOS: "matematicas" encuentra "Matemáticas"), devolviendo _id por relevancia;
             // si no, CAE a la búsqueda Mongo $regex de siempre. Los IDENTIFICADORES (ISBN/ISSN, tolerando
