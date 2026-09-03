@@ -151,7 +151,15 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
     // Imágenes del LIBRO (a nivel de libro, NO solo del audiolibro): así, si el libro no tiene audio (p. ej.
     // «Transformations»: PDFs+vídeos+pics), sus imágenes NO se pierden — se adjuntan a sus PDFs/vídeos.
     const imagenesLibro = imgs.map((f) => ({ rel: f.rel }));
-    const portadaLibroRel = (imgs.find((f) => /(^|\/)(cover|folder|portada|front)/i.test(f.rel)) || imgs[0])?.rel || null;
+    // PORTADA COMPARTIDA del libro. Una imagen con NOMBRE DE CUBIERTA (cover/folder/portada/front) siempre vale.
+    // Una imagen SUELTA (sin ese nombre) solo se comparte como portada si el libro es un AUDIOLIBRO (la carátula
+    // es común a todas las pistas) o un ÚNICO documento; con VARIOS documentos distintos NO se comparte —una
+    // imagen suelta suele ser un mapa/ilustración, no la cubierta de todos—: cada documento saca la SUYA (1ª
+    // página) y la imagen va al carrusel. (Antes «|| imgs[0]» promocionaba cualquier imagen a portada de todos:
+    // p. ej. un mapa «East-NE-full.jpg» quedaba de cubierta de los 4 tomos de Gibbon.)
+    const coverNombrada = imgs.find((f) => /(^|\/)(cover|folder|portada|front)/i.test(f.rel));
+    const imagenSuelta = (audios.length > 0 || pdfs.length <= 1) ? imgs[0] : null;
+    const portadaLibroRel = (coverNombrada || imagenSuelta)?.rel || null;
 
     let audiolibro = null;
     if (audios.length) {
@@ -298,10 +306,35 @@ async function recolectarColecciones(dir, salida) {
  */
 /** Detección LIGERA (sin leer ID3, solo estructura de ficheros) para el vigilante: ¿el drop es una COLECCIÓN
  *  de audiolibros? Sí si se detecta alguna colección con ≥2 libros/obras (1 solo = audiolibro suelto). */
+// Fracción MÍNIMA de «libros» (subcarpetas-obra) con AUDIO para considerar la carpeta una COLECCIÓN DE
+// AUDIOLIBROS. Por debajo es una colección de LIBROS (aunque traiga algún audio suelto): se cataloga por el
+// camino de LIBROS (identificación completa: ISBN, portada propia, metadatos), no verbatim por el de audiolibros.
+const AUDIO_FRACCION_MIN = Number(process.env.COLECCION_AUDIO_FRACCION_MIN || 0.5);
+
+// ¿Los «libros» detectados son mayoritariamente AUDIO? Recorre los ficheros de cada libro y mira si hay audio.
+async function librosSonDeAudio(cols) {
+    let total = 0, conAudio = 0;
+    for (const c of cols) {
+        for (const l of c.libros) {
+            total++;
+            const files = l.files || await listarFicheros(l.abs);
+            if (files.some((f) => esAudio(f.nombre))) conAudio++;
+        }
+    }
+    return total > 0 && (conAudio / total) >= AUDIO_FRACCION_MIN;
+}
+
+/**
+ * ¿Es la carpeta una COLECCIÓN DE AUDIOLIBROS? Exige DOS cosas: (1) ≥2 «libros» (subcarpetas-obra) y (2) que sean
+ * AUDIO-DOMINANTES. Antes bastaba (1): una colección de LIBROS (Loeb, «TXtras», etc.) con ≥2 subcarpetas se
+ * tragaba por este camino y sus libros se catalogaban VERBATIM por nombre —sin ISBN ni portada propia, con una
+ * cubierta compartida a menudo equivocada—. Ahora, sin audio, se deja para el catalogado por LIBRO.
+ */
 export async function esColeccionAudiolibros(dir) {
     const cols = [];
     await recolectarColecciones(dir, cols);
-    return cols.some((c) => c.libros.length >= 2);
+    if (!cols.some((c) => c.libros.length >= 2)) return false;
+    return await librosSonDeAudio(cols);
 }
 
 export async function analizarColeccionAudiolibros(dir) {
