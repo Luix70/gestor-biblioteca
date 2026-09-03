@@ -119,9 +119,16 @@ export async function carpetaExiste(carpeta) {
 }
 
 /** Ruta absoluta del archivo original (epub/pdf/...) dentro de la carpeta, o null. */
-export async function archivoOriginal(carpeta) {
+export async function archivoOriginal(carpeta, nombrePreferido = null) {
     let entradas;
     try { entradas = await fs.readdir(carpeta); } catch { return null; }
+    // Si se conoce el nombre EXACTO del fichero del documento, se PREFIERE. Imprescindible cuando VARIOS
+    // documentos comparten carpeta (p. ej. una colección mal clasificada donde 8 libros cuelgan de «Mary Beard/»):
+    // sin esto se cogería el 1.º de la carpeta y se sacaría la portada del libro EQUIVOCADO para todos.
+    if (nombrePreferido) {
+        const base = path.basename(String(nombrePreferido));
+        if (entradas.includes(base) && EXT_DOC.includes(path.extname(base).toLowerCase())) return path.join(carpeta, base);
+    }
     const f = entradas.find(n => EXT_DOC.includes(path.extname(n).toLowerCase()));
     return f ? path.join(carpeta, f) : null;
 }

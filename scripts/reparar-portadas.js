@@ -146,7 +146,9 @@ async function portadaDelFichero(doc, carpeta) {
         if (meta?.portada?.buffer?.length) return meta.portada.buffer;
     }
 
-    const original = await archivoOriginal(carpeta);
+    // Se prefiere el fichero del PROPIO documento (nombre_archivo): si la carpeta la comparten varios libros
+    // (colección mal clasificada), sin esto se sacaría la portada del libro equivocado para todos.
+    const original = await archivoOriginal(carpeta, doc.nombre_archivo);
     if (!original) {
         // ÚLTIMO RECURSO (sin fichero-documento: audiolibros y demás): buscar una IMAGEN SUELTA en la carpeta,
         // RECURSIVAMENTE. Los rips de audiolibro suelen traer cover.jpg/folder.jpg junto a las pistas, y aquí
@@ -255,7 +257,7 @@ async function main() {
             if (reusar) {
                 set.portada = reusar.ruta;
                 accion = 'reusar';
-            } else if (!(await archivoOriginal(carpeta)) && !(doc.audios || []).length && !(await imagenSueltaEnCarpeta(carpeta))) {
+            } else if (!(await archivoOriginal(carpeta, doc.nombre_archivo)) && !(doc.audios || []).length && !(await imagenSueltaEnCarpeta(carpeta))) {
                 // No hay NADA de donde sacarla: ni fichero-documento, ni pistas de audio, ni una imagen suelta
                 // en su carpeta. Esto sí es genuinamente irreparable.
                 accion = 'irreparable';

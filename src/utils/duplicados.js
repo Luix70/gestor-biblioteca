@@ -71,7 +71,7 @@ export async function reemplazarFicheroDeDoc(doc, ficheroNuevo) {
     const db = await conectarDB();
     const carpeta = carpetaDeDoc(doc);
     await fs.mkdir(carpeta, { recursive: true });
-    const viejo = await archivoOriginal(carpeta);
+    const viejo = await archivoOriginal(carpeta, doc.nombre_archivo);
     if (viejo) await reciclar([viejo], `reemplazado-${doc.isbn || doc.titulo || String(doc._id)}`);
     const destino = path.join(carpeta, path.basename(ficheroNuevo));
     await fs.copyFile(ficheroNuevo, destino);
@@ -122,7 +122,7 @@ export async function compararDuplicado(idRel) {
     if (idExist && ObjectId.isValid(idExist)) {
         const db = await conectarDB();
         doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(idExist) });
-        if (doc) { rutaEx = await archivoOriginal(carpetaDeDoc(doc)); ex = await metricas(rutaEx); }
+        if (doc) { rutaEx = await archivoOriginal(carpetaDeDoc(doc), doc.nombre_archivo); ex = await metricas(rutaEx); }
     }
 
     // Idéntico solo si MISMO tamaño (pre-filtro barato) y mismo hash.

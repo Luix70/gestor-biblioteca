@@ -24,7 +24,9 @@ import { indexarDoc } from './indice-busqueda.js';
  */
 export async function reextraerImagenesDoc(db, doc, { solo5mas1 = true } = {}) {
     const carpeta = carpetaDeDoc(doc);
-    const original = await archivoOriginal(carpeta).catch(() => null);
+    // Se pasa el nombre_archivo del propio documento: si la carpeta la comparten varios libros (colección mal
+    // clasificada), sin esto se sacaría la portada del fichero equivocado. (Ver archivoOriginal.)
+    const original = await archivoOriginal(carpeta, doc.nombre_archivo).catch(() => null);
     if (!original) return { ok: false, motivo: 'sin fichero original en su carpeta' };
     const tipo = detectarTipo(original);
 

@@ -411,7 +411,7 @@ export const TAREAS = [
         aplica: (doc) => !doc.nombre_archivo,
         async ejecutar(doc) {
             const carpeta = carpetaDeDoc(doc);
-            const original = await archivoOriginal(carpeta);
+            const original = await archivoOriginal(carpeta, doc.nombre_archivo);
             if (!original) return null;
             return { set: { nombre_archivo: path.basename(original) } };
         },
@@ -437,7 +437,7 @@ export const TAREAS = [
             if (anchoActual >= ANCHO_OBJETIVO) return null; // ya es buena
 
             // 2. Reunir fuentes y re-resolver.
-            const original = await archivoOriginal(carpeta);
+            const original = await archivoOriginal(carpeta, doc.nombre_archivo);
             const tipo = tipoDeArchivo(original);
             let embebida = null, numPaginas = 2;
             if (tipo === 'epub') {
@@ -481,7 +481,7 @@ export const TAREAS = [
             if (yaPdf >= 6) return null; // ya tiene el juego completo
 
             const carpeta = carpetaDeDoc(doc);
-            const original = await archivoOriginal(carpeta);
+            const original = await archivoOriginal(carpeta, doc.nombre_archivo);
             if (!original || tipoDeArchivo(original) !== 'pdf') return null;
 
             const numPaginas = (await numeroPaginasPdf(original)) || 5;

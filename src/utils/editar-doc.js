@@ -191,7 +191,7 @@ export async function editarDocumento(db, id, campos = {}) {
         const esPapelAhora = (docActual.formatos || []).includes('papel');
         if (soporte === 'digital' && esPapelAhora) {
             let orig = null;
-            try { orig = await archivoOriginal(carpetaDeDoc(docActual)); } catch { /* sin carpeta accesible */ }
+            try { orig = await archivoOriginal(carpetaDeDoc(docActual), docActual.nombre_archivo); } catch { /* sin carpeta accesible */ }
             if (orig) {
                 const fmt = FORMATO_POR_EXT[path.extname(orig).toLowerCase()] || path.extname(orig).slice(1).toLowerCase() || 'pdf';
                 set.formatos = [fmt];

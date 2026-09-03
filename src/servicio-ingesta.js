@@ -267,7 +267,7 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         let hashExistente = resultado.hash_contenido || null;
         if (!hashExistente) {
             try {
-                const original = await archivoOriginal(carpetaDeDoc(resultado));
+                const original = await archivoOriginal(carpetaDeDoc(resultado), resultado.nombre_archivo);
                 if (original) {
                     hashExistente = await calcularHashArchivo(original);
                     if (hashExistente) await actualizarDocumento(resultado._id, { hash_contenido: hashExistente }).catch(() => {});
@@ -287,7 +287,7 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
             // REGLA DE SEGURIDAD (usuario): el ÚNICO fs.rm de un fichero permitido es un duplicado por hash con
             // su copia ARCHIVADA PRESENTE FÍSICAMENTE en la ruta. `hashExistente` pudo salir de la BD aunque el
             // fichero falte, así que se comprueba el disco AQUÍ, antes de borrar el único ejemplar.
-            const original = await archivoOriginal(carpetaDeDoc(resultado)).catch(() => null);
+            const original = await archivoOriginal(carpetaDeDoc(resultado), resultado.nombre_archivo).catch(() => null);
             if (original) {
                 for (const r of rutas) { await fs.chmod(r, 0o666).catch(() => {}); await fs.rm(r, { force: true }).catch(() => {}); }
                 console.log(`  🗑️  Duplicado EXACTO (hash) de ${idExist}, copia archivada PRESENTE: «${path.basename(rutas[0])}» → borrado.`);
