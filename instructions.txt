@@ -615,8 +615,10 @@ de ficheros clasificado por CDU.
       fichero EPUB/PDF/MOBI, obtiene el ISBN y COTEJA el título + rellena huecos de
       autor/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: «Forzar» (re-cotejar
       AUNQUE ya tenga ISBN → arregla títulos-artefacto «DjVu Document», nombres de serie, truncados),
-      «ISBN manual» (solo 1 doc), «Con IA» (si el texto no da el ISBN, reextrae páginas y lee el
-      código de barras/CIP por visión; y enriquece con IA), «Investigar CDU» (deriva la CDU del
+      «ISBN manual» (solo 1 doc), «Con IA» (si el texto no da el ISBN: 1º el código de barras EAN
+      por visión —zxing local primero—; 2º, en escaneos con el ISBN IMPRESO en los créditos, el
+      CIP por visión sobre las imágenes ya extraídas —capta el ISBN del VOLUMEN/tapa dura y el de
+      la OBRA/SET→isbn_obra—; y enriquece con IA), «Investigar CDU» (deriva la CDU del
       Dewey/LCC por las tablas cruzadas —sin IA— y, con «Con IA», investiga las que el crosswalk no
       resuelve; rellena las CDU vacías/000, y con «Forzar» reemplaza la existente → MUEVE la carpeta).
       Por defecto —sin marcar nada— solo los SIN ISBN, del texto, sin IA. 2º plano con progreso —

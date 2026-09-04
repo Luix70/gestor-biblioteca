@@ -16,6 +16,7 @@
  *   · Nombre de archivo → un ISBN incrustado en el nombre se trata como propio.
  */
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../database.js';
 import { carpetaDeDoc, archivoOriginal, numeroPaginasPdf } from '../mantenimiento/util-mantenimiento.js';
@@ -23,6 +24,8 @@ import { isbnDesdeArchivo, tipoLibro } from './isbn-archivo.js';
 import { variantesISBN, validarISBN } from './identificadores.js';
 import { esTituloArtefacto } from './parsear-nombre.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
+import { leerCIPdeImagenes } from '../agente.js';
+import { rasterizarFrontalesPdf } from './ocr-pdf.js';
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
 import { resolverCDU } from '../clasificador-cdu.js';
@@ -49,6 +52,47 @@ async function resolverAutores(db, nombres) {
     const out = [];
     for (const n of nombres || []) { const r = await resolverPersona(db, n).catch(() => null); if (r?._id) out.push(r._id); }
     return out;
+}
+
+// Lee las imágenes YA extraídas del documento (portada + páginas de catalogación) como buffers, para la visión.
+async function imagenesDeDocParaVision(doc, max = 6) {
+    const carpeta = carpetaDeDoc(doc);
+    if (!carpeta) return [];
+    const out = [];
+    for (const im of (doc.imagenes || []).slice(0, max)) {
+        try { out.push({ data: await fs.readFile(path.join(carpeta, path.basename(im.ruta))), mimeType: 'image/jpeg' }); } catch { /* falta el fichero */ }
+    }
+    return out;
+}
+// Del JSON del CIP-por-visión saca el ISBN del VOLUMEN (este ejemplar) y el de la OBRA/SET (si es multivolumen).
+// El ISBN impreso en la página de créditos es TEXTO en un escaneo → el código de barras no lo ve; por eso este
+// paso complementa a leerCodigoBarrasPorVision. Distingue por el rol que la visión etiqueta (volumen/obra/tapa_*).
+function isbnsDeCIP(cip) {
+    if (!cip) return { volumen: null, obra: null };
+    let volumen = validarISBN(cip.isbn) || null;
+    let obra = validarISBN(cip.isbn_obra) || null;
+    for (const e of (Array.isArray(cip.isbns) ? cip.isbns : [])) {
+        const v = validarISBN(e && (e.numero || e.isbn));
+        if (!v) continue;
+        const rol = String((e && e.rol) || '').toLowerCase();
+        if (!obra && rol === 'obra') obra = v;
+        else if (!volumen && ['volumen', 'tapa_dura', 'tapa_blanda', 'desconocido'].includes(rol)) volumen = v;
+    }
+    // Si no se pudo etiquetar el volumen pero hay algún ISBN suelto, se coge el primero que no sea el de la obra.
+    if (!volumen) for (const e of (Array.isArray(cip.isbns) ? cip.isbns : [])) { const v = validarISBN(e && (e.numero || e.isbn)); if (v && v !== obra) { volumen = v; break; } }
+    if (obra && obra === volumen) obra = null;
+    return { volumen, obra };
+}
+// ISBN(s) por CIP: lee el CIP en las imágenes YA extraídas y, si es un PDF y no salió nada, RASTERIZA las
+// primeras páginas (la página de créditos vive al principio) y reintenta. Best-effort.
+async function isbnPorCIP(doc, abs) {
+    let cip = await leerCIPdeImagenes(await imagenesDeDocParaVision(doc)).catch(() => ({}));
+    let r = isbnsDeCIP(cip);
+    if ((r.volumen || r.obra) || !abs || tipoLibro(abs) !== 'pdf') return r;
+    const nPag = doc.paginas || (await numeroPaginasPdf(abs).catch(() => 0)) || 8;
+    const renders = await rasterizarFrontalesPdf(abs, nPag).catch(() => []);
+    if (renders.length) { cip = await leerCIPdeImagenes(renders.map((x) => ({ data: x.buffer, mimeType: 'image/jpeg' }))).catch(() => ({})); r = isbnsDeCIP(cip); }
+    return r;
 }
 async function resolverEditorial(db, nombre) {
     const t = String(nombre || '').trim();
@@ -91,17 +135,27 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
 
     // 1) RESOLVER EL ISBN según la fuente. Prioridad: manual > texto del fichero > barras/visión (con IA) >
     //    el que ya tiene (al forzar). Así «datos existentes», «reextraer páginas» y «manual» son elegibles.
-    let isbn = null, via = '', ext = { isbn: null, titulo: null, autores: [], editorial: null };
+    let isbn = null, via = '', isbnObra = null, ext = { isbn: null, titulo: null, autores: [], editorial: null };
     if (manual) { isbn = manual; via = 'manual'; }
     else {
         if (abs && tipoLibro(abs)) { ext = await isbnDesdeArchivo(abs, { nombre: doc.nombre_archivo, tituloRef: doc.titulo }); if (ext.isbn) { isbn = ext.isbn; via = 'fichero'; } }
-        if (!isbn && conIA && abs) {
-            // Reextraer páginas y leer el EAN de la cubierta/contracubierta (o el CIP): zxing local sin coste y,
-            // si falla, VISIÓN. Solo para PDF (los EPUB/MOBI ya dan su ISBN por el texto de arriba).
-            const numPag = doc.paginas || (await numeroPaginasPdf(abs).catch(() => 0)) || 3;
-            const bc = await leerCodigoBarrasPorVision(abs, numPag).catch(() => null);
-            const v = bc?.isbn ? validarISBN(bc.isbn) : null;
-            if (v) { isbn = v; via = 'barras/visión'; }
+        if (!isbn && conIA) {
+            // (a) EAN de cubierta/contracubierta: zxing local sin coste y, si falla, VISIÓN. Solo PDF con fichero.
+            if (abs && tipoLibro(abs) === 'pdf') {
+                const numPag = doc.paginas || (await numeroPaginasPdf(abs).catch(() => 0)) || 3;
+                const bc = await leerCodigoBarrasPorVision(abs, numPag).catch(() => null);
+                const v = bc?.isbn ? validarISBN(bc.isbn) : null;
+                if (v) { isbn = v; via = 'barras/visión'; }
+            }
+            // (b) ISBN IMPRESO del CIP (página de créditos) por VISIÓN, en las imágenes YA extraídas (y, si es
+            //     PDF y no salió, en las primeras páginas rasterizadas). En un escaneo el ISBN es TEXTO, no un
+            //     código de barras → este paso lo capta. Distingue el ISBN del VOLUMEN (este ejemplar, p. ej. la
+            //     tapa dura) del de la OBRA/SET (→ isbn_obra). Era el hueco: ni el texto ni el EAN lo veían.
+            if (!isbn) {
+                const cip = await isbnPorCIP(doc, abs);
+                if (cip.volumen) { isbn = cip.volumen; via = 'cip/visión'; }
+                if (cip.obra) isbnObra = cip.obra;
+            }
         }
         if (!isbn && forzar && doc.isbn) { isbn = validarISBN(doc.isbn) || doc.isbn; via = 'existente'; }
     }
@@ -126,6 +180,9 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     const set = {};
     const nombres = {}; // log legible
     if (isbn && String(doc.isbn || '') !== isbn) { set.isbn = isbn; if (manual) nombres.isbn = isbn; }
+    // ISBN de la OBRA/SET (multivolumen): captado del CIP; pivote para agrupar los tomos (obras.isbn_obra). Solo
+    // si falta y es distinto del del volumen. No crea la obra aquí (eso lo hace el flujo de obras/Conformador).
+    if (isbnObra && isbnObra !== isbn && !doc.isbn_obra) { set.isbn_obra = isbnObra; nombres.isbn_obra = isbnObra; }
 
     // TÍTULO (cotejo): se sustituye por el de la AUTORIDAD si el actual es DÉBIL o ARTEFACTO, o —al FORZAR— si
     // simplemente DIFIERE; nunca si DEGRADARÍA (el actual ya es más completo). El de la autoridad (Fichero/APIs
