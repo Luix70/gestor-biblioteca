@@ -111,16 +111,47 @@ function deweyACDU(codigo) {
     return EXACTAS[d] || null;   // el resto (130, 15x, 4xx, 8xx, historia regional…) → IA
 }
 
-// LC → CDU: solo las clases de CIENCIA/TÉCNICA de correspondencia clara (la mayoría de libros técnicos traen
-// TAMBIÉN Dewey, que se prueba primero; esto es la red para los que solo llevan signatura LC).
+// LC → CDU. La correspondencia se hace por CLASE (1-2 letras iniciales de la signatura). Es CONSERVADORA, como
+// el crosswalk Dewey: mapea solo lo que alinea con CERTEZA (a la DIVISIÓN, no a subdivisiones finas dudosas) y
+// deja fuera lo ambiguo → null → IA. En concreto DEFIERE: la HISTORIA regional (D/E/F: necesita el área) y las
+// literaturas/lenguas MULTI-idioma (PA grecolatino, PQ románicas, PT germánicas, PG eslavas, PJ/PK/PL/PM
+// orientales: el idioma exacto lo distingue la IA). Sí resuelve la literatura/lengua de UNA sola tradición
+// (PR inglesa, PS estadounidense, PE lengua inglesa, PC lenguas románicas). Lo que devuelve se APRENDE como
+// autoridad, así que ante la duda se deja en null.
 const LCC_A_CDU = {
+    // Obras generales
+    A: '0', AE: '03', AM: '069', AN: '070', AP: '05', AZ: '001',
+    // Filosofía · psicología · religión
+    B: '1', BC: '16', BD: '11', BF: '159.9', BH: '18', BJ: '17',
+    BL: '2', BM: '2', BP: '2', BQ: '2', BR: '2', BS: '2', BT: '2', BV: '2', BX: '2',
+    // Ciencias auxiliares de la historia · genealogía/biografía  (D/E/F historia → diferido, necesita área)
+    C: '93', CS: '929', CT: '929',
+    // Geografía · antropología · folclore · deporte
+    G: '91', GB: '551', GC: '551.46', GE: '502', GN: '39', GR: '398', GV: '79',
+    // Ciencias sociales
+    H: '3', HA: '31', HB: '33', HC: '33', HD: '33', HE: '656', HF: '33', HG: '33', HM: '316', HN: '316', HQ: '316.3', HT: '316', HV: '36',
+    // Ciencia política
+    J: '32', JX: '327', JZ: '327',
+    // Derecho · educación · música
+    K: '34', L: '37', M: '78',
+    // Bellas artes
+    N: '7', NA: '72', NB: '73', NC: '74', ND: '75', NE: '76', NK: '745',
+    // Lengua y literatura (SOLO tradición/idioma único; las multi-idioma PA/PQ/PT/PG/PJ/PK/PL/PM → IA)
+    PN: '82', PZ: '82', PE: '811.111', PC: '811.13', PR: '821.111', PS: '821.111(73)',
+    // Ciencia
     Q: '5', QA: '51', QB: '52', QC: '53', QD: '54', QE: '55', QH: '57', QK: '58', QL: '59',
+    // Medicina · agricultura · técnica
     R: '61', S: '63', T: '6',
+    // Ciencia militar · naval · biblioteconomía
+    U: '355', V: '359', Z: '02',
 };
-function lccACDU(codigo) {
+function claseLcc(codigo) {
     const m = String(codigo || '').trim().toUpperCase().match(/^[A-Z]{1,3}/);
-    if (!m) return null;
-    const letras = m[0];
+    return m ? m[0] : null;
+}
+function lccACDU(codigo) {
+    const letras = claseLcc(codigo);
+    if (!letras) return null;
     return LCC_A_CDU[letras.slice(0, 2)] || LCC_A_CDU[letras[0]] || null;
 }
 
@@ -245,8 +276,23 @@ inventes datos concretos (fechas, nombres) que no puedas justificar con lo dado.
  *   3) IA — y APRENDE la equivalencia (Dewey/LC) para la próxima vez.
  */
 export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, sinopsis, permitirIA = true }) {
-    const candidatos = [['dewey', dewey], ['lcc', lcc]].filter(([, c]) => c);
+    // Los códigos se manejan por su UNIDAD de equivalencia: Dewey tal cual; LCC por su CLASE (letras iniciales),
+    // no la signatura completa — si no, «PR4589.H39 1998» se guardaría entero y no lo reusaría ningún otro libro.
+    const candidatos = [['dewey', dewey], ['lcc', claseLcc(lcc)]].filter(([, c]) => c);
     const categoria = Array.isArray(categorias) && categorias.length > 0 ? categorias[0] : null;
+
+    // APRENDIZAJE A TRES BANDAS (LCC ↔ Dewey ↔ CDU): un libro que trae Dewey Y LCC es un par de entrenamiento
+    // gratis. Al resolver la CDU por UN código, se enseña la MISMA CDU a los OTROS códigos presentes, para que un
+    // futuro libro que solo traiga ese otro código la herede sin IA (el caso «solo LCC» del Dickens). Se hace
+    // SOLO donde el crosswalk determinista NO llega (así una inferencia nunca contradice/ensombrece al crosswalk)
+    // y como 'inferido' (no verificado: un mapeo Manual futuro lo corrige).
+    const enseñarBandas = async (cdu, resueltoPor, fuentePrimaria) => {
+        for (const [s2, c2] of candidatos) {
+            if (s2 === resueltoPor) { if (fuentePrimaria) await guardarEquivalencia(s2, c2, cdu, fuentePrimaria, categoria); continue; }
+            if (await buscarEquivalenciaExterna(s2, c2)) continue;      // el crosswalk ya lo resuelve mejor → no inferir
+            await guardarEquivalencia(s2, c2, cdu, 'inferido', categoria);
+        }
+    };
 
     // 1) Caché aprendida (por CÓDIGO Dewey/LCC). Se lee SIEMPRE que haya un código — también para literatura:
     //    el Dewey 8xx ya CODIFICA la lengua/tradición (84x francés, 83x alemán, 82x inglés…), así que la
@@ -256,14 +302,14 @@ export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, 
     const esLit = esFiccionLiteratura({ dewey, lcc, categorias });
     for (const [sistema, codigo] of candidatos) {
         const hit = await buscarEquivalencia(sistema, codigo);
-        if (hit) return { cdu: hit, fuente: `cache:${sistema}`, aprendida: true };
+        if (hit) { await enseñarBandas(hit, sistema, null); return { cdu: hit, fuente: `cache:${sistema}`, aprendida: true }; }
     }
 
-    // 2) Fuente externa (preparada, aún sin proveedor).
+    // 2) Crosswalk determinista Dewey/LC → CDU (gratis, sin IA).
     for (const [sistema, codigo] of candidatos) {
         const ext = await buscarEquivalenciaExterna(sistema, codigo);
         if (ext) {
-            await guardarEquivalencia(sistema, codigo, ext, 'Manual', categoria);
+            await enseñarBandas(ext, sistema, 'Manual');
             return { cdu: ext, fuente: `api:${sistema}`, aprendida: false };
         }
     }
@@ -277,8 +323,8 @@ export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, 
     const r = await iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis });
     const cdu = r.cdu;
     if (cdu && cdu !== '000' && candidatos.length > 0) {
-        const [sistema, codigo] = candidatos[0]; // el más fiable disponible (Dewey > LC)
-        await guardarEquivalencia(sistema, codigo, cdu, 'IA', r.titulo_es || categoria);
+        const [sistema] = candidatos[0]; // el más fiable disponible (Dewey > LC)
+        await enseñarBandas(cdu, sistema, 'IA');   // aprende el primario (IA) y los otros presentes (inferido)
     }
     // Sembrar la descripción del código en su caché AHORA (misma llamada IA): evita la 2ª llamada de
     // describirCDU que el panel/mantenimiento harían después. Idempotente y best-effort.
