@@ -616,9 +616,11 @@ de ficheros clasificado por CDU.
       autor/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: «Forzar» (re-cotejar
       AUNQUE ya tenga ISBN → arregla títulos-artefacto «DjVu Document», nombres de serie, truncados),
       «ISBN manual» (solo 1 doc), «Con IA» (si el texto no da el ISBN, reextrae páginas y lee el
-      código de barras/CIP por visión; y enriquece con IA). Por defecto —sin marcar nada— solo los
-      SIN ISBN, del texto, sin IA. 2º plano con progreso — POST /documentos/reidentificar-isbn) ·
-      ♻️ Reprocesar (las
+      código de barras/CIP por visión; y enriquece con IA), «Investigar CDU» (deriva la CDU del
+      Dewey/LCC por las tablas cruzadas —sin IA— y, con «Con IA», investiga las que el crosswalk no
+      resuelve; rellena las CDU vacías/000, y con «Forzar» reemplaza la existente → MUEVE la carpeta).
+      Por defecto —sin marcar nada— solo los SIN ISBN, del texto, sin IA. 2º plano con progreso —
+      POST /documentos/reidentificar-isbn) · ♻️ Reprocesar (las
       MISMAS acciones de la ficha individual que proceden en lote —«medir» no—, aplicadas una
       a una con progreso) · 🗑 Eliminar (pide
       contraseña) · Limpiar. «🗂 Todos los resultados» selecciona todas las páginas.
@@ -3007,7 +3009,9 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
                               (solo mira los sin ISBN). Además, para arreglar títulos-artefacto ya catalogados:
                               --forzar (re-cotejar AUNQUE ya tenga ISBN; exige acotar), --con-ia (leer el ISBN
                               por código de barras/CIP con visión si no está en el texto; y enriquecer con IA),
-                              --id <ObjectId> --isbn <ISBN> (fija a mano el ISBN de un doc). Corre donde estén los
+                              --cdu (investigar/forzar también la CDU del Dewey/LCC por crosswalk → IA si --con-ia;
+                              por defecto apunta a los de CDU vacía/000; MUEVE la carpeta), --id <ObjectId> --isbn
+                              <ISBN> (fija a mano el ISBN de un doc). Corre donde estén los
                               ficheros. Dry-run; --ejecutar. Motor común src/utils/reidentificar-doc.js (mismo de
                               la acción del panel «🔎 Extraer ISBN» sobre la selección de la Búsqueda, y del que
                               la ingesta reutiliza la extracción para no volver a perder el ISBN en colecciones nuevas).

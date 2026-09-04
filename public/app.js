@@ -8432,7 +8432,8 @@ async function reidentificarLote(ids, { alTerminar = null } = {}) {
       <h3 style="margin:0 0 4px">🔎 Extraer / cotejar ISBN</h3>
       <div class="muted" style="font-size:12px;margin-bottom:10px">${ids.length} documento(s). Con el ISBN se coteja el título y se rellenan huecos (autores, editorial, sinopsis…) desde el Fichero local y las APIs gratuitas. Solo campos vacíos, salvo el título (se corrige si es débil/artefacto o al forzar).</div>
       <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="riForzar"><span>Forzar aunque ya tenga ISBN <span class="muted">(re-cotejar; arregla títulos como «DjVu Document», nombres de serie o truncados)</span></span></label>
-      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="riIA"><span>Con IA <span class="muted">(si el texto no trae el ISBN, reextrae páginas y lee el código de barras/CIP por visión; y permite enriquecer con IA)</span></span></label>
+      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="riIA"><span>Con IA <span class="muted">(si el texto no trae el ISBN, reextrae páginas y lee el código de barras/CIP por visión; permite enriquecer con IA y, para la CDU, distinguir la lengua/tradición)</span></span></label>
+      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="riCdu"><span>Investigar CDU <span class="muted">(deriva la CDU del Dewey/LCC por las tablas cruzadas —sin IA— y, si marcas «Con IA», investiga las que el crosswalk no resuelve. Rellena las CDU vacías/000; con «Forzar» reemplaza la existente. MUEVE la carpeta.)</span></span></label>
       ${uno ? `<label class="row" style="gap:8px;align-items:center;margin:10px 0"><span style="white-space:nowrap">ISBN manual</span><input type="text" id="riIsbn" placeholder="978… (opcional)" style="flex:1" inputmode="numeric"></label>` : '<div class="muted" style="font-size:12px;margin:6px 0">El ISBN manual solo está disponible con 1 documento seleccionado.</div>'}
       <div class="row" style="justify-content:flex-end;gap:8px;margin-top:14px">
         <button class="btn" id="riCancelar">Cancelar</button>
@@ -8442,7 +8443,7 @@ async function reidentificarLote(ids, { alTerminar = null } = {}) {
     $('#cmpModal').style.display = 'grid';
     $('#riCancelar').onclick = () => { cerrarCmp(); resolve(null); };
     $('#riLanzar').onclick = () => {
-      const o = { forzar: $('#riForzar').checked, conIA: $('#riIA').checked, isbnManual: uno && $('#riIsbn') ? $('#riIsbn').value.trim() : '' };
+      const o = { forzar: $('#riForzar').checked, conIA: $('#riIA').checked, cdu: $('#riCdu').checked, isbnManual: uno && $('#riIsbn') ? $('#riIsbn').value.trim() : '' };
       cerrarCmp(); resolve(o);
     };
   });
@@ -8477,14 +8478,14 @@ async function seguirReidentificacion(total) {
     try { e = await api('/documentos/reidentificar-isbn/estado'); } catch { break; }
     const pct = e.total ? Math.round((e.hechos / e.total) * 100) : 0;
     if ($('#riBar')) $('#riBar').style.width = pct + '%';
-    if ($('#riTxt')) $('#riTxt').textContent = `${e.hechos} / ${e.total} · ${e.recuperados || 0} con ISBN${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
+    if ($('#riTxt')) $('#riTxt').textContent = `${e.hechos} / ${e.total} · ${e.recuperados || 0} con ISBN${e.cdu ? ` · ${e.cdu} CDU` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
     if ($('#riTit')) $('#riTit').textContent = e.titulo ? recortar(e.titulo, 60) : '';
     if (!e.en_curso) break;
   }
   cerrarCmp();
   const cancelado = e.cancelar && e.hechos < e.total;
   toast(
-    `ISBN recuperado en ${e.recuperados || 0} documento(s)${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN en el fichero` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
+    `ISBN recuperado en ${e.recuperados || 0} documento(s)${e.cdu ? ` · CDU en ${e.cdu}` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN en el fichero` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
     cancelado || e.sin_isbn || e.sin_fichero ? 'warn' : 'ok',
   );
 }

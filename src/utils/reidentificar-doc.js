@@ -24,6 +24,9 @@ import { variantesISBN, validarISBN } from './identificadores.js';
 import { esTituloArtefacto } from './parsear-nombre.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
+import { buscarEnFicheroLocal } from './buscador-local.js';
+import { resolverCDU } from '../clasificador-cdu.js';
+import { editarDocumento } from './editar-doc.js';
 import { resolverPersona } from './resolver-persona.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
@@ -166,27 +169,63 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     return { estado: 'aplicado', isbn, via, titulo: set.titulo || doc.titulo, resumen, set };
 }
 
+/**
+ * INVESTIGAR / FORZAR LA CDU de un documento a partir de su Dewey/LCC (crosswalk determinista, gratis) y, si se
+ * pide `conIA`, por la IA (que distingue la lengua/tradición literaria). Del ISBN se obtiene sin IA muchas veces
+ * el Dewey/LCC pero no la CDU; el crosswalk (ampliado + tres bandas) la deriva. Si el doc no trae Dewey/LCC, se
+ * toman del Fichero por su ISBN. Aplica con `editarDocumento` (MUEVE la carpeta al árbol nuevo + sidecars + FTS).
+ * Conservador: NO toca una CDU fijada a mano (cdu_manual); rellena las vacías/'000' y, solo al `forzar`,
+ * reemplaza una CDU existente (no manual).
+ * @returns {Promise<{estado, cdu?, de?, motivo?}>} estado ∈ 'cdu-manual'|'cdu-sin-codigos'|'cdu-no-hallada'|
+ *   'cdu-ya'|'cdu-igual'|'cdu-identificada'|'cdu-aplicada'
+ */
+export async function resolverCduDoc(db, doc, { conIA = false, forzar = false, aplicar = true } = {}) {
+    if (doc.cdu_manual) return { estado: 'cdu-manual', motivo: 'CDU fijada a mano; no se toca' };
+    // Códigos de origen: los del propio doc; si faltan y hay ISBN, los del Fichero local (offline).
+    let dewey = doc.dewey || null, lcc = doc.lcc || null;
+    if (!dewey && !lcc && doc.isbn) {
+        const f = await buscarEnFicheroLocal({ isbns: variantesISBN(doc.isbn) }).catch(() => null);
+        if (f) { dewey = f.dewey || dewey; lcc = f.lcc || lcc; }
+    }
+    if (!dewey && !lcc && !conIA) return { estado: 'cdu-sin-codigos', motivo: 'sin Dewey/LCC (marca «con IA» para investigar por título/autor)' };
+    // Nombre del primer autor (ayuda a la IA con la literatura: se clasifica por la tradición del autor).
+    let autorNom = null;
+    if (doc.autores?.length) { const a = await db.collection('autores').findOne({ _id: doc.autores[0] }, { projection: { nombre: 1 } }).catch(() => null); autorNom = a?.nombre || null; }
+    const r = await resolverCDU({ dewey, lcc, titulo: doc.titulo, autor: autorNom, sinopsis: doc.sinopsis, categorias: doc.palabras_clave || [], permitirIA: conIA }).catch(() => null);
+    const cdu = r && (typeof r === 'string' ? r : r.cdu);
+    if (!cdu || cdu === '000') return { estado: 'cdu-no-hallada', motivo: conIA ? 'ni el crosswalk ni la IA dieron una CDU' : 'el crosswalk determinista no la resuelve (marca «con IA» para investigar)' };
+    const actual = String(doc.cdu || '');
+    const vacia = !actual || actual === '000' || actual === '0';
+    if (!vacia && !forzar) return { estado: 'cdu-ya', cdu: actual, motivo: 'ya tiene CDU (marca «forzar» para reemplazarla)' };
+    if (actual === cdu) return { estado: 'cdu-igual', cdu };
+    if (!aplicar) return { estado: 'cdu-identificada', cdu, de: actual || '000', motivo: `${actual || '000'} → ${cdu}` };
+    // editarDocumento mueve la carpeta al árbol de la nueva CDU + regenera sidecars + reíndice. Marca cdu_manual
+    // (es una decisión explícita del usuario, como una edición) → el Conformador no la recalcula luego.
+    await editarDocumento(db, String(doc._id), { cdu, ...(dewey ? { dewey } : {}), ...(lcc ? { lcc } : {}) }).catch(() => null);
+    return { estado: 'cdu-aplicada', cdu, de: actual || '000' };
+}
+
 // ── LOTE en 2º plano (acción de la Búsqueda sobre una selección) ─────────────────────────────────────────
 // Mismo patrón que reextraer-imagenes: lanzar / estado / cancelar + sondeo del front-end. Best-effort: nunca
 // tumba el servidor. Aplica SIEMPRE (la acción del panel es para arreglar de verdad, no dry-run).
-let trabajo = { en_curso: false, total: 0, hechos: 0, recuperados: 0, sin_isbn: 0, sin_fichero: 0, otros: 0, titulo: '', cancelar: false, ts: null };
+let trabajo = { en_curso: false, total: 0, hechos: 0, recuperados: 0, sin_isbn: 0, sin_fichero: 0, cdu: 0, otros: 0, titulo: '', cancelar: false, ts: null };
 export function estadoReidentificacion() { return { ...trabajo }; }
 export function cancelarReidentificacion() { if (trabajo.en_curso) trabajo.cancelar = true; return { ok: true }; }
 
-export function lanzarReidentificacion({ ids, forzar = false, isbnManual = null, conIA = false } = {}) {
+export function lanzarReidentificacion({ ids, forzar = false, isbnManual = null, conIA = false, cdu = false } = {}) {
     if (trabajo.en_curso) return { ok: false, motivo: 'ya hay una re-identificación en curso' };
     const lista = (Array.isArray(ids) ? ids : String(ids || '').split(','))
         .map((x) => String(x).trim()).filter((x) => ObjectId.isValid(x)).map((x) => new ObjectId(x));
     if (!lista.length) return { ok: false, motivo: 'no se recibió ningún documento válido' };
     // El ISBN manual solo tiene sentido para UN documento (si no, se aplicaría el mismo a todos): se ignora en lote.
     const manual = lista.length === 1 ? isbnManual : null;
-    trabajo = { en_curso: true, total: lista.length, hechos: 0, recuperados: 0, sin_isbn: 0, sin_fichero: 0, otros: 0, titulo: '', cancelar: false, ts: new Date().toISOString() };
+    trabajo = { en_curso: true, total: lista.length, hechos: 0, recuperados: 0, sin_isbn: 0, sin_fichero: 0, cdu: 0, otros: 0, titulo: '', cancelar: false, ts: new Date().toISOString() };
     (async () => {
         try {
             const db = await conectarDB();
             for (const _id of lista) {
                 if (trabajo.cancelar) break;
-                const doc = await db.collection('biblioteca').findOne({ _id }).catch(() => null);
+                let doc = await db.collection('biblioteca').findOne({ _id }).catch(() => null);
                 trabajo.titulo = doc?.titulo || '';
                 if (doc) {
                     try {
@@ -196,6 +235,15 @@ export function lanzarReidentificacion({ ids, forzar = false, isbnManual = null,
                         else if (r.estado === 'sin-fichero') trabajo.sin_fichero++;
                         else trabajo.otros++;   // ya-tiene-isbn / formato-no-soportado
                     } catch { trabajo.otros++; }
+                    // INVESTIGAR/FORZAR CDU (opción aparte): re-lee el doc por si el ISBN cambió arriba, y resuelve
+                    // la CDU del Dewey/LCC (crosswalk → IA si conIA). Mueve la carpeta (editarDocumento).
+                    if (cdu) {
+                        try {
+                            doc = await db.collection('biblioteca').findOne({ _id }).catch(() => doc);
+                            const rc = await resolverCduDoc(db, doc, { conIA, forzar, aplicar: true });
+                            if (rc.estado === 'cdu-aplicada') trabajo.cdu++;
+                        } catch { /* best-effort */ }
+                    }
                 } else trabajo.otros++;
                 trabajo.hechos++;
             }

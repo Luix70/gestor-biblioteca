@@ -19,6 +19,7 @@ import { resolverNombres, regenerarSidecarsDoc } from './registro.js';
 import { editarDocumento } from './editar-doc.js';
 import { carpetaDeDoc } from '../mantenimiento/util-mantenimiento.js';
 import { variantesISBN } from './identificadores.js';
+import { resolverCDU } from '../clasificador-cdu.js';
 
 // Campos cotejables (todos aplicables por editarDocumento). `label` para la UI; `leerDoc`/`leerDatos` extraen el
 // valor ACTUAL (del doc, con nombres ya resueltos) y el ENTRANTE (de `datos` de buscarMetadatosExternos), ambos
@@ -66,6 +67,24 @@ export async function investigarIdentificador(db, doc, { usarIA = false } = {}) 
     } catch (e) { return { ok: false, motivo: `la consulta a las fuentes falló: ${e.message}` }; }
 
     const resueltos = await resolverNombres(db, doc);   // autores/editorial → nombres, para cotejar legible
+
+    // CDU: derivarla también del Dewey/LCC del PROPIO documento (o de la autoridad) por el CROSSWALK determinista
+    // (sin IA) o la IA (si usarIA). Antes la CDU entrante era SOLO `datos.cdu` (la que da el Fichero POR ISBN), así
+    // que cuando el Fichero no tenía ese ISBN pero el doc SÍ traía un Dewey/LCC (del CIP), la CDU nunca cambiaba
+    // en el cotejo sin IA. Ahora el crosswalk (ampliado, incl. literatura LCC P*) la resuelve de primeras.
+    if (!datos.cdu) {
+        const dw = doc.dewey || datos.dewey || null;
+        const lc = doc.lcc || datos.lcc || null;
+        if (dw || lc) {
+            const rc = await resolverCDU({
+                dewey: dw, lcc: lc, titulo: doc.titulo, autor: (resueltos.autores || [])[0] || null,
+                sinopsis: doc.sinopsis, categorias: doc.palabras_clave || [], permitirIA: !!usarIA,
+            }).catch(() => null);
+            const cdu = rc && (typeof rc === 'string' ? rc : rc.cdu);
+            if (cdu && cdu !== '000') datos.cdu = cdu;
+        }
+    }
+
     const campos = CAMPOS.map(({ campo, label, leerDoc, leerDatos }) => {
         const actual = leerDoc(doc, resueltos);
         const entrante = leerDatos(datos);

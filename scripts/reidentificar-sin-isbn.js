@@ -24,6 +24,8 @@
  *                             nombres de serie, truncados…). Exige acotar (id/colección/selección/patrón/limite).
  *   --con-ia                  si el TEXTO no da el ISBN, reextrae páginas y lee el código de barras/CIP por
  *                             visión (zxing local primero, sin coste); y permite enriquecer con IA.
+ *   --cdu                     investiga/fuerza también la CDU del Dewey/LCC (crosswalk determinista → IA si
+ *                             --con-ia). Por defecto apunta a los de CDU vacía/000; MUEVE la carpeta al aplicar.
  *   --id <ObjectId> --isbn <ISBN>   fija a mano el ISBN de UN documento y coteja desde él.
  *
  * Uso:
@@ -36,13 +38,14 @@ import 'dotenv/config';
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';
-import { reidentificarDoc } from '../src/utils/reidentificar-doc.js';
+import { reidentificarDoc, resolverCduDoc } from '../src/utils/reidentificar-doc.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const TODOS = process.argv.includes('--todos');
 const SIN_APIS = process.argv.includes('--sin-apis');
 const FORZAR = process.argv.includes('--forzar');   // re-cotejar AUNQUE ya tenga ISBN (arregla títulos-artefacto)
 const CON_IA = process.argv.includes('--con-ia');   // permite leer el ISBN por barras/visión y enriquecer con IA
+const CON_CDU = process.argv.includes('--cdu');     // investigar/forzar también la CDU (crosswalk Dewey/LCC→CDU)
 const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
 const idArg = arg('--id');
 const isbnArg = arg('--isbn');   // ISBN manual (solo con --id)
@@ -79,7 +82,10 @@ async function main() {
         console.error('⛔ --forzar necesita acotar: --id / --coleccion / --seleccion / --patron / --limite (o --todos, con cuidado).');
         process.exit(1);
     }
-    const base = FORZAR ? {} : { ...SIN_ISBN };   // al forzar, también los que YA tienen ISBN
+    // Base del conjunto por defecto: --forzar → todos (acotado); --cdu → los de CDU vacía/000 (que suelen TENER
+    // ISBN: reidentificarDoc no los tocará y resolverCduDoc les pone la CDU); si no → los SIN ISBN (recuperación).
+    const CDU_VACIA = { $or: [{ cdu: { $in: ['000', '0', ''] } }, { cdu: null }, { cdu: { $exists: false } }] };
+    const base = FORZAR ? {} : (CON_CDU ? { ...CDU_VACIA } : { ...SIN_ISBN });
     let filtro = { ...base };
     if (idArg) filtro = { _id: new ObjectId(idArg) };
     else if (selArg) filtro = { _id: { $in: await idsDeSeleccion(db, selArg) }, ...base };
@@ -92,11 +98,11 @@ async function main() {
     const ids = (await col.find(filtro, { projection: { _id: 1 } }).limit(Number.isFinite(limite) ? limite : 0).toArray()).map((d) => d._id);
     console.log(`${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${ids.length} candidato(s)${FORZAR ? ' (forzando, incl. con ISBN)' : ' sin ISBN'}${CON_IA ? ' · con IA' : ''}${SIN_APIS ? ' · solo Fichero (sin APIs)' : ''}\n`);
 
-    const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, fallos: 0 };
+    const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, cdu: 0, fallos: 0 };
     const t0 = Date.now();
     let i = 0;
     for (const _id of ids) {
-        const doc = await col.findOne({ _id });
+        let doc = await col.findOne({ _id });
         if (!doc) continue;
         i++;
         let r;
@@ -111,6 +117,19 @@ async function main() {
         else if (r.estado === 'formato-no-soportado') st.formato++;
         else if (r.estado === 'ya-tiene-isbn') st.yaTiene++;
 
+        // Paso CDU (opción --cdu): investiga/fuerza la CDU del Dewey/LCC (crosswalk → IA si --con-ia). Re-lee el
+        // doc por si el ISBN cambió arriba. En dry-run informa el cambio propuesto; con --ejecutar mueve la carpeta.
+        if (CON_CDU) {
+            try {
+                if (EJECUTAR) doc = await col.findOne({ _id }).catch(() => doc);
+                const rc = await resolverCduDoc(db, doc, { conIA: CON_IA, forzar: FORZAR, aplicar: EJECUTAR });
+                if (rc.estado === 'cdu-aplicada' || rc.estado === 'cdu-identificada') {
+                    st.cdu++;
+                    process.stdout.write(`[${i}/${ids.length}] ${EJECUTAR ? '🏷️' : '↪️'} ${_id} · CDU ${rc.de} → ${rc.cdu}\n`);
+                }
+            } catch { /* best-effort */ }
+        }
+
         if (i % 25 === 0) {
             const seg = (Date.now() - t0) / 1000, eta = seg / i * (ids.length - i);
             process.stdout.write(`   … ${i}/${ids.length} · identificados ${st.identificados} · ETA ~${Math.round(eta)}s\n`);
@@ -123,6 +142,7 @@ async function main() {
     console.log(`  sin fichero en disco    : ${st.sinFichero}`);
     console.log(`  ISBN no hallado         : ${st.noHallado}  (el fichero no lo declara ni corrobora)`);
     console.log(`  formato no soportado    : ${st.formato}  (djvu/otros: sin ISBN de texto barato)`);
+    if (CON_CDU) console.log(`  ${EJECUTAR ? 'CDU resueltas' : 'CDU resolubles'}      : ${st.cdu}  (del Dewey/LCC por crosswalk${CON_IA ? '+IA' : ''})`);
     if (st.yaTiene) console.log(`  ya tenían ISBN          : ${st.yaTiene}`);
     if (st.fallos) console.log(`  fallos                  : ${st.fallos}`);
     if (!EJECUTAR) console.log('\n▶ Ejecuta con --ejecutar para aplicar (haz COPIA DE SEGURIDAD de la BD antes).');
