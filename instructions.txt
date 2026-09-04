@@ -3147,8 +3147,19 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       autores sigue siendo por rol AUTOR; filtra por rol para ver los de contribucion.)
     * TITULOS ARTEFACTO: esTituloArtefacto (utils/parsear-nombre.js) detecta mas casos —
       «New Page N», cabeceras de correo («Subject:/From:…»), marcas de scene («TeAM
-      YYePG», «ebooks from…») y nombres de fichero fuente con extension separada («Hawking
-      FM» = FrameMaker). Si tras enriquecer el titulo SIGUE siendo artefacto (ninguna
+      YYePG», «ebooks from…»), nombres de fichero fuente con extension separada («Hawking
+      FM» = FrameMaker) y GENERICOS de conversor/escaner («DjVu Document» del export de
+      DjVuLibre, «Untitled Document» de LibreOffice, «Scanned Document»/«Scan», «PDF Document»,
+      «Adobe Acrobat Document»: 0-2 palabras de formato/herramienta + document/scan, con la
+      cadena ENTERA; «Government Document Sourcebook» o «The Great Document» NO casan). POR QUE
+      IMPORTA: la ingesta YA sustituye un titulo-artefacto por el de la AUTORIDAD por ISBN
+      (motor-enriquecimiento: tituloNoFiable → datosExtra.titulo), asi que reconocer «DjVu
+      Document» hace que el libro entre ya con el titulo bueno (caso real 6a9a71ff: «DjVu
+      Document» + ISBN del CIP → «Introducing Aesthetics»), SIN esperar al cotejo del
+      Conformador (que ademas no corrobora cuando el nombre de archivo es numerico) y SIN el
+      posterior movimiento de carpeta al reclasificar. El backlog ya catalogado con esos
+      titulos se limpia con `re-enriquecer-degradados` (su tituloNoFiable ahora usa tambien
+      esTituloArtefacto). Si tras enriquecer el titulo SIGUE siendo artefacto (ninguna
       autoridad lo sustituyo), el doc NO se da por completado: se marca `pendiente` +
       `revision_requerida` + `titulo_artefacto` (para relanzar una investigacion mas
       profunda —vision del libro— en el Conformador / revision en el panel).

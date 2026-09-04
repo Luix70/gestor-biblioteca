@@ -24,6 +24,14 @@ export function esTituloArtefacto(s) {
     if (/^[a-z]:[\\/]?/i.test(t) && /\.[a-z0-9]{2,4}$/i.test(t)) return true; // "C:…algo.ext" (ruta Windows)
     if (/^microsoft\s+(word|powerpoint|excel|publisher|frontpage)\b/i.test(t)) return true; // "Microsoft Word - documento1"
     if (/^(untitled|sin\s*t[íi]tulo|documento?\s*\d*|document\s*\d+|presentaci[óo]n\s*\d*)$/i.test(t)) return true;
+    // Genéricos de CONVERSORES/ESCÁNERES grabados como título: "DjVu Document" (export de DjVuLibre),
+    // "Untitled Document" (LibreOffice/OpenOffice), "Scanned Document"/"Scan", "PDF Document", "Adobe Acrobat
+    // Document"… No es un título real: solo la palabra genérica (document/scan), con 0-2 palabras de
+    // formato/herramienta delante → hay que caer a la autoridad por ISBN. Caso real: 6a9a71ff… ("DjVu Document"
+    // con ISBN del CIP → el Fichero da "Introducing Aesthetics"). Los títulos reales con esas palabras no casan:
+    // requieren coincidir la cadena ENTERA y las palabras previas han de estar en la lista blanca ("Government
+    // Document Sourcebook", "The Great Document" → false).
+    if (/^(?:(?:dj?vu|pdf|e?pub|mobi|azw3?|word|scanned?|adobe|acrobat|foxit|nitro|calibre|ghostscript|kindle|nuance|abbyy|finereader|new|untitled)\s+){0,2}(?:document|documento|scan|escaneo)\s*\d*$/i.test(t)) return true;
     // "New Page N" / "Untitled Page" / "Page N" / "Página N": página por defecto de editores HTML
     // (FrontPage/Mobipocket…) grabada como título. Caso real de una ingesta masiva: «New Page 12».
     if (/^(new\s+page|untitled\s+page|page|p[áa]gina)\s*\d*$/i.test(t)) return true;

@@ -22,6 +22,7 @@ import { buscarMetadatosExternos } from '../src/utils/proveedor-metadatos.js';
 import { resolverColeccion } from '../src/utils/colecciones.js';
 import { resolverPersona } from '../src/utils/resolver-persona.js';
 import { validarISBN, validarISSN, variantesISBN } from '../src/utils/identificadores.js';
+import { esTituloArtefacto } from '../src/utils/parsear-nombre.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const SOLO_SIN_AUTOR = process.argv.includes('--sin-autor'); // apuntar SOLO a los libros sin autor (mayor acierto)
@@ -31,7 +32,7 @@ const PAUSA_MS = 1200; // ritmo entre documentos para no saturar las APIs
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '');
 
-/** ¿El título es en realidad basura (nombre de archivo, identificador o un código)? */
+/** ¿El título es en realidad basura (nombre de archivo, identificador, código o ARTEFACTO de conversor)? */
 function tituloNoFiable(doc) {
     const t = doc.titulo || '';
     if (!t.trim()) return true;
@@ -39,6 +40,10 @@ function tituloNoFiable(doc) {
     if (doc.nombre_archivo && norm(t) === norm(doc.nombre_archivo)) return true;
     // "Code-like": sin espacios, con dígitos y separadores _/-, largo (p.ej. 10.1007_978-…).
     if (!/\s/.test(t) && /\d/.test(t) && /[_\-.]/.test(t) && t.length > 8) return true;
+    // Artefacto de productor/conversor grabado como título ("DjVu Document", "Untitled Document", watermark de
+    // maquetación, DOI, URL…): la fuente única es esTituloArtefacto, la misma que usa la ingesta. Así el backlog
+    // ya catalogado con esos títulos se re-enriquece por ISBN (título del Fichero/APIs).
+    if (esTituloArtefacto(t)) return true;
     return false;
 }
 
