@@ -225,6 +225,8 @@ export const CATALOGO_SCRIPTS = [
         params: [
             { nombre: 'coleccion', flag: '--coleccion', tipo: 'texto', etiqueta: 'Colección (id o nombre)', ejemplo: 'TXtras' },
             { nombre: 'todos', flag: '--todos', tipo: 'switch', etiqueta: 'TODOS los sin ISBN (no solo colecciones)' },
+            { nombre: 'forzar', flag: '--forzar', tipo: 'switch', etiqueta: 'Forzar aunque ya tenga ISBN (re-cotejar; exige acotar)' },
+            { nombre: 'conia', flag: '--con-ia', tipo: 'switch', etiqueta: 'Con IA (leer ISBN por barras/visión + enriquecer)' },
             { nombre: 'sinapis', flag: '--sin-apis', tipo: 'switch', etiqueta: 'Solo Fichero local (sin OpenLibrary/Google)' },
             { nombre: 'limite', flag: '--limite', tipo: 'numero', etiqueta: 'Límite (para probar)', ejemplo: '20' },
         ] }),

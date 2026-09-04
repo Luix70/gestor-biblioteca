@@ -8065,7 +8065,7 @@ function renderBulk() {
     ${ROL === 'admin' ? '<button class="btn pri" id="bkSelShare" title="Compartir estos documentos: enlace/QR de SOLO LECTURA (ver + descargar), con caducidad opcional. Es una foto fija; no crea una selección guardada.">🔗 Compartir selección</button>' : ''}
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReimg" title="Re-extraer del PROPIO fichero la portada Y las imágenes de catalogación (5 páginas frontales + contraportada, saltando las páginas en blanco), reemplazando las actuales (equivocadas). Conserva las imágenes que hayas añadido a mano. Trabajo en 2º plano.">🖼️ Reextraer imágenes</button>' : ''}
-    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReisbn" title="Recuperar el ISBN abriendo el PROPIO fichero (EPUB/PDF/MOBI) y, con él, rellenar título/autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. SIN IA. Para los que se catalogaron por el nombre y quedaron sin ISBN (miembros de colección). Solo rellena huecos. Trabajo en 2º plano.">🔎 Recuperar ISBN</button>' : ''}
+    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReisbn" title="Extraer/cotejar el ISBN: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual (1 doc), con o sin IA. Trabajo en 2º plano.">🔎 Extraer ISBN</button>' : ''}
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
     : '';
@@ -8415,13 +8415,36 @@ async function seguirReextraccion(total) {
 // ingesta no capturó (típico de miembros de colección catalogados por el nombre) y, con él, rellena huecos de
 // título/autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. SIN IA. Solo rellena lo que falta.
 // Trabajo de fondo con progreso y cancelación (mismo patrón que reextraer).
+// Abre un diálogo de OPCIONES para extraer/cotejar el ISBN y lanza el trabajo de fondo. Opciones:
+//  · Forzar: re-cotejar aunque el doc YA tenga ISBN (arregla títulos-artefacto «DjVu Document», series, truncados).
+//  · ISBN manual (solo si hay 1 documento): usar ese ISBN como autoritativo.
+//  · Con IA: si el texto no da ISBN, reextrae páginas y lee el código de barras/CIP por visión; y enriquece con IA.
+// Por defecto (sin marcar nada): solo los que NO tienen ISBN, del texto del fichero, SIN IA (el comportamiento previo).
 async function reidentificarLote(ids) {
   if (!ids.length) return;
-  if (!confirm(
-    `Se intentará RECUPERAR EL ISBN de ${ids.length} documento(s) abriendo su propio fichero (EPUB/PDF/MOBI) y, con él, rellenar huecos de título/autores/editorial/sinopsis desde el Fichero y las APIs gratuitas.\n\nSIN IA. Solo se rellenan campos vacíos; los que ya tienen ISBN se saltan. Es un trabajo de fondo. ¿Seguir?`,
-  )) return;
+  const uno = ids.length === 1;
+  const opc = await new Promise((resolve) => {
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;width:94vw">
+      <h3 style="margin:0 0 4px">🔎 Extraer / cotejar ISBN</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">${ids.length} documento(s). Con el ISBN se coteja el título y se rellenan huecos (autores, editorial, sinopsis…) desde el Fichero local y las APIs gratuitas. Solo campos vacíos, salvo el título (se corrige si es débil/artefacto o al forzar).</div>
+      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="riForzar"><span>Forzar aunque ya tenga ISBN <span class="muted">(re-cotejar; arregla títulos como «DjVu Document», nombres de serie o truncados)</span></span></label>
+      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="riIA"><span>Con IA <span class="muted">(si el texto no trae el ISBN, reextrae páginas y lee el código de barras/CIP por visión; y permite enriquecer con IA)</span></span></label>
+      ${uno ? `<label class="row" style="gap:8px;align-items:center;margin:10px 0"><span style="white-space:nowrap">ISBN manual</span><input type="text" id="riIsbn" placeholder="978… (opcional)" style="flex:1" inputmode="numeric"></label>` : '<div class="muted" style="font-size:12px;margin:6px 0">El ISBN manual solo está disponible con 1 documento seleccionado.</div>'}
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn" id="riCancelar">Cancelar</button>
+        <button class="btn pri" id="riLanzar">Extraer y cotejar</button>
+      </div>
+    </div>`;
+    $('#cmpModal').style.display = 'grid';
+    $('#riCancelar').onclick = () => { cerrarCmp(); resolve(null); };
+    $('#riLanzar').onclick = () => {
+      const o = { forzar: $('#riForzar').checked, conIA: $('#riIA').checked, isbnManual: uno && $('#riIsbn') ? $('#riIsbn').value.trim() : '' };
+      cerrarCmp(); resolve(o);
+    };
+  });
+  if (!opc) return;
   try {
-    const r = await api('/documentos/reidentificar-isbn', { method: 'POST', body: JSON.stringify({ ids }) });
+    const r = await api('/documentos/reidentificar-isbn', { method: 'POST', body: JSON.stringify({ ids, ...opc }) });
     if (!r.ok) { toast(r.motivo || 'No se pudo lanzar', 'bad'); return; }
     selDocs.clear();
     await seguirReidentificacion(r.total || ids.length);

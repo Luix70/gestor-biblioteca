@@ -525,7 +525,8 @@ export function rutasPanel() {
     //    2º plano + sondeo + cancelación. Solo admin (crea autores/editoriales, escribe documentos). ──
     r.post('/documentos/reidentificar-isbn', (req, res) => {
         if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
-        res.json(lanzarReidentificacion({ ids: req.body?.ids }));
+        const { ids, forzar, isbnManual, conIA } = req.body || {};
+        res.json(lanzarReidentificacion({ ids, forzar: !!forzar, isbnManual: isbnManual || null, conIA: !!conIA }));
     });
     r.get('/documentos/reidentificar-isbn/estado', (req, res) => res.json(estadoReidentificacion()));
     r.post('/documentos/reidentificar-isbn/cancelar', (req, res) => res.json(cancelarReidentificacion()));

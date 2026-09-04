@@ -611,11 +611,14 @@ de ficheros clasificado por CDU.
       🎯 A fondo (lee cada libro con la visión y aplica lo que aporte) · 🔀 Cambiar tipo ·
       🖼️ Portada común (asigna la MISMA imagen de portada a toda la selección: se añade como
       portada en cada uno; las imágenes que ya tuvieran se conservan en el carrusel —
-      POST /documentos/portada-lote) · 🔎 Recuperar ISBN (admin: abre el PROPIO fichero
-      EPUB/PDF/MOBI de cada seleccionado, extrae el ISBN que la ingesta no capturó —SIN IA— y con
-      él rellena huecos de título/autor/editorial/sinopsis desde el Fichero y las APIs gratuitas;
-      para los miembros de colección que quedaron sin ISBN; 2º plano con progreso —
-      POST /documentos/reidentificar-isbn) · ♻️ Reprocesar (las
+      POST /documentos/portada-lote) · 🔎 Extraer ISBN (admin: diálogo de opciones — abre el PROPIO
+      fichero EPUB/PDF/MOBI, obtiene el ISBN y COTEJA el título + rellena huecos de
+      autor/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: «Forzar» (re-cotejar
+      AUNQUE ya tenga ISBN → arregla títulos-artefacto «DjVu Document», nombres de serie, truncados),
+      «ISBN manual» (solo 1 doc), «Con IA» (si el texto no da el ISBN, reextrae páginas y lee el
+      código de barras/CIP por visión; y enriquece con IA). Por defecto —sin marcar nada— solo los
+      SIN ISBN, del texto, sin IA. 2º plano con progreso — POST /documentos/reidentificar-isbn) ·
+      ♻️ Reprocesar (las
       MISMAS acciones de la ficha individual que proceden en lote —«medir» no—, aplicadas una
       a una con progreso) · 🗑 Eliminar (pide
       contraseña) · Limpiar. «🗂 Todos los resultados» selecciona todas las páginas.
@@ -2998,10 +3001,13 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
                               nombre sin abrir el fichero). Por defecto: miembros de colección sin ISBN, en
                               pdf/epub/mobi. --coleccion <id|nombre> · --seleccion · --id · --patron · --todos
                               (todo el catálogo sin ISBN) · --sin-apis (solo Fichero) · --limite N. REANUDABLE
-                              (solo mira los sin ISBN). Corre donde estén los ficheros. Dry-run; --ejecutar.
-                              Motor común src/utils/reidentificar-doc.js (mismo de la acción del panel «🔎
-                              Recuperar ISBN» sobre la selección de la Búsqueda, y del que la ingesta reutiliza
-                              la extracción para no volver a perder el ISBN en colecciones nuevas).
+                              (solo mira los sin ISBN). Además, para arreglar títulos-artefacto ya catalogados:
+                              --forzar (re-cotejar AUNQUE ya tenga ISBN; exige acotar), --con-ia (leer el ISBN
+                              por código de barras/CIP con visión si no está en el texto; y enriquecer con IA),
+                              --id <ObjectId> --isbn <ISBN> (fija a mano el ISBN de un doc). Corre donde estén los
+                              ficheros. Dry-run; --ejecutar. Motor común src/utils/reidentificar-doc.js (mismo de
+                              la acción del panel «🔎 Extraer ISBN» sobre la selección de la Búsqueda, y del que
+                              la ingesta reutiliza la extracción para no volver a perder el ISBN en colecciones nuevas).
     recuperar-titulo-original.js [RETROACTIVO] backfill SIN IA de `titulo_original`: abre el EPUB/PDF y
                               lee «Título original:» de la página de créditos. Corre donde estén los
                               ficheros. Dry-run; --ejecutar.

@@ -20,6 +20,11 @@
  *   --todos                   TODOS los documentos sin ISBN (no solo miembros de colección)
  *   --limite N                tope de candidatos (para probar)
  *   --sin-apis                solo el Fichero local (aún más barato; sin OpenLibrary/Google)
+ *   --forzar                  re-cotejar AUNQUE ya tenga ISBN (arregla títulos-artefacto «DjVu Document»,
+ *                             nombres de serie, truncados…). Exige acotar (id/colección/selección/patrón/limite).
+ *   --con-ia                  si el TEXTO no da el ISBN, reextrae páginas y lee el código de barras/CIP por
+ *                             visión (zxing local primero, sin coste); y permite enriquecer con IA.
+ *   --id <ObjectId> --isbn <ISBN>   fija a mano el ISBN de UN documento y coteja desde él.
  *
  * Uso:
  *   node scripts/reidentificar-sin-isbn.js                          (dry-run, miembros de colección sin ISBN)
@@ -36,8 +41,11 @@ import { reidentificarDoc } from '../src/utils/reidentificar-doc.js';
 const EJECUTAR = process.argv.includes('--ejecutar');
 const TODOS = process.argv.includes('--todos');
 const SIN_APIS = process.argv.includes('--sin-apis');
+const FORZAR = process.argv.includes('--forzar');   // re-cotejar AUNQUE ya tenga ISBN (arregla títulos-artefacto)
+const CON_IA = process.argv.includes('--con-ia');   // permite leer el ISBN por barras/visión y enriquecer con IA
 const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
 const idArg = arg('--id');
+const isbnArg = arg('--isbn');   // ISBN manual (solo con --id)
 const patronArg = arg('--patron');
 const colArg = arg('--coleccion');
 const selArg = arg('--seleccion');
@@ -64,17 +72,25 @@ async function main() {
     const db = await conectarDB();
     const col = db.collection('biblioteca');
 
-    let filtro = { ...SIN_ISBN };
+    // --forzar re-coteja AUNQUE ya tenga ISBN → NO se filtra por «sin ISBN». Como eso podría abarcar TODO el
+    // catálogo, exige acotar (id/colección/selección/patrón/limite), igual que reparar-portadas.
+    const acotado = idArg || colArg || selArg || patronArg || Number.isFinite(limite);
+    if (FORZAR && !TODOS && !acotado) {
+        console.error('⛔ --forzar necesita acotar: --id / --coleccion / --seleccion / --patron / --limite (o --todos, con cuidado).');
+        process.exit(1);
+    }
+    const base = FORZAR ? {} : { ...SIN_ISBN };   // al forzar, también los que YA tienen ISBN
+    let filtro = { ...base };
     if (idArg) filtro = { _id: new ObjectId(idArg) };
-    else if (selArg) filtro = { _id: { $in: await idsDeSeleccion(db, selArg) }, ...SIN_ISBN };
-    else if (colArg) filtro = { coleccion: await resolverColeccionArg(db, colArg), ...SIN_ISBN };
-    else if (patronArg) filtro = { nombre_archivo: { $regex: patronArg, $options: 'i' }, ...SIN_ISBN };
-    else if (!TODOS) filtro = { coleccion: { $exists: true, $ne: null }, ...SIN_ISBN }; // por defecto: miembros de colección
+    else if (selArg) filtro = { _id: { $in: await idsDeSeleccion(db, selArg) }, ...base };
+    else if (colArg) filtro = { coleccion: await resolverColeccionArg(db, colArg), ...base };
+    else if (patronArg) filtro = { nombre_archivo: { $regex: patronArg, $options: 'i' }, ...base };
+    else if (!TODOS) filtro = { coleccion: { $exists: true, $ne: null }, ...base }; // por defecto: miembros de colección
     // Solo formatos con ISBN de texto barato (pdf/epub/mobi); descarta audio/material/vídeo/software/djvu.
     if (!idArg) filtro.formatos = { $in: ['pdf', 'epub', 'mobi'] };
 
     const ids = (await col.find(filtro, { projection: { _id: 1 } }).limit(Number.isFinite(limite) ? limite : 0).toArray()).map((d) => d._id);
-    console.log(`${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${ids.length} candidato(s) sin ISBN${SIN_APIS ? ' · solo Fichero (sin APIs)' : ''}\n`);
+    console.log(`${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${ids.length} candidato(s)${FORZAR ? ' (forzando, incl. con ISBN)' : ' sin ISBN'}${CON_IA ? ' · con IA' : ''}${SIN_APIS ? ' · solo Fichero (sin APIs)' : ''}\n`);
 
     const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, fallos: 0 };
     const t0 = Date.now();
@@ -84,7 +100,7 @@ async function main() {
         if (!doc) continue;
         i++;
         let r;
-        try { r = await reidentificarDoc(db, doc, { aplicar: EJECUTAR, usarApis: !SIN_APIS }); }
+        try { r = await reidentificarDoc(db, doc, { aplicar: EJECUTAR, usarApis: !SIN_APIS, forzar: FORZAR, conIA: CON_IA, isbnManual: idArg ? isbnArg : null }); }
         catch (e) { st.fallos++; process.stdout.write(`[${i}/${ids.length}] ⛔ ${_id}: ${e.message}\n`); continue; }
 
         if (r.estado === 'identificado' || r.estado === 'aplicado') {

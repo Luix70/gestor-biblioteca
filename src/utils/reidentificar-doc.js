@@ -18,9 +18,11 @@
 import path from 'node:path';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../database.js';
-import { carpetaDeDoc, archivoOriginal } from '../mantenimiento/util-mantenimiento.js';
+import { carpetaDeDoc, archivoOriginal, numeroPaginasPdf } from '../mantenimiento/util-mantenimiento.js';
 import { isbnDesdeArchivo, tipoLibro } from './isbn-archivo.js';
-import { variantesISBN } from './identificadores.js';
+import { variantesISBN, validarISBN } from './identificadores.js';
+import { esTituloArtefacto } from './parsear-nombre.js';
+import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
 import { resolverPersona } from './resolver-persona.js';
 import { indexarDoc } from './indice-busqueda.js';
@@ -51,42 +53,88 @@ async function resolverEditorial(db, nombre) {
     const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });
     return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
 }
+// Normaliza un título para comparar (minúsculas, sin acentos ni puntuación).
+const RE_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
+const normLite = (s) => String(s || '').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '').replace(/[^a-z0-9]+/g, ' ').trim();
+// El título nuevo NO debe DEGRADAR el actual: si el actual ya CONTIENE (como frase) el nuevo y es más largo,
+// el nuevo perdería información («Cinema 1: The Movement-Image» → «Cinema») → no se sustituye. (Igual que cotejarPorISBN.)
+function noDegrada(actual, nuevo) {
+    const a = normLite(actual), n = normLite(nuevo);
+    if (!n) return false;
+    if (a.length > n.length && (' ' + a + ' ').includes(' ' + n + ' ')) return false;
+    return true;
+}
 
 /**
- * Re-identifica UN documento sin ISBN: extrae el ISBN de su fichero y rellena huecos por el Fichero/APIs.
- * @param {object} opts { aplicar=false, usarApis=true }  · aplicar=false → dry-run (calcula pero no escribe).
- * @returns {Promise<{estado, isbn?, titulo?, resumen?, motivo?, set?}>}
+ * Re-identifica UN documento por su ISBN: lo obtiene (del fichero / a mano / por código de barras con IA / del
+ * propio doc si se fuerza) y pivota al Fichero + APIs gratuitas para cotejar título y rellenar huecos.
+ * @param {object} opts
+ *   aplicar=false     dry-run (calcula pero no escribe).
+ *   usarApis=true     consulta OpenLibrary/Google además del Fichero local.
+ *   forzar=false      re-cotejar AUNQUE el doc ya tenga ISBN (para títulos-artefacto, series, truncados…).
+ *   isbnManual=null   ISBN dado a mano → autoritativo (fuente = manual).
+ *   conIA=false       permite IA: si el TEXTO no da ISBN, reextrae páginas y lee el código de barras/CIP por
+ *                     VISIÓN (zxing local primero, sin coste); y permite el enriquecimiento con IA.
+ * @returns {Promise<{estado, isbn?, via?, titulo?, resumen?, motivo?, set?}>}
  *   estado ∈ 'ya-tiene-isbn' | 'sin-fichero' | 'formato-no-soportado' | 'no-hallado' | 'identificado' | 'aplicado'
  */
-export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = true } = {}) {
-    if (doc.isbn) return { estado: 'ya-tiene-isbn' };
+export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = true, forzar = false, isbnManual = null, conIA = false } = {}) {
+    const manual = isbnManual ? validarISBN(isbnManual) : null;
+    // Por defecto (sin forzar ni ISBN manual) solo se actúa sobre los que NO tienen ISBN (ingesta/backfill/lote).
+    if (doc.isbn && !forzar && !manual) return { estado: 'ya-tiene-isbn' };
+
     const carpeta = carpetaDeDoc(doc);
     const abs = await archivoOriginal(carpeta, doc.nombre_archivo).catch(() => null);
-    if (!abs) return { estado: 'sin-fichero', motivo: 'no se encontró el fichero del documento en su carpeta' };
-    if (!tipoLibro(abs)) return { estado: 'formato-no-soportado', motivo: `${path.extname(abs)} no da un ISBN de texto` };
 
-    const ext = await isbnDesdeArchivo(abs, { nombre: doc.nombre_archivo, tituloRef: doc.titulo });
-    if (!ext.isbn) return { estado: 'no-hallado', motivo: 'el fichero no declara ISBN (ni corrobora un candidato del cuerpo)' };
+    // 1) RESOLVER EL ISBN según la fuente. Prioridad: manual > texto del fichero > barras/visión (con IA) >
+    //    el que ya tiene (al forzar). Así «datos existentes», «reextraer páginas» y «manual» son elegibles.
+    let isbn = null, via = '', ext = { isbn: null, titulo: null, autores: [], editorial: null };
+    if (manual) { isbn = manual; via = 'manual'; }
+    else {
+        if (abs && tipoLibro(abs)) { ext = await isbnDesdeArchivo(abs, { nombre: doc.nombre_archivo, tituloRef: doc.titulo }); if (ext.isbn) { isbn = ext.isbn; via = 'fichero'; } }
+        if (!isbn && conIA && abs) {
+            // Reextraer páginas y leer el EAN de la cubierta/contracubierta (o el CIP): zxing local sin coste y,
+            // si falla, VISIÓN. Solo para PDF (los EPUB/MOBI ya dan su ISBN por el texto de arriba).
+            const numPag = doc.paginas || (await numeroPaginasPdf(abs).catch(() => 0)) || 3;
+            const bc = await leerCodigoBarrasPorVision(abs, numPag).catch(() => null);
+            const v = bc?.isbn ? validarISBN(bc.isbn) : null;
+            if (v) { isbn = v; via = 'barras/visión'; }
+        }
+        if (!isbn && forzar && doc.isbn) { isbn = validarISBN(doc.isbn) || doc.isbn; via = 'existente'; }
+    }
 
-    // Pivote por ISBN: Fichero local + APIs gratuitas (sin IA por defecto). incluirCdu:false → no se toca la CDU
-    // aquí (el miembro vive en la carpeta de la colección; si mejora el título, el Conformador re-clasifica y
-    // MUEVE la carpeta al des-sellar re-clasificar-cdu).
-    const isbnVar = variantesISBN(ext.isbn);
+    if (!isbn) {
+        if (!abs && !manual) return { estado: 'sin-fichero', motivo: 'no se encontró el fichero del documento en su carpeta' };
+        if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` };
+        return { estado: 'no-hallado', motivo: 'no se pudo obtener un ISBN (ni del texto, ni por barras/visión, ni a mano)' };
+    }
+
+    // 2) PIVOTE por ISBN: Fichero local + APIs gratuitas. incluirCdu:false → NO se toca la CDU aquí (cambiarla
+    //    movería la carpeta, justo lo que se quiere evitar); si mejora el título se des-sella re-clasificar-cdu
+    //    y el Conformador la afina/mueve a reposo. sinIA:!conIA → con IA se permite el enriquecimiento con IA.
+    const isbnVar = variantesISBN(isbn);
     let datos = {};
     if (usarApis) {
         datos = await buscarMetadatosExternos(doc.titulo || ext.titulo || '', '', null, {
-            incluirSinopsis: true, incluirCdu: false, isbnsArchivo: isbnVar, idioma: doc.idioma || null, sinIA: true,
+            incluirSinopsis: true, incluirCdu: false, isbnsArchivo: isbnVar, idioma: doc.idioma || null, sinIA: !conIA,
         }).catch(() => ({}));
     }
 
-    const debil = tituloDebil(doc);
-    const set = { isbn: ext.isbn };
+    const set = {};
     const nombres = {}; // log legible
+    if (isbn && String(doc.isbn || '') !== isbn) { set.isbn = isbn; if (manual) nombres.isbn = isbn; }
 
-    // Título: si el actual es débil, prefiere el de la AUTORIDAD (Fichero/APIs por ISBN, limpio y normalizado) y,
-    // si no la hay, el del propio fichero (fiable solo en EPUB/MOBI; en PDF ext.titulo es null a propósito).
+    // TÍTULO (cotejo): se sustituye por el de la AUTORIDAD si el actual es DÉBIL o ARTEFACTO, o —al FORZAR— si
+    // simplemente DIFIERE; nunca si DEGRADARÍA (el actual ya es más completo). El de la autoridad (Fichero/APIs
+    // por ISBN) va primero; el del propio fichero solo es fiable en EPUB/MOBI (en PDF ext.titulo es null).
     const tituloMejor = datos.titulo || ext.titulo || null;
-    if (debil && tituloMejor) { set.titulo = tituloMejor; nombres.titulo = tituloMejor; }
+    if (tituloMejor) {
+        const actual = String(doc.titulo || '');
+        const malActual = tituloDebil(doc) || esTituloArtefacto(actual);
+        if ((malActual || forzar) && normLite(actual) !== normLite(tituloMejor) && noDegrada(actual, tituloMejor)) {
+            set.titulo = tituloMejor; nombres.titulo = tituloMejor;
+        }
+    }
     // Autores: si el doc no tiene ninguno, resuélvelos del fichero primero, si no de la autoridad.
     const autoresNom = (ext.autores && ext.autores.length ? ext.autores : datos.autores) || [];
     if (!(doc.autores?.length) && autoresNom.length) { set.autores = await resolverAutores(db, autoresNom); nombres.autores = autoresNom; }
@@ -99,22 +147,23 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     if (datos.idioma && !doc.idioma) set.idioma = datos.idioma;
     if (datos.subtitulo && !doc.subtitulo) set.subtitulo = datos.subtitulo;
 
-    const resumen = Object.keys(nombres).length
-        ? `isbn=${ext.isbn} · ` + Object.entries(nombres).map(([k, v]) => `${k}="${Array.isArray(v) ? v.join(', ') : v}"`).join(' · ')
-        : `isbn=${ext.isbn}`;
+    if (Object.keys(set).length === 0) return { estado: 'no-hallado', isbn, via, motivo: 'ISBN resuelto pero la autoridad no aportó nada nuevo' };
 
-    if (!aplicar) return { estado: 'identificado', isbn: ext.isbn, titulo: set.titulo || doc.titulo, resumen, set };
+    const resumen = `isbn=${isbn}${via ? ` (${via})` : ''}`
+        + (Object.keys(nombres).length ? ' · ' + Object.entries(nombres).map(([k, v]) => `${k}="${Array.isArray(v) ? v.join(', ') : v}"`).join(' · ') : '');
+
+    if (!aplicar) return { estado: 'identificado', isbn, via, titulo: set.titulo || doc.titulo, resumen, set };
 
     // Si se corrige el título, des-sellar re-clasificar-cdu para que el Conformador reclasifique y MUEVA la
     // carpeta con el título ya bueno (igual que re-enriquecer-degradados).
     if (set.titulo) { set['mantenimiento.re-clasificar-cdu'] = 0; set.mantenimiento_firma = 'pendiente-reidentificado'; }
     set.fecha_actualizacion = new Date();
-    set.alertas_agente = [...(doc.alertas_agente || []), 'ISBN recuperado del fichero + pivote al Fichero/APIs (re-identificación).'];
+    set.alertas_agente = [...(doc.alertas_agente || []), `ISBN ${via === 'manual' ? 'manual' : 'recuperado (' + via + ')'} + cotejo por ISBN (Fichero/APIs${conIA ? ', con IA' : ''}).`];
     await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
     // Índice FTS + sidecars (best-effort: nunca tumban la operación).
     await indexarDoc(db, doc._id).catch(() => {});
     await regenerarSidecarsDoc(db, { ...doc, ...set }, carpeta).catch(() => {});
-    return { estado: 'aplicado', isbn: ext.isbn, titulo: set.titulo || doc.titulo, resumen, set };
+    return { estado: 'aplicado', isbn, via, titulo: set.titulo || doc.titulo, resumen, set };
 }
 
 // ── LOTE en 2º plano (acción de la Búsqueda sobre una selección) ─────────────────────────────────────────
@@ -124,11 +173,13 @@ let trabajo = { en_curso: false, total: 0, hechos: 0, recuperados: 0, sin_isbn: 
 export function estadoReidentificacion() { return { ...trabajo }; }
 export function cancelarReidentificacion() { if (trabajo.en_curso) trabajo.cancelar = true; return { ok: true }; }
 
-export function lanzarReidentificacion({ ids } = {}) {
+export function lanzarReidentificacion({ ids, forzar = false, isbnManual = null, conIA = false } = {}) {
     if (trabajo.en_curso) return { ok: false, motivo: 'ya hay una re-identificación en curso' };
     const lista = (Array.isArray(ids) ? ids : String(ids || '').split(','))
         .map((x) => String(x).trim()).filter((x) => ObjectId.isValid(x)).map((x) => new ObjectId(x));
     if (!lista.length) return { ok: false, motivo: 'no se recibió ningún documento válido' };
+    // El ISBN manual solo tiene sentido para UN documento (si no, se aplicaría el mismo a todos): se ignora en lote.
+    const manual = lista.length === 1 ? isbnManual : null;
     trabajo = { en_curso: true, total: lista.length, hechos: 0, recuperados: 0, sin_isbn: 0, sin_fichero: 0, otros: 0, titulo: '', cancelar: false, ts: new Date().toISOString() };
     (async () => {
         try {
@@ -139,7 +190,7 @@ export function lanzarReidentificacion({ ids } = {}) {
                 trabajo.titulo = doc?.titulo || '';
                 if (doc) {
                     try {
-                        const r = await reidentificarDoc(db, doc, { aplicar: true, usarApis: true });
+                        const r = await reidentificarDoc(db, doc, { aplicar: true, usarApis: true, forzar, isbnManual: manual, conIA });
                         if (r.estado === 'aplicado') trabajo.recuperados++;
                         else if (r.estado === 'no-hallado') trabajo.sin_isbn++;
                         else if (r.estado === 'sin-fichero') trabajo.sin_fichero++;
