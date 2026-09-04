@@ -27,6 +27,9 @@ import { resolverPersona } from './resolver-persona.js';
 import { esAudio } from './lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { esDocumentoLeible, esImagenArchivo, esMaterialNotable, esVideo, formatoDocumento } from './criba-material.js';
 import { leerGuia } from './guia-ingesta.js'; // pistas del reproceso (principal fijado + soloAdmin de adjuntos)
+import { isbnDesdeArchivo } from './isbn-archivo.js'; // ISBN del propio fichero del miembro (identificar antes de clasificar)
+import { buscarEnFicheroLocal } from './buscador-local.js'; // pivote OFFLINE por ISBN (sin IA)
+import { variantesISBN } from './identificadores.js';
 
 // Subcarpeta OCULTA con las portadas DERIVADAS (1ª página rasterizada). El prefijo «.» hace que `ignorar`
 // (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
@@ -476,6 +479,18 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         }
         return ids;
     };
+    // Resuelve un nombre de editorial → ObjectId (check-then-create; el $jsonSchema exige ObjectId, no string).
+    // Cacheado igual que los autores (una colección repite editorial en muchos miembros).
+    const cacheEditoriales = new Map();
+    const resolverEditorial = async (nombre) => {
+        const t = String(nombre || '').trim();
+        if (!t) return null;
+        if (!cacheEditoriales.has(t)) {
+            const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });
+            cacheEditoriales.set(t, ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId);
+        }
+        return cacheEditoriales.get(t);
+    };
 
     // 3) Documentos por PDF (dedup por hash) + audiolibros. Se calcula el hash sobre el fichero YA copiado.
     const hashesVistos = new Set();
@@ -494,7 +509,6 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         const hash = await calcularHashArchivo(abs).catch(() => null);
         if (hash && hashesVistos.has(hash)) { deduplicados++; continue; } // igual hash → un solo doc (fichero intacto)
         if (hash) hashesVistos.add(hash);
-        const autores = await resolverAutores(m.autores);
         const audios = (m.audios_rel || []).map((r, i) => ({ ruta: webDeRel(r), titulo: tituloDeArchivo(path.basename(r)), orden: i + 1 }));
         // El _id se pre-genera para nombrar su portada derivada (`.portadas/<id>.jpg`). Portada: la LECTURA
         // usa la `cover.jpg` de su unidad; los materiales/guías (o una lectura sin cover) reciben su PROPIA
@@ -503,13 +517,35 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         const esLectura = m.rol_material === 'lectura';
         let portada = esLectura ? webDeRel(m.portada_rel) : null;
         if (!portada) portada = await renderizarPortadaMiembro(abs, carpetaColeccion, webColeccion, _id);
+        // IDENTIFICAR EL MIEMBRO POR SU FICHERO (no solo por el nombre): recuperar el ISBN — que la vía de
+        // colección NO capturaba (todos los TXtras quedaron sin ISBN) — y, con él, PIVOTAR GRATIS al Fichero
+        // local (offline, sin IA) para mejorar título/autor/editorial/idioma/sinopsis. Solo LECTURAS en formato
+        // con ISBN de texto (pdf/epub/mobi). Best-effort: nunca rompe la ingesta. Las APIs online se dejan al
+        // Conformador (aquí prima el throughput; el Fichero local es una consulta SQLite barata).
+        let ident = null, metaF = null;
+        if (esLectura) {
+            ident = await isbnDesdeArchivo(abs, { nombre: m.nombre_archivo, tituloRef: m.titulo }).catch(() => null);
+            if (ident?.isbn) metaF = await buscarEnFicheroLocal({ isbns: variantesISBN(ident.isbn) }).catch(() => null);
+        }
+        // Mejores metadatos disponibles: autoridad del Fichero > propio fichero > nombre de archivo.
+        const tituloMejor = (metaF && metaF.titulo) || ident?.titulo || m.titulo;
+        const autoresNom = (metaF && metaF.autores?.length ? metaF.autores : (ident?.autores?.length ? ident.autores : m.autores)) || [];
+        const autores = await resolverAutores(autoresNom);
+        const editorialNom = (metaF && metaF.editorial) || ident?.editorial || null;
+        const editorial = editorialNom ? await resolverEditorial(editorialNom) : null;
         const doc = baseDoc({
             _id,
             // Una lectura CON audio se etiqueta pdf + audio (así el thumbnail avisa de que trae audiolibro).
-            titulo: m.titulo, tipo_recurso: 'libro',
+            titulo: tituloMejor, tipo_recurso: 'libro',
+            subtitulo: (metaF && metaF.subtitulo) || undefined,
+            isbn: ident?.isbn || undefined,   // ISBN recuperado del fichero → dedup, portada remota y enriquecido posterior
             // Cada miembro con SU formato (no todo es pdf). Una lectura CON audio se etiqueta además 'audio'.
             formatos: audios.length ? [m.formato || 'pdf', 'audio'] : [m.formato || 'pdf'],
             autores: autores.length ? autores : undefined,
+            editorial: editorial || undefined,
+            idioma: (metaF && metaF.idioma) || plan.idioma,   // el Fichero manda sobre el idioma de la colección
+            sinopsis: (metaF && metaF.sinopsis) || undefined,
+            año_edicion: (metaF && metaF.año_edicion) || undefined,
             nombre_archivo: m.nombre_archivo, ruta_base: carpetaWebDeRel(m.rel),
             nivel: m.nivel || undefined, unidad: m.unidad || undefined, rol_material: m.rol_material,
             portada: portada || undefined,

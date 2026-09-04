@@ -19,6 +19,7 @@ import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './integridad.js';
 import { lanzarEmparejado, estadoEmparejado } from './utils/emparejar-portadas.js';
 import { lanzarReextraccion, estadoReextraccion, cancelarReextraccion } from './utils/reextraer-imagenes.js';
+import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion } from './utils/reidentificar-doc.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
 import { informePlanHtml } from './utils/informe-plan.js';
 import { planificarInbox } from './vigilante.js';
@@ -518,6 +519,16 @@ export function rutasPanel() {
     });
     r.get('/documentos/reextraer-imagenes/estado', (req, res) => res.json(estadoReextraccion()));
     r.post('/documentos/reextraer-imagenes/cancelar', (req, res) => res.json(cancelarReextraccion()));
+
+    // ── RE-IDENTIFICAR (recuperar el ISBN del propio fichero + pivote al Fichero/APIs, SIN IA), sobre una
+    //    selección. Para los miembros de colección que se catalogaron por nombre y quedaron SIN ISBN (TXtras).
+    //    2º plano + sondeo + cancelación. Solo admin (crea autores/editoriales, escribe documentos). ──
+    r.post('/documentos/reidentificar-isbn', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(lanzarReidentificacion({ ids: req.body?.ids }));
+    });
+    r.get('/documentos/reidentificar-isbn/estado', (req, res) => res.json(estadoReidentificacion()));
+    r.post('/documentos/reidentificar-isbn/cancelar', (req, res) => res.json(cancelarReidentificacion()));
     /**
      * Origen ABSOLUTO del panel, para los enlaces del informe HTML (se descarga y se abre desde el DISCO: uno
      * relativo apuntaría a file:/// y no llevaría a ninguna parte).

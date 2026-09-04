@@ -8065,6 +8065,7 @@ function renderBulk() {
     ${ROL === 'admin' ? '<button class="btn pri" id="bkSelShare" title="Compartir estos documentos: enlace/QR de SOLO LECTURA (ver + descargar), con caducidad opcional. Es una foto fija; no crea una selección guardada.">🔗 Compartir selección</button>' : ''}
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReimg" title="Re-extraer del PROPIO fichero la portada Y las imágenes de catalogación (5 páginas frontales + contraportada, saltando las páginas en blanco), reemplazando las actuales (equivocadas). Conserva las imágenes que hayas añadido a mano. Trabajo en 2º plano.">🖼️ Reextraer imágenes</button>' : ''}
+    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReisbn" title="Recuperar el ISBN abriendo el PROPIO fichero (EPUB/PDF/MOBI) y, con él, rellenar título/autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. SIN IA. Para los que se catalogaron por el nombre y quedaron sin ISBN (miembros de colección). Solo rellena huecos. Trabajo en 2º plano.">🔎 Recuperar ISBN</button>' : ''}
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
     : '';
@@ -8143,6 +8144,7 @@ function renderBulk() {
     if ($('#bkSelShare')) $('#bkSelShare').onclick = compartirSeleccionMarcada;
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReimg')) $('#bkReimg').onclick = () => reextraerImagenesLote([...selDocs]);
+    if ($('#bkReisbn')) $('#bkReisbn').onclick = () => reidentificarLote([...selDocs]);
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     $('#bkDel').onclick = eliminarSeleccionados;
   }
@@ -8407,6 +8409,56 @@ async function seguirReextraccion(total) {
   toast(
     `Imágenes re-extraídas en ${e.ok || 0} documento(s)${e.fallidos ? ` · ${e.fallidos} sin fichero/ilegibles` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
     cancelado || e.fallidos ? 'warn' : 'ok',
+  );
+}
+// RECUPERAR ISBN en lote: abre el PROPIO fichero (EPUB/PDF/MOBI) de cada documento, extrae el ISBN que la
+// ingesta no capturó (típico de miembros de colección catalogados por el nombre) y, con él, rellena huecos de
+// título/autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. SIN IA. Solo rellena lo que falta.
+// Trabajo de fondo con progreso y cancelación (mismo patrón que reextraer).
+async function reidentificarLote(ids) {
+  if (!ids.length) return;
+  if (!confirm(
+    `Se intentará RECUPERAR EL ISBN de ${ids.length} documento(s) abriendo su propio fichero (EPUB/PDF/MOBI) y, con él, rellenar huecos de título/autores/editorial/sinopsis desde el Fichero y las APIs gratuitas.\n\nSIN IA. Solo se rellenan campos vacíos; los que ya tienen ISBN se saltan. Es un trabajo de fondo. ¿Seguir?`,
+  )) return;
+  try {
+    const r = await api('/documentos/reidentificar-isbn', { method: 'POST', body: JSON.stringify({ ids }) });
+    if (!r.ok) { toast(r.motivo || 'No se pudo lanzar', 'bad'); return; }
+    selDocs.clear();
+    await seguirReidentificacion(r.total || ids.length);
+    buscarCatalogo(estadoBusqueda.page || 1);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function seguirReidentificacion(total) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;width:94vw">
+    <h3 style="margin:0 0 10px">🔎 Recuperando ISBN…</h3>
+    <div style="height:10px;border-radius:6px;background:rgba(128,128,128,.25);overflow:hidden">
+      <div id="riBar" style="height:100%;width:0%;background:var(--acc);transition:width .3s"></div>
+    </div>
+    <div id="riTxt" class="muted" style="font-size:13px;margin-top:8px">0 / ${total}</div>
+    <div id="riTit" class="muted" style="font-size:12px;margin-top:2px;min-height:1.2em"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn bad" id="riCancel">✕ Cancelar</button></div>
+  </div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#riCancel').onclick = async () => {
+    $('#riCancel').disabled = true;
+    $('#riCancel').textContent = 'Cancelando…';
+    try { await api('/documentos/reidentificar-isbn/cancelar', { method: 'POST' }); } catch { /* ya habrá acabado */ }
+  };
+  let e = {};
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 700));
+    try { e = await api('/documentos/reidentificar-isbn/estado'); } catch { break; }
+    const pct = e.total ? Math.round((e.hechos / e.total) * 100) : 0;
+    if ($('#riBar')) $('#riBar').style.width = pct + '%';
+    if ($('#riTxt')) $('#riTxt').textContent = `${e.hechos} / ${e.total} · ${e.recuperados || 0} con ISBN${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
+    if ($('#riTit')) $('#riTit').textContent = e.titulo ? recortar(e.titulo, 60) : '';
+    if (!e.en_curso) break;
+  }
+  cerrarCmp();
+  const cancelado = e.cancelar && e.hechos < e.total;
+  toast(
+    `ISBN recuperado en ${e.recuperados || 0} documento(s)${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN en el fichero` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
+    cancelado || e.sin_isbn || e.sin_fichero ? 'warn' : 'ok',
   );
 }
 // Asigna la MISMA imagen de portada a toda la selección: se elige un fichero (o foto), se reduce en el
