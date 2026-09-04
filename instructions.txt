@@ -756,7 +756,10 @@ de ficheros clasificado por CDU.
          Página de texto» rasteriza el HTML del libro (SVG foreignObject→canvas) conservando
          estructura (encabezados/negrita/cursiva/párrafos) + serif; no la fuente embebida.
       📐 Medir — estima el tamaño físico (cm) sobre la alfombrilla reglada.
-      🧹 Conformar · ✨ Enriquecer · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
+      🧹 Conformar · ✨ Enriquecer · 🔎 Extraer ISBN · ♻️ Reprocesar · 🗑 Eliminar (a la Papelera)
+      🔎 EXTRAER ISBN (ficha, admin, solo ESTE documento): mismo diálogo de opciones que la acción de la
+         Búsqueda (forzar aunque ya tenga ISBN · ISBN manual · con/sin IA), pero sobre el documento de la
+         ficha; al terminar REFRESCA la ficha (no el catálogo). Reutiliza reidentificarLote([id]) con callback.
       📶 Grabar NFC (ver más abajo)
       ♻️ REPROCESAR ofrece DOS MODOS (se elige en el modal, con la contraseña):
          · CONSERVADOR (con sidecar, por defecto): escribe un sidecar .meta.json con los

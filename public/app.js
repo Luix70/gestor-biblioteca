@@ -3435,6 +3435,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actMedir" title="Estimar el tamaño físico del libro (cm) sobre la alfombrilla reglada">📐 Medir</button>
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las fuentes para mejorar el documento: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books)">✨ Enriquecer</button>
+      <button class="fbtn admin-only" id="actReisbn" title="Extraer/cotejar el ISBN de ESTE documento: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual, con o sin IA.">🔎 Extraer ISBN</button>
       <button class="fbtn admin-only" id="actAFondo" title="Lee las PÁGINAS del propio libro (portadilla/contraportada) con la visión y propone autores/roles reales, sinopsis e identificadores. Muestra un balance antes/después para aplicar lo que elijas.">🎯 Completar a fondo</button>
       <button class="fbtn admin-only" id="actShare" title="Genera un QR/enlace para compartir esta ficha (y su descarga, si es digital)">🔗 Compartir</button>
       <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG213/215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
@@ -3491,6 +3492,9 @@ function pintarDoc(r, ctx) {
       cr = $('#actRepr');
     if (cf) cf.onclick = () => fichaAccion('conformar', d._id, cf);
     if (ce) ce.onclick = () => fichaAccion('enriquecer', d._id, ce);
+    // 🔎 Extraer ISBN sobre SOLO este documento: reutiliza el diálogo de opciones del lote (con ISBN manual, al
+    // ser 1 doc) y, al terminar, REFRESCA la ficha (no el catálogo).
+    if ($('#actReisbn')) $('#actReisbn').onclick = () => reidentificarLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
     if ($('#actTipo')) $('#actTipo').onclick = () => cambiarTipoDocs([d._id]);
     const caf = $('#actAFondo');
@@ -8420,7 +8424,7 @@ async function seguirReextraccion(total) {
 //  · ISBN manual (solo si hay 1 documento): usar ese ISBN como autoritativo.
 //  · Con IA: si el texto no da ISBN, reextrae páginas y lee el código de barras/CIP por visión; y enriquece con IA.
 // Por defecto (sin marcar nada): solo los que NO tienen ISBN, del texto del fichero, SIN IA (el comportamiento previo).
-async function reidentificarLote(ids) {
+async function reidentificarLote(ids, { alTerminar = null } = {}) {
   if (!ids.length) return;
   const uno = ids.length === 1;
   const opc = await new Promise((resolve) => {
@@ -8446,9 +8450,9 @@ async function reidentificarLote(ids) {
   try {
     const r = await api('/documentos/reidentificar-isbn', { method: 'POST', body: JSON.stringify({ ids, ...opc }) });
     if (!r.ok) { toast(r.motivo || 'No se pudo lanzar', 'bad'); return; }
-    selDocs.clear();
+    if (!alTerminar) selDocs.clear();   // desde la ficha no hay selección que vaciar
     await seguirReidentificacion(r.total || ids.length);
-    buscarCatalogo(estadoBusqueda.page || 1);
+    if (alTerminar) alTerminar(); else buscarCatalogo(estadoBusqueda.page || 1);
   } catch (e) { toast(e.message, 'bad'); }
 }
 async function seguirReidentificacion(total) {
