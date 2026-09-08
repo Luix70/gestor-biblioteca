@@ -3221,14 +3221,28 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       del cuerpo: la validez del ISBN (checksum) NO basta, tiene que CASAR con el documento.
     * .opf HERMANO (Calibre) + PORTADAS SUELTAS — vigilante·buscarOpfHermano / buscarPortadaPreextraida +
       utils/lector-opf.js: una exportacion de Calibre deja junto al libro un «Titulo - Autor.opf» (metadatos
-      FIABLES: titulo/autor/editorial/ISBN/idioma/serie/sinopsis + la PORTADA real que referencia en <guide>) y
-      a menudo su «Titulo - Autor.jpg». En la ingesta, si hay un .opf hermano (mismo nombre, o el UNICO .opf de
-      una carpeta con <=1 documento) se examina PRIMERO: sus datos RELLENAN huecos (no pisan lo del fichero) y
-      su ISBN pasa a isbn_propio; su cubierta viaja como contexto.portadaLocal. Sin .opf: se usa la imagen del
-      MISMO nombre que el documento, y si no, una GENERICA (cover.jpg/portada.jpg/cubierta.jpg) SOLO si la
-      carpeta tiene un unico documento (con varios seria ambigua). El .opf y las portadas ya consumidas se
-      RECICLAN a la Papelera tras catalogar (si no, un cover.jpg suelto se re-cataloga como libro-imagen). Antes
-      de esto, la portada salia SIEMPRE de la pagina 1 → cientos de libros sin su cubierta real.
+      FIABLES: titulo/autor(es)/contribuciones-con-rol/editorial/ISBN/AÑO(dc:date)/idioma/serie(calibre:series)/
+      sinopsis/materias(dc:subject) + la PORTADA real que referencia en <guide>) y a menudo su «Titulo -
+      Autor.jpg». En la ingesta, si hay un .opf hermano (mismo nombre, o el UNICO .opf de una carpeta con <=1
+      documento) se examina PRIMERO: sus datos RELLENAN huecos (no pisan lo del fichero) y su ISBN pasa a
+      isbn_propio; su cubierta viaja como contexto.portadaLocal — SIN reextraer nada del documento (solo lee el
+      fichero de imagen ya existente; para PDF compite por ancho con la pagina 1, y si la pagina 1 es TEXTO la
+      cubierta externa gana siempre). Sin .opf: se usa la imagen del MISMO nombre que el documento, y si no, una
+      GENERICA (cover.jpg/portada.jpg/cubierta.jpg) SOLO si la carpeta tiene un unico documento (con varios
+      seria ambigua). El .opf y las portadas ya consumidas se RECICLAN a la Papelera tras catalogar (si no, un
+      cover.jpg suelto se re-cataloga como libro-imagen). Antes de esto, la portada salia SIEMPRE de la pagina 1
+      → cientos de libros sin su cubierta real.
+      IGNORADO A PROPOSITO: los dc:identifier de scheme calibre/uuid/AMAZON/GOOGLE (solo se usa el de scheme
+      ISBN, con checksum); el dc:contributor con rol «bkp» (solo marca que Calibre procesó el fichero, no es un
+      colaborador real); y TODOS los <meta name="calibre:..."> internos de la libreria de origen (rating,
+      timestamp de cuando se AÑADIO a esa libreria —no confundir con dc:date, que SI es el año de publicacion—,
+      title_sort, author_link_map, columnas personalizadas #genre/#quality/#formats): son configuracion PRIVADA
+      del Calibre de quien exporto, no bibliografia.
+      OJO — AUTORES CON file-as CONJUNTO: cuando dos <dc:creator> (coautoria) comparten el MISMO opf:file-as
+      («Michaels, Marcy & Desalle, Marie» puesto a mano en AMBOS, en vez de uno por persona), ese file-as ya NO
+      es el nombre individual de nadie → se usa el TEXTO del elemento (el nombre propio de cada dc:creator) en
+      vez del file-as. Sin este caso especial, saldrian DOS autores duplicados con el mismo nombre conjunto en
+      lugar de las dos personas reales (detectado y arreglado con un .opf real de una exportacion de Calibre).
     * PAGINAS EN BLANCO al extraer el 5+1 — rasterizar-pdf·rasterizarSignificativas (usada por ocr-pdf y
       resolver-portada): al sacar las 5 frontales + 1 final para OCR/vision/portada se SALTAN las paginas sin
       contenido util (en blanco, «intentionally left blank», «scanned by…», caption pequena, adorno decorativo

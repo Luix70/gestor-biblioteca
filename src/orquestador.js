@@ -815,6 +815,7 @@ export async function procesarRecurso(entrada) {
         if (o.editorial && !datosBase.editorial) { datosBase.editorial = o.editorial; aplic.push('editorial'); }
         if (o.serie_nombre && !datosBase.coleccion_nombre) { datosBase.coleccion_nombre = o.serie_nombre; if (o.serie_indice) datosBase.coleccion_numero = o.serie_indice; aplic.push('colección'); }
         if (o.idioma && !datosBase.idioma) { datosBase.idioma = o.idioma; aplic.push('idioma'); }
+        if (o.año_edicion && !datosBase['año_edicion']) { datosBase['año_edicion'] = o.año_edicion; aplic.push('año'); }
         if (o.sinopsis && !datosBase.sinopsis) { datosBase.sinopsis = o.sinopsis; aplic.push('sinopsis'); }
         if (o.materias && o.materias.length && !(datosBase.palabras_clave || []).length) { datosBase.palabras_clave = o.materias; aplic.push('materias'); }
         if (o.isbn && !datosBase._isbnBloqueado) {

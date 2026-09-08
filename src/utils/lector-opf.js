@@ -41,14 +41,23 @@ export function parsearOPF(xml, dirBase = '') {
 
     const primerTexto = (sel) => { const el = metadata.find(sel).first(); return el.length ? (el.text() || '').trim() || null : null; };
 
-    // Autores: dc:creator sin rol o con opf:role='aut' (los demás roles → contribuciones).
-    const autores = [];
+    // Autores: dc:creator sin rol o con opf:role='aut' (los demás roles → contribuciones). Se prefiere
+    // opf:file-as (formato «Apellido, Nombre», más fiable) salvo un caso: cuando VARIOS dc:creator comparten
+    // el MISMO file-as — un file-as CONJUNTO fijado a mano para varios coautores («Michaels, Marcy & Desalle,
+    // Marie» repetido en cada <dc:creator>, visto en exportaciones de Calibre) — ahí el file-as ya no es el
+    // nombre INDIVIDUAL de cada uno, así que se usa el TEXTO del elemento (el nombre propio de cada persona).
+    const creadoresBrutos = [];
     metadata.find('dc\\:creator').each((i, el) => {
         const $el = $(el);
-        const nombre = ($el.attr('opf:file-as') || $el.text() || '').trim();
         const role = ($el.attr('opf:role') || '').toLowerCase();
-        if (nombre && (!role || role === 'aut')) autores.push(nombre);
+        if (role && role !== 'aut') return;
+        const fileAs = ($el.attr('opf:file-as') || '').trim();
+        const texto = ($el.text() || '').trim();
+        if (fileAs || texto) creadoresBrutos.push({ fileAs, texto });
     });
+    const fileAsCompartido = creadoresBrutos.length > 1
+        && creadoresBrutos.every((c) => c.fileAs && c.fileAs === creadoresBrutos[0].fileAs);
+    const autores = creadoresBrutos.map((c) => (fileAsCompartido ? c.texto : (c.fileAs || c.texto))).filter(Boolean);
 
     const materias = [];
     metadata.find('dc\\:subject').each((i, el) => { const s = ($(el).text() || '').trim(); if (s) materias.push(s); });
@@ -68,12 +77,19 @@ export function parsearOPF(xml, dirBase = '') {
         catch { coverPath = path.resolve(dirBase, coverHref.split('#')[0].split('?')[0]); }
     }
 
+    // Año de EDICIÓN: dc:date es la fecha de PUBLICACIÓN en el OPF de Calibre (no confundir con
+    // <meta name="calibre:timestamp">, que es cuándo se AÑADIÓ a la biblioteca de Calibre, irrelevante aquí).
+    // Se toman los 4 primeros dígitos (AAAA-MM-DD… → AAAA); null si no hay fecha o no empieza por un año.
+    const fechaTexto = primerTexto('dc\\:date');
+    const añoMatch = fechaTexto && fechaTexto.match(/^(\d{4})/);
+
     return {
         titulo: primerTexto('dc\\:title'),
         autores,
         contribuciones: extraerContribucionesEpub($, metadata),   // [{nombre, rol}]
         editorial: primerTexto('dc\\:publisher'),
         isbn: extraerIsbnDublinCore($, metadata),
+        año_edicion: añoMatch ? añoMatch[1] : null,
         // Igual que lector-epub: 2 primeras letras del código de lengua (eng→en, fra→fr…).
         idioma: (primerTexto('dc\\:language') || '').substring(0, 2).toLowerCase() || null,
         serie_nombre: serie.nombre,
