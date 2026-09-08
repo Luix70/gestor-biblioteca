@@ -82,6 +82,7 @@ export function parsearOPF(xml, dirBase = '') {
     // Se toman los 4 primeros dígitos (AAAA-MM-DD… → AAAA); null si no hay fecha o no empieza por un año.
     const fechaTexto = primerTexto('dc\\:date');
     const añoMatch = fechaTexto && fechaTexto.match(/^(\d{4})/);
+    const añoEdicion = añoMatch ? parseInt(añoMatch[1], 10) : null;   // bsonType 'number' en el esquema
 
     return {
         titulo: primerTexto('dc\\:title'),
@@ -89,7 +90,7 @@ export function parsearOPF(xml, dirBase = '') {
         contribuciones: extraerContribucionesEpub($, metadata),   // [{nombre, rol}]
         editorial: primerTexto('dc\\:publisher'),
         isbn: extraerIsbnDublinCore($, metadata),
-        año_edicion: añoMatch ? añoMatch[1] : null,
+        año_edicion: añoEdicion,
         // Igual que lector-epub: 2 primeras letras del código de lengua (eng→en, fra→fr…).
         idioma: (primerTexto('dc\\:language') || '').substring(0, 2).toLowerCase() || null,
         serie_nombre: serie.nombre,
