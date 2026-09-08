@@ -1346,7 +1346,7 @@ async function purga(ejecutar) {
 $('#purgaSim').onclick = () => purga(false);
 $('#purgaExec').onclick = () => purga(true);
 // ── ESTANTERÍA (shelf) de obras y colecciones: rejilla con portada, filtro, selección y acciones en lote ──
-const shelf = { obra: { items: [], sel: new Set(), modo: false }, coleccion: { items: [], sel: new Set(), modo: false } };
+const shelf = { obra: { items: [], sel: new Set(), modo: false }, coleccion: { items: [], sel: new Set(), modo: false, orden: '' } };
 async function loadObras() {
   try {
     shelf.obra.items = await api('/obras');
@@ -1359,7 +1359,21 @@ async function loadObras() {
 async function loadColecciones() {
   try {
     const tipo = $('#colsTipo') ? $('#colsTipo').value : '';
-    shelf.coleccion.items = await api('/colecciones' + (tipo ? '?tipo=' + encodeURIComponent(tipo) : ''));
+    // El orden elegido se RECUERDA entre visitas (localStorage) — se restaura la primera vez que se pinta la
+    // página (el <select> nace en "Por defecto"; aquí se corrige a lo guardado antes de pedir los datos).
+    const selOrden = $('#colsOrden');
+    if (selOrden && !selOrden.dataset.restaurado) {
+      selOrden.value = localStorage.getItem('cols_orden') || '';
+      selOrden.dataset.restaurado = '1';
+    }
+    const orden = selOrden ? selOrden.value : '';
+    shelf.coleccion.orden = orden;
+    localStorage.setItem('cols_orden', orden);
+    const qs = new URLSearchParams();
+    if (tipo) qs.set('tipo', tipo);
+    if (orden) qs.set('orden', orden);
+    const query = qs.toString();
+    shelf.coleccion.items = await api('/colecciones' + (query ? '?' + query : ''));
     shelf.coleccion.sel.clear();
     pintarShelf('coleccion');
   } catch (e) {
@@ -1382,9 +1396,17 @@ function shelfCard(kind, x) {
     nombre = esObra ? x.titulo : x.nombre,
     ph = esObra ? '📚' : x.tipo === 'revista' ? '📰' : '📚';
   const cov = stackCover(x.portadas && x.portadas.length ? x.portadas : x.portada ? [x.portada] : [], ph);
+  // Cuando se ordena por fecha, se muestra la fecha del criterio activo: si no, el orden reordena las tarjetas
+  // sin que se vea POR QUÉ. Solo en colecciones (obras no tiene este selector).
+  let fechaInfo = '';
+  if (!esObra) {
+    const ord = shelf.coleccion.orden || '';
+    if (ord.startsWith('creacion_')) fechaInfo = x.fecha_creacion ? ` · creada ${_fechaCorta(x.fecha_creacion)}` : '';
+    else if (ord.startsWith('insercion_')) fechaInfo = x.fecha_ultima_insercion ? ` · última entrada ${_fechaCorta(x.fecha_ultima_insercion)}` : ' · sin miembros aún';
+  }
   const estado = esObra
     ? `${x.volumenes_presentes || 0}/${x.total_volumenes || '?'} tomos ${x.completa ? '<span class="tag ok">completa</span>' : '<span class="tag warn">incompleta</span>'}${x.revision_requerida ? ' <span class="tag bad">revisar</span>' : ''}`
-    : `${x.tipo === 'revista' ? '📰 revista' : '📚 libro'} · ${x.miembros || 0}${x.revision_requerida ? ' <span class="tag bad">revisar</span>' : ''}`;
+    : `${x.tipo === 'revista' ? '📰 revista' : '📚 libro'} · ${x.miembros || 0}${fechaInfo}${x.revision_requerida ? ' <span class="tag bad">revisar</span>' : ''}`;
   const sel = shelf[kind].sel.has(x._id);
   const req =
     esObra && x.isbn_obra

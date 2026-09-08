@@ -1425,22 +1425,50 @@ export function rutasPanel() {
             // aparecían ni en la búsqueda (bug: «Series on knots…» invisible con 1510 colecciones). El tope
             // alto es sólo una salvaguarda; si algún día se superara, pasar a búsqueda server-side (?q=).
             const cols = await db.collection('colecciones')
-                .find(filtro, { projection: { nombre: 1, tipo: 1, issn: 1, numeros_presentes: 1, revision_requerida: 1, nsfw: 1, valoracion: 1 } })
+                .find(filtro, { projection: { nombre: 1, tipo: 1, issn: 1, numeros_presentes: 1, revision_requerida: 1, nsfw: 1, valoracion: 1, fecha_creacion: 1 } })
                 .sort({ revision_requerida: -1, nombre: 1 }).limit(20000).toArray();
-            // Nº de miembros + hasta 3 portadas (para la cubierta apilada) de un tirón, por agregación.
-            // OJO: `$push` de TODAS las portadas revienta el límite de 100 MB del $group en colecciones enormes
-            // (p. ej. Oxford Bookworms, 868 miembros) → error en el Atlas gratuito (sin allowDiskUse). Se usa
-            // `$firstN` (n=6, luego se filtran nulos y se cortan a 3): memoria ACOTADA, sin necesitar disco.
+            // Nº de miembros + hasta 3 portadas (para la cubierta apilada) + fecha del miembro MÁS RECIENTE («última
+            // inserción»), de un tirón, por agregación. OJO: `$push` de TODAS las portadas revienta el límite de
+            // 100 MB del $group en colecciones enormes (p. ej. Oxford Bookworms, 868 miembros) → error en el Atlas
+            // gratuito (sin allowDiskUse). Se usa `$firstN` (n=6, luego se filtran nulos y se cortan a 3): memoria
+            // ACOTADA, sin necesitar disco.
             const agg = cols.length ? await db.collection('biblioteca').aggregate([
                 { $match: { coleccion: { $in: cols.map(c => c._id) } } },
-                { $group: { _id: '$coleccion', n: { $sum: 1 }, portadas: { $firstN: { input: '$portada', n: 6 } } } },
+                { $group: { _id: '$coleccion', n: { $sum: 1 }, portadas: { $firstN: { input: '$portada', n: 6 } }, ultimaInsercion: { $max: '$fecha_ingreso' } } },
             ]).toArray() : [];
             const mapa = new Map(agg.map(x => [String(x._id), x]));
-            res.json(cols.map(c => {
+            const items = cols.map(c => {
                 const a = mapa.get(String(c._id));
                 const ps = (a?.portadas || []).filter(Boolean).slice(0, 3);
-                return { ...c, _id: String(c._id), tipo: c.tipo || 'libro', miembros: a?.n || 0, portada: ps[0] || null, portadas: ps };
-            }));
+                // `fecha_creacion` no existía en las colecciones más antiguas: el _id de Mongo lleva su propio
+                // timestamp de creación embebido (primeros 4 bytes) → fallback gratuito, siempre disponible.
+                const fechaCreacion = c.fecha_creacion || c._id.getTimestamp();
+                return {
+                    ...c, _id: String(c._id), tipo: c.tipo || 'libro', miembros: a?.n || 0,
+                    portada: ps[0] || null, portadas: ps,
+                    fecha_creacion: fechaCreacion, fecha_ultima_insercion: a?.ultimaInsercion || null,
+                };
+            });
+            // Orden pedido por el cliente (además del filtro por tipo). Por defecto (sin `orden`, u orden
+            // desconocido) se conserva el de Mongo (revisar primero, luego alfabético) — no se reordena de más.
+            // Las colecciones sin fecha de última inserción (recién creadas, aún sin miembro) van SIEMPRE al
+            // final, sea cual sea la dirección: no hay «último» que comparar.
+            const dirNum = (d) => (d ? new Date(d).getTime() : null);
+            const porFecha = (campo, asc) => (x, y) => {
+                const a = dirNum(x[campo]), b = dirNum(y[campo]);
+                if (a == null && b == null) return 0;
+                if (a == null) return 1;
+                if (b == null) return -1;
+                return asc ? a - b : b - a;
+            };
+            const COMPARADORES = {
+                creacion_asc: porFecha('fecha_creacion', true), creacion_desc: porFecha('fecha_creacion', false),
+                insercion_asc: porFecha('fecha_ultima_insercion', true), insercion_desc: porFecha('fecha_ultima_insercion', false),
+                miembros_asc: (x, y) => x.miembros - y.miembros, miembros_desc: (x, y) => y.miembros - x.miembros,
+            };
+            const cmp = COMPARADORES[String(req.query.orden || '')];
+            if (cmp) items.sort(cmp);
+            res.json(items);
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

@@ -370,6 +370,18 @@
                     <option value="libro">📚 Series de libros</option>
                   </select>
                 </div>
+                <div>
+                  <label>Ordenar por</label>
+                  <select id="colsOrden" onchange="loadColecciones()">
+                    <option value="">Por defecto</option>
+                    <option value="creacion_desc">Fecha de creación (recientes primero)</option>
+                    <option value="creacion_asc">Fecha de creación (antiguas primero)</option>
+                    <option value="insercion_desc">Última inserción (recientes primero)</option>
+                    <option value="insercion_asc">Última inserción (antiguas primero)</option>
+                    <option value="miembros_desc">Nº de documentos (más primero)</option>
+                    <option value="miembros_asc">Nº de documentos (menos primero)</option>
+                  </select>
+                </div>
               </div>
               <div id="colsBody"></div>
             </div>

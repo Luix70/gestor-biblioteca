@@ -1657,6 +1657,21 @@ de ficheros clasificado por CDU.
     catalogado). GET /api/documentos/:id/archivos?sub= lista la carpeta (raíz = sube hasta el
     marcador .ruta_fija/.transmedia); confinado al árbol CDU. Descargas por /recursos.
 
+  ── COLECCIONES · LISTADO (página) ────────────────────────────────────────────
+    Rejilla de cabeceras (`#p-colecciones`): filtro «Tipo» (Todas/Revistas/Series
+    de libros) + filtro de texto en cliente por nombre. Selector «Ordenar por»
+    (`#colsOrden`, GET /colecciones?orden=): fecha de creación / fecha de la
+    ÚLTIMA inserción (el `fecha_ingreso` MÁS RECIENTE entre sus miembros, por
+    agregación) / nº de documentos — cada uno asc y desc; «Por defecto» conserva
+    el orden de siempre (revisar primero, luego alfabético). `fecha_creacion` cae
+    al timestamp embebido en el propio `_id` de Mongo si la colección es anterior
+    a ese campo (fallback gratuito, no requiere backfill). Las colecciones SIN
+    ningún miembro van siempre al FINAL al ordenar por última inserción (no hay
+    fecha que comparar), sea la dirección que sea. La elección de orden se
+    RECUERDA entre visitas (localStorage `cols_orden`) y, mientras el orden activo
+    es por fecha, cada tarjeta muestra esa fecha (creada/última entrada) para que
+    el criterio no quede opaco.
+
   ── COLECCIONES · NUMERACIÓN (series de libros) ──────────────────────────────
     El nº de un libro dentro de una colección puede ser EDITORIAL (leído del ISBN/datos
     o del nombre — PREVALECE) o AUTOMÁTICO (asignado por el sistema — cede). Se distingue
