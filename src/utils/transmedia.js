@@ -30,6 +30,7 @@ import { leerGuia } from './guia-ingesta.js'; // pistas del reproceso (principal
 import { isbnDesdeArchivo } from './isbn-archivo.js'; // ISBN del propio fichero del miembro (identificar antes de clasificar)
 import { buscarEnFicheroLocal } from './buscador-local.js'; // pivote OFFLINE por ISBN (sin IA)
 import { variantesISBN } from './identificadores.js';
+import { normalizarPermisos, normalizarFichero } from './permisos.js'; // el árbol debe quedar legible para el backup
 
 // Subcarpeta OCULTA con las portadas DERIVADAS (1ª página rasterizada). El prefijo «.» hace que `ignorar`
 // (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
@@ -357,7 +358,10 @@ async function copiarArbolResiliente(origen, destino) {
         const src = path.join(origen, e.name), dst = path.join(destino, e.name);
         try {
             if (e.isDirectory()) await copiarArbolResiliente(src, dst);
-            else await fs.copyFile(src, dst);
+            // `copyFile` PRESERVA el modo del origen: una colección descargada mete en el árbol CDU sus
+            // ficheros de solo lectura y sus carpetas sin bit de travesía, y una copia de seguridad hecha
+            // con otro usuario las salta EN SILENCIO. Se normalizan al vuelo (ver `utils/permisos.js`).
+            else { await fs.copyFile(src, dst); await normalizarFichero(dst); }
         } catch (err) { if (err.code !== 'ENOENT') throw err; /* entrada desaparecida/normalización → se salta */ }
     }
 }
@@ -812,6 +816,12 @@ export async function ingestarLibroConMaterial(dirOrigen, { reciclarOrigen = tru
         } catch (err) { if (err.code !== 'ENOENT') console.warn(`  ⚠️  material «${e.name}» no copiado: ${err.message}`); }
     }
     const material = topMaterial.length;
+
+    // Permisos del árbol RECIÉN materializado. Se hace aquí, una sola vez y sobre el destino completo, porque
+    // a esta carpeta se llega por varios caminos (copia recursiva, `fs.rename` de un drop entero…) y el
+    // `rename` conserva EL MODO ORIGINAL del directorio de origen — de ahí las carpetas de audiolibros que
+    // ni `du` ni un `rsync` de backup podían leer. Ver `utils/permisos.js`.
+    await normalizarPermisos(destino);
 
     // 4) Proteger el árbol (marcador .ruta_fija + ruta_fija:true → Integridad NO poda el material) y REGISTRAR
     //    el material como `adjuntos[]` ESTRUCTURADO — una entrada por elemento de primer nivel, con el flag

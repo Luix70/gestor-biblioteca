@@ -68,6 +68,12 @@ export const CATALOGO_SCRIPTS = [
     S({ id: 'regenerar-registros', cat: 'Integridad y disco', escribe: true, aplica: '--ejecutar',
         resumen: 'Regenera los sidecars registro.json / .marc.xml desde Mongo',
         proposito: 'Reescribe los dos sidecars de cada carpeta con los datos actuales de la base (resolviendo autores/editorial a nombres). Útil tras correcciones masivas. No toca nada más.', params: [] }),
+    S({ id: 'normalizar-permisos', cat: 'Integridad y disco', escribe: true, aplica: '--ejecutar',
+        resumen: 'Deja todo el árbol CDU legible (carpetas 755, ficheros 644)',
+        proposito: 'El material que entra de fuera trae sus propios permisos (copyFile/cp preservan el modo, rename conserva el del directorio): quedan carpetas sin bit de travesía que la app SÍ lee (corre con privilegios) pero que un rsync de copia de seguridad con otro usuario SALTA EN SILENCIO — huecos invisibles en el backup. Esto los normaliza. La ingesta ya lo hace sola con lo nuevo; esto arregla lo antiguo. Ejecutar en el NAS.',
+        params: [
+            { nombre: 'ruta', flag: '--ruta', tipo: 'texto', etiqueta: 'Limitar a una rama del árbol (para probar antes)', ejemplo: '8/82/82/audiolibros' },
+        ] }),
     S({ id: 'separar-carpetas-compartidas', cat: 'Integridad y disco', escribe: true, aplica: '--ejecutar',
         resumen: 'Da carpeta propia a documentos que comparten una por colisión',
         proposito: 'Cuando varios documentos comparten una carpeta y se pisan los sidecars/portadas (el catálogo los tiene bien, solo mal alojados), mueve cada uno a su carpeta adyacente y corrige la BD. No reingesta ni usa IA.', params: [] }),

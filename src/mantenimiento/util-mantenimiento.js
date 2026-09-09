@@ -7,6 +7,7 @@ import { rutaCatalogo } from '../utils/rutas.js';
 import { arbolCDU } from '../utils/cdu-arbol.js';
 import { aMARCXML } from '../marc21.js';
 import { timeoutPoppler } from '../utils/timeout-poppler.js';
+import { normalizarPermisos } from '../utils/permisos.js'; // el árbol debe quedar legible para el backup
 
 const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -184,6 +185,9 @@ export async function moverCarpetaConVerificacion(origen, destino, archivosEnBD 
     // ── Intento 1: rename atómico (no hay estado intermedio que verificar) ─────────────────
     try {
         await fs.rename(origen, destino);
+        // Un `rename` conserva EL MODO del directorio original. Si venía de fuera con permisos restrictivos,
+        // los arrastra por todo el árbol CDU y una copia de seguridad con otro usuario lo salta en silencio.
+        await normalizarPermisos(destino);
         return; // atómico: si no lanzó, el movimiento está completo y correcto
     } catch (e) {
         if (e.code !== 'EXDEV') throw e; // solo EXDEV nos empuja al camino largo
@@ -224,7 +228,10 @@ export async function moverCarpetaConVerificacion(origen, destino, archivosEnBD 
         );
     }
 
-    // d) Todo correcto: borrar origen
+    // d) Permisos: `fs.cp` preserva el modo del origen (ver el `rename` de arriba, mismo motivo).
+    await normalizarPermisos(destino);
+
+    // e) Todo correcto: borrar origen
     await fs.rm(origen, { recursive: true, force: true });
 }
 

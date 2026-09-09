@@ -7,6 +7,7 @@ import { procesarCatalogo, actualizarDocumento, buscarDocPorHash } from './motor
 import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
+import { normalizarPermisos } from './utils/permisos.js';
 import { enviarACuarentena } from './gestor-fallos.js';
 import { esFalloDeConexionMongo } from './database.js';
 import { carpetaDeDoc, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
@@ -109,6 +110,13 @@ async function copiarArchivos(carpetaFs, rutaWeb, rutasOriginales, activos) {
             console.warn(`   ⚠️  Imagen (${a.origen}) no materializada: ${e.message}`);
         }
     }
+
+    // 3. Normalizar permisos de TODA la carpeta recién poblada. `fs.copyFile` preserva el modo del origen, y
+    //    el material que entra (descargas, discos ajenos) trae a menudo ficheros de solo lectura y carpetas
+    //    sin bit de travesía. Si se quedan así, una copia de seguridad ejecutada con otro usuario las SALTA
+    //    en silencio. Ver `utils/permisos.js`. Best-effort: no rompe la catalogación si falla.
+    await normalizarPermisos(carpetaFs);
+
     return { imagenes, portada, originalesOk };
 }
 
