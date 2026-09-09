@@ -3264,3 +3264,43 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       variante en TODAS las listas de extension (ingesta, visor paginado, mantenimiento, frontend);
       su `formato` catalogado sigue siendo 'djvu'. (Caso de «lista incompleta»: se verifico que
       ninguna lista de extension con .djvu quedara sin su .djv.)
+
+── PERMISOS DEL ARBOL Y COPIA DE SEGURIDAD AL USB ────────────────────────────────────
+    * PERMISOS (utils/permisos.js) — fs.copyFile/fs.cp PRESERVAN el modo del origen y fs.rename
+      CONSERVA el del directorio original, asi que el material que entra de fuera (descargas,
+      colecciones ajenas) metia en CDU ficheros de solo lectura y CARPETAS SIN BIT DE TRAVESIA.
+      La app no lo nota (el contenedor corre con privilegios), pero un `du` o un `rsync` de copia
+      con otro usuario da «Permission denied» y LAS SALTA SIN ERROR: la copia queda con huecos
+      SILENCIOSOS — el peor fallo posible en un backup. Se descubrio en carpetas de audiolibros.
+      Politica: carpetas 0o755, ficheros 0o644 (todos LEEN, solo el dueno escribe). NO se toca la
+      propiedad: DSM monta ACLs sobre POSIX y un chown las descuadraria. normalizarPermisos() es
+      best-effort (nunca lanza; una catalogacion correcta no debe caerse por un chmod) y solo llama
+      a chmod si el modo NO es ya el correcto (sobre 485.000 entradas, importa).
+      Cableado en los TRES puntos donde se escribe al arbol: servicio-ingesta·copiarArchivos,
+      transmedia (copiarArbolResiliente + arbol ruta_fija) y util-mantenimiento·moverCarpetaConVerificacion
+      (ramas rename Y cp). Backfill de lo antiguo: scripts/normalizar-permisos.js (dry-run por
+      defecto, --ejecutar, --ruta <rama> para probar antes, progreso e informe). EJECUTAR EN EL NAS.
+    * COPIA AL USB (scripts/sincronizar-copia.sh) — NO es un demonio ni una campana del Conformador:
+      es un script BARATO en el repo que lanza el Programador de tareas de DSM (cada hora, p.ej.)
+      FUERA del contenedor y como root. Se despierta, mira si toca y casi siempre sale en milisegundos.
+      POR QUE FUERA: el contenedor NO ve el disco USB (/volumeUSB1 no esta en los bind mounts), y
+      montar un dispositivo EXTRAIBLE dentro seria peligroso — si el disco no esta, el punto de montaje
+      puede quedar como carpeta VACIA y `rsync --delete` escribiria el TB entero en volume3.
+      Ademas root lee las carpetas con permisos raros, y el rsync queda fuera del mem_limit de 700 MB.
+      DEFENSAS: (1) FICHERO CENTINELA en el propio disco (.copia-biblioteca-ok) — no basta con que
+      exista la carpeta destino, ver el peligro de arriba; sin centinela el script sale sin tocar nada.
+      (2) CERROJO por mkdir atomico: la primera copia dura horas y la tarea corre cada hora.
+      (3) --partial: si se corta, retoma el fichero a medias (11 h por USB 2.0).
+      (4) Por defecto NO borra: lo retirado se aparta a _retirados/<fecha>/ (max. «nunca perder
+      informacion»); BK_BORRAR=1 para espejo exacto. (5) Destino NTFS por defecto (-rlt --no-perms
+      --no-owner --no-group --modify-window=1) para que el disco se lea en cualquier PC — que es el
+      motivo de existir del arbol CDU; BK_MODO_DESTINO=ext4 para copia fiel.
+      Codigo de salida 24 de rsync = «ficheros desaparecidos durante la copia»: ESPERABLE en una
+      biblioteca viva (el Conformador mueve carpetas al reclasificar), no es un fallo.
+    * GET /api/ocupado (PUBLICA, antes de la puerta de autenticacion, como /api/version) — semaforo
+      que consulta el script antes de arrancar. Devuelve {ocupado, ingiriendo, conformando, actividad}
+      desde estadoVigilante()/estadoConformador(). OJO al matiz: esperar a que este ocioso NO es
+      cuestion de CORRECCION —la ingesta escribe a `.tmp-…` y solo hace rename tras verificar, asi que
+      un fichero en su sitio SIEMPRE esta completo y no puede copiarse a medias— sino de no cargar el
+      Atom con la ingesta y la copia a la vez. Si la API no responde, el script SIGUE: una app caida
+      es, por definicion, una app que no esta ingiriendo.

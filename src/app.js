@@ -19,7 +19,7 @@ import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { esFalloDeConexionMongo } from './database.js';
 import { reciclar } from './utils/papelera.js';
-import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador } from './vigilante.js';
+import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador, estadoVigilante } from './vigilante.js';
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel, rutasPublicas, usuarioPuedeNsfw, nsfwPorDefecto } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
@@ -151,6 +151,26 @@ app.get('/api/usuarios', (req, res) => res.json({ usuarios: listarUsuarios() }))
 // Versión desplegada («v1.<serie>»): PÚBLICA (antes de la puerta) para poder mostrarla en el pie del menú
 // incluso antes del login. Sin datos sensibles (solo etiqueta/commit/rama).
 app.get('/api/version', (req, res) => res.json({ ok: true, ...versionApp() }));
+// ¿ESTÁ OCUPADO? Semáforo para la COPIA DE SEGURIDAD (`scripts/sincronizar-copia.sh`, lanzado por el
+// Programador de tareas de DSM FUERA del contenedor). El script pregunta antes de arrancar el rsync y se
+// vuelve a dormir si la casa está trabajando — no por corrección (la ingesta escribe a `.tmp-…` y solo hace
+// `rename` tras verificar, así que un fichero en su sitio SIEMPRE está completo y no puede copiarse a
+// medias), sino para no machacar el Atom con la ingesta y la copia a la vez.
+// PÚBLICA a propósito (antes de la puerta): la lanza un script del sistema sin sesión, y no expone ningún
+// dato — solo dos booleanos sobre si hay trabajo en curso.
+app.get('/api/ocupado', (req, res) => {
+    const vig = estadoVigilante();
+    const conf = estadoConformador();
+    const ingiriendo = !!vig.procesando;
+    const conformando = !conf.dormido && conf.modo !== 'apagado';
+    res.json({
+        ok: true,
+        ocupado: ingiriendo || conformando || !!conf.mantenimientoManual,
+        ingiriendo,
+        conformando,
+        actividad: vig.actividad || null,
+    });
+});
 // EX-LIBRIS (cartela «Este libro pertenece a…» del panel y de las etiquetas NFC): nombre del bibliotecario +
 // contacto para «devolver si se pierde», desde el .env. PÚBLICA a propósito (antes de la puerta): la idea es
 // que quien ENCUENTRE un libro fuera de la biblioteca pueda ver de quién es y cómo devolverlo (datos que el
