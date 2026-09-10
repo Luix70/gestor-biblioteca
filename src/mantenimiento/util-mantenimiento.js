@@ -8,6 +8,7 @@ import { arbolCDU } from '../utils/cdu-arbol.js';
 import { aMARCXML } from '../marc21.js';
 import { timeoutPoppler } from '../utils/timeout-poppler.js';
 import { normalizarPermisos } from '../utils/permisos.js'; // el árbol debe quedar legible para el backup
+import { anotarMovimiento } from '../utils/diario-movimientos.js'; // que la copia replique el mv, no recopie
 
 const execFileP = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -188,6 +189,9 @@ export async function moverCarpetaConVerificacion(origen, destino, archivosEnBD 
         // Un `rename` conserva EL MODO del directorio original. Si venía de fuera con permisos restrictivos,
         // los arrastra por todo el árbol CDU y una copia de seguridad con otro usuario lo salta en silencio.
         await normalizarPermisos(destino);
+        // Se anota para que la COPIA DE SEGURIDAD lo replique con un `mv` (gratis) en vez de retransferir el
+        // documento entero: rsync no distingue un movimiento de un borrado + un alta. Ver diario-movimientos.js.
+        await anotarMovimiento(DIR_CDU, origen, destino);
         return; // atómico: si no lanzó, el movimiento está completo y correcto
     } catch (e) {
         if (e.code !== 'EXDEV') throw e; // solo EXDEV nos empuja al camino largo
@@ -233,6 +237,9 @@ export async function moverCarpetaConVerificacion(origen, destino, archivosEnBD 
 
     // e) Todo correcto: borrar origen
     await fs.rm(origen, { recursive: true, force: true });
+
+    // f) Anotar el movimiento para la copia de seguridad (ver la rama del `rename`, mismo motivo).
+    await anotarMovimiento(DIR_CDU, origen, destino);
 }
 
 const union = (a, b, clave) => {

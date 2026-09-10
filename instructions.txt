@@ -3303,7 +3303,21 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       vieja va a _retirados (rename barato en el propio disco) y la nueva se transfiere ENTERA desde el NAS
       (~21 MB por documento; local-a-local rsync usa --whole-file, no hay delta que valga). Por eso
       _retirados CRECE con cada reclasificacion y se poda por edad: BK_RETENCION_DIAS (180 por defecto,
-      0 = nunca). La poda solo corre si la copia fue bien y no es simulacion. (5) Destino NTFS por defecto (-rlt --no-perms
+      0 = nunca). La poda solo corre si la copia fue bien y no es simulacion.
+    * DIARIO DE MOVIMIENTOS (utils/diario-movimientos.js) — la respuesta al coste anterior. La APP si sabe
+      que un cambio de rama es un MOVIMIENTO (pasa todo por util-mantenimiento·moverCarpetaConVerificacion,
+      punto unico), asi que lo anota en <CDU>/.movimientos-copia.log en TSV: <ISO>	<ruta vieja>	<ruta
+      nueva>, RELATIVAS al arbol (el script las lee desde el anfitrion, donde CDU cuelga de otro sitio).
+      Antes de sincronizar, sincronizar-copia.sh REPLICA cada movimiento con un  DENTRO del disco de
+      copia: un rename en el mismo sistema de ficheros, coste CONSTANTE pese el documento 4 KB o 2 GB. rsync
+      se lo encuentra colocado y no transfiere nada. Sin esto, 10.000 docs reclasificados = ~2,4 TB y casi un
+      dia por USB 2.0; con esto, segundos.
+      ES OPTIMIZACION, NO DEPENDENCIA: si el diario se pierde/trunca o un mv falla, rsync copia como siempre
+      — se pierde velocidad, nunca datos. Por eso anotarMovimiento es best-effort y jamas lanza.
+      La MARCA de posicion (.movimientos-aplicados) vive EN EL DISCO, no en el NAS: asi cada disco sabe por
+      donde iba y se pueden ROTAR varios. Se comparan los sellos ISO como TEXTO (longitud fija, UTC, asi que
+      equivale a comparar cronologicamente). Diario topado a 8 MB (~55.000 movimientos); al desbordar se
+      conserva la mitad reciente. Excluido del rsync (es del origen; el destino lleva su propia marca). (5) Destino NTFS por defecto (-rlt --no-perms
       --no-owner --no-group --modify-window=1) para que el disco se lea en cualquier PC — que es el
       motivo de existir del arbol CDU; BK_MODO_DESTINO=ext4 para copia fiel.
       Codigo de salida 24 de rsync = «ficheros desaparecidos durante la copia»: ESPERABLE en una

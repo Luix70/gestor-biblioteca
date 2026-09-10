@@ -195,6 +195,59 @@ if [ "$FORZAR" -eq 0 ]; then
     esac
 fi
 
+# ─── 4bis. REPLICAR LOS MOVIMIENTOS ANTES DE SINCRONIZAR ─────────────────────────────────────────────────
+# rsync no distingue un MOVIMIENTO de un borrado + un alta: retransferiría el documento entero (y en
+# local-a-local usa --whole-file, así que no hay delta que lo abarate). Con una media que tenderá a ~240 MB
+# por documento, una campaña de reclasificación de 10.000 docs son ~2,4 TB: casi un día por USB 2.0.
+#
+# Pero la aplicación SÍ sabe que fue un movimiento y lo anota en `.movimientos-copia.log` (ver
+# src/utils/diario-movimientos.js). Aquí se replica cada uno con un `mv` DENTRO del disco de copia: un rename
+# en el mismo sistema de ficheros, coste constante pese el documento 4 KB o 2 GB. Luego rsync se lo encuentra
+# todo colocado y no transfiere nada.
+#
+# ES UNA OPTIMIZACIÓN, NO UNA DEPENDENCIA: lo que no se pueda replicar lo arregla rsync copiando, como antes.
+# La marca de posición vive EN EL DISCO, así que cada disco sabe por dónde iba (soporta rotar varios discos).
+DIARIO="$ORIGEN/.movimientos-copia.log"
+MARCA="$DISCO/.movimientos-aplicados"
+
+if [ -f "$DIARIO" ] && [ "$SIMULAR" -eq 0 ]; then
+    ULTIMA="$(cat "$MARCA" 2>/dev/null || echo '')"
+    movidos=0
+    fallidos=0
+    ultima_vista="$ULTIMA"
+
+    # Las marcas de tiempo son ISO-8601 en UTC, de longitud fija, así que comparar como TEXTO equivale a
+    # comparar cronológicamente. Se procesa en orden de fichero, que es el de escritura.
+    while IFS="$(printf '\t')" read -r sello viejo nuevo; do
+        [ -n "$sello" ] && [ -n "$viejo" ] && [ -n "$nuevo" ] || continue
+        # Ya aplicado en una pasada anterior.
+        if [ -n "$ULTIMA" ]; then
+            [ "$sello" \> "$ULTIMA" ] || continue
+        fi
+        ultima_vista="$sello"
+
+        de="$DESTINO/$viejo"
+        a="$DESTINO/$nuevo"
+        # Si el origen no está en la copia (documento aún no respaldado) o el destino ya existe (movimiento ya
+        # replicado, o rsync se adelantó), no se toca nada: rsync resolverá lo que falte.
+        [ -e "$de" ] || continue
+        [ -e "$a" ] && continue
+
+        if mkdir -p "$(dirname "$a")" 2>/dev/null && mv "$de" "$a" 2>/dev/null; then
+            movidos=$((movidos + 1))
+        else
+            fallidos=$((fallidos + 1))
+        fi
+    done < "$DIARIO"
+
+    if [ "$movidos" -gt 0 ] || [ "$fallidos" -gt 0 ]; then
+        log "↔️  Movimientos replicados en la copia: $movidos$([ "$fallidos" -gt 0 ] && echo " ($fallidos no se pudieron; rsync los resolverá copiando)")"
+    fi
+    # Se avanza la marca aunque alguno fallara: rsync deja la copia correcta igualmente, y así no se reintenta
+    # eternamente un movimiento imposible.
+    [ -n "$ultima_vista" ] && printf '%s\n' "$ultima_vista" > "$MARCA" 2>/dev/null
+fi
+
 # ─── 5. Construir las opciones de rsync ──────────────────────────────────────────────────────────────────
 mkdir -p "$DESTINO" 2>/dev/null || true
 
@@ -216,7 +269,9 @@ fi
 #   .tmp-*   temporales de una ingesta EN VUELO (el fichero definitivo llega por `rename`; el temporal sobra)
 #   @eaDir   miniaturas e índices de Synology: se regeneran solas, no son datos
 #   #recycle / .DS_Store / Thumbs.db: basura de papelera y de clientes
-set -- "$@" --exclude '.tmp-*' --exclude '@eaDir' --exclude '#recycle' --exclude '.DS_Store' --exclude 'Thumbs.db'
+#   .movimientos-copia.log: diario de movimientos, propio del origen (el destino lleva su propia marca)
+set -- "$@" --exclude '.tmp-*' --exclude '@eaDir' --exclude '#recycle' --exclude '.DS_Store' --exclude 'Thumbs.db' \
+            --exclude '.movimientos-copia.log'
 
 if [ "$BORRAR" = "1" ]; then
     set -- "$@" --delete
