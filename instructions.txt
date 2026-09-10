@@ -3317,9 +3317,18 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       La MARCA de posicion (.movimientos-aplicados) vive EN EL DISCO, no en el NAS: asi cada disco sabe por
       donde iba y se pueden ROTAR varios. Se comparan los sellos ISO como TEXTO (longitud fija, UTC, asi que
       equivale a comparar cronologicamente). Diario topado a 8 MB (~55.000 movimientos); al desbordar se
-      conserva la mitad reciente. Excluido del rsync (es del origen; el destino lleva su propia marca). (5) Destino NTFS por defecto (-rlt --no-perms
-      --no-owner --no-group --modify-window=1) para que el disco se lea en cualquier PC — que es el
-      motivo de existir del arbol CDU; BK_MODO_DESTINO=ext4 para copia fiel.
+      conserva la mitad reciente. Excluido del rsync (es del origen; el destino lleva su propia marca).
+    * DESTINO NTFS y TOLERANCIA DE FECHAS — por defecto -rlt --no-perms --no-owner --no-group, para que
+      el disco se lea en cualquier PC (motivo de existir del arbol CDU); BK_MODO_DESTINO=ext4 = copia fiel.
+      --modify-window=2 (BK_VENTANA_MTIME), NO 1: rsync decide si un fichero cambio por TAMANO+FECHA, y una
+      copia de partida hecha con otra herramienta puede no tener las fechas identicas al milisegundo.
+      MEDIDO contra la copia real que dejo TeraCopy (111 ficheros al azar de los ingeridos antes de agosto):
+      tamano IDENTICO en todos, desfases de 0,50 a 1,50 s (mediana 1,03). Con ventana 1 coincidia solo el
+      50% → rsync habria retransferido MEDIA COPIA (~600 GB, ~6 h por USB 2.0) para nada, y ademas habria
+      empujado esas versiones viejas a _retirados gastando otro tanto de disco. Con ventana 2, el 100%.
+      Riesgo despreciable: haria falta un fichero modificado dentro de la misma ventana de 2 s Y con el
+      tamano exacto anterior para pasar desapercibido. Excluido tambien sync.ffs_* (base de datos y cerrojo
+      que FreeFileSync deja dentro del arbol; no son datos de la biblioteca).
       Codigo de salida 24 de rsync = «ficheros desaparecidos durante la copia»: ESPERABLE en una
       biblioteca viva (el Conformador mueve carpetas al reclasificar), no es un fallo.
     * GET /api/ocupado (PUBLICA, antes de la puerta de autenticacion, como /api/version) — semaforo
