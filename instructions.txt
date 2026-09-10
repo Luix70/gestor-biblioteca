@@ -3298,7 +3298,12 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       (2) CERROJO por mkdir atomico: la primera copia dura horas y la tarea corre cada hora.
       (3) --partial: si se corta, retoma el fichero a medias (11 h por USB 2.0).
       (4) Por defecto NO borra: lo retirado se aparta a _retirados/<fecha>/ (max. «nunca perder
-      informacion»); BK_BORRAR=1 para espejo exacto. (5) Destino NTFS por defecto (-rlt --no-perms
+      informacion»); BK_BORRAR=1 para espejo exacto. OJO: rsync NO entiende de MOVIMIENTOS — cuando el
+      Conformador reclasifica y la carpeta cambia de rama, ve «desaparecio la vieja» + «hay una nueva»: la
+      vieja va a _retirados (rename barato en el propio disco) y la nueva se transfiere ENTERA desde el NAS
+      (~21 MB por documento; local-a-local rsync usa --whole-file, no hay delta que valga). Por eso
+      _retirados CRECE con cada reclasificacion y se poda por edad: BK_RETENCION_DIAS (180 por defecto,
+      0 = nunca). La poda solo corre si la copia fue bien y no es simulacion. (5) Destino NTFS por defecto (-rlt --no-perms
       --no-owner --no-group --modify-window=1) para que el disco se lea en cualquier PC — que es el
       motivo de existir del arbol CDU; BK_MODO_DESTINO=ext4 para copia fiel.
       Codigo de salida 24 de rsync = «ficheros desaparecidos durante la copia»: ESPERABLE en una

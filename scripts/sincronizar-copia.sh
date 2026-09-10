@@ -69,6 +69,12 @@ MODO_DESTINO="${BK_MODO_DESTINO:-ntfs}"
 # borra: se aparta a una carpeta con fecha. Pon BK_BORRAR=1 para un espejo exacto (más simple, menos red).
 BORRAR="${BK_BORRAR:-0}"
 
+# Caducidad de _retirados, en días. Necesaria porque rsync NO entiende de movimientos: cuando el Conformador
+# reclasifica un documento y su carpeta cambia de rama, rsync ve «desapareció la ruta vieja» + «hay una ruta
+# nueva», y la vieja acaba en _retirados. Sin poda, cada reclasificación deja ahí una copia COMPLETA del
+# documento y la carpeta crece sin fin. 0 = no podar nunca (te encargas tú).
+RETENCION_DIAS="${BK_RETENCION_DIAS:-180}"
+
 CERROJO="${BK_CERROJO:-/tmp/sincronizar-copia.lock}"
 
 # Estas TRES cuelgan del disco que se descubra, así que se rellenan más abajo (no pueden tener una ruta fija
@@ -248,6 +254,19 @@ MINUTOS=$(( (FIN - INICIO) / 60 ))
 
 # rsync 24 = «ficheros desaparecieron durante la copia». En una biblioteca viva (el Conformador mueve
 # carpetas al reclasificar) es ESPERABLE y no es un fallo: lo que faltó se copia en la pasada siguiente.
+# ─── 7. Podar _retirados ─────────────────────────────────────────────────────────────────────────────────
+# Solo si la copia fue bien: si rsync falló, no tocamos la red de seguridad. Se usa `find -mtime` (portable,
+# también en el BusyBox de DSM) en vez de aritmética de fechas, que varía entre implementaciones de `date`.
+if [ "$RETENCION_DIAS" -gt 0 ] && { [ "$CODIGO" -eq 0 ] || [ "$CODIGO" -eq 24 ]; } && [ "$SIMULAR" -eq 0 ]; then
+    if [ -d "$DIR_APARTADOS" ]; then
+        podadas=0
+        for viejo in $(find "$DIR_APARTADOS" -mindepth 1 -maxdepth 1 -type d -mtime +"$RETENCION_DIAS" 2>/dev/null); do
+            rm -rf "$viejo" 2>/dev/null && podadas=$((podadas + 1))
+        done
+        [ "$podadas" -gt 0 ] && log "🧹 Podadas $podadas tandas de _retirados con más de $RETENCION_DIAS días."
+    fi
+fi
+
 if [ "$CODIGO" -eq 0 ]; then
     log "✅ Copia terminada sin incidencias en ${MINUTOS} min."
 elif [ "$CODIGO" -eq 24 ]; then
