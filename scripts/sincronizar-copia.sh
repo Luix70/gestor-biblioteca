@@ -298,6 +298,16 @@ fi
 
 [ "$SIMULAR" -eq 1 ] && set -- "$@" --dry-run
 
+# PROGRESO EN VIVO, pero solo cuando hay una persona mirando. Sin `-v` rsync no dice nada hasta el final, y
+# una copia de horas se vuelve indistinguible de una colgada. `--info=progress2` da un porcentaje global con
+# velocidad y tiempo restante, PERO lo pinta con retornos de carro: en el fichero de registro dejaría miles
+# de líneas basura. Por eso se activa solo si la salida es una terminal (`-t 1`) — al lanzarlo el Programador
+# de DSM no lo es, y el registro queda limpio. Se comprueba antes que el rsync de esta máquina admita
+# `--info` (es de rsync 3.1+): si no, se sigue sin progreso en vez de romper la copia con una opción inválida.
+if [ -t 1 ] && rsync --info=help >/dev/null 2>&1; then
+    set -- "$@" --info=progress2
+fi
+
 # ─── 6. Adelante ─────────────────────────────────────────────────────────────────────────────────────────
 log "── Copia de la biblioteca ─────────────────────────────"
 log "   Origen:  $ORIGEN"
