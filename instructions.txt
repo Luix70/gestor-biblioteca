@@ -3308,7 +3308,7 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       que un cambio de rama es un MOVIMIENTO (pasa todo por util-mantenimiento·moverCarpetaConVerificacion,
       punto unico), asi que lo anota en <CDU>/.movimientos-copia.log en TSV: <ISO>	<ruta vieja>	<ruta
       nueva>, RELATIVAS al arbol (el script las lee desde el anfitrion, donde CDU cuelga de otro sitio).
-      Antes de sincronizar, sincronizar-copia.sh REPLICA cada movimiento con un  DENTRO del disco de
+      Antes de sincronizar, sincronizar-copia.sh REPLICA cada movimiento con un "mv" DENTRO del disco de
       copia: un rename en el mismo sistema de ficheros, coste CONSTANTE pese el documento 4 KB o 2 GB. rsync
       se lo encuentra colocado y no transfiere nada. Sin esto, 10.000 docs reclasificados = ~2,4 TB y casi un
       dia por USB 2.0; con esto, segundos.
