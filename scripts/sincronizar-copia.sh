@@ -337,10 +337,15 @@ fi
 
 if [ "$CODIGO" -eq 0 ]; then
     log "✅ Copia terminada sin incidencias en ${MINUTOS} min."
+    salir 0
 elif [ "$CODIGO" -eq 24 ]; then
     log "✅ Copia terminada en ${MINUTOS} min (algún fichero se movió durante el proceso; se recogerá en la siguiente)."
+    # Se sale con 0 A PROPÓSITO. El 24 de rsync («ficheros desaparecidos durante la copia») es ESPERABLE en
+    # una biblioteca viva —el Conformador mueve carpetas mientras copiamos— y aquí lo damos por bueno. Si lo
+    # propagáramos, el Programador de DSM marcaría la tarea como terminada de forma anómala y mandaría un
+    # correo de aviso cada vez: el aviso dejaría de significar nada, que es como se ignoran las alarmas útiles.
+    salir 0
 else
     log "⚠️  rsync terminó con código $CODIGO tras ${MINUTOS} min. Revisa $LOG."
+    salir "$CODIGO"
 fi
-
-salir "$CODIGO"
