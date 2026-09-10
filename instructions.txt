@@ -3287,8 +3287,14 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       montar un dispositivo EXTRAIBLE dentro seria peligroso — si el disco no esta, el punto de montaje
       puede quedar como carpeta VACIA y `rsync --delete` escribiria el TB entero en volume3.
       Ademas root lee las carpetas con permisos raros, y el rsync queda fuera del mem_limit de 700 MB.
-      DEFENSAS: (1) FICHERO CENTINELA en el propio disco (.copia-biblioteca-ok) — no basta con que
-      exista la carpeta destino, ver el peligro de arriba; sin centinela el script sale sin tocar nada.
+      DEFENSAS: (1) FICHERO CENTINELA en el propio disco (.copia-biblioteca-ok). Hace DOS trabajos:
+      PRESENCIA (no basta con que exista la carpeta destino, ver el peligro de arriba) e IDENTIDAD — DSM NO
+      da un punto de montaje estable a los USB (usbshare, usbshare2, usbshare2-2… y al reconectar asigna
+      OTRO si el anterior sigue ocupado), asi que el script NO cablea ninguna ruta: BUSCA el centinela por
+      /volumeUSB*/*, /volumeSATA*/*, /volumeExt*/* y usa el disco que lo lleve, este donde este montado hoy.
+      Destino, registro y _retirados cuelgan de el, asi que le siguen. Si hay DOS discos marcados, ABORTA en
+      vez de adivinar (escribir en el que no toca seria peor). BK_DISCO fija uno a mano; BK_RUTAS_BUSQUEDA
+      cambia donde mirar.
       (2) CERROJO por mkdir atomico: la primera copia dura horas y la tarea corre cada hora.
       (3) --partial: si se corta, retoma el fichero a medias (11 h por USB 2.0).
       (4) Por defecto NO borra: lo retirado se aparta a _retirados/<fecha>/ (max. «nunca perder
