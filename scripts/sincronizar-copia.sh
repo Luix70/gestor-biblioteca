@@ -65,6 +65,18 @@ SUBCARPETA="${BK_SUBCARPETA:-CDU}"
 #   ext4 → copia fiel (-a).
 MODO_DESTINO="${BK_MODO_DESTINO:-ntfs}"
 
+# Tolerancia al comparar fechas de modificación, en segundos (rsync `--modify-window`).
+#
+# POR QUÉ 2 Y NO 1: rsync decide si un fichero cambió por TAMAÑO + FECHA. Si la copia de partida se hizo con
+# otra herramienta, sus fechas pueden no ser idénticas al milisegundo. Medido sobre la copia real que dejó
+# TeraCopy (111 ficheros de muestra): tamaño idéntico en TODOS, pero desfases de 0,5 a 1,5 s (mediana 1,03).
+# Con ventana 1 coincidía solo el 50% → rsync habría retransferido MEDIA COPIA (~600 GB, ~6 h por USB 2.0)
+# sin ninguna necesidad, y además habría empujado todas esas versiones viejas a _retirados, gastando otro
+# tanto de disco. Con ventana 2 coincide el 100%.
+# El riesgo de agrandarla es despreciable aquí: haría falta un fichero modificado dentro de la misma ventana
+# de 2 s Y con el tamaño exacto anterior para que pasara desapercibido.
+VENTANA_MTIME="${BK_VENTANA_MTIME:-2}"
+
 # Qué hacer con lo que se borró del origen. Por la máxima «nunca perder información», por defecto NO se
 # borra: se aparta a una carpeta con fecha. Pon BK_BORRAR=1 para un espejo exacto (más simple, menos red).
 BORRAR="${BK_BORRAR:-0}"
@@ -260,7 +272,7 @@ set -- "$@" --partial
 if [ "$MODO_DESTINO" = "ntfs" ]; then
     # -r recursivo, -l enlaces, -t marcas de tiempo. NADA de permisos/propietario/grupo: NTFS no los tiene y
     # rsync llenaría el log de errores en cada fichero.
-    set -- "$@" -rlt --modify-window=1 --no-perms --no-owner --no-group
+    set -- "$@" -rlt --modify-window="$VENTANA_MTIME" --no-perms --no-owner --no-group
 else
     set -- "$@" -a
 fi
@@ -270,8 +282,9 @@ fi
 #   @eaDir   miniaturas e índices de Synology: se regeneran solas, no son datos
 #   #recycle / .DS_Store / Thumbs.db: basura de papelera y de clientes
 #   .movimientos-copia.log: diario de movimientos, propio del origen (el destino lleva su propia marca)
+#   sync.ffs_*: base de datos y cerrojo que FreeFileSync deja dentro del árbol; no son datos de la biblioteca
 set -- "$@" --exclude '.tmp-*' --exclude '@eaDir' --exclude '#recycle' --exclude '.DS_Store' --exclude 'Thumbs.db' \
-            --exclude '.movimientos-copia.log'
+            --exclude '.movimientos-copia.log' --exclude 'sync.ffs_*'
 
 if [ "$BORRAR" = "1" ]; then
     set -- "$@" --delete
