@@ -106,8 +106,6 @@ for arg in "$@"; do
     esac
 done
 
-# `log` escribe a la vez por pantalla (DSM recoge la salida y puede enviártela por correo) y al fichero de
-# registro, que vive EN EL DISCO de copia para que viaje con ella.
 # Escribe por pantalla (DSM recoge la salida de la tarea y puede enviártela por correo) y, EN CUANTO se sepa
 # cuál es el disco, también a su registro. Antes de descubrirlo, LOG está vacío y solo sale por pantalla.
 log() {
@@ -197,12 +195,33 @@ LOG="${BK_LOG:-$DISCO/copia-biblioteca.log}"
 # No es cuestión de corrección —la ingesta escribe a `.tmp-…` y solo hace `rename` tras verificar, así que un
 # fichero en su sitio siempre está completo—, sino de no cargar el Atom con las dos tareas a la vez.
 # Si la API no responde, se SIGUE: una app caída es, por definición, una app que no está ingiriendo.
+#
+# PERO NUNCA SE QUEDA SIN HACER. La tarea solo tiene dos franjas al día y en cada una comprueba UNA vez: una
+# ingesta de miles de libros o un backfill de sinopsis de 20 horas la tendrían bloqueada en las dos, y se
+# pasaría un día entero —o más— sin copia. Como esperar no es cuestión de corrección, si la última copia BUENA
+# es más vieja que BK_MAX_ESPERA_HORAS se hace igualmente, con la casa trabajando: irá más lenta, pero se hace.
+# El umbral (20 h) es menor que las 24 h entre dos medianoches a propósito: se mide desde el ARRANQUE de la
+# copia buena, y una copia que tarde media hora dejaría la del día siguiente justo por debajo de 24 h.
+MAX_ESPERA_HORAS="${BK_MAX_ESPERA_HORAS:-20}"
+MARCA_ULTIMA="$DISCO/.ultima-copia-ok"
+AHORA="$(date +%s)"
+
 if [ "$FORZAR" -eq 0 ]; then
     RESP="$(curl -s --max-time 5 "$API" 2>/dev/null || true)"
     case "$RESP" in
         *'"ocupado":true'*)
-            log "⏭️  El gestor está ocupado (ingesta o mantenimiento en curso). Lo intento en la próxima pasada."
-            salir 0
+            ULTIMA="$(cat "$MARCA_ULTIMA" 2>/dev/null || echo 0)"
+            case "$ULTIMA" in ''|*[!0-9]*) ULTIMA=0 ;; esac   # marca ausente o corrupta → «nunca»
+            HORAS=$(( (AHORA - ULTIMA) / 3600 ))
+            if [ "$HORAS" -lt "$MAX_ESPERA_HORAS" ]; then
+                log "⏭️  El gestor está ocupado; última copia buena hace ${HORAS} h (máx. ${MAX_ESPERA_HORAS} h). Lo intento en la próxima pasada."
+                salir 0
+            fi
+            if [ "$ULTIMA" -eq 0 ]; then
+                log "⚠️  El gestor está ocupado, pero no consta ninguna copia buena anterior: se hace igualmente."
+            else
+                log "⚠️  El gestor está ocupado, pero la última copia buena fue hace ${HORAS} h (máx. ${MAX_ESPERA_HORAS} h): se hace igualmente."
+            fi
             ;;
     esac
 fi
@@ -345,8 +364,16 @@ if [ "$RETENCION_DIAS" -gt 0 ] && { [ "$CODIGO" -eq 0 ] || [ "$CODIGO" -eq 24 ];
     fi
 fi
 
+# Marca de «última copia BUENA» (ver el paso 4): se guarda la hora de ARRANQUE, no la de fin, para que una copia
+# larga no deje la siguiente franja por debajo del umbral. Solo si la copia fue de verdad (no una simulación).
+marcar_copia_buena() {
+    [ "$SIMULAR" -eq 1 ] && return 0
+    printf '%s\n' "$AHORA" > "$MARCA_ULTIMA" 2>/dev/null || true
+}
+
 if [ "$CODIGO" -eq 0 ]; then
     log "✅ Copia terminada sin incidencias en ${MINUTOS} min."
+    marcar_copia_buena
     salir 0
 elif [ "$CODIGO" -eq 24 ]; then
     log "✅ Copia terminada en ${MINUTOS} min (algún fichero se movió durante el proceso; se recogerá en la siguiente)."
@@ -354,6 +381,7 @@ elif [ "$CODIGO" -eq 24 ]; then
     # una biblioteca viva —el Conformador mueve carpetas mientras copiamos— y aquí lo damos por bueno. Si lo
     # propagáramos, el Programador de DSM marcaría la tarea como terminada de forma anómala y mandaría un
     # correo de aviso cada vez: el aviso dejaría de significar nada, que es como se ignoran las alarmas útiles.
+    marcar_copia_buena
     salir 0
 else
     log "⚠️  rsync terminó con código $CODIGO tras ${MINUTOS} min. Revisa $LOG."

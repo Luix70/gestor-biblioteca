@@ -20,6 +20,7 @@ import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { esFalloDeConexionMongo } from './database.js';
 import { reciclar } from './utils/papelera.js';
 import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador, estadoVigilante } from './vigilante.js';
+import { trabajosEnCurso } from './utils/actividad.js'; // trabajos del panel, para el semáforo de la copia
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel, rutasPublicas, usuarioPuedeNsfw, nsfwPorDefecto } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
@@ -161,14 +162,21 @@ app.get('/api/version', (req, res) => res.json({ ok: true, ...versionApp() }));
 app.get('/api/ocupado', (req, res) => {
     const vig = estadoVigilante();
     const conf = estadoConformador();
+    // OJO al nombre: `procesando` es el cerrojo COMPARTIDO del vigilante — lo toman la ingesta, las campañas de
+    // fondo (sidecars…) y el mantenimiento, no solo la ingesta. Se conserva el campo `ingiriendo` por
+    // compatibilidad, pero significa «el trabajador del vigilante está ocupado»; `actividad` dice con qué.
     const ingiriendo = !!vig.procesando;
     const conformando = !conf.dormido && conf.modo !== 'apagado';
+    // Trabajos lanzados desde el PANEL (scripts y acciones en 2.º plano): no usan ese cerrojo, y la copia no los
+    // veía. Ver utils/actividad.js.
+    const trabajos = trabajosEnCurso();
     res.json({
         ok: true,
-        ocupado: ingiriendo || conformando || !!conf.mantenimientoManual,
+        ocupado: ingiriendo || conformando || !!conf.mantenimientoManual || trabajos.length > 0,
         ingiriendo,
         conformando,
         actividad: vig.actividad || null,
+        trabajos,
     });
 });
 // EX-LIBRIS (cartela «Este libro pertenece a…» del panel y de las etiquetas NFC): nombre del bibliotecario +

@@ -3455,3 +3455,16 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
     * LIMITES CONOCIDOS: en historia se le cuelan numeros de DEWEY en vez de CDU (941, 97: aciertan la clase 9
       pero no la notacion, que usaria auxiliares de lugar como 94(410)). La salida varia algo entre llamadas.
       Marca como obra independiente cada parte de una obra partida en subcarpetas (bookI…XIII de Euclides).
+    * SEMAFORO DE LA COPIA, COMPLETO + ANTI-INANICION. /api/ocupado miraba solo el cerrojo `procesando` del
+      vigilante (que comparten ingesta, campanas de fondo y mantenimiento: el campo se llama `ingiriendo` por
+      compatibilidad, pero cubre las tres). Los trabajos lanzados desde el PANEL —scripts y acciones en 2.º
+      plano— no tocan ese cerrojo y la copia no los veia. utils/actividad.js·trabajosEnCurso() los reune:
+      cada modulo dice «estoy en marcha» con una convencion DISTINTA (en_curso / enCurso / activo) y se
+      normaliza ahi; nunca lanza. /api/ocupado devuelve ademas `trabajos: [...]`.
+      PERO esperar a MAS cosas empeoraba otra: la tarea tiene dos franjas al dia y comprueba una vez en cada
+      una, asi que un backfill de 20 h o una ingesta de miles de libros la dejaban un dia entero sin hacer.
+      Como esperar no es cuestion de CORRECCION (ingesta y movimientos usan rename, atomico; lo demas se
+      autocorrige en la pasada siguiente), si la ultima copia BUENA es mas vieja que BK_MAX_ESPERA_HORAS (20)
+      se hace igualmente, con la casa trabajando. Marca: <disco>/.ultima-copia-ok con la hora de ARRANQUE de
+      la ultima copia buena (no la de fin: una copia de media hora dejaria la del dia siguiente por debajo de
+      24 h). 20 y no 24 por eso mismo. Sin marca (primera vez) → se hace.
