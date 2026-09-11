@@ -93,10 +93,20 @@
           <section class="page" id="p-activity">
             <div class="sec-h"><h2>Mantenimiento</h2></div>
             <!-- Tarjetas COMPACTADAS en columnas (masonry): las de distinta altura se empaquetan sin huecos
-                 (las pequeñas caen juntas y las grandes también). 2 columnas ≥340px → 1 en móvil. -->
+                 (las pequeñas caen juntas y las grandes también).
+                 ANCHO MÍNIMO DE COLUMNA 480px, NO 340: con 340 una pantalla vertical de 1020px (menú lateral
+                 fijo de 248px → ~724px útiles) se partía en DOS columnas de ~354px, demasiado estrechas para
+                 las filas de controles de estas tarjetas. Y en una maquetación por columnas CSS lo que no cabe
+                 NO se recorta: se DESBORDA sobre la columna vecina — de ahí los botones montados unos encima de
+                 otros. Con 480, las dos columnas solo aparecen cuando cada una tiene sitio de verdad (portátil
+                 de 1366 o más); por debajo, una sola columna. -->
             <style>
-              #p-activity .actmason { columns: 2 340px; column-gap: 16px; }
-              #p-activity .actmason > .card { break-inside: avoid; margin: 0 0 16px; }
+              #p-activity .actmason { columns: 2 480px; column-gap: 16px; }
+              #p-activity .actmason > .card { break-inside: avoid; margin: 0 0 16px; min-width: 0; }
+              /* Red de seguridad para cualquier ancho: que un control nunca sea más ancho que su tarjeta.
+                 Sin esto, un select o un botón con etiqueta larga sigue pudiendo invadir la columna de al lado. */
+              #p-activity .actmason > .card :is(button, select, input, textarea) { max-width: 100%; }
+              #p-activity .actmason > .card button { white-space: normal; }
             </style>
             <div class="actmason">
               <details class="card foldcard" id="fcConformador" data-fold="open" open>
