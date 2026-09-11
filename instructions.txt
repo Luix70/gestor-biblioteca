@@ -3385,3 +3385,38 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       Books la trae directa. ARREGLO DE RAIZ (no hecho): reconstruir el Fichero cruzando el volcado de OBRAS
       de OL por `e.works[0].key`. Leccion: se supuso que el Fichero tenia sinopsis porque la COLUMNA existe
       y el ETL la mapea; habia que haber medido su contenido antes de recomendar esa via.
+
+── CDU: CONTAMINACION DE LA CACHE APRENDIDA POR CLASE LCC ────────────────────────────
+    * EL FALLO (lo introdujo el commit 7b476b1 del 4-sep): resolverCDU consulta la CACHE aprendida ANTES
+      que la tabla determinista, y el LCC se busca por CLASE (claseLcc: «QA184.L37» → «QA»). El 23-jun la IA
+      clasifico UN libro de LCC «QA» como inteligencia artificial y se aprendio «lcc:qa → 004.8:004.832.2».
+      Estuvo DORMIDA hasta el 4-sep, porque antes se buscaba por signatura completa. Desde el cambio a clase,
+      TODO libro de matematicas con LCC QA la heredaba — algebra lineal, analisis numerico, geometria
+      proyectiva… como IA —, y la tabla (QA → 51, correcto) no llegaba a consultarse. AGRAVANTE: el bucle
+      recorre la cache de TODOS los codigos antes que la tabla de NINGUNO, asi que ni un Dewey perfecto
+      (516.35 → geometria algebraica) lo salvaba. Se descubrio al revisar la coleccion de matematicas: 9 de
+      34 mal clasificados.
+    * EL ARREGLO (resolverCDU, paso 1): «la cache puede AFINAR la tabla, nunca CONTRADECIRLA» — con DOS
+      limites, cada uno descubierto midiendo contra la base real, no supuesto:
+      (1) SOLO LCC. El peligro no es la cache: es una equivalencia de CLASE aprendida de UN libro y aplicada a
+          todos. El Dewey se busca por codigo COMPLETO: su equivalencia es especifica y suele ser MAS FINA que
+          la tabla, que es gruesa a proposito. Aplicarle la regla la degradaria («652.80151 → criptografia»
+          cederia ante «652 → 65, gestion», una rareza de la jerarquia Dewey).
+      (2) SOLO con entrada ESPECIFICA de la tabla (lccACDUEspecifica), nunca con el respaldo de la letra. La
+          IA aprendio «qp → 612» (fisiologia: CORRECTO); si el «5» generico de la Q ganara, 52 libros de
+          fisiologia pasarian a «ciencias naturales» a secas.
+      Al ganar la tabla, el paso 2 REESCRIBE la entrada con el valor bueno (fuente Manual): la cache se
+      AUTOCURA en la primera consulta de cada codigo contaminado, sin intervencion. Aviso en el log una vez
+      por codigo.
+    * AUDITORIA: scripts/auditar-equivalencias-cdu.js (informa; --reparar reescribe la cache). Distingue:
+      coherentes / fuera de la tabla / especificas que difieren (NO se tocan: signaturas completas y Dewey,
+      suelen ser mas finas) / de clase frente a respaldo generico (NO se tocan) / de clase que contradicen
+      una entrada especifica (las que SI son contaminacion). Primera pasada: 14.718 entradas; 7 clases
+      contaminadas (qc→519.6 fisica como analisis numerico, 147 docs; bl, hg, jz, hn, u, gn) con 372 docs,
+      mas los 242 de qa (su entrada ya se autocuro, pero los documentos conservan la CDU mala).
+    * OJO al interpretar el informe: una primera version contaba 3.343 «afectados» mezclando las ~1.700
+      equivalencias especificas —muchas CORRECTAS: la tabla manda todo PN a 82-literatura, pero PN1993-1999
+      es CINE y ahi la IA acierta con 791.4— con la contaminacion real. Reparar esas habria DEGRADADO datos
+      buenos. --reparar solo actua sobre la contaminacion de clase.
+    * LOS DOCUMENTOS (614: 372 + 242) no se reparan aqui: cambiar su CDU MUEVE su carpeta. Van por «Investigar
+      CDU» con Forzar, o reidentificar-sin-isbn --cdu --forzar, con copia de seguridad hecha antes.

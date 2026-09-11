@@ -156,11 +156,41 @@ function lccACDU(codigo) {
 }
 
 /**
+ * Como lccACDU pero SIN el respaldo a la letra suelta: devuelve la CDU solo si la tabla tiene una entrada
+ * ESPECÍFICA para esa clase. «QA» → «51» (la tabla la tiene); «QP» → null (no la tiene: lccACDU devolvería el
+ * «5» genérico de la letra Q).
+ *
+ * Existe para decidir cuándo la tabla puede DESAUTORIZAR a una equivalencia aprendida. El respaldo de la letra
+ * es un comodín grueso, no una afirmación sobre esa clase concreta, así que no debe pisar nada. Caso real:
+ * la IA aprendió «qp → 612» (fisiología: CORRECTO, QP es fisiología); si el «5» del respaldo de Q ganara,
+ * 52 libros de fisiología pasarían de «612» a «ciencias naturales» a secas.
+ */
+export function lccACDUEspecifica(codigo) {
+    const letras = claseLcc(codigo);
+    if (!letras) return null;
+    return LCC_A_CDU[letras.slice(0, 2)] || null;
+}
+
+/**
  * «Fuente externa» = crosswalk DETERMINISTA (no una API: la CDU deriva del Dewey). Devuelve la CDU o null.
  * Lo que devuelve se APRENDE en la caché de equivalencias (como 'Manual'), así que debe ser CORRECTO — por eso
  * es conservador: mapea solo lo que alinea con certeza y deja lo dudoso a la IA.
  */
-async function buscarEquivalenciaExterna(sistema, codigo) {
+// Avisa (una sola vez por código y proceso) de una equivalencia aprendida que CONTRADICE a la tabla determinista.
+// Sin el «una vez» cada libro de matemáticas repetiría el aviso: con 242 afectados, el registro se inundaría.
+// El aviso es lo que permite descubrir OTRAS entradas contaminadas como la de «qa»; para listarlas todas de
+// golpe está scripts/auditar-equivalencias-cdu.js.
+const _cacheContradictoriaAvisada = new Set();
+function avisarCacheContradictoria(sistema, codigo, hit, tabla) {
+    const clave = `${sistema}:${String(codigo).toLowerCase()}`;
+    if (_cacheContradictoriaAvisada.has(clave)) return;
+    _cacheContradictoriaAvisada.add(clave);
+    console.warn(`⚠️  [CDU] Equivalencia aprendida ${clave} → «${hit}» CONTRADICE la tabla (→ «${tabla}»): se ignora y manda la tabla.`);
+}
+
+// Exportada para la auditoría de la caché (scripts/auditar-equivalencias-cdu.js): comprobar qué equivalencias
+// aprendidas contradicen a esta tabla exige poder consultarla desde fuera.
+export async function buscarEquivalenciaExterna(sistema, codigo) {
     if (sistema === 'dewey') return deweyACDU(codigo);
     if (sistema === 'lcc') return lccACDU(codigo);
     return null;
@@ -302,7 +332,39 @@ export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, 
     const esLit = esFiccionLiteratura({ dewey, lcc, categorias });
     for (const [sistema, codigo] of candidatos) {
         const hit = await buscarEquivalencia(sistema, codigo);
-        if (hit) { await enseñarBandas(hit, sistema, null); return { cdu: hit, fuente: `cache:${sistema}`, aprendida: true }; }
+        if (!hit) continue;
+
+        // LA CACHÉ PUEDE AFINAR LA TABLA DETERMINISTA, NUNCA CONTRADECIRLA.
+        // La caché es APRENDIDA (a menudo de una sola decisión de la IA) y la tabla está CURADA. Si la tabla
+        // conoce este código, la caché solo vale si es una PRECISIÓN dentro de lo que la tabla dice
+        // (tabla «51» → caché «512.64» es un refinamiento correcto) — si es OTRA rama, se ignora.
+        //
+        // Por qué hacía falta (caso real, 242 documentos): el 23-jun la IA clasificó un libro de LCC «QA»
+        // —la clase cubre toda la MATEMÁTICA y también la INFORMÁTICA (QA75-76)— como inteligencia artificial,
+        // y se aprendió «lcc:qa → 004.8:004.832.2». Dormía, porque entonces se buscaba por signatura completa
+        // («qa184.l37» nunca casaba con «qa»). El 4-sep se pasó a buscar el LCC por CLASE, y desde ese día
+        // TODO libro de matemáticas con LCC QA la encontraba: esta caché va ANTES que la tabla (que dice
+        // QA → 51, correcto), así que la tabla no llegaba a consultarse. Álgebra lineal, análisis numérico,
+        // geometría proyectiva… clasificados como IA. Y como el bucle recorre la caché de TODOS los códigos
+        // antes que la tabla de NINGUNO, ni un Dewey perfecto (516.35 → geometría algebraica) lo salvaba.
+        //
+        // SOLO PARA LCC, y a propósito. El peligro no es la caché en sí: es una equivalencia de CLASE aprendida
+        // de UN libro, que luego se aplica a TODOS los de esa clase. Eso solo pasa en el LCC, que se busca por
+        // clase («qa»). El Dewey se busca por el código COMPLETO («652.80151»): su equivalencia aprendida es
+        // específica de ese código y suele ser MÁS FINA que la tabla, que es deliberadamente gruesa. Aplicarle
+        // esta regla la DEGRADARÍA: «652.80151 → criptografía» (bien) cedería ante la tabla «652 → 65, gestión»
+        // (mal: la criptografía cae bajo gestión en Dewey por una rareza de su jerarquía).
+        //
+        // Y solo con una entrada ESPECÍFICA de la tabla para esa clase, nunca con el respaldo genérico de la
+        // letra (ver lccACDUEspecifica): «qp → 612» (fisiología, correcto) no debe ceder ante el «5» de la Q.
+        const tabla = sistema === 'lcc' ? lccACDUEspecifica(codigo) : null;
+        if (tabla && !String(hit).startsWith(String(tabla))) {
+            avisarCacheContradictoria(sistema, codigo, hit, tabla);
+            continue;   // la tabla decidirá en el paso 2
+        }
+
+        await enseñarBandas(hit, sistema, null);
+        return { cdu: hit, fuente: `cache:${sistema}`, aprendida: true };
     }
 
     // 2) Crosswalk determinista Dewey/LC → CDU (gratis, sin IA).
