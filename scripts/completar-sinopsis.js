@@ -86,11 +86,19 @@ async function main() {
     const t0 = Date.now();
     let i = 0;
 
-    // Cursor por lotes: 16.000 documentos no caben cómodos en memoria de golpe en el Atom del NAS.
-    const cursor = col.find(filtro, { projection: { titulo: 1, isbn: 1, sinopsis: 1, idioma: 1 } }).batchSize(200);
+    // PRIMERO LOS _id, LUEGO EL TRABAJO — nunca un cursor abierto mientras se hace trabajo lento.
+    // Atlas MATA un cursor que pasa 10 minutos sin pedir el siguiente lote (CursorNotFound, código 43). Con
+    // lotes de 200 y ~5 s por documento por las APIs, entre lote y lote pasaban ~17 minutos: la primera
+    // ejecución real con --limite 1000 murió en el segundo lote. (Las pruebas con --limite 6 nunca llegaban a
+    // pedir un segundo lote, y por eso no se vio.) Los _id de 16.000 documentos son un par de megas: caben de
+    // sobra. Y cada documento se lee JUSTO antes de tratarlo, así que el dato es fresco (si otra ejecución ya le
+    // puso sinopsis entretanto, completarSinopsisDoc lo ve y lo salta).
+    const PROY = { titulo: 1, isbn: 1, sinopsis: 1, idioma: 1 };
+    const ids = await col.find(filtro, { projection: { _id: 1 } }).limit(LIMITE || 0).toArray();
 
-    for await (const doc of cursor) {
-        if (LIMITE && i >= LIMITE) break;
+    for (const { _id } of ids) {
+        const doc = await col.findOne({ _id }, { projection: PROY });
+        if (!doc) continue;                                  // borrado mientras tanto
         try {
             const { estado, sinopsis } = await completarSinopsisDoc(db, doc, { aplicar: EJECUTAR, forzar: FORZAR, soloFichero: SOLO_FICHERO });
             st[estado]++;
@@ -100,10 +108,12 @@ async function main() {
             }
         } catch { st.sin_fuente++; }
         i++;
-        if (i % 10 === 0) progreso(i, aProcesar, t0, st);   // el cierre lo pinta una vez al salir del bucle
+        // El total es la lista YA cargada, no el recuento previo: entre contar y recorrer entraban documentos
+        // nuevos y la barra marcaba cosas como «16556/16555».
+        if (i % 10 === 0) progreso(i, ids.length, t0, st);   // el cierre lo pinta una vez al salir del bucle
         if (!SOLO_FICHERO && PAUSA > 0) await new Promise((r) => setTimeout(r, PAUSA));
     }
-    progreso(i, aProcesar, t0, st);
+    progreso(i, ids.length, t0, st);
 
     const mins = Math.round((Date.now() - t0) / 60000);
     console.log('\n\n── Resumen ──────────────────────────────────────────');
