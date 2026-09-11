@@ -206,6 +206,10 @@ EVIDENCIA calculada en local para cada carpeta, entre llaves (úsala, es fiable)
 Para las de tipo «materia» da la CDU (Clasificación Decimal Universal) más PRECISA que puedas justificar con el
 nombre (p. ej. Algebra → 512, Topology → 515.1, Number theory → 511, Cryptography → 003.26). Si el nombre no
 basta para precisar, da la división (p. ej. 51) — nunca inventes precisión.
+MUY IMPORTANTE: notación CDU, NO Dewey. Se parecen y se confunden sobre todo en HISTORIA:
+- En la CDU las divisiones 95, 96, 97, 98 y 99 NO EXISTEN (están vacías). «97» o «973» son Dewey.
+- La historia de un lugar es 94 con auxiliar de lugar entre paréntesis: 94(410) Gran Bretaña, 94(73) Estados
+  Unidos, 94(7) América, 94(51) China. NUNCA 941, 973 ni 951, que son Dewey.
 
 Da «confianza» entre 0 y 1: baja cuando dudes entre dos tipos. Sé honesto: una carpeta que es decisión del
 usuario (¿quiere conservar «University Press Collection» como colección?) debe llevar confianza baja.

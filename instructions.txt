@@ -3468,3 +3468,32 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       se hace igualmente, con la casa trabajando. Marca: <disco>/.ultima-copia-ok con la hora de ARRANQUE de
       la ultima copia buena (no la de fin: una copia de media hora dejaria la del dia siguiente por debajo de
       24 h). 20 y no 24 por eso mismo. Sin marca (primera vez) → se hace.
+    * FASES 2 Y 3 (hechas). DOS HUECOS que habia que tapar para que las guias sirvieran de algo:
+      (a) la COLECCION se decidia antes que la guia y la guia no podia evitarla: al clasificar la carpeta, la
+          regla plana ya asignaba unidad.coleccion, y aplicarPerfilAContexto solo pone la de la guia si no hay
+          una. Ninguna guia podia decir «esto es editorial, no lo conviertas en coleccion».
+      (b) perfil.materia_cdu solo llegaba al prompt de VISION (agente.js); la ingesta sin IA la ignoraba.
+      FASE 2 — utils/guias-estructura.js (planGuias/escribirGuias) convierte la interpretacion en _guia.json:
+        serie/coleccion → perfil.coleccion (nombre CANONICO); editorial → editorial_probable + sin_coleccion;
+        materia → materia_cdu + sin_coleccion; cajon/raiz → sin_coleccion; obra → accion:'obra'; mixta → nada.
+        NUNCA pisa una guia del usuario (solo reescribe las de perfil.origen:'agente'); las dudosas (confianza
+        < 0.6) solo con --incluir-dudosas; no guia descendientes de una obra (la obra ya los reune como tomos).
+        SANEA la CDU de materia: las divisiones 95-99 NO EXISTEN en la CDU (el agente dio «97» para American
+        History: Dewey 970) → 94; clase 9 con 3 cifras sin auxiliar («941», Dewey) → 94. Sin esto, la fase 3
+        habria precisado un «94» correcto a un codigo que no es CDU. El prompt ya lo advierte, y esto es la red.
+        VIGILANTE: la rama de documentos respeta sin_coleccion (no crea coleccion; la carpeta se disuelve) y usa
+        perfil.coleccion como nombre. El contexto de cada documento usa perfilHeredado (guia-ingesta.js): sube
+        desde la carpeta del FICHERO hasta la raiz del Inbox, la guia mas cercana gana pista a pista, y
+        sin_coleccion NO corta la herencia (una materia es transparente: el libro sigue heredando su serie).
+        CLI: inspeccionar-estructura.js «ruta» (ensena el plan) / --escribir / --incluir-dudosas.
+      FASE 3 — clasificador-cdu·contrastarCduCarpeta, llamada en servicio-ingesta entre procesarRecurso y
+        procesarCatalogo (CDU ya definitiva, carpeta fisica aun sin calcular: el libro cae YA en su sitio, y en
+        un tomo la obra nace con esa CDU). CONSERVADORA, porque en la casa los identificadores mandan sobre las
+        pistas: RELLENA una CDU vacia/000; PRECISA si la de la carpeta esta dentro de la calculada (misma rama,
+        mas fina: 51 → 512); si CONTRADICE (ramas distintas) deja la calculada y AVISA en alertas_agente. La
+        relacion es de PREFIJO, que es como esta construida la CDU. Revistas excluidas.
+      PROBADO contra el planificador REAL (planificarInbox) sobre un Inbox de pruebas con la estructura de
+        University Press: sin guias, los 8 libros sueltos a UNA coleccion; con guias, Cambridge UP sueltos con
+        su editorial, Derrida en «Cultural Memory in the Present», y los tomos de una Cambridge History heredan
+        la coleccion de la serie A TRAVES de la carpeta de materia, con la CDU saneada (97 → 94). El contraste,
+        con casos reales: Lang 51→512, Strogatz 5→517.93, criptografia 65 → AVISO sin cambio, 512.64 intacto.

@@ -6,19 +6,29 @@
  * editorial, materia (con su CDU), obra o cajón. NO ESCRIBE NADA: enseña la propuesta para juzgarla.
  * Ver src/utils/agente-estructura.js.
  *
- *   node scripts/inspeccionar-estructura.js "<ruta del árbol>"            (señales + propuesta de la IA)
+ *   node scripts/inspeccionar-estructura.js "<ruta del árbol>"            (señales + propuesta + PLAN de guías)
+ *   node scripts/inspeccionar-estructura.js "<ruta>" --escribir           (escribe las guías del plan)
+ *   node scripts/inspeccionar-estructura.js "<ruta>" --escribir --incluir-dudosas
  *   node scripts/inspeccionar-estructura.js "<ruta>" --sin-ia             (solo el esqueleto: coste cero)
  *   node scripts/inspeccionar-estructura.js "<ruta>" --json               (salida en JSON)
+ *
+ * FASE 2: sin --escribir enseña qué `_guia.json` escribiría en cada carpeta y NO escribe nada. Nunca pisa una
+ * guía tuya (hecha en el Inspector); las carpetas dudosas solo se escriben con --incluir-dudosas.
+ * Ver src/utils/guias-estructura.js.
  */
 import 'dotenv/config';
 import '../src/config.js';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { esqueletoArbol, interpretarEstructura } from '../src/utils/agente-estructura.js';
+import { planGuias, escribirGuias } from '../src/utils/guias-estructura.js';
 
 const args = process.argv.slice(2);
 const RUTA = args.find((a) => !a.startsWith('--'));
 const SIN_IA = args.includes('--sin-ia');
 const JSON_OUT = args.includes('--json');
+const ESCRIBIR = args.includes('--escribir');
+const INCLUIR_DUDOSAS = args.includes('--incluir-dudosas');
 
 const ICONO = { coleccion: '📚', serie: '🔗', editorial: '🏢', materia: '🏷️', obra: '📖', cajon: '🗃️', mixta: '🧩', raiz: '🌳' };
 
@@ -82,7 +92,35 @@ async function main() {
         console.log(`\n   ⚠️  ${r.descartadas.length} respuesta(s) de la IA descartadas (ruta que no existe o tipo desconocido):`);
         for (const d of r.descartadas.slice(0, 8)) console.log(`      ${JSON.stringify(d.ruta)}  tipo=${d.tipo}`);
     }
-    console.log('\n   (FASE 1: solo propuesta — no se ha escrito nada)\n');
+
+    // ── FASE 2: plan de guías ──────────────────────────────────────────────────────────────────────────────
+    const plan = await planGuias(path.resolve(RUTA), esq, r, { incluirDudosas: INCLUIR_DUDOSAS });
+    const cuenta = (e) => plan.filter((p) => p.estado === e).length;
+    console.log(`\n   Plan de guías (_guia.json):  ${cuenta('nueva')} nuevas · ${cuenta('actualizar')} a actualizar · `
+        + `${cuenta('respetada')} tuyas respetadas · ${cuenta('dudosa')} dudosas · ${cuenta('omitida')} sin guía`);
+
+    // Qué se escribiría, resumido: una línea por carpeta que recibe guía.
+    const resumen = (g) => {
+        if (!g) return '';
+        const p = g.perfil || {};
+        return [g.accion === 'obra' && `obra «${p.obra}»`, p.coleccion && `colección «${p.coleccion}»`,
+            p.editorial_probable && `editorial «${p.editorial_probable}»`, p.materia_cdu && `CDU ${p.materia_cdu}`,
+            p.sin_coleccion && 'sin colección'].filter(Boolean).join(' · ');
+    };
+    for (const p of plan) {
+        if (!['nueva', 'actualizar', 'dudosa', 'respetada'].includes(p.estado)) continue;
+        const marca = { nueva: '＋', actualizar: '↻', dudosa: '？', respetada: '🔒' }[p.estado];
+        const nombre = p.ruta === '.' ? esq.raiz : p.ruta;
+        console.log(`   ${marca} ${nombre}  → ${resumen(p.guia)}${p.motivo ? `   (${p.motivo})` : ''}`);
+    }
+
+    if (!ESCRIBIR) {
+        console.log(`\n   (Sin --escribir no se ha escrito nada. Para aplicarlo: --escribir${cuenta('dudosa') ? '; las dudosas, con --incluir-dudosas' : ''})\n`);
+        process.exit(0);
+    }
+    const n = await escribirGuias(plan);
+    console.log(`\n   ✔ Escritas ${n} guías. El vigilante las obedecerá en la próxima ingesta de este árbol.\n`);
+    process.exit(0);
     process.exit(0);
 }
 

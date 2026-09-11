@@ -19,8 +19,18 @@
  *   "archivos": { "<nombre>": { "omitir": true } }                             // overrides por fichero
  * }
  *
- * Cada carpeta lleva su PROPIO `_guia.json` (recursivo): las subcarpetas se guían con el suyo. El sidecar es
- * un ACCESORIO (empieza por «_») → el recolector del vigilante ya lo ignora y no se cataloga.
+ * Cada carpeta lleva su PROPIO `_guia.json`, y el PERFIL SE HEREDA: para cada fichero se sube hasta la raíz del
+ * Inbox y cada pista la da la guía más cercana (perfilHeredado). Antes cada documento leía solo la guía de su
+ * carpeta, y con el agente de estructura el significado se reparte por niveles: la SERIE dos carpetas arriba,
+ * la MATERIA justo encima. La ACCIÓN, en cambio, es de cada carpeta y no se hereda. El sidecar es un
+ * ACCESORIO (empieza por «_») → el recolector del vigilante ya lo ignora y no se cataloga.
+ *
+ * Campos que añadió el agente de estructura (utils/guias-estructura.js):
+ *   perfil.sin_coleccion: true → esta carpeta NO forma colección con su nombre (editorial, materia, cajón).
+ *                                Transparente para la herencia: no corta la colección de una serie de arriba.
+ *   perfil.origen: 'agente'    → guía GENERADA. Solo esas se reescriben; las del usuario no se tocan jamás.
+ *   perfil.materia_cdu         → ya existía, pero solo llegaba a los prompts de visión; ahora la usa también la
+ *                                ingesta SIN IA para rellenar o precisar la CDU (clasificador-cdu·contrastarCduCarpeta).
  */
 import fs from 'fs/promises';
 import path from 'path';
@@ -73,11 +83,55 @@ export function normalizarPerfil(p) {
     const out = {};
     const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     if (TIPOS_PROBABLES.includes(p.tipo_probable)) out.tipo_probable = p.tipo_probable;
-    for (const k of ['naturaleza', 'coleccion', 'obra', 'enciclopedia', 'idioma_probable', 'editorial_probable', 'materia_cdu']) {
+    for (const k of ['naturaleza', 'coleccion', 'obra', 'enciclopedia', 'idioma_probable', 'editorial_probable', 'materia_cdu', 'origen']) {
         const v = str(p[k]);
         if (v) out[k] = v;
     }
+    // «sin_coleccion»: esta carpeta NO forma una colección con su nombre. Es lo que distingue una carpeta de
+    // EDITORIAL, de MATERIA o un CAJÓN de una colección de verdad: sin esto, la regla «carpeta con 2+ documentos
+    // = colección» convertía «Cambridge.University.Press» (1.194 libros) o «Algebra» en colecciones, cuando la
+    // editorial ya es un dato del libro y la materia es su CDU. Es TRANSPARENTE para la herencia: un libro en
+    // una carpeta de materia sigue heredando la colección de la serie que la contiene (ver perfilHeredado).
+    if (p.sin_coleccion === true) out.sin_coleccion = true;
     return out;
+}
+
+/**
+ * PERFIL HEREDADO: sube desde la carpeta del fichero hasta la raíz del Inbox leyendo cada `_guia.json`, y se
+ * queda con el valor de la guía MÁS CERCANA para cada pista.
+ *
+ * Por qué hace falta: el agente de estructura guía cada carpeta según lo que ES, y el significado se reparte
+ * por niveles. En «University Press Collection / Cambridge.History.Collection / American History / …» la
+ * SERIE está dos niveles arriba y la MATERIA justo encima: un libro necesita las dos. Con la lectura antigua
+ * —solo la guía de su carpeta— perdía la de la serie.
+ *
+ * `sin_coleccion` NO corta la herencia de la colección (una carpeta de materia es transparente): solo impide
+ * que ESA carpeta cree una colección con su nombre, y eso se decide al clasificarla, no aquí.
+ *
+ * @param dirFichero  carpeta donde está el fichero
+ * @param raizInbox   raíz del Inbox (no se sube por encima)
+ * @returns {Promise<object>} perfil normalizado (vacío si no hay ninguna guía en el camino)
+ */
+export async function perfilHeredado(dirFichero, raizInbox) {
+    const raiz = path.resolve(raizInbox);
+    let dir = path.resolve(dirFichero);
+    const heredado = {};
+    // De dentro hacia fuera: la primera guía que aporta una pista es la más cercana, y esa gana.
+    for (let i = 0; i < 20; i++) {                 // tope por seguridad ante enlaces o rutas raras
+        if (!dir.startsWith(raiz)) break;
+        const g = await leerGuia(dir);
+        if (g?.perfil) {
+            for (const [k, v] of Object.entries(g.perfil)) {
+                if (k === 'sin_coleccion') continue;   // se decide al clasificar la carpeta, no se hereda
+                if (!(k in heredado)) heredado[k] = v;
+            }
+        }
+        if (dir === raiz) break;
+        const padre = path.dirname(dir);
+        if (padre === dir) break;
+        dir = padre;
+    }
+    return heredado;
 }
 
 /** Normaliza una guía cruda (de disco o del explorador). Devuelve un objeto guía siempre válido. */

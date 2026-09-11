@@ -21,7 +21,7 @@ import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/co
 import { esAudio } from './utils/lector-audio.js';
 import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf suelto (Calibre): metadatos + portada referenciada
-import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, NOMBRE_GUIA } from './utils/guia-ingesta.js';
+import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, perfilHeredado, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { detectarLibroDesglosado, detectarDesglosePuro } from './utils/libro-desglosado.js'; // libro + su desglose
 import { unirPdfs } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
@@ -1124,13 +1124,22 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                     // Colección si hay 2+ documentos DISTINTOS, O si el NOMBRE de la carpeta coincide con una
                     // colección YA EXISTENTE. Esto último arregla AÑADIR a una colección re-dropeando un libro
                     // en su carpeta aunque quede SOLO ese (caso atajo/gap-fill: el resto ya estaba catalogado).
-                    let esColeccion = !multiFormato && resto.length >= 2;
-                    if (!esColeccion && !multiFormato && await coleccionExiste(e.name)) esColeccion = true;
-                    if (!esColeccion) dropsADisolver.add(ruta); // single-doc NUEVO o multi-formato → deflate
+                    // LA GUÍA MANDA SOBRE LA REGLA PLANA. «Carpeta con 2+ documentos = colección» acierta con las
+                    // SERIES, pero no con una carpeta de EDITORIAL («Cambridge.University.Press», 1.194 libros: la
+                    // editorial ya es un dato del libro), de MATERIA («Algebra»: eso es su CDU) ni con un CAJÓN
+                    // («useful»). Una guía con `sin_coleccion` (las escribe el agente de estructura) lo impide, y
+                    // la carpeta se disuelve al vaciarse como cualquier drop suelto. Y si la guía da un nombre de
+                    // colección —el CANÓNICO de la serie, «Cultural Memory in the Present» y no el de la carpeta—,
+                    // se usa ese.
+                    const sinColeccion = !!guiaCarpeta?.perfil?.sin_coleccion;
+                    const nombreColeccion = guiaCarpeta?.perfil?.coleccion || e.name;
+                    let esColeccion = !sinColeccion && !multiFormato && resto.length >= 2;
+                    if (!esColeccion && !sinColeccion && !multiFormato && await coleccionExiste(nombreColeccion)) esColeccion = true;
+                    if (!esColeccion) dropsADisolver.add(ruta); // single-doc NUEVO, multi-formato o sin colección → deflate
                     for (const d of resto) unidades.push({
                         rutas: [d], esImagenes: false, carpeta: ruta,
                         conservarCarpeta: esColeccion,
-                        coleccion: esColeccion ? e.name : undefined,
+                        coleccion: esColeccion ? nombreColeccion : undefined,
                     });
                 }
             } else {
@@ -1207,11 +1216,22 @@ async function procesarUnidad(unidad) {
     // Drop por carpeta: ligar el recurso a la colección (nombre de carpeta) y autonumerar la serie.
     if (unidad.coleccion) { contexto.coleccion = unidad.coleccion; contexto.serieAuto = true; }
     if (unidad.obra) contexto.obra = unidad.obra; // tomo de obra multivolumen
-    // PERFIL de ingesta: pistas del usuario en el `_guia.json` de la carpeta (sesga tipo/APIs/prompts, T4).
-    // Solo rellena huecos; la colección/obra REAL del drop manda sobre la pista (ver aplicarPerfilAContexto).
-    if (unidad.carpeta) {
-        const guia = await leerGuia(unidad.carpeta);
-        if (guia && Object.keys(guia.perfil).length) contexto = aplicarPerfilAContexto(contexto, guia.perfil);
+    // PERFIL de ingesta: pistas de los `_guia.json` (sesga tipo/APIs/prompts, T4). Solo rellena huecos; la
+    // colección/obra REAL del drop manda sobre la pista (ver aplicarPerfilAContexto).
+    // HEREDADO, no solo el de la carpeta: se sube desde la carpeta del FICHERO hasta la raíz del Inbox y cada
+    // pista la da la guía más cercana. El agente de estructura reparte el significado por niveles —en
+    // «…/Cambridge.History.Collection/American History/…» la SERIE está dos niveles arriba y la MATERIA justo
+    // encima— y un libro necesita las dos. Leyendo solo su carpeta perdía la serie.
+    // Se parte de la carpeta del fichero (la más específica: recopilarDocumentos baja varios niveles, así que
+    // puede estar por debajo de unidad.carpeta); en las unidades-carpeta (transmedia, software…) su primera
+    // «ruta» ES la carpeta.
+    {
+        const primera = unidad.rutas?.[0];
+        const desde = primera && primera !== unidad.carpeta ? path.dirname(primera) : unidad.carpeta;
+        if (desde) {
+            const perfil = await perfilHeredado(desde, INBOX).catch(() => ({}));
+            if (Object.keys(perfil).length) contexto = aplicarPerfilAContexto(contexto, perfil);
+        }
     }
     // PATRÓN DE NOMBRES: se lee de la carpeta REAL del fichero (donde vive el _guia.json con el patrón), para que
     // aplique aunque la unidad sea un documento suelto de una carpeta guiada. Lo aplica el orquestador FICHERO A

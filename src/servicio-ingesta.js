@@ -15,7 +15,7 @@ import { conectarDB } from './database.js';
 import { indexarDoc } from './utils/indice-busqueda.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { parsearVolumen } from './utils/multivolumen.js';
-import { resolverCDU } from './clasificador-cdu.js';
+import { resolverCDU, contrastarCduCarpeta } from './clasificador-cdu.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -232,6 +232,23 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
 
     // 1. Extracción + enriquecimiento.
     const { documento, activos, forzarNuevo } = await procesarRecurso({ rutas, contexto });
+
+    // 1bis. CONTRASTE CON LA CDU DE LA CARPETA (agente de estructura, fase 3). Aquí y no antes: la CDU ya es la
+    // definitiva del pipeline (identificadores → Fichero → tablas), y aún no se ha guardado ni se ha calculado
+    // la carpeta física, que sale de ella — así el libro cae YA en su sitio. En un tomo de obra, la obra nace
+    // con esta CDU y la heredan todos sus tomos. La carpeta solo RELLENA o PRECISA; si contradice, AVISA
+    // (ver contrastarCduCarpeta: los identificadores del fichero mandan sobre las pistas).
+    // Las revistas no: su CDU va por la cabecera, no por la carpeta donde se soltó el número.
+    const cduCarpeta = contexto.perfil?.materia_cdu;
+    if (cduCarpeta && documento.tipo_recurso !== 'revista') {
+        const nombreCarpeta = rutas[0] ? path.basename(path.dirname(rutas[0])) : null;
+        const r = contrastarCduCarpeta(documento.cdu, cduCarpeta, nombreCarpeta);
+        if (r.accion === 'rellenar' || r.accion === 'precisar') documento.cdu = r.cdu;
+        if (r.alerta) {
+            documento.alertas_agente = [...(documento.alertas_agente || []), r.alerta];
+            console.log(`   🏷️  ${r.alerta}`);
+        }
+    }
 
     // Añadir nombre_archivo y hash antes de catalogar.
     // El nombre_archivo permite detectar re-procesamientos del mismo fichero (vs nuevas versiones);

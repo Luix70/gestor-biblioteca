@@ -145,6 +145,49 @@ const LCC_A_CDU = {
     // Ciencia militar · naval · biblioteconomía
     U: '355', V: '359', Z: '02',
 };
+/**
+ * CONTRASTE CON LA CDU DE LA CARPETA (fase 3 del agente de estructura).
+ *
+ * La carpeta donde alguien dejó un libro («Algebra/», «Cryptography/») dice de qué va, y el agente la traduce a
+ * CDU. Pero la casa tiene una regla: los IDENTIFICADORES del fichero mandan sobre las pistas. Así que la
+ * carpeta no pisa nada — solo hace tres cosas, todas conservadoras:
+ *
+ *   · RELLENAR  — la CDU calculada está vacía o es «000»      → la de la carpeta.
+ *   · PRECISAR  — la de la carpeta está DENTRO de la calculada (misma rama, más fina: «51» → «512») → la de la
+ *                 carpeta. Solo añade precisión en la dirección que ya marcaba el identificador.
+ *   · CONTRADICE — son de RAMAS distintas (ninguna es prefijo de la otra) → se deja la calculada y se AVISA,
+ *                 para revisarlo a mano: puede fallar el identificador… o el libro estar mal archivado.
+ *
+ * Por qué el prefijo: la CDU es jerárquica por prefijo (512 está dentro de 51, que está dentro de 5). Casos
+ * reales de la colección de matemáticas: «Linear Algebra» con 51 en «Algebra/» (512) → se precisa; Strogatz con
+ * 5 en «Dynamical Systems/» (517.93) → se precisa; criptografía con 65 (gestión, rareza del Dewey 652.8) en
+ * «Cryptography/» (003.26) → se AVISA, no se cambia.
+ *
+ * @returns {{ cdu: string|null, accion: 'rellenar'|'precisar'|'contradice'|null, alerta: string|null }}
+ */
+export function contrastarCduCarpeta(cduCalculada, cduCarpeta, nombreCarpeta = null) {
+    const limpia = (c) => String(c || '').trim();
+    const calc = limpia(cduCalculada);
+    const carp = limpia(cduCarpeta);
+    const donde = nombreCarpeta ? ` de la carpeta «${nombreCarpeta}»` : ' de la carpeta';
+
+    // La de la carpeta viene de la IA: si no parece una CDU (empieza por cifra o por paréntesis de auxiliar),
+    // se ignora en vez de colarla.
+    if (!carp || !/^[0-9(]/.test(carp) || carp.length > 40) return { cdu: calc || null, accion: null, alerta: null };
+
+    if (!calc || calc === '000' || calc === '0') {
+        return { cdu: carp, accion: 'rellenar', alerta: `CDU tomada de la materia${donde}: «${carp}» (no había CDU calculada).` };
+    }
+    if (carp === calc || calc.startsWith(carp)) return { cdu: calc, accion: null, alerta: null };   // igual o ya más fina
+    if (carp.startsWith(calc)) {
+        return { cdu: carp, accion: 'precisar', alerta: `CDU precisada con la materia${donde}: «${calc}» → «${carp}».` };
+    }
+    return {
+        cdu: calc, accion: 'contradice',
+        alerta: `⚠️ Revisar CDU: la calculada «${calc}» es de otra rama que la materia${donde} («${carp}»). No se ha cambiado.`,
+    };
+}
+
 // Exportada para la reparación de la contaminación por clase (scripts/reparar-cdu-contaminada.js), que tiene que
 // seleccionar los documentos por su clase EXACTA con la misma regla que usa la búsqueda.
 export function claseLcc(codigo) {
