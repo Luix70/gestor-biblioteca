@@ -68,6 +68,13 @@ export const CATALOGO_SCRIPTS = [
     S({ id: 'regenerar-registros', cat: 'Integridad y disco', escribe: true, aplica: '--ejecutar',
         resumen: 'Regenera los sidecars registro.json / .marc.xml desde Mongo',
         proposito: 'Reescribe los dos sidecars de cada carpeta con los datos actuales de la base (resolviendo autores/editorial a nombres). Útil tras correcciones masivas. No toca nada más.', params: [] }),
+    S({ id: 'inspeccionar-estructura', cat: 'Inbox', escribe: false, aplica: null,
+        resumen: 'Agente de estructura: qué es cada carpeta de un árbol (colección, serie, editorial, materia+CDU, obra, cajón)',
+        proposito: 'Analiza un árbol de carpetas y propone qué información aprovechar de él. Calcula en local las señales gratuitas (tomos, ISBN en los nombres, editorial y serie dominantes según el Fichero) y la IA sintetiza en UNA llamada por cada 50 carpetas. SOLO PROPUESTA: no escribe nada. «sin-ia» enseña solo las señales locales (coste cero).',
+        params: [
+            { nombre: 'ruta', tipo: 'texto', requerido: true, etiqueta: 'Ruta del árbol', ejemplo: '/app/Inbox/University Press Collection' },
+            { nombre: 'sinia', flag: '--sin-ia', tipo: 'switch', etiqueta: 'Solo señales locales (no llama a la IA)' },
+        ] }),
     S({ id: 'reparar-cdu-contaminada', cat: 'Metadatos y clasificación', escribe: true, aplica: '--ejecutar', peligroso: true,
         resumen: 'Repara la CDU de los documentos que heredaron una equivalencia de clase contaminada',
         proposito: 'Complemento de auditar-equivalencias-cdu: aquel cura la CACHÉ; esto corrige los DOCUMENTOS ya guardados con la CDU mala (física como análisis numérico, matemáticas como IA, religión como ocultismo…). Solo repara lo que sabe reparar: deja QA75-76 (informática), «QA» sin número y la clase GN (mitad antropología física, mitad etnología). NO marca cdu_manual: son CDU automáticas. MUEVE carpetas: ejecutar en el NAS y con copia hecha.',

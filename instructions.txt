@@ -3420,3 +3420,38 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       buenos. --reparar solo actua sobre la contaminacion de clase.
     * LOS DOCUMENTOS (614: 372 + 242) no se reparan aqui: cambiar su CDU MUEVE su carpeta. Van por «Investigar
       CDU» con Forzar, o reidentificar-sin-isbn --cdu --forzar, con copia de seguridad hecha antes.
+
+── AGENTE DE ESTRUCTURA (fase 1: solo propuesta) ─────────────────────────────────────
+    * QUE ES: interpreta un ARBOL DE CARPETAS y dice que es cada carpeta — coleccion, serie, editorial,
+      materia (con su CDU), obra o cajon — para aprovechar la clasificacion que alguien hizo a mano. Motor:
+      src/utils/agente-estructura.js; CLI: scripts/inspeccionar-estructura.js "<ruta>" [--sin-ia] [--json].
+      FASE 1 NO ESCRIBE NADA: ensena la propuesta. Fases previstas: 2) generar _guia.json (el formato que el
+      vigilante ya obedece); 3) contraste de CDU en la ingesta (avisar si la CDU calculada es de otra rama que
+      la carpeta).
+    * POR QUE: la regla del vigilante «carpeta con 2+ docs = coleccion» mete a todos los sueltos de un arbol
+      profundo en UNA coleccion con el nombre de la raiz (asi nacio «Misc»), y confunde editoriales y materias
+      con colecciones. Y la materia de la carpeta es justo lo que le falta a la ingesta sin IA para la CDU:
+      en la coleccion de matematicas, 9 de 34 libros acabaron en otra rama (algebra lineal como IA, cripto-
+      grafia como gestion) estando en carpetas que decian exactamente de que iban.
+    * DISENO: el codigo local calcula GRATIS las senales (tomos «Vol. N» con su PROPORCION sobre la carpeta,
+      ISBN en los nombres, editorial y serie dominantes segun el Fichero, recuento de ficheros «otros» para que
+      una carpeta de HTML no parezca vacia) y se las da a la IA como EVIDENCIA; la IA sintetiza. Las reglas no
+      desaparecen: pasan a ser materia prima. Reutiliza conTexto (vision.js: conmutacion entre proveedores).
+    * LECCIONES MEDIDAS al construirlo (cada una fue un fallo real, no una hipotesis):
+      - maxTokens 32000: en Gemini 2.5 el razonamiento CUENTA dentro del limite de salida; con 8000, 47 carpetas
+        devolvian una lista VACIA sin error. Se pide «razon» solo para las dudosas.
+      - La ruta devuelta se NORMALIZA (corchetes, prefijo de la raiz, «/» final): sin ello se descartaban las 47.
+      - Resultado incompleto → AVISO a la vista, nunca silencio.
+      - TANDAS de 50 carpetas: 96 en una llamada acababan en «fetch failed». Pausa de 8 s entre tandas y
+        reintento con espera (20 s, 45 s): con la cuota gratuita agotada, un solo intento dejaba arboles a medias.
+        Una tanda perdida NO tira las demas: se conserva lo obtenido y se avisa.
+      - MAPA COMPLETO del arbol en cada tanda: sin el, las 15 carpetas tematicas hermanas de University Press
+        salieron unas MATERIA y otras COLECCION segun la tanda que les toco. Con el, criterio unico.
+    * RESULTADOS: Collection of Mathematical ebooks (47 carpetas, 1 llamada, 41 s): materias con CDU precisa
+      (Cryptography → 003.26, Algebraic geometry → 512.7, Applied mathematics → 51-7 con la auxiliar),
+      reconoce a Euclides en «elements/booki…bookxiii». University Press Collection (96, 2 llamadas, 105 s):
+      Cambridge/Oxford/Stanford → EDITORIAL (no coleccion); las 3 series de Stanford → SERIE solo por el
+      NOMBRE (sus ficheros no llevan ISBN); las Cambridge History → OBRA.
+    * LIMITES CONOCIDOS: en historia se le cuelan numeros de DEWEY en vez de CDU (941, 97: aciertan la clase 9
+      pero no la notacion, que usaria auxiliares de lugar como 94(410)). La salida varia algo entre llamadas.
+      Marca como obra independiente cada parte de una obra partida en subcarpetas (bookI…XIII de Euclides).
