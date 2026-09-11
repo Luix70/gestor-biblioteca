@@ -145,7 +145,9 @@ const LCC_A_CDU = {
     // Ciencia militar · naval · biblioteconomía
     U: '355', V: '359', Z: '02',
 };
-function claseLcc(codigo) {
+// Exportada para la reparación de la contaminación por clase (scripts/reparar-cdu-contaminada.js), que tiene que
+// seleccionar los documentos por su clase EXACTA con la misma regla que usa la búsqueda.
+export function claseLcc(codigo) {
     const m = String(codigo || '').trim().toUpperCase().match(/^[A-Z]{1,3}/);
     return m ? m[0] : null;
 }
