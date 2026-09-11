@@ -3356,7 +3356,16 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       la sinopsis viviria solo en Mongo y no llegaria a la copia en disco.
     * TRES CONSUMIDORES (mismo patron que «Extraer ISBN»):
       1) TAREA del Conformador `completar-sinopsis` (aplica: isbn && !sinopsis). Progresiva por
-         naturaleza: avanza al ralenti y no dispara limites de uso de las APIs.
+         naturaleza: avanza al ralenti y no dispara limites de uso de las APIs. OJO, TRES MATICES:
+         (a) el Conformador ARRANCA APAGADO (modoConformador='apagado' salvo MANTENIMIENTO_ACTIVO=1 o
+         encendido desde el panel): si esta apagado, esta tarea NO corre nunca. Verificado: tras desplegar,
+         0 docs revisados por ella con el Conformador apagado.
+         (b) anadirla CAMBIO LA FIRMA (FIRMA = todas las tareas:version), asi que los ~59.000 docs pasan a
+         no-conformes y se revisitan; en cada uno solo corre lo nuevo. A MANTENIMIENTO_LOTE=25 docs por
+         pasada, drenar eso lleva DIAS — por eso existe el backfill.
+         (c) el Conformador SELLA la tarea aunque devuelva null: un doc que no encuentre sinopsis (tambien si
+         la API estaba caida en ese momento) NO se reintenta por esta via. Para reintentar: el CLI o la
+         accion del panel, que no usan el sello.
       2) CLI scripts/completar-sinopsis.js — dry-run por defecto; --ejecutar, --solo-fichero, --limite,
          --pausa MS (freno), --forzar, --id. REANUDABLE (sin --forzar solo toca los que siguen sin
          sinopsis). ESTRATEGIA EN DOS TIEMPOS recomendada: primero --solo-fichero (sin red, rapido, cero

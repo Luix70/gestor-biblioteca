@@ -347,7 +347,11 @@ export const TAREAS = [
             // Mismo motor que el backfill y la acción del panel (utils/completar-sinopsis.js): una sola
             // definición de «de dónde sale una sinopsis» para los tres consumidores.
             const { sinopsis } = await buscarSinopsis(doc);
-            if (!sinopsis) return null;         // no está en ninguna fuente, o la API se cayó: otra pasada reintenta
+            // OJO: el Conformador SELLA la tarea aunque devuelva null («sin bucles», conformador.js), así que un
+            // documento que no encuentre sinopsis NO se reintenta por esta vía — tampoco si fue porque la API
+            // estaba caída en ese momento. Para reintentar, el backfill (scripts/completar-sinopsis.js) y la
+            // acción del panel, que no usan el sello y solo miran si el documento sigue sin sinopsis.
+            if (!sinopsis) return null;
             return { set: { sinopsis }, alertas: ['Sinopsis recuperada por ISBN (fuentes gratuitas).'] };
         },
     },
