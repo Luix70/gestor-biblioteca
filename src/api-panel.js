@@ -20,6 +20,7 @@ import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './i
 import { lanzarEmparejado, estadoEmparejado } from './utils/emparejar-portadas.js';
 import { lanzarReextraccion, estadoReextraccion, cancelarReextraccion } from './utils/reextraer-imagenes.js';
 import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion } from './utils/reidentificar-doc.js';
+import { lanzarCompletarSinopsis, estadoCompletarSinopsis, cancelarCompletarSinopsis } from './utils/completar-sinopsis.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
 import { informePlanHtml } from './utils/informe-plan.js';
 import { planificarInbox } from './vigilante.js';
@@ -530,6 +531,20 @@ export function rutasPanel() {
     });
     r.get('/documentos/reidentificar-isbn/estado', (req, res) => res.json(estadoReidentificacion()));
     r.post('/documentos/reidentificar-isbn/cancelar', (req, res) => res.json(cancelarReidentificacion()));
+
+    /**
+     * BUSCAR SINOPSIS por ISBN (sin IA) para una selección o un solo documento. Mismo motor que la tarea del
+     * Conformador y el backfill de consola (utils/completar-sinopsis.js).
+     *   · forzar       reemplaza la sinopsis existente (por defecto solo rellena huecos)
+     *   · soloFichero  solo el volcado local: cero red, cero riesgo de bloqueo por uso de las APIs
+     */
+    r.post('/documentos/completar-sinopsis', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        const { ids, forzar, soloFichero } = req.body || {};
+        res.json(lanzarCompletarSinopsis({ ids, forzar: !!forzar, soloFichero: !!soloFichero }));
+    });
+    r.get('/documentos/completar-sinopsis/estado', (req, res) => res.json(estadoCompletarSinopsis()));
+    r.post('/documentos/completar-sinopsis/cancelar', (req, res) => res.json(cancelarCompletarSinopsis()));
     /**
      * Origen ABSOLUTO del panel, para los enlaces del informe HTML (se descarga y se abre desde el DISCO: uno
      * relativo apuntaría a file:/// y no llevaría a ninguna parte).

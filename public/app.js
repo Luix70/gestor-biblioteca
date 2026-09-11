@@ -3458,6 +3458,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las fuentes para mejorar el documento: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books)">✨ Enriquecer</button>
       <button class="fbtn admin-only" id="actReisbn" title="Extraer/cotejar el ISBN de ESTE documento: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual, con o sin IA.">🔎 Extraer ISBN</button>
+      <button class="fbtn admin-only" id="actSinopsis" title="Busca la sinopsis de ESTE documento por su ISBN en el Fichero local y, si no está, en OpenLibrary y Google Books. Sin IA. Opciones: forzar (reemplazar la que tenga) y solo Fichero local (sin salir a internet).">📝 Buscar sinopsis</button>
       <button class="fbtn admin-only" id="actAFondo" title="Lee las PÁGINAS del propio libro (portadilla/contraportada) con la visión y propone autores/roles reales, sinopsis e identificadores. Muestra un balance antes/después para aplicar lo que elijas.">🎯 Completar a fondo</button>
       <button class="fbtn admin-only" id="actShare" title="Genera un QR/enlace para compartir esta ficha (y su descarga, si es digital)">🔗 Compartir</button>
       <button class="fbtn admin-only" id="actNfc" style="display:none" title="Graba una etiqueta NFC (NTAG213/215) con esta ficha: al acercar el móvil se abrirá este documento">📶 Grabar NFC</button>
@@ -3517,6 +3518,7 @@ function pintarDoc(r, ctx) {
     // 🔎 Extraer ISBN sobre SOLO este documento: reutiliza el diálogo de opciones del lote (con ISBN manual, al
     // ser 1 doc) y, al terminar, REFRESCA la ficha (no el catálogo).
     if ($('#actReisbn')) $('#actReisbn').onclick = () => reidentificarLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
+    if ($('#actSinopsis')) $('#actSinopsis').onclick = () => sinopsisLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
     if ($('#actTipo')) $('#actTipo').onclick = () => cambiarTipoDocs([d._id]);
     const caf = $('#actAFondo');
@@ -8092,6 +8094,7 @@ function renderBulk() {
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReimg" title="Re-extraer del PROPIO fichero la portada Y las imágenes de catalogación (5 páginas frontales + contraportada, saltando las páginas en blanco), reemplazando las actuales (equivocadas). Conserva las imágenes que hayas añadido a mano. Trabajo en 2º plano.">🖼️ Reextraer imágenes</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReisbn" title="Extraer/cotejar el ISBN: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual (1 doc), con o sin IA. Trabajo en 2º plano.">🔎 Extraer ISBN</button>' : ''}
+    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkSinopsis" title="Busca la sinopsis por el ISBN en el Fichero local y, si no está, en OpenLibrary y Google Books. Sin IA. Opciones: forzar (reemplazar la existente) y solo Fichero local (sin salir a internet). Trabajo en 2º plano.">📝 Buscar sinopsis</button>' : ''}
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
     <button class="btn bad" id="bkDel">🗑 Eliminar</button>`
     : '';
@@ -8171,6 +8174,7 @@ function renderBulk() {
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReimg')) $('#bkReimg').onclick = () => reextraerImagenesLote([...selDocs]);
     if ($('#bkReisbn')) $('#bkReisbn').onclick = () => reidentificarLote([...selDocs]);
+    if ($('#bkSinopsis')) $('#bkSinopsis').onclick = () => sinopsisLote([...selDocs]);
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
     $('#bkDel').onclick = eliminarSeleccionados;
   }
@@ -8509,6 +8513,71 @@ async function seguirReidentificacion(total) {
   toast(
     `ISBN recuperado en ${e.recuperados || 0} documento(s)${e.cdu ? ` · CDU en ${e.cdu}` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN en el fichero` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
     cancelado || e.sin_isbn || e.sin_fichero ? 'warn' : 'ok',
+  );
+}
+// ── BUSCAR SINOPSIS (por ISBN, sin IA) ──────────────────────────────────────────────────────────────────
+// Mismo motor que la tarea del Conformador y el backfill de consola. Se usa desde la selección del catálogo
+// y desde la ficha de un documento (ahí con `alTerminar` para refrescar la ficha en vez de recargar la lista).
+async function sinopsisLote(ids, { alTerminar = null } = {}) {
+  if (!ids.length) return;
+  const opc = await new Promise((resolve) => {
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;width:94vw">
+      <h3 style="margin:0 0 4px">📝 Buscar sinopsis</h3>
+      <div class="muted" style="font-size:12px;margin-bottom:10px">${ids.length} documento(s). Busca la sinopsis por el ISBN en el Fichero local y, si no está, en OpenLibrary y Google Books. <b>Sin IA.</b> Los documentos sin ISBN no se pueden resolver por aquí: usa antes «🔎 Extraer ISBN».</div>
+      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="siForzar"><span>Forzar <span class="muted">(reemplaza la sinopsis que ya tenga; por defecto solo rellena los huecos)</span></span></label>
+      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="siLocal"><span>Solo Fichero local <span class="muted">(no sale a internet: más rápido y sin riesgo de que las APIs nos corten por exceso de uso. Encuentra menos.)</span></span></label>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn" id="siCancelar">Cancelar</button>
+        <button class="btn pri" id="siLanzar">Buscar sinopsis</button>
+      </div>
+    </div>`;
+    $('#cmpModal').style.display = 'grid';
+    $('#siCancelar').onclick = () => { cerrarCmp(); resolve(null); };
+    $('#siLanzar').onclick = () => {
+      const o = { forzar: $('#siForzar').checked, soloFichero: $('#siLocal').checked };
+      cerrarCmp(); resolve(o);
+    };
+  });
+  if (!opc) return;
+  try {
+    const r = await api('/documentos/completar-sinopsis', { method: 'POST', body: JSON.stringify({ ids, ...opc }) });
+    if (!r.ok) { toast(r.motivo || 'No se pudo lanzar', 'bad'); return; }
+    if (!alTerminar) selDocs.clear();   // desde la ficha no hay selección que vaciar
+    await seguirSinopsis(r.total || ids.length);
+    if (alTerminar) alTerminar(); else buscarCatalogo(estadoBusqueda.page || 1);
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function seguirSinopsis(total) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:520px;width:94vw">
+    <h3 style="margin:0 0 10px">📝 Buscando sinopsis…</h3>
+    <div style="height:10px;border-radius:6px;background:rgba(128,128,128,.25);overflow:hidden">
+      <div id="siBar" style="height:100%;width:0%;background:var(--acc);transition:width .3s"></div>
+    </div>
+    <div id="siTxt" class="muted" style="font-size:13px;margin-top:8px">0 / ${total}</div>
+    <div id="siTit" class="muted" style="font-size:12px;margin-top:2px;min-height:1.2em"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn bad" id="siCancel">✕ Cancelar</button></div>
+  </div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#siCancel').onclick = async () => {
+    $('#siCancel').disabled = true;
+    $('#siCancel').textContent = 'Cancelando…';
+    try { await api('/documentos/completar-sinopsis/cancelar', { method: 'POST' }); } catch { /* ya habrá acabado */ }
+  };
+  let e = {};
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 700));
+    try { e = await api('/documentos/completar-sinopsis/estado'); } catch { break; }
+    const pct = e.total ? Math.round((e.hechos / e.total) * 100) : 0;
+    if ($('#siBar')) $('#siBar').style.width = pct + '%';
+    if ($('#siTxt')) $('#siTxt').textContent = `${e.hechos} / ${e.total} · ${e.recuperadas || 0} con sinopsis${e.sin_fuente ? ` · ${e.sin_fuente} sin fuente` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
+    if ($('#siTit')) $('#siTit').textContent = e.titulo ? recortar(e.titulo, 60) : '';
+    if (!e.en_curso) break;
+  }
+  cerrarCmp();
+  const cancelado = e.cancelar && e.hechos < e.total;
+  toast(
+    `Sinopsis recuperada en ${e.recuperadas || 0} documento(s)${e.sin_fuente ? ` · ${e.sin_fuente} sin fuente` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN (extrae el ISBN primero)` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
+    cancelado || e.sin_isbn || e.sin_fuente ? 'warn' : 'ok',
   );
 }
 // Asigna la MISMA imagen de portada a toda la selección: se elige un fichero (o foto), se reduce en el

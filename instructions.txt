@@ -3338,3 +3338,33 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       un fichero en su sitio SIEMPRE esta completo y no puede copiarse a medias— sino de no cargar el
       Atom con la ingesta y la copia a la vez. Si la API no responde, el script SIGUE: una app caida
       es, por definicion, una app que no esta ingiriendo.
+
+── SINOPSIS POR ISBN (sin IA) ────────────────────────────────────────────────────────
+    * EL AGUJERO: el 37% del catalogo (21.828 docs) no tenia sinopsis y NINGUNA accion la rellenaba
+      —ni conformar, ni enriquecer, ni cotejar, ni completar a fondo—. La unica tarea que la tocaba era
+      `re-enriquecer-degradados`, cuya condicion es esDegradado(doc) = titulo no fiable | CDU generica |
+      APIs caidas | estado 'pendiente'. Un documento LIMPIO pero sin sinopsis (lo que deja una ingesta
+      SIN IA) no cumple NINGUNA de las cuatro, asi que jamas se le buscaba. De esos 21.828, 16.577
+      TIENEN ISBN → recuperables gratis; 5.251 no (para esos, primero «Extraer ISBN»).
+    * MOTOR UNICO: src/utils/completar-sinopsis.js · buscarSinopsis(doc, {soloFichero}) y
+      completarSinopsisDoc(db, doc, {aplicar, forzar, soloFichero}) → {estado, sinopsis}. Devuelve TAMBIEN
+      la sinopsis (no solo el estado) para que un dry-run pueda ENSENARLA sin repetir la peticion de red.
+      La cascada la pone `proveedor-metadatos`: Fichero local (58,7 M, OFFLINE y gratis) → OpenLibrary →
+      Google Books. sinIA:true explicito. Se descarta lo que no llegue a 40 caracteres (restos tipo «.»).
+      Al guardar NO se reindexa la busqueda (el FTS no incluye la sinopsis) pero SI se marca
+      fecha_actualizacion: es lo que hace que la campana de sidecars regenere el registro.json — sin eso
+      la sinopsis viviria solo en Mongo y no llegaria a la copia en disco.
+    * TRES CONSUMIDORES (mismo patron que «Extraer ISBN»):
+      1) TAREA del Conformador `completar-sinopsis` (aplica: isbn && !sinopsis). Progresiva por
+         naturaleza: avanza al ralenti y no dispara limites de uso de las APIs.
+      2) CLI scripts/completar-sinopsis.js — dry-run por defecto; --ejecutar, --solo-fichero, --limite,
+         --pausa MS (freno), --forzar, --id. REANUDABLE (sin --forzar solo toca los que siguen sin
+         sinopsis). ESTRATEGIA EN DOS TIEMPOS recomendada: primero --solo-fichero (sin red, rapido, cero
+         riesgo de bloqueo) y luego el resto contra las APIs con pausa.
+      3) ACCION «📝 Buscar sinopsis» — en la barra de seleccion del catalogo Y en ⚙️ Acciones de la ficha
+         (ahi acotada a ese documento y refrescando la ficha al terminar). Trabajo en 2º plano con barra
+         de progreso y cancelar, como el resto. POST /documentos/completar-sinopsis (+/estado,/cancelar),
+         solo admin. Opciones: forzar (reemplaza la existente) y soloFichero (sin red).
+    * MEDIDO en una muestra real de 6 documentos: 5 recuperadas (83%), con sinopsis de calidad. Ritmo con
+      APIs ~0,2 doc/s (la latencia de OL+GB domina, no la pausa): los 16.577 son ~23 h de fondo. Con
+      --solo-fichero es mucho mas rapido porque no hay red.

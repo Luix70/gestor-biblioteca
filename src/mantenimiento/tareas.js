@@ -14,6 +14,7 @@ import { calcularHashArchivo } from '../utils/hash-archivo.js';
 import { parsearNombre, esTituloArtefacto } from '../utils/parsear-nombre.js';
 import { resolverColeccion } from '../utils/colecciones.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
+import { buscarSinopsis } from '../utils/completar-sinopsis.js'; // motor único de sinopsis (tarea + CLI + panel)
 import { resolverObraPorIsbn } from '../utils/obra-autoridad.js';
 import { validarISBN, validarISSN, variantesISBN } from '../utils/identificadores.js';
 import { aRegistroLegible, escribirSidecars, resolverNombres } from '../utils/registro.js';
@@ -329,6 +330,26 @@ export const TAREAS = [
         // Sin proactividad de IA (ver [[minimize-ai-ingestion]]). Para un backfill puntual: scripts/describir-clasificaciones.js --ejecutar.
         aplica: () => false,
         async ejecutar() { return null; },
+    },
+
+    {
+        id: 'completar-sinopsis',
+        version: 1,
+        descripcion: 'Documentos CON ISBN y SIN sinopsis: la recupera por la cascada GRATUITA (Fichero local offline → OpenLibrary → Google Books). Sin IA. Solo rellena el hueco; jamás toca una sinopsis existente.',
+        // POR QUÉ HACÍA FALTA UNA TAREA PROPIA: la sinopsis solo la rellenaba `re-enriquecer-degradados`, y su
+        // condición es `esDegradado` (título no fiable, CDU genérica, APIs caídas o estado 'pendiente'). Un
+        // documento LIMPIO pero sin sinopsis —el resultado típico de una ingesta sin IA— no cumple NINGUNA de
+        // las cuatro, así que nunca se le buscaba: 37% del catálogo se quedaba sin sinopsis para siempre.
+        // Coste: la cascada consulta PRIMERO el Fichero local (offline, gratis, sin red); solo sale a las APIs
+        // lo que no esté en el volcado. Al ir por el Conformador, avanza al ralentí y no dispara límites de uso.
+        aplica: (doc) => !!doc.isbn && !doc.sinopsis,
+        async ejecutar(doc) {
+            // Mismo motor que el backfill y la acción del panel (utils/completar-sinopsis.js): una sola
+            // definición de «de dónde sale una sinopsis» para los tres consumidores.
+            const { sinopsis } = await buscarSinopsis(doc);
+            if (!sinopsis) return null;         // no está en ninguna fuente, o la API se cayó: otra pasada reintenta
+            return { set: { sinopsis }, alertas: ['Sinopsis recuperada por ISBN (fuentes gratuitas).'] };
+        },
     },
 
     {
