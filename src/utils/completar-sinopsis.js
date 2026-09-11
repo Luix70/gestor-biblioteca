@@ -30,8 +30,10 @@ const utilizable = (s) => typeof s === 'string' && s.trim().length >= SINOPSIS_M
  * Busca la sinopsis de UN documento por su ISBN.
  *
  * @param doc            documento de Mongo (necesita `isbn`)
- * @param soloFichero    true = SOLO el volcado local: cero red, cero riesgo de bloqueo por uso. Útil para
- *                       drenar el grueso del atraso sin tocar las APIs y dejar solo el resto para después.
+ * @param soloFichero    true = SOLO el volcado local: cero red. ⚠️ Encuentra MUY poco: medido, el 97% de los
+ *                       ISBN sin sinopsis SÍ están en el Fichero pero ninguna fila la trae, porque OpenLibrary
+ *                       guarda la descripción en la OBRA y el ETL solo cargó EDICIONES (etl-map.js · mapOL
+ *                       lee `e.description`, casi siempre vacío). Las APIs sí la resuelven.
  * @returns {Promise<{sinopsis:string|null, fuente:string|null}>}
  */
 export async function buscarSinopsis(doc, { soloFichero = false } = {}) {

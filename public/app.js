@@ -8525,7 +8525,7 @@ async function sinopsisLote(ids, { alTerminar = null } = {}) {
       <h3 style="margin:0 0 4px">📝 Buscar sinopsis</h3>
       <div class="muted" style="font-size:12px;margin-bottom:10px">${ids.length} documento(s). Busca la sinopsis por el ISBN en el Fichero local y, si no está, en OpenLibrary y Google Books. <b>Sin IA.</b> Los documentos sin ISBN no se pueden resolver por aquí: usa antes «🔎 Extraer ISBN».</div>
       <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="siForzar"><span>Forzar <span class="muted">(reemplaza la sinopsis que ya tenga; por defecto solo rellena los huecos)</span></span></label>
-      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="siLocal"><span>Solo Fichero local <span class="muted">(no sale a internet: más rápido y sin riesgo de que las APIs nos corten por exceso de uso. Encuentra menos.)</span></span></label>
+      <label class="row" style="gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" id="siLocal"><span>Solo Fichero local <span class="muted">(no sale a internet, pero el Fichero <b>casi nunca</b> trae sinopsis: OpenLibrary la guarda en la obra y el volcado solo tiene ediciones. Déjalo sin marcar salvo que las APIs estén caídas.)</span></span></label>
       <div class="row" style="justify-content:flex-end;gap:8px;margin-top:14px">
         <button class="btn" id="siCancelar">Cancelar</button>
         <button class="btn pri" id="siLanzar">Buscar sinopsis</button>

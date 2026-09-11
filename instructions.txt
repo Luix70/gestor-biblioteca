@@ -3368,12 +3368,20 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
          accion del panel, que no usan el sello.
       2) CLI scripts/completar-sinopsis.js — dry-run por defecto; --ejecutar, --solo-fichero, --limite,
          --pausa MS (freno), --forzar, --id. REANUDABLE (sin --forzar solo toca los que siguen sin
-         sinopsis). ESTRATEGIA EN DOS TIEMPOS recomendada: primero --solo-fichero (sin red, rapido, cero
-         riesgo de bloqueo) y luego el resto contra las APIs con pausa.
+         sinopsis). Contra las APIs, con --pausa y en tandas con --limite. (Antes se recomendaba empezar
+         por --solo-fichero: ERROR, ver el apunte del Fichero mas abajo.)
       3) ACCION «📝 Buscar sinopsis» — en la barra de seleccion del catalogo Y en ⚙️ Acciones de la ficha
          (ahi acotada a ese documento y refrescando la ficha al terminar). Trabajo en 2º plano con barra
          de progreso y cancelar, como el resto. POST /documentos/completar-sinopsis (+/estado,/cancelar),
          solo admin. Opciones: forzar (reemplaza la existente) y soloFichero (sin red).
     * MEDIDO en una muestra real de 6 documentos: 5 recuperadas (83%), con sinopsis de calidad. Ritmo con
-      APIs ~0,2 doc/s (la latencia de OL+GB domina, no la pausa): los 16.577 son ~23 h de fondo. Con
-      --solo-fichero es mucho mas rapido porque no hay red.
+      APIs ~0,2 doc/s (la latencia de OL+GB domina, no la pausa): los 16.577 son ~23 h de fondo.
+    * ⚠ EL FICHERO LOCAL CASI NO TIENE SINOPSIS (medido, no supuesto). El backfill con --solo-fichero
+      recupero 1 de 16.556. Diagnostico sobre 300 docs sin sinopsis: el 97% de sus ISBN SI esta en el
+      Fichero (el cruce funciona), pero NINGUNA fila trae sinopsis; casi todas son de OpenLibrary. CAUSA: en
+      el modelo de OpenLibrary la DESCRIPCION vive en la OBRA (/works/OL…W), no en la EDICION. El Fichero va
+      por ISBN, asi que el ETL cargo EDICIONES, y etl-map.js·mapOL toma `e.description` de la edicion — casi
+      siempre vacio. Las APIs si la dan: la de OL resuelve edicion → obra y trae su descripcion, y Google
+      Books la trae directa. ARREGLO DE RAIZ (no hecho): reconstruir el Fichero cruzando el volcado de OBRAS
+      de OL por `e.works[0].key`. Leccion: se supuso que el Fichero tenia sinopsis porque la COLUMNA existe
+      y el ETL la mapea; habia que haber medido su contenido antes de recomendar esa via.

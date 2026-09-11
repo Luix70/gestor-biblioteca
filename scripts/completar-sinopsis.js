@@ -5,17 +5,23 @@
  * (`re-enriquecer-degradados`) solo entra en documentos DEGRADADOS, y una ingesta sin IA deja documentos
  * limpios pero vacíos de sinopsis. Ver `src/utils/completar-sinopsis.js`.
  *
- * ESTRATEGIA RECOMENDADA, en dos tiempos, para no tentar a los límites de uso de las APIs:
- *   1) --solo-fichero --ejecutar     → drena el grueso contra el volcado LOCAL. Sin red, sin freno, rápido.
- *   2) --ejecutar                    → el resto sale a OpenLibrary/Google Books, con pausa entre documentos.
+ * ⚠️  EL FICHERO LOCAL CASI NO TIENE SINOPSIS (medido): de 300 documentos sin sinopsis, el 97% de sus ISBN
+ * SÍ está en el Fichero, pero NINGUNA fila trae sinopsis; el backfill completo con --solo-fichero recuperó
+ * 1 de 16.556. Causa: en OpenLibrary la descripción vive en la OBRA (/works/…), no en la EDICIÓN, y el ETL
+ * (etl-map.js · mapOL) solo cargó ediciones —las que llevan ISBN—, leyendo `e.description`, casi siempre
+ * vacío. La fuente real son las APIs: la de OpenLibrary resuelve edición → obra y trae su descripción, y
+ * Google Books la trae directamente. (Arreglarlo de raíz = reconstruir el Fichero cruzando el volcado de
+ * obras de OL por `e.works[0].key`.)
+ *
+ * Por eso lo útil es ir contra las APIs, con pausa, en tandas con --limite para no tentar a los límites de
+ * uso. --solo-fichero se conserva (cuesta segundos y rescata el caso raro), pero no es la vía principal.
  *
  *   node scripts/completar-sinopsis.js                          (DRY-RUN: informa, no escribe)
- *   node scripts/completar-sinopsis.js --solo-fichero --ejecutar
- *   node scripts/completar-sinopsis.js --ejecutar --limite 500 --pausa 400
+ *   node scripts/completar-sinopsis.js --ejecutar --limite 1000 --pausa 400
  *
  * Opciones:
  *   --ejecutar        aplica los cambios (sin él solo informa)
- *   --solo-fichero    SOLO el volcado local: cero red, cero riesgo de bloqueo
+ *   --solo-fichero    SOLO el volcado local: cero red. Encuentra MUY poco (ver arriba): no es la vía principal
  *   --limite N        procesa como mucho N documentos (por defecto, todos)
  *   --pausa MS        espera entre documentos al usar APIs (por defecto 250 ms; ignorado con --solo-fichero)
  *   --forzar          reemplaza la sinopsis existente en vez de solo rellenar huecos
@@ -112,9 +118,11 @@ async function main() {
         for (const e of ejemplos) console.log(`     · ${e}`);
     }
     if (!EJECUTAR && st.recuperada) console.log('\n   → Para aplicarlo: añade --ejecutar');
-    if (EJECUTAR && SOLO_FICHERO && st.sin_fuente) {
-        console.log('\n   → Los que no estaban en el Fichero pueden intentarse contra las APIs:');
-        console.log('     node scripts/completar-sinopsis.js --ejecutar --pausa 400');
+    if (SOLO_FICHERO && st.sin_fuente) {
+        // No es que falten en el Fichero: el ISBN suele estar, pero sin sinopsis (OL la guarda en la obra,
+        // no en la edición). Las APIs sí la resuelven.
+        console.log('\n   → El Fichero apenas trae sinopsis. Las APIs sí (con pausa y en tandas):');
+        console.log('     node scripts/completar-sinopsis.js --ejecutar --limite 1000 --pausa 400');
     }
     console.log('');
     process.exit(0);
