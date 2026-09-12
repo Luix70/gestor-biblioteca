@@ -115,6 +115,10 @@ de ficheros clasificado por CDU.
   MANTENIMIENTO_ACTIVO=1    OPT-IN al modo AUTO ("diferido": mantenimiento tras
                             ~5 min de Inbox inactivo). Por defecto NO corre solo:
                             se dispara a mano con POST /api/mantenimiento.
+                            Es solo el valor INICIAL: en cuanto se cambia el modo
+                            desde el panel (interruptor Automático/Manual) o por
+                            POST /api/mantenimiento/modo, se guarda en Mongo
+                            (ajustes/_id:'conformador') y MANDA sobre el .env.
   MANTENIMIENTO_FORZAR=1    Fuerza el Conformador fuera de Docker (desarrollo)
 
   4.2  Ajustes numéricos (src/config.js — va a git, se edita en el repo)
@@ -2147,6 +2151,24 @@ de ficheros clasificado por CDU.
 
   ── ACTIVIDAD (administración) ───────────────────────────────────────────────
     Fichas plegables: 👁 Vigilante del Inbox (activar/pausar), 🧭 Estado del
+    Conformador, 🧹 Lanzar mantenimiento, 🎯 Campañas de fondo (ver abajo), 🩺
+    Integridad (diagnosticar/reparar a la Papelera), 🧼 Sanear catálogo, 👁️ Visión
+    IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🧰 Ejecutar script (ver
+    abajo), 🔞 Permisos de invitados (permitir/restringir NSFW), 📜 Logs en vivo.
+
+    · INTERRUPTOR «Automático / Manual» del Conformador (admin, tarjeta «🧭 Estado del Conformador», id
+      #mAutoSwitch). ON = modo 'diferido': una pasada de 25 documentos cada vez que el Inbox lleva
+      MANTENIMIENTO_REPOSO_MS (5 min) quieto, indefinidamente. OFF = 'apagado': no corre solo. Una pausa
+      temporal ('apagado-hasta', solo por API) se ve como «En pausa · vuelve a automático el …». El modo se
+      GUARDA en Mongo (ajustes/_id:'conformador') y se carga al arrancar: sobrevive a reinicios y despliegues
+      (antes cada despliegue lo devolvía en silencio al .env). Si la llamada falla, el interruptor vuelve a
+      su posición. Cambiar el modo NO toca una pasada manual en curso.
+    · «🧹 Lanzar mantenimiento»: ▶ Iniciar lanza una pasada MANUAL que vacía toda la cola en rondas de 25
+      (corre aunque el modo sea manual). «■ Detener» para SOLO esa pasada — acaba la ronda en curso y no toca
+      el modo (antes ponía modo='apagado' y apagaba de paso el automático, sin forma de volver a encenderlo
+      desde el panel). Los botones se desactivan cuando no tienen sentido (Iniciar con una pasada ya en
+      curso; Detener sin ninguna). El Estado dice «pasada manual en curso…» / «deteniéndose…» / «en reposo».
+    · Las CAMPAÑAS de fondo NO dependen de este modo: cada una tiene su propio interruptor.
 
     · COPIA DEL INTERRUPTOR DEL VIGILANTE AL FINAL DEL MENU (admin): el mando de Entrada sigue siendo el
       «oficial», pero como se usa constantemente hay una copia al pie de la barra lateral (#vSwitch2),
@@ -2160,10 +2182,6 @@ de ficheros clasificado por CDU.
       motor-enriquecimiento vía utils/ajustes-ingesta.js·cduSinIAActivo) y se PERSISTE en Mongo
       (ajustes/_id:'ingesta') para sobrevivir a reinicios (se carga al arrancar). Arranca con el valor del
       .env. Estado en GET /estado (campo cduSinIA); cambio en POST /ingesta/cdu-sin-ia {activo}.
-    Conformador, 🧹 Lanzar mantenimiento, 🎯 Campañas de fondo (ver abajo), 🩺
-    Integridad (diagnosticar/reparar a la Papelera), 🧼 Sanear catálogo, 👁️ Visión
-    IA (proveedores/claves), 🔎 Búsqueda (reindexar FTS), 🧰 Ejecutar script (ver
-    abajo), 🔞 Permisos de invitados (permitir/restringir NSFW), 📜 Logs en vivo.
 
     · 🧰 EJECUTAR SCRIPT — lanzar los scripts de scripts/ desde el panel, con la salida en el visor de Logs.
       Un desplegable AGRUPADO por categoría + un buscador (filtra por nombre/resumen/propósito); al elegir uno
@@ -2429,14 +2447,29 @@ de ficheros clasificado por CDU.
     POST /api/mantenimiento?activar=-1&intervalo=30
     POST /api/mantenimiento     body { "activar": 300, "intervalo": 0 }
 
+  Corre AUNQUE el modo sea "apagado": el modo solo gobierna las pasadas automáticas.
+
   Para DETENER un mantenimiento manual en marcha (o cancelar uno programado):
-    POST /api/mantenimiento/modo   body { "modo": "apagado" }
+    POST /api/mantenimiento/detener      (ver abajo; NO cambia el modo)
 
   Respuesta 202 (programado):
-    { "ok": true, "mensaje": "Mantenimiento programado (cuando el Inbox quede inactivo; 30s entre rondas de 25). Detén con modo=apagado." }
+    { "ok": true, "mensaje": "Mantenimiento programado (cuando el Inbox quede inactivo; 30s entre rondas de 25)." }
 
   Respuesta 409 (ya hay un mantenimiento manual en curso):
     { "ok": false, "motivo": "ya hay un mantenimiento manual en curso" }
+
+  ──────────────────────────────────────────────────────────────────────────────
+  POST /api/mantenimiento/detener
+  ──────────────────────────────────────────────────────────────────────────────
+  Detiene el mantenimiento MANUAL en curso, o cancela uno programado que aún espera
+  su arranque. La ronda de 25 que esté a medias TERMINA (cortarla dejaría documentos
+  a medio conformar). NO toca el modo automático/manual. Es el «■ Detener» del panel.
+  (Antes se paraba con modo="apagado", que apagaba de paso el automático.)
+
+  Respuesta 200:
+    { "ok": true, "mensaje": "Deteniendo el mantenimiento manual: acaba la ronda en curso y para. El modo no cambia." }
+  Respuesta 409 (no hay ninguno):
+    { "ok": false, "motivo": "no hay ningún mantenimiento manual en curso" }
 
   ──────────────────────────────────────────────────────────────────────────────
   GET /api/mantenimiento/estado
@@ -2445,16 +2478,22 @@ de ficheros clasificado por CDU.
 
   Respuesta 200:
     {
-      "modo":          "diferido"|"apagado"|"apagado-hasta",
-      "dormido":       true|false,
-      "apagadoHasta":  "2026-06-20T00:00:00.000Z"|null,
-      "ultimaRevision":"2026-06-19T14:32:10.000Z"|null
+      "modo":               "diferido"|"apagado"|"apagado-hasta",
+      "dormido":            true|false,
+      "mantenimientoManual":true|false,
+      "deteniendo":         true|false,
+      "reposoMs":           300000,
+      "apagadoHasta":       "2026-06-20T00:00:00.000Z"|null,
+      "ultimaRevision":     "2026-06-19T14:32:10.000Z"|null
     }
 
   Campos:
     modo          Modo de funcionamiento actual (ver sección 8)
     dormido       true = la cola está vacía; el Conformador no consulta la BD
                   hasta la próxima ingesta
+    mantenimientoManual  true = hay una pasada manual en curso (o programada)
+    deteniendo    true = se pidió detenerla y está acabando la ronda en curso
+    reposoMs      reposo del Inbox que espera el modo automático (MANTENIMIENTO_REPOSO_MS)
     apagadoHasta  ISO 8601 del momento en que expira el apagado temporal
                   (solo presente en modo "apagado-hasta")
     ultimaRevision ISO 8601 de la última pasada completada (null si nunca corrió)
@@ -2462,7 +2501,11 @@ de ficheros clasificado por CDU.
   ──────────────────────────────────────────────────────────────────────────────
   POST /api/mantenimiento/modo
   ──────────────────────────────────────────────────────────────────────────────
-  Cambia el modo del Conformador en caliente (sin reiniciar la app).
+  Cambia el modo del Conformador en caliente (sin reiniciar la app). Es lo que hace
+  el interruptor «Automático / Manual» del panel. El modo se GUARDA en Mongo
+  (ajustes/_id:'conformador') y se carga al arrancar, así que sobrevive a reinicios
+  y despliegues; a partir de ahí manda sobre MANTENIMIENTO_ACTIVO del .env.
+  NO detiene una pasada manual en curso (eso es POST /api/mantenimiento/detener).
 
   Body: application/json
     {
@@ -2478,9 +2521,9 @@ de ficheros clasificado por CDU.
                     tras MANTENIMIENTO_REPOSO_MS de Inbox inactivo.
                     Si estaba apagado, lo reactiva.
 
-  "apagado"         Desactiva el Conformador indefinidamente.
-                    Solo vuelve a correr si se cambia el modo manualmente
-                    o se llama a POST /api/mantenimiento.
+  "apagado"         Desactiva el modo automático indefinidamente («Manual»).
+                    Solo vuelve a correr si se cambia el modo o se lanza una
+                    pasada con POST /api/mantenimiento.
 
   "apagado-hasta"   Desactiva el Conformador hasta el hito indicado en "hasta",
                     tras el cual vuelve automáticamente a modo "diferido".
@@ -2493,6 +2536,13 @@ de ficheros clasificado por CDU.
   "proxima-semana"  Hasta dentro de 7 días a las 00:00.
 
   Para disparo INMEDIATO: usar POST /api/mantenimiento (ver arriba).
+
+  OJO: todas estas rutas exigen sesión de ADMINISTRADOR; sin token devuelven 401. Lo
+  cómodo es el panel. Por consola, primero el token y luego la cabecera en cada llamada:
+    curl -X POST http://localhost:3000/api/login -H "Content-Type: application/json" \
+         -d '{"usuario":"<admin>","password":"<clave>"}'          → { "token": "…" }
+    … -H "Authorization: Bearer <token>"
+  (Los ejemplos de abajo omiten esa cabecera por brevedad.)
 
   Ejemplos con curl:
 
@@ -3358,7 +3408,8 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       1) TAREA del Conformador `completar-sinopsis` (aplica: isbn && !sinopsis). Progresiva por
          naturaleza: avanza al ralenti y no dispara limites de uso de las APIs. OJO, TRES MATICES:
          (a) el Conformador ARRANCA APAGADO (modoConformador='apagado' salvo MANTENIMIENTO_ACTIVO=1 o
-         encendido desde el panel): si esta apagado, esta tarea NO corre nunca. Verificado: tras desplegar,
+         el interruptor «Automático» de la tarjeta «🧭 Estado del Conformador», que se guarda y sobrevive
+         a los despliegues): si esta apagado, esta tarea NO corre nunca. Verificado: tras desplegar,
          0 docs revisados por ella con el Conformador apagado.
          (b) anadirla CAMBIO LA FIRMA (FIRMA = todas las tareas:version), asi que los ~59.000 docs pasan a
          no-conformes y se revisitan; en cada uno solo corre lo nuevo. A MANTENIMIENTO_LOTE=25 docs por

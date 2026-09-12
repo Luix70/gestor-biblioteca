@@ -111,6 +111,19 @@
             <div class="actmason">
               <details class="card foldcard" id="fcConformador" data-fold="open" open>
                 <summary><h3>🧭 Estado del Conformador</h3></summary>
+                <!-- Interruptor AUTOMÁTICO ↔ MANUAL (mismo patrón que el del Vigilante). ON = modo «diferido»: una
+                     pasada de 25 documentos cada vez que el Inbox lleva un rato quieto. OFF = «apagado»: solo corre
+                     cuando se lanza en la tarjeta de abajo. El servidor lo guarda: sobrevive a reinicios y despliegues.
+                     No afecta a una pasada manual en curso (esa se para con «■ Detener»). -->
+                <div style="display: flex; align-items: center; gap: 16px; margin: 8px 0">
+                  <label class="switch admin-only" style="flex: 0 0 auto"
+                    ><input type="checkbox" id="mAutoSwitch" /><span class="slider"></span
+                  ></label>
+                  <div>
+                    <b id="mAutoLabel">—</b>
+                    <div class="muted" style="font-size: 12px" id="mAutoSub"></div>
+                  </div>
+                </div>
                 <div id="mEstado"></div>
               </details>
               <details class="card foldcard admin-only" id="fcMantenimiento" data-fold="open" open>
@@ -136,7 +149,9 @@
                   <button class="btn bad" id="mStop">■ Detener</button>
                 </div>
                 <p class="muted" style="margin-top: 12px; font-size: 12px">
-                  Procesa 25 documentos por ronda, cede a la ingesta y reintenta hasta vaciar el backlog.
+                  Procesa 25 documentos por ronda, cede a la ingesta y reintenta hasta vaciar el backlog. Corre
+                  aunque el Conformador esté en manual. «■ Detener» para solo esta pasada (acaba la ronda en curso);
+                  el modo automático/manual no cambia.
                 </p>
               </details>
               <details class="card foldcard" id="fcIntegridad" data-fold="pc">

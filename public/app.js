@@ -441,13 +441,29 @@ async function refrescarEstado() {
       : vigilanteActivo
         ? 'observando el Inbox'
         : 'los ficheros esperan en el Inbox';
-    // Estado del Conformador: "Estado" = indicador en vivo; "Modo" = ajuste (manual/automático), no un error.
-    const modoTxt =
-      modo === 'diferido' ? 'Automático (al reposo)' : modo === 'apagado' ? 'Manual (a demanda)' : modo;
+    // Interruptor Automático/Manual del Conformador: refleja el modo REAL del servidor (también si cambia por la
+    // API o al vencer una pausa temporal). Una pausa temporal («apagado-hasta») cuenta como apagado.
+    const conf = estado.conformador;
+    const auto = modo === 'diferido';
+    const reposoMin = Math.max(1, Math.round((conf.reposoMs || 300000) / 60000));
+    if ($('#mAutoSwitch')) $('#mAutoSwitch').checked = auto;
+    if ($('#mAutoLabel'))
+      $('#mAutoLabel').textContent = auto ? 'Automático (al reposo)' : modo === 'apagado-hasta' ? 'En pausa' : 'Manual (a demanda)';
+    if ($('#mAutoSub'))
+      $('#mAutoSub').textContent = auto
+        ? `una pasada de 25 documentos cada vez que el Inbox lleva ${reposoMin} min quieto`
+        : modo === 'apagado-hasta' && conf.apagadoHasta
+          ? `vuelve a automático el ${new Date(conf.apagadoHasta).toLocaleString('es-ES')}`
+          : 'solo corre cuando lo lanzas en «🧹 Lanzar mantenimiento»';
+    // «Estado» = lo que está haciendo AHORA la pasada manual (el modo ya lo dice el interruptor).
+    const estadoTxt = conf.deteniendo ? 'deteniéndose (acaba la ronda)…' : mantManual ? 'pasada manual en curso…' : 'en reposo';
     $('#mEstado').innerHTML = `<table>
-     <tr><td>Estado</td><td><span class="tag ${mantManual ? 'warn' : 'mut'}">${mantManual ? 'ejecutándose…' : 'en reposo'}</span></td></tr>
-     <tr><td>Modo</td><td><span class="tag ${modo === 'diferido' ? 'ok' : 'mut'}">${modoTxt}</span></td></tr>
-     <tr><td>Última revisión</td><td class="muted">${estado.conformador.ultimaRevision ? new Date(estado.conformador.ultimaRevision).toLocaleString('es-ES') : '—'}</td></tr></table>`;
+     <tr><td>Estado</td><td><span class="tag ${mantManual ? 'warn' : 'mut'}">${estadoTxt}</span></td></tr>
+     <tr><td>Última revisión</td><td class="muted">${conf.ultimaRevision ? new Date(conf.ultimaRevision).toLocaleString('es-ES') : '—'}</td></tr></table>`;
+    // Los botones de «Lanzar mantenimiento» solo se ofrecen cuando tienen sentido: no se puede lanzar una
+    // segunda pasada (el servidor la rechazaría) ni detener una que no existe.
+    if ($('#mStart')) $('#mStart').disabled = !!mantManual;
+    if ($('#mStop')) $('#mStop').disabled = !mantManual || !!conf.deteniendo;
   } catch (e) {}
 }
 
@@ -538,16 +554,37 @@ $('#mStart').onclick = async () => {
     toast(e.message, 'bad');
   }
 };
-// Detiene el mantenimiento automático (modo 'apagado' = solo a demanda).
+// Detiene SOLO la pasada manual en curso (o la programada que aún espera). NO toca el modo: antes ponía
+// modo='apagado' y apagaba de paso el automático, sin forma de volver a encenderlo desde el panel.
 $('#mStop').onclick = async () => {
   try {
-    await api('/mantenimiento/modo', { method: 'POST', body: JSON.stringify({ modo: 'apagado' }) });
-    toast('Mantenimiento detenido', 'warn');
-    refrescarEstado();
+    const resp = await api('/mantenimiento/detener', { method: 'POST' });
+    toast(resp.mensaje || 'Deteniendo el mantenimiento', 'warn');
   } catch (e) {
     toast(e.message, 'bad');
   }
+  refrescarEstado();
 };
+
+// Interruptor Automático/Manual del Conformador (tarjeta «🧭 Estado del Conformador»). Cambia SOLO el modo, que
+// el servidor guarda; una pasada manual en curso sigue la suya. Si la llamada falla, el interruptor vuelve a su
+// posición (no debe mentir sobre el estado real) — mismo patrón que el del Vigilante.
+async function conmutarConformador(auto, origen) {
+  try {
+    await api('/mantenimiento/modo', { method: 'POST', body: JSON.stringify({ modo: auto ? 'diferido' : 'apagado' }) });
+    toast(
+      auto
+        ? 'Conformador en AUTOMÁTICO: trabajará solo cuando el sistema esté en reposo'
+        : 'Conformador en MANUAL: solo correrá cuando lo lances',
+      auto ? 'ok' : 'warn',
+    );
+  } catch (err) {
+    toast(err.message, 'bad');
+    if (origen) origen.checked = !auto;
+  }
+  refrescarEstado();
+}
+if ($('#mAutoSwitch')) $('#mAutoSwitch').onchange = (ev) => conmutarConformador(ev.target.checked, ev.target);
 
 // ── Barra lateral: FIJA ↔ AUTOCOMPRIMIBLE (chincheta) ────────────────────────────────────────────────
 // Autocomprimible = se recoge contra el borde izquierdo y se despliega al pasar el ratón (todo el efecto es

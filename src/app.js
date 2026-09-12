@@ -19,7 +19,7 @@ import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { esFalloDeConexionMongo } from './database.js';
 import { reciclar } from './utils/papelera.js';
-import { iniciarVigilante, mantenimientoManual, configurarConformador, estadoConformador, estadoVigilante } from './vigilante.js';
+import { iniciarVigilante, mantenimientoManual, detenerMantenimientoManual, configurarConformador, estadoConformador, estadoVigilante } from './vigilante.js';
 import { trabajosEnCurso } from './utils/actividad.js'; // trabajos del panel, para el semáforo de la copia
 import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel, rutasPublicas, usuarioPuedeNsfw, nsfwPorDefecto } from './api-panel.js';
@@ -427,7 +427,7 @@ app.post('/api/fichas-lectura/:id/imagen', upload.single('imagen'), async (req, 
 //   activar (M): CUÁNDO arrancar — 0 = ya · N>0 = en N s · -1 = cuando el Inbox quede inactivo.
 //   intervalo (N): pausa en segundos entre rondas — 0 = continuo.
 //   POST /api/mantenimiento?activar=-1&intervalo=30   ó   body { "activar": -1, "intervalo": 30 }
-// Detén un mantenimiento en curso con POST /api/mantenimiento/modo { "modo": "apagado" }.
+// Detén un mantenimiento en curso con POST /api/mantenimiento/detener.
 // 409 si ya hay un mantenimiento manual en curso.
 app.post('/api/mantenimiento', (req, res) => {
     const intervaloSegundos = Number(req.query.intervalo ?? req.body?.intervalo ?? 0) || 0;
@@ -436,14 +436,21 @@ app.post('/api/mantenimiento', (req, res) => {
     res.status(r.ok ? 202 : 409).json(r);
 });
 
+// Detiene el mantenimiento MANUAL en curso (o cancela uno programado) SIN tocar el modo automático/manual.
+// La ronda de 25 que esté a medias termina. 409 si no hay ninguno en curso.
+app.post('/api/mantenimiento/detener', (req, res) => {
+    const r = detenerMantenimientoManual();
+    res.status(r.ok ? 200 : 409).json(r);
+});
+
 // Estado actual del Conformador: modo, si está dormido, cuándo expira un apagado, última revisión.
 app.get('/api/mantenimiento/estado', (req, res) => {
     res.json(estadoConformador());
 });
 
-// Cambia el modo del Conformador en caliente.
+// Cambia el modo del Conformador en caliente (el interruptor Automático/Manual del panel) y lo PERSISTE.
 // Body: { "modo": "diferido"|"apagado"|"apagado-hasta", "hasta": "proxima-hora"|"proximo-dia"|"proxima-semana" }
-// "hasta" solo es necesario cuando modo="apagado-hasta".
+// "hasta" solo es necesario cuando modo="apagado-hasta". No para una pasada manual en curso (eso es /detener).
 app.post('/api/mantenimiento/modo', (req, res) => {
     const { modo, hasta } = req.body || {};
     const r = configurarConformador({ modo, hasta });

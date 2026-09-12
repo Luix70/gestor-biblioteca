@@ -57,13 +57,15 @@ const UBICACION_INBOX = { ambito: 'Sin asignar', estanteria: 'Sin asignar (Inbox
 // repasa la base de datos y conforma los documentos (portadas, nombres, sidecars...). Cede
 // siempre a la ingesta.
 //
-// Modos (cambiables en caliente vía API):
-//   'diferido'     — auto, tras MANTENIMIENTO_REPOSO_MS de inactividad del Inbox (por defecto)
-//   'apagado'      — desactivado hasta cambio manual
-//   'apagado-hasta'— desactivado hasta conformadorApagadoHasta (ms epoch), luego vuelve a 'diferido'
+// Modos (cambiables en caliente: interruptor del panel o POST /api/mantenimiento/modo):
+//   'diferido'     — AUTOMÁTICO: una pasada tras MANTENIMIENTO_REPOSO_MS de inactividad del Inbox
+//   'apagado'      — MANUAL: no corre solo; solo cuando se lanza a mano
+//   'apagado-hasta'— apagado hasta conformadorApagadoHasta (ms epoch), luego vuelve a 'diferido'
 //
-// El disparo inmediato se hace con POST /api/mantenimiento (ya existía; no es un "modo" persistente).
-// MANTENIMIENTO_ACTIVO=0 en .env arranca en modo 'apagado'.
+// El MODO y la PASADA MANUAL son cosas independientes: la pasada manual (POST /api/mantenimiento) corre
+// aunque el modo sea 'apagado', y se detiene con POST /api/mantenimiento/detener — que NO toca el modo.
+// El modo se PERSISTE en Mongo (ajustes/_id:'conformador'); el .env (MANTENIMIENTO_ACTIVO=1 → 'diferido')
+// solo da el valor inicial mientras nadie lo haya cambiado desde el panel.
 const MANTENIMIENTO_REPOSO_MS = Number(process.env.MANTENIMIENTO_REPOSO_MS || 300000); // 5 min de Inbox inactivo
 
 let temporizador = null;
@@ -85,13 +87,12 @@ let ultimaRevisionMant = 0;          // última pasada de mantenimiento
 const dropsADisolver = new Set();
 
 // --- Estado del Conformador ---
-// El mantenimiento NO corre automáticamente al quedar el Inbox inactivo: se dispara A MANO con
-// POST /api/mantenimiento (activar/intervalo). El modo 'diferido' (auto al reposo) es OPT-IN
-// (MANTENIMIENTO_ACTIVO=1); por defecto queda 'apagado'.
+// Por defecto NO corre solo al quedar el Inbox inactivo: se dispara A MANO. El modo 'diferido' (auto al
+// reposo) es OPT-IN: MANTENIMIENTO_ACTIVO=1, o el interruptor del panel (que se persiste y manda desde entonces).
 let modoConformador = (process.env.MANTENIMIENTO_ACTIVO === '1') ? 'diferido' : 'apagado';
 let conformadorApagadoHasta = null;  // ms epoch; solo para modo 'apagado-hasta'
 let conformadorDormido = false;      // true cuando la cola está vacía; evita polls innecesarios a Mongo
-let pararMantManual = false;         // señal de STOP del bucle de mantenimiento manual (modo=apagado)
+let pararMantManual = false;         // señal de STOP del bucle de mantenimiento manual (detenerMantenimientoManual)
 
 const esValida = (f) => EXT_VALIDAS.includes(path.extname(f).toLowerCase());
 
@@ -2153,6 +2154,7 @@ async function quizasMantenimiento() {
         conformadorApagadoHasta = null;
         conformadorDormido = false;
         console.log('🧹 Conformador: pausa temporal expirada → modo diferido.');
+        guardarModoConformador(); // si no, tras un reinicio volvería a cargarse la pausa ya vencida
     }
     if (modoConformador === 'apagado' || modoConformador === 'apagado-hasta') return;
     if (procesando || conformadorDormido || mantManualEnCurso) return; // dormido = cola vacía; o ya hay manual en curso
@@ -2307,12 +2309,24 @@ export function mantenimientoManual({ intervaloSegundos = 0, activarSegundos = 0
                 if (r.pendientes === 0) { console.log('🧹 Mantenimiento manual finalizado: backlog vacío.'); break; }
                 if (seg > 0) await dormir(seg);
             }
-            if (pararMantManual) console.log('🧹 Mantenimiento manual detenido (modo=apagado).');
-        } finally { mantManualEnCurso = false; }
-    })().catch(e => { mantManualEnCurso = false; console.error('Mantenimiento manual:', e.message); });
+            if (pararMantManual) console.log('🧹 Mantenimiento manual detenido por el usuario.');
+        } finally { mantManualEnCurso = false; pararMantManual = false; }
+    })().catch(e => { mantManualEnCurso = false; pararMantManual = false; console.error('Mantenimiento manual:', e.message); });
 
     const cuando = activar === -1 ? 'cuando el Inbox quede inactivo' : activar > 0 ? `en ${activar}s` : 'inmediatamente';
-    return { ok: true, mensaje: `Mantenimiento programado (${cuando}; ${seg > 0 ? `${seg}s entre rondas de ${lote}` : 'continuo'}). Detén con modo=apagado.` };
+    return { ok: true, mensaje: `Mantenimiento programado (${cuando}; ${seg > 0 ? `${seg}s entre rondas de ${lote}` : 'continuo'}).` };
+}
+
+/**
+ * Detiene el mantenimiento MANUAL en curso (o uno programado que aún espera su arranque) SIN tocar el modo.
+ * Antes el panel lo paraba poniendo modo='apagado', y eso apagaba de paso el automático — sin forma de volver
+ * a encenderlo desde el panel. El bucle mira la señal entre rondas: la ronda de 25 que esté a medias termina
+ * (cortarla dejaría documentos a medio conformar).
+ */
+export function detenerMantenimientoManual() {
+    if (!mantManualEnCurso) return { ok: false, motivo: 'no hay ningún mantenimiento manual en curso' };
+    pararMantManual = true;
+    return { ok: true, mensaje: 'Deteniendo el mantenimiento manual: acaba la ronda en curso y para. El modo no cambia.' };
 }
 
 /** Calcula el ms-epoch del siguiente hito temporal para 'apagado-hasta'. */
@@ -2330,15 +2344,55 @@ function calcularHasta(hasta) {
     }
 }
 
+const MODOS_CONFORMADOR = ['diferido', 'apagado', 'apagado-hasta'];
+// ¿Se ha cambiado el modo en ESTA sesión? La carga del arranque espera a Atlas; si en esos segundos alguien
+// ya tocó el interruptor, su elección es más nueva que la guardada y la carga no debe pisarla.
+let modoCambiadoEnSesion = false;
+
 /**
- * Cambia el modo del Conformador en caliente.
+ * Guarda el modo en Mongo (ajustes/_id:'conformador'). Sin esto, cada despliegue (git pull + contenedor
+ * nuevo) lo devolvía EN SILENCIO al valor del .env: quien lo había encendido desde el panel creía que seguía
+ * trabajando y llevaba días parado. Mismo patrón que «CDU sin IA» (utils/ajustes-ingesta.js). Best-effort:
+ * si la BD falla, el modo sigue valiendo en memoria para esta sesión.
+ */
+async function guardarModoConformador() {
+    try {
+        await (await conectarDB()).collection('ajustes').updateOne(
+            { _id: 'conformador' },
+            { $set: { modo: modoConformador, apagadoHasta: conformadorApagadoHasta, fecha: new Date() } },
+            { upsert: true });
+    } catch (e) {
+        console.error('Conformador: no se pudo guardar el modo (queda solo en memoria):', e.message);
+    }
+}
+
+/** Carga el modo guardado (una vez, al arrancar). Si no hay nada guardado, se queda el del .env. */
+async function cargarModoConformador() {
+    try {
+        const d = await (await conectarDB()).collection('ajustes').findOne({ _id: 'conformador' });
+        if (!d || !MODOS_CONFORMADOR.includes(d.modo)) return false;
+        if (modoCambiadoEnSesion) return true; // ya lo eligió alguien en el panel mientras cargaba
+        modoConformador = d.modo;
+        conformadorApagadoHasta = d.modo === 'apagado-hasta' ? (Number(d.apagadoHasta) || null) : null;
+        // Una pausa temporal sin fecha no podría vencer nunca: se trata como manual. (Si ya venció mientras la
+        // app estaba parada, la primera pasada de quizasMantenimiento la pasa a 'diferido' y lo guarda.)
+        if (modoConformador === 'apagado-hasta' && !conformadorApagadoHasta) modoConformador = 'apagado';
+        return true;
+    } catch {
+        return false; // sin BD todavía: se queda el valor del entorno
+    }
+}
+
+/**
+ * Cambia el modo del Conformador en caliente y lo guarda. NO toca una pasada manual en curso: para
+ * eso está detenerMantenimientoManual (antes 'apagado' la paraba también, y apagar el automático y
+ * parar la pasada eran la misma orden).
  * @param {object} opts
  * @param {'diferido'|'apagado'|'apagado-hasta'} opts.modo
  * @param {'proxima-hora'|'proximo-dia'|'proxima-semana'} [opts.hasta] — requerido si modo='apagado-hasta'
  */
 export function configurarConformador({ modo, hasta } = {}) {
-    const MODOS = ['diferido', 'apagado', 'apagado-hasta'];
-    if (!MODOS.includes(modo))
+    if (!MODOS_CONFORMADOR.includes(modo))
         return { ok: false, motivo: `Modo inválido: "${modo}". Valores: diferido, apagado, apagado-hasta.` };
 
     if (modo === 'apagado-hasta') {
@@ -2351,8 +2405,9 @@ export function configurarConformador({ modo, hasta } = {}) {
     }
 
     modoConformador = modo;
+    modoCambiadoEnSesion = true;
     if (modo === 'diferido') conformadorDormido = false;      // permitir que el auto compruebe pronto
-    if (modo === 'apagado') pararMantManual = true;           // además, DETIENE un mantenimiento manual en curso
+    guardarModoConformador();                                 // en segundo plano: la respuesta no espera a Atlas
 
     const info = modo === 'apagado-hasta'
         ? `apagado hasta ${new Date(conformadorApagadoHasta).toLocaleString('es-ES')}`
@@ -2361,12 +2416,14 @@ export function configurarConformador({ modo, hasta } = {}) {
     return { ok: true, ...estadoConformador() };
 }
 
-/** Devuelve el estado actual del Conformador (para GET /api/mantenimiento/estado). */
+/** Devuelve el estado actual del Conformador (para GET /api/mantenimiento/estado y el panel). */
 export function estadoConformador() {
     return {
         modo: modoConformador,
         dormido: conformadorDormido,
         mantenimientoManual: mantManualEnCurso,
+        deteniendo: mantManualEnCurso && pararMantManual,    // se pidió parar; acaba la ronda en curso
+        reposoMs: MANTENIMIENTO_REPOSO_MS,                   // para que el panel diga «tras N min» sin adivinarlo
         apagadoHasta: conformadorApagadoHasta ? new Date(conformadorApagadoHasta).toISOString() : null,
         ultimaRevision: ultimaRevisionMant ? new Date(ultimaRevisionMant).toISOString() : null,
     };
@@ -2429,10 +2486,16 @@ export async function iniciarVigilante() {
     // Y un primer barrido inmediato de lo que ya hubiera en el Inbox al arrancar.
     procesarCola().catch(e => console.error('Vigilante (escaneo inicial):', e));
 
+    // Modo guardado desde el panel. Va DESPUÉS de montar el vigilante para que un Atlas lento no retrase la
+    // vigilancia del Inbox; mientras tanto rige el del .env, y da igual: el automático exige 5 min de reposo.
+    const guardado = await cargarModoConformador();
+    const origen = guardado ? 'elegido en el panel' : 'del .env';
     if (modoConformador === 'diferido') {
-        console.log(`🧹 Conformador en AUTO (opt-in): mantenimiento tras ${Math.round(MANTENIMIENTO_REPOSO_MS / 1000)}s de Inbox inactivo.`);
+        console.log(`🧹 Conformador AUTOMÁTICO (${origen}): una pasada tras ${Math.round(MANTENIMIENTO_REPOSO_MS / 1000)}s de Inbox inactivo.`);
+    } else if (modoConformador === 'apagado-hasta') {
+        console.log(`🧹 Conformador en PAUSA (${origen}) hasta ${new Date(conformadorApagadoHasta).toLocaleString('es-ES')}; luego, automático.`);
     } else {
-        console.log('🧹 Conformador MANUAL: no corre solo. Dispáralo con POST /api/mantenimiento (activar=0|N|-1, intervalo=N).');
+        console.log(`🧹 Conformador MANUAL (${origen}): no corre solo. Lánzalo desde el panel (Mantenimiento) o actívale el modo automático.`);
     }
 
     return watcher;
