@@ -464,6 +464,20 @@
                   </div>
                 </div>
               </div>
+              <!-- 🧭 INSPECCIÓN CON IA de las carpetas complejas ANTES de ingerirlas (agente de estructura, de serie).
+                   Una llamada por árbol en vez de muchas por documento; ver utils/inspeccion-auto.js. -->
+              <div style="display: flex; align-items: center; gap: 16px; margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--line)" class="admin-only">
+                <label class="switch"><input type="checkbox" id="inspIASwitch" /><span class="slider"></span></label>
+                <div>
+                  <b>🧭 Inspeccionar carpetas con IA antes de ingerir</b>
+                  <div class="muted" style="font-size: 12px">
+                    Cada carpeta COMPLEJA (varios documentos, subcarpetas o mezcla de audio, PDF, programas…) la
+                    interpreta la IA de una vez: colección, serie, editorial, materia y CDU, revistas y su cabecera,
+                    audiolibros, transmedia, software, libros desglosados. Deja sus guías y la ingesta las obedece.
+                    Si la IA no responde, la carpeta espera y se reintenta; lo dudoso sigue las reglas de siempre.
+                  </div>
+                </div>
+              </div>
             </div>
             <!-- 🧭 INGESTA GUIADA: explorador del Inbox. Marca por carpeta una acción + pistas → _guia.json. -->
             <details class="card foldcard admin-only" id="fcGuiaInbox" data-fold="pc">

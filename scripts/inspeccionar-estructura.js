@@ -15,6 +15,11 @@
  * FASE 2: sin --escribir enseña qué `_guia.json` escribiría en cada carpeta y NO escribe nada. Nunca pisa una
  * guía tuya (hecha en el Inspector); las carpetas dudosas solo se escriben con --incluir-dudosas.
  * Ver src/utils/guias-estructura.js.
+ *
+ * DE SERIE, el vigilante hace esto mismo solo con cada carpeta compleja del Inbox (utils/inspeccion-auto.js). Este
+ * CLI queda para árboles fuera del Inbox, para ver la propuesta ANTES de soltar algo, y para reinspeccionar.
+ * Con --escribir, AFINA las guías igual que la inspección automática: ISSN comprobado de las cabeceras de revista
+ * y orden/títulos de los libros desglosados (utils/afinar-guias.js).
  */
 import 'dotenv/config';
 import '../src/config.js';
@@ -22,6 +27,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { esqueletoArbol, interpretarEstructura } from '../src/utils/agente-estructura.js';
 import { planGuias, escribirGuias } from '../src/utils/guias-estructura.js';
+import { afinarPlan } from '../src/utils/afinar-guias.js';
 
 const args = process.argv.slice(2);
 const RUTA = args.find((a) => !a.startsWith('--'));
@@ -80,8 +86,9 @@ async function main() {
         const sangria = '  '.repeat(c.nivel);
         const nombre = c.ruta === '.' ? esq.raiz : c.ruta.split('/').pop();
         if (!i) { console.log(`   ${sangria}${nombre}  — ${noVistas.has(c.ruta) ? '(tanda fallida: la IA no llegó a verla)' : '(sin interpretar)'}`); continue; }
-        const extra = [i.cdu && `CDU ${i.cdu}`, i.editorial && `ed. ${i.editorial}`,
-            i.nombre_canonico && i.nombre_canonico !== nombre && `«${i.nombre_canonico}»`].filter(Boolean).join(' · ');
+        const extra = [i.contenido && i.contenido !== 'libros' && `contiene: ${i.contenido}`, i.cdu && `CDU ${i.cdu}`, i.editorial && `ed. ${i.editorial}`,
+            i.nombre_canonico && i.nombre_canonico !== nombre && `«${i.nombre_canonico}»`,
+            i.periodicidad && i.periodicidad, i.anio && String(i.anio)].filter(Boolean).join(' · ');
         const conf = i.confianza < 0.6 ? `  ⚠️ confianza ${i.confianza.toFixed(2)}` : '';
         console.log(`   ${sangria}${ICONO[i.tipo] || '•'} ${nombre}  → ${i.tipo.toUpperCase()}${extra ? '  · ' + extra : ''}${conf}`);
         if (i.confianza < 0.6 && i.razon) console.log(`   ${sangria}     ↳ ${i.razon}`);
@@ -99,11 +106,24 @@ async function main() {
     console.log(`\n   Plan de guías (_guia.json):  ${cuenta('nueva')} nuevas · ${cuenta('actualizar')} a actualizar · `
         + `${cuenta('respetada')} tuyas respetadas · ${cuenta('dudosa')} dudosas · ${cuenta('omitida')} sin guía`);
 
+    // Con --escribir se AFINA antes de escribir (ISSN comprobado, orden de los desgloses): es lo que hace la
+    // inspección automática. Sin --escribir no, porque consulta Wikidata, el catálogo y quizá la IA.
+    if (ESCRIBIR) {
+        const notas = await afinarPlan(plan, esq);
+        if (notas.length) { console.log('\n   Afinado:'); for (const n of notas) console.log(`     · ${n}`); }
+    }
+
     // Qué se escribiría, resumido: una línea por carpeta que recibe guía.
     const resumen = (g) => {
         if (!g) return '';
         const p = g.perfil || {};
-        return [g.accion === 'obra' && `obra «${p.obra}»`, p.coleccion && `colección «${p.coleccion}»`,
+        const ACC = { audiolibro: 'audiolibro', 'coleccion-audiolibros': 'colección de audiolibros', transmedia: 'transmedia',
+            software: 'software', 'libro-material': 'libro con material', desglose: 'libro desglosado' };
+        return [g.accion === 'obra' && `obra «${p.obra}»`, ACC[g.accion],
+            g.desglose && (g.desglose.principal ? `libro entero «${g.desglose.principal}»` : `${(g.desglose.orden || []).length} partes a coser`),
+            p.tipo_probable === 'revista' && `revistas de «${p.cabecera || '?'}»${p.issn ? ` (ISSN ${p.issn})` : ''}`,
+            p.tipo_probable === 'comic' && 'cómics',
+            p.coleccion && `colección «${p.coleccion}»`,
             p.editorial_probable && `editorial «${p.editorial_probable}»`, p.materia_cdu && `CDU ${p.materia_cdu}`,
             p.sin_coleccion && 'sin colección'].filter(Boolean).join(' · ');
     };
@@ -120,7 +140,6 @@ async function main() {
     }
     const n = await escribirGuias(plan);
     console.log(`\n   ✔ Escritas ${n} guías. El vigilante las obedecerá en la próxima ingesta de este árbol.\n`);
-    process.exit(0);
     process.exit(0);
 }
 

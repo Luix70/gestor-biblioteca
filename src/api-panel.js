@@ -46,7 +46,7 @@ import { enriquecerAutor } from './utils/enriquecer-autor.js';
 import { listarUbicacionesGestion, crearUbicaciones, renombrarUbicacion, moverEstanteria, fusionarEstanteria, explotarUbicacion, eliminarUbicacion, asignarUbicacion, quitarUbicacion, ordenarEstanterias, ordenarLibros, librosDeEstanteria, registrarNfcUbicacion } from './utils/gestion-ubicaciones.js';
 import { reenriquecerDoc } from './utils/reenriquecer.js';
 import { investigarIdentificador, aplicarCotejo, docsQueComparten } from './utils/cotejo.js';
-import { cduSinIAActivo, setCduSinIA } from './utils/ajustes-ingesta.js';
+import { cduSinIAActivo, setCduSinIA, inspeccionIAActiva, setInspeccionIA } from './utils/ajustes-ingesta.js';
 import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fondo.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
 import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
@@ -335,15 +335,43 @@ async function docOcultoParaGuest(db, doc) {
 }
 
 /**
+ * Guía que se GUARDA desde el Inspector: la del formulario FUSIONADA con la que ya había.
+ *
+ * El formulario solo maneja la acción, el alcance, el tipo probable, la colección y las acciones por fichero. Antes
+ * la guía se SUSTITUÍA entera, así que cambiar la acción de una carpeta borraba lo que el formulario no enseña: su
+ * patrón de nombres, sus grupos y adjuntos, las acciones por fichero no tocadas y, con la inspección con IA de
+ * serie, las pistas del agente (cabecera e ISSN de una revista, CDU de materia, editorial, detalle de un desglose).
+ * Reglas: lo del formulario MANDA (un campo suyo vacío = borrado); lo demás se conserva. Al editarla, la guía pasa
+ * a ser TUYA: se quita origen:'agente', y el agente ya no la reescribirá. Si pones una colección a mano, se quita el
+ * «sin colección» del agente (si no, la tuya se ignoraría).
+ */
+const CAMPOS_PERFIL_FORMULARIO = ['tipo_probable', 'coleccion'];
+export function fusionarGuiaInspector(actual, entrante) {
+    if (!actual) return entrante;
+    const perfil = { ...(actual.perfil || {}) };
+    for (const k of CAMPOS_PERFIL_FORMULARIO) delete perfil[k];
+    Object.assign(perfil, entrante.perfil || {});
+    delete perfil.origen;
+    if (perfil.coleccion) delete perfil.sin_coleccion;
+    return {
+        ...actual,
+        ...entrante,
+        perfil,
+        archivos: 'archivos' in entrante ? entrante.archivos : actual.archivos,
+    };
+}
+
+/**
  * Rutas del PANEL DE CONTROL (montadas bajo /api). Acciones de operación: vigilante, papelera,
  * cuarentena, purga de obras, ingesta por día. (Mantenimiento y estadísticas viven en app.js.)
  */
 export function rutasPanel() {
     const r = express.Router();
 
-    // Estado consolidado (vigilante + conformador + ajuste «CDU sin IA») para la cabecera y la página Entrada.
+    // Estado consolidado (vigilante + conformador + ajustes «CDU sin IA» e «Inspección con IA») para la cabecera y
+    // la página Entrada.
     r.get('/estado', (req, res) => {
-        res.json({ vigilante: estadoVigilante(), conformador: estadoConformador(), cduSinIA: cduSinIAActivo() });
+        res.json({ vigilante: estadoVigilante(), conformador: estadoConformador(), cduSinIA: cduSinIAActivo(), inspeccionIA: inspeccionIAActiva() });
     });
 
     // Pausar / reanudar el vigilante. Body { activo: bool }.
@@ -358,6 +386,14 @@ export function rutasPanel() {
         const { activo } = req.body || {};
         if (typeof activo !== 'boolean') return res.status(400).json({ ok: false, motivo: 'falta { activo: true|false }' });
         res.json({ ok: true, cduSinIA: await setCduSinIA(activo) });
+    });
+
+    // «Inspección con IA» de las carpetas complejas del Inbox antes de ingerirlas (agente de estructura, de serie).
+    // Interruptor EN CALIENTE junto a los anteriores. Body { activo: bool }.
+    r.post('/ingesta/inspeccion-ia', async (req, res) => {
+        const { activo } = req.body || {};
+        if (typeof activo !== 'boolean') return res.status(400).json({ ok: false, motivo: 'falta { activo: true|false }' });
+        res.json({ ok: true, inspeccionIA: await setInspeccionIA(activo) });
     });
 
     // Ingesta por día (gráfica). ?dias=30
@@ -2696,7 +2732,7 @@ export function rutasPanel() {
             if (!abs) return res.status(400).json({ ok: false, motivo: 'ruta fuera del Inbox' });
             const st = await stat(abs).catch(() => null);
             if (!st || !st.isDirectory()) return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' });
-            const guia = await escribirGuia(abs, req.body?.guia || {});
+            const guia = await escribirGuia(abs, fusionarGuiaInspector(await leerGuia(abs), req.body?.guia || {}));
             res.json({ ok: true, guia });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

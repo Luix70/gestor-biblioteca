@@ -1329,6 +1329,14 @@ de ficheros clasificado por CDU.
       el número que dice si se perdió algo. Antes de ingerir sale como «previsión» (pendiente, no fallo);
       después juzga. Cada fichero que entró ENLAZA a su ficha. Una sola consulta a Mongo con todos los
       nombres. Reutiliza el CSS del informe de Integridad (CSS_INFORME) — un solo lenguaje visual.
+    · GUARDAR DESDE EL INSPECTOR FUSIONA (POST /inbox/guia → api-panel · fusionarGuiaInspector): el formulario
+      solo maneja acción, alcance, tipo probable, colección y acciones por fichero; lo demás de la guía EXISTENTE
+      se conserva (patrón, grupos, adjuntos, acciones por fichero no tocadas, detalle de un desglose, y las pistas
+      del agente: cabecera/ISSN de revista, CDU de materia, editorial). Antes la guía se SUSTITUÍA entera y cambiar
+      la acción de una carpeta borraba su patrón. Los campos del formulario mandan (vacío = borrado). Al editarla,
+      la guía pasa a ser TUYA (se quita origen:'agente'); poner una colección a mano quita el «sin colección» del
+      agente. El desplegable de acciones incluye ya audiolibro, colección de audiolibros, transmedia y libro
+      desglosado.
     · 🧩 PATRÓN DE NOMBRES (botón «🧩 Patrón» por carpeta en el Inspector, admin): para colecciones cuyos
       ficheros siguen un mismo esquema de nombre (p. ej. Loeb «L035-(1914) Autor Título [trad]» o Harvard
       «isbn.Editorial.Título.Autor.Mes.Año»). DETECTA el patrón (POST /inbox/detectar-patron) mirando la
@@ -2182,6 +2190,10 @@ de ficheros clasificado por CDU.
       motor-enriquecimiento vía utils/ajustes-ingesta.js·cduSinIAActivo) y se PERSISTE en Mongo
       (ajustes/_id:'ingesta') para sobrevivir a reinicios (se carga al arrancar). Arranca con el valor del
       .env. Estado en GET /estado (campo cduSinIA); cambio en POST /ingesta/cdu-sin-ia {activo}.
+    · INTERRUPTOR «🧭 Inspeccionar carpetas con IA antes de ingerir» (admin, misma tarjeta, id #inspIASwitch): el
+      agente de estructura inspecciona cada carpeta COMPLEJA del Inbox antes de ingerirla (ver «AGENTE DE
+      ESTRUCTURA DE SERIE»). De serie ACTIVO; persiste en Mongo (ajustes/_id:'ingesta', inspeccionIA). Estado en
+      GET /estado (inspeccionIA); cambio en POST /ingesta/inspeccion-ia {activo}.
 
     · 🧰 EJECUTAR SCRIPT — lanzar los scripts de scripts/ desde el panel, con la salida en el visor de Logs.
       Un desplegable AGRUPADO por categoría + un buscador (filtra por nombre/resumen/propósito); al elegir uno
@@ -3562,3 +3574,99 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
         su editorial, Derrida en «Cultural Memory in the Present», y los tomos de una Cambridge History heredan
         la coleccion de la serie A TRAVES de la carpeta de materia, con la CDU saneada (97 → 94). El contraste,
         con casos reales: Lang 51→512, Strogatz 5→517.93, criptografia 65 → AVISO sin cambio, 512.64 intacto.
+
+── AGENTE DE ESTRUCTURA DE SERIE + QUE CONTIENE CADA CARPETA (14-sep-2026) ──────────────
+    * DE SERIE (utils/inspeccion-auto.js · prepararCarpeta, llamado por vigilante · clasificarDirectorio): cada
+      carpeta de la RAIZ del Inbox, en cuanto termina de copiarse y ANTES de clasificarla, pasa por el agente si
+      es COMPLEJA; deja sus _guia.json y la clasificacion de ese mismo escaneo ya las obedece. Es lo mismo que
+      inspeccionar-estructura --escribir (mismo plan, mismo afinado), sin tener que acordarse.
+      Decisiones del usuario:
+      - Solo COMPLEJAS (evaluarComplejidad, sin abrir nada): 2+ documentos DISTINTOS (libro.pdf + libro.epub es
+        uno), alguna subcarpeta que no sea de portadas, mezcla de tipos (audio + PDF…) o cualquier ejecutable/
+        imagen de disco. No cuentan los acompañantes de descarga (.txt .url .nfo .opf .html…). Un libro con su
+        portada no gasta IA.
+      - Si la IA NO responde: la carpeta ESPERA en el Inbox (las demas siguen) y se reintenta cada
+        INSPECCION_IA_REINTENTO_MIN (15); pasadas INSPECCION_IA_ESPERA_MAX_H (6) sin IA, se ingiere con las
+        reglas de siempre. Dentro de cada intento, UN solo reintento de 10 s (el CLI conserva los de 20 y 45 s):
+        medido, con tres intentos cada fallo retenia al vigilante 65-95 s.
+      - Lo DUDOSO (confianza < 0.6) no se escribe: esa parte sigue las reglas de siempre y queda anotada.
+      Una interpretacion INCOMPLETA (alguna tanda fallida) no se aplica a medias: se reintenta entera.
+      MEMORIA: marca «.inspeccion-ia.json» en la raiz de la carpeta (estado hecha|fallida|agotada, intentos,
+      proximo, resumen por clase, dudosas, notas del afinado, subcarpetas de primer nivel). Si llegan SUBCARPETAS
+      NUEVAS a una carpeta ya inspeccionada (un buzon de coleccion), se reinspecciona. Nunca en modo PLAN (la
+      vista previa del Inspector). Una carpeta guiada A MANO en su raiz no se inspecciona (manda el usuario).
+      INTERRUPTOR «🧭 Inspeccionar carpetas con IA antes de ingerir» en Entrada, junto a «CDU sin IA»
+      (#inspIASwitch; POST /ingesta/inspeccion-ia {activo}; GET /estado → inspeccionIA). Persiste en Mongo
+      (ajustes/_id:'ingesta', campo inspeccionIA); de serie ACTIVO (INSPECCION_IA=1 en config.js).
+    * SEGUNDA DIMENSION: QUE CONTIENE («contenido»), independiente de como esta organizada («tipo»): libros,
+      revistas, comics, audiolibro, coleccion-audiolibros, transmedia, software, libro-material, libro-desglosado,
+      escaneo, mixta. Decide la RUTA de ingesta. Para eso el esqueleto lleva ahora, por carpeta: reparto por
+      extension («mp3×15 pdf×2 jpg×1»), nombres de muestra TAMBIEN de lo que no es documento (primero los
+      ejecutables), cuanto domina en tamaño el documento mayor (libro entero junto a sus capitulos) y los ISSN
+      escritos en los nombres (solo la forma con guion y con digito de control valido).
+      Contenido → guia (guias-estructura · guiaDesdeInterpretacion): software / libro-material / audiolibro /
+      coleccion-audiolibros / transmedia → accion del mismo nombre; libro-desglosado → accion:'desglose';
+      revistas → perfil de revista (abajo); comics → tipo_probable:'comic'. NUEVAS ACCIONES DE GUIA en el
+      vigilante: audiolibro, coleccion-audiolibros, transmedia y desglose. Las tres primeras FUERZAN rutas que
+      ya existian pero a las que solo se llegaba por los detectores en cascada, que fallan en los limites (un
+      audiolibro con librillo y contraportada en PDF acababa como «transmedia debil»). Valen tambien a mano.
+      Nuevo tipo «parte»: subcarpeta que es parte de su madre (CD1, «Audio», los años de una revista): sin guia.
+    * REDES EN CODIGO (no depender de que el prompt acierte; cada una salio de un fallo MEDIDO con la IA real):
+      - Un CAJON nunca es unidad ni cabecera: la IA ponia a «Programas», «Audiolibros», «Revistas» el contenido
+        de sus hijas — «Programas» se habria ingerido como UN solo software, y la «cabecera» «Revistas» saco de
+        Wikidata el ISSN de otra publicacion. (La RAIZ si puede serlo: «Muy Historia/» con sus años.)
+      - desarmarContenedores: una unidad que contiene OTRAS unidades es un contenedor («English Readers» con
+        varias lecturas graduadas, cada una transmedia). Las «partes» no cuentan, y tambien lo es por el NOMBRE
+        (CD1, Disco 2, Audio, Extras, Parte 3…) aunque la IA no lo marque: un audiolibro con CD1/CD2 se desarmaba.
+        Una coleccion de audiolibros deja de serlo si alguna hija no es audiolibro (una carpeta mixta con EPUB).
+      - Solo las unidades QUE SE APLICAN (se escriben, o son del usuario) dejan sin guia a sus hijas: una unidad
+        DUDOSA silenciaba al audiolibro claro que tenia dentro.
+      - promoverTiradasDeRevista: una carpeta cuyas hijas son todas numeros de la MISMA cabecera es esa revista.
+      - Confusion de campos: si la IA pone el contenido en «tipo» (tipo:software), se recoloca (asi se perdian
+        justo el programa y el libro desglosado).
+      - Los detectores automaticos de libro desglosado ya no ceden ante una guia del agente que solo aporta
+        organizacion (coleccion, CDU): si el agente no vio el desglose, siguen siendo la red de siempre.
+    * REVISTAS. La guia lleva perfil.tipo_probable:'revista' + perfil.cabecera (nombre canonico, sin fecha ni
+      numero) + sin_coleccion (+ periodicidad, + issn si se comprueba). NO se usa perfil.coleccion: al catalogar,
+      la coleccion (paso 2b) se crea ANTES que la cabecera (2d) y esta la heredaria con tipo 'libro'. Por lo
+      mismo: perfilHeredado deja de heredar una coleccion de mas arriba en cuanto una guia mas cercana da la
+      cabecera; el vigilante no crea coleccion «2019» en una carpeta dentro de una tirada (enTiradaRevista); y
+      servicio-ingesta (paso 1ter) quita la coleccion de carpeta a un numero con cabecera de guia.
+      Aplicacion (servicio-ingesta 1ter, SOLO si el documento resulta ser revista): cabecera_nombre (dato de
+      TRANSITO que motor-catalogo 2d usa en vez de deducirla del titulo, que con «HIV_163_0719.pdf» sale mal, y
+      retira) + el ISSN de la guia si el fichero no trae uno. Si el fichero trae OTRO ISSN, manda el suyo y avisa.
+      ISSN — la IA NO lo da (recuerda mal los ISSN; uno falso con digito de control valido crearia una cabecera
+      falsa). afinar-guias · resolverIssnCabecera, en orden: escrito en los nombres (uno solo) → cabecera ya en el
+      catalogo con ese nombre → Wikidata por titulo COMPROBADO DE VUELTA (el nombre registrado para ese ISSN,
+      Wikidata/ISSN Portal, tiene que casar con la cabecera) y nunca para titulos genericos. Si no hay ninguno, la
+      guia va sin ISSN y lo aporta el primer numero al ingerirse. Las fechas/numeros de cada ejemplar siguen
+      saliendo de su propio fichero (nombre, portada, codigo de barras): lo que da la carpeta es la cabecera.
+    * LIBRO DESGLOSADO (accion:'desglose'). Opinion dada al usuario y aplicada: UN documento con UN PDF cosido (lo
+      que ya hacia el desglose puro), no un documento por capitulo (ensuciaria catalogo, busqueda, duplicados y
+      sidecars; el ISBN es del libro) ni un documento multi-fichero (portada, sidecars, hash, OCR, Integridad y
+      copia USB tendrian que aprender a manejar varios ficheros por documento). Lo de navegar capitulos se da
+      con un INDICE sobre el PDF cosido.
+      afinar-guias · detallarDesglose: 1) detector local (libro entero + partes numeradas) → gratis; 2) si ≥90%
+      de las partes dicen su sitio en el nombre (numero, Preface/Index…; libro-desglosado · tienePistaDeOrden),
+      orden determinista; 3) si no (partes con nombre de TITULO), UNA llamada con los nombres, tamaño, paginas y
+      el SUMARIO (pdftotext de las primeras paginas del preliminar) → {principal, orden, titulos}. Lo que la IA
+      olvide se añade al final (coser sin una parte seria perder contenido). Si falla, orden por nombre.
+      Vigilante · materializarDesgloseGuiado: con libro entero → materializarDesglose (capitulos de material);
+      sin el → materializarDesglosePuro en el orden de la guia (todas PDF; si no, reglas de siempre).
+      INDICE: al coser se miden las paginas de cada parte (pdfinfo) → libro_material.capitulos [{titulo,pagina}]
+      en la guia (si una parte no se mide o la suma no cuadra con el PDF cosido, NO hay indice: uno descuadrado
+      llevaria a la pagina equivocada) → ingestarLibroConMaterial lo guarda en el documento (biblioteca.capitulos)
+      solo si el principal catalogado ES ese PDF cosido.
+      VISOR: «☰» en la barra del visor PDF de la ficha, como el del lector EPUB (iniciarLectorPdf · indicePdf):
+      los capitulos del documento o, si no hay, los MARCADORES del propio PDF (un nivel de anidacion). Solo para
+      el texto principal (con otro texto del selector, las paginas no corresponderian).
+    * PROBADO (14-sep): 44 comprobaciones sin IA (complejidad, mapeo, contenedores, partes, marca: espera,
+      reintento, rendicion a las 6 h, reinspeccion por subcarpeta nueva, guiadas a mano) + 4 pasadas de la IA real
+      sobre un arbol con dos revistas (una con nombres cripticos), un audiolibro con librillo, una mezcla, un
+      programa, un libro partido por titulos, una lectura graduada y materias: todo acertado en la ultima, ISSN de
+      Historia de Iberia Vieja 1699-7913 sacado del catalogo, y el plan REAL del vigilante (planificarInbox) con
+      las unidades esperadas (24 numeros sueltos sin colecciones «2019/2020», cada audiolibro/transmedia/software
+      como unidad). El orden por SUMARIO con PDF reales (pdf-lib) y el «☰» en el navegador (salta a la pag. 12 =
+      capitulo 3). SIN PROBAR aqui: el cosido con qpdf (no esta en el PC; si en el NAS) y una ingesta real.
+    * COSTE: una llamada por cada 50 subcarpetas de un arbol complejo (~35-40 s) + una por libro desglosado cuyas
+      partes se llamen por su titulo + consultas gratuitas a Wikidata/catalogo por cabecera de revista.

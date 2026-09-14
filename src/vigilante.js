@@ -22,8 +22,10 @@ import { esAudio } from './utils/lector-audio.js';
 import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf suelto (Calibre): metadatos + portada referenciada
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, perfilHeredado, NOMBRE_GUIA } from './utils/guia-ingesta.js';
-import { detectarLibroDesglosado, detectarDesglosePuro } from './utils/libro-desglosado.js'; // libro + su desglose
-import { unirPdfs } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
+import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
+import { tituloDeNombre } from './utils/afinar-guias.js';
+import { detectarLibroDesglosado, detectarDesglosePuro, ordenarPartesLibro } from './utils/libro-desglosado.js'; // libro + su desglose
+import { unirPdfs, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB, esFalloDeConexionMongo } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
@@ -974,6 +976,17 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                     console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
                     continue;
                 }
+                // INSPECCIÓN CON IA (de serie, utils/inspeccion-auto.js): si la carpeta es compleja, el agente de
+                // estructura interpreta su árbol y deja sus _guia.json ANTES de clasificarla, y lo de abajo ya las
+                // obedece en este mismo escaneo. Si la IA falla, la carpeta ESPERA (seguir=false) y se reintenta;
+                // las demás siguen. Nunca en modo PLAN: la vista previa del Inspector no debe gastar IA ni escribir.
+                if (!modoPlan) {
+                    const prep = await prepararCarpeta(ruta).catch((err) => {
+                        console.warn(`  🧭 ${e.name}: fallo al preparar la inspección (${err.message}) → reglas de siempre.`);
+                        return { seguir: true };
+                    });
+                    if (!prep.seguir) continue;
+                }
             }
             // GUÍA de ingesta (_guia.json). aplanar/explotar ya se aplicaron en la pasada previa; aquí:
             //   · OMITIR  → NO catalogar nada de esta carpeta (se deja intacta en el Inbox).
@@ -1014,11 +1027,43 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
+            // RUTAS FORZADAS POR GUÍA (las escribe el agente de estructura; valen también a mano). Son las mismas
+            // unidades que abajo decide la cascada de detectores, pero sin su margen de error: un audiolibro con dos
+            // PDF de acompañamiento ya no cae en «transmedia débil», ni una carpeta con un curso en «audiolibro».
+            if (guiaCarpeta?.accion === 'audiolibro') {
+                audiolibroVistas.add(ruta);
+                unidades.push({ esAudiolibro: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
+            if (guiaCarpeta?.accion === 'coleccion-audiolibros') {
+                colAudioVistas.add(ruta);
+                unidades.push({ esColeccionAudio: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
+            if (guiaCarpeta?.accion === 'transmedia') {
+                transmediaVistas.add(ruta);
+                unidades.push({ esTransmedia: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
+            if (guiaCarpeta?.accion === 'desglose') {
+                // En PLAN solo se anuncia: coser fabrica un PDF y mueve las partes, y la vista previa no toca nada.
+                if (modoPlan) { unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] }); continue; }
+                if (await materializarDesgloseGuiado(ruta, guiaCarpeta.desglose || {})) {
+                    unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
+                    continue;
+                }
+                // No se pudo: sigue abajo con las reglas de siempre.
+            }
             // LIBRO DESGLOSADO (AUTOMÁTICO): carpeta con UN libro entero + su desglose en capítulos/material.
             // Se distingue de una COLECCIÓN de libros por tres señales a la vez (nombre del fichero ≈ nombre de
             // la carpeta, dominio de tamaño y nombres de «parte»); ver utils/libro-desglosado.js. Solo se aplica
             // si el usuario NO ha guiado la carpeta: su guía siempre manda. Se espera a que termine de copiarse.
-            if (!guiaEsSignificativa(guiaCarpeta)) {
+            // Una guía del AGENTE que solo aporta organización (colección, CDU…) NO lo desactiva: si el agente no
+            // vio el desglose, este detector sigue siendo la red de siempre. Sí cede si la guía ya decide qué es
+            // la carpeta (una acción).
+            const guiaDecide = guiaEsSignificativa(guiaCarpeta)
+                && (guiaCarpeta.perfil?.origen !== 'agente' || (guiaCarpeta.accion && guiaCarpeta.accion !== 'normal'));
+            if (!guiaDecide) {
                 const desg = await detectarLibroDesglosado(ruta);
                 if (desg && await carpetaEstable(ruta) && await materializarDesglose(ruta, desg)) {
                     unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
@@ -1132,7 +1177,12 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                     // la carpeta se disuelve al vaciarse como cualquier drop suelto. Y si la guía da un nombre de
                     // colección —el CANÓNICO de la serie, «Cultural Memory in the Present» y no el de la carpeta—,
                     // se usa ese.
-                    const sinColeccion = !!guiaCarpeta?.perfil?.sin_coleccion;
+                    // Dentro de una tirada de REVISTA (esta guía u otra de más arriba da la cabecera), una carpeta por
+                    // año o por tomo no forma colección propia: la agrupación de los números es la CABECERA (motor-
+                    // catalogo, paso 2d). Sin esto, las subcarpetas «2019», «2020» que la IA dejó sin guía (dudosas)
+                    // se convertían en colecciones de libros llamadas «2019».
+                    const enTiradaRevista = !!(await perfilHeredado(ruta, INBOX).catch(() => ({}))).cabecera;
+                    const sinColeccion = !!guiaCarpeta?.perfil?.sin_coleccion || enTiradaRevista;
                     const nombreColeccion = guiaCarpeta?.perfil?.coleccion || e.name;
                     let esColeccion = !sinColeccion && !multiFormato && resto.length >= 2;
                     if (!esColeccion && !sinColeccion && !multiFormato && await coleccionExiste(nombreColeccion)) esColeccion = true;
@@ -1623,7 +1673,7 @@ async function materializarDesglose(dir, desg) {
             movidas++;
         }
         await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: desg.principal } });
-        console.log(`  📚 «${path.basename(dir)}»: LIBRO DESGLOSADO → «${desg.principal}» (×${desg.dominio} de tamaño) + ${movidas} parte(s) a «Desglose/» (adjunto).`);
+        console.log(`  📚 «${path.basename(dir)}»: LIBRO DESGLOSADO → «${desg.principal}»${desg.dominio ? ` (×${desg.dominio} de tamaño)` : ''} + ${movidas} parte(s) a «Desglose/» (adjunto).`);
         return true;
     } catch (err) {
         console.warn(`  ⚠️  desglose: no se pudo preparar «${path.basename(dir)}» (${err.message}); se deja como estaba.`);
@@ -1655,6 +1705,19 @@ async function materializarDesglosePuro(dir, puro) {
         console.warn(`  ⚠️  «${path.basename(dir)}»: el cosido salió con ${r.paginas} páginas para ${puro.partes.length} partes — se descarta por seguridad.`);
         return false;
     }
+    // ÍNDICE DE CAPÍTULOS del libro cosido: al coser se sabe cuántas páginas aporta cada parte, así que cada una
+    // empieza donde acabó la anterior. Es lo que permite al visor saltar a un capítulo SIN partir el documento en
+    // varios ficheros. Se mide ANTES de mover las partes a «Desglose/». Si una parte no se puede medir, o la suma
+    // no cuadra con el PDF cosido, NO hay índice: uno descuadrado llevaría a la página equivocada.
+    let capitulos = [];
+    let pagina = 1;
+    for (const parte of puro.partes) {
+        const n = await paginasPdf(path.join(dir, parte));
+        if (!n) { capitulos = []; break; }
+        capitulos.push({ titulo: puro.titulos?.[parte] || tituloDeNombre(parte), pagina });
+        pagina += n;
+    }
+    if (capitulos.length && r.paginas && pagina - 1 !== r.paginas) capitulos = [];
     try {
         const sub = path.join(dir, 'Desglose');
         await fs.mkdir(sub, { recursive: true });
@@ -1662,13 +1725,46 @@ async function materializarDesglosePuro(dir, puro) {
             const src = path.join(dir, parte);
             if (await rutaExiste(src)) await fs.rename(src, path.join(sub, parte));
         }
-        await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: nombre } });
-        console.log(`  🧵 «${path.basename(dir)}»: DESGLOSE PURO cosido → «${nombre}» (${r.paginas} págs. de ${puro.partes.length} partes); originales a «Desglose/».`);
+        await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: nombre, ...(capitulos.length ? { capitulos } : {}) } });
+        console.log(`  🧵 «${path.basename(dir)}»: DESGLOSE PURO cosido → «${nombre}» (${r.paginas} págs. de ${puro.partes.length} partes`
+            + `${capitulos.length ? `, índice de ${capitulos.length} capítulos` : ''}); originales a «Desglose/».`);
         return true;
     } catch (err) {
         console.warn(`  ⚠️  desglose puro: no se pudo preparar «${path.basename(dir)}» (${err.message}); se deja como estaba.`);
         return false;
     }
+}
+
+/**
+ * DESGLOSE GUIADO (accion:'desglose', la escribe el agente de estructura): el mismo destino que los dos casos
+ * automáticos de arriba, pero con lo que la guía ya sabe — el libro entero si está, y el ORDEN de lectura y los
+ * TÍTULOS de las partes, que el agente sacó del sumario cuando los nombres no lo decían («The Fall of Rome.pdf»).
+ * Los detectores automáticos exigen nombres numerados; esto cubre lo que se les escapaba. Devuelve false si no
+ * se puede (partes que no son PDF sin libro entero, qpdf ausente…): entonces siguen las reglas de siempre.
+ */
+async function materializarDesgloseGuiado(dir, d = {}) {
+    const EXT_PARTE = new Set(['.pdf', '.epub', '.mobi', '.azw', '.azw3', '.djvu', '.djv', '.chm', '.doc', '.docx', '.rtf']);
+    let docs;
+    try {
+        docs = (await fs.readdir(dir, { withFileTypes: true }))
+            .filter((e) => e.isFile() && !soloMetadatos(e.name) && !e.name.startsWith('_') && EXT_PARTE.has(path.extname(e.name).toLowerCase()))
+            .map((e) => e.name);
+    } catch { return false; }
+    if (docs.length < 2) return false;
+
+    // Libro ENTERO presente: se cataloga él y los capítulos viajan de material (no se cose nada).
+    if (d.principal && docs.includes(d.principal)) {
+        return materializarDesglose(dir, { principal: d.principal, partes: docs.filter((n) => n !== d.principal) });
+    }
+    // Solo partes: se COSEN en el orden de la guía. Lo que la guía no nombre va al final en el orden determinista
+    // (coser el libro sin una de sus partes sería perder contenido en silencio).
+    const enGuia = (d.orden || []).filter((n) => docs.includes(n));
+    const orden = [...enGuia, ...ordenarPartesLibro(docs.filter((n) => !enGuia.includes(n)))];
+    if (orden.some((n) => path.extname(n).toLowerCase() !== '.pdf')) {
+        console.warn(`  ⚠️  «${path.basename(dir)}»: libro desglosado sin el libro entero y con partes que no son PDF → no se puede coser; reglas de siempre.`);
+        return false;
+    }
+    return materializarDesglosePuro(dir, { partes: orden, titulos: d.titulos || {} });
 }
 
 async function materializarAdjuntos(dir, guia) {

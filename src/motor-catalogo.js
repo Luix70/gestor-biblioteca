@@ -268,10 +268,15 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         // pivote: cada número se cuelga de su cabecera y su identidad es (cabecera, clave-de-número),
         // NO el ISSN suelto (eso fusionaba TODOS los números en un solo documento). Sin fecha/nº →
         // miembro "sin fecha" de la cabecera (nunca se fusiona, nunca se pierde).
+        // `cabecera_nombre` = la cabecera CANÓNICA que da la guía de la carpeta (servicio-ingesta, paso 1ter): manda
+        // sobre la deducida del título del número, que con un nombre de fichero críptico sale mal. Es un dato de
+        // tránsito: se retira aquí para que no se guarde en el documento.
+        const cabeceraGuia = docFinal.cabecera_nombre || null;
+        delete docFinal.cabecera_nombre;
         if (docFinal.tipo_recurso === 'revista') {
             const cn = claveNumero(docFinal);
             if (cn) docFinal.clave_numero = cn; else delete docFinal.clave_numero;
-            const cabTitulo = tituloCabecera(docFinal.obra_titulo || docFinal.titulo);
+            const cabTitulo = cabeceraGuia || tituloCabecera(docFinal.obra_titulo || docFinal.titulo);
             if (docFinal.issn || cabTitulo) {
                 const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
                 const { _id, cdu: cduCab, creada } = await resolverCabecera(db, {

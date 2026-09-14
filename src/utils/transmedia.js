@@ -843,6 +843,16 @@ export async function ingestarLibroConMaterial(dirOrigen, { reciclarOrigen = tru
         } catch (e) { console.warn(`  ⚠️  no se pudo marcar ruta_fija/adjuntos del libro: ${e.message}`); }
     }
 
+    // ÍNDICE DE CAPÍTULOS de un libro COSIDO a partir de su desglose (título + página de inicio de cada parte, lo
+    // calculó el cosido). Solo si el libro catalogado ES el PDF cosido al que se refiere el índice: con otro
+    // principal, las páginas no corresponderían. El visor lo usa para saltar a cada capítulo.
+    if (lm?.capitulos?.length && res._id && principal.name === lm.principal) {
+        try {
+            const db = await conectarDB();
+            await db.collection('biblioteca').updateOne({ _id: new ObjectId(String(res._id)) }, { $set: { capitulos: lm.capitulos } });
+        } catch (e) { console.warn(`  ⚠️  no se pudo guardar el índice de capítulos: ${e.message}`); }
+    }
+
     // 5) Reciclar el origen (Papelera) si la copia del libro fue íntegra, o si era un duplicado (su PDF ya lo
     //    retiró el pipeline). Si la copia falló, se conserva el origen para no perder nada.
     const esDup = res.operacion === 'duplicado_exacto' || res.duplicado || res.ya_existia;

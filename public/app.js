@@ -436,6 +436,7 @@ async function refrescarEstado() {
     if ($('#vLabel2')) $('#vLabel2').textContent = vigilanteActivo ? 'Activo' : 'Pausado';
     // 🧠 CDU sin IA en la ingesta (interruptor junto al del Vigilante) — refleja el ajuste del servidor.
     if ($('#cduSinIASwitch') && typeof estado.cduSinIA === 'boolean') $('#cduSinIASwitch').checked = estado.cduSinIA;
+    if ($('#inspIASwitch') && typeof estado.inspeccionIA === 'boolean') $('#inspIASwitch').checked = estado.inspeccionIA;
     $('#vSub').textContent = vigilanteProcesando
       ? 'procesando el Inbox…'
       : vigilanteActivo
@@ -640,6 +641,21 @@ async function conmutarCduSinIA(activo, origen) {
   }
 }
 if ($('#cduSinIASwitch')) $('#cduSinIASwitch').onchange = (ev) => conmutarCduSinIA(ev.target.checked, ev.target);
+
+// 🧭 Inspección con IA de las carpetas complejas antes de ingerirlas: interruptor en caliente. Persiste en el servidor.
+async function conmutarInspeccionIA(activo, origen) {
+  try {
+    const r = await api('/ingesta/inspeccion-ia', { method: 'POST', body: JSON.stringify({ activo }) });
+    toast(
+      'Inspección con IA de las carpetas: ' + (r.inspeccionIA ? 'ACTIVADA' : 'desactivada (solo reglas)'),
+      r.inspeccionIA ? 'ok' : 'warn',
+    );
+  } catch (err) {
+    toast(err.message, 'bad');
+    if (origen) origen.checked = !activo; // revertir si falló
+  }
+}
+if ($('#inspIASwitch')) $('#inspIASwitch').onchange = (ev) => conmutarInspeccionIA(ev.target.checked, ev.target);
 
 // ── cuarentena ──
 // Consulta de búsqueda: limpia serializaciones (Epublibre [id]/(rN), marcas de fuente, hashes de
@@ -3742,7 +3758,10 @@ function pintarDoc(r, ctx) {
   const initLector = () => {
     const nom = (r.nombre_archivo || '').toLowerCase();   // se lee en CADA init: puede cambiar con el selector
     if (r.archivo_url && nom.endsWith('.epub')) iniciarLectorEpub(encUrl(r.archivo_url));
-    else if (r.archivo_url && nom.endsWith('.pdf')) iniciarLectorPdf(encUrl(r.archivo_url));
+    // El índice de capítulos del documento (libro cosido de un desglose) es del texto PRINCIPAL: si en el selector
+    // se elige otro texto, sus páginas no corresponderían.
+    else if (r.archivo_url && nom.endsWith('.pdf'))
+      iniciarLectorPdf(encUrl(r.archivo_url), { capitulos: r.nombre_archivo === d.nombre_archivo ? d.capitulos : null });
     else if (/\.(cbz|cbr|cb7|djvu|djv)$/.test(nom)) iniciarLectorComic(d._id);
     else if (/\.(mobi|azw3?)$/.test(nom)) iniciarLectorMobi(d._id);
     else if (nom.endsWith('.chm')) iniciarLectorChm(d._id);
@@ -7705,7 +7724,8 @@ function previewArchivoBase(r) {
     return audio + `<div class="fileprev"><h3 style="margin:16px 0 8px;color:var(--mut);font-size:13px">📄 ${esc(nombre)}</h3>
     <div class="pdfwrap" id="pdfWrap"><div class="pdfscroll" id="pdfScroll"></div>
       <button class="epubfs" id="pdfFs" title="Pantalla completa" style="display:none">⛶</button>
-      <div class="epubbar" id="pdfBar" style="display:none"><span class="epubpct" style="text-align:left;min-width:0"><span id="pdfCur">1</span> / <span id="pdfTotal">?</span></span></div>
+      <nav class="epubtoc" id="pdfToc"></nav>
+      <div class="epubbar" id="pdfBar" style="display:none"><button id="pdfTocBtn" title="Índice" style="display:none">☰</button><span class="epubpct" style="text-align:left;min-width:0"><span id="pdfCur">1</span> / <span id="pdfTotal">?</span></span></div>
       <div class="epubmsg" id="pdfMsg">Cargando PDF…</div></div>${acc}</div>`;
   // EPUB: lector epub.js (vendored en /vendor) — se inicializa tras pintar (iniciarLectorEpub).
   if (ext === 'epub')
@@ -7984,7 +8004,40 @@ function cargarPdfLib() {
   });
   return pdfLibPromise;
 }
-async function iniciarLectorPdf(url) {
+// ÍNDICE de un PDF para el «☰» del visor, como el del lector EPUB. Primero el del DOCUMENTO (`capitulos`: lo calcula
+// el cosido de un libro desglosado — título y página de inicio de cada parte, que se sabe al coser); si no hay, los
+// MARCADORES del propio PDF, que traen muchos libros enteros (con un nivel de anidación, como el EPUB).
+async function indicePdf(doc, capitulos) {
+  if (Array.isArray(capitulos) && capitulos.length) {
+    return capitulos
+      .filter((c) => c && c.titulo && c.pagina >= 1 && c.pagina <= doc.numPages)
+      .map((c) => ({ titulo: c.titulo, pagina: c.pagina, sub: false }));
+  }
+  try {
+    const outline = await doc.getOutline();
+    if (!outline || !outline.length) return [];
+    const out = [];
+    const recorrer = async (items, sub) => {
+      for (const it of items.slice(0, 300)) {
+        let pagina = null;
+        try {
+          const dest = typeof it.dest === 'string' ? await doc.getDestination(it.dest) : it.dest;
+          if (Array.isArray(dest) && dest[0]) pagina = (await doc.getPageIndex(dest[0])) + 1;
+        } catch {
+          /* marcador sin destino resoluble: se omite */
+        }
+        if (pagina) out.push({ titulo: it.title || '—', pagina, sub });
+        if (!sub && it.items && it.items.length) await recorrer(it.items, true);
+      }
+    };
+    await recorrer(outline, false);
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function iniciarLectorPdf(url, { capitulos = null } = {}) {
   const wrap = $('#pdfWrap'),
     scroll = $('#pdfScroll'),
     msg = $('#pdfMsg');
@@ -8029,6 +8082,29 @@ async function iniciarLectorPdf(url) {
       const e = $('#pdfCur');
       if (e) e.textContent = cur;
     };
+    // ☰ Índice: saltar a un capítulo sin partir el documento. Sin entradas, el botón no aparece.
+    const entradas = await indicePdf(pdfDoc, capitulos);
+    const toc = $('#pdfToc'),
+      btnToc = $('#pdfTocBtn');
+    if (toc && btnToc && entradas.length) {
+      toc.innerHTML = entradas
+        .map(
+          (en) =>
+            `<a href="#" data-pag="${en.pagina}"${en.sub ? ' class="sub"' : ''}>${esc(en.titulo)} <span class="muted" style="float:right;font-size:11px">${en.pagina}</span></a>`,
+        )
+        .join('');
+      btnToc.style.display = '';
+      btnToc.onclick = () => toc.classList.toggle('open');
+      $$('#pdfToc a[data-pag]').forEach(
+        (a) =>
+          (a.onclick = (ev) => {
+            ev.preventDefault();
+            const pg = scroll.children[Number(a.dataset.pag) - 1];
+            if (pg) scroll.scrollTop = pg.offsetTop - 12; // 12 = relleno superior del visor
+            toc.classList.remove('open');
+          }),
+      );
+    }
     // Pantalla completa: overlay por CSS (igual que el epub).
     const fs = $('#pdfFs');
     fs.onclick = () => {
@@ -13646,7 +13722,11 @@ function pintarInboxResultados(res) {
 // El usuario recorre el árbol del Inbox y, por CARPETA, elige una acción (omitir/aplanar/explotar/intacta)
 // y da pistas (tipo probable, colección). Se guarda como _guia.json y el vigilante lo obedece al procesar.
 const _guiaDirty = new Set(); // rutas de carpeta tocadas por el usuario (las que se guardarán)
-const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta'], ['obra', '📚 obra'], ['software', '💿 software'], ['libro-material', '📖 libro + material'], ['empaquetar', '🖼️ empaquetar (cbz)']];
+// Las cuatro últimas FUERZAN rutas que el vigilante solo alcanzaba por detectores en cascada; las escribe el agente de
+// estructura (inspección con IA) y aquí se ven y se pueden elegir a mano. «libro desglosado» = capítulos sueltos que
+// se cosen en un PDF (con el libro entero al lado, los capítulos van de material).
+const _ACCIONES_GUIA = [['normal', '—'], ['omitir', '⏭️ omitir'], ['aplanar', '📂 aplanar'], ['explotar', '💥 explotar'], ['intacta', '📦 intacta'], ['obra', '📚 obra'], ['software', '💿 software'], ['libro-material', '📖 libro + material'], ['empaquetar', '🖼️ empaquetar (cbz)'],
+  ['audiolibro', '🎧 audiolibro'], ['coleccion-audiolibros', '🎧 colección de audiolibros'], ['transmedia', '🎞️ transmedia'], ['desglose', '🧵 libro desglosado']];
 // Alcance de «empaquetar»: una carpeta de láminas sueltas genera MILES de fichas basura (una por lámina) si no
 // se empaqueta. Por subcarpeta = un tomo cada una (obra multivolumen); todo junto = un solo documento.
 const _ALCANCES_EMPAQUETAR = [['subcarpetas', 'un cbz por subcarpeta (obra)'], ['todo', 'un solo cbz con todo']];

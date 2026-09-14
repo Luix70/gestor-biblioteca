@@ -202,6 +202,17 @@ export function ordenarPartesLibro(nombres) {
         .map((x) => x.n);
 }
 
+/**
+ * ¿El NOMBRE dice por sí solo dónde va la parte en el libro? Un número (Chapter07, 05-CH), un preliminar
+ * (Preface, Contents) o material final (Index, Appendix). Si casi todas lo dicen, ordenarPartesLibro acierta sin
+ * ayuda; si no (capítulos nombrados por su TÍTULO: «The Fall of Rome.pdf»), el orden alfabético es el equivocado y
+ * hace falta leer el sumario (afinar-guias · detallarDesglose, con IA).
+ */
+export function tienePistaDeOrden(nombre) {
+    const base = path.basename(nombre, path.extname(nombre));
+    return numDe(base) != null || RE_FRONT.test(base) || FIN.some(([re]) => re.test(base));
+}
+
 const MIN_PAGS_PARTE = 3;   // un capítulo tiene páginas; una lámina/página suelta, una
 
 /**

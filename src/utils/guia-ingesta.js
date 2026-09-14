@@ -31,9 +31,15 @@
  *   perfil.origen: 'agente'    → guía GENERADA. Solo esas se reescriben; las del usuario no se tocan jamás.
  *   perfil.materia_cdu         → ya existía, pero solo llegaba a los prompts de visión; ahora la usa también la
  *                                ingesta SIN IA para rellenar o precisar la CDU (clasificador-cdu·contrastarCduCarpeta).
+ *   perfil.cabecera / .issn    → REVISTAS: nombre canónico de la publicación y su ISSN comprobado. Solo afectan a
+ *                                los documentos que resulten ser revista (servicio-ingesta); se heredan, así que las
+ *                                subcarpetas por año de una tirada cuelgan de la misma cabecera.
+ *   perfil.periodicidad        → REVISTAS: informativa (mensual, trimestral…).
+ *   desglose                   → accion:'desglose': principal / orden de lectura / títulos de capítulo.
  */
 import fs from 'fs/promises';
 import path from 'path';
+import { validarISSN } from './identificadores.js';
 
 export const NOMBRE_GUIA = '_guia.json';
 
@@ -55,7 +61,18 @@ export const NOMBRE_GUIA = '_guia.json';
 //                datasets, multimedia…). El LIBRO se cataloga por el PIPELINE NORMAL (ISBN/CDU/metadatos
 //                completos → `tipo_recurso:'libro'` de pleno derecho, NO transmedia/colección/audiolibro), y el
 //                material se conserva VERBATIM junto a él (ruta_fija) y se ve en el explorador «🗂️ Archivos».
-export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta', 'obra', 'software', 'libro-material', 'empaquetar'];
+// Acciones que FUERZAN una ruta que el vigilante ya tenía pero a la que solo llegaba por detectores fijos en
+// cascada (transmedia fuerte → colección de audiolibros → transmedia débil → audiolibro). Los detectores
+// fallan en los casos límite —un audiolibro con dos PDF de acompañamiento acababa como «transmedia débil»— y
+// sin estas acciones no había forma de corregirlo. Las escribe el agente de estructura; también valen a mano.
+//   · audiolibro            → UN audiolibro (pistas + portada + material): un documento con playlist.
+//   · coleccion-audiolibros → VARIOS audiolibros: una colección con un documento por libro.
+//   · transmedia            → UNA obra en varios medios: se conserva y cataloga junta.
+//   · desglose              → UN libro partido en capítulos: si está el libro entero, se cataloga y los
+//                capítulos van de material; si no, se COSEN en un PDF en el orden de `desglose.orden`
+//                (ver vigilante · materializarDesglose / materializarDesglosePuro).
+export const ACCIONES_CARPETA = ['normal', 'omitir', 'aplanar', 'explotar', 'intacta', 'obra', 'software', 'libro-material', 'empaquetar',
+    'audiolibro', 'coleccion-audiolibros', 'transmedia', 'desglose'];
 /**
  * Alcance de `empaquetar` (láminas sueltas → cbz). Sin él, una carpeta de miles de imágenes (o de miles de
  * .rar con una lámina cada uno) genera MILES DE FICHAS BASURA, una por lámina.
@@ -83,10 +100,16 @@ export function normalizarPerfil(p) {
     const out = {};
     const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     if (TIPOS_PROBABLES.includes(p.tipo_probable)) out.tipo_probable = p.tipo_probable;
-    for (const k of ['naturaleza', 'coleccion', 'obra', 'enciclopedia', 'idioma_probable', 'editorial_probable', 'materia_cdu', 'origen']) {
+    for (const k of ['naturaleza', 'coleccion', 'obra', 'enciclopedia', 'idioma_probable', 'editorial_probable', 'materia_cdu', 'origen',
+        'cabecera', 'periodicidad']) {
         const v = str(p[k]);
         if (v) out[k] = v;
     }
+    // REVISTAS: `cabecera` es el nombre canónico de la publicación y `issn` su ISSN COMPROBADO (nombres de fichero,
+    // cabecera ya catalogada o Wikidata; nunca de memoria de la IA). Solo se aplican a los documentos que resulten
+    // ser revista (servicio-ingesta). Un ISSN sin dígito de control válido se descarta aquí.
+    const issn = p.issn ? validarISSN(p.issn) : null;
+    if (issn) out.issn = issn;
     // «sin_coleccion»: esta carpeta NO forma una colección con su nombre. Es lo que distingue una carpeta de
     // EDITORIAL, de MATERIA o un CAJÓN de una colección de verdad: sin esto, la regla «carpeta con 2+ documentos
     // = colección» convertía «Cambridge.University.Press» (1.194 libros) o «Algebra» en colecciones, cuando la
@@ -123,6 +146,11 @@ export async function perfilHeredado(dirFichero, raizInbox) {
         if (g?.perfil) {
             for (const [k, v] of Object.entries(g.perfil)) {
                 if (k === 'sin_coleccion') continue;   // se decide al clasificar la carpeta, no se hereda
+                // Dentro de una tirada de REVISTA (una guía más cercana ya dio la cabecera), la agrupación de los
+                // números ES la cabecera: una colección de más arriba («Revistas», «Muy Historia») no se hereda.
+                // Si se heredara, al catalogar se crearía una colección de LIBROS con ese nombre antes que la
+                // cabecera, y la usurparía.
+                if (k === 'coleccion' && heredado.cabecera) continue;
                 if (!(k in heredado)) heredado[k] = v;
             }
         }
@@ -181,7 +209,36 @@ export function normalizarGuia(g) {
                 .filter((a) => a && typeof a === 'object' && !malo(String(a.nombre || '').trim()))
                 .map((a) => ({ nombre: String(a.nombre).trim(), soloAdmin: !!a.soloAdmin }));
         }
+        // ÍNDICE DE CAPÍTULOS de un libro COSIDO (desglose): título y página de inicio de cada parte. Lo escribe el
+        // cosido (vigilante · materializarDesglosePuro) y lo pasa al documento ingestarLibroConMaterial.
+        if (Array.isArray(g.libro_material.capitulos)) {
+            const caps = g.libro_material.capitulos
+                .filter((c) => c && typeof c.titulo === 'string' && c.titulo.trim() && Number.isInteger(c.pagina) && c.pagina >= 1)
+                .map((c) => ({ titulo: c.titulo.trim().slice(0, 300), pagina: c.pagina }))
+                .sort((a, b) => a.pagina - b.pagina);
+            if (caps.length) lm.capitulos = caps;
+        }
         if (lm.principal || (lm.adjuntos && lm.adjuntos.length)) guia.libro_material = lm;
+    }
+
+    // DESGLOSE (accion:'desglose'): cómo recomponer un libro partido en capítulos. `principal` = el libro entero si
+    // está en la carpeta (entonces los capítulos son solo material); `orden` = las partes en ORDEN DE LECTURA para
+    // coserlas cuando no está; `titulos` = el título de cada parte para el índice de capítulos. Todo son NOMBRES de
+    // ficheros de la carpeta (sin separadores): lo que no exista al aplicarlo se ignora allí.
+    if (guia.accion === 'desglose' && g.desglose && typeof g.desglose === 'object') {
+        const SEP = String.fromCharCode(92);   // «\» sin literal: el entorno lo corrompe
+        const nombreOk = (x) => typeof x === 'string' && x.trim() && !x.includes('/') && !x.includes(SEP) && x !== '.' && x !== '..';
+        const d = {};
+        if (nombreOk(g.desglose.principal)) d.principal = g.desglose.principal.trim();
+        if (Array.isArray(g.desglose.orden)) d.orden = [...new Set(g.desglose.orden.filter(nombreOk).map((x) => x.trim()))];
+        if (g.desglose.titulos && typeof g.desglose.titulos === 'object') {
+            const t = {};
+            for (const [k, v] of Object.entries(g.desglose.titulos)) {
+                if (nombreOk(k) && typeof v === 'string' && v.trim() && v.length <= 300) t[k.trim()] = v.trim();
+            }
+            if (Object.keys(t).length) d.titulos = t;
+        }
+        if (Object.keys(d).length) guia.desglose = d;
     }
 
     // Alcance de «empaquetar»: por subcarpeta (obra multivolumen) o todo junto (un documento). Por defecto,

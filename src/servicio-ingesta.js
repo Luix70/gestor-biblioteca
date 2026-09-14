@@ -250,6 +250,30 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         }
     }
 
+    // 1ter. CABECERA DE REVISTA de la carpeta (agente de estructura). Si el documento ES una revista y la guía da la
+    // cabecera canónica (y su ISSN, ya comprobado contra fuentes fiables), el número se cuelga de ella aunque su
+    // nombre de fichero sea críptico («HIV_163_0719.pdf») o no se le haya podido leer el ISSN. Solo RELLENA: si
+    // el fichero trae OTRO ISSN, es de otra publicación y manda el suyo (se avisa y no se toca la cabecera).
+    const perfilRevista = contexto.perfil || {};
+    if (documento.tipo_recurso === 'revista' && (perfilRevista.cabecera || perfilRevista.issn)) {
+        const choca = perfilRevista.issn && documento.issn && documento.issn !== perfilRevista.issn;
+        if (choca) {
+            const aviso = `El ISSN del fichero (${documento.issn}) no es el de la carpeta (${perfilRevista.issn}, «${perfilRevista.cabecera || '?'}»): se conserva el del fichero.`;
+            documento.alertas_agente = [...(documento.alertas_agente || []), aviso];
+            console.log(`   📰 ${aviso}`);
+        } else {
+            if (perfilRevista.cabecera) documento.cabecera_nombre = perfilRevista.cabecera;   // lo consume motor-catalogo (2d)
+            // La colección «de carpeta» no aplica a un número con cabecera: su agrupación ES la cabecera. Si se dejara,
+            // motor-catalogo crearía antes (paso 2b) una colección de LIBROS con ese nombre, que la cabecera heredaría.
+            if (perfilRevista.cabecera && contexto.coleccion && documento.coleccion_nombre === contexto.coleccion) delete documento.coleccion_nombre;
+            if (perfilRevista.issn && !documento.issn) {
+                documento.issn = perfilRevista.issn;
+                documento.alertas_agente = [...(documento.alertas_agente || []),
+                    `ISSN ${perfilRevista.issn} de la guía de la carpeta (cabecera «${perfilRevista.cabecera || perfilRevista.issn}»).`];
+            }
+        }
+    }
+
     // Añadir nombre_archivo y hash antes de catalogar.
     // El nombre_archivo permite detectar re-procesamientos del mismo fichero (vs nuevas versiones);
     // el hash_contenido detecta copias exactas aunque el nombre difiera (ej. "X (1).epub").
