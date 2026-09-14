@@ -44,9 +44,11 @@ const EXT_AUDIO = new Set(['.mp3', '.m4a', '.m4b', '.flac', '.ogg', '.wav', '.aa
 // Nombres que no son contenido: marcadores propios, metadatos de Synology y de sistemas operativos.
 const esAccesorio = (n) => n.startsWith('.') || n.startsWith('_') || n.startsWith('@') || n.startsWith('#') || /^(thumbs\.db|desktop\.ini)$/i.test(n);
 
-// Límites que acotan el TAMAÑO del esqueleto, y con él el coste de la llamada. Un árbol de miles de carpetas
-// no cabe entero: se recorta con aviso (la IA sabe que ve una muestra) en vez de reventar el prompt.
-const LIMITES = { profundidad: 6, carpetas: 120, muestras: 5, isbnPorCarpeta: 8 };
+// Límites que acotan el TAMAÑO del esqueleto, y con él el coste. Un árbol de miles de carpetas no cabe entero: se
+// recorta con aviso (la IA sabe que ve una muestra) en vez de reventar el prompt. 500 carpetas = 10 tandas de 50
+// (~7-8 min): antes eran 120, de cuando todo iba en UNA llamada. Profundidad 8 = la misma a la que llega el
+// vigilante al recorrer una carpeta (recopilarDocumentos, tieneDescendientesGuiados).
+const LIMITES = { profundidad: 8, carpetas: 500, muestras: 5, isbnPorCarpeta: 8 };
 
 /** Normaliza para agrupar variantes de lo mismo: «CAMBRIDGE UNIV PRESS» y «Cambridge University Press». */
 const normEditorial = (s) => String(s || '').toLowerCase().replace(/\buniv(ersity)?\b\.?/g, 'university').replace(/\bpr(ess)?\b\.?/g, 'press').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -151,67 +153,99 @@ function repartoExtensiones(nombres, max = 6) {
     return [...cuenta].sort((a, b) => b[1] - a[1]).slice(0, max).map(([e, k]) => `${e}×${k}`).join(' ');
 }
 
+/** Orden de ÁRBOL (en profundidad) entre dos rutas relativas: la madre antes que sus hijas, y cada subárbol junto. */
+function ordenArbol(a, b) {
+    if (a === '.') return -1;
+    if (b === '.') return 1;
+    const x = a.split('/'), y = b.split('/');
+    for (let i = 0; i < Math.min(x.length, y.length); i++) {
+        if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+    }
+    return x.length - y.length;
+}
+
 /**
  * Recorre el árbol y construye su ESQUELETO: por carpeta, recuentos, unos pocos nombres de muestra y las
  * señales locales. No abre ningún documento: solo nombres de fichero y el Fichero local.
  *
- * @returns {Promise<{raiz, carpetas: object[], recortado: boolean}>}
+ * QUÉ CARPETAS ENTRAN cuando el árbol es más grande que el tope: se eligen NIVEL A NIVEL (en anchura), primero
+ * todas las de arriba. Antes el recorrido era en profundidad y alfabético, y al llegar al tope se perdían RAMAS
+ * ENTERAS — las últimas del alfabeto: en un árbol como University Press Collection, las series de Stanford
+ * podían quedarse sin ver. Las carpetas de arriba son las que más dicen (colección, serie, editorial, materia) y
+ * sus guías se HEREDAN hacia abajo, así que lo que quede fuera en lo hondo va por las reglas con esas pistas.
+ * Luego se presentan en orden de árbol, que es como las esperan el mapa y el troceo en tandas.
+ *
+ * @returns {Promise<{raiz, carpetas: object[], recortado: boolean, sin_ver: number}>}
+ *   sin_ver = carpetas que se sabe que existen y quedaron fuera (sin contar lo que cuelga de ellas).
  */
 export async function esqueletoArbol(raiz, limites = {}) {
     const lim = { ...LIMITES, ...limites };
-    const carpetas = [];
     let recortado = false;
 
-    async function visitar(dir, nivel) {
-        if (carpetas.length >= lim.carpetas) { recortado = true; return; }
+    // 1) SELECCIÓN en anchura. Se guarda el listado de cada carpeta elegida para no volver a leerla después.
+    const elegidas = [];
+    const cola = [{ dir: raiz, nivel: 0 }];
+    while (cola.length) {
+        if (elegidas.length >= lim.carpetas) { recortado = true; break; }
+        const { dir, nivel } = cola.shift();
         let entradas;
-        try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+        try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { continue; }
+        elegidas.push({ dir, nivel, entradas });
+        const subs = entradas.filter((e) => e.isDirectory() && !esAccesorio(e.name)).map((e) => e.name).sort();
+        if (nivel >= lim.profundidad) { if (subs.length) recortado = true; continue; }
+        for (const s of subs) cola.push({ dir: path.join(dir, s), nivel: nivel + 1 });
+    }
+    const sinVer = cola.length;
 
-        const docs = [], subcarpetas = [], ficheros = [], noDocs = [];
-        let imagenes = 0, audios = 0, otros = 0;
-        for (const e of entradas) {
-            if (esAccesorio(e.name)) continue;
-            if (e.isDirectory()) { subcarpetas.push(e.name); continue; }
-            ficheros.push(e.name);
-            const ext = path.extname(e.name).toLowerCase();
-            if (EXT_DOC.has(ext)) docs.push(e.name);
-            else if (EXT_IMG.has(ext)) imagenes++;
-            else if (EXT_AUDIO.has(ext)) { audios++; noDocs.push(e.name); }
-            // «Otros» (html, código, datos…): sin ellos una carpeta con los 13 libros de Euclides en HTML
-            // aparecería como VACÍA, y la IA la tomaría por basura.
-            else { otros++; noDocs.push(e.name); }
-        }
+    // 2) Orden de ÁRBOL para presentarlas.
+    const relDe = (dir) => path.relative(raiz, dir).split(path.sep).join('/') || '.';
+    elegidas.sort((a, b) => ordenArbol(relDe(a.dir), relDe(b.dir)));
 
-        // Muestras de lo que NO es documento: sin nombres, un audiolibro («01 - Capítulo 1.mp3») o un programa
-        // («setup.exe», «data1.cab») eran para la IA solo «12 audio» o «9 otros». Primero los ejecutables, que son
-        // los que más cambian la lectura de la carpeta.
-        const muestrasOtros = [
-            ...noDocs.filter((n) => EXT_SOFTWARE.has(path.extname(n).toLowerCase())),
-            ...noDocs.filter((n) => !EXT_SOFTWARE.has(path.extname(n).toLowerCase())),
-        ].slice(0, 4);
+    // 3) Señales de cada carpeta.
+    const carpetas = [];
+    for (const { dir, nivel, entradas } of elegidas) carpetas.push(await describirCarpeta(dir, relDe(dir), nivel, entradas, lim));
+    return { raiz: path.basename(raiz), carpetas, recortado, sin_ver: sinVer };
+}
 
-        const rel = path.relative(raiz, dir).split(path.sep).join('/') || '.';
-        carpetas.push({
-            ruta: rel,
-            nivel,
-            documentos: docs.length,
-            imagenes,
-            audios,
-            otros,
-            subcarpetas: subcarpetas.length,
-            extensiones: ficheros.length ? repartoExtensiones(ficheros) : '',
-            muestras: docs.slice(0, lim.muestras),
-            muestras_otros: muestrasOtros,
-            dominio: await dominioTamano(dir, docs),
-            ...(docs.length ? await senalesLocales(docs) : {}),
-        });
-
-        if (nivel >= lim.profundidad) { if (subcarpetas.length) recortado = true; return; }
-        for (const s of subcarpetas.sort()) await visitar(path.join(dir, s), nivel + 1);
+/** Recuentos, muestras y señales locales de UNA carpeta del esqueleto. */
+async function describirCarpeta(dir, rel, nivel, entradas, lim) {
+    const docs = [], subcarpetas = [], ficheros = [], noDocs = [];
+    let imagenes = 0, audios = 0, otros = 0;
+    for (const e of entradas) {
+        if (esAccesorio(e.name)) continue;
+        if (e.isDirectory()) { subcarpetas.push(e.name); continue; }
+        ficheros.push(e.name);
+        const ext = path.extname(e.name).toLowerCase();
+        if (EXT_DOC.has(ext)) docs.push(e.name);
+        else if (EXT_IMG.has(ext)) imagenes++;
+        else if (EXT_AUDIO.has(ext)) { audios++; noDocs.push(e.name); }
+        // «Otros» (html, código, datos…): sin ellos una carpeta con los 13 libros de Euclides en HTML
+        // aparecería como VACÍA, y la IA la tomaría por basura.
+        else { otros++; noDocs.push(e.name); }
     }
 
-    await visitar(raiz, 0);
-    return { raiz: path.basename(raiz), carpetas, recortado };
+    // Muestras de lo que NO es documento: sin nombres, un audiolibro («01 - Capítulo 1.mp3») o un programa
+    // («setup.exe», «data1.cab») eran para la IA solo «12 audio» o «9 otros». Primero los ejecutables, que son
+    // los que más cambian la lectura de la carpeta.
+    const muestrasOtros = [
+        ...noDocs.filter((n) => EXT_SOFTWARE.has(path.extname(n).toLowerCase())),
+        ...noDocs.filter((n) => !EXT_SOFTWARE.has(path.extname(n).toLowerCase())),
+    ].slice(0, 4);
+
+    return {
+        ruta: rel,
+        nivel,
+        documentos: docs.length,
+        imagenes,
+        audios,
+        otros,
+        subcarpetas: subcarpetas.length,
+        extensiones: ficheros.length ? repartoExtensiones(ficheros) : '',
+        muestras: docs.slice(0, lim.muestras),
+        muestras_otros: muestrasOtros,
+        dominio: await dominioTamano(dir, docs),
+        ...(docs.length ? await senalesLocales(docs) : {}),
+    };
 }
 
 // ─── La llamada a la IA ──────────────────────────────────────────────────────────────────────────────────

@@ -223,11 +223,16 @@ export function normalizarGuia(g) {
 
     // DESGLOSE (accion:'desglose'): cómo recomponer un libro partido en capítulos. `principal` = el libro entero si
     // está en la carpeta (entonces los capítulos son solo material); `orden` = las partes en ORDEN DE LECTURA para
-    // coserlas cuando no está; `titulos` = el título de cada parte para el índice de capítulos. Todo son NOMBRES de
-    // ficheros de la carpeta (sin separadores): lo que no exista al aplicarlo se ignora allí.
+    // coserlas cuando no está; `titulos` = el título de cada parte para el índice de capítulos. Son ficheros de la
+    // carpeta o de UNA subcarpeta suya de partes («Chapters/ch01.pdf»): ruta relativa de 1 o 2 tramos, sin «..» ni
+    // «\» (nunca fuera de la carpeta). Lo que no exista al aplicarlo se ignora allí.
     if (guia.accion === 'desglose' && g.desglose && typeof g.desglose === 'object') {
         const SEP = String.fromCharCode(92);   // «\» sin literal: el entorno lo corrompe
-        const nombreOk = (x) => typeof x === 'string' && x.trim() && !x.includes('/') && !x.includes(SEP) && x !== '.' && x !== '..';
+        const nombreOk = (x) => {
+            if (typeof x !== 'string' || !x.trim() || x.includes(SEP) || x.startsWith('/')) return false;
+            const tramos = x.split('/');
+            return tramos.length <= 2 && tramos.every((t) => t && t !== '.' && t !== '..');
+        };
         const d = {};
         if (nombreOk(g.desglose.principal)) d.principal = g.desglose.principal.trim();
         if (Array.isArray(g.desglose.orden)) d.orden = [...new Set(g.desglose.orden.filter(nombreOk).map((x) => x.trim()))];

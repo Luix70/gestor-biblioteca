@@ -202,6 +202,30 @@ export function ordenarPartesLibro(nombres) {
         .map((x) => x.n);
 }
 
+// Subcarpetas que, dentro de un libro desglosado, guardan sus PARTES: «Chapters/», «Capítulos/», «PDF/»…
+export const RE_CARPETA_PARTES = /^(chapters?|cap[ií]tulos?|caps|parts?|partes?|sections?|secciones?|split|pdfs?|unidades|units?|lessons?|lecciones|temas)$/i;
+
+/**
+ * PARTES de un libro desglosado: los documentos sueltos de la carpeta MÁS los de sus subcarpetas de partes (por
+ * nombre, o las que se indiquen — p. ej. las que el agente marcó como «parte»). Devuelve rutas RELATIVAS a `dir`
+ * («Chapters/ch01.pdf»). Antes solo se miraba la raíz, y un libro con sus capítulos en «Chapters/» no se cosía.
+ */
+export async function partesDeDesglose(dir, subcarpetas = []) {
+    const out = [];
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return out; }
+    const indicadas = new Set(subcarpetas);
+    for (const e of ents) {
+        if (ignorar(e.name)) continue;
+        if (e.isFile() && esDoc(e.name)) { out.push(e.name); continue; }
+        if (!e.isDirectory() || !(indicadas.has(e.name) || RE_CARPETA_PARTES.test(e.name))) continue;
+        let sub;
+        try { sub = await fs.readdir(path.join(dir, e.name), { withFileTypes: true }); } catch { continue; }
+        for (const s of sub) if (s.isFile() && !ignorar(s.name) && esDoc(s.name)) out.push(`${e.name}/${s.name}`);
+    }
+    return out;
+}
+
 /**
  * ¿El NOMBRE dice por sí solo dónde va la parte en el libro? Un número (Chapter07, 05-CH), un preliminar
  * (Preface, Contents) o material final (Index, Appendix). Si casi todas lo dicen, ordenarPartesLibro acierta sin

@@ -3670,3 +3670,24 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       capitulo 3). SIN PROBAR aqui: el cosido con qpdf (no esta en el PC; si en el NAS) y una ingesta real.
     * COSTE: una llamada por cada 50 subcarpetas de un arbol complejo (~35-40 s) + una por libro desglosado cuyas
       partes se llamen por su titulo + consultas gratuitas a Wikidata/catalogo por cabecera de revista.
+    * PROFUNDIDAD (14-sep, tras la pregunta «¿funcionara en carpetas a distintos niveles?»). La inspeccion se
+      dispara por cada carpeta de PRIMER nivel del Inbox pero analiza su arbol entero y deja guias a cualquier
+      nivel; el vigilante las obedece hasta 8 niveles y la herencia de pistas sube hasta 20. Tres huecos cerrados:
+      - ARBOLES GRANDES: el esqueleto elige las carpetas NIVEL A NIVEL (en anchura) y las presenta en orden de
+        arbol. Antes el recorrido era en profundidad y alfabetico, y al llegar al tope se perdian RAMAS ENTERAS
+        (las ultimas del alfabeto: en University Press, las series de Stanford). Ahora primero entran todas las
+        de arriba, que son las que mas dicen y cuyas guias se heredan hacia abajo. Tope subido de 120 a 500
+        carpetas (10 tandas, ~7-8 min) y profundidad de 6 a 8 (la del vigilante). Si aun asi se recorta, el log lo
+        dice («arbol RECORTADO: la IA vio N carpetas y quedan al menos M»), y la marca guarda sin_ver.
+        Probado: 127 carpetas con tope 40 → entran las 6 ramas y las 30 del segundo nivel.
+      - CARPETAS NUEVAS A CUALQUIER PROFUNDIDAD: la marca guarda ahora el arbol ENTERO (campo carpetas, rutas
+        relativas; inspeccion-auto · carpetasDelArbol) y se compara todo, no solo el primer nivel. No cuentan como
+        nuevas las que ya traen guia ni las que aparecen DENTRO de una unidad (libro con material, software,
+        audiolibro, desglose…): asi no reinspecciona por lo que crea el propio vigilante (la «Desglose/» de un
+        libro cosido). Las marcas ANTIGUAS (solo `subcarpetas` de primer nivel) se siguen comparando como antes,
+        para no reinspeccionar de golpe todo lo ya inspeccionado al desplegar.
+      - CAPITULOS EN UNA SUBCARPETA: las partes de un libro desglosado se reunen de la carpeta Y de sus
+        subcarpetas de partes (libro-desglosado · partesDeDesglose: por nombre —Chapters, Capitulos, Parts, PDF,
+        Sections…— o las que el agente leyo como «parte»). Se nombran con ruta relativa («Chapters/ch01.pdf»); la
+        guia la admite (1-2 tramos, sin «..» ni «\»). Al coser o separar, las partes se mueven a «Desglose/»
+        conservando su subcarpeta, y la subcarpeta vaciada se retira (si no, viajaria como material vacio).

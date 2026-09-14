@@ -16,9 +16,10 @@
  *   · Lo DUDOSO (confianza baja) no se escribe: esa parte se cataloga con las reglas de siempre y queda anotada.
  *
  * MEMORIA: la marca `.inspeccion-ia.json` en la raíz de la carpeta dice que ya se inspeccionó (o cuándo toca
- * reintentar). Empieza por «.», así que el vigilante y el agente la ignoran como contenido. Si luego aparecen
- * SUBCARPETAS NUEVAS en una carpeta ya inspeccionada (un buzón de colección que sigue recibiendo), se reinspecciona:
- * las guías del usuario se respetan siempre y las del agente se actualizan.
+ * reintentar) y guarda su árbol de carpetas. Empieza por «.», así que el vigilante y el agente la ignoran como
+ * contenido. Si luego aparecen CARPETAS NUEVAS, a cualquier profundidad (un buzón de colección que sigue
+ * recibiendo), se reinspecciona: las guías del usuario se respetan siempre y las del agente se actualizan. Lo que
+ * aparece dentro de una unidad o ya trae guía no cuenta (ver carpetasNuevas).
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -88,12 +89,71 @@ async function escribirMarca(dir, datos) {
     catch (e) { console.warn(`   ⚠️  no se pudo escribir la marca de inspección en «${path.basename(dir)}»: ${e.message}`); }
 }
 
-/** Subcarpetas de PRIMER nivel (lo que se compara para saber si llegó algo nuevo a un buzón ya inspeccionado). */
+/** Subcarpetas de PRIMER nivel. Solo para las marcas antiguas, que no guardaban el árbol entero. */
 async function subcarpetasNivel1(dir) {
     try {
         return (await fs.readdir(dir, { withFileTypes: true }))
             .filter((e) => e.isDirectory() && !esAccesorio(e.name) && !SUB_PORTADAS.test(e.name)).map((e) => e.name).sort();
     } catch { return []; }
+}
+
+/**
+ * TODAS las carpetas del árbol (rutas relativas «a», «a/b»), solo con readdir: lo que se guarda en la marca y se
+ * compara después para saber si ha llegado algo NUEVO, esté a la profundidad que esté. Acotado (profundidad 8,
+ * como el vigilante; tope de 3000) porque se consulta en cada escaneo mientras la carpeta siga en el Inbox.
+ */
+export async function carpetasDelArbol(dir, { profundidad = 8, max = 3000 } = {}) {
+    const out = [];
+    const cola = [{ abs: dir, rel: '', nivel: 0 }];
+    while (cola.length && out.length < max) {
+        const { abs, rel, nivel } = cola.shift();
+        if (nivel >= profundidad) continue;
+        let ents;
+        try { ents = await fs.readdir(abs, { withFileTypes: true }); } catch { continue; }
+        for (const e of ents) {
+            if (!e.isDirectory() || esAccesorio(e.name) || SUB_PORTADAS.test(e.name)) continue;
+            const r = rel ? `${rel}/${e.name}` : e.name;
+            out.push(r);
+            cola.push({ abs: path.join(abs, e.name), rel: r, nivel: nivel + 1 });
+        }
+    }
+    return out.sort();
+}
+
+// Acciones de guía que hacen de una carpeta UNA cosa que se ingiere entera (o que no se toca): lo que aparezca
+// DENTRO es parte de ella, no algo nuevo que interpretar. Incluye lo que el propio vigilante crea al procesar —
+// la «Desglose/» de un libro cosido, la subcarpeta de un libro con sus adjuntos—, que si no dispararía una
+// reinspección por su propia culpa.
+const ACCIONES_UNIDAD = new Set(['obra', 'software', 'libro-material', 'intacta', 'empaquetar', 'omitir',
+    'audiolibro', 'coleccion-audiolibros', 'transmedia', 'desglose']);
+
+/** ¿Esta carpeta nueva merece interpretación? No si ya tiene guía propia, ni si está dentro de una unidad. */
+async function esNuevaQueInterpretar(dir, rel) {
+    const partes = rel.split('/');
+    for (let i = partes.length; i >= 0; i--) {
+        const g = await leerGuia(path.join(dir, ...partes.slice(0, i)));
+        if (!g) continue;
+        if (ACCIONES_UNIDAD.has(g.accion)) return false;          // ella o una antecesora es una unidad
+        if (i === partes.length && guiaEsSignificativa(g)) return false;   // ya guiada (por ti o por el agente)
+    }
+    return true;
+}
+
+/** Carpetas que han llegado desde la última inspección y merecen interpretarse. */
+async function carpetasNuevas(dir, marca) {
+    // Marca ANTIGUA (sin el árbol entero): se compara solo el primer nivel, como entonces. Si no, todas las
+    // carpetas de más abajo parecerían nuevas y se reinspeccionaría todo lo ya inspeccionado.
+    if (!Array.isArray(marca.carpetas)) {
+        const conocidas = new Set(marca.subcarpetas || []);
+        return (await subcarpetasNivel1(dir)).filter((s) => !conocidas.has(s));
+    }
+    const conocidas = new Set(marca.carpetas);
+    const nuevas = [];
+    for (const rel of await carpetasDelArbol(dir)) {
+        if (conocidas.has(rel)) continue;
+        if (await esNuevaQueInterpretar(dir, rel)) nuevas.push(rel);
+    }
+    return nuevas;
 }
 
 // ─── Flujo ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -109,19 +169,19 @@ export async function prepararCarpeta(dir) {
     const nombre = path.basename(dir);
     const marca = await leerMarca(dir);
 
-    // Ya inspeccionada (o agotada la espera): solo se repite si han llegado subcarpetas NUEVAS.
+    // Ya inspeccionada (o agotada la espera): solo se repite si han llegado carpetas NUEVAS, a cualquier profundidad.
     if (marca && (marca.estado === 'hecha' || marca.estado === 'agotada')) {
-        const conocidas = new Set(marca.subcarpetas || []);
-        const nuevas = (await subcarpetasNivel1(dir)).filter((s) => !conocidas.has(s));
+        const nuevas = await carpetasNuevas(dir, marca);
         if (!nuevas.length) return { seguir: true };
-        console.log(`  🧭 «${nombre}»: ${nuevas.length} subcarpeta(s) nueva(s) desde la última inspección → se reinspecciona.`);
+        console.log(`  🧭 «${nombre}»: ${nuevas.length} carpeta(s) nueva(s) desde la última inspección `
+            + `(${nuevas.slice(0, 3).join(', ')}${nuevas.length > 3 ? '…' : ''}) → se reinspecciona.`);
     }
 
     // Falló antes: esperar al próximo intento, o rendirse pasado el tope (y seguir con las reglas).
     if (marca?.estado === 'fallida') {
         const desde = Date.parse(marca.primer_intento) || Date.now();
         if (Date.now() - desde >= esperaMaxMs()) {
-            await escribirMarca(dir, { ...marca, estado: 'agotada', fecha: new Date().toISOString(), subcarpetas: await subcarpetasNivel1(dir) });
+            await escribirMarca(dir, { ...marca, estado: 'agotada', fecha: new Date().toISOString(), carpetas: await carpetasDelArbol(dir) });
             console.warn(`  🧭 «${nombre}»: ${marca.intentos} intento(s) sin IA en ${Math.round((Date.now() - desde) / 3600000)} h → se ingiere con las reglas de siempre.`);
             return { seguir: true };
         }
@@ -175,10 +235,18 @@ async function inspeccionar(dir, marcaPrevia, motivo) {
             dudosas,
             notas,
             raiz: r.carpetas.find((c) => c.ruta === '.') || null,
-            subcarpetas: await subcarpetasNivel1(dir),
+            sin_ver: esq.sin_ver || 0,
+            // El árbol ENTERO tal como estaba (no solo lo que vio la IA): así, una carpeta que llegue después a
+            // cualquier profundidad se reconoce como nueva. Las que quedaron fuera por el tope no cuentan como
+            // nuevas: ya se sabía que existían y van por las reglas con las guías heredadas.
+            carpetas: await carpetasDelArbol(dir),
         });
         const resumen = Object.entries(porClase).map(([k, n]) => `${n} ${k}`).join(', ') || 'ninguna';
         console.log(`  🧭 «${nombre}»: inspeccionada en ${Math.round((Date.now() - t0) / 1000)} s (${r.llamadas} llamada(s), ${esq.carpetas.length} carpetas). Guías: ${resumen}.`);
+        if (esq.recortado) {
+            console.warn(`     · árbol RECORTADO: la IA vio ${esq.carpetas.length} carpetas${esq.sin_ver ? ` y quedan al menos ${esq.sin_ver} más` : ''}`
+                + ' (por profundidad o por el tope). Lo que no vio va por las reglas, heredando las guías de arriba.');
+        }
         for (const n of notas) console.log(`     · ${n}`);
         if (dudosas.length) console.log(`     · ${dudosas.length} carpeta(s) dudosa(s) → reglas de siempre: ${dudosas.slice(0, 5).map((d) => d.ruta).join(', ')}${dudosas.length > 5 ? '…' : ''}`);
         return { seguir: true };

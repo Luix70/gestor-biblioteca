@@ -24,7 +24,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { conectarDB } from '../database.js';
 import { buscarISSNporTitulo, buscarNombrePorISSN } from './buscador-issn-titulo.js';
-import { detectarLibroDesglosado, ordenarPartesLibro, tienePistaDeOrden } from './libro-desglosado.js';
+import { detectarLibroDesglosado, ordenarPartesLibro, tienePistaDeOrden, partesDeDesglose, RE_CARPETA_PARTES } from './libro-desglosado.js';
 import { conTexto, extraerJSON } from './vision.js';
 
 const ejecutar = promisify(execFile);
@@ -83,8 +83,6 @@ function nombresCasan(a, b) {
 
 // ─── 2) Detalle del desglose ────────────────────────────────────────────────────────────────────────────
 
-const EXT_PARTE = new Set(['.pdf', '.epub', '.mobi', '.azw', '.azw3', '.djvu', '.djv', '.chm', '.doc', '.docx', '.rtf']);
-const esAccesorio = (n) => n.startsWith('.') || n.startsWith('_') || n.startsWith('@') || n.startsWith('#');
 const MAX_PARTES_IA = 150;        // un libro se parte en decenas de piezas; más no cabe con sentido en el prompt
 const MAX_SUMARIO = 6000;         // caracteres del sumario que se envían (sobra para un índice de capítulos)
 
@@ -119,16 +117,15 @@ export function tituloDeNombre(nombre) {
 
 /**
  * Detalle de un libro desglosado que vive en `dirAbs`: { principal?, orden, titulos, fuente } o null si no hay
- * partes. Nunca lanza: si la IA falla, devuelve el orden determinista (el vigilante coserá con él).
+ * partes. Las partes pueden estar sueltas en la carpeta o en sus subcarpetas de partes («Chapters/»…, o las de
+ * `subcarpetas`): entonces se nombran con su ruta relativa («Chapters/ch01.pdf»). Nunca lanza: si la IA falla,
+ * devuelve el orden determinista (el vigilante coserá con él).
  */
-export async function detallarDesglose(dirAbs) {
-    let entradas;
-    try { entradas = await fs.readdir(dirAbs, { withFileTypes: true }); } catch { return null; }
+export async function detallarDesglose(dirAbs, { subcarpetas = [] } = {}) {
     const docs = [];
-    for (const e of entradas) {
-        if (!e.isFile() || esAccesorio(e.name) || !EXT_PARTE.has(path.extname(e.name).toLowerCase())) continue;
-        let bytes = 0; try { bytes = (await fs.stat(path.join(dirAbs, e.name))).size; } catch { /* sin stat */ }
-        docs.push({ nombre: e.name, bytes });
+    for (const nombre of await partesDeDesglose(dirAbs, subcarpetas)) {
+        let bytes = 0; try { bytes = (await fs.stat(path.join(dirAbs, ...nombre.split('/')))).size; } catch { /* sin stat */ }
+        docs.push({ nombre, bytes });
     }
     if (docs.length < 2) return null;
 
@@ -145,10 +142,10 @@ export async function detallarDesglose(dirAbs) {
     // c) Partes con nombre de TÍTULO: una llamada dirigida con los nombres, su tamaño y el sumario.
     try {
         const conPaginas = [];
-        for (const d of docs) conPaginas.push({ ...d, paginas: await paginasPdf(path.join(dirAbs, d.nombre)) });
-        const preliminar = ordenLocal.find((n) => /front|contents|toc|preface|pr[oó]logo|[ií]ndice|sumario/i.test(n))
+        for (const d of docs) conPaginas.push({ ...d, paginas: await paginasPdf(path.join(dirAbs, ...d.nombre.split('/'))) });
+        const preliminar = ordenLocal.find((n) => /front|contents|toc|preface|pr[oó]logo|[ií]ndice|sumario/i.test(path.basename(n)))
             || [...conPaginas].sort((a, b) => a.bytes - b.bytes)[0]?.nombre;
-        const sumario = preliminar ? await textoInicial(path.join(dirAbs, preliminar)) : '';
+        const sumario = preliminar ? await textoInicial(path.join(dirAbs, ...preliminar.split('/'))) : '';
         const r = await pedirOrdenIA(path.basename(dirAbs), conPaginas, preliminar, sumario);
         return { ...validarDetalle(r, nombres, ordenLocal), fuente: sumario ? 'IA con el sumario' : 'IA solo con los nombres' };
     } catch (e) {
@@ -234,7 +231,14 @@ export async function afinarPlan(plan, esq) {
         }
 
         if (p.guia.accion === 'desglose') {
-            const d = await detallarDesglose(p.abs);
+            // Subcarpetas donde pueden estar sus partes: las que el agente leyó como «parte» (o como otro trozo del
+            // mismo libro desglosado); las de nombre típico («Chapters/»…) las añade partesDeDesglose por su cuenta.
+            const madreDe = (ruta) => (ruta.includes('/') ? ruta.slice(0, ruta.lastIndexOf('/')) : '.');
+            const subcarpetas = plan
+                .filter((q) => q.ruta !== '.' && madreDe(q.ruta) === p.ruta)
+                .filter((q) => q.tipo === 'parte' || q.contenido === 'libro-desglosado' || RE_CARPETA_PARTES.test(q.ruta.split('/').pop()))
+                .map((q) => q.ruta.split('/').pop());
+            const d = await detallarDesglose(p.abs, { subcarpetas });
             if (d) {
                 p.guia.desglose = { ...(d.principal ? { principal: d.principal } : {}), orden: d.orden, ...(Object.keys(d.titulos).length ? { titulos: d.titulos } : {}) };
                 notas.push(`«${nombre}»: libro desglosado — ${d.principal ? `libro entero «${d.principal}» + ${d.orden.length} partes` : `${d.orden.length} partes a coser`} (orden: ${d.fuente}).`);

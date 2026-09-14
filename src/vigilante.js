@@ -24,7 +24,7 @@ import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf s
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, perfilHeredado, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
 import { tituloDeNombre } from './utils/afinar-guias.js';
-import { detectarLibroDesglosado, detectarDesglosePuro, ordenarPartesLibro } from './utils/libro-desglosado.js'; // libro + su desglose
+import { detectarLibroDesglosado, detectarDesglosePuro, ordenarPartesLibro, partesDeDesglose } from './utils/libro-desglosado.js'; // libro + su desglose
 import { unirPdfs, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB, esFalloDeConexionMongo } from './database.js';
@@ -1661,17 +1661,33 @@ async function aplicarAccionesGuiaFs() {
  * desde la ficha— sin perder nada. Fijar el principal es imprescindible: por tamaño se elegiría bien aquí,
  * pero el detector ya sabe CUÁL es y así no queda al azar.
  */
+/**
+ * Mueve una parte («ch01.pdf» o, si vivía en una subcarpeta de partes, «Chapters/ch01.pdf») a «Desglose/»,
+ * conservando esa subcarpeta dentro. Devuelve true si la movió.
+ */
+async function moverParteADesglose(dir, sub, parte) {
+    const src = path.join(dir, ...parte.split('/'));
+    if (!(await rutaExiste(src))) return false;
+    const dst = path.join(sub, ...parte.split('/'));
+    await fs.mkdir(path.dirname(dst), { recursive: true });
+    await fs.rename(src, dst);
+    return true;
+}
+// Las subcarpetas de partes («Chapters/») quedan vacías tras mover sus capítulos: se retiran para que no viajen
+// como «material» vacío junto al libro. rmdir SIN recursive: si les queda algo, se quedan (y ese algo viaja).
+async function retirarSubcarpetasVaciadas(dir, partes) {
+    for (const s of new Set(partes.filter((p) => p.includes('/')).map((p) => p.split('/')[0]))) {
+        await fs.rmdir(path.join(dir, s)).catch(() => {});
+    }
+}
+
 async function materializarDesglose(dir, desg) {
     try {
         const sub = path.join(dir, 'Desglose');
         await fs.mkdir(sub, { recursive: true });
         let movidas = 0;
-        for (const parte of desg.partes) {
-            const src = path.join(dir, parte);
-            if (!(await rutaExiste(src))) continue;
-            await fs.rename(src, path.join(sub, parte));
-            movidas++;
-        }
+        for (const parte of desg.partes) if (await moverParteADesglose(dir, sub, parte)) movidas++;
+        await retirarSubcarpetasVaciadas(dir, desg.partes);
         await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: desg.principal } });
         console.log(`  📚 «${path.basename(dir)}»: LIBRO DESGLOSADO → «${desg.principal}»${desg.dominio ? ` (×${desg.dominio} de tamaño)` : ''} + ${movidas} parte(s) a «Desglose/» (adjunto).`);
         return true;
@@ -1692,7 +1708,7 @@ async function materializarDesglose(dir, desg) {
 async function materializarDesglosePuro(dir, puro) {
     const nombre = `${path.basename(dir)} (recompuesto).pdf`;
     const destino = path.join(dir, nombre);
-    const rutas = puro.partes.map((p) => path.join(dir, p));
+    const rutas = puro.partes.map((p) => path.join(dir, ...p.split('/')));   // «Chapters/ch01.pdf» → ruta del sistema
     const r = await unirPdfs(rutas, destino);
     if (!r.ok) {
         await fs.rm(destino, { force: true }).catch(() => {});
@@ -1712,7 +1728,7 @@ async function materializarDesglosePuro(dir, puro) {
     let capitulos = [];
     let pagina = 1;
     for (const parte of puro.partes) {
-        const n = await paginasPdf(path.join(dir, parte));
+        const n = await paginasPdf(path.join(dir, ...parte.split('/')));
         if (!n) { capitulos = []; break; }
         capitulos.push({ titulo: puro.titulos?.[parte] || tituloDeNombre(parte), pagina });
         pagina += n;
@@ -1721,10 +1737,8 @@ async function materializarDesglosePuro(dir, puro) {
     try {
         const sub = path.join(dir, 'Desglose');
         await fs.mkdir(sub, { recursive: true });
-        for (const parte of puro.partes) {
-            const src = path.join(dir, parte);
-            if (await rutaExiste(src)) await fs.rename(src, path.join(sub, parte));
-        }
+        for (const parte of puro.partes) await moverParteADesglose(dir, sub, parte);
+        await retirarSubcarpetasVaciadas(dir, puro.partes);
         await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: nombre, ...(capitulos.length ? { capitulos } : {}) } });
         console.log(`  🧵 «${path.basename(dir)}»: DESGLOSE PURO cosido → «${nombre}» (${r.paginas} págs. de ${puro.partes.length} partes`
             + `${capitulos.length ? `, índice de ${capitulos.length} capítulos` : ''}); originales a «Desglose/».`);
@@ -1743,13 +1757,10 @@ async function materializarDesglosePuro(dir, puro) {
  * se puede (partes que no son PDF sin libro entero, qpdf ausente…): entonces siguen las reglas de siempre.
  */
 async function materializarDesgloseGuiado(dir, d = {}) {
-    const EXT_PARTE = new Set(['.pdf', '.epub', '.mobi', '.azw', '.azw3', '.djvu', '.djv', '.chm', '.doc', '.docx', '.rtf']);
-    let docs;
-    try {
-        docs = (await fs.readdir(dir, { withFileTypes: true }))
-            .filter((e) => e.isFile() && !soloMetadatos(e.name) && !e.name.startsWith('_') && EXT_PARTE.has(path.extname(e.name).toLowerCase()))
-            .map((e) => e.name);
-    } catch { return false; }
+    // Partes: las sueltas en la carpeta y las de sus subcarpetas de partes — las que nombra la guía
+    // («Chapters/ch01.pdf») y las de nombre típico. Rutas relativas a la carpeta.
+    const subsGuia = [...new Set([...(d.orden || []), d.principal || ''].filter((n) => n.includes('/')).map((n) => n.split('/')[0]))];
+    const docs = await partesDeDesglose(dir, subsGuia);
     if (docs.length < 2) return false;
 
     // Libro ENTERO presente: se cataloga él y los capítulos viajan de material (no se cose nada).
