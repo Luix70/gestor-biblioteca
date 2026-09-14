@@ -21,7 +21,8 @@
  *   mixta             → NADA: se deja la regla por defecto.
  *
  * SALVAGUARDAS:
- *   · NUNCA pisa una guía del USUARIO (hecha en el Inspector): solo reescribe las que llevan origen:'agente'.
+ *   · NUNCA pisa una guía del USUARIO (hecha en el Inspector): solo reescribe las que llevan origen:'agente' (y,
+ *     cuando la inspección se lanza desde el panel, también las 'panel': las que aprobaste allí).
  *   · Las carpetas DUDOSAS (confianza < UMBRAL_CONFIANZA) no se escriben salvo que se pida: son decisiones
  *     tuyas, no deducciones («¿quiero "University Press Collection" como colección?»).
  *   · No guía los DESCENDIENTES de una obra ni de una unidad: la obra ya reúne todo lo de debajo como tomos, y
@@ -212,7 +213,10 @@ function promoverTiradasDeRevista(porRuta) {
     }
 }
 
-export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDudosas = false } = {}) {
+// `origenesReescribibles`: de quién son las guías que este plan puede reescribir. La inspección automática solo
+// reescribe las suyas ('agente'); la del panel también las que TÚ aprobaste en el panel ('panel'), porque es tu
+// decisión repetirla. Las hechas a mano en el Inspector (sin origen) no se tocan nunca.
+export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDudosas = false, origenesReescribibles = [ORIGEN] } = {}) {
     const porRuta = new Map(interpretacion.carpetas.map((c) => [c.ruta, { ...c }]));
     promoverTiradasDeRevista(porRuta);
     desarmarContenedores(porRuta);
@@ -235,15 +239,17 @@ export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDud
         }
 
         const actual = await leerGuia(abs);
-        if (actual && guiaEsSignificativa(actual) && actual.perfil?.origen !== ORIGEN) {
-            plan.push({ ...base, guia, estado: 'respetada', accionUsuario: actual.accion, motivo: 'ya tiene una guía tuya (Inspector): no se toca' });
+        const reescribible = origenesReescribibles.includes(actual?.perfil?.origen);
+        if (actual && guiaEsSignificativa(actual) && !reescribible) {
+            const deQuien = actual.perfil?.origen === 'panel' ? 'la aprobaste en el panel' : 'ya tiene una guía tuya (Inspector)';
+            plan.push({ ...base, guia, estado: 'respetada', accionUsuario: actual.accion, motivo: `${deQuien}: no se toca` });
             continue;
         }
         if (i.confianza < UMBRAL_CONFIANZA && !incluirDudosas) {
             plan.push({ ...base, guia, estado: 'dudosa', motivo: i.razon || 'confianza baja: decisión tuya' });
             continue;
         }
-        plan.push({ ...base, guia, estado: actual?.perfil?.origen === ORIGEN ? 'actualizar' : 'nueva', motivo: null });
+        plan.push({ ...base, guia, estado: actual && reescribible ? 'actualizar' : 'nueva', motivo: null });
     }
 
     // 2.ª pasada: lo que cuelga de una OBRA o UNIDAD (audiolibro, software, desglose…) no se guía (ver cabecera):
@@ -265,6 +271,21 @@ export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDud
         p.motivo = 'forma parte de una obra o unidad';
     }
     return plan;
+}
+
+/** Resumen legible de una guía («revistas de «2DArtist» (ISSN …) · CDU 741 · sin colección»), para el CLI y el panel. */
+export function resumenGuia(g) {
+    if (!g) return '';
+    const p = g.perfil || {};
+    const ACC = { audiolibro: 'audiolibro', 'coleccion-audiolibros': 'colección de audiolibros', transmedia: 'transmedia',
+        software: 'software', 'libro-material': 'libro con material', desglose: 'libro desglosado' };
+    return [g.accion === 'obra' && `obra «${p.obra}»`, ACC[g.accion],
+        g.desglose && (g.desglose.principal ? `libro entero «${g.desglose.principal}»` : `${(g.desglose.orden || []).length} partes a coser`),
+        p.tipo_probable === 'revista' && `revistas de «${p.cabecera || '?'}»${p.issn ? ` (ISSN ${p.issn})` : ''}`,
+        p.tipo_probable === 'comic' && 'cómics',
+        p.coleccion && `colección «${p.coleccion}»`,
+        p.editorial_probable && `editorial «${p.editorial_probable}»`, p.materia_cdu && `CDU ${p.materia_cdu}`,
+        p.sin_coleccion && 'sin colección'].filter(Boolean).join(' · ');
 }
 
 /** Escribe las guías del plan con estado 'nueva' o 'actualizar'. Devuelve cuántas escribió. */

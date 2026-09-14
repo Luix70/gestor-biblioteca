@@ -156,17 +156,77 @@ async function carpetasNuevas(dir, marca) {
     return nuevas;
 }
 
+/**
+ * Deja la MARCA de «inspeccionada» en la carpeta. La usan la inspección automática, la del panel (Inspector) y el
+ * CLI con --escribir: sin ella, una carpeta inspeccionada a mano la volvería a inspeccionar el vigilante — otra
+ * llamada, y podría reescribir las guías que ya revisaste (la IA no responde siempre igual).
+ * @param escritas  entradas del plan cuyas guías se escribieron
+ * @param dudosas   [{ruta, tipo, contenido, motivo}] que se dejaron a las reglas
+ * @returns {Promise<{porClase: object}>}
+ */
+export async function registrarInspeccion(dir, { esq, r, escritas = [], notas = [], dudosas = [], segundos = 0, origen = 'vigilante' }) {
+    const porClase = {};
+    for (const p of escritas) {
+        const k = p.contenido && p.contenido !== 'libros' ? p.contenido : p.tipo;
+        porClase[k] = (porClase[k] || 0) + 1;
+    }
+    await escribirMarca(dir, {
+        estado: 'hecha',
+        origen,
+        fecha: new Date().toISOString(),
+        segundos,
+        llamadas: r.llamadas,
+        carpetas_vistas: esq.carpetas.length,
+        recortado: !!esq.recortado,
+        guias_escritas: escritas.length,
+        por_clase: porClase,
+        dudosas,
+        notas,
+        raiz: r.carpetas.find((c) => c.ruta === '.') || null,
+        sin_ver: esq.sin_ver || 0,
+        // El árbol ENTERO tal como estaba (no solo lo que vio la IA): así, una carpeta que llegue después a
+        // cualquier profundidad se reconoce como nueva. Las que quedaron fuera por el tope no cuentan como
+        // nuevas: ya se sabía que existían y van por las reglas con las guías heredadas.
+        carpetas: await carpetasDelArbol(dir),
+    });
+    return { porClase };
+}
+
+// ─── Reservas ───────────────────────────────────────────────────────────────────────────────────────────
+
+// Carpetas de primer nivel con una inspección A DEMANDA (panel) en curso o pendiente de que decidas. Mientras, el
+// vigilante no las toca: si las ingiriera con las reglas —o las inspeccionara él por su cuenta— mientras revisas su
+// propuesta, revisarla no serviría de nada. Caducan solas por si cierras el panel sin decidir.
+const RESERVA_MAX_MS = 30 * 60 * 1000;
+const reservadas = new Map();   // ruta absoluta → caducidad (ms)
+export function reservarCarpeta(dir, ms = RESERVA_MAX_MS) { reservadas.set(path.resolve(dir), Date.now() + ms); }
+export function liberarCarpeta(dir) { if (dir) reservadas.delete(path.resolve(dir)); }
+function estaReservada(dir) {
+    const k = path.resolve(dir), hasta = reservadas.get(k);
+    if (!hasta) return false;
+    if (Date.now() > hasta) { reservadas.delete(k); return false; }
+    return true;
+}
+
 // ─── Flujo ──────────────────────────────────────────────────────────────────────────────────────────────
 
 const avisadasManual = new Set();   // carpetas guiadas a mano: se avisa UNA vez, no en cada escaneo
+const avisadasReserva = new Set();  // ídem, carpetas reservadas por el panel
 
 /**
  * Prepara UNA carpeta de la raíz del Inbox antes de clasificarla.
  * @returns {Promise<{seguir:boolean}>} seguir=false → ESPERAR (la IA falló y aún no toca reintentar).
  */
 export async function prepararCarpeta(dir) {
-    if (!inspeccionIAActiva()) return { seguir: true };
     const nombre = path.basename(dir);
+    // Reservada por una inspección del panel: esperar a que decidas (va antes que el interruptor: aunque la
+    // inspección automática esté apagada, no se debe ingerir lo que estás revisando).
+    if (estaReservada(dir)) {
+        if (!avisadasReserva.has(dir)) { avisadasReserva.add(dir); console.log(`  🧭 «${nombre}»: en revisión en el panel (inspección con IA) → espera.`); }
+        return { seguir: false };
+    }
+    avisadasReserva.delete(dir);
+    if (!inspeccionIAActiva()) return { seguir: true };
     const marca = await leerMarca(dir);
 
     // Ya inspeccionada (o agotada la espera): solo se repite si han llegado carpetas NUEVAS, a cualquier profundidad.
@@ -218,29 +278,8 @@ async function inspeccionar(dir, marcaPrevia, motivo) {
         const escritas = await escribirGuias(plan);
 
         const dudosas = plan.filter((p) => p.estado === 'dudosa').map((p) => ({ ruta: p.ruta, tipo: p.tipo, contenido: p.contenido, motivo: p.motivo }));
-        const porClase = {};
-        for (const p of plan.filter((q) => q.estado === 'nueva' || q.estado === 'actualizar')) {
-            const k = p.contenido && p.contenido !== 'libros' ? p.contenido : p.tipo;
-            porClase[k] = (porClase[k] || 0) + 1;
-        }
-        await escribirMarca(dir, {
-            estado: 'hecha',
-            fecha: new Date().toISOString(),
-            segundos: Math.round((Date.now() - t0) / 1000),
-            llamadas: r.llamadas,
-            carpetas: esq.carpetas.length,
-            recortado: !!esq.recortado,
-            guias_escritas: escritas,
-            por_clase: porClase,
-            dudosas,
-            notas,
-            raiz: r.carpetas.find((c) => c.ruta === '.') || null,
-            sin_ver: esq.sin_ver || 0,
-            // El árbol ENTERO tal como estaba (no solo lo que vio la IA): así, una carpeta que llegue después a
-            // cualquier profundidad se reconoce como nueva. Las que quedaron fuera por el tope no cuentan como
-            // nuevas: ya se sabía que existían y van por las reglas con las guías heredadas.
-            carpetas: await carpetasDelArbol(dir),
-        });
+        const escritasPlan = plan.filter((q) => q.estado === 'nueva' || q.estado === 'actualizar');
+        const { porClase } = await registrarInspeccion(dir, { esq, r, escritas: escritasPlan, notas, dudosas, segundos: Math.round((Date.now() - t0) / 1000), origen: 'vigilante' });
         const resumen = Object.entries(porClase).map(([k, n]) => `${n} ${k}`).join(', ') || 'ninguna';
         console.log(`  🧭 «${nombre}»: inspeccionada en ${Math.round((Date.now() - t0) / 1000)} s (${r.llamadas} llamada(s), ${esq.carpetas.length} carpetas). Guías: ${resumen}.`);
         if (esq.recortado) {

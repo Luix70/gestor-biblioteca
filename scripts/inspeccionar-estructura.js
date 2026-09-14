@@ -25,9 +25,11 @@ import 'dotenv/config';
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { esqueletoArbol, interpretarEstructura } from '../src/utils/agente-estructura.js';
-import { planGuias, escribirGuias } from '../src/utils/guias-estructura.js';
+import { planGuias, escribirGuias, resumenGuia } from '../src/utils/guias-estructura.js';
 import { afinarPlan } from '../src/utils/afinar-guias.js';
+import { registrarInspeccion } from '../src/utils/inspeccion-auto.js';
 
 const args = process.argv.slice(2);
 const RUTA = args.find((a) => !a.startsWith('--'));
@@ -114,19 +116,7 @@ async function main() {
     }
 
     // Qué se escribiría, resumido: una línea por carpeta que recibe guía.
-    const resumen = (g) => {
-        if (!g) return '';
-        const p = g.perfil || {};
-        const ACC = { audiolibro: 'audiolibro', 'coleccion-audiolibros': 'colección de audiolibros', transmedia: 'transmedia',
-            software: 'software', 'libro-material': 'libro con material', desglose: 'libro desglosado' };
-        return [g.accion === 'obra' && `obra «${p.obra}»`, ACC[g.accion],
-            g.desglose && (g.desglose.principal ? `libro entero «${g.desglose.principal}»` : `${(g.desglose.orden || []).length} partes a coser`),
-            p.tipo_probable === 'revista' && `revistas de «${p.cabecera || '?'}»${p.issn ? ` (ISSN ${p.issn})` : ''}`,
-            p.tipo_probable === 'comic' && 'cómics',
-            p.coleccion && `colección «${p.coleccion}»`,
-            p.editorial_probable && `editorial «${p.editorial_probable}»`, p.materia_cdu && `CDU ${p.materia_cdu}`,
-            p.sin_coleccion && 'sin colección'].filter(Boolean).join(' · ');
-    };
+    const resumen = resumenGuia;
     for (const p of plan) {
         if (!['nueva', 'actualizar', 'dudosa', 'respetada'].includes(p.estado)) continue;
         const marca = { nueva: '＋', actualizar: '↻', dudosa: '？', respetada: '🔒' }[p.estado];
@@ -139,7 +129,19 @@ async function main() {
         process.exit(0);
     }
     const n = await escribirGuias(plan);
-    console.log(`\n   ✔ Escritas ${n} guías. El vigilante las obedecerá en la próxima ingesta de este árbol.\n`);
+    // Si la carpeta es de PRIMER nivel del Inbox, la marca de «inspeccionada»: sin ella el vigilante la volvería a
+    // inspeccionar al procesarla (otra llamada, y podría reescribir las guías que acabas de revisar).
+    const abs = path.resolve(RUTA);
+    const inbox = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', process.env.PATH_INBOX || 'Inbox');
+    let marcada = false;
+    if (path.dirname(abs) === inbox) {
+        const escritas = plan.filter((p) => p.estado === 'nueva' || p.estado === 'actualizar');
+        const dudosas = plan.filter((p) => p.estado === 'dudosa').map((p) => ({ ruta: p.ruta, tipo: p.tipo, contenido: p.contenido, motivo: p.motivo }));
+        await registrarInspeccion(abs, { esq, r, escritas, notas: [], dudosas, segundos: Math.round((Date.now() - t1) / 1000), origen: 'cli' });
+        marcada = true;
+    }
+    console.log(`\n   ✔ Escritas ${n} guías${marcada ? ' y la marca de inspeccionada (el vigilante no la repetirá)' : ''}.`
+        + ' El vigilante las obedecerá en la próxima ingesta de este árbol.\n');
     process.exit(0);
 }
 

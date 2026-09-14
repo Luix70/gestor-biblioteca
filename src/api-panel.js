@@ -18,6 +18,7 @@ import { listarUsuariosBD, crearUsuario, editarUsuario, borrarUsuario, contarAdm
 import { compararDuplicado, resolverDuplicado } from './utils/duplicados.js';
 import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './integridad.js';
 import { lanzarEmparejado, estadoEmparejado } from './utils/emparejar-portadas.js';
+import { lanzarInspeccionManual, estadoInspeccionManual, aplicarInspeccionManual, descartarInspeccionManual } from './utils/inspeccion-manual.js';
 import { lanzarReextraccion, estadoReextraccion, cancelarReextraccion } from './utils/reextraer-imagenes.js';
 import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion } from './utils/reidentificar-doc.js';
 import { lanzarCompletarSinopsis, estadoCompletarSinopsis, cancelarCompletarSinopsis } from './utils/completar-sinopsis.js';
@@ -2796,6 +2797,41 @@ export function rutasPanel() {
     };
     // AGRUPADO A: mueve los ficheros seleccionados a una NUEVA subcarpeta (en su padre común) — ahora mismo.
     // La autodetección del vigilante la tratará luego (audio→audiolibro, docs→colección, etc.).
+    // 🤖 INSPECCIÓN CON IA A DEMANDA de una carpeta del Inspector (utils/inspeccion-manual.js), en dos pasos como el
+    // «🧩 Patrón»: PROPONER en segundo plano (puede tardar minutos: se sondea el estado) → APLICAR las guías que
+    // elijas. Mientras decides, su carpeta de primer nivel queda reservada: el vigilante no la toca. Solo admin.
+    const soloAdminInspeccion = (req, res) => { if (req.usuario?.rol !== 'admin') { res.status(403).json({ ok: false, motivo: 'solo administradores' }); return false; } return true; };
+    r.post('/inbox/inspeccion', async (req, res) => {
+        try {
+            if (!soloAdminInspeccion(req, res)) return;
+            const sub = String(req.body?.sub || '').replace(/^[/\\]+/, '');
+            const abs = sub ? rutaInboxSegura(INBOX, sub) : null;
+            // La RAÍZ del Inbox no: inspeccionarla como un solo árbol mezclaría todos los drops en una interpretación.
+            if (!abs || abs === path.resolve(INBOX)) return res.status(400).json({ ok: false, motivo: 'elige una carpeta del Inbox' });
+            const st = await stat(abs).catch(() => null);
+            if (!st || !st.isDirectory()) return res.status(404).json({ ok: false, motivo: 'carpeta no encontrada' });
+            const reserva = path.join(path.resolve(INBOX), sub.split(/[/\\]/)[0]);   // su carpeta de PRIMER nivel
+            const r2 = lanzarInspeccionManual({ abs, sub, reserva, repetir: !!req.body?.repetir });
+            res.status(r2.ok ? 200 : 409).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.get('/inbox/inspeccion/estado', (req, res) => {
+        if (!soloAdminInspeccion(req, res)) return;
+        res.json(estadoInspeccionManual());
+    });
+    r.post('/inbox/inspeccion/aplicar', async (req, res) => {
+        try {
+            if (!soloAdminInspeccion(req, res)) return;
+            const rutas = Array.isArray(req.body?.rutas) ? req.body.rutas.map(String) : [];
+            const r2 = await aplicarInspeccionManual({ sub: String(req.body?.sub || ''), rutas });
+            res.status(r2.ok ? 200 : 409).json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/inbox/inspeccion/descartar', (req, res) => {
+        if (!soloAdminInspeccion(req, res)) return;
+        res.json(descartarInspeccionManual({ sub: String(req.body?.sub || '') }));
+    });
+
     r.post('/inbox/agrupar-carpeta', async (req, res) => {
         try {
             const rutas = Array.isArray(req.body?.rutas) ? req.body.rutas : [];

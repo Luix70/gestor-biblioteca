@@ -13960,6 +13960,10 @@ function enlazarControlesGuia(raiz) {
   $$r('.guiaPatron').forEach((btn) => {
     btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); editarPatronNombres(btn.dataset.ruta); };
   });
+  // Botón «🤖 IA» de cada carpeta → inspección con IA a demanda (tampoco debe abrir/cerrar el <details>).
+  $$r('.guiaIA').forEach((btn) => {
+    btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); inspeccionarConIA(btn.dataset.ruta); };
+  });
   $$r('.guiaTodos').forEach((btn) => {
     btn.onclick = (e) => {
       e.preventDefault();
@@ -14042,7 +14046,8 @@ function nodoGuiaHTML(n, prof = 0) {
       ${sel('alcance', _ALCANCES_EMPAQUETAR, g.alcance || 'subcarpetas', g.accion === 'empaquetar' ? '' : ' hidden')}
       ${sel('tipo_probable', _TIPOS_GUIA, g.perfil && g.perfil.tipo_probable)}
       <input class="guiaCtl" data-ruta="${esc(n.ruta)}" data-k="coleccion" placeholder="colección" value="${esc((g.perfil && g.perfil.coleccion) || '')}" style="font-size:12px;width:110px;padding:1px 4px" />
-      <button type="button" class="btn guiaPatron" data-ruta="${esc(n.ruta)}" title="Detectar el patrón de los nombres de esta carpeta y mapear cada parte a un campo (ISBN, editorial, título, autor, año, nº de colección…). Se guarda en su _guia.json y el vigilante lo aplica validando cada campo." style="font-size:11px;padding:1px 6px">🧩 Patrón${g.patron ? ' ✓' : ''}</button>${trunc}
+      <button type="button" class="btn guiaPatron" data-ruta="${esc(n.ruta)}" title="Detectar el patrón de los nombres de esta carpeta y mapear cada parte a un campo (ISBN, editorial, título, autor, año, nº de colección…). Se guarda en su _guia.json y el vigilante lo aplica validando cada campo." style="font-size:11px;padding:1px 6px">🧩 Patrón${g.patron ? ' ✓' : ''}</button>
+      <button type="button" class="btn guiaIA" data-ruta="${esc(n.ruta)}" title="Inspeccionar con IA esta carpeta y todo lo que cuelga de ella: propone una guía para cada una (colección, serie, editorial, materia y CDU, revistas y su cabecera, audiolibros, software, libros desglosados…). Revisas la propuesta y eliges qué guías se escriben." style="font-size:11px;padding:1px 6px">🤖 IA${g.perfil && ['agente', 'panel'].includes(g.perfil.origen) ? ' ✓' : ''}</button>${trunc}
     </span>`;
   // `pendiente` = el servidor no la descendió (carga diferida): nace PLEGADA y se pide al desplegarla. Ojo con
   // no confundirla con una carpeta VACÍA: por eso el servidor las distingue y aquí también.
@@ -14182,6 +14187,113 @@ async function editarPatronNombres(ruta) {
     } catch (e) { toast(e.message, 'bad'); }
   };
   $('#patProbar').click();   // dry-run inicial con el patrón detectado
+}
+
+// ── 🤖 INSPECCIÓN CON IA A DEMANDA (dentro de «Guiar la ingesta») ────────────────────────────────────────
+// El agente de estructura sobre la carpeta elegida y todo lo que cuelga de ella, en dos pasos como el «🧩 Patrón»:
+// PROPONER (en segundo plano en el servidor: un árbol grande son varias llamadas y minutos; aquí se sondea) y
+// ESCRIBIR las guías que marques — las dudosas vienen desmarcadas. Mientras decides, el vigilante no toca la carpeta.
+const _IA_ICONO_CONT = { revistas: '📰', comics: '💬', audiolibro: '🎧', 'coleccion-audiolibros': '🎧', transmedia: '🎞️', software: '💿', 'libro-material': '📦', 'libro-desglosado': '🧵', escaneo: '🖼️', mixta: '🧩' };
+const _IA_ICONO_TIPO = { coleccion: '📚', serie: '🔗', editorial: '🏢', materia: '🏷️', obra: '📖', cajon: '🗃️', mixta: '🧩', raiz: '🌳', parte: '·' };
+const _IA_ESTADO = { nueva: ['＋ nueva', 'ok'], actualizar: ['↻ actualiza', 'ok'], respetada: ['🔒 tuya', 'mut'], omitida: ['— sin guía', 'mut'] };
+
+async function inspeccionarConIA(ruta, { repetir = false } = {}) {
+  const modal = $('#cmpModal'), scrim = $('#cmpScrim');
+  const nombre = ruta.split('/').pop() || ruta;
+  let cerrado = false, sondeo = null;
+  // Cerrar sin escribir DESCARTA la propuesta: la carpeta vuelve a quedar libre para el vigilante.
+  const cerrar = (descartar = true) => {
+    cerrado = true;
+    clearTimeout(sondeo);
+    if (descartar) api('/inbox/inspeccion/descartar', { method: 'POST', body: JSON.stringify({ sub: ruta }) }).catch(() => {});
+    cerrarCmp();
+  };
+  modal.innerHTML = `<div class="box card" style="max-width:760px;width:96vw;max-height:92vh;overflow:auto"><h3 style="margin-top:0">🤖 Inspección con IA — ${esc(nombre)}</h3><div id="iaBody" class="muted">Lanzando…</div></div>`;
+  scrim.style.display = 'block'; modal.style.display = 'grid'; scrim.onclick = () => cerrar();
+  const cuerpo = (html) => { const b = $('#iaBody'); if (b) b.innerHTML = html; return !!b; };
+
+  try {
+    const r = await api('/inbox/inspeccion', { method: 'POST', body: JSON.stringify({ sub: ruta, repetir }) });
+    if (!r.ok) { cuerpo(`<div style="color:var(--bad)">${esc(r.motivo || 'No se pudo lanzar')}</div>`); return; }
+  } catch (e) { cuerpo(`<div style="color:var(--bad)">${esc(e.message)}</div>`); return; }
+
+  const sondear = async () => {
+    if (cerrado || !$('#iaBody')) return;   // cerrado, o el modal lo ocupa ya otra cosa
+    let e;
+    try { e = await api('/inbox/inspeccion/estado'); } catch { sondeo = setTimeout(sondear, 3000); return; }
+    if (cerrado || !$('#iaBody')) return;
+    if (!e.activo || e.sub !== ruta) { cuerpo('<div class="muted">La propuesta ya no está disponible (se aplicó o se descartó).</div>'); return; }
+    if (e.error) {
+      cuerpo(`<div style="color:var(--bad);margin-bottom:10px">La IA no pudo inspeccionarla: ${esc(e.error)}</div>
+        <div class="row" style="gap:8px;justify-content:flex-end"><button class="btn pri" id="iaReintentar">🔄 Reintentar</button><button class="btn" id="iaCerrar">Cerrar</button></div>`);
+      $('#iaReintentar').onclick = () => { cerrado = true; inspeccionarConIA(ruta, { repetir: true }); };
+      $('#iaCerrar').onclick = () => cerrar();
+      return;
+    }
+    if (!e.resultado) {
+      cuerpo(`<div>${esc(e.faseTexto || 'Inspeccionando…')} <span class="muted">· ${e.segundos} s${e.carpetas ? ` · ${e.carpetas} carpeta(s)` : ''}</span></div>
+        <p class="muted" style="font-size:12px">Un árbol grande son varias llamadas (unos 40 s cada 50 carpetas). Puedes cerrar y volver: la propuesta se guarda. Mientras tanto el Vigilante no toca esta carpeta.</p>`);
+      sondeo = setTimeout(sondear, 2000);
+      return;
+    }
+    pintarPropuesta(e);
+  };
+
+  const pintarPropuesta = (e) => {
+    const res = e.resultado;
+    const filas = res.filas.map((f) => {
+      const nom = f.ruta === '.' ? res.raiz : f.ruta.split('/').pop();
+      const ico = _IA_ICONO_CONT[f.contenido] || _IA_ICONO_TIPO[f.tipo] || '📁';
+      const [etq, clase] = _IA_ESTADO[f.estado] || [f.estado, 'mut'];
+      const marcada = f.escribible && !f.dudosa;
+      const sangria = Math.min(f.nivel, 8) * 14;
+      const detalle = f.resumen || f.motivo || '';
+      const duda = f.dudosa ? `<div style="font-size:11px;color:var(--warn)">⚠ la IA duda (confianza ${Number(f.confianza).toFixed(2)})${f.razon ? `: ${esc(f.razon)}` : ''} — decide tú</div>` : '';
+      return `<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 0 6px ${sangria}px;border-top:1px solid var(--line);cursor:${f.escribible ? 'pointer' : 'default'}">
+        <input type="checkbox" class="iaSel" data-ruta="${esc(f.ruta)}" ${marcada ? 'checked' : ''} ${f.escribible ? '' : 'disabled'} style="margin-top:3px">
+        <div style="flex:1;min-width:0"><div style="font-size:13px">${ico} <b>${esc(nom)}</b> <span class="tag ${clase}" style="font-size:10px;white-space:nowrap">${esc(etq)}</span></div>
+          ${detalle ? `<div class="muted" style="font-size:12px">${esc(detalle)}</div>` : ''}${duda}</div></label>`;
+    }).join('');
+    const avisos = [
+      res.aviso && `⚠ ${res.aviso}`,
+      res.recortado && `⚠ Árbol recortado: la IA vio ${res.carpetas} carpetas${res.sinVer ? ` y quedan al menos ${res.sinVer} más` : ''}; lo que no vio irá por las reglas, heredando estas guías.`,
+    ].filter(Boolean);
+    cuerpo(`<div style="font-size:12px;margin-bottom:8px">${res.carpetas} carpeta(s) · ${res.llamadas} llamada(s) · ${e.segundos} s.
+        Marca las guías que quieras escribir; las que la IA no tiene claras vienen desmarcadas. Hasta que decidas, el Vigilante no toca esta carpeta.</div>
+      ${avisos.map((a) => `<div style="font-size:12px;color:var(--warn);margin-bottom:6px">${esc(a)}</div>`).join('')}
+      ${res.notas && res.notas.length ? `<div style="font-size:12px;margin-bottom:8px">${res.notas.map((n) => `<div>· ${esc(n)}</div>`).join('')}</div>` : ''}
+      <div style="max-height:52vh;overflow:auto;border-bottom:1px solid var(--line)">${filas}</div>
+      <div class="row" style="gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px">
+        <button class="btn" id="iaRepetir" title="Volver a pedir la interpretación a la IA (otra llamada)">🔄 Repetir</button>
+        <button class="btn" id="iaCerrar">Cerrar sin escribir</button>
+        <button class="btn pri" id="iaEscribir">✅ Escribir guías</button>
+      </div>`);
+    const contar = () => {
+      const n = $$('#iaBody .iaSel:checked').length;
+      const b = $('#iaEscribir');
+      if (b) { b.textContent = `✅ Escribir ${n} guía(s)`; b.disabled = !n; }
+    };
+    $$('#iaBody .iaSel').forEach((cb) => (cb.onchange = contar));
+    contar();
+    $('#iaCerrar').onclick = () => cerrar();
+    $('#iaRepetir').onclick = () => { cerrado = true; inspeccionarConIA(ruta, { repetir: true }); };
+    $('#iaEscribir').onclick = async () => {
+      const rutas = $$('#iaBody .iaSel:checked').map((cb) => cb.dataset.ruta);
+      const b = $('#iaEscribir');
+      if (b) { b.disabled = true; b.textContent = 'Escribiendo…'; }
+      try {
+        const r = await api('/inbox/inspeccion/aplicar', { method: 'POST', body: JSON.stringify({ sub: ruta, rutas }) });
+        toast(`🤖 ${r.escritas} guía(s) escrita(s)${r.marcada ? ' · el Vigilante no volverá a inspeccionarla' : ''}`, 'ok');
+        cerrar(false);   // aplicar ya liberó la carpeta
+        cargarArbolInbox();
+      } catch (err) {
+        toast(err.message, 'bad');
+        contar();
+      }
+    };
+  };
+
+  sondear();
 }
 if ($('#guiaCargar')) $('#guiaCargar').onclick = cargarArbolInbox;
 // «🧰 Utilidades» del menú: NO es una página aparte —eso obligaría a duplicar el explorador, las casillas y el

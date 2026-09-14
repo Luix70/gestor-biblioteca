@@ -1329,6 +1329,23 @@ de ficheros clasificado por CDU.
       el número que dice si se perdió algo. Antes de ingerir sale como «previsión» (pendiente, no fallo);
       después juzga. Cada fichero que entró ENLAZA a su ficha. Una sola consulta a Mongo con todos los
       nombres. Reutiliza el CSS del informe de Integridad (CSS_INFORME) — un solo lenguaje visual.
+    · 🤖 IA (botón por carpeta en el Inspector, junto a «🧩 Patrón», admin): inspecciona CON IA esa carpeta y todo
+      lo que cuelga de ella cuando tú quieras, sin esperar al vigilante (utils/inspeccion-manual.js). Dos pasos como
+      el patrón: PROPONER en segundo plano (POST /inbox/inspeccion {sub, repetir?}; el panel sondea GET
+      /inbox/inspeccion/estado; un arbol grande son varias llamadas y minutos, y se puede cerrar y volver: la
+      propuesta se guarda) y ESCRIBIR las guías que marques (POST /inbox/inspeccion/aplicar {sub, rutas}). La
+      propuesta enseña, por carpeta, qué es, qué guía se escribiría (resumen comun con el CLI: guias-estructura ·
+      resumenGuia) y si es nueva / actualiza / tuya / sin guía; las DUDOSAS vienen desmarcadas con la razón de la
+      IA. Viene ya AFINADA (ISSN comprobado, orden de los desgloses). «🔄 Repetir» vuelve a pedirla (otra llamada);
+      «Cerrar sin escribir» la descarta (POST /inbox/inspeccion/descartar).
+      - RESERVA: mientras decides, su carpeta de PRIMER nivel queda reservada (inspeccion-auto · reservarCarpeta) y
+        el vigilante no la ingiere ni la inspecciona por su cuenta; caduca a los 30 min por si cierras sin decidir.
+      - Las guías escritas llevan perfil.origen:'panel' (las APROBASTE): la inspección automática las respeta como
+        tuyas; una nueva inspección desde el panel sí puede actualizarlas (planGuias · origenesReescribibles).
+      - En una carpeta de primer nivel deja además la MARCA .inspeccion-ia.json (registrarInspeccion, comun con la
+        automatica y con el CLI --escribir, que ahora tambien la deja): el vigilante no la volvera a inspeccionar.
+      - Una inspeccion a la vez (la IA es de pago y el vigilante también la usa). La raíz del Inbox no se puede
+        inspeccionar como un solo árbol (mezclaría todos los drops).
     · GUARDAR DESDE EL INSPECTOR FUSIONA (POST /inbox/guia → api-panel · fusionarGuiaInspector): el formulario
       solo maneja acción, alcance, tipo probable, colección y acciones por fichero; lo demás de la guía EXISTENTE
       se conserva (patrón, grupos, adjuntos, acciones por fichero no tocadas, detalle de un desglose, y las pistas
