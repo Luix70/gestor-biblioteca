@@ -285,7 +285,16 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 });
                 if (creada) docFinal.alertas_agente.push(`Nueva cabecera de revista registrada: ${cabTitulo || docFinal.issn}`);
                 if (_id) { docFinal.coleccion = _id; if (cabTitulo) docFinal.coleccion_nombre = cabTitulo; }
-                if (cduCab) docFinal.cdu = cduCab; // los números comparten la CDU de la cabecera
+                // Los números comparten la CDU de la cabecera… salvo que la de la cabecera sea GENÉRICA (0/000: nació
+                // del primer número sin CDU) y este número traiga una buena: entonces se CORRIGE la cabecera, en vez de
+                // imponer su 000 a todos los números que vengan. resolverCabecera solo rellena una CDU vacía, y un
+                // «000» no está vacío.
+                const generica = (c) => ['', '0', '000'].includes(String(c || '').trim());
+                if (cduCab && !generica(cduCab)) docFinal.cdu = cduCab;
+                else if (_id && !generica(docFinal.cdu)) {
+                    await db.collection('colecciones').updateOne({ _id }, { $set: { cdu: docFinal.cdu, fecha_actualizacion: new Date() } });
+                    docFinal.alertas_agente.push(`CDU de la cabecera «${cabTitulo || docFinal.issn}» corregida: ${cduCab || '(vacía)'} → ${docFinal.cdu}.`);
+                }
             }
         }
 

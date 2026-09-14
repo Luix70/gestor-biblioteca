@@ -16,6 +16,7 @@ import { indexarDoc } from './utils/indice-busqueda.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { parsearVolumen } from './utils/multivolumen.js';
 import { resolverCDU, contrastarCduCarpeta } from './clasificador-cdu.js';
+import { tituloDeNumero, tituloEsDelFichero } from './utils/revistas.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -270,6 +271,20 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
                 documento.issn = perfilRevista.issn;
                 documento.alertas_agente = [...(documento.alertas_agente || []),
                     `ISSN ${perfilRevista.issn} de la guía de la carpeta (cabecera «${perfilRevista.cabecera || perfilRevista.issn}»).`];
+            }
+            // CDU de la PUBLICACIÓN (la da el agente al inspeccionar la carpeta): rellena la de un número que no la
+            // tiene (vacía/0/000). Un número rara vez trae CDU propia, y sin esto la cabecera nacía con 000 (medido:
+            // los doce números de 2DArtist 2012). La cabecera la toma de su primer número (motor-catalogo, 2d).
+            if (perfilRevista.materia_cdu && ['', '0', '000'].includes(String(documento.cdu || '').trim())) {
+                documento.cdu = perfilRevista.materia_cdu;
+                documento.alertas_agente = [...(documento.alertas_agente || []), `CDU ${perfilRevista.materia_cdu} de la publicación (guía de la carpeta).`];
+            }
+            // TÍTULO: si es solo un resto del nombre del fichero («2DAIssue.073.»), se compone con la cabecera:
+            // «2DArtist nº 73 (enero 2012)». Un título de verdad (el tema de portada) se conserva.
+            if (perfilRevista.cabecera && tituloEsDelFichero(documento.titulo, path.basename(rutas[0] || ''))) {
+                const nuevo = tituloDeNumero(perfilRevista.cabecera, documento);
+                documento.alertas_agente = [...(documento.alertas_agente || []), `Título «${documento.titulo}» (del nombre del fichero) → «${nuevo}».`];
+                documento.titulo = nuevo;
             }
         }
     }

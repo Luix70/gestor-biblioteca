@@ -89,11 +89,15 @@ export function guiaDesdeInterpretacion(i, nombreCarpeta) {
     //    propio fichero siguen mandando (discriminador).
     if (i.contenido === 'revistas') {
         const cabecera = (i.nombre_canonico && String(i.nombre_canonico).trim()) || tituloCabecera(nombreCarpeta);
+        // CDU de la PUBLICACIÓN: servicio-ingesta la da a los números que no traen una (casi todos), y la cabecera
+        // nace con ella. Sin esto, 2DArtist 2012 entró entero con 000. Se sanea igual que la de materia (95-99…).
+        const cdu = sanearCduMateria(i.cdu);
         return {
             perfil: {
                 tipo_probable: 'revista',
                 ...(cabecera ? { cabecera } : {}),
                 ...(i.periodicidad ? { periodicidad: i.periodicidad } : {}),
+                ...(cdu ? { materia_cdu: cdu } : {}),
                 sin_coleccion: true,
                 origen: ORIGEN,
             },
@@ -202,6 +206,7 @@ function promoverTiradasDeRevista(porRuta) {
             c.contenido = 'revistas';
             c.nombre_canonico = hs.find((h) => h.nombre_canonico).nombre_canonico;
             c.periodicidad = c.periodicidad || hs[0].periodicidad || null;
+            c.cdu = c.cdu || hs.find((h) => h.cdu)?.cdu || null;
             cambio = true;
         }
     }

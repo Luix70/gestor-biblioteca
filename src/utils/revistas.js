@@ -11,6 +11,29 @@
  */
 import { MES_NUM } from './parsear-nombre.js';
 
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const normalizarAlnum = (s) => String(s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/**
+ * Título legible de un NÚMERO a partir de su cabecera: «2DArtist nº 73 (enero 2012)». Lo que falte se omite.
+ */
+export function tituloDeNumero(cabecera, { numero_issue, mes_publicacion, año_edicion } = {}) {
+    const m = parseInt(mes_publicacion, 10);
+    const fecha = [m >= 1 && m <= 12 ? MESES[m - 1] : null, año_edicion || null].filter(Boolean).join(' ');
+    const n = numero_issue != null && String(numero_issue).trim() ? ` nº ${String(numero_issue).trim()}` : '';
+    return `${String(cabecera).trim()}${n}${fecha ? ` (${fecha})` : ''}`;
+}
+
+/**
+ * ¿El título es solo un RESTO del nombre del fichero? («2DAIssue.073.» sacado de «2DAIssue.073.January.2012.pdf»).
+ * Entonces no aporta nada y se puede sustituir por uno compuesto con la cabecera. Un título de verdad (el tema de
+ * portada, «Especial Egipto») no está dentro del nombre del fichero y se conserva.
+ */
+export function tituloEsDelFichero(titulo, nombreArchivo) {
+    const t = normalizarAlnum(titulo), f = normalizarAlnum(String(nombreArchivo || '').replace(/\.[^.]+$/, ''));
+    return !t || (f.length > 0 && f.includes(t));
+}
+
 /**
  * Clave estable de un número dentro de su cabecera, en orden de fiabilidad:
  *   AAAA-MM  (año + mes)  →  n<nº de issue>  →  AAAA (solo año)  →  null (sin fecha/nº).

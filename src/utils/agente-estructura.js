@@ -311,8 +311,10 @@ Y, aparte, di QUÉ CONTIENE cada carpeta («contenido»), que es independiente d
 - libros: libros o documentos de lectura corrientes (lo habitual)
 - revistas: números de una publicación periódica (una tirada, todas las ediciones de un año…). En
   «nombre_canonico» pon el nombre de la CABECERA, sin fecha ni número («Historia de Iberia Vieja», no «HIV
-  2019 nº 163»); en «periodicidad», ${PERIODICIDADES.join('|')} si se deduce; en «anio», el año si la
-  carpeta es de un solo año. NO des el ISSN: se comprueba aparte contra fuentes fiables
+  2019 nº 163»; si los ficheros la abrevian —«2DAIssue.073»—, el nombre completo de la publicación); en
+  «periodicidad», ${PERIODICIDADES.join('|')} si se deduce; en «anio», el año si la carpeta es de un solo año;
+  y en «cdu», la CDU de la MATERIA de la publicación (se aplica a todos sus números). NO des el ISSN: se
+  comprueba aparte contra fuentes fiables
 - comics: cómics o novela gráfica
 - audiolibro: UN audiolibro: el AUDIO es la obra. Puede traer portada y PDF ACCESORIOS (librillo, carátula,
   contraportada, portada, notas, inlay): siguen siendo un audiolibro, NO transmedia
@@ -348,9 +350,10 @@ EVIDENCIA calculada en local para cada carpeta, entre llaves (úsala, es fiable)
 Tras «ej:» van nombres de documentos de muestra; tras «otros:», nombres de lo que no es documento (audio,
 ejecutables, datos…).
 
-Para las de tipo «materia» da la CDU (Clasificación Decimal Universal) más PRECISA que puedas justificar con el
-nombre (p. ej. Algebra → 512, Topology → 515.1, Number theory → 511, Cryptography → 003.26). Si el nombre no
-basta para precisar, da la división (p. ej. 51) — nunca inventes precisión.
+Para las de tipo «materia» y las de contenido «revistas» da la CDU (Clasificación Decimal Universal) más PRECISA
+que puedas justificar (p. ej. Algebra → 512, Topology → 515.1, Number theory → 511, Cryptography → 003.26; una
+revista de historia → 94, de fotografía → 77, de dibujo e ilustración → 741). Si no basta para precisar, da la
+división (p. ej. 51) — nunca inventes precisión.
 MUY IMPORTANTE: notación CDU, NO Dewey. Se parecen y se confunden sobre todo en HISTORIA:
 - En la CDU las divisiones 95, 96, 97, 98 y 99 NO EXISTEN (están vacías). «97» o «973» son Dewey.
 - La historia de un lugar es 94 con auxiliar de lugar entre paréntesis: 94(410) Gran Bretaña, 94(73) Estados

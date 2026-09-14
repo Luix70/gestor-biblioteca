@@ -3670,6 +3670,24 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       capitulo 3). SIN PROBAR aqui: el cosido con qpdf (no esta en el PC; si en el NAS) y una ingesta real.
     * COSTE: una llamada por cada 50 subcarpetas de un arbol complejo (~35-40 s) + una por libro desglosado cuyas
       partes se llamen por su titulo + consultas gratuitas a Wikidata/catalogo por cabecera de revista.
+    * INCIDENTE 2DArtist (14-sep, primer uso real). La inspeccion de «2DArtist_2012.collection» acerto (revistas,
+      cabecera «2DArtist», mensual, 2012), pero solo el PRIMER numero entro en esa cabecera; los siguientes crearon
+      cada uno la suya («2DAIssue.074.»…) con titulo del nombre del fichero y CDU 000. CAUSA: vigilante ·
+      limpiarInbox, tras catalogar cada unidad de una carpeta que NO es coleccion, recicla los ficheros «no
+      bibliograficos» de su raiz — y «_guia.json» (empieza por «_», no por «.») era uno de ellos. Con sin_coleccion
+      (revistas, editorial, materia, cajon) la guia desaparecia tras el primer documento. ARREGLO: la guia no se
+      recicla nunca en esa limpieza; se va con la carpeta al disolverla.
+      A la vez, por peticion del usuario: (a) el agente da tambien la CDU de la PUBLICACION en las carpetas de
+      revistas (perfil.materia_cdu) y servicio-ingesta 1ter la aplica al numero con CDU generica; motor-catalogo 2d
+      CORRIGE la CDU de una cabecera que nacio con 0/000 con la primera buena que llegue (antes resolverCabecera
+      solo rellenaba una vacia y un «000» no lo esta, asi que la cabecera imponia su 000 a todos); (b) un titulo
+      que sea solo un resto del nombre del fichero («2DAIssue.073.») pasa a «2DArtist nº 73 (enero 2012)»
+      (revistas · tituloDeNumero / tituloEsDelFichero); un titulo de verdad se conserva.
+      REPARACION de lo ya catalogado: scripts/reunir-numeros-revista.js --cabecera «X» --fichero «texto del
+      nombre» [--cdu C] [--ejecutar]: reune los numeros en la cabecera (camino de «Agrupar en coleccion»: clave,
+      inventario, borra las cabeceras vaciadas), rehace esos titulos y pasa la CDU 000 a la indicada o a la de la
+      cabecera (camino del Conformador: mueve carpetas, sin cdu_manual → en el NAS). Dry-run por defecto. En el
+      panel: 🧰 Ejecutar script.
     * PROFUNDIDAD (14-sep, tras la pregunta «¿funcionara en carpetas a distintos niveles?»). La inspeccion se
       dispara por cada carpeta de PRIMER nivel del Inbox pero analiza su arbol entero y deja guias a cualquier
       nivel; el vigilante las obedece hasta 8 niveles y la herencia de pistas sube hasta 20. Tres huecos cerrados:

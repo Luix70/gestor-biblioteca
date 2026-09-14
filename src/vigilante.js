@@ -1238,6 +1238,11 @@ export async function limpiarInbox(unidad, { borrarCatalogados = false } = {}) {
             let entradas; try { entradas = await fs.readdir(unidad.carpeta, { withFileTypes: true }); } catch { entradas = []; }
             for (const e of entradas) {
                 // NUNCA reciclar material CONSERVABLE (audio…): se deja intacto (lo protege .noborrar).
+                // NI la GUÍA de la carpeta: es la instrucción que siguen los documentos que aún quedan por procesar.
+                // Incidente real (14-sep): en «2DArtist_2012.collection» (revistas, sin colección de carpeta) la guía
+                // se recicló tras ingerir el PRIMER número, y los seis siguientes, sin cabecera ni pista de tipo, crearon
+                // cada uno su propia «cabecera» con el nombre del fichero. La guía se va con la carpeta al disolverla.
+                if (e.name === NOMBRE_GUIA) continue;
                 if (e.isFile() && !soloMetadatos(e.name) && !esValida(e.name) && !esConservable(e.name)) aReciclar.push(path.join(unidad.carpeta, e.name));
             }
         }
