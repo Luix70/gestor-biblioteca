@@ -346,6 +346,22 @@
             <div class="grid g3" id="papStats" style="margin-bottom: 16px"></div>
             <div class="card">
               <h3>Subcarpetas</h3>
+              <!-- Orden: mismo patrón que «↕️ Ordenar» del Catálogo (desplegable + botón de sentido). Se ordena en el
+                   NAVEGADOR sobre la lista ya cargada: medir tamaños recorre el disco y no hace falta repetirlo. -->
+              <div class="row" style="align-items: flex-end; margin-bottom: 12px">
+                <div style="flex: 1 1 220px">
+                  <label>Ordenar por</label
+                  ><select id="papOrden">
+                    <option value="fecha">Fecha de eliminación</option>
+                    <option value="bytes">Tamaño</option>
+                    <option value="ficheros">Nº de ficheros</option>
+                  </select>
+                </div>
+                <div>
+                  <label>Sentido</label
+                  ><button class="btn" id="papDir" data-dir="desc" title="Cambiar entre ascendente y descendente">↓ Desc</button>
+                </div>
+              </div>
               <div id="papBody"></div>
             </div>
           </section>

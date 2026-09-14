@@ -2358,6 +2358,20 @@ de ficheros clasificado por CDU.
       función no tienen manifiesto → no ofrecen «restaurar». (POST /papelera/restaurar
       {sub}. papelera.js·restaurar.)
     · 🗑 Vaciar (subcarpeta o toda): borrado DEFINITIVO explícito del usuario.
+    · ↕️ ORDENAR la tabla por FECHA DE ELIMINACIÓN, TAMAÑO o Nº DE FICHEROS, ascendente o
+      descendente (desplegable «Ordenar por» + botón «Sentido», el mismo patrón que el Catálogo).
+      Al cambiar de criterio el sentido vuelve a descendente (lo más reciente / grande / numeroso
+      primero, que es lo que se busca al hacer limpieza). La columna activa lleva una flecha ↑/↓.
+      Se ordena EN EL NAVEGADOR sobre la lista ya cargada: medir las subcarpetas recorre el disco,
+      y cambiar de orden no lo repite. La elección se recuerda en ese navegador (localStorage
+      pap_orden / pap_dir). Empates: decide el nº de serie (lo más reciente primero); sin fecha, al final.
+      FECHA DE ELIMINACIÓN (campo `fecha` de GET /papelera, inspeccion.js·fechaSubcarpeta): la del
+      NOMBRE de la subcarpeta (`<serial>_AAAA-MM-DD_HH-MM-SS_…`, en UTC; el panel la enseña en hora
+      local); si el nombre no la trae, `creado` del manifiesto; si tampoco, la fecha de modificación
+      de la carpeta (aproximada).
+      El nº de ficheros y el tamaño NO cuentan el manifiesto .papelera.json (antes cada subcarpeta
+      restaurable salía con un fichero de más).
+    · En MÓVIL la tabla pasa a TARJETAS apiladas con cada dato etiquetado (como en Cuarentena).
 
 
 ────────────────────────────────────────────────────────────────────────────────

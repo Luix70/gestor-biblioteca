@@ -1292,6 +1292,69 @@ async function abrirComparador(id) {
 
 // ── papelera ──
 // Página Papelera: totales (tamaño/ficheros/subcarpetas) + tabla de subcarpetas con «ver» y «vaciar».
+// La lista se pide UNA vez (el servidor recorre cada subcarpeta para medirla, y eso tarda) y el orden se
+// aplica aquí: cambiar de orden solo repinta, no vuelve a recorrer el disco.
+let _papSubcarpetas = [];
+// Sentido por defecto al elegir cada criterio: lo más reciente, lo más grande, lo más numeroso primero — lo que
+// se busca al hacer limpieza.
+const PAP_DIR_DEF = { fecha: 'desc', bytes: 'desc', ficheros: 'desc' };
+
+function ordenarPapelera(lista, clave, dir) {
+  const signo = dir === 'asc' ? 1 : -1;
+  const valor = (s) => (clave === 'fecha' ? Date.parse(s.fecha || '') : Number(s[clave]));
+  return lista.slice().sort((a, b) => {
+    const va = valor(a),
+      vb = valor(b);
+    // Sin dato (fecha desconocida): siempre al final, en cualquier sentido.
+    if (Number.isNaN(va) !== Number.isNaN(vb)) return Number.isNaN(va) ? 1 : -1;
+    if (!Number.isNaN(va) && va !== vb) return (va - vb) * signo;
+    // Empate (mismo tamaño, mismo nº de ficheros): decide el nombre, que empieza por el nº de serie de
+    // eliminación → a igualdad, lo más reciente primero. Así el orden no baila entre recargas.
+    return b.nombre.localeCompare(a.nombre);
+  });
+}
+
+function setPapDir(d) {
+  const b = $('#papDir');
+  if (b) {
+    b.dataset.dir = d;
+    b.textContent = d === 'asc' ? '↑ Asc' : '↓ Desc';
+  }
+}
+
+// El orden elegido se recuerda en este navegador (es una comodidad de quien mira, no un ajuste del servidor).
+function guardarOrdenPap() {
+  try {
+    localStorage.setItem('pap_orden', $('#papOrden').value);
+    localStorage.setItem('pap_dir', $('#papDir').dataset.dir);
+  } catch {
+    /* navegador sin almacenamiento: se queda el orden por defecto */
+  }
+}
+(() => {
+  let orden = 'fecha',
+    dir = 'desc';
+  try {
+    orden = localStorage.getItem('pap_orden') || orden;
+    dir = localStorage.getItem('pap_dir') || dir;
+  } catch {
+    /* sin almacenamiento */
+  }
+  if (!PAP_DIR_DEF[orden]) orden = 'fecha';
+  $('#papOrden').value = orden;
+  setPapDir(dir === 'asc' ? 'asc' : 'desc');
+})();
+$('#papOrden').onchange = () => {
+  setPapDir(PAP_DIR_DEF[$('#papOrden').value] || 'desc');
+  guardarOrdenPap();
+  pintarPap();
+};
+$('#papDir').onclick = () => {
+  setPapDir($('#papDir').dataset.dir === 'asc' ? 'desc' : 'asc');
+  guardarOrdenPap();
+  pintarPap();
+};
+
 async function loadPap() {
   try {
     const papelera = await api('/papelera');
@@ -1299,50 +1362,61 @@ async function loadPap() {
       `<div class="stat acc"><div class="ic">♻</div><div class="v">${fmtBytes(papelera.bytes)}</div><div class="k">Tamaño total</div></div>
     <div class="stat"><div class="ic">📄</div><div class="v">${papelera.ficheros}</div><div class="k">Ficheros</div></div>
     <div class="stat"><div class="ic">📁</div><div class="v">${papelera.subcarpetas.length}</div><div class="k">Subcarpetas</div></div>`;
-    $('#papBody').innerHTML = papelera.subcarpetas.length
-      ? `<table><tr><th>Subcarpeta</th><th>Ficheros</th><th>Tamaño</th><th></th></tr>
-    ${papelera.subcarpetas
-      .map(
-        (
-          sub,
-        ) => `<tr><td class="mono">${esc(sub.nombre)}</td><td>${sub.ficheros}</td><td>${fmtBytes(sub.bytes)}</td>
-      <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}" title="Explorar los ficheros reales de esta carpeta y descargarlos">🗂️ explorar</button> ${sub.restaurable ? `<button class="btn admin-only" data-restore="${esc(sub.nombre)}" title="Devolver el fichero/carpeta a su ubicación original (no pisa lo que ya exista allí)">↩️ restaurar</button> ` : ''}<button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
-      )
-      .join('')}</table>`
-      : '<div class="empty">Papelera vacía</div>';
-    $$('#papBody [data-restore]').forEach(
-      (b) =>
-        (b.onclick = async () => {
-          if (!confirm('¿Restaurar «' + b.dataset.restore + '» a su ubicación original?')) return;
-          b.disabled = true;
-          try {
-            const r = await api('/papelera/restaurar', { method: 'POST', body: JSON.stringify({ sub: b.dataset.restore }) });
-            if (!r.ok) { toast(r.motivo, 'bad'); b.disabled = false; return; }
-            const partes = [`↩️ ${r.restaurados} restaurado(s)`];
-            if (r.conflictos && r.conflictos.length) partes.push(`${r.conflictos.length} ya existían (conservados en Papelera)`);
-            if (r.errores && r.errores.length) partes.push(`${r.errores.length} con error`);
-            toast(partes.join(' · '), r.conflictos?.length || r.errores?.length ? 'warn' : 'ok');
-            loadPap();
-          } catch (e) { toast(e.message, 'bad'); b.disabled = false; }
-        }),
-    );
-    $$('#papBody [data-del]').forEach(
-      (b) =>
-        (b.onclick = async () => {
-          if (!confirm('¿Vaciar ' + b.dataset.del + '? (irreversible)')) return;
-          try {
-            await api('/papelera/vaciar', { method: 'POST', body: JSON.stringify({ sub: b.dataset.del }) });
-            toast('Subcarpeta vaciada', 'warn');
-            loadPap();
-          } catch (e) {
-            toast(e.message, 'bad');
-          }
-        }),
-    );
-    $$('#papBody [data-ver]').forEach((b) => (b.onclick = () => explorarPap(b.dataset.ver, '')));
+    _papSubcarpetas = papelera.subcarpetas || [];
+    pintarPap();
   } catch (e) {
     toast(e.message, 'bad');
   }
+}
+
+// Pinta la tabla con el orden elegido y engancha sus botones.
+function pintarPap() {
+  const clave = $('#papOrden').value,
+    dir = $('#papDir').dataset.dir;
+  // Flecha en la cabecera de la columna por la que se ordena, para que se vea sin mirar el desplegable.
+  const flecha = (k) => (k === clave ? (dir === 'asc' ? ' ↑' : ' ↓') : '');
+  const fechaTxt = (iso) =>
+    iso ? new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+  const lista = ordenarPapelera(_papSubcarpetas, clave, dir);
+  $('#papBody').innerHTML = lista.length
+    ? `<table><tr><th>Subcarpeta</th><th>Eliminada${flecha('fecha')}</th><th>Ficheros${flecha('ficheros')}</th><th>Tamaño${flecha('bytes')}</th><th></th></tr>
+    ${lista
+      .map(
+        (sub) => `<tr><td class="mono">${esc(sub.nombre)}</td><td data-k="Eliminada" style="white-space:nowrap">${fechaTxt(sub.fecha)}</td><td data-k="Ficheros">${Number(sub.ficheros || 0).toLocaleString('es-ES')}</td><td data-k="Tamaño" style="white-space:nowrap">${fmtBytes(sub.bytes)}</td>
+      <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}" title="Explorar los ficheros reales de esta carpeta y descargarlos">🗂️ explorar</button> ${sub.restaurable ? `<button class="btn admin-only" data-restore="${esc(sub.nombre)}" title="Devolver el fichero/carpeta a su ubicación original (no pisa lo que ya exista allí)">↩️ restaurar</button> ` : ''}<button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
+      )
+      .join('')}</table>`
+    : '<div class="empty">Papelera vacía</div>';
+  $$('#papBody [data-restore]').forEach(
+    (b) =>
+      (b.onclick = async () => {
+        if (!confirm('¿Restaurar «' + b.dataset.restore + '» a su ubicación original?')) return;
+        b.disabled = true;
+        try {
+          const r = await api('/papelera/restaurar', { method: 'POST', body: JSON.stringify({ sub: b.dataset.restore }) });
+          if (!r.ok) { toast(r.motivo, 'bad'); b.disabled = false; return; }
+          const partes = [`↩️ ${r.restaurados} restaurado(s)`];
+          if (r.conflictos && r.conflictos.length) partes.push(`${r.conflictos.length} ya existían (conservados en Papelera)`);
+          if (r.errores && r.errores.length) partes.push(`${r.errores.length} con error`);
+          toast(partes.join(' · '), r.conflictos?.length || r.errores?.length ? 'warn' : 'ok');
+          loadPap();
+        } catch (e) { toast(e.message, 'bad'); b.disabled = false; }
+      }),
+  );
+  $$('#papBody [data-del]').forEach(
+    (b) =>
+      (b.onclick = async () => {
+        if (!confirm('¿Vaciar ' + b.dataset.del + '? (irreversible)')) return;
+        try {
+          await api('/papelera/vaciar', { method: 'POST', body: JSON.stringify({ sub: b.dataset.del }) });
+          toast('Subcarpeta vaciada', 'warn');
+          loadPap();
+        } catch (e) {
+          toast(e.message, 'bad');
+        }
+      }),
+  );
+  $$('#papBody [data-ver]').forEach((b) => (b.onclick = () => explorarPap(b.dataset.ver, '')));
 }
 $('#papVaciarAll').onclick = async () => {
   if (!confirm('¿Vaciar TODA la papelera? (irreversible)')) return;

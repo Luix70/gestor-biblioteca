@@ -2736,6 +2736,51 @@ body.guest .admin-only {
     flex: 1 1 auto;
     min-width: 128px;
   }
+  /* Papelera: mismo tratamiento que Cuarentena. Con la columna de fecha son 5 columnas, que en un móvil no
+     caben; cada dato lleva su etiqueta (data-k) porque la fila de cabecera desaparece. */
+  #p-pap .card {
+    overflow-x: visible;
+  }
+  #p-pap #papBody table,
+  #p-pap #papBody tbody,
+  #p-pap #papBody tr,
+  #p-pap #papBody td,
+  #p-pap #papBody th {
+    display: block;
+    width: auto;
+  }
+  #p-pap #papBody tr:first-child {
+    display: none;
+  } /* oculta la fila de cabecera (th) */
+  #p-pap #papBody tr {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: var(--bg2);
+  }
+  #p-pap #papBody td {
+    text-align: left !important;
+    white-space: normal !important;
+    padding: 3px 0;
+    border-bottom: 0;
+    overflow-wrap: anywhere; /* el nombre de la subcarpeta es una tira larga sin espacios */
+  }
+  #p-pap #papBody td[data-k]::before {
+    content: attr(data-k) ': ';
+    color: var(--mut);
+    font-size: 11px;
+  }
+  #p-pap #papBody td:last-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  #p-pap #papBody td:last-child .btn {
+    flex: 1 1 auto;
+    min-width: 110px;
+  }
 }
 /* ── MENÚ AUTOCOMPRIMIBLE (solo escritorio) ────────────────────────────────────────────────────────────
    Con `body.sb-auto` la barra lateral se recoge contra el borde izquierdo dejando una franja estrecha, y se

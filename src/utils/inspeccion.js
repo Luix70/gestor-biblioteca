@@ -19,6 +19,10 @@ const DIR_RECICLAJE = resolver(process.env.PATH_RECICLAJE, 'Recycling');
 const DIR_CUARENTENA = resolver(process.env.PATH_CUARENTENA, 'Cuarentena');
 const DIR_INBOX = resolver(process.env.PATH_INBOX, 'Inbox');
 
+// Tamaño y nº de ficheros de una subcarpeta de la Papelera. No cuenta el manifiesto de su raíz
+// (`.papelera.json`): es metadato, no algo que se borrara — igual que lo omiten contenidoPapelera y
+// explorarPapelera. Si contara, cada carpeta restaurable saldría con un fichero de más, y ordenar por
+// nº de ficheros las mezclaría mal con las antiguas sin manifiesto.
 async function tamanoDir(dir) {
     let bytes = 0, ficheros = 0;
     async function walk(d) {
@@ -26,6 +30,7 @@ async function tamanoDir(dir) {
         for (const e of ents) {
             const p = path.join(d, e.name);
             if (e.isDirectory()) await walk(p);
+            else if (d === dir && e.name === '.papelera.json') continue;
             else { try { bytes += (await fs.stat(p)).size; ficheros++; } catch { /* ignora */ } }
         }
     }
@@ -34,15 +39,41 @@ async function tamanoDir(dir) {
 }
 
 // ── Papelera (Recycling) ─────────────────────────────────────────────────────
+
+// Nombre de subcarpeta que pone papelera.js: `<serial>_AAAA-MM-DD_HH-MM-SS[_etiqueta]`, con la hora en UTC
+// (sale de toISOString).
+const RE_FECHA_SUBCARPETA = /^\d+_(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})/;
+
+/**
+ * Fecha de ELIMINACIÓN de una subcarpeta de la Papelera (ISO), para poder ordenar por ella:
+ *   1) la que lleva el propio nombre (exacta: es el momento en que se creó la subcarpeta al reciclar);
+ *   2) si el nombre no la trae (entradas antiguas), `creado` del manifiesto;
+ *   3) en último caso, la fecha de modificación de la carpeta (aproximada).
+ */
+async function fechaSubcarpeta(nombre, dir) {
+    const m = nombre.match(RE_FECHA_SUBCARPETA);
+    if (m) {
+        const d = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`);
+        if (!Number.isNaN(d.getTime())) return d.toISOString();
+    }
+    try {
+        const man = JSON.parse(await fs.readFile(path.join(dir, '.papelera.json'), 'utf8'));
+        const d = new Date(man.creado);
+        if (man.creado && !Number.isNaN(d.getTime())) return d.toISOString();
+    } catch { /* sin manifiesto */ }
+    try { return (await fs.stat(dir)).mtime.toISOString(); } catch { return null; }
+}
+
 export async function infoPapelera() {
     const subcarpetas = [];
     let ents; try { ents = await fs.readdir(DIR_RECICLAJE, { withFileTypes: true }); } catch { ents = []; }
     for (const e of ents) {
         if (!e.isDirectory()) continue;
-        const { bytes, ficheros } = await tamanoDir(path.join(DIR_RECICLAJE, e.name));
+        const dir = path.join(DIR_RECICLAJE, e.name);
+        const { bytes, ficheros } = await tamanoDir(dir);
         // ¿Tiene manifiesto de origen? → se puede restaurar a su sitio (Papelera de Windows).
-        const restaurable = await fs.access(path.join(DIR_RECICLAJE, e.name, '.papelera.json')).then(() => true).catch(() => false);
-        subcarpetas.push({ nombre: e.name, ficheros, bytes, restaurable });
+        const restaurable = await fs.access(path.join(dir, '.papelera.json')).then(() => true).catch(() => false);
+        subcarpetas.push({ nombre: e.name, ficheros, bytes, restaurable, fecha: await fechaSubcarpeta(e.name, dir) });
     }
     subcarpetas.sort((a, b) => b.nombre.localeCompare(a.nombre)); // serial desc → más reciente primero
     const bytes = subcarpetas.reduce((s, x) => s + x.bytes, 0);
