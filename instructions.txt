@@ -3840,6 +3840,13 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       cabecera_verificada) solo se heredan CON ella. Antes, «GQ British» (su propia cabecera, sin ISSN) habria heredado
       el ISSN de la raiz → al catalogar, colgada de «All About History». Una tirada por años (subcarpeta sin cabecera)
       sigue heredando la de su madre.
+      - REINSPECCIONAR no exige borrar guias: las del agente y las aprobadas en el panel se reescriben ENTERAS (↻
+        actualiza; escribirGuia no mezcla con la vieja). Lo que quedaba eran las guias VIEJAS de carpetas que la nueva
+        lectura deja sin guia (una subcarpeta duplicada «X/X» que ahora es «parte» de su madre, o lo que cae dentro de
+        una unidad): por estar mas cerca de los ficheros mandaban sobre la nueva de la madre. Ahora el plan las propone
+        como «✖ retira la vieja» (estado 'retirar', marcada por defecto) y escribirGuias borra ese _guia.json. Las
+        hechas a mano en el Inspector (sin origen) no se tocan nunca. NO borres todas a mano: sin guia, una carpeta de
+        revistas vuelve a la regla «2+ documentos = coleccion» (coleccion de LIBROS con el nombre de la carpeta).
       - numeracion 'numero' SIN calibrar con la portada: «1» … «12» es ambiguo (pueden ser meses; la IA de nombres dijo
         «numero» para L'Histoire 2016, que son meses) → no se convierte en nº de issue, ni sirve para ahorrarse la
         vision de un escaneo. perfil.numeracion_verificada la pone la calibracion con la muestra.

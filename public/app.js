@@ -14195,7 +14195,9 @@ async function editarPatronNombres(ruta) {
 // ESCRIBIR las guías que marques — las dudosas vienen desmarcadas. Mientras decides, el vigilante no toca la carpeta.
 const _IA_ICONO_CONT = { revistas: '📰', comics: '💬', audiolibro: '🎧', 'coleccion-audiolibros': '🎧', transmedia: '🎞️', software: '💿', 'libro-material': '📦', 'libro-desglosado': '🧵', escaneo: '🖼️', mixta: '🧩' };
 const _IA_ICONO_TIPO = { coleccion: '📚', serie: '🔗', editorial: '🏢', materia: '🏷️', obra: '📖', cajon: '🗃️', mixta: '🧩', raiz: '🌳', parte: '·' };
-const _IA_ESTADO = { nueva: ['＋ nueva', 'ok'], actualizar: ['↻ actualiza', 'ok'], respetada: ['🔒 tuya', 'mut'], omitida: ['— sin guía', 'mut'] };
+// «retirar»: una guía VIEJA (del agente o aprobada aquí) que la nueva lectura deja sobrando —una subcarpeta que ahora es
+// parte de su madre—; si se quedara, mandaría sobre la nueva por estar más cerca de los ficheros.
+const _IA_ESTADO = { nueva: ['＋ nueva', 'ok'], actualizar: ['↻ actualiza', 'ok'], retirar: ['✖ retira la vieja', 'warn'], respetada: ['🔒 tuya', 'mut'], omitida: ['— sin guía', 'mut'] };
 
 async function inspeccionarConIA(ruta, { repetir = false } = {}) {
   const modal = $('#cmpModal'), scrim = $('#cmpScrim');
@@ -14283,7 +14285,7 @@ async function inspeccionarConIA(ruta, { repetir = false } = {}) {
     const contar = () => {
       const n = $$('#iaBody .iaSel:checked').length;
       const b = $('#iaEscribir');
-      if (b) { b.textContent = `✅ Escribir ${n} guía(s)`; b.disabled = !n; }
+      if (b) { b.textContent = `✅ Aplicar ${n} guía(s)`; b.disabled = !n; }
     };
     $$('#iaBody .iaSel').forEach((cb) => (cb.onchange = contar));
     contar();
@@ -14295,7 +14297,7 @@ async function inspeccionarConIA(ruta, { repetir = false } = {}) {
       if (b) { b.disabled = true; b.textContent = 'Escribiendo…'; }
       try {
         const r = await api('/inbox/inspeccion/aplicar', { method: 'POST', body: JSON.stringify({ sub: ruta, rutas }) });
-        toast(`🤖 ${r.escritas} guía(s) escrita(s)${r.marcada ? ' · el Vigilante no volverá a inspeccionarla' : ''}`, 'ok');
+        toast(`🤖 ${r.escritas} guía(s) escrita(s)${r.retiradas ? ` · ${r.retiradas} vieja(s) retirada(s)` : ''}${r.marcada ? ' · el Vigilante no volverá a inspeccionarla' : ''}`, 'ok');
         cerrar(false);   // aplicar ya liberó la carpeta
         cargarArbolInbox();
       } catch (err) {

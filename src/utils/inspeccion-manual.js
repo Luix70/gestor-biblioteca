@@ -89,9 +89,9 @@ export function estadoInspeccionManual() {
                 confianza: p.confianza,
                 dudosa: p.confianza != null && p.confianza < UMBRAL_CONFIANZA,
                 razon: porRuta.get(p.ruta)?.razon || null,
-                estado: p.estado,          // nueva | actualizar | respetada | omitida
+                estado: p.estado,          // nueva | actualizar | retirar | respetada | omitida
                 motivo: p.motivo,
-                escribible: p.estado === 'nueva' || p.estado === 'actualizar',
+                escribible: p.estado === 'nueva' || p.estado === 'actualizar' || p.estado === 'retirar',
                 resumen: resumenGuia(p.guia),
             })),
         },
@@ -104,24 +104,25 @@ export async function aplicarInspeccionManual({ sub, rutas = [] }) {
     if (!t || t.sub !== sub || !t.resultado) return { ok: false, motivo: 'No hay una propuesta de esa carpeta (vuelve a inspeccionarla).' };
     const { esq, r, plan, notas } = t.resultado;
     const elegidas = new Set(rutas);
-    const aEscribir = plan.filter((p) => (p.estado === 'nueva' || p.estado === 'actualizar') && elegidas.has(p.ruta));
+    const aEscribir = plan.filter((p) => ['nueva', 'actualizar', 'retirar'].includes(p.estado) && elegidas.has(p.ruta));
     // Origen 'panel': las APROBASTE tú. La inspección automática las respeta como tuyas (si una subcarpeta se revisó
     // aquí, la de arriba se inspeccionará entera cuando le toque, pero no le reescribirá esto); una nueva
     // inspección desde el panel sí puede actualizarlas, porque repetirla es decisión tuya.
-    for (const p of aEscribir) p.guia = { ...p.guia, perfil: { ...(p.guia.perfil || {}), origen: 'panel' } };
+    for (const p of aEscribir) if (p.guia) p.guia = { ...p.guia, perfil: { ...(p.guia.perfil || {}), origen: 'panel' } };
     const escritas = await escribirGuias(aEscribir);
+    const retiradas = aEscribir.filter((p) => p.estado === 'retirar').length;
 
     // La marca, solo en una carpeta de PRIMER nivel del Inbox: es la unidad con la que trabaja el vigilante.
     let marcada = false;
     if (t.abs === t.reserva) {
         const dudosas = plan.filter((p) => p.guia && !elegidas.has(p.ruta) && p.confianza != null && p.confianza < UMBRAL_CONFIANZA)
             .map((p) => ({ ruta: p.ruta, tipo: p.tipo, contenido: p.contenido, motivo: 'dudosa: no marcada en el panel' }));
-        await registrarInspeccion(t.abs, { esq, r, escritas: aEscribir, notas, dudosas, segundos: Math.round((t.fin - t.inicio) / 1000), origen: 'panel' });
+        await registrarInspeccion(t.abs, { esq, r, escritas: aEscribir.filter((p) => p.guia), notas, dudosas, segundos: Math.round((t.fin - t.inicio) / 1000), origen: 'panel' });
         marcada = true;
     }
     liberarCarpeta(t.reserva);
     trabajo = null;
-    return { ok: true, escritas, marcada };
+    return { ok: true, escritas, retiradas, marcada };
 }
 
 /** Descarta la propuesta (o la inspección en curso) y libera la carpeta para el vigilante. */

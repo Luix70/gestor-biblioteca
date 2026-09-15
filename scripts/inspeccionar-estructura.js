@@ -106,7 +106,7 @@ async function main() {
     const plan = await planGuias(path.resolve(RUTA), esq, r, { incluirDudosas: INCLUIR_DUDOSAS });
     const cuenta = (e) => plan.filter((p) => p.estado === e).length;
     console.log(`\n   Plan de guías (_guia.json):  ${cuenta('nueva')} nuevas · ${cuenta('actualizar')} a actualizar · `
-        + `${cuenta('respetada')} tuyas respetadas · ${cuenta('dudosa')} dudosas · ${cuenta('omitida')} sin guía`);
+        + `${cuenta('retirar')} viejas a retirar · ${cuenta('respetada')} tuyas respetadas · ${cuenta('dudosa')} dudosas · ${cuenta('omitida')} sin guía`);
 
     // Con --escribir se AFINA antes de escribir (ISSN comprobado, orden de los desgloses): es lo que hace la
     // inspección automática. Sin --escribir no, porque consulta Wikidata, el catálogo y quizá la IA.

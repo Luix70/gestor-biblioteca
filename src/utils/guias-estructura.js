@@ -29,8 +29,9 @@
  *     guiar sus partes por separado las convertiría en obras sueltas (los libros I-XIII de Euclides); a una
  *     unidad (audiolibro, software…) le pasaría lo mismo: se recorrería por dentro y se partiría.
  */
+import fs from 'node:fs/promises';
 import path from 'node:path';
-import { leerGuia, escribirGuia, guiaEsSignificativa } from './guia-ingesta.js';
+import { leerGuia, escribirGuia, guiaEsSignificativa, NOMBRE_GUIA } from './guia-ingesta.js';
 import { tituloCabecera, periodoDeTexto, esTituloGenerico, normTituloPublicacion } from './revistas.js';
 
 export const UMBRAL_CONFIANZA = 0.6;
@@ -271,15 +272,25 @@ export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDud
 
         if (!i) { plan.push({ ...base, guia: null, estado: 'omitida', motivo: 'la IA no la interpretó' }); continue; }
 
+        const actual = await leerGuia(abs);
+        const reescribible = origenesReescribibles.includes(actual?.perfil?.origen);
+        // Una guía VIEJA (del agente o aprobada en el panel) que queda sobrando se puede retirar: es la de una carpeta que
+        // ahora es PARTE de su madre, o que queda dentro de una unidad (2.ª pasada). Si se dejara, al estar más cerca de
+        // los ficheros mandaría sobre la nueva de la madre (medido el 15-sep: las subcarpetas duplicadas «X/X» de
+        // _REVISTAS conservaban la CDU y el nombre de cabecera de la primera inspección). Las tuyas (sin origen), no.
+        base.retirable = !!(actual && guiaEsSignificativa(actual) && reescribible);
+
         const guia = guiaDesdeInterpretacion(i, nombre);
         if (!guia) {
+            if (i.tipo === 'parte' && base.retirable) {
+                plan.push({ ...base, guia: null, estado: 'retirar', motivo: 'guía vieja que sobra: ahora es parte de su carpeta madre, que manda' });
+                continue;
+            }
             const motivo = i.tipo === 'parte' ? 'es parte de su carpeta madre' : `tipo «${i.tipo}»: se deja la regla por defecto`;
             plan.push({ ...base, guia: null, estado: 'omitida', motivo });
             continue;
         }
 
-        const actual = await leerGuia(abs);
-        const reescribible = origenesReescribibles.includes(actual?.perfil?.origen);
         if (actual && guiaEsSignificativa(actual) && !reescribible) {
             const deQuien = actual.perfil?.origen === 'panel' ? 'la aprobaste en el panel' : 'ya tiene una guía tuya (Inspector)';
             plan.push({ ...base, guia, estado: 'respetada', accionUsuario: actual.accion, motivo: `${deQuien}: no se toca` });
@@ -307,8 +318,9 @@ export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDud
     for (const p of plan) {
         if (p.estado === 'respetada' || !bajoUnidad(p.ruta)) continue;
         p.guia = null;
-        p.estado = 'omitida';
-        p.motivo = 'forma parte de una obra o unidad';
+        // Una guía vieja dentro de una unidad haría que el vigilante la recorriera por dentro y la partiera: fuera.
+        p.estado = p.retirable ? 'retirar' : 'omitida';
+        p.motivo = p.retirable ? 'guía vieja que sobra: forma parte de una obra o unidad' : 'forma parte de una obra o unidad';
     }
     return plan;
 }
@@ -335,10 +347,18 @@ export function resumenGuia(g) {
         p.sin_coleccion && 'sin colección'].filter(Boolean).join(' · ');
 }
 
-/** Escribe las guías del plan con estado 'nueva' o 'actualizar'. Devuelve cuántas escribió. */
+/**
+ * Escribe las guías del plan con estado 'nueva' o 'actualizar' y RETIRA las de estado 'retirar' (guías viejas del
+ * agente o del panel que la nueva lectura deja sobrando). Devuelve cuántas ESCRIBIÓ (las retiradas se cuentan en el
+ * plan: estado 'retirar').
+ */
 export async function escribirGuias(plan) {
     let n = 0;
     for (const p of plan) {
+        if (p.estado === 'retirar') {
+            await fs.rm(path.join(p.abs, NOMBRE_GUIA), { force: true }).catch(() => {});
+            continue;
+        }
         if (p.estado !== 'nueva' && p.estado !== 'actualizar') continue;
         await escribirGuia(p.abs, p.guia);
         n++;
