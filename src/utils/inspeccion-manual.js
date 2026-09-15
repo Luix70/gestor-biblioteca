@@ -41,10 +41,17 @@ export function lanzarInspeccionManual({ abs, sub, reserva, repetir = false }) {
             const r = await interpretarEstructura(esq);   // paciencia de CLI: estás esperando el resultado
             if (!r.carpetas.length) throw new Error(r.aviso || 'la IA no interpretó ninguna carpeta');
             t.fase = 'afinado';
+            reservarCarpeta(reserva);   // la reserva dura 30 min: se renueva en cada paso de un trabajo largo
             // Todas las guías posibles, dudosas incluidas, y AFINADAS: así ves el ISSN o el orden de un desglose
             // también de las que decidas marcar a mano. Cuáles se escriben lo eliges tú (aplicarInspeccionManual).
             const plan = await planGuias(abs, esq, r, { incluirDudosas: true, origenesReescribibles: ['agente', 'panel'] });
-            const notas = await afinarPlan(plan, esq);
+            // PROGRESO del afinado (medido: 51 min en «Comprobando ISSN…» sin más señal que el reloj, con un _REVISTAS de
+            // 121 carpetas): qué portada se está leyendo y cuántas faltan. Y cada paso RENUEVA la reserva: caducaba a
+            // los 30 min, en mitad del trabajo, y el vigilante podía ponerse con la carpeta que se estaba inspeccionando.
+            const notas = await afinarPlan(plan, esq, {
+                onProgreso: (texto) => { t.detalle = texto; reservarCarpeta(reserva); },
+                cancelado: () => t.descartar,   // «Cancelar» en el panel: no seguir pagando portadas que se van a tirar
+            });
             t.resultado = { esq, r, plan, notas };
         } catch (e) {
             t.error = e.message;
@@ -57,14 +64,14 @@ export function lanzarInspeccionManual({ abs, sub, reserva, repetir = false }) {
     return { ok: true, lanzado: true };
 }
 
-const FASES = { esqueleto: 'Leyendo el árbol…', ia: 'La IA está interpretando el árbol…', afinado: 'Comprobando ISSN y capítulos…' };
+const FASES = { esqueleto: 'Leyendo el árbol…', ia: 'La IA está interpretando el árbol…', afinado: 'Afinando: portadas de revistas, ISSN y capítulos…' };
 
 /** Estado para el sondeo del panel. Con la propuesta ya lista, la devuelve fila a fila. */
 export function estadoInspeccionManual() {
     if (!trabajo) return { activo: false };
     const t = trabajo;
     const base = {
-        activo: true, sub: t.sub, enCurso: !t.fin, fase: t.fase, faseTexto: FASES[t.fase] || t.fase,
+        activo: true, sub: t.sub, enCurso: !t.fin, fase: t.fase, faseTexto: FASES[t.fase] || t.fase, detalle: t.fin ? null : (t.detalle || null),
         segundos: Math.round(((t.fin || Date.now()) - t.inicio) / 1000), carpetas: t.carpetas || null, error: t.error,
     };
     if (!t.resultado) return base;

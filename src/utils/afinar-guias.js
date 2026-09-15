@@ -32,7 +32,7 @@ import { leerGuia } from './guia-ingesta.js';
 import { buscarISSNporTitulo, buscarNombrePorISSN } from './buscador-issn-titulo.js';
 import { detectarLibroDesglosado, ordenarPartesLibro, tienePistaDeOrden, partesDeDesglose, RE_CARPETA_PARTES } from './libro-desglosado.js';
 import { conTexto, conVision, extraerJSON } from './vision.js';
-import { rasterizarSignificativas } from './rasterizar-pdf.js';
+import { rasterizarPaginas } from './rasterizar-pdf.js';
 import { timeoutPoppler } from './timeout-poppler.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
@@ -316,19 +316,37 @@ export async function leerPortadaRevista(dirAbs, pistas = {}) {
     const ruta = await primerNumeroPdf(dirAbs);
     if (!ruta) return null;
     const fichero = path.relative(dirAbs, ruta).split(path.sep).join('/');
+    // CACHÉ en memoria (fichero + tamaño + fecha): «🔄 Repetir» o una segunda inspección del mismo árbol no vuelven a
+    // pagar la portada ya leída mientras el proceso siga vivo.
+    let clave = null;
+    try { const st = await fs.stat(ruta); clave = `${ruta}|${st.size}|${st.mtimeMs}`; } catch { /* sin stat: sin caché */ }
+    if (clave && CACHE_PORTADAS.has(clave)) return { ...CACHE_PORTADAS.get(clave), fichero };
+    const t0 = Date.now();
+    console.log(`   📰 Portada de «${path.basename(dirAbs)}» («${fichero}»)…`);
     const total = await paginasPdf(ruta);
-    const renders = await rasterizarSignificativas(ruta, { frente: VISION_PAGINAS(), incluirUltima: true, ancho: VISION_ANCHO(), numPaginas: total || 0 });
+
+    // RENDIMIENTO EN EL NAS (medido: un _REVISTAS de 121 carpetas llevaba 51 min afinando). Cada llamada a poppler
+    // RELEE el PDF entero, y en el Atom un número de revista de 20-100 MB tarda en cada lectura. Así que el mínimo de
+    // pasadas: las páginas pedidas se rasterizan de una vez (no se mide antes la tinta: una revista no empieza con
+    // páginas en blanco), el texto solo de las primeras y las últimas páginas (la mancheta está ahí), y los recortes
+    // del código de barras (cinco pasadas más) solo si el texto no dio el ISSN.
+    const frente = Array.from({ length: Math.min(VISION_PAGINAS(), total || VISION_PAGINAS()) }, (_, i) => i + 1);
+    const paginas = total && total > frente.length ? [...frente, total] : frente;
+    const renders = await rasterizarPaginas(ruta, { paginas, ancho: VISION_ANCHO() });
     if (!renders.length) return null;
 
-    // a) El ISSN sin IA, de dos fuentes que no se equivocan de dígitos: el código de barras leído en LOCAL (zxing,
-    //    decodificador determinista: un 977 ES el ISSN de la publicación) y la MANCHETA en la capa de texto del número
-    //    (si trae UN solo ISSN; varios —impreso y electrónico, o el de otra revista citada— no se deciden a ciegas).
+    // a) El ISSN sin IA, de dos fuentes que no se equivocan de dígitos: la MANCHETA en la capa de texto del número (si
+    //    trae UN solo ISSN; varios —impreso y electrónico, o el de otra revista citada— no se deciden a ciegas) y el
+    //    código de barras leído en LOCAL (zxing, decodificador determinista: un 977 ES el ISSN de la publicación).
     let issn = null, issnFuente = null;
-    const bcLocal = total ? await leerCodigoBarrasPorVision(ruta, total, [], { soloLocal: true }).catch(() => null) : null;
-    if (bcLocal?.issn) { issn = bcLocal.issn; issnFuente = 'código de barras'; }
-    const textoNumero = await textoDePaginas(ruta, 1, total || 200);
+    const textoNumero = (await textoDePaginas(ruta, 1, Math.min(total || 12, 12)))
+        + (total > 12 ? await textoDePaginas(ruta, Math.max(13, total - 3), total) : '');
     const issnsTexto = issnsEnTexto(textoNumero);
-    if (!issn && issnsTexto.length === 1) { issn = issnsTexto[0]; issnFuente = 'mancheta (capa de texto del número)'; }
+    if (issnsTexto.length === 1) { issn = issnsTexto[0]; issnFuente = 'mancheta (capa de texto del número)'; }
+    if (!issn && total) {
+        const bcLocal = await leerCodigoBarrasPorVision(ruta, total, [], { soloLocal: true }).catch(() => null);
+        if (bcLocal?.issn) { issn = bcLocal.issn; issnFuente = 'código de barras'; }
+    }
 
     // b) UNA llamada de visión con las páginas.
     let nombres = [];
@@ -361,7 +379,7 @@ export async function leerPortadaRevista(dirAbs, pistas = {}) {
     const numero = entero(v.numero, 1, 100000), mes = entero(v.mes, 1, 12), anio = entero(v.anio, 1800, 2100);
     const muestra = (numero || (mes && anio)) ? { fichero, ...(numero ? { numero } : {}), ...(anio ? { anio } : {}), ...(mes ? { mes } : {}) } : null;
     const idioma = texto(v.idioma, 3);
-    return {
+    const leido = {
         fichero,
         cabecera,
         issn, issn_fuente: issnFuente, issn_sin_confirmar: issnSinConfirmar,
@@ -372,7 +390,11 @@ export async function leerPortadaRevista(dirAbs, pistas = {}) {
         descripcion: texto(v.descripcion, 600),
         muestra,
     };
+    if (clave) CACHE_PORTADAS.set(clave, leido);
+    console.log(`   📰 «${path.basename(dirAbs)}»: «${cabecera || '?'}»${issn ? `, ISSN ${issn}` : ''} (${Math.round((Date.now() - t0) / 1000)} s).`);
+    return leido;
 }
+const CACHE_PORTADAS = new Map();
 
 /**
  * Vuelca en el perfil de la guía lo leído en la portada. La portada manda sobre lo deducido de los nombres (la ha
@@ -427,8 +449,12 @@ function aplicarPortada(perfil, v, nombre) {
  *
  * @param plan  salida de guias-estructura · planGuias
  * @param esq   el esqueleto (para los ISSN escritos en los nombres de cada subárbol)
+ * @param opciones.onProgreso  (texto) → qué se está haciendo («portada 12 de 60 · «Muy Historia 2014»»): el panel lo
+ *                             enseña y renueva con él la reserva de la carpeta. Un árbol con decenas de revistas son
+ *                             decenas de minutos en el NAS.
+ * @param opciones.cancelado   () → true para dejarlo a medias (el panel canceló: no seguir pagando portadas).
  */
-export async function afinarPlan(plan, esq) {
+export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado = () => false } = {}) {
     const notas = [];
     const issnsDe = (ruta) => {
         const vistos = new Set();
@@ -440,10 +466,19 @@ export async function afinarPlan(plan, esq) {
 
     const leidas = new Set();   // rutas de las tiradas cuya portada ya se leyó (en esta pasada o en una anterior)
     let llamadasVision = 0;     // lo que cuenta para el tope: las llamadas de verdad, no las reaprovechadas
+    const aAfinar = plan.filter((p) => p.guia && ['nueva', 'actualizar'].includes(p.estado));
+    const tiradas = aAfinar.filter((p) => p.guia.perfil?.tipo_probable === 'revista').length;
+    let paso = 0, tirada = 0;
     for (const p of plan) {
         if (!p.guia || !['nueva', 'actualizar'].includes(p.estado)) continue;
+        if (cancelado()) { notas.push('Afinado interrumpido: la inspección se canceló.'); break; }
         const nombre = p.ruta === '.' ? esq.raiz : p.ruta;
         const bajoDe = (q) => q.ruta === '.' || p.ruta.startsWith(q.ruta + '/');
+        paso++;
+        if (p.guia.perfil?.tipo_probable === 'revista') tirada++;
+        onProgreso(p.guia.perfil?.tipo_probable === 'revista'
+            ? `Revista ${tirada} de ${tiradas} · «${nombre}»${VISION_ACTIVA() ? ` · portadas leídas: ${llamadasVision}${VISION_MAX() < tiradas ? ` (tope ${VISION_MAX()})` : ''}` : ''}`
+            : `Carpeta ${paso} de ${aAfinar.length} · «${nombre}»`);
 
         // La PORTADA del primer número (visión). No se repite en una subcarpeta de una tirada ya leída, ni si la guía que
         // ya hay en disco la leyó en una inspección anterior: se reaprovecha (reinspeccionar no vuelve a pagarla, y

@@ -3803,6 +3803,22 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       un numero es la de siempre (barras por vision, escaneos por vision).
       BUG encontrado en esa prueba: el orquestador no pasaba el PERFIL de la guia al enriquecimiento, asi que la
       CDU de la guia, su idioma y la salvaguarda del ISSN de Wikidata no llegaban (se deducian por numero). Pasado.
+    * PRIMER USO REAL (15-sep, «🤖 IA» sobre _REVISTAS, 121 carpetas): 51 min en «Comprobando ISSN y capitulos…» sin
+      mas señal que el reloj, y el modal SIN forma de cerrarse (ocupa toda la pantalla: el clic «fuera» no llegaba al
+      velo; y si hubiera llegado, DESCARTABA el trabajo). Arreglado:
+      - Modal: «Ocultar (sigue en el NAS)» y «✖ Cancelar inspeccion» (con confirmacion) mientras trabaja; un clic
+        fuera solo OCULTA. Se vuelve con el mismo «🤖 IA» (se engancha al trabajo en curso, no lanza otro).
+      - PROGRESO: «Revista 23 de 71 · «Muy Historia 2014» · portadas leidas: 22» (afinarPlan {onProgreso};
+        estadoInspeccionManual.detalle). El CLI lo imprime por linea; el vigilante deja una linea por portada.
+      - La RESERVA de la carpeta (30 min) se renueva en cada paso: caducaba en mitad del trabajo y el vigilante podia
+        ponerse con la carpeta que se estaba inspeccionando.
+      - Cancelar DETIENE el afinado (afinarPlan {cancelado}); antes seguia pagando portadas que se iban a tirar.
+      - MAS RAPIDA en el Atom: cada llamada a poppler relee el PDF entero. Ahora: las paginas se rasterizan de una
+        vez (sin medir antes la tinta), el texto solo de las 12 primeras y las 4 ultimas (la mancheta esta ahi) y los
+        5 recortes del codigo de barras solo si el texto no dio el ISSN. En el PC: 16,6 s → 8 s por tirada (la mitad,
+        casi todo ya es la llamada de vision).
+      - Cache en memoria por fichero (tamaño + fecha): «🔄 Repetir» no vuelve a pagar las portadas ya leidas.
+      Para saber por donde va desde el NAS: sudo docker logs --since 2h gestor-biblioteca 2>&1 | grep "📰"
     * NOMBRE DE LA CABECERA: resolverCabecera({nombreVerificado}) RENOMBRA la cabecera hallada por ISSN si su
       nombre es una VARIANTE cercana del leido en la portada (colecciones · esVarianteDeNombre: solo letras,
       ofuscaciones deshechas 0→o 1→i 3→e 4→a 5→s 7→t, distancia de edicion ≤ 2 o 20 %): «l'historie» →

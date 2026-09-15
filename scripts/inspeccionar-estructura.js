@@ -111,7 +111,8 @@ async function main() {
     // Con --escribir se AFINA antes de escribir (ISSN comprobado, orden de los desgloses): es lo que hace la
     // inspección automática. Sin --escribir no, porque consulta Wikidata, el catálogo y quizá la IA.
     if (ESCRIBIR) {
-        const notas = await afinarPlan(plan, esq);
+        // Progreso en una línea: con decenas de revistas (una portada leída por tirada) son minutos.
+        const notas = await afinarPlan(plan, esq, { onProgreso: (t) => console.log(`   … ${t}`) });
         if (notas.length) { console.log('\n   Afinado:'); for (const n of notas) console.log(`     · ${n}`); }
     }
 

@@ -14205,11 +14205,15 @@ async function inspeccionarConIA(ruta, { repetir = false } = {}) {
   const cerrar = (descartar = true) => {
     cerrado = true;
     clearTimeout(sondeo);
+    modal.onclick = null;   // el modal es compartido: que el «clic fuera» de este no cierre los que vengan después
     if (descartar) api('/inbox/inspeccion/descartar', { method: 'POST', body: JSON.stringify({ sub: ruta }) }).catch(() => {});
     cerrarCmp();
   };
   modal.innerHTML = `<div class="box card" style="max-width:760px;width:96vw;max-height:92vh;overflow:auto"><h3 style="margin-top:0">🤖 Inspección con IA — ${esc(nombre)}</h3><div id="iaBody" class="muted">Lanzando…</div></div>`;
-  scrim.style.display = 'block'; modal.style.display = 'grid'; scrim.onclick = () => cerrar();
+  // Un clic fuera del recuadro solo OCULTA (la inspección sigue en el NAS): descartar horas de trabajo por un clic
+  // perdido sería un disparate. Descartar es siempre un botón explícito.
+  scrim.style.display = 'block'; modal.style.display = 'grid'; scrim.onclick = () => cerrar(false);
+  modal.onclick = (ev) => { if (ev.target === modal) cerrar(false); };
   const cuerpo = (html) => { const b = $('#iaBody'); if (b) b.innerHTML = html; return !!b; };
 
   try {
@@ -14231,8 +14235,16 @@ async function inspeccionarConIA(ruta, { repetir = false } = {}) {
       return;
     }
     if (!e.resultado) {
-      cuerpo(`<div>${esc(e.faseTexto || 'Inspeccionando…')} <span class="muted">· ${e.segundos} s${e.carpetas ? ` · ${e.carpetas} carpeta(s)` : ''}</span></div>
-        <p class="muted" style="font-size:12px">Un árbol grande son varias llamadas (unos 40 s cada 50 carpetas). Puedes cerrar y volver: la propuesta se guarda. Mientras tanto el Vigilante no toca esta carpeta.</p>`);
+      const min = Math.floor(e.segundos / 60), seg = e.segundos % 60;
+      cuerpo(`<div>${esc(e.faseTexto || 'Inspeccionando…')} <span class="muted">· ${min ? `${min} min ` : ''}${seg} s${e.carpetas ? ` · ${e.carpetas} carpeta(s)` : ''}</span></div>
+        ${e.detalle ? `<div style="font-size:12px;margin-top:4px">${esc(e.detalle)}</div>` : ''}
+        <p class="muted" style="font-size:12px">Un árbol grande son varias llamadas (unos 40 s cada 50 carpetas) y, en cada tirada de revistas, la lectura de la portada de su primer número (en el NAS, alrededor de un minuto por tirada). Puedes <b>ocultar</b> esta ventana y volver con el mismo botón «🤖 IA»: la inspección sigue en el NAS. Mientras tanto el Vigilante no toca esta carpeta.</p>
+        <div class="row" style="gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn" id="iaCancelar" title="Detiene la inspección y descarta lo hecho">✖ Cancelar inspección</button>
+          <button class="btn pri" id="iaOcultar">Ocultar (sigue en el NAS)</button>
+        </div>`);
+      $('#iaOcultar').onclick = () => cerrar(false);
+      $('#iaCancelar').onclick = () => { if (confirm('¿Cancelar la inspección? Se descarta todo lo hecho hasta ahora.')) cerrar(true); };
       sondeo = setTimeout(sondear, 2000);
       return;
     }
