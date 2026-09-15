@@ -31,6 +31,11 @@ export function esVarianteDeNombre(a, b) {
     const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't' };
     const norm = (s) => String(s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').toLowerCase()
         .replace(/[013457]/g, (d) => LEET[d]).replace(/[^a-z]/g, '');
+    // Solo cambian mayúsculas, espacios o signos («Historia de Iberia Vieja» / «HISTORIA DE IBERIA VIEJA», «New Scientist»
+    // / «NewScientist»): eso no es corregir una errata, y el nombre del catálogo se queda. (Sin deshacer los dígitos: «All
+    // Ab0ut Hist0ry» SÍ es una ofuscación que corregir.)
+    const tal = (s) => String(s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (tal(a) === tal(b)) return false;
     const x = norm(a), y = norm(b);
     if (x.length < 4 || y.length < 4) return false;
     if (x === y) return true;

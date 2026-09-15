@@ -56,7 +56,47 @@ export function esTituloGenerico(t) {
 const EDICIONES = new Set(['turkey', 'turkiye', 'espana', 'spain', 'france', 'uk', 'usa', 'us', 'italia', 'italy', 'deutschland',
     'germany', 'mexico', 'argentina', 'brasil', 'brazil', 'portugal', 'india', 'australia', 'canada', 'japan', 'china', 'russia',
     'polska', 'poland', 'nederland', 'netherlands', 'belgique', 'suisse', 'arabic', 'arabia', 'latinoamerica', 'edition', 'edicion',
-    'edizione', 'ausgabe', 'international', 'kids', 'junior']);
+    'edizione', 'ausgabe', 'international', 'kids', 'junior', 'asia', 'istanbul']);
+// El registro escribe la edición como adjetivo («Éd. française», «ed. española»): se lleva al país para compararla con la
+// que lleve el nombre de la cabecera («… France»).
+const PAIS_DE = { francaise: 'france', francais: 'france', espanola: 'espana', espanol: 'espana', italiana: 'italia', italiano: 'italia',
+    deutsche: 'deutschland', deutsch: 'deutschland', turkce: 'turkey', turkish: 'turkey', british: 'uk', american: 'usa', australian: 'australia' };
+const ETIQUETA_EDICION = { france: 'France', espana: 'España', italia: 'Italia', deutschland: 'Deutschland', turkey: 'Turkey', uk: 'UK',
+    usa: 'USA', australia: 'Australia', india: 'India', asia: 'Asia', mexico: 'México', portugal: 'Portugal', brasil: 'Brasil', canada: 'Canada' };
+// Palabras que no identifican a una publicación: no cuentan para decir que dos nombres «hablan de lo mismo».
+const VACIAS = new Set(['the', 'and', 'of', 'all', 'about', 'magazine', 'revista', 'review', 'journal', 'les', 'des', 'la', 'le', 'de',
+    'el', 'del', 'und', 'der', 'die', 'das', 'for', 'your', 'my', 'our', 'ed', 'edition', 'edicion', 'new']);
+const tokensPublicacion = (s) => new Set(normTituloPublicacion(s).split(' ').filter(Boolean).map((w) => PAIS_DE[w] || w));
+
+/**
+ * ¿El nombre REGISTRADO para un ISSN (Wikidata / ISSN Portal) es compatible con el de la cabecera? Más laxo que
+ * nombresDePublicacionCasan, porque el registro añade el lugar («France (Stow-on-the-Wold)») o la edición («Harvard
+ * business review (Éd. française)»): basta con compartir alguna palabra significativa… salvo que lo que sobra sea OTRA
+ * edición. Devuelve { ok, edicion } — `edicion` = la que el registro añade y a la cabecera le falta («France»).
+ * Medido el 15-sep: el «ISSN 2050-0548» impreso en la mancheta de All About History es el de «All about space».
+ */
+export function compatibilidadConRegistro(registrado, cabecera) {
+    if (nombresDePublicacionCasan(registrado, cabecera)) return { ok: true, edicion: null };
+    const a = tokensPublicacion(registrado), b = tokensPublicacion(cabecera);
+    // Palabras significativas COMUNES (un país también, si está en los dos: «France Magazine» se llama como un país).
+    const comunes = [...a].filter((w) => w.length >= 4 && !VACIAS.has(w) && b.has(w));
+    if (!comunes.length) return { ok: false, edicion: null };
+    const edicionesRegistro = [...a].filter((w) => EDICIONES.has(w) && !b.has(w));
+    const edicionesCabecera = [...b].filter((w) => EDICIONES.has(w) && !a.has(w));
+    if (edicionesCabecera.length) return { ok: false, edicion: null };                  // la cabecera es OTRA edición
+    if (edicionesRegistro.length) return { ok: false, edicion: ETIQUETA_EDICION[edicionesRegistro[0]] || null };
+    return { ok: true, edicion: null };
+}
+
+/**
+ * La portada no dice la EDICIÓN: el logotipo de la francesa es «National Geographic». Si el nombre que ya se tenía (de la
+ * carpeta) es el leído MÁS un país o una lengua («National Geographic France»), ese es el bueno.
+ */
+export function conservaEdicion(nombreLeido, nombrePrevio) {
+    if (!nombreLeido || !nombrePrevio) return false;
+    const leido = tokensPublicacion(nombreLeido), previo = tokensPublicacion(nombrePrevio);
+    return [...leido].every((w) => previo.has(w)) && [...previo].some((w) => !leido.has(w) && EDICIONES.has(w));
+}
 
 /**
  * ¿Dos nombres de publicación son la MISMA? Iguales tras normalizar, o uno contiene al otro entero (subtítulos,
@@ -70,7 +110,8 @@ export function nombresDePublicacionCasan(a, b) {
     if (!contiene) return false;
     const [largo, corto] = x.length >= y.length ? [x, y] : [y, x];
     const cortas = new Set(corto.split(' '));
-    return !largo.split(' ').some((w) => !cortas.has(w) && EDICIONES.has(w));
+    // (La edición puede venir como adjetivo: «Éd. française» → france.)
+    return !largo.split(' ').some((w) => !cortas.has(w) && EDICIONES.has(PAIS_DE[w] || w));
 }
 
 /**
@@ -81,10 +122,11 @@ export function nombresDePublicacionCasan(a, b) {
 export function capitalizarCabecera(nombre) {
     const s = String(nombre || '').trim();
     const letras = s.replace(/[^\p{L}]/gu, '');
-    if (letras.length < 4 || letras !== letras.toUpperCase()) return s;
+    // Entera en mayúsculas («ALL ABOUT HISTORY») o entera en minúsculas, como el logotipo de «nature»: se normaliza.
+    if (letras.length < 4 || (letras !== letras.toUpperCase() && letras !== letras.toLowerCase())) return s;
     return s.split(' ').map((palabra) => {
         const soloLetras = palabra.replace(/[^\p{L}]/gu, '');
-        if (soloLetras.length <= 3 && !/[AEIOUÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜY]/u.test(soloLetras)) return palabra;   // sigla
+        if (soloLetras.length <= 3 && !/[AEIOUÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜY]/iu.test(soloLetras)) return palabra.toUpperCase();   // sigla
         // Mayúscula al principio y tras un apóstrofo o un guion («L'Histoire», «Hors-Série»); el resto, en minúscula.
         return palabra.toLowerCase().replace(/(^|['’\-(«"])(\p{L})/gu, (m, antes, letra) => antes + letra.toUpperCase());
     }).join(' ');

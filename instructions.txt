@@ -3847,6 +3847,23 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
         como «✖ retira la vieja» (estado 'retirar', marcada por defecto) y escribirGuias borra ese _guia.json. Las
         hechas a mano en el Inspector (sin origen) no se tocan nunca. NO borres todas a mano: sin guia, una carpeta de
         revistas vuelve a la regla «2+ documentos = coleccion» (coleccion de LIBROS con el nombre de la carpeta).
+      - TERCER USO REAL (15-sep, ya con portadas: 98 de 111 guias leidas). Cotejadas con el registro y el catalogo:
+        · All About History imprime en su mancheta «ISSN 2050-0548», que segun el ISSN Portal es «All about space»;
+          el 2717-8536 del catalogo es «All about history (Istanbul)». Ninguno es suyo: queda SIN ISSN. Por eso TODO
+          ISSN (tambien el impreso en el numero) se coteja con el registro (revistas · compatibilidadConRegistro): de
+          otra publicacion → no se usa; si el registro solo añade la EDICION que al nombre le falta («Harvard business
+          review (Éd. française)»), el ISSN vale y la cabecera se completa («… France»). Lo mismo al tomar el ISSN de
+          una cabecera ya catalogada.
+        · El logotipo no dice la edicion: la de Francia salio «National Geographic» con el ISSN de la de EE. UU.
+          (revistas · conservaEdicion: si el nombre que se tenia es el leido + un pais, se conserva).
+        · Nombres del logotipo en mayusculas o minusculas («HISTORY REVEALED», «nature»): capitalizarCabecera; y un
+          cambio SOLO de mayusculas/espacios nunca renombra una cabecera del catalogo (colecciones · esVarianteDeNombre).
+        Arreglado a mano ese dia (con copia en el scratchpad): 20 guias (nombres, ediciones, ISSN unificados: Nature
+        0028-0836, Muy Historia 1885-5180…) y el catalogo: All About History (tipo revista, sin el ISSN turco, 4
+        numeros), BBC Knowledge / Harvard Business Review (tipo revista), cabeceras con nombre de un numero
+        renombradas («New Scientist 14», «Outdoor Photography 2018 08», «ForteanTimes», «Discover Magazine», «The
+        Complete National Geographic», «Harvard Business Review France Hors-Série») y dos fusiones (Outdoor Photography,
+        Harvard Business Review USA). L'Histoire, con sanear-numeros-revista --cabecera.
       - numeracion 'numero' SIN calibrar con la portada: «1» … «12» es ambiguo (pueden ser meses; la IA de nombres dijo
         «numero» para L'Histoire 2016, que son meses) → no se convierte en nº de issue, ni sirve para ahorrarse la
         vision de un escaneo. perfil.numeracion_verificada la pone la calibracion con la muestra.

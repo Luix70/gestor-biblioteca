@@ -38,7 +38,8 @@ import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
 import { validarISSN } from './identificadores.js';
 import { esVarianteDeNombre } from './colecciones.js';
-import { mesesDeNombre, esTituloGenerico, normTituloPublicacion, nombresDePublicacionCasan, capitalizarCabecera } from './revistas.js';
+import { mesesDeNombre, esTituloGenerico, normTituloPublicacion, nombresDePublicacionCasan, capitalizarCabecera,
+    compatibilidadConRegistro, conservaEdicion } from './revistas.js';
 import { sanearCduMateria } from './guias-estructura.js';
 import { PERIODICIDADES } from './agente-estructura.js';
 
@@ -67,8 +68,10 @@ export async function resolverIssnCabecera(cabecera, issnsNombres = []) {
             { nombre: cabecera, issn: { $type: 'string' } },
             { collation: { locale: 'es', strength: 1 }, projection: { issn: 1, nombre: 1 } });
         if (c?.issn) {
+            // Compatible con el registro (sin ser otra edición: aquí el nombre de la cabecera manda, y si le falta la
+            // edición que el registro dice, ese ISSN es de otra edición).
             const reg = await buscarNombrePorISSN(c.issn).catch(() => null);
-            if (!reg?.nombre || nombresCasan(reg.nombre, cabecera)) return { issn: c.issn, fuente: `catálogo («${c.nombre}»)` };
+            if (!reg?.nombre || compatibilidadConRegistro(reg.nombre, cabecera).ok) return { issn: c.issn, fuente: `catálogo («${c.nombre}»)` };
             console.warn(`   ⚠ ISSN ${c.issn} de la cabecera catalogada «${c.nombre}» registrado como «${reg.nombre}»: no se usa.`);
         }
     } catch { /* sin BD: se sigue con Wikidata */ }
@@ -272,7 +275,10 @@ async function confirmarIssn(issn, textoNumero, cabecera) {
         if (c?.nombre && (nombresCasan(c.nombre, cabecera) || esVarianteDeNombre(c.nombre, cabecera))) return { fuente: `catálogo («${c.nombre}»)` };
     } catch { /* sin BD: se sigue con el registro */ }
     const reg = await buscarNombrePorISSN(issn).catch(() => null);
-    if (reg?.nombre && (nombresCasan(reg.nombre, cabecera) || esVarianteDeNombre(reg.nombre, cabecera))) return { fuente: `${reg.fuente || 'registro ISSN'}, «${reg.nombre}»` };
+    if (reg?.nombre) {
+        const c = compatibilidadConRegistro(reg.nombre, cabecera);
+        if (c.ok || c.edicion || esVarianteDeNombre(reg.nombre, cabecera)) return { fuente: `${reg.fuente || 'registro ISSN'}, «${reg.nombre}»` };
+    }
     return { rechazo: reg?.nombre ? `registrado como «${reg.nombre}»` : 'no aparece en el texto ni en los registros' };
 }
 
@@ -379,12 +385,32 @@ export async function leerPortadaRevista(dirAbs, pistas = {}) {
         }
     }
 
+    // COTEJO CON EL REGISTRO de cualquier ISSN, también el impreso en el propio número: All About History imprime en su
+    // mancheta el de «All about space» (2050-0548, según el ISSN Portal). Si el registro lo da como de OTRA publicación,
+    // no se usa; si solo añade la EDICIÓN que al nombre le falta («Harvard business review (Éd. française)» para
+    // «Harvard Business Review»), el ISSN es bueno y la cabecera se completa con ella («… France»).
+    let edicion = null;
+    const cabCotejo = cabecera || pistas.cabecera;
+    if (issn && cabCotejo) {
+        const reg = await buscarNombrePorISSN(issn).catch(() => null);
+        if (reg?.nombre) {
+            const c = compatibilidadConRegistro(reg.nombre, cabCotejo);
+            if (c.edicion) edicion = c.edicion;
+            else if (!c.ok) {
+                issnSinConfirmar = `${issn} (${issnFuente}; registrado como «${reg.nombre}»)`;
+                issn = null;
+                issnFuente = null;
+            }
+        }
+    }
+
     const numero = entero(v.numero, 1, 100000), mes = entero(v.mes, 1, 12), anio = entero(v.anio, 1800, 2100);
     const muestra = (numero || (mes && anio)) ? { fichero, ...(numero ? { numero } : {}), ...(anio ? { anio } : {}), ...(mes ? { mes } : {}) } : null;
     const idioma = texto(v.idioma, 3);
     const leido = {
         fichero,
         cabecera,
+        edicion,
         issn, issn_fuente: issnFuente, issn_sin_confirmar: issnSinConfirmar,
         editorial: texto(v.editorial, 120),
         idioma: idioma && /^[a-z]{2,3}$/i.test(idioma) ? idioma.toLowerCase() : null,
@@ -409,7 +435,12 @@ function aplicarPortada(perfil, v, nombre) {
         // El logotipo suele ir en MAYÚSCULAS («ALL ABOUT HISTORY»): si es el mismo nombre que ya se tenía, se conserva
         // esa grafía; si no, se pasa a mayúsculas normales. Si no, al ingerir renombraría la cabecera del catálogo a
         // mayúsculas (la regla de «variante del nombre» no distingue mayúsculas).
-        const leido = perfil.cabecera && normTitulo(perfil.cabecera) === normTitulo(v.cabecera) ? perfil.cabecera : capitalizarCabecera(v.cabecera);
+        // Y la EDICIÓN: el logotipo de la francesa dice «National Geographic»; si el nombre que se tenía es ese más un país
+        // («National Geographic France»), se conserva (si no, las ediciones se mezclarían en una cabecera). Si el registro
+        // del ISSN dice qué edición es y al nombre le falta, se añade.
+        let leido = perfil.cabecera && (normTitulo(perfil.cabecera) === normTitulo(v.cabecera) || conservaEdicion(v.cabecera, perfil.cabecera))
+            ? perfil.cabecera : capitalizarCabecera(v.cabecera);
+        if (v.edicion && !normTitulo(leido).split(' ').includes(normTitulo(v.edicion))) leido = `${leido} ${v.edicion}`;
         if (perfil.cabecera && perfil.cabecera !== leido) notas.push(`cabecera «${perfil.cabecera}» (de los nombres) → «${leido}» (leída en la portada)`);
         perfil.cabecera = leido;
         perfil.cabecera_verificada = true;
