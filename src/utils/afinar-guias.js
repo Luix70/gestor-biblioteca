@@ -38,7 +38,7 @@ import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
 import { validarISSN } from './identificadores.js';
 import { esVarianteDeNombre } from './colecciones.js';
-import { mesesDeNombre, esTituloGenerico, normTituloPublicacion } from './revistas.js';
+import { mesesDeNombre, esTituloGenerico, normTituloPublicacion, nombresDePublicacionCasan, capitalizarCabecera } from './revistas.js';
 import { sanearCduMateria } from './guias-estructura.js';
 import { PERIODICIDADES } from './agente-estructura.js';
 
@@ -57,13 +57,20 @@ export async function resolverIssnCabecera(cabecera, issnsNombres = []) {
     if (issnsNombres.length === 1) return { issn: issnsNombres[0], fuente: 'nombres de fichero' };
     if (!cabecera) return null;
 
-    // b) La cabecera ya catalogada con ese nombre (sin distinguir mayúsculas ni acentos, como resolverCabecera).
+    // b) La cabecera ya catalogada con ese nombre (sin distinguir mayúsculas ni acentos, como resolverCabecera)… si el
+    //    registro no dice que ese ISSN es de OTRA publicación. El catálogo también puede estar contaminado: «All About
+    //    History» llevaba desde agosto el ISSN de su edición turca (2717-8536), puesto por una búsqueda en Wikidata que
+    //    no comprobaba el nombre, y esta inspección lo volvió a copiar a la guía.
     try {
         const db = await conectarDB();
         const c = await db.collection('colecciones').findOne(
             { nombre: cabecera, issn: { $type: 'string' } },
             { collation: { locale: 'es', strength: 1 }, projection: { issn: 1, nombre: 1 } });
-        if (c?.issn) return { issn: c.issn, fuente: `catálogo («${c.nombre}»)` };
+        if (c?.issn) {
+            const reg = await buscarNombrePorISSN(c.issn).catch(() => null);
+            if (!reg?.nombre || nombresCasan(reg.nombre, cabecera)) return { issn: c.issn, fuente: `catálogo («${c.nombre}»)` };
+            console.warn(`   ⚠ ISSN ${c.issn} de la cabecera catalogada «${c.nombre}» registrado como «${reg.nombre}»: no se usa.`);
+        }
     } catch { /* sin BD: se sigue con Wikidata */ }
 
     // c) Wikidata por título, COMPROBADO DE VUELTA. La búsqueda por título devuelve el primer candidato con ISSN, y
@@ -80,30 +87,10 @@ export async function resolverIssnCabecera(cabecera, issnsNombres = []) {
     return null;
 }
 
-// (Los títulos GENÉRICOS —«Revistas», «_REVISTAS»…— y su normalización viven en revistas.js: los usa también el plan
-// de guías, para no tomar un cajón de revistas por UNA revista.)
+// (Los títulos GENÉRICOS —«Revistas», «_REVISTAS»…—, su normalización y la comparación de nombres con la regla de
+// «otra edición» viven en revistas.js: los usan también el plan de guías y la búsqueda de ISSN por título.)
 const normTitulo = normTituloPublicacion;
-
-// Palabras que marcan OTRA EDICIÓN de la misma cabecera (un país, una lengua): «All About History: Turkey» no es
-// «All About History». Medido el 15-sep: la búsqueda por título en Wikidata dio el ISSN de la edición turca
-// (2717-8536) y la regla «uno contiene al otro» lo aceptó. Una coletilla de otro tipo («Outside (revista)», «Popular
-// science (New York, N.Y.)») sigue valiendo.
-const EDICIONES = new Set(['turkey', 'turkiye', 'espana', 'spain', 'france', 'uk', 'usa', 'us', 'italia', 'italy', 'deutschland',
-    'germany', 'mexico', 'argentina', 'brasil', 'brazil', 'portugal', 'india', 'australia', 'canada', 'japan', 'china', 'russia',
-    'polska', 'poland', 'nederland', 'netherlands', 'belgique', 'suisse', 'arabic', 'arabia', 'latinoamerica', 'edition', 'edicion',
-    'edizione', 'ausgabe', 'international', 'kids', 'junior']);
-/** ¿Dos nombres de publicación son la misma? Iguales tras normalizar, o uno contiene al otro entero (subtítulos). */
-function nombresCasan(a, b) {
-    const x = normTitulo(a), y = normTitulo(b);
-    if (!x || !y) return false;
-    if (x === y) return true;
-    const contiene = (` ${x} `).includes(` ${y} `) || (` ${y} `).includes(` ${x} `);
-    if (!contiene) return false;
-    // Lo que sobra en el más largo no puede ser el nombre de otra edición.
-    const [largo, corto] = x.length >= y.length ? [x, y] : [y, x];
-    const cortas = new Set(corto.split(' '));
-    return !largo.split(' ').some((w) => !cortas.has(w) && EDICIONES.has(w));
-}
+const nombresCasan = nombresDePublicacionCasan;
 
 // ─── 2) Detalle del desglose ────────────────────────────────────────────────────────────────────────────
 
@@ -348,9 +335,16 @@ export async function leerPortadaRevista(dirAbs, pistas = {}) {
     //    trae UN solo ISSN; varios —impreso y electrónico, o el de otra revista citada— no se deciden a ciegas) y el
     //    código de barras leído en LOCAL (zxing, decodificador determinista: un 977 ES el ISSN de la publicación).
     let issn = null, issnFuente = null;
-    const textoNumero = (await textoDePaginas(ruta, 1, Math.min(total || 12, 12)))
+    let textoNumero = (await textoDePaginas(ruta, 1, Math.min(total || 12, 12)))
         + (total > 12 ? await textoDePaginas(ruta, Math.max(13, total - 3), total) : '');
-    const issnsTexto = issnsEnTexto(textoNumero);
+    let issnsTexto = issnsEnTexto(textoNumero);
+    // La mancheta no siempre está al principio o al final: All About History la lleva hacia la mitad («ISSN
+    // 2050-0548»), y sin ella la guía acabó con el ISSN equivocado del catálogo. Si el texto parcial no dio ninguno
+    // pero el número TIENE capa de texto, se lee entero una vez (una pasada más de poppler, solo en ese caso).
+    if (!issnsTexto.length && textoNumero.trim().length > 500 && total > 16) {
+        textoNumero = await textoDePaginas(ruta, 1, total);
+        issnsTexto = issnsEnTexto(textoNumero);
+    }
     if (issnsTexto.length === 1) { issn = issnsTexto[0]; issnFuente = 'mancheta (capa de texto del número)'; }
     if (!issn && total) {
         const bcLocal = await leerCodigoBarrasPorVision(ruta, total, [], { soloLocal: true }).catch(() => null);
@@ -412,8 +406,12 @@ const CACHE_PORTADAS = new Map();
 function aplicarPortada(perfil, v, nombre) {
     const notas = [];
     if (v.cabecera) {
-        if (perfil.cabecera && perfil.cabecera !== v.cabecera) notas.push(`cabecera «${perfil.cabecera}» (de los nombres) → «${v.cabecera}» (leída en la portada)`);
-        perfil.cabecera = v.cabecera;
+        // El logotipo suele ir en MAYÚSCULAS («ALL ABOUT HISTORY»): si es el mismo nombre que ya se tenía, se conserva
+        // esa grafía; si no, se pasa a mayúsculas normales. Si no, al ingerir renombraría la cabecera del catálogo a
+        // mayúsculas (la regla de «variante del nombre» no distingue mayúsculas).
+        const leido = perfil.cabecera && normTitulo(perfil.cabecera) === normTitulo(v.cabecera) ? perfil.cabecera : capitalizarCabecera(v.cabecera);
+        if (perfil.cabecera && perfil.cabecera !== leido) notas.push(`cabecera «${perfil.cabecera}» (de los nombres) → «${leido}» (leída en la portada)`);
+        perfil.cabecera = leido;
         perfil.cabecera_verificada = true;
     }
     if (v.issn) { perfil.issn = v.issn; notas.push(`ISSN ${v.issn} (${v.issn_fuente})`); }

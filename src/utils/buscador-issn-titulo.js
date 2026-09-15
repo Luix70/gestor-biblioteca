@@ -10,6 +10,7 @@
  */
 import { http } from './http.js';
 import { validarISSN } from './identificadores.js';
+import { nombresDePublicacionCasan } from './revistas.js';
 
 const API = 'https://www.wikidata.org/w/api.php';
 const TIMEOUT = Number(process.env.WIKIDATA_TIMEOUT_MS) || 12000;
@@ -28,12 +29,18 @@ export async function buscarISSNporTitulo(titulo, { idioma = null } = {}) {
         if (!ids.length) return null;
 
         const { data: e } = await http.get(API, {
-            params: { action: 'wbgetentities', ids: ids.join('|'), props: 'claims', format: 'json' },
+            params: { action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels', languages: `${lang}|en|es|fr`, format: 'json' },
             headers: { 'User-Agent': UA }, timeout: TIMEOUT,
         });
         for (const id of ids) {                                   // respeta el orden de relevancia de la búsqueda
-            const p236 = e?.entities?.[id]?.claims?.P236;
+            const ent = e?.entities?.[id];
+            const p236 = ent?.claims?.P236;
             if (!p236) continue;
+            // El NOMBRE del ítem tiene que ser el buscado, no otra edición ni otra publicación que lo contenga. Sin esto,
+            // «All About History» se llevó el ISSN de «All About History: Turkey» (el único ítem con ISSN) y lo guardó
+            // en el catálogo en agosto; de ahí lo copiaron las guías del 15-sep.
+            const etiquetas = Object.values(ent.labels || {}).map((l) => l?.value).filter(Boolean);
+            if (etiquetas.length && !etiquetas.some((l) => nombresDePublicacionCasan(l, t))) continue;
             for (const c of p236) {
                 const issn = validarISSN(c?.mainsnak?.datavalue?.value);
                 if (issn) return { issn, fuente: `wikidata:${id}` };

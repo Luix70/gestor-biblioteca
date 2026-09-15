@@ -49,6 +49,47 @@ export function esTituloGenerico(t) {
     return !n || n.length < 3 || GENERICOS.has(n);
 }
 
+// Palabras que marcan OTRA EDICIÓN de la misma cabecera (un país, una lengua): «All About History: Turkey» no es
+// «All About History». Medido el 15-sep: la búsqueda por título en Wikidata dio el ISSN de la edición turca
+// (2717-8536; el de la británica, 2050-0548, está impreso en su mancheta) y ya estaba en el catálogo desde agosto.
+// Una coletilla de otro tipo («Outside (revista)», «Popular science (New York, N.Y.)») sigue valiendo.
+const EDICIONES = new Set(['turkey', 'turkiye', 'espana', 'spain', 'france', 'uk', 'usa', 'us', 'italia', 'italy', 'deutschland',
+    'germany', 'mexico', 'argentina', 'brasil', 'brazil', 'portugal', 'india', 'australia', 'canada', 'japan', 'china', 'russia',
+    'polska', 'poland', 'nederland', 'netherlands', 'belgique', 'suisse', 'arabic', 'arabia', 'latinoamerica', 'edition', 'edicion',
+    'edizione', 'ausgabe', 'international', 'kids', 'junior']);
+
+/**
+ * ¿Dos nombres de publicación son la MISMA? Iguales tras normalizar, o uno contiene al otro entero (subtítulos,
+ * coletillas «(revista)»)… salvo que lo que sobra sea el nombre de OTRA EDICIÓN (un país, una lengua, «Kids»).
+ */
+export function nombresDePublicacionCasan(a, b) {
+    const x = normTituloPublicacion(a), y = normTituloPublicacion(b);
+    if (!x || !y) return false;
+    if (x === y) return true;
+    const contiene = (` ${x} `).includes(` ${y} `) || (` ${y} `).includes(` ${x} `);
+    if (!contiene) return false;
+    const [largo, corto] = x.length >= y.length ? [x, y] : [y, x];
+    const cortas = new Set(corto.split(' '));
+    return !largo.split(' ').some((w) => !cortas.has(w) && EDICIONES.has(w));
+}
+
+/**
+ * Nombre de cabecera en MAYÚSCULAS, como lo escribe el logotipo («ALL ABOUT HISTORY», «L'HISTOIRE») → con mayúsculas
+ * normales («All About History», «L'Histoire»). Se quedan en mayúsculas las siglas: palabras cortas SIN vocales
+ * («BBC», «GQ»). Un nombre que no está entero en mayúsculas no se toca.
+ */
+export function capitalizarCabecera(nombre) {
+    const s = String(nombre || '').trim();
+    const letras = s.replace(/[^\p{L}]/gu, '');
+    if (letras.length < 4 || letras !== letras.toUpperCase()) return s;
+    return s.split(' ').map((palabra) => {
+        const soloLetras = palabra.replace(/[^\p{L}]/gu, '');
+        if (soloLetras.length <= 3 && !/[AEIOUÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜY]/u.test(soloLetras)) return palabra;   // sigla
+        // Mayúscula al principio y tras un apóstrofo o un guion («L'Histoire», «Hors-Série»); el resto, en minúscula.
+        return palabra.toLowerCase().replace(/(^|['’\-(«"])(\p{L})/gu, (m, antes, letra) => antes + letra.toUpperCase());
+    }).join(' ');
+}
+
 // ─── FECHA Y NÚMERO de un número con lo que sabe su CARPETA ─────────────────────────────────────────────
 //
 // El año de un número salía errático (medido, L'Histoire 2016: 2018, 2011, 1925, 1730, 2003…): no hay fecha en
