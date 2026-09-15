@@ -13,7 +13,10 @@ export const getVerboso = () => verboso;
 
 // Marcadores de "titular" (resultado/estado): si una línea de log/info los lleva, se muestra también en
 // modo simple. Substring match (robusto con emojis multi-código). Los pasos internos no los llevan.
-const MARCAS = ['✅', '⚠', '❌', '⛔', '🚫', '🔁', '📛', '👻', '📥', '📭', '📊', '🧹', '👁', '🎛', '▶', '⏸', '♻', '🗑', '🛠', '📚', 'Lote', 'RESUMEN', 'Inbox vacío'];
+// 📰 = portada leída al inspeccionar una tirada de revistas y 🧭 = resumen de una inspección: son el progreso de un
+// trabajo largo (medido el 15-sep: una inspección de 108 revistas no dejaba ni una línea en el log simple, y parecía
+// parada mientras el panel contaba 27 portadas leídas).
+const MARCAS = ['✅', '⚠', '❌', '⛔', '🚫', '🔁', '📛', '👻', '📥', '📭', '📊', '🧹', '👁', '🎛', '▶', '⏸', '♻', '🗑', '🛠', '📚', '📰', '🧭', 'Lote', 'RESUMEN', 'Inbox vacío'];
 const esTitular = (s) => MARCAS.some(m => s.includes(m));
 
 if (!console.__conTimestamp) {
