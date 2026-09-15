@@ -20,7 +20,14 @@ import { conectarDB } from '../database.js';
 // enfriando 5 min a la vez y la visión caía a la de PAGO. Con 70s vuelven enseguida y el pago casi no se toca.
 const COOLDOWN_MIN_MS = Number(process.env.VISION_COOLDOWN_MIN_MS) || 70 * 1000;
 const COOLDOWN_DIA_MS = Number(process.env.VISION_COOLDOWN_DIA_MS) || 30 * 60 * 1000;
-const cooldownPorCuota = (e) => /per\s*day|\bdaily\b/i.test(String(e?.message || '') + ' ' + String(e?.response?.data?.error?.message || '')) ? COOLDOWN_DIA_MS : COOLDOWN_MIN_MS;
+// ¿Es la cuota DIARIA? Gemini no lo dice en el mensaje, sino en `errorDetails` (quotaId
+// «GenerateRequestsPerDayPerProjectPerModel-FreeTier»), y OpenRouter lo escribe con guiones («free-models-per-day»).
+// Mirando solo el mensaje con /per\s*day/, una clave agotada para todo el día se enfriaba 70 s y CADA llamada volvía a
+// probarla antes de pasar a la siguiente (medido el 15-sep: 1 min 45 s en contestar un 429, en cada llamada de una
+// inspección de 60 portadas).
+const textoDelError = (e) => [e?.message, e?.response?.data?.error?.message, e?.response?.data?.error?.metadata?.raw,
+    e?.errorDetails ? JSON.stringify(e.errorDetails) : ''].map((x) => String(x || '')).join(' ');
+const cooldownPorCuota = (e) => /per[\s_-]*day|\bdaily\b/i.test(textoDelError(e)) ? COOLDOWN_DIA_MS : COOLDOWN_MIN_MS;
 const TIMEOUT_MS = Number(process.env.VISION_TIMEOUT_MS) || Number(process.env.HTTP_TIMEOUT_MS) || 30000;
 const limpia = (k) => (k && String(k).trim()) || null;
 

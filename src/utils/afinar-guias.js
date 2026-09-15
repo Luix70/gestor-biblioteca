@@ -38,7 +38,7 @@ import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
 import { validarISSN } from './identificadores.js';
 import { esVarianteDeNombre } from './colecciones.js';
-import { mesesDeNombre } from './revistas.js';
+import { mesesDeNombre, esTituloGenerico, normTituloPublicacion } from './revistas.js';
 import { sanearCduMateria } from './guias-estructura.js';
 import { PERIODICIDADES } from './agente-estructura.js';
 
@@ -80,20 +80,29 @@ export async function resolverIssnCabecera(cabecera, issnsNombres = []) {
     return null;
 }
 
-// Títulos que describen un SOPORTE o un cajón, no una publicación: buscarles ISSN solo puede dar uno ajeno.
-const GENERICOS = new Set(['revista', 'revistas', 'magazine', 'magazines', 'periodicos', 'prensa', 'diarios', 'comic', 'comics',
-    'boletin', 'boletines', 'varios', 'varias', 'misc', 'otros', 'numeros', 'ejemplares', 'suscripciones']);
-const normTitulo = (s) => String(s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '')
-    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/^(el|la|los|las|the|le|les|il|lo|der|die|das) /, '').trim();
-function esTituloGenerico(t) {
-    const n = normTitulo(t);
-    return !n || n.length < 3 || GENERICOS.has(n);
-}
+// (Los títulos GENÉRICOS —«Revistas», «_REVISTAS»…— y su normalización viven en revistas.js: los usa también el plan
+// de guías, para no tomar un cajón de revistas por UNA revista.)
+const normTitulo = normTituloPublicacion;
+
+// Palabras que marcan OTRA EDICIÓN de la misma cabecera (un país, una lengua): «All About History: Turkey» no es
+// «All About History». Medido el 15-sep: la búsqueda por título en Wikidata dio el ISSN de la edición turca
+// (2717-8536) y la regla «uno contiene al otro» lo aceptó. Una coletilla de otro tipo («Outside (revista)», «Popular
+// science (New York, N.Y.)») sigue valiendo.
+const EDICIONES = new Set(['turkey', 'turkiye', 'espana', 'spain', 'france', 'uk', 'usa', 'us', 'italia', 'italy', 'deutschland',
+    'germany', 'mexico', 'argentina', 'brasil', 'brazil', 'portugal', 'india', 'australia', 'canada', 'japan', 'china', 'russia',
+    'polska', 'poland', 'nederland', 'netherlands', 'belgique', 'suisse', 'arabic', 'arabia', 'latinoamerica', 'edition', 'edicion',
+    'edizione', 'ausgabe', 'international', 'kids', 'junior']);
 /** ¿Dos nombres de publicación son la misma? Iguales tras normalizar, o uno contiene al otro entero (subtítulos). */
 function nombresCasan(a, b) {
     const x = normTitulo(a), y = normTitulo(b);
     if (!x || !y) return false;
-    return x === y || (` ${x} `).includes(` ${y} `) || (` ${y} `).includes(` ${x} `);
+    if (x === y) return true;
+    const contiene = (` ${x} `).includes(` ${y} `) || (` ${y} `).includes(` ${x} `);
+    if (!contiene) return false;
+    // Lo que sobra en el más largo no puede ser el nombre de otra edición.
+    const [largo, corto] = x.length >= y.length ? [x, y] : [y, x];
+    const cortas = new Set(corto.split(' '));
+    return !largo.split(' ').some((w) => !cortas.has(w) && EDICIONES.has(w));
 }
 
 // ─── 2) Detalle del desglose ────────────────────────────────────────────────────────────────────────────
@@ -464,7 +473,10 @@ export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado =
         return [...vistos];
     };
 
-    const leidas = new Set();   // rutas de las tiradas cuya portada ya se leyó (en esta pasada o en una anterior)
+    // Tiradas cuya portada ya se leyó (en esta pasada o en una anterior): ruta → cabecera. Una subcarpeta solo se da
+    // por leída si su madre leída es la MISMA publicación (los años de una tirada). Con un Set de rutas, una raíz mal
+    // tomada por revista dejó sin leer las 60 tiradas de debajo (15-sep, «_REVISTAS»).
+    const leidas = new Map();
     let llamadasVision = 0;     // lo que cuenta para el tope: las llamadas de verdad, no las reaprovechadas
     const aAfinar = plan.filter((p) => p.guia && ['nueva', 'actualizar'].includes(p.estado));
     const tiradas = aAfinar.filter((p) => p.guia.perfil?.tipo_probable === 'revista').length;
@@ -488,15 +500,16 @@ export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado =
             for (const k of ['cabecera', 'cabecera_verificada', 'issn', 'editorial_probable', 'idioma_probable', 'periodicidad', 'descripcion', 'muestra', 'numeracion', 'materia_cdu']) {
                 if (previa.perfil[k] !== undefined) p.guia.perfil[k] = previa.perfil[k];
             }
-            leidas.add(p.ruta);
+            leidas.set(p.ruta, normTitulo(p.guia.perfil.cabecera));
             notas.push(`«${nombre}»: portada ya leída en una inspección anterior (cabecera «${p.guia.perfil.cabecera}»); se conserva.`);
         } else if (p.guia.perfil?.tipo_probable === 'revista' && VISION_ACTIVA()) {
-            const madreLeida = [...leidas].some((r) => bajoDe({ ruta: r }));
+            const cabP = normTitulo(p.guia.perfil.cabecera);
+            const madreLeida = !!cabP && [...leidas].some(([r, cab]) => r !== p.ruta && bajoDe({ ruta: r }) && cab === cabP);
             if (!madreLeida && llamadasVision < VISION_MAX()) {
                 try {
                     llamadasVision++;
                     const v = await leerPortadaRevista(p.abs, p.guia.perfil);
-                    if (v) { leidas.add(p.ruta); notas.push(...aplicarPortada(p.guia.perfil, v, nombre)); }
+                    if (v) { notas.push(...aplicarPortada(p.guia.perfil, v, nombre)); leidas.set(p.ruta, normTitulo(p.guia.perfil.cabecera)); }
                 } catch (e) {
                     notas.push(`«${nombre}»: no se pudo leer la portada con la visión (${String(e.message).slice(0, 80)}); la guía se queda con lo deducido de los nombres.`);
                 }

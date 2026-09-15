@@ -36,6 +36,19 @@ export function tituloEsDelFichero(titulo, nombreArchivo) {
     return !t || (f.length > 0 && f.includes(t));
 }
 
+// ─── NOMBRES que no son una publicación ─────────────────────────────────────────────────────────────────
+
+// Títulos que describen un SOPORTE o un cajón, no una publicación: «Revistas», «_REVISTAS», «Magazines»… Buscarles un
+// ISSN solo puede dar uno ajeno, y tratarlos como cabecera convierte un cajón de revistas en UNA revista.
+const GENERICOS = new Set(['revista', 'revistas', 'magazine', 'magazines', 'periodicos', 'prensa', 'diarios', 'comic', 'comics',
+    'boletin', 'boletines', 'varios', 'varias', 'misc', 'otros', 'numeros', 'ejemplares', 'suscripciones', 'publicaciones']);
+export const normTituloPublicacion = (s) => String(s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/^(el|la|los|las|the|le|les|il|lo|der|die|das) /, '').trim();
+export function esTituloGenerico(t) {
+    const n = normTituloPublicacion(t);
+    return !n || n.length < 3 || GENERICOS.has(n);
+}
+
 // ─── FECHA Y NÚMERO de un número con lo que sabe su CARPETA ─────────────────────────────────────────────
 //
 // El año de un número salía errático (medido, L'Histoire 2016: 2018, 2011, 1925, 1730, 2003…): no hay fecha en

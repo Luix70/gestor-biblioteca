@@ -3819,6 +3819,20 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
         casi todo ya es la llamada de vision).
       - Cache en memoria por fichero (tamaño + fecha): «🔄 Repetir» no vuelve a pagar las portadas ya leidas.
       Para saber por donde va desde el NAS: sudo docker logs --since 2h gestor-biblioteca 2>&1 | grep "📰"
+    * SEGUNDO USO REAL (15-sep, ya con lo anterior): la propuesta salio en 355 s pero con UNA sola portada leida. La IA
+      tomo la RAIZ «_REVISTAS» por una revista; la vision leyo «su» primer numero (el de la primera subcarpeta) y le
+      puso «All About History» + un ISSN de Wikidata; y como la raiz ya estaba «leida», ninguna tirada de debajo leyo
+      la suya. De escribirse, todo lo de debajo sin guia propia habria heredado esa cabecera. Arreglado:
+      - guias-estructura · desarmarCajonesDeRevistas: una carpeta «revistas» cuyas hijas son revistas DISTINTAS (2+
+        cabeceras) es un CAJON (raiz/cajon, sin cabecera). Lo contrario de promoverTiradasDeRevista.
+      - Un nombre de SOPORTE («Revistas», «_REVISTAS», «Magazines»…: revistas · esTituloGenerico, antes privado de
+        afinar-guias) nunca es cabecera.
+      - afinarPlan: una subcarpeta solo se da por «leida» si su madre leida es la MISMA publicacion.
+      - ISSN por titulo (Wikidata): «uno contiene al otro» ya no acepta OTRA EDICION («All About History: Turkey»,
+        2717-8536, para «All About History»): se rechaza si lo que sobra es un pais, una lengua o «edition/kids…».
+      - vision · cooldown: la cuota DIARIA agotada (Gemini la dice en errorDetails, «…PerDay…»; OpenRouter
+        «free-models-per-day») enfria la clave 30 min, no 70 s. Antes cada llamada volvia a probar las claves
+        agotadas antes de pasar a la siguiente (un 429 tardo 1 min 45 s en llegar).
     * NOMBRE DE LA CABECERA: resolverCabecera({nombreVerificado}) RENOMBRA la cabecera hallada por ISSN si su
       nombre es una VARIANTE cercana del leido en la portada (colecciones · esVarianteDeNombre: solo letras,
       ofuscaciones deshechas 0→o 1→i 3→e 4→a 5→s 7→t, distancia de edicion ≤ 2 o 20 %): «l'historie» →

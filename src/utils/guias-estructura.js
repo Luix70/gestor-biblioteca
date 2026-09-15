@@ -31,7 +31,7 @@
  */
 import path from 'node:path';
 import { leerGuia, escribirGuia, guiaEsSignificativa } from './guia-ingesta.js';
-import { tituloCabecera, periodoDeTexto } from './revistas.js';
+import { tituloCabecera, periodoDeTexto, esTituloGenerico, normTituloPublicacion } from './revistas.js';
 
 export const UMBRAL_CONFIANZA = 0.6;
 const ORIGEN = 'agente';
@@ -89,7 +89,10 @@ export function guiaDesdeInterpretacion(i, nombreCarpeta) {
     //    añade afinar-guias SOLO si lo confirma una fuente fiable. La pista de tipo es débil: un ISBN o un CIP del
     //    propio fichero siguen mandando (discriminador).
     if (i.contenido === 'revistas') {
-        const cabecera = (i.nombre_canonico && String(i.nombre_canonico).trim()) || tituloCabecera(nombreCarpeta);
+        // Nunca un nombre de SOPORTE («_REVISTAS», «Magazines») como cabecera: sin cabecera, cada número la toma de sí
+        // mismo (o la pone la visión al leer la portada), en vez de colgar todos de una «revista» que no existe.
+        const cabecera = [i.nombre_canonico && String(i.nombre_canonico).trim(), tituloCabecera(nombreCarpeta)]
+            .find((x) => x && !esTituloGenerico(x)) || null;
         // CDU de la PUBLICACIÓN: servicio-ingesta la da a los números que no traen una (casi todos), y la cabecera
         // nace con ella. Sin esto, 2DArtist 2012 entró entero con 000. Se sanea igual que la de materia (95-99…).
         const cdu = sanearCduMateria(i.cdu);
@@ -224,12 +227,38 @@ function promoverTiradasDeRevista(porRuta) {
     }
 }
 
+/**
+ * Lo CONTRARIO de promoverTiradasDeRevista: una carpeta que la IA leyó como «revistas» pero cuyas hijas son revistas
+ * DISTINTAS (dos o más cabeceras) es un CAJÓN de revistas, no una tirada. Medido el 15-sep con «_REVISTAS» (la raíz,
+ * 121 carpetas): salió con contenido revistas, la visión leyó «su» primer número —el de la primera subcarpeta, All
+ * About History— y le puso ese nombre y un ISSN; y como la raíz ya estaba «leída», ninguna tirada de debajo leyó su
+ * portada. Si la guía se hubiera escrito, TODO lo de debajo sin guía propia habría heredado «All About History».
+ * También lo es la que se LLAMA como un soporte («Revistas», «_REVISTAS», «Magazines»): eso no es una cabecera.
+ */
+function desarmarCajonesDeRevistas(porRuta) {
+    for (const c of porRuta.values()) {
+        if (c.contenido !== 'revistas') continue;
+        const nombre = c.ruta === '.' ? null : c.ruta.split('/').pop();
+        const hijas = [...porRuta.values()].filter((h) => h.ruta !== c.ruta && madreDe(h.ruta) === c.ruta && h.contenido === 'revistas');
+        const cabeceras = new Set(hijas.map((h) => normTituloPublicacion(h.nombre_canonico || h.ruta.split('/').pop())).filter(Boolean));
+        if (cabeceras.size >= 2) {
+            c.contenido = null;
+            c.tipo = c.ruta === '.' ? 'raiz' : 'cajon';
+        } else if (esTituloGenerico(c.nombre_canonico || nombre || '')) {
+            // Una tirada de verdad con un nombre de soporte («Revistas/» con los números de UNA publicación dentro)
+            // no puede llevar ese nombre de cabecera: mejor sin cabecera (lo pondrá la visión o el primer número).
+            c.nombre_canonico = null;
+        }
+    }
+}
+
 // `origenesReescribibles`: de quién son las guías que este plan puede reescribir. La inspección automática solo
 // reescribe las suyas ('agente'); la del panel también las que TÚ aprobaste en el panel ('panel'), porque es tu
 // decisión repetirla. Las hechas a mano en el Inspector (sin origen) no se tocan nunca.
 export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDudosas = false, origenesReescribibles = [ORIGEN] } = {}) {
     const porRuta = new Map(interpretacion.carpetas.map((c) => [c.ruta, { ...c }]));
     promoverTiradasDeRevista(porRuta);
+    desarmarCajonesDeRevistas(porRuta);
     desarmarContenedores(porRuta);
 
     // 1.ª pasada: qué le toca a cada carpeta por sí misma.
