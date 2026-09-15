@@ -465,7 +465,9 @@ function aplicarPortada(perfil, v, nombre) {
  *                             decenas de minutos en el NAS.
  * @param opciones.cancelado   () → true para dejarlo a medias (el panel canceló: no seguir pagando portadas).
  */
-export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado = () => false } = {}) {
+// `maxPortadas`: tope de portadas leídas en esta pasada. La automática usa INSPECCION_IA_VISION_MAX (60: bloquea al
+// vigilante mientras dura); la del panel pasa uno mayor (se ve el progreso y se puede cancelar).
+export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado = () => false, maxPortadas = VISION_MAX() } = {}) {
     const notas = [];
     const issnsDe = (ruta) => {
         const vistos = new Set();
@@ -491,7 +493,7 @@ export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado =
         paso++;
         if (p.guia.perfil?.tipo_probable === 'revista') tirada++;
         onProgreso(p.guia.perfil?.tipo_probable === 'revista'
-            ? `Revista ${tirada} de ${tiradas} · «${nombre}»${VISION_ACTIVA() ? ` · portadas leídas: ${llamadasVision}${VISION_MAX() < tiradas ? ` (tope ${VISION_MAX()})` : ''}` : ''}`
+            ? `Revista ${tirada} de ${tiradas} · «${nombre}»${VISION_ACTIVA() ? ` · portadas leídas: ${llamadasVision}${maxPortadas < tiradas ? ` (tope ${maxPortadas})` : ''}` : ''}`
             : `Carpeta ${paso} de ${aAfinar.length} · «${nombre}»`);
 
         // La PORTADA del primer número (visión). No se repite en una subcarpeta de una tirada ya leída, ni si la guía que
@@ -507,7 +509,7 @@ export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado =
         } else if (p.guia.perfil?.tipo_probable === 'revista' && VISION_ACTIVA()) {
             const cabP = normTitulo(p.guia.perfil.cabecera);
             const madreLeida = !!cabP && [...leidas].some(([r, cab]) => r !== p.ruta && bajoDe({ ruta: r }) && cab === cabP);
-            if (!madreLeida && llamadasVision < VISION_MAX()) {
+            if (!madreLeida && llamadasVision < maxPortadas) {
                 try {
                     llamadasVision++;
                     const v = await leerPortadaRevista(p.abs, p.guia.perfil);
@@ -516,7 +518,7 @@ export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado =
                     notas.push(`«${nombre}»: no se pudo leer la portada con la visión (${String(e.message).slice(0, 80)}); la guía se queda con lo deducido de los nombres.`);
                 }
             } else if (!madreLeida) {
-                notas.push(`«${nombre}»: portada sin leer (tope de ${VISION_MAX()} tiradas por inspección, INSPECCION_IA_VISION_MAX).`);
+                notas.push(`«${nombre}»: portada sin leer (tope de ${maxPortadas} tiradas por inspección; otra pasada reaprovecha las leídas y sigue con las demás).`);
             }
         }
 

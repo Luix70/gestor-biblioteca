@@ -51,6 +51,9 @@ export function lanzarInspeccionManual({ abs, sub, reserva, repetir = false }) {
             const notas = await afinarPlan(plan, esq, {
                 onProgreso: (texto) => { t.detalle = texto; reservarCarpeta(reserva); },
                 cancelado: () => t.descartar,   // «Cancelar» en el panel: no seguir pagando portadas que se van a tirar
+                // Desde el panel el tope es mayor que en la automática: aquí se ve el progreso y se puede cancelar, y
+                // un _REVISTAS con un centenar de tiradas no debería necesitar dos pasadas.
+                maxPortadas: Number(process.env.INSPECCION_IA_VISION_MAX_PANEL || 200),
             });
             t.resultado = { esq, r, plan, notas };
         } catch (e) {

@@ -82,7 +82,8 @@ export const AJUSTES = {
                                      // editorial, idioma, CDU, descripción y nº+fecha de muestra (utils/afinar-guias.js)
     INSPECCION_IA_VISION_PAGINAS: 4, // páginas CON CONTENIDO del principio que se envían (+ la contraportada)
     INSPECCION_IA_VISION_ANCHO: 1000,// px de ancho de cada página enviada (legible sin pesar demasiado)
-    INSPECCION_IA_VISION_MAX: 60,    // tope de tiradas leídas por inspección (un _REVISTAS con cientos no bloquea horas)
+    INSPECCION_IA_VISION_MAX: 60,    // tope de tiradas leídas por inspección AUTOMÁTICA (bloquea al vigilante mientras dura)
+    INSPECCION_IA_VISION_MAX_PANEL: 200, // …y desde el panel («🤖 IA»): se ve el progreso y se puede cancelar
 
     // --- Campañas de fondo (backfill autorreparable al reposo; ajustables en el panel) ---
     CAMPANAS_PAUSA_MS: 700,          // ritmo entre elementos de una tanda de campaña (respeta a las APIs)
