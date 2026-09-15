@@ -437,12 +437,14 @@ function aplicarPortada(perfil, v, nombre) {
             if (mn.mes === v.muestra.mes) {
                 if (perfil.numeracion !== 'mes') notas.push(`«${v.muestra.fichero}» es de ${v.muestra.mes}/${v.muestra.anio || '?'}: los números de los ficheros son MESES`);
                 perfil.numeracion = 'mes';
+                perfil.numeracion_verificada = true;
             } else if (perfil.numeracion === 'mes') {
                 notas.push(`«${v.muestra.fichero}» es del mes ${v.muestra.mes}, no del ${mn.mes}: los números de los ficheros NO son meses`);
                 delete perfil.numeracion;
+                delete perfil.numeracion_verificada;
             }
         }
-        if (v.muestra.numero && baseNum === v.muestra.numero) perfil.numeracion = 'numero';
+        if (v.muestra.numero && baseNum === v.muestra.numero) { perfil.numeracion = 'numero'; perfil.numeracion_verificada = true; }
         if (perfil.periodo && v.muestra.anio && (v.muestra.anio < perfil.periodo.desde || v.muestra.anio > perfil.periodo.hasta)) {
             notas.push(`OJO: el primer número es de ${v.muestra.anio}, fuera de los años de la carpeta (${perfil.periodo.desde}-${perfil.periodo.hasta})`);
         }
@@ -497,7 +499,7 @@ export async function afinarPlan(plan, esq, { onProgreso = () => {}, cancelado =
         // una segunda pasada sobre un _REVISTAS enorme completa las que el tope dejó sin leer).
         const previa = p.guia.perfil?.tipo_probable === 'revista' ? await leerGuia(p.abs).catch(() => null) : null;
         if (previa?.perfil?.cabecera_verificada) {
-            for (const k of ['cabecera', 'cabecera_verificada', 'issn', 'editorial_probable', 'idioma_probable', 'periodicidad', 'descripcion', 'muestra', 'numeracion', 'materia_cdu']) {
+            for (const k of ['cabecera', 'cabecera_verificada', 'issn', 'editorial_probable', 'idioma_probable', 'periodicidad', 'descripcion', 'muestra', 'numeracion', 'numeracion_verificada', 'materia_cdu']) {
                 if (previa.perfil[k] !== undefined) p.guia.perfil[k] = previa.perfil[k];
             }
             leidas.set(p.ruta, normTitulo(p.guia.perfil.cabecera));

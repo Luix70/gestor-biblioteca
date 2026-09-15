@@ -3833,6 +3833,16 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       - vision · cooldown: la cuota DIARIA agotada (Gemini la dice en errorDetails, «…PerDay…»; OpenRouter
         «free-models-per-day») enfria la clave 30 min, no 70 s. Antes cada llamada volvia a probar las claves
         agotadas antes de pasar a la siguiente (un 429 tardo 1 min 45 s en llegar).
+      COMPROBADO leyendo las guias escritas (17:20): la de la raiz «_REVISTAS» salio «All About History», ✓portada,
+      ISSN 2717-8536, editorial Imagine Publishing, muestra nº 8 — la UNICA de 120 con portada leida. Se NEUTRALIZO a
+      mano (cajon: sin_coleccion). Peligro que destapo, cerrado en codigo (guia-ingesta · perfilHeredado): los datos
+      PROPIOS de una cabecera (issn, muestra, editorial, descripcion, periodicidad, numeracion, periodo, CDU, idioma,
+      cabecera_verificada) solo se heredan CON ella. Antes, «GQ British» (su propia cabecera, sin ISSN) habria heredado
+      el ISSN de la raiz → al catalogar, colgada de «All About History». Una tirada por años (subcarpeta sin cabecera)
+      sigue heredando la de su madre.
+      - numeracion 'numero' SIN calibrar con la portada: «1» … «12» es ambiguo (pueden ser meses; la IA de nombres dijo
+        «numero» para L'Histoire 2016, que son meses) → no se convierte en nº de issue, ni sirve para ahorrarse la
+        vision de un escaneo. perfil.numeracion_verificada la pone la calibracion con la muestra.
     * NOMBRE DE LA CABECERA: resolverCabecera({nombreVerificado}) RENOMBRA la cabecera hallada por ISSN si su
       nombre es una VARIANTE cercana del leido en la portada (colecciones · esVarianteDeNombre: solo letras,
       ofuscaciones deshechas 0→o 1→i 3→e 4→a 5→s 7→t, distancia de edicion ≤ 2 o 20 %): «l'historie» →

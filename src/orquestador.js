@@ -452,9 +452,11 @@ export async function procesarRecurso(entrada) {
         const perfilGuia = contexto.perfil || {};
         const nombreFich = path.basename(rutas[0]);
         const revistaGuiada = perfilGuia.tipo_probable === 'revista' && !!perfilGuia.cabecera && !!perfilGuia.issn;
+        const numNombre = numeroDeNombre(nombreFich);
         const fechaPorNombre = parsearNombre(nombreFich).esFechada
             || (perfilGuia.numeracion === 'mes' && !!mesesDeNombre(nombreFich))
-            || (perfilGuia.numeracion === 'numero' && numeroDeNombre(nombreFich) != null);
+            // «1» … «12» sin calibrar con la portada puede ser un mes: no basta para ahorrarse la visión.
+            || (perfilGuia.numeracion === 'numero' && numNombre != null && (perfilGuia.numeracion_verificada || numNombre > 12));
         // (Con ISBN propio o bloque CIP es un LIBRO que cayó en la carpeta, y sigue su camino de siempre.)
         if (esEscaneado && revistaGuiada && fechaPorNombre && !datosBase.isbn_propio && !datosBase.cip) {
             // Escaneo de una tirada guiada: sin visión por número. Título provisional = el nombre del fichero (1ter lo

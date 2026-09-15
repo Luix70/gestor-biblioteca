@@ -122,6 +122,7 @@ export function normalizarPerfil(p) {
     if (issn) out.issn = issn;
     if (p.cabecera_verificada === true) out.cabecera_verificada = true;
     if (['mes', 'numero', 'fecha'].includes(p.numeracion)) out.numeracion = p.numeracion;
+    if (out.numeracion && p.numeracion_verificada === true) out.numeracion_verificada = true;   // calibrada con la portada
     // Años y muestra: solo valores verosímiles (un año de 4 cifras, un mes 1-12). Lo demás se descarta.
     const anio = (v) => (Number.isInteger(Number(v)) && Number(v) >= 1800 && Number(v) <= 2100 ? Number(v) : null);
     if (p.periodo && anio(p.periodo.desde)) {
@@ -162,6 +163,15 @@ export function normalizarPerfil(p) {
  * @param raizInbox   raíz del Inbox (no se sube por encima)
  * @returns {Promise<object>} perfil normalizado (vacío si no hay ninguna guía en el camino)
  */
+// Datos PROPIOS de una cabecera de revista: solo tienen sentido con ELLA. Si una guía más cercana ya dio OTRA cabecera,
+// los de una guía de más arriba no se heredan. Medido el 15-sep: una guía de «_REVISTAS» (la raíz) salió por error
+// como «All About History» con ISSN, muestra y editorial; «GQ British», con su propia cabecera pero sin ISSN, habría
+// heredado el ISSN de All About History (y con él, la cabecera en el catálogo), su editorial y su muestra.
+const DE_LA_CABECERA = new Set(['issn', 'cabecera_verificada', 'muestra', 'descripcion', 'editorial_probable', 'periodicidad',
+    'numeracion', 'numeracion_verificada', 'periodo', 'materia_cdu', 'idioma_probable']);
+const mismaCabecera = (a, b) => String(a || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+    === String(b || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
 export async function perfilHeredado(dirFichero, raizInbox) {
     const raiz = path.resolve(raizInbox);
     let dir = path.resolve(dirFichero);
@@ -178,6 +188,8 @@ export async function perfilHeredado(dirFichero, raizInbox) {
                 // Si se heredara, al catalogar se crearía una colección de LIBROS con ese nombre antes que la
                 // cabecera, y la usurparía.
                 if (k === 'coleccion' && heredado.cabecera) continue;
+                // Una guía de más arriba con OTRA cabecera: sus datos de cabecera no son de esta revista.
+                if (DE_LA_CABECERA.has(k) && heredado.cabecera && g.perfil.cabecera && !mismaCabecera(heredado.cabecera, g.perfil.cabecera)) continue;
                 if (!(k in heredado)) heredado[k] = v;
             }
         }

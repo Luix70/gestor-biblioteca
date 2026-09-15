@@ -133,7 +133,12 @@ export function afinarFechaNumero(documento, { perfil = {}, nombreFichero = '', 
     // 1) Mes (o nº) por el nombre del fichero.
     if (perfil.numeracion === 'numero' && documento.numero_issue == null) {
         const n = numeroDeNombre(nombreFichero);
-        if (n) { documento.numero_issue = n; alertas.push(`Nº ${n}, el del nombre del fichero (en esta carpeta los ficheros se llaman por el nº).`); }
+        // Sin calibrar con la portada, «1» … «12» es AMBIGUO: pueden ser meses. Medido: la IA de nombres dijo «numero»
+        // para «1.pdf» … «12.pdf» de L'Histoire 2016, que son los meses (la portada de 1.pdf dice nº 419, enero).
+        if (n && (perfil.numeracion_verificada || n > 12)) {
+            documento.numero_issue = n;
+            alertas.push(`Nº ${n}, el del nombre del fichero (en esta carpeta los ficheros se llaman por el nº).`);
+        }
     }
     if (perfil.numeracion === 'mes') {
         const mn = mesesDeNombre(nombreFichero);
