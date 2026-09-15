@@ -20,6 +20,34 @@ export const nombreEsPlaceholder = (nombre, issn) => {
     return esTituloArtefacto(s);
 };
 
+/**
+ * ¿`a` es una VARIANTE cercana de `b` (errata u ofuscación), no otro nombre? Para renombrar una cabecera nacida del
+ * nombre de una carpeta cuando la portada dice cómo se llama de verdad: «l'historie» o «l´hist0r1e» → «L'Histoire».
+ * Se comparan solo las letras (sin acentos ni signos, con los dígitos-letra de las ofuscaciones deshechos: 0→o,
+ * 1→i, 3→e, 4→a, 5→s, 7→t) y se admite una distancia de edición pequeña: 2, o el 20 % en nombres largos. Así
+ * «National Geographic» NO es variante de «National Geographic Historia» (es otra publicación).
+ */
+export function esVarianteDeNombre(a, b) {
+    const LEET = { 0: 'o', 1: 'i', 3: 'e', 4: 'a', 5: 's', 7: 't' };
+    const norm = (s) => String(s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').toLowerCase()
+        .replace(/[013457]/g, (d) => LEET[d]).replace(/[^a-z]/g, '');
+    const x = norm(a), y = norm(b);
+    if (x.length < 4 || y.length < 4) return false;
+    if (x === y) return true;
+    const tope = Math.max(2, Math.floor(Math.max(x.length, y.length) * 0.2));
+    if (Math.abs(x.length - y.length) > tope) return false;
+    // Levenshtein clásico (nombres cortos: coste despreciable).
+    let fila = Array.from({ length: y.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= x.length; i++) {
+        const nueva = [i];
+        for (let j = 1; j <= y.length; j++) {
+            nueva[j] = Math.min(fila[j] + 1, nueva[j - 1] + 1, fila[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+        }
+        fila = nueva;
+    }
+    return fila[y.length] <= tope;
+}
+
 // Normaliza un texto para comparar títulos (minúsculas, sin acentos ni puntuación, espacios colapsados).
 const _normTit = (s) => String(s || '').toLowerCase().normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '')
     .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -45,12 +73,18 @@ export async function nombreEsTituloDeMiembro(db, coleccionId, nombre) {
  * (autoridad) y, en su defecto, por nombre. Completa huecos (issn, tipo, editorial, cdu, descripcion)
  * de una ya existente. Devuelve { _id, cdu, creada }. Análogo a resolverObra() para obras multivolumen.
  *
+ * `nombreVerificado`: el nombre se LEYÓ en la portada (visión al inspeccionar la carpeta). Si la cabecera ya
+ * existente (hallada por ISSN) se llama casi igual —una errata o una ofuscación del nombre de carpeta del que
+ * nació: «l'historie», «l´hist0r1e» → «L'Histoire»—, se RENOMBRA. Solo una variante cercana: un nombre distinto de
+ * verdad puede ser una decisión del usuario, y ese no se toca. Devuelve entonces `renombrada` con el nombre viejo.
+ *
  * @param {import('mongodb').Db} db
  * @param {{nombre?:string|null, issn?:string|null, tipo?:'revista'|'libro'|null,
  *          editorialId?:import('mongodb').ObjectId|null, cdu?:string|null, descripcion?:string|null,
- *          naturaleza?:string|null}} datos
+ *          naturaleza?:string|null, nombreVerificado?:boolean}} datos
  */
-export async function resolverCabecera(db, { nombre, issn = null, tipo = null, editorialId = null, cdu = null, descripcion = null, naturaleza = null }) {
+export async function resolverCabecera(db, { nombre, issn = null, tipo = null, editorialId = null, cdu = null, descripcion = null, naturaleza = null,
+    nombreVerificado = false }) {
     const col = db.collection('colecciones');
     // nombre es obligatorio y único; si solo tenemos ISSN, usamos el ISSN como nombre provisional
     // (el Conformador/autoridad lo renombra luego con el título real de la cabecera/serie). Se limpian las
@@ -85,11 +119,14 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
         // SANEO: la existente se reencontró por ISSN pero tiene un nombre-PLACEHOLDER/ARTEFACTO (un DOI, su
         // ISSN…, resto de una ingesta fallida) y ahora traemos un nombre REAL → RENÓMBRALA (si no choca con
         // otra). Y si era una 'revista' de relleno SIN números y ahora es una serie de libros, corrige el tipo.
+        let renombrada = null;
         if (n && existente.nombre !== n
-            && (nombreEsPlaceholder(existente.nombre, existente.issn) || await nombreEsTituloDeMiembro(db, existente._id, existente.nombre))) {
+            && (nombreEsPlaceholder(existente.nombre, existente.issn) || await nombreEsTituloDeMiembro(db, existente._id, existente.nombre)
+                || (nombreVerificado && esVarianteDeNombre(existente.nombre, n)))) {
             const choca = await col.findOne({ nombre: n, _id: { $ne: existente._id } }, { collation: { locale: 'es', strength: 1 } });
             if (!choca) {
                 set.nombre = n;
+                renombrada = existente.nombre;
                 if (claveCan) set.clave_canonica = claveCan;
                 if (tipo === 'libro' && existente.tipo === 'revista' && !(existente.numeros && existente.numeros.length)) set.tipo = 'libro';
             }
@@ -98,7 +135,20 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
             set.fecha_actualizacion = new Date();
             await col.updateOne({ _id: existente._id }, { $set: set });
         }
-        return { _id: existente._id, cdu: existente.cdu || cdu || null, creada: false };
+        // Renombrada: el nombre va DENORMALIZADO en cada miembro (catálogo, búsqueda, MARC 490): se refresca y se
+        // reindexa, como hace la campaña que resuelve nombres de serie por ISSN. Best-effort: el catálogo ya está bien.
+        if (renombrada) {
+            try {
+                const bib = db.collection('biblioteca');
+                const miembros = await bib.find({ coleccion: existente._id, coleccion_nombre: { $ne: n } }, { projection: { _id: 1 } }).toArray();
+                if (miembros.length) {
+                    await bib.updateMany({ _id: { $in: miembros.map((m) => m._id) } }, { $set: { coleccion_nombre: n, fecha_actualizacion: new Date() } });
+                    const { indexarDoc } = await import('./indice-busqueda.js');
+                    for (const m of miembros) await indexarDoc(db, m._id).catch(() => {});
+                }
+            } catch (e) { console.warn(`[Colecciones] renombrada «${renombrada}» → «${n}», pero sin refrescar sus miembros: ${e.message}`); }
+        }
+        return { _id: existente._id, cdu: existente.cdu || cdu || null, creada: false, ...(renombrada ? { renombrada } : {}) };
     }
 
     const nueva = { nombre: n, fecha_creacion: new Date() };

@@ -16,7 +16,7 @@ import { indexarDoc } from './utils/indice-busqueda.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { parsearVolumen } from './utils/multivolumen.js';
 import { resolverCDU, contrastarCduCarpeta } from './clasificador-cdu.js';
-import { tituloDeNumero, tituloEsDelFichero } from './utils/revistas.js';
+import { tituloDeNumero, tituloEsDelFichero, afinarFechaNumero } from './utils/revistas.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -272,12 +272,31 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
                 documento.alertas_agente = [...(documento.alertas_agente || []),
                     `ISSN ${perfilRevista.issn} de la guía de la carpeta (cabecera «${perfilRevista.cabecera || perfilRevista.issn}»).`];
             }
-            // CDU de la PUBLICACIÓN (la da el agente al inspeccionar la carpeta): rellena la de un número que no la
-            // tiene (vacía/0/000). Un número rara vez trae CDU propia, y sin esto la cabecera nacía con 000 (medido:
-            // los doce números de 2DArtist 2012). La cabecera la toma de su primer número (motor-catalogo, 2d).
-            if (perfilRevista.materia_cdu && ['', '0', '000'].includes(String(documento.cdu || '').trim())) {
+            // CDU de la PUBLICACIÓN (la da el agente al inspeccionar la carpeta, o la visión con la portada y el sumario
+            // delante). MANDA sobre la del número: un número no trae CDU propia, y la que llevara salía de adivinar por
+            // su título (medido: L'Histoire 2016 recibió un Dewey 741.5 de «Heartstopper» por llamarse «1.pdf»). Viaja
+            // también a motor-catalogo (2d) como `cabecera_cdu`, para que CORRIJA la de la cabecera si no coincide:
+            // sin eso, una cabecera nacida con una CDU equivocada se la imponía a todos sus números.
+            if (perfilRevista.materia_cdu) {
+                const previa = String(documento.cdu || '').trim();
+                if (previa !== perfilRevista.materia_cdu) {
+                    documento.alertas_agente = [...(documento.alertas_agente || []),
+                        `CDU ${perfilRevista.materia_cdu} de la publicación (guía de la carpeta)${['', '0', '000'].includes(previa) ? '' : `; la deducida para el número (${previa}) se descarta`}.`];
+                }
                 documento.cdu = perfilRevista.materia_cdu;
-                documento.alertas_agente = [...(documento.alertas_agente || []), `CDU ${perfilRevista.materia_cdu} de la publicación (guía de la carpeta).`];
+                documento.cabecera_cdu = perfilRevista.materia_cdu;
+            }
+            // Datos de la PUBLICACIÓN leídos en su portada al inspeccionar la carpeta (afinar-guias · visión): la
+            // editorial rellena la del número; la descripción y la señal de «nombre leído en la portada» viajan a la
+            // cabecera (2d).
+            if (perfilRevista.editorial_probable && !documento.editorial) documento.editorial = perfilRevista.editorial_probable;
+            if (perfilRevista.descripcion) documento.cabecera_descripcion = perfilRevista.descripcion;
+            if (perfilRevista.cabecera_verificada) documento.cabecera_verificada = true;
+            // FECHA Y NÚMERO con lo que sabe la carpeta: su periodo (los años de su nombre), qué significan los números
+            // de los ficheros («1.pdf» … «12.pdf» = meses) y un número de muestra leído en la portada del primero.
+            for (const a of afinarFechaNumero(documento, { perfil: perfilRevista, nombreFichero: path.basename(rutas[0] || ''), rutaCarpetas: perfilRevista.materia_ruta })) {
+                documento.alertas_agente = [...(documento.alertas_agente || []), a];
+                console.log(`   📅 ${a}`);
             }
             // TÍTULO: si es solo un resto del nombre del fichero («2DAIssue.073.»), se compone con la cabecera:
             // «2DArtist nº 73 (enero 2012)». Un título de verdad (el tema de portada) se conserva.
@@ -285,6 +304,13 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
                 const nuevo = tituloDeNumero(perfilRevista.cabecera, documento);
                 documento.alertas_agente = [...(documento.alertas_agente || []), `Título «${documento.titulo}» (del nombre del fichero) → «${nuevo}».`];
                 documento.titulo = nuevo;
+            }
+            // ESTADO: el enriquecimiento lo calculó ANTES de que la guía aportara el ISSN y la CDU (y lo dejó
+            // «pendiente… requiere revisión humana»). Con título, CDU real e ISSN, el número está identificado.
+            const cduReal = !['', '0', '000'].includes(String(documento.cdu || '').trim());
+            if (documento.estado_verificacion === 'pendiente' && documento.issn && cduReal && documento.titulo && !documento.titulo_artefacto) {
+                documento.estado_verificacion = 'completado';
+                documento.alertas_agente = (documento.alertas_agente || []).filter((a) => !/^Identificación incompleta/.test(a));
             }
         }
     }

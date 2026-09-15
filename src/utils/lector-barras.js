@@ -38,7 +38,9 @@ function recortesDePagina(p) {
     ];
 }
 
-export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInternos = []) {
+// `soloLocal`: solo el paso gratuito (zxing sobre los recortes); si no lee nada, devuelve null SIN llamar a la visión.
+// Lo usa la inspección de una tirada de revistas, que ya hace su propia llamada de visión con la portada entera.
+export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInternos = [], { soloLocal = false } = {}) {
     const tam = await tamanoPagina(ruta);
     if (!tam) { console.warn('[Barras] pdfinfo no dio el tamaño de página → se omite la lectura de barras.'); return null; }
     // DPI para que el ANCHO objetivo salga ~ANCHO px. Suelo de 72 (barcodes nítidos en páginas pequeñas) PERO
@@ -75,6 +77,7 @@ export async function leerCodigoBarrasPorVision(ruta, numPaginas, rendersInterno
             return { issn: bc.issn || null, isbn: bc.isbn || null, esRevista: !!bc.issn, mes_publicacion: mes };
         }
     }
+    if (soloLocal) return null;
     // (b) Páginas INTERIORES (mancheta/créditos) para el ISSN impreso: reusar renders ya hechos (2ª-5ª,
     //     ni la portada ni la contraportada). Hasta 3, sin re-rasterizar.
     const interiores = (rendersInternos || [])

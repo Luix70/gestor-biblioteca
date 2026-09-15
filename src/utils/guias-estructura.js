@@ -31,7 +31,7 @@
  */
 import path from 'node:path';
 import { leerGuia, escribirGuia, guiaEsSignificativa } from './guia-ingesta.js';
-import { tituloCabecera } from './revistas.js';
+import { tituloCabecera, periodoDeTexto } from './revistas.js';
 
 export const UMBRAL_CONFIANZA = 0.6;
 const ORIGEN = 'agente';
@@ -93,12 +93,18 @@ export function guiaDesdeInterpretacion(i, nombreCarpeta) {
         // CDU de la PUBLICACIÓN: servicio-ingesta la da a los números que no traen una (casi todos), y la cabecera
         // nace con ella. Sin esto, 2DArtist 2012 entró entero con 000. Se sanea igual que la de materia (95-99…).
         const cdu = sanearCduMateria(i.cdu);
+        // PERIODO de la tirada: los años del nombre de la carpeta mandan (son del usuario y no se equivocan de
+        // cifra); si no los lleva, los que dedujo la IA de los nombres de fichero. Al ingerir cada número, su año
+        // se contrasta con él (revistas · afinarFechaNumero).
+        const periodo = periodoDeTexto(nombreCarpeta) || (i.anio ? { desde: Math.min(i.anio, i.anio_hasta || i.anio), hasta: Math.max(i.anio, i.anio_hasta || i.anio) } : null);
         return {
             perfil: {
                 tipo_probable: 'revista',
                 ...(cabecera ? { cabecera } : {}),
                 ...(i.periodicidad ? { periodicidad: i.periodicidad } : {}),
                 ...(cdu ? { materia_cdu: cdu } : {}),
+                ...(periodo ? { periodo } : {}),
+                ...(i.numeracion ? { numeracion: i.numeracion } : {}),
                 sin_coleccion: true,
                 origen: ORIGEN,
             },
@@ -208,6 +214,11 @@ function promoverTiradasDeRevista(porRuta) {
             c.nombre_canonico = hs.find((h) => h.nombre_canonico).nombre_canonico;
             c.periodicidad = c.periodicidad || hs[0].periodicidad || null;
             c.cdu = c.cdu || hs.find((h) => h.cdu)?.cdu || null;
+            // La tirada abarca los años de todas sus hijas; y si todas numeran igual sus ficheros, ella también.
+            const anios = hs.flatMap((h) => [h.anio, h.anio_hasta]).filter(Boolean);
+            if (!c.anio && anios.length) { c.anio = Math.min(...anios); c.anio_hasta = Math.max(...anios); }
+            const numeraciones = new Set(hs.map((h) => h.numeracion || null));
+            if (!c.numeracion && numeraciones.size === 1) c.numeracion = [...numeraciones][0];
             cambio = true;
         }
     }
@@ -279,12 +290,19 @@ export function resumenGuia(g) {
     const p = g.perfil || {};
     const ACC = { audiolibro: 'audiolibro', 'coleccion-audiolibros': 'colección de audiolibros', transmedia: 'transmedia',
         software: 'software', 'libro-material': 'libro con material', desglose: 'libro desglosado' };
+    const NUMERACION = { mes: 'ficheros = meses', numero: 'ficheros = nº', fecha: 'ficheros con fecha' };
+    const m = p.muestra;
     return [g.accion === 'obra' && `obra «${p.obra}»`, ACC[g.accion],
         g.desglose && (g.desglose.principal ? `libro entero «${g.desglose.principal}»` : `${(g.desglose.orden || []).length} partes a coser`),
-        p.tipo_probable === 'revista' && `revistas de «${p.cabecera || '?'}»${p.issn ? ` (ISSN ${p.issn})` : ''}`,
+        p.tipo_probable === 'revista' && `revistas de «${p.cabecera || '?'}»${p.cabecera_verificada ? ' (leído en la portada)' : ''}${p.issn ? ` (ISSN ${p.issn})` : ''}`,
         p.tipo_probable === 'comic' && 'cómics',
         p.coleccion && `colección «${p.coleccion}»`,
         p.editorial_probable && `editorial «${p.editorial_probable}»`, p.materia_cdu && `CDU ${p.materia_cdu}`,
+        p.idioma_probable && `idioma ${p.idioma_probable}`,
+        p.periodicidad && p.periodicidad,
+        p.periodo && (p.periodo.desde === p.periodo.hasta ? `año ${p.periodo.desde}` : `años ${p.periodo.desde}-${p.periodo.hasta}`),
+        NUMERACION[p.numeracion],
+        m && (m.numero || m.mes) && `muestra: nº ${m.numero || '?'}${m.mes ? ` = ${m.mes}/${m.anio || '?'}` : ''}`,
         p.sin_coleccion && 'sin colección'].filter(Boolean).join(' · ');
 }
 

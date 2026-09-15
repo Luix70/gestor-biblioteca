@@ -54,10 +54,27 @@ Responde ÚNICAMENTE en JSON (null para los campos que no puedas leer):
 }
 
 /**
+ * ¿Sirve este título para buscar un LIBRO por texto (OpenLibrary, Google Books) o para que la IA razone su CDU?
+ *
+ * Un título sin letras casa con cualquier cosa. Medido con L'Histoire 2016, cuyos números se llaman «1.pdf» …
+ * «12.pdf»: «11» devolvió «11/22/63» de Stephen King, «12» «12 Rules for Life», «1» y «2» «Heartstopper»… y de
+ * cada ficha ajena salieron sinopsis, autor, editorial, año, idioma y un Dewey que acabó en la CDU (741.5 → 74).
+ * Con menos de dos letras no se busca por texto; el ISBN, si lo hay, sigue sirviendo. «º» y «ª» no cuentan
+ * (en «nº 5» no hay nada que buscar).
+ */
+export function tituloBuscable(titulo) {
+    const letras = String(titulo || '').replace(/[ºª]/g, '').match(/\p{L}/gu) || [];
+    return letras.length >= 2;
+}
+
+/**
  * Flujo maestro de enriquecimiento.
+ *
+ * `revista: true` → número de una publicación periódica: NO se consultan los catálogos de LIBROS (ver abajo).
  */
 export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null, opciones = {}) {
-    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [], idioma = null, cipDewey = null, cipLcc = null, sinIA = false } = opciones;
+    const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [], idioma = null, cipDewey = null, cipLcc = null, sinIA = false,
+        revista = false } = opciones;
     let datosExtra = {
         isbn: null,
         titulo: null,        // título de la autoridad (solo se usa si el archivo no aporta uno fiable)
@@ -96,6 +113,26 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     if (cipDewey) rellenar('dewey', cipDewey);
     if (cipLcc) rellenar('lcc', cipLcc);
     if (cipDewey || cipLcc) datosExtra.alertas.push('Dewey/LC del bloque CIP del propio fichero.');
+
+    // REVISTA: los catálogos de LIBROS no describen un número de revista. No hay ISBN que consultar
+    // (motor-enriquecimiento ya los descarta: los de una revista son de anuncios o suscripciones) y una búsqueda
+    // por TÍTULO solo encuentra un libro homónimo, con su sinopsis, autor, editorial, año, idioma y Dewey. El
+    // número se identifica por su CABECERA (ISSN, guía de la carpeta, la colección ya catalogada), no por aquí.
+    // Tampoco la visión de «portada de libro» (busca ISBN, colección y sello: nada que sirva). Queda la CDU, y
+    // solo si hay un título con el que razonarla; si la guía de la carpeta ya la da, ni eso (incluirCdu=false).
+    if (revista) {
+        datosExtra.alertas.push('Revista: sin búsqueda en catálogos de libros (sinopsis, autor, editorial y Dewey no aplican a un número).');
+        if (incluirCdu && tituloBuscable(titulo)) {
+            const { cdu, fuente } = await resolverCDU({ titulo, permitirIA: !sinIA });
+            datosExtra.cdu = cdu;
+            datosExtra.cdu_fuente = fuente;
+        }
+        return datosExtra;
+    }
+
+    // Título para las búsquedas POR TEXTO: uno sin letras («11», «7-8») no se usa (ver tituloBuscable).
+    const tituloTexto = tituloBuscable(titulo) ? titulo : null;
+    if (titulo && !tituloTexto) datosExtra.alertas.push(`Título «${String(titulo).slice(0, 30)}» sin letras: no se busca por texto en los catálogos.`);
 
     // TIER 3a · Visión Multimodal: produce solo PISTAS (la IA es la fuente menos fiable;
     // su ISBN se usa para consultar las APIs, pero estas tendrán prioridad sobre ella).
@@ -167,7 +204,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         datosExtra.alertas.push('OpenLibrary pausada (circuit-breaker): omitida.');
     } else {
         try {
-            infoOL = await buscarPorCriterios({ isbns: isbnsLookup, titulo, autor, incluirSinopsis, idioma });
+            infoOL = await buscarPorCriterios({ isbns: isbnsLookup, titulo: tituloTexto, autor, incluirSinopsis, idioma });
             olFallosConsecutivos = 0; // éxito → resetear contador
         } catch (e) {
             if (e.tipo === 'infraestructura') {
@@ -213,7 +250,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     let infoGB = null;
     try {
         const isbnsGB = datosExtra.isbn ? [datosExtra.isbn] : isbnsLookup;
-        infoGB = await buscarEnGoogleBooks({ isbns: isbnsGB, titulo, autor, idioma, coleccion: coleccionHint });
+        infoGB = await buscarEnGoogleBooks({ isbns: isbnsGB, titulo: tituloTexto, autor, idioma, coleccion: coleccionHint });
     } catch (e) {
         if (e.tipo === 'infraestructura') datosExtra.alertas.push('Google Books inalcanzable: omitida.');
         else throw e;
@@ -295,14 +332,18 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // TIER 3c · Resolución de la CDU vía clasificador (solo si BNE no la resolvió ya).
     // Dewey/LC en caché → API externa → IA, aprendiendo la equivalencia.
     if (incluirCdu && !datosExtra.cdu) {
+        const tituloCdu = datosExtra.titulo || titulo;   // el del archivo puede ser un ISBN: usa el resuelto
+        // Sin código Dewey/LC, la IA razona la CDU por el título y la sinopsis: con un título sin letras y sin
+        // sinopsis no tiene de qué, y lo que devuelva es una conjetura que luego parece un dato.
+        const conQueRazonar = !!(datosExtra.dewey || datosExtra.lcc || datosExtra.sinopsis || tituloBuscable(tituloCdu));
         const { cdu, fuente, palabras_clave } = await resolverCDU({
             dewey: datosExtra.dewey,
             lcc: datosExtra.lcc,
             categorias: datosExtra.categorias,     // lista completa para detectar ficción
-            titulo: datosExtra.titulo || titulo,   // el del archivo puede ser un ISBN: usa el resuelto
+            titulo: tituloCdu,
             autor: (datosExtra.autores && datosExtra.autores[0]) || autor || null,
             sinopsis: datosExtra.sinopsis,
-            permitirIA: !sinIA,                    // investigación «sin IA»: solo caché + crosswalk determinista
+            permitirIA: !sinIA && conQueRazonar,   // investigación «sin IA»: solo caché + crosswalk determinista
         });
         datosExtra.cdu = cdu;
         datosExtra.cdu_fuente = fuente;   // 'cache:…'|'api:…'|'ia' — para colorear la procedencia en el panel

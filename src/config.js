@@ -77,6 +77,12 @@ export const AJUSTES = {
                                      // deja sus _guia.json (utils/inspeccion-auto.js). Conmutable en caliente en el panel.
     INSPECCION_IA_REINTENTO_MIN: 15, // si la IA no responde, la carpeta ESPERA en el Inbox y se reintenta cada N min…
     INSPECCION_IA_ESPERA_MAX_H: 6,   // …hasta este tope; pasado, se ingiere con las reglas de siempre (sin guías de la IA)
+    INSPECCION_IA_VISION: 1,         // 1 = en cada TIRADA DE REVISTAS, UNA llamada de visión con la portada, las primeras
+                                     // páginas y la contraportada de su primer número: cabecera bien escrita, ISSN (confirmado),
+                                     // editorial, idioma, CDU, descripción y nº+fecha de muestra (utils/afinar-guias.js)
+    INSPECCION_IA_VISION_PAGINAS: 4, // páginas CON CONTENIDO del principio que se envían (+ la contraportada)
+    INSPECCION_IA_VISION_ANCHO: 1000,// px de ancho de cada página enviada (legible sin pesar demasiado)
+    INSPECCION_IA_VISION_MAX: 60,    // tope de tiradas leídas por inspección (un _REVISTAS con cientos no bloquea horas)
 
     // --- Campañas de fondo (backfill autorreparable al reposo; ajustables en el panel) ---
     CAMPANAS_PAUSA_MS: 700,          // ritmo entre elementos de una tanda de campaña (respeta a las APIs)

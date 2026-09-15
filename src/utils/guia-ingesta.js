@@ -34,7 +34,16 @@
  *   perfil.cabecera / .issn    → REVISTAS: nombre canónico de la publicación y su ISSN comprobado. Solo afectan a
  *                                los documentos que resulten ser revista (servicio-ingesta); se heredan, así que las
  *                                subcarpetas por año de una tirada cuelgan de la misma cabecera.
- *   perfil.periodicidad        → REVISTAS: informativa (mensual, trimestral…).
+ *   perfil.periodicidad        → REVISTAS: mensual, trimestral… (comprueba los nº de issue contra la muestra).
+ *   perfil.periodo             → REVISTAS: { desde, hasta } — años de la tirada (del nombre de la carpeta o de la IA).
+ *                                Al ingerir, un año fuera del periodo se corrige o se retira (revistas·afinarFechaNumero).
+ *   perfil.numeracion          → REVISTAS: qué son los números de los nombres de fichero: 'mes' («1.pdf» = enero,
+ *                                «7-8.pdf» = julio-agosto), 'numero' (nº de la revista) o 'fecha'.
+ *   perfil.muestra             → REVISTAS: { fichero, numero, anio, mes } leídos por la VISIÓN en la portada del primer
+ *                                número al inspeccionar la carpeta: calibra los nº de issue de los demás.
+ *   perfil.descripcion         → REVISTAS: descripción de la publicación (la visión) → la de la cabecera.
+ *   perfil.cabecera_verificada → REVISTAS: el nombre de la cabecera se LEYÓ en la portada, no del nombre de carpeta
+ *                                (que puede venir con erratas u ofuscado): puede corregir el de la cabecera ya catalogada.
  *   desglose                   → accion:'desglose': principal / orden de lectura / títulos de capítulo.
  */
 import fs from 'fs/promises';
@@ -101,15 +110,33 @@ export function normalizarPerfil(p) {
     const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     if (TIPOS_PROBABLES.includes(p.tipo_probable)) out.tipo_probable = p.tipo_probable;
     for (const k of ['naturaleza', 'coleccion', 'obra', 'enciclopedia', 'idioma_probable', 'editorial_probable', 'materia_cdu', 'origen',
-        'cabecera', 'periodicidad']) {
+        'cabecera', 'periodicidad', 'descripcion']) {
         const v = str(p[k]);
         if (v) out[k] = v;
     }
-    // REVISTAS: `cabecera` es el nombre canónico de la publicación y `issn` su ISSN COMPROBADO (nombres de fichero,
-    // cabecera ya catalogada o Wikidata; nunca de memoria de la IA). Solo se aplican a los documentos que resulten
-    // ser revista (servicio-ingesta). Un ISSN sin dígito de control válido se descarta aquí.
+    // REVISTAS: `cabecera` es el nombre canónico de la publicación y `issn` su ISSN COMPROBADO (código de barras o
+    // ISSN impreso leídos en el propio número, nombres de fichero, cabecera ya catalogada o Wikidata; nunca de memoria
+    // de la IA). Solo se aplican a los documentos que resulten ser revista (servicio-ingesta). Un ISSN sin dígito de
+    // control válido se descarta aquí.
     const issn = p.issn ? validarISSN(p.issn) : null;
     if (issn) out.issn = issn;
+    if (p.cabecera_verificada === true) out.cabecera_verificada = true;
+    if (['mes', 'numero', 'fecha'].includes(p.numeracion)) out.numeracion = p.numeracion;
+    // Años y muestra: solo valores verosímiles (un año de 4 cifras, un mes 1-12). Lo demás se descarta.
+    const anio = (v) => (Number.isInteger(Number(v)) && Number(v) >= 1800 && Number(v) <= 2100 ? Number(v) : null);
+    if (p.periodo && anio(p.periodo.desde)) {
+        const desde = anio(p.periodo.desde), hasta = anio(p.periodo.hasta) || desde;
+        out.periodo = { desde: Math.min(desde, hasta), hasta: Math.max(desde, hasta) };
+    }
+    if (p.muestra && typeof p.muestra === 'object') {
+        const m = {};
+        if (typeof p.muestra.fichero === 'string' && p.muestra.fichero) m.fichero = p.muestra.fichero;
+        if (Number.isInteger(Number(p.muestra.numero)) && Number(p.muestra.numero) > 0) m.numero = Number(p.muestra.numero);
+        if (anio(p.muestra.anio)) m.anio = anio(p.muestra.anio);
+        const mes = Number(p.muestra.mes);
+        if (Number.isInteger(mes) && mes >= 1 && mes <= 12) m.mes = mes;
+        if (Object.keys(m).length > (m.fichero ? 1 : 0)) out.muestra = m;
+    }
     // «sin_coleccion»: esta carpeta NO forma una colección con su nombre. Es lo que distingue una carpeta de
     // EDITORIAL, de MATERIA o un CAJÓN de una colección de verdad: sin esto, la regla «carpeta con 2+ documentos
     // = colección» convertía «Cambridge.University.Press» (1.194 libros) o «Algebra» en colecciones, cuando la

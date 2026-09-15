@@ -1336,7 +1336,9 @@ de ficheros clasificado por CDU.
       propuesta se guarda) y ESCRIBIR las guías que marques (POST /inbox/inspeccion/aplicar {sub, rutas}). La
       propuesta enseña, por carpeta, qué es, qué guía se escribiría (resumen comun con el CLI: guias-estructura ·
       resumenGuia) y si es nueva / actualiza / tuya / sin guía; las DUDOSAS vienen desmarcadas con la razón de la
-      IA. Viene ya AFINADA (ISSN comprobado, orden de los desgloses). «🔄 Repetir» vuelve a pedirla (otra llamada);
+      IA. Viene ya AFINADA (ISSN comprobado, orden de los desgloses y, en las tiradas de revistas, la PORTADA del
+      primer número leída con visión: cabecera bien escrita, editorial, idioma, años, «ficheros = meses», muestra;
+      ver «REVISTAS: SIN CATALOGOS DE LIBROS…»). «🔄 Repetir» vuelve a pedirla (otra llamada);
       «Cerrar sin escribir» la descarta (POST /inbox/inspeccion/descartar).
       - RESERVA: mientras decides, su carpeta de PRIMER nivel queda reservada (inspeccion-auto · reservarCarpeta) y
         el vigilante no la ingiere ni la inspecciona por su cuenta; caduca a los 30 min por si cierras sin decidir.
@@ -3726,3 +3728,84 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
         Sections…— o las que el agente leyo como «parte»). Se nombran con ruta relativa («Chapters/ch01.pdf»); la
         guia la admite (1-2 tramos, sin «..» ni «\»). Al coser o separar, las partes se mueven a «Desglose/»
         conservando su subcarpeta, y la subcarpeta vaciada se retira (si no, viajaria como material vacio).
+
+── REVISTAS: SIN CATALOGOS DE LIBROS + PORTADA LEIDA AL INSPECCIONAR (15-sep-2026) ──────────
+    * INCIDENTE L'Histoire 2016. La guia decia revista, cabecera «l'historie», CDU 94, y aun asi los numeros
+      salieron con CDU 74 y sinopsis absurdas (con la ingesta «CDU sin IA» activa: la IA no tenia nada que ver).
+      CAUSA: motor-enriquecimiento buscaba CADA numero de revista por su TITULO en OpenLibrary y Google Books,
+      como a un libro. Los ficheros se llaman «1.pdf» … «12.pdf»: «11» → «11/22/63» de Stephen King, «12» →
+      «12 Rules for Life», «1» y «2» → «Heartstopper»… De cada ficha ajena salian sinopsis, autor, editorial, año,
+      idioma y un Dewey. El del primer numero (741.5, comic) dio la CDU de la CABECERA (74), y la cabecera se la
+      impone a todos sus numeros (motor-catalogo 2d) → el 74 que se veia. Medido ese dia: 424 de 1.539 numeros de
+      revista con datos de catalogos de libros, desde junio.
+    * ARREGLO en la ingesta:
+      - proveedor-metadatos · buscarMetadatosExternos({revista:true}): un NUMERO de revista no consulta ni el
+        Fichero ni OpenLibrary, Google Books, DNB o BnF, ni la vision de «portada de libro». Solo queda la CDU
+        (razonada con el nombre de la CABECERA, no del numero) y ni eso si la guia la da. Un comic seriado
+        (naturaleza comic) sigue como antes: tiene guionista y dibujante, y su argumento es una sinopsis.
+      - tituloBuscable: con cualquier documento, un titulo con menos de 2 letras («1», «11», «7-8», «nº 5») no se
+        busca por texto (el ISBN, si lo hay, sigue valiendo) ni se le pide a la IA una CDU sin nada con que
+        razonarla.
+      - Un numero de revista NO tiene autor: el del fichero (el «Author» del PDF es el maquetador o el escaner) se
+        anota en las alertas y no se asigna. Sinopsis: solo la del propio fichero.
+      - La busqueda de ISSN por titulo en Wikidata no se hace si la guia ya da cabecera/ISSN (un ISSN ajeno para
+        «1» chocaria con el de la guia) ni con titulos sin letras.
+      - Idioma: antes que suponer «es», el de la guia (idioma_probable).
+      - servicio-ingesta 1ter: la CDU de la GUIA manda sobre la del numero (antes solo rellenaba 000) y viaja a
+        motor-catalogo 2d (cabecera_cdu) para CORREGIR la de la cabecera si no coincide. Tambien la editorial de
+        la guia (si el numero no trae), la descripcion para la cabecera y el estado: con ISSN + CDU + titulo de
+        la guia, el numero queda «completado» (antes «pendiente… revision humana»).
+    * FECHA Y NUMERO con lo que sabe la CARPETA (revistas · afinarFechaNumero, en 1ter; sin IA):
+      - PERIODO: los años del nombre de la carpeta mas cercana al fichero («l'historie 2016» → 2016; «L'Histoire
+        2009 - 2016 / 2012» → 2012; si no hay, perfil.periodo). Un solo año → lo fija; varios → un año fuera se
+        retira (uno equivocado es peor que ninguno: da la clave y la carpeta del numero).
+      - perfil.numeracion:'mes' → «3.pdf» es marzo; «7-8.pdf», julio-agosto (mes_fin_publicacion; titulo
+        «L'Histoire nº 425 (julio-agosto 2016)»). Lo decide la guia, no se adivina: «1.pdf» … «6.pdf» de una
+        bimestral son numeros, no meses.
+      - perfil.muestra (nº + fecha de un numero, leidos en su portada) + periodicidad: un nº de issue imposible
+        para su fecha se retira (el «775» y el «94» que salieron del texto; se esperaba ~421 y ~430). Nunca se
+        inventa uno: los dobles y los especiales descuadran la cuenta.
+    * EL AGENTE DE ESTRUCTURA (prompt): los nombres de carpeta y fichero son PISTAS, no el dato (erratas,
+      ofuscaciones «l´hist0r1e», «All Ab0ut Hist0ry»): que de el nombre real de la publicacion si la reconoce.
+      Da tambien anio y anio_hasta (la guia guarda perfil.periodo; mandan los años del nombre de la carpeta) y
+      numeracion (mes | numero | fecha).
+    * PORTADA DEL PRIMER NUMERO (afinar-guias · leerPortadaRevista; INSPECCION_IA_VISION=1): al inspeccionar
+      una tirada de revistas, UNA llamada de vision con la portada, las primeras paginas con contenido (sumario,
+      creditos) y la contraportada de su primer numero (INSPECCION_IA_VISION_PAGINAS=4 + la ultima, a 1000 px).
+      Deja en la guia: cabecera tal como se escribe (perfil.cabecera_verificada), editorial (editorial_probable),
+      idioma, periodicidad, CDU (la mas precisa; si choca con la de los nombres, manda la de la portada),
+      descripcion (→ la de la cabecera) y la MUESTRA (nº y fecha de ese numero). Con la muestra se CALIBRA la
+      numeracion: si «1.pdf» es de enero, los ficheros son meses; si no cuadra, se quita la de la IA.
+      ISSN — nunca de la memoria de la IA ni de sus lecturas sin confirmar. Directos: el codigo de barras leido en
+      LOCAL (zxing) y un ISSN UNICO en la mancheta de la capa de texto del numero. Lo que dice leer la vision
+      (impreso o en el codigo de barras) solo si se CONFIRMA: en la capa de texto, en la cabecera catalogada con
+      ese nombre o en el registro (Wikidata / ISSN Portal) con un nombre que case. MEDIDO en la primera prueba: la
+      vision leyo en el codigo de barras 0241-2780 (digito de control del EAN correcto) y es el ISSN de «Graphite»;
+      el de L'Histoire, 0182-2411, estaba en la mancheta del texto. Sin ISSN confirmado → resolverIssnCabecera de
+      siempre, ya con el nombre bien escrito.
+      Coste: ~16 s y una llamada por tirada. Tope INSPECCION_IA_VISION_MAX=60 por inspeccion; al reinspeccionar,
+      una guia que ya tiene la portada leida (cabecera_verificada) se reaprovecha sin volver a pagarla (asi una
+      segunda pasada completa las que dejo el tope). Probado con 1.pdf de L'Histoire: «l'historie» → «L'Histoire»,
+      ISSN 0182-2411 (mancheta), Sophia Publications, fr, mensual, CDU 94, muestra nº 419 = enero 2016 →
+      numeracion 'mes'.
+    * NOMBRE DE LA CABECERA: resolverCabecera({nombreVerificado}) RENOMBRA la cabecera hallada por ISSN si su
+      nombre es una VARIANTE cercana del leido en la portada (colecciones · esVarianteDeNombre: solo letras,
+      ofuscaciones deshechas 0→o 1→i 3→e 4→a 5→s 7→t, distancia de edicion ≤ 2 o 20 %): «l'historie» →
+      «L'Histoire» si; «National Geographic» → «… Historia» no (es otra). Refresca el nombre en sus numeros y
+      los reindexa.
+    * REPARACION: scripts/sanear-numeros-revista.js (dry-run por defecto; en el panel: 🧰 Ejecutar script):
+      --contaminadas → todos los numeros con datos de catalogos de libros o con autores: quita autores (todos),
+      la sinopsis que NO habla de la revista, la editorial que no es la de la revista (se queda la comun a la
+      mitad de sus numeros y la leida por vision), las categorias de libro («American literature»), Dewey/LCC y
+      lengua original; corrige el año por el del nombre del fichero y rehace clave y titulo compuesto. CONSERVA lo
+      bueno que tambien llevan (sinopsis que la IA escribio viendo el numero, editorial real, palabras clave de la
+      IA) y NO toca lo que parece un LIBRO catalogado como revista (un solo numero sin mes ni nº en el nombre,
+      serie de libros, o ISBN propio en el texto): lo lista para revisarlo aparte (129 el 15-sep). Lista tambien
+      las cabeceras cuya CDU pudo salir del Dewey de un libro (54), para revisarlas a mano.
+      --cabecera «X» [--nombre] [--cdu] [--editorial] [--idioma] [--descripcion] [--periodo] [--meses-del-nombre]
+      [--muestra 419@2016-01] [--periodicidad] → ademas renombra, fija CDU (mueve carpetas → NAS)/editorial/idioma/
+      descripcion y rehace fecha, nº, clave, inventario y titulos. Solo Mongo + indice de busqueda; los sidecars
+      los regenera la campaña «sidecars». Despues, «limpiar-huerfanos».
+    * NOTA: las carpetas de _REVISTAS inspeccionadas ANTES de este cambio tienen guias sin portada leida. Para
+      aprovecharlo: «🤖 IA» del Inspector sobre la carpeta (reescribe las guias del agente y las aprobadas en el
+      panel; no las hechas a mano).

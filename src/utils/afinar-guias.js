@@ -15,6 +15,11 @@
  *      llaman por su TÍTULO («The Fall of Rome.pdf») se hace UNA llamada dirigida a la IA con los nombres y el
  *      sumario del libro (texto de las primeras páginas del preliminar), que es la fuente fiable del orden.
  *
+ *   3) LA PORTADA DEL PRIMER NÚMERO de una tirada de revistas: UNA llamada de visión que lee la cabecera tal como
+ *      se escribe, el ISSN (código de barras o impreso, confirmado), editorial, idioma, CDU, una descripción y el nº
+ *      y la fecha de ese número (la muestra que calibra los demás). Va antes que 1): si la portada da el ISSN, no
+ *      hace falta buscarlo, y si da el nombre bien escrito, se busca con él.
+ *
  * Lo usan la inspección automática del vigilante (inspeccion-auto) y el CLI inspeccionar-estructura, para que
  * los dos escriban exactamente las mismas guías.
  */
@@ -23,9 +28,19 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { conectarDB } from '../database.js';
+import { leerGuia } from './guia-ingesta.js';
 import { buscarISSNporTitulo, buscarNombrePorISSN } from './buscador-issn-titulo.js';
 import { detectarLibroDesglosado, ordenarPartesLibro, tienePistaDeOrden, partesDeDesglose, RE_CARPETA_PARTES } from './libro-desglosado.js';
-import { conTexto, extraerJSON } from './vision.js';
+import { conTexto, conVision, extraerJSON } from './vision.js';
+import { rasterizarSignificativas } from './rasterizar-pdf.js';
+import { timeoutPoppler } from './timeout-poppler.js';
+import { leerCodigoBarrasPorVision } from './lector-barras.js';
+import { decodificarCodigoBarras } from './codigo-barras.js';
+import { validarISSN } from './identificadores.js';
+import { esVarianteDeNombre } from './colecciones.js';
+import { mesesDeNombre } from './revistas.js';
+import { sanearCduMateria } from './guias-estructura.js';
+import { PERIODICIDADES } from './agente-estructura.js';
 
 const ejecutar = promisify(execFile);
 
@@ -194,6 +209,216 @@ function validarDetalle(r, nombres, ordenLocal) {
     return { ...(principal ? { principal } : {}), orden, titulos };
 }
 
+// ─── 3) La portada del PRIMER NÚMERO de una tirada (visión) ─────────────────────────────────────────────
+//
+// Los nombres no bastan para una revista: la carpeta se llama «l'historie» o «l´hist0r1e» y la publicación es
+// «L'Histoire»; nada en «7-8.pdf» dice el año; y el ISSN no está escrito en ningún nombre. La PORTADA sí lo dice.
+// Una llamada de visión por tirada, con la portada, las primeras páginas con contenido (sumario, créditos) y la
+// contraportada del primer número, deja en la guía la cabecera bien escrita, su ISSN, editorial, idioma, CDU y una
+// descripción, más una MUESTRA (nº y fecha de ese número) que calibra los demás. Es una inversión: con esa guía,
+// cada número se ingiere sin volver a preguntar a la IA por nada de eso.
+
+const VISION_ACTIVA = () => process.env.INSPECCION_IA_VISION !== '0';
+const VISION_PAGINAS = () => Number(process.env.INSPECCION_IA_VISION_PAGINAS || 4);   // páginas con contenido del principio
+const VISION_ANCHO = () => Number(process.env.INSPECCION_IA_VISION_ANCHO || 1000);    // px: legible sin pesar demasiado
+const VISION_MAX = () => Number(process.env.INSPECCION_IA_VISION_MAX || 60);          // tiradas leídas por inspección
+
+/** Primer PDF de una tirada en orden natural («1.pdf» antes que «10.pdf»), bajando hasta 3 niveles (años). */
+async function primerNumeroPdf(dirAbs, nivel = 0) {
+    let entradas;
+    try { entradas = await fs.readdir(dirAbs, { withFileTypes: true }); } catch { return null; }
+    const orden = (a, b) => a.name.localeCompare(b.name, 'es', { numeric: true, sensitivity: 'base' });
+    const pdf = entradas.filter((e) => e.isFile() && /\.pdf$/i.test(e.name) && !/^[._@#]/.test(e.name)).sort(orden)[0];
+    if (pdf) return path.join(dirAbs, pdf.name);
+    if (nivel >= 3) return null;
+    for (const d of entradas.filter((e) => e.isDirectory() && !/^[._@#]/.test(e.name)).sort(orden)) {
+        const r = await primerNumeroPdf(path.join(dirAbs, d.name), nivel + 1);
+        if (r) return r;
+    }
+    return null;
+}
+
+/** Texto de un tramo de páginas de un PDF ('' si no tiene capa de texto o no hay poppler). */
+async function textoDePaginas(ruta, desde, hasta) {
+    if (hasta < desde) return '';
+    try {
+        // Timeout adaptado al tamaño (en el Atom, un número de 150 MB no se lee en 30 s).
+        const { stdout } = await ejecutar('pdftotext', ['-f', String(desde), '-l', String(hasta), ruta, '-'], { timeout: await timeoutPoppler(ruta), maxBuffer: 64 << 20 });
+        return String(stdout || '');
+    } catch { return ''; }
+}
+
+/** ISSN escritos junto a la palabra «ISSN» en un texto (la mancheta del número), validados y sin repetir. */
+function issnsEnTexto(texto) {
+    const vistos = new Set();
+    for (const m of String(texto || '').matchAll(/ISSN[^0-9]{0,15}(\d{4}\s*[-‐‑–]?\s*\d{3}[\dXx])/gi)) {
+        const v = validarISSN(m[1].replace(/\s+/g, ''));
+        if (v) vistos.add(v);
+    }
+    return [...vistos];
+}
+
+/**
+ * ¿Se puede CONFIRMAR un ISSN que la visión dice haber leído (en el código de barras o impreso)? La guía lo aplica a
+ * TODOS los números de la tirada, y la visión se equivoca de dígitos sin avisar. Medido con L'Histoire 2016: leyó en
+ * el código de barras 0241-2780 —dígito de control del EAN correcto— y es el ISSN de «Graphite»; el de L'Histoire
+ * (0182-2411) estaba impreso en la mancheta. Vale: que esté en la capa de texto del número, que la cabecera
+ * catalogada con ese ISSN se llame igual, o que el nombre registrado para ese ISSN (Wikidata / ISSN Portal) case con
+ * el de la portada. Devuelve { fuente } o { rechazo } (el porqué, para la nota).
+ */
+async function confirmarIssn(issn, textoNumero, cabecera) {
+    const [a, b] = issn.split('-');
+    if (new RegExp(`${a}\\s*[-‐‑–]?\\s*${b.replace('X', '[Xx]')}`).test(textoNumero)) return { fuente: 'capa de texto del número' };
+    if (!cabecera) return { rechazo: 'sin nombre de cabecera con que cotejarlo' };
+    try {
+        const db = await conectarDB();
+        const c = await db.collection('colecciones').findOne({ issn }, { projection: { nombre: 1 } });
+        if (c?.nombre && (nombresCasan(c.nombre, cabecera) || esVarianteDeNombre(c.nombre, cabecera))) return { fuente: `catálogo («${c.nombre}»)` };
+    } catch { /* sin BD: se sigue con el registro */ }
+    const reg = await buscarNombrePorISSN(issn).catch(() => null);
+    if (reg?.nombre && (nombresCasan(reg.nombre, cabecera) || esVarianteDeNombre(reg.nombre, cabecera))) return { fuente: `${reg.fuente || 'registro ISSN'}, «${reg.nombre}»` };
+    return { rechazo: reg?.nombre ? `registrado como «${reg.nombre}»` : 'no aparece en el texto ni en los registros' };
+}
+
+function promptPortada(carpeta, fichero, nombres, pistas) {
+    const pista = [
+        pistas.cabecera && `cabecera «${pistas.cabecera}»`,
+        pistas.materia_cdu && `CDU ${pistas.materia_cdu}`,
+        pistas.periodicidad && `periodicidad ${pistas.periodicidad}`,
+        pistas.periodo && `años ${pistas.periodo.desde}${pistas.periodo.hasta !== pistas.periodo.desde ? `-${pistas.periodo.hasta}` : ''}`,
+    ].filter(Boolean).join(' · ');
+    return `Estas imágenes son páginas del PRIMER número («${fichero}») de una tirada de revistas guardada en la carpeta
+«${carpeta}». La primera es la PORTADA; las siguientes, las primeras páginas con contenido (sumario, créditos o
+mancheta); la última, la CONTRAPORTADA. Otros ficheros de la tirada: ${nombres.slice(0, 15).map((n) => `«${n}»`).join(', ')}.
+${pista ? `Lo que se dedujo de los NOMBRES (son pistas y pueden estar MAL: las carpetas vienen con erratas u ofuscadas): ${pista}.\n` : ''}
+Devuelve SOLO un JSON con estos campos (null o vacío lo que no veas con seguridad; NO inventes ni recuerdes de memoria):
+- "cabecera": el nombre de la publicación tal como la escribe ella misma (su logotipo), sin número, fecha ni lema,
+  con mayúsculas normales («L'Histoire», no «L'HISTOIRE»).
+- "issn_impreso": el ISSN IMPRESO que VEAS (créditos, mancheta, junto a la palabra ISSN), formato NNNN-NNNX.
+- "codigo_barras": los 13 dígitos del código de barras EAN-13 de la portada o la contraportada, sin espacios.
+- "editorial": la empresa editora (créditos).
+- "idioma": código ISO 639-1 del idioma de la revista (es, en, fr…).
+- "periodicidad": ${PERIODICIDADES.join('|')}, si se ve o se deduce.
+- "cdu": la CDU (Clasificación Decimal Universal, NO Dewey) de la MATERIA de la publicación, lo más precisa que
+  puedas justificar: historia → 94 (en la CDU las divisiones 95-99 NO existen), fotografía → 77, dibujo → 741,
+  informática → 004, ciencia divulgativa → 50.
+- "descripcion": una o dos frases en español que describan la publicación (qué es, de qué trata, de dónde es).
+- "numero": el número de ESTE ejemplar (entero), o null. "mes": su mes (1-12; en un número doble, el primero);
+  "mes_fin": el segundo mes de un número doble, o null. "anio": su año (4 cifras).`;
+}
+
+/**
+ * Lee la portada del primer número de la tirada que vive en `dirAbs`. Devuelve lo leído, ya validado
+ * ({ fichero, cabecera, issn, issn_fuente, issn_sin_confirmar, editorial, idioma, periodicidad, cdu, descripcion,
+ * muestra }), o null si no hay un PDF que leer. Lanza si la visión falla (el llamante sigue sin ella).
+ */
+export async function leerPortadaRevista(dirAbs, pistas = {}) {
+    const ruta = await primerNumeroPdf(dirAbs);
+    if (!ruta) return null;
+    const fichero = path.relative(dirAbs, ruta).split(path.sep).join('/');
+    const total = await paginasPdf(ruta);
+    const renders = await rasterizarSignificativas(ruta, { frente: VISION_PAGINAS(), incluirUltima: true, ancho: VISION_ANCHO(), numPaginas: total || 0 });
+    if (!renders.length) return null;
+
+    // a) El ISSN sin IA, de dos fuentes que no se equivocan de dígitos: el código de barras leído en LOCAL (zxing,
+    //    decodificador determinista: un 977 ES el ISSN de la publicación) y la MANCHETA en la capa de texto del número
+    //    (si trae UN solo ISSN; varios —impreso y electrónico, o el de otra revista citada— no se deciden a ciegas).
+    let issn = null, issnFuente = null;
+    const bcLocal = total ? await leerCodigoBarrasPorVision(ruta, total, [], { soloLocal: true }).catch(() => null) : null;
+    if (bcLocal?.issn) { issn = bcLocal.issn; issnFuente = 'código de barras'; }
+    const textoNumero = await textoDePaginas(ruta, 1, total || 200);
+    const issnsTexto = issnsEnTexto(textoNumero);
+    if (!issn && issnsTexto.length === 1) { issn = issnsTexto[0]; issnFuente = 'mancheta (capa de texto del número)'; }
+
+    // b) UNA llamada de visión con las páginas.
+    let nombres = [];
+    try { nombres = (await fs.readdir(path.dirname(ruta))).filter((n) => /\.(pdf|epub|cbz|cbr|djvu)$/i.test(n)); } catch { /* sin lista */ }
+    const txt = await conVision({
+        prompt: promptPortada(path.basename(dirAbs), fichero, nombres, pistas),
+        imagenes: renders.map((r) => ({ base64: r.buffer.toString('base64'), mimeType: 'image/jpeg' })),
+    });
+    const v = extraerJSON(txt) || {};
+
+    const texto = (x, max) => (typeof x === 'string' && x.trim() && x.trim().toLowerCase() !== 'null' ? x.trim().slice(0, max) : null);
+    const entero = (x, min, max) => (Number.isInteger(Number(x)) && Number(x) >= min && Number(x) <= max ? Number(x) : null);
+    const cabecera = texto(v.cabecera, 120);
+
+    // ISSN que dice haber leído la visión (impreso, o en el código de barras): solo CONFIRMADO (ver confirmarIssn).
+    // El impreso primero: el código de barras es donde más se equivoca de dígitos.
+    let issnSinConfirmar = null;
+    if (!issn) {
+        const candidatos = [
+            [validarISSN(v.issn_impreso || ''), 'impreso'],
+            [decodificarCodigoBarras(v.codigo_barras)?.issn || null, 'código de barras'],
+        ].filter(([c]) => c);
+        for (const [cand, donde] of candidatos) {
+            const conf = await confirmarIssn(cand, textoNumero, cabecera || pistas.cabecera);
+            if (conf.fuente) { issn = cand; issnFuente = `${donde} (visión), confirmado por ${conf.fuente}`; break; }
+            issnSinConfirmar = issnSinConfirmar || `${cand} (${donde}, visión: ${conf.rechazo})`;
+        }
+    }
+
+    const numero = entero(v.numero, 1, 100000), mes = entero(v.mes, 1, 12), anio = entero(v.anio, 1800, 2100);
+    const muestra = (numero || (mes && anio)) ? { fichero, ...(numero ? { numero } : {}), ...(anio ? { anio } : {}), ...(mes ? { mes } : {}) } : null;
+    const idioma = texto(v.idioma, 3);
+    return {
+        fichero,
+        cabecera,
+        issn, issn_fuente: issnFuente, issn_sin_confirmar: issnSinConfirmar,
+        editorial: texto(v.editorial, 120),
+        idioma: idioma && /^[a-z]{2,3}$/i.test(idioma) ? idioma.toLowerCase() : null,
+        periodicidad: PERIODICIDADES.includes(v.periodicidad) ? v.periodicidad : null,
+        cdu: sanearCduMateria(texto(v.cdu, 40)),
+        descripcion: texto(v.descripcion, 600),
+        muestra,
+    };
+}
+
+/**
+ * Vuelca en el perfil de la guía lo leído en la portada. La portada manda sobre lo deducido de los nombres (la ha
+ * VISTO); los choques se anotan para que se vean en el log y en el panel. Devuelve las notas.
+ */
+function aplicarPortada(perfil, v, nombre) {
+    const notas = [];
+    if (v.cabecera) {
+        if (perfil.cabecera && perfil.cabecera !== v.cabecera) notas.push(`cabecera «${perfil.cabecera}» (de los nombres) → «${v.cabecera}» (leída en la portada)`);
+        perfil.cabecera = v.cabecera;
+        perfil.cabecera_verificada = true;
+    }
+    if (v.issn) { perfil.issn = v.issn; notas.push(`ISSN ${v.issn} (${v.issn_fuente})`); }
+    if (v.issn_sin_confirmar) notas.push(`ISSN ${v.issn_sin_confirmar} SIN confirmar: no se usa`);
+    if (v.editorial && !perfil.editorial_probable) perfil.editorial_probable = v.editorial;
+    if (v.idioma && !perfil.idioma_probable) perfil.idioma_probable = v.idioma;
+    if (v.periodicidad) perfil.periodicidad = v.periodicidad;
+    if (v.descripcion) perfil.descripcion = v.descripcion;
+    // CDU: la más precisa si una afina a la otra (94 → 94(44)); si chocan, la de la portada (ha visto el contenido).
+    if (v.cdu && v.cdu !== perfil.materia_cdu) {
+        const previa = perfil.materia_cdu;
+        if (!previa || v.cdu.startsWith(previa)) perfil.materia_cdu = v.cdu;
+        else if (!previa.startsWith(v.cdu)) { notas.push(`CDU ${previa} (de los nombres) → ${v.cdu} (vista la revista)`); perfil.materia_cdu = v.cdu; }
+    }
+    if (v.muestra) {
+        perfil.muestra = v.muestra;
+        // CALIBRAR la numeración de los ficheros con la muestra: si «1.pdf» es de enero, los números son meses.
+        const mn = mesesDeNombre(path.basename(v.muestra.fichero));
+        const baseNum = Number(path.basename(v.muestra.fichero).replace(/\.[^.]+$/, ''));
+        if (mn && v.muestra.mes) {
+            if (mn.mes === v.muestra.mes) {
+                if (perfil.numeracion !== 'mes') notas.push(`«${v.muestra.fichero}» es de ${v.muestra.mes}/${v.muestra.anio || '?'}: los números de los ficheros son MESES`);
+                perfil.numeracion = 'mes';
+            } else if (perfil.numeracion === 'mes') {
+                notas.push(`«${v.muestra.fichero}» es del mes ${v.muestra.mes}, no del ${mn.mes}: los números de los ficheros NO son meses`);
+                delete perfil.numeracion;
+            }
+        }
+        if (v.muestra.numero && baseNum === v.muestra.numero) perfil.numeracion = 'numero';
+        if (perfil.periodo && v.muestra.anio && (v.muestra.anio < perfil.periodo.desde || v.muestra.anio > perfil.periodo.hasta)) {
+            notas.push(`OJO: el primer número es de ${v.muestra.anio}, fuera de los años de la carpeta (${perfil.periodo.desde}-${perfil.periodo.hasta})`);
+        }
+    }
+    return notas.length ? [`«${nombre}» (portada de «${v.fichero}»): ${notas.join('; ')}.`] : [`«${nombre}»: portada de «${v.fichero}» leída (cabecera «${perfil.cabecera || '?'}»${perfil.materia_cdu ? `, CDU ${perfil.materia_cdu}` : ''}).`];
+}
+
 // ─── Plan completo ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -213,16 +438,43 @@ export async function afinarPlan(plan, esq) {
         return [...vistos];
     };
 
+    const leidas = new Set();   // rutas de las tiradas cuya portada ya se leyó (en esta pasada o en una anterior)
+    let llamadasVision = 0;     // lo que cuenta para el tope: las llamadas de verdad, no las reaprovechadas
     for (const p of plan) {
         if (!p.guia || !['nueva', 'actualizar'].includes(p.estado)) continue;
         const nombre = p.ruta === '.' ? esq.raiz : p.ruta;
+        const bajoDe = (q) => q.ruta === '.' || p.ruta.startsWith(q.ruta + '/');
+
+        // La PORTADA del primer número (visión). No se repite en una subcarpeta de una tirada ya leída, ni si la guía que
+        // ya hay en disco la leyó en una inspección anterior: se reaprovecha (reinspeccionar no vuelve a pagarla, y
+        // una segunda pasada sobre un _REVISTAS enorme completa las que el tope dejó sin leer).
+        const previa = p.guia.perfil?.tipo_probable === 'revista' ? await leerGuia(p.abs).catch(() => null) : null;
+        if (previa?.perfil?.cabecera_verificada) {
+            for (const k of ['cabecera', 'cabecera_verificada', 'issn', 'editorial_probable', 'idioma_probable', 'periodicidad', 'descripcion', 'muestra', 'numeracion', 'materia_cdu']) {
+                if (previa.perfil[k] !== undefined) p.guia.perfil[k] = previa.perfil[k];
+            }
+            leidas.add(p.ruta);
+            notas.push(`«${nombre}»: portada ya leída en una inspección anterior (cabecera «${p.guia.perfil.cabecera}»); se conserva.`);
+        } else if (p.guia.perfil?.tipo_probable === 'revista' && VISION_ACTIVA()) {
+            const madreLeida = [...leidas].some((r) => bajoDe({ ruta: r }));
+            if (!madreLeida && llamadasVision < VISION_MAX()) {
+                try {
+                    llamadasVision++;
+                    const v = await leerPortadaRevista(p.abs, p.guia.perfil);
+                    if (v) { leidas.add(p.ruta); notas.push(...aplicarPortada(p.guia.perfil, v, nombre)); }
+                } catch (e) {
+                    notas.push(`«${nombre}»: no se pudo leer la portada con la visión (${String(e.message).slice(0, 80)}); la guía se queda con lo deducido de los nombres.`);
+                }
+            } else if (!madreLeida) {
+                notas.push(`«${nombre}»: portada sin leer (tope de ${VISION_MAX()} tiradas por inspección, INSPECCION_IA_VISION_MAX).`);
+            }
+        }
 
         const cab = p.guia.perfil?.cabecera;
-        if (p.guia.perfil?.tipo_probable === 'revista' && cab) {
+        if (p.guia.perfil?.tipo_probable === 'revista' && cab && !p.guia.perfil.issn) {
             // Las subcarpetas de una tirada (por año) HEREDAN la cabecera y el ISSN de la madre: no se repite la
             // búsqueda si una guía de más arriba ya lleva ese mismo nombre de cabecera con su ISSN.
-            const madre = plan.find((q) => q !== p && q.guia?.perfil?.cabecera === cab && q.guia.perfil.issn
-                && (q.ruta === '.' || p.ruta.startsWith(q.ruta + '/')));
+            const madre = plan.find((q) => q !== p && q.guia?.perfil?.cabecera === cab && q.guia.perfil.issn && bajoDe(q));
             if (!madre) {
                 const r = await resolverIssnCabecera(cab, issnsDe(p.ruta));
                 if (r) { p.guia.perfil.issn = r.issn; notas.push(`«${nombre}»: cabecera «${cab}», ISSN ${r.issn} (${r.fuente}).`); }

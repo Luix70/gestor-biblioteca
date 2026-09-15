@@ -257,7 +257,7 @@ const TIPOS = ['coleccion', 'serie', 'editorial', 'materia', 'obra', 'cajon', 'm
 // en el vigilante; antes solo se llegaba a ellas por detectores fijos en cascada o por una guía hecha a mano.
 export const CONTENIDOS = ['libros', 'revistas', 'comics', 'audiolibro', 'coleccion-audiolibros', 'transmedia',
     'software', 'libro-material', 'libro-desglosado', 'escaneo', 'mixta'];
-const PERIODICIDADES = ['semanal', 'quincenal', 'mensual', 'bimestral', 'trimestral', 'semestral', 'anual', 'irregular'];
+export const PERIODICIDADES = ['semanal', 'quincenal', 'mensual', 'bimestral', 'trimestral', 'semestral', 'anual', 'irregular'];
 
 /**
  * Mapa COMPACTO de todo el árbol (solo rutas y nº de documentos) que acompaña a cada tanda cuando se trocea.
@@ -311,10 +311,17 @@ Y, aparte, di QUÉ CONTIENE cada carpeta («contenido»), que es independiente d
 - libros: libros o documentos de lectura corrientes (lo habitual)
 - revistas: números de una publicación periódica (una tirada, todas las ediciones de un año…). En
   «nombre_canonico» pon el nombre de la CABECERA, sin fecha ni número («Historia de Iberia Vieja», no «HIV
-  2019 nº 163»; si los ficheros la abrevian —«2DAIssue.073»—, el nombre completo de la publicación); en
-  «periodicidad», ${PERIODICIDADES.join('|')} si se deduce; en «anio», el año si la carpeta es de un solo año;
-  y en «cdu», la CDU de la MATERIA de la publicación (se aplica a todos sus números). NO des el ISSN: se
-  comprueba aparte contra fuentes fiables
+  2019 nº 163»; si los ficheros la abrevian —«2DAIssue.073»—, el nombre completo de la publicación). OJO: los
+  nombres de carpeta y de fichero son PISTAS, no el dato: vienen con erratas, abreviados u ofuscados con
+  dígitos («l'historie», «l´hist0r1e», «All Ab0ut Hist0ry»). Si reconoces la publicación real, da su nombre
+  bien escrito («L'Histoire», «All About History»); si no, el de la carpeta corregido lo justo. En
+  «periodicidad», ${PERIODICIDADES.join('|')} si se deduce; en «anio» y «anio_hasta», el primer y el último año
+  de la tirada según los nombres («L'Histoire 2009 - 2016» → 2009 y 2016; una carpeta de un solo año → el
+  mismo en los dos); en «numeracion», qué son los números de los nombres de fichero: «mes» si son los meses del
+  año («1.pdf» … «12.pdf», «7-8.pdf» para julio-agosto, en una carpeta de un año), «numero» si son el número de
+  la revista («Muy Historia 57.pdf»), «fecha» si el nombre lleva la fecha («2016-03»), o null; y en «cdu», la
+  CDU de la MATERIA de la publicación (se aplica a todos sus números). NO des el ISSN: se comprueba aparte
+  contra fuentes fiables
 - comics: cómics o novela gráfica
 - audiolibro: UN audiolibro: el AUDIO es la obra. Puede traer portada y PDF ACCESORIOS (librillo, carátula,
   contraportada, portada, notas, inlay): siguen siendo un audiolibro, NO transmedia
@@ -371,9 +378,9 @@ ${mapaArbol(esq)}
 ` : ''}Árbol «${esq.raiz}»${esq.recortado ? ' (RECORTADO: solo ves una parte)' : ''}${trozo ? ` — TANDA ${trozo.n} de ${trozo.de}: interpreta SOLO estas ${carpetas.length} carpetas; cada una lleva su ruta COMPLETA desde la raíz` : ''}:
 ${lineas}
 
-Responde SOLO con JSON, sin texto alrededor. «periodicidad» y «anio» solo en las de contenido revistas (en las
-demás, null):
-{"carpetas":[{"ruta":"…","tipo":"${TIPOS.join('|')}","contenido":"${CONTENIDOS.join('|')}|null","nombre_canonico":"…o null","cdu":"…o null","editorial":"…o null","periodicidad":"…o null","anio":0,"confianza":0.0,"razon":"…breve"}]}`;
+Responde SOLO con JSON, sin texto alrededor. «periodicidad», «anio», «anio_hasta» y «numeracion» solo en las de
+contenido revistas (en las demás, null):
+{"carpetas":[{"ruta":"…","tipo":"${TIPOS.join('|')}","contenido":"${CONTENIDOS.join('|')}|null","nombre_canonico":"…o null","cdu":"…o null","editorial":"…o null","periodicidad":"…o null","anio":0,"anio_hasta":0,"numeracion":"mes|numero|fecha|null","confianza":0.0,"razon":"…breve"}]}`;
 }
 
 /**
@@ -487,11 +494,14 @@ async function interpretarTanda(esq, carpetasTanda, trozo) {
             // El CONTENIDO es un dato más, no la llave de la carpeta: uno desconocido se anula (queda la regla por
             // defecto para esa parte) en vez de tirar también el tipo, que sí era válido.
             const contenido = CONTENIDOS.includes(c.contenido) ? c.contenido : null;
-            const anio = Number.isInteger(Number(c.anio)) && Number(c.anio) >= 1800 && Number(c.anio) <= 2100 ? Number(c.anio) : null;
+            const anioValido = (v) => (Number.isInteger(Number(v)) && Number(v) >= 1800 && Number(v) <= 2100 ? Number(v) : null);
+            const anio = anioValido(c.anio), anioHasta = anioValido(c.anio_hasta);
             aceptadas.push({
                 ...c, ruta, contenido,
                 periodicidad: contenido === 'revistas' && PERIODICIDADES.includes(c.periodicidad) ? c.periodicidad : null,
                 anio: contenido === 'revistas' ? anio : null,
+                anio_hasta: contenido === 'revistas' ? anioHasta : null,
+                numeracion: contenido === 'revistas' && ['mes', 'numero', 'fecha'].includes(c.numeracion) ? c.numeracion : null,
                 confianza: Math.max(0, Math.min(1, Number(c.confianza) || 0)),
             });
         } else {

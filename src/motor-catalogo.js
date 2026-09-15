@@ -272,25 +272,44 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         // sobre la deducida del título del número, que con un nombre de fichero críptico sale mal. Es un dato de
         // tránsito: se retira aquí para que no se guarde en el documento.
         const cabeceraGuia = docFinal.cabecera_nombre || null;
+        // Más datos de tránsito de la guía (servicio-ingesta, 1ter): la CDU de la PUBLICACIÓN, su descripción y si el
+        // nombre de la cabecera se LEYÓ en la portada (visión al inspeccionar) en vez de sacarse del nombre de carpeta.
+        const cduGuia = docFinal.cabecera_cdu || null;
+        const descripcionGuia = docFinal.cabecera_descripcion || null;
+        const nombreVerificado = !!docFinal.cabecera_verificada;
         delete docFinal.cabecera_nombre;
+        delete docFinal.cabecera_cdu;
+        delete docFinal.cabecera_descripcion;
+        delete docFinal.cabecera_verificada;
         if (docFinal.tipo_recurso === 'revista') {
             const cn = claveNumero(docFinal);
             if (cn) docFinal.clave_numero = cn; else delete docFinal.clave_numero;
             const cabTitulo = cabeceraGuia || tituloCabecera(docFinal.obra_titulo || docFinal.titulo);
             if (docFinal.issn || cabTitulo) {
                 const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
-                const { _id, cdu: cduCab, creada } = await resolverCabecera(db, {
+                const { _id, cdu: cduCab, creada, renombrada } = await resolverCabecera(db, {
                     nombre: cabTitulo, issn: docFinal.issn, tipo: 'revista', editorialId: edId, cdu: docFinal.cdu,
+                    descripcion: descripcionGuia, nombreVerificado: nombreVerificado && !!cabeceraGuia,
                     naturaleza: docFinal.naturaleza || null,   // cómics: la cabecera hereda naturaleza:'comic'
                 });
                 if (creada) docFinal.alertas_agente.push(`Nueva cabecera de revista registrada: ${cabTitulo || docFinal.issn}`);
+                if (renombrada) docFinal.alertas_agente.push(`Cabecera «${renombrada}» renombrada a «${cabTitulo}» (nombre leído en la portada).`);
                 if (_id) { docFinal.coleccion = _id; if (cabTitulo) docFinal.coleccion_nombre = cabTitulo; }
                 // Los números comparten la CDU de la cabecera… salvo que la de la cabecera sea GENÉRICA (0/000: nació
                 // del primer número sin CDU) y este número traiga una buena: entonces se CORRIGE la cabecera, en vez de
                 // imponer su 000 a todos los números que vengan. resolverCabecera solo rellena una CDU vacía, y un
                 // «000» no está vacío.
+                // Con la CDU de la GUÍA manda la guía, también sobre la cabecera: es la CDU de la publicación vista entera
+                // (la inspección de la carpeta), y la de la cabecera pudo nacer de un primer número mal clasificado
+                // (medido: «l'historie» nació con 74 por un Dewey 741.5 de un libro homónimo, y se lo imponía a todos).
                 const generica = (c) => ['', '0', '000'].includes(String(c || '').trim());
-                if (cduCab && !generica(cduCab)) docFinal.cdu = cduCab;
+                if (cduGuia) {
+                    docFinal.cdu = cduGuia;
+                    if (_id && cduCab !== cduGuia) {
+                        await db.collection('colecciones').updateOne({ _id }, { $set: { cdu: cduGuia, fecha_actualizacion: new Date() } });
+                        docFinal.alertas_agente.push(`CDU de la cabecera «${cabTitulo || docFinal.issn}» ${cduCab ? `corregida: ${cduCab} →` : 'fijada:'} ${cduGuia} (guía de la carpeta).`);
+                    }
+                } else if (cduCab && !generica(cduCab)) docFinal.cdu = cduCab;
                 else if (_id && !generica(docFinal.cdu)) {
                     await db.collection('colecciones').updateOne({ _id }, { $set: { cdu: docFinal.cdu, fecha_actualizacion: new Date() } });
                     docFinal.alertas_agente.push(`CDU de la cabecera «${cabTitulo || docFinal.issn}» corregida: ${cduCab || '(vacía)'} → ${docFinal.cdu}.`);

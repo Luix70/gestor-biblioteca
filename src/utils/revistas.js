@@ -15,11 +15,13 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', '
 const normalizarAlnum = (s) => String(s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 /**
- * Título legible de un NÚMERO a partir de su cabecera: «2DArtist nº 73 (enero 2012)». Lo que falte se omite.
+ * Título legible de un NÚMERO a partir de su cabecera: «2DArtist nº 73 (enero 2012)», o «(julio-agosto 2016)» en
+ * un número doble. Lo que falte se omite.
  */
-export function tituloDeNumero(cabecera, { numero_issue, mes_publicacion, año_edicion } = {}) {
-    const m = parseInt(mes_publicacion, 10);
-    const fecha = [m >= 1 && m <= 12 ? MESES[m - 1] : null, año_edicion || null].filter(Boolean).join(' ');
+export function tituloDeNumero(cabecera, { numero_issue, mes_publicacion, mes_fin_publicacion, año_edicion } = {}) {
+    const m = parseInt(mes_publicacion, 10), mf = parseInt(mes_fin_publicacion, 10);
+    const mes = m >= 1 && m <= 12 ? (mf > m && mf <= 12 ? `${MESES[m - 1]}-${MESES[mf - 1]}` : MESES[m - 1]) : null;
+    const fecha = [mes, año_edicion || null].filter(Boolean).join(' ');
     const n = numero_issue != null && String(numero_issue).trim() ? ` nº ${String(numero_issue).trim()}` : '';
     return `${String(cabecera).trim()}${n}${fecha ? ` (${fecha})` : ''}`;
 }
@@ -32,6 +34,117 @@ export function tituloDeNumero(cabecera, { numero_issue, mes_publicacion, año_e
 export function tituloEsDelFichero(titulo, nombreArchivo) {
     const t = normalizarAlnum(titulo), f = normalizarAlnum(String(nombreArchivo || '').replace(/\.[^.]+$/, ''));
     return !t || (f.length > 0 && f.includes(t));
+}
+
+// ─── FECHA Y NÚMERO de un número con lo que sabe su CARPETA ─────────────────────────────────────────────
+//
+// El año de un número salía errático (medido, L'Histoire 2016: 2018, 2011, 1925, 1730, 2003…): no hay fecha en
+// «7-8.pdf», y el hueco lo rellenaba el año de un libro homónimo. La carpeta sí lo sabe: la tirada viene agrupada
+// por años («l'historie 2016», «L'Histoire 2009 - 2016») y la inspección de la carpeta dice qué significan los
+// números de los ficheros y lee en la portada del primero su número y su fecha (la «muestra»). Todo local y sin IA
+// al ingerir cada número: la IA se gastó UNA vez, al inspeccionar la carpeta.
+
+const RE_ANIO = /(?<!\d)(1[89]\d{2}|20\d{2})(?!\d)/g;
+
+/** Años escritos en un texto (un nombre de carpeta) → { desde, hasta }, o null si no hay ninguno. */
+export function periodoDeTexto(texto) {
+    const anios = [...String(texto || '').matchAll(RE_ANIO)].map((m) => Number(m[1]));
+    if (!anios.length) return null;
+    return { desde: Math.min(...anios), hasta: Math.max(...anios) };
+}
+
+/**
+ * Periodo de la carpeta MÁS CERCANA al fichero que lleve años en el nombre. `rutaCarpetas` = la ruta relativa al
+ * Inbox con « / » (perfil.materia_ruta: «_REVISTAS / L'Histoire 2009-2016 / 2012»): gana la carpeta más interna,
+ * así «…/2012» manda sobre el «2009-2016» de su madre.
+ */
+export function periodoDeRuta(rutaCarpetas) {
+    const partes = String(rutaCarpetas || '').split(/\s*[/\\]\s*/).filter(Boolean);
+    for (let i = partes.length - 1; i >= 0; i--) {
+        const p = periodoDeTexto(partes[i]);
+        if (p) return p;
+    }
+    return null;
+}
+
+/**
+ * Mes(es) de un nombre de fichero que es SOLO un número de mes: «1.pdf» → {mes:1}, «07.pdf» → {mes:7},
+ * «7-8.pdf» → {mes:7, mes_fin:8} (número doble). Cualquier otra cosa → null. Que ese número sea un mes y no un
+ * número de la revista lo decide la guía (perfil.numeracion), no esta función.
+ */
+export function mesesDeNombre(nombreFichero) {
+    const base = String(nombreFichero || '').replace(/\.[^.]+$/, '').trim();
+    const m = base.match(/^0?(\d{1,2})(?:\s*[-_&+y]\s*0?(\d{1,2}))?$/i);
+    if (!m) return null;
+    const mes = Number(m[1]), fin = m[2] ? Number(m[2]) : null;
+    if (mes < 1 || mes > 12) return null;
+    if (fin != null && (fin <= mes || fin > 12)) return null;
+    return fin ? { mes, mes_fin: fin } : { mes };
+}
+
+// Meses entre dos números consecutivos según la periodicidad (para comprobar un nº de issue contra la muestra).
+const MESES_POR_NUMERO = { semanal: 12 / 52, quincenal: 0.5, mensual: 1, bimestral: 2, trimestral: 3, semestral: 6, anual: 12 };
+
+/**
+ * Afina, EN SITIO, año / mes / nº de un número de revista con lo que sabe su carpeta. Devuelve las alertas.
+ *
+ *  · MES: si la guía dice que los números de los ficheros son MESES (perfil.numeracion:'mes'), «3.pdf» es marzo
+ *    (y «7-8.pdf», julio-agosto). Manda sobre un mes leído del texto, que puede ser el de un artículo.
+ *  · AÑO: la carpeta de un solo año lo fija; si la carpeta abarca varios, un año fuera de ese rango se retira (un
+ *    año equivocado es peor que ninguno: da la clave del número y su carpeta física).
+ *  · Nº: con la muestra de la portada (p. ej. nº 419 = enero de 2016) y la periodicidad, un nº de issue absurdo
+ *    para su fecha (el «775» o el «94» que salieron del texto) se retira. No se inventa ninguno: los números dobles
+ *    y los especiales descuadran la cuenta, así que solo se descarta lo que no cuadra NI de lejos.
+ *
+ * @param documento  el número (se modifica)
+ * @param opts.perfil         perfil heredado de la guía (periodo, numeracion, muestra, periodicidad)
+ * @param opts.nombreFichero  nombre del fichero del número
+ * @param opts.rutaCarpetas   ruta de sus carpetas dentro del Inbox («A / B / C»), para el periodo por nombre
+ */
+export function afinarFechaNumero(documento, { perfil = {}, nombreFichero = '', rutaCarpetas = '' } = {}) {
+    const alertas = [];
+
+    // 1) Mes por el nombre del fichero.
+    if (perfil.numeracion === 'mes') {
+        const mn = mesesDeNombre(nombreFichero);
+        if (mn) {
+            const previo = parseInt(documento.mes_publicacion, 10);
+            if (previo && previo !== mn.mes) alertas.push(`Mes ${previo} (del texto) sustituido por ${mn.mes}: en esta carpeta el nombre del fichero es el mes.`);
+            documento.mes_publicacion = mn.mes;
+            if (mn.mes_fin) documento.mes_fin_publicacion = mn.mes_fin;
+        }
+    }
+
+    // 2) Año dentro del periodo de la carpeta (el de su nombre; si no lo lleva, el que dejó la inspección).
+    const periodo = periodoDeRuta(rutaCarpetas) || (perfil.periodo?.desde ? perfil.periodo : null);
+    if (periodo) {
+        const anio = parseInt(documento.año_edicion, 10);
+        const dentro = anio >= periodo.desde && anio <= periodo.hasta;
+        if (periodo.desde === periodo.hasta) {
+            if (anio !== periodo.desde) {
+                alertas.push(anio ? `Año ${anio} fuera del de la carpeta: ${periodo.desde}.` : `Año ${periodo.desde}, el de la carpeta.`);
+                documento.año_edicion = periodo.desde;
+            }
+        } else if (anio && !dentro) {
+            alertas.push(`Año ${anio} fuera del periodo de la carpeta (${periodo.desde}-${periodo.hasta}): se retira.`);
+            delete documento.año_edicion;
+        }
+    }
+
+    // 3) Nº de issue contra la muestra de la portada.
+    const m = perfil.muestra, paso = MESES_POR_NUMERO[perfil.periodicidad] || (perfil.numeracion === 'mes' ? 1 : null);
+    const num = parseInt(documento.numero_issue, 10), anio = parseInt(documento.año_edicion, 10), mes = parseInt(documento.mes_publicacion, 10);
+    if (m?.numero && m.anio && m.mes && paso && num && anio && mes) {
+        const meses = (anio - m.anio) * 12 + (mes - m.mes);
+        const esperado = m.numero + meses / paso;
+        // Holgura: los números dobles y los especiales van descuadrando la cuenta con los años.
+        const holgura = 3 + Math.ceil(Math.abs(meses) / 12) * 2;
+        if (Math.abs(num - esperado) > holgura) {
+            alertas.push(`Nº ${num} imposible para ${mes}/${anio} (la muestra ${m.numero} es de ${m.mes}/${m.anio}; se esperaba ~${Math.round(esperado)}): se retira.`);
+            delete documento.numero_issue;
+        }
+    }
+    return alertas;
 }
 
 /**

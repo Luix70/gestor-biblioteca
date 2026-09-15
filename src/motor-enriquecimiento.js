@@ -1,4 +1,4 @@
-import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
+import { buscarMetadatosExternos, tituloBuscable } from './utils/proveedor-metadatos.js';
 import { cduSinIAActivo } from './utils/ajustes-ingesta.js';
 import { buscarPorDOI } from './utils/buscador-crossref.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
@@ -178,8 +178,16 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     const faltaSinopsis = !primerValido(documento.sinopsis);
     const faltaCdu = !primerValido(documento.cdu);
 
-    const autorPrincipal = (documento.autores && documento.autores.length > 0) ? documento.autores[0] : '';
-    const imagen = primerValido(datosBase.cubierta_base64, datosBase.imagen_adicional) || null;
+    // NÚMERO DE REVISTA (no un cómic seriado: ese sí tiene guionista y dibujante, y su argumento es una sinopsis).
+    // Un número no tiene autor, y su «sinopsis» solo tiene sentido como extracto de su sumario, que sale del propio
+    // fichero. Los catálogos de libros no aportan nada y, buscando por el título del número, traían los datos de un
+    // libro homónimo (ver proveedor-metadatos · tituloBuscable). Su CDU es la de la PUBLICACIÓN: si la guía de la
+    // carpeta la da, se aplica en servicio-ingesta (1ter) y aquí no se gasta nada en deducirla.
+    const esRevistaPura = documento.tipo_recurso === 'revista' && documento.naturaleza !== 'comic';
+    const cduDeGuia = !!(esRevistaPura && contexto.perfil?.materia_cdu);
+
+    const autorPrincipal = (!esRevistaPura && documento.autores && documento.autores.length > 0) ? documento.autores[0] : '';
+    const imagen = esRevistaPura ? null : (primerValido(datosBase.cubierta_base64, datosBase.imagen_adicional) || null);
 
     // ISBN como pivote: reunimos todos los candidatos del archivo (lectura del texto/nombre
     // ya recolectados por el lector, más las formas 10/13 del isbn principal) para que las
@@ -214,9 +222,13 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         ? { isbn: null, titulo: null, autores: [], sinopsis: null, editorial: null, año_edicion: null,
             idioma: null, categorias: [], dewey: null, lcc: null, portadas_remotas: [], cdu: null,
             cdu_adicionales: [], coleccion_nombre: null, coleccion_numero: null, alertas: ['Sin APIs (override manual).'] }
-        : await buscarMetadatosExternos(documento.titulo, autorPrincipal, imagen, {
-            incluirSinopsis: faltaSinopsis,
-            incluirCdu: faltaCdu,
+        // Para una revista, la CDU se razona con el nombre de la CABECERA, no con el del número («Muy Historia»,
+        // no «Muy Historia nº 57 – marzo 2014»).
+        : await buscarMetadatosExternos(esRevistaPura ? (tituloCabecera(documento.titulo) || documento.titulo) : documento.titulo,
+            autorPrincipal, imagen, {
+            revista: esRevistaPura,
+            incluirSinopsis: faltaSinopsis && !esRevistaPura,
+            incluirCdu: faltaCdu && !cduDeGuia,
             isbnsArchivo: [...isbnsArchivo],
             idioma: documento.idioma || null,
             cipDewey: cip?.dewey || null,
@@ -239,9 +251,15 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         // El subtítulo del CIP acompaña al título del CIP: al sustituir el título, se toma el subtítulo de la autoridad.
         if (documento._cipSub) documento.subtitulo = datosExtra.subtitulo || null;
     }
+    // Un número de revista NO tiene autor. El «Author» de los metadatos de un PDF de revista es el maquetador, el
+    // escáner o quien lo subió; se deja constancia en las alertas (no se pierde) y no se crea una ficha de autor.
+    if (esRevistaPura && Array.isArray(documento.autores) && documento.autores.length) {
+        documento.alertas_agente.push(`Autor(es) del fichero «${documento.autores.join('; ').slice(0, 80)}» no asignado(s): un número de revista no tiene autor.`);
+        documento.autores = [];
+    }
     const autoresNoFiables = !documento.autores || documento.autores.length === 0
         || documento.autores.every((a) => esAutorArtefacto(a));
-    if ((documento._cipAutor || autoresNoFiables) && datosExtra.autores && datosExtra.autores.length > 0) {
+    if (!esRevistaPura && (documento._cipAutor || autoresNoFiables) && datosExtra.autores && datosExtra.autores.length > 0) {
         if (documento.autores && documento.autores.length && String(documento.autores[0]) !== String(datosExtra.autores[0]))
             documento.alertas_agente.push(`Autor "${String(documento.autores[0]).slice(0, 40)}" sustituido por el de la autoridad: "${String(datosExtra.autores[0]).slice(0, 40)}".`);
         documento.autores = datosExtra.autores;
@@ -281,13 +299,17 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         }
     }
     documento.año_edicion = primerValido(documento.año_edicion, datosExtra.año_edicion);
-    documento.idioma      = primerValido(documento.idioma, datosExtra.idioma) || 'es';
+    // Idioma: el del fichero; si no lo trae, el de las APIs; y antes que suponer «es» a ciegas, el que diga la guía
+    // de la carpeta (en una revista lo lee la visión en la portada al inspeccionarla: un PDF escaneado sin capa
+    // de texto no permite detectarlo).
+    documento.idioma      = primerValido(documento.idioma, datosExtra.idioma, contexto.idioma_probable, contexto.perfil?.idioma_probable) || 'es';
     documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
     // Red de seguridad: si la CDU quedó sin resolver (p. ej. INGESTA_CDU_SIN_IA=1 y ni caché ni crosswalk la
     // dieron), cae al cajón '000' (válido para el esquema). `re-clasificar-cdu` la afina a reposo y mueve la carpeta.
+    // Una revista con CDU en la guía no está «sin resolver»: la recibe en servicio-ingesta (1ter).
     if (!primerValido(documento.cdu)) {
         documento.cdu = '000';
-        documento.alertas_agente.push('CDU sin resolver en la ingesta (diferida): se afinará en mantenimiento (re-clasificar-cdu).');
+        if (!cduDeGuia) documento.alertas_agente.push('CDU sin resolver en la ingesta (diferida): se afinará en mantenimiento (re-clasificar-cdu).');
     }
     if (datosExtra.cdu_adicionales && datosExtra.cdu_adicionales.length > 0)
         documento.cdu_adicionales = datosExtra.cdu_adicionales;
@@ -361,7 +383,12 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Revista SIN ISSN (p. ej. cubierta sin código de barras legible): intentar resolverlo por el TÍTULO
     // (Wikidata) → así el número entra en su cabecera-colección por ISSN en vez de quedar suelto.
     // Conservador: solo periódicos con ISSN registrado en Wikidata; un fallo deja la revista sin ISSN.
-    if (esRevista && !documento.issn && documento.titulo && !contexto.sinApis) {
+    // No con la guía de una tirada: la cabecera y su ISSN (ya comprobado) los aplica servicio-ingesta, y un ISSN de
+    // Wikidata para el título de un número («1», «Nº 57») sería de otra publicación y además CHOCARÍA con el de la
+    // guía (1ter conserva el «del fichero» ante un choque). Tampoco con un título sin letras.
+    const cabeceraDeGuia = !!(contexto.perfil?.cabecera || contexto.perfil?.issn);
+    if (esRevista && !documento.issn && documento.titulo && !contexto.sinApis && !cabeceraDeGuia
+        && tituloBuscable(tituloCabecera(documento.titulo) || documento.titulo)) {
         const cab = tituloCabecera(documento.titulo) || documento.titulo;
         const r = await buscarISSNporTitulo(cab, { idioma: documento.idioma });
         if (r?.issn) {
