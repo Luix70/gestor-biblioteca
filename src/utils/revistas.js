@@ -82,6 +82,18 @@ export function mesesDeNombre(nombreFichero) {
     return fin ? { mes, mes_fin: fin } : { mes };
 }
 
+/**
+ * Nº de la revista de un nombre de fichero que es SOLO ese número («57.pdf», «0163.pdf»), o null. Estricto a
+ * propósito: en «HIV_163_0719.pdf» el número final es la fecha, no el nº. Un año de 4 cifras no vale.
+ */
+export function numeroDeNombre(nombreFichero) {
+    const base = String(nombreFichero || '').replace(/\.[^.]+$/, '').trim();
+    if (!/^\d{1,5}$/.test(base)) return null;
+    const n = Number(base);
+    if (!n || (base.length === 4 && n >= 1800 && n <= 2100)) return null;
+    return n;
+}
+
 // Meses entre dos números consecutivos según la periodicidad (para comprobar un nº de issue contra la muestra).
 const MESES_POR_NUMERO = { semanal: 12 / 52, quincenal: 0.5, mensual: 1, bimestral: 2, trimestral: 3, semestral: 6, anual: 12 };
 
@@ -89,7 +101,8 @@ const MESES_POR_NUMERO = { semanal: 12 / 52, quincenal: 0.5, mensual: 1, bimestr
  * Afina, EN SITIO, año / mes / nº de un número de revista con lo que sabe su carpeta. Devuelve las alertas.
  *
  *  · MES: si la guía dice que los números de los ficheros son MESES (perfil.numeracion:'mes'), «3.pdf» es marzo
- *    (y «7-8.pdf», julio-agosto). Manda sobre un mes leído del texto, que puede ser el de un artículo.
+ *    (y «7-8.pdf», julio-agosto). Manda sobre un mes leído del texto, que puede ser el de un artículo. Si dice que
+ *    son el Nº (numeracion:'numero'), «57.pdf» es el nº 57 (solo rellena).
  *  · AÑO: la carpeta de un solo año lo fija; si la carpeta abarca varios, un año fuera de ese rango se retira (un
  *    año equivocado es peor que ninguno: da la clave del número y su carpeta física).
  *  · Nº: con la muestra de la portada (p. ej. nº 419 = enero de 2016) y la periodicidad, un nº de issue absurdo
@@ -104,7 +117,11 @@ const MESES_POR_NUMERO = { semanal: 12 / 52, quincenal: 0.5, mensual: 1, bimestr
 export function afinarFechaNumero(documento, { perfil = {}, nombreFichero = '', rutaCarpetas = '' } = {}) {
     const alertas = [];
 
-    // 1) Mes por el nombre del fichero.
+    // 1) Mes (o nº) por el nombre del fichero.
+    if (perfil.numeracion === 'numero' && documento.numero_issue == null) {
+        const n = numeroDeNombre(nombreFichero);
+        if (n) { documento.numero_issue = n; alertas.push(`Nº ${n}, el del nombre del fichero (en esta carpeta los ficheros se llaman por el nº).`); }
+    }
     if (perfil.numeracion === 'mes') {
         const mn = mesesDeNombre(nombreFichero);
         if (mn) {

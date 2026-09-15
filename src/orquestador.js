@@ -14,7 +14,7 @@ import { leerMobi } from './utils/lector-mobi.js';
 import { leerChm } from './utils/lector-chm.js';
 import { leerWord } from './utils/lector-word.js';
 import { extraerISBNs } from './utils/lector-pdf.js';
-import { pareceSerieLibros, esEditorialDeLibros } from './utils/revistas.js';
+import { pareceSerieLibros, esEditorialDeLibros, mesesDeNombre, numeroDeNombre } from './utils/revistas.js';
 import { clasificarTipo, clasificarPorPaginas } from './utils/discriminador.js';
 import { interpretarIdentificadores } from './utils/interpretar-identificadores.js';
 import { extraerMetadatosComic } from './utils/lector-comic.js';
@@ -302,6 +302,7 @@ export async function procesarRecurso(entrada) {
     let datosBase, formatos, tipo_recurso;
     let activos = [];
     let escaneadoSinTexto = false;
+    let escaneadoGuiado = false;   // escaneo de una tirada de revistas guiada: identificado por la guía, sin visión
     let isbnDelArchivo = false;
 
     if (tipo === 'epub') {
@@ -443,7 +444,35 @@ export async function procesarRecurso(entrada) {
         //  3) PDF de imágenes con capa OCR (Adobe Scan/Lens): pdfEsImagen lo detecta por productor + fuentes.
         // Así un escaneo con OCR ilegible deja de catalogarse como "libro digital en PDF".
         const esEscaneado = !datosBase.texto_legible || !datosBase.texto_util || await pdfEsImagen(rutas[0]);
-        if (esEscaneado) {
+        // TIRADA DE REVISTAS GUIADA: la inspección de la carpeta (con la portada del primer número leída por visión)
+        // ya dio la cabecera, su ISSN COMPROBADO, la CDU, la editorial y el idioma (servicio-ingesta los aplica en
+        // 1ter). Leerle a CADA número el código de barras o identificarlo por visión es pagar otra vez lo que ya se
+        // sabe: la IA se gastó UNA vez, al inspeccionar. `fechaPorNombre`: la fecha o el nº del número salen de su
+        // nombre (fechado, «3.pdf» = marzo si la guía dice que son meses, «57.pdf» = nº 57 si dice que son números).
+        const perfilGuia = contexto.perfil || {};
+        const nombreFich = path.basename(rutas[0]);
+        const revistaGuiada = perfilGuia.tipo_probable === 'revista' && !!perfilGuia.cabecera && !!perfilGuia.issn;
+        const fechaPorNombre = parsearNombre(nombreFich).esFechada
+            || (perfilGuia.numeracion === 'mes' && !!mesesDeNombre(nombreFich))
+            || (perfilGuia.numeracion === 'numero' && numeroDeNombre(nombreFich) != null);
+        // (Con ISBN propio o bloque CIP es un LIBRO que cayó en la carpeta, y sigue su camino de siempre.)
+        if (esEscaneado && revistaGuiada && fechaPorNombre && !datosBase.isbn_propio && !datosBase.cip) {
+            // Escaneo de una tirada guiada: sin visión por número. Título provisional = el nombre del fichero (1ter lo
+            // compone con la cabecera: «L'Histoire nº 425 (julio-agosto 2016)»); fecha del nombre; ISSN de la guía.
+            escaneadoGuiado = true;
+            for (const r of renders) {
+                activos.push({ tipo: r.etiqueta === 'portada' ? 'portada' : 'otra', origen: `pdf:${r.etiqueta}`, base64: r.buffer.toString('base64') });
+            }
+            const fn = parsearNombre(nombreFich);
+            datosBase = {
+                titulo: tituloDesdeNombre(nombreFich) || nombreFich.replace(/\.[^.]+$/, ''), tipo_recurso: 'revista', issn: perfilGuia.issn,
+                paginas: datosBase.paginas, texto_legible: false,
+                ...(fn.esFechada ? { año_edicion: fn.año_edicion, ...(fn.mes_publicacion != null ? { mes_publicacion: fn.mes_publicacion } : {}) } : {}),
+                alertas_agente: [`PDF escaneado de una tirada GUIADA («${perfilGuia.cabecera}», ISSN ${perfilGuia.issn}): identificado por la guía y el nombre del fichero, sin visión IA por número.`],
+            };
+            tipo_recurso = 'revista';
+            console.log(`[Orquestador] Escaneo de tirada guiada «${perfilGuia.cabecera}»: sin visión IA por número.`);
+        } else if (esEscaneado) {
             // PDF cuyo TEXTO no es fiable (escaneo con/sin OCR: Adobe Scan / cámara / Lens). Se IDENTIFICA por
             // VISIÓN sobre las páginas rasterizadas (como un grupo de imágenes), pero SIGUE SIENDO UN FICHERO
             // DIGITAL que CONSERVAMOS: el formato queda 'pdf' (no 'papel') y el PDF se copia a la carpeta como
@@ -528,8 +557,10 @@ export async function procesarRecurso(entrada) {
         // PROPIO del tipo. Una REVISTA necesita su ISSN aunque el OCR le haya colado un ISBN espurio (las
         // revistas no llevan ISBN); un LIBRO necesita su ISBN. 977→ISSN/revista, 978/979→ISBN. Recortes a
         // alta resolución (la visión lee bien un recorte enfocado). No gasta visión si el id propio ya está.
+        // En una tirada GUIADA (cabecera + ISSN comprobado en la guía) solo el intento LOCAL (zxing, gratis): la visión
+        // gastaría una llamada por número para leer el ISSN que la guía ya trae.
         if (!datosBase.issn && (!datosBase.isbn || tipo_recurso === 'revista')) {
-            const bc = await leerCodigoBarrasPorVision(rutas[0], datosBase.paginas, renders);
+            const bc = await leerCodigoBarrasPorVision(rutas[0], datosBase.paginas, renders, { soloLocal: revistaGuiada });
             if (bc) {
                 if (bc.issn) datosBase.issn = bc.issn;
                 if (bc.isbn) { datosBase.isbn = bc.isbn; isbnDelArchivo = true; }
@@ -904,6 +935,11 @@ export async function procesarRecurso(entrada) {
         coleccion: contexto.coleccion,   // drop por carpeta: colección autoritativa
         obra: contexto.obra,             // tomo de obra multivolumen (titulo, numero, titulo_volumen)
         sinApis,                         // override sin_apis: no consultar APIs/IA
+        // Perfil de la GUÍA de la carpeta (heredado): en una tirada de revistas dice que la CDU, la cabecera y su ISSN
+        // ya se saben (no se deducen por número) y el idioma (antes que suponer «es»). Sin pasarlo, el enriquecimiento
+        // no lo veía y deducía por su cuenta lo que la guía ya traía (medido en la prueba del 15-sep).
+        perfil: contexto.perfil,
+        idioma_probable: contexto.idioma_probable,
     });
 
     // Portada de calidad (las imágenes escaneadas ya son su propia portada; no se tocan).
@@ -955,8 +991,9 @@ export async function procesarRecurso(entrada) {
     delete documento._portadas_remotas;
 
     // Regla conservadora: un PDF escaneado sin ISBN propio no puede darse por verificado;
-    // cualquier coincidencia de API es una conjetura a partir de un título débil.
-    if (escaneadoSinTexto && !isbnDelArchivo) {
+    // cualquier coincidencia de API es una conjetura a partir de un título débil. (No aplica al escaneo de una tirada
+    // GUIADA: su identidad —cabecera e ISSN comprobado— la da la guía, no una conjetura sobre el título.)
+    if (escaneadoSinTexto && !isbnDelArchivo && !escaneadoGuiado) {
         documento.estado_verificacion = 'pendiente';
         documento.alertas_agente.push("Identificación NO verificada (PDF escaneado, sin OCR): requiere revisión humana.");
     }

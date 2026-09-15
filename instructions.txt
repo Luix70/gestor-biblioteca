@@ -3788,6 +3788,21 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       segunda pasada completa las que dejo el tope). Probado con 1.pdf de L'Histoire: «l'historie» → «L'Histoire»,
       ISSN 0182-2411 (mancheta), Sophia Publications, fr, mensual, CDU 94, muestra nº 419 = enero 2016 →
       numeracion 'mes'.
+    * INGESTA SIN IA POR NUMERO (15-sep, pregunta del usuario: «¿habra que ingerir con IA o basta con la usada al
+      inspeccionar?»). Con la guia de una tirada con cabecera + ISSN COMPROBADO (orquestador · revistaGuiada):
+      - el codigo de barras de cada numero sin ISSN en su texto se intenta solo en LOCAL (zxing): la vision
+        gastaria una llamada por numero para leer el ISSN que la guia ya trae (lector-barras {soloLocal});
+      - un PDF ESCANEADO se identifica por la guia y su nombre, SIN vision por numero, si la fecha o el nº salen del
+        nombre (fechado, «3.pdf» = marzo con numeracion 'mes', «57.pdf» = nº 57 con numeracion 'numero' —
+        revistas · numeroDeNombre, estricto: solo un numero—). Si no salen del nombre, la vision sigue (es lo unico
+        que dira la fecha). Con ISBN propio o bloque CIP es un libro y va por su camino;
+      - CDU, idioma y editorial de la guia; sin catalogos de libros.
+      MEDIDO (procesarRecurso sobre 1.pdf digital y un «3.pdf» escaneado hecho con sus paginas): 0 llamadas de IA y
+      0 consultas a catalogos; «L'Histoire nº 419 (enero 2016)» y «L'Histoire (marzo 2016)», fr, ISSN 0182-2411.
+      La IA de verdad se gasta UNA vez por tirada, al inspeccionar. Sin guia, o sin ISSN comprobado, la ingesta de
+      un numero es la de siempre (barras por vision, escaneos por vision).
+      BUG encontrado en esa prueba: el orquestador no pasaba el PERFIL de la guia al enriquecimiento, asi que la
+      CDU de la guia, su idioma y la salvaguarda del ISSN de Wikidata no llegaban (se deducian por numero). Pasado.
     * NOMBRE DE LA CABECERA: resolverCabecera({nombreVerificado}) RENOMBRA la cabecera hallada por ISSN si su
       nombre es una VARIANTE cercana del leido en la portada (colecciones · esVarianteDeNombre: solo letras,
       ofuscaciones deshechas 0→o 1→i 3→e 4→a 5→s 7→t, distancia de edicion ≤ 2 o 20 %): «l'historie» →
