@@ -271,7 +271,12 @@ comprobar_aviso_espacio() {
         return 0
     fi
 
-    log "   ⚠️  POCO ESPACIO EN EL DISCO DE COPIA: $(texto_espacio) — el umbral de aviso es ${UMBRAL_LIBRE_PCT} %."
+    if [ "$ESP_LIBRE_PCT" -ge "$UMBRAL_LIBRE_PCT" ]; then
+        # Solo en la prueba: no confundir «estoy probando el aviso» con «hay poco espacio».
+        log "   🧪 PRUEBA con el disco en ${ESP_LIBRE_PCT} % libre: en una copia normal NO se avisaría (el umbral es ${UMBRAL_LIBRE_PCT} %)."
+    else
+        log "   ⚠️  POCO ESPACIO EN EL DISCO DE COPIA: $(texto_espacio) — el umbral de aviso es ${UMBRAL_LIBRE_PCT} %."
+    fi
 
     ahora="$(date +%s)"
     ultima="$(cat "$marca_aviso" 2>/dev/null || echo 0)"
@@ -404,7 +409,13 @@ if [ "$PROBAR_AVISO" -eq 1 ]; then
     medir_espacio
     log "   Disco: $DISCO · $(texto_espacio)"
     comprobar_aviso_espacio forzar
-    [ "$AVISO_POR_SALIDA" -eq 1 ] && { log "   Salgo con código $SALIDA_AVISO para que el Programador de DSM mande este registro por correo."; salir "$SALIDA_AVISO"; }
+    if [ "$AVISO_POR_SALIDA" -eq 1 ]; then
+        log "   Salgo con código $SALIDA_AVISO para que el Programador de DSM mande este registro por correo."
+        # Lanzado a mano, ese código no manda nada: el correo lo envía el PROGRAMADOR al terminar SU tarea (medido el
+        # 17-sep: la prueba desde la terminal salió bien, pero no llegó correo y parecía que el aviso no funcionaba).
+        [ -t 1 ] && log "   ℹ️  Desde la terminal NO llega correo: añade --probar-aviso al comando de la tarea en el Programador de DSM y pulsa «Ejecutar»."
+        salir "$SALIDA_AVISO"
+    fi
     salir 0
 fi
 
