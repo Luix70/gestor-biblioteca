@@ -171,7 +171,10 @@ paso() { log_suelto ""; log "▸ $*"; }
 # Un aviso de UNA línea (copia aplazada, disco ausente…) también se separa del bloque anterior.
 aviso_suelto() { log_suelto ""; log "$*"; }
 
-salir() { rmdir "$CERROJO" 2>/dev/null || true; exit "$1"; }
+# Solo se retira el cerrojo si lo tomó ESTA ejecución: --probar-aviso no lo toma (puede lanzarse con una copia en
+# marcha) y no debe borrar el de la copia que está trabajando.
+TENGO_CERROJO=0
+salir() { [ "$TENGO_CERROJO" -eq 1 ] && rmdir "$CERROJO" 2>/dev/null; exit "$1"; }
 
 # ─── Formato de cifras (awk: portable, también en el BusyBox de DSM) ─────────────────────────────────────
 # 612767 → «612.767»
@@ -315,7 +318,11 @@ Registro: $LOG"
 # ─── A. Cerrojo: nunca dos copias a la vez ───────────────────────────────────────────────────────────────
 # `mkdir` es atómico en POSIX, así que sirve de mutex sin depender de flock (que en BusyBox puede no estar).
 # Importante: la primera copia puede durar horas y la tarea está programada cada hora; sin esto se solaparían.
-if ! mkdir "$CERROJO" 2>/dev/null; then
+# --probar-aviso NO lo necesita (no copia nada, solo mide el espacio y avisa): así se puede probar aunque haya una
+# copia en marcha. Medido el 17-sep: la prueba lanzada a las 12:18 chocó con la copia de las 12:00 y salió sin avisar.
+if [ "$PROBAR_AVISO" -eq 1 ]; then
+    :
+elif ! mkdir "$CERROJO" 2>/dev/null; then
     if [ -d "$CERROJO" ]; then
         log "⏭️  Ya hay una copia en curso ($CERROJO). Salgo."
         exit 0
@@ -325,8 +332,10 @@ if ! mkdir "$CERROJO" 2>/dev/null; then
     # el aviso diría algo falso. Se avisa y se sale con error, para que DSM lo marque como tarea fallida.
     log "❌ No se pudo crear el cerrojo $CERROJO (¿existe su carpeta padre?). No arranco."
     exit 1
+else
+    TENGO_CERROJO=1
+    trap 'rmdir "$CERROJO" 2>/dev/null || true' EXIT INT TERM
 fi
-trap 'rmdir "$CERROJO" 2>/dev/null || true' EXIT INT TERM
 
 # ─── B. ¿Están el origen y la herramienta? ───────────────────────────────────────────────────────────────
 if [ ! -d "$ORIGEN" ]; then
