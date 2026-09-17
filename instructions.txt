@@ -3445,6 +3445,18 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
         DSM en «Enviar detalles de ejecucion por correo… solo si finaliza de forma anomala», DSM manda el
         registro con su propia configuracion de correo (Panel de control → Notificacion). 0 lo desactiva.
         Probar sin esperar a llenarlo: sudo …/sincronizar-copia.sh --probar-aviso (no copia; no deja marca).
+        CONFIGURAR EL CORREO EN DSM (lo que costo el 17-sep, para no redescubrirlo):
+        · Gmail: el proveedor «Gmail» (OAuth) de DSM autoriza pero el envio da «Server Response Code: 403» (le falta
+          el permiso de enviar). Funciono con SMTP personalizado: smtp.gmail.com:587 + TLS, usuario = la direccion,
+          contraseña = CONTRASEÑA DE APLICACION de Google (con verificacion en dos pasos).
+        · En DSM 7 el correo de una tarea se configura en la PROPIA TAREA (Configuracion de la tarea → «Enviar detalles
+          de ejecucion por correo» + su campo de direccion + «solo si finaliza de forma anomala»), aparte del correo de
+          prueba de Notificacion.
+        · Desde la TERMINAL, --probar-aviso no manda correo: el codigo 3 solo se convierte en correo cuando la tarea la
+          ejecuta el Programador.
+        · Probarlo con una TAREA APARTE («Prueba aviso copia», root, comando con --probar-aviso) y borrarla despues: DSM
+          no relanza una tarea que sigue en ejecucion (la copia de las 12:00 dura ~1 h y «Ejecutar» no hacia nada), y
+          asi no se corre el riesgo de dejar --probar-aviso en la tarea de copia real (que dejaria de copiar).
       - Probado en el PC con un rsync falso (estadisticas de 3.0): bloques, cifras, movimiento replicado, error de
         permisos, aviso por codigo de salida, intervalo de 24 h, --probar-aviso y copia aplazada.
     * GET /api/ocupado (PUBLICA, antes de la puerta de autenticacion, como /api/version) — semaforo

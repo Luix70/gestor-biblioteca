@@ -9,8 +9,10 @@
 #   Instalación (DSM → Panel de control → Programador de tareas → Crear → Tarea programada → Script definido):
 #     Usuario: root      ← IMPRESCINDIBLE: hay carpetas que otros usuarios no pueden leer, y se saltarían
 #     Comando: /volume1/docker/GestorBiblioteca/scripts/sincronizar-copia.sh
-#     Configuración de la tarea → «Enviar detalles de ejecución por correo electrónico» + «solo si la tarea
-#     finaliza de forma anómala»: es la vía de CORREO más sencilla del aviso de poco espacio (ver más abajo).
+#     Configuración de la tarea → «Enviar detalles de ejecución por correo electrónico» (con TU dirección en el campo
+#     de la propia tarea) + «solo si la tarea finaliza de forma anómala»: es la vía de CORREO más sencilla del aviso
+#     de poco espacio (ver más abajo). Para probarlo, crea una tarea APARTE con --probar-aviso y bórrala después: DSM
+#     no relanza una tarea que sigue en ejecución, y dejar --probar-aviso en la tarea de copia la dejaría sin copiar.
 #
 #   A mano:
 #     sudo /volume1/docker/GestorBiblioteca/scripts/sincronizar-copia.sh                 (copia)
