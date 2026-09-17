@@ -3918,6 +3918,15 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       [--muestra 419@2016-01] [--periodicidad] → ademas renombra, fija CDU (mueve carpetas → NAS)/editorial/idioma/
       descripcion y rehace fecha, nº, clave, inventario y titulos. Solo Mongo + indice de busqueda; los sidecars
       los regenera la campaña «sidecars». Despues, «limpiar-huerfanos».
+      COPIA PREVIA OBLIGATORIA (17-sep): con --ejecutar, ANTES de escribir guarda el original completo de lo que va a
+      tocar (numeros + sus cabeceras) en logs/copias-bd/sanear-numeros-revista-<fecha>.json (EJSON: ObjectId y fechas
+      intactos; en el NAS, /volume1/docker/GestorBiblioteca/logs, que el despliegue no toca) y lo relee; si falla, no
+      escribe. --restaurar <fichero> [--ejecutar] lo deshace (replaceOne + reindexado + fecha_actualizacion para que la
+      campaña «sidecars» reescriba sus registros). --solo-copia la guarda sin cambiar nada. Motivo: el catalogo vive en
+      Atlas GRATUITO, sin copias automaticas, y la copia USB solo lleva los FICHEROS (CDU), no la base. Probado: 510
+      numeros y 203 cabeceras, 1,8 MB, 510/510 identicos a la base. Se puede ejecutar con la copia USB en marcha (solo
+      toca Mongo); los ~1.000 registro.json/.marc.xml que reescriba despues la campaña los lleva la copia siguiente
+      (pocos MB) y sus versiones viejas quedan en _retirados/<fecha> del disco.
     * NOTA: las carpetas de _REVISTAS inspeccionadas ANTES de este cambio tienen guias sin portada leida. Para
       aprovecharlo: «🤖 IA» del Inspector sobre la carpeta (reescribe las guias del agente y las aprobadas en el
       panel; no las hechas a mano).

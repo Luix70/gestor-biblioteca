@@ -46,12 +46,23 @@
  *   node scripts/sanear-numeros-revista.js --cabecera "l'historie" --nombre "L'Histoire" --cdu 94 --editorial "Sophia Publications" \
  *        --idioma fr --periodo 2016 --meses-del-nombre --muestra 419@2016-01 --periodicidad mensual [--ejecutar]
  *
+ * COPIA Y MARCHA ATRÁS. Con --ejecutar, ANTES de escribir nada guarda el original COMPLETO de cada número que va a
+ * tocar (con --cabecera, todos los de esa cabecera) y de sus cabeceras en logs/copias-bd/sanear-numeros-revista-
+ * <fecha>.json (EJSON: conserva ObjectId y fechas), y comprueba que se relee entero; si no puede, no escribe. El
+ * catálogo vive en Atlas y el Atlas gratuito no hace copias: esta es la red para deshacer ESTE cambio.
+ *   node scripts/sanear-numeros-revista.js --restaurar logs/copias-bd/<fichero>.json [--ejecutar]
+ *   node scripts/sanear-numeros-revista.js --contaminadas --solo-copia      (solo guarda la copia; no cambia nada)
+ *
  * Toca Mongo (y el índice de búsqueda); los sidecars de cada carpeta los regenera después la campaña «sidecars»
  * (ve la fecha_actualizacion). Salvo --cdu, se puede ejecutar desde cualquier máquina. Reanudable: lo ya saneado
  * no tiene nada que retirar. Después, «limpiar-huerfanos» poda los autores y editoriales que se queden sin libros.
  */
 import 'dotenv/config';
 import '../src/config.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { BSON, ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
 import { tituloDeNumero, tituloEsDelFichero, claveNumero, afinarFechaNumero, periodoDeTexto, pareceSerieLibros } from '../src/utils/revistas.js';
@@ -64,6 +75,10 @@ const valor = (flag) => { const i = args.indexOf(flag); return i >= 0 && args[i 
 const EJECUTAR = args.includes('--ejecutar');
 const CONTAMINADAS = args.includes('--contaminadas');
 const CABECERA = valor('--cabecera');
+const RESTAURAR = valor('--restaurar');
+const SOLO_COPIA = args.includes('--solo-copia');
+const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DIR_COPIAS = path.join(RAIZ, 'logs', 'copias-bd');
 const OPC = {
     nombre: valor('--nombre'),
     cdu: valor('--cdu'),
@@ -165,10 +180,92 @@ function editorialComun(docs) {
     return null;
 }
 
+/**
+ * COPIA de lo que se va a tocar, ANTES de escribir: los números del plan (con --cabecera, todos los de la cabecera, porque
+ * su nombre se cambia en todos) y sus cabeceras, completos, en EJSON. Se relee para comprobar que está entera: una copia
+ * que no se puede leer no es una copia. Devuelve { ruta, numeros, colecciones }.
+ */
+async function guardarCopia(db, plan, cab) {
+    const bib = db.collection('biblioteca');
+    const cols = db.collection('colecciones');
+    const ids = new Map(plan.map((p) => [String(p.doc._id), p.doc._id]));
+    if (cab) {
+        for (const d of await bib.find({ coleccion: cab._id }, { projection: { _id: 1 } }).toArray()) ids.set(String(d._id), d._id);
+    }
+    const numeros = await bib.find({ _id: { $in: [...ids.values()] } }).toArray();
+    const idsCol = new Set(numeros.map((d) => String(d.coleccion || '')).filter(Boolean));
+    if (cab) idsCol.add(String(cab._id));
+    const colecciones = await cols.find({ _id: { $in: [...idsCol].map((i) => new ObjectId(i)) } }).toArray();
+
+    await fs.mkdir(DIR_COPIAS, { recursive: true });
+    const sello = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const ruta = path.join(DIR_COPIAS, 'sanear-numeros-revista-' + sello + '.json');
+    const contenido = { script: 'sanear-numeros-revista', fecha: new Date(), argumentos: args, biblioteca: numeros, colecciones };
+    await fs.writeFile(ruta, BSON.EJSON.stringify(contenido, { relaxed: false }));
+    const relectura = BSON.EJSON.parse(await fs.readFile(ruta, 'utf8'), { relaxed: false });
+    if (relectura.biblioteca?.length !== numeros.length || relectura.colecciones?.length !== colecciones.length) {
+        throw new Error('la copia ' + ruta + ' no se ha podido releer entera');
+    }
+    return { ruta: path.relative(RAIZ, ruta), numeros: numeros.length, colecciones: colecciones.length };
+}
+
+/** Devuelve los documentos y cabeceras de una copia a su estado de entonces. DRY-RUN salvo --ejecutar. */
+async function restaurar(db, fichero) {
+    const ruta = path.isAbsolute(fichero) ? fichero : path.join(RAIZ, fichero);
+    const copia = BSON.EJSON.parse(await fs.readFile(ruta, 'utf8'), { relaxed: false });
+    const total = copia.biblioteca.length + copia.colecciones.length;
+    console.log('\n♻️  Restaurar la copia del ' + (copia.fecha?.toISOString?.() || '?') + ' (' + (copia.argumentos || []).join(' ') + ')');
+    console.log('   ' + copia.biblioteca.length + ' documento(s) y ' + copia.colecciones.length + ' cabecera(s) volverían a su estado de entonces.');
+    if (!EJECUTAR) {
+        console.log('\n   (DRY-RUN: no se ha tocado nada. Repite con --ejecutar para restaurar.)\n');
+        return;
+    }
+    const bib = db.collection('biblioteca');
+    const cols = db.collection('colecciones');
+    const t0 = Date.now();
+    let n = 0;
+    let fallos = 0;
+    const progreso = () => {
+        const seg = (Date.now() - t0) / 1000;
+        const eta = n ? Math.round((total - n) * seg / n) : 0;
+        process.stdout.write('\r   ' + n + '/' + total + ' (' + Math.round(n * 100 / total) + ' %) · ETA ' + eta + ' s   ');
+    };
+    for (const d of copia.biblioteca) {
+        // fecha_actualizacion = ahora: así la campaña «sidecars» reescribe el registro.json de la carpeta con lo restaurado.
+        try {
+            await bib.replaceOne({ _id: d._id }, { ...d, fecha_actualizacion: new Date() });
+            await indexarDoc(db, d._id).catch(() => {});
+        } catch (e) {
+            fallos++;
+            console.warn('\n   ⚠️  ' + d._id + ': ' + e.message);
+        }
+        n++;
+        progreso();
+    }
+    for (const c of copia.colecciones) {
+        try {
+            await cols.replaceOne({ _id: c._id }, c);
+        } catch (e) {
+            fallos++;
+            console.warn('\n   ⚠️  cabecera ' + c._id + ': ' + e.message);
+        }
+        n++;
+        progreso();
+    }
+    process.stdout.write('\n');
+    console.log('   ✔ Restaurados ' + (n - fallos) + ' de ' + total + (fallos ? ' · ⚠️ fallos: ' + fallos : '') + '.\n');
+    if (fallos) process.exitCode = 1;
+}
+
 async function main() {
+    if (RESTAURAR) {
+        await restaurar(await conectarDB(), RESTAURAR);
+        process.exit(process.exitCode || 0);
+    }
     if (!CONTAMINADAS && !CABECERA) {
         console.error('Uso: node scripts/sanear-numeros-revista.js --contaminadas | --cabecera "<nombre>" [--nombre …] [--cdu …] [--editorial …] [--idioma …]\n'
-            + '       [--descripcion …] [--periodo 2016|2009-2016] [--meses-del-nombre] [--muestra 419@2016-01] [--periodicidad mensual] [--ejecutar]');
+            + '       [--descripcion …] [--periodo 2016|2009-2016] [--meses-del-nombre] [--muestra 419@2016-01] [--periodicidad mensual] [--ejecutar | --solo-copia]\n'
+            + '       node scripts/sanear-numeros-revista.js --restaurar logs/copias-bd/<fichero>.json [--ejecutar]');
         process.exit(1);
     }
     const db = await conectarDB();
@@ -334,8 +431,14 @@ async function main() {
         }
     }
 
+    if (SOLO_COPIA) {
+        const c = await guardarCopia(db, plan, CABECERA ? cab : null);
+        console.log('\n   💾 Copia guardada (no se ha cambiado nada): ' + c.ruta + ' · ' + c.numeros + ' número(s) y ' + c.colecciones + ' cabecera(s).\n');
+        process.exit(0);
+    }
     if (!EJECUTAR) {
-        console.log('\n   (DRY-RUN: no se ha tocado nada. Haz una COPIA DE SEGURIDAD de la base y repite con --ejecutar.)\n');
+        console.log('\n   (DRY-RUN: no se ha tocado nada. Con --ejecutar, ANTES de escribir guarda en logs/copias-bd/ el original de todo lo');
+        console.log('    que va a tocar, y se puede deshacer con --restaurar.)\n');
         process.exit(0);
     }
 
@@ -349,6 +452,17 @@ async function main() {
             process.exit(1);
         }
     }
+
+    // ── COPIA ANTES DE ESCRIBIR (obligatoria: si no se puede guardar y releer, no se toca nada) ──────────
+    let copia;
+    try {
+        copia = await guardarCopia(db, plan, CABECERA ? cab : null);
+    } catch (e) {
+        console.error('\n   ❌ No se pudo guardar la copia previa (' + e.message + '): no se cambia nada.\n');
+        process.exit(1);
+    }
+    console.log('\n   💾 Copia de lo que se va a tocar: ' + copia.ruta + ' (' + copia.numeros + ' número(s), ' + copia.colecciones + ' cabecera(s)).');
+    console.log('      Para deshacer: node scripts/sanear-numeros-revista.js --restaurar "' + copia.ruta + '" --ejecutar\n');
 
     // ── Ejecución ─────────────────────────────────────────────────────────────────────────────────────
     if (OPC.editorial && !editorialId) editorialId = (await db.collection('editoriales').insertOne({ nombre: OPC.editorial })).insertedId;
