@@ -3426,6 +3426,27 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
       que FreeFileSync deja dentro del arbol; no son datos de la biblioteca).
       Codigo de salida 24 de rsync = «ficheros desaparecidos durante la copia»: ESPERABLE en una
       biblioteca viva (el Conformador mueve carpetas al reclasificar), no es un fallo.
+    * REGISTRO LEGIBLE + ESPACIO DEL DISCO (17-sep, peticion del usuario: «el log es poco claro»). Antes cada
+      copia volcaba las estadisticas crudas de rsync (--human-readable) seguidas, sin separacion. Ahora:
+      - copia-biblioteca.log (en el disco): cada copia empieza con dos lineas en blanco y un separador doble
+        (════), pasos numerados (1. Preparacion · 2. Movimientos replicados · 3. Copia · 4. Limpieza de
+        _retirados) y un bloque RESUMEN: resultado y duracion; COPIADOS «2.822 ficheros · 12.964 MB (12,66 GB) ·
+        4,2 MB/s»; carpetas movidas sin retransferir; APARTADOS a _retirados/<fecha> por esta copia (diferencia
+        antes/despues: la tanda del dia acumula las dos copias diarias); tamaño de la biblioteca; espacio del
+        disco (libre/total/%, lo que ha ocupado esta copia y «≈ N dias al ritmo de los ultimos D dias», con un
+        historial .espacio-copia.hist en el disco). Los problemas de rsync (permisos, disco lleno…) se cuentan y
+        se enseñan los 5 primeros. Una copia aplazada («gestor ocupado») es una linea suelta tras una en blanco.
+      - copia-biblioteca-detalle.log: la salida COMPLETA de rsync de cada copia. rsync va ahora con --stats SIN
+        --human-readable: bytes exactos, que el resumen formatea (valen las estadisticas de rsync 3.0 y 3.1+).
+      - AVISO DE POCO ESPACIO: por debajo de BK_AVISO_LIBRE_PCT (10 %), linea ⚠️ en el resumen y aviso como mucho
+        una vez cada BK_AVISO_CADA_HORAS (24 h; la marca .aviso-espacio se borra al recuperarse): (1) correo
+        directo si BK_CORREO y hay ssmtp/msmtp/sendmail; (2) notificacion del escritorio de DSM (synodsmnotify);
+        (3) si no hubo correo directo, tras una copia BUENA sale con codigo BK_SALIDA_AVISO (3) → con la tarea de
+        DSM en «Enviar detalles de ejecucion por correo… solo si finaliza de forma anomala», DSM manda el
+        registro con su propia configuracion de correo (Panel de control → Notificacion). 0 lo desactiva.
+        Probar sin esperar a llenarlo: sudo …/sincronizar-copia.sh --probar-aviso (no copia; no deja marca).
+      - Probado en el PC con un rsync falso (estadisticas de 3.0): bloques, cifras, movimiento replicado, error de
+        permisos, aviso por codigo de salida, intervalo de 24 h, --probar-aviso y copia aplazada.
     * GET /api/ocupado (PUBLICA, antes de la puerta de autenticacion, como /api/version) — semaforo
       que consulta el script antes de arrancar. Devuelve {ocupado, ingiriendo, conformando, actividad}
       desde estadoVigilante()/estadoConformador(). OJO al matiz: esperar a que este ocioso NO es
