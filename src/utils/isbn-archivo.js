@@ -3,7 +3,8 @@
  * colecciones (`transmedia.js`), el motor de re-identificación (`reidentificar-doc.js`) y su acción/backfill.
  *
  * Confianza del ISBN (misma política que el orquestador, para NO colgar un ISBN equivocado):
- *   · EPUB → dc:identifier del OPF (propio del libro) → se confía.
+ *   · EPUB → dc:identifier del OPF (propio del libro) → se confía; si el OPF no lo trae, un ISBN del TEXTO
+ *     (página de créditos) solo se acepta si CORROBORA por título contra el Fichero, como en un PDF.
  *   · MOBI/AZW → registro EXTH (propio) → se confía.
  *   · PDF → el ISBN PROPIO (nombre-es-ISBN / DOI / bloque CIP) se confía; un candidato del CUERPO del texto
  *     solo se acepta si CORROBORA por título contra el Fichero (`corroborarISBNporTitulo`).
@@ -11,9 +12,10 @@
  */
 import path from 'node:path';
 import { extraerMetadatosPdf, extraerISBNs } from './lector-pdf.js';
-import { extraerMetadatosEpub } from './lector-epub.js';
+import { extraerMetadatosEpub, isbnsEnTextoEpub, textoInicialEpub } from './lector-epub.js';
 import { leerMobi } from './lector-mobi.js';
 import { corroborarISBNporTitulo } from './buscador-local.js';
+import { parsearBloqueCatalogacion } from './cip.js';
 import { validarISBN } from './identificadores.js';
 
 // Tipo por extensión — sin importar el orquestador (evita ciclos y peso; solo estos formatos dan un ISBN de
@@ -46,7 +48,23 @@ export async function isbnDesdeArchivo(abs, { nombre = '', tituloRef = '' } = {}
     try {
         if (tipo === 'epub') {
             const m = await extraerMetadatosEpub(abs);
-            return { isbn: validarISBN(m?.isbn) || isbnNombre, titulo: m?.titulo || null, autores: m?.autores || [], editorial: m?.editorial || null };
+            let isbn = validarISBN(m?.isbn) || isbnNombre;
+            // El OPF no lo trae: mirar las PÁGINAS DE CRÉDITOS. El bloque CIP es el registro de catalogación de
+            // ESTE libro → propio, se confía. Un ISBN suelto del texto, en cambio, puede ser el de otra obra
+            // citada → solo se acepta si CORROBORA por título contra el Fichero (como el cuerpo de un PDF).
+            if (!isbn) {
+                const texto = await textoInicialEpub(abs);
+                const cip = texto ? parsearBloqueCatalogacion(texto) : null;
+                isbn = cip?.isbns?.map((x) => validarISBN(x.isbn)).find(Boolean) || null;
+                if (!isbn) {
+                    const candidatos = await isbnsEnTextoEpub(abs, { texto });
+                    if (candidatos.length) {
+                        const ref = m?.titulo || tituloRef || base;
+                        isbn = await corroborarISBNporTitulo({ candidatos, titulo: ref }).catch(() => null);
+                    }
+                }
+            }
+            return { isbn: isbn || null, titulo: m?.titulo || null, autores: m?.autores || [], editorial: m?.editorial || null };
         }
         if (tipo === 'mobi') {
             const m = await leerMobi(abs);

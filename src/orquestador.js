@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { extraerMetadatosEpub } from './utils/lector-epub.js';
+import { extraerMetadatosEpub, isbnsEnTextoEpub, textoInicialEpub } from './utils/lector-epub.js';
+import { parsearBloqueCatalogacion } from './utils/cip.js';
 import { recuperarOriginalesDeFichero } from './utils/titulo-original.js';
 import { extraerMetadatosPdf, textoPagina } from './utils/lector-pdf.js';
 import { medirImagen } from './utils/medir-imagen.js';
@@ -316,6 +317,46 @@ export async function procesarRecurso(entrada) {
         }
         // Título/idioma original del propio EPUB (página de créditos), gratis y sin IA.
         await rellenarOriginalesDesdeFichero(datosBase, rutas[0]);
+        // LAS PÁGINAS DE CRÉDITOS DEL EPUB, que hasta ahora no se miraban. Un EPUB no siempre declara el ISBN
+        // en el OPF (o el ripeo se lo quitó), pero su texto inicial suele traerlo impreso y, en los libros
+        // anglosajones, el BLOQUE CIP entero: Dewey, LC, LCCN y materias — es decir, la CDU SIN IA. Es
+        // exactamente lo que ya se hace con las primeras páginas de un PDF; aquí sale aún más barato porque no
+        // hay que rasterizar nada. Todo offline.
+        const textoCreditos = await textoInicialEpub(rutas[0]);
+        const cipEpub = textoCreditos ? parsearBloqueCatalogacion(textoCreditos) : null;
+        if (cipEpub) {
+            datosBase.cip = cipEpub;                       // lo consume motor-enriquecimiento (Dewey/LC → CDU)
+            if (cipEpub.isbns?.length) datosBase.isbns_rol = cipEpub.isbns.map((x) => ({ isbn: x.isbn, rol: x.etiqueta || 'desconocido' }));
+        }
+        // ISBN, por orden de confianza. Todas las vías son del PROPIO fichero, gratis y sin IA (mismo criterio
+        // que `utils/isbn-archivo.js`):
+        //   1. El del bloque CIP: es el registro de catalogación DE ESTE libro → propio.
+        //   2. Un ISBN incrustado en el NOMBRE (así se nombran, p. ej., los de University Press) → propio.
+        //   3. Un ISBN suelto del texto NO es autoritativo (el libro puede citar el de otra obra): solo se
+        //      acepta si CORROBORA por título contra el Fichero, como el cuerpo de un PDF.
+        if (!datosBase.isbn) {
+            const nombreEpub = path.basename(rutas[0]);
+            const delCip = cipEpub?.isbns?.map((x) => validarISBN(x.isbn)).find(Boolean) || null;
+            const delNombre = extraerISBNs(nombreEpub).map((x) => validarISBN(x)).find(Boolean);
+            if (delCip) {
+                datosBase.isbn = delCip;
+                datosBase.isbn_propio = delCip;
+                datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `ISBN ${delCip} del bloque CIP impreso en el EPUB (el OPF no lo trae).`];
+            } else if (delNombre) {
+                datosBase.isbn = delNombre;
+                datosBase.isbn_propio = delNombre;
+                datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `ISBN ${delNombre} tomado del nombre del fichero (el OPF no lo trae).`];
+            } else {
+                const candidatos = await isbnsEnTextoEpub(rutas[0], { texto: textoCreditos });
+                const corroborado = candidatos.length
+                    ? await corroborarISBNporTitulo({ candidatos, titulo: datosBase.titulo || nombreEpub }).catch(() => null)
+                    : null;
+                if (corroborado) {
+                    datosBase.isbn = corroborado;
+                    datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `ISBN ${corroborado} leído en la página de créditos del EPUB y corroborado por título en el Fichero.`];
+                }
+            }
+        }
         // La cubierta embebida se resuelve más abajo (resolverPortada), midiéndola frente a las
         // portadas remotas; aquí solo se conserva en datosBase para la pista de visión.
 

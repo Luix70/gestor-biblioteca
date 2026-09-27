@@ -4,29 +4,102 @@ import fs from 'fs/promises';
 import path from 'path';
 import { validarISBN } from './identificadores.js';
 import { esTituloArtefacto } from './parsear-nombre.js';
+import { extraerISBNs } from './lector-pdf.js';   // mismo criterio de captura de ISBN en texto que en un PDF
 
 const RE_PORTADA = /cover|portada|caratula|cubierta|frontcover/i;
 const RE_RUIDO = /logo|ex_?libris|fuente|epl|brand|banner|sello/i;
 const esImagenHref = (href, mt) => (mt && mt.startsWith('image/')) || /\.(jpe?g|png|gif|webp)$/i.test(href || '');
 
 /**
- * ISBN desde Dublin Core. Recorre TODOS los dc:identifier pero solo acepta los marcados como
- * ISBN (scheme con 'isbn' o valor 'urn:isbn:'), y SIEMPRE valida el dígito de control. Esto
- * capta variantes (scheme en minúsculas, urn:isbn:, sin scheme con prefijo) y, sobre todo,
- * descarta los UUID: su hexadecimal contiene tiradas de 10 dígitos que parecen un ISBN-10.
+ * Un OPF puede escribir sus PROPIOS elementos con prefijo de espacio de nombres (<opf:metadata>,
+ * <opf:manifest>), y es igual de válido que sin él. cheerio en xmlMode trata el prefijo como parte del
+ * nombre, así que `$('metadata')` NO encuentra <opf:metadata> y se perdía el OPF ENTERO: título, autores,
+ * editorial, sinopsis e ISBN (medido: el 3 % de los EPUB sin ISBN — libros de University Press — quedaron
+ * con el nombre del fichero por título y sin ningún autor).
+ *
+ * Se quita el prefijo SOLO de los nombres de ELEMENTO del espacio OPF, el que declare el propio fichero.
+ * Los ATRIBUTOS (opf:scheme, opf:role, opf:file-as) se dejan intactos: el resto del lector los busca así.
+ */
+function normalizarOpf(xml) {
+    const prefijos = new Set(
+        [...String(xml).matchAll(/xmlns:([A-Za-z0-9_.-]+)\s*=\s*["']http:\/\/www\.idpf\.org\/2007\/opf["']/g)].map((m) => m[1]),
+    );
+    let salida = String(xml);
+    for (const p of prefijos) salida = salida.replace(new RegExp('<(/?)' + p + ':', 'g'), '<$1');
+    return salida;
+}
+
+/**
+ * ISBN desde Dublin Core. Recorre TODOS los dc:identifier y acepta, por orden de fiabilidad:
+ *   1. El MARCADO como ISBN: atributo `scheme` (con el prefijo que sea: opf:scheme, ns6:scheme…),
+ *      atributo `id` que diga isbn, o valor con 'urn:isbn:'/'ISBN:'.
+ *   2. El DESNUDO: un identificador sin etiqueta alguna cuyo valor sea un ISBN-13 con prefijo 978/979.
+ *      Muchos EPUB comerciales escriben `<dc:identifier id="PrimaryID">978-0-8129-9401-8</dc:identifier>`.
+ * Siempre se valida el dígito de control. El caso 2 exige 13 dígitos y prefijo 978/979 a propósito: así un
+ * UUID no puede colarse (su hexadecimal contiene tiradas de 10 dígitos que pasarían por un ISBN-10).
  */
 export function extraerIsbnDublinCore($, metadata) {
-    let isbn = null;
+    let marcado = null;
+    let desnudo = null;
     metadata.find('dc\\:identifier').each((i, el) => {
-        if (isbn) return;
-        const scheme = ($(el).attr('opf:scheme') || $(el).attr('scheme') || '').toLowerCase();
+        if (marcado) return;
+        const attrs = el.attribs || {};
+        // Nombre local del atributo: 'scheme' venga como scheme, opf:scheme o ns6:scheme.
+        const scheme = Object.entries(attrs)
+            .filter(([k]) => k.split(':').pop().toLowerCase() === 'scheme')
+            .map(([, v]) => String(v).toLowerCase()).join(' ');
+        const id = String(attrs.id || '').toLowerCase();
         const val = $(el).text().trim();
-        const esCandidato = scheme.includes('isbn') || /isbn/i.test(val);
-        if (!esCandidato) return;
-        const candidato = validarISBN(val.replace(/.*isbn:?/i, '')); // quita 'urn:isbn:'/'ISBN:' y valida
-        if (candidato) isbn = candidato;
+
+        if (scheme.includes('isbn') || id.includes('isbn') || /isbn/i.test(val)) {
+            const candidato = validarISBN(val.replace(/.*isbn:?/i, '')); // quita 'urn:isbn:'/'ISBN:' y valida
+            if (candidato) { marcado = candidato; return; }
+        }
+        if (!desnudo && !scheme && !id.includes('uuid')) {
+            const limpio = val.replace(/[\s-]/g, '');
+            if (/^97[89]\d{10}$/.test(limpio)) desnudo = validarISBN(limpio) || null;
+        }
     });
-    return isbn;
+    return marcado || desnudo;
+}
+
+// Páginas que suelen llevar el ISBN impreso (créditos/colofón/portadilla): se miran ANTES que el resto.
+const RE_CREDITOS = /cop[yi]|cred|colof|colophon|legal|imprint|title|port|isbn/i;
+
+/**
+ * TEXTO PLANO de las primeras páginas del EPUB, con las que parecen de CRÉDITOS delante. Ahí está lo que un
+ * EPUB no siempre pone en el OPF y vale oro: el ISBN impreso y, en los libros anglosajones, el BLOQUE CIP
+ * entero (Dewey, LC, LCCN, materias, ISBN por rol). Es el equivalente a las primeras páginas de un PDF, y sale
+ * gratis: el fichero ya está abierto. Nunca lanza; devuelve '' si algo falla.
+ */
+export async function textoInicialEpub(rutaArchivo, { maxDocs = 25 } = {}) {
+    try {
+        const zip = new AdmZip(await fs.readFile(rutaArchivo));
+        const paginas = zip.getEntries().filter((e) => !e.isDirectory && /\.(x?html?|xml)$/i.test(e.entryName) && !/\.opf$/i.test(e.entryName));
+        // Créditos primero; el resto, en el orden del propio fichero (que suele ser el de lectura).
+        paginas.sort((a, b) => (RE_CREDITOS.test(b.entryName) ? 1 : 0) - (RE_CREDITOS.test(a.entryName) ? 1 : 0));
+        let texto = '';
+        for (const e of paginas.slice(0, maxDocs)) {
+            try { texto += ' ' + e.getData().toString('utf8').replace(/<[^>]+>/g, ' '); } catch { /* página ilegible */ }
+        }
+        return texto.replace(/\s+/g, ' ').trim();
+    } catch { return ''; }
+}
+
+/**
+ * ISBN VÁLIDOS escritos en el TEXTO del EPUB («ISBN 978-0-8129-9400-1»). NO son autoritativos —un libro puede
+ * citar el ISBN de OTRA obra—, así que el llamador debe corroborarlos por título (misma política que el cuerpo
+ * de un PDF). Se descartan los de relleno (0000000000, 1111111111), que pasan el dígito de control.
+ */
+export async function isbnsEnTextoEpub(rutaArchivo, { maxDocs = 25, texto = null } = {}) {
+    const t = texto ?? await textoInicialEpub(rutaArchivo, { maxDocs });
+    const out = new Set();
+    for (const c of extraerISBNs(t)) {
+        const v = validarISBN(c);
+        if (v && !/^(\d)\1+$/.test(v)) out.add(v);
+        if (out.size >= 8) break;
+    }
+    return [...out];
 }
 
 /**
@@ -214,7 +287,7 @@ export async function leerImagenesEpub(ruta, { max = 120, minBytes = 256 } = {})
         const opfPath = cheerio.load(cont.getData().toString('utf8'), { xmlMode: true })('rootfile').attr('full-path');
         const opf = opfPath && zip.getEntry(opfPath);
         if (!opf) return { drm: false, total: 0, imagenes: [] };
-        const $ = cheerio.load(opf.getData().toString('utf8'), { xmlMode: true });
+        const $ = cheerio.load(normalizarOpf(opf.getData().toString('utf8')), { xmlMode: true });
         const imagenes = imagenesEnOrdenEpub(zip, $, opfPath, { max, minBytes });
         return { drm: false, total: imagenes.length, imagenes };
     } catch { return { drm: false, total: 0, imagenes: [] }; }
@@ -285,7 +358,7 @@ export async function extraerMetadatosEpub(rutaArchivo) {
             const opfEntry = zip.getEntry(opfPath);
             if (!opfEntry) throw new Error(`Falta el archivo OPF en: ${opfPath}`);
 
-            const opfXml = opfEntry.getData().toString("utf8");
+            const opfXml = normalizarOpf(opfEntry.getData().toString("utf8"));
             const $ = cheerio.load(opfXml, { xmlMode: true });
             const metadata = $('metadata');
 

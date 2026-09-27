@@ -927,6 +927,37 @@ de ficheros clasificado por CDU.
       (aquí prima el throughput; el Fichero es una consulta SQLite barata). `utils/isbn-archivo·isbnDesdeArchivo`
       (extracción pura) + `buscarEnFicheroLocal`. Best-effort: nunca rompe la ingesta. La CDU/carpeta NO se
       tocan (el miembro vive en la carpeta de la colección; el Conformador reclasifica si mejora el título).
+
+    EPUB: LEER DE VERDAD EL OPF Y LAS PÁGINAS DE CRÉDITOS (2026-09-27). Un EPUB daba su ISBN por UNA sola vía
+    —el dc:identifier del OPF y solo si venía ETIQUETADO como ISBN—, y fallaba mucho más de lo que parecía.
+    Medido sobre 150 de los 4.620 EPUB catalogados SIN ISBN: el 11 % lo tenía en el propio fichero. Cuatro
+    agujeros, todos arreglados (`utils/lector-epub.js`, `utils/isbn-archivo.js`, `orquestador.js`):
+      · OPF CON PREFIJO DE ESPACIO DE NOMBRES (`<opf:metadata>`): cheerio en xmlMode trata el prefijo como
+        parte del nombre, así que `$('metadata')` devolvía CERO y se perdía el OPF ENTERO — ni título, ni
+        autores, ni editorial, ni sinopsis, ni ISBN (la ficha se quedaba con el nombre del fichero por
+        título). El 3 % de los EPUB sin ISBN, todos de University Press. `normalizarOpf` quita el prefijo
+        SOLO de los nombres de ELEMENTO del espacio OPF; los atributos (opf:scheme, opf:role, opf:file-as) se
+        dejan intactos porque el resto del lector los busca así.
+      · IDENTIFICADOR NO ETIQUETADO: `<dc:identifier id="PrimaryID">978-0-8129-9401-8</dc:identifier>`. Se
+        acepta si, sin guiones, es un ISBN-13 con prefijo 978/979 y dígito de control correcto (un UUID no
+        puede colarse por ahí; con un ISBN-10 sí podría, de ahí la exigencia de 13).
+      · ETIQUETA EN OTRO SITIO: `id="isbn"`, o `scheme` con el prefijo que sea (`ns6:scheme="ISBN"`).
+      · TEXTO DE LAS PRIMERAS PÁGINAS, que no se miraba nunca (`textoInicialEpub`, créditos primero):
+          - BLOQUE CIP → `parsearBloqueCatalogacion`, el MISMO que ya se usaba solo en PDF: da ISBN por rol
+            (papel/electrónico), materias LCSH, LCCN y, sobre todo, Dewey/LC ⇒ CDU SIN IA. Es el registro de
+            catalogación DE ESTE libro, así que su ISBN se trata como PROPIO.
+          - ISBN suelto → NO autoritativo (el libro puede citar el de otra obra): solo se acepta si CORROBORA
+            por título contra el Fichero, igual que el cuerpo de un PDF. Se descartan además los de relleno
+            (0000000000, 1111111111), que pasan el dígito de control.
+          - Un ISBN incrustado en el NOMBRE del fichero también se toma como propio (así se llaman los de
+            University Press: «9780226428154.UChicagoPress.….epub»).
+      RETROACTIVO: los ya catalogados se arreglan con la acción «🔎 Extraer ISBN» de Búsqueda/ficha o con
+      `node scripts/reidentificar-sin-isbn.js` (ambos usan `isbnDesdeArchivo`), sin IA y sin red.
+      LO QUE SIGUE SIN RESOLVERSE: el ripeo que BORRA el ISBN del fichero (típico de ePubLibre). Ahí no hay
+      nada que extraer y el Fichero local tampoco ayuda si no tiene esa edición (medido: la edición española
+      de «Vampiro», Valdemar Gótica 112, NO está en el volcado; solo una inglesa de 2020 con otro ISBN, que
+      sería un emparejamiento FALSO). Identificar la EDICIÓN por título+autor+editorial exige fuentes online
+      (OpenLibrary/Google/BNE) o IA, y comprobar editorial/idioma/año antes de aceptar nada.
     · AUDIOLIBRO = unidad con audio y SIN PDF de lectura → doc naturaleza:'audiolibro',
       formatos:['audio']. Una lectura CON audio se queda como libro con formatos:['pdf','audio']
       (el thumbnail avisa) + su playlist; los audios (audios[]) se reproducen desde la ficha
