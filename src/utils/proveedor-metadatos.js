@@ -8,6 +8,8 @@ import { buscarEnBNF } from './buscador-bnf.js';
 import { buscarEnBNE } from './buscador-bne-sru.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { extraerContribuciones } from './contribuciones.js';
+import { variantesISBN } from './identificadores.js';
+import { mismoNombreAutor } from './huecos-autoridad.js';
 
 // ─── BNE en línea (SRU del catálogo) ────────────────────────────────────────────────────────────────────
 // Lenguas de España y prefijos ISBN de España (978-84, 979-13): para esas ediciones la BNE es la autoridad.
@@ -40,6 +42,28 @@ async function completarDesdeBNE(datosExtra, rellenar, isbns) {
     if (b.dimensiones && !datosExtra.dimensiones_bne) datosExtra.dimensiones_bne = b.dimensiones;
     datosExtra.alertas.push('Datos complementados desde la BNE (catálogo en línea).');
     return true;
+}
+
+// ─── ¿Es de ESTE libro lo que devolvió una API? ────────────────────────────────────────────────────────
+// OpenLibrary y Google Books, si no encuentran el ISBN, BUSCAN POR TÍTULO y devuelven lo primero que casa… que
+// puede ser OTRO libro. Medido: ISBN 9791387600075 («La misión», Tim Weiner, Debate 2026) no está en OpenLibrary;
+// su búsqueda por «La misión» devolvió un libro de Laura Gallego (Montena 2019, ISBN 8417460659) y la cascada tomó
+// su autor, su editorial, su año Y SU ISBN como si fueran de este libro. Mismo mal que el de las revistas con
+// libros homónimos. Regla:
+//   · Si CONOCEMOS el ISBN, solo vale un resultado con ESE ISBN (o su variante 10/13). Uno con otro ISBN —o sin
+//     ISBN— es otra edición u otro libro: se descarta entero.
+//   · Si NO lo conocemos, la búsqueda por título es la única vía, pero si sabemos el autor tiene que coincidir.
+function resultadoDeEsteLibro(info, isbnsNuestros, autor) {
+    if (!info) return { ok: false };
+    if (isbnsNuestros.size) {
+        const suyos = variantesISBN(info.isbn);
+        if (!suyos.some((v) => isbnsNuestros.has(v))) return { ok: false, motivo: `otro ISBN (${info.isbn || 'sin ISBN'})` };
+        return { ok: true };
+    }
+    if (autor && Array.isArray(info.autores) && info.autores.length && !info.autores.some((a) => mismoNombreAutor(a, autor))) {
+        return { ok: false, motivo: `otro autor (${info.autores.join(', ')})` };
+    }
+    return { ok: true };
 }
 
 // Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
@@ -266,6 +290,15 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             } else throw e;
         }
     }
+    // Los ISBN que ya sabemos de este libro (del fichero, de la visión o del Fichero local).
+    const isbnsNuestros = new Set([datosExtra.isbn, ...isbnsLookup].filter(Boolean).flatMap((x) => variantesISBN(x)));
+    if (infoOL) {
+        const v = resultadoDeEsteLibro(infoOL, isbnsNuestros, autor);
+        if (!v.ok) {
+            datosExtra.alertas.push(`OpenLibrary devolvió por título OTRO libro («${String(infoOL.titulo || '?').slice(0, 60)}», ${v.motivo}): descartado.`);
+            infoOL = null;
+        }
+    }
     if (infoOL) {
         rellenar('isbn', infoOL.isbn);
         rellenar('titulo', infoOL.titulo);
@@ -301,6 +334,13 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         // El mensaje distingue «sin cuota diaria» (lo normal con ingestas masivas) de una caída de verdad.
         if (e.tipo === 'infraestructura') datosExtra.alertas.push(`${/cuota/.test(e.message) ? e.message : 'Google Books inalcanzable'}: omitida.`);
         else throw e;
+    }
+    if (infoGB) {
+        const v = resultadoDeEsteLibro(infoGB, isbnsNuestros, autor);
+        if (!v.ok) {
+            datosExtra.alertas.push(`Google Books devolvió por título OTRO libro («${String(infoGB.titulo || '?').slice(0, 60)}», ${v.motivo}): descartado.`);
+            infoGB = null;
+        }
     }
     if (infoGB) {
         rellenar('isbn', infoGB.isbn);

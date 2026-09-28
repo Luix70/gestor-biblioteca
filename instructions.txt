@@ -1085,6 +1085,18 @@ de ficheros clasificado por CDU.
         existía. Hoy hay 400 carpetas compartidas: 328 de colecciones (a propósito), 62 del mismo libro en varios
         ficheros y 10 de libros DISTINTOS con el mismo ISBN (probablemente uno lleva el ISBN del otro).
 
+    LIBROS HOMÓNIMOS EN LA CASCADA (2026-09-28, proveedor-metadatos · resultadoDeEsteLibro). OpenLibrary y Google
+    Books, si no encuentran el ISBN, BUSCAN POR TÍTULO y devuelven lo primero que casa… que puede ser otro libro.
+    Caso real: ISBN 9791387600075 («La misión», Tim Weiner, Debate 2026; en la BNE solo hay un «registro
+    provisional» con el título) no está en OpenLibrary; su búsqueda por «La misión» dio «La misión de Rox» de Laura
+    Gallego (Montena 2019, ISBN 8417460659) y la cascada tomó su autor, editorial, año Y SU ISBN; Google Books, que
+    tenía el bueno, llegó tarde y solo rellenó huecos. Lo veía todo lo que usa la cascada (cotejo, Enriquecedor,
+    Extraer ISBN, campañas, ingesta). Ahora: si conocemos el ISBN, solo vale un resultado con ESE ISBN (o su
+    variante 10/13); otro ISBN o ninguno → se descarta entero, con alerta. Sin ISBN, si sabemos el autor, tiene que
+    coincidir. Medido el alcance en los 7.336 EPUB de ePubLibre (autor del nombre del fichero ≠ autor de la ficha):
+    30, casi todos grafías de la misma persona; ~5 contaminados de verdad («Poesía completa» Bradbury/Brontë, «La
+    revelación» Godoy/May, «Querida yo» Clapés/Amón, «La invención del poder» Bueno de Mesquita/Campbell, «Título»).
+
     SEPARAR CARPETAS COMPARTIDAS — «1 documento ↔ 1 carpeta» (2026-09-28, scripts/separar-carpetas-compartidas.js).
     Había 72 carpetas (147 documentos, sin contar colecciones, que comparten a propósito) donde varios documentos
     apuntaban a la MISMA carpeta: casi siempre el mismo libro en dos ficheros (epub r1.2 y r1.3), a veces libros
