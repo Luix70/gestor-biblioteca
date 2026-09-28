@@ -91,3 +91,41 @@ export function parsearBloqueCatalogacion(texto) {
 
     return out;
 }
+
+// ─── CDU IMPRESA en la página de créditos ────────────────────────────────────────────────────────────────
+//
+// Algunas editoriales (sobre todo académicas, y muchas fichas catalográficas de libros hispanoamericanos)
+// imprimen la CDU en los créditos: «CDU 821.134.2-31"19"», «C.D.U.: 94(460)». Es la clasificación que
+// decidieron el autor y la editorial, y por eso tiene prioridad sobre la de la BNE y sobre cualquier deducción
+// (ver prioridad-cdu.js). Es RARA en esta biblioteca (medido: 0 de 300 EPUB y 0 de 200 PDF en español), así que
+// el lector es ESTRICTO para no inventar: los dos «aciertos» de aquella muestra eran falsos — el partido alemán
+// CDU y la CDU de OTRA obra citada en una bibliografía. Por eso solo se acepta:
+//   · la sigla CDU/C.D.U. (o «Clasificación Decimal Universal») seguida DIRECTAMENTE de un código con forma de CDU
+//     (empieza por dígito; solo dígitos y los signos de la CDU);
+//   · y cerca (±400 caracteres) de señales de PÁGINA DE CRÉDITOS de este libro: ISBN, depósito legal, «ficha
+//     catalográfica», «catalogación en publicación», «impreso en»… — no en medio del texto ni de una bibliografía.
+const RE_CDU_IMPRESA = new RegExp(
+    String.raw`(?:\bC\.?\s?D\.?\s?U\.?|Clasificaci[oó]n\s+Decimal\s+Universal)\s*[:.]?\s*`
+    + String.raw`(\d[\d.:/()\-=+"'’”“ ]{0,40}?)`
+    + String.raw`(?=\s*(?:$|[\n;·|,—–]|\s{2}|ISBN|I\.S\.B\.N|D\.\s?L\.|Dep[oó]sito|NIPO|\b[A-ZÁÉÍÓÚ][a-záéíóú]{2,}))`,
+    'gi',
+);
+const RE_CREDITOS_CERCA = /ISBN|I\.S\.B\.N|dep[oó]sito\s+legal|\bD\.\s?L\.|ficha\s+catalogr[aá]fica|catalogaci[oó]n\s+en\s+(la\s+)?publicaci[oó]n|impreso\s+en|printed\s+in|©|copyright/i;
+const RE_BIBLIOGRAFIA_CERCA = /bibliograf[ií]a|referencias|obras\s+citadas|Biblioteca\s+Virtual/i;
+
+/**
+ * CDU impresa en la página de créditos de ESTE libro, o null. Ver la nota de arriba (estricta a propósito).
+ * @param {string} texto  texto de las primeras páginas
+ */
+export function cduImpresa(texto) {
+    const t = String(texto || '');
+    for (const m of t.matchAll(RE_CDU_IMPRESA)) {
+        const codigo = m[1].replace(/[\s.;:,]+$/, '').replace(/\s+/g, ' ').trim();
+        if (!/^\d/.test(codigo) || codigo.length < 1) continue;
+        const entorno = t.slice(Math.max(0, m.index - 400), m.index + m[0].length + 400);
+        if (!RE_CREDITOS_CERCA.test(entorno)) continue;          // no es la página de créditos de este libro
+        if (RE_BIBLIOGRAFIA_CERCA.test(entorno) && !/ISBN/i.test(entorno)) continue;
+        return codigo;
+    }
+    return null;
+}

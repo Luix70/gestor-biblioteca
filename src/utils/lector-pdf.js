@@ -4,7 +4,7 @@ import path from 'path';
 import { extraerISSNs, validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre, esTituloArtefacto, esAutorArtefacto } from './parsear-nombre.js';
 import { extraerISBNsConRol, parsearVolumen } from './multivolumen.js';
-import { parsearBloqueCatalogacion } from './cip.js';
+import { parsearBloqueCatalogacion, cduImpresa } from './cip.js';
 import { timeoutPoppler } from './timeout-poppler.js';
 
 const execFileP = promisify(execFile);
@@ -250,6 +250,9 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // fiables, todo leído del propio fichero (fuente de archivo, máxima confianza).
         const cip = parsearBloqueCatalogacion(texto);
         if (cip) datos.cip = cip;
+        // CDU IMPRESA en los créditos (la decidieron autor y editorial): máxima prioridad tras la manual.
+        const cduImp = cduImpresa(texto);
+        if (cduImp) datos.cdu_impresa = cduImp;
 
         // Número de tomo desde el NOMBRE DE ARCHIVO ("… Vol. 4 - S-Z"): fuente fiable y propia de
         // ESTE fichero. Imprescindible cuando un tomo se cataloga SUELTO (llegó/estabilizó antes que

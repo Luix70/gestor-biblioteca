@@ -4,12 +4,15 @@ import { medirImagen } from '../utils/medir-imagen.js';
 import { resolverPortada } from '../utils/resolver-portada.js';
 import { rasterizarPaginas } from '../utils/rasterizar-pdf.js';
 import { extraerMetadatosEpub } from '../utils/lector-epub.js';
-import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion, restaurarOriginalSiFalta } from './util-mantenimiento.js';
+import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion, restaurarOriginalSiFalta, reubicarPorCdu } from './util-mantenimiento.js';
 import { arbolCDU } from '../utils/cdu-arbol.js';
 import { buscarEnFicheroLocal } from '../utils/buscador-local.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { buscarEnBNE } from '../utils/buscador-bne-sru.js';
 import { huecosDesdeAutoridad, autoresConAncla, mismoNombreAutor } from '../utils/huecos-autoridad.js';
+import { puedeSustituirCdu, fuenteCduDoc, rangoFuente, RANGO_CDU } from '../utils/prioridad-cdu.js';
+import { buscarAutoridadPorISBN } from '../utils/autoridad-isbn.js';
+import { cduDeAutoridadFiable } from '../utils/autoridad-isbn.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { calcularHashArchivo } from '../utils/hash-archivo.js';
@@ -203,8 +206,9 @@ export const TAREAS = [
             if (!cduNueva && (cip.dewey || cip.lcc)) {
                 try { const r = await resolverCDU({ dewey: cip.dewey || null, lcc: cip.lcc || null, titulo: doc.titulo, sinopsis: doc.sinopsis }); if (r?.cdu) { cduNueva = r.cdu; fuente = r.fuente; } } catch { /* sin CDU */ }
             }
-            if (cduNueva && cduNueva !== doc.cdu) {
+            if (cduNueva && cduNueva !== doc.cdu && puedeSustituirCdu(doc, cduNueva, fuente === 'CIP impreso' ? 'impresa' : 'clasificador')) {
                 set.cdu = cduNueva;
+                set.cdu_fuente = fuente === 'CIP impreso' ? 'impresa' : 'clasificador';
                 if (cip.dewey) set.dewey = String(cip.dewey).trim();
                 if (cip.lcc) set.lcc = String(cip.lcc).trim();
                 alertas.push(`CDU fijada desde el CIP impreso del escaneo (${fuente}): ${cduNueva}.`);
@@ -212,7 +216,50 @@ export const TAREAS = [
             if (cip.isbn && !doc.isbn) { const v = validarISBN(cip.isbn); if (v) { set.isbn = v; alertas.push(`ISBN ${v} leído del CIP impreso (visión, escaneo).`); } }
             if (cip.idioma_original && !doc.idioma_original) { set.idioma_original = String(cip.idioma_original).trim(); alertas.push('Idioma original del CIP.'); }
             if (cip.titulo_original && !doc.titulo_original) { set.titulo_original = String(cip.titulo_original).trim(); alertas.push('Título original del CIP.'); }
-            return Object.keys(set).length ? { set, alertas } : null;
+            if (!Object.keys(set).length) return null;
+            // La CDU nueva MUEVE la carpeta aquí mismo. Antes se dejaba a re-clasificar-cdu, que solo mueve cuando SU
+            // cálculo difiere del doc: con la CDU ya puesta no movía nada y la carpeta quedaba en el árbol viejo.
+            let carpetaNueva = null;
+            if (set.cdu) {
+                const reub = await reubicarPorCdu(doc, set.cdu);
+                if (reub?.set) Object.assign(set, reub.set);
+                carpetaNueva = reub?.carpetaNueva || null;
+                alertas.push(...(reub?.alertas || []));
+            }
+            return { set, alertas, carpetaNueva };
+        },
+    },
+
+    {
+        id: 'aplicar-cdu-bne',
+        version: 1,
+        descripcion: 'La CDU de la BNE (catalogada y revisada por bibliotecarios) tiene PRIORIDAD sobre la deducida (equivalencia Dewey/LCC o IA): si la BNE clasifica este ISBN de otra forma, se aplica y se MUEVE la carpeta a su árbol. Nunca toca una CDU manual ni una impresa en el propio libro, ni los tomos de una obra (comparten la de la obra). Fuente: la guardada (cdu_autoridad), el Fichero (volcado BNE) o, si falta, el catálogo en línea.',
+        aplica: (doc) => doc.tipo_recurso === 'libro' && !doc.obra && !doc.cdu_manual
+            && (!!doc.isbn || !!doc.cdu_autoridad) && rangoFuente(fuenteCduDoc(doc)) <= RANGO_CDU.bne,
+        async ejecutar(doc) {
+            // El registro de la BNE para este ISBN (Fichero → catálogo en línea). Hace falta aunque ya haya una
+            // cdu_autoridad guardada: con él se comprueba que el ISBN sea de ESTE libro (el título debe casar).
+            const reg = doc.isbn ? await buscarAutoridadPorISBN(variantesISBN(doc.isbn)).catch(() => null) : null;
+            const cdu = reg?.cdu || doc.cdu_autoridad || null;
+            if (!cdu || !puedeSustituirCdu(doc, cdu, 'bne')) return null;
+            if (reg && !cduDeAutoridadFiable(doc, reg)) {
+                // El título de la BNE para este ISBN NO es el del documento: el ISBN es probablemente de OTRO libro
+                // (medido: «Los caminos de la seda» con el ISBN de «Sin miedo»). No se clasifica por él; se avisa
+                // y se marca para revisar. (Una CDU sin clase principal —solo auxiliares— tampoco se aplica, sin marcar.)
+                if (!/^\d/.test(String(reg.cdu || '').trim())) return null;
+                if (doc.isbn_sospechoso) return null;
+                return {
+                    set: { revision_requerida: true, isbn_sospechoso: `la BNE tiene el ISBN ${doc.isbn} como «${String(reg.titulo || '?').slice(0, 120)}»` },
+                    alertas: [`ISBN ${doc.isbn} probablemente de OTRO libro: la BNE lo registra como «${String(reg.titulo || '?').slice(0, 80)}». No se aplica su CDU; revisa el ISBN.`],
+                };
+            }
+            if (!reg && !doc.cdu_autoridad) return null;
+            const reub = await reubicarPorCdu(doc, cdu);
+            return {
+                set: { ...(reub?.set || { cdu }), cdu_fuente: 'bne', cdu_autoridad: cdu },
+                carpetaNueva: reub?.carpetaNueva || null,
+                alertas: [`CDU ${doc.cdu || '∅'} → ${cdu} (BNE: catalogada por bibliotecarios; prioridad sobre la deducida).`, ...(reub?.alertas || [])],
+            };
         },
     },
 
@@ -282,56 +329,20 @@ export const TAREAS = [
                 return { set: { cdu_adicionales: cduAdicionales } };
             }
 
-            // ── CDU cambió: mover la carpeta ─────────────────────────────────────────
-            const carpetaVieja = carpetaDeDoc(doc);
-            const existeVieja  = await carpetaExiste(carpetaVieja);
+            // ── PRIORIDAD (prioridad-cdu.js): la del paso 1 es de la BNE; la de DNB/caché/IA, del clasificador.
+            //    Una CDU del clasificador NUNCA sustituye a una impresa en el libro, de la BNE o manual. ────────
+            const fuenteRango = /^(autoridad|Fichero|BNE)$/.test(fuente) ? 'bne' : 'clasificador';
+            if (!puedeSustituirCdu(doc, cduNueva, fuenteRango)) return null;
 
-            // La ruta nueva sustituye SOLO la parte CDU (lo anterior a libros/revistas) por el
-            // árbol nuevo <clase>/<division>/<cdu>, conservando tipo + resto (isbn/discriminador,
-            // o issn/año-mes en revistas). Robusto tanto si la ruta vieja es plana como en árbol.
-            //   vieja: /recursos/<…cdu…>/<tipo>/<resto...>
-            //   nueva: /recursos/<clase>/<division>/<cdu>/<tipo>/<resto...>
-            const rutaBaseVieja = webDeDoc(doc);
-            const segsViejos    = rutaBaseVieja.replace(/^\/recursos\//, '').split('/');
-            const iTipo         = segsViejos.findIndex(s => s === 'libros' || s === 'revistas');
-            const resto         = iTipo >= 0 ? segsViejos.slice(iTipo) : segsViejos.slice(-2);
-            const segsNuevos    = [...arbolCDU(cduNueva).segmentos, ...resto];
-            const rutaBaseNueva = '/recursos/' + segsNuevos.join('/');
-            const relativaNueva = segsNuevos.join('/');
-            const carpetaNueva  = path.join(DIR_CDU, ...segsNuevos);
-
-            if (existeVieja && carpetaNueva !== carpetaVieja) {
-                // Colisión: el destino ya existe (otro registro con el mismo CDU+ISBN)
-                if (await carpetaExiste(carpetaNueva)) {
-                    console.warn(`   ⚠️  re-clasificar-cdu: colisión en "${relativaNueva}"; CDU actualizada en BD pero ficheros NO movidos.`);
-                    const set = { cdu: cduNueva };
-                    if (cduAdicionales.length) set.cdu_adicionales = cduAdicionales;
-                    return { set, alertas: [`CDU actualizada a "${cduNueva}" [${fuente}]; carpeta destino ya existía — ficheros no movidos.`] };
-                }
-
-                // Archivos enlazados en la BD: basenames para verificación tras copia.
-                const archivosEnBD = [
-                    doc.portada   ? path.basename(doc.portada)   : null,
-                    ...(doc.imagenes || []).map(im => path.basename(im.ruta)),
-                ].filter(Boolean);
-
-                await moverCarpetaConVerificacion(carpetaVieja, carpetaNueva, archivosEnBD);
-            }
-
-            // ── Recalcular todas las rutas internas que llevaban el prefijo viejo ────
-            const remap = (p) => p && p.startsWith(rutaBaseVieja)
-                ? rutaBaseNueva + p.slice(rutaBaseVieja.length)
-                : p;
-
-            const set = { cdu: cduNueva, ruta_base: rutaBaseNueva };
-            if (cduAdicionales.length)    set.cdu_adicionales = cduAdicionales;
-            if (doc.portada)              set.portada  = remap(doc.portada);
-            if (doc.imagenes?.length)     set.imagenes = doc.imagenes.map(im => ({ ...im, ruta: remap(im.ruta) }));
-
+            // ── CDU cambió: mover la carpeta (función común: verifica la copia y, si el destino es la carpeta de
+            //    OTRO documento, usa una propia con sufijo — antes aquí quedaban «colisiones» sin mover). ─────────
+            const reub = await reubicarPorCdu(doc, cduNueva);
+            const set = { ...(reub?.set || { cdu: cduNueva }), cdu_fuente: fuenteRango };
+            if (cduAdicionales.length) set.cdu_adicionales = cduAdicionales;
             return {
                 set,
-                carpetaNueva: existeVieja ? carpetaNueva : null,
-                alertas: [`CDU actualizada: "${doc.cdu}" → "${cduNueva}" [${fuente}]${existeVieja ? '; ficheros movidos.' : ' (sin carpeta — solo BD).'}`],
+                carpetaNueva: reub?.carpetaNueva || null,
+                alertas: [`CDU actualizada: "${doc.cdu}" → "${cduNueva}" [${fuente}].`, ...(reub?.alertas || [])],
             };
         },
     },

@@ -166,6 +166,7 @@ export async function editarDocumento(db, id, campos = {}) {
             avisos.push(`No se pudo reubicar la carpeta por la nueva CDU: ${e.message}`);
         }
         set.cdu_manual = true;
+        set.cdu_fuente = 'manual';   // prioridad-cdu.js: la tuya manda sobre todas
     }
 
     // Recomputa la clave del número si el doc es una REVISTA y cambió mes/año/nº (AAAA-MM → n<nº> → AAAA →

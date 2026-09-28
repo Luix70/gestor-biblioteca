@@ -12,6 +12,8 @@ import { esEditorialFalsa } from './utils/editoriales-falsas.js';
 // Mapa determinista COLECCIÓN → editorial (gratis): muchas colecciones célebres son marca de UNA casa
 // («Biblioteca Clásica Gredos»→Gredos…). Resuelve la editorial de los ebooks sin depender de la IA.
 import { editorialDeColeccionMapa } from './utils/coleccion-editorial.js';
+import { mejorCdu } from './utils/prioridad-cdu.js';
+import { cduDeAutoridadFiable } from './utils/autoridad-isbn.js';
 
 /**
  * Devuelve el primer valor "con contenido" de la lista.
@@ -176,6 +178,12 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
 
     // Qué falta (solo eso justifica tocar la red / la IA).
     const faltaSinopsis = !primerValido(documento.sinopsis);
+    // CDU IMPRESA en los créditos del propio libro: por delante de cualquier otra salvo la manual.
+    if (documento.cdu_impresa && documento.cdu_fuente !== 'manual') {
+        documento.cdu = documento.cdu_impresa;
+        documento.cdu_fuente = 'impresa';
+        documento.alertas_agente.push(`CDU ${documento.cdu_impresa} impresa en la página de créditos del libro.`);
+    }
     const faltaCdu = !primerValido(documento.cdu);
 
     // NÚMERO DE REVISTA (no un cómic seriado: ese sí tiene guionista y dibujante, y su argumento es una sinopsis).
@@ -303,7 +311,22 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // de la carpeta (en una revista lo lee la visión en la portada al inspeccionarla: un PDF escaneado sin capa
     // de texto no permite detectarlo).
     documento.idioma      = primerValido(documento.idioma, datosExtra.idioma, contexto.idioma_probable, contexto.perfil?.idioma_probable) || 'es';
-    documento.cdu         = primerValido(documento.cdu, datosExtra.cdu);
+    // CDU por PRIORIDAD (prioridad-cdu.js): manual > impresa > BNE/BnF > clasificador (equivalencia o IA). Una
+    // CDU del fichero SIN procedencia es la que infirió la visión → rango de clasificador: la de la BNE, catalogada
+    // por bibliotecarios, pasa por delante. A igual rango se queda la del fichero.
+    {
+        const elegida = mejorCdu([
+            documento.cdu ? { cdu: documento.cdu, fuente: documento.cdu_fuente || 'clasificador' } : null,
+            // Si el registro de la BNE no es de ESTE libro (el título no casa: ISBN probablemente ajeno), su CDU no
+            // tiene la autoridad de la BNE para este documento: cuenta como deducida.
+            datosExtra.cdu ? { cdu: datosExtra.cdu, fuente: (datosExtra.cdu_fuente === 'bne' && !cduDeAutoridadFiable(documento, datosExtra)) ? 'clasificador' : (datosExtra.cdu_fuente || 'clasificador') } : null,
+        ]);
+        if (elegida) {
+            if (documento.cdu && elegida.cdu !== documento.cdu) documento.alertas_agente.push(`CDU ${documento.cdu} sustituida por ${elegida.cdu} (${elegida.fuente}: tiene prioridad).`);
+            documento.cdu = elegida.cdu;
+            documento.cdu_fuente = elegida.fuente;
+        }
+    }
     // Red de seguridad: si la CDU quedó sin resolver (p. ej. INGESTA_CDU_SIN_IA=1 y ni caché ni crosswalk la
     // dieron), cae al cajón '000' (válido para el esquema). `re-clasificar-cdu` la afina a reposo y mueve la carpeta.
     // Una revista con CDU en la guía no está «sin resolver»: la recibe en servicio-ingesta (1ter).
@@ -474,7 +497,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
     // isbn_candidatos / issn_candidatos SE PERSISTEN (todos los identificadores vistos, para búsquedas más
     // refinadas). El resto son de proceso y no se guardan.
-    const CAMPOS_INTERNOS = ['cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_propio', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado', '_cipTitulo', '_cipAutor', '_cipSub'];
+    const CAMPOS_INTERNOS = ['cdu_impresa', 'cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_propio', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado', '_cipTitulo', '_cipAutor', '_cipSub'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).

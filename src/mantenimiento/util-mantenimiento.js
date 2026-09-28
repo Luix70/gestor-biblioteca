@@ -283,9 +283,27 @@ export async function reubicarPorCdu(doc, nuevaCdu) {
     const segsViejos = rutaBaseVieja.replace(/^\/recursos\//, '').split('/');
     const iTipo = segsViejos.findIndex(s => s === 'libros' || s === 'revistas');
     const resto = iTipo >= 0 ? segsViejos.slice(iTipo) : segsViejos.slice(-2);
-    const segsNuevos = [...arbolCDU(destinoCdu).segmentos, ...resto];
+    let segsNuevos = [...arbolCDU(destinoCdu).segmentos, ...resto];
+    let carpetaNueva = path.join(DIR_CDU, ...segsNuevos);
+
+    // COLISIÓN: la carpeta destino ya existe porque OTRO documento vive ahí (el mismo libro en otro formato
+    // —djvu y pdf comparten ISBN—, u otra edición con el mismo ISBN). Antes aquí se devolvía la ruta_base NUEVA
+    // sin mover nada: el documento quedaba apuntando a la carpeta (y la portada) DEL OTRO. Ahora se aplica la
+    // regla «1 documento ↔ 1 carpeta» de siempre (rutas.js · discriminador): carpeta propia con el sufijo del _id.
+    // Si incluso esa existe, se cambia la CDU en BD pero la ruta NO se toca (sigue apuntando a sus ficheros).
+    if (existeVieja && carpetaNueva !== carpetaVieja && await carpetaExiste(carpetaNueva)) {
+        const hoja = segsNuevos[segsNuevos.length - 1];
+        const conSufijo = [...segsNuevos.slice(0, -1), `${hoja}-${String(doc._id).slice(-6)}`];
+        const alternativa = path.join(DIR_CDU, ...conSufijo);
+        if (alternativa === carpetaVieja || !(await carpetaExiste(alternativa))) {
+            segsNuevos = conSufijo;
+            carpetaNueva = alternativa;
+        } else {
+            return { set: { cdu: destinoCdu }, carpetaNueva: null,
+                alertas: [`CDU → "${destinoCdu}" (solo BD): la carpeta destino y su alternativa ya existen; los ficheros siguen en su sitio.`] };
+        }
+    }
     const rutaBaseNueva = '/recursos/' + segsNuevos.join('/');
-    const carpetaNueva = path.join(DIR_CDU, ...segsNuevos);
 
     // Recalcular las rutas internas (portada/imágenes) que llevaban el prefijo viejo.
     const remap = (p) => (p && p.startsWith(rutaBaseVieja) ? rutaBaseNueva + p.slice(rutaBaseVieja.length) : p);
@@ -295,11 +313,7 @@ export async function reubicarPorCdu(doc, nuevaCdu) {
 
     // Sin carpeta en disco (p.ej. API fuera del NAS) o mismo destino → solo BD.
     if (!existeVieja || carpetaNueva === carpetaVieja) {
-        return { set, alertas: [`CDU → "${destinoCdu}" (solo BD${existeVieja ? '' : '; sin carpeta en disco'}).`] };
-    }
-    // Colisión: el destino ya existe (otro registro con el mismo CDU+ISBN) → no pisar; solo BD.
-    if (await carpetaExiste(carpetaNueva)) {
-        return { set, alertas: [`CDU → "${destinoCdu}"; la carpeta destino ya existía — ficheros NO movidos.`] };
+        return { set, carpetaNueva: null, alertas: [`CDU → "${destinoCdu}" (solo BD${existeVieja ? '' : '; sin carpeta en disco'}).`] };
     }
 
     const archivosEnBD = [
@@ -307,7 +321,7 @@ export async function reubicarPorCdu(doc, nuevaCdu) {
         ...(doc.imagenes || []).map(im => path.basename(im.ruta)),
     ].filter(Boolean);
     await moverCarpetaConVerificacion(carpetaVieja, carpetaNueva, archivosEnBD);
-    return { set, alertas: [`CDU → "${destinoCdu}"; ficheros movidos a "${segsNuevos.join('/')}".`] };
+    return { set, carpetaNueva, alertas: [`CDU → "${destinoCdu}"; ficheros movidos a "${segsNuevos.join('/')}".`] };
 }
 
 /**

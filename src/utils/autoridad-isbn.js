@@ -13,6 +13,32 @@
 import { buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarEnBNE } from './buscador-bne-sru.js';
 
+const RE_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
+// Palabras de un título SIN lo que va entre paréntesis o corchetes: «(Ilustrado por Quentin Blake)», «(Colección
+// Alfaguara Clásicos)», «[Tapa dura]» son coletillas de la edición, no del título, y bajaban la coincidencia.
+const palabras = (s) => String(s || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '')
+    .replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w.length > 2);
+
+/**
+ * ¿Es fiable aplicar la CDU de este registro de autoridad a ESTE documento? Dos comprobaciones, las dos por casos
+ * medidos al estimar el cambio en todo el catálogo:
+ *   · La CDU tiene CLASE PRINCIPAL (empieza por dígito). El volcado trae a veces solo auxiliares —«(054)(460.27
+ *     M.)», forma y lugar—, que no son una clasificación.
+ *   · El TÍTULO del registro casa con el del documento. Si no, lo más probable es que el ISBN del documento sea de
+ *     OTRO libro (como los Osprey con un ISBN compartido): «Los caminos de la seda» (historia) se habría ido a
+ *     159.942.5 (psicología de las emociones). Mejor no tocar que clasificar por un ISBN equivocado.
+ */
+export function cduDeAutoridadFiable(doc, reg) {
+    const cdu = String(reg?.cdu || '').trim();
+    if (!/^\d/.test(cdu)) return false;
+    const A = new Set(palabras(doc?.titulo)), B = new Set(palabras([reg?.titulo, reg?.subtitulo].filter(Boolean).join(' ')));
+    if (!A.size || !B.size) return false;
+    const [chico, grande] = A.size <= B.size ? [A, B] : [B, A];
+    let comunes = 0;
+    for (const w of chico) if (grande.has(w)) comunes++;
+    return comunes / chico.size >= 0.6;
+}
+
 const esIsbnEspañol = (isbns) => (isbns || []).some((i) => /^(97884|97913|84)/.test(String(i || '').replace(/[^0-9Xx]/g, '')));
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
 

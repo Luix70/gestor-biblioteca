@@ -27,6 +27,8 @@ import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { identificarEdicion, candidatasParaGuardar } from './identificar-edicion.js';
 import { huecosDesdeAutoridad } from './huecos-autoridad.js';
+import { aplicarCduConPrioridad, puedeSustituirCdu, fuenteCduDoc } from './prioridad-cdu.js';
+import { cduDeAutoridadFiable, buscarAutoridadPorISBN } from './autoridad-isbn.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
@@ -308,7 +310,15 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // Índice FTS + sidecars (best-effort: nunca tumban la operación).
     await indexarDoc(db, doc._id).catch(() => {});
     await regenerarSidecarsDoc(db, { ...doc, ...set }, carpeta).catch(() => {});
-    return { estado: 'aplicado', isbn, via, titulo: set.titulo || doc.titulo, resumen, set };
+    // CDU de la BNE para esta edición: se APLICA si tiene prioridad sobre la actual (la deducida por equivalencia o
+    // IA), MOVIENDO la carpeta. No toca una CDU manual ni una impresa en el libro, ni tomos de obra.
+    let cduAplicada = null;
+    if (datos.cdu && datos.cdu_fuente === 'bne' && cduDeAutoridadFiable({ ...doc, ...set }, datos)) {
+        const actualizado = await db.collection('biblioteca').findOne({ _id: doc._id });
+        const rc = actualizado ? await aplicarCduConPrioridad(db, actualizado, datos.cdu, 'bne').catch(() => null) : null;
+        if (rc?.aplicada) cduAplicada = `${rc.de || '∅'} → ${rc.a}`;
+    }
+    return { estado: 'aplicado', isbn, via, titulo: set.titulo || doc.titulo, resumen: resumen + (cduAplicada ? ` · CDU ${cduAplicada} (BNE)` : ''), set };
 }
 
 /**
@@ -326,14 +336,18 @@ export async function resolverCduDoc(db, doc, { conIA = false, forzar = false, a
     // 0) CDU de AUTORIDAD: la BNE cataloga directamente en CDU, así que es la mejor fuente — ni crosswalk ni IA.
     //    La guardada por «Extraer ISBN» (cdu_autoridad), la del Fichero (volcado BNE) o la del catálogo en línea.
     let dewey = doc.dewey || null, lcc = doc.lcc || null;
-    let cduAutoridad = doc.cdu_autoridad || null;
-    if (doc.isbn && (!cduAutoridad || (!dewey && !lcc))) {
-        const f = await buscarEnFicheroLocal({ isbns: variantesISBN(doc.isbn) }).catch(() => null);
-        if (f) { dewey = dewey || f.dewey || null; lcc = lcc || f.lcc || null; cduAutoridad = cduAutoridad || f.cdu || null; }
-        if (!cduAutoridad) {
-            const b = await buscarEnBNE({ isbns: variantesISBN(doc.isbn) }).catch(() => null);
-            if (b?.cdu) cduAutoridad = b.cdu;
+    let cduAutoridad = null;
+    if (doc.isbn) {
+        // El registro de la BNE para este ISBN (Fichero → catálogo en línea): su CDU, y su título para comprobar
+        // que el ISBN es de ESTE libro — si no casa, el ISBN es probablemente de otro y su CDU no vale aquí.
+        const reg = await buscarAutoridadPorISBN(variantesISBN(doc.isbn)).catch(() => null);
+        if (reg) {
+            dewey = dewey || reg.dewey || null;
+            lcc = lcc || reg.lcc || null;
+            if (reg.cdu && cduDeAutoridadFiable(doc, reg)) cduAutoridad = reg.cdu;
         }
+    } else if (doc.cdu_autoridad) {
+        cduAutoridad = doc.cdu_autoridad;   // sin ISBN que contrastar: la guardada al identificar la edición
     }
     let cdu = cduAutoridad;
     if (!cdu) {
@@ -347,13 +361,24 @@ export async function resolverCduDoc(db, doc, { conIA = false, forzar = false, a
     if (!cdu || cdu === '000') return { estado: 'cdu-no-hallada', motivo: conIA ? 'ni el crosswalk ni la IA dieron una CDU' : 'el crosswalk determinista no la resuelve (marca «con IA» para investigar)' };
     const actual = String(doc.cdu || '');
     const vacia = !actual || actual === '000' || actual === '0';
-    if (!vacia && !forzar) return { estado: 'cdu-ya', cdu: actual, motivo: 'ya tiene CDU (marca «forzar» para reemplazarla)' };
+    // La de la BNE se aplica por PRIORIDAD (sustituye a la del clasificador aunque no esté vacía); la deducida
+    // (equivalencia o IA), solo sobre una vacía o forzando — y nunca sobre una de más rango (prioridad-cdu.js).
+    const fuenteNueva = cduAutoridad ? 'bne' : 'clasificador';
+    if (!vacia && !forzar && fuenteNueva !== 'bne') return { estado: 'cdu-ya', cdu: actual, motivo: 'ya tiene CDU (marca «forzar» para reemplazarla)' };
     if (actual === cdu) return { estado: 'cdu-igual', cdu };
-    if (!aplicar) return { estado: 'cdu-identificada', cdu, de: actual || '000', motivo: `${actual || '000'} → ${cdu}` };
-    // editarDocumento mueve la carpeta al árbol de la nueva CDU + regenera sidecars + reíndice. Marca cdu_manual
-    // (es una decisión explícita del usuario, como una edición) → el Conformador no la recalcula luego.
-    await editarDocumento(db, String(doc._id), { cdu, ...(dewey ? { dewey } : {}), ...(lcc ? { lcc } : {}) }).catch(() => null);
-    return { estado: 'cdu-aplicada', cdu, de: actual || '000' };
+    if (!puedeSustituirCdu(doc, cdu, fuenteNueva)) return { estado: 'cdu-ya', cdu: actual, motivo: `la CDU actual (${fuenteCduDoc(doc)}) tiene prioridad sobre ${cdu} (${fuenteNueva})` };
+    if (!aplicar) return { estado: 'cdu-identificada', cdu, de: actual || '000', motivo: `${actual || '000'} → ${cdu} (${fuenteNueva})` };
+    // Mueve la carpeta al árbol de la nueva CDU + sidecars + índice, SIN marcarla manual: queda con su fuente, y
+    // una de más rango (impresa en el libro, la que pongas tú) podrá sustituirla después.
+    const r = await aplicarCduConPrioridad(db, doc, cdu, fuenteNueva);
+    if (r.aplicada) {
+        const extra = {};
+        if (dewey && !doc.dewey) extra.dewey = dewey;
+        if (lcc && !doc.lcc) extra.lcc = lcc;
+        if (cduAutoridad) extra.cdu_autoridad = cduAutoridad;
+        if (Object.keys(extra).length) await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: extra });
+    }
+    return r.aplicada ? { estado: 'cdu-aplicada', cdu, de: actual || '000' } : { estado: 'cdu-ya', cdu: actual, motivo: r.motivo };
 }
 
 // ── LOTE en 2º plano (acción de la Búsqueda sobre una selección) ─────────────────────────────────────────

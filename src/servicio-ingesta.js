@@ -20,7 +20,9 @@ import { tituloDeNumero, tituloEsDelFichero, afinarFechaNumero } from './utils/r
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
 import { identificarEdicion, candidatasParaGuardar, lenguaDeBNE } from './utils/identificar-edicion.js';
 import { buscarAutoridadPorISBN } from './utils/autoridad-isbn.js';
+import { cduDeAutoridadFiable } from './utils/autoridad-isbn.js';
 import { huecosEscalares } from './utils/huecos-autoridad.js';
+import { mejorCdu, rangoFuente, RANGO_CDU } from './utils/prioridad-cdu.js';
 import { variantesISBN } from './utils/identificadores.js';
 import { esEditorialFalsa } from './utils/editoriales-falsas.js';
 
@@ -261,8 +263,15 @@ export async function identificarEdicionEnIngesta(documento) {
             const { set } = huecosEscalares(documento, { ...reg, paginas_bne: reg.paginas, dimensiones_bne: reg.dimensiones });
             delete set.cdu_autoridad;   // aquí la CDU se decide abajo, directamente
             Object.assign(documento, set);
-            const cduActual = String(documento.cdu || '').trim();
-            if (reg.cdu && (!cduActual || ['0', '00', '000'].includes(cduActual)) && !documento.cdu_manual) documento.cdu = reg.cdu;
+            // CDU de la BNE (el Fichero solo trae CDU del volcado de la BNE): por PRIORIDAD, no solo sobre una vacía.
+            // Gana a la del clasificador o la IA; no a una impresa en el libro ni a una manual (prioridad-cdu.js).
+            if (reg.cdu && cduDeAutoridadFiable(documento, reg)) {
+                const elegida = mejorCdu([
+                    documento.cdu ? { cdu: documento.cdu, fuente: documento.cdu_fuente || 'clasificador' } : null,
+                    { cdu: reg.cdu, fuente: 'bne' },
+                ]);
+                if (elegida && elegida.cdu !== documento.cdu) { documento.cdu = elegida.cdu; documento.cdu_fuente = elegida.fuente; }
+            }
             if (reg.editorial && (!documento.editorial || esEditorialFalsa(documento.editorial))) documento.editorial = reg.editorial;
             if (Array.isArray(reg.contribuciones_nombres) && reg.contribuciones_nombres.length && !(documento.contribuciones_nombres?.length)) {
                 documento.contribuciones_nombres = reg.contribuciones_nombres;
@@ -316,7 +325,8 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     // (ver contrastarCduCarpeta: los identificadores del fichero mandan sobre las pistas).
     // Las revistas no: su CDU va por la cabecera, no por la carpeta donde se soltó el número.
     const cduCarpeta = contexto.perfil?.materia_cdu;
-    if (cduCarpeta && documento.tipo_recurso !== 'revista') {
+    // La CDU de la carpeta es una PISTA: no toca una CDU con autoridad (impresa en el libro, de la BNE o manual).
+    if (cduCarpeta && documento.tipo_recurso !== 'revista' && rangoFuente(documento.cdu_fuente) < RANGO_CDU.bne) {
         const nombreCarpeta = rutas[0] ? path.basename(path.dirname(rutas[0])) : null;
         const r = contrastarCduCarpeta(documento.cdu, cduCarpeta, nombreCarpeta);
         if (r.accion === 'rellenar' || r.accion === 'precisar') documento.cdu = r.cdu;

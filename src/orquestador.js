@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { extraerMetadatosEpub, isbnsEnTextoEpub, textoInicialEpub } from './utils/lector-epub.js';
-import { parsearBloqueCatalogacion } from './utils/cip.js';
+import { parsearBloqueCatalogacion, cduImpresa } from './utils/cip.js';
 import { recuperarOriginalesDeFichero } from './utils/titulo-original.js';
 import { extraerMetadatosPdf, textoPagina } from './utils/lector-pdf.js';
 import { medirImagen } from './utils/medir-imagen.js';
@@ -324,6 +324,8 @@ export async function procesarRecurso(entrada) {
         // hay que rasterizar nada. Todo offline.
         const textoCreditos = await textoInicialEpub(rutas[0]);
         const cipEpub = textoCreditos ? parsearBloqueCatalogacion(textoCreditos) : null;
+        const cduImpEpub = textoCreditos ? cduImpresa(textoCreditos) : null;
+        if (cduImpEpub) datosBase.cdu_impresa = cduImpEpub;   // la decidieron autor y editorial
         if (cipEpub) {
             datosBase.cip = cipEpub;                       // lo consume motor-enriquecimiento (Dewey/LC → CDU)
             if (cipEpub.isbns?.length) datosBase.isbns_rol = cipEpub.isbns.map((x) => ({ isbn: x.isbn, rol: x.etiqueta || 'desconocido' }));
@@ -933,6 +935,7 @@ export async function procesarRecurso(entrada) {
     }
     if (contexto.cdu) {
         datosBase.cdu = String(contexto.cdu).trim();
+        datosBase.cdu_fuente = 'manual';   // la has puesto tú: manda sobre todo (prioridad-cdu.js)
         datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `CDU ${datosBase.cdu} fijada en el formulario de la subida.`];
     }
 

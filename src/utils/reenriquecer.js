@@ -23,6 +23,8 @@
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
 import { resolverColeccion } from './colecciones.js';
 import { huecosDesdeAutoridad, autoresConAncla } from './huecos-autoridad.js';
+import { aplicarCduConPrioridad } from './prioridad-cdu.js';
+import { cduDeAutoridadFiable } from './autoridad-isbn.js';
 import { variantesISBN, validarISBN, validarISSN } from './identificadores.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '');
@@ -215,5 +217,12 @@ export async function reenriquecerDoc(db, doc, { aplicar = true, sinIA = false }
     set.alertas_agente = [...(doc.alertas_agente || []), nota];
     if (!aplicar) return { ok: true, cambios, reclasificar, anclaISBN, dryRun: true };
     await col.updateOne({ _id: doc._id }, { $set: set });
+    // CDU de la BNE (catalogada por bibliotecarios): se APLICA si tiene prioridad sobre la actual, moviendo la
+    // carpeta (prioridad-cdu.js: nunca sobre una manual ni una impresa en el libro).
+    if (datos.cdu && datos.cdu_fuente === 'bne' && cduDeAutoridadFiable({ ...doc, ...set }, datos)) {
+        const actualizado = await col.findOne({ _id: doc._id });
+        const rc = actualizado ? await aplicarCduConPrioridad(db, actualizado, datos.cdu, 'bne').catch(() => null) : null;
+        if (rc?.aplicada) cambios.push({ campo: 'cdu', de: rc.de || null, a: `${rc.a} (BNE)` });
+    }
     return { ok: true, cambios, reclasificar, anclaISBN };
 }

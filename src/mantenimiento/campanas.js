@@ -30,6 +30,7 @@ import { variantesISBN } from '../utils/identificadores.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from '../utils/buscador-local.js';
 import { buscarEnBNE } from '../utils/buscador-bne-sru.js';
 import { huecosDesdeAutoridad } from '../utils/huecos-autoridad.js';
+import { aplicarCduConPrioridad } from '../utils/prioridad-cdu.js';
 import { buscarNombrePorISSN } from '../utils/buscador-issn-titulo.js';
 import { nombreEsPlaceholder, limpiarNombreColeccion, claveCanonica } from '../utils/colecciones.js';
 import { ROLES_VALIDOS } from '../utils/contribuciones.js';
@@ -350,8 +351,13 @@ export const CAMPANAS = [
             const ref = sinExtension(doc.nombre_archivo);
             const ok = ref ? await corroborarISBNporTitulo({ candidatos: isbns, titulo: ref }).catch(() => null) : null;
             if (!ok) return false;                                 // ISBN no corroborado → no clasificar (posible ISBN erróneo)
-            const r = await editarDocumento(db, String(doc._id), { cdu: cf.cdu }).catch(() => null); // mueve la carpeta
-            return !!(r && r.ok);
+            // Mueve la carpeta SIN marcarla manual (antes pasaba por editarDocumento, que la congelaba como «manual»
+            // y ya ninguna fuente mejor —la impresa en el libro— podía corregirla). La CDU directa del Fichero es la
+            // de la BNE; la del crosswalk, deducida.
+            const completo = await db.collection('biblioteca').findOne({ _id: doc._id });
+            const fuente = String(cf.via || '').includes('BNE') ? 'bne' : 'clasificador';
+            const r = completo ? await aplicarCduConPrioridad(db, completo, cf.cdu, fuente).catch(() => null) : null;
+            return !!(r && r.aplicada);
         },
     },
 

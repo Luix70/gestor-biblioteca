@@ -59,7 +59,7 @@ export async function ejecutarMantenimiento({ debeAbortar = async () => false } 
  */
 async function conformarDocumento(db, doc) {
     const col = db.collection('biblioteca');
-    const carpeta = carpetaDeDoc(doc);
+    let carpeta = carpetaDeDoc(doc);   // `let`: si una tarea MUEVE la carpeta, las siguientes trabajan en la nueva
     const existe = await carpetaExiste(carpeta);
     const sello = { ...(doc.mantenimiento || {}) };
     let cambios = 0;
@@ -71,9 +71,11 @@ async function conformarDocumento(db, doc) {
                 if (tarea.aplica(doc)) {
                     const cambio = await tarea.ejecutar(doc, { db });
                     if (cambio) {
-                        // re-clasificar-cdu mueve la carpeta: registro.json va al nuevo destino
+                        // aplicar-cdu-bne / re-clasificar-cdu / cip-vision mueven la carpeta: registro.json va al nuevo
+                        // destino, y las tareas siguientes de esta misma pasada ya trabajan allí.
                         const carpetaEfectiva = cambio.carpetaNueva || carpeta;
                         await aplicarCambio(col, doc, carpetaEfectiva, cambio);
+                        if (cambio.carpetaNueva) carpeta = cambio.carpetaNueva;
                         Object.assign(doc, cambio.set || {});                 // reflejar para tareas posteriores
                         if (cambio.imagenesNuevas) doc.imagenes = [...(doc.imagenes || []), ...cambio.imagenesNuevas];
                         cambios++;

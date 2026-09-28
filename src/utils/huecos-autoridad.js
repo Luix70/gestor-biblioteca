@@ -19,6 +19,7 @@
  * falte en el objeto se vería vacío y se rellenaría encima de lo que hay en la base.
  */
 import { resolverPersona } from './resolver-persona.js';
+import { cduDeAutoridadFiable } from './autoridad-isbn.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 
@@ -58,8 +59,10 @@ export function huecosEscalares(doc, datos = {}) {
         }
     }
 
-    // CDU de AUTORIDAD: se guarda aparte; nunca se toca `cdu` aquí.
-    if (datos.cdu && datos.cdu !== doc.cdu && datos.cdu !== doc.cdu_autoridad && !doc.cdu_manual) {
+    // CDU de AUTORIDAD: se guarda aparte; nunca se toca `cdu` aquí. SOLO la de la BNE (catalogada por
+    // bibliotecarios): una CDU del clasificador (equivalencia Dewey/LCC o IA) nunca pasa por «de autoridad».
+    if (datos.cdu && datos.cdu_fuente === 'bne' && cduDeAutoridadFiable(doc, datos)
+        && datos.cdu !== doc.cdu && datos.cdu !== doc.cdu_autoridad && !doc.cdu_manual) {
         set.cdu_autoridad = datos.cdu;
         cambios.push({ campo: 'cdu_autoridad', de: doc.cdu_autoridad || null, a: datos.cdu });
     }

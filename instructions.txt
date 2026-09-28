@@ -1029,6 +1029,41 @@ de ficheros clasificado por CDU.
     (también «Colección gótica ; 112», «Austral 1234», «nº 112») y el nº cuenta como señal de edición.
     «La otra vida del Capitán Contreras» [Ancora & Delfin 85] → 9788423304479 (editorial + colección + nº).
 
+    PRIORIDAD DE LA CDU SEGÚN QUIÉN LA DECIDIÓ (2026-09-28, `utils/prioridad-cdu.js`). Regla del usuario:
+        4 · MANUAL     la que fijas tú (ficha o formulario de subida) — manda sobre todas.
+        3 · IMPRESA    la impresa en la página de créditos del propio libro: la decidieron autor y editorial.
+        2 · BNE (BnF)  la de la Biblioteca Nacional: catalogada y revisada por bibliotecarios.
+        1 · deducida   equivalencia Dewey/LCC (tabla o caché) o IA (texto o visión).
+    Una CDU de rango MAYOR O IGUAL sustituye a la actual y se APLICA MOVIENDO LA CARPETA; una de rango menor,
+    nunca. El documento guarda de dónde salió su CDU en `cdu_fuente` (desde hoy; los anteriores sin ese campo
+    cuentan como deducidos, salvo los marcados manuales o los que una alerta dice que salieron del CIP impreso).
+    Dónde se aplica: ingesta (el enriquecimiento elige por rango; una CDU que la visión infirió ya no gana a la de la
+    BNE; la CDU orientativa de una carpeta guiada ya no toca una impresa/BNE/manual), paso 1a de la ingesta,
+    «Extraer ISBN», Enriquecedor, «Investigar CDU», la campaña «Clasificación por ISBN» y el Conformador:
+      · TAREA NUEVA `aplicar-cdu-bne` (antes de re-clasificar-cdu): recorre el catálogo y aplica la CDU de la BNE
+        (Fichero → catálogo en línea) donde tenga prioridad. Medido en el catálogo actual: de 48.412 libros con
+        ISBN, 2.114 tienen CDU de la BNE en el Fichero; 1.512 ya coinciden y 529 CAMBIARÁN de CDU y de carpeta
+        (322 de clase, 207 precisando la misma). Más los que añada la BNE en línea. Añadir la tarea cambia la
+        firma: todos los documentos vuelven a la cola, pero los ya conformados solo ejecutan esta tarea.
+      · re-clasificar-cdu ya no sustituye una CDU impresa/BNE/manual por una deducida.
+      · Nada de esto marca la CDU como «manual» (antes «Investigar CDU» y la campaña de CDU la congelaban así, y
+        ninguna fuente mejor podía corregirla después).
+    SALVAGUARDA — EL ISBN DEBE SER DE ESTE LIBRO (`autoridad-isbn·cduDeAutoridadFiable`): la CDU de la BNE solo se
+    aplica si el TÍTULO del registro de la BNE casa con el del documento (sin las coletillas entre paréntesis) y si
+    la CDU tiene clase principal (no solo auxiliares como «(054)(460.27 M.)»). Medido: 73 libros del catálogo
+    tienen un ISBN que la BNE registra como OTRO libro («Los caminos de la seda» con el de «Sin miedo», «La quinta
+    reina» con el de «La papisa Juana»…): no se reclasifican por él; la tarea los marca `revision_requerida` +
+    `isbn_sospechoso` con una alerta, y aparecen en el Dashboard como «Docs a revisar».
+    CDU IMPRESA: `cip·cduImpresa` la lee del texto de las primeras páginas de PDF y EPUB («CDU 821.134.2-31"19"»,
+    «C.D.U.: 94(460)»), solo junto a señales de página de créditos (ISBN, depósito legal, ficha catalográfica…) y
+    nunca en una bibliografía. Es RARA aquí (0 de 300 EPUB y 0 de 200 PDF en español); en los escaneos la lee la
+    visión (cip-vision-escaneo, que ahora además mueve la carpeta, que antes quedaba en el árbol viejo).
+    COLISIONES DE CARPETA ARREGLADAS (`util-mantenimiento·reubicarPorCdu`, única función para mover por CDU):
+    si la carpeta destino ya es de OTRO documento (el mismo libro en djvu y pdf comparten ISBN), el documento va a
+    una carpeta propia con sufijo (`<isbn>-<id>`). Antes: re-clasificar-cdu dejaba los ficheros en el árbol viejo
+    («colisión… ficheros NO movidos», 68 casos), y editar la CDU a mano APUNTABA el documento a la carpeta y la
+    portada del otro.
+
     REVISIÓN GENERAL «QUE NADA PIERDA LO CONSEGUIDO» (2026-09-28). Todos los que aplican datos de una autoridad a
     un documento ya catalogado comparten ahora `utils/huecos-autoridad.js`:
       · huecosDesdeAutoridad / huecosEscalares: rellena SOLO huecos (sinopsis, subtítulo, año, idioma, páginas,

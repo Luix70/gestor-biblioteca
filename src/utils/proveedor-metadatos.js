@@ -35,7 +35,7 @@ async function completarDesdeBNE(datosExtra, rellenar, isbns) {
     rellenar('coleccion_numero', b.coleccion_numero);
     rellenar('dewey', b.dewey);
     rellenar('contribuciones_nombres', b.contribuciones_nombres);
-    if (b.cdu && !datosExtra.cdu) datosExtra.cdu = b.cdu;          // CDU de la BNE → sin clasificador ni IA
+    if (b.cdu && !datosExtra.cdu) { datosExtra.cdu = b.cdu; datosExtra.cdu_fuente = 'bne'; }   // CDU de la BNE → sin clasificador ni IA
     if (b.paginas && !datosExtra.paginas_bne) datosExtra.paginas_bne = b.paginas;
     if (b.dimensiones && !datosExtra.dimensiones_bne) datosExtra.dimensiones_bne = b.dimensiones;
     datosExtra.alertas.push('Datos complementados desde la BNE (catálogo en línea).');
@@ -210,7 +210,8 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         rellenar('categorias', infoLocal.categorias);
         rellenar('coleccion_nombre', infoLocal.coleccion_nombre);
         rellenar('idioma_original', infoLocal.lengua_original);   // lengua original (traducciones)
-        if (infoLocal.cdu) datosExtra.cdu = infoLocal.cdu;   // CDU de la BNE → salta el clasificador IA
+        // CDU del Fichero: solo la trae el volcado de la BNE → es la de la BNE (catalogada por bibliotecarios).
+        if (infoLocal.cdu) { datosExtra.cdu = infoLocal.cdu; datosExtra.cdu_fuente = 'bne'; }   // salta el clasificador IA
         if (infoLocal.paginas) datosExtra.paginas_bne = infoLocal.paginas;       // canales que captura
         if (infoLocal.dimensiones) datosExtra.dimensiones_bne = infoLocal.dimensiones; // motor-enriquecimiento
         if (infoLocal.portada_url) datosExtra.portadas_remotas.push({ origen: 'fichero_local', url: infoLocal.portada_url });
@@ -368,7 +369,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             rellenar('idioma', infoBNF.idioma);
             rellenar('coleccion_nombre', infoBNF.coleccion_nombre);
             rellenar('dewey', infoBNF.dewey);
-            if (infoBNF.cdu && !datosExtra.cdu) datosExtra.cdu = infoBNF.cdu;
+            if (infoBNF.cdu && !datosExtra.cdu) { datosExtra.cdu = infoBNF.cdu; datosExtra.cdu_fuente = 'bnf'; }
             if (infoBNF.paginas && !datosExtra.paginas_bne) datosExtra.paginas_bne = infoBNF.paginas;
             if (infoBNF.dimensiones && !datosExtra.dimensiones_bne) datosExtra.dimensiones_bne = infoBNF.dimensiones;
             datosExtra.alertas.push('Datos/Dewey complementados desde la BnF.');
