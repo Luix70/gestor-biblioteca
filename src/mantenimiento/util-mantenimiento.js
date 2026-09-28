@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { rutaCatalogo } from '../utils/rutas.js';
+import { conectarDB } from '../database.js';
 import { arbolCDU } from '../utils/cdu-arbol.js';
 import { aMARCXML } from '../marc21.js';
 import { timeoutPoppler } from '../utils/timeout-poppler.js';
@@ -257,9 +258,33 @@ const union = (a, b, clave) => {
  *   · sin carpeta en disco, o el destino ya existe (colisión) → actualiza solo la BD, sin mover, con aviso.
  * Devuelve { set:{ cdu, ruta_base, portada?, imagenes? }, alertas:[...] } o null.
  */
-export async function reubicarPorCdu(doc, nuevaCdu) {
+/**
+ * ¿Está la carpeta del documento DONDE DICE SU FICHA? (árbol de su CDU y segmento de su tipo). Los documentos de
+ * árbol preservado (miembros de una colección transmedia/audiolibros/software) y los tomos de obra viven, a
+ * propósito, en la carpeta de su colección u obra: para ellos siempre es «sí».
+ */
+export function carpetaReflejaFicha(doc) {
+    if (!doc?.ruta_base || !doc.cdu) return true;
+    if (doc.ruta_fija && (doc.coleccion || doc.naturaleza === 'audiolibro' || doc.naturaleza === 'software')) return true;
+    if (doc.obra) return true;
+    const ruta = String(doc.ruta_base);
+    if (!ruta.startsWith('/recursos/' + arbolCDU(doc.cdu).segmentos.join('/') + '/')) return false;
+    const tipoSeg = doc.tipo_recurso === 'revista' ? 'revistas' : doc.tipo_recurso === 'libro' ? 'libros' : null;
+    const otro = tipoSeg === 'libros' ? '/revistas/' : tipoSeg === 'revistas' ? '/libros/' : null;
+    return !(otro && ruta.includes(otro));
+}
+
+/** Mueve la carpeta al árbol que dice su ficha si no está allí (con sufijo si el destino es de otro). null si ya está. */
+export async function recolocarSegunCdu(doc) {
+    if (carpetaReflejaFicha(doc)) return null;
+    return reubicarPorCdu(doc, doc.cdu, { recolocar: true });
+}
+
+export async function reubicarPorCdu(doc, nuevaCdu, { recolocar = false } = {}) {
     const destinoCdu = String(nuevaCdu || '').trim();
-    if (!destinoCdu || destinoCdu === doc.cdu) return null;
+    // recolocar: la CDU no cambia, pero la carpeta NO está en su árbol (lo dejaron así las colisiones antiguas de
+    // re-clasificar-cdu, que cambiaban la CDU en BD sin mover los ficheros) → se mueve a donde dice la ficha.
+    if (!destinoCdu || (destinoCdu === doc.cdu && !recolocar)) return null;
     // ÁRBOL PRESERVADO DE UNA COLECCIÓN (transmedia / audiolibro / software): su rama la define la COLECCIÓN,
     // compartida por todos los miembros → se actualiza la CDU en la BD pero NO se mueve la carpeta.
     // PERO un LIBRO SUELTO con material adjunto también lleva `ruta_fija` (para que Integridad no pode el
@@ -277,12 +302,33 @@ export async function reubicarPorCdu(doc, nuevaCdu) {
     const carpetaVieja = carpetaDeDoc(doc);
     const existeVieja = await carpetaExiste(carpetaVieja);
 
+    // CARPETA COMPARTIDA: mover una carpeta la mueve ENTERA. Si otros documentos apuntan a la misma (el mismo libro
+    // en varios ficheros —epub r1.0 y r1.1, djvu y pdf—, que comparten ISBN), moverla por uno arrastraría los
+    // ficheros de los demás y los dejaría apuntando a una carpeta que ya no existe. Así que:
+    //   · si TODOS los que la comparten van a esta misma CDU → se mueve entera y se actualizan TODOS;
+    //   · si no → no se mueve (CDU solo en BD, con aviso); cuando los demás tengan la misma CDU, la tarea
+    //     ubicar-segun-cdu del Conformador la moverá entera.
+    const db = existeVieja ? await conectarDB() : null;
+    const companeros = db
+        ? await db.collection('biblioteca').find({ ruta_base: doc.ruta_base, _id: { $ne: doc._id } },
+            { projection: { cdu: 1, portada: 1, imagenes: 1 } }).toArray()
+        : [];
+    if (companeros.length && !companeros.every((c) => String(c.cdu || '').trim() === destinoCdu)) {
+        if (recolocar) return null;
+        return { set: { cdu: destinoCdu }, carpetaNueva: null,
+            alertas: [`CDU → "${destinoCdu}" (solo BD): la carpeta la comparten ${companeros.length} documento(s) más con otra CDU; se moverá entera cuando coincidan.`] };
+    }
+
     // La ruta nueva sustituye SOLO la parte CDU (lo anterior a libros/revistas) por el árbol nuevo
     // <clase>/<division>/<cdu>, conservando tipo + resto (isbn/discriminador, o issn/año-mes en revistas).
     const rutaBaseVieja = webDeDoc(doc);
     const segsViejos = rutaBaseVieja.replace(/^\/recursos\//, '').split('/');
     const iTipo = segsViejos.findIndex(s => s === 'libros' || s === 'revistas');
     const resto = iTipo >= 0 ? segsViejos.slice(iTipo) : segsViejos.slice(-2);
+    // El segmento de TIPO también debe reflejar la ficha: un documento que era revista y se corrigió a libro seguía
+    // en «…/revistas/…» (y al revés). La hoja (isbn/issn/id) se conserva.
+    const tipoSeg = doc.tipo_recurso === 'revista' ? 'revistas' : doc.tipo_recurso === 'libro' ? 'libros' : null;
+    if (tipoSeg && (resto[0] === 'libros' || resto[0] === 'revistas') && resto[0] !== tipoSeg) resto[0] = tipoSeg;
     let segsNuevos = [...arbolCDU(destinoCdu).segmentos, ...resto];
     let carpetaNueva = path.join(DIR_CDU, ...segsNuevos);
 
@@ -312,6 +358,9 @@ export async function reubicarPorCdu(doc, nuevaCdu) {
     if (doc.imagenes?.length) set.imagenes = doc.imagenes.map(im => ({ ...im, ruta: remap(im.ruta) }));
 
     // Sin carpeta en disco (p.ej. API fuera del NAS) o mismo destino → solo BD.
+    // Recolocar sin carpeta en disco (p. ej. ejecutado fuera del NAS): no se toca NADA — cambiar solo la ruta en
+    // BD dejaría la ficha apuntando a una carpeta vacía.
+    if (recolocar && (!existeVieja || carpetaNueva === carpetaVieja)) return null;
     if (!existeVieja || carpetaNueva === carpetaVieja) {
         return { set, carpetaNueva: null, alertas: [`CDU → "${destinoCdu}" (solo BD${existeVieja ? '' : '; sin carpeta en disco'}).`] };
     }
@@ -320,8 +369,20 @@ export async function reubicarPorCdu(doc, nuevaCdu) {
         doc.portada ? path.basename(doc.portada) : null,
         ...(doc.imagenes || []).map(im => path.basename(im.ruta)),
     ].filter(Boolean);
+    for (const c of companeros) {
+        if (c.portada) archivosEnBD.push(path.basename(c.portada));
+        for (const im of (c.imagenes || [])) archivosEnBD.push(path.basename(im.ruta));
+    }
     await moverCarpetaConVerificacion(carpetaVieja, carpetaNueva, archivosEnBD);
-    return { set, carpetaNueva, alertas: [`CDU → "${destinoCdu}"; ficheros movidos a "${segsNuevos.join('/')}".`] };
+    // Los que compartían la carpeta van con ella: su ruta, su portada y sus imágenes, al sitio nuevo.
+    for (const c of companeros) {
+        const cs = { ruta_base: rutaBaseNueva, fecha_actualizacion: new Date() };
+        if (c.portada) cs.portada = remap(c.portada);
+        if (c.imagenes?.length) cs.imagenes = c.imagenes.map((im) => ({ ...im, ruta: remap(im.ruta) }));
+        await db.collection('biblioteca').updateOne({ _id: c._id }, { $set: cs });
+    }
+    const extra = companeros.length ? ` (con los ${companeros.length} documento(s) que la comparten)` : '';
+    return { set, carpetaNueva, alertas: [`CDU → "${destinoCdu}"; ficheros movidos a "${segsNuevos.join('/')}"${extra}.`] };
 }
 
 /**

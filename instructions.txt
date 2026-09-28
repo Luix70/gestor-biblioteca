@@ -1064,6 +1064,27 @@ de ficheros clasificado por CDU.
     («colisión… ficheros NO movidos», 68 casos), y editar la CDU a mano APUNTABA el documento a la carpeta y la
     portada del otro.
 
+    LA CARPETA REFLEJA LA FICHA (2026-09-28). Regla del usuario: la ubicación en disco debe reflejar la CDU (y el
+    tipo) de la ficha, o buscar a mano es imposible; si hace falta, sufijo de desambiguación.
+      · `util-mantenimiento·carpetaReflejaFicha(doc)`: ¿está en el árbol de su CDU y bajo «libros»/«revistas»
+        según su tipo? (Los miembros de colección de árbol fijo y los tomos de obra viven a propósito en la
+        carpeta de su colección/obra: para ellos, siempre sí.)
+      · `recolocarSegunCdu(doc)` = `reubicarPorCdu(doc, doc.cdu, {recolocar:true})`: lo mueve allí. Corrige también
+        el segmento de tipo (un libro que fue revista seguía en «…/revistas/<issn>/<año>»). Si la carpeta vieja
+        no está en disco, no toca nada (no deja la ficha apuntando a una carpeta vacía).
+      · Tarea del Conformador `ubicar-segun-cdu` (tras re-clasificar-cdu) y script inmediato:
+          sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js            (lista, en seco)
+          sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js --ejecutar
+        Medido hoy: 451 documentos fuera de su árbol — 103 por las colisiones antiguas de re-clasificar-cdu
+        («colisión en …; CDU actualizada en BD pero ficheros NO movidos») y ~350 libros que siguen bajo
+        «revistas/». Los 451 están SOLOS en su carpeta (ninguno la comparte): moverlos es seguro.
+      · CARPETAS COMPARTIDAS (reubicarPorCdu): mover una carpeta la mueve ENTERA. Si otros documentos apuntan a la
+        misma (el mismo libro en varios ficheros), se mueve solo si TODOS van a la misma CDU, y entonces se
+        actualizan todos (ruta, portada, imágenes); si no, la CDU cambia solo en BD con aviso y la carpeta se
+        moverá entera cuando coincidan. Antes, mover por uno dejaba a los demás apuntando a una carpeta que ya no
+        existía. Hoy hay 400 carpetas compartidas: 328 de colecciones (a propósito), 62 del mismo libro en varios
+        ficheros y 10 de libros DISTINTOS con el mismo ISBN (probablemente uno lleva el ISBN del otro).
+
     REVISIÓN GENERAL «QUE NADA PIERDA LO CONSEGUIDO» (2026-09-28). Todos los que aplican datos de una autoridad a
     un documento ya catalogado comparten ahora `utils/huecos-autoridad.js`:
       · huecosDesdeAutoridad / huecosEscalares: rellena SOLO huecos (sinopsis, subtítulo, año, idioma, páginas,

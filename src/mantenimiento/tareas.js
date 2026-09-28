@@ -4,7 +4,7 @@ import { medirImagen } from '../utils/medir-imagen.js';
 import { resolverPortada } from '../utils/resolver-portada.js';
 import { rasterizarPaginas } from '../utils/rasterizar-pdf.js';
 import { extraerMetadatosEpub } from '../utils/lector-epub.js';
-import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion, restaurarOriginalSiFalta, reubicarPorCdu } from './util-mantenimiento.js';
+import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImagen, EXT_DOC, DIR_CDU, carpetaExiste, moverCarpetaConVerificacion, restaurarOriginalSiFalta, reubicarPorCdu, carpetaReflejaFicha, recolocarSegunCdu } from './util-mantenimiento.js';
 import { arbolCDU } from '../utils/cdu-arbol.js';
 import { buscarEnFicheroLocal } from '../utils/buscador-local.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
@@ -347,6 +347,18 @@ export const TAREAS = [
         },
     },
 
+
+    {
+        id: 'ubicar-segun-cdu',
+        version: 1,
+        descripcion: 'La carpeta debe reflejar la CDU (y el tipo) de la ficha, o buscar a mano sería imposible. Si no está en su árbol —lo dejaron así las colisiones antiguas de re-clasificar-cdu, que cambiaban la CDU en BD sin mover los ficheros—, se mueve allí; si el destino es la carpeta de OTRO documento, a una propia con sufijo. No toca miembros de colección de árbol fijo ni tomos de obra (viven en la carpeta de su colección/obra).',
+        aplica: (doc) => !!doc.ruta_base && !carpetaReflejaFicha(doc),
+        async ejecutar(doc) {
+            const reub = await recolocarSegunCdu(doc);
+            if (!reub?.set?.ruta_base || reub.set.ruta_base === doc.ruta_base) return null;
+            return { set: reub.set, carpetaNueva: reub.carpetaNueva || null, alertas: [`Carpeta recolocada según la ficha (CDU ${doc.cdu}).`, ...(reub.alertas || [])] };
+        },
+    },
 
     {
         id: 'describir-cdu',
