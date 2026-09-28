@@ -1017,6 +1017,13 @@ de ficheros clasificado por CDU.
     abre la Búsqueda con ellos. POST /documentos/:id/elegir-edicion {isbn|ninguna}. Solo admite un ISBN que esté
     entre las candidatas. Un ISBN-10 y su ISBN-13 cuentan como UNO; un idioma «und/mul» no descarta a nadie.
 
+    CAMPAÑAS: «504» AL CARGAR LA TARJETA (arreglado 2026-09-28). Cada carga del panel recontaba lo pendiente de las
+    12 campañas, una tras otra (recorridos completos en Atlas) → pasaba del límite del proxy, sobre todo con Atlas
+    ocupado por un script. Ahora los contadores «Pendientes» van en caché: el panel responde al momento con el
+    último valor conocido (la 1.ª carga espera como mucho 5 s; lo que no llegue sale «—» y aparece en la siguiente),
+    el recuento se hace en segundo plano y en paralelo como mucho cada 2 min, y cada tanda ejecutada actualiza el
+    suyo.
+
     CAMPAÑA DE FONDO «Recuperar ISBN que faltan» (2026-09-28, campanas.js · recuperar-isbn, ACTIVA por defecto,
     coste «apis», sin IA): lo mismo que «🔎 Extraer ISBN» / scripts/reidentificar-sin-isbn.js, poco a poco y a
     reposo (lote 20 cada 15 min): busca el ISBN en el fichero y, si no, identifica la edición por autoridad; con

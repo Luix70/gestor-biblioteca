@@ -604,13 +604,35 @@ export function campanaEnCurso() {
     return false;
 }
 
+// ── CONTADORES «Pendientes» EN CACHÉ ────────────────────────────────────────────────────────────
+// Contar lo pendiente de cada campaña es un recorrido de la colección entera en Atlas (12 campañas, filtros con
+// $exists/$expr que no usan índice). Hacerlo EN CADA carga del panel —y el panel sondea— sumaba más de lo que
+// aguanta el proxy: «504» en la tarjeta de Campañas, sobre todo con Atlas ocupado por un script. Ahora el panel
+// recibe al momento los últimos valores conocidos y el recuento se refresca en segundo plano, en paralelo y como
+// mucho cada CONTEO_TTL_MS; cada tanda ejecutada actualiza además el suyo.
+const CONTEO_TTL_MS = 2 * 60 * 1000;
+const ESPERA_CONTEO_MS = 5000;           // lo que el panel espera por un recuento fresco antes de responder
+const conteos = new Map();               // id → nº pendiente (último conocido)
+let conteoEnCurso = null, conteoFecha = 0;
+
+function refrescarConteos(db) {
+    if (conteoEnCurso) return conteoEnCurso;
+    conteoEnCurso = Promise.all(CAMPANAS.map(async (c) => {
+        try { conteos.set(c.id, await pendientesCampana(db, c)); } catch { /* conserva el último valor */ }
+    })).finally(() => { conteoFecha = Date.now(); conteoEnCurso = null; });
+    return conteoEnCurso;
+}
+
 /** Estado + config + pendientes + PROGRESO de TODAS las campañas (para GET /api/campanas). */
 export async function listarCampanas(db) {
     const cfg = await leerAjustesCampanas(db);
+    if (Date.now() - conteoFecha > CONTEO_TTL_MS) {
+        // Espera un poco por el recuento (la 1.ª vez suele bastar); si tarda, responde con lo que haya.
+        await Promise.race([refrescarConteos(db), new Promise((r) => setTimeout(r, ESPERA_CONTEO_MS))]);
+    }
     const out = [];
     for (const c of CAMPANAS) {
-        let pendientes = null;
-        try { pendientes = await pendientesCampana(db, c); } catch { pendientes = null; }
+        const pendientes = conteos.has(c.id) ? conteos.get(c.id) : null;
         out.push({
             id: c.id, etiqueta: c.etiqueta, coste: c.coste, descripcion: c.descripcion,
             version: c.version, ...cfg[c.id], pendientes,
@@ -647,6 +669,7 @@ export async function ejecutarCampana(db, id, { limite, debeAbortar = async () =
             });
             prog.cambios = r.cambios || 0;
             prog.procesados = r.procesados ?? prog.procesados;
+            if (Number.isFinite(r.pendientes)) conteos.set(id, r.pendientes);
             return { ...r, abortado: false };
         }
 
@@ -659,6 +682,7 @@ export async function ejecutarCampana(db, id, { limite, debeAbortar = async () =
         for (const doc of docs) {
             if (await debeAbortar()) {
                 const pendientes = await col.countDocuments(filtroConSello(camp, base));
+                conteos.set(id, pendientes);
                 return { procesados, cambios, pendientes, abortado: true };
             }
             try {
@@ -679,6 +703,7 @@ export async function ejecutarCampana(db, id, { limite, debeAbortar = async () =
             await espera(PAUSA_MS);
         }
         const pendientes = await col.countDocuments(filtroConSello(camp, base));
+        conteos.set(id, pendientes);   // el contador del panel, al día sin otro recuento
         return { procesados, cambios, pendientes, abortado: false };
     } finally {
         prog.enCurso = false;
