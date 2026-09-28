@@ -13,7 +13,10 @@
  *   · Cada uno de los demás pasa a SU carpeta (la misma ruta con el sufijo de su _id, como hace la ingesta):
  *       1. si su fichero está en la carpeta compartida → se MUEVE (copia verificada por tamaño, luego se borra el
  *          original de la compartida);
- *       2. si está en otra carpeta del árbol (una con su registro.json, o por nombre) → se le apunta ALLÍ;
+ *       2. si está en otra carpeta del árbol (una con su registro.json, o por nombre) — medido: los 75 casos, en
+ *          su carpeta ANTIGUA (casi siempre 0/000/000/libros/<isbn>, de antes de clasificarse) — esa carpeta se
+ *          MUEVE ENTERA a su sitio correcto (su CDU + sufijo), con su propia portada; si otro documento la usara,
+ *          solo se copia su fichero;
  *       3. si está en la Papelera / Cuarentena → se COPIA de vuelta a su carpeta (lo de la Papelera no se toca);
  *       4. si no está en ninguna parte → no se borra nada: el documento pasa a su carpeta con su ficha en disco y
  *          queda marcado para revisar («fichero original no encontrado»).
@@ -30,7 +33,7 @@ import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { conectarDB } from '../src/database.js';
-import { DIR_CDU, carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
+import { DIR_CDU, carpetaDeDoc, moverCarpetaConVerificacion } from '../src/mantenimiento/util-mantenimiento.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
 
@@ -109,14 +112,20 @@ for (const [ruta, ds] of compartidas) {
         const hoja = path.basename(carpeta);
         const propia = path.join(path.dirname(carpeta), `${hoja}-${String(d._id).slice(-6)}`);
         const enCompartida = presentes.includes(d);
-        const carpetaReg = porRegistro.get(String(d._id));
+        // Su carpeta por registro.json, salvo que sea la propia compartida (entonces no es «otra» carpeta suya).
+        const carpetaReg0 = porRegistro.get(String(d._id));
+        const carpetaReg = carpetaReg0 && carpetaReg0 !== carpeta ? carpetaReg0 : null;
         const enArbol = (porNombre.get(d.nombre_archivo) || []).filter((p) => p.startsWith(DIR_CDU) && path.dirname(p) !== carpeta);
         const enOtras = (porNombre.get(d.nombre_archivo) || []).filter((p) => !p.startsWith(DIR_CDU));
         const otroTitulo = norm(d.titulo) !== norm(dueno.titulo);
 
         let accion, destino;
         if (enCompartida) { accion = 'mover su fichero a su carpeta'; destino = propia; }
-        else if (carpetaReg || enArbol.length) { accion = 'apuntar a la carpeta donde está su fichero'; destino = carpetaReg || path.dirname(enArbol[0]); }
+        // Su carpeta antigua (donde está su fichero): ¿la usa algún otro documento? Si no, se mueve entera a su sitio.
+        // La que CONTIENE su fichero manda; la de su registro.json, solo si el fichero no aparece por nombre.
+        const vieja = (enArbol.length ? path.dirname(enArbol[0]) : null) || carpetaReg;
+        const viejaEnUso = vieja ? (porRuta.get(absAWeb(vieja)) || []).length > 0 : false;
+        if (vieja) { accion = viejaEnUso ? `copiar su fichero desde ${absAWeb(vieja)} (esa carpeta la usa otro)` : `mover su carpeta ${absAWeb(vieja)} a su sitio`; destino = propia; }
         else if (enOtras.length) { accion = `recuperar su fichero de ${path.relative(RAIZ_APP, enOtras[0])}`; destino = propia; }
         else { accion = 'FICHERO NO ENCONTRADO en el NAS → carpeta propia con su ficha, marcado para revisar'; destino = propia; }
         console.log(`   · «${String(d.titulo).slice(0, 45)}» (${d.nombre_archivo || '—'})\n       → ${accion}: ${absAWeb(destino)}`);
@@ -125,7 +134,12 @@ for (const [ruta, ds] of compartidas) {
         try {
             const alertas = [];
             if (enCompartida) await copiarVerificado(path.join(carpeta, d.nombre_archivo), path.join(destino, d.nombre_archivo), { mover: true });
-            else if (!carpetaReg && !enArbol.length && enOtras.length) await copiarVerificado(enOtras[0], path.join(destino, d.nombre_archivo));
+            else if (vieja && !viejaEnUso && !(await existe(destino))) {
+                // La carpeta antigua es SOLO suya: entera (fichero, su portada, sus imágenes, material) a su sitio.
+                const suyos = [d.nombre_archivo, d.portada && path.posix.basename(d.portada), ...(d.imagenes || []).map((im) => path.posix.basename(im.ruta))].filter(Boolean);
+                await moverCarpetaConVerificacion(vieja, destino, suyos);
+            } else if (vieja) await copiarVerificado(path.join(vieja, d.nombre_archivo), path.join(destino, d.nombre_archivo));
+            else if (enOtras.length) await copiarVerificado(enOtras[0], path.join(destino, d.nombre_archivo));
             await fs.mkdir(destino, { recursive: true });
 
             // Portada: la de su carpeta de destino si ya tiene una; si no, copia de la compartida (la única que hay).
@@ -148,7 +162,7 @@ for (const [ruta, ds] of compartidas) {
             }
             if (otroTitulo) { set.revision_requerida = true; alertas.push('Portada heredada de una carpeta compartida con OTRO libro: re-extráela de su fichero («Re-extraer imágenes»).'); }
             if (enCompartida) { cuenta.movidos++; alertas.push(`Carpeta separada: compartía «${ruta}» con otro documento; ahora tiene la suya.`); }
-            else if (carpetaReg || enArbol.length) { cuenta.reapuntados++; alertas.push(`Apuntaba a la carpeta de otro documento (${ruta}); ahora a la suya, donde está su fichero.`); }
+            else if (vieja) { cuenta.reapuntados++; alertas.push(`Apuntaba a la carpeta de otro documento (${ruta}) y sus ficheros se habían quedado en ${absAWeb(vieja)}: ${viejaEnUso ? 'copiado su fichero' : 'movida su carpeta'} a su sitio.`); }
             else if (enOtras.length) { cuenta.recuperados++; alertas.push(`Fichero recuperado de ${path.relative(RAIZ_APP, enOtras[0])} (copia; el original sigue allí).`); }
             else { cuenta.sinFichero++; set.revision_requerida = true; set.fichero_perdido = true; alertas.push(`Fichero original «${d.nombre_archivo}» NO encontrado en el NAS (CDU, Papelera, Cuarentena): el documento apuntaba a la carpeta de otro (${ruta}). Se conserva la ficha; recupera el fichero o elimina el documento si es un duplicado.`); }
 
@@ -168,6 +182,6 @@ for (const [ruta, ds] of compartidas) {
     }
 }
 console.log(EJECUTAR
-    ? `\nSeparados (fichero movido): ${cuenta.movidos} · reapuntados a su carpeta: ${cuenta.reapuntados} · recuperados de Papelera/Cuarentena: ${cuenta.recuperados} · sin fichero (marcados): ${cuenta.sinFichero} · fallos: ${cuenta.fallos}\n`
+    ? `\nSeparados (fichero movido): ${cuenta.movidos} · devueltos a su sitio desde su carpeta antigua: ${cuenta.reapuntados} · recuperados de Papelera/Cuarentena: ${cuenta.recuperados} · sin fichero (marcados): ${cuenta.sinFichero} · fallos: ${cuenta.fallos}\n`
     : '\nDRY-RUN: no se ha tocado nada. Repite con --ejecutar.\n');
 process.exit(cuenta.fallos ? 1 : 0);
