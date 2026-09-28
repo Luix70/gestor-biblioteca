@@ -20,6 +20,7 @@ import { paginasMuestraDjvu } from './djvu.js';
 import { leerPaginaComic } from './comic-paginas.js';
 import { bufferPortadaPorISBN } from './portadas-isbn.js';
 import { indexarDoc } from './indice-busqueda.js';
+import { cargarArtefactos, esImagenArtefacto } from './portadas-artefacto.js';
 
 /**
  * Re-extrae las imágenes de UN documento. `solo5mas1=true` → portada + páginas de catalogación (5+1); false →
@@ -63,6 +64,10 @@ export async function reextraerImagenesDoc(db, doc, { solo5mas1 = true } = {}) {
     // documento SIN fichero (software/ISO catalogado por carpeta) → PORTADA REMOTA por ISBN reuniendo TODAS las
     // fuentes que ya usa la ingesta (OpenLibrary + Amazon + Google Books), no solo OpenLibrary.
     buffers = buffers.filter((b) => Buffer.isBuffer(b) && b.length);
+    // PORTADA ARTEFACTO (una imagen que es la «portada» de libros distintos: banner de un grupo de ripeo, logo de un
+    // maquetador…): fuera. Si no queda ninguna, se cae a la portada remota por ISBN (abajo).
+    await cargarArtefactos();
+    buffers = buffers.filter((b) => !esImagenArtefacto(b));
     if (!buffers.length && doc.isbn) { const r = await bufferPortadaPorISBN(doc.isbn); if (r) buffers = [r]; }
     if (!buffers.length)
         return { ok: false, motivo: original ? `no se pudo extraer ninguna imagen (${tipo})` : 'sin fichero original ni portada remota por ISBN' };

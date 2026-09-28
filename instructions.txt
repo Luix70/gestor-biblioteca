@@ -1093,6 +1093,24 @@ de ficheros clasificado por CDU.
         existía. Hoy hay 400 carpetas compartidas: 328 de colecciones (a propósito), 62 del mismo libro en varios
         ficheros y 10 de libros DISTINTOS con el mismo ISBN (probablemente uno lleva el ISBN del otro).
 
+    PORTADAS ARTEFACTO (2026-09-28, utils/portadas-artefacto.js + scripts/detectar-portadas-artefacto.js). Como hay
+    títulos-artefacto, hay portadas-artefacto: imágenes que no son la cubierta de ningún libro. Caso real: un grupo
+    de ripeo mete su banner («We Trip The Light Fantastic») como PÁGINA 1 de todos sus PDF; al rasterizar la
+    portada salía el banner, idéntico byte a byte en «Beer», «Deadly Connections» y «G. E. Moore's Ethical Theory»
+    (la cubierta real estaba en la página 2). Señal inequívoca: la MISMA imagen como portada de OBRAS distintas.
+      · Registro `portadas_artefacto`: SHA-256 exacto de la imagen y, si salió de un PDF, la HUELLA perceptiva
+        (dHash de 64 bits) de esa página, calculada sobre la miniatura gris que ya se hace para detectar páginas
+        en blanco (misma página → misma huella aunque se rasterice a otro tamaño; medido: el banner da la misma en
+        los tres PDF y la página 2 difiere en 23-36 bits). Las huellas de páginas casi lisas no se registran.
+      · La extracción de páginas de PDF (ingesta, «Re-extraer imágenes») SALTA las páginas artefacto como salta las
+        en blanco → la portada pasa a ser la siguiente página con contenido. Una cubierta embebida (EPUB) o una
+        imagen re-extraída que sea un artefacto se descarta y se cae a la portada remota por ISBN.
+      · scripts/detectar-portadas-artefacto.js (en seco por defecto; --ejecutar; --obras N): agrupa las portadas
+        por tamaño y SHA, registra las que comparten 2+ obras y REPARA esos libros re-extrayendo sus imágenes de
+        su propio fichero (sin IA, sin borrar nada, conservando las manuales) y regenerando sus sidecars.
+          sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js
+          sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js --ejecutar
+
     LIBROS HOMÓNIMOS EN LA CASCADA (2026-09-28, proveedor-metadatos · resultadoDeEsteLibro). OpenLibrary y Google
     Books, si no encuentran el ISBN, BUSCAN POR TÍTULO y devuelven lo primero que casa… que puede ser otro libro.
     Caso real: ISBN 9791387600075 («La misión», Tim Weiner, Debate 2026; en la BNE solo hay un «registro

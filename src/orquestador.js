@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { extraerMetadatosEpub, isbnsEnTextoEpub, textoInicialEpub } from './utils/lector-epub.js';
 import { parsearBloqueCatalogacion, cduImpresa } from './utils/cip.js';
+import { cargarArtefactos, esImagenArtefacto } from './utils/portadas-artefacto.js';
 import { recuperarOriginalesDeFichero } from './utils/titulo-original.js';
 import { extraerMetadatosPdf, textoPagina } from './utils/lector-pdf.js';
 import { medirImagen } from './utils/medir-imagen.js';
@@ -309,6 +310,15 @@ export async function procesarRecurso(entrada) {
     if (tipo === 'epub') {
         // TIER 1 · metadatos nativos del EPUB
         datosBase = await extraerMetadatosEpub(rutas[0]);
+        // Cubierta embebida que es una PORTADA ARTEFACTO conocida (el logo de un maquetador, la misma imagen en
+        // libros distintos): se descarta y resolverPortada buscará la real (remota por ISBN…).
+        if (datosBase.cubierta_base64) {
+            await cargarArtefactos();
+            if (esImagenArtefacto(Buffer.from(datosBase.cubierta_base64, 'base64'))) {
+                delete datosBase.cubierta_base64;
+                datosBase.alertas_agente = [...(datosBase.alertas_agente || []), 'Cubierta embebida descartada: es una portada artefacto conocida (la misma imagen en libros distintos).'];
+            }
+        }
         formatos = ['epub'];
         tipo_recurso = 'libro';
         // FICHERO DEFECTUOSO: EPUB con ZIP/OPF dañado → a Cuarentena/ilegibles (no se cataloga).

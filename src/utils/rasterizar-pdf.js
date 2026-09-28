@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { timeoutPoppler } from './timeout-poppler.js';
+import { huellaPGM, cargarArtefactos, esHuellaArtefacto } from './portadas-artefacto.js';
 
 const execFileP = promisify(execFile);
 
@@ -174,9 +175,11 @@ async function rasterizarGrisTramo(ruta, desde, hasta, dir, timeout, idx) {
     return out;
 }
 
-// Mapa pagina→fracciónTinta para un conjunto de páginas, midiéndolas por TRAMOS contiguos (menos relecturas).
+// Mapa pagina→{ tinta, huella } para un conjunto de páginas, midiéndolas por TRAMOS contiguos (menos relecturas).
+// `tinta` = fracción de píxeles oscuros (páginas en blanco); `huella` = dHash de la misma miniatura gris (para
+// reconocer páginas ARTEFACTO: el banner de un grupo de ripeo, idéntico en todos sus PDF — portadas-artefacto.js).
 // Best-effort: una página no medida (fallo de tramo) simplemente no aparece en el mapa.
-async function medirTinta(ruta, paginas) {
+export async function medirTinta(ruta, paginas) {
     const objetivo = [...new Set(paginas)].filter(p => p >= 1).sort((a, b) => a - b);
     if (!objetivo.length) return new Map();
     let dir;
@@ -187,7 +190,9 @@ async function medirTinta(ruta, paginas) {
         let idx = 0;
         for (const [desde, hasta] of tramosContiguos(objetivo)) {
             try {
-                for (const { pagina, buffer } of await rasterizarGrisTramo(ruta, desde, hasta, dir, to, idx++)) frac.set(pagina, fraccionTinta(buffer));
+                for (const { pagina, buffer } of await rasterizarGrisTramo(ruta, desde, hasta, dir, to, idx++)) {
+                    frac.set(pagina, { tinta: fraccionTinta(buffer), huella: huellaPGM(buffer) });
+                }
             } catch (e) {
                 if (PDF_ILEGIBLE.test(e.message || '') || PDF_ILEGIBLE.test(e.stderr || '')) break; // PDF entero ilegible
                 // tramo suelto (timeout/fallo): se sigue con el resto; las no medidas se tratan como significativas.
@@ -199,9 +204,13 @@ async function medirTinta(ruta, paginas) {
     return frac;
 }
 
-// De una ventana de páginas, las que superan el umbral de tinta (una NO medida se considera significativa: no se
-// descarta contenido por un fallo de medida — dirección segura).
-const significativasDe = (frac, ventana) => ventana.filter(p => (frac.has(p) ? frac.get(p) : 1) >= TINTA_MIN);
+// De una ventana de páginas, las que superan el umbral de tinta Y no son una página ARTEFACTO conocida (una NO
+// medida se considera significativa: no se descarta contenido por un fallo de medida — dirección segura).
+const significativasDe = (frac, ventana) => ventana.filter((p) => {
+    const m = frac.get(p);
+    if (!m) return true;
+    return m.tinta >= TINTA_MIN && !esHuellaArtefacto(m.huella);
+});
 
 /**
  * Rasteriza a JPEG las primeras `frente` páginas SIGNIFICATIVAS (saltando las en blanco) + la última
@@ -211,6 +220,7 @@ const significativasDe = (frac, ventana) => ventana.filter(p => (frac.has(p) ? f
  * o todo sale en blanco, cae a [1..frente]+última (nunca vacía → la comprobación de legibilidad sigue valiendo).
  */
 export async function rasterizarSignificativas(ruta, { frente = 5, incluirUltima = true, ancho = ANCHO, numPaginas = 0 } = {}) {
+    await cargarArtefactos();   // páginas artefacto conocidas (se saltan como las en blanco)
     const total = numPaginas || 0;
     const finVentana = total ? Math.min(total, frente + VENTANA_EXTRA) : frente + VENTANA_EXTRA;
     const ventanaFrente = Array.from({ length: finVentana }, (_, i) => i + 1);
