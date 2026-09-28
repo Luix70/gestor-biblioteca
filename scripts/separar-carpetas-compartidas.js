@@ -1,172 +1,173 @@
-// ── SEPARAR CARPETAS COMPARTIDAS (varios docs en la misma carpeta) ──────────────────────────────────────
-// Por una colisión de ruta_base, varios documentos comparten UNA carpeta y se pisan los sidecars
-// (registro.json, portada). No están perdidos —el catálogo los tiene bien— solo mal alojados. Este script les
-// da a cada uno SU carpeta adyacente y lo actualiza en la BD. NO reingesta y NO usa IA: los datos ya están
-// bien; solo se mueve el fichero y se corrige la ruta. Es lo que la red anti-colisión habría hecho al ingerir
-// (misma mecánica: carpeta + sufijo del _id).
-//
-// Por cada grupo que comparte carpeta R:
-//   · el PRIMER doc se queda en R (con sus sidecars regenerados a su nombre).
-//   · cada OTRO doc → carpeta adyacente «R-<id6>»: se COPIA+verifica su fichero (y las imágenes que referencia)
-//     allí, se actualiza ruta_base/portada/imagenes en Mongo, se regeneran sus sidecars, y solo ENTONCES se
-//     retira su fichero de R. Copia→verifica→retira: nunca se pierde un byte.
-//
-// Se excluyen los árboles preservados (ruta_fija): ahí compartir carpeta es a propósito (transmedia).
-// Tras ejecutar, conviene `node scripts/reparar-portadas.js --ejecutar` (las portadas compartidas eran de UN
-// solo doc; se re-extrae la de cada uno) y una pasada de Integridad.
-//
-// DRY-RUN por defecto. Antes de --ejecutar: BACKUP de `biblioteca` (ya hecho).
-//   node scripts/separar-carpetas-compartidas.js            (informe)
-//   node scripts/separar-carpetas-compartidas.js --ejecutar (aplica)
+/**
+ * SEPARAR CARPETAS COMPARTIDAS — «1 documento ↔ 1 carpeta».
+ *
+ * Por qué: varios documentos apuntaban a la MISMA carpeta. Casi siempre el mismo libro en dos ficheros (epub r1.2
+ * y r1.3), a veces libros distintos con el mismo ISBN. Pasaba sobre todo por un fallo ya corregido de
+ * `reubicarPorCdu`: al cambiar la CDU con la carpeta destino ocupada, apuntaba el documento a la carpeta del OTRO.
+ * Consecuencias: un solo `registro.json` por carpeta (la copia en disco de un documento PISA la del otro: si hubiera
+ * que reconstruir la base desde los sidecars, se perdería uno), una sola `portada-1.jpg` (uno enseña la del otro)
+ * y, a menudo, el documento apunta a una carpeta donde NI SIQUIERA está su fichero.
+ *
+ * Qué hace, carpeta por carpeta (los miembros de colecciones de árbol fijo comparten carpeta A PROPÓSITO: no se tocan):
+ *   · Se queda en la carpeta su DUEÑO: el del registro.json, o si no el que tiene su fichero allí, o el más antiguo.
+ *   · Cada uno de los demás pasa a SU carpeta (la misma ruta con el sufijo de su _id, como hace la ingesta):
+ *       1. si su fichero está en la carpeta compartida → se MUEVE (copia verificada por tamaño, luego se borra el
+ *          original de la compartida);
+ *       2. si está en otra carpeta del árbol (una con su registro.json, o por nombre) → se le apunta ALLÍ;
+ *       3. si está en la Papelera / Cuarentena → se COPIA de vuelta a su carpeta (lo de la Papelera no se toca);
+ *       4. si no está en ninguna parte → no se borra nada: el documento pasa a su carpeta con su ficha en disco y
+ *          queda marcado para revisar («fichero original no encontrado»).
+ *     Su portada: la de la carpeta compartida se COPIA (es la única que hay); si los títulos difieren, se marca para
+ *     re-extraerla de su propio fichero.
+ *   · Se regeneran los sidecars (registro.json + MARC) de TODOS, cada uno en su carpeta.
+ *
+ * Solo en el NAS. Una pasada por el árbol (CDU, Papelera, Cuarentena) para localizar los ficheros.
+ *   sudo docker exec -t gestor-biblioteca node scripts/separar-carpetas-compartidas.js              (DRY-RUN)
+ *   sudo docker exec -t gestor-biblioteca node scripts/separar-carpetas-compartidas.js --ejecutar
+ */
 import 'dotenv/config';
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { conectarDB } from '../src/database.js';
-import { aRegistroLegible, escribirSidecars } from '../src/utils/registro.js';
+import { DIR_CDU, carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
+import { regenerarSidecarsDoc } from '../src/utils/registro.js';
+import { indexarDoc } from '../src/utils/indice-busqueda.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const RAIZ = path.resolve(__dirname, '..');
-const dir = (env, def) => { const v = process.env[env] || def; return path.isAbsolute(v) ? v : path.resolve(RAIZ, v); };
-const DIR_CDU = dir('PATH_CDU', 'CDU');
 const EJECUTAR = process.argv.includes('--ejecutar');
-
-const existe = (p) => fs.access(p).then(() => true).catch(() => false);
-const absDe = (web) => path.join(DIR_CDU, ...(web.startsWith('/recursos/') ? web.slice('/recursos/'.length) : web).split('/').filter(Boolean));
-
-// Copia NO destructiva y verificada (a un temporal oculto → rename): el destino queda con el mismo tamaño (>0)
-// o se aborta sin haber tocado nada. Devuelve true si la copia es íntegra.
-async function copiaVerificada(origen, destino) {
-    const st = await fs.stat(origen).catch(() => null);
-    if (!st || !st.isFile() || st.size === 0) return false;
-    await fs.mkdir(path.dirname(destino), { recursive: true });
-    const tmp = path.join(path.dirname(destino), `.tmp-${Date.now()}-${path.basename(destino)}`);
-    try {
-        await fs.copyFile(origen, tmp);
-        const d = await fs.stat(tmp);
-        if (d.size !== st.size) { await fs.rm(tmp, { force: true }).catch(() => {}); return false; }
-        await fs.rename(tmp, destino);
-        return true;
-    } catch { await fs.rm(tmp, { force: true }).catch(() => {}); return false; }
-}
-
-// Este script trabaja sobre los FICHEROS del árbol CDU: hay que ejecutarlo DONDE ESTÁN (en el NAS, dentro del
-// contenedor). Si la raíz CDU no existe (p. ej. corriéndolo en un portátil de desarrollo), todo saldría como
-// «no está en la carpeta» — un falso negativo que despista. Se avisa alto y claro.
-if (!(await existe(DIR_CDU))) {
-    console.error(`\n⛔ No existe la raíz CDU: ${DIR_CDU}`);
-    console.error('   Este script mueve ficheros del árbol CDU: ejecútalo EN EL NAS, dentro del contenedor:');
-    console.error('   docker exec gestor-biblioteca node scripts/separar-carpetas-compartidas.js\n');
-    process.exit(1);
-}
+const RAIZ_APP = path.resolve(DIR_CDU, '..');
+const OTRAS_RAICES = ['Papelera', 'Cuarentena', 'Reintentos'].map((d) => path.join(RAIZ_APP, d));
 
 const db = await conectarDB();
 const col = db.collection('biblioteca');
+const existe = async (p) => { try { await fs.access(p); return true; } catch { return false; } };
+const webAAbs = (web) => path.join(DIR_CDU, ...String(web).replace(/^\/recursos\//, '').split('/'));
+const absAWeb = (abs) => '/recursos/' + path.relative(DIR_CDU, abs).split(path.sep).join('/');
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '').slice(0, 30);
 
-// Mapas id→nombre para resolver autores/editorial al regenerar los sidecars (sin una consulta por doc).
-const autorMap = new Map();
-for (const a of await db.collection('autores').find({}, { projection: { nombre: 1 } }).toArray()) autorMap.set(String(a._id), a.nombre);
-const editorialMap = new Map();
-for (const e of await db.collection('editoriales').find({}, { projection: { nombre: 1 } }).toArray()) editorialMap.set(String(e._id), e.nombre);
-const sidecarsDe = (doc) => aRegistroLegible(doc, {
-    autores: (doc.autores || []).map(id => autorMap.get(String(id)) || String(id)),
-    editorial: doc.editorial ? (editorialMap.get(String(doc.editorial)) || null) : null,
-});
+// ── 1. Carpetas compartidas (sin las de colecciones de árbol fijo) ─────────────────────────────────────────
+const todos = await col.find({ ruta_base: { $exists: true } }, {
+    projection: { ruta_base: 1, titulo: 1, nombre_archivo: 1, portada: 1, imagenes: 1, fecha_ingreso: 1, ruta_fija: 1, coleccion: 1, naturaleza: 1 },
+}).toArray();
+const porRuta = new Map();
+for (const d of todos) porRuta.set(d.ruta_base, [...(porRuta.get(d.ruta_base) || []), d]);
+const deColeccion = (d) => d.ruta_fija && (d.coleccion || d.naturaleza === 'audiolibro' || d.naturaleza === 'software');
+const compartidas = [...porRuta.entries()].filter(([, ds]) => ds.length > 1 && !ds.some(deColeccion));
+console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${compartidas.length} carpeta(s) compartida(s) · ${compartidas.reduce((s, [, ds]) => s + ds.length, 0)} documento(s)\n`);
+if (!compartidas.length) process.exit(0);
 
-// Grupos que comparten ruta_base (2+ docs). Se excluyen los árboles preservados (ruta_fija).
-const grupos = await col.aggregate([
-    { $match: { ruta_base: { $ne: null }, ruta_fija: { $ne: true } } },
-    { $group: { _id: '$ruta_base', n: { $sum: 1 }, ids: { $push: '$_id' } } },
-    { $match: { n: { $gt: 1 } } },
-]).toArray();
-
-console.log(`\nCarpetas compartidas por 2+ documentos: ${grupos.length}  [${EJECUTAR ? 'EJECUTAR' : 'DRY-RUN'}]\n`);
-
-let movidos = 0, fallos = 0, gruposOk = 0;
-for (const g of grupos) {
-    const base = g._id;
-    const baseDir = absDe(base);
-    // Orden estable por _id: el keeper (primero) es determinista entre pasadas.
-    const docs = (await col.find({ ruta_base: base }).toArray()).sort((a, b) => String(a._id).localeCompare(String(b._id)));
-    const [keeper, ...movers] = docs;
-    console.log(`📁 ${base}   (${docs.length} docs)`);
-    console.log(`   ⏸ se queda: [${keeper._id}] ${keeper.nombre_archivo || keeper.titulo}`);
-
-    for (const doc of movers) {
-        const id6 = String(doc._id).slice(-6);
-        const nuevaWeb = `${base}-${id6}`;
-        const nuevaDir = absDe(nuevaWeb);
-        const nombre = doc.nombre_archivo || '';
-        const src = nombre ? path.join(baseDir, nombre) : null;
-
-        if (!src || !(await existe(src))) {
-            // Su fichero no está en la carpeta (quizá ya es el de otro doc): no se puede mover con seguridad.
-            console.log(`   ⚠ [${doc._id}] «${nombre || '(sin nombre_archivo)'}» no está en la carpeta → SE OMITE (revisar a mano)`);
-            fallos++;
-            continue;
-        }
-        // PORTADAS. Si el doc tiene un ORIGINAL re-extraíble (pdf/epub…), su portada compartida era la del
-        // ÚLTIMO número que se catalogó (todos sobrescribieron portada-1.jpg) → copiarla propagaría la portada
-        // equivocada, y reparar-portadas NO la corregiría (la vería «presente»). Se LIMPIA portada/imagenes:
-        // reparar-portadas re-extrae después la de CADA número de su propio PDF. No se pierde nada: las
-        // imágenes son extracciones re-derivables y los ficheros siguen en la carpeta base.
-        // Si NO es re-extraíble (un ESCANEO: las imágenes SON el contenido), se COPIAN y se conservan.
-        const reextraible = /\.(pdf|epub|mobi|azw3?|fb2|djvu|cbr|cbz|cb7|chm|docx?)$/i.test(nombre);
-        const imgs = [];
-        if (!reextraible) {
-            for (const im of (doc.imagenes || [])) {
-                const b = im?.ruta ? path.basename(im.ruta) : null;
-                if (b && await existe(path.join(baseDir, b))) imgs.push(b);
-            }
-            const portadaB = doc.portada ? path.basename(doc.portada) : null;
-            if (portadaB && !imgs.includes(portadaB) && await existe(path.join(baseDir, portadaB))) imgs.push(portadaB);
-        }
-
-        console.log(`   → [${doc._id}] «${nombre}»  →  ${nuevaWeb}${reextraible ? '  (portada se re-extrae)' : imgs.length ? `  (+${imgs.length} img)` : ''}`);
-        if (!EJECUTAR) { movidos++; continue; }
-
-        // 1) Copiar+verificar el fichero y las imágenes (solo si escaneo) en la carpeta nueva.
-        if (!(await copiaVerificada(src, path.join(nuevaDir, nombre)))) { console.error(`     ⛔ copia fallida → SE OMITE`); fallos++; continue; }
-        let imgsOk = true;
-        for (const b of imgs) if (!(await copiaVerificada(path.join(baseDir, b), path.join(nuevaDir, b)))) { imgsOk = false; break; }
-        if (!imgsOk) { console.error(`     ⛔ copia de imágenes fallida → SE OMITE (fichero ya copiado, se limpia)`); await fs.rm(path.join(nuevaDir, nombre), { force: true }).catch(() => {}); fallos++; continue; }
-
-        // 2) Actualizar la BD: ruta_base + portada/imagenes (rebase si escaneo; limpiar si re-extraíble).
-        const rebase = (w) => (typeof w === 'string' && w.startsWith(base) ? nuevaWeb + w.slice(base.length) : w);
-        const set = { ruta_base: nuevaWeb };
-        if (reextraible) { set.portada = null; set.imagenes = []; }
-        else {
-            if (doc.portada) set.portada = rebase(doc.portada);
-            if (Array.isArray(doc.imagenes)) set.imagenes = doc.imagenes.map(im => ({ ...im, ruta: rebase(im.ruta) }));
-        }
-        await col.updateOne({ _id: doc._id }, { $set: set });
-
-        // 3) Regenerar los sidecars del doc en su carpeta nueva.
-        try { await escribirSidecars(nuevaDir, sidecarsDe({ ...doc, ...set })); } catch (e) { console.warn(`     ⚠ sidecars: ${e.message}`); }
-
-        // 4) Ahora que todo está copiado y verificado, retirar el fichero del doc de la carpeta base (NO las
-        //    imágenes: pueden ser del keeper por nombre compartido). Si por lo que sea coincide con el nombre
-        //    del keeper, no se toca.
-        if (nombre !== (keeper.nombre_archivo || '')) await fs.rm(src, { force: true }).catch(() => {});
-        movidos++;
+// ── 2. Localizar ficheros: una pasada por el árbol ─────────────────────────────────────────────────────────
+// Solo interesan los nombres de fichero de estos documentos y las carpetas cuyo nombre empieza como la hoja de
+// alguna carpeta compartida (ahí puede estar la carpeta propia con sufijo, con su registro.json).
+const buscados = new Set(compartidas.flatMap(([, ds]) => ds.map((d) => d.nombre_archivo).filter(Boolean)));
+const hojas = new Set(compartidas.map(([r]) => path.posix.basename(r)));
+const porNombre = new Map();      // nombre de fichero → [rutas absolutas]
+const porRegistro = new Map();    // _id del registro.json → carpeta absoluta
+let vistas = 0;
+async function recorrer(dir) {
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    if (++vistas % 5000 === 0) process.stdout.write(`\r   …${vistas} carpetas recorridas`);
+    const base = path.basename(dir);
+    if ([...hojas].some((h) => base.startsWith(h)) && ents.some((e) => e.isFile() && e.name === 'registro.json')) {
+        try { const id = JSON.parse(await fs.readFile(path.join(dir, 'registro.json'), 'utf8'))._id; if (id) porRegistro.set(String(id), dir); } catch { /* ilegible */ }
     }
-
-    // El keeper se queda, pero sus sidecars Y su portada en la carpeta base pueden ser de OTRO doc (el último
-    // que escribió). Se regeneran los sidecars a su nombre; y si es re-extraíble, se limpia su portada para que
-    // reparar-portadas saque la SUYA (si no, el keeper se quedaría con la portada del último número).
-    if (EJECUTAR) {
-        const keeperReextraible = /\.(pdf|epub|mobi|azw3?|fb2|djvu|cbr|cbz|cb7|chm|docx?)$/i.test(keeper.nombre_archivo || '');
-        if (keeperReextraible) await col.updateOne({ _id: keeper._id }, { $set: { portada: null, imagenes: [] } });
-        const keeperAct = keeperReextraible ? { ...keeper, portada: null, imagenes: [] } : keeper;
-        try { await escribirSidecars(baseDir, sidecarsDe(keeperAct)); } catch (e) { console.warn(`   ⚠ sidecars keeper: ${e.message}`); }
+    for (const e of ents) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) await recorrer(p);
+        else if (buscados.has(e.name)) porNombre.set(e.name, [...(porNombre.get(e.name) || []), p]);
     }
-    gruposOk++;
-    console.log('');
+}
+process.stdout.write('   Localizando ficheros en el NAS…');
+for (const r of [DIR_CDU, ...OTRAS_RAICES]) await recorrer(r);
+process.stdout.write(`\r   ${vistas} carpetas recorridas.                    \n\n`);
+
+// Copia verificada por tamaño (y, si se pide, borra el original tras verificar).
+async function copiarVerificado(origen, destino, { mover = false } = {}) {
+    await fs.mkdir(path.dirname(destino), { recursive: true });
+    await fs.copyFile(origen, destino);
+    const [a, b] = await Promise.all([fs.stat(origen), fs.stat(destino)]);
+    if (a.size !== b.size) throw new Error(`copia incompleta de ${path.basename(origen)}`);
+    if (mover) await fs.unlink(origen);
 }
 
-console.log('═'.repeat(64));
-console.log(`  ${EJECUTAR ? 'Movidos' : 'A mover'}: ${movidos} docs · Grupos: ${gruposOk} · Omitidos/fallos: ${fallos}`);
-if (!EJECUTAR) console.log('\n  (DRY-RUN) Nada tocado. Con --ejecutar se aplica (BACKUP hecho).');
-else console.log('\n  Sugerido después: `node scripts/reparar-portadas.js --ejecutar` (re-extrae la portada de cada uno)\n              y `node scripts/integridad.js` para confirmar que ya no hay carpetas compartidas.');
-process.exit(0);
+const cuenta = { movidos: 0, reapuntados: 0, recuperados: 0, sinFichero: 0, fallos: 0 };
+let i = 0;
+for (const [ruta, ds] of compartidas) {
+    i++;
+    const carpeta = webAAbs(ruta);
+    let regId = null;
+    try { regId = JSON.parse(await fs.readFile(path.join(carpeta, 'registro.json'), 'utf8'))._id || null; } catch { /* */ }
+    const presentes = [];
+    for (const d of ds) if (d.nombre_archivo && await existe(path.join(carpeta, d.nombre_archivo))) presentes.push(d);
+    const porAntiguedad = [...ds].sort((a, b) => (a.fecha_ingreso || 0) - (b.fecha_ingreso || 0));
+    const dueno = ds.find((d) => String(d._id) === String(regId) && presentes.includes(d)) || presentes[0] || porAntiguedad[0];
+    console.log(`[${i}/${compartidas.length}] ${ruta}\n   se queda: «${String(dueno.titulo).slice(0, 45)}» (${dueno.nombre_archivo || '—'})`);
+
+    for (const d of ds) {
+        if (d === dueno) continue;
+        const hoja = path.basename(carpeta);
+        const propia = path.join(path.dirname(carpeta), `${hoja}-${String(d._id).slice(-6)}`);
+        const enCompartida = presentes.includes(d);
+        const carpetaReg = porRegistro.get(String(d._id));
+        const enArbol = (porNombre.get(d.nombre_archivo) || []).filter((p) => p.startsWith(DIR_CDU) && path.dirname(p) !== carpeta);
+        const enOtras = (porNombre.get(d.nombre_archivo) || []).filter((p) => !p.startsWith(DIR_CDU));
+        const otroTitulo = norm(d.titulo) !== norm(dueno.titulo);
+
+        let accion, destino;
+        if (enCompartida) { accion = 'mover su fichero a su carpeta'; destino = propia; }
+        else if (carpetaReg || enArbol.length) { accion = 'apuntar a la carpeta donde está su fichero'; destino = carpetaReg || path.dirname(enArbol[0]); }
+        else if (enOtras.length) { accion = `recuperar su fichero de ${path.relative(RAIZ_APP, enOtras[0])}`; destino = propia; }
+        else { accion = 'FICHERO NO ENCONTRADO en el NAS → carpeta propia con su ficha, marcado para revisar'; destino = propia; }
+        console.log(`   · «${String(d.titulo).slice(0, 45)}» (${d.nombre_archivo || '—'})\n       → ${accion}: ${absAWeb(destino)}`);
+        if (!EJECUTAR) continue;
+
+        try {
+            const alertas = [];
+            if (enCompartida) await copiarVerificado(path.join(carpeta, d.nombre_archivo), path.join(destino, d.nombre_archivo), { mover: true });
+            else if (!carpetaReg && !enArbol.length && enOtras.length) await copiarVerificado(enOtras[0], path.join(destino, d.nombre_archivo));
+            await fs.mkdir(destino, { recursive: true });
+
+            // Portada: la de su carpeta de destino si ya tiene una; si no, copia de la compartida (la única que hay).
+            const set = { ruta_base: absAWeb(destino), fecha_actualizacion: new Date() };
+            const nombrePortada = d.portada ? path.posix.basename(d.portada) : null;
+            if (nombrePortada) {
+                const enDestino = path.join(destino, nombrePortada);
+                if (!(await existe(enDestino)) && await existe(path.join(carpeta, nombrePortada))) await copiarVerificado(path.join(carpeta, nombrePortada), enDestino);
+                set.portada = `${set.ruta_base}/${nombrePortada}`;
+            }
+            if (Array.isArray(d.imagenes) && d.imagenes.length) {
+                const imagenes = [];
+                for (const im of d.imagenes) {
+                    const n = path.posix.basename(im.ruta);
+                    const enDestino = path.join(destino, n);
+                    if (!(await existe(enDestino)) && await existe(path.join(carpeta, n))) await copiarVerificado(path.join(carpeta, n), enDestino).catch(() => {});
+                    if (await existe(enDestino)) imagenes.push({ ...im, ruta: `${set.ruta_base}/${n}` });
+                }
+                set.imagenes = imagenes;
+            }
+            if (otroTitulo) { set.revision_requerida = true; alertas.push('Portada heredada de una carpeta compartida con OTRO libro: re-extráela de su fichero («Re-extraer imágenes»).'); }
+            if (enCompartida) { cuenta.movidos++; alertas.push(`Carpeta separada: compartía «${ruta}» con otro documento; ahora tiene la suya.`); }
+            else if (carpetaReg || enArbol.length) { cuenta.reapuntados++; alertas.push(`Apuntaba a la carpeta de otro documento (${ruta}); ahora a la suya, donde está su fichero.`); }
+            else if (enOtras.length) { cuenta.recuperados++; alertas.push(`Fichero recuperado de ${path.relative(RAIZ_APP, enOtras[0])} (copia; el original sigue allí).`); }
+            else { cuenta.sinFichero++; set.revision_requerida = true; set.fichero_perdido = true; alertas.push(`Fichero original «${d.nombre_archivo}» NO encontrado en el NAS (CDU, Papelera, Cuarentena): el documento apuntaba a la carpeta de otro (${ruta}). Se conserva la ficha; recupera el fichero o elimina el documento si es un duplicado.`); }
+
+            await col.updateOne({ _id: d._id }, { $set: set, $push: { alertas_agente: { $each: alertas } } });
+            const actualizado = await col.findOne({ _id: d._id });
+            await regenerarSidecarsDoc(db, actualizado, carpetaDeDoc(actualizado)).catch(() => {});
+            await indexarDoc(db, d._id).catch(() => {});
+        } catch (e) {
+            cuenta.fallos++;
+            console.log(`       ⛔ ${e.message}`);
+        }
+    }
+    // El dueño: su registro.json vuelve a ser SUYO (podía ser el del otro).
+    if (EJECUTAR) {
+        const actualizado = await col.findOne({ _id: dueno._id });
+        if (actualizado) await regenerarSidecarsDoc(db, { ...actualizado, fecha_actualizacion: new Date() }, carpeta).catch(() => {});
+    }
+}
+console.log(EJECUTAR
+    ? `\nSeparados (fichero movido): ${cuenta.movidos} · reapuntados a su carpeta: ${cuenta.reapuntados} · recuperados de Papelera/Cuarentena: ${cuenta.recuperados} · sin fichero (marcados): ${cuenta.sinFichero} · fallos: ${cuenta.fallos}\n`
+    : '\nDRY-RUN: no se ha tocado nada. Repite con --ejecutar.\n');
+process.exit(cuenta.fallos ? 1 : 0);

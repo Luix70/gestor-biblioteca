@@ -1085,6 +1085,23 @@ de ficheros clasificado por CDU.
         existía. Hoy hay 400 carpetas compartidas: 328 de colecciones (a propósito), 62 del mismo libro en varios
         ficheros y 10 de libros DISTINTOS con el mismo ISBN (probablemente uno lleva el ISBN del otro).
 
+    SEPARAR CARPETAS COMPARTIDAS — «1 documento ↔ 1 carpeta» (2026-09-28, scripts/separar-carpetas-compartidas.js).
+    Había 72 carpetas (147 documentos, sin contar colecciones, que comparten a propósito) donde varios documentos
+    apuntaban a la MISMA carpeta: casi siempre el mismo libro en dos ficheros (epub r1.2 y r1.3), a veces libros
+    distintos con el mismo ISBN. Consecuencias: un solo registro.json (la copia en disco de uno PISABA la del otro:
+    reconstruir la base desde los sidecars perdería uno), una sola portada-1.jpg, y en 75 de los 147 el fichero
+    del documento NI SIQUIERA estaba en la carpeta a la que apuntaba. Causa principal: el fallo ya corregido de
+    reubicarPorCdu (apuntaba el documento a la carpeta del otro al cambiar la CDU con el destino ocupado), usado por
+    la edición manual de la CDU, «Investigar CDU», la campaña de CDU por ISBN y scripts de saneado.
+    El script deja en la carpeta a su dueño (el del registro.json / el que tiene allí su fichero / el más antiguo)
+    y a cada uno de los demás le da SU carpeta (sufijo del _id, como la ingesta): mueve su fichero si está allí
+    (copia verificada), le apunta a la carpeta donde esté su fichero si está en otro sitio del árbol, lo COPIA de
+    vuelta si está en la Papelera/Cuarentena, y si no está en ninguna parte conserva la ficha, la marca para
+    revisar (`fichero_perdido`) y lo dice en una alerta. Regenera los sidecars de todos, cada uno en su carpeta.
+    Si los títulos difieren, marca la portada para re-extraerla (la heredada era la del otro libro).
+        sudo docker exec -t gestor-biblioteca node scripts/separar-carpetas-compartidas.js              (en seco)
+        sudo docker exec -t gestor-biblioteca node scripts/separar-carpetas-compartidas.js --ejecutar
+
     REVISIÓN GENERAL «QUE NADA PIERDA LO CONSEGUIDO» (2026-09-28). Todos los que aplican datos de una autoridad a
     un documento ya catalogado comparten ahora `utils/huecos-autoridad.js`:
       · huecosDesdeAutoridad / huecosEscalares: rellena SOLO huecos (sinopsis, subtítulo, año, idioma, páginas,
