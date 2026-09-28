@@ -30,6 +30,7 @@ import { variantesISBN } from '../utils/identificadores.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from '../utils/buscador-local.js';
 import { buscarEnBNE } from '../utils/buscador-bne-sru.js';
 import { huecosDesdeAutoridad } from '../utils/huecos-autoridad.js';
+import { reidentificarDoc } from '../utils/reidentificar-doc.js';
 import { aplicarCduConPrioridad } from '../utils/prioridad-cdu.js';
 import { buscarNombrePorISSN } from '../utils/buscador-issn-titulo.js';
 import { nombreEsPlaceholder, limpiarNombreColeccion, claveCanonica } from '../utils/colecciones.js';
@@ -297,6 +298,39 @@ export const CAMPANAS = [
             set.fecha_actualizacion = new Date();
             await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
             return true;
+        },
+    },
+
+    {
+        id: 'recuperar-isbn',
+        etiqueta: 'Recuperar ISBN que faltan',
+        coste: 'apis',
+        descripcion: 'Libros SIN ISBN: lo busca en el propio fichero (OPF, página de créditos y bloque CIP, nombre) y, si el ripeo se lo quitó, identifica la EDICIÓN por título + autor + editorial + colección (Fichero → BNE / OpenLibrary según la lengua), con reglas estrictas. Con el ISBN hace el COTEJO en el mismo paso: rellena todo lo que falte (editorial, año, páginas, medidas, Dewey/LCC, traductor, materias…), aplica la CDU de la BNE si tiene prioridad (moviendo la carpeta) y corrige un título pobre; nunca pisa lo que ya hay. Si hay varias ediciones posibles no elige: las deja en la ficha («¿Cuál es tu edición?»). SIN IA. Es lo mismo que «🔎 Extraer ISBN» y scripts/reidentificar-sin-isbn.js, poco a poco y a reposo.',
+        version: 1,
+        loteDefecto: 20,
+        cadenciaDefecto: 15,
+        activaDefecto: true,    // gratis (sin IA) y lo pidió el usuario: que los ISBN se recuperen solos
+        coleccion: 'biblioteca',
+        proyeccion: { _id: 1 },
+        // Libros sin ISBN, salvo los que ya tienen ediciones candidatas esperando tu elección o las descartaste, y
+        // los cómics/audiolibros/software (tienen su propia vía de identificación).
+        candidatos: () => ({
+            tipo_recurso: 'libro',
+            ...VACIO('isbn'),
+            naturaleza: { $nin: ['comic', 'audiolibro', 'software'] },
+            // Ni audio, ni vídeo, ni material didáctico: su «edición» por autoridad sería la del libro impreso, con
+            // un ISBN que no es el suyo.
+            formatos: { $nin: ['audio', 'video', 'material'] },
+            edicion_descartada: { $ne: true },
+            'ediciones_candidatas.0': { $exists: false },
+        }),
+        async procesarDoc(db, doc) {
+            // Documento COMPLETO: el cotejo compara con todo lo que ya tiene (una proyección haría que algún campo
+            // pareciera vacío y se rellenara encima).
+            const completo = await db.collection('biblioteca').findOne({ _id: doc._id });
+            if (!completo || completo.isbn) return false;
+            const r = await reidentificarDoc(db, completo, { aplicar: true, usarApis: true, conIA: false });
+            return r.estado === 'aplicado' || r.estado === 'ambiguo';
         },
     },
 

@@ -1017,6 +1017,14 @@ de ficheros clasificado por CDU.
     abre la Búsqueda con ellos. POST /documentos/:id/elegir-edicion {isbn|ninguna}. Solo admite un ISBN que esté
     entre las candidatas. Un ISBN-10 y su ISBN-13 cuentan como UNO; un idioma «und/mul» no descarta a nadie.
 
+    CAMPAÑA DE FONDO «Recuperar ISBN que faltan» (2026-09-28, campanas.js · recuperar-isbn, ACTIVA por defecto,
+    coste «apis», sin IA): lo mismo que «🔎 Extraer ISBN» / scripts/reidentificar-sin-isbn.js, poco a poco y a
+    reposo (lote 20 cada 15 min): busca el ISBN en el fichero y, si no, identifica la edición por autoridad; con
+    él hace el cotejo en el mismo paso (huecos, CDU de la BNE con prioridad, título pobre). Candidatos: libros sin
+    ISBN (sin cómics, audiolibros, software, audio, vídeo ni material; ni los que esperan tu elección de edición o
+    la descartaste). Cada libro se procesa una vez por versión. Medido: 8.997 en cola al crearla. Para ir más
+    rápido, lanza el script; la campaña sigue con lo que quede y con lo que vaya llegando.
+
     TAMBIÉN EN LA INGESTA (2026-09-28, servicio-ingesta paso 1a · identificarEdicionEnIngesta). Un LIBRO que
     llega sin ISBN por ninguna vía, con título y autor, busca su edición por autoridad al ingerirse (Fichero
     local; en español/catalán/gallego/euskera, también la BNE en línea — OpenLibrary ya lo probó la cascada).
