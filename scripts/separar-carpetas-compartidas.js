@@ -46,6 +46,10 @@ const col = db.collection('biblioteca');
 const existe = async (p) => { try { await fs.access(p); return true; } catch { return false; } };
 const webAAbs = (web) => path.join(DIR_CDU, ...String(web).replace(/^\/recursos\//, '').split('/'));
 const absAWeb = (abs) => '/recursos/' + path.relative(DIR_CDU, abs).split(path.sep).join('/');
+// ¿Está dentro del árbol CDU? Con rutas NORMALIZADAS: comparar texto a secas fallaba en Windows (U:/CDU frente a
+// U:\CDU\…) y clasificaba ficheros del propio árbol como si estuvieran en la Papelera.
+const RAIZ_CDU = path.resolve(DIR_CDU) + path.sep;
+const dentroDeCdu = (p) => path.resolve(p).startsWith(RAIZ_CDU);
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '').slice(0, 30);
 
 // ── 1. Carpetas compartidas (sin las de colecciones de árbol fijo) ─────────────────────────────────────────
@@ -115,8 +119,8 @@ for (const [ruta, ds] of compartidas) {
         // Su carpeta por registro.json, salvo que sea la propia compartida (entonces no es «otra» carpeta suya).
         const carpetaReg0 = porRegistro.get(String(d._id));
         const carpetaReg = carpetaReg0 && carpetaReg0 !== carpeta ? carpetaReg0 : null;
-        const enArbol = (porNombre.get(d.nombre_archivo) || []).filter((p) => p.startsWith(DIR_CDU) && path.dirname(p) !== carpeta);
-        const enOtras = (porNombre.get(d.nombre_archivo) || []).filter((p) => !p.startsWith(DIR_CDU));
+        const enArbol = (porNombre.get(d.nombre_archivo) || []).filter((p) => dentroDeCdu(p) && path.resolve(path.dirname(p)) !== path.resolve(carpeta));
+        const enOtras = (porNombre.get(d.nombre_archivo) || []).filter((p) => !dentroDeCdu(p));
         const otroTitulo = norm(d.titulo) !== norm(dueno.titulo);
 
         let accion, destino;
