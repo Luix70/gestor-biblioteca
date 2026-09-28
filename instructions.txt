@@ -1111,6 +1111,12 @@ de ficheros clasificado por CDU.
     vuelta si está en la Papelera/Cuarentena, y si no está en ninguna parte conserva la ficha, la marca para
     revisar (`fichero_perdido`) y lo dice en una alerta. Regenera los sidecars de todos, cada uno en su carpeta.
     Si los títulos difieren, marca la portada para re-extraerla (la heredada era la del otro libro).
+    IMÁGENES Y SIDECARS: mientras compartían carpeta, las imágenes del uno pudieron pisar las del otro (mismos
+    nombres, portada-1.jpg…; y las tareas que regeneraban imágenes del «invitado» escribían en la carpeta del
+    dueño). Como no se puede saber de quién es cada imagen, al terminar se RE-EXTRAEN las de TODOS los implicados
+    (dueños e invitados) desde su PROPIO fichero (reextraerImagenesDoc, sin IA; conserva las añadidas a mano; no
+    borra nada del disco) y DESPUÉS se regeneran sus sidecars desde la base, cada uno en su carpeta.
+    --sin-reextraer lo omite.
         sudo docker exec -t gestor-biblioteca node scripts/separar-carpetas-compartidas.js              (en seco)
         sudo docker exec -t gestor-biblioteca node scripts/separar-carpetas-compartidas.js --ejecutar
 

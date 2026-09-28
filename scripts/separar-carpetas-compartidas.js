@@ -22,11 +22,20 @@
  *          queda marcado para revisar («fichero original no encontrado»).
  *     Su portada: la de la carpeta compartida se COPIA (es la única que hay); si los títulos difieren, se marca para
  *     re-extraerla de su propio fichero.
- *   · Se regeneran los sidecars (registro.json + MARC) de TODOS, cada uno en su carpeta.
+ *   · IMÁGENES: mientras compartían carpeta, las del uno pudieron pisar las del otro (mismos nombres:
+ *     portada-1.jpg…; y las tareas que regeneraban imágenes del documento «invitado» escribían en la carpeta del
+ *     dueño). No hay forma de saber de quién es cada fichero de imagen, así que no se adivina: al terminar se
+ *     RE-EXTRAEN las imágenes de TODOS los implicados (dueños e invitados) desde SU PROPIO fichero
+ *     (reextraerImagenesDoc: portada + páginas de catalogación, sin IA). Se conservan las imágenes añadidas o
+ *     editadas a mano, y no se borra ningún fichero del disco (las viejas quedan sin referenciar). --sin-reextraer
+ *     lo omite.
+ *   · SIDECARS: se regeneran DESPUÉS, desde la base (la fuente de verdad), cada uno en su carpeta: registro.json y
+ *     MARC vuelven a ser de su documento (el de la carpeta compartida podía ser del otro).
  *
  * Solo en el NAS. Una pasada por el árbol (CDU, Papelera, Cuarentena) para localizar los ficheros.
  *   sudo docker exec -t gestor-biblioteca node scripts/separar-carpetas-compartidas.js              (DRY-RUN)
  *   sudo docker exec -t gestor-biblioteca node scripts/separar-carpetas-compartidas.js --ejecutar
+ *   … --ejecutar --sin-reextraer   (no re-extrae imágenes)
  */
 import 'dotenv/config';
 import '../src/config.js';
@@ -36,8 +45,10 @@ import { conectarDB } from '../src/database.js';
 import { DIR_CDU, carpetaDeDoc, moverCarpetaConVerificacion } from '../src/mantenimiento/util-mantenimiento.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
+import { reextraerImagenesDoc } from '../src/utils/reextraer-imagenes.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
+const REEXTRAER = !process.argv.includes('--sin-reextraer');
 const RAIZ_APP = path.resolve(DIR_CDU, '..');
 const OTRAS_RAICES = ['Papelera', 'Cuarentena', 'Reintentos'].map((d) => path.join(RAIZ_APP, d));
 
@@ -98,7 +109,7 @@ async function copiarVerificado(origen, destino, { mover = false } = {}) {
     if (mover) await fs.unlink(origen);
 }
 
-const cuenta = { movidos: 0, reapuntados: 0, recuperados: 0, sinFichero: 0, fallos: 0 };
+const cuenta = { movidos: 0, reapuntados: 0, recuperados: 0, sinFichero: 0, reextraidos: 0, fallos: 0 };
 let i = 0;
 for (const [ruta, ds] of compartidas) {
     i++;
@@ -171,21 +182,28 @@ for (const [ruta, ds] of compartidas) {
             else { cuenta.sinFichero++; set.revision_requerida = true; set.fichero_perdido = true; alertas.push(`Fichero original «${d.nombre_archivo}» NO encontrado en el NAS (CDU, Papelera, Cuarentena): el documento apuntaba a la carpeta de otro (${ruta}). Se conserva la ficha; recupera el fichero o elimina el documento si es un duplicado.`); }
 
             await col.updateOne({ _id: d._id }, { $set: set, $push: { alertas_agente: { $each: alertas } } });
-            const actualizado = await col.findOne({ _id: d._id });
-            await regenerarSidecarsDoc(db, actualizado, carpetaDeDoc(actualizado)).catch(() => {});
             await indexarDoc(db, d._id).catch(() => {});
         } catch (e) {
             cuenta.fallos++;
             console.log(`       ⛔ ${e.message}`);
         }
     }
-    // El dueño: su registro.json vuelve a ser SUYO (podía ser el del otro).
-    if (EJECUTAR) {
-        const actualizado = await col.findOne({ _id: dueno._id });
-        if (actualizado) await regenerarSidecarsDoc(db, { ...actualizado, fecha_actualizacion: new Date() }, carpeta).catch(() => {});
+    if (!EJECUTAR) { if (REEXTRAER) console.log(`   · después: imágenes re-extraídas del propio fichero y sidecars regenerados para los ${ds.length}`); continue; }
+    // Imágenes de TODOS (dueño e invitados) desde su propio fichero, y luego sus sidecars desde la base, cada uno
+    // en su carpeta (el registro.json de la compartida podía ser del otro).
+    for (const d of ds) {
+        let actual = await col.findOne({ _id: d._id });
+        if (!actual) continue;
+        if (REEXTRAER) {
+            const r = await reextraerImagenesDoc(db, actual).catch((e) => ({ ok: false, motivo: e.message }));
+            if (r.ok) cuenta.reextraidos++;
+            else console.log(`       ⚠️  imágenes de «${String(d.titulo).slice(0, 40)}» no re-extraídas: ${r.motivo}`);
+            actual = await col.findOne({ _id: d._id });
+        }
+        await regenerarSidecarsDoc(db, { ...actual, fecha_actualizacion: new Date() }, carpetaDeDoc(actual)).catch(() => {});
     }
 }
 console.log(EJECUTAR
-    ? `\nSeparados (fichero movido): ${cuenta.movidos} · devueltos a su sitio desde su carpeta antigua: ${cuenta.reapuntados} · recuperados de Papelera/Cuarentena: ${cuenta.recuperados} · sin fichero (marcados): ${cuenta.sinFichero} · fallos: ${cuenta.fallos}\n`
+    ? `\nSeparados (fichero movido): ${cuenta.movidos} · devueltos a su sitio desde su carpeta antigua: ${cuenta.reapuntados} · recuperados de Papelera/Cuarentena: ${cuenta.recuperados} · sin fichero (marcados): ${cuenta.sinFichero} · imágenes re-extraídas: ${cuenta.reextraidos} · fallos: ${cuenta.fallos}\n`
     : '\nDRY-RUN: no se ha tocado nada. Repite con --ejecutar.\n');
 process.exit(cuenta.fallos ? 1 : 0);
