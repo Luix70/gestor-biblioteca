@@ -1125,6 +1125,9 @@ de ficheros clasificado por CDU.
       · scripts/detectar-portadas-artefacto.js (en seco por defecto; --ejecutar; --obras N): agrupa las portadas
         por tamaño y SHA, registra las que comparten 2+ obras y REPARA esos libros re-extrayendo sus imágenes de
         su propio fichero (sin IA, sin borrar nada, conservando las manuales) y regenerando sus sidecars.
+        NO cuentan como obras distintas (primer barrido, 588 grupos): los tomos de una misma obra, los miembros de
+        una misma colección (Grzimek, enciclopedias de Gale, colecciones de audiolibros: la portada del conjunto
+        es legítima) ni títulos que solo difieren en el número («Poetry for students 02» / «05»).
           sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js
           sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js --ejecutar
 

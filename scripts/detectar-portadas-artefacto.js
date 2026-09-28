@@ -8,8 +8,9 @@
  *
  * Qué hace:
  *   1. Agrupa las portadas del catálogo por tamaño y, solo las de tamaño repetido, por SHA-256 (barato).
- *   2. Un grupo con 2 o más OBRAS distintas (por título) es un artefacto. (El mismo libro en dos ficheros comparte
- *      portada con todo derecho: no cuenta.)
+ *   2. Un grupo con 2 o más OBRAS distintas es un artefacto. No cuentan como distintas: el mismo libro en dos
+ *      ficheros, los tomos de una misma obra ni los miembros de una misma colección (comparten con todo derecho la
+ *      portada del conjunto), ni títulos que solo difieren en el número («Drama for Students Vol 1» / «Vol 13»).
  *   3. Lo REGISTRA (colección `portadas_artefacto`, utils/portadas-artefacto.js) con su SHA y, si salió de un PDF, con
  *      la huella perceptiva de ESA página — así la ingesta y la re-extracción la SALTAN en cualquier PDF futuro del
  *      mismo grupo de ripeo, como saltan las páginas en blanco.
@@ -42,11 +43,19 @@ const TINTA_MIN = Number(process.env.PDF_TINTA_MIN || 0.005);
 const db = await conectarDB();
 const col = db.collection('biblioteca');
 const abs = (web) => path.join(DIR_CDU, ...String(web).replace(/^\/recursos\//, '').split('/'));
-const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '').slice(0, 20);
+// Título comparable SIN números ni «vol»: «Poetry for students 02» y «… 05» son la MISMA serie, no obras distintas.
+const RE_DIACRITICOS = new RegExp(String.raw`[\u0300-\u036f]`, 'g');
+const RE_DESIGNADOR = new RegExp(String.raw`\b(vol|volume|volumen|tomo|t|n|no)\b\.?`, 'g');
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '')
+    .replace(RE_DESIGNADOR, '').replace(/[^a-z]/g, '').slice(0, 20);
+// UNIDAD de obra: los tomos de una obra y los miembros de una colección comparten con todo derecho la portada del
+// conjunto (medido en el primer barrido: Grzimek, las enciclopedias de Gale, «Novels for Students», colecciones de
+// audiolibros…) — no es un artefacto. Cuentan como UNA sola unidad; si no, el título sin números.
+const unidad = (d) => (d.obra ? `o:${d.obra}` : d.coleccion ? `c:${d.coleccion}` : `t:${norm(d.titulo)}`);
 
 // ── 1. Portadas: por tamaño, y SHA solo de los tamaños repetidos ─────────────────────────────────────────
 const docs = await col.find({ portada: { $exists: true, $ne: null } },
-    { projection: { portada: 1, titulo: 1, isbn: 1, nombre_archivo: 1, imagenes: 1, ruta_base: 1 } }).toArray();
+    { projection: { portada: 1, titulo: 1, isbn: 1, nombre_archivo: 1, imagenes: 1, ruta_base: 1, obra: 1, coleccion: 1 } }).toArray();
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${docs.length} documentos con portada`);
 const porTam = new Map();
 let i = 0;
@@ -68,7 +77,7 @@ process.stdout.write('\r' + ' '.repeat(40) + '\r');
 
 // ── 2. Artefactos: la misma imagen en N obras distintas ──────────────────────────────────────────────────
 const artefactos = [...porSha.entries()]
-    .map(([sha, ds]) => ({ sha, ds, obras: new Set(ds.map((d) => norm(d.titulo))).size }))
+    .map(([sha, ds]) => ({ sha, ds, obras: new Set(ds.map(unidad)).size }))
     .filter((g) => g.ds.length > 1 && g.obras >= MIN_OBRAS)
     .sort((a, b) => b.ds.length - a.ds.length);
 console.log(`   Portadas idénticas en ${MIN_OBRAS}+ obras distintas: ${artefactos.length} imagen(es) · ${artefactos.reduce((s, g) => s + g.ds.length, 0)} documento(s)\n`);
