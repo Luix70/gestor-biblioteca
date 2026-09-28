@@ -133,13 +133,16 @@ function señalesEdicion(doc, cand) {
     // ya la clava (Gótica nº 112 es un solo libro).
     // Solo cuentan palabras que DISTINGAN: «biblioteca», «clásicos», «colección»… las comparten cientos de
     // colecciones distintas. Hace falta una palabra propia en común, o varias.
-    const colDoc = palabras(doc.coleccion_nombre).filter((w) => !GENERICAS_COLECCION.has(w));
-    const colCand = palabras(cand.coleccion_nombre).filter((w) => !GENERICAS_COLECCION.has(w));
+    const cDoc = coleccionYNumero(doc.coleccion_nombre, doc.coleccion_numero);
+    const cCand = coleccionYNumero(cand.coleccion_nombre, cand.coleccion_numero);
+    const distintivas = (s) => palabras(s).filter((w) => !GENERICAS_COLECCION.has(w) && !/^\d+$/.test(w));
+    const colDoc = distintivas(cDoc.nombre);
+    const colCand = distintivas(cCand.nombre);
     const comunesCol = colDoc.filter((w) => colCand.includes(w));
     if (comunesCol.length >= (colDoc.length === 1 || colCand.length === 1 ? 1 : 2)) {
         señales.push('colección');
-        const nDoc = String(doc.coleccion_numero || '').replace(/\D/g, '');
-        const nCand = String(cand.coleccion_numero || '').replace(/\D/g, '');
+        const nDoc = cDoc.numero || '';
+        const nCand = cCand.numero || '';
         if (nDoc && nCand && nDoc === nCand) señales.push('nº de colección');
     }
 
@@ -151,12 +154,26 @@ function señalesEdicion(doc, cand) {
 // (medido: «Misiones secretas» salía ambigua entre 8476330111 y 9788476330111).
 const isbn13 = (v) => { const x = v ? validarISBN(v) : null; return x ? (isbn10a13(x) || x) : null; };
 
+/**
+ * Colección y número por separado. Las fuentes los escriben juntos de mil maneras: «Ancora y Delfin -- 85»
+ * (OpenLibrary), «Colección gótica ; 112» (BNE), «Austral 1234», «Gótica nº 112». Si ya viene el número aparte,
+ * se respeta.
+ */
+function coleccionYNumero(nombre, numero) {
+    const n = String(numero ?? '').replace(/\D/g, '') || null;
+    const t = String(nombre || '').trim();
+    if (!t) return { nombre: null, numero: n };
+    const m = t.match(/^(.*?)[\s,;:.\-–—]*(?:n[º°o.]*\s*|vol\.?\s*|#\s*)?(\d{1,5})\s*$/i);
+    if (m && m[1].trim().length >= 3) return { nombre: m[1].trim(), numero: n || m[2] };
+    return { nombre: t, numero: n };
+}
+
 const comoCandidato = (c, fuente) => ({
     isbn: isbn13(c.isbn),
     titulo: c.titulo || '', subtitulo: c.subtitulo || null,
     autores: Array.isArray(c.autores) ? c.autores : String(c.autores || '').split(/;/).map((x) => x.trim()).filter(Boolean),
     editorial: c.editorial || null, anio: c.anio || c.anio_edicion || c.año_edicion || null,
-    coleccion_nombre: c.coleccion_nombre || null, coleccion_numero: c.coleccion_numero || null,
+    ...(() => { const cn = coleccionYNumero(c.coleccion_nombre, c.coleccion_numero); return { coleccion_nombre: cn.nombre, coleccion_numero: cn.numero }; })(),
     idioma: c.idioma || null, cdu: c.cdu || null, fuente,
 });
 
@@ -263,7 +280,9 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
         // 2) FUENTES EN LÍNEA, en el orden que dicta la LENGUA: para un libro en español (o catalán, gallego,
         //    euskera) la BNE es la autoridad y va primero; para el resto, OpenLibrary. Si la primera no lo
         //    resuelve, se prueba la siguiente.
-        const fuentes = LENGUAS_BNE.has(idioma2(doc.idioma)) ? ['bne', 'openlibrary'] : ['openlibrary', 'bne'];
+        // online === 'bne' → solo la BNE (la ingesta ya ha preguntado a OpenLibrary en su cascada).
+        const fuentes = online === 'bne' ? ['bne']
+            : LENGUAS_BNE.has(idioma2(doc.idioma)) ? ['bne', 'openlibrary'] : ['openlibrary', 'bne'];
         for (const fuente of fuentes) {
             const nuevos = fuente === 'bne' ? await candidatosBNE(doc, autor) : await candidatosOL(doc, autor);
             if (!nuevos.length) continue;
@@ -296,6 +315,22 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
     }
     return { estado: 'sin-candidatos', candidatos: [], motivo: 'ninguna autoridad tiene esta edición' };
 }
+
+/**
+ * Las candidatas de una identificación ambigua, en la forma en que se guardan en el documento
+ * (`ediciones_candidatas`, máx. 8): lo justo para reconocerlas en la ficha y elegir.
+ */
+export function candidatasParaGuardar(candidatos = []) {
+    return candidatos.slice(0, 8).map((c) => ({
+        isbn: c.isbn, titulo: c.titulo || null, subtitulo: c.subtitulo || null,
+        editorial: c.editorial || null, anio: c.anio || null, idioma: c.idioma || null,
+        coleccion: [c.coleccion_nombre, c.coleccion_numero].filter(Boolean).join(' · ') || null,
+        fuente: c.fuente || null, señales: c.señales || [],
+    }));
+}
+
+/** ¿Es una lengua cuya autoridad natural es la BNE? (para decidir si consultarla en línea en la ingesta) */
+export const lenguaDeBNE = (idioma) => LENGUAS_BNE.has(idioma2(idioma));
 
 /** Pregunta a la IA el ISBN de ESTA edición. Su respuesta no se cree: la verifica el llamante. */
 async function preguntarIsbnALaIA(doc) {

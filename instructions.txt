@@ -1017,6 +1017,18 @@ de ficheros clasificado por CDU.
     abre la Búsqueda con ellos. POST /documentos/:id/elegir-edicion {isbn|ninguna}. Solo admite un ISBN que esté
     entre las candidatas. Un ISBN-10 y su ISBN-13 cuentan como UNO; un idioma «und/mul» no descarta a nadie.
 
+    TAMBIÉN EN LA INGESTA (2026-09-28, servicio-ingesta paso 1a · identificarEdicionEnIngesta). Un LIBRO que
+    llega sin ISBN por ninguna vía, con título y autor, busca su edición por autoridad al ingerirse (Fichero
+    local; en español/catalán/gallego/euskera, también la BNE en línea — OpenLibrary ya lo probó la cascada).
+    Una sola confirmada → su ISBN + los huecos de su registro (páginas, medidas, traductor…), la editorial real si
+    la del fichero es de maquetador (ePubLibre), la CDU de la BNE si la del libro está vacía o es 000, y estado
+    «completado». Varias → se guardan como candidatas y la ficha pregunta. Nada de esto sobrescribe lo que el
+    fichero ya trajo. Medido: «Vampiro» [Valdemar Gótica 112] entra con editorial ePubLibre y CDU 000 y sale con
+    ISBN 9788477028796, Valdemar, CDU 821.112.2-31"19", 519 p., 25 cm, traductor y completado.
+    COLECCIÓN Y SU Nº: el Fichero guarda la colección con el número pegado («Ancora y Delfin -- 85»); se separan
+    (también «Colección gótica ; 112», «Austral 1234», «nº 112») y el nº cuenta como señal de edición.
+    «La otra vida del Capitán Contreras» [Ancora & Delfin 85] → 9788423304479 (editorial + colección + nº).
+
     REVISIÓN GENERAL «QUE NADA PIERDA LO CONSEGUIDO» (2026-09-28). Todos los que aplican datos de una autoridad a
     un documento ya catalogado comparten ahora `utils/huecos-autoridad.js`:
       · huecosDesdeAutoridad / huecosEscalares: rellena SOLO huecos (sinopsis, subtítulo, año, idioma, páginas,

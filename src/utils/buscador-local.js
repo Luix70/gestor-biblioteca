@@ -68,7 +68,7 @@ async function asegurarDB() {
         // antiguos → se prepara con guarda y, si falla, la función de texto se desactiva sola.
         try {
             stmtFts = db.prepare(`SELECT f.isbn, f.titulo, f.subtitulo, f.autores, f.editorial, f.anio_edicion,
-                f.cdu, f.dewey, f.idioma, f.portada_url FROM fichero_fts ft JOIN fichero f ON f.rowid = ft.rowid
+                f.cdu, f.dewey, f.idioma, f.portada_url, f.coleccion_nombre FROM fichero_fts ft JOIN fichero f ON f.rowid = ft.rowid
                 WHERE fichero_fts MATCH ? ORDER BY bm25(fichero_fts) LIMIT ?`);
         } catch (e) { stmtFts = null; console.warn(`⚠️  Fichero sin índice FTS (Descubrir desactivado): ${e.message}`); }
         disponible = true;
@@ -211,6 +211,8 @@ export async function buscarTextoEnFichero(q, { limite = 40 } = {}) {
                 autores: f.autores ? f.autores.split(';').map(s => s.trim()).filter(Boolean) : [],
                 editorial: f.editorial || null, anio: f.anio_edicion || null,
                 cdu: f.cdu || null, dewey: f.dewey || null, idioma: f.idioma || null, portada_url: f.portada_url || null,
+                // La colección identifica la edición («Ancora y Delfin -- 85»): la usa identificar-edicion.
+                coleccion_nombre: f.coleccion_nombre || null,
             });
             if (out.length >= limite) break;
         }

@@ -18,6 +18,11 @@ import { parsearVolumen } from './utils/multivolumen.js';
 import { resolverCDU, contrastarCduCarpeta } from './clasificador-cdu.js';
 import { tituloDeNumero, tituloEsDelFichero, afinarFechaNumero } from './utils/revistas.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
+import { identificarEdicion, candidatasParaGuardar, lenguaDeBNE } from './utils/identificar-edicion.js';
+import { buscarAutoridadPorISBN } from './utils/autoridad-isbn.js';
+import { huecosEscalares } from './utils/huecos-autoridad.js';
+import { variantesISBN } from './utils/identificadores.js';
+import { esEditorialFalsa } from './utils/editoriales-falsas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -217,6 +222,69 @@ async function atajoPorHash(rutas, contexto = {}) {
 }
 
 /**
+ * Paso 1a de la ingesta (ver arriba). Modifica `documento` EN SITIO, solo si es un LIBRO sin ISBN con título y
+ * autor (sin eso no hay con qué reconocer la edición) y que no sea cómic ni audiolibro (tienen su propia vía).
+ * Conservador: el ISBN elegido no es «propio» del fichero sino de AUTORIDAD, y de su registro solo se rellenan
+ * HUECOS (huecosEscalares); la CDU de la autoridad solo entra si la del documento está vacía o es la genérica
+ * (aquí aún no hay carpeta que mover). Si el título y la CDU quedan buenos, pasa a «completado».
+ */
+export async function identificarEdicionEnIngesta(documento) {
+    try {
+        if (documento.tipo_recurso !== 'libro' || documento.isbn || !documento.titulo) return;
+        if (!Array.isArray(documento.autores) || !documento.autores.length) return;
+        if (documento.naturaleza === 'comic' || documento.naturaleza === 'audiolibro' || documento.titulo_artefacto) return;
+
+        const datos = {
+            titulo: documento.titulo,
+            autores: documento.autores.filter((a) => typeof a === 'string'),
+            editorial: typeof documento.editorial === 'string' ? documento.editorial : null,
+            coleccion_nombre: documento.coleccion_nombre || null, coleccion_numero: documento.coleccion_numero || null,
+            anio: documento.año_edicion || null, idioma: documento.idioma || null,
+        };
+        if (!datos.autores.length) return;
+        // En línea solo la BNE y solo en lenguas de España: OpenLibrary ya lo intentó la cascada por título/autor.
+        const r = await identificarEdicion(datos, { online: lenguaDeBNE(datos.idioma) ? 'bne' : false });
+
+        if (r?.estado === 'ambiguo' && r.candidatos?.length) {
+            documento.ediciones_candidatas = candidatasParaGuardar(r.candidatos);
+            documento.ediciones_candidatas_fecha = new Date();
+            documento.alertas_agente = [...(documento.alertas_agente || []), `Sin ISBN en el fichero: ${r.candidatos.length} edición(es) posible(s) por autoridad — elige la tuya en la ficha («¿Cuál es tu edición?»).`];
+            console.log(`   📚 Edición ambigua (${r.candidatos.length} candidata/s): se pregunta en la ficha.`);
+            return;
+        }
+        if (r?.estado !== 'unico' || !r.isbn) return;
+
+        documento.isbn = r.isbn;
+        // El registro de esa edición (Fichero y, si falta, BNE en línea) completa lo que falte — nunca pisa.
+        const reg = await buscarAutoridadPorISBN(variantesISBN(r.isbn)).catch(() => null);
+        if (reg) {
+            const { set } = huecosEscalares(documento, { ...reg, paginas_bne: reg.paginas, dimensiones_bne: reg.dimensiones });
+            delete set.cdu_autoridad;   // aquí la CDU se decide abajo, directamente
+            Object.assign(documento, set);
+            const cduActual = String(documento.cdu || '').trim();
+            if (reg.cdu && (!cduActual || ['0', '00', '000'].includes(cduActual)) && !documento.cdu_manual) documento.cdu = reg.cdu;
+            if (reg.editorial && (!documento.editorial || esEditorialFalsa(documento.editorial))) documento.editorial = reg.editorial;
+            if (Array.isArray(reg.contribuciones_nombres) && reg.contribuciones_nombres.length && !(documento.contribuciones_nombres?.length)) {
+                documento.contribuciones_nombres = reg.contribuciones_nombres;
+            }
+        }
+        const alerta = `ISBN ${r.isbn} identificado por autoridad (${r.via}: ${r.motivo}); el fichero no traía ISBN.`;
+        documento.alertas_agente = [...(documento.alertas_agente || []), alerta];
+        console.log(`   📚 ${alerta}`);
+
+        // Con título fiable, CDU real e ISBN, el libro está identificado (el enriquecimiento lo dejó «pendiente»
+        // porque entonces no había ISBN).
+        const cduReal = !['', '0', '00', '000'].includes(String(documento.cdu || '').trim());
+        if (documento.estado_verificacion === 'pendiente' && cduReal && !documento.titulo_artefacto) {
+            documento.estado_verificacion = 'completado';
+            documento.alertas_agente = documento.alertas_agente.filter((a) => !/^Identificación incompleta/.test(a));
+        }
+    } catch (e) {
+        console.warn(`   ⚠️  Identificación de la edición por autoridad falló (${e.message}): se sigue sin ISBN.`);
+    }
+}
+
+/**
  * Ingesta completa de UN recurso (1 archivo o grupo de imágenes del mismo libro/revista):
  *   extracción → enriquecimiento → persistencia → copia a estructura CDU → enlace de rutas.
  *
@@ -233,6 +301,13 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
 
     // 1. Extracción + enriquecimiento.
     const { documento, activos, forzarNuevo } = await procesarRecurso({ rutas, contexto });
+
+    // 1a. IDENTIFICAR LA EDICIÓN de un libro que llega SIN ISBN por ninguna vía (el ripeo se lo quitó: típico de
+    // ePubLibre). Con lo que sí sabemos —título, autor, editorial, colección y su nº— se busca ESA edición por
+    // autoridad (identificar-edicion: Fichero local; en español, también la BNE en línea) con reglas estrictas.
+    // Una sola edición confirmada → su ISBN y los huecos que traiga; varias → quedan como candidatas en el
+    // documento y la ficha pregunta «¿Cuál es tu edición?». Best-effort: nunca rompe la ingesta.
+    await identificarEdicionEnIngesta(documento);
 
     // 1bis. CONTRASTE CON LA CDU DE LA CARPETA (agente de estructura, fase 3). Aquí y no antes: la CDU ya es la
     // definitiva del pipeline (identificadores → Fichero → tablas), y aún no se ha guardado ni se ha calculado

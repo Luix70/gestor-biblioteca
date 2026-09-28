@@ -25,7 +25,7 @@ import { variantesISBN, validarISBN } from './identificadores.js';
 import { esTituloArtefacto } from './parsear-nombre.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
-import { identificarEdicion } from './identificar-edicion.js';
+import { identificarEdicion, candidatasParaGuardar } from './identificar-edicion.js';
 import { huecosDesdeAutoridad } from './huecos-autoridad.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
@@ -136,12 +136,7 @@ function noDegrada(actual, nuevo) {
  * reconocerlas: ISBN, título, editorial, año, idioma, colección, de dónde salen y qué casó.
  */
 async function guardarCandidatas(db, doc, candidatos) {
-    const lista = candidatos.slice(0, 8).map((c) => ({
-        isbn: c.isbn, titulo: c.titulo || null, subtitulo: c.subtitulo || null,
-        editorial: c.editorial || null, anio: c.anio || null, idioma: c.idioma || null,
-        coleccion: [c.coleccion_nombre, c.coleccion_numero].filter(Boolean).join(' · ') || null,
-        fuente: c.fuente || null, señales: c.señales || [],
-    }));
+    const lista = candidatasParaGuardar(candidatos);
     await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { ediciones_candidatas: lista, ediciones_candidatas_fecha: new Date() } });
 }
 
