@@ -29,6 +29,7 @@ import { identificarEdicion } from './identificar-edicion.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
+import { buscarEnBNE } from './buscador-bne-sru.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { editarDocumento } from './editar-doc.js';
 import { resolverPersona } from './resolver-persona.js';
@@ -66,7 +67,8 @@ async function datosDeAutoridad(db, doc) {
     const ed = doc.editorial ? await db.collection('editoriales').findOne({ _id: doc.editorial }, { projection: { nombre: 1 } }) : null;
     return {
         titulo: doc.titulo, autores, editorial: ed?.nombre || null,
-        coleccion_nombre: doc.coleccion_nombre || null, anio: doc.año_edicion || null, idioma: doc.idioma || null,
+        coleccion_nombre: doc.coleccion_nombre || null, coleccion_numero: doc.coleccion_numero || null,
+        anio: doc.año_edicion || null, idioma: doc.idioma || null,
     };
 }
 
@@ -228,11 +230,41 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // Editorial: rellena si falta (del fichero o de la autoridad).
     const editorialNom = ext.editorial || datos.editorial || null;
     if (!doc.editorial && editorialNom) { set.editorial = await resolverEditorial(db, editorialNom); nombres.editorial = editorialNom; }
-    // Escalares de hueco (solo si faltan).
+    // Escalares de hueco (solo si faltan). TODO lo que la autoridad aporte y no tengamos: una llamada a una API
+    // ya hecha que solo se aprovecha para el título desperdicia lo demás (fecha, páginas, medidas, traductor…).
     if (datos.sinopsis && !doc.sinopsis) set.sinopsis = datos.sinopsis;
     if (datos.año_edicion && !doc.año_edicion) set.año_edicion = datos.año_edicion;
     if (datos.idioma && !doc.idioma) set.idioma = datos.idioma;
     if (datos.subtitulo && !doc.subtitulo) set.subtitulo = datos.subtitulo;
+    if (datos.paginas_bne && !doc.paginas) set.paginas = datos.paginas_bne;
+    if (datos.dimensiones_bne && !doc.dimensiones) set.dimensiones = datos.dimensiones_bne;
+    if (datos.dewey && !doc.dewey) set.dewey = datos.dewey;
+    if (datos.lcc && !doc.lcc) set.lcc = datos.lcc;
+    if (datos.idioma_original && !doc.idioma_original) set.idioma_original = datos.idioma_original;
+    if (datos.categorias?.length) {
+        const previas = Array.isArray(doc.palabras_clave) ? doc.palabras_clave : [];
+        const juntas = [...new Set([...previas, ...datos.categorias])];
+        if (juntas.length > previas.length) set.palabras_clave = juntas;
+    }
+    // Traductor, ilustrador, prologuista… (la BNE los da con su rol): solo si el doc no tiene ninguno.
+    if (datos.contribuciones_nombres?.length && !(doc.contribuciones?.length)) {
+        const contribs = [];
+        for (const c of datos.contribuciones_nombres) {
+            if (!c?.nombre || !c.rol || c.rol === 'autor') continue;
+            const p = await resolverPersona(db, c.nombre).catch(() => null);
+            if (p?._id) contribs.push({ persona: p._id, rol: c.rol });
+        }
+        if (contribs.length) { set.contribuciones = contribs; nombres.contribuciones = datos.contribuciones_nombres.map((c) => `${c.nombre} (${c.rol})`); }
+    }
+    // Colección de la edición («Colección gótica», nº 112): solo como dato si el doc no está ya en una. No se
+    // crea ni se asigna la colección aquí (eso reorganiza el catálogo); queda anotada para verla y agruparla.
+    if (datos.coleccion_nombre && !doc.coleccion && !doc.coleccion_nombre) {
+        set.coleccion_nombre = datos.coleccion_nombre;
+        if (datos.coleccion_numero && !doc.coleccion_numero) set.coleccion_numero = String(datos.coleccion_numero);
+    }
+    // CDU de AUTORIDAD (la BNE cataloga en CDU): se guarda aparte. Aplicarla movería la carpeta, así que lo hace
+    // la opción «Investigar CDU» (resolverCduDoc), que la usa antes que el crosswalk y que la IA.
+    if (datos.cdu && datos.cdu !== doc.cdu) set.cdu_autoridad = datos.cdu;
 
     if (Object.keys(set).length === 0) return { estado: 'no-hallado', isbn, via, motivo: 'ISBN resuelto pero la autoridad no aportó nada nuevo' };
 
@@ -265,18 +297,27 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
  */
 export async function resolverCduDoc(db, doc, { conIA = false, forzar = false, aplicar = true } = {}) {
     if (doc.cdu_manual) return { estado: 'cdu-manual', motivo: 'CDU fijada a mano; no se toca' };
-    // Códigos de origen: los del propio doc; si faltan y hay ISBN, los del Fichero local (offline).
+    // 0) CDU de AUTORIDAD: la BNE cataloga directamente en CDU, así que es la mejor fuente — ni crosswalk ni IA.
+    //    La guardada por «Extraer ISBN» (cdu_autoridad), la del Fichero (volcado BNE) o la del catálogo en línea.
     let dewey = doc.dewey || null, lcc = doc.lcc || null;
-    if (!dewey && !lcc && doc.isbn) {
+    let cduAutoridad = doc.cdu_autoridad || null;
+    if (doc.isbn && (!cduAutoridad || (!dewey && !lcc))) {
         const f = await buscarEnFicheroLocal({ isbns: variantesISBN(doc.isbn) }).catch(() => null);
-        if (f) { dewey = f.dewey || dewey; lcc = f.lcc || lcc; }
+        if (f) { dewey = dewey || f.dewey || null; lcc = lcc || f.lcc || null; cduAutoridad = cduAutoridad || f.cdu || null; }
+        if (!cduAutoridad) {
+            const b = await buscarEnBNE({ isbns: variantesISBN(doc.isbn) }).catch(() => null);
+            if (b?.cdu) cduAutoridad = b.cdu;
+        }
     }
-    if (!dewey && !lcc && !conIA) return { estado: 'cdu-sin-codigos', motivo: 'sin Dewey/LCC (marca «con IA» para investigar por título/autor)' };
-    // Nombre del primer autor (ayuda a la IA con la literatura: se clasifica por la tradición del autor).
-    let autorNom = null;
-    if (doc.autores?.length) { const a = await db.collection('autores').findOne({ _id: doc.autores[0] }, { projection: { nombre: 1 } }).catch(() => null); autorNom = a?.nombre || null; }
-    const r = await resolverCDU({ dewey, lcc, titulo: doc.titulo, autor: autorNom, sinopsis: doc.sinopsis, categorias: doc.palabras_clave || [], permitirIA: conIA }).catch(() => null);
-    const cdu = r && (typeof r === 'string' ? r : r.cdu);
+    let cdu = cduAutoridad;
+    if (!cdu) {
+        if (!dewey && !lcc && !conIA) return { estado: 'cdu-sin-codigos', motivo: 'sin Dewey/LCC ni CDU de autoridad (marca «con IA» para investigar por título/autor)' };
+        // Nombre del primer autor (ayuda a la IA con la literatura: se clasifica por la tradición del autor).
+        let autorNom = null;
+        if (doc.autores?.length) { const a = await db.collection('autores').findOne({ _id: doc.autores[0] }, { projection: { nombre: 1 } }).catch(() => null); autorNom = a?.nombre || null; }
+        const r = await resolverCDU({ dewey, lcc, titulo: doc.titulo, autor: autorNom, sinopsis: doc.sinopsis, categorias: doc.palabras_clave || [], permitirIA: conIA }).catch(() => null);
+        cdu = r && (typeof r === 'string' ? r : r.cdu);
+    }
     if (!cdu || cdu === '000') return { estado: 'cdu-no-hallada', motivo: conIA ? 'ni el crosswalk ni la IA dieron una CDU' : 'el crosswalk determinista no la resuelve (marca «con IA» para investigar)' };
     const actual = String(doc.cdu || '');
     const vacia = !actual || actual === '000' || actual === '0';

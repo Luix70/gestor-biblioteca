@@ -5,8 +5,42 @@ import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { buscarEnDNB } from './buscador-dnb.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarEnBNF } from './buscador-bnf.js';
+import { buscarEnBNE } from './buscador-bne-sru.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { extraerContribuciones } from './contribuciones.js';
+
+// ─── BNE en línea (SRU del catálogo) ────────────────────────────────────────────────────────────────────
+// Lenguas de España y prefijos ISBN de España (978-84, 979-13): para esas ediciones la BNE es la autoridad.
+const LENGUAS_BNE = new Set(['es', 'ca', 'gl', 'eu']);
+function esEdicionEspañola(idioma, isbns) {
+    if (LENGUAS_BNE.has(String(idioma || '').toLowerCase().slice(0, 2))) return true;
+    return (isbns || []).some((i) => /^(97884|97913|84)/.test(String(i || '').replace(/[^0-9Xx]/g, '')));
+}
+// ¿Queda algo que la BNE pueda aportar? (CDU, páginas, medidas, editorial, año, autores, colección)
+const faltaAlgoDeBNE = (d) => !d.cdu || !d.paginas_bne || !d.dimensiones_bne || !d.editorial || !d.año_edicion
+    || !(d.autores && d.autores.length) || !d.coleccion_nombre;
+
+/** Completa `datosExtra` con TODO lo que traiga la BNE para ese ISBN y aún falte. Nunca lanza. */
+async function completarDesdeBNE(datosExtra, rellenar, isbns) {
+    const b = await buscarEnBNE({ isbns: isbns.filter(Boolean) }).catch(() => null);
+    if (b === null) { datosExtra.alertas.push('BNE en línea no disponible: omitida.'); return false; }
+    if (!b.titulo) return false;
+    rellenar('titulo', b.titulo);
+    rellenar('subtitulo', b.subtitulo);
+    rellenar('autores', b.autores);
+    rellenar('editorial', b.editorial);
+    rellenar('año_edicion', b.año_edicion);
+    rellenar('idioma', b.idioma);
+    rellenar('coleccion_nombre', b.coleccion_nombre);
+    rellenar('coleccion_numero', b.coleccion_numero);
+    rellenar('dewey', b.dewey);
+    rellenar('contribuciones_nombres', b.contribuciones_nombres);
+    if (b.cdu && !datosExtra.cdu) datosExtra.cdu = b.cdu;          // CDU de la BNE → sin clasificador ni IA
+    if (b.paginas && !datosExtra.paginas_bne) datosExtra.paginas_bne = b.paginas;
+    if (b.dimensiones && !datosExtra.dimensiones_bne) datosExtra.dimensiones_bne = b.dimensiones;
+    datosExtra.alertas.push('Datos complementados desde la BNE (catálogo en línea).');
+    return true;
+}
 
 // Circuit-breaker de OpenLibrary: si falla N veces seguidas se pausa OL_PAUSA_MS
 // para no bloquear cada ingesta con un timeout largo. Se reinicia solo.
@@ -190,6 +224,17 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     }
     const localHit = !!(infoLocal && infoLocal.titulo);
 
+    // TIER 2.1 · BNE EN LÍNEA, ANTES que OpenLibrary/Google si la edición es ESPAÑOLA (la BNE es su autoridad:
+    // cataloga en CDU, con colección, nº, páginas, medidas y traductor). Para el resto de lenguas va al final,
+    // como respaldo (ver más abajo). En los dos casos se completa TODO lo que aún falte, no solo el título.
+    const española = esEdicionEspañola(idioma || datosExtra.idioma, [datosExtra.isbn, ...isbnsLookup]);
+    // Si el registro del Fichero YA viene del volcado de la BNE, el catálogo en línea no añadiría nada: no se llama.
+    let bneConsultada = (infoLocal?.fuentes || []).includes('bne');
+    if (española && faltaAlgoDeBNE(datosExtra) && (datosExtra.isbn || isbnsLookup.length)) {
+        bneConsultada = true;
+        await completarDesdeBNE(datosExtra, rellenar, [datosExtra.isbn, ...isbnsLookup]);
+    }
+
     // TIER 2a · OpenLibrary (autoridad principal). Si los ISBN dan 404, el buscador recae
     // en una búsqueda por título/autor filtrada por idioma (da con la edición en la lengua
     // del archivo antes que con ediciones en otras lenguas).
@@ -252,7 +297,8 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         const isbnsGB = datosExtra.isbn ? [datosExtra.isbn] : isbnsLookup;
         infoGB = await buscarEnGoogleBooks({ isbns: isbnsGB, titulo: tituloTexto, autor, idioma, coleccion: coleccionHint });
     } catch (e) {
-        if (e.tipo === 'infraestructura') datosExtra.alertas.push('Google Books inalcanzable: omitida.');
+        // El mensaje distingue «sin cuota diaria» (lo normal con ingestas masivas) de una caída de verdad.
+        if (e.tipo === 'infraestructura') datosExtra.alertas.push(`${/cuota/.test(e.message) ? e.message : 'Google Books inalcanzable'}: omitida.`);
         else throw e;
     }
     if (infoGB) {
@@ -327,6 +373,12 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             if (infoBNF.dimensiones && !datosExtra.dimensiones_bne) datosExtra.dimensiones_bne = infoBNF.dimensiones;
             datosExtra.alertas.push('Datos/Dewey complementados desde la BnF.');
         }
+    }
+
+    // TIER 2f · BNE como RESPALDO para las ediciones no españolas (o las que no se reconocieron como tales):
+    // si tras las demás fuentes aún falta algo, se prueba también. Si una fuente falla, se prueban las siguientes.
+    if (!bneConsultada && faltaAlgoDeBNE(datosExtra) && (datosExtra.isbn || isbnsLookup.length)) {
+        await completarDesdeBNE(datosExtra, rellenar, [datosExtra.isbn, ...isbnsLookup]);
     }
 
     // TIER 3c · Resolución de la CDU vía clasificador (solo si BNE no la resolvió ya).

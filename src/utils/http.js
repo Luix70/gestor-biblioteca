@@ -43,6 +43,9 @@ const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 // (red/timeout). Un 4xx normal (400/401/403/404) NO se reintenta: reintentarlo no cambiaría nada.
 function reintentable(e) {
     const s = e?.response?.status;
+    // Un 429 por CUOTA DIARIA agotada («Queries per day») no se arregla esperando unos segundos: reintentarlo
+    // solo alarga cada consulta (medido: Google Books, 4 intentos por libro durante semanas).
+    if (s === 429 && /per day/i.test(JSON.stringify(e?.response?.data || ''))) return false;
     if (s === 429 || s === 502 || s === 503 || s === 504) return true;
     return !e?.response;
 }

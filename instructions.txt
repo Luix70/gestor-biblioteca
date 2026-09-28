@@ -971,6 +971,49 @@ de ficheros clasificado por CDU.
     «edición ambigua» y el informe lista los candidatos (ISBN, editorial, año) para que decidas tú.
     Medido sobre 60 libros sin ISBN, solo Fichero: 2 identificados (ambos correctos), 20 ambiguos con sus
     candidatos, 38 sin la edición en el volcado. El rendimiento lo pone la cobertura de las fuentes, no la regla.
+    Ampliado (2026-09-28):
+      · REGISTROS SIN AUTOR: hay filas del Fichero sin autor (el «Vampiro» de Valdemar entró así desde
+        OpenLibrary), invisibles para una búsqueda que exige el apellido. Si conocemos una editorial real, se
+        busca además por TÍTULO EXACTO (`buscador-local·buscarTituloEnFichero`: frase en la columna título, sin
+        ranking → 10-20 ms; con ranking bm25 eran 7 s con «Love Story») y se aceptan solo con título exacto +
+        misma editorial.
+      · TOMOS: «uno contiene al otro» ya no vale si lo que sobra es un tomo/parte («Libros XXXVI-XLV», «vol. 2»).
+      · COLECCIÓN: solo cuentan palabras que distingan (no «biblioteca», «clásicos», «colección»…); el Nº de la
+        colección es una señal más.
+      · DESEMPATE: varias ediciones de la misma editorial y solo una casa además el año exacto o el nº de
+        colección → esa («Hive Mind», Stanford: la electrónica de 2015 frente a las de 2016).
+      · ORDEN EN LÍNEA POR LENGUA: español/catalán/gallego/euskera → BNE primero; el resto → OpenLibrary primero;
+        si la primera no lo resuelve, la siguiente. OpenLibrary con tope de 15 s aquí (IDENTIFICAR_OL_TOPE_MS).
+
+    BNE EN LÍNEA OTRA VEZ, POR SU SRU (2026-09-28, `utils/buscador-bne-sru.js`). El SPARQL de datos.bne.es da
+    403 (por eso se retiró), pero el catálogo actual (Alma) tiene un SRU público que funciona:
+    https://catalogo.bne.es/view/sru/34BNE_INST (MARC 21). Busca por ISBN y SIN ISBN (título + autor/editorial),
+    y trae la CDU asignada por la BNE (080), la colección con su nº (490), traductor (700 $e), páginas y medidas.
+    POR QUÉ HACE FALTA si ya tenemos el volcado BNE en el Fichero: el volcado tiene AGUJEROS. Comparado año a año
+    con el catálogo en línea, la parte BNE del volcado recoge el 62-75 % de los registros de cada año, pero SOLO
+    el 28 % en 2016, el 13 % en 2017 y el 20 % en 2018 (y el 35 % de 2024, que se volcó a medio catalogar). Es
+    un hueco de la EXPORTACIÓN de datos abiertos de la BNE, no del ETL: un fallo al leer líneas se repartiría
+    por todos los años, no se concentraría en tres seguidos. El «Vampiro» de Valdemar (2018) cae justo ahí.
+    Dónde se usa:
+      · Cascada de enriquecimiento (`proveedor-metadatos`), por ISBN: edición española (lengua es/ca/gl/eu o
+        ISBN 978-84/979-13) → justo después del Fichero, antes que OpenLibrary/Google; el resto → al final,
+        como respaldo. Solo si falta algo (CDU, páginas, medidas, editorial, año, autores, colección) y si el
+        registro del Fichero NO viene ya del volcado BNE (sería el mismo dato).
+      · «Extraer ISBN» / reidentificar-sin-isbn: identificación sin ISBN (arriba) y, en «Investigar CDU», la
+        CDU de autoridad de la BNE va ANTES que el crosswalk y que la IA.
+    Circuit-breaker: un fallo de red la pausa 15 min (BNE_PAUSA_MS).
+    TODO LO QUE TRAIGA LA AUTORIDAD: tras identificar un ISBN, «Extraer ISBN» ya no se queda en título/autor/
+    editorial: rellena (solo huecos) páginas, medidas, Dewey, LCC, lengua original, materias, traductor y demás
+    contribuciones, y la colección con su nº como dato. La CDU de autoridad se guarda en `cdu_autoridad` (no se
+    aplica ahí porque movería la carpeta; la aplica «Investigar CDU»).
+
+    GOOGLE BOOKS: NO ESTAMOS BANEADOS, SE AGOTA LA CUOTA DIARIA (2026-09-28). Medido: desde julio fallaba en el
+    55-87 % de los libros de cada semana con 429 «Quota exceeded … Queries per day» — la cuota gratuita del
+    proyecto se agota a primera hora con las ingestas masivas. Antes se registraba como «inalcanzable» y se
+    reintentaba cuatro veces por libro. Ahora: al primer 429 de cuota diaria se deja de llamar hasta que Google
+    la reinicia (medianoche del Pacífico ≈ 08:05 UTC), la alerta dice «sin cuota diaria (vuelve a las HH:MM)»,
+    y `http.js` ya no reintenta un 429 «per day». Para tener más: pedir aumento de cuota en Google Cloud
+    Console (API Books). OpenLibrary está sana (fallos esporádicos, 0-14 % semanal).
     · AUDIOLIBRO = unidad con audio y SIN PDF de lectura → doc naturaleza:'audiolibro',
       formatos:['audio']. Una lectura CON audio se queda como libro con formatos:['pdf','audio']
       (el thumbnail avisa) + su playlist; los audios (audios[]) se reproducen desde la ficha

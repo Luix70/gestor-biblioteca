@@ -48,7 +48,7 @@ function resolverDB() {
     return /\.db$/i.test(base) ? base : path.join(base, 'fichero.db');
 }
 
-let db = null, stmt = null, stmtFts = null, intentado = false, disponible = false;
+let db = null, stmt = null, stmtFts = null, stmtTitulo = null, intentado = false, disponible = false;
 
 /** Abre el .db una sola vez (lazy, solo-lectura). Devuelve si el proveedor está disponible. */
 async function asegurarDB() {
@@ -218,7 +218,33 @@ export async function buscarTextoEnFichero(q, { limite = 40 } = {}) {
     } catch (e) { console.warn(`[Fichero/FTS] consulta falló: ${e.message}`); return null; }
 }
 
+/**
+ * Filas cuyo TÍTULO contiene EXACTAMENTE esa frase (columna `titulo` del FTS, sin prefijos ni ranking). Sirve
+ * para encontrar registros que la búsqueda por título+autor no ve porque les falta el autor (los hay: el
+ * «Vampiro» de Valdemar entró en OpenLibrary sin él). Sin ORDER BY bm25 a propósito: ordenar por relevancia
+ * obliga a puntuar TODAS las coincidencias (medido: 7 s con «Love Story», bastante más en el Atom del NAS) y
+ * además podía dejar fuera la fila buena; así tarda 10-20 ms y el llamador filtra por título exacto y editorial.
+ * @returns {Promise<Array|null>} null = no disponible
+ */
+export async function buscarTituloEnFichero(titulo, { limite = 500 } = {}) {
+    if (!(await asegurarDB())) return null;
+    const palabras = String(titulo || '').toLowerCase().match(/[\p{L}\p{N}]+/gu);
+    if (!palabras?.length) return [];
+    try {
+        if (!stmtTitulo) {
+            stmtTitulo = db.prepare(`SELECT f.isbn, f.titulo, f.subtitulo, f.autores, f.editorial, f.anio_edicion, f.idioma,
+                f.coleccion_nombre FROM fichero_fts ft JOIN fichero f ON f.rowid = ft.rowid WHERE fichero_fts MATCH ? LIMIT ?`);
+        }
+        return stmtTitulo.all(`titulo : "${palabras.join(' ')}"`, limite).map((f) => ({
+            isbn: f.isbn || null, titulo: f.titulo || '', subtitulo: f.subtitulo || null,
+            autores: f.autores ? f.autores.split(';').map((s) => s.trim()).filter(Boolean) : [],
+            editorial: f.editorial || null, anio: f.anio_edicion || null, idioma: f.idioma || null,
+            coleccion_nombre: f.coleccion_nombre || null,
+        }));
+    } catch (e) { console.warn(`[Fichero/FTS] consulta por título falló: ${e.message}`); return null; }
+}
+
 /** Cierra el .db (para scripts/pruebas; en la app vive lo que dure el proceso). */
 export function cerrarFicheroLocal() {
-    if (db) { try { db.close(); } catch { /* ignore */ } db = null; stmt = null; stmtFts = null; intentado = false; disponible = false; }
+    if (db) { try { db.close(); } catch { /* ignore */ } db = null; stmt = null; stmtFts = null; stmtTitulo = null; intentado = false; disponible = false; }
 }

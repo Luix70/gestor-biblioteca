@@ -14,13 +14,17 @@
  *   · Si quedan varios, no se elige: se devuelven todos.
  *
  * Cascada, de lo barato a lo caro (principio del proyecto: fichero → local → APIs gratis → IA):
- *   1. FICHERO local (SQLite, offline, gratis) por título+autor.
- *   2. OpenLibrary por título+autor (solo si `online`), verificando la edición igual de estricto.
+ *   1. FICHERO local (SQLite, offline, gratis) por título+autor; y, si conocemos la editorial, también por
+ *      título exacto (para los registros que entraron sin autor, como el «Vampiro» de Valdemar).
+ *   2. En línea (solo si `online`), en el orden que dicta la LENGUA: español/catalán/gallego/euskera → BNE
+ *      primero (su autoridad; busca sin ISBN y trae la CDU); el resto → OpenLibrary primero. Si la primera no
+ *      lo resuelve, la siguiente. Cada candidato se verifica igual de estricto.
  *   3. IA (solo si `conIA`), como ÚLTIMO recurso y nunca como fuente: lo que diga solo se acepta si su ISBN
  *      es válido y aparece en el Fichero con el mismo título y autor. Una alucinación no pasa ese filtro.
  */
-import { buscarTextoEnFichero, buscarEnFicheroLocal } from './buscador-local.js';
+import { buscarTextoEnFichero, buscarTituloEnFichero, buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
+import { buscarEdicionesEnBNE } from './buscador-bne-sru.js';
 import { validarISBN } from './identificadores.js';
 import { conGemini } from './gemini.js';
 import { esEditorialFalsa } from './editoriales-falsas.js';
@@ -38,6 +42,14 @@ const idioma2 = (s) => { const v = String(s || '').toLowerCase().slice(0, 3); re
 const RUIDO_EDITORIAL = new Set(['ediciones', 'edicion', 'editorial', 'editores', 'editions', 'edition', 'books', 'book', 'press', 'publishing', 'publishers', 'publicaciones', 'grupo', 'the', 'and', 'company', 'verlag', 'libros', 'sa', 'sl', 'inc', 'ltd']);
 const nucleoEditorial = (s) => palabras(s).filter((w) => !RUIDO_EDITORIAL.has(w));
 
+// Palabras que aparecen en cientos de colecciones distintas y no identifican ninguna.
+const GENERICAS_COLECCION = new Set(['coleccion', 'collection', 'serie', 'series', 'biblioteca', 'library', 'clasicos',
+    'classics', 'grandes', 'obras', 'libros', 'books', 'nueva', 'nuevo', 'autores', 'literatura', 'bolsillo', 'edicion',
+    'ediciones', 'the', 'del', 'los', 'las', 'une', 'des']);
+
+/** ¿Señala este resto de título un tomo/parte/volumen concreto? (números, romanos, «tomo», «libros», «vol.») */
+const esDeTomo = (resto) => /\b(vol|volumen|volume|tomo|tome|band|libro|libros|book|books|parte|part|partie|[ivxlcdm]{2,}|\d+)\b/.test(resto);
+
 /** ¿El título del candidato es el mismo libro? Igualdad normalizada, o uno contiene al otro (subtítulo). */
 function casaTitulo(titDoc, titCand, subCand) {
     const a = norm(titDoc);
@@ -45,13 +57,21 @@ function casaTitulo(titDoc, titCand, subCand) {
     const bSolo = norm(titCand);
     if (!a || !bSolo) return false;
     if (a === bSolo || a === b) return true;
-    if (b.includes(a) || a.includes(bSolo)) return true;
+    // Uno contiene al otro (subtítulo de más o de menos)… salvo que lo que sobra señale un TOMO o una PARTE:
+    // «Historia romana. Libros XXXVI-XLV» NO es «Historia romana» a secas — en una obra en varios tomos cada
+    // uno tiene su ISBN, y aceptar el de otro tomo es colgar un ISBN equivocado (medido con Dion Casio, Gredos).
+    const sobra = (largo, corto) => largo.replace(corto, ' ');
+    if (b.includes(a) && !esDeTomo(sobra(b, a))) return true;
+    if (a.includes(bSolo) && !esDeTomo(sobra(a, bSolo))) return true;
     // Conjuntos de palabras casi iguales (tolera «El» / «:» / orden del subtítulo).
     const A = new Set(palabras(titDoc));
     const B = new Set(palabras([titCand, subCand].filter(Boolean).join(' ')));
     if (!A.size || !B.size) return false;
     let comunes = 0;
     for (const w of A) if (B.has(w)) comunes++;
+    // Las palabras que solo están en uno de los dos tampoco pueden señalar un tomo (misma razón que arriba).
+    const diferentes = [...A].filter((w) => !B.has(w)).concat([...B].filter((w) => !A.has(w)));
+    if (esDeTomo(diferentes.join(' '))) return false;
     return comunes / Math.min(A.size, B.size) >= 0.85;
 }
 
@@ -102,33 +122,51 @@ function señalesEdicion(doc, cand) {
     const aDoc = parseInt(doc.anio, 10), aCand = parseInt(cand.anio, 10);
     if (aDoc && aCand && aDoc === aCand) señales.push('año');
 
-    // La colección con su número es una firma casi única de la edición («Valdemar: Gótica»).
-    const colDoc = palabras(doc.coleccion_nombre), colCand = palabras(cand.coleccion_nombre);
-    if (colDoc.length && colCand.length && colDoc.some((w) => colCand.includes(w))) señales.push('colección');
+    // La colección es una firma casi única de la edición («Valdemar: Gótica» ↔ «Colección gótica»), y su NÚMERO
+    // ya la clava (Gótica nº 112 es un solo libro).
+    // Solo cuentan palabras que DISTINGAN: «biblioteca», «clásicos», «colección»… las comparten cientos de
+    // colecciones distintas. Hace falta una palabra propia en común, o varias.
+    const colDoc = palabras(doc.coleccion_nombre).filter((w) => !GENERICAS_COLECCION.has(w));
+    const colCand = palabras(cand.coleccion_nombre).filter((w) => !GENERICAS_COLECCION.has(w));
+    const comunesCol = colDoc.filter((w) => colCand.includes(w));
+    if (comunesCol.length >= (colDoc.length === 1 || colCand.length === 1 ? 1 : 2)) {
+        señales.push('colección');
+        const nDoc = String(doc.coleccion_numero || '').replace(/\D/g, '');
+        const nCand = String(cand.coleccion_numero || '').replace(/\D/g, '');
+        if (nDoc && nCand && nDoc === nCand) señales.push('nº de colección');
+    }
 
     return { señales, contradice };
 }
 
-/** Normaliza un candidato del Fichero / de OpenLibrary a una forma común. */
+/** Normaliza un candidato (Fichero, BNE, OpenLibrary) a una forma común. */
 const comoCandidato = (c, fuente) => ({
     isbn: c.isbn ? validarISBN(c.isbn) : null,
     titulo: c.titulo || '', subtitulo: c.subtitulo || null,
-    autores: Array.isArray(c.autores) ? c.autores : String(c.autores || '').split(/[;,]/).map((x) => x.trim()).filter(Boolean),
+    autores: Array.isArray(c.autores) ? c.autores : String(c.autores || '').split(/;/).map((x) => x.trim()).filter(Boolean),
     editorial: c.editorial || null, anio: c.anio || c.anio_edicion || c.año_edicion || null,
-    coleccion_nombre: c.coleccion_nombre || null,
-    idioma: c.idioma || null, fuente,
+    coleccion_nombre: c.coleccion_nombre || null, coleccion_numero: c.coleccion_numero || null,
+    idioma: c.idioma || null, cdu: c.cdu || null, fuente,
 });
 
-/** Filtra y puntúa candidatos con las reglas estrictas de arriba. */
+/**
+ * Filtra y puntúa candidatos con las reglas estrictas de arriba.
+ *
+ * Un candidato SIN AUTORES (los hay: el «Vampiro» de Valdemar entró en OpenLibrary sin autor) no puede confirmar
+ * la autoría. Se admite solo con más exigencia: TÍTULO EXACTO y MISMA EDITORIAL. El mismo título en la misma
+ * casa, sin un autor que lo contradiga, es en la práctica el mismo libro.
+ */
 function verificar(doc, candidatos) {
     const buenos = [];
     for (const c of candidatos) {
         if (!c.isbn) continue;
         if (!casaTitulo(doc.titulo, c.titulo, c.subtitulo)) continue;
-        if (doc.autores?.length && !casaAutor(doc.autores, c.autores)) continue;
+        const sinAutor = !c.autores?.length;
+        if (doc.autores?.length && !sinAutor && !casaAutor(doc.autores, c.autores)) continue;
         const { señales, contradice } = señalesEdicion(doc, c);
-        if (contradice) continue;                 // otra lengua ⇒ otra edición
+        if (contradice) continue;                 // otra lengua u otra editorial ⇒ otra edición
         if (!señales.length) continue;            // nada confirma que sea ESTA edición
+        if (sinAutor && doc.autores?.length && !(norm(doc.titulo) === norm(c.titulo) && señales.includes('editorial'))) continue;
         buenos.push({ ...c, señales });
     }
     // Mejor primero: más señales; a igualdad, la que casa la editorial.
@@ -139,42 +177,93 @@ function verificar(doc, candidatos) {
 /** Los que solo fallaron por no confirmar edición: sirven para explicar por qué no se acepta nada. */
 function casiCandidatos(doc, candidatos) {
     return candidatos.filter((c) => c.isbn && casaTitulo(doc.titulo, c.titulo, c.subtitulo)
-        && (!doc.autores?.length || casaAutor(doc.autores, c.autores)));
+        && (!doc.autores?.length || !c.autores?.length || casaAutor(doc.autores, c.autores)));
+}
+
+// Lenguas cuya autoridad natural es la BNE (orden de consulta en línea).
+const LENGUAS_BNE = new Set(['es', 'ca', 'gl', 'eu']);
+
+// Tope de espera para OpenLibrary aquí: su cliente espera hasta 45 s (con reintentos) porque en la ingesta
+// prima conseguir el dato; en «Extraer ISBN» un libro no puede bloquear el lote varios minutos.
+const TOPE_OL_MS = Number(process.env.IDENTIFICAR_OL_TOPE_MS || 15000);
+
+/** Ediciones de la BNE por título+autor (o +editorial). [] si no hay o la BNE no responde. */
+async function candidatosBNE(doc, autor) {
+    const r = await buscarEdicionesEnBNE({ titulo: doc.titulo, autor, editorial: doc.editorial }).catch(() => null);
+    return (r || []).map((x) => comoCandidato({ ...x, anio: x.año_edicion }, 'bne'));
+}
+
+/** La edición que elige OpenLibrary por título+autor (una), con tope de espera. */
+async function candidatosOL(doc, autor) {
+    const tope = new Promise((res) => setTimeout(() => res(null), TOPE_OL_MS));
+    const consulta = buscarPorCriterios({ titulo: doc.titulo, autor, idioma: doc.idioma || null, incluirSinopsis: false }).catch(() => null);
+    const ol = await Promise.race([consulta, tope]);
+    return ol?.isbn ? [comoCandidato({ ...ol, anio: ol.año_edicion }, 'openlibrary')] : [];
+}
+
+/** Sin duplicados por ISBN (la misma edición puede llegar del Fichero y de la BNE). */
+const unicosPorIsbn = (lista) => [...new Map(lista.map((b) => [b.isbn, b])).values()];
+
+/**
+ * Si queda exactamente UNA edición verificada, esa es. DESEMPATE: si hay varias de la misma editorial pero solo
+ * UNA casa además el año exacto o el nº de colección, es esa (p. ej. «Hive Mind», Stanford: la electrónica de
+ * 2015, la tapa dura y la rústica de 2016 — el año decide). Si el empate persiste, no se elige ninguna.
+ */
+function siUnica(buenos, via) {
+    const u = unicosPorIsbn(buenos).sort((a, b) => b.señales.length - a.señales.length);
+    const elegir = (c, motivo) => ({ estado: 'unico', isbn: c.isbn, elegido: c, candidatos: u, via: c.fuente || via, motivo });
+    if (u.length === 1) return elegir(u[0], `casa ${u[0].señales.join(' + ')}`);
+    if (u.length > 1) {
+        const [mejor, segundo] = u;
+        const decisiva = mejor.señales.includes('editorial') && (mejor.señales.includes('año') || mejor.señales.includes('nº de colección'));
+        if (decisiva && mejor.señales.length > segundo.señales.length) {
+            return elegir(mejor, `casa ${mejor.señales.join(' + ')} (la única de ${u.length} ediciones de la misma editorial que casa también ${mejor.señales.includes('año') ? 'el año' : 'el nº de colección'})`);
+        }
+    }
+    return null;
 }
 
 /**
- * @param doc { titulo, autores:[nombre], editorial, coleccion_nombre, anio, idioma }
- * @param opts online=false (OpenLibrary) · conIA=false (último recurso, verificado) · limite=40
+ * @param doc { titulo, autores:[nombre], editorial, coleccion_nombre, coleccion_numero, anio, idioma }
+ * @param opts online=false (BNE + OpenLibrary) · conIA=false (último recurso, verificado) · limite=40
  * @returns { estado:'unico'|'ambiguo'|'sin-candidatos', isbn?, elegido?, candidatos[], via?, motivo }
  */
 export async function identificarEdicion(doc, { online = false, conIA = false, limite = 40 } = {}) {
     if (!doc?.titulo) return { estado: 'sin-candidatos', candidatos: [], motivo: 'el documento no tiene título' };
-    const consulta = [doc.titulo, ...(doc.autores || []).slice(0, 1)].join(' ');
+    const autor = (doc.autores || [])[0] || null;
 
-    // 1) FICHERO local (offline, gratis).
-    const delFichero = (await buscarTextoEnFichero(consulta, { limite }).catch(() => null)) || [];
-    let candidatos = delFichero.map((c) => comoCandidato(c, 'fichero'));
+    // 1) FICHERO local (offline, gratis). Primero título+autor; si no sale nada verificado, SOLO título: un
+    //    registro sin autor (los hay) no aparece en una búsqueda que exige el apellido.
+    let candidatos = ((await buscarTextoEnFichero([doc.titulo, autor].filter(Boolean).join(' '), { limite }).catch(() => null)) || [])
+        .map((c) => comoCandidato(c, 'fichero'));
     let buenos = verificar(doc, candidatos);
-    if (buenos.length === 1) return { estado: 'unico', isbn: buenos[0].isbn, elegido: buenos[0], candidatos: buenos, via: 'fichero', motivo: `casa ${buenos[0].señales.join(' + ')}` };
+    // Registros SIN AUTOR: solo se pueden aceptar con título exacto y MISMA editorial, así que esta segunda
+    // búsqueda solo tiene sentido si conocemos una editorial real. Búsqueda exacta por la columna título (10-20 ms).
+    if (!buenos.length && autor && doc.editorial && !esEditorialFalsa(doc.editorial)) {
+        const soloTitulo = ((await buscarTituloEnFichero(doc.titulo).catch(() => null)) || [])
+            .map((c) => comoCandidato(c, 'fichero'));
+        candidatos = unicosPorIsbn([...candidatos, ...soloTitulo]);
+        buenos = verificar(doc, candidatos);
+    }
+    let r = siUnica(buenos, 'fichero');
+    if (r) return r;
 
-    // 2) OpenLibrary por título+autor (solo si se permite la red). Devuelve UNA edición ya elegida por OL:
-    //    se verifica con el mismo rasero, así que una edición de otra lengua/editorial no cuela.
-    if (online && buenos.length !== 1) {
-        try {
-            const ol = await buscarPorCriterios({ titulo: doc.titulo, autor: (doc.autores || [])[0] || null, idioma: doc.idioma || null, incluirSinopsis: false });
-            if (ol?.isbn) {
-                const c = comoCandidato({ ...ol, anio: ol.año_edicion }, 'openlibrary');
-                candidatos = [...candidatos, c];
-                const v = verificar(doc, [c]);
-                if (v.length) buenos = [...buenos, ...v];
-            }
-        } catch (e) { /* red caída / cuota: se sigue con lo que haya */ }
-        const unicos = [...new Map(buenos.map((b) => [b.isbn, b])).values()];
-        if (unicos.length === 1) return { estado: 'unico', isbn: unicos[0].isbn, elegido: unicos[0], candidatos: unicos, via: unicos[0].fuente, motivo: `casa ${unicos[0].señales.join(' + ')}` };
-        buenos = unicos;
+    if (online) {
+        // 2) FUENTES EN LÍNEA, en el orden que dicta la LENGUA: para un libro en español (o catalán, gallego,
+        //    euskera) la BNE es la autoridad y va primero; para el resto, OpenLibrary. Si la primera no lo
+        //    resuelve, se prueba la siguiente.
+        const fuentes = LENGUAS_BNE.has(idioma2(doc.idioma)) ? ['bne', 'openlibrary'] : ['openlibrary', 'bne'];
+        for (const fuente of fuentes) {
+            const nuevos = fuente === 'bne' ? await candidatosBNE(doc, autor) : await candidatosOL(doc, autor);
+            if (!nuevos.length) continue;
+            candidatos = unicosPorIsbn([...candidatos, ...nuevos]);
+            buenos = unicosPorIsbn([...buenos, ...verificar(doc, nuevos)]);
+            r = siUnica(buenos, fuente);
+            if (r) return r;
+        }
     }
 
-    // 3) IA, último recurso y NUNCA como fuente: propone un ISBN y solo se acepta si el Fichero lo confirma
+    // 4) IA, último recurso y NUNCA como fuente: propone un ISBN y solo se acepta si el Fichero lo confirma
     //    con el mismo título y autor. Así una alucinación no llega nunca al catálogo.
     if (conIA && !buenos.length) {
         const propuesto = await preguntarIsbnALaIA(doc).catch(() => null);
