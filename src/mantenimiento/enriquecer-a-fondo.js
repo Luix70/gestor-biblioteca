@@ -21,6 +21,7 @@ import { separarAutores } from '../utils/autor-normalizar.js';
 import { ROLES_VALIDOS, esComicPorDatos, promoverIlustradorSiComic } from '../utils/contribuciones.js';
 import { validarISBN, variantesISBN } from '../utils/identificadores.js';
 import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
+import { huecosEscalares } from '../utils/huecos-autoridad.js';
 import { resolverObra, registrarVolumenEnObra } from '../utils/obras.js';
 import { resolverColeccion } from '../utils/colecciones.js';
 
@@ -146,6 +147,20 @@ export async function analizarAFondo(db, doc, { maxImagenes = 6 } = {}) {
         if (vis.palabras_clave.length && !(doc.palabras_clave || []).length) proponer('palabras_clave', '—', vis.palabras_clave.join(', '), vis.palabras_clave, 'portadilla·IA');
         if (vis['año_edicion'] && !doc['año_edicion']) proponer('año_edicion', '—', vis['año_edicion'], vis['año_edicion'], 'portadilla·IA');
     }
+    // DATOS FÍSICOS Y DE CATALOGACIÓN que la autoridad trae y faltan: subtítulo, páginas, medidas, idioma, Dewey/
+    // LCC (aunque ya haya CDU) y la CDU que asigna la BNE. Se agrupan en una sola propuesta («ficha») y solo
+    // rellenan huecos (función común huecos-autoridad; lo ya propuesto arriba no se repite).
+    if (ext) {
+        const YA = new Set(['sinopsis', 'año_edicion', 'idioma_original', 'palabras_clave']);
+        const { set: ficha, cambios } = huecosEscalares(doc, ext);
+        for (const k of Object.keys(ficha)) if (YA.has(k)) delete ficha[k];
+        if (!doc.cdu && propuesta.clasificacion) { delete ficha.dewey; delete ficha.lcc; }   // ya va en «clasificacion»
+        if (Object.keys(ficha).length) {
+            const resumen = cambios.filter((c) => c.campo in ficha).map((c) => `${c.campo}: ${c.a}`).join(' · ');
+            proponer('ficha', '—', resumen, ficha, 'APIs');
+        }
+    }
+
     // TÍTULO ORIGINAL (traducciones/antologías) — de la portadilla·IA; hueco, nunca pisa lo que ya hubiera.
     if (vis && !doc.titulo_original && (vis.titulo_original || (vis.titulos_originales || []).length)) {
         const tos = vis.titulos_originales || [];
@@ -211,6 +226,17 @@ export async function aplicarAFondo(db, doc, propuesta = {}, campos = null, { re
         if (out.length) { set.contribuciones = out; aplicados.push('contribuciones'); }
     }
     if (elegidos.includes('sinopsis') && propuesta.sinopsis) { set.sinopsis = propuesta.sinopsis; aplicados.push('sinopsis'); }
+    // Datos físicos/de catalogación: se vuelve a comprobar el hueco AL APLICAR (el doc pudo cambiar desde la
+    // propuesta): nunca se escribe encima de un valor que ya esté.
+    if (elegidos.includes('ficha') && propuesta.ficha && typeof propuesta.ficha === 'object') {
+        let alguno = false;
+        for (const [k, v] of Object.entries(propuesta.ficha)) {
+            const actual = doc[k];
+            const hueco = actual === undefined || actual === null || actual === '' || (Array.isArray(actual) && !actual.length);
+            if (hueco && v != null && v !== '') { set[k] = v; alguno = true; }
+        }
+        if (alguno) aplicados.push('ficha');
+    }
     if (elegidos.includes('isbn') && Array.isArray(propuesta.isbn) && propuesta.isbn.length) {
         const validos = propuesta.isbn.filter((x) => validarISBN(x));
         if (validos.length) {

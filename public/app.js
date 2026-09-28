@@ -495,7 +495,7 @@ async function loadDashboard() {
       ${rowN('Tomos sin número (?)', anom.tomos_sin_numero, anom.tomos_sin_numero ? 'bad' : 'ok', 'tomos_sin_numero', 'Tomos sin número')}
       ${rowN('Docs a revisar', anom.docs_revision, anom.docs_revision ? 'bad' : 'ok', 'revision', 'Documentos a revisar')}</table>`;
     $('#defs').innerHTML = `<table>
-      ${rowN('Libros sin ISBN', def.libros_sin_isbn, 'mut', 'sin_isbn', 'Libros sin ISBN')}${rowN('Libros sin autor', def.libros_sin_autor, def.libros_sin_autor ? 'warn' : 'ok', 'sin_autor', 'Libros sin autor')}
+      ${rowN('Libros sin ISBN', def.libros_sin_isbn, 'mut', 'sin_isbn', 'Libros sin ISBN')}${rowN('Edición por elegir', def.edicion_por_elegir, def.edicion_por_elegir ? 'warn' : 'ok', 'edicion_por_elegir', 'Edición por elegir')}${rowN('Libros sin autor', def.libros_sin_autor, def.libros_sin_autor ? 'warn' : 'ok', 'sin_autor', 'Libros sin autor')}
       ${rowN('Sin hash', def.sin_hash, 'mut', 'sin_hash', 'Sin hash')}${rowN('Sin portada', def.sin_portada, 'mut', 'sin_portada', 'Sin portada')}
       ${rowN('CDU genérica', def.cdu_generica, 'mut', 'cdu_generica', 'CDU genérica')}${rowN('Pendientes', def.pendientes, def.pendientes ? 'warn' : 'ok', 'pendientes', 'Pendientes')}
       ${rowN('Sin colección', def.sin_coleccion, 'mut', 'sin_coleccion', 'Sin colección')}</table>`;
@@ -3603,6 +3603,23 @@ function pintarDoc(r, ctx) {
   const secSin = d.sinopsis
     ? `<details class="card foldcard" open style="margin-top:14px"><summary>📝 Sinopsis</summary><p class="sinopsis-text" style="margin-top:10px">${esc(d.sinopsis)}</p></details>`
     : '';
+  // 📚 ¿CUÁL ES TU EDICIÓN? — identificación AMBIGUA («🔎 Extraer ISBN» no encontró el ISBN en el fichero y la
+  // búsqueda por autoridad dio varias ediciones posibles, o una sin nada que confirmara que era esta). No se
+  // eligió ninguna: se muestran aquí para que elijas con un clic. Abierta y arriba, porque pide una decisión.
+  const _cands = Array.isArray(d.ediciones_candidatas) ? d.ediciones_candidatas : [];
+  const secEdicion = _cands.length
+    ? `<details class="card foldcard admin-only" id="edicionDet" open style="margin-top:14px"><summary>📚 ¿Cuál es tu edición?</summary>
+        <div class="muted" style="font-size:12px;margin:8px 0">No se encontró el ISBN en el fichero y hay ${_cands.length === 1 ? 'una edición posible que nada confirma' : _cands.length + ' ediciones posibles'}. Elige la de este ejemplar: se aplicará su ISBN y se completarán los datos que falten (nunca se pisa lo que ya tiene).</div>
+        <div style="display:flex;flex-direction:column;gap:6px">${_cands.map((c) => `
+          <div class="row" style="gap:8px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 8px;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px"><b>${esc(c.titulo || '—')}</b>${c.subtitulo ? ' <span class="muted">' + esc(c.subtitulo) + '</span>' : ''}
+              <div class="muted" style="font-size:12px">${esc([c.editorial, c.anio, c.idioma, c.coleccion].filter(Boolean).join(' · '))} · ISBN ${esc(c.isbn)}${c.fuente ? ' · ' + esc(c.fuente) : ''}${c.señales?.length ? ' · casa ' + esc(c.señales.join(' + ')) : ''}</div></div>
+            <button class="btn edElegir" data-isbn="${esc(c.isbn)}" title="Aplicar este ISBN y completar los huecos desde la autoridad">✔ Es esta</button>
+          </div>`).join('')}
+        </div>
+        <div class="row" style="margin-top:8px"><button class="btn edNinguna" title="Ninguna es la de este ejemplar: se descartan y no se volverán a proponer">✖ Ninguna</button></div>
+      </details>`
+    : '';
   // 🩺 Salud: plegable, admin-only, carga perezosa al abrir (checklist de tareas de mantenimiento).
   const secSalud = `<details class="card foldcard admin-only" id="saludDet" style="margin-top:14px"><summary>🩺 Salud del documento</summary><div id="saludBody" class="muted" style="margin-top:10px">Abre para ver el estado de mantenimiento…</div></details>`;
   // MATERIAL ADJUNTO: sección PROPIA y ABIERTA, con los ficheros listados dentro. La fila que puse en «Datos
@@ -3620,7 +3637,7 @@ function pintarDoc(r, ctx) {
   // (no solo la página). El contenedor #fichaNav se rellena async (los ids se traen y cachean por búsqueda).
   // Imágenes y sinopsis DESPLEGADAS y ANTES de las acciones; el resto (lectura, catalográficos, salud) plegado, después.
   $('#p-detalle').innerHTML =
-    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}<div id="selDocBox"></div>${secImg}${secSin}${secMaterial}${secFichasLectura}${secAcc}${secLect}${secCat}${secSalud}`;
+    `${crumb}<div class="row" style="margin:2px 0 12px;align-items:center;gap:8px"><button class="det-back" title="Volver" onclick="${back}">←</button><div id="fichaNav" class="row" style="margin-left:auto;gap:4px;align-items:center"></div></div>${fmin}<div id="selDocBox"></div>${secEdicion}${secImg}${secSin}${secMaterial}${secFichasLectura}${secAcc}${secLect}${secCat}${secSalud}`;
   pintarNavFicha(d._id, ctx);
   if (_tieneAdj) attachMaterial(d._id);
   else if (d.material_adjunto) cargarMaterialFicha(d._id);
@@ -3650,6 +3667,28 @@ function pintarDoc(r, ctx) {
     if ($('#actTipo')) $('#actTipo').onclick = () => cambiarTipoDocs([d._id]);
     const caf = $('#actAFondo');
     if (caf) caf.onclick = () => completarAFondo(d._id, caf);
+    // 📚 ¿Cuál es tu edición?: aplicar la elegida (o descartarlas todas) y refrescar la ficha.
+    const elegirEd = async (btn, cuerpo, pregunta) => {
+      if (!confirm(pregunta)) return;
+      btn.disabled = true;
+      const txt = btn.textContent;
+      btn.textContent = '⏳…';
+      try {
+        const r = await api('/documentos/' + encodeURIComponent(d._id) + '/elegir-edicion', { method: 'POST', body: JSON.stringify(cuerpo) });
+        if (!r || !r.ok) throw new Error((r && r.motivo) || 'no se pudo aplicar');
+        toast(r.descartadas ? 'Ediciones descartadas' : 'Edición aplicada: ISBN ' + r.isbn, 'ok');
+        verDoc(d._id, detalle && detalle.ctx);
+      } catch (e) {
+        toast(e.message, 'bad');
+        btn.disabled = false;
+        btn.textContent = txt;
+      }
+    };
+    $$('#p-detalle .edElegir').forEach((b) => (b.onclick = () => elegirEd(b, { isbn: b.dataset.isbn },
+      `¿Aplicar la edición con ISBN ${b.dataset.isbn}?\n\nSe completarán los datos que falten desde la autoridad; lo que ya tiene el documento no se toca.`)));
+    const bNinguna = $('#p-detalle .edNinguna');
+    if (bNinguna) bNinguna.onclick = () => elegirEd(bNinguna, { ninguna: true },
+      '¿Ninguna es la edición de este ejemplar?\n\nSe descartan y no se volverán a proponer (salvo forzando «Extraer ISBN»).');
     // 🩺 Salud: carga perezosa del checklist la primera vez que se despliega la sección.
     const saludDet = $('#saludDet');
     if (saludDet)

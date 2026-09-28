@@ -16,6 +16,7 @@ import { ObjectId } from 'mongodb';
 import { conectarDB } from '../database.js';
 import { DIR_CDU, MARCA_RUTA_FIJA } from '../mantenimiento/util-mantenimiento.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
+import { buscarAutoridadPorISBN } from './autoridad-isbn.js';
 import { cduDeGenero, deducirIdioma, etiquetaDisco, leerISBNdeImagenes, mejorTituloPista } from './audiolibro.js';
 import { arbolCDU } from './cdu-arbol.js';
 import { resolverCabecera } from './colecciones.js';
@@ -183,7 +184,7 @@ async function analizarLibro(nombreLibro, files, { plano = false } = {}) {
         let isbn = isbnDeNombre(nombreLibro);
         if (!isbn) { const bi = await leerISBNdeImagenes(imgs.map((f) => ({ abs: f.abs, rel: f.rel, clase: 'portada' }))); isbn = bi?.isbn || null; }
         if (isbn) {
-            const f = await buscarEnFicheroLocal({ isbns: [isbn] }).catch(() => null);
+            const f = await buscarAutoridadPorISBN([isbn]).catch(() => null);   // Fichero → BNE si falta
             if (f && f.titulo) {
                 ficheroHit = true;
                 if (!autor && f.autores?.length) autor = f.autores[0];

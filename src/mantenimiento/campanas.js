@@ -28,6 +28,8 @@ import { resolverPersona } from '../utils/resolver-persona.js';
 import { esAutorArtefacto, esTituloArtefacto } from '../utils/parsear-nombre.js';
 import { variantesISBN } from '../utils/identificadores.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from '../utils/buscador-local.js';
+import { buscarEnBNE } from '../utils/buscador-bne-sru.js';
+import { huecosDesdeAutoridad } from '../utils/huecos-autoridad.js';
 import { buscarNombrePorISSN } from '../utils/buscador-issn-titulo.js';
 import { nombreEsPlaceholder, limpiarNombreColeccion, claveCanonica } from '../utils/colecciones.js';
 import { ROLES_VALIDOS } from '../utils/contribuciones.js';
@@ -251,7 +253,10 @@ export const CAMPANAS = [
         cadenciaDefecto: 15,
         activaDefecto: false,
         coleccion: 'biblioteca',
-        proyeccion: { isbn: 1, sinopsis: 1, año_edicion: 1, editorial: 1, autores: 1, palabras_clave: 1, dewey: 1, lcc: 1, idioma: 1, titulo: 1 },
+        // ⚠ Todos los campos que rellena huecosDesdeAutoridad deben venir en la proyección: uno que falte aquí se
+        // vería vacío y se SOBRESCRIBIRÍA.
+        proyeccion: { isbn: 1, sinopsis: 1, año_edicion: 1, editorial: 1, autores: 1, palabras_clave: 1, dewey: 1, lcc: 1, idioma: 1, titulo: 1,
+            subtitulo: 1, paginas: 1, dimensiones: 1, idioma_original: 1, contribuciones: 1, cdu: 1, cdu_autoridad: 1, cdu_manual: 1 },
         // Con ISBN y con AL MENOS un hueco de los que esta campaña rellena, O con un autor ARTEFACTO/[?]_.
         async candidatos(db) {
             const artefactoIds = await idsAutoresArtefacto(db);
@@ -271,14 +276,9 @@ export const CAMPANAS = [
                 isbnsArchivo: variantesISBN(doc.isbn), incluirCdu: false, incluirSinopsis: true, idioma: doc.idioma || null,
             }).catch(() => null);
             if (!ext) return false;
-            const set = {};
-            // Escalares/arrays: solo se rellena lo que falte (conservador).
-            if (ext.sinopsis && !doc.sinopsis) set.sinopsis = ext.sinopsis;
-            if (ext.año_edicion && !doc.año_edicion) set.año_edicion = ext.año_edicion;
-            if (ext.idioma && !doc.idioma) set.idioma = ext.idioma;
-            if (ext.categorias?.length && !(doc.palabras_clave?.length)) set.palabras_clave = ext.categorias;
-            if (ext.dewey && !doc.dewey) set.dewey = String(ext.dewey).trim();
-            if (ext.lcc && !doc.lcc) set.lcc = String(ext.lcc).trim();
+            // Huecos: TODO lo que traiga la autoridad y falte — sinopsis, año, idioma, páginas, medidas, Dewey,
+            // LCC, materias, traductor, lengua original, CDU de autoridad… (función común; nunca sobrescribe).
+            const set = (await huecosDesdeAutoridad(db, doc, ext)).set;
             // Editorial: solo si falta por completo.
             if (ext.editorial && !doc.editorial) set.editorial = await resolverEditorialRef(db, ext.editorial);
             // Autores: rellenar si FALTAN, o REEMPLAZAR si el actual es un ARTEFACTO ([?]_ / basura del texto).
@@ -340,8 +340,13 @@ export const CAMPANAS = [
         async procesarDoc(db, doc) {
             const isbns = variantesISBN(doc.isbn);
             const f = await buscarEnFicheroLocal({ isbns }).catch(() => null);
-            const cf = await cduDelFichero(f);
-            if (!cf) return false;                                 // el Fichero no aporta clasificación → nada
+            let cf = await cduDelFichero(f);
+            // El volcado BNE del Fichero tiene huecos (2016-2018 sobre todo): si no clasifica, el catálogo en línea.
+            if (!cf) {
+                const bne = await buscarEnBNE({ isbns }).catch(() => null);
+                if (bne?.cdu) cf = { cdu: String(bne.cdu).trim(), via: 'cdu-BNE-en-línea' };
+            }
+            if (!cf) return false;                                 // ninguna autoridad aporta clasificación → nada
             const ref = sinExtension(doc.nombre_archivo);
             const ok = ref ? await corroborarISBNporTitulo({ candidatos: isbns, titulo: ref }).catch(() => null) : null;
             if (!ok) return false;                                 // ISBN no corroborado → no clasificar (posible ISBN erróneo)

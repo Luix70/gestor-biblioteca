@@ -26,6 +26,7 @@ import { esTituloArtefacto } from './parsear-nombre.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { identificarEdicion } from './identificar-edicion.js';
+import { huecosDesdeAutoridad } from './huecos-autoridad.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
@@ -131,6 +132,49 @@ function noDegrada(actual, nuevo) {
 }
 
 /**
+ * Guarda en el documento las EDICIONES CANDIDATAS de una identificación ambigua (máx. 8), con lo justo para
+ * reconocerlas: ISBN, título, editorial, año, idioma, colección, de dónde salen y qué casó.
+ */
+async function guardarCandidatas(db, doc, candidatos) {
+    const lista = candidatos.slice(0, 8).map((c) => ({
+        isbn: c.isbn, titulo: c.titulo || null, subtitulo: c.subtitulo || null,
+        editorial: c.editorial || null, anio: c.anio || null, idioma: c.idioma || null,
+        coleccion: [c.coleccion_nombre, c.coleccion_numero].filter(Boolean).join(' · ') || null,
+        fuente: c.fuente || null, señales: c.señales || [],
+    }));
+    await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { ediciones_candidatas: lista, ediciones_candidatas_fecha: new Date() } });
+}
+
+/**
+ * ELEGIR LA EDICIÓN desde la ficha, entre las candidatas de una identificación ambigua.
+ *   · { isbn }      → se aplica como ISBN MANUAL (autoritativo: lo has elegido tú) con el pivote habitual
+ *                     (Fichero → BNE/APIs, solo rellena huecos) y se quitan las candidatas.
+ *   · { ninguna }   → se quitan las candidatas y se marca `edicion_descartada` para no volver a proponerlas.
+ * Solo se admite un ISBN que esté entre las candidatas (la ficha no es un editor de ISBN; para eso, «🔎 Extraer
+ * ISBN» con ISBN manual).
+ */
+export async function elegirEdicion(db, id, { isbn = null, ninguna = false } = {}) {
+    const _id = typeof id === 'string' ? new ObjectId(id) : id;
+    const doc = await db.collection('biblioteca').findOne({ _id });
+    if (!doc) return { ok: false, motivo: 'documento no encontrado' };
+    if (ninguna) {
+        await db.collection('biblioteca').updateOne({ _id }, {
+            $unset: { ediciones_candidatas: '', ediciones_candidatas_fecha: '' },
+            $set: { edicion_descartada: true },
+            $push: { alertas_agente: 'Ediciones candidatas descartadas a mano: ninguna era la de este ejemplar.' },
+        });
+        return { ok: true, descartadas: true };
+    }
+    const elegido = validarISBN(isbn);
+    const esCandidata = (doc.ediciones_candidatas || []).some((c) => variantesISBN(c.isbn).includes(elegido));
+    if (!elegido || !esCandidata) return { ok: false, motivo: 'ese ISBN no está entre las ediciones candidatas' };
+    const r = await reidentificarDoc(db, doc, { aplicar: true, usarApis: true, isbnManual: elegido });
+    if (r.estado !== 'aplicado') return { ok: false, motivo: r.motivo || `no se pudo aplicar (${r.estado})` };
+    // (reidentificarDoc ya quitó las candidatas al aplicar.)
+    return { ok: true, isbn: elegido, resumen: r.resumen };
+}
+
+/**
  * Re-identifica UN documento por su ISBN: lo obtiene (del fichero / a mano / por código de barras con IA / del
  * propio doc si se fuerza) y pivota al Fichero + APIs gratuitas para cotejar título y rellenar huecos.
  * @param {object} opts
@@ -182,14 +226,21 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     //     sabemos —título, autor, editorial, colección, año, idioma—. Estricto: solo se acepta una edición que
     //     case título + autor Y confirme editorial/idioma/año; si hay varias posibles no se elige ninguna.
     let ambiguo = null;
-    if (!isbn) {
+    // Si ya se te propusieron ediciones y dijiste «ninguna», no se vuelve a proponer (salvo forzando).
+    if (!isbn && (!doc.edicion_descartada || forzar)) {
         const r = await identificarEdicion(await datosDeAutoridad(db, doc), { online: usarApis, conIA }).catch(() => null);
         if (r?.estado === 'unico') { isbn = r.isbn; via = `autoridad/${r.via}`; }
         else if (r?.estado === 'ambiguo') ambiguo = r;
     }
 
     if (!isbn) {
-        if (ambiguo) return { estado: 'ambiguo', motivo: ambiguo.motivo, candidatos: ambiguo.candidatos };
+        if (ambiguo) {
+            // Varias ediciones posibles: NO se elige ninguna. Se guardan como candidatas para que elijas tú en la
+            // ficha («¿Cuál es tu edición?»). No se toca nada más del documento (ni fecha_actualizacion: no hay
+            // cambio de datos, así que no hace falta regenerar sus sidecars).
+            if (aplicar && ambiguo.candidatos?.length) await guardarCandidatas(db, doc, ambiguo.candidatos);
+            return { estado: 'ambiguo', motivo: ambiguo.motivo, candidatos: ambiguo.candidatos };
+        }
         if (!abs && !manual) return { estado: 'sin-fichero', motivo: 'no se encontró el fichero del documento en su carpeta' };
         if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` };
         return { estado: 'no-hallado', motivo: 'no se pudo obtener un ISBN (ni del texto, ni por barras/visión, ni por autoridad)' };
@@ -226,45 +277,23 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     }
     // Autores: si el doc no tiene ninguno, resuélvelos del fichero primero, si no de la autoridad.
     const autoresNom = (ext.autores && ext.autores.length ? ext.autores : datos.autores) || [];
-    if (!(doc.autores?.length) && autoresNom.length) { set.autores = await resolverAutores(db, autoresNom); nombres.autores = autoresNom; }
+    // En SECO no se resuelven nombres a referencias: resolverlos CREA autores/editoriales en la base, y una
+    // prueba no debe dejar rastro. Se anota el nombre para el informe; se resuelve solo al aplicar.
+    if (!(doc.autores?.length) && autoresNom.length) { set.autores = aplicar ? await resolverAutores(db, autoresNom) : autoresNom; nombres.autores = autoresNom; }
     // Editorial: rellena si falta (del fichero o de la autoridad).
     const editorialNom = ext.editorial || datos.editorial || null;
-    if (!doc.editorial && editorialNom) { set.editorial = await resolverEditorial(db, editorialNom); nombres.editorial = editorialNom; }
-    // Escalares de hueco (solo si faltan). TODO lo que la autoridad aporte y no tengamos: una llamada a una API
-    // ya hecha que solo se aprovecha para el título desperdicia lo demás (fecha, páginas, medidas, traductor…).
-    if (datos.sinopsis && !doc.sinopsis) set.sinopsis = datos.sinopsis;
-    if (datos.año_edicion && !doc.año_edicion) set.año_edicion = datos.año_edicion;
-    if (datos.idioma && !doc.idioma) set.idioma = datos.idioma;
-    if (datos.subtitulo && !doc.subtitulo) set.subtitulo = datos.subtitulo;
-    if (datos.paginas_bne && !doc.paginas) set.paginas = datos.paginas_bne;
-    if (datos.dimensiones_bne && !doc.dimensiones) set.dimensiones = datos.dimensiones_bne;
-    if (datos.dewey && !doc.dewey) set.dewey = datos.dewey;
-    if (datos.lcc && !doc.lcc) set.lcc = datos.lcc;
-    if (datos.idioma_original && !doc.idioma_original) set.idioma_original = datos.idioma_original;
-    if (datos.categorias?.length) {
-        const previas = Array.isArray(doc.palabras_clave) ? doc.palabras_clave : [];
-        const juntas = [...new Set([...previas, ...datos.categorias])];
-        if (juntas.length > previas.length) set.palabras_clave = juntas;
-    }
-    // Traductor, ilustrador, prologuista… (la BNE los da con su rol): solo si el doc no tiene ninguno.
-    if (datos.contribuciones_nombres?.length && !(doc.contribuciones?.length)) {
-        const contribs = [];
-        for (const c of datos.contribuciones_nombres) {
-            if (!c?.nombre || !c.rol || c.rol === 'autor') continue;
-            const p = await resolverPersona(db, c.nombre).catch(() => null);
-            if (p?._id) contribs.push({ persona: p._id, rol: c.rol });
-        }
-        if (contribs.length) { set.contribuciones = contribs; nombres.contribuciones = datos.contribuciones_nombres.map((c) => `${c.nombre} (${c.rol})`); }
-    }
+    if (!doc.editorial && editorialNom) { set.editorial = aplicar ? await resolverEditorial(db, editorialNom) : editorialNom; nombres.editorial = editorialNom; }
+    // HUECOS: TODO lo que la autoridad aporte y no tengamos (fecha, páginas, medidas, Dewey/LCC, traductor,
+    // materias, lengua original, CDU de autoridad…), con la función común. Nunca sobrescribe.
+    const huecos = await huecosDesdeAutoridad(db, doc, datos, { aplicar });
+    Object.assign(set, huecos.set);
+    for (const c of huecos.cambios) if (c.campo === 'contribuciones' || c.campo === 'cdu_autoridad') nombres[c.campo] = c.a;
     // Colección de la edición («Colección gótica», nº 112): solo como dato si el doc no está ya en una. No se
     // crea ni se asigna la colección aquí (eso reorganiza el catálogo); queda anotada para verla y agruparla.
     if (datos.coleccion_nombre && !doc.coleccion && !doc.coleccion_nombre) {
         set.coleccion_nombre = datos.coleccion_nombre;
         if (datos.coleccion_numero && !doc.coleccion_numero) set.coleccion_numero = String(datos.coleccion_numero);
     }
-    // CDU de AUTORIDAD (la BNE cataloga en CDU): se guarda aparte. Aplicarla movería la carpeta, así que lo hace
-    // la opción «Investigar CDU» (resolverCduDoc), que la usa antes que el crosswalk y que la IA.
-    if (datos.cdu && datos.cdu !== doc.cdu) set.cdu_autoridad = datos.cdu;
 
     if (Object.keys(set).length === 0) return { estado: 'no-hallado', isbn, via, motivo: 'ISBN resuelto pero la autoridad no aportó nada nuevo' };
 
@@ -278,7 +307,9 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     if (set.titulo) { set['mantenimiento.re-clasificar-cdu'] = 0; set.mantenimiento_firma = 'pendiente-reidentificado'; }
     set.fecha_actualizacion = new Date();
     set.alertas_agente = [...(doc.alertas_agente || []), `ISBN ${via === 'manual' ? 'manual' : 'recuperado (' + via + ')'} + cotejo por ISBN (Fichero/APIs${conIA ? ', con IA' : ''}).`];
-    await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set });
+    // Con el ISBN ya resuelto, las ediciones candidatas (si las había) sobran.
+    const quitar = doc.ediciones_candidatas ? { $unset: { ediciones_candidatas: '', ediciones_candidatas_fecha: '' } } : {};
+    await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set, ...quitar });
     // Índice FTS + sidecars (best-effort: nunca tumban la operación).
     await indexarDoc(db, doc._id).catch(() => {});
     await regenerarSidecarsDoc(db, { ...doc, ...set }, carpeta).catch(() => {});

@@ -20,7 +20,7 @@ import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './i
 import { lanzarEmparejado, estadoEmparejado } from './utils/emparejar-portadas.js';
 import { lanzarInspeccionManual, estadoInspeccionManual, aplicarInspeccionManual, descartarInspeccionManual } from './utils/inspeccion-manual.js';
 import { lanzarReextraccion, estadoReextraccion, cancelarReextraccion } from './utils/reextraer-imagenes.js';
-import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion } from './utils/reidentificar-doc.js';
+import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion, elegirEdicion } from './utils/reidentificar-doc.js';
 import { lanzarCompletarSinopsis, estadoCompletarSinopsis, cancelarCompletarSinopsis } from './utils/completar-sinopsis.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
 import { informePlanHtml } from './utils/informe-plan.js';
@@ -257,6 +257,7 @@ const ausenteCampo = (campo) => ({ $or: [{ [campo]: { $exists: false } }, { [cam
 async function filtroEspecial(db, nombre) {
     switch (nombre) {
         case 'sin_isbn':         return { tipo_recurso: 'libro', ...ausenteCampo('isbn') };
+        case 'edicion_por_elegir': return { 'ediciones_candidatas.0': { $exists: true } };
         case 'sin_autor':        return { tipo_recurso: 'libro', $or: [{ autores: { $exists: false } }, { autores: { $size: 0 } }] };
         case 'sin_hash':         return ausenteCampo('hash_contenido');
         case 'sin_portada':      return ausenteCampo('portada');
@@ -567,6 +568,15 @@ export function rutasPanel() {
         res.json(lanzarReidentificacion({ ids, forzar: !!forzar, isbnManual: isbnManual || null, conIA: !!conIA, cdu: !!cdu }));
     });
     r.get('/documentos/reidentificar-isbn/estado', (req, res) => res.json(estadoReidentificacion()));
+    // ELEGIR LA EDICIÓN entre las candidatas de una identificación ambigua (ficha → «¿Cuál es tu edición?»).
+    // { isbn } aplica esa edición como ISBN manual; { ninguna: true } descarta las candidatas. Solo admin.
+    r.post('/documentos/:id/elegir-edicion', async (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        try {
+            const db = await conectarDB();
+            res.json(await elegirEdicion(db, req.params.id, { isbn: req.body?.isbn || null, ninguna: !!req.body?.ninguna }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
     r.post('/documentos/reidentificar-isbn/cancelar', (req, res) => res.json(cancelarReidentificacion()));
 
     /**

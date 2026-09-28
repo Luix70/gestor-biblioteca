@@ -29,6 +29,7 @@ import { esDocumentoLeible, esImagenArchivo, esMaterialNotable, esVideo, formato
 import { leerGuia } from './guia-ingesta.js'; // pistas del reproceso (principal fijado + soloAdmin de adjuntos)
 import { isbnDesdeArchivo } from './isbn-archivo.js'; // ISBN del propio fichero del miembro (identificar antes de clasificar)
 import { buscarEnFicheroLocal } from './buscador-local.js'; // pivote OFFLINE por ISBN (sin IA)
+import { buscarAutoridadPorISBN } from './autoridad-isbn.js';
 import { variantesISBN } from './identificadores.js';
 import { normalizarPermisos, normalizarFichero } from './permisos.js'; // el árbol debe quedar legible para el backup
 
@@ -529,7 +530,7 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         let ident = null, metaF = null;
         if (esLectura) {
             ident = await isbnDesdeArchivo(abs, { nombre: m.nombre_archivo, tituloRef: m.titulo }).catch(() => null);
-            if (ident?.isbn) metaF = await buscarEnFicheroLocal({ isbns: variantesISBN(ident.isbn) }).catch(() => null);
+            if (ident?.isbn) metaF = await buscarAutoridadPorISBN(variantesISBN(ident.isbn)).catch(() => null);   // Fichero → BNE si falta
         }
         // Mejores metadatos disponibles: autoridad del Fichero > propio fichero > nombre de archivo.
         const tituloMejor = (metaF && metaF.titulo) || ident?.titulo || m.titulo;

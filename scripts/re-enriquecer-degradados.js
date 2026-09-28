@@ -20,6 +20,7 @@ import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { buscarMetadatosExternos } from '../src/utils/proveedor-metadatos.js';
 import { resolverColeccion } from '../src/utils/colecciones.js';
+import { huecosDesdeAutoridad, autoresConAncla } from '../src/utils/huecos-autoridad.js';
 import { resolverPersona } from '../src/utils/resolver-persona.js';
 import { validarISBN, validarISSN, variantesISBN } from '../src/utils/identificadores.js';
 import { esTituloArtefacto } from '../src/utils/parsear-nombre.js';
@@ -109,18 +110,23 @@ async function main() {
 
         // Título/editorial: se SOBRESCRIBEN solo si el título actual es basura.
         if (garbage && datos.titulo) { set.titulo = datos.titulo; nombres.titulo = datos.titulo; }
-        if (garbage && datos.editorial) { set.editorial = await resolverEditorial(db, datos.editorial); nombres.editorial = datos.editorial; }
+        // En DRY-RUN no se resuelven nombres a referencias: hacerlo CREA autores/editoriales/colecciones en la base.
+        if (garbage && datos.editorial) { set.editorial = EJECUTAR ? await resolverEditorial(db, datos.editorial) : datos.editorial; nombres.editorial = datos.editorial; }
         // Autor: se rellena si el título es basura O si el doc se quedó SIN autor (aunque el título sea bueno).
-        if ((garbage || faltaAutor) && datos.autores?.length) { set.autores = await resolverAutores(db, datos.autores); nombres.autores = datos.autores; }
+        // Sin perder coautores: si comparte alguno con la autoridad, se conservan todos y se añaden los que falten.
+        if ((garbage || faltaAutor) && datos.autores?.length) {
+            const actuales = doc.autores?.length
+                ? (await db.collection('autores').find({ _id: { $in: doc.autores } }, { projection: { nombre: 1 } }).toArray()).map((x) => x.nombre)
+                : [];
+            const r = autoresConAncla(actuales, datos.autores);
+            if (r.modo !== 'igual') { set.autores = EJECUTAR ? await resolverAutores(db, r.nombres) : r.nombres; nombres.autores = r.nombres; }
+        }
 
-        // Gaps (siempre que falten): sinopsis, año, idioma, palabras clave, colección.
-        if (datos.sinopsis && !doc.sinopsis) set.sinopsis = datos.sinopsis;
-        if (datos.año_edicion && !doc.año_edicion) set.año_edicion = datos.año_edicion;
-        if (datos.idioma && !doc.idioma) set.idioma = datos.idioma;
-        if (datos.categorias?.length && !(doc.palabras_clave?.length)) set.palabras_clave = datos.categorias;
+        // Huecos: TODO lo que traiga la autoridad y falte (función común; nunca sobrescribe).
+        Object.assign(set, (await huecosDesdeAutoridad(db, doc, datos, { aplicar: EJECUTAR })).set);
         if (datos.coleccion_nombre && !doc.coleccion) {
-            const { _id } = await resolverColeccion(db, datos.coleccion_nombre, set.editorial || (typeof doc.editorial !== 'string' ? doc.editorial : null));
-            set.coleccion = _id; set.coleccion_nombre = datos.coleccion_nombre;
+            if (EJECUTAR) set.coleccion = (await resolverColeccion(db, datos.coleccion_nombre, set.editorial || (typeof doc.editorial !== 'string' ? doc.editorial : null)))._id;
+            set.coleccion_nombre = datos.coleccion_nombre;
             if (datos.coleccion_numero) set.coleccion_numero = String(datos.coleccion_numero);
         }
 

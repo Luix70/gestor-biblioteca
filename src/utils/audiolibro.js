@@ -21,6 +21,7 @@ import { conectarDB } from '../database.js';
 import { DIR_CDU, MARCA_RUTA_FIJA } from '../mantenimiento/util-mantenimiento.js';
 import { arbolCDU } from './cdu-arbol.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
+import { buscarAutoridadPorISBN } from './autoridad-isbn.js';
 import { decodificarCodigoBarras } from './codigo-barras.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { agregarMetadatos, esAudio, leerMetadatosAudio } from './lector-audio.js';
@@ -243,7 +244,7 @@ async function planUnidad(unidad) {
     const isbnInfo = await leerISBNdeImagenes(imagenes);
     let editorial = null, sinopsis = null, dewey = null, lcc = null, ficheroHit = false;
     if (isbnInfo) {
-        const f = await buscarEnFicheroLocal({ isbns: [isbnInfo.isbn] }).catch(() => null);
+        const f = await buscarAutoridadPorISBN([isbnInfo.isbn]).catch(() => null);   // Fichero → BNE si falta
         if (f && f.titulo) {
             ficheroHit = true;
             if (!autor && f.autores?.length) autor = f.autores[0];

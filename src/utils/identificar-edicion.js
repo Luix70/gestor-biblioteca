@@ -25,7 +25,7 @@
 import { buscarTextoEnFichero, buscarTituloEnFichero, buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEdicionesEnBNE } from './buscador-bne-sru.js';
-import { validarISBN } from './identificadores.js';
+import { validarISBN, isbn10a13 } from './identificadores.js';
 import { conGemini } from './gemini.js';
 import { esEditorialFalsa } from './editoriales-falsas.js';
 
@@ -36,7 +36,14 @@ const palabras = (s) => norm(s).split(' ').filter((w) => w.length > 2);
 
 // Códigos de idioma de las fuentes: MARC de 3 letras (spa/eng/fre…) y ISO de 2. Se comparan en ISO-2.
 const IDIOMA2 = { spa: 'es', eng: 'en', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', por: 'pt', cat: 'ca', dut: 'nl', nld: 'nl', rus: 'ru', lat: 'la' };
-const idioma2 = (s) => { const v = String(s || '').toLowerCase().slice(0, 3); return IDIOMA2[v] || v.slice(0, 2) || null; };
+// «und» (indeterminado), «mul» (varios), «zxx» (sin contenido lingüístico): no dicen la lengua → desconocido,
+// para que no «contradigan» a un candidato bueno (medido: la BNE marca «und» ediciones en español).
+const SIN_LENGUA = new Set(['und', 'mul', 'zxx', 'mis', 'un', '']);
+const idioma2 = (s) => {
+    const v = String(s || '').toLowerCase().trim().slice(0, 3);
+    if (SIN_LENGUA.has(v)) return null;
+    return IDIOMA2[v] || v.slice(0, 2) || null;
+};
 
 // Palabras que no distinguen una editorial de otra («ediciones», «editorial», «books», «press»…).
 const RUIDO_EDITORIAL = new Set(['ediciones', 'edicion', 'editorial', 'editores', 'editions', 'edition', 'books', 'book', 'press', 'publishing', 'publishers', 'publicaciones', 'grupo', 'the', 'and', 'company', 'verlag', 'libros', 'sa', 'sl', 'inc', 'ltd']);
@@ -140,8 +147,12 @@ function señalesEdicion(doc, cand) {
 }
 
 /** Normaliza un candidato (Fichero, BNE, OpenLibrary) a una forma común. */
+// Un ISBN-10 y su ISBN-13 son el MISMO libro: se normaliza todo a 13 para que no cuenten como dos ediciones
+// (medido: «Misiones secretas» salía ambigua entre 8476330111 y 9788476330111).
+const isbn13 = (v) => { const x = v ? validarISBN(v) : null; return x ? (isbn10a13(x) || x) : null; };
+
 const comoCandidato = (c, fuente) => ({
-    isbn: c.isbn ? validarISBN(c.isbn) : null,
+    isbn: isbn13(c.isbn),
     titulo: c.titulo || '', subtitulo: c.subtitulo || null,
     autores: Array.isArray(c.autores) ? c.autores : String(c.autores || '').split(/;/).map((x) => x.trim()).filter(Boolean),
     editorial: c.editorial || null, anio: c.anio || c.anio_edicion || c.año_edicion || null,

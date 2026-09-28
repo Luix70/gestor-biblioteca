@@ -22,6 +22,7 @@
  */
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
 import { resolverColeccion } from './colecciones.js';
+import { huecosDesdeAutoridad, autoresConAncla } from './huecos-autoridad.js';
 import { variantesISBN, validarISBN, validarISSN } from './identificadores.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '');
@@ -154,39 +155,46 @@ export async function reenriquecerDoc(db, doc, { aplicar = true, sinIA = false }
         ? (garbage || titulosManifiestamenteDistintos(doc.titulo, datos.titulo))
         : (garbage && datos.titulo !== doc.titulo);
     if (datos.titulo && forzarTitulo) { set.titulo = datos.titulo; anota('titulo', doc.titulo, datos.titulo); }
-    if (datos.autores?.length && (anclaISBN ? !mismosNombres(autoresActuales, datos.autores) : garbage)) {
-        set.autores = await resolverAutores(db, datos.autores);
-        anota('autores', autoresActuales.join(', ') || null, datos.autores.join(', '));
+    // Autores. Con ancla ya NO se reemplaza la lista por la de la autoridad a secas: la autoridad suele listar
+    // MENOS autores (la BNE, el principal; OpenLibrary, a veces uno) y se perdían coautores. Si comparten alguno
+    // se conservan todos y se AÑADEN los que falten; solo si no comparten ninguno (los actuales eran basura:
+    // «Men at Arms 058» como autor) se sustituyen. Ver huecos-autoridad·autoresConAncla.
+    if (datos.autores?.length && (anclaISBN || garbage)) {
+        const r = garbage ? { nombres: datos.autores, modo: 'sustituir' } : autoresConAncla(autoresActuales, datos.autores, (x, y) => mismosNombres([x], [y]));
+        if (r.modo !== 'igual' && !mismosNombres(autoresActuales, r.nombres)) {
+            set.autores = aplicar ? await resolverAutores(db, r.nombres) : r.nombres;   // en seco no se crean personas
+            anota('autores', autoresActuales.join(', ') || null, r.nombres.join(', '));
+        }
     }
     if (datos.editorial && (anclaISBN ? !textoCasa(editorialActual, datos.editorial) : garbage)) {
-        set.editorial = await resolverEditorial(db, datos.editorial);
+        set.editorial = aplicar ? await resolverEditorial(db, datos.editorial) : datos.editorial;   // en seco no se crean editoriales
         anota('editorial', editorialActual || null, datos.editorial);
     }
 
     // ── Colección / serie ── con ancla: la de la AUTORIDAD manda: se FUERZA si difiere del nombre actual
     // (aunque se parezca — p. ej. "Osprey Men at Arms" → "Men-at-arms series"), no solo si falta. Sin ancla:
     // comportamiento conservador, solo rellena hueco.
+    // ⚠ Con la BNE como primera fuente de los libros españoles, su colección (490: «Colección gótica») difiere a
+    // menudo del nombre de TU colección («Valdemar: Gótica») aunque sea la misma: forzarla sacaba el libro de ella
+    // y creaba otra. Ahora con ancla solo se fuerza si NO comparten ninguna palabra que distinga; si la comparten,
+    // es la misma colección con otro nombre y se deja como está.
     const forzarColeccion = anclaISBN
-        ? normTexto(doc.coleccion_nombre) !== normTexto(datos.coleccion_nombre)
+        ? (!doc.coleccion_nombre || (normTexto(doc.coleccion_nombre) !== normTexto(datos.coleccion_nombre)
+            && !textoCasa(doc.coleccion_nombre, datos.coleccion_nombre)))
         : !doc.coleccion;
     if (datos.coleccion_nombre && forzarColeccion) {
         const edId = set.editorial || (typeof doc.editorial !== 'string' ? doc.editorial : null);
-        const { _id } = await resolverColeccion(db, datos.coleccion_nombre, edId);
-        set.coleccion = _id; set.coleccion_nombre = datos.coleccion_nombre;
+        // En seco no se crea la colección (resolverColeccion la crearía si no existe).
+        if (aplicar) set.coleccion = (await resolverColeccion(db, datos.coleccion_nombre, edId))._id;
+        set.coleccion_nombre = datos.coleccion_nombre;
         if (datos.coleccion_numero) set.coleccion_numero = String(datos.coleccion_numero);
         anota('coleccion', doc.coleccion_nombre || null, datos.coleccion_nombre);
     }
 
-    // ── Huecos puros (solo si faltan) ──
-    if (datos.sinopsis && !doc.sinopsis) { set.sinopsis = datos.sinopsis; anota('sinopsis', null, '(añadida)'); }
-    if (datos.año_edicion && !doc.año_edicion) { set.año_edicion = datos.año_edicion; anota('año_edicion', null, datos.año_edicion); }
-    if (datos.idioma && !doc.idioma) { set.idioma = datos.idioma; anota('idioma', null, datos.idioma); }
-    if (datos.categorias?.length && !(doc.palabras_clave?.length)) { set.palabras_clave = datos.categorias; anota('palabras_clave', null, datos.categorias.join(', ')); }
-    if (datos.dewey && !doc.dewey) { set.dewey = datos.dewey; anota('dewey', null, datos.dewey); }
-    if (datos.lcc && !doc.lcc) { set.lcc = datos.lcc; anota('lcc', null, datos.lcc); }
-    // Paginación / dimensiones del registro MARC (BNE/OL): dato físico útil, rellena hueco.
-    if (datos.paginas_bne && !doc.paginas) { set.paginas = datos.paginas_bne; anota('paginas', null, datos.paginas_bne); }
-    if (datos.dimensiones_bne && !doc.dimensiones) { set.dimensiones = datos.dimensiones_bne; anota('dimensiones', null, datos.dimensiones_bne); }
+    // ── Huecos puros (solo si faltan): TODO lo que traiga la autoridad, con la función común ──
+    const huecos = await huecosDesdeAutoridad(db, doc, datos, { aplicar });
+    Object.assign(set, huecos.set);
+    cambios.push(...huecos.cambios);
 
     // Re-clasificar la CDU si cambió el título, o si la CDU es POBRE (000/00/0/ausente) y hay Dewey/LCC/CDU con
     // que deducir una buena. El Conformador (re-clasificar-cdu) la resuelve (Fichero→Dewey/LCC→…) y MUEVE la

@@ -8,6 +8,8 @@ import { carpetaDeDoc, webDeDoc, archivoOriginal, numeroPaginasPdf, escribirImag
 import { arbolCDU } from '../utils/cdu-arbol.js';
 import { buscarEnFicheroLocal } from '../utils/buscador-local.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
+import { buscarEnBNE } from '../utils/buscador-bne-sru.js';
+import { huecosDesdeAutoridad, autoresConAncla, mismoNombreAutor } from '../utils/huecos-autoridad.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { calcularHashArchivo } from '../utils/hash-archivo.js';
@@ -159,12 +161,17 @@ export const TAREAS = [
                 if (p.titulo && !esTituloArtefacto(p.titulo)) set.titulo = p.titulo;
             }
             if (garbage && datos.editorial)     set.editorial = await resolverEditorialRef(db, datos.editorial);
-            if (garbage && datos.autores?.length) set.autores  = await resolverAutoresRef(db, datos.autores);
-            // Huecos (rellenar si faltan).
-            if (datos.sinopsis && !doc.sinopsis)        set.sinopsis = datos.sinopsis;
-            if (datos.año_edicion && !doc.año_edicion)  set.año_edicion = datos.año_edicion;
-            if (datos.idioma && !doc.idioma)            set.idioma = datos.idioma;
-            if (datos.categorias?.length && !(doc.palabras_clave?.length)) set.palabras_clave = datos.categorias;
+            // Autores: con título basura el registro está degradado, pero sus autores pueden ser buenos y la
+            // autoridad listar MENOS (se perdían coautores). Unión si comparten alguno; sustitución si no.
+            if (garbage && datos.autores?.length) {
+                const actuales = doc.autores?.length
+                    ? (await db.collection('autores').find({ _id: { $in: doc.autores } }, { projection: { nombre: 1 } }).toArray()).map((x) => x.nombre)
+                    : [];
+                const r = autoresConAncla(actuales, datos.autores, mismoNombreAutor);
+                if (r.modo !== 'igual') set.autores = await resolverAutoresRef(db, r.nombres);
+            }
+            // Huecos: TODO lo que traiga la autoridad y falte (función común; nunca sobrescribe).
+            Object.assign(set, (await huecosDesdeAutoridad(db, doc, datos)).set);
             if (datos.coleccion_nombre && !doc.coleccion) {
                 const ed = set.editorial || (typeof doc.editorial !== 'string' ? doc.editorial : null);
                 const { _id } = await resolverColeccion(db, datos.coleccion_nombre, ed);
@@ -221,14 +228,21 @@ export const TAREAS = [
         async ejecutar(doc, { db }) {
             const isbn = doc.isbn || null;
 
-            // ── Paso 1: Fichero local (dump OL+BNE; la BNE online se retiró) ──────────
+            // ── Paso 1: CDU de AUTORIDAD (la BNE cataloga en CDU): la guardada por «Extraer ISBN»/Enriquecedor
+            //    (cdu_autoridad), la del Fichero (volcado BNE) o, si el volcado no la tiene —tiene huecos medidos,
+            //    2016-2018 sobre todo—, la del catálogo en línea de la BNE. Antes que DNB/crosswalk/IA. ──────
             let cduNueva = null, cduAdicionales = [], fuente = null;
-            if (isbn) {
-                const rec = await buscarEnFicheroLocal({ isbns: [isbn] });
+            if (doc.cdu_autoridad) { cduNueva = doc.cdu_autoridad; fuente = 'autoridad'; }
+            if (!cduNueva && isbn) {
+                const rec = await buscarEnFicheroLocal({ isbns: variantesISBN(isbn) });
                 if (rec?.cdu) {
                     cduNueva = rec.cdu;
                     fuente = 'Fichero';
                 }
+            }
+            if (!cduNueva && isbn) {
+                const bne = await buscarEnBNE({ isbns: variantesISBN(isbn) }).catch(() => null);
+                if (bne?.cdu) { cduNueva = bne.cdu; fuente = 'BNE'; }
             }
 
             // ── Paso 2: DNB → equivalencias_cdu cache/IA (si BNE no resolvió) ──────

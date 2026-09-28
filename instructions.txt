@@ -1007,6 +1007,39 @@ de ficheros clasificado por CDU.
     contribuciones, y la colección con su nº como dato. La CDU de autoridad se guarda en `cdu_autoridad` (no se
     aplica ahí porque movería la carpeta; la aplica «Investigar CDU»).
 
+    EDICIÓN AMBIGUA → ELIGES TÚ EN LA FICHA (2026-09-28). Cuando «Extraer ISBN» (panel o reidentificar-sin-isbn
+    --ejecutar) no encuentra el ISBN en el fichero y la autoridad da varias ediciones posibles —o una sin nada
+    que confirme que es esta—, NO elige: guarda las candidatas en el documento (`ediciones_candidatas`, máx. 8;
+    no toca nada más). La ficha muestra entonces, arriba y abierta, «📚 ¿Cuál es tu edición?» con cada candidata
+    (título, editorial, año, idioma, colección, ISBN, fuente y qué casó) y un botón «✔ Es esta» (aplica su ISBN
+    como manual + completa los huecos desde la autoridad; nunca pisa) o «✖ Ninguna» (se descartan y no se vuelven
+    a proponer: `edicion_descartada`, salvo forzando). En el Dashboard, «Edición por elegir» cuenta cuántos hay y
+    abre la Búsqueda con ellos. POST /documentos/:id/elegir-edicion {isbn|ninguna}. Solo admite un ISBN que esté
+    entre las candidatas. Un ISBN-10 y su ISBN-13 cuentan como UNO; un idioma «und/mul» no descarta a nadie.
+
+    REVISIÓN GENERAL «QUE NADA PIERDA LO CONSEGUIDO» (2026-09-28). Todos los que aplican datos de una autoridad a
+    un documento ya catalogado comparten ahora `utils/huecos-autoridad.js`:
+      · huecosDesdeAutoridad / huecosEscalares: rellena SOLO huecos (sinopsis, subtítulo, año, idioma, páginas,
+        medidas, Dewey, LCC, lengua original, materias por unión, traductor/ilustrador… si no hay ninguno, y la
+        CDU de la BNE en `cdu_autoridad`). Nunca sobrescribe. La usan «Extraer ISBN», el Enriquecedor de la
+        ficha, «Enriquecer a fondo» (nueva propuesta «ficha» con los datos físicos), la tarea
+        re-enriquecer-degradados, la campaña «Huecos de metadatos» y scripts/re-enriquecer-degradados.js.
+      · autoresConAncla: con un ISBN que ancla la edición, la autoridad ya NO reemplaza la lista de autores:
+        suele traer MENOS (la BNE, el principal; OpenLibrary, a veces uno) y se perdían coautores. Si comparten
+        alguno, se conservan todos y se añaden los que falten; solo si no comparten ninguno (los actuales eran
+        basura, «Men at Arms 058») se sustituyen. Enriquecedor, re-enriquecer-degradados (tarea y script).
+      · Enriquecedor con ancla: la colección de la autoridad ya no saca un libro de TU colección si los nombres
+        comparten alguna palabra que distinga («Valdemar: Gótica» ↔ «Colección gótica» = la misma).
+      · PRUEBAS EN SECO SIN RASTRO: «Extraer ISBN», el Enriquecedor y re-enriquecer-degradados creaban autores,
+        editoriales y colecciones en la base al resolver nombres aunque no aplicaran nada. Ya no: en seco se
+        informa del nombre y solo se crea al aplicar (medido: 0 registros creados en la prueba).
+      · La BNE (catálogo en línea) llega a: la cascada de enriquecimiento (y por ella a todo lo que la usa:
+        ingesta, alta por ISBN, campañas, obras, sinopsis…), re-clasificar-cdu y la campaña «Clasificación por
+        ISBN» (CDU de la BNE si el Fichero no la tiene), «Investigar CDU», la cascada de editoriales
+        (reclasificar-editoriales) y, por `utils/autoridad-isbn.js` (Fichero → BNE si falta), los pivotes de la
+        ingesta de colecciones transmedia, audiolibros y colecciones de audiolibros.
+      · La BNE devuelve también los COAUTORES (700 con rol «autor»), no solo el autor principal.
+
     GOOGLE BOOKS: NO ESTAMOS BANEADOS, SE AGOTA LA CUOTA DIARIA (2026-09-28). Medido: desde julio fallaba en el
     55-87 % de los libros de cada semana con 429 «Quota exceeded … Queries per day» — la cuota gratuita del
     proyecto se agota a primera hora con las ingestas masivas. Antes se registraba como «inalcanzable» y se

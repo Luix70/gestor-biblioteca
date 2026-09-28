@@ -63,20 +63,27 @@ function registroMarc($, rec) {
     const isbns = rec.find('datafield[tag="020"] subfield[code="a"]')
         .map((i, s) => validarISBN($(s).text().trim().split(/\s/)[0])).get().filter(Boolean);
 
+    // 100 = autor principal. Los COAUTORES van en 700 con el rol «autor»: sin ellos la BNE parecería listar menos
+    // autores de los que tiene el libro (y un llamador podría creer que sobran los que ya teníamos).
+    const autores = [];
+    const principal = limpiar(sub('100', 'a'));
+    if (principal) autores.push(principal);
     const contribuciones = [];
     rec.find('datafield[tag="700"]').each((i, df) => {
         const nombre = limpiar($(df).find('subfield[code="a"]').first().text());
-        const rol = rolDe($(df).find('subfield[code="e"]').map((j, s) => $(s).text()).get().join(' '));
-        if (nombre && rol) contribuciones.push({ nombre, rol });
+        const e = $(df).find('subfield[code="e"]').map((j, s) => $(s).text()).get().join(' ');
+        if (!nombre) return;
+        if (/\bautor|coautor/i.test(e) && !autores.includes(nombre)) { autores.push(nombre); return; }
+        const rol = rolDe(e);
+        if (rol) contribuciones.push({ nombre, rol });
     });
-    const autor = limpiar(sub('100', 'a'));
 
     return {
         isbn: isbns[0] || null,
         isbns,
         titulo: limpiar(sub('245', 'a')),
         subtitulo: limpiar(sub('245', 'b')),
-        autores: autor ? [autor] : [],
+        autores,
         contribuciones_nombres: contribuciones,
         editorial: limpiar(sub('264', 'b') || sub('260', 'b')),
         año_edicion: anioDe(sub('264', 'c') || sub('260', 'c')),

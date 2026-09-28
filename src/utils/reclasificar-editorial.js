@@ -27,6 +27,7 @@ import fs from 'node:fs/promises';
 import { ObjectId } from 'mongodb';
 import { DIR_CDU } from '../mantenimiento/util-mantenimiento.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
+import { buscarAutoridadPorISBN } from './autoridad-isbn.js';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { analizarImagenesRecurso } from '../agente.js';
@@ -112,13 +113,14 @@ async function buscarEditorialEnCascada(doc, criterios, usarIA) {
         const e = editorialDeProveedor({ editorial: parsed.editorial });
         if (e) return { editorial: e, fuente: 'archivo' };
     }
-    // 1) Fichero local (offline, por ISBN) — autoritativo para la edición de ese ISBN.
+    // 1) Fichero local (offline, por ISBN) — autoritativo para la edición de ese ISBN — y, si no la tiene, la
+    //    BNE en línea (el volcado del Fichero tiene huecos; la BNE da la editorial de la edición exacta).
     if (criterios.isbns.length) {
         try {
-            const loc = await buscarEnFicheroLocal({ isbns: criterios.isbns });
+            const loc = await buscarAutoridadPorISBN(criterios.isbns);
             const e = editorialDeProveedor(loc);
-            if (e) return { editorial: e, fuente: 'fichero' };
-        } catch { /* fichero no disponible: se sigue */ }
+            if (e) return { editorial: e, fuente: (loc?.fuentes || []).includes('bne-en-linea') && !loc?.fuentes?.includes('bne') ? 'bne' : 'fichero' };
+        } catch { /* fichero/BNE no disponibles: se sigue */ }
     }
     // 2) COLECCIÓN → mapa determinista (GRATIS). Antes de OL/Google porque para clásicos en dominio público esas
     //    APIs devuelven re-editores (DigiCat…) que ya filtramos, y la colección da la casa real y consistente.
