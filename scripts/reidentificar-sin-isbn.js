@@ -98,7 +98,7 @@ async function main() {
     const ids = (await col.find(filtro, { projection: { _id: 1 } }).limit(Number.isFinite(limite) ? limite : 0).toArray()).map((d) => d._id);
     console.log(`${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${ids.length} candidato(s)${FORZAR ? ' (forzando, incl. con ISBN)' : ' sin ISBN'}${CON_IA ? ' · con IA' : ''}${SIN_APIS ? ' · solo Fichero (sin APIs)' : ''}\n`);
 
-    const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, cdu: 0, fallos: 0 };
+    const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, ambiguos: 0, cdu: 0, fallos: 0 };
     const t0 = Date.now();
     let i = 0;
     for (const _id of ids) {
@@ -112,6 +112,11 @@ async function main() {
         if (r.estado === 'identificado' || r.estado === 'aplicado') {
             st.identificados++;
             process.stdout.write(`[${i}/${ids.length}] ${EJECUTAR ? '✅' : '↪️'} ${_id} · ${(doc.titulo || '').slice(0, 45)} → ${r.resumen}\n`);
+        } else if (r.estado === 'ambiguo') {
+            // Varias ediciones posibles (o ninguna que confirme cuál es): NO se elige — se listan para ti.
+            st.ambiguos++;
+            process.stdout.write(`[${i}/${ids.length}] ❓ ${_id} · ${(doc.titulo || '').slice(0, 45)} → ${r.motivo}
+`);
         } else if (r.estado === 'sin-fichero') st.sinFichero++;
         else if (r.estado === 'no-hallado') st.noHallado++;
         else if (r.estado === 'formato-no-soportado') st.formato++;
@@ -143,6 +148,7 @@ async function main() {
     console.log(`  ISBN no hallado         : ${st.noHallado}  (el fichero no lo declara ni corrobora)`);
     console.log(`  formato no soportado    : ${st.formato}  (djvu/otros: sin ISBN de texto barato)`);
     if (CON_CDU) console.log(`  ${EJECUTAR ? 'CDU resueltas' : 'CDU resolubles'}      : ${st.cdu}  (del Dewey/LCC por crosswalk${CON_IA ? '+IA' : ''})`);
+    if (st.ambiguos) console.log(`  edición ambigua         : ${st.ambiguos}  (título y autor casan, pero hay varias ediciones o ninguna confirmada → míralas tú)`);
     if (st.yaTiene) console.log(`  ya tenían ISBN          : ${st.yaTiene}`);
     if (st.fallos) console.log(`  fallos                  : ${st.fallos}`);
     if (!EJECUTAR) console.log('\n▶ Ejecuta con --ejecutar para aplicar (haz COPIA DE SEGURIDAD de la BD antes).');

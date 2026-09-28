@@ -25,6 +25,7 @@ import { variantesISBN, validarISBN } from './identificadores.js';
 import { esTituloArtefacto } from './parsear-nombre.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
+import { identificarEdicion } from './identificar-edicion.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
 import { buscarMetadatosExternos } from './proveedor-metadatos.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
@@ -52,6 +53,21 @@ async function resolverAutores(db, nombres) {
     const out = [];
     for (const n of nombres || []) { const r = await resolverPersona(db, n).catch(() => null); if (r?._id) out.push(r._id); }
     return out;
+}
+
+/**
+ * Los datos del documento con los que se puede reconocer su EDICIÓN, ya resueltos a NOMBRES (en la BD, autores
+ * y editorial son referencias). Es lo que come `identificarEdicion`.
+ */
+async function datosDeAutoridad(db, doc) {
+    const autores = doc.autores?.length
+        ? (await db.collection('autores').find({ _id: { $in: doc.autores } }, { projection: { nombre: 1 } }).toArray()).map((a) => a.nombre)
+        : [];
+    const ed = doc.editorial ? await db.collection('editoriales').findOne({ _id: doc.editorial }, { projection: { nombre: 1 } }) : null;
+    return {
+        titulo: doc.titulo, autores, editorial: ed?.nombre || null,
+        coleccion_nombre: doc.coleccion_nombre || null, anio: doc.año_edicion || null, idioma: doc.idioma || null,
+    };
 }
 
 // Lee las imágenes YA extraídas del documento (portada + páginas de catalogación) como buffers, para la visión.
@@ -123,7 +139,7 @@ function noDegrada(actual, nuevo) {
  *   conIA=false       permite IA: si el TEXTO no da ISBN, reextrae páginas y lee el código de barras/CIP por
  *                     VISIÓN (zxing local primero, sin coste); y permite el enriquecimiento con IA.
  * @returns {Promise<{estado, isbn?, via?, titulo?, resumen?, motivo?, set?}>}
- *   estado ∈ 'ya-tiene-isbn' | 'sin-fichero' | 'formato-no-soportado' | 'no-hallado' | 'identificado' | 'aplicado'
+ *   estado ∈ 'ya-tiene-isbn' | 'sin-fichero' | 'formato-no-soportado' | 'no-hallado' | 'ambiguo' | 'identificado' | 'aplicado'
  */
 export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = true, forzar = false, isbnManual = null, conIA = false } = {}) {
     const manual = isbnManual ? validarISBN(isbnManual) : null;
@@ -160,10 +176,21 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         if (!isbn && forzar && doc.isbn) { isbn = validarISBN(doc.isbn) || doc.isbn; via = 'existente'; }
     }
 
+    // (c) EL FICHERO NO LO TRAE (el ripeo se lo quitó): identificar la EDICIÓN por autoridad, con lo que sí
+    //     sabemos —título, autor, editorial, colección, año, idioma—. Estricto: solo se acepta una edición que
+    //     case título + autor Y confirme editorial/idioma/año; si hay varias posibles no se elige ninguna.
+    let ambiguo = null;
     if (!isbn) {
+        const r = await identificarEdicion(await datosDeAutoridad(db, doc), { online: usarApis, conIA }).catch(() => null);
+        if (r?.estado === 'unico') { isbn = r.isbn; via = `autoridad/${r.via}`; }
+        else if (r?.estado === 'ambiguo') ambiguo = r;
+    }
+
+    if (!isbn) {
+        if (ambiguo) return { estado: 'ambiguo', motivo: ambiguo.motivo, candidatos: ambiguo.candidatos };
         if (!abs && !manual) return { estado: 'sin-fichero', motivo: 'no se encontró el fichero del documento en su carpeta' };
         if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` };
-        return { estado: 'no-hallado', motivo: 'no se pudo obtener un ISBN (ni del texto, ni por barras/visión, ni a mano)' };
+        return { estado: 'no-hallado', motivo: 'no se pudo obtener un ISBN (ni del texto, ni por barras/visión, ni por autoridad)' };
     }
 
     // 2) PIVOTE por ISBN: Fichero local + APIs gratuitas. incluirCdu:false → NO se toca la CDU aquí (cambiarla
@@ -276,7 +303,7 @@ export function lanzarReidentificacion({ ids, forzar = false, isbnManual = null,
     if (!lista.length) return { ok: false, motivo: 'no se recibió ningún documento válido' };
     // El ISBN manual solo tiene sentido para UN documento (si no, se aplicaría el mismo a todos): se ignora en lote.
     const manual = lista.length === 1 ? isbnManual : null;
-    trabajo = { en_curso: true, total: lista.length, hechos: 0, recuperados: 0, sin_isbn: 0, sin_fichero: 0, cdu: 0, otros: 0, titulo: '', cancelar: false, ts: new Date().toISOString() };
+    trabajo = { en_curso: true, total: lista.length, hechos: 0, recuperados: 0, sin_isbn: 0, sin_fichero: 0, ambiguos: 0, cdu: 0, otros: 0, titulo: '', cancelar: false, ts: new Date().toISOString() };
     (async () => {
         try {
             const db = await conectarDB();
@@ -288,6 +315,7 @@ export function lanzarReidentificacion({ ids, forzar = false, isbnManual = null,
                     try {
                         const r = await reidentificarDoc(db, doc, { aplicar: true, usarApis: true, forzar, isbnManual: manual, conIA });
                         if (r.estado === 'aplicado') trabajo.recuperados++;
+                        else if (r.estado === 'ambiguo') trabajo.ambiguos++;   // varias ediciones: decide una persona
                         else if (r.estado === 'no-hallado') trabajo.sin_isbn++;
                         else if (r.estado === 'sin-fichero') trabajo.sin_fichero++;
                         else trabajo.otros++;   // ya-tiene-isbn / formato-no-soportado

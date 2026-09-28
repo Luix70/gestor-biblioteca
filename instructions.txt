@@ -958,6 +958,19 @@ de ficheros clasificado por CDU.
       de «Vampiro», Valdemar Gótica 112, NO está en el volcado; solo una inglesa de 2020 con otro ISBN, que
       sería un emparejamiento FALSO). Identificar la EDICIÓN por título+autor+editorial exige fuentes online
       (OpenLibrary/Google/BNE) o IA, y comprobar editorial/idioma/año antes de aceptar nada.
+
+    IDENTIFICAR LA EDICIÓN SIN ISBN, POR AUTORIDAD (2026-09-28, `utils/identificar-edicion.js`). Cuando el
+    fichero no trae ISBN por ninguna vía, «🔎 Extraer ISBN» y `scripts/reidentificar-sin-isbn.js` buscan la
+    EDICIÓN por título + autor + editorial + colección + año: Fichero local (offline) → OpenLibrary (si hay red)
+    → IA (solo con «con IA», y lo que proponga solo se acepta si el Fichero lo confirma con el mismo título y
+    autor: una alucinación no llega al catálogo). REGLA: un ISBN equivocado es peor que ninguno, así que se exige
+    título Y autor, y además que CONFIRME editorial, año EXACTO o colección. El idioma NO confirma (casi todo el
+    catálogo es español: medido, aceptaba «Pueblos y leyendas» de Seix Barral 1929 como la de Teide 1981); solo
+    DESCARTA, igual que dos editoriales reales distintas. Las editoriales de maquetador (ePubLibre…) cuentan como
+    desconocidas. Si hay varias ediciones posibles, o ninguna confirmada, NO se elige: el documento queda
+    «edición ambigua» y el informe lista los candidatos (ISBN, editorial, año) para que decidas tú.
+    Medido sobre 60 libros sin ISBN, solo Fichero: 2 identificados (ambos correctos), 20 ambiguos con sus
+    candidatos, 38 sin la edición en el volcado. El rendimiento lo pone la cobertura de las fuentes, no la regla.
     · AUDIOLIBRO = unidad con audio y SIN PDF de lectura → doc naturaleza:'audiolibro',
       formatos:['audio']. Una lectura CON audio se queda como libro con formatos:['pdf','audio']
       (el thumbnail avisa) + su playlist; los audios (audios[]) se reproducen desde la ficha

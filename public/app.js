@@ -8691,14 +8691,14 @@ async function seguirReidentificacion(total) {
     try { e = await api('/documentos/reidentificar-isbn/estado'); } catch { break; }
     const pct = e.total ? Math.round((e.hechos / e.total) * 100) : 0;
     if ($('#riBar')) $('#riBar').style.width = pct + '%';
-    if ($('#riTxt')) $('#riTxt').textContent = `${e.hechos} / ${e.total} · ${e.recuperados || 0} con ISBN${e.cdu ? ` · ${e.cdu} CDU` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
+    if ($('#riTxt')) $('#riTxt').textContent = `${e.hechos} / ${e.total} · ${e.recuperados || 0} con ISBN${e.cdu ? ` · ${e.cdu} CDU` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN` : ''}${e.ambiguos ? ` · ${e.ambiguos} edición ambigua` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
     if ($('#riTit')) $('#riTit').textContent = e.titulo ? recortar(e.titulo, 60) : '';
     if (!e.en_curso) break;
   }
   cerrarCmp();
   const cancelado = e.cancelar && e.hechos < e.total;
   toast(
-    `ISBN recuperado en ${e.recuperados || 0} documento(s)${e.cdu ? ` · CDU en ${e.cdu}` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN en el fichero` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
+    `ISBN recuperado en ${e.recuperados || 0} documento(s)${e.cdu ? ` · CDU en ${e.cdu}` : ''}${e.ambiguos ? ` · ${e.ambiguos} con varias ediciones posibles (sin tocar)` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN en el fichero` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
     cancelado || e.sin_isbn || e.sin_fichero ? 'warn' : 'ok',
   );
 }
