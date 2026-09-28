@@ -105,17 +105,23 @@ async function main() {
         let doc = await col.findOne({ _id });
         if (!doc) continue;
         i++;
+        // Línea de progreso ANTES de trabajar el libro (se sobrescribe con \r): si uno se atasca, se ve cuál es.
+        const seg = (Date.now() - t0) / 1000;
+        const eta = i > 1 ? formatoDuracion(seg / (i - 1) * (ids.length - i + 1)) : '…';
+        process.stdout.write(`\r\x1b[K   ⏳ ${i}/${ids.length} · ${(doc.titulo || '').slice(0, 40)} · identificados ${st.identificados} · ETA ${eta}`);
         let r;
-        try { r = await reidentificarDoc(db, doc, { aplicar: EJECUTAR, usarApis: !SIN_APIS, forzar: FORZAR, conIA: CON_IA, isbnManual: idArg ? isbnArg : null }); }
-        catch (e) { st.fallos++; process.stdout.write(`[${i}/${ids.length}] ⛔ ${_id}: ${e.message}\n`); continue; }
+        try {
+            // Tope por libro: una espera de red eterna (API colgada) no puede parar la tanda — se salta y se apunta.
+            r = await conTope(reidentificarDoc(db, doc, { aplicar: EJECUTAR, usarApis: !SIN_APIS, forzar: FORZAR, conIA: CON_IA, isbnManual: idArg ? isbnArg : null }), TOPE_LIBRO_MS);
+        } catch (e) { st.fallos++; process.stdout.write(`\r\x1b[K[${i}/${ids.length}] ⛔ ${_id} · ${(doc.titulo || '').slice(0, 45)}: ${e.message}\n`); continue; }
 
         if (r.estado === 'identificado' || r.estado === 'aplicado') {
             st.identificados++;
-            process.stdout.write(`[${i}/${ids.length}] ${EJECUTAR ? '✅' : '↪️'} ${_id} · ${(doc.titulo || '').slice(0, 45)} → ${r.resumen}\n`);
+            process.stdout.write(`\r\x1b[K[${i}/${ids.length}] ${EJECUTAR ? '✅' : '↪️'} ${_id} · ${(doc.titulo || '').slice(0, 45)} → ${r.resumen}\n`);
         } else if (r.estado === 'ambiguo') {
             // Varias ediciones posibles (o ninguna que confirme cuál es): NO se elige — se listan para ti.
             st.ambiguos++;
-            process.stdout.write(`[${i}/${ids.length}] ❓ ${_id} · ${(doc.titulo || '').slice(0, 45)} → ${r.motivo}
+            process.stdout.write(`\r\x1b[K[${i}/${ids.length}] ❓ ${_id} · ${(doc.titulo || '').slice(0, 45)} → ${r.motivo}
 `);
         } else if (r.estado === 'sin-fichero') st.sinFichero++;
         else if (r.estado === 'no-hallado') st.noHallado++;
@@ -130,18 +136,15 @@ async function main() {
                 const rc = await resolverCduDoc(db, doc, { conIA: CON_IA, forzar: FORZAR, aplicar: EJECUTAR });
                 if (rc.estado === 'cdu-aplicada' || rc.estado === 'cdu-identificada') {
                     st.cdu++;
-                    process.stdout.write(`[${i}/${ids.length}] ${EJECUTAR ? '🏷️' : '↪️'} ${_id} · CDU ${rc.de} → ${rc.cdu}\n`);
+                    process.stdout.write(`\r\x1b[K[${i}/${ids.length}] ${EJECUTAR ? '🏷️' : '↪️'} ${_id} · CDU ${rc.de} → ${rc.cdu}\n`);
                 }
             } catch { /* best-effort */ }
         }
 
-        if (i % 25 === 0) {
-            const seg = (Date.now() - t0) / 1000, eta = seg / i * (ids.length - i);
-            process.stdout.write(`   … ${i}/${ids.length} · identificados ${st.identificados} · ETA ~${Math.round(eta)}s\n`);
-        }
         if (PAUSA_MS && (r.estado === 'identificado' || r.estado === 'aplicado')) await new Promise((res) => setTimeout(res, PAUSA_MS));
     }
 
+    process.stdout.write('\r\x1b[K');
     console.log(`\n=== RESUMEN (${EJECUTAR ? 'APLICADO' : 'dry-run'}) ===`);
     console.log(`  ${EJECUTAR ? 'ISBN recuperados' : 'ISBN recuperables'} : ${st.identificados}`);
     console.log(`  sin fichero en disco    : ${st.sinFichero}`);
@@ -150,9 +153,29 @@ async function main() {
     if (CON_CDU) console.log(`  ${EJECUTAR ? 'CDU resueltas' : 'CDU resolubles'}      : ${st.cdu}  (del Dewey/LCC por crosswalk${CON_IA ? '+IA' : ''})`);
     if (st.ambiguos) console.log(`  edición ambigua         : ${st.ambiguos}  (título y autor casan, pero hay varias ediciones o ninguna confirmada → míralas tú)`);
     if (st.yaTiene) console.log(`  ya tenían ISBN          : ${st.yaTiene}`);
-    if (st.fallos) console.log(`  fallos                  : ${st.fallos}`);
+    if (st.fallos) console.log(`  fallos / saltados       : ${st.fallos}  (error o más de ${TOPE_LIBRO_MS / 60000} min con un libro; se reintentan en la próxima pasada)`);
     if (!EJECUTAR) console.log('\n▶ Ejecuta con --ejecutar para aplicar (haz COPIA DE SEGURIDAD de la BD antes).');
     process.exit(0);
+}
+
+// Tope de tiempo por libro (min): `--tope-min N` (por defecto 5).
+const iTope = process.argv.indexOf('--tope-min');
+const TOPE_LIBRO_MS = (iTope >= 0 ? Math.max(1, Number(process.argv[iTope + 1]) || 5) : 5) * 60 * 1000;
+
+/** Resuelve la promesa o falla al cumplirse el tope (la tarea colgada sigue en segundo plano, pero la tanda avanza). */
+function conTope(promesa, ms) {
+    let temporizador;
+    const tope = new Promise((_, rechazar) => {
+        temporizador = setTimeout(() => rechazar(new Error(`saltado: más de ${Math.round(ms / 60000)} min`)), ms);
+    });
+    return Promise.race([promesa, tope]).finally(() => clearTimeout(temporizador));
+}
+
+/** 3725 s → «1h 02m»; 95 s → «1m 35s». */
+function formatoDuracion(seg) {
+    seg = Math.round(seg);
+    const h = Math.floor(seg / 3600), m = Math.floor((seg % 3600) / 60), sg = seg % 60;
+    return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m ${String(sg).padStart(2, '0')}s`;
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

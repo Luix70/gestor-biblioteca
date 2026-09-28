@@ -1025,6 +1025,16 @@ de ficheros clasificado por CDU.
     la descartaste). Cada libro se procesa una vez por versión. Medido: 8.997 en cola al crearla. Para ir más
     rápido, lanza el script; la campaña sigue con lo que quede y con lo que vaya llegando.
 
+    PROGRESO Y TOPE DEL SCRIPT (2026-09-28). reidentificar-sin-isbn muestra UNA línea que avanza en su sitio por
+    cada libro examinado (nº/total · título en curso · identificados · tiempo restante); solo añade líneas nuevas
+    para lo relevante (✅ identificado, ❓ ambiguo, ⛔ error o saltado). Tope por libro: `--tope-min N` (5 por
+    defecto); el que lo supera se salta y se reintenta en la próxima pasada. CAUSA del «parado una hora»: la
+    búsqueda de ediciones en el Fichero reutilizaba la de «Descubrir» (comodín en cada palabra, «la*», «de*», y
+    orden por relevancia) → en el Atom, horas por consulta, y como SQLite es síncrono bloqueaba todo el proceso
+    sin imprimir nada. Ahora usa buscador-local · buscarEdicionesEnFichero: palabras significativas del título
+    en la columna título + apellido en la de autores, sin comodines ni orden → segundos. (Afecta también a la
+    ingesta de libros sin ISBN y a la campaña.)
+
     TAMBIÉN EN LA INGESTA (2026-09-28, servicio-ingesta paso 1a · identificarEdicionEnIngesta). Un LIBRO que
     llega sin ISBN por ninguna vía, con título y autor, busca su edición por autoridad al ingerirse (Fichero
     local; en español/catalán/gallego/euskera, también la BNE en línea — OpenLibrary ya lo probó la cascada).

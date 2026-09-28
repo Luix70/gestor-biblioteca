@@ -22,7 +22,7 @@
  *   3. IA (solo si `conIA`), como ÚLTIMO recurso y nunca como fuente: lo que diga solo se acepta si su ISBN
  *      es válido y aparece en el Fichero con el mismo título y autor. Una alucinación no pasa ese filtro.
  */
-import { buscarTextoEnFichero, buscarTituloEnFichero, buscarEnFicheroLocal } from './buscador-local.js';
+import { buscarEdicionesEnFichero, buscarTituloEnFichero, buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEdicionesEnBNE } from './buscador-bne-sru.js';
 import { validarISBN, isbn10a13 } from './identificadores.js';
@@ -262,7 +262,7 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
 
     // 1) FICHERO local (offline, gratis). Primero título+autor; si no sale nada verificado, SOLO título: un
     //    registro sin autor (los hay) no aparece en una búsqueda que exige el apellido.
-    let candidatos = ((await buscarTextoEnFichero([doc.titulo, autor].filter(Boolean).join(' '), { limite }).catch(() => null)) || [])
+    let candidatos = ((await buscarEdicionesEnFichero(doc.titulo, autor, { limite: Math.max(limite, 200) }).catch(() => null)) || [])
         .map((c) => comoCandidato(c, 'fichero'));
     let buenos = verificar(doc, candidatos);
     // Registros SIN AUTOR: solo se pueden aceptar con título exacto y MISMA editorial, así que esta segunda

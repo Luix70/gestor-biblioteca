@@ -48,7 +48,7 @@ function resolverDB() {
     return /\.db$/i.test(base) ? base : path.join(base, 'fichero.db');
 }
 
-let db = null, stmt = null, stmtFts = null, stmtTitulo = null, intentado = false, disponible = false;
+let db = null, stmt = null, stmtFts = null, stmtTitulo = null, stmtEdiciones = null, intentado = false, disponible = false;
 
 /** Abre el .db una sola vez (lazy, solo-lectura). Devuelve si el proveedor está disponible. */
 async function asegurarDB() {
@@ -246,7 +246,49 @@ export async function buscarTituloEnFichero(titulo, { limite = 500 } = {}) {
     } catch (e) { console.warn(`[Fichero/FTS] consulta por título falló: ${e.message}`); return null; }
 }
 
+// Palabras vacías: aparecen en millones de títulos y no distinguen nada. En una búsqueda FTS obligan a recorrer
+// listas enormes; se quitan de la consulta (la comprobación fina del título se hace después, en JS).
+const VACIAS_FTS = new Set(['el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'de', 'del', 'y', 'e', 'o', 'u', 'a', 'al', 'en',
+    'por', 'para', 'con', 'sin', 'sobre', 'the', 'of', 'and', 'or', 'a', 'an', 'to', 'in', 'on', 'for', 'with', 'le', 'les', 'des',
+    'du', 'et', 'il', 'lo', 'di', 'da', 'der', 'die', 'das', 'und', 'von', 'que', 'es', 'se', 'su', 'sus', 'mi', 'tu']);
+
+/**
+ * EDICIONES por título + autor, para IDENTIFICAR una edición (identificar-edicion.js). Consulta PRECISA y barata:
+ * palabras significativas del título principal en la COLUMNA título (sin comodines, sin palabras vacías) y el
+ * apellido del autor en la columna autores, SIN ordenar por relevancia.
+ *
+ * Por qué no `buscarTextoEnFichero`: aquella (la de «Descubrir») pone un comodín de prefijo a CADA palabra y ordena
+ * por bm25. Con palabras cortas y comunes («la*», «de*») el FTS recorre millones de entradas y puntúa todas; en el
+ * Atom del NAS una sola consulta pudo tardar más de una hora — y better-sqlite3 es SÍNCRONO: bloquea el proceso
+ * entero (medido: reidentificar-sin-isbn se quedó una hora en el 4.º libro sin ni siquiera imprimir su progreso).
+ * Esto la usaba también la ingesta de libros sin ISBN.
+ * @returns {Promise<Array|null>} null = Fichero no disponible
+ */
+export async function buscarEdicionesEnFichero(titulo, autor = null, { limite = 200 } = {}) {
+    if (!(await asegurarDB())) return null;
+    // Título principal (sin subtítulo), sus palabras significativas (máx. 6); del autor, el apellido.
+    const principal = String(titulo || '').split(/\s[:.\-–—]\s|:\s|\s\(/)[0];
+    const palabras = (s) => (String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').match(/[\p{L}\p{N}]+/gu) || []);
+    const delTitulo = [...new Set(palabras(principal).filter((w) => w.length >= 2 && !VACIAS_FTS.has(w)))].slice(0, 6);
+    if (!delTitulo.length) return [];
+    const apellido = String(autor || '').includes(',') ? String(autor).split(',')[0] : String(autor || '').trim().split(/\s+/).pop();
+    const delAutor = palabras(apellido).filter((w) => w.length >= 3 && !VACIAS_FTS.has(w));
+    const q = `titulo : (${delTitulo.join(' AND ')})` + (delAutor.length ? ` AND autores : (${delAutor.join(' AND ')})` : '');
+    try {
+        if (!stmtEdiciones) {
+            stmtEdiciones = db.prepare(`SELECT f.isbn, f.titulo, f.subtitulo, f.autores, f.editorial, f.anio_edicion, f.idioma,
+                f.coleccion_nombre FROM fichero_fts ft JOIN fichero f ON f.rowid = ft.rowid WHERE fichero_fts MATCH ? LIMIT ?`);
+        }
+        return stmtEdiciones.all(q, limite).map((f) => ({
+            isbn: f.isbn || null, titulo: f.titulo || '', subtitulo: f.subtitulo || null,
+            autores: f.autores ? f.autores.split(';').map((s) => s.trim()).filter(Boolean) : [],
+            editorial: f.editorial || null, anio: f.anio_edicion || null, idioma: f.idioma || null,
+            coleccion_nombre: f.coleccion_nombre || null,
+        }));
+    } catch (e) { console.warn(`[Fichero/FTS] consulta de ediciones falló: ${e.message}`); return null; }
+}
+
 /** Cierra el .db (para scripts/pruebas; en la app vive lo que dure el proceso). */
 export function cerrarFicheroLocal() {
-    if (db) { try { db.close(); } catch { /* ignore */ } db = null; stmt = null; stmtFts = null; stmtTitulo = null; intentado = false; disponible = false; }
+    if (db) { try { db.close(); } catch { /* ignore */ } db = null; stmt = null; stmtFts = null; stmtTitulo = null; stmtEdiciones = null; intentado = false; disponible = false; }
 }
