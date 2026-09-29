@@ -8686,7 +8686,7 @@ async function portadaSospechosaLote(ids, { alTerminar = null } = {}) {
     <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="texto">
       <span><b>Primera página de texto</b><br><span class="muted" style="font-size:12px">PDF: la primera página con texto. EPUB sin cubierta: una página compuesta con su portadilla (título, autor…).</span></span></label>
     <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="quitar">
-      <span><b>Quitar portada</b><br><span class="muted" style="font-size:12px">El documento se queda sin portada (la imagen no se borra del disco).</span></span></label>
+      <span><b>Quitar portada</b><br><span class="muted" style="font-size:12px">Pasa a portada la siguiente imagen extraída del documento (saltando copias de la falsa); si no hay otra, queda sin portada. La imagen no se borra del disco.</span></span></label>
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
       <button class="btn" id="psNo">Cancelar</button><button class="btn ok" id="psSi">Aplicar</button></div>
   </div>`;

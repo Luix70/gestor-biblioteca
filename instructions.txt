@@ -1154,7 +1154,9 @@ de ficheros clasificado por CDU.
           - Primera página de texto: PDF → la primera página con capa de texto (pdftotext); EPUB sin cubierta →
             se COMPONE una página con el texto de su PORTADILLA (titulo.xhtml/title.xhtml…; si no hay, la primera
             página con texto que no sea índice/nav) con pdf-lib + pdftoppm (sin navegador ni sharp).
-          - Quitar portada: el documento se queda sin portada.
+          - Quitar portada: si el documento tiene más imágenes extraídas, la SIGUIENTE en orden pasa a ser la
+            portada (saltando copias de la retirada, artefactos conocidos y las que falten del disco); si no
+            queda ninguna, se queda sin portada.
         Solo cambia la PORTADA: las demás imágenes se conservan y la retirada sigue en disco. Si la portada la
         comparten 2+ documentos del lote (o la huella de la 1.ª página de sus PDF), se registra como artefacto:
         la ingesta y la re-extracción la saltarán en adelante. Al acabar lista los no arreglados con el motivo.

@@ -4,8 +4,8 @@
  * crea una SELECCIÓN por grupo; sobre ella (o sobre un documento desde su ficha) la acción «🖼️ Portada
  * sospechosa…» ofrece tres salidas:
  *
- *   · 'quitar'     — el documento se queda SIN portada. La imagen NO se borra del disco (solo deja de ser la
- *                    portada y sale del carrusel): anti-pérdida.
+ *   · 'quitar'     — retira la portada: si hay más imágenes extraídas del documento, la SIGUIENTE en orden pasa a
+ *                    ser la portada; si no, queda sin portada. La imagen NO se borra del disco (anti-pérdida).
  *   · 'reextraer'  — otra portada del PROPIO fichero, OMITIENDO la sospechosa: la cubierta embebida si no es la
  *                    sospechosa; en un PDF, la siguiente página con contenido; si el fichero no da otra, la
  *                    portada remota por ISBN.
@@ -310,13 +310,35 @@ async function ponerPortada(db, doc, buffer, origen) {
     });
 }
 
+/**
+ * QUITAR la portada: si el documento tiene más imágenes extraídas, la SIGUIENTE en orden pasa a ser la portada;
+ * si no queda ninguna, se queda sin portada. Se saltan las imágenes que no sirven de portada: la que es COPIA
+ * de la retirada (mismo contenido con otro nombre), un artefacto conocido o una que ya no está en el disco.
+ * La imagen retirada no se borra del disco.
+ */
 async function quitarPortada(db, doc) {
-    const imagenes = (doc.imagenes || []).filter((im) => im && im.ruta !== doc.portada);
-    await db.collection('biblioteca').updateOne({ _id: doc._id }, {
-        $set: { imagenes, fecha_actualizacion: new Date() },
-        $unset: { portada: '' },
-        $push: { alertas_agente: 'Portada sospechosa retirada a mano (la imagen sigue en disco).' },
-    });
+    const shaRetirada = await shaPortadaActual(doc);
+    const resto = (doc.imagenes || []).filter((im) => im && im.ruta && im.ruta !== doc.portada);
+    let nueva = null;
+    for (const im of resto) {
+        let buf;
+        try { buf = await fs.readFile(rutaAbs(im.ruta)); } catch { continue; }   // no está en disco
+        if (!buf.length || esImagenArtefacto(buf) || (shaRetirada && shaImagen(buf) === shaRetirada)) continue;
+        nueva = im;
+        break;
+    }
+    // La nueva portada va la primera del carrusel, marcada como portada; el resto, en su orden, como «otra».
+    const imagenes = nueva
+        ? [{ ...nueva, tipo: 'portada' }, ...resto.filter((im) => im !== nueva).map((im) => ({ ...im, tipo: im.tipo === 'portada' ? 'otra' : im.tipo }))]
+        : resto.map((im) => ({ ...im, tipo: im.tipo === 'portada' ? 'otra' : im.tipo }));
+    const cambio = nueva
+        ? { $set: { imagenes, portada: nueva.ruta, fecha_actualizacion: new Date() } }
+        : { $set: { imagenes, fecha_actualizacion: new Date() }, $unset: { portada: '' } };
+    cambio.$push = { alertas_agente: nueva
+        ? 'Portada sospechosa retirada a mano; pasa a portada la siguiente imagen extraída (la retirada sigue en disco).'
+        : 'Portada sospechosa retirada a mano; no quedaba otra imagen, queda sin portada (la retirada sigue en disco).' };
+    await db.collection('biblioteca').updateOne({ _id: doc._id }, cambio);
+    return nueva ? 'siguiente-imagen' : 'sin-portada';
 }
 
 /**
@@ -327,7 +349,7 @@ export async function tratarPortadaSospechosa(db, doc, modo) {
     let origen = null;
     if (modo === 'quitar') {
         if (!doc.portada) return { ok: false, motivo: 'no tiene portada' };
-        await quitarPortada(db, doc);
+        origen = await quitarPortada(db, doc);
     } else {
         const original = await archivoOriginal(carpetaDeDoc(doc), doc.nombre_archivo).catch(() => null);
         const tipo = original ? detectarTipo(original) : null;
