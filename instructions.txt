@@ -1024,6 +1024,12 @@ de ficheros clasificado por CDU.
     [--ejecutar]: devuelve cada documento a como estaba (replaceOne por _id, recrea los borrados) y NO borra los
     creados después. Hacerla SIEMPRE antes de un cambio masivo. La copia del disco (árbol CDU → USB) es
     scripts/sincronizar-copia.sh (en el NAS, como root).
+    COPIA DEL PC (CopiaBase.ps1 del usuario: mongodump + mongoexport a D:\Bibliobak): mongodump guarda además el
+    validador $jsonSchema y los índices (mongorestore los recrea). Restaurar una COLECCIÓN ENTERA: mongorestore --uri
+    … --nsInclude "Biblioteca.biblioteca" --drop <carpeta> (¡pierde lo hecho después de la copia!). Restaurar SOLO UN
+    LOTE (lo normal para deshacer un script): desde el PC, node scripts/restaurar-base.js --fichero
+    "D:\Bibliobak\…\Coleccionesiblioteca.json" --coleccion biblioteca --ids a,b,c [--ejecutar] (lee el EJSON de
+    mongoexport; solo toca esos documentos).
 
     LOG ESTÁNDAR DE LOS SCRIPTS (2026-09-29, src/utils/log-script.js, importado lo PRIMERO en todos los scripts/).
     Cada línea en pantalla empieza por [AAAA-MM-DD HH:MM:SS] (el mismo formato que el log de la app), también la
