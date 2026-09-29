@@ -6,6 +6,10 @@
 ## Antes de nada
 
 - [ x] **Copia de seguridad de la base de datos** (Atlas). Casi todo lo de abajo escribe en muchos documentos.
+      Desde el 29-sep hay herramienta (Atlas gratuito no hace copias): `sudo docker exec -t gestor-biblioteca node
+      scripts/copia-base.js` → /app/logs/copias-bd/<fecha>/ (conserva las 10 últimas). Restaurar: `scripts/restaurar-base.js
+      --desde <fecha> --coleccion biblioteca [--ids …] [--ejecutar]` (en seco por defecto). **Hacerla antes de cada paso.**
+- [ ] **Copia del disco** (árbol CDU → USB): `sudo /volume1/docker/GestorBiblioteca/scripts/sincronizar-copia.sh --forzar`
 - [ x] **Desplegar la última versión** con el script de actualización de siempre (`actualizar-GestorBiblioteca.sh`).
       Sin esto, los scripts nuevos no están en el NAS.
 

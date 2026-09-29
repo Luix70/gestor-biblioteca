@@ -1017,6 +1017,14 @@ de ficheros clasificado por CDU.
     abre la Búsqueda con ellos. POST /documentos/:id/elegir-edicion {isbn|ninguna}. Solo admite un ISBN que esté
     entre las candidatas. Un ISBN-10 y su ISBN-13 cuentan como UNO; un idioma «und/mul» no descarta a nadie.
 
+    COPIA DE SEGURIDAD DE LA BASE (2026-09-29). Atlas (plan gratuito) no hace copias. scripts/copia-base.js exporta
+    TODAS las colecciones a /app/logs/copias-bd/<AAAAMMDD-HHMMSS>/<coleccion>.jsonl.gz (EJSON canónico: ObjectId y
+    fechas exactos) + manifiesto.json; streaming (poca RAM); conserva las 10 últimas (--conservar N). Restaurar:
+    scripts/restaurar-base.js (sin argumentos lista las copias) --desde <copia> --coleccion <nombre> [--ids a,b]
+    [--ejecutar]: devuelve cada documento a como estaba (replaceOne por _id, recrea los borrados) y NO borra los
+    creados después. Hacerla SIEMPRE antes de un cambio masivo. La copia del disco (árbol CDU → USB) es
+    scripts/sincronizar-copia.sh (en el NAS, como root).
+
     LOG ESTÁNDAR DE LOS SCRIPTS (2026-09-29, src/utils/log-script.js, importado lo PRIMERO en todos los scripts/).
     Cada línea en pantalla empieza por [AAAA-MM-DD HH:MM:SS] (el mismo formato que el log de la app), también la
     línea de progreso que se repinta (así se ve la hora de su última actualización). Y cada ejecución deja un
