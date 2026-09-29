@@ -1153,6 +1153,10 @@ de ficheros clasificado por CDU.
         de la edición confirmada manda, y con el ISBN ya fijado se consulta la cascada gratuita por ESE ISBN
         (sinopsis, páginas, materias, Dewey/LCC…; la CDU de la BNE por prioridad). Con ISBN del propio fichero,
         su editorial se aprende como indicio de la colección.
+      · UNA SOLA PASADA (29-sep): `reidentificar-sin-isbn --todos --edicion-por-elegir` recorre a la vez los libros sin
+        ISBN no revisados (pdf/epub/mobi) y los que esperan que elijas edición (cualquier formato), cuyas listas de
+        candidatas se afinan con las reglas nuevas. Medido: 5.710 + 1.103 = 6.813 (solo libros; antes, sin el filtro
+        por tipo, eran 8.293 porque entraban las revistas).
       · Para re-investigar los pendientes:
           sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir          (en seco)
           sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir --ejecutar

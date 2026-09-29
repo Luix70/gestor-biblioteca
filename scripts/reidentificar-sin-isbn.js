@@ -28,6 +28,8 @@
  *                             --con-ia). Por defecto apunta a los de CDU vacía/000; MUEVE la carpeta al aplicar.
  *   --id <ObjectId> --isbn <ISBN>   fija a mano el ISBN de UN documento y coteja desde él.
  *   --reintentar              repasa también los YA REVISADOS (los que no se encontraron en una pasada anterior).
+ *   --todos --edicion-por-elegir   las dos cosas en UNA pasada (libros sin ISBN no revisados + los que esperan
+ *                             edición, cuyas listas de candidatas se afinan con las reglas nuevas)
  *   --edicion-por-elegir      los que esperan que elijas edición (Dashboard «Edición por elegir»): se re-investigan
  *                             con las pruebas nuevas (traductor, indicios de colección). Resultado: ISBN definitivo, PROVISIONAL
  *                             (varias ediciones de la misma editorial) o DUDOSO (una sola posible); si sigue ambiguo, se queda.
@@ -102,10 +104,14 @@ async function main() {
     else if (selArg) filtro = { _id: { $in: await idsDeSeleccion(db, selArg) }, ...base };
     else if (colArg) filtro = { coleccion: await resolverColeccionArg(db, colArg), ...base };
     else if (patronArg) filtro = { nombre_archivo: { $regex: patronArg, $options: 'i' }, ...base };
-    else if (EDICION) filtro = { 'ediciones_candidatas.0': { $exists: true }, isbn_provisional: { $ne: true }, ...base };
+    else if (EDICION && !TODOS) filtro = { 'ediciones_candidatas.0': { $exists: true }, isbn_provisional: { $ne: true }, ...base };
     else if (!TODOS) filtro = { coleccion: { $exists: true, $ne: null }, ...base }; // por defecto: miembros de colección
     // Solo formatos con ISBN de texto barato (pdf/epub/mobi); descarta audio/material/vídeo/software/djvu.
     if (!idArg && !EDICION) filtro.formatos = { $in: ['pdf', 'epub', 'mobi'] };   // (la edición por autoridad no necesita el fichero)
+    // --todos --edicion-por-elegir: los libros sin ISBN (pdf/epub/mobi) Y los que esperan que elijas edición (de
+    // cualquier formato), en UNA pasada: las reglas nuevas también afinan esas listas de candidatas antiguas.
+    const AMBOS = TODOS && EDICION && !idArg;
+    const PENDIENTE_EDICION = { 'ediciones_candidatas.0': { $exists: true }, isbn_provisional: { $ne: true } };
     // Solo LIBROS, como la campaña: sin revistas, cómics, audiolibros ni software (con --todos entraban las revistas
     // y recibían el ISBN de libros homónimos — 29-sep).
     if (!idArg) Object.assign(filtro, { tipo_recurso: 'libro', naturaleza: { $nin: ['comic', 'audiolibro', 'software'] } });
@@ -114,7 +120,14 @@ async function main() {
     const RECUPERACION = !FORZAR && !CON_CDU;
     const NO_REVISADO = { $or: [{ [CAMPO_MARCA_RECUPERAR_ISBN]: { $exists: false } }, { [CAMPO_MARCA_RECUPERAR_ISBN]: { $ne: VERSION_RECUPERAR_ISBN } }] };
     let yaRevisados = 0;
-    if (RECUPERACION && !idArg && !REINTENTAR && !EDICION) {
+    if (AMBOS) {
+        // No revisados (pdf/epub/mobi) O pendientes de edición (cualquier formato; revisados o no).
+        const comun = { ...base, tipo_recurso: 'libro', naturaleza: { $nin: ['comic', 'audiolibro', 'software'] } };
+        filtro = { $and: [comun, { $or: [
+            { $and: [{ formatos: { $in: ['pdf', 'epub', 'mobi'] } }, REINTENTAR ? {} : NO_REVISADO] },
+            PENDIENTE_EDICION,
+        ] }] };
+    } else if (RECUPERACION && !idArg && !REINTENTAR && !EDICION) {
         yaRevisados = await col.countDocuments({ $and: [filtro, { [CAMPO_MARCA_RECUPERAR_ISBN]: VERSION_RECUPERAR_ISBN }] });
         filtro = { $and: [filtro, NO_REVISADO] };
     }
