@@ -31,6 +31,10 @@ import { calcularHashArchivo } from './hash-archivo.js';
 import { reciclarCarpeta } from './papelera.js';
 import { indexarDoc, desindexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
+import { validarISBN, isbn10a13 } from './identificadores.js';
+
+/** ISBN comparable: SIEMPRE en 13 dígitos (un ISBN-10 y su ISBN-13 son el mismo libro). */
+export const isbnComparable = (v) => { const x = v ? validarISBN(v) : null; return x ? (isbn10a13(x) || x) : null; };
 
 const MAX_SEGURO = 5;      // versiones por grupo para fusionar solo
 const TOL_PAGINAS = 2;     // diferencia de páginas admitida
@@ -69,8 +73,16 @@ export function clasificarGrupo(docs, { tamanos = null } = {}) {
     }
     if (new Set(docs.map(formatosDe)).size > 1) return { clase: 'revisar', motivo: 'formatos distintos (no se fusionan)' };
     if (docs.some((d) => d.obra)) return { clase: 'revisar', motivo: 'alguno es tomo de una obra' };
-    // Solo cuenta si hay DOS números distintos: que uno tenga nº de colección y el otro no, no dice nada.
-    const numsCol = new Set(docs.map((d) => String(d.coleccion_numero || '').trim()).filter(Boolean));
+    // Nº de colección REAL: no automático (el que se asigna en orden a los miembros de una colección-carpeta: dos
+    // versiones del mismo libro reciben el 29 y el 30 — medido: 880 de 1.002 grupos frenados por esto) y escrito en
+    // el propio título o nombre de fichero («[Blackwater 05]»). Solo frena si hay DOS números reales distintos.
+    const numReal = (d) => {
+        const n = String(d.coleccion_numero || '').trim();
+        if (!n || d.coleccion_numero_auto) return null;
+        const texto = `${d.titulo || ''} ${d.nombre_archivo || ''}`;
+        return new RegExp(String.raw`(^|\D)0*${n.replace(/^0+/, '')}(\D|$)`).test(texto) ? n.replace(/^0+/, '') : null;
+    };
+    const numsCol = new Set(docs.map(numReal).filter(Boolean));
     if (numsCol.size > 1) return { clase: 'revisar', motivo: 'distinto nº de colección (¿tomos de una colección?)' };
     if (docs.length > MAX_SEGURO) return { clase: 'revisar', motivo: `${docs.length} versiones: posible ISBN compartido` };
     if (docs.some((d) => d.isbn_provisional || d.isbn_dudoso)) return { clase: 'revisar', motivo: 'ISBN provisional o dudoso' };
@@ -92,14 +104,39 @@ export function clasificarGrupo(docs, { tamanos = null } = {}) {
 
 /** Grupos de documentos con el mismo ISBN y el mismo formato principal (2 o más). */
 export async function gruposDeVersiones(db, { isbn = null } = {}) {
-    const match = { isbn: isbn || { $exists: true, $nin: [null, ''] }, tipo_recurso: 'libro' };
-    return db.collection('biblioteca').aggregate([
-        { $match: match },
-        { $project: { isbn: 1, titulo: 1, paginas: 1, obra: 1, nombre_archivo: 1, isbn_provisional: 1, isbn_dudoso: 1, fecha_ingreso: 1,
-            formatos: 1, coleccion_numero: 1, ruta_base: 1, f: { $arrayElemAt: ['$formatos', 0] } } },
-        { $group: { _id: { isbn: '$isbn', f: '$f' }, docs: { $push: '$$ROOT' } } },
-        { $match: { 'docs.1': { $exists: true } } },
-    ], { allowDiskUse: true }).toArray();
+    // El ISBN se agrupa en su forma de 13 dígitos (la agregación no sabe convertir un ISBN-10), así que se agrupa
+    // aquí: 184968667X y 9781849686679 son el MISMO libro.
+    const filtro = { isbn: { $exists: true, $nin: [null, ''] }, tipo_recurso: 'libro' };
+    if (isbn) filtro.isbn = { $in: variantesDe(isbn) };
+    const docs = await db.collection('biblioteca').find(filtro, {
+        projection: { isbn: 1, titulo: 1, paginas: 1, obra: 1, nombre_archivo: 1, isbn_provisional: 1, isbn_dudoso: 1, fecha_ingreso: 1,
+            formatos: 1, coleccion_numero: 1, coleccion_numero_auto: 1, ruta_base: 1 },
+    }).toArray();
+    const grupos = new Map();
+    for (const d of docs) {
+        const i13 = isbnComparable(d.isbn);
+        if (!i13) continue;
+        const clave = `${i13}|${(d.formatos || [])[0] || ''}`;
+        if (!grupos.has(clave)) grupos.set(clave, { _id: { isbn: i13, f: (d.formatos || [])[0] || null }, docs: [] });
+        grupos.get(clave).docs.push(d);
+    }
+    return [...grupos.values()].filter((g) => g.docs.length > 1);
+}
+/** Las formas con las que un ISBN puede estar guardado (10 y 13 dígitos). */
+function variantesDe(isbn) {
+    const x = validarISBN(isbn);
+    if (!x) return [isbn];
+    const i13 = isbn10a13(x) || x;
+    const out = new Set([isbn, x, i13]);
+    if (i13.startsWith('978')) {
+        // ISBN-10 a partir del 13 (solo prefijo 978): 9 dígitos centrales + dígito de control.
+        const nueve = i13.slice(3, 12);
+        let suma = 0;
+        for (let k = 0; k < 9; k++) suma += (10 - k) * Number(nueve[k]);
+        const c = (11 - (suma % 11)) % 11;
+        out.add(nueve + (c === 10 ? 'X' : String(c)));
+    }
+    return [...out];
 }
 
 /** Map id → tamaño en bytes del fichero de cada documento (null si no está). */

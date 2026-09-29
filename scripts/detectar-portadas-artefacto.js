@@ -39,6 +39,10 @@ import { registrarArtefacto, huellaInformativa, distanciaHuellas } from '../src/
 import { reextraerImagenesDoc } from '../src/utils/reextraer-imagenes.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { crearSeleccion, reemplazarDocs } from '../src/utils/selecciones.js';
+import { validarISBN, isbn10a13 } from '../src/utils/identificadores.js';
+// ISBN comparable: SIEMPRE en 13 dígitos. Un ISBN-10 y su ISBN-13 son el MISMO (medido: un EPUB con 184968667X y
+// su MOBI con 9781849686679 salían como «libros distintos» con la misma portada).
+const isbnComparable = (v) => { const x = v ? validarISBN(v) : null; return x ? (isbn10a13(x) || x) : null; };
 
 const args = process.argv.slice(2);
 const EJECUTAR = args.includes('--ejecutar');
@@ -69,7 +73,7 @@ function obrasDistintas(ds) {
     const raiz = (i) => (padre[i] === i ? i : (padre[i] = raiz(padre[i])));
     const primeroDe = new Map();
     ds.forEach((d, i) => {
-        const claves = [d.isbn ? `i:${d.isbn}` : null, d.obra ? `o:${d.obra}` : null, norm(d.titulo) ? `t:${norm(d.titulo)}` : null];
+        const claves = [isbnComparable(d.isbn) ? `i:${isbnComparable(d.isbn)}` : null, d.obra ? `o:${d.obra}` : null, norm(d.titulo) ? `t:${norm(d.titulo)}` : null];
         for (const k of claves.filter(Boolean)) {
             if (primeroDe.has(k)) padre[raiz(i)] = raiz(primeroDe.get(k));
             else primeroDe.set(k, i);
