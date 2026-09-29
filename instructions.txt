@@ -1031,7 +1031,12 @@ de ficheros clasificado por CDU.
     no abre rutas con caracteres no latinos. Arreglo: se lanzan con LANG/LC_ALL=C.UTF-8 y, si la ruta no es ASCII,
     a través de un enlace temporal con nombre ASCII (/tmp/djvu-enlaces/<sha1>.djvu) que apunta al fichero real.
     Confirmado en el NAS: sin idioma, djvused responde con su ayuda; con C.UTF-8, «241» páginas. Desde entonces
-    LANG=C.UTF-8 y LC_ALL=C.UTF-8 van en el docker-compose (y en el Dockerfile) para TODO el contenedor.
+    LANG=C.UTF-8 y LC_ALL=C.UTF-8 van en el docker-compose para TODO el contenedor. NO en el Dockerfile: ponerlo
+    antes del `apt-get install` invalidó la caché de esa capa y la reconstrucción falló (404 en debian-security:
+    Debian 11 «bullseye» ha terminado su soporte extendido y el repositorio ya no sirve esos paquetes).
+    ⚠ PENDIENTE: cualquier cambio que obligue a rehacer la capa de apt fallará igual hasta que se migre la imagen
+    base (node:18-bullseye-slim) — a node:18-bookworm-slim, o apuntando apt a archive.debian.org. No tocar la parte
+    de apt del Dockerfile sin resolver esto antes (probar primero en el PC con docker-compose.pc.yml).
     (Mi primer diagnóstico —forma Unicode del nombre— era un espejismo de cómo Windows ve la unidad del NAS por
     SMB: dentro del NAS el nombre coincide; Integridad lo confirmó con 0 casos.)
 
