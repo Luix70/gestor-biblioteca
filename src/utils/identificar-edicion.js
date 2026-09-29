@@ -264,6 +264,7 @@ function reducirCandidatas(doc, casi) {
     const pruebasEd = [...(doc.editoriales_coleccion || []), ...editorialesDelTitulo(doc.titulo)]
         .filter((e) => e && !esEditorialFalsa(e)).map(nucleoEditorial).filter((n) => n.length);
     let lista = unicosPorIsbn(casi).filter((c) => {
+        if (esEdicionAudio(c)) return false;
         const iCand = idioma2(c.idioma);
         if (iDoc && iCand && iDoc !== iCand) return false;
         const edCand = esEditorialFalsa(c.editorial) ? [] : nucleoEditorial(c.editorial);
@@ -332,10 +333,16 @@ function siMismaEditorial(buenos) {
  * la autoría. Se admite solo con más exigencia: TÍTULO EXACTO y MISMA EDITORIAL. El mismo título en la misma
  * casa, sin un autor que lo contradiga, es en la práctica el mismo libro.
  */
+// Una edición en AUDIO («Penguin Random House Audio», audiolibro, Audible…) no es la de un libro en papel o
+// electrónico (medido el 30-sep: «Sentido y sensibilidad» recibía el ISBN del audiolibro).
+const RE_EDICION_AUDIO = new RegExp(String.raw`\baudio\b|audiolibro|audiobook|audible|\bcd\b`, 'i');
+const esEdicionAudio = (c) => RE_EDICION_AUDIO.test(`${c.editorial || ''} ${c.subtitulo || ''}`);
+
 function verificar(doc, candidatos) {
     const buenos = [];
     for (const c of candidatos) {
         if (!c.isbn) continue;
+        if (esEdicionAudio(c)) continue;   // (este motor no identifica audiolibros: ver reidentificar-doc)
         if (!casaTitulo(doc.titulo, c.titulo, c.subtitulo)) continue;
         const sinAutor = !c.autores?.length;
         if (doc.autores?.length && !sinAutor && !casaAutor(doc.autores, c.autores)) continue;
