@@ -7,8 +7,11 @@
  *
  *   · PRINCIPAL: el que más trabajo tuyo lleva (valoración, CDU manual, notas…), después el más completo, el fichero
  *     más grande y, a igualdad, el más antiguo (conserva su id: enlaces, etiquetas NFC).
- *   · DATOS: el principal HEREDA todo lo que le falte de los demás (sinopsis, materias, contribuciones, año,
- *     páginas…); nunca se pisa lo que ya tiene.
+ *   · DATOS (CONSERVADOR, regla del usuario: se AGREGA, no se borra): el principal hereda lo que le falte; AUTORES,
+ *     COLABORADORES y MATERIAS se UNEN; la CDU queda la de mayor prioridad (manual > impresa > BNE > deducida) y las
+ *     demás se anotan; si están en COLECCIONES distintas, las otras quedan en `colecciones_adicionales`. Y cada
+ *     documento retirado se guarda ENTERO en `documentos_fusionados` (títulos, sinopsis, ubicación, valoración,
+ *     notas, alertas…): no se pierde ni un dato.
  *   · FICHEROS: los de las otras versiones se MUEVEN a la carpeta del principal y quedan en `versiones[]` (nombre,
  *     hash, tamaño, páginas, documento de origen). Sus hashes se siguen reconociendo si vuelven por el Inbox.
  *   · REFERENCIAS: selecciones, fichas de lectura y el inventario de su colección pasan a apuntar al principal; el
@@ -32,6 +35,7 @@ import { reciclarCarpeta } from './papelera.js';
 import { indexarDoc, desindexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
 import { validarISBN, isbn10a13 } from './identificadores.js';
+import { mejorCdu, fuenteCduDoc, aplicarCduConPrioridad } from './prioridad-cdu.js';
 
 /** ISBN comparable: SIEMPRE en 13 dígitos (un ISBN-10 y su ISBN-13 son el mismo libro). */
 export const isbnComparable = (v) => { const x = v ? validarISBN(v) : null; return x ? (isbn10a13(x) || x) : null; };
@@ -170,7 +174,8 @@ const NO_HEREDAR = new Set(['_id', 'ruta_base', 'nombre_archivo', 'hash_contenid
     'hashes_anteriores', 'imagenes', 'portada', 'fecha_ingreso', 'fecha_actualizacion', 'mantenimiento', 'mantenimiento_firma',
     'campanas', 'alertas_agente', 'versiones', 'sidecars_fecha', 'ediciones_candidatas', 'ediciones_candidatas_fecha',
     'archivos_originales', 'audios', 'ruta_fija', 'estado_verificacion', 'formatos', 'recuperar_isbn_intentos',
-    'recuperar_isbn_ultimo_intento', 'edicion_ultimo_intento', 'textos']);
+    'recuperar_isbn_ultimo_intento', 'edicion_ultimo_intento', 'textos', 'colecciones_adicionales', 'documentos_fusionados',
+    'cdus_alternativas']);
 
 /** Nombre libre en `dir` para `nombre` (si ya existe: «X (versión 2).pdf», «X (versión 3).pdf»…). */
 async function nombreLibre(dir, nombre) {
@@ -225,6 +230,11 @@ export async function fusionarDocumentos(db, ids, { aplicar = true } = {}) {
     const set = {};
     const union = { palabras_clave: new Set(principal.palabras_clave || []) };
     let contribuciones = [...(principal.contribuciones || [])];
+    const autores = [...(principal.autores || [])];
+    const colAdicionales = [...(principal.colecciones_adicionales || [])];
+    const fusionados = [...(principal.documentos_fusionados || [])];
+    const cdus = [principal.cdu ? { cdu: principal.cdu, fuente: fuenteCduDoc(principal) } : null];
+    const cdusAlternativas = [...(principal.cdus_alternativas || [])];
     const versiones = [...(principal.versiones || [])];
     // Selector de textos del visor (`textos[]`): el principal primero y cada versión después, para poder abrirlas
     // desde la ficha.
@@ -241,12 +251,33 @@ export async function fusionarDocumentos(db, ids, { aplicar = true } = {}) {
         for (const [k, v] of Object.entries(o)) {
             if (NO_HEREDAR.has(k) || vacio(v)) continue;
             if (k === 'palabras_clave') { for (const x of v) union.palabras_clave.add(x); continue; }
+            if (k === 'autores') {   // se UNEN (nunca se quita un autor)
+                for (const a of v) if (!autores.some((x) => String(x) === String(a))) autores.push(a);
+                continue;
+            }
+            if (k === 'cdu' || k === 'cdu_fuente' || k === 'cdu_manual') continue;   // se decide abajo, por prioridad
+            if (k === 'coleccion' || k === 'coleccion_nombre' || k === 'coleccion_numero' || k === 'coleccion_numero_auto') continue;   // abajo
             if (k === 'contribuciones') {
                 for (const c of v) if (!contribuciones.some((x) => String(x.persona) === String(c.persona) && x.rol === c.rol)) contribuciones.push(c);
                 continue;
             }
             if (vacio(principal[k]) && vacio(set[k])) set[k] = v;
         }
+        // 1b) CDU: candidata por su prioridad; 1c) colección: la del principal manda, las demás se anotan.
+        if (o.cdu) cdus.push({ cdu: o.cdu, fuente: fuenteCduDoc(o) });
+        if (o.coleccion || o.coleccion_nombre) {
+            const mismaCol = (principal.coleccion && o.coleccion && String(principal.coleccion) === String(o.coleccion))
+                || (!principal.coleccion && !o.coleccion && principal.coleccion_nombre === o.coleccion_nombre);
+            if (!principal.coleccion && !principal.coleccion_nombre && !set.coleccion && !set.coleccion_nombre) {
+                for (const k of ['coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto']) if (!vacio(o[k])) set[k] = o[k];
+            } else if (!mismaCol) {
+                colAdicionales.push({ coleccion: o.coleccion || null, coleccion_nombre: o.coleccion_nombre || null, coleccion_numero: o.coleccion_numero || null, doc_origen: o._id });
+            }
+        }
+        // 1d) La ficha ENTERA del retirado (sin lo pesado/interno): nada de lo que sabía se pierde.
+        const ficha = { ...o };
+        for (const k of ['imagenes', 'mantenimiento', 'campanas', 'textos', 'versiones', 'documentos_fusionados']) delete ficha[k];
+        fusionados.push({ _id: o._id, fecha_fusion: new Date(), ficha });
         // 2) Fichero → carpeta del principal, como versión.
         const f = fichero.get(String(o._id));
         if (f) {
@@ -300,6 +331,16 @@ export async function fusionarDocumentos(db, ids, { aplicar = true } = {}) {
     }
 
     if (union.palabras_clave.size > (principal.palabras_clave || []).length) set.palabras_clave = [...union.palabras_clave];
+    if (autores.length > (principal.autores || []).length) set.autores = autores;
+    if (colAdicionales.length) set.colecciones_adicionales = colAdicionales;
+    set.documentos_fusionados = fusionados;
+    // CDU: la de mayor prioridad; las distintas que no ganan quedan anotadas.
+    const candidatas = cdus.filter(Boolean);
+    const ganadora = candidatas.length ? mejorCdu(candidatas) : null;
+    for (const c of candidatas) {
+        if (ganadora && c.cdu !== ganadora.cdu && !cdusAlternativas.some((x) => x.cdu === c.cdu)) cdusAlternativas.push(c);
+    }
+    if (cdusAlternativas.length) set.cdus_alternativas = cdusAlternativas;
     if (contribuciones.length > (principal.contribuciones || []).length) set.contribuciones = contribuciones;
     set.versiones = versiones;
     if (textos.length > 1) set.textos = textos;
@@ -311,8 +352,17 @@ export async function fusionarDocumentos(db, ids, { aplicar = true } = {}) {
     };
     if (imagenesExtra.length) update.$push.imagenes = { $each: imagenesExtra };
     await col.updateOne({ _id: principal._id }, update);
-    const act = await col.findOne({ _id: principal._id });
-    await regenerarSidecarsDoc(db, act, carpetaP).catch(() => {});
+    let act = await col.findOne({ _id: principal._id });
+    if (ganadora && ganadora.cdu !== principal.cdu) {
+        const rc = await aplicarCduConPrioridad(db, act, ganadora.cdu, ganadora.fuente).catch(() => null);
+        if (rc?.aplicada) {
+            // Una CDU que pusiste A MANO en la otra versión sigue siendo manual en el principal.
+            if (ganadora.fuente === 'manual') await col.updateOne({ _id: principal._id }, { $set: { cdu_manual: true, cdu_fuente: 'manual' } });
+            resumen.cdu = `${principal.cdu || '∅'} → ${ganadora.cdu}`;
+            act = await col.findOne({ _id: principal._id });
+        }
+    }
+    await regenerarSidecarsDoc(db, act, carpetaDeDoc(act)).catch(() => {});
     await indexarDoc(db, principal._id).catch(() => {});
     return resumen;
 }

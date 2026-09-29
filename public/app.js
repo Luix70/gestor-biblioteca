@@ -15422,8 +15422,20 @@ async function loadSelecciones() {
         + 'Marca varios documentos en el Catálogo y pulsa «📌 Guardar como selección».</span></div>';
       return;
     }
-    cont.innerHTML = lista.map((s) => `<div class="card" style="padding:14px;margin-bottom:10px">
+    // MARCAR VARIAS (admin): casilla por tarjeta + Todas/Ninguna (sobre las VISIBLES tras el filtro) → fusionar las
+    // marcadas en una, o borrarlas (los documentos no se tocan). El filtro por nombre ayuda con cientos de ellas.
+    const esAdmin = ROL === 'admin';
+    const barra = esAdmin ? `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;position:sticky;top:0;z-index:2;background:var(--card);padding:6px 0">
+        <input id="selFiltro" placeholder="Filtrar por nombre…" style="flex:1;min-width:160px">
+        <button class="btn" id="selTodas" title="Marcar todas las que se ven (tras el filtro)">☑ Todas</button>
+        <button class="btn" id="selNinguna">☐ Ninguna</button>
+        <span class="muted" id="selN" style="font-size:12px">0 marcadas</span>
+        <button class="btn" id="selFusionar" disabled title="Une los documentos de las marcadas en la PRIMERA marcada y borra las demás (los documentos no se tocan)">🔗 Fusionar</button>
+        <button class="btn bad" id="selBorrarLote" disabled title="Borra las selecciones marcadas. Los documentos NO se borran: siguen en la base y en el disco.">🗑 Borrar marcadas</button>
+      </div>` : '';
+    cont.innerHTML = barra + lista.map((s) => `<div class="card selcard" data-nombre="${esc(String(s.nombre || '').toLowerCase())}" style="padding:14px;margin-bottom:10px">
       <div class="row" style="align-items:flex-start;gap:8px">
+        ${esAdmin ? `<input type="checkbox" class="selMarca" data-id="${esc(s._id)}" style="margin-top:4px;transform:scale(1.3)" title="Marcar para fusionar o borrar">` : ''}
         <div style="flex:1;min-width:0">
           <b style="font-size:16px;cursor:pointer" data-selver="${esc(s._id)}">📌 ${esc(s.nombre)}</b>
           <div class="muted" style="font-size:12px;margin-top:3px">${s.n} documento(s) · creada ${_fechaCorta(s.fecha_creacion)}
@@ -15457,9 +15469,54 @@ async function loadSelecciones() {
     cont.querySelectorAll('[data-selshare]').forEach((b) => (b.onclick = () => compartirGrupo('seleccion', b.dataset.selshare, b.dataset.nom)));
     cont.querySelectorAll('[data-seledit]').forEach((b) => (b.onclick = () => editarSeleccion(b.dataset.seledit, b.dataset.nom, b.dataset.desc)));
     cont.querySelectorAll('[data-seldel]').forEach((b) => (b.onclick = () => borrarSeleccionUI(b.dataset.seldel, b.dataset.nom)));
+    if (esAdmin) cablearMarcasSelecciones(cont);
   } catch (e) {
     cont.innerHTML = '<div class="muted">No se pudieron cargar: ' + esc(e.message) + '</div>';
   }
+}
+
+// Casillas de la página Selecciones: filtro, Todas/Ninguna, contador y acciones en lote.
+function cablearMarcasSelecciones(cont) {
+  const marcas = () => [...cont.querySelectorAll('.selMarca')];
+  const visibles = () => marcas().filter((c) => c.closest('.selcard').style.display !== 'none');
+  const marcadas = () => marcas().filter((c) => c.checked).map((c) => c.dataset.id);
+  const refrescar = () => {
+    const n = marcadas().length;
+    $('#selN').textContent = `${n} marcada${n === 1 ? '' : 's'}`;
+    $('#selFusionar').disabled = n < 2;
+    $('#selBorrarLote').disabled = n < 1;
+  };
+  marcas().forEach((c) => (c.onchange = refrescar));
+  $('#selFiltro').oninput = (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    cont.querySelectorAll('.selcard').forEach((t) => (t.style.display = !q || t.dataset.nombre.includes(q) ? '' : 'none'));
+  };
+  $('#selTodas').onclick = () => { visibles().forEach((c) => (c.checked = true)); refrescar(); };
+  $('#selNinguna').onclick = () => { marcas().forEach((c) => (c.checked = false)); refrescar(); };
+  $('#selBorrarLote').onclick = async () => {
+    const ids = marcadas();
+    if (!ids.length || !confirm(`Se BORRARÁN ${ids.length} selección(es).\n\nLos documentos NO se borran: siguen en la base y en el disco (solo dejan de estar en esas selecciones). ¿Seguir?`)) return;
+    try {
+      const r = await api('/selecciones/borrar-lote', { method: 'POST', body: JSON.stringify({ ids }) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo borrar');
+      toast(`${r.borradas} selección(es) borrada(s)`);
+      loadSelecciones();
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  $('#selFusionar').onclick = async () => {
+    const ids = marcadas();
+    if (ids.length < 2) return;
+    const primera = cont.querySelector(`.selMarca[data-id="${ids[0]}"]`)?.closest('.selcard')?.querySelector('[data-selver]')?.textContent?.replace(/^📌\s*/, '') || '';
+    const nombre = prompt(`Se unirán los documentos de ${ids.length} selecciones en una sola (sin duplicados) y se borrarán las demás. Los documentos no se tocan.\n\nNombre de la selección resultante:`, primera);
+    if (nombre == null) return;
+    try {
+      const r = await api('/selecciones/fusionar', { method: 'POST', body: JSON.stringify({ ids, nombre }) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo fusionar');
+      toast(`Fusionadas en «${r.nombre}»: ${r.n} documento(s)`);
+      loadSelecciones();
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  refrescar();
 }
 
 /**

@@ -70,7 +70,7 @@ import { reconstruirInventarioObra } from './utils/obras.js';
 import { ultimasLineas, infoLog, purgarLog } from './utils/registro-logs.js';
 import { CATEGORIAS_SCRIPTS, catalogoParaPanel, scriptPorId, construirArgv } from './utils/catalogo-scripts.js';
 import { listarFichas, crearFicha, actualizarFicha, borrarFicha, entidadExiste, COL_POR_AMBITO } from './utils/fichas-lectura.js';
-import { listarSelecciones, crearSeleccion, editarSeleccion, borrarSeleccion, anadirDocs, quitarDocs, reemplazarDocs,
+import { listarSelecciones, crearSeleccion, editarSeleccion, borrarSeleccion, borrarSelecciones, fusionarSelecciones, anadirDocs, quitarDocs, reemplazarDocs,
          fichaSeleccion, docsDeSeleccion, seleccionesDeDoc } from './utils/selecciones.js';
 import { lanzarScript, estadoEjecutor, detenerScript } from './utils/ejecutor-scripts.js';
 import { setVerboso, getVerboso } from './utils/consola-timestamp.js';
@@ -3383,6 +3383,18 @@ export function rutasPanel() {
     });
     r.post('/selecciones/:id/editar', async (req, res) => {
         try { res.json(await editarSeleccion(await conectarDB(), req.params.id, req.body || {})); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // En LOTE (página Selecciones: marcar varias). Borrar NO toca los documentos; fusionar une sus documentos en la
+    // primera marcada y borra las demás.
+    r.post('/selecciones/borrar-lote', async (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        try { res.json(await borrarSelecciones(await conectarDB(), req.body?.ids)); }
+        catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/selecciones/fusionar', async (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        try { res.json(await fusionarSelecciones(await conectarDB(), req.body?.ids, { nombre: req.body?.nombre })); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/selecciones/:id/borrar', async (req, res) => {

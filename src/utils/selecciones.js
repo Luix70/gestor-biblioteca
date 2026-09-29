@@ -94,6 +94,43 @@ export async function borrarSeleccion(db, id) {
     return { ok: true };
 }
 
+/**
+ * Borra VARIAS selecciones. Como `borrarSeleccion`: los documentos NO se tocan (quedan en la base y en el disco;
+ * solo dejan de estar en esas selecciones). Devuelve cuántas se borraron.
+ */
+export async function borrarSelecciones(db, ids) {
+    const lista = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
+    if (!lista.length) return { ok: false, motivo: 'no se recibió ninguna selección' };
+    const r = await db.collection('selecciones').deleteMany({ _id: { $in: lista } });
+    await db.collection('fichas_lectura').deleteMany({ ambito: 'seleccion', ref: { $in: lista } }).catch(() => {});
+    return { ok: true, borradas: r.deletedCount };
+}
+
+/**
+ * FUSIONA varias selecciones en una: la primera recibe los documentos de todas (sin duplicados) y, si se da,
+ * el nombre nuevo; las demás se borran. Sus comentarios (fichas de lectura) pasan a la que queda. Los documentos
+ * no se tocan.
+ */
+export async function fusionarSelecciones(db, ids, { nombre = null } = {}) {
+    const lista = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
+    if (lista.length < 2) return { ok: false, motivo: 'elige al menos dos selecciones' };
+    const sels = await db.collection('selecciones').find({ _id: { $in: lista } }).toArray();
+    if (sels.length < 2) return { ok: false, motivo: 'no se encontraron las selecciones' };
+    const destino = sels.find((s) => String(s._id) === String(lista[0])) || sels[0];
+    const otras = sels.filter((s) => s !== destino);
+    const vistos = new Set();
+    const docs = [];
+    for (const s of [destino, ...otras]) for (const d of (s.docs || [])) if (!vistos.has(String(d))) { vistos.add(String(d)); docs.push(d); }
+    const set = { docs, fecha_actualizacion: new Date() };
+    const nom = limpiar(nombre, 120);
+    if (nom) set.nombre = nom;
+    await db.collection('selecciones').updateOne({ _id: destino._id }, { $set: set });
+    const idsOtras = otras.map((s) => s._id);
+    await db.collection('fichas_lectura').updateMany({ ambito: 'seleccion', ref: { $in: idsOtras } }, { $set: { ref: destino._id } }).catch(() => {});
+    await db.collection('selecciones').deleteMany({ _id: { $in: idsOtras } });
+    return { ok: true, _id: String(destino._id), nombre: nom || destino.nombre, n: docs.length, fusionadas: idsOtras.length };
+}
+
 /** AÑADE documentos ($addToSet: nunca duplica, así que «añadir otra vez» es inofensivo). */
 export async function anadirDocs(db, id, ids) {
     const _id = oid(id);

@@ -1187,11 +1187,25 @@ de ficheros clasificado por CDU.
         en `redirecciones` (la ficha lo abre en el principal: enlaces y NFC siguen valiendo); el resto de la
         carpeta retirada (imágenes derivadas, sidecars) a la Papelera; las imágenes añadidas a mano, al principal.
         El hash de una versión sigue identificando al documento (atajo del Inbox).
+      · FUSIÓN CONSERVADORA (regla del usuario: se agrega, no se borra): AUTORES, COLABORADORES y MATERIAS se unen;
+        la CDU queda la de mayor prioridad (si gana una manual de otra versión, sigue siendo manual) y las demás en
+        `cdus_alternativas`; colecciones distintas → las otras en `colecciones_adicionales`; y cada documento
+        retirado se guarda ENTERO en `documentos_fusionados` (títulos, sinopsis, ubicación, valoración, notas…).
+      · ISBN comparado en 13 dígitos: un ISBN-10 y su ISBN-13 son el mismo libro (EPUB 184968667X y MOBI
+        9781849686679). El nº de colección solo frena la fusión si es real (no automático y escrito en el título
+        o el nombre del fichero). Medido el 29-sep: 971 grupos seguros (1.957 documentos) antes de este último ajuste.
       · scripts/fusionar-versiones.js: por defecto clasifica y crea selecciones «Versiones por revisar <ISBN> (N)»
         y «ISBN compartido <ISBN> (N)» (sin tocar documentos); --ejecutar fusiona los seguros (--isbn, --limite).
       · Acción «🔗 Fusionar versiones» (barra de la selección): fusiona los que TÚ elijas (rechaza formatos distintos).
       · detectar-portadas-artefacto: el mismo ISBN ya es la misma obra (822 selecciones «Portada sospechosa» cuyos
         documentos compartían ISBN, borradas a petición del usuario el 29-sep).
+
+    SELECCIONES EN LOTE (2026-09-29, página Selecciones, admin): casilla en cada selección, filtro por nombre,
+    «☑ Todas» (las visibles tras el filtro) / «☐ Ninguna», y con las marcadas: «🔗 Fusionar» (une sus documentos en
+    la primera marcada, sin duplicados, con el nombre que elijas; sus comentarios pasan a ella; las demás se
+    borran) o «🗑 Borrar marcadas» (solo las selecciones: los documentos siguen en la base y en el disco).
+    POST /selecciones/borrar-lote y /selecciones/fusionar. Limpieza hecha el 29-sep: 822 + 155 selecciones
+    «Portada sospechosa» que eran el mismo libro (mismo ISBN, o EPUB/MOBI del mismo libro con ISBN-10/13).
 
     HASH DEL DOCUMENTO: REGENERARLO Y DETECTAR SI QUEDÓ VIEJO (2026-09-29, utils/hash-doc.js). Si modificas el
     fichero de un documento (quitar de un PDF una página artefacto, anotarlo…), el hash de la ingesta deja de ser
