@@ -1204,7 +1204,9 @@ de ficheros clasificado por CDU.
     «☑ Todas» (las visibles tras el filtro) / «☐ Ninguna», y con las marcadas: «🔗 Fusionar» (une sus documentos en
     la primera marcada, sin duplicados, con el nombre que elijas; sus comentarios pasan a ella; las demás se
     borran) o «🗑 Borrar marcadas» (solo las selecciones: los documentos siguen en la base y en el disco).
-    POST /selecciones/borrar-lote y /selecciones/fusionar. Limpieza hecha el 29-sep: 822 + 155 selecciones
+    POST /selecciones/borrar-lote y /selecciones/fusionar.
+    ORDEN: nombre (A→Z / Z→A), nº de documentos (más / menos primero) o fecha de creación (recientes / antiguas
+    primero); se recuerda entre sesiones (localStorage «sel_orden»). También para invitados. Limpieza hecha el 29-sep: 822 + 155 selecciones
     «Portada sospechosa» que eran el mismo libro (mismo ISBN, o EPUB/MOBI del mismo libro con ISBN-10/13).
 
     HASH DEL DOCUMENTO: REGENERARLO Y DETECTAR SI QUEDÓ VIEJO (2026-09-29, utils/hash-doc.js). Si modificas el

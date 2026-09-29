@@ -15410,6 +15410,11 @@ async function opSeleccion(ids, modo) {
   };
 }
 
+/** Orden guardado de la página Selecciones («campo:asc|desc»); por defecto, las más recientes primero. */
+function ordenSelecciones() {
+  try { return localStorage.getItem('sel_orden') || 'fecha:desc'; } catch { return 'fecha:desc'; }
+}
+
 /** Página «Selecciones»: tarjetas con nombre, descripción, nº de documentos y fechas. */
 async function loadSelecciones() {
   const cont = $('#selBody');
@@ -15417,6 +15422,19 @@ async function loadSelecciones() {
   cont.innerHTML = '<div class="muted">Cargando…</div>';
   try {
     const lista = (await api('/selecciones')).selecciones || [];
+    // ORDEN elegido (se recuerda entre sesiones): nombre, nº de documentos o fecha de creación, asc/desc.
+    const orden = ordenSelecciones();
+    const [campo, sentido] = orden.split(':');
+    const clave = {
+      nombre: (x) => String(x.nombre || '').toLocaleLowerCase('es'),
+      n: (x) => x.n || 0,
+      fecha: (x) => new Date(x.fecha_creacion || 0).getTime(),
+    }[campo] || ((x) => 0);
+    lista.sort((a, b) => {
+      const va = clave(a), vb = clave(b);
+      const c = typeof va === 'string' ? va.localeCompare(vb, 'es', { numeric: true }) : va - vb;
+      return sentido === 'desc' ? -c : c;
+    });
     if (!lista.length) {
       cont.innerHTML = '<div class="empty">Aún no tienes selecciones.<br><span class="muted" style="font-size:13px">'
         + 'Marca varios documentos en el Catálogo y pulsa «📌 Guardar como selección».</span></div>';
@@ -15425,7 +15443,15 @@ async function loadSelecciones() {
     // MARCAR VARIAS (admin): casilla por tarjeta + Todas/Ninguna (sobre las VISIBLES tras el filtro) → fusionar las
     // marcadas en una, o borrarlas (los documentos no se tocan). El filtro por nombre ayuda con cientos de ellas.
     const esAdmin = ROL === 'admin';
+    const opciones = [
+      ['nombre:asc', 'Nombre (A→Z)'], ['nombre:desc', 'Nombre (Z→A)'],
+      ['n:desc', 'Nº de documentos (más primero)'], ['n:asc', 'Nº de documentos (menos primero)'],
+      ['fecha:desc', 'Creación (recientes primero)'], ['fecha:asc', 'Creación (antiguas primero)'],
+    ];
+    const selectorOrden = `<select id="selOrden" title="Ordenar las selecciones">${opciones
+      .map(([v, t]) => `<option value="${v}"${v === orden ? ' selected' : ''}>↕ ${t}</option>`).join('')}</select>`;
     const barra = esAdmin ? `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;position:sticky;top:0;z-index:2;background:var(--card);padding:6px 0">
+        ${selectorOrden}
         <input id="selFiltro" placeholder="Filtrar por nombre…" style="flex:1;min-width:160px">
         <button class="btn" id="selTodas" title="Marcar todas las que se ven (tras el filtro)">☑ Todas</button>
         <button class="btn" id="selNinguna">☐ Ninguna</button>
@@ -15433,7 +15459,8 @@ async function loadSelecciones() {
         <button class="btn" id="selFusionar" disabled title="Une los documentos de las marcadas en la PRIMERA marcada y borra las demás (los documentos no se tocan)">🔗 Fusionar</button>
         <button class="btn bad" id="selBorrarLote" disabled title="Borra las selecciones marcadas. Los documentos NO se borran: siguen en la base y en el disco.">🗑 Borrar marcadas</button>
       </div>` : '';
-    cont.innerHTML = barra + lista.map((s) => `<div class="card selcard" data-nombre="${esc(String(s.nombre || '').toLowerCase())}" style="padding:14px;margin-bottom:10px">
+    // (Sin la barra de admin, el selector de orden va solo: ordenar es útil para cualquiera.)
+    cont.innerHTML = (barra || `<div class="row" style="margin-bottom:10px">${selectorOrden}</div>`) + lista.map((s) => `<div class="card selcard" data-nombre="${esc(String(s.nombre || '').toLowerCase())}" style="padding:14px;margin-bottom:10px">
       <div class="row" style="align-items:flex-start;gap:8px">
         ${esAdmin ? `<input type="checkbox" class="selMarca" data-id="${esc(s._id)}" style="margin-top:4px;transform:scale(1.3)" title="Marcar para fusionar o borrar">` : ''}
         <div style="flex:1;min-width:0">
@@ -15470,6 +15497,10 @@ async function loadSelecciones() {
     cont.querySelectorAll('[data-seledit]').forEach((b) => (b.onclick = () => editarSeleccion(b.dataset.seledit, b.dataset.nom, b.dataset.desc)));
     cont.querySelectorAll('[data-seldel]').forEach((b) => (b.onclick = () => borrarSeleccionUI(b.dataset.seldel, b.dataset.nom)));
     if (esAdmin) cablearMarcasSelecciones(cont);
+    $('#selOrden').onchange = (e) => {
+      try { localStorage.setItem('sel_orden', e.target.value); } catch { /* sin almacenamiento: solo esta vez */ }
+      loadSelecciones();
+    };
   } catch (e) {
     cont.innerHTML = '<div class="muted">No se pudieron cargar: ' + esc(e.message) + '</div>';
   }
