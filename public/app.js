@@ -11512,6 +11512,8 @@ function drillInteg(mk, m) {
       .join('');
   else if (mk === 'docsSinCarpeta')
     h = arr.map((x) => `<div class="intgrp">${dl(x)}<br>${carp(x.ruta)}</div>`).join('');
+  else if (mk === 'nombreUnicodeDistinto')
+    h = arr.map((x) => `<div class="intgrp">${dl(x)}${Array.isArray(x.cambios) ? `<div style="padding-left:16px;font-size:12px" class="muted">${x.cambios.map((c) => '· ' + esc(c)).join('<br>')}</div>` : ''}</div>`).join('');
   else if (mk === 'hashDesactualizado')
     h = arr.map((x) => `<div class="intgrp">${dl(x)} <span class="muted">— ${esc(x.motivo || '')}</span></div>`).join('');
   else if (mk === 'docsConAudiosRotos')

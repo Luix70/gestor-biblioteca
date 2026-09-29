@@ -134,7 +134,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     prog('cargando');
     const db = await conectarDB();
     const col = db.collection('biblioteca');
-    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1, portada: 1, hash_mtime: 1, hash_tamano: 1, hash_fecha: 1, fecha_ingreso: 1, paginas: 1 } }).toArray();
+    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1, portada: 1, hash_mtime: 1, hash_tamano: 1, hash_fecha: 1, fecha_ingreso: 1, paginas: 1, versiones: 1, archivos_originales: 1 } }).toArray();
     const rutasWeb = new Set(docs.map(d => d.ruta_base).filter(Boolean));
     const porId = new Map(docs.map(d => [String(d._id), d]));
 
@@ -158,10 +158,50 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         cdu: d.cdu || null, formatos: d.formatos || [], ...extra,
     });
 
+    // ── NOMBRES CON OTRA FORMA UNICODE («й» compuesta en la BD, «и»+acento en el disco…): el fichero o la carpeta
+    //    ESTÁN, pero no se encuentran al pedirlos byte a byte (visor, descarga, extracción). Se resuelve cada ruta
+    //    TRAMO A TRAMO en el disco, admitiendo otra forma Unicode en cualquier carpeta o fichero del camino, y se
+    //    acumulan por documento los cambios que necesita (carpeta, fichero, pistas, versiones, originales). ──
+    const listados = new Map();   // carpeta absoluta → sus entradas (caché: muchas rutas comparten carpetas)
+    const entradasDe = async (abs) => {
+        if (!listados.has(abs)) listados.set(abs, await fs.readdir(abs).catch(() => null));
+        return listados.get(abs);
+    };
+    /** La ruta web REAL en el disco (/recursos/…) de `web`, o null si algún tramo no existe en ninguna forma. */
+    const rutaWebReal = async (web) => {
+        const tramos = String(web || '').replace(/^\/recursos\//, '').split('/').filter(Boolean);
+        if (!tramos.length) return null;
+        let actual = DIR_CDU;
+        const reales = [];
+        for (const t of tramos) {
+            const ents = await entradasDe(actual);
+            const real = ents ? nombreEnDisco(ents, t) : null;
+            if (!real) return null;
+            reales.push(real);
+            actual = path.join(actual, real);
+        }
+        return '/recursos/' + reales.join('/');
+    };
+    const unicode = new Map();   // id → { d, cambios:[{tipo, de, a}] }
+    const anotarUnicode = (d, tipo, de, a) => {
+        const k = String(d._id);
+        if (!unicode.has(k)) unicode.set(k, { d, cambios: [] });
+        unicode.get(k).cambios.push({ tipo, de, a });
+    };
+    // Carpeta REAL del documento (la corregida si su nombre tenía otra forma Unicode).
+    const rutaBaseReal = (d) => unicode.get(String(d._id))?.cambios.find((c) => c.tipo === 'carpeta')?.a || d.ruta_base;
+
     // ── A. Docs sin carpeta en disco (solo informa) ──
     const sinCarpeta = [];
     let _iA = 0;
-    for (const d of docs) { if (d.ruta_base && !await existe(absDe(d.ruta_base))) sinCarpeta.push(d); if (++_iA % 50 === 0) prog('docs-sin-carpeta', { i: _iA, total: docs.length }); }
+    for (const d of docs) {
+        if (++_iA % 50 === 0) prog('docs-sin-carpeta', { i: _iA, total: docs.length });
+        if (!d.ruta_base || await existe(absDe(d.ruta_base))) continue;
+        // ¿Está con OTRA FORMA UNICODE en algún tramo del camino? Entonces no falta: se corrige la ruta.
+        const real = await rutaWebReal(d.ruta_base);
+        if (real && real !== d.ruta_base) anotarUnicode(d, 'carpeta', d.ruta_base, real);
+        else sinCarpeta.push(d);
+    }
     D.docsSinCarpeta = sinCarpeta.length;
     anotar('docsSinCarpeta', sinCarpeta, d => fichaDoc(d));
 
@@ -176,14 +216,27 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     // ── D. Docs cuya carpeta existe pero falta el fichero original (solo informa) ──
     prog('docs-sin-fichero', { i: 0, total: docs.length });
     const sinFichero = [];
-    const nombresUnicode = [];   // el fichero está, pero su nombre en la BD tiene otra forma Unicode
     let _iD = 0;
     for (const d of docs) {
         if (++_iD % 50 === 0) prog('docs-sin-fichero', { i: _iD, total: docs.length });
         // 'papel' (sin fichero digital) y AUDIOLIBROS audio-only (su original son las pistas) no aplican.
         if ((d.formatos || []).includes('papel') || !d.ruta_base || esAudioSinDoc(d)) continue;
-        const carpeta = absDe(d.ruta_base);
+        const carpeta = absDe(rutaBaseReal(d));
         if (!await existe(carpeta)) continue;   // eso ya lo cuenta «docs sin carpeta»
+        // Versiones fusionadas y originales de un documento de varios ficheros: con otra forma Unicode, se corrigen.
+        const ents = await entradasDe(carpeta) || [];
+        for (const v of (d.versiones || [])) {
+            if (v?.nombre_archivo && !ents.includes(v.nombre_archivo)) {
+                const real = nombreEnDisco(ents, v.nombre_archivo);
+                if (real) anotarUnicode(d, 'version', v.nombre_archivo, real);
+            }
+        }
+        for (const o of (Array.isArray(d.archivos_originales) ? d.archivos_originales : [])) {
+            if (typeof o === 'string' && !ents.includes(o)) {
+                const real = nombreEnDisco(ents, o);
+                if (real) anotarUnicode(d, 'original', o, real);
+            }
+        }
         // NO SE ADIVINA POR EXTENSIÓN: el documento YA SABE cómo se llama su fichero (`nombre_archivo`), así
         // que se comprueba ESE. Antes se buscaba «algún fichero con una extensión de la lista EXT_DOC», una
         // lista estrecha que ni siquiera coincidía con FORMATOS_DOC de aquí al lado: le faltaban .cbz, .azw3,
@@ -196,8 +249,8 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         // ¿Está, pero con el nombre escrito en OTRA FORMA UNICODE («й» compuesta vs «и»+acento)? No falta: hay que
         // guardar en la BD el nombre REAL (el visor y la descarga lo piden byte a byte).
         if (falta && d.nombre_archivo) {
-            const real = nombreEnDisco(await fs.readdir(carpeta).catch(() => []), d.nombre_archivo);
-            if (real) { nombresUnicode.push({ d, real }); falta = false; }
+            const real = nombreEnDisco(ents, d.nombre_archivo);
+            if (real) { anotarUnicode(d, 'fichero', d.nombre_archivo, real); falta = false; }
         }
         // Se apunta QUÉ HAY de verdad en la carpeta: con «falta el original», lo primero que quieres saber es
         // qué quedó. Si están la portada y los sidecars y no el pdf, el fichero se perdió; si no hay nada, la
@@ -206,23 +259,6 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     }
     D.docsSinFicheroOriginal = sinFichero.length;
     anotar('docsSinFicheroOriginal', sinFichero, x => fichaDoc(x.d, { contenido: x.contenido }));
-    D.nombreUnicodeDistinto = nombresUnicode.length;
-    anotar('nombreUnicodeDistinto', nombresUnicode, x => fichaDoc(x.d, { real: x.real }));
-    if (reparar && nombresUnicode.length) {
-        // Se guarda el nombre REAL del disco (y se corrige en `textos[]`, cuyas rutas lo llevan).
-        let n = 0;
-        for (const { d, real } of nombresUnicode) {
-            const full = await col.findOne({ _id: d._id }, { projection: { textos: 1, ruta_base: 1 } });
-            const set = { nombre_archivo: real };
-            if (Array.isArray(full?.textos)) {
-                set.textos = full.textos.map((t) => (t?.ruta && path.basename(t.ruta).normalize('NFC') === real.normalize('NFC'))
-                    ? { ...t, ruta: `${path.posix.dirname(t.ruta)}/${real}` } : t);
-            }
-            await col.updateOne({ _id: d._id }, { $set: set });
-            n++;
-        }
-        R.nombresUnicodeCorregidos = n;
-    }
 
     // ── D-bis. AUDIOS ROTOS: docs cuyo `audios[]` apunta a ficheros que NO están en disco (solo informa) ──
     // PUNTO CIEGO que esto tapa: la comprobación de arriba EXCLUYE a los audiolibros (`esAudioSinDoc`) porque
@@ -242,7 +278,11 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         const rotas = [];
         for (const a of pistas) {
             const abs = absDe(a?.ruta);
-            if (!abs || !(await existe(abs))) rotas.push(a?.ruta || '(pista sin ruta)');
+            if (abs && await existe(abs)) continue;
+            // ¿Está con otra forma Unicode (en su nombre o en alguna carpeta del camino)? Se corrige, no falta.
+            const real = a?.ruta ? await rutaWebReal(a.ruta) : null;
+            if (real && real !== a.ruta) anotarUnicode(d, 'pista', a.ruta, real);
+            else rotas.push(a?.ruta || '(pista sin ruta)');
         }
         if (rotas.length) audiosRotos.push({ d, faltan: rotas.length, total: pistas.length, rotas });
     }
@@ -250,6 +290,59 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     anotar('docsConAudiosRotos', audiosRotos, x => fichaDoc(x.d, {
         faltan: `${x.faltan}/${x.total} pistas`, pistas: x.rotas,
     }));
+
+    // ── Nombres con otra forma Unicode: informe y REPARACIÓN (se guarda en la BD la forma REAL del disco) ──
+    const conUnicode = [...unicode.values()];
+    D.nombreUnicodeDistinto = conUnicode.length;
+    anotar('nombreUnicodeDistinto', conUnicode, x => fichaDoc(x.d, {
+        cambios: x.cambios.map((c) => `${c.tipo}: ${c.a}`),
+    }));
+    if (reparar && conUnicode.length) {
+        const nfc = (v) => String(v || '').normalize('NFC');
+        let n = 0;
+        for (const [k, x] of conUnicode.entries()) {
+            prog('reparando', { i: k + 1, total: conUnicode.length });
+            const full = await col.findOne({ _id: x.d._id }, {
+                projection: { ruta_base: 1, portada: 1, imagenes: 1, textos: 1, audios: 1, versiones: 1, archivos_originales: 1, nombre_archivo: 1 },
+            });
+            if (!full) continue;
+            const set = {};
+            // 1) Carpeta: la ruta base y TODO lo que cuelga de ella (portada, imágenes, textos, pistas).
+            const carpeta = x.cambios.find((c) => c.tipo === 'carpeta');
+            const cambiarPrefijo = (ruta) => (carpeta && typeof ruta === 'string' && nfc(ruta).startsWith(nfc(carpeta.de) + '/'))
+                ? carpeta.a + ruta.slice(carpeta.de.length) : ruta;
+            let imagenes = full.imagenes, textos = full.textos, audios = full.audios, versiones = full.versiones, originales = full.archivos_originales;
+            if (carpeta) {
+                set.ruta_base = carpeta.a;
+                if (full.portada) set.portada = cambiarPrefijo(full.portada);
+                if (Array.isArray(imagenes)) imagenes = imagenes.map((im) => (im?.ruta ? { ...im, ruta: cambiarPrefijo(im.ruta) } : im));
+                if (Array.isArray(textos)) textos = textos.map((t) => (t?.ruta ? { ...t, ruta: cambiarPrefijo(t.ruta) } : t));
+                if (Array.isArray(audios)) audios = audios.map((a) => (a?.ruta ? { ...a, ruta: cambiarPrefijo(a.ruta) } : a));
+            }
+            // 2) Nombres de fichero (principal, versiones, originales) y su entrada en `textos[]`.
+            const renombrar = (de, a) => {
+                if (Array.isArray(textos)) textos = textos.map((t) => (t?.ruta && nfc(path.posix.basename(t.ruta)) === nfc(de))
+                    ? { ...t, ruta: `${path.posix.dirname(t.ruta)}/${a}` } : t);
+            };
+            for (const c of x.cambios) {
+                if (c.tipo === 'fichero') { set.nombre_archivo = c.a; renombrar(c.de, c.a); }
+                if (c.tipo === 'version' && Array.isArray(versiones)) {
+                    versiones = versiones.map((v) => (v && nfc(v.nombre_archivo) === nfc(c.de) ? { ...v, nombre_archivo: c.a } : v));
+                    renombrar(c.de, c.a);
+                }
+                if (c.tipo === 'original' && Array.isArray(originales)) originales = originales.map((o) => (nfc(o) === nfc(c.de) ? c.a : o));
+                // 3) Pistas: la ruta completa real.
+                if (c.tipo === 'pista' && Array.isArray(audios)) audios = audios.map((a) => (a?.ruta && nfc(a.ruta) === nfc(cambiarPrefijo(c.de)) || nfc(a?.ruta) === nfc(c.de) ? { ...a, ruta: c.a } : a));
+            }
+            if (imagenes !== full.imagenes) set.imagenes = imagenes;
+            if (textos !== full.textos) set.textos = textos;
+            if (audios !== full.audios) set.audios = audios;
+            if (versiones !== full.versiones) set.versiones = versiones;
+            if (originales !== full.archivos_originales) set.archivos_originales = originales;
+            if (Object.keys(set).length) { await col.updateOne({ _id: x.d._id }, { $set: set }); n++; }
+        }
+        R.nombresUnicodeCorregidos = n;
+    }
 
     // ── D-ter. HASH DESACTUALIZADO: el fichero cambió DESPUÉS de calcular su hash (se le quitó una página, se
     //    anotó…). Detección BARATA por huella (tamaño + fecha de modificación guardados con el hash; sin leer el

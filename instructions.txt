@@ -1035,8 +1035,11 @@ de ficheros clasificado por CDU.
         aparece y la carpeta tiene OTROS documentos, devuelve null (nunca un fichero de otro libro).
       · Endpoints de páginas (DjVu/cómic), imágenes EPUB/MOBI y CHM: resuelven el fichero con esa función.
       · Integridad: categoría «Nombre de fichero con otra forma Unicode» (antes contaba como «sin fichero»);
-        «Diagnosticar y reparar» guarda en la BD el nombre REAL del disco (y lo corrige en `textos[]`), para que el
-        visor y la descarga —que lo piden byte a byte— lo encuentren.
+        «Diagnosticar y reparar» guarda en la BD la forma REAL del disco, para que el visor y la descarga —que lo
+        piden byte a byte— lo encuentren. Cubre (ampliado el 29-sep): el FICHERO principal, la CARPETA (`ruta_base`,
+        resuelta tramo a tramo: cualquier carpeta del camino puede tener otra forma; se corrigen también la portada,
+        las imágenes, los textos y las pistas que cuelgan de ella), las PISTAS de audio (`audios[]`), las VERSIONES
+        fusionadas y los ORIGINALES de un documento de varios ficheros. El detalle dice qué cambia en cada documento.
 
     CAMPAÑAS: INTERRUPTOR GENERAL (2026-09-29). En la cabecera de «🎯 Campañas de fondo», «Todas las campañas»
     enciende o apaga TODAS a la vez. Apagado, ninguna corre sola (ajustes/campanas.encendidas=false; el planificador
