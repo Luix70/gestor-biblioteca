@@ -489,6 +489,8 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
     if (buenos.length > 1) {
         const prov = siMismaEditorial(buenos);
         if (prov) return conCaidas(prov);
+        // Editoriales distintas: la más probable SOLO si alguna prueba la respalda (siempre las hay aquí: «buenos»
+        // son los que casan editorial, traductor, año o colección); la elegida es la de más pruebas.
         return conCaidas(masProbable(doc, buenos, 'con pruebas, de editoriales distintas'));
     }
     const reducidas = reducirCandidatas(doc, casiCandidatos(doc, candidatos));
@@ -499,7 +501,12 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
     }
     if (reducidas.length > 1) {
         const conSeñales = reducidas.map((c) => ({ ...c, señales: c.señales || [] }));
-        return conCaidas(siMismaEditorial(conSeñales) || masProbable(doc, conSeñales, 'sin pruebas que la confirmen'));
+        // SIN PRUEBAS no se elige ninguna «a ciegas»: con un clásico hay cientos de ediciones y la «más probable» es
+        // lotería (medido el 29-sep: adaptaciones de Oxford Bookworms recibían el ISBN de ediciones completas de
+        // Printers Row, Nasionale Boekhandel, Harvard…). Todas de la misma editorial → provisional (la edición da
+        // igual); si no, se guardan las candidatas y eliges tú en la ficha.
+        return conCaidas(siMismaEditorial(conSeñales) || { estado: 'ambiguo', candidatos: conSeñales,
+            motivo: `${conSeñales.length} ediciones posibles de editoriales distintas y nada que confirme cuál: elige en la ficha` });
     }
     if (caidas.length) return conCaidas({ estado: 'sin-candidatos', candidatos: [], motivo: `no hallado, pero no respondió: ${[...new Set(caidas)].join(', ')}` });
     return conCaidas({ estado: 'sin-candidatos', candidatos: [], motivo: 'ninguna autoridad tiene esta edición' });

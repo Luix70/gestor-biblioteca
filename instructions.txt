@@ -1097,6 +1097,12 @@ de ficheros clasificado por CDU.
     esMaterialDerivado: si tras un separador («— », «: », «(») el título dice ejercicios, solucionario, soluciones,
     test, examen, actividades, cuaderno, workbook, worksheet, answer key, teacher's book, guía didáctica…, no se
     identifica como el libro. fusionar-versiones: un grupo con material derivado va a «por revisar», nunca solo.
+    SIN ELECCIONES A CIEGAS (29-sep, 2.º dry-run): con un clásico hay cientos de ediciones y la «más probable» sin
+    pruebas era lotería (adaptaciones de Oxford Bookworms recibían ISBN de ediciones completas de Printers Row,
+    Nasionale Boekhandel, Harvard…). Ahora: sin pruebas, provisional SOLO si todas las candidatas son de la misma
+    editorial; si no, se guardan las candidatas y eliges en la ficha. Con pruebas (editorial, traductor, año,
+    colección), la de más pruebas. Y varios documentos con el MISMO TÍTULO en la MISMA carpeta («Ghost Stories [1]
+    / [2] / [3].pdf» de una colección transmedia) no se identifican por autoridad: no se sabe cuál es el libro.
     DIARIO PARA DESHACER: cada documento que toca reidentificarDoc guarda en `deshacer[]` el valor anterior de cada
     campo cambiado (y la CDU y la carpeta si la CDU se aplicó).
     REVERSIÓN (sin copia de la base): scripts/revertir-reidentificacion.js --log <log de la ejecución> [--ejecutar]

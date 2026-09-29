@@ -290,7 +290,15 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // Si ya se te propusieron ediciones y dijiste «ninguna», no se vuelve a proponer (salvo forzando).
     // Identificar la EDICIÓN por autoridad es solo para LIBROS: una revista, un cómic, un audiolibro o un programa
     // no tienen «edición» en los catálogos de libros (medido: números de revista recibieron ISBN de libros).
-    const identificable = doc.tipo_recurso === 'libro' && !['comic', 'audiolibro', 'software'].includes(doc.naturaleza);
+    let identificable = doc.tipo_recurso === 'libro' && !['comic', 'audiolibro', 'software'].includes(doc.naturaleza);
+    // Varios documentos con el MISMO TÍTULO en la MISMA carpeta («Ghost Stories [1].pdf», «[2].pdf», «[3].pdf» de
+    // una colección transmedia: el libro, sus actividades, sus tests…): no se sabe cuál es el libro, así que
+    // ninguno recibe su ISBN por autoridad (medido el 29-sep con Oxford Bookworms Library).
+    if (identificable && doc.ruta_base) {
+        const hermano = await db.collection('biblioteca').findOne(
+            { ruta_base: doc.ruta_base, titulo: doc.titulo, _id: { $ne: doc._id } }, { projection: { _id: 1 } });
+        if (hermano) identificable = false;
+    }
     if (!isbn && identificable && (!doc.edicion_descartada || forzar)) {
         const pruebas = await datosDeAutoridad(db, doc);
         editorialActual = pruebas.editorial;
