@@ -43,7 +43,7 @@ import 'dotenv/config';
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';
-import { reidentificarDoc, resolverCduDoc, VERSION_RECUPERAR_ISBN, CAMPO_MARCA_RECUPERAR_ISBN } from '../src/utils/reidentificar-doc.js';
+import { reidentificarDoc, resolverCduDoc, VERSION_RECUPERAR_ISBN, CAMPO_MARCA_RECUPERAR_ISBN, anotarRevisionIsbn } from '../src/utils/reidentificar-doc.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const TODOS = process.argv.includes('--todos');
@@ -115,7 +115,7 @@ async function main() {
     if (yaRevisados) console.log(`   (${yaRevisados} ya revisados antes sin éxito se saltan; --reintentar para repasarlos)`);
     console.log('');
 
-    const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, ambiguos: 0, cdu: 0, fallos: 0 };
+    const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, ambiguos: 0, cdu: 0, fallos: 0, reintentar: 0 };
     const t0 = Date.now();
     let i = 0;
     for (const _id of ids) {
@@ -130,9 +130,15 @@ async function main() {
         try {
             // Tope por libro: una espera de red eterna (API colgada) no puede parar la tanda — se salta y se apunta.
             r = await conTope(reidentificarDoc(db, doc, { aplicar: EJECUTAR, usarApis: !SIN_APIS, forzar: FORZAR, conIA: CON_IA, isbnManual: idArg ? isbnArg : null }), TOPE_LIBRO_MS);
-        } catch (e) { st.fallos++; process.stdout.write(`\r\x1b[K[${i}/${ids.length}] ⛔ ${_id} · ${(doc.titulo || '').slice(0, 45)}: ${e.message}\n`); continue; }
+        } catch (e) {
+            st.fallos++;
+            process.stdout.write(`\r\x1b[K[${i}/${ids.length}] ⛔ ${_id} · ${(doc.titulo || '').slice(0, 45)}: ${e.message}\n`);
+            if (EJECUTAR && RECUPERACION) await anotarRevisionIsbn(db, _id, null).catch(() => {});   // intento, no marca
+            continue;
+        }
+        // Marca «ya revisado» SOLO si no queda esperanza; si alguna fuente no respondió, se anota el intento.
         if (EJECUTAR && RECUPERACION) {
-            await col.updateOne({ _id }, { $set: { [CAMPO_MARCA_RECUPERAR_ISBN]: VERSION_RECUPERAR_ISBN } }).catch(() => {});
+            if (await anotarRevisionIsbn(db, _id, r).catch(() => null) === 'reintentar') st.reintentar++;
         }
 
         if (r.estado === 'identificado' || r.estado === 'aplicado') {
@@ -173,6 +179,7 @@ async function main() {
     if (CON_CDU) console.log(`  ${EJECUTAR ? 'CDU resueltas' : 'CDU resolubles'}      : ${st.cdu}  (del Dewey/LCC por crosswalk${CON_IA ? '+IA' : ''})`);
     if (st.ambiguos) console.log(`  edición ambigua         : ${st.ambiguos}  (título y autor casan, pero hay varias ediciones o ninguna confirmada → míralas tú)`);
     if (st.yaTiene) console.log(`  ya tenían ISBN          : ${st.yaTiene}`);
+    if (st.reintentar) console.log(`  con esperanza           : ${st.reintentar}  (alguna fuente no respondió: NO se marcan, se reintentarán)`);
     if (st.fallos) console.log(`  fallos / saltados       : ${st.fallos}  (error o más de ${TOPE_LIBRO_MS / 60000} min con un libro; se reintentan en la próxima pasada)`);
     if (!EJECUTAR) console.log('\n▶ Ejecuta con --ejecutar para aplicar (haz COPIA DE SEGURIDAD de la BD antes).');
     process.exit(0);

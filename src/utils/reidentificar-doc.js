@@ -179,6 +179,33 @@ export async function elegirEdicion(db, id, { isbn = null, ninguna = false } = {
  */
 export const VERSION_RECUPERAR_ISBN = 1;
 export const CAMPO_MARCA_RECUPERAR_ISBN = 'campanas.recuperar-isbn';
+// Intentos «con esperanza» (alguna fuente no respondió, error, tope de tiempo): se anotan y el libro vuelve a
+// la cola pasadas unas horas. Tras MAX_INTENTOS ya no se espera más y se marca (un fichero que siempre falla no
+// puede ocupar la cola para siempre).
+export const CAMPO_INTENTOS_RECUPERAR_ISBN = 'recuperar_isbn_intentos';
+export const CAMPO_ULTIMO_INTENTO_RECUPERAR_ISBN = 'recuperar_isbn_ultimo_intento';
+const MAX_INTENTOS_RECUPERAR_ISBN = Number(process.env.RECUPERAR_ISBN_MAX_INTENTOS || 5);
+
+/**
+ * Anota el resultado de mirar un libro sin ISBN. Solo se MARCA como revisado (fuera de la cola) cuando no queda
+ * esperanza: se identificó, quedó ambiguo (esperan tu elección) o TODAS las fuentes respondieron y ninguna lo
+ * tiene. Si alguna no respondió (r.reintentable) o hubo error/tope (r == null), se anota el intento y vuelve.
+ * @returns {Promise<'marcado'|'reintentar'>}
+ */
+export async function anotarRevisionIsbn(db, id, r) {
+    const col = db.collection('biblioteca');
+    const marcar = () => col.updateOne({ _id: id }, {
+        $set: { [CAMPO_MARCA_RECUPERAR_ISBN]: VERSION_RECUPERAR_ISBN },
+        $unset: { [CAMPO_INTENTOS_RECUPERAR_ISBN]: '', [CAMPO_ULTIMO_INTENTO_RECUPERAR_ISBN]: '' },
+    });
+    if (r && !r.reintentable) { await marcar(); return 'marcado'; }
+    const act = await col.findOneAndUpdate({ _id: id },
+        { $inc: { [CAMPO_INTENTOS_RECUPERAR_ISBN]: 1 }, $set: { [CAMPO_ULTIMO_INTENTO_RECUPERAR_ISBN]: new Date() } },
+        { returnDocument: 'after', projection: { [CAMPO_INTENTOS_RECUPERAR_ISBN]: 1 } });
+    const intentos = (act?.value ?? act)?.[CAMPO_INTENTOS_RECUPERAR_ISBN] || 0;
+    if (intentos >= MAX_INTENTOS_RECUPERAR_ISBN) { await marcar(); return 'marcado'; }
+    return 'reintentar';
+}
 
 /**
  * Re-identifica UN documento por su ISBN: lo obtiene (del fichero / a mano / por código de barras con IA / del
@@ -232,12 +259,19 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     //     sabemos —título, autor, editorial, colección, año, idioma—. Estricto: solo se acepta una edición que
     //     case título + autor Y confirme editorial/idioma/año; si hay varias posibles no se elige ninguna.
     let ambiguo = null;
+    // ¿QUEDA ESPERANZA si no se encuentra? Sí, si alguna fuente no respondió, si la identificación falló por un
+    // error, o si no se consultaron las fuentes en línea (--sin-apis): otro día puede salir.
+    let caidas = usarApis ? [] : ['apis (no consultadas)'];
     // Si ya se te propusieron ediciones y dijiste «ninguna», no se vuelve a proponer (salvo forzando).
     if (!isbn && (!doc.edicion_descartada || forzar)) {
         const r = await identificarEdicion(await datosDeAutoridad(db, doc), { online: usarApis, conIA }).catch(() => null);
+        if (!r) caidas.push('error en la identificación');
+        else caidas.push(...(r.fuentesCaidas || []));
         if (r?.estado === 'unico') { isbn = r.isbn; via = `autoridad/${r.via}`; }
         else if (r?.estado === 'ambiguo') ambiguo = r;
     }
+    const reintentable = caidas.length > 0;
+    const porQue = reintentable ? ` (no respondió: ${caidas.join(', ')} → se reintentará)` : '';
 
     if (!isbn) {
         if (ambiguo) {
@@ -247,9 +281,9 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
             if (aplicar && ambiguo.candidatos?.length) await guardarCandidatas(db, doc, ambiguo.candidatos);
             return { estado: 'ambiguo', motivo: ambiguo.motivo, candidatos: ambiguo.candidatos };
         }
-        if (!abs && !manual) return { estado: 'sin-fichero', motivo: 'no se encontró el fichero del documento en su carpeta' };
-        if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` };
-        return { estado: 'no-hallado', motivo: 'no se pudo obtener un ISBN (ni del texto, ni por barras/visión, ni por autoridad)' };
+        if (!abs && !manual) return { estado: 'sin-fichero', reintentable, motivo: 'no se encontró el fichero del documento en su carpeta' + porQue };
+        if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', reintentable, motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` + porQue };
+        return { estado: 'no-hallado', reintentable, motivo: 'no se pudo obtener un ISBN (ni del texto, ni por barras/visión, ni por autoridad)' + porQue };
     }
 
     // 2) PIVOTE por ISBN: Fichero local + APIs gratuitas. incluirCdu:false → NO se toca la CDU aquí (cambiarla

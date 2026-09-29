@@ -1040,6 +1040,13 @@ de ficheros clasificado por CDU.
         sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --todos --reintentar --ejecutar
     (Los saltados por error o por el tope de tiempo NO se marcan: vuelven a la cola solos.) Subir la versión (cuando
     el motor de identificación mejore) vuelve a poner en cola a todos los no encontrados, también en la campaña.
+    SOLO SE MARCA SI NO QUEDA ESPERANZA (2026-09-29, reidentificar-doc · anotarRevisionIsbn). Marcado = se
+    identificó, quedó ambiguo (esperan tu elección) o TODAS las fuentes respondieron y ninguna lo tiene. Si alguna
+    no respondió (BNE caída o con el circuito abierto, OpenLibrary sin red o fuera de tiempo, Fichero no
+    disponible), si hubo un error o el tope de tiempo, o si se usó --sin-apis, NO se marca: se anota el intento
+    (recuperar_isbn_intentos / recuperar_isbn_ultimo_intento) y la campaña lo vuelve a coger pasadas 6 h
+    (RECUPERAR_ISBN_ESPERA_H). Tras 5 intentos así (RECUPERAR_ISBN_MAX_INTENTOS) se marca igualmente, para que un
+    fichero que siempre falla no ocupe la cola. identificar-edicion devuelve fuentesCaidas para saberlo.
 
     PROGRESO Y TOPE DEL SCRIPT (2026-09-28). reidentificar-sin-isbn muestra UNA línea que avanza en su sitio por
     cada libro examinado (nº/total · título en curso · identificados · tiempo restante); solo añade líneas nuevas

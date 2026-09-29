@@ -30,7 +30,7 @@ import { variantesISBN } from '../utils/identificadores.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from '../utils/buscador-local.js';
 import { buscarEnBNE } from '../utils/buscador-bne-sru.js';
 import { huecosDesdeAutoridad } from '../utils/huecos-autoridad.js';
-import { reidentificarDoc, VERSION_RECUPERAR_ISBN } from '../utils/reidentificar-doc.js';
+import { reidentificarDoc, VERSION_RECUPERAR_ISBN, anotarRevisionIsbn, CAMPO_ULTIMO_INTENTO_RECUPERAR_ISBN } from '../utils/reidentificar-doc.js';
 import { aplicarCduConPrioridad } from '../utils/prioridad-cdu.js';
 import { buscarNombrePorISSN } from '../utils/buscador-issn-titulo.js';
 import { nombreEsPlaceholder, limpiarNombreColeccion, claveCanonica } from '../utils/colecciones.js';
@@ -55,6 +55,8 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Condición «campo vacío» reutilizable (ausente / null / '' / array vacío).
 const VACIO = (f) => ({ $or: [{ [f]: { $exists: false } }, { [f]: null }, { [f]: '' }] });
+// «Recuperar ISBN»: espera antes de reintentar un libro que se miró con alguna fuente caída.
+const ESPERA_REINTENTO_ISBN_MS = Number(process.env.RECUPERAR_ISBN_ESPERA_H || 6) * 3600 * 1000;
 const CON_ISBN = { isbn: { $exists: true, $nin: [null, ''] } };
 
 // ¿El nombre de un autor es ARTEFACTO (basura del texto/producción: frases, «Creator:…», URLs…) o está
@@ -323,14 +325,26 @@ export const CAMPANAS = [
             formatos: { $nin: ['audio', 'video', 'material'] },
             edicion_descartada: { $ne: true },
             'ediciones_candidatas.0': { $exists: false },
+            // Los que se intentaron hace poco con alguna fuente caída esperan unas horas (si no, la tanda cogería
+            // siempre los mismos mientras la fuente siga caída). En $and: el «sin ISBN» de arriba ya es un $or.
+            $and: [{
+                $or: [
+                    { [CAMPO_ULTIMO_INTENTO_RECUPERAR_ISBN]: { $exists: false } },
+                    { [CAMPO_ULTIMO_INTENTO_RECUPERAR_ISBN]: { $lt: new Date(Date.now() - ESPERA_REINTENTO_ISBN_MS) } },
+                ],
+            }],
         }),
+        // Esta campaña marca ella misma (anotarRevisionIsbn): SOLO cuando no queda esperanza de hallar el ISBN.
         async procesarDoc(db, doc) {
             // Documento COMPLETO: el cotejo compara con todo lo que ya tiene (una proyección haría que algún campo
             // pareciera vacío y se rellenara encima).
             const completo = await db.collection('biblioteca').findOne({ _id: doc._id });
-            if (!completo || completo.isbn) return false;
-            const r = await reidentificarDoc(db, completo, { aplicar: true, usarApis: true, conIA: false });
-            return r.estado === 'aplicado' || r.estado === 'ambiguo';
+            if (!completo || completo.isbn) return { cambio: false };   // (sin ISBN deja de ser candidato solo)
+            let r = null;
+            try { r = await reidentificarDoc(db, completo, { aplicar: true, usarApis: true, conIA: false }); }
+            catch (e) { console.warn(`   ⚠️ recuperar-isbn ${doc._id}: ${e.message} (se reintentará)`); }
+            await anotarRevisionIsbn(db, doc._id, r);
+            return { cambio: r?.estado === 'aplicado' || r?.estado === 'ambiguo', sellar: false };
         },
     },
 
@@ -685,8 +699,14 @@ export async function ejecutarCampana(db, id, { limite, debeAbortar = async () =
                 conteos.set(id, pendientes);
                 return { procesados, cambios, pendientes, abortado: true };
             }
+            // procesarDoc devuelve true/false (¿hubo cambio?) o { cambio, sellar:false } si la campaña se sella
+            // ella misma (recuperar-isbn: solo cuando no queda esperanza).
+            let sellar = true;
             try {
-                if (await camp.procesarDoc(db, doc)) {
+                const res = await camp.procesarDoc(db, doc);
+                const cambio = res && typeof res === 'object' ? res.cambio : res;
+                if (res && typeof res === 'object' && res.sellar === false) sellar = false;
+                if (cambio) {
                     cambios++;
                     // Refresca el índice de búsqueda de ESE doc (una campaña puede cambiar título/título
                     // original/autores/editorial, que son buscables). Best-effort: nunca rompe la campaña.
@@ -696,7 +716,7 @@ export async function ejecutarCampana(db, id, { limite, debeAbortar = async () =
                 console.warn(`   ⚠️ campaña ${id} falló en ${doc._id}: ${e.message}`);
             }
             // Sella el documento (procesado, con o sin datos) para no reintentarlo mientras no suba la versión.
-            await col.updateOne({ _id: doc._id }, { $set: { [`campanas.${camp.id}`]: camp.version } });
+            if (sellar) await col.updateOne({ _id: doc._id }, { $set: { [`campanas.${camp.id}`]: camp.version } });
             procesados++;
             prog.procesados = procesados;
             prog.cambios = cambios;

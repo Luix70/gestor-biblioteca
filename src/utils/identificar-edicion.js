@@ -216,16 +216,21 @@ const LENGUAS_BNE = new Set(['es', 'ca', 'gl', 'eu']);
 const TOPE_OL_MS = Number(process.env.IDENTIFICAR_OL_TOPE_MS || 15000);
 
 /** Ediciones de la BNE por título+autor (o +editorial). [] si no hay o la BNE no responde. */
-async function candidatosBNE(doc, autor) {
+async function candidatosBNE(doc, autor, caidas = []) {
     const r = await buscarEdicionesEnBNE({ titulo: doc.titulo, autor, editorial: doc.editorial }).catch(() => null);
+    if (r === null) caidas.push('bne');   // null = la BNE no respondió (red o circuito abierto); [] = no lo tiene
     return (r || []).map((x) => comoCandidato({ ...x, anio: x.año_edicion }, 'bne'));
 }
 
 /** La edición que elige OpenLibrary por título+autor (una), con tope de espera. */
-async function candidatosOL(doc, autor) {
-    const tope = new Promise((res) => setTimeout(() => res(null), TOPE_OL_MS));
-    const consulta = buscarPorCriterios({ titulo: doc.titulo, autor, idioma: doc.idioma || null, incluirSinopsis: false }).catch(() => null);
+async function candidatosOL(doc, autor, caidas = []) {
+    // Un fallo de RED (lanza ErrorInfraestructura) o el tope de espera NO son «OpenLibrary no lo tiene»: se anotan
+    // como fuente caída para que el libro se vuelva a intentar más tarde.
+    const FALLO = Symbol('fallo');
+    const tope = new Promise((res) => setTimeout(() => res(FALLO), TOPE_OL_MS));
+    const consulta = buscarPorCriterios({ titulo: doc.titulo, autor, idioma: doc.idioma || null, incluirSinopsis: false }).catch(() => FALLO);
     const ol = await Promise.race([consulta, tope]);
+    if (ol === FALLO) { caidas.push('openlibrary'); return []; }
     return ol?.isbn ? [comoCandidato({ ...ol, anio: ol.año_edicion }, 'openlibrary')] : [];
 }
 
@@ -259,11 +264,16 @@ function siUnica(buenos, via) {
 export async function identificarEdicion(doc, { online = false, conIA = false, limite = 40 } = {}) {
     if (!doc?.titulo) return { estado: 'sin-candidatos', candidatos: [], motivo: 'el documento no tiene título' };
     const autor = (doc.autores || [])[0] || null;
+    // Fuentes que NO respondieron (Fichero no disponible, BNE u OpenLibrary caídas): un «no encontrado» con alguna
+    // caída no es definitivo — quien llama puede volver a intentarlo más tarde (campaña «Recuperar ISBN»).
+    const caidas = [];
+    const conCaidas = (r) => ({ ...r, fuentesCaidas: [...new Set(caidas)] });
 
     // 1) FICHERO local (offline, gratis). Primero título+autor; si no sale nada verificado, SOLO título: un
     //    registro sin autor (los hay) no aparece en una búsqueda que exige el apellido.
-    let candidatos = ((await buscarEdicionesEnFichero(doc.titulo, autor, { limite: Math.max(limite, 200) }).catch(() => null)) || [])
-        .map((c) => comoCandidato(c, 'fichero'));
+    const delFichero = await buscarEdicionesEnFichero(doc.titulo, autor, { limite: Math.max(limite, 200) }).catch(() => null);
+    if (delFichero === null) caidas.push('fichero');
+    let candidatos = (delFichero || []).map((c) => comoCandidato(c, 'fichero'));
     let buenos = verificar(doc, candidatos);
     // Registros SIN AUTOR: solo se pueden aceptar con título exacto y MISMA editorial, así que esta segunda
     // búsqueda solo tiene sentido si conocemos una editorial real. Búsqueda exacta por la columna título (10-20 ms).
@@ -284,7 +294,7 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
         const fuentes = online === 'bne' ? ['bne']
             : LENGUAS_BNE.has(idioma2(doc.idioma)) ? ['bne', 'openlibrary'] : ['openlibrary', 'bne'];
         for (const fuente of fuentes) {
-            const nuevos = fuente === 'bne' ? await candidatosBNE(doc, autor) : await candidatosOL(doc, autor);
+            const nuevos = fuente === 'bne' ? await candidatosBNE(doc, autor, caidas) : await candidatosOL(doc, autor, caidas);
             if (!nuevos.length) continue;
             candidatos = unicosPorIsbn([...candidatos, ...nuevos]);
             buenos = unicosPorIsbn([...buenos, ...verificar(doc, nuevos)]);
@@ -307,13 +317,14 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
     }
 
     if (buenos.length > 1) {
-        return { estado: 'ambiguo', candidatos: buenos, motivo: `${buenos.length} ediciones posibles: ` + buenos.slice(0, 5).map((c) => `${c.isbn} (${c.editorial || '?'}, ${c.anio || '?'})`).join(' · ') };
+        return conCaidas({ estado: 'ambiguo', candidatos: buenos, motivo: `${buenos.length} ediciones posibles: ` + buenos.slice(0, 5).map((c) => `${c.isbn} (${c.editorial || '?'}, ${c.anio || '?'})`).join(' · ') });
     }
     const casi = casiCandidatos(doc, candidatos);
     if (casi.length) {
-        return { estado: 'ambiguo', candidatos: casi, motivo: `mismo título y autor pero nada confirma la edición (editorial/idioma/año): ` + casi.slice(0, 5).map((c) => `${c.isbn} (${c.editorial || '?'}, ${c.anio || '?'}, ${c.idioma || '?'})`).join(' · ') };
+        return conCaidas({ estado: 'ambiguo', candidatos: casi, motivo: `mismo título y autor pero nada confirma la edición (editorial/idioma/año): ` + casi.slice(0, 5).map((c) => `${c.isbn} (${c.editorial || '?'}, ${c.anio || '?'}, ${c.idioma || '?'})`).join(' · ') });
     }
-    return { estado: 'sin-candidatos', candidatos: [], motivo: 'ninguna autoridad tiene esta edición' };
+    if (caidas.length) return conCaidas({ estado: 'sin-candidatos', candidatos: [], motivo: `no hallado, pero no respondió: ${[...new Set(caidas)].join(', ')}` });
+    return conCaidas({ estado: 'sin-candidatos', candidatos: [], motivo: 'ninguna autoridad tiene esta edición' });
 }
 
 /**
