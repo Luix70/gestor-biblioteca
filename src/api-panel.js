@@ -53,7 +53,7 @@ import { investigarIdentificador, aplicarCotejo, docsQueComparten } from './util
 import { cduSinIAActivo, setCduSinIA, inspeccionIAActiva, setInspeccionIA } from './utils/ajustes-ingesta.js';
 import { analizarAFondo, aplicarAFondo } from './mantenimiento/enriquecer-a-fondo.js';
 import { conformarAlIngerir, saludDocumento, dessellarTareas } from './mantenimiento/conformador.js';
-import { carpetaDeDoc, DIR_CDU } from './mantenimiento/util-mantenimiento.js';
+import { carpetaDeDoc, DIR_CDU, archivoOriginal } from './mantenimiento/util-mantenimiento.js';
 import { spawn } from 'node:child_process';
 import { readdir, stat, mkdir, rename } from 'node:fs/promises';
 import { leerImagenesMobi, leerTextoMobi } from './utils/lector-mobi.js';
@@ -2533,6 +2533,10 @@ export function rutasPanel() {
     // PREVISUALIZACIÓN paginada (cómic .cbz/.cbr/.cb7 y .djvu): nº de páginas + página N como imagen,
     // BAJO DEMANDA. Cómics: del comprimido (adm-zip/bsdtar). DjVu: rasterizando solo esa página (ddjvu→
     // pdftoppm). El visor del panel pide una página por vez (no se convierte el documento entero).
+    // Ruta del fichero del documento, TOLERANTE a la forma Unicode del nombre (el disco puede tener «и»+acento donde la
+    // BD tiene «й»: el DjVu ruso no se podía paginar). Si no aparece, la ruta literal (el llamador dará «no existe»).
+    const rutaFicheroDoc = async (doc) => (await archivoOriginal(carpetaDeDoc(doc), doc.nombre_archivo).catch(() => null))
+        || path.join(carpetaDeDoc(doc), doc.nombre_archivo);
     const docPaginable = async (req, res) => {
         if (!ObjectId.isValid(req.params.id)) { res.status(400).json({ ok: false, motivo: 'id inválido' }); return null; }
         const db = await conectarDB();
@@ -2540,7 +2544,7 @@ export function rutasPanel() {
         if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (!doc.nombre_archivo || !EXT_PAGINABLE.has(path.extname(doc.nombre_archivo).toLowerCase())) { res.status(400).json({ ok: false, motivo: 'no es paginable (.cbz/.cbr/.cb7/.djvu)' }); return null; }
-        return path.join(carpetaDeDoc(doc), doc.nombre_archivo);
+        return rutaFicheroDoc(doc);
     };
     const esDjvu = (ruta) => ['.djvu', '.djv'].includes(path.extname(ruta).toLowerCase());
     r.get('/documentos/:id/paginas', async (req, res) => {
@@ -2586,7 +2590,7 @@ export function rutasPanel() {
         if (!['.mobi', '.azw', '.azw3', '.epub'].includes(ext)) { res.status(400).json({ ok: false, motivo: 'no es un MOBI/AZW/EPUB' }); return null; }
         // Usa el nombre_archivo del PROPIO documento (no el 1.º de la carpeta): correcto aunque varios libros
         // compartan carpeta. El `formato` decide el extractor (epub ordenado por spine vs registros MOBI).
-        return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo), formato: ext === '.epub' ? 'epub' : 'mobi' };
+        return { doc, ruta: await rutaFicheroDoc(doc), formato: ext === '.epub' ? 'epub' : 'mobi' };
     };
     const leerImagenesDoc = (m) => (m.formato === 'epub' ? leerImagenesEpub(m.ruta, { max: 120 }) : leerImagenesMobi(m.ruta, { max: 120 }));
     // Nº de imágenes embebidas (para la rejilla perezosa; NO devuelve las imágenes: se piden una a una).
@@ -2632,7 +2636,7 @@ export function rutasPanel() {
         if (!doc) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc)) { res.status(404).json({ ok: false, motivo: 'documento no encontrado' }); return null; }
         if (path.extname(doc.nombre_archivo || '').toLowerCase() !== '.chm') { res.status(400).json({ ok: false, motivo: 'no es un CHM' }); return null; }
-        return { doc, ruta: path.join(carpetaDeDoc(doc), doc.nombre_archivo) };
+        return { doc, ruta: await rutaFicheroDoc(doc) };
     };
     // WORD (.docx/.doc) → HTML para el visor de la ficha. El .docx se lee con adm-zip+cheerio (sin dependencias
     // nuevas); el .doc necesita antiword/catdoc en el servidor y, si no están, se avisa con claridad y queda la

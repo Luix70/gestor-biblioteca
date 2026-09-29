@@ -122,18 +122,34 @@ export async function carpetaExiste(carpeta) {
 }
 
 /** Ruta absoluta del archivo original (epub/pdf/...) dentro de la carpeta, o null. */
+/**
+ * El nombre REAL en el disco de `nombre` dentro de `entradas`: el exacto o, si no, el que coincide tras normalizar
+ * Unicode (NFC). Un mismo nombre puede estar escrito de dos formas —«й» compuesta (1 carácter) o «и» + acento (2)—
+ * según por dónde llegó el fichero (Mac, Synology…): se ven iguales pero NO son iguales al compararlas, y el
+ * fichero no aparecía (medido: «10 Древнегреческий язык…Часть 2.djvu», 52 caracteres en la BD y 54 en el disco).
+ */
+export function nombreEnDisco(entradas, nombre) {
+    if (!nombre) return null;
+    if (entradas.includes(nombre)) return nombre;
+    const n = String(nombre).normalize('NFC');
+    return entradas.find((e) => e.normalize('NFC') === n) || null;
+}
+
 export async function archivoOriginal(carpeta, nombrePreferido = null) {
     let entradas;
     try { entradas = await fs.readdir(carpeta); } catch { return null; }
-    // Si se conoce el nombre EXACTO del fichero del documento, se PREFIERE. Imprescindible cuando VARIOS
-    // documentos comparten carpeta (p. ej. una colección mal clasificada donde 8 libros cuelgan de «Mary Beard/»):
-    // sin esto se cogería el 1.º de la carpeta y se sacaría la portada del libro EQUIVOCADO para todos.
+    const docs = entradas.filter(n => EXT_DOC.includes(path.extname(n).toLowerCase()));
+    // Si se conoce el nombre del fichero del documento, se PREFIERE (también con otra forma Unicode). Imprescindible
+    // cuando VARIOS documentos comparten carpeta (una colección donde 20 libros cuelgan de la misma): sin esto se
+    // cogería el 1.º de la carpeta y se sacaría la portada —o las páginas— del libro EQUIVOCADO.
     if (nombrePreferido) {
-        const base = path.basename(String(nombrePreferido));
-        if (entradas.includes(base) && EXT_DOC.includes(path.extname(base).toLowerCase())) return path.join(carpeta, base);
+        const real = nombreEnDisco(entradas, path.basename(String(nombrePreferido)));
+        if (real && EXT_DOC.includes(path.extname(real).toLowerCase())) return path.join(carpeta, real);
+        // No está: si hay OTROS documentos en la carpeta, no se coge uno al azar (sería de otro libro: el DjVu ruso
+        // abría «01 Teach Yourself Ancient Greek.pdf»). Solo si hay UNO, que ha de ser el suyo con otro nombre.
+        if (docs.length !== 1) return null;
     }
-    const f = entradas.find(n => EXT_DOC.includes(path.extname(n).toLowerCase()));
-    return f ? path.join(carpeta, f) : null;
+    return docs.length ? path.join(carpeta, docs[0]) : null;
 }
 
 /** Número de páginas de un PDF vía pdfinfo (poppler), o null si no está disponible. */

@@ -61,6 +61,12 @@ const CATEGORIAS = [
         hacer: 'Restaurar las pistas desde la Papelera, o volver a ingerir la colección de origen.',
     },
     {
+        clave: 'nombreUnicodeDistinto', lista: 'nombreUnicodeDistinto', auto: true,
+        etiqueta: 'Nombre de fichero con otra forma Unicode',
+        que: 'El fichero SÍ está, pero su nombre en la base está escrito con otra forma Unicode que en el disco («й» compuesta en un carácter frente a «и» + acento en dos; pasa con ficheros que llegaron por un Mac o por Synology). Se ven iguales, pero no lo son al compararlos: el visor y la descarga no lo encuentran, y antes la extracción de imágenes podía coger OTRO fichero de la carpeta.',
+        hacer: '«Diagnosticar y reparar» guarda en la base el nombre real del disco (y lo corrige en el selector de textos).',
+    },
+    {
         clave: 'hashDesactualizado', lista: 'hashDesactualizado', auto: true,
         etiqueta: 'Hash desactualizado',
         que: 'El fichero original se MODIFICÓ después de calcular su hash (se le quitó una página, se anotó…): su tamaño o su fecha de modificación ya no son los que se anotaron con el hash. En los documentos anteriores a la huella, el fichero está fechado bastante después de su ingesta. Mover o restaurar carpetas también cambia la fecha: por eso es SOSPECHOSO hasta recalcularlo.',
@@ -461,6 +467,7 @@ const ET_REPARADO = {
     carpetasHuerfanasRecicladas: 'Carpetas huérfanas retiradas (vacías)',
     hashDuplicadosEliminados: 'Copias exactas eliminadas (a la Papelera)',
     hashesRegenerados: 'Hashes regenerados (el fichero había cambiado)',
+    nombresUnicodeCorregidos: 'Nombres de fichero corregidos (forma Unicode del disco)',
     hashesConfirmados: 'Hashes confirmados (solo se anotó la huella)',
     cuarentenaResueltos: 'Depósitos de Cuarentena resueltos',
     carpetasConservadas: 'Carpetas NO tocadas (tienen ficheros → míralas tú)',

@@ -1017,6 +1017,19 @@ de ficheros clasificado por CDU.
     abre la Búsqueda con ellos. POST /documentos/:id/elegir-edicion {isbn|ninguna}. Solo admite un ISBN que esté
     entre las candidatas. Un ISBN-10 y su ISBN-13 cuentan como UNO; un idioma «und/mul» no descarta a nadie.
 
+    NOMBRES DE FICHERO CON OTRA FORMA UNICODE (2026-09-29). Caso: el DjVu «10 Древнегреческий язык. Начальный
+    курс.Часть 2.djvu» (6a95baa0dfe138fb5a556610) no dejaba extraer páginas. El fichero está sano (DjVu «DJVM»
+    válido) y el contenedor sí sabe tratar DjVu: el nombre en la BD tiene «й» COMPUESTA (52 caracteres) y en el
+    disco «и»+acento (54) — se ven iguales, pero no lo son al compararlos. Peor: archivoOriginal, al no encontrarlo,
+    cogía el PRIMER documento de la carpeta compartida («01 Teach Yourself Ancient Greek.pdf»): se extraía de OTRO
+    libro. Arreglado:
+      · util-mantenimiento · nombreEnDisco / archivoOriginal: busca el nombre también normalizado (NFC) y, si no
+        aparece y la carpeta tiene OTROS documentos, devuelve null (nunca un fichero de otro libro).
+      · Endpoints de páginas (DjVu/cómic), imágenes EPUB/MOBI y CHM: resuelven el fichero con esa función.
+      · Integridad: categoría «Nombre de fichero con otra forma Unicode» (antes contaba como «sin fichero»);
+        «Diagnosticar y reparar» guarda en la BD el nombre REAL del disco (y lo corrige en `textos[]`), para que el
+        visor y la descarga —que lo piden byte a byte— lo encuentren.
+
     CAMPAÑAS: INTERRUPTOR GENERAL (2026-09-29). En la cabecera de «🎯 Campañas de fondo», «Todas las campañas»
     enciende o apaga TODAS a la vez. Apagado, ninguna corre sola (ajustes/campanas.encendidas=false; el planificador
     ejecutarCampanasDebidas no lanza nada), pero cada una CONSERVA su ajuste (activa, lote, cadencia): al encenderlo,

@@ -24,6 +24,7 @@ import { esTituloArtefacto } from './utils/parsear-nombre.js';
 import { esDocumentoLeible, esMaterialNotable, esVideo } from './utils/criba-material.js';
 import { metricasFichero, ganaEntrante, reemplazarFicheroDeDoc } from './utils/duplicados.js';
 import { estadoHash, regenerarHashDoc } from './utils/hash-doc.js';
+import { nombreEnDisco } from './mantenimiento/util-mantenimiento.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -175,6 +176,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     // ── D. Docs cuya carpeta existe pero falta el fichero original (solo informa) ──
     prog('docs-sin-fichero', { i: 0, total: docs.length });
     const sinFichero = [];
+    const nombresUnicode = [];   // el fichero está, pero su nombre en la BD tiene otra forma Unicode
     let _iD = 0;
     for (const d of docs) {
         if (++_iD % 50 === 0) prog('docs-sin-fichero', { i: _iD, total: docs.length });
@@ -188,9 +190,15 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         // .cb7, .chm, .docx y los vídeos → un cómic .cbz se denunciaba «sin fichero original» CON el .cbz al
         // lado (174 falsos positivos, confirmado por el usuario con «Don Miki 101»). Y lo peor: tanto ruido
         // ESCONDE los casos reales — una alarma que miente no la mira nadie.
-        const falta = d.nombre_archivo
+        let falta = d.nombre_archivo
             ? !await existe(path.join(carpeta, d.nombre_archivo))
             : !await tieneDocFichero(carpeta);   // sin nombre_archivo (docs antiguos) → respaldo por extensión
+        // ¿Está, pero con el nombre escrito en OTRA FORMA UNICODE («й» compuesta vs «и»+acento)? No falta: hay que
+        // guardar en la BD el nombre REAL (el visor y la descarga lo piden byte a byte).
+        if (falta && d.nombre_archivo) {
+            const real = nombreEnDisco(await fs.readdir(carpeta).catch(() => []), d.nombre_archivo);
+            if (real) { nombresUnicode.push({ d, real }); falta = false; }
+        }
         // Se apunta QUÉ HAY de verdad en la carpeta: con «falta el original», lo primero que quieres saber es
         // qué quedó. Si están la portada y los sidecars y no el pdf, el fichero se perdió; si no hay nada, la
         // carpeta es un cascarón. Sin esto hay que ir al NAS a mirar, y entonces el informe no sirve de nada.
@@ -198,6 +206,23 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     }
     D.docsSinFicheroOriginal = sinFichero.length;
     anotar('docsSinFicheroOriginal', sinFichero, x => fichaDoc(x.d, { contenido: x.contenido }));
+    D.nombreUnicodeDistinto = nombresUnicode.length;
+    anotar('nombreUnicodeDistinto', nombresUnicode, x => fichaDoc(x.d, { real: x.real }));
+    if (reparar && nombresUnicode.length) {
+        // Se guarda el nombre REAL del disco (y se corrige en `textos[]`, cuyas rutas lo llevan).
+        let n = 0;
+        for (const { d, real } of nombresUnicode) {
+            const full = await col.findOne({ _id: d._id }, { projection: { textos: 1, ruta_base: 1 } });
+            const set = { nombre_archivo: real };
+            if (Array.isArray(full?.textos)) {
+                set.textos = full.textos.map((t) => (t?.ruta && path.basename(t.ruta).normalize('NFC') === real.normalize('NFC'))
+                    ? { ...t, ruta: `${path.posix.dirname(t.ruta)}/${real}` } : t);
+            }
+            await col.updateOne({ _id: d._id }, { $set: set });
+            n++;
+        }
+        R.nombresUnicodeCorregidos = n;
+    }
 
     // ── D-bis. AUDIOS ROTOS: docs cuyo `audios[]` apunta a ficheros que NO están en disco (solo informa) ──
     // PUNTO CIEGO que esto tapa: la comprobación de arriba EXCLUYE a los audiolibros (`esAudioSinDoc`) porque

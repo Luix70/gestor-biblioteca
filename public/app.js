@@ -11311,6 +11311,7 @@ const INTEG_AUTOREPARA = new Set([
   'hashDuplicadosDocs',
   'cuarentenaDuplicados',
   'hashDesactualizado',
+  'nombreUnicodeDistinto',
 ]);
 function pintarInteg(r) {
   const d = r.diagnostico || {},
@@ -11320,6 +11321,7 @@ function pintarInteg(r) {
     docsSinFicheroOriginal: 'Docs sin fichero original',
     docsConAudiosRotos: 'Audiolibros con pistas que faltan',
     hashDesactualizado: 'Hash desactualizado (fichero modificado)',
+    nombreUnicodeDistinto: 'Nombre de fichero con otra forma Unicode',
     docsSinPortada: 'Documentos sin portada',
     rutaBaseCompartida: 'Varios docs en la misma carpeta',
     ramasMuertas: 'Ramas vacías / muertas',
@@ -11336,6 +11338,7 @@ function pintarInteg(r) {
     docsSinFicheroOriginal: 'docsSinFicheroOriginal',
     docsConAudiosRotos: 'docsConAudiosRotos',
     hashDesactualizado: 'hashDesactualizado',
+    nombreUnicodeDistinto: 'nombreUnicodeDistinto',
     docsSinPortada: 'docsSinPortada',
     rutaBaseCompartida: 'rutaBaseCompartida',
     ramasMuertas: 'ramasMuertas',
@@ -11391,6 +11394,7 @@ function pintarInteg(r) {
         carpetasHuerfanasRecicladas: 'Huérfanas recicladas',
         hashDuplicadosEliminados: 'Hash-duplicados eliminados',
         hashesRegenerados: 'Hashes regenerados',
+        nombresUnicodeCorregidos: 'Nombres Unicode corregidos',
         hashesConfirmados: 'Hashes confirmados (huella anotada)',
         cuarentenaResueltos: 'Cuarentena resueltos',
       };
