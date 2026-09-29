@@ -94,8 +94,11 @@ Cascada gratuita (nombre de archivo → Fichero → colección → OpenLibrary �
       `clone3` y Node no arrancaría (salvo `security_opt: seccomp:unconfined`, que no conviene).
 
 ### Revisiones a mano (sin script)
-- [ ] 129 documentos catalogados como **revista** que parecen libros, y 54 cabeceras cuya CDU pudo salir del Dewey
-      de un libro (ofrecido el 17-sep, no hecho).
+- [ ] **Libros catalogados como revista** (~129; el usuario pidió que se le recuerde, 29-sep). Llevan el ISSN de su
+      SERIE y por eso entraron como revista: p. ej. «DK Eyewitness Travel Guide» (…/revistas/1542-1554/2014) o
+      «Collider Physics within the Standard Model» (Lecture Notes in Physics, …/revistas/0075-8450…/2017). Pasarlos a
+      libro (el ISSN va a su colección-serie, como las series de Springer), recolocar su carpeta y revisar las 54
+      cabeceras cuya CDU pudo salir del Dewey de un libro. Ofrecido el 17-sep, no hecho.
 
 ## Lo que ya hace el sistema solo (no hay que lanzar nada)
 
