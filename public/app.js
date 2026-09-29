@@ -8339,6 +8339,7 @@ function renderBulk() {
     ${ROL === 'admin' ? '<button class="btn pri" id="bkSelShare" title="Compartir estos documentos: enlace/QR de SOLO LECTURA (ver + descargar), con caducidad opcional. Es una foto fija; no crea una selección guardada.">🔗 Compartir selección</button>' : ''}
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReimg" title="Re-extraer del PROPIO fichero la portada Y las imágenes de catalogación (5 páginas frontales + contraportada, saltando las páginas en blanco), reemplazando las actuales (equivocadas). Conserva las imágenes que hayas añadido a mano. Trabajo en 2º plano.">🖼️ Reextraer imágenes</button>' : ''}
+    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkFusion" title="Los documentos seleccionados son el MISMO libro (versiones: otro escaneo, otra conversión): se fusionan en uno solo, conservando TODOS los ficheros como versiones. Formatos distintos no se fusionan.">🔗 Fusionar versiones</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkRehash" title="Recalcular el hash (SHA-256) del fichero de cada documento: tras MODIFICARLO (quitar una página, anotarlo…) el de la ingesta queda viejo. El anterior se conserva; en un PDF se recuentan las páginas. Trabajo en 2º plano.">#️⃣ Regenerar hash</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkPortSosp" title="Para portadas FALSAS (la misma imagen en libros distintos: banner de un grupo de ripeo, «cover not available»…): quitar la portada, re-extraerla omitiendo la sospechosa, o poner la primera página de texto. Solo cambia la portada; conserva las demás imágenes.">🚩 Portada sospechosa…</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReisbn" title="Extraer/cotejar el ISBN: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual (1 doc), con o sin IA. Trabajo en 2º plano.">🔎 Extraer ISBN</button>' : ''}
@@ -8423,6 +8424,7 @@ function renderBulk() {
     if ($('#bkReimg')) $('#bkReimg').onclick = () => reextraerImagenesLote([...selDocs]);
     if ($('#bkPortSosp')) $('#bkPortSosp').onclick = () => portadaSospechosaLote([...selDocs]);
     if ($('#bkRehash')) $('#bkRehash').onclick = () => regenerarHashLote([...selDocs]);
+    if ($('#bkFusion')) $('#bkFusion').onclick = () => fusionarVersionesLote([...selDocs]);
     if ($('#bkReisbn')) $('#bkReisbn').onclick = () => reidentificarLote([...selDocs]);
     if ($('#bkSinopsis')) $('#bkSinopsis').onclick = () => sinopsisLote([...selDocs]);
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
@@ -8691,6 +8693,30 @@ async function seguirReextraccion(total) {
     cancelado || e.fallidos ? 'warn' : 'ok',
   );
 }
+// FUSIONAR VERSIONES: los documentos elegidos son el MISMO libro catalogado varias veces (mismo ISBN y formato,
+// ficheros algo distintos). Quedan en uno: el principal (el de más trabajo tuyo / más completo) hereda los datos que
+// le falten, los ficheros de los demás pasan a su carpeta como versiones (se abren desde el selector del visor), las
+// selecciones y fichas de lectura apuntan a él y los ids retirados redirigen a él. Rechaza formatos distintos.
+async function fusionarVersionesLote(ids) {
+  if (ids.length < 2) { toast('Elige al menos dos documentos', 'warn'); return; }
+  if (!confirm(`Se FUSIONARÁN ${ids.length} documentos en uno solo.\n\nÚsalo solo si son el MISMO libro (versiones: otro escaneo, otra conversión). Se conservan TODOS los ficheros como versiones; los documentos retirados redirigen al que queda. No se fusionan formatos distintos (EPUB y PDF). ¿Seguir?`)) return;
+  try {
+    const r = await api('/documentos/fusionar-versiones', { method: 'POST', body: JSON.stringify({ ids }) });
+    if (!r.ok) { toast(r.motivo || 'No se pudo fusionar', 'bad'); return; }
+    let e = {};
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 700));
+      try { e = await api('/documentos/fusionar-versiones/estado'); } catch { break; }
+      if (!e.en_curso) break;
+    }
+    if (e.error || (e.resultado && !e.resultado.ok)) { toast(e.error || e.resultado.motivo || 'Error al fusionar', 'bad'); return; }
+    const res = e.resultado || {};
+    toast(`Fusionados en «${recortar(res.principal?.titulo || '', 40)}»: ${res.retirados?.length || 0} retirado(s), ${res.versiones?.length || 0} fichero(s) conservado(s) como versión`, 'ok');
+    selDocs.clear();
+    buscarCatalogo(estadoBusqueda.page || 1);
+  } catch (err) { toast(err.message, 'bad'); }
+}
+
 // REGENERAR HASH: tras MODIFICAR el fichero de un documento (quitar de un PDF una página artefacto, anotarlo…) el
 // hash de la ingesta deja de ser el suyo. Lo recalcula (leyendo el fichero entero, en 2º plano) y guarda su huella;
 // el anterior queda en el historial (si el original vuelve a entrar por el Inbox, se reconoce). En un PDF recuenta

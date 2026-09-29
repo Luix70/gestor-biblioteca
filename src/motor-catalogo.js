@@ -18,7 +18,7 @@ const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
 export async function buscarDocPorHash(hash) {
     if (!hash) return null;
     const db = await conectarDB();
-    return db.collection('biblioteca').findOne({ hash_contenido: hash });
+    return db.collection('biblioteca').findOne({ $or: [{ hash_contenido: hash }, { 'versiones.hash_contenido': hash }] });
 }
 
 /** Documento cuyo fichero TUVO este hash antes de modificarse (hashes_anteriores: ver utils/hash-doc.js). */

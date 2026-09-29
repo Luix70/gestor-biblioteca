@@ -1171,6 +1171,28 @@ de ficheros clasificado por CDU.
         existía. Hoy hay 400 carpetas compartidas: 328 de colecciones (a propósito), 62 del mismo libro en varios
         ficheros y 10 de libros DISTINTOS con el mismo ISBN (probablemente uno lleva el ISBN del otro).
 
+    VERSIONES DEL MISMO LIBRO CATALOGADAS VARIAS VECES → FUSIONAR (2026-09-29, utils/fusionar-versiones.js). La
+    búsqueda de portadas sospechosas destapó que muchas «portadas compartidas» eran el mismo libro dos veces:
+    mismo ISBN, formato y título, ficheros algo distintos (otro escaneo/conversión). Medido: 2.673 grupos con el
+    mismo ISBN y formato (5.902 documentos): 2.416 son la misma obra (2.016 con las mismas páginas) y 257 tienen
+    títulos DISTINTOS → no son versiones, el ISBN está mal (ISBN de relleno que pasan el dígito de control:
+    9781213141513 ×74, 9780102030402 ×50, 9781111111113 ×19, 9783333333335, 9780000000002…).
+      · Decisión del usuario: se CONSERVAN TODOS LOS FICHEROS y solo se fusiona solo lo SEGURO. Seguro = mismo
+        ISBN, los mismos formatos (EPUB y PDF nunca), mismo título, ni tomo de una obra ni distinto nº de colección
+        ni indicio de tomo en título/nombre, sin ISBN provisional/dudoso, páginas conocidas y a ±2, tamaño de
+        fichero a ±25 % (un escaneo a otra resolución se conserva aparte) y ≤ 5 versiones.
+      · Fusión: queda el PRINCIPAL (más trabajo tuyo → más completo → fichero mayor → más antiguo), hereda lo que
+        le falte de los demás; sus ficheros pasan a su carpeta en `versiones[]` y al selector de textos del visor
+        (`textos[]`); selecciones, fichas de lectura e inventario de colección apuntan a él; el id retirado queda
+        en `redirecciones` (la ficha lo abre en el principal: enlaces y NFC siguen valiendo); el resto de la
+        carpeta retirada (imágenes derivadas, sidecars) a la Papelera; las imágenes añadidas a mano, al principal.
+        El hash de una versión sigue identificando al documento (atajo del Inbox).
+      · scripts/fusionar-versiones.js: por defecto clasifica y crea selecciones «Versiones por revisar <ISBN> (N)»
+        y «ISBN compartido <ISBN> (N)» (sin tocar documentos); --ejecutar fusiona los seguros (--isbn, --limite).
+      · Acción «🔗 Fusionar versiones» (barra de la selección): fusiona los que TÚ elijas (rechaza formatos distintos).
+      · detectar-portadas-artefacto: el mismo ISBN ya es la misma obra (822 selecciones «Portada sospechosa» cuyos
+        documentos compartían ISBN, borradas a petición del usuario el 29-sep).
+
     HASH DEL DOCUMENTO: REGENERARLO Y DETECTAR SI QUEDÓ VIEJO (2026-09-29, utils/hash-doc.js). Si modificas el
     fichero de un documento (quitar de un PDF una página artefacto, anotarlo…), el hash de la ingesta deja de ser
     el suyo. Ahora, con cada hash se guarda la HUELLA del fichero (hash_fecha, hash_mtime = fecha de modificación,

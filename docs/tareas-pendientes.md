@@ -55,6 +55,15 @@ Detecta los documentos cuyo fichero se modificó después de calcular su hash y 
 anota la huella). La primera vez saldrán muchos «sospechosos» que no lo son (carpetas movidas o restauradas estos
 días): el recálculo los confirma. Después, Integridad lo vigila solo.
 
+### 4 ter. Libros catalogados varias veces (versiones del mismo libro)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/fusionar-versiones.js`
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/fusionar-versiones.js --ejecutar`
+
+Mismo ISBN, formato y título con ficheros algo distintos (2.416 grupos, 5.123 documentos medidos el 29-sep). Sin
+`--ejecutar` crea selecciones «Versiones por revisar …» e «ISBN compartido …»; con `--ejecutar` fusiona solo los
+seguros (todos los ficheros se conservan como versiones). Los que queden, desde el panel: «🔗 Fusionar versiones».
+Los «ISBN compartido» (títulos distintos, 257 grupos) tienen un ISBN falso: hay que corregirlo, no fusionar.
+
 ### 5. Autores fusionados en uno (pendiente desde julio)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/separar-autores-fusionados.js`
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/separar-autores-fusionados.js --ejecutar`

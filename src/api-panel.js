@@ -22,6 +22,7 @@ import { lanzarInspeccionManual, estadoInspeccionManual, aplicarInspeccionManual
 import { lanzarReextraccion, estadoReextraccion, cancelarReextraccion } from './utils/reextraer-imagenes.js';
 import { lanzarPortadaSospechosa, estadoPortadaSospechosa, cancelarPortadaSospechosa } from './utils/portadas-sospechosas.js';
 import { lanzarRegenerarHash, estadoRegenerarHash, cancelarRegenerarHash } from './utils/hash-doc.js';
+import { lanzarFusion, estadoFusion } from './utils/fusionar-versiones.js';
 import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion, elegirEdicion } from './utils/reidentificar-doc.js';
 import { lanzarCompletarSinopsis, estadoCompletarSinopsis, cancelarCompletarSinopsis } from './utils/completar-sinopsis.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
@@ -581,6 +582,14 @@ export function rutasPanel() {
     });
     r.get('/documentos/regenerar-hash/estado', (req, res) => res.json(estadoRegenerarHash()));
     r.post('/documentos/regenerar-hash/cancelar', (req, res) => res.json(cancelarRegenerarHash()));
+
+    // ── FUSIONAR VERSIONES: los documentos elegidos son el MISMO libro → uno solo, conservando todos los ficheros
+    //    como versiones (utils/fusionar-versiones.js). Rechaza formatos distintos. Solo admin. ──
+    r.post('/documentos/fusionar-versiones', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(lanzarFusion({ ids: req.body?.ids }));
+    });
+    r.get('/documentos/fusionar-versiones/estado', (req, res) => res.json(estadoFusion()));
 
     // ── RE-IDENTIFICAR (recuperar el ISBN del propio fichero + pivote al Fichero/APIs, SIN IA), sobre una
     //    selección. Para los miembros de colección que se catalogaron por nombre y quedaron SIN ISBN (TXtras).
@@ -1833,7 +1842,13 @@ export function rutasPanel() {
         try {
             if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
             const db = await conectarDB();
-            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            let doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            // Documento FUSIONADO en otro (versiones del mismo libro): su id redirige al principal, para que los
+            // enlaces guardados y las etiquetas NFC impresas sigan abriendo el libro.
+            if (!doc) {
+                const red = await db.collection('redirecciones').findOne({ _id: new ObjectId(req.params.id) });
+                if (red?.a) doc = await db.collection('biblioteca').findOne({ _id: red.a });
+            }
             if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
             if (await ocultarNsfw(req.usuario) && await docOcultoParaGuest(db, doc))
                 return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
