@@ -61,7 +61,22 @@ const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(RE_DI
 // español con la misma imagen desaparecían del informe por compartir colección). Esos grupos se marcan «de
 // colección»: se crea su selección igual, pero quedan FUERA de la reparación automática (--ejecutar), por si la
 // imagen es la portada legítima de una serie (p. ej. la de una colección de audiolibros).
-const unidad = (d) => (d.obra ? `o:${d.obra}` : `t:${norm(d.titulo)}`);
+// Cuántas OBRAS distintas hay en un grupo: dos documentos son la misma obra si comparten ISBN (dos versiones del
+// mismo PDF, con el título escrito de otra manera: «A wealth of numbers» / «A Wealth of Numbers: An Anthology…»),
+// obra (tomos) o título sin números. Se unen por componentes (A=B por ISBN y B=C por título ⇒ A=C).
+function obrasDistintas(ds) {
+    const padre = ds.map((_, i) => i);
+    const raiz = (i) => (padre[i] === i ? i : (padre[i] = raiz(padre[i])));
+    const primeroDe = new Map();
+    ds.forEach((d, i) => {
+        const claves = [d.isbn ? `i:${d.isbn}` : null, d.obra ? `o:${d.obra}` : null, norm(d.titulo) ? `t:${norm(d.titulo)}` : null];
+        for (const k of claves.filter(Boolean)) {
+            if (primeroDe.has(k)) padre[raiz(i)] = raiz(primeroDe.get(k));
+            else primeroDe.set(k, i);
+        }
+    });
+    return new Set(ds.map((_, i) => raiz(i))).size;
+}
 const deUnaColeccion = (ds) => ds.every((d) => d.coleccion && String(d.coleccion) === String(ds[0].coleccion));
 
 // ── 1. Portadas: por tamaño, y SHA solo de los tamaños repetidos ─────────────────────────────────────────
@@ -95,7 +110,7 @@ process.stdout.write('\r\x1b[K');
 
 // ── 2. Artefactos: la misma imagen en N obras distintas ──────────────────────────────────────────────────
 const artefactos = [...porSha.entries()]
-    .map(([sha, ds]) => ({ sha, ds, obras: new Set(ds.map(unidad)).size, coleccion: deUnaColeccion(ds) }))
+    .map(([sha, ds]) => ({ sha, ds, obras: obrasDistintas(ds), coleccion: deUnaColeccion(ds) }))
     .filter((g) => g.ds.length > 1 && g.obras >= MIN_OBRAS)
     .sort((a, b) => b.ds.length - a.ds.length);
 console.log(`   Portadas idénticas en ${MIN_OBRAS}+ obras distintas: ${artefactos.length} imagen(es) · ${artefactos.reduce((s, g) => s + g.ds.length, 0)} documento(s)\n`);
