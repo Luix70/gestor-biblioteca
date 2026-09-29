@@ -1025,6 +1025,14 @@ de ficheros clasificado por CDU.
     (SCRIPT_LOG_DIAS). La hora es la del contenedor: UTC salvo que el docker-compose defina TZ=Europe/Madrid.
     Progreso: src/utils/progreso-cli.js (línea «⏳ etiqueta hechos/total (pct) · faltan ~ETA · transcurrido»).
 
+    DjVu CON NOMBRE NO LATINO (cirílico, griego…) — 2026-09-29, utils/djvu.js. Los DjVu rusos de «Ancient Greek
+    Language Learning Pack» no se podían ver ni extraer (ficheros sanos, nombres correctos). Causa: djvulibre
+    (djvused/ddjvu) convierte el nombre según el IDIOMA del sistema y el contenedor no tiene ninguno (ASCII puro):
+    no abre rutas con caracteres no latinos. Arreglo: se lanzan con LANG/LC_ALL=C.UTF-8 y, si la ruta no es ASCII,
+    a través de un enlace temporal con nombre ASCII (/tmp/djvu-enlaces/<sha1>.djvu) que apunta al fichero real.
+    (Mi primer diagnóstico —forma Unicode del nombre— era un espejismo de cómo Windows ve la unidad del NAS por
+    SMB: dentro del NAS el nombre coincide; Integridad lo confirmó con 0 casos.)
+
     NOMBRES DE FICHERO CON OTRA FORMA UNICODE (2026-09-29). Caso: el DjVu «10 Древнегреческий язык. Начальный
     курс.Часть 2.djvu» (6a95baa0dfe138fb5a556610) no dejaba extraer páginas. El fichero está sano (DjVu «DJVM»
     válido) y el contenedor sí sabe tratar DjVu: el nombre en la BD tiene «й» COMPUESTA (52 caracteres) y en el

@@ -8,11 +8,40 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import crypto from 'node:crypto';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
 const execFileP = promisify(execFile);
+
+// ── NOMBRES NO LATINOS (cirílico, griego…) ─────────────────────────────────────────────────────────
+// djvulibre convierte el nombre del fichero según el IDIOMA del sistema; en el contenedor, sin idioma definido
+// (ASCII puro), NO abre ficheros con caracteres no latinos (medido: los DjVu rusos de «Ancient Greek Language
+// Learning Pack» no se podían ver ni extraer; los de nombre latino, sí). Dos medidas:
+//   1. se lanzan con LANG/LC_ALL=C.UTF-8;
+//   2. si la ruta tiene caracteres no ASCII, se abren a través de un ENLACE temporal con nombre ASCII que apunta
+//      al fichero real (vale aunque el contenedor no tenga ese idioma). Los enlaces se reutilizan.
+const ENTORNO_DJVU = { ...process.env, LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
+const DIR_ENLACES = path.join(os.tmpdir(), 'djvu-enlaces');
+const _enlaces = new Map();
+async function rutaDjvu(ruta) {
+    if (/^[\x20-\x7e]*$/.test(ruta)) return ruta;
+    if (_enlaces.has(ruta)) return _enlaces.get(ruta);
+    try {
+        await fs.mkdir(DIR_ENLACES, { recursive: true });
+        const enlace = path.join(DIR_ENLACES, crypto.createHash('sha1').update(ruta).digest('hex') + path.extname(ruta).toLowerCase());
+        try { await fs.unlink(enlace); } catch { /* no existía */ }
+        await fs.symlink(ruta, enlace);
+        _enlaces.set(ruta, enlace);
+        return enlace;
+    } catch { return ruta; /* sin enlace: se intenta con la ruta real (y el idioma UTF-8) */ }
+}
+/** Lanza una herramienta de djvulibre con idioma UTF-8 y la ruta segura. */
+async function djvulibre(programa, args, ruta, opciones = {}) {
+    const segura = await rutaDjvu(ruta);
+    return execFileP(programa, args.map((a) => (a === ruta ? segura : a)), { ...opciones, env: ENTORNO_DJVU });
+}
 
 // ── Páginas de MUESTRA para la VISIÓN (igual que un cómic/PDF): 5 primeras + última ──────────────
 const PAG_FRENTE = Number(process.env.DJVU_PAGINAS_FRENTE || 5);
@@ -65,7 +94,7 @@ function indicesMuestra(n) {
 /** Nº de páginas de un DjVu (djvused). 0 si no se puede leer. */
 export async function contarPaginasDjvu(ruta) {
     try {
-        const { stdout } = await execFileP('djvused', ['-e', 'n', ruta], { timeout: 30000 });
+        const { stdout } = await djvulibre('djvused', ['-e', 'n', ruta], ruta, { timeout: 30000 });
         const n = parseInt(String(stdout).trim().split(/\s+/)[0], 10);
         return n > 0 ? n : 0;
     } catch { return 0; }
@@ -87,7 +116,7 @@ async function paginaDjvuJpeg(ruta, n1, dpi = 150, estaVivo) {
         const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'djvu-pg-'));
         try {
             const pdf = path.join(dir, 'p.pdf');
-            await execFileP('ddjvu', ['-format=pdf', `-page=${n1}`, ruta, pdf], { timeout: 120000 });
+            await djvulibre('ddjvu', ['-format=pdf', `-page=${n1}`, ruta, pdf], ruta, { timeout: 120000 });
             await execFileP('pdftoppm', ['-jpeg', '-r', String(r), '-singlefile', pdf, path.join(dir, 'out')], { timeout: 120000 });
             const buf = await fs.readFile(path.join(dir, 'out.jpg'));
             _cacheSet(clave, buf);
