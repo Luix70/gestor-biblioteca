@@ -1093,6 +1093,12 @@ de ficheros clasificado por CDU.
     (identificar-edicion); «casi» exige un autor que case en los dos lados; el script filtra como la campaña.
     DIARIO PARA DESHACER: cada documento que toca reidentificarDoc guarda en `deshacer[]` el valor anterior de cada
     campo cambiado (y la CDU y la carpeta si la CDU se aplicó).
+    REVERSIÓN (sin copia de la base): scripts/revertir-reidentificacion.js --log <log de la ejecución> [--ejecutar]
+    [--revisar-hoy AAAA-MM-DD]. Por cada línea «✅ … (autoridad/…)» del log (las de «fichero» son buenas): quita el
+    ISBN y sus marcas; editorial «X (antes «Y»)» → Y, o fuera si era un hueco; fuera autores/contribuciones/
+    cdu_autoridad del log; título original si el log lo trae completo; CDU «A → B (BNE)» → A moviendo la carpeta; y
+    los huecos que no salen en el log se quitan si COINCIDEN con lo que aporta ese ISBN equivocado (se vuelve a
+    consultar). --revisar-hoy crea una selección con los provisional/dudoso de ese día que no están en el log.
 
     BIBLIOTECARIO MÁS AUTÓNOMO CON LAS EDICIONES (2026-09-29). Revisar a mano ~1.300 «Edición por elegir» es
     demasiado; ahora decide solo en la mayoría (muestra de 30 pendientes: 15 resueltos → 6 definitivos, 6
