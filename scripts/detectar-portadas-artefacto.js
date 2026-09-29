@@ -55,36 +55,47 @@ const RE_DIACRITICOS = new RegExp(String.raw`[\u0300-\u036f]`, 'g');
 const RE_DESIGNADOR = new RegExp(String.raw`\b(vol|volume|volumen|tomo|t|n|no)\b\.?`, 'g');
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '')
     .replace(RE_DESIGNADOR, '').replace(/[^a-z]/g, '').slice(0, 20);
-// UNIDAD de obra: los tomos de una obra y los miembros de una colección comparten con todo derecho la portada del
-// conjunto (medido en el primer barrido: Grzimek, las enciclopedias de Gale, «Novels for Students», colecciones de
-// audiolibros…) — no es un artefacto. Cuentan como UNA sola unidad; si no, el título sin números.
-const unidad = (d) => (d.obra ? `o:${d.obra}` : d.coleccion ? `c:${d.coleccion}` : `t:${norm(d.titulo)}`);
+// UNIDAD de obra: los TOMOS de una obra comparten con todo derecho la portada del conjunto (Grzimek, las
+// enciclopedias de Gale), igual que los títulos que solo difieren en el número («Novels for Students Vol 10/11»).
+// Pertenecer a la misma COLECCIÓN no basta: hay colecciones-cajón con libros sin relación (medido: 415 EPUB en
+// español con la misma imagen desaparecían del informe por compartir colección). Esos grupos se marcan «de
+// colección»: se crea su selección igual, pero quedan FUERA de la reparación automática (--ejecutar), por si la
+// imagen es la portada legítima de una serie (p. ej. la de una colección de audiolibros).
+const unidad = (d) => (d.obra ? `o:${d.obra}` : `t:${norm(d.titulo)}`);
+const deUnaColeccion = (ds) => ds.every((d) => d.coleccion && String(d.coleccion) === String(ds[0].coleccion));
 
 // ── 1. Portadas: por tamaño, y SHA solo de los tamaños repetidos ─────────────────────────────────────────
 const docs = await col.find({ portada: { $exists: true, $ne: null } },
     { projection: { portada: 1, titulo: 1, isbn: 1, nombre_archivo: 1, imagenes: 1, ruta_base: 1, obra: 1, coleccion: 1 } }).toArray();
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : SELECCIONES ? '📋 SELECCIONES (no toca los documentos)' : '🔍 DRY-RUN'} · ${docs.length} documentos con portada`);
+// Fase 1: tamaño de cada portada (stat, sin leerla).
 const porTam = new Map();
 let i = 0;
 for (const d of docs) {
-    if (++i % 2000 === 0) process.stdout.write(`\r   tamaños: ${i}/${docs.length}`);
-    try { const st = await fs.stat(abs(d.portada)); porTam.set(st.size, [...(porTam.get(st.size) || []), d]); } catch { /* no está */ }
+    if (++i % 500 === 0) process.stdout.write(`\r\x1b[K   1/2 · tamaños: ${i}/${docs.length}`);
+    try {
+        const st = await fs.stat(abs(d.portada));
+        if (!porTam.has(st.size)) porTam.set(st.size, []);
+        porTam.get(st.size).push(d);
+    } catch { /* no está */ }
 }
+// Fase 2: SHA solo de las de tamaño repetido. (Antes esta fase no mostraba progreso y parecía colgada en «64000».)
+const aLeer = [...porTam.values()].filter((ds) => ds.length > 1).flat();
 const porSha = new Map();
-for (const ds of porTam.values()) {
-    if (ds.length < 2) continue;
-    for (const d of ds) {
-        try {
-            const sha = crypto.createHash('sha256').update(await fs.readFile(abs(d.portada))).digest('hex');
-            porSha.set(sha, [...(porSha.get(sha) || []), d]);
-        } catch { /* */ }
-    }
+let k = 0;
+for (const d of aLeer) {
+    if (++k % 200 === 0) process.stdout.write(`\r\x1b[K   2/2 · comparando portadas de igual tamaño: ${k}/${aLeer.length}`);
+    try {
+        const sha = crypto.createHash('sha256').update(await fs.readFile(abs(d.portada))).digest('hex');
+        if (!porSha.has(sha)) porSha.set(sha, []);
+        porSha.get(sha).push(d);
+    } catch { /* */ }
 }
-process.stdout.write('\r' + ' '.repeat(40) + '\r');
+process.stdout.write('\r\x1b[K');
 
 // ── 2. Artefactos: la misma imagen en N obras distintas ──────────────────────────────────────────────────
 const artefactos = [...porSha.entries()]
-    .map(([sha, ds]) => ({ sha, ds, obras: new Set(ds.map(unidad)).size }))
+    .map(([sha, ds]) => ({ sha, ds, obras: new Set(ds.map(unidad)).size, coleccion: deUnaColeccion(ds) }))
     .filter((g) => g.ds.length > 1 && g.obras >= MIN_OBRAS)
     .sort((a, b) => b.ds.length - a.ds.length);
 console.log(`   Portadas idénticas en ${MIN_OBRAS}+ obras distintas: ${artefactos.length} imagen(es) · ${artefactos.reduce((s, g) => s + g.ds.length, 0)} documento(s)\n`);
@@ -107,14 +118,16 @@ for (const g of artefactos) {
     // (Solo al ejecutar: rasterizar PDFs para listar sería lento y no hace falta para crear las selecciones.)
     if (EJECUTAR) for (const d of g.ds) { if (huellas.length >= 2) break; const h = await huellaDePortadaPdf(d); if (h) huellas.push(h); }
     const huella = huellas.length && huellaInformativa(huellas[0]) && (huellas.length < 2 || distanciaHuellas(huellas[0], huellas[1]) <= 6) ? huellas[0] : null;
-    console.log(`🖼️  ${g.sha.slice(0, 12)} · ${g.ds.length} documento(s), ${g.obras} obras · huella de página ${huella || '—'} · ej. ${g.ds[0].portada}`);
+    console.log(`🖼️  ${g.sha.slice(0, 12)} · ${g.ds.length} documento(s), ${g.obras} obras${g.coleccion ? ' · TODOS DE UNA COLECCIÓN' : ''} · huella de página ${huella || '—'} · ej. ${g.ds[0].portada}`);
     for (const d of g.ds.slice(0, 5)) console.log(`     «${String(d.titulo).slice(0, 50)}» · ${String(d.nombre_archivo || '').slice(0, 60)}`);
     if (g.ds.length > 5) console.log(`     … y ${g.ds.length - 5} más`);
     if (SELECCIONES) {
         // Una por grupo; si ya existe (otra pasada), se ACTUALIZAN sus miembros en vez de duplicarla.
         const prefijo = `Portada sospechosa ${g.sha.slice(0, 8)}`;
-        const nombre = `${prefijo} (${g.ds.length})`;
+        const deColeccion = g.coleccion ? ' · de colección' : '';
+        const nombre = `${prefijo} (${g.ds.length})${deColeccion}`;
         const descripcion = `La MISMA imagen es la portada de ${g.ds.length} documentos (${g.obras} obras distintas): probablemente no es la de ninguno. `
+            + (g.coleccion ? 'Todos pertenecen a la MISMA colección: puede ser la portada de la serie (legítima) o una colección-cajón. ' : '')
             + `Revísalos y usa «🚩 Portada sospechosa…» (quitar / re-extraer omitiendo la sospechosa / primera página de texto). `
             + `Ej.: ${g.ds.slice(0, 4).map((d) => `«${String(d.titulo || '').slice(0, 40)}»`).join(', ')}. sha ${g.sha}`;
         const ya = await db.collection('selecciones').findOne({ nombre: { $regex: `^${prefijo}` } }, { projection: { _id: 1 } });
@@ -125,6 +138,8 @@ for (const g of artefactos) {
         seleccionesHechas++;
     }
     if (!EJECUTAR) continue;
+    // Grupo de UNA colección: podría ser la portada legítima de la serie → no se toca solo; decide tú en su selección.
+    if (g.coleccion) { console.log('       ↪ de una colección: no se repara automáticamente (revísalo en su selección).'); continue; }
 
     await registrarArtefacto(db, { huella, sha: g.sha, ejemplos: g.ds.map((d) => d._id), nota: String(g.ds[0].titulo || '').slice(0, 80) });
     for (const d of g.ds) {
