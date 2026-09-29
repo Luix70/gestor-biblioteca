@@ -29,7 +29,30 @@ if (iFlag >= 0 && !RUTA_INFORME) {
     process.exit(1);
 }
 
-const inf = await verificarIntegridad({ reparar: REPARAR });
+// PROGRESO: una línea que avanza en su sitio (fase · i/total · tiempo restante de la fase). El motor ya emite su
+// avance (el panel lo usa); el CLI no lo escuchaba y parecía colgado durante minutos.
+const FASES = {
+    cargando: 'Cargando documentos', 'docs-sin-carpeta': 'Comprobando carpetas', 'docs-sin-fichero': 'Comprobando ficheros',
+    'audios-rotos': 'Comprobando pistas de audio', 'hash-desactualizado': 'Comprobando hashes',
+    'recorrido-arbol': 'Recorriendo el árbol CDU', 'duplicados-hash': 'Duplicados por hash', cuarentena: 'Revisando Cuarentena',
+    reparando: 'Reparando', hecho: 'Terminado',
+};
+const t0 = Date.now();
+let faseActual = null, inicioFase = Date.now();
+const seg = (ms) => { const s = Math.round(ms / 1000); return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`; };
+const onProgress = ({ fase, i, total, carpetas }) => {
+    if (fase !== faseActual) { faseActual = fase; inicioFase = Date.now(); }
+    let det = '';
+    if (total) {
+        const eta = i > 0 ? (Date.now() - inicioFase) / i * (total - i) : null;
+        det = ` ${i}/${total}${eta != null ? ` · faltan ~${seg(eta)}` : ''}`;
+    } else if (carpetas) det = ` ${carpetas} carpetas`;
+    process.stdout.write(`\r\x1b[K   ⏳ ${FASES[fase] || fase}${det} · total ${seg(Date.now() - t0)}`);
+};
+
+const inf = await verificarIntegridad({ reparar: REPARAR, onProgress });
+process.stdout.write('\r\x1b[K');
+console.log(`   (${seg(Date.now() - t0)})`);
 
 console.log(informeTexto(inf, { detalle: false }));
 
