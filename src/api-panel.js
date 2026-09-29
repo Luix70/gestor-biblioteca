@@ -20,6 +20,7 @@ import { lanzarIntegridad, estadoIntegridad, ultimoInformeIntegridad } from './i
 import { lanzarEmparejado, estadoEmparejado } from './utils/emparejar-portadas.js';
 import { lanzarInspeccionManual, estadoInspeccionManual, aplicarInspeccionManual, descartarInspeccionManual } from './utils/inspeccion-manual.js';
 import { lanzarReextraccion, estadoReextraccion, cancelarReextraccion } from './utils/reextraer-imagenes.js';
+import { lanzarPortadaSospechosa, estadoPortadaSospechosa, cancelarPortadaSospechosa } from './utils/portadas-sospechosas.js';
 import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion, elegirEdicion } from './utils/reidentificar-doc.js';
 import { lanzarCompletarSinopsis, estadoCompletarSinopsis, cancelarCompletarSinopsis } from './utils/completar-sinopsis.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
@@ -558,6 +559,16 @@ export function rutasPanel() {
     });
     r.get('/documentos/reextraer-imagenes/estado', (req, res) => res.json(estadoReextraccion()));
     r.post('/documentos/reextraer-imagenes/cancelar', (req, res) => res.json(cancelarReextraccion()));
+
+    // ── PORTADA SOSPECHOSA (una imagen que es la «portada» de libros distintos): sobre una selección o un documento,
+    //    modo 'quitar' | 'reextraer' (omitiendo la sospechosa) | 'texto' (primera página de texto). Solo cambia la
+    //    portada (conserva las demás imágenes); lo compartido por 2+ del lote se registra como artefacto. ──
+    r.post('/documentos/portada-sospechosa', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(lanzarPortadaSospechosa({ ids: req.body?.ids, modo: req.body?.modo }));
+    });
+    r.get('/documentos/portada-sospechosa/estado', (req, res) => res.json(estadoPortadaSospechosa()));
+    r.post('/documentos/portada-sospechosa/cancelar', (req, res) => res.json(cancelarPortadaSospechosa()));
 
     // ── RE-IDENTIFICAR (recuperar el ISBN del propio fichero + pivote al Fichero/APIs, SIN IA), sobre una
     //    selección. Para los miembros de colección que se catalogaron por nombre y quedaron SIN ISBN (TXtras).

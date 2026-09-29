@@ -3585,6 +3585,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las fuentes para mejorar el documento: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books)">✨ Enriquecer</button>
       <button class="fbtn admin-only" id="actReisbn" title="Extraer/cotejar el ISBN de ESTE documento: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual, con o sin IA.">🔎 Extraer ISBN</button>
+      <button class="fbtn admin-only" id="actPortSosp" title="Portada FALSA (la misma imagen en libros distintos): quitarla, re-extraerla omitiendo la sospechosa, o poner la primera página de texto. Solo cambia la portada.">🚩 Portada sospechosa…</button>
       <button class="fbtn admin-only" id="actSinopsis" title="Busca la sinopsis de ESTE documento por su ISBN en el Fichero local y, si no está, en OpenLibrary y Google Books. Sin IA. Opciones: forzar (reemplazar la que tenga) y solo Fichero local (sin salir a internet).">📝 Buscar sinopsis</button>
       <button class="fbtn admin-only" id="actAFondo" title="Lee las PÁGINAS del propio libro (portadilla/contraportada) con la visión y propone autores/roles reales, sinopsis e identificadores. Muestra un balance antes/después para aplicar lo que elijas.">🎯 Completar a fondo</button>
       <button class="fbtn admin-only" id="actShare" title="Genera un QR/enlace para compartir esta ficha (y su descarga, si es digital)">🔗 Compartir</button>
@@ -3662,6 +3663,7 @@ function pintarDoc(r, ctx) {
     // 🔎 Extraer ISBN sobre SOLO este documento: reutiliza el diálogo de opciones del lote (con ISBN manual, al
     // ser 1 doc) y, al terminar, REFRESCA la ficha (no el catálogo).
     if ($('#actReisbn')) $('#actReisbn').onclick = () => reidentificarLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
+    if ($('#actPortSosp')) $('#actPortSosp').onclick = () => portadaSospechosaLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if ($('#actSinopsis')) $('#actSinopsis').onclick = () => sinopsisLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
     if ($('#actTipo')) $('#actTipo').onclick = () => cambiarTipoDocs([d._id]);
@@ -8319,6 +8321,7 @@ function renderBulk() {
     ${ROL === 'admin' ? '<button class="btn pri" id="bkSelShare" title="Compartir estos documentos: enlace/QR de SOLO LECTURA (ver + descargar), con caducidad opcional. Es una foto fija; no crea una selección guardada.">🔗 Compartir selección</button>' : ''}
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReimg" title="Re-extraer del PROPIO fichero la portada Y las imágenes de catalogación (5 páginas frontales + contraportada, saltando las páginas en blanco), reemplazando las actuales (equivocadas). Conserva las imágenes que hayas añadido a mano. Trabajo en 2º plano.">🖼️ Reextraer imágenes</button>' : ''}
+    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkPortSosp" title="Para portadas FALSAS (la misma imagen en libros distintos: banner de un grupo de ripeo, «cover not available»…): quitar la portada, re-extraerla omitiendo la sospechosa, o poner la primera página de texto. Solo cambia la portada; conserva las demás imágenes.">🚩 Portada sospechosa…</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReisbn" title="Extraer/cotejar el ISBN: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual (1 doc), con o sin IA. Trabajo en 2º plano.">🔎 Extraer ISBN</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkSinopsis" title="Busca la sinopsis por el ISBN en el Fichero local y, si no está, en OpenLibrary y Google Books. Sin IA. Opciones: forzar (reemplazar la existente) y solo Fichero local (sin salir a internet). Trabajo en 2º plano.">📝 Buscar sinopsis</button>' : ''}
     <button class="btn" id="bkReproc" title="Reprocesar: devolver cada documento al Inbox para re-catalogarlo de cero (recicla el registro actual)">♻️ Reprocesar</button>
@@ -8399,6 +8402,7 @@ function renderBulk() {
     if ($('#bkSelShare')) $('#bkSelShare').onclick = compartirSeleccionMarcada;
     if ($('#bkPortada')) $('#bkPortada').onclick = portadaComunLote;
     if ($('#bkReimg')) $('#bkReimg').onclick = () => reextraerImagenesLote([...selDocs]);
+    if ($('#bkPortSosp')) $('#bkPortSosp').onclick = () => portadaSospechosaLote([...selDocs]);
     if ($('#bkReisbn')) $('#bkReisbn').onclick = () => reidentificarLote([...selDocs]);
     if ($('#bkSinopsis')) $('#bkSinopsis').onclick = () => sinopsisLote([...selDocs]);
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
@@ -8666,6 +8670,80 @@ async function seguirReextraccion(total) {
     `Imágenes re-extraídas en ${e.ok || 0} documento(s)${e.fallidos ? ` · ${e.fallidos} sin fichero/ilegibles` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
     cancelado || e.fallidos ? 'warn' : 'ok',
   );
+}
+// PORTADA SOSPECHOSA: para las portadas FALSAS (la misma imagen en libros distintos). Tres salidas: quitarla,
+// re-extraerla OMITIENDO la sospechosa (cubierta embebida que no sea ella → siguiente página del PDF → portada
+// remota por ISBN) o poner la PRIMERA PÁGINA DE TEXTO (PDF: primera página con texto; EPUB sin cubierta: se
+// compone con el texto de su portadilla). Solo cambia la portada; las demás imágenes se conservan. Lo que comparten
+// 2+ documentos del lote se registra como artefacto, para que la ingesta lo salte en adelante.
+async function portadaSospechosaLote(ids, { alTerminar = null } = {}) {
+  if (!ids.length) return;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;width:94vw">
+    <h3 style="margin:0 0 6px">🚩 Portada sospechosa · ${ids.length} documento(s)</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">Solo cambia la PORTADA: las demás imágenes se conservan y la imagen retirada sigue en disco.${ids.length > 1 ? ' Si la portada la comparten varios de estos documentos, se registra como falsa para que la ingesta la salte en adelante.' : ''}</p>
+    <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="reextraer" checked>
+      <span><b>Re-extraer omitiendo la sospechosa</b><br><span class="muted" style="font-size:12px">La cubierta embebida si no es la falsa; en un PDF, la siguiente página con contenido; si no, la portada remota por ISBN.</span></span></label>
+    <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="texto">
+      <span><b>Primera página de texto</b><br><span class="muted" style="font-size:12px">PDF: la primera página con texto. EPUB sin cubierta: una página compuesta con su portadilla (título, autor…).</span></span></label>
+    <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="quitar">
+      <span><b>Quitar portada</b><br><span class="muted" style="font-size:12px">El documento se queda sin portada (la imagen no se borra del disco).</span></span></label>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn" id="psNo">Cancelar</button><button class="btn ok" id="psSi">Aplicar</button></div>
+  </div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#psNo').onclick = cerrarCmp;
+  $('#psSi').onclick = async () => {
+    const modo = (document.querySelector('input[name="psModo"]:checked') || {}).value || 'reextraer';
+    try {
+      const r = await api('/documentos/portada-sospechosa', { method: 'POST', body: JSON.stringify({ ids, modo }) });
+      if (!r.ok) { toast(r.motivo || 'No se pudo lanzar', 'bad'); return; }
+      await seguirPortadaSospechosa(r.total || ids.length);
+      if (alTerminar) alTerminar();
+      else { selDocs.clear(); buscarCatalogo(estadoBusqueda.page || 1); }
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+}
+async function seguirPortadaSospechosa(total) {
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;width:94vw">
+    <h3 style="margin:0 0 10px">🚩 Tratando portadas…</h3>
+    <div style="height:10px;border-radius:6px;background:rgba(128,128,128,.25);overflow:hidden">
+      <div id="psBar" style="height:100%;width:0%;background:var(--acc);transition:width .3s"></div>
+    </div>
+    <div id="psTxt" class="muted" style="font-size:13px;margin-top:8px">0 / ${total}</div>
+    <div id="psTit" class="muted" style="font-size:12px;margin-top:2px;min-height:1.2em"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn bad" id="psCancel">✕ Cancelar</button></div>
+  </div>`;
+  $('#cmpModal').style.display = 'grid';
+  $('#psCancel').onclick = async () => {
+    $('#psCancel').disabled = true;
+    $('#psCancel').textContent = 'Cancelando…';
+    try { await api('/documentos/portada-sospechosa/cancelar', { method: 'POST' }); } catch { /* ya habrá acabado */ }
+  };
+  let e = {};
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 700));
+    try { e = await api('/documentos/portada-sospechosa/estado'); } catch { break; }
+    const pct = e.total ? Math.round((e.hechos / e.total) * 100) : 0;
+    if ($('#psBar')) $('#psBar').style.width = pct + '%';
+    if ($('#psTxt')) $('#psTxt').textContent = `${e.hechos} / ${e.total}${e.fallidos ? ` · ${e.fallidos} sin arreglar` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
+    if ($('#psTit')) $('#psTit').textContent = e.titulo ? recortar(e.titulo, 60) : '';
+    if (!e.en_curso) break;
+  }
+  cerrarCmp();
+  const cancelado = e.cancelar && e.hechos < e.total;
+  toast(
+    `Portada tratada en ${e.ok || 0} documento(s)${e.registrados ? ` · ${e.registrados} portada(s) registrada(s) como falsa(s)` : ''}${e.fallidos ? ` · ${e.fallidos} sin arreglar` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
+    cancelado || e.fallidos ? 'warn' : 'ok',
+  );
+  // Los que no se pudieron arreglar, con el motivo (p. ej. «el PDF no tiene capa de texto: usa Re-extraer»).
+  if (e.motivos && e.motivos.length) {
+    $('#cmpModal').innerHTML = `<div class="box card" style="max-width:640px;width:94vw">
+      <h3 style="margin:0 0 8px">Sin arreglar (${e.fallidos})</h3>
+      <div class="muted" style="font-size:12px;max-height:50vh;overflow:auto">${e.motivos.map((m) => `<div style="margin:3px 0">${esc(m)}</div>`).join('')}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" id="psOk">Cerrar</button></div></div>`;
+    $('#cmpModal').style.display = 'grid';
+    $('#psOk').onclick = cerrarCmp;
+  }
 }
 // RECUPERAR ISBN en lote: abre el PROPIO fichero (EPUB/PDF/MOBI) de cada documento, extrae el ISBN que la
 // ingesta no capturó (típico de miembros de colección catalogados por el nombre) y, con él, rellena huecos de

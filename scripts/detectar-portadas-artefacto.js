@@ -18,8 +18,13 @@
  *      la siguiente página con contenido, que suele ser la cubierta real); si el fichero no da otra, portada remota
  *      por ISBN. No borra nada del disco; conserva las imágenes añadidas a mano.
  *
- *   sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js              (DRY-RUN)
- *   sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js --ejecutar
+ * SELECCIONES (por defecto): crea (o actualiza) una SELECCIÓN por grupo sospechoso, «Portada sospechosa <sha8>
+ * (N)», para revisarla en el panel y decidir allí con la acción «🚩 Portada sospechosa…» (quitar portada /
+ * re-extraer omitiendo la sospechosa / primera página de texto). No toca los documentos: solo crea selecciones.
+ *
+ *   sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js              (lista + selecciones)
+ *   sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js --sin-selecciones   (solo lista)
+ *   sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js --ejecutar   (registra y repara TODO solo)
  *   … --obras N    mínimo de obras distintas que deben compartir la imagen (por defecto 2)
  */
 import 'dotenv/config';
@@ -33,9 +38,11 @@ import { medirTinta } from '../src/utils/rasterizar-pdf.js';
 import { registrarArtefacto, huellaInformativa, distanciaHuellas } from '../src/utils/portadas-artefacto.js';
 import { reextraerImagenesDoc } from '../src/utils/reextraer-imagenes.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
+import { crearSeleccion, reemplazarDocs } from '../src/utils/selecciones.js';
 
 const args = process.argv.slice(2);
 const EJECUTAR = args.includes('--ejecutar');
+const SELECCIONES = !args.includes('--sin-selecciones');
 const iObras = args.indexOf('--obras');
 const MIN_OBRAS = iObras >= 0 ? Math.max(2, Number(args[iObras + 1]) || 2) : 2;
 const TINTA_MIN = Number(process.env.PDF_TINTA_MIN || 0.005);
@@ -56,7 +63,7 @@ const unidad = (d) => (d.obra ? `o:${d.obra}` : d.coleccion ? `c:${d.coleccion}`
 // ── 1. Portadas: por tamaño, y SHA solo de los tamaños repetidos ─────────────────────────────────────────
 const docs = await col.find({ portada: { $exists: true, $ne: null } },
     { projection: { portada: 1, titulo: 1, isbn: 1, nombre_archivo: 1, imagenes: 1, ruta_base: 1, obra: 1, coleccion: 1 } }).toArray();
-console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${docs.length} documentos con portada`);
+console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : SELECCIONES ? '📋 SELECCIONES (no toca los documentos)' : '🔍 DRY-RUN'} · ${docs.length} documentos con portada`);
 const porTam = new Map();
 let i = 0;
 for (const d of docs) {
@@ -93,15 +100,30 @@ async function huellaDePortadaPdf(d) {
     return null;
 }
 
-let reparados = 0, fallos = 0;
+let reparados = 0, fallos = 0, seleccionesHechas = 0;
 for (const g of artefactos) {
     // Huella: de hasta dos PDFs del grupo; si coinciden (o solo hay una), se registra.
     const huellas = [];
-    for (const d of g.ds) { if (huellas.length >= 2) break; const h = await huellaDePortadaPdf(d); if (h) huellas.push(h); }
+    // (Solo al ejecutar: rasterizar PDFs para listar sería lento y no hace falta para crear las selecciones.)
+    if (EJECUTAR) for (const d of g.ds) { if (huellas.length >= 2) break; const h = await huellaDePortadaPdf(d); if (h) huellas.push(h); }
     const huella = huellas.length && huellaInformativa(huellas[0]) && (huellas.length < 2 || distanciaHuellas(huellas[0], huellas[1]) <= 6) ? huellas[0] : null;
     console.log(`🖼️  ${g.sha.slice(0, 12)} · ${g.ds.length} documento(s), ${g.obras} obras · huella de página ${huella || '—'} · ej. ${g.ds[0].portada}`);
     for (const d of g.ds.slice(0, 5)) console.log(`     «${String(d.titulo).slice(0, 50)}» · ${String(d.nombre_archivo || '').slice(0, 60)}`);
     if (g.ds.length > 5) console.log(`     … y ${g.ds.length - 5} más`);
+    if (SELECCIONES) {
+        // Una por grupo; si ya existe (otra pasada), se ACTUALIZAN sus miembros en vez de duplicarla.
+        const prefijo = `Portada sospechosa ${g.sha.slice(0, 8)}`;
+        const nombre = `${prefijo} (${g.ds.length})`;
+        const descripcion = `La MISMA imagen es la portada de ${g.ds.length} documentos (${g.obras} obras distintas): probablemente no es la de ninguno. `
+            + `Revísalos y usa «🚩 Portada sospechosa…» (quitar / re-extraer omitiendo la sospechosa / primera página de texto). `
+            + `Ej.: ${g.ds.slice(0, 4).map((d) => `«${String(d.titulo || '').slice(0, 40)}»`).join(', ')}. sha ${g.sha}`;
+        const ya = await db.collection('selecciones').findOne({ nombre: { $regex: `^${prefijo}` } }, { projection: { _id: 1 } });
+        if (ya) {
+            await reemplazarDocs(db, ya._id, g.ds.map((d) => d._id));
+            await db.collection('selecciones').updateOne({ _id: ya._id }, { $set: { nombre, descripcion } });
+        } else await crearSeleccion(db, { nombre, descripcion, docs: g.ds.map((d) => d._id) });
+        seleccionesHechas++;
+    }
     if (!EJECUTAR) continue;
 
     await registrarArtefacto(db, { huella, sha: g.sha, ejemplos: g.ds.map((d) => d._id), nota: String(g.ds[0].titulo || '').slice(0, 80) });
@@ -116,7 +138,8 @@ for (const g of artefactos) {
         } else { fallos++; console.log(`       ⚠️  «${String(d.titulo).slice(0, 40)}»: ${r.motivo}`); }
     }
 }
+if (SELECCIONES) console.log(`\n📋 ${seleccionesHechas} selección(es) «Portada sospechosa …» creadas/actualizadas: revísalas en el panel (Selecciones) y usa «🚩 Portada sospechosa…».`);
 console.log(EJECUTAR
     ? `\nArtefactos registrados: ${artefactos.length} · libros reparados: ${reparados} · sin reparar: ${fallos}\n`
-    : '\nDRY-RUN: no se ha registrado ni cambiado nada. Repite con --ejecutar.\n');
+    : '\nNo se ha tocado ningún documento. (Para registrar y reparar todo automáticamente: --ejecutar.)\n');
 process.exit(0);

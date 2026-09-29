@@ -1144,6 +1144,20 @@ de ficheros clasificado por CDU.
         NO cuentan como obras distintas (primer barrido, 588 grupos): los tomos de una misma obra, los miembros de
         una misma colección (Grzimek, enciclopedias de Gale, colecciones de audiolibros: la portada del conjunto
         es legítima) ni títulos que solo difieren en el número («Poetry for students 02» / «05»).
+        SELECCIONES (2026-09-29, por defecto): el script crea/actualiza una SELECCIÓN por grupo sospechoso,
+        «Portada sospechosa <sha8> (N)», sin tocar los documentos; --sin-selecciones solo lista; --ejecutar
+        registra y repara todo automáticamente (como antes).
+      · ACCIÓN «🚩 Portada sospechosa…» (barra de la selección en Búsqueda y ficha, solo admin; utils/portadas-
+        sospechosas.js, POST /documentos/portada-sospechosa [+/estado, /cancelar], trabajo de fondo). Tres salidas:
+          - Re-extraer omitiendo la sospechosa: cubierta embebida (EPUB/MOBI) si no es la falsa; en un PDF, la
+            siguiente página con contenido; si no, portada remota por ISBN.
+          - Primera página de texto: PDF → la primera página con capa de texto (pdftotext); EPUB sin cubierta →
+            se COMPONE una página con el texto de su PORTADILLA (titulo.xhtml/title.xhtml…; si no hay, la primera
+            página con texto que no sea índice/nav) con pdf-lib + pdftoppm (sin navegador ni sharp).
+          - Quitar portada: el documento se queda sin portada.
+        Solo cambia la PORTADA: las demás imágenes se conservan y la retirada sigue en disco. Si la portada la
+        comparten 2+ documentos del lote (o la huella de la 1.ª página de sus PDF), se registra como artefacto:
+        la ingesta y la re-extracción la saltarán en adelante. Al acabar lista los no arreglados con el motivo.
           sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js
           sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js --ejecutar
 
