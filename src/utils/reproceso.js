@@ -203,8 +203,23 @@ export async function reprocesarDocumento(db, doc, { conservar = true } = {}) {
         }
         await fs.copyFile(origen, destino);
         if (conservar) await escribirSidecar(destino, doc); // preserva ubicación/colección/nº/isbn/valoración/nsfw/nfc
+        // VERSIONES fusionadas (utils/fusionar-versiones.js): sus ficheros viven en esta carpeta y la carpeta va a la
+        // Papelera → viajan TAMBIÉN al Inbox, para que no queden solo en la Papelera (que se vacía). Entran como
+        // documentos aparte; la fusión de versiones los volverá a reunir.
+        const versionesEnviadas = [];
+        for (const v of (doc.versiones || [])) {
+            const vOrigen = path.join(carpeta, v.nombre_archivo || '');
+            if (!v.nombre_archivo || !(await existe(vOrigen))) continue;
+            let vDestino = path.join(DIR_INBOX, v.nombre_archivo);
+            if (await existe(vDestino)) {
+                const ext = path.extname(v.nombre_archivo);
+                vDestino = path.join(DIR_INBOX, `${path.basename(v.nombre_archivo, ext)} (reproc ${id6} v${versionesEnviadas.length + 2})${ext}`);
+            }
+            await fs.copyFile(vOrigen, vDestino);
+            versionesEnviadas.push(path.basename(vDestino));
+        }
         const reciclada = await desvincularYReciclar(db, doc, 'reprocesado');
-        return { ok: true, inbox: path.basename(destino), reciclada, conservar };
+        return { ok: true, inbox: path.basename(destino), versiones: versionesEnviadas, reciclada, conservar };
     }
 
     // ── Escaneo (imágenes = dato del usuario): reunir TODAS las imágenes de contenido y enviarlas. ──

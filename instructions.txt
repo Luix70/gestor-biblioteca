@@ -1200,6 +1200,11 @@ de ficheros clasificado por CDU.
       · ISBN comparado en 13 dígitos: un ISBN-10 y su ISBN-13 son el mismo libro (EPUB 184968667X y MOBI
         9781849686679). El nº de colección solo frena la fusión si es real (no automático y escrito en el título
         o el nombre del fichero). Medido el 29-sep: 971 grupos seguros (1.957 documentos) antes de este último ajuste.
+      · UNIVOCIDAD: tras fusionar sigue habiendo 1 ficha ↔ 1 carpeta; lo que cambia es 1 ficha ↔ N ficheros (como
+        `textos[]` o los audiolibros). Los sidecars son de la ficha y llevan `versiones` y `documentos_fusionados`
+        (la carpeta sigue explicando cada fichero para reconstruir la BD desde el disco). Las imágenes extraídas son
+        las del fichero principal. «Reprocesar» una ficha fusionada envía al Inbox el principal Y sus versiones (antes
+        las versiones solo acababan en la Papelera con la carpeta).
       · scripts/fusionar-versiones.js: por defecto clasifica y crea selecciones «Versiones por revisar <ISBN> (N)»
         y «ISBN compartido <ISBN> (N)» (sin tocar documentos); --ejecutar fusiona los seguros (--isbn, --limite).
       · Acción «🔗 Fusionar versiones» (barra de la selección): fusiona los que TÚ elijas (rechaza formatos distintos).
