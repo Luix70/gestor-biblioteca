@@ -69,7 +69,8 @@ export function clasificarGrupo(docs, { tamanos = null } = {}) {
     }
     if (new Set(docs.map(formatosDe)).size > 1) return { clase: 'revisar', motivo: 'formatos distintos (no se fusionan)' };
     if (docs.some((d) => d.obra)) return { clase: 'revisar', motivo: 'alguno es tomo de una obra' };
-    const numsCol = new Set(docs.map((d) => String(d.coleccion_numero || '')));
+    // Solo cuenta si hay DOS números distintos: que uno tenga nº de colección y el otro no, no dice nada.
+    const numsCol = new Set(docs.map((d) => String(d.coleccion_numero || '').trim()).filter(Boolean));
     if (numsCol.size > 1) return { clase: 'revisar', motivo: 'distinto nº de colección (¿tomos de una colección?)' };
     if (docs.length > MAX_SEGURO) return { clase: 'revisar', motivo: `${docs.length} versiones: posible ISBN compartido` };
     if (docs.some((d) => d.isbn_provisional || d.isbn_dudoso)) return { clase: 'revisar', motivo: 'ISBN provisional o dudoso' };
