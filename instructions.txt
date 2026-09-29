@@ -1063,6 +1063,24 @@ de ficheros clasificado por CDU.
         editorial SUSTITUYE a la del registro si no casan, anotando la anterior (caso «La estrella de Pandora»:
         elegido el ISBN seguía «Gamon»; solo el Cotejo lo arreglaba). En las dudosas no. Y nunca se rellena una
         editorial vacía con un maquetador («ePubLibre», que el OPF declara como dc:publisher: se colaba).
+      · DECIDE SIEMPRE LA MÁS PROBABLE (2026-09-29, identificar-edicion · reducirCandidatas / masProbable): sin
+        pruebas, la lista se REDUCE (fuera otras lenguas, otras traducciones y reimpresores bajo demanda —Creative
+        Media Partners, Independently Published, Kessinger…— si hay alguna edición de una editorial real). Queda
+        una → DUDOSA; varias → la más probable (más señales, misma lengua, editorial real, BNE > Fichero > OL, más
+        reciente) como PROVISIONAL. Una provisional elegida SIN pruebas no impone su editorial ni se aprende como
+        indicio de la colección (confirmada:false). Muestra de 30 pendientes: 30 asignados (6 definitivos, 18
+        provisionales, 6 dudosos).
+      · TRADUCTOR EN EL TÍTULO («Las amistades peligrosas (trad. Ángeles Caso)», «(Tr. Josefina Ferrer)»): se
+        separa del título para buscar (con él la BNE no encontraba nada) y se usa como prueba; además, búsqueda
+        dirigida en la BNE por el apellido del traductor, y hasta 50 ediciones por consulta (la de Caso era la 26.ª).
+      · «Unknown Publisher - Being Researched», «[s.n.]», «Sin editorial»… son editoriales falsas (editoriales-falsas.js).
+      · CAMPAÑA «Resolver ediciones pendientes» (campanas.js · resolver-ediciones, activa, sin IA): lo mismo a
+        reposo sobre «Edición por elegir» (lote 20 cada 15 min; con una fuente caída reintenta a las 6 h).
+      · EN LA INGESTA (servicio-ingesta · identificarEdicionEnIngesta), para que el libro ENTRE BIEN: las mismas
+        pruebas (traductor del fichero o del título, indicios de su colección), provisional/dudoso, la editorial
+        de la edición confirmada manda, y con el ISBN ya fijado se consulta la cascada gratuita por ESE ISBN
+        (sinopsis, páginas, materias, Dewey/LCC…; la CDU de la BNE por prioridad). Con ISBN del propio fichero,
+        su editorial se aprende como indicio de la colección.
       · Para re-investigar los pendientes:
           sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir          (en seco)
           sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir --ejecutar

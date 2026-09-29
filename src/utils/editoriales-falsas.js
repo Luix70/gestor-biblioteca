@@ -29,6 +29,9 @@ export const EDITORIALES_NO_VALIDAS = [
     /independently\s+published/i,
     /\bkdp\b|kindle\s+direct/i,
     /\blulu(\.com|\s+press)?\b/i,
+    // Marcadores de «editorial desconocida» que algunas fuentes ponen en vez de dejar el campo vacío (medido:
+    // «Unknown Publisher - Being Researched» en el Fichero): no son una editorial.
+    /unknown\s+publisher|being\s+researched|publisher\s+not\s+identified|^\[?s\.\s?n\.\]?$|^sin\s+editorial$|editor\s+no\s+identificado/i,
 ];
 
 /** ¿Es `nombre` uno de esos grupos/re-editores (no una editorial real)? */

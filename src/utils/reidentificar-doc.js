@@ -25,7 +25,7 @@ import { variantesISBN, validarISBN } from './identificadores.js';
 import { esTituloArtefacto } from './parsear-nombre.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
-import { identificarEdicion, candidatasParaGuardar } from './identificar-edicion.js';
+import { identificarEdicion, candidatasParaGuardar, mismaEditorial, traductoresDelTitulo } from './identificar-edicion.js';
 import { editorialesDeColeccion, anotarEditorialDeColeccion } from './indicios-coleccion.js';
 import { esEditorialFalsa } from './editoriales-falsas.js';
 import { extraerMetadatosEpub, textoInicialEpub } from './lector-epub.js';
@@ -84,14 +84,6 @@ async function datosDeAutoridad(db, doc) {
         // Editoriales que sugiere su colección (indicios aprendidos de otras identificaciones).
         editoriales_coleccion: await editorialesDeColeccion(db, doc).catch(() => []),
     };
-}
-
-/** ¿Nombran la misma editorial? (sin acentos, mayúsculas ni palabras de relleno: «La Factoría de Ideas» = «La Factoria de Ideas»). */
-function mismaEditorial(a, b) {
-    const RELLENO = new Set(['ediciones', 'edicion', 'editorial', 'editores', 'grupo', 'libros', 'la', 'el', 'de', 'del', 'y', 'sa', 'sl']);
-    const nucleo = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !RELLENO.has(w));
-    const na = nucleo(a), nb = nucleo(b);
-    return na.length > 0 && nb.length > 0 && na.some((w) => nb.includes(w));
 }
 
 /** Traductores declarados en un EPUB: el OPF y, si no, la línea «Traducción: …» de los créditos. Nunca lanza. */
@@ -302,11 +294,16 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         // Si el documento no guardó sus traductores (ingestas antiguas), se leen del PROPIO fichero: el OPF del
         // EPUB (dc:contributor opf:role="trl") o, si no, la página de créditos («Traducción: …», ePubLibre).
         if (!pruebas.traductores.length && abs && /\.epub$/i.test(abs)) pruebas.traductores = await traductoresDeEpub(abs);
+        if (!pruebas.traductores.length) pruebas.traductores = traductoresDelTitulo(doc.titulo);   // «(trad. Ángeles Caso)»
         const r = await identificarEdicion(pruebas, { online: usarApis, conIA }).catch(() => null);
         if (!r) caidas.push('error en la identificación');
         else caidas.push(...(r.fuentesCaidas || []));
         if (r?.estado === 'unico') { isbn = r.isbn; via = `autoridad/${r.via}`; edicion = r.elegido; }
-        else if (r?.estado === 'provisional') { isbn = r.isbn; via = `autoridad/${r.via}, PROVISIONAL`; edicion = r.elegido; provisional = r; }
+        else if (r?.estado === 'provisional') {
+            isbn = r.isbn; via = `autoridad/${r.via}, PROVISIONAL`; provisional = r;
+            // Sin pruebas (la más probable «a ciegas») la edición no está confirmada: no impone su editorial.
+            if (r.confirmada !== false) edicion = r.elegido;
+        }
         else if (r?.estado === 'dudoso') { isbn = r.isbn; via = `autoridad/${r.via}, DUDOSO`; dudoso = r; }
         else if (r?.estado === 'ambiguo') ambiguo = r;
     }
@@ -319,7 +316,7 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
             // ficha («¿Cuál es tu edición?»). No se toca nada más del documento (ni fecha_actualizacion: no hay
             // cambio de datos, así que no hace falta regenerar sus sidecars).
             if (aplicar && ambiguo.candidatos?.length) await guardarCandidatas(db, doc, ambiguo.candidatos);
-            return { estado: 'ambiguo', motivo: ambiguo.motivo, candidatos: ambiguo.candidatos };
+            return { estado: 'ambiguo', reintentable, motivo: ambiguo.motivo + porQue, candidatos: ambiguo.candidatos };
         }
         if (!abs && !manual) return { estado: 'sin-fichero', reintentable, motivo: 'no se encontró el fichero del documento en su carpeta' + porQue };
         if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', reintentable, motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` + porQue };
@@ -428,8 +425,11 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     await regenerarSidecarsDoc(db, { ...doc, ...set }, carpeta).catch(() => {});
     // APRENDER: la editorial de esta edición queda como INDICIO en la colección del libro («Solaris ficción» →
     // La Factoría de Ideas), para las siguientes identificaciones de libros de la misma colección.
+    // Solo con la edición SEGURA (ISBN del propio fichero, elegido por ti, o identificado con pruebas): una
+    // provisional «a ciegas» o una dudosa ensuciarían los indicios.
+    const edicionSegura = !dudoso && (!provisional || edicion) && (via === 'fichero' || manual || edicion);
     const edEdicion = [datos.editorial, edicion?.editorial].find((e) => e && !esEditorialFalsa(e));
-    if (edEdicion && (doc.coleccion || doc.coleccion_nombre)) await anotarEditorialDeColeccion(db, doc, edEdicion);
+    if (edicionSegura && edEdicion && (doc.coleccion || doc.coleccion_nombre)) await anotarEditorialDeColeccion(db, doc, edEdicion);
     // CDU de la BNE para esta edición: se APLICA si tiene prioridad sobre la actual (la deducida por equivalencia o
     // IA), MOVIENDO la carpeta. No toca una CDU manual ni una impresa en el libro, ni tomos de obra.
     let cduAplicada = null;

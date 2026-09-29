@@ -172,6 +172,23 @@ const NO_PERSONA = new Set(['traduccion', 'traducido', 'traducida', 'traductor',
 const tokensPersonas = (lista) => new Set((Array.isArray(lista) ? lista : [lista]).filter(Boolean)
     .flatMap((s) => palabras(s)).filter((w) => w.length >= 4 && !NO_PERSONA.has(w) && !/^\d+$/.test(w)));
 
+/**
+ * Traductor anotado en el TÍTULO por quien preparó el fichero: «Cuentos de Canterbury (Tr. Josefina Ferrer)»,
+ * «Las amistades peligrosas (trad. Ángeles Caso)», «… [Traducción de X]». Es la pista que distingue la edición
+ * cuando el libro no guardó sus contribuciones. [] si no hay.
+ */
+const RE_TRADUCTOR_TITULO = new RegExp(String.raw`[(\[]\s*(?:traducci[oó]n(?:\s+de)?|translated\s+by|transl|trad|tr)\b\.?\s*:?\s*([^)\]]{3,80})[)\]]`, 'i');
+/** ¿Nombran la misma editorial? (sin acentos, mayúsculas ni relleno: «La Factoría de Ideas» = «La Factoria de Ideas»). */
+export function mismaEditorial(a, b) {
+    const na = nucleoEditorial(a), nb = nucleoEditorial(b);
+    return na.length > 0 && nb.length > 0 && na.some((w) => nb.includes(w));
+}
+
+export function traductoresDelTitulo(titulo) {
+    const m = RE_TRADUCTOR_TITULO.exec(String(titulo || ''));
+    return m ? [m[1].trim()] : [];
+}
+
 /** Normaliza un candidato (Fichero, BNE, OpenLibrary) a una forma común. */
 // Un ISBN-10 y su ISBN-13 son el MISMO libro: se normaliza todo a 13 para que no cuenten como dos ediciones
 // (medido: «Misiones secretas» salía ambigua entre 8476330111 y 9788476330111).
@@ -202,6 +219,63 @@ const comoCandidato = (c, fuente) => ({
         : (c.contribuciones_nombres || []).filter((x) => x && x.rol === 'traductor').map((x) => x.nombre),
 });
 
+// REIMPRESORES BAJO DEMANDA: reeditan en facsímil obras de dominio público a partir de escaneos; su «edición» casi
+// nunca es la de un EPUB/PDF de biblioteca. Solo se descartan si queda alguna edición de una editorial de verdad.
+const RE_BAJO_DEMANDA = new RegExp([
+    'creative media partners', 'independently published', 'createspace', 'kessinger', 'forgotten books', 'legare street',
+    'wentworth', 'hansebooks', 'nabu press', 'bibliolife', 'general books', 'lulu', 'trieste publishing', 'alpha editions',
+    'outlook verlag', 'sagwan', 'andesite', 'franklin classics', 'palala', 'gale ecco', "scholar'?s choice", 'books on demand',
+    'tredition', 'literary licensing', 'wallachia', 'blurb', 'fb&c', 'hardpress', 'leopold classic', 'read books',
+    'dalton house', 'double 9', 'lightning source', 'print on demand', 'amazon digital', 'kindle direct',
+].join('|'), 'i');
+const esBajoDemanda = (c) => RE_BAJO_DEMANDA.test(String(c.editorial || ''));
+
+/**
+ * Reduce las candidatas SIN pruebas a las plausibles: fuera las de OTRA LENGUA y las de OTRA TRADUCCIÓN (cuando se
+ * sabe), y los reimpresores bajo demanda si queda alguna edición de una editorial real. Sin duplicados por ISBN.
+ */
+function reducirCandidatas(doc, casi) {
+    const iDoc = idioma2(doc.idioma);
+    const tDoc = tokensPersonas(doc.traductores);
+    let lista = unicosPorIsbn(casi).filter((c) => {
+        const iCand = idioma2(c.idioma);
+        if (iDoc && iCand && iDoc !== iCand) return false;
+        const tCand = tokensPersonas(c.traductores);
+        return !(tDoc.size && tCand.size && ![...tDoc].some((w) => tCand.has(w)));
+    });
+    const reales = lista.filter((c) => !esBajoDemanda(c));
+    if (reales.length) lista = reales;
+    return lista;
+}
+
+/**
+ * La edición MÁS PROBABLE de varias: más señales; misma lengua que el libro; editorial real (no bajo demanda); la
+ * BNE antes que el Fichero y OpenLibrary (catalogación profesional); y, a igualdad, la MÁS RECIENTE (la que más
+ * probablemente sirvió de base a un EPUB/PDF actual). Se asigna como PROVISIONAL: las demás quedan en la ficha.
+ */
+function masProbable(doc, lista, porQue) {
+    const iDoc = idioma2(doc.idioma);
+    const FUENTE = { bne: 3, fichero: 2, openlibrary: 1 };
+    const puntos = (c) => [
+        (c.señales || []).length,
+        iDoc && idioma2(c.idioma) === iDoc ? 1 : 0,
+        esBajoDemanda(c) ? 0 : 1,
+        FUENTE[c.fuente] || 0,
+        parseInt(c.anio, 10) || 0,
+    ];
+    const orden = [...unicosPorIsbn(lista)].sort((a, b) => {
+        const pa = puntos(a), pb = puntos(b);
+        for (let i = 0; i < pa.length; i++) if (pa[i] !== pb[i]) return pb[i] - pa[i];
+        return 0;
+    });
+    const e = orden[0];
+    return {
+        estado: 'provisional', isbn: e.isbn, elegido: e, candidatos: orden, via: e.fuente,
+        confirmada: (e.señales || []).length > 0,
+        motivo: `la más probable de ${orden.length} ediciones (${porQue}): ${e.editorial || '?'}, ${e.anio || '?'}${e.señales?.length ? ' — casa ' + e.señales.join(' + ') : ''}; se asigna como PROVISIONAL`,
+    };
+}
+
 /**
  * ISBN PROVISIONAL: varias ediciones posibles pero TODAS de la MISMA editorial (típico: reimpresiones o
  * reediciones — «Los propios dioses», La Factoría de Ideas 2005 y 2007). Cuál de ellas sea importa poco: el
@@ -218,6 +292,7 @@ function siMismaEditorial(buenos) {
     const elegido = [...u].sort((a, b) => b.señales.length - a.señales.length || (parseInt(b.anio, 10) || 0) - (parseInt(a.anio, 10) || 0))[0];
     return {
         estado: 'provisional', isbn: elegido.isbn, elegido, candidatos: u, via: elegido.fuente,
+        confirmada: elegido.señales.length > 0,   // ¿alguna prueba (editorial, traductor…) respalda la edición?
         motivo: `${u.length} ediciones, todas de ${elegido.editorial}: se asigna la de ${elegido.anio || '?'} como PROVISIONAL (casa ${elegido.señales.join(' + ')})`,
     };
 }
@@ -262,9 +337,20 @@ const TOPE_OL_MS = Number(process.env.IDENTIFICAR_OL_TOPE_MS || 15000);
 
 /** Ediciones de la BNE por título+autor (o +editorial). [] si no hay o la BNE no responde. */
 async function candidatosBNE(doc, autor, caidas = []) {
-    const r = await buscarEdicionesEnBNE({ titulo: doc.titulo, autor, editorial: doc.editorial }).catch(() => null);
+    // Hasta 50: un clásico tiene decenas de ediciones y la buena puede venir la 26.ª (medido: la de Ángeles Caso de
+    // «Las amistades peligrosas»).
+    const r = await buscarEdicionesEnBNE({ titulo: doc.titulo, autor, editorial: doc.editorial, max: 50 }).catch(() => null);
     if (r === null) caidas.push('bne');   // null = la BNE no respondió (red o circuito abierto); [] = no lo tiene
-    return (r || []).map((x) => comoCandidato({ ...x, anio: x.año_edicion }, 'bne'));
+    // Con el TRADUCTOR conocido, además una búsqueda dirigida por su apellido (la BNE indexa los 700): da justo
+    // las ediciones de esa traducción aunque haya cien del mismo título.
+    const extra = [];
+    for (const t of (doc.traductores || []).slice(0, 2)) {
+        const apellido = String(t).includes(',') ? String(t).split(',')[0] : String(t).trim().split(/\s+/).pop();
+        if (!apellido || apellido.length < 3) continue;
+        const x = await buscarEdicionesEnBNE({ titulo: doc.titulo, autor: apellido, max: 10 }).catch(() => null);
+        if (x) extra.push(...x);
+    }
+    return [...(r || []), ...extra].map((x) => comoCandidato({ ...x, anio: x.año_edicion }, 'bne'));
 }
 
 /** La edición que elige OpenLibrary por título+autor (una), con tope de espera. */
@@ -308,6 +394,17 @@ function siUnica(buenos, via) {
  */
 export async function identificarEdicion(doc, { online = false, conIA = false, limite = 40 } = {}) {
     if (!doc?.titulo) return { estado: 'sin-candidatos', candidatos: [], motivo: 'el documento no tiene título' };
+    // El traductor anotado en el título («… (trad. Ángeles Caso)») es una PRUEBA, no parte del título: se pasa a
+    // `traductores` y se quita del título, o ninguna autoridad encuentra el libro (medido: la BNE no devolvía la
+    // edición de Ángeles Caso y ganaba otra traducción).
+    const delTitulo = traductoresDelTitulo(doc.titulo);
+    if (delTitulo.length) {
+        doc = {
+            ...doc,
+            titulo: String(doc.titulo).replace(RE_TRADUCTOR_TITULO, ' ').replace(/\s+/g, ' ').trim(),
+            traductores: doc.traductores?.length ? doc.traductores : delTitulo,
+        };
+    }
     const autor = (doc.autores || [])[0] || null;
     // Fuentes que NO respondieron (Fichero no disponible, BNE u OpenLibrary caídas): un «no encontrado» con alguna
     // caída no es definitivo — quien llama puede volver a intentarlo más tarde (campaña «Recuperar ISBN»).
@@ -361,30 +458,26 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
         }
     }
 
-    // Varias posibles de la MISMA editorial → ISBN provisional (el registro se completa; tú puedes cambiarla).
-    const prov = siMismaEditorial(buenos);
-    if (prov) return conCaidas(prov);
+    // ── DECIDIR SIN TI (regla del usuario: revisar a mano ~1.300 ediciones no es tarea para un humano) ──
+    // 1) Con pruebas (buenos): todas de la MISMA editorial → PROVISIONAL; de editoriales distintas → la MÁS
+    //    PROBABLE, también provisional (las demás quedan en la ficha para cambiarla).
+    // 2) Sin pruebas (casi: mismo título y autor, nada más): se REDUCE la lista (fuera otras lenguas, otras
+    //    traducciones y reimpresores bajo demanda si hay alguna edición «de verdad»). Queda UNA → se asigna marcada
+    //    DUDOSA; quedan varias → la más probable, provisional.
     if (buenos.length > 1) {
-        return conCaidas({ estado: 'ambiguo', candidatos: buenos, motivo: `${buenos.length} ediciones posibles: ` + buenos.slice(0, 5).map((c) => `${c.isbn} (${c.editorial || '?'}, ${c.anio || '?'})`).join(' · ') });
+        const prov = siMismaEditorial(buenos);
+        if (prov) return conCaidas(prov);
+        return conCaidas(masProbable(doc, buenos, 'con pruebas, de editoriales distintas'));
     }
-    const casi = casiCandidatos(doc, candidatos);
-    // UNA SOLA edición posible (mismo título y autor; ni la lengua ni la traducción la contradicen), aunque nada la
-    // confirme: se asigna como DEFINITIVA pero marcada DUDOSA (regla del usuario: con una sola candidata no hay
-    // nada que elegir; mejor un registro completo que revisar a mano). Caso: «Las bodas de la semejanza», solo
-    // Muchnik 1996 en la BNE frente a «Egales» en el registro.
-    const unicas = unicosPorIsbn(casi).filter((c) => {
-        const iDoc = idioma2(doc.idioma), iCand = idioma2(c.idioma);
-        if (iDoc && iCand && iDoc !== iCand) return false;
-        const tDoc = tokensPersonas(doc.traductores), tCand = tokensPersonas(c.traductores);
-        return !(tDoc.size && tCand.size && ![...tDoc].some((w) => tCand.has(w)));
-    });
-    if (unicas.length === 1 && unicosPorIsbn(casi).length === 1) {
-        const c = unicas[0];
+    const reducidas = reducirCandidatas(doc, casiCandidatos(doc, candidatos));
+    if (reducidas.length === 1) {
+        const c = reducidas[0];
         return conCaidas({ estado: 'dudoso', isbn: c.isbn, elegido: { ...c, señales: [] }, candidatos: [c], via: c.fuente,
             motivo: `única edición posible (${c.editorial || '?'}, ${c.anio || '?'}), sin nada que confirme que es la de este ejemplar: se asigna marcada como DUDOSA` });
     }
-    if (casi.length) {
-        return conCaidas({ estado: 'ambiguo', candidatos: casi, motivo: `mismo título y autor pero nada confirma la edición (editorial/idioma/año): ` + casi.slice(0, 5).map((c) => `${c.isbn} (${c.editorial || '?'}, ${c.anio || '?'}, ${c.idioma || '?'})`).join(' · ') });
+    if (reducidas.length > 1) {
+        const conSeñales = reducidas.map((c) => ({ ...c, señales: c.señales || [] }));
+        return conCaidas(siMismaEditorial(conSeñales) || masProbable(doc, conSeñales, 'sin pruebas que la confirmen'));
     }
     if (caidas.length) return conCaidas({ estado: 'sin-candidatos', candidatos: [], motivo: `no hallado, pero no respondió: ${[...new Set(caidas)].join(', ')}` });
     return conCaidas({ estado: 'sin-candidatos', candidatos: [], motivo: 'ninguna autoridad tiene esta edición' });

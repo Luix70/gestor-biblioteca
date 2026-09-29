@@ -18,7 +18,8 @@ import { parsearVolumen } from './utils/multivolumen.js';
 import { resolverCDU, contrastarCduCarpeta } from './clasificador-cdu.js';
 import { tituloDeNumero, tituloEsDelFichero, afinarFechaNumero } from './utils/revistas.js';
 import { enriquecerMetadatos } from './motor-enriquecimiento.js';
-import { identificarEdicion, candidatasParaGuardar, lenguaDeBNE } from './utils/identificar-edicion.js';
+import { identificarEdicion, candidatasParaGuardar, lenguaDeBNE, mismaEditorial, traductoresDelTitulo } from './utils/identificar-edicion.js';
+import { buscarMetadatosExternos } from './utils/proveedor-metadatos.js';
 import { buscarAutoridadPorISBN } from './utils/autoridad-isbn.js';
 import { cduDeAutoridadFiable } from './utils/autoridad-isbn.js';
 import { huecosEscalares } from './utils/huecos-autoridad.js';
@@ -233,6 +234,11 @@ async function atajoPorHash(rutas, contexto = {}) {
  */
 export async function identificarEdicionEnIngesta(documento) {
     try {
+        // Con ISBN del PROPIO fichero la edición es segura: su editorial se aprende como indicio de su colección.
+        if (documento.isbn && documento.coleccion_nombre && typeof documento.editorial === 'string'
+            && documento.editorial && !esEditorialFalsa(documento.editorial)) {
+            await anotarEditorialDeColeccion(await conectarDB(), { coleccion_nombre: documento.coleccion_nombre }, documento.editorial);
+        }
         if (documento.tipo_recurso !== 'libro' || documento.isbn || !documento.titulo) return;
         if (!Array.isArray(documento.autores) || !documento.autores.length) return;
         if (documento.naturaleza === 'comic' || documento.naturaleza === 'audiolibro' || documento.titulo_artefacto) return;
@@ -244,7 +250,10 @@ export async function identificarEdicionEnIngesta(documento) {
             coleccion_nombre: documento.coleccion_nombre || null, coleccion_numero: documento.coleccion_numero || null,
             anio: documento.año_edicion || null, idioma: documento.idioma || null,
             // Traductores del fichero (distinguen una traducción de otra) y editoriales que sugiere su colección.
-            traductores: (documento.contribuciones_nombres || []).filter((c) => c && c.rol === 'traductor').map((c) => c.nombre),
+            traductores: (() => {
+                const delFichero = (documento.contribuciones_nombres || []).filter((c) => c && c.rol === 'traductor').map((c) => c.nombre);
+                return delFichero.length ? delFichero : traductoresDelTitulo(documento.titulo);   // «(trad. Ángeles Caso)»
+            })(),
             editoriales_coleccion: documento.coleccion_nombre
                 ? await editorialesDeColeccion(await conectarDB(), { coleccion_nombre: documento.coleccion_nombre }).catch(() => [])
                 : [],
@@ -271,7 +280,9 @@ export async function identificarEdicionEnIngesta(documento) {
             documento.ediciones_candidatas_fecha = new Date();
         }
         // Aprender la editorial de esta colección (indicio para los siguientes libros de la misma colección).
-        if (documento.coleccion_nombre && r.elegido?.editorial && !esEditorialFalsa(r.elegido.editorial)) {
+        // (Solo con edición CONFIRMADA: una dudosa o una provisional sin pruebas ensuciarían los indicios.)
+        const segura = r.estado === 'unico' || (r.estado === 'provisional' && r.confirmada !== false);
+        if (segura && documento.coleccion_nombre && r.elegido?.editorial && !esEditorialFalsa(r.elegido.editorial)) {
             await anotarEditorialDeColeccion(await conectarDB(), { coleccion_nombre: documento.coleccion_nombre }, r.elegido.editorial);
         }
         // El registro de esa edición (Fichero y, si falta, BNE en línea) completa lo que falte — nunca pisa.
@@ -289,11 +300,41 @@ export async function identificarEdicionEnIngesta(documento) {
                 ]);
                 if (elegida && elegida.cdu !== documento.cdu) { documento.cdu = elegida.cdu; documento.cdu_fuente = elegida.fuente; }
             }
-            if (reg.editorial && (!documento.editorial || esEditorialFalsa(documento.editorial))) documento.editorial = reg.editorial;
+            if (reg.editorial && !esEditorialFalsa(reg.editorial) && (!documento.editorial || esEditorialFalsa(documento.editorial))) documento.editorial = reg.editorial;
             if (Array.isArray(reg.contribuciones_nombres) && reg.contribuciones_nombres.length && !(documento.contribuciones_nombres?.length)) {
                 documento.contribuciones_nombres = reg.contribuciones_nombres;
             }
         }
+        // EDITORIAL DE LA EDICIÓN CONFIRMADA (única, o provisional con pruebas): manda sobre la que traía el registro
+        // (pudo llegar de una API por título y ser de otra edición). En una dudosa o una provisional «a ciegas», no.
+        const confirmada = r.estado === 'unico' || (r.estado === 'provisional' && r.confirmada !== false);
+        const edEdicion = r.elegido?.editorial;
+        if (confirmada && edEdicion && !esEditorialFalsa(edEdicion) && typeof documento.editorial === 'string'
+            && documento.editorial && !mismaEditorial(documento.editorial, edEdicion)) {
+            documento.alertas_agente = [...(documento.alertas_agente || []), `Editorial «${documento.editorial}» sustituida por «${edEdicion}», la de la edición identificada.`];
+            documento.editorial = edEdicion;
+        }
+        // TODO lo que la cascada GRATUITA sabe de ESE ISBN (OpenLibrary, Google Books, DNB/BnF): sinopsis, páginas,
+        // materias, Dewey/LCC… — así el libro entra COMPLETO y no espera a un cotejo posterior. Solo rellena huecos.
+        const porIsbn = await buscarMetadatosExternos(documento.titulo, '', null, {
+            incluirSinopsis: true, incluirCdu: false, isbnsArchivo: variantesISBN(r.isbn), idioma: documento.idioma || null, sinIA: true,
+        }).catch(() => null);
+        if (porIsbn) {
+            const huecos = huecosEscalares(documento, porIsbn).set;
+            delete huecos.cdu_autoridad;   // la CDU no entra como «hueco»: se decide por PRIORIDAD, abajo
+            Object.assign(documento, huecos);
+            if (porIsbn.cdu && porIsbn.cdu_fuente === 'bne' && cduDeAutoridadFiable(documento, porIsbn)) {
+                const elegida = mejorCdu([
+                    documento.cdu ? { cdu: documento.cdu, fuente: documento.cdu_fuente || 'clasificador' } : null,
+                    { cdu: porIsbn.cdu, fuente: 'bne' },
+                ]);
+                if (elegida && elegida.cdu !== documento.cdu) { documento.cdu = elegida.cdu; documento.cdu_fuente = elegida.fuente; }
+            }
+            if (Array.isArray(porIsbn.contribuciones_nombres) && porIsbn.contribuciones_nombres.length && !(documento.contribuciones_nombres?.length)) {
+                documento.contribuciones_nombres = porIsbn.contribuciones_nombres;
+            }
+        }
+
         const alerta = r.estado === 'dudoso'
             ? `ISBN DUDOSO ${r.isbn} (${r.via}: ${r.motivo}); el fichero no traía ISBN — corrígelo en la ficha si no es tu edición.`
             : r.estado === 'provisional'

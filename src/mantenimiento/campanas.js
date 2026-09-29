@@ -349,6 +349,44 @@ export const CAMPANAS = [
     },
 
     {
+        id: 'resolver-ediciones',
+        etiqueta: 'Resolver ediciones pendientes',
+        coste: 'apis',
+        descripcion: 'Libros que esperan que elijas su edición («Edición por elegir»): los re-investiga con todas las pruebas (traductor, editorial y colección, indicios aprendidos de su colección, lengua), REDUCE la lista de candidatas (fuera otras lenguas, otras traducciones y reimpresores bajo demanda) y ASIGNA la más probable: si queda una, como definitiva marcada DUDOSA; si quedan varias, la más probable como PROVISIONAL (las demás siguen en la ficha para cambiarla). Con el ISBN hace el COTEJO completo: rellena todo lo que falte, pone la editorial de la edición confirmada, aplica la CDU de la BNE (moviendo la carpeta) y corrige un título pobre. SIN IA. Lo mismo que «reidentificar-sin-isbn --edicion-por-elegir», poco a poco y a reposo.',
+        version: 1,
+        loteDefecto: 20,
+        cadenciaDefecto: 15,
+        activaDefecto: true,    // sin IA; lo pidió el usuario: que las ediciones se decidan solas
+        coleccion: 'biblioteca',
+        proyeccion: { _id: 1 },
+        candidatos: () => ({
+            tipo_recurso: 'libro',
+            ...VACIO('isbn'),
+            'ediciones_candidatas.0': { $exists: true },
+            isbn_provisional: { $ne: true },
+            edicion_descartada: { $ne: true },
+            // Si alguna fuente no respondió en el intento anterior, espera unas horas antes de repetir.
+            $and: [{
+                $or: [
+                    { edicion_ultimo_intento: { $exists: false } },
+                    { edicion_ultimo_intento: { $lt: new Date(Date.now() - ESPERA_REINTENTO_ISBN_MS) } },
+                ],
+            }],
+        }),
+        async procesarDoc(db, doc) {
+            const completo = await db.collection('biblioteca').findOne({ _id: doc._id });
+            if (!completo || completo.isbn) return { cambio: false };
+            const r = await reidentificarDoc(db, completo, { aplicar: true, usarApis: true, conIA: false });
+            // Con alguna fuente caída no se sella: se reintenta pasadas unas horas (el resultado podría cambiar).
+            if (r?.reintentable) {
+                await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { edicion_ultimo_intento: new Date() } });
+                return { cambio: false, sellar: false };
+            }
+            return { cambio: r?.estado === 'aplicado' };
+        },
+    },
+
+    {
         id: 'cotejo',
         etiqueta: 'Cotejar título por ISBN',
         coste: 'gratis',
