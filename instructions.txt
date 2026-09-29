@@ -1111,6 +1111,15 @@ de ficheros clasificado por CDU.
     editorial; si no, se guardan las candidatas y eliges en la ficha. Con pruebas (editorial, traductor, año,
     colección), la de más pruebas. Y varios documentos con el MISMO TÍTULO en la MISMA carpeta («Ghost Stories [1]
     / [2] / [3].pdf» de una colección transmedia) no se identifican por autoridad: no se sabe cuál es el libro.
+    3.er DRY-RUN (29-sep, --todos --edicion-por-elegir --limite 150): bien las colecciones (Solaris/Factoría,
+    Valdemar, Siruela, Penguin Clásicos) y los clásicos quedan ambiguos. Cuatro arreglos más:
+      · un ISBN que YA tiene otro documento con OTRO título no se asigna (los 4 tomos de «Una danza para la música
+        del tiempo» recibían el del primero): quedan las candidatas;
+      · el autor no es colaborador: MARC 700 con $t (entrada autor-título) se ignora, y huecosDesdeAutoridad no añade
+        como traductor/editor a quien ya es autor («Highsmith, Patricia (traductor)», «Dante (editor)»);
+      · una editorial/colección entre paréntesis en el título («(Penguin Clásicos)») es prueba de edición, y las
+        candidatas que la contradicen se descartan («Cuentos de terror (Penguin Clásicos)» → Caballo Regalado);
+      · ISBN 979-8 (autoedición en Amazon) o reimpresor bajo demanda: nunca «único», como mucho DUDOSO.
     DIARIO PARA DESHACER: cada documento que toca reidentificarDoc guarda en `deshacer[]` el valor anterior de cada
     campo cambiado (y la CDU y la carpeta si la CDU se aplicó).
     REVERSIÓN (sin copia de la base): scripts/revertir-reidentificacion.js --log <log de la ejecución> [--ejecutar]

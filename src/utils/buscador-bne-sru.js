@@ -73,6 +73,10 @@ function registroMarc($, rec) {
         const nombre = limpiar($(df).find('subfield[code="a"]').first().text());
         const e = $(df).find('subfield[code="e"]').map((j, s) => $(s).text()).get().join(' ');
         if (!nombre) return;
+        // Un 700 con $t es una entrada AUTOR-TÍTULO (la obra original: «Highsmith, Patricia. The talented Mr. Ripley»),
+        // no un colaborador — y el autor principal no es su propio traductor (medido el 29-sep: «Highsmith, Patricia
+        // (traductor)», «Powell, Anthony (traductor)», «Dante Alighieri (editor)»).
+        if ($(df).find('subfield[code="t"]').length || nombre === principal) return;
         if (/\bautor|coautor/i.test(e) && !autores.includes(nombre)) { autores.push(nombre); return; }
         const rol = rolDe(e);
         if (rol) contribuciones.push({ nombre, rol });

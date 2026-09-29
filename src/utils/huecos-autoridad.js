@@ -78,8 +78,14 @@ export function huecosEscalares(doc, datos = {}) {
 export async function huecosDesdeAutoridad(db, doc, datos = {}, { aplicar = true } = {}) {
     const { set, cambios } = huecosEscalares(doc, datos);
 
+    // Una persona que es AUTORA del libro no es a la vez su traductora o editora: las fichas de autoridad a veces la
+    // repiten con otro rol (medido el 29-sep: «Highsmith, Patricia (traductor)», «Powell, Anthony (traductor)»,
+    // «Dante Alighieri (editor)»). Se compara por apellido + nombre sin acentos ni orden.
+    const clavePersona = (n) => String(n || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/\(.*?\)|\d{3,4}-?\d{0,4}/g, ' ').split(/[^a-z]+/).filter((w) => w.length > 2).sort().join(' ');
+    const autoresClave = new Set((Array.isArray(datos.autores) ? datos.autores : []).map(clavePersona).filter(Boolean));
     const conRol = (Array.isArray(datos.contribuciones_nombres) ? datos.contribuciones_nombres : [])
-        .filter((c) => c?.nombre && c.rol && c.rol !== 'autor');
+        .filter((c) => c?.nombre && c.rol && c.rol !== 'autor' && !autoresClave.has(clavePersona(c.nombre)));
     if (conRol.length && vacio(doc.contribuciones)) {
         const etiqueta = conRol.map((c) => `${c.nombre} (${c.rol})`).join(', ');
         if (!aplicar) {

@@ -318,6 +318,19 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         else if (r?.estado === 'dudoso') { isbn = r.isbn; via = `autoridad/${r.via}, DUDOSO`; dudoso = r; }
         else if (r?.estado === 'ambiguo') ambiguo = r;
     }
+    // ¿Ese ISBN ya lo tiene OTRO documento con OTRO título? (los 4 tomos de «Una danza para la música del tiempo»
+    // —Primavera, Verano…— recibían el ISBN del primero). Entonces no se asigna: quedan las candidatas para elegir.
+    // (Mismo título = otra versión o formato del mismo libro: eso sí vale; lo reúne la fusión de versiones.)
+    if (isbn && via.startsWith('autoridad/')) {
+        const normT = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+        const otro = await db.collection('biblioteca').findOne(
+            { isbn: { $in: variantesISBN(isbn) }, _id: { $ne: doc._id } }, { projection: { titulo: 1 } });
+        if (otro && normT(otro.titulo) !== normT(doc.titulo)) {
+            const candidatos = (provisional?.candidatos || (edicion ? [edicion] : []));
+            ambiguo = { motivo: `el ISBN ${isbn} ya es de «${otro.titulo}» (${otro._id}), otro título: no se asigna`, candidatos };
+            isbn = null; via = ''; provisional = null; dudoso = null; edicion = null;
+        }
+    }
     const reintentable = caidas.length > 0;
     const porQue = reintentable ? ` (no respondió: ${caidas.join(', ')} → se reintentará)` : '';
 

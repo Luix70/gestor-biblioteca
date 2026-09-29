@@ -138,7 +138,7 @@ function señalesEdicion(doc, cand) {
     // confirme: el campo editorial del documento puede venir de una API y estar mal (medido: «Los propios dioses»
     // con «Salamandra»), y la traducción la trae el propio fichero.
     const edCand = esEditorialFalsa(cand.editorial) ? [] : nucleoEditorial(cand.editorial);
-    const pruebas = [doc.editorial, ...(doc.editoriales_coleccion || [])]
+    const pruebas = [doc.editorial, ...(doc.editoriales_coleccion || []), ...editorialesDelTitulo(doc.titulo)]
         .filter((e) => e && !esEditorialFalsa(e)).map(nucleoEditorial).filter((n) => n.length);
     if (pruebas.length && edCand.length) {
         if (pruebas.some((n) => n.some((w) => edCand.includes(w)))) señales.push('editorial');
@@ -237,7 +237,22 @@ const RE_BAJO_DEMANDA = new RegExp([
     'tredition', 'literary licensing', 'wallachia', 'blurb', 'fb&c', 'hardpress', 'leopold classic', 'read books',
     'dalton house', 'double 9', 'lightning source', 'print on demand', 'amazon digital', 'kindle direct',
 ].join('|'), 'i');
-const esBajoDemanda = (c) => RE_BAJO_DEMANDA.test(String(c.editorial || ''));
+const esBajoDemanda = (c) => RE_BAJO_DEMANDA.test(String(c.editorial || '')) || /^9798/.test(String(c.isbn || ''));
+
+/**
+ * Editorial o colección escrita ENTRE PARÉNTESIS en el título («Cuentos de terror (Penguin Clásicos)»): es una
+ * prueba de la edición tan buena como la colección. Se ignoran los paréntesis que no lo son (traductor, ilustrado,
+ * bilingüe, años…).
+ */
+export function editorialesDelTitulo(titulo) {
+    const out = [];
+    for (const m of String(titulo || '').matchAll(/\(([^()]{3,60})\)/g)) {
+        const t = m[1].trim();
+        if (/^(trad|tr\.|il\.|ilustr|biling|bilingüe|ed\.|edici|vol|tomo|\d)/i.test(t)) continue;
+        out.push(t);
+    }
+    return out;
+}
 
 /**
  * Reduce las candidatas SIN pruebas a las plausibles: fuera las de OTRA LENGUA y las de OTRA TRADUCCIÓN (cuando se
@@ -246,9 +261,13 @@ const esBajoDemanda = (c) => RE_BAJO_DEMANDA.test(String(c.editorial || ''));
 function reducirCandidatas(doc, casi) {
     const iDoc = idioma2(doc.idioma);
     const tDoc = tokensPersonas(doc.traductores);
+    const pruebasEd = [...(doc.editoriales_coleccion || []), ...editorialesDelTitulo(doc.titulo)]
+        .filter((e) => e && !esEditorialFalsa(e)).map(nucleoEditorial).filter((n) => n.length);
     let lista = unicosPorIsbn(casi).filter((c) => {
         const iCand = idioma2(c.idioma);
         if (iDoc && iCand && iDoc !== iCand) return false;
+        const edCand = esEditorialFalsa(c.editorial) ? [] : nucleoEditorial(c.editorial);
+        if (pruebasEd.length && edCand.length && !pruebasEd.some((n) => n.some((w) => edCand.includes(w)))) return false;
         const tCand = tokensPersonas(c.traductores);
         return !(tDoc.size && tCand.size && ![...tDoc].some((w) => tCand.has(w)));
     });
@@ -385,7 +404,11 @@ const unicosPorIsbn = (lista) => [...new Map(lista.map((b) => [b.isbn, b])).valu
  */
 function siUnica(buenos, via) {
     const u = unicosPorIsbn(buenos).sort((a, b) => b.señales.length - a.señales.length);
-    const elegir = (c, motivo) => ({ estado: 'unico', isbn: c.isbn, elegido: c, candidatos: u, via: c.fuente || via, motivo });
+    // Una edición de AUTOEDICIÓN o bajo demanda (979-8…, Creative Media Partners…) nunca es «única»: como mucho DUDOSA
+    // (medido: «Nostromo (trad. Rafael Santervás)» → 979-8…).
+    const elegir = (c, motivo) => (esBajoDemanda(c)
+        ? { estado: 'dudoso', isbn: c.isbn, elegido: c, candidatos: u, via: c.fuente || via, confirmada: false, motivo: `${motivo}; edición de autoedición o bajo demanda: DUDOSA` }
+        : { estado: 'unico', isbn: c.isbn, elegido: c, candidatos: u, via: c.fuente || via, motivo });
     if (u.length === 1) return elegir(u[0], `casa ${u[0].señales.join(' + ')}`);
     if (u.length > 1) {
         const [mejor, segundo] = u;
