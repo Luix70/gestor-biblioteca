@@ -87,6 +87,11 @@ Cascada gratuita (nombre de archivo → Fichero → colección → OpenLibrary �
 - [ ] Panel → **Búsqueda → Reindexar** (el índice del NAS no recogió los renombres de revistas del 15-sep).
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/integridad.js --informe /app/logs/integridad.txt` (diagnóstico).
 
+### Imagen Docker: Debian 11 sin soporte (a resolver ANTES de tocar la parte de apt del Dockerfile)
+- [ ] Migrar la imagen base `node:18-bullseye-slim` → `node:18-bookworm-slim` (o apuntar apt a archive.debian.org).
+      Hoy funciona porque la capa de apt sale de la caché de Docker; si hubiera que rehacerla (un cambio en esa parte
+      del Dockerfile, o limpiar la caché), falla con 404 (29-sep). Probar antes en el PC con docker-compose.pc.yml.
+
 ### Revisiones a mano (sin script)
 - [ ] 129 documentos catalogados como **revista** que parecen libros, y 54 cabeceras cuya CDU pudo salir del Dewey
       de un libro (ofrecido el 17-sep, no hecho).
