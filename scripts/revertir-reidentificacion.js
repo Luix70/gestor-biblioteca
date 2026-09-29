@@ -48,7 +48,16 @@ const DIA_REVISAR = REVISAR && args[iRev + 1] && /^\d{4}-\d{2}-\d{2}$/.test(args
 if (!RUTA_LOG) { console.error('Falta --log <ruta del log de reidentificar-sin-isbn>'); process.exit(1); }
 
 // ── 1. Leer el log ────────────────────────────────────────────────────────────────────────────────────
-const texto = await fs.readFile(RUTA_LOG, 'utf8');
+let texto;
+try { texto = await fs.readFile(RUTA_LOG, 'utf8'); }
+catch {
+    // El nombre lleva el SEGUNDO en que arrancó el script (puede ser uno o dos antes de su 1.ª línea): se listan los
+    // que hay, para copiar el correcto.
+    const dir = (await import('node:path')).dirname(RUTA_LOG);
+    const hay = (await fs.readdir(dir).catch(() => [])).filter((f) => f.startsWith('reidentificar-sin-isbn')).sort();
+    console.error(`No existe ${RUTA_LOG}.${hay.length ? `\nLogs de reidentificar-sin-isbn en ${dir}:\n  ${hay.join('\n  ')}` : `\nNo hay logs de reidentificar-sin-isbn en ${dir}.`}`);
+    process.exit(1);
+}
 const entradas = [];
 for (const linea of texto.split('\n')) {
     const m = /\[\d+\/\d+\] ✅ ([0-9a-f]{24}) · (.*?) → isbn=(\S+) \(([^)]*)\)(.*)$/.exec(linea);
