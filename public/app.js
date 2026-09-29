@@ -4690,6 +4690,34 @@ function parsearRangoPaginas(texto, total) {
   }
   return [...out].sort((a, b) => a - b);
 }
+// Páginas de la REJILLA de miniaturas: las PRIMERAS 50 y las ÚLTIMAS 10 (en los documentos largos lo que interesa
+// suele estar al principio —cubierta, créditos, índice— o al final —contracubierta—). Con 60 o menos, todas. Cada
+// una lleva su grupo para pintarle un marco: amarillo = del principio, rojo = de las últimas.
+const REJ_PRIMERAS = 50, REJ_ULTIMAS = 10;
+function paginasRejilla(total) {
+  if (total <= REJ_PRIMERAS + REJ_ULTIMAS) return Array.from({ length: total }, (_, i) => ({ num: i + 1, grupo: null }));
+  const out = [];
+  for (let i = 1; i <= REJ_PRIMERAS; i++) out.push({ num: i, grupo: 'inicio' });
+  for (let i = total - REJ_ULTIMAS + 1; i <= total; i++) out.push({ num: i, grupo: 'final' });
+  return out;
+}
+const MARCO_REJ = { inicio: '#e0b400', final: '#d64545' };
+// Marco del grupo (anillo exterior: no se confunde con el borde de «marcada») y separador entre los dos grupos.
+function marcoRejilla(cel, grupo) {
+  if (grupo) { cel.style.boxShadow = `0 0 0 2px ${MARCO_REJ[grupo]}`; cel.style.borderRadius = '7px'; }
+}
+function separadorRejilla(grid, omitidas) {
+  const sep = document.createElement('div');
+  sep.style.cssText = 'grid-column:1/-1;text-align:center;font-size:12px;color:var(--muted);padding:6px 0';
+  sep.innerHTML = `⋯ ${omitidas} página(s) no mostradas (usa el rango de arriba) · <span style="color:${MARCO_REJ.final}">las 10 últimas</span> ⋯`;
+  grid.appendChild(sep);
+}
+function textoRejilla(total) {
+  return total > REJ_PRIMERAS + REJ_ULTIMAS
+    ? ` (rejilla: <span style="color:${MARCO_REJ.inicio}">primeras ${REJ_PRIMERAS}</span> + <span style="color:${MARCO_REJ.final}">últimas ${REJ_ULTIMAS}</span>)`
+    : '';
+}
+
 // Rango por defecto para el selector de páginas: «1-6» + las dos últimas (sin solaparse en docs cortos).
 function rangoPorDefecto(total) {
   if (!total) return '1-6';
@@ -4722,9 +4750,8 @@ async function extraerDePdf(archivo) {
   const blob = await _descargarArchivo(archivo.url);
   const pdf = await lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
   const total = pdf.numPages;
-  const MAX = 80; // tope de miniaturas (rendimiento en el Atom/móvil)
-  const n = Math.min(total, MAX);
-  $('#exMsg').textContent = `${total} páginas${total > MAX ? ` (rejilla: primeras ${MAX})` : ''} · toca las que quieras, o usa el rango arriba`;
+  const rejilla = paginasRejilla(total);   // primeras 50 + últimas 10 (rendimiento en el Atom/móvil)
+  $('#exMsg').innerHTML = `${total} páginas${textoRejilla(total)} · toca las que quieras, o usa el rango arriba`;
   if ($('#exTotal')) $('#exTotal').textContent = `${total} pág.`;
   if ($('#exRango')) $('#exRango').value = rangoPorDefecto(total);
   const marcadas = new Set();
@@ -4751,10 +4778,12 @@ async function extraerDePdf(archivo) {
       }).catch(() => {});
     }
   }, { root: grid, rootMargin: '300px' });
-  for (let i = 1; i <= n; i++) {
+  for (const { num: i, grupo } of rejilla) {
+    if (grupo === 'final' && !grid.querySelector('.exSep')) { separadorRejilla(grid, total - REJ_PRIMERAS - REJ_ULTIMAS); grid.lastChild.classList.add('exSep'); }
     const cel = document.createElement('div');
     cel.dataset.n = i;
     cel.style.cssText = 'position:relative;cursor:pointer';
+    marcoRejilla(cel, grupo);
     cel.innerHTML = `<img loading="lazy" style="width:100%;min-height:120px;border-radius:6px;border:2px solid transparent;background:var(--card)"><span style="position:absolute;top:2px;left:4px;font-size:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:0 4px">${i}</span>`;
     cel.onclick = () => {
       marcadas.has(i) ? marcadas.delete(i) : marcadas.add(i);
@@ -4933,8 +4962,8 @@ async function extraerLazy(id, cfg) {
   if (r.drm) { $('#exMsg').textContent = 'Fichero con DRM: no se puede leer el contenido.'; return; }
   const total = r[cfg.contar.key] || 0;
   if (!total) { $('#exMsg').textContent = cfg.vacio || 'No hay imágenes extraíbles.'; return; }
-  const MAX = 200, n = Math.min(total, MAX);
-  $('#exMsg').textContent = `${total}${total > MAX ? ` (rejilla: primeras ${MAX})` : ''} · toca las que quieras, o usa el rango arriba`;
+  const rejilla = paginasRejilla(total);   // primeras 50 + últimas 10 (nºs 1-based; aquí se usan 0-based)
+  $('#exMsg').innerHTML = `${total}${textoRejilla(total)} · toca las que quieras, o usa el rango arriba`;
   if ($('#exTotal')) $('#exTotal').textContent = `${total} pág.`;
   if ($('#exRango')) $('#exRango').value = rangoPorDefecto(total);
   const marcadas = new Set();
@@ -4968,10 +4997,13 @@ async function extraerLazy(id, cfg) {
     }
   }, { root: grid, rootMargin: '120px' });
   ioRef = io;   // para poder desconectarlo (dejar de pedir miniaturas) al cerrar/cancelar/añadir
-  for (let i = 0; i < n; i++) {
+  for (const { num, grupo } of rejilla) {
+    const i = num - 1;
+    if (grupo === 'final' && !grid.querySelector('.exSep')) { separadorRejilla(grid, total - REJ_PRIMERAS - REJ_ULTIMAS); grid.lastChild.classList.add('exSep'); }
     const cel = document.createElement('div');
     cel.dataset.n = i;
     cel.style.cssText = 'position:relative;cursor:pointer';
+    marcoRejilla(cel, grupo);
     cel.innerHTML = `<img loading="lazy" style="width:100%;height:120px;object-fit:cover;border-radius:6px;border:2px solid transparent;background:var(--card)"><span style="position:absolute;top:2px;left:4px;font-size:10px;background:rgba(0,0,0,.55);color:#fff;border-radius:4px;padding:0 4px">${i + 1}</span>`;
     cel.onclick = () => {
       marcadas.has(i) ? marcadas.delete(i) : marcadas.add(i);

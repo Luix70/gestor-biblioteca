@@ -1234,6 +1234,9 @@ de ficheros clasificado por CDU.
     IMÁGENES DEL DOCUMENTO (2026-09-29): botón «⤒» que sube una imagen arriba del todo y la hace portada; miniaturas
     de 50×66 con una lupa 🔍: mientras la mantienes pulsada (ratón o dedo) se ve la imagen en grande, inscrita en el
     recuadro del selector, y al soltar desaparece.
+    REJILLA DE EXTRACCIÓN (PDF, EPUB, DjVu, cómic…): las 50 PRIMERAS páginas (marco amarillo) y las 10 ÚLTIMAS
+    (marco rojo), con un separador que dice cuántas se omiten; con 60 o menos, todas y sin marcos. Lo demás, con el
+    rango de arriba (antes: solo las 80 primeras en PDF, 200 en el resto).
     «PORTADA #» AL EXTRAER (PDF, EPUB, DjVu…): junto al rango, indica cuál de las imágenes extraídas pasa a ser la
     portada (1 = la primera extraída; vacío = no cambia). Ej.: «2-8 + 2 últimas», portada #2 → la página 3. El rango
     admite «últimas 2» y «2 últimas», y «+» como separador.
