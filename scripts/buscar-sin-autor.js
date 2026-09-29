@@ -5,6 +5,7 @@
 //   docker exec gestor-biblioteca node scripts/buscar-sin-autor.js               (todos)
 //   docker exec gestor-biblioteca node scripts/buscar-sin-autor.js visualization (filtra por título/archivo)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 

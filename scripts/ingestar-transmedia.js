@@ -7,6 +7,7 @@
  *   node scripts/ingestar-transmedia.js "Test Battery/52.Archivos transmedia" --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { analizarTransmedia, ingestarTransmedia, esCarpetaTransmedia } from '../src/utils/transmedia.js';
 import { conectarDB } from '../src/database.js';

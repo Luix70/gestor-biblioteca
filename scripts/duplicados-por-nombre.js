@@ -22,6 +22,7 @@
  *   3) node scripts/duplicados-por-nombre.js "<carpeta>" --ejecutar → lee el plan y MUEVE los "eliminar" a
  *      «_papelera-duplicados/<misma ruta relativa>» (recuperable). Solo mueve si en su grupo queda un "conservar".
  */
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import fs from 'fs/promises';
 import path from 'path';
 

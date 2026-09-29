@@ -14,6 +14,7 @@
 //   node scripts/backfill-volumen-tomo.js            (informe)
 //   node scripts/backfill-volumen-tomo.js --ejecutar (aplica; BACKUP recomendado)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { parsearVolumen } from '../src/utils/multivolumen.js';

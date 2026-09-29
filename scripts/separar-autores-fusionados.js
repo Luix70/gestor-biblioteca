@@ -17,6 +17,7 @@
 //   node scripts/separar-autores-fusionados.js --limite 20   (informe, solo los N primeros grupos)
 //   node scripts/separar-autores-fusionados.js --ejecutar     (aplica → BORRA los fusionados; BACKUP antes)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { separarAutores } from '../src/utils/autor-normalizar.js';

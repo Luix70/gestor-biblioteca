@@ -23,6 +23,7 @@
  * Debe correr donde están los ficheros y la BD (el NAS): docker exec -t gestor-biblioteca node scripts/…
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';

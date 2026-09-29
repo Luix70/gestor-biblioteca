@@ -7,6 +7,7 @@
  *   · cómic .cbz numerado → revista-serie; .cbr álbum/novela gráfica → libro (ambos naturaleza:comic)
  * Ejecutar: `node scripts/test-discriminador.js`  (sale 0 si todo pasa, 1 si algo falla).
  */
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { clasificarTipo } from '../src/utils/discriminador.js';
 
 const casos = [

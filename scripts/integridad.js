@@ -16,6 +16,7 @@
  * (utils/informe-integridad.js), así que no pueden contar cosas distintas.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import { verificarIntegridad } from '../src/integridad.js';

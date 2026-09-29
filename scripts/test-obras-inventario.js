@@ -1,3 +1,4 @@
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { registrarVolumenEnObra } from '../src/utils/obras.js';
 
 /**

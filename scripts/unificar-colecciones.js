@@ -20,6 +20,7 @@
  *   docker exec gestor-biblioteca node scripts/unificar-colecciones.js --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { registrarNumeroEnColeccion } from '../src/utils/colecciones.js';

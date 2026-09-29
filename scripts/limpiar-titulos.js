@@ -17,6 +17,7 @@
  *   node scripts/limpiar-titulos.js --ejecutar        (aplica; COPIA DE SEGURIDAD antes)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { editarDocumento } from '../src/utils/editar-doc.js';

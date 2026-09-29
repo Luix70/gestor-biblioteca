@@ -8,6 +8,7 @@
 //   node scripts/limpiar-huerfanos.js            (cuenta, no escribe)
 //   node scripts/limpiar-huerfanos.js --ejecutar (borra)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { conectarDB } from '../src/database.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');

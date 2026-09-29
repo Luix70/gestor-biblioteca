@@ -15,6 +15,7 @@
 //   docker exec gestor-biblioteca node scripts/reclasificar-revistas-a-libros.js            (lista, dry-run)
 //   docker exec gestor-biblioteca node scripts/reclasificar-revistas-a-libros.js --ejecutar --limite 10
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

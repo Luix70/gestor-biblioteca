@@ -15,6 +15,7 @@
  * Por DEFECTO es dry-run: dice qué haría y no toca nada. Con `--ejecutar` reescribe cada cbz, y solo después
  * de VERIFICARLO página a página (si la verificación falla, se restaura el original y no se pierde nada).
  */
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import AdmZip from 'adm-zip';

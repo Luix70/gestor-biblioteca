@@ -8,6 +8,7 @@
  *   docker exec gestor-biblioteca node scripts/verificar-gemini.js
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 

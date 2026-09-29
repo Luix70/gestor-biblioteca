@@ -19,6 +19,7 @@
  *   docker exec gestor-biblioteca node scripts/reclasificar-libros.js --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';

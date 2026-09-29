@@ -26,6 +26,7 @@
  *   node scripts/diagnosticar-irreparables.js --informe irrep.txt   (vuelca la lista COMPLETA a un .txt)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';

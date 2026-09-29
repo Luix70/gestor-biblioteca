@@ -19,6 +19,7 @@
  *   node scripts/resolver-duplicados.js --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'fs/promises';
 import path from 'path';

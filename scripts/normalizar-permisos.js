@@ -19,6 +19,7 @@
  *   --ruta <subruta>  limita a una rama del árbol (p. ej. "8/82/82/audiolibros") para probar antes de ir a todo
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';

@@ -1,3 +1,4 @@
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import fs from 'fs';
 import Database from 'better-sqlite3';
 import { COLS, ESQUEMA_FICHERO, ESQUEMA_INDICES, parseAutorLine, parseEdicionLine, parseBneLine } from './etl-map.js';

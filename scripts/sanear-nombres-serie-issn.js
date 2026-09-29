@@ -8,6 +8,7 @@
 //   node scripts/sanear-nombres-serie-issn.js            (diagnostica)
 //   node scripts/sanear-nombres-serie-issn.js --ejecutar (renombra)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { conectarDB } from '../src/database.js';
 import { nombreEsPlaceholder, nombreEsTituloDeMiembro } from '../src/utils/colecciones.js';
 import { buscarNombrePorISSN } from '../src/utils/buscador-issn-titulo.js';

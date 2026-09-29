@@ -13,6 +13,7 @@
  *   node scripts/reparar-contribuidores-colgantes.js --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';

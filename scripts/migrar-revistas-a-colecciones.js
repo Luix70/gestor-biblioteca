@@ -22,6 +22,7 @@
  *   docker exec gestor-biblioteca node scripts/migrar-revistas-a-colecciones.js --sin-recuperar --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';

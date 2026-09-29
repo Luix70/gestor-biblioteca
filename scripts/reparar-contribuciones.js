@@ -9,6 +9,7 @@
  *   node scripts/reparar-contribuciones.js --ejecutar (repara)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';

@@ -9,6 +9,7 @@
 //   node scripts/marcar-autores-basura.js --ejecutar (marca con «[?]_»)
 //   node scripts/marcar-autores-basura.js --quitar --ejecutar  (retira el prefijo)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { conectarDB } from '../src/database.js';
 import { esAutorArtefacto } from '../src/utils/parsear-nombre.js';
 

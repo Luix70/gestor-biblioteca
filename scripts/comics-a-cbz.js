@@ -31,6 +31,7 @@
  *   node scripts/comics-a-cbz.js "<carpeta>" --pdf --ejecutar        (crea .pdf en vez de .cbz)
  *   node scripts/comics-a-cbz.js "<carpeta>" --pdf --concurrencia=6 --sin-verificar --ejecutar   (rápido)
  */
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';

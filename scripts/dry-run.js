@@ -12,6 +12,7 @@
  * — es QUÉ SE VA A QUEDAR FUERA Y POR QUÉ, que es lo que no puedes averiguar mirando el resultado.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { planificarInbox, INBOX } from '../src/vigilante.js';
 

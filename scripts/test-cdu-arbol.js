@@ -2,6 +2,7 @@
  * Test offline (sin BD) del mapeo arbolCDU sobre los códigos reales más problemáticos.
  *   node scripts/test-cdu-arbol.js
  */
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { arbolCDU } from '../src/utils/cdu-arbol.js';
 
 const CASOS = [

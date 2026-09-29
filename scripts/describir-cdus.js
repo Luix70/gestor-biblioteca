@@ -8,6 +8,7 @@
  */
 
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { describirCDU } from '../src/utils/descripcion-cdu.js';

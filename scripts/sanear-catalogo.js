@@ -7,6 +7,7 @@
  * También en el panel (Actividad → Sanear catálogo). Detalle de las tareas en src/sanear-catalogo.js.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { sanearCatalogo } from '../src/sanear-catalogo.js';
 

@@ -27,6 +27,7 @@
  *   node scripts/cotejar-por-isbn.js --clasificacion --solo-000          (informe CDU de los 000, solo lectura)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from '../src/utils/buscador-local.js';

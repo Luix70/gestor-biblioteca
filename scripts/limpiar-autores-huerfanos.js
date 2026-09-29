@@ -15,6 +15,7 @@
  * ⚠ Es un BORRADO MASIVO en la BD: haz COPIA DE SEGURIDAD antes de --ejecutar.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { autorTieneInversion } from '../src/utils/gestion-autores.js';

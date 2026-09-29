@@ -21,6 +21,7 @@
  * carpetas. Los ficheros se MUEVEN (nunca se borran) y si la carpeta destino ya existe, ese tomo se salta.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';

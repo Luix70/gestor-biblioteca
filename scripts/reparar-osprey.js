@@ -29,6 +29,7 @@
  * ⚠ Cambia CIENTOS de documentos y borra autores: haz COPIA DE SEGURIDAD antes de --ejecutar.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';

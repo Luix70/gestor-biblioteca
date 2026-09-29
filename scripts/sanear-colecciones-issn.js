@@ -13,6 +13,7 @@
  *   node scripts/sanear-colecciones-issn.js --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { nombreEsPlaceholder, claveCanonica } from '../src/utils/colecciones.js';

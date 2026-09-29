@@ -11,6 +11,7 @@
 //   docker exec gestor-biblioteca node scripts/reclasificar-revistas-por-senal.js            (lista)
 //   docker exec gestor-biblioteca node scripts/reclasificar-revistas-por-senal.js --ejecutar
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { conectarDB } from '../src/database.js';
 import { reprocesarDocumento } from '../src/utils/reproceso.js';
 

@@ -58,6 +58,7 @@
  * no tiene nada que retirar. Después, «limpiar-huerfanos» poda los autores y editoriales que se queden sin libros.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';

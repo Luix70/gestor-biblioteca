@@ -13,6 +13,7 @@
  *       node scripts/reparar-transmedia.js --ejecutar  (aplica los cambios)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import path from 'node:path';
 import { conectarDB } from '../src/database.js';
 import { DIR_CDU } from '../src/mantenimiento/util-mantenimiento.js';

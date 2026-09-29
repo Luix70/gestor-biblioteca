@@ -1017,6 +1017,14 @@ de ficheros clasificado por CDU.
     abre la Búsqueda con ellos. POST /documentos/:id/elegir-edicion {isbn|ninguna}. Solo admite un ISBN que esté
     entre las candidatas. Un ISBN-10 y su ISBN-13 cuentan como UNO; un idioma «und/mul» no descarta a nadie.
 
+    LOG ESTÁNDAR DE LOS SCRIPTS (2026-09-29, src/utils/log-script.js, importado lo PRIMERO en todos los scripts/).
+    Cada línea en pantalla empieza por [AAAA-MM-DD HH:MM:SS] (el mismo formato que el log de la app), también la
+    línea de progreso que se repinta (así se ve la hora de su última actualización). Y cada ejecución deja un
+    registro en logs/scripts/<script>-<AAAAMMDD-HHMMSS>.log: la orden completa, todas las líneas terminadas (sin los
+    repintados del progreso ni colores) y el tiempo total al acabar. Se borran solos los de más de 60 días
+    (SCRIPT_LOG_DIAS). La hora es la del contenedor: UTC salvo que el docker-compose defina TZ=Europe/Madrid.
+    Progreso: src/utils/progreso-cli.js (línea «⏳ etiqueta hechos/total (pct) · faltan ~ETA · transcurrido»).
+
     NOMBRES DE FICHERO CON OTRA FORMA UNICODE (2026-09-29). Caso: el DjVu «10 Древнегреческий язык. Начальный
     курс.Часть 2.djvu» (6a95baa0dfe138fb5a556610) no dejaba extraer páginas. El fichero está sano (DjVu «DJVM»
     válido) y el contenedor sí sabe tratar DjVu: el nombre en la BD tiene «й» COMPUESTA (52 caracteres) y en el

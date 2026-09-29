@@ -43,6 +43,7 @@
  *   node scripts/reidentificar-sin-isbn.js --todos --ejecutar       (todo el catálogo sin ISBN)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';

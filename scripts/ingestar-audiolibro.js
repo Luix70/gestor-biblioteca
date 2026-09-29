@@ -7,6 +7,7 @@
  *       node scripts/ingestar-audiolibro.js "<carpeta>" --ejecutar    (cataloga de verdad)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { analizarAudiolibro, ingestarAudiolibro } from '../src/utils/audiolibro.js';
 
 const args = process.argv.slice(2);

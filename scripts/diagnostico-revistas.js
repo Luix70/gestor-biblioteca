@@ -22,6 +22,7 @@
  *   docker exec gestor-biblioteca node scripts/diagnostico-revistas.js --sin-bd   # solo disco
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

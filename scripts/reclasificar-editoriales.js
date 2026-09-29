@@ -16,6 +16,7 @@
  * --ejecutar en lotes grandes. Correr en el NAS (o local con acceso a Atlas + Fichero + red).
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';

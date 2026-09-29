@@ -19,6 +19,7 @@
  * ⚠ Antes de --ejecutar: COPIA DE SEGURIDAD de la base de datos. Reanudable: lo fusionado ya no forma grupo.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { gruposDeVersiones, clasificarGrupo, tamanosDe, fusionarDocumentos } from '../src/utils/fusionar-versiones.js';

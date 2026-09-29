@@ -1,4 +1,5 @@
 /** Test offline del parseo de obras multivolumen. node scripts/test-multivolumen.js */
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import path from 'path';
 import { parsearVolumen, extraerISBNsConRol, discriminarMultivolumen, discriminarMultivolumenes, totalDeclarado, aArabigo } from '../src/utils/multivolumen.js';
 

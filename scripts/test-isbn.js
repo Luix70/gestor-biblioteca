@@ -9,6 +9,7 @@
  * Sin argumentos usa la lista de Alianza de la prueba.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { buscarEnFicheroLocal } from '../src/utils/buscador-local.js';
 import { buscarPorCriterios } from '../src/utils/buscador-bibliografico.js';

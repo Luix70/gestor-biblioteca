@@ -14,6 +14,7 @@
 //   node scripts/consolidar-obras.js            (informe)
 //   node scripts/consolidar-obras.js --ejecutar  (aplica; BACKUP recomendado)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import path from 'node:path';
 import { conectarDB } from '../src/database.js';

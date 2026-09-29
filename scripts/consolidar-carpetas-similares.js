@@ -22,6 +22,7 @@
  *   node scripts/consolidar-carpetas-similares.js "<carpeta>"              (DRY-RUN)
  *   node scripts/consolidar-carpetas-similares.js "<carpeta>" --ejecutar   (fusiona)
  */
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import fs from 'fs/promises';
 import path from 'path';
 import { calcularHashArchivo } from '../src/utils/hash-archivo.js';

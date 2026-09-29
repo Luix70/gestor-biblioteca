@@ -1,3 +1,4 @@
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';

@@ -28,6 +28,7 @@
  *   … --obras N    mínimo de obras distintas que deben compartir la imagen (por defecto 2)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';

@@ -21,6 +21,7 @@
  *   sudo docker exec gestor-biblioteca node scripts/reunir-numeros-revista.js --cabecera "2DArtist" --fichero "2DAIssue" --cdu 741 --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';

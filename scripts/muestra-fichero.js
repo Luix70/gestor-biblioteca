@@ -14,6 +14,7 @@
  * Pega la salida y con eso ajusto las campañas. Solo LECTURA; no toca nada.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs';
 import path from 'node:path';

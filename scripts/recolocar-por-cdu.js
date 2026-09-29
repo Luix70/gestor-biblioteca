@@ -15,6 +15,7 @@
  *   sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js --ejecutar
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { carpetaReflejaFicha, recolocarSegunCdu, aplicarCambio, carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';

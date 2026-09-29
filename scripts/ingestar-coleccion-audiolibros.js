@@ -7,6 +7,7 @@
  *       node scripts/ingestar-coleccion-audiolibros.js "<carpeta>" --ejecutar   (cataloga)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { analizarColeccionAudiolibros, ingestarColeccionAudiolibros } from '../src/utils/coleccion-audiolibros.js';
 
 const seg = (s) => (s == null ? '—' : `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`);

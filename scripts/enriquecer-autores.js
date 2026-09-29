@@ -13,6 +13,7 @@
  * (En Windows, si Atlas rechaza el TLS: NODE_TLS_REJECT_UNAUTHORIZED=0 node scripts/enriquecer-autores.js …)
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { autoresEnriquecibles, enriquecerAutor } from '../src/utils/enriquecer-autor.js';

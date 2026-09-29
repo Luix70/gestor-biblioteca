@@ -6,6 +6,7 @@
  * Uso (PC con el .db y red):
  *   PATH_FICHERO=H:/DUMPS/fichero.db NODE_TLS_REJECT_UNAUTHORIZED=0 node scripts/test-buscadores.js
  */
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import Database from 'better-sqlite3';
 import { buscarEnFicheroLocal, cerrarFicheroLocal } from '../src/utils/buscador-local.js';
 import { buscarEnBNF } from '../src/utils/buscador-bnf.js';

@@ -18,6 +18,7 @@
 //   docker exec gestor-biblioteca node scripts/limpiar-colecciones-falsas.js            (lista, dry-run)
 //   docker exec gestor-biblioteca node scripts/limpiar-colecciones-falsas.js --ejecutar --limite 10
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { conectarDB } from '../src/database.js';
 import { reprocesarDocumento } from '../src/utils/reproceso.js';
 import { esTituloArtefacto } from '../src/utils/parsear-nombre.js';

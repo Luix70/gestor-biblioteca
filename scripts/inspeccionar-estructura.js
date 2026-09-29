@@ -22,6 +22,7 @@
  * y orden/títulos de los libros desglosados (utils/afinar-guias.js).
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';

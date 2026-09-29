@@ -8,6 +8,7 @@
 //   node scripts/unificar-autores-grafia.js            (lista los grupos)
 //   node scripts/unificar-autores-grafia.js --ejecutar (funde)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { conectarDB } from '../src/database.js';
 import { fusionarAutores } from '../src/utils/gestion-autores.js';
 

@@ -36,6 +36,7 @@
  * al no haber TTY y parece congelado: `docker exec -t gestor-biblioteca node scripts/reparar-portadas.js …`
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';

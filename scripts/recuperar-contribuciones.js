@@ -8,6 +8,7 @@
 //   node scripts/recuperar-contribuciones.js            (diagnostica)
 //   node scripts/recuperar-contribuciones.js --ejecutar (repara)
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import path from 'node:path';
 import fs from 'node:fs';
 import { ObjectId } from 'mongodb';

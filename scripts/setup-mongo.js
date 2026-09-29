@@ -11,6 +11,7 @@
  */
 
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { conectarDB } from '../src/database.js';
 
 async function asegurarIndice(col, spec, opciones) {

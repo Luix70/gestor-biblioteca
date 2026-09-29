@@ -26,6 +26,7 @@
  * `reidentificar-sin-isbn --cdu --forzar`), con copia de seguridad hecha antes.
  */
 import 'dotenv/config';
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { buscarEquivalenciaExterna, lccACDUEspecifica, guardarEquivalencia } from '../src/clasificador-cdu.js';

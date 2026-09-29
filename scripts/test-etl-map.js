@@ -1,3 +1,4 @@
+import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import { norm13, isbn10a13, anioDe, paginasDe, idiomaOL, idiomaBNE, limpiarCDU, mapBNE, mapOL } from './etl-map.js';
 
 /** Pruebas de la lógica pura del ETL del Fichero. node scripts/test-etl-map.js */
