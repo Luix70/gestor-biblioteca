@@ -28,14 +28,18 @@ async function main() {
 
     console.log(`${QUITAR ? 'Quitar prefijo' : 'Marcar con «' + PREFIJO + '»'}: ${objetivos.length} autor(es).`);
     let n = 0;
+    const { progreso } = await import('../src/utils/progreso-cli.js');
+    const prog = progreso(objetivos.length, EJECUTAR ? 'Marcando autores' : 'Revisando autores');
     for (const a of objetivos) {
+        prog.paso(a.nombre);
         const nDocs = await bib.countDocuments({ $or: [{ autores: a._id }, { 'contribuciones.persona': a._id }] });
         const nuevo = QUITAR ? String(a.nombre).slice(PREFIJO.length) : PREFIJO + a.nombre;
-        if (n < 80) console.log(`  ${EJECUTAR ? '✓' : '·'} «${String(nuevo).slice(0, 52)}» · ${nDocs} doc(s)`);
+        if (n < 80) prog.nota(`  ${EJECUTAR ? '✓' : '·'} «${String(nuevo).slice(0, 52)}» · ${nDocs} doc(s)`);
         if (EJECUTAR) await col.updateOne({ _id: a._id }, { $set: { nombre: nuevo } });
         n++;
     }
-    console.log(`\n${EJECUTAR ? (QUITAR ? 'Desmarcados' : 'Marcados') : '(dry-run)'}: ${n}. ${QUITAR ? '' : 'Busca «' + PREFIJO + '» en el panel de Autores para revisarlos.'}`);
+    const tiempo = prog.fin();
+    console.log(`\n(${tiempo}) ${EJECUTAR ? (QUITAR ? 'Desmarcados' : 'Marcados') : '(dry-run)'}: ${n}. ${QUITAR ? '' : 'Busca «' + PREFIJO + '» en el panel de Autores para revisarlos.'}`);
 }
 
 main().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });

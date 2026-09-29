@@ -83,7 +83,10 @@ async function main() {
     let nGrupos = 0, nDocsAfectados = 0, nBorrados = 0, nCreadosAprox = 0;
     const referenciaFiltro = (id) => ({ $or: [{ autores: id }, { 'contribuciones.persona': id }] });
 
+    const { progreso } = await import('../src/utils/progreso-cli.js');
+    const prog = progreso(candidatos.length, EJECUTAR ? 'Separando autores' : 'Revisando autores');
     for (const m of candidatos) {
+        prog.paso(m.nombre);
         const partes = partesFusion(m.nombre);
         if (!partes) continue;
         // Solo interesa si REALMENTE lo referencia algún documento (los del volcado sin libros son ruido).
@@ -95,7 +98,7 @@ async function main() {
 
         if (!EJECUTAR) {
             // Dry-run: no resuelve/crea nada; solo informa la separación y el alcance.
-            console.log(`  «${m.nombre}»  →  [${partes.map((p) => `«${p}»`).join(', ')}]  ·  ${docs.length} libro(s)`);
+            prog.nota(`  «${m.nombre}»  →  [${partes.map((p) => `«${p}»`).join(', ')}]  ·  ${docs.length} libro(s)`);
             nDocsAfectados += docs.length;
             nCreadosAprox += partes.length;
             continue;
@@ -111,7 +114,7 @@ async function main() {
             if (r.creada) nCreadosAprox++;
             if (!vistos.has(sid(r._id))) { vistos.add(sid(r._id)); nuevosIds.push(r._id); }
         }
-        if (!nuevosIds.length) { console.log(`  ⚠️  «${m.nombre}»: no se pudo resolver ninguna parte; se deja intacto`); continue; }
+        if (!nuevosIds.length) { prog.nota(`  ⚠️  «${m.nombre}»: no se pudo resolver ninguna parte; se deja intacto`); continue; }
 
         let afectados = 0;
         for (const doc of docs) {
@@ -128,11 +131,12 @@ async function main() {
         if (restantes === 0) {
             await colAutores.deleteOne({ _id: m._id });
             nBorrados++;
-            console.log(`  «${m.nombre}» → [${nuevosIds.length} personas] · ${afectados} libro(s) · registro fusionado borrado`);
+            prog.nota(`  «${m.nombre}» → [${nuevosIds.length} personas] · ${afectados} libro(s) · registro fusionado borrado`);
         } else {
-            console.log(`  «${m.nombre}» → [${nuevosIds.length} personas] · ${afectados} libro(s) · NO se borra (aún referenciado)`);
+            prog.nota(`  «${m.nombre}» → [${nuevosIds.length} personas] · ${afectados} libro(s) · NO se borra (aún referenciado)`);
         }
     }
+    console.log(`   (${prog.fin()})`);
 
     console.log(`\nGrupos fusionados con libros: ${nGrupos}`);
     console.log(`Libros ${EJECUTAR ? 'actualizados' : 'que se actualizarían'}: ${nDocsAfectados}`);

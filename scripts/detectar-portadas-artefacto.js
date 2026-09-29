@@ -84,14 +84,15 @@ function obrasDistintas(ds) {
 const deUnaColeccion = (ds) => ds.every((d) => d.coleccion && String(d.coleccion) === String(ds[0].coleccion));
 
 // ── 1. Portadas: por tamaño, y SHA solo de los tamaños repetidos ─────────────────────────────────────────
+const { progreso } = await import('../src/utils/progreso-cli.js');
 const docs = await col.find({ portada: { $exists: true, $ne: null } },
     { projection: { portada: 1, titulo: 1, isbn: 1, nombre_archivo: 1, imagenes: 1, ruta_base: 1, obra: 1, coleccion: 1 } }).toArray();
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : SELECCIONES ? '📋 SELECCIONES (no toca los documentos)' : '🔍 DRY-RUN'} · ${docs.length} documentos con portada`);
 // Fase 1: tamaño de cada portada (stat, sin leerla).
 const porTam = new Map();
-let i = 0;
+const p1 = progreso(docs.length, '1/2 · midiendo portadas');
 for (const d of docs) {
-    if (++i % 500 === 0) process.stdout.write(`\r\x1b[K   1/2 · tamaños: ${i}/${docs.length}`);
+    p1.paso();
     try {
         const st = await fs.stat(abs(d.portada));
         if (!porTam.has(st.size)) porTam.set(st.size, []);
@@ -99,18 +100,19 @@ for (const d of docs) {
     } catch { /* no está */ }
 }
 // Fase 2: SHA solo de las de tamaño repetido. (Antes esta fase no mostraba progreso y parecía colgada en «64000».)
+p1.fin();
 const aLeer = [...porTam.values()].filter((ds) => ds.length > 1).flat();
 const porSha = new Map();
-let k = 0;
+const p2 = progreso(aLeer.length, '2/2 · comparando portadas de igual tamaño');
 for (const d of aLeer) {
-    if (++k % 200 === 0) process.stdout.write(`\r\x1b[K   2/2 · comparando portadas de igual tamaño: ${k}/${aLeer.length}`);
+    p2.paso();
     try {
         const sha = crypto.createHash('sha256').update(await fs.readFile(abs(d.portada))).digest('hex');
         if (!porSha.has(sha)) porSha.set(sha, []);
         porSha.get(sha).push(d);
     } catch { /* */ }
 }
-process.stdout.write('\r\x1b[K');
+p2.fin();
 
 // ── 2. Artefactos: la misma imagen en N obras distintas ──────────────────────────────────────────────────
 const artefactos = [...porSha.entries()]

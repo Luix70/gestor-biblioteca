@@ -67,9 +67,16 @@ async function main() {
     console.log(`Libros a examinar: ${ids.length}${LIMITE ? ` (limitado a ${LIMITE})` : ''}\n`);
 
     let ultimo = 0;
+    const t0Busca = Date.now();
     const informe = await calcularReclasificacion(db, ids, {
         usarIA: USAR_IA,
-        alPaso: (h, t) => { if (h - ultimo >= 25 || h === t) { ultimo = h; process.stdout.write(`\r  buscando… ${h}/${t}`); } },
+        alPaso: (h, t) => {
+            if (h - ultimo >= 5 || h === t) {
+                ultimo = h;
+                const eta = h > 0 ? Math.round((Date.now() - t0Busca) / h * (t - h) / 1000) : null;
+                process.stdout.write(`\r\x1b[K  ⏳ buscando editorial ${h}/${t}${eta != null ? ` · faltan ~${eta >= 60 ? `${Math.floor(eta / 60)}m ${eta % 60}s` : `${eta}s`}` : ''}`);
+            }
+        },
     });
     process.stdout.write('\r' + ' '.repeat(40) + '\r');
 

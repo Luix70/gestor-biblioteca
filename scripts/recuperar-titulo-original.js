@@ -38,9 +38,12 @@ async function main() {
   console.log(`Candidatos (libros epub/pdf sin título original): ${ids.length}`);
 
   let nEscaneados = 0, nSinFichero = 0, nConOriginal = 0, nAplicados = 0, nErrores = 0;
+  const { progreso } = await import('../src/utils/progreso-cli.js');
+  const prog = progreso(LIMITE ? Math.min(LIMITE, ids.length) : ids.length, 'Leyendo créditos');
   for (const _id of ids) {
     if (LIMITE && nEscaneados >= LIMITE) break;
     const doc = await bib.findOne({ _id }, { projection: PROY });
+    prog.paso(doc?.titulo);
     if (!doc) continue;
     const ruta = path.join(carpetaDeDoc(doc), doc.nombre_archivo || '');
     let existe = true;
@@ -57,7 +60,7 @@ async function main() {
     const etiqueta = res.titulos_originales.length
       ? `[${res.titulos_originales.map((o) => `«${o}»`).join(', ')}]`
       : `«${res.titulo_original}»`;
-    console.log(`  «${String(doc.titulo || '').slice(0, 60)}»  →  ${etiqueta}${res.idioma_original ? ` · idioma orig: ${res.idioma_original}` : ''}`);
+    prog.nota(`  «${String(doc.titulo || '').slice(0, 60)}»  →  ${etiqueta}${res.idioma_original ? ` · idioma orig: ${res.idioma_original}` : ''}`);
 
     if (EJECUTAR) {
       const set = { titulo_original: res.titulo_original, fecha_actualizacion: new Date() };
@@ -70,7 +73,8 @@ async function main() {
     }
   }
 
-  console.log(`\nLibros escaneados (con fichero): ${nEscaneados}`);
+  console.log(`\n(${prog.fin()})`);
+  console.log(`Libros escaneados (con fichero): ${nEscaneados}`);
   console.log(`Sin fichero accesible (saltados): ${nSinFichero}`);
   console.log(`Con título original detectado: ${nConOriginal}${nErrores ? ` · errores de lectura: ${nErrores}` : ''}`);
   if (EJECUTAR) console.log(`Aplicados: ${nAplicados}`);

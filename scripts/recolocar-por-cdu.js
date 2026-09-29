@@ -24,39 +24,44 @@ const EJECUTAR = process.argv.includes('--ejecutar');
 
 const db = await conectarDB();
 const col = db.collection('biblioteca');
+const { progreso } = await import('../src/utils/progreso-cli.js');
 
 // Primero los candidatos (la comprobación es solo de rutas: rápida), luego el trabajo.
 const candidatos = [];
+const pBusca = progreso(await col.countDocuments({ ruta_base: { $exists: true } }), 'Revisando carpetas');
 for await (const d of col.find({ ruta_base: { $exists: true } }, {
     projection: { cdu: 1, ruta_base: 1, tipo_recurso: 1, obra: 1, ruta_fija: 1, coleccion: 1, naturaleza: 1, titulo: 1 },
 })) {
+    pBusca.paso();
     if (!carpetaReflejaFicha(d)) candidatos.push(d._id);
 }
+pBusca.fin();
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${candidatos.length} documento(s) con la carpeta fuera del árbol de su ficha\n`);
 
 let movidos = 0, sinCarpeta = 0, fallos = 0, i = 0;
-const t0 = Date.now();
+const p = progreso(candidatos.length, EJECUTAR ? 'Recolocando' : 'Revisando');
 for (const _id of candidatos) {
     i++;
     const doc = await col.findOne({ _id });
+    p.paso(doc?.titulo);
     if (!doc) continue;
-    const eta = i > 1 ? Math.round(((Date.now() - t0) / (i - 1)) * (candidatos.length - i + 1) / 1000) : 0;
     if (!EJECUTAR) {
-        process.stdout.write(`[${i}/${candidatos.length}] ↪️  cdu ${String(doc.cdu).padEnd(16)} ${doc.ruta_base}  «${String(doc.titulo || '').slice(0, 40)}»\n`);
+        p.nota(`[${i}/${candidatos.length}] ↪️  cdu ${String(doc.cdu).padEnd(16)} ${doc.ruta_base}  «${String(doc.titulo || '').slice(0, 40)}»`);
         continue;
     }
     try {
         const reub = await recolocarSegunCdu(doc);
-        if (!reub?.set?.ruta_base) { sinCarpeta++; process.stdout.write(`[${i}/${candidatos.length}] ·  ${doc._id}: sin carpeta en disco — no se toca\n`); continue; }
+        if (!reub?.set?.ruta_base) { sinCarpeta++; p.nota(`[${i}/${candidatos.length}] ·  ${doc._id}: sin carpeta en disco — no se toca`); continue; }
         const cambio = { set: reub.set, alertas: ['Carpeta recolocada según la ficha (scripts/recolocar-por-cdu).', ...(reub.alertas || [])] };
         await aplicarCambio(col, doc, reub.carpetaNueva || carpetaDeDoc({ ...doc, ...reub.set }), cambio);
         await indexarDoc(db, doc._id).catch(() => {});
         movidos++;
-        process.stdout.write(`[${i}/${candidatos.length}] ✅ ${reub.set.ruta_base}  «${String(doc.titulo || '').slice(0, 40)}» · ETA ${eta} s\n`);
+        p.nota(`[${i}/${candidatos.length}] ✅ ${reub.set.ruta_base}  «${String(doc.titulo || '').slice(0, 40)}»`);
     } catch (e) {
         fallos++;
-        process.stdout.write(`[${i}/${candidatos.length}] ⛔ ${doc._id}: ${e.message}\n`);
+        p.nota(`[${i}/${candidatos.length}] ⛔ ${doc._id}: ${e.message}`);
     }
 }
-console.log(`\n${EJECUTAR ? `Recolocados: ${movidos} · sin carpeta en disco: ${sinCarpeta} · fallos: ${fallos}` : 'DRY-RUN: no se ha movido nada. Repite con --ejecutar.'}\n`);
+const tiempo = p.fin();
+console.log(`\n${EJECUTAR ? `Recolocados: ${movidos} · sin carpeta en disco: ${sinCarpeta} · fallos: ${fallos}` : 'DRY-RUN: no se ha movido nada. Repite con --ejecutar.'} · tiempo ${tiempo}\n`);
 process.exit(fallos ? 1 : 0);
