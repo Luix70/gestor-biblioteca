@@ -58,6 +58,15 @@ const GENERICAS_COLECCION = new Set(['coleccion', 'collection', 'serie', 'series
 const esDeTomo = (resto) => /\b(vol|volumen|volume|tomo|tome|band|libro|libros|book|books|parte|part|partie|[ivxlcdm]{2,}|\d+)\b/.test(resto);
 
 /** ¿El título del candidato es el mismo libro? Igualdad normalizada, o uno contiene al otro (subtítulo). */
+// Indicación de MATERIAL DERIVADO (no el libro): solo cuenta DETRÁS de un separador («— test», «: workbook»,
+// «(answer key)»), para no confundir títulos legítimos («The Test», «Examen de conciencia»).
+const RE_MATERIAL = new RegExp(String.raw`^\s*(ejercicios|solucionario|soluciones|test|tests|examen|examenes|actividades|cuaderno( de actividades| de ejercicios)?|workbook|worksheets?|activity book|answer key|answers|key|teacher'?s (book|guide|notes)|guia didactica|guia del profesor|libro del profesor|study guide|quiz|quizzes)\b`, 'i');
+export function esMaterialDerivado(titulo) {
+    const t = String(titulo || '').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '');
+    const partes = t.split(/\s[—–-]\s|:\s|[([]/).slice(1);
+    return partes.some((p) => RE_MATERIAL.test(p));
+}
+
 function casaTitulo(titDoc, titCand, subCand) {
     const a = norm(titDoc);
     const b = norm([titCand, subCand].filter(Boolean).join(' '));
@@ -395,6 +404,12 @@ function siUnica(buenos, via) {
  */
 export async function identificarEdicion(doc, { online = false, conIA = false, limite = 40 } = {}) {
     if (!doc?.titulo) return { estado: 'sin-candidatos', candidatos: [], motivo: 'el documento no tiene título' };
+    // MATERIAL DERIVADO de un libro («The Eagle of the Ninth — ejercicios», «… — solucionario», «… — test»): NO es el
+    // libro, aunque su título lo contenga y el autor case. Darle el ISBN del libro sería falso (y después la fusión
+    // de versiones podría juntar ejercicios, solucionario y test en uno). Medido el 29-sep con Oxford Bookworms.
+    if (esMaterialDerivado(doc.titulo)) {
+        return { estado: 'sin-candidatos', candidatos: [], motivo: 'material derivado de un libro (ejercicios, solucionario, test…): no es la edición del libro' };
+    }
     // SIN AUTOR NO SE IDENTIFICA UNA EDICIÓN. Solo con el título, cualquier libro homónimo «casa» (medido el 29-sep:
     // revistas y títulos genéricos —«Astronomy», «Computer Hoy», «Más Allá 5», «Nueva Dimensión 3»…— recibieron el
     // ISBN de libros sin relación). El autor es la prueba mínima de que es la misma obra.

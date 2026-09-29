@@ -1091,6 +1091,12 @@ de ficheros clasificado por CDU.
     las revistas) y un documento SIN AUTOR aceptaba cualquier libro del mismo título (dudoso/más probable).
     Blindaje: identificar la edición SOLO en libros (ni revistas, cómics, audiolibros ni software) y NUNCA sin autor
     (identificar-edicion); «casi» exige un autor que case en los dos lados; el script filtra como la campaña.
+    MATERIAL DERIVADO (29-sep, dry-run con --limite 150): hojas de ejercicios/solucionario/test de lecturas graduadas
+    («The Eagle of the Ninth — ejercicios») recibían el ISBN del LIBRO (su título lo contiene y el autor casa), y
+    luego la fusión de versiones podría juntar ejercicios + solucionario + test. identificar-edicion ·
+    esMaterialDerivado: si tras un separador («— », «: », «(») el título dice ejercicios, solucionario, soluciones,
+    test, examen, actividades, cuaderno, workbook, worksheet, answer key, teacher's book, guía didáctica…, no se
+    identifica como el libro. fusionar-versiones: un grupo con material derivado va a «por revisar», nunca solo.
     DIARIO PARA DESHACER: cada documento que toca reidentificarDoc guarda en `deshacer[]` el valor anterior de cada
     campo cambiado (y la CDU y la carpeta si la CDU se aplicó).
     REVERSIÓN (sin copia de la base): scripts/revertir-reidentificacion.js --log <log de la ejecución> [--ejecutar]

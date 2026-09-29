@@ -36,6 +36,7 @@ import { indexarDoc, desindexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
 import { validarISBN, isbn10a13 } from './identificadores.js';
 import { mejorCdu, fuenteCduDoc, aplicarCduConPrioridad } from './prioridad-cdu.js';
+import { esMaterialDerivado } from './identificar-edicion.js';
 
 /** ISBN comparable: SIEMPRE en 13 dígitos (un ISBN-10 y su ISBN-13 son el mismo libro). */
 export const isbnComparable = (v) => { const x = v ? validarISBN(v) : null; return x ? (isbn10a13(x) || x) : null; };
@@ -76,6 +77,9 @@ export function clasificarGrupo(docs, { tamanos = null } = {}) {
         return { clase: 'isbn-compartido', motivo: 'títulos distintos con el mismo ISBN: el ISBN está mal en alguno' };
     }
     if (new Set(docs.map(formatosDe)).size > 1) return { clase: 'revisar', motivo: 'formatos distintos (no se fusionan)' };
+    // Material derivado de un libro (ejercicios, solucionario, test…): cada uno es un documento distinto aunque
+    // compartan ISBN y el título empiece igual — nunca se fusionan solos.
+    if (docs.some((d) => esMaterialDerivado(d.titulo))) return { clase: 'revisar', motivo: 'material derivado (ejercicios, solucionario, test…): no se fusiona solo' };
     if (docs.some((d) => d.obra)) return { clase: 'revisar', motivo: 'alguno es tomo de una obra' };
     // Nº de colección REAL: no automático (el que se asigna en orden a los miembros de una colección-carpeta: dos
     // versiones del mismo libro reciben el 29 y el 30 — medido: 880 de 1.002 grupos frenados por esto) y escrito en
