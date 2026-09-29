@@ -27,6 +27,11 @@
  *   --cdu                     investiga/fuerza también la CDU del Dewey/LCC (crosswalk determinista → IA si
  *                             --con-ia). Por defecto apunta a los de CDU vacía/000; MUEVE la carpeta al aplicar.
  *   --id <ObjectId> --isbn <ISBN>   fija a mano el ISBN de UN documento y coteja desde él.
+ *   --reintentar              repasa también los YA REVISADOS (los que no se encontraron en una pasada anterior).
+ *
+ * YA REVISADOS: cada libro que se mira con --ejecutar queda marcado (la MISMA marca que la campaña «Recuperar ISBN
+ * que faltan»), se encontrara o no. Las pasadas siguientes —y la campaña— lo saltan: la cola baja por todos los
+ * mirados, no solo por los encontrados. Para una última vuelta sobre los que quedaron: --reintentar.
  *
  * Uso:
  *   node scripts/reidentificar-sin-isbn.js                          (dry-run, miembros de colección sin ISBN)
@@ -38,7 +43,7 @@ import 'dotenv/config';
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';
-import { reidentificarDoc, resolverCduDoc } from '../src/utils/reidentificar-doc.js';
+import { reidentificarDoc, resolverCduDoc, VERSION_RECUPERAR_ISBN, CAMPO_MARCA_RECUPERAR_ISBN } from '../src/utils/reidentificar-doc.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const TODOS = process.argv.includes('--todos');
@@ -46,6 +51,7 @@ const SIN_APIS = process.argv.includes('--sin-apis');
 const FORZAR = process.argv.includes('--forzar');   // re-cotejar AUNQUE ya tenga ISBN (arregla títulos-artefacto)
 const CON_IA = process.argv.includes('--con-ia');   // permite leer el ISBN por barras/visión y enriquecer con IA
 const CON_CDU = process.argv.includes('--cdu');     // investigar/forzar también la CDU (crosswalk Dewey/LCC→CDU)
+const REINTENTAR = process.argv.includes('--reintentar'); // repasar también los ya revisados que no se encontraron
 const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
 const idArg = arg('--id');
 const isbnArg = arg('--isbn');   // ISBN manual (solo con --id)
@@ -95,8 +101,19 @@ async function main() {
     // Solo formatos con ISBN de texto barato (pdf/epub/mobi); descarta audio/material/vídeo/software/djvu.
     if (!idArg) filtro.formatos = { $in: ['pdf', 'epub', 'mobi'] };
 
+    // Modo RECUPERACIÓN (el normal: libros sin ISBN): salta los ya revisados, salvo --reintentar o un --id concreto.
+    const RECUPERACION = !FORZAR && !CON_CDU;
+    const NO_REVISADO = { $or: [{ [CAMPO_MARCA_RECUPERAR_ISBN]: { $exists: false } }, { [CAMPO_MARCA_RECUPERAR_ISBN]: { $ne: VERSION_RECUPERAR_ISBN } }] };
+    let yaRevisados = 0;
+    if (RECUPERACION && !idArg && !REINTENTAR) {
+        yaRevisados = await col.countDocuments({ $and: [filtro, { [CAMPO_MARCA_RECUPERAR_ISBN]: VERSION_RECUPERAR_ISBN }] });
+        filtro = { $and: [filtro, NO_REVISADO] };
+    }
+
     const ids = (await col.find(filtro, { projection: { _id: 1 } }).limit(Number.isFinite(limite) ? limite : 0).toArray()).map((d) => d._id);
-    console.log(`${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${ids.length} candidato(s)${FORZAR ? ' (forzando, incl. con ISBN)' : ' sin ISBN'}${CON_IA ? ' · con IA' : ''}${SIN_APIS ? ' · solo Fichero (sin APIs)' : ''}\n`);
+    console.log(`${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · ${ids.length} candidato(s)${FORZAR ? ' (forzando, incl. con ISBN)' : ' sin ISBN'}${CON_IA ? ' · con IA' : ''}${SIN_APIS ? ' · solo Fichero (sin APIs)' : ''}${REINTENTAR ? ' · reintentando los ya revisados' : ''}`);
+    if (yaRevisados) console.log(`   (${yaRevisados} ya revisados antes sin éxito se saltan; --reintentar para repasarlos)`);
+    console.log('');
 
     const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, ambiguos: 0, cdu: 0, fallos: 0 };
     const t0 = Date.now();
@@ -114,6 +131,9 @@ async function main() {
             // Tope por libro: una espera de red eterna (API colgada) no puede parar la tanda — se salta y se apunta.
             r = await conTope(reidentificarDoc(db, doc, { aplicar: EJECUTAR, usarApis: !SIN_APIS, forzar: FORZAR, conIA: CON_IA, isbnManual: idArg ? isbnArg : null }), TOPE_LIBRO_MS);
         } catch (e) { st.fallos++; process.stdout.write(`\r\x1b[K[${i}/${ids.length}] ⛔ ${_id} · ${(doc.titulo || '').slice(0, 45)}: ${e.message}\n`); continue; }
+        if (EJECUTAR && RECUPERACION) {
+            await col.updateOne({ _id }, { $set: { [CAMPO_MARCA_RECUPERAR_ISBN]: VERSION_RECUPERAR_ISBN } }).catch(() => {});
+        }
 
         if (r.estado === 'identificado' || r.estado === 'aplicado') {
             st.identificados++;

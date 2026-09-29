@@ -172,6 +172,15 @@ export async function elegirEdicion(db, id, { isbn = null, ninguna = false } = {
 }
 
 /**
+ * MARCA «ya revisado» que comparten la campaña «Recuperar ISBN que faltan» y scripts/reidentificar-sin-isbn.js:
+ * un libro sin ISBN que ya se miró (se encontrara o no) no vuelve a la cola — sin ella, cada pasada repetía
+ * todos los que no se encontraron y la cola no bajaba nunca. Subir la VERSIÓN (cuando el motor mejore) vuelve a
+ * poner en cola a todos los no encontrados; el script lo fuerza con --reintentar.
+ */
+export const VERSION_RECUPERAR_ISBN = 1;
+export const CAMPO_MARCA_RECUPERAR_ISBN = 'campanas.recuperar-isbn';
+
+/**
  * Re-identifica UN documento por su ISBN: lo obtiene (del fichero / a mano / por código de barras con IA / del
  * propio doc si se fuerza) y pivota al Fichero + APIs gratuitas para cotejar título y rellenar huecos.
  * @param {object} opts

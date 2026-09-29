@@ -1032,6 +1032,15 @@ de ficheros clasificado por CDU.
     la descartaste). Cada libro se procesa una vez por versión. Medido: 8.997 en cola al crearla. Para ir más
     rápido, lanza el script; la campaña sigue con lo que quede y con lo que vaya llegando.
 
+    MARCA «YA REVISADO» COMPARTIDA (2026-09-29). La campaña marcaba cada libro mirado (encontrado o no) y lo
+    sacaba de la cola; el SCRIPT no: solo bajaba la cola por los encontrados y cada relanzamiento repetía todos los
+    fallidos (cola interminable). Ahora ambos usan la MISMA marca (reidentificar-doc · CAMPO_MARCA_RECUPERAR_ISBN /
+    VERSION_RECUPERAR_ISBN): lo que mira uno ya no lo repite el otro. El script dice cuántos se saltan por ya
+    revisados; para una última vuelta sobre los que quedaron:
+        sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --todos --reintentar --ejecutar
+    (Los saltados por error o por el tope de tiempo NO se marcan: vuelven a la cola solos.) Subir la versión (cuando
+    el motor de identificación mejore) vuelve a poner en cola a todos los no encontrados, también en la campaña.
+
     PROGRESO Y TOPE DEL SCRIPT (2026-09-28). reidentificar-sin-isbn muestra UNA línea que avanza en su sitio por
     cada libro examinado (nº/total · título en curso · identificados · tiempo restante); solo añade líneas nuevas
     para lo relevante (✅ identificado, ❓ ambiguo, ⛔ error o saltado). Tope por libro: `--tope-min N` (5 por

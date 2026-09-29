@@ -30,7 +30,7 @@ import { variantesISBN } from '../utils/identificadores.js';
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from '../utils/buscador-local.js';
 import { buscarEnBNE } from '../utils/buscador-bne-sru.js';
 import { huecosDesdeAutoridad } from '../utils/huecos-autoridad.js';
-import { reidentificarDoc } from '../utils/reidentificar-doc.js';
+import { reidentificarDoc, VERSION_RECUPERAR_ISBN } from '../utils/reidentificar-doc.js';
 import { aplicarCduConPrioridad } from '../utils/prioridad-cdu.js';
 import { buscarNombrePorISSN } from '../utils/buscador-issn-titulo.js';
 import { nombreEsPlaceholder, limpiarNombreColeccion, claveCanonica } from '../utils/colecciones.js';
@@ -306,7 +306,7 @@ export const CAMPANAS = [
         etiqueta: 'Recuperar ISBN que faltan',
         coste: 'apis',
         descripcion: 'Libros SIN ISBN: lo busca en el propio fichero (OPF, página de créditos y bloque CIP, nombre) y, si el ripeo se lo quitó, identifica la EDICIÓN por título + autor + editorial + colección (Fichero → BNE / OpenLibrary según la lengua), con reglas estrictas. Con el ISBN hace el COTEJO en el mismo paso: rellena todo lo que falte (editorial, año, páginas, medidas, Dewey/LCC, traductor, materias…), aplica la CDU de la BNE si tiene prioridad (moviendo la carpeta) y corrige un título pobre; nunca pisa lo que ya hay. Si hay varias ediciones posibles no elige: las deja en la ficha («¿Cuál es tu edición?»). SIN IA. Es lo mismo que «🔎 Extraer ISBN» y scripts/reidentificar-sin-isbn.js, poco a poco y a reposo.',
-        version: 1,
+        version: VERSION_RECUPERAR_ISBN,   // compartida con scripts/reidentificar-sin-isbn.js (misma marca)
         loteDefecto: 20,
         cadenciaDefecto: 15,
         activaDefecto: true,    // gratis (sin IA) y lo pidió el usuario: que los ISBN se recuperen solos
