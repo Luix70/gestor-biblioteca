@@ -495,7 +495,7 @@ async function loadDashboard() {
       ${rowN('Tomos sin número (?)', anom.tomos_sin_numero, anom.tomos_sin_numero ? 'bad' : 'ok', 'tomos_sin_numero', 'Tomos sin número')}
       ${rowN('Docs a revisar', anom.docs_revision, anom.docs_revision ? 'bad' : 'ok', 'revision', 'Documentos a revisar')}</table>`;
     $('#defs').innerHTML = `<table>
-      ${rowN('Libros sin ISBN', def.libros_sin_isbn, 'mut', 'sin_isbn', 'Libros sin ISBN')}${rowN('Edición por elegir', def.edicion_por_elegir, def.edicion_por_elegir ? 'warn' : 'ok', 'edicion_por_elegir', 'Edición por elegir')}${rowN('Libros sin autor', def.libros_sin_autor, def.libros_sin_autor ? 'warn' : 'ok', 'sin_autor', 'Libros sin autor')}
+      ${rowN('Libros sin ISBN', def.libros_sin_isbn, 'mut', 'sin_isbn', 'Libros sin ISBN')}${rowN('Edición por elegir', def.edicion_por_elegir, def.edicion_por_elegir ? 'warn' : 'ok', 'edicion_por_elegir', 'Edición por elegir')}${rowN('ISBN provisional', def.isbn_provisional, 'mut', 'isbn_provisional', 'ISBN provisional (misma editorial; confirmable)')}${rowN('ISBN dudoso', def.isbn_dudoso, 'mut', 'isbn_dudoso', 'ISBN dudoso (única edición posible, sin confirmar)')}${rowN('Libros sin autor', def.libros_sin_autor, def.libros_sin_autor ? 'warn' : 'ok', 'sin_autor', 'Libros sin autor')}
       ${rowN('Sin hash', def.sin_hash, 'mut', 'sin_hash', 'Sin hash')}${rowN('Sin portada', def.sin_portada, 'mut', 'sin_portada', 'Sin portada')}
       ${rowN('CDU genérica', def.cdu_generica, 'mut', 'cdu_generica', 'CDU genérica')}${rowN('Pendientes', def.pendientes, def.pendientes ? 'warn' : 'ok', 'pendientes', 'Pendientes')}
       ${rowN('Sin colección', def.sin_coleccion, 'mut', 'sin_coleccion', 'Sin colección')}</table>`;
@@ -3608,14 +3608,19 @@ function pintarDoc(r, ctx) {
   // búsqueda por autoridad dio varias ediciones posibles, o una sin nada que confirmara que era esta). No se
   // eligió ninguna: se muestran aquí para que elijas con un clic. Abierta y arriba, porque pide una decisión.
   const _cands = Array.isArray(d.ediciones_candidatas) ? d.ediciones_candidatas : [];
+  // ISBN PROVISIONAL: varias ediciones de la MISMA editorial; se asignó una y el registro ya está completo. La
+  // tarjeta va PLEGADA (no exige nada): sirve para confirmar o cambiar a otra de las candidatas.
+  const _prov = !!d.isbn_provisional;
   const secEdicion = _cands.length
-    ? `<details class="card foldcard admin-only" id="edicionDet" open style="margin-top:14px"><summary>📚 ¿Cuál es tu edición?</summary>
-        <div class="muted" style="font-size:12px;margin:8px 0">No se encontró el ISBN en el fichero y hay ${_cands.length === 1 ? 'una edición posible que nada confirma' : _cands.length + ' ediciones posibles'}. Elige la de este ejemplar: se aplicará su ISBN y se completarán los datos que falten (nunca se pisa lo que ya tiene).</div>
+    ? `<details class="card foldcard admin-only" id="edicionDet" ${_prov ? '' : 'open'} style="margin-top:14px"><summary>📚 ${_prov ? 'Edición provisional' : '¿Cuál es tu edición?'}</summary>
+        <div class="muted" style="font-size:12px;margin:8px 0">${_prov
+          ? `ISBN <b>${esc(d.isbn || '')}</b> asignado como PROVISIONAL: las ${_cands.length} ediciones posibles son de la misma editorial, así que autor, traducción, sinopsis y CDU no cambian. Si tu ejemplar es otra, elígela (o confirma esta).`
+          : `No se encontró el ISBN en el fichero y hay ${_cands.length === 1 ? 'una edición posible que nada confirma' : _cands.length + ' ediciones posibles'}. Elige la de este ejemplar: se aplicará su ISBN y se completarán los datos que falten (nunca se pisa lo que ya tiene).`}</div>
         <div style="display:flex;flex-direction:column;gap:6px">${_cands.map((c) => `
           <div class="row" style="gap:8px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 8px;flex-wrap:wrap">
             <div style="flex:1;min-width:200px"><b>${esc(c.titulo || '—')}</b>${c.subtitulo ? ' <span class="muted">' + esc(c.subtitulo) + '</span>' : ''}
               <div class="muted" style="font-size:12px">${esc([c.editorial, c.anio, c.idioma, c.coleccion].filter(Boolean).join(' · '))} · ISBN ${esc(c.isbn)}${c.fuente ? ' · ' + esc(c.fuente) : ''}${c.señales?.length ? ' · casa ' + esc(c.señales.join(' + ')) : ''}</div></div>
-            <button class="btn edElegir" data-isbn="${esc(c.isbn)}" title="Aplicar este ISBN y completar los huecos desde la autoridad">✔ Es esta</button>
+            <button class="btn edElegir" data-isbn="${esc(c.isbn)}" title="Aplicar este ISBN y completar los huecos desde la autoridad">${_prov && c.isbn === d.isbn ? '✔ Confirmar' : '✔ Es esta'}</button>
           </div>`).join('')}
         </div>
         <div class="row" style="margin-top:8px"><button class="btn edNinguna" title="Ninguna es la de este ejemplar: se descartan y no se volverán a proponer">✖ Ninguna</button></div>

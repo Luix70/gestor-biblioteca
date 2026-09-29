@@ -28,6 +28,9 @@
  *                             --con-ia). Por defecto apunta a los de CDU vacía/000; MUEVE la carpeta al aplicar.
  *   --id <ObjectId> --isbn <ISBN>   fija a mano el ISBN de UN documento y coteja desde él.
  *   --reintentar              repasa también los YA REVISADOS (los que no se encontraron en una pasada anterior).
+ *   --edicion-por-elegir      los que esperan que elijas edición (Dashboard «Edición por elegir»): se re-investigan
+ *                             con las pruebas nuevas (traductor, indicios de colección). Resultado: ISBN definitivo, PROVISIONAL
+ *                             (varias ediciones de la misma editorial) o DUDOSO (una sola posible); si sigue ambiguo, se queda.
  *
  * YA REVISADOS: cada libro que se mira con --ejecutar queda marcado (la MISMA marca que la campaña «Recuperar ISBN
  * que faltan»), se encontrara o no. Las pasadas siguientes —y la campaña— lo saltan: la cola baja por todos los
@@ -52,6 +55,7 @@ const FORZAR = process.argv.includes('--forzar');   // re-cotejar AUNQUE ya teng
 const CON_IA = process.argv.includes('--con-ia');   // permite leer el ISBN por barras/visión y enriquecer con IA
 const CON_CDU = process.argv.includes('--cdu');     // investigar/forzar también la CDU (crosswalk Dewey/LCC→CDU)
 const REINTENTAR = process.argv.includes('--reintentar'); // repasar también los ya revisados que no se encontraron
+const EDICION = process.argv.includes('--edicion-por-elegir'); // los que esperan que elijas edición: re-investigarlos
 const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
 const idArg = arg('--id');
 const isbnArg = arg('--isbn');   // ISBN manual (solo con --id)
@@ -97,15 +101,16 @@ async function main() {
     else if (selArg) filtro = { _id: { $in: await idsDeSeleccion(db, selArg) }, ...base };
     else if (colArg) filtro = { coleccion: await resolverColeccionArg(db, colArg), ...base };
     else if (patronArg) filtro = { nombre_archivo: { $regex: patronArg, $options: 'i' }, ...base };
+    else if (EDICION) filtro = { 'ediciones_candidatas.0': { $exists: true }, isbn_provisional: { $ne: true }, ...base };
     else if (!TODOS) filtro = { coleccion: { $exists: true, $ne: null }, ...base }; // por defecto: miembros de colección
     // Solo formatos con ISBN de texto barato (pdf/epub/mobi); descarta audio/material/vídeo/software/djvu.
-    if (!idArg) filtro.formatos = { $in: ['pdf', 'epub', 'mobi'] };
+    if (!idArg && !EDICION) filtro.formatos = { $in: ['pdf', 'epub', 'mobi'] };   // (la edición por autoridad no necesita el fichero)
 
     // Modo RECUPERACIÓN (el normal: libros sin ISBN): salta los ya revisados, salvo --reintentar o un --id concreto.
     const RECUPERACION = !FORZAR && !CON_CDU;
     const NO_REVISADO = { $or: [{ [CAMPO_MARCA_RECUPERAR_ISBN]: { $exists: false } }, { [CAMPO_MARCA_RECUPERAR_ISBN]: { $ne: VERSION_RECUPERAR_ISBN } }] };
     let yaRevisados = 0;
-    if (RECUPERACION && !idArg && !REINTENTAR) {
+    if (RECUPERACION && !idArg && !REINTENTAR && !EDICION) {
         yaRevisados = await col.countDocuments({ $and: [filtro, { [CAMPO_MARCA_RECUPERAR_ISBN]: VERSION_RECUPERAR_ISBN }] });
         filtro = { $and: [filtro, NO_REVISADO] };
     }
@@ -115,7 +120,7 @@ async function main() {
     if (yaRevisados) console.log(`   (${yaRevisados} ya revisados antes sin éxito se saltan; --reintentar para repasarlos)`);
     console.log('');
 
-    const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, ambiguos: 0, cdu: 0, fallos: 0, reintentar: 0 };
+    const st = { identificados: 0, sinFichero: 0, noHallado: 0, formato: 0, yaTiene: 0, ambiguos: 0, cdu: 0, fallos: 0, reintentar: 0, provisionales: 0, dudosos: 0 };
     const t0 = Date.now();
     let i = 0;
     for (const _id of ids) {
@@ -143,6 +148,8 @@ async function main() {
 
         if (r.estado === 'identificado' || r.estado === 'aplicado') {
             st.identificados++;
+            if (r.provisional) st.provisionales++;
+            if (r.dudoso) st.dudosos++;
             process.stdout.write(`\r\x1b[K[${i}/${ids.length}] ${EJECUTAR ? '✅' : '↪️'} ${_id} · ${(doc.titulo || '').slice(0, 45)} → ${r.resumen}\n`);
         } else if (r.estado === 'ambiguo') {
             // Varias ediciones posibles (o ninguna que confirme cuál es): NO se elige — se listan para ti.
@@ -173,6 +180,8 @@ async function main() {
     process.stdout.write('\r\x1b[K');
     console.log(`\n=== RESUMEN (${EJECUTAR ? 'APLICADO' : 'dry-run'}) ===`);
     console.log(`  ${EJECUTAR ? 'ISBN recuperados' : 'ISBN recuperables'} : ${st.identificados}`);
+    if (st.provisionales) console.log(`    de ellos PROVISIONALES : ${st.provisionales}  (varias ediciones de la misma editorial; confirmables en la ficha)`);
+    if (st.dudosos) console.log(`    de ellos DUDOSOS       : ${st.dudosos}  (única edición posible, sin confirmar)`);
     console.log(`  sin fichero en disco    : ${st.sinFichero}`);
     console.log(`  ISBN no hallado         : ${st.noHallado}  (el fichero no lo declara ni corrobora)`);
     console.log(`  formato no soportado    : ${st.formato}  (djvu/otros: sin ISBN de texto barato)`);

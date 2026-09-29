@@ -76,6 +76,14 @@ export async function editarDocumento(db, id, campos = {}) {
         const v = String(campos.isbn || '').trim();
         if (!v) unset.isbn = '';
         else { const ok = validarISBN(v); if (ok) set.isbn = ok; else avisos.push(`ISBN inválido (ignorado): ${v}`); }
+        // Si CAMBIAS el ISBN a mano, deja de ser provisional o dudoso (lo has decidido tú). Guardar la ficha con el
+        // mismo ISBN no cuenta: solo un cambio real quita las marcas.
+        if (set.isbn || unset.isbn) {
+            const previo = await db.collection('biblioteca').findOne({ _id: new ObjectId(id) }, { projection: { isbn: 1 } });
+            if (String(previo?.isbn || '') !== String(set.isbn || '')) {
+                Object.assign(unset, { isbn_provisional: '', isbn_dudoso: '', ediciones_candidatas: '', ediciones_candidatas_fecha: '' });
+            }
+        }
     }
     if ('issn' in campos) {
         const v = String(campos.issn || '').trim();

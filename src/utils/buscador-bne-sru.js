@@ -78,9 +78,19 @@ function registroMarc($, rec) {
         if (rol) contribuciones.push({ nombre, rol });
     });
 
+    // TRADUCTORES: los 700 con rol de traductor y, sobre todo, la mención de responsabilidad (245 $c), donde la
+    // BNE casi siempre los escribe («Isaac Asimov ; traducción, Ana I. Domínguez…», «[P. Giralt Gorina
+    // traducción]») aunque no haya 700. Una TRADUCCIÓN es de una edición concreta: distingue ediciones de un
+    // mismo título mejor que nada (Plaza & Janés y Bruguera: Pilar Giralt; La Factoría: Domínguez y Rodríguez).
+    const traductores = contribuciones.filter((c) => c.rol === 'traductor').map((c) => c.nombre);
+    for (const trozo of sub('245', 'c').split(';')) {
+        if (/tradu|transl/i.test(trozo)) traductores.push(trozo.replace(/[\[\]]/g, ' ').trim());
+    }
+
     return {
         isbn: isbns[0] || null,
         isbns,
+        traductores,
         titulo: limpiar(sub('245', 'a')),
         subtitulo: limpiar(sub('245', 'b')),
         autores,

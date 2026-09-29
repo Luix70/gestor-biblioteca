@@ -113,12 +113,27 @@ function señalesEdicion(doc, cand) {
     const señales = [];
     let contradice = false;
 
-    // Una «editorial» de maquetador (ePubLibre…) no dice nada de la edición: se trata como desconocida.
-    const edDoc = esEditorialFalsa(doc.editorial) ? [] : nucleoEditorial(doc.editorial);
+    // TRADUCTOR (va primero: decide cómo pesa la editorial). Una traducción es de una edición concreta: si el
+    // libro y la candidata comparten traductores es esa traducción; si los dos los nombran y no comparten
+    // ninguno, es OTRA traducción ⇒ otra edición.
+    const tDoc = tokensPersonas(doc.traductores), tCand = tokensPersonas(cand.traductores);
+    if (tDoc.size && tCand.size) {
+        const comunes = [...tDoc].filter((w) => tCand.has(w)).length;
+        if (comunes >= 2 || (comunes === 1 && Math.min(tDoc.size, tCand.size) === 1)) señales.push('traductor');
+        else if (comunes === 0) contradice = true;
+    }
+
+    // EDITORIAL: la del documento y las que sugiere SU COLECCIÓN (indicios aprendidos: «Solaris ficción» → La
+    // Factoría de Ideas). Una «editorial» de maquetador (ePubLibre…) no dice nada: se trata como desconocida.
+    // Casa con cualquiera de ellas ⇒ señal. No casa con ninguna ⇒ otra edición… salvo que el TRADUCTOR la
+    // confirme: el campo editorial del documento puede venir de una API y estar mal (medido: «Los propios dioses»
+    // con «Salamandra»), y la traducción la trae el propio fichero.
     const edCand = esEditorialFalsa(cand.editorial) ? [] : nucleoEditorial(cand.editorial);
-    if (edDoc.length && edCand.length) {
-        if (edDoc.some((w) => edCand.includes(w))) señales.push('editorial');
-        else contradice = true;                       // Seix Barral ≠ Teide ⇒ otra edición
+    const pruebas = [doc.editorial, ...(doc.editoriales_coleccion || [])]
+        .filter((e) => e && !esEditorialFalsa(e)).map(nucleoEditorial).filter((n) => n.length);
+    if (pruebas.length && edCand.length) {
+        if (pruebas.some((n) => n.some((w) => edCand.includes(w)))) señales.push('editorial');
+        else if (!señales.includes('traductor')) contradice = true;   // Seix Barral ≠ Teide ⇒ otra edición
     }
 
     const iDoc = idioma2(doc.idioma), iCand = idioma2(cand.idioma);
@@ -149,6 +164,14 @@ function señalesEdicion(doc, cand) {
     return { señales, contradice };
 }
 
+// Palabras de una mención de traducción que no son nombres de persona.
+const NO_PERSONA = new Set(['traduccion', 'traducido', 'traducida', 'traductor', 'traductora', 'traductores', 'trad',
+    'translated', 'translation', 'translator', 'notas', 'prologo', 'introduccion', 'edicion', 'revision', 'revisada',
+    'version', 'castellana', 'espanola', 'ingles', 'frances', 'aleman', 'italiano', 'original']);
+/** Apellidos/nombres (≥ 4 letras) de una lista de personas, para comparar traductores entre fuentes. */
+const tokensPersonas = (lista) => new Set((Array.isArray(lista) ? lista : [lista]).filter(Boolean)
+    .flatMap((s) => palabras(s)).filter((w) => w.length >= 4 && !NO_PERSONA.has(w) && !/^\d+$/.test(w)));
+
 /** Normaliza un candidato (Fichero, BNE, OpenLibrary) a una forma común. */
 // Un ISBN-10 y su ISBN-13 son el MISMO libro: se normaliza todo a 13 para que no cuenten como dos ediciones
 // (medido: «Misiones secretas» salía ambigua entre 8476330111 y 9788476330111).
@@ -175,7 +198,29 @@ const comoCandidato = (c, fuente) => ({
     editorial: c.editorial || null, anio: c.anio || c.anio_edicion || c.año_edicion || null,
     ...(() => { const cn = coleccionYNumero(c.coleccion_nombre, c.coleccion_numero); return { coleccion_nombre: cn.nombre, coleccion_numero: cn.numero }; })(),
     idioma: c.idioma || null, cdu: c.cdu || null, fuente,
+    traductores: Array.isArray(c.traductores) && c.traductores.length ? c.traductores
+        : (c.contribuciones_nombres || []).filter((x) => x && x.rol === 'traductor').map((x) => x.nombre),
 });
+
+/**
+ * ISBN PROVISIONAL: varias ediciones posibles pero TODAS de la MISMA editorial (típico: reimpresiones o
+ * reediciones — «Los propios dioses», La Factoría de Ideas 2005 y 2007). Cuál de ellas sea importa poco: el
+ * autor, la editorial, la traducción, la sinopsis y la CDU son los mismos. Se elige una (la de más señales y, a
+ * igualdad, la MÁS RECIENTE) para poder completar el registro, y se deja marcada como provisional con las demás
+ * candidatas, por si quieres cambiarla. Con editoriales distintas NO: serían traducciones/ediciones distintas.
+ */
+function siMismaEditorial(buenos) {
+    const u = unicosPorIsbn(buenos);
+    if (u.length < 2) return null;
+    const nucleos = u.map((c) => (esEditorialFalsa(c.editorial) ? [] : nucleoEditorial(c.editorial)));
+    if (nucleos.some((n) => !n.length)) return null;
+    if (!nucleos.every((n) => n.some((w) => nucleos[0].includes(w)))) return null;
+    const elegido = [...u].sort((a, b) => b.señales.length - a.señales.length || (parseInt(b.anio, 10) || 0) - (parseInt(a.anio, 10) || 0))[0];
+    return {
+        estado: 'provisional', isbn: elegido.isbn, elegido, candidatos: u, via: elegido.fuente,
+        motivo: `${u.length} ediciones, todas de ${elegido.editorial}: se asigna la de ${elegido.anio || '?'} como PROVISIONAL (casa ${elegido.señales.join(' + ')})`,
+    };
+}
 
 /**
  * Filtra y puntúa candidatos con las reglas estrictas de arriba.
@@ -316,10 +361,28 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
         }
     }
 
+    // Varias posibles de la MISMA editorial → ISBN provisional (el registro se completa; tú puedes cambiarla).
+    const prov = siMismaEditorial(buenos);
+    if (prov) return conCaidas(prov);
     if (buenos.length > 1) {
         return conCaidas({ estado: 'ambiguo', candidatos: buenos, motivo: `${buenos.length} ediciones posibles: ` + buenos.slice(0, 5).map((c) => `${c.isbn} (${c.editorial || '?'}, ${c.anio || '?'})`).join(' · ') });
     }
     const casi = casiCandidatos(doc, candidatos);
+    // UNA SOLA edición posible (mismo título y autor; ni la lengua ni la traducción la contradicen), aunque nada la
+    // confirme: se asigna como DEFINITIVA pero marcada DUDOSA (regla del usuario: con una sola candidata no hay
+    // nada que elegir; mejor un registro completo que revisar a mano). Caso: «Las bodas de la semejanza», solo
+    // Muchnik 1996 en la BNE frente a «Egales» en el registro.
+    const unicas = unicosPorIsbn(casi).filter((c) => {
+        const iDoc = idioma2(doc.idioma), iCand = idioma2(c.idioma);
+        if (iDoc && iCand && iDoc !== iCand) return false;
+        const tDoc = tokensPersonas(doc.traductores), tCand = tokensPersonas(c.traductores);
+        return !(tDoc.size && tCand.size && ![...tDoc].some((w) => tCand.has(w)));
+    });
+    if (unicas.length === 1 && unicosPorIsbn(casi).length === 1) {
+        const c = unicas[0];
+        return conCaidas({ estado: 'dudoso', isbn: c.isbn, elegido: { ...c, señales: [] }, candidatos: [c], via: c.fuente,
+            motivo: `única edición posible (${c.editorial || '?'}, ${c.anio || '?'}), sin nada que confirme que es la de este ejemplar: se asigna marcada como DUDOSA` });
+    }
     if (casi.length) {
         return conCaidas({ estado: 'ambiguo', candidatos: casi, motivo: `mismo título y autor pero nada confirma la edición (editorial/idioma/año): ` + casi.slice(0, 5).map((c) => `${c.isbn} (${c.editorial || '?'}, ${c.anio || '?'}, ${c.idioma || '?'})`).join(' · ') });
     }

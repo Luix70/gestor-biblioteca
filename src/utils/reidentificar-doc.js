@@ -26,6 +26,9 @@ import { esTituloArtefacto } from './parsear-nombre.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { identificarEdicion, candidatasParaGuardar } from './identificar-edicion.js';
+import { editorialesDeColeccion, anotarEditorialDeColeccion } from './indicios-coleccion.js';
+import { esEditorialFalsa } from './editoriales-falsas.js';
+import { extraerMetadatosEpub, textoInicialEpub } from './lector-epub.js';
 import { huecosDesdeAutoridad } from './huecos-autoridad.js';
 import { aplicarCduConPrioridad, puedeSustituirCdu, fuenteCduDoc } from './prioridad-cdu.js';
 import { cduDeAutoridadFiable, buscarAutoridadPorISBN } from './autoridad-isbn.js';
@@ -68,11 +71,37 @@ async function datosDeAutoridad(db, doc) {
         ? (await db.collection('autores').find({ _id: { $in: doc.autores } }, { projection: { nombre: 1 } }).toArray()).map((a) => a.nombre)
         : [];
     const ed = doc.editorial ? await db.collection('editoriales').findOne({ _id: doc.editorial }, { projection: { nombre: 1 } }) : null;
+    // Traductores del documento (del propio fichero en la ingesta): distinguen una traducción de otra.
+    const idsTrad = (doc.contribuciones || []).filter((c) => c && c.rol === 'traductor' && c.persona).map((c) => c.persona);
+    const traductores = idsTrad.length
+        ? (await db.collection('autores').find({ _id: { $in: idsTrad } }, { projection: { nombre: 1 } }).toArray()).map((a) => a.nombre)
+        : [];
     return {
         titulo: doc.titulo, autores, editorial: ed?.nombre || null,
         coleccion_nombre: doc.coleccion_nombre || null, coleccion_numero: doc.coleccion_numero || null,
         anio: doc.año_edicion || null, idioma: doc.idioma || null,
+        traductores,
+        // Editoriales que sugiere su colección (indicios aprendidos de otras identificaciones).
+        editoriales_coleccion: await editorialesDeColeccion(db, doc).catch(() => []),
     };
+}
+
+/** ¿Nombran la misma editorial? (sin acentos, mayúsculas ni palabras de relleno: «La Factoría de Ideas» = «La Factoria de Ideas»). */
+function mismaEditorial(a, b) {
+    const RELLENO = new Set(['ediciones', 'edicion', 'editorial', 'editores', 'grupo', 'libros', 'la', 'el', 'de', 'del', 'y', 'sa', 'sl']);
+    const nucleo = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter((w) => w.length > 1 && !RELLENO.has(w));
+    const na = nucleo(a), nb = nucleo(b);
+    return na.length > 0 && nb.length > 0 && na.some((w) => nb.includes(w));
+}
+
+/** Traductores declarados en un EPUB: el OPF y, si no, la línea «Traducción: …» de los créditos. Nunca lanza. */
+async function traductoresDeEpub(ruta) {
+    const m = await extraerMetadatosEpub(ruta).catch(() => null);
+    const delOpf = (m?.contribuciones_nombres || []).filter((c) => c && c.rol === 'traductor').map((c) => c.nombre);
+    if (delOpf.length) return delOpf;
+    const texto = await textoInicialEpub(ruta, { maxDocs: 6 }).catch(() => '');
+    const t = /Traducci[óo]n\s*(?:de|del [a-zé]+)?\s*[:,]\s*(.{3,160}?)(?=\s+(?:Dise[ñn]o|Editor|Ilustraci|Revisi|Correcci|Cubierta|ePub|$))/i.exec(texto);
+    return t ? [t[1].trim()] : [];
 }
 
 // Lee las imágenes YA extraídas del documento (portada + páginas de catalogación) como buffers, para la visión.
@@ -259,15 +288,26 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     //     sabemos —título, autor, editorial, colección, año, idioma—. Estricto: solo se acepta una edición que
     //     case título + autor Y confirme editorial/idioma/año; si hay varias posibles no se elige ninguna.
     let ambiguo = null;
+    let provisional = null;   // varias ediciones de la misma editorial: se asigna una, marcada como provisional
+    let dudoso = null;        // una sola edición posible que nada confirma: se asigna, marcada como dudosa
+    let editorialActual = null;   // nombre de la editorial que tenía el documento
+    let edicion = null;       // la edición elegida por autoridad (para aprender la editorial de su colección)
     // ¿QUEDA ESPERANZA si no se encuentra? Sí, si alguna fuente no respondió, si la identificación falló por un
     // error, o si no se consultaron las fuentes en línea (--sin-apis): otro día puede salir.
     let caidas = usarApis ? [] : ['apis (no consultadas)'];
     // Si ya se te propusieron ediciones y dijiste «ninguna», no se vuelve a proponer (salvo forzando).
     if (!isbn && (!doc.edicion_descartada || forzar)) {
-        const r = await identificarEdicion(await datosDeAutoridad(db, doc), { online: usarApis, conIA }).catch(() => null);
+        const pruebas = await datosDeAutoridad(db, doc);
+        editorialActual = pruebas.editorial;
+        // Si el documento no guardó sus traductores (ingestas antiguas), se leen del PROPIO fichero: el OPF del
+        // EPUB (dc:contributor opf:role="trl") o, si no, la página de créditos («Traducción: …», ePubLibre).
+        if (!pruebas.traductores.length && abs && /\.epub$/i.test(abs)) pruebas.traductores = await traductoresDeEpub(abs);
+        const r = await identificarEdicion(pruebas, { online: usarApis, conIA }).catch(() => null);
         if (!r) caidas.push('error en la identificación');
         else caidas.push(...(r.fuentesCaidas || []));
-        if (r?.estado === 'unico') { isbn = r.isbn; via = `autoridad/${r.via}`; }
+        if (r?.estado === 'unico') { isbn = r.isbn; via = `autoridad/${r.via}`; edicion = r.elegido; }
+        else if (r?.estado === 'provisional') { isbn = r.isbn; via = `autoridad/${r.via}, PROVISIONAL`; edicion = r.elegido; provisional = r; }
+        else if (r?.estado === 'dudoso') { isbn = r.isbn; via = `autoridad/${r.via}, DUDOSO`; dudoso = r; }
         else if (r?.estado === 'ambiguo') ambiguo = r;
     }
     const reintentable = caidas.length > 0;
@@ -321,8 +361,29 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // prueba no debe dejar rastro. Se anota el nombre para el informe; se resuelve solo al aplicar.
     if (!(doc.autores?.length) && autoresNom.length) { set.autores = aplicar ? await resolverAutores(db, autoresNom) : autoresNom; nombres.autores = autoresNom; }
     // Editorial: rellena si falta (del fichero o de la autoridad).
-    const editorialNom = ext.editorial || datos.editorial || null;
+    // Editorial para un hueco: la primera REAL (nunca un maquetador como «ePubLibre», que el OPF del EPUB declara
+    // como dc:publisher: medido, se colaba en libros sin editorial).
+    const editorialNom = [ext.editorial, datos.editorial, edicion?.editorial].find((e) => e && !esEditorialFalsa(e)) || null;
     if (!doc.editorial && editorialNom) { set.editorial = aplicar ? await resolverEditorial(db, editorialNom) : editorialNom; nombres.editorial = editorialNom; }
+    // EDICIÓN CONFIRMADA — la que ELEGISTE en la ficha (ISBN manual) o la única/provisional por autoridad —: su
+    // editorial manda. El ISBN ES esa edición, y un registro con el ISBN de La Factoría y la editorial «Gamon» o
+    // «Salamandra» sería incoherente (el campo editorial pudo llegar de una API y estar mal). Se sustituye y se anota
+    // la anterior. En una DUDOSA no: ahí lo dudoso es el ISBN, y la editorial del registro puede ser la buena.
+    const candidataElegida = manual ? (doc.ediciones_candidatas || []).find((c) => variantesISBN(c.isbn).includes(manual)) : null;
+    const edEdicionConfirmada = [
+        (edicion && !dudoso) ? edicion.editorial : null,
+        manual ? datos.editorial : null,          // la autoridad por ESE ISBN
+        candidataElegida?.editorial,              // o la de la candidata que elegiste
+    ].find((e) => e && !esEditorialFalsa(e)) || null;
+    if (doc.editorial && edEdicionConfirmada && editorialActual === null) {
+        const ed = await db.collection('editoriales').findOne({ _id: doc.editorial }, { projection: { nombre: 1 } }).catch(() => null);
+        editorialActual = ed?.nombre || '';
+    }
+    if (doc.editorial && edEdicionConfirmada && editorialActual
+        && !mismaEditorial(editorialActual, edEdicionConfirmada)) {
+        set.editorial = aplicar ? await resolverEditorial(db, edEdicionConfirmada) : edEdicionConfirmada;
+        nombres.editorial = `${edEdicionConfirmada} (antes «${editorialActual}»)`;
+    }
     // HUECOS: TODO lo que la autoridad aporte y no tengamos (fecha, páginas, medidas, Dewey/LCC, traductor,
     // materias, lengua original, CDU de autoridad…), con la función común. Nunca sobrescribe.
     const huecos = await huecosDesdeAutoridad(db, doc, datos, { aplicar });
@@ -340,19 +401,35 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     const resumen = `isbn=${isbn}${via ? ` (${via})` : ''}`
         + (Object.keys(nombres).length ? ' · ' + Object.entries(nombres).map(([k, v]) => `${k}="${Array.isArray(v) ? v.join(', ') : v}"`).join(' · ') : '');
 
-    if (!aplicar) return { estado: 'identificado', isbn, via, titulo: set.titulo || doc.titulo, resumen, set };
+    if (!aplicar) return { estado: 'identificado', provisional: !!provisional, dudoso: !!dudoso, isbn, via, titulo: set.titulo || doc.titulo, resumen, set };
 
     // Si se corrige el título, des-sellar re-clasificar-cdu para que el Conformador reclasifique y MUEVA la
     // carpeta con el título ya bueno (igual que re-enriquecer-degradados).
     if (set.titulo) { set['mantenimiento.re-clasificar-cdu'] = 0; set.mantenimiento_firma = 'pendiente-reidentificado'; }
     set.fecha_actualizacion = new Date();
-    set.alertas_agente = [...(doc.alertas_agente || []), `ISBN ${via === 'manual' ? 'manual' : 'recuperado (' + via + ')'} + cotejo por ISBN (Fichero/APIs${conIA ? ', con IA' : ''}).`];
-    // Con el ISBN ya resuelto, las ediciones candidatas (si las había) sobran.
-    const quitar = doc.ediciones_candidatas ? { $unset: { ediciones_candidatas: '', ediciones_candidatas_fecha: '' } } : {};
+    set.alertas_agente = [...(doc.alertas_agente || []), provisional
+        ? `ISBN PROVISIONAL ${isbn}: ${provisional.motivo}. Registro completado con él; si tu ejemplar es otra de las ediciones, elígela en la ficha.`
+        : dudoso ? `ISBN DUDOSO ${isbn}: ${dudoso.motivo}. Registro completado con él; si no es tu edición, corrige el ISBN en la ficha.`
+        : `ISBN ${via === 'manual' ? 'manual' : 'recuperado (' + via + ')'} + cotejo por ISBN (Fichero/APIs${conIA ? ', con IA' : ''}).`];
+    // PROVISIONAL: se conservan las candidatas (la ficha ofrece confirmar o cambiar). Si no, sobran: el ISBN ya
+    // está resuelto (y si era provisional, deja de serlo).
+    let quitar = {};
+    if (dudoso) set.isbn_dudoso = true;
+    if (provisional) {
+        set.isbn_provisional = true;
+        set.ediciones_candidatas = candidatasParaGuardar(provisional.candidatos);
+        set.ediciones_candidatas_fecha = new Date();
+    } else if (doc.ediciones_candidatas || doc.isbn_provisional || (doc.isbn_dudoso && !dudoso)) {
+        quitar = { $unset: { ediciones_candidatas: '', ediciones_candidatas_fecha: '', isbn_provisional: '', ...(dudoso ? {} : { isbn_dudoso: '' }) } };
+    }
     await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set, ...quitar });
     // Índice FTS + sidecars (best-effort: nunca tumban la operación).
     await indexarDoc(db, doc._id).catch(() => {});
     await regenerarSidecarsDoc(db, { ...doc, ...set }, carpeta).catch(() => {});
+    // APRENDER: la editorial de esta edición queda como INDICIO en la colección del libro («Solaris ficción» →
+    // La Factoría de Ideas), para las siguientes identificaciones de libros de la misma colección.
+    const edEdicion = [datos.editorial, edicion?.editorial].find((e) => e && !esEditorialFalsa(e));
+    if (edEdicion && (doc.coleccion || doc.coleccion_nombre)) await anotarEditorialDeColeccion(db, doc, edEdicion);
     // CDU de la BNE para esta edición: se APLICA si tiene prioridad sobre la actual (la deducida por equivalencia o
     // IA), MOVIENDO la carpeta. No toca una CDU manual ni una impresa en el libro, ni tomos de obra.
     let cduAplicada = null;
@@ -361,7 +438,7 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         const rc = actualizado ? await aplicarCduConPrioridad(db, actualizado, datos.cdu, 'bne').catch(() => null) : null;
         if (rc?.aplicada) cduAplicada = `${rc.de || '∅'} → ${rc.a}`;
     }
-    return { estado: 'aplicado', isbn, via, titulo: set.titulo || doc.titulo, resumen: resumen + (cduAplicada ? ` · CDU ${cduAplicada} (BNE)` : ''), set };
+    return { estado: 'aplicado', provisional: !!provisional, dudoso: !!dudoso, isbn, via, titulo: set.titulo || doc.titulo, resumen: resumen + (cduAplicada ? ` · CDU ${cduAplicada} (BNE)` : ''), set };
 }
 
 /**

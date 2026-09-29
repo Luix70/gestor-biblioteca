@@ -25,6 +25,7 @@ import { huecosEscalares } from './utils/huecos-autoridad.js';
 import { mejorCdu, rangoFuente, RANGO_CDU } from './utils/prioridad-cdu.js';
 import { variantesISBN } from './utils/identificadores.js';
 import { esEditorialFalsa } from './utils/editoriales-falsas.js';
+import { editorialesDeColeccion, anotarEditorialDeColeccion } from './utils/indicios-coleccion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -242,6 +243,11 @@ export async function identificarEdicionEnIngesta(documento) {
             editorial: typeof documento.editorial === 'string' ? documento.editorial : null,
             coleccion_nombre: documento.coleccion_nombre || null, coleccion_numero: documento.coleccion_numero || null,
             anio: documento.año_edicion || null, idioma: documento.idioma || null,
+            // Traductores del fichero (distinguen una traducción de otra) y editoriales que sugiere su colección.
+            traductores: (documento.contribuciones_nombres || []).filter((c) => c && c.rol === 'traductor').map((c) => c.nombre),
+            editoriales_coleccion: documento.coleccion_nombre
+                ? await editorialesDeColeccion(await conectarDB(), { coleccion_nombre: documento.coleccion_nombre }).catch(() => [])
+                : [],
         };
         if (!datos.autores.length) return;
         // En línea solo la BNE y solo en lenguas de España: OpenLibrary ya lo intentó la cascada por título/autor.
@@ -254,9 +260,20 @@ export async function identificarEdicionEnIngesta(documento) {
             console.log(`   📚 Edición ambigua (${r.candidatos.length} candidata/s): se pregunta en la ficha.`);
             return;
         }
-        if (r?.estado !== 'unico' || !r.isbn) return;
+        if (!['unico', 'provisional', 'dudoso'].includes(r?.estado) || !r.isbn) return;
 
         documento.isbn = r.isbn;
+        // PROVISIONAL (varias ediciones de la misma editorial): se completa con ella y se dejan las candidatas.
+        if (r.estado === 'dudoso') documento.isbn_dudoso = true;   // única edición posible, sin confirmar
+        if (r.estado === 'provisional') {
+            documento.isbn_provisional = true;
+            documento.ediciones_candidatas = candidatasParaGuardar(r.candidatos);
+            documento.ediciones_candidatas_fecha = new Date();
+        }
+        // Aprender la editorial de esta colección (indicio para los siguientes libros de la misma colección).
+        if (documento.coleccion_nombre && r.elegido?.editorial && !esEditorialFalsa(r.elegido.editorial)) {
+            await anotarEditorialDeColeccion(await conectarDB(), { coleccion_nombre: documento.coleccion_nombre }, r.elegido.editorial);
+        }
         // El registro de esa edición (Fichero y, si falta, BNE en línea) completa lo que falte — nunca pisa.
         const reg = await buscarAutoridadPorISBN(variantesISBN(r.isbn)).catch(() => null);
         if (reg) {
@@ -277,7 +294,11 @@ export async function identificarEdicionEnIngesta(documento) {
                 documento.contribuciones_nombres = reg.contribuciones_nombres;
             }
         }
-        const alerta = `ISBN ${r.isbn} identificado por autoridad (${r.via}: ${r.motivo}); el fichero no traía ISBN.`;
+        const alerta = r.estado === 'dudoso'
+            ? `ISBN DUDOSO ${r.isbn} (${r.via}: ${r.motivo}); el fichero no traía ISBN — corrígelo en la ficha si no es tu edición.`
+            : r.estado === 'provisional'
+            ? `ISBN PROVISIONAL ${r.isbn} (${r.via}: ${r.motivo}); el fichero no traía ISBN — confírmalo o cámbialo en la ficha si quieres.`
+            : `ISBN ${r.isbn} identificado por autoridad (${r.via}: ${r.motivo}); el fichero no traía ISBN.`;
         documento.alertas_agente = [...(documento.alertas_agente || []), alerta];
         console.log(`   📚 ${alerta}`);
 

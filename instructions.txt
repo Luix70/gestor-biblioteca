@@ -1040,6 +1040,33 @@ de ficheros clasificado por CDU.
         sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --todos --reintentar --ejecutar
     (Los saltados por error o por el tope de tiempo NO se marcan: vuelven a la cola solos.) Subir la versión (cuando
     el motor de identificación mejore) vuelve a poner en cola a todos los no encontrados, también en la campaña.
+    BIBLIOTECARIO MÁS AUTÓNOMO CON LAS EDICIONES (2026-09-29). Revisar a mano ~1.300 «Edición por elegir» es
+    demasiado; ahora decide solo en la mayoría (muestra de 30 pendientes: 15 resueltos → 6 definitivos, 6
+    provisionales, 3 dudosos):
+      · TRADUCTOR como prueba (identificar-edicion · señalesEdicion): una traducción es de una edición concreta.
+        La BNE los da en 245 $c/700 (buscador-bne-sru · traductores); los del libro, de sus contribuciones o, si no
+        se guardaron, del propio EPUB (OPF opf:role="trl" o «Traducción: …» de los créditos). Comparten traductores
+        ⇒ señal; ninguno en común ⇒ otra traducción, se descarta (Plaza/Bruguera: Pilar Giralt ≠ La Factoría).
+        Si el traductor casa, una editorial del registro que no case ya no descarta (el campo pudo venir de una API).
+      · INDICIOS COLECCIÓN → EDITORIAL (utils/indicios-coleccion.js): cada identificación anota en la colección la
+        editorial de la edición (colecciones.editoriales_indicios [{nombre,n}]) y las siguientes búsquedas de libros
+        de esa colección la usan como prueba de editorial. Así queda registrado que «Solaris ficción» es de La
+        Factoría de Ideas aunque la colección tuviera fijada otra (Ediciones B).
+      · ISBN PROVISIONAL: varias ediciones posibles pero TODAS de la misma editorial (reimpresiones 2005/2007) → se
+        asigna una (más señales; a igualdad, la más reciente), se completa el registro y queda isbn_provisional +
+        las candidatas: la ficha muestra «📚 Edición provisional» (plegada) para confirmar o cambiar.
+      · ISBN DUDOSO: una sola edición posible (mismo título y autor; ni lengua ni traductor en contra), aunque nada
+        la confirme → se asigna como definitiva con isbn_dudoso (regla del usuario).
+      · Dashboard: «Edición por elegir» ya solo cuenta las que siguen SIN ISBN; filas nuevas «ISBN provisional» e
+        «ISBN dudoso». Cambiar el ISBN a mano en la ficha quita esas marcas.
+      · EDITORIAL DE LA EDICIÓN CONFIRMADA: al elegir tú la edición (o quedar única/provisional por autoridad), su
+        editorial SUSTITUYE a la del registro si no casan, anotando la anterior (caso «La estrella de Pandora»:
+        elegido el ISBN seguía «Gamon»; solo el Cotejo lo arreglaba). En las dudosas no. Y nunca se rellena una
+        editorial vacía con un maquetador («ePubLibre», que el OPF declara como dc:publisher: se colaba).
+      · Para re-investigar los pendientes:
+          sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir          (en seco)
+          sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir --ejecutar
+
     SOLO SE MARCA SI NO QUEDA ESPERANZA (2026-09-29, reidentificar-doc · anotarRevisionIsbn). Marcado = se
     identificó, quedó ambiguo (esperan tu elección) o TODAS las fuentes respondieron y ninguna lo tiene. Si alguna
     no respondió (BNE caída o con el circuito abierto, OpenLibrary sin red o fuera de tiempo, Fichero no

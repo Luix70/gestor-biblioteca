@@ -49,7 +49,9 @@ export async function obtenerEstadisticas({ detalle = true } = {}) {
     const defectos = {
         libros_sin_isbn:  await col.countDocuments({ tipo_recurso: 'libro', ...ausente('isbn') }),
         // Identificación ambigua: varias ediciones posibles guardadas en el doc, a la espera de que elijas una.
-        edicion_por_elegir: await col.countDocuments({ 'ediciones_candidatas.0': { $exists: true } }),
+        edicion_por_elegir: await col.countDocuments({ 'ediciones_candidatas.0': { $exists: true }, isbn_provisional: { $ne: true } }),
+        isbn_provisional: await col.countDocuments({ isbn_provisional: true }),
+        isbn_dudoso: await col.countDocuments({ isbn_dudoso: true }),
         // LIBROS sin autor (solo libros, no revistas: la identidad de una revista es su cabecera/ISSN, no un autor).
         libros_sin_autor: await col.countDocuments({ tipo_recurso: 'libro', $or: [{ autores: { $exists: false } }, { autores: { $size: 0 } }] }),
         sin_hash:         await col.countDocuments(ausente('hash_contenido')),
