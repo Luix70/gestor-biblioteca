@@ -1,6 +1,10 @@
 # Base estable y activa. Node 18 por compatibilidad con CPUs antiguas (Intel Atom D525).
 FROM node:18-bullseye-slim
 
+# Idioma UTF-8: sin él el contenedor es ASCII puro y herramientas nativas (djvulibre) no abren ficheros con nombre
+# no latino (los DjVu en cirílico). El docker-compose también lo fija; aquí va en la propia imagen.
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+
 # Dependencias: casi todo JS puro. La única nativa es better-sqlite3 (lee el Fichero local
 # OL+BNE), pero se instala como BINARIO PRECOMPILADO (prebuild-install lo descarga), así que
 # NO hace falta toolchain (python3/build-essential) en la imagen. Es C plano, sin SIMD/AVX, así

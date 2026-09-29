@@ -37,6 +37,9 @@ services:
       - "3000:3000"   # API
       - "4000:4000"   # Panel (útil para ver el progreso de la ingesta en el PC: localhost:4000)
     environment:
+      # Idioma UTF-8 (nombres no latinos en herramientas nativas como djvulibre).
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
       # Rutas FIJAS dentro del contenedor (ganan sobre lo que traiga el .env copiado del NAS).
       - PATH_INBOX=/app/Inbox
       - PATH_CDU=/app/CDU

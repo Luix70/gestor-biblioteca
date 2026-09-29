@@ -42,6 +42,11 @@ services:
       - ADMIN_PWD=${ADMIN_PWD}
       - GUEST_PWD=${GUEST_PWD:-guest}
       - TZ=${TZ:-Europe/Madrid}
+      # IDIOMA UTF-8 para TODOS los procesos del contenedor (la app, los scripts de `docker exec` y las herramientas
+      # nativas). Sin él el contenedor es ASCII puro y herramientas como djvulibre NO abren ficheros con nombre no
+      # latino (medido 29-sep: los DjVu en cirílico no se veían ni se podían extraer; djvused respondía con su ayuda).
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
       - NODE_OPTIONS=--max-old-space-size=512 --no-warnings
 
     working_dir: /app

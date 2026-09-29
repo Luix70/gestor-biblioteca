@@ -1022,7 +1022,7 @@ de ficheros clasificado por CDU.
     línea de progreso que se repinta (así se ve la hora de su última actualización). Y cada ejecución deja un
     registro en logs/scripts/<script>-<AAAAMMDD-HHMMSS>.log: la orden completa, todas las líneas terminadas (sin los
     repintados del progreso ni colores) y el tiempo total al acabar. Se borran solos los de más de 60 días
-    (SCRIPT_LOG_DIAS). La hora es la del contenedor: UTC salvo que el docker-compose defina TZ=Europe/Madrid.
+    (SCRIPT_LOG_DIAS). La hora es la del contenedor: el docker-compose fija TZ=Europe/Madrid.
     Progreso: src/utils/progreso-cli.js (línea «⏳ etiqueta hechos/total (pct) · faltan ~ETA · transcurrido»).
 
     DjVu CON NOMBRE NO LATINO (cirílico, griego…) — 2026-09-29, utils/djvu.js. Los DjVu rusos de «Ancient Greek
@@ -1030,6 +1030,8 @@ de ficheros clasificado por CDU.
     (djvused/ddjvu) convierte el nombre según el IDIOMA del sistema y el contenedor no tiene ninguno (ASCII puro):
     no abre rutas con caracteres no latinos. Arreglo: se lanzan con LANG/LC_ALL=C.UTF-8 y, si la ruta no es ASCII,
     a través de un enlace temporal con nombre ASCII (/tmp/djvu-enlaces/<sha1>.djvu) que apunta al fichero real.
+    Confirmado en el NAS: sin idioma, djvused responde con su ayuda; con C.UTF-8, «241» páginas. Desde entonces
+    LANG=C.UTF-8 y LC_ALL=C.UTF-8 van en el docker-compose (y en el Dockerfile) para TODO el contenedor.
     (Mi primer diagnóstico —forma Unicode del nombre— era un espejismo de cómo Windows ve la unidad del NAS por
     SMB: dentro del NAS el nombre coincide; Integridad lo confirmó con 0 casos.)
 
