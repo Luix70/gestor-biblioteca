@@ -4503,7 +4503,10 @@ function pintarGestorImagenes() {
         im,
         i,
       ) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
-    <img src="${esc(encUrl(im.ruta))}?t=${Date.now()}" style="width:100px;height:132px;object-fit:cover;border-radius:6px;border:1px solid var(--line);flex:none">
+    <div style="position:relative;flex:none;width:50px;height:66px">
+      <img src="${esc(encUrl(im.ruta))}?t=${Date.now()}" style="width:50px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">
+      <span data-previa="${esc(encUrl(im.ruta))}" title="Mantén pulsado para ver la imagen en grande" style="position:absolute;right:-6px;bottom:-6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.72);color:#fff;display:grid;place-items:center;font-size:13px;cursor:zoom-in;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none">🔍</span>
+    </div>
     <span class="muted" style="flex:1;font-size:12px">${i === 0 ? '⭐ portada' : '#' + (i + 1)}</span>
     <button class="btn" data-top="${i}" ${i === 0 ? 'disabled' : ''} title="Subir arriba del todo y hacerla PORTADA">⤒</button>
     <button class="btn" data-up="${i}" ${i === 0 ? 'disabled' : ''} title="Subir">↑</button>
@@ -4514,7 +4517,7 @@ function pintarGestorImagenes() {
     )
     .join('');
   $('#cmpModal').innerHTML =
-    `<div class="box card" style="max-width:640px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">🖼️ Imágenes (${imgs.length})</h3>
+    `<div class="box card" style="max-width:560px;max-height:88vh;overflow:auto"><h3 style="margin-top:0">🖼️ Imágenes (${imgs.length})</h3>
     <p class="muted" style="font-size:12px;margin:0 0 6px">La 1.ª es la PORTADA. ⤒ la sube arriba del todo (portada); reordena con ↑/↓; ✎ abre el editor (rotar/recortar/corregir perspectiva).</p>
     ${imgs.length ? filas : '<div class="muted">Sin imágenes.</div>'}
     <div style="display:flex;gap:10px;justify-content:space-between;margin-top:12px;flex-wrap:wrap"><div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><button class="btn" id="imgAdd">➕ Añadir</button><button class="btn" id="imgCam">📷 Cámara</button><button class="btn" id="imgEnVivo" title="Cámara EN VIVO: multidisparo con tapete (recorta/endereza); añade VARIAS imágenes de golpe al carrusel, como en Entrada">🎥 En vivo</button>${_imgExtraible() ? '<button class="btn" id="imgExtraer" title="Extraer una página/imagen del propio documento (PDF o EPUB) y añadirla — p. ej. la foto del autor del interior">🖹 Del documento</button>' : ''}<label class="muted" title="Si la foto está sobre el TAPETE reglado, la recorta, endereza y mide al añadirla. Desactívalo para adjuntar la imagen TAL CUAL (sin recorte)." style="font-size:12px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="imgTapete" ${tapeteManualOn() ? 'checked' : ''}> 📐 Tapete</label></div><button class="btn pri" id="imgCerrar">Cerrar</button></div>
@@ -4531,6 +4534,7 @@ function pintarGestorImagenes() {
   $('#imgCerrar').onclick = cerrar;
   $('#cmpScrim').onclick = cerrar;
   $$('#cmpModal [data-top]').forEach((b) => (b.onclick = () => hacerPortadaImg(+b.dataset.top)));
+  $$('#cmpModal [data-previa]').forEach((b) => cablearPrevisualizacion(b, $('#cmpModal .box')));
   $$('#cmpModal [data-up]').forEach((b) => (b.onclick = () => moverImg(+b.dataset.up, -1)));
   $$('#cmpModal [data-down]').forEach((b) => (b.onclick = () => moverImg(+b.dataset.down, 1)));
   $$('#cmpModal [data-del]').forEach(
@@ -5221,6 +5225,30 @@ async function htmlAPaginaImagen(titulo, html) {
   ctx.drawImage(img, 0, 0);
   return canvas.toDataURL('image/jpeg', 0.92);
 }
+// PREVISUALIZACIÓN «mantener pulsado»: al PULSAR la lupa (ratón o dedo) se muestra la imagen en grande, inscrita en
+// el recuadro del selector; al SOLTAR (o si el puntero se va/cancela) desaparece. Pointer events + captura: el
+// «soltar» llega aunque el puntero ya no esté sobre la lupa. Se bloquea el menú contextual del toque largo.
+function cablearPrevisualizacion(boton, caja) {
+  let capa = null;
+  const cerrar = () => { if (capa) { capa.remove(); capa = null; } };
+  boton.addEventListener('contextmenu', (e) => e.preventDefault());
+  boton.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    cerrar();
+    try { boton.setPointerCapture(e.pointerId); } catch { /* sin captura: basta con pointerup en la lupa */ }
+    const r = (caja || document.body).getBoundingClientRect();
+    capa = document.createElement('div');
+    capa.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;`
+      + 'z-index:9999;background:rgba(0,0,0,.88);border-radius:12px;display:grid;place-items:center;padding:10px;box-sizing:border-box;pointer-events:none';
+    const img = document.createElement('img');
+    img.src = boton.dataset.previa + '?t=' + Date.now();
+    img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;border-radius:6px';
+    capa.appendChild(img);
+    document.body.appendChild(capa);
+  });
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) boton.addEventListener(ev, cerrar);
+}
+
 // ⤒ Sube la imagen i arriba del todo: la 1.ª del carrusel ES la portada (el servidor la marca al reordenar);
 // las demás conservan su orden relativo.
 async function hacerPortadaImg(i) {
