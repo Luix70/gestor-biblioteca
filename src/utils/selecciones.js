@@ -195,6 +195,20 @@ export async function docsDeSeleccion(db, id) {
 }
 
 /** ¿En qué selecciones está este documento? (consulta inversa, la resuelve el índice sobre `docs`). */
+/**
+ * Selecciones que contienen ALGUNO de estos documentos, con cuántos de ellos hay en cada una (`enEsta`). Para
+ * «Quitar de selección»: solo tiene sentido ofrecer las listas en las que están.
+ */
+export async function seleccionesDeDocs(db, ids) {
+    const lista = idsValidos(ids);
+    if (!lista.length) return [];
+    return db.collection('selecciones').aggregate([
+        { $match: { docs: { $in: lista } } },
+        { $project: { nombre: 1, n: { $size: { $ifNull: ['$docs', []] } }, enEsta: { $size: { $setIntersection: ['$docs', lista] } } } },
+        { $sort: { nombre: 1 } },
+    ]).toArray();
+}
+
 export async function seleccionesDeDoc(db, docId) {
     const _id = oid(docId);
     if (!_id) return [];

@@ -1205,6 +1205,8 @@ de ficheros clasificado por CDU.
     la primera marcada, sin duplicados, con el nombre que elijas; sus comentarios pasan a ella; las demás se
     borran) o «🗑 Borrar marcadas» (solo las selecciones: los documentos siguen en la base y en el disco).
     POST /selecciones/borrar-lote y /selecciones/fusionar.
+    «➖ QUITAR DE SELECCIÓN» ofrece solo las selecciones que contienen ALGUNO de los documentos marcados (con cuántos
+    de ellos hay en cada una); si ninguno está en una selección, lo dice. POST /selecciones/de-documentos.
     ORDEN: nombre (A→Z / Z→A), nº de documentos (más / menos primero) o fecha de creación (recientes / antiguas
     primero); se recuerda entre sesiones (localStorage «sel_orden»). También para invitados. Limpieza hecha el 29-sep: 822 + 155 selecciones
     «Portada sospechosa» que eran el mismo libro (mismo ISBN, o EPUB/MOBI del mismo libro con ISBN-10/13).

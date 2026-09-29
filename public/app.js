@@ -15432,13 +15432,23 @@ async function opSeleccion(ids, modo) {
   const m = _MODOS_SEL[modo];
   if (!ids.length) { toast('No hay documentos seleccionados', 'warn'); return; }
   let lista = [];
-  try { lista = (await api('/selecciones')).selecciones || []; } catch (e) { toast(e.message, 'bad'); return; }
-  if (!lista.length) { toast('Aún no tienes ninguna selección: usa «📌 Guardar como selección»', 'warn'); return; }
+  try {
+    // QUITAR: solo las selecciones en las que está ALGUNO de los documentos marcados (con cuántos de ellos).
+    lista = modo === 'quitar'
+      ? (await api('/selecciones/de-documentos', { method: 'POST', body: JSON.stringify({ ids }) })).selecciones || []
+      : (await api('/selecciones')).selecciones || [];
+  } catch (e) { toast(e.message, 'bad'); return; }
+  if (!lista.length) {
+    toast(modo === 'quitar'
+      ? (ids.length === 1 ? 'Este documento no está en ninguna selección' : 'Ninguno de estos documentos está en una selección')
+      : 'Aún no tienes ninguna selección: usa «📌 Guardar como selección»', 'warn');
+    return;
+  }
   $('#cmpModal').innerHTML = `<div class="box card" style="max-width:480px">
     <h3 style="margin-top:0">${m.titulo}</h3>
     <p class="muted" style="font-size:13px">${m.aviso(ids.length)}</p>
     <select id="selCual" size="${Math.min(8, lista.length)}" style="width:100%">
-      ${lista.map((s) => `<option value="${esc(s._id)}">${esc(s.nombre)} · ${s.n} doc.</option>`).join('')}
+      ${lista.map((s) => `<option value="${esc(s._id)}">${esc(s.nombre)} · ${s.n} doc.${modo === 'quitar' && ids.length > 1 ? ` (${s.enEsta} de los marcados)` : ''}</option>`).join('')}
     </select>
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px">
       <button class="btn" id="addX">Cancelar</button><button class="btn ${m.clase}" id="addOk">${m.boton}</button></div>
