@@ -106,6 +106,9 @@ async function main() {
     else if (!TODOS) filtro = { coleccion: { $exists: true, $ne: null }, ...base }; // por defecto: miembros de colección
     // Solo formatos con ISBN de texto barato (pdf/epub/mobi); descarta audio/material/vídeo/software/djvu.
     if (!idArg && !EDICION) filtro.formatos = { $in: ['pdf', 'epub', 'mobi'] };   // (la edición por autoridad no necesita el fichero)
+    // Solo LIBROS, como la campaña: sin revistas, cómics, audiolibros ni software (con --todos entraban las revistas
+    // y recibían el ISBN de libros homónimos — 29-sep).
+    if (!idArg) Object.assign(filtro, { tipo_recurso: 'libro', naturaleza: { $nin: ['comic', 'audiolibro', 'software'] } });
 
     // Modo RECUPERACIÓN (el normal: libros sin ISBN): salta los ya revisados, salvo --reintentar o un --id concreto.
     const RECUPERACION = !FORZAR && !CON_CDU;

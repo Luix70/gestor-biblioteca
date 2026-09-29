@@ -324,8 +324,9 @@ function verificar(doc, candidatos) {
 
 /** Los que solo fallaron por no confirmar edición: sirven para explicar por qué no se acepta nada. */
 function casiCandidatos(doc, candidatos) {
+    // Mismo título Y un autor que CASE (en los dos lados): un candidato sin autores no basta para asignar nada.
     return candidatos.filter((c) => c.isbn && casaTitulo(doc.titulo, c.titulo, c.subtitulo)
-        && (!doc.autores?.length || !c.autores?.length || casaAutor(doc.autores, c.autores)));
+        && doc.autores?.length && c.autores?.length && casaAutor(doc.autores, c.autores));
 }
 
 // Lenguas cuya autoridad natural es la BNE (orden de consulta en línea).
@@ -394,6 +395,12 @@ function siUnica(buenos, via) {
  */
 export async function identificarEdicion(doc, { online = false, conIA = false, limite = 40 } = {}) {
     if (!doc?.titulo) return { estado: 'sin-candidatos', candidatos: [], motivo: 'el documento no tiene título' };
+    // SIN AUTOR NO SE IDENTIFICA UNA EDICIÓN. Solo con el título, cualquier libro homónimo «casa» (medido el 29-sep:
+    // revistas y títulos genéricos —«Astronomy», «Computer Hoy», «Más Allá 5», «Nueva Dimensión 3»…— recibieron el
+    // ISBN de libros sin relación). El autor es la prueba mínima de que es la misma obra.
+    if (!(doc.autores || []).some((a) => String(a || '').trim())) {
+        return { estado: 'sin-candidatos', candidatos: [], motivo: 'sin autor no se identifica la edición (solo con el título casaría cualquier homónimo)' };
+    }
     // El traductor anotado en el título («… (trad. Ángeles Caso)») es una PRUEBA, no parte del título: se pasa a
     // `traductores` y se quita del título, o ninguna autoridad encuentra el libro (medido: la BNE no devolvía la
     // edición de Ángeles Caso y ganaba otra traducción).

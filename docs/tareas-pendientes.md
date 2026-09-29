@@ -5,8 +5,8 @@
 
 ## Antes de nada
 
-- [ ] **Copia de seguridad de la base de datos** (Atlas). Casi todo lo de abajo escribe en muchos documentos.
-- [ ] **Desplegar la última versión** con el script de actualización de siempre (`actualizar-GestorBiblioteca.sh`).
+- [ x] **Copia de seguridad de la base de datos** (Atlas). Casi todo lo de abajo escribe en muchos documentos.
+- [ x] **Desplegar la última versión** con el script de actualización de siempre (`actualizar-GestorBiblioteca.sh`).
       Sin esto, los scripts nuevos no están en el NAS.
 
 Todos los scripts van **en seco por defecto**: primero se lanzan sin `--ejecutar`, se revisa lo que proponen y solo
@@ -88,9 +88,10 @@ Cascada gratuita (nombre de archivo → Fichero → colección → OpenLibrary �
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/integridad.js --informe /app/logs/integridad.txt` (diagnóstico).
 
 ### Imagen Docker: Debian 11 sin soporte (a resolver ANTES de tocar la parte de apt del Dockerfile)
-- [ ] Migrar la imagen base `node:18-bullseye-slim` → `node:18-bookworm-slim` (o apuntar apt a archive.debian.org).
-      Hoy funciona porque la capa de apt sale de la caché de Docker; si hubiera que rehacerla (un cambio en esa parte
-      del Dockerfile, o limpiar la caché), falla con 404 (29-sep). Probar antes en el PC con docker-compose.pc.yml.
+- [ ] Seguir en Debian 11 (bullseye) apuntando apt a `archive.debian.org` cuando haya que rehacer la capa de apt.
+      Hoy funciona porque esa capa sale de la caché de Docker; si hubiera que rehacerla falla con 404 (29-sep).
+      NO migrar a Debian 12 (bookworm): el NAS tiene DSM 6.2.4 → Docker 20.10.3 (< 20.10.10), cuyo seccomp bloquea
+      `clone3` y Node no arrancaría (salvo `security_opt: seccomp:unconfined`, que no conviene).
 
 ### Revisiones a mano (sin script)
 - [ ] 129 documentos catalogados como **revista** que parecen libros, y 54 cabeceras cuya CDU pudo salir del Dewey

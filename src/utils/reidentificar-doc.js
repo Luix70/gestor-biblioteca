@@ -288,7 +288,10 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // error, o si no se consultaron las fuentes en línea (--sin-apis): otro día puede salir.
     let caidas = usarApis ? [] : ['apis (no consultadas)'];
     // Si ya se te propusieron ediciones y dijiste «ninguna», no se vuelve a proponer (salvo forzando).
-    if (!isbn && (!doc.edicion_descartada || forzar)) {
+    // Identificar la EDICIÓN por autoridad es solo para LIBROS: una revista, un cómic, un audiolibro o un programa
+    // no tienen «edición» en los catálogos de libros (medido: números de revista recibieron ISBN de libros).
+    const identificable = doc.tipo_recurso === 'libro' && !['comic', 'audiolibro', 'software'].includes(doc.naturaleza);
+    if (!isbn && identificable && (!doc.edicion_descartada || forzar)) {
         const pruebas = await datosDeAutoridad(db, doc);
         editorialActual = pruebas.editorial;
         // Si el documento no guardó sus traductores (ingestas antiguas), se leen del PROPIO fichero: el OPF del
@@ -419,7 +422,16 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     } else if (doc.ediciones_candidatas || doc.isbn_provisional || (doc.isbn_dudoso && !dudoso)) {
         quitar = { $unset: { ediciones_candidatas: '', ediciones_candidatas_fecha: '', isbn_provisional: '', ...(dudoso ? {} : { isbn_dudoso: '' }) } };
     }
-    await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set, ...quitar });
+    // DIARIO PARA DESHACER: el valor ANTERIOR de todo lo que se va a cambiar (null = el campo estaba vacío). Con él,
+    // scripts/deshacer-reidentificacion.js devuelve el documento a como estaba (incluida la CDU y la carpeta, abajo).
+    const INTERNOS = new Set(['alertas_agente', 'fecha_actualizacion', 'mantenimiento_firma', 'mantenimiento.re-clasificar-cdu']);
+    const antes = {};
+    for (const k of [...Object.keys(set), ...Object.keys(quitar.$unset || {})]) {
+        if (INTERNOS.has(k)) continue;
+        antes[k] = doc[k] === undefined ? null : doc[k];
+    }
+    const entradaDiario = { fecha: new Date(), origen: 'reidentificar', isbn, via, antes };
+    await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set, ...quitar, $push: { deshacer: entradaDiario } });
     // Índice FTS + sidecars (best-effort: nunca tumban la operación).
     await indexarDoc(db, doc._id).catch(() => {});
     await regenerarSidecarsDoc(db, { ...doc, ...set }, carpeta).catch(() => {});
@@ -436,7 +448,14 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     if (datos.cdu && datos.cdu_fuente === 'bne' && cduDeAutoridadFiable({ ...doc, ...set }, datos)) {
         const actualizado = await db.collection('biblioteca').findOne({ _id: doc._id });
         const rc = actualizado ? await aplicarCduConPrioridad(db, actualizado, datos.cdu, 'bne').catch(() => null) : null;
-        if (rc?.aplicada) cduAplicada = `${rc.de || '∅'} → ${rc.a}`;
+        if (rc?.aplicada) {
+            cduAplicada = `${rc.de || '∅'} → ${rc.a}`;
+            // Al diario: la CDU y la carpeta de ANTES (deshacer las devuelve, moviendo la carpeta).
+            await db.collection('biblioteca').updateOne(
+                { _id: doc._id, 'deshacer.fecha': entradaDiario.fecha },
+                { $set: { 'deshacer.$.antes.cdu': doc.cdu ?? null, 'deshacer.$.antes.cdu_fuente': doc.cdu_fuente ?? null, 'deshacer.$.antes.ruta_base': doc.ruta_base ?? null } },
+            ).catch(() => {});
+        }
     }
     return { estado: 'aplicado', provisional: !!provisional, dudoso: !!dudoso, isbn, via, titulo: set.titulo || doc.titulo, resumen: resumen + (cduAplicada ? ` · CDU ${cduAplicada} (BNE)` : ''), set };
 }

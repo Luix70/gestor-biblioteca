@@ -1085,6 +1085,15 @@ de ficheros clasificado por CDU.
         sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --todos --reintentar --ejecutar
     (Los saltados por error o por el tope de tiempo NO se marcan: vuelven a la cola solos.) Subir la versión (cuando
     el motor de identificación mejore) vuelve a poner en cola a todos los no encontrados, también en la campaña.
+    ⚠ INCIDENTE 29-sep (reidentificar-sin-isbn --todos --ejecutar, 18:35): revistas y títulos genéricos recibieron
+    ISBN de libros homónimos («Más Allá 5/9», «Nueva Dimensión 3-9», «Computer Hoy», «Astronomy», «Control
+    Design»…), con editorial y CDU (moviendo carpetas). Causas: el script con --todos no filtraba por tipo (entraban
+    las revistas) y un documento SIN AUTOR aceptaba cualquier libro del mismo título (dudoso/más probable).
+    Blindaje: identificar la edición SOLO en libros (ni revistas, cómics, audiolibros ni software) y NUNCA sin autor
+    (identificar-edicion); «casi» exige un autor que case en los dos lados; el script filtra como la campaña.
+    DIARIO PARA DESHACER: cada documento que toca reidentificarDoc guarda en `deshacer[]` el valor anterior de cada
+    campo cambiado (y la CDU y la carpeta si la CDU se aplicó).
+
     BIBLIOTECARIO MÁS AUTÓNOMO CON LAS EDICIONES (2026-09-29). Revisar a mano ~1.300 «Edición por elegir» es
     demasiado; ahora decide solo en la mayoría (muestra de 30 pendientes: 15 resueltos → 6 definitivos, 6
     provisionales, 3 dudosos):
