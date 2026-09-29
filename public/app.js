@@ -4678,9 +4678,10 @@ async function _descargarArchivo(url) {
 function parsearRangoPaginas(texto, total) {
   const out = new Set();
   let t = String(texto || '').toLowerCase();
-  t = t.replace(/[úu]ltimas?\s*(\d+)/g, (_, n) => { for (let i = Math.max(1, total - (+n) + 1); i <= total; i++) out.add(i); return ' '; });
+  const ultimas = (_, n) => { for (let i = Math.max(1, total - (+n) + 1); i <= total; i++) out.add(i); return ' '; };
+  t = t.replace(/[úu]ltimas?\s*(\d+)/g, ultimas).replace(/(\d+)\s*[úu]ltimas/g, ultimas);   // «últimas 2» y «2 últimas»
   t = t.replace(/[úu]ltima/g, String(total)).replace(/primera/g, '1');
-  for (const parte of t.split(/[,;]+/)) {
+  for (const parte of t.split(/[,;+]+/)) {
     const p = parte.trim();
     if (!p) continue;
     const m = p.match(/^(\d+)\s*[-–a]\s*(\d+)$/);
@@ -4703,6 +4704,7 @@ async function extraerDePdf(archivo) {
       <span class="muted" id="exTotal" style="font-size:12px">…</span>
       <input id="exRango" placeholder="1-6, última" title="Páginas a extraer. Ej.: primera, 2-5, 25, última" style="font-size:12px;width:150px;padding:2px 6px">
       <button class="btn" id="exAddRango" type="button">➕ Añadir rango</button>
+      <label class="muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Cuál de las imágenes que vas a extraer pasa a ser la PORTADA (1 = la primera extraída). Vacío: la portada no cambia.">Portada #<input id="exPortada" type="number" min="1" placeholder="—" style="width:52px;font-size:12px;padding:2px 4px"></label>
       <span style="flex:1;min-width:8px"></span>
       <button class="btn" id="exCancelTop" type="button">Cerrar</button>
       <button class="btn pri" id="exOkTop" type="button" disabled>Añadir 0</button>
@@ -4768,14 +4770,17 @@ async function extraerDePdf(archivo) {
     if (!lista.length) { toast('Indica alguna página (marca miniaturas o escribe un rango)', 'warn'); return; }
     ['#exOk', '#exOkTop', '#exAddRango'].forEach((s) => { const b = $(s); if (b) { b.disabled = true; if (s !== '#exAddRango') b.textContent = 'Añadiendo…'; } });
     let ok = 0;
+    const nuevas = [];   // rutas de las imágenes añadidas, en orden (para «Portada #n»)
     try {
       for (const num of lista) {
         const c = await render(num, 1600); // alta resolución para la imagen definitiva
         const b64 = c.toDataURL('image/jpeg', 0.9);
         c.width = c.height = 0;
         await apiImg('anadir', { base64: b64 }); ok++;
+        nuevas.push(_imgState.imgs[_imgState.imgs.length - 1]?.ruta);
       }
       toast(`🖹 ${ok} imagen(es) añadida(s)`);
+      await portadaDeExtraidas(nuevas);
     } catch (e) { toast(e.message, 'bad'); }
     try { pdf.destroy(); } catch (_) {}
     pintarGestorImagenes();
@@ -4894,6 +4899,7 @@ async function extraerLazy(id, cfg) {
       <span class="muted" id="exTotal" style="font-size:12px">…</span>
       <input id="exRango" placeholder="1-6, última" title="Páginas a extraer. Ej.: primera, 2-5, 25, última" style="font-size:12px;width:150px;padding:2px 6px">
       <button class="btn" id="exAddRango" type="button">➕ Añadir rango</button>
+      <label class="muted" style="font-size:12px;display:inline-flex;align-items:center;gap:4px" title="Cuál de las imágenes que vas a extraer pasa a ser la PORTADA (1 = la primera extraída). Vacío: la portada no cambia.">Portada #<input id="exPortada" type="number" min="1" placeholder="—" style="width:52px;font-size:12px;padding:2px 4px"></label>
       <span style="flex:1;min-width:8px"></span>
       <button class="btn" id="exCancelTop" type="button">Cerrar</button>
       <button class="btn pri" id="exOkTop" type="button" disabled>Añadir 0</button>
@@ -4983,14 +4989,17 @@ async function extraerLazy(id, cfg) {
     if (!lista.length) { toast('Indica alguna página (marca miniaturas o escribe un rango)', 'warn'); return; }
     ['#exOk', '#exOkTop', '#exAddRango'].forEach((s) => { const b = $(s); if (b) { b.disabled = true; if (s !== '#exAddRango') b.textContent = 'Añadiendo…'; } });
     let ok = 0;
+    const nuevas = [];   // rutas de las imágenes añadidas, en orden (para «Portada #n»)
     try {
       for (const num of lista) {
         const blob = await fetchBlob(num);
         const file = new File([blob], `img-${num + 1}.jpg`, { type: blob.type || 'image/jpeg' });
         const b64 = await fileADataURL(await reducirImagen(file, 1600, 0.9));
         await apiImg('anadir', { base64: b64 }); ok++;
+        nuevas.push(_imgState.imgs[_imgState.imgs.length - 1]?.ruta);
       }
       toast(`🖹 ${ok} imagen(es) añadida(s)`);
+      await portadaDeExtraidas(nuevas);
     } catch (e) { toast(e.message, 'bad'); }
     pintarGestorImagenes();
   };
@@ -5247,6 +5256,17 @@ function cablearPrevisualizacion(boton, caja) {
     document.body.appendChild(capa);
   });
   for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) boton.addEventListener(ev, cerrar);
+}
+
+// «Portada #n» del extractor: de las imágenes recién extraídas (en su orden), la n.ª pasa a ser la PORTADA (arriba del
+// todo); las demás quedan donde se añadieron. Sin número (o fuera de rango), la portada no cambia.
+async function portadaDeExtraidas(nuevas) {
+  const n = parseInt($('#exPortada') ? $('#exPortada').value : '', 10);
+  const ruta = n >= 1 ? nuevas[n - 1] : null;
+  if (!ruta) { if (n >= 1) toast(`Portada #${n}: solo se extrajeron ${nuevas.length}`, 'warn'); return; }
+  const imgs = _imgState.imgs;
+  const i = imgs.findIndex((x) => x.ruta === ruta);
+  if (i > 0) { await hacerPortadaImg(i); toast(`⭐ Portada: la #${n} de las extraídas`); }
 }
 
 // ⤒ Sube la imagen i arriba del todo: la 1.ª del carrusel ES la portada (el servidor la marca al reordenar);
@@ -8801,6 +8821,10 @@ async function portadaSospechosaLote(ids, { alTerminar = null } = {}) {
     <p class="muted" style="font-size:13px;margin:0 0 10px">Solo cambia la PORTADA: las demás imágenes se conservan y la imagen retirada sigue en disco.${ids.length > 1 ? ' Si la portada la comparten varios de estos documentos, se registra como falsa para que la ingesta la salte en adelante.' : ''}</p>
     <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="reextraer" checked>
       <span><b>Re-extraer omitiendo la sospechosa</b><br><span class="muted" style="font-size:12px">La cubierta embebida si no es la falsa; en un PDF, la siguiente página con contenido; si no, la portada remota por ISBN.</span></span></label>
+    <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="rango">
+      <span><b>Re-extraer un rango de páginas (PDF)</b><br><span class="muted" style="font-size:12px">Extrae esas páginas, pone de portada la que indiques y añade las demás al carrusel.</span>
+        <span class="row" style="gap:6px;margin-top:4px;flex-wrap:wrap;align-items:center"><input id="psRango" value="1-6, últimas 2" title="Ej.: 2-8, últimas 2 · primera · 25" style="font-size:12px;width:150px;padding:2px 6px">
+        <span class="muted" style="font-size:12px">portada #</span><input id="psPortadaN" type="number" min="1" value="1" style="width:52px;font-size:12px;padding:2px 4px" title="Cuál de las extraídas es la portada (1 = la primera)"></span></span></label>
     <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="texto">
       <span><b>Primera página de texto</b><br><span class="muted" style="font-size:12px">PDF: la primera página con texto. EPUB sin cubierta: una página compuesta con su portadilla (título, autor…).</span></span></label>
     <label class="row" style="gap:8px;align-items:flex-start;margin:6px 0"><input type="radio" name="psModo" value="quitar">
@@ -8813,7 +8837,9 @@ async function portadaSospechosaLote(ids, { alTerminar = null } = {}) {
   $('#psSi').onclick = async () => {
     const modo = (document.querySelector('input[name="psModo"]:checked') || {}).value || 'reextraer';
     try {
-      const r = await api('/documentos/portada-sospechosa', { method: 'POST', body: JSON.stringify({ ids, modo }) });
+      const r = await api('/documentos/portada-sospechosa', { method: 'POST', body: JSON.stringify({
+        ids, modo, rango: $('#psRango') ? $('#psRango').value : null, portadaN: $('#psPortadaN') ? +$('#psPortadaN').value : 1,
+      }) });
       if (!r.ok) { toast(r.motivo || 'No se pudo lanzar', 'bad'); return; }
       await seguirPortadaSospechosa(r.total || ids.length);
       if (alTerminar) alTerminar();

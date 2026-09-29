@@ -9,6 +9,8 @@
  *   · 'reextraer'  — otra portada del PROPIO fichero, OMITIENDO la sospechosa: la cubierta embebida si no es la
  *                    sospechosa; en un PDF, la siguiente página con contenido; si el fichero no da otra, la
  *                    portada remota por ISBN.
+ *   · 'rango'      — extrae de un PDF las páginas de un RANGO («2-8, últimas 2») y pone como portada la n.ª de las
+ *                    extraídas (por defecto la 1.ª); las demás se añaden al carrusel.
  *   · 'texto'      — la PRIMERA PÁGINA DE TEXTO: en un PDF, la primera página con capa de texto (portadilla);
  *                    en un EPUB sin cubierta, se COMPONE una página con el texto de su primera página (título,
  *                    autor…) con pdf-lib y se rasteriza con poppler (nada de navegador ni sharp: apto para el Atom).
@@ -29,7 +31,7 @@ import * as cheerio from 'cheerio';
 import { ObjectId } from 'mongodb';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { conectarDB } from '../database.js';
-import { DIR_CDU, carpetaDeDoc, webDeDoc, archivoOriginal, escribirImagen } from '../mantenimiento/util-mantenimiento.js';
+import { DIR_CDU, carpetaDeDoc, webDeDoc, archivoOriginal, escribirImagen, numeroPaginasPdf } from '../mantenimiento/util-mantenimiento.js';
 import { detectarTipo } from '../orquestador.js';
 import { rasterizarPaginas, medirTinta } from './rasterizar-pdf.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
@@ -297,6 +299,54 @@ async function imagenReextraida(doc, original, tipo, shaSospechosa) {
     return { motivo: original ? `el fichero (${tipo}) no da otra portada y no hay portada remota por ISBN` : 'sin fichero original ni portada remota por ISBN' };
 }
 
+// ── 3 bis. Re-extraer un RANGO de páginas y elegir cuál es la portada ─────────────────────────────────────
+
+/**
+ * Rango de páginas en texto libre → nºs (1-based) dentro de [1, total], ordenados y sin repetir. Igual que el del
+ * panel: «primera», «última», «últimas N», tramos «2-8» y sueltos «25». Ej.: «2-8, últimas 2».
+ */
+export function parsearRangoPaginas(texto, total) {
+    const out = new Set();
+    let t = String(texto || '').toLowerCase();
+    const ultimas = (_, n) => { for (let i = Math.max(1, total - Number(n) + 1); i <= total; i++) out.add(i); return ' '; };
+    t = t.replace(/[úu]ltimas?\s*(\d+)/g, ultimas).replace(/(\d+)\s*[úu]ltimas/g, ultimas);   // «últimas 2» y «2 últimas»
+    t = t.replace(/[úu]ltima/g, String(total)).replace(/primera/g, '1');
+    for (const parte of t.split(/[,;+]+/)) {
+        const p = parte.trim();
+        if (!p) continue;
+        const m = p.match(/^(\d+)\s*[-–a]\s*(\d+)$/);
+        if (m) { let a = Number(m[1]), b = Number(m[2]); if (a > b) [a, b] = [b, a]; for (let i = a; i <= b; i++) if (i >= 1 && i <= total) out.add(i); }
+        else { const n = parseInt(p, 10); if (n >= 1 && n <= total) out.add(n); }
+    }
+    return [...out].sort((a, b) => a - b);
+}
+
+/** Extrae el rango del PDF, pone de portada la n.ª extraída, añade las demás; quita la portada sospechosa. */
+async function reextraerRango(db, doc, original, tipo, { rango, portadaN = 1 }) {
+    if (tipo !== 'pdf') return { ok: false, motivo: `«rango» solo sirve para PDF (este es ${tipo || 'sin fichero'})` };
+    const total = doc.paginas || (await numeroPaginasPdf(original).catch(() => 0));
+    if (!total) return { ok: false, motivo: 'no se pudo contar las páginas del PDF' };
+    const paginas = parsearRangoPaginas(rango, total);
+    if (!paginas.length) return { ok: false, motivo: `el rango «${rango}» no da ninguna página (el PDF tiene ${total})` };
+    const renders = await rasterizarPaginas(original, { paginas });
+    if (!renders.length) return { ok: false, motivo: 'no se pudo rasterizar ninguna página' };
+    const idx = Math.min(Math.max(1, Number(portadaN) || 1), renders.length) - 1;
+    const carpeta = carpetaDeDoc(doc);
+    const nuevas = [];
+    for (const [i, r] of renders.entries()) {
+        const { web } = await escribirImagen(carpeta, webDeDoc(doc), r.buffer, i === idx ? 'portada' : 'pagina');
+        nuevas.push({ ruta: web, tipo: i === idx ? 'portada' : 'otra', origen: `pdf-p${r.pagina}` });
+    }
+    const portada = nuevas[idx];
+    const resto = (doc.imagenes || []).filter((im) => im && im.ruta !== doc.portada).map((im) => ({ ...im, tipo: 'otra' }));
+    const imagenes = [portada, ...nuevas.filter((x) => x !== portada), ...resto];
+    await db.collection('biblioteca').updateOne({ _id: doc._id }, {
+        $set: { imagenes, portada: portada.ruta, fecha_actualizacion: new Date() },
+        $push: { alertas_agente: `Portada sospechosa sustituida por la página ${renders[idx].pagina} (rango «${rango}», portada #${idx + 1}); la anterior sigue en disco.` },
+    });
+    return { ok: true, origen: `rango p${renders[idx].pagina}` };
+}
+
 // ── 4. Aplicar al documento (cambia SOLO la portada; conserva las demás imágenes) ──────────────────────
 
 async function ponerPortada(db, doc, buffer, origen) {
@@ -345,9 +395,14 @@ async function quitarPortada(db, doc) {
  * Trata la portada de UN documento según el `modo` ('quitar' | 'reextraer' | 'texto').
  * @returns {Promise<{ok:boolean, motivo?:string, origen?:string}>}
  */
-export async function tratarPortadaSospechosa(db, doc, modo) {
+export async function tratarPortadaSospechosa(db, doc, modo, opciones = {}) {
     let origen = null;
-    if (modo === 'quitar') {
+    if (modo === 'rango') {
+        const original = await archivoOriginal(carpetaDeDoc(doc), doc.nombre_archivo).catch(() => null);
+        const r = await reextraerRango(db, doc, original, original ? detectarTipo(original) : null, opciones);
+        if (!r.ok) return r;
+        origen = r.origen;
+    } else if (modo === 'quitar') {
         if (!doc.portada) return { ok: false, motivo: 'no tiene portada' };
         origen = await quitarPortada(db, doc);
     } else {
@@ -372,8 +427,9 @@ let trabajo = { en_curso: false, total: 0, hechos: 0, ok: 0, fallidos: 0, titulo
 export function estadoPortadaSospechosa() { return { ...trabajo, motivos: trabajo.motivos.slice(-20) }; }
 export function cancelarPortadaSospechosa() { if (trabajo.en_curso) trabajo.cancelar = true; return { ok: true }; }
 
-export function lanzarPortadaSospechosa({ ids, modo } = {}) {
-    if (!['quitar', 'reextraer', 'texto'].includes(modo)) return { ok: false, motivo: 'modo desconocido' };
+export function lanzarPortadaSospechosa({ ids, modo, rango = null, portadaN = 1 } = {}) {
+    if (!['quitar', 'reextraer', 'texto', 'rango'].includes(modo)) return { ok: false, motivo: 'modo desconocido' };
+    if (modo === 'rango' && !String(rango || '').trim()) return { ok: false, motivo: 'indica el rango de páginas' };
     if (trabajo.en_curso) return { ok: false, motivo: 'ya hay un tratamiento de portadas en curso' };
     const lista = (Array.isArray(ids) ? ids : String(ids || '').split(','))
         .map((x) => String(x).trim()).filter((x) => ObjectId.isValid(x)).map((x) => new ObjectId(x));
@@ -391,7 +447,7 @@ export function lanzarPortadaSospechosa({ ids, modo } = {}) {
                 if (trabajo.cancelar) break;
                 trabajo.titulo = doc.titulo || '';
                 try {
-                    const r = await tratarPortadaSospechosa(db, doc, modo);
+                    const r = await tratarPortadaSospechosa(db, doc, modo, { rango, portadaN });
                     if (r.ok) trabajo.ok++;
                     else { trabajo.fallidos++; trabajo.motivos.push(`«${String(doc.titulo || doc._id).slice(0, 50)}»: ${r.motivo}`); }
                 } catch (e) { trabajo.fallidos++; trabajo.motivos.push(`«${String(doc.titulo || doc._id).slice(0, 50)}»: ${e.message}`); }

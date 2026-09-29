@@ -569,7 +569,7 @@ export function rutasPanel() {
     //    portada (conserva las demás imágenes); lo compartido por 2+ del lote se registra como artefacto. ──
     r.post('/documentos/portada-sospechosa', (req, res) => {
         if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
-        res.json(lanzarPortadaSospechosa({ ids: req.body?.ids, modo: req.body?.modo }));
+        res.json(lanzarPortadaSospechosa({ ids: req.body?.ids, modo: req.body?.modo, rango: req.body?.rango, portadaN: req.body?.portadaN }));
     });
     r.get('/documentos/portada-sospechosa/estado', (req, res) => res.json(estadoPortadaSospechosa()));
     r.post('/documentos/portada-sospechosa/cancelar', (req, res) => res.json(cancelarPortadaSospechosa()));

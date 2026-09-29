@@ -1229,8 +1229,14 @@ de ficheros clasificado por CDU.
       · La huella se guarda desde ya al ingerir (tras la copia verificada al árbol CDU) y en la tarea del
         Conformador «completar-hash-contenido».
 
-    IMÁGENES DEL DOCUMENTO (2026-09-29): miniaturas al doble de tamaño y botón «⤒» que sube una imagen arriba del
-    todo y la hace portada.
+    IMÁGENES DEL DOCUMENTO (2026-09-29): botón «⤒» que sube una imagen arriba del todo y la hace portada; miniaturas
+    de 50×66 con una lupa 🔍: mientras la mantienes pulsada (ratón o dedo) se ve la imagen en grande, inscrita en el
+    recuadro del selector, y al soltar desaparece.
+    «PORTADA #» AL EXTRAER (PDF, EPUB, DjVu…): junto al rango, indica cuál de las imágenes extraídas pasa a ser la
+    portada (1 = la primera extraída; vacío = no cambia). Ej.: «2-8 + 2 últimas», portada #2 → la página 3. El rango
+    admite «últimas 2» y «2 últimas», y «+» como separador.
+    PORTADA SOSPECHOSA · «Re-extraer un rango de páginas (PDF)»: extrae ese rango, pone de portada la n.ª extraída,
+    añade las demás al carrusel y retira la sospechosa (las imágenes manuales se conservan).
 
     DETECTAR PORTADAS ARTEFACTO, corregido (2026-09-29): los 415 EPUB con la misma imagen no salían porque
     compartían colección (una colección-cajón). Ahora solo los tomos de una obra y los títulos que solo difieren en
