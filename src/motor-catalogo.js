@@ -21,6 +21,13 @@ export async function buscarDocPorHash(hash) {
     return db.collection('biblioteca').findOne({ hash_contenido: hash });
 }
 
+/** Documento cuyo fichero TUVO este hash antes de modificarse (hashes_anteriores: ver utils/hash-doc.js). */
+export async function buscarDocPorHashAnterior(hash) {
+    if (!hash) return null;
+    const db = await conectarDB();
+    return db.collection('biblioteca').findOne({ 'hashes_anteriores.hash': hash }, { projection: { titulo: 1, ruta_base: 1, estado_verificacion: 1 } });
+}
+
 /**
  * Calcula los cambios al re-procesar un libro ya catalogado (búsqueda futura con mejor info).
  * Reglas: (1) rellenar huecos siempre; (2) si el registro estaba 'pendiente' y la nueva

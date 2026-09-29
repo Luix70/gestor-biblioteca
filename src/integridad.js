@@ -23,6 +23,7 @@ import { reciclar, reciclarCarpeta as reciclarArbolAPapelera } from './utils/pap
 import { esTituloArtefacto } from './utils/parsear-nombre.js';
 import { esDocumentoLeible, esMaterialNotable, esVideo } from './utils/criba-material.js';
 import { metricasFichero, ganaEntrante, reemplazarFicheroDeDoc } from './utils/duplicados.js';
+import { estadoHash, regenerarHashDoc } from './utils/hash-doc.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -132,7 +133,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     prog('cargando');
     const db = await conectarDB();
     const col = db.collection('biblioteca');
-    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1, portada: 1 } }).toArray();
+    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1, portada: 1, hash_mtime: 1, hash_tamano: 1, hash_fecha: 1, fecha_ingreso: 1, paginas: 1 } }).toArray();
     const rutasWeb = new Set(docs.map(d => d.ruta_base).filter(Boolean));
     const porId = new Map(docs.map(d => [String(d._id), d]));
 
@@ -224,6 +225,33 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     anotar('docsConAudiosRotos', audiosRotos, x => fichaDoc(x.d, {
         faltan: `${x.faltan}/${x.total} pistas`, pistas: x.rotas,
     }));
+
+    // ── D-ter. HASH DESACTUALIZADO: el fichero cambió DESPUÉS de calcular su hash (se le quitó una página, se
+    //    anotó…). Detección BARATA por huella (tamaño + fecha de modificación guardados con el hash; sin leer el
+    //    fichero). Con --reparar se recalcula: si sale igual (mover o restaurar carpetas también cambia la fecha),
+    //    solo se anota la huella; si cambió, el hash nuevo y el anterior al historial (utils/hash-doc.js). ──
+    prog('hash-desactualizado', { i: 0, total: docs.length });
+    const hashViejos = [];
+    let _iH = 0;
+    for (const d of docs) {
+        if (++_iH % 50 === 0) prog('hash-desactualizado', { i: _iH, total: docs.length });
+        if (!d.hash_contenido || !d.nombre_archivo) continue;
+        const e = await estadoHash(d).catch(() => null);
+        if (e?.estado === 'sospechoso') hashViejos.push({ d, motivo: e.motivo });
+    }
+    D.hashDesactualizado = hashViejos.length;
+    anotar('hashDesactualizado', hashViejos, x => fichaDoc(x.d, { motivo: x.motivo }));
+    if (reparar && hashViejos.length) {
+        let cambiados = 0, alDia = 0;
+        for (const [n, x] of hashViejos.entries()) {
+            prog('hash-desactualizado', { i: n + 1, total: hashViejos.length });
+            const r = await regenerarHashDoc(db, x.d).catch(() => null);
+            if (r?.ok && r.cambiado) cambiados++;
+            else if (r?.ok) alDia++;
+        }
+        R.hashesRegenerados = cambiados;
+        R.hashesConfirmados = alDia;
+    }
 
     // ── Recorrido del árbol CDU: hojas (registro/doc/img), ramas muertas, registro sin doc, huérfanas/desync ──
     prog('recorrido-arbol', { carpetas: 0 });

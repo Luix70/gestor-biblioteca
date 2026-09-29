@@ -21,6 +21,7 @@ import { lanzarEmparejado, estadoEmparejado } from './utils/emparejar-portadas.j
 import { lanzarInspeccionManual, estadoInspeccionManual, aplicarInspeccionManual, descartarInspeccionManual } from './utils/inspeccion-manual.js';
 import { lanzarReextraccion, estadoReextraccion, cancelarReextraccion } from './utils/reextraer-imagenes.js';
 import { lanzarPortadaSospechosa, estadoPortadaSospechosa, cancelarPortadaSospechosa } from './utils/portadas-sospechosas.js';
+import { lanzarRegenerarHash, estadoRegenerarHash, cancelarRegenerarHash } from './utils/hash-doc.js';
 import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion, elegirEdicion } from './utils/reidentificar-doc.js';
 import { lanzarCompletarSinopsis, estadoCompletarSinopsis, cancelarCompletarSinopsis } from './utils/completar-sinopsis.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
@@ -571,6 +572,15 @@ export function rutasPanel() {
     });
     r.get('/documentos/portada-sospechosa/estado', (req, res) => res.json(estadoPortadaSospechosa()));
     r.post('/documentos/portada-sospechosa/cancelar', (req, res) => res.json(cancelarPortadaSospechosa()));
+
+    // ── REGENERAR HASH: recalcula el SHA-256 del fichero (tras modificarlo: quitar una página, anotarlo…) y guarda
+    //    su huella. El anterior queda en hashes_anteriores. Lee el fichero entero → 2º plano. Solo admin. ──
+    r.post('/documentos/regenerar-hash', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        res.json(lanzarRegenerarHash({ ids: req.body?.ids }));
+    });
+    r.get('/documentos/regenerar-hash/estado', (req, res) => res.json(estadoRegenerarHash()));
+    r.post('/documentos/regenerar-hash/cancelar', (req, res) => res.json(cancelarRegenerarHash()));
 
     // ── RE-IDENTIFICAR (recuperar el ISBN del propio fichero + pivote al Fichero/APIs, SIN IA), sobre una
     //    selección. Para los miembros de colección que se catalogaron por nombre y quedaron SIN ISBN (TXtras).

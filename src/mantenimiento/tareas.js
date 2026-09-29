@@ -439,7 +439,9 @@ export const TAREAS = [
                 { projection: { _id: 1, titulo: 1 } }
             );
 
-            const set = { hash_contenido: hash };
+            // Con su HUELLA (tamaño + fecha de modificación): así se detecta si el fichero cambia después (hash-doc.js).
+            const st = await fs.stat(original).catch(() => null);
+            const set = { hash_contenido: hash, hash_fecha: new Date(), ...(st ? { hash_mtime: st.mtimeMs, hash_tamano: st.size } : {}) };
             if (!doc.nombre_archivo) set.nombre_archivo = docsEnCarpeta[0]; // de paso, fija el nombre
             const alertas = [];
             if (otro) {

@@ -3,7 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import { procesarRecurso, leerOverride } from './orquestador.js';
-import { procesarCatalogo, actualizarDocumento, buscarDocPorHash } from './motor-catalogo.js';
+import { procesarCatalogo, actualizarDocumento, buscarDocPorHash, buscarDocPorHashAnterior } from './motor-catalogo.js';
+import { reciclar } from './utils/papelera.js';
 import { rutaCatalogo } from './utils/rutas.js';
 import { aMARCXML } from './marc21.js';
 import { calcularHashArchivo } from './utils/hash-archivo.js';
@@ -189,7 +190,20 @@ async function atajoPorHash(rutas, contexto = {}) {
     try { hash = await calcularHashArchivo(rutas[0]); } catch { return null; }
     if (!hash) return null;
     const doc = await buscarDocPorHash(hash);
-    if (!doc) return null;                                   // hash nuevo → procesar normal
+    if (!doc) {
+        // ¿Es la VERSIÓN ANTERIOR de un documento cuyo fichero modificaste después (le quitaste una página,
+        // lo anotaste…)? No es una copia exacta del archivado —no se borra— ni debe catalogarse como libro nuevo:
+        // va a la Papelera (recuperable) y se dice de quién es.
+        const previo = await buscarDocPorHashAnterior(hash);
+        if (!previo) return null;                            // hash nuevo → procesar normal
+        await reciclar(rutas, `version-anterior-${previo._id}`).catch(() => null);
+        console.log(`  ♻️  [Atajo hash] «${path.basename(rutas[0])}» es la versión ANTERIOR (sin modificar) de ${previo._id} «${previo.titulo}» → a la Papelera.`);
+        return {
+            _id: String(previo._id), duplicado: true, estado: previo.estado_verificacion || null, rutaWeb: previo.ruta_base || null,
+            carpeta: null, copiaIntegra: false, documento: { ...previo, _id: String(previo._id) },
+            operacion: 'version_anterior', accion: 'reciclado',
+        };
+    }
 
     // GAP-FILL: el re-drop de un fichero YA archivado puede traer MÁS contexto que la 1.ª vez. Rellena
     // los huecos del doc existente (conservador) antes de descartarlo/restaurarlo.
@@ -609,6 +623,13 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
     if (rutas.length > 1) campos.archivos_originales = rutas.map(r => path.basename(r));
     if (imagenes.length) campos.imagenes = imagenes;
     if (portada) campos.portada = portada;
+    // HUELLA DEL HASH: tamaño y fecha de modificación del fichero YA COPIADO al árbol CDU. Si alguien lo modifica
+    // después (quitar una página, anotarlo…), dejarán de coincidir y se detectará que el hash quedó viejo
+    // (utils/hash-doc.js). Solo con un único fichero y el hash de ESTE contenido.
+    if (copiaIntegra && rutas.length === 1 && documento.hash_contenido) {
+        const st = await fs.stat(path.join(carpetaFs, path.basename(rutas[0]))).catch(() => null);
+        if (st) Object.assign(campos, { hash_fecha: new Date(), hash_mtime: st.mtimeMs, hash_tamano: st.size });
+    }
     try {
         await actualizarDocumento(resultado._id, campos);
     } catch (e) {

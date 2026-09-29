@@ -61,6 +61,12 @@ const CATEGORIAS = [
         hacer: 'Restaurar las pistas desde la Papelera, o volver a ingerir la colección de origen.',
     },
     {
+        clave: 'hashDesactualizado', lista: 'hashDesactualizado', auto: true,
+        etiqueta: 'Hash desactualizado',
+        que: 'El fichero original se MODIFICÓ después de calcular su hash (se le quitó una página, se anotó…): su tamaño o su fecha de modificación ya no son los que se anotaron con el hash. En los documentos anteriores a la huella, el fichero está fechado bastante después de su ingesta. Mover o restaurar carpetas también cambia la fecha: por eso es SOSPECHOSO hasta recalcularlo.',
+        hacer: '«Diagnosticar y reparar» lo recalcula: si sale igual, solo se anota la huella; si cambió, se guarda el nuevo y el anterior pasa al historial (así el original, si vuelve a entrar por el Inbox, se reconoce). También a mano: «#️⃣ Regenerar hash» en la ficha o sobre una selección, o `node scripts/verificar-hashes.js --ejecutar`.',
+    },
+    {
         clave: 'docsSinPortada', lista: 'docsSinPortada', auto: false,
         etiqueta: 'Documentos sin portada',
         que: 'Documentos que no tienen imagen de portada. NO es una pérdida —el fichero está y se lee—, es cosmético: la ficha sale en blanco en el catálogo.',
@@ -454,6 +460,8 @@ const ET_REPARADO = {
     rutasReparadas: 'ruta_base reparadas',
     carpetasHuerfanasRecicladas: 'Carpetas huérfanas retiradas (vacías)',
     hashDuplicadosEliminados: 'Copias exactas eliminadas (a la Papelera)',
+    hashesRegenerados: 'Hashes regenerados (el fichero había cambiado)',
+    hashesConfirmados: 'Hashes confirmados (solo se anotó la huella)',
     cuarentenaResueltos: 'Depósitos de Cuarentena resueltos',
     carpetasConservadas: 'Carpetas NO tocadas (tienen ficheros → míralas tú)',
 };

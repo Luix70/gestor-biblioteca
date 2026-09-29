@@ -1,7 +1,7 @@
 # Tareas pendientes en el NAS y resumen de trabajos
 
 > Lista viva: se actualiza con cada cambio que deje un script por ejecutar. Marca `[x]` lo que vayas haciendo.
-> Última actualización: 2026-09-29 (commit `388f903`).
+> Última actualización: 2026-09-29 (hash regenerable + portadas artefacto corregido).
 
 ## Antes de nada
 
@@ -46,6 +46,14 @@ revisa en el Dashboard las filas **«ISBN provisional»** e **«ISBN dudoso»** 
 Crea una selección **«Portada sospechosa …»** por grupo (no toca los documentos). Luego, en el panel, sobre cada
 selección: **🚩 Portada sospechosa…** → re-extraer omitiendo la sospechosa / primera página de texto / quitar.
 (El 1.er barrido encontró grupos como 415 EPUB en español con la misma imagen y 30 libros de ciencia con un banner.)
+
+### 4 bis. Hashes que hayan quedado viejos
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/verificar-hashes.js`
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/verificar-hashes.js --ejecutar`
+
+Detecta los documentos cuyo fichero se modificó después de calcular su hash y los recalcula (si sale igual, solo
+anota la huella). La primera vez saldrán muchos «sospechosos» que no lo son (carpetas movidas o restauradas estos
+días): el recálculo los confirma. Después, Integridad lo vigila solo.
 
 ### 5. Autores fusionados en uno (pendiente desde julio)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/separar-autores-fusionados.js`

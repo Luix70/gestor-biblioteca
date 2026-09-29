@@ -1171,6 +1171,35 @@ de ficheros clasificado por CDU.
         existía. Hoy hay 400 carpetas compartidas: 328 de colecciones (a propósito), 62 del mismo libro en varios
         ficheros y 10 de libros DISTINTOS con el mismo ISBN (probablemente uno lleva el ISBN del otro).
 
+    HASH DEL DOCUMENTO: REGENERARLO Y DETECTAR SI QUEDÓ VIEJO (2026-09-29, utils/hash-doc.js). Si modificas el
+    fichero de un documento (quitar de un PDF una página artefacto, anotarlo…), el hash de la ingesta deja de ser
+    el suyo. Ahora, con cada hash se guarda la HUELLA del fichero (hash_fecha, hash_mtime = fecha de modificación,
+    hash_tamano): si el fichero cambia, ya no coinciden → se detecta con un simple stat, sin leerlo. Los documentos
+    anteriores (sin huella) son sospechosos si el fichero está fechado > 2 h después de su ingesta (HASH_MARGEN_H).
+    Mover/restaurar carpetas también cambia la fecha: un sospechoso se CONFIRMA recalculando (si sale igual, solo
+    se anota la huella).
+      · Acción «#️⃣ Regenerar hash» (ficha y barra de la selección; 2º plano con progreso): recalcula; el hash
+        anterior pasa a `hashes_anteriores` (anti-pérdida); en un PDF recuenta las páginas; avisa si el nuevo
+        coincide con el de otro documento.
+      · Detección: Integridad tiene la categoría «Hash desactualizado» (se repara con «Diagnosticar y reparar»,
+        así que entra en la tarea programada), y el script
+          sudo docker exec -t gestor-biblioteca node scripts/verificar-hashes.js             (diagnóstico + selección «Hash por revisar»)
+          sudo docker exec -t gestor-biblioteca node scripts/verificar-hashes.js --ejecutar  (regenera sospechosos y sin hash)
+      · VERSIÓN ANTERIOR: si el fichero ORIGINAL (sin tu modificación) vuelve a entrar por el Inbox, se reconoce por
+        `hashes_anteriores`: no se borra como copia exacta (no lo es) ni se cataloga como libro nuevo — va a la
+        Papelera indicando de qué documento es.
+      · La huella se guarda desde ya al ingerir (tras la copia verificada al árbol CDU) y en la tarea del
+        Conformador «completar-hash-contenido».
+
+    IMÁGENES DEL DOCUMENTO (2026-09-29): miniaturas al doble de tamaño y botón «⤒» que sube una imagen arriba del
+    todo y la hace portada.
+
+    DETECTAR PORTADAS ARTEFACTO, corregido (2026-09-29): los 415 EPUB con la misma imagen no salían porque
+    compartían colección (una colección-cajón). Ahora solo los tomos de una obra y los títulos que solo difieren en
+    el número cuentan como la misma obra; un grupo cuyos miembros son todos de UNA colección sale igual, con su
+    selección «… · de colección», pero no se repara solo con --ejecutar (podría ser la portada legítima de la serie).
+    La fase de comparación muestra progreso (antes parecía colgada en «64000/65624»).
+
     PORTADAS ARTEFACTO (2026-09-28, utils/portadas-artefacto.js + scripts/detectar-portadas-artefacto.js). Como hay
     títulos-artefacto, hay portadas-artefacto: imágenes que no son la cubierta de ningún libro. Caso real: un grupo
     de ripeo mete su banner («We Trip The Light Fantastic») como PÁGINA 1 de todos sus PDF; al rasterizar la

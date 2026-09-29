@@ -1333,6 +1333,7 @@ async function procesarUnidad(unidad) {
             const MAPA = {
                 borrado:    ['♻️', 'idéntico (mismo hash) → borrado', 'reciclado'],
                 restaurado: ['♻️', 'fichero ausente restaurado con el entrante', 'reciclado'],
+                reciclado: ['♻️', 'versión ANTERIOR de un documento cuyo fichero se modificó → Papelera', 'reciclado'],
                 cuarentena: ['⚠️', 'contenido distinto → Cuarentena/duplicados', 'duplicado'],
             };
             const [ic, txt, cat] = MAPA[r.accion] || ['⚠️', `duplicado (${r.accion || '?'})`, 'duplicado'];

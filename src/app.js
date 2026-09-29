@@ -269,7 +269,7 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
                 ok: true, operacion: r.operacion, estado: r.estado,
                 id: String(r._id), isbn: r.isbn, issn: r.issn,
                 // Aviso «ya ingresado» (doc preexistente): fecha de alta y ubicación reales del existente.
-                ya_existia: !!r.ya_existia || r.operacion === 'duplicado' || r.operacion === 'duplicado_exacto' || r.operacion === 'posible_duplicado',
+                ya_existia: !!r.ya_existia || r.operacion === 'duplicado' || r.operacion === 'duplicado_exacto' || r.operacion === 'posible_duplicado' || r.operacion === 'version_anterior',
                 fecha_ingreso: r.fecha_ingreso || null,
                 ubicacion_existente: r.ubicacion || null,
                 titulo: r.documento.titulo, ruta: r.rutaWeb,

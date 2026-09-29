@@ -11011,6 +11011,7 @@ const INTEG_FASES = {
   cargando: 'Cargando documentos…',
   'docs-sin-carpeta': 'Comprobando carpetas',
   'docs-sin-fichero': 'Comprobando ficheros',
+  'hash-desactualizado': 'Comprobando si algún hash quedó viejo',
   'recorrido-arbol': 'Recorriendo el árbol CDU',
   'duplicados-hash': 'Buscando duplicados por hash',
   cuarentena: 'Revisando Cuarentena',
@@ -11181,6 +11182,7 @@ const INTEG_AUTOREPARA = new Set([
   'hashDuplicadosGrupos',
   'hashDuplicadosDocs',
   'cuarentenaDuplicados',
+  'hashDesactualizado',
 ]);
 function pintarInteg(r) {
   const d = r.diagnostico || {},
@@ -11189,6 +11191,7 @@ function pintarInteg(r) {
     docsSinCarpeta: 'Docs sin carpeta',
     docsSinFicheroOriginal: 'Docs sin fichero original',
     docsConAudiosRotos: 'Audiolibros con pistas que faltan',
+    hashDesactualizado: 'Hash desactualizado (fichero modificado)',
     docsSinPortada: 'Documentos sin portada',
     rutaBaseCompartida: 'Varios docs en la misma carpeta',
     ramasMuertas: 'Ramas vacías / muertas',
@@ -11204,6 +11207,7 @@ function pintarInteg(r) {
     docsSinCarpeta: 'docsSinCarpeta',
     docsSinFicheroOriginal: 'docsSinFicheroOriginal',
     docsConAudiosRotos: 'docsConAudiosRotos',
+    hashDesactualizado: 'hashDesactualizado',
     docsSinPortada: 'docsSinPortada',
     rutaBaseCompartida: 'rutaBaseCompartida',
     ramasMuertas: 'ramasMuertas',
@@ -11258,6 +11262,8 @@ function pintarInteg(r) {
         rutasReparadas: 'ruta_base reparadas',
         carpetasHuerfanasRecicladas: 'Huérfanas recicladas',
         hashDuplicadosEliminados: 'Hash-duplicados eliminados',
+        hashesRegenerados: 'Hashes regenerados',
+        hashesConfirmados: 'Hashes confirmados (huella anotada)',
         cuarentenaResueltos: 'Cuarentena resueltos',
       };
     h +=
@@ -11374,6 +11380,8 @@ function drillInteg(mk, m) {
       .join('');
   else if (mk === 'docsSinCarpeta')
     h = arr.map((x) => `<div class="intgrp">${dl(x)}<br>${carp(x.ruta)}</div>`).join('');
+  else if (mk === 'hashDesactualizado')
+    h = arr.map((x) => `<div class="intgrp">${dl(x)} <span class="muted">— ${esc(x.motivo || '')}</span></div>`).join('');
   else if (mk === 'docsConAudiosRotos')
     h = arr
       .map(
