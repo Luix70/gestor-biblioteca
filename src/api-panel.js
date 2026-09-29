@@ -4,7 +4,7 @@ import { conectarDB } from './database.js';
 import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora, ejecutarCampanaCompleta, pararCampanaCompleta, estadoDrenaje, INBOX } from './vigilante.js';
 import { arbolInbox, escribirGuia, leerGuia, rutaInboxSegura, normalizarPatron, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { detectarPatron, extraerCamposPorPatron } from './utils/detector-patron.js';
-import { listarCampanas, guardarAjusteCampana } from './mantenimiento/campanas.js';
+import { listarCampanas, guardarAjusteCampana, campanasEncendidas, fijarCampanasEncendidas } from './mantenimiento/campanas.js';
 import {
     infoPapelera, contenidoPapelera, vaciarPapelera, explorarPapelera, rutaFicheroPapelera,
     listarCuarentena, reingestarCuarentena, descartarCuarentena, descartarCategoria, reingestarTodosDuplicados, ingestaPorDia,
@@ -698,7 +698,15 @@ export function rutasPanel() {
     // ── Campañas de fondo (backfill autorreparable al reposo): listar estado+config+pendientes,
     //    ajustar (activa/lote/cada-N-min) y disparar una tanda ahora. Config y disparo = solo admin. ──
     r.get('/campanas', async (req, res) => {
-        try { res.json({ ok: true, campanas: await listarCampanas(await conectarDB()), drenaje: estadoDrenaje() }); }
+        try {
+            const db = await conectarDB();
+            res.json({ ok: true, campanas: await listarCampanas(db), drenaje: estadoDrenaje(), encendidas: await campanasEncendidas(db) });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    // Interruptor GENERAL (todas a la vez). Declarada ANTES de '/campanas/:id' para que «encendidas» no se tome por un id.
+    r.post('/campanas/encendidas', async (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        try { res.json(await fijarCampanasEncendidas(await conectarDB(), req.body?.encendidas !== false)); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/campanas/:id', async (req, res) => {

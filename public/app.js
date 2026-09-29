@@ -10622,6 +10622,22 @@ async function loadCampanas(silencioso) {
     return;
   }
   const drenaje = r.drenaje || {}; // { id, etiqueta } de un backfill completo en curso (o vacío)
+  // INTERRUPTOR GENERAL: apagado, ninguna corre sola (cada una conserva su ajuste). Las filas se atenúan.
+  const gen = $('#campGlobal');
+  if (gen) {
+    gen.checked = r.encendidas !== false;
+    $('#campGlobalTxt').textContent = r.encendidas !== false ? 'Todas las campañas: encendidas' : 'Todas las campañas: APAGADAS';
+    gen.onchange = async () => {
+      gen.disabled = true;
+      try {
+        await api('/campanas/encendidas', { method: 'POST', body: JSON.stringify({ encendidas: gen.checked }) });
+        toast(gen.checked ? '🎯 Campañas encendidas (cada una según su ajuste)' : '⏸ Todas las campañas apagadas');
+      } catch (e) { toast(e.message, 'bad'); gen.checked = !gen.checked; }
+      gen.disabled = false;
+      loadCampanas(true);
+    };
+  }
+  cont.style.opacity = r.encendidas === false ? '0.5' : '';
   cont.innerHTML = (r.campanas || [])
     .map((c) => {
       const drenando = drenaje.id === c.id;

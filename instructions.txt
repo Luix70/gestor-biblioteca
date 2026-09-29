@@ -1017,6 +1017,12 @@ de ficheros clasificado por CDU.
     abre la Búsqueda con ellos. POST /documentos/:id/elegir-edicion {isbn|ninguna}. Solo admite un ISBN que esté
     entre las candidatas. Un ISBN-10 y su ISBN-13 cuentan como UNO; un idioma «und/mul» no descarta a nadie.
 
+    CAMPAÑAS: INTERRUPTOR GENERAL (2026-09-29). En la cabecera de «🎯 Campañas de fondo», «Todas las campañas»
+    enciende o apaga TODAS a la vez. Apagado, ninguna corre sola (ajustes/campanas.encendidas=false; el planificador
+    ejecutarCampanasDebidas no lanza nada), pero cada una CONSERVA su ajuste (activa, lote, cadencia): al encenderlo,
+    todo sigue como estaba. Los botones manuales de cada una («Ahora», «Completar») siguen funcionando.
+    POST /campanas/encendidas {encendidas}.
+
     CAMPAÑAS: «504» AL CARGAR LA TARJETA (arreglado 2026-09-28). Cada carga del panel recontaba lo pendiente de las
     12 campañas, una tras otra (recorridos completos en Atlas) → pasaba del límite del proxy, sobre todo con Atlas
     ocupado por un script. Ahora los contadores «Pendientes» van en caché: el panel responde al momento con el

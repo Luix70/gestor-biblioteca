@@ -618,6 +618,19 @@ export async function leerAjustesCampanas(db) {
     return out;
 }
 
+/**
+ * INTERRUPTOR GENERAL de las campañas. Apagado = NINGUNA corre sola, pero cada una conserva su ajuste (activa, lote,
+ * cadencia): al volver a encenderlo, todo sigue como lo dejaste. Por defecto, encendido.
+ */
+export async function campanasEncendidas(db) {
+    const g = await db.collection('ajustes').findOne({ _id: AJUSTES_ID }, { projection: { encendidas: 1 } }).catch(() => null);
+    return g?.encendidas !== false;
+}
+export async function fijarCampanasEncendidas(db, encendidas) {
+    await db.collection('ajustes').updateOne({ _id: AJUSTES_ID }, { $set: { encendidas: !!encendidas } }, { upsert: true });
+    return { ok: true, encendidas: !!encendidas };
+}
+
 /** Guarda el ajuste de UNA campaña (activa/lote/cadenciaMin). Solo campos válidos. */
 export async function guardarAjusteCampana(db, id, cambios = {}) {
     if (!PORID.has(id)) return { ok: false, motivo: 'campaña desconocida' };
@@ -779,6 +792,7 @@ export async function ejecutarCampanasDebidas({ debeAbortar = async () => false,
     if (!PUEDE_CAMPANAS) return { lanzadas: 0, cambios: 0 };
     let db;
     try { db = await conectarDB(); } catch { return { lanzadas: 0, cambios: 0 }; }
+    if (!(await campanasEncendidas(db))) return { lanzadas: 0, cambios: 0 };   // interruptor general apagado
     const cfg = await leerAjustesCampanas(db);
     let lanzadas = 0, cambios = 0;
     for (const camp of CAMPANAS) {
