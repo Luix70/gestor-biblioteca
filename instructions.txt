@@ -1243,6 +1243,37 @@ de ficheros clasificado por CDU.
     «C.D.U.: 94(460)»), solo junto a señales de página de créditos (ISBN, depósito legal, ficha catalográfica…) y
     nunca en una bibliografía. Es RARA aquí (0 de 300 EPUB y 0 de 200 PDF en español); en los escaneos la lee la
     visión (cip-vision-escaneo, que ahora además mueve la carpeta, que antes quedaba en el árbol viejo).
+    CDU EN NOTACIÓN MODERNA, SIEMPRE (2026-09-30, `utils/cdu-moderna.js`). La BNE y los CIP de libros viejos dan la
+    literatura con la notación anterior a los 90 (820 inglesa, 830 alemana, 840 francesa, 849.9 catalana, 850
+    italiana, 860 española, 869 portuguesa, 870 latina, 882 rusa, 884 polaca, 885 checa); nosotros usamos la de hoy
+    (821.111, 821.112.2, 821.133.1…). Aplicarlas tal cual partía el árbol (8/820/… y 8/821/…). Ahora TODA CDU se
+    traduce al entrar, conservando los auxiliares (820(73)-31"19" → 821.111(73)-31"19"): BNE en línea, Fichero,
+    CIP impreso, clasificador/IA (`resolverCDU`), CDU de autoridad (`huecosEscalares`), edición manual,
+    `aplicarCduConPrioridad` y, como última red, `motor-catalogo` antes de guardar.
+    PUBLICACIONES JUVENILES (087.5, decisión del usuario: opción A): la BNE clasifica los clásicos juveniles como
+    087.5:82; se GUARDA así, pero la carpeta se decide por la parte literaria (`cduParaUbicar`: 087.5:82 → 82:087.5,
+    en 8/82/…), no en la clase 0. `arbolCDU` ubica siempre por `cduParaUbicar` (moderna + juvenil al final).
+    Arreglo de lo ya guardado: `scripts/modernizar-cdu.js` (en seco por defecto; `--ejecutar`): fase 1 pasa cdu,
+    cdu_autoridad y la caché equivalencias_cdu a notación moderna; fase 2 recoloca las carpetas (medido el 30-sep:
+    474 CDU antiguas y 791 carpetas, 342 de ellas juveniles).
+    EDITORIALES (2026-09-30): distribuidores fuera (`editoriales-falsas`: Distribooks, «… Distributing», «…
+    Inventory», Libros Sin Fronteras); nombre limpio de puntuación ISBD al crear la editorial en todos los puntos
+    (`limpiarNombreEditorial`: «Valdemar,» → Valdemar, «Ultramar.» → Ultramar, «Alianza, etc» → Alianza, «[Destino»
+    → Destino); y la editorial de una edición se contrasta con el PREFIJO DEL ISBN (`editorial-por-prefijo.js`:
+    prefijo = 9 primeros dígitos del ISBN-13; editorial dominante = 3+ libros, ≥ 60 % y el triple que la segunda,
+    agrupando grafías y sin contar maquetadores ni ruido «SE»/«ge»/«2007»). Rellena el hueco y sustituye una
+    propuesta de API que sea basura o DESCONOCIDA en ese país («Los episodios de Vathek», 84-7702 = Valdemar, no
+    «Rama Publishing»); una editorial REAL conocida allí o una variante del nombre se respeta (puede ser un SELLO:
+    Routledge/Taylor & Francis, Clarendon/Oxford). En «Extraer ISBN» y en la ingesta.
+    Retroactivo: `scripts/editoriales-por-prefijo.js` (seco por defecto; `--ejecutar`, `--solo-vacias`): corrige
+    SOLO huecos, maquetadores y basura (medido 30-sep: 247), con diario `deshacer[]` (origen «editorial-prefijo»);
+    una editorial real distinta NUNCA la cambia: va a la selección «Editorial a revisar (prefijo ISBN)» (890, la
+    mayoría sellos del mismo grupo). Salta los ISBN sospechosos y los compartidos por títulos distintos. La editorial de la COLECCIÓN o la escrita en el título ya no la rescata un
+    traductor coincidente («La hija del capitán», colección de Anaya, recibía la edición de Paulinas).
+    MISMO TÍTULO CON EL MISMO ISBN (`utils/titulo-libro.js·mismoTituloLibro`): la guarda «ese ISBN ya es de otro
+    título» ignora paréntesis/corchetes («(Ilustrado)», «(trad. …)»), acepta el título con/sin subtítulo y una
+    errata de 1-2 letras, pero exige los mismos NÚMEROS (tomo 1 ≠ tomo 2). Antes 14 falsos «❓» en un tramo de la
+    pasada del 30-sep. Ahora la misma guarda está también en la INGESTA (paso 1a).
     COLISIONES DE CARPETA ARREGLADAS (`util-mantenimiento·reubicarPorCdu`, única función para mover por CDU):
     si la carpeta destino ya es de OTRO documento (el mismo libro en djvu y pdf comparten ISBN), el documento va a
     una carpeta propia con sufijo (`<isbn>-<id>`). Antes: re-clasificar-cdu dejaba los ficheros en el árbol viejo

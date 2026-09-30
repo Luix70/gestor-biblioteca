@@ -37,6 +37,7 @@ import { normalizarPermisos, normalizarFichero } from './permisos.js'; // el ár
 // (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
 // la estructura visible; queda dentro del subárbol `ruta_fija`, así que Integridad tampoco la poda.
 const DIR_PORTADAS = '.portadas';
+import { limpiarNombreEditorial } from './editoriales-falsas.js';
 const ext = (n) => path.extname(n).toLowerCase();
 const esPdf = (n) => ext(n) === '.pdf';
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#');
@@ -488,7 +489,7 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
     // Cacheado igual que los autores (una colección repite editorial en muchos miembros).
     const cacheEditoriales = new Map();
     const resolverEditorial = async (nombre) => {
-        const t = String(nombre || '').trim();
+        const t = limpiarNombreEditorial(String(nombre || ''));
         if (!t) return null;
         if (!cacheEditoriales.has(t)) {
             const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });

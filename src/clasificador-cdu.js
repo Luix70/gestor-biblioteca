@@ -1,6 +1,7 @@
 import { conectarDB } from './database.js';
 import { conTexto, extraerJSON } from './utils/vision.js';
 import { sembrarDescripcionCDU } from './utils/descripcion-cdu.js';
+import { modernizarCDU } from './utils/cdu-moderna.js';
 
 // Tabla de tradiciones/lenguas literarias → CDU (82x). El Dewey 8xx y la LCC P* YA codifican la lengua, así que
 // la equivalencia por código es estable. Se usa en el prompt de iaCDU (por doc) y de iaCDULote (por lote).
@@ -350,7 +351,17 @@ inventes datos concretos (fechas, nombres) que no puedas justificar con lo dado.
  *   2) API/web externa (extensible),
  *   3) IA — y APRENDE la equivalencia (Dewey/LC) para la próxima vez.
  */
-export async function resolverCDU({ dewey, lcc, categorias = [], titulo, autor, sinopsis, permitirIA = true }) {
+/**
+ * Envoltorio: TODA CDU que sale del clasificador (caché, tabla, IA) va en notación MODERNA (820 → 821.111): la IA y
+ * algunas equivalencias aprendidas de fichas antiguas la devuelven a veces con la antigua (cdu-moderna.js).
+ */
+export async function resolverCDU(args) {
+    const r = await resolverCDUSinModernizar(args);
+    if (r?.cdu) r.cdu = modernizarCDU(r.cdu);
+    return r;
+}
+
+async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, autor, sinopsis, permitirIA = true }) {
     // Los códigos se manejan por su UNIDAD de equivalencia: Dewey tal cual; LCC por su CLASE (letras iniciales),
     // no la signatura completa — si no, «PR4589.H39 1998» se guardaría entero y no lo reusaría ningún otro libro.
     const candidatos = [['dewey', dewey], ['lcc', claseLcc(lcc)]].filter(([, c]) => c);

@@ -143,6 +143,15 @@ function señalesEdicion(doc, cand) {
     if (pruebas.length && edCand.length) {
         if (pruebas.some((n) => n.some((w) => edCand.includes(w)))) señales.push('editorial');
         else if (!señales.includes('traductor')) contradice = true;   // Seix Barral ≠ Teide ⇒ otra edición
+        else {
+            // El traductor rescata la contradicción con el campo editorial del DOCUMENTO (puede venir de una API),
+            // pero NO con las pruebas firmes: la editorial de SU COLECCIÓN o la escrita en el título. Una misma
+            // traducción la reeditan varias casas (medido el 30-sep: «La hija del capitán», de la colección de
+            // Anaya, recibió la edición de Paulinas con el mismo traductor).
+            const firmes = [...(doc.editoriales_coleccion || []), ...editorialesDelTitulo(doc.titulo)]
+                .filter((e) => e && !esEditorialFalsa(e)).map(nucleoEditorial).filter((n) => n.length);
+            if (firmes.length && !firmes.some((n) => n.some((w) => edCand.includes(w)))) contradice = true;
+        }
     }
 
     const iDoc = idioma2(doc.idioma), iCand = idioma2(cand.idioma);

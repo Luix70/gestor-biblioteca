@@ -22,6 +22,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { extraerContribucionesBNE } from './contribuciones.js';
 import { normalizarTituloBibliografico } from './titulos.js';
+import { modernizarCDU } from './cdu-moderna.js';
+import { limpiarNombreEditorial } from './editoriales-falsas.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -108,12 +110,12 @@ function fusionar(filas) {
         subtitulo,
         autores,
         contribuciones_nombres,   // [{nombre,rol}] (traductor/ilustrador/…) parseados de la mención BNE
-        editorial: primero('editorial'),
+        editorial: limpiarNombreEditorial(primero('editorial')),
         año_edicion: primero('anio_edicion'),
         idioma: primero('idioma'),
         dewey: primero('dewey'),
         lcc: primero('lcc'),
-        cdu: primero('cdu'),
+        cdu: modernizarCDU(primero('cdu')),   // el volcado BNE trae notación antigua (820 → 821.111)
         paginas: primero('paginas'),
         dimensiones: primero('dimensiones'),
         categorias: lista(primero('palabras_clave')),
@@ -209,8 +211,8 @@ export async function buscarTextoEnFichero(q, { limite = 40 } = {}) {
             out.push({
                 isbn: f.isbn || null, titulo: f.titulo || '', subtitulo: f.subtitulo || null,
                 autores: f.autores ? f.autores.split(';').map(s => s.trim()).filter(Boolean) : [],
-                editorial: f.editorial || null, anio: f.anio_edicion || null,
-                cdu: f.cdu || null, dewey: f.dewey || null, idioma: f.idioma || null, portada_url: f.portada_url || null,
+                editorial: limpiarNombreEditorial(f.editorial) || null, anio: f.anio_edicion || null,
+                cdu: modernizarCDU(f.cdu) || null, dewey: f.dewey || null, idioma: f.idioma || null, portada_url: f.portada_url || null,
                 // La colección identifica la edición («Ancora y Delfin -- 85»): la usa identificar-edicion.
                 coleccion_nombre: f.coleccion_nombre || null,
             });

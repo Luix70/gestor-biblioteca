@@ -23,6 +23,8 @@ import { http } from './http.js';
 import * as cheerio from 'cheerio';
 import { esErrorDeRed } from '../errores.js';
 import { validarISBN } from './identificadores.js';
+import { modernizarCDU } from './cdu-moderna.js';
+import { limpiarNombreEditorial } from './editoriales-falsas.js';
 
 const SRU = 'https://catalogo.bne.es/view/sru/34BNE_INST';
 const TIMEOUT = Number(process.env.BNE_TIMEOUT_MS || 20000);
@@ -99,14 +101,14 @@ function registroMarc($, rec) {
         subtitulo: limpiar(sub('245', 'b')),
         autores,
         contribuciones_nombres: contribuciones,
-        editorial: limpiar(sub('264', 'b') || sub('260', 'b')),
+        editorial: limpiarNombreEditorial(limpiar(sub('264', 'b') || sub('260', 'b'))),
         año_edicion: anioDe(sub('264', 'c') || sub('260', 'c')),
         idioma: idioma639((rec.find('controlfield[tag="008"]').first().text() || '').slice(35, 38)),
         paginas: paginasDe(sub('300', 'a')),
         dimensiones: limpiar(sub('300', 'c')),
         coleccion_nombre: limpiar(sub('490', 'a')),
         coleccion_numero: limpiar(sub('490', 'v'))?.replace(/^(n[º°o.]*|vol\.?)\s*/i, '') || null,
-        cdu: limpiar(sub('080', 'a')),
+        cdu: modernizarCDU(limpiar(sub('080', 'a'))),   // 820 → 821.111 (notación antigua)
         dewey: limpiar(sub('082', 'a')),
         fuente: 'bne',
     };

@@ -8,6 +8,8 @@
  * Por eso se puede recortar agresivamente el texto libre del nombre de carpeta sin perder dato.
  */
 
+import { cduParaUbicar } from './cdu-moderna.js';
+
 // Caracteres prohibidos en rutas (Windows ∪ Linux). NO incluye - ( ) = + . , que son válidos.
 const PROHIBIDOS = /[<>/\\|?*\x00-\x1f]/g;
 
@@ -57,7 +59,9 @@ const BUCKET_SIN_CLASE = '_sin_clasificar';
  *   - segmentos: la ruta jerárquica [clase, division, hoja] (o [BUCKET, hoja] si no hay clase).
  */
 export function arbolCDU(cdu) {
-    const hoja = sanitizarCDU(cdu) || BUCKET_SIN_CLASE;
+    // Se ubica por la CDU MODERNA (820 → 821.111) y, en una publicación juvenil (087.5:82), por su parte
+    // literaria: ver cdu-moderna.js. El valor guardado en la base no cambia.
+    const hoja = sanitizarCDU(cduParaUbicar(cdu)) || BUCKET_SIN_CLASE;
 
     // Sin dígito inicial (p. ej. "(460.23)", "=111", o puro texto): cae al cajón de revisión.
     if (!/^[0-9]/.test(hoja)) {

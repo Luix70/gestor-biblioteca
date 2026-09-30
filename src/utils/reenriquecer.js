@@ -26,6 +26,7 @@ import { huecosDesdeAutoridad, autoresConAncla } from './huecos-autoridad.js';
 import { aplicarCduConPrioridad } from './prioridad-cdu.js';
 import { cduDeAutoridadFiable } from './autoridad-isbn.js';
 import { variantesISBN, validarISBN, validarISSN } from './identificadores.js';
+import { limpiarNombreEditorial } from './editoriales-falsas.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '');
 
@@ -103,6 +104,7 @@ async function resolverAutores(db, nombres) {
     return out;
 }
 async function resolverEditorial(db, nombre) {
+    nombre = limpiarNombreEditorial(nombre);
     const ex = await db.collection('editoriales').findOne({ nombre });
     return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
 }

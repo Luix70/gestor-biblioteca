@@ -20,6 +20,7 @@
  */
 import { resolverPersona } from './resolver-persona.js';
 import { cduDeAutoridadFiable } from './autoridad-isbn.js';
+import { modernizarCDU } from './cdu-moderna.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 
@@ -63,8 +64,8 @@ export function huecosEscalares(doc, datos = {}) {
     // bibliotecarios): una CDU del clasificador (equivalencia Dewey/LCC o IA) nunca pasa por «de autoridad».
     if (datos.cdu && datos.cdu_fuente === 'bne' && cduDeAutoridadFiable(doc, datos)
         && datos.cdu !== doc.cdu && datos.cdu !== doc.cdu_autoridad && !doc.cdu_manual) {
-        set.cdu_autoridad = datos.cdu;
-        cambios.push({ campo: 'cdu_autoridad', de: doc.cdu_autoridad || null, a: datos.cdu });
+        set.cdu_autoridad = modernizarCDU(datos.cdu);
+        cambios.push({ campo: 'cdu_autoridad', de: doc.cdu_autoridad || null, a: set.cdu_autoridad });
     }
     return { set, cambios };
 }

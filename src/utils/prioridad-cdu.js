@@ -19,6 +19,7 @@
 import { reubicarPorCdu, carpetaDeDoc } from '../mantenimiento/util-mantenimiento.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
+import { modernizarCDU } from './cdu-moderna.js';
 
 export const RANGO_CDU = { manual: 4, impresa: 3, bne: 2, bnf: 2, clasificador: 1 };
 
@@ -73,6 +74,7 @@ export function mejorCdu(candidatas) {
  * @returns {Promise<{aplicada:boolean, motivo?:string, de?:string, a?:string}>}
  */
 export async function aplicarCduConPrioridad(db, doc, cduNueva, fuenteNueva, { aplicar = true } = {}) {
+    cduNueva = modernizarCDU(cduNueva);   // última red: nunca se aplica una CDU en notación antigua
     if (doc.obra) return { aplicada: false, motivo: 'tomo de obra: comparte la CDU de la obra' };
     if (!puedeSustituirCdu(doc, cduNueva, fuenteNueva)) {
         return { aplicada: false, motivo: `la CDU actual (${doc.cdu}, ${fuenteCduDoc(doc)}) tiene prioridad sobre ${cduNueva} (${fuenteNueva})` };

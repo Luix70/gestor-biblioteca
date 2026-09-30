@@ -9,6 +9,8 @@ import { variantesISBN } from './utils/identificadores.js';
 import { resolverPersona } from './utils/resolver-persona.js';
 import { separarAutores } from './utils/autor-normalizar.js';
 import { ROLES_VALIDOS, esComicPorDatos, promoverIlustradorSiComic } from './utils/contribuciones.js';
+import { limpiarNombreEditorial } from './utils/editoriales-falsas.js';
+import { modernizarCDU } from './utils/cdu-moderna.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -186,8 +188,12 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         }
         delete docFinal.contribuciones_nombres;
 
+        // CDU en notación MODERNA (820 → 821.111), venga de donde venga: última red antes de guardar (cdu-moderna.js).
+        if (docFinal.cdu) docFinal.cdu = modernizarCDU(docFinal.cdu);
+
         // 2. Editorial (string → ObjectId; crea si no existe).
         if (docFinal.editorial && typeof docFinal.editorial === 'string') {
+            docFinal.editorial = limpiarNombreEditorial(docFinal.editorial);   // «Valdemar,» → «Valdemar»
             const existente = await coleccionEditoriales.findOne({ nombre: docFinal.editorial });
             if (existente) docFinal.editorial = existente._id;
             else {

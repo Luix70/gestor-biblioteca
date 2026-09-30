@@ -44,6 +44,26 @@ Re-investiga los que esperaban tu elección y les asigna la más probable (muest
 «Resolver ediciones pendientes» hace lo mismo a reposo (**páusala mientras corre el script**). Después, si quieres,
 revisa en el Dashboard las filas **«ISBN provisional»** e **«ISBN dudoso»** (opcional: el registro ya está completo).
 
+### 3 bis. Después de la pasada del 30-sep (desplegar primero la versión con los arreglos)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/modernizar-cdu.js`
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/modernizar-cdu.js --ejecutar`
+
+Pasa a notación moderna las CDU de la BNE en notación antigua (820 → 821.111, 860 → 821.134.2…) y recoloca sus
+carpetas; también saca de la clase 0 los juveniles 087.5:82, que se ubican ahora por su parte literaria. Medido en
+seco el 30-sep: 474 CDU y 791 carpetas.
+
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/editoriales-por-prefijo.js`
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/editoriales-por-prefijo.js --ejecutar`
+
+Rellena o corrige la editorial por el prefijo del ISBN (84-7702 = Valdemar), SOLO donde falta o es basura
+(«SE», «ge», «Unknown», un distribuidor): 247 en seco. Las ~890 con otra editorial real (casi siempre un sello del
+mismo grupo: Routledge/Taylor & Francis) no se tocan: quedan en la selección «Editorial a revisar (prefijo ISBN)».
+
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir --ejecutar`
+
+Otra vez, para los falsos «❓ el ISBN ya es de otro título» («Colmillo Blanco (Ilustrado)» / «Colmillo Blanco»…):
+la comparación de títulos ya no se equivoca con los paréntesis.
+
 ### 4. Portadas falsas (la misma imagen en libros distintos)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js`
 

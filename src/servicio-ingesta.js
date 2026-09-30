@@ -28,6 +28,8 @@ import { mejorCdu, rangoFuente, RANGO_CDU } from './utils/prioridad-cdu.js';
 import { variantesISBN } from './utils/identificadores.js';
 import { esEditorialFalsa } from './utils/editoriales-falsas.js';
 import { editorialesDeColeccion, anotarEditorialDeColeccion } from './utils/indicios-coleccion.js';
+import { editorialCoherenteConISBN } from './utils/editorial-por-prefijo.js';
+import { mismoTituloLibro } from './utils/titulo-libro.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -285,6 +287,19 @@ export async function identificarEdicionEnIngesta(documento) {
         }
         if (!['unico', 'provisional', 'dudoso'].includes(r?.estado) || !r.isbn) return;
 
+        // ¿Ese ISBN ya lo tiene OTRO libro con OTRO título? (tomos de una obra que comparten el ISBN de uno, o un
+        // homónimo). Igual que en «Extraer ISBN»: no se asigna, se pregunta en la ficha. Mismo título (con o sin
+        // «(Ilustrado)», subtítulo, una errata) = otra versión del mismo libro: eso sí vale.
+        const db = await conectarDB();
+        const otro = await db.collection('biblioteca').findOne(
+            { isbn: { $in: variantesISBN(r.isbn) } }, { projection: { titulo: 1 } }).catch(() => null);
+        if (otro && !mismoTituloLibro(otro.titulo, documento.titulo)) {
+            documento.ediciones_candidatas = candidatasParaGuardar(r.candidatos || [r.elegido].filter(Boolean));
+            documento.ediciones_candidatas_fecha = new Date();
+            documento.alertas_agente = [...(documento.alertas_agente || []), `La edición identificada (ISBN ${r.isbn}) ya es de «${otro.titulo}», otro título: no se asigna — elige en la ficha.`];
+            return;
+        }
+
         documento.isbn = r.isbn;
         // PROVISIONAL (varias ediciones de la misma editorial): se completa con ella y se dejan las candidatas.
         if (r.estado === 'dudoso') documento.isbn_dudoso = true;   // única edición posible, sin confirmar
@@ -322,7 +337,14 @@ export async function identificarEdicionEnIngesta(documento) {
         // EDITORIAL DE LA EDICIÓN CONFIRMADA (única, o provisional con pruebas): manda sobre la que traía el registro
         // (pudo llegar de una API por título y ser de otra edición). En una dudosa o una provisional «a ciegas», no.
         const confirmada = r.estado === 'unico' || (r.estado === 'provisional' && r.confirmada !== false);
-        const edEdicion = r.elegido?.editorial;
+        let edEdicion = r.elegido?.editorial;
+        // Contrastada con el PREFIJO del ISBN (lo que la biblioteca ya sabe: 84-7702 = Valdemar): si la contradice,
+        // manda la del prefijo; si la editorial falta, se rellena con ella (editorial-por-prefijo.js).
+        const porPrefijo = await editorialCoherenteConISBN(db, r.isbn, edEdicion && !esEditorialFalsa(edEdicion) ? edEdicion : null, mismaEditorial);
+        if (porPrefijo.prefijo) {
+            edEdicion = porPrefijo.nombre;
+            if (!documento.editorial || esEditorialFalsa(documento.editorial)) documento.editorial = porPrefijo.nombre;
+        }
         if (confirmada && edEdicion && !esEditorialFalsa(edEdicion) && typeof documento.editorial === 'string'
             && documento.editorial && !mismaEditorial(documento.editorial, edEdicion)) {
             documento.alertas_agente = [...(documento.alertas_agente || []), `Editorial «${documento.editorial}» sustituida por «${edEdicion}», la de la edición identificada.`];

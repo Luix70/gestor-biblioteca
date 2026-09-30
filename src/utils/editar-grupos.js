@@ -8,11 +8,12 @@
  */
 import { ObjectId } from 'mongodb';
 import { validarISBN, validarISSN } from './identificadores.js';
+import { limpiarNombreEditorial } from './editoriales-falsas.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
 async function resolverEditorial(db, nombre) {
-    const t = String(nombre || '').trim();
+    const t = limpiarNombreEditorial(String(nombre || ''));
     if (!t) return null;
     const ex = await db.collection('editoriales').findOne({ nombre: t });
     return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;

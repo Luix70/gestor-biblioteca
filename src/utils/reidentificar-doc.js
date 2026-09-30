@@ -27,7 +27,7 @@ import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { identificarEdicion, candidatasParaGuardar, mismaEditorial, traductoresDelTitulo } from './identificar-edicion.js';
 import { editorialesDeColeccion, anotarEditorialDeColeccion } from './indicios-coleccion.js';
-import { esEditorialFalsa } from './editoriales-falsas.js';
+import { esEditorialFalsa, limpiarNombreEditorial } from './editoriales-falsas.js';
 import { extraerMetadatosEpub, textoInicialEpub } from './lector-epub.js';
 import { huecosDesdeAutoridad } from './huecos-autoridad.js';
 import { aplicarCduConPrioridad, puedeSustituirCdu, fuenteCduDoc } from './prioridad-cdu.js';
@@ -41,6 +41,8 @@ import { editarDocumento } from './editar-doc.js';
 import { resolverPersona } from './resolver-persona.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
+import { mismoTituloLibro } from './titulo-libro.js';
+import { editorialCoherenteConISBN } from './editorial-por-prefijo.js';
 
 export { isbnDesdeArchivo } from './isbn-archivo.js'; // re-exportado por comodidad de los consumidores
 
@@ -137,7 +139,7 @@ async function isbnPorCIP(doc, abs) {
     return r;
 }
 async function resolverEditorial(db, nombre) {
-    const t = String(nombre || '').trim();
+    const t = limpiarNombreEditorial(String(nombre || ''));
     if (!t) return null;
     const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });
     return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
@@ -322,10 +324,9 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // —Primavera, Verano…— recibían el ISBN del primero). Entonces no se asigna: quedan las candidatas para elegir.
     // (Mismo título = otra versión o formato del mismo libro: eso sí vale; lo reúne la fusión de versiones.)
     if (isbn && via.startsWith('autoridad/')) {
-        const normT = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
         const otro = await db.collection('biblioteca').findOne(
             { isbn: { $in: variantesISBN(isbn) }, _id: { $ne: doc._id } }, { projection: { titulo: 1 } });
-        if (otro && normT(otro.titulo) !== normT(doc.titulo)) {
+        if (otro && !mismoTituloLibro(otro.titulo, doc.titulo)) {
             const candidatos = (provisional?.candidatos || (edicion ? [edicion] : []));
             ambiguo = { motivo: `el ISBN ${isbn} ya es de «${otro.titulo}» (${otro._id}), otro título: no se asigna`, candidatos };
             isbn = null; via = ''; provisional = null; dudoso = null; edicion = null;
@@ -384,18 +385,29 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // Editorial: rellena si falta (del fichero o de la autoridad).
     // Editorial para un hueco: la primera REAL (nunca un maquetador como «ePubLibre», que el OPF del EPUB declara
     // como dc:publisher: medido, se colaba en libros sin editorial).
-    const editorialNom = [ext.editorial, datos.editorial, edicion?.editorial].find((e) => e && !esEditorialFalsa(e)) || null;
+    let editorialNom = [ext.editorial, datos.editorial, edicion?.editorial].find((e) => e && !esEditorialFalsa(e)) || null;
+    // Contrastada con el PREFIJO del ISBN: si la biblioteca ya sabe de quién es (84-7702 = Valdemar), manda eso
+    // sobre lo que diga una API («Rama Publishing Company»), y rellena el hueco aunque ninguna fuente lo diga.
+    if (!doc.editorial && isbn) {
+        const coherente = await editorialCoherenteConISBN(db, isbn, editorialNom, mismaEditorial, { excluirId: doc._id });
+        editorialNom = coherente.nombre;
+    }
     if (!doc.editorial && editorialNom) { set.editorial = aplicar ? await resolverEditorial(db, editorialNom) : editorialNom; nombres.editorial = editorialNom; }
     // EDICIÓN CONFIRMADA — la que ELEGISTE en la ficha (ISBN manual) o la única/provisional por autoridad —: su
     // editorial manda. El ISBN ES esa edición, y un registro con el ISBN de La Factoría y la editorial «Gamon» o
     // «Salamandra» sería incoherente (el campo editorial pudo llegar de una API y estar mal). Se sustituye y se anota
     // la anterior. En una DUDOSA no: ahí lo dudoso es el ISBN, y la editorial del registro puede ser la buena.
     const candidataElegida = manual ? (doc.ediciones_candidatas || []).find((c) => variantesISBN(c.isbn).includes(manual)) : null;
-    const edEdicionConfirmada = [
+    let edEdicionConfirmada = [
         (edicion && !dudoso) ? edicion.editorial : null,
         manual ? datos.editorial : null,          // la autoridad por ESE ISBN
         candidataElegida?.editorial,              // o la de la candidata que elegiste
     ].find((e) => e && !esEditorialFalsa(e)) || null;
+    // Tampoco se impone una editorial que contradiga el prefijo del ISBN (Distribooks sobre Hodder, 30-sep).
+    if (doc.editorial && edEdicionConfirmada && isbn) {
+        const coherente = await editorialCoherenteConISBN(db, isbn, edEdicionConfirmada, mismaEditorial, { excluirId: doc._id });
+        edEdicionConfirmada = coherente.nombre;
+    }
     if (doc.editorial && edEdicionConfirmada && editorialActual === null) {
         const ed = await db.collection('editoriales').findOne({ _id: doc.editorial }, { projection: { nombre: 1 } }).catch(() => null);
         editorialActual = ed?.nombre || '';

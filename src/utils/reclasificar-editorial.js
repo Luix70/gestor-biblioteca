@@ -37,7 +37,7 @@ import { editorialDeColeccionMapa, editorialDeColeccionIA } from './coleccion-ed
 // «Editoriales» que en realidad son grupos de maquetación/difusión o re-editores de dominio público (no
 // casas editoriales): si un libro tiene una de estas y no hallamos una real, se propone quitarla. Lista
 // compartida — ver `utils/editoriales-falsas.js`.
-import { esEditorialFalsa } from './editoriales-falsas.js';
+import { esEditorialFalsa, limpiarNombreEditorial } from './editoriales-falsas.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
@@ -52,15 +52,7 @@ function normEd(nombre) {
     return s.replace(/\s+/g, ' ').trim();
 }
 
-// Quita puntuación de los BORDES de un nombre de editorial (no interna: «John Wiley & Sons», «W. W. Norton»
-// se conservan). Los volcados arrastran restos como «Planeta]», «Acantilado,», «[Destino», «Anagrama;».
-function limpiarNombreEditorial(nombre) {
-    return String(nombre || '')
-        .replace(/^[\s.,;:·\-«»"'()\[\]]+/, '')
-        .replace(/[\s.,;:·\-«»"'()\[\]]+$/, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
+// La limpieza de bordes («Planeta]», «Acantilado,», «[Destino», «Anagrama;») es la común: editoriales-falsas.js.
 
 // De la respuesta de un proveedor, saca un nombre de editorial LIMPIO (o null). Limpia los bordes, descarta
 // las falsas (para que el proveedor no reintroduzca ePubLibre) y las cadenas vacías/absurdas.
@@ -263,6 +255,7 @@ export async function aplicarReclasificacion(db, plan) {
     const resueltas = new Map();
     let creadas = 0;
     const resolverEditorial = async (nombre) => {
+        nombre = limpiarNombreEditorial(nombre);
         const clave = normEd(nombre);
         if (resueltas.has(clave)) return resueltas.get(clave);
         // Buscar una existente por nombre exacto (tolerante a mayúsculas) y afinar por normalización en memoria.

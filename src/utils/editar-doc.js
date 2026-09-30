@@ -13,6 +13,8 @@ import { resolverPersona } from './resolver-persona.js';
 import { ROLES_VALIDOS } from './contribuciones.js';
 import { claveNumero } from './revistas.js';
 import path from 'node:path';
+import { limpiarNombreEditorial } from './editoriales-falsas.js';
+import { modernizarCDU } from './cdu-moderna.js';
 
 const TEXTO = ['subtitulo', 'idioma', 'numero_edicion', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'obra_titulo'];
 const NUM = ['año_edicion', 'paginas', 'volumen_numero'];
@@ -30,7 +32,7 @@ async function resolverAutores(db, nombres) {
     return out;
 }
 async function resolverEditorial(db, nombre) {
-    const t = String(nombre || '').trim(); if (!t) return null;
+    const t = limpiarNombreEditorial(String(nombre || '')); if (!t) return null;
     const ex = await db.collection('editoriales').findOne({ nombre: t });
     return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
 }
@@ -163,6 +165,8 @@ export async function editarDocumento(db, id, campos = {}) {
 
     // CDU cambiada A MANO: la clasificación manual manda → mover la carpeta a su árbol nuevo al instante y
     // proteger el valor (cdu_manual) para que el Conformador (re-clasificar-cdu) no lo recalcule ni lo pise.
+    // La CDU se guarda siempre en notación MODERNA (820 → 821.111), también la escrita a mano (cdu-moderna.js).
+    if (set.cdu) set.cdu = modernizarCDU(set.cdu);
     if (set.cdu && docActual && set.cdu !== docActual.cdu) {
         try {
             const reub = await reubicarPorCdu(docActual, set.cdu);

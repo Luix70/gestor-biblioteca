@@ -1,4 +1,5 @@
 import { validarISBN } from './identificadores.js';
+import { modernizarCDU } from './cdu-moderna.js';
 
 /**
  * Parser del BLOQUE DE CATALOGACIÓN EN PUBLICACIÓN (CIP) que muchos libros imprimen en la página
@@ -125,7 +126,7 @@ export function cduImpresa(texto) {
         const entorno = t.slice(Math.max(0, m.index - 400), m.index + m[0].length + 400);
         if (!RE_CREDITOS_CERCA.test(entorno)) continue;          // no es la página de créditos de este libro
         if (RE_BIBLIOGRAFIA_CERCA.test(entorno) && !/ISBN/i.test(entorno)) continue;
-        return codigo;
+        return modernizarCDU(codigo);   // un CIP de un libro viejo puede traer 860, 820… (notación antigua)
     }
     return null;
 }
