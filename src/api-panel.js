@@ -245,7 +245,9 @@ async function condicionCampoBusqueda(db, campo, valor) {
     if (campo === 'isbn') {
         // Un ISBN válido casa por sus DOS variantes (10/13); si no es válido (parcial), regex por los dígitos.
         const vars = variantesISBN(valor);
-        return vars.length ? { isbn: { $in: vars } } : { isbn: { $regex: escapeRegex(valor.replace(/[^0-9Xx]/g, '')), $options: 'i' } };
+        // También el ISBN PROBABLE (edición sin confirmar): quien busca por el ISBN de su ejemplar debe encontrarlo.
+        const cond = vars.length ? { $in: vars } : { $regex: escapeRegex(valor.replace(/[^0-9Xx]/g, '')), $options: 'i' };
+        return { $or: [{ isbn: cond }, { isbn_probable: cond }] };
     }
     if (campo === 'issn') {
         const norm = validarISSN(valor);   // "NNNN-NNNC" si es válido
@@ -1039,7 +1041,7 @@ export function rutasPanel() {
                 const qId = q.replace(/[^0-9Xx]/g, '');
                 if (qId.length >= 8) {
                     const irx = { $regex: '^' + qId.split('').join('[\\s-]?'), $options: 'i' };
-                    or.push({ isbn: irx }, { issn: irx }, { isbn_obra: irx }, { 'isbns_alternativos.isbn': irx });
+                    or.push({ isbn: irx }, { issn: irx }, { isbn_obra: irx }, { 'isbns_alternativos.isbn': irx }, { isbn_probable: irx });
                     // El ISSN de una serie de libros vive en la COLECCIÓN (no en el libro): buscar la
                     // cabecera/serie por su ISSN y traer sus miembros.
                     const colsISSN = await db.collection('colecciones').find({ issn: irx }, { projection: { _id: 1 } }).limit(50).toArray();

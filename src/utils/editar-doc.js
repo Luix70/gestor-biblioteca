@@ -83,7 +83,7 @@ export async function editarDocumento(db, id, campos = {}) {
         if (set.isbn || unset.isbn) {
             const previo = await db.collection('biblioteca').findOne({ _id: new ObjectId(id) }, { projection: { isbn: 1 } });
             if (String(previo?.isbn || '') !== String(set.isbn || '')) {
-                Object.assign(unset, { isbn_provisional: '', isbn_dudoso: '', ediciones_candidatas: '', ediciones_candidatas_fecha: '' });
+                Object.assign(unset, { isbn_provisional: '', isbn_dudoso: '', isbn_probable: '', ediciones_candidatas: '', ediciones_candidatas_fecha: '' });
             }
         }
     }

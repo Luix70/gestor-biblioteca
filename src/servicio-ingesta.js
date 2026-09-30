@@ -30,6 +30,7 @@ import { esEditorialFalsa } from './utils/editoriales-falsas.js';
 import { editorialesDeColeccion, anotarEditorialDeColeccion } from './utils/indicios-coleccion.js';
 import { editorialCoherenteConISBN } from './utils/editorial-por-prefijo.js';
 import { mismoTituloLibro } from './utils/titulo-libro.js';
+import { datosDeObraDeCandidatas } from './utils/datos-de-obra.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -281,8 +282,24 @@ export async function identificarEdicionEnIngesta(documento) {
         if (r?.estado === 'ambiguo' && r.candidatos?.length) {
             documento.ediciones_candidatas = candidatasParaGuardar(r.candidatos);
             documento.ediciones_candidatas_fecha = new Date();
-            documento.alertas_agente = [...(documento.alertas_agente || []), `Sin ISBN en el fichero: ${r.candidatos.length} edición(es) posible(s) por autoridad — elige la tuya en la ficha («¿Cuál es tu edición?»).`];
-            console.log(`   📚 Edición ambigua (${r.candidatos.length} candidata/s): se pregunta en la ficha.`);
+            // La MÁS PROBABLE, aparte: visible y buscable, pero no es el ISBN del documento hasta que se confirme.
+            if (r.probable?.isbn) documento.isbn_probable = r.probable.isbn;
+            // Los datos de la OBRA (iguales en todas las ediciones) se completan con las candidatas: sinopsis, lengua
+            // original, materias y la CDU si coinciden. Nada de la edición (editorial, año, páginas, colaboradores).
+            const obra = await datosDeObraDeCandidatas(documento, r.candidatos, { enLinea: lenguaDeBNE(datos.idioma) })
+                .catch(() => ({ set: {}, cambios: [], cdu: null }));
+            Object.assign(documento, obra.set);
+            if (obra.cdu) {
+                const elegida = mejorCdu([
+                    documento.cdu ? { cdu: documento.cdu, fuente: documento.cdu_fuente || 'clasificador' } : null,
+                    { cdu: obra.cdu, fuente: 'bne' },
+                ]);
+                if (elegida && elegida.cdu !== documento.cdu) { documento.cdu = elegida.cdu; documento.cdu_fuente = elegida.fuente; }
+            }
+            const completados = [...obra.cambios.map((c) => c.campo), ...(obra.cdu ? ['CDU'] : [])];
+            documento.alertas_agente = [...(documento.alertas_agente || []), `Sin ISBN en el fichero: ${r.candidatos.length} edición(es) posible(s) por autoridad — elige la tuya en la ficha («¿Cuál es tu edición?»).`
+                + (completados.length ? ` Datos de la obra completados con ellas: ${completados.join(', ')}.` : '')];
+            console.log(`   📚 Edición ambigua (${r.candidatos.length} candidata/s): se pregunta en la ficha${r.probable?.isbn ? ` (probable ${r.probable.isbn})` : ''}.`);
             return;
         }
         if (!['unico', 'provisional', 'dudoso'].includes(r?.estado) || !r.isbn) return;
@@ -330,7 +347,9 @@ export async function identificarEdicionEnIngesta(documento) {
                 if (elegida && elegida.cdu !== documento.cdu) { documento.cdu = elegida.cdu; documento.cdu_fuente = elegida.fuente; }
             }
             if (reg.editorial && !esEditorialFalsa(reg.editorial) && (!documento.editorial || esEditorialFalsa(documento.editorial))) documento.editorial = reg.editorial;
-            if (Array.isArray(reg.contribuciones_nombres) && reg.contribuciones_nombres.length && !(documento.contribuciones_nombres?.length)) {
+            // Los COLABORADORES (traductor, ilustrador…) son de la EDICIÓN: solo con la edición CONFIRMADA (regla del
+            // usuario, 30-sep), no con una provisional o dudosa.
+            if (r.estado === 'unico' && Array.isArray(reg.contribuciones_nombres) && reg.contribuciones_nombres.length && !(documento.contribuciones_nombres?.length)) {
                 documento.contribuciones_nombres = reg.contribuciones_nombres;
             }
         }

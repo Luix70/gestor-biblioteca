@@ -1270,6 +1270,24 @@ de ficheros clasificado por CDU.
     una editorial real distinta NUNCA la cambia: va a la selección «Editorial a revisar (prefijo ISBN)» (890, la
     mayoría sellos del mismo grupo). Salta los ISBN sospechosos y los compartidos por títulos distintos. La editorial de la COLECCIÓN o la escrita en el título ya no la rescata un
     traductor coincidente («La hija del capitán», colección de Anaya, recibía la edición de Paulinas).
+    EDICIONES SIN DECIDIR: ISBN PROBABLE + DATOS DE LA OBRA (2026-09-30, regla del usuario). Cuando hay varias
+    ediciones posibles de editoriales distintas y nada decide:
+      · la MÁS PROBABLE se guarda APARTE en `isbn_probable` (no en `isbn`): se ve en la ficha («ISBN probable ·
+        sin confirmar», ⭐ en «¿Cuál es tu edición?») y la búsqueda por ISBN la encuentra, pero NO se usa como
+        pivote (fusión, portada remota, cotejo, CDU por ISBN…) hasta que la confirmes. Orden: pruebas → edición de
+        verdad (no autoedición ni bajo demanda) → misma lengua → BNE > Fichero > OpenLibrary → más reciente. Si hasta
+        la mejor es de CreateSpace/«Independently Published», no hay probable (la tuya no está entre ellas).
+      · las candidatas completan los datos de la OBRA (`utils/datos-de-obra.js`), que no cambian entre ediciones:
+        sinopsis (de una en la lengua del ejemplar), lengua original, materias (unión) y la CDU si las que la traen
+        COINCIDEN (2+; una juvenil 087.5 y una de adultos discrepan → no). Solo huecos, con diario `deshacer[]`.
+      · NUNCA de una candidata sin confirmar: ISBN, editorial, año, páginas, medidas, colección, portada y los
+        COLABORADORES (traductor, ilustrador, prologuista…). Esto vale también para las ediciones PROVISIONALES y
+        DUDOSAS: ya no reciben los colaboradores de la autoridad (`huecosDesdeAutoridad({conContribuciones:false})`);
+        llegan cuando eliges la edición en la ficha.
+      · en una colisión («el ISBN ya es de otro título», p. ej. otro tomo) las candidatas son de OTRO libro: se
+        guardan para elegir, pero no aportan datos.
+    En «Extraer ISBN», la campaña «Resolver ediciones pendientes», reidentificar-sin-isbn y la ingesta (paso 1a).
+    Al fijar el ISBN (elegir, a mano o por identificación) `isbn_probable` desaparece.
     MISMO TÍTULO CON EL MISMO ISBN (`utils/titulo-libro.js·mismoTituloLibro`): la guarda «ese ISBN ya es de otro
     título» ignora paréntesis/corchetes («(Ilustrado)», «(trad. …)»), acepta el título con/sin subtítulo y una
     errata de 1-2 letras, pero exige los mismos NÚMEROS (tomo 1 ≠ tomo 2). Antes 14 falsos «❓» en un tramo de la

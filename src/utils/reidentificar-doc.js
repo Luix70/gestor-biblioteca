@@ -43,6 +43,7 @@ import { indexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
 import { mismoTituloLibro } from './titulo-libro.js';
 import { editorialCoherenteConISBN } from './editorial-por-prefijo.js';
+import { datosDeObraDeCandidatas } from './datos-de-obra.js';
 
 export { isbnDesdeArchivo } from './isbn-archivo.js'; // re-exportado por comodidad de los consumidores
 
@@ -160,6 +161,57 @@ function noDegrada(actual, nuevo) {
  * Guarda en el documento las EDICIONES CANDIDATAS de una identificación ambigua (máx. 8), con lo justo para
  * reconocerlas: ISBN, título, editorial, año, idioma, colección, de dónde salen y qué casó.
  */
+/**
+ * Identificación AMBIGUA: guarda las candidatas (ordenadas, la más probable primero), la más probable aparte como
+ * `isbn_probable`, y completa los datos de la OBRA con todas ellas (datos-de-obra.js: sinopsis, lengua original,
+ * materias y la CDU si coinciden — nunca editorial, año, páginas ni colaboradores). Con diario para deshacer.
+ * @returns {Promise<{ resumen: string }>}  texto para el informe (« · probable 978… · obra: sinopsis, CDU …»)
+ */
+async function completarConCandidatas(db, doc, ambiguo, { aplicar, usarApis, carpeta }) {
+    const probable = ambiguo.probable?.isbn || null;
+    const obra = await datosDeObraDeCandidatas(doc, ambiguo.candidatos, { enLinea: usarApis }).catch(() => ({ set: {}, cambios: [], cdu: null }));
+    const trozos = [];
+    if (probable) trozos.push(`probable ${probable}`);
+    if (obra.cambios.length) trozos.push(`obra: ${obra.cambios.map((c) => c.campo).join(', ')}`);
+    if (obra.cdu && obra.cdu !== doc.cdu) trozos.push(`CDU de consenso ${obra.cdu}`);
+    const resumen = trozos.length ? ` · ${trozos.join(' · ')}` : '';
+    if (!aplicar) return { resumen };
+
+    const set = {
+        ...obra.set,
+        ediciones_candidatas: candidatasParaGuardar(ambiguo.candidatos),
+        ediciones_candidatas_fecha: new Date(),
+    };
+    if (probable) set.isbn_probable = probable;
+    const cambiaDatos = obra.cambios.length > 0;
+    if (cambiaDatos) {
+        set.fecha_actualizacion = new Date();
+        set.alertas_agente = [...(doc.alertas_agente || []),
+            `Edición sin decidir: datos de la OBRA completados con las ${ambiguo.candidatos.length} ediciones candidatas (${obra.cambios.map((c) => c.campo).join(', ')}).`];
+    }
+    const antes = {};
+    for (const k of Object.keys(obra.set).concat(probable ? ['isbn_probable'] : [])) antes[k] = doc[k] === undefined ? null : doc[k];
+    const entrada = { fecha: new Date(), origen: 'candidatas', antes };
+    await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: set, $push: { deshacer: entrada } });
+    if (cambiaDatos) {
+        await indexarDoc(db, doc._id).catch(() => {});
+        await regenerarSidecarsDoc(db, { ...doc, ...set }, carpeta).catch(() => {});
+    }
+    // CDU de CONSENSO (todas las candidatas con CDU de la BNE dicen la misma): es de la obra; se aplica por
+    // prioridad, como la de la BNE (mueve la carpeta; no pisa una manual ni una impresa).
+    if (obra.cdu) {
+        const actualizado = await db.collection('biblioteca').findOne({ _id: doc._id });
+        const rc = actualizado ? await aplicarCduConPrioridad(db, actualizado, obra.cdu, 'bne').catch(() => null) : null;
+        if (rc?.aplicada) {
+            await db.collection('biblioteca').updateOne(
+                { _id: doc._id, 'deshacer.fecha': entrada.fecha },
+                { $set: { 'deshacer.$.antes.cdu': doc.cdu ?? null, 'deshacer.$.antes.cdu_fuente': doc.cdu_fuente ?? null, 'deshacer.$.antes.ruta_base': doc.ruta_base ?? null } },
+            ).catch(() => {});
+        }
+    }
+    return { resumen };
+}
+
 async function guardarCandidatas(db, doc, candidatos) {
     const lista = candidatasParaGuardar(candidatos);
     await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { ediciones_candidatas: lista, ediciones_candidatas_fecha: new Date() } });
@@ -179,7 +231,7 @@ export async function elegirEdicion(db, id, { isbn = null, ninguna = false } = {
     if (!doc) return { ok: false, motivo: 'documento no encontrado' };
     if (ninguna) {
         await db.collection('biblioteca').updateOne({ _id }, {
-            $unset: { ediciones_candidatas: '', ediciones_candidatas_fecha: '' },
+            $unset: { ediciones_candidatas: '', ediciones_candidatas_fecha: '', isbn_probable: '' },
             $set: { edicion_descartada: true },
             $push: { alertas_agente: 'Ediciones candidatas descartadas a mano: ninguna era la de este ejemplar.' },
         });
@@ -328,7 +380,7 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
             { isbn: { $in: variantesISBN(isbn) }, _id: { $ne: doc._id } }, { projection: { titulo: 1 } });
         if (otro && !mismoTituloLibro(otro.titulo, doc.titulo)) {
             const candidatos = (provisional?.candidatos || (edicion ? [edicion] : []));
-            ambiguo = { motivo: `el ISBN ${isbn} ya es de «${otro.titulo}» (${otro._id}), otro título: no se asigna`, candidatos };
+            ambiguo = { motivo: `el ISBN ${isbn} ya es de «${otro.titulo}» (${otro._id}), otro título: no se asigna`, candidatos, colision: true };
             isbn = null; via = ''; provisional = null; dudoso = null; edicion = null;
         }
     }
@@ -340,8 +392,18 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
             // Varias ediciones posibles: NO se elige ninguna. Se guardan como candidatas para que elijas tú en la
             // ficha («¿Cuál es tu edición?»). No se toca nada más del documento (ni fecha_actualizacion: no hay
             // cambio de datos, así que no hace falta regenerar sus sidecars).
-            if (aplicar && ambiguo.candidatos?.length) await guardarCandidatas(db, doc, ambiguo.candidatos);
-            return { estado: 'ambiguo', reintentable, motivo: ambiguo.motivo + porQue, candidatos: ambiguo.candidatos };
+            // Además (regla del usuario, 30-sep): la MÁS PROBABLE queda aparte como `isbn_probable` (no es el ISBN
+            // del documento: no se usa como pivote hasta que se confirme) y las candidatas aportan los datos de la
+            // OBRA que falten (sinopsis, lengua original, materias, CDU si coinciden). Nada de la edición.
+            // (En una COLISIÓN —el ISBN era de otro libro, p. ej. otro tomo— las candidatas son ediciones de ESE otro
+            // libro: sus datos no valen aquí. Solo se guardan para elegir.)
+            let obra = { resumen: '' };
+            if (ambiguo.candidatos?.length && ambiguo.colision) {
+                if (aplicar) await guardarCandidatas(db, doc, ambiguo.candidatos);
+            } else if (ambiguo.candidatos?.length) {
+                obra = await completarConCandidatas(db, doc, ambiguo, { aplicar, usarApis, carpeta });
+            }
+            return { estado: 'ambiguo', reintentable, motivo: ambiguo.motivo + obra.resumen + porQue, candidatos: ambiguo.candidatos };
         }
         if (!abs && !manual) return { estado: 'sin-fichero', reintentable, motivo: 'no se encontró el fichero del documento en su carpeta' + porQue };
         if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', reintentable, motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` + porQue };
@@ -419,7 +481,9 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     }
     // HUECOS: TODO lo que la autoridad aporte y no tengamos (fecha, páginas, medidas, Dewey/LCC, traductor,
     // materias, lengua original, CDU de autoridad…), con la función común. Nunca sobrescribe.
-    const huecos = await huecosDesdeAutoridad(db, doc, datos, { aplicar });
+    // Los COLABORADORES (traductor, ilustrador…) son de la EDICIÓN: con una provisional o dudosa no se dan por buenos
+    // (regla del usuario, 30-sep). Llegarán cuando la edición se confirme (la eliges tú en la ficha).
+    const huecos = await huecosDesdeAutoridad(db, doc, datos, { aplicar, conContribuciones: !provisional && !dudoso });
     Object.assign(set, huecos.set);
     for (const c of huecos.cambios) if (c.campo === 'contribuciones' || c.campo === 'cdu_autoridad') nombres[c.campo] = c.a;
     // Colección de la edición («Colección gótica», nº 112): solo como dato si el doc no está ya en una. No se
@@ -455,6 +519,8 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     } else if (doc.ediciones_candidatas || doc.isbn_provisional || (doc.isbn_dudoso && !dudoso)) {
         quitar = { $unset: { ediciones_candidatas: '', ediciones_candidatas_fecha: '', isbn_provisional: '', ...(dudoso ? {} : { isbn_dudoso: '' }) } };
     }
+    // Con el ISBN resuelto, el «probable» sobra.
+    if (doc.isbn_probable) quitar = { $unset: { ...(quitar.$unset || {}), isbn_probable: '' } };
     // DIARIO PARA DESHACER: el valor ANTERIOR de todo lo que se va a cambiar (null = el campo estaba vacío). Con él,
     // scripts/deshacer-reidentificacion.js devuelve el documento a como estaba (incluida la CDU y la carpeta, abajo).
     const INTERNOS = new Set(['alertas_agente', 'fecha_actualizacion', 'mantenimiento_firma', 'mantenimiento.re-clasificar-cdu']);

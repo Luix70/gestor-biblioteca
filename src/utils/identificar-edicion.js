@@ -294,10 +294,13 @@ function reducirCandidatas(doc, casi) {
 function masProbable(doc, lista, porQue) {
     const iDoc = idioma2(doc.idioma);
     const FUENTE = { bne: 3, fichero: 2, openlibrary: 1 };
+    // Una edición «de verdad» va antes que la lengua: una autoedición o reimpresión bajo demanda (CreateSpace,
+    // «Independently Published», 979-8…) casi nunca es la base de un EPUB/PDF de biblioteca, aunque declare la lengua
+    // y sea la más reciente (medido el 30-sep: era la «más probable» de «Drácula», «Primer amor», «Catriona»).
     const puntos = (c) => [
         (c.señales || []).length,
+        esBajoDemanda(c) || esEditorialFalsa(c.editorial) ? 0 : 1,
         iDoc && idioma2(c.idioma) === iDoc ? 1 : 0,
-        esBajoDemanda(c) ? 0 : 1,
         FUENTE[c.fuente] || 0,
         parseInt(c.anio, 10) || 0,
     ];
@@ -544,8 +547,18 @@ export async function identificarEdicion(doc, { online = false, conIA = false, l
         // lotería (medido el 29-sep: adaptaciones de Oxford Bookworms recibían el ISBN de ediciones completas de
         // Printers Row, Nasionale Boekhandel, Harvard…). Todas de la misma editorial → provisional (la edición da
         // igual); si no, se guardan las candidatas y eliges tú en la ficha.
-        return conCaidas(siMismaEditorial(conSeñales) || { estado: 'ambiguo', candidatos: conSeñales,
-            motivo: `${conSeñales.length} ediciones posibles de editoriales distintas y nada que confirme cuál: elige en la ficha` });
+        const mismaEd = siMismaEditorial(conSeñales);
+        if (mismaEd) return conCaidas(mismaEd);
+        // Aun así se señala la MÁS PROBABLE (`probable`), que el llamante guarda APARTE (isbn_probable): visible en la
+        // ficha y buscable, pero no es el ISBN del documento — no se usa como pivote hasta que se confirme. Las
+        // candidatas van ordenadas de más a menos probable.
+        // Si hasta la mejor es una autoedición o reimpresión bajo demanda, la edición real no está entre las
+        // candidatas: no hay «más probable» (señalar una de CreateSpace engañaría).
+        const orden = masProbable(doc, conSeñales, 'sin pruebas');
+        const real = !esBajoDemanda(orden.elegido) && !esEditorialFalsa(orden.elegido.editorial);
+        return conCaidas({ estado: 'ambiguo', candidatos: orden.candidatos, probable: real ? orden.elegido : null,
+            motivo: `${conSeñales.length} ediciones posibles de editoriales distintas y nada que confirme cuál: elige en la ficha`
+                + (real ? ` (la más probable: ${orden.elegido.editorial || '?'}, ${orden.elegido.anio || '?'})` : ' (todas son autoediciones o bajo demanda: la tuya quizá no está entre ellas)') });
     }
     if (caidas.length) return conCaidas({ estado: 'sin-candidatos', candidatos: [], motivo: `no hallado, pero no respondió: ${[...new Set(caidas)].join(', ')}` });
     return conCaidas({ estado: 'sin-candidatos', candidatos: [], motivo: 'ninguna autoridad tiene esta edición' });

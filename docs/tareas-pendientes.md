@@ -63,6 +63,8 @@ mismo grupo: Routledge/Taylor & Francis) no se tocan: quedan en la selección «
 
 Otra vez, para los falsos «❓ el ISBN ya es de otro título» («Colmillo Blanco (Ilustrado)» / «Colmillo Blanco»…):
 la comparación de títulos ya no se equivoca con los paréntesis.
+Además, a las que sigan sin decidir les pone el **ISBN probable** (aparte, sin confirmar) y completa con todas las
+candidatas los datos de la OBRA (sinopsis, lengua original, materias, CDU si coinciden). Nada de la edición.
 
 ### 4. Portadas falsas (la misma imagen en libros distintos)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js`

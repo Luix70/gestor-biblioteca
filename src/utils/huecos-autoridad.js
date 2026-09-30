@@ -74,10 +74,13 @@ export function huecosEscalares(doc, datos = {}) {
  * Todos los huecos, incluidas las contribuciones (traductor, ilustrador…) resueltas a personas.
  * @param opts.aplicar  false = prueba en seco: las contribuciones NO se resuelven a personas (eso las CREARÍA en
  *                      la base); solo se informa de ellas en `cambios`.
+ * @param opts.conContribuciones  false = sin colaboradores: son de la EDICIÓN, y con una edición provisional o
+ *                      dudosa no se dan por buenos (regla del usuario, 30-sep).
  * @returns {Promise<{ set: object, cambios: Array<{campo, de, a}> }>}
  */
-export async function huecosDesdeAutoridad(db, doc, datos = {}, { aplicar = true } = {}) {
+export async function huecosDesdeAutoridad(db, doc, datos = {}, { aplicar = true, conContribuciones = true } = {}) {
     const { set, cambios } = huecosEscalares(doc, datos);
+    if (!conContribuciones) return { set, cambios };
 
     // Una persona que es AUTORA del libro no es a la vez su traductora o editora: las fichas de autoridad a veces la
     // repiten con otro rol (medido el 29-sep: «Highsmith, Patricia (traductor)», «Powell, Anthony (traductor)»,

@@ -3512,6 +3512,9 @@ function pintarDoc(r, ctx) {
       return `<a class="rowlink mono" data-clascdu="${esc(d.cdu)}" title="Ver todo lo de esta CDU en el Catálogo">${esc(d.cdu)}</a>${descCdu}`;
     })() : null],
     ['ISBN', especiales._isbn],
+    // ISBN PROBABLE: la edición más probable de varias sin decidir. No es el ISBN del documento (no se usa para nada
+    // hasta que lo confirmes en «¿Cuál es tu edición?»); se muestra para reconocerla y porque es buscable.
+    ['ISBN probable', !d.isbn && d.isbn_probable ? `<span class="mono">${esc(d.isbn_probable)}</span> <span class="muted">· sin confirmar</span>` : null],
     ['ISSN', especiales._issn],
     ['DOI', especiales._doi],
     ['Cita', especiales._cita],
@@ -3616,10 +3619,10 @@ function pintarDoc(r, ctx) {
     ? `<details class="card foldcard admin-only" id="edicionDet" ${_prov ? '' : 'open'} style="margin-top:14px"><summary>📚 ${_prov ? 'Edición provisional' : '¿Cuál es tu edición?'}</summary>
         <div class="muted" style="font-size:12px;margin:8px 0">${_prov
           ? `ISBN <b>${esc(d.isbn || '')}</b> asignado como PROVISIONAL: las ${_cands.length} ediciones posibles son de la misma editorial, así que autor, traducción, sinopsis y CDU no cambian. Si tu ejemplar es otra, elígela (o confirma esta).`
-          : `No se encontró el ISBN en el fichero y hay ${_cands.length === 1 ? 'una edición posible que nada confirma' : _cands.length + ' ediciones posibles'}. Elige la de este ejemplar: se aplicará su ISBN y se completarán los datos que falten (nunca se pisa lo que ya tiene).`}</div>
+          : `No se encontró el ISBN en el fichero y hay ${_cands.length === 1 ? 'una edición posible que nada confirma' : _cands.length + ' ediciones posibles'}. Elige la de este ejemplar: se aplicará su ISBN y se completarán los datos que falten (nunca se pisa lo que ya tiene).${d.isbn_probable ? ' ⭐ = la más probable (aún sin confirmar). Los datos de la obra —sinopsis, lengua original, materias— ya se tomaron de todas; los de la edición (editorial, año, traductor…) esperan a que elijas.' : ''}`}</div>
         <div style="display:flex;flex-direction:column;gap:6px">${_cands.map((c) => `
           <div class="row" style="gap:8px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 8px;flex-wrap:wrap">
-            <div style="flex:1;min-width:200px"><b>${esc(c.titulo || '—')}</b>${c.subtitulo ? ' <span class="muted">' + esc(c.subtitulo) + '</span>' : ''}
+            <div style="flex:1;min-width:200px">${!_prov && c.isbn === d.isbn_probable ? '<span title="La más probable (sin confirmar)">⭐ </span>' : ''}<b>${esc(c.titulo || '—')}</b>${c.subtitulo ? ' <span class="muted">' + esc(c.subtitulo) + '</span>' : ''}
               <div class="muted" style="font-size:12px">${esc([c.editorial, c.anio, c.idioma, c.coleccion].filter(Boolean).join(' · '))} · ISBN ${esc(c.isbn)}${c.fuente ? ' · ' + esc(c.fuente) : ''}${c.señales?.length ? ' · casa ' + esc(c.señales.join(' + ')) : ''}</div></div>
             <button class="btn edElegir" data-isbn="${esc(c.isbn)}" title="Aplicar este ISBN y completar los huecos desde la autoridad">${_prov && c.isbn === d.isbn ? '✔ Confirmar' : '✔ Es esta'}</button>
           </div>`).join('')}
