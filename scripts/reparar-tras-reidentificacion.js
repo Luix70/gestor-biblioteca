@@ -43,7 +43,22 @@
  *   Fase 11 · SELECCIONES PARA REVISAR A MANO (no cambian nada): «CDU de la BNE de otra lengua» (la BNE dice
  *            española y lo deducido decía inglesa, o el número no existe: «821.11(73)») e «ISBN de otra lengua».
  *
- *   Orden de ejecución: 1, 2, 3, 7, 10, 8, 9, 12, 4, 5, 11, 6.
+ *
+ *   LO QUE ENSEÑÓ EL LOG DE LA FASE 6 (1-oct):
+ *   Fase 2 (ampliada) · también se devuelve la editorial anterior donde la pasada puso un REIMPRESOR BAJO DEMANDA
+ *            («Scholarly Publishing Office, University of Michigan» en lugar de «Henry Holt and Company»).
+ *   Fase 14 · EDICIONES BUSCADAS CON UN TÍTULO QUE NO ES UN TÍTULO («Author:  David», «El» —del fichero «El -
+ *            Lovecraft»—): sus candidatas, su ISBN probable y los datos de la obra que trajeron (materias, lengua
+ *            original, sinopsis, CDU de consenso) son de otros libros. Se deshacen según el diario.
+ *   Fase 13 · TÍTULOS-ARTEFACTO SIN ISBN: toman el título del nombre del fichero («Instructor's Manual to Physics
+ *            Laboratory Manual» en lugar de «Author:  David»), si ese sí es un título.
+ *   Fase 15 · TOMOS que perdieron su número al tomar el título del conjunto («Vol. 5: Europe» →
+ *            «Worldmark encyclopedia of the Nations»): se les añade «— Vol. 5: Europe».
+ *   (Lo demás de ese log —el «probable» de «Harry Potter 3» era la caja «Harry Potter», las colisiones «ya es de otro
+ *   título» en que el equivocado era el otro documento— lo rehace la campaña «Resolver ediciones pendientes» con el
+ *   motor corregido: no hace falta fase.)
+ *
+ *   Orden de ejecución: 1, 2, 3, 7, 10, 8, 9, 14, 13, 15, 12, 4, 5, 11, 6.
  *
  *   sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js              (en seco)
  *   sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js --ejecutar
@@ -69,10 +84,10 @@ import { separarSerie } from '../src/utils/series-texto.js';
 import { claveCanonica } from '../src/utils/colecciones.js';
 import { fusionarColecciones } from '../src/utils/gestion-grupos.js';
 import { reubicarPorCdu, carpetaExiste } from '../src/mantenimiento/util-mantenimiento.js';
-import { reidentificarDoc, anotarRevisionIsbn, soloAnadeColetilla, CAMPO_MARCA_RECUPERAR_ISBN } from '../src/utils/reidentificar-doc.js';
-import { esMaterialDerivado, esTituloDeLoteAudio } from '../src/utils/identificar-edicion.js';
+import { reidentificarDoc, anotarRevisionIsbn, soloAnadeColetilla, conSuTomo, CAMPO_MARCA_RECUPERAR_ISBN } from '../src/utils/reidentificar-doc.js';
+import { esMaterialDerivado, esTituloDeLoteAudio, esEditorialBajoDemanda } from '../src/utils/identificar-edicion.js';
 import { tituloComparable } from '../src/utils/titulo-libro.js';
-import { esTituloArtefacto, tituloDeNombreDeLote } from '../src/utils/parsear-nombre.js';
+import { esTituloArtefacto, tituloDeNombreDeLote, tituloDesdeNombre } from '../src/utils/parsear-nombre.js';
 import { esNombreRuido } from '../src/utils/editorial-por-prefijo.js';
 import { modernizarCDU } from '../src/utils/cdu-moderna.js';
 import { extraerISBNs } from '../src/utils/lector-pdf.js';
@@ -152,19 +167,22 @@ if (toca(2)) {
     for await (const doc of col.find(filtro, { projection: { editorial: 1, deshacer: 1, titulo: 1, alertas_agente: 1, ruta_base: 1 } })) {
         p.paso(doc.titulo);
         const actual = nombrePorId.get(String(doc.editorial));
-        if (!actual || !esEditorialFalsa(actual)) continue;
+        // Falsa (distribuidor, marcador) o reimpresor bajo demanda («Scholarly Publishing Office» en lugar de Henry
+        // Holt, log del 1-oct): ninguna es la editorial del libro.
+        const noVale = (nombre) => esEditorialFalsa(nombre) || esEditorialBajoDemanda(nombre);
+        if (!actual || !noVale(actual)) continue;
         // La editorial que tenía ANTES de la pasada (la entrada más antigua del periodo que la cambió).
         const entrada = entradasDe(doc).find((e) => e.antes && 'editorial' in e.antes);
         if (!entrada) continue;
         const anterior = entrada.antes.editorial;
         const nombreAnterior = anterior ? nombrePorId.get(String(anterior)) : null;
-        if (nombreAnterior && esEditorialFalsa(nombreAnterior)) continue;   // antes también era falsa: nada que devolver
+        if (nombreAnterior && noVale(nombreAnterior)) continue;   // antes tampoco valía: nada que devolver
         n++;
         p.nota(`${doc._id} · «${actual}» → ${nombreAnterior ? `«${nombreAnterior}»` : '(sin editorial)'} · «${String(doc.titulo || '').slice(0, 45)}»`);
         if (EJECUTAR) {
             const update = anterior ? { $set: { editorial: anterior } } : { $unset: { editorial: '' } };
             await guardar(doc, update, { editorial: doc.editorial },
-                `Editorial «${actual}» (un distribuidor o marcador, no una editorial) devuelta a ${nombreAnterior ? `«${nombreAnterior}»` : 'vacía'}.`);
+                `Editorial «${actual}» (un distribuidor, un marcador o un reimpresor bajo demanda, no la editorial del libro) devuelta a ${nombreAnterior ? `«${nombreAnterior}»` : 'vacía'}.`);
         }
     }
     p.fin();
@@ -324,7 +342,7 @@ if (toca(10)) {
  * Devuelve un documento a como estaba antes de UNA entrada de su diario: cada campo a su valor anterior (null = no
  * existía), la CDU y la carpeta incluidas. La entrada queda marcada como deshecha (no se borra: es historia).
  */
-async function deshacerEntrada(doc, entrada, motivo) {
+async function deshacerEntrada(doc, entrada, motivo, { quitar = [], mensaje = null } = {}) {
     const antes = entrada.antes || {};
     const set = {}, unset = {};
     for (const [campo, valor] of Object.entries(antes)) {
@@ -337,14 +355,15 @@ async function deshacerEntrada(doc, entrada, motivo) {
         if (reub) Object.assign(set, reub.set);
         if (antes.cdu_fuente) set.cdu_fuente = antes.cdu_fuente; else unset.cdu_fuente = '';
     }
-    // Deja de estar «ya revisado»: se va a reidentificar.
+    // Deja de estar «ya revisado»: se va a reidentificar. (Y lo que pida quien llama: las candidatas…)
     unset[CAMPO_MARCA_RECUPERAR_ISBN] = '';
+    for (const campo of quitar) { unset[campo] = ''; delete set[campo]; }
     const ahora = new Date();
     await col.updateOne({ _id: doc._id }, {
         $set: { ...set, fecha_actualizacion: ahora, 'deshacer.$[entrada].deshecho': ahora },
         $unset: unset,
-        $push: { alertas_agente: `Identificación del ${new Date(entrada.fecha).toISOString().slice(0, 10)} deshecha (${motivo}); se reidentifica con el motor corregido.` },
-    }, { arrayFilters: [{ 'entrada.fecha': entrada.fecha, 'entrada.origen': 'reidentificar' }] });
+        $push: { alertas_agente: mensaje || `Identificación del ${new Date(entrada.fecha).toISOString().slice(0, 10)} deshecha (${motivo}); se reidentifica con el motor corregido.` },
+    }, { arrayFilters: [{ 'entrada.fecha': entrada.fecha, 'entrada.origen': entrada.origen }] });
 }
 
 if (toca(8)) {
@@ -503,6 +522,86 @@ if (toca(9)) {
     pb.fin();
     resumen.push(`Fase 9 · títulos: ${devueltos} devueltos al suyo (coletilla de catálogo) · ${artefactos.length} títulos-artefacto con ISBN`
         + (EJECUTAR || CON_REIDENTIFICAR ? ` → ${conTituloNuevo} con título nuevo` : ` (${delNombre} con título en el nombre del fichero; el resto depende de la autoridad: --con-reidentificar para verlo)`));
+}
+
+// ─── FASE 14: ediciones buscadas con un título que no es un título ─────────────────────────────────────────
+/** ¿Tiene el título alguna palabra con cuerpo? (la misma regla que reidentificarDoc para no buscar edición) */
+const VACIAS = new Set(['el', 'la', 'los', 'las', 'un', 'una', 'the', 'a', 'an', 'le', 'les', 'il', 'lo', 'de', 'del', 'vol', 'tomo']);
+const tituloConCuerpo = (titulo) => String(titulo || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim().split(' ').some((w) => w.length >= 3 && !VACIAS.has(w) && !/^\d+$/.test(w));
+const tituloNoEsTitulo = (titulo) => esTituloArtefacto(titulo) || !tituloConCuerpo(titulo);
+
+if (toca(14)) {
+    const filtro = { deshacer: { $elemMatch: { origen: 'candidatas', fecha: { $gte: DESDE } } } };
+    let deshechos = 0;
+    const p = progreso(await col.countDocuments(filtro), 'Fase 14 · candidatas de títulos que no son títulos');
+    for await (const doc of col.find(filtro)) {
+        p.paso(doc.titulo);
+        if (!tituloNoEsTitulo(doc.titulo)) continue;
+        deshechos++;
+        p.nota(`${doc._id} · «${recorta(doc.titulo, 45)}» · ${(doc.ediciones_candidatas || []).length} candidatas${doc.isbn_probable ? ` · probable ${doc.isbn_probable}` : ''}`);
+        if (!EJECUTAR) continue;
+        const entradas = (doc.deshacer || []).filter((e) => e.origen === 'candidatas' && new Date(e.fecha) >= DESDE && !e.deshecho);
+        let actual = doc;
+        for (const entrada of entradas.reverse()) {
+            await deshacerEntrada(actual, entrada, 'título que no es un título', {
+                quitar: ['ediciones_candidatas', 'ediciones_candidatas_fecha', 'isbn_probable'],
+                mensaje: `Ediciones candidatas y datos de la obra quitados: se buscaron con «${recorta(doc.titulo, 40)}», que no es un título (eran de otros libros).`,
+            });
+            actual = await col.findOne({ _id: doc._id });
+        }
+        await regenerarSidecarsDoc(db, actual, carpetaDeDoc(actual)).catch(() => {});
+        await indexarDoc(db, doc._id).catch(() => {});
+    }
+    p.fin();
+    resumen.push(`Fase 14 · candidatas buscadas con un título que no es un título: ${deshechos} documento(s)`);
+}
+
+// ─── FASE 13: títulos-artefacto sin ISBN → el título del nombre del fichero ────────────────────────────────
+if (toca(13)) {
+    let cambiados = 0, sinArreglo = 0;
+    const filtro = { tipo_recurso: 'libro', $or: [{ isbn: { $exists: false } }, { isbn: null }, { isbn: '' }] };
+    const p = progreso(await col.countDocuments(filtro), 'Fase 13 · títulos-artefacto sin ISBN');
+    for await (const doc of col.find(filtro, { projection: { titulo: 1, nombre_archivo: 1, alertas_agente: 1, ruta_base: 1, deshacer: 1 } })) {
+        p.paso();
+        if (!esTituloArtefacto(doc.titulo)) continue;
+        // (Sin la extensión que a veces queda como palabra: «Examen feb 2012 pdf».)
+        const nuevo = String(tituloDeNombreDeLote(doc.nombre_archivo) || tituloDesdeNombre(doc.nombre_archivo) || '')
+            .replace(/\s+(pdf|epub|mobi|djvu|azw3?)$/i, '').trim() || null;
+        if (!nuevo || esTituloArtefacto(nuevo) || nuevo === doc.titulo) { sinArreglo++; continue; }
+        cambiados++;
+        if (cambiados <= 40) p.nota(`${doc._id} · «${recorta(doc.titulo, 45)}» → «${recorta(nuevo, 60)}»`);
+        if (EJECUTAR) {
+            await guardar(doc, { $set: { titulo: nuevo, 'mantenimiento.re-clasificar-cdu': 0 } }, { titulo: doc.titulo },
+                `Título «${recorta(doc.titulo, 60)}» (un artefacto del fichero, no un título) sustituido por el del nombre del fichero.`);
+        }
+    }
+    p.fin();
+    resumen.push(`Fase 13 · títulos-artefacto sin ISBN: ${cambiados} toman el del nombre del fichero · ${sinArreglo} sin un nombre aprovechable (a mano)`);
+}
+
+// ─── FASE 15: tomos que perdieron su número al tomar el título del conjunto ────────────────────────────────
+if (toca(15)) {
+    let arreglados = 0;
+    const filtro = { obra: { $exists: true, $ne: null }, volumen_numero: { $ne: null },
+        deshacer: { $elemMatch: { origen: 'reidentificar', fecha: { $gte: DESDE }, 'antes.titulo': { $exists: true } } } };
+    const p = progreso(await col.countDocuments(filtro), 'Fase 15 · tomos sin su número');
+    for await (const doc of col.find(filtro)) {
+        p.paso(doc.titulo);
+        const entrada = entradasDe(doc).find((e) => e.antes && 'titulo' in e.antes);
+        if (!entrada) continue;
+        // El número del tomo y su parte salen del título de ANTES («Vol. 5 — Vol. 5: Europe»).
+        const nuevo = conSuTomo(doc.titulo, { ...doc, titulo: entrada.antes.titulo || doc.nombre_archivo });
+        if (nuevo === doc.titulo) continue;
+        arreglados++;
+        p.nota(`${doc._id} · «${recorta(doc.titulo, 45)}» → «${recorta(nuevo, 70)}»`);
+        if (EJECUTAR) {
+            await guardar(doc, { $set: { titulo: nuevo } }, { titulo: doc.titulo },
+                `Título del tomo completado con su número: «${nuevo}» (había tomado el título del conjunto a secas).`);
+        }
+    }
+    p.fin();
+    resumen.push(`Fase 15 · tomos a los que se devuelve su número: ${arreglados}`);
 }
 
 // ─── FASES con script propio ─────────────────────────────────────────────────────────────────────────────────

@@ -46,11 +46,35 @@ function numerosDe(comparable) {
     return comparable.split(' ').filter((t) => /^\d+$/.test(t) || RE_ROMANO.test(t)).join(' ');
 }
 
+/**
+ * Errata de OCR en un número: «II3» por «113», «l0» por «10». Solo en palabras que MEZCLAN cifras con I/l (una
+ * palabra solo de letras —«II», «Ill»— no se toca: es un romano o una palabra).
+ */
+const corregirNumerosOcr = (texto) => String(texto || '').replace(/\b(?=[Il|\d]*\d)[Il|\d]{2,}\b/g, (p) => p.replace(/[Il|]/g, '1'));
+
+/**
+ * Las PARTES de un título separadas por «:» o «,» con cuerpo («Microcosmos: cuatro mil millones de años…»,
+ * «Constantinopla, El imperio olvidado», «Historia universal Asimov: El Imperio Romano»).
+ */
+const partesDelTitulo = (titulo) => String(titulo || '').replace(RE_PARENTESIS, ' ').split(/\s*[:,]\s+|\s+[-–—]\s+/)
+    .map(tituloComparable).filter((p) => p.length >= 4);
+
 export function mismoTituloLibro(a, b) {
+    a = corregirNumerosOcr(a);
+    b = corregirNumerosOcr(b);
     const A = tituloComparable(a);
     const B = tituloComparable(b);
     if (!A || !B) return false;
     if (A === B) return true;
+
+    // Uno es entero una PARTE del otro (título y subtítulo separados por «:» o «,»): «Microcosmos» y «Microcosmos:
+    // cuatro mil millones de años…»; «El Imperio Romano» y «Historia universal Asimov: El Imperio Romano». Medido en
+    // el log del 1-oct: salían como «otro título» y el libro se quedaba sin su ISBN. Una palabra suelta vale solo si
+    // tiene cuerpo (6+ letras) y los números coinciden: «Dune» / «Casa Capitular Dune» no tiene separador.
+    const [cortoA, largoA] = A.length <= B.length ? [a, b] : [b, a];
+    const corto0 = tituloComparable(cortoA);
+    if (numerosDe(A) === numerosDe(B) && partesDelTitulo(largoA).slice(0, 2).concat(partesDelTitulo(largoA).slice(-1)).includes(corto0)
+        && (corto0.split(' ').length >= 2 || corto0.length >= 6)) return true;
 
     // Los NÚMEROS deben coincidir: «El señor de los anillos 2» empieza por «El señor de los anillos», y «Tomo 1» /
     // «Tomo 2» se diferencian en una letra, pero son tomos distintos (el caso que motivó esta comprobación).

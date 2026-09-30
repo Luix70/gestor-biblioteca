@@ -89,6 +89,19 @@ ejecución: 1, 2, 3, 7, 10, 8, 9, 12, 4, 5, 11, 6. Se puede ir por partes con `-
 6. **Reidentificar otra vez** (`--todos --edicion-por-elegir`): los 135 «con esperanza», lo deshecho en la fase 8
    que no se resolviera, y las ediciones por elegir (ISBN probable + datos de la obra). Tarda horas; en seco se salta.
 
+### 3 bis-2. Arreglos tras el log de la fase 6 (1-oct)
+- [ ] Desplegar la última versión
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js --fases 2,14,13,15`   (en seco)
+- [ ] Lo mismo con `--ejecutar`
+- [ ] Encender la campaña **«Resolver ediciones pendientes»** (y el resto): rehace, con el motor corregido, las
+      ediciones por elegir — el «probable» de «Harry Potter 3» era la caja «Harry Potter», y los «❓ ya es de otro
+      título» en que el equivocado era el OTRO documento («Dune» / «Casa Capitular Dune») ahora se asignan y el otro
+      queda marcado `isbn_sospechoso`.
+
+En seco (1-oct): **2** · 1 reimpresor bajo demanda devuelto a la editorial real (Henry Holt) · **14** · 2 libros con
+candidatas buscadas con un título que no es un título («Author: David», «El») · **13** · 79 títulos-artefacto sin ISBN
+toman el del nombre del fichero (7 sin un nombre aprovechable) · **15** · 6 tomos recuperan su «— Vol. N».
+
 ### 3 ter. Índice de series (para el trabajo de colecciones)
 - [ ] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»
   cuentan ahora en cada una).

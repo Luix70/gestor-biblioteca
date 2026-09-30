@@ -1384,7 +1384,30 @@ de ficheros clasificado por CDU.
         que necesitan IA (773) van a una selección y pierden el sello de re-clasificar-cdu (los rehace el Conformador).
       · `scripts/verificar-imports.js`: comprueba, sin ejecutar nada, que cada import con nombre existe como export
         en su módulo. `node --check` no lo ve (incidente d491882: la aplicación no arrancó). Antes de cada commit.
-    REPARACIONES (fases nuevas de reparar-tras-reidentificacion; orden 1, 2, 3, 7, 10, 8, 9, 12, 4, 5, 11, 6):
+    LO QUE ENSEÑÓ EL LOG DE LA FASE 6 (2026-10-01, 796 libros sin ISBN o con edición por elegir):
+      · «SERIE N - TÍTULO» (`identificar-edicion·casaTitulo`): con el número de la serie delante («Harry Potter 3 - Harry
+        Potter y el prisionero de Azkaban», «Ender 6 - La sombra del hegemón») el libro es lo que va tras el guion; una
+        candidata que es solo la serie («Harry Potter», la caja; «Arsenio Lupin») no casa; y los números también cuentan
+        en la comparación por palabras (el «3» se perdía por corto). La MÁS PROBABLE se ordena primero por cuánto del
+        título del libro cubre la candidata (antes: la caja «Harry Potter» era la probable de los tomos 1, 3, 4 y 6).
+      · LENGUA DEL GRUPO DEL ISBN también al reducir las candidatas sin pruebas, y con más grupos (tr 605/975, fi, hu,
+        el, cs, pl, da, sv, no, ko…): «Somnium» tenía de probable una edición turca.
+      · REIMPRESORES BAJO DEMANDA nuevos («Scholarly Publishing Office», «Hachette BnF», BiblioBazaar, Babelcube…):
+        nunca sustituyen a la editorial del libro (`esEditorialBajoDemanda`).
+      · NO SE BUSCA EDICIÓN CON UN TÍTULO QUE NO ES UN TÍTULO («Author:  David», «El»): `reidentificarDoc` exige un
+        título que no sea artefacto y tenga alguna palabra con cuerpo.
+      · COLISIONES «ya es de otro título» en que el EQUIVOCADO ES EL OTRO (`elOtroEsElEquivocado`): si el título del
+        libro es el de la edición, sin nada de más, y el otro documento tiene palabras propias que no son un «tomo»
+        («Dune» / «Casa Capitular Dune», «Felicia está ahí» / «El ladrón de Maigret»), el ISBN se asigna y el otro
+        queda con `isbn_sospechoso` + `revision_requerida`. `mismoTituloLibro` acepta ahora el título que es una
+        PARTE del otro tras «:» o «,» («Microcosmos» / «Microcosmos: cuatro mil millones…») y corrige erratas de OCR
+        en números («II3» → «113»).
+      · TOMOS (`reidentificar-doc·conSuTomo`): al tomar el título del conjunto, un tomo conserva «— Vol. N: parte».
+    REPARACIONES (fases nuevas de reparar-tras-reidentificacion; orden 1, 2, 3, 7, 10, 8, 9, 14, 13, 15, 12, 4, 5, 11, 6):
+      2 también reimpresores bajo demanda; 14 deshace las candidatas/probable/datos de obra buscados con un título que
+      no es un título; 13 títulos-artefacto SIN ISBN → el del nombre del fichero; 15 tomos que perdieron su número. Lo
+      demás lo rehace la campaña «Resolver ediciones pendientes» con el motor corregido.
+    REPARACIONES DEL LOG COMPLETO (orden anterior: 1, 2, 3, 7, 10, 8, 9, 12, 4, 5, 11, 6):
       10 editoriales de la visión (quita las de 1-2 letras y «Seix Barral» sin ISBN 978-84-322; los demás sin ISBN a
       la selección «Editorial sin confirmar…»); 8 DESHACER Y REHACER (cada campo a su valor anterior según el diario,
       CDU y carpeta incluidas; la entrada queda `deshecho`; luego se reidentifica con el motor corregido): ISBN

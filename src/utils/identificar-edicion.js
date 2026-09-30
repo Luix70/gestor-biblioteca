@@ -54,7 +54,12 @@ const idioma2 = (s) => {
  *   · un libro en INGLÉS con ISBN alemán, neerlandés o italiano es normal (Springer, Elsevier, Brill…): no se mira.
  * @returns {string|null} código de lengua de dos letras, o null si el grupo no permite afirmar nada
  */
-const GRUPOS_ISBN_DE_UNA_LENGUA = [[/^2/, 'fr'], [/^3/, 'de'], [/^4/, 'ja'], [/^5/, 'ru'], [/^7/, 'zh'], [/^88/, 'it'], [/^(85|972|989)/, 'pt'], [/^(90|94)/, 'nl']];
+// (Los de 2 y 3 cifras van antes que los de 1: «951» es Finlandia, no «9».)
+const GRUPOS_ISBN_DE_UNA_LENGUA = [
+    [/^(605|975|9944)/, 'tr'], [/^(951|952)/, 'fi'], [/^963/, 'hu'], [/^960/, 'el'], [/^964/, 'fa'], [/^(957|986)/, 'zh'],
+    [/^2/, 'fr'], [/^3/, 'de'], [/^4/, 'ja'], [/^5/, 'ru'], [/^7/, 'zh'], [/^80/, 'cs'], [/^82/, 'no'], [/^83/, 'pl'],
+    [/^87/, 'da'], [/^88/, 'it'], [/^89/, 'ko'], [/^91/, 'sv'], [/^(85|972|989)/, 'pt'], [/^(90|94)/, 'nl'],
+];
 function lenguaDelGrupoISBN(isbn, lenguaDoc) {
     if (!lenguaDoc || lenguaDoc === 'en') return null;
     const cifras = String(isbn || '').replace(/[^0-9Xx]/g, '');
@@ -85,12 +90,30 @@ export function esMaterialDerivado(titulo) {
     return partes.some((p) => RE_MATERIAL.test(p));
 }
 
-function casaTitulo(titDoc, titCand, subCand) {
+/** Los números sueltos de un título ya normalizado («harry potter 3 …» → «3»), en orden. */
+const numerosDelTitulo = (normalizado) => normalizado.split(' ').filter((t) => /^\d+$/.test(t)).join(' ');
+
+export function casaTitulo(titDoc, titCand, subCand) {
     const a = norm(titDoc);
     const b = norm([titCand, subCand].filter(Boolean).join(' '));
     const bSolo = norm(titCand);
     if (!a || !bSolo) return false;
     if (a === bSolo || a === b) return true;
+    // «Serie - Título» (así nombran los ficheros muchos ripeos: «Arsenio Lupin - El caballero ladrón», «Los miserables
+    // V - Jean Valjean»): una candidata que es SOLO la serie no es este libro (log del 1-oct: el probable de tres
+    // títulos de Arsenio Lupin distintos era el mismo «Arsenio Lupin»).
+    const serie = String(titDoc || '').split(/\s[-–—]\s/);
+    if (serie.length > 1 && norm(serie[0].replace(/\s+[\divxlc]+\.?$/i, '')) === bSolo) return false;
+    // «Serie N - Título» («Harry Potter 3 - Harry Potter y el prisionero de Azkaban», «Ender 6 - La sombra del
+    // hegemón»): el libro es lo que va tras el guion; el número es el de la serie y no debe estorbar (ni casar con el
+    // «La sombra de Ender» que es el tomo 5).
+    const numeroSerie = serie.length > 1 ? serie[0].trim().match(/(\d+|\b[ivxlc]+)\.?$/i) : null;
+    if (numeroSerie) {
+        const titulo = serie.slice(1).join(' - ');
+        // La candidata puede llevar el mismo número delante: «3. Harry Potter y el prisionero de Azkaban».
+        const sinNumero = String(titCand || '').replace(new RegExp(`^\\s*${numeroSerie[1]}\\s*[.:\\-–—]\\s*`, 'i'), '');
+        return casaTitulo(titulo, titCand, subCand) || (sinNumero !== titCand && casaTitulo(titulo, sinNumero, subCand));
+    }
     // Uno contiene al otro (subtítulo de más o de menos)… salvo que lo que sobra señale un TOMO o una PARTE:
     // «Historia romana. Libros XXXVI-XLV» NO es «Historia romana» a secas — en una obra en varios tomos cada
     // uno tiene su ISBN, y aceptar el de otro tomo es colgar un ISBN equivocado (medido con Dion Casio, Gredos).
@@ -106,6 +129,8 @@ function casaTitulo(titDoc, titCand, subCand) {
     // Las palabras que solo están en uno de los dos tampoco pueden señalar un tomo (misma razón que arriba).
     const diferentes = [...A].filter((w) => !B.has(w)).concat([...B].filter((w) => !A.has(w)));
     if (esDeTomo(diferentes.join(' '))) return false;
+    // Los números (el «3» de «Harry Potter 3», que `palabras` descarta por corto) también tienen que coincidir.
+    if (numerosDelTitulo(a) !== numerosDelTitulo(b) && numerosDelTitulo(a) !== numerosDelTitulo(bSolo)) return false;
     return comunes / Math.min(A.size, B.size) >= 0.85;
 }
 
@@ -267,8 +292,12 @@ const RE_BAJO_DEMANDA = new RegExp([
     'outlook verlag', 'sagwan', 'andesite', 'franklin classics', 'palala', 'gale ecco', "scholar'?s choice", 'books on demand',
     'tredition', 'literary licensing', 'wallachia', 'blurb', 'fb&c', 'hardpress', 'leopold classic', 'read books',
     'dalton house', 'double 9', 'lightning source', 'print on demand', 'amazon digital', 'kindle direct',
+    'scholarly publishing office', 'university of michigan library', 'hachette bnf', 'bibliobazaar', 'babelcube',
+    'edibooks', 'pixabay', 'everand', 'dodo press', 'echo library', 'hard press', 'kirmizi kedi',
 ].join('|'), 'i');
 const esBajoDemanda = (c) => RE_BAJO_DEMANDA.test(String(c.editorial || '')) || /^9798/.test(String(c.isbn || ''));
+/** ¿Es un reimpresor bajo demanda / autoedición? (para no dejarlo como editorial de un libro que no es suyo) */
+export const esEditorialBajoDemanda = (nombre) => RE_BAJO_DEMANDA.test(String(nombre || ''));
 
 /**
  * Editorial o colección escrita ENTRE PARÉNTESIS en el título («Cuentos de terror (Penguin Clásicos)»): es una
@@ -296,7 +325,7 @@ function reducirCandidatas(doc, casi) {
         .filter((e) => e && !esEditorialFalsa(e)).map(nucleoEditorial).filter((n) => n.length);
     let lista = unicosPorIsbn(casi).filter((c) => {
         if (esEdicionAudio(c)) return false;
-        const iCand = idioma2(c.idioma);
+        const iCand = idioma2(c.idioma) || lenguaDelGrupoISBN(c.isbn, iDoc);
         if (iDoc && iCand && iDoc !== iCand) return false;
         const edCand = esEditorialFalsa(c.editorial) ? [] : nucleoEditorial(c.editorial);
         if (pruebasEd.length && edCand.length && !pruebasEd.some((n) => n.some((w) => edCand.includes(w)))) return false;
@@ -319,8 +348,17 @@ function masProbable(doc, lista, porQue) {
     // Una edición «de verdad» va antes que la lengua: una autoedición o reimpresión bajo demanda (CreateSpace,
     // «Independently Published», 979-8…) casi nunca es la base de un EPUB/PDF de biblioteca, aunque declare la lengua
     // y sea la más reciente (medido el 30-sep: era la «más probable» de «Drácula», «Primer amor», «Catriona»).
+    // Cuánto del título del libro está en el de la candidata (en décimas): el log del 1-oct daba como probable de
+    // «Harry Potter 3 - Harry Potter y el prisionero de Azkaban» la caja «Harry Potter», y la misma a los tomos 1, 4 y 6.
+    const delDoc = new Set(palabras(doc.titulo));
+    const cubre = (c) => {
+        if (!delDoc.size) return 0;
+        const suyas = new Set(palabras([c.titulo, c.subtitulo].filter(Boolean).join(' ')));
+        return Math.round((10 * [...delDoc].filter((w) => suyas.has(w)).length) / delDoc.size);
+    };
     const puntos = (c) => [
         (c.señales || []).length,
+        cubre(c),
         esBajoDemanda(c) || esEditorialFalsa(c.editorial) ? 0 : 1,
         iDoc && idioma2(c.idioma) === iDoc ? 1 : 0,
         FUENTE[c.fuente] || 0,

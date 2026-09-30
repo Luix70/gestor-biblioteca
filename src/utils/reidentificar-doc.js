@@ -22,7 +22,8 @@ import { conectarDB } from '../database.js';
 import { carpetaDeDoc, archivoOriginal, numeroPaginasPdf } from '../mantenimiento/util-mantenimiento.js';
 import { isbnDesdeArchivo, tipoLibro } from './isbn-archivo.js';
 import { variantesISBN, validarISBN } from './identificadores.js';
-import { esTituloArtefacto, tituloDeNombreDeLote } from './parsear-nombre.js';
+import { esTituloArtefacto, tituloDeNombreDeLote, tituloDesdeNombre } from './parsear-nombre.js';
+import { parsearVolumen } from './multivolumen.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { identificarEdicion, candidatasParaGuardar, mismaEditorial, traductoresDelTitulo } from './identificar-edicion.js';
@@ -190,6 +191,46 @@ function tituloConfirmaDoc(tituloAutoridad, doc) {
     const texto = ` ${normLite(`${doc.titulo || ''} ${doc.nombre_archivo || ''}`)} `;
     const presentes = palabras.filter((w) => texto.includes(` ${w} `)).length;
     return presentes / palabras.length >= 0.8;
+}
+
+/** ¿Tiene el título alguna palabra con cuerpo? «El», «La», «Vol. 2» no (no se puede buscar una edición por ellos). */
+const PALABRAS_VACIAS = new Set(['el', 'la', 'los', 'las', 'un', 'una', 'the', 'a', 'an', 'le', 'les', 'il', 'lo', 'de', 'del', 'vol', 'tomo']);
+function tituloConCuerpo(titulo) {
+    return normLite(titulo).split(' ').some((w) => w.length >= 3 && !PALABRAS_VACIAS.has(w) && !/^\d+$/.test(w));
+}
+
+/** Palabras con cuerpo (4+ letras, sin números) de un título. */
+const palabrasConCuerpo = (titulo) => new Set(normLite(String(titulo || '').replace(/\([^)]*\)|\[[^\]]*\]/g, ' '))
+    .split(' ').filter((w) => w.length >= 4 && !/^\d+$/.test(w)));
+const DESIGNADORES_DE_TOMO = new Set(['volume', 'volumen', 'tomo', 'tome', 'band', 'parte', 'part', 'libro', 'book']);
+
+/**
+ * En una colisión de ISBN: ¿es el OTRO documento el que lo lleva mal? Sí cuando la edición que dio la autoridad
+ * es la de ESTE (el título de este no añade nada al de la edición) y el otro tiene palabras propias que la edición no
+ * tiene — y no son solo un «tomo 2» (los tomos de una obra comparten a veces el título de la edición: ahí no se sabe).
+ */
+function elOtroEsElEquivocado(doc, otro, edicion) {
+    const deEdicion = palabrasConCuerpo([edicion.titulo, edicion.subtitulo].filter(Boolean).join(' '));
+    if (!deEdicion.size || !mismoTituloLibro(edicion.titulo, doc.titulo)) return false;
+    const deEste = palabrasConCuerpo(doc.titulo);
+    if ([...deEste].some((w) => !deEdicion.has(w))) return false;             // «…: Otoño» frente a la edición del conjunto
+    const propiasDelOtro = [...palabrasConCuerpo(otro.titulo)].filter((w) => !deEdicion.has(w) && !DESIGNADORES_DE_TOMO.has(w));
+    return propiasDelOtro.length > 0;
+}
+
+/** El título de la autoridad con el tomo del documento, si es un tomo y el título no lo dice ya. */
+export function conSuTomo(titulo, doc) {
+    const numero = doc.volumen_numero;
+    if (numero == null || !doc.obra) return titulo;
+    const tomo = parsearVolumen(doc.titulo) || parsearVolumen(doc.nombre_archivo);
+    if (new RegExp(`\\b${numero}\\b`).test(normLite(titulo))) return titulo;   // ya lleva el número
+    // Ya dice de qué tomo es, a su manera («… Volume III: …», «(Uncitral Vol. 26)»): no se añade otro.
+    if (/\b(vol|volume|volumen|tomo|band)\b/i.test(titulo)) return titulo;
+    // (La parte del tomo puede venir con el «Vol. 5:» repetido: «Vol. 5 — Vol. 5: Europe».)
+    const nombreParte = String(tomo?.titulo || '').replace(/^(vol\.?|volume|volumen|tomo)\s*\d+\s*[:.\-–—]\s*/i, '').trim();
+    // Una «parte» que es un ISBN o solo cifras («Vol. 1: 0750678801») no es el nombre del tomo.
+    const parte = nombreParte && /\p{L}{3,}/u.test(nombreParte) ? `: ${nombreParte}` : '';
+    return `${titulo} — Vol. ${numero}${parte}`;
 }
 
 /** ¿El documento ya guarda ese mismo ISBN (en su forma de 10 o de 13)? */
@@ -391,6 +432,10 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // Varios documentos con el MISMO TÍTULO en la MISMA carpeta («Ghost Stories [1].pdf», «[2].pdf», «[3].pdf» de
     // una colección transmedia: el libro, sus actividades, sus tests…): no se sabe cuál es el libro, así que
     // ninguno recibe su ISBN por autoridad (medido el 29-sep con Oxford Bookworms Library).
+    // Con un título que NO es un título no se busca edición por él (log del 1-oct: «Author:  David» dio 13 ediciones
+    // de libros titulados «Author, Author»; «El» —el nombre de fichero «El - Lovecraft»—, 33 de Lovecraft). Un
+    // título-artefacto, o uno sin ninguna palabra con cuerpo, espera a tener uno de verdad.
+    if (identificable && (esTituloArtefacto(doc.titulo) || !tituloConCuerpo(doc.titulo))) identificable = false;
     if (identificable && doc.ruta_base) {
         const hermano = await db.collection('biblioteca').findOne(
             { ruta_base: doc.ruta_base, titulo: doc.titulo, _id: { $ne: doc._id } }, { projection: { _id: 1 } });
@@ -421,7 +466,19 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     if (isbn && via.startsWith('autoridad/')) {
         const otro = await db.collection('biblioteca').findOne(
             { isbn: { $in: variantesISBN(isbn) }, _id: { $ne: doc._id } }, { projection: { titulo: 1 } });
-        if (otro && !mismoTituloLibro(otro.titulo, doc.titulo)) {
+        const elegida = edicion || provisional?.elegido || dudoso?.elegido || null;
+        if (otro && !mismoTituloLibro(otro.titulo, doc.titulo) && elegida && elOtroEsElEquivocado(doc, otro, elegida)) {
+            // La edición es la de ESTE libro (su título es el de la autoridad, sin nada de más) y el otro documento
+            // lleva un título que no es ese (log del 1-oct: «Dune» no recibía su ISBN porque lo tenía «Casa Capitular
+            // Dune»; «Felicia está ahí», porque lo tenía «El ladrón de Maigret»). Se asigna aquí y el otro queda
+            // marcado para revisar su ISBN.
+            if (aplicar) {
+                await db.collection('biblioteca').updateOne({ _id: otro._id }, {
+                    $set: { isbn_sospechoso: true, revision_requerida: true },
+                    $push: { alertas_agente: `ISBN ${isbn} SOSPECHOSO: la autoridad lo da para «${elegida.titulo}», que es otro documento (${doc._id}). Comprueba el ISBN de este.` },
+                }).catch(() => {});
+            }
+        } else if (otro && !mismoTituloLibro(otro.titulo, doc.titulo)) {
             const candidatos = (provisional?.candidatos || (edicion ? [edicion] : []));
             ambiguo = { motivo: `el ISBN ${isbn} ya es de «${otro.titulo}» (${otro._id}), otro título: no se asigna`, candidatos, colision: true };
             isbn = null; via = ''; provisional = null; dudoso = null; edicion = null;
@@ -511,13 +568,18 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // Último recurso para un título-artefacto que ninguna autoridad resuelve: el tramo del título de un nombre de
     // fichero de lote editorial («<ISBN>.<Editorial>.<Título>.<Autor>.<fecha>»).
     const tituloMejor = datos.titulo || ext.titulo
-        || (esTituloArtefacto(doc.titulo) ? tituloDeNombreDeLote(doc.nombre_archivo || doc.titulo) : null);
+        || (esTituloArtefacto(doc.titulo)
+            ? (tituloDeNombreDeLote(doc.nombre_archivo || doc.titulo) || tituloDesdeNombre(doc.nombre_archivo))
+            : null);
     if (tituloMejor) {
         const actual = String(doc.titulo || '');
         const malActual = tituloDebil(doc) || esTituloArtefacto(actual);
-        if ((malActual || forzar) && normLite(actual) !== normLite(tituloMejor) && noDegrada(actual, tituloMejor)
-            && !soloAnadeColetilla(actual, tituloMejor)) {
-            set.titulo = tituloMejor; nombres.titulo = tituloMejor;
+        // Un TOMO conserva su número y su parte: «Vol. 5 — Vol. 5: Europe» → «Worldmark Encyclopedia of the Nations —
+        // Vol. 5: Europe», no el título del conjunto a secas (log del 1-oct; antes, «Encyclopedia of Modern Asia» ×6).
+        const nuevo = conSuTomo(tituloMejor, doc);
+        if ((malActual || forzar) && normLite(actual) !== normLite(nuevo) && noDegrada(actual, nuevo)
+            && !soloAnadeColetilla(actual, nuevo)) {
+            set.titulo = nuevo; nombres.titulo = nuevo;
         }
     }
     // Autores: si el doc no tiene ninguno, resuélvelos del fichero primero, si no de la autoridad.
