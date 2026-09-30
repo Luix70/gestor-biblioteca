@@ -59,12 +59,17 @@ Todo en un comando y en orden (en seco medido el 30-sep, con la pasada aún a me
 4. **CDU en notación moderna** (`modernizar-cdu.js`): 474 CDU, 791 carpetas (342 juveniles 087.5 salen de la clase 0).
 5. **Editorial por el prefijo del ISBN** (`editoriales-por-prefijo.js`): 247 huecos/basura; ~890 a una selección
    «Editorial a revisar (prefijo ISBN)», sin tocarlos.
+7. **Colecciones con «/**/» en el nombre** (el volcado de la BNE junta así varias series: «Punto de lectura /**/
+   Biblioteca de bolsillo»): se quedan con la primera, el número pegado pasa al libro, y se fusionan con la que ya
+   exista. 25 colecciones (12 fusiones, 13 renombradas) y 58 libros. (Se ejecuta justo tras la fase 3.)
 6. **Ediciones por elegir otra vez** (`reidentificar-sin-isbn --edicion-por-elegir`): los falsos «❓ otro título»,
    y a las que sigan sin decidir, ISBN probable + datos de la obra. Tarda horas; en seco se salta.
 
 Se añadirán las reparaciones de lo que muestre el log final de la pasada.
 
 ### 3 ter. Índice de series (para el trabajo de colecciones)
+- [ ] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»
+  cuentan ahora en cada una).
 - [ ] Copiar `D:\gestor-biblioteca\Fichero\series.db` (2,9 GB, construido en el PC el 30-sep) a la carpeta Fichero del
   NAS (`U:\Fichero\series.db`). Sin reiniciar nada: se abre la primera vez que se consulta.
 - [ ] Probar: `sudo docker exec -t gestor-biblioteca node scripts/consultar-serie.js "Graduate texts in mathematics"`

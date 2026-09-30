@@ -25,9 +25,31 @@ const ordenDe = (numero) => {
 };
 
 /**
- * @returns {{ nombre: string|null, subserie: string|null, numero: string|null, orden: number|null }}
+ * Las SERIES de un campo que puede traer varias: el volcado de la BNE junta los valores repetidos de un campo con
+ * « /**\/ » («Punto de lectura /**\/  Biblioteca de bolsillo» = dos menciones de serie; «Bestseller 185/4 /**\/» =
+ * una, con el separador colgando). Medido 30-sep: 25 colecciones creadas con el separador en el nombre.
+ * @returns {string[]} las menciones, sin vacías
+ */
+export function seriesDelCampo(texto) {
+    const partes = String(texto || '').split(/\s*\/\*\*\/\s*/).map((s) => s.trim()).filter(Boolean);
+    // Un trozo que es SOLO un número es el número de la serie anterior, no otra serie («Nova /**\/  269»).
+    const out = [];
+    for (const p of partes) {
+        if (out.length && /^[\d\s/.\-]+$/.test(p)) out[out.length - 1] += ` ${p}`;
+        else out.push(p);
+    }
+    // Una mención entera entre corchetes («[Narrativas históricas Edhasa 18]»): sin los corchetes.
+    return out.map((p) => p.replace(/^\[\s*([^\[\]]+?)\s*\]$/, '$1'));
+}
+
+/** La PRIMERA serie del campo (la principal), o null. */
+export const primeraSerie = (texto) => seriesDelCampo(texto)[0] || null;
+
+/**
+ * @returns {{ nombre: string|null, subserie: string|null, numero: string|null, orden: number|null, issn: string|null }}
  */
 export function separarSerie(texto) {
+    texto = primeraSerie(texto) || '';
     // El ISSN de la serie a veces va pegado al nombre («Graduate Texts in Mathematics, 0072-5285»): se separa (es el
     // eslabón con Crossref y con las colecciones por ISSN) y el nombre queda limpio. También un «Volume» colgando.
     const RE_ISSN = /[\s,;(]*\b(?:ISSN:?\s*)?(\d{4}-\d{3}[\dXx])\b\)?/;

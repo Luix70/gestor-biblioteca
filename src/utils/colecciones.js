@@ -8,6 +8,7 @@
  */
 import { esTituloArtefacto } from './parsear-nombre.js';
 import { validarISSN } from './identificadores.js';
+import { primeraSerie } from './series-texto.js';
 
 // ¿El nombre de una colección es un PLACEHOLDER/ARTEFACTO (no un nombre real)? Su propio ISSN, un ISSN
 // suelto, un DOI o una cadena URL-codificada (restos de una 1ª ingesta fallida). Sirve para RENOMBRARLA
@@ -204,7 +205,9 @@ const RE_COLA_SEP = new RegExp('[\\s,;:.·\\-–—]+$');                       
  * ISSN 0261-9814» → «Arthurian studies».
  */
 export function limpiarNombreColeccion(nombre) {
-    const original = String(nombre || '').trim();
+    // Varias series juntas con « /**/ » (volcado de la BNE: «Punto de lectura /**/  Biblioteca de bolsillo»): la
+    // colección es la PRIMERA; el separador nunca forma parte de un nombre (25 colecciones así, 30-sep).
+    const original = primeraSerie(nombre) || String(nombre || '').trim();
     let s = original, prev;
     do {
         prev = s;

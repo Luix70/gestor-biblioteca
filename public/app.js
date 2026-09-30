@@ -3576,6 +3576,7 @@ function pintarDoc(r, ctx) {
     tipoFormatoHTML: badgesTipoFormato(d),
     editable: ROL === 'admin',
     origen,
+    idHTML: especiales._oid,
   });
   // Debajo de la ficha, secciones PLEGABLES y colapsadas por defecto (acciones, imágenes, lectura, datos, sinopsis).
   const botones = `<div class="det-acts">
@@ -15212,7 +15213,10 @@ function fichaMinima(o) {
   const editBtn = o.editable
     ? `<div style="margin-top:10px"><button id="fminEdit" class="btn" title="Editar los datos a mano" style="padding:4px 14px;font-size:13px">✏️ Editar</button></div>`
     : '';
-  return `<div class="fmin card">${badge}
+  // El _id de Mongo ARRIBA DEL TODO (pedido del usuario, 30-sep): es lo que se pega para localizar un documento, así
+  // que tiene que estar a la vista, con su botón de copiar, sin abrir «Datos catalográficos».
+  const idLinea = o.idHTML ? `<div class="fmin-id">${o.idHTML}</div>` : '';
+  return `<div class="fmin card">${badge}${idLinea}
     <h1 class="fmin-tit">${esc(o.titulo || '(sin título)')}</h1>${o.subtitulo ? `<div class="fmin-sub">${esc(o.subtitulo)}</div>` : ''}${starsInner ? `<div class="fmin-stars">${starsInner}</div>` : ''}
     ${o.tipoFormatoHTML || ''}
     ${editBtn}

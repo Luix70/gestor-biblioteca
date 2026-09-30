@@ -1315,6 +1315,13 @@ de ficheros clasificado por CDU.
     ISBN EN SUS DOS FORMAS: la cascada pregunta a cada fuente por el ISBN-10 Y el ISBN-13 (`conAmbasFormas`): hay
     fuentes que solo indexan la forma con que se registró el libro (Crossref tiene la edición de 2003 de ese libro
     solo como 0387008349; la BNE «no siempre» indexa ambas). Antes, Google Books y la BnF recibían una sola forma.
+    SERIES JUNTAS CON « /**/ » (2026-09-30): el volcado de la BNE une los valores repetidos de un campo con « /**/ »
+    («Punto de lectura /**/  Biblioteca de bolsillo» = dos series). El ETL del Fichero lo limpiaba en la CDU pero no
+    en la serie, y se crearon 25 colecciones con el separador en el nombre. Ahora `series-texto·seriesDelCampo`
+    separa las menciones (un trozo que es solo un número es el nº de la anterior: «Nova /**/ 269»; sin corchetes
+    envolventes): el Fichero devuelve la PRIMERA (`buscador-local`), `limpiarNombreColeccion` nunca deja el separador
+    y series.db cuenta el libro en cada serie. Arreglo de lo creado: fase 7 de reparar-tras-reidentificacion.
+    FICHA: el _id de Mongo va ARRIBA DEL TODO en la ficha básica, con su botón 📋 (y, para el admin, enlace al JSON).
     MISMO TÍTULO CON EL MISMO ISBN (`utils/titulo-libro.js·mismoTituloLibro`): la guarda «ese ISBN ya es de otro
     título» ignora paréntesis/corchetes («(Ilustrado)», «(trad. …)»), acepta el título con/sin subtítulo y una
     errata de 1-2 letras, pero exige los mismos NÚMEROS (tomo 1 ≠ tomo 2). Antes 14 falsos «❓» en un tramo de la

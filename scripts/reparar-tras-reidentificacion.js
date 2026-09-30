@@ -17,6 +17,10 @@
  *   Fase 6 · scripts/reidentificar-sin-isbn.js --edicion-por-elegir  (falsos «❓ otro título», ISBN probable y
  *            datos de la obra en las que sigan sin decidir). Larga (horas): en seco se salta, salvo
  *            `--con-reidentificar`.
+ *   Fase 7 · COLECCIONES con « /**\/ » en el nombre (el volcado de la BNE junta así varias series:
+ *            «Punto de lectura /**\/  Biblioteca de bolsillo», «Bestseller 185/4 /**\/»): se quedan con la PRIMERA
+ *            serie, sin el número pegado (que pasa a coleccion_numero si el libro no tenía); si ya existe una
+ *            colección con ese nombre, se fusionan. 25 colecciones el 30-sep. Se ejecuta tras la fase 3.
  *   (Aquí se añadirán las reparaciones de lo que muestre el log final de la pasada.)
  *
  *   sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js              (en seco)
@@ -39,6 +43,9 @@ import { fusionarEditoriales } from '../src/utils/gestion-editoriales.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
+import { separarSerie } from '../src/utils/series-texto.js';
+import { claveCanonica } from '../src/utils/colecciones.js';
+import { fusionarColecciones } from '../src/utils/gestion-grupos.js';
 
 const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -154,6 +161,51 @@ if (toca(3)) {
     p.fin();
     resumen.push(`Fase 3 · editoriales con puntuación: ${fusionadas} fusionadas, ${renombradas} renombradas, ${aMano} a mano`);
     if (EJECUTAR && fusionadas) resumen.push('         (los sidecars de sus libros los pone al día la campaña «sidecars»)');
+}
+
+// ─── FASE 7: colecciones con « /**/ » en el nombre ───────────────────────────────────────────────────────────
+if (toca(7)) {
+    const colCol = db.collection('colecciones');
+    const RE_SEPARADOR = new RegExp(String.raw`/\*\*/`);
+    const afectadas = await colCol.find({ nombre: RE_SEPARADOR }).toArray();
+    let fusionadas = 0, renombradas = 0;
+    const p = progreso(afectadas.length, 'Fase 7 · colecciones con /**/');
+    for (const c of afectadas) {
+        p.paso(c.nombre);
+        const { nombre, numero } = separarSerie(c.nombre);
+        if (!nombre) continue;
+        // Por nombre (sin mayúsculas ni acentos) y, si el nombre da clave canónica, por ella. Un nombre de UNA palabra
+        // no tiene clave (null): buscar por clave null casaría con cualquier colección sin clave («Millenium» →
+        // «Legendarium» en el primer ensayo).
+        const clave = claveCanonica(nombre);
+        const destino = await colCol.findOne({ nombre, _id: { $ne: c._id } }, { collation: { locale: 'es', strength: 1 } })
+            || (clave ? await colCol.findOne({ clave_canonica: clave, _id: { $ne: c._id } }) : null);
+        p.nota(`«${c.nombre}» → ${destino ? `se fusiona con «${destino.nombre}»` : `«${nombre}»`}${numero ? ` (nº ${numero} a sus libros)` : ''}`);
+        if (!EJECUTAR) { if (destino) fusionadas++; else renombradas++; continue; }
+        // El número que iba pegado al nombre, a los libros que no tengan el suyo.
+        if (numero) {
+            await col.updateMany({ coleccion: c._id, $or: [{ coleccion_numero: { $exists: false } }, { coleccion_numero: null }, { coleccion_numero: '' }] },
+                { $set: { coleccion_numero: String(numero) } });
+        }
+        if (destino) {
+            await fusionarColecciones(db, [c._id], destino._id);
+            fusionadas++;
+        } else {
+            await colCol.updateOne({ _id: c._id }, { $set: { nombre, clave_canonica: claveCanonica(nombre), fecha_actualizacion: new Date() } });
+            await col.updateMany({ coleccion: c._id }, { $set: { coleccion_nombre: nombre, fecha_actualizacion: new Date() } });
+            renombradas++;
+        }
+    }
+    p.fin();
+    // Libros con el separador en su coleccion_nombre (texto), estén o no en una colección.
+    const sueltos = await col.countDocuments({ coleccion_nombre: RE_SEPARADOR });
+    if (EJECUTAR && sueltos) {
+        for await (const d of col.find({ coleccion_nombre: RE_SEPARADOR }, { projection: { coleccion_nombre: 1 } })) {
+            const { nombre } = separarSerie(d.coleccion_nombre);
+            if (nombre) await col.updateOne({ _id: d._id }, { $set: { coleccion_nombre: nombre } });
+        }
+    }
+    resumen.push(`Fase 7 · colecciones con /**/: ${fusionadas} fusionadas, ${renombradas} renombradas · ${sueltos} libros con el separador en su serie`);
 }
 
 // ─── FASES 4-6: los scripts de cada arreglo, en orden ────────────────────────────────────────────────────────

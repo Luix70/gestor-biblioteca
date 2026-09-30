@@ -29,7 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { progreso } from '../src/utils/progreso-cli.js';
-import { separarSerie, claveSerie } from '../src/utils/series-texto.js';
+import { separarSerie, claveSerie, seriesDelCampo } from '../src/utils/series-texto.js';
 
 const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -88,16 +88,19 @@ if (leerMeta('fase1') === 'hecha') {
         const hasta = Math.min(ultimo + LOTE, tope);
         const lote = destino.transaction(() => {
             for (const f of leer.iterate(ultimo, hasta)) {
-                const s = separarSerie(f.coleccion_nombre);
-                const clave = claveSerie(s.nombre);
-                if (!clave || clave.length < 2) continue;
-                insertar.run(clave, s.nombre, s.subserie, s.numero, s.orden, s.issn,
-                    f.isbn || f.isbn_10 || null,
-                    String(f.titulo || '').slice(0, 250), String(f.autores || '').slice(0, 200),
-                    f.editorial ? String(f.editorial).slice(0, 150) : null,
-                    Number.isFinite(f.anio_edicion) ? f.anio_edicion : (parseInt(f.anio_edicion, 10) || null),
-                    f.idioma || null, f.fuente || null);
-                series++;
+                // Un libro puede estar en VARIAS series (la BNE las junta con « /**/ »): cuenta en cada una.
+                for (const mencion of seriesDelCampo(f.coleccion_nombre)) {
+                    const s = separarSerie(mencion);
+                    const clave = claveSerie(s.nombre);
+                    if (!clave || clave.length < 2) continue;
+                    insertar.run(clave, s.nombre, s.subserie, s.numero, s.orden, s.issn,
+                        f.isbn || f.isbn_10 || null,
+                        String(f.titulo || '').slice(0, 250), String(f.autores || '').slice(0, 200),
+                        f.editorial ? String(f.editorial).slice(0, 150) : null,
+                        Number.isFinite(f.anio_edicion) ? f.anio_edicion : (parseInt(f.anio_edicion, 10) || null),
+                        f.idioma || null, f.fuente || null);
+                    series++;
+                }
             }
             ponerMeta.run('ultimo_rowid', String(hasta));
         });

@@ -24,6 +24,7 @@ import { extraerContribucionesBNE } from './contribuciones.js';
 import { normalizarTituloBibliografico } from './titulos.js';
 import { modernizarCDU } from './cdu-moderna.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
+import { primeraSerie } from './series-texto.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -119,7 +120,7 @@ function fusionar(filas) {
         paginas: primero('paginas'),
         dimensiones: primero('dimensiones'),
         categorias: lista(primero('palabras_clave')),
-        coleccion_nombre: primero('coleccion_nombre'),
+        coleccion_nombre: primeraSerie(primero('coleccion_nombre')),   // la BNE junta varias con « /**/ »
         sinopsis: primero('sinopsis'),
         portada_url: primero('portada_url'),
         lengua_original: primero('lengua_original'),   // → idioma_original del documento (traducciones)
@@ -214,7 +215,7 @@ export async function buscarTextoEnFichero(q, { limite = 40 } = {}) {
                 editorial: limpiarNombreEditorial(f.editorial) || null, anio: f.anio_edicion || null,
                 cdu: modernizarCDU(f.cdu) || null, dewey: f.dewey || null, idioma: f.idioma || null, portada_url: f.portada_url || null,
                 // La colección identifica la edición («Ancora y Delfin -- 85»): la usa identificar-edicion.
-                coleccion_nombre: f.coleccion_nombre || null,
+                coleccion_nombre: primeraSerie(f.coleccion_nombre),
             });
             if (out.length >= limite) break;
         }
@@ -243,7 +244,7 @@ export async function buscarTituloEnFichero(titulo, { limite = 500 } = {}) {
             isbn: f.isbn || null, titulo: f.titulo || '', subtitulo: f.subtitulo || null,
             autores: f.autores ? f.autores.split(';').map((s) => s.trim()).filter(Boolean) : [],
             editorial: f.editorial || null, anio: f.anio_edicion || null, idioma: f.idioma || null,
-            coleccion_nombre: f.coleccion_nombre || null,
+            coleccion_nombre: primeraSerie(f.coleccion_nombre),
         }));
     } catch (e) { console.warn(`[Fichero/FTS] consulta por título falló: ${e.message}`); return null; }
 }
@@ -285,7 +286,7 @@ export async function buscarEdicionesEnFichero(titulo, autor = null, { limite = 
             isbn: f.isbn || null, titulo: f.titulo || '', subtitulo: f.subtitulo || null,
             autores: f.autores ? f.autores.split(';').map((s) => s.trim()).filter(Boolean) : [],
             editorial: f.editorial || null, anio: f.anio_edicion || null, idioma: f.idioma || null,
-            coleccion_nombre: f.coleccion_nombre || null,
+            coleccion_nombre: primeraSerie(f.coleccion_nombre),
         }));
     } catch (e) { console.warn(`[Fichero/FTS] consulta de ediciones falló: ${e.message}`); return null; }
 }
