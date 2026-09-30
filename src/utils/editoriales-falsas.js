@@ -50,17 +50,38 @@ export function esEditorialFalsa(nombre) {
 /**
  * Nombre de editorial LIMPIO de la puntuación que arrastra de la ficha catalográfica (ISBD: «Valdemar,»,
  * «Ultramar.», «Alianza, etc.»). Medido el 30-sep: esas variantes creaban editoriales duplicadas.
- * El punto final se quita solo tras una PALABRA (4+ letras): «S.A.» o «Ed.» se quedan como están.
+ *
+ * Paréntesis, corchetes y comillas de los bordes solo se quitan si están DESPAREJADOS («Planeta]», «[Destino»), o si
+ * envuelven el nombre entero («"Catacora"», «[Society of Jesus]»). Los equilibrados se quedan: «Wiley [Imprint]»,
+ * «Editorial «Mir»», «Orion (an Imprint of … Ltd)» (el primer ensayo, 30-sep, los rompía).
+ * El punto final se quita solo tras una palabra de 5+ letras («Ultramar.», «Destino.»): las abreviaturas se quedan
+ * («S.A.», «Corp.», «Comp.», «Inc.»).
  */
+const PARES = [['(', ')'], ['[', ']'], ['«', '»'], ['"', '"'], ['“', '”']];
+const veces = (s, c) => s.split(c).length - 1;
+const desparejado = (s, abre, cierra) => (abre === cierra ? veces(s, abre) % 2 === 1 : veces(s, abre) !== veces(s, cierra));
+
 export function limpiarNombreEditorial(nombre) {
     if (nombre === undefined || nombre === null) return nombre;
     let s = String(nombre).replace(/\s+/g, ' ').trim();
-    s = s.replace(/^[\s.,;:·\-«»"'\[\]]+/, '');   // restos al principio: «[Destino», «, Planeta»
-    s = s.replace(/[\s,;]+etc\.?$/i, '');         // «Alianza, etc» (la ficha abrevia varios pies de imprenta)
-    s = s.replace(/[\s,;:/·\-«»"'\[\]]+$/, '');   // al final: «Planeta]», «Acantilado,», «Anagrama;»
-    // Un paréntesis final solo se quita si está DESPAREJADO («Orion (an Imprint of … Ltd)» se queda).
-    if (/\)$/.test(s) && (s.match(/\(/g) || []).length < (s.match(/\)/g) || []).length) s = s.replace(/\)+$/, '').trim();
-    if (/^\(/.test(s) && (s.match(/\(/g) || []).length > (s.match(/\)/g) || []).length) s = s.replace(/^\(+/, '').trim();
-    s = s.replace(/(\p{L}{4,})\.$/u, '$1');   // «Ultramar.» → «Ultramar» (pero «S.A.» sigue igual)
+    // «Alianza, etc», «Printed for J. Johnson [etc.]», «…; [etc., etc.]»: la ficha abrevia varios pies de imprenta.
+    s = s.replace(/[\s,;]+(\[?etc\.?\]?[\s,.]*)+$/i, '');
+
+    let previo;
+    do {
+        previo = s;
+        s = s.replace(/^[\s.,;:·\-/]+/, '').replace(/[\s,;:·\-/]+$/, '');   // «, Planeta», «Acantilado,», «Anagrama;»
+        for (const [abre, cierra] of PARES) {
+            if (s.endsWith(cierra) && desparejado(s, abre, cierra)) s = s.slice(0, -cierra.length);
+            if (s.startsWith(abre) && desparejado(s, abre, cierra)) s = s.slice(abre.length);
+            // El nombre ENTERO envuelto en un par, sin más pares dentro: se quita el par.
+            const dentro = s.slice(abre.length, s.length - cierra.length);
+            if (s.length > abre.length + cierra.length && s.startsWith(abre) && s.endsWith(cierra)
+                && !dentro.includes(abre) && !dentro.includes(cierra)) s = dentro;
+        }
+        s = s.trim();
+    } while (s !== previo);
+
+    s = s.replace(/(\p{L}{5,})\.$/u, '$1');   // «Ultramar.» → «Ultramar» (pero «S.A.», «Corp.» siguen igual)
     return s.trim();
 }

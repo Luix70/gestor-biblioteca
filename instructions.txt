@@ -1288,6 +1288,14 @@ de ficheros clasificado por CDU.
         guardan para elegir, pero no aportan datos.
     En «Extraer ISBN», la campaña «Resolver ediciones pendientes», reidentificar-sin-isbn y la ingesta (paso 1a).
     Al fijar el ISBN (elegir, a mano o por identificación) `isbn_probable` desaparece.
+    REPARAR TRAS LA PASADA (`scripts/reparar-tras-reidentificacion.js`, en seco por defecto; `--ejecutar`,
+    `--fases 1,2,3`, `--desde AAAA-MM-DD`): aplica los arreglos del 30-sep a lo que hizo la pasada de
+    reidentificar-sin-isbn del 29/30-sep, en orden: (1) quita los colaboradores que dio a ediciones provisionales/
+    dudosas (según su diario deshacer[]), (2) devuelve la editorial anterior donde puso un distribuidor, (3) fusiona o
+    renombra las editoriales con puntuación ISBD en el nombre (el viejo queda como grafía alternativa; una con datos
+    propios se deja a mano), y lanza (4) modernizar-cdu, (5) editoriales-por-prefijo y (6) reidentificar-sin-isbn
+    --edicion-por-elegir (en seco la 6 se salta salvo --con-reidentificar). `limpiarNombreEditorial` solo quita
+    paréntesis/corchetes/comillas DESPAREJADOS o que envuelven el nombre entero («Wiley [Imprint]» se queda).
     MISMO TÍTULO CON EL MISMO ISBN (`utils/titulo-libro.js·mismoTituloLibro`): la guarda «ese ISBN ya es de otro
     título» ignora paréntesis/corchetes («(Ilustrado)», «(trad. …)»), acepta el título con/sin subtítulo y una
     errata de 1-2 letras, pero exige los mismos NÚMEROS (tomo 1 ≠ tomo 2). Antes 14 falsos «❓» en un tramo de la
