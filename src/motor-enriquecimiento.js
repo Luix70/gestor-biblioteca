@@ -363,6 +363,11 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     documento.coleccion_nombre = primerValido(documento.coleccion_nombre, datosExtra.coleccion_nombre);
     documento.coleccion_numero = primerValido(documento.coleccion_numero, datosExtra.coleccion_numero);
     if (documento.coleccion_numero != null) documento.coleccion_numero = String(documento.coleccion_numero);
+    // ISSN de la SERIE (Crossref) — solo si la serie que queda es la misma que lo trajo; y el DOI del libro.
+    if (datosExtra.coleccion_issn && documento.coleccion_nombre === datosExtra.coleccion_nombre && !documento.coleccion_issn) {
+        documento.coleccion_issn = datosExtra.coleccion_issn;
+    }
+    documento.doi = primerValido(documento.doi, datosExtra.doi);
 
     // Drop por CARPETA: el nombre de la carpeta es una agrupación EXPLÍCITA del usuario y manda
     // sobre cualquier colección deducida del archivo. El número de serie del archivo (si lo hay)

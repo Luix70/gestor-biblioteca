@@ -6,6 +6,7 @@ import { buscarEnDNB } from './buscador-dnb.js';
 import { buscarEnFicheroLocal } from './buscador-local.js';
 import { buscarEnBNF } from './buscador-bnf.js';
 import { buscarEnBNE } from './buscador-bne-sru.js';
+import { buscarEnCrossref } from './buscador-crossref.js';
 import { resolverCDU } from '../clasificador-cdu.js';
 import { extraerContribuciones } from './contribuciones.js';
 import { variantesISBN } from './identificadores.js';
@@ -24,7 +25,9 @@ const faltaAlgoDeBNE = (d) => !d.cdu || !d.paginas_bne || !d.dimensiones_bne || 
 
 /** Completa `datosExtra` con TODO lo que traiga la BNE para ese ISBN y aún falte. Nunca lanza. */
 async function completarDesdeBNE(datosExtra, rellenar, isbns) {
-    const b = await buscarEnBNE({ isbns: isbns.filter(Boolean) }).catch(() => null);
+    // Las dos formas del ISBN (10 y 13): el catálogo de la BNE no siempre indexa ambas.
+    const formas = [...new Set(isbns.filter(Boolean).flatMap((i) => { const v = variantesISBN(i); return v.length ? v : [i]; }))];
+    const b = await buscarEnBNE({ isbns: formas }).catch(() => null);
     if (b === null) { datosExtra.alertas.push('BNE en línea no disponible: omitida.'); return false; }
     if (!b.titulo) return false;
     rellenar('titulo', b.titulo);
@@ -205,7 +208,14 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // ISBN es el pivote: se consulta a las APIs con los identificadores que el ARCHIVO ya
     // aporta (preferentes), y luego con la pista de la IA. Sin esto, un PDF cuyo ISBN está
     // en el texto/nombre nunca se resolvía por identificador (solo por título). Ver case 14.
-    const isbnsLookup = [...isbnsArchivo, ...(isbnHint ? [isbnHint] : [])];
+    // Cada ISBN en sus DOS formas (10 y 13): hay fuentes que solo indexan la forma con que se registró el libro
+    // (medido 30-sep: Crossref tiene «Reading, Writing, and Proving» 2003 solo como 0387008349, y la BNE «indexa las
+    // dos formas, pero no siempre»). Preguntar por una sola forma daba «no encontrado» con el libro dentro.
+    const conAmbasFormas = (lista) => [...new Set(lista.filter(Boolean).flatMap((i) => {
+        const v = variantesISBN(i);
+        return v.length ? v : [i];
+    }))];
+    const isbnsLookup = conAmbasFormas([...isbnsArchivo, ...(isbnHint ? [isbnHint] : [])]);
 
     // TIER 2.0 · FICHERO LOCAL (volcados OL+BNE offline en fichero.db). Autoridad principal:
     // sin red, ~0,1 ms por ISBN. Gana a las APIs online (rellenar = primera fuente), que quedan
@@ -328,7 +338,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // de la portada para localizar la edición exacta (ej. "Clásica Maior" de Anna Karenina).
     let infoGB = null;
     try {
-        const isbnsGB = datosExtra.isbn ? [datosExtra.isbn] : isbnsLookup;
+        const isbnsGB = datosExtra.isbn ? conAmbasFormas([datosExtra.isbn]) : isbnsLookup;
         infoGB = await buscarEnGoogleBooks({ isbns: isbnsGB, titulo: tituloTexto, autor, idioma, coleccion: coleccionHint });
     } catch (e) {
         // El mensaje distingue «sin cuota diaria» (lo normal con ingestas masivas) de una caída de verdad.
@@ -400,7 +410,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // aún faltan clasificación o datos clave; rellena huecos sin pisar nada. (La British National
     // Bibliography será un fallback hermano cuando publique su endpoint Share Family; ver docs.)
     if (isbnParaBusquedas && ((!datosExtra.cdu && !datosExtra.dewey) || !datosExtra.titulo || !datosExtra.autores?.length)) {
-        const infoBNF = await buscarEnBNF({ isbns: [datosExtra.isbn, ...isbnsLookup].filter(Boolean) });
+        const infoBNF = await buscarEnBNF({ isbns: conAmbasFormas([datosExtra.isbn, ...isbnsLookup]) });
         if (infoBNF && infoBNF.titulo) {
             rellenar('titulo', infoBNF.titulo);
             rellenar('autores', infoBNF.autores);
@@ -413,6 +423,33 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             if (infoBNF.paginas && !datosExtra.paginas_bne) datosExtra.paginas_bne = infoBNF.paginas;
             if (infoBNF.dimensiones && !datosExtra.dimensiones_bne) datosExtra.dimensiones_bne = infoBNF.dimensiones;
             datosExtra.alertas.push('Datos/Dewey complementados desde la BnF.');
+        }
+    }
+
+    // TIER 2g · CROSSREF — para los libros ACADÉMICOS (Springer, Routledge, CUP, OUP, Elsevier, Wiley…) sabe la
+    // SERIE con su ISSN y lo reciente, que al Fichero le faltan (medido 30-sep: «Reading, Writing, and Proving» →
+    // Undergraduate Texts in Mathematics; el Fichero lo tenía sin serie). Gratis y sin clave; solo huecos, y solo
+    // si falta algo que pueda dar. Nunca para revistas (no se llega aquí) ni sin ISBN.
+    const faltaAlgoDeCrossref = !datosExtra.coleccion_nombre || !datosExtra.editorial || !datosExtra.año_edicion
+        || !datosExtra.titulo || !(datosExtra.autores && datosExtra.autores.length);
+    if (faltaAlgoDeCrossref && (datosExtra.isbn || isbnsLookup.length)) {
+        const infoCR = await buscarEnCrossref({ isbns: conAmbasFormas([datosExtra.isbn, ...isbnsLookup]) }).catch(() => null);
+        if (infoCR === null) datosExtra.alertas.push('Crossref no disponible: omitido.');
+        else if (infoCR.titulo) {
+            rellenar('titulo', infoCR.titulo);
+            rellenar('subtitulo', infoCR.subtitulo);
+            rellenar('autores', infoCR.autores);
+            rellenar('editorial', infoCR.editorial);
+            rellenar('año_edicion', infoCR.año_edicion);
+            if (infoCR.coleccion_nombre && !datosExtra.coleccion_nombre) {
+                datosExtra.coleccion_nombre = infoCR.coleccion_nombre;
+                if (infoCR.coleccion_numero) datosExtra.coleccion_numero = infoCR.coleccion_numero;
+                // El ISSN de la SERIE (no del libro): identifica la colección sin ambigüedad (lo usará el trabajo
+                // de colecciones para ratificarla y ver sus huecos).
+                if (infoCR.coleccion_issn) datosExtra.coleccion_issn = infoCR.coleccion_issn;
+            }
+            if (infoCR.doi && !datosExtra.doi) datosExtra.doi = infoCR.doi;
+            datosExtra.alertas.push(`Datos complementados desde Crossref${infoCR.coleccion_nombre ? ` (serie «${infoCR.coleccion_nombre}»)` : ''}.`);
         }
     }
 

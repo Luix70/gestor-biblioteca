@@ -1305,6 +1305,16 @@ de ficheros clasificado por CDU.
     `node scripts/consultar-serie.js "Graduate texts in mathematics"` (✓ los que tienes, huecos de numeración) o
     `--isbn …`. Es la base para ratificar colecciones y ver huecos (trabajo de colecciones, después de los ISBN).
     Límite: el volcado llega hasta ~2017; lo posterior vendrá de Crossref (por ISSN) y de la BNE en línea.
+    CROSSREF EN LA CASCADA (2026-09-30, `utils/buscador-crossref.js`): API pública, gratis y sin clave (el User-Agent
+    con el EMAIL del .env la mete en el «polite pool»). Para libros ACADÉMICOS da lo que al Fichero le falta: la
+    SERIE con su ISSN y lo reciente («Reading, Writing, and Proving» → Undergraduate Texts in Mathematics). Tier 2g
+    de `buscarMetadatosExternos` (tras la BnF), solo si falta serie/editorial/año/título/autores y hay ISBN; solo
+    huecos; guarda también `coleccion_issn` (ISSN de la SERIE, para ratificar colecciones) y `doi`. Se queda con el
+    LIBRO (una consulta por ISBN devuelve también sus capítulos). `librosDeSerieCrossref(issn)` lista una serie
+    entera (Springer Monographs in Mathematics: 243). El volcado anual (U:\_DUMPEDCATALOGS) dará la base offline.
+    ISBN EN SUS DOS FORMAS: la cascada pregunta a cada fuente por el ISBN-10 Y el ISBN-13 (`conAmbasFormas`): hay
+    fuentes que solo indexan la forma con que se registró el libro (Crossref tiene la edición de 2003 de ese libro
+    solo como 0387008349; la BNE «no siempre» indexa ambas). Antes, Google Books y la BnF recibían una sola forma.
     MISMO TÍTULO CON EL MISMO ISBN (`utils/titulo-libro.js·mismoTituloLibro`): la guarda «ese ISBN ya es de otro
     título» ignora paréntesis/corchetes («(Ilustrado)», «(trad. …)»), acepta el título con/sin subtítulo y una
     errata de 1-2 letras, pero exige los mismos NÚMEROS (tomo 1 ≠ tomo 2). Antes 14 falsos «❓» en un tramo de la
