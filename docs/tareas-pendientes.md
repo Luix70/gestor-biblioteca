@@ -64,6 +64,11 @@ Todo en un comando y en orden (en seco medido el 30-sep, con la pasada aún a me
 
 Se añadirán las reparaciones de lo que muestre el log final de la pasada.
 
+### 3 ter. Índice de series (para el trabajo de colecciones)
+- [ ] Copiar `D:\gestor-biblioteca\Fichero\series.db` (2,9 GB, construido en el PC el 30-sep) a la carpeta Fichero del
+  NAS (`U:\Fichero\series.db`). Sin reiniciar nada: se abre la primera vez que se consulta.
+- [ ] Probar: `sudo docker exec -t gestor-biblioteca node scripts/consultar-serie.js "Graduate texts in mathematics"`
+
 ### 4. Portadas falsas (la misma imagen en libros distintos)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js`
 

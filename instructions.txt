@@ -1296,6 +1296,15 @@ de ficheros clasificado por CDU.
     propios se deja a mano), y lanza (4) modernizar-cdu, (5) editoriales-por-prefijo y (6) reidentificar-sin-isbn
     --edicion-por-elegir (en seco la 6 se salta salvo --con-reidentificar). `limpiarNombreEditorial` solo quita
     paréntesis/corchetes/comillas DESPAREJADOS o que envuelven el nombre entero («Wiley [Imprint]» se queda).
+    ÍNDICE DE SERIES (2026-09-30, `Fichero/series.db`): las series editoriales que conocen OpenLibrary y la BNE (1,6 M
+    series, 10,2 M libros), sacadas del Fichero por `scripts/etl-series.js` (una vez, ~10 min en el PC; reanudable;
+    derivado y reconstruible como busqueda.db: fuera de git y del despliegue → se COPIA a la carpeta Fichero del NAS,
+    U:\Fichero). El texto de la serie se separa en nombre / subserie / número / ISSN (`utils/series-texto.js`:
+    «Ediciones de Bolsillo -- 284», «Graduate texts in mathematics ; 52», «Bd. 29», «[t. 11, 18]», «…, 0072-5285»).
+    Consultas (`utils/buscador-series.js`): seriesDeISBN, seriesDeISSN, buscarSeries, librosDeSerie. Herramienta:
+    `node scripts/consultar-serie.js "Graduate texts in mathematics"` (✓ los que tienes, huecos de numeración) o
+    `--isbn …`. Es la base para ratificar colecciones y ver huecos (trabajo de colecciones, después de los ISBN).
+    Límite: el volcado llega hasta ~2017; lo posterior vendrá de Crossref (por ISSN) y de la BNE en línea.
     MISMO TÍTULO CON EL MISMO ISBN (`utils/titulo-libro.js·mismoTituloLibro`): la guarda «ese ISBN ya es de otro
     título» ignora paréntesis/corchetes («(Ilustrado)», «(trad. …)»), acepta el título con/sin subtítulo y una
     errata de 1-2 letras, pero exige los mismos NÚMEROS (tomo 1 ≠ tomo 2). Antes 14 falsos «❓» en un tramo de la
