@@ -23,7 +23,7 @@ import { http } from './http.js';
 import * as cheerio from 'cheerio';
 import { esErrorDeRed } from '../errores.js';
 import { validarISBN } from './identificadores.js';
-import { modernizarCDU } from './cdu-moderna.js';
+import { modernizarCDU, encabezamientoCDU } from './cdu-moderna.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
 
 const SRU = 'https://catalogo.bne.es/view/sru/34BNE_INST';
@@ -108,7 +108,9 @@ function registroMarc($, rec) {
         dimensiones: limpiar(sub('300', 'c')),
         coleccion_nombre: limpiar(sub('490', 'a')),
         coleccion_numero: limpiar(sub('490', 'v'))?.replace(/^(n[º°o.]*|vol\.?)\s*/i, '') || null,
-        cdu: modernizarCDU(limpiar(sub('080', 'a'))),   // 820 → 821.111 (notación antigua)
+        cdu: modernizarCDU(limpiar(sub('080', 'a'))),   // 820 → 821.111 (notación antigua); sin encabezamiento
+        // El encabezamiento pegado a la CDU («929 Tesla, Nikola») es una materia: no se pierde.
+        categorias: [encabezamientoCDU(limpiar(sub('080', 'a')))].filter(Boolean),
         dewey: limpiar(sub('082', 'a')),
         fuente: 'bne',
     };

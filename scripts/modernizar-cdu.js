@@ -8,6 +8,11 @@
  * También recoloca las publicaciones juveniles de la BNE (087.5:82…), que se UBICAN ahora por su parte literaria
  * (decisión del usuario, opción A) — su CDU guardada no cambia.
  *
+ * Ampliado con lo que enseñó el log completo de la pasada (ver cdu-moderna.js, punto 3): encabezamientos pegados
+ * al número («929 Tesla, Nikola» → «929», y «Tesla, Nikola» pasa a las materias del libro: no se pierde),
+ * espacios sueltos, historia antigua (946 → 94(460), 937 → 94(37), 940.53 → 94(100)"1939/1945"), biografía
+ * (92 → 929), informática (681.3 → 004) y más literaturas (871, 875, 839.x, 894.5xx…).
+ *
  * Dos fases, para que las carpetas compartidas (varias versiones del mismo libro) se muevan de una vez:
  *   1. BASE: cdu y cdu_autoridad → notación moderna (y la caché equivalencias_cdu).
  *   2. DISCO: cada documento afectado cuya carpeta ya no refleja su ficha se mueve a su árbol (con verificación
@@ -20,7 +25,7 @@ import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
-import { modernizarCDU, esCduAntigua } from '../src/utils/cdu-moderna.js';
+import { modernizarCDU, esCduAntigua, encabezamientoCDU } from '../src/utils/cdu-moderna.js';
 import { carpetaReflejaFicha, recolocarSegunCdu, aplicarCambio, carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
@@ -31,10 +36,17 @@ const EJECUTAR = process.argv.includes('--ejecutar');
 const db = await conectarDB();
 const col = db.collection('biblioteca');
 
-// Prefiltro en Mongo (rápido): alguna faceta que empiece por 8xx, o una publicación especial 087… El filtro fino
-// (qué números son de verdad notación antigua) lo hace esCduAntigua en memoria.
-const RE_CANDIDATA = /(^|:)\s*(8[2-8]\d|087)/;
-const filtro = { $or: [{ cdu: RE_CANDIDATA }, { cdu_autoridad: RE_CANDIDATA }] };
+// Se recorren todos los documentos con CDU (decenas de miles: unos segundos): qué hay que limpiar o traducir lo
+// decide esCduAntigua en memoria. El prefiltro por expresión regular que había aquí se quedaba corto en cuanto la
+// tabla de equivalencias creció (historia, biografía, encabezamientos…).
+// Fuera los que esperan una CDU nueva del Conformador (reparar-cdu-contaminada los dejó marcados): la que tienen es
+// un invento («972.5» en historia de EE. UU.), y traducirla solo movería la carpeta dos veces.
+const filtro = {
+    $or: [{ cdu: { $type: 'string' } }, { cdu_autoridad: { $type: 'string' } }],
+    mantenimiento_firma: { $ne: 'pendiente-cdu-contaminada' },
+};
+const transiciones = new Map();   // «946 → 94(460)»: cuántos documentos (para juzgar el cambio de un vistazo)
+const raizDe = (cdu) => String(cdu).match(/^[\d.]+(?:\(\d[\d.]*\))?/)?.[0] || String(cdu);
 
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · CDU en notación antigua y publicaciones juveniles\n`);
 
@@ -52,13 +64,21 @@ for await (const d of col.find(filtro, { projection: { cdu: 1, cdu_autoridad: 1,
     if (Object.keys(set).length || juvenil) afectados.push(d._id);
     if (!Object.keys(set).length) continue;
     cambiadas++;
-    if (cambiadas <= 40 || !EJECUTAR) {
+    if (set.cdu) {
+        // Resumen por RAÍZ (el número principal, sin auxiliares de forma ni época): «946 → 94(460)».
+        const transicion = `${raizDe(d.cdu)} → ${raizDe(set.cdu)}`;
+        transiciones.set(transicion, (transiciones.get(transicion) || 0) + 1);
+    }
+    if (cambiadas <= 40) {
         p1.nota(`${set.cdu ? `cdu ${d.cdu} → ${set.cdu}` : `cdu_autoridad ${d.cdu_autoridad} → ${set.cdu_autoridad}`}  «${String(d.titulo || '').slice(0, 40)}»`);
     }
     if (EJECUTAR) {
+        // El encabezamiento que iba pegado al número («Tesla, Nikola») es una materia: a las palabras clave.
+        const materias = [encabezamientoCDU(d.cdu), encabezamientoCDU(d.cdu_autoridad)].filter(Boolean);
         await col.updateOne({ _id: d._id }, {
             $set: { ...set, fecha_actualizacion: new Date() },
-            $push: { alertas_agente: `CDU pasada a notación moderna (scripts/modernizar-cdu): ${d.cdu} → ${set.cdu || d.cdu}.` },
+            $push: { alertas_agente: `CDU limpia y en notación moderna (scripts/modernizar-cdu): ${d.cdu} → ${set.cdu || d.cdu}.` },
+            ...(materias.length ? { $addToSet: { palabras_clave: { $each: materias } } } : {}),
         });
     }
 }
@@ -66,12 +86,15 @@ p1.fin();
 
 // La caché de equivalencias: una CDU aprendida en notación antigua se serviría a los libros siguientes.
 let equivalencias = 0;
-for await (const e of db.collection('equivalencias_cdu').find({ cdu: RE_CANDIDATA }, { projection: { cdu: 1 } })) {
+for await (const e of db.collection('equivalencias_cdu').find({ cdu: { $type: 'string' } }, { projection: { cdu: 1 } })) {
     if (!esCduAntigua(e.cdu)) continue;
     equivalencias++;
     if (EJECUTAR) await db.collection('equivalencias_cdu').updateOne({ _id: e._id }, { $set: { cdu: modernizarCDU(e.cdu) } });
 }
-console.log(`\nFase 1: ${cambiadas} documento(s) con CDU antigua${EJECUTAR ? ' corregidos' : ''} · ${equivalencias} equivalencia(s) de la caché.\n`);
+console.log(`\nFase 1: ${cambiadas} documento(s) con CDU antigua${EJECUTAR ? ' corregidos' : ''} · ${equivalencias} equivalencia(s) de la caché.`);
+console.log('Por transición (las 50 mayores):');
+for (const [transicion, n] of [...transiciones].sort((a, b) => b[1] - a[1]).slice(0, 50)) console.log(`  ${String(n).padStart(5)}  ${transicion}`);
+console.log('');
 
 // ─── FASE 2: el disco ────────────────────────────────────────────────────────────────────────────────────────
 let movidos = 0, sinCarpeta = 0, fallos = 0, enSuSitio = 0;

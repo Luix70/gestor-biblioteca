@@ -1304,7 +1304,8 @@ de ficheros clasificado por CDU.
     Consultas (`utils/buscador-series.js`): seriesDeISBN, seriesDeISSN, buscarSeries, librosDeSerie. Herramienta:
     `node scripts/consultar-serie.js "Graduate texts in mathematics"` (✓ los que tienes, huecos de numeración) o
     `--isbn …`. Es la base para ratificar colecciones y ver huecos (trabajo de colecciones, después de los ISBN).
-    Límite: el volcado llega hasta ~2017; lo posterior vendrá de Crossref (por ISSN) y de la BNE en línea.
+    Límite: OpenLibrary registra mal la serie de los libros recientes (el volcado es de 2026-05, pero pocos traen
+    serie desde ~2017); eso vendrá de Crossref (por ISSN) y de la BNE en línea.
     CROSSREF EN LA CASCADA (2026-09-30, `utils/buscador-crossref.js`): API pública, gratis y sin clave (el User-Agent
     con el EMAIL del .env la mete en el «polite pool»). Para libros ACADÉMICOS da lo que al Fichero le falta: la
     SERIE con su ISSN y lo reciente («Reading, Writing, and Proving» → Undergraduate Texts in Mathematics). Tier 2g
@@ -1326,6 +1327,71 @@ de ficheros clasificado por CDU.
     título» ignora paréntesis/corchetes («(Ilustrado)», «(trad. …)»), acepta el título con/sin subtítulo y una
     errata de 1-2 letras, pero exige los mismos NÚMEROS (tomo 1 ≠ tomo 2). Antes 14 falsos «❓» en un tramo de la
     pasada del 30-sep. Ahora la misma guarda está también en la INGESTA (paso 1a).
+
+    LO QUE ENSEÑÓ EL LOG COMPLETO DE LA PASADA (2026-09-30: 6.795 libros, 2.587 ISBN recuperados — 883 del propio
+    fichero, 569 provisionales, 303 dudosos —, 3.683 sin ISBN, 525 ambiguos, 135 «con esperanza»). Arreglos en el
+    motor (valen para la ingesta y para toda identificación futura) y su reparación en
+    `scripts/reparar-tras-reidentificacion.js` (fases 8-12):
+      · EL ISBN DEL CONJUNTO NO ES EL DEL LIBRO (`isbn-archivo.js·isbnSegunRol`). La página de créditos lista el
+        ISBN del conjunto («… (Set)») junto al del volumen, y se cogía el primero: 196 documentos —tomos de 40
+        enciclopedias, 8 títulos de «Routledge Library Editions»— compartían ISBN. Ahora el del conjunto va a
+        `isbn_obra` y el del libro se elige por su número de tomo (todos los ISBN «de volumen» con el mismo número
+        = los de este libro; varios números = hace falta saber el tomo; si no se sabe, ninguno: la regla de la
+        ingesta). Además `reidentificarDoc` no asigna un ISBN del fichero que ya tiene OTRO TOMO de la misma obra
+        (→ isbn_obra) ni uno que ya es de otro título sin que la autoridad lo confirme para este
+        (`tituloConfirmaDoc`: título de la autoridad frente al título y al nombre del fichero).
+      · NOMBRE Y CONTENIDO DISCREPAN (`elegirEntreContenidoYNombre`): «9780803296701.…Before_Jackie_Robinson….epub»
+        traía dentro el ISBN de «Bambini sorriso di Dio». Decide el Fichero por el título; sin respuesta, de
+        editoriales distintas manda el del nombre; de la misma, el del contenido (papel/ebook del mismo libro).
+      · LOTES CON AUDIO: una candidata cuyo TÍTULO es de lote («… MP3 PACK», «… CD Pack», «with Audio CD») no es la
+        edición de un libro (`identificar-edicion·esTituloDeLoteAudio`). GLOSARIOS/VOCABULARIOS son material derivado.
+      · TÍTULO CON COLETILLA (`reidentificar-doc·soloAnadeColetilla`): si el de la autoridad es el actual más serie,
+        nivel, formato o edición («Recycling» → «Recycling, Level 3»; «… (Spanish Edition)»), se queda el actual.
+      · LENGUA POR EL GRUPO DEL ISBN (`identificar-edicion·lenguaDelGrupoISBN`): una candidata sin idioma declarado
+        cuyo ISBN es de un grupo de una sola lengua (2 fr, 3 de, 5 ru, 88 it…) no vale para un libro en otra lengua
+        («1984» en español recibió el ISBN de Ullstein). Solo descarta; no se aplica a libros en inglés (Springer,
+        Elsevier) ni al grupo inglés (en EE. UU. se publica en español).
+      · TÍTULOS-ARTEFACTO (`parsear-nombre·esTituloArtefacto`): nuevos «Unknown», «Title», «test», «Frontmatter»,
+        «CreationDate: …», «Keywords: …», «B000OVLIPQ EBOK»; y dejan de serlo «Microsoft Word 2013 For Dummies» o
+        «Adobe InDesign CC Classroom in a Book» (solo es la marca del productor con guion/versión: «Microsoft Word -
+        doc1», «Adobe Acrobat Pro 10.1.8»). `tituloDeNombreDeLote`: último recurso para «<ISBN>.<Editorial>.
+        <Título_con_guiones>.<Autor>.<fecha>» cuando ninguna autoridad tiene el ISBN (213 artefactos con ISBN en la base).
+      · EDITORIAL LEÍDA POR LA VISIÓN EN LA CUBIERTA DE UN MAQUETADOR: en los ficheros de ePubLibre la cubierta lleva
+        SU logotipo; la visión lo leía como «se», «Se», «ge», «9e» (281 libros) o como «Seix Barral» (208 sin serlo) y
+        esa «editorial» sustituía a «ePubLibre» como «la real». Ahora `proveedor-metadatos` no toma de la visión un
+        nombre de 1-2 letras y marca `editorial_de_vision`; `motor-enriquecimiento` no la usa cuando el fichero es de
+        un maquetador (sí la de un catálogo o la de la colección). `mismaEditorial` da por iguales dos nombres
+        idénticos aunque su núcleo quede vacío («Ediciones B»).
+      · CDU LIMPIA (`cdu-moderna.js`, punto 3 de su cabecera): la BNE pega el ENCABEZAMIENTO al número («929 Tesla,
+        Nikola», «821.111 Shakespeare, William 1.07», «004.438 Python»: 456 documentos, cada persona una CDU
+        distinta). `modernizarCDU` deja el número y `encabezamientoCDU` devuelve el nombre, que pasa a las materias
+        (palabras_clave). También: espacios sueltos; HISTORIA antigua/Dewey → 94(lugar) (946.081 → 94(460).081,
+        937 → 94(37), 949.5 → 94(495), 940.53 → 94(100)"1939/1945"; 973.x se deja: allí los decimales son periodos);
+        92 → 929; 681.3 → 004; más literaturas (871, 875, 839.x, 894.5xx, 895.x, 892.x); las facetas se parten por
+        los «:» de FUERA de paréntesis («327(73:510)» es una). `modernizar-cdu.js` recorre ya toda la base (en seco,
+        30-sep: 3.168 CDU y 2.764 carpetas) y da el resumen por transición. Salta los que esperan CDU nueva del
+        Conformador (`mantenimiento_firma: 'pendiente-cdu-contaminada'`).
+      · CDU CONTAMINADA POR CLASE LCC, SEGUNDA TANDA (`clasificador-cdu.js`). Para las clases que la tabla APLAZA a la
+        IA (historia D/E/F, literaturas de varias lenguas P/PA/PQ/PT…) no había tabla que protegiera, y la decisión
+        de UN libro se servía a toda la clase: «lcc:e → 972.5» (115 libros de historia de EE. UU.), «pa → 791.43»,
+        «d → 93.04.2», «f → 918.3»… 30 equivalencias, 1.082 documentos; el Conformador movía allí libros que estaban
+        bien. Ahora: (1) `unidadLcc`: esas clases se buscan y se aprenden por CLASE + NÚMERO («E185», «PQ6555»), que
+        es lo que dice de qué trata el libro; sin número no hay caché; (2) una equivalencia de clase aprendida que no
+        AFINA lo que dice la tabla —ahora también el respaldo de la letra— no se usa («tk → 004.738»); QP, QM, QR, TK
+        y TP entran en la tabla; (3) `cduBienFormada`: una CDU de la IA mal formada («93.04.2», «94-(Normandy)») ni
+        se aplica ni se aprende. Reparación: `scripts/reparar-cdu-contaminada.js` lee los incidentes de la caché y
+        devuelve a cada libro la CDU que tenía (de su alerta «CDU actualizada: "X" → …»), o la del motor sin IA; los
+        que necesitan IA (773) van a una selección y pierden el sello de re-clasificar-cdu (los rehace el Conformador).
+      · `scripts/verificar-imports.js`: comprueba, sin ejecutar nada, que cada import con nombre existe como export
+        en su módulo. `node --check` no lo ve (incidente d491882: la aplicación no arrancó). Antes de cada commit.
+    REPARACIONES (fases nuevas de reparar-tras-reidentificacion; orden 1, 2, 3, 7, 10, 8, 9, 12, 4, 5, 11, 6):
+      10 editoriales de la visión (quita las de 1-2 letras y «Seix Barral» sin ISBN 978-84-322; los demás sin ISBN a
+      la selección «Editorial sin confirmar…»); 8 DESHACER Y REHACER (cada campo a su valor anterior según el diario,
+      CDU y carpeta incluidas; la entrada queda `deshecho`; luego se reidentifica con el motor corregido): ISBN
+      compartido con otro tomo u otro título, lote con audio, material derivado, ISBN de otra editorial que el del
+      nombre; 9 títulos con coletilla devueltos y títulos-artefacto con ISBN cotejados de nuevo; 12 CDU contaminada;
+      11 selecciones «CDU de la BNE de otra lengua» e «ISBN de otra lengua»; 6 pasa a `--todos --edicion-por-elegir`
+      (recoge los «con esperanza» y lo deshecho).
     COLISIONES DE CARPETA ARREGLADAS (`util-mantenimiento·reubicarPorCdu`, única función para mover por CDU):
     si la carpeta destino ya es de OTRO documento (el mismo libro en djvu y pdf comparten ISBN), el documento va a
     una carpeta propia con sufijo (`<isbn>-<id>`). Antes: re-clasificar-cdu dejaba los ficheros en el árbol viejo

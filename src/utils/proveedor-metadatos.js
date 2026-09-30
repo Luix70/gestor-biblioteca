@@ -11,6 +11,8 @@ import { resolverCDU } from '../clasificador-cdu.js';
 import { extraerContribuciones } from './contribuciones.js';
 import { variantesISBN } from './identificadores.js';
 import { mismoNombreAutor } from './huecos-autoridad.js';
+import { esEditorialFalsa } from './editoriales-falsas.js';
+import { esNombreRuido } from './editorial-por-prefijo.js';
 
 // ─── BNE en línea (SRU del catálogo) ────────────────────────────────────────────────────────────────────
 // Lenguas de España y prefijos ISBN de España (978-84, 979-13): para esas ediciones la BNE es la autoridad.
@@ -382,7 +384,16 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // TIER 3a (fallback) · Las pistas de la IA solo rellenan lo que NINGUNA API pudo aportar.
     if (pistasIA) {
         rellenar('isbn', pistasIA.isbn);
-        rellenar('editorial', pistasIA.editorial);
+        // La editorial que la visión LEE en la cubierta. Dos precauciones (medido el 30-sep: 225 libros con la
+        // editorial «se», «Se», «ge» o «9e», y 219 con «Seix Barral» sin serlo — la visión leía así el logotipo de
+        // ePubLibre en sus cubiertas):
+        //   · un nombre de una o dos letras no es una editorial: no se toma;
+        //   · se marca de dónde viene, para que quien fusiona pueda desconfiar (motor-enriquecimiento no la usa
+        //     cuando el fichero es de un maquetador: la cubierta es la suya, no la de la editorial).
+        const editorialVision = pistasIA.editorial && !esNombreRuido(pistasIA.editorial) && !esEditorialFalsa(pistasIA.editorial)
+            ? pistasIA.editorial : null;
+        if (editorialVision && !datosExtra.editorial) datosExtra.editorial_de_vision = true;
+        rellenar('editorial', editorialVision);
         rellenar('año_edicion', pistasIA.año_edicion);
         rellenar('coleccion_nombre', pistasIA.coleccion);
         rellenar('coleccion_numero', pistasIA.numero_coleccion != null ? String(pistasIA.numero_coleccion) : null);

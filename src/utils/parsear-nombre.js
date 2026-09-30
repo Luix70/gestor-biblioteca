@@ -22,8 +22,17 @@ export function esTituloArtefacto(s) {
     if (/\.(pdf|epub|mobi|azw3|fb2|djvu|cbr|cbz|cb7)$/i.test(t)) return true; // el "título" es un nombre de fichero (p. ej. "jan09-1.pdf")
     if (/[\\]/.test(t)) return true;                                // contiene barra invertida → es una ruta
     if (/^[a-z]:[\\/]?/i.test(t) && /\.[a-z0-9]{2,4}$/i.test(t)) return true; // "C:…algo.ext" (ruta Windows)
-    if (/^microsoft\s+(word|powerpoint|excel|publisher|frontpage)\b/i.test(t)) return true; // "Microsoft Word - documento1"
+    // "Microsoft Word - documento1": la marca del programa seguida de un GUION y el nombre del fichero. Sin el guion
+    // es un libro sobre el programa («Microsoft Word 2013 For Dummies» se marcaba como artefacto: medido el 30-sep).
+    if (/^microsoft\s+(word|powerpoint|excel|publisher|frontpage)\s*[-–—:]/i.test(t)) return true;
     if (/^(untitled|sin\s*t[íi]tulo|documento?\s*\d*|document\s*\d+|presentaci[óo]n\s*\d*)$/i.test(t)) return true;
+    // Marcadores de plantilla o de sección grabados como título (log del 30-sep: «Unknown», «Title», «test»,
+    // «Frontmatter»): nadie titula así un libro, y si lo hiciera la autoridad devolvería ese mismo título.
+    if (/^(unknown|title|titulo|título|test|front\s?matter|no\s+title|sin\s+nombre)$/i.test(t)) return true;
+    // Otro campo del info-dict del PDF en el sitio del título: «CreationDate: Sun Jan 22 06:58:33 2006», «Keywords: …».
+    if (/^\s*(creationdate|moddate|keywords|author|title)\s*:/i.test(t)) return true;
+    // Identificador de Amazon (ASIN) con la coletilla de sus ebooks: «B000OVLIPQ EBOK».
+    if (/^B0[0-9A-Z]{8}(\s+EBOK)?$/i.test(t) || /\sEBOK$/.test(t)) return true;
     // Genéricos de CONVERSORES/ESCÁNERES grabados como título: "DjVu Document" (export de DjVuLibre),
     // "Untitled Document" (LibreOffice/OpenOffice), "Scanned Document"/"Scan", "PDF Document", "Adobe Acrobat
     // Document"… No es un título real: solo la palabra genérica (document/scan), con 0-2 palabras de
@@ -73,7 +82,16 @@ export function esTituloArtefacto(s) {
     // Marca del PRODUCTOR del PDF grabada como "título" (no es un título): herramientas de creación/
     // reparación/conversión. Casos reales: "Creator_ Advanced PDF Repair at http://www.datanumen.com/apdfr/",
     // "Creator_ PScript5.dll Version 5.2.2", "Adobe InDesign CC 2014", "Adobe Acrobat Pro 10.1.8".
-    if (/\b(advanced\s+pdf\s+repair|datanumen|pscript\d?\.dll|acrobat\s+distiller|ghostscript|quartz\s*pdf|pdfcreator|primopdf|nitro\s*pro|dvipsone|dvips|pdftex|xetex|miktex|tex\s+output|aspose|itext|prince\s*xml|apache\s+fop|adobe\s+(?:indesign|acrobat|photoshop|illustrator|pagemaker|framemaker|distiller)|quark\s*xpress|calibre|wkhtmltopdf|microsoft\s+office\s+word)\b/i.test(t)) return true;
+    if (/\b(advanced\s+pdf\s+repair|datanumen|pscript\d?\.dll|acrobat\s+distiller|ghostscript|quartz\s*pdf|pdfcreator|primopdf|nitro\s*pro|dvipsone|dvips|pdftex|xetex|miktex|tex\s+output|aspose|itext|prince\s*xml|apache\s+fop|quark\s*xpress|calibre|wkhtmltopdf)\b/i.test(t)) return true;
+    // Los programas de Adobe y Word son también TEMA de libros («Adobe InDesign CC Classroom in a Book», «Adobe
+    // Photoshop: A Complete Course…», que el 30-sep se trataban como artefacto y cedían su título). Solo es la marca
+    // del productor cuando el texto ENTERO es programa + versión: «Adobe InDesign CC 2014 (Windows)», «Adobe Acrobat
+    // Pro 10.1.8», «Microsoft® Office Word 2007».
+    if (/^adobe\s+(indesign|acrobat|photoshop|illustrator|pagemaker|framemaker|distiller)(\s+(cc|cs\d*|pro|dc|standard|reader|elements))*(\s+[\d.]+)?(\s*\((windows|macintosh|mac)\))?$/i.test(t)) return true;
+    // …o cuando lleva lo que un título de libro no lleva: versión con decimales, «plug-in», el sistema entre paréntesis.
+    if (/^adobe\s+(indesign|acrobat|photoshop|illustrator|pagemaker|framemaker|distiller)\b/i.test(t)
+        && /\d+\.\d+|plug-?in|\((windows|macintosh|mac)\)/i.test(t)) return true;
+    if (/^microsoft®?\s+office\s+word(\s+\d{4})?$/i.test(t)) return true;
     return false;
 }
 
@@ -98,6 +116,26 @@ export function tituloDesdeNombre(nombreArchivo) {
     if (!limpio || esTituloArtefacto(limpio)) return null;              // sigue siendo artefacto tras des-puntuar
     if ((limpio.match(/[a-záéíóúñü]/gi) || []).length < 3) return null; // sin apenas letras → no es un título
     return limpio;
+}
+
+/**
+ * TÍTULO de un nombre de fichero con el patrón de los lotes de editoriales universitarias:
+ *   «<ISBN>.<Editorial>.<Título_con_guiones_bajos>.<Autor>.<Mes>.<Año>.pdf»
+ *   9780226063812.UChicagoPress.Patient_Zero_and_the_Making_of_the_AIDS_Epidemic.Richard_A._McKay.Nov.2017.pdf
+ * Medido el 30-sep: 60 documentos conservaban ese nombre entero como título porque ninguna autoridad tenía su ISBN
+ * (libros de 2017 en adelante). El tercer tramo ES el título: mejor eso que el nombre del fichero.
+ * En estos nombres «_ » sustituye a «: » («Jane Austen's Names_ Riddles, Persons…»).
+ * @returns {string|null} el título, o null si el nombre no sigue el patrón
+ */
+export function tituloDeNombreDeLote(nombreArchivo) {
+    const base = String(nombreArchivo || '').replace(/\.(pdf|epub|mobi|azw3?|djvu)$/i, '');
+    const m = base.match(/^(?:97[89]\d{10}|\d{9}[\dXx])\.([^.]+)\.(.+)$/);
+    if (!m) return null;
+    // El título acaba en el primer punto (tras él van el autor y la fecha). Un «..» es un autor vacío.
+    const tramo = m[2].split('.')[0];
+    const titulo = tramo.replace(/_ /g, ': ').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+    if (titulo.length < 4 || (titulo.match(/\p{L}/gu) || []).length < 3) return null;
+    return esTituloArtefacto(titulo) ? null : titulo;
 }
 
 /**

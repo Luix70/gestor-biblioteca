@@ -45,6 +45,24 @@ const idioma2 = (s) => {
     return IDIOMA2[v] || v.slice(0, 2) || null;
 };
 
+/**
+ * La lengua que delata el GRUPO de registro de un ISBN, para las fichas que no declaran idioma. Medido en el log
+ * del 30-sep: «1984 (Edición 75 Aniversario)», en español, recibió el ISBN de Ullstein (978-3-548…); «La lotería»,
+ * uno ruso (978-5…); «Borges en Sur», uno de Gallimard (978-2…).
+ * Conservador a propósito — solo sirve para DESCARTAR, y solo donde es seguro:
+ *   · el grupo inglés (0 y 1) no dice nada: en EE. UU. se publica mucho en español (Vintage Español…);
+ *   · un libro en INGLÉS con ISBN alemán, neerlandés o italiano es normal (Springer, Elsevier, Brill…): no se mira.
+ * @returns {string|null} código de lengua de dos letras, o null si el grupo no permite afirmar nada
+ */
+const GRUPOS_ISBN_DE_UNA_LENGUA = [[/^2/, 'fr'], [/^3/, 'de'], [/^4/, 'ja'], [/^5/, 'ru'], [/^7/, 'zh'], [/^88/, 'it'], [/^(85|972|989)/, 'pt'], [/^(90|94)/, 'nl']];
+function lenguaDelGrupoISBN(isbn, lenguaDoc) {
+    if (!lenguaDoc || lenguaDoc === 'en') return null;
+    const cifras = String(isbn || '').replace(/[^0-9Xx]/g, '');
+    const cuerpo = cifras.length === 13 ? (cifras.startsWith('978') ? cifras.slice(3) : '') : cifras;
+    if (cuerpo.length < 9) return null;
+    return GRUPOS_ISBN_DE_UNA_LENGUA.find(([re]) => re.test(cuerpo))?.[1] || null;
+}
+
 // Palabras que no distinguen una editorial de otra («ediciones», «editorial», «books», «press»…).
 const RUIDO_EDITORIAL = new Set(['ediciones', 'edicion', 'editorial', 'editores', 'editions', 'edition', 'books', 'book', 'press', 'publishing', 'publishers', 'publicaciones', 'grupo', 'the', 'and', 'company', 'verlag', 'libros', 'sa', 'sl', 'inc', 'ltd']);
 const nucleoEditorial = (s) => palabras(s).filter((w) => !RUIDO_EDITORIAL.has(w));
@@ -60,7 +78,7 @@ const esDeTomo = (resto) => /\b(vol|volumen|volume|tomo|tome|band|libro|libros|b
 /** ¿El título del candidato es el mismo libro? Igualdad normalizada, o uno contiene al otro (subtítulo). */
 // Indicación de MATERIAL DERIVADO (no el libro): solo cuenta DETRÁS de un separador («— test», «: workbook»,
 // «(answer key)»), para no confundir títulos legítimos («The Test», «Examen de conciencia»).
-const RE_MATERIAL = new RegExp(String.raw`^\s*(ejercicios|solucionario|soluciones|test|tests|examen|examenes|actividades|cuaderno( de actividades| de ejercicios)?|workbook|worksheets?|activity book|answer key|answers|key|teacher'?s (book|guide|notes)|guia didactica|guia del profesor|libro del profesor|study guide|quiz|quizzes)\b`, 'i');
+const RE_MATERIAL = new RegExp(String.raw`^\s*(glosario|glossary|vocabulario|vocabulary|word ?list|ejercicios|solucionario|soluciones|test|tests|examen|examenes|actividades|cuaderno( de actividades| de ejercicios)?|workbook|worksheets?|activity book|answer key|answers|key|teacher'?s (book|guide|notes)|guia didactica|guia del profesor|libro del profesor|study guide|quiz|quizzes)\b`, 'i');
 export function esMaterialDerivado(titulo) {
     const t = String(titulo || '').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '');
     const partes = t.split(/\s[—–-]\s|:\s|[([]/).slice(1);
@@ -154,7 +172,8 @@ function señalesEdicion(doc, cand) {
         }
     }
 
-    const iDoc = idioma2(doc.idioma), iCand = idioma2(cand.idioma);
+    // Si la ficha no dice el idioma (muchas de OpenLibrary), lo dice el GRUPO del ISBN cuando es de una sola lengua.
+    const iDoc = idioma2(doc.idioma), iCand = idioma2(cand.idioma) || lenguaDelGrupoISBN(cand.isbn, iDoc);
     if (iDoc && iCand && iDoc !== iCand) contradice = true;   // otra lengua ⇒ otra edición
 
     // Año EXACTO. Una diferencia mayor no descarta (el año del doc suele ser el de la obra, no el de la
@@ -198,6 +217,9 @@ const tokensPersonas = (lista) => new Set((Array.isArray(lista) ? lista : [lista
 const RE_TRADUCTOR_TITULO = new RegExp(String.raw`[(\[]\s*(?:traducci[oó]n(?:\s+de)?|translated\s+by|transl|trad|tr)\b\.?\s*:?\s*([^)\]]{3,80})[)\]]`, 'i');
 /** ¿Nombran la misma editorial? (sin acentos, mayúsculas ni relleno: «La Factoría de Ideas» = «La Factoria de Ideas»). */
 export function mismaEditorial(a, b) {
+    // Iguales letra por letra: son la misma aunque su «núcleo» quede vacío. «Ediciones B» se queda sin núcleo
+    // («ediciones» es relleno y «b» tiene una letra), y el log del 30-sep decía «Ediciones B (antes «Ediciones B»)».
+    if (norm(a) && norm(a) === norm(b)) return true;
     const na = nucleoEditorial(a), nb = nucleoEditorial(b);
     return na.length > 0 && nb.length > 0 && na.some((w) => nb.includes(w));
 }
@@ -348,7 +370,13 @@ function siMismaEditorial(buenos) {
 // Una edición en AUDIO («Penguin Random House Audio», audiolibro, Audible…) no es la de un libro en papel o
 // electrónico (medido el 30-sep: «Sentido y sensibilidad» recibía el ISBN del audiolibro).
 const RE_EDICION_AUDIO = new RegExp(String.raw`\baudio\b|audiolibro|audiobook|audible|\bcd\b`, 'i');
-const esEdicionAudio = (c) => RE_EDICION_AUDIO.test(`${c.editorial || ''} ${c.subtitulo || ''}`);
+// En el TÍTULO solo cuentan las fórmulas de lote («… CD Pack», «… MP3 PACK», «… MP3 PK», «with Audio CD», «+ CD»):
+// una palabra suelta no («Audio Engineering» es un libro). Medido en el log completo: los Oxford Bookworms
+// recibieron el ISBN —y el título— del lote con MP3 («OXFORD BOOKWORMS LIBRARY 2. VOODOO ISLAND MP3 PK»).
+const RE_TITULO_LOTE_AUDIO = new RegExp(String.raw`\b(cd|cds|mp3|audio|cassette|casete)[\s-]+(pack|pk|edition)\b|\b(with|con|\+)\s*(audio\s*)?(cd|cds|mp3)\b|\baudio\s?(cd|pack|download)\b`, 'i');
+const esEdicionAudio = (c) => RE_EDICION_AUDIO.test(`${c.editorial || ''} ${c.subtitulo || ''}`)
+    || RE_TITULO_LOTE_AUDIO.test(`${c.titulo || ''} ${c.subtitulo || ''}`);
+export const esTituloDeLoteAudio = (titulo) => RE_TITULO_LOTE_AUDIO.test(String(titulo || ''));
 
 function verificar(doc, candidatos) {
     const buenos = [];

@@ -276,12 +276,19 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         if (parsed.isbn) for (const v of variantesISBN(parsed.isbn)) { candidatos.add(v); propios.add(v); }       // el nombre ES un ISBN
         for (const x of extraerISBNs(nombreParaISBN(nombre))) for (const v of variantesISBN(x)) { candidatos.add(v); propios.add(v); } // ISBN incrustado en el nombre (incl. DOI Springer)
         for (const c of (cip?.isbns || [])) for (const v of variantesISBN(c.isbn || c)) { candidatos.add(v); propios.add(v); } // CIP
+        // El ISBN del CONJUNTO («ISBN … (Set)», «(obra completa)») no es el de ESTE libro: sigue como pista, pero no
+        // como propio. Era el primero de los créditos y se quedaba como ISBN del documento (medido el 30-sep: 196
+        // documentos —tomos de enciclopedias, títulos de una serie— compartían el del conjunto). Va a isbn_obra.
+        for (const r of isbnsRol) if (r.rol === 'obra') for (const v of variantesISBN(r.isbn)) propios.delete(v);
         datos.isbn_candidatos = [...candidatos];
         datos.isbn_propio = [...propios].find(c => c.length === 13) || [...propios][0] || null;
         // El ISBN principal PREFIERE el PROPIO (del nombre/DOI/CIP: autoritativo) al del cuerpo: un libro
         // lista en el cuerpo su ISBN de tapa dura Y el de ebook; el del DOI/nombre es el que resuelve en el
         // Fichero/OL (caso Springer: cuerpo ...912 de papel, DOI ...929 de ebook = el catalogado).
-        datos.isbn = datos.isbn_propio || datos.isbn_candidatos.find(c => c.length === 13) || datos.isbn_candidatos[0] || null;
+        // (Tampoco aquí el del conjunto: si solo queda ese, el documento va sin ISBN y lo lleva como isbn_obra.)
+        const delConjunto = new Set(isbnsRol.filter((r) => r.rol === 'obra').flatMap((r) => variantesISBN(r.isbn)));
+        const delCuerpo = datos.isbn_candidatos.filter((c) => !delConjunto.has(c));
+        datos.isbn = datos.isbn_propio || delCuerpo.find(c => c.length === 13) || delCuerpo[0] || null;
 
         // DOI (pivote del artículo): del cuerpo + del info-dict (Subject/Keywords/Title) + del nombre. Se guarda
         // tal cual; más adelante resuelve la metadata por Crossref y ayuda a clasificar 'articulo'. No fuerza tipo.

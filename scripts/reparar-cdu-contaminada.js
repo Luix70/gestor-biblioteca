@@ -13,6 +13,20 @@
  *   · «QA» a SECAS, sin número: no se sabe si es matemática o informática («The R Book», «Fuzzy Clustering»).
  *   · GN: GN1-296 es antropología FÍSICA (el «572» aprendido es correcto) y GN301+ etnología («39»). Mitad y
  *     mitad: no se puede arreglar en bloque.
+ *   · TK5101-5105 son telecomunicaciones y redes de ordenadores: su «004.738» es correcto.
+ *
+ * SEGUNDA TANDA (30-sep): LAS CLASES QUE LA TABLA APLAZA A LA IA. Historia (D, E, F y sus subclases) y las
+ * literaturas de varias lenguas (P, PA, PQ, PT, PG…) no tienen entrada en la tabla —cada libro necesita su
+ * decisión—, así que la salvaguarda «la caché afina la tabla, no la contradice» no las cubría, y la decisión de UN
+ * libro se sirvió a toda la clase: «lcc:e → 972.5» a 115 libros de historia de EE. UU., «pa → 791.43» (clásicos
+ * grecolatinos como cine), «d → 93.04.2», «f → 918.3», «pq → 821.13»… El Conformador, además, movió allí libros
+ * que ya estaban bien. Estos incidentes no se escriben a mano: se LEEN de la caché (toda equivalencia de CLASE,
+ * aprendida de la IA, de una clase aplazada). Para cada documento afectado, por este orden:
+ *   1. La CDU que TENÍA antes de que el Conformador se la cambiara (queda en su alerta «CDU actualizada: "X" →
+ *      "972.5" [clasificador:cache:lcc]»): se le devuelve.
+ *   2. Si no, la que dé el motor ya arreglado SIN IA (su Dewey, o lo aprendido por clase + número).
+ *   3. Si no, se deja como está, se apunta en la selección «CDU por reclasificar (clase LCC contaminada)» y se
+ *      le quita el sello de la tarea re-clasificar-cdu: el Conformador la recalculará con IA, ya libro a libro.
  *
  * CÓMO SE APLICA — y por qué NO con editarDocumento: ese camino marca `cdu_manual:true` siempre que cambia la
  * CDU, porque está pensado para ediciones a mano. Aquí son CDU AUTOMÁTICAS: marcarlas como manuales mentiría
@@ -30,8 +44,12 @@ import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
-import { resolverCDU, claseLcc } from '../src/clasificador-cdu.js';
+import { resolverCDU, claseLcc, unidadLcc, cduBienFormada, buscarEquivalenciaExterna } from '../src/clasificador-cdu.js';
 import { reubicarPorCdu, aplicarCambio, carpetaDeDoc, carpetaExiste } from '../src/mantenimiento/util-mantenimiento.js';
+import { modernizarCDU } from '../src/utils/cdu-moderna.js';
+import { cduVacia, rangoFuente, fuenteCduDoc, RANGO_CDU } from '../src/utils/prioridad-cdu.js';
+import { crearSeleccion } from '../src/utils/selecciones.js';
+import { progreso } from '../src/utils/progreso-cli.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 
@@ -59,16 +77,54 @@ const INCIDENTES = [
     { clase: 'JZ', cduMala: '340' },            // relaciones internacionales como derecho
     { clase: 'HN', cduMala: '610.8' },          // problemas sociales como medicina
     { clase: 'U', cduMala: '929:355.02' },      // ciencia militar como biografía
+    {
+        clase: 'TK', cduMala: '004.738',        // electrotecnia como redes de ordenadores (30-sep)
+        excluir: (d) => {
+            const n = numeroLcc(d.lcc);
+            if (Number.isNaN(n)) return '«TK» sin número: ¿electrotecnia o redes?';
+            if (n >= 5101 && n < 5106) return 'TK5101-5105 son telecomunicaciones y redes: su 004.738 es correcto';
+            return null;
+        },
+    },
     // GN: NO — ver cabecera (mitad antropología física, mitad etnología).
 ];
 
-let ultimoAviso = 0;
-function progreso(i, total, t0) {
-    if (Date.now() - ultimoAviso < 1500 && i < total) return;
-    ultimoAviso = Date.now();
-    const s = (Date.now() - t0) / 1000, ritmo = i / Math.max(s, 0.001);
-    const falta = Math.round((total - i) / Math.max(ritmo, 0.001));
-    process.stdout.write(`\r   ${i}/${total}  ·  ${ritmo.toFixed(1)}/s  ·  faltan ${Math.floor(falta / 60)}:${String(falta % 60).padStart(2, '0')}   `);
+const PROYECCION = {
+    titulo: 1, cdu: 1, cdu_fuente: 1, dewey: 1, lcc: 1, cdu_manual: 1, locked: 1, ruta_base: 1,
+    portada: 1, imagenes: 1, obra: 1, coleccion: 1, ruta_fija: 1, naturaleza: 1, tipo_recurso: 1,
+    isbn: 1, issn: 1, año_edicion: 1, mes_publicacion: 1, alertas_agente: 1, isbn_obra: 1,
+    obra_titulo: 1, volumen_numero: 1,
+};
+
+/**
+ * Incidentes de la SEGUNDA TANDA, leídos de la caché: equivalencias aprendidas para una CLASE entera (solo letras)
+ * de las que la tabla aplaza a la IA. El motor ya no las consulta (busca por clase + número).
+ */
+async function incidentesDeClasesAplazadas(db) {
+    const lista = [];
+    const aprendidas = await db.collection('equivalencias_cdu')
+        .find({ sistema_origen: 'lcc', fuente: { $ne: 'Manual' } }).toArray();
+    for (const e of aprendidas) {
+        if (!/^[a-z]{1,3}$/.test(String(e.codigo_origen || ''))) continue;      // solo las de clase entera
+        if (await buscarEquivalenciaExterna('lcc', e.codigo_origen)) continue;  // la tabla la cubre: no es de esta tanda
+        lista.push({ clase: e.codigo_origen.toUpperCase(), cduMala: e.cdu, aplazada: true, usos: e.usos || 0 });
+    }
+    return lista.sort((a, b) => b.usos - a.usos);
+}
+
+/**
+ * La CDU que el documento tenía ANTES de que el Conformador le pusiera la contaminada, según su propia alerta.
+ * null si no hay alerta, o si la anterior estaba vacía o era otro invento.
+ */
+function cduAnteriorSegunAlerta(doc, cduMala) {
+    for (const alerta of [...(doc.alertas_agente || [])].reverse()) {
+        const m = String(alerta).match(/^CDU actualizada: "(.*)" → "(.*)" \[clasificador:cache:lcc\]/);
+        if (!m || m[2] !== cduMala) continue;
+        const anterior = m[1];
+        if (cduVacia(anterior) || anterior === cduMala || !cduBienFormada(anterior)) return null;
+        return modernizarCDU(anterior);
+    }
+    return null;
 }
 
 async function main() {
@@ -78,21 +134,25 @@ async function main() {
     console.log('\n🩹 Reparación de CDU heredadas de equivalencias contaminadas');
     console.log(`   Modo: ${EJECUTAR ? '⚠️  EJECUTAR (mueve carpetas)' : 'DRY-RUN (no toca nada)'}\n`);
 
+    const aplazadas = await incidentesDeClasesAplazadas(db);
+    console.log(`   Incidentes: ${INCIDENTES.length} conocidos + ${aplazadas.length} de clases aplazadas a la IA (leídos de la caché).`);
+    for (const a of aplazadas) console.log(`     lcc:${a.clase.toLowerCase().padEnd(3)} → «${a.cduMala}»  (${a.usos} usos)`);
+    console.log('');
+
     // 1) Selección: CDU mala exacta + clase LCC EXACTA (misma regla que la búsqueda) + exclusiones.
     const plan = [];
     const omitidos = {};
-    for (const inc of INCIDENTES) {
+    for (const inc of [...INCIDENTES, ...aplazadas]) {
         const candidatos = await col.find(
-            { cdu: inc.cduMala, lcc: { $regex: `^${inc.clase}`, $options: 'i' } },
-            { projection: { titulo: 1, cdu: 1, dewey: 1, lcc: 1, cdu_manual: 1, locked: 1, ruta_base: 1,
-                portada: 1, imagenes: 1, obra: 1, coleccion: 1, ruta_fija: 1, naturaleza: 1, tipo_recurso: 1,
-                isbn: 1, issn: 1, año_edicion: 1, mes_publicacion: 1, alertas_agente: 1, isbn_obra: 1,
-                obra_titulo: 1, volumen_numero: 1 } },
+            { cdu: inc.cduMala, lcc: { $regex: `^${inc.clase}`, $options: 'i' } }, { projection: PROYECCION },
         ).toArray();
 
         for (const d of candidatos) {
             if (claseLcc(d.lcc) !== inc.clase) continue;   // «UA…» no es la clase «U»
+            // Una CDU de más rango que la del clasificador (impresa en el libro, de la BNE) no vino de la caché.
+            const deMasRango = rangoFuente(fuenteCduDoc(d)) > RANGO_CDU.clasificador;
             const motivo = d.cdu_manual ? 'CDU fijada a mano' : d.locked ? 'documento bloqueado'
+                : deMasRango ? 'CDU impresa en el libro o de la BNE (no vino de la caché)'
                 : inc.excluir ? inc.excluir(d) : null;
             if (motivo) { omitidos[motivo] = (omitidos[motivo] || 0) + 1; continue; }
             plan.push({ doc: d, inc });
@@ -103,29 +163,49 @@ async function main() {
     for (const [m, n] of Object.entries(omitidos)) console.log(`   Se dejan como están: ${n} — ${m}`);
     console.log('');
 
-    // 2) CDU nueva de cada uno con el motor ya arreglado, sin IA.
+    // 2) CDU nueva de cada uno: la que tenía antes (según su alerta) o la del motor ya arreglado, sin IA.
     const cambios = [];
+    const pendientes = [];   // sin CDU calculable sin IA: a la selección, para que el Conformador los reclasifique
     let sinSolucion = 0;
+    const p1 = progreso(plan.length, 'Calculando la CDU');
     for (const p of plan) {
-        const r = await resolverCDU({ dewey: p.doc.dewey, lcc: p.doc.lcc, titulo: p.doc.titulo, permitirIA: false }).catch(() => null);
-        const nueva = r?.cdu;
-        // Si el motor no da nada, o devolviera la misma CDU mala, no se toca: mejor igual que peor.
-        if (!nueva || nueva === '000' || nueva === p.inc.cduMala) { sinSolucion++; continue; }
-        cambios.push({ ...p, nueva });
+        p1.paso(p.doc.titulo);
+        let nueva = cduAnteriorSegunAlerta(p.doc, p.inc.cduMala);
+        let origen = 'la que tenía antes';
+        if (!nueva) {
+            const r = await resolverCDU({ dewey: p.doc.dewey, lcc: p.doc.lcc, titulo: p.doc.titulo, permitirIA: false }).catch(() => null);
+            nueva = r?.cdu || null;
+            origen = 'motor sin IA';
+        }
+        // Si no hay nada, o saliera la misma CDU mala, no se toca: mejor igual que peor.
+        if (!nueva || nueva === '000' || nueva === p.inc.cduMala || !cduBienFormada(nueva)) {
+            if (p.inc.aplazada) pendientes.push(p); else sinSolucion++;
+            continue;
+        }
+        cambios.push({ ...p, nueva, origen });
     }
+    p1.fin();
 
     // Resumen por transición (lo que de verdad hay que juzgar antes de ejecutar).
     const transiciones = {};
     for (const c of cambios) {
-        const k = `${c.inc.clase}: «${c.inc.cduMala}» → «${c.nueva}»`;
+        const k = c.inc.aplazada
+            ? `${c.inc.clase}: «${c.inc.cduMala}» → ${c.origen}`
+            : `${c.inc.clase}: «${c.inc.cduMala}» → «${c.nueva}»`;
         transiciones[k] = (transiciones[k] || 0) + 1;
     }
-    console.log('   Transiciones:');
+    console.log('\n   Transiciones:');
     for (const [k, n] of Object.entries(transiciones).sort((a, b) => b[1] - a[1])) console.log(`     ${String(n).padStart(4)}  ${k}`);
     if (sinSolucion) console.log(`\n   Sin CDU calculable (se dejan): ${sinSolucion}`);
+    if (pendientes.length) {
+        console.log(`\n   Necesitan IA (se dejan, quedan en una selección y el Conformador los reclasificará): ${pendientes.length}`);
+        const porClase = {};
+        for (const p of pendientes) porClase[p.inc.clase] = (porClase[p.inc.clase] || 0) + 1;
+        console.log(`     ${Object.entries(porClase).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c}×${n}`).join('  ')}`);
+    }
 
     console.log('\n   Ejemplos:');
-    for (const c of cambios.slice(0, 8)) console.log(`     [${c.doc.lcc}] ${String(c.doc.titulo).slice(0, 52)}  →  ${c.nueva}`);
+    for (const c of cambios.slice(0, 12)) console.log(`     [${c.doc.lcc}] ${String(c.doc.titulo).slice(0, 52)}  «${c.doc.cdu}» → «${c.nueva}»`);
 
     if (!EJECUTAR) {
         console.log(`\n   → Para aplicarlo: --ejecutar   (${cambios.length} documentos; mueve sus carpetas)\n`);
@@ -149,29 +229,45 @@ async function main() {
 
     // 4) Aplicar por el camino del Conformador: SIN cdu_manual.
     console.log('');
-    const t0 = Date.now();
     let hechos = 0, fallos = 0, movidos = 0;
+    const p2 = progreso(cambios.length, 'Reparando');
     for (const c of cambios) {
+        p2.paso(c.doc.titulo);
         try {
             const reub = await reubicarPorCdu(c.doc, c.nueva);
             if (reub) {
                 const docNuevo = { ...c.doc, ...reub.set };
                 await aplicarCambio(col, c.doc, carpetaDeDoc(docNuevo), {
                     set: reub.set,
-                    alertas: [`CDU reparada: «${c.inc.cduMala}» venía de una equivalencia de clase contaminada (lcc:${c.inc.clase.toLowerCase()}); → «${c.nueva}».`],
+                    alertas: [`CDU reparada: «${c.inc.cduMala}» venía de una equivalencia de clase contaminada (lcc:${c.inc.clase.toLowerCase()}); → «${c.nueva}» (${c.origen}).`],
                 });
                 if (reub.set.ruta_base && reub.set.ruta_base !== c.doc.ruta_base) movidos++;
                 hechos++;
             }
         } catch (e) {
             fallos++;
-            console.warn(`\n   ⚠️  ${c.doc._id}: ${e.message}`);
+            p2.nota(`⚠️  ${c.doc._id}: ${e.message}`);
         }
-        progreso(hechos + fallos, cambios.length, t0);
+    }
+    p2.fin();
+
+    // 5) Los que necesitan IA: sin sello en re-clasificar-cdu (el Conformador los recalcula, ya por clase + número)
+    //    y a una selección, para verlos.
+    if (pendientes.length) {
+        const ids = pendientes.map((p) => p.doc._id);
+        await col.updateMany({ _id: { $in: ids } },
+            { $set: { 'mantenimiento.re-clasificar-cdu': 0, mantenimiento_firma: 'pendiente-cdu-contaminada' } });
+        const fecha = new Date().toISOString().slice(0, 10);
+        await crearSeleccion(db, {
+            nombre: `CDU por reclasificar (clase LCC contaminada) ${fecha}`,
+            descripcion: 'Libros cuya CDU vino de una equivalencia aprendida para toda su clase LCC (historia, literaturas de varias lenguas) y que no se pueden recalcular sin IA. El Conformador los reclasifica (tarea re-clasificar-cdu).',
+            docs: ids,
+        });
+        console.log(`\n   ${pendientes.length} documento(s) a la selección «CDU por reclasificar (clase LCC contaminada) ${fecha}»; el Conformador los recalculará.`);
     }
 
-    console.log(`\n\n   ✔ Reparados: ${hechos}  ·  carpetas movidas: ${movidos}${fallos ? `  ·  ⚠️  fallos: ${fallos}` : ''}\n`);
-    process.exit(0);
+    console.log(`\n   ✔ Reparados: ${hechos}  ·  carpetas movidas: ${movidos}${fallos ? `  ·  ⚠️  fallos: ${fallos}` : ''}\n`);
+    process.exit(fallos ? 1 : 0);
 }
 
 main().catch((e) => { console.error('❌', e); process.exit(1); });

@@ -22,7 +22,7 @@ import { conectarDB } from '../database.js';
 import { carpetaDeDoc, archivoOriginal, numeroPaginasPdf } from '../mantenimiento/util-mantenimiento.js';
 import { isbnDesdeArchivo, tipoLibro } from './isbn-archivo.js';
 import { variantesISBN, validarISBN } from './identificadores.js';
-import { esTituloArtefacto } from './parsear-nombre.js';
+import { esTituloArtefacto, tituloDeNombreDeLote } from './parsear-nombre.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { identificarEdicion, candidatasParaGuardar, mismaEditorial, traductoresDelTitulo } from './identificar-edicion.js';
@@ -156,6 +156,44 @@ function noDegrada(actual, nuevo) {
     if (a.length > n.length && (' ' + a + ' ').includes(' ' + n + ' ')) return false;
     return true;
 }
+
+/**
+ * ¿El título nuevo es el ACTUAL con una coletilla de catálogo? «The Enemy» → «Oxford Bookworms 6. The Enemy CD
+ * Pack»; «Recycling» → «Recycling, Level 3»; «Volver a empezar» → «Volver a empezar/ Replay (Spanish Edition)»
+ * (todos del log del 30-sep). Lo que sobra es la serie, el nivel, el formato o la edición: datos de la ficha de la
+ * librería, no del título. Un título actual que ya es bueno (no un artefacto, no «Vol. 2») se queda como está.
+ */
+export function soloAnadeColetilla(actual, nuevo) {
+    const a = normLite(actual), n = normLite(nuevo);
+    if (a.length < 4 || esTituloArtefacto(actual)) return false;
+    if (/^(vol|volumen|volume|tomo|parte?|n)\s*[ivxlcdm\d]+$/.test(a)) return false;   // «Vol. I»: eso sí se sustituye
+    if (n.length <= a.length || !(` ${n} `).includes(` ${a} `)) return false;
+    // Lo que sobra tiene que PARECER de catálogo: un paréntesis, una barra o una palabra de serie/nivel/formato.
+    // «The Gale Encyclopedia of Mental Health» frente a «Encyclopedia of Mental Health» no lo es (ese sí es el título
+    // completo), ni «Cinema 1: The Movement-Image» frente a «Cinema» (el número y el subtítulo son del libro).
+    const sobra = (` ${n} `).replace(` ${a} `, ' ');
+    return /[(\[/]/.test(String(nuevo))
+        || /\b(level|stage|nivel|pack|pk|mp3|cd|edition|edicion|series|serie|library|biblioteca|collection|coleccion|classics|bookworms|factfiles|headwords|readers?)\b/.test(sobra);
+}
+
+/**
+ * ¿El título que da la AUTORIDAD para un ISBN es el de este documento? Se mira contra su título y contra el nombre
+ * de su fichero (el título del documento puede ser un artefacto: «Anthology.The.Mammoth.Book.of.Cover.Ups…»): casi
+ * todas las palabras con cuerpo del título de la autoridad tienen que aparecer. «Encyclopedia of Modern Asia» no
+ * confirma a «Vol.1_-_Abacus_-_China»; «The Mammoth Book of Cover-Ups» sí a ese nombre de fichero.
+ */
+function tituloConfirmaDoc(tituloAutoridad, doc) {
+    if (!tituloAutoridad) return false;
+    if (mismoTituloLibro(tituloAutoridad, doc.titulo)) return true;
+    const palabras = normLite(tituloAutoridad).split(' ').filter((w) => w.length > 3);
+    if (palabras.length < 2) return false;
+    const texto = ` ${normLite(`${doc.titulo || ''} ${doc.nombre_archivo || ''}`)} `;
+    const presentes = palabras.filter((w) => texto.includes(` ${w} `)).length;
+    return presentes / palabras.length >= 0.8;
+}
+
+/** ¿El documento ya guarda ese mismo ISBN (en su forma de 10 o de 13)? */
+const mismoISBNGuardado = (guardado, isbn) => !!guardado && variantesISBN(isbn).includes(String(guardado));
 
 /**
  * Guarda en el documento las EDICIONES CANDIDATAS de una identificación ambigua (máx. 8), con lo justo para
@@ -308,7 +346,12 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     let isbn = null, via = '', isbnObra = null, ext = { isbn: null, titulo: null, autores: [], editorial: null };
     if (manual) { isbn = manual; via = 'manual'; }
     else {
-        if (abs && tipoLibro(abs)) { ext = await isbnDesdeArchivo(abs, { nombre: doc.nombre_archivo, tituloRef: doc.titulo }); if (ext.isbn) { isbn = ext.isbn; via = 'fichero'; } }
+        if (abs && tipoLibro(abs)) {
+            // Con el número de tomo: la página de créditos de una obra lista el ISBN de cada tomo y el del conjunto.
+            ext = await isbnDesdeArchivo(abs, { nombre: doc.nombre_archivo, tituloRef: doc.titulo, volumen: doc.volumen_numero ?? null });
+            if (ext.isbn) { isbn = ext.isbn; via = 'fichero'; }
+            if (ext.isbn_obra) isbnObra = ext.isbn_obra;   // el del conjunto va aparte: nunca es el ISBN del libro
+        }
         if (!isbn && conIA) {
             // (a) EAN de cubierta/contracubierta: zxing local sin coste y, si falla, VISIÓN. Solo PDF con fichero.
             if (abs && tipoLibro(abs) === 'pdf') {
@@ -388,6 +431,11 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     const porQue = reintentable ? ` (no respondió: ${caidas.join(', ')} → se reintentará)` : '';
 
     if (!isbn) {
+        // Sin ISBN propio pero con el del CONJUNTO (los créditos de un tomo lo declaran): se anota como isbn_obra,
+        // que es lo que reúne los tomos. No es el ISBN del libro.
+        if (isbnObra && !doc.isbn_obra && aplicar) {
+            await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { isbn_obra: isbnObra } }).catch(() => {});
+        }
         if (ambiguo) {
             // Varias ediciones posibles: NO se elige ninguna. Se guardan como candidatas para que elijas tú en la
             // ficha («¿Cuál es tu edición?»). No se toca nada más del documento (ni fecha_actualizacion: no hay
@@ -421,6 +469,35 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         }).catch(() => ({}));
     }
 
+    // ¿El ISBN que declara el FICHERO ya lo tiene otro documento con OTRO título, y la autoridad tampoco dice que
+    // sea el de este? Es el de un conjunto o una serie que los créditos no etiquetan (medido el 30-sep: 196
+    // documentos —tomos de enciclopedias, títulos de «Routledge Library Editions»— compartiendo ISBN). No se asigna.
+    // Si la autoridad SÍ confirma el título, el equivocado es el otro documento: se asigna y sigue.
+    if (!manual && via === 'fichero' && !mismoISBNGuardado(doc.isbn, isbn)) {
+        const otros = await db.collection('biblioteca').find(
+            { $or: [{ isbn: { $in: isbnVar } }, { isbn_obra: { $in: isbnVar } }], _id: { $ne: doc._id } },
+            { projection: { titulo: 1, isbn: 1, obra: 1, volumen_numero: 1 } }).limit(20).toArray();
+        // (a) Lo tiene OTRO TOMO de la misma obra (como ISBN o como ISBN de la obra): es el del conjunto. Un tomo se
+        //     identifica por su obra y su número (misma regla que la ingesta); el del conjunto va a isbn_obra.
+        const otroTomo = doc.obra && otros.find((o) => String(o.obra || '') === String(doc.obra)
+            && (o.volumen_numero !== doc.volumen_numero || !mismoTituloLibro(o.titulo, doc.titulo)));
+        // (b) Lo tiene un documento de otro título, y la autoridad no dice que sea el de este.
+        const deOtroTitulo = otros.find((o) => o.isbn && !mismoTituloLibro(o.titulo, doc.titulo));
+        const confirmado = tituloConfirmaDoc(datos.titulo, doc);
+        if (otroTomo || (deOtroTitulo && !confirmado)) {
+            if (aplicar && otroTomo && !doc.isbn_obra) {
+                await db.collection('biblioteca').updateOne({ _id: doc._id }, { $set: { isbn_obra: isbnObra || isbn } }).catch(() => {});
+            }
+            const quien = otroTomo || deOtroTitulo;
+            return {
+                estado: 'ambiguo', reintentable: false, candidatos: [],
+                motivo: otroTomo
+                    ? `el ISBN ${isbn} que trae el fichero es el del conjunto (lo tiene otro tomo de la obra: «${quien.titulo}»); queda como ISBN de la obra, no del tomo`
+                    : `el ISBN ${isbn} que trae el fichero ya es de «${quien.titulo}» (${quien._id}), otro título, y ninguna autoridad lo confirma para este: parece el de un conjunto o una serie; no se asigna`,
+            };
+        }
+    }
+
     const set = {};
     const nombres = {}; // log legible
     if (isbn && String(doc.isbn || '') !== isbn) { set.isbn = isbn; if (manual) nombres.isbn = isbn; }
@@ -431,11 +508,15 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // TÍTULO (cotejo): se sustituye por el de la AUTORIDAD si el actual es DÉBIL o ARTEFACTO, o —al FORZAR— si
     // simplemente DIFIERE; nunca si DEGRADARÍA (el actual ya es más completo). El de la autoridad (Fichero/APIs
     // por ISBN) va primero; el del propio fichero solo es fiable en EPUB/MOBI (en PDF ext.titulo es null).
-    const tituloMejor = datos.titulo || ext.titulo || null;
+    // Último recurso para un título-artefacto que ninguna autoridad resuelve: el tramo del título de un nombre de
+    // fichero de lote editorial («<ISBN>.<Editorial>.<Título>.<Autor>.<fecha>»).
+    const tituloMejor = datos.titulo || ext.titulo
+        || (esTituloArtefacto(doc.titulo) ? tituloDeNombreDeLote(doc.nombre_archivo || doc.titulo) : null);
     if (tituloMejor) {
         const actual = String(doc.titulo || '');
         const malActual = tituloDebil(doc) || esTituloArtefacto(actual);
-        if ((malActual || forzar) && normLite(actual) !== normLite(tituloMejor) && noDegrada(actual, tituloMejor)) {
+        if ((malActual || forzar) && normLite(actual) !== normLite(tituloMejor) && noDegrada(actual, tituloMejor)
+            && !soloAnadeColetilla(actual, tituloMejor)) {
             set.titulo = tituloMejor; nombres.titulo = tituloMejor;
         }
     }

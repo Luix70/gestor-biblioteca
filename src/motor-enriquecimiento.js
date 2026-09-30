@@ -9,6 +9,7 @@ import { buscarISSNporTitulo, buscarNombreDeISSNs } from './utils/buscador-issn-
 // La lista de «editoriales» que no lo son (repackagers/re-editores de dominio público) es compartida —
 // si el archivo/una API trae una de estas, una editorial real (APIs/colofón/colección) prevalece.
 import { esEditorialFalsa } from './utils/editoriales-falsas.js';
+import { esNombreRuido } from './utils/editorial-por-prefijo.js';
 // Mapa determinista COLECCIÓN → editorial (gratis): muchas colecciones célebres son marca de UNA casa
 // («Biblioteca Clásica Gredos»→Gredos…). Resuelve la editorial de los ebooks sin depender de la IA.
 import { editorialDeColeccionMapa } from './utils/coleccion-editorial.js';
@@ -285,10 +286,15 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     const editorialDeColeccion = editorialDeColeccionMapa(nombreColeccion);
     // Una editorial de las APIs que sea a su vez un repackager/autopublicación (DigiCat, CreateSpace…) NO
     // vale como editorial real: se descarta aquí para que nunca gane (era el caso «DigiCat» original).
-    const editorialAPI = esEditorialFalsa(datosExtra.editorial) ? null : datosExtra.editorial;
+    // Tampoco un nombre de una o dos letras («se», «ge», «9e»: lecturas de un logotipo), que no es una editorial.
+    const editorialAPI = esEditorialFalsa(datosExtra.editorial) || (datosExtra.editorial && esNombreRuido(datosExtra.editorial))
+        ? null : datosExtra.editorial;
     if (esEditorialFalsa(documento.editorial)) {
         // El archivo trae un maquetador → prioriza la editorial real: colección (gratis) > APIs.
-        const editorialReal = primerValido(editorialDeColeccion, editorialAPI);
+        // Si la «editorial» externa la LEYÓ LA VISIÓN en la cubierta, no vale aquí: la cubierta de un fichero de
+        // maquetador es la del maquetador (la visión leía el logotipo de ePubLibre como «Seix Barral» o «se»: 444
+        // libros, medido el 30-sep). La de un catálogo (Fichero, OpenLibrary, BNE…) sí.
+        const editorialReal = primerValido(editorialDeColeccion, datosExtra.editorial_de_vision ? null : editorialAPI);
         if (editorialReal) {
             const via = editorialReal === editorialDeColeccion ? ' (deducida de la colección)' : '';
             documento.alertas_agente.push(`Editorial "${documento.editorial}" sustituida por la editorial real: "${editorialReal}"${via}.`);

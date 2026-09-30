@@ -1,16 +1,16 @@
 # Tareas pendientes en el NAS y resumen de trabajos
 
 > Lista viva: se actualiza con cada cambio que deje un script por ejecutar. Marca `[x]` lo que vayas haciendo.
-> Última actualización: 2026-09-29 (hash regenerable + portadas artefacto corregido).
+> Última actualización: 2026-09-30 (reparaciones tras revisar el log completo de la pasada de ISBN).
 
 ## Antes de nada
 
-- [ x] **Copia de seguridad de la base de datos** (Atlas). Casi todo lo de abajo escribe en muchos documentos.
+- [x] **Copia de seguridad de la base de datos** (Atlas). Casi todo lo de abajo escribe en muchos documentos.
       Desde el 29-sep hay herramienta (Atlas gratuito no hace copias): `sudo docker exec -t gestor-biblioteca node
       scripts/copia-base.js` → /app/logs/copias-bd/<fecha>/ (conserva las 10 últimas). Restaurar: `scripts/restaurar-base.js
       --desde <fecha> --coleccion biblioteca [--ids …] [--ejecutar]` (en seco por defecto). **Hacerla antes de cada paso.**
-- [ ] **Copia del disco** (árbol CDU → USB): `sudo /volume1/docker/GestorBiblioteca/scripts/sincronizar-copia.sh --forzar`
-- [ x] **Desplegar la última versión** con el script de actualización de siempre (`actualizar-GestorBiblioteca.sh`).
+- [x] **Copia del disco** (árbol CDU → USB): `sudo /volume1/docker/GestorBiblioteca/scripts/sincronizar-copia.sh --forzar`
+- [x] **Desplegar la última versión** con el script de actualización de siempre (`actualizar-GestorBiblioteca.sh`).
       Sin esto, los scripts nuevos no están en el NAS.
 
 Todos los scripts van **en seco por defecto**: primero se lanzan sin `--ejecutar`, se revisa lo que proponen y solo
@@ -45,27 +45,49 @@ Re-investiga los que esperaban tu elección y les asigna la más probable (muest
 revisa en el Dashboard las filas **«ISBN provisional»** e **«ISBN dudoso»** (opcional: el registro ya está completo).
 
 ### 3 bis. Reparaciones tras la pasada del 29/30-sep (desplegar primero la versión con los arreglos)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js`
-- [ ] Copia de la base (la fase 3 fusiona editoriales duplicadas: el nombre viejo queda como grafía alternativa)
+- [ ] Desplegar la última versión (incluye el arreglo de arranque `d737ba3` y los del log completo)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js`   (en seco: ~10 min)
+- [ ] Copia de la base (`scripts/copia-base.js`) **y** del disco (la reparación mueve ~3.000 carpetas)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js --ejecutar`
+- [ ] Revisar las selecciones que deja (abajo) y, al final, encender Conformador y campañas
 
-Todo en un comando y en orden (en seco medido el 30-sep, con la pasada aún a medias):
+Todo en un comando. En seco medido el 30-sep con la pasada ya terminada (6.795 libros, 2.587 ISBN). Orden de
+ejecución: 1, 2, 3, 7, 10, 8, 9, 12, 4, 5, 11, 6. Se puede ir por partes con `--fases 10,8,9`.
+
 1. **Colaboradores** (traductor, ilustrador…) que la pasada dio a ediciones provisionales o dudosas: se quitan
    (son de la edición; vuelven al confirmarla). ~155.
 2. **Editoriales falsas** impuestas (Distribooks, Firebird Distributing, Libros Sin Fronteras): se devuelve la
    anterior. 3.
 3. **Editoriales con puntuación** («Valdemar,», «Ultramar.», «[Destino»): 76 se fusionan con la de nombre limpio,
    51 se renombran.
-4. **CDU en notación moderna** (`modernizar-cdu.js`): 474 CDU, 791 carpetas (342 juveniles 087.5 salen de la clase 0).
-5. **Editorial por el prefijo del ISBN** (`editoriales-por-prefijo.js`): 247 huecos/basura; ~890 a una selección
-   «Editorial a revisar (prefijo ISBN)», sin tocarlos.
-7. **Colecciones con «/**/» en el nombre** (el volcado de la BNE junta así varias series: «Punto de lectura /**/
-   Biblioteca de bolsillo»): se quedan con la primera, el número pegado pasa al libro, y se fusionan con la que ya
-   exista. 25 colecciones (12 fusiones, 13 renombradas) y 58 libros. (Se ejecuta justo tras la fase 3.)
-6. **Ediciones por elegir otra vez** (`reidentificar-sin-isbn --edicion-por-elegir`): los falsos «❓ otro título»,
-   y a las que sigan sin decidir, ISBN probable + datos de la obra. Tarda horas; en seco se salta.
-
-Se añadirán las reparaciones de lo que muestre el log final de la pasada.
+7. **Colecciones con «/**/» en el nombre**: 25 colecciones (12 fusiones, 13 renombradas) y 58 libros.
+10. **Editoriales que la visión leyó en la cubierta de ePubLibre** (su logotipo): **281** libros con «se», «Se»,
+   «ge», «9e», «n/a»… y **208** con «Seix Barral» sin serlo (su ISBN no es 978-84-322, o no tienen). Se les quita;
+   la fase 5 la rellena por el prefijo del ISBN donde pueda. Otros **480** libros sin ISBN cuya editorial sustituyó
+   a «ePubLibre» sin nada que la avale → selección **«Editorial sin confirmar (sin ISBN, en lugar del maquetador)»**.
+8. **Deshacer y rehacer 155 identificaciones** que el motor corregido hace de otra manera: 116 tomos con el ISBN
+   del CONJUNTO (enciclopedias Gale/Macmillan, etc.), 25 con el ISBN de otro título (8 de «Routledge Library
+   Editions»), 7 con el ISBN de otra editorial que el del nombre del fichero («Bambini sorriso di Dio»), 5 con la
+   edición «MP3 PACK» y 2 glosarios. Vuelven a como estaban (CDU y carpeta incluidas) y se reidentifican.
+   **Necesita los ficheros: solo en el NAS.** Para ver en seco qué les pondría: `--fases 8 --con-reidentificar`.
+9. **Títulos**: 13 que la pasada cambió por el mismo con una coletilla («Recycling» → «Recycling, Level 3») recuperan
+   el suyo; **213 títulos-artefacto con ISBN** de toda la base («9780226…UChicagoPress.Patient_Zero…», «Unknown»)
+   se cotejan otra vez (ahora también con Crossref) y, si nadie responde, toman el título del nombre del fichero (83).
+12. **CDU contaminada por clase LCC** (`reparar-cdu-contaminada.js`): 1.082 libros con una CDU aprendida de UN libro
+   y servida a toda su clase (historia y literaturas: «lcc:e → 972.5», «pa → 791.43»…). 309 se arreglan sin IA (a
+   94 se les devuelve la que tenían); **773 necesitan IA** → selección **«CDU por reclasificar (clase LCC
+   contaminada)»**; los rehace el Conformador (tarea re-clasificar-cdu) cuando lo enciendas.
+4. **CDU limpia y en notación moderna** (`modernizar-cdu.js`): **3.168 CDU y 2.764 carpetas** (eran 474/791 con solo
+   la literatura): encabezamientos pegados («929 Tesla, Nikola» → «929» + materia «Tesla, Nikola»), historia
+   (946 → 94(460), 937 → 94(37), 940.53 → 94(100)"1939/1945"), biografía (92 → 929) y las juveniles 087.5.
+   El ensayo lista las transiciones: **míralas antes de ejecutar**.
+5. **Editorial por el prefijo del ISBN** (`editoriales-por-prefijo.js`): 247 huecos/basura (más los que deja la
+   fase 10); ~890 a la selección «Editorial a revisar (prefijo ISBN)», sin tocarlos.
+11. **Para revisar a mano** (no cambia nada): selección **«CDU de la BNE de otra lengua»** (17: Hemingway o
+   Stephen King como literatura española, «821.11(73)», «821.122.2») y **«ISBN de otra lengua»** (16: «1984» con
+   ISBN alemán, «La lotería» con uno ruso).
+6. **Reidentificar otra vez** (`--todos --edicion-por-elegir`): los 135 «con esperanza», lo deshecho en la fase 8
+   que no se resolviera, y las ediciones por elegir (ISBN probable + datos de la obra). Tarda horas; en seco se salta.
 
 ### 3 ter. Índice de series (para el trabajo de colecciones)
 - [ ] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»

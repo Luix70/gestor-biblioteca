@@ -22,7 +22,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { extraerContribucionesBNE } from './contribuciones.js';
 import { normalizarTituloBibliografico } from './titulos.js';
-import { modernizarCDU } from './cdu-moderna.js';
+import { modernizarCDU, encabezamientoCDU } from './cdu-moderna.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
 import { primeraSerie } from './series-texto.js';
 
@@ -119,7 +119,8 @@ function fusionar(filas) {
         cdu: modernizarCDU(primero('cdu')),   // el volcado BNE trae notación antigua (820 → 821.111)
         paginas: primero('paginas'),
         dimensiones: primero('dimensiones'),
-        categorias: lista(primero('palabras_clave')),
+        // El encabezamiento que la BNE pega a la CDU («929 Tesla, Nikola») es una materia: se guarda como tal.
+        categorias: [...lista(primero('palabras_clave')), encabezamientoCDU(primero('cdu'))].filter(Boolean),
         coleccion_nombre: primeraSerie(primero('coleccion_nombre')),   // la BNE junta varias con « /**/ »
         sinopsis: primero('sinopsis'),
         portada_url: primero('portada_url'),

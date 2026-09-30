@@ -141,8 +141,10 @@ const LCC_A_CDU = {
     PN: '82', PZ: '82', PE: '811.111', PC: '811.13', PR: '821.111', PS: '821.111(73)',
     // Ciencia
     Q: '5', QA: '51', QB: '52', QC: '53', QD: '54', QE: '55', QH: '57', QK: '58', QL: '59',
+    QM: '611', QP: '612', QR: '579',   // anatomía · fisiología · microbiología
     // Medicina · agricultura · técnica
     R: '61', S: '63', T: '6',
+    TK: '621.3', TP: '66',             // electrotecnia · tecnología química
     // Ciencia militar · naval · biblioteconomía
     U: '355', V: '359', Z: '02',
 };
@@ -195,6 +197,54 @@ export function claseLcc(codigo) {
     const m = String(codigo || '').trim().toUpperCase().match(/^[A-Z]{1,3}/);
     return m ? m[0] : null;
 }
+
+/**
+ * La UNIDAD por la que se busca y se aprende una equivalencia LCC → CDU.
+ *   · Clase que la tabla resuelve (QA, PR, T…): la CLASE. Todos sus libros comparten rama, y lo aprendido solo
+ *     puede afinarla.
+ *   · Clase que la tabla APLAZA a la IA porque abarca temas o lenguas distintos (D, E, F: historia por países;
+ *     PA, PQ, PT…: literaturas de varias lenguas): la clase MÁS EL NÚMERO entero («E185», «PQ6555»). El número
+ *     es lo que dice de qué trata: E185 afroamericanos, E855 Nixon, PQ6000-8929 literatura española…
+ *
+ * Por qué (medido el 30-sep): la decisión de la IA sobre UN libro se aprendía para la clase entera y se servía a
+ * todos los demás. «lcc:e → 972.5» (de un libro sobre México) clasificó 115 libros de historia de EE. UU. — y el
+ * Conformador movió allí a los que ya estaban bien («94(73)"1969/1974"» → «972.5»). Igual «pa → 791.43» (clásicos
+ * grecolatinos como cine, 96 usos), «d → 93.04.2» (165), «f → 918.3» (150), «pq → 821.13» (171)… El arreglo de
+ * «qa» (la caché puede afinar la tabla, nunca contradecirla) no las cubría: para estas clases no hay tabla.
+ * @returns {string|null} null si la clase está aplazada y la signatura no trae número (no hay unidad fiable)
+ */
+export function unidadLcc(codigo) {
+    const clase = claseLcc(codigo);
+    if (!clase) return null;
+    if (lccACDU(clase)) return clase;
+    const numero = parseInt(String(codigo).trim().slice(clase.length).replace(/^[^0-9]+/, ''), 10);
+    return Number.isFinite(numero) ? `${clase}${numero}` : null;
+}
+
+/**
+ * ¿Está BIEN FORMADA una CDU? El número principal lleva un punto cada tres cifras (821.134.2, 004.738): todos sus
+ * grupos menos el último tienen exactamente tres. La IA devuelve a veces inventos que no lo cumplen —«93.04.2»,
+ * «31.5:61.1», «43.5.2.1», «94-(Normandy)»— y se aprendían como equivalencia (medido el 30-sep). Una CDU así no
+ * se aprende ni se aplica.
+ */
+export function cduBienFormada(cdu) {
+    const texto = String(cdu || '').trim();
+    if (!/^\d/.test(texto)) return false;
+    // Una palabra (un nombre, un lugar escrito con letras): no es una CDU. Las abreviaturas de un auxiliar, sí
+    // («(460.355 C.)»): por eso se piden tres letras seguidas.
+    if (/\p{L}{3,}/u.test(texto)) return false;
+    // Cada faceta (separadas por «:», «+» o «/» FUERA de paréntesis y comillas): su número principal, antes de
+    // cualquier auxiliar. «94(100)"1939/1945"» es una sola faceta.
+    const sinAuxiliares = texto.replace(/\([^)]*\)|"[^"]*"/g, ' ');
+    for (const faceta of sinAuxiliares.split(/[:+/]/)) {
+        const numero = faceta.trim().match(/^\d+(?:\.\d+)*/)?.[0];
+        if (!numero) continue;                                   // «/.2», un auxiliar suelto: no se juzga
+        const grupos = numero.split('.');
+        if (grupos.slice(0, -1).some((g) => g.length !== 3) || grupos[grupos.length - 1].length > 3) return false;
+    }
+    return true;
+}
+
 function lccACDU(codigo) {
     const letras = claseLcc(codigo);
     if (!letras) return null;
@@ -364,7 +414,8 @@ export async function resolverCDU(args) {
 async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, autor, sinopsis, permitirIA = true }) {
     // Los códigos se manejan por su UNIDAD de equivalencia: Dewey tal cual; LCC por su CLASE (letras iniciales),
     // no la signatura completa — si no, «PR4589.H39 1998» se guardaría entero y no lo reusaría ningún otro libro.
-    const candidatos = [['dewey', dewey], ['lcc', claseLcc(lcc)]].filter(([, c]) => c);
+    // (LCC de una clase APLAZADA —historia, literaturas de varias lenguas—: por clase + número; ver unidadLcc.)
+    const candidatos = [['dewey', dewey], ['lcc', unidadLcc(lcc)]].filter(([, c]) => c);
     const categoria = Array.isArray(categorias) && categorias.length > 0 ? categorias[0] : null;
 
     // APRENDIZAJE A TRES BANDAS (LCC ↔ Dewey ↔ CDU): un libro que trae Dewey Y LCC es un par de entrenamiento
@@ -413,7 +464,11 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
         //
         // Y solo con una entrada ESPECÍFICA de la tabla para esa clase, nunca con el respaldo genérico de la
         // letra (ver lccACDUEspecifica): «qp → 612» (fisiología, correcto) no debe ceder ante el «5» de la Q.
-        const tabla = sistema === 'lcc' ? lccACDUEspecifica(codigo) : null;
+        //
+        // (30-sep) Se amplía al RESPALDO DE LA LETRA: lo que motivó la excepción («qp → 612») ya está en la tabla, y
+        // sin ella seguían vivas «tk → 004.738» (toda la electrotecnia como redes de ordenadores, 132 usos),
+        // «tp → 542.8» o «gf → 302.2». Una equivalencia de CLASE que no afina lo que dice la tabla, no se usa.
+        const tabla = sistema === 'lcc' ? lccACDU(codigo) : null;
         if (tabla && !String(hit).startsWith(String(tabla))) {
             avisarCacheContradictoria(sistema, codigo, hit, tabla);
             continue;   // la tabla decidirá en el paso 2
@@ -439,6 +494,11 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
     // 3) IA + aprendizaje. Se aprende la equivalencia por CÓDIGO también para literatura (hay Dewey/LC → estable,
     //    ver arriba). La MISMA llamada trae ya la descripción y las materias → se aprovechan sin gastar más IA.
     const r = await iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis });
+    // Una CDU mal formada («93.04.2», «94-(Normandy)») es un invento: ni se aplica ni se aprende.
+    if (r.cdu && r.cdu !== '000' && !cduBienFormada(r.cdu)) {
+        console.warn(`⚠️  [CDU] La IA devolvió una CDU mal formada («${r.cdu}») para «${String(titulo || '').slice(0, 50)}»: se descarta.`);
+        r.cdu = '000';
+    }
     const cdu = r.cdu;
     if (cdu && cdu !== '000' && candidatos.length > 0) {
         const [sistema] = candidatos[0]; // el más fiable disponible (Dewey > LC)

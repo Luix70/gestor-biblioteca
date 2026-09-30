@@ -64,3 +64,23 @@ export function mismoTituloLibro(a, b) {
     // Una errata (OCR, tilde perdida, «113» / «II3»): solo en títulos con cuerpo, o «Ella» = «Eva».
     return corto.length >= 8 && distanciaEdicion(A, B) <= 2;
 }
+
+/**
+ * Comparación MÁS HOLGADA, para títulos que aún arrastran restos del nombre del fichero: «Homer - Odyssey (Barnes &
+ * Noble, 2003)» / «Odyssey (Barnes & Noble Classics Series)», «A Neolithic Ceremonial Complex…» / «Neolithic
+ * Ceremonial Complex…», «STORK, P. (2008), Index of Verb Forms in Thucydides» / «Index of Verb Forms in Thucydides».
+ * Mismo libro si los números coinciden y casi todas las palabras con cuerpo del título más corto están en el otro.
+ * Sirve para decidir si dos documentos con el mismo ISBN son sospechosos (dos títulos) o no (dos copias); NO para
+ * dar por bueno un ISBN.
+ */
+export function mismoLibroHolgado(a, b) {
+    if (mismoTituloLibro(a, b)) return true;
+    const A = tituloComparable(a);
+    const B = tituloComparable(b);
+    if (!A || !B || numerosDe(A) !== numerosDe(B)) return false;
+    const palabras = (texto) => new Set(texto.split(' ').filter((w) => w.length > 3));
+    const [corto, largo] = palabras(A).size <= palabras(B).size ? [palabras(A), palabras(B)] : [palabras(B), palabras(A)];
+    if (corto.size < 2) return false;
+    const comunes = [...corto].filter((w) => largo.has(w)).length;
+    return comunes / corto.size >= 0.8;
+}
