@@ -1,7 +1,7 @@
 # Tareas pendientes en el NAS y resumen de trabajos
 
 > Lista viva: se actualiza con cada cambio que deje un script por ejecutar. Marca `[x]` lo que vayas haciendo.
-> Última actualización: 2026-09-30 (reparaciones tras revisar el log completo de la pasada de ISBN).
+> Última actualización: 2026-10-01 (revisado contra la base qué se hizo anoche; Crossref en marcha; volcados por traer).
 
 ## Antes de nada
 
@@ -22,13 +22,16 @@ entonces se repiten con `--ejecutar`. Todos son **reanudables**: si se cortan, s
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js`
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js --ejecutar`
 
+> 1-oct: casi hecho por el camino — modernizar-cdu y la tarea «ubicar-segun-cdu» recolocaron miles. Quedan **69** de
+> 65.987 (los «sin carpeta en disco» de modernizar-cdu): el ensayo dirá cuáles.
+
 Mueve a su sitio los libros cuya carpeta no refleja la CDU de la ficha (medido: ~451). La tarea del Conformador
 «ubicar-segun-cdu» hace lo mismo poco a poco; el script lo hace de una vez. *(Si ya lo ejecutaste tras el 28-sep,
 el dry-run dirá 0.)*
 
 ### 2. Recuperar los ISBN que faltan (y cotejar con ellos)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --todos`
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --todos --ejecutar`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --todos`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --todos --ejecutar`  (29/30-sep: 2.587 ISBN)
 
 Busca el ISBN en el propio fichero y, si el ripeo lo quitó, identifica la edición por autoridad (Fichero, BNE,
 OpenLibrary), con traductor, editorial, colección e indicios aprendidos. Con el ISBN rellena todo lo que falte, pone
@@ -37,19 +40,24 @@ más probable: **definitiva**, **provisional** (varias de la misma editorial) o 
 Salta lo ya revisado. La campaña «Recuperar ISBN que faltan» hace lo mismo a reposo (**páusala mientras corre el script**).
 
 ### 3. Resolver las «Edición por elegir» (~1.232)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir`
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir --ejecutar`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/reidentificar-sin-isbn.js --edicion-por-elegir --ejecutar`  (en la misma pasada y en la fase 6)
 
 Re-investiga los que esperaban tu elección y les asigna la más probable (muestra de 30: 30 asignados). La campaña
 «Resolver ediciones pendientes» hace lo mismo a reposo (**páusala mientras corre el script**). Después, si quieres,
 revisa en el Dashboard las filas **«ISBN provisional»** e **«ISBN dudoso»** (opcional: el registro ya está completo).
 
 ### 3 bis. Reparaciones tras la pasada del 29/30-sep (desplegar primero la versión con los arreglos)
-- [ ] Desplegar la última versión (incluye el arreglo de arranque `d737ba3` y los del log completo)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js`   (en seco: ~10 min)
-- [ ] Copia de la base (`scripts/copia-base.js`) **y** del disco (la reparación mueve ~3.000 carpetas)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js --ejecutar`
-- [ ] Revisar las selecciones que deja (abajo) y, al final, encender Conformador y campañas
+- [x] Desplegar la última versión (incluye el arreglo de arranque `d737ba3` y los del log completo)
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js`   (en seco: ~10 min)
+- [x] Copia de la base (`scripts/copia-base.js`) **y** del disco (la reparación mueve ~3.000 carpetas)
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js --ejecutar`  (30-sep; comprobado
+      en la base: fase 8 · 153 deshechas y rehechas, fase 10 · 489, fase 12 · 749 CDU reparadas, fase 4 · 3.067 CDU)
+- [x] Encender Conformador y campañas (1-oct)
+- [ ] Revisar a mano las selecciones que deja: «Editorial sin confirmar…» (477), «Editorial a revisar (prefijo ISBN)»
+      (888), «CDU de la BNE de otra lengua» (17), «ISBN de otra lengua» (16). La de «CDU por reclasificar (clase LCC
+      contaminada)» (773) la va resolviendo el Conformador. ⚠ Por las ejecuciones repetidas (la noche del 30-sep hubo
+      dos copias del script a la vez) hay **selecciones duplicadas** con el mismo nombre: sobra una de cada.
 
 Todo en un comando. En seco medido el 30-sep con la pasada ya terminada (6.795 libros, 2.587 ISBN). Orden de
 ejecución: 1, 2, 3, 7, 10, 8, 9, 12, 4, 5, 11, 6. Se puede ir por partes con `--fases 10,8,9`.
@@ -90,10 +98,10 @@ ejecución: 1, 2, 3, 7, 10, 8, 9, 12, 4, 5, 11, 6. Se puede ir por partes con `-
    que no se resolviera, y las ediciones por elegir (ISBN probable + datos de la obra). Tarda horas; en seco se salta.
 
 ### 3 bis-2. Arreglos tras el log de la fase 6 (1-oct)
-- [ ] Desplegar la última versión
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js --fases 2,14,13,15`   (en seco)
-- [ ] Lo mismo con `--ejecutar`
-- [ ] Encender la campaña **«Resolver ediciones pendientes»** (y el resto): rehace, con el motor corregido, las
+- [x] Desplegar la última versión
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/reparar-tras-reidentificacion.js --fases 2,14,13,15`   (en seco)
+- [x] Lo mismo con `--ejecutar`  (comprobado: 1 · 2 · 79 · 6)
+- [x] Encender la campaña **«Resolver ediciones pendientes»** (y el resto): rehace, con el motor corregido, las
       ediciones por elegir — el «probable» de «Harry Potter 3» era la caja «Harry Potter», y los «❓ ya es de otro
       título» en que el equivocado era el OTRO documento («Dune» / «Casa Capitular Dune») ahora se asignan y el otro
       queda marcado `isbn_sospechoso`.
@@ -103,9 +111,11 @@ candidatas buscadas con un título que no es un título («Author: David», «El
 toman el del nombre del fichero (7 sin un nombre aprovechable) · **15** · 6 tomos recuperan su «— Vol. N».
 
 ### 3 bis-3. Carpetas movidas dentro de la de otro documento (1-oct)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-carpetas-anidadas.js`   (en seco, ~5 min)
-- [ ] Lo mismo con `--ejecutar`
-- [ ] Y para acabar con los anidados: `… --separar` (en seco) y `… --separar --ejecutar`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/reparar-carpetas-anidadas.js`   (en seco, ~5 min)
+- [x] Lo mismo con `--ejecutar`
+- [x] Y para acabar con los anidados: `… --separar` (en seco) y `… --separar --ejecutar`  (24 separadas; queda 1, la
+      colección transmedia de Oxford Bookworms, que es a propósito). La selección «Carpeta dentro de la de otro
+      documento» (135) quedó vieja: se puede borrar.
 - [ ] Los 6 «sin sitio conocido»: el script ahora busca su FICHERO por nombre en todo el árbol (relanzar en seco y con
       `--ejecutar`); los que aparezcan en la carpeta de otro → luego `scripts/separar-carpetas-compartidas.js`; los que no →
       `fichero_perdido` + selección «Documentos sin fichero» (buscar en Papelera/copia o decidir borrar la ficha).
@@ -118,17 +128,26 @@ viviendo dentro de la carpeta de otro documento → selección «Carpeta dentro 
 rompen al moverse: el motor los lleva consigo).
 
 ### 3 quater. Crossref sin conexión (`crossref.db`, en el PC)
-- [ ] En el PC: `node scripts/etl-crossref.js` (lee `U:\_DUMPEDCATALOGS\March 2026 Public Data File from Crossref`, ~3 h con 6
+- [ ] En el PC: `node scripts/etl-crossref.js --capitulos` (EN MARCHA desde el 1-oct 11:41, ~2 h 30 min) (lee `U:\_DUMPEDCATALOGS\March 2026 Public Data File from Crossref`, ~3 h con 6
       hilos; reanudable: si se corta, se relanza igual). Deja `D:\gestor-biblioteca\Fichero\crossref.db`.
 - [ ] Copiar `crossref.db` a `U:\Fichero\crossref.db` (junto a fichero.db). Sin reiniciar: se abre al primer uso.
 - [ ] Desplegar la versión que lo consulta (la cascada lo mira antes que la API de Crossref).
 
 ### 3 ter. Índice de series (para el trabajo de colecciones)
-- [ ] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»
-  cuentan ahora en cada una).
-- [ ] Copiar `D:\gestor-biblioteca\Fichero\series.db` (2,9 GB, construido en el PC el 30-sep) a la carpeta Fichero del
+- [x] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»
+  cuentan ahora en cada una). (Copiado a `U:\Fichero` el 30-sep.)
+- [x] Copiar `D:\gestor-biblioteca\Fichero\series.db` (2,9 GB, construido en el PC el 30-sep) a la carpeta Fichero del
   NAS (`U:\Fichero\series.db`). Sin reiniciar nada: se abre la primera vez que se consulta.
 - [ ] Probar: `sudo docker exec -t gestor-biblioteca node scripts/consultar-serie.js "Graduate texts in mathematics"`
+
+### 3 quinquies. Volcados por traer (apuntado el 1-oct)
+- [ ] **Library Genesis** (volcado de su base de datos, unas decenas de GB) → `U:\_DUMPEDCATALOGS\`, y su ETL como el de
+      Crossref. Trae el **MD5 de cada fichero** + ISBN, serie, editorial, idioma, formato y tamaño: identificar ripeos sin
+      ISBN y sin IA (comparando el MD5 de nuestros ficheros), y, para Cuarentena y los huecos de colecciones/obras,
+      mostrar las copias que existen (formato, tamaño, idioma) con enlace a su página (`annas-archive.org/md5/<md5>`,
+      `libgen.li/ads.php?md5=<md5>`). Descarga siempre a mano: los enlaces directos no vienen en los volcados.
+- [ ] Más adelante: British National Bibliography (CC0, Dewey + series del Reino Unido), DNB alemana, Library of
+      Congress (LCC/Dewey para la CDU sin IA), Wikidata (nacionalidad de autores → CDU de literatura).
 
 ### 4. Portadas falsas (la misma imagen en libros distintos)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js`
