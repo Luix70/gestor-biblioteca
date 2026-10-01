@@ -131,7 +131,7 @@ rompen al moverse: el motor los lleva consigo).
 - [x] En el PC: `node scripts/etl-crossref.js --capitulos` (HECHO 1-oct 11:41→13:44: 1.901.344 libros, 294.408 con
       sinopsis, 244.220 con serie e ISSN, 10.804 series, 145.158 revistas, 19,8 M capítulos; `crossref.db` = 3,9 GB) (lee `U:\_DUMPEDCATALOGS\March 2026 Public Data File from Crossref`, ~3 h con 6
       hilos; reanudable: si se corta, se relanza igual). Deja `D:\gestor-biblioteca\Fichero\crossref.db`.
-- [ ] Copiar `crossref.db` a `U:\Fichero\crossref.db` (junto a fichero.db). Sin reiniciar: se abre al primer uso.
+- [x] Copiar `crossref.db` a `U:\Fichero\crossref.db` (junto a fichero.db). Sin reiniciar: se abre al primer uso. (HECHO 1-oct)
 - [ ] Desplegar la versión que lo consulta (la cascada lo mira antes que la API de Crossref).
 
 ### 3 sexies. Editoriales: colecciones y sus libros (1-oct)
