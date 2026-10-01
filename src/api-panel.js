@@ -83,6 +83,7 @@ import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 import { altaPorISBN } from './servicio-ingesta.js';
 import { medirPortadaRemota, portadasPorISBN } from './utils/portadas-isbn.js';
 import { buscarUnISBN, iniciarLoteISBN, estadoLoteISBN } from './utils/lote-isbn.js';
+import { confirmarEditorial } from './utils/confirmar-editorial.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1, nfc: 1 };
@@ -575,6 +576,17 @@ export function rutasPanel() {
     });
     r.get('/documentos/portada-sospechosa/estado', (req, res) => res.json(estadoPortadaSospechosa()));
     r.post('/documentos/portada-sospechosa/cancelar', (req, res) => res.json(cancelarPortadaSospechosa()));
+
+    // ── CONFIRMAR EDITORIAL: el usuario da por buena la editorial de los documentos (tras mirar la portada, p. ej.)
+    //    → `editorial_confirmada` + salen de las selecciones «Editorial sin confirmar/a revisar». Rápido (un
+    //    updateMany): síncrono. {quitar:true} deshace la marca. Solo admin. ──
+    r.post('/documentos/confirmar-editorial', async (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        try {
+            const db = await conectarDB();
+            res.json(await confirmarEditorial(db, req.body?.ids || [], { quitar: !!req.body?.quitar, motivo: req.body?.quitar ? null : 'revisada a mano en el panel.' }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
 
     // ── REGENERAR HASH: recalcula el SHA-256 del fichero (tras modificarlo: quitar una página, anotarlo…) y guarda
     //    su huella. El anterior queda en hashes_anteriores. Lee el fichero entero → 2º plano. Solo admin. ──
@@ -1154,12 +1166,12 @@ export function rutasPanel() {
             // (alfabético), autor, posicion (físico en estantería), obra (obra+volumen), coleccion
             // (colección+nº). Compatibilidad: 'reciente'=fecha desc, 'antiguo'=fecha asc. Los nulos van al
             // final. Con collation español (acentos/mayúsculas indiferentes) en los órdenes de texto.
-            const CAMPO_ORDEN = { reciente: 'fecha', antiguo: 'fecha', fecha: 'fecha', titulo: 'titulo', autor: 'autor', posicion: 'posicion', obra: 'obra', coleccion: 'coleccion', paginas: 'paginas', azar: 'azar' };
+            const CAMPO_ORDEN = { reciente: 'fecha', antiguo: 'fecha', fecha: 'fecha', titulo: 'titulo', autor: 'autor', posicion: 'posicion', obra: 'obra', coleccion: 'coleccion', paginas: 'paginas', editorial: 'editorial', azar: 'azar' };
             const campoOrden = CAMPO_ORDEN[orden] || 'fecha';
             const dirRaw = String(req.query.dir || '').toLowerCase();
             const s = dirRaw === 'asc' ? 1 : dirRaw === 'desc' ? -1
                 : orden === 'antiguo' ? 1 : campoOrden === 'fecha' ? -1 : 1; // por defecto: fecha desc, el resto asc
-            const opciones = ['titulo', 'autor', 'obra', 'coleccion', 'posicion'].includes(campoOrden)
+            const opciones = ['titulo', 'autor', 'editorial', 'obra', 'coleccion', 'posicion'].includes(campoOrden)
                 ? { collation: { locale: 'es', strength: 1 } } : {};
             // ORDEN — se separan las etapas PREVIAS (cálculo de claves) del propio $sort para poder PROYECTAR a un
             // documento LIGERO (solo _id + las claves de orden) ANTES de ordenar.
@@ -1214,6 +1226,14 @@ export function rutasPanel() {
                         { $addFields: { _auNom: { $ifNull: [{ $arrayElemAt: ['$_auS.nombre', 0] }, 'zzzzzzzz'] } } },
                     ],
                     orden: { _auNom: s, titulo: 1 } }
+                : campoOrden === 'editorial'
+                ? { pre: [
+                        // Por EDITORIAL (para revisar en bloque las de un mismo sello, con sus portadas a la vista).
+                        // Igual que el autor: el $lookup se descarta en la proyección ligera. Sin editorial, al final.
+                        { $lookup: { from: 'editoriales', localField: 'editorial', foreignField: '_id', as: '_edS' } },
+                        { $addFields: { _edNom: { $ifNull: [{ $arrayElemAt: ['$_edS.nombre', 0] }, 'zzzzzzzz'] } } },
+                    ],
+                    orden: { _edNom: s, titulo: 1 } }
                 : campoOrden === 'obra'
                 ? { pre: [
                         // _vn NUMÉRICO ($convert): volumen_numero puede venir como string → sin convertir, el orden
@@ -1272,6 +1292,8 @@ export function rutasPanel() {
                 titulo: 1, subtitulo: 1, portada: 1, formatos: 1, cdu: 1, isbn: 1, issn: 1, paginas: 1,
                 tipo_recurso: 1, 'año_edicion': 1, volumen_numero: 1, obra_titulo: 1, nsfw: 1, locked: 1,
                 valoracion: 1, leido: 1, like: 1, naturaleza: 1, nfc: 1, orden_estanteria: 1, autores: '$_au.nombre',
+                editorial_nombre: { $arrayElemAt: ['$_ed.nombre', 0] },   // se enseña al ordenar por editorial
+                editorial_confirmada: 1,
                 coleccion: 1, coleccion_nombre: 1,   // para el distintivo «pertenece a una colección»
                 obra: 1,                             // para colapsar la obra multivolumen en una tarjeta
                 // Nº de imágenes del carrusel (para el contador de la miniatura). Misma semántica que la ficha:
@@ -1321,6 +1343,7 @@ export function rutasPanel() {
                 const crudos = await db.collection('biblioteca').aggregate([
                     { $match: { _id: { $in: idsPagina } } },
                     { $lookup: { from: 'autores', localField: 'autores', foreignField: '_id', as: '_au' } },
+                    { $lookup: { from: 'editoriales', localField: 'editorial', foreignField: '_id', as: '_ed' } },
                     { $project: PROY_TARJETA },
                 ]).toArray();
                 const porId = new Map(crudos.map(d => [String(d._id), d]));

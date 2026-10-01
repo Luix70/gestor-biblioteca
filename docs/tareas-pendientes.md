@@ -19,8 +19,8 @@ entonces se repiten con `--ejecutar`. Todos son **reanudables**: si se cortan, s
 ## Scripts por ejecutar (en este orden)
 
 ### 1. Colocar cada libro en la carpeta de su CDU
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js`
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js --ejecutar`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/recolocar-por-cdu.js --ejecutar`
 
 > 1-oct: casi hecho por el camino — modernizar-cdu y la tarea «ubicar-segun-cdu» recolocaron miles. Quedan **69** de
 > 65.987 (los «sin carpeta en disco» de modernizar-cdu): el ensayo dirá cuáles.
@@ -128,13 +128,14 @@ viviendo dentro de la carpeta de otro documento → selección «Carpeta dentro 
 rompen al moverse: el motor los lleva consigo).
 
 ### 3 quater. Crossref sin conexión (`crossref.db`, en el PC)
-- [ ] En el PC: `node scripts/etl-crossref.js --capitulos` (EN MARCHA desde el 1-oct 11:41, ~2 h 30 min) (lee `U:\_DUMPEDCATALOGS\March 2026 Public Data File from Crossref`, ~3 h con 6
+- [x] En el PC: `node scripts/etl-crossref.js --capitulos` (HECHO 1-oct 11:41→13:44: 1.901.344 libros, 294.408 con
+      sinopsis, 244.220 con serie e ISSN, 10.804 series, 145.158 revistas, 19,8 M capítulos; `crossref.db` = 3,9 GB) (lee `U:\_DUMPEDCATALOGS\March 2026 Public Data File from Crossref`, ~3 h con 6
       hilos; reanudable: si se corta, se relanza igual). Deja `D:\gestor-biblioteca\Fichero\crossref.db`.
 - [ ] Copiar `crossref.db` a `U:\Fichero\crossref.db` (junto a fichero.db). Sin reiniciar: se abre al primer uso.
 - [ ] Desplegar la versión que lo consulta (la cascada lo mira antes que la API de Crossref).
 
 ### 3 sexies. Editoriales: colecciones y sus libros (1-oct)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/editorial-de-colecciones.js` (en seco) y luego `--ejecutar`.
+- [X] `sudo docker exec -t gestor-biblioteca node scripts/editorial-de-colecciones.js` (en seco) y luego `--ejecutar`.
       En seco (1-oct): **~80 libros** cuyo ISBN y cuya colección dicen otra editorial (16 «RBA Libros → Gredos» en la
       Biblioteca Clásica Gredos, variantes de nombre, «Rama Publishing → Valdemar»…) y **31 colecciones** con la
       editorial mal apuntada («Biblioteca Clásica Gredos»: RBA → Gredos; «Valdemar: El Club Diógenes»: Gredos →
@@ -142,6 +143,14 @@ rompen al moverse: el motor los lleva consigo).
       asignado a una colección no se toca (su ISBN es de otro registrante). `--excluir <id>,…` para dejar alguna.
 - [ ] `editoriales-por-prefijo.js --ejecutar` otra vez: rehace (sin duplicar) «Editorial a revisar (prefijo ISBN)» y
       crea «Editorial a revisar — su colección coincide con el prefijo» (151, los más sospechosos: revisar primero).
+
+### 3 septies. Revisar las editoriales dudosas (1-oct)
+- [ ] Desplegar (trae el orden «Editorial» en Búsqueda y la acción «✅ Confirmar editorial»).
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/triar-editoriales-sin-confirmar.js` (en seco) y `--ejecutar`
+      (en seco 1-oct: 6 maquetadores a quitar, 91 confirmadas por su colección o su autor, **350** para mirar).
+- [ ] Mirar los 350 en Búsqueda: selección «Editorial sin confirmar…» + ordenar por «Editorial» → por grupos de
+      portadas → «✅ Confirmar editorial» o «✏️ Asignar datos». Después, igual con «Editorial a revisar — su colección
+      coincide con el prefijo» y «Editorial a revisar (prefijo ISBN)».
 
 ### 3 ter. Índice de series (para el trabajo de colecciones)
 - [x] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»

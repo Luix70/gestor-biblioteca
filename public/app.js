@@ -56,6 +56,7 @@ const _AYUDA_ORDEN = `<ul>
     <li><b>🎲 Aleatorio</b> (por defecto al entrar): descubrimiento; mantiene juntos los tomos de una misma obra. «🎲 Rebarajar» = otro orden.</li>
     <li><b>Relevancia / recientes</b>: al buscar por texto ordena por mejor coincidencia; al navegar, por más recientes.</li>
     <li><b>Título · Autor · Nº de páginas</b>: alfabético/numérico, con botón de sentido ascendente/descendente.</li>
+    <li><b>Editorial</b>: agrupa los libros de un mismo sello y pone su nombre en cada tarjeta (✅ si ya está confirmada). Sirve para revisar editoriales en bloque mirando las portadas.</li>
     <li><b>Posición en la estantería / obra / colección</b>: orden físico o el de la serie.</li>
   </ul>`;
 const _AYUDA_SELECCION = `<ul>
@@ -3589,6 +3590,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las fuentes para mejorar el documento: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books)">✨ Enriquecer</button>
       <button class="fbtn admin-only" id="actReisbn" title="Extraer/cotejar el ISBN de ESTE documento: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual, con o sin IA.">🔎 Extraer ISBN</button>
+      <button class="fbtn admin-only" id="actConfEd" title="${d.editorial_confirmada ? 'La editorial ya está confirmada. Pulsa para QUITAR la confirmación.' : 'Dar por BUENA la editorial de este documento: sale de las selecciones «Editorial sin confirmar / a revisar» y los scripts de editoriales ya no la tocan.'}">${d.editorial_confirmada ? '✅ Editorial confirmada' : '✅ Confirmar editorial'}</button>
       <button class="fbtn admin-only" id="actRehash" title="Recalcular el hash del fichero de ESTE documento (tras modificarlo: quitar una página, anotarlo…). El anterior se conserva.">#️⃣ Regenerar hash</button>
       <button class="fbtn admin-only" id="actPortSosp" title="Portada FALSA (la misma imagen en libros distintos): quitarla, re-extraerla omitiendo la sospechosa, o poner la primera página de texto. Solo cambia la portada.">🚩 Portada sospechosa…</button>
       <button class="fbtn admin-only" id="actSinopsis" title="Busca la sinopsis de ESTE documento por su ISBN en el Fichero local y, si no está, en OpenLibrary y Google Books. Sin IA. Opciones: forzar (reemplazar la que tenga) y solo Fichero local (sin salir a internet).">📝 Buscar sinopsis</button>
@@ -3675,6 +3677,7 @@ function pintarDoc(r, ctx) {
     if ($('#actReisbn')) $('#actReisbn').onclick = () => reidentificarLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if ($('#actPortSosp')) $('#actPortSosp').onclick = () => portadaSospechosaLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if ($('#actRehash')) $('#actRehash').onclick = () => regenerarHashLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
+    if ($('#actConfEd')) $('#actConfEd').onclick = () => confirmarEditorialLote([d._id], { quitar: !!d.editorial_confirmada, alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if ($('#actSinopsis')) $('#actSinopsis').onclick = () => sinopsisLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
     if ($('#actTipo')) $('#actTipo').onclick = () => cambiarTipoDocs([d._id]);
@@ -8413,6 +8416,7 @@ function renderBulk() {
     ${ROL === 'admin' ? '<button class="btn" id="bkCotejar" title="Cotejar por ISBN/ISSN contra el Fichero + APIs y REEMPLAZAR los campos que elijas (donde difieran) en toda la selección. Cambiar la CDU mueve la carpeta. Con o sin IA (como el cotejo de la ficha).">🔎 Cotejar (ISBN)</button>' : ''}
     <button class="btn" id="bkAFondo" title="Completar a fondo: lee cada libro con la VISIÓN (IA, más lento) y aplica lo que aporte (autores/roles, sinopsis, identificadores). Va uno a uno.">🎯 A fondo</button>
     <button class="btn" id="bkTipo" title="Cambiar el tipo (libro/revista/cómic) de los documentos seleccionados">🔀 Cambiar tipo</button>
+    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkConfEd" title="Dar por BUENA la editorial que tienen los seleccionados (p. ej. tras ver su logotipo en las portadas). Se marcan como confirmadas, salen de las selecciones «Editorial sin confirmar / a revisar» y los scripts de editoriales ya no las tocan.">✅ Confirmar editorial</button>' : ''}
     <button class="btn" id="bkReclasEd" title="Reclasificar la EDITORIAL de los seleccionados buscándola en cascada (fichero → OpenLibrary → Google → IA opcional). Muestra un informe por transición antes de aplicar.">🏢 Reclasificar editorial</button>
     <button class="btn" id="bkAsignar" title="Asignar a los seleccionados: autor · contribuidor con rol · editorial · CDU (mueve la carpeta al árbol nuevo)">✏️ Asignar datos</button>
     <button class="btn" id="bkKw" title="Añadir palabras clave COMUNES (separadas por comas) a los seleccionados. Se AÑADEN a las que ya tenga cada uno; no las reemplazan. Luego se pueden buscar con «#palabra».">🏷 Palabras clave</button>
@@ -8508,6 +8512,7 @@ function renderBulk() {
     if ($('#bkReimg')) $('#bkReimg').onclick = () => reextraerImagenesLote([...selDocs]);
     if ($('#bkPortSosp')) $('#bkPortSosp').onclick = () => portadaSospechosaLote([...selDocs]);
     if ($('#bkRehash')) $('#bkRehash').onclick = () => regenerarHashLote([...selDocs]);
+    if ($('#bkConfEd')) $('#bkConfEd').onclick = () => confirmarEditorialLote([...selDocs]);
     if ($('#bkFusion')) $('#bkFusion').onclick = () => fusionarVersionesLote([...selDocs]);
     if ($('#bkReisbn')) $('#bkReisbn').onclick = () => reidentificarLote([...selDocs]);
     if ($('#bkSinopsis')) $('#bkSinopsis').onclick = () => sinopsisLote([...selDocs]);
@@ -8805,6 +8810,20 @@ async function fusionarVersionesLote(ids) {
 // hash de la ingesta deja de ser el suyo. Lo recalcula (leyendo el fichero entero, en 2º plano) y guarda su huella;
 // el anterior queda en el historial (si el original vuelve a entrar por el Inbox, se reconoce). En un PDF recuenta
 // las páginas. Integridad y scripts/verificar-hashes.js detectan los que han quedado viejos.
+// ✅ CONFIRMAR EDITORIAL: da por buena la editorial de los documentos (marca `editorial_confirmada`) y los saca de
+// las selecciones de revisión «Editorial sin confirmar / a revisar». Es un updateMany: síncrono, sin 2º plano.
+// `quitar` deshace la marca (desde la ficha, si se confirmó por error).
+async function confirmarEditorialLote(ids, { quitar = false, alTerminar = null } = {}) {
+  if (!ids || !ids.length) return;
+  if (ids.length > 1 && !confirm(`¿Dar por buena la editorial de ${ids.length} documentos?`)) return;
+  try {
+    const r = await api('/documentos/confirmar-editorial', { method: 'POST', body: JSON.stringify({ ids, quitar }) });
+    if (!r.ok) { toast(r.motivo, 'bad'); return; }
+    toast(quitar ? '↩️ Confirmación de editorial quitada' : `✅ ${r.n} editorial(es) confirmada(s)${r.fuera ? ` · ${r.fuera} fuera de las selecciones de revisión` : ''}`);
+    if (alTerminar) alTerminar();
+    else { selDocs.clear(); buscarCatalogo(estadoBusqueda.page || 1); }
+  } catch (e) { toast(e.message, 'bad'); }
+}
 async function regenerarHashLote(ids, { alTerminar = null } = {}) {
   if (!ids.length) return;
   if (!confirm(`Se RECALCULARÁ el hash del fichero de ${ids.length} documento(s).\n\nÚsalo si has modificado el fichero (quitar una página, anotarlo…). El hash anterior se conserva en su historial. Lee cada fichero entero: puede tardar. ¿Seguir?`)) return;
@@ -9452,6 +9471,7 @@ function construirSearch() {
             <option value="fecha">Fecha de ingreso</option>
             <option value="titulo">Título (alfabético)</option>
             <option value="autor">Autor</option>
+            <option value="editorial">Editorial</option>
             <option value="posicion">Posición en la estantería</option>
             <option value="obra">Posición en la obra</option>
             <option value="coleccion">Posición en la colección</option>
@@ -9552,7 +9572,7 @@ function construirSearch() {
       fo.addEventListener('toggle', () => localStorage.setItem('sq_ordenar', fo.open ? '1' : '0'));
     }
   }
-  const DIR_DEF = { reciente: 'desc', fecha: 'desc', titulo: 'asc', autor: 'asc', posicion: 'asc', obra: 'asc', coleccion: 'asc', paginas: 'desc' };
+  const DIR_DEF = { reciente: 'desc', fecha: 'desc', titulo: 'asc', autor: 'asc', editorial: 'asc', posicion: 'asc', obra: 'asc', coleccion: 'asc', paginas: 'desc' };
   const setOrdenDir = (d) => {
     const b = $('#sqDir');
     if (b) { b.dataset.dir = d; b.textContent = d === 'asc' ? '↑ Asc' : '↓ Desc'; }
@@ -10377,11 +10397,14 @@ function docCard(d) {
     ? `<img src="${esc(encUrl(d.portada))}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>${ph}</div>'">`
     : `<div class="ph">${ph}</div>`;
   const fmt = tipoFmtCompacto(d);
-  const sub =
+  const subNormal =
     (d.autores && d.autores.length ? d.autores.slice(0, 2).join(', ') : '') ||
     (d.año_edicion ? String(d.año_edicion) : '') ||
     d.isbn ||
     '—';
+  // Ordenando por EDITORIAL, la tarjeta dice cuál es (y ✅ si está confirmada): así se revisa un sello entero
+  // comparando su nombre con el logotipo de las portadas, sin abrir fichas.
+  const sub = ordenPorEditorial() ? `🏢 ${d.editorial_nombre || '(sin editorial)'}${d.editorial_confirmada ? ' ✅' : ''} · ${subNormal}` : subNormal;
   const nfcTag = nfcBadge(d);
   // TOMO de una obra mayor (modo expandido): fondo más claro para distinguirlo de un libro de un solo volumen,
   // tanto en gris como en burdeos (selección). La marca «📚 N» dice de cuántos tomos es y abre la obra.
@@ -10395,10 +10418,16 @@ function docCard(d) {
   const numImg = d.n_imagenes > 1 ? `<span class="cnum cnum-br" title="${d.n_imagenes} imágenes">${d.n_imagenes}</span>` : '';
   return `<div class="vol${esVol}${selDocs.has(d._id) ? ' sel' : ''}" data-doc="${esc(d._id)}"><span class="selmark">✓</span><div class="cov">${cov}${nfcTag}${posBadge(d)}${numImg}</div><div class="meta"><div class="n">${esc(recortar(d.titulo || '(sin título)', 64))} ${fmt}${volTag}${badgesDoc(d)}</div><div class="t">${esc(sub)}</div><div style="margin-top:5px">${ratingBar('documentos', d._id, d.valoracion, d.nsfw)}</div></div></div>`;
 }
+// ¿Está el catálogo ordenado por editorial? (las tarjetas y filas enseñan entonces la editorial)
+function ordenPorEditorial() {
+  const o = $('#sqOrden');
+  return !!o && o.value === 'editorial';
+}
 // Vista DETALLES: una FILA por documento, solo texto (título · autor · año · identificador · CDU + formatos).
 // Comparte data-doc, .selmark y .sel con la vista iconos (misma mecánica de selección).
 function docRow(d) {
   const partes = [
+    ordenPorEditorial() ? `🏢 ${d.editorial_nombre || '(sin editorial)'}${d.editorial_confirmada ? ' ✅' : ''}` : '',
     d.autores && d.autores.length ? d.autores.slice(0, 3).join(', ') : '',
     d.año_edicion ? String(d.año_edicion) : '',
     d.isbn || d.issn || '',

@@ -1270,6 +1270,21 @@ de ficheros clasificado por CDU.
     una editorial real distinta NUNCA la cambia: va a la selección «Editorial a revisar (prefijo ISBN)» (890, la
     mayoría sellos del mismo grupo). Salta los ISBN sospechosos y los compartidos por títulos distintos. La editorial de la COLECCIÓN o la escrita en el título ya no la rescata un
     traductor coincidente («La hija del capitán», colección de Anaya, recibía la edición de Paulinas).
+    REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y
+    «Editorial a revisar…»:
+      · `scripts/triar-editoriales-sin-confirmar.js` (seco por defecto; `--ejecutar`, `--seleccion "<nombre>"`)
+        resuelve lo que tiene respaldo: QUITA las que son maquetadores o ruido (Lectulandia, DigiCat…; diario
+        `deshacer[]`) y CONFIRMA las que avalan otros 2+ libros de su colección (la mitad o más) o un libro del mismo
+        autor CON ISBN. Si la colección dice otra editorial no cambia nada (el libro puede estar mal asignado a ella).
+        Medido 1-oct sobre 447: 6 a quitar, 91 a confirmar, 350 para mirar.
+      · El resto, en Búsqueda: filtrar por la selección y ORDENAR POR «Editorial» (opción nueva): cada tarjeta dice
+        «🏢 Editorial» (✅ si ya está confirmada) y los libros de un sello salen juntos, así que se comparan de un
+        vistazo con el logotipo de sus portadas. Si el grupo está bien → seleccionarlo → ⚙️ «✅ Confirmar editorial».
+        Si alguno está mal → «✏️ Asignar datos» (editorial) o «🏢 Reclasificar editorial».
+      · «✅ Confirmar editorial» (selección y ficha; en la ficha, pulsado otra vez QUITA la confirmación): marca
+        `editorial_confirmada` (+ `editorial_confirmada_fecha`) y saca los documentos de las selecciones «Editorial
+        sin confirmar / a revisar» (`POST /documentos/confirmar-editorial`, `utils/confirmar-editorial.js`). Los
+        scripts de editoriales (editoriales-por-prefijo, editorial-de-colecciones) no tocan un doc confirmado.
     EDICIONES SIN DECIDIR: ISBN PROBABLE + DATOS DE LA OBRA (2026-09-30, regla del usuario). Cuando hay varias
     ediciones posibles de editoriales distintas y nada decide:
       · la MÁS PROBABLE se guarda APARTE en `isbn_probable` (no en `isbn`): se ve en la ficha («ISBN probable ·
