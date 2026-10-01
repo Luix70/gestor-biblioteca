@@ -106,6 +106,9 @@ toman el del nombre del fichero (7 sin un nombre aprovechable) · **15** · 6 to
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-carpetas-anidadas.js`   (en seco, ~5 min)
 - [ ] Lo mismo con `--ejecutar`
 - [ ] Y para acabar con los anidados: `… --separar` (en seco) y `… --separar --ejecutar`
+- [ ] Los 6 «sin sitio conocido»: el script ahora busca su FICHERO por nombre en todo el árbol (relanzar en seco y con
+      `--ejecutar`); los que aparezcan en la carpeta de otro → luego `scripts/separar-carpetas-compartidas.js`; los que no →
+      `fichero_perdido` + selección «Documentos sin fichero» (buscar en Papelera/copia o decidir borrar la ficha).
 
 En seco desde el PC: de 65.987 documentos, **1** apunta a una carpeta que se movió dentro de la de otro (el nº de
 febrero de 2015 de «Historia de Iberia Vieja»; está en `9/94/94(460)/revistas/1699-7913-b8999d/2015-02`) y se

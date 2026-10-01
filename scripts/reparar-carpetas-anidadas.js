@@ -93,6 +93,74 @@ p.fin();
 for (const r of reparables.slice(0, 40)) console.log(`↪️  ${r.d._id} «${String(r.d.titulo || '').slice(0, 40)}»\n      ${r.rel}\n   →  ${r.nueva}`);
 for (const r of perdidos.slice(0, 40)) console.log(`❌ ${r.d._id} «${String(r.d.titulo || '').slice(0, 40)}» · ${r.rel} (no está, ni siguiendo el diario)`);
 
+// ─── Los que el diario no encuentra: se busca su FICHERO por nombre en todo el árbol ─────────────────────────
+// (Medido el 1-oct: dos tomos de «The Internet Encyclopedia» tenían sus PDF en la carpeta de OTRO tomo de la obra,
+// «vol-x-f7b2ed»: se catalogaron en la misma carpeta y la ficha quedó apuntando a una que nunca se creó.)
+// Un único sitio con ese fichero → la ficha apunta ahí (si es la carpeta de otro documento, la separa luego
+// scripts/separar-carpetas-compartidas.js). Ninguno → `fichero_perdido` + revisión, y a una selección.
+const reubicados = [], sinFichero = [], dudosos = [];
+if (perdidos.length) {
+    const normal = (s) => String(s || '').normalize('NFC').toLowerCase();
+    const indice = new Map();   // nombre de fichero → carpetas donde está
+    const pendientes = [''];
+    const pi = progreso(0, 'Indexando ficheros del árbol');
+    while (pendientes.length) {
+        const rel = pendientes.pop();
+        let entradas = [];
+        try { entradas = fs.readdirSync(path.join(RAIZ, ...rel.split('/').filter(Boolean)), { withFileTypes: true }); } catch { continue; }
+        pi.paso(rel);
+        for (const e of entradas) {
+            if (e.name.startsWith('.')) continue;
+            const hijo = rel ? `${rel}/${e.name}` : e.name;
+            if (e.isDirectory()) pendientes.push(hijo);
+            else if (!/\.(jpe?g|png|webp|json|xml)$/i.test(e.name)) {
+                const k = normal(e.name);
+                if (!indice.has(k)) indice.set(k, []);
+                indice.get(k).push(rel);
+            }
+        }
+    }
+    pi.fin();
+    for (const r of perdidos) {
+        const sitios = r.d.nombre_archivo ? (indice.get(normal(r.d.nombre_archivo)) || []) : [];
+        if (sitios.length === 1) reubicados.push({ ...r, nueva: sitios[0] });
+        else if (!sitios.length) sinFichero.push(r);
+        else dudosos.push({ ...r, sitios });
+    }
+    for (const r of reubicados) console.log(`📄 ${r.d._id} «${String(r.d.titulo || '').slice(0, 40)}» · su fichero está en ${r.nueva}`);
+    for (const r of dudosos) console.log(`❓ ${r.d._id} «${String(r.d.titulo || '').slice(0, 40)}» · su fichero está en ${r.sitios.length} sitios: ${r.sitios.slice(0, 3).join(' | ')}`);
+    for (const r of sinFichero) console.log(`🚫 ${r.d._id} «${String(r.d.titulo || '').slice(0, 40)}» · «${r.d.nombre_archivo || '(sin nombre de fichero)'}» no está en ninguna carpeta del árbol`);
+
+    if (EJECUTAR) {
+        for (const { d, rel, nueva } of reubicados) {
+            const viejaWeb = `/recursos/${rel}`, nuevaWeb = `/recursos/${nueva}`;
+            const remap = (ruta) => (ruta && ruta.startsWith(viejaWeb) ? nuevaWeb + ruta.slice(viejaWeb.length) : ruta);
+            const set = { ruta_base: nuevaWeb, fecha_actualizacion: new Date() };
+            if (d.portada) set.portada = remap(d.portada);
+            if (d.imagenes?.length) set.imagenes = d.imagenes.map((im) => ({ ...im, ruta: remap(im.ruta) }));
+            await col.updateOne({ _id: d._id }, {
+                $set: set,
+                $push: {
+                    deshacer: { fecha: new Date(), origen: 'reparar-carpetas-anidadas', antes: { ruta_base: d.ruta_base, portada: d.portada ?? null, imagenes: d.imagenes ?? null } },
+                    alertas_agente: `Carpeta reencontrada por el nombre de su fichero: «${rel}» no existía; el fichero está en «${nueva}».`,
+                },
+            });
+            await indexarDoc(db, d._id).catch(() => {});
+        }
+        if (sinFichero.length) {
+            await col.updateMany({ _id: { $in: sinFichero.map((r) => r.d._id) } }, {
+                $set: { fichero_perdido: true, revision_requerida: true },
+                $push: { alertas_agente: 'Fichero PERDIDO: ni su carpeta ni su fichero están en el árbol CDU. Búscalo en la Papelera o en tu copia; si no aparece, decide si se borra la ficha.' },
+            });
+            await crearSeleccion(db, {
+                nombre: `Documentos sin fichero ${new Date().toISOString().slice(0, 10)}`,
+                descripcion: 'Su carpeta no existe y su fichero no está en ninguna carpeta del árbol CDU. Búscalos en la Papelera o en la copia; si no aparecen, decide si se borra la ficha.',
+                docs: sinFichero.map((r) => r.d._id),
+            });
+        }
+    }
+}
+
 if (EJECUTAR && reparables.length) {
     const pe = progreso(reparables.length, 'Corrigiendo rutas');
     for (const { d, rel, nueva } of reparables) {
@@ -187,7 +255,7 @@ if (EJECUTAR && anidados.length && !SEPARAR) {
 console.log(`\n=== ${EJECUTAR ? 'HECHO' : 'DRY-RUN'} ===`);
 console.log(`  documentos revisados                         : ${docs.length}`);
 console.log(`  carpeta movida dentro de otra (se reencuentra): ${reparables.length}${EJECUTAR ? ' (corregidos)' : ''}`);
-console.log(`  carpeta que no está en ningún sitio conocido  : ${perdidos.length}`);
+console.log(`  carpeta que no existe (sin diario)            : ${perdidos.length} → su fichero, encontrado en otra carpeta: ${reubicados.length}${EJECUTAR ? ' (corregidos)' : ''} · en varios sitios: ${dudosos.length} · en ninguno: ${sinFichero.length}${EJECUTAR && sinFichero.length ? ' → selección «Documentos sin fichero»' : ''}`);
 console.log(`  carpetas ANIDADAS que quedan (riesgo)         : ${anidados.length}${EJECUTAR && anidados.length ? ' → selección «Carpeta dentro de la de otro documento»' : ''}`);
 console.log(`  carpetas-contenedor${SEPARAR ? (EJECUTAR ? ' separadas' : ' que se separarían') : ' (--separar para darles carpeta propia)'} : ${SEPARAR ? separados : padres.size}`);
 if (!EJECUTAR) console.log('\n▶ Repite con --ejecutar para corregir las rutas (solo cambia la base: los ficheros ya están en su sitio nuevo).');
