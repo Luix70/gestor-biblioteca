@@ -40,7 +40,10 @@ function abrir() {
         stmts.porIsbn = db.prepare('SELECT l.* FROM isbn_libro i JOIN libros l ON l.id = i.libro WHERE i.isbn = ?');
         stmts.porSerie = db.prepare('SELECT * FROM libros WHERE serie_issn = ? ORDER BY anio, titulo LIMIT ?');
         // La tabla de series se crea al final del ETL: un índice a medias funciona sin ella.
-        try { stmts.serie = db.prepare('SELECT issn, nombre, n FROM series WHERE issn = ?'); } catch { stmts.serie = null; }
+        try {
+            stmts.serie = db.prepare('SELECT issn, nombre, n FROM series WHERE issn = ?');
+            stmts.seriePorNombre = db.prepare('SELECT issn, nombre, n FROM series WHERE nombre = ? COLLATE NOCASE ORDER BY n DESC');
+        } catch { stmts.serie = null; stmts.seriePorNombre = null; }
         console.log(`📘 Crossref local conectado: ${ruta}`);
     } catch (e) {
         console.warn(`⚠️  Crossref local no disponible (${e.message}).`);
@@ -101,4 +104,13 @@ export function librosDeSerieCrossrefLocal(issn, { max = 5000 } = {}) {
 export function serieCrossrefLocal(issn) {
     if (!abrir() || !issn) return null;
     return stmts.serie?.get(String(issn).toUpperCase()) || null;
+}
+
+/**
+ * Las series de Crossref con ese NOMBRE exacto (sin distinguir mayúsculas), la más nutrida primero. Para cuando la
+ * serie del Fichero no trae ISSN (p. ej. consultar-serie.js con «Graduate texts in mathematics»).
+ */
+export function seriesCrossrefPorNombre(nombre) {
+    if (!abrir() || !nombre || !stmts.seriePorNombre) return [];
+    return stmts.seriePorNombre.all(String(nombre).trim());
 }
