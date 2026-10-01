@@ -15,6 +15,7 @@ import { esNombreRuido } from './utils/editorial-por-prefijo.js';
 import { editorialDeColeccionMapa } from './utils/coleccion-editorial.js';
 import { mejorCdu } from './utils/prioridad-cdu.js';
 import { cduDeAutoridadFiable } from './utils/autoridad-isbn.js';
+import { seriesDeAutoridad, elegirSerie, mismaSerie } from './utils/serie-autoridad.js';
 
 /**
  * Devuelve el primer valor "con contenido" de la lista.
@@ -366,8 +367,11 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
 
     // Colección/serie: el archivo (metadatos Calibre / nombre) manda; la visión rellena el hueco.
     // El número se guarda como cadena (preserva romanos como "XLVII" y árabes por igual).
+    // PROCEDENCIA de la colección (coleccion_fuente): la del archivo (OPF, CIP, nombre) o la de la autoridad.
+    const coleccionDelArchivo = primerValido(documento.coleccion_nombre);
     documento.coleccion_nombre = primerValido(documento.coleccion_nombre, datosExtra.coleccion_nombre);
     documento.coleccion_numero = primerValido(documento.coleccion_numero, datosExtra.coleccion_numero);
+    if (documento.coleccion_nombre) documento.coleccion_fuente = coleccionDelArchivo ? 'archivo' : 'autoridad';
     if (documento.coleccion_numero != null) documento.coleccion_numero = String(documento.coleccion_numero);
     // ISSN de la SERIE (Crossref) — solo si la serie que queda es la misma que lo trajo; y el DOI del libro.
     if (datosExtra.coleccion_issn && documento.coleccion_nombre === datosExtra.coleccion_nombre && !documento.coleccion_issn) {
@@ -378,8 +382,28 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // Drop por CARPETA: el nombre de la carpeta es una agrupación EXPLÍCITA del usuario y manda
     // sobre cualquier colección deducida del archivo. El número de serie del archivo (si lo hay)
     // se conserva; si no, motor-catalogo asignará el siguiente incremental.
+    //
+    // EXCEPCIÓN (regla del usuario, 1-oct): si el ISBN dice que el libro es de una SERIE EDITORIAL (series.db /
+    // crossref.db, local y sin IA) y la carpeta no es esa serie, manda la serie: la carpeta suele ser un paquete de
+    // descarga («MIT.Press.Nonfiction.Ebook-2021-PHC») o un tema, no una colección. Se avisa en las alertas.
+    // Sin carpeta y sin colección, la serie de la autoridad rellena el hueco.
+    const isbnSerie = !esRevista ? primerValido(documento.isbn, datosExtra.isbn) : null;
+    const serieAutoridad = isbnSerie ? elegirSerie(seriesDeAutoridad(isbnSerie, { titulo: documento.titulo }), contexto.coleccion || documento.coleccion_nombre) : null;
     if (contexto.coleccion) {
-        documento.coleccion_nombre = contexto.coleccion;
+        if (serieAutoridad && !mismaSerie(serieAutoridad.nombre, contexto.coleccion)) {
+            documento.coleccion_nombre = serieAutoridad.nombre;
+            if (serieAutoridad.numero) documento.coleccion_numero = String(serieAutoridad.numero);
+            documento.coleccion_fuente = 'autoridad';
+            documento.alertas_agente = [...(documento.alertas_agente || []),
+                `Colección: la carpeta «${contexto.coleccion}» no es su serie; por el ISBN es de «${serieAutoridad.nombre}».`];
+        } else {
+            documento.coleccion_nombre = contexto.coleccion;
+            documento.coleccion_fuente = serieAutoridad ? 'autoridad' : 'carpeta';
+        }
+    } else if (!documento.coleccion_nombre && serieAutoridad) {
+        documento.coleccion_nombre = serieAutoridad.nombre;
+        if (serieAutoridad.numero && !documento.coleccion_numero) documento.coleccion_numero = String(serieAutoridad.numero);
+        documento.coleccion_fuente = 'autoridad';
     }
     // Campos físicos de la BNE: el archivo digital no los tiene; las APIs tampoco los aportan.
     if (datosExtra.paginas_bne && !documento.paginas)

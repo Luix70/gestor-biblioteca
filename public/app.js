@@ -52,6 +52,14 @@ const _AYUDA_BUSQUEDA = `<p>En «Buscar» pon título, autor, editorial, ISBN/IS
     <li><b>🎯 Frase exacta</b>: solo resultados con esa frase adyacente y en ese orden.</li>
     <li><b>ISBN/ISSN</b>: con o sin guiones. También busca por otras ediciones y por el ISSN de serie de la colección.</li>
   </ul>`;
+// Procedencia de la colección de un documento (`coleccion_fuente`) → [etiqueta corta, explicación].
+const FUENTE_COLECCION = {
+  manual: ['✋ puesta a mano', 'La pusiste tú: ningún proceso automático la cambia.'],
+  autoridad: ['📚 serie editorial', 'La dice la autoridad (Fichero o Crossref) por el ISBN del libro.'],
+  archivo: ['📄 del archivo', 'La trae el propio fichero (metadatos del EPUB, página de créditos, nombre).'],
+  carpeta: ['📁 de carpeta', 'Sale del nombre de la carpeta en que entró. Es la procedencia más débil.'],
+  guia: ['🧭 de la guía', 'La puso la guía de ingesta de la carpeta.'],
+};
 const _AYUDA_ORDEN = `<ul>
     <li><b>🎲 Aleatorio</b> (por defecto al entrar): descubrimiento; mantiene juntos los tomos de una misma obra. «🎲 Rebarajar» = otro orden.</li>
     <li><b>Relevancia / recientes</b>: al buscar por texto ordena por mejor coincidencia; al navegar, por más recientes.</li>
@@ -3338,6 +3346,9 @@ function pintarDoc(r, ctx) {
       ? (r.coleccion_id
           ? `<a class="rowlink" data-colid="${esc(r.coleccion_id)}" data-colnom="${esc(r.coleccion)}">${esc(r.coleccion)}</a>`
           : esc(r.coleccion)) + (d.coleccion_numero ? ` · nº ${esc(d.coleccion_numero)}` : '')
+        // DE DÓNDE sale la pertenencia (coleccion_fuente): manda la manual, luego la editorial (autoridad), y la de
+        // carpeta es la más débil. Así se ve si una colección dudosa la puso el Fichero o un nombre de carpeta.
+        + (FUENTE_COLECCION[d.coleccion_fuente] ? ` <span class="muted" style="font-size:12px" title="${esc(FUENTE_COLECCION[d.coleccion_fuente][1])}">· ${FUENTE_COLECCION[d.coleccion_fuente][0]}</span>` : '')
       : null,
     _formatos: (d.formatos || []).length
       ? d.formatos.map((f) => `<span class="fmt">${esc(f)}</span>`).join('')

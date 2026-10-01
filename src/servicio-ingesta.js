@@ -163,7 +163,7 @@ async function rellenarHuecosPorContexto(doc, ruta, contexto = {}) {
             const actual = String(doc.coleccion_nombre || '').trim();
             const yaEnEsa = doc.coleccion && actual && actual.localeCompare(nueva, 'es', { sensitivity: 'base' }) === 0;
             if (nueva && !yaEnEsa) {
-                const r = await asignarColeccion(db, [doc._id], { nombre: nueva, tipo: doc.tipo_recurso === 'revista' ? 'revista' : 'libro' });
+                const r = await asignarColeccion(db, [doc._id], { nombre: nueva, tipo: doc.tipo_recurso === 'revista' ? 'revista' : 'libro', fuente: 'carpeta' });
                 if (r?.ok && r.n) rellenos.push(doc.coleccion ? `colección → «${nueva}» (movida)` : `colección «${nueva}»`);
             }
         }

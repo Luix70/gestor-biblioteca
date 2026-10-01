@@ -14,7 +14,9 @@ import { claveNumero } from './revistas.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
-export async function asignarColeccion(db, ids = [], { coleccionId = null, nombre = null, tipo = null } = {}) {
+// `fuente` = de dónde sale la pertenencia (coleccion_fuente): 'manual' (por defecto: el panel), 'carpeta' (re-drop en
+// una carpeta-colección), 'archivo', 'guia'… Una pertenencia MANUAL no la toca nadie más (reorganizar-colecciones).
+export async function asignarColeccion(db, ids = [], { coleccionId = null, nombre = null, tipo = null, fuente = 'manual' } = {}) {
     const col = db.collection('colecciones');
     let _id, nom = nombre, t = tipo;
     if (coleccionId) {
@@ -44,7 +46,7 @@ export async function asignarColeccion(db, ids = [], { coleccionId = null, nombr
         const doc = await bib.findOne({ _id: _doc });
         if (!doc) continue;
         if (doc.coleccion && String(doc.coleccion) !== String(_id)) previas.add(String(doc.coleccion));
-        const set = { coleccion: _id, coleccion_nombre: nom, fecha_actualizacion: new Date() };
+        const set = { coleccion: _id, coleccion_nombre: nom, coleccion_fuente: fuente, fecha_actualizacion: new Date() };
         if (t === 'revista') { const cn = claveNumero(doc); if (cn) set.clave_numero = cn; }
         else {
             const propio = parseInt(doc.coleccion_numero, 10);

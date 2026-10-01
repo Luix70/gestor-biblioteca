@@ -38,7 +38,7 @@ export async function buscarDocPorHashAnterior(hash) {
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza', 'orden_estanteria', 'doi', 'revista', 'articulo'];
+    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'coleccion_fuente', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza', 'orden_estanteria', 'doi', 'revista', 'articulo'];
 
     // (1) Rellenar huecos (añadir información donde FALTA nunca borra).
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
@@ -219,7 +219,8 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             // NUMERACIÓN dentro de la colección (regla: el número EDITORIAL —leído del nombre/ISBN/datos—
             // PREVALECE; el asignado automáticamente cede). `coleccion_numero_auto:true` marca el AUTO, para
             // poder distinguirlo (y renumerarlo) después.
-            if (opciones.serieAuto && !docFinal.coleccion_numero) {
+            // (No en una serie EDITORIAL puesta por la autoridad: ahí el número es el del editor o ninguno.)
+            if (opciones.serieAuto && !docFinal.coleccion_numero && docFinal.coleccion_fuente !== 'autoridad') {
                 // Serie automática (drop por carpeta): sin número propio → el siguiente por encima del máximo.
                 const miembros = await coleccionBiblioteca
                     .find({ coleccion: _id }, { projection: { coleccion_numero: 1 } }).toArray();

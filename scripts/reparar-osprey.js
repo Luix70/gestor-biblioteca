@@ -163,7 +163,7 @@ if (argSeries && recolocar.size) {
     for (const [nombreCol, ids] of [...recolocar.entries()].sort((a, b) => b[1].length - a[1].length)) {
         console.log(`  · «${nombreCol}» ← ${ids.length} doc(s)${EJECUTAR ? '' : ' (se movería)'}`);
         if (EJECUTAR) {
-            const r = await asignarColeccion(db, ids.map(String), { nombre: nombreCol, tipo: 'libro' }).catch((e) => ({ ok: false, motivo: e.message }));
+            const r = await asignarColeccion(db, ids.map(String), { nombre: nombreCol, tipo: 'libro', fuente: 'archivo' }).catch((e) => ({ ok: false, motivo: e.message }));
             if (!r.ok) console.warn(`    ⚠ no se pudo recolocar en «${nombreCol}»: ${r.motivo}`);
             else for (const id of ids) await indexarDoc(db, id).catch(() => {});
         }

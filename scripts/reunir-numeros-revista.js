@@ -94,7 +94,7 @@ async function main() {
     }
 
     // 1) Cabecera: el camino de «Agrupar en colección» (clave de número + inventario + borra las que se vacían).
-    const r = await asignarColeccion(db, docs.map((d) => String(d._id)), cab ? { coleccionId: String(cab._id) } : { nombre: CABECERA, tipo: 'revista' });
+    const r = await asignarColeccion(db, docs.map((d) => String(d._id)), cab ? { coleccionId: String(cab._id), fuente: 'guia' } : { nombre: CABECERA, tipo: 'revista', fuente: 'guia' });
     if (!r.ok) { console.error(`\n   ❌ ${r.motivo}\n`); process.exit(1); }
     console.log(`\n   ✔ ${r.n} número(s) en «${r.coleccion.nombre}»; cabeceras vaciadas y borradas: ${r.vaciadas}`);
 

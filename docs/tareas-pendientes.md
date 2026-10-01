@@ -132,7 +132,7 @@ rompen al moverse: el motor los lleva consigo).
       sinopsis, 244.220 con serie e ISSN, 10.804 series, 145.158 revistas, 19,8 M capítulos; `crossref.db` = 3,9 GB) (lee `U:\_DUMPEDCATALOGS\March 2026 Public Data File from Crossref`, ~3 h con 6
       hilos; reanudable: si se corta, se relanza igual). Deja `D:\gestor-biblioteca\Fichero\crossref.db`.
 - [x] Copiar `crossref.db` a `U:\Fichero\crossref.db` (junto a fichero.db). Sin reiniciar: se abre al primer uso. (HECHO 1-oct)
-- [ ] Desplegar la versión que lo consulta (la cascada lo mira antes que la API de Crossref).
+- [X] Desplegar la versión que lo consulta (la cascada lo mira antes que la API de Crossref).
 
 ### 3 sexies. Editoriales: colecciones y sus libros (1-oct)
 - [X] `sudo docker exec -t gestor-biblioteca node scripts/editorial-de-colecciones.js` (en seco) y luego `--ejecutar`.
@@ -151,6 +151,17 @@ rompen al moverse: el motor los lleva consigo).
 - [ ] Mirar los 350 en Búsqueda: selección «Editorial sin confirmar…» + ordenar por «Editorial» → por grupos de
       portadas → «✅ Confirmar editorial» o «✏️ Asignar datos». Después, igual con «Editorial a revisar — su colección
       coincide con el prefijo» y «Editorial a revisar (prefijo ISBN)».
+
+### 3 octies. Reorganizar las colecciones (1-oct; regla: manual > editorial > carpeta)
+- [ ] Desplegar (trae `coleccion_fuente`, la serie editorial en la ingesta y el script).
+- [ ] Copia de la base: `sudo docker exec -it gestor-biblioteca node scripts/copia-base.js`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/reorganizar-colecciones.js --informe logs/reorganizar-colecciones.txt` (en seco, ~2 min)
+      En seco 1-oct (PC): 2.581 nombres al día · 40 series fundidas (90 colecciones) · 3.037 libros sin colección
+      entran en su serie · 2.544 salen de una carpeta a su serie · 353 contradicciones claras · **352 a revisar** ·
+      **86 colecciones de carpeta → selección** (12.873 libros) · 490 de un libro retiradas. Mirar la lista de la
+      fase 4 en el informe: lo que deba seguir siendo colección → `--conservar <id>,…` (p. ej. «En 50 Minutos»).
+- [ ] `… --ejecutar` (mismas opciones).
+- [ ] Revisar la selección «Colección contradicha por la autoridad».
 
 ### 3 ter. Índice de series (para el trabajo de colecciones)
 - [x] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»

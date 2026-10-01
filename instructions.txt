@@ -1270,6 +1270,25 @@ de ficheros clasificado por CDU.
     una editorial real distinta NUNCA la cambia: va a la selección «Editorial a revisar (prefijo ISBN)» (890, la
     mayoría sellos del mismo grupo). Salta los ISBN sospechosos y los compartidos por títulos distintos. La editorial de la COLECCIÓN o la escrita en el título ya no la rescata un
     traductor coincidente («La hija del capitán», colección de Anaya, recibía la edición de Paulinas).
+    COLECCIONES: MANUAL > EDITORIAL > CARPETA (2026-10-01, regla del usuario). Cada pertenencia lleva su procedencia
+    `coleccion_fuente` (manual / autoridad / archivo / carpeta / guia), visible en la ficha junto a la colección.
+      · Una colección puesta a mano (panel: «Asignar a colección») queda 'manual' y nada automático la cambia.
+      · INGESTA: si el ISBN dice que el libro es de una serie editorial (series.db / crossref.db, local, sin IA) y la
+        carpeta no es esa serie, manda la serie (alerta «la carpeta X no es su serie»); sin colección, la serie rellena
+        el hueco. Una serie de la autoridad cuenta solo si es fiable (ISSN o 3+ libros), no es de pura materia
+        («Historia», «Narrativa») y el título de su registro casa con el del libro (un ISBN de relleno compartido
+        arrastraba la serie «Ungifted» a decenas de libros). Utilidad: `src/utils/serie-autoridad.js`.
+      · RETROACTIVO: `scripts/reorganizar-colecciones.js` (seco por defecto; `--ejecutar`, `--fases`, `--conservar
+        <id>,…`, `--informe <txt>`, `--explicar <id|nombre>`). Clasifica cada colección (intocable: revistas,
+        transmedia, audiolibros, árbol fijo o con algún libro manual; DE CARPETA: nombre de artefacto o de materia,
+        nombre de editorial, saco grande de 10+ series ajenas, o un solo libro sin aval; EDITORIAL: el resto) y:
+        1 nombres desfasados al día; 2 funde las colecciones que son la misma serie (admite la editorial delante,
+        no funde una subserie con su serie); 3 libro a libro: sin colección o en una de carpeta → su serie; en otra
+        editorial → solo si la autoridad lo dice claro (Fichero y Crossref coinciden, o el Fichero da su número),
+        si no, selección «Colección contradicha por la autoridad»; 4 las de carpeta que quedan: con 2+ libros →
+        selección «Colección de carpeta · <nombre>»; con 1 → el libro queda libre. Diario `deshacer[]` en cada libro
+        y copia de cada colección retirada en `colecciones_retiradas`. Medido en seco 1-oct: 20.884 libros cambian,
+        680 colecciones se retiran, 86 pasan a selección, 352 libros a revisar.
     REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y
     «Editorial a revisar…»:
       · `scripts/triar-editoriales-sin-confirmar.js` (seco por defecto; `--ejecutar`, `--seleccion "<nombre>"`)

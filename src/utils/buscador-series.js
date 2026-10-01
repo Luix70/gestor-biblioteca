@@ -37,8 +37,8 @@ function abrir() {
     if (!fs.existsSync(ruta)) return null;
     try {
         db = new Database(ruta, { readonly: true, fileMustExist: true });
-        stmts.porIsbn = db.prepare(`SELECT l.clave, l.nombre AS nombre_ficha, l.subserie, l.numero, l.orden, l.editorial, l.fuente,
-            s.nombre, s.n FROM libros l JOIN series s USING (clave) WHERE l.isbn IN (SELECT value FROM json_each(?))`);
+        stmts.porIsbn = db.prepare(`SELECT l.clave, l.nombre AS nombre_ficha, l.subserie, l.numero, l.orden, l.editorial, l.fuente, l.titulo AS titulo_libro,
+            s.nombre, s.n, s.issn FROM libros l JOIN series s USING (clave) WHERE l.isbn IN (SELECT value FROM json_each(?))`);
         stmts.fts = db.prepare(`SELECT s.clave, s.nombre, s.editorial, s.n, s.n_numerados, s.max_orden, s.desde, s.hasta
             FROM series_fts f JOIN series s ON s.rowid = f.rowid WHERE series_fts MATCH ? ORDER BY bm25(series_fts), s.n DESC LIMIT ?`);
         stmts.porClave = db.prepare('SELECT * FROM series WHERE clave = ?');
