@@ -133,6 +133,16 @@ rompen al moverse: el motor los lleva consigo).
 - [ ] Copiar `crossref.db` a `U:\Fichero\crossref.db` (junto a fichero.db). Sin reiniciar: se abre al primer uso.
 - [ ] Desplegar la versión que lo consulta (la cascada lo mira antes que la API de Crossref).
 
+### 3 sexies. Editoriales: colecciones y sus libros (1-oct)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/editorial-de-colecciones.js` (en seco) y luego `--ejecutar`.
+      En seco (1-oct): **~80 libros** cuyo ISBN y cuya colección dicen otra editorial (16 «RBA Libros → Gredos» en la
+      Biblioteca Clásica Gredos, variantes de nombre, «Rama Publishing → Valdemar»…) y **31 colecciones** con la
+      editorial mal apuntada («Biblioteca Clásica Gredos»: RBA → Gredos; «Valdemar: El Club Diógenes»: Gredos →
+      Valdemar; «Solaris Ficción»: Ediciones B → La Factoría; 14 apuntando a una editorial borrada). Un libro mal
+      asignado a una colección no se toca (su ISBN es de otro registrante). `--excluir <id>,…` para dejar alguna.
+- [ ] `editoriales-por-prefijo.js --ejecutar` otra vez: rehace (sin duplicar) «Editorial a revisar (prefijo ISBN)» y
+      crea «Editorial a revisar — su colección coincide con el prefijo» (151, los más sospechosos: revisar primero).
+
 ### 3 ter. Índice de series (para el trabajo de colecciones)
 - [x] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»
   cuentan ahora en cada una). (Copiado a `U:\Fichero` el 30-sep.)

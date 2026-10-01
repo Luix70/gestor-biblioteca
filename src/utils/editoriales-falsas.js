@@ -23,6 +23,11 @@ export const EDITORIALES_NO_VALIDAS = [
     /good\s*press/i,
     /e-?artnow/i,
     /musaicum/i,
+    // Grupo francés que digitaliza clásicos (Zola, Simenon…), como ePubLibre en español: no es la editorial (1-oct:
+    // salía como «editorial» de «Los Rougon-Macquart», «Maigret» y «Le Livre de poche»).
+    /alexandriz/i,
+    /\bebsco\b/i,   // agregador de ebooks para bibliotecas: lo da como «editorial» de lo que distribuye (1-oct)
+    /bibebook/i,   // ídem (bibliotecas francesas gratuitas: «Collection Folio» y «Le Livre de poche» salían de Bibebook)
     // Plataformas de AUTOPUBLICACIÓN (Amazon KDP/CreateSpace, Lulu…): no son casas editoriales — las APIs las
     // devuelven como «editorial» de reediciones baratas de clásicos. Mismo tratamiento que los repackagers.
     /createspace/i,
