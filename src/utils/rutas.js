@@ -72,10 +72,15 @@ export function rutaCatalogo({ cdu, tipo_recurso, isbn, issn, id, año_edicion, 
         // MISMA prioridad que `revistas.js · claveNumero`, que es quien define la identidad del número:
         // AAAA-MM → n<nº> → AAAA. Ojo con el orden: preferir el AÑO SUELTO al número metía los 52 ejemplares
         // de 1977 en una sola carpeta, cuando cada uno tiene su nº. El año solo manda si trae mes.
+        // Sin fecha ni número: «sin-fecha», NUNCA la carpeta de la cabecera a secas. Antes el número sin fecha se
+        // quedaba con «revistas/<issn>», y los números fechados que llegaban después se guardaban DENTRO de ella
+        // («revistas/<issn>/2015-02»): 130 números vivían en la carpeta de otro, y al moverse la de fuera por su
+        // CDU se llevaba a los de dentro (incidente del 1-oct, «Historia de Iberia Vieja»). Varios sin fecha
+        // conviven con el discriminador, como cualquier otra colisión.
         const numeroSeg = (año_edicion && mes_publicacion)
             ? `${año_edicion}-${String(mes_publicacion).padStart(2, '0')}`
-            : (clave_numero || (año_edicion ? String(año_edicion) : null));
-        if (numeroSeg) segmentos.push(sanitizarSegmento(String(numeroSeg)));
+            : (clave_numero || (año_edicion ? String(año_edicion) : 'sin-fecha'));
+        segmentos.push(sanitizarSegmento(String(numeroSeg)));
         // discriminador: dos números que caerían en la MISMA carpeta (mismo año sin mes) → cada
         // documento conserva SU carpeta (1 doc ↔ 1 carpeta), sin pisar ficheros ni sidecars.
         if (discriminador) segmentos[segmentos.length - 1] = sanitizarSegmento(`${segmentos[segmentos.length - 1]}-${discriminador}`);
@@ -86,7 +91,10 @@ export function rutaCatalogo({ cdu, tipo_recurso, isbn, issn, id, año_edicion, 
         };
     }
 
-    const baseLeaf = isbn || issn || String(id) || 'sin_id';
+    // El ISSN de un LIBRO es el de su SERIE (Springer «Graduate Texts in Physics», 1868-4513): lo comparten todos los
+    // libros de la serie, así que no puede nombrar la carpeta de uno (varios acababan en «libros/1868-4513», o
+    // dentro de ella). Sin ISBN, la carpeta es la de su _id.
+    const baseLeaf = isbn || (tipo_recurso === 'libro' ? null : issn) || String(id) || 'sin_id';
     const hojaSeg = sanitizarSegmento(discriminador ? `${baseLeaf}-${discriminador}` : baseLeaf);
     const segmentos = [...cduSegs, tipoSeg, hojaSeg];
     return {

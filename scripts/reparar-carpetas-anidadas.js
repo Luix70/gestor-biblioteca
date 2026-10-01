@@ -17,6 +17,8 @@
  *
  *   sudo docker exec -t gestor-biblioteca node scripts/reparar-carpetas-anidadas.js              (en seco)
  *   sudo docker exec -t gestor-biblioteca node scripts/reparar-carpetas-anidadas.js --ejecutar
+ *   … --separar     además, el documento de FUERA se lleva sus ficheros a una carpeta propia (los de dentro no se
+ *                   tocan), y la carpeta queda como simple contenedor: se acaba el anidamiento
  *   node scripts/reparar-carpetas-anidadas.js --raiz "U:/CDU"      (desde el PC, mirando el árbol del NAS)
  */
 import 'dotenv/config';
@@ -113,7 +115,68 @@ if (EJECUTAR && reparables.length) {
     }
     pe.fin();
 }
-if (EJECUTAR && anidados.length) {
+// ─── --separar: que el documento de FUERA deje de ser una carpeta-contenedor ────────────────────────────────
+// La causa (rutas.js, ya corregida): un número de revista SIN fecha se quedaba con la carpeta de la cabecera
+// («revistas/<issn>») y los fechados se guardaban dentro; y un LIBRO sin ISBN tomaba como carpeta el ISSN de su
+// serie («libros/1868-4513»), que comparten todos los de la serie. Se arregla moviendo los FICHEROS del de fuera
+// (no las subcarpetas, que son de los otros) a una carpeta propia: «<cabecera>/sin-fecha» (o su fecha/número) para
+// una revista; «libros/<isbn o _id>» para un libro. Los de dentro no se tocan: ya están en su sitio.
+const SEPARAR = args.includes('--separar');
+const padres = new Map();   // ruta del de fuera → sus documentos (puede haber varios con la misma carpeta)
+for (const { padre } of anidados) {
+    const rel = relDe(padre);
+    if (!padres.has(rel)) padres.set(rel, docs.filter((d) => relDe(d.ruta_base) === rel));
+}
+let separados = 0;
+if (SEPARAR) {
+    const ps = progreso(padres.size, 'Separando carpetas-contenedor');
+    for (const [rel, duenos] of padres) {
+        ps.paso(rel);
+        const principal = await col.findOne({ _id: duenos[0]._id });
+        if (!principal || (principal.ruta_fija && principal.coleccion) || principal.naturaleza === 'transmedia') continue;
+        const abs = path.join(RAIZ, ...rel.split('/'));
+        let entradas;
+        try { entradas = fs.readdirSync(abs, { withFileTypes: true }); } catch { continue; }
+        const ficheros = entradas.filter((e) => e.isFile()).map((e) => e.name);
+        if (!ficheros.length) { ps.nota(`⚠️  ${rel}: no tiene ficheros propios (solo subcarpetas): se deja`); continue; }
+        // Carpeta propia: la del número (revista) o la del libro, como la daría hoy rutas.js.
+        const segs = rel.split('/');
+        const hoja = principal.tipo_recurso === 'revista'
+            ? [...segs, (principal.año_edicion && principal.mes_publicacion)
+                ? `${principal.año_edicion}-${String(principal.mes_publicacion).padStart(2, '0')}`
+                : (principal.clave_numero || (principal.numero_issue ? `n${principal.numero_issue}` : null)
+                    || (principal.año_edicion ? String(principal.año_edicion) : 'sin-fecha'))]
+            : [...segs.slice(0, -1), String(principal.isbn || principal._id)];
+        let destino = hoja.map((s) => String(s).replace(/[<>:"\\|?*]/g, '_')).join('/');
+        if (fs.existsSync(path.join(RAIZ, ...destino.split('/')))) destino = `${destino}-${String(principal._id).slice(-6)}`;
+        separados++;
+        ps.nota(`📦 ${rel}  →  ${destino}  (${ficheros.length} fichero(s) de ${duenos.length} documento(s))`);
+        if (!EJECUTAR) continue;
+        const absDestino = path.join(RAIZ, ...destino.split('/'));
+        fs.mkdirSync(absDestino, { recursive: true });
+        for (const f of ficheros) fs.renameSync(path.join(abs, f), path.join(absDestino, f));
+        const viejaWeb = `/recursos/${rel}/`, nuevaWeb = `/recursos/${destino}/`;
+        const remap = (r) => (r && r.startsWith(viejaWeb) ? nuevaWeb + r.slice(viejaWeb.length) : r);
+        for (const dueno of duenos) {
+            const d = await col.findOne({ _id: dueno._id });
+            const set = { ruta_base: `/recursos/${destino}`, fecha_actualizacion: new Date() };
+            if (d.portada) set.portada = remap(d.portada);
+            if (d.imagenes?.length) set.imagenes = d.imagenes.map((im) => ({ ...im, ruta: remap(im.ruta) }));
+            await col.updateOne({ _id: d._id }, {
+                $set: set,
+                $push: {
+                    deshacer: { fecha: new Date(), origen: 'reparar-carpetas-anidadas', antes: { ruta_base: d.ruta_base, portada: d.portada ?? null, imagenes: d.imagenes ?? null } },
+                    alertas_agente: `Carpeta propia: vivía en «${rel}», que hacía de contenedor de otros documentos; sus ficheros pasan a «${destino}».`,
+                },
+            });
+            await regenerarSidecarsDoc(db, await col.findOne({ _id: d._id }), absDestino).catch(() => {});
+            await indexarDoc(db, d._id).catch(() => {});
+        }
+    }
+    ps.fin();
+}
+
+if (EJECUTAR && anidados.length && !SEPARAR) {
     await crearSeleccion(db, {
         nombre: `Carpeta dentro de la de otro documento ${new Date().toISOString().slice(0, 10)}`,
         descripcion: 'Documentos cuya carpeta cuelga de la carpeta de otro documento. Funcionan, pero cada uno debería tener la suya (1 documento ↔ 1 carpeta).',
@@ -126,5 +189,6 @@ console.log(`  documentos revisados                         : ${docs.length}`);
 console.log(`  carpeta movida dentro de otra (se reencuentra): ${reparables.length}${EJECUTAR ? ' (corregidos)' : ''}`);
 console.log(`  carpeta que no está en ningún sitio conocido  : ${perdidos.length}`);
 console.log(`  carpetas ANIDADAS que quedan (riesgo)         : ${anidados.length}${EJECUTAR && anidados.length ? ' → selección «Carpeta dentro de la de otro documento»' : ''}`);
+console.log(`  carpetas-contenedor${SEPARAR ? (EJECUTAR ? ' separadas' : ' que se separarían') : ' (--separar para darles carpeta propia)'} : ${SEPARAR ? separados : padres.size}`);
 if (!EJECUTAR) console.log('\n▶ Repite con --ejecutar para corregir las rutas (solo cambia la base: los ficheros ya están en su sitio nuevo).');
 process.exit(0);

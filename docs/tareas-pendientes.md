@@ -105,6 +105,7 @@ toman el del nombre del fichero (7 sin un nombre aprovechable) · **15** · 6 to
 ### 3 bis-3. Carpetas movidas dentro de la de otro documento (1-oct)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-carpetas-anidadas.js`   (en seco, ~5 min)
 - [ ] Lo mismo con `--ejecutar`
+- [ ] Y para acabar con los anidados: `… --separar` (en seco) y `… --separar --ejecutar`
 
 En seco desde el PC: de 65.987 documentos, **1** apunta a una carpeta que se movió dentro de la de otro (el nº de
 febrero de 2015 de «Historia de Iberia Vieja»; está en `9/94/94(460)/revistas/1699-7913-b8999d/2015-02`) y se

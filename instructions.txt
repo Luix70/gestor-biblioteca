@@ -1408,10 +1408,16 @@ de ficheros clasificado por CDU.
     es la de otro número). Mover la carpeta de fuera se lleva la de dentro, pero solo se actualizaban los documentos
     con la MISMA carpeta: los anidados quedaban apuntando a una ruta que ya no existe («Historia de Iberia Vieja»,
     feb. 2015). Ahora `reubicarPorCdu` actualiza también a los que cuelgan de ella (ruta, portada, imágenes, alerta).
+    POR QUÉ HABÍA ANIDADOS (135, medido): (1) un número de revista SIN fecha ni número se quedaba con la carpeta de la
+    CABECERA («revistas/<issn>») y los fechados se guardaban dentro (130); (2) un LIBRO sin ISBN tomaba como carpeta
+    el ISSN de su SERIE («libros/1868-4513»), que comparten todos los de la serie (3; venían de cuando se catalogaban
+    como revista). `rutas.js·rutaCatalogo` ya no lo hace: el número sin fecha va a «<cabecera>/sin-fecha» y el libro
+    nunca toma el ISSN como carpeta. El anidado de una colección transmedia (la guía y sus miembros) es a propósito.
     Reparación: `scripts/reparar-carpetas-anidadas.js` (en seco; `--ejecutar`; `--raiz "U:/CDU"` desde el PC): busca
     los documentos cuya carpeta no existe, sigue el diario de movimientos del árbol (`.movimientos-copia.log`) hasta su
     sitio actual, lo comprueba en disco y corrige la ruta; lista los que no aparecen y deja en una selección las
-    carpetas que siguen anidadas.
+    carpetas que siguen anidadas. Con `--separar`, el documento de FUERA se lleva sus ficheros (no las subcarpetas) a
+    una carpeta propia y la suya queda como simple contenedor: se acaba el anidamiento.
     REPARACIONES (fases nuevas de reparar-tras-reidentificacion; orden 1, 2, 3, 7, 10, 8, 9, 14, 13, 15, 12, 4, 5, 11, 6):
       2 también reimpresores bajo demanda; 14 deshace las candidatas/probable/datos de obra buscados con un título que
       no es un título; 13 títulos-artefacto SIN ISBN → el del nombre del fichero; 15 tomos que perdieron su número. Lo
