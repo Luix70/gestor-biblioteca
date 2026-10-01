@@ -24,13 +24,20 @@
  *   node scripts/etl-crossref.js --dir "U:/_DUMPEDCATALOGS/March 2026 Public Data File from Crossref" --hilos 6
  *   … --limite 200     solo los primeros N ficheros (para probar)
  *   … --desde-cero     descarta lo hecho y empieza de nuevo
+ *   … --capitulos      guarda también el ÍNDICE de capítulos de los libros (título, autores, DOI): más GB y tiempo
  *
  * Tablas:
  *   libros(id, isbns, titulo, subtitulo, titulo_original, autores, editores, editorial, lugar, anio, edicion, serie,
  *          serie_issn, volumen, doi, idioma, sinopsis, tipo, fuente)   fuente: 'libro' (propio) | 'capitulo' (deducido)
  *
- * Lo que se DEJA FUERA: todo lo que no es un libro (artículos, actas, datasets…), los capítulos como tales (su
- * título y autores), las bibliografías (`reference`), licencias, enlaces, financiadores y recuentos de citas.
+ *   isbn_libro(isbn → libro, tipo)                   tipo del ISBN: 'print' (papel) | 'electronic' (ebook)
+ *   revistas(issn, titulo, editorial, n)             las REVISTAS (de los artículos): nombre de cabecera por ISSN
+ *   capitulos(libro, orden, titulo, autores, doi)    con --capitulos: el ÍNDICE de los libros colectivos
+ *
+ * El año: el de la edición IMPRESA si lo hay (en un 36 % de los libros difiere del de la edición en línea, que suele
+ * salir antes); el de la en línea se guarda aparte.
+ * Lo que se DEJA FUERA: los artículos (salvo el nombre de su revista), actas, datasets…; las bibliografías
+ * (`reference`), licencias, enlaces, financiadores, recuentos de citas y relaciones entre registros (casi no las hay).
  *   isbn_libro(isbn → libro)                         ISBN-13 sin guiones; uno por cada ISBN del libro
  *   series(issn, nombre, n)                          al final: las series por ISSN y cuántos libros tienen
  */
@@ -59,7 +66,10 @@ function isbn13(valor) {
     return base + ((10 - (suma % 10)) % 10);
 }
 const persona = (p) => [p.given, p.family].filter(Boolean).join(' ').trim() || p.name || null;
-const anioDe = (w) => (w.published || w['published-print'] || w['published-online'] || w.issued)?.['date-parts']?.[0]?.[0] || null;
+const anioDe = (w) => (w['published-print'] || w.published || w['published-online'] || w.issued)?.['date-parts']?.[0]?.[0] || null;
+const anioOnline = (w) => w['published-online']?.['date-parts']?.[0]?.[0] || null;
+/** Los ISBN con su tipo (papel / ebook), en forma de 13. */
+const isbnsConTipo = (w) => (w['isbn-type'] || []).map((x) => ({ isbn: isbn13(x.value), tipo: x.type })).filter((x) => x.isbn);
 const issnDe = (w) => (w['issn-type'] || []).find((x) => x.type === 'print')?.value || (w.ISSN || [])[0] || null;
 const corta = (s, n) => (s ? String(s).slice(0, n) : null);
 
@@ -83,6 +93,8 @@ function filaDe(w) {
             doi: corta(w.DOI, 200), idioma: w.language ? String(w.language).slice(0, 2) : null,
             titulo_original: corta((w['original-title'] || [])[0], 400),
             edicion: corta(w['edition-number'], 20),
+            anio_online: anioOnline(w),
+            tipos: isbnsConTipo(w),
             // El resumen viene en JATS (XML): se le quitan las etiquetas.
             sinopsis: w.abstract ? corta(String(w.abstract).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(), 4000) : null,
         };
@@ -98,16 +110,46 @@ function filaDe(w) {
             editores: corta((w.editor || []).map(persona).filter(Boolean).join('; '), 600),
             editorial: corta(w.publisher, 200), lugar: corta(w['publisher-location'], 120), anio: anioDe(w),
             serie: corta(serie, 300), serie_issn: serie ? issnDe(w) : null, volumen: null, doi: null, idioma: w.language ? String(w.language).slice(0, 2) : null,
-            titulo_original: null, edicion: null, sinopsis: null,
+            titulo_original: null, edicion: null, sinopsis: null, anio_online: anioOnline(w), tipos: isbnsConTipo(w),
+            // El capítulo mismo, para el ÍNDICE del libro (solo se guarda con --capitulos).
+            capitulo: w.type === 'book-chapter' && (w.title || [])[0] ? {
+                titulo: corta(w.title[0], 400),
+                autores: corta((w.author || []).map(persona).filter(Boolean).join('; '), 400),
+                doi: corta(w.DOI, 200),
+                orden: Number(String(w.DOI || '').match(/_(\d+)$/)?.[1]) || null,   // Springer: …_27 = capítulo 27
+            } : null,
         };
     }
     return null;
 }
 
 /** Lee un fichero del volcado y devuelve las filas de libro, una por libro (los capítulos se repiten mucho). */
-function procesarFichero(ruta) {
+// Nombre de la REVISTA de un artículo, sin parsear el JSON entero (son el 70 % del volcado): tres expresiones.
+// (El volcado lleva un espacio tras cada «:» y cada «[»: `"ISSN": ["0740-0020"]`.)
+const RE_TIPO_ARTICULO = /"type":\s*"journal-article"/;
+const RE_ISSN = /"ISSN":\s*\[\s*"([0-9]{4}-[0-9]{3}[0-9X])"/;
+const RE_CONTENEDOR = /"container-title":\s*\[\s*"((?:[^"\\]|\\.)*)"/;
+const RE_EDITORIAL = /"publisher":\s*"((?:[^"\\]|\\.)*)"/;
+const desescapar = (s) => { try { return JSON.parse(`"${s}"`); } catch { return s; } };
+
+function procesarFichero(ruta, { capitulos = false } = {}) {
     const texto = zlib.gunzipSync(fs.readFileSync(ruta)).toString('utf8');
     const porClave = new Map();
+    const indices = [];           // capítulos: { isbn del libro, …capítulo }
+    const revistas = new Map();   // issn → { titulo, editorial, n }
+    // Revistas: una pasada línea a línea solo con expresiones regulares (barato).
+    for (let i = 0, fin; i < texto.length; i = fin + 1) {
+        fin = texto.indexOf('\n', i);
+        if (fin < 0) fin = texto.length;
+        const linea = texto.slice(i, fin);
+        if (!RE_TIPO_ARTICULO.test(linea)) continue;
+        const issn = linea.match(RE_ISSN)?.[1];
+        const titulo = linea.match(RE_CONTENEDOR)?.[1];
+        if (!issn || !titulo) continue;
+        const r = revistas.get(issn);
+        if (r) r.n++;
+        else revistas.set(issn, { titulo: desescapar(titulo).slice(0, 300), editorial: desescapar(linea.match(RE_EDITORIAL)?.[1] || '').slice(0, 200) || null, n: 1 });
+    }
     // Solo se parsean las líneas con ISBN: un artículo de revista no lo lleva (el 90 % se salta sin leerlo). Se
     // salta de una aparición de «"ISBN"» a la siguiente, no línea a línea: buscar desde cada línea hasta la próxima
     // aparición recorría el texto una y otra vez (medido: 5 s por fichero en vez de 0,5).
@@ -119,19 +161,21 @@ function procesarFichero(ruta) {
         siguienteIsbn = texto.indexOf('"ISBN"', fin);
         try {
             const fila = filaDe(JSON.parse(texto.slice(inicio, fin)));
+            if (fila?.capitulo && capitulos) indices.push({ isbn: fila.isbns[0], ...fila.capitulo });
             if (fila) {
+                delete fila.capitulo;
                 const clave = fila.isbns[0];
                 const previa = porClave.get(clave);
                 if (!previa || (previa.fuente === 'capitulo' && fila.fuente === 'libro')) porClave.set(clave, fila);
             }
         } catch { /* línea corrupta: se ignora */ }
     }
-    return [...porClave.values()];
+    return { filas: [...porClave.values()], indices, revistas: [...revistas].map(([issn, r]) => ({ issn, ...r })) };
 }
 
 if (!isMainThread) {
     parentPort.on('message', (tarea) => {
-        try { parentPort.postMessage({ numero: tarea.numero, filas: procesarFichero(tarea.ruta) }); }
+        try { parentPort.postMessage({ numero: tarea.numero, ...procesarFichero(tarea.ruta, { capitulos: tarea.capitulos }) }); }
         catch (e) { parentPort.postMessage({ numero: tarea.numero, error: e.message }); }
     });
 } else {
@@ -147,6 +191,7 @@ async function principal() {
     const DIR = arg('--dir') || 'U:/_DUMPEDCATALOGS/March 2026 Public Data File from Crossref';
     const HILOS = Math.max(1, Number(arg('--hilos')) || Math.min(6, os.cpus().length - 1));
     const LIMITE = arg('--limite') ? Number(arg('--limite')) : null;
+    const CAPITULOS = args.includes('--capitulos');   // guardar también el índice de capítulos (más GB, más tiempo)
     const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const rutaFichero = (() => {
         const v = process.env.PATH_FICHERO;
@@ -168,36 +213,48 @@ async function principal() {
         CREATE TABLE IF NOT EXISTS libros (
             id INTEGER PRIMARY KEY, isbns TEXT, titulo TEXT, subtitulo TEXT, titulo_original TEXT, autores TEXT, editores TEXT,
             editorial TEXT, lugar TEXT, anio INTEGER, edicion TEXT, serie TEXT, serie_issn TEXT, volumen TEXT, doi TEXT,
-            idioma TEXT, sinopsis TEXT, tipo TEXT, fuente TEXT
+            idioma TEXT, sinopsis TEXT, anio_online INTEGER, tipo TEXT, fuente TEXT
         );
-        CREATE TABLE IF NOT EXISTS isbn_libro (isbn TEXT PRIMARY KEY, libro INTEGER) WITHOUT ROWID;
+        CREATE TABLE IF NOT EXISTS isbn_libro (isbn TEXT PRIMARY KEY, libro INTEGER, tipo TEXT) WITHOUT ROWID;
+        CREATE TABLE IF NOT EXISTS revistas (issn TEXT PRIMARY KEY, titulo TEXT, editorial TEXT, n INTEGER) WITHOUT ROWID;
+        CREATE TABLE IF NOT EXISTS capitulos (libro_isbn TEXT, orden INTEGER, titulo TEXT, autores TEXT, doi TEXT);
     `);
     const buscar = db.prepare('SELECT l.id, l.fuente, l.serie FROM isbn_libro i JOIN libros l ON l.id = i.libro WHERE i.isbn = ?');
     const insertar = db.prepare(`INSERT INTO libros (isbns, titulo, subtitulo, titulo_original, autores, editores, editorial,
-        lugar, anio, edicion, serie, serie_issn, volumen, doi, idioma, sinopsis, tipo, fuente) VALUES (@isbns, @titulo,
-        @subtitulo, @titulo_original, @autores, @editores, @editorial, @lugar, @anio, @edicion, @serie, @serie_issn,
-        @volumen, @doi, @idioma, @sinopsis, @tipo, @fuente)`);
+        lugar, anio, edicion, serie, serie_issn, volumen, doi, idioma, sinopsis, anio_online, tipo, fuente) VALUES (@isbns,
+        @titulo, @subtitulo, @titulo_original, @autores, @editores, @editorial, @lugar, @anio, @edicion, @serie, @serie_issn,
+        @volumen, @doi, @idioma, @sinopsis, @anio_online, @tipo, @fuente)`);
     const sustituir = db.prepare(`UPDATE libros SET isbns=@isbns, titulo=@titulo, subtitulo=@subtitulo,
         titulo_original=@titulo_original, autores=@autores, editores=@editores, editorial=@editorial, lugar=@lugar,
         anio=@anio, edicion=@edicion, serie=COALESCE(@serie, serie), serie_issn=COALESCE(@serie_issn, serie_issn),
-        volumen=@volumen, doi=@doi, idioma=@idioma, sinopsis=@sinopsis, tipo=@tipo, fuente=@fuente WHERE id=@id`);
+        volumen=@volumen, doi=@doi, idioma=@idioma, sinopsis=@sinopsis, anio_online=@anio_online, tipo=@tipo,
+        fuente=@fuente WHERE id=@id`);
     const completarSerie = db.prepare('UPDATE libros SET serie=@serie, serie_issn=@serie_issn WHERE id=@id AND serie IS NULL');
-    const enlazar = db.prepare('INSERT OR IGNORE INTO isbn_libro (isbn, libro) VALUES (?, ?)');
+    const enlazar = db.prepare('INSERT OR IGNORE INTO isbn_libro (isbn, libro, tipo) VALUES (?, ?, ?)');
+    const ponerTipo = db.prepare('UPDATE isbn_libro SET tipo = ? WHERE isbn = ? AND tipo IS NULL');
+    const sumarRevista = db.prepare(`INSERT INTO revistas (issn, titulo, editorial, n) VALUES (@issn, @titulo, @editorial, @n)
+        ON CONFLICT(issn) DO UPDATE SET n = n + excluded.n`);
+    const insertarCapitulo = db.prepare('INSERT INTO capitulos (libro_isbn, orden, titulo, autores, doi) VALUES (@isbn, @orden, @titulo, @autores, @doi)');
     const marcar = db.prepare('INSERT OR IGNORE INTO hechos (fichero) VALUES (?)');
 
     // Escribir lo de un fichero del volcado: una transacción, con el fichero marcado como hecho dentro.
-    const guardar = db.transaction((numero, filas) => {
+    const guardar = db.transaction((numero, filas, indices, revistas) => {
+        for (const r of revistas) sumarRevista.run(r);
+        for (const c of indices) insertarCapitulo.run(c);
         for (const f of filas) {
-            const fila = { ...f, isbns: f.isbns.join(' ') };
+            const tipoDe = (isbn) => (f.tipos || []).find((t) => t.isbn === isbn)?.tipo || null;
+            const { tipos, ...resto } = f;
+            const fila = { ...resto, isbns: f.isbns.join(' ') };
             const existente = f.isbns.map((i) => buscar.get(i)).find(Boolean);
             if (!existente) {
                 const id = insertar.run(fila).lastInsertRowid;
-                for (const i of f.isbns) enlazar.run(i, id);
+                for (const i of f.isbns) enlazar.run(i, id, tipoDe(i));
             } else if (existente.fuente === 'capitulo' && f.fuente === 'libro') {
                 sustituir.run({ ...fila, id: existente.id });   // el registro del propio libro manda sobre lo deducido
-                for (const i of f.isbns) enlazar.run(i, existente.id);
-            } else if (!existente.serie && f.serie) {
-                completarSerie.run({ serie: f.serie, serie_issn: f.serie_issn, id: existente.id });
+                for (const i of f.isbns) { enlazar.run(i, existente.id, tipoDe(i)); ponerTipo.run(tipoDe(i), i); }
+            } else {
+                if (!existente.serie && f.serie) completarSerie.run({ serie: f.serie, serie_issn: f.serie_issn, id: existente.id });
+                for (const i of f.isbns) { if (tipoDe(i)) ponerTipo.run(tipoDe(i), i); }
             }
         }
         marcar.run(numero);
@@ -224,13 +281,13 @@ async function principal() {
             }
             const numero = cola[siguiente++];
             enMarcha++;
-            w.postMessage({ numero, ruta: path.join(DIR, `${numero}.jsonl.gz`) });
+            w.postMessage({ numero, ruta: path.join(DIR, `${numero}.jsonl.gz`), capitulos: CAPITULOS });
         };
         for (const w of hilos) {
             w.on('message', (m) => {
                 enMarcha--;
                 if (m.error) p.nota(`⚠️  ${m.numero}.jsonl.gz: ${m.error} (se reintentará al relanzar)`);
-                else { guardar(m.numero, m.filas); libros += m.filas.length; }
+                else { guardar(m.numero, m.filas, m.indices || [], m.revistas || []); libros += m.filas.length; }
                 p.paso(`${libros.toLocaleString('es')} libros`);
                 darTrabajo(w);
             });
@@ -251,6 +308,7 @@ async function principal() {
     console.log('\nÍndices y series…');
     db.exec(`
         CREATE INDEX IF NOT EXISTS libros_serie_issn ON libros(serie_issn);
+        CREATE INDEX IF NOT EXISTS capitulos_libro ON capitulos(libro_isbn, orden);
         DROP TABLE IF EXISTS series;
         CREATE TABLE series AS
             SELECT serie_issn AS issn, serie AS nombre, count(*) AS n FROM libros
