@@ -14,6 +14,12 @@
  *   · una VARIANTE del mismo nombre («Springer International Publishing» / «Springer») no se toca;
  *   · se CORRIGE (automático) solo si la actual está vacía, es un maquetador/distribuidor o es basura («SE», «ge»,
  *     «Unknown», «Other», «n/a»);
+ *   · si además su COLECCIÓN dice lo mismo que el prefijo y no la que tiene el libro (1-oct: «En busca del gato de
+ *     Schrödinger», ISBN 978-84-345 de Salvat, «Biblioteca Científica Salvat», tenía «Siglo XXI», leída por la visión
+ *     en la cubierta), va a una selección APARTE, «Editorial a revisar — su colección coincide con el prefijo»: es
+ *     la de más probabilidad de error y se revisa primero. Tampoco se cambia sola: en el ensayo, esa regla habría
+ *     convertido sellos legítimos en su matriz (Routledge → Taylor & Francis, Clarendon → Oxford, A Bradford Book →
+ *     MIT, Booket → Tusquets).
  *   · una editorial REAL distinta NUNCA se cambia sola: puede ser un SELLO del mismo grupo (Routledge/Taylor &
  *     Francis, Clarendon/Oxford, A Bradford Book/MIT, Garland/T&F — medido en el primer ensayo, 30-sep) o un error
  *     («Rama Publishing Company» o «Sexto Piso» en un Valdemar). Va a la selección «Editorial a revisar (prefijo
@@ -53,7 +59,7 @@ for await (const e of db.collection('editoriales').find({}, { projection: { nomb
 const filtro = { tipo_recurso: 'libro', isbn: { $exists: true, $nin: [null, ''] } };
 const libros = [];
 const p1 = progreso(await col.countDocuments(filtro), 'Leyendo el catálogo');
-for await (const d of col.find(filtro, { projection: { isbn: 1, editorial: 1, titulo: 1, isbn_sospechoso: 1 } })) {
+for await (const d of col.find(filtro, { projection: { isbn: 1, editorial: 1, titulo: 1, isbn_sospechoso: 1, coleccion: 1, editorial_confirmada: 1 } })) {
     p1.paso();
     const prefijo = prefijoEditorialISBN(d.isbn);
     if (prefijo) libros.push({ ...d, prefijo, nombreEd: d.editorial ? nombrePorId.get(String(d.editorial)) || null : null });
@@ -91,9 +97,27 @@ console.log(`\n${libros.length} libros con ISBN · ${porPrefijo.size} prefijos �
 const palabras = (clave) => new Set(clave.split(' ').filter((w) => w.length >= 4 && !['press', 'publishing', 'publishers', 'books', 'group', 'university', 'libros'].includes(w)));
 const variante = (a, b) => { const B = palabras(b); return [...palabras(a)].some((w) => B.has(w)); };
 
+// Las editoriales de cada COLECCIÓN: la suya y las aprendidas de sus libros.
+const editorialesDeColeccion = new Map();
+for await (const c of db.collection('colecciones').find({}, { projection: { editorial: 1, editoriales_indicios: 1 } })) {
+    const nombres = [c.editorial ? nombrePorId.get(String(c.editorial)) : null, ...(c.editoriales_indicios || []).map((i) => i.nombre)]
+        .filter(Boolean).map(claveEditorial).filter(Boolean);
+    if (nombres.length) editorialesDeColeccion.set(String(c._id), nombres);
+}
+// La colección CONFIRMA la del prefijo y DESMIENTE la actual: entre sus editoriales está la del prefijo y NO la que
+// tiene el libro. (Si la actual también es de la colección —Routledge en «Routledge Library Editions», Clarendon en
+// una serie de Oxford—, es un sello del grupo y no se toca: medido en el primer ensayo del 1-oct.)
+const coleccionLoConfirma = (l, dom) => {
+    const deLaColeccion = editorialesDeColeccion.get(String(l.coleccion)) || [];
+    const actual = claveEditorial(l.nombreEd || '');
+    const esDeLaColeccion = (clave) => deLaColeccion.some((c) => c === clave || variante(c, clave));
+    return esDeLaColeccion(dom.clave) && !esDeLaColeccion(actual);
+};
+
 // ─── 2. Los que no cuadran ───────────────────────────────────────────────────────────────────────────────────
 const cambios = [];
 const aRevisar = [];
+const aRevisarColeccion = [];   // otra editorial real, pero su colección dice lo mismo que el prefijo: más sospechosa
 for (const l of libros) {
     if (l.isbn_sospechoso || isbnFalso.has(l.isbn)) continue;
     const dom = dominante.get(l.prefijo);
@@ -105,8 +129,10 @@ for (const l of libros) {
         if (clave === dom.clave) continue;                       // ya es esa (quizá con otra grafía)
         if ((dom.grupos[clave] || 0) >= 3) continue;             // plausible: sello o coedición con 3+ libros
         if (variante(clave, dom.clave)) continue;                // «Springer International» ~ «Springer»
+        if (l.editorial_confirmada) continue;                    // la confirmaste tú en la ficha
         const ruido = esNombreRuido(l.nombreEd);
-        if (!ruido) { aRevisar.push({ l, dom }); continue; }   // otra editorial real (¿sello? ¿error?): tú decides
+        // Otra editorial real (¿sello? ¿error?): tú decides… salvo que la colección del libro diga lo mismo que el prefijo.
+        if (!ruido) { (coleccionLoConfirma(l, dom) ? aRevisarColeccion : aRevisar).push({ l, dom }); continue; }
     }
     cambios.push({ l, dom, vacia });
 }
@@ -162,13 +188,31 @@ if (EJECUTAR && cambios.length) {
     }
     p3.fin();
 }
+console.log(`
+${aRevisarColeccion.length} libro(s) más en los que su COLECCIÓN dice lo mismo que el prefijo y no la editorial que tienen: los más sospechosos${EJECUTAR ? ' → selección «Editorial a revisar — su colección coincide con el prefijo»' : ''}.`);
+
+/** Crea la selección o, si ya existe una de una pasada anterior, la ACTUALIZA (el 30-sep quedaron duplicadas). */
+async function guardarSeleccion(prefijoNombre, descripcion, ids) {
+    const { crearSeleccion, reemplazarDocs, editarSeleccion } = await import('../src/utils/selecciones.js');
+    const nombre = `${prefijoNombre} ${new Date().toISOString().slice(0, 10)}`;
+    const escapado = prefijoNombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const previa = await db.collection('selecciones').findOne({ nombre: new RegExp(`^${escapado}`) }, { sort: { fecha_creacion: -1 } });
+    if (previa) {
+        await reemplazarDocs(db, previa._id, ids);
+        await editarSeleccion(db, previa._id, { nombre });
+    } else {
+        await crearSeleccion(db, { nombre, descripcion, docs: ids });
+    }
+}
+if (EJECUTAR && aRevisarColeccion.length) {
+    await guardarSeleccion('Editorial a revisar — su colección coincide con el prefijo',
+        'Su editorial no es la del prefijo de su ISBN, y su colección dice lo mismo que el prefijo: lo más probable es que la editorial esté mal (o sea un sello del grupo). Revísalos primero.',
+        aRevisarColeccion.map(({ l }) => l._id));
+}
 if (EJECUTAR && aRevisar.length) {
-    const { crearSeleccion } = await import('../src/utils/selecciones.js');
-    await crearSeleccion(db, {
-        nombre: `Editorial a revisar (prefijo ISBN) ${new Date().toISOString().slice(0, 10)}`,
-        descripcion: 'Libros cuya editorial no es la dominante del prefijo de su ISBN, pero es una editorial real conocida en ese país: puede ser un sello del mismo grupo (bien) o un error. scripts/editoriales-por-prefijo.js no los cambia.',
-        docs: aRevisar.map(({ l }) => l._id),
-    });
+    await guardarSeleccion('Editorial a revisar (prefijo ISBN)',
+        'Libros cuya editorial no es la dominante del prefijo de su ISBN, pero es una editorial real conocida en ese país: puede ser un sello del mismo grupo (bien) o un error. scripts/editoriales-por-prefijo.js no los cambia.',
+        aRevisar.map(({ l }) => l._id));
     console.log(`
 Selección creada con ${aRevisar.length} libro(s) para revisar.`);
 }
