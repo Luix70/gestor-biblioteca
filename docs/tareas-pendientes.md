@@ -117,6 +117,12 @@ Encyclopedia», «Ten Physical Applications…», «Numerical Analysis», dos «
 viviendo dentro de la carpeta de otro documento → selección «Carpeta dentro de la de otro documento» (ya no se
 rompen al moverse: el motor los lleva consigo).
 
+### 3 quater. Crossref sin conexión (`crossref.db`, en el PC)
+- [ ] En el PC: `node scripts/etl-crossref.js` (lee `U:\_DUMPEDCATALOGS\March 2026 Public Data File from Crossref`, ~3 h con 6
+      hilos; reanudable: si se corta, se relanza igual). Deja `D:\gestor-biblioteca\Fichero\crossref.db`.
+- [ ] Copiar `crossref.db` a `U:\Fichero\crossref.db` (junto a fichero.db). Sin reiniciar: se abre al primer uso.
+- [ ] Desplegar la versión que lo consulta (la cascada lo mira antes que la API de Crossref).
+
 ### 3 ter. Índice de series (para el trabajo de colecciones)
 - [ ] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»
   cuentan ahora en cada una).

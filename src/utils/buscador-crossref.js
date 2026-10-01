@@ -21,6 +21,7 @@ import { http } from './http.js';
 import { esErrorDeRed } from '../errores.js';
 import { variantesISBN } from './identificadores.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
+import { libroCrossrefLocal, librosDeSerieCrossrefLocal, crossrefLocalDisponible } from './crossref-local.js';
 
 const API = 'https://api.crossref.org/works';
 const TIMEOUT = Number(process.env.CROSSREF_TIMEOUT_MS || 20000);
@@ -82,6 +83,10 @@ export function fichaDeCrossref(w) {
 export async function buscarEnCrossref({ isbns = [] } = {}) {
     const formas = [...new Set(isbns.flatMap((i) => variantesISBN(i)))].map((i) => String(i).replace(/[^0-9Xx]/g, ''));
     if (!formas.length) return {};
+    // Primero el índice LOCAL (el volcado anual, sin conexión ni límites: scripts/etl-crossref.js). La API queda para
+    // lo que no esté: lo registrado después del volcado.
+    const local = libroCrossrefLocal(formas);
+    if (local) return local;
     const m = await consultar({ filter: formas.map((i) => `isbn:${i}`).join(','), rows: 20 });
     if (m === null) return null;
     const libro = (m.items || []).find((w) => TIPOS_LIBRO.has(w.type));
@@ -93,6 +98,11 @@ export async function buscarEnCrossref({ isbns = [] } = {}) {
  * @returns {Promise<object[]|null>} fichas; null si Crossref no responde.
  */
 export async function librosDeSerieCrossref(issn, { max = 2000 } = {}) {
+    // Con el índice local, la serie entera sale de ahí (sin paginar contra la API).
+    if (crossrefLocalDisponible()) {
+        const locales = librosDeSerieCrossrefLocal(issn, { max });
+        if (locales.length) return locales;
+    }
     const out = [];
     let cursor = '*';
     while (out.length < max) {

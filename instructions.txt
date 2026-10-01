@@ -1313,6 +1313,14 @@ de ficheros clasificado por CDU.
     huecos; guarda también `coleccion_issn` (ISSN de la SERIE, para ratificar colecciones) y `doi`. Se queda con el
     LIBRO (una consulta por ISBN devuelve también sus capítulos). `librosDeSerieCrossref(issn)` lista una serie
     entera (Springer Monographs in Mathematics: 243). El volcado anual (U:\_DUMPEDCATALOGS) dará la base offline.
+    CROSSREF SIN CONEXIÓN (2026-10-01, `scripts/etl-crossref.js` → `Fichero/crossref.db`; `utils/crossref-local.js`):
+    los LIBROS del volcado público anual (March 2026, 35.909 ficheros, ~240 GB): título, subtítulo, título original,
+    autores, editores, editorial, lugar, año, edición, serie + ISSN + volumen, DOI, idioma y el RESUMEN de la editorial
+    (más de la mitad lo trae). Los libros que solo aparecen por sus capítulos se deducen de ellos (título y serie).
+    Fuera: artículos y demás no-libros, los capítulos como tales, bibliografías, licencias, enlaces, financiadores.
+    Se construye una vez en el PC (~3 h, varios hilos, reanudable) y se copia a la carpeta Fichero del NAS.
+    `buscarEnCrossref` mira primero el índice local y solo después la API (para lo posterior al volcado);
+    `librosDeSerieCrossref(issn)` sale entera del índice. La cascada toma también la SINOPSIS de Crossref (solo hueco).
     ISBN EN SUS DOS FORMAS: la cascada pregunta a cada fuente por el ISBN-10 Y el ISBN-13 (`conAmbasFormas`): hay
     fuentes que solo indexan la forma con que se registró el libro (Crossref tiene la edición de 2003 de ese libro
     solo como 0387008349; la BNE «no siempre» indexa ambas). Antes, Google Books y la BnF recibían una sola forma.

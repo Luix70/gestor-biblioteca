@@ -442,7 +442,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // Undergraduate Texts in Mathematics; el Fichero lo tenía sin serie). Gratis y sin clave; solo huecos, y solo
     // si falta algo que pueda dar. Nunca para revistas (no se llega aquí) ni sin ISBN.
     const faltaAlgoDeCrossref = !datosExtra.coleccion_nombre || !datosExtra.editorial || !datosExtra.año_edicion
-        || !datosExtra.titulo || !(datosExtra.autores && datosExtra.autores.length);
+        || !datosExtra.titulo || !(datosExtra.autores && datosExtra.autores.length) || !datosExtra.sinopsis;
     if (faltaAlgoDeCrossref && (datosExtra.isbn || isbnsLookup.length)) {
         const infoCR = await buscarEnCrossref({ isbns: conAmbasFormas([datosExtra.isbn, ...isbnsLookup]) }).catch(() => null);
         if (infoCR === null) datosExtra.alertas.push('Crossref no disponible: omitido.');
@@ -452,6 +452,8 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
             rellenar('autores', infoCR.autores);
             rellenar('editorial', infoCR.editorial);
             rellenar('año_edicion', infoCR.año_edicion);
+            // El RESUMEN de la editorial (lo trae más de la mitad de los libros del volcado).
+            rellenar('sinopsis', infoCR.sinopsis);
             if (infoCR.coleccion_nombre && !datosExtra.coleccion_nombre) {
                 datosExtra.coleccion_nombre = infoCR.coleccion_nombre;
                 if (infoCR.coleccion_numero) datosExtra.coleccion_numero = infoCR.coleccion_numero;
