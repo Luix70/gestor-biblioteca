@@ -149,6 +149,11 @@ rompen al moverse: el motor los lleva consigo).
 - [ ] Más adelante: British National Bibliography (CC0, Dewey + series del Reino Unido), DNB alemana, Library of
       Congress (LCC/Dewey para la CDU sin IA), Wikidata (nacionalidad de autores → CDU de literatura).
 
+### Ideas de baja prioridad
+- [ ] **ISBN de los DjVu desde su capa de texto** (`djvutxt`, de DjVuLibre): como en el PDF, leer las primeras páginas,
+      buscar el ISBN y corroborarlo por título en el Fichero. La campaña «Recuperar ISBN que faltan» tiene 96 DjVu sin
+      ISBN (1-oct); solo ayudaría a los que tienen capa de texto (los escaneos sin OCR no).
+
 ### 4. Portadas falsas (la misma imagen en libros distintos)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js`
 
