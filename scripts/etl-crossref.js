@@ -50,6 +50,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+import { limpiarTextoCrossref } from '../src/utils/texto-crossref.js';
 
 // ─── Extracción (en cada hilo) ──────────────────────────────────────────────────────────────────────────────
 const TIPOS_LIBRO = new Set(['book', 'monograph', 'edited-book', 'reference-book', 'book-set', 'proceedings']);
@@ -72,6 +73,9 @@ const anioOnline = (w) => w['published-online']?.['date-parts']?.[0]?.[0] || nul
 const isbnsConTipo = (w) => (w['isbn-type'] || []).map((x) => ({ isbn: isbn13(x.value), tipo: x.type })).filter((x) => x.isbn);
 const issnDe = (w) => (w['issn-type'] || []).find((x) => x.type === 'print')?.value || (w.ISSN || [])[0] || null;
 const corta = (s, n) => (s ? String(s).slice(0, n) : null);
+// Texto para leer (títulos, nombres, resúmenes): sin entidades HTML ni etiquetas de formato. NO para el DOI (los SICI
+// llevan «<» y «>» de verdad).
+const cortaTexto = (s, n) => (s ? limpiarTextoCrossref(String(s)).slice(0, n) || null : null);
 
 /** Un registro de Crossref → la fila de su LIBRO (o null si no hay libro que sacar). */
 function filaDe(w) {
@@ -85,18 +89,18 @@ function filaDe(w) {
         const serie = titulos.find((c) => c !== titulo) || null;
         return {
             isbns, fuente: 'libro', tipo: w.type,
-            titulo: corta(titulo, 400), subtitulo: corta((w.subtitle || [])[0], 400),
-            autores: corta((w.author || []).map(persona).filter(Boolean).join('; '), 600),
-            editores: corta((w.editor || []).map(persona).filter(Boolean).join('; '), 600),
-            editorial: corta(w.publisher, 200), lugar: corta(w['publisher-location'], 120), anio: anioDe(w),
-            serie: corta(serie, 300), serie_issn: serie ? issnDe(w) : null, volumen: serie ? corta(w.volume, 40) : null,
+            titulo: cortaTexto(titulo, 400), subtitulo: cortaTexto((w.subtitle || [])[0], 400),
+            autores: cortaTexto((w.author || []).map(persona).filter(Boolean).join('; '), 600),
+            editores: cortaTexto((w.editor || []).map(persona).filter(Boolean).join('; '), 600),
+            editorial: cortaTexto(w.publisher, 200), lugar: corta(w['publisher-location'], 120), anio: anioDe(w),
+            serie: cortaTexto(serie, 300), serie_issn: serie ? issnDe(w) : null, volumen: serie ? corta(w.volume, 40) : null,
             doi: corta(w.DOI, 200), idioma: w.language ? String(w.language).slice(0, 2) : null,
-            titulo_original: corta((w['original-title'] || [])[0], 400),
+            titulo_original: cortaTexto((w['original-title'] || [])[0], 400),
             edicion: corta(w['edition-number'], 20),
             anio_online: anioOnline(w),
             tipos: isbnsConTipo(w),
             // El resumen viene en JATS (XML): se le quitan las etiquetas.
-            sinopsis: w.abstract ? corta(String(w.abstract).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(), 4000) : null,
+            sinopsis: w.abstract ? cortaTexto(String(w.abstract).replace(/<[^>]+>/g, ' '), 4000) : null,
         };
     }
     if (TIPOS_PARTE.has(w.type) && titulos.length) {
@@ -106,15 +110,15 @@ function filaDe(w) {
         const serie = titulos.length > 1 ? titulos[0] : null;
         return {
             isbns, fuente: 'capitulo', tipo: 'book',
-            titulo: corta(titulo, 400), subtitulo: null, autores: null,
-            editores: corta((w.editor || []).map(persona).filter(Boolean).join('; '), 600),
-            editorial: corta(w.publisher, 200), lugar: corta(w['publisher-location'], 120), anio: anioDe(w),
-            serie: corta(serie, 300), serie_issn: serie ? issnDe(w) : null, volumen: null, doi: null, idioma: w.language ? String(w.language).slice(0, 2) : null,
+            titulo: cortaTexto(titulo, 400), subtitulo: null, autores: null,
+            editores: cortaTexto((w.editor || []).map(persona).filter(Boolean).join('; '), 600),
+            editorial: cortaTexto(w.publisher, 200), lugar: corta(w['publisher-location'], 120), anio: anioDe(w),
+            serie: cortaTexto(serie, 300), serie_issn: serie ? issnDe(w) : null, volumen: null, doi: null, idioma: w.language ? String(w.language).slice(0, 2) : null,
             titulo_original: null, edicion: null, sinopsis: null, anio_online: anioOnline(w), tipos: isbnsConTipo(w),
             // El capítulo mismo, para el ÍNDICE del libro (solo se guarda con --capitulos).
             capitulo: w.type === 'book-chapter' && (w.title || [])[0] ? {
-                titulo: corta(w.title[0], 400),
-                autores: corta((w.author || []).map(persona).filter(Boolean).join('; '), 400),
+                titulo: cortaTexto(w.title[0], 400),
+                autores: cortaTexto((w.author || []).map(persona).filter(Boolean).join('; '), 400),
                 doi: corta(w.DOI, 200),
                 orden: Number(String(w.DOI || '').match(/_(\d+)$/)?.[1]) || null,   // Springer: …_27 = capítulo 27
             } : null,

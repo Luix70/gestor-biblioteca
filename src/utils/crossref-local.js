@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { variantesISBN } from './identificadores.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
+import { limpiarTextoCrossref as txt } from './texto-crossref.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -54,7 +55,7 @@ function abrir() {
 
 export const crossrefLocalDisponible = () => !!abrir();
 
-const lista = (s) => String(s || '').split(';').map((x) => x.trim()).filter(Boolean);
+const lista = (s) => String(txt(s) || '').split(';').map((x) => x.trim()).filter(Boolean);
 
 /** Una fila de crossref.db → la ficha de siempre (la misma forma que `fichaDeCrossref` de la API). */
 function fichaDeFila(f) {
@@ -62,20 +63,21 @@ function fichaDeFila(f) {
     return {
         isbn: isbns[0] || null,
         isbns,
-        titulo: f.titulo || null,
-        subtitulo: f.subtitulo || null,
+        // txt(): el índice construido antes del 1-oct guarda «&amp;» y etiquetas (<i>…</i>) tal como vienen.
+        titulo: txt(f.titulo) || null,
+        subtitulo: txt(f.subtitulo) || null,
         autores: lista(f.autores),
         contribuciones_nombres: lista(f.editores).map((nombre) => ({ nombre, rol: 'editor' })),
-        editorial: limpiarNombreEditorial(f.editorial) || null,
+        editorial: limpiarNombreEditorial(txt(f.editorial)) || null,
         año_edicion: f.anio || null,
         idioma: f.idioma || null,
-        coleccion_nombre: f.serie || null,
+        coleccion_nombre: txt(f.serie) || null,
         coleccion_issn: f.serie_issn || null,
         coleccion_numero: f.volumen || null,
         categorias: [],
         doi: f.doi || null,
-        sinopsis: f.sinopsis || null,
-        titulo_original: f.titulo_original || null,
+        sinopsis: txt(f.sinopsis) || null,
+        titulo_original: txt(f.titulo_original) || null,
         edicion: f.edicion || null,
         fuente: 'crossref',
         // Un libro que solo se conoce por sus capítulos trae menos (sin autores ni DOI propio).

@@ -13,7 +13,8 @@
  * Cada número junta sus ediciones Y los registros sin número con el mismo título (otra edición del mismo libro), con
  * todos sus ISBN: «✓» si tienes cualquiera de ellos (papel, ebook, otra edición). Si está crossref.db, se suman los
  * libros de la serie que da Crossref por su ISSN: no traen el número, pero sí títulos e ISBN hasta hoy (el Fichero
- * se queda antes), así que aparecen los libros recientes y se reconocen más de los que tienes.
+ * se queda antes), así que aparecen los libros recientes y se reconocen más de los que tienes. Y los números que el
+ * Fichero no conoce se toman de TUS fichas de la colección (`coleccion_numero`), marcados «[nº de tu ficha]».
  */
 import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
@@ -26,7 +27,7 @@ const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : nu
 const ISBN = arg('--isbn');
 const CLAVE = arg('--clave');
 const EDITORIAL = arg('--editorial');
-const SIN_BASE = args.includes('--sin-base');
+const SIN_BASE = args.includes('--sin-base');   // sin la base tampoco se usan los números de tus fichas
 const SIN_CROSSREF = args.includes('--sin-crossref');
 const TODOS = args.includes('--todos');
 const TEXTO = args.filter((a, i) => !a.startsWith('--') && !['--isbn', '--clave', '--editorial'].includes(args[i - 1])).join(' ');
@@ -134,11 +135,54 @@ if (!SIN_CROSSREF) {
 }
 console.log('');
 
+const db = SIN_BASE ? null : await (await import('../src/database.js')).conectarDB();
+
+// ─── NÚMEROS DE TUS FICHAS: tus libros de esta colección que llevan `coleccion_numero` dan el número que el Fichero
+//     no conoce («Categories for the working mathematician» es el GTM 5). Se busca la entrada por ISBN o título y,
+//     si no tiene número y ese número está libre, pasa a él. Cordura: el número no puede pasar mucho del mayor
+//     conocido (hay fichas con un trozo de ISBN o ISSN como «número»: 852, 6056…).
+let deTusFichas = 0;
+if (db) {
+    const nombreSerie = claveTitulo(ficha?.nombre || TEXTO);
+    const issnSerie = ficha?.issn || null;
+    const candidatas = await db.collection('colecciones')
+        .find({}, { projection: { nombre: 1, issn: 1 } })
+        .toArray();
+    // La colección de la biblioteca es la de la serie si su nombre, sin la puntuación de la ficha («Graduate texts in
+    // mathematics ;»), es el mismo, o si comparten ISSN.
+    const idsColeccion = candidatas
+        .filter((c) => claveTitulo(c.nombre) === nombreSerie || (issnSerie && c.issn === issnSerie))
+        .map((c) => c._id);
+    const mayorConocido = Math.max(0, ...porNumero.keys());
+    const conNumero = idsColeccion.length
+        ? await db.collection('biblioteca')
+            .find({ coleccion: { $in: idsColeccion }, coleccion_numero: { $nin: [null, ''] } }, { projection: { titulo: 1, isbn: 1, coleccion_numero: 1 } })
+            .toArray()
+        : [];
+    // Título de la ficha sin coletillas de edición o de catálogo («… - 2. edición», «(Graduate Texts…)»).
+    const tituloDeFicha = (t) => claveTitulo(String(t || '').replace(/\s+-\s+.*$/, '').replace(/\([^)]*\)/g, ''));
+    const entradaPorIsbn = new Map();
+    for (const e of [...sinNumero.values(), ...soloCrossref.values()]) for (const v of e.isbns) entradaPorIsbn.set(v, e);
+    for (const d of conNumero) {
+        const n = Number.parseInt(String(d.coleccion_numero), 10);
+        if (!Number.isFinite(n) || n < 1 || n > mayorConocido + 50 || porNumero.has(n)) continue;
+        const k = tituloDeFicha(d.titulo);
+        const entrada = variantesISBN(d.isbn).map((v) => entradaPorIsbn.get(v)).find(Boolean)
+            || sinNumero.get(k) || soloCrossref.get(k);
+        if (!entrada) continue;
+        // Sale de su lista y pasa a su número.
+        for (const lista of [sinNumero, soloCrossref]) for (const [clave, e] of lista) if (e === entrada) lista.delete(clave);
+        entrada.numero = n;
+        entrada.fuentes.add('ficha');
+        porNumero.set(n, entrada);
+        deTusFichas++;
+    }
+    if (deTusFichas) console.log(`   + ${deTusFichas} números sacados de tus fichas (coleccion_numero).\n`);
+}
+
 // ─── Lo que tienes: por cualquiera de los ISBN de cada entrada.
 const tengo = new Set();
-if (!SIN_BASE) {
-    const { conectarDB } = await import('../src/database.js');
-    const db = await conectarDB();
+if (db) {
     const entradas = [...porNumero.values(), ...sinNumero.values(), ...soloCrossref.values()];
     const todos = [...new Set(entradas.flatMap((e) => [...e.isbns]))];
     for (let i = 0; i < todos.length; i += 5000) {
@@ -149,8 +193,9 @@ if (!SIN_BASE) {
 const laTengo = (e) => [...e.isbns].some((v) => tengo.has(v));
 const linea = (e, columnaNumero) => {
     const extra = e.ediciones > 1 ? `  +${e.ediciones - 1} ed.` : '';
-    const marcaCrossref = e.fuentes.size === 1 && e.fuentes.has('crossref') ? '  [Crossref]' : '';
-    return `  ${laTengo(e) ? '✓' : '·'} ${columnaNumero}  ${String(e.titulo).slice(0, 70)}${e.anio ? ` (${e.anio})` : ''}${extra}${marcaCrossref}`;
+    const marcaCrossref = !e.fuentes.has('fichero') && e.fuentes.has('crossref') ? '  [Crossref]' : '';
+    const marcaFicha = e.fuentes.has('ficha') ? '  [nº de tu ficha]' : '';
+    return `  ${laTengo(e) ? '✓' : '·'} ${columnaNumero}  ${String(e.titulo).slice(0, 70)}${e.anio ? ` (${e.anio})` : ''}${extra}${marcaCrossref}${marcaFicha}`;
 };
 
 let tenidos = 0;
