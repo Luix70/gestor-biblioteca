@@ -102,6 +102,17 @@ En seco (1-oct): **2** · 1 reimpresor bajo demanda devuelto a la editorial real
 candidatas buscadas con un título que no es un título («Author: David», «El») · **13** · 79 títulos-artefacto sin ISBN
 toman el del nombre del fichero (7 sin un nombre aprovechable) · **15** · 6 tomos recuperan su «— Vol. N».
 
+### 3 bis-3. Carpetas movidas dentro de la de otro documento (1-oct)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/reparar-carpetas-anidadas.js`   (en seco, ~5 min)
+- [ ] Lo mismo con `--ejecutar`
+
+En seco desde el PC: de 65.987 documentos, **1** apunta a una carpeta que se movió dentro de la de otro (el nº de
+febrero de 2015 de «Historia de Iberia Vieja»; está en `9/94/94(460)/revistas/1699-7913-b8999d/2015-02`) y se
+corrige. **6** no aparecen en ningún sitio conocido (anteriores al diario de movimientos: dos tomos de «The Internet
+Encyclopedia», «Ten Physical Applications…», «Numerical Analysis», dos «Marketing - 11. ed.»): a mano. **135** siguen
+viviendo dentro de la carpeta de otro documento → selección «Carpeta dentro de la de otro documento» (ya no se
+rompen al moverse: el motor los lleva consigo).
+
 ### 3 ter. Índice de series (para el trabajo de colecciones)
 - [ ] **Volver a copiar** `series.db` al NAS: se reconstruyó el 30-sep por la tarde (las series juntas con «/**/»
   cuentan ahora en cada una).

@@ -389,6 +389,15 @@ export async function reubicarPorCdu(doc, nuevaCdu, { recolocar = false } = {}) 
         if (c.portada) archivosEnBD.push(path.basename(c.portada));
         for (const im of (c.imagenes || [])) archivosEnBD.push(path.basename(im.ruta));
     }
+    // Los que viven DENTRO de esta carpeta (una subcarpeta suya: «…/revistas/1699-7913/2015-02» dentro de
+    // «…/revistas/1699-7913»). El rename se los lleva también, así que sus rutas tienen que cambiar con ella. Antes
+    // solo se actualizaban los que tenían la MISMA carpeta y los anidados quedaban apuntando a la ruta vieja
+    // (incidente del 1-oct, «Historia de Iberia Vieja» feb. 2015; reparación: scripts/reparar-carpetas-anidadas.js).
+    const escaparRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const anidados = await db.collection('biblioteca').find(
+        { ruta_base: { $regex: `^${escaparRegex(rutaBaseVieja)}/` } },
+        { projection: { ruta_base: 1, portada: 1, imagenes: 1 } }).toArray();
+
     await moverCarpetaConVerificacion(carpetaVieja, carpetaNueva, archivosEnBD);
     // Los que compartían la carpeta van con ella: su ruta, su portada y sus imágenes, al sitio nuevo.
     for (const c of companeros) {
@@ -396,6 +405,15 @@ export async function reubicarPorCdu(doc, nuevaCdu, { recolocar = false } = {}) 
         if (c.portada) cs.portada = remap(c.portada);
         if (c.imagenes?.length) cs.imagenes = c.imagenes.map((im) => ({ ...im, ruta: remap(im.ruta) }));
         await db.collection('biblioteca').updateOne({ _id: c._id }, { $set: cs });
+    }
+    for (const a of anidados) {
+        const as = { ruta_base: remap(a.ruta_base), fecha_actualizacion: new Date() };
+        if (a.portada) as.portada = remap(a.portada);
+        if (a.imagenes?.length) as.imagenes = a.imagenes.map((im) => ({ ...im, ruta: remap(im.ruta) }));
+        await db.collection('biblioteca').updateOne({ _id: a._id }, {
+            $set: as,
+            $push: { alertas_agente: `Carpeta movida junto con la de otro documento, en la que vivía: «${a.ruta_base}» → «${as.ruta_base}».` },
+        });
     }
     const extra = companeros.length ? ` (con los ${companeros.length} documento(s) que la comparten)` : '';
     return { set, carpetaNueva, alertas: [`CDU → "${destinoCdu}"; ficheros movidos a "${segsNuevos.join('/')}"${extra}.`] };
