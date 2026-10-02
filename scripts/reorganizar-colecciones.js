@@ -119,7 +119,19 @@ const pcl = progreso(colecciones.size, 'Clasificando colecciones');
 for (const [id, c] of colecciones) {
     pcl.paso(c.nombre);
     const miembros = miembrosDe.get(id) || [];
-    if (CONSERVAR.has(id) || CONSERVAR.has(c.nombre) || TIPOS_INTOCABLES.has(c.tipo) || c.ruta_fija || c.raiz_web
+    // «REVISTA» QUE ES UNA SERIE DE LIBROS: una cabecera con ISSN cuyos miembros son casi todos LIBROS es el ISSN de
+    // una serie (el caso «Rosen», 2-oct: la colección de la serie Springer «The Frontiers Collection», ISSN
+    // 1612-3018, acabó como revista y con el nombre «Rosen» porque un libro suyo —«Rosen - Symmetry Rules
+    // (Springer, 2008).pdf»— entró como revista titulada «Rosen» y la cabecera tomó su nombre). Deja de ser
+    // intocable: la fase 2 le devuelve el tipo libro y el nombre que la autoridad da a ese ISSN.
+    const libros = miembros.filter((d) => d.tipo_recurso === 'libro').length;
+    if (c.tipo === 'revista' && c.issn && miembros.length >= 2 && libros / miembros.length >= 0.8) {
+        const nombreAutoridad = serieCrossrefLocal(c.issn)?.nombre || seriesDeISSN(c.issn)[0]?.nombre || null;
+        // Solo si el ISSN es de una SERIE DE LIBROS conocida (Crossref/Fichero): «Popular Photography» o «MSDN» son
+        // revistas de verdad, aunque algún número se catalogara como libro.
+        if (nombreAutoridad) c._serieDeLibros = { nombre: mismaSerie(nombreAutoridad, c.nombre) ? c.nombre : nombreAutoridad, issn: c.issn, numero: null, registros: 0 };
+    }
+    if (CONSERVAR.has(id) || CONSERVAR.has(c.nombre) || (TIPOS_INTOCABLES.has(c.tipo) && !c._serieDeLibros) || c.ruta_fija || c.raiz_web
         || miembros.some((d) => d.coleccion_fuente === 'manual')) {
         clase.set(id, 'intocable');
         continue;
@@ -306,6 +318,9 @@ if (FASES.has('2')) {
         grupos.get(k).push({ c, serie: serieComun });
     }
     const fusiones = [...grupos.entries()].filter(([, g]) => g.length > 1);
+    const seriesDeLibros = [...colecciones.values()].filter((c) => c._serieDeLibros && clase.get(String(c._id)) === 'editorial');
+    di(`FASE 2 · «revistas» que son series de libros (pasan a tipo libro, con el nombre de su ISSN): ${seriesDeLibros.length}`);
+    for (const c of seriesDeLibros) di(`   «${c.nombre}» (ISSN ${c.issn}, ${(miembrosDe.get(String(c._id)) || []).length} libros) → «${c._serieDeLibros.nombre}»`);
     const renombres = [...grupos.values()].filter((g) => g.length === 1 && g[0].serie && (pareceArtefacto(g[0].c.nombre) || g[0].c._serieIssn)
         && !pareceArtefacto(g[0].serie.nombre) && g[0].serie.nombre !== g[0].c.nombre);
     di(`FASE 2 · series repartidas en varias colecciones: ${fusiones.length} (${fusiones.reduce((s, [, g]) => s + g.length, 0)} colecciones) · nombres de artefacto que pasan al de la serie: ${renombres.length}`);
@@ -314,7 +329,20 @@ if (FASES.has('2')) {
     for (const [unico] of renombres) anota(`   renombrar «${unico.c.nombre}» → «${unico.serie.nombre}»`);
 
     {
-        const p2 = progreso(fusiones.length + renombres.length, 'Fase 2');
+        const p2 = progreso(seriesDeLibros.length + fusiones.length + renombres.length, 'Fase 2');
+        for (const c of seriesDeLibros) {
+            p2.paso(c.nombre);
+            if (EJECUTAR) {
+                // El inventario de números (numeros[]) era de revista: queda en el diario, no en la colección.
+                await colCol.updateOne({ _id: c._id }, {
+                    $set: { tipo: 'libro', fecha_actualizacion: new Date() },
+                    $unset: { numeros: '', numeros_sin_fecha: '', numeros_presentes: '' },
+                    $push: { deshacer: { fecha: new Date(), origen: ORIGEN, antes: { tipo: c.tipo, numeros: c.numeros ?? null, numeros_sin_fecha: c.numeros_sin_fecha ?? null } } },
+                });
+            }
+            c.tipo = 'libro';
+            await renombrar(c, c._serieDeLibros);
+        }
         for (const [k, g] of fusiones) {
             // Se queda la que ya se llama como la serie; si no, la más grande.
             const tam = (c) => (miembrosDe.get(String(c._id)) || []).length;

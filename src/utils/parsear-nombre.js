@@ -247,6 +247,55 @@ function extraerColeccion(base) {
     return out;
 }
 
+// Pie de imprenta al final: «(Springer, 2008)», «(Wiley 2008)», con una marca de grupo detrás («… (Wiley, 2008) WW»).
+const RE_PIE_IMPRENTA = new RegExp(String.raw`^(.*?)\s*\(([^()]{2,80}?),?\s+((?:1[5-9]|20)\d{2})\)\s*(?:[A-Z]{1,4})?\s*$`);
+// Una INICIAL («I. Klotz», «Joe R. Smith»): firma de persona.
+const RE_INICIAL = new RegExp(String.raw`(^|\s)\p{Lu}\.(\s|$)`, 'u');
+// Un apellido suelto («Rosen», «García-Márquez»).
+const RE_APELLIDO = new RegExp(String.raw`^\p{Lu}[\p{L}'’-]+$`, 'u');
+// Palabras que delatan un TÍTULO, no un nombre de persona.
+const RE_PALABRA_DE_TITULO = /\b(the|of|and|for|to|in|on|an?|el|la|los|las|de|del|y|en|una?|introduction|guide|handbook|theory|principles|methods|edition|ed)\b/i;
+
+/** ¿El segmento parece una lista de personas? («I. Klotz, R. Rosenberg», «Rosen», «Smith & Jones»). */
+function parecenAutores(segmento) {
+    const s = String(segmento || '').trim();
+    if (!s || s.length > 120 || RE_PALABRA_DE_TITULO.test(s)) return false;
+    if (RE_INICIAL.test(s) || RE_APELLIDO.test(s)) return true;
+    // Varias personas separadas por coma, «&» o «and»/«y», cada una de 2-3 palabras con mayúscula.
+    const personas = s.split(/\s*(?:,|&|\band\b|\by\b)\s*/).filter(Boolean);
+    return personas.length >= 2 && personas.every((p) => /^(\p{Lu}[\p{L}'’.-]*\s?){1,3}$/u.test(p.trim()));
+}
+
+/**
+ * «Autor - Título - Subtítulo (Editorial, año)» o «Título - Subtítulo - Autores (Editorial, año)». Devuelve
+ * { titulo, autores, editorial, año_edicion } o null si el nombre no tiene esa forma o no se sabe de qué lado van
+ * los autores (entonces se aplica la regla general).
+ */
+function parsearConPieDeImprenta(trabajo) {
+    const m = String(trabajo).match(RE_PIE_IMPRENTA);
+    if (!m) return null;
+    const partes = m[1].split(' - ').map((s) => s.trim()).filter(Boolean);
+    if (partes.length < 2) return null;
+    const editorial = m[2].trim();
+    const año = parseInt(m[3], 10);
+    let autores;
+    let tituloPartes;
+    if (parecenAutores(partes[partes.length - 1]) && !parecenAutores(partes[0])) {
+        autores = partes[partes.length - 1];
+        tituloPartes = partes.slice(0, -1);
+    } else if (parecenAutores(partes[0])) {
+        autores = partes[0];
+        tituloPartes = partes.slice(1);
+    } else {
+        return null;
+    }
+    // «7th ed» al final del título es la edición, no parte del título.
+    const titulo = tituloPartes.join(': ').replace(/\s+\d+(st|nd|rd|th)\s+ed\.?$/i, '').trim();
+    const lista = autores.split(/\s*(?:,|&|\band\b)\s*/).map((s) => s.trim()).filter(Boolean)
+        .filter((a) => !esAutorArtefacto(a));
+    return { titulo, autores: lista, ...(editorial && !/^\d+$/.test(editorial) ? { editorial } : {}), año_edicion: año };
+}
+
 /**
  * @returns { titulo, autores, año_edicion?, idioma?, esFechada, coleccion_nombre?, coleccion_numero?, editorial? }
  */
@@ -326,6 +375,14 @@ export function parsearNombre(nombreArchivo) {
             return { titulo, autores: [], año_edicion: parseInt(m[2]), idioma: lang, esFechada: true, mes_publicacion: mesANumero(m[1]), ...colExtra };
         }
     }
+
+    // Formato de biblioteca de descargas: «Autor - Título - Subtítulo (Editorial, año)» o, en otros paquetes,
+    // «Título - Subtítulo - Autores (Editorial, año) WW». El paréntesis final con editorial y año es la señal; el lado
+    // de los autores se decide por su forma (iniciales, «Apellido, Nombre», un apellido suelto). Caso del 2-oct:
+    // «Rosen - Symmetry Rules - How Science and Nature Are Founded on Symmetry (Springer, 2008).pdf» se leía como
+    // título «Rosen» y autor «Symmetry Rules», y el libro acabó de revista «Rosen» dando nombre a una colección.
+    const conPieDeImprenta = parsearConPieDeImprenta(trabajo);
+    if (conPieDeImprenta) return { ...conPieDeImprenta, esFechada: false, ...colExtra };
 
     // Libro: separar título y autores por " - ".
     const partes = trabajo.split(' - ');

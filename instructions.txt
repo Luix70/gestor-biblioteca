@@ -1289,6 +1289,13 @@ de ficheros clasificado por CDU.
         selección «Colección de carpeta · <nombre>»; con 1 → el libro queda libre. Diario `deshacer[]` en cada libro
         y copia de cada colección retirada en `colecciones_retiradas`. Medido en seco 1-oct: 20.884 libros cambian,
         680 colecciones se retiran, 86 pasan a selección, 352 libros a revisar.
+        Fase 2 también devuelve a su ser las «REVISTAS» QUE SON SERIES DE LIBROS: cabecera con ISSN, 80 %+ de sus
+        miembros libros y el ISSN conocido como serie de libros en Crossref/Fichero → tipo libro y el nombre de la
+        serie (2-oct: «Rosen» → «The Frontiers Collection», ISSN 1612-3018; 9 en total). Origen de «Rosen»: el
+        fichero «Rosen - Symmetry Rules - … (Springer, 2008).pdf» se leyó como título «Rosen» y autor «Symmetry
+        Rules»; con el ISSN de la serie y sin ISBN entró como REVISTA y la cabecera (la colección de la serie, hallada
+        por ISSN) tomó su nombre. parsearNombre ya entiende «Autor - Título (Editorial, año)» y «Título - Autores
+        (Editorial, año) WW» (decide el lado de los autores por su forma: iniciales, apellido suelto).
     REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y
     «Editorial a revisar…»:
       · `scripts/triar-editoriales-sin-confirmar.js` (seco por defecto; `--ejecutar`, `--seleccion "<nombre>"`)
