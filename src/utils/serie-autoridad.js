@@ -12,8 +12,8 @@
  * Consumidores: scripts/reorganizar-colecciones.js y la ingesta (motor-enriquecimiento: la serie de la autoridad
  * gana a la colección de carpeta).
  */
-import { seriesDeISBN, buscarSeries, disponible as seriesDisponible } from './buscador-series.js';
-import { libroCrossrefLocal, seriesCrossrefPorNombre, crossrefLocalDisponible } from './crossref-local.js';
+import { seriesDeISBN, seriesDeISSN, buscarSeries, disponible as seriesDisponible } from './buscador-series.js';
+import { libroCrossrefLocal, seriesCrossrefPorNombre, crossrefLocalDisponible, revistaCrossrefLocal, serieCrossrefLocal } from './crossref-local.js';
 import { limpiarNombreColeccion } from './colecciones.js';
 import { tituloComparable, mismoLibroHolgado } from './titulo-libro.js';
 
@@ -136,6 +136,19 @@ export function seriesDeAutoridad(isbn, { titulo = null } = {}) {
 const RE_NOMBRE_BASURA = new RegExp(String.raw`(untitled|^author:|^\d+$|_|\.pdf\b|\bebooks?\b)`, 'i');
 
 /** Una serie de la autoridad es fiable si tiene ISSN o el Fichero le conoce 3+ libros. */
+/**
+ * ¿De qué es este ISSN? 'revista' (Crossref lo tiene como revista con artículos), 'serie' (serie de LIBROS en Crossref o
+ * en el Fichero), 'ambos' (las dos cosas: pasa con algunas series de actas) o null (no se sabe). Un libro con ISBN
+ * bajo el ISSN de una revista —o un número de revista bajo el de una serie de libros— es una señal de alarma (usuario,
+ * 2-oct): o el documento está mal catalogado o está mal metido en esa colección.
+ */
+export function naturalezaISSN(issn) {
+    if (!issn) return null;
+    const esRevista = !!revistaCrossrefLocal(issn);
+    const esSerie = !!serieCrossrefLocal(issn) || (seriesDisponible() && seriesDeISSN(issn).some((s) => s.n >= 3));
+    return esRevista && esSerie ? 'ambos' : esRevista ? 'revista' : esSerie ? 'serie' : null;
+}
+
 export const serieFiable = (s) => !!s && (!!s.issn || s.registros >= 3) && !esNombreGenerico(s.nombre);
 
 /**

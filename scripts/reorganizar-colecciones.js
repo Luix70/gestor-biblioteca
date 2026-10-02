@@ -51,8 +51,9 @@ import { conectarDB } from '../src/database.js';
 import { progreso } from '../src/utils/progreso-cli.js';
 import { resolverCabecera } from '../src/utils/colecciones.js';
 import { claveSerie } from '../src/utils/series-texto.js';
-import { seriesDeAutoridad, elegirSerie, mismaSerie, mismoNombreDeSerie, esSerieEditorial, esNombreGenerico, palabrasDeSerie } from '../src/utils/serie-autoridad.js';
+import { seriesDeAutoridad, elegirSerie, mismaSerie, mismoNombreDeSerie, esSerieEditorial, esNombreGenerico, palabrasDeSerie, naturalezaISSN } from '../src/utils/serie-autoridad.js';
 import { crearSeleccion } from '../src/utils/selecciones.js';
+import { parsearNombre } from '../src/utils/parsear-nombre.js';
 import { serieCrossrefLocal, seriesCrossrefPorNombre } from '../src/utils/crossref-local.js';
 import { seriesDeISSN } from '../src/utils/buscador-series.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
@@ -80,6 +81,10 @@ const di = (linea = '') => { console.log(linea); anota(linea); };
 // Nombre con pinta de carpeta o de paquete de descarga, no de serie editorial.
 const RE_ARTEFACTO = /(\.pdf\b|\.epub\b|\bpdf\b|\bepub\b|\bebooks?\b|\bpack\b|\btorrent\b|\bcollection\b.*\b(books?|pdf|ebooks?)\b|\b(books?|pdf|ebooks?)\b.*\bcollection\b|^[\w-]+(\.[\w-]+){2,}|^author:|^\d+$|_|untitled)/i;
 const pareceArtefacto = (nombre) => RE_ARTEFACTO.test(String(nombre || ''));
+// Un número («nº 73», «73») en el título.
+const RE_NUMERO = new RegExp(String.raw`\b(n[º°o.]?\s*\d+|\d{1,4})\b`, 'i');
+// Una FECHA de número (año-mes, con o sin separadores: «2009-09», «20090910»), sin confundirla con los dígitos de un ISBN.
+const RE_FECHA_NUMERO = new RegExp(String.raw`(?<!\d)(19|20)\d{2}[-_.]?(0[1-9]|1[0-2])([-_.]?(0[1-9]|[12]\d|3[01]))?(?!\d)`);
 const RE_ISSN = new RegExp(String.raw`^\d{4}-\d{3}[\dXx]$`);
 // Nombre de EDITORIAL usado como colección («Cornell Univerity Press»): es la carpeta de una editorial, no una serie.
 const RE_NOMBRE_EDITORIAL = new RegExp(String.raw`\b(press|publishing|publishers|verlag|editorial|ediciones)\s*$`, 'i');
@@ -90,7 +95,7 @@ for await (const c of colCol.find({})) colecciones.set(String(c._id), c);
 const nombreEditorial = new Map();
 for await (const e of db.collection('editoriales').find({}, { projection: { nombre: 1 } })) nombreEditorial.set(String(e._id), e.nombre);
 
-const PROY = { titulo: 1, isbn: 1, tipo_recurso: 1, coleccion: 1, coleccion_nombre: 1, coleccion_numero: 1, coleccion_numero_auto: 1, coleccion_fuente: 1 };
+const PROY = { titulo: 1, isbn: 1, issn: 1, clave_numero: 1, nombre_archivo: 1, tipo_recurso: 1, naturaleza: 1, coleccion: 1, coleccion_nombre: 1, coleccion_numero: 1, coleccion_numero_auto: 1, coleccion_fuente: 1 };
 const docs = [];
 const pc = progreso(await bib.countDocuments({}), 'Leyendo la biblioteca y la serie de cada libro');
 for await (const d of bib.find({}, { projection: PROY })) {
@@ -129,13 +134,33 @@ for (const [id, c] of colecciones) {
     // (Springer, 2008).pdf»— entró como revista titulada «Rosen» y la cabecera tomó su nombre). Deja de ser
     // intocable: la fase 2 le devuelve el tipo libro y el nombre que la autoridad da a ese ISSN.
     const libros = miembros.filter((d) => d.tipo_recurso === 'libro').length;
-    if (c.tipo === 'revista' && c.issn && miembros.length >= 2 && libros / miembros.length >= 0.8) {
+    // Lo PRIMERO es de qué es su ISSN (Crossref/Fichero): eso decide el tipo de la colección, y los miembros que no
+    // casen son los sospechosos — no al revés.
+    c._naturaleza = naturalezaISSN(c.issn);
+    if (c.tipo === 'revista' && c._naturaleza === 'serie') {
+        const nombreSerie = serieCrossrefLocal(c.issn)?.nombre || seriesDeISSN(c.issn)[0]?.nombre || c.nombre;
+        c._serieDeLibros = { nombre: mismaSerie(nombreSerie, c.nombre) ? c.nombre : nombreSerie, issn: c.issn, numero: null, registros: 0 };
+    } else if (c.tipo === 'revista' && c.issn && !c._naturaleza && miembros.length >= 2 && libros / miembros.length >= 0.8) {
         const nombreAutoridad = serieCrossrefLocal(c.issn)?.nombre || seriesDeISSN(c.issn)[0]?.nombre || null;
         // Solo si el ISSN es de una SERIE DE LIBROS conocida (Crossref/Fichero): «Popular Photography» o «MSDN» son
         // revistas de verdad, aunque algún número se catalogara como libro.
         if (nombreAutoridad) c._serieDeLibros = { nombre: mismaSerie(nombreAutoridad, c.nombre) ? c.nombre : nombreAutoridad, issn: c.issn, numero: null, registros: 0 };
     }
-    if (CONSERVAR.has(id) || CONSERVAR.has(c.nombre) || (TIPOS_INTOCABLES.has(c.tipo) && !c._serieDeLibros) || c.ruta_fija || c.raiz_web
+    // Aunque la autoridad no conozca el ISSN: si los libros llevan ISBN y ninguno parece un número de revista, es una
+    // serie de libros («DK Eyewitness Travel», «Focus series», «Intersections»). Con un solo libro y su mismo título
+    // no: es el libro dando nombre a una colección (la fase 2b lo saca y la colección vacía se retira).
+    const conIsbn = miembros.filter((d) => d.tipo_recurso === 'libro' && d.isbn).length;
+    if (!c._serieDeLibros && c.tipo === 'revista' && c._naturaleza !== 'revista' && miembros.length >= 2 && conIsbn / miembros.length >= 0.8
+        && miembros.filter((d) => tieneSenalDeNumero(d, c)).length / miembros.length < 0.2) {
+        c._serieDeLibros = { nombre: c.nombre, issn: c.issn || null, numero: null, registros: 0 };
+    }
+    // COLECCIÓN «DE LIBROS» QUE ES UNA REVISTA: casi todos sus miembros son números o artículos («Science», «Cell»,
+    // «Fotogramas», «Nueva Dimensión»). La fase 2 le pone tipo revista; mientras, intocable (no es una serie de libros
+    // que la autoridad pueda confirmar ni una carpeta que deshacer).
+    const periodicos = miembros.filter((d) => d.tipo_recurso === 'revista' || d.tipo_recurso === 'articulo').length;
+    if (c.tipo !== 'revista' && !TIPOS_INTOCABLES.has(c.tipo)
+        && (c._naturaleza === 'revista' || (c._naturaleza !== 'serie' && miembros.length && periodicos / miembros.length >= 0.8))) c._aRevista = true;
+    if (CONSERVAR.has(id) || CONSERVAR.has(c.nombre) || (TIPOS_INTOCABLES.has(c.tipo) && !c._serieDeLibros) || c._aRevista || c.ruta_fija || c.raiz_web
         || miembros.some((d) => d.coleccion_fuente === 'manual')) {
         clase.set(id, 'intocable');
         continue;
@@ -385,6 +410,164 @@ async function renombrar(c, serie) {
     await bib.updateMany({ coleccion: c._id }, { $set: { coleccion_nombre: serie.nombre } });
     for (const d of miembrosDe.get(String(c._id)) || []) d.coleccion_nombre = serie.nombre;
     c.nombre = serie.nombre;
+}
+
+// ─── FASE 2b: cada colección con documentos de su tipo ───────────────────────────────────────────────────
+// Una colección de REVISTA admite números y artículos; una de LIBROS, libros, capítulos y apuntes. Un cómic vale en
+// las dos (hay tebeos periódicos y en tomo). Medido el 2-oct: 88 colecciones de revista y 73 de libros mezcladas.
+//   · la colección «de libros» que es una revista (_aRevista) → tipo revista;
+//   · un LIBRO CON ISBN en la cabecera de una revista sale de ella (llegó por el nombre de una carpeta: los 37 libros
+//     de astronomía en la revista «Astronomy»), salvo que sea una serie de libros con ISSN (eso lo arregla la fase 2);
+//   · el resto de desajustes (un número suelto en una serie de libros, un libro sin ISBN en una revista…) no se
+//     decide solo: selección «Tipo distinto del de su colección».
+const desajustados = [];
+const malTipados = [];
+
+
+// Señales de que el documento es un NÚMERO de la revista `c`: su ISSN, una clave de número, una fecha en el nombre
+// del fichero, o el nombre de la cabecera en su título acompañado de un número.
+function pareceNumeroDe(d, c, { soloFuertes = false } = {}) {
+    if (tieneSenalDeNumero(d, c)) return true;
+    // El título solo es una señal débil («Marketing - 11. ed.» no es el nº 11 de la revista «Marketing»).
+    if (soloFuertes || /d+s*(.|ª|a)?s*(ed|edici[oó]n|edition)/i.test(String(d.titulo || ''))) return false;
+    const titulo = String(d.titulo || '');
+    const palabrasCabecera = [...palabrasDeSerie(c.nombre)];
+    const palabrasTitulo = palabrasDeSerie(titulo);
+    return palabrasCabecera.length > 0 && palabrasCabecera.every((p) => palabrasTitulo.has(p)) && RE_NUMERO.test(titulo);
+}
+
+
+/**
+ * Señales FUERTES de que el documento es un número de la revista `c`: su mismo ISSN, una clave de número, una fecha
+ * en el nombre o el título, o un título que es solo la cabecera y un número («Nueva Dimensión 20»).
+ */
+function tieneSenalDeNumero(d, c) {
+    if (c && c.issn && d.issn && String(d.issn).toUpperCase() === String(c.issn).toUpperCase()) return true;
+    if (d.clave_numero && d.tipo_recurso === 'revista') return true;
+    if (d.nombre_archivo && parsearNombre(d.nombre_archivo).esFechada) return true;
+    if (RE_FECHA_NUMERO.test(String(d.titulo || '')) || RE_FECHA_NUMERO.test(String(d.nombre_archivo || '').replace(/\d{10,13}/g, ''))) return true;
+    if (c) {
+        const sobra = [...palabrasDeSerie(d.titulo)].filter((w) => !palabrasDeSerie(c.nombre).has(w));
+        if (!sobra.length && palabrasDeSerie(c.nombre).size && RE_NUMERO.test(String(d.titulo || ''))) return true;
+    }
+    return false;
+}
+
+// Un número de revista SUELTO (de alguna cabecera): tiene clave, ISSN o fecha en el nombre.
+const esNumeroDeRevista = (d) => !!(d.clave_numero || d.issn || (d.nombre_archivo && parsearNombre(d.nombre_archivo).esFechada));
+
+/** 'mal-tipo' (el documento está mal catalogado) · 'fuera' (está mal metido en la colección) · null (no se sabe). */
+function diagnosticar(d, c, tipoColeccion) {
+    // La colección es el propio documento («Essays on the Theory of Numbers», «El extraño caso del doctor Jekyll…»):
+    // nació de su título. Sale, y la colección vacía se retira.
+    if ((miembrosDe.get(String(c._id)) || []).length === 1 && d.tipo_recurso === 'libro' && mismaSerie(c.nombre, d.titulo)) return 'fuera';
+    if (tipoColeccion === 'revista') {
+        if (d.tipo_recurso === 'libro') {
+            // Señales fuertes de número (ISSN, clave, fecha en el nombre): es un número suyo tipado como libro.
+            if (pareceNumeroDe(d, c, { soloFuertes: true })) return 'mal-tipo';
+            if (d.isbn) return 'fuera';                    // un libro de verdad, metido por el nombre de una carpeta
+            if (pareceNumeroDe(d, c)) return 'mal-tipo';   // solo el título lo sugiere, y no tiene ISBN
+        }
+        return null;
+    }
+    // Serie de libros.
+    if (d.tipo_recurso === 'revista') {
+        // Un libro con ISBN tipado como revista (como «Rosen»)… salvo que tenga señales de número: entonces el ISBN
+        // es el que le atribuyó por error un catálogo de libros («Más Allá 1» con el de un manual de español).
+        if (d.isbn && !esNumeroDeRevista(d) && !pareceNumeroDe(d, c)) return 'mal-tipo';
+        if (d.isbn) return null;
+        if (esNumeroDeRevista(d) && !(c.issn && d.issn === c.issn)) return 'fuera';   // un número de otra revista
+        return null;
+    }
+    if (d.tipo_recurso === 'articulo') return 'fuera';      // un artículo no es un libro de la serie
+    return null;
+}
+
+const motivoFuera = (d, tipo) => (tipo === 'revista'
+    ? 'es un libro con ISBN en la cabecera de una revista (llegó por el nombre de una carpeta)'
+    : d.tipo_recurso === 'articulo' ? 'es un artículo, no un libro de la serie' : 'es un número de otra revista, no un libro de la serie');
+
+if (FASES.has('2')) {
+    const COMPATIBLES = { revista: new Set(['revista', 'articulo']), libro: new Set(['libro', 'capitulo', 'apuntes']) };
+    const esComic = (d) => ['comic', 'novela-grafica', 'tebeo', 'historieta', 'manga'].includes(String(d.naturaleza || '').toLowerCase());
+    const aRevista = [...colecciones.values()].filter((c) => c._aRevista);
+    let fuera = 0;
+    for (const c of aRevista) {
+        if (EJECUTAR) {
+            await colCol.updateOne({ _id: c._id }, {
+                $set: { tipo: 'revista', fecha_actualizacion: new Date() },
+                $push: { deshacer: { fecha: new Date(), origen: ORIGEN, antes: { tipo: c.tipo ?? null } } },
+            });
+        }
+        c.tipo = 'revista';
+    }
+    for (const [id, c] of colecciones) {
+        const tipo = c.tipo === 'revista' ? 'revista' : (!c.tipo || c.tipo === 'libro') ? 'libro' : null;
+        // (Las de carpeta las deshace la fase 4: sus desajustes no importan.)
+        if (!tipo || clase.get(id) === 'retirada' || clase.get(id) === 'carpeta') continue;
+        for (const d of [...(miembrosDe.get(id) || [])]) {
+            if (COMPATIBLES[tipo].has(d.tipo_recurso) || esComic(d)) continue;
+            if (c._serieDeLibros && d.tipo_recurso === 'libro') continue;
+            // DOS DIAGNÓSTICOS POSIBLES (regla del usuario, 2-oct): o el DOCUMENTO está mal catalogado (un número de
+            // esa revista tipado como libro, un libro con ISBN tipado como revista), o está MAL METIDO en la colección
+            // (un libro en la cabecera de una revista por el nombre de una carpeta, un número de otra revista o un
+            // artículo en una serie de libros). Se decide por sus señales; sin señales claras, a revisar.
+            const diag = diagnosticar(d, c, tipo);
+            if (diag === 'fuera' && d.coleccion_fuente !== 'manual') {
+                fuera++;
+                c._tocada = true;
+                (fuera <= 25 ? di : anota)(`      fuera: «${String(d.titulo).slice(0, 60)}» (${d.tipo_recurso}${d.isbn ? ', ISBN' : ''}) de «${c.nombre}»`);
+                await moverLibro(d, null, { motivo: `no pertenece a «${c.nombre}»: ${motivoFuera(d, tipo)}` });
+                continue;
+            }
+            if (diag === 'mal-tipo') malTipados.push({ d, c, debe: tipo === 'revista' ? 'revista' : 'libro' });
+            else desajustados.push({ d, c });
+        }
+    }
+    // Las que se han quedado vacías (el libro que les daba nombre ha salido): se retiran.
+    let vaciadas = 0;
+    for (const [id, c] of colecciones) {
+        if (clase.get(id) === 'retirada' || clase.get(id) === 'carpeta' || TIPOS_INTOCABLES.has(c.tipo) && c.tipo !== 'revista') continue;
+        if ((miembrosDe.get(id) || []).length || !(c._tocada)) continue;
+        vaciadas++;
+        await retirarColeccion(c, 'vacía tras sacar los documentos que no eran de ella');
+    }
+    di(`FASE 2b · colecciones de libros que son revistas (pasan a tipo revista): ${aRevista.length}`);
+    for (const c of aRevista) di(`   «${c.nombre}» (${(miembrosDe.get(String(c._id)) || []).length})`);
+    const alarmas = [...malTipados, ...desajustados].length + fuera;
+    di(`          ⚠ documentos de un tipo distinto del de su ISSN/colección (libro bajo una revista o al revés): ${alarmas}`);
+    di(`          colecciones que se quedan vacías y se retiran: ${vaciadas}`);
+    di(`          mal metidos en la colección (salen de ella): ${fuera} · mal catalogados (el tipo del documento está mal): ${malTipados.length} · sin señales claras, a revisar: ${desajustados.length}`);
+    const porDebe = { revista: malTipados.filter((x) => x.debe === 'revista'), libro: malTipados.filter((x) => x.debe === 'libro') };
+    di(`          · deberían ser REVISTA (números tipados como libro): ${porDebe.revista.length} · deberían ser LIBRO (con ISBN, tipados como revista): ${porDebe.libro.length}`);
+    for (const { d, c, debe } of malTipados.slice(0, 15)) di(`      «${String(d.titulo).slice(0, 60)}» en «${c.nombre}» → ${debe}`);
+    for (const { d, c, debe } of malTipados.slice(15)) anota(`      «${String(d.titulo).slice(0, 60)}» en «${c.nombre}» → ${debe}`);
+    const porColeccion = new Map();
+    for (const { d, c } of desajustados) {
+        const k = `«${c.nombre}» (${c.tipo === 'revista' ? 'revista' : 'libros'}) ← ${d.tipo_recurso}`;
+        porColeccion.set(k, (porColeccion.get(k) || 0) + 1);
+    }
+    const orden = [...porColeccion].sort((a, b) => b[1] - a[1]);
+    for (const [k, n] of orden.slice(0, 20)) di(`   ${String(n).padStart(5)} · ${k}`);
+    for (const [k, n] of orden.slice(20)) anota(`   ${String(n).padStart(5)} · ${k}`);
+    // El tipo NO se cambia aquí: cambiarlo mueve la carpeta (libros/ ↔ revistas/) y conviene mirarlo antes. Una
+    // selección por tipo correcto, para aplicarlo en bloque con «🔀 Cambiar tipo».
+    if (EJECUTAR && porDebe.revista.length) {
+        await guardarSeleccion('Debería ser revista (según su colección)',
+            'Documentos tipados como libro dentro de la cabecera de una revista, con señales de ser un número suyo (mismo ISSN, fecha o número en el nombre, título de la cabecera). Revísalos y usa 🔀 Cambiar tipo → Revista (scripts/reorganizar-colecciones, fase 2b).',
+            porDebe.revista.map((x) => x.d._id));
+    }
+    if (EJECUTAR && porDebe.libro.length) {
+        await guardarSeleccion('Debería ser libro (según su colección)',
+            'Documentos tipados como revista dentro de una serie de libros y con ISBN propio: son libros catalogados como revista. Revísalos y usa 🔀 Cambiar tipo → Libro y después 🔎 Extraer ISBN (scripts/reorganizar-colecciones, fase 2b).',
+            porDebe.libro.map((x) => x.d._id));
+    }
+    if (EJECUTAR && desajustados.length) {
+        await guardarSeleccion('Tipo distinto del de su colección',
+            'Documentos cuyo tipo no casa con el de su colección: un número de revista en una serie de libros, un libro sin ISBN en la cabecera de una revista… (scripts/reorganizar-colecciones, fase 2b). Corrige el tipo del documento (🔀 Cambiar tipo) o sácalo de la colección.',
+            desajustados.map((x) => x.d._id));
+    }
+    di('');
 }
 
 // ─── FASE 3: libro a libro, por la autoridad ─────────────────────────────────────────────────────────────

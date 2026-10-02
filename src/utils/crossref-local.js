@@ -45,6 +45,7 @@ function abrir() {
             stmts.serie = db.prepare('SELECT issn, nombre, n FROM series WHERE issn = ?');
             stmts.seriePorNombre = db.prepare('SELECT issn, nombre, n FROM series WHERE nombre = ? COLLATE NOCASE ORDER BY n DESC');
         } catch { stmts.serie = null; stmts.seriePorNombre = null; }
+        try { stmts.revista = db.prepare('SELECT issn, titulo, editorial, n FROM revistas WHERE issn = ?'); } catch { stmts.revista = null; }
         console.log(`📘 Crossref local conectado: ${ruta}`);
     } catch (e) {
         console.warn(`⚠️  Crossref local no disponible (${e.message}).`);
@@ -112,6 +113,13 @@ export function serieCrossrefLocal(issn) {
  * Las series de Crossref con ese NOMBRE exacto (sin distinguir mayúsculas), la más nutrida primero. Para cuando la
  * serie del Fichero no trae ISSN (p. ej. consultar-serie.js con «Graduate texts in mathematics»).
  */
+/** La REVISTA con ese ISSN según Crossref ({ issn, titulo, editorial, n } — n = artículos), o null. */
+export function revistaCrossrefLocal(issn) {
+    if (!abrir() || !issn || !stmts.revista) return null;
+    const r = stmts.revista.get(String(issn).toUpperCase());
+    return r ? { ...r, titulo: txt(r.titulo), editorial: txt(r.editorial) } : null;
+}
+
 export function seriesCrossrefPorNombre(nombre) {
     if (!abrir() || !nombre || !stmts.seriePorNombre) return [];
     return stmts.seriePorNombre.all(String(nombre).trim());
