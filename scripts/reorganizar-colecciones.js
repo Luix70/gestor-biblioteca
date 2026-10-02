@@ -137,9 +137,16 @@ for (const [id, c] of colecciones) {
     // Lo PRIMERO es de qué es su ISSN (Crossref/Fichero): eso decide el tipo de la colección, y los miembros que no
     // casen son los sospechosos — no al revés.
     c._naturaleza = naturalezaISSN(c.issn);
-    if (c.tipo === 'revista' && c._naturaleza === 'serie') {
-        const nombreSerie = serieCrossrefLocal(c.issn)?.nombre || seriesDeISSN(c.issn)[0]?.nombre || c.nombre;
-        c._serieDeLibros = { nombre: mismaSerie(nombreSerie, c.nombre) ? c.nombre : nombreSerie, issn: c.issn, numero: null, registros: 0 };
+    // También una colección de LIBROS cuyo nombre no es el de la serie de su ISSN (el título de un libro: «Algebraic
+    // Curves and Riemann Surfaces» con el ISSN de «Graduate Studies in Mathematics»): toma el nombre o se funde.
+    const nombreSerieIssn = c._naturaleza === 'serie' ? (serieCrossrefLocal(c.issn)?.nombre || seriesDeISSN(c.issn)[0]?.nombre || null) : null;
+    // En una de libros, solo si sus propios libros lo confirman (la mitad o más dicen esa serie por su ISBN): una carpeta
+    // grande con un ISSN pegado de un solo libro («Biologia», 229 libros, ISSN de «Synthesis Lectures on Biomedical
+    // Engineering») no es esa serie.
+    const confirmanIssn = nombreSerieIssn ? miembros.filter((d) => d._series.some((x) => (x.issn && x.issn === c.issn) || mismaSerie(x.nombre, nombreSerieIssn))).length : 0;
+    if (nombreSerieIssn && (c.tipo === 'revista'
+        || ((!c.tipo || c.tipo === 'libro') && !mismaSerie(nombreSerieIssn, c.nombre) && miembros.length && confirmanIssn / miembros.length >= 0.5))) {
+        c._serieDeLibros = { nombre: mismaSerie(nombreSerieIssn, c.nombre) ? c.nombre : nombreSerieIssn, issn: c.issn, numero: null, registros: 0 };
     } else if (c.tipo === 'revista' && c.issn && !c._naturaleza && miembros.length >= 2 && libros / miembros.length >= 0.8) {
         const nombreAutoridad = serieCrossrefLocal(c.issn)?.nombre || seriesDeISSN(c.issn)[0]?.nombre || null;
         // Solo si el ISSN es de una SERIE DE LIBROS conocida (Crossref/Fichero): «Popular Photography» o «MSDN» son
@@ -349,7 +356,7 @@ if (FASES.has('2')) {
     }
     const fusiones = [...grupos.entries()].filter(([, g]) => g.length > 1);
     const seriesDeLibros = [...colecciones.values()].filter((c) => c._serieDeLibros && clase.get(String(c._id)) === 'editorial');
-    di(`FASE 2 · «revistas» que son series de libros (pasan a tipo libro, con el nombre de su ISSN): ${seriesDeLibros.length}`);
+    di(`FASE 2 · colecciones de una serie de libros con otro tipo o con otro nombre (pasan a tipo libro y al nombre de su ISSN, o se funden con la que ya lo tiene): ${seriesDeLibros.length}`);
     for (const c of seriesDeLibros) di(`   «${c.nombre}» (ISSN ${c.issn}, ${(miembrosDe.get(String(c._id)) || []).length} libros) → «${c._serieDeLibros.nombre}»`);
     const renombres = [...grupos.values()].filter((g) => g.length === 1 && g[0].serie && (pareceArtefacto(g[0].c.nombre) || g[0].c._serieIssn)
         && !pareceArtefacto(g[0].serie.nombre) && g[0].serie.nombre !== g[0].c.nombre);
@@ -362,7 +369,7 @@ if (FASES.has('2')) {
         const p2 = progreso(seriesDeLibros.length + fusiones.length + renombres.length, 'Fase 2');
         for (const c of seriesDeLibros) {
             p2.paso(c.nombre);
-            if (EJECUTAR) {
+            if (EJECUTAR && c.tipo === 'revista') {
                 // El inventario de números (numeros[]) era de revista: queda en el diario, no en la colección.
                 await colCol.updateOne({ _id: c._id }, {
                     $set: { tipo: 'libro', fecha_actualizacion: new Date() },
@@ -376,13 +383,18 @@ if (FASES.has('2')) {
         for (const [k, g] of fusiones) {
             // Se queda la que ya se llama como la serie; si no, la más grande.
             const tam = (c) => (miembrosDe.get(String(c._id)) || []).length;
-            const canonica = (g.find(({ c }) => claveSerie(c.nombre) === k) || [...g].sort((a, b) => tam(b.c) - tam(a.c))[0]).c;
+            let canonica = (g.find(({ c }) => claveSerie(c.nombre) === k) || [...g].sort((a, b) => tam(b.c) - tam(a.c))[0]).c;
             p2.paso(canonica.nombre);
             const serie = g.find((x) => x.serie)?.serie;
-            if (serie && pareceArtefacto(canonica.nombre)) await renombrar(canonica, serie);
-            if (EJECUTAR && serie?.issn && !canonica.issn) await colCol.updateOne({ _id: canonica._id }, { $set: { issn: serie.issn } });
+            if (serie && pareceArtefacto(canonica.nombre)) canonica = await renombrar(canonica, serie);
+            // El ISSN es único: solo se pone si ninguna otra colección lo tiene ya.
+            if (EJECUTAR && serie?.issn && !canonica.issn && !(await colCol.findOne({ issn: serie.issn, _id: { $ne: canonica._id } }))) {
+                await colCol.updateOne({ _id: canonica._id }, { $set: { issn: serie.issn } });
+                canonica.issn = serie.issn;
+            }
             for (const { c } of g) {
-                if (c === canonica) continue;
+                // (La canónica pudo fundirse al renombrarla en otra que ya tenía ese nombre: entonces ya está retirada.)
+                if (c === canonica || clase.get(String(c._id)) === 'retirada') continue;
                 const miembros = [...(miembrosDe.get(String(c._id)) || [])];
                 for (const d of miembros) await moverLibro(d, canonica, { motivo: `«${c.nombre}» y «${canonica.nombre}» son la misma serie` });
                 await retirarColeccion(c, `fundida en «${canonica.nombre}» (misma serie)`, miembros);
@@ -399,9 +411,33 @@ if (FASES.has('2')) {
 }
 
 /** Renombra una colección al nombre de su serie (diario en la colección y nombre al día en sus libros). */
+/**
+ * Renombra una colección al nombre de su serie. Si ese nombre (o su ISSN) ya lo tiene OTRA colección, es la misma serie
+ * catalogada dos veces: no se renombra (el índice único lo impediría — error E11000 del 2-oct con «Graduate Studies in
+ * Mathematics»), se FUNDE en la que ya existe. Devuelve la colección que queda.
+ */
 async function renombrar(c, serie) {
-    if (c.nombre === serie.nombre) return;
-    if (!EJECUTAR) { c.nombre = serie.nombre; return; }
+    if (c.nombre === serie.nombre) return c;
+    const mismoNombre = (a, b) => String(a || '').localeCompare(String(b || ''), 'es', { sensitivity: 'base' }) === 0;
+    const otra = [...colecciones.values()].find((x) => x !== c && clase.get(String(x._id)) !== 'retirada'
+        && (mismoNombre(x.nombre, serie.nombre) || (serie.issn && x.issn === serie.issn)))
+        || (EJECUTAR ? await colCol.findOne({
+            _id: { $ne: c._id },
+            $or: [{ nombre: serie.nombre }, ...(serie.issn ? [{ issn: serie.issn }] : [])],
+        }, { collation: { locale: 'es', strength: 1 } }) : null);
+    if (otra) {
+        if (!colecciones.has(String(otra._id))) colecciones.set(String(otra._id), otra);
+        clase.set(String(otra._id), 'editorial');
+        if (EJECUTAR && serie.issn && !otra.issn && !(await colCol.findOne({ issn: serie.issn, _id: { $ne: otra._id } }))) {
+            await colCol.updateOne({ _id: otra._id }, { $set: { issn: serie.issn, fecha_actualizacion: new Date() } });
+            otra.issn = serie.issn;
+        }
+        const miembros = [...(miembrosDe.get(String(c._id)) || [])];
+        for (const d of miembros) await moverLibro(d, otra, { motivo: `«${c.nombre}» y «${otra.nombre}» son la misma serie` });
+        await retirarColeccion(c, `fundida en «${otra.nombre}» (misma serie)`, miembros);
+        return otra;
+    }
+    if (!EJECUTAR) { c.nombre = serie.nombre; return c; }
     const antes = { nombre: c.nombre, issn: c.issn ?? null };
     await colCol.updateOne({ _id: c._id }, {
         $set: { nombre: serie.nombre, ...(serie.issn && !c.issn ? { issn: serie.issn } : {}), fecha_actualizacion: new Date() },
@@ -410,6 +446,7 @@ async function renombrar(c, serie) {
     await bib.updateMany({ coleccion: c._id }, { $set: { coleccion_nombre: serie.nombre } });
     for (const d of miembrosDe.get(String(c._id)) || []) d.coleccion_nombre = serie.nombre;
     c.nombre = serie.nombre;
+    return c;
 }
 
 // ─── FASE 2b: cada colección con documentos de su tipo ───────────────────────────────────────────────────

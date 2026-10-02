@@ -106,7 +106,8 @@ export function librosDeSerieCrossrefLocal(issn, { max = 5000 } = {}) {
 
 export function serieCrossrefLocal(issn) {
     if (!abrir() || !issn) return null;
-    return stmts.serie?.get(String(issn).toUpperCase()) || null;
+    const r = stmts.serie?.get(String(issn).toUpperCase());
+    return r ? { ...r, nombre: txt(r.nombre) } : null;   // «Ocean Engineering &amp; Oceanography» → «&»
 }
 
 /**
@@ -122,5 +123,5 @@ export function revistaCrossrefLocal(issn) {
 
 export function seriesCrossrefPorNombre(nombre) {
     if (!abrir() || !nombre || !stmts.seriePorNombre) return [];
-    return stmts.seriePorNombre.all(String(nombre).trim());
+    return stmts.seriePorNombre.all(String(nombre).trim()).map((r) => ({ ...r, nombre: txt(r.nombre) }));
 }
