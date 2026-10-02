@@ -12,9 +12,9 @@
  * Consumidores: scripts/reorganizar-colecciones.js y la ingesta (motor-enriquecimiento: la serie de la autoridad
  * gana a la colección de carpeta).
  */
-import { seriesDeISBN, seriesDeISSN, buscarSeries, disponible as seriesDisponible } from './buscador-series.js';
+import { seriesDeISBN, seriesDeISSN, buscarSeries, numeroQueEsDelNombre, disponible as seriesDisponible } from './buscador-series.js';
 import { libroCrossrefLocal, seriesCrossrefPorNombre, crossrefLocalDisponible, revistaCrossrefLocal, serieCrossrefLocal } from './crossref-local.js';
-import { limpiarNombreColeccion } from './colecciones.js';
+import { limpiarNombreColeccion, aliasColeccion } from './colecciones.js';
 import { tituloComparable, mismoLibroHolgado } from './titulo-libro.js';
 
 // Palabras que no distinguen una serie de otra («Colección», «Series», «the», «de»…). «Biblioteca» se queda:
@@ -120,6 +120,15 @@ export function seriesDeAutoridad(isbn, { titulo = null } = {}) {
     if (seriesDisponible()) {
         for (const s of seriesDeISBN(isbn)) {
             if (titulo && !tituloCompatible(titulo, s.titulo_libro)) continue;
+            // Un número que llevan TODOS los libros de la serie (de esa editorial) no es el del libro. Si tiene dos cifras
+            // o más, es del NOMBRE («Post 45», «Biblio 17», «Colecciones MAPFRE 1492»); si es una sola, suele ser un «1»
+            // puesto por defecto («Lonely Planet guías de país 1», 346 libros): se descarta.
+            const delNombre = s.numero && numeroQueEsDelNombre(s.clave, s.editorial) === s.numero;
+            if (delNombre) {
+                const nombreSerie = String(s.numero).length >= 2 ? `${limpiarNombreColeccion(s.nombre)} ${s.numero}` : limpiarNombreColeccion(s.nombre);
+                out.push({ nombre: aliasColeccion(nombreSerie), numero: null, issn: s.issn || null, registros: s.n || 0, fuente: 'fichero' });
+                continue;
+            }
             out.push({ nombre: limpiarNombreColeccion(s.nombre), numero: s.numero || null, issn: s.issn || null, registros: s.n || 0, fuente: 'fichero' });
         }
     }

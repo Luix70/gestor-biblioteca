@@ -43,6 +43,8 @@ function abrir() {
             FROM series_fts f JOIN series s ON s.rowid = f.rowid WHERE series_fts MATCH ? ORDER BY bm25(series_fts), s.n DESC LIMIT ?`);
         stmts.porClave = db.prepare('SELECT * FROM series WHERE clave = ?');
         stmts.porIssn = db.prepare('SELECT * FROM series WHERE issn = ? ORDER BY n DESC');
+        stmts.numerosDeEditorial = db.prepare(`SELECT numero, count(*) AS n FROM libros
+            WHERE clave = ? AND editorial = ? AND numero IS NOT NULL GROUP BY numero`);
         stmts.libros = db.prepare(`SELECT numero, orden, subserie, isbn, titulo, autores, editorial, anio, idioma, fuente
             FROM libros WHERE clave = ? ORDER BY orden IS NULL, orden, anio`);
     } catch (e) {
@@ -76,6 +78,17 @@ export function buscarSeries(texto, { limite = 10 } = {}) {
 export function seriesDeISSN(issn) {
     if (!abrir() || !issn) return [];
     try { return stmts.porIssn.all(String(issn).toUpperCase()); } catch { return []; }
+}
+
+/**
+ * Si TODOS los libros numerados de esa serie y esa editorial llevan el MISMO número (3 o más), ese número es parte
+ * del NOMBRE de la serie, no el del libro: «Post 45» de Stanford (Post•45) se partía en «Post» nº 45. Devuelve el
+ * número, o null.
+ */
+export function numeroQueEsDelNombre(clave, editorial) {
+    if (!abrir() || !clave || !editorial) return null;
+    const filas = stmts.numerosDeEditorial.all(clave, editorial);
+    return filas.length === 1 && filas[0].n >= 3 ? filas[0].numero : null;
 }
 
 /** La ficha de una serie por su clave. */

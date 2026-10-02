@@ -182,7 +182,18 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
 const ALIAS_COLECCION = new Map([
     ['alianza cien', 'Alianza Cien'],
     ['alianza 100', 'Alianza Cien'],
+    // «Post•45» (Stanford UP): OpenLibrary la escribe «Post 45», y el 45 se tomaba por el número del libro (2-oct).
+    ['post 45', 'Post45'],
+    ['post*45', 'Post45'],
+    ['post•45', 'Post45'],
+    ['post45', 'Post45'],
 ]);
+
+/** El nombre canónico de una colección si tiene alias («Post 45» → «Post45»); si no, el mismo. */
+export function aliasColeccion(nombre) {
+    const limpio = String(nombre || '').trim();
+    return ALIAS_COLECCION.get(limpio.toLowerCase()) || limpio;
+}
 
 // Marcas diacríticas combinantes (para quitar acentos), vía new RegExp desde ASCII (regla del proyecto).
 const RE_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
