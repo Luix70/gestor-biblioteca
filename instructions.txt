@@ -1270,6 +1270,14 @@ de ficheros clasificado por CDU.
     una editorial real distinta NUNCA la cambia: va a la selección «Editorial a revisar (prefijo ISBN)» (890, la
     mayoría sellos del mismo grupo). Salta los ISBN sospechosos y los compartidos por títulos distintos. La editorial de la COLECCIÓN o la escrita en el título ya no la rescata un
     traductor coincidente («La hija del capitán», colección de Anaya, recibía la edición de Paulinas).
+    LIBROS CATALOGADOS COMO REVISTA (2026-10-02): `scripts/libros-como-revista.js` (seco por defecto; `--ejecutar`,
+    `--limite N`, `--id <id>,…`). De los documentos tipados como revista, pasan a libro los que tienen el ISSN de una
+    SERIE DE LIBROS (Crossref/Fichero) y los que tienen ISBN propio sin ninguna señal de número (fecha año-mes, mes o
+    «nº» en el título, clave AAAA-MM/nNNN, título que es solo un número o lleva el nombre de su cabecera); los cómics y
+    los gordos sin ISBN van a la selección «¿Libro catalogado como revista?». A cada libro: tipo libro, fuera clave/mes/
+    nº, su ISSN a la colección de la serie (nunca al libro) y fuera del inventario de la cabecera; luego Extraer ISBN y
+    Investigar CDU forzados (sin IA), carpeta a libros/, sidecars e índice. Diario `deshacer[]` (origen
+    «libros-como-revista»); selección «Pasados de revista a libro». Mueve carpetas: en el NAS.
     SERIE COMPLETA DE UNA COLECCIÓN (2026-10-02). En la ficha de una colección de libros:
       · «👻 Ver colección completa» intercala, cada uno en su número, CARÁTULAS FANTASMA (grises, borde discontinuo;
         cubierta de OpenLibrary por ISBN si la hay) de los libros de la serie que no tienes; tocar una abre sus datos
