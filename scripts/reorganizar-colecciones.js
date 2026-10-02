@@ -301,6 +301,22 @@ async function coleccionDeSerie(serie) {
     let c = [...colecciones.values()].find((x) => clase.get(String(x._id)) === 'editorial'
         && ((serie.issn && x.issn === serie.issn) || claveSerie(x.nombre) === k
             || mismoNombreDeSerie(x.nombre, serie.nombre, { editoriales: editorialesDe(x) })));
+    // Si el ISSN de la serie lo tiene pegado una colección que NO es editorial (una carpeta), resolverCabecera la
+    // encontraría por ese ISSN y la RENOMBRARÍA a la serie, sin diario (su saneo de nombres): así «English Literature»,
+    // una carpeta de 1.233 libros con el ISSN 0929-7316, se convirtió el 2-oct en «Benjamins Translation Library». Se
+    // le quita antes el ISSN (con diario) y la serie tiene su propia colección.
+    if (!c && serie.issn) {
+        const conIssn = [...colecciones.values()].find((x) => x.issn === serie.issn && clase.get(String(x._id)) !== 'editorial');
+        if (conIssn) {
+            if (EJECUTAR) {
+                await colCol.updateOne({ _id: conIssn._id }, {
+                    $unset: { issn: '' },
+                    $push: { deshacer: { fecha: new Date(), origen: ORIGEN, antes: { issn: conIssn.issn } } },
+                });
+            }
+            delete conIssn.issn;
+        }
+    }
     if (!c && EJECUTAR) {
         const { _id } = await resolverCabecera(db, { nombre: serie.nombre, issn: serie.issn || null, tipo: 'libro' });
         c = await colCol.findOne({ _id });
