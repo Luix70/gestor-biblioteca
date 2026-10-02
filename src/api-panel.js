@@ -84,6 +84,7 @@ import { altaPorISBN } from './servicio-ingesta.js';
 import { medirPortadaRemota, portadasPorISBN } from './utils/portadas-isbn.js';
 import { buscarUnISBN, iniciarLoteISBN, estadoLoteISBN } from './utils/lote-isbn.js';
 import { confirmarEditorial } from './utils/confirmar-editorial.js';
+import { serieCompletaDeColeccion } from './utils/serie-completa.js';
 
 // Proyección mínima de un documento para mostrarlo como "tomo" en la vista de obra.
 const PROY_VOL = { titulo: 1, volumen_titulo: 1, volumen_numero: 1, formatos: 1, isbn: 1, portada: 1, paginas: 1, tipo_recurso: 1, nsfw: 1, locked: 1, nfc: 1 };
@@ -1657,6 +1658,27 @@ export function rutasPanel() {
 
     // Detalle de UNA colección: cabecera/serie resuelta (editorial/CDU+descripción) + sus miembros
     // (números de revista en orden cronológico, o libros de la serie) para el drill-down del panel.
+    // ── LA SERIE COMPLETA de una colección (utils/serie-completa.js): todos sus libros según el Fichero (con número) y
+    //    Crossref (por ISSN), con los que tienes marcados y los huecos. Para «👻 Ver colección completa» (carátulas
+    //    fantasma) y «📋 Lista» en la ficha de la colección. Local, sin red ni IA. Los enlaces para conseguir lo que
+    //    falta (FUENTES_COPIA) solo para administradores, como en Descubrir. ──
+    r.get('/colecciones/:id/completa', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const r2 = await serieCompletaDeColeccion(db, new ObjectId(req.params.id));
+            if (r2.ok && r2.disponible && req.usuario?.rol === 'admin') {
+                const fuentes = fuentesCopia();
+                for (const x of [...r2.numeradas, ...r2.sin_numero]) {
+                    if (x.tengo) continue;
+                    const consulta = encodeURIComponent(x.isbn || x.titulo || '');
+                    x.enlaces = fuentes.map((f) => ({ nombre: f.nombre, url: String(f.url).replace('{q}', consulta) }));
+                }
+            }
+            res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
     r.get('/colecciones/:id', async (req, res) => {
         try {
             if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });

@@ -2017,6 +2017,13 @@ function pintarColeccion(r) {
       ? `<button class="btn" id="colNumerar" title="Asignar o corregir el nº de cada libro dentro de la colección">🔢 Numerar</button>
          <button class="btn" id="colLomos" title="Foto de los lomos → la IA lee título y nº de cada uno y renumera la colección (y adjunta el recorte del lomo)">📷 Numerar por lomos</button>${nfcOrdBtn}`
       : '';
+  // «Ver colección completa»: intercala carátulas FANTASMA de los libros de la serie que no tienes (según el Fichero y
+  // Crossref), en su orden; «Lista»: los tomos de la serie con ✓ en los que tienes. Solo series de libros.
+  const completaActiva = !!(_colCompleta && _colCompleta.id === String(c._id) && _colCompleta.activo && _colCompleta.datos);
+  const completaBtns = !esRev && !esTrans
+    ? `<button class="btn${completaActiva ? ' pri' : ''}" id="colCompleta" title="Mostrar también, como carátulas fantasma, los libros de la serie que NO tienes (según el Fichero y Crossref), cada uno en su número. Vuelve a pulsar para ocultarlos.">👻 ${completaActiva ? 'Ocultar los que faltan' : 'Ver colección completa'}</button>
+       <button class="btn" id="colLista" title="Lista de todos los libros de la serie, con ✓ en los que tienes y enlaces para buscar los que faltan">📋 Lista</button>`
+    : '';
   const tipoLabel = esRev ? '📰 Revista (cabecera)' : esTrans ? '🎬 Colección transmedia' : '📚 Serie de libros';
   const rango = rangoFechas(c.fecha_inicio, c.fecha_fin);
   const sub = [c.issn ? 'ISSN ' + c.issn : '', c.editorial, rango].filter(Boolean).map(esc).join(' · ') || '—';
@@ -2045,9 +2052,12 @@ function pintarColeccion(r) {
       ? `<button class="btn" style="padding:1px 7px;font-size:11px;line-height:1.6" data-renum="${esc(d._id)}" title="Cambiar el nº en la colección">${esc(lbl)} ✏️</button>`
       : esc(d.coleccion_numero ? 'nº ' + d.coleccion_numero : '');
   };
-  const cards = r.miembros.length
-    ? r.miembros.map((d) => miembroCard(d, numeroChip(d))).join('')
-    : `<div class="empty">Sin ${esRev ? 'números' : esTrans ? 'documentos' : 'libros'} registrados</div>`;
+  const cards = completaActiva
+    ? tarjetasSerieCompleta(r, _colCompleta.datos, numeroChip)
+    : r.miembros.length
+      ? r.miembros.map((d) => miembroCard(d, numeroChip(d))).join('')
+      : `<div class="empty">Sin ${esRev ? 'números' : esTrans ? 'documentos' : 'libros'} registrados</div>`;
+  const resumenCompleta = completaActiva ? resumenSerieCompleta(_colCompleta.datos) : '';
   // Con colecciones grandes conviene FILTRAR + PAGINAR (868 documentos son mucho scroll). Los controles solo
   // aparecen si hay bastantes miembros; el filtrado es en CLIENTE por CSS (mostrar/ocultar) sin re-renderizar,
   // así no se pierde el cableado de selección ni se recargan las imágenes (lazy).
@@ -2082,7 +2092,7 @@ function pintarColeccion(r) {
   const secFichasLectura = ROL === 'admin' ? fichasLecturaSeccionHTML() : '';
   $('#p-detalle').innerHTML =
     head +
-    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${tituloGrid}${contadorHtml}</h3>${numBtn}</div>${chipsBar}${buscarBar}<div class="vol-grid" id="colGrid" style="margin-top:10px">${cards}</div>${pagerBar}</div>` +
+    `<div class="card"><div id="selbarDet"></div><div class="row" style="align-items:center;justify-content:space-between;gap:8px"><h3 style="margin:0">${tituloGrid}${contadorHtml}</h3><div class="row" style="gap:6px;flex-wrap:wrap">${completaBtns}${numBtn}</div></div>${resumenCompleta}${chipsBar}${buscarBar}<div class="vol-grid" id="colGrid" style="margin-top:10px">${cards}</div>${pagerBar}</div>` +
     secFichasLectura;
 
   // ── Filtro (texto + nivel/material) + paginación, todo en CLIENTE ──────────────────────────────────────
@@ -2137,6 +2147,12 @@ function pintarColeccion(r) {
     const d = r.miembros.find((m) => String(m._id) === b.dataset.renum);
     if (d) renumerarVolumenRapido({ tipo: 'coleccion', grupoId: c._id, docId: d._id, actual: d.coleccion_numero, titulo: d.titulo });
   }));
+  if ($('#colCompleta')) $('#colCompleta').onclick = () => alternarSerieCompleta(c);
+  if ($('#colLista')) $('#colLista').onclick = () => listaSerieCompleta(c);
+  // Carátula fantasma → qué libro es y dónde buscarlo.
+  if (completaActiva) {
+    $('#colGrid .vol.fantasma').forEach((el) => (el.onclick = () => fichaFantasma(_colCompleta.entradas[+el.dataset.fantasma])));
+  }
   if ($('#colNumerar')) $('#colNumerar').onclick = () => numerarColeccion();
   if ($('#colLomos')) $('#colLomos').onclick = () => numerarPorLomos();
   if ($('#colNfc')) $('#colNfc').onclick = () => ordenarColeccionPorNFC();
@@ -2146,6 +2162,131 @@ function pintarColeccion(r) {
   // escala a colecciones enormes). El servidor resuelve los miembros por `coleccion`. Mismo camino que el
   // «Mostrar en Catálogo» de la estantería de colecciones.
   if ($('#colVerCat')) $('#colVerCat').onclick = () => irBusquedaFiltro({ colecciones: c._id, etiqueta: '📚 ' + c.nombre });
+}
+
+// ── SERIE COMPLETA de una colección (GET /colecciones/:id/completa → utils/serie-completa.js) ─────────────────
+// Estado: { id, activo, datos, entradas } — entradas = las que pinta la rejilla (para abrir la ficha de un fantasma).
+let _colCompleta = null;
+
+async function cargarSerieCompleta(c) {
+  if (_colCompleta && _colCompleta.id === String(c._id) && _colCompleta.datos) return _colCompleta.datos;
+  const datos = await api('/colecciones/' + encodeURIComponent(c._id) + '/completa');
+  _colCompleta = { id: String(c._id), activo: false, datos, entradas: [] };
+  return datos;
+}
+
+async function alternarSerieCompleta(c) {
+  const btn = $('#colCompleta');
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = '👻 Buscando la serie…'; }
+    const datos = await cargarSerieCompleta(c);
+    if (!datos.disponible) {
+      toast(datos.motivo || 'No se conoce esta serie', 'warn');
+      if (btn) { btn.disabled = false; btn.textContent = '👻 Ver colección completa'; }
+      return;
+    }
+    _colCompleta.activo = !_colCompleta.activo;
+    pintarColeccion(_colR);
+  } catch (e) {
+    toast('No se pudo cargar la serie: ' + e.message, 'bad');
+    if (btn) { btn.disabled = false; btn.textContent = '👻 Ver colección completa'; }
+  }
+}
+
+// Línea de resumen sobre la rejilla: cuántos tienes y qué números de la serie no se conocen.
+function resumenSerieCompleta(d) {
+  const r = d.resumen || {};
+  const fuente = [d.serie && d.serie.nombre ? `«${esc(d.serie.nombre)}»` : '', d.serie && d.serie.issn ? 'ISSN ' + esc(d.serie.issn) : '']
+    .filter(Boolean).join(' · ');
+  const sinNum = r.sin_numero ? ` · ${r.sin_numero_tenidos} de ${r.sin_numero} sin número` : '';
+  const huecos = d.numeros_desconocidos
+    ? `<div class="muted" style="font-size:12px;margin-top:4px">Números de la serie que no sabemos cuáles son: ${esc(d.numeros_desconocidos)}</div>`
+    : '';
+  return `<div class="muted" style="font-size:13px;margin-top:6px">👻 Serie ${fuente}: tienes <b>${r.numeros_tenidos} de ${r.numeros_conocidos}</b> números conocidos${sinNum}.
+    Las carátulas en gris son las que faltan (toca una para buscarla).</div>${huecos}`;
+}
+
+// Las tarjetas en el orden de la serie: lo que tienes (su tarjeta de siempre; «fuera de la colección» si lo tienes
+// en otra) y, en su sitio, una carátula FANTASMA por cada libro que falta. Al final, tus libros de la colección que la
+// serie no recoge.
+function tarjetasSerieCompleta(r, d, numeroChip) {
+  const porId = new Map(r.miembros.map((m) => [String(m._id), m]));
+  const entradas = [...(d.numeradas || []), ...(d.sin_numero || [])];
+  _colCompleta.entradas = entradas;
+  const vistos = new Set();
+  const html = entradas.map((x, i) => {
+    if (x.tengo) {
+      const m = porId.get(String(x.tengo._id));
+      if (m) {
+        if (vistos.has(String(m._id))) return '';
+        vistos.add(String(m._id));
+        return miembroCard(m, numeroChip(m));
+      }
+      // Lo tienes, pero en otra colección (o en ninguna).
+      const etiqueta = (x.numero != null ? 'nº ' + esc(String(x.numero)) + ' ' : '') + '<span class="tag" title="Lo tienes, pero no está en esta colección">fuera de la colección</span>';
+      return miembroCard({ ...x.tengo, titulo: x.tengo.titulo }, etiqueta);
+    }
+    return tarjetaFantasma(x, i);
+  });
+  const resto = r.miembros.filter((m) => !vistos.has(String(m._id))).map((m) => miembroCard(m, numeroChip(m)));
+  return html.join('') + resto.join('');
+}
+
+// Carátula fantasma: la cubierta de OpenLibrary por ISBN (si la hay), en gris y con borde discontinuo — el mismo
+// aspecto que los tomos que faltan de una obra («vol falta»).
+function tarjetaFantasma(x, i) {
+  const cov = x.isbn
+    ? `<img src="https://covers.openlibrary.org/b/isbn/${encodeURIComponent(x.isbn)}-M.jpg?default=false" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.innerHTML='<div class=ph>👻</div>'">`
+    : '<div class="ph">👻</div>';
+  const n = x.numero != null ? 'nº ' + esc(String(x.numero)) : 'sin nº';
+  const buscar = normalizar([x.titulo, x.isbn].filter(Boolean).join(' '));
+  return `<div class="vol falta fantasma" data-fantasma="${i}" data-buscar="${esc(buscar)}" title="Falta: ${esc(x.titulo || '')}"><div class="cov">${cov}</div><div class="meta"><div class="n">${n} · <span class="muted">falta</span></div><div class="t">${esc(x.titulo || '—')}${x.anio ? ' (' + esc(String(x.anio)) + ')' : ''}</div></div></div>`;
+}
+
+// Ficha mínima de un libro que falta: datos y enlaces para conseguirlo (solo administradores los reciben).
+function fichaFantasma(x) {
+  if (!x) return;
+  const enlaces = (x.enlaces || []).map((e) => `<a class="btn" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(e.nombre)}</a>`).join(' ');
+  const fuentes = (x.fuentes || []).map((f) => ({ fichero: 'Fichero', crossref: 'Crossref', ficha: 'tus fichas' }[f] || f)).join(' · ');
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:460px">
+    <h3 style="margin-top:0">👻 ${esc(x.titulo || '—')}</h3>
+    <div class="muted">${x.numero != null ? 'Nº ' + esc(String(x.numero)) + ' de la serie · ' : ''}${x.anio ? esc(String(x.anio)) + ' · ' : ''}${x.isbn ? 'ISBN ' + esc(x.isbn) : 'sin ISBN'}${x.ediciones > 1 ? ' · ' + x.ediciones + ' ediciones' : ''}</div>
+    <div class="muted" style="font-size:12px;margin-top:4px">Según: ${esc(fuentes || '—')}</div>
+    ${enlaces ? `<div style="margin-top:12px"><div class="muted" style="font-size:12px;margin-bottom:6px">Buscar una copia (luego, déjala en el Inbox):</div><div class="row" style="gap:6px;flex-wrap:wrap">${enlaces}</div></div>` : ''}
+    <div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn" id="ffX">Cerrar</button></div>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#ffX').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+}
+
+// Lista de la serie: ✓ lo que tienes, · lo que falta; toca una fila para abrir el libro (si lo tienes) o su ficha
+// fantasma (si no).
+async function listaSerieCompleta(c) {
+  let d;
+  try { d = await cargarSerieCompleta(c); } catch (e) { toast('No se pudo cargar la serie: ' + e.message, 'bad'); return; }
+  if (!d.disponible) { toast(d.motivo || 'No se conoce esta serie', 'warn'); return; }
+  const entradas = [...(d.numeradas || []), ...(d.sin_numero || [])];
+  const fila = (x, i) => `<tr data-i="${i}" style="cursor:pointer;${x.tengo ? '' : 'opacity:.6'}">
+      <td style="padding:3px 6px">${x.tengo ? '✅' : '·'}</td>
+      <td style="padding:3px 6px;text-align:right" class="mono">${x.numero != null ? esc(String(x.numero)) : ''}</td>
+      <td style="padding:3px 6px">${esc(x.titulo || '—')}${x.tengo && !x.tengo.en_coleccion ? ' <span class="tag">fuera de la colección</span>' : ''}</td>
+      <td style="padding:3px 6px" class="muted">${x.anio ? esc(String(x.anio)) : ''}</td></tr>`;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:760px;max-height:90vh;overflow:auto">
+    <h3 style="margin-top:0">📋 ${esc(c.nombre)}</h3>
+    ${resumenSerieCompleta(d)}
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;font-size:13px">${entradas.map(fila).join('')}</table>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn" id="lsX">Cerrar</button></div>
+  </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#lsX').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#cmpModal tr[data-i]').forEach((tr) => (tr.onclick = () => {
+    const x = entradas[+tr.dataset.i];
+    if (x.tengo) { cerrarCmp(); verDoc(x.tengo._id); } else fichaFantasma(x);
+  }));
 }
 
 // Rango de años de publicación: «1920–1960», «1980–actualidad» (fin vacío), «?–1960» (solo fin), '' si nada.

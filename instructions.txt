@@ -1270,6 +1270,17 @@ de ficheros clasificado por CDU.
     una editorial real distinta NUNCA la cambia: va a la selección «Editorial a revisar (prefijo ISBN)» (890, la
     mayoría sellos del mismo grupo). Salta los ISBN sospechosos y los compartidos por títulos distintos. La editorial de la COLECCIÓN o la escrita en el título ya no la rescata un
     traductor coincidente («La hija del capitán», colección de Anaya, recibía la edición de Paulinas).
+    SERIE COMPLETA DE UNA COLECCIÓN (2026-10-02). En la ficha de una colección de libros:
+      · «👻 Ver colección completa» intercala, cada uno en su número, CARÁTULAS FANTASMA (grises, borde discontinuo;
+        cubierta de OpenLibrary por ISBN si la hay) de los libros de la serie que no tienes; tocar una abre sus datos
+        y, para administradores, los enlaces de FUENTES_COPIA para buscarla. Lo que tienes en OTRA colección sale con
+        la marca «fuera de la colección». Encima, el resumen: «tienes X de Y números conocidos» y los números de la
+        serie que no se sabe cuáles son. Volver a pulsar lo oculta.
+      · «📋 Lista»: todos los libros de la serie con ✅ en los que tienes (fila → la ficha o el fantasma).
+      Fuente: GET /api/colecciones/:id/completa → `src/utils/serie-completa.js` (la misma lógica que la consola
+      `scripts/consultar-serie.js`). La serie se localiza por el ISSN de la colección, luego por la que dicen los ISBN
+      de sus propios libros, luego por su nombre; con la editorial de la colección (o la de sus libros) para separar
+      series homónimas. Local (series.db + crossref.db), sin red ni IA.
     COLECCIONES: MANUAL > EDITORIAL > CARPETA (2026-10-01, regla del usuario). Cada pertenencia lleva su procedencia
     `coleccion_fuente` (manual / autoridad / archivo / carpeta / guia), visible en la ficha junto a la colección.
       · Una colección puesta a mano (panel: «Asignar a colección») queda 'manual' y nada automático la cambia.

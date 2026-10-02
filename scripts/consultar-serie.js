@@ -21,6 +21,7 @@ import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro
 import '../src/config.js';
 import { disponible, seriesDeISBN, buscarSeries, serie, librosDeSerie } from '../src/utils/buscador-series.js';
 import { variantesISBN } from '../src/utils/identificadores.js';
+import { entradasDeSerie, numerosDeTusFichas, numerosDesconocidos, rangos, claveTitulo } from '../src/utils/serie-completa.js';
 
 const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -49,135 +50,31 @@ if (!clave) {
     for (const s of encontradas) console.log(`  ${String(s.n).padStart(6)} reg. · ${s.nombre} · ${s.editorial || '?'} · ${s.desde || '?'}–${s.hasta || '?'}   [--clave "${s.clave}"]`);
     clave = encontradas[0].clave;
 }
-const ficha = serie(clave);
-const libros = librosDeSerie(clave, { editorial: EDITORIAL });
-console.log(`\n📚 ${ficha?.nombre || clave}${EDITORIAL ? ` (${EDITORIAL})` : ''} · ${libros.length} registros en el Fichero`);
-
-// ─── Título comparable: el mismo libro sale con grafías distintas («A course in arithmetic» / «course in arithmetic.»).
-const claveTitulo = (t) => String(t || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9 ]/g, ' ')
-    .replace(/^\s*(a|an|the|el|la|los|las|le|les|der|die|das)\s+/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-const tieneNumero = (l) => l.orden !== null && l.orden !== undefined;
-
-// ─── ENTRADAS: una por número; las de sin número, una por título. Cada una junta sus ediciones y TODOS sus ISBN.
-const porNumero = new Map();     // orden → entrada
-const sinNumero = new Map();     // claveTitulo → entrada
-const nueva = (titulo, anio, numero) => ({ numero, titulo, anio: anio || null, ediciones: 0, isbns: new Set(), fuentes: new Set() });
-const anadir = (entrada, isbns, fuente) => {
-    entrada.ediciones++;
-    for (const x of isbns) for (const v of variantesISBN(x)) entrada.isbns.add(v);
-    entrada.fuentes.add(fuente);
-};
-for (const l of libros.filter(tieneNumero)) {
-    if (!porNumero.has(l.orden)) porNumero.set(l.orden, nueva(l.titulo, l.anio, l.orden));
-    anadir(porNumero.get(l.orden), [l.isbn], 'fichero');
-}
-
-// Título → número, solo si ese título es de UN solo número («Graph theory» es el 63, el 173 y el 244: no se adivina).
-const numerosDeTitulo = new Map();
-for (const l of libros.filter(tieneNumero)) {
-    const k = claveTitulo(l.titulo);
-    if (!numerosDeTitulo.has(k)) numerosDeTitulo.set(k, new Set());
-    numerosDeTitulo.get(k).add(l.orden);
-}
-const numeroUnico = (titulo) => {
-    const s = numerosDeTitulo.get(claveTitulo(titulo));
-    return s && s.size === 1 ? [...s][0] : null;
-};
-
-// Un registro SIN número cuyo título es el de un número conocido es otra edición de ese número.
-let reunidos = 0;
-for (const l of libros.filter((x) => !tieneNumero(x))) {
-    const n = numeroUnico(l.titulo);
-    if (n !== null) {
-        anadir(porNumero.get(n), [l.isbn], 'fichero');
-        reunidos++;
-        continue;
-    }
-    const k = claveTitulo(l.titulo);
-    if (!sinNumero.has(k)) sinNumero.set(k, nueva(l.titulo, l.anio, null));
-    anadir(sinNumero.get(k), [l.isbn], 'fichero');
-}
-
-// ─── CROSSREF (crossref.db, si está): los libros de la serie por su ISSN. Springer y compañía no depositan el número
-//     de volumen, pero sí el título y los ISBN (papel + ebook). Cada uno se une a la entrada con la que comparte un
-//     ISBN o el título; si no, es un libro que el Fichero no conoce (suelen ser los recientes).
-const soloCrossref = new Map();
-if (!SIN_CROSSREF) {
-    const { crossrefLocalDisponible, librosDeSerieCrossrefLocal, seriesCrossrefPorNombre } = await import('../src/utils/crossref-local.js');
-    if (crossrefLocalDisponible()) {
-        const issnSerie = ficha?.issn || seriesCrossrefPorNombre(ficha?.nombre || TEXTO)[0]?.issn || null;
-        const deLaSerie = issnSerie ? librosDeSerieCrossrefLocal(issnSerie) : [];
-        const entradaPorIsbn = new Map();
-        for (const e of [...porNumero.values(), ...sinNumero.values()]) for (const v of e.isbns) entradaPorIsbn.set(v, e);
-        for (const c of deLaSerie) {
-            const variantes = c.isbns.flatMap((x) => variantesISBN(x));
-            let entrada = variantes.map((v) => entradaPorIsbn.get(v)).find(Boolean);
-            if (!entrada) {
-                const n = c.coleccion_numero ? Number.parseInt(c.coleccion_numero, 10) : numeroUnico(c.titulo);
-                const k = claveTitulo(c.titulo);
-                entrada = (Number.isFinite(n) && porNumero.get(n)) || sinNumero.get(k) || soloCrossref.get(k);
-                if (!entrada) {
-                    entrada = nueva(c.titulo, c.año_edicion, null);
-                    soloCrossref.set(k, entrada);
-                }
-            }
-            anadir(entrada, c.isbns, 'crossref');
-            for (const v of entrada.isbns) entradaPorIsbn.set(v, entrada);
-        }
-        console.log(`   + Crossref (ISSN ${issnSerie || 'desconocido'}): ${deLaSerie.length} libros, ${soloCrossref.size} que el Fichero no tiene.`);
-    }
-}
+const issnFicha = serie(clave)?.issn || null;
+const e = entradasDeSerie({ clave, issn: issnFicha, editorial: EDITORIAL, conCrossref: !SIN_CROSSREF });
+const { ficha, porNumero, sinNumero, soloCrossref, reunidos } = e;
+console.log(`
+📚 ${ficha?.nombre || clave}${EDITORIAL ? ` (${EDITORIAL})` : ''} · ${e.registros} registros en el Fichero`);
+if (e.deCrossref) console.log(`   + Crossref (ISSN ${e.issn}): ${e.deCrossref} libros, ${soloCrossref.size} que el Fichero no tiene.`);
 console.log('');
 
 const db = SIN_BASE ? null : await (await import('../src/database.js')).conectarDB();
 
-// ─── NÚMEROS DE TUS FICHAS: tus libros de esta colección que llevan `coleccion_numero` dan el número que el Fichero
-//     no conoce («Categories for the working mathematician» es el GTM 5). Se busca la entrada por ISBN o título y,
-//     si no tiene número y ese número está libre, pasa a él. Cordura: el número no puede pasar mucho del mayor
-//     conocido (hay fichas con un trozo de ISBN o ISSN como «número»: 852, 6056…).
-let deTusFichas = 0;
+// Números de TUS fichas: tus libros de la colección de esta serie (mismo nombre sin la puntuación de la ficha, o
+// mismo ISSN) que llevan coleccion_numero dan el número que el Fichero no conoce.
 if (db) {
     const nombreSerie = claveTitulo(ficha?.nombre || TEXTO);
-    const issnSerie = ficha?.issn || null;
-    const candidatas = await db.collection('colecciones')
-        .find({}, { projection: { nombre: 1, issn: 1 } })
-        .toArray();
-    // La colección de la biblioteca es la de la serie si su nombre, sin la puntuación de la ficha («Graduate texts in
-    // mathematics ;»), es el mismo, o si comparten ISSN.
-    const idsColeccion = candidatas
-        .filter((c) => claveTitulo(c.nombre) === nombreSerie || (issnSerie && c.issn === issnSerie))
+    const idsColeccion = (await db.collection('colecciones').find({}, { projection: { nombre: 1, issn: 1 } }).toArray())
+        .filter((c) => claveTitulo(c.nombre) === nombreSerie || (e.issn && c.issn === e.issn))
         .map((c) => c._id);
-    const mayorConocido = Math.max(0, ...porNumero.keys());
     const conNumero = idsColeccion.length
         ? await db.collection('biblioteca')
             .find({ coleccion: { $in: idsColeccion }, coleccion_numero: { $nin: [null, ''] } }, { projection: { titulo: 1, isbn: 1, coleccion_numero: 1 } })
             .toArray()
         : [];
-    // Título de la ficha sin coletillas de edición o de catálogo («… - 2. edición», «(Graduate Texts…)»).
-    const tituloDeFicha = (t) => claveTitulo(String(t || '').replace(/\s+-\s+.*$/, '').replace(/\([^)]*\)/g, ''));
-    const entradaPorIsbn = new Map();
-    for (const e of [...sinNumero.values(), ...soloCrossref.values()]) for (const v of e.isbns) entradaPorIsbn.set(v, e);
-    for (const d of conNumero) {
-        const n = Number.parseInt(String(d.coleccion_numero), 10);
-        if (!Number.isFinite(n) || n < 1 || n > mayorConocido + 50 || porNumero.has(n)) continue;
-        const k = tituloDeFicha(d.titulo);
-        const entrada = variantesISBN(d.isbn).map((v) => entradaPorIsbn.get(v)).find(Boolean)
-            || sinNumero.get(k) || soloCrossref.get(k);
-        if (!entrada) continue;
-        // Sale de su lista y pasa a su número.
-        for (const lista of [sinNumero, soloCrossref]) for (const [clave, e] of lista) if (e === entrada) lista.delete(clave);
-        entrada.numero = n;
-        entrada.fuentes.add('ficha');
-        porNumero.set(n, entrada);
-        deTusFichas++;
-    }
-    if (deTusFichas) console.log(`   + ${deTusFichas} números sacados de tus fichas (coleccion_numero).\n`);
+    const deTusFichas = numerosDeTusFichas(e, conNumero);
+    if (deTusFichas) console.log(`   + ${deTusFichas} números sacados de tus fichas (coleccion_numero).
+`);
 }
 
 // ─── Lo que tienes: por cualquiera de los ISBN de cada entrada.
@@ -218,20 +115,8 @@ listar(`Sin número en el Fichero (${sinNum.length} títulos; ${reunidos} regist
 listar(`Solo en Crossref (${soloCr.length}; Crossref no da el número de la serie)`, soloCr);
 
 // Huecos: números entre 1 y el mayor conocido que no figuran (la serie existe, pero no sabemos cuál es).
-const numeros = [...porNumero.keys()].sort((a, b) => a - b);
-const max = numeros.length ? numeros[numeros.length - 1] : 0;
-const desconocidos = [];
-for (let i = 1; i <= max; i++) if (!porNumero.has(i)) desconocidos.push(i);
-const rangos = (lista) => {
-    const out = [];
-    for (let i = 0; i < lista.length; i++) {
-        let j = i;
-        while (j + 1 < lista.length && lista[j + 1] === lista[j] + 1) j++;
-        out.push(i === j ? `${lista[i]}` : `${lista[i]}-${lista[j]}`);
-        i = j;
-    }
-    return out.join(', ');
-};
+const desconocidos = numerosDesconocidos(porNumero);
+const max = Math.max(0, ...porNumero.keys());
 const tenidosSinNumero = sinNum.filter(laTengo).length + soloCr.filter(laTengo).length;
 console.log(`\nTienes ${tenidos} de ${porNumero.size} números conocidos`
     + `${tenidosSinNumero ? `, y ${tenidosSinNumero} títulos más de la serie sin número` : ''}`

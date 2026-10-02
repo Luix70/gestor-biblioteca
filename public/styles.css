@@ -1169,6 +1169,17 @@ body.shared > *:not(#sharedView):not(#cmpScrim):not(#cmpModal):not(#toast) {
   transform: none;
   border-color: var(--line);
 }
+/* Carátula FANTASMA de la serie completa de una colección: un libro que falta, en gris; se puede tocar (ficha con
+   enlaces para buscarlo), así que recupera el cursor de mano. */
+.vol.fantasma {
+  cursor: pointer;
+}
+.vol.fantasma .cov img {
+  filter: grayscale(1);
+}
+.vol.fantasma:hover {
+  opacity: 0.85;
+}
 .fmt {
   font-size: 9px;
   text-transform: uppercase;
