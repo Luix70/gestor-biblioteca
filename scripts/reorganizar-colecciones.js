@@ -28,6 +28,10 @@
  *   4. LAS DE CARPETA que quedan — con 2+ libros se convierten en SELECCIÓN («Colección de carpeta · <nombre>»: la
  *      agrupación no se pierde) y la colección se retira; con 1 libro, el libro queda libre y la colección se retira.
  *
+ * INTERRUMPIBLE Y REANUDABLE: cada cambio se guarda en el momento (un libro, una colección), y cada pasada parte del
+ * estado ACTUAL de la base: lo ya hecho sale confirmado o ya no aparece, y se sigue con lo que falta. Para cortarlo,
+ * Ctrl+C con `docker exec -it` (con -t a secas no llega la señal); relanzar con las mismas opciones.
+ *
  * NADA SE PIERDE: cada libro cambiado lleva su entrada en el diario `deshacer[]` (origen «reorganizar-colecciones»),
  * cada colección retirada se copia entera en `colecciones_retiradas` (con el motivo y sus miembros) antes de borrarla.
  * Las carpetas en disco no se mueven: la ruta de un libro no depende de su colección (salvo las de árbol fijo, que
@@ -239,9 +243,10 @@ async function retirarColeccion(c, motivo, miembros = []) {
     if (!EJECUTAR) return;
     // Copia sin el _id (la retirada lleva el suyo) ni los campos de trabajo de este script (los que empiezan por «_»).
     const copia = Object.fromEntries(Object.entries(c).filter(([k]) => !k.startsWith('_')));
-    await db.collection('colecciones_retiradas').insertOne({
-        ...copia, _id_original: c._id, retirada: { fecha: new Date(), origen: ORIGEN, motivo, miembros: miembros.map((d) => d._id) },
-    });
+    // Por _id_original: si una pasada se cortó entre la copia y el borrado, la siguiente no duplica la copia.
+    await db.collection('colecciones_retiradas').updateOne({ _id_original: c._id }, {
+        $setOnInsert: { ...copia, _id_original: c._id, retirada: { fecha: new Date(), origen: ORIGEN, motivo, miembros: miembros.map((d) => d._id) } },
+    }, { upsert: true });
     await colCol.deleteOne({ _id: c._id });
 }
 
@@ -474,10 +479,16 @@ if (FASES.has('3')) {
 }
 
 /** Crea la selección o, si ya existe con ese nombre, la rehace (no duplica). */
-async function guardarSeleccion(nombre, descripcion, ids) {
+// `sumar`: AÑADE a los que ya tenga en vez de sustituirlos. Lo usa la fase 4 para poder REANUDAR: si una pasada se
+// corta después de liberar parte de los libros de una colección de carpeta, la siguiente solo ve los que quedan, y
+// sustituir dejaría fuera de la selección a los ya liberados.
+async function guardarSeleccion(nombre, descripcion, ids, { sumar = false } = {}) {
     const existe = await db.collection('selecciones').findOne({ nombre });
     if (existe) {
-        await db.collection('selecciones').updateOne({ _id: existe._id }, { $set: { docs: ids, descripcion, fecha_actualizacion: new Date() } });
+        const docs = sumar ? { $addToSet: { docs: { $each: ids } } } : {};
+        await db.collection('selecciones').updateOne({ _id: existe._id }, {
+            $set: { ...(sumar ? {} : { docs: ids }), descripcion, fecha_actualizacion: new Date() }, ...docs,
+        });
         return existe._id;
     }
     return (await crearSeleccion(db, { nombre, descripcion, docs: ids }))._id;
@@ -511,7 +522,7 @@ if (FASES.has('4')) {
             const miembros = [...(miembrosDe.get(String(c._id)) || [])];
             if (EJECUTAR) await guardarSeleccion(`Colección de carpeta · ${c.nombre}`.slice(0, 120),
                 `Era la colección «${c.nombre}», que no es una serie editorial (nació de una carpeta o de un paquete de descarga). Se conserva la agrupación como selección (scripts/reorganizar-colecciones, fase 4).`,
-                miembros.map((d) => d._id));
+                miembros.map((d) => d._id), { sumar: true });
             for (const d of miembros) await moverLibro(d, null, { motivo: `«${c.nombre}» no es una serie editorial; queda la selección «Colección de carpeta · ${c.nombre}»` });
             await retirarColeccion(c, 'de carpeta: convertida en selección', miembros);
         }
