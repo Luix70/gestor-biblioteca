@@ -1287,18 +1287,29 @@ export function rutasPanel() {
             const sinCabecera = agrupar ? { $ifNull: ['$obra', '$_id'] } : '$_id';
             const claveGrupo = cabeceras ? { $cond: [esNumeroDeCabecera, '$coleccion', sinCabecera] } : sinCabecera;
             const clavesOrden = Object.keys(porOrden.orden);
+            // ESCALABLE (5-oct): antes se ORDENABA todo el catálogo para que cada grupo se quedara con su primer tomo
+            // ($sort → $group con $first) y después se ordenaban los grupos. Con un orden sin índice (aleatorio, autor,
+            // editorial) ese primer $sort era en memoria sobre los 64.000 documentos y pasaba del tope de 32 MB de Atlas
+            // («Sort exceeded memory limit»), y empeoraba con cada libro nuevo. Ahora:
+            //   1. $group SIN ordenar: cada grupo elige su representante con $top (el primero según el orden pedido),
+            //      que solo guarda un documento por grupo;
+            //   2. un ÚNICO $sort sobre los GRUPOS, seguido de $skip/$limit: Mongo lo convierte en un «top-K» que solo
+            //      retiene (página × tamaño) grupos, no todos.
+            // `id` desempata (orden total → paginación estable aunque las claves coincidan).
+            const representante = { id: '$_id', obra: '$obra', coleccion: '$coleccion' };
+            for (const k of clavesOrden) representante[k] = `$${k}`;
             const grupoObra = {
-                _id: claveGrupo, id: { $first: '$_id' }, obra: { $first: '$obra' }, n: { $sum: 1 },
-                coleccion: { $first: '$coleccion' },
+                _id: claveGrupo,
+                rep: { $top: { sortBy: porOrden.orden, output: representante } },
+                n: { $sum: 1 },
                 cabecera: { $max: cabeceras ? { $cond: [esNumeroDeCabecera, 1, 0] } : 0 },
             };
-            for (const k of clavesOrden) grupoObra[k] = { $first: `$${k}` };
             const etapasIdsAgr = [
                 ...porOrden.pre,
                 { $project: { ...projClaves, obra: 1, coleccion: 1, tipo_recurso: 1 } },
-                { $sort: porOrden.orden },
                 { $group: grupoObra },
-                { $sort: porOrden.orden },
+                { $replaceWith: { $mergeObjects: ['$rep', { n: '$n', cabecera: '$cabecera' }] } },
+                { $sort: { ...porOrden.orden, id: 1 } },
             ];
 
             // Campos de la tarjeta del Catálogo (los únicos que viajan al cliente).
