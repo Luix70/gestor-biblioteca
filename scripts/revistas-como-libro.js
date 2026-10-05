@@ -49,6 +49,7 @@ import { recolocarSegunCdu, carpetaDeDoc, aplicarCambio } from '../src/mantenimi
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
 import { crearSeleccion } from '../src/utils/selecciones.js';
+import { MESES_FICHERO, NOMBRES_MES, RE_FECHA_DELANTE, sinExtension, sinEntidades, cabeceraDeNombreDeFichero } from '../src/utils/cabecera-de-fichero.js';
 import { mismaSerie } from '../src/utils/serie-autoridad.js';
 
 const args = process.argv.slice(2);
@@ -65,20 +66,8 @@ const colCol = db.collection('colecciones');
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · revistas catalogadas como libro\n`);
 
 // ─── Fecha, número y cabecera a partir del NOMBRE del fichero ───────────────────────────────────────────
-const MESES = {
-    jan: 1, january: 1, ene: 1, enero: 1, feb: 2, february: 2, febrero: 2, mar: 3, march: 3, marzo: 3, apr: 4, april: 4,
-    abr: 4, abril: 4, may: 5, mayo: 5, jun: 6, june: 6, junio: 6, jul: 7, july: 7, julio: 7, aug: 8, august: 8, ago: 8,
-    agosto: 8, sep: 9, sept: 9, september: 9, septiembre: 9, oct: 10, october: 10, octubre: 10, nov: 11, november: 11,
-    noviembre: 11, dec: 12, december: 12, dic: 12, diciembre: 12,
-    janvier: 1, fevrier: 2, février: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7, aout: 8, août: 8, septembre: 9,
-    octobre: 10, novembre: 11, decembre: 12, décembre: 12,
-    // Las estaciones (números trimestrales): el primer mes de cada una.
-    winter: 1, invierno: 1, spring: 4, primavera: 4, summer: 7, verano: 7, autumn: 10, fall: 10, otono: 10,
-};
-const NOMBRES_MES = Object.keys(MESES).sort((a, b) => b.length - a.length).join('|');
+const MESES = MESES_FICHERO;
 
-// Fecha DELANTE: «2021 07 01 Crochet Now», «2023-01-01 Watercolor Artist».
-const RE_FECHA_DELANTE = /^((?:19|20)\d{2})[-_ ](0[1-9]|1[0-2])[-_ ](\d{2})\b/;
 // Fecha AL FINAL (antes de la extensión), con un sufijo corto opcional («US», «UK») o un «(1)» de copia.
 const RE_FECHA_FINAL = /(?<!\d)((?:19|20)\d{2})[-_ .]?(0[1-9]|1[0-2])(?:[-_ .]?\d{2})?(?:\s*[A-Z]{2,3})?\s*(?:\(\d\))?\.[a-z0-9]+$/;
 // Mes (o estación) y año PEGADOS al nombre: «UltraRunningMay2014», «AsimovsScienceFictionMarch2015»,
@@ -101,10 +90,8 @@ const esAnio = (n) => n >= 1800 && n <= 2100;
 const RE_VOL_ISSUE = /\bvol(?:ume)?\.?\s*\d+\s*(?:issue|no\.?|n[º°])\s*\d+/i;
 
 const empiezaPorIsbn = (nombre) => !!validarISBN(String(nombre).split(/[ ._-]/)[0]);
-const sinExtension = (nombre) => String(nombre || '').replace(/\.[a-z0-9]{2,5}$/i, '');
 
 /** { anio, mes, numero } que se leen en el nombre del fichero (los que haya). */
-const sinEntidades = (s) => String(s || '').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).replace(/&amp;/g, '&');
 
 function datosDelNombre(nombre) {
     const base = sinEntidades(nombre);
@@ -135,29 +122,7 @@ function datosDelNombre(nombre) {
     return out;
 }
 
-/** El nombre de la cabecera según el fichero: sin la fecha, el número ni la basura de la descarga. */
-function cabeceraDelNombre(nombre) {
-    nombre = sinEntidades(nombre);
-    // Cabecera ePubLibre «[Isaac Asimov Magazine 05]», «[Nueva Dimension 020]»: el nombre de la colección sin el nº.
-    const pn = parsearNombre(nombre);
-    if (pn.coleccion_nombre && pn.coleccion_numero) return pn.coleccion_nombre.replace(/\s+extra$/i, '').trim();
-    let t = sinExtension(nombre)
-        .replace(RE_FECHA_DELANTE, ' ')
-        .replace(/\bvol(?:ume)?\.?\s*\d+.*$/i, ' ')
-        .replace(/(?<!\d)(?:19|20)\d{2}[-_ .]?(?:0[1-9]|1[0-2])(?:[-_ .]?\d{2})?.*$/, ' ')
-        .replace(new RegExp(`(${NOMBRES_MES})\\.?[-_ ]?(?:19|20)\\d{2}.*$`, 'i'), ' ')
-        .replace(/\b(?:issue|no\.?|n[º°]|#)\s*\d+.*$/i, ' ')
-        .replace(/\bdownmagaz(?:\.com)?\b|\bstoremags?\b|\bfantamag(?:\.com)?\b/gi, ' ')
-        .replace(/[_.]+/g, ' ')
-        .replace(/([a-z])([A-Z])/g, '$1 $2')            // «CustomPC» → «Custom PC», «BBCKnowledge» → «BBC Knowledge»
-        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-        .replace(/\s*\(\d\)\s*$/, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    t = t.replace(new RegExp(`[\\s,.-]*\\b(${NOMBRES_MES})\\.?\\s*$`, 'i'), '').trim();   // un mes suelto al final («… Juin»)
-    t = tituloCabecera(t) || t;
-    return t.length >= 3 ? capitalizarCabecera(t) : null;
-}
+const cabeceraDelNombre = cabeceraDeNombreDeFichero;
 
 /** 'revista' | 'revisar' | null, con el motivo y los datos leídos. */
 function clasificar(d, c) {

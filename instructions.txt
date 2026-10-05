@@ -1278,6 +1278,20 @@ de ficheros clasificado por CDU.
     nº, su ISSN a la colección de la serie (nunca al libro) y fuera del inventario de la cabecera; luego Extraer ISBN y
     Investigar CDU forzados (sin IA), carpeta a libros/, sidecars e índice. Diario `deshacer[]` (origen
     «libros-como-revista»); selección «Pasados de revista a libro». Mueve carpetas: en el NAS.
+    TÍTULOS DE LOS NÚMEROS DE REVISTA (2026-10-05): todos con el patrón de su cabecera, «Easy Cook nº 219 (septiembre
+    2020)». INGESTA (motor-catalogo 2d): al resolver la cabecera de cualquier número, el número toma el nombre REAL de la
+    cabecera (antes, el de su título, desfasado si se encontró por ISSN) y el título unificado
+    (`revistas·tituloUnificadoDeNumero`); un título de verdad (tema de portada) pasa a subtítulo, el de un libro homónimo
+    (alertas de catálogos de libros) solo queda en las alertas. esTituloArtefacto reconoce las marcas de las webs de
+    descarga («downmagaz.com», «Storemags - Free Magazines…», «Subject»). capitalizarCabecera respeta las siglas de una
+    palabra («MSDN») y pone los conectores en minúscula («Investigación y Ciencia»).
+    RETROACTIVO: `scripts/unificar-titulos-numeros.js` (seco por defecto; `--ejecutar`, `--cabecera`, `--sin-grafia`):
+    0) cabeceras con nombre de marca de agua o de fichero («downmagaz.net», «Bon Appetit 2018 12») toman el nombre que
+    dicen los ficheros de sus números (`utils/cabecera-de-fichero.js`) y se funden si esa cabecera ya existe (sin «BBC»,
+    «The», «Magazine»: «BBC Easy Cook» = «Easy Cook»); las de un solo documento sin cabecera a la que unirse no se tocan
+    (suelen ser libros o artículos); 1) grafía de las cabeceras todo en mayúsculas o minúsculas; 2) título unificado de
+    cada número con nº o año (el Nº que faltaba, del título o del nombre del fichero: «Nueva Dimensión 2» → nº 2).
+    Las cabeceras con nombre de fichero sin arreglo se listan y se saltan. Diario `deshacer[]`.
     CABECERAS COLAPSADAS (2026-10-05): en Búsqueda, botón «📰 Cabeceras colapsadas / 📰 Números sueltos» (junto al de
     obras; se recuerda). Colapsadas, los números de cada revista son UNA tarjeta (cubierta apilada con sus tres últimos
     números, «📰 N números», abre la ficha de la revista); también en la vista Detalles. Se agrupa en el servidor

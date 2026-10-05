@@ -3,7 +3,7 @@ import { conectarDB } from './database.js';
 import { ErrorInfraestructura, esErrorDeMongo } from './errores.js';
 import { resolverColeccion, resolverCabecera, registrarNumeroEnColeccion, separarNumeroColeccion } from './utils/colecciones.js';
 import { resolverObra, registrarVolumenEnObra } from './utils/obras.js';
-import { claveNumero, tituloCabecera } from './utils/revistas.js';
+import { claveNumero, tituloCabecera, tituloUnificadoDeNumero, RE_DATOS_DE_CATALOGO_DE_LIBROS } from './utils/revistas.js';
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
 import { resolverPersona } from './utils/resolver-persona.js';
@@ -308,7 +308,23 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 });
                 if (creada) docFinal.alertas_agente.push(`Nueva cabecera de revista registrada: ${cabTitulo || docFinal.issn}`);
                 if (renombrada) docFinal.alertas_agente.push(`Cabecera «${renombrada}» renombrada a «${cabTitulo}» (nombre leído en la portada).`);
-                if (_id) { docFinal.coleccion = _id; if (cabTitulo) docFinal.coleccion_nombre = cabTitulo; }
+                if (_id) {
+                    // El nombre REAL de la cabecera (encontrada por ISSN puede llamarse de otra forma que el título del
+                    // número: antes se copiaba el del número y quedaba desfasado), y con él el TÍTULO UNIFICADO del
+                    // número («Easy Cook nº 219 (septiembre 2020)» en vez de «downmagaz.com»; el título de verdad que
+                    // trajera, a subtítulo).
+                    const cabReal = await db.collection('colecciones').findOne({ _id }, { projection: { nombre: 1 } });
+                    const nombreCab = cabReal?.nombre || cabTitulo;
+                    docFinal.coleccion = _id;
+                    if (nombreCab) docFinal.coleccion_nombre = nombreCab;
+                    const contaminado = (docFinal.alertas_agente || []).some((a) => RE_DATOS_DE_CATALOGO_DE_LIBROS.test(String(a)));
+                    const u = tituloUnificadoDeNumero(docFinal, nombreCab, { contaminado });
+                    if (u) {
+                        if (u.subtitulo) docFinal.subtitulo = u.subtitulo;
+                        docFinal.titulo = u.titulo;
+                        docFinal.alertas_agente.push(`Título «${u.anterior}» → «${u.titulo}» (el de los números de su cabecera)${u.subtitulo ? '; el anterior, a subtítulo' : ''}.`);
+                    }
+                }
                 // Los números comparten la CDU de la cabecera… salvo que la de la cabecera sea GENÉRICA (0/000: nació
                 // del primer número sin CDU) y este número traiga una buena: entonces se CORRIGE la cabecera, en vez de
                 // imponer su 000 a todos los números que vengan. resolverCabecera solo rellena una CDU vacía, y un

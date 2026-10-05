@@ -240,7 +240,11 @@ Cascada gratuita (nombre de archivo → Fichero → colección → OpenLibrary �
 ### Revisiones a mano (sin script)
 - [x] **Libros catalogados como revista**: ejecutado el 5-oct (50 pasados). Sus rutas: 30 corregidas a mano (bug de
       recolocación ya arreglado); «Algebraic Geometry I» sigue en revistas/ hasta que la recoloque ubicar-segun-cdu.
-- [ ] **Revistas catalogadas como libro** (5-oct): desplegar y, en el NAS con copia, `scripts/revistas-como-libro.js`
+- [ ] **Títulos de los números de revista** (5-oct): desplegar y, con copia, `scripts/unificar-titulos-numeros.js` (en
+      seco) y `--ejecutar`. En seco: 12 cabeceras-basura reparadas («downmagaz.net» → Easy Cook…), 27 grafías, **1.698**
+      títulos unificados (41 recuperan su Nº). Quedan ~48 cabeceras con nombre de fichero para limpiar a mano o con otro
+      script (muchas son libros o artículos tipados como revista).
+- [x] **Revistas catalogadas como libro** (5-oct, ejecutado: 124): desplegar y, en el NAS con copia, `scripts/revistas-como-libro.js`
       (en seco), `--ejecutar --limite 5`, `--ejecutar`; después `sanear-numeros-revista.js --contaminadas` (en seco y
       `--ejecutar`). En seco 5-oct: **124** a revista (Popular Photography, Paranormal, Kiplinger's, Hi-Fi Choice,
       Amateur Photographer…) y **27** a revisar.

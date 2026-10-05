@@ -9,7 +9,7 @@
  *
  * (resolverCabecera / registrarNumeroEnColeccion viven en colecciones.js — la cabecera ES una colección.)
  */
-import { MES_NUM } from './parsear-nombre.js';
+import { MES_NUM, esTituloArtefacto } from './parsear-nombre.js';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const normalizarAlnum = (s) => String(s || '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '').toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -35,6 +35,36 @@ export function tituloEsDelFichero(titulo, nombreArchivo) {
     const t = normalizarAlnum(titulo), f = normalizarAlnum(String(nombreArchivo || '').replace(/\.[^.]+$/, ''));
     return !t || (f.length > 0 && f.includes(t));
 }
+
+/**
+ * TÍTULO UNIFICADO de un número dentro de su cabecera: «Easy Cook nº 219 (septiembre 2020)», como el resto de sus
+ * números, en vez de lo que trajera el PDF («downmagaz.com», «Easy cook. Septiembre 2020», «Untitled», un resto del
+ * nombre del fichero). Petición del usuario (5-oct): «si tenemos la cabecera, ¿por qué no se unifican los títulos?».
+ *
+ * Devuelve null si no hace falta o no se puede (sin nº ni año no hay título que componer). Si no, { titulo, subtitulo,
+ * anterior, basura }: el título anterior, si era un título DE VERDAD (el tema de portada, «Especial Egipto»), pasa a
+ * subtítulo para no perderlo —salvo que lo hubiera traído un catálogo de LIBROS (`contaminado`: era el de un libro
+ * homónimo) o que el número ya tenga subtítulo.
+ */
+export function tituloUnificadoDeNumero(doc, cabecera, { nombreArchivo = doc?.nombre_archivo, contaminado = false } = {}) {
+    if (!cabecera || !doc) return null;
+    const conNumero = doc.numero_issue != null && String(doc.numero_issue).trim() !== '';
+    if (!conNumero && !parseInt(doc.año_edicion, 10)) return null;
+    const nuevo = tituloDeNumero(cabecera, doc);
+    const actual = String(doc.titulo || '').trim();
+    if (actual === nuevo) return null;
+    const basura = !actual || esTituloArtefacto(actual) || tituloEsDelFichero(actual, nombreArchivo) || esTituloGenerico(actual)
+        || /^\d{1,4}$/.test(actual)
+        // La cabecera con su fecha o su nº, escrita de otra forma: «Easy cook. Septiembre 2020», «Easy Cook #219».
+        || normTituloPublicacion(tituloCabecera(actual)) === normTituloPublicacion(cabecera)
+        || normTituloPublicacion(actual).startsWith(normTituloPublicacion(cabecera) + ' ');
+    const subtitulo = !basura && !contaminado && !doc.subtitulo ? actual : null;
+    return { titulo: nuevo, subtitulo, anterior: actual, basura };
+}
+
+// Marcas que deja la ingesta cuando un catálogo de LIBROS aportó datos a un documento (proveedor-metadatos): en un
+// número de revista, el título que traen es el de un libro homónimo.
+export const RE_DATOS_DE_CATALOGO_DE_LIBROS = /^(Datos validados contra OpenLibrary|Datos complementados con Google Books|Datos del Fichero local)/;
 
 // ─── NOMBRES que no son una publicación ─────────────────────────────────────────────────────────────────
 
@@ -124,13 +154,21 @@ export function capitalizarCabecera(nombre) {
     const letras = s.replace(/[^\p{L}]/gu, '');
     // Entera en mayúsculas («ALL ABOUT HISTORY») o entera en minúsculas, como el logotipo de «nature»: se normaliza.
     if (letras.length < 4 || (letras !== letras.toUpperCase() && letras !== letras.toLowerCase())) return s;
-    return s.split(' ').map((palabra) => {
+    // Una sola palabra en MAYÚSCULAS es una sigla o una marca («MSDN», «AFAR»): se respeta.
+    if (!/\s/.test(s.trim()) && letras === letras.toUpperCase()) return s;
+    return s.split(' ').map((palabra, i) => {
         const soloLetras = palabra.replace(/[^\p{L}]/gu, '');
+        // Los conectores van en minúscula salvo al principio: «Investigación y Ciencia», «Famous Monsters of Filmland».
+        if (i > 0 && CONECTORES_TITULO.has(palabra.toLowerCase())) return palabra.toLowerCase();
         if (soloLetras.length <= 3 && !/[AEIOUÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÄËÏÖÜY]/iu.test(soloLetras)) return palabra.toUpperCase();   // sigla
         // Mayúscula al principio y tras un apóstrofo o un guion («L'Histoire», «Hors-Série»); el resto, en minúscula.
         return palabra.toLowerCase().replace(/(^|['’\-(«"])(\p{L})/gu, (m, antes, letra) => antes + letra.toUpperCase());
     }).join(' ');
 }
+
+const CONECTORES_TITULO = new Set(['y', 'e', 'o', 'u', 'de', 'del', 'la', 'las', 'el', 'los', 'en', 'con', 'por', 'para', 'a', 'al',
+    'of', 'and', 'the', 'to', 'in', 'on', 'for', 'an', 'at', 'by', 'or', 'et', 'du', 'des', 'le', 'les', 'ou', 'und', 'der', 'die', 'das',
+    'di', 'da', 'e']);
 
 // ─── FECHA Y NÚMERO de un número con lo que sabe su CARPETA ─────────────────────────────────────────────
 //

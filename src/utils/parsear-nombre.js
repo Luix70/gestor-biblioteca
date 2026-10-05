@@ -28,7 +28,13 @@ export function esTituloArtefacto(s) {
     if (/^(untitled|sin\s*t[íi]tulo|documento?\s*\d*|document\s*\d+|presentaci[óo]n\s*\d*)$/i.test(t)) return true;
     // Marcadores de plantilla o de sección grabados como título (log del 30-sep: «Unknown», «Title», «test»,
     // «Frontmatter»): nadie titula así un libro, y si lo hiciera la autoridad devolvería ese mismo título.
-    if (/^(unknown|title|titulo|título|test|front\s?matter|no\s+title|sin\s+nombre)$/i.test(t)) return true;
+    if (/^(unknown|title|titulo|título|test|front\s?matter|no\s+title|sin\s+nombre|subject)$/i.test(t)) return true;
+    // Marca de agua de una web de DESCARGAS de revistas grabada como título del PDF: un dominio suelto
+    // («downmagaz.com») o sus lemas («Storemags - Free Magazines for all», «Fantamag.com & Storemags.com - Magazines
+    // for all»). 5-oct: muchos números de «easy cook» y de «Popular Photography» se titulaban así.
+    if (/^[\w-]+(\.[\w-]+)*\.(com|net|org|info|ru|to|se|cc|me|io|xyz|club|top|biz)$/i.test(t)) return true;
+    if (/\b(downmagaz|storemags?|fantamag|magzus|avxhome|avaxhome|magazinelib|freemagazines?|pdfmagazines?)\b/i.test(t)) return true;
+    if (/\bmagazines?\s+for\s+(all|ipad)\b|\bdownload\s+back\s+issues\b|\bfree\s+(pdf\s+)?magazines?\b/i.test(t)) return true;
     // Otro campo del info-dict del PDF en el sitio del título: «CreationDate: Sun Jan 22 06:58:33 2006», «Keywords: …».
     if (/^\s*(creationdate|moddate|keywords|author|title)\s*:/i.test(t)) return true;
     // Identificador de Amazon (ASIN) con la coletilla de sus ebooks: «B000OVLIPQ EBOK».
