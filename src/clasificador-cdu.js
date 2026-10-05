@@ -245,6 +245,59 @@ export function cduBienFormada(cdu) {
     return true;
 }
 
+/**
+ * REPARA una CDU mal formada sin gastar otra llamada de IA: en cada faceta, conserva del número principal la parte
+ * bien escrita y descarta lo que sobra, manteniendo los auxiliares. «94.02(6):71» → «94(6):71» (en la CDU el punto va
+ * cada TRES cifras: «94.02» no existe), «93.04.2» → «93», «821111» → «821.111» (faltaban los puntos). Devuelve la
+ * CDU reparada si queda bien formada, o null (una palabra dentro, «94-(Normandy)», no tiene arreglo).
+ */
+export function repararCDU(cdu) {
+    const texto = String(cdu || '').trim();
+    if (!texto || cduBienFormada(texto)) return texto || null;
+    if (/\p{L}{3,}/u.test(texto)) return null;
+    // Trocear en facetas por «:», «+» o «/» FUERA de paréntesis y comillas, guardando los separadores.
+    const facetas = [];
+    const separadores = [];
+    let actual = '';
+    let profundidad = 0;
+    let enComillas = false;
+    for (const ch of texto) {
+        if (ch === '(') profundidad++;
+        else if (ch === ')') profundidad = Math.max(0, profundidad - 1);
+        else if (ch === '"') enComillas = !enComillas;
+        if (!profundidad && !enComillas && /[:+/]/.test(ch)) {
+            facetas.push(actual);
+            separadores.push(ch);
+            actual = '';
+        } else actual += ch;
+    }
+    facetas.push(actual);
+    const arreglar = (numero) => {
+        const grupos = numero.split('.');
+        // Sin puntos y con más de tres cifras: se ponen («821111» → «821.111»).
+        if (grupos.length === 1) return grupos[0].match(/\d{1,3}/g).join('.');
+        // Se conservan los grupos mientras el anterior tenga tres cifras; el resto sobra.
+        const buenos = [grupos[0]];
+        for (let i = 1; i < grupos.length && buenos[buenos.length - 1].length === 3 && grupos[i].length <= 3; i++) buenos.push(grupos[i]);
+        return buenos[0].length <= 3 ? buenos.join('.') : buenos[0].match(/\d{1,3}/g).join('.');
+    };
+    const reparada = facetas
+        .map((f) => f.replace(/^(\s*)(\d+(?:\.\d+)*)/, (_, espacio, numero) => espacio + arreglar(numero)))
+        .reduce((acc, f, i) => acc + (i ? separadores[i - 1] : '') + f, '');
+    return cduBienFormada(reparada) ? reparada : null;
+}
+
+// Reglas de NOTACIÓN que se dan a la IA (las mismas que comprueba cduBienFormada): medido el 5-oct, la IA devolvía
+// «94.02(6):71» y la CDU se perdía. Se le explica cómo se escribe y se le pide comprobarla antes de responder.
+const REGLAS_NOTACION_CDU = `═══ CÓMO SE ESCRIBE UNA CDU (compruébalo ANTES de responder) ═══
+- Solo cifras, puntos y signos de auxiliar: NADA de letras ni palabras.
+- El punto separa grupos de TRES cifras contados desde el principio: 821.111 · 004.43 · 539.12 · 94.
+  MAL: «94.02», «93.04.2», «82.3» (tras el primer punto no puede quedar un grupo de dos cifras en medio).
+- Auxiliares: lugar entre paréntesis y en cifras «(460)», «(6)»; tiempo entre comillas «"19"», «"1939/1945"»;
+  forma «(038)», «(091)»; aspectos con guion «-3» (82-3 novela). Relación entre dos materias: «:» (una vez como máximo).
+- Historia: 94 + lugar + época: 94(460)"19" (España, s. XX), 94(6) (África). MAL: «94.02(6)».
+- Si dudas de una subdivisión, quédate en el nivel superior VÁLIDO (94(6) mejor que inventar 94.02(6)).`;
+
 function lccACDU(codigo) {
     const letras = claseLcc(codigo);
     if (!letras) return null;
@@ -354,6 +407,8 @@ REGLA D — INCERTIDUMBRE (aplícala antes de inventar una clasificación):
   Si no puedes determinar la tradición literaria del autor con confianza razonable,
   usa el código genérico de literatura: 82 (o 82-3 para novela, 82-1 para poesía, etc.)
   NUNCA inventes una nacionalidad — un error es peor que un código genérico.
+
+${REGLAS_NOTACION_CDU}
 
 ═══ DATOS DE LA OBRA ═══
 ${esLiteratura ? '⚑ FICCIÓN/LITERATURA detectada: aplica REGLA A (o D si no conoces la nacionalidad).' : ''}
@@ -495,9 +550,16 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
     //    ver arriba). La MISMA llamada trae ya la descripción y las materias → se aprovechan sin gastar más IA.
     const r = await iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis });
     // Una CDU mal formada («93.04.2», «94-(Normandy)») es un invento: ni se aplica ni se aprende.
+    // Primero se intenta REPARAR (gratis): «94.02(6):71» → «94(6):71». Solo si no tiene arreglo se descarta.
     if (r.cdu && r.cdu !== '000' && !cduBienFormada(r.cdu)) {
-        console.warn(`⚠️  [CDU] La IA devolvió una CDU mal formada («${r.cdu}») para «${String(titulo || '').slice(0, 50)}»: se descarta.`);
-        r.cdu = '000';
+        const reparada = repararCDU(r.cdu);
+        if (reparada) {
+            console.warn(`⚠️  [CDU] La IA devolvió una CDU mal formada («${r.cdu}») para «${String(titulo || '').slice(0, 50)}»: reparada → «${reparada}».`);
+            r.cdu = reparada;
+        } else {
+            console.warn(`⚠️  [CDU] La IA devolvió una CDU mal formada («${r.cdu}») para «${String(titulo || '').slice(0, 50)}»: sin arreglo, se descarta.`);
+            r.cdu = '000';
+        }
     }
     const cdu = r.cdu;
     if (cdu && cdu !== '000' && candidatos.length > 0) {
@@ -539,6 +601,8 @@ LITERATURA (Dewey 8xx / LCC P*): clasifica por la TRADICIÓN/LENGUA que el propi
 NO ficción: por el tema (usa el Dewey/LC como guía). Si un código es demasiado genérico, da el CDU genérico
 razonable (Dewey 800→82, 500→5, 300→3…). NUNCA inventes; ante la duda, el genérico.
 
+${REGLAS_NOTACION_CDU}
+
 CÓDIGOS:
 ${lista}
 
@@ -553,8 +617,10 @@ Un objeto por código, en el MISMO orden, con su "i" (1..${items.length}).`;
     for (const r of arr) {
         const idx = Number(r.i) - 1;
         if (!Number.isInteger(idx) || idx < 0 || idx >= items.length) continue;
-        const cdu = String(r.cdu || '').trim().replace(/^["']|["']$/g, '');
-        if (!cdu || cdu === '000') continue;
+        const bruta = String(r.cdu || '').trim().replace(/^["']|["']$/g, '');
+        // Mal formada: se repara si se puede; si no, no se aprende (se serviría a todos los libros de ese código).
+        const cdu = bruta && bruta !== '000' ? repararCDU(bruta) : null;
+        if (!cdu) continue;
         out.set(items[idx].codigo, {
             cdu, titulo_es: r.titulo_es || null, descripcion_es: r.descripcion_es || null,
             titulo_en: r.titulo_en || null, descripcion_en: r.descripcion_en || null,
