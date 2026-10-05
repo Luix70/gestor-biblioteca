@@ -46,6 +46,7 @@ import { indexarDoc } from '../utils/indice-busqueda.js';
 import { regenerarSidecarsDoc, FILTRO_SIDECARS_DESACTUALIZADOS } from '../utils/registro.js';
 import { precalentarEquivalencias, contarEquivalenciasPendientes, resolverCDU } from '../clasificador-cdu.js';
 import { editarDocumento } from '../utils/editar-doc.js';
+import { resolverEditorial as resolverEditorialComun } from '../utils/resolver-editorial.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -76,8 +77,7 @@ async function nombresAutoresDoc(db, ids) {
 
 // Resuelve un nombre de editorial a su ObjectId (check-then-create), como en la ingesta.
 async function resolverEditorialRef(db, nombre) {
-    const ex = await db.collection('editoriales').findOne({ nombre });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 // Convierte [{nombre,rol}] (de la mención) en [{persona,rol}] resueltos y deduplicados (sin el rol 'autor').

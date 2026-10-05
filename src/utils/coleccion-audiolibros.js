@@ -25,6 +25,7 @@ import { esDocumentoLeible, esMaterialNotable, esVideo, formatoDocumento } from 
 import { agregarMetadatos, esAudio, leerMetadatosAudio } from './lector-audio.js';
 import { reciclarCarpeta } from './papelera.js';
 import { resolverPersona } from './resolver-persona.js';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 
 // Carpeta OCULTA de portadas derivadas, misma convención que audiolibro.js (la sirve express con dotfiles:allow).
 const DIR_PORTADAS = '.portadas';
@@ -366,10 +367,7 @@ const moda = (vals) => { const c = new Map(); for (const v of vals) if (v) c.set
 function limpiarUndefined(obj) { const o = {}; for (const [k, v] of Object.entries(obj)) if (v !== undefined) o[k] = v; return o; }
 
 async function resolverEditorialRef(db, nombre) {
-    const t = String(nombre || '').trim();
-    if (!t) return null;
-    const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 /**

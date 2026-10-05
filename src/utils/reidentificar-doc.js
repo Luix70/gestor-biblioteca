@@ -45,6 +45,7 @@ import { regenerarSidecarsDoc } from './registro.js';
 import { mismoTituloLibro } from './titulo-libro.js';
 import { editorialCoherenteConISBN } from './editorial-por-prefijo.js';
 import { datosDeObraDeCandidatas } from './datos-de-obra.js';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 
 export { isbnDesdeArchivo } from './isbn-archivo.js'; // re-exportado por comodidad de los consumidores
 
@@ -141,10 +142,7 @@ async function isbnPorCIP(doc, abs) {
     return r;
 }
 async function resolverEditorial(db, nombre) {
-    const t = limpiarNombreEditorial(String(nombre || ''));
-    if (!t) return null;
-    const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 // Normaliza un título para comparar (minúsculas, sin acentos ni puntuación).
 const RE_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');

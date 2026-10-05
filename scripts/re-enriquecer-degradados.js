@@ -25,6 +25,7 @@ import { huecosDesdeAutoridad, autoresConAncla } from '../src/utils/huecos-autor
 import { resolverPersona } from '../src/utils/resolver-persona.js';
 import { validarISBN, validarISSN, variantesISBN } from '../src/utils/identificadores.js';
 import { esTituloArtefacto } from '../src/utils/parsear-nombre.js';
+import { resolverEditorial as resolverEditorialComun } from '../src/utils/resolver-editorial.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const SOLO_SIN_AUTOR = process.argv.includes('--sin-autor'); // apuntar SOLO a los libros sin autor (mayor acierto)
@@ -70,8 +71,7 @@ async function resolverAutores(db, nombres) {
     return out;
 }
 async function resolverEditorial(db, nombre) {
-    const ex = await db.collection('editoriales').findOne({ nombre });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 async function main() {

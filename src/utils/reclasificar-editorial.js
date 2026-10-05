@@ -34,6 +34,7 @@ import { analizarImagenesRecurso } from '../agente.js';
 import { validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre } from './parsear-nombre.js';
 import { editorialDeColeccionMapa, editorialDeColeccionIA } from './coleccion-editorial.js';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 // «Editoriales» que en realidad son grupos de maquetación/difusión o re-editores de dominio público (no
 // casas editoriales): si un libro tiene una de estas y no hallamos una real, se propone quitarla. Lista
 // compartida — ver `utils/editoriales-falsas.js`.
@@ -258,17 +259,8 @@ export async function aplicarReclasificacion(db, plan) {
         nombre = limpiarNombreEditorial(nombre);
         const clave = normEd(nombre);
         if (resueltas.has(clave)) return resueltas.get(clave);
-        // Buscar una existente por nombre exacto (tolerante a mayúsculas) y afinar por normalización en memoria.
-        const rxExacto = new RegExp('^' + String(nombre).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
-        const cand = await colEd.find(
-            { $or: [{ nombre: rxExacto }, { nombres_alternativos: rxExacto }] },
-            { projection: { nombre: 1, nombres_alternativos: 1 } },
-        ).limit(20).toArray();
-        const elegida = cand.find((e) => normEd(e.nombre) === clave)
-            || cand.find((e) => (e.nombres_alternativos || []).some((v) => normEd(v) === clave));
-        let _id;
-        if (elegida) _id = elegida._id;
-        else { _id = (await colEd.insertOne({ nombre, fecha_creacion: new Date() })).insertedId; creadas++; }
+        // Por nombre o grafía (utils/resolver-editorial.js, la puerta única de la ingesta).
+        const _id = await resolverEditorialComun(db, nombre, { alCrear: () => { creadas++; } });
         resueltas.set(clave, _id);
         return _id;
     };

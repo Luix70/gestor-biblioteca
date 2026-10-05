@@ -16,6 +16,7 @@ import { resolverPersona } from './resolver-persona.js';
 import { editarDocumento } from './editar-doc.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { ROLES_VALIDOS } from './contribuciones.js';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 
 const oid = (x) => (ObjectId.isValid(String(x)) ? new ObjectId(String(x)) : null);
 const oids = (ids) => (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
@@ -40,10 +41,7 @@ async function resolverEditorialFlex(db, { editorial, editorialId } = {}) {
         const ex = await db.collection('editoriales').findOne({ _id: oid(editorialId) }, { projection: { _id: 1 } });
         if (ex) return ex._id;
     }
-    const nombre = String(editorial || '').trim();
-    if (!nombre) return null;
-    const ex = await db.collection('editoriales').findOne({ nombre }, { collation: { locale: 'es', strength: 1 } });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
+    return resolverEditorialComun(db, editorial);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 const reindexar = async (db, lista) => { for (const id of lista) await indexarDoc(db, id).catch(() => {}); };

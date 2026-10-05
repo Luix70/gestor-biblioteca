@@ -18,6 +18,7 @@ import fs from 'node:fs/promises';
 import { ObjectId } from 'mongodb';
 import { DIR_CDU } from '../mantenimiento/util-mantenimiento.js';
 import { decodificarImagen } from './imagen-base64.js';
+import { actualizarClaves } from './resolver-editorial.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
@@ -171,6 +172,7 @@ export async function editarEditorial(db, id, cambios = {}) {
     const upd = { $set: set };
     if (Object.keys(unset).length) upd.$unset = unset;
     await db.collection('editoriales').updateOne({ _id }, upd);
+    if ('nombre' in cambios || 'nombres_alternativos' in cambios) await actualizarClaves(db, _id);
     return { ok: true, avisos };
 }
 
@@ -251,6 +253,7 @@ export async function fusionarEditoriales(db, destinoId, ids = []) {
     const set = { fecha_actualizacion: new Date() };
     if (alt.size) set.nombres_alternativos = [...alt].sort();
     await colEd.updateOne({ _id: destino._id }, { $set: set });
+    await actualizarClaves(db, destino._id);   // la ingesta reconocerá después las grafías absorbidas
 
     // Reasignar en biblioteca: editorial (campo único) A → B.
     const r = await colBiblio.updateMany(

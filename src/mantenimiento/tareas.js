@@ -24,6 +24,7 @@ import { resolverObraPorIsbn } from '../utils/obra-autoridad.js';
 import { validarISBN, validarISSN, variantesISBN } from '../utils/identificadores.js';
 import { aRegistroLegible, escribirSidecars, resolverNombres } from '../utils/registro.js';
 import { describirCDU } from '../utils/descripcion-cdu.js';
+import { resolverEditorial as resolverEditorialComun } from '../utils/resolver-editorial.js';
 
 const ANCHO_OBJETIVO = Number(process.env.PORTADA_ANCHO_OBJETIVO || 1000);
 
@@ -81,8 +82,7 @@ async function resolverAutoresRef(db, nombres) {
     return out;
 }
 async function resolverEditorialRef(db, nombre) {
-    const ex = await db.collection('editoriales').findOne({ nombre });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 /**

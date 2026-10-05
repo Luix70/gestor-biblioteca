@@ -27,6 +27,7 @@ import { aplicarCduConPrioridad } from './prioridad-cdu.js';
 import { cduDeAutoridadFiable } from './autoridad-isbn.js';
 import { variantesISBN, validarISBN, validarISSN } from './identificadores.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '');
 
@@ -104,9 +105,7 @@ async function resolverAutores(db, nombres) {
     return out;
 }
 async function resolverEditorial(db, nombre) {
-    nombre = limpiarNombreEditorial(nombre);
-    const ex = await db.collection('editoriales').findOne({ nombre });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 /** Nombres de los autores ACTUALES del doc (doc.autores = ObjectId[]), preservando su orden. */

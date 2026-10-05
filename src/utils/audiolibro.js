@@ -29,6 +29,7 @@ import { leerBarrasLocal } from './lector-barras-local.js';
 import { reciclarCarpeta } from './papelera.js';
 import { resolverPersona } from './resolver-persona.js';
 import { copiarVerificado, huella } from './transmedia.js';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 
 const EXT_IMG = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff'];
 const esImagen = (n) => EXT_IMG.includes(path.extname(n).toLowerCase());
@@ -426,10 +427,7 @@ async function resolverAutor(db, nombre) {
 
 /** Resuelve un nombre de editorial → ObjectId (check-then-create). El $jsonSchema exige ObjectId, no string. */
 async function resolverEditorialRef(db, nombre) {
-    const t = String(nombre || '').trim();
-    if (!t) return null;
-    const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 function limpiarUndefined(obj) {

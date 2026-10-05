@@ -31,6 +31,7 @@ import { conectarDB } from '../src/database.js';
 import { progreso } from '../src/utils/progreso-cli.js';
 import { fusionarEditoriales } from '../src/utils/gestion-editoriales.js';
 import { esEditorialFalsa } from '../src/utils/editoriales-falsas.js';
+import { claveEditorial, asegurarClaves } from '../src/utils/resolver-editorial.js';
 
 const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
@@ -44,24 +45,8 @@ const bib = db.collection('biblioteca');
 
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · grafías de una misma editorial\n`);
 
-// Forma societaria y palabras genéricas que no distinguen una editorial de otra.
-const RE_SOCIETARIA = /\b(s\.?\s?a\.?\s?u?|s\.?\s?l\.?\s?u?|s\.?\s?a\.?\s?de\s?c\.?\s?v\.?|s\.?\s?r\.?\s?l\.?|s\.?\s?p\.?\s?a\.?|inc|incorporated|ltd|ltda|limited|llc|l\.?\s?l\.?\s?c|gmbh|ag|kg|bv|nv|plc|pty|sarl|co|corp|corporation|company|& co|y cia|cia)\b\.?/gi;
-const RE_GENERICAS = /\b(editorial|editoriales|ediciones|edicions|edicion|editores|editora|editrice|edizioni|editions|edition|publishing|publishers|publisher|pub|verlag|grupo|group)\b/gi;
-
-/** Clave de agrupación: el nombre sin lo que no distingue una editorial de otra. */
-function clave(nombre) {
-    return String(nombre || '')
-        .toLowerCase()
-        .normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .replace(/&amp;/g, '&')
-        .replace(/[,\s]+(1[5-9]|20)\d{2}\s*$/, '')            // «…, 1997»
-        .replace(/&/g, ' and ')
-        .replace(RE_SOCIETARIA, ' ')
-        .replace(RE_GENERICAS, ' ')
-        .replace(/\band\b/g, ' ')
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim();
-}
+// La clave es la de la ingesta (utils/resolver-editorial.js): lo que aquí se funde, allí se reconoce después.
+const clave = claveEditorial;
 
 // ─── Grupos ──────────────────────────────────────────────────────────────────────────────────────────────
 const editoriales = await colEd.find({}, { projection: { nombre: 1, logo: 1, descripcion: 1, web: 1, nombres_alternativos: 1 } }).toArray();
@@ -129,6 +114,7 @@ if (EJECUTAR && grupos.length) {
         if (r.ok) { fusionadas += r.fusionadas; reasignados += r.reasignados; } else p.nota(`  ⚠ «${destino.nombre}»: ${r.motivo}`);
     }
     p.fin();
+    await asegurarClaves(db);   // las que no se fundieron también quedan con su clave para la ingesta
 }
 
 console.log(`\n=== ${EJECUTAR ? `HECHO · ${fusionadas} editoriales fundidas · ${reasignados} libros reasignados` : `DRY-RUN · ${grupos.length} grupos · ${aMover} libros cambiarían`} ===`);

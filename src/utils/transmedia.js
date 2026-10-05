@@ -37,6 +37,7 @@ import { normalizarPermisos, normalizarFichero } from './permisos.js'; // el ár
 // (y por tanto `huella`/`listarFicheros`) la salten → no cuenta en la verificación de la copia ni «altera»
 // la estructura visible; queda dentro del subárbol `ruta_fija`, así que Integridad tampoco la poda.
 const DIR_PORTADAS = '.portadas';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
 const ext = (n) => path.extname(n).toLowerCase();
 const esPdf = (n) => ext(n) === '.pdf';
@@ -492,8 +493,7 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         const t = limpiarNombreEditorial(String(nombre || ''));
         if (!t) return null;
         if (!cacheEditoriales.has(t)) {
-            const ex = await db.collection('editoriales').findOne({ nombre: t }, { projection: { _id: 1 } });
-            cacheEditoriales.set(t, ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId);
+            cacheEditoriales.set(t, await resolverEditorialComun(db, t));   // por nombre o grafía
         }
         return cacheEditoriales.get(t);
     };

@@ -15,6 +15,7 @@ import { claveNumero } from './revistas.js';
 import path from 'node:path';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
 import { modernizarCDU } from './cdu-moderna.js';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 
 const TEXTO = ['subtitulo', 'idioma', 'numero_edicion', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'obra_titulo'];
 const NUM = ['año_edicion', 'paginas', 'volumen_numero'];
@@ -32,9 +33,7 @@ async function resolverAutores(db, nombres) {
     return out;
 }
 async function resolverEditorial(db, nombre) {
-    const t = limpiarNombreEditorial(String(nombre || '')); if (!t) return null;
-    const ex = await db.collection('editoriales').findOne({ nombre: t });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 export async function editarDocumento(db, id, campos = {}) {

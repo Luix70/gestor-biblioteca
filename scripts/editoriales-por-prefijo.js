@@ -43,6 +43,7 @@ import { mismoTituloLibro } from '../src/utils/titulo-libro.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
+import { resolverEditorial as resolverEditorialComun } from '../src/utils/resolver-editorial.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const SOLO_VACIAS = process.argv.includes('--solo-vacias');
@@ -159,8 +160,7 @@ if (EJECUTAR && cambios.length) {
     const resolver = async (nombre) => {
         const limpio = limpiarNombreEditorial(nombre);
         if (idPorNombre.has(limpio)) return idPorNombre.get(limpio);
-        const ex = await db.collection('editoriales').findOne({ nombre: limpio }, { projection: { _id: 1 } });
-        const id = ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: limpio })).insertedId;
+        const id = await resolverEditorialComun(db, limpio);   // por nombre o grafía
         idPorNombre.set(limpio, id);
         return id;
     };

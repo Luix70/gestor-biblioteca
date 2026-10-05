@@ -24,6 +24,7 @@ import { buscarMetadatosExternos } from '../utils/proveedor-metadatos.js';
 import { huecosEscalares } from '../utils/huecos-autoridad.js';
 import { resolverObra, registrarVolumenEnObra } from '../utils/obras.js';
 import { resolverColeccion } from '../utils/colecciones.js';
+import { resolverEditorial as resolverEditorialComun } from '../utils/resolver-editorial.js';
 
 // Lee las primeras imágenes GUARDADAS del documento (páginas clave: portada + créditos + contraportada).
 async function leerImagenesDeDoc(doc, max = 6) {
@@ -257,10 +258,8 @@ export async function aplicarAFondo(db, doc, propuesta = {}, campos = null, { re
     if (elegidos.includes('año_edicion') && propuesta['año_edicion']) { set['año_edicion'] = propuesta['año_edicion']; aplicados.push('año_edicion'); }
     // EDITORIAL (nombre → ObjectId, check-then-create). Solo si el doc no tenía (anti-pérdida).
     if (elegidos.includes('editorial') && propuesta.editorial && !doc.editorial) {
-        const nombre = String(propuesta.editorial).trim();
-        const ex = await db.collection('editoriales').findOne({ nombre });
-        set.editorial = ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre })).insertedId;
-        aplicados.push('editorial');
+        const id = await resolverEditorialComun(db, propuesta.editorial);   // por nombre o grafía
+        if (id) { set.editorial = id; aplicados.push('editorial'); }
     }
     // CLASIFICACIÓN: guarda Dewey/LCC (para que re-clasificar-cdu deduzca la CDU) si faltaba la CDU.
     if (elegidos.includes('clasificacion') && propuesta.clasificacion && !doc.cdu) {

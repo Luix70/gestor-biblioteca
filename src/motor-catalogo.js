@@ -11,6 +11,7 @@ import { separarAutores } from './utils/autor-normalizar.js';
 import { ROLES_VALIDOS, esComicPorDatos, promoverIlustradorSiComic } from './utils/contribuciones.js';
 import { limpiarNombreEditorial } from './utils/editoriales-falsas.js';
 import { modernizarCDU } from './utils/cdu-moderna.js';
+import { resolverEditorial as resolverEditorialComun } from './utils/resolver-editorial.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -193,14 +194,11 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
 
         // 2. Editorial (string → ObjectId; crea si no existe).
         if (docFinal.editorial && typeof docFinal.editorial === 'string') {
-            docFinal.editorial = limpiarNombreEditorial(docFinal.editorial);   // «Valdemar,» → «Valdemar»
-            const existente = await coleccionEditoriales.findOne({ nombre: docFinal.editorial });
-            if (existente) docFinal.editorial = existente._id;
-            else {
-                const nueva = await coleccionEditoriales.insertOne({ nombre: docFinal.editorial });
-                docFinal.editorial = nueva.insertedId;
-                docFinal.alertas_agente.push(`Nueva editorial registrada: ${documentoEnriquecido.editorial}`);
-            }
+            // Por nombre O GRAFÍA («Catedra Ediciones» → «Cátedra»): utils/resolver-editorial.js, la puerta única.
+            const id = await resolverEditorialComun(db, docFinal.editorial, {
+                alCrear: (n) => docFinal.alertas_agente.push(`Nueva editorial registrada: ${n}`),
+            });
+            if (id) docFinal.editorial = id; else delete docFinal.editorial;
         }
 
         // 2b. Colección/serie (nombre → ObjectId en 'colecciones'; crea si no existe, enlazando

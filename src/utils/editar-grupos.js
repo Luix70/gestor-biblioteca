@@ -9,14 +9,12 @@
 import { ObjectId } from 'mongodb';
 import { validarISBN, validarISSN } from './identificadores.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
+import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
 async function resolverEditorial(db, nombre) {
-    const t = limpiarNombreEditorial(String(nombre || ''));
-    if (!t) return null;
-    const ex = await db.collection('editoriales').findOne({ nombre: t });
-    return ex ? ex._id : (await db.collection('editoriales').insertOne({ nombre: t })).insertedId;
+    return resolverEditorialComun(db, nombre);   // por nombre o grafía (utils/resolver-editorial.js)
 }
 
 // Año de publicación (inicio/fin): entero 1000-2100, o null (vacío = «sin dato» / «hasta la actualidad»).
