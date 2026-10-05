@@ -26,6 +26,7 @@ import { rasterizarFrontalesPdf, ocrDesdeRenders } from './utils/ocr-pdf.js';
 import { pdfEsImagen, paginaDescomunal } from './utils/rasterizar-pdf.js';
 import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/lector-barras.js';
 import { paginasMuestraDjvu } from './utils/djvu.js';
+import { clasificarPorNombre } from './utils/revista-por-nombre.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -450,6 +451,13 @@ export async function procesarRecurso(entrada) {
         // cada uno → señales por confianza para el discriminador. El 977/impreso lo resuelve luego el lector
         // de barras (aquí el ISSN del cuerpo es solo pista, vía issnCandidatos).
         const edLibro = esEditorialDeLibros(path.basename(rutas[0])) || esEditorialDeLibros(datosBase.coleccion_nombre);
+        // NÚMERO DE REVISTA POR EL NOMBRE más allá de la fecha que entiende parsearNombre: «Crochet Now Issue 3»,
+        // «Linux Format Magazine 5», «2021 07 01 Crochet Now», «WatercolorArtistFall2023» (utils/revista-por-nombre,
+        // el criterio de scripts/revistas-como-libro: lo que ese script corregía, ahora entra bien). Cuenta como un
+        // nombre fechado: un ISBN propio o un CIP siguen mandando (libroFuerte en clasificarTipo).
+        const porNombre = datosBase.esFechada ? null
+            : clasificarPorNombre({ nombre_archivo: path.basename(rutas[0]), titulo: datosBase.titulo, naturaleza: datosBase.naturaleza }, null);
+        const revistaPorNombre = porNombre?.clase === 'revista';
         const interp = interpretarIdentificadores({
             isbnCandidatos: datosBase.isbn_candidatos || (datosBase.isbn ? [datosBase.isbn] : []),
             isbnPropio: datosBase.isbn_propio,                          // CIP / nombre-es-ISBN / incrustado
@@ -457,7 +465,7 @@ export async function procesarRecurso(entrada) {
             isbnObra: datosBase.isbn_obra,
             cip: !!datosBase.cip,
             issnCandidatos: datosBase.issn_candidatos || (datosBase.issn ? [datosBase.issn] : []),
-            esFechada: !!datosBase.esFechada,
+            esFechada: !!datosBase.esFechada || revistaPorNombre,
             volumenNumero: datosBase.volumen_numero,
             obraTitulo: datosBase.obra_titulo,
             pareceSerieLibros: pareceSerieLibros(datosBase.titulo),
@@ -471,6 +479,14 @@ export async function procesarRecurso(entrada) {
         const articuloDoi = !!datosBase.doi && !datosBase.isbn_propio && !/97[89]\d{7}/.test(doiDigitos);
         const clasif = clasificarTipo({ ...interp.senales, articuloDoi, ...hintPerfil });
         tipo_recurso = clasif.tipo_recurso;
+        // Revista por su nombre: la fecha y el número que dice el nombre rellenan los huecos (la clave del número).
+        if (tipo_recurso === 'revista' && revistaPorNombre) {
+            const { anio, mes, numero } = porNombre.datos || {};
+            if (anio && !datosBase.año_edicion) datosBase.año_edicion = anio;
+            if (mes && datosBase.mes_publicacion == null) datosBase.mes_publicacion = mes;
+            if (numero && datosBase.numero_issue == null) datosBase.numero_issue = numero;
+            datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Revista por el nombre del fichero (${porNombre.motivo}).`];
+        }
         // El ISBN del CUERPO de un artículo es de un LIBRO CITADO en las referencias, no del artículo: se descarta
         // (si no, se usaría como identidad y resolvería el libro equivocado en el Fichero/APIs). El pivote es el DOI.
         if (tipo_recurso === 'articulo' && !datosBase.isbn_propio) {
