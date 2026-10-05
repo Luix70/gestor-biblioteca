@@ -1278,6 +1278,20 @@ de ficheros clasificado por CDU.
     nº, su ISSN a la colección de la serie (nunca al libro) y fuera del inventario de la cabecera; luego Extraer ISBN y
     Investigar CDU forzados (sin IA), carpeta a libros/, sidecars e índice. Diario `deshacer[]` (origen
     «libros-como-revista»); selección «Pasados de revista a libro». Mueve carpetas: en el NAS.
+    REVISTAS CATALOGADAS COMO LIBRO (2026-10-05): `scripts/revistas-como-libro.js` (seco por defecto; `--ejecutar`,
+    `--limite N`, `--id`). El caso inverso: números a los que un catálogo de libros dio ISBN y título («2023-01-01
+    Watercolor Artist.pdf» → «Painting Beautiful Watercolor Landscapes»). Pasan a revista los que lo dicen claro en el
+    nombre del fichero (fecha delante o al final, mes y año pegados «UltraRunningMay2014», «Issue N»/«Magazine N»,
+    «No. N» con mes y año) y no empiezan por ni contienen un ISBN ni llevan marcas de libro; dentro de una cabecera,
+    también con mes y año separados. Cómics y libros mal metidos en una cabecera, a «¿Revista catalogada como libro?».
+    A cada uno: tipo revista, año/mes/nº y clave, su cabecera (la suya, o la del nombre del fichero —reconocida aunque
+    esté escrita junta o sin acentos— o una nueva) y su inventario, título compuesto, fuera ISBN/autores/Dewey/LCC, carpeta
+    a revistas/. Después, `sanear-numeros-revista.js --contaminadas` juzga sinopsis, editorial y palabras clave.
+    parsearNombre: un nombre que empieza por un ISBN no es una revista con fecha (el «Nov.2019» de los lotes es la fecha de
+    la edición); devuelve ese ISBN y el título del lote.
+    ⚠ recolocarSegunCdu mueve la carpeta y DEVUELVE el cambio para la base: hay que aplicarlo con aplicarCambio (5-oct:
+    libros-como-revista no lo hacía y 31 libros apuntaron a la carpeta vieja; corregidos a mano 30 con el diario de
+    movimientos).
     SERIE COMPLETA DE UNA COLECCIÓN (2026-10-02). En la ficha de una colección de libros:
       · «👻 Ver colección completa» intercala, cada uno en su número, CARÁTULAS FANTASMA (grises, borde discontinuo;
         cubierta de OpenLibrary por ISBN si la hay) de los libros de la serie que no tienes; tocar una abre sus datos

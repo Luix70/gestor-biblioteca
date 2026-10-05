@@ -47,7 +47,7 @@ import { serieCrossrefLocal } from '../src/utils/crossref-local.js';
 import { seriesDeISSN } from '../src/utils/buscador-series.js';
 import { resolverCabecera } from '../src/utils/colecciones.js';
 import { reidentificarDoc, resolverCduDoc } from '../src/utils/reidentificar-doc.js';
-import { recolocarSegunCdu, carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
+import { recolocarSegunCdu, carpetaDeDoc, aplicarCambio } from '../src/mantenimiento/util-mantenimiento.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
 import { crearSeleccion } from '../src/utils/selecciones.js';
@@ -198,7 +198,15 @@ if (EJECUTAR && lista.length) {
 
             // 4. La carpeta a libros/ si aún está en revistas/; sidecars e índice.
             doc = await bib.findOne({ _id: d._id });
-            if (await recolocarSegunCdu(doc).catch(() => null)) resumen.recolocados++;
+            // recolocarSegunCdu MUEVE la carpeta pero no escribe la base: devuelve el cambio (ruta_base, portada, imágenes)
+            // y hay que aplicarlo (como recolocar-por-cdu). Sin esto, el 5-oct 31 libros quedaron apuntando a la carpeta
+            // vieja ya vacía.
+            const reub = await recolocarSegunCdu(doc).catch(() => null);
+            if (reub?.set?.ruta_base) {
+                await aplicarCambio(bib, doc, reub.carpetaNueva || carpetaDeDoc({ ...doc, ...reub.set }),
+                    { set: reub.set, alertas: ['Carpeta recolocada según su tipo (scripts/libros-como-revista).', ...(reub.alertas || [])] });
+                resumen.recolocados++;
+            }
             doc = await bib.findOne({ _id: d._id });
             await regenerarSidecarsDoc(db, doc, carpetaDeDoc(doc)).catch(() => {});
             await indexarDoc(db, d._id).catch(() => {});

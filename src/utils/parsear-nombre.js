@@ -333,7 +333,18 @@ export function parsearNombre(nombreArchivo) {
 
     // Prefijo de fecha ISO: "2017-10-01 Direction Espagne" o "2017-10 Title"
     // Señal inequívoca de publicación periódica (el SO añade esta fecha para ordenar).
-    const isoPrefix = trabajo.match(/^((?:19|20)\d{2})[-_](\d{2})(?:[-_]\d{2})?\s+(.+)/);
+    // Un nombre de LOTE que empieza por un ISBN («9780262537827.MIT_Press.Recycling.Jorgensen.Nov.2019.epub») es un
+    // libro: el «Nov.2019» del final es la fecha de la edición, no la de un número de revista (5-oct: 17.199 libros
+    // así salían como «fechados» y confundían a los detectores de revistas).
+    const empiezaPorIsbn = !!validarISBN(trabajo.split(/[ ._-]/)[0]);
+    if (empiezaPorIsbn) {
+        // El ISBN del principio es el identificador (la autoridad dará el resto) y, si es un lote con puntos, su título.
+        const isbnLote = validarISBN(trabajo.split(/[ ._-]/)[0]);
+        const tituloLote = trabajo.includes('.') ? tituloDeNombreDeLote(trabajo) : null;
+        return { titulo: tituloLote || null, autores: [], isbn: isbnLote, esFechada: false, ...colExtra };
+    }
+
+    const isoPrefix = !empiezaPorIsbn && trabajo.match(/^((?:19|20)\d{2})[-_](\d{2})(?:[-_]\d{2})?\s+(.+)/);
     if (isoPrefix) {
         return {
             titulo: isoPrefix[3].trim(),
@@ -350,7 +361,7 @@ export function parsearNombre(nombreArchivo) {
     // "NationalGeographic201503". Patrón MUY común al nombrar números de revista; el nombre que da el
     // curador es autoridad para la fecha del número. Exige AÑO-MES (mes 01-12): un año SUELTO no basta
     // (un libro suele acabar en año y NO es periódico) — así no se clasifican libros como revista.
-    const isoSuffix = trabajo.match(/^(.*?)[\s._-]*((?:19|20)\d{2})[-_.]?(0[1-9]|1[0-2])(?:[-_.]\d{2})?$/);
+    const isoSuffix = !empiezaPorIsbn && trabajo.match(/^(.*?)[\s._-]*((?:19|20)\d{2})[-_.]?(0[1-9]|1[0-2])(?:[-_.]\d{2})?$/);
     if (isoSuffix && isoSuffix[1].replace(/[-–_\s.]+$/, '').trim().length >= 2) {
         return {
             titulo: isoSuffix[1].replace(/[-–_\s.]+$/, '').trim(),
@@ -364,7 +375,7 @@ export function parsearNombre(nombreArchivo) {
     }
 
     // ¿Bloque de fecha "Mes[-Mes] Año" (señal fuerte de publicación periódica)?
-    for (const [lang, meses] of Object.entries(MESES)) {
+    for (const [lang, meses] of Object.entries(empiezaPorIsbn ? {} : MESES)) {
         const grupo = meses.join('|');
         // Capturamos el PRIMER mes (m[1]) además del año (m[2]) para no perder el mes ("octubre 2015").
         const re = new RegExp(`(${grupo})[a-zà-ÿ]*(?:[-/\\s]+(?:${grupo})[a-zà-ÿ]*)?[\\s,.–-]*((?:19|20)\\d{2})`, 'i');

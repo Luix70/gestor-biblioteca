@@ -238,7 +238,13 @@ Cascada gratuita (nombre de archivo → Fichero → colección → OpenLibrary �
       `clone3` y Node no arrancaría (salvo `security_opt: seccomp:unconfined`, que no conviene).
 
 ### Revisiones a mano (sin script)
-- [ ] **Libros catalogados como revista** → ahora con script (2-oct): desplegar y, en el NAS, con copia de la base:
+- [x] **Libros catalogados como revista**: ejecutado el 5-oct (50 pasados). Sus rutas: 30 corregidas a mano (bug de
+      recolocación ya arreglado); «Algebraic Geometry I» sigue en revistas/ hasta que la recoloque ubicar-segun-cdu.
+- [ ] **Revistas catalogadas como libro** (5-oct): desplegar y, en el NAS con copia, `scripts/revistas-como-libro.js`
+      (en seco), `--ejecutar --limite 5`, `--ejecutar`; después `sanear-numeros-revista.js --contaminadas` (en seco y
+      `--ejecutar`). En seco 5-oct: **124** a revista (Popular Photography, Paranormal, Kiplinger's, Hi-Fi Choice,
+      Amateur Photographer…) y **27** a revisar.
+- [ ] (antiguo) Libros catalogados como revista → ahora con script (2-oct): desplegar y, en el NAS, con copia de la base:
       `sudo docker exec -it gestor-biblioteca node scripts/libros-como-revista.js` (en seco: la lista), después
       `… --ejecutar --limite 5` (probar), y `… --ejecutar`. En seco 2-oct: **50** pasan a libro (44 por el ISSN de
       su serie, 6 con ISBN y sin señales de número) y **9** a revisar (cómics de Don Miki, «Mitsu»). De los ~129
