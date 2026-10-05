@@ -1358,6 +1358,16 @@ de ficheros clasificado por CDU.
       · El resto, en Búsqueda: filtrar por la selección y ORDENAR POR «Editorial» (opción nueva): cada tarjeta dice
         «🏢 Editorial» (✅ si ya está confirmada) y los libros de un sello salen juntos, así que se comparan de un
         vistazo con el logotipo de sus portadas. Si el grupo está bien → seleccionarlo → ⚙️ «✅ Confirmar editorial».
+    FUNDIR LAS GRAFÍAS DE UNA MISMA EDITORIAL (2026-10-05). «Emecé», «EMECÉ», «Emece Editores», «Emecé editores,
+    s. a.» eran editoriales distintas. `scripts/fusionar-grafias-editoriales.js` (seco por defecto; `--ejecutar`,
+    `--solo "<texto>"`, `--excluir <id>,…`) agrupa por el nombre sin mayúsculas, acentos, puntuación, forma
+    societaria (S.A., Inc., Ltd, GmbH…), palabras genéricas (Editorial, Ediciones, Publishing, Verlag, Grupo…) ni un
+    año al final; «Press» y «Books» SÍ cuentan y una palabra de más separa («Emecé Editores España», «Alianza Emecé»
+    quedan aparte). Se queda la de trabajo manual (logo/descripción/web) o, entre las de 1/4+ de los libros de la
+    mayor, la sin nombre de empresa («Planeta» antes que «Grupo Planeta»); las demás pasan a nombres alternativos y
+    sus libros a ella (lo mismo que «🔗 Combinar»), con copia en `editoriales_retiradas`. «Unknown» y demás
+    placeholders no se funden. Medido 5-oct: 911 grupos, 1.706 editoriales, 6.738 libros. Lo que quede a mano:
+    página Editoriales → modo selección → «🔗 Combinar».
         Si alguno está mal → «✏️ Asignar datos» (editorial) o «🏢 Reclasificar editorial».
       · «✅ Confirmar editorial» (selección y ficha; en la ficha, pulsado otra vez QUITA la confirmación): marca
         `editorial_confirmada` (+ `editorial_confirmada_fecha`) y saca los documentos de las selecciones «Editorial

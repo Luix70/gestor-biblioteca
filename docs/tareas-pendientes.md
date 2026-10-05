@@ -152,6 +152,12 @@ rompen al moverse: el motor los lleva consigo).
       portadas → «✅ Confirmar editorial» o «✏️ Asignar datos». Después, igual con «Editorial a revisar — su colección
       coincide con el prefijo» y «Editorial a revisar (prefijo ISBN)».
 
+### 3 septies b. Fundir las grafías de una misma editorial (5-oct)
+- [ ] Copia de la base (`scripts/copia-base.js`).
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/fusionar-grafias-editoriales.js` (en seco: 911 grupos,
+      6.738 libros) y `--ejecutar`. Después, lo que siga separado («Emecé Editores España»…) → página Editoriales →
+      «🔗 Combinar». Sidecars: campaña «sidecars»; índice: «Reindexar».
+
 ### 3 octies. Reorganizar las colecciones (1-oct; regla: manual > editorial > carpeta)
 - [ ] Desplegar (trae `coleccion_fuente`, la serie editorial en la ingesta y el script).
 - [ ] Copia de la base: `sudo docker exec -it gestor-biblioteca node scripts/copia-base.js`
