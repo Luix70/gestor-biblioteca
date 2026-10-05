@@ -1348,6 +1348,25 @@ de ficheros clasificado por CDU.
         Rules»; con el ISSN de la serie y sin ISBN entró como REVISTA y la cabecera (la colección de la serie, hallada
         por ISSN) tomó su nombre. parsearNombre ya entiende «Autor - Título (Editorial, año)» y «Título - Autores
         (Editorial, año) WW» (decide el lado de los autores por su forma: iniciales, apellido suelto).
+    EDITORIALES: UNA SOLA PUERTA Y SIN REFERENCIAS COLGANTES (2026-10-05).
+      · La ingesta (y toda la app) resuelve la editorial por utils/resolver-editorial.js: nombre exacto, nombre
+        alternativo, misma grafía («Catedra Ediciones» → «Cátedra») y, con el ISBN del libro, un nombre que empieza
+        por el de otra con el mismo prefijo de registrante («Montena/Mondiberica» → «Montena»). Una grafía nueva
+        reconocida se apunta en los nombres alternativos de la editorial.
+      · Fundir, explotar o borrar una editorial (panel o scripts) mueve también sus colecciones y obras; borrar se
+        niega si alguna la nombra. `scripts/reparar-referencias-editorial.js` arregló las que quedaron (5-oct: 554 a
+        la editorial en que se fundieron, 216 a la de sus libros, 60 sin editorial).
+      · `scripts/alinear-editorial-numeros.js` (seco / `--ejecutar` / `--cabecera "<texto>"`): los números de una
+        revista sin editorial, o con una que sale en menos del 10 % de sus números, toman la de su cabecera (Don Miki:
+        98 sin editorial + lecturas erróneas). Las de 10 %+ se respetan (cambio de editor). La ingesta ya da a un
+        número sin editorial la de su cabecera.
+    IMÁGENES FUERA DE SU CARPETA (2026-10-05). La portada o el carrusel apuntaban a una carpeta vieja (la ficha
+      las enseñaba rotas, la miniatura no): 693 documentos, 690 de Don Miki, reparados. Integridad las detecta
+      («Imágenes fuera de su carpeta») y las repara sola; a mano: `scripts/reparar-rutas-imagenes.js [--ejecutar]`.
+    REVISTA POR EL NOMBRE EN LA INGESTA (2026-10-05). «Crochet Now Issue 3», «Linux Format Magazine 5», «2021 07 01
+      Crochet Now», «WatercolorArtistFall2023» entran como números de revista (utils/revista-por-nombre.js, el mismo
+      criterio que scripts/revistas-como-libro.js). Y un libro con ISSN de serie dentro de una carpeta-colección va a
+      la serie del ISSN, no a una colección con el nombre de la carpeta.
     REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y
     «Editorial a revisar…»:
       · `scripts/triar-editoriales-sin-confirmar.js` (seco por defecto; `--ejecutar`, `--seleccion "<nombre>"`)

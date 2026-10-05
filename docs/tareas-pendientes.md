@@ -152,11 +152,18 @@ rompen al moverse: el motor los lleva consigo).
       portadas → «✅ Confirmar editorial» o «✏️ Asignar datos». Después, igual con «Editorial a revisar — su colección
       coincide con el prefijo» y «Editorial a revisar (prefijo ISBN)».
 
-### 3 septies b. Fundir las grafías de una misma editorial (5-oct)
+### 3 septies b. Editoriales: grafías, sellos y números de revista (5-oct)
+- [x] fusionar-grafias-editoriales (1.ª pasada, solo grafías) — ejecutada en el NAS el 5-oct.
+- [x] reparar-rutas-imagenes (693 docs, Don Miki) y reparar-referencias-editorial (830 colecciones/obras) —
+      ejecutados desde el PC el 5-oct (solo BD; verificado: 0 pendientes).
+- [ ] Desplegar (resolver de editoriales con prefijo ISBN, revista por el nombre, categoría de Integridad nueva).
 - [ ] Copia de la base (`scripts/copia-base.js`).
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/fusionar-grafias-editoriales.js` (en seco: 911 grupos,
-      6.738 libros) y `--ejecutar`. Después, lo que siga separado («Emecé Editores España»…) → página Editoriales →
-      «🔗 Combinar». Sidecars: campaña «sidecars»; índice: «Reindexar».
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/fusionar-grafias-editoriales.js` (2.ª pasada: ahora junta
+      también los sellos de una casa por el prefijo ISBN — Montena/Mondiberica → Montena; en seco 426 grupos, 3.926
+      libros; `--sin-prefijo` para solo grafías) y `--ejecutar`.
+- [ ] Después: `sudo docker exec -it gestor-biblioteca node scripts/alinear-editorial-numeros.js` (en seco: 501 números
+      sin editorial + 149 con una suelta) y `--ejecutar`.
+- [ ] Lo que siga separado → página Editoriales → «🔗 Combinar». Sidecars: campaña «sidecars»; índice: «Reindexar».
 
 ### 3 octies. Reorganizar las colecciones (1-oct; regla: manual > editorial > carpeta)
 - [ ] Desplegar (trae `coleccion_fuente`, la serie editorial en la ingesta y el script).

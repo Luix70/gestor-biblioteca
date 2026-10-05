@@ -95,6 +95,15 @@ Each writes an `estado.json` with work-so-far for resume. Bibliographic APIs **d
 
 Required: `tipo_recurso` (`libro|revista`), `titulo`, `cdu`, `idioma`, `formatos` (enum array), `ubicacion` (`{ambito, estanteria}`). `autores` is an array of ObjectId, `editorial` an ObjectId. Identifiers are checksum-validated (`utils/identificadores.js`) and dropped to keep the record `pendiente` if malformed. A schema violation throws error 121 — never persist null/empty optional fields.
 
+## Rules learned from data repairs (don't repeat past mistakes)
+
+- **Every data-repair script has a twin in the ingest.** Ask «will ingest produce this again?». The detector lives in `src/utils/` and both the script and the ingest call it (e.g. `utils/revista-por-nombre.js` — magazine issue by filename, shared by `scripts/revistas-como-libro.js` and `orquestador`; `utils/resolver-editorial.js`). Never keep decision logic only inside a script.
+- **One gate per entity.** Publishers are created/resolved ONLY via `utils/resolver-editorial.js·resolverEditorial` (name → alt name → `claveEditorial` (case/accents/S.A./«Editorial»… stripped; «Press»/«Books» kept) → name-prefix + same ISBN registrant; indexed `claves` field, self-backfilled). There used to be ~15 copies of exact-name check-then-create, which re-created spelling variants (911 groups / 6,738 books, merged by `scripts/fusionar-grafias-editoriales.js`).
+- **Deleting/merging an entity moves ALL its referencers**, not just `biblioteca`: publishers are also referenced by `colecciones.editorial` and `obras.editorial` (`gestion-editoriales·moverReferencias`). Merging only books left 639 collections + 191 works dangling (repair: `scripts/reparar-referencias-editorial.js`). Before writing a delete, look for the field in every collection.
+- **Moving a folder = `ruta_base` + `portada` + `imagenes[]` (+ `textos`/`audios`) together**, always via `reubicarPorCdu`/`aplicarCambio`; projections passed to movers must include `portada` and `imagenes`. A `$set` of `ruta_base` alone (Integridad's ruta_base repair did it) leaves the ficha carousel broken while the catalogue thumbnail looks fine (690 Don Miki issues). Safety net: `utils/rutas-imagenes.js`, Integridad category `imagenesFueraDeCarpeta` (auto-repaired), `scripts/reparar-rutas-imagenes.js`.
+- **Name-only matching is either too strict or too permissive** — corroborate with an identifier (ISBN registrant prefix, ≥50 % of the books).
+- **Verify after executing**: recount what was fixed down to 0 and check the neighbouring entities (collections, works, images).
+
 ## Legacy / superseded files (avoid editing by mistake)
 
 `src/controlador-ingesta.js` (old REST handler, replaced by `servicio-ingesta.js`), `src/procesador-epub.js` (epub2 reader — the live one is `utils/lector-epub.js`), `src/utils/procesador-archivos.js` (used only by the old controller), and `src/auditoria-apis.js` (one-off Gemini model-listing diagnostic).
