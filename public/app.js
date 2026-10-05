@@ -11532,6 +11532,7 @@ const INTEG_AUTOREPARA = new Set([
   'cuarentenaDuplicados',
   'hashDesactualizado',
   'nombreUnicodeDistinto',
+  'imagenesFueraDeCarpeta',
 ]);
 function pintarInteg(r) {
   const d = r.diagnostico || {},
@@ -11542,6 +11543,7 @@ function pintarInteg(r) {
     docsConAudiosRotos: 'Audiolibros con pistas que faltan',
     hashDesactualizado: 'Hash desactualizado (fichero modificado)',
     nombreUnicodeDistinto: 'Nombre de fichero con otra forma Unicode',
+    imagenesFueraDeCarpeta: 'Imágenes fuera de su carpeta',
     docsSinPortada: 'Documentos sin portada',
     rutaBaseCompartida: 'Varios docs en la misma carpeta',
     ramasMuertas: 'Ramas vacías / muertas',
@@ -11559,6 +11561,7 @@ function pintarInteg(r) {
     docsConAudiosRotos: 'docsConAudiosRotos',
     hashDesactualizado: 'hashDesactualizado',
     nombreUnicodeDistinto: 'nombreUnicodeDistinto',
+    imagenesFueraDeCarpeta: 'imagenesFueraDeCarpeta',
     docsSinPortada: 'docsSinPortada',
     rutaBaseCompartida: 'rutaBaseCompartida',
     ramasMuertas: 'ramasMuertas',
@@ -11734,7 +11737,7 @@ function drillInteg(mk, m) {
     h = arr.map((x) => `<div class="intgrp">${dl(x)}<br>${carp(x.ruta)}</div>`).join('');
   else if (mk === 'nombreUnicodeDistinto')
     h = arr.map((x) => `<div class="intgrp">${dl(x)}${Array.isArray(x.cambios) ? `<div style="padding-left:16px;font-size:12px" class="muted">${x.cambios.map((c) => '· ' + esc(c)).join('<br>')}</div>` : ''}</div>`).join('');
-  else if (mk === 'hashDesactualizado')
+  else if (mk === 'hashDesactualizado' || mk === 'imagenesFueraDeCarpeta')
     h = arr.map((x) => `<div class="intgrp">${dl(x)} <span class="muted">— ${esc(x.motivo || '')}</span></div>`).join('');
   else if (mk === 'docsConAudiosRotos')
     h = arr

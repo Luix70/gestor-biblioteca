@@ -196,9 +196,24 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         if (docFinal.editorial && typeof docFinal.editorial === 'string') {
             // Por nombre O GRAFÍA («Catedra Ediciones» → «Cátedra»): utils/resolver-editorial.js, la puerta única.
             const id = await resolverEditorialComun(db, docFinal.editorial, {
+                isbn: docFinal.isbn || null,
                 alCrear: (n) => docFinal.alertas_agente.push(`Nueva editorial registrada: ${n}`),
             });
             if (id) docFinal.editorial = id; else delete docFinal.editorial;
+        }
+
+        // SERIE POR ISSN vs CARPETA: un libro con ISSN de serie cuya «colección» solo es el nombre de su CARPETA
+        // (coleccion_fuente 'carpeta') va a la serie que dice el ISSN, si ya existe — no se crea la colección de la
+        // carpeta (2b) ni se le pone su nombre (2e). Lo aprendido al reorganizar las colecciones (2-oct): una carpeta
+        // «English Literature» con un ISSN de Benjamins acabó renombrando la serie de Benjamins.
+        const serieDelIssn = (docFinal.tipo_recurso === 'libro' && docFinal.issn && docFinal.coleccion_fuente === 'carpeta')
+            ? await db.collection('colecciones').findOne({ issn: docFinal.issn }, { projection: { nombre: 1 } })
+            : null;
+        if (serieDelIssn) {
+            docFinal.alertas_agente.push(`Colección: la carpeta «${docFinal.coleccion_nombre}» no es su serie; por el ISSN ${docFinal.issn} es de «${serieDelIssn.nombre}».`);
+            docFinal.coleccion_nombre = serieDelIssn.nombre;
+            docFinal.coleccion_fuente = 'autoridad';
+            delete docFinal.coleccion_numero_auto;
         }
 
         // 2b. Colección/serie (nombre → ObjectId en 'colecciones'; crea si no existe, enlazando
@@ -299,12 +314,14 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             const cabTitulo = cabeceraGuia || tituloCabecera(docFinal.obra_titulo || docFinal.titulo);
             if (docFinal.issn || cabTitulo) {
                 const edId = (docFinal.editorial && typeof docFinal.editorial !== 'string') ? docFinal.editorial : null;
-                const { _id, cdu: cduCab, creada, renombrada } = await resolverCabecera(db, {
+                const { _id, cdu: cduCab, editorial: editorialCab, creada, renombrada } = await resolverCabecera(db, {
                     nombre: cabTitulo, issn: docFinal.issn, tipo: 'revista', editorialId: edId, cdu: docFinal.cdu,
                     descripcion: descripcionGuia, nombreVerificado: nombreVerificado && !!cabeceraGuia,
                     naturaleza: docFinal.naturaleza || null,   // cómics: la cabecera hereda naturaleza:'comic'
                 });
                 if (creada) docFinal.alertas_agente.push(`Nueva cabecera de revista registrada: ${cabTitulo || docFinal.issn}`);
+                // Número sin editorial → la de su cabecera (98 números de «Don Miki» habían entrado sin ella).
+                if (!docFinal.editorial && editorialCab) docFinal.editorial = editorialCab;
                 if (renombrada) docFinal.alertas_agente.push(`Cabecera «${renombrada}» renombrada a «${cabTitulo}» (nombre leído en la portada).`);
                 if (_id) {
                     // El nombre REAL de la cabecera (encontrada por ISSN puede llamarse de otra forma que el título del

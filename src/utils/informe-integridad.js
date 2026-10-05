@@ -61,6 +61,12 @@ const CATEGORIAS = [
         hacer: 'Restaurar las pistas desde la Papelera, o volver a ingerir la colección de origen.',
     },
     {
+        clave: 'imagenesFueraDeCarpeta', lista: 'imagenesFueraDeCarpeta', auto: true,
+        etiqueta: 'Imágenes fuera de su carpeta',
+        que: 'La portada o las imágenes del carrusel apuntan a una carpeta que ya no es la del documento, y allí no están (un movimiento cambió la carpeta y no ellas). La miniatura del catálogo puede verse bien y la ficha enseñar las imágenes rotas.',
+        hacer: '«Diagnosticar y reparar» las apunta a la carpeta actual cuando el fichero de ese nombre está en ella. Las que no aparecen se dejan como están (nunca se borra una referencia): mira la Papelera o usa «Re-extraer imágenes».',
+    },
+    {
         clave: 'nombreUnicodeDistinto', lista: 'nombreUnicodeDistinto', auto: true,
         etiqueta: 'Nombre de fichero con otra forma Unicode',
         que: 'El fichero SÍ está, pero su nombre en la base está escrito con otra forma Unicode que en el disco («й» compuesta en un carácter frente a «и» + acento en dos; pasa con ficheros que llegaron por un Mac o por Synology). Se ven iguales, pero no lo son al compararlos: el visor y la descarga no lo encuentran, y antes la extracción de imágenes podía coger OTRO fichero de la carpeta.',

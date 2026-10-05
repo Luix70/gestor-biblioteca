@@ -221,6 +221,31 @@ export async function imagenesDeLibros(db, id) {
     return { ok: true, obras };
 }
 
+// OTRAS COLECCIONES QUE APUNTAN A UNA EDITORIAL, además de los libros: las colecciones/cabeceras y las obras
+// multivolumen llevan su `editorial`. Antes solo se miraban los libros: fundir, explotar o borrar dejaba esas
+// referencias colgando (5-oct: 639 colecciones y 191 obras apuntaban a una editorial que ya no existía, entre ellas
+// la cabecera de «Don Miki»). Toda operación que borra una editorial pasa por aquí.
+const REFERENCIAS_EDITORIAL = ['colecciones', 'obras'];
+
+/** ¿Hay colecciones u obras que apuntan a esta editorial? (los libros se miran aparte). */
+async function referenciasFueraDeLibros(db, editorialId) {
+    let n = 0;
+    for (const c of REFERENCIAS_EDITORIAL) n += await db.collection(c).countDocuments({ editorial: editorialId });
+    return n;
+}
+
+/** Pasa las colecciones y obras de unas editoriales a otra (o les quita la editorial si `nuevo` es null). */
+async function moverReferencias(db, viejos, nuevo) {
+    let n = 0;
+    for (const c of REFERENCIAS_EDITORIAL) {
+        const upd = nuevo
+            ? { $set: { editorial: nuevo, fecha_actualizacion: new Date() } }
+            : { $unset: { editorial: '' }, $set: { fecha_actualizacion: new Date() } };
+        n += (await db.collection(c).updateMany({ editorial: { $in: viejos } }, upd)).modifiedCount;
+    }
+    return n;
+}
+
 /**
  * FUSIONA varias editoriales en una destino (B): dirección A→B. Conserva el nombre de B; los nombres de las
  * A (y sus grafías alternativas) pasan a `nombres_alternativos` de B; TODOS los documentos de las A pasan a
@@ -261,6 +286,9 @@ export async function fusionarEditoriales(db, destinoId, ids = []) {
         { $set: { editorial: destino._id, fecha_actualizacion: new Date() } },
     );
 
+    // …y sus colecciones y obras (sin esto quedaban apuntando a una editorial borrada).
+    await moverReferencias(db, absorbidosIds, destino._id);
+
     // Borrar las A (ya sin referencias).
     await colEd.deleteMany({ _id: { $in: absorbidosIds } });
 
@@ -290,7 +318,8 @@ export async function quitarEditorialDeDocs(db, editorialId, ids = null) {
     // ¿Sigue referenciada por algún documento? Si no, se borra (nunca con libros).
     const restantes = await bib.countDocuments({ editorial: _id });
     let editorialBorrada = false;
-    if (restantes === 0) { await db.collection('editoriales').deleteOne({ _id }); editorialBorrada = true; }
+    // Sin libros, pero con colecciones u obras que la nombran, se conserva: es su editorial.
+    if (restantes === 0 && !(await referenciasFueraDeLibros(db, _id))) { await db.collection('editoriales').deleteOne({ _id }); editorialBorrada = true; }
     return { ok: true, quitados: r.modifiedCount, restantes, editorialBorrada };
 }
 
@@ -314,7 +343,7 @@ export async function reasignarDocsAEditorial(db, docIds, viejoId, nuevoId) {
     );
     const restantes = await bib.countDocuments({ editorial: viejo });
     let editorialBorrada = false;
-    if (restantes === 0) { await db.collection('editoriales').deleteOne({ _id: viejo }); editorialBorrada = true; }
+    if (restantes === 0 && !(await referenciasFueraDeLibros(db, viejo))) { await db.collection('editoriales').deleteOne({ _id: viejo }); editorialBorrada = true; }
     return { ok: true, reasignados: r.modifiedCount, restantes, editorialBorrada };
 }
 
@@ -333,6 +362,7 @@ export async function explotarEditorial(db, id) {
         { editorial: _id },
         { $unset: { editorial: '' }, $set: { fecha_actualizacion: new Date() } },
     );
+    await moverReferencias(db, [_id], null);   // sus colecciones y obras, también sin editorial
     await db.collection('editoriales').deleteOne({ _id });
     return { ok: true, liberados: r.modifiedCount, nombre: editorial.nombre || '' };
 }
@@ -347,6 +377,8 @@ export async function borrarEditorial(db, id) {
     if (!_id) return { ok: false, motivo: 'id inválido' };
     const libros = await db.collection('biblioteca').countDocuments({ editorial: _id });
     if (libros > 0) return { ok: false, motivo: `tiene ${libros} libro(s); reasígnalos o fusiónala antes`, libros };
+    const otras = await referenciasFueraDeLibros(db, _id);
+    if (otras > 0) return { ok: false, motivo: `la nombran ${otras} colección(es)/obra(s); fusiónala con otra antes`, libros: 0 };
     const r = await db.collection('editoriales').deleteOne({ _id });
     return { ok: true, borrada: r.deletedCount === 1, libros: 0 };
 }

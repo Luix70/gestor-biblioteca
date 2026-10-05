@@ -25,6 +25,7 @@ import { esDocumentoLeible, esMaterialNotable, esVideo } from './utils/criba-mat
 import { metricasFichero, ganaEntrante, reemplazarFicheroDeDoc } from './utils/duplicados.js';
 import { estadoHash, regenerarHashDoc } from './utils/hash-doc.js';
 import { nombreEnDisco } from './mantenimiento/util-mantenimiento.js';
+import { rutasImagenesFueraDeCarpeta } from './utils/rutas-imagenes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -134,7 +135,7 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
     prog('cargando');
     const db = await conectarDB();
     const col = db.collection('biblioteca');
-    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1, portada: 1, hash_mtime: 1, hash_tamano: 1, hash_fecha: 1, fecha_ingreso: 1, paginas: 1, versiones: 1, archivos_originales: 1 } }).toArray();
+    const docs = await col.find({}, { projection: { titulo: 1, ruta_base: 1, isbn: 1, issn: 1, nombre_archivo: 1, formatos: 1, audios: 1, naturaleza: 1, hash_contenido: 1, estado_verificacion: 1, cdu: 1, autores: 1, sinopsis: 1, obra: 1, ruta_fija: 1, portada: 1, hash_mtime: 1, hash_tamano: 1, hash_fecha: 1, fecha_ingreso: 1, paginas: 1, versiones: 1, archivos_originales: 1, imagenes: 1 } }).toArray();
     const rutasWeb = new Set(docs.map(d => d.ruta_base).filter(Boolean));
     const porId = new Map(docs.map(d => [String(d._id), d]));
 
@@ -371,6 +372,34 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         R.hashesConfirmados = alDia;
     }
 
+    // ── D-quater. IMÁGENES FUERA DE SU CARPETA: `imagenes[]`/`portada` apuntan a una carpeta que ya no es la suya y
+    //    el fichero no está allí (un movimiento cambió `ruta_base` y no ellas). La ficha enseña imágenes rotas aunque
+    //    estén en la carpeta nueva (5-oct: 690 números de «Don Miki»). Con --reparar se reescriben a la carpeta actual
+    //    si el fichero de ese nombre está en ella; si no aparece, la referencia se deja (nunca se borra). ──
+    prog('imagenes-fuera', { i: 0, total: docs.length });
+    const imagenesFuera = [];
+    let _iIF = 0;
+    for (const d of docs) {
+        if (++_iIF % 50 === 0) prog('imagenes-fuera', { i: _iIF, total: docs.length });
+        if (!d.ruta_base || (!d.portada && !(d.imagenes || []).length)) continue;
+        const r = await rutasImagenesFueraDeCarpeta(d, absDe).catch(() => null);
+        if (r) imagenesFuera.push({ d, ...r });
+    }
+    D.imagenesFueraDeCarpeta = imagenesFuera.length;
+    anotar('imagenesFueraDeCarpeta', imagenesFuera, x => fichaDoc(x.d, {
+        motivo: `${x.rotas} ruta(s) rota(s): ${x.arregladas} en su carpeta${x.sinArreglo ? `, ${x.sinArreglo} sin encontrar` : ''}`,
+    }));
+    if (reparar && imagenesFuera.length) {
+        let n = 0;
+        for (const [k, x] of imagenesFuera.entries()) {
+            prog('imagenes-fuera', { i: k + 1, total: imagenesFuera.length });
+            if (!Object.keys(x.set).length) continue;
+            await col.updateOne({ _id: x.d._id }, { $set: { ...x.set, fecha_actualizacion: new Date() } });
+            n++;
+        }
+        R.imagenesReubicadas = n;
+    }
+
     // ── Recorrido del árbol CDU: hojas (registro/doc/img), ramas muertas, registro sin doc, huérfanas/desync ──
     prog('recorrido-arbol', { carpetas: 0 });
     const carpetasHuerfanas = [], rutaBaseDesync = [], registroSinDoc = [], sinHoja = new Set();
@@ -494,6 +523,10 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
         if (await tieneDocFichero(rbFolder)) { if (await retirar(carpeta, 'carpeta-stale') !== 'conservada') rutasReparadas++; }
         else if (await tieneDocFichero(carpeta)) {
             await col.updateOne({ _id: doc._id }, { $set: { ruta_base: web } });
+            // …y la portada y el carrusel con ella: solo con ruta_base, la ficha quedaba con las imágenes rotas.
+            const completo = await col.findOne({ _id: doc._id }, { projection: { ruta_base: 1, portada: 1, imagenes: 1 } });
+            const img = completo ? await rutasImagenesFueraDeCarpeta(completo, absDe).catch(() => null) : null;
+            if (img && Object.keys(img.set).length) await col.updateOne({ _id: doc._id }, { $set: img.set });
             await retirar(rbFolder, 'carpeta-vacia');
             rutasReparadas++;
         }

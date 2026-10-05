@@ -154,7 +154,7 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
                 }
             } catch (e) { console.warn(`[Colecciones] renombrada «${renombrada}» → «${n}», pero sin refrescar sus miembros: ${e.message}`); }
         }
-        return { _id: existente._id, cdu: existente.cdu || cdu || null, creada: false, ...(renombrada ? { renombrada } : {}) };
+        return { _id: existente._id, cdu: existente.cdu || cdu || null, editorial: existente.editorial || editorialId || null, creada: false, ...(renombrada ? { renombrada } : {}) };
     }
 
     const nueva = { nombre: n, fecha_creacion: new Date() };
@@ -167,7 +167,7 @@ export async function resolverCabecera(db, { nombre, issn = null, tipo = null, e
     if (claveCan)    nueva.clave_canonica = claveCan;
     try {
         const r = await col.insertOne(nueva);
-        return { _id: r.insertedId, cdu: cdu || null, creada: true };
+        return { _id: r.insertedId, cdu: cdu || null, editorial: editorialId || null, creada: true };
     } catch {
         // Carrera con el índice único (issn o nombre): devolver el existente.
         const ya = issn ? await col.findOne({ issn })

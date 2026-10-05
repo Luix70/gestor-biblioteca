@@ -11,6 +11,11 @@
  *   · una palabra de más separa: «Emecé Editores España», «Alianza Emecé», «Oxford University Press, USA» quedan
  *     aparte (si son la misma, se funden a mano en la página Editoriales → 🔗 Combinar).
  *
+ * SEGUNDO NIVEL (5-oct, «Montena/Mondiberica», «Montena División Infantil de Mondadori» → «Montena»): un nombre que
+ * EMPIEZA por el de otra editorial se junta con ella si la mitad o más de sus libros con ISBN llevan un prefijo de
+ * registrante que ya usa la otra. Junta sellos de una misma casa (Wiley-VCH → Wiley, Planeta México → Planeta);
+ * `--sin-prefijo` lo desactiva. La ingesta aplica la misma regla (utils/resolver-editorial · buscarEditorial).
+ *
  * Se queda la que tiene trabajo hecho a mano (logo, descripción, web); si no, entre las que tienen al menos la cuarta
  * parte de los libros de la más usada, la que no lleva nombre de empresa («Planeta» antes que «Grupo Planeta», «Random
  * House» antes que «Random House, Inc.»), escrita con mayúsculas y minúsculas, con más libros y con acentos («Emecé»
@@ -23,6 +28,7 @@
  *   sudo docker exec -it gestor-biblioteca node scripts/fusionar-grafias-editoriales.js --ejecutar
  *   … --solo "<texto>"     solo los grupos cuyo nombre contenga ese texto (p. ej. «emece»)
  *   … --excluir <id>,…     editoriales que no se tocan
+ *   … --sin-prefijo        solo grafías; sin el segundo nivel (nombre que empieza por el de otra + mismo ISBN)
  */
 import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
@@ -31,11 +37,12 @@ import { conectarDB } from '../src/database.js';
 import { progreso } from '../src/utils/progreso-cli.js';
 import { fusionarEditoriales } from '../src/utils/gestion-editoriales.js';
 import { esEditorialFalsa } from '../src/utils/editoriales-falsas.js';
-import { claveEditorial, asegurarClaves } from '../src/utils/resolver-editorial.js';
+import { claveEditorial, asegurarClaves, prefijoIsbn, clavesPrefijo } from '../src/utils/resolver-editorial.js';
 
 const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const EJECUTAR = args.includes('--ejecutar');
+const SIN_PREFIJO = args.includes('--sin-prefijo');   // solo grafías: no junta sellos de una misma casa
 const SOLO = arg('--solo');
 const EXCLUIR = new Set(String(arg('--excluir') || '').split(',').map((s) => s.trim()).filter(Boolean));
 
@@ -77,7 +84,64 @@ function elegirDestino(grupo) {
         || (mezcla(b.nombre) - mezcla(a.nombre)) || (b.n - a.n) || (acentos(b.nombre) - acentos(a.nombre)) || (a.nombre.length - b.nombre.length))[0];
 }
 
-const grupos = [...porClave.values()]
+// ─── Segundo nivel: el nombre EMPIEZA por el de otra editorial y comparten editor por el ISBN ─────────────────
+// «Montena/Mondiberica», «Montena División Infantil de Mondadori España» → «Montena»: palabras de más, misma casa.
+// El nombre solo no basta («Alianza Emecé» no es «Alianza» por llamarse así): hace falta que la MITAD O MÁS de sus
+// libros con ISBN tengan un PREFIJO DE ISBN (registrante) que ya usa la madre. Con un solo libro en común se colaban
+// sellos distintos por un libro mal asignado («Wiley-VCH» → «Wiley», «Random House Mondadori» → «Random House»).
+// En la ingesta (buscarEditorial) la regla es la misma aplicada al único libro que entra.
+const prefijosDe = new Map();   // id de editorial → prefijo de ISBN → nº de libros
+for await (const d of bib.find({ editorial: { $ne: null }, isbn: { $exists: true } }, { projection: { editorial: 1, isbn: 1 } })) {
+    const pref = prefijoIsbn(d.isbn);
+    if (!pref) continue;
+    const k = String(d.editorial);
+    if (!prefijosDe.has(k)) prefijosDe.set(k, new Map());
+    const m = prefijosDe.get(k);
+    m.set(pref, (m.get(pref) || 0) + 1);
+}
+// Prefijo → nº de libros, sumado sobre las editoriales del grupo.
+const prefijosDeGrupo = (g) => {
+    const total = new Map();
+    for (const e of g) for (const [pref, n] of prefijosDe.get(String(e._id)) || []) total.set(pref, (total.get(pref) || 0) + n);
+    return total;
+};
+// ¿La mitad o más de los libros del hijo llevan un prefijo que ya usa la madre?
+const comparten = (hijo, madreP) => {
+    let dentro = 0, todos = 0;
+    for (const [pref, n] of hijo) { todos += n; if (madreP.has(pref)) dentro += n; }
+    return todos > 0 && dentro / todos >= 0.5;
+};
+
+// Unión de grupos: cada clave apunta a la de su editorial «madre» (la más corta que la contiene y la avala el ISBN).
+const madre = new Map();
+const raiz = (k) => { while (madre.has(k)) k = madre.get(k); return k; };
+const porPrefijo = [];      // para el informe
+for (const [k, g] of SIN_PREFIJO ? [] : porClave) {
+    if (g.some((e) => esEditorialFalsa(e.nombre))) continue;
+    const suyos = prefijosDeGrupo(g);
+    if (!suyos.size) continue;
+    for (const pref of clavesPrefijo(k)) {             // de la más corta a la más larga
+        const otro = porClave.get(pref);
+        if (!otro || otro.some((e) => esEditorialFalsa(e.nombre))) continue;
+        if (!comparten(suyos, prefijosDeGrupo(otro))) continue;
+        const r1 = raiz(k), r2 = raiz(pref);
+        if (r1 !== r2) madre.set(r1, r2);
+        porPrefijo.push(`«${g[0].nombre}» → «${otro[0].nombre}»`);
+        break;
+    }
+}
+const unidos = new Map();
+for (const [k, g] of porClave) {
+    const r = raiz(k);
+    if (!unidos.has(r)) unidos.set(r, []);
+    unidos.get(r).push(...g);
+}
+console.log(`Por principio de nombre + prefijo de ISBN: ${porPrefijo.length}`);
+for (const x of porPrefijo.slice(0, 40)) console.log(`   ${x}`);
+if (porPrefijo.length > 40) console.log(`   … y ${porPrefijo.length - 40} más`);
+console.log('');
+
+const grupos = [...unidos.values()]
     .filter((g) => g.length > 1)
     // «Unknown», «Publisher Unknown»: no son editoriales; no se funden (se quitan con reclasificar-editoriales).
     .filter((g) => !g.some((e) => esEditorialFalsa(e.nombre)))
