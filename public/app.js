@@ -74,6 +74,7 @@ const _AYUDA_SELECCION = `<ul>
     <li>La selección se <b>conserva</b> al cambiar de modo, de página o de filtros.</li>
     <li><b>Todos (página)</b> / <b>🗂 Todos los resultados</b>: seleccionar en bloque. <b>👁 Mostrar selección</b>: ver solo lo marcado (y se puede ACOTAR con la búsqueda: p. ej. escribe <code>isbn:*</code> para quedarte solo con los que tienen ISBN, y luego «🗂 Todos los resultados»).</li>
     <li><b>📚 Obras colapsadas / 📖 Tomos sueltos</b>: una tarjeta por obra, o cada tomo suelto y seleccionable.</li>
+    <li><b>📰 Cabeceras colapsadas / Números sueltos</b>: una tarjeta por revista (con su nº de números), o cada número suelto.</li>
   </ul>`;
 const _AYUDA_ACCIONES = `<p>Sobre los documentos <b>seleccionados</b>:</p>
   <ul>
@@ -3352,6 +3353,12 @@ function modoTomos(expandido) {
   localStorage.setItem('cat_tomos', expandido ? '1' : '0');   // el botón de la barra se repinta al buscar
 }
 const modoTomosExpandido = () => localStorage.getItem('cat_tomos') === '1';
+// CABECERAS COLAPSADAS: los números de cada revista en UNA tarjeta (Don Miki: 1 tarjeta, no 692). Opcional (por
+// defecto, números sueltos) y recordado entre sesiones, como el de tomos.
+function modoCabeceras(colapsadas) {
+  try { localStorage.setItem('cat_cabeceras', colapsadas ? '1' : '0'); } catch { /* sin almacenamiento: solo esta vez */ }
+}
+const modoCabecerasColapsadas = () => { try { return localStorage.getItem('cat_cabeceras') === '1'; } catch { return false; } };
 // Ver los libros de UNA ubicación (ámbito/estantería) en el Catálogo: FILTRA por esa ubicación y —si es
 // una estantería concreta— ordena por su POSICIÓN física (visible y ajustable en el selector de orden).
 // Punto ÚNICO usado por el deep-link ?amb=&est= (arranque) y por la lectura NFC de una etiqueta de
@@ -8545,6 +8552,10 @@ function renderBulk() {
   const tomosBtn = `<button class="btn${expandido ? ' pri' : ''}" id="bkTomos" title="${expandido
     ? 'Viendo los TOMOS uno a uno (seleccionables). Pulsa para colapsar cada obra en una sola tarjeta.'
     : 'Las obras multivolumen se ven COLAPSADAS (una tarjeta por obra). Pulsa para desplegar sus tomos y poder seleccionarlos.'}">${expandido ? '📖 Tomos sueltos' : '📚 Obras colapsadas'}</button>`;
+  const cabColapsadas = modoCabecerasColapsadas();
+  const cabecerasBtn = `<button class="btn${cabColapsadas ? ' pri' : ''}" id="bkCabeceras" title="${cabColapsadas
+    ? 'Las revistas se ven COLAPSADAS (una tarjeta por cabecera, con su nº de números). Pulsa para ver cada número suelto.'
+    : 'Cada número de revista es una tarjeta. Pulsa para juntar los números de cada revista en una sola tarjeta por cabecera.'}">${cabColapsadas ? '📰 Cabeceras colapsadas' : '📰 Números sueltos'}</button>`;
   // Herramientas de selección masiva (solo tienen sentido en modo selección).
   const selNfc =
     'NDEFReader' in window
@@ -8614,7 +8625,7 @@ function renderBulk() {
   const compBusq = ROL === 'admin'
     ? `<button class="btn" id="bkCompBusq" title="Compartir estos resultados: enlace/QR de solo lectura con los libros que casan la búsqueda actual (todas las páginas), con caducidad opcional">🔗 Compartir búsqueda</button>`
     : '';
-  el.innerHTML = `<div class="bulkbar">${modoBtn}${tomosBtn}${ayudaSel}${compBusq}${herramientas}${resume}${cuenta}</div>${acciones}`;
+  el.innerHTML = `<div class="bulkbar">${modoBtn}${tomosBtn}${cabecerasBtn}${ayudaSel}${compBusq}${herramientas}${resume}${cuenta}</div>${acciones}`;
   // Recordar si el panel de acciones queda plegado o desplegado.
   if ($('#bulkActs'))
     $('#bulkActs').addEventListener('toggle', (e) => localStorage.setItem('sq_acciones', e.target.open ? '1' : '0'));
@@ -8623,6 +8634,7 @@ function renderBulk() {
   $('#bkModo').onclick = alternarModoSel;
   // Colapsar/desplegar obras: es un MODO (se recuerda) → se repinta la búsqueda desde la página 1.
   if ($('#bkTomos')) $('#bkTomos').onclick = () => { modoTomos(!modoTomosExpandido()); buscarCatalogo(1); };
+  if ($('#bkCabeceras')) $('#bkCabeceras').onclick = () => { modoCabeceras(!modoCabecerasColapsadas()); buscarCatalogo(1); };
   if ($('#bkCompBusq')) $('#bkCompBusq').onclick = compartirBusqueda;
   if ($('#bkResumeNfc'))
     $('#bkResumeNfc').onclick = () => {
@@ -9902,6 +9914,8 @@ function _paramsBusqueda() {
   // Obras multivolumen COLAPSADAS en una tarjeta (por defecto). El MODO vive en localStorage y se conmuta con
   // el botón «📚 Obras colapsadas / 📖 Tomos sueltos» de la barra de modos (junto a selección/previsualización).
   if (modoTomosExpandido()) params.set('agrupar', '0');
+  // Revistas colapsadas por cabecera (botón «📰 Cabeceras colapsadas / Números sueltos»).
+  if (modoCabecerasColapsadas()) params.set('cabeceras', '1');
   // Orden ALEATORIO: la semilla hace la barajada estable entre páginas (sin ella la paginación se rompería).
   if (ordenEfectivo === 'azar') { if (!_seedAzar) _seedAzar = nuevoSeedAzar(); params.set('seed', _seedAzar); }
   // Sentido asc/desc (salvo en «Relevancia / recientes» y «Aleatorio», que no lo usan).
@@ -10524,8 +10538,24 @@ function tipoFmtCompacto(d) {
 }
 // ¿La última página del catálogo vino colapsada por obras? La fija pintarResultados desde la respuesta.
 let _catAgrupado = true;
+// ¿Vino colapsada por cabeceras de revista? (la fija pintarResultados desde la respuesta)
+let _catCabeceras = false;
+
+// Tarjeta de una CABECERA colapsada: cubierta apilada con sus últimos números y cuántos hay; abre la ficha de la
+// revista (donde están todos sus números), como la obra colapsada abre la de la obra.
+function tarjetaCabecera(d) {
+  const cov = stackCover(d.cabecera_portadas && d.cabecera_portadas.length ? d.cabecera_portadas : d.portada ? [d.portada] : [], '📰');
+  const nombre = d.coleccion_nombre || d.titulo || '(revista)';
+  return `<div class="vol obracard" data-coleccion="${esc(d.coleccion)}" onclick="verColeccion('${esc(d.coleccion)}')" style="cursor:pointer" title="Revista con ${d.cabecera_n} números — pulsa para verlos todos">
+    <div class="cov">${cov}</div>
+    <div class="meta">
+      <div class="n">${esc(recortar(nombre, 64))} <span class="fmt" style="background:rgba(27,163,255,.18);color:var(--acc2)">📰 ${d.cabecera_n} números</span></div>
+      <div class="t">${esc(d.issn ? 'ISSN ' + d.issn : 'Revista')}</div>
+    </div></div>`;
+}
 
 function docCard(d) {
+  if (_catCabeceras && d.cabecera_n > 1) return tarjetaCabecera(d);
   const ph = tipoIcono(d.tipo_recurso);
   // OBRA MULTIVOLUMEN COLAPSADA: sus N tomos son UNA tarjeta, visualmente distinta (cubierta APILADA, la misma
   // que la Estantería) y con el nº de tomos. Abre la ficha de la OBRA —donde ya se listan los tomos— en vez de
@@ -10585,6 +10615,10 @@ function docRow(d) {
     d.isbn || d.issn || '',
     d.cdu ? 'CDU ' + d.cdu : '',
   ].filter(Boolean);
+  // Cabecera colapsada: también en Detalles, una fila por revista.
+  if (_catCabeceras && d.cabecera_n > 1) {
+    return `<div class="drow" data-coleccion="${esc(d.coleccion)}" onclick="verColeccion('${esc(d.coleccion)}')" style="cursor:pointer" title="Revista con ${d.cabecera_n} números — pulsa para verlos todos"><span class="dtit">${esc(recortar(d.coleccion_nombre || d.titulo || '(revista)', 90))} <span class="fmt" style="background:rgba(27,163,255,.18);color:var(--acc2)">📰 ${d.cabecera_n} números</span></span><span class="dmeta">${esc(d.issn ? 'ISSN ' + d.issn : '')}</span><span class="dfmt">${tipoFmtCompacto(d)}</span></div>`;
+  }
   // Obra colapsada: también en Detalles (consistencia de patrones) — una fila por OBRA, no por tomo.
   if (_catAgrupado && d.obra_n > 1) {
     return `<div class="drow" data-obra="${esc(d.obra)}" onclick="verObra('${esc(d.obra)}')" style="cursor:pointer" title="Obra en ${d.obra_n} tomos — pulsa para ver la obra y sus tomos"><span class="dtit">${esc(recortar(d.obra_titulo || d.titulo || '(obra)', 90))} <span class="fmt" style="background:rgba(40,217,168,.18);color:var(--acc)">📚 ${d.obra_n} tomos</span>${badgeColeccion(d)}</span><span class="dmeta">${esc(partes.join(' · '))}</span><span class="dfmt">${tipoFmtCompacto(d)}</span></div>`;
@@ -10605,6 +10639,7 @@ function pintarBusqueda(r) {
   // ¿La página vino COLAPSADA por obras? Lo decide el servidor (es quien agrupa); las tarjetas lo consultan:
   // colapsado → tarjeta única de obra · expandido → tomo normal TEÑIDO (pertenece a una obra mayor).
   _catAgrupado = r.agrupado !== false;
+  _catCabeceras = !!r.cabeceras;
   $('#searchCount').textContent = `${r.total.toLocaleString('es-ES')} ${_catAgrupado ? 'resultado' : 'documento'}${r.total === 1 ? '' : 's'}`;
   // Aviso VISIBLE cuando la selección superó el tope y se recortó (antes se recortaba en silencio). Se sugiere
   // el camino escalable: ver la colección/obra por su filtro, sin lista de ids.

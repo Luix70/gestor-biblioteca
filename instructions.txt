@@ -1278,6 +1278,11 @@ de ficheros clasificado por CDU.
     nº, su ISSN a la colección de la serie (nunca al libro) y fuera del inventario de la cabecera; luego Extraer ISBN y
     Investigar CDU forzados (sin IA), carpeta a libros/, sidecars e índice. Diario `deshacer[]` (origen
     «libros-como-revista»); selección «Pasados de revista a libro». Mueve carpetas: en el NAS.
+    CABECERAS COLAPSADAS (2026-10-05): en Búsqueda, botón «📰 Cabeceras colapsadas / 📰 Números sueltos» (junto al de
+    obras; se recuerda). Colapsadas, los números de cada revista son UNA tarjeta (cubierta apilada con sus tres últimos
+    números, «📰 N números», abre la ficha de la revista); también en la vista Detalles. Se agrupa en el servidor
+    (`/catalogo?cabeceras=1`: documentos tipo revista con colección, por su colección) para que paginación y recuento
+    cuenten tarjetas: filtro Revistas, 3.053 números → 450 tarjetas (Don Miki: 1).
     REVISTAS CATALOGADAS COMO LIBRO (2026-10-05): `scripts/revistas-como-libro.js` (seco por defecto; `--ejecutar`,
     `--limite N`, `--id`). El caso inverso: números a los que un catálogo de libros dio ISBN y título («2023-01-01
     Watercolor Artist.pdf» → «Painting Beautiful Watercolor Landscapes»). Pasan a revista los que lo dicen claro en el

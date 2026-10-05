@@ -1277,12 +1277,25 @@ export function rutasPanel() {
             // El $group va DESPUÉS del $sort para que `$first` sea el tomo que toca según ese orden; como
             // $group no conserva el orden, se re-ordena por las MISMAS claves (que se arrastran con $first).
             const agrupar = String(req.query.agrupar ?? '1') !== '0';
+            // CABECERAS COLAPSADAS (`cabeceras=1`, opcional): los números de una REVISTA salen como UNA tarjeta por
+            // cabecera (Don Miki: 1 tarjeta, no 692). Mismo mecanismo que las obras, en la misma etapa de ids, para que
+            // la paginación y el recuento sigan diciendo la verdad. Solo los documentos tipo revista con colección;
+            // el resto se agrupa por obra (si `agrupar`) o va suelto.
+            const cabeceras = String(req.query.cabeceras || '') === '1';
+            const agruparEfectivo = agrupar || cabeceras;
+            const esNumeroDeCabecera = { $and: [{ $eq: ['$tipo_recurso', 'revista'] }, { $gt: ['$coleccion', null] }] };
+            const sinCabecera = agrupar ? { $ifNull: ['$obra', '$_id'] } : '$_id';
+            const claveGrupo = cabeceras ? { $cond: [esNumeroDeCabecera, '$coleccion', sinCabecera] } : sinCabecera;
             const clavesOrden = Object.keys(porOrden.orden);
-            const grupoObra = { _id: { $ifNull: ['$obra', '$_id'] }, id: { $first: '$_id' }, obra: { $first: '$obra' }, n: { $sum: 1 } };
+            const grupoObra = {
+                _id: claveGrupo, id: { $first: '$_id' }, obra: { $first: '$obra' }, n: { $sum: 1 },
+                coleccion: { $first: '$coleccion' },
+                cabecera: { $max: cabeceras ? { $cond: [esNumeroDeCabecera, 1, 0] } : 0 },
+            };
             for (const k of clavesOrden) grupoObra[k] = { $first: `$${k}` };
             const etapasIdsAgr = [
                 ...porOrden.pre,
-                { $project: { ...projClaves, obra: 1 } },
+                { $project: { ...projClaves, obra: 1, coleccion: 1, tipo_recurso: 1 } },
                 { $sort: porOrden.orden },
                 { $group: grupoObra },
                 { $sort: porOrden.orden },
@@ -1320,23 +1333,27 @@ export function rutasPanel() {
             }
             // Total: con colapso, lo que se cuenta son GRUPOS (una obra = 1 resultado), no documentos — si no,
             // la paginación y el «N resultados» mentirían respecto a lo que se ve.
-            const total = agrupar
+            const total = agruparEfectivo
                 ? ((await db.collection('biblioteca').aggregate([
                     { $match: consulta },
-                    { $group: { _id: { $ifNull: ['$obra', '$_id'] } } },
+                    { $group: { _id: claveGrupo } },
                     { $count: 'n' },
                 ], opciones).toArray())[0]?.n || 0)
                 : await db.collection('biblioteca').countDocuments(consulta);
             // 1) _ids de la PÁGINA, ya ordenados (el $sort trabaja sobre documentos diminutos → sin tope de 32 MB).
             //    Con colapso, cada fila es un GRUPO: `_id` = el tomo REPRESENTANTE y `n` = cuántos tomos tiene.
             const filasPagina = await db.collection('biblioteca').aggregate([
-                { $match: consulta }, ...(agrupar ? etapasIdsAgr : etapasIds),
+                { $match: consulta }, ...(agruparEfectivo ? etapasIdsAgr : etapasIds),
                 { $skip: (page - 1) * porPagina }, { $limit: porPagina },
-                agrupar ? { $project: { _id: '$id', obra: 1, n: 1 } } : { $project: { _id: 1 } },
+                agruparEfectivo ? { $project: { _id: '$id', obra: 1, n: 1, coleccion: 1, cabecera: 1 } } : { $project: { _id: 1 } },
             ], opciones).toArray();
             const idsPagina = filasPagina.map(x => x._id);
-            // Tomos por obra, SOLO de las que agrupan de verdad (n > 1): una «obra» de un tomo se pinta normal.
-            const nPorObra = new Map(filasPagina.filter(f => f.obra && f.n > 1).map(f => [String(f.obra), f.n]));
+            // Tomos por obra, SOLO de las que agrupan de verdad (n > 1): una «obra» de un tomo se pinta normal. (Una fila
+            // de CABECERA no cuenta como obra aunque su número representante sea tomo de algo.)
+            const nPorObra = new Map(filasPagina.filter(f => f.obra && f.n > 1 && !f.cabecera).map(f => [String(f.obra), f.n]));
+            // Números por cabecera colapsada (solo las que juntan varios) y el documento que la representa.
+            const nPorCabecera = new Map(filasPagina.filter(f => f.cabecera && f.n > 1).map(f => [String(f.coleccion), f.n]));
+            const representaCabecera = new Set(filasPagina.filter(f => f.cabecera && f.n > 1).map(f => String(f._id)));
             // 2) Documentos COMPLETOS de esa página (autores resueltos) y REORDENADOS como venían de la página
             //    ($in no conserva el orden). Sin $sort aquí: son `porPagina` documentos como mucho.
             let docs = [];
@@ -1388,15 +1405,30 @@ export function rutasPanel() {
                 for (const x of po) portObra.set(String(x._id), (x.portadas || []).slice(0, 3));
             }
 
+            // Portadas de las cabeceras colapsadas: las de sus TRES ÚLTIMOS números (por clave AAAA-MM), para la
+            // cubierta apilada. Un solo $group sobre las cabeceras de esta página.
+            const portCabecera = new Map();
+            if (nPorCabecera.size) {
+                const pc = await db.collection('biblioteca').aggregate([
+                    { $match: { coleccion: { $in: [...nPorCabecera.keys()].map(x => new ObjectId(x)) }, tipo_recurso: 'revista', portada: { $exists: true, $ne: null } } },
+                    { $sort: { clave_numero: -1, fecha_ingreso: -1 } },
+                    { $group: { _id: '$coleccion', portadas: { $push: '$portada' } } },
+                ]).toArray();
+                for (const x of pc) portCabecera.set(String(x._id), (x.portadas || []).slice(0, 3));
+            }
+
             res.json({
                 ok: true, total, page, porPagina, paginas: Math.max(1, Math.ceil(total / porPagina)),
                 agrupado: agrupar,
+                cabeceras,
                 // Aviso de recorte: la selección por ids superó el tope (para que el cliente lo muestre, no lo oculte).
                 ...(seleccionTruncada ? { seleccionTruncada, seleccionTope: MAX_IDS_SELECCION } : {}),
                 docs: docs.map(d => {
                     const nc = d.coleccion ? (nCol.get(String(d.coleccion)) || 0) : 0;
                     const claveObra = d.obra ? String(d.obra) : null;
-                    const nObra = claveObra ? nPorObra.get(claveObra) : undefined;
+                    const esCab = representaCabecera.has(String(d._id));
+                    const nObra = claveObra && !esCab ? nPorObra.get(claveObra) : undefined;
+                    const nCab = esCab ? nPorCabecera.get(String(d.coleccion)) : undefined;
                     return {
                         ...d, _id: String(d._id),
                         coleccion: d.coleccion ? String(d.coleccion) : undefined,
@@ -1407,6 +1439,9 @@ export function rutasPanel() {
                         //   · expandido → tarjeta normal TEÑIDA (es un tomo de una obra mayor, no un libro suelto)
                         obra_n: nObra && nObra > 1 ? nObra : undefined,
                         obra_portadas: agrupar && nObra > 1 ? (portObra.get(claveObra) || (d.portada ? [d.portada] : [])) : undefined,
+                        // `cabecera_n` = números de su revista, solo en la tarjeta que REPRESENTA a la cabecera colapsada.
+                        cabecera_n: nCab && nCab > 1 ? nCab : undefined,
+                        cabecera_portadas: nCab > 1 ? (portCabecera.get(String(d.coleccion)) || (d.portada ? [d.portada] : [])) : undefined,
                     };
                 }),
             });
