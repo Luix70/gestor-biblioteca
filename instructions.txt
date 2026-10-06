@@ -1367,6 +1367,18 @@ de ficheros clasificado por CDU.
       Crochet Now», «WatercolorArtistFall2023» entran como números de revista (utils/revista-por-nombre.js, el mismo
       criterio que scripts/revistas-como-libro.js). Y un libro con ISSN de serie dentro de una carpeta-colección va a
       la serie del ISSN, no a una colección con el nombre de la carpeta.
+    TÍTULOS QUE EL COTEJO CAMBIÓ POR LOS DE OTRO LIBRO (2026-10-06). La campaña «Cotejar título por ISBN» cambiaba el
+      título por el del Fichero si el ISBN se «corroboraba» por el nombre del fichero, con una prueba que tolera
+      palabras de menos: «El cine contado con sencillez» pasó a «El cine ESPAÑOL contado con sencillez» (el libro
+      hermano de la serie, cuyo ISBN llevaba el fichero), «…: Primavera» a «…: Invierno». Ahora, si la autoridad trae
+      palabras que no dicen ni el título ni el nombre del fichero, no se cambia (titulo-libro.js · palabrasAnadidas;
+      romanos = arábigos). Lo hecho: `scripts/reparar-titulos-cotejo.js` (seco / `--ejecutar`, solo BD, unos
+      minutos): vuelve el título (con acentos), lo pegado como subtítulo pasa a subtítulo, y los que tenían el título
+      de OTRO libro quedan con `isbn_sospechoso` en la selección «ISBN de otro libro de la serie (cotejo)».
+    «TÍTULO ORIGINAL» SOLO SI ES UNA TRADUCCIÓN (2026-10-06). ePubLibre escribe «Título original:» en todos sus
+      libros, también en los escritos en español: sin indicio de traducción junto a esa línea (traducción, traducido,
+      translated…) ya no se guarda como título original (utils/titulo-original.js; ingesta, campaña y script). Los
+      ya guardados que son el mismo título que el libro los quita reparar-titulos-cotejo (sin releer los ficheros).
     REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y
     «Editorial a revisar…»:
       · `scripts/triar-editoriales-sin-confirmar.js` (seco por defecto; `--ejecutar`, `--seleccion "<nombre>"`)

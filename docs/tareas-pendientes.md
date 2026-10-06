@@ -228,9 +228,17 @@ Los «ISBN compartido» (títulos distintos, 257 grupos) tienen un ISBN falso: h
 
 Separa «autores» que eran varias personas en un solo registro (dry-run de julio: 285 grupos, 314 libros; **en seco 6-oct: 9 grupos, 9 libros**; marcar-autores-basura: **391** autores).
 
+### 5 bis. Títulos que el cotejo cambió por los de otro libro (6-oct) — solo BD, minutos
+- [ ] Copia de la base (`scripts/copia-base.js`).
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/reparar-titulos-cotejo.js` (en seco 6-oct: **958** títulos
+      vuelven — 80 eran un subtítulo pegado, 878 el título de OTRO libro —, 311 sin el título anterior completo, 178
+      «títulos originales» que eran el del propio libro) y `--ejecutar`.
+- [ ] Revisar la selección «ISBN de otro libro de la serie (cotejo)» (~1.190): su ISBN es probablemente el del otro
+      libro → 🔎 Extraer ISBN con «forzar», o a mano.
+
 ### 6. Título original desde los créditos (pendiente desde julio)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-titulo-original.js`
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-titulo-original.js --ejecutar`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-titulo-original.js`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-titulo-original.js --ejecutar` (6-oct, ~6 h; NO hace falta repetirlo: lo que tomó mal lo arregla reparar-titulos-cotejo, solo BD)
 
 Lee la página de créditos de EPUB/PDF (sin IA) y guarda el título original (~11.635 candidatos).
 

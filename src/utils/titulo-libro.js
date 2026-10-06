@@ -108,3 +108,41 @@ export function mismoLibroHolgado(a, b) {
     const comunes = [...corto].filter((w) => largo.has(w)).length;
     return comunes / corto.size >= 0.8;
 }
+
+// «xvii» → «17» (romanos bien escritos hasta 89); cualquier otra palabra se deja como está.
+const ROMANOS = { i: 1, v: 5, x: 10, l: 50 };
+const RE_ROMANO_CORTO = /^l?x{0,3}(?:ix|iv|v?i{0,3})$/;
+function romanoAArabigo(w) {
+    if (!w || !RE_ROMANO_CORTO.test(w)) return w;
+    let n = 0;
+    for (let k = 0; k < w.length; k++) {
+        const v = ROMANOS[w[k]];
+        const siguiente = ROMANOS[w[k + 1]] || 0;
+        n += v < siguiente ? -v : v;
+    }
+    return n > 0 ? String(n) : w;
+}
+
+// Palabras que no distinguen un título de otro (artículos, preposiciones, conjunciones; es/en/fr/de/it).
+const PALABRAS_VACIAS = new Set(('el la los las un una unos unas de del al y e o u en con por para sin sobre '
+    + 'the a an of and or in on to for with from by at '
+    + 'le les des du et au aux une dans pour '
+    + 'der die das den dem des und ein eine von zu mit '
+    + 'il lo gli dei delle della degli per').split(' '));
+
+/**
+ * PALABRAS QUE UN TÍTULO NUEVO AÑADE a las que ya decían el título actual y el nombre del fichero. Para decidir si
+ * se puede CAMBIAR el título de un libro por el de la autoridad de su ISBN: si la autoridad trae una palabra que no
+ * sale en ningún sitio («El cine ESPAÑOL contado con sencillez» para el fichero «El Cine contado con sencillez»,
+ * «…: INVIERNO» para «…: Primavera»), no es una corrección del título: es OTRO libro de la serie, y el ISBN del
+ * documento es probablemente el de ese otro. Cuentan los números y los romanos (Vol. 2 ≠ Vol. 3, XVII ≠ XX); no
+ * cuenta lo que va entre paréntesis (la serie: «(Las crónicas de Dune 4)»).
+ */
+export function palabrasAnadidas(nuevo, ...referencias) {
+    // Romanos y arábigos son lo mismo («Volume I» = «Volume 1»).
+    const palabrasDe = (t) => tituloComparable(t).split(' ').filter(Boolean).map(romanoAArabigo);
+    const conocidas = new Set(referencias.flatMap(palabrasDe));
+    return [...new Set(palabrasDe(nuevo))]
+        .filter((w) => w && !PALABRAS_VACIAS.has(w) && !conocidas.has(w))
+        .filter((w) => w.length >= 3 || /^\d+$/.test(w) || /^[ivxlc]+$/.test(w));
+}

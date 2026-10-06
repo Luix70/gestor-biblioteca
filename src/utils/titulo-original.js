@@ -122,11 +122,31 @@ export function idiomaOriginalDeTexto(texto) {
  */
 export async function recuperarOriginalesDeFichero(ruta, tituloDoc = '') {
     const texto = await textoCreditos(ruta);
-    if (!texto) return { titulo_original: null, titulos_originales: [], idioma_original: null };
+    if (!texto) return { titulo_original: null, titulos_originales: [], idioma_original: null, titulo_creditos: null };
     const titulos = titulosOriginales(texto, tituloDoc);
+    const idioma = idiomaOriginalDeTexto(texto);
+    // ¿Es una TRADUCCIÓN? ePubLibre escribe «Título original:» en TODOS sus libros, también en los escritos en
+    // español: ahí no es el título de la obra en su lengua, es el título de ESTE libro (6-oct: «El cine contado con
+    // sencillez» quedó como «título original» de una ficha a la que el cotejo había puesto el título de otro libro de
+    // la serie). Sin indicio de traducción junto a la etiqueta, se devuelve como `titulo_creditos`, no como original.
+    if (!idioma && !hayTraduccionCerca(texto)) {
+        return { titulo_original: null, titulos_originales: [], idioma_original: null, titulo_creditos: titulos[0] || null };
+    }
     return {
         titulo_original: titulos[0] || null,
         titulos_originales: titulos.length > 1 ? titulos : [],
-        idioma_original: idiomaOriginalDeTexto(texto),
+        idioma_original: idioma,
+        titulo_creditos: null,
     };
+}
+
+// Indicio de traducción CERCA de la etiqueta «Título original» (en los créditos va unas líneas más abajo:
+// «Traducción: …», «Traducido por…», «Translated by…», «Trad.: …»). Se mira solo esa ventana: el resto del texto
+// (prólogo, capítulos) puede hablar de traducciones sin que el libro lo sea.
+const RE_TRADUCCION = /traduc|traduz|translat|übersetz|trad\.\s*:?|versi[oó]n\s+(?:castellana|española|de\s)/i;
+export function hayTraduccionCerca(texto) {
+    const t = String(texto || '');
+    const i = t.search(RE_ETIQUETA);
+    if (i < 0) return false;
+    return RE_TRADUCCION.test(t.slice(Math.max(0, i - 300), i + 700));
 }

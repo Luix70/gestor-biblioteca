@@ -42,6 +42,7 @@ import { PLACEHOLDERS_AUTOR } from '../utils/creditos-portada.js';
 import path from 'node:path';
 import { carpetaDeDoc } from './util-mantenimiento.js';
 import { recuperarOriginalesDeFichero } from '../utils/titulo-original.js';
+import { palabrasAnadidas } from '../utils/titulo-libro.js';
 import { indexarDoc } from '../utils/indice-busqueda.js';
 import { regenerarSidecarsDoc, FILTRO_SIDECARS_DESACTUALIZADOS } from '../utils/registro.js';
 import { precalentarEquivalencias, contarEquivalenciasPendientes, resolverCDU } from '../clasificador-cdu.js';
@@ -128,6 +129,14 @@ export async function cotejarPorISBN(doc) {
     // ser el genérico de la serie o un artefacto → mal referente). Sin nombre de archivo → no se puede confirmar.
     const ref = sinExtension(doc.nombre_archivo);
     const corrobora = ref ? await corroborarISBNporTitulo({ candidatos: isbns, titulo: ref }).catch(() => null) : null;
+    // CORROBORAR UN ISBN NO ES CORROBORAR UN TÍTULO NUEVO. La corroboración tolera palabras de menos (60 % del título
+    // más corto); para CAMBIAR el título, la autoridad no puede traer palabras que no digan ni el título actual ni el
+    // nombre del fichero. Si las trae, es otro libro de la misma serie y el ISBN probablemente es el suyo (6-oct:
+    // 1.490 de 13.890 cambios así: «El cine contado con sencillez» → «El cine ESPAÑOL…», «…: Primavera» →
+    // «…: Invierno», «Margaret Thatcher» → «Assassination of Margaret Thatcher»). Se deja para revisar.
+    if (corrobora && palabrasAnadidas(tAut, doc.titulo, ref).length) {
+        return { accion: 'revisar', tituloFichero: tAut, motivo: 'la autoridad añade palabras (¿otro libro de la serie?)' };
+    }
     if (corrobora) return { accion: 'aplicar', titulo: tAut, subtitulo: fich.subtitulo ? String(fich.subtitulo).trim() : null };
     return { accion: 'revisar', tituloFichero: tAut };            // difiere y el ISBN no se corrobora → posible ISBN erróneo
 }
