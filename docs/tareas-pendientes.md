@@ -141,12 +141,12 @@ rompen al moverse: el motor los lleva consigo).
       editorial mal apuntada («Biblioteca Clásica Gredos»: RBA → Gredos; «Valdemar: El Club Diógenes»: Gredos →
       Valdemar; «Solaris Ficción»: Ediciones B → La Factoría; 14 apuntando a una editorial borrada). Un libro mal
       asignado a una colección no se toca (su ISBN es de otro registrante). `--excluir <id>,…` para dejar alguna.
-- [ ] `editoriales-por-prefijo.js --ejecutar` otra vez: rehace (sin duplicar) «Editorial a revisar (prefijo ISBN)» y
+- [ ] `editoriales-por-prefijo.js --ejecutar` otra vez (en seco 6-oct: **96** a corregir, 565 sellos/otra editorial que no se tocan, 59 sospechosos): rehace (sin duplicar) «Editorial a revisar (prefijo ISBN)» y
       crea «Editorial a revisar — su colección coincide con el prefijo» (151, los más sospechosos: revisar primero).
 
 ### 3 septies. Revisar las editoriales dudosas (1-oct)
-- [ ] Desplegar (trae el orden «Editorial» en Búsqueda y la acción «✅ Confirmar editorial»).
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/triar-editoriales-sin-confirmar.js` (en seco) y `--ejecutar`
+- [x] Desplegar (trae el orden «Editorial» en Búsqueda y la acción «✅ Confirmar editorial»).
+- [x] `sudo docker exec -it gestor-biblioteca node scripts/triar-editoriales-sin-confirmar.js` (en seco) y `--ejecutar`
       (en seco 1-oct: 6 maquetadores a quitar, 91 confirmadas por su colección o su autor, **350** para mirar).
 - [ ] Mirar los 350 en Búsqueda: selección «Editorial sin confirmar…» + ordenar por «Editorial» → por grupos de
       portadas → «✅ Confirmar editorial» o «✏️ Asignar datos». Después, igual con «Editorial a revisar — su colección
@@ -156,24 +156,24 @@ rompen al moverse: el motor los lleva consigo).
 - [x] fusionar-grafias-editoriales (1.ª pasada, solo grafías) — ejecutada en el NAS el 5-oct.
 - [x] reparar-rutas-imagenes (693 docs, Don Miki) y reparar-referencias-editorial (830 colecciones/obras) —
       ejecutados desde el PC el 5-oct (solo BD; verificado: 0 pendientes).
-- [ ] Desplegar (resolver de editoriales con prefijo ISBN, revista por el nombre, categoría de Integridad nueva).
-- [ ] Copia de la base (`scripts/copia-base.js`).
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/fusionar-grafias-editoriales.js` (2.ª pasada: ahora junta
+- [x] Desplegar (resolver de editoriales con prefijo ISBN, revista por el nombre, categoría de Integridad nueva).
+- [x] Copia de la base (`scripts/copia-base.js`).
+- [x] (5-oct: 524 editoriales fundidas, 3.827 libros; Montena 569, 0 referencias rotas) `sudo docker exec -it gestor-biblioteca node scripts/fusionar-grafias-editoriales.js` (2.ª pasada: ahora junta
       también los sellos de una casa por el prefijo ISBN — Montena/Mondiberica → Montena; en seco 426 grupos, 3.926
       libros; `--sin-prefijo` para solo grafías) y `--ejecutar`.
-- [ ] Después: `sudo docker exec -it gestor-biblioteca node scripts/alinear-editorial-numeros.js` (en seco: 501 números
+- [x] (5-oct: 595 números; Don Miki 692/692 Montena) Después: `sudo docker exec -it gestor-biblioteca node scripts/alinear-editorial-numeros.js` (en seco: 501 números
       sin editorial + 149 con una suelta) y `--ejecutar`.
 - [ ] Lo que siga separado → página Editoriales → «🔗 Combinar». Sidecars: campaña «sidecars»; índice: «Reindexar».
 
 ### 3 octies. Reorganizar las colecciones (1-oct; regla: manual > editorial > carpeta)
-- [ ] Desplegar (trae `coleccion_fuente`, la serie editorial en la ingesta y el script).
-- [ ] Copia de la base: `sudo docker exec -it gestor-biblioteca node scripts/copia-base.js`
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/reorganizar-colecciones.js --informe logs/reorganizar-colecciones.txt` (en seco, ~2 min)
+- [x] Desplegar (trae `coleccion_fuente`, la serie editorial en la ingesta y el script).
+- [x] Copia de la base: `sudo docker exec -it gestor-biblioteca node scripts/copia-base.js`
+- [x] `sudo docker exec -it gestor-biblioteca node scripts/reorganizar-colecciones.js --informe logs/reorganizar-colecciones.txt` (en seco, ~2 min)
       En seco 1-oct (PC): 2.581 nombres al día · 40 series fundidas (90 colecciones) · 3.037 libros sin colección
       entran en su serie · 2.544 salen de una carpeta a su serie · 353 contradicciones claras · **352 a revisar** ·
       **86 colecciones de carpeta → selección** (12.873 libros) · 490 de un libro retiradas. Mirar la lista de la
       fase 4 en el informe: lo que deba seguir siendo colección → `--conservar <id>,…` (p. ej. «En 50 Minutos»).
-- [ ] `… --ejecutar` (mismas opciones).
+- [x] `… --ejecutar` (mismas opciones). (2-oct: 20.726 cambios en el diario)
 - [ ] Revisar la selección «Colección contradicha por la autoridad».
 
 ### 3 ter. Índice de series (para el trabajo de colecciones)
@@ -181,7 +181,7 @@ rompen al moverse: el motor los lleva consigo).
   cuentan ahora en cada una). (Copiado a `U:\Fichero` el 30-sep.)
 - [x] Copiar `D:\gestor-biblioteca\Fichero\series.db` (2,9 GB, construido en el PC el 30-sep) a la carpeta Fichero del
   NAS (`U:\Fichero\series.db`). Sin reiniciar nada: se abre la primera vez que se consulta.
-- [ ] Probar: `sudo docker exec -t gestor-biblioteca node scripts/consultar-serie.js "Graduate texts in mathematics"`
+- [x] Probar: `sudo docker exec -t gestor-biblioteca node scripts/consultar-serie.js "Graduate texts in mathematics"`
 
 ### 3 quinquies. Volcados por traer (apuntado el 1-oct)
 - [ ] **Library Genesis** (volcado de su base de datos, unas decenas de GB) → `U:\_DUMPEDCATALOGS\`, y su ETL como el de
@@ -198,9 +198,9 @@ rompen al moverse: el motor los lleva consigo).
       ISBN (1-oct); solo ayudaría a los que tienen capa de texto (los escaneos sin OCR no).
 
 ### 4. Portadas falsas (la misma imagen en libros distintos)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/detectar-portadas-artefacto.js`
 
-Crea una selección **«Portada sospechosa …»** por grupo (no toca los documentos). Luego, en el panel, sobre cada
+(Hecho: hay ~250 selecciones «Portada sospechosa …» por revisar.) Crea una selección **«Portada sospechosa …»** por grupo (no toca los documentos). Luego, en el panel, sobre cada
 selección: **🚩 Portada sospechosa…** → re-extraer omitiendo la sospechosa / primera página de texto / quitar.
 (El 1.er barrido encontró grupos como 415 EPUB en español con la misma imagen y 30 libros de ciencia con un banner.)
 
@@ -213,8 +213,8 @@ anota la huella). La primera vez saldrán muchos «sospechosos» que no lo son (
 días): el recálculo los confirma. Después, Integridad lo vigila solo.
 
 ### 4 ter. Libros catalogados varias veces (versiones del mismo libro)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/fusionar-versiones.js`
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/fusionar-versiones.js --ejecutar`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/fusionar-versiones.js` (en seco 6-oct: **0** grupos seguros para fundir solos; 2.756 docs en «Versiones por revisar …» y 346 en «ISBN compartido …» → a mano con «🔗 Fusionar versiones»)
+- [x] ~~`… --ejecutar`~~ (no fundiría nada)
 
 Mismo ISBN, formato y título con ficheros algo distintos (2.416 grupos, 5.123 documentos medidos el 29-sep). Sin
 `--ejecutar` crea selecciones «Versiones por revisar …» e «ISBN compartido …»; con `--ejecutar` fusiona solo los
@@ -226,7 +226,7 @@ Los «ISBN compartido» (títulos distintos, 257 grupos) tienen un ISBN falso: h
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/separar-autores-fusionados.js --ejecutar`
 - [ ] Después: `sudo docker exec -t gestor-biblioteca node scripts/marcar-autores-basura.js` (en seco y luego `--ejecutar`)
 
-Separa «autores» que eran varias personas en un solo registro (dry-run de julio: 285 grupos, 314 libros).
+Separa «autores» que eran varias personas en un solo registro (dry-run de julio: 285 grupos, 314 libros; **en seco 6-oct: 9 grupos, 9 libros**; marcar-autores-basura: **391** autores).
 
 ### 6. Título original desde los créditos (pendiente desde julio)
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-titulo-original.js`
@@ -253,7 +253,7 @@ Cascada gratuita (nombre de archivo → Fichero → colección → OpenLibrary �
 ### Revisiones a mano (sin script)
 - [x] **Libros catalogados como revista**: ejecutado el 5-oct (50 pasados). Sus rutas: 30 corregidas a mano (bug de
       recolocación ya arreglado); «Algebraic Geometry I» sigue en revistas/ hasta que la recoloque ubicar-segun-cdu.
-- [ ] **Títulos de los números de revista** (5-oct): desplegar y, con copia, `scripts/unificar-titulos-numeros.js` (en
+- [x] **Títulos de los números de revista** (5-oct, ejecutado: 1.724): desplegar y, con copia, `scripts/unificar-titulos-numeros.js` (en
       seco) y `--ejecutar`. En seco: 12 cabeceras-basura reparadas («downmagaz.net» → Easy Cook…), 27 grafías, **1.698**
       títulos unificados (41 recuperan su Nº). Quedan ~48 cabeceras con nombre de fichero para limpiar a mano o con otro
       script (muchas son libros o artículos tipados como revista).
@@ -261,7 +261,7 @@ Cascada gratuita (nombre de archivo → Fichero → colección → OpenLibrary �
       (en seco), `--ejecutar --limite 5`, `--ejecutar`; después `sanear-numeros-revista.js --contaminadas` (en seco y
       `--ejecutar`). En seco 5-oct: **124** a revista (Popular Photography, Paranormal, Kiplinger's, Hi-Fi Choice,
       Amateur Photographer…) y **27** a revisar.
-- [ ] (antiguo) Libros catalogados como revista → ahora con script (2-oct): desplegar y, en el NAS, con copia de la base:
+- [x] (antiguo, ejecutado 5-oct) Libros catalogados como revista → ahora con script (2-oct): desplegar y, en el NAS, con copia de la base:
       `sudo docker exec -it gestor-biblioteca node scripts/libros-como-revista.js` (en seco: la lista), después
       `… --ejecutar --limite 5` (probar), y `… --ejecutar`. En seco 2-oct: **50** pasan a libro (44 por el ISSN de
       su serie, 6 con ISBN y sin señales de número) y **9** a revisar (cómics de Don Miki, «Mitsu»). De los ~129
