@@ -948,6 +948,9 @@ export function rutasPanel() {
             const clasSistema = String(req.query.clasSistema || '').toLowerCase();
             const clasCodigo = String(req.query.clasCodigo || '').trim();
             if (['cdu', 'dewey', 'lcc'].includes(clasSistema) && clasCodigo) match[clasSistema] = clasCodigo;
+            // Filtro por MATERIA exacta (clic en una palabra clave de la ficha), sin distinguir mayúsculas.
+            const materia = String(req.query.materia || '').trim();
+            if (materia) match.palabras_clave = { $regex: '^' + escapeRegex(materia) + '$', $options: 'i' };
             // Filtro por colección (clic en la colección desde la ficha).
             const colId = String(req.query.coleccion || '').trim();
             if (colId && ObjectId.isValid(colId)) match.coleccion = new ObjectId(colId);
@@ -3099,7 +3102,8 @@ export function rutasPanel() {
             const rol = String(req.query.rol || '');      // '' | autor | traductor | ilustrador | …
             const minLibros = Number(req.query.minLibros) || 0; // ≥ N obras
             const sinLibros = req.query.sinLibros === '1' || req.query.sinLibros === 'true'; // solo autores con 0 libros
-            const r = await listarAutores(await conectarDB(), { q, limite, pagina, foto, bio, orden, rol, minLibros, sinLibros });
+            const soloIds = req.query.soloIds === '1';   // «☑ Todos»: todos los del filtro, en ligero
+            const r = await listarAutores(await conectarDB(), { q, limite, pagina, foto, bio, orden, rol, minLibros, sinLibros, soloIds });
             res.json({ ok: true, ...r }); // { autores, total, pagina, porPagina, capado }
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

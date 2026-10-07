@@ -1400,6 +1400,10 @@ de ficheros clasificado por CDU.
     CARPETAS ANIDADAS AL BORRAR (2026-10-07). Reprocesar/borrar un documento, fundir versiones o quitar un duplicado
       por hash mandaban su carpeta a la Papelera mirando solo si otro documento tenía la MISMA carpeta, no si vivía
       DENTRO: se habría llevado sus ficheros. Ahora miran ambas (utils/carpeta-en-uso.js) y la conservan.
+    PANEL (2026-10-07): en Autores, en Modo selección, «☑ Página» (marca o desmarca la página visible) y «☑ Todos (N)»
+      (todos los del filtro, todas las páginas; GET /api/autores?soloIds=1) — p. ej. buscar «[?]_» y marcarlos todos.
+      En la ficha, las MATERIAS de «Datos catalográficos» (palabras clave) son clicables: llevan al Catálogo filtrado
+      por esa materia exacta (/api/catalogo?materia=…, sin distinguir mayúsculas).
     REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y
     «Editorial a revisar…»:
       · `scripts/triar-editoriales-sin-confirmar.js` (seco por defecto; `--ejecutar`, `--seleccion "<nombre>"`)

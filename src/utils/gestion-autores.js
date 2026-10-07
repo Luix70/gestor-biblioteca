@@ -75,7 +75,7 @@ function condicionCampo(campo, valor) {
  * SIN búsqueda ni rol muestra los autores QUE TIENEN LIBROS (los miles del volcado sin libros son ruido;
  * aparecen al buscarlos por nombre). foto/bio se aplican siempre.
  */
-export async function listarAutores(db, { q = '', limite = 60, foto = '', bio = '', orden = 'libros', rol = '', minLibros = 0, sinLibros = false, pagina = 1 } = {}) {
+export async function listarAutores(db, { q = '', limite = 60, foto = '', bio = '', orden = 'libros', rol = '', minLibros = 0, sinLibros = false, pagina = 1, soloIds = false } = {}) {
     const porPagina = Math.min(200, Math.max(1, Number(limite) || 60)); // autores por página
     const pag = Math.max(1, Number(pagina) || 1);
     const MAX_ESCANEO = 5000; // tope de autores a puntuar (para el recuento y la paginación)
@@ -116,6 +116,8 @@ export async function listarAutores(db, { q = '', limite = 60, foto = '', bio = 
         autores.sort((x, y) => y.n_libros - x.n_libros || String(x.nombre || '').localeCompare(String(y.nombre || '')));
     }
     const total = autores.length;
+    // «☑ Todos» del panel: TODOS los del filtro (todas las páginas), en ligero (id, nombre, nº de libros).
+    if (soloIds) return { ids: autores.map((a) => ({ _id: a._id, nombre: a.nombre, n_libros: a.n_libros })), total, capado: docs.length >= MAX_ESCANEO };
     const inicio = (pag - 1) * porPagina;
     return {
         autores: autores.slice(inicio, inicio + porPagina),

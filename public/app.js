@@ -3622,7 +3622,7 @@ function pintarDoc(r, ctx) {
     ? `<div class="card" style="margin-top:14px"><h3>Sinopsis</h3><p class="sinopsis-text">${esc(d.sinopsis)}</p></div>`
     : '';
   const palabras = (d.palabras_clave || []).length
-    ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:5px">${d.palabras_clave.map((p) => `<span class="tag mut">${esc(p)}</span>`).join('')}</div>`
+    ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:5px">${d.palabras_clave.map((p) => `<a href="#" class="tag mut" data-materia="${esc(p)}" title="Ver en el Catálogo los libros con esta materia">${esc(p)}</a>`).join('')}</div>`
     : '';
   const clas = (r.clasificaciones || []).length
     ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:6px">Clasificación</div><table class="clastab">${r.clasificaciones.map((x) => filaClas(x)).join('')}</table></div>`
@@ -3935,6 +3935,8 @@ function pintarDoc(r, ctx) {
   $$('#p-detalle [data-ediid]').forEach((a) => (a.onclick = () => irBusquedaFiltro({ editorial: a.dataset.ediid, etiqueta: '🏢 ' + (a.dataset.edinom || 'editorial') })));
   // CDU clicable → Catálogo filtrado por esa misma clasificación (reusa el filtro de la tabla de clasificación).
   $$('#p-detalle [data-clascdu]').forEach((a) => (a.onclick = () => filtrarPorClasificacion('cdu', a.dataset.clascdu)));
+  // Materia (palabra clave) clicable → Catálogo filtrado por esa materia exacta (sin distinguir mayúsculas).
+  $$('#p-detalle [data-materia]').forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); irBusquedaFiltro({ materia: a.dataset.materia, etiqueta: '🏷 ' + a.dataset.materia }); }));
   // ID de Mongo → ver el documento EXACTO de la base (JSON, solo lectura).
   $$('#p-detalle [data-oid]').forEach((a) => (a.onclick = () => verDocumentoCrudo(a.dataset.oid)));
   // 🔎 Cotejar (junto a ISBN/ISSN): recopilar del Fichero + APIs y cotejar con el documento.
@@ -17404,10 +17406,8 @@ async function loadAutores() {
   autoresBuscar();
 }
 
-// Lee los controles (texto + filtros foto/bio/rol + orden) y pide la lista al servidor.
-async function autoresBuscar() {
-  const grid = $('#autGrid');
-  if (grid) grid.textContent = 'Cargando…';
+// Parámetros del filtro actual de Autores (sin página): los usan la lista y «☑ Todos».
+function _paramsAutores() {
   const params = new URLSearchParams({
     q: ($('#autBuscar') && $('#autBuscar').value.trim()) || '',
     foto: ($('#autFotoFiltro') && $('#autFotoFiltro').value) || '',
@@ -17419,6 +17419,14 @@ async function autoresBuscar() {
   const min = ($('#autMin') && $('#autMin').value) || '0';
   if (min === 'sin') params.set('sinLibros', '1');
   else params.set('minLibros', min);
+  return params;
+}
+
+// Lee los controles (texto + filtros foto/bio/rol + orden) y pide la lista al servidor.
+async function autoresBuscar() {
+  const grid = $('#autGrid');
+  if (grid) grid.textContent = 'Cargando…';
+  const params = _paramsAutores();
   params.set('pagina', String(_autoresPagina));
   params.set('limite', String(_autoresPorPagina));
   try {
@@ -17538,6 +17546,14 @@ function autoresBarraCombinar() {
   const modoBtn = admin
     ? `<button class="btn${_autoresSelModo ? ' pri' : ''}" id="autModo" title="Modo selección: tocar una tarjeta la marca (para combinar). Modo previsualización: tocar abre la ficha. Doble clic / pulsación larga en una tarjeta también conmuta. Lo marcado se conserva.">${_autoresSelModo ? '🖱 Modo selección' : '👁 Modo previsualización'}</button>`
     : '';
+  // En Modo selección: marcar la PÁGINA visible (o desmarcarla si ya lo está) o TODOS los del filtro (todas las
+  // páginas), como en el Catálogo. Para revisar en bloque, p. ej., los «[?]_» o los de 0 libros.
+  const enPagina = (_autores || []).map((a) => a._id);
+  const paginaMarcada = enPagina.length > 0 && enPagina.every((id) => _autoresSel.has(id));
+  const marcarTodo = admin && _autoresSelModo
+    ? ` <button class="btn" id="autSelPagina" title="Marcar (o desmarcar) los autores de esta página">${paginaMarcada ? '☐ Página' : '☑ Página'}</button>`
+      + ` <button class="btn" id="autSelTodosRes" title="Marcar TODOS los autores del filtro actual (todas las páginas)">☑ Todos (${_autoresTotal}${_autoresCapado ? '+' : ''})</button>`
+    : '';
   let acciones = '';
   if (n >= 1) {
     const combinar = n >= 2 ? `<button class="btn pri admin-only" id="autCombinar">🔗 Combinar ${n}…</button> ` : '';
@@ -17545,8 +17561,14 @@ function autoresBarraCombinar() {
     const elim = admin ? `<button class="btn admin-only" id="autEliminar" title="Borra los marcados que NO figuren en ningún documento (ni como autor ni como contribuyente); los que tengan obras se conservan intactos">🗑 Eliminar ${n}</button> ` : '';
     acciones = ` ${combinar}${marca1}${elim}<button class="btn" id="autSelClear">✕ deseleccionar</button>`;
   }
-  bar.innerHTML = modoBtn + acciones;
+  bar.innerHTML = modoBtn + marcarTodo + acciones;
   if ($('#autModo')) $('#autModo').onclick = () => alternarAutoresModo();
+  if ($('#autSelPagina'))
+    $('#autSelPagina').onclick = () => {
+      enPagina.forEach((id) => marcarAutor(id, !paginaMarcada));
+      autoresPintar();
+    };
+  if ($('#autSelTodosRes')) $('#autSelTodosRes').onclick = autoresSelTodosResultados;
   if ($('#autCombinar')) $('#autCombinar').onclick = autorCombinar;
   if ($('#autEliminar')) $('#autEliminar').onclick = autoresEliminarSel;
   if ($('#autSelClear'))
@@ -17554,6 +17576,26 @@ function autoresBarraCombinar() {
       limpiarSelAutores();
       autoresPintar();
     };
+}
+
+// Marca TODOS los autores del filtro actual (todas las páginas), con su nombre y nº de libros (para listarlos
+// aunque no estén en la página visible). El servidor escanea hasta 5.000: si el filtro da más, avisa.
+async function autoresSelTodosResultados() {
+  const params = _paramsAutores();
+  params.set('soloIds', '1');
+  let r;
+  try {
+    r = await api('/autores?' + params.toString());
+  } catch (e) {
+    toast(e.message, 'bad');
+    return;
+  }
+  for (const a of r.ids || []) {
+    _autoresSel.add(a._id);
+    _autoresSelInfo.set(a._id, { _id: a._id, nombre: a.nombre, n_libros: a.n_libros || 0 });
+  }
+  autoresPintar();
+  toast(`${(r.ids || []).length} autor(es) marcados${r.capado ? ' (el filtro da más de 5.000: afínalo para marcar el resto)' : ''} · total ${_autoresSel.size}`);
 }
 
 // Elimina los autores MARCADOS, pero solo los que no figuran en ningún documento (salvaguarda en el server).
