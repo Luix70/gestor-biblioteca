@@ -122,7 +122,10 @@ export async function cotejarPorISBN(doc) {
     // NO DEGRADAR: si el título actual ya CONTIENE (como frase completa) el del Fichero, es MÁS específico y no
     // se sustituye — el del Fichero perdería información (visto: «Cinema 1: The Movement-Image» → «Cinema»). El
     // cotejo solo arregla títulos POBRES (nombre de serie/editorial, truncados, artefacto), no rebaja uno bueno.
-    if (nAut && nDoc.length > nAut.length && (' ' + nDoc + ' ').includes(' ' + nAut + ' ')) {
+    // …salvo que el título actual SEA el nombre del fichero (8-oct: «(Series … 1) Bernard Helffer-Semiclassical
+    // analysis…-World Scientific (2002)»): lo que tiene «de más» es serie, autor, editorial y año, no título.
+    const esElNombreDelFichero = nDoc === normTitulo(sinExtension(doc.nombre_archivo));
+    if (!esElNombreDelFichero && nAut && nDoc.length > nAut.length && (' ' + nDoc + ' ').includes(' ' + nAut + ' ')) {
         return { accion: 'revisar', tituloFichero: tAut, motivo: 'no-degradar (el actual es más completo)' };
     }
     // ¿El ISBN es REALMENTE de este libro? Se corrobora SOLO por el nombre de archivo (el título actual puede
@@ -400,7 +403,7 @@ export const CAMPANAS = [
         etiqueta: 'Cotejar título por ISBN',
         coste: 'gratis',
         descripcion: 'El ISBN-autoridad PRIMA sobre el título de los metadatos del fichero (escaneos descuidados). Para libros con ISBN, si el título del Fichero local (OL+BNE) DIFIERE del actual y el ISBN se CORROBORA por el nombre de archivo, sustituye el título (y el subtítulo si falta) — AUTO, SIN IA, offline. Casos reales: el título quedó con el nombre de la SERIE/editorial, truncado o un artefacto. SOLO aplica el caso corroborado (100% seguro); si difiere pero el ISBN NO se corrobora (posible ISBN equivocado o compartido) NO toca nada — esos sospechosos se ven con «node scripts/cotejar-por-isbn.js» (que de paso es un cazador de ISBN erróneos).',
-        version: 1,
+        version: 2,   // v2 (8-oct): títulos que son el nombre del fichero; autoridad que añade palabras → revisar
         loteDefecto: 120,
         cadenciaDefecto: 10,
         activaDefecto: true,   // gratis (solo Fichero, offline) → conviene que corra solo

@@ -1416,6 +1416,13 @@ de ficheros clasificado por CDU.
       cada libro; aviso fuerte si alguno no es un «[?]_»).
       En la ficha, las MATERIAS de «Datos catalográficos» (palabras clave) son clicables: llevan al Catálogo filtrado
       por esa materia exacta (/api/catalogo?materia=…, sin distinguir mayúsculas).
+    TÍTULOS QUE SON EL NOMBRE DEL FICHERO (2026-10-08). 3.609 libros tenían por título el nombre de su fichero. El
+      lector de nombres entiende ya el formato de Z-Library/Libgen «(Serie N) Autor-Título-Editorial (Año)»
+      (parsear-nombre · parsearNombreZlib: título, autores, editorial, año y serie). El cotejo por ISBN ya no se
+      frena con «no degradar» cuando el título actual ES el nombre del fichero (campaña cotejo v2: vuelve a pasar).
+      Lo ya catalogado: `scripts/retitular-por-nombre.js` (seco / `--ejecutar`): solo casos seguros — formato
+      Z-Library, o el título del Fichero para su ISBN está ENTERO dentro (se toma ese trozo con su grafía, se conserva
+      el artículo inicial, nunca se pierde un «Vol N»; lo que sobra con forma de subtítulo pasa a subtítulo).
     TÍTULOS LIMPIOS (2026-10-08, utils/titulos.js; la ingesta ya lo aplica). (1) La MENCIÓN de responsabilidad pegada
       al título («…; ED. BY JOHN DAINTITH.», «… (il. N. C. Wyeth; trad. Francisco Torres Oliver)», «…, by Mary L. Boas»)
       se separa y sus personas pasan a autores o colaboraciones con su rol — solo si toda la cola son nombres. (2) Los

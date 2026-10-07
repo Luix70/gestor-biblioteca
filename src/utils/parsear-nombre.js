@@ -305,6 +305,40 @@ function parsearConPieDeImprenta(trabajo) {
 }
 
 /**
+ * Nombre al estilo de Z-Library / Library Genesis: «[(Serie N) ]Autor[, Autor2]-Título-Editorial (Año)», con guiones
+ * SIN espacios como separadores: «(Series on partial differential equations and applications 1) Bernard Helffer-
+ * Semiclassical analysis, Witten Laplacians, and statistical mechanics-World Scientific (2002)». 8-oct: 3.609 libros
+ * tenían por título el nombre del fichero entero, muchos así. El ancla es el final «-Editorial (Año)»; el autor es el
+ * primer tramo con forma de nombre (2+ palabras: «Jean-Pierre Serre-A Course…» no se corta en «Jean»).
+ * @returns {{titulo, autores, editorial, año_edicion, coleccion_nombre?, coleccion_numero?}|null}
+ */
+export function parsearNombreZlib(nombre) {
+    let s = String(nombre).trim();
+    let serie = null;
+    const ms = s.match(/^\(([^()]+?)\s+(\d{1,4})\)\s*/);   // «(Serie 12) …»
+    if (ms) { serie = { nombre: ms[1].trim(), numero: ms[2] }; s = s.slice(ms[0].length); }
+    const mf = s.match(/-([^-()]{2,80}?)\s*\(((?:1[5-9]|20)\d{2})\)$/);   // «…-Editorial (2002)»
+    if (!mf) return null;
+    const editorial = mf[1].trim();
+    const resto = s.slice(0, mf.index);
+    // El autor: el primer «-» tras el que lo de delante parece un nombre (2-8 palabras con mayúscula, o una lista).
+    for (let i = resto.indexOf('-'); i > 0; i = resto.indexOf('-', i + 1)) {
+        const autor = resto.slice(0, i).trim();
+        const titulo = resto.slice(i + 1).trim();
+        const palabras = autor.split(/\s+/);
+        if (!titulo || palabras.length < 2 || palabras.length > 8 || !/^\p{Lu}/u.test(autor)) continue;
+        if (/[:;!?]/.test(autor) || esAutorArtefacto(autor)) continue;
+        const autores = autor.split(/\s*,\s*|\s*&\s*|\s+and\s+/).map((a) => a.trim()).filter(Boolean);
+        if (autores.some((a) => a.split(/\s+/).length < 2)) continue;   // «Helffer, Bernard» no es este formato
+        return {
+            titulo, autores, editorial, año_edicion: Number(mf[2]),
+            ...(serie ? { coleccion_nombre: serie.nombre, coleccion_numero: serie.numero } : {}),
+        };
+    }
+    return null;
+}
+
+/**
  * @returns { titulo, autores, año_edicion?, idioma?, esFechada, coleccion_nombre?, coleccion_numero?, editorial? }
  */
 export function parsearNombre(nombreArchivo) {
@@ -351,6 +385,10 @@ export function parsearNombre(nombreArchivo) {
         const tituloLote = trabajo.includes('.') ? tituloDeNombreDeLote(trabajo) : null;
         return { titulo: tituloLote || null, autores: [], isbn: isbnLote, esFechada: false, ...colExtra };
     }
+
+    // Z-Library / Libgen: «(Serie N) Autor-Título-Editorial (Año)» (ver parsearNombreZlib).
+    const zl = !col.coleccion_nombre && parsearNombreZlib(trabajo);
+    if (zl) return { ...zl, esFechada: false, ...colExtra };
 
     const isoPrefix = !empiezaPorIsbn && trabajo.match(/^((?:19|20)\d{2})[-_](\d{2})(?:[-_]\d{2})?\s+(.+)/);
     if (isoPrefix) {
