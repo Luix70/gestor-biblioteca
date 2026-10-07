@@ -4,9 +4,9 @@
  * distintos). Motor y reglas: src/utils/fusionar-versiones.js.
  *
  * Por defecto NO toca ningún documento: clasifica los grupos y crea SELECCIONES para revisar:
- *   · «Versiones por revisar <ISBN> (N)»   — mismo libro, pero algo impide fusionarlo solo (páginas o tamaño muy
+ *   · «Versiones por revisar»   (una sola; ordenar por ISBN) — mismo libro, pero algo impide fusionarlo solo (páginas o tamaño muy
  *                                             distintos, formatos distintos, posibles tomos, ISBN provisional…)
- *   · «ISBN compartido <ISBN> (N)»         — títulos DISTINTOS con el mismo ISBN: no son versiones, el ISBN está mal
+ *   · «ISBN compartido»         (una sola)                 — títulos DISTINTOS con el mismo ISBN: no son versiones, el ISBN está mal
  * Con --ejecutar, fusiona los SEGUROS (mismo ISBN, formatos, título, páginas ±2 y tamaño ±25 %): un solo documento,
  * con los ficheros de todas las versiones conservados en su carpeta.
  *
@@ -59,25 +59,29 @@ console.log('   motivos:');
 for (const [m, n] of Object.entries(motivos).sort((a, b) => b[1] - a[1])) console.log(`     · ${m}: ${n}`);
 
 // ── 2. Selecciones para revisar ─────────────────────────────────────────────────────────────────────────
-async function seleccion(prefijo, g, descripcion) {
-    const nombre = `${prefijo} ${g._id.isbn} (${g.docs.length})`;
-    const ya = await db.collection('selecciones').findOne({ nombre: { $regex: `^${prefijo} ${g._id.isbn} ` } }, { projection: { _id: 1 } });
-    const ids = g.docs.map((d) => d._id);
-    if (ya) { await reemplazarDocs(db, ya._id, ids); await db.collection('selecciones').updateOne({ _id: ya._id }, { $set: { nombre, descripcion } }); }
-    else await crearSeleccion(db, { nombre, descripcion, docs: ids });
+// UNA selección por clase, no una por grupo: el 6-oct una pasada en seco creó 3.082 («Versiones por revisar <ISBN>»
+// y «ISBN compartido <ISBN>») y ahogaron la lista de selecciones. En la selección, ordenar por ISBN junta cada grupo.
+// Las antiguas de un grupo («<clase> <ISBN> (N)») se retiran al rehacerla.
+async function seleccion(nombre, grupos, descripcion) {
+    const ids = grupos.flatMap((g) => g.docs.map((d) => d._id));
+    const col = db.collection('selecciones');
+    const viejas = await col.deleteMany({ nombre: { $regex: `^${nombre} [0-9X-]+ \\(\\d+\\)$` } });
+    if (viejas.deletedCount) console.log(`   (retiradas ${viejas.deletedCount} selecciones antiguas «${nombre} <ISBN>»)`);
+    if (!ids.length) return;
+    const ya = await col.findOne({ nombre }, { projection: { _id: 1 } });
+    if (ya) {
+        await reemplazarDocs(db, ya._id, ids);
+        await col.updateOne({ _id: ya._id }, { $set: { descripcion } });
+    } else {
+        await crearSeleccion(db, { nombre, descripcion, docs: ids });
+    }
 }
 if (SELECCIONES && !ISBN) {
-    let n = 0;
-    for (const g of clases.revisar) {
-        await seleccion('Versiones por revisar', g, `Mismo ISBN (${g._id.isbn}) y título, pero no se fusiona solo: ${g.motivo}. Si son el mismo libro, «🔗 Fusionar versiones» (conserva todos los ficheros).`);
-        if (++n % 50 === 0) process.stdout.write(`\r\x1b[K   ⏳ selecciones ${n}/${clases.revisar.length + clases['isbn-compartido'].length}`);
-    }
-    for (const g of clases['isbn-compartido']) {
-        await seleccion('ISBN compartido', g, `Títulos DISTINTOS con el mismo ISBN ${g._id.isbn}: no son versiones; el ISBN está mal en alguno (o es de relleno). Corrige el ISBN de los que no sean.`);
-        if (++n % 50 === 0) process.stdout.write(`\r\x1b[K   ⏳ selecciones ${n}/${clases.revisar.length + clases['isbn-compartido'].length}`);
-    }
-    process.stdout.write('\r\x1b[K');
-    console.log(`\n📋 Selecciones creadas/actualizadas: ${clases.revisar.length} «Versiones por revisar …» y ${clases['isbn-compartido'].length} «ISBN compartido …».`);
+    await seleccion('Versiones por revisar', clases.revisar,
+        'Mismo ISBN y título, pero no se fusionan solos (páginas o tamaño muy distintos, formatos distintos, posibles tomos, ISBN provisional…). Ordena por ISBN: cada grupo sale junto. Si son el mismo libro, «🔗 Fusionar versiones» (conserva todos los ficheros).');
+    await seleccion('ISBN compartido', clases['isbn-compartido'],
+        'Títulos DISTINTOS con el mismo ISBN: no son versiones; el ISBN está mal en alguno (o es de relleno). Ordena por ISBN y corrige el de los que no sean.');
+    console.log(`\n📋 Selecciones: «Versiones por revisar» (${docsDe(clases.revisar)} documentos, ${clases.revisar.length} grupos) y «ISBN compartido» (${docsDe(clases['isbn-compartido'])}, ${clases['isbn-compartido'].length} grupos).`);
 }
 
 // ── 3. Fusionar los seguros ─────────────────────────────────────────────────────────────────────────────

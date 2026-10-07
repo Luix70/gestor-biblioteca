@@ -141,7 +141,7 @@ rompen al moverse: el motor los lleva consigo).
       editorial mal apuntada («Biblioteca Clásica Gredos»: RBA → Gredos; «Valdemar: El Club Diógenes»: Gredos →
       Valdemar; «Solaris Ficción»: Ediciones B → La Factoría; 14 apuntando a una editorial borrada). Un libro mal
       asignado a una colección no se toca (su ISBN es de otro registrante). `--excluir <id>,…` para dejar alguna.
-- [ ] `editoriales-por-prefijo.js --ejecutar` otra vez (en seco 6-oct: **96** a corregir, 565 sellos/otra editorial que no se tocan, 59 sospechosos): rehace (sin duplicar) «Editorial a revisar (prefijo ISBN)» y
+- [x] `editoriales-por-prefijo.js --ejecutar` otra vez — HECHO 6-oct (96; queda 1) (en seco 6-oct: **96** a corregir, 565 sellos/otra editorial que no se tocan, 59 sospechosos): rehace (sin duplicar) «Editorial a revisar (prefijo ISBN)» y
       crea «Editorial a revisar — su colección coincide con el prefijo» (151, los más sospechosos: revisar primero).
 
 ### 3 septies. Revisar las editoriales dudosas (1-oct)
@@ -205,15 +205,15 @@ selección: **🚩 Portada sospechosa…** → re-extraer omitiendo la sospechos
 (El 1.er barrido encontró grupos como 415 EPUB en español con la misma imagen y 30 libros de ciencia con un banner.)
 
 ### 4 bis. Hashes que hayan quedado viejos
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/verificar-hashes.js`
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/verificar-hashes.js --ejecutar`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/verificar-hashes.js`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/verificar-hashes.js --ejecutar` (6-oct: 457 hashes nuevos, 0 cambiados; 438 idénticos a otro doc: casi todos miembros de colecciones transmedia (árbol preservado, se dejan) y 11 duplicados reales que resuelve `integridad.js --reparar`)
 
 Detecta los documentos cuyo fichero se modificó después de calcular su hash y los recalcula (si sale igual, solo
 anota la huella). La primera vez saldrán muchos «sospechosos» que no lo son (carpetas movidas o restauradas estos
 días): el recálculo los confirma. Después, Integridad lo vigila solo.
 
 ### 4 ter. Libros catalogados varias veces (versiones del mismo libro)
-- [x] `sudo docker exec -t gestor-biblioteca node scripts/fusionar-versiones.js` (en seco 6-oct: **0** grupos seguros para fundir solos; 2.756 docs en «Versiones por revisar …» y 346 en «ISBN compartido …» → a mano con «🔗 Fusionar versiones»)
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/fusionar-versiones.js` (7-oct: **0** grupos seguros para fundir solos. Ahora UNA selección por clase: «Versiones por revisar» (5.754 docs, 2.705 grupos) e «ISBN compartido» (1.122, 397); ordenar por ISBN. La pasada en seco del 6-oct había creado 3.082 selecciones, una por grupo: retiradas)
 - [x] ~~`… --ejecutar`~~ (no fundiría nada)
 
 Mismo ISBN, formato y título con ficheros algo distintos (2.416 grupos, 5.123 documentos medidos el 29-sep). Sin
@@ -222,18 +222,18 @@ seguros (todos los ficheros se conservan como versiones). Los que queden, desde 
 Los «ISBN compartido» (títulos distintos, 257 grupos) tienen un ISBN falso: hay que corregirlo, no fusionar.
 
 ### 5. Autores fusionados en uno (pendiente desde julio)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/separar-autores-fusionados.js`
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/separar-autores-fusionados.js --ejecutar`
-- [ ] Después: `sudo docker exec -t gestor-biblioteca node scripts/marcar-autores-basura.js` (en seco y luego `--ejecutar`)
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/separar-autores-fusionados.js`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/separar-autores-fusionados.js --ejecutar` (comprobado 7-oct: 0 pendientes)
+- [x] Después: `sudo docker exec -t gestor-biblioteca node scripts/marcar-autores-basura.js` (7-oct: 391 marcados con «[?]_», 0 pendientes → revisarlos en Autores) (en seco y luego `--ejecutar`)
 
 Separa «autores» que eran varias personas en un solo registro (dry-run de julio: 285 grupos, 314 libros; **en seco 6-oct: 9 grupos, 9 libros**; marcar-autores-basura: **391** autores).
 
 ### 5 bis. Títulos que el cotejo cambió por los de otro libro (6-oct) — solo BD, minutos
-- [ ] Copia de la base (`scripts/copia-base.js`).
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/reparar-titulos-cotejo.js` (en seco 6-oct: **958** títulos
+- [x] Copia de la base (`scripts/copia-base.js`).
+- [x] (7-oct: 1.123) `sudo docker exec -it gestor-biblioteca node scripts/reparar-titulos-cotejo.js` (en seco 6-oct: **958** títulos
       vuelven — 80 eran un subtítulo pegado, 878 el título de OTRO libro —, 311 sin el título anterior completo, 178
       «títulos originales» que eran el del propio libro) y `--ejecutar`.
-- [ ] Después: `sudo docker exec -it gestor-biblioteca node scripts/recuperar-titulo-original.js --revisar-existentes` (en seco
+- [x] (7-oct) Después: `sudo docker exec -it gestor-biblioteca node scripts/recuperar-titulo-original.js --revisar-existentes` (en seco
       7-oct, ~3 min: relee solo 825 ficheros; quita 52 «títulos originales» que eran el mismo título y 11 basura;
       531 traducciones y 153 dudosos se quedan) y `--ejecutar`. Lo dudoso a mano: «El Oro del Los Tigres» → «El oro de
       los tigres», «ALMA CAPRICHOS EL MAL POETA» → «Alma. Caprichos. El mal poema».
