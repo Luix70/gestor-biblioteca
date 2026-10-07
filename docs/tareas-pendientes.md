@@ -233,6 +233,10 @@ Separa «autores» que eran varias personas en un solo registro (dry-run de juli
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/reparar-titulos-cotejo.js` (en seco 6-oct: **958** títulos
       vuelven — 80 eran un subtítulo pegado, 878 el título de OTRO libro —, 311 sin el título anterior completo, 178
       «títulos originales» que eran el del propio libro) y `--ejecutar`.
+- [ ] Después: `sudo docker exec -it gestor-biblioteca node scripts/recuperar-titulo-original.js --revisar-existentes` (en seco
+      7-oct, ~3 min: relee solo 825 ficheros; quita 52 «títulos originales» que eran el mismo título y 11 basura;
+      531 traducciones y 153 dudosos se quedan) y `--ejecutar`. Lo dudoso a mano: «El Oro del Los Tigres» → «El oro de
+      los tigres», «ALMA CAPRICHOS EL MAL POETA» → «Alma. Caprichos. El mal poema».
 - [ ] Revisar la selección «ISBN de otro libro de la serie (cotejo)» (~1.190): su ISBN es probablemente el del otro
       libro → 🔎 Extraer ISBN con «forzar», o a mano.
 
