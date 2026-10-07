@@ -43,7 +43,7 @@ import { buscar as buscarIndice, buscarPalabrasClave, estadoIndice, lanzarReinde
 import { descubrirEnFichero } from './utils/fichero-descubrir.js';
 import { asignarColeccion, asignarObra } from './utils/agrupar-docs.js';
 import { fusionarColecciones, explotarColeccion, eliminarColeccionVacia, fusionarObras, explotarObra, eliminarObraVacia, expulsarDeGrupo } from './utils/gestion-grupos.js';
-import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor, cambiarRolEnDocs, eliminarAutoresVacios, imagenesDeObras } from './utils/gestion-autores.js';
+import { listarAutores, fichaAutor, editarAutor, fusionarAutores, guardarFotoAutor, quitarAutorDeDocs, reasignarDocsAAutor, cambiarRolEnDocs, eliminarAutoresVacios, eliminarAutoresConAutoria, imagenesDeObras } from './utils/gestion-autores.js';
 import { listarEditoriales, fichaEditorial, editarEditorial, fusionarEditoriales, borrarEditorial, guardarLogoEditorial, imagenesDeLibros, quitarEditorialDeDocs, reasignarDocsAEditorial, explotarEditorial } from './utils/gestion-editoriales.js';
 import { lanzarReclasificacion, estadoReclasificacion, aplicarUltimaReclasificacion } from './utils/reclasificar-editorial.js';
 import { enriquecerAutor } from './utils/enriquecer-autor.js';
@@ -3111,7 +3111,12 @@ export function rutasPanel() {
     r.post('/autores/eliminar', async (req, res) => {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
-            res.json(await eliminarAutoresVacios(await conectarDB(), req.body?.ids || []));
+            // quitarAutoria: además de los vacíos, los que TIENEN libros: se les quita la autoría y se borran (los
+            // documentos se conservan). Sin él, solo se borran los vacíos (los que tienen libros se cuentan y se dejan).
+            const db = await conectarDB();
+            res.json(req.body?.quitarAutoria
+                ? await eliminarAutoresConAutoria(db, req.body?.ids || [])
+                : await eliminarAutoresVacios(db, req.body?.ids || []));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     // Todas las imágenes de las obras del autor (para elegir su foto de una de ellas).

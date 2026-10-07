@@ -1402,6 +1402,9 @@ de ficheros clasificado por CDU.
       DENTRO: se habría llevado sus ficheros. Ahora miran ambas (utils/carpeta-en-uso.js) y la conservan.
     PANEL (2026-10-07): en Autores, en Modo selección, «☑ Página» (marca o desmarca la página visible) y «☑ Todos (N)»
       (todos los del filtro, todas las páginas; GET /api/autores?soloIds=1) — p. ej. buscar «[?]_» y marcarlos todos.
+      «🗑 Eliminar» en Autores: borra los vacíos y, si alguno de los marcados tiene libros, pregunta aparte si quitarles
+      la autoría de esos libros y borrarlos (los LIBROS se conservan; copia en autores_retirados y diario deshacer[] en
+      cada libro; aviso fuerte si alguno no es un «[?]_»).
       En la ficha, las MATERIAS de «Datos catalográficos» (palabras clave) son clicables: llevan al Catálogo filtrado
       por esa materia exacta (/api/catalogo?materia=…, sin distinguir mayúsculas).
     REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y

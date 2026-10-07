@@ -17610,8 +17610,31 @@ async function autoresEliminarSel() {
     // Se conservan por dos causas: tienen obras, o están sin libros pero con inversión (bio/foto/fechas).
     const causas = [r.conObras ? `${r.conObras} con obras` : '', r.conInversion ? `${r.conInversion} con datos (bio/foto)` : ''].filter(Boolean).join(' · ');
     toast(`🗑 ${r.borrados} borrado(s)${causas ? ` · conservados: ${causas}` : ''}`);
+    // Los que TIENEN libros: se ofrece quitarles la autoría de esos libros y borrarlos (los libros se quedan).
+    if (r.conObras) await autoresEliminarConAutoria(ids);
     limpiarSelAutores();
     autoresBuscar();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+// Segundo paso de «Eliminar»: los marcados que siguen existiendo porque tienen libros. Se les quita la autoría
+// (o la colaboración) en TODOS sus libros y se borran; los LIBROS NO se borran. Se pide confirmación aparte, con
+// aviso fuerte si hay autores reales (no «[?]_»): sus libros se quedarían sin ese autor.
+async function autoresEliminarConAutoria(idsMarcados) {
+  const conLibros = idsMarcados
+    .map((id) => _autoresSelInfo.get(id) || (_autores || []).find((a) => a._id === id))
+    .filter((a) => a && (a.n_libros || 0) > 0);
+  if (!conLibros.length) return;
+  const libros = conLibros.reduce((s, a) => s + (a.n_libros || 0), 0);
+  const reales = conLibros.filter((a) => !String(a.nombre || '').startsWith('[?]_'));
+  const aviso = reales.length
+    ? `\n\n⚠ ${reales.length} NO son artefactos «[?]_» (${reales.slice(0, 5).map((a) => a.nombre).join(', ')}${reales.length > 5 ? '…' : ''}): sus libros se quedarán SIN ese autor.`
+    : '';
+  if (!confirm(`${conLibros.length} de los marcados aparecen en libros (${libros} en total).\n\n¿Quitarles la autoría de esos libros y borrarlos?\n\nLos LIBROS NO se borran: solo dejan de tener a ese autor. Se puede deshacer (copia en autores_retirados y diario en cada libro).${aviso}`)) return;
+  try {
+    const r = await api('/autores/eliminar', { method: 'POST', body: JSON.stringify({ ids: conLibros.map((a) => a._id), quitarAutoria: true }) });
+    if (!r.ok) { toast(r.motivo, 'bad'); return; }
+    toast(`🗑 ${r.borrados} autor(es) borrado(s) · autoría quitada en ${r.librosTocados} libro(s)`);
   } catch (e) { toast(e.message, 'bad'); }
 }
 

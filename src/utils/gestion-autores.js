@@ -166,6 +166,54 @@ export async function eliminarAutoresVacios(db, ids = []) {
 }
 
 /**
+ * ELIMINAR AUNQUE TENGA LIBROS: quita a estas personas de TODOS sus documentos (de `autores[]` y de
+ * `contribuciones[]`) y luego las borra. Los DOCUMENTOS no se tocan más allá de eso: se conservan, solo pierden esa
+ * autoría (pensado para los autores-artefacto «[?]_…» repartidos por varios libros). Para poder deshacerlo, cada
+ * persona se copia antes en `autores_retirados` con la lista de sus libros y su papel en cada uno, y cada libro
+ * guarda en `deshacer[]` sus autores y colaboraciones de antes.
+ * Devuelve { ok, borrados, librosTocados }.
+ */
+export async function eliminarAutoresConAutoria(db, ids = []) {
+    const objs = (Array.isArray(ids) ? ids : []).map(oid).filter(Boolean);
+    if (!objs.length) return { ok: false, motivo: 'sin autores' };
+    const bib = db.collection('biblioteca');
+    const tocados = new Set();
+    let borrados = 0;
+    for (const _id of objs) {
+        const autor = await db.collection('autores').findOne({ _id });
+        if (!autor) continue;
+        const docs = await bib.find({ $or: [{ autores: _id }, { 'contribuciones.persona': _id }] },
+            { projection: { autores: 1, contribuciones: 1 } }).toArray();
+        const { _id: idOriginal, ...copia } = autor;
+        await db.collection('autores_retirados').updateOne({ _id_original: idOriginal }, {
+            $setOnInsert: {
+                ...copia, _id_original: idOriginal,
+                retirada: {
+                    fecha: new Date(), origen: 'panel-eliminar-con-autoria',
+                    libros: docs.map((d) => ({
+                        _id: d._id,
+                        autor: (d.autores || []).some((a) => String(a) === String(_id)),
+                        roles: (d.contribuciones || []).filter((c) => String(c.persona) === String(_id)).map((c) => c.rol),
+                    })),
+                },
+            },
+        }, { upsert: true });
+        for (const d of docs) {
+            await bib.updateOne({ _id: d._id }, {
+                $pull: { autores: _id, contribuciones: { persona: _id } },
+                $set: { fecha_actualizacion: new Date() },
+                $push: { deshacer: { fecha: new Date(), origen: 'eliminar-autor', antes: { autores: d.autores ?? [], contribuciones: d.contribuciones ?? [] } } },
+            });
+            tocados.add(String(d._id));
+        }
+        await db.collection('autores').deleteOne({ _id });
+        borrados++;
+    }
+    for (const id of tocados) await indexarDoc(db, oid(id)).catch(() => {});
+    return { ok: true, borrados, librosTocados: tocados.size };
+}
+
+/**
  * Todas las imágenes (portada + carrusel) de las OBRAS en las que interviene este autor (como autor o
  * contribuyente) — para elegir una como foto del autor (p. ej. una foto suya del interior del libro).
  */
