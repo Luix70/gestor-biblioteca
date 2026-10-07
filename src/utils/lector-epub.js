@@ -117,6 +117,7 @@ const MARC_A_ROL = {
     aui: 'prologuista', win: 'prologuista', wpr: 'prologuista', aft: 'prologuista', wst: 'prologuista',
     ann: 'anotador',
     com: 'compilador', cmp: 'compilador',
+    ctb: 'colaborador',
 };
 // Contribuidores (traductor/ilustrador/editor/…) del OPF: dc:contributor con su rol MARC. EPUB2 usa el
 // atributo `opf:role="trl"`; EPUB3 lo refina con <meta refines="#id" property="role">trl</meta>. Devuelve

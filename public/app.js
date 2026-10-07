@@ -6893,7 +6893,7 @@ function fichaEditar(d, r, opts) {
   // Editor de AUTORES + COLABORADORES (nombre + rol). Filas añadibles/borrables. El nombre puede llevar
   // COMAS («Touchard, Jean»): cada fila es una persona (no se parte por comas). El rol 'autor' va a
   // autores[]; los demás (traductor/ilustrador/editor/…) a contribuciones[].
-  const ROLES_PERSONA = [['autor', 'Autor'], ['traductor', 'Traductor'], ['ilustrador', 'Ilustrador'], ['editor', 'Editor'], ['prologuista', 'Prologuista'], ['anotador', 'Anotador'], ['compilador', 'Compilador']];
+  const ROLES_PERSONA = [['autor', 'Autor'], ['traductor', 'Traductor'], ['ilustrador', 'Ilustrador'], ['editor', 'Editor'], ['prologuista', 'Prologuista'], ['anotador', 'Anotador'], ['compilador', 'Compilador'], ['colaborador', 'Colaborador']];
   const rolPersonaOpts = (sel) => ROLES_PERSONA.map(([v, l]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${l}</option>`).join('');
   const edAutFila = (nombre, rol) =>
     `<div class="edAutRow" style="display:flex;gap:6px;margin-top:6px;align-items:center"><input class="edAutNom" value="${esc(nombre || '')}" placeholder="Apellido, Nombre" autocomplete="off" style="flex:1 1 auto;min-width:0;width:auto"><select class="edAutRol" style="flex:0 0 140px;width:140px">${rolPersonaOpts(rol || 'autor')}</select><button type="button" class="btn bad edAutDel" title="Quitar" style="flex:none;padding:2px 9px">✕</button></div>`;
@@ -17381,7 +17381,7 @@ async function loadAutores() {
         <select id="autBioFiltro"><option value="">todas</option><option value="si">con</option><option value="no">sin</option></select>
       </label>
       <label class="muted" style="font-size:12px">Rol
-        <select id="autRol"><option value="">todos</option><option value="autor">autor</option><option value="traductor">traductor</option><option value="ilustrador">ilustrador</option><option value="prologuista">prologuista</option><option value="anotador">anotador</option><option value="editor">editor</option><option value="compilador">compilador</option></select>
+        <select id="autRol"><option value="">todos</option><option value="autor">autor</option><option value="traductor">traductor</option><option value="ilustrador">ilustrador</option><option value="prologuista">prologuista</option><option value="anotador">anotador</option><option value="editor">editor</option><option value="compilador">compilador</option><option value="colaborador">colaborador</option></select>
       </label>
       <label class="muted" style="font-size:12px">Obras
         <select id="autMin"><option value="0">todas</option><option value="sin">0 (sin libros)</option><option value="1">≥ 1</option><option value="2">≥ 2</option><option value="3">≥ 3</option><option value="5">≥ 5</option><option value="10">≥ 10</option></select>
@@ -17722,6 +17722,7 @@ async function autorFicha(id) {
     ['prologuista', '📖 Como prologuista'],
     ['anotador', '🖊️ Como anotador'],
     ['compilador', '📚 Como compilador'],
+    ['colaborador', '🤝 Como colaborador'],
     ['contribuyente', '👥 Otras contribuciones'],
   ];
   const porRol = new Map();
@@ -17953,7 +17954,7 @@ async function autorQuitar(id, nombre, ids, count) {
 // Roles que puede desempeñar una persona (el mismo conjunto que el servidor · ROLES_VALIDOS).
 const ROLES_PERSONA = [
   ['autor', '✍️ Autor'], ['traductor', '🌐 Traductor'], ['ilustrador', '🎨 Ilustrador'],
-  ['prologuista', '📖 Prologuista'], ['anotador', '🖊️ Anotador'], ['editor', '🧑‍💼 Editor'], ['compilador', '🗃️ Compilador'],
+  ['prologuista', '📖 Prologuista'], ['anotador', '🖊️ Anotador'], ['editor', '🧑‍💼 Editor'], ['compilador', '🗃️ Compilador'], ['colaborador', '🤝 Colaborador'],
 ];
 // Cambia el ROL de una persona en los libros seleccionados. Un rol es una VISTA de intervención: cambiarlo NO
 // borra a la persona, solo la mueve entre «autor principal» y «colaborador con rol».

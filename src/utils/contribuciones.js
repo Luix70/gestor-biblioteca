@@ -206,10 +206,11 @@ export function promoverIlustradorSiComic(contribuciones = [], esComic = false) 
 }
 
 // Roles válidos (para validar entradas manuales del panel). 'autor' incluido por completitud.
-export const ROLES_VALIDOS = ['autor', 'traductor', 'ilustrador', 'prologuista', 'anotador', 'editor', 'compilador'];
+export const ROLES_VALIDOS = ['autor', 'traductor', 'ilustrador', 'prologuista', 'anotador', 'editor', 'compilador', 'colaborador'];
 
 // Rol canónico → relator MARC 21 (para el $e de los campos 700/701 en marc21.js).
 export const REL_MARC = {
     autor: 'aut', traductor: 'trl', ilustrador: 'ill', prologuista: 'aui',
     anotador: 'ann', editor: 'edt', compilador: 'com',
+    colaborador: 'ctb',   // contributor: autores de capítulos de una obra colectiva, «with the assistance of…»
 };

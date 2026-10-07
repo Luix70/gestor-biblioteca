@@ -18,6 +18,9 @@ const MARCAS_ROL = [
   [/\b(?:foreword|preface|introduction|pr[oó]logo)\s+(?:by|por|de)\b:?/i, 'prologuista'],
   [/\b(?:translated|traducci[oó]n|traducido)\s+(?:by|por|de)\b:?/i, 'traductor'],
   [/\b(?:edited|ed\.|compiled|edici[oó]n)\s+(?:by|por|de)\b:?/i, 'editor'],
+  // Colaboraciones menores o capítulos de una obra colectiva («with the assistance of Susan Ashe», «with additional
+  // research by Julia Prange», «con la colaboración de…», «contributions by…»).
+  [/\b(?:with\s+the\s+(?:assistance|collaboration|help)\s+of|with\s+(?:additional\s+)?research\s+by|(?:with\s+)?contributions?\s+(?:by|from)|con\s+la\s+colaboraci[oó]n\s+de)\b:?/i, 'colaborador'],
   [/^\s*(?:editors?|editores?|eds?\.)\s*:/i, 'editor'],
 ];
 // Marcadores de rol al FINAL de un tramo («…, editors», «(eds.)», «, general editor»).

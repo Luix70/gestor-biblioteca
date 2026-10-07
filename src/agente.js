@@ -39,7 +39,7 @@ ESTRUCTURA JSON REQUERIDA:
   "tipo_recurso": "libro|revista",
   "titulo": "string",
   "autores": ["string"],
-  "contribuciones": [{ "nombre": "string", "rol": "traductor|ilustrador|editor|prologuista|anotador|compilador" }],
+  "contribuciones": [{ "nombre": "string", "rol": "traductor|ilustrador|editor|prologuista|anotador|compilador|colaborador" }],
   "cdu": "string",
   "idioma": "string",
   "idioma_original": "string",
@@ -217,7 +217,7 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null, opcion
         // mención de la BNE/OpenLibrary), que motor-catalogo resuelve a contribuciones[persona,rol]. Solo
         // roles válidos; se ACUMULAN (no se pisan) con los que ya hubiera.
         {
-            const ROLES = new Set(['traductor', 'ilustrador', 'editor', 'prologuista', 'anotador', 'compilador']);
+            const ROLES = new Set(['traductor', 'ilustrador', 'editor', 'prologuista', 'anotador', 'compilador', 'colaborador']);
             const cn = [];
             for (const c of (Array.isArray(recursoEstructurado.contribuciones) ? recursoEstructurado.contribuciones : [])) {
                 const nombre = String((c && c.nombre) || '').trim();

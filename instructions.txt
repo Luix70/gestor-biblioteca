@@ -1389,6 +1389,9 @@ de ficheros clasificado por CDU.
       · Si el Fichero tiene el ISBN pero SIN autores, se pregunta igual a OpenLibrary en línea (antes se saltaba:
         «Professional Visual Studio 2008» se quedó con una frase del copyright como autor).
       · Idioma de un PDF por su texto (utils/idioma-texto.js) cuando nada lo declara: antes caía en «es».
+      · Nuevo rol de persona «colaborador» (MARC ctb): autores de capítulos de una obra colectiva y colaboraciones
+        menores («with the assistance of…», «with contributions by…»). Elegible en el editor de la ficha, filtrable en
+        Autores; el parser de menciones ya lo usa.
       · Menciones como autor («edited by A, B and C», «X • Illustrated by Y», «K. Lerner and B. Lerner, editors»,
         «Langton, Nancy, Robbins, Stephen») se EXPLOTAN en personas con su rol (utils/explotar-mencion.js): en la ingesta
         (depurarAutores) y en lo catalogado con `scripts/explotar-autores-mencion.js` (seco / `--ejecutar` /
