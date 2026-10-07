@@ -1,3 +1,4 @@
+import { explotarMencion } from './explotar-mencion.js';
 /**
  * Normaliza el nombre de un autor tal y como puede venir del Fichero (BNE/OL): el volcado de la BNE une
  * varios contribuyentes con el marcador «/**​/» (autor /**​/ traductor /**​/ …) e incluye las FECHAS de vida
@@ -69,11 +70,24 @@ export function claveAutor(nombre) {
  * los cuatro), y las grafías repetidas de la misma persona («Charles H. Anderson» / «Charles H.. Anderson»). Quita
  * también el que es otro de la lista con palabras de más delante («… Chris Eliasmith» con «Chris Eliasmith» al lado).
  * `esArtefacto` lo pasa quien llama (parsear-nombre · esAutorArtefacto; aquí no se importa para no crear un ciclo).
- * @returns {{ autores: string[], descartados: string[] }}
+ * @returns {{ autores: string[], descartados: string[], contribuciones: Array<{nombre:string, rol:string}> }}
  */
 export function depurarAutores(lista, { esArtefacto = () => false } = {}) {
+    // Una mención con varias personas y roles («edited by A, B and C», «X • Illustrated by Y») se EXPLOTA
+    // (explotar-mencion.js): los autores siguen aquí; editores, ilustradores… salen en `contribuciones`.
+    const contribuciones = [];
+    const expandir = (x) => {
+        if (typeof x !== 'string') return [x];
+        if (/\/\*+\//.test(x)) return [x];                      // mención BNE con roles: la trata contribuciones.js
+        const m = explotarMencion(x);
+        if (m.fiable && (m.personas.length > 1 || m.personas[0].rol !== 'autor')) {
+            for (const p of m.personas) if (p.rol !== 'autor') contribuciones.push({ nombre: p.nombre, rol: p.rol });
+            return m.personas.filter((p) => p.rol === 'autor').map((p) => p.nombre);
+        }
+        return separarAutores(x);
+    };
     const partes = (Array.isArray(lista) ? lista : [lista])
-        .flatMap((x) => (typeof x === 'string' ? separarAutores(x) : [x]))
+        .flatMap(expandir)
         .filter((x) => x != null && x !== '');
     const descartados = [];
     const cadenas = partes.filter((x) => typeof x === 'string');
@@ -94,5 +108,5 @@ export function depurarAutores(lista, { esArtefacto = () => false } = {}) {
         vistas.add(k);
         autores.push(x);
     }
-    return { autores, descartados };
+    return { autores, descartados, contribuciones };
 }

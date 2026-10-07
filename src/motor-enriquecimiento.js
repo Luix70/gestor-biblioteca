@@ -275,6 +275,8 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         const dep = depurarAutores(documento.autores, { esArtefacto: esAutorArtefacto });
         if (dep.descartados.length) documento.alertas_agente.push(`Autor(es) del fichero descartado(s) (artefacto o repetido): «${dep.descartados.join('»; «').slice(0, 160)}».`);
         documento.autores = dep.autores;
+        // Editores, ilustradores… sacados de una mención explotada («edited by A, B», «X • Illustrated by Y»).
+        if (dep.contribuciones.length) documento.contribuciones_nombres = [...(documento.contribuciones_nombres || []), ...dep.contribuciones];
     }
     const autoresNoFiables = !documento.autores || documento.autores.length === 0
         || documento.autores.every((a) => esAutorArtefacto(a));

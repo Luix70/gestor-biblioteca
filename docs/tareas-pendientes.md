@@ -243,6 +243,10 @@ Separa «autores» que eran varias personas en un solo registro (dry-run de juli
 ### 5 ter. Autores: grafías y artefactos (7-oct) — solo BD
 - [ ] Desplegar (ingesta: depura la lista de autores, reconoce grafías, OpenLibrary si el Fichero no trae autores,
       idioma por el texto; y el arreglo de carpetas anidadas al borrar).
+- [ ] PRIMERO `sudo docker exec -it gestor-biblioteca node scripts/explotar-autores-mencion.js` (en seco 7-oct: 1.353 autores
+      que son una mención se cambian por sus personas con su rol — 57 de los «[?]_» y 1.296 sin marca: «edited by A, B and C»,
+      «X • Illustrated by Y», «Apellido, Nombre, Apellido, Nombre»; 45 «[?]_» son basura y se dejan). Revisar la lista del
+      log y `--ejecutar` (o `--solo-marcados` para empezar por los «[?]_»).
 - [ ] Copia de la base y `sudo docker exec -it gestor-biblioteca node scripts/depurar-autores.js` (en seco 7-oct: 674
       grupos de grafías, 194 libros que pierden el artefacto, ~6-16 con los autores de la autoridad, 219 «[?]_»
       retirados) y `--ejecutar --online`. Después, revisar «Autor artefacto sin sustituto» (~160) a mano.

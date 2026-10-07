@@ -175,7 +175,9 @@ export function esAutorArtefacto(s) {
         // Palabras inequívocas de PROSA (verbos/pronombres/conjunciones que no aparecen en un nombre, ni personal
         // ni corporativo). Se EXCLUYEN a propósito the/and/for/of/to (salen en autores corporativos: "University
         // of X", "Institute of Physics") y so (apellido coreano/chino).
-        if (palabras.length >= 3 && /\b(you|your|they|we|are|were|was|is|been|have|has|had|will|would|but|because|when|while|which|that|this|there|here|not|with|from)\b/i.test(t)) return true;
+        // En MINÚSCULAS (sin /i): en prosa van en minúscula; con mayúscula son nombres («Moore, Will H.», «Hervé This»,
+        // «Wilfried van der Will» se marcaban como artefacto, 7-oct).
+        if (palabras.length >= 3 && /\b(you|your|they|we|are|were|was|is|been|have|has|had|will|would|but|because|when|while|which|that|this|there|here|not|with|from)\b/.test(t)) return true;
     }
     return false;
 }

@@ -150,6 +150,8 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             const dep = depurarAutores(docFinal.autores, { esArtefacto: esAutorArtefacto });
             if (dep.descartados.length) docFinal.alertas_agente.push(`Autor(es) descartado(s) (artefacto o repetido): «${dep.descartados.join('»; «').slice(0, 160)}».`);
             docFinal.autores = dep.autores;
+            // Editores, ilustradores… sacados de una mención explotada («edited by A, B», «X • Illustrated by Y»).
+            if (dep.contribuciones.length) docFinal.contribuciones_nombres = [...(docFinal.contribuciones_nombres || []), ...dep.contribuciones];
         }
         if (docFinal.autores && docFinal.autores.length > 0) {
             const ids = [];

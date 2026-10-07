@@ -1389,6 +1389,12 @@ de ficheros clasificado por CDU.
       · Si el Fichero tiene el ISBN pero SIN autores, se pregunta igual a OpenLibrary en línea (antes se saltaba:
         «Professional Visual Studio 2008» se quedó con una frase del copyright como autor).
       · Idioma de un PDF por su texto (utils/idioma-texto.js) cuando nada lo declara: antes caía en «es».
+      · Menciones como autor («edited by A, B and C», «X • Illustrated by Y», «K. Lerner and B. Lerner, editors»,
+        «Langton, Nancy, Robbins, Stephen») se EXPLOTAN en personas con su rol (utils/explotar-mencion.js): en la ingesta
+        (depurarAutores) y en lo catalogado con `scripts/explotar-autores-mencion.js` (seco / `--ejecutar` /
+        `--solo-marcados`; antes que depurar-autores). Conservador: «Apellido, Nombre» es una persona, y si un trozo
+        no parece un nombre (cargo, institución, título) no se toca. El detector de autores-artefacto ya no marca
+        nombres con «Will»/«This» (las palabras de prosa solo cuentan en minúscula).
       · `scripts/depurar-autores.js` (seco / `--ejecutar` / `--online` / `--fases`): 1 funde las grafías de una misma
         persona (674 grupos; se queda la mejor escrita: «René Chartrand»), 2 quita los «[?]_» de los libros que tienen
         sus autores de verdad (194) o los sustituye por los de la autoridad del ISBN, 3 retira los «[?]_» sin libros.
