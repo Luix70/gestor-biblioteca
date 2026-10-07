@@ -116,7 +116,7 @@ toman el del nombre del fichero (7 sin un nombre aprovechable) · **15** · 6 to
 - [x] Y para acabar con los anidados: `… --separar` (en seco) y `… --separar --ejecutar`  (24 separadas; queda 1, la
       colección transmedia de Oxford Bookworms, que es a propósito). La selección «Carpeta dentro de la de otro
       documento» (135) quedó vieja: se puede borrar.
-- [ ] Los 6 «sin sitio conocido»: el script ahora busca su FICHERO por nombre en todo el árbol (relanzar en seco y con
+- [x] (7-oct: 4 encontrados y corregidos, 2 a «Documentos sin fichero»; quedan 118 anidados y 12 carpetas-contenedor → `--separar`) Los 6 «sin sitio conocido»: el script ahora busca su FICHERO por nombre en todo el árbol (relanzar en seco y con
       `--ejecutar`); los que aparezcan en la carpeta de otro → luego `scripts/separar-carpetas-compartidas.js`; los que no →
       `fichero_perdido` + selección «Documentos sin fichero» (buscar en Papelera/copia o decidir borrar la ficha).
 
@@ -239,6 +239,13 @@ Separa «autores» que eran varias personas en un solo registro (dry-run de juli
       los tigres», «ALMA CAPRICHOS EL MAL POETA» → «Alma. Caprichos. El mal poema».
 - [ ] Revisar la selección «ISBN de otro libro de la serie (cotejo)» (~1.190): su ISBN es probablemente el del otro
       libro → 🔎 Extraer ISBN con «forzar», o a mano.
+
+### 5 ter. Autores: grafías y artefactos (7-oct) — solo BD
+- [ ] Desplegar (ingesta: depura la lista de autores, reconoce grafías, OpenLibrary si el Fichero no trae autores,
+      idioma por el texto; y el arreglo de carpetas anidadas al borrar).
+- [ ] Copia de la base y `sudo docker exec -it gestor-biblioteca node scripts/depurar-autores.js` (en seco 7-oct: 674
+      grupos de grafías, 194 libros que pierden el artefacto, ~6-16 con los autores de la autoridad, 219 «[?]_»
+      retirados) y `--ejecutar --online`. Después, revisar «Autor artefacto sin sustituto» (~160) a mano.
 
 ### 6. Título original desde los créditos (pendiente desde julio)
 - [x] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-titulo-original.js`

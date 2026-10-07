@@ -1379,6 +1379,27 @@ de ficheros clasificado por CDU.
       libros, también en los escritos en español: sin indicio de traducción junto a esa línea (traducción, traducido,
       translated…) ya no se guarda como título original (utils/titulo-original.js; ingesta, campaña y script). Los
       ya guardados que son el mismo título que el libro los quita reparar-titulos-cotejo (sin releer los ficheros).
+    AUTORES: GRAFÍAS, ARTEFACTOS Y AUTORES QUE FALTAN (2026-10-07).
+      · Ingesta: la lista de autores del fichero se DEPURA uno a uno (autor-normalizar · depurarAutores): fuera los
+        artefactos aunque no lo sean todos («Canada Research Chair … Chris Eliasmith & Chris Eliasmith & …»), las
+        grafías repetidas («Charles H.. Anderson») y la puntuación de más («Noam Chomsky.», «Rene Chartrand -»).
+        resolver-persona reconoce a la persona sin puntuación ni espacios («Tolkien, J.R.R.» = «Tolkien, J. R. R.»;
+        campo `clave` indexado, se completa solo). Las dos copias sueltas de check-then-create (tareas, reenriquecer)
+        pasan por resolver-persona.
+      · Si el Fichero tiene el ISBN pero SIN autores, se pregunta igual a OpenLibrary en línea (antes se saltaba:
+        «Professional Visual Studio 2008» se quedó con una frase del copyright como autor).
+      · Idioma de un PDF por su texto (utils/idioma-texto.js) cuando nada lo declara: antes caía en «es».
+      · `scripts/depurar-autores.js` (seco / `--ejecutar` / `--online` / `--fases`): 1 funde las grafías de una misma
+        persona (674 grupos; se queda la mejor escrita: «René Chartrand»), 2 quita los «[?]_» de los libros que tienen
+        sus autores de verdad (194) o los sustituye por los de la autoridad del ISBN, 3 retira los «[?]_» sin libros.
+        Los que no tienen sustituto (~160) → selección «Autor artefacto sin sustituto».
+    PORTADA QUE NO EXISTE (2026-10-07). Si el fichero de `portada` no está (aunque apunte dentro de su carpeta), la
+      carátula del catálogo salía en blanco con el carrusel bueno: Integridad («Imágenes fuera de su carpeta») y
+      reparar-rutas-imagenes toman la del carrusel marcada como portada. separar-carpetas-compartidas ya no apunta
+      una portada que no ha podido copiar.
+    CARPETAS ANIDADAS AL BORRAR (2026-10-07). Reprocesar/borrar un documento, fundir versiones o quitar un duplicado
+      por hash mandaban su carpeta a la Papelera mirando solo si otro documento tenía la MISMA carpeta, no si vivía
+      DENTRO: se habría llevado sus ficheros. Ahora miran ambas (utils/carpeta-en-uso.js) y la conservan.
     REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y
     «Editorial a revisar…»:
       · `scripts/triar-editoriales-sin-confirmar.js` (seco por defecto; `--ejecutar`, `--seleccion "<nombre>"`)

@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import path from 'path';
 import { extraerISSNs, validarISBN, variantesISBN } from './identificadores.js';
 import { parsearNombre, esTituloArtefacto, esAutorArtefacto } from './parsear-nombre.js';
+import { idiomaDeTexto } from './idioma-texto.js';
 import { extraerISBNsConRol, parsearVolumen } from './multivolumen.js';
 import { parsearBloqueCatalogacion, cduImpresa } from './cip.js';
 import { timeoutPoppler } from './timeout-poppler.js';
@@ -294,6 +295,10 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // tal cual; más adelante resuelve la metadata por Crossref y ayuda a clasificar 'articulo'. No fuerza tipo.
         const doi = extraerDOI([texto, info.subject, info.keywords, info.title, nombre].filter(Boolean).join('\n'));
         if (doi) datos.doi = doi;
+
+        // IDIOMA por el texto, si nada lo dijo: sin esto caía al «es» por defecto (un libro de Wrox en inglés quedaba
+        // en español). Solo con capa de texto útil y una lengua que gane con claridad (utils/idioma-texto.js).
+        if (!datos.idioma && datos.texto_legible) datos.idioma = idiomaDeTexto(texto) || null;
 
         return datos;
     } catch (e) {

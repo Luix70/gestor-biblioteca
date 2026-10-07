@@ -56,7 +56,18 @@ export async function rutasImagenesFueraDeCarpeta(doc, absDe) {
     if (cambia) set.imagenes = nuevas;
   }
   if (doc.portada) {
-    const r = await arreglar(doc.portada);
+    let r = await arreglar(doc.portada);
+    // PORTADA QUE NO ESTÁ, aunque apunte DENTRO de su carpeta (7-oct: «The Internet Encyclopedia, Volume 1»: apuntaba
+    // a «portada-1.jpg», que no existe, con el carrusel bueno). La carátula del catálogo usa `portada` y sale en
+    // blanco. Se toma la imagen del carrusel marcada como portada, o la primera que exista.
+    if (r.estado === 'bien' && dentro(r.ruta) && !(await existe(absDe(r.ruta)))) r = { ruta: r.ruta, estado: 'perdida' };
+    if (r.estado === 'perdida') {
+      const carrusel = set.imagenes || doc.imagenes || [];
+      const candidatas = [...carrusel.filter((im) => im?.tipo === 'portada'), ...carrusel.filter((im) => im?.tipo !== 'portada')];
+      for (const im of candidatas) {
+        if (im?.ruta && await existe(absDe(im.ruta))) { r = { ruta: im.ruta, estado: 'arreglada' }; break; }
+      }
+    }
     cuenta(r);
     if (r.ruta !== doc.portada) set.portada = r.ruta;
   }

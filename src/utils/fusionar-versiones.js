@@ -37,6 +37,7 @@ import { regenerarSidecarsDoc } from './registro.js';
 import { validarISBN, isbn10a13 } from './identificadores.js';
 import { mejorCdu, fuenteCduDoc, aplicarCduConPrioridad } from './prioridad-cdu.js';
 import { esMaterialDerivado } from './identificar-edicion.js';
+import { otroDocEnCarpeta } from './carpeta-en-uso.js';
 
 /** ISBN comparable: SIEMPRE en 13 dígitos (un ISBN-10 y su ISBN-13 son el mismo libro). */
 export const isbnComparable = (v) => { const x = v ? validarISBN(v) : null; return x ? (isbn10a13(x) || x) : null; };
@@ -329,7 +330,7 @@ export async function fusionarDocumentos(db, ids, { aplicar = true } = {}) {
         await desindexarDoc(o._id).catch(() => {});
         const carpetaO = carpetaDeDoc(o);
         if (carpetaO && path.resolve(carpetaO) !== path.resolve(carpetaP)) {
-            const otroUsa = await col.findOne({ ruta_base: o.ruta_base }, { projection: { _id: 1 } });
+            const otroUsa = await otroDocEnCarpeta(db, o.ruta_base, [o._id]);   // también uno anidado dentro
             if (!otroUsa) await reciclarCarpeta(carpetaO, `fusion-${principal._id}`, path.basename(path.dirname(carpetaO))).catch(() => null);
         }
     }

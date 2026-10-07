@@ -7,7 +7,8 @@ import { claveNumero, tituloCabecera, tituloUnificadoDeNumero, RE_DATOS_DE_CATAL
 import { resolverObraPorIsbn } from './utils/obra-autoridad.js';
 import { variantesISBN } from './utils/identificadores.js';
 import { resolverPersona } from './utils/resolver-persona.js';
-import { separarAutores } from './utils/autor-normalizar.js';
+import { separarAutores, depurarAutores } from './utils/autor-normalizar.js';
+import { esAutorArtefacto } from './utils/parsear-nombre.js';
 import { ROLES_VALIDOS, esComicPorDatos, promoverIlustradorSiComic } from './utils/contribuciones.js';
 import { limpiarNombreEditorial } from './utils/editoriales-falsas.js';
 import { modernizarCDU } from './utils/cdu-moderna.js';
@@ -144,6 +145,12 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             }
         }
 
+        if (docFinal.autores && docFinal.autores.length > 0) {
+            // Última red (venga de donde venga la lista): artefactos y grafías repetidas fuera (autor-normalizar).
+            const dep = depurarAutores(docFinal.autores, { esArtefacto: esAutorArtefacto });
+            if (dep.descartados.length) docFinal.alertas_agente.push(`Autor(es) descartado(s) (artefacto o repetido): «${dep.descartados.join('»; «').slice(0, 160)}».`);
+            docFinal.autores = dep.autores;
+        }
         if (docFinal.autores && docFinal.autores.length > 0) {
             const ids = [];
             const vistos = new Set();

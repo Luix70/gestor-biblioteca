@@ -28,6 +28,9 @@ import { cduDeAutoridadFiable } from './autoridad-isbn.js';
 import { variantesISBN, validarISBN, validarISSN } from './identificadores.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
 import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
+import { resolverPersona } from './resolver-persona.js';
+import { depurarAutores } from './autor-normalizar.js';
+import { esAutorArtefacto } from './parsear-nombre.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '');
 
@@ -96,11 +99,13 @@ function tituloNoFiable(doc) {
     return false;
 }
 
+// Por la puerta única de las personas (utils/resolver-persona.js): reconoce grafías («Tolkien, J.R.R.» =
+// «Tolkien, J. R. R.»), latiniza y quita los artefactos y repetidos de la lista (autor-normalizar · depurarAutores).
 async function resolverAutores(db, nombres) {
     const out = [];
-    for (const n of nombres) {
-        const ex = await db.collection('autores').findOne({ nombre: n });
-        out.push(ex ? ex._id : (await db.collection('autores').insertOne({ nombre: n })).insertedId);
+    for (const n of depurarAutores(nombres, { esArtefacto: esAutorArtefacto }).autores) {
+        const r = await resolverPersona(db, n);
+        if (r && !out.some((x) => String(x) === String(r._id))) out.push(r._id);
     }
     return out;
 }

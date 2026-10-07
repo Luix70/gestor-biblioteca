@@ -26,6 +26,7 @@ import { metricasFichero, ganaEntrante, reemplazarFicheroDeDoc } from './utils/d
 import { estadoHash, regenerarHashDoc } from './utils/hash-doc.js';
 import { nombreEnDisco } from './mantenimiento/util-mantenimiento.js';
 import { rutasImagenesFueraDeCarpeta } from './utils/rutas-imagenes.js';
+import { otroDocEnCarpeta } from './utils/carpeta-en-uso.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -552,7 +553,11 @@ export async function verificarIntegridad({ reparar = false, onProgress = null }
             // ÚNICA excepción a «si tiene ficheros no se toca»: el fichero es BYTE A BYTE idéntico al del que
             // se conserva, así que no se pierde absolutamente nada. Aun así va a la Papelera ENTERA (con
             // manifiesto), no se borra.
-            if (p.ruta_base) await reciclarCarpeta(absDe(p.ruta_base), `hashdup-${p.isbn || p._id}`, { aunConFicheros: true });
+            // Pero no si otro documento vive en esa carpeta o DENTRO de ella (anidada): se iría con ella. Entonces
+            // se retira solo la ficha duplicada y la carpeta se queda (el informe la lista como conservada).
+            const vecino = p.ruta_base ? await otroDocEnCarpeta(db, p.ruta_base, grupo.map((d) => d._id)) : null;
+            if (vecino) conservadas.push({ carpeta: p.ruta_base, motivo: `duplicado por hash con otro documento dentro («${vecino.titulo}»)` });
+            else if (p.ruta_base) await reciclarCarpeta(absDe(p.ruta_base), `hashdup-${p.isbn || p._id}`, { aunConFicheros: true });
             await col.deleteOne({ _id: p._id });
             hashEliminados++;
         }

@@ -3,6 +3,7 @@ import { cduSinIAActivo } from './utils/ajustes-ingesta.js';
 import { buscarPorDOI } from './utils/buscador-crossref.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { esTituloArtefacto, esAutorArtefacto } from './utils/parsear-nombre.js';
+import { depurarAutores } from './utils/autor-normalizar.js';
 import { parsearVolumen, totalDeclarado } from './utils/multivolumen.js';
 import { tituloCabecera } from './utils/revistas.js';
 import { buscarISSNporTitulo, buscarNombreDeISSNs } from './utils/buscador-issn-titulo.js';
@@ -266,6 +267,14 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     if (esRevistaPura && Array.isArray(documento.autores) && documento.autores.length) {
         documento.alertas_agente.push(`Autor(es) del fichero «${documento.autores.join('; ').slice(0, 80)}» no asignado(s): un número de revista no tiene autor.`);
         documento.autores = [];
+    }
+    // Lista del fichero DEPURADA antes de decidir si vale: fuera los artefactos UNO A UNO y las grafías repetidas
+    // (antes solo se descartaba si lo eran TODOS, y «Canada Research Chair … Chris Eliasmith & Chris Eliasmith &
+    // Charles H. Anderson & Charles H.. Anderson» dejaba cuatro autores). Lo quitado queda en las alertas.
+    if (Array.isArray(documento.autores) && documento.autores.length) {
+        const dep = depurarAutores(documento.autores, { esArtefacto: esAutorArtefacto });
+        if (dep.descartados.length) documento.alertas_agente.push(`Autor(es) del fichero descartado(s) (artefacto o repetido): «${dep.descartados.join('»; «').slice(0, 160)}».`);
+        documento.autores = dep.autores;
     }
     const autoresNoFiables = !documento.autores || documento.autores.length === 0
         || documento.autores.every((a) => esAutorArtefacto(a));

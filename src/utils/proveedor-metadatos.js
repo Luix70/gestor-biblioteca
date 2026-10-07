@@ -277,7 +277,10 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // del archivo antes que con ediciones en otras lenguas).
     // Un fallo de RED en una API no aborta la ingesta: se degrada con una alerta y se sigue.
     let infoOL = null;
-    if (localHit) {
+    // Solo si el Fichero trae los AUTORES: un registro del volcado sin ellos («Professional Visual Studio 2008», Wrox)
+    // dejaba el libro con el autor que se leyó del texto (una frase del copyright) aunque OpenLibrary en línea los
+    // tiene. Sin autores en el Fichero, se pregunta igual (los demás datos del Fichero siguen mandando).
+    if (localHit && (infoLocal.autores || []).length) {
         // El Fichero local ya trae los datos de OL (mismo origen, sin el timeout de 20-45 s).
         datosExtra.alertas.push('OpenLibrary online omitida: ya la sirve el Fichero local.');
     } else if (Date.now() < olBloqueadoHasta) {

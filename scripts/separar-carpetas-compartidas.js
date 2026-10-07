@@ -164,7 +164,9 @@ for (const [ruta, ds] of compartidas) {
             if (nombrePortada) {
                 const enDestino = path.join(destino, nombrePortada);
                 if (!(await existe(enDestino)) && await existe(path.join(carpeta, nombrePortada))) await copiarVerificado(path.join(carpeta, nombrePortada), enDestino);
-                set.portada = `${set.ruta_base}/${nombrePortada}`;
+                // Solo si el fichero está: antes se apuntaba igual y la carátula del catálogo salía en blanco (7-oct:
+                // «The Internet Encyclopedia, Volume 1»). Sin él, la portada sale del carrusel (abajo).
+                if (await existe(enDestino)) set.portada = `${set.ruta_base}/${nombrePortada}`;
             }
             if (Array.isArray(d.imagenes) && d.imagenes.length) {
                 const imagenes = [];
@@ -175,6 +177,7 @@ for (const [ruta, ds] of compartidas) {
                     if (await existe(enDestino)) imagenes.push({ ...im, ruta: `${set.ruta_base}/${n}` });
                 }
                 set.imagenes = imagenes;
+                if (!set.portada && imagenes.length) set.portada = (imagenes.find((im) => im.tipo === 'portada') || imagenes[0]).ruta;
             }
             if (otroTitulo) { set.revision_requerida = true; alertas.push('Portada heredada de una carpeta compartida con OTRO libro: re-extráela de su fichero («Re-extraer imágenes»).'); }
             if (enCompartida) { cuenta.movidos++; alertas.push(`Carpeta separada: compartía «${ruta}» con otro documento; ahora tiene la suya.`); }

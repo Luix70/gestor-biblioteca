@@ -16,6 +16,7 @@ import { DIR_CDU } from '../mantenimiento/util-mantenimiento.js';
 import { decodificarImagen } from './imagen-base64.js';
 import { ROLES_VALIDOS } from './contribuciones.js';
 import { indexarDoc } from './indice-busqueda.js';
+import { claveAutor } from './autor-normalizar.js';
 
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 
@@ -246,7 +247,7 @@ export async function editarAutor(db, id, cambios = {}) {
 
     if ('nombre' in cambios) {
         const n = String(cambios.nombre || '').trim();
-        if (n) set.nombre = n; // el nombre principal no se borra: si viene vacío, se ignora
+        if (n) { set.nombre = n; set.clave = claveAutor(n); } // el nombre principal no se borra: si viene vacío, se ignora
     }
     if ('biografia' in cambios) {
         const b = String(cambios.biografia || '').trim();
