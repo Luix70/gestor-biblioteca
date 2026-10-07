@@ -571,11 +571,15 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
             : null);
     if (tituloMejor) {
         const actual = String(doc.titulo || '');
-        const malActual = tituloDebil(doc) || esTituloArtefacto(actual);
+        // Un título que ES el nombre del fichero («(Series … 1) Bernard Helffer-Semiclassical analysis…-World
+        // Scientific (2002)») es malo aunque CONTENGA el bueno: lo que lleva de más es serie, autor, editorial y año, así
+        // que el «no degradar» no aplica (8-oct).
+        const esElNombreDelFichero = !!doc.nombre_archivo && normLite(actual) === normLite(String(doc.nombre_archivo).replace(/\.[^.]+$/, ''));
+        const malActual = tituloDebil(doc) || esTituloArtefacto(actual) || esElNombreDelFichero;
         // Un TOMO conserva su número y su parte: «Vol. 5 — Vol. 5: Europe» → «Worldmark Encyclopedia of the Nations —
         // Vol. 5: Europe», no el título del conjunto a secas (log del 1-oct; antes, «Encyclopedia of Modern Asia» ×6).
         const nuevo = conSuTomo(tituloMejor, doc);
-        if ((malActual || forzar) && normLite(actual) !== normLite(nuevo) && noDegrada(actual, nuevo)
+        if ((malActual || forzar) && normLite(actual) !== normLite(nuevo) && (noDegrada(actual, nuevo) || esElNombreDelFichero)
             && !soloAnadeColetilla(actual, nuevo)) {
             set.titulo = nuevo; nombres.titulo = nuevo;
         }

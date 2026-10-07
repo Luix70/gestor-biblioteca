@@ -38,7 +38,7 @@ const total = await bib.countDocuments(filtro);
 const p = progreso(total, 'Revisando');
 const cuenta = { candidatos: 0, fichero: 0, nombre: 0, autores: 0, editorial: 0, anio: 0 };
 const ejemplos = [];
-for await (const d of bib.find(filtro, { projection: { titulo: 1, subtitulo: 1, nombre_archivo: 1, isbn: 1, autores: 1, editorial: 1, año_edicion: 1 } })) {
+for await (const d of bib.find(filtro, { projection: { titulo: 1, subtitulo: 1, nombre_archivo: 1, isbn: 1, autores: 1, editorial: 1, año_edicion: 1, coleccion_nombre: 1, coleccion_numero: 1 } })) {
   p.paso(d.titulo);
   if (String(d.titulo || '').trim() !== sinExtension(d.nombre_archivo)) continue;
   cuenta.candidatos++;
@@ -116,6 +116,12 @@ for await (const d of bib.find(filtro, { projection: { titulo: 1, subtitulo: 1, 
   if (!(d.autores || []).length && (leido.autores || []).length) huecos.push('autores');
   if (!d.editorial && leido.editorial) huecos.push('editorial');
   if (!d.año_edicion && leido.año_edicion) huecos.push('año');
+  // El número en la colección que dice el nombre («(Series on … 1) …»), si el libro está en ESA colección sin número.
+  const mismaColeccion = (a, b) => plano(a).trim() === plano(b).trim();
+  if (leido.coleccion_numero && !d.coleccion_numero && d.coleccion_nombre && mismaColeccion(d.coleccion_nombre, leido.coleccion_nombre)) {
+    set.coleccion_numero = String(leido.coleccion_numero);
+    huecos.push('nº de colección');
+  }
   for (const h of huecos) { const k = h === 'año' ? 'anio' : h; cuenta[k] = (cuenta[k] || 0) + 1; }
   if (ejemplos.length < 40) ejemplos.push(`«${d.titulo.slice(0, 80)}» → «${titulo}»${via === 'fichero' ? ' (Fichero)' : ''}${huecos.length ? ` + ${huecos.join(', ')}` : ''}`);
   if (!EJECUTAR) continue;
@@ -130,7 +136,7 @@ for await (const d of bib.find(filtro, { projection: { titulo: 1, subtitulo: 1, 
   await bib.updateOne({ _id: d._id }, {
     $set: set,
     $push: {
-      deshacer: { fecha: new Date(), origen: ORIGEN, antes: { titulo: d.titulo, subtitulo: d.subtitulo ?? null, autores: d.autores ?? [], editorial: d.editorial ?? null, año_edicion: d.año_edicion ?? null } },
+      deshacer: { fecha: new Date(), origen: ORIGEN, antes: { titulo: d.titulo, subtitulo: d.subtitulo ?? null, coleccion_numero: d.coleccion_numero ?? null, autores: d.autores ?? [], editorial: d.editorial ?? null, año_edicion: d.año_edicion ?? null } },
       alertas_agente: `Título (era el nombre del fichero) → «${titulo}»${via === 'fichero' ? ', el del Fichero para su ISBN' : ''} (scripts/${ORIGEN}).`,
     },
   });
@@ -140,7 +146,7 @@ p.fin();
 
 console.log(`\nTítulos que son el nombre del fichero: ${cuenta.candidatos}`);
 console.log(`Se cambian: ${cuenta.fichero + cuenta.nombre} (${cuenta.fichero} con el título del Fichero, ${cuenta.nombre} con el leído del nombre)`);
-console.log(`Huecos que se rellenan: subtítulo ${cuenta.subtitulo || 0} · autores ${cuenta.autores} · editorial ${cuenta.editorial} · año ${cuenta.anio}\n`);
+console.log(`Huecos que se rellenan: nº de colección ${cuenta['nº de colección'] || 0} · subtítulo ${cuenta.subtitulo || 0} · autores ${cuenta.autores} · editorial ${cuenta.editorial} · año ${cuenta.anio}\n`);
 ejemplos.forEach((e) => console.log(`   ${e}`));
 console.log(`\n=== ${EJECUTAR ? 'HECHO' : 'DRY-RUN'} ===`);
 if (!EJECUTAR) console.log('▶ Copia de la base antes (scripts/copia-base.js) y repite con --ejecutar.');
