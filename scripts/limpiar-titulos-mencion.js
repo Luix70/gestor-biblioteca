@@ -20,7 +20,7 @@ import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { progreso } from '../src/utils/progreso-cli.js';
-import { separarMencionDelTitulo, capitalizarTitulo, tituloEnMayusculas } from '../src/utils/titulos.js';
+import { separarMencionDelTitulo, capitalizarTitulo, tituloEnMayusculas, articuloDelNombre } from '../src/utils/titulos.js';
 import { explotarMencion } from '../src/utils/explotar-mencion.js';
 import { resolverPersona } from '../src/utils/resolver-persona.js';
 import { buscarEnFicheroLocal } from '../src/utils/buscador-local.js';
@@ -44,7 +44,7 @@ const cuenta = { mencion: 0, autoridad: 0, titleCase: 0, subtitulo: 0 };
 const ejemplos = { mencion: [], autoridad: [], titleCase: [] };
 const apunta = (clase, texto) => { if (ejemplos[clase].length < 40) ejemplos[clase].push(texto); };
 
-for await (const d of bib.find(filtro, { projection: { titulo: 1, subtitulo: 1, isbn: 1, autores: 1, contribuciones: 1 } })) {
+for await (const d of bib.find(filtro, { projection: { titulo: 1, subtitulo: 1, isbn: 1, autores: 1, contribuciones: 1, nombre_archivo: 1 } })) {
   p.paso(d.titulo);
   const set = {};
   let titulo = d.titulo;
@@ -74,6 +74,11 @@ for await (const d of bib.find(filtro, { projection: { titulo: 1, subtitulo: 1, 
     }
     const capS = capitalizarTitulo(d.subtitulo, { autoridad: aut?.subtitulo });
     if (capS) { set.subtitulo = capS; cuenta.subtitulo++; }
+  }
+  // El artículo inicial que el registro quitó y el nombre del fichero conserva («The Austrian Contribution…»).
+  if (titulo !== d.titulo) {
+    const conArticulo = articuloDelNombre(titulo, d.nombre_archivo);
+    if (conArticulo) titulo = conArticulo;
   }
   if (titulo !== d.titulo) set.titulo = titulo;
   if (!Object.keys(set).length) continue;

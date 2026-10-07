@@ -17,7 +17,7 @@ import { editorialDeColeccionMapa } from './utils/coleccion-editorial.js';
 import { mejorCdu } from './utils/prioridad-cdu.js';
 import { cduDeAutoridadFiable } from './utils/autoridad-isbn.js';
 import { seriesDeAutoridad, elegirSerie, mismaSerie } from './utils/serie-autoridad.js';
-import { separarMencionDelTitulo, capitalizarTitulo } from './utils/titulos.js';
+import { separarMencionDelTitulo, capitalizarTitulo, tituloEnMayusculas, articuloDelNombre } from './utils/titulos.js';
 import { explotarMencion } from './utils/explotar-mencion.js';
 
 /**
@@ -541,6 +541,11 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         for (const campo of ['titulo', 'subtitulo']) {
             const cap = capitalizarTitulo(documento[campo], { autoridad: campo === 'titulo' ? datosExtra?.titulo : datosExtra?.subtitulo });
             if (cap && cap !== documento[campo]) documento[campo] = cap;
+        }
+        // El artículo inicial que el registro de catálogo quitó y el nombre del fichero conserva («The Austrian…»).
+        if (sep || tituloEnMayusculas(datosBase?.titulo)) {
+            const conArticulo = articuloDelNombre(documento.titulo, documento.nombre_archivo);
+            if (conArticulo) documento.titulo = conArticulo;
         }
     }
 

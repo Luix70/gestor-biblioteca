@@ -73,6 +73,25 @@ export function separarMencionDelTitulo(titulo, explotar) {
     return { titulo: cabeza, personas: r.personas, mencion: cola };
 }
 
+/**
+ * El ARTÍCULO INICIAL que el registro de catálogo quitó y el nombre del fichero conserva: título «Austrian
+ * Contribution to Analytic Philosophy», fichero «0415404053.Routledge.The.Austrian.Contribution.to.Analytic…» →
+ * «The Austrian Contribution…». Solo si en el nombre el artículo va JUSTO delante de las palabras del título.
+ * Devuelve el título con el artículo, o null si no hay nada que poner.
+ */
+export function articuloDelNombre(titulo, nombreArchivo) {
+    const t = String(titulo || '').trim();
+    if (!t || /^(?:the|a|an|el|la|los|las|lo|un|una|le|les|l'|der|die|das|il)\s/i.test(t)) return null;
+    const nombre = ` ${comparableT(String(nombreArchivo || '').replace(/\.[^.]+$/, ''))} `;
+    const inicio = comparableT(t).split(' ').slice(0, 4).join(' ');
+    if (!inicio) return null;
+    const m = nombre.match(new RegExp(` (the|a|an|el|la|los|las|le|les|der|die|das|il) ${inicio.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} `));
+    if (!m) return null;
+    const art = m[1];
+    const conMayuscula = art.charAt(0).toUpperCase() + art.slice(1);
+    return `${conMayuscula} ${t}`;
+}
+
 // ─── Títulos en MAYÚSCULAS ───────────────────────────────────────────────────────────────────────────────────
 // 856 títulos (8-oct) escritos enteros en mayúsculas («THE CAMBRIDGE ENCYCLOPEDIA OF THE ENGLISH LANGUAGE»,
 // «HOMBRE LOBO INSOLITO,EL»). Lo mejor: el título de la autoridad del mismo ISBN si dice LO MISMO (trae la grafía de
