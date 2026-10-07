@@ -3401,7 +3401,17 @@ function buscarTexto(q) {
   if ($('#sqHasta')) $('#sqHasta').value = '';
   buscarCatalogo(1);
 }
-// ISBN-13 «978…» → su forma de 10 cifras (las 9 centrales + dígito de control módulo 11; «X» si sale 10). Los «979…»// no tienen forma de 10. null si no aplica.function isbn13a10(isbn) {  const d = String(isbn || '').replace(/[^0-9]/g, '');  if (d.length !== 13 || !d.startsWith('978')) return null;  const nueve = d.slice(3, 12);  let suma = 0;  for (let i = 0; i < 9; i++) suma += (10 - i) * Number(nueve[i]);  const control = (11 - (suma % 11)) % 11;  return nueve + (control === 10 ? 'X' : String(control));}
+// ISBN-13 «978…» → su forma de 10 cifras (las 9 centrales + dígito de control módulo 11; «X» si sale 10). Los «979…»
+// no tienen forma de 10. null si no aplica.
+function isbn13a10(isbn) {
+  const d = String(isbn || '').replace(/[^0-9]/g, '');
+  if (d.length !== 13 || !d.startsWith('978')) return null;
+  const nueve = d.slice(3, 12);
+  let suma = 0;
+  for (let i = 0; i < 9; i++) suma += (10 - i) * Number(nueve[i]);
+  const control = (11 - (suma % 11)) % 11;
+  return nueve + (control === 10 ? 'X' : String(control));
+}
 function filtrarPorClasificacion(sist, cod) {
   irBusquedaFiltro({ clasSistema: sist, clasCodigo: cod, etiqueta: `${sist.toUpperCase()} ${cod}` });
 }
