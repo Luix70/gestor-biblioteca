@@ -3401,6 +3401,7 @@ function buscarTexto(q) {
   if ($('#sqHasta')) $('#sqHasta').value = '';
   buscarCatalogo(1);
 }
+// ISBN-13 «978…» → su forma de 10 cifras (las 9 centrales + dígito de control módulo 11; «X» si sale 10). Los «979…»// no tienen forma de 10. null si no aplica.function isbn13a10(isbn) {  const d = String(isbn || '').replace(/[^0-9]/g, '');  if (d.length !== 13 || !d.startsWith('978')) return null;  const nueve = d.slice(3, 12);  let suma = 0;  for (let i = 0; i < 9; i++) suma += (10 - i) * Number(nueve[i]);  const control = (11 - (suma % 11)) % 11;  return nueve + (control === 10 ? 'X' : String(control));}
 function filtrarPorClasificacion(sist, cod) {
   irBusquedaFiltro({ clasSistema: sist, clasCodigo: cod, etiqueta: `${sist.toUpperCase()} ${cod}` });
 }
@@ -3554,8 +3555,10 @@ function pintarDoc(r, ctx) {
     _issn: d.issn
       ? `<a class="rowlink" data-q="${esc(d.issn)}" title="Ver todo lo que comparte este ISSN">${esc(d.issn)}</a>${ROL === 'admin' ? ` <button class="rbtn admin-only" data-cotejar="${esc(d._id)}" title="Recopilar todo del Fichero + APIs para este ISSN y cotejarlo con el documento (reemplazar lo que elijas)">🔎 Cotejar</button>` : ''}`
       : null,
+    // Con su forma de 10 cifras al lado, la que va IMPRESA en los libros anteriores a 2007 (981-238-098-1 =
+    // 978-981-238-098-2): sin ella parecía que el ISBN de la ficha no era el del libro.
     _isbn: d.isbn
-      ? `<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a> <button class="rbtn copybtn" data-copy="${esc(d.isbn)}" title="Copiar el ISBN al portapapeles">📋</button>${ROL === 'admin' ? ` <button class="rbtn admin-only" data-cotejar="${esc(d._id)}" title="Recopilar todo del Fichero + APIs para este ISBN y cotejarlo con el documento (reemplazar lo que elijas)">🔎 Cotejar</button>` : ''}`
+      ? `<a class="rowlink" data-q="${esc(d.isbn)}" title="Ver todo lo que comparte este ISBN">${esc(d.isbn)}</a> <button class="rbtn copybtn" data-copy="${esc(d.isbn)}" title="Copiar el ISBN al portapapeles">📋</button>${isbn13a10(d.isbn) ? ` <span class="muted" style="font-size:12px" title="El mismo ISBN en su forma de 10 cifras (la impresa en los libros anteriores a 2007)">· ISBN-10 <span class="mono">${esc(isbn13a10(d.isbn))}</span></span> <button class="rbtn copybtn" data-copy="${esc(isbn13a10(d.isbn))}" title="Copiar el ISBN-10">📋</button>` : ''}${ROL === 'admin' ? ` <button class="rbtn admin-only" data-cotejar="${esc(d._id)}" title="Recopilar todo del Fichero + APIs para este ISBN y cotejarlo con el documento (reemplazar lo que elijas)">🔎 Cotejar</button>` : ''}`
       : null,
     // DOI (identificador del ARTÍCULO): abre doi.org y se puede copiar. La REVISTA de origen y la CITA
     // (vol/nº/pp) acompañan al artículo, como el ISBN/colección a un libro/número.
