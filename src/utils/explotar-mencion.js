@@ -16,7 +16,10 @@
 const MARCAS_ROL = [
   [/\b(?:illustrated|illustrations|ilustrado|ilustraciones)\s+(?:by|por|de)\b:?/i, 'ilustrador'],
   [/\b(?:foreword|preface|introduction|pr[oó]logo)\s+(?:by|por|de)\b:?/i, 'prologuista'],
-  [/\b(?:translated|traducci[oó]n|traducido)\s+(?:by|por|de)\b:?/i, 'traductor'],
+  [/\b(?:translated|trans\.?|traducci[oó]n|traducido)\s+(?:by|por|de)\b:?/i, 'traductor'],
+  // Abreviaturas de los créditos españoles: «(il. N. C. Wyeth; trad. Francisco Torres Oliver)».
+  [/(?:^|[\s;(])trad\.\s*/i, 'traductor'],
+  [/(?:^|[\s;(])il(?:s|us)?\.\s*/i, 'ilustrador'],
   [/\b(?:edited|ed\.|compiled|edici[oó]n)\s+(?:by|por|de)\b:?/i, 'editor'],
   // Colaboraciones menores o capítulos de una obra colectiva («with the assistance of Susan Ashe», «with additional
   // research by Julia Prange», «con la colaboración de…», «contributions by…»).
@@ -54,7 +57,7 @@ function capitalizar(nombre) {
 const PARTICULAS = new Set(['de', 'del', 'la', 'las', 'los', 'da', 'das', 'do', 'dos', 'di', 'du', 'des', 'le', 'van', 'von', 'der', 'den', 'ter', 'ten', 'y', 'e', 'i', 'bin', 'ibn', 'al', 'el', 'zu', 'af', 'av']);
 // Palabras de institución o de título de libro: un nombre de persona no las lleva (7-oct: «Aeronautics and Space
 // Engineering Board», «AGI Creative Team» se partían como si fueran personas).
-const RE_INSTITUCION = /\b(?:board|team|committee|council|society|association|academy|group|staff|office|bureau|agency|ministry|commission|company|corporation|inc|ltd|llc|editorial|library|museum|companion|guide|history|approach|introduction|handbook|american|scientific|magazine|journal|review|news|media|publishing|studio|project|muse|architect|terms|data)\b/i;
+const RE_INSTITUCION = /\b(?:board|team|committee|council|society|association|academy|group|staff|office|bureau|agency|ministry|commission|company|corporation|inc|ltd|llc|editorial|library|museum|companion|guide|history|approach|introduction|handbook|american|scientific|magazine|journal|review|news|media|publishing|studio|project|muse|architect|terms|data|colecci[oó]n|collection|bne|biblioteca)\b/i;
 // Palabras de título con mayúscula inicial («Enterprise Architect And Rational Rose»): en un nombre no salen.
 const RE_PALABRA_TITULO = /\b(?:And|The|Of|For|To|In|On|With)\b/;
 

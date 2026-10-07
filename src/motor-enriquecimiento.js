@@ -17,6 +17,8 @@ import { editorialDeColeccionMapa } from './utils/coleccion-editorial.js';
 import { mejorCdu } from './utils/prioridad-cdu.js';
 import { cduDeAutoridadFiable } from './utils/autoridad-isbn.js';
 import { seriesDeAutoridad, elegirSerie, mismaSerie } from './utils/serie-autoridad.js';
+import { separarMencionDelTitulo, capitalizarTitulo } from './utils/titulos.js';
+import { explotarMencion } from './utils/explotar-mencion.js';
 
 /**
  * Devuelve el primer valor "con contenido" de la lista.
@@ -520,6 +522,26 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         documento.alertas_agente.push(`Título no fiable ("${String(documento.titulo || '—').slice(0, 50)}"): parece un artefacto del productor/OCR, no un título real → requiere investigación más profunda (visión del libro).`);
     } else if (documento.estado_verificacion === 'pendiente') {
         documento.alertas_agente.push("Identificación incompleta (sin ISBN/ISSN o sin CDU): requiere revisión humana.");
+    }
+
+    // TÍTULO LIMPIO (utils/titulos.js): (1) sin la mención de responsabilidad pegada («…; ED. BY JOHN DAINTITH.»,
+    // «… (il. N. C. Wyeth; trad. Francisco Torres Oliver)»): sus personas pasan a autores (si no hay) o a
+    // colaboraciones con su rol; (2) sin MAYÚSCULAS sostenidas: la grafía de la autoridad si dice lo mismo, o Title Case.
+    {
+        const sep = separarMencionDelTitulo(documento.titulo, explotarMencion);
+        if (sep) {
+            documento.alertas_agente.push(`Mención «${sep.mencion}» separada del título.`);
+            documento.titulo = sep.titulo;
+            const autoresPrevios = Array.isArray(documento.autores) ? documento.autores : [];
+            const nuevosAutores = sep.personas.filter((p) => p.rol === 'autor').map((p) => p.nombre);
+            if (!autoresPrevios.length && nuevosAutores.length) documento.autores = nuevosAutores;
+            const otras = sep.personas.filter((p) => p.rol !== 'autor');
+            if (otras.length) documento.contribuciones_nombres = [...(documento.contribuciones_nombres || []), ...otras];
+        }
+        for (const campo of ['titulo', 'subtitulo']) {
+            const cap = capitalizarTitulo(documento[campo], { autoridad: campo === 'titulo' ? datosExtra?.titulo : datosExtra?.subtitulo });
+            if (cap && cap !== documento[campo]) documento[campo] = cap;
+        }
     }
 
     // ISBNs ALTERNATIVOS (otras ediciones/encuadernaciones leídas de los créditos/CIP): se PERSISTEN con

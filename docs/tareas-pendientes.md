@@ -251,6 +251,11 @@ Separa «autores» que eran varias personas en un solo registro (dry-run de juli
       grupos de grafías, 194 libros que pierden el artefacto, ~6-16 con los autores de la autoridad, 219 «[?]_»
       retirados) y `--ejecutar --online`. Después, revisar «Autor artefacto sin sustituto» (~160) a mano.
 
+### 5 quater. Títulos: mención pegada y mayúsculas (8-oct) — solo BD
+- [ ] Desplegar; copia de la base; `sudo docker exec -it gestor-biblioteca node scripts/limpiar-titulos-mencion.js` (en seco 8-oct: ~125
+      menciones separadas, ~990 títulos en mayúsculas — 433 con la grafía del Fichero, el resto Title Case —, 292
+      subtítulos) y `--ejecutar`.
+
 ### 6. Título original desde los créditos (pendiente desde julio)
 - [x] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-titulo-original.js`
 - [x] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-titulo-original.js --ejecutar` (6-oct, ~6 h; NO hace falta repetirlo: lo que tomó mal lo arregla reparar-titulos-cotejo, solo BD)

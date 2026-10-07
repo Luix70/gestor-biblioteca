@@ -1416,6 +1416,13 @@ de ficheros clasificado por CDU.
       cada libro; aviso fuerte si alguno no es un «[?]_»).
       En la ficha, las MATERIAS de «Datos catalográficos» (palabras clave) son clicables: llevan al Catálogo filtrado
       por esa materia exacta (/api/catalogo?materia=…, sin distinguir mayúsculas).
+    TÍTULOS LIMPIOS (2026-10-08, utils/titulos.js; la ingesta ya lo aplica). (1) La MENCIÓN de responsabilidad pegada
+      al título («…; ED. BY JOHN DAINTITH.», «… (il. N. C. Wyeth; trad. Francisco Torres Oliver)», «…, by Mary L. Boas»)
+      se separa y sus personas pasan a autores o colaboraciones con su rol — solo si toda la cola son nombres. (2) Los
+      títulos en MAYÚSCULAS toman la grafía del Fichero para su ISBN si dice lo mismo (conservando los acentos del
+      original), o Title Case (romanos y siglas sin vocales en mayúscula; «HOTEL DE LOS ANIMALES, EL» → «El Hotel de los
+      Animales»). Lo ya catalogado: `scripts/limpiar-titulos-mencion.js` (seco / `--ejecutar` / `--solo-mencion` /
+      `--solo-mayusculas`).
     REVISAR EDITORIALES DUDOSAS EN BLOQUE (2026-10-01). Para las selecciones «Editorial sin confirmar…» y
     «Editorial a revisar…»:
       · `scripts/triar-editoriales-sin-confirmar.js` (seco por defecto; `--ejecutar`, `--seleccion "<nombre>"`)
