@@ -39,7 +39,10 @@ export function huecosEscalares(doc, datos = {}) {
     };
 
     rellena('sinopsis', datos.sinopsis, '(añadida)');
-    rellena('subtitulo', datos.subtitulo);
+    // El subtítulo, salvo que el título ya lo lleve dentro («Fichte. La libertad es el fundamento del conocimiento y de
+    // la moral» + «la libertad es el fundamento…» saldría repetido).
+    const plano = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!plano(doc.titulo).includes(plano(datos.subtitulo))) rellena('subtitulo', datos.subtitulo);
     rellena('año_edicion', datos.año_edicion);
     rellena('idioma', datos.idioma);
     rellena('paginas', datos.paginas_bne ?? datos.paginas);

@@ -201,6 +201,18 @@ function señalesEdicion(doc, cand) {
     const iDoc = idioma2(doc.idioma), iCand = idioma2(cand.idioma) || lenguaDelGrupoISBN(cand.isbn, iDoc);
     if (iDoc && iCand && iDoc !== iCand) contradice = true;   // otra lengua ⇒ otra edición
 
+    // TÍTULO COMPLETO con SUBTÍTULO largo: si el título del documento es el título + el subtítulo de la candidata y
+    // ese subtítulo tiene varias palabras propias, es la firma de ESA edición (8-oct: «Fichte. La libertad es el
+    // fundamento del conocimiento y de la moral» = «Fichte» + su subtítulo en la colección «Aprender a pensar» de RBA;
+    // el epub de ePubLibre no traía ni editorial ni el año de esa edición, y quedaba sin ISBN). «Fichte» a secas no
+    // basta: lo hace el subtítulo, que solo lleva esa edición.
+    const subCand = palabras(cand.subtitulo || '').filter((w) => w.length > 2);
+    if (subCand.length >= 4) {
+        const completoCand = palabras(`${cand.titulo || ''} ${cand.subtitulo || ''}`).join(' ');
+        const completoDoc = palabras(`${doc.titulo || ''} ${doc.subtitulo || ''}`).join(' ');
+        if (completoCand && completoCand === completoDoc) señales.push('título completo');
+    }
+
     // Año EXACTO. Una diferencia mayor no descarta (el año del doc suele ser el de la obra, no el de la
     // edición: «Vampiro» figura como 1920), pero tampoco confirma.
     const aDoc = parseInt(doc.anio, 10), aCand = parseInt(cand.anio, 10);
@@ -453,7 +465,20 @@ const TOPE_OL_MS = Number(process.env.IDENTIFICAR_OL_TOPE_MS || 15000);
 async function candidatosBNE(doc, autor, caidas = []) {
     // Hasta 50: un clásico tiene decenas de ediciones y la buena puede venir la 26.ª (medido: la de Ángeles Caso de
     // «Las amistades peligrosas»).
-    const r = await buscarEdicionesEnBNE({ titulo: doc.titulo, autor, editorial: doc.editorial, max: 50 }).catch(() => null);
+    // Sin una «editorial» de maquetador: filtrar la BNE por «ePubLibre» no devuelve nada (8-oct: «Fichte. La libertad
+    // es el fundamento…», de RBA, quedaba sin ISBN por eso).
+    const editorialReal = doc.editorial && !esEditorialFalsa(doc.editorial) ? doc.editorial : null;
+    let r = await buscarEdicionesEnBNE({ titulo: doc.titulo, autor, editorial: editorialReal, max: 50 }).catch(() => null);
+    // Sin resultado con el nombre entero, con los apellidos acortados: los autores españoles van con o sin el segundo
+    // apellido («Rivera de Rosales Chacón, Jacinto» en el documento, «Rivera de Rosales, Jacinto» en la BNE).
+    if (Array.isArray(r) && !r.length && autor) {
+        const apellidos = String(autor).split(',')[0].trim().split(/\s+/);
+        for (let n = apellidos.length - 1; n >= 1 && !r.length; n--) {
+            const corto = apellidos.slice(0, n).join(' ');
+            if (corto.replace(/\b(?:de|del|la|las|los|y)\b/gi, '').trim().length < 3) break;
+            r = (await buscarEdicionesEnBNE({ titulo: doc.titulo, autor: corto, editorial: editorialReal, max: 50 }).catch(() => null)) || [];
+        }
+    }
     if (r === null) caidas.push('bne');   // null = la BNE no respondió (red o circuito abierto); [] = no lo tiene
     // Con el TRADUCTOR conocido, además una búsqueda dirigida por su apellido (la BNE indexa los 700): da justo
     // las ediciones de esa traducción aunque haya cien del mismo título.

@@ -329,7 +329,9 @@ export async function elegirEdicion(db, id, { isbn = null, ninguna = false } = {
  * todos los que no se encontraron y la cola no bajaba nunca. Subir la VERSIÓN (cuando el motor mejore) vuelve a
  * poner en cola a todos los no encontrados; el script lo fuerza con --reintentar.
  */
-export const VERSION_RECUPERAR_ISBN = 1;
+// v2 (8-oct): la BNE ya no se filtra por una editorial de maquetador («ePubLibre») y se reintenta sin el segundo
+// apellido; el título completo con subtítulo confirma la edición. Vuelve a pasar por los que no tenían ISBN.
+export const VERSION_RECUPERAR_ISBN = 2;
 export const CAMPO_MARCA_RECUPERAR_ISBN = 'campanas.recuperar-isbn';
 // Intentos «con esperanza» (alguna fuente no respondió, error, tope de tiempo): se anotan y el libro vuelve a
 // la cola pasadas unas horas. Tras MAX_INTENTOS ya no se espera más y se marca (un fichero que siempre falla no
