@@ -170,12 +170,18 @@ export function tituloCortado(titulo) {
     return /(?:^|\s)(?:de|del|la|las|el|los|y|e|o|en|con|a|al|para|por|sobre|su|sus|un|una|entre|sin|como|que)$/i.test(t);
 }
 
-async function generarIA(db, codigo, { soloGratis = false } = {}) {
+/**
+ * `codigo` es la CLAVE saneada (la de cdu_descripciones); `notacion`, la CDU tal cual la lleva el libro. A la IA se le
+ * da la NOTACIÓN: la clave pierde lo que distingue un lugar de un año (8-oct: `930.85(460:73)"1920/30"` le llegaba
+ * como `930.85(460_73)_192030` y salió «Historia del mundo antiguo»; `930.85:94(430)` → «Grecia clásica, año 430 a.C.»).
+ */
+async function generarIA(db, codigo, { soloGratis = false, notacion = null } = {}) {
+    const real = notacion && sanitizarCDU(notacion) === codigo ? String(notacion).trim() : codigo;
     const padre = await descripcionDelPadre(db, codigo).catch(() => null);
-    const equivalencias = await equivalenciasDe(db, codigo);
+    const equivalencias = await equivalenciasDe(db, real);
     // Las oficiales primero: si existen, mandan sobre la tabla fija (que es un resumen hecho a mano).
-    const refs = [...await referenciasOficiales(db, codigo), ...referenciasDe(codigo)];
-    const txt = await conTexto({ prompt: prompt(codigo, refs, padre, equivalencias), json: true, maxTokens: 4000, soloGratis });   // 2.5-flash gasta tokens en «pensar» antes de responder
+    const refs = [...await referenciasOficiales(db, real), ...referenciasDe(real)];
+    const txt = await conTexto({ prompt: prompt(real, refs, padre, equivalencias), json: true, maxTokens: 4000, soloGratis });   // 2.5-flash gasta tokens en «pensar» antes de responder
     const j = extraerJSON(txt);
     if (!j) throw new Error('respuesta de IA no parseable');
     // Respuesta INCOMPLETA (se le acabó el sitio y extraerJSON la cerró a medias): no se guarda, se reintentará.
@@ -195,7 +201,7 @@ async function generarIA(db, codigo, { soloGratis = false } = {}) {
 export async function generarDescripcionCDU(db, cdu, { soloGratis = false } = {}) {
     const codigo = sanitizarCDU(cdu);
     if (!codigo || !/[0-9]/.test(codigo)) throw new Error('código sin parte codificable');
-    return generarIA(db, codigo, { soloGratis });
+    return generarIA(db, codigo, { soloGratis, notacion: cdu });
 }
 
 /**
@@ -244,7 +250,7 @@ export async function describirCDU(db, cdu) {
 
     let datos;
     try {
-        datos = await generarIA(db, codigo);
+        datos = await generarIA(db, codigo, { notacion: cdu });
     } catch {
         return null; // transitorio → se reintentará
     }

@@ -17,13 +17,19 @@ import { sanitizarCDU } from '../utils/cdu-arbol.js';
 const PAUSA_MS = Number(process.env.DESC_PAUSA_MS || 400);         // ritmo entre códigos
 const LOTE_IA = Math.max(1, Number(process.env.DESC_LOTE_IA) || 6); // códigos por llamada de IA
 
-/** Códigos CDU (limpios, con dígitos) que usan los libros y NO están en cdu_descripciones. */
+/**
+ * CDU que usan los libros y NO están en cdu_descripciones, en su NOTACIÓN real (una por clave limpia): la clave
+ * pierde las comillas de una fecha y los «:», y con ella la IA confundía años con lugares (ver descripcion-cdu.js).
+ */
 async function cduFaltantes(db) {
     const crudos = await db.collection('biblioteca').distinct('cdu', { cdu: { $exists: true, $ne: null } });
-    const codigos = new Set();
-    for (const c of crudos) { const k = sanitizarCDU(c); if (k && /[0-9]/.test(k)) codigos.add(k); }
+    const porClave = new Map();
+    for (const c of crudos) {
+        const k = sanitizarCDU(c);
+        if (k && /[0-9]/.test(k) && !porClave.has(k)) porClave.set(k, String(c).trim());
+    }
     const ya = new Set(await db.collection('cdu_descripciones').distinct('codigo'));
-    return [...codigos].filter(k => !ya.has(k));
+    return [...porClave].filter(([k]) => !ya.has(k)).map(([, notacion]) => notacion);
 }
 
 /** Códigos Dewey/LCC que usan los libros y NO están en clasificacion_descripciones. */
@@ -120,11 +126,15 @@ export async function rellenarDescripcionesFaltantes({ limite = 5, db = null, on
     for (let i = 0; i < objetivos.length; i += LOTE_IA) {
         const grupo = objetivos.slice(i, i + LOTE_IA);
 
-        // Una sola llamada de IA para todo el grupo (si es de 2+; uno suelto va directo al fallback).
+        // Una sola llamada de IA para los Dewey/LCC del grupo (si son 2+; uno suelto va directo al fallback).
+        // La CDU NO va por lote: el prompt de lote no lleva referencias ni comprobaciones, y de él salieron
+        // descripciones inventadas («930.85 = Historia del mundo antiguo», que es el Dewey 930). Cada CDU va por
+        // describirCDU, con su notación real, sus piezas oficiales del UDC Summary y los filtros de coherencia.
         const mapa = new Map();
-        if (grupo.length > 1) {
+        const lote = grupo.filter(g => g.sistema !== 'cdu');
+        if (lote.length > 1) {
             try {
-                const txt = await conTexto({ prompt: promptLote(grupo), json: true, maxTokens: 8000 });
+                const txt = await conTexto({ prompt: promptLote(lote), json: true, maxTokens: 8000 });
                 const arr = parsearArray(txt);
                 if (Array.isArray(arr)) for (const o of arr) if (o && o.sistema && o.codigo) mapa.set(clave(o.sistema, o.codigo), o);
             } catch { /* el lote falló entero → cada código cae al fallback uno-a-uno */ }

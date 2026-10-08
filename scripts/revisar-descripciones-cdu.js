@@ -96,19 +96,42 @@ const VACIAS = new Set(['general', 'generales', 'generalidades', 'otros', 'otras
 const plano = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const raices = (s) => plano(s).split(/[^a-z]+/).filter((w) => w.length >= 5 && !VACIAS.has(w)).map((w) => w.slice(0, 5));
 
-/** ¿Comparte alguna palabra con el significado oficial de alguno de sus antepasados? */
-function casaConOficial(d, ants) {
+const raicesOficiales = (c) => raices(`${oficial.get(c)?.es?.titulo || ''} ${oficial.get(c)?.en?.titulo || ''}`);
+
+/**
+ * ¿Por qué es sospechosa? (null = no lo es)
+ *  · «ajena»: no comparte ni una palabra con el significado oficial de ningún antepasado («78.2 = Cine», 78 es Música).
+ *  · «sin lo propio»: comparte las del abuelo pero no las que DISTINGUEN a su antepasado más concreto de su padre
+ *    («930.85 = Historia del mundo antiguo»: dice «historia» como 930, pero no «civilización» ni «cultural», que es lo
+ *    que es 930.85; era el Dewey 930).
+ *  · «a ciegas»: su código lleva una fecha entre comillas o una relación «:», y la descripción se escribió con la clave
+ *    limpia, que las pierde (`930.85:94(430)` → «Grecia clásica, año 430 a.C.»; (430) es Alemania). Hasta el 8-oct
+ *    todas se escribieron así, así que todas se juzgan.
+ */
+function motivoSospecha(d, ants, notacion) {
   const texto = new Set(raices(`${d.titulo_es} ${d.descripcion_es}`));
-  return ants.some((a) => raices(`${oficial.get(a).es?.titulo || ''} ${oficial.get(a).en?.titulo || ''}`).some((r) => texto.has(r)));
+  if (!ants.some((a) => raicesOficiales(a).some((r) => texto.has(r)))) return 'ajena';
+  if (ants.length >= 2) {
+    const delPadre = new Set(ants.slice(1).flatMap(raicesOficiales));
+    const propias = raicesOficiales(ants[0]).filter((r) => !delPadre.has(r));
+    if (propias.length && !propias.some((r) => texto.has(r))) return 'sin lo propio';
+  }
+  if (notacion && /[":]/.test(notacion)) return 'a ciegas';
+  return null;
 }
 
-// Libros por código: se empieza por los que más se ven.
+// Libros por código (se empieza por los que más se ven) y la NOTACIÓN real de cada clave (para el juez y para
+// rehacerla: la clave limpia pierde las comillas de las fechas y los «:»).
 const libros = new Map();
+const notacionDe = new Map();
 for (const x of await db.collection('biblioteca').aggregate([{ $group: { _id: '$cdu', n: { $sum: 1 } } }]).toArray()) {
   const k = sanitizarCDU(x._id);
-  if (k) libros.set(k, (libros.get(k) || 0) + x.n);
+  if (!k) continue;
+  libros.set(k, (libros.get(k) || 0) + x.n);
+  if (!notacionDe.has(k)) notacionDe.set(k, String(x._id).trim());
 }
 const porLibros = (a, b) => (libros.get(b.codigo) || 0) - (libros.get(a.codigo) || 0);
+const notacion = (d) => notacionDe.get(d.codigo) || d.codigo;
 
 // ─── Clasificar ──────────────────────────────────────────────────────────────────────────────────────────────
 const col = db.collection('cdu_descripciones');
@@ -121,14 +144,19 @@ for (const d of descs) {
   if (tituloCortado(d.titulo_es)) { cortadas.push(d); continue; }
   if (/^2/.test(d.codigo)) { religion++; continue; }
   const ants = antepasados(d.codigo);
-  if (ants.length && !casaConOficial(d, ants)) sospechosas.push({ ...d, ants });
+  const motivo = ants.length ? motivoSospecha(d, ants, notacionDe.get(d.codigo)) : null;
+  if (motivo) sospechosas.push({ ...d, ants, motivo });
 }
 cortadas.sort(porLibros);
 sospechosas.sort(porLibros);
 const suma = (l) => l.reduce((s, d) => s + (libros.get(d.codigo) || 0), 0);
+const deMotivo = (m) => sospechosas.filter((d) => d.motivo === m);
 console.log(`Descripciones de IA: ${descs.length}`);
 console.log(`   1. con el título cortado: ${cortadas.length} (${suma(cortadas)} libros)`);
-console.log(`   2. sospechosas (ninguna palabra en común con su significado oficial): ${sospechosas.length} (${suma(sospechosas)} libros)`);
+console.log(`   2. sospechosas: ${sospechosas.length} (${suma(sospechosas)} libros) — se juzgan con IA:`);
+console.log(`        · ajenas a su significado oficial: ${deMotivo('ajena').length}`);
+console.log(`        · sin lo que distingue a su código de su padre: ${deMotivo('sin lo propio').length}`);
+console.log(`        · escritas sin ver su fecha o su relación «:»: ${deMotivo('a ciegas').length}`);
 console.log(`   (clase 2, religión, excluidas: ${religion} — su problema es la notación del libro, §4)\n`);
 cortadas.slice(0, 8).forEach((d) => console.log(`   ✂ ${d.codigo.padEnd(22)} «${d.titulo_es}»`));
 
@@ -149,14 +177,14 @@ const promptJuez = (tanda) => `Eres un bibliotecario experto en la Clasificació
 Para cada código CDU te doy el significado OFICIAL de sus antepasados (UDC Summary) y el título de la descripción que
 tenemos guardada. Clasifica cada uno:
   · "coherente": el título encaja con lo que significa el código en CDU. El antepasado oficial es más GENERAL: un tema
-    concreto dentro de él es coherente. "_" separa dos facetas unidas por ":" (basta con que trate de ellas). Los
+    concreto dentro de él es coherente. ":" une dos facetas relacionadas (basta con que trate de ellas). Los
     auxiliares cuentan: lugar entre paréntesis — (73) Estados Unidos, así que 821.111(73) es literatura estadounidense —,
     tiempo entre comillas, forma (0…), lengua =…, y 087.5 = para niños/jóvenes.
   · "dewey": el título NO encaja con la CDU pero SÍ es exactamente lo que ese número significa en DEWEY (p. ej.
     363.325 Terrorismo, 523.1 Cosmología): el código del libro es un número Dewey guardado como CDU.
   · "incoherente": ni lo uno ni lo otro (otra disciplina, otro lugar u otra época), o un título vacío de sentido
     («Psic», «Impactos»).
-${tanda.map((d, i) => `${i + 1}. código ${d.codigo} · oficial: ${d.ants.map((a) => `${a} = ${tituloOficial(a)}`).join('; ')} · título guardado: «${d.titulo_es}»`).join('\n')}
+${tanda.map((d, i) => `${i + 1}. código ${notacion(d)} · oficial: ${d.ants.map((a) => `${a} = ${tituloOficial(a)}`).join('; ')} · título guardado: «${d.titulo_es}»`).join('\n')}
 Responde ÚNICAMENTE con JSON, un veredicto por número: {"veredictos":[{"n":<número>,"v":"coherente"|"dewey"|"incoherente","motivo":"<máx. 12 palabras>"}]}`;
 
 const pendientesJuicio = hacerSospechosas ? sospechosas.slice(0, LIMITE).filter((d) => !veredictoDe(d)) : [];
@@ -214,7 +242,7 @@ if (EJECUTAR && aRehacer.length) {
     p.paso(d.codigo);
     let nueva;
     try {
-      nueva = await conIAGratis((o) => generarDescripcionCDU(db, d.codigo, o), p.nota);   // primero la nueva: si falla, la vieja se queda
+      nueva = await conIAGratis((o) => generarDescripcionCDU(db, notacion(d), o), p.nota);   // primero la nueva: si falla, la vieja se queda
     } catch (e) {
       fallidas++;
       continue;
