@@ -100,7 +100,11 @@ async function ajustes() {
         const db = await conectarDB();
         const docs = await db.collection('ajustes_vision').find({}).toArray();
         ajustesCache = new Map(docs.map(d => [d._id, d]));
-    } catch { ajustesCache = new Map(); }
+    } catch {
+        // Si la base no responde, se siguen usando los ÚLTIMOS ajustes leídos: un Map vacío significa «todo activo»,
+        // y un corte de Atlas reactivaba en silencio el proveedor de PAGO que el usuario había apagado en el panel.
+        if (!ajustesCache) ajustesCache = new Map();
+    }
     ajustesTs = Date.now();
     return ajustesCache;
 }
