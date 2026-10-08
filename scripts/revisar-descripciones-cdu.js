@@ -24,7 +24,10 @@
  *   … --fase cortadas|sospechosas   solo una de las dos (por defecto, las dos)
  *   … --sin-ia                       en seco, sin juzgar (solo cuenta)
  *   … --limite N                     como mucho N códigos por fase (los que más libros tienen primero)
- *   … --permitir-pago                usar también la IA de PAGO (por defecto solo gratis: si se saturan, espera y reintenta)
+ *   … --solo-gratis                  no usar NUNCA la IA de pago aunque esté activada en el panel: si las gratis se
+ *                                    saturan, espera 60 s y reintenta (lento; para dejarlo de noche sin gastar)
+ * Por defecto usa los proveedores de IA tal como estén ACTIVADOS en el panel (Ajustes de IA), sin esperas: para no
+ * gastar, desactiva allí «Gemini (pago)» mientras corre.
  */
 import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
@@ -45,21 +48,21 @@ const SIN_IA = args.includes('--sin-ia') && !EJECUTAR;
 const FASE = arg('--fase') || 'todas';
 const LIMITE = Number(arg('--limite')) || Infinity;
 const TANDA = 25;
-const PAGO = args.includes('--permitir-pago');   // por defecto, SOLO proveedores gratis
+const SOLO_GRATIS = args.includes('--solo-gratis');   // por defecto, lo que esté activado en el panel
 
 /**
- * Llama a la IA SOLO con proveedores gratis (salvo --permitir-pago). Los gratis se saturan por MINUTO (Groq: tokens
- * por minuto; 8-oct, en tandas seguidas caía al de pago una de cada cuatro), así que si están todos saturados se
- * espera un minuto y se reintenta, hasta 5 veces. Lanza si sigue sin haber ninguno (cupo diario agotado).
+ * Llama a la IA. Por defecto, con los proveedores que estén activados en el panel y sin esperas (la rotación de
+ * conTexto ya salta los desactivados). Con --solo-gratis, nunca el de pago: los gratis se saturan por MINUTO (Groq:
+ * tokens por minuto), así que si están todos saturados se espera un minuto y se reintenta, hasta 5 veces.
  */
 async function conIAGratis(llamada, nota) {
   for (let intento = 1; ; intento++) {
     try {
-      return await llamada({ soloGratis: !PAGO });
+      return await llamada({ soloGratis: SOLO_GRATIS });
     } catch (e) {
       // Solo se espera si es SATURACIÓN (cuota/límite por minuto); una respuesta mala o incompleta no mejora esperando.
       const saturada = /429|cuota|quota|rate limit|too many|no hay proveedores/i.test(String(e.message));
-      if (PAGO || !saturada || intento >= 5) throw e;
+      if (!SOLO_GRATIS || !saturada || intento >= 5) throw e;
       nota(`   ⏸ IA gratis saturada (${String(e.message).slice(0, 60)}); espero 60 s y reintento (${intento}/4)`);
       await new Promise((r) => setTimeout(r, 60000));
     }

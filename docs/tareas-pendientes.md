@@ -57,7 +57,7 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
       **Ampliada 8-oct tarde** (caso «930.85(460:73)"1920/30"» = «Historia del mundo antiguo», que es el Dewey 930): ahora
       juzga también las que no nombran lo que DISTINGUE a su código de su padre (1.779) y las escritas «a ciegas» (2.981:
       la IA recibía la clave limpia, sin las comillas de las fechas ni los «:», y confundía años con lugares). Total
-      ~6.160 sospechosas → ~250 tandas del juez + ~2.000 a rehacer: varios días de cupo GRATIS (solo usa IA gratis;
+      ~6.160 sospechosas → ~250 tandas del juez + ~2.000 a rehacer: varios días de cupo GRATIS (usa la IA que esté activada en el panel; `--solo-gratis` para no gastar nunca, más lento;
       relanzar cada día sigue donde iba). **Causas cortadas**: la IA recibe la notación real; Mantenimiento ya no
       describe la CDU por lotes sin referencias (backfill-descripciones → describirCDU uno a uno).
       Prueba 8-oct con 50: 33 falsas alarmas, 12 a rehacer, 5 «Dewey». Los «Dewey» (`logs/udcs/cdu-con-numero-dewey.txt`)
