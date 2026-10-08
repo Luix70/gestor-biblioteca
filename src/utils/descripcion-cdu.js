@@ -170,12 +170,12 @@ export function tituloCortado(titulo) {
     return /(?:^|\s)(?:de|del|la|las|el|los|y|e|o|en|con|a|al|para|por|sobre|su|sus|un|una|entre|sin|como|que)$/i.test(t);
 }
 
-async function generarIA(db, codigo) {
+async function generarIA(db, codigo, { soloGratis = false } = {}) {
     const padre = await descripcionDelPadre(db, codigo).catch(() => null);
     const equivalencias = await equivalenciasDe(db, codigo);
     // Las oficiales primero: si existen, mandan sobre la tabla fija (que es un resumen hecho a mano).
     const refs = [...await referenciasOficiales(db, codigo), ...referenciasDe(codigo)];
-    const txt = await conTexto({ prompt: prompt(codigo, refs, padre, equivalencias), json: true, maxTokens: 4000 });   // 2.5-flash gasta tokens en «pensar» antes de responder
+    const txt = await conTexto({ prompt: prompt(codigo, refs, padre, equivalencias), json: true, maxTokens: 4000, soloGratis });   // 2.5-flash gasta tokens en «pensar» antes de responder
     const j = extraerJSON(txt);
     if (!j) throw new Error('respuesta de IA no parseable');
     // Respuesta INCOMPLETA (se le acabó el sitio y extraerJSON la cerró a medias): no se guarda, se reintentará.
@@ -192,10 +192,10 @@ async function generarIA(db, codigo) {
  * ya existe (scripts/revisar-descripciones-cdu.js): primero se genera y solo si sale bien se sustituye la vieja.
  * Lanza si la IA falla o la respuesta es incoherente/incompleta.
  */
-export async function generarDescripcionCDU(db, cdu) {
+export async function generarDescripcionCDU(db, cdu, { soloGratis = false } = {}) {
     const codigo = sanitizarCDU(cdu);
     if (!codigo || !/[0-9]/.test(codigo)) throw new Error('código sin parte codificable');
-    return generarIA(db, codigo);
+    return generarIA(db, codigo, { soloGratis });
 }
 
 /**

@@ -24,6 +24,7 @@
  *   … --fase cortadas|sospechosas   solo una de las dos (por defecto, las dos)
  *   … --sin-ia                       en seco, sin juzgar (solo cuenta)
  *   … --limite N                     como mucho N códigos por fase (los que más libros tienen primero)
+ *   … --permitir-pago                usar también la IA de PAGO (por defecto solo gratis: si se saturan, espera y reintenta)
  */
 import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
@@ -44,6 +45,26 @@ const SIN_IA = args.includes('--sin-ia') && !EJECUTAR;
 const FASE = arg('--fase') || 'todas';
 const LIMITE = Number(arg('--limite')) || Infinity;
 const TANDA = 25;
+const PAGO = args.includes('--permitir-pago');   // por defecto, SOLO proveedores gratis
+
+/**
+ * Llama a la IA SOLO con proveedores gratis (salvo --permitir-pago). Los gratis se saturan por MINUTO (Groq: tokens
+ * por minuto; 8-oct, en tandas seguidas caía al de pago una de cada cuatro), así que si están todos saturados se
+ * espera un minuto y se reintenta, hasta 5 veces. Lanza si sigue sin haber ninguno (cupo diario agotado).
+ */
+async function conIAGratis(llamada, nota) {
+  for (let intento = 1; ; intento++) {
+    try {
+      return await llamada({ soloGratis: !PAGO });
+    } catch (e) {
+      // Solo se espera si es SATURACIÓN (cuota/límite por minuto); una respuesta mala o incompleta no mejora esperando.
+      const saturada = /429|cuota|quota|rate limit|too many|no hay proveedores/i.test(String(e.message));
+      if (PAGO || !saturada || intento >= 5) throw e;
+      nota(`   ⏸ IA gratis saturada (${String(e.message).slice(0, 60)}); espero 60 s y reintento (${intento}/4)`);
+      await new Promise((r) => setTimeout(r, 60000));
+    }
+  }
+}
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE_VEREDICTOS = path.join(RAIZ, 'logs', 'udcs', 'veredictos-descripciones.json');
@@ -146,7 +167,7 @@ if (hacerSospechosas && pendientesJuicio.length && !SIN_IA) {
     const tanda = pendientesJuicio.slice(i, i + TANDA);
     p.paso(`tanda ${i / TANDA + 1}`);
     try {
-      const j = extraerJSON(await conTexto({ prompt: promptJuez(tanda), json: true, maxTokens: 8000 }));
+      const j = extraerJSON(await conIAGratis((o) => conTexto({ prompt: promptJuez(tanda), json: true, maxTokens: 8000, ...o }), p.nota));
       for (const v of j?.veredictos || []) {
         // Por NÚMERO, no por código: la IA reescribe los códigos («332.4(44)» → «332.4 (44)») y no casarían.
         const d = tanda[Number(v.n) - 1];
@@ -193,7 +214,7 @@ if (EJECUTAR && aRehacer.length) {
     p.paso(d.codigo);
     let nueva;
     try {
-      nueva = await generarDescripcionCDU(db, d.codigo);   // primero la nueva: si falla, la vieja se queda
+      nueva = await conIAGratis((o) => generarDescripcionCDU(db, d.codigo, o), p.nota);   // primero la nueva: si falla, la vieja se queda
     } catch (e) {
       fallidas++;
       continue;

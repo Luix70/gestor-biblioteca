@@ -194,11 +194,15 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
  * sin imágenes. Para tareas de texto puro (clasificación CDU, descripciones…), así el texto también
  * aprovecha los tiers gratis de otros proveedores antes de gastar la de pago. Devuelve el TEXTO (usa
  * extraerJSON para parsear). `maxTokens` sube el límite de salida (p. ej. descripciones por lote).
- * @param {{prompt:string, json?:boolean, maxTokens?:number}} opts
+ * `soloGratis`: no usa nunca un proveedor de pago (para trabajos de mantenimiento por lotes sin prisa: si los
+ * gratis están saturados, lanza y el llamante espera y reintenta).
+ * @param {{prompt:string, json?:boolean, maxTokens?:number, soloGratis?:boolean}} opts
  */
-export async function conTexto({ prompt, json = true, maxTokens } = {}) {
-    const orden = await ordenIntento();
-    if (!orden.length) throw new Error('No hay proveedores de IA configurados/activos (revisa las claves en .env y los Ajustes).');
+export async function conTexto({ prompt, json = true, maxTokens, soloGratis = false } = {}) {
+    const orden = await ordenIntento(soloGratis ? (c => c.tier === 'free') : null);
+    if (!orden.length) throw new Error(soloGratis
+        ? 'No hay proveedores de IA GRATIS configurados/activos.'
+        : 'No hay proveedores de IA configurados/activos (revisa las claves en .env y los Ajustes).');
     let ultimo;
     for (const c of orden) {
         const t0 = Date.now();
