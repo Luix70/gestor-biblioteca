@@ -42,7 +42,7 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
       «94(430).085» = «Geología de la Antártida») y `--ejecutar --regenerar` (o sin `--regenerar`: las rehace Mantenimiento
       poco a poco). `--lugar` añade las que nombran otro lugar (más ruidosa: mirar la lista).
 - [ ] Estudiar aparte: ~400 libros cuya CDU lleva un auxiliar de lugar que no casa con su materia («321.2(44)» = Francia
-      para un libro sobre China); muchos son CDU de la BNE: no se tocan sin revisar.
+      para un libro sobre China); muchos son CDU de la BNE: no se tocan sin revisar. → ver **§4, estrategia de la CDU**.
 
 ### 1.3 Al final
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/integridad.js --reparar --informe /app/logs/integridad.txt`
@@ -72,6 +72,67 @@ Y sueltos:
 - [ ] «El Oro del Los Tigres» → «El oro de los tigres»; «ALMA CAPRICHOS EL MAL POETA» → «Alma. Caprichos. El mal poema».
 - [ ] «Hervé This, Pierre Gagnaire»: son dos autores (el lector de menciones no puede distinguirlo de «Apellido, Nombre»).
 - [ ] ~48 cabeceras de revista con nombre de fichero (muchas son libros o artículos tipados como revista).
+
+---
+
+## 4. CDU: revisar las equivocadas y sus descripciones — ESTRATEGIA (8-oct)
+
+- [ ] **Revisar posibles CDU equivocadas y descripciones equivocadas** siguiendo esta estrategia.
+
+**Por qué es delicado.** La CDU decide la **carpeta** de cada libro en el disco (`CDU/<cdu>/libros/…`) y el **árbol de
+navegación** del panel y de la **copia sin conexión** (USB). Cambiar una CDU **mueve carpetas**: un error se multiplica
+(una equivalencia mala mueve cientos de libros a la vez, como la de las clases LCC en septiembre). Por eso: **primero
+diagnosticar sin tocar nada, corregir el ORIGEN antes que los libros, aplicar por tandas pequeñas, y verificar**.
+
+**Lo que se sabe (8-oct).** 66.019 libros: 57.661 **sin `cdu_fuente`** (anteriores a que se anotara; origen desconocido),
+4.172 del clasificador, 3.850 de la **BNE**, 319 manuales (+ 3.607 con `cdu_manual`), 3.411 en **000**. La caché
+`equivalencias_cdu` tiene **10.193 equivalencias aprendidas de la IA sin verificar** (+ 5.347 verificadas): es la vía
+por la que un error llega a muchos libros. Descripciones: 306 incoherentes con su división (§1.2 ter).
+
+**Reglas de seguridad (para todas las fases).**
+1. Antes de cada fase que escriba: **copia de la base** (`copia-base.js`) **y del disco** (`sincronizar-copia.sh --forzar`).
+2. Todo en **seco por defecto**; el seco escribe un **informe** (`--informe`) que se revisa antes de `--ejecutar`.
+3. **Nunca** se toca una CDU **manual** (rango 4) ni se baja de rango (`utils/prioridad-cdu.js`: manual > impresa >
+   BNE > deducida). Una CDU de la BNE solo la cambia una evidencia de rango igual o mayor, o una persona.
+4. Las carpetas se mueven **solo** con `reubicarPorCdu` (copia verificada, diario de movimientos, lleva consigo a los
+   anidados) y en **tandas** (`--limite 200`), comprobando entre tanda y tanda.
+5. Cada cambio deja **`deshacer[]`** (CDU y carpeta de antes) y la selección del lote, para poder revertirlo.
+6. Al terminar cada fase: `integridad.js` (diagnóstico), `recolocar-por-cdu.js` en seco (debe dar 0), campaña de
+   sidecars al día, **Reindexar**, y **sincronizar la copia USB** (navegación sin conexión al día).
+
+**Fase 1 — Diagnóstico (no escribe nada).** Un script `auditar-cdu.js` que puntúa cada libro con las pruebas que hay
+y lo clasifica por **confianza** (alta / media / baja) en un informe y en selecciones (sin mover nada):
+   - **contra su propia evidencia**: la Dewey/LCC del libro (tabla determinista), la CDU de la BNE por su ISBN, la
+     CDU impresa (CIP), sus materias/palabras clave y su título → ¿coinciden en la **clase** y la **división**?
+   - **lugar**: el auxiliar de lugar del código frente a los lugares del título y las materias (`lugarContradice`);
+   - **hermanos**: la CDU frente a la mayoritaria de su colección, serie u obra (un tomo de historia entre 20 de
+     física es sospechoso);
+   - **literatura**: `821.x` (la lengua) frente a la lengua original / nacionalidad del autor;
+   - **procedencia**: si la CDU es exactamente la de una equivalencia aprendida **sin verificar** (marca el origen);
+   - **descripción incoherente** del código (`descripcionContradice`), como señal más.
+
+**Fase 2 — Corregir el ORIGEN: la caché de equivalencias.** Antes que los libros. `auditar-equivalencias-cdu.js`
+ordenado por **nº de libros que dependen** de cada equivalencia IA sin verificar; revisar las de más uso (a mano o con
+la tabla determinista), corregirlas y marcarlas `verificado`. Arreglar una equivalencia arregla todos sus libros en
+la fase 3 de una vez y con criterio.
+
+**Fase 3 — Aplicar por niveles de confianza** (siempre con las reglas de seguridad):
+   - **A, automático**: hay una evidencia de **mayor rango** que contradice una CDU deducida (BNE o CIP impresa frente a
+     IA/caché/crosswalk) → `aplicarCduConPrioridad` (ya existe: Conformador `aplicar-cdu-bne`), por tandas.
+   - **B, propuesto**: la Dewey/LCC del propio libro o la equivalencia corregida dan otra CDU de mismo rango → se
+     **propone** (selección «CDU propuesta») y se aprueba por grupos en el panel antes de aplicar.
+   - **C, a mano**: lugar que no casa, BNE que contradice su materia, hermanos discordantes sin otra prueba →
+     selección para revisar; **nunca** automático.
+   - Los **000** (3.411) van aparte: no hay CDU que perder; se clasifican con la cascada normal (sin IA primero).
+
+**Fase 4 — Descripciones.** `regenerar-descripciones-cdu.js --ejecutar --regenerar` (no mueve nada; se puede hacer ya).
+
+**Fase 5 — Verificación final.** Integridad, recolocar-por-cdu en seco = 0, sidecars, Reindexar, copia USB; y una
+muestra a mano del árbol de navegación (que las ramas grandes —94, 821, 5x— contienen lo que dicen).
+
+**Que no vuelva a pasar (ingesta).** Al clasificar, contrastar la CDU propuesta con la evidencia del propio libro
+(clase de su Dewey/LCC, lugar del título) antes de aceptarla; una equivalencia IA solo pasa a la caché si casa con esa
+evidencia; y la descripción del código se genera con referencias (hecho el 8-oct).
 
 ---
 
