@@ -3699,6 +3699,11 @@ de ficheros clasificado por CDU.
         restaurar-originales.js   Repone ficheros desaparecidos desde Reintentos…
         re-enriquecer-degradados  Recupera metadata de lotes con APIs caídas
         describir-cdus.js         Rellena la tabla cdu_descripciones (ES/EN)
+        auditar-cdu.js            DIAGNÓSTICO de la CDU de cada libro (no cambia nada): indicios (su Dewey/LCC,
+                                  la BNE por ISBN, número Dewey, división inexistente en la CDU, lugar,
+                                  tomos de su obra, lengua de la literatura, equivalencia IA sin verificar)
+                                  → sospecha alta/media/baja y vía A (BNE, automático) / B (su Dewey/LCC,
+                                  proponer) / C (a mano). Informe en logs/auditoria-cdu/; --selecciones.
         revisar-descripciones-cdu Revisa las descripciones de IA contra el UDC Summary: rehace las de
                                   título cortado y las que la IA juzga incoherentes (por tandas de 25);
                                   las que encajan con el número en DEWEY no se tocan y se listan en

@@ -121,7 +121,12 @@ por la que un error llega a muchos libros. Descripciones: 306 incoherentes con s
 6. Al terminar cada fase: `integridad.js` (diagnóstico), `recolocar-por-cdu.js` en seco (debe dar 0), campaña de
    sidecars al día, **Reindexar**, y **sincronizar la copia USB** (navegación sin conexión al día).
 
-**Fase 1 — Diagnóstico (no escribe nada).** Un script `auditar-cdu.js` que puntúa cada libro con las pruebas que hay
+**Fase 1 — Diagnóstico (no escribe nada).** HECHO el script (8-oct): `sudo docker exec -it gestor-biblioteca node
+scripts/auditar-cdu.js` → informe en `logs/auditoria-cdu/` (+ detalle .jsonl para la Fase 3); `--selecciones` crea
+«CDU sospechosa A/B/C». Lanzarlo DESPUÉS de revisar-descripciones-cdu (usa sus veredictos «Dewey»). Ajustes medidos en
+una muestra de 3.000: la LCC pesa menos que la Dewey (va por clase), la informática 004-006 frente a 5/6 no es
+contradicción, los auxiliares especiales «.0» son válidos, «hermanos» solo dentro de una OBRA (una serie editorial
+mezcla temas), el lugar no se mira en literatura (allí es la nacionalidad del autor). Un script `auditar-cdu.js` que puntúa cada libro con las pruebas que hay
 y lo clasifica por **confianza** (alta / media / baja) en un informe y en selecciones (sin mover nada):
    - **contra su propia evidencia**: la Dewey/LCC del libro (tabla determinista), la CDU de la BNE por su ISBN, la
      CDU impresa (CIP), sus materias/palabras clave y su título → ¿coinciden en la **clase** y la **división**?
