@@ -45,6 +45,11 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/regenerar-descripciones-cdu.js` (en seco 8-oct: ~300 incoherentes, p. ej.
       «94(430).085» = «Geología de la Antártida») y `--ejecutar --regenerar` (o sin `--regenerar`: las rehace Mantenimiento
       poco a poco). `--lugar` añade las que nombran otro lugar (más ruidosa: mirar la lista).
+- [x] Resultado (8-oct): las 306 se retiraron por la mañana y Mantenimiento rehízo 281 (175 códigos con libros, 441 libros);
+      la mayoría mejoraron («94(437)» Chequia ya no es «Geografía de Cataluña»), unas pocas empeoraron («93:327» →
+      «Historiografía… España»). El detector era demasiado estricto con la clase 94 (retiraba «Genocidio», «Administración
+      Johnson» por no decir «historia»); arreglado: vale cualquier palabra de acontecimiento, época o poder. Las de IA que
+      queden mal se tratan en la §4, fase 4 (rehacer por tandas con las referencias oficiales del UDC Summary).
 - [ ] Estudiar aparte: ~400 libros cuya CDU lleva un auxiliar de lugar que no casa con su materia («321.2(44)» = Francia
       para un libro sobre China); muchos son CDU de la BNE: no se tocan sin revisar. → ver **§4, estrategia de la CDU**.
 

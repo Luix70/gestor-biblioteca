@@ -129,8 +129,12 @@ export function descripcionContradice(codigo, titulo) {
     const t = String(titulo || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     if (!t) return false;
     if (/^929/.test(c)) return !/biograf|genealog|heraldic|vida|memorias/.test(t);
-    if (/^94/.test(c)) return !/histor/.test(t);
-    if (/^93/.test(c)) return !/histor|arqueolog|archiv|cronolog|fuentes|paleograf|epigraf|numismat|diplomat|prehist/.test(t);
+    // Un tema histórico no siempre dice «historia» («Segunda Guerra Mundial», «Genocidio», «Administración Johnson»,
+    // «Reino Romano»: 8-oct se retiraron por eso descripciones que estaban bien). Lo que delata el error es que
+    // hable de GEOGRAFÍA, así que vale cualquier palabra de acontecimiento, época o poder.
+    const HISTORICO = /histor|guerra|batalla|revoluc|reinad|reino|imperi|conquist|dinast|periodo|epoca|edad|siglo|republica|monarqu|genocid|holocaust|administracion|gobierno|dictadura|colonia|independencia|civilizacion|antigu|medieval/;
+    if (/^94/.test(c)) return !HISTORICO.test(t);
+    if (/^93/.test(c)) return !(HISTORICO.test(t) || /arqueolog|archiv|cronolog|fuentes|paleograf|epigraf|numismat|diplomat|prehist/.test(t));
     if (/^91/.test(c)) return !/geograf|viaj|explorac|turis|pais|cartograf|mapa|atlas|expedic|regional/.test(t);
     return false;
 }
