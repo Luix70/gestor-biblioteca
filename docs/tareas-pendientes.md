@@ -38,6 +38,10 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
 ### 1.2 ter Descripciones de CDU inventadas (8-oct) — solo BD, IA de texto barata
 - [ ] Desplegar (la IA describe cada código con la tabla de su clase/división, sus lugares, la descripción del padre y
       la Dewey/LCC de la que salió; no se guarda una que contradiga su división).
+- [ ] **Antes**, importar el **UDC Summary** oficial (es + en, ~2.430 códigos): `sudo docker exec -it gestor-biblioteca node
+      scripts/importar-udc-summary.js` (descarga ~40 min la primera vez, a la caché `logs/udcs/`; en seco no escribe) y
+      luego `--ejecutar` (usa la caché). Sus códigos pasan a descripción oficial verificada (`fuente:'udcs'`; la de IA
+      se copia a `cdu_descripciones_retiradas`) y la IA recibe sus antepasados oficiales como referencia obligatoria.
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/regenerar-descripciones-cdu.js` (en seco 8-oct: ~300 incoherentes, p. ej.
       «94(430).085» = «Geología de la Antártida») y `--ejecutar --regenerar` (o sin `--regenerar`: las rehace Mantenimiento
       poco a poco). `--lugar` añade las que nombran otro lugar (más ruidosa: mirar la lista).
@@ -131,10 +135,15 @@ la fase 3 de una vez y con criterio.
      Portugal», «572.4 Botánica – Fisiología vegetal» (572 es Antropología física; sus dos libros, de la BNE, están
      bien). **Cortado**: ya no se siembra; la descripción se genera desde el código, con referencias. Por eso las
      ~15.000 descripciones `fuente:'ia'` sin verificar son todas sospechosas, no solo las 306 incoherentes.
-   - **Autoridad**: importar el **UDC Summary** oficial del Consorcio UDC (~2.600 clases, en español, licencia CC BY-SA
-     3.0, linked data SKOS en udcdata.info) como descripciones **verificadas** (`fuente:'udcs'`); la IA solo para los
-     códigos que no estén, y con los antepasados del UDC Summary como referencia obligatoria. Hay que citar al
-     Consorcio UDC en el panel (condición de la licencia).
+   - **Autoridad** (HECHO en código 8-oct, falta ejecutarlo: §1.2 ter): `scripts/importar-udc-summary.js` importa el
+     **UDC Summary** oficial (~2.430 códigos; licencia CC BY-SA 3.0, citado en el ⓘ del panel). udcdata.info está
+     fuera de línea mientras el Consorcio lo revisa para la MRF12; se usan dos réplicas: español de
+     vocabularyserver.com/udc/es (TemaTres, 2019) e inglés + jerarquía de vocabs.rossio.fcsh.unl.pt (Skosmos). Tabla
+     completa en `udc_summary`; descripciones `fuente:'udcs'` verificadas; la IA solo para los códigos que no estén,
+     con las piezas oficiales (número, antepasados, lugar, lengua) como referencia obligatoria. Cuando el Consorcio
+     publique el servicio nuevo (MRF12), repetir la importación desde allí.
+   - Pendiente: usar `udc_summary` en el diagnóstico de la Fase 1 (una CDU cuyo número principal no esté en el
+     resumen ni sea subdivisión de uno suyo es sospechosa).
    - Mientras tanto: `regenerar-descripciones-cdu.js --ejecutar --regenerar` (las 306 incoherentes); después, rehacer
      por tandas las `ia` sin verificar empezando por los códigos con más libros.
 

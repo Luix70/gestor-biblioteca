@@ -3282,7 +3282,8 @@ export function rutasPanel() {
                 const cod = sanitizarCDU(codigo);
                 let d = await db.collection('cdu_descripciones').findOne({ codigo: cod });
                 if (!d && esAdmin) d = await describirCDU(db, codigo);
-                return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null });
+                // `fuente:'udcs'` = el texto oficial del UDC Summary (hay que citar al Consorcio UDC, licencia CC BY-SA).
+                return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null, fuente: d?.fuente || null });
             }
             if (sistema === 'dewey' || sistema === 'lcc') {
                 let d = await db.collection('clasificacion_descripciones').findOne({ sistema, codigo });

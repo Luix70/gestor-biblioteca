@@ -46,6 +46,41 @@ function referenciasDe(codigo) {
     return lineas;
 }
 
+/**
+ * Los significados OFICIALES (UDC Summary, colección `udc_summary`, ver scripts/importar-udc-summary.js) de las piezas
+ * de este código: su número principal y sus antecesores (94 → 9), y los auxiliares de lugar y lengua que lleve
+ * («(430)», «(43)», «(4)», «=111»). Son la referencia más fiable que se le puede dar a la IA. Vacío si no se importó.
+ */
+async function referenciasOficiales(db, codigo) {
+    const candidatos = new Set();
+    const conPrefijos = (s, minimo) => {
+        let x = s;
+        while (x.length >= minimo) {
+            candidatos.add(x);
+            x = x.slice(0, -1).replace(/\.$/, '');
+        }
+    };
+    // Cada faceta («94(430).085_008»: el «_» es el «:» saneado) aporta su número principal.
+    for (const faceta of String(codigo).split(/[_:+/]/)) {
+        const num = (faceta.match(/^\d[\d.]*/) || [])[0];
+        if (num) conPrefijos(num.replace(/\.$/, ''), 1);
+    }
+    // Lugares «(430)» → «(43)», «(4)»; lenguas «=111» → «=11», «=1».
+    for (const [, lugar] of String(codigo).matchAll(/\((\d[\d.]*)\)/g)) {
+        for (let x = lugar; x.length >= 1; x = x.slice(0, -1).replace(/\.$/, '')) candidatos.add(`(${x})`);
+    }
+    for (const [, lengua] of String(codigo).matchAll(/=(\d[\d.]*)/g)) {
+        for (let x = lengua; x.length >= 1; x = x.slice(0, -1).replace(/\.$/, '')) candidatos.add(`=${x}`);
+    }
+    candidatos.delete(String(codigo));
+    if (!candidatos.size) return [];
+    const filas = await db.collection('udc_summary').find({ _id: { $in: [...candidatos] } },
+        { projection: { es: 1, en: 1 } }).toArray().catch(() => []);
+    return filas
+        .sort((a, b) => String(a._id).length - String(b._id).length)
+        .map((f) => `${f._id} = ${f.es?.titulo || f.en?.titulo}${f.en?.titulo && f.es?.titulo ? ` (en: ${f.en.titulo})` : ''} [UDC Summary oficial]`);
+}
+
 /** La descripción ya guardada del código «padre» más cercano (quitando el último auxiliar o la última cifra). */
 async function descripcionDelPadre(db, codigo) {
     const col = db.collection('cdu_descripciones');
@@ -122,7 +157,9 @@ export function lugarContradice(codigo, texto) {
 async function generarIA(db, codigo) {
     const padre = await descripcionDelPadre(db, codigo).catch(() => null);
     const equivalencias = await equivalenciasDe(db, codigo);
-    const txt = await conTexto({ prompt: prompt(codigo, referenciasDe(codigo), padre, equivalencias), json: true, maxTokens: 1200 });
+    // Las oficiales primero: si existen, mandan sobre la tabla fija (que es un resumen hecho a mano).
+    const refs = [...await referenciasOficiales(db, codigo), ...referenciasDe(codigo)];
+    const txt = await conTexto({ prompt: prompt(codigo, refs, padre, equivalencias), json: true, maxTokens: 1200 });
     const j = extraerJSON(txt);
     if (!j) throw new Error('respuesta de IA no parseable');
     if (descripcionContradice(codigo, j.titulo_es)) throw new Error(`descripción incoherente con la división («${j.titulo_es}»)`);

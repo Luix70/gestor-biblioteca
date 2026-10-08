@@ -3326,7 +3326,7 @@ async function infoClasificacion(sist, cod) {
     if (!b) return;
     b.classList.remove('muted');
     b.innerHTML = r.ok
-      ? `${r.titulo ? `<div style="font-weight:600;margin-bottom:8px">${esc(r.titulo)}</div>` : ''}<div style="line-height:1.65;font-size:13px">${esc(r.descripcion || 'Sin descripción disponible (la IA no la generó).')}</div>`
+      ? `${r.titulo ? `<div style="font-weight:600;margin-bottom:8px">${esc(r.titulo)}</div>` : ''}<div style="line-height:1.65;font-size:13px">${esc(r.descripcion || 'Sin descripción disponible (la IA no la generó).')}</div>${r.fuente === 'udcs' ? '<div class="muted" style="margin-top:10px;font-size:11px">Texto oficial del UDC Summary · © UDC Consortium · <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a></div>' : (r.fuente === 'ia' ? '<div class="muted" style="margin-top:10px;font-size:11px">Descripción redactada por IA (sin verificar)</div>' : '')}`
       : `<span class="muted">${esc(r.motivo || 'no disponible')}</span>`;
   } catch (e) {
     const b = $('#iclasBody');

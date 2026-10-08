@@ -3699,6 +3699,11 @@ de ficheros clasificado por CDU.
         restaurar-originales.js   Repone ficheros desaparecidos desde Reintentos…
         re-enriquecer-degradados  Recupera metadata de lotes con APIs caídas
         describir-cdus.js         Rellena la tabla cdu_descripciones (ES/EN)
+        importar-udc-summary.js   Importa el UDC Summary OFICIAL (es+en, ~2.430 códigos) a
+                                  udc_summary y como descripciones verificadas (fuente 'udcs');
+                                  la IA describe solo el resto, con sus piezas oficiales de
+                                  referencia. En seco descarga a logs/udcs/ (caché); --ejecutar
+                                  escribe. © UDC Consortium, CC BY-SA 3.0 (citado en el ⓘ).
         organizar-cuarentena.js   Agrupa la Cuarentena por categoría (+ hash)
         purgar-duplicados.js      Borra Cuarentena/duplicados ya en el catálogo
         purgar-ilegibles.js       Mueve PDFs ilegibles a Cuarentena/ilegibles y
