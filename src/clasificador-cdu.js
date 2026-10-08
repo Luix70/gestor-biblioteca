@@ -1,6 +1,5 @@
 import { conectarDB } from './database.js';
 import { conTexto, extraerJSON } from './utils/vision.js';
-import { sembrarDescripcionCDU } from './utils/descripcion-cdu.js';
 import { modernizarCDU } from './utils/cdu-moderna.js';
 
 // Tabla de tradiciones/lenguas literarias → CDU (82x). El Dewey 8xx y la LCC P* YA codifican la lengua, así que
@@ -566,11 +565,10 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
         const [sistema] = candidatos[0]; // el más fiable disponible (Dewey > LC)
         await enseñarBandas(cdu, sistema, 'IA');   // aprende el primario (IA) y los otros presentes (inferido)
     }
-    // Sembrar la descripción del código en su caché AHORA (misma llamada IA): evita la 2ª llamada de
-    // describirCDU que el panel/mantenimiento harían después. Idempotente y best-effort.
-    if (cdu && cdu !== '000' && (r.descripcion_es || r.titulo_es)) {
-        try { const db = await conectarDB(); await sembrarDescripcionCDU(db, cdu, r); } catch { /* caché best-effort */ }
-    }
+    // (Ya NO se siembra aquí la descripción del código con la respuesta de la IA: describía el LIBRO, no el código —
+    // «12 Epistemología y lógica: Willard Van Orman Quine», «908 Portugal»— y, si el código era equivocado, dejaba en
+    // él la materia de otro libro para siempre: «572.4 Botánica – Fisiología vegetal» (8-oct). La descripción la hace
+    // describirCDU a partir del CÓDIGO, con referencias.)
     return {
         cdu,
         fuente: 'ia',
@@ -678,7 +676,7 @@ export async function precalentarEquivalencias(db, { limite = 60, porLlamada = 1
             const r = mapa.get(it.codigo);
             if (r && r.cdu) {
                 await guardarEquivalencia(it.sistema, it.codigo, r.cdu, 'IA', r.titulo_es || null);
-                if (r.descripcion_es || r.titulo_es) { try { await sembrarDescripcionCDU(db, r.cdu, r); } catch { /* best-effort */ } }
+                // (La descripción del CÓDIGO CDU ya no se siembra con la del código de origen: ver arriba.)
                 cambios++;
             }
             if (onProgreso) onProgreso(procesados, pend.length);

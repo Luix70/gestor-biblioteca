@@ -125,7 +125,18 @@ la fase 3 de una vez y con criterio.
      selección para revisar; **nunca** automático.
    - Los **000** (3.411) van aparte: no hay CDU que perder; se clasifican con la cascada normal (sin IA primero).
 
-**Fase 4 — Descripciones.** `regenerar-descripciones-cdu.js --ejecutar --regenerar` (no mueve nada; se puede hacer ya).
+**Fase 4 — Descripciones** (no mueven nada; se pueden hacer ya).
+   - **Causa encontrada (8-oct)**: al clasificar un LIBRO con IA, su respuesta (la materia de ese libro) se guardaba
+     como descripción del CÓDIGO, y nunca se revisaba: «12 Epistemología y lógica: Willard Van Orman Quine», «908
+     Portugal», «572.4 Botánica – Fisiología vegetal» (572 es Antropología física; sus dos libros, de la BNE, están
+     bien). **Cortado**: ya no se siembra; la descripción se genera desde el código, con referencias. Por eso las
+     ~15.000 descripciones `fuente:'ia'` sin verificar son todas sospechosas, no solo las 306 incoherentes.
+   - **Autoridad**: importar el **UDC Summary** oficial del Consorcio UDC (~2.600 clases, en español, licencia CC BY-SA
+     3.0, linked data SKOS en udcdata.info) como descripciones **verificadas** (`fuente:'udcs'`); la IA solo para los
+     códigos que no estén, y con los antepasados del UDC Summary como referencia obligatoria. Hay que citar al
+     Consorcio UDC en el panel (condición de la licencia).
+   - Mientras tanto: `regenerar-descripciones-cdu.js --ejecutar --regenerar` (las 306 incoherentes); después, rehacer
+     por tandas las `ia` sin verificar empezando por los códigos con más libros.
 
 **Fase 5 — Verificación final.** Integridad, recolocar-por-cdu en seco = 0, sidecars, Reindexar, copia USB; y una
 muestra a mano del árbol de navegación (que las ramas grandes —94, 821, 5x— contienen lo que dicen).
