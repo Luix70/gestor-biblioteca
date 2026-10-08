@@ -35,6 +35,15 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
       con «1791441939492-…» delante, algunos títulos y 10 ISBN falsos sacados del prefijo, p. ej. «1791441939» compartido
       por 5 libros) y `--ejecutar`. Los que se quedan sin ISBN los recoge la campaña «Recuperar ISBN que faltan».
 
+### 1.2 ter Descripciones de CDU inventadas (8-oct) — solo BD, IA de texto barata
+- [ ] Desplegar (la IA describe cada código con la tabla de su clase/división, sus lugares, la descripción del padre y
+      la Dewey/LCC de la que salió; no se guarda una que contradiga su división).
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/regenerar-descripciones-cdu.js` (en seco 8-oct: ~300 incoherentes, p. ej.
+      «94(430).085» = «Geología de la Antártida») y `--ejecutar --regenerar` (o sin `--regenerar`: las rehace Mantenimiento
+      poco a poco). `--lugar` añade las que nombran otro lugar (más ruidosa: mirar la lista).
+- [ ] Estudiar aparte: ~400 libros cuya CDU lleva un auxiliar de lugar que no casa con su materia («321.2(44)» = Francia
+      para un libro sobre China); muchos son CDU de la BNE: no se tocan sin revisar.
+
 ### 1.3 Al final
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/integridad.js --reparar --informe /app/logs/integridad.txt`
       — además resuelve los **11 duplicados exactos** que dejó la verificación de hashes (el otro va a la Papelera, entero).
