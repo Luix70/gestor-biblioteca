@@ -81,7 +81,10 @@ for (const d of docs) {
     const segmentos = rel.split('/');
     for (let i = segmentos.length - 1; i > 0; i--) {
         const padre = segmentos.slice(0, i).join('/');
-        if (rutas.has(padre) && !(d.ruta_fija && d.coleccion)) { anidados.push({ d, padre }); break; }
+        // Un miembro de un ÁRBOL PRESERVADO (transmedia, audiolibros: `ruta_fija`) vive anidado a propósito, tenga o no
+        // colección (8-oct: 77 de «TXtras» salían como riesgo porque reorganizar-colecciones les quitó la colección de
+        // carpeta; sus ficheros siguen, como deben, dentro del árbol preservado).
+        if (rutas.has(padre) && !d.ruta_fija) { anidados.push({ d, padre }); break; }
     }
     if (existe(rel)) continue;
     const nueva = rutaActual(rel);

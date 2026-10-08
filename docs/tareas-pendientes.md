@@ -23,7 +23,7 @@
 Cascada gratuita (nombre de fichero → Fichero → colección → OpenLibrary → Google). `--ia` añade IA de texto (barata).
 
 ### 1.2 Carpetas-contenedor (opcional)
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/reparar-carpetas-anidadas.js --separar` (en seco) y `--separar --ejecutar`
+- [x] (8-oct: 9 contenedores separados; los «118 anidados» restantes eran miembros de árboles preservados —77 de TXtras, 1 de Oxford Bookworms—, anidados a propósito: ya no se cuentan) `sudo docker exec -it gestor-biblioteca node scripts/reparar-carpetas-anidadas.js --separar` (en seco) y `--separar --ejecutar`
 
 Quedan 118 documentos viviendo dentro de la carpeta de otro y 12 «carpetas-contenedor». Ya no es peligroso (borrar,
 reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero separarlas deja 1 documento ↔ 1 carpeta.
