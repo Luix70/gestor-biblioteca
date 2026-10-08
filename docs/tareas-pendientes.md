@@ -38,7 +38,7 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
 ### 1.2 ter Descripciones de CDU inventadas (8-oct) — solo BD, IA de texto barata
 - [ ] Desplegar (la IA describe cada código con la tabla de su clase/división, sus lugares, la descripción del padre y
       la Dewey/LCC de la que salió; no se guarda una que contradiga su división).
-- [ ] **Antes**, importar el **UDC Summary** oficial (es + en, ~2.430 códigos): `sudo docker exec -it gestor-biblioteca node
+- [x] **HECHO 8-oct** (2.466 códigos; 1.076 descripciones nuevas, 771 de IA sustituidas). Importar el **UDC Summary** oficial (es + en, ~2.430 códigos): `sudo docker exec -it gestor-biblioteca node
       scripts/importar-udc-summary.js` (descarga ~40 min la primera vez, a la caché `logs/udcs/`; en seco no escribe) y
       luego `--ejecutar` (usa la caché). Sus códigos pasan a descripción oficial verificada (`fuente:'udcs'`; la de IA
       se copia a `cdu_descripciones_retiradas`) y la IA recibe sus antepasados oficiales como referencia obligatoria.
