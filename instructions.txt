@@ -3699,6 +3699,11 @@ de ficheros clasificado por CDU.
         restaurar-originales.js   Repone ficheros desaparecidos desde Reintentos…
         re-enriquecer-degradados  Recupera metadata de lotes con APIs caídas
         describir-cdus.js         Rellena la tabla cdu_descripciones (ES/EN)
+        revisar-descripciones-cdu Revisa las descripciones de IA contra el UDC Summary: rehace las de
+                                  título cortado y las que la IA juzga incoherentes (por tandas de 25);
+                                  las que encajan con el número en DEWEY no se tocan y se listan en
+                                  logs/udcs/cdu-con-numero-dewey.txt (la CDU del libro es la mala). Solo
+                                  descripciones: no cambia CDU ni mueve carpetas. Seco por defecto.
         importar-udc-summary.js   Importa el UDC Summary OFICIAL (es+en, ~2.430 códigos) a
                                   udc_summary y como descripciones verificadas (fuente 'udcs');
                                   la IA describe solo el resto, con sus piezas oficiales de

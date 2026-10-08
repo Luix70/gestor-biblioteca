@@ -51,7 +51,7 @@ function referenciasDe(codigo) {
  * de este código: su número principal y sus antecesores (94 → 9), y los auxiliares de lugar y lengua que lleve
  * («(430)», «(43)», «(4)», «=111»). Son la referencia más fiable que se le puede dar a la IA. Vacío si no se importó.
  */
-async function referenciasOficiales(db, codigo) {
+export async function referenciasOficiales(db, codigo) {
     const candidatos = new Set();
     const conPrefijos = (s, minimo) => {
         let x = s;
@@ -158,17 +158,44 @@ export function lugarContradice(codigo, texto) {
     return otros.some((n) => new RegExp(`\\b${n}\\b`).test(t));
 }
 
+/**
+ * ¿Título CORTADO? Cuando la IA se queda sin tokens, `extraerJSON` cierra el JSON a medias y el título se guardaba
+ * tal cual: «Láseres y sus longitudes de», «Mujeres en el», «Psic» (1.227 medidos el 8-oct). Se delata porque acaba
+ * en preposición/artículo/conjunción, o porque es demasiado corto para ser un título.
+ */
+export function tituloCortado(titulo) {
+    const t = String(titulo || '').trim();
+    if (t.length < 4) return true;
+    // Con un ESPACIO delante, no \b: para \b la «í» no es letra, y «Psicología» acababa «en la palabra "a"».
+    return /(?:^|\s)(?:de|del|la|las|el|los|y|e|o|en|con|a|al|para|por|sobre|su|sus|un|una|entre|sin|como|que)$/i.test(t);
+}
+
 async function generarIA(db, codigo) {
     const padre = await descripcionDelPadre(db, codigo).catch(() => null);
     const equivalencias = await equivalenciasDe(db, codigo);
     // Las oficiales primero: si existen, mandan sobre la tabla fija (que es un resumen hecho a mano).
     const refs = [...await referenciasOficiales(db, codigo), ...referenciasDe(codigo)];
-    const txt = await conTexto({ prompt: prompt(codigo, refs, padre, equivalencias), json: true, maxTokens: 1200 });
+    const txt = await conTexto({ prompt: prompt(codigo, refs, padre, equivalencias), json: true, maxTokens: 4000 });   // 2.5-flash gasta tokens en «pensar» antes de responder
     const j = extraerJSON(txt);
     if (!j) throw new Error('respuesta de IA no parseable');
+    // Respuesta INCOMPLETA (se le acabó el sitio y extraerJSON la cerró a medias): no se guarda, se reintentará.
+    if (!j.titulo_es || !j.descripcion_es || !j.titulo_en || !j.descripcion_en || tituloCortado(j.titulo_es)) {
+        throw new Error(`respuesta de IA incompleta («${j.titulo_es || ''}»)`);
+    }
     if (descripcionContradice(codigo, j.titulo_es)) throw new Error(`descripción incoherente con la división («${j.titulo_es}»)`);
     if (lugarContradice(codigo, `${j.titulo_es || ''} ${j.descripcion_es || ''}`)) throw new Error(`descripción con otro lugar («${j.titulo_es}»)`);
     return j;
+}
+
+/**
+ * Genera (sin guardar) la descripción de un código, con todas las referencias y comprobaciones. Para REHACER una que
+ * ya existe (scripts/revisar-descripciones-cdu.js): primero se genera y solo si sale bien se sustituye la vieja.
+ * Lanza si la IA falla o la respuesta es incoherente/incompleta.
+ */
+export async function generarDescripcionCDU(db, cdu) {
+    const codigo = sanitizarCDU(cdu);
+    if (!codigo || !/[0-9]/.test(codigo)) throw new Error('código sin parte codificable');
+    return generarIA(db, codigo);
 }
 
 /**

@@ -50,6 +50,12 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
       «Historiografía… España»). El detector era demasiado estricto con la clase 94 (retiraba «Genocidio», «Administración
       Johnson» por no decir «historia»); arreglado: vale cualquier palabra de acontecimiento, época o poder. Las de IA que
       queden mal se tratan en la §4, fase 4 (rehacer por tandas con las referencias oficiales del UDC Summary).
+- [ ] **Revisar todas las descripciones de IA contra el UDC Summary** (solo descripciones: no cambia ninguna CDU ni mueve
+      nada): `sudo docker exec -it gestor-biblioteca node scripts/revisar-descripciones-cdu.js` (en seco: cuenta las
+      cortadas —476— y la IA juzga las ~1.400 sospechosas en ~56 llamadas baratas; guarda los veredictos) y luego
+      `--ejecutar` (rehace las cortadas y las incoherentes, ~900 llamadas; la vieja a cdu_descripciones_retiradas).
+      Prueba 8-oct con 50: 33 falsas alarmas, 12 a rehacer, 5 «Dewey». Los «Dewey» (`logs/udcs/cdu-con-numero-dewey.txt`)
+      son libros cuya CDU es en realidad un número Dewey («363.325 Terrorismo»): pasan a la auditoría de la §4.
 - [ ] Estudiar aparte: ~400 libros cuya CDU lleva un auxiliar de lugar que no casa con su materia («321.2(44)» = Francia
       para un libro sobre China); muchos son CDU de la BNE: no se tocan sin revisar. → ver **§4, estrategia de la CDU**.
 
@@ -147,6 +153,11 @@ la fase 3 de una vez y con criterio.
      completa en `udc_summary`; descripciones `fuente:'udcs'` verificadas; la IA solo para los códigos que no estén,
      con las piezas oficiales (número, antepasados, lugar, lengua) como referencia obligatoria. Cuando el Consorcio
      publique el servicio nuevo (MRF12), repetir la importación desde allí.
+   - **CDU que son números Dewey**: `revisar-descripciones-cdu.js` las detecta (la descripción encaja con el Dewey del
+     número, no con la CDU: «363.325 Terrorismo», «332.64 Mercado de capitales», «523.12 Cosmología») y las lista en
+     `logs/udcs/cdu-con-numero-dewey.txt`. Entran en la Fase 1 (diagnóstico) con prioridad: deciden la carpeta.
+   - **Religión (clase 2) en notación anterior a 2000**: 1.978 libros; la clase 2 se reorganizó entera (hoy 23 Hinduismo,
+     26 Judaísmo, 27 Cristianismo, 28 Islam, 29 Movimientos espirituales modernos) y no hay traducción mecánica simple.
    - Pendiente: usar `udc_summary` en el diagnóstico de la Fase 1 (una CDU cuyo número principal no esté en el
      resumen ni sea subdivisión de uno suyo es sospechosa).
    - Mientras tanto: `regenerar-descripciones-cdu.js --ejecutar --regenerar` (las 306 incoherentes); después, rehacer
