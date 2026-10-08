@@ -117,7 +117,9 @@ function textoPdfUtil(texto) {
 
 export function extraerISBNs(texto) {   // exportada: la reutiliza el lector de Word (mismo criterio de captura)
     if (!texto) return [];
-    const re = /(?:ISBN(?:-1[03])?:?\s*)?((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])/g;
+    // Sin más cifras pegadas delante ni detrás: unas cifras dentro de un número más largo no son un ISBN (8-oct: la
+    // hora de subida «1791441939492-…» daba el «ISBN» 1791441939, que pasa el dígito de control de un ISBN-10).
+    const re = /(?:ISBN(?:-1[03])?:?\s*)?(?<![0-9])((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])(?![0-9])/g;
     const out = new Set();
     let m;
     while ((m = re.exec(texto)) !== null) {

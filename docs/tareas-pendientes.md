@@ -29,6 +29,12 @@ Quedan 118 documentos viviendo dentro de la carpeta de otro y 12 «carpetas-cont
 reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero separarlas deja 1 documento ↔ 1 carpeta.
 **Mueve carpetas: copia del disco antes.**
 
+### 1.2 bis Prefijo de subida en nombres, títulos e ISBN (8-oct) — en el NAS (renombra ficheros)
+- [ ] Desplegar (la subida ya no antepone la hora; el lector de ISBN ya no toma cifras dentro de un número más largo).
+- [ ] Copia; `sudo docker exec -it gestor-biblioteca node scripts/quitar-prefijo-subida.js` (en seco 8-oct: 319 documentos — ficheros
+      con «1791441939492-…» delante, algunos títulos y 10 ISBN falsos sacados del prefijo, p. ej. «1791441939» compartido
+      por 5 libros) y `--ejecutar`. Los que se quedan sin ISBN los recoge la campaña «Recuperar ISBN que faltan».
+
 ### 1.3 Al final
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/integridad.js --reparar --informe /app/logs/integridad.txt`
       — además resuelve los **11 duplicados exactos** que dejó la verificación de hashes (el otro va a la Papelera, entero).

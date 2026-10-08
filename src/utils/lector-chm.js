@@ -24,7 +24,8 @@ const execFileP = promisify(execFile);
 const MAX_HTML_ESCANEO = 40;    // nº máximo de HTML a inspeccionar (un CHM puede tener cientos de temas)
 const MAX_BYTES_HTML = 400000;  // no leer enteros los HTML gigantes (basta el principio para título/ISBN)
 // Igual que en lector-pdf: captura candidatos a ISBN; validarISBN filtra los que tienen checksum válido.
-const RE_ISBN = /(?:ISBN(?:-1[03])?:?\s*)?((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])/g;
+// Sin cifras pegadas delante ni detrás (unas cifras dentro de un número más largo no son un ISBN; ver lector-pdf).
+const RE_ISBN = /(?:ISBN(?:-1[03])?:?\s*)?(?<![0-9])((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])(?![0-9])/g;
 
 // Decodifica un buffer de texto (HTML/HHC) a string DETECTANDO su codificación. Muchos CHM usan
 // codificaciones LEGACY (windows-1252 occidental —comillas curvas, °, ©—, windows-1251 cirílico, gbk/big5

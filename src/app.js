@@ -11,6 +11,7 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs/promises';
 import { readFileSync } from 'node:fs';
+import fsSync from 'node:fs';
 import { execSync } from 'node:child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -68,10 +69,28 @@ const nombreSubida = (original) => {
     const limpio = (/^\d{9,}$/.test(cuerpo) ? '' : cuerpo).slice(0, 80) || 'archivo';
     return `${limpio}${ext}`;
 };
+// Cada subida va a SU PROPIA subcarpeta temporal y el fichero conserva SU NOMBRE. Antes se le anteponía la hora en
+// milisegundos («1791441939492-Schlayer, Felix - Matanzas….epub») para que no chocaran, y ese prefijo llegaba al
+// catálogo: al nombre del fichero, a algún título y, peor, al ISBN — sus 10 primeras cifras («1791441939») pasaban el
+// dígito de control de un ISBN-10 y dos libros subidos en el mismo segundo recibían el mismo «ISBN» (8-oct).
 const upload = multer({
     storage: multer.diskStorage({
-        destination: (req, file, cb) => cb(null, DIR_TMP),
-        filename: (req, file, cb) => cb(null, `${Date.now()}-${nombreSubida(file.originalname)}`),
+        destination: (req, file, cb) => {
+            if (!req._dirSubida) {
+                req._dirSubida = path.join(DIR_TMP, `subida-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+                fsSync.mkdirSync(req._dirSubida, { recursive: true });
+            }
+            cb(null, req._dirSubida);
+        },
+        filename: (req, file, cb) => {
+            // Dos ficheros con el mismo nombre en la MISMA subida: el segundo, «nombre (2).ext».
+            const nombre = nombreSubida(file.originalname);
+            req._nombresSubida = req._nombresSubida || new Set();
+            let final = nombre;
+            for (let i = 2; req._nombresSubida.has(final.toLowerCase()); i++) final = nombre.replace(/(\.[a-z0-9]{2,6})?$/i, ` (${i})$1`);
+            req._nombresSubida.add(final.toLowerCase());
+            cb(null, final);
+        },
     }),
 });
 

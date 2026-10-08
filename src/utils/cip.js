@@ -42,7 +42,7 @@ export function parsearBloqueCatalogacion(texto) {
     };
 
     // ── ISBN(s) con etiqueta (encuadernación o rol): "ISBN 0-7914-5259-X (alk. paper)" ──
-    const isbnRe = /ISBN[:\s-]*((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])\s*(?:\(([^)]{1,40})\))?/gi;
+    const isbnRe = /ISBN[:\s-]*((?:97[89][-\s]?)?(?:[0-9][-\s]?){9}[0-9Xx])(?![0-9])\s*(?:\(([^)]{1,40})\))?/gi;
     let m;
     const vistos = new Set();
     while ((m = isbnRe.exec(plano)) !== null) {
