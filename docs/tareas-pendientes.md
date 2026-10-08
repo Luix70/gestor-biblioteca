@@ -252,12 +252,12 @@ Separa «autores» que eran varias personas en un solo registro (dry-run de juli
       retirados) y `--ejecutar --online`. Después, revisar «Autor artefacto sin sustituto» (~160) a mano.
 
 ### 5 quater. Títulos: mención pegada y mayúsculas (8-oct) — solo BD
-- [ ] Desplegar; copia de la base; `sudo docker exec -it gestor-biblioteca node scripts/limpiar-titulos-mencion.js` (en seco 8-oct: ~125
+- [x] (7/8-oct, hecho) Desplegar; copia de la base; `sudo docker exec -it gestor-biblioteca node scripts/limpiar-titulos-mencion.js` (en seco 8-oct: ~125
       menciones separadas, ~990 títulos en mayúsculas — 433 con la grafía del Fichero, el resto Title Case —, 292
       subtítulos) y `--ejecutar`.
 
 ### 5 quinquies. Títulos que son el nombre del fichero (8-oct) — solo BD
-- [ ] Desplegar; copia; `sudo docker exec -it gestor-biblioteca node scripts/retitular-por-nombre.js` (en seco 8-oct: 413 títulos;
+- [x] (7-oct, hecho: 412) Desplegar; copia; `sudo docker exec -it gestor-biblioteca node scripts/retitular-por-nombre.js` (en seco 8-oct: 413 títulos;
       407 con el del Fichero, 6 leídos del nombre) y `--ejecutar`. La campaña «Cotejar título por ISBN» (v2) vuelve a
       pasar sola y arregla los que queden.
 
