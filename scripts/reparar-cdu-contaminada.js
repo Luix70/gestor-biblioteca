@@ -139,6 +139,20 @@ const normalizarCodigo = (c) => String(c || '').trim().toLowerCase().replace(/\s
  * (literatura mexicana) a «821.111(73)», sacadas de otras equivalencias aprendidas de UN libro. Sin códigos → null
  * (no se exige nada). La informática (004) se admite junto a 5/6, como en la tabla.
  */
+/**
+ * Dentro de la literatura, la FAMILIA de lenguas de su LCC: PQ románicas (821.13x), PT germánicas (821.11x), PG eslavas
+ * (821.16x), PA clásicas (821.12x griega, 821.14 latina… y 821.124). En el seco del 9-oct, «PQ7298» (literatura
+ * mexicana) y «PQ7798» (argentina) iban a «821.111(73)», estadounidense, desde equivalencias aprendidas de una
+ * traducción. «82» a secas (literatura en general) vale siempre. Sin LCC de esas clases o sin 821 → true.
+ */
+const FAMILIAS_LITERATURA = { PQ: ['821.13'], PT: ['821.11'], PG: ['821.16'], PA: ['821.12', '821.14'] };
+function literaturaDeSuFamilia(doc, cdu) {
+    const familia = FAMILIAS_LITERATURA[claseLcc(doc.lcc)];
+    const c = String(cduParaUbicar(cdu) || cdu);
+    if (!familia || !c.startsWith('821')) return true;
+    return familia.some((f) => c.startsWith(f));
+}
+
 async function clasesEsperadas(doc) {
     const clases = new Set();
     const d = (String(doc.dewey || '').match(/\d{3}/) || [])[0];
@@ -287,9 +301,9 @@ async function main() {
         // al Conformador con IA en vez de cambiar un error por otro.
         const esperadas = await clasesEsperadas(p.doc);
         const claseNueva = (String(cduParaUbicar(nueva) || nueva).match(/^\d/) || [])[0];
-        if (esperadas && claseNueva && !esperadas.has(claseNueva)) {
+        if ((esperadas && claseNueva && !esperadas.has(claseNueva)) || !literaturaDeSuFamilia(p.doc, nueva)) {
             fueraDeClase++;
-            if (fueraDeClase <= 15) p1.nota(`   ↷ «${String(p.doc.titulo).slice(0, 40)}» [${p.doc.dewey || ''} ${p.doc.lcc || ''}]: «${nueva}» no es de su clase (${[...esperadas].join('/')}) → Conformador`);
+            if (fueraDeClase <= 15) p1.nota(`   ↷ «${String(p.doc.titulo).slice(0, 40)}» [${p.doc.dewey || ''} ${p.doc.lcc || ''}]: «${nueva}» no es de su clase o su familia de lenguas → Conformador`);
             pendientes.push(p);
             continue;
         }

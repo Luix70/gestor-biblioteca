@@ -144,8 +144,8 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
      libros), el «afinado» de un Dewey que es una DIVISIÓN entera («520 → 522.2», «530 → 530.145», «004 → 004.451…») ni un
      Dewey amplio que cambie de clase («973 → 39(73)», «092 → 821.133.1»). Un Dewey concreto sí puede («652.80151 →
      003.26», «547 → 547»).
-   - **Reparación**: `reparar-cdu-contaminada.js` (tercera tanda, con la MISMA regla). En seco (PC y NAS, 9-oct): **3.758 libros**
-     a reparar + 1.207 para el Conformador con IA (212 de ellos porque la CDU calculada no era de la clase de su
+   - **Reparación**: `reparar-cdu-contaminada.js` (tercera tanda, con la MISMA regla). En seco (PC y NAS, 9-oct): **3.755 libros**
+     a reparar + 1.210 para el Conformador con IA (215 de ellos porque la CDU calculada no era de la clase o la familia de lenguas de su
      propia Dewey/LCC) + 332 manuales que no se tocan. En el NAS:
        - [ ] copia de la base y del disco;
        - [ ] `sudo docker exec gestor-biblioteca ls logs/copias-bd` → elegir una copia ANTERIOR al 9-oct 08:38 (ver incidente);
