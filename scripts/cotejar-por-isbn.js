@@ -81,7 +81,7 @@ if (CLASIFICACION) {
     const cduFich = async (f) => {
         if (!f) return null;
         if (f.cdu) return String(f.cdu).trim();
-        if (f.dewey || f.lcc) { try { const r = await resolverCDU({ dewey: f.dewey, lcc: f.lcc, permitirIA: false }); const c = typeof r === 'string' ? r : (r && r.cdu); if (c && c !== '000') return String(c).trim(); } catch { /**/ } }
+        if (f.dewey || f.lcc) { try { const r = await resolverCDU({ dewey: f.dewey, lcc: f.lcc, permitirIA: false, aprender: false }); const c = typeof r === 'string' ? r : (r && r.cdu); if (c && c !== '000') return String(c).trim(); } catch { /**/ } }
         return null;
     };
     const total = await bib.countDocuments(FILTRO);

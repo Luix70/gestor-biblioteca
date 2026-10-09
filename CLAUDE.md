@@ -103,6 +103,8 @@ Required: `tipo_recurso` (`libro|revista`), `titulo`, `cdu`, `idioma`, `formatos
 - **Moving a folder = `ruta_base` + `portada` + `imagenes[]` (+ `textos`/`audios`) together**, always via `reubicarPorCdu`/`aplicarCambio`; projections passed to movers must include `portada` and `imagenes`. A `$set` of `ruta_base` alone (Integridad's ruta_base repair did it) leaves the ficha carousel broken while the catalogue thumbnail looks fine (690 Don Miki issues). Safety net: `utils/rutas-imagenes.js`, Integridad category `imagenesFueraDeCarpeta` (auto-repaired), `scripts/reparar-rutas-imagenes.js`.
 - **Name-only matching is either too strict or too permissive** — corroborate with an identifier (ISBN registrant prefix, ≥50 % of the books).
 - **Verify after executing**: recount what was fixed down to 0 and check the neighbouring entities (collections, works, images).
+- **A dry run must not write ANYTHING — including caches.** `resolverCDU` LEARNS what it resolves (it stores table results as «Manual» equivalences): the 9-oct dry run of `reparar-cdu-contaminada` overwrote 87 cache entries (23 good ones degraded, restored from a backup). Diagnostics and dry runs call it with `aprender:false`. Check after a dry run that nothing changed (count by date).
+- **The CDU cache serves ONE AI decision to EVERY book with that code**, so `clasificador-cdu·equivalenciaUsable` (read AND learn) rejects what can't generalise: malformed CDUs, class-level LCC entries learned from the AI unless equal to the table, an AI «refinement» of a whole Dewey division (x0 / 004-006), and a broad Dewey that changes main class. Measured by `scripts/auditar-cdu.js` (b → 141.4 on 467 books, 973 → 39(73)…).
 
 ## Legacy / superseded files (avoid editing by mistake)
 

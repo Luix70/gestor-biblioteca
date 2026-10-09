@@ -3699,6 +3699,11 @@ de ficheros clasificado por CDU.
         restaurar-originales.js   Repone ficheros desaparecidos desde Reintentos…
         re-enriquecer-degradados  Recupera metadata de lotes con APIs caídas
         describir-cdus.js         Rellena la tabla cdu_descripciones (ES/EN)
+        reparar-cdu-contaminada   Repara los libros que heredaron una CDU de una equivalencia contaminada:
+                                  incidentes conocidos + clases LCC aplazadas + (9-oct) todo lo que la
+                                  regla del motor (equivalenciaUsable) ya no usa. --solo-regla, --copia
+                                  <sello> (lee también la caché de una copia), --limite N (por tandas).
+                                  Seco por defecto; --ejecutar solo en el NAS (mueve carpetas).
         auditar-cdu.js            DIAGNÓSTICO de la CDU de cada libro (no cambia nada): indicios (su Dewey/LCC,
                                   la BNE por ISBN, número Dewey, división inexistente en la CDU, lugar,
                                   tomos de su obra, lengua de la literatura, equivalencia IA sin verificar)

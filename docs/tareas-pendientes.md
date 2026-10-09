@@ -137,7 +137,26 @@ y lo clasifica por **confianza** (alta / media / baja) en un informe y en selecc
    - **procedencia**: si la CDU es exactamente la de una equivalencia aprendida **sin verificar** (marca el origen);
    - **descripción incoherente** del código (`descripcionContradice`), como señal más.
 
-**Fase 2 — Corregir el ORIGEN: la caché de equivalencias.** Antes que los libros. `auditar-equivalencias-cdu.js`
+**Fase 2 — HECHA en código (9-oct), falta ejecutarla en el NAS.** La auditoría completa (62.211 libros: 5.214 sospecha
+alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché servía a todos los libros de un código.
+   - **Motor** (`clasificador-cdu·equivalenciaUsable`, usada al leer Y al aprender): no se usa ni se aprende una CDU mal
+     formada («193 → 19.035»), una LCC de clase entera aprendida de la IA que no sea la de la tabla («b → 141.4», 467
+     libros), el «afinado» de un Dewey que es una DIVISIÓN entera («520 → 522.2», «530 → 530.145», «004 → 004.451…») ni un
+     Dewey amplio que cambie de clase («973 → 39(73)», «092 → 821.133.1»). Un Dewey concreto sí puede («652.80151 →
+     003.26», «547 → 547»).
+   - **Reparación**: `reparar-cdu-contaminada.js` (tercera tanda, con la MISMA regla). En seco desde el PC: **3.970 libros**
+     a reparar + 995 para el Conformador con IA + 315 manuales que no se tocan. En el NAS:
+       - [ ] copia de la base y del disco;
+       - [ ] `sudo docker exec gestor-biblioteca ls logs/copias-bd` → elegir una copia ANTERIOR al 9-oct 08:38 (ver incidente);
+       - [ ] `sudo docker exec -it gestor-biblioteca node scripts/reparar-cdu-contaminada.js --copia <sello>` (en seco; revisar
+             las transiciones);
+       - [ ] `… --copia <sello> --ejecutar --limite 200`, repetido (comprobando entre tandas) hasta que no quede nada.
+   - **Incidente 9-oct (resuelto)**: el seco de esta reparación desde el PC ESCRIBIÓ en la caché (resolverCDU aprende lo
+     que resuelve por la tabla): 87 equivalencias pisadas con la de la tabla como «Manual». 62 eran malas (da igual) y 23
+     buenas («547 → 547» → «54»): devueltas desde la copia del 5-oct con restaurar-base. Arreglado: `resolverCDU({aprender:
+     false})` en los secos y diagnósticos. Por eso hace falta `--copia`: la caché viva ya no tiene las 62 malas.
+
+**Fase 2 (plan original) — Corregir el ORIGEN: la caché de equivalencias.** Antes que los libros. `auditar-equivalencias-cdu.js`
 ordenado por **nº de libros que dependen** de cada equivalencia IA sin verificar; revisar las de más uso (a mano o con
 la tabla determinista), corregirlas y marcarlas `verificado`. Arreglar una equivalencia arregla todos sus libros en
 la fase 3 de una vez y con criterio.

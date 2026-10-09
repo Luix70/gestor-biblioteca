@@ -37,6 +37,17 @@
  * La CDU nueva la calcula resolverCDU SIN IA — el mismo motor ya arreglado que clasificará lo que entre a
  * partir de ahora, para que lo reparado quede coherente con lo nuevo.
  *
+ * TERCERA TANDA (9-oct): LAS QUE RECHAZA LA REGLA DEL MOTOR. La auditoría de la CDU (scripts/auditar-cdu.js) halló
+ * miles de libros heredando equivalencias que la salvaguarda dejaba pasar: LCC de clase entera que «afinaban» la tabla
+ * («b → 141.4», 467 libros de filosofía como librepensamiento; «qh → 573.016», «hm → 316.774:32»…) y Dewey amplios
+ * («973 → 39(73)», historia de EE. UU. como etnología; «193 → 19.035», una división que no existe; «520 → 522.2»).
+ * El motor ya no las usa ni las aprende (clasificador-cdu·equivalenciaUsable); los incidentes se LEEN de la caché con
+ * esa MISMA regla, así que lo que se repara es exactamente lo que el motor ya no haría. Mismo orden: la CDU de antes
+ * (su alerta), la del motor sin IA, o a la selección para que el Conformador la reclasifique. Mismas exclusiones por
+ * clase (GN, QA75-76, TK5101-5105). Con --solo-regla se hace solo esta tanda; --copia <sello> lee además las
+ * equivalencias de una copia de la base (logs/copias-bd/<sello>) por si la caché viva ya se corrigió; --limite N
+ * aplica solo N cambios por pasada (reanudable: relanzar sigue con los que quedan).
+ *
  *   node scripts/reparar-cdu-contaminada.js              (DRY-RUN: enseña qué cambiaría, no toca nada)
  *   node scripts/reparar-cdu-contaminada.js --ejecutar   (mueve carpetas: haz copia de seguridad antes)
  */
@@ -44,7 +55,7 @@ import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
-import { resolverCDU, claseLcc, unidadLcc, cduBienFormada, buscarEquivalenciaExterna } from '../src/clasificador-cdu.js';
+import { resolverCDU, claseLcc, unidadLcc, cduBienFormada, buscarEquivalenciaExterna, equivalenciaUsable } from '../src/clasificador-cdu.js';
 import { reubicarPorCdu, aplicarCambio, carpetaDeDoc, carpetaExiste } from '../src/mantenimiento/util-mantenimiento.js';
 import { modernizarCDU } from '../src/utils/cdu-moderna.js';
 import { cduVacia, rangoFuente, fuenteCduDoc, RANGO_CDU } from '../src/utils/prioridad-cdu.js';
@@ -52,6 +63,7 @@ import { crearSeleccion } from '../src/utils/selecciones.js';
 import { progreso } from '../src/utils/progreso-cli.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
+const SOLO_REGLA = process.argv.includes('--solo-regla');   // solo la tercera tanda
 
 /** Número de la signatura tras las letras de clase: «QA-0076.3» → 76.3; «QA» a secas → NaN. */
 function numeroLcc(lcc) {
@@ -112,13 +124,65 @@ async function incidentesDeClasesAplazadas(db) {
     return lista.sort((a, b) => b.usos - a.usos);
 }
 
+/** Las exclusiones por clase LCC de los incidentes conocidos (QA75-76, TK5101-5105…) más GN, que no se toca en bloque. */
+function exclusionPorClase(clase, d) {
+    if (clase === 'GN') return 'GN: mitad antropología física (572), mitad etnología (39): no se arregla en bloque';
+    const inc = INCIDENTES.find((i) => i.clase === clase && i.excluir);
+    return inc ? inc.excluir(d) : null;
+}
+
+const normalizarCodigo = (c) => String(c || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Incidentes de la TERCERA TANDA, leídos de la caché con la regla del motor (equivalenciaUsable): toda equivalencia
+ * Dewey/LCC sin verificar que el motor ya no usaría. Las de clases aplazadas ya son de la segunda tanda.
+ */
+async function incidentesPorRegla(db, yaCubiertas) {
+    const lista = [];
+    const aprendidas = await db.collection('equivalencias_cdu')
+        .find({ sistema_origen: { $in: ['dewey', 'lcc'] }, verificado: { $ne: true }, fuente: { $ne: 'Manual' } }).toArray();
+    // --copia <sello>: también las de una COPIA anterior de la caché. Hace falta cuando la caché viva ya se corrigió
+    // (p. ej. el 9-oct, un seco anterior pisó las malas con la CDU de la tabla) pero sus libros siguen con la CDU mala:
+    // sin la copia ya no se sabría qué buscar.
+    const sello = (() => { const i = process.argv.indexOf('--copia'); return i >= 0 ? process.argv[i + 1] : null; })();
+    if (sello) {
+        const { readFileSync } = await import('node:fs');
+        const { gunzipSync } = await import('node:zlib');
+        const { EJSON } = await import('bson');
+        const ruta = new URL(`../logs/copias-bd/${sello}/equivalencias_cdu.jsonl.gz`, import.meta.url);
+        const vivas = new Set(aprendidas.map((e) => `${e.sistema_origen}|${e.codigo_origen}`));
+        let deCopia = 0;
+        for (const linea of gunzipSync(readFileSync(ruta)).toString('utf8').split('\n')) {
+            if (!linea.trim()) continue;
+            const e = EJSON.parse(linea);
+            if (!['dewey', 'lcc'].includes(e.sistema_origen) || e.verificado === true || e.fuente === 'Manual') continue;
+            if (vivas.has(`${e.sistema_origen}|${e.codigo_origen}`)) continue;
+            aprendidas.push(e);
+            deCopia++;
+        }
+        console.log(`   + ${deCopia} equivalencia(s) sin verificar leídas de la copia ${sello} (ya no están así en la caché viva).`);
+    }
+    for (const e of aprendidas) {
+        const uso = equivalenciaUsable(e.sistema_origen, e.codigo_origen, e);
+        if (uso.usable) continue;
+        const clave = `${e.sistema_origen}|${e.codigo_origen}`;
+        if (yaCubiertas.has(clave)) continue;
+        lista.push({
+            sistema: e.sistema_origen, codigo: e.codigo_origen, cduMala: e.cdu, motivo: uso.motivo, usos: e.usos || 0,
+            clase: e.sistema_origen === 'lcc' ? String(e.codigo_origen).toUpperCase() : `DEWEY ${e.codigo_origen}`,
+            regla: true, aplazada: true,   // sin CDU calculable sin IA → a la selección (no «sin solución»)
+        });
+    }
+    return lista.sort((a, b) => b.usos - a.usos);
+}
+
 /**
  * La CDU que el documento tenía ANTES de que el Conformador le pusiera la contaminada, según su propia alerta.
  * null si no hay alerta, o si la anterior estaba vacía o era otro invento.
  */
 function cduAnteriorSegunAlerta(doc, cduMala) {
     for (const alerta of [...(doc.alertas_agente || [])].reverse()) {
-        const m = String(alerta).match(/^CDU actualizada: "(.*)" → "(.*)" \[clasificador:cache:lcc\]/);
+        const m = String(alerta).match(/^CDU actualizada: "(.*)" → "(.*)" \[clasificador:cache:(?:lcc|dewey)\]/);
         if (!m || m[2] !== cduMala) continue;
         const anterior = m[1];
         if (cduVacia(anterior) || anterior === cduMala || !cduBienFormada(anterior)) return null;
@@ -134,21 +198,34 @@ async function main() {
     console.log('\n🩹 Reparación de CDU heredadas de equivalencias contaminadas');
     console.log(`   Modo: ${EJECUTAR ? '⚠️  EJECUTAR (mueve carpetas)' : 'DRY-RUN (no toca nada)'}\n`);
 
-    const aplazadas = await incidentesDeClasesAplazadas(db);
-    console.log(`   Incidentes: ${INCIDENTES.length} conocidos + ${aplazadas.length} de clases aplazadas a la IA (leídos de la caché).`);
+    const aplazadas = SOLO_REGLA ? [] : await incidentesDeClasesAplazadas(db);
+    const conocidos = SOLO_REGLA ? [] : INCIDENTES;
+    const porRegla = await incidentesPorRegla(db, new Set(aplazadas.map((a) => `lcc|${a.clase.toLowerCase()}`)));
+    console.log(`   Incidentes: ${conocidos.length} conocidos + ${aplazadas.length} de clases aplazadas a la IA + ${porRegla.length} que la regla del motor ya no usa (leídos de la caché).`);
     for (const a of aplazadas) console.log(`     lcc:${a.clase.toLowerCase().padEnd(3)} → «${a.cduMala}»  (${a.usos} usos)`);
+    for (const a of porRegla.slice(0, 40)) console.log(`     ${a.sistema}:${String(a.codigo).padEnd(10)} → «${a.cduMala}»  (${a.usos} usos) — ${a.motivo}`);
+    if (porRegla.length > 40) console.log(`     … y ${porRegla.length - 40} más`);
     console.log('');
 
     // 1) Selección: CDU mala exacta + clase LCC EXACTA (misma regla que la búsqueda) + exclusiones.
     const plan = [];
     const omitidos = {};
-    for (const inc of [...INCIDENTES, ...aplazadas]) {
+    const pIncidentes = progreso(conocidos.length + aplazadas.length + porRegla.length, 'Buscando los libros afectados');
+    for (const inc of [...conocidos, ...aplazadas, ...porRegla]) {
+        pIncidentes.paso(inc.clase);
+        const esDewey = inc.sistema === 'dewey';
         const candidatos = await col.find(
-            { cdu: inc.cduMala, lcc: { $regex: `^${inc.clase}`, $options: 'i' } }, { projection: PROYECCION },
+            esDewey ? { cdu: inc.cduMala, dewey: { $exists: true, $ne: null } }
+                : { cdu: inc.cduMala, lcc: { $regex: `^${inc.clase}`, $options: 'i' } },
+            { projection: PROYECCION },
         ).toArray();
 
         for (const d of candidatos) {
-            if (claseLcc(d.lcc) !== inc.clase) continue;   // «UA…» no es la clase «U»
+            if (esDewey ? normalizarCodigo(d.dewey) !== inc.codigo : claseLcc(d.lcc) !== inc.clase) continue;   // «UA…» no es la clase «U»
+            if (!esDewey && inc.regla) {
+                const ex = exclusionPorClase(inc.clase, d);
+                if (ex) { omitidos[ex] = (omitidos[ex] || 0) + 1; continue; }
+            }
             // Una CDU de más rango que la del clasificador (impresa en el libro, de la BNE) no vino de la caché.
             const deMasRango = rangoFuente(fuenteCduDoc(d)) > RANGO_CDU.clasificador;
             const motivo = d.cdu_manual ? 'CDU fijada a mano' : d.locked ? 'documento bloqueado'
@@ -158,6 +235,7 @@ async function main() {
             plan.push({ doc: d, inc });
         }
     }
+    pIncidentes.fin();
 
     console.log(`   A reparar: ${plan.length} documento(s)`);
     for (const [m, n] of Object.entries(omitidos)) console.log(`   Se dejan como están: ${n} — ${m}`);
@@ -173,7 +251,7 @@ async function main() {
         let nueva = cduAnteriorSegunAlerta(p.doc, p.inc.cduMala);
         let origen = 'la que tenía antes';
         if (!nueva) {
-            const r = await resolverCDU({ dewey: p.doc.dewey, lcc: p.doc.lcc, titulo: p.doc.titulo, permitirIA: false }).catch(() => null);
+            const r = await resolverCDU({ dewey: p.doc.dewey, lcc: p.doc.lcc, titulo: p.doc.titulo, permitirIA: false, aprender: false }).catch(() => null);
             nueva = r?.cdu || null;
             origen = 'motor sin IA';
         }
@@ -190,7 +268,7 @@ async function main() {
     const transiciones = {};
     for (const c of cambios) {
         const k = c.inc.aplazada
-            ? `${c.inc.clase}: «${c.inc.cduMala}» → ${c.origen}`
+            ? `${c.inc.clase.toLowerCase()}: «${c.inc.cduMala}» → ${c.inc.regla ? `«${c.nueva}» (${c.origen})` : c.origen}`
             : `${c.inc.clase}: «${c.inc.cduMala}» → «${c.nueva}»`;
         transiciones[k] = (transiciones[k] || 0) + 1;
     }
@@ -217,6 +295,16 @@ async function main() {
     // «sin carpeta en disco → solo BD»: cambiaría la ruta_base en Mongo SIN mover la carpeta real del NAS, y
     // base y disco quedarían desincronizados en cientos de documentos — sin un solo error. Se exige ver en disco
     // la carpeta de la mayoría de una muestra antes de tocar nada.
+    // --limite N: solo los N primeros cambios por pasada (estrategia de la CDU, regla 4: por tandas, comprobando entre
+    // una y otra). Es reanudable: un libro reparado ya no tiene la CDU mala, así que la pasada siguiente no lo ve.
+    const iLim = process.argv.indexOf('--limite');
+    const LIMITE = iLim >= 0 ? Number(process.argv[iLim + 1]) || 0 : 0;
+    const ultimaTanda = !LIMITE || cambios.length <= LIMITE;
+    if (LIMITE) {
+        cambios.splice(LIMITE);
+        console.log(`\n   Tanda de ${cambios.length} (--limite ${LIMITE})${ultimaTanda ? ' — la última' : '; relanza para la siguiente'}.`);
+    }
+
     const muestra = cambios.slice(0, 20);
     let vistas = 0;
     for (const c of muestra) if (await carpetaExiste(carpetaDeDoc(c.doc))) vistas++;
@@ -239,7 +327,7 @@ async function main() {
                 const docNuevo = { ...c.doc, ...reub.set };
                 await aplicarCambio(col, c.doc, carpetaDeDoc(docNuevo), {
                     set: reub.set,
-                    alertas: [`CDU reparada: «${c.inc.cduMala}» venía de una equivalencia de clase contaminada (lcc:${c.inc.clase.toLowerCase()}); → «${c.nueva}» (${c.origen}).`],
+                    alertas: [`CDU reparada: «${c.inc.cduMala}» venía de una equivalencia contaminada (${c.inc.regla ? `${c.inc.sistema}:${c.inc.codigo}, ${c.inc.motivo}` : `lcc:${c.inc.clase.toLowerCase()}`}); → «${c.nueva}» (${c.origen}).`],
                 });
                 if (reub.set.ruta_base && reub.set.ruta_base !== c.doc.ruta_base) movidos++;
                 hechos++;
@@ -252,8 +340,8 @@ async function main() {
     p2.fin();
 
     // 5) Los que necesitan IA: sin sello en re-clasificar-cdu (el Conformador los recalcula, ya por clase + número)
-    //    y a una selección, para verlos.
-    if (pendientes.length) {
+    //    y a una selección, para verlos. Con --limite, solo en la ÚLTIMA tanda (si no, una selección por tanda).
+    if (pendientes.length && ultimaTanda) {
         const ids = pendientes.map((p) => p.doc._id);
         await col.updateMany({ _id: { $in: ids } },
             { $set: { 'mantenimiento.re-clasificar-cdu': 0, mantenimiento_firma: 'pendiente-cdu-contaminada' } });

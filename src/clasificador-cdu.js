@@ -1,6 +1,6 @@
 import { conectarDB } from './database.js';
 import { conTexto, extraerJSON } from './utils/vision.js';
-import { modernizarCDU } from './utils/cdu-moderna.js';
+import { modernizarCDU, cduParaUbicar } from './utils/cdu-moderna.js';
 
 // Tabla de tradiciones/lenguas literarias → CDU (82x). El Dewey 8xx y la LCC P* YA codifican la lengua, así que
 // la equivalencia por código es estable. Se usa en el prompt de iaCDU (por doc) y de iaCDULote (por lote).
@@ -35,25 +35,77 @@ function normalizarCodigo(c) {
     return String(c || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-/** Busca una equivalencia ya aprendida. Tolerante a fallos de Mongo (devuelve null). */
-export async function buscarEquivalencia(sistema, codigo) {
+/** La equivalencia aprendida entera ({cdu, fuente, verificado…}) o null. Tolerante a fallos de Mongo. */
+async function buscarEquivalenciaDoc(sistema, codigo) {
     if (!codigo) return null;
     try {
         const db = await conectarDB();
         const doc = await db.collection(COL).findOne({ sistema_origen: sistema, codigo_origen: normalizarCodigo(codigo) });
-        if (doc) {
-            db.collection(COL).updateOne({ _id: doc._id }, { $inc: { usos: 1 } }).catch(() => {});
-            return doc.cdu;
-        }
-        return null;
+        if (doc) db.collection(COL).updateOne({ _id: doc._id }, { $inc: { usos: 1 } }).catch(() => {});
+        return doc || null;
     } catch {
         return null;
     }
 }
 
+/** Busca una equivalencia ya aprendida (solo la CDU). Tolerante a fallos de Mongo (devuelve null). */
+export async function buscarEquivalencia(sistema, codigo) {
+    return (await buscarEquivalenciaDoc(sistema, codigo))?.cdu || null;
+}
+
+/**
+ * ¿Se puede USAR (o aprender) una equivalencia de la caché? La caché sirve UNA decisión a TODOS los libros con ese
+ * código, así que una decisión de la IA sobre un libro solo vale donde el código es tan concreto como esa decisión.
+ * La auditoría del 8-oct (scripts/auditar-cdu.js) encontró miles de libros mal por estas cuatro vías:
+ *   1. CDU MAL FORMADA: «dewey 193 → 19.035» (la división 19 no existe; 190 libros).
+ *   2. LCC de CLASE ENTERA aprendida de la IA: «lcc b → 141.4» (toda la filosofía como «librepensamiento», 467
+ *      libros), «qh → 573.016», «hm → 316.774:32»… El arreglo de septiembre solo rechazaba las que CONTRADECÍAN a la
+ *      tabla; estas pasaban por «afinarla» (141.4 empieza por el «1» de la B), pero afinar una clase entera por un
+ *      libro es el mismo error. Solo se usan si una persona las ha verificado.
+ *   3. DEWEY AMPLIO (tres cifras, sin decimales) que la tabla ya resuelve: «520 → 522.2», «004 → 004.451:658.78»,
+ *      «530 → 530.145». Un «520» es toda la astronomía; su «afinado» por un libro no vale para los demás: manda la tabla.
+ *   4. DEWEY que cambia de CLASE PRINCIPAL: la clase de la CDU coincide con la cifra del Dewey (4xx lengua → 8).
+ *      «973 → 39(73)» (historia de EE. UU. como etnología, 162 libros), «092 → 821.133.1».
+ * Las verificadas (o 'Manual': la tabla determinista) siempre valen. Devuelve { usable, motivo }.
+ */
+export function equivalenciaUsable(sistema, codigo, eq) {
+    if (!eq || !eq.cdu) return { usable: false, motivo: 'vacía' };
+    if (eq.verificado === true || eq.fuente === 'Manual') return { usable: true, motivo: null };
+    if (sistema !== 'dewey' && sistema !== 'lcc') return { usable: true, motivo: null };
+    const cdu = String(eq.cdu).trim();
+    const cod = String(codigo || '').trim();
+    if (!cduBienFormada(cdu)) return { usable: false, motivo: 'CDU mal formada' };
+    if (sistema === 'lcc') {
+        // (Si dice lo mismo que la tabla —«ps → 821.111(73)», «bf → 159.9»— no hay riesgo: vale.)
+        if (/^[a-z]{1,3}$/i.test(cod) && cdu !== lccACDU(cod)) return { usable: false, motivo: 'aprendida de un libro para toda una clase LCC' };
+        return { usable: true, motivo: null };
+    }
+    const d = (cod.match(/\d{3}/) || [])[0];
+    if (!d) return { usable: true, motivo: null };
+    // Las reglas 3 y 4 son para el Dewey AMPLIO (tres cifras sin decimales: «520», «973»), que abarca muchos libros
+    // distintos. Un Dewey CONCRETO sí puede cambiar de clase con razón: «652.80151 → 003.26» (la criptografía cae
+    // en el 652 de Dewey por una rareza de su jerarquía; en la CDU es 003), «621.39 → 004».
+    if (!/^\d{3}$/.test(cod)) return { usable: true, motivo: null };
+    // Con la tabla: una DIVISIÓN entera (acaba en 0: «520» astronomía, «530» física, «500») no admite el «afinado» de
+    // un libro («522.2», «530.145»); una SECCIÓN («547» química orgánica, «512» álgebra) sí, porque en ciencias el
+    // número Dewey y el CDU coinciden hasta las tres cifras — siempre que se quede dentro de la rama de la tabla.
+    const tabla = deweyACDU(cod);
+    const division = cod.endsWith('0') || ['004', '005', '006'].includes(cod);   // 004-006: toda la informática
+    if (tabla && cdu !== tabla && (division || !cdu.startsWith(tabla))) {
+        return { usable: false, motivo: `Dewey amplio ${cod}: manda la tabla («${tabla}»)` };
+    }
+    // La clase se mira donde se UBICA el libro (087.5:82, juvenil, va a la literatura: ver cduParaUbicar).
+    const claseCdu = (String(cduParaUbicar(cdu) || cdu).match(/^\d/) || [])[0];
+    const esperada = d[0] === '4' ? '8' : d[0];
+    if (claseCdu && claseCdu !== esperada) return { usable: false, motivo: `Dewey ${d}, amplio, no puede ser CDU de la clase ${claseCdu}` };
+    return { usable: true, motivo: null };
+}
+
 /** Aprende/actualiza una equivalencia para reutilizarla la próxima vez. */
 export async function guardarEquivalencia(sistema, codigo, cdu, fuente = 'IA', descripcion) {
     if (!codigo || !cdu) return;
+    // Lo que el motor no USARÍA tampoco se APRENDE (ver equivalenciaUsable): así no se vuelve a sembrar el error.
+    if (!equivalenciaUsable(sistema, normalizarCodigo(codigo), { cdu, fuente, verificado: fuente === 'Manual' }).usable) return;
     try {
         const db = await conectarDB();
         await db.collection(COL).updateOne(
@@ -333,7 +385,10 @@ function avisarCacheContradictoria(sistema, codigo, hit, tabla) {
     const clave = `${sistema}:${String(codigo).toLowerCase()}`;
     if (_cacheContradictoriaAvisada.has(clave)) return;
     _cacheContradictoriaAvisada.add(clave);
-    console.warn(`⚠️  [CDU] Equivalencia aprendida ${clave} → «${hit}» CONTRADICE la tabla (→ «${tabla}»): se ignora y manda la tabla.`);
+    // `tabla` es la CDU de la tabla, o el MOTIVO por el que equivalenciaUsable la descarta (texto con espacios).
+    console.warn(/\s/.test(String(tabla))
+        ? `⚠️  [CDU] Equivalencia aprendida ${clave} → «${hit}» no se usa: ${tabla}.`
+        : `⚠️  [CDU] Equivalencia aprendida ${clave} → «${hit}» CONTRADICE la tabla (→ «${tabla}»): se ignora y manda la tabla.`);
 }
 
 // Exportada para la auditoría de la caché (scripts/auditar-equivalencias-cdu.js): comprobar qué equivalencias
@@ -465,7 +520,10 @@ export async function resolverCDU(args) {
     return r;
 }
 
-async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, autor, sinopsis, permitirIA = true }) {
+// `aprender: false` = solo CONSULTAR: no se escribe nada en la caché de equivalencias. Lo usan los diagnósticos y las
+// pasadas en seco: el 9-oct el seco de reparar-cdu-contaminada guardó como «Manual» (verificada) la CDU de la tabla
+// sobre 87 equivalencias —23 de ellas buenas, «547 → 547» pasó a «54»—; hubo que devolverlas desde la copia.
+async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, autor, sinopsis, permitirIA = true, aprender = true }) {
     // Los códigos se manejan por su UNIDAD de equivalencia: Dewey tal cual; LCC por su CLASE (letras iniciales),
     // no la signatura completa — si no, «PR4589.H39 1998» se guardaría entero y no lo reusaría ningún otro libro.
     // (LCC de una clase APLAZADA —historia, literaturas de varias lenguas—: por clase + número; ver unidadLcc.)
@@ -478,6 +536,7 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
     // SOLO donde el crosswalk determinista NO llega (así una inferencia nunca contradice/ensombrece al crosswalk)
     // y como 'inferido' (no verificado: un mapeo Manual futuro lo corrige).
     const enseñarBandas = async (cdu, resueltoPor, fuentePrimaria) => {
+        if (!aprender) return;
         for (const [s2, c2] of candidatos) {
             if (s2 === resueltoPor) { if (fuentePrimaria) await guardarEquivalencia(s2, c2, cdu, fuentePrimaria, categoria); continue; }
             if (await buscarEquivalenciaExterna(s2, c2)) continue;      // el crosswalk ya lo resuelve mejor → no inferir
@@ -492,8 +551,16 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
     //    y evita re-consultar la IA por CADA libro de literatura (el gran gasto en lotes de humanidades).
     const esLit = esFiccionLiteratura({ dewey, lcc, categorias });
     for (const [sistema, codigo] of candidatos) {
-        const hit = await buscarEquivalencia(sistema, codigo);
-        if (!hit) continue;
+        const eq = await buscarEquivalenciaDoc(sistema, codigo);
+        if (!eq || !eq.cdu) continue;
+        const hit = eq.cdu;
+
+        // Una decisión de la IA que la caché serviría a libros que no le corresponden: no se usa (ver equivalenciaUsable).
+        const uso = equivalenciaUsable(sistema, normalizarCodigo(codigo), eq);
+        if (!uso.usable) {
+            avisarCacheContradictoria(sistema, codigo, hit, uso.motivo);
+            continue;
+        }
 
         // LA CACHÉ PUEDE AFINAR LA TABLA DETERMINISTA, NUNCA CONTRADECIRLA.
         // La caché es APRENDIDA (a menudo de una sola decisión de la IA) y la tabla está CURADA. Si la tabla
