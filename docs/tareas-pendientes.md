@@ -144,14 +144,20 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
      libros), el «afinado» de un Dewey que es una DIVISIÓN entera («520 → 522.2», «530 → 530.145», «004 → 004.451…») ni un
      Dewey amplio que cambie de clase («973 → 39(73)», «092 → 821.133.1»). Un Dewey concreto sí puede («652.80151 →
      003.26», «547 → 547»).
-   - **Reparación**: `reparar-cdu-contaminada.js` (tercera tanda, con la MISMA regla). En seco (PC y NAS, 9-oct): **3.755 libros**
-     a reparar + 1.210 para el Conformador con IA (215 de ellos porque la CDU calculada no era de la clase o la familia de lenguas de su
-     propia Dewey/LCC) + 332 manuales que no se tocan. En el NAS:
-       - [ ] copia de la base y del disco;
-       - [ ] `sudo docker exec gestor-biblioteca ls logs/copias-bd` → elegir una copia ANTERIOR al 9-oct 08:38 (ver incidente);
-       - [ ] `sudo docker exec -it gestor-biblioteca node scripts/reparar-cdu-contaminada.js --copia <sello>` (en seco; revisar
-             las transiciones);
-       - [ ] `… --copia <sello> --ejecutar --limite 200`, repetido (comprobando entre tandas) hasta que no quede nada.
+   - **Reparación**: `reparar-cdu-contaminada.js` (tercera tanda, con la MISMA regla). Tras el primer lote (9-oct, 200
+     libros, técnicamente perfecto: carpetas, portadas e imágenes al día) se corrigió: el Dewey va antes que el LCC en el
+     motor (un LCC dudoso, «M27», mandaba «After Nietzsche» a 78), la tabla cubre la filosofía por países (193 → 1(430)), y
+     una alternativa sacada de OTRA equivalencia aprendida que no casa con la clase de su código no se aplica (790 libros a
+     la selección «CDU por revisar a mano…»; el Conformador pondría lo mismo). Seco final: **3.138 a reparar**, 974 al
+     Conformador con IA, 790 a mano, 332 manuales intactos. En el NAS (tras desplegar):
+       - [x] copia (CopiaBase.ps1, 9-oct 10:33) y copia de disco de esa noche;
+       - [x] primer lote de 200 (9-oct);
+       - [ ] revisar ese lote con las reglas nuevas: `… reparar-cdu-contaminada.js --revisar-reparados 2026-10-09` (seco: 132
+             cambian, sobre todo «1» → «1(430)») y luego con `--ejecutar`;
+       - [ ] el resto por tandas: `… --copia 20261005-160502 --ejecutar --limite 500`, revisando entre tandas;
+       - [ ] revisar a mano la selección «CDU por revisar a mano (reparación sin fuente fiable)» (lista en
+             `logs/reparar-cdu-desviados.tsv`). Muchas vienen de equivalencias LCC clase+número aprendidas de UN libro
+             («f1435 → 09:93»): ese es el siguiente origen a auditar.
    - **Incidente 9-oct (resuelto)**: el seco de esta reparación desde el PC ESCRIBIÓ en la caché (resolverCDU aprende lo
      que resuelve por la tabla): 87 equivalencias pisadas con la de la tabla como «Manual». 62 eran malas (da igual) y 23
      buenas («547 → 547» → «54»): devueltas desde la copia del 5-oct con restaurar-base. Arreglado: `resolverCDU({aprender:

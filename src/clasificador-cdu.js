@@ -160,7 +160,13 @@ function deweyACDU(codigo) {
         '300': '3', '310': '31', '320': '32', '330': '33', '340': '34', '350': '35', '360': '36', '370': '37', '390': '39',
         '900': '9', '910': '91', '920': '929',
     };
-    return EXACTAS[d] || null;   // el resto (130, 15x, 4xx, 8xx, historia regional…) → IA
+    // Filosofía MODERNA por países (Dewey 190-199): en la CDU es la filosofía (1) con el auxiliar de lugar. Exacto, así
+    // que no hace falta IA (9-oct: 137 libros de Dewey 193 tenían «19.035», un invento de la IA aprendido de un libro).
+    const FILOSOFIA_PAIS = {
+        '190': '1', '191': '1(73)', '192': '1(410)', '193': '1(430)', '194': '1(44)', '195': '1(450)',
+        '196': '1(460)', '197': '1(470)', '198': '1(48)', '199': '1',
+    };
+    return EXACTAS[d] || FILOSOFIA_PAIS[d] || null;   // el resto (130, 15x, 4xx, 8xx, historia regional…) → IA
 }
 
 // LC → CDU. La correspondencia se hace por CLASE (1-2 letras iniciales de la signatura). Es CONSERVADORA, como
@@ -551,14 +557,30 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
     //    y evita re-consultar la IA por CADA libro de literatura (el gran gasto en lotes de humanidades).
     const esLit = esFiccionLiteratura({ dewey, lcc, categorias });
     for (const [sistema, codigo] of candidatos) {
+        // EL DEWEY ANTES QUE EL LCC (9-oct). Si el Dewey no tiene caché utilizable, su TABLA se consulta aquí mismo,
+        // antes de pasar a la caché del LCC: si no, «After Nietzsche» (Dewey 193 = filosofía alemana, LCC dudoso «M27»)
+        // salía 78 —música— por la caché «lcc m», y la tabla del Dewey (193 → 1(430)) ni se miraba.
+        const usarTablaDewey = async () => {
+            if (sistema !== 'dewey') return null;
+            const ext = await buscarEquivalenciaExterna('dewey', codigo);
+            if (!ext) return null;
+            await enseñarBandas(ext, 'dewey', 'Manual');
+            return { cdu: ext, fuente: 'api:dewey', aprendida: false };
+        };
         const eq = await buscarEquivalenciaDoc(sistema, codigo);
-        if (!eq || !eq.cdu) continue;
+        if (!eq || !eq.cdu) {
+            const porTabla = await usarTablaDewey();
+            if (porTabla) return porTabla;
+            continue;
+        }
         const hit = eq.cdu;
 
         // Una decisión de la IA que la caché serviría a libros que no le corresponden: no se usa (ver equivalenciaUsable).
         const uso = equivalenciaUsable(sistema, normalizarCodigo(codigo), eq);
         if (!uso.usable) {
             avisarCacheContradictoria(sistema, codigo, hit, uso.motivo);
+            const porTabla = await usarTablaDewey();
+            if (porTabla) return porTabla;
             continue;
         }
 

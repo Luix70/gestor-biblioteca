@@ -64,6 +64,11 @@ import { progreso } from '../src/utils/progreso-cli.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const SOLO_REGLA = process.argv.includes('--solo-regla');   // solo la tercera tanda
+// --revisar-reparados <AAAA-MM-DD>: vuelve a calcular, con las reglas de HOY, los libros ya reparados desde esa fecha
+// (por su alerta «CDU reparada…»). Nació del primer lote del 9-oct: «After Nietzsche» había ido a 78 (música) por un
+// LCC dudoso, y los Dewey 193 a «1» cuando la tabla ya da «1(430)». Solo cambia los que salen distintos.
+const iRev = process.argv.indexOf('--revisar-reparados');
+const REVISAR = iRev >= 0 ? process.argv[iRev + 1] : null;
 
 /** Número de la signatura tras las letras de clase: «QA-0076.3» → 76.3; «QA» a secas → NaN. */
 function numeroLcc(lcc) {
@@ -153,11 +158,13 @@ function literaturaDeSuFamilia(doc, cdu) {
     return familia.some((f) => c.startsWith(f));
 }
 
-async function clasesEsperadas(doc) {
+// Solo el código del INCIDENTE (9-oct, primer lote): con «cualquiera de los dos», un LCC dudoso del libro («M27», «H46»:
+// marcas de autor, no clases) dejaba pasar «After Nietzsche» → 78 (música) aunque su Dewey 193 dice filosofía.
+async function clasesEsperadas(doc, sistema = null) {
     const clases = new Set();
-    const d = (String(doc.dewey || '').match(/\d{3}/) || [])[0];
+    const d = sistema === 'lcc' ? null : (String(doc.dewey || '').match(/\d{3}/) || [])[0];
     if (d) clases.add(['004', '005', '006'].includes(d) ? '0' : d[0] === '4' ? '8' : d[0]);
-    const letras = claseLcc(doc.lcc);
+    const letras = sistema === 'dewey' ? null : claseLcc(doc.lcc);
     if (letras) {
         const tabla = String(await buscarEquivalenciaExterna('lcc', letras) || '');   // la tabla del motor, por clase
         if (/^\d/.test(tabla)) clases.add(tabla[0]);
@@ -234,9 +241,9 @@ async function main() {
     console.log('\n🩹 Reparación de CDU heredadas de equivalencias contaminadas');
     console.log(`   Modo: ${EJECUTAR ? '⚠️  EJECUTAR (mueve carpetas)' : 'DRY-RUN (no toca nada)'}\n`);
 
-    const aplazadas = SOLO_REGLA ? [] : await incidentesDeClasesAplazadas(db);
-    const conocidos = SOLO_REGLA ? [] : INCIDENTES;
-    const porRegla = await incidentesPorRegla(db, new Set(aplazadas.map((a) => `lcc|${a.clase.toLowerCase()}`)));
+    const aplazadas = SOLO_REGLA || REVISAR ? [] : await incidentesDeClasesAplazadas(db);
+    const conocidos = SOLO_REGLA || REVISAR ? [] : INCIDENTES;
+    const porRegla = REVISAR ? [] : await incidentesPorRegla(db, new Set(aplazadas.map((a) => `lcc|${a.clase.toLowerCase()}`)));
     console.log(`   Incidentes: ${conocidos.length} conocidos + ${aplazadas.length} de clases aplazadas a la IA + ${porRegla.length} que la regla del motor ya no usa (leídos de la caché).`);
     for (const a of aplazadas) console.log(`     lcc:${a.clase.toLowerCase().padEnd(3)} → «${a.cduMala}»  (${a.usos} usos)`);
     for (const a of porRegla.slice(0, 40)) console.log(`     ${a.sistema}:${String(a.codigo).padEnd(10)} → «${a.cduMala}»  (${a.usos} usos) — ${a.motivo}`);
@@ -273,6 +280,21 @@ async function main() {
     }
     pIncidentes.fin();
 
+    // Modo revisión: los ya reparados desde la fecha, con el incidente que cuenta su alerta.
+    if (REVISAR) {
+        const RE = /^CDU reparada: «(.*?)» venía de una equivalencia contaminada \((dewey|lcc):([^,)]+)/;
+        const reparados = await col.find({ fecha_actualizacion: { $gte: new Date(REVISAR) }, cdu_manual: { $ne: true },
+            alertas_agente: { $elemMatch: { $regex: '^CDU reparada: ' } } }, { projection: PROYECCION }).toArray();
+        for (const d of reparados) {
+            const alerta = [...(d.alertas_agente || [])].reverse().map((x) => String(x).match(RE)).find(Boolean);
+            if (!alerta) continue;
+            const [, cduOriginal, sistema, codigo] = alerta;
+            plan.push({ doc: d, inc: { sistema, codigo, clase: sistema === 'lcc' ? codigo.toUpperCase() : `DEWEY ${codigo}`,
+                cduMala: cduOriginal, cduOriginal, regla: true, aplazada: true, revision: true, motivo: 'revisión' } });
+        }
+        console.log(`   Modo revisión: ${plan.length} libro(s) reparados desde ${REVISAR}.`);
+    }
+
     console.log(`   A reparar: ${plan.length} documento(s)`);
     for (const [m, n] of Object.entries(omitidos)) console.log(`   Se dejan como están: ${n} — ${m}`);
     console.log('');
@@ -282,16 +304,23 @@ async function main() {
     const pendientes = [];   // sin CDU calculable sin IA: a la selección, para que el Conformador los reclasifique
     let sinSolucion = 0;
     let fueraDeClase = 0;    // la CDU nueva no casa con la clase de su propia Dewey/LCC
+    let sinCambio = 0;       // (revisión) ya tenían la CDU que sale hoy
+    const desviados = [];    // la lista completa de los apartados por la clase, para revisarla
+    const aMano = [];        // esos mismos: a una selección para revisarlos a mano (sin tocar su CDU)
     const p1 = progreso(plan.length, 'Calculando la CDU');
     for (const p of plan) {
         p1.paso(p.doc.titulo);
-        let nueva = cduAnteriorSegunAlerta(p.doc, p.inc.cduMala);
+        let nueva = cduAnteriorSegunAlerta(p.doc, p.inc.cduOriginal || p.inc.cduMala);
         let origen = 'la que tenía antes';
+        let deCache = false;     // ¿la dio OTRA equivalencia aprendida (de un libro), no la tabla ni su historia?
         if (!nueva) {
             const r = await resolverCDU({ dewey: p.doc.dewey, lcc: p.doc.lcc, titulo: p.doc.titulo, permitirIA: false, aprender: false }).catch(() => null);
             nueva = r?.cdu || null;
             origen = 'motor sin IA';
+            deCache = String(r?.fuente || '').startsWith('cache:');
         }
+        // Revisión: si sale la que ya tiene, no hay nada que hacer.
+        if (p.inc.revision && nueva === p.doc.cdu) { sinCambio++; continue; }
         // Si no hay nada, o saliera la misma CDU mala, no se toca: mejor igual que peor.
         if (!nueva || nueva === '000' || nueva === p.inc.cduMala || !cduBienFormada(nueva)) {
             if (p.inc.aplazada) pendientes.push(p); else sinSolucion++;
@@ -299,12 +328,18 @@ async function main() {
         }
         // Y tiene que caer en una clase que admitan los códigos del propio libro (ver clasesEsperadas): si no, se deja
         // al Conformador con IA en vez de cambiar un error por otro.
-        const esperadas = await clasesEsperadas(p.doc);
+        const esperadas = await clasesEsperadas(p.doc, p.inc.sistema || 'lcc');   // los incidentes conocidos y aplazados son de LCC
         const claseNueva = (String(cduParaUbicar(nueva) || nueva).match(/^\d/) || [])[0];
-        if ((esperadas && claseNueva && !esperadas.has(claseNueva)) || !literaturaDeSuFamilia(p.doc, nueva)) {
+        // Solo cuando la CDU nueva sale de OTRA equivalencia aprendida: todos los casos malos del 9-oct venían de ahí
+        // («lcc pq3989 → 929:331.2», «lcc d1 → 630.200(460)»). La tabla determinista y la CDU que el libro tenía antes
+        // se aceptan aunque cambien de clase: medido el mismo día, apartarlas por la clase dejaba fuera 800 buenas
+        // («It's Not Like I'm Poor», Dewey 973 erróneo y LCC HD → 33; «Mastering QuickBooks» → 004.49:657).
+        if (deCache && ((esperadas && claseNueva && !esperadas.has(claseNueva)) || !literaturaDeSuFamilia(p.doc, nueva))) {
             fueraDeClase++;
-            if (fueraDeClase <= 15) p1.nota(`   ↷ «${String(p.doc.titulo).slice(0, 40)}» [${p.doc.dewey || ''} ${p.doc.lcc || ''}]: «${nueva}» no es de su clase o su familia de lenguas → Conformador`);
-            pendientes.push(p);
+            desviados.push(`${p.inc.sistema || 'lcc'}:${p.inc.codigo || p.inc.clase} | «${p.doc.cdu}» → «${nueva}» (${origen}) | dewey ${p.doc.dewey || '-'} · lcc ${p.doc.lcc || '-'} | ${p.doc.titulo}`);
+            if (fueraDeClase <= 15) p1.nota(`   ↷ «${String(p.doc.titulo).slice(0, 40)}» [${p.doc.dewey || ''} ${p.doc.lcc || ''}]: «${nueva}» no es de su clase o su familia de lenguas → a revisar`);
+            // A MANO, no al Conformador: el Conformador usaría esa misma equivalencia y pondría esa misma CDU.
+            aMano.push(p);
             continue;
         }
         cambios.push({ ...p, nueva, origen });
@@ -322,7 +357,13 @@ async function main() {
     console.log('\n   Transiciones:');
     for (const [k, n] of Object.entries(transiciones).sort((a, b) => b[1] - a[1])) console.log(`     ${String(n).padStart(4)}  ${k}`);
     if (sinSolucion) console.log(`\n   Sin CDU calculable (se dejan): ${sinSolucion}`);
-    if (fueraDeClase) console.log(`\n   La CDU calculada no era de la clase de su propia Dewey/LCC (se dejan para el Conformador): ${fueraDeClase}`);
+    if (sinCambio) console.log(`\n   Ya tenían la CDU que sale hoy (no se tocan): ${sinCambio}`);
+    if (desviados.length) {
+        const ruta = new URL('../logs/reparar-cdu-desviados.tsv', import.meta.url);
+        (await import('node:fs')).writeFileSync(ruta, desviados.join('\n') + '\n');
+        console.log('\n   Lista completa de los apartados por la clase: logs/reparar-cdu-desviados.tsv');
+    }
+    if (fueraDeClase) console.log(`\n   Su única alternativa era otra equivalencia dudosa (se dejan como están, a una selección para revisar a mano): ${fueraDeClase}`);
     if (pendientes.length) {
         console.log(`\n   Necesitan IA (se dejan, quedan en una selección y el Conformador los reclasificará): ${pendientes.length}`);
         const porClase = {};
@@ -400,6 +441,18 @@ async function main() {
             docs: ids,
         });
         console.log(`\n   ${pendientes.length} documento(s) a la selección «CDU por reclasificar (clase LCC contaminada) ${fecha}»; el Conformador los recalculará.`);
+    }
+
+    // 6) Los apartados por la clase: a una selección PARA REVISAR A MANO, sin quitarles el sello (el Conformador
+    //    pondría la misma CDU de la equivalencia dudosa). También solo en la última tanda.
+    if (aMano.length && ultimaTanda) {
+        const fecha = new Date().toISOString().slice(0, 10);
+        await crearSeleccion(db, {
+            nombre: `CDU por revisar a mano (reparación sin fuente fiable) ${fecha}`,
+            descripcion: 'Libros con una CDU contaminada cuya única alternativa sin IA venía de otra equivalencia aprendida de un solo libro y no casaba con la clase de su Dewey/LCC (lista en logs/reparar-cdu-desviados.tsv). Se dejan como estaban: decidir a mano o con «Investigar CDU» con IA.',
+            docs: aMano.map((p) => p.doc._id),
+        });
+        console.log(`\n   ${aMano.length} documento(s) a la selección «CDU por revisar a mano (reparación sin fuente fiable) ${fecha}».`);
     }
 
     console.log(`\n   ✔ Reparados: ${hechos}  ·  carpetas movidas: ${movidos}${fallos ? `  ·  ⚠️  fallos: ${fallos}` : ''}\n`);
