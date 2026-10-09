@@ -57,7 +57,7 @@ import '../src/config.js';
 import { conectarDB } from '../src/database.js';
 import { resolverCDU, claseLcc, unidadLcc, cduBienFormada, buscarEquivalenciaExterna, equivalenciaUsable } from '../src/clasificador-cdu.js';
 import { reubicarPorCdu, aplicarCambio, carpetaDeDoc, carpetaExiste } from '../src/mantenimiento/util-mantenimiento.js';
-import { modernizarCDU } from '../src/utils/cdu-moderna.js';
+import { modernizarCDU, cduParaUbicar } from '../src/utils/cdu-moderna.js';
 import { cduVacia, rangoFuente, fuenteCduDoc, RANGO_CDU } from '../src/utils/prioridad-cdu.js';
 import { crearSeleccion } from '../src/utils/selecciones.js';
 import { progreso } from '../src/utils/progreso-cli.js';
@@ -132,6 +132,28 @@ function exclusionPorClase(clase, d) {
 }
 
 const normalizarCodigo = (c) => String(c || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Las CLASES principales de CDU que admiten los códigos del propio libro (su Dewey y su LCC). La CDU nueva tiene que
+ * caer en una de ellas: en el seco del 9-oct, «PQ3989» (literatura africana en francés) iba a «929:331.2» y «PQ7298»
+ * (literatura mexicana) a «821.111(73)», sacadas de otras equivalencias aprendidas de UN libro. Sin códigos → null
+ * (no se exige nada). La informática (004) se admite junto a 5/6, como en la tabla.
+ */
+async function clasesEsperadas(doc) {
+    const clases = new Set();
+    const d = (String(doc.dewey || '').match(/\d{3}/) || [])[0];
+    if (d) clases.add(['004', '005', '006'].includes(d) ? '0' : d[0] === '4' ? '8' : d[0]);
+    const letras = claseLcc(doc.lcc);
+    if (letras) {
+        const tabla = String(await buscarEquivalenciaExterna('lcc', letras) || '');   // la tabla del motor, por clase
+        if (/^\d/.test(tabla)) clases.add(tabla[0]);
+        else if (letras[0] === 'P') clases.add('8');                       // lenguas y literaturas (aplazadas)
+        else if ('DEF'.includes(letras[0])) clases.add('9');               // historia (aplazada)
+    }
+    if (!clases.size) return null;
+    if (clases.has('5') || clases.has('6')) clases.add('0');
+    return clases;
+}
 
 /**
  * Incidentes de la TERCERA TANDA, leídos de la caché con la regla del motor (equivalenciaUsable): toda equivalencia
@@ -245,6 +267,7 @@ async function main() {
     const cambios = [];
     const pendientes = [];   // sin CDU calculable sin IA: a la selección, para que el Conformador los reclasifique
     let sinSolucion = 0;
+    let fueraDeClase = 0;    // la CDU nueva no casa con la clase de su propia Dewey/LCC
     const p1 = progreso(plan.length, 'Calculando la CDU');
     for (const p of plan) {
         p1.paso(p.doc.titulo);
@@ -258,6 +281,16 @@ async function main() {
         // Si no hay nada, o saliera la misma CDU mala, no se toca: mejor igual que peor.
         if (!nueva || nueva === '000' || nueva === p.inc.cduMala || !cduBienFormada(nueva)) {
             if (p.inc.aplazada) pendientes.push(p); else sinSolucion++;
+            continue;
+        }
+        // Y tiene que caer en una clase que admitan los códigos del propio libro (ver clasesEsperadas): si no, se deja
+        // al Conformador con IA en vez de cambiar un error por otro.
+        const esperadas = await clasesEsperadas(p.doc);
+        const claseNueva = (String(cduParaUbicar(nueva) || nueva).match(/^\d/) || [])[0];
+        if (esperadas && claseNueva && !esperadas.has(claseNueva)) {
+            fueraDeClase++;
+            if (fueraDeClase <= 15) p1.nota(`   ↷ «${String(p.doc.titulo).slice(0, 40)}» [${p.doc.dewey || ''} ${p.doc.lcc || ''}]: «${nueva}» no es de su clase (${[...esperadas].join('/')}) → Conformador`);
+            pendientes.push(p);
             continue;
         }
         cambios.push({ ...p, nueva, origen });
@@ -275,6 +308,7 @@ async function main() {
     console.log('\n   Transiciones:');
     for (const [k, n] of Object.entries(transiciones).sort((a, b) => b[1] - a[1])) console.log(`     ${String(n).padStart(4)}  ${k}`);
     if (sinSolucion) console.log(`\n   Sin CDU calculable (se dejan): ${sinSolucion}`);
+    if (fueraDeClase) console.log(`\n   La CDU calculada no era de la clase de su propia Dewey/LCC (se dejan para el Conformador): ${fueraDeClase}`);
     if (pendientes.length) {
         console.log(`\n   Necesitan IA (se dejan, quedan en una selección y el Conformador los reclasificará): ${pendientes.length}`);
         const porClase = {};
