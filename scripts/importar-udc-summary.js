@@ -202,13 +202,18 @@ const colU = db.collection('udc_summary');
 const colD = db.collection('cdu_descripciones');
 if (EJECUTAR) await colU.createIndex({ clave: 1 }).catch(() => {});
 const p = progreso(filas.length, EJECUTAR ? 'Guardando' : 'Comparando');
+const clavesDeClase = new Set();   // las claves que SÍ son de un código de clase (para limpiar las intrusas)
 for (const f of filas) {
   p.paso(f.codigo);
   const clave = sanitizarCDU(f.codigo);
   if (EJECUTAR) await colU.updateOne({ _id: f.codigo }, { $set: { ...f, clave, fuente: FUENTE, fecha: new Date() } }, { upsert: true });
   // Solo los códigos que pueden ser la CDU de un libro (empiezan por cifra).
   // (Los auxiliares sueltos —«(430)», «=111»— y los patrones «=...`04» se quedan solo en udc_summary.)
-  if (!clave || !/^[0-9]/.test(clave) || f.codigo.includes('...') || f.codigo.includes('`')) continue;
+  // La NOTACIÓN (no la clave) tiene que empezar por cifra: los auxiliares de tiempo («"61"», Precámbrico) y de
+  // materiales («-034», metales) dan, al sanearlos, la misma clave que una clase principal («61» Medicina) y la
+  // pisaban (12-oct: 88 descripciones, entre ellas las clases 0 a 7).
+  if (!clave || !/^\d/.test(f.codigo) || f.codigo.includes('...') || f.codigo.includes('`')) continue;
+  clavesDeClase.add(clave);
   const ya = await colD.findOne({ codigo: clave });
   if (ya?.verificado && ya.fuente !== 'udcs') { respetadas++; continue; }   // verificada a mano: no se toca
   const titulo_es = f.es?.titulo || f.en?.titulo || null;
@@ -238,6 +243,28 @@ for (const f of filas) {
   escritas++;
 }
 p.fin();
+
+// LIMPIEZA de las INTRUSAS de la importación del 8-oct: descripciones `udcs` cuya clave no es de ningún código de clase
+// (venían de un auxiliar: «-034» escribió en «034»). Se devuelve la que había antes (la más reciente de
+// cdu_descripciones_retiradas que retiró la importación) o, si no la hay, se borra y Mantenimiento la rehará.
+// Las de clave legítima («61») ya las ha reescrito el bucle de arriba con su texto bueno.
+const intrusas = await colD.find({ fuente: 'udcs', codigo: { $nin: [...clavesDeClase] } }).toArray();
+let devueltas = 0, borradas = 0;
+for (const d of intrusas) {
+  const anterior = await db.collection('cdu_descripciones_retiradas').find({ codigo: d.codigo, 'retirada.motivo': 'sustituida por el UDC Summary oficial' })
+    .sort({ 'retirada.fecha': -1 }).limit(1).next();
+  if (muestra.length < 60) muestra.push(`   ${d.codigo.padEnd(14)} intrusa «${String(d.titulo_es || '').slice(0, 45)}» → ${anterior ? `vuelve «${String(anterior.titulo_es || '').slice(0, 45)}»` : 'se borra (Mantenimiento la rehará)'}`);
+  if (!EJECUTAR) continue;
+  if (anterior) {
+    const { _id, _id_original, retirada, ...original } = anterior;
+    await colD.replaceOne({ _id: d._id }, { ...original, codigo: d.codigo });
+    devueltas++;
+  } else {
+    await colD.deleteOne({ _id: d._id });
+    borradas++;
+  }
+}
+console.log(`\nDescripciones INTRUSAS (de un auxiliar, en la clave de otro código): ${intrusas.length}${EJECUTAR ? ` · ${devueltas} devueltas a la anterior · ${borradas} borradas` : ''}`);
 
 if (muestra.length) console.log(`\nMuestra de descripciones de IA que cambian:\n${muestra.join('\n')}`);
 console.log(`\n=== ${EJECUTAR ? 'HECHO' : 'DRY-RUN'} · ${filas.length} códigos en el UDC Summary · descripciones: ${nuevas} nuevas, ${retiradas} de IA ${EJECUTAR ? 'retiradas (copia en cdu_descripciones_retiradas)' : 'se sustituirían'}, ${respetadas} verificadas a mano respetadas${EJECUTAR ? ` · ${escritas} escritas` : ''} ===`);

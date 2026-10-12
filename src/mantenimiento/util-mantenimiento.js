@@ -282,6 +282,11 @@ const union = (a, b, clave) => {
 export function carpetaReflejaFicha(doc) {
     if (!doc?.ruta_base || !doc.cdu) return true;
     if (doc.ruta_fija && (doc.coleccion || doc.naturaleza === 'audiolibro' || doc.naturaleza === 'software')) return true;
+    // Un miembro de un ÁRBOL PRESERVADO (audiolibros / transmedia / software) sigue siéndolo aunque haya perdido su
+    // colección: reorganizar-colecciones (2-oct) desligó 294 miembros de TXtras de colecciones-cajón, y sin esta
+    // regla recolocar-por-cdu los habría sacado del árbol, uno por CDU. (Un libro suelto con material también lleva
+    // ruta_fija, pero vive en «…/libros/…»: ese sí se recoloca.)
+    if (doc.ruta_fija && /\/(?:audiolibros|transmedia|software)\//.test(String(doc.ruta_base))) return true;
     if (doc.obra) return true;
     const ruta = String(doc.ruta_base);
     if (!ruta.startsWith('/recursos/' + arbolCDU(doc.cdu).segmentos.join('/') + '/')) return false;
@@ -308,7 +313,10 @@ export async function reubicarPorCdu(doc, nuevaCdu, { recolocar = false } = {}) 
     // ENTERA —el libro Y su material— a la rama nueva. Si lo saltáramos, cambiar la CDU dejaría la carpeta (con
     // sus adjuntos) huérfana en la rama vieja. Se distingue por pertenecer a una colección o ser de esas
     // naturalezas; un libro-con-material no tiene colección.
-    if (doc.ruta_fija && (doc.coleccion || doc.naturaleza === 'audiolibro' || doc.naturaleza === 'software')) {
+    // (12-oct) También el miembro de un árbol preservado que ya no tiene colección (TXtras tras reorganizar-colecciones):
+    // se reconoce por su ruta, «…/audiolibros|transmedia|software/…»; un libro con material vive en «…/libros/…».
+    const enArbolPreservado = doc.ruta_fija && /\/(?:audiolibros|transmedia|software)\//.test(String(doc.ruta_base || ''));
+    if (doc.ruta_fija && (doc.coleccion || doc.naturaleza === 'audiolibro' || doc.naturaleza === 'software' || enArbolPreservado)) {
         return { set: { cdu: destinoCdu }, alertas: ['CDU actualizada en BD; documento de árbol preservado (colección): no se reubica la carpeta.'] };
     }
     if (doc.obra) {

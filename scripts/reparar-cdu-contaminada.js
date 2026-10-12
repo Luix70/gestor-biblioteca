@@ -321,6 +321,18 @@ async function main() {
         }
         // Revisión: si sale la que ya tiene, no hay nada que hacer.
         if (p.inc.revision && nueva === p.doc.cdu) { sinCambio++; continue; }
+        // Revisión: el motor de HOY devuelve la CDU de ANTES de la reparación. Pasa cuando aquella solo se rechazó por
+        // «mal formada» y no lo era (auxiliares especiales «.0»: 82.09, 72.01, 159.9.01; 12-oct). Se devuelve solo si
+        // AFINA la actual (misma rama: 82 → 82.09); si es de otra rama, se deja la de ahora.
+        if (p.inc.revision && nueva === p.inc.cduOriginal) {
+            const numero = (c) => (String(c).match(/^\d[\d.]*/) || [''])[0].replace(/\.$/, '');
+            if (numero(nueva) && numero(p.doc.cdu) && numero(nueva).startsWith(numero(p.doc.cdu))) {
+                cambios.push({ ...p, nueva, origen: 'la de antes: era válida (auxiliar especial «.0»)' });
+            } else {
+                sinCambio++;
+            }
+            continue;
+        }
         // Si no hay nada, o saliera la misma CDU mala, no se toca: mejor igual que peor.
         if (!nueva || nueva === '000' || nueva === p.inc.cduMala || !cduBienFormada(nueva)) {
             if (p.inc.aplazada) pendientes.push(p); else sinSolucion++;

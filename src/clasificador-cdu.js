@@ -294,8 +294,13 @@ export function cduBienFormada(cdu) {
     // cualquier auxiliar. «94(100)"1939/1945"» es una sola faceta.
     const sinAuxiliares = texto.replace(/\([^)]*\)|"[^"]*"/g, ' ');
     for (const faceta of sinAuxiliares.split(/[:+/]/)) {
-        const numero = faceta.trim().match(/^\d+(?:\.\d+)*/)?.[0];
-        if (!numero) continue;                                   // «/.2», un auxiliar suelto: no se juzga
+        const entero = faceta.trim().match(/^\d+(?:\.\d+)*/)?.[0];
+        if (!entero) continue;                                   // «/.2», un auxiliar suelto: no se juzga
+        // Los AUXILIARES ESPECIALES «.0…» (72.01 teoría de la arquitectura, 82.09 crítica literaria, 7.046
+        // iconografía, 159.9.01) van tras el número principal sin la regla de las tres cifras: se juzga solo lo de
+        // ANTES del primer «.0». (12-oct: tomarlos por mal formados hizo que la reparación del 9-oct dejara
+        // «72.01 → 72», «82.09 → 82», y que la ingesta los recortara desde el 30-sep.)
+        const numero = entero.split(/\.(?=0)/)[0];
         const grupos = numero.split('.');
         if (grupos.slice(0, -1).some((g) => g.length !== 3) || grupos[grupos.length - 1].length > 3) return false;
     }

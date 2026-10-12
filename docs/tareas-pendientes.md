@@ -155,6 +155,13 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
        - [ ] revisar ese lote con las reglas nuevas: `… reparar-cdu-contaminada.js --revisar-reparados 2026-10-09` (seco: 132
              cambian, sobre todo «1» → «1(430)») y luego con `--ejecutar`;
        - [ ] el resto por tandas: `… --copia 20261005-160502 --ejecutar --limite 500`, revisando entre tandas;
+       - [x] lotes de 200, 500, 1000, 1000 y 638 (9-oct): 3.344 reparados, todos con carpeta, portada e imágenes al día;
+       - [x] revisión del primer lote (132 → 1(430)…);
+       - [ ] **12-oct: recuperar el detalle de 287** que la reparación recortó por un error de `cduBienFormada` (los
+             auxiliares especiales «.0» —82.09, 72.01, 159.9.01— no son CDU mal formadas): tras desplegar,
+             `… reparar-cdu-contaminada.js --revisar-reparados 2026-10-09` (seco: 287) y `--ejecutar`;
+       - [ ] `recolocar-por-cdu.js`: tras desplegar, repetir el seco (debe quedar en ~5: los 68 de TXtras ya no cuentan,
+             son de un árbol preservado aunque reorganizar-colecciones les quitara la colección) y entonces `--ejecutar`;
        - [ ] revisar a mano la selección «CDU por revisar a mano (reparación sin fuente fiable)» (lista en
              `logs/reparar-cdu-desviados.tsv`). Muchas vienen de equivalencias LCC clase+número aprendidas de UN libro
              («f1435 → 09:93»): ese es el siguiente origen a auditar.
