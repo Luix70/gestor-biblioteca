@@ -37,14 +37,14 @@ const PROYECCION = {
 /** El número principal de una CDU, para comparar ramas: «94(430).085» → «94». */
 const numero = (cdu) => (String(cdu || '').match(/^\d[\d.]*/) || [''])[0].replace(/\.$/, '');
 
-/** ¿«nueva» AFINA a «actual» sin cambiar de rama? (51 → 517, 1 → 1(430); no 82 → 791.43, ni 517 → 51) */
+/**
+ * ¿«nueva» AFINA a «actual»? Tiene que CONTENERLA entera y añadir algo: 51 → 517, 1 → 1(430), 82 → 82.09. Si no,
+ * cambiaría un detalle por otro: «82-312.9 → 821.111(73)» ganaba la literatura pero PERDÍA el género (ciencia
+ * ficción), «598(410) → 598.2» perdía el lugar (seco del 12-oct). Eso no es afinar: lo decide la auditoría.
+ */
 function afina(actual, nueva) {
   if (!nueva || nueva === actual) return false;
-  const a = numero(actual);
-  const n = numero(nueva);
-  if (!a || !n) return false;
-  if (n === a) return String(nueva).startsWith(String(actual)) && nueva.length > actual.length;   // 1 → 1(430)
-  return n.startsWith(a);                                                                         // 51 → 517
+  return String(nueva).startsWith(String(actual)) && Boolean(numero(nueva));
 }
 
 async function main() {
