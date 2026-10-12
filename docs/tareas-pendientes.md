@@ -162,6 +162,10 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
              `… reparar-cdu-contaminada.js --revisar-reparados 2026-10-09` (seco: 287) y `--ejecutar`;
        - [ ] `recolocar-por-cdu.js`: tras desplegar, repetir el seco (debe quedar en ~5: los 68 de TXtras ya no cuentan,
              son de un árbol preservado aunque reorganizar-colecciones les quitara la colección) y entonces `--ejecutar`;
+       - [ ] **12-oct (tarde)**: tras desplegar, `afinar-cdu.js` (seco y luego `--ejecutar --limite 1000`): afina sin IA
+             con los tramos de LCC y el Dewey 19x; y `reparar-cdu-contaminada.js --copia 20261005-160502` en seco: ahora
+             también recoge las equivalencias de la IA que COPIARON el número Dewey como CDU donde no coinciden
+             («181.5 → 181.5», al-Ghazali entre la estética); y `modernizar-cdu.js` (lenguas antiguas 80x: 807.5 → 811.14).
        - [ ] revisar a mano la selección «CDU por revisar a mano (reparación sin fuente fiable)» (lista en
              `logs/reparar-cdu-desviados.tsv`). Muchas vienen de equivalencias LCC clase+número aprendidas de UN libro
              («f1435 → 09:93»): ese es el siguiente origen a auditar.

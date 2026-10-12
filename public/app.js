@@ -3303,13 +3303,42 @@ function filaClas(x, sinSist) {
     x.n > 1
       ? `<a class="cntclas" data-sist="${esc(x.sistema)}" data-cod="${esc(x.codigo)}" title="Ver los ${x.n} documentos">${x.n}</a>`
       : `<span class="muted">${x.n || 1}</span>`;
-  return `<tr>${sinSist ? '' : `<td class="mono muted" style="white-space:nowrap">${esc((x.sistema || '').toUpperCase())}</td>`}<td class="mono" style="white-space:nowrap">${esc(x.codigo)}</td><td>${t} <button class="iclas" data-sist="${esc(x.sistema)}" data-cod="${esc(x.codigo)}" title="Más información sobre esta clasificación">ⓘ</button></td><td style="text-align:right">${cnt}</td></tr>`;
+  return `<tr>${sinSist ? '' : `<td class="mono muted" style="white-space:nowrap">${esc((x.sistema || '').toUpperCase())}</td>`}<td class="mono" style="white-space:nowrap">${esc(x.codigo)}</td><td>${t} <button class="iclas" data-sist="${esc(x.sistema)}" data-cod="${esc(x.codigo)}" title="Más información sobre esta clasificación">ⓘ</button>${x.sistema === 'cdu' && ROL === 'admin' ? ` <button class="regclas" data-cod="${esc(x.codigo)}" title="Rehacer la descripción de este código (sin IA: texto oficial del UDC Summary; o con IA)">↻</button>` : ''}</td><td style="text-align:right">${cnt}</td></tr>`;
 }
 function attachClas(scope) {
   $$(scope + ' .iclas').forEach((b) => (b.onclick = () => infoClasificacion(b.dataset.sist, b.dataset.cod)));
+  $$(scope + ' .regclas').forEach((b) => (b.onclick = () => regenerarDescripcionClas(b.dataset.cod)));
   $$(scope + ' .cntclas').forEach(
     (b) => (b.onclick = () => filtrarPorClasificacion(b.dataset.sist, b.dataset.cod)),
   );
+}
+// Rehacer la descripción de un código CDU: sin IA (texto oficial del UDC Summary, o compuesto con sus piezas
+// oficiales) o con IA (con referencias). El resultado se enseña en el mismo modal que el ⓘ.
+function regenerarDescripcionClas(cod) {
+  $('#cmpModal').innerHTML =
+    `<div class="box card" style="max-width:520px"><h3 style="margin-top:0">Rehacer la descripción · CDU <span class="mono">${esc(cod)}</span></h3>` +
+    `<p class="muted" style="font-size:13px;line-height:1.5">Solo cambia el texto que explica el código (el ⓘ); la CDU de los libros no se toca. La descripción de ahora se guarda por si hay que volver a ella.</p>` +
+    `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" id="regSinIA">Sin IA (UDC Summary)</button><button class="btn" id="regConIA">Con IA</button><button class="btn" id="regCerrar">Cancelar</button></div>` +
+    `<div id="regEstado" class="muted" style="margin-top:10px;font-size:13px"></div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#regCerrar').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  const lanzar = async (conIA) => {
+    $('#regSinIA').disabled = $('#regConIA').disabled = true;
+    $('#regEstado').textContent = conIA ? 'Pidiendo la descripción a la IA…' : 'Buscando en el UDC Summary…';
+    try {
+      const r = await api('/clasificacion/regenerar', { method: 'POST', body: JSON.stringify({ codigo: cod, conIA }) });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo');
+      infoClasificacion('cdu', cod);
+      toast('Descripción rehecha');
+    } catch (e) {
+      $('#regEstado').textContent = '⚠ ' + e.message;
+      $('#regSinIA').disabled = $('#regConIA').disabled = false;
+    }
+  };
+  $('#regSinIA').onclick = () => lanzar(false);
+  $('#regConIA').onclick = () => lanzar(true);
 }
 async function infoClasificacion(sist, cod) {
   $('#cmpModal').innerHTML =
@@ -3326,7 +3355,7 @@ async function infoClasificacion(sist, cod) {
     if (!b) return;
     b.classList.remove('muted');
     b.innerHTML = r.ok
-      ? `${r.titulo ? `<div style="font-weight:600;margin-bottom:8px">${esc(r.titulo)}</div>` : ''}<div style="line-height:1.65;font-size:13px">${esc(r.descripcion || 'Sin descripción disponible (la IA no la generó).')}</div>${r.fuente === 'udcs' ? '<div class="muted" style="margin-top:10px;font-size:11px">Texto oficial del UDC Summary · © UDC Consortium · <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a></div>' : (r.fuente === 'ia' ? '<div class="muted" style="margin-top:10px;font-size:11px">Descripción redactada por IA (sin verificar)</div>' : '')}`
+      ? `${r.titulo ? `<div style="font-weight:600;margin-bottom:8px">${esc(r.titulo)}</div>` : ''}<div style="line-height:1.65;font-size:13px">${esc(r.descripcion || 'Sin descripción disponible (la IA no la generó).')}</div>${r.fuente === 'udcs' ? '<div class="muted" style="margin-top:10px;font-size:11px">Texto oficial del UDC Summary · © UDC Consortium · <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a></div>' : (r.fuente === 'ia' ? '<div class="muted" style="margin-top:10px;font-size:11px">Descripción redactada por IA (sin verificar)</div>' : r.fuente === 'udcs-compuesta' ? '<div class="muted" style="margin-top:10px;font-size:11px">Compuesta sin IA con piezas del UDC Summary · © UDC Consortium · <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a></div>' : '')}`
       : `<span class="muted">${esc(r.motivo || 'no disponible')}</span>`;
   } catch (e) {
     const b = $('#iclasBody');

@@ -78,7 +78,7 @@ import { estadoVision, configurarProveedor, probarProveedor } from './utils/visi
 import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
 import { fuentesCopia, procesarSaneamiento, estadoSaneamiento, repararDeposito, rutaReemplazo, descartarReemplazo } from './utils/saneamiento.js';
-import { describirCDU } from './utils/descripcion-cdu.js';
+import { describirCDU, regenerarDescripcionCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion } from './utils/descripcion-clasificacion.js';
 import { altaPorISBN } from './servicio-ingesta.js';
 import { medirPortadaRemota, portadasPorISBN } from './utils/portadas-isbn.js';
@@ -3268,6 +3268,18 @@ export function rutasPanel() {
     // Descripción (título conciso + texto extenso, ES) de un código de clasificación — de CACHÉ o
     // generada por IA al momento. CDU → cdu_descripciones/describirCDU; Dewey/LCC →
     // clasificacion_descripciones/describirClasificacion. Alimenta el popup ⓘ de la ficha/dashboard.
+    // REHACER la descripción de un código CDU (botón «↻» junto a la CDU en la ficha; solo admin, como todo lo que no
+    // es GET). { codigo, conIA }: sin IA = texto oficial del UDC Summary o compuesto con sus piezas oficiales.
+    r.post('/clasificacion/regenerar', async (req, res) => {
+        try {
+            const codigo = String(req.body?.codigo || '').trim();
+            if (!codigo) return res.status(400).json({ ok: false, motivo: 'falta el código' });
+            const db = await conectarDB();
+            const d = await regenerarDescripcionCDU(db, codigo, { conIA: !!req.body?.conIA });
+            res.json({ ok: true, titulo: d.titulo_es, descripcion: d.descripcion_es, fuente: d.fuente });
+        } catch (e) { res.status(422).json({ ok: false, motivo: e.message }); }
+    });
+
     r.get('/clasificacion', async (req, res) => {
         try {
             const sistema = String(req.query.sistema || '').toLowerCase();

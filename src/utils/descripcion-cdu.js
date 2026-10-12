@@ -240,6 +240,68 @@ export async function sembrarDescripcionCDU(db, cdu, datos = {}) {
  *
  * @returns el documento de descripción (existente o nuevo) o null.
  */
+/**
+ * REHACER la descripción de un código a petición (botón «↻» junto a la CDU en la ficha, 12-oct).
+ *   · sin IA: el texto OFICIAL del UDC Summary si el código está en él; si no, una descripción COMPUESTA con el
+ *     significado oficial de sus piezas (número y antepasados, lugar, lengua). Si no hay ninguna pieza oficial, no
+ *     se inventa nada: lanza («usa la opción con IA»).
+ *   · con IA: generada con referencias y con la NOTACIÓN real del libro (no la clave limpia).
+ * La que hubiera se copia antes en cdu_descripciones_retiradas. Devuelve la nueva.
+ */
+export async function regenerarDescripcionCDU(db, cdu, { conIA = false } = {}) {
+    const codigo = sanitizarCDU(cdu);
+    if (!codigo || !/[0-9]/.test(codigo)) throw new Error('código sin parte codificable');
+    const notacion = String(cdu).trim();
+    let datos;
+    let fuente;
+    if (conIA) {
+        datos = await generarIA(db, codigo, { notacion });
+        fuente = 'ia';
+    } else {
+        // ¿Está tal cual en el UDC Summary? (por su notación, que empiece por cifra; la clave sola no basta)
+        const oficial = await db.collection('udc_summary').findOne({ _id: notacion }) ||
+            await db.collection('udc_summary').findOne({ clave: codigo, _id: { $regex: '^[0-9]' } });
+        if (oficial) {
+            const texto = (lado) => [lado?.titulo ? `${lado.titulo}.` : '', ...(lado?.notas || []).map((n) => n.texto)].filter(Boolean).join('\n\n');
+            datos = {
+                titulo_es: oficial.es?.titulo || oficial.en?.titulo || null, descripcion_es: texto(oficial.es) || texto(oficial.en) || null,
+                titulo_en: oficial.en?.titulo || null, descripcion_en: texto(oficial.en) || null,
+            };
+            fuente = 'udcs';
+        } else {
+            const piezas = await referenciasOficiales(db, notacion);
+            if (!piezas.length) throw new Error('ninguna pieza de este código está en el UDC Summary: usa la opción con IA');
+            const limpia = (p) => p.replace(/\s*\[UDC Summary oficial\]$/, '');
+            // El título: el significado del número más concreto, y el del lugar y la lengua más concretos si los hay
+            // («94(430).085» → «Historia general — Alemania»). Las piezas vienen de la más corta a la más larga.
+            const significado = (p) => limpia(p).split(' = ').slice(1).join(' = ').replace(/\s*\(en: .*\)$/, '').split('. ')[0];
+            const ultima = (re) => piezas.filter((p) => re.test(p)).pop();
+            const partes = [ultima(/^\d/), ultima(/^\(/), ultima(/^=/)].filter(Boolean).map(significado);
+            datos = {
+                titulo_es: `${partes.join(' — ')} (subdivisión ${notacion})`,
+                descripcion_es: `Descripción compuesta, sin IA, con el significado oficial de sus piezas (UDC Summary):\n${piezas.map((p) => `· ${limpia(p)}`).join('\n')}`,
+                titulo_en: null, descripcion_en: null,
+            };
+            fuente = 'udcs-compuesta';
+        }
+    }
+    const col = db.collection('cdu_descripciones');
+    const vieja = await col.findOne({ codigo });
+    if (vieja) {
+        const { _id, ...copia } = vieja;
+        await db.collection('cdu_descripciones_retiradas').insertOne({ ...copia, _id_original: _id, retirada: { fecha: new Date(), motivo: `regenerada desde la ficha (${conIA ? 'con IA' : 'sin IA'})` } });
+    }
+    const { clase, division } = arbolCDU(cdu);
+    const doc = {
+        codigo, clase, division,
+        titulo_es: datos.titulo_es || null, descripcion_es: datos.descripcion_es || null,
+        titulo_en: datos.titulo_en || null, descripcion_en: datos.descripcion_en || null,
+        fuente, verificado: fuente === 'udcs', fecha: new Date(), revisada: { fecha: new Date(), motivo: 'regenerada desde la ficha' },
+    };
+    await col.updateOne({ codigo }, { $set: doc }, { upsert: true });
+    return doc;
+}
+
 export async function describirCDU(db, cdu) {
     const codigo = sanitizarCDU(cdu);
     if (!codigo || !/[0-9]/.test(codigo)) return null; // sin parte codificable

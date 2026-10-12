@@ -111,8 +111,22 @@ function historiaModerna(numero) {
 }
 
 /** Traduce el número principal de una faceta (sin auxiliares). Devuelve el mismo si no hay nada que traducir. */
+// ─── Lenguas: notación anterior a 1993 (80x) → moderna (811.x). 12-oct: «807.5'36» (gramática GRIEGA, «Syntax of the
+// Moods and Tenses of the Greek Verb») se describía como «retórica política» porque nadie reconocía el 807.5. Solo
+// las que no admiten duda: el 801 y el 808 se dejan (el 808 de hoy es retórica, y el antiguo era el ruso).
+const LENGUA_ANTIGUA = {
+    '802.0': '811.111',      // inglés
+    '803.0': '811.112.2',    // alemán
+    '804.0': '811.133.1',    // francés
+    '805.0': '811.131.1',    // italiano
+    '806.0': '811.134.2',    // español
+    '807.1': '811.124',      // latín
+    '807.5': '811.14',       // griego
+};
+
 function numeroModerno(numero) {
     if (LITERATURA_ANTIGUA[numero]) return LITERATURA_ANTIGUA[numero];
+    if (LENGUA_ANTIGUA[numero]) return LENGUA_ANTIGUA[numero];
     // Historia y crítica de una literatura: «860.09» → «821.134.2.09».
     const critica = numero.match(/^(\d{3}(?:\.\d+)?)(\.0\d*)$/);
     if (critica && LITERATURA_ANTIGUA[critica[1]]) return LITERATURA_ANTIGUA[critica[1]] + critica[2];

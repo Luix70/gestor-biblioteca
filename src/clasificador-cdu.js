@@ -82,6 +82,16 @@ export function equivalenciaUsable(sistema, codigo, eq) {
     }
     const d = (cod.match(/\d{3}/) || [])[0];
     if (!d) return { usable: true, motivo: null };
+    // 5. La IA COPIÓ el número Dewey como CDU, en una división donde los dos sistemas NO coinciden (12-oct: «dewey
+    //    181.5 → 181.5»: en Dewey es filosofía islámica; en la CDU, 18 es ESTÉTICA, y al-Ghazali acabó entre libros de
+    //    estética). Coinciden en ciencias, técnica, artes, informática y casi toda la 3; divergen 13 (paranormal ≠
+    //    filosofía de la mente), 15 (psicología → 159.9), 18-19, la 2 (reorganizada), 38, la 4 (lengua → 81), la 8
+    //    (literatura → 82) y la historia 92-99.
+    const principal = (cdu.match(/^\d[\d.]*/) || [''])[0];
+    const esCopia = principal && principal.replace(/\./g, '') === cod.replace(/[^\d]/g, '');
+    const div2 = d.slice(0, 2);
+    const divergen = ['13', '15', '18', '19', '38'].includes(div2) || '248'.includes(d[0]) || (d[0] === '9' && div2 !== '91');
+    if (esCopia && divergen) return { usable: false, motivo: `copia el número Dewey ${cod} como CDU, y en esa división no coinciden` };
     // Las reglas 3 y 4 son para el Dewey AMPLIO (tres cifras sin decimales: «520», «973»), que abarca muchos libros
     // distintos. Un Dewey CONCRETO sí puede cambiar de clase con razón: «652.80151 → 003.26» (la criptografía cae
     // en el 652 de Dewey por una rareza de su jerarquía; en la CDU es 003), «621.39 → 004».
@@ -181,7 +191,9 @@ const LCC_A_CDU = {
     A: '0', AE: '03', AM: '069', AN: '070', AP: '05', AZ: '001',
     // Filosofía · psicología · religión
     B: '1', BC: '16', BD: '11', BF: '159.9', BH: '18', BJ: '17',
-    BL: '2', BM: '2', BP: '2', BQ: '2', BR: '2', BS: '2', BT: '2', BV: '2', BX: '2',
+    // Religiones con su división MODERNA de la CDU (12-oct; antes todas a «2»): BM judaísmo 26, BP islam 28,
+    // BQ budismo 24, BR-BX cristianismo 27. BL (religión en general, mitologías) se queda en 2.
+    BL: '2', BM: '26', BP: '28', BQ: '24', BR: '27', BS: '27', BT: '27', BV: '27', BX: '27',
     // Ciencias auxiliares de la historia · genealogía/biografía  (D/E/F historia → diferido, necesita área)
     C: '93', CS: '929', CT: '929',
     // Geografía · antropología · folclore · deporte
@@ -202,6 +214,8 @@ const LCC_A_CDU = {
     // Medicina · agricultura · técnica
     R: '61', S: '63', T: '6',
     TK: '621.3', TP: '66',             // electrotecnia · tecnología química
+    // (12-oct) Subclases de la T que coinciden con una división de la CDU (antes caían en el «6» genérico).
+    TA: '62', TC: '626', TD: '628', TH: '69', TJ: '621', TL: '629', TN: '622', TR: '77', TS: '67', TX: '64',
     // Ciencia militar · naval · biblioteconomía
     U: '355', V: '359', Z: '02',
 };
@@ -360,10 +374,48 @@ const REGLAS_NOTACION_CDU = `═══ CÓMO SE ESCRIBE UNA CDU (compruébalo AN
 - Historia: 94 + lugar + época: 94(460)"19" (España, s. XX), 94(6) (África). MAL: «94.02(6)».
 - Si dudas de una subdivisión, quédate en el nivel superior VÁLIDO (94(6) mejor que inventar 94.02(6)).`;
 
+// LCC por TRAMOS DE NÚMERO dentro de una clase (12-oct). La tabla de arriba va por clase (QA → 51), y dentro de una
+// clase el número dice mucho: «Calculus» (QA303) es análisis (517), no «matemáticas» a secas; Nietzsche (B3311) es
+// filosofía ALEMANA, 1(430). Solo tramos SEGUROS del esquema de la Library of Congress; el más concreto va antes.
+// Un resultado por tramo NUNCA se aprende como equivalencia de la clase (sería repetir el error de «qa → 004.8»).
+const LCC_RANGOS = {
+    QA: [[75, 76.999, '004'], [241, 247.999, '511'], [150, 272.999, '512'], [273, 280.999, '519.2'],
+        [297, 299.999, '519.6'], [300, 433.999, '517'], [440, 699.999, '514'], [801, 939.999, '531']],
+    QB: [[500, 785.999, '523'], [980, 991.999, '524.8'], [799, 903.999, '524']],
+    QC: [[173.96, 174.999, '530.145'], [170, 197.999, '539.1'], [221, 246.999, '534'], [251, 338.999, '536'],
+        [350, 467.999, '535'], [501, 766.999, '537'], [770, 798.999, '539.1'], [801, 809.999, '550.3'], [851, 999.999, '551.5']],
+    QD: [[71, 142.999, '543'], [146, 199.999, '546'], [241, 441.999, '547'], [450, 801.999, '544'], [901, 999.999, '548']],
+    QE: [[351, 399.999, '549'], [420, 499.999, '552'], [701, 760.999, '56']],
+    QH: [[426, 470.999, '575'], [540, 549.999, '574'], [573, 671.999, '576.3']],
+    QL: [[461, 599.999, '595.7'], [614, 639.999, '597'], [640, 669.999, '597.6'], [671, 699.999, '598.2'], [700, 739.999, '599']],
+    // Filosofía moderna por países (la misma regla que el Dewey 19x).
+    B: [[851, 945.999, '1(73)'], [1111, 1674.999, '1(410)'], [1801, 2430.999, '1(44)'], [2521, 3396.999, '1(430)'], [3551, 3636.999, '1(450)']],
+    BP: [[500, 610.999, '2']],          // teosofía y movimientos nuevos: no es islam
+    PN: [[1560, 1590.999, '792'], [1991, 1992.999, '654.19'], [1993, 1999.999, '791.43'], [2000, 3307.999, '792'], [4699, 5650.999, '070']],
+    HF: [[5410, 5417.999, '658.8'], [5601, 5689.999, '657'], [5001, 6182.999, '658']],
+    HD: [[4801, 8943.999, '331']],
+    TK: [[5105.5, 5105.999, '004.7'], [7885, 7895.999, '004'], [5101, 6720.999, '621.39'], [7800, 8360.999, '621.38']],
+};
+
+/** El número de una signatura LCC tras sus letras: «QA303.2.L367» → 303.2; «QA-0076.9…» → 76.9; sin número → NaN. */
+function numeroDeLcc(codigo) {
+    return parseFloat(String(codigo || '').trim().toUpperCase().replace(/^[A-Z]{1,3}/, '').replace(/^[^0-9]+/, ''));
+}
+
+/** La CDU por el TRAMO de número de la signatura, o null (sin tramo conocido, o sin número). */
+export function lccPorRango(codigo) {
+    const letras = claseLcc(codigo);
+    const n = numeroDeLcc(codigo);
+    if (!letras || !Number.isFinite(n)) return null;
+    const tramos = LCC_RANGOS[letras] || LCC_RANGOS[letras.slice(0, 2)] || (letras.length === 1 ? null : null);
+    const tramo = (tramos || []).find(([desde, hasta]) => n >= desde && n <= hasta);
+    return tramo ? tramo[2] : null;
+}
+
 function lccACDU(codigo) {
     const letras = claseLcc(codigo);
     if (!letras) return null;
-    return LCC_A_CDU[letras.slice(0, 2)] || LCC_A_CDU[letras[0]] || null;
+    return lccPorRango(codigo) || LCC_A_CDU[letras.slice(0, 2)] || LCC_A_CDU[letras[0]] || null;
 }
 
 /**
@@ -562,6 +614,17 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
     //    y evita re-consultar la IA por CADA libro de literatura (el gran gasto en lotes de humanidades).
     const esLit = esFiccionLiteratura({ dewey, lcc, categorias });
     for (const [sistema, codigo] of candidatos) {
+        // EL LCC: LA TABLA ANTES QUE LA CACHÉ (12-oct). La caché del LCC va por CLASE («qa»), y una entrada de clase
+        // no puede saber más que la tabla curada (que ahora además mira el TRAMO del número: QA303 → 517). La caché
+        // solo decide en las clases que la tabla aplaza (historia D/E/F, literaturas PQ/PT…: por clase + número).
+        // Lo resuelto por TRAMO no se aprende para la clase (sería servir «517» a todo el QA).
+        if (sistema === 'lcc' && lcc) {
+            const tablaLcc = lccACDU(lcc);
+            if (tablaLcc) {
+                await enseñarBandas(tablaLcc, 'lcc', lccPorRango(lcc) ? null : 'Manual');
+                return { cdu: tablaLcc, fuente: 'api:lcc', aprendida: false };
+            }
+        }
         // EL DEWEY ANTES QUE EL LCC (9-oct). Si el Dewey no tiene caché utilizable, su TABLA se consulta aquí mismo,
         // antes de pasar a la caché del LCC: si no, «After Nietzsche» (Dewey 193 = filosofía alemana, LCC dudoso «M27»)
         // salía 78 —música— por la caché «lcc m», y la tabla del Dewey (193 → 1(430)) ni se miraba.
@@ -569,6 +632,10 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
             if (sistema !== 'dewey') return null;
             const ext = await buscarEquivalenciaExterna('dewey', codigo);
             if (!ext) return null;
+            // La tabla del Dewey es gruesa a propósito (515 → «51»): si el TRAMO del LCC del mismo libro la AFINA
+            // dentro de la misma rama (QA303 → 517), manda el tramo.
+            const fino = lcc ? lccPorRango(lcc) : null;
+            if (fino && fino !== ext && fino.startsWith(ext)) return { cdu: fino, fuente: 'api:lcc', aprendida: false };
             await enseñarBandas(ext, 'dewey', 'Manual');
             return { cdu: ext, fuente: 'api:dewey', aprendida: false };
         };
