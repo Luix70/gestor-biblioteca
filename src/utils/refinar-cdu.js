@@ -80,6 +80,9 @@ export function componerRefinada(actual, nueva) {
     const pa = principal(a);
     if (!principal(n).startsWith(pa) || principal(n) === pa && n === a) return null;
     const cola = a.slice(pa.length);
+    // Un RANGO («5/6» ciencias puras y aplicadas, «51/53») abarca varias ramas: no se refina. Si no, «5/6(035.062)»
+    // + 52 daba «52/6(035.062)», que no significa nada (2 libros el 13-oct).
+    if (cola.startsWith('/')) return null;
     if (cola && !n.includes(cola)) n = `${n}${cola}`;
   }
   if (!cduBienFormada(n) || esCduGruesa(n) && principal(n) === principal(a)) return null;

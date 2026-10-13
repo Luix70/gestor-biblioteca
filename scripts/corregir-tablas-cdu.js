@@ -66,6 +66,14 @@ for (const d of conLcc) {
 }
 p.fin();
 
+// 3. La primera ejecución de refinar-cdu (13-oct) «refinó» dos CDU con RANGO («5/6(035.062)» → «52/6(035.062)»,
+// «51/53(091)» → «517/53(091)»): sin sentido. Vuelven a la que tenían, que está en su alerta.
+for (const d of await col.find({ alertas_agente: { $elemMatch: { $regex: '^CDU refinada: «[0-9]{1,2}/' } }, cdu_manual: { $ne: true } }).toArray()) {
+  const alerta = [...d.alertas_agente].reverse().find((a) => /^CDU refinada: «[0-9]{1,2}\//.test(a));
+  const m = alerta.match(/^CDU refinada: «([^»]+)» → «([^»]+)»/);
+  if (m && d.cdu === m[2]) cambios.push({ doc: d, nueva: m[1], motivo: 'un rango de CDU no se refina: vuelve a la que tenía' });
+}
+
 console.log(`\nLibros a corregir: ${cambios.length}`);
 for (const c of cambios.slice(0, 60)) console.log(`   ${String(c.doc.cdu).padEnd(14)} → ${String(c.nueva).padEnd(14)} «${String(c.doc.titulo || '').slice(0, 50)}»`);
 
