@@ -30,19 +30,19 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
 **Mueve carpetas: copia del disco antes.**
 
 ### 1.2 bis Prefijo de subida en nombres, títulos e ISBN (8-oct) — en el NAS (renombra ficheros)
-- [ ] Desplegar (la subida ya no antepone la hora; el lector de ISBN ya no toma cifras dentro de un número más largo).
-- [ ] Copia; `sudo docker exec -it gestor-biblioteca node scripts/quitar-prefijo-subida.js` (en seco 8-oct: 319 documentos — ficheros
+- [x] Desplegar (la subida ya no antepone la hora; el lector de ISBN ya no toma cifras dentro de un número más largo).
+- [x] Copia; `sudo docker exec -it gestor-biblioteca node scripts/quitar-prefijo-subida.js` (en seco 8-oct: 319 documentos — ficheros
       con «1791441939492-…» delante, algunos títulos y 10 ISBN falsos sacados del prefijo, p. ej. «1791441939» compartido
       por 5 libros) y `--ejecutar`. Los que se quedan sin ISBN los recoge la campaña «Recuperar ISBN que faltan».
 
 ### 1.2 ter Descripciones de CDU inventadas (8-oct) — solo BD, IA de texto barata
-- [ ] Desplegar (la IA describe cada código con la tabla de su clase/división, sus lugares, la descripción del padre y
+- [x] Desplegar (la IA describe cada código con la tabla de su clase/división, sus lugares, la descripción del padre y
       la Dewey/LCC de la que salió; no se guarda una que contradiga su división).
 - [x] **HECHO 8-oct** (2.466 códigos; 1.076 descripciones nuevas, 771 de IA sustituidas). Importar el **UDC Summary** oficial (es + en, ~2.430 códigos): `sudo docker exec -it gestor-biblioteca node
       scripts/importar-udc-summary.js` (descarga ~40 min la primera vez, a la caché `logs/udcs/`; en seco no escribe) y
       luego `--ejecutar` (usa la caché). Sus códigos pasan a descripción oficial verificada (`fuente:'udcs'`; la de IA
       se copia a `cdu_descripciones_retiradas`) y la IA recibe sus antepasados oficiales como referencia obligatoria.
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/regenerar-descripciones-cdu.js` (en seco 8-oct: ~300 incoherentes, p. ej.
+- [x] `sudo docker exec -it gestor-biblioteca node scripts/regenerar-descripciones-cdu.js` (en seco 8-oct: ~300 incoherentes, p. ej.
       «94(430).085» = «Geología de la Antártida») y `--ejecutar --regenerar` (o sin `--regenerar`: las rehace Mantenimiento
       poco a poco). `--lugar` añade las que nombran otro lugar (más ruidosa: mirar la lista).
 - [x] Resultado (8-oct): las 306 se retiraron por la mañana y Mantenimiento rehízo 281 (175 códigos con libros, 441 libros);
@@ -50,7 +50,7 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
       «Historiografía… España»). El detector era demasiado estricto con la clase 94 (retiraba «Genocidio», «Administración
       Johnson» por no decir «historia»); arreglado: vale cualquier palabra de acontecimiento, época o poder. Las de IA que
       queden mal se tratan en la §4, fase 4 (rehacer por tandas con las referencias oficiales del UDC Summary).
-- [ ] **Revisar todas las descripciones de IA contra el UDC Summary** (solo descripciones: no cambia ninguna CDU ni mueve
+- [x] **Revisar todas las descripciones de IA contra el UDC Summary** (solo descripciones: no cambia ninguna CDU ni mueve
       nada): `sudo docker exec -it gestor-biblioteca node scripts/revisar-descripciones-cdu.js` (en seco: cuenta las
       cortadas —476— y la IA juzga las ~1.400 sospechosas en ~56 llamadas baratas; guarda los veredictos) y luego
       `--ejecutar` (rehace las cortadas y las incoherentes, ~900 llamadas; la vieja a cdu_descripciones_retiradas).
@@ -152,21 +152,21 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
      Conformador con IA, 790 a mano, 332 manuales intactos. En el NAS (tras desplegar):
        - [x] copia (CopiaBase.ps1, 9-oct 10:33) y copia de disco de esa noche;
        - [x] primer lote de 200 (9-oct);
-       - [ ] revisar ese lote con las reglas nuevas: `… reparar-cdu-contaminada.js --revisar-reparados 2026-10-09` (seco: 132
+       - [x] revisar ese lote con las reglas nuevas: `… reparar-cdu-contaminada.js --revisar-reparados 2026-10-09` (seco: 132
              cambian, sobre todo «1» → «1(430)») y luego con `--ejecutar`;
-       - [ ] el resto por tandas: `… --copia 20261005-160502 --ejecutar --limite 500`, revisando entre tandas;
+       - [x] el resto por tandas: `… --copia 20261005-160502 --ejecutar --limite 500`, revisando entre tandas;
        - [x] lotes de 200, 500, 1000, 1000 y 638 (9-oct): 3.344 reparados, todos con carpeta, portada e imágenes al día;
        - [x] revisión del primer lote (132 → 1(430)…);
-       - [ ] **12-oct: recuperar el detalle de 287** que la reparación recortó por un error de `cduBienFormada` (los
+       - [x] **12-oct: recuperar el detalle de 287** que la reparación recortó por un error de `cduBienFormada` (los
              auxiliares especiales «.0» —82.09, 72.01, 159.9.01— no son CDU mal formadas): tras desplegar,
              `… reparar-cdu-contaminada.js --revisar-reparados 2026-10-09` (seco: 287) y `--ejecutar`;
-       - [ ] `recolocar-por-cdu.js`: tras desplegar, repetir el seco (debe quedar en ~5: los 68 de TXtras ya no cuentan,
+       - [x] `recolocar-por-cdu.js`: tras desplegar, repetir el seco (debe quedar en ~5: los 68 de TXtras ya no cuentan,
              son de un árbol preservado aunque reorganizar-colecciones les quitara la colección) y entonces `--ejecutar`;
-       - [ ] **12-oct (tarde)**: tras desplegar, `afinar-cdu.js` (seco y luego `--ejecutar --limite 1000`): afina sin IA
+       - [x] **12-oct (tarde)**: tras desplegar, `afinar-cdu.js` (seco y luego `--ejecutar --limite 1000`): afina sin IA
              con los tramos de LCC y el Dewey 19x; y `reparar-cdu-contaminada.js --copia 20261005-160502` en seco: ahora
              también recoge las equivalencias de la IA que COPIARON el número Dewey como CDU donde no coinciden
              («181.5 → 181.5», al-Ghazali entre la estética); y `modernizar-cdu.js` (lenguas antiguas 80x: 807.5 → 811.14).
-       - [ ] **13-oct**: `corregir-cdu-religion.js` (seco: 21 equivalencias + ~65 libros): la tabla tenía la clase 2 ANTIGUA
+       - [x] **13-oct**: `corregir-cdu-religion.js` (seco: 21 equivalencias + ~65 libros): la tabla tenía la clase 2 ANTIGUA
              (Dewey 220 Biblia → «22», que hoy es religiones del Lejano Oriente; 230 → «23», hoy hinduismo) → 27. Antes
              de afinar-cdu.js, que ahora solo usa la tabla determinista (nunca la caché: «641.5 → 641.5(540)»).
        - [ ] **13-oct (tarde)**: tablas deterministas mucho más finas (Dewey alineado a 3 cifras en medicina, ingeniería,
@@ -177,7 +177,14 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
        - [x] **13-oct**: referencias oficiales de Dewey y LCC importadas (clasificacion_oficial: 907 secciones DDC + 9.673
              rangos del LC Outline). El LCC se describe ya sin IA con el Outline; el Dewey con IA y referencias. ↻ en las
              tres filas de la ficha. Mantenimiento ya no describe Dewey/LCC por lotes sin referencias.
-       - [ ] títulos del LCC en español: `… importar-referencias-clasificacion.js --traducir` (IA, ~160 llamadas);
+       - [x] títulos del LCC en español: `… importar-referencias-clasificacion.js --traducir` (IA, ~160 llamadas);
+       - [ ] **ORDEN tras c37cccf (revisado 13-oct 13:15 contra logs/scripts del NAS)**: el modernizar-cdu de las 09:54 y el
+             afinar-cdu de las 11:47 corrieron ANTES de 5c5199c (quedan 171 libros en la clase 4 antigua) → copia (PC) ·
+             modernizar-cdu (seco, --ejecutar) · afinar-cdu (seco, --ejecutar hasta 0) · recolocar-por-cdu (seco, --ejecutar)
+             · integridad --informe (y --reparar) · reindexar-busqueda · auditar-cdu · revisar-descripciones-cdu (seco).
+       - [ ] a mano: 6a3b20a71c900068144ebe66 «Ten Physical Applications Of Spectral Zeta Functions» es un LIBRO de Lecture
+             Notes in Physics (ISSN de serie 0075-8450) catalogado como revista en la CDU 82, sin carpeta en disco; y dos
+             números de «Marketing» (6a3e3957…, 6a3e39a6…, CDU 339.13) con ruta_base 658.8 que no existe en disco.
        - [ ] revisión de las descripciones del Dewey (11.644; prueba con 50: 8 incoherentes —«830 = Literatura española»—):
              encender la campaña «🤖🆓 Revisar descripciones Dewey» (solo IA gratis, escalonada), o de golpe
              `… revisar-descripciones-dewey.js --ejecutar` (reutiliza los veredictos del seco).
