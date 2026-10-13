@@ -52,7 +52,9 @@ const numeroBueno = (c) => {
   const m = String(c || '').trim().toUpperCase().replace(/^[A-Z]{1,3}/, '').replace(/^[^0-9]+/, '').match(/^\d+(?:\.\d+)?/);
   return m ? Number(m[0]) : NaN;
 };
-const conLcc = await col.find({ lcc: { $type: 'string' }, cdu_manual: { $ne: true } }).toArray();
+// Solo los campos que se miran (traer los ~25.000 documentos enteros tardaba muchos minutos sin enseñar progreso en el
+// NAS); el documento completo, solo de los que se van a cambiar.
+const conLcc = await col.find({ lcc: { $type: 'string' }, cdu_manual: { $ne: true } }, { projection: { lcc: 1, cdu: 1, cdu_fuente: 1, titulo: 1 } }).toArray();
 const p = progreso(conLcc.length, 'LCC con marca en «E»');
 for (const d of conLcc) {
   p.paso(d.titulo);
@@ -62,7 +64,7 @@ for (const d of conLcc) {
   const conFallo = await buscarEquivalenciaExterna('lcc', claseLcc(d.lcc));            // lo que daba: la de la clase
   const ahora = await buscarEquivalenciaExterna('lcc', d.lcc);
   if (!ahora || String(d.cdu) !== String(conFallo) || ahora === conFallo) continue;
-  cambios.push({ doc: d, nueva: ahora, motivo: `LCC ${d.lcc}: su número se leía mal («.E…» como exponente) y la tabla daba la clase entera` });
+  cambios.push({ doc: await col.findOne({ _id: d._id }), nueva: ahora, motivo: `LCC ${d.lcc}: su número se leía mal («.E…» como exponente) y la tabla daba la clase entera` });
 }
 p.fin();
 
