@@ -1256,6 +1256,19 @@ de ficheros clasificado por CDU.
     Arreglo de lo ya guardado: `scripts/modernizar-cdu.js` (en seco por defecto; `--ejecutar`): fase 1 pasa cdu,
     cdu_autoridad y la caché equivalencias_cdu a notación moderna; fase 2 recoloca las carpetas (medido el 30-sep:
     474 CDU antiguas y 791 carpetas, 342 de ellas juveniles).
+    RELIGIÓN, CLASE 2 (13-oct): la única clase que se REHIZO entera (revisión de 2000). La antigua seguía al Dewey
+    (22 Biblia, 23 dogmática, 24 devoción, 25 pastoral, 26 Iglesia, 27 historia de la Iglesia, 28 iglesias
+    cristianas —282 católica—, 29 no cristianas —296 judaísmo, 297 islam—); la actual va por religiones (21
+    primitivas, 22 Lejano Oriente, 23 hinduismo, 24 budismo, 25 Antigüedad, 26 judaísmo, 27 cristianismo, 28 islam,
+    29 movimientos modernos). Así un «282» antiguo de la BNE dejaba un libro católico bajo el islam. Como el mismo
+    número vale en los dos esquemas, la traducción (src/utils/cdu-religion.js) mira el LIBRO (Dewey, LCC, título,
+    materias): un número que no existe hoy (220, 231, 248, 289, 29x…) se traduce; uno que vale en los dos (26x,
+    28x, 241-244, 25x…) solo si el libro confirma la lectura antigua; el 27x no se toca (cristianismo en los dos).
+    Una CDU la escribe UN catalogador: si una faceta es antigua sin duda, las demás también («225:296» → «27-23:26»);
+    nunca se deja a medio traducir. Se aplica al ingerir (motor-catalogo) y al llegar una CDU de la BNE a un libro
+    ya catalogado (aplicarCduConPrioridad). Lo ya guardado: `scripts/modernizar-cdu-religion.js` (en seco; seco del
+    13-oct: 643 libros, 407 equivalencias de la caché, 40 dudosas → selección «CDU de religión por revisar», 60
+    puestas a mano que no toca y lista).
     EDITORIALES (2026-09-30): distribuidores fuera (`editoriales-falsas`: Distribooks, «… Distributing», «…
     Inventory», Libros Sin Fronteras); nombre limpio de puntuación ISBD al crear la editorial en todos los puntos
     (`limpiarNombreEditorial`: «Valdemar,» → Valdemar, «Ultramar.» → Ultramar, «Alianza, etc» → Alianza, «[Destino»

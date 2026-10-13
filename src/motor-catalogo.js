@@ -12,6 +12,7 @@ import { esAutorArtefacto } from './utils/parsear-nombre.js';
 import { ROLES_VALIDOS, esComicPorDatos, promoverIlustradorSiComic } from './utils/contribuciones.js';
 import { limpiarNombreEditorial } from './utils/editoriales-falsas.js';
 import { modernizarCDU } from './utils/cdu-moderna.js';
+import { cduReligionModerna } from './utils/cdu-religion.js';
 import { resolverEditorial as resolverEditorialComun } from './utils/resolver-editorial.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -200,6 +201,15 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
 
         // CDU en notación MODERNA (820 → 821.111), venga de donde venga: última red antes de guardar (cdu-moderna.js).
         if (docFinal.cdu) docFinal.cdu = modernizarCDU(docFinal.cdu);
+        // Y la clase 2 (religión), que se rehízo entera en 2000: «282» antiguo (Iglesia católica) → «272». Necesita el
+        // contexto del libro (Dewey, LCC, título) porque el mismo número vale en los dos esquemas (cdu-religion.js).
+        if (docFinal.cdu) {
+            const rel = cduReligionModerna(docFinal.cdu, docFinal);
+            if (rel.cambio) {
+                docFinal.alertas_agente.push(`CDU de religión en notación actual: ${docFinal.cdu} → ${rel.cdu}. ${rel.motivos.join('; ')}`);
+                docFinal.cdu = rel.cdu;
+            }
+        }
 
         // 2. Editorial (string → ObjectId; crea si no existe).
         if (docFinal.editorial && typeof docFinal.editorial === 'string') {

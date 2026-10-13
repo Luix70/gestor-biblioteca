@@ -20,6 +20,7 @@ import { reubicarPorCdu, carpetaDeDoc } from '../mantenimiento/util-mantenimient
 import { indexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
 import { modernizarCDU } from './cdu-moderna.js';
+import { cduReligionModerna } from './cdu-religion.js';
 
 export const RANGO_CDU = { manual: 4, impresa: 3, bne: 2, bnf: 2, clasificador: 1 };
 
@@ -75,6 +76,7 @@ export function mejorCdu(candidatas) {
  */
 export async function aplicarCduConPrioridad(db, doc, cduNueva, fuenteNueva, { aplicar = true } = {}) {
     cduNueva = modernizarCDU(cduNueva);   // última red: nunca se aplica una CDU en notación antigua
+    cduNueva = cduReligionModerna(cduNueva, doc).cdu;   // tampoco la clase 2 antigua (BNE: «282» = Iglesia católica)
     if (doc.obra) return { aplicada: false, motivo: 'tomo de obra: comparte la CDU de la obra' };
     if (!puedeSustituirCdu(doc, cduNueva, fuenteNueva)) {
         return { aplicada: false, motivo: `la CDU actual (${doc.cdu}, ${fuenteCduDoc(doc)}) tiene prioridad sobre ${cduNueva} (${fuenteNueva})` };

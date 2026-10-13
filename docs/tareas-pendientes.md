@@ -180,7 +180,9 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
        - [x] títulos del LCC en español: `… importar-referencias-clasificacion.js --traducir` (IA, ~160 llamadas);
        - [ ] **ORDEN tras c37cccf (revisado 13-oct 13:15 contra logs/scripts del NAS)**: el modernizar-cdu de las 09:54 y el
              afinar-cdu de las 11:47 corrieron ANTES de 5c5199c (quedan 171 libros en la clase 4 antigua) → copia (PC) ·
-             modernizar-cdu (seco, --ejecutar) · afinar-cdu (seco, --ejecutar hasta 0) · recolocar-por-cdu (seco, --ejecutar)
+             modernizar-cdu (seco, --ejecutar) · **modernizar-cdu-religion** (seco, --ejecutar: clase 2 antigua → actual; seco
+             del 13-oct: 643 libros + 407 de la caché, 40 dudosas a una selección) · afinar-cdu (seco, --ejecutar hasta 0) ·
+             recolocar-por-cdu (seco, --ejecutar)
              · integridad --informe (y --reparar) · reindexar-busqueda · auditar-cdu · revisar-descripciones-cdu (seco).
        - [ ] a mano: 6a3b20a71c900068144ebe66 «Ten Physical Applications Of Spectral Zeta Functions» es un LIBRO de Lecture
              Notes in Physics (ISSN de serie 0075-8450) catalogado como revista en la CDU 82, sin carpeta en disco; y dos
