@@ -166,6 +166,9 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
              con los tramos de LCC y el Dewey 19x; y `reparar-cdu-contaminada.js --copia 20261005-160502` en seco: ahora
              también recoge las equivalencias de la IA que COPIARON el número Dewey como CDU donde no coinciden
              («181.5 → 181.5», al-Ghazali entre la estética); y `modernizar-cdu.js` (lenguas antiguas 80x: 807.5 → 811.14).
+       - [ ] **13-oct**: `corregir-cdu-religion.js` (seco: 21 equivalencias + ~65 libros): la tabla tenía la clase 2 ANTIGUA
+             (Dewey 220 Biblia → «22», que hoy es religiones del Lejano Oriente; 230 → «23», hoy hinduismo) → 27. Antes
+             de afinar-cdu.js, que ahora solo usa la tabla determinista (nunca la caché: «641.5 → 641.5(540)»).
        - [ ] revisar a mano la selección «CDU por revisar a mano (reparación sin fuente fiable)» (lista en
              `logs/reparar-cdu-desviados.tsv`). Muchas vienen de equivalencias LCC clase+número aprendidas de UN libro
              («f1435 → 09:93»): ese es el siguiente origen a auditar.

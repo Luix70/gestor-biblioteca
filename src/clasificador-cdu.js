@@ -166,7 +166,10 @@ function deweyACDU(codigo) {
     const EXACTAS = {
         '000': '0', '010': '01', '020': '02', '030': '03', '050': '05', '060': '06', '070': '07', '080': '08', '090': '09',
         '100': '1', '110': '11', '140': '14', '160': '16', '170': '17',
-        '200': '2', '220': '22', '230': '23', '290': '29',
+        // La clase 2 se reorganizó (hoy 22 = religiones del Lejano Oriente, 23 = hinduismo, 29 = movimientos
+        // espirituales modernos): el Dewey 220 (Biblia) y 230 (teología cristiana) son CRISTIANISMO, 27; el 290
+        // (otras religiones) se queda en 2. (13-oct: la tabla tenía la clase 2 ANTIGUA: 220 → 22, 230 → 23.)
+        '200': '2', '220': '27', '230': '27', '290': '2',
         '300': '3', '310': '31', '320': '32', '330': '33', '340': '34', '350': '35', '360': '36', '370': '37', '390': '39',
         '900': '9', '910': '91', '920': '929',
     };

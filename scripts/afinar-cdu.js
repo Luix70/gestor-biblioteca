@@ -66,6 +66,10 @@ async function main() {
     if (cduVacia(d.cdu) || d.locked) { omitidos['sin CDU o bloqueado'] = (omitidos['sin CDU o bloqueado'] || 0) + 1; continue; }
     if (rangoFuente(fuenteCduDoc(d)) > RANGO_CDU.clasificador) { omitidos['CDU de la BNE o impresa'] = (omitidos['CDU de la BNE o impresa'] || 0) + 1; continue; }
     const r = await resolverCDU({ dewey: d.dewey, lcc: d.lcc, titulo: d.titulo, permitirIA: false, aprender: false }).catch(() => null);
+    // Solo la TABLA determinista («api:dewey», «api:lcc»), nunca la caché aprendida: en el seco del 13-oct la caché
+    // afinaba «641.5 → 641.5(540)» (Gordon Ramsay como cocina india: lo aprendió la IA de UN libro), «821.14 →
+    // 821.140» o «94(55) → 94(55):32». Afinar es para lo SEGURO.
+    if (!String(r?.fuente || '').startsWith('api:')) continue;
     if (afina(d.cdu, r?.cdu)) cambios.push({ doc: d, nueva: r.cdu, via: r.fuente });
   }
   p1.fin();

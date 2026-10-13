@@ -3706,6 +3706,8 @@ de ficheros clasificado por CDU.
                                   regla del motor (equivalenciaUsable) ya no usa. --solo-regla, --copia
                                   <sello> (lee también la caché de una copia), --limite N (por tandas).
                                   Seco por defecto; --ejecutar solo en el NAS (mueve carpetas).
+        corregir-cdu-religion.js  Corrige la clase 2 ANTIGUA que ponía la tabla (Dewey 220 → 22, 230 → 23; hoy
+                                  22 es Lejano Oriente y 23 hinduismo) → 27, en la caché y en los libros.
         afinar-cdu.js             Afina la CDU con los códigos del PROPIO libro, sin IA: LCC por tramos de número
                                   (QA303 → 517, B3311 → 1(430), PN1993 → 791.43…), Dewey 19x por países,
                                   religiones con su división moderna. Solo si la nueva AFINA la actual en la
