@@ -10860,11 +10860,12 @@ async function loadGuestNsfw() {
 
 // ── Campañas de fondo (backfill autorreparable al reposo): estado + ajuste (activa/lote/cada-N-min) + «Ahora» ──
 // Coste de cada campaña: 🆓 sin IA · 🌐 APIs gratis (con límite de llamadas) · 🤖 IA de pago.
-const CAMP_BADGE = { gratis: '🆓', apis: '🌐', ia: '🤖' };
+const CAMP_BADGE = { gratis: '🆓', apis: '🌐', ia: '🤖', 'ia-gratis': '🤖🆓' };
 const CAMP_BADGE_TIT = {
   gratis: 'Sin IA (local / Fichero)',
   apis: 'APIs gratuitas, pero con LÍMITE de llamadas',
   ia: 'Consume IA de pago (Gemini)',
+  'ia-gratis': 'IA, pero SOLO de los proveedores gratuitos (nunca la de pago)',
 };
 // Barra/estado de la tanda de una campaña (en curso o la última terminada).
 function barraCampana(c) {

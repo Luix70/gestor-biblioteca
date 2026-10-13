@@ -3170,8 +3170,17 @@ de ficheros clasificado por CDU.
       cuando el sistema está en REPOSO (Inbox inactivo), cada una con su interruptor,
       su tamaño de LOTE y su periodicidad (cada N minutos). Comparten el candado con
       la ingesta y le CEDEN el turno. Cada campaña avisa de su COSTE:
-        🆓 sin IA (local/Fichero) · 🌐 APIs gratis (con LÍMITE de llamadas) · 🤖 IA de pago.
+        🆓 sin IA (local/Fichero) · 🌐 APIs gratis (con LÍMITE de llamadas) · 🤖 IA de pago ·
+        🤖🆓 IA, pero SOLO de los proveedores gratuitos (nunca la de pago).
       Campañas actuales:
+        · 🤖🆓 Revisar descripciones Dewey (13-oct) — INACTIVA por defecto. La IA juzga, por
+          tandas de 25, cada descripción del Dewey escrita antes de tener referencias contra
+          el significado oficial del número (DDC 23 Summaries + su CDU), y rehace las
+          incoherentes con esas referencias (la vieja va a clasificacion_descripciones_retiradas).
+          Empieza por los códigos con más libros. SOLO IA GRATUITA: si las gratis están
+          saturadas, la tanda para y sigue en la siguiente. El veredicto queda en la propia
+          descripción (campo «juicio»), así que es reanudable. Solo cambia textos: ni la CDU
+          ni las carpetas. Motor: utils/revision-dewey.js (el mismo del script).
         · 🆓 Roles e idioma original — traductor/ilustrador/… e idioma original por
           ISBN (mención de la BNE del Fichero + OpenLibrary).
         · 🆓 Título e idioma original (del fichero) — lee la PÁGINA DE CRÉDITOS del
@@ -3729,6 +3738,8 @@ de ficheros clasificado por CDU.
                                   los títulos del LCC en español (IA, por tandas, reanudable).
         revisar-descripciones-dewey.js  La IA juzga las descripciones del Dewey contra sus referencias (sección
                                   oficial + su CDU) y rehace las incoherentes («830 = Literatura española»).
+                                  SOLO IA gratuita (--con-pago para permitir la de pago). Lo mismo, escalonado:
+                                  la campaña de fondo «Revisar descripciones Dewey».
         importar-udc-summary.js   Importa el UDC Summary OFICIAL (es+en, ~2.430 códigos) a
                                   udc_summary y como descripciones verificadas (fuente 'udcs');
                                   la IA describe solo el resto, con sus piezas oficiales de

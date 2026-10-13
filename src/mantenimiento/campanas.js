@@ -37,6 +37,7 @@ import { nombreEsPlaceholder, limpiarNombreColeccion, claveCanonica } from '../u
 import { ROLES_VALIDOS } from '../utils/contribuciones.js';
 import { enriquecerAutor, autoresEnriquecibles } from '../utils/enriquecer-autor.js';
 import { rellenarDescripcionesFaltantes, contarFaltantes } from './backfill-descripciones.js';
+import { revisarTandaDewey, contarDeweyPendientes } from '../utils/revision-dewey.js';
 import { enriquecerAFondo } from './enriquecer-a-fondo.js';
 import { PLACEHOLDERS_AUTOR } from '../utils/creditos-portada.js';
 import path from 'node:path';
@@ -196,7 +197,7 @@ export async function resolverNombreSeriePorISSN(db, coleccion) {
 
 // ── REGISTRO DE CAMPAÑAS ────────────────────────────────────────────────────────────────────
 // coste: 'gratis' = sin IA (local/Fichero) · 'apis' = APIs gratuitas con LÍMITE de llamadas ·
-//        'ia' = consume IA de pago (Gemini).
+//        'ia' = consume IA de pago (Gemini) · 'ia-gratis' = IA, pero SOLO de los proveedores gratuitos.
 
 export const CAMPANAS = [
     {
@@ -555,6 +556,26 @@ export const CAMPANAS = [
         async ejecutarLote(db, { limite, onProgreso }) {
             const r = await rellenarDescripcionesFaltantes({ limite, db, onProgreso });
             return { procesados: r.generadas + r.fallos, cambios: r.generadas, pendientes: r.pendientes };
+        },
+    },
+
+    {
+        id: 'revisar-dewey',
+        etiqueta: 'Revisar descripciones Dewey',
+        coste: 'ia-gratis',
+        descripcion: 'Revisa las descripciones del Dewey que escribió la IA SIN referencias (antes del 13-oct): la IA juzga cada título contra el significado oficial del número (DDC 23 Summaries + su CDU) por tandas de 25, y las incoherentes («830 = Literatura española») se rehacen con esas referencias (la vieja se guarda en clasificacion_descripciones_retiradas). Empieza por los códigos con más libros. SOLO IA GRATUITA: si las gratis están saturadas, la tanda para y sigue en la próxima. Solo cambia el texto de la descripción: ni la CDU ni las carpetas.',
+        version: 1,
+        loteDefecto: 50,        // descripciones por tanda (2 llamadas de juez + las que haya que rehacer)
+        cadenciaDefecto: 15,
+        activaDefecto: false,   // opt-in: se enciende desde el panel
+        especial: true,         // no itera documentos de la biblioteca: el estado va en clasificacion_descripciones.juicio
+        async pendientes(db) {
+            return (await contarDeweyPendientes(db)).total;
+        },
+        async ejecutarLote(db, { limite, onProgreso }) {
+            const r = await revisarTandaDewey(db, { limite, soloGratis: true, onProgreso });
+            if (r.sinIA) console.log('🎯 [Campaña revisar-dewey] IA gratuita no disponible ahora: sigue en la próxima tanda.');
+            return { procesados: r.procesados, cambios: r.cambios, pendientes: r.pendientes };
         },
     },
 

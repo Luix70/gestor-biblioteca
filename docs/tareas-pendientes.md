@@ -178,8 +178,9 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
              rangos del LC Outline). El LCC se describe ya sin IA con el Outline; el Dewey con IA y referencias. ↻ en las
              tres filas de la ficha. Mantenimiento ya no describe Dewey/LCC por lotes sin referencias.
        - [ ] títulos del LCC en español: `… importar-referencias-clasificacion.js --traducir` (IA, ~160 llamadas);
-       - [ ] `… revisar-descripciones-dewey.js` (seco; prueba con 50: 8 incoherentes —«830 = Literatura española»—) y
-             `--ejecutar`; 11.644 descripciones del Dewey: unas 470 tandas, varios días de cupo gratis.
+       - [ ] revisión de las descripciones del Dewey (11.644; prueba con 50: 8 incoherentes —«830 = Literatura española»—):
+             encender la campaña «🤖🆓 Revisar descripciones Dewey» (solo IA gratis, escalonada), o de golpe
+             `… revisar-descripciones-dewey.js --ejecutar` (reutiliza los veredictos del seco).
        - [ ] revisar a mano la selección «CDU por revisar a mano (reparación sin fuente fiable)» (lista en
              `logs/reparar-cdu-desviados.tsv`). Muchas vienen de equivalencias LCC clase+número aprendidas de UN libro
              («f1435 → 09:93»): ese es el siguiente origen a auditar.
