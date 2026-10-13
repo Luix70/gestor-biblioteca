@@ -6,7 +6,7 @@
  *     cine (PN1993-1999) → 791.43; marketing (HF5410-5417) → 658.8; redes (TK5105.5-.9) → 004.7…
  *   · Dewey 190-199, filosofía por países: 193 → 1(430), 194 → 1(44)…
  *   · religiones con su división moderna: BP (islam) → 28, BR-BX (cristianismo) → 27…
- * Este script recalcula la CDU de cada libro con ese motor (SIN IA, sin aprender nada) y SOLO la cambia si la nueva
+ * Este script consulta las TABLAS deterministas (Dewey y LCC del libro; nunca la caché aprendida) y SOLO cambia si la nueva
  * AFINA la actual dentro de la MISMA rama (51 → 517 sí; 82 → 791.43 no: eso es otra rama y lo decide la auditoría).
  * Nunca toca una CDU manual ni una de más rango que la deducida (BNE, impresa en el libro). Mueve la carpeta por el
  * camino seguro (reubicarPorCdu + aplicarCambio, con diario para la copia USB) y deja una alerta con la de antes.
@@ -18,7 +18,7 @@ import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { conectarDB } from '../src/database.js';
-import { resolverCDU } from '../src/clasificador-cdu.js';
+import { buscarEquivalenciaExterna } from '../src/clasificador-cdu.js';
 import { reubicarPorCdu, aplicarCambio, carpetaDeDoc, carpetaExiste } from '../src/mantenimiento/util-mantenimiento.js';
 import { cduVacia, rangoFuente, fuenteCduDoc, RANGO_CDU } from '../src/utils/prioridad-cdu.js';
 import { progreso } from '../src/utils/progreso-cli.js';
@@ -65,12 +65,15 @@ async function main() {
     p1.paso(String(d.titulo || '').slice(0, 30));
     if (cduVacia(d.cdu) || d.locked) { omitidos['sin CDU o bloqueado'] = (omitidos['sin CDU o bloqueado'] || 0) + 1; continue; }
     if (rangoFuente(fuenteCduDoc(d)) > RANGO_CDU.clasificador) { omitidos['CDU de la BNE o impresa'] = (omitidos['CDU de la BNE o impresa'] || 0) + 1; continue; }
-    const r = await resolverCDU({ dewey: d.dewey, lcc: d.lcc, titulo: d.titulo, permitirIA: false, aprender: false }).catch(() => null);
-    // Solo la TABLA determinista («api:dewey», «api:lcc»), nunca la caché aprendida: en el seco del 13-oct la caché
-    // afinaba «641.5 → 641.5(540)» (Gordon Ramsay como cocina india: lo aprendió la IA de UN libro), «821.14 →
-    // 821.140» o «94(55) → 94(55):32». Afinar es para lo SEGURO.
-    if (!String(r?.fuente || '').startsWith('api:')) continue;
-    if (afina(d.cdu, r?.cdu)) cambios.push({ doc: d, nueva: r.cdu, via: r.fuente });
+    // Solo las TABLAS deterministas, consultadas DIRECTAMENTE (no el motor: su caché aprendida va antes que la tabla y
+    // tapaba el resultado seguro). En el seco del 13-oct la caché afinaba «641.5 → 641.5(540)» (Gordon Ramsay como
+    // cocina india: lo aprendió la IA de UN libro) o «821.14 → 821.140». Afinar es para lo SEGURO. Entre lo que dan
+    // el Dewey y el LCC del libro, la más detallada que afine la actual.
+    const candidatas = [
+      d.dewey ? { cdu: await buscarEquivalenciaExterna('dewey', d.dewey), via: 'tabla Dewey' } : null,
+      d.lcc ? { cdu: await buscarEquivalenciaExterna('lcc', d.lcc), via: 'tabla LCC' } : null,
+    ].filter((c) => c && c.cdu && afina(d.cdu, c.cdu)).sort((a, b) => b.cdu.length - a.cdu.length);
+    if (candidatas.length) cambios.push({ doc: d, nueva: candidatas[0].cdu, via: candidatas[0].via });
   }
   p1.fin();
 

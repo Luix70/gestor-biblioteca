@@ -149,7 +149,59 @@ export async function guardarEquivalencia(sistema, codigo, cdu, fuente = 'IA', d
 // lo que alinea con CERTEZA; lo divergente (Dewey 4xx lengua → CDU 81, 8xx literatura → 82, y las
 // subdivisiones finas) devuelve null y sigue a la IA, que sí distingue el idioma/tradición. Nunca se
 // «adivina»: un mapeo dudoso envenenaría la caché aprendida, así que ante la duda → null → IA.
+// ── Dewey → CDU con MÁS DETALLE (13-oct), solo donde la equivalencia es segura ─────────────────────────────────
+// Las tres primeras cifras COINCIDEN entre los dos sistemas en medicina (611-618), ingeniería (621-625, 627-629),
+// agricultura (631-639), hogar (641-649), gestión (651, 657-659), física (531-539), química (543, 546-549), geología
+// (551-553), parte de la biología y de las artes, deportes y espectáculos (792-799), y en varias de las ciencias
+// sociales. Antes se mapeaba solo a la división de 2 cifras (61, 62…): 1.074 libros de medicina en «61».
+const DEWEY_ALINEADO = new Set([
+    '611', '612', '613', '614', '615', '616', '617', '618',
+    '621', '622', '623', '624', '625', '627', '628', '629',
+    '631', '632', '633', '634', '635', '636', '637', '638', '639',
+    '641', '642', '643', '644', '645', '646', '647', '648', '649',
+    '651', '657', '658', '659',
+    '531', '532', '533', '534', '535', '536', '537', '538', '539',
+    '543', '546', '547', '548', '549', '551', '552', '553', '579', '591', '595', '597', '599',
+    '741', '745', '746', '747', '748', '749', '781', '791', '792', '793', '794', '795', '796', '797', '798', '799',
+    '321', '324', '325', '327', '328', '331', '338', '341', '342', '355', '359', '368', '374', '378', '391', '392', '394', '398',
+]);
+// Equivalencias conocidas donde el número NO coincide (prefijo con punto: gana el más largo).
+const DEWEY_FINO = {
+    '512': '512', '514': '515.1', '515': '517', '516': '514', '518': '519.6', '519.2': '519.2', '519.5': '519.2',
+    '503': '5(03)', '509': '5(091)', '526': '528', '541': '544', '572': '577.1', '576': '575', '576.8': '575.8',
+    '577': '574', '598': '598.2', '523.1': '524.8', '523.8': '524',
+    '791.43': '791.43', '709': '7(091)', '809': '82.09',
+    '292': '25', '294.3': '24', '294.4': '23', '294.5': '23', '296': '26', '297': '28',
+    '301': '316', '302': '316', '303': '316', '304': '316', '305': '316', '306': '316.7', '307': '316',
+    '332': '336', '345': '343', '346': '347', '364': '343.9', '372': '373.3', '373': '373.5',
+};
+function deweyFino(codigo) {
+    const limpio = (String(codigo || '').match(/\d{3}(?:\.\d+)?/) || [''])[0];   // «791.4372» , «294.3/4» → «294.3»
+    if (!limpio) return null;
+    for (let largo = limpio.length; largo >= 3; largo--) {
+        const pref = limpio.slice(0, largo).replace(/\.$/, '');
+        if (DEWEY_FINO[pref]) return DEWEY_FINO[pref];
+    }
+    const d = limpio.slice(0, 3);
+    if (DEWEY_ALINEADO.has(d)) return d;
+    if (/^2[4-8]\d$/.test(d)) return '27';                   // 240-289: cristianismo (iglesias, órdenes, historia…)
+    if (/^21\d$/.test(d)) return '2-1';                      // 210-219: filosofía y teoría de la religión
+    // Historia 931-999: el número ya dice el LUGAR (y a veces el periodo) → 94(lugar), con la misma traducción que
+    // modernizarCDU (973 → 94(73), 946.081 → 94(460).081). 930 es la ciencia de la historia: no.
+    if (/^9[3-9]\d/.test(d) && d !== '930') {
+        // Como mucho tres decimales: lo que sigue suele ser una subdivisión común del Dewey (941.084092: el «092» es
+        // BIOGRAFÍA, no parte del periodo; daba «94(410).084.092»).
+        const h = modernizarCDU(limpio.replace(/^(\d{3}\.\d{1,3})\d*$/, '$1'));
+        if (/^94\(/.test(h)) return h;
+        const h3 = modernizarCDU(d);
+        if (/^94\(/.test(h3)) return h3;
+    }
+    return null;
+}
+
 function deweyACDU(codigo) {
+    const fino = deweyFino(codigo);
+    if (fino) return fino;
     const m = String(codigo || '').match(/\d{3}/);   // «510/.3» → «510»
     if (!m) return null;
     const d = m[0];
@@ -209,14 +261,18 @@ const LCC_A_CDU = {
     BL: '2', BM: '26', BP: '28', BQ: '24', BR: '27', BS: '27', BT: '27', BV: '27', BX: '27',
     // Ciencias auxiliares de la historia · genealogía/biografía  (D/E/F historia → diferido, necesita área)
     C: '93', CS: '929', CT: '929',
+    // (13-oct) Ciencias auxiliares de la historia con su número propio en la CDU.
+    CB: '930.85', CC: '902', CD: '930.25', CJ: '737', CN: '930.27', CR: '929.6',
     // Geografía · antropología · folclore · deporte
     G: '91', GB: '551', GC: '551.46', GE: '502', GN: '39', GR: '398', GV: '79',
     // Ciencias sociales
     H: '3', HA: '31', HB: '33', HC: '33', HD: '33', HE: '656', HF: '33', HG: '33', HM: '316', HN: '316', HQ: '316.3', HT: '316', HV: '36',
     // Ciencia política
     J: '32', JX: '327', JZ: '327',
+    JK: '32(73)', JN: '32(4)',             // (13-oct) política de EE. UU. · de Europa
     // Derecho · educación · música
     K: '34', L: '37', M: '78',
+    KF: '34(73)', KD: '34(410)', KZ: '341', LA: '37(091)',   // (13-oct) derecho de EE. UU. · del Reino Unido · internacional · historia de la educación
     // Bellas artes
     N: '7', NA: '72', NB: '73', NC: '74', ND: '75', NE: '76', NK: '745',
     // Lengua y literatura (SOLO tradición/idioma único; las multi-idioma PA/PQ/PT/PG/PJ/PK/PL/PM → IA)
@@ -392,7 +448,7 @@ const REGLAS_NOTACION_CDU = `═══ CÓMO SE ESCRIBE UNA CDU (compruébalo AN
 // filosofía ALEMANA, 1(430). Solo tramos SEGUROS del esquema de la Library of Congress; el más concreto va antes.
 // Un resultado por tramo NUNCA se aprende como equivalencia de la clase (sería repetir el error de «qa → 004.8»).
 const LCC_RANGOS = {
-    QA: [[75, 76.999, '004'], [241, 247.999, '511'], [150, 272.999, '512'], [273, 280.999, '519.2'],
+    QA: [[75, 76.999, '004'], [164, 167.999, '519.1'], [241, 247.999, '511'], [150, 272.999, '512'], [273, 280.999, '519.2'],
         [297, 299.999, '519.6'], [300, 433.999, '517'], [440, 699.999, '514'], [801, 939.999, '531']],
     QB: [[500, 785.999, '523'], [980, 991.999, '524.8'], [799, 903.999, '524']],
     QC: [[173.96, 174.999, '530.145'], [170, 197.999, '539.1'], [221, 246.999, '534'], [251, 338.999, '536'],
@@ -408,7 +464,15 @@ const LCC_RANGOS = {
         [720, 765.999, '1"04/14"'], [770, 785.999, '1"14/16"'],
         [851, 945.999, '1(73)'], [1111, 1674.999, '1(410)'], [1801, 2430.999, '1(44)'], [2521, 3396.999, '1(430)'], [3551, 3636.999, '1(450)']],
     BP: [[500, 610.999, '2']],          // teosofía y movimientos nuevos: no es islam
-    PN: [[1560, 1590.999, '792'], [1991, 1992.999, '654.19'], [1993, 1999.999, '791.43'], [2000, 3307.999, '792'], [4699, 5650.999, '070']],
+    // Literatura en general por GÉNEROS (13-oct): crítica e historia (82.09), poesía (82-1), novela (82-3), humor (82-7).
+    PN: [[80, 99.999, '82.09'], [441, 1009.999, '82.09'], [1010, 1525.999, '82-1'], [1560, 1590.999, '792'],
+        [1991, 1992.999, '654.19'], [1993, 1999.999, '791.43'], [2000, 3307.999, '792'], [3311, 3503.999, '82-3'],
+        [4699, 5650.999, '070'], [6157, 6222.999, '82-7']],
+    PZ: [[5, 90.999, '82-93']],                 // literatura infantil y juvenil
+    BD: [[143, 237.999, '165'], [300, 450.999, '111'], [493, 708.999, '113']],   // epistemología · ontología · cosmología
+    G: [[149, 570.999, '910.4'], [1000, 3122.999, '912']],                       // viajes y exploraciones · atlas y mapas
+    LB: [[2300, 2430.999, '378']],              // enseñanza superior
+    Z: [[665, 997.999, '02'], [1001, 8999.999, '01']],                           // bibliotecas · bibliografías
     HF: [[5410, 5417.999, '658.8'], [5601, 5689.999, '657'], [5001, 6182.999, '658']],
     HD: [[4801, 8943.999, '331']],
     TK: [[5105.5, 5105.999, '004.7'], [7885, 7895.999, '004'], [5101, 6720.999, '621.39'], [7800, 8360.999, '621.38']],

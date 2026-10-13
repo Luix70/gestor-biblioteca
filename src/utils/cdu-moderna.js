@@ -124,9 +124,21 @@ const LENGUA_ANTIGUA = {
     '807.5': '811.14',       // griego
 };
 
+// La CLASE 4 está VACÍA en la CDU de hoy (las lenguas pasaron a 81 en los años 60). Un «42», «43», «44»… es notación
+// antigua (o un Dewey 4xx copiado): 42 inglés, 43 alemán, 44 francés, 45 italiano, 46 español, 47 latín, 48 griego;
+// 40/41 lingüística general. 13-oct: 21 libros. Se traduce la lengua; lo que siga al número no tiene equivalente.
+const CLASE4_LENGUA = {
+    '40': '81', '41': '81', '42': '811.111', '43': '811.112.2', '44': '811.133.1', '45': '811.131.1',
+    '46': '811.134.2', '47': '811.124', '48': '811.14',
+};
+
 function numeroModerno(numero) {
     if (LITERATURA_ANTIGUA[numero]) return LITERATURA_ANTIGUA[numero];
     if (LENGUA_ANTIGUA[numero]) return LENGUA_ANTIGUA[numero];
+    if (/^4\d/.test(numero) && CLASE4_LENGUA[numero.slice(0, 2)]) {
+        if (numero.slice(0, 3) === '469') return '811.134.3';   // portugués
+        return CLASE4_LENGUA[numero.slice(0, 2)];
+    }
     // Historia y crítica de una literatura: «860.09» → «821.134.2.09».
     const critica = numero.match(/^(\d{3}(?:\.\d+)?)(\.0\d*)$/);
     if (critica && LITERATURA_ANTIGUA[critica[1]]) return LITERATURA_ANTIGUA[critica[1]] + critica[2];

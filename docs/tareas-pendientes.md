@@ -169,6 +169,11 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
        - [ ] **13-oct**: `corregir-cdu-religion.js` (seco: 21 equivalencias + ~65 libros): la tabla tenía la clase 2 ANTIGUA
              (Dewey 220 Biblia → «22», que hoy es religiones del Lejano Oriente; 230 → «23», hoy hinduismo) → 27. Antes
              de afinar-cdu.js, que ahora solo usa la tabla determinista (nunca la caché: «641.5 → 641.5(540)»).
+       - [ ] **13-oct (tarde)**: tablas deterministas mucho más finas (Dewey alineado a 3 cifras en medicina, ingeniería,
+             agricultura, hogar, gestión, física, química, deportes…; Dewey fino 515 → 517, 294.3 → 24, 973 → 94(73)…; LCC
+             por géneros literarios, BD, G, C, J/K por país, LB, Z; clase 4 antigua → 811.x). afinar-cdu.js consulta ya
+             las TABLAS directamente (no el motor). Seco del PC: **4.123** a afinar. Tras desplegar: modernizar-cdu.js
+             (clase 4) y afinar-cdu.js, en seco y luego --ejecutar --limite 1000.
        - [ ] revisar a mano la selección «CDU por revisar a mano (reparación sin fuente fiable)» (lista en
              `logs/reparar-cdu-desviados.tsv`). Muchas vienen de equivalencias LCC clase+número aprendidas de UN libro
              («f1435 → 09:93»): ese es el siguiente origen a auditar.
