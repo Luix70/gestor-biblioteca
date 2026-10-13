@@ -3722,6 +3722,13 @@ de ficheros clasificado por CDU.
                                   las que encajan con el número en DEWEY no se tocan y se listan en
                                   logs/udcs/cdu-con-numero-dewey.txt (la CDU del libro es la mala). Solo
                                   descripciones: no cambia CDU ni mueve carpetas. Seco por defecto.
+        importar-referencias-clasificacion.js  Referencias OFICIALES de Dewey (DDC 23 Summaries, © OCLC: solo
+                                  referencia interna para la IA) y LCC (LC Classification Outline, dominio
+                                  público) → clasificacion_oficial. El LCC se describe ya SIN IA con el Outline
+                                  («B753 → Philosophy (General) › Medieval»). --ejecutar guarda; --traducir pone
+                                  los títulos del LCC en español (IA, por tandas, reanudable).
+        revisar-descripciones-dewey.js  La IA juzga las descripciones del Dewey contra sus referencias (sección
+                                  oficial + su CDU) y rehace las incoherentes («830 = Literatura española»).
         importar-udc-summary.js   Importa el UDC Summary OFICIAL (es+en, ~2.430 códigos) a
                                   udc_summary y como descripciones verificadas (fuente 'udcs');
                                   la IA describe solo el resto, con sus piezas oficiales de

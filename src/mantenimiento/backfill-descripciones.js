@@ -131,7 +131,9 @@ export async function rellenarDescripcionesFaltantes({ limite = 5, db = null, on
         // descripciones inventadas («930.85 = Historia del mundo antiguo», que es el Dewey 930). Cada CDU va por
         // describirCDU, con su notación real, sus piezas oficiales del UDC Summary y los filtros de coherencia.
         const mapa = new Map();
-        const lote = grupo.filter(g => g.sistema !== 'cdu');
+        // (13-oct) Tampoco el Dewey y el LCC: van uno a uno por describirClasificacion, con las referencias oficiales
+        // (DDC 23 Summaries, LC Outline) — el LCC con rangos ni siquiera necesita IA. El lote queda sin uso.
+        const lote = [];
         if (lote.length > 1) {
             try {
                 const txt = await conTexto({ prompt: promptLote(lote), json: true, maxTokens: 8000 });

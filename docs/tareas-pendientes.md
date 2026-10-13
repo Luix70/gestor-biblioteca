@@ -174,6 +174,12 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
              por géneros literarios, BD, G, C, J/K por país, LB, Z; clase 4 antigua → 811.x). afinar-cdu.js consulta ya
              las TABLAS directamente (no el motor). Seco del PC: **4.123** a afinar. Tras desplegar: modernizar-cdu.js
              (clase 4) y afinar-cdu.js, en seco y luego --ejecutar --limite 1000.
+       - [x] **13-oct**: referencias oficiales de Dewey y LCC importadas (clasificacion_oficial: 907 secciones DDC + 9.673
+             rangos del LC Outline). El LCC se describe ya sin IA con el Outline; el Dewey con IA y referencias. ↻ en las
+             tres filas de la ficha. Mantenimiento ya no describe Dewey/LCC por lotes sin referencias.
+       - [ ] títulos del LCC en español: `… importar-referencias-clasificacion.js --traducir` (IA, ~160 llamadas);
+       - [ ] `… revisar-descripciones-dewey.js` (seco; prueba con 50: 8 incoherentes —«830 = Literatura española»—) y
+             `--ejecutar`; 11.644 descripciones del Dewey: unas 470 tandas, varios días de cupo gratis.
        - [ ] revisar a mano la selección «CDU por revisar a mano (reparación sin fuente fiable)» (lista en
              `logs/reparar-cdu-desviados.tsv`). Muchas vienen de equivalencias LCC clase+número aprendidas de UN libro
              («f1435 → 09:93»): ese es el siguiente origen a auditar.

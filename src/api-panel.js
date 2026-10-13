@@ -79,7 +79,7 @@ import { resolverNombres } from './utils/registro.js';
 import { sanitizarCDU } from './utils/cdu-arbol.js';
 import { fuentesCopia, procesarSaneamiento, estadoSaneamiento, repararDeposito, rutaReemplazo, descartarReemplazo } from './utils/saneamiento.js';
 import { describirCDU, regenerarDescripcionCDU } from './utils/descripcion-cdu.js';
-import { describirClasificacion } from './utils/descripcion-clasificacion.js';
+import { describirClasificacion, descripcionVigente, regenerarDescripcionClasificacion } from './utils/descripcion-clasificacion.js';
 import { altaPorISBN } from './servicio-ingesta.js';
 import { medirPortadaRemota, portadasPorISBN } from './utils/portadas-isbn.js';
 import { buscarUnISBN, iniciarLoteISBN, estadoLoteISBN } from './utils/lote-isbn.js';
@@ -1980,7 +1980,8 @@ export function rutasPanel() {
             const cdesc = await cduDesc(db, doc.cdu);
             const tituloCache = async (sistema, codigo) => {
                 if (!codigo) return null;
-                const d = await db.collection('clasificacion_descripciones').findOne({ sistema, codigo }, { projection: { titulo_es: 1 } });
+                // La que se ENSEÑA (rehecha a mano › oficial del LC Outline › la de IA): ver descripcionVigente.
+                const d = await descripcionVigente(db, sistema, codigo);
                 return d?.titulo_es || null;
             };
             const clasificaciones = [];
@@ -3275,7 +3276,11 @@ export function rutasPanel() {
             const codigo = String(req.body?.codigo || '').trim();
             if (!codigo) return res.status(400).json({ ok: false, motivo: 'falta el código' });
             const db = await conectarDB();
-            const d = await regenerarDescripcionCDU(db, codigo, { conIA: !!req.body?.conIA });
+            // Dewey y LCC también (13-oct): sin IA = LC Outline / equivalencia en la CDU; con IA = con referencias.
+            const sistema = String(req.body?.sistema || 'cdu').toLowerCase();
+            const d = sistema === 'cdu'
+                ? await regenerarDescripcionCDU(db, codigo, { conIA: !!req.body?.conIA })
+                : await regenerarDescripcionClasificacion(db, sistema, codigo, { conIA: !!req.body?.conIA });
             res.json({ ok: true, titulo: d.titulo_es, descripcion: d.descripcion_es, fuente: d.fuente });
         } catch (e) { res.status(422).json({ ok: false, motivo: e.message }); }
     });
@@ -3298,9 +3303,9 @@ export function rutasPanel() {
                 return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null, fuente: d?.fuente || null });
             }
             if (sistema === 'dewey' || sistema === 'lcc') {
-                let d = await db.collection('clasificacion_descripciones').findOne({ sistema, codigo });
+                let d = await descripcionVigente(db, sistema, codigo);
                 if (!d && esAdmin) d = await describirClasificacion(db, sistema, codigo);
-                return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null });
+                return res.json({ ok: true, sistema, codigo, titulo: d?.titulo_es || null, descripcion: d?.descripcion_es || null, fuente: d?.fuente || null });
             }
             return res.status(400).json({ ok: false, motivo: 'sistema inválido (cdu|dewey|lcc)' });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
