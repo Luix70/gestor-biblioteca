@@ -192,20 +192,42 @@ const VACIAS = new Set(('de del la las los el en y a con para por una uno unos u
   'se o u e otros otras otro otra distintas distintos the of and in to for on with an a by from its as at or into ' +
   'than other others').split(' '));
 const sinTildes = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-const raices = (texto) => new Set(sinTildes(texto).split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !VACIAS.has(w) && !/^\d+$/.test(w)).map((w) => w.slice(0, 6)));
+// Desde 3 letras: con 4, «Set theory» se quedaba en «theory» y «Law in general» en «general» (seco del NAS, 13-oct:
+// 35 libros con «theory» en el título a «Teoría de conjuntos», 14 a «Derecho en general»).
+const raices = (texto) => new Set(sinTildes(texto).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !VACIAS.has(w) && !/^\d+$/.test(w)).map((w) => w.slice(0, 6)));
+
+// Un nombre de UNA sola palabra solo vale si la palabra es específica (no «Lenguas», «Cristiandad» —«christ» está
+// también en Christmas, Christopher—, «Física» de un libro de «physical therapy»…) y está en el TÍTULO, no solo en
+// las materias.
+const GENERICAS = new Set(['theory', 'teoria', 'genera', 'langua', 'lengua', 'histor', 'scienc', 'cienci', 'method',
+  'metodo', 'system', 'sistem', 'analys', 'analis', 'univer', 'intern', 'social', 'christ', 'cristi', 'politi',
+  'econom', 'physic', 'fisica', 'mathem', 'matema', 'philos', 'filoso', 'religi', 'arte', 'art', 'music', 'musica',
+  'litera', 'law', 'derech', 'educat', 'educac', 'techno', 'tecnol', 'medici', 'health', 'salud', 'biolog', 'chemis',
+  'quimic', 'cultur', 'nature', 'natura', 'world', 'mundo', 'life', 'vida', 'human', 'humano', 'europe', 'europa',
+  'church', 'iglesi', 'system', 'intern', 'relati', 'relaci', 'organi', 'manage', 'gestio', 'study', 'studie']);
+
+/** Quita los paréntesis («Greek (Hellenic) literature» → «Greek literature») y se queda con la primera frase. */
+const primeraFrase = (t) => raices(String(t || '').replace(/\([^)]*\)/g, ' ').split(/[.;]/)[0]);
 
 function pasoArbol(filas, doc) {
   if (esCero(doc.cdu)) return null;   // con 000 el árbol entero es demasiado: que decida la IA
   const delLibro = raices([doc.titulo, doc.subtitulo, ...(Array.isArray(doc.palabras_clave) ? doc.palabras_clave : [])].join(' '));
+  const delTitulo = raices([doc.titulo, doc.subtitulo].join(' '));
   if (!delLibro.size) return null;
   // Coincidir en palabras sueltas no basta (seco del 13-oct: «Sustainable DEVELOPMENT Goals» → 622.2 «Operaciones
   // mineras… desarrollo», «Neural ENGINEERING» → 004.41 «Ingeniería de software», «sociología» + «cultura» →
   // 316.7 para un libro sobre comida halal). Solo vale si el NOMBRE del código —su primera frase, en español o en
   // inglés— está ENTERO en el libro («Álgebra lineal», «Topología», «Perros»); puntúa por cuántas palabras tiene.
-  const primeraFrase = (t) => raices(String(t || '').split(/[.;(]/)[0]);
+  // Todo el nombre en el libro (título o materias) Y al menos una palabra ESPECÍFICA suya en el TÍTULO: con dos
+  // genéricas casaban «Religiones de Europa» con «The Politics of Secularism», «El sistema solar» con «Astronomy
+  // for Beginners» (por sus materias), «Derecho en general» con «Lawyers' Ethics».
+  const vale = (s) => {
+    if (!s.size || ![...s].every((r) => delLibro.has(r))) return false;
+    return [...s].some((r) => !GENERICAS.has(r) && delTitulo.has(r));
+  };
   const puntuadas = [];
   for (const f of subdivisiones(filas, doc.cdu, 400)) {
-    const nombres = [primeraFrase(f.es), primeraFrase(f.en)].filter((s) => s.size && [...s].every((r) => delLibro.has(r)));
+    const nombres = [primeraFrase(f.es), primeraFrase(f.en)].filter(vale);
     if (!nombres.length) continue;
     const comunes = [...nombres.sort((a, b) => b.size - a.size)[0]];
     puntuadas.push({ ...f, n: comunes.length, comunes });

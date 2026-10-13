@@ -216,7 +216,8 @@ function deweyACDU(codigo) {
     // 4xx (lengua → CDU 81), 8xx (literatura → 82) y la historia regional 93x-99x (necesita el área). Un mapeo
     // dudoso envenenaría la caché, así que ante la duda NO se mapea.
     const EXACTAS = {
-        '000': '0', '010': '01', '020': '02', '030': '03', '050': '05', '060': '06', '070': '07', '080': '08', '090': '09',
+        '000': '0', '010': '01', '020': '02', '030': '03', '050': '05', '060': '06', '070': '070', '080': '08',   // 070 periodismo: en la CDU es 070 («07» no existe)
+        '090': '09',
         '100': '1', '110': '11', '140': '14', '160': '16', '170': '17',
         // La clase 2 se reorganizó (hoy 22 = religiones del Lejano Oriente, 23 = hinduismo, 29 = movimientos
         // espirituales modernos): el Dewey 220 (Biblia) y 230 (teología cristiana) son CRISTIANISMO, 27; el 290
@@ -472,7 +473,9 @@ const LCC_RANGOS = {
     BD: [[143, 237.999, '165'], [300, 450.999, '111'], [493, 708.999, '113']],   // epistemología · ontología · cosmología
     G: [[149, 570.999, '910.4'], [1000, 3122.999, '912']],                       // viajes y exploraciones · atlas y mapas
     LB: [[2300, 2430.999, '378']],              // enseñanza superior
-    Z: [[665, 997.999, '02'], [1001, 8999.999, '01']],                           // bibliotecas · bibliografías
+    // Escritura y paleografía · criptografía · el libro (imprenta, edición) · bibliotecas · bibliografías (13-oct:
+    // «Cryptography», Z103, caía en 02 bibliotecas).
+    Z: [[40, 102.499, '003'], [102.5, 104.999, '003.26'], [116, 659.999, '655'], [665, 997.999, '02'], [1001, 8999.999, '01']],
     HF: [[5410, 5417.999, '658.8'], [5601, 5689.999, '657'], [5001, 6182.999, '658']],
     HD: [[4801, 8943.999, '331']],
     TK: [[5105.5, 5105.999, '004.7'], [7885, 7895.999, '004'], [5101, 6720.999, '621.39'], [7800, 8360.999, '621.38']],
@@ -480,7 +483,11 @@ const LCC_RANGOS = {
 
 /** El número de una signatura LCC tras sus letras: «QA303.2.L367» → 303.2; «QA-0076.9…» → 76.9; sin número → NaN. */
 function numeroDeLcc(codigo) {
-    return parseFloat(String(codigo || '').trim().toUpperCase().replace(/^[A-Z]{1,3}/, '').replace(/^[^0-9]+/, ''));
+    // Solo las cifras (y su decimal): con parseFloat a secas, «PN5214.E8» se leía como 5214·10⁸ — la marca de autor
+    // «.E8» es un EXPONENTE para JavaScript — y toda signatura con un cutter en E se salía de su tramo (13-oct).
+    const resto = String(codigo || '').trim().toUpperCase().replace(/^[A-Z]{1,3}/, '').replace(/^[^0-9]+/, '');
+    const m = resto.match(/^\d+(?:\.\d+)?/);
+    return m ? Number(m[0]) : NaN;
 }
 
 /** La CDU por el TRAMO de número de la signatura, o null (sin tramo conocido, o sin número). */

@@ -41,6 +41,7 @@ console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · refinar la
 
 const guion = abrirGuion('refinar-cdu', { parametros: { modo: MODO_IA, limite: LIMITE } });
 let plan = EJECUTAR ? await guion.leer() : null;
+const usandoGuion = !!plan;
 
 // ─── DECIDIR (o tomar el guion del seco) ────────────────────────────────────────────────────────────────────────
 if (!plan) {
@@ -106,14 +107,24 @@ if (muestra.length && vistas < Math.ceil(muestra.length / 2)) {
   process.exit(1);
 }
 
-let hechos = 0, movidos = 0, cambiados = 0, fallos = 0;
+let hechos = 0, movidos = 0, cambiados = 0, fallos = 0, corregidas = 0, descartadas = 0;
 const p2 = progreso(acciones.length, 'Aplicando');
 for (const a of acciones) {
   p2.paso(a.titulo);
   try {
     const doc = await col.findOne({ _id: new ObjectId(a.id) });
     if (!doc || !sigueIgual(doc, a.antes) || doc.cdu_manual) { cambiados++; continue; }   // cambió desde el seco: no se toca
-    const r = await aplicarRefinamiento(db, doc, a);
+    // Con un guion: lo decidido SIN la BNE en línea ni la IA (tablas, hermanos, árbol) se vuelve a comprobar con el
+    // motor ACTUAL — barato, sin red —, por si el motor se corrigió entre el seco y la ejecución (13-oct: el árbol
+    // aceptaba nombres de una palabra genérica, la tabla LCC leía «.E8» como exponente). Lo de la BNE y la IA,
+    // que es lo caro, se aplica tal cual.
+    let decision = a;
+    if (usandoGuion && a.fuente !== 'bne' && !/IA con menú/.test(a.via)) {
+      const d = (await decidirLote(db, [doc], { conIA: false, enLinea: false })).decisiones[0];
+      if (!d) { descartadas++; continue; }
+      if (d.cdu !== a.cdu) { corregidas++; decision = { cdu: d.cdu, fuente: d.fuente, via: d.via }; }
+    }
+    const r = await aplicarRefinamiento(db, doc, decision);
     if (r.aplicado) {
       hechos++;
       if (r.movida) movidos++;
@@ -142,5 +153,6 @@ if (resumen.sinResolver.length && conIA && !resumen.iaNoDisponible) {
 }
 await guion.archivar();
 
+if (usandoGuion) console.log(`\nComprobación con el motor actual: ${corregidas} corregidas · ${descartadas} descartadas (ya no pasan las reglas).`);
 console.log(`\n=== HECHO · ${hechos} refinados · ${movidos} carpetas movidas · ${cambiados} cambiados desde el seco (no se tocan) · ${fallos} fallos ===`);
 process.exit(fallos ? 1 : 0);
