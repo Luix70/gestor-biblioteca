@@ -179,7 +179,17 @@ function deweyACDU(codigo) {
         '190': '1', '191': '1(73)', '192': '1(410)', '193': '1(430)', '194': '1(44)', '195': '1(450)',
         '196': '1(460)', '197': '1(470)', '198': '1(48)', '199': '1',
     };
-    return EXACTAS[d] || FILOSOFIA_PAIS[d] || null;   // el resto (130, 15x, 4xx, 8xx, historia regional…) → IA
+    // Filosofía ANTIGUA y MEDIEVAL (Dewey 180-189, 13-oct): la CDU las pone con auxiliar de lugar o de tiempo —
+    // Grecia (38), Roma (37), mundo antiguo (3), Edad Media "04/14"—. Quedaban en «1» a secas (37 de Platón, 184).
+    // El 181 (oriental: China, India, judía, islámica…) es demasiado variado: se deja.
+    const FILOSOFIA_ANTIGUA = {
+        '180': '1(3)', '182': '1(38)', '183': '1(38)', '184': '1(38)', '185': '1(38)', '186': '1(38)',
+        '187': '1(38)', '188': '1(3)', '189': '1"04/14"',
+    };
+    // Sistemas filosóficos (Dewey 141-149) son la división 14 de la CDU; epistemología (121) es el 165.
+    const OTRAS_FILOSOFIA = { '121': '165' };
+    if (/^14[1-9]$/.test(d)) return '14';
+    return EXACTAS[d] || FILOSOFIA_PAIS[d] || FILOSOFIA_ANTIGUA[d] || OTRAS_FILOSOFIA[d] || null;   // el resto (130, 15x, 4xx, 8xx, historia regional…) → IA
 }
 
 // LC → CDU. La correspondencia se hace por CLASE (1-2 letras iniciales de la signatura). Es CONSERVADORA, como
@@ -392,7 +402,11 @@ const LCC_RANGOS = {
     QH: [[426, 470.999, '575'], [540, 549.999, '574'], [573, 671.999, '576.3']],
     QL: [[461, 599.999, '595.7'], [614, 639.999, '597'], [640, 669.999, '597.6'], [671, 699.999, '598.2'], [700, 739.999, '599']],
     // Filosofía moderna por países (la misma regla que el Dewey 19x).
-    B: [[851, 945.999, '1(73)'], [1111, 1674.999, '1(410)'], [1801, 2430.999, '1(44)'], [2521, 3396.999, '1(430)'], [3551, 3636.999, '1(450)']],
+    // Filosofía por PERIODOS (13-oct): historia general (B69-99), antigua (B108-708: Grecia B165-629 —Platón B350-398,
+    // Aristóteles B400-491—, Roma B630-708), medieval (B720-765), Renacimiento (B770-785); y la moderna por PAÍSES.
+    B: [[69, 99.999, '1(091)'], [108, 164.999, '1(3)'], [165, 629.999, '1(38)'], [630, 708.999, '1(37)'],
+        [720, 765.999, '1"04/14"'], [770, 785.999, '1"14/16"'],
+        [851, 945.999, '1(73)'], [1111, 1674.999, '1(410)'], [1801, 2430.999, '1(44)'], [2521, 3396.999, '1(430)'], [3551, 3636.999, '1(450)']],
     BP: [[500, 610.999, '2']],          // teosofía y movimientos nuevos: no es islam
     PN: [[1560, 1590.999, '792'], [1991, 1992.999, '654.19'], [1993, 1999.999, '791.43'], [2000, 3307.999, '792'], [4699, 5650.999, '070']],
     HF: [[5410, 5417.999, '658.8'], [5601, 5689.999, '657'], [5001, 6182.999, '658']],
