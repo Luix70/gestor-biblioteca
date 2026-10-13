@@ -2152,7 +2152,7 @@ function pintarColeccion(r) {
   if ($('#colLista')) $('#colLista').onclick = () => listaSerieCompleta(c);
   // Carátula fantasma → qué libro es y dónde buscarlo.
   if (completaActiva) {
-    $('#colGrid .vol.fantasma').forEach((el) => (el.onclick = () => fichaFantasma(_colCompleta.entradas[+el.dataset.fantasma])));
+    $$('#colGrid .vol.fantasma').forEach((el) => (el.onclick = () => fichaFantasma(_colCompleta.entradas[+el.dataset.fantasma])));
   }
   if ($('#colNumerar')) $('#colNumerar').onclick = () => numerarColeccion();
   if ($('#colLomos')) $('#colLomos').onclick = () => numerarPorLomos();
@@ -2284,7 +2284,7 @@ async function listaSerieCompleta(c) {
   $('#cmpModal').style.display = 'grid';
   $('#lsX').onclick = cerrarCmp;
   $('#cmpScrim').onclick = cerrarCmp;
-  $('#cmpModal tr[data-i]').forEach((tr) => (tr.onclick = () => {
+  $$('#cmpModal tr[data-i]').forEach((tr) => (tr.onclick = () => {
     const x = entradas[+tr.dataset.i];
     if (x.tengo) { cerrarCmp(); verDoc(x.tengo._id); } else fichaFantasma(x);
   }));
@@ -3307,7 +3307,7 @@ function filaClas(x, sinSist) {
 }
 function attachClas(scope) {
   $$(scope + ' .iclas').forEach((b) => (b.onclick = () => infoClasificacion(b.dataset.sist, b.dataset.cod)));
-  $(scope + ' .regclas').forEach((b) => (b.onclick = () => regenerarDescripcionClas(b.dataset.cod, b.dataset.sist || 'cdu')));
+  $$(scope + ' .regclas').forEach((b) => (b.onclick = () => regenerarDescripcionClas(b.dataset.cod, b.dataset.sist || 'cdu')));
   $$(scope + ' .cntclas').forEach(
     (b) => (b.onclick = () => filtrarPorClasificacion(b.dataset.sist, b.dataset.cod)),
   );
