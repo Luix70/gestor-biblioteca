@@ -3185,6 +3185,11 @@ de ficheros clasificado por CDU.
       la ingesta y le CEDEN el turno. Cada campaña avisa de su COSTE:
         🆓 sin IA (local/Fichero) · 🌐 APIs gratis (con LÍMITE de llamadas) · 🤖 IA de pago ·
         🤖🆓 IA, pero SOLO de los proveedores gratuitos (nunca la de pago).
+      Las campañas que usan IA tienen un selector «IA» (13-oct): «gratis y de pago» (la rotación normal),
+      «solo gratis» (nunca la de pago: si las gratuitas están saturadas, la tanda para y sigue en la próxima)
+      o «sin IA» (solo lo que puede hacer sin ella: p. ej. las descripciones salen de las fuentes oficiales —UDC
+      Summary, LC Outline—; «Completar a fondo» y «Equivalencias CDU» no hacen nada). El icono de coste sigue al
+      selector. Un libro que se queda sin IA por esta opción NO se da por hecho: se reintenta en la tanda siguiente.
       Campañas actuales:
         · 🤖🆓 Revisar descripciones Dewey (13-oct) — INACTIVA por defecto. La IA juzga, por
           tandas de 25, cada descripción del Dewey escrita antes de tener referencias contra

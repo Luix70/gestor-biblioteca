@@ -10867,6 +10867,17 @@ const CAMP_BADGE_TIT = {
   ia: 'Consume IA de pago (Gemini)',
   'ia-gratis': 'IA, pero SOLO de los proveedores gratuitos (nunca la de pago)',
 };
+// Qué IA puede usar una campaña que la usa (politica-ia.js): la rotación normal, solo los proveedores gratuitos, o
+// ninguna (hace solo lo que puede sin IA). Si la IA permitida no está disponible, la tanda para y sigue en la próxima.
+const MODOS_IA_CAMPANA = [
+  ['todas', 'gratis y de pago', 'La rotación normal: primero los proveedores gratuitos y, si se agotan, la IA de pago.'],
+  ['gratis', 'solo gratis', 'Nunca la IA de pago: si los gratuitos están saturados, la tanda para y sigue en la próxima.'],
+  ['ninguna', 'sin IA', 'Ninguna llamada de IA: la campaña hace solo lo que puede sin ella (o nada, si todo su trabajo es de IA).'],
+];
+function selectorIACampana(actual) {
+  const opciones = MODOS_IA_CAMPANA.map(([v, txt, tit]) => `<option value="${v}" title="${esc(tit)}"${v === actual ? ' selected' : ''}>${txt}</option>`).join('');
+  return `<label style="font-size:12px" title="Qué IA puede usar esta campaña">IA <select class="campIA" style="font-size:12px">${opciones}</select></label>`;
+}
 // Barra/estado de la tanda de una campaña (en curso o la última terminada).
 function barraCampana(c) {
   const p = c.progreso;
@@ -10929,6 +10940,7 @@ async function loadCampanas(silencioso) {
           <span class="muted" style="font-size:12px">Pendientes: <b class="campPend">${c.pendientes == null ? '—' : c.pendientes}</b></span>
           <label style="font-size:12px">Lote <input class="campLote" type="number" min="1" value="${c.lote}" style="width:66px"></label>
           <label style="font-size:12px">cada <input class="campCada" type="number" min="1" value="${c.cadenciaMin}" style="width:56px"> min</label>
+          ${c.usaIA ? selectorIACampana(c.ia) : ''}
           <button class="btn campGuardar" style="padding:3px 9px;font-size:12px">Guardar</button>
           <button class="btn campRun" style="padding:3px 9px;font-size:12px" title="Lanza una tanda ahora (en segundo plano)"${drenaje.id ? ' disabled' : ''}>▶ Ahora</button>
           ${btnCompletar}
@@ -10948,6 +10960,7 @@ async function loadCampanas(silencioso) {
       activa: row.querySelector('.campActiva').checked,
       lote: +row.querySelector('.campLote').value,
       cadenciaMin: +row.querySelector('.campCada').value,
+      ...(row.querySelector('.campIA') ? { ia: row.querySelector('.campIA').value } : {}),
     });
     const guardar = async (silencioso) => {
       try {
@@ -10958,6 +10971,9 @@ async function loadCampanas(silencioso) {
       }
     };
     row.querySelector('.campActiva').onchange = () => guardar(true);
+    // La IA se guarda al cambiarla, y se repinta la fila (el icono de coste depende de ella).
+    const selIA = row.querySelector('.campIA');
+    if (selIA) selIA.onchange = async () => { await guardar(false); loadCampanas(true); };
     row.querySelector('.campGuardar').onclick = () => guardar(false);
     row.querySelector('.campRun').onclick = async () => {
       await guardar(true); // asegura que lote/cadencia estén persistidos antes de lanzar

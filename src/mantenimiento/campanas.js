@@ -38,6 +38,7 @@ import { ROLES_VALIDOS } from '../utils/contribuciones.js';
 import { enriquecerAutor, autoresEnriquecibles } from '../utils/enriquecer-autor.js';
 import { rellenarDescripcionesFaltantes, contarFaltantes } from './backfill-descripciones.js';
 import { revisarTandaDewey, contarDeweyPendientes } from '../utils/revision-dewey.js';
+import { conPoliticaIA, politicaIA, MODOS_IA } from '../utils/politica-ia.js';
 import { enriquecerAFondo } from './enriquecer-a-fondo.js';
 import { PLACEHOLDERS_AUTOR } from '../utils/creditos-portada.js';
 import path from 'node:path';
@@ -198,6 +199,10 @@ export async function resolverNombreSeriePorISSN(db, coleccion) {
 // ── REGISTRO DE CAMPAÑAS ────────────────────────────────────────────────────────────────────
 // coste: 'gratis' = sin IA (local/Fichero) · 'apis' = APIs gratuitas con LÍMITE de llamadas ·
 //        'ia' = consume IA de pago (Gemini) · 'ia-gratis' = IA, pero SOLO de los proveedores gratuitos.
+// Las que usan IA ('ia' / 'ia-gratis') llevan además un ajuste «IA» editable en el panel (politica-ia.js):
+//   'todas' (gratis y, si se agotan, la de pago) · 'gratis' (solo las gratuitas) · 'ninguna' (lo que se pueda sin IA).
+// Su defecto es `iaDefecto` (o 'todas' para las 'ia', 'gratis' para las 'ia-gratis'). El coste que enseña el
+// panel sale del ajuste en vigor.
 
 export const CAMPANAS = [
     {
@@ -544,7 +549,7 @@ export const CAMPANAS = [
         id: 'descripciones',
         etiqueta: 'Descripciones CDU/Dewey/LCC',
         coste: 'ia',
-        descripcion: 'Genera con IA (Gemini) la descripción de cada código de clasificación que usan los libros y aún no la tiene. CONSUME IA DE PAGO: 1 llamada por código. Se cachea (una vez descrito, no se vuelve a pedir).',
+        descripcion: 'Genera la descripción de cada código de clasificación (CDU/Dewey/LCC) que usan los libros y aún no la tiene, con las referencias oficiales (UDC Summary, DDC 23, LC Outline). Con IA: 1 llamada por código. Sin IA: solo los que se pueden componer con las fuentes oficiales. Se cachea (una vez descrito, no se vuelve a pedir).',
         version: 1,
         loteDefecto: 25,
         cadenciaDefecto: 10,
@@ -563,7 +568,7 @@ export const CAMPANAS = [
         id: 'revisar-dewey',
         etiqueta: 'Revisar descripciones Dewey',
         coste: 'ia-gratis',
-        descripcion: 'Revisa las descripciones del Dewey que escribió la IA SIN referencias (antes del 13-oct): la IA juzga cada título contra el significado oficial del número (DDC 23 Summaries + su CDU) por tandas de 25, y las incoherentes («830 = Literatura española») se rehacen con esas referencias (la vieja se guarda en clasificacion_descripciones_retiradas). Empieza por los códigos con más libros. SOLO IA GRATUITA: si las gratis están saturadas, la tanda para y sigue en la próxima. Solo cambia el texto de la descripción: ni la CDU ni las carpetas.',
+        descripcion: 'Revisa las descripciones del Dewey que escribió la IA SIN referencias (antes del 13-oct): la IA juzga cada título contra el significado oficial del número (DDC 23 Summaries + su CDU) por tandas de 25, y las incoherentes («830 = Literatura española») se rehacen con esas referencias (la vieja se guarda en clasificacion_descripciones_retiradas). Empieza por los códigos con más libros. Si la IA permitida está saturada, la tanda para y sigue en la próxima. Solo cambia el texto de la descripción: ni la CDU ni las carpetas. Sin IA no hace nada.',
         version: 1,
         loteDefecto: 50,        // descripciones por tanda (2 llamadas de juez + las que haya que rehacer)
         cadenciaDefecto: 15,
@@ -573,8 +578,9 @@ export const CAMPANAS = [
             return (await contarDeweyPendientes(db)).total;
         },
         async ejecutarLote(db, { limite, onProgreso }) {
-            const r = await revisarTandaDewey(db, { limite, soloGratis: true, onProgreso });
-            if (r.sinIA) console.log('🎯 [Campaña revisar-dewey] IA gratuita no disponible ahora: sigue en la próxima tanda.');
+            if (politicaIA()?.modo === 'ninguna') return { procesados: 0, cambios: 0, pendientes: (await contarDeweyPendientes(db)).total };
+            const r = await revisarTandaDewey(db, { limite, soloGratis: politicaIA()?.modo !== 'todas', onProgreso });
+            if (r.sinIA) console.log('🎯 [Campaña revisar-dewey] IA no disponible ahora: sigue en la próxima tanda.');
             return { procesados: r.procesados, cambios: r.cambios, pendientes: r.pendientes };
         },
     },
@@ -622,6 +628,8 @@ export const CAMPANAS = [
             return contarEquivalenciasPendientes(db);
         },
         async ejecutarLote(db, { limite, onProgreso }) {
+            // Sin IA no hay nada que deducir (los códigos que la tabla sabe traducir ya no están pendientes).
+            if (politicaIA()?.modo === 'ninguna') return { procesados: 0, cambios: 0, pendientes: await contarEquivalenciasPendientes(db) };
             const r = await precalentarEquivalencias(db, { limite, onProgreso });
             return { procesados: r.procesados, cambios: r.cambios, pendientes: r.pendientes };
         },
@@ -635,6 +643,12 @@ const PORID = new Map(CAMPANAS.map((c) => [c.id, c]));
 
 const AJUSTES_ID = 'campanas';
 
+/** ¿La campaña usa IA? (las que tienen el ajuste «IA»: todas / solo gratis / ninguna). */
+const usaIA = (c) => c.coste === 'ia' || c.coste === 'ia-gratis';
+const iaDefecto = (c) => c.iaDefecto || (c.coste === 'ia-gratis' ? 'gratis' : 'todas');
+/** El coste que enseña el panel, según el ajuste de IA en vigor. */
+const costeEfectivo = (c, ajuste) => !usaIA(c) ? c.coste : ajuste?.ia === 'ninguna' ? 'gratis' : ajuste?.ia === 'gratis' ? 'ia-gratis' : 'ia';
+
 /** Lee la config efectiva por campaña = defecto del registro fusionado con el override guardado. */
 export async function leerAjustesCampanas(db) {
     const guardado = await db.collection('ajustes').findOne({ _id: AJUSTES_ID }).catch(() => null);
@@ -646,6 +660,7 @@ export async function leerAjustesCampanas(db) {
             activa: typeof o.activa === 'boolean' ? o.activa : c.activaDefecto,
             lote: Number.isFinite(o.lote) && o.lote > 0 ? Math.min(2000, o.lote) : c.loteDefecto,
             cadenciaMin: Number.isFinite(o.cadenciaMin) && o.cadenciaMin > 0 ? o.cadenciaMin : c.cadenciaDefecto,
+            ...(usaIA(c) ? { ia: MODOS_IA.includes(o.ia) ? o.ia : iaDefecto(c) } : {}),
         };
     }
     return out;
@@ -671,6 +686,7 @@ export async function guardarAjusteCampana(db, id, cambios = {}) {
     if (typeof cambios.activa === 'boolean') set[`campanas.${id}.activa`] = cambios.activa;
     if (Number.isFinite(Number(cambios.lote))) set[`campanas.${id}.lote`] = Math.max(1, Math.min(2000, Number(cambios.lote)));
     if (Number.isFinite(Number(cambios.cadenciaMin))) set[`campanas.${id}.cadenciaMin`] = Math.max(1, Number(cambios.cadenciaMin));
+    if (MODOS_IA.includes(cambios.ia) && usaIA(PORID.get(id))) set[`campanas.${id}.ia`] = cambios.ia;
     if (!Object.keys(set).length) return { ok: false, motivo: 'nada que guardar' };
     await db.collection('ajustes').updateOne({ _id: AJUSTES_ID }, { $set: set }, { upsert: true });
     return { ok: true };
@@ -732,7 +748,7 @@ export async function listarCampanas(db) {
     for (const c of CAMPANAS) {
         const pendientes = conteos.has(c.id) ? conteos.get(c.id) : null;
         out.push({
-            id: c.id, etiqueta: c.etiqueta, coste: c.coste, descripcion: c.descripcion,
+            id: c.id, etiqueta: c.etiqueta, coste: costeEfectivo(c, cfg[c.id]), usaIA: usaIA(c), descripcion: c.descripcion,
             version: c.version, ...cfg[c.id], pendientes,
             ultimaEjecucion: ultimaEjecucion.get(c.id) || null,
             progreso: progreso.get(c.id) || null,   // { enCurso, procesados, objetivo, cambios } de la tanda en curso/última
@@ -751,9 +767,17 @@ const progreso = new Map();        // id → { enCurso, procesados, objetivo, ca
  * Publica su avance en `progreso` (lo lee el panel para pintar una barra).
  * @returns {Promise<{procesados, cambios, pendientes, abortado}>}
  */
-export async function ejecutarCampana(db, id, { limite, debeAbortar = async () => false } = {}) {
+export async function ejecutarCampana(db, id, opciones = {}) {
     const camp = PORID.get(id);
     if (!camp) return { procesados: 0, cambios: 0, pendientes: 0, abortado: false };
+    // La política de IA de la campaña (todas / solo gratis / ninguna) rige toda la IA que se llame en la tanda.
+    if (!usaIA(camp)) return ejecutarTanda(db, camp, opciones);
+    const modo = (await leerAjustesCampanas(db))[id]?.ia || iaDefecto(camp);
+    return conPoliticaIA(modo, () => ejecutarTanda(db, camp, opciones));
+}
+
+async function ejecutarTanda(db, camp, { limite, debeAbortar = async () => false } = {}) {
+    const id = camp.id;
     ultimaEjecucion.set(id, Date.now());
     const prog = { enCurso: true, procesados: 0, objetivo: limite, cambios: 0, inicio: Date.now(), fin: null };
     progreso.set(id, prog);
@@ -786,6 +810,7 @@ export async function ejecutarCampana(db, id, { limite, debeAbortar = async () =
             // procesarDoc devuelve true/false (¿hubo cambio?) o { cambio, sellar:false } si la campaña se sella
             // ella misma (recuperar-isbn: solo cuando no queda esperanza).
             let sellar = true;
+            const bloqueosAntes = politicaIA()?.bloqueos || 0;
             try {
                 const res = await camp.procesarDoc(db, doc);
                 const cambio = res && typeof res === 'object' ? res.cambio : res;
@@ -798,6 +823,15 @@ export async function ejecutarCampana(db, id, { limite, debeAbortar = async () =
                 }
             } catch (e) {
                 console.warn(`   ⚠️ campaña ${id} falló en ${doc._id}: ${e.message}`);
+            }
+            // Si la POLÍTICA DE IA dejó a este documento sin IA (solo gratis y saturadas, o ninguna), no se sella:
+            // no se ha hecho de verdad, y sellarlo daría la campaña por terminada sin haber trabajado. Y se para la
+            // tanda: los siguientes se quedarían igual (se reintenta en la próxima).
+            if ((politicaIA()?.bloqueos || 0) > bloqueosAntes) {
+                const pendientes = await col.countDocuments(filtroConSello(camp, base));
+                conteos.set(id, pendientes);
+                console.log(`🎯 [Campaña ${id}] IA no disponible con la política «${politicaIA().modo}»: la tanda para aquí y sigue en la próxima.`);
+                return { procesados, cambios, pendientes, abortado: false, sinIA: true };
             }
             // Sella el documento (procesado, con o sin datos) para no reintentarlo mientras no suba la versión.
             if (sellar) await col.updateOne({ _id: doc._id }, { $set: { [`campanas.${camp.id}`]: camp.version } });

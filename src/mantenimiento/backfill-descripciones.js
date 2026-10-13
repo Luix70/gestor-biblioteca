@@ -1,7 +1,8 @@
 import { conectarDB } from '../database.js';
 import { conTexto, extraerJSON } from '../utils/vision.js';
-import { describirCDU, sembrarDescripcionCDU } from '../utils/descripcion-cdu.js';
-import { describirClasificacion, guardarDescripcionClasificacion } from '../utils/descripcion-clasificacion.js';
+import { describirCDU, sembrarDescripcionCDU, regenerarDescripcionCDU } from '../utils/descripcion-cdu.js';
+import { describirClasificacion, guardarDescripcionClasificacion, regenerarDescripcionClasificacion } from '../utils/descripcion-clasificacion.js';
+import { politicaIA } from '../utils/politica-ia.js';
 import { sanitizarCDU } from '../utils/cdu-arbol.js';
 
 /**
@@ -92,7 +93,25 @@ async function guardarUno(db, sistema, codigo, datos) {
 }
 
 // Genera UNO-A-UNO (fallback): hace su propia llamada de IA y cachea.
+// Sin IA, los códigos que no tienen fuente oficial se saltan en las tandas siguientes (mientras viva el proceso):
+// si no, la campaña se atascaría reintentando siempre los mismos primeros de la lista.
+const sinFuenteOficial = new Set();
+
 async function generarUno(db, sistema, codigo) {
+    // Campaña con la IA en «ninguna»: solo lo que dan las fuentes oficiales, sin IA (CDU: UDC Summary o su
+    // composición con las piezas oficiales; LCC: el LC Outline; Dewey: su equivalencia en la CDU). Si no hay, se
+    // queda para cuando haya IA.
+    if (politicaIA()?.modo === 'ninguna') {
+        try {
+            const r = sistema === 'cdu'
+                ? await regenerarDescripcionCDU(db, codigo, { conIA: false })
+                : await regenerarDescripcionClasificacion(db, sistema, codigo, { conIA: false });
+            return !!r;
+        } catch {
+            sinFuenteOficial.add(clave(sistema, codigo));
+            return false;
+        }
+    }
     try {
         const r = sistema === 'cdu' ? await describirCDU(db, codigo) : await describirClasificacion(db, sistema, codigo);
         return !!r;
@@ -118,7 +137,7 @@ export async function rellenarDescripcionesFaltantes({ limite = 5, db = null, on
         ...cdu.map(c => ({ sistema: 'cdu', codigo: c })),
         ...dewey.map(c => ({ sistema: 'dewey', codigo: c })),
         ...lcc.map(c => ({ sistema: 'lcc', codigo: c })),
-    ].slice(0, limite);
+    ].filter((o) => politicaIA()?.modo !== 'ninguna' || !sinFuenteOficial.has(clave(o.sistema, o.codigo))).slice(0, limite);
 
     const total = objetivos.length;
     let generadas = 0, fallos = 0, hechos = 0;

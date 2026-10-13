@@ -10,6 +10,7 @@
  * para no malgastar una llamada fallida en cada petición mientras la cuota está agotada.
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
 
 // Cooldown de una clave GRATIS tras un 429, PROPORCIONAL a la cuota: CORTO si es límite por-minuto (RPM/TPM,
 // se recupera en ~1 min), LARGO solo si es la cuota DIARIA (RPD, agotada hasta mañana). Antes era fijo 5 min
@@ -46,9 +47,10 @@ function clavesOrdenadas() {
     const paid = descubrirEnv(['GEMINI_API_KEY_PAID', 'GEMINI_API_KEY']).filter(k => !free.includes(k)); // _PAID + legado
     const now = Date.now();
     const orden = [];
-    for (const k of free) if ((cooldownKey[k] || 0) <= now) orden.push(['free', k]); // free NO enfriando (por clave)
-    for (const k of paid) orden.push(['paid', k]);
-    if (!orden.length) for (const k of free) orden.push(['free', k]); // todas enfriando y sin pago → intentar free igual
+    // La política de IA del trabajo en curso (campañas): con «gratis», nunca la de pago; con «ninguna», nada.
+    if (tierPermitido('free')) for (const k of free) if ((cooldownKey[k] || 0) <= now) orden.push(['free', k]); // free NO enfriando (por clave)
+    if (tierPermitido('paid')) for (const k of paid) orden.push(['paid', k]);
+    if (!orden.length && tierPermitido('free')) for (const k of free) orden.push(['free', k]); // todas enfriando y sin pago → intentar free igual
     return orden;
 }
 
@@ -63,6 +65,7 @@ function clavesOrdenadas() {
  */
 export async function conGemini(opcionesModelo, fn) {
     const orden = clavesOrdenadas();
+    if (!orden.length && !tierPermitido('paid')) throw errorSinIA('Gemini');
     if (!orden.length) throw new Error('No hay claves Gemini configuradas (GEMINI_API_FREE_KEY / GEMINI_API_KEY).');
 
     let ultimo;
@@ -84,6 +87,7 @@ export async function conGemini(opcionesModelo, fn) {
                 console.warn(`   ↻ Gemini[${etiqueta}] falló (${motivo}); probando la siguiente clave.`);
                 continue;
             }
+            if (esCuota(e)) anotarSinIA();   // con la política «gratis»: las claves gratis, agotadas
             throw e;
         }
     }

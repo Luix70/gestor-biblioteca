@@ -14,6 +14,7 @@
 import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { conectarDB } from '../database.js';
+import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
 
 // Cooldown por-clave tras un 429, PROPORCIONAL a la cuota: corto para límite por-minuto (RPM/TPM, se recupera
 // en ~1 min), largo solo para la cuota diaria (RPD). Antes era fijo 5 min → tras un pico las 3 gratis quedaban
@@ -151,6 +152,8 @@ async function ordenIntento(filtro = null) {
     const aj = await ajustes();
     let base = candidatos().filter(c => aj.get(c.id)?.enabled !== false);
     if (filtro) base = base.filter(filtro);
+    // La política de IA del trabajo en curso (campañas: todas / solo gratis / ninguna) — politica-ia.js.
+    base = base.filter(c => tierPermitido(c.tier));
     const ahora = Date.now();
     if (ultimoOk) {
         const lc = base.find(c => c.id === ultimoOk);
@@ -171,6 +174,7 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
     // ERRÓNEA de Groq/OpenRouter (que "responden" con dígitos mal y cortan la rotación).
     // Para VISIÓN se excluyen los proveedores `soloTexto` (p. ej. Groq, que ya no tiene modelo de imagen → 404).
     const orden = await ordenIntento(soloGemini ? (c => c.prov.tipo === 'gemini') : (c => !c.prov.soloTexto));
+    if (!orden.length && !tierPermitido('paid')) throw errorSinIA('visión');
     if (!orden.length) throw new Error(soloGemini
         ? 'No hay proveedor Gemini disponible/activo para leer el código de barras con precisión.'
         : 'No hay proveedores de visión configurados/activos (revisa las claves en .env y los Ajustes).');
@@ -190,6 +194,7 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
             console.warn(`   ↻ Visión[${c.id}] falló (${motivo(e)}); siguiente proveedor.`);
         }
     }
+    anotarSinIA();   // con la política «gratis»: las gratis, saturadas
     throw ultimo || new Error('Todos los proveedores de visión fallaron.');
 }
 
@@ -204,6 +209,7 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
  */
 export async function conTexto({ prompt, json = true, maxTokens, soloGratis = false } = {}) {
     const orden = await ordenIntento(soloGratis ? (c => c.tier === 'free') : null);
+    if (!orden.length && !tierPermitido('paid')) throw errorSinIA('texto');
     if (!orden.length) throw new Error(soloGratis
         ? 'No hay proveedores de IA GRATIS configurados/activos.'
         : 'No hay proveedores de IA configurados/activos (revisa las claves en .env y los Ajustes).');
@@ -222,6 +228,7 @@ export async function conTexto({ prompt, json = true, maxTokens, soloGratis = fa
             console.warn(`   ↻ IA-texto[${c.id}] falló (${motivo(e)}); siguiente proveedor.`);
         }
     }
+    anotarSinIA();
     throw ultimo || new Error('Todos los proveedores de IA de texto fallaron.');
 }
 
