@@ -31,6 +31,7 @@ import { editorialesDeColeccion, anotarEditorialDeColeccion } from './utils/indi
 import { editorialCoherenteConISBN } from './utils/editorial-por-prefijo.js';
 import { mismoTituloLibro } from './utils/titulo-libro.js';
 import { datosDeObraDeCandidatas } from './utils/datos-de-obra.js';
+import { decidirLote, esCduGruesa } from './utils/refinar-cdu.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -450,6 +451,26 @@ export async function ingestarRecurso({ rutas, contexto = {} }) {
         if (r.alerta) {
             documento.alertas_agente = [...(documento.alertas_agente || []), r.alerta];
             console.log(`   🏷️  ${r.alerta}`);
+        }
+    }
+
+    // 1quater. REFINAR UNA CDU GRUESA («51», «8», 000) antes de guardar, para que el libro entre ya en su rama fina
+    // (utils/refinar-cdu.js, el mismo motor de la campaña «Refinar CDU»): solo los pasos SIN IA y sin red —la CDU
+    // de la BNE del Fichero por ISBN, las tablas Dewey/LCC y el árbol oficial (UDC Summary) por el título—. Solo
+    // refina dentro de la misma rama; lo que no resuelva lo hará la campaña. Best-effort: nunca rompe la ingesta.
+    if (documento.tipo_recurso !== 'revista' && !documento.cdu_manual && esCduGruesa(documento.cdu)) {
+        try {
+            const { decisiones } = await decidirLote(await conectarDB(), [documento], { conIA: false, enLinea: false, hermanos: false });
+            const d = decisiones[0];
+            if (d) {
+                const aviso = `CDU refinada al ingerir: «${documento.cdu || '000'}» → «${d.cdu}» (${d.via}).`;
+                documento.alertas_agente = [...(documento.alertas_agente || []), aviso];
+                console.log(`   🔬 ${aviso}`);
+                documento.cdu = d.cdu;
+                if (d.fuente === 'bne' && rangoFuente(documento.cdu_fuente) < RANGO_CDU.bne) documento.cdu_fuente = 'bne';
+            }
+        } catch (e) {
+            console.warn(`   ⚠️ Refinar la CDU al ingerir falló (sigue con la que tenía): ${e.message}`);
         }
     }
 

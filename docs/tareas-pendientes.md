@@ -188,6 +188,10 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
        - [ ] a mano: 6a3b20a71c900068144ebe66 «Ten Physical Applications Of Spectral Zeta Functions» es un LIBRO de Lecture
              Notes in Physics (ISSN de serie 0075-8450) catalogado como revista en la CDU 82, sin carpeta en disco; y dos
              números de «Marketing» (6a3e3957…, 6a3e39a6…, CDU 339.13) con ruta_base 658.8 que no existe en disco.
+       - [ ] **Refinar CDU (mínimo 3 cifras)**: 20.768 libros con 000 o 1-2 cifras. Encender la campaña «Refinar CDU»
+             (IA solo gratis, escalonada) — o de golpe: `… refinar-cdu.js --sin-ia` (seco) y `--ejecutar` (los
+             pasos sin IA: ~17 % de los libros), y después la campaña para el resto con IA. Revisar la selección «CDU
+             sin refinar» que deje.
        - [ ] revisión de las descripciones del Dewey (11.644; prueba con 50: 8 incoherentes —«830 = Literatura española»—):
              encender la campaña «🤖🆓 Revisar descripciones Dewey» (solo IA gratis, escalonada), o de golpe
              `… revisar-descripciones-dewey.js --ejecutar` (reutiliza los veredictos del seco).
