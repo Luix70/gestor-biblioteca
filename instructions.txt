@@ -1268,7 +1268,11 @@ de ficheros clasificado por CDU.
     nunca se deja a medio traducir. Se aplica al ingerir (motor-catalogo) y al llegar una CDU de la BNE a un libro
     ya catalogado (aplicarCduConPrioridad). Lo ya guardado: `scripts/modernizar-cdu-religion.js` (en seco; seco del
     13-oct: 643 libros, 407 equivalencias de la caché, 40 dudosas → selección «CDU de religión por revisar», 60
-    puestas a mano que no toca y lista).
+    puestas a mano que no toca y lista). La 1.ª pasada (15:38) llevó el 291 (religión comparada) y el 299 (otras
+    religiones) a «2» a secas: ahora 291 → 2-65 (comparación de religiones) y sus subdivisiones a los auxiliares
+    (291.13 → 2-1, 291.3 → 2-5, 291.6 → 2-3…), y el 299 por regiones SOLO si el Dewey del libro lo confirma (en la
+    CDU antigua sus decimales significan otra cosa). `--rehacer` vuelve a traducir, desde la CDU original de su
+    alerta, los que la pasada dejó peor. Una CDU ya traducida por el script no se vuelve a examinar.
     EDITORIALES (2026-09-30): distribuidores fuera (`editoriales-falsas`: Distribooks, «… Distributing», «…
     Inventory», Libros Sin Fronteras); nombre limpio de puntuación ISBD al crear la editorial en todos los puntos
     (`limpiarNombreEditorial`: «Valdemar,» → Valdemar, «Ultramar.» → Ultramar, «Alianza, etc» → Alianza, «[Destino»

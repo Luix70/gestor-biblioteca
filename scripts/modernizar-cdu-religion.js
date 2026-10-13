@@ -16,6 +16,8 @@
  *
  *   sudo docker exec -t gestor-biblioteca node scripts/modernizar-cdu-religion.js              (DRY-RUN)
  *   sudo docker exec -t gestor-biblioteca node scripts/modernizar-cdu-religion.js --ejecutar
+ *   … --rehacer [--ejecutar]   además, vuelve a traducir (desde la CDU original de su alerta) los libros que una
+ *                              versión anterior de la tabla dejó peor (13-oct: 291 → «2» en vez de 2-65)
  */
 import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
@@ -25,10 +27,12 @@ import { cduReligionModerna } from '../src/utils/cdu-religion.js';
 import { carpetaReflejaFicha, recolocarSegunCdu, aplicarCambio, carpetaDeDoc } from '../src/mantenimiento/util-mantenimiento.js';
 import { regenerarSidecarsDoc } from '../src/utils/registro.js';
 import { indexarDoc } from '../src/utils/indice-busqueda.js';
-import { crearSeleccion } from '../src/utils/selecciones.js';
+import { crearSeleccion, anadirDocs } from '../src/utils/selecciones.js';
 import { progreso } from '../src/utils/progreso-cli.js';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
+const REHACER = process.argv.includes('--rehacer');
+const nuevaCdu = new Map();   // _id → CDU nueva (para mirar en seco dónde iría la carpeta)
 
 const db = await conectarDB();
 const col = db.collection('biblioteca');
@@ -38,6 +42,10 @@ const RE_CLASE2 = '(^|:)\\s*2[0-9][0-9]';
 const filtro = {
   $or: [{ cdu: { $regex: RE_CLASE2 } }, { cdu_autoridad: { $regex: RE_CLASE2 } }],
   mantenimiento_firma: { $ne: 'pendiente-cdu-contaminada' },
+  // Una CDU que ya tradujo este script está en notación ACTUAL: no se vuelve a examinar. Releída, «255» (292
+  // antiguo → religiones clásicas) vale también en el esquema antiguo, y con vocabulario cristiano en el título se
+  // «traduciría» otra vez a 27-46. (Lo que haya que rehacer con una tabla mejor lo hace --rehacer, desde la original.)
+  alertas_agente: { $not: { $elemMatch: { $regex: 'modernizar-cdu-religion' } } },
 };
 const PROYECCION = { cdu: 1, cdu_autoridad: 1, cdu_manual: 1, titulo: 1, subtitulo: 1, palabras_clave: 1, dewey: 1, lcc: 1 };
 const raizDe = (cdu) => String(cdu).match(/^[\d.\-]+/)?.[0] || String(cdu);
@@ -80,6 +88,7 @@ for await (const d of col.find(filtro, { projection: PROYECCION })) {
   cambiadas++;
   if (set.cdu) {
     afectados.push(d._id);
+    nuevaCdu.set(String(d._id), set.cdu);
     const t = transicionDe(d.cdu, set.cdu);
     transiciones.set(t, (transiciones.get(t) || 0) + 1);
   }
@@ -108,6 +117,52 @@ for await (const e of db.collection('equivalencias_cdu').find({ cdu: { $regex: R
   if (EJECUTAR) await db.collection('equivalencias_cdu').updateOne({ _id: e._id }, { $set: { cdu: r.cdu } });
 }
 
+// ─── --rehacer: los ya traducidos con una versión anterior de la tabla ─────────────────────────────────────────
+// La primera pasada (13-oct) llevó el 291 (religión comparada) y el 299 (otras religiones) a «2» a secas. La CDU
+// original está en la alerta que dejó cada libro: se vuelve a traducir con la tabla actual y, si sale distinta y
+// nadie ha tocado la CDU desde entonces (sigue siendo la que puso la pasada), se aplica.
+let rehechos = 0;
+if (REHACER) {
+  const RE_ALERTA = /modernizar-cdu-religion\): cdu (.+?)(?:, cdu_autoridad .+?)? → (\S+?)\. /;
+  const conAlerta = { alertas_agente: { $elemMatch: { $regex: 'modernizar-cdu-religion\\): cdu ' } }, cdu_manual: { $ne: true } };
+  const pR = progreso(await col.countDocuments(conAlerta), 'Rehacer · base');
+  for await (const d of col.find(conAlerta, { projection: { ...PROYECCION, alertas_agente: 1 } })) {
+    pR.paso(d.titulo);
+    // (Una CDU con espacios dentro —«726.6(445.1 Chart.)»— no se lee bien de la alerta: se salta, no es 291/299.)
+    const alerta = [...d.alertas_agente].reverse().find((a) => RE_ALERTA.test(a));
+    if (!alerta) continue;
+    const [, original, puesta] = alerta.match(RE_ALERTA);
+    if (d.cdu !== puesta) continue;                       // cambiada después: no se toca
+    const r = cduReligionModerna(original, d);
+    if (!r.cambio || r.cdu === puesta) continue;
+    rehechos++;
+    afectados.push(d._id);
+    nuevaCdu.set(String(d._id), r.cdu);
+    const t = `${transicionDe(original, puesta)} ⇒ ${raizDe(r.cdu)}`;
+    transiciones.set(t, (transiciones.get(t) || 0) + 1);
+    if (rehechos <= 40) pR.nota(`↻ ${original} → ${puesta} ⇒ ${r.cdu}  «${String(d.titulo || '').slice(0, 45)}»`);
+    if (EJECUTAR) {
+      await col.updateOne({ _id: d._id }, {
+        $set: { cdu: r.cdu, fecha_actualizacion: new Date() },
+        $push: { alertas_agente: `CDU de religión rehecha con la tabla corregida (scripts/modernizar-cdu-religion --rehacer): ${puesta} → ${r.cdu} (original: ${original}).` },
+      });
+    }
+  }
+  pR.fin();
+  // La caché: las equivalencias Dewey 29x que quedaron en «2» a secas (o con solo un lugar) se recalculan desde el
+  // propio código Dewey (el Dewey 29x anterior a 2000 y la CDU antigua 29x coinciden).
+  for await (const e of db.collection('equivalencias_cdu').find({ sistema_origen: /^dewey$/i, codigo_origen: /^29/, cdu: /^2($|\()/ })) {
+    // Sin las marcas de segmentación del Dewey («299/.16113», «291.1/3» → 299.16113, 291.13).
+    const dewey = String(e.codigo_origen).replace(/[/']/g, '');
+    const r = cduReligionModerna(dewey, { dewey });
+    if (!r.cambio || r.cdu === e.cdu) continue;
+    equivalencias++;
+    console.log(`   caché ↻ dewey:${e.codigo_origen}  ${e.cdu} ⇒ ${r.cdu}`);
+    if (EJECUTAR) await db.collection('equivalencias_cdu').updateOne({ _id: e._id }, { $set: { cdu: r.cdu } });
+  }
+  console.log(`\n--rehacer: ${rehechos} documento(s) con una traducción mejor que la de la primera pasada.`);
+}
+
 console.log(`\nFase 1: ${cambiadas} documento(s) con CDU de religión antigua${EJECUTAR ? ' corregidos' : ''} · ${equivalencias} equivalencia(s) de la caché.`);
 console.log('Por transición:');
 for (const [t, n] of [...transiciones].sort((a, b) => b[1] - a[1]).slice(0, 60)) console.log(`  ${String(n).padStart(5)}  ${t}`);
@@ -126,7 +181,7 @@ for (const _id of afectados) {
   p2.paso(doc?.titulo);
   if (!doc?.ruta_base) continue;
   // En seco la fase 1 no se aplicó: se mira dónde iría con la CDU nueva.
-  const comoQuedaria = EJECUTAR ? doc : { ...doc, cdu: cduReligionModerna(doc.cdu, doc).cdu };
+  const comoQuedaria = EJECUTAR ? doc : { ...doc, cdu: nuevaCdu.get(String(_id)) ?? doc.cdu };
   if (carpetaReflejaFicha(comoQuedaria)) { enSuSitio++; continue; }
   if (!EJECUTAR) continue;
   try {
@@ -149,17 +204,24 @@ const tiempo = p2.fin();
 
 // Las dudosas, a una selección para revisarlas a mano (sin tocar su CDU).
 if (EJECUTAR && dudosos.length) {
+  // Si ya hay una de una pasada anterior, se le añaden (sin repetir) en vez de crear otra igual.
+  const previa = await db.collection('selecciones').findOne({ nombre: /^CDU de religión por revisar/ }, { sort: { fecha_creacion: -1 } });
+  if (previa) {
+    await anadirDocs(db, String(previa._id), dudosos);
+    console.log(`\n   Dudosas añadidas a la selección «${previa.nombre}» (las que ya estaban no se repiten).`);
+  }
   const fecha = new Date().toISOString().slice(0, 10);
-  await crearSeleccion(db, {
+  if (!previa) await crearSeleccion(db, {
     nombre: `CDU de religión por revisar (¿notación antigua?) ${fecha}`,
     descripcion: 'Libros con una CDU de la clase 2 que vale en los dos esquemas (anterior y posterior a 2000) con significados distintos — p. ej. 282 = Iglesia católica (antigua) o islam suní (actual) — y cuyo Dewey, LCC, título y materias no dicen de qué religión tratan. No se ha tocado su CDU. scripts/modernizar-cdu-religion.js.',
     docs: dudosos,
   });
-  console.log(`\n   ${dudosos.length} documento(s) a la selección «CDU de religión por revisar (¿notación antigua?) ${fecha}».`);
+  if (!previa) console.log(`\n   ${dudosos.length} documento(s) a la selección «CDU de religión por revisar (¿notación antigua?) ${fecha}».`);
 }
 
 console.log(`\n=== ${EJECUTAR ? 'HECHO' : 'DRY-RUN'} · ${tiempo} ===`);
 console.log(`  CDU pasadas a notación actual : ${cambiadas}`);
+if (REHACER) console.log(`  rehechas con la tabla corregida: ${rehechos}`);
 console.log(`  equivalencias de la caché     : ${equivalencias}`);
 console.log(`  dudosas (a revisar a mano)    : ${dudosos.length}${EJECUTAR ? ' (en una selección)' : ''}`);
 console.log(`  puestas a mano (no se tocan)  : ${manuales.length}`);

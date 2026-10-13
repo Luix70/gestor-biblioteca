@@ -50,6 +50,15 @@ const ANTIGUA_A_ACTUAL = {
   // 29 religiones no cristianas → cada religión en su número actual
   29: '2', 292: '255', 293: '257', 294: '23', 2943: '24', 2944: '234', 2945: '233', 2946: '235',
   295: '254', 296: '26', 297: '28',
+  // 291 religión comparada / religiones en general (Eliade, «Historia de las creencias…») → comparación de
+  // religiones, y sus subdivisiones (como el Dewey 291 anterior a 2000) a los auxiliares especiales de la clase 2.
+  // (Primera versión, 13-oct: 291 → «2» a secas, que perdía lo que se sabía: 43 libros, rehechos con --rehacer.)
+  291: '2-65', 2911: '2-1', 2912: '2-1', 2913: '2-5', 2914: '2-4', 2915: '2-42', 2916: '2-3', 2917: '2-76',
+  2918: '2-23', 2919: '2-87',
+  // 299 otras religiones, por su origen (Dewey 299): celtas y otras indoeuropeas → Europa; Egipto; China (taoísmo);
+  // Japón; Corea; África y Norteamérica, con su auxiliar de lugar; Sudamérica; las eclécticas (New Age…) → 29.
+  299: '2', 2991: '257', 2993: '251', 29951: '221', 299514: '221.3', 29956: '225', 29957: '223',
+  2996: '2(6)', 2997: '2(7)', 2998: '258', 29993: '29',
 };
 
 // Números de 3 cifras o más que SÍ existen en el esquema actual (UDC Summary): ahí hay ambigüedad.
@@ -148,8 +157,16 @@ export function religionDelDoc(doc = {}) {
 }
 
 // ─── Traducción ─────────────────────────────────────────────────────────────────────────────────────────────────
-function traducirNumero(digitos) {
+/**
+ * El número actual para unos dígitos antiguos (prefijo más largo de la tabla). Las subdivisiones del 299 son las del
+ * DEWEY (299.51 China, 299.8 Sudamérica…), pero en la CDU antigua esos decimales significan otra cosa («Gods and
+ * Myths of Northern Europe» trae un 299.81 de la CDU antigua): solo se usan si el Dewey del libro lo confirma
+ * (`deweyDigitos` empieza igual); si no, el 299 se queda en «2».
+ */
+function traducirNumero(digitos, deweyDigitos = '') {
+  const finoConfirmado = deweyDigitos && deweyDigitos.slice(0, 4) === digitos.slice(0, 4);
   for (let largo = digitos.length; largo >= 2; largo--) {
+    if (largo > 3 && digitos.startsWith('299') && !finoConfirmado) continue;
     const destino = ANTIGUA_A_ACTUAL[digitos.slice(0, largo)];
     if (destino) return destino;
   }
@@ -180,14 +197,14 @@ function partirFacetas(cdu) {
  *             fuera (cduReligionModerna la usa cuando OTRA faceta de la misma CDU prueba que es del esquema antiguo);
  *   conflicto → no existe hoy, pero el libro trata justo de la religión de la lectura actual: no se toca nada.
  */
-function decidirFaceta(faceta, religion) {
+function decidirFaceta(faceta, religion, deweyDigitos) {
   const m = faceta.match(/^(\s*)(2\d\d(?:\.\d+)*)(.*)$/s);
   if (!m) return { faceta };
   const [, espacio, numero, restoCrudo] = m;
   const resto = restoCrudo.replace(/^\.(?!\d)/, '');   // «299.» → «299»: el punto suelto no es parte de nada
   const digitos = numero.replace(/\./g, '');
   if (digitos.startsWith('27')) return { faceta };                         // cristianismo en los dos esquemas
-  const destino = traducirNumero(digitos);
+  const destino = traducirNumero(digitos, deweyDigitos);
   if (!destino) return { faceta };
   const antigua = religionAntigua(digitos);
   const actual = RELIGION_ACTUAL[digitos.slice(0, 2)] || null;
@@ -220,7 +237,8 @@ export function cduReligionModerna(cdu, doc = {}) {
   if (typeof cdu !== 'string' || !/(^|:)\s*2\d\d/.test(cdu)) return sin;
   const r = religionDelDoc(doc);
   const religion = r?.religion || null;
-  const decisiones = partirFacetas(cdu).map((f) => decidirFaceta(f, religion));
+  const deweyDigitos = String(doc.dewey || '').replace(/[^0-9]/g, '');
+  const decisiones = partirFacetas(cdu).map((f) => decidirFaceta(f, religion, deweyDigitos));
   const sufijo = r ? ` · religión del libro: ${religion} (${r.por})` : '';
   const motivos = decisiones.filter((d) => d.motivo).map((d) => d.motivo + sufijo);
   const hayAntigua = decisiones.some((d) => d.cambio);
