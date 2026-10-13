@@ -64,9 +64,12 @@ título de la descripción que tenemos guardada. Di si el título es COHERENTE c
   · el número puede ser más concreto que la sección oficial (un tema dentro de ella es coherente);
   · NO es coherente si habla de otra disciplina, otro lugar, otra época, o de un LIBRO o autor concreto en vez de la
     materia del número;
-  · NI si afirma algo MÁS CONCRETO que la referencia oficial (un país, una escuela, una época) que NO puedas asegurar
-    para ese número exacto del DDC: «181.5 = Filosofía japonesa» no es coherente (en el DDC, Japón es 181.12). Ante la
-    duda, incoherente: la descripción se rehará quedándose en lo que se puede asegurar.
+  · NI si afirma algo más concreto (un país, una escuela, una época, un tema) que SABES que en el DDC tiene OTRO
+    número: «181.5 = Filosofía japonesa» no es coherente (en el DDC, Japón es 181.12); «841.8 = Poesía francesa del
+    siglo XX» tampoco (841.8 es el XIX).
+  · Si el título es un tema razonable dentro de la sección oficial y no sabes que esté mal, es COHERENTE: una
+    descripción concreta y correcta («005.8 = Seguridad informática») vale más que una genérica, y rehacerla sin
+    motivo perdería información.
 ${tanda.map((d, i) => `${i + 1}. Dewey ${d.codigo} · oficial: ${d.refs.join('; ') || '—'} · título guardado: «${d.titulo_es}»`).join('\n')}
 Responde ÚNICAMENTE con JSON, un veredicto por línea («n» es el número de la LÍNEA, 1, 2, 3…): {"veredictos":[{"n":<línea>,"coherente":true|false,"motivo":"<máx. 12 palabras>"}]}`;
 

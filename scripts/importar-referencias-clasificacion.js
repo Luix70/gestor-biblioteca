@@ -76,17 +76,34 @@ function leerLcc(texto, fichero) {
   return filas;
 }
 
-// ─── Dewey: las secciones de 3 cifras, a dos columnas (modo -layout) ─────────────────────────────────────────────
+// ─── Dewey: las 1.000 secciones (modo -raw) ─────────────────────────────────────────────────────────────────────
+// OJO: en el modo -layout la capa de texto del PDF DESCUADRA la columna derecha (los títulos 550-599 van dos filas
+// por detrás de sus números: «551 Economic geology», que es el 553) — así entró la primera importación (13-oct) y el
+// juez dio por malas descripciones buenas («551 = Meteorología»). En -raw cada columna sale como un bloque de
+// números seguido de sus títulos EN EL MISMO ORDEN, así que se emparejan por orden con una cola: un número suelto
+// espera; un título se lleva el número más antiguo en espera; una línea «822 English drama» se asigna sola.
+// Los tres sumarios (clases, divisiones, secciones) van en orden: el tercero, el de las secciones, prevalece.
 function leerDewey(texto) {
   const secciones = new Map();
-  const desde = texto.indexOf('First Summary') >= 0 ? texto.indexOf('First Summary') : 0;
-  for (const linea of texto.slice(desde).split('\n')) {
-    for (const x of linea.matchAll(/(?:^|\s{2,})(\d{3})\s+(.+?)(?=\s{2,}\d{3}\s|\s*$)/g)) {
-      const titulo = x[2].trim();
-      if (!secciones.has(x[1]) && !/^\[Unassigned\]$/i.test(titulo)) secciones.set(x[1], titulo);
+  let cola = [];
+  let anterior = null;
+  for (const bruta of texto.split('\n')) {
+    const linea = bruta.trim();
+    if (!linea) continue;
+    if (/^Consult schedules/i.test(linea)) { cola = []; continue; }   // pie de página: la cola no cruza páginas
+    if (/^\d{3}$/.test(linea)) {
+      if (linea !== anterior) cola.push(linea);   // el «000» de cabecera sale repetido
+      anterior = linea;
+      continue;
     }
+    anterior = null;
+    const m = linea.match(/^(\d{3})\s+(\S.*)$/);
+    if (m) secciones.set(m[1], m[2].trim());
+    else if (cola.length) secciones.set(cola.shift(), linea);
   }
-  return [...secciones].map(([codigo, titulo]) => ({ sistema: 'dewey', codigo, titulo }));
+  return [...secciones]
+    .filter(([, titulo]) => !/^\[Unassigned\]$|^\(Optional number\)$/i.test(titulo))
+    .map(([codigo, titulo]) => ({ sistema: 'dewey', codigo, titulo }));
 }
 
 /**
@@ -132,7 +149,7 @@ async function main() {
   await fs.mkdir(DIR, { recursive: true });
   console.log(`\n📚 Referencias oficiales Dewey + LCC — ${EJECUTAR ? '⚙️  EJECUTAR' : 'DRY-RUN (no escribe)'}\n`);
 
-  const dewey = leerDewey(await textoDePdf(URL_DDC, 'ddc23-summaries.pdf', '-layout'));
+  const dewey = leerDewey(await textoDePdf(URL_DDC, 'ddc23-summaries.pdf', '-raw'));
   console.log(`   Dewey (DDC 23 Summaries): ${dewey.length} secciones`);
 
   const lcc = [];
@@ -145,7 +162,7 @@ async function main() {
   p.fin();
   console.log(`   LCC (LC Classification Outline): ${lcc.length} rangos`);
 
-  for (const c of ['000', '181', '184', '300', '616', '791', '973']) console.log(`     dewey ${c}  ${dewey.find((x) => x.codigo === c)?.titulo || '—'}`);
+  for (const c of ['000', '181', '184', '300', '485', '551', '553', '595', '616', '791', '830', '973']) console.log(`     dewey ${c}  ${dewey.find((x) => x.codigo === c)?.titulo || '—'}`);
   for (const [cl, n] of [['B', 753], ['BD', 161], ['QA', 303], ['PN', 1995], ['TK', 5105.8]]) {
     const deEsta = lcc.filter((x) => x.clase === cl && x.desde !== null && n >= x.desde && n <= x.hasta).sort((a, b) => (b.hasta - b.desde) - (a.hasta - a.desde));
     console.log(`     lcc ${cl}${n}  ${deEsta.map((x) => `${x.notacion} ${x.titulo}`).join(' › ') || '—'}`);
@@ -162,7 +179,10 @@ async function main() {
   }
   const db = await conectarDB();
   const col = db.collection('clasificacion_oficial');
-  await col.deleteMany({});                    // se rehace entera: es derivada de los PDF, reconstruible
+  // Se rehace entera (es derivada de los PDF), pero conservando las traducciones del LCC ya hechas con --traducir.
+  const traducidos = new Map((await col.find({ sistema: 'lcc', titulo_es: { $exists: true } }, { projection: { titulo: 1, titulo_es: 1 } }).toArray()).map((x) => [x.titulo, x.titulo_es]));
+  for (const l of lcc) if (traducidos.has(l.titulo)) l.titulo_es = traducidos.get(l.titulo);
+  await col.deleteMany({});
   const fecha = new Date();
   const docs = [
     ...dewey.map((d) => ({ ...d, _id: `dewey|${d.codigo}`, fuente: 'DDC 23 Summaries (OCLC)', uso: 'solo referencia interna: © OCLC, no se muestra', fecha })),
