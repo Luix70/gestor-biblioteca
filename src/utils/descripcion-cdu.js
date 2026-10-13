@@ -36,9 +36,35 @@ const LUGARES = {
     '(99)': 'Antártida', '(=1:4)': 'pueblos europeos', '(=411.16)': 'judíos',
 };
 
-/** Las referencias fijas que tocan a este código: su clase, su división y los lugares que lleva. */
-function referenciasDe(codigo) {
+// Los AUXILIARES DE TIEMPO, descifrados (13-oct: con «1"04/14"» la IA leyó «/14» como la división 14 y se inventó un
+// lugar). En la CDU, entre comillas: 4 cifras = un año ("1939"); 2 cifras = un siglo ("19" = s. XX, "04" = s. V);
+// 1 cifra = un milenio ("1" = segundo milenio); «a/b» = de a hasta b.
+const ROMANOS = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX', 'XXI', 'XXII'];
+function tiempoLegible(parte) {
+    const p = String(parte).trim();
+    if (/^\d{4}$/.test(p)) return `el año ${Number(p)}`;
+    if (/^\d{2}$/.test(p)) return `el siglo ${ROMANOS[Number(p) + 1] || Number(p) + 1}`;
+    if (/^\d$/.test(p)) return `el ${['primer', 'segundo', 'tercer'][Number(p)] || `${Number(p) + 1}.º`} milenio d. C.`;
+    return null;
+}
+export function auxiliaresDeTiempo(codigo) {
     const lineas = [];
+    for (const [, dentro] of String(codigo).matchAll(/"([^"]*)"?/g)) {
+        const partes = dentro.split('/');
+        // Un final ABREVIADO hereda las cifras de delante del principio: «1920/30» = 1920-1930 (no «el siglo XXXI»).
+        if (partes.length === 2 && partes[0].length > partes[1].length && /^\d+$/.test(partes[0] + partes[1])) {
+            partes[1] = partes[0].slice(0, partes[0].length - partes[1].length) + partes[1];
+        }
+        const legibles = partes.map(tiempoLegible);
+        if (legibles.some((x) => !x)) continue;
+        lineas.push(`"${dentro}" = auxiliar de TIEMPO (no es un lugar ni otra clase): ${legibles.length === 2 ? `desde ${legibles[0]} hasta ${legibles[1]}` : legibles[0]}`);
+    }
+    return lineas;
+}
+
+/** Las referencias fijas que tocan a este código: su clase, su división, los lugares y los tiempos que lleva. */
+function referenciasDe(codigo) {
+    const lineas = [...auxiliaresDeTiempo(codigo)];
     const c = String(codigo);
     if (CLASES[c[0]]) lineas.push(`clase ${c[0]} = ${CLASES[c[0]]}`);
     for (const d of ['929', '91', '92', '93', '94']) if (c.startsWith(d)) { lineas.push(`${d} = ${DIVISIONES[d]}`); break; }
@@ -277,9 +303,12 @@ export async function regenerarDescripcionCDU(db, cdu, { conIA = false } = {}) {
             const significado = (p) => limpia(p).split(' = ').slice(1).join(' = ').replace(/\s*\(en: .*\)$/, '').split('. ')[0];
             const ultima = (re) => piezas.filter((p) => re.test(p)).pop();
             const partes = [ultima(/^\d/), ultima(/^\(/), ultima(/^=/)].filter(Boolean).map(significado);
+            // El periodo, si lo lleva («"04/14"» → «desde el siglo V hasta el siglo XV»).
+            const tiempos = auxiliaresDeTiempo(notacion);
+            const periodo = tiempos.map((t) => t.split(': ').slice(1).join(': ')).join('; ');
             datos = {
-                titulo_es: `${partes.join(' — ')} (subdivisión ${notacion})`,
-                descripcion_es: `Descripción compuesta, sin IA, con el significado oficial de sus piezas (UDC Summary):\n${piezas.map((p) => `· ${limpia(p)}`).join('\n')}`,
+                titulo_es: `${partes.join(' — ')}${periodo ? ` (${periodo})` : ''}`,
+                descripcion_es: `Descripción compuesta, sin IA, con el significado oficial de sus piezas (UDC Summary):\n${[...piezas.map(limpia), ...tiempos].map((p) => `· ${p}`).join('\n')}`,
                 titulo_en: null, descripcion_en: null,
             };
             fuente = 'udcs-compuesta';

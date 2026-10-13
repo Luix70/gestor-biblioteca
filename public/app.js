@@ -3330,6 +3330,13 @@ function regenerarDescripcionClas(cod) {
     try {
       const r = await api('/clasificacion/regenerar', { method: 'POST', body: JSON.stringify({ codigo: cod, conIA }) });
       if (!r.ok) throw new Error(r.motivo || 'no se pudo');
+      // La fila de la ficha se actualiza a la vista (si no, seguía enseñando el título viejo hasta reabrirla).
+      $$('.regclas').forEach((b) => {
+        if (b.dataset.cod !== cod) return;
+        const celda = b.closest('td');
+        if (celda && celda.firstChild && celda.firstChild.nodeType === 3) celda.firstChild.textContent = (r.titulo || '') + ' ';
+        else if (celda) celda.insertAdjacentText('afterbegin', (r.titulo || '') + ' ');
+      });
       infoClasificacion('cdu', cod);
       toast('Descripción rehecha');
     } catch (e) {
