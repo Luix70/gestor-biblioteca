@@ -632,6 +632,40 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // (regla del usuario, 30-sep). Llegarán cuando la edición se confirme (la eliges tú en la ficha).
     const huecos = await huecosDesdeAutoridad(db, doc, datos, { aplicar, conContribuciones: !provisional && !dudoso });
     Object.assign(set, huecos.set);
+
+    // LO QUE TRAJO UN ISBN EQUIVOCADO (14-oct). Si el libro tuvo OTRO ISBN —el anterior, o el que da nombre a su
+    // carpeta— y ese ISBN es de OTRO título, lo que se sacó de él no es de este libro: «La conjura de los necios»
+    // conservaba la CDU 929 y las materias «Marx, Groucho – Correspondencia» de «Las cartas de Groucho» aunque se le
+    // diera el ISBN bueno a mano, porque con el bueno ninguna autoridad da CDU y la mezcla conservadora no pisa lo
+    // que hay. Ahora: su CDU, si es la de ese otro libro, va a la cola de reclasificación DESDE CERO (campaña
+    // «Refinar CDU»: título, autores, sinopsis, IA con menú oficial), y se quitan las materias que solo vienen de él.
+    if (isbn) {
+        const segmento = String(doc.ruta_base || '').split('/').pop().replace(/-[0-9a-f]{6}$/, '');
+        const anteriores = [...new Set([doc.isbn, segmento].filter((x) => x && validarISBN(x) && !variantesISBN(isbn).includes(x)))];
+        for (const anterior of anteriores) {
+            const otro = await buscarAutoridadPorISBN(variantesISBN(anterior), { enLinea: false }).catch(() => null);
+            if (!otro?.titulo || mismoTituloLibro(otro.titulo, set.titulo || doc.titulo)) continue;
+            const raiz = (c) => String(c || '').trim().match(/^\d+(?:\.\d+)*/)?.[0] || '';
+            if (doc.cdu && !doc.cdu_manual && otro.cdu && raiz(doc.cdu) === raiz(otro.cdu)) {
+                set.mantenimiento_firma = 'pendiente-cdu-contaminada';
+                nombres.cdu = `«${doc.cdu}» era de «${otro.titulo}» (ISBN ${anterior}): a reclasificar desde cero`;
+            }
+            // Materias de ese otro libro (su título, autores y materias) que el nuestro no comparte.
+            const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+            const delOtro = norm([otro.titulo, ...(otro.autores || []), ...(otro.categorias || [])].join(' '));
+            const delNuestro = norm([doc.titulo, doc.subtitulo].join(' '));
+            const ajena = (m) => {
+                const palabras = norm(m).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !/^\d+$/.test(w));
+                return palabras.length && palabras.every((w) => delOtro.includes(w)) && !palabras.some((w) => delNuestro.includes(w));
+            };
+            const actuales = set.palabras_clave || doc.palabras_clave || [];
+            const quedan = actuales.filter((m) => !ajena(m));
+            if (quedan.length < actuales.length) {
+                set.palabras_clave = quedan;
+                nombres.palabras_clave = `quitadas ${actuales.length - quedan.length} materia(s) de «${otro.titulo}»`;
+            }
+        }
+    }
     for (const c of huecos.cambios) if (c.campo === 'contribuciones' || c.campo === 'cdu_autoridad') nombres[c.campo] = c.a;
     // Colección de la edición («Colección gótica», nº 112): solo como dato si el doc no está ya en una. No se
     // crea ni se asigna la colección aquí (eso reorganiza el catálogo); queda anotada para verla y agruparla.
@@ -668,6 +702,11 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     }
     // Con el ISBN resuelto, el «probable» sobra.
     if (doc.isbn_probable) quitar = { $unset: { ...(quitar.$unset || {}), isbn_probable: '' } };
+    // Sin materias tras quitar las del ISBN equivocado: el campo se quita (el esquema no admite listas vacías).
+    if (Array.isArray(set.palabras_clave) && !set.palabras_clave.length) {
+        delete set.palabras_clave;
+        quitar = { $unset: { ...(quitar.$unset || {}), palabras_clave: '' } };
+    }
     // DIARIO PARA DESHACER: el valor ANTERIOR de todo lo que se va a cambiar (null = el campo estaba vacío). Con él,
     // scripts/deshacer-reidentificacion.js devuelve el documento a como estaba (incluida la CDU y la carpeta, abajo).
     const INTERNOS = new Set(['alertas_agente', 'fecha_actualizacion', 'mantenimiento_firma', 'mantenimiento.re-clasificar-cdu']);
