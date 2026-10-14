@@ -30,7 +30,7 @@ import { identificarEdicion, candidatasParaGuardar, mismaEditorial, traductoresD
 import { editorialesDeColeccion, anotarEditorialDeColeccion } from './indicios-coleccion.js';
 import { esEditorialFalsa, limpiarNombreEditorial } from './editoriales-falsas.js';
 import { extraerMetadatosEpub, textoInicialEpub } from './lector-epub.js';
-import { huecosDesdeAutoridad } from './huecos-autoridad.js';
+import { huecosDesdeAutoridad, mismoNombreAutor as mismoNombre } from './huecos-autoridad.js';
 import { aplicarCduConPrioridad, puedeSustituirCdu, fuenteCduDoc } from './prioridad-cdu.js';
 import { cduDeAutoridadFiable, buscarAutoridadPorISBN } from './autoridad-isbn.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
@@ -43,7 +43,7 @@ import { resolverPersona } from './resolver-persona.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
 import { mismoTituloLibro } from './titulo-libro.js';
-import { datosDeIsbnAjeno, FIRMA_RECLASIFICAR } from './isbn-ajeno.js';
+import { datosDeIsbnAjeno, aplicarRetirada, nombresDeAutores, FIRMA_RECLASIFICAR } from './isbn-ajeno.js';
 import { editorialCoherenteConISBN } from './editorial-por-prefijo.js';
 import { datosDeObraDeCandidatas } from './datos-de-obra.js';
 import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
@@ -415,6 +415,52 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         if (!isbn && forzar && doc.isbn) { isbn = validarISBN(doc.isbn) || doc.isbn; via = 'existente'; }
     }
 
+    // ISBN DE OTRO LIBRO (14-oct; utils/isbn-ajeno.js). Un ISBN ya descartado no se vuelve a adoptar. Y si el que
+    // trae el fichero (o el que ya tiene) es, según la autoridad, de un título CLARAMENTE distinto —un EPUB
+    // maquetado con el ISBN de otro libro: «La conjura de los necios» con el de «Las cartas de Groucho»—, se
+    // descarta y se retira lo que trajo (CDU a reclasificar desde cero, materias), y se sigue SIN ISBN: el paso (c)
+    // puede identificar la edición buena por título y autor. El manual no se discute: lo has elegido tú.
+    if (!manual && isbn) {
+        const descartados = (doc.isbns_descartados || []).flatMap((x) => variantesISBN(x));
+        if (descartados.includes(isbn)) { isbn = null; via = ''; }
+    }
+    // La REFERENCIA es el título y el autor del PROPIO fichero (metadatos del EPUB/MOBI), no los del documento: si el
+    // ISBN equivocado ya impuso su título, comparar con el documento no ve nada («La_conjura_de_los_necios_John_
+    // Kennedy_Toole.epub» catalogado como «Las cartas de Groucho»: el ISBN de Groucho casaba con su propio título, y
+    // «Extraer ISBN» lo volvía a dar por bueno; después buscaba la edición por ese título y encontraba otra de Groucho).
+    if (!manual && isbn) {
+        const refTitulo = ext.titulo && !esTituloArtefacto(ext.titulo) ? ext.titulo : doc.titulo;
+        const refAutores = ext.autores?.length ? ext.autores : await nombresDeAutores(db, doc.autores);
+        const ajeno = await datosDeIsbnAjeno(doc, isbn, { titulo: refTitulo, autores: refAutores });
+        if (ajeno?.isbnActualAjeno) {
+            // Además del ISBN, el TÍTULO y los AUTORES si son los del otro libro: vuelven a ser los del fichero.
+            const restaurar = {};
+            if (refTitulo !== doc.titulo && mismoTituloLibro(doc.titulo, ajeno.otroTitulo)) restaurar.titulo = refTitulo;
+            const delOtro = await buscarAutoridadPorISBN(variantesISBN(isbn), { enLinea: false }).catch(() => null);
+            const nuestros = await nombresDeAutores(db, doc.autores);
+            const sonLosDelOtro = nuestros.length && (delOtro?.autores || []).some((a) => nuestros.some((n) => mismoNombre(n, a)));
+            if (ext.autores?.length && sonLosDelOtro) restaurar.autores = ext.autores;
+            if (aplicar) {
+                doc = await aplicarRetirada(db, doc, ajeno, { origen: 'Extraer ISBN' });
+                if (Object.keys(restaurar).length) {
+                    const setR = { ...restaurar };
+                    if (setR.autores) setR.autores = await resolverAutores(db, setR.autores);
+                    await db.collection('biblioteca').updateOne({ _id: doc._id }, {
+                        $set: setR,
+                        $push: {
+                            alertas_agente: `Título/autores de «${ajeno.otroTitulo}» (otro libro, ISBN ${ajeno.anterior}) sustituidos por los del propio fichero: «${restaurar.titulo || doc.titulo}»${restaurar.autores ? ` · ${restaurar.autores.join('; ')}` : ''}.`,
+                            deshacer: { fecha: new Date(), origen: 'Extraer ISBN (título/autores ajenos)', antes: { titulo: doc.titulo, autores: doc.autores } },
+                        },
+                    });
+                    doc = { ...doc, ...setR };
+                }
+            } else {
+                doc = { ...doc, isbn: undefined, ...(restaurar.titulo ? { titulo: restaurar.titulo } : {}) };
+            }
+            isbn = null; via = '';
+        }
+    }
+
     // (c) EL FICHERO NO LO TRAE (el ripeo se lo quitó): identificar la EDICIÓN por autoridad, con lo que sí
     //     sabemos —título, autor, editorial, colección, año, idioma—. Estricto: solo se acepta una edición que
     //     case título + autor Y confirme editorial/idioma/año; si hay varias posibles no se elige ninguna.
@@ -638,8 +684,11 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // el libro tuvo OTRO ISBN —el anterior, o el que nombra su carpeta— de OTRO título, su CDU (si es la de ese otro
     // libro) va a reclasificarse DESDE CERO y se retiran las materias que solo vienen de él («La conjura de los
     // necios» conservaba la CDU 929 y las materias de «Las cartas de Groucho» aunque se le diera el ISBN bueno).
-    const ajeno = await datosDeIsbnAjeno({ ...doc, palabras_clave: set.palabras_clave || doc.palabras_clave }, isbn, { titulo: set.titulo || doc.titulo });
-    if (ajeno) {
+    const ajeno = await datosDeIsbnAjeno({ ...doc, palabras_clave: set.palabras_clave || doc.palabras_clave }, isbn, {
+        titulo: set.titulo || doc.titulo, autores: await nombresDeAutores(db, doc.autores),
+    });
+    // (El ISBN ACTUAL de otro libro ya se trató arriba; aquí solo cuenta si es manual, y el manual no se discute.)
+    if (ajeno && !ajeno.isbnActualAjeno) {
         if (ajeno.cduAjena) {
             set.mantenimiento_firma = FIRMA_RECLASIFICAR;
             nombres.cdu = `«${doc.cdu}» era de «${ajeno.otroTitulo}» (ISBN ${ajeno.anterior}): a reclasificar desde cero`;

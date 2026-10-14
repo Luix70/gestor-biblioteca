@@ -146,3 +146,22 @@ export function palabrasAnadidas(nuevo, ...referencias) {
         .filter((w) => w && !PALABRAS_VACIAS.has(w) && !conocidas.has(w))
         .filter((w) => w.length >= 3 || /^\d+$/.test(w) || /^[ivxlc]+$/.test(w));
 }
+
+/**
+ * ¿Son CLARAMENTE dos libros distintos? Más estricto que «no es el mismo título»: no comparten NI UNA palabra con
+ * cuerpo (4+ letras), contando también lo que va entre paréntesis. Sirve para decidir que un ISBN es de OTRO libro
+ * («La conjura de los necios» / «Las cartas de Groucho»; «Kalka River 1223» / «Appleby and the Ospreys»), sin
+ * tomar por ajeno el mismo libro con el título abreviado o con subtítulo («Amarte» / «Amarte. Pensar el amor…»,
+ * «Fedro» / «El banquete: Fedro», «La guerra zulú» / «Hija de la tempestad (La guerra zulú II)»).
+ * Medido el 14-oct: con «no es el mismo título», 279 libros con CDU de la BNE parecían tener un ISBN ajeno; casi
+ * todos eran el mismo libro.
+ */
+export function tituloClaramenteDistinto(a, b) {
+    const palabras = (t) => new Set(String(t || '').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '')
+        .split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !/^\d+$/.test(w)));
+    const A = palabras(a);
+    const B = palabras(b);
+    if (!A.size || !B.size) return false;   // sin palabras con cuerpo no se puede afirmar nada
+    for (const w of A) if (B.has(w)) return false;
+    return true;
+}

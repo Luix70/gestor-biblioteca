@@ -572,6 +572,10 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // refinadas). El resto son de proceso y no se guardan.
     const CAMPOS_INTERNOS = ['cdu_impresa', 'cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_propio', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado', '_cipTitulo', '_cipAutor', '_cipSub'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
+    // Un ISBN DESCARTADO (de otro libro: utils/isbn-ajeno.js) nunca se guarda, aunque alguna fuente lo devuelva.
+    if (documento.isbn && (documento.isbns_descartados || []).some((x) => variantesISBN(x).includes(documento.isbn))) {
+        delete documento.isbn;
+    }
 
     // Limpieza 2: ningún campo puede quedar como undefined/null/'' (rompería el $jsonSchema).
     Object.keys(documento).forEach(k => {

@@ -27,6 +27,7 @@ import { pdfEsImagen, paginaDescomunal } from './utils/rasterizar-pdf.js';
 import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/lector-barras.js';
 import { paginasMuestraDjvu } from './utils/djvu.js';
 import { clasificarPorNombre } from './utils/revista-por-nombre.js';
+import { isbnDeOtroLibro } from './utils/isbn-ajeno.js';
 
 const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
@@ -997,6 +998,25 @@ export async function procesarRecurso(entrada) {
     if (contexto.tipo_recurso && ['libro', 'revista'].includes(contexto.tipo_recurso)) {
         if (tipo_recurso !== contexto.tipo_recurso) datosBase.alertas_agente = [...(datosBase.alertas_agente || []), `Tipo forzado a «${contexto.tipo_recurso}» en el formulario de la subida.`];
         tipo_recurso = contexto.tipo_recurso;
+    }
+
+    // ISBN DE OTRO LIBRO en los metadatos del EPUB/MOBI (14-oct; utils/isbn-ajeno.js). El ISBN del OPF/EXTH se daba
+    // por bueno sin mirar el título, y un fichero maquetado con el ISBN de otro libro heredaba todo lo de ese otro
+    // libro: «La conjura de los necios» con el de «Las cartas de Groucho» → CDU 929 y sus materias. Si la autoridad
+    // de ese ISBN es un título CLARAMENTE distinto del que declara el propio fichero, Y de otro autor (si no, es una
+    // traducción u otra edición del mismo libro: «Hija de la fortuna» / «Daughter of Fortune»), el ISBN no se adopta (queda en
+    // isbns_descartados) y el libro sigue como uno sin ISBN (la edición se busca por título y autor). Solo con el
+    // título de los metadatos del mismo fichero: en un PDF el «título» puede ser basura («Microsoft Word - doc1»).
+    if (['epub', 'mobi'].includes(tipo) && datosBase.isbn && datosBase.titulo && !esTituloArtefacto(datosBase.titulo)) {
+        const otro = await isbnDeOtroLibro(datosBase.isbn, datosBase.titulo, datosBase.autores || []).catch(() => null);
+        if (otro) {
+            const aviso = `El ISBN ${datosBase.isbn} de los metadatos del fichero es de «${otro.titulo}», otro libro: no se adopta (queda en isbns_descartados).`;
+            console.log(`[Orquestador] ⚠️ ${aviso}`);
+            datosBase.alertas_agente = [...(datosBase.alertas_agente || []), aviso];
+            datosBase.isbns_descartados = [datosBase.isbn];
+            delete datosBase.isbn;
+            delete datosBase.isbn_propio;
+        }
     }
 
     // TIER 2–4 · enriquecimiento conservador (APIs + IA solo para huecos)
