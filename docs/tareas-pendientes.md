@@ -198,6 +198,9 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
              Osprey con las materias de «Appleby and the Ospreys», novela policiaca, por el ISBN compartido 0140110925—;
              1 CDU heredada: «La conjura de los necios») y `--ejecutar`. El detector (utils/isbn-ajeno.js) también
              actúa en «Extraer ISBN».
+       - [ ] `… corregir-siglos-descripciones.js` (seco 14-oct: 354 descripciones de IA con el siglo desplazado —«"19"» =
+             «siglo XIX», cuando es el XX—) y `--ejecutar` (IA solo gratis; o `--sin-ia`). La IA ya no puede volver a
+             escribirlo: descripcion-cdu.js·sigloIncoherente rechaza la respuesta.
        - [ ] **1.191 libros con la CDU contaminada** (`mantenimiento_firma: pendiente-cdu-contaminada`, de reparar-cdu-contaminada
              del 9-oct) seguían sin reclasificar el 14-oct: el Conformador está APAGADO y su re-clasificar-cdu usaría su
              Dewey/LCC (a veces de otro libro). Ahora la campaña «Refinar CDU» los hace PRIMERO, desde cero (o

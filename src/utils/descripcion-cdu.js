@@ -62,6 +62,33 @@ export function auxiliaresDeTiempo(codigo) {
     return lineas;
 }
 
+/**
+ * ¿Dice el texto un SIGLO que no es el de los auxiliares de tiempo del código? El error típico de la IA: leer «"19"»
+ * como «siglo XIX» cuando es el XX (los años 1900). Medido el 14-oct: 366 descripciones así («821.111(73)-31"19"» =
+ * «Novelas estadounidenses en inglés del siglo XIX»). Solo con la NOTACIÓN real (con comillas): en la clave saneada
+ * («…-31_19») el «19» ya no se distingue de otras cosas. Devuelve el siglo mal dicho o null.
+ */
+const NUM_ROMANO = new Map(ROMANOS.map((r, i) => [r, i]));
+export function sigloIncoherente(notacion, texto) {
+    const validos = new Set();
+    for (const [, dentro] of String(notacion || '').matchAll(/"([^"]*)"?/g)) {
+        const partes = dentro.split('/');
+        if (partes.length === 2 && partes[0].length > partes[1].length && /^\d+$/.test(partes[0] + partes[1])) {
+            partes[1] = partes[0].slice(0, partes[0].length - partes[1].length) + partes[1];
+        }
+        const siglos = partes.map((p) => (/^\d{2}$/.test(p) ? Number(p) + 1 : /^\d{4}$/.test(p) ? Math.floor(Number(p) / 100) + 1 : null));
+        if (siglos.some((s) => s === null)) continue;
+        // Un periodo («"04/14"») vale entero: del siglo V al XV.
+        for (let s = Math.min(...siglos); s <= Math.max(...siglos); s++) validos.add(s);
+    }
+    if (!validos.size) return null;
+    for (const [, r] of String(texto || '').matchAll(/siglos?\s+([IVXL]+)\b/gi)) {
+        const s = NUM_ROMANO.get(r.toUpperCase());
+        if (s && !validos.has(s)) return `siglo ${r.toUpperCase()}`;
+    }
+    return null;
+}
+
 /** Las referencias fijas que tocan a este código: su clase, su división, los lugares y los tiempos que lleva. */
 function referenciasDe(codigo) {
     const lineas = [...auxiliaresDeTiempo(codigo)];
@@ -216,6 +243,9 @@ async function generarIA(db, codigo, { soloGratis = false, notacion = null } = {
     }
     if (descripcionContradice(codigo, j.titulo_es)) throw new Error(`descripción incoherente con la división («${j.titulo_es}»)`);
     if (lugarContradice(codigo, `${j.titulo_es || ''} ${j.descripcion_es || ''}`)) throw new Error(`descripción con otro lugar («${j.titulo_es}»)`);
+    // El siglo, como dicen sus auxiliares de tiempo («"19"» = siglo XX, no XIX): con la notación real.
+    const malSiglo = sigloIncoherente(real, `${j.titulo_es || ''} ${j.descripcion_es || ''}`);
+    if (malSiglo) throw new Error(`descripción con otro siglo («${j.titulo_es}»: ${malSiglo})`);
     return j;
 }
 
