@@ -41,7 +41,10 @@ const FASES = {
 const t0 = Date.now();
 let faseActual = null, inicioFase = Date.now();
 const seg = (ms) => { const s = Math.round(ms / 1000); return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`; };
-const onProgress = ({ fase, i, total, carpetas }) => {
+let ultimo = { fase: 'cargando' };
+const onProgress = (p) => {
+    ultimo = p;
+    const { fase, i, total, carpetas } = p;
     if (fase !== faseActual) { faseActual = fase; inicioFase = Date.now(); }
     let det = '';
     if (total) {
@@ -51,7 +54,11 @@ const onProgress = ({ fase, i, total, carpetas }) => {
     process.stdout.write(`\r\x1b[K   ⏳ ${FASES[fase] || fase}${det} · total ${seg(Date.now() - t0)}`);
 };
 
+// La carga de los ~66.000 documentos desde Atlas tarda minutos sin emitir avance: sin esto la línea se quedaba en
+// «Cargando documentos · total 0s» y parecía colgado (14-oct). Repinta cada 5 s con el último estado.
+const latido = setInterval(() => onProgress(ultimo), 5000);
 const inf = await verificarIntegridad({ reparar: REPARAR, onProgress });
+clearInterval(latido);
 process.stdout.write('\r\x1b[K');
 console.log(`   (${seg(Date.now() - t0)})`);
 
