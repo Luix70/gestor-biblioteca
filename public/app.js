@@ -14136,6 +14136,40 @@ async function subirInbox(files, extra) {
       setInboxEstado('');
     }
   }
+  // VARIOS DOCUMENTOS (epub, pdf…) A LA VEZ: un trabajo POR DOCUMENTO en la cola, no una sola petición con todos.
+  // Antes los 184 de una subida iban juntos: el servidor no respondía hasta catalogarlos TODOS (horas), el proxy de
+  // DSM cortaba la espera y el panel daba error aunque el servidor siguiera; y un fallo de red los perdía todos
+  // (14-oct). Las imágenes sueltas sí van juntas: son las vistas de UN libro. El ISBN del formulario es de un solo
+  // libro: con varios no se aplica a ninguno (como hace el servidor).
+  {
+    const documentos = files.filter((f) => !_esImg(f));
+    if (documentos.length > 1) {
+      const imagenes = files.filter(_esImg);
+      const snap = metaSnapshot();
+      delete snap.isbn;
+      delete snap.isbnOrigen;
+      if ($('#inIsbn')) $('#inIsbn').value = '';
+      setInboxEstado('');
+      const grupos = [...documentos.map((f) => [f]), ...(imagenes.length ? [imagenes] : [])];
+      for (const grupo of grupos) {
+        colaInbox.push({
+          id: ++jobSeq,
+          files: grupo,
+          snap: { ...snap },
+          n: grupo.length,
+          estado: 'cola',
+          dims: null,
+          mensajes: [],
+          titulo: grupo.map((f) => f.name).join(', '),
+          isbnCliente: null,
+        });
+      }
+      toast(`📚 ${documentos.length} documentos en la cola: se suben y catalogan de uno en uno`);
+      pintarCola();
+      procesarCola();
+      return;
+    }
+  }
   const supervisado = $('#inSupervisar') && $('#inSupervisar').checked;
   if (supervisado) {
     let isbn = extra.isbn || null,
@@ -14249,7 +14283,8 @@ async function procesarCola() {
   cargarUbicaciones();
 }
 function cortarJobs() {
-  if (jobsHechos.length > 25) jobsHechos.length = 25;
+  // Lotes de cientos de documentos (un trabajo por documento): que se pueda ver el resultado de cada uno.
+  if (jobsHechos.length > 400) jobsHechos.length = 400;
 }
 const _filaInb = (html) =>
   `<div style="padding:7px 0;border-top:1px solid rgba(255,255,255,.06)">${html}</div>`;
