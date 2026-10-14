@@ -1008,7 +1008,7 @@ export async function procesarRecurso(entrada) {
     // isbns_descartados) y el libro sigue como uno sin ISBN (la edición se busca por título y autor). Solo con el
     // título de los metadatos del mismo fichero: en un PDF el «título» puede ser basura («Microsoft Word - doc1»).
     if (['epub', 'mobi'].includes(tipo) && datosBase.isbn && datosBase.titulo && !esTituloArtefacto(datosBase.titulo)) {
-        const otro = await isbnDeOtroLibro(datosBase.isbn, datosBase.titulo, datosBase.autores || []).catch(() => null);
+        const otro = await isbnDeOtroLibro(datosBase.isbn, datosBase.titulo, datosBase.autores || [], datosBase.idioma || null).catch(() => null);
         if (otro) {
             const aviso = `El ISBN ${datosBase.isbn} de los metadatos del fichero es de «${otro.titulo}», otro libro: no se adopta (queda en isbns_descartados).`;
             console.log(`[Orquestador] ⚠️ ${aviso}`);

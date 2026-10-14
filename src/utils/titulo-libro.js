@@ -157,8 +157,9 @@ export function palabrasAnadidas(nuevo, ...referencias) {
  * todos eran el mismo libro.
  */
 export function tituloClaramenteDistinto(a, b) {
+    // Por RAÍZ (5 primeras letras): «Poesía completa» y «Poesías completas» no son dos libros (seco del 14-oct).
     const palabras = (t) => new Set(String(t || '').toLowerCase().normalize('NFD').replace(RE_DIACRITICOS, '')
-        .split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !/^\d+$/.test(w)));
+        .split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !/^\d+$/.test(w)).map((w) => w.slice(0, 5)));
     const A = palabras(a);
     const B = palabras(b);
     if (!A.size || !B.size) return false;   // sin palabras con cuerpo no se puede afirmar nada

@@ -41,12 +41,21 @@ const palabrasDeAutores = (autores) => new Set((autores || []).flatMap((a) => St
  * «Daughter of Fortune») o un tomo con otro nombre («Their Finest Hour» / «The Second World War, Volume 2») salían
  * como otro libro (seco del 14-oct: 1.543 «ISBN de otro libro», muchos de ellos así).
  */
-export async function isbnDeOtroLibro(isbn, titulo, autores = []) {
+export async function isbnDeOtroLibro(isbn, titulo, autores = [], idioma = null) {
   if (!isbn || !titulo) return null;
+  // Con un título de UNA palabra («Hume», «Kolb», «Graphic1», «Opener») no se puede afirmar nada: lo más probable es
+  // que el malo sea el título, no el ISBN («Hume» con el ISBN del «Treatise of Human Nature»). Seco del 14-oct.
+  const conCuerpo = String(titulo).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .split(/[^a-z]+/).filter((w) => w.length >= 4);
+  if (conCuerpo.length < 2) return null;
   const nuestros = palabrasDeAutores(autores);
   if (!nuestros.size) return null;   // sin autor no se puede afirmar que sea otro libro
   const reg = await buscarAutoridadPorISBN(variantesISBN(isbn), { enLinea: false }).catch(() => null);
   if (!reg?.titulo || !tituloClaramenteDistinto(reg.titulo, titulo)) return null;
+  // En OTRO idioma es otra EDICIÓN (una traducción), no otro libro: su registro pone como «autor» al traductor («Yellow
+  // Dog» → Linda Asher, para «Le chien jaune» de Simenon) y la comparación de autores no los emparejaba.
+  const idiomaReg = String(reg.idioma || '').slice(0, 2).toLowerCase();
+  if (idioma && idiomaReg && idiomaReg !== String(idioma).slice(0, 2).toLowerCase()) return null;
   const suyos = palabrasDeAutores([...(reg.autores || []), ...(reg.contribuciones_nombres || []).map((c) => c?.nombre || c)]);
   if (!suyos.size) return null;
   for (const w of suyos) if (nuestros.has(w)) return null;   // comparten autor: otra edición del mismo libro
@@ -87,18 +96,19 @@ function retirarDe(doc, otro, tituloNuestro) {
  *          null si nada viene de otro libro. `isbnActualAjeno`: el ISBN ACTUAL es de otro libro → descartarlo.
  *          `materias` = la lista que queda (null si no cambia).
  */
-export async function datosDeIsbnAjeno(doc, isbnActual, { titulo = null, autores = [] } = {}) {
+export async function datosDeIsbnAjeno(doc, isbnActual, { titulo = null, autores = [], idioma = null } = {}) {
+  const idiomaNuestro = idioma || doc.idioma || null;
   const tituloNuestro = titulo || doc.titulo;
   // El ACTUAL, primero: si es de otro libro, todo lo que trajo es ajeno y el ISBN se descarta.
   if (isbnActual) {
-    const otro = await isbnDeOtroLibro(isbnActual, tituloNuestro, autores);
+    const otro = await isbnDeOtroLibro(isbnActual, tituloNuestro, autores, idiomaNuestro);
     if (otro) return { anterior: isbnActual, otroTitulo: otro.titulo, otraCdu: otro.cdu || null, isbnActualAjeno: true, ...retirarDe(doc, otro, tituloNuestro) };
   }
   const buenos = isbnActual ? variantesISBN(isbnActual) : [];
   const anteriores = [...new Set([doc.isbn, isbnDeCarpeta(doc.ruta_base)]
     .filter((x) => x && validarISBN(x) && !buenos.includes(x) && !(isbnActual && variantesISBN(x).includes(isbnActual))))];
   for (const anterior of anteriores) {
-    const otro = await isbnDeOtroLibro(anterior, tituloNuestro, autores);
+    const otro = await isbnDeOtroLibro(anterior, tituloNuestro, autores, idiomaNuestro);
     if (!otro) continue;
     const r = retirarDe(doc, otro, tituloNuestro);
     if (!r.cduAjena && !r.quitadas.length) continue;

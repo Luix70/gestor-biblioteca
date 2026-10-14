@@ -31,7 +31,7 @@ console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · datos here
 
 const todos = await col.find(
   { tipo_recurso: 'libro', isbn: { $type: 'string' } },
-  { projection: { isbn: 1, ruta_base: 1, titulo: 1, subtitulo: 1, cdu: 1, cdu_manual: 1, palabras_clave: 1, mantenimiento_firma: 1, isbns_descartados: 1, autores: 1 } },
+  { projection: { isbn: 1, ruta_base: 1, titulo: 1, subtitulo: 1, cdu: 1, cdu_manual: 1, palabras_clave: 1, mantenimiento_firma: 1, isbns_descartados: 1, autores: 1, idioma: 1 } },
 ).toArray();
 const conCarpetaDeOtro = todos.filter((d) => {
   const c = isbnDeCarpeta(d.ruta_base);
