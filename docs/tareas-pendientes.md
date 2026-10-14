@@ -188,9 +188,13 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
        - [ ] a mano: 6a3b20a71c900068144ebe66 «Ten Physical Applications Of Spectral Zeta Functions» es un LIBRO de Lecture
              Notes in Physics (ISSN de serie 0075-8450) catalogado como revista en la CDU 82, sin carpeta en disco; y dos
              números de «Marketing» (6a3e3957…, 6a3e39a6…, CDU 339.13) con ruta_base 658.8 que no existe en disco.
-       - [ ] `… corregir-tablas-cdu.js` (seco) y `--ejecutar`: la caché tenía 27 «Dewey 070… → 07» (como Manual verificado:
+       - [x] **14-oct**: integridad --reparar (576 ramas vacías); 5 docs erróneos borrados de la base (copia en
+             logs/borrados/ del PC) y reingresados por el usuario, salvo «Ten Physical Applications…» y «Numerical
+             Analysis», sin fichero. Las 2 carpetas huérfanas (Fotogramas 2014-01, L'Histoire 419) ya reingresadas: la
+             próxima integridad --reparar las retira si quedan vacías.
+       - [x] `… corregir-tablas-cdu.js` (seco) y `--ejecutar`: la caché tenía 27 «Dewey 070… → 07» (como Manual verificado:
              se servían antes que la tabla corregida) y 66 libros (42 en «07», 24 del cutter LCC en «E» leído como exponente).
-       - [ ] **1.192 libros con la CDU contaminada** (`mantenimiento_firma: pendiente-cdu-contaminada`, de reparar-cdu-contaminada
+       - [ ] **1.191 libros con la CDU contaminada** (`mantenimiento_firma: pendiente-cdu-contaminada`, de reparar-cdu-contaminada
              del 9-oct) seguían sin reclasificar el 14-oct: el Conformador está APAGADO y su re-clasificar-cdu usaría su
              Dewey/LCC (a veces de otro libro). Ahora la campaña «Refinar CDU» los hace PRIMERO, desde cero (o
              `… refinar-cdu.js --contaminados`). NO encender el Conformador hasta que queden 0 (`--contaminados` en seco lo cuenta).
