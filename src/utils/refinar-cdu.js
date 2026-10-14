@@ -54,6 +54,24 @@ export function esCduGruesa(cdu) {
  * Los libros que le quedan por refinar: CDU gruesa, no manual, no tomo de una obra (comparten la CDU de la obra), y
  * no intentados en esta versión —o intentados sin IA, si ahora la hay (`refinar_cdu.ia`)—.
  */
+export const FIRMA_CONTAMINADA = 'pendiente-cdu-contaminada';
+
+/**
+ * Los libros que la reparación del 9-oct (scripts/reparar-cdu-contaminada) dejó esperando una CDU nueva: la que
+ * tienen salió de una equivalencia aprendida para TODA una clase LCC (o de un Dewey copiado) y no vale nada
+ * («43.5.2.1» para «Walking in Berlin», «401(063)»). El Conformador debía reclasificarlos, pero su tarea usa el
+ * Dewey/LCC del libro —a veces también de otro libro— y llevaba días apagado: 1.192 seguían así el 14-oct. Se
+ * reclasifican DESDE CERO (decidirLote con desdeCero).
+ */
+export function filtroContaminados({ conIA = true } = {}) {
+  return {
+    mantenimiento_firma: FIRMA_CONTAMINADA,
+    cdu_manual: { $ne: true },
+    obra: { $in: [null] },
+    $or: [{ 'refinar_cdu.v': { $ne: VERSION_REFINAR } }, ...(conIA ? [{ 'refinar_cdu.ia': { $ne: true } }] : [])],
+  };
+}
+
 export function filtroRefinarCdu({ conIA = true } = {}) {
   return {
     tipo_recurso: 'libro',
@@ -75,6 +93,8 @@ const esCero = (cdu) => /^0*$/.test(principal(cdu)) || !String(cdu || '').trim()
 export function componerRefinada(actual, nueva) {
   const a = String(actual || '').trim();
   let n = modernizarCDU(String(nueva || '').trim());
+  // Un «.00» final no significa nada («94(892).00», de un Dewey 989.200…): fuera. Los «.0x» especiales (82.09) se quedan.
+  n = String(n || '').replace(/.0+$/, '');
   if (!n || !/^\d/.test(n)) return null;
   if (!esCero(a)) {
     const pa = principal(a);
@@ -90,7 +110,7 @@ export function componerRefinada(actual, nueva) {
 }
 
 // ─── Paso 1: autoridad por ISBN y tablas ──────────────────────────────────────────────────────────────────────
-async function pasoAutoridad(doc, { enLinea }) {
+async function pasoAutoridad(doc, { enLinea, exigirAcuerdo = false }) {
   const candidatas = [];
   const conTabla = async (sistema, codigo, via) => {
     if (!codigo) return;
@@ -112,6 +132,13 @@ async function pasoAutoridad(doc, { enLinea }) {
         if (reg.lcc && reg.lcc !== doc.lcc) await conTabla('lcc', reg.lcc, `LCC ${reg.lcc} de la autoridad`);
       }
     }
+  }
+  // Desde cero (libros con la clasificación contaminada): si las tablas del Dewey y del LCC llevan a CLASES distintas,
+  // uno de los dos es de otro libro («Paleontological data analysis»: Dewey 285 religión, LCC D37 historia) → no se
+  // fía de ninguno y decide la IA por el título, los autores y la sinopsis.
+  if (exigirAcuerdo) {
+    const tablas = candidatas.filter((c) => c.fuente === 'tabla');
+    if (new Set(tablas.map((c) => principal(c.cdu)[0])).size > 1) return mejorCandidata(doc, candidatas.filter((c) => c.fuente !== 'tabla'));
   }
   return mejorCandidata(doc, candidatas);
 }
@@ -322,9 +349,11 @@ async function pasoIA(db, libros, { porLlamada = 8 } = {}) {
  * @param opts.enLinea    consultar la BNE en línea en el paso 1
  * @param opts.hermanos   paso 2 (requiere los documentos ya guardados: autores/colección como ObjectId)
  * @param opts.onPaso     (i, total, titulo) para el progreso
+ * @param opts.desdeCero  ignorar la CDU actual (contaminada: se trata como 000), no fiarse de un Dewey y un LCC que
+ *                        se contradicen, no mirar hermanos (pueden estar igual), y solo dar por buena una CDU de 3+ cifras
  * @returns {Promise<{decisiones: Array<{doc, cdu, fuente, via}>, sinResolver: Array<doc>, iaNoDisponible: boolean, errorIA: string|null}>}
  */
-export async function decidirLote(db, docs, { conIA = true, enLinea = true, hermanos = true, onPaso = null } = {}) {
+export async function decidirLote(db, docs, { conIA = true, enLinea = true, hermanos = true, onPaso = null, desdeCero = false } = {}) {
   const filas = await cargarResumen(db);
   const decisiones = [];
   const pendientes = [];
@@ -332,10 +361,14 @@ export async function decidirLote(db, docs, { conIA = true, enLinea = true, herm
   for (const doc of docs) {
     onPaso?.(++i, docs.length, doc.titulo);
     // Pasos 1-3 encadenados: cada uno parte de lo que haya refinado el anterior (51 → 512 por tabla → 512.64 por árbol).
-    let actual = { ...doc };
+    let actual = desdeCero ? { ...doc, cdu: '000' } : { ...doc };
     const vias = [];
     let fuente = null;
-    for (const paso of [() => pasoAutoridad(actual, { enLinea }), () => (hermanos ? pasoHermanos(db, actual) : null), () => pasoArbol(filas, actual)]) {
+    for (const paso of [
+      () => pasoAutoridad(actual, { enLinea, exigirAcuerdo: desdeCero }),
+      () => (hermanos && !desdeCero ? pasoHermanos(db, actual) : null),
+      () => pasoArbol(filas, actual),
+    ]) {
       const r = await paso();
       if (r) {
         actual = { ...actual, cdu: r.cdu };
@@ -343,7 +376,7 @@ export async function decidirLote(db, docs, { conIA = true, enLinea = true, herm
         if (!fuente || r.fuente === 'bne') fuente = r.fuente;
       }
     }
-    if (actual.cdu !== doc.cdu) decisiones.push({ doc, cdu: actual.cdu, fuente, via: vias.join(' → ') });
+    if (actual.cdu !== (desdeCero ? '000' : doc.cdu)) decisiones.push({ doc, cdu: actual.cdu, fuente, via: vias.join(' → '), desdeCero });
     if (esCduGruesa(actual.cdu)) pendientes.push({ doc: actual, original: doc, vias, fuente });
   }
 
@@ -369,7 +402,7 @@ export async function decidirLote(db, docs, { conIA = true, enLinea = true, herm
         p.vias.push(r.via);
         p.fuente = p.fuente || 'ia';
         const previa = decisiones.findIndex((d) => d.doc._id === p.original._id);
-        const decision = { doc: p.original, cdu: r.cdu, fuente: p.fuente, via: p.vias.join(' → ') };
+        const decision = { doc: p.original, cdu: r.cdu, fuente: p.fuente, via: p.vias.join(' → '), desdeCero };
         if (previa >= 0) decisiones[previa] = decision; else decisiones.push(decision);
         if (esCduGruesa(r.cdu)) siguiente.push(p);
       }
@@ -378,7 +411,9 @@ export async function decidirLote(db, docs, { conIA = true, enLinea = true, herm
   }
   const resueltos = new Set(decisiones.filter((d) => !esCduGruesa(d.cdu)).map((d) => String(d.doc._id)));
   const sinResolver = docs.filter((d) => !resueltos.has(String(d._id)));
-  return { decisiones, sinResolver, iaNoDisponible, errorIA };
+  // Desde cero, una CDU que se quedó en la clase («9») no se aplica: el libro sigue pendiente.
+  const validas = desdeCero ? decisiones.filter((d) => !esCduGruesa(d.cdu)) : decisiones;
+  return { decisiones: validas, sinResolver, iaNoDisponible, errorIA };
 }
 
 /**
@@ -394,7 +429,16 @@ export async function aplicarRefinamiento(db, doc, decision) {
   if (decision.fuente === 'bne' && rangoFuente(doc.cdu_fuente) < RANGO_CDU.bne) set.cdu_fuente = 'bne';
   await aplicarCambio(col, doc, carpetaDeDoc({ ...doc, ...set }), {
     set,
-    alertas: [`CDU refinada: «${doc.cdu || '000'}» → «${decision.cdu}» (${decision.via}).`, ...(reub?.alertas || [])],
+    alertas: [decision.desdeCero
+      ? `CDU reclasificada desde cero: «${doc.cdu}» venía de una equivalencia contaminada → «${decision.cdu}» (${decision.via}).`
+      : `CDU refinada: «${doc.cdu || '000'}» → «${decision.cdu}» (${decision.via}).`, ...(reub?.alertas || [])],
   });
+  if (decision.desdeCero) {
+    // Fuera de la espera del Conformador, y con su tarea re-clasificar-cdu ya sellada: si la repitiera, volvería a
+    // sacar la CDU del Dewey/LCC del libro, que en estos a veces es de otro libro. Las demás tareas sí correrán.
+    const { TAREAS } = await import('../mantenimiento/tareas.js');
+    const version = TAREAS.find((x) => x.id === 're-clasificar-cdu')?.version ?? 0;
+    await col.updateOne({ _id: doc._id }, { $set: { mantenimiento_firma: null, 'mantenimiento.re-clasificar-cdu': version, cdu_fuente: 'clasificador' } });
+  }
   return { aplicado: true, movida: !!(set.ruta_base && set.ruta_base !== doc.ruta_base) };
 }

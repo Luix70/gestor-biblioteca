@@ -39,7 +39,7 @@ import { enriquecerAutor, autoresEnriquecibles } from '../utils/enriquecer-autor
 import { rellenarDescripcionesFaltantes, contarFaltantes } from './backfill-descripciones.js';
 import { revisarTandaDewey, contarDeweyPendientes } from '../utils/revision-dewey.js';
 import { conPoliticaIA, politicaIA, MODOS_IA } from '../utils/politica-ia.js';
-import { decidirLote, aplicarRefinamiento, filtroRefinarCdu, VERSION_REFINAR } from '../utils/refinar-cdu.js';
+import { decidirLote, aplicarRefinamiento, filtroRefinarCdu, filtroContaminados, VERSION_REFINAR } from '../utils/refinar-cdu.js';
 import { enriquecerAFondo } from './enriquecer-a-fondo.js';
 import { PLACEHOLDERS_AUTOR } from '../utils/creditos-portada.js';
 import path from 'node:path';
@@ -570,24 +570,33 @@ export const CAMPANAS = [
         etiqueta: 'Refinar CDU (mínimo 3 cifras)',
         coste: 'ia',
         iaDefecto: 'gratis',
-        descripcion: 'Que ningún libro se quede con una CDU de 1 o 2 cifras («5», «51», «82») ni en 000. Cascada, de lo gratuito a la IA: (1) la CDU de la BNE por ISBN y el Dewey/LCC del libro y de su autoridad por las tablas; (2) otro ejemplar del mismo título y autor, o la CDU dominante de su colección; (3) el árbol oficial (UDC Summary): la subdivisión de su rama que casa con el título y las materias; (4) la IA eligiendo de la LISTA OFICIAL de subdivisiones de su rama (no puede inventar), por tandas de 8. Solo acepta una CDU que REFINE la actual (51 → 512, nunca 51 → 004); conserva sus auxiliares; mueve la carpeta. No toca las CDU manuales ni los tomos de una obra. Sin IA: solo los pasos 1-3.',
+        descripcion: 'Que ningún libro se quede con una CDU de 1 o 2 cifras («5», «51», «82») ni en 000 — y, ANTES, reclasifica desde cero los que la reparación del 9-oct dejó con la CDU contaminada (1.192: su CDU no vale y su Dewey/LCC a veces es de otro libro; solo se aplica una CDU de 3+ cifras). Cascada, de lo gratuito a la IA: (1) la CDU de la BNE por ISBN y el Dewey/LCC del libro y de su autoridad por las tablas; (2) otro ejemplar del mismo título y autor, o la CDU dominante de su colección; (3) el árbol oficial (UDC Summary): la subdivisión de su rama que casa con el título y las materias; (4) la IA eligiendo de la LISTA OFICIAL de subdivisiones de su rama (no puede inventar), por tandas de 8. Solo acepta una CDU que REFINE la actual (51 → 512, nunca 51 → 004); conserva sus auxiliares; mueve la carpeta. No toca las CDU manuales ni los tomos de una obra. Sin IA: solo los pasos 1-3.',
         version: VERSION_REFINAR,
         loteDefecto: 40,
         cadenciaDefecto: 15,
         activaDefecto: false,
         especial: true,   // decide por lotes (la IA agrupa libros de la misma rama); su sello es el campo refinar_cdu
         async pendientes(db) {
-            return db.collection('biblioteca').countDocuments(filtroRefinarCdu({ conIA: politicaIA()?.modo !== 'ninguna' }));
+            const conIA = politicaIA()?.modo !== 'ninguna';
+            const col = db.collection('biblioteca');
+            return (await col.countDocuments(filtroRefinarCdu({ conIA }))) + (await col.countDocuments(filtroContaminados({ conIA })));
         },
         async ejecutarLote(db, { limite, onProgreso }) {
             const conIA = politicaIA()?.modo !== 'ninguna';
             const col = db.collection('biblioteca');
             const filtro = filtroRefinarCdu({ conIA });
-            // Primero los nunca intentados; después, los que se quedaron sin IA (rotan por fecha de intento).
-            const docs = await col.find(filtro).sort({ 'refinar_cdu.fecha': 1 }).limit(limite).toArray();
-            const { decisiones, iaNoDisponible } = await decidirLote(db, docs, {
-                conIA, enLinea: true, onPaso: (i, total) => onProgreso?.(Math.floor(i / 2), total),
-            });
+            // PRIMERO los de CDU contaminada (reparar-cdu-contaminada los dejó esperando): se reclasifican DESDE CERO.
+            // Después, los gruesos. En cada grupo, primero los nunca intentados; luego los que se quedaron sin IA.
+            const contaminados = await col.find(filtroContaminados({ conIA })).sort({ 'refinar_cdu.fecha': 1 }).limit(limite).toArray();
+            const gruesos = contaminados.length < limite
+                ? await col.find(filtro).sort({ 'refinar_cdu.fecha': 1 }).limit(limite - contaminados.length).toArray() : [];
+            const docs = [...contaminados, ...gruesos];
+            const r1 = contaminados.length ? await decidirLote(db, contaminados, { conIA, enLinea: true, desdeCero: true }) : { decisiones: [] };
+            const r2 = gruesos.length && !r1.iaNoDisponible
+                ? await decidirLote(db, gruesos, { conIA, enLinea: true, onPaso: (i, total) => onProgreso?.(Math.floor(i / 2), total) })
+                : { decisiones: [], iaNoDisponible: r1.iaNoDisponible };
+            const decisiones = [...r1.decisiones, ...r2.decisiones];
+            const iaNoDisponible = !!(r1.iaNoDisponible || r2.iaNoDisponible);
             let cambios = 0;
             for (const d of decisiones) {
                 try {
@@ -606,7 +615,7 @@ export const CAMPANAS = [
                 { $set: { refinar_cdu: { v: VERSION_REFINAR, ia: conIAHecha, fecha: new Date() } } });
             if (iaNoDisponible) console.log('🎯 [Campaña refinar-cdu] IA no disponible ahora: lo que la necesita se reintenta en la próxima tanda.');
             onProgreso?.(docs.length, docs.length);
-            return { procesados: docs.length, cambios, pendientes: await col.countDocuments(filtro) };
+            return { procesados: docs.length, cambios, pendientes: (await col.countDocuments(filtro)) + (await col.countDocuments(filtroContaminados({ conIA }))) };
         },
     },
 

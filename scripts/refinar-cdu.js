@@ -13,13 +13,15 @@
  *
  *   sudo docker exec -it gestor-biblioteca node scripts/refinar-cdu.js [--sin-ia|--con-pago] [--limite N]
  *   sudo docker exec -it gestor-biblioteca node scripts/refinar-cdu.js --ejecutar [--sin-ia|--con-pago] [--limite N]
+ *   … --contaminados   en vez de los gruesos, los que la reparación del 9-oct dejó con la CDU contaminada
+ *                      (mantenimiento_firma 'pendiente-cdu-contaminada'), reclasificados DESDE CERO
  */
 import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from '../src/database.js';
-import { decidirLote, aplicarRefinamiento, filtroRefinarCdu, esCduGruesa, VERSION_REFINAR } from '../src/utils/refinar-cdu.js';
+import { decidirLote, aplicarRefinamiento, filtroRefinarCdu, filtroContaminados, esCduGruesa, VERSION_REFINAR } from '../src/utils/refinar-cdu.js';
 import { conPoliticaIA } from '../src/utils/politica-ia.js';
 import { abrirGuion, sigueIgual } from '../src/utils/guion-seco.js';
 import { carpetaDeDoc, carpetaExiste } from '../src/mantenimiento/util-mantenimiento.js';
@@ -32,6 +34,8 @@ const arg = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : nu
 const EJECUTAR = args.includes('--ejecutar');
 const MODO_IA = args.includes('--sin-ia') ? 'ninguna' : args.includes('--con-pago') ? 'todas' : 'gratis';
 const LIMITE = Number(arg('--limite')) || 0;
+// --contaminados: los que la reparación del 9-oct dejó con la CDU contaminada, reclasificados DESDE CERO.
+const CONTAMINADOS = args.includes('--contaminados');
 const TROZO = 40;   // libros por lote del motor (la IA agrupa los de la misma rama dentro de cada lote)
 
 const db = await conectarDB();
@@ -39,13 +43,13 @@ const col = db.collection('biblioteca');
 const conIA = MODO_IA !== 'ninguna';
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · refinar las CDU de 1-2 cifras y 000 · IA: ${{ ninguna: 'ninguna', gratis: 'solo gratuita', todas: 'gratuita y de pago' }[MODO_IA]}\n`);
 
-const guion = abrirGuion('refinar-cdu', { parametros: { modo: MODO_IA, limite: LIMITE } });
+const guion = abrirGuion(CONTAMINADOS ? 'refinar-cdu-contaminados' : 'refinar-cdu', { parametros: { modo: MODO_IA, limite: LIMITE } });
 let plan = EJECUTAR ? await guion.leer() : null;
 const usandoGuion = !!plan;
 
 // ─── DECIDIR (o tomar el guion del seco) ────────────────────────────────────────────────────────────────────────
 if (!plan) {
-  let consulta = col.find(filtroRefinarCdu({ conIA })).sort({ cdu: 1 });   // por CDU: la IA agrupa por rama
+  let consulta = col.find(CONTAMINADOS ? filtroContaminados({ conIA }) : filtroRefinarCdu({ conIA })).sort({ cdu: 1 });   // por CDU: la IA agrupa por rama
   if (LIMITE) consulta = consulta.limit(LIMITE);
   const docs = await consulta.toArray();
   console.log(`Libros con la CDU gruesa por mirar: ${docs.length}`);
@@ -56,13 +60,13 @@ if (!plan) {
   await conPoliticaIA(MODO_IA, async () => {
     for (let i = 0; i < docs.length; i += TROZO) {
       const trozo = docs.slice(i, i + TROZO);
-      const r = await decidirLote(db, trozo, { conIA: conIA && !iaNoDisponible, enLinea: true, onPaso: (_, __, titulo) => p.paso(titulo) });
+      const r = await decidirLote(db, trozo, { conIA: conIA && !iaNoDisponible, enLinea: true, desdeCero: CONTAMINADOS, onPaso: (_, __, titulo) => p.paso(titulo) });
       if (r.iaNoDisponible && !iaNoDisponible) {
         iaNoDisponible = true;
         p.nota(`   ⏸ La IA no está disponible (${r.errorIA}): el resto se decide solo con los pasos sin IA.`);
       }
       for (const d of r.decisiones) {
-        acciones.push({ id: String(d.doc._id), antes: { cdu: d.doc.cdu ?? null }, cdu: d.cdu, fuente: d.fuente, via: d.via, titulo: d.doc.titulo });
+        acciones.push({ id: String(d.doc._id), antes: { cdu: d.doc.cdu ?? null }, cdu: d.cdu, fuente: d.fuente, via: d.via, titulo: d.doc.titulo, desdeCero: !!d.desdeCero });
       }
       for (const d of r.sinResolver) sinResolver.push(String(d._id));
     }
@@ -120,9 +124,9 @@ for (const a of acciones) {
     // que es lo caro, se aplica tal cual.
     let decision = a;
     if (usandoGuion && a.fuente !== 'bne' && !/IA con menú/.test(a.via)) {
-      const d = (await decidirLote(db, [doc], { conIA: false, enLinea: false })).decisiones[0];
+      const d = (await decidirLote(db, [doc], { conIA: false, enLinea: false, desdeCero: !!a.desdeCero })).decisiones[0];
       if (!d) { descartadas++; continue; }
-      if (d.cdu !== a.cdu) { corregidas++; decision = { cdu: d.cdu, fuente: d.fuente, via: d.via }; }
+      if (d.cdu !== a.cdu) { corregidas++; decision = { cdu: d.cdu, fuente: d.fuente, via: d.via, desdeCero: !!a.desdeCero }; }
     }
     const r = await aplicarRefinamiento(db, doc, decision);
     if (r.aplicado) {
@@ -145,7 +149,7 @@ await col.updateMany({ _id: { $in: ids } }, { $set: { refinar_cdu: { v: VERSION_
 if (resumen.sinResolver.length && conIA && !resumen.iaNoDisponible) {
   const fecha = new Date().toISOString().slice(0, 10);
   await crearSeleccion(db, {
-    nombre: `CDU sin refinar ${fecha}`,
+    nombre: `${CONTAMINADOS ? 'CDU contaminada sin reclasificar' : 'CDU sin refinar'} ${fecha}`,
     descripcion: 'Libros con la CDU de 1-2 cifras o 000 que ni la autoridad por ISBN, ni las tablas Dewey/LCC, ni otros ejemplares, ni el árbol oficial, ni la IA con el menú oficial pudieron refinar con seguridad. scripts/refinar-cdu.js.',
     docs: resumen.sinResolver.map((i) => new ObjectId(i)),
   });

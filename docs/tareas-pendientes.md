@@ -190,6 +190,10 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
              números de «Marketing» (6a3e3957…, 6a3e39a6…, CDU 339.13) con ruta_base 658.8 que no existe en disco.
        - [ ] `… corregir-tablas-cdu.js` (seco) y `--ejecutar`: la caché tenía 27 «Dewey 070… → 07» (como Manual verificado:
              se servían antes que la tabla corregida) y 66 libros (42 en «07», 24 del cutter LCC en «E» leído como exponente).
+       - [ ] **1.192 libros con la CDU contaminada** (`mantenimiento_firma: pendiente-cdu-contaminada`, de reparar-cdu-contaminada
+             del 9-oct) seguían sin reclasificar el 14-oct: el Conformador está APAGADO y su re-clasificar-cdu usaría su
+             Dewey/LCC (a veces de otro libro). Ahora la campaña «Refinar CDU» los hace PRIMERO, desde cero (o
+             `… refinar-cdu.js --contaminados`). NO encender el Conformador hasta que queden 0 (`--contaminados` en seco lo cuenta).
        - [ ] **Refinar CDU (mínimo 3 cifras)**: 20.768 libros con 000 o 1-2 cifras. Encender la campaña «Refinar CDU»
              (IA solo gratis, escalonada) — o de golpe: `… refinar-cdu.js --sin-ia` (seco) y `--ejecutar` (los
              pasos sin IA: ~17 % de los libros), y después la campaña para el resto con IA. Revisar la selección «CDU

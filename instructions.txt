@@ -3207,6 +3207,11 @@ de ficheros clasificado por CDU.
           sobre la CDU de la BNE (no la contradice, la precisa), nunca sobre una manual. Mueve la carpeta. Seco
           del PC (13-oct, sin IA): de 2.000 libros, 334 resueltos sin IA. La ingesta aplica los pasos 1 y 3.
           De golpe: scripts/refinar-cdu.js (seco con guion; --ejecutar lo aplica; --sin-ia / --con-pago).
+          ANTES que los gruesos, la campaña reclasifica DESDE CERO los libros que la reparación del 9-oct dejó
+          con la CDU contaminada (mantenimiento_firma «pendiente-cdu-contaminada»: 1.192): ignora su CDU, no se fía
+          de un Dewey y un LCC que lleven a clases distintas (uno es de otro libro), y solo aplica una CDU de 3+
+          cifras; después sella su re-clasificar-cdu para que el Conformador no la rehaga con datos malos. A mano:
+          scripts/refinar-cdu.js --contaminados.
         · 🤖🆓 Revisar descripciones Dewey (13-oct) — INACTIVA por defecto. La IA juzga, por
           tandas de 25, cada descripción del Dewey escrita antes de tener referencias contra
           el significado oficial del número (DDC 23 Summaries + su CDU), y rehace las
