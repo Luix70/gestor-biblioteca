@@ -14,7 +14,7 @@
  * (utils/isbn-ajeno.js).
  *
  *   sudo docker exec -it gestor-biblioteca node scripts/retirar-datos-isbn-ajeno.js              (seco)
- *   sudo docker exec -it gestor-biblioteca node scripts/retirar-datos-isbn-ajeno.js --ejecutar
+ *   sudo docker exec -it gestor-biblioteca node scripts/retirar-datos-isbn-ajeno.js --ejecutar   (con guion del seco: minutos)
  */
 import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
@@ -23,16 +23,29 @@ import { conectarDB } from '../src/database.js';
 import { datosDeIsbnAjeno, aplicarRetirada, isbnDeCarpeta, nombresDeAutores } from '../src/utils/isbn-ajeno.js';
 import { variantesISBN } from '../src/utils/identificadores.js';
 import { progreso } from '../src/utils/progreso-cli.js';
+import { abrirGuion, sigueIgual } from '../src/utils/guion-seco.js';
+import { ObjectId } from 'mongodb';
 
 const EJECUTAR = process.argv.includes('--ejecutar');
 const db = await conectarDB();
 const col = db.collection('biblioteca');
 console.log(`\n${EJECUTAR ? '⚙️  EJECUCIÓN' : '🔍 DRY-RUN'} · datos heredados de un ISBN de otro libro\n`);
 
-const todos = await col.find(
-  { tipo_recurso: 'libro', isbn: { $type: 'string' } },
-  { projection: { isbn: 1, ruta_base: 1, titulo: 1, subtitulo: 1, cdu: 1, cdu_manual: 1, palabras_clave: 1, mantenimiento_firma: 1, isbns_descartados: 1, autores: 1, idioma: 1 } },
-).toArray();
+// GUION DEL SECO (utils/guion-seco.js): recorrer los ~57.000 libros con ISBN tarda hora y media en el NAS. El seco
+// guarda la lista de los hallados; un --ejecutar en las 24 h siguientes solo vuelve a mirar ESOS (unos minutos), con el
+// motor ACTUAL —si se corrigió entretanto, cuenta la corrección— y solo si el libro no ha cambiado (sigueIgual).
+const PROYECCION = { isbn: 1, ruta_base: 1, titulo: 1, subtitulo: 1, cdu: 1, cdu_manual: 1, palabras_clave: 1, mantenimiento_firma: 1, isbns_descartados: 1, autores: 1, idioma: 1 };
+const guion = abrirGuion('retirar-datos-isbn-ajeno');
+const plan = EJECUTAR ? await guion.leer() : null;
+let todos;
+if (plan) {
+  const ids = plan.acciones.map((a) => new ObjectId(a.id));
+  const porId = new Map((await col.find({ _id: { $in: ids } }, { projection: PROYECCION }).toArray()).map((d) => [String(d._id), d]));
+  todos = plan.acciones.map((a) => porId.get(a.id)).filter((d, i) => d && sigueIgual(d, plan.acciones[i].antes));
+  console.log(`Del guion: ${plan.acciones.length} · sin cambios desde el seco: ${todos.length}`);
+} else {
+  todos = await col.find({ tipo_recurso: 'libro', isbn: { $type: 'string' } }, { projection: PROYECCION }).toArray();
+}
 const conCarpetaDeOtro = todos.filter((d) => {
   const c = isbnDeCarpeta(d.ruta_base);
   return c && !variantesISBN(d.isbn).includes(c) && !variantesISBN(c).includes(d.isbn);
@@ -72,6 +85,10 @@ muestra('ISBN actual de otro libro', isbnAjeno);
 muestra('ISBN anterior de otro libro', hallados.filter((h) => !h.isbnActualAjeno && !/0140110925/.test(h.anterior)));
 
 if (!EJECUTAR) {
+  await guion.guardar(hallados.map((h) => ({
+    id: String(h.doc._id),
+    antes: { isbn: h.doc.isbn ?? null, cdu: h.doc.cdu ?? null, palabras_clave: h.doc.palabras_clave ?? null },
+  })), { hallados: hallados.length });
   console.log('\n▶ Repite con --ejecutar para aplicarlo (no mueve nada: la CDU la cambiará la campaña «Refinar CDU»).');
   process.exit(0);
 }

@@ -21,6 +21,8 @@
 import { variantesISBN, validarISBN } from './identificadores.js';
 import { buscarAutoridadPorISBN } from './autoridad-isbn.js';
 import { tituloClaramenteDistinto } from './titulo-libro.js';
+import { esTituloArtefacto } from './parsear-nombre.js';
+import { mismoNombreAutor } from './huecos-autoridad.js';
 
 export const FIRMA_RECLASIFICAR = 'pendiente-cdu-contaminada';
 
@@ -48,10 +50,15 @@ export async function isbnDeOtroLibro(isbn, titulo, autores = [], idioma = null)
   const conCuerpo = String(titulo).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .split(/[^a-z]+/).filter((w) => w.length >= 4);
   if (conCuerpo.length < 2) return null;
+  // Un título que es un artefacto del fichero («Inside_cover.eps», «Microsoft Word - doc1») tampoco prueba nada.
+  if (esTituloArtefacto(titulo) || /\.(eps|pdf|docx?|indd|tiff?|jpe?g|png|epub|mobi)\b/i.test(titulo)) return null;
   const nuestros = palabrasDeAutores(autores);
   if (!nuestros.size) return null;   // sin autor no se puede afirmar que sea otro libro
   const reg = await buscarAutoridadPorISBN(variantesISBN(isbn), { enLinea: false }).catch(() => null);
   if (!reg?.titulo || !tituloClaramenteDistinto(reg.titulo, titulo)) return null;
+  // Un «título» que es el NOMBRE de una persona —el autor del registro o el nuestro— es un título malo, no un ISBN
+  // ajeno: «Hugo Steinhaus» con el ISBN de «Mathematical snapshots», de Hugo Steinhaus (seco del NAS, 14-oct).
+  if ([...(reg.autores || []), ...autores].some((a) => mismoNombreAutor(titulo, a))) return null;
   // En OTRO idioma es otra EDICIÓN (una traducción), no otro libro: su registro pone como «autor» al traductor («Yellow
   // Dog» → Linda Asher, para «Le chien jaune» de Simenon) y la comparación de autores no los emparejaba.
   const idiomaReg = String(reg.idioma || '').slice(0, 2).toLowerCase();
