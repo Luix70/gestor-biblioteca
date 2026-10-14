@@ -108,7 +108,7 @@ export async function datosDeIsbnAjeno(doc, isbnActual, { titulo = null, autores
   const anteriores = [...new Set([doc.isbn, isbnDeCarpeta(doc.ruta_base)]
     .filter((x) => x && validarISBN(x) && !buenos.includes(x) && !(isbnActual && variantesISBN(x).includes(isbnActual))))];
   for (const anterior of anteriores) {
-    const otro = await isbnDeOtroLibro(anterior, tituloNuestro, autores, idiomaNuestro);
+    const otro = await isbnDeOtroLibro(anterior, tituloNuestro, autores);   // sin idioma: aquí solo se quitan materias y, si coincide, la CDU (el idioma de la ficha puede estar mal: Osprey en «es»)
     if (!otro) continue;
     const r = retirarDe(doc, otro, tituloNuestro);
     if (!r.cduAjena && !r.quitadas.length) continue;
