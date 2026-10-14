@@ -434,7 +434,9 @@ async function refrescarEstado() {
     const estado = await api('/estado');
     const vigilanteActivo = estado.vigilante.activo,
       vigilanteProcesando = estado.vigilante.procesando;
-    $('#dVig').className = 'dot ' + (vigilanteProcesando ? 'busy' : vigilanteActivo ? 'ok' : 'off');
+    // Subidas desde el panel que el servidor está catalogando (no pasan por el vigilante): también «ocupado».
+    const subidas = estado.subidas || [];
+    $('#dVig').className = 'dot ' + (vigilanteProcesando || subidas.length ? 'busy' : vigilanteActivo ? 'ok' : 'off');
     const mantManual = estado.conformador.mantenimientoManual,
       modo = estado.conformador.modo;
     $('#dMant').className = 'dot ' + (mantManual ? 'busy' : modo === 'diferido' ? 'ok' : ''); // apagado = neutral, no rojo
@@ -447,7 +449,15 @@ async function refrescarEstado() {
     // 🧠 CDU sin IA en la ingesta (interruptor junto al del Vigilante) — refleja el ajuste del servidor.
     if ($('#cduSinIASwitch') && typeof estado.cduSinIA === 'boolean') $('#cduSinIASwitch').checked = estado.cduSinIA;
     if ($('#inspIASwitch') && typeof estado.inspeccionIA === 'boolean') $('#inspIASwitch').checked = estado.inspeccionIA;
-    $('#vSub').textContent = vigilanteProcesando
+    const textoSubidas = subidas
+      .map((s) => {
+        const min = s.restante_s != null ? ` · faltan ~${Math.max(1, Math.round(s.restante_s / 60))} min` : '';
+        return `catalogando subida del panel ${s.hechas}/${s.total}${min}${s.actual ? ` · ${s.actual}` : ''}${s.errores ? ` · ${s.errores} con error` : ''}`;
+      })
+      .join(' — ');
+    $('#vSub').textContent = textoSubidas
+      ? textoSubidas + (vigilanteProcesando ? ' · y procesando el Inbox' : '')
+      : vigilanteProcesando
       ? 'procesando el Inbox…'
       : vigilanteActivo
         ? 'observando el Inbox'

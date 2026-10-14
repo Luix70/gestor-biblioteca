@@ -1,4 +1,5 @@
 import express from 'express';
+import { estadoSubidas } from './utils/subidas-en-curso.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
 import { configurarVigilante, estadoVigilante, estadoConformador, ejecutarCampanaAhora, ejecutarCampanaCompleta, pararCampanaCompleta, estadoDrenaje, INBOX } from './vigilante.js';
@@ -382,7 +383,7 @@ export function rutasPanel() {
     // Estado consolidado (vigilante + conformador + ajustes «CDU sin IA» e «Inspección con IA») para la cabecera y
     // la página Entrada.
     r.get('/estado', (req, res) => {
-        res.json({ vigilante: estadoVigilante(), conformador: estadoConformador(), cduSinIA: cduSinIAActivo(), inspeccionIA: inspeccionIAActiva() });
+        res.json({ vigilante: estadoVigilante(), conformador: estadoConformador(), cduSinIA: cduSinIAActivo(), inspeccionIA: inspeccionIAActiva(), subidas: estadoSubidas() });
     });
 
     // Pausar / reanudar el vigilante. Body { activo: bool }.

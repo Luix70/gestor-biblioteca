@@ -9,6 +9,7 @@ import axios from 'axios';
 axios.defaults.timeout = Number(process.env.HTTP_TIMEOUT_MS || 20000);
 import express from 'express';
 import multer from 'multer';
+import { empezarSubida, catalogando, unidadHecha, terminarSubida } from './utils/subidas-en-curso.js';
 import fs from 'fs/promises';
 import { readFileSync } from 'node:fs';
 import fsSync from 'node:fs';
@@ -274,8 +275,12 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
 
     const unidades = agrupar(archivos);
     const resultados = [];
+    // El panel ve el avance (GET /api/estado → subidas): antes una subida grande se catalogaba sin ninguna señal.
+    const subidaId = empezarSubida(unidades.length);
 
+    try {
     for (const unidad of unidades) {
+        catalogando(subidaId, path.basename(unidad.rutas[0]) + (unidad.rutas.length > 1 ? ` (+${unidad.rutas.length - 1})` : ''));
         const ctx = { ...baseCtx };
         // El ISBN del formulario solo aplica a UN libro (un grupo de imágenes, o una única unidad subida).
         if (isbnForm && (unidad.esImagenes || unidades.length === 1)) { ctx.isbn = isbnForm; if (isbnOrigen) ctx.isbn_origen = isbnOrigen; }
@@ -299,7 +304,9 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
                 nImagenes: (r.documento.imagenes || []).length,
                 nota: (r.documento.alertas_agente || []).slice(-1)[0] || null,
             });
+            unidadHecha(subidaId);
         } catch (e) {
+            unidadHecha(subidaId, { ok: false });
             // Igual que en el Vigilante: un error crudo del driver de Mongo no trae `.tipo` y acababa en
             // Cuarentena como «sin identificar». Es infraestructura → Reintentos, que es reversible.
             if (e.tipo === 'infraestructura' || esFalloDeConexionMongo(e)) {
@@ -310,6 +317,10 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
                 resultados.push({ ok: false, destino: 'cuarentena', error: e.message });
             }
         }
+    }
+
+    } finally {
+        terminarSubida(subidaId);
     }
 
     // Política "nunca borrar": los temporales de subida (ya copiados al catálogo) se MUEVEN a la
