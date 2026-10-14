@@ -43,6 +43,7 @@ import { resolverPersona } from './resolver-persona.js';
 import { indexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
 import { mismoTituloLibro } from './titulo-libro.js';
+import { datosDeIsbnAjeno, FIRMA_RECLASIFICAR } from './isbn-ajeno.js';
 import { editorialCoherenteConISBN } from './editorial-por-prefijo.js';
 import { datosDeObraDeCandidatas } from './datos-de-obra.js';
 import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
@@ -633,37 +634,19 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     const huecos = await huecosDesdeAutoridad(db, doc, datos, { aplicar, conContribuciones: !provisional && !dudoso });
     Object.assign(set, huecos.set);
 
-    // LO QUE TRAJO UN ISBN EQUIVOCADO (14-oct). Si el libro tuvo OTRO ISBN —el anterior, o el que da nombre a su
-    // carpeta— y ese ISBN es de OTRO título, lo que se sacó de él no es de este libro: «La conjura de los necios»
-    // conservaba la CDU 929 y las materias «Marx, Groucho – Correspondencia» de «Las cartas de Groucho» aunque se le
-    // diera el ISBN bueno a mano, porque con el bueno ninguna autoridad da CDU y la mezcla conservadora no pisa lo
-    // que hay. Ahora: su CDU, si es la de ese otro libro, va a la cola de reclasificación DESDE CERO (campaña
-    // «Refinar CDU»: título, autores, sinopsis, IA con menú oficial), y se quitan las materias que solo vienen de él.
-    if (isbn) {
-        const segmento = String(doc.ruta_base || '').split('/').pop().replace(/-[0-9a-f]{6}$/, '');
-        const anteriores = [...new Set([doc.isbn, segmento].filter((x) => x && validarISBN(x) && !variantesISBN(isbn).includes(x)))];
-        for (const anterior of anteriores) {
-            const otro = await buscarAutoridadPorISBN(variantesISBN(anterior), { enLinea: false }).catch(() => null);
-            if (!otro?.titulo || mismoTituloLibro(otro.titulo, set.titulo || doc.titulo)) continue;
-            const raiz = (c) => String(c || '').trim().match(/^\d+(?:\.\d+)*/)?.[0] || '';
-            if (doc.cdu && !doc.cdu_manual && otro.cdu && raiz(doc.cdu) === raiz(otro.cdu)) {
-                set.mantenimiento_firma = 'pendiente-cdu-contaminada';
-                nombres.cdu = `«${doc.cdu}» era de «${otro.titulo}» (ISBN ${anterior}): a reclasificar desde cero`;
-            }
-            // Materias de ese otro libro (su título, autores y materias) que el nuestro no comparte.
-            const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-            const delOtro = norm([otro.titulo, ...(otro.autores || []), ...(otro.categorias || [])].join(' '));
-            const delNuestro = norm([doc.titulo, doc.subtitulo].join(' '));
-            const ajena = (m) => {
-                const palabras = norm(m).split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !/^\d+$/.test(w));
-                return palabras.length && palabras.every((w) => delOtro.includes(w)) && !palabras.some((w) => delNuestro.includes(w));
-            };
-            const actuales = set.palabras_clave || doc.palabras_clave || [];
-            const quedan = actuales.filter((m) => !ajena(m));
-            if (quedan.length < actuales.length) {
-                set.palabras_clave = quedan;
-                nombres.palabras_clave = `quitadas ${actuales.length - quedan.length} materia(s) de «${otro.titulo}»`;
-            }
+    // LO QUE TRAJO UN ISBN EQUIVOCADO (14-oct; utils/isbn-ajeno.js, el mismo detector del script de reparación): si
+    // el libro tuvo OTRO ISBN —el anterior, o el que nombra su carpeta— de OTRO título, su CDU (si es la de ese otro
+    // libro) va a reclasificarse DESDE CERO y se retiran las materias que solo vienen de él («La conjura de los
+    // necios» conservaba la CDU 929 y las materias de «Las cartas de Groucho» aunque se le diera el ISBN bueno).
+    const ajeno = await datosDeIsbnAjeno({ ...doc, palabras_clave: set.palabras_clave || doc.palabras_clave }, isbn, { titulo: set.titulo || doc.titulo });
+    if (ajeno) {
+        if (ajeno.cduAjena) {
+            set.mantenimiento_firma = FIRMA_RECLASIFICAR;
+            nombres.cdu = `«${doc.cdu}» era de «${ajeno.otroTitulo}» (ISBN ${ajeno.anterior}): a reclasificar desde cero`;
+        }
+        if (ajeno.materias) {
+            set.palabras_clave = ajeno.materias;
+            nombres.palabras_clave = `quitadas ${ajeno.quitadas.length} materia(s) de «${ajeno.otroTitulo}»`;
         }
     }
     for (const c of huecos.cambios) if (c.campo === 'contribuciones' || c.campo === 'cdu_autoridad') nombres[c.campo] = c.a;
