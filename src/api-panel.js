@@ -1,4 +1,5 @@
 import express from 'express';
+import { resumenTrafico } from './utils/trafico-atlas.js';
 import { estadoSubidas } from './utils/subidas-en-curso.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
@@ -382,6 +383,11 @@ export function rutasPanel() {
 
     // Estado consolidado (vigilante + conformador + ajustes «CDU sin IA» e «Inspección con IA») para la cabecera y
     // la página Entrada.
+    // Tráfico con Atlas de los últimos 7 días (su tope del plan gratuito: 10 GB en ventana móvil). utils/trafico-atlas.js
+    r.get('/trafico-atlas', async (req, res) => {
+        try { res.json({ ok: true, ...(await resumenTrafico(await conectarDB())) }); }
+        catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+    });
     r.get('/estado', (req, res) => {
         res.json({ vigilante: estadoVigilante(), conformador: estadoConformador(), cduSinIA: cduSinIAActivo(), inspeccionIA: inspeccionIAActiva(), subidas: estadoSubidas() });
     });

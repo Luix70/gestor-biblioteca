@@ -1,5 +1,6 @@
 import { MongoClient } from 'mongodb';
 import dns from 'node:dns';
+import { vigilarTrafico } from './utils/trafico-atlas.js';
 
 // Puenteamos el DNS local inyectando los servidores de Google para resolver registros SRV
 dns.setServers(['8.8.8.8', '8.8.4.4']);
@@ -47,11 +48,14 @@ async function abrirCliente(uri) {
     const nuevo = new MongoClient(uri, {
         serverSelectionTimeoutMS: 10000, // Damos 10 segundos de margen a la conexión
         family: 4,                       // Forzamos IPv4 para evitar atascos en la red
+        monitorCommands: true,           // para el contador de tráfico con Atlas (utils/trafico-atlas.js)
     });
     // Si el driver anuncia que la topología se ha cerrado, se descarta el cliente EN EL ACTO: así la próxima
     // llamada abre uno nuevo en vez de devolver este cadáver. Es la señal que nos faltaba.
     nuevo.on('topologyClosed', () => { if (client === nuevo) client = null; });
     await nuevo.connect();
+    // El clúster gratuito de Atlas frena la red al pasar de 10 GB en 7 días: se mide lo que gasta cada proceso.
+    vigilarTrafico(nuevo, nuevo.db(nombreBD()));
     return nuevo;
 }
 

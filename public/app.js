@@ -11229,8 +11229,53 @@ async function sanearRun() {
   }
 }
 // Página "Actividad": vigilante + conformador + mantenimiento + integridad + logs (al final).
+// ── TARJETA «Tráfico con Atlas» (Mantenimiento): la ventana de 7 días del tope del plan gratuito ─────────────
+// Barra con el % del límite (verde < 60 %, ámbar < 80 %, rojo después: Atlas frena la red), el detalle por día y
+// los orígenes que más han gastado (app, integridad, afinar-cdu…). Fuente: GET /trafico-atlas (utils/trafico-atlas.js).
+async function loadTrafico() {
+  const cont = $('#traficoOut');
+  if (!cont) return;
+  let t;
+  try {
+    t = await api('/trafico-atlas');
+  } catch (e) {
+    cont.innerHTML = `<span class="muted" style="font-size:12px">${esc(e.message)}</span>`;
+    return;
+  }
+  const gb = (x) => (x < 0.1 ? `${Math.round(x * 1024)} MB` : `${x.toFixed(2).replace('.', ',')} GB`);
+  const color = t.pct >= 80 ? 'var(--bad, #e05252)' : t.pct >= 60 ? 'var(--warn, #e0a030)' : 'var(--ok, #3cb371)';
+  const aviso =
+    t.pct >= 100
+      ? '⛔ Por encima del límite: Atlas estará frenando la red. Evita pasadas completas de la base hasta que baje.'
+      : t.pct >= 80
+        ? '⚠️ Cerca del límite: deja las pasadas completas (integridad, auditorías, secos de toda la base) para dentro de unos días.'
+        : '';
+  const maxDia = Math.max(0.001, ...t.dias.map((d) => d.salida_gb));
+  cont.innerHTML = `
+    <div style="font-size:13px;margin-bottom:6px"><b>${gb(t.salida_gb)}</b> recibidos de Atlas en 7 días · límite ${t.limite_gb} GB
+      <span class="muted">(enviados: ${gb(t.entrada_gb)})</span></div>
+    <div class="campbar"><div class="campbar-fill" style="width:${Math.min(100, t.pct)}%;background:${color}"></div></div>
+    <div style="font-size:12px;margin-top:4px;color:${color}">${t.pct} % del límite${aviso ? ` · ${aviso}` : ''}</div>
+    <div style="display:flex;gap:4px;align-items:flex-end;height:60px;margin-top:10px">
+      ${t.dias
+        .map(
+          (d) => `<div title="${esc(d.dia)}: ${gb(d.salida_gb)}" style="flex:1;text-align:center;font-size:10px">
+            <div style="height:${Math.max(2, Math.round((d.salida_gb / maxDia) * 44))}px;background:${color};opacity:.7;border-radius:2px"></div>
+            <div class="muted">${esc(d.dia.slice(8))}</div></div>`,
+        )
+        .join('')}
+    </div>
+    ${
+      t.origenes.length
+        ? `<div class="muted" style="font-size:12px;margin-top:8px">Quién más ha gastado: ${t.origenes
+            .map((o) => `${esc(o.origen)} ${gb(o.salida_gb)}`)
+            .join(' · ')}</div>`
+        : '<div class="muted" style="font-size:12px;margin-top:8px">Aún sin datos: se empiezan a contar ahora.</div>'
+    }`;
+}
 function loadActivity() {
   refrescarEstado();
+  loadTrafico();
   loadInteg();
   logAuto();
   aplicarPliegueActividad();

@@ -3183,6 +3183,12 @@ de ficheros clasificado por CDU.
       cabecera (no en la URL: acabaría en el historial del navegador). El detalle
       NO viaja en el sondeo de progreso (que va cada 1,5 s): solo al pedir el .txt.
 
+    · 📶 TRÁFICO CON ATLAS (15-oct): el plan gratuito de Atlas admite 10 GB de salida y 10 de entrada en los
+      últimos 7 días (ventana MÓVIL); al pasarlo frena la red (medido el 14-oct: 94 KB/s) y su panel no avisa.
+      La tarjeta suma lo que reciben de Atlas la aplicación y TODOS los scripts (NAS y PC: database.js mide cada
+      comando y respuesta del driver y lo vuelca cada minuto en la colección trafico_atlas, por día y por
+      origen), con el % del límite (ámbar al 60 %, rojo al 80 %) y quién más ha gastado. Estimación: Atlas
+      cuenta bytes comprimidos por la red. Si se acerca al límite: nada de pasadas completas de la base.
     · 🎯 CAMPAÑAS DE FONDO (admin): rellenan información INCOMPLETA del catálogo
       cuando el sistema está en REPOSO (Inbox inactivo), cada una con su interruptor,
       su tamaño de LOTE y su periodicidad (cada N minutos). Comparten el candado con
