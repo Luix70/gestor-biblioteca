@@ -188,6 +188,9 @@ function deweyFino(codigo) {
     if (/^21\d$/.test(d)) return '2-1';                      // 210-219: filosofía y teoría de la religión
     // Historia 931-999: el número ya dice el LUGAR (y a veces el periodo) → 94(lugar), con la misma traducción que
     // modernizarCDU (973 → 94(73), 946.081 → 94(460).081). 930 es la ciencia de la historia: no.
+    // El Dewey 931 es CHINA (hasta 420) → 94(31). (En la CDU antigua, 931 era la historia antigua en general, y
+    // modernizarCDU lo lleva a 94(3): aquí se resuelve antes para que el Dewey no herede esa lectura.)
+    if (d === '931') return '94(31)';
     if (/^9[3-9]\d/.test(d) && d !== '930') {
         // Como mucho tres decimales: lo que sigue suele ser una subdivisión común del Dewey (941.084092: el «092» es
         // BIOGRAFÍA, no parte del periodo; daba «94(410).084.092»).

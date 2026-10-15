@@ -105,6 +105,10 @@ function historiaModerna(numero) {
     // Excepción: en la historia de EE. UU. los decimales sin cero son PERIODOS (973.2 colonial, 973.7 guerra civil),
     // no lugares. No hay traducción segura a fechas: se deja como está.
     if (base === '73' && partes[1]) return null;
+    // 931 a secas en la CDU ANTIGUA era la HISTORIA ANTIGUA en general (no un lugar): hoy 94(3), «mundo antiguo».
+    // El auxiliar (31) es China, y lo que llega aquí es una CDU (BNE, CIP, la IA): «The Cambridge Ancient History»
+    // tenía 19 tomos en la historia de China (15-oct). El Dewey 931 sí es China: clasificador-cdu lo trata aparte.
+    if (base === '31' && !partes[1]) return `94(3)${partes[2] && partes[2] !== '0' ? `.${conPuntos(partes[2])}` : ''}`;
     const lugar = conPuntos(base + partes[1]);
     const periodo = partes[2] && partes[2] !== '0' ? `.${conPuntos(partes[2])}` : '';
     return `94(${LUGAR_MODERNO[lugar] || lugar})${periodo}`;
