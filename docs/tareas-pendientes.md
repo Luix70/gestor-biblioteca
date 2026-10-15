@@ -66,7 +66,7 @@ reprocesar o fundir versiones respetan lo que hay dentro desde el 7-oct), pero s
       para un libro sobre China); muchos son CDU de la BNE: no se tocan sin revisar. → ver **§4, estrategia de la CDU**.
 
 ### 1.3 Al final
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/integridad.js --reparar --informe /app/logs/integridad.txt`
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/integridad.js --reparar --informe /app/logs/integridad.txt`
       — además resuelve los **11 duplicados exactos** que dejó la verificación de hashes (el otro va a la Papelera, entero).
 - [ ] Panel → **Búsqueda → Reindexar** (recoge todos los cambios de títulos, autores y editoriales de estos días).
 
@@ -185,7 +185,7 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
              del 13-oct: 643 libros + 407 de la caché, 40 dudosas a una selección) · afinar-cdu (seco, --ejecutar hasta 0) ·
              recolocar-por-cdu (seco, --ejecutar)
              · integridad --informe (y --reparar) · reindexar-busqueda · auditar-cdu · revisar-descripciones-cdu (seco).
-       - [ ] a mano: 6a3b20a71c900068144ebe66 «Ten Physical Applications Of Spectral Zeta Functions» es un LIBRO de Lecture
+       - [x] a mano: 6a3b20a71c900068144ebe66 «Ten Physical Applications Of Spectral Zeta Functions» es un LIBRO de Lecture
              Notes in Physics (ISSN de serie 0075-8450) catalogado como revista en la CDU 82, sin carpeta en disco; y dos
              números de «Marketing» (6a3e3957…, 6a3e39a6…, CDU 339.13) con ruta_base 658.8 que no existe en disco.
        - [x] **14-oct**: integridad --reparar (576 ramas vacías); 5 docs erróneos borrados de la base (copia en
@@ -194,7 +194,7 @@ alta, 4.057 media) señaló el origen: equivalencias de la IA que la caché serv
              próxima integridad --reparar las retira si quedan vacías.
        - [x] `… corregir-tablas-cdu.js` (seco) y `--ejecutar`: la caché tenía 27 «Dewey 070… → 07» (como Manual verificado:
              se servían antes que la tabla corregida) y 66 libros (42 en «07», 24 del cutter LCC en «E» leído como exponente).
-       - [ ] `… retirar-datos-isbn-ajeno.js` (seco 14-oct: 457 libros con datos de OTRO libro por un ISBN anterior —444
+       - [x] **15-oct HECHO** (699: 326 ISBN descartados, 54 CDU a reclasificar, 529 con materias retiradas) `… retirar-datos-isbn-ajeno.js` (seco 14-oct: 457 libros con datos de OTRO libro por un ISBN anterior —444
              Osprey con las materias de «Appleby and the Ospreys», novela policiaca, por el ISBN compartido 0140110925—;
              1 CDU heredada: «La conjura de los necios») y `--ejecutar`. El detector (utils/isbn-ajeno.js) también
              actúa en «Extraer ISBN».
