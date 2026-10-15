@@ -93,6 +93,74 @@ export async function editarColeccion(db, id, campos = {}) {
     return persistir(db, 'colecciones', _id, set, unset, avisos);
 }
 
+/**
+ * APLICAR LA CDU DE LA OBRA A TODOS SUS TOMOS (15-oct, petición del usuario: al cambiar la CDU de una obra, el panel
+ * pregunta si se aplica también a los tomos). Los tomos viven juntos en <cdu>/obras/<obra>/<vol-N>/, así que no se
+ * mueven uno a uno (reubicarPorCdu no toca los tomos de obra): se mueve la carpeta DE LA OBRA entera al árbol de la CDU
+ * nueva —con verificación de la copia, como siempre—, y en cada tomo se actualizan la CDU (manual: la has decidido tú),
+ * la ruta, la portada y las imágenes; se regeneran sus sidecars. Un tomo que no vive en esa carpeta (ingerido aparte)
+ * recibe la CDU solo en la base, con aviso. Si la carpeta destino ya existe (otra obra), no se mueve nada.
+ * @returns {Promise<{ tomos:number, movida:boolean, avisos:string[] }>}
+ */
+export async function aplicarCduAObra(db, obraId, cduNueva) {
+    const { carpetaDeDoc, webDeDoc, carpetaExiste, moverCarpetaConVerificacion } = await import('../mantenimiento/util-mantenimiento.js');
+    const { arbolCDU } = await import('./cdu-arbol.js');
+    const { modernizarCDU } = await import('./cdu-moderna.js');
+    const { regenerarSidecarsDoc } = await import('./registro.js');
+    const { indexarDoc } = await import('./indice-busqueda.js');
+    const cdu = modernizarCDU(String(cduNueva || '').trim());
+    const avisos = [];
+    const col = db.collection('biblioteca');
+    const tomos = await col.find({ obra: obraId }).toArray();
+    if (!cdu || !tomos.length) return { tomos: 0, movida: false, avisos };
+
+    // La carpeta de la obra: lo que va hasta «…/obras/<obra>» en la ruta de sus tomos (la del primero que la tenga).
+    const baseDe = (web) => { const m = String(web || '').match(/^(.*\/obras\/[^/]+)\//); return m ? m[1] : null; };
+    const baseVieja = tomos.map((t) => baseDe(t.ruta_base)).find(Boolean) || null;
+    let baseNueva = null;
+    let movida = false;
+    if (baseVieja) {
+        const obraSeg = baseVieja.split('/').pop();
+        baseNueva = '/recursos/' + [...arbolCDU(cdu).segmentos, 'obras', obraSeg].join('/');
+        if (baseNueva !== baseVieja) {
+            const dirViejo = carpetaDeDoc({ ruta_base: baseVieja });
+            const dirNuevo = carpetaDeDoc({ ruta_base: baseNueva });
+            if (!(await carpetaExiste(dirViejo))) {
+                avisos.push('La carpeta de la obra no está en este disco: la CDU de los tomos se cambia solo en la base.');
+                baseNueva = null;
+            } else if (await carpetaExiste(dirNuevo)) {
+                avisos.push(`Ya existe una carpeta «${baseNueva}» (¿otra obra con el mismo nombre?): no se mueve; la CDU se cambia solo en la base.`);
+                baseNueva = null;
+            } else {
+                const ficheros = tomos.flatMap((t) => [t.portada, ...(t.imagenes || []).map((i) => i.ruta)]).filter(Boolean).map((p) => p.split('/').pop());
+                await moverCarpetaConVerificacion(dirViejo, dirNuevo, ficheros);
+                movida = true;
+            }
+        } else baseNueva = null;   // misma rama: no hay que mover nada
+    }
+
+    const remap = (p) => (p && baseNueva && p.startsWith(baseVieja + '/') ? baseNueva + p.slice(baseVieja.length) : p);
+    for (const t of tomos) {
+        const set = { cdu, cdu_manual: true, cdu_fuente: 'manual', fecha_actualizacion: new Date() };
+        const dentro = baseNueva && String(t.ruta_base || '').startsWith(baseVieja + '/');
+        if (dentro) {
+            set.ruta_base = remap(t.ruta_base);
+            if (t.portada) set.portada = remap(t.portada);
+            if (t.imagenes?.length) set.imagenes = t.imagenes.map((i) => ({ ...i, ruta: remap(i.ruta) }));
+        }
+        await col.updateOne({ _id: t._id }, {
+            $set: set,
+            $push: { alertas_agente: `CDU «${t.cdu}» → «${cdu}», la de su obra (aplicada a todos los tomos desde la ficha de la obra)${dentro ? '; carpeta de la obra movida' : ''}.` },
+        });
+        const nuevo = { ...t, ...set };
+        await regenerarSidecarsDoc(db, nuevo, carpetaDeDoc(nuevo)).catch(() => {});
+        await indexarDoc(db, t._id).catch(() => {});
+    }
+    const fuera = tomos.filter((t) => !baseVieja || !String(t.ruta_base || '').startsWith(baseVieja + '/')).length;
+    if (fuera && movida) avisos.push(`${fuera} tomo(s) no estaban en la carpeta de la obra: CDU cambiada solo en la base.`);
+    return { tomos: tomos.length, movida, avisos };
+}
+
 export async function editarObra(db, id, campos = {}) {
     const _id = oid(id);
     if (!_id) return { ok: false, motivo: 'id inválido' };
@@ -108,5 +176,20 @@ export async function editarObra(db, id, campos = {}) {
         else { const v = parseInt(campos.total_volumenes, 10); if (Number.isFinite(v) && v > 0) set.total_volumenes = v; else avisos.push('Total de tomos inválido (ignorado)'); }
     }
     await aplicarComunes(db, campos, set, unset, avisos);
-    return persistir(db, 'obras', _id, set, unset, avisos);
+    const r = await persistir(db, 'obras', _id, set, unset, avisos);
+    // A LOS TOMOS, si se pidió (el panel pregunta al guardar): la CDU (mueve la carpeta de la obra) y la editorial.
+    const aTomos = Array.isArray(campos.aplicarATomos) ? campos.aplicarATomos : [];
+    if (r.ok && aTomos.includes('cdu') && set.cdu) {
+        const t = await aplicarCduAObra(db, _id, set.cdu);
+        r.tomos = t.tomos;
+        r.avisos = [...(r.avisos || []), `CDU aplicada a ${t.tomos} tomo(s)${t.movida ? ' (carpeta de la obra movida)' : ''}`, ...t.avisos];
+    }
+    if (r.ok && aTomos.includes('editorial') && set.editorial) {
+        const u = await db.collection('biblioteca').updateMany({ obra: _id }, {
+            $set: { editorial: set.editorial, fecha_actualizacion: new Date() },
+            $push: { alertas_agente: 'Editorial de su obra aplicada a todos los tomos desde la ficha de la obra.' },
+        });
+        r.avisos = [...(r.avisos || []), `Editorial aplicada a ${u.modifiedCount} tomo(s)`];
+    }
+    return r;
 }

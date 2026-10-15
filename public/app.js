@@ -2365,7 +2365,23 @@ function editarGrupo(tipo, g) {
       campos.issn = $('#egIssn').value;
       // Sin #egTipo (colección estructural) no se envía `tipo`: el backend lo deja intacto.
       if ($('#egTipo')) campos.tipo = $('#egTipo').value;
-    } else { campos.titulo = $('#egNombre').value; campos.isbn_obra = $('#egIsbn').value; campos.total_volumenes = $('#egTotal').value; }
+    } else {
+      campos.titulo = $('#egNombre').value;
+      campos.isbn_obra = $('#egIsbn').value;
+      campos.total_volumenes = $('#egTotal').value;
+      // ¿También a los TOMOS? Si cambiaste la CDU o la editorial de la obra, se pregunta: la CDU mueve la carpeta de
+      // la obra entera (con sus tomos) al árbol nuevo; la editorial se copia a cada tomo.
+      const nTomos = (_obraR && _obraR.obra && String(_obraR.obra._id) === String(g._id) && (_obraR.volumenes || []).filter((v) => v && v._id).length) || g.volumenes_presentes || 0;
+      const cambios = [];
+      if (campos.cdu.trim() && campos.cdu.trim() !== String(g.cdu || '').trim()) cambios.push('cdu');
+      if (campos.editorial.trim() && campos.editorial.trim() !== String(g.editorial || '').trim()) cambios.push('editorial');
+      if (cambios.length && nTomos > 0) {
+        const que = cambios.map((c) => (c === 'cdu' ? `la CDU «${campos.cdu.trim()}»` : `la editorial «${campos.editorial.trim()}»`)).join(' y ');
+        if (confirm(`¿Aplicar también ${que} a los ${nTomos} tomo(s) de la obra?${cambios.includes('cdu') ? '\n\nLa carpeta de la obra, con todos sus tomos, se moverá al árbol de la CDU nueva.' : ''}\n\n«Cancelar» = solo a la obra.`)) {
+          campos.aplicarATomos = cambios;
+        }
+      }
+    }
     try {
       const res = await api('/' + (esCol ? 'colecciones' : 'obras') + '/' + encodeURIComponent(g._id) + '/editar', { method: 'POST', body: JSON.stringify(campos) });
       if (!res.ok) { $('#egErr').textContent = res.motivo; toast(res.motivo, 'bad'); return; }

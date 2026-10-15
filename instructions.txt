@@ -4929,3 +4929,12 @@ APÉNDICE — MANUAL DE LOS SCRIPTS DE scripts/  (qué hacen, cómo se usan, cu�
     * NOTA: las carpetas de _REVISTAS inspeccionadas ANTES de este cambio tienen guias sin portada leida. Para
       aprovecharlo: «🤖 IA» del Inspector sobre la carpeta (reescribe las guias del agente y las aprobadas en el
       panel; no las hechas a mano).
+
+
+CDU Y EDITORIAL DE UNA OBRA → SUS TOMOS (15-oct)
+    Al guardar una obra (✏️ Editar) con la CDU o la editorial cambiadas, el panel pregunta si se aplican también a
+    todos sus tomos. La CDU mueve la carpeta de la obra ENTERA (<cdu>/obras/<obra>/, con todos sus tomos) al árbol de
+    la CDU nueva, con verificación de la copia; cada tomo queda con esa CDU como manual, su ruta/portada/imágenes al
+    día y sus sidecars regenerados (utils/editar-grupos.js·aplicarCduAObra). Un tomo que no viva en esa carpeta recibe
+    la CDU solo en la base, con aviso; si la carpeta destino ya existe (otra obra), no se mueve nada. «Cancelar» =
+    solo la obra, como antes.
