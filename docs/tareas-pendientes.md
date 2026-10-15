@@ -22,6 +22,14 @@
 
 Cascada gratuita (nombre de fichero → Fichero → colección → OpenLibrary → Google). `--ia` añade IA de texto (barata).
 
+### 1.1 bis Disolver TXtras (15-oct) — en el NAS (mueve ficheros; copia del disco antes)
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/disolver-txtras.js`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/disolver-txtras.js --ejecutar`
+
+Los 45 «material» → colección «Curso de Latín» (811.124, ficha limpia y sin portada); los 297 libros → su carpeta
+CDU normal (o la de su obra), sin `ruta_fija`. Lo que quede en TXtras se lista, no se borra. Después: Refinar CDU
+sobre la selección «TXtras · todos» (166 siguen con «82» y varios con CDU mal formada: 1.9.1, 93.04.2…).
+
 ### 1.2 Carpetas-contenedor (opcional)
 - [x] (8-oct: 9 contenedores separados; los «118 anidados» restantes eran miembros de árboles preservados —77 de TXtras, 1 de Oxford Bookworms—, anidados a propósito: ya no se cuentan) `sudo docker exec -it gestor-biblioteca node scripts/reparar-carpetas-anidadas.js --separar` (en seco) y `--separar --ejecutar`
 
