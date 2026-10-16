@@ -47,6 +47,19 @@ FROM node:18-bullseye-slim
 # libtiff-tools aporta `tiff2pdf`: una carpeta de páginas escaneadas en TIF se convierte en un PDF por libro
 # (utils/escaneo-a-pdf.js) conservando su compresión (CCITT G4 de los escaneos bitonales), sin recomprimir.
 # C plano, ~1 MB, Debian MAIN. Si faltara, la carpeta se queda en el Inbox con un aviso.
+# FUENTES DE APT → archive.debian.org (16-oct). Bullseye (Debian 11) terminó su soporte LTS en agosto de 2026 y sus
+# paquetes se están mudando al archivo: deb.debian.org SIGUE publicando el índice de bullseye-security pero ya NO
+# sirve sus .deb (404 en poppler, ghostscript, libtiff…), así que la construcción fallaba. archive.debian.org tiene
+# las tres ramas (main, updates, security) con los mismos paquetes. Check-Valid-Until=false por si algún día el
+# Release del archivo caduca (sus índices ya no se renuevan). El paso a una base más nueva (bookworm) es otra tarea:
+# cambia las versiones de poppler/ghostscript y hay que probarlo en el Atom.
+RUN printf '%s\n' \
+        'deb http://archive.debian.org/debian bullseye main' \
+        'deb http://archive.debian.org/debian bullseye-updates main' \
+        'deb http://archive.debian.org/debian-security bullseye-security main' \
+        > /etc/apt/sources.list \
+    && rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99archivo
 RUN apt-get update \
     && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin antiword catdoc qpdf ghostscript libtiff-tools \
     && rm -rf /var/lib/apt/lists/*
