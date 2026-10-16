@@ -303,6 +303,12 @@ async function main() {
             else if (accion === 'extraer') st.extraidas++;
             else st.irreparables++;
         }
+        // Irreparable con una portada que apunta a un fichero que YA NO EXISTE: se retira esa referencia muerta, como
+        // las imágenes rotas del carrusel. Dejarla solo enseña un hueco roto en el catálogo y, encima, ata el documento
+        // a una carpeta ajena (16-oct: 26 volúmenes de Gibbon apuntaban a un mapa de TXtras e impedían reciclarla).
+        // Solo en ejecución real (en seco se cumpliría también, pero allí 'extraer' aún no se ha intentado).
+        const unset = {};
+        if (EJECUTAR && accion === 'irreparable' && doc.portada && !portadaOk) unset.portada = '';
 
         const marca = `${!portadaOk || FORZAR ? '🖼️ ' : ''}${rotas.length ? `🧹${rotas.length} ` : ''}`;
         const cola = set.portada
@@ -310,15 +316,19 @@ async function main() {
             : accion === 'extraer' ? ' → se extraería la portada de su fichero (ejecuta con --ejecutar)'
             // Al FORZAR también hay que decir por qué NO se pudo: si no, un documento con portada válida
             // que falla al re-extraer no imprimiría nada y parecería que ha ido bien.
-            : (!portadaOk || FORZAR ? ` → SIN reparar: ${motivo || 'no tiene imágenes válidas ni fichero original'}` : '');
+            : (!portadaOk || FORZAR ? ` → SIN reparar: ${motivo || 'no tiene imágenes válidas ni fichero original'}${unset.portada === '' ? ' (se retira la referencia rota)' : ''}` : '');
+
         // Contador i/N: rasterizar la 1.ª página de un PDF tarda segundos, así que sin saber cuánto queda el
         // proceso PARECE colgado. Se escribe por stdout directamente (no console.log) por si algún import
         // trajera consola-timestamp, que silencia las líneas sin marcador de titular.
         const pos = `[${String(st.revisados).padStart(String(ids.length).length)}/${ids.length}]`;
         process.stdout.write(`${pos} ${marca}${doc._id} · ${(doc.titulo || '(sin título)').slice(0, 60)}${cola}\n`);
 
-        if (EJECUTAR && Object.keys(set).length) {
-            await col.updateOne({ _id }, { $set: set });
+        if (EJECUTAR && (Object.keys(set).length || Object.keys(unset).length)) {
+            await col.updateOne({ _id }, {
+                ...(Object.keys(set).length ? { $set: set } : {}),
+                ...(Object.keys(unset).length ? { $unset: unset } : {}),
+            });
             st.docsTocados++;
         }
     }
