@@ -103,6 +103,15 @@ async function ficheros(dir) {
 }
 
 const rel = (p) => path.relative(TX, p).split(path.sep).join('/');
+
+/**
+ * ¿Algún documento usa como portada/imagen algo de `o` (relativo a TXtras)? Entonces NO se mueve: la primera pasada
+ * (16-oct) movió «Map plates» de Gibbon a Material/ de la obra y dejó rota la portada de 26 volúmenes que la usaban.
+ */
+async function referenciado(o) {
+  const re = new RegExp(`^${escaparRegex(`${WEB_TXTRAS}/${o}`)}(/|$)`);
+  return (await col.countDocuments({ $or: [{ portada: re }, { 'imagenes.ruta': re }] })) > 0;
+}
 const esLibroSuelto = (p) => /\.(pdf|epub|mobi|azw3?|djvu|doc|docx)$/i.test(p);
 
 // ── 1. Copias y libros sueltos ──────────────────────────────────────────────────────────────────────────────
@@ -231,14 +240,18 @@ for (const { p: f } of alInbox) {
   p.paso(path.basename(f));
   try { await moverVerificado(f, path.join(INBOX, path.basename(f))); } catch (e) { fallos++; p.nota(`⛔ ${path.basename(f)}: ${e.message}`); }
 }
+// Reanudable: lo que una pasada anterior ya movió no está, y no es un fallo.
 for (const r of ESCANEOS) {
   p.paso(path.basename(r));
+  if (!(await existe(path.join(TX, r)))) continue;
   try { await moverVerificado(path.join(TX, r), path.join(INBOX, path.basename(r))); } catch (e) { fallos++; p.nota(`⛔ ${r}: ${e.message}`); }
 }
 
 const raizCurso = webAAbs(curso.raiz_web);
 for (const [o, d] of AL_CURSO) {
   p.paso(o.trim());
+  if (!(await existe(path.join(TX, o)))) continue;
+  if (await referenciado(o)) { p.nota(`⏭️  ${o.trim()}: lo usa un documento como portada/imagen → no se mueve`); continue; }
   try {
     if (SOLO_HTM.has(o)) {
       for (const f of (await ficheros(path.join(TX, o))).filter((x) => /\.htm$/i.test(x))) await moverVerificado(f, path.join(raizCurso, d, path.basename(f)));
@@ -250,7 +263,8 @@ for (const [o, d] of AL_CURSO) {
 
 for (const [o, d] of A_OBRA) {
   p.paso(o);
-  if (!d) continue;
+  if (!d || !(await existe(path.join(TX, o)))) continue;
+  if (await referenciado(o)) { p.nota(`⏭️  ${o}: lo usa un documento como portada/imagen → no se mueve`); continue; }
   try { await moverVerificado(path.join(TX, o), webAAbs(d)); } catch (e) { fallos++; p.nota(`⛔ ${o}: ${e.message}`); }
 }
 
