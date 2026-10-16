@@ -44,8 +44,11 @@ FROM node:18-bullseye-slim
 # esencia, lo que hacen por dentro iLovePDF/pdf24). Pesa mas (~40 MB) y es lento en el Atom, por eso solo
 # se invoca si qpdf no logro un PDF legible. C plano, sin SIMD.
 # faltara, los dos usos DEGRADAN con elegancia (se detecta con `qpdf --version` y no se rompe nada).
+# libtiff-tools aporta `tiff2pdf`: una carpeta de páginas escaneadas en TIF se convierte en un PDF por libro
+# (utils/escaneo-a-pdf.js) conservando su compresión (CCITT G4 de los escaneos bitonales), sin recomprimir.
+# C plano, ~1 MB, Debian MAIN. Si faltara, la carpeta se queda en el Inbox con un aviso.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin antiword catdoc qpdf ghostscript \
+    && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin antiword catdoc qpdf ghostscript libtiff-tools \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

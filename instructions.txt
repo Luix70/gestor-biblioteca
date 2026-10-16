@@ -2434,6 +2434,16 @@ de ficheros clasificado por CDU.
       su nombre es clicable y lleva un botón 🔍 → abre el explorador de ficheros en un modal (#cmpModal),
       acotado a esa subcarpeta (reutiliza explorarArchivos → GET /documentos/:id/archivos?sub=<nombre>, que ya
       oculta a los invitados lo marcado «solo admin»). Descargar una carpeta baja un zip.
+    · ESCANEO DE PÁGINAS → PDF (16-oct, utils/escaneo-a-pdf.js): una carpeta del Inbox SIN documentos cuyo árbol
+      son solo imágenes (algún TIF, o al menos ESCANEO_PDF_MIN_PAGINAS=12 páginas JPG/PNG) es un libro digitalizado,
+      no fotos de un libro en papel. Antes de nada (antes incluso de la inspección con IA) se convierte: imágenes
+      directas → «<carpeta>.pdf»; con subcarpetas → un PDF por subcarpeta de primer nivel con todo su subárbol
+      (la carpeta queda con varios PDF → colección por la regla de siempre). Orden natural por nombre. Sin pérdida:
+      los JPG entran con sus mismos bytes, los TIF por tiff2pdf (libtiff-tools, en la imagen Docker) conservando su
+      compresión. Se verifica el nº de páginas y solo entonces los originales van a la Papelera; si algo falla no se
+      toca nada y sale un aviso en el log. Una guía con acción (empaquetar/intacta/omitir…) manda. Antes, una
+      carpeta de TIF no se catalogaba nunca (se quedaba en el Inbox sin aviso) y una de JPG iba entera a la visión
+      como «libro en papel».
     · LIBRO DESGLOSADO (AUTOMÁTICO, sin guía): patrón muy común en material académico — una carpeta con el
       LIBRO ENTERO más su DESGLOSE al lado (cada capítulo suelto, portadilla, índice, apéndices, material
       adicional). Se cataloga el LIBRO de forma ORDINARIA (pipeline normal: ISBN/CDU/metadatos) y TODO lo demás

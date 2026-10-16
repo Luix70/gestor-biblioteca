@@ -26,6 +26,7 @@ import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección c
 import { tituloDeNombre } from './utils/afinar-guias.js';
 import { detectarLibroDesglosado, detectarDesglosePuro, ordenarPartesLibro, partesDeDesglose } from './utils/libro-desglosado.js'; // libro + su desglose
 import { unirPdfs, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
+import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js'; // carpeta de páginas escaneadas → PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB, esFalloDeConexionMongo } from './database.js';
 import { enviarACuarentena, enviarAReintentos, enviarAIlegibles } from './gestor-fallos.js';
@@ -490,6 +491,8 @@ const colAudioVistas = new Set();
 const omitidasDefinitivas = new Set();
 // Carpetas con acción OMITIR en su _guia.json (para no repetir el log en cada escaneo). Se olvida al desaparecer.
 const omitidasGuia = new Set();
+// Escaneos de páginas que no se pudieron pasar a PDF (para avisar una vez, no en cada escaneo). Se olvida al reiniciar.
+const escaneosFallidos = new Set();
 
 /**
  * Huella de un árbol de carpeta: nº total de ficheros, bytes totales y el mtime MÁS RECIENTE. Recorre TODO
@@ -975,6 +978,24 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 if (!(await carpetaEstable(ruta))) {
                     console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
                     continue;
+                }
+                // ESCANEO DE PÁGINAS → PDF (utils/escaneo-a-pdf.js): una carpeta sin documentos cuyo árbol son solo
+                // páginas escaneadas (TIF, o muchas JPG/PNG) se convierte ANTES de nada en un PDF por libro (uno por
+                // subcarpeta si las hay), y a partir de ahí es una carpeta de PDF como cualquier otra (la inspección
+                // ya la ve así). Sin esto, una de TIF no daba ninguna unidad y una de JPG iba por la visión del «libro
+                // en papel». Una guía con acción (empaquetar, intacta, omitir…) manda: entonces no se toca.
+                if (!modoPlan) {
+                    const guiaPrevia = await leerGuia(ruta);
+                    const plan = (!guiaPrevia?.accion || guiaPrevia.accion === 'normal') ? await planEscaneo(ruta).catch(() => null) : null;
+                    if (plan) {
+                        const r = await materializarEscaneo(ruta, plan);
+                        if (r.ok) {
+                            console.log(`  📄 ${e.name}: escaneo de páginas → ${r.pdfs.map((p) => `«${p.nombre}» (${p.paginas} págs.)`).join(', ')}; originales a la Papelera.`);
+                        } else if (!escaneosFallidos.has(ruta)) {
+                            escaneosFallidos.add(ruta);
+                            console.warn(`  ⚠️  ${e.name}: parece un escaneo de páginas pero no se pudo pasar a PDF (${r.motivo}); se deja como está.`);
+                        }
+                    }
                 }
                 // INSPECCIÓN CON IA (de serie, utils/inspeccion-auto.js): si la carpeta es compleja, el agente de
                 // estructura interpreta su árbol y deja sus _guia.json ANTES de clasificarla, y lo de abajo ya las
