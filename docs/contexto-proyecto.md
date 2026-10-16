@@ -102,7 +102,9 @@ Host de despliegue: Synology **DS1511+**, CPU Intel **Atom D525**, DSM/kernel an
    rompe la regla. Las dimensiones de imagen se leen con un parser JS puro (`utils/medir-imagen.js`).
 2. **Kernel sin `getrandom()`** → contenedores **Alpine/musl** mueren ("unable to get random
    bytes"). Usar Debian/glibc: base **`node:18-bullseye-slim`**. Clonar en el NAS por **tarball**
-   (wget+tar), sin git ni Alpine.
+   (wget+tar), sin git ni Alpine. **No subir de base** (bookworm o posterior): misma raíz (getrandom) y
+   Node 18 es el techo. Bullseye acabó su LTS (ago-2026) y deb.debian.org dejó de servir sus .deb de
+   seguridad (404 al construir, 16-oct): el Dockerfile toma apt de **archive.debian.org** (permanente).
 3. **Node 18** (Node 20+ no corre en este CPU) no tiene `File` global. `cheerio ^1.2` arrastra
    `undici@7` que lo referencia → boot loop. **Fijar `cheerio` a `1.0.0`** (→ undici 6).
 4. **Synology Docker = Compose v1** → usar **`docker-compose`** (con guion).

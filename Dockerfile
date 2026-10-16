@@ -51,8 +51,9 @@ FROM node:18-bullseye-slim
 # paquetes se están mudando al archivo: deb.debian.org SIGUE publicando el índice de bullseye-security pero ya NO
 # sirve sus .deb (404 en poppler, ghostscript, libtiff…), así que la construcción fallaba. archive.debian.org tiene
 # las tres ramas (main, updates, security) con los mismos paquetes. Check-Valid-Until=false por si algún día el
-# Release del archivo caduca (sus índices ya no se renuevan). El paso a una base más nueva (bookworm) es otra tarea:
-# cambia las versiones de poppler/ghostscript y hay que probarlo en el Atom.
+# Release del archivo caduca (sus índices ya no se renuevan). archive.debian.org conserva las versiones antiguas
+# indefinidamente, así que esta es la vía PERMANENTE: NO se cambia a una base más nueva (bookworm…), porque el
+# kernel del NAS no tiene getrandom() (ver docs/contexto-proyecto.md, restricciones del Atom) y Node 18 es el techo.
 RUN printf '%s\n' \
         'deb http://archive.debian.org/debian bullseye main' \
         'deb http://archive.debian.org/debian bullseye-updates main' \
