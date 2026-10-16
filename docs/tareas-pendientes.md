@@ -30,6 +30,15 @@ Los 45 «material» → colección «Curso de Latín» (811.124, ficha limpia y 
 CDU normal (o la de su obra), sin `ruta_fija`. Lo que quede en TXtras se lista, no se borra. Después: Refinar CDU
 sobre la selección «TXtras · todos» (166 siguen con «82» y varios con CDU mal formada: 1.9.1, 93.04.2…).
 
+- [x] `disolver-txtras.js --ejecutar` (15-oct: 342 fuera, 0 fallos, verificado en disco)
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/limpiar-restos-txtras.js`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/limpiar-restos-txtras.js --ejecutar` → activar el Vigilante
+
+Restos: 28 copias idénticas (SHA-256) → Papelera; 4 PDF sin catalogar + escaneos Latina Christiana (alumno y
+profesor) y Latin Road → Inbox; tablas, Aquino, notas .rtf y .torrent → «Curso de Latín»; HTML/mapas de Gibbon y la
+nota de la Cambridge Ancient History → `Material/` de su obra; lo demás (restos de la ingesta) → TXtras entera a la
+Papelera.
+
 ### 1.2 Carpetas-contenedor (opcional)
 - [x] (8-oct: 9 contenedores separados; los «118 anidados» restantes eran miembros de árboles preservados —77 de TXtras, 1 de Oxford Bookworms—, anidados a propósito: ya no se cuentan) `sudo docker exec -it gestor-biblioteca node scripts/reparar-carpetas-anidadas.js --separar` (en seco) y `--separar --ejecutar`
 
