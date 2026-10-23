@@ -83,7 +83,9 @@ export async function juzgarTanda(db, descs, { soloGratis = true } = {}) {
     const refs = (await referenciasOficialesClasificacion(db, 'dewey', d.codigo)).map((r) => r.replace(/\s*\[.*\]$/, ''));
     tanda.push({ ...d, refs });
   }
-  const txt = await conTexto({ prompt: promptJuez(tanda), json: true, maxTokens: 8000, soloGratis });
+  // sinRazonar: cotejar un título con el significado oficial no necesita «pensar»; el razonamiento de Gemini 2.5 se
+  // cobra como salida y cuenta dentro de maxTokens (con 25 veredictos por llamada podía cortar el JSON).
+  const txt = await conTexto({ prompt: promptJuez(tanda), json: true, maxTokens: 8000, soloGratis, sinRazonar: true });
   const j = extraerJSON(txt);
   // Tolerante con la forma: algunos modelos devuelven la lista suelta o con otra clave, y «true» como texto.
   const lista = Array.isArray(j) ? j : (j?.veredictos || j?.verdicts || j?.resultados || []);

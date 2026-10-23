@@ -93,7 +93,9 @@ ${refs.length ? `REFERENCIAS OFICIALES (no las contradigas; tradúcelas, no las 
 async function generarIA(db, sistema, codigo, { soloGratis = false } = {}) {
     const unidad = unidadClasificacion(sistema, codigo);
     const refs = await referenciasOficialesClasificacion(db, sistema, unidad);
-    const txt = await conTexto({ prompt: prompt(sistema, unidad, refs), json: true, maxTokens: 3000, soloGratis });
+    // sinRazonar: la descripción se apoya en las REFERENCIAS OFICIALES del prompt, no en que el modelo «piense»; el
+    // razonamiento de Gemini 2.5 se cobra como salida y cuenta dentro de maxTokens (podía cortar la explicación).
+    const txt = await conTexto({ prompt: prompt(sistema, unidad, refs), json: true, maxTokens: 3000, soloGratis, sinRazonar: true });
     const j = extraerJSON(txt);
     if (!j || !j.titulo_es || !j.descripcion_es) throw new Error('respuesta de IA no parseable o incompleta');
     return j;
