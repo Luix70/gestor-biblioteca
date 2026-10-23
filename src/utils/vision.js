@@ -123,7 +123,14 @@ const esCuota = (e) => {
     const m = String(e?.message || '') + ' ' + String(e?.response?.data?.error?.message || '');
     return s === 429 || /\b429\b|quota|rate.?limit|resource.?exhausted|exhausted|too.?many.?request/i.test(m);
 };
-const motivo = (e) => esCuota(e) ? `429 cuota — ${(e?.response?.data?.error?.message || e?.message || '').replace(/\s+/g, ' ').slice(0, 160)}`
+// SIN SALDO (402): la clave de PAGO con los créditos de prepago agotados («Your prepayment credits are depleted»,
+// 23-oct). No es una cuota que vuelva sola: hasta que se recargue en AI Studio, cada llamada fallaría igual. Se aparta
+// la clave un buen rato (como una cuota) y el log dice el porqué, no solo «402».
+const esSinSaldo = (e) => (e?.status || e?.response?.status) === 402
+    || /prepayment|credits are depleted|payment required/i.test(String(e?.message || '') + ' ' + String(e?.response?.data?.error?.message || ''));
+const COOLDOWN_SIN_SALDO_MS = 60 * 60000;
+const motivo = (e) => esSinSaldo(e) ? '402 SIN SALDO: créditos de prepago agotados — recarga en https://ai.studio/projects'
+    : esCuota(e) ? `429 cuota — ${(e?.response?.data?.error?.message || e?.message || '').replace(/\s+/g, ' ').slice(0, 160)}`
     : (e?.response?.status || e?.status || (e?.message || '').slice(0, 120));
 
 async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false }) {
@@ -195,7 +202,8 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
             return txt;
         } catch (e) {
             ultimo = e;
-            if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
+            if (esSinSaldo(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_SIN_SALDO_MS;
+            else if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
             errores[c.id] = { n: (errores[c.id]?.n || 0) + 1, ultimo: String(motivo(e)), ts: Date.now() };
             console.warn(`   ↻ Visión[${c.id}] falló (${motivo(e)}); siguiente proveedor.`);
         }
@@ -229,7 +237,8 @@ export async function conTexto({ prompt, json = true, maxTokens, soloGratis = fa
             return txt;
         } catch (e) {
             ultimo = e;
-            if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
+            if (esSinSaldo(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_SIN_SALDO_MS;
+            else if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
             errores[c.id] = { n: (errores[c.id]?.n || 0) + 1, ultimo: String(motivo(e)), ts: Date.now() };
             console.warn(`   ↻ IA-texto[${c.id}] falló (${motivo(e)}); siguiente proveedor.`);
         }
@@ -312,7 +321,8 @@ export async function probarProveedor(id) {
         delete cooldownHasta[c.id];
         return { ok: true, ms: Date.now() - t0, respuesta: String(txt || '').trim().slice(0, 40) };
     } catch (e) {
-        if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
+        if (esSinSaldo(e)) cooldownHasta[c.id] = Date.now() + COOLDOWN_SIN_SALDO_MS;
+        else if (esCuota(e)) cooldownHasta[c.id] = Date.now() + cooldownPorCuota(e);
         return { ok: false, ms: Date.now() - t0, motivo: String(motivo(e)) };
     }
 }
