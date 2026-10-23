@@ -1220,7 +1220,10 @@ de ficheros clasificado por CDU.
         2 · BNE (BnF)  la de la Biblioteca Nacional: catalogada y revisada por bibliotecarios.
         1 · deducida   equivalencia Dewey/LCC (tabla o caché) o IA (texto o visión).
     Una CDU de rango MAYOR O IGUAL sustituye a la actual y se APLICA MOVIENDO LA CARPETA; una de rango menor,
-    nunca. El documento guarda de dónde salió su CDU en `cdu_fuente` (desde hoy; los anteriores sin ese campo
+    nunca. EXCEPCIÓN (23-oct): una CDU MÁS GRUESA de la misma rama («51» frente a «512.64», «94» frente a
+    «94(460)») nunca deshace una más precisa, sea del rango que sea (salvo la manual): refinar precisa, no
+    contradice. Sin ella, el Conformador (re-clasificar-cdu, rango 1 igual que la IA de «Refinar CDU») habría
+    devuelto a la tabla Dewey 3.034 libros que la campaña acababa de afinar. El documento guarda de dónde salió su CDU en `cdu_fuente` (desde hoy; los anteriores sin ese campo
     cuentan como deducidos, salvo los marcados manuales o los que una alerta dice que salieron del CIP impreso).
     Dónde se aplica: ingesta (el enriquecimiento elige por rango; una CDU que la visión infirió ya no gana a la de la
     BNE; la CDU orientativa de una carpeta guiada ya no toca una impresa/BNE/manual), paso 1a de la ingesta,

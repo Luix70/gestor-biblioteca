@@ -51,7 +51,26 @@ export function puedeSustituirCdu(doc, cduNueva, fuenteNueva) {
     if (!cduNueva || cduVacia(cduNueva)) return false;
     if (String(doc?.cdu || '').trim() === String(cduNueva).trim()) return false;
     if (cduVacia(doc?.cdu)) return true;
+    // Una CDU MÁS GRUESA de la misma rama (un antepasado: «51» frente a «512.64») nunca deshace una más precisa,
+    // venga de quien venga (salvo que la fijes tú). Refinar dentro de la rama precisa, no contradice. Sin esto, el
+    // Conformador (re-clasificar-cdu, rango 1 como la IA de «Refinar CDU») devolvía al «51» de la tabla Dewey los
+    // libros que la campaña acababa de afinar — medido el 23-oct: 3.034 refinados expuestos.
+    if (rangoFuente(fuenteNueva) < RANGO_CDU.manual && esAntepasadoCdu(cduNueva, doc.cdu)) return false;
     return rangoFuente(fuenteNueva) >= rangoFuente(fuenteCduDoc(doc));
+}
+
+/** Cifras del número principal de una CDU, sin puntos («512.64(075)» → «51264»). */
+const cifrasPrincipales = (cdu) => (String(cdu || '').trim().match(/^\d+(?:\.\d+)*/)?.[0] || '').replace(/\./g, '');
+
+/**
+ * ¿`a` es más GRUESA que `b` en la misma rama? Su número principal es un prefijo más corto («51» de «512.64»), o
+ * `a` es literalmente el principio de `b` y le faltan los auxiliares que la precisan («94» de «94(460)»: el lugar).
+ */
+export function esAntepasadoCdu(a, b) {
+    const sa = String(a || '').trim(), sb = String(b || '').trim();
+    if (sa && sb.length > sa.length && sb.startsWith(sa)) return true;
+    const ca = cifrasPrincipales(sa), cb = cifrasPrincipales(sb);
+    return !!ca && cb.length > ca.length && cb.startsWith(ca);
 }
 
 /**
