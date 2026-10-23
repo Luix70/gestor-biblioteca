@@ -123,7 +123,8 @@ export async function revisarTandaDewey(db, { limite = 50, soloGratis = true, on
   let procesados = 0;
   let cambios = 0;
   let sinIA = false;
-  const avisar = () => onProgreso && onProgreso(procesados, limite);
+  // Con los cambios: el panel los enseña en vivo («37/50 · N con datos»); antes solo los conocía al acabar la tanda.
+  const avisar = () => onProgreso && onProgreso(procesados, limite, cambios);
 
   const rehacer = async (d) => {
     try {
@@ -132,7 +133,9 @@ export async function revisarTandaDewey(db, { limite = 50, soloGratis = true, on
       return true;
     } catch (e) {
       // Sin IA gratuita disponible: se deja para otra tanda (el juicio se queda, se rehará entonces).
-      if (/gratuit|gratis|429|cuota|proveedor/i.test(e.message)) sinIA = true;
+      // También un 503 (Google saturado un momento) o un 402 (sin saldo): no son culpa de ESTA descripción, y
+      // contarlos como intento fallido la abandonaría tras 3 (MAX_INTENTOS_REHACER) sin haberla podido rehacer.
+      if (/gratuit|gratis|429|cuota|proveedor|\b50[0-9]\b|overload|unavailable|402|saldo|prepayment/i.test(e.message)) sinIA = true;
       else await col.updateOne({ sistema: 'dewey', codigo: d.codigo }, { $inc: { 'juicio.intentos': 1 } });
       return false;
     }
