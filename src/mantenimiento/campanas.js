@@ -592,14 +592,20 @@ export const CAMPANAS = [
             const gruesos = contaminados.length < limite
                 ? await col.find(filtro).sort({ 'refinar_cdu.fecha': 1 }).limit(limite - contaminados.length).toArray() : [];
             const docs = [...contaminados, ...gruesos];
-            const r1 = contaminados.length ? await decidirLote(db, contaminados, { conIA, enLinea: true, desdeCero: true }) : { decisiones: [] };
+            // PROGRESO en dos mitades: la 1.ª, decidir (cascada libro a libro; la IA va al final de cada lote); la 2.ª,
+            // aplicar las decisiones (mueve carpetas). Antes la 2.ª no avanzaba el contador y los cambios solo se
+            // conocían al terminar: el panel se quedaba en «20/40 · 0 con datos» casi toda la tanda.
+            const total = docs.length;
+            let decididos = 0;
+            const alDecidir = () => onProgreso?.(Math.floor(++decididos / 2), total, 0);
+            const r1 = contaminados.length ? await decidirLote(db, contaminados, { conIA, enLinea: true, desdeCero: true, onPaso: alDecidir }) : { decisiones: [] };
             const r2 = gruesos.length && !r1.iaNoDisponible
-                ? await decidirLote(db, gruesos, { conIA, enLinea: true, onPaso: (i, total) => onProgreso?.(Math.floor(i / 2), total) })
+                ? await decidirLote(db, gruesos, { conIA, enLinea: true, onPaso: alDecidir })
                 : { decisiones: [], iaNoDisponible: r1.iaNoDisponible };
             const decisiones = [...r1.decisiones, ...r2.decisiones];
             const iaNoDisponible = !!(r1.iaNoDisponible || r2.iaNoDisponible);
             let cambios = 0;
-            for (const d of decisiones) {
+            for (const [k, d] of decisiones.entries()) {
                 try {
                     const r = await aplicarRefinamiento(db, d.doc, d);
                     if (r.aplicado) {
@@ -609,6 +615,7 @@ export const CAMPANAS = [
                 } catch (e) {
                     console.warn(`   ⚠️ refinar-cdu ${d.doc._id}: ${e.message}`);
                 }
+                onProgreso?.(Math.floor(total / 2 + ((k + 1) * total) / (2 * decisiones.length)), total, cambios);
             }
             // Sello: intentado en esta versión, y si la IA llegó a participar (los que no, se reintentan con IA).
             const conIAHecha = conIA && !iaNoDisponible;
@@ -865,7 +872,12 @@ async function ejecutarTanda(db, camp, { limite, debeAbortar = async () => false
             // Campaña sin iteración de documentos (descripciones): avanza por su propio callback.
             const r = await camp.ejecutarLote(db, {
                 limite,
-                onProgreso: (hechos, total) => { prog.procesados = hechos; if (total) prog.objetivo = total; },
+                // `cambios` (opcional): las campañas que saben en vivo cuántos llevan lo pasan, y el panel lo enseña.
+                onProgreso: (hechos, total, cambios) => {
+                    prog.procesados = hechos;
+                    if (total) prog.objetivo = total;
+                    if (Number.isFinite(cambios)) prog.cambios = cambios;
+                },
             });
             prog.cambios = r.cambios || 0;
             prog.procesados = r.procesados ?? prog.procesados;
