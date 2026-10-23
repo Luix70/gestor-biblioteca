@@ -10964,6 +10964,7 @@ async function loadCampanas(silencioso) {
         </div>
         <div class="row" style="gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
           <span class="muted" style="font-size:12px">Pendientes: <b class="campPend">${c.pendientes == null ? '—' : c.pendientes}</b></span>
+          ${c.esperaIAHasta ? `<span class="tag warn" style="font-size:11px" title="La última tanda no encontró ninguna IA disponible (cuotas gratuitas agotadas): no se reintenta hasta esa hora">⏸ sin IA · sigue a las ${new Date(c.esperaIAHasta).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
           <label style="font-size:12px">Lote <input class="campLote" type="number" min="1" value="${c.lote}" style="width:66px"></label>
           <label style="font-size:12px">cada <input class="campCada" type="number" min="1" value="${c.cadenciaMin}" style="width:56px"> min</label>
           ${c.usaIA ? selectorIACampana(c.ia) : ''}

@@ -1,5 +1,6 @@
 import { http } from './http.js';
 import { ErrorInfraestructura, esErrorDeRed } from '../errores.js';
+import { reinicioCuotaPacifico } from './cuota-diaria.js';
 
 const BASE = 'https://www.googleapis.com/books/v1/volumes';
 
@@ -49,13 +50,7 @@ function clave() {
 // primera hora con las ingestas masivas y no vuelve hasta que Google la reinicia (medianoche, hora del
 // Pacífico). Así que, en cuanto se detecta, se deja de llamar hasta entonces: ahorra tiempo y no empeora nada.
 let sinCuotaHasta = 0;
-/** Próxima medianoche del Pacífico, con margen (08:05 UTC cubre el horario de invierno y el de verano). */
-function reinicioCuota() {
-    const ahora = new Date();
-    const t = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth(), ahora.getUTCDate(), 8, 5));
-    if (t <= ahora) t.setUTCDate(t.getUTCDate() + 1);
-    return t.getTime();
-}
+const reinicioCuota = reinicioCuotaPacifico;
 const esCuotaDiaria = (e) => e?.response?.status === 429 && /per day|quota/i.test(JSON.stringify(e.response?.data || ''));
 
 /** ¿Se puede llamar a Google Books ahora? (false mientras dure la cuota agotada) */

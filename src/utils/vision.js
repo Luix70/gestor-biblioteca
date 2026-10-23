@@ -126,11 +126,15 @@ const esCuota = (e) => {
 const motivo = (e) => esCuota(e) ? `429 cuota — ${(e?.response?.data?.error?.message || e?.message || '').replace(/\s+/g, ' ').slice(0, 160)}`
     : (e?.response?.status || e?.status || (e?.message || '').slice(0, 120));
 
-async function llamar(c, { prompt, imagenes, json, maxTokens }) {
+async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false }) {
     const imgs = recortarImagenes(imagenes, c.prov.maxImg);   // respeta el límite de imágenes del modelo
     if (c.prov.tipo === 'gemini') {
         const generationConfig = json ? { responseMimeType: 'application/json' } : {};
         if (maxTokens) generationConfig.maxOutputTokens = maxTokens;
+        // SIN RAZONAMIENTO: los modelos 2.5 «piensan» por defecto, y esos tokens se COBRAN como salida (lo más caro:
+        // ~3/4 del coste de una llamada de clasificación) y además CUENTAN dentro de maxOutputTokens, así que podían
+        // cortar el JSON. Para elegir de un menú cerrado no hace falta. Solo los Flash admiten presupuesto 0.
+        if (sinRazonar && /flash/i.test(c.modelo)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
         const model = new GoogleGenerativeAI(c.key).getGenerativeModel({ model: c.modelo, generationConfig });
         const parts = [prompt, ...imgs.map(im => ({ inlineData: { data: im.base64, mimeType: im.mimeType || 'image/jpeg' } }))];
         const res = await model.generateContent(parts);
@@ -141,9 +145,11 @@ async function llamar(c, { prompt, imagenes, json, maxTokens }) {
     const content = [{ type: 'text', text: prompt }, ...imgs.map(im => ({ type: 'image_url', image_url: { url: `data:${im.mimeType || 'image/jpeg'};base64,${im.base64}` } }))];
     const headers = { Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json' };
     if (c.prov.id === 'openrouter') { headers['HTTP-Referer'] = 'https://gestor-biblioteca.local'; headers['X-Title'] = 'Gestor Biblioteca'; }
-    const res = await axios.post(`${c.baseURL}/chat/completions`,
-        { model: c.modelo, messages: [{ role: 'user', content }], temperature: 0, max_tokens: maxTokens || 1500 },
-        { headers, timeout: TIMEOUT_MS });
+    const cuerpo = { model: c.modelo, messages: [{ role: 'user', content }], temperature: 0, max_tokens: maxTokens || 1500 };
+    // Los gpt-oss de Groq también razonan, y el tope diario de Groq es en TOKENS: con el esfuerzo al mínimo la misma
+    // cuota gratuita da para más llamadas. (Solo en Groq y en esos modelos: otros proveedores rechazan el campo.)
+    if (sinRazonar && c.prov.id === 'groq' && /gpt-oss/i.test(c.modelo)) cuerpo.reasoning_effort = 'low';
+    const res = await axios.post(`${c.baseURL}/chat/completions`, cuerpo, { headers, timeout: TIMEOUT_MS });
     return res.data?.choices?.[0]?.message?.content || '';
 }
 
@@ -207,7 +213,7 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
  * gratis están saturados, lanza y el llamante espera y reintenta).
  * @param {{prompt:string, json?:boolean, maxTokens?:number, soloGratis?:boolean}} opts
  */
-export async function conTexto({ prompt, json = true, maxTokens, soloGratis = false } = {}) {
+export async function conTexto({ prompt, json = true, maxTokens, soloGratis = false, sinRazonar = false } = {}) {
     const orden = await ordenIntento(soloGratis ? (c => c.tier === 'free') : null);
     if (!orden.length && !tierPermitido('paid')) throw errorSinIA('texto');
     if (!orden.length) throw new Error(soloGratis
@@ -217,7 +223,7 @@ export async function conTexto({ prompt, json = true, maxTokens, soloGratis = fa
     for (const c of orden) {
         const t0 = Date.now();
         try {
-            const txt = await llamar(c, { prompt, imagenes: [], json, maxTokens });
+            const txt = await llamar(c, { prompt, imagenes: [], json, maxTokens, sinRazonar });
             ultimoOk = c.id;
             console.log(`   ✓ IA-texto[${c.id}] (${c.tier} · ${c.modelo}) respondió en ${Date.now() - t0} ms.`);
             return txt;

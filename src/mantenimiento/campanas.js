@@ -51,6 +51,7 @@ import { regenerarSidecarsDoc, FILTRO_SIDECARS_DESACTUALIZADOS } from '../utils/
 import { precalentarEquivalencias, contarEquivalenciasPendientes, resolverCDU } from '../clasificador-cdu.js';
 import { editarDocumento } from '../utils/editar-doc.js';
 import { resolverEditorial as resolverEditorialComun } from '../utils/resolver-editorial.js';
+import { reinicioCuotaPacifico } from '../utils/cuota-diaria.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -613,9 +614,13 @@ export const CAMPANAS = [
             const conIAHecha = conIA && !iaNoDisponible;
             await col.updateMany({ _id: { $in: docs.map((d) => d._id) } },
                 { $set: { refinar_cdu: { v: VERSION_REFINAR, ia: conIAHecha, fecha: new Date() } } });
-            if (iaNoDisponible) console.log('🎯 [Campaña refinar-cdu] IA no disponible ahora: lo que la necesita se reintenta en la próxima tanda.');
+            if (iaNoDisponible) console.log('🎯 [Campaña refinar-cdu] IA no disponible ahora: lo que la necesita se reintenta más tarde.');
             onProgreso?.(docs.length, docs.length);
-            return { procesados: docs.length, cambios, pendientes: (await col.countDocuments(filtro)) + (await col.countDocuments(filtroContaminados({ conIA }))) };
+            return {
+                procesados: docs.length, cambios,
+                pendientes: (await col.countDocuments(filtro)) + (await col.countDocuments(filtroContaminados({ conIA }))),
+                sinIA: conIA && iaNoDisponible,   // el planificador espera antes de la próxima tanda (ver esperaSinIA)
+            };
         },
     },
 
@@ -635,8 +640,8 @@ export const CAMPANAS = [
         async ejecutarLote(db, { limite, onProgreso }) {
             if (politicaIA()?.modo === 'ninguna') return { procesados: 0, cambios: 0, pendientes: (await contarDeweyPendientes(db)).total };
             const r = await revisarTandaDewey(db, { limite, soloGratis: politicaIA()?.modo !== 'todas', onProgreso });
-            if (r.sinIA) console.log('🎯 [Campaña revisar-dewey] IA no disponible ahora: sigue en la próxima tanda.');
-            return { procesados: r.procesados, cambios: r.cambios, pendientes: r.pendientes };
+            if (r.sinIA) console.log('🎯 [Campaña revisar-dewey] IA no disponible ahora: sigue más tarde.');
+            return { procesados: r.procesados, cambios: r.cambios, pendientes: r.pendientes, sinIA: !!r.sinIA };
         },
     },
 
@@ -807,6 +812,7 @@ export async function listarCampanas(db) {
             version: c.version, ...cfg[c.id], pendientes,
             ultimaEjecucion: ultimaEjecucion.get(c.id) || null,
             progreso: progreso.get(c.id) || null,   // { enCurso, procesados, objetivo, cambios } de la tanda en curso/última
+            esperaIAHasta: (esperaIA.get(c.id)?.hasta > Date.now()) ? esperaIA.get(c.id).hasta : null,   // sin IA: en pausa hasta…
         });
     }
     return out;
@@ -815,6 +821,23 @@ export async function listarCampanas(db) {
 // ── EJECUCIÓN ───────────────────────────────────────────────────────────────────────────────
 
 const ultimaEjecucion = new Map(); // id → ms epoch de la última tanda (para la cadencia y el panel)
+
+// ESPERA SIN IA. Una campaña con IA cuya tanda acaba sin ninguna IA disponible (todas las gratuitas en 429/503) no
+// debe repetir cada N minutos: medido del 20 al 22-oct, «Refinar CDU» avanzaba una o dos tandas hacia las 9:00
+// (cuando Google renueva la cuota gratis) y el resto del día repetía cada 16 min «40 procesados · 0 cambios»,
+// leyendo Atlas y ensuciando el log para nada. Ahora espera: 1 h, y el doble a cada fallo seguido (tope 8 h), pero
+// nunca más allá de la próxima renovación de la cuota diaria de Google. Una tanda con IA borra la espera.
+// En memoria: un reinicio del contenedor vuelve a intentarlo enseguida, que es lo prudente.
+const esperaIA = new Map();   // id → { hasta, fallos }
+const ESPERA_IA_BASE_MS = 60 * 60000;
+const ESPERA_IA_MAX_MS = 8 * 60 * 60000;
+function esperaSinIA(id) {
+    const fallos = (esperaIA.get(id)?.fallos || 0) + 1;
+    const backoff = Math.min(ESPERA_IA_BASE_MS * 2 ** (fallos - 1), ESPERA_IA_MAX_MS);
+    const hasta = Math.min(Date.now() + backoff, reinicioCuotaPacifico());
+    esperaIA.set(id, { hasta, fallos });
+    return hasta;
+}
 const progreso = new Map();        // id → { enCurso, procesados, objetivo, cambios, inicio, fin } de la tanda
 
 /**
@@ -922,6 +945,7 @@ export async function ejecutarCampanasDebidas({ debeAbortar = async () => false,
         if (!c.activa) continue;
         const ultima = ultimaEjecucion.get(camp.id) || 0;
         if (Date.now() - ultima < c.cadenciaMin * 60000) continue; // aún no toca
+        if (Date.now() < (esperaIA.get(camp.id)?.hasta || 0)) continue; // sin IA: espera (ver esperaSinIA)
         if (await debeAbortar()) break;                             // cede a la ingesta
         alEmpezar(camp.id);
         const r = await ejecutarCampana(db, camp.id, { limite: c.lote, debeAbortar });
@@ -929,6 +953,13 @@ export async function ejecutarCampanasDebidas({ debeAbortar = async () => false,
         cambios += r.cambios;
         if (r.procesados || r.cambios)
             console.log(`🎯 [Campaña ${camp.id}] ${r.procesados} procesados · ${r.cambios} cambios · ${r.pendientes} pendientes.`);
+        if (r.sinIA) {
+            const hasta = esperaSinIA(camp.id);
+            const hora = new Date(hasta).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+            console.log(`🎯 [Campaña ${camp.id}] sin IA disponible: en pausa hasta las ${hora} (intento ${esperaIA.get(camp.id).fallos} sin IA seguido).`);
+        } else if (r.procesados || r.cambios) {
+            esperaIA.delete(camp.id);   // volvió a haber IA (o la tanda no la necesitaba): cadencia normal
+        }
         if (r.abortado) break;
     }
     return { lanzadas, cambios };

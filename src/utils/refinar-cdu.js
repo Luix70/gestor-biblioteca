@@ -326,7 +326,9 @@ async function pasoIA(db, libros, { porLlamada = 8 } = {}) {
     for (let i = 0; i < grupo.length; i += porLlamada) {
       const tanda = grupo.slice(i, i + porLlamada);
       for (const l of tanda) l.autores = await nombresAutores(db, l.doc);
-      const txt = await conTexto({ prompt: promptIA(tanda, menu, porLugar), json: true, maxTokens: 2000 });
+      // sinRazonar: elegir de un menú cerrado no necesita «pensar», y el razonamiento de Gemini 2.5 era ~3/4 del coste
+      // de la llamada de pago (y gastaba antes la cuota gratuita, que se mide también en tokens en Groq).
+      const txt = await conTexto({ prompt: promptIA(tanda, menu, porLugar), json: true, maxTokens: 2000, sinRazonar: true });
       const j = extraerJSON(txt);
       for (const v of (Array.isArray(j) ? j : j?.r || [])) {
         const l = tanda[Number(v.n) - 1];
