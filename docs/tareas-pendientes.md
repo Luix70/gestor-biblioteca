@@ -6,8 +6,9 @@
 
 ## Antes de cada paso
 
-- **Copia de la base**: `sudo docker exec -t gestor-biblioteca node scripts/copia-base.js` → `/app/logs/copias-bd/<fecha>/`
-  (conserva las 10 últimas). Restaurar: `scripts/restaurar-base.js --desde <fecha> --coleccion biblioteca [--ids …] [--ejecutar]`.
+- **Copia de la base**: en el PC, `D:\Bibliobak\CopiaBase.ps1` (mongodump + mongoexport en
+  `D:\Bibliobak\Biblioteca_aaaa_MM_dd@HH-mm\`). Restaurar algo concreto desde sus JSON:
+  `scripts/restaurar-base.js --fichero <export.json> --coleccion <c> --ids …`.
 - **Copia del disco** (si el paso mueve carpetas): `sudo /volume1/docker/GestorBiblioteca/scripts/sincronizar-copia.sh --forzar`.
 - **Desplegar** la última versión (`actualizar-GestorBiblioteca.sh`) si el script es nuevo.
 - Todos los scripts van **en seco por defecto** (sin `--ejecutar`) y son **reanudables**.
@@ -23,7 +24,7 @@
 Cascada gratuita (nombre de fichero → Fichero → colección → OpenLibrary → Google). `--ia` añade IA de texto (barata).
 
 ### 1.0 Deshacer los cambios de rama del Conformador (25-oct) — en el NAS (mueve carpetas; copia antes)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/copia-base.js`
+- [ ] Copia de la base en el PC: `D:\Bibliobak\CopiaBase.ps1`
 - [ ] Desplegar (las reglas nuevas de prioridad/caché/Conformador deben estar en marcha antes)
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/revertir-reclasificacion-conformador.js`
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/revertir-reclasificacion-conformador.js --ejecutar`
@@ -138,7 +139,7 @@ diagnosticar sin tocar nada, corregir el ORIGEN antes que los libros, aplicar po
 por la que un error llega a muchos libros. Descripciones: 306 incoherentes con su división (§1.2 ter).
 
 **Reglas de seguridad (para todas las fases).**
-1. Antes de cada fase que escriba: **copia de la base** (`copia-base.js`) **y del disco** (`sincronizar-copia.sh --forzar`).
+1. Antes de cada fase que escriba: **copia de la base** (`CopiaBase.ps1` en el PC) **y del disco** (`sincronizar-copia.sh --forzar`).
 2. Todo en **seco por defecto**; el seco escribe un **informe** (`--informe`) que se revisa antes de `--ejecutar`.
 3. **Nunca** se toca una CDU **manual** (rango 4) ni se baja de rango (`utils/prioridad-cdu.js`: manual > impresa >
    BNE > deducida). Una CDU de la BNE solo la cambia una evidencia de rango igual o mayor, o una persona.
