@@ -43,18 +43,15 @@ export const VERSION_REFINAR = 1;
 // ─── ¿Gruesa? ─────────────────────────────────────────────────────────────────────────────────────────────────
 // Una sola expresión (en texto, para poder usarla también en las consultas de Mongo): vacía, 000, 1-2 cifras
 // solas, o 1-2 cifras seguidas de un auxiliar que NO precisa (forma «(0…», tiempo «"», lengua «=», relación «:+/»).
-export const RE_CDU_GRUESA = String.raw`^\s*$|^0+$|^[0-9]{1,2}$|^[0-9]{1,2}\(0|^[0-9]{1,2}["=:+/]`;
-const reGruesa = new RegExp(RE_CDU_GRUESA);
-
-export function esCduGruesa(cdu) {
-  return reGruesa.test(String(cdu ?? '').trim());
-}
+// La definición vive en cdu-gruesa.js (la comparte la regla de prioridad); se reexporta para los usos de siempre.
+export { RE_CDU_GRUESA, esCduGruesa } from './cdu-gruesa.js';
+import { RE_CDU_GRUESA, esCduGruesa, FIRMA_CDU_CONTAMINADA } from './cdu-gruesa.js';
 
 /**
  * Los libros que le quedan por refinar: CDU gruesa, no manual, no tomo de una obra (comparten la CDU de la obra), y
  * no intentados en esta versión —o intentados sin IA, si ahora la hay (`refinar_cdu.ia`)—.
  */
-export const FIRMA_CONTAMINADA = 'pendiente-cdu-contaminada';
+export const FIRMA_CONTAMINADA = FIRMA_CDU_CONTAMINADA;
 
 /**
  * Los libros que la reparación del 9-oct (scripts/reparar-cdu-contaminada) dejó esperando una CDU nueva: la que

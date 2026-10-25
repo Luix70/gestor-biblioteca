@@ -21,6 +21,7 @@ import { indexarDoc } from './indice-busqueda.js';
 import { regenerarSidecarsDoc } from './registro.js';
 import { modernizarCDU } from './cdu-moderna.js';
 import { cduReligionModerna } from './cdu-religion.js';
+import { esCduDebil } from './cdu-gruesa.js';
 
 export const RANGO_CDU = { manual: 4, impresa: 3, bne: 2, bnf: 2, clasificador: 1 };
 
@@ -47,16 +48,25 @@ export const cduVacia = (cdu) => ['', '0', '00', '000'].includes(String(cdu ?? '
  * ¿Puede una CDU de `fuenteNueva` sustituir a la actual del documento? Sí si la actual está vacía/genérica, o
  * si la nueva es de rango MAYOR O IGUAL (a igual rango, la más reciente refresca: la BNE corrige su registro).
  */
-export function puedeSustituirCdu(doc, cduNueva, fuenteNueva) {
+export function puedeSustituirCdu(doc, cduNueva, fuenteNueva, { forzar = false } = {}) {
     if (!cduNueva || cduVacia(cduNueva)) return false;
     if (String(doc?.cdu || '').trim() === String(cduNueva).trim()) return false;
     if (cduVacia(doc?.cdu)) return true;
+    const rNueva = rangoFuente(fuenteNueva);
+    const rActual = rangoFuente(fuenteCduDoc(doc));
     // Una CDU MÁS GRUESA de la misma rama (un antepasado: «51» frente a «512.64») nunca deshace una más precisa,
     // venga de quien venga (salvo que la fijes tú). Refinar dentro de la rama precisa, no contradice. Sin esto, el
     // Conformador (re-clasificar-cdu, rango 1 como la IA de «Refinar CDU») devolvía al «51» de la tabla Dewey los
     // libros que la campaña acababa de afinar — medido el 23-oct: 3.034 refinados expuestos.
-    if (rangoFuente(fuenteNueva) < RANGO_CDU.manual && esAntepasadoCdu(cduNueva, doc.cdu)) return false;
-    return rangoFuente(fuenteNueva) >= rangoFuente(fuenteCduDoc(doc));
+    if (rNueva < RANGO_CDU.manual && esAntepasadoCdu(cduNueva, doc.cdu)) return false;
+    // DEDUCIDA CONTRA DEDUCIDA, DE OTRA RAMA: solo si la actual es DÉBIL (gruesa, de la clase 4 vacante o contaminada).
+    // Dos deducciones igual de fiables no justifican un vaivén de carpetas, y la segunda suele ser peor: el 23-25 oct
+    // el Conformador (re-clasificar-cdu) cambió de rama 2.330 libros con su Dewey/LCC y la caché — «What Are Gamma-Ray
+    // Bursts?» de 524.3 a 27-23 (la Biblia), «Islam in Pakistan» de 28 a 254 —, 376 de ellos recién afinados por
+    // «Refinar CDU». Afinarla dentro de su rama sí vale siempre (51 → 512). `forzar`: lo pides tú desde el panel.
+    if (!forzar && rNueva === RANGO_CDU.clasificador && rActual === RANGO_CDU.clasificador
+        && !esAntepasadoCdu(doc.cdu, cduNueva) && !esCduDebil(doc.cdu, doc)) return false;
+    return rNueva >= rActual;
 }
 
 /** Cifras del número principal de una CDU, sin puntos («512.64(075)» → «51264»). */
@@ -93,11 +103,11 @@ export function mejorCdu(candidatas) {
  * Regenera los sidecars y el índice. Los tomos de una obra no se tocan (comparten la CDU de la obra).
  * @returns {Promise<{aplicada:boolean, motivo?:string, de?:string, a?:string}>}
  */
-export async function aplicarCduConPrioridad(db, doc, cduNueva, fuenteNueva, { aplicar = true } = {}) {
+export async function aplicarCduConPrioridad(db, doc, cduNueva, fuenteNueva, { aplicar = true, forzar = false } = {}) {
     cduNueva = modernizarCDU(cduNueva);   // última red: nunca se aplica una CDU en notación antigua
     cduNueva = cduReligionModerna(cduNueva, doc).cdu;   // tampoco la clase 2 antigua (BNE: «282» = Iglesia católica)
     if (doc.obra) return { aplicada: false, motivo: 'tomo de obra: comparte la CDU de la obra' };
-    if (!puedeSustituirCdu(doc, cduNueva, fuenteNueva)) {
+    if (!puedeSustituirCdu(doc, cduNueva, fuenteNueva, { forzar })) {
         return { aplicada: false, motivo: `la CDU actual (${doc.cdu}, ${fuenteCduDoc(doc)}) tiene prioridad sobre ${cduNueva} (${fuenteNueva})` };
     }
     if (!aplicar) return { aplicada: true, de: doc.cdu, a: cduNueva, seco: true };

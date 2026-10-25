@@ -1223,7 +1223,14 @@ de ficheros clasificado por CDU.
     nunca. EXCEPCIÓN (23-oct): una CDU MÁS GRUESA de la misma rama («51» frente a «512.64», «94» frente a
     «94(460)») nunca deshace una más precisa, sea del rango que sea (salvo la manual): refinar precisa, no
     contradice. Sin ella, el Conformador (re-clasificar-cdu, rango 1 igual que la IA de «Refinar CDU») habría
-    devuelto a la tabla Dewey 3.034 libros que la campaña acababa de afinar. El documento guarda de dónde salió su CDU en `cdu_fuente` (desde hoy; los anteriores sin ese campo
+    devuelto a la tabla Dewey 3.034 libros que la campaña acababa de afinar.
+    SEGUNDA EXCEPCIÓN (25-oct): DEDUCIDA CONTRA DEDUCIDA DE OTRA RAMA solo si la actual es DÉBIL (gruesa, de la
+    clase 4 vacante o contaminada: utils/cdu-gruesa.js·esCduDebil). El Conformador del 23-25 oct cambió de rama 2.330
+    libros (524.3 → 27-23 la Biblia, 28 → 254, 003 → 821.411…). «Investigar CDU» con «forzar» se la salta (lo pides
+    tú). Y dos redes más: la caché no puede cambiar de DIVISIÓN respecto a la tabla Dewey (salvo hacia la clase 0)
+    ni llevar un Dewey de lengua (4xx) fuera del 81/003; re-clasificar-cdu no cambia nada si el Dewey y el LCC del
+    libro llevan a clases distintas (uno es de otro libro). Reparación: scripts/revertir-reclasificacion-conformador.js.
+    El documento guarda de dónde salió su CDU en `cdu_fuente` (desde hoy; los anteriores sin ese campo
     cuentan como deducidos, salvo los marcados manuales o los que una alerta dice que salieron del CIP impreso).
     Dónde se aplica: ingesta (el enriquecimiento elige por rango; una CDU que la visión infirió ya no gana a la de la
     BNE; la CDU orientativa de una carpeta guiada ya no toca una impresa/BNE/manual), paso 1a de la ingesta,

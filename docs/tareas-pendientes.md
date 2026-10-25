@@ -22,6 +22,16 @@
 
 Cascada gratuita (nombre de fichero → Fichero → colección → OpenLibrary → Google). `--ia` añade IA de texto (barata).
 
+### 1.0 Deshacer los cambios de rama del Conformador (25-oct) — en el NAS (mueve carpetas; copia antes)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/copia-base.js`
+- [ ] Desplegar (las reglas nuevas de prioridad/caché/Conformador deben estar en marcha antes)
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/revertir-reclasificacion-conformador.js`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/revertir-reclasificacion-conformador.js --ejecutar`
+- [ ] Después: `auditar-cdu.js`
+
+Seco del PC: 1.126 a deshacer (1.113 de rama, 2 engrosadas, 11 de equivalencias ya inservibles); se respetan 203
+que la afinaron, 859 que venían de una CDU débil y 257 de la BNE/autoridad.
+
 ### 1.1 bis Disolver TXtras (15-oct) — en el NAS (mueve ficheros; copia del disco antes)
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/disolver-txtras.js`
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/disolver-txtras.js --ejecutar`

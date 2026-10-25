@@ -92,10 +92,29 @@ export function equivalenciaUsable(sistema, codigo, eq) {
     const div2 = d.slice(0, 2);
     const divergen = ['13', '15', '18', '19', '38'].includes(div2) || '248'.includes(d[0]) || (d[0] === '9' && div2 !== '91');
     if (esCopia && divergen) return { usable: false, motivo: `copia el número Dewey ${cod} como CDU, y en esa división no coinciden` };
+    // 6. (25-oct) LENGUA: el 4xx del Dewey es la LENGUA, que en la CDU es 81 (y la escritura, 003). Una equivalencia
+    //    que lo lleva a la literatura (82), u otra clase, es de un libro concreto: «411 escritura → 821.411» puso «The
+    //    Routledge Handbook of Scripts and Alphabets» entre la literatura árabe.
+    if (d[0] === '4' && !/^(81|003)/.test(principal || cdu)) {
+        return { usable: false, motivo: `Dewey ${d} es lengua: la CDU debe ser 81 (o 003, escritura)` };
+    }
     // Las reglas 3 y 4 son para el Dewey AMPLIO (tres cifras sin decimales: «520», «973»), que abarca muchos libros
     // distintos. Un Dewey CONCRETO sí puede cambiar de clase con razón: «652.80151 → 003.26» (la criptografía cae
     // en el 652 de Dewey por una rareza de su jerarquía; en la CDU es 003), «621.39 → 004».
-    if (!/^\d{3}$/.test(cod)) return { usable: true, motivo: null };
+    if (!/^\d{3}$/.test(cod)) {
+        // 7. (25-oct) …pero NO puede cambiar de DIVISIÓN (las dos primeras cifras) respecto a la tabla, donde la tabla
+        //    sabe. «297.095491 → 254» contra la tabla «28» (islam) y «306.661709781 → 3.06» contra «316.7» los aplicó el
+        //    Conformador del 23-25 oct. Dentro de la división sí puede afinar o recolocar («516.35 geometría algebraica
+        //    → 512.7», que en la CDU va bajo álgebra, aunque la tabla diga 514). Las rarezas legítimas del Dewey van a
+        //    la clase 0 (003 criptografía, 004 informática): esas se respetan.
+        const tablaConcreto = deweyACDU(cod);
+        const div = (s) => String(s || '').replace(/[^\d]/g, '').slice(0, 2);
+        if (tablaConcreto && div(principal).length === 2 && div(tablaConcreto).length === 2
+            && div(principal) !== div(tablaConcreto) && !/^0/.test(principal)) {
+            return { usable: false, motivo: `cambia de división respecto a la tabla del Dewey (${cod} → «${tablaConcreto}»)` };
+        }
+        return { usable: true, motivo: null };
+    }
     // Con la tabla: una DIVISIÓN entera (acaba en 0: «520» astronomía, «530» física, «500») no admite el «afinado» de
     // un libro («522.2», «530.145»); una SECCIÓN («547» química orgánica, «512» álgebra) sí, porque en ciencias el
     // número Dewey y el CDU coinciden hasta las tres cifras — siempre que se quede dentro de la rama de la tabla.

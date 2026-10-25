@@ -822,11 +822,11 @@ export async function resolverCduDoc(db, doc, { conIA = false, forzar = false, a
     const fuenteNueva = cduAutoridad ? 'bne' : 'clasificador';
     if (!vacia && !forzar && fuenteNueva !== 'bne') return { estado: 'cdu-ya', cdu: actual, motivo: 'ya tiene CDU (marca «forzar» para reemplazarla)' };
     if (actual === cdu) return { estado: 'cdu-igual', cdu };
-    if (!puedeSustituirCdu(doc, cdu, fuenteNueva)) return { estado: 'cdu-ya', cdu: actual, motivo: `la CDU actual (${fuenteCduDoc(doc)}) tiene prioridad sobre ${cdu} (${fuenteNueva})` };
+    if (!puedeSustituirCdu(doc, cdu, fuenteNueva, { forzar })) return { estado: 'cdu-ya', cdu: actual, motivo: `la CDU actual (${fuenteCduDoc(doc)}) tiene prioridad sobre ${cdu} (${fuenteNueva})` };
     if (!aplicar) return { estado: 'cdu-identificada', cdu, de: actual || '000', motivo: `${actual || '000'} → ${cdu} (${fuenteNueva})` };
     // Mueve la carpeta al árbol de la nueva CDU + sidecars + índice, SIN marcarla manual: queda con su fuente, y
     // una de más rango (impresa en el libro, la que pongas tú) podrá sustituirla después.
-    const r = await aplicarCduConPrioridad(db, doc, cdu, fuenteNueva);
+    const r = await aplicarCduConPrioridad(db, doc, cdu, fuenteNueva, { forzar });
     if (r.aplicada) {
         const extra = {};
         if (dewey && !doc.dewey) extra.dewey = dewey;
