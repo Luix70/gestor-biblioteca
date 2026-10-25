@@ -703,6 +703,28 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
     const candidatos = [['dewey', dewey], ['lcc', unidadLcc(lcc)]].filter(([, c]) => c);
     const categoria = Array.isArray(categorias) && categorias.length > 0 ? categorias[0] : null;
 
+    // DEWEY Y LCC EN DESACUERDO (25-oct): si llevan a CLASES distintas, uno de los dos es de otro libro («What Are
+    // Gamma-Ray Bursts?»: Dewey 222 = la Biblia, LCC QB471 = astronomía). Sin saber cuál, ninguno decide por su
+    // cuenta ni se APRENDE nada (serviría el error a todos los libros con ese código): con IA, ella decide viendo el
+    // título y los dos códigos; sin IA, no se deduce nada (la CDU queda débil y la afinan después Refinar CDU o el
+    // Conformador, que tampoco cambian nada mientras los códigos discrepen). Clase del Dewey: su primera cifra (la 4,
+    // lengua, es la 8 en la CDU); la del LCC, la de la tabla — solo donde la tabla sabe (no en las clases aplazadas).
+    if (dewey && lcc) {
+        const dCifra = (String(dewey).match(/\d/) || [])[0];
+        const claseDewey = dCifra === '4' ? '8' : dCifra;
+        const claseLccTabla = (String(cduParaUbicar(lccACDUEspecifica(lcc) || '') || '').match(/^\d/) || [])[0];
+        if (claseDewey && claseLccTabla && claseDewey !== claseLccTabla) {
+            if (!permitirIA) return { cdu: null, fuente: 'sin-ia', aprendida: false, descripcion: null, palabras_clave: [] };
+            const r = await iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis });
+            const cduIA = r.cdu && r.cdu !== '000' && cduBienFormada(r.cdu) ? r.cdu : '000';
+            return {
+                cdu: cduIA, fuente: 'ia', aprendida: false,
+                descripcion: { titulo_es: r.titulo_es, descripcion_es: r.descripcion_es, titulo_en: r.titulo_en, descripcion_en: r.descripcion_en },
+                palabras_clave: r.palabras_clave || [],
+            };
+        }
+    }
+
     // APRENDIZAJE A TRES BANDAS (LCC ↔ Dewey ↔ CDU): un libro que trae Dewey Y LCC es un par de entrenamiento
     // gratis. Al resolver la CDU por UN código, se enseña la MISMA CDU a los OTROS códigos presentes, para que un
     // futuro libro que solo traiga ese otro código la herede sin IA (el caso «solo LCC» del Dickens). Se hace

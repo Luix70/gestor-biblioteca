@@ -10,7 +10,7 @@ import { buscarEnFicheroLocal } from '../utils/buscador-local.js';
 import { buscarEnDNB } from '../utils/buscador-dnb.js';
 import { buscarEnBNE } from '../utils/buscador-bne-sru.js';
 import { huecosDesdeAutoridad, autoresConAncla, mismoNombreAutor } from '../utils/huecos-autoridad.js';
-import { puedeSustituirCdu, fuenteCduDoc, rangoFuente, RANGO_CDU } from '../utils/prioridad-cdu.js';
+import { puedeSustituirCdu, fuenteCduDoc, rangoFuente, RANGO_CDU, cduNormalizada } from '../utils/prioridad-cdu.js';
 import { buscarAutoridadPorISBN } from '../utils/autoridad-isbn.js';
 import { cduDeAutoridadFiable } from '../utils/autoridad-isbn.js';
 import { resolverCDU, lccACDUEspecifica } from '../clasificador-cdu.js';
@@ -246,7 +246,8 @@ export const TAREAS = [
             // El registro de la BNE para este ISBN (Fichero → catálogo en línea). Hace falta aunque ya haya una
             // cdu_autoridad guardada: con él se comprueba que el ISBN sea de ESTE libro (el título debe casar).
             const reg = doc.isbn ? await buscarAutoridadPorISBN(variantesISBN(doc.isbn)).catch(() => null) : null;
-            const cdu = reg?.cdu || doc.cdu_autoridad || null;
+            // Normalizada ANTES de comparar (notación moderna y religión actual: «294.3» → «24»).
+            const cdu = cduNormalizada(reg?.cdu || doc.cdu_autoridad || null, doc);
             if (!cdu || !puedeSustituirCdu(doc, cdu, 'bne')) return null;
             if (reg && !cduDeAutoridadFiable(doc, reg)) {
                 // El título de la BNE para este ISBN NO es el del documento: el ISBN es probablemente de OTRO libro
@@ -334,6 +335,8 @@ export const TAREAS = [
 
             // ── Sin resolución: mantener CDU actual ──────────────────────────────────
             if (!cduNueva) return null;
+            // Normalizada antes de comparar: la de la BNE/Fichero puede venir en notación antigua («294.3» → «24»).
+            cduNueva = cduNormalizada(cduNueva, doc);
 
             // ── Misma CDU: solo actualizar adicionales si cambiaron ──────────────────
             if (cduNueva === doc.cdu) {

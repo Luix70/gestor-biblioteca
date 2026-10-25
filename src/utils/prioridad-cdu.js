@@ -69,6 +69,17 @@ export function puedeSustituirCdu(doc, cduNueva, fuenteNueva, { forzar = false }
     return rNueva >= rActual;
 }
 
+/**
+ * La CDU que se APLICARÍA: en notación moderna y, en la clase 2, en el esquema de religión actual (la BNE y los CIP
+ * antiguos dan «294.3» para el budismo, que hoy es «24»). Toda vía que aplique una CDU de fuera debe pasar por aquí
+ * ANTES de compararla: el 25-oct la tarea aplicar-cdu-bne puso «294.3» a «Lo que el Buda enseñó», que Refinar CDU
+ * había dejado bien en «241», porque comparaba y aplicaba la de la BNE tal cual.
+ */
+export function cduNormalizada(cdu, doc = null) {
+    if (!cdu) return cdu;
+    return cduReligionModerna(modernizarCDU(String(cdu).trim()), doc).cdu;
+}
+
 /** Cifras del número principal de una CDU, sin puntos («512.64(075)» → «51264»). */
 const cifrasPrincipales = (cdu) => (String(cdu || '').trim().match(/^\d+(?:\.\d+)*/)?.[0] || '').replace(/\./g, '');
 

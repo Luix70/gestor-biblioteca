@@ -210,6 +210,10 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 docFinal.cdu = rel.cdu;
             }
         }
+        // DE DÓNDE SALIÓ LA CDU, siempre: la regla de prioridad (prioridad-cdu.js) decide con ese dato si otra tarea
+        // puede cambiarla. Algunos caminos (colecciones, transmedia) no lo anotaban — 53 de 491 ingestas de octubre —
+        // y contaban como deducidas solo por defecto. Una CDU de verdad sin fuente conocida ES deducida.
+        if (docFinal.cdu && !/^0*$/.test(String(docFinal.cdu).trim()) && !docFinal.cdu_fuente) docFinal.cdu_fuente = 'clasificador';
 
         // 2. Editorial (string → ObjectId; crea si no existe).
         if (docFinal.editorial && typeof docFinal.editorial === 'string') {

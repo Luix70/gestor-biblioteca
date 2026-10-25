@@ -1230,6 +1230,11 @@ de ficheros clasificado por CDU.
     tú). Y dos redes más: la caché no puede cambiar de DIVISIÓN respecto a la tabla Dewey (salvo hacia la clase 0)
     ni llevar un Dewey de lengua (4xx) fuera del 81/003; re-clasificar-cdu no cambia nada si el Dewey y el LCC del
     libro llevan a clases distintas (uno es de otro libro). Reparación: scripts/revertir-reclasificacion-conformador.js.
+    (25-oct, ingesta) Lo mismo en resolverCDU para TODOS: con Dewey y LCC en desacuerdo de clase, decide la IA viendo el
+    título (sin aprender nada) o, sin IA, no se deduce nada. La CDU de la BNE/Fichero se NORMALIZA antes de compararla
+    (prioridad-cdu·cduNormalizada: notación moderna + religión actual; «294.3» → «24») también en las tareas
+    aplicar-cdu-bne y re-clasificar-cdu, que la aplicaban tal cual. Y motor-catalogo anota siempre `cdu_fuente`
+    («clasificador» si ningún camino lo dijo: colecciones y transmedia no lo hacían).
     El documento guarda de dónde salió su CDU en `cdu_fuente` (desde hoy; los anteriores sin ese campo
     cuentan como deducidos, salvo los marcados manuales o los que una alerta dice que salieron del CIP impreso).
     Dónde se aplica: ingesta (el enriquecimiento elige por rango; una CDU que la visión infirió ya no gana a la de la
