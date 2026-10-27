@@ -234,7 +234,9 @@ async function generarIA(db, codigo, { soloGratis = false, notacion = null } = {
     const equivalencias = await equivalenciasDe(db, real);
     // Las oficiales primero: si existen, mandan sobre la tabla fija (que es un resumen hecho a mano).
     const refs = [...await referenciasOficiales(db, real), ...referenciasDe(real)];
-    const txt = await conTexto({ prompt: prompt(real, refs, padre, equivalencias), json: true, maxTokens: 4000, soloGratis });   // 2.5-flash gasta tokens en «pensar» antes de responder
+    // sinRazonar (27-oct): la descripción se apoya en las REFERENCIAS OFICIALES del prompt; el razonamiento de Gemini 2.5
+    // se cobraba como salida y hacía de esta campaña la más cara (~0,0036 € por llamada, 5 veces una de clasificación).
+    const txt = await conTexto({ prompt: prompt(real, refs, padre, equivalencias), json: true, maxTokens: 4000, soloGratis, sinRazonar: true });
     const j = extraerJSON(txt);
     if (!j) throw new Error('respuesta de IA no parseable');
     // Respuesta INCOMPLETA (se le acabó el sitio y extraerJSON la cerró a medias): no se guarda, se reintentará.

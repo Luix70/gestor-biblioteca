@@ -52,6 +52,7 @@ import { precalentarEquivalencias, contarEquivalenciasPendientes, resolverCDU } 
 import { editarDocumento } from '../utils/editar-doc.js';
 import { resolverEditorial as resolverEditorialComun } from '../utils/resolver-editorial.js';
 import { reinicioCuotaPacifico } from '../utils/cuota-diaria.js';
+import { conOrigenIA } from '../utils/uso-ia.js';
 
 const EN_CONTENEDOR = fs.existsSync('/.dockerenv');
 export const PUEDE_CAMPANAS = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1';
@@ -855,10 +856,13 @@ const progreso = new Map();        // id → { enCurso, procesados, objetivo, ca
 export async function ejecutarCampana(db, id, opciones = {}) {
     const camp = PORID.get(id);
     if (!camp) return { procesados: 0, cambios: 0, pendientes: 0, abortado: false };
-    // La política de IA de la campaña (todas / solo gratis / ninguna) rige toda la IA que se llame en la tanda.
-    if (!usaIA(camp)) return ejecutarTanda(db, camp, opciones);
-    const modo = (await leerAjustesCampanas(db))[id]?.ia || iaDefecto(camp);
-    return conPoliticaIA(modo, () => ejecutarTanda(db, camp, opciones));
+    // La política de IA de la campaña (todas / solo gratis / ninguna) rige toda la IA que se llame en la tanda, y su
+    // uso se anota a su nombre en el contador de IA (utils/uso-ia.js).
+    return conOrigenIA(`campaña:${id}`, async () => {
+        if (!usaIA(camp)) return ejecutarTanda(db, camp, opciones);
+        const modo = (await leerAjustesCampanas(db))[id]?.ia || iaDefecto(camp);
+        return conPoliticaIA(modo, () => ejecutarTanda(db, camp, opciones));
+    });
 }
 
 async function ejecutarTanda(db, camp, { limite, debeAbortar = async () => false } = {}) {

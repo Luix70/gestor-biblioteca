@@ -15,6 +15,7 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { conectarDB } from '../database.js';
 import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
+import { anotarUsoIA } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
 
 // Cooldown por-clave tras un 429, PROPORCIONAL a la cuota: corto para límite por-minuto (RPM/TPM, se recupera
 // en ~1 min), largo solo para la cuota diaria (RPD). Antes era fijo 5 min → tras un pico las 3 gratis quedaban
@@ -50,8 +51,10 @@ const PROVEEDORES = [
         prefijos: ['GROQ_API_KEY'] },
     { id: 'openrouter', etiqueta: 'OpenRouter (free)', tipo: 'openai', tier: 'free', maxImg: Number(process.env.OPENROUTER_MAX_IMG) || 5,
         baseURL: () => process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-        // Default vigente (el viejo llama-3.2-11b-vision-instruct:free fue retirado). Gemma 4 admite imagen+texto.
-        modelo: () => process.env.OPENROUTER_MODELO || 'google/gemma-4-31b-it:free',
+        // Modelo gratuito con imagen+texto. (27-oct) Gemma 4 (google/gemma-4-31b-it:free) llevaba días en 429 «rate-limited
+        // upstream»: la bolsa gratuita de Google AI Studio que comparten todos los usuarios de OpenRouter, saturada — no
+        // nuestras claves. Nemotron 3.5 Super VL de NVIDIA respondía en <1 s con JSON válido. OPENROUTER_MODELO lo cambia.
+        modelo: () => process.env.OPENROUTER_MODELO || 'nvidia/nemotron-3.5-super-vl:free',
         prefijos: ['OPENROUTER_API_KEY'] },
     { id: 'gemini-paid', etiqueta: 'Gemini (pago)', tipo: 'gemini', tier: 'paid', maxImg: Number(process.env.GEMINI_MAX_IMG) || 16,
         modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
@@ -145,6 +148,9 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
         const model = new GoogleGenerativeAI(c.key).getGenerativeModel({ model: c.modelo, generationConfig });
         const parts = [prompt, ...imgs.map(im => ({ inlineData: { data: im.base64, mimeType: im.mimeType || 'image/jpeg' } }))];
         const res = await model.generateContent(parts);
+        // Tokens REALES de la llamada, para el contador de uso (utils/uso-ia.js): el de razonamiento va aparte.
+        const u = res.response.usageMetadata || {};
+        anotarUsoIA({ proveedor: c.id, tier: c.tier, uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
         return res.response.text();
     }
     // OpenAI-compatible (Groq, OpenRouter, …): no forzamos response_format (algunos modelos lo rechazan);
@@ -157,6 +163,9 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
     // cuota gratuita da para más llamadas. (Solo en Groq y en esos modelos: otros proveedores rechazan el campo.)
     if (sinRazonar && c.prov.id === 'groq' && /gpt-oss/i.test(c.modelo)) cuerpo.reasoning_effort = 'low';
     const res = await axios.post(`${c.baseURL}/chat/completions`, cuerpo, { headers, timeout: TIMEOUT_MS });
+    // Tokens para el contador de uso (en estos proveedores, los de razonamiento ya van dentro de completion_tokens).
+    const u = res.data?.usage || {};
+    anotarUsoIA({ proveedor: c.id, tier: c.tier, uso: { entrada: u.prompt_tokens, salida: u.completion_tokens } });
     return res.data?.choices?.[0]?.message?.content || '';
 }
 

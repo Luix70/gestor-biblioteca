@@ -32,6 +32,7 @@ import { editorialCoherenteConISBN } from './utils/editorial-por-prefijo.js';
 import { mismoTituloLibro } from './utils/titulo-libro.js';
 import { datosDeObraDeCandidatas } from './utils/datos-de-obra.js';
 import { decidirLote, esCduGruesa } from './utils/refinar-cdu.js';
+import { conOrigenIA } from './utils/uso-ia.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -420,7 +421,7 @@ export async function identificarEdicionEnIngesta(documento) {
  *
  * @param entrada { rutas: string[], contexto?: { ubicacion } }
  */
-export async function ingestarRecurso({ rutas, contexto = {} }) {
+async function ingestarRecursoInterno({ rutas, contexto = {} }) {
     // 0. ATAJO POR HASH: si el fichero ya está archivado (hash idéntico) no malgastar OCR/visión/APIs;
     //    si el doc existe pero su fichero falta, restaurarlo con el entrante. (Ver atajoPorHash.)
     const atajo = await atajoPorHash(rutas, contexto);
@@ -858,4 +859,9 @@ export async function altaPorISBN({ base = {}, activos = [], contexto = {}, comp
         ya_existia: resultado.operacion === 'actualizacion',
         fecha_ingreso: resultado.fecha_ingreso || null, ubicacion: resultado.ubicacion || null,
     };
+}
+
+/** ingestarRecurso con su IA anotada a nombre de «ingesta» en el contador de uso (utils/uso-ia.js). */
+export function ingestarRecurso(...args) {
+    return conOrigenIA('ingesta', () => ingestarRecursoInterno(...args));
 }

@@ -11290,9 +11290,54 @@ async function loadTrafico() {
         : '<div class="muted" style="font-size:12px;margin-top:8px">Aún sin datos: se empiezan a contar ahora.</div>'
     }`;
 }
+// Uso de IA (GET /uso-ia, utils/uso-ia.js): gasto de los últimos 30 días, barras por día y una tabla por origen con
+// las llamadas de pago y gratis, los tokens y el coste medio por llamada de pago — el dato para prever una campaña.
+async function loadUsoIA() {
+  const cont = $('#usoIAOut');
+  if (!cont) return;
+  let u;
+  try {
+    u = await api('/uso-ia');
+  } catch (e) {
+    cont.innerHTML = `<span class="muted" style="font-size:12px">${esc(e.message)}</span>`;
+    return;
+  }
+  if (!u.dias.length) {
+    cont.innerHTML = '<span class="muted" style="font-size:12px">Aún sin datos: se empiezan a contar ahora.</span>';
+    return;
+  }
+  const eur = (x) => `${x < 0.01 && x > 0 ? x.toFixed(4) : x.toFixed(2)} €`.replace('.', ',');
+  const miles = (n) => (n >= 10000 ? `${Math.round(n / 1000)} k` : String(n));
+  const maxDia = Math.max(0.0001, ...u.dias.map((d) => d.eur));
+  cont.innerHTML = `
+    <div style="font-size:13px;margin-bottom:6px"><b>${eur(u.total_eur)}</b> de IA de pago en ${u.dias.length} día(s) con actividad
+      <span class="muted">(tarifa: ${u.tarifa.entrada_usd_m} $ / ${u.tarifa.salida_usd_m} $ por millón de tokens de entrada / salida)</span></div>
+    <div style="display:flex;gap:3px;align-items:flex-end;height:60px;margin-top:6px">
+      ${u.dias
+        .map(
+          (d) => `<div title="${esc(d.dia)}: ${eur(d.eur)} · ${d.llamadas_pago} de pago · ${d.llamadas_gratis} gratis" style="flex:1;text-align:center;font-size:10px">
+            <div style="height:${Math.max(2, Math.round((d.eur / maxDia) * 44))}px;background:var(--accent, #4a90d9);opacity:.75;border-radius:2px"></div>
+            <div class="muted">${esc(d.dia.slice(8))}</div></div>`,
+        )
+        .join('')}
+    </div>
+    <div style="font-size:12px;margin-top:10px;display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:2px 10px">
+      <b>Quién</b><b style="text-align:right">De pago</b><b style="text-align:right">Gratis</b><b style="text-align:right">Coste</b>
+      ${u.origenes
+        .map(
+          (o) => `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.origen)}">${esc(o.origen)}</span>
+            <span style="text-align:right" title="${o.llamadas_pago ? `${eur(o.eur_por_llamada)} por llamada · ${miles(o.entrada)} tokens de entrada, ${miles(o.salida + o.razon)} de salida` : ''}">${o.llamadas_pago}</span>
+            <span style="text-align:right">${o.llamadas_gratis}</span>
+            <span style="text-align:right">${eur(o.eur)}</span>`,
+        )
+        .join('')}
+    </div>
+    <div class="muted" style="font-size:11px;margin-top:6px">Pasa el ratón por las llamadas de pago para ver el coste medio por llamada y los tokens.</div>`;
+}
 function loadActivity() {
   refrescarEstado();
   loadTrafico();
+  loadUsoIA();
   loadInteg();
   logAuto();
   aplicarPliegueActividad();

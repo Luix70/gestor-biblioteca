@@ -3247,6 +3247,15 @@ de ficheros clasificado por CDU.
           reasoning_effort low): elegir de un menú cerrado no lo necesita, y el razonamiento era ~3/4 del coste de
           pago, gastaba antes la cuota gratuita de Groq (que es en tokens) y podía cortar el JSON. Estimación con
           Gemini de pago para los ~14.500 pendientes: 10-20 $. Gratis: ~75 libros/día (~6 meses).
+        · 🤖 USO DE IA (27-oct, tarjeta en Mantenimiento, GET /api/uso-ia, utils/uso-ia.js): cada llamada que responde
+          (vision.js·llamar y gemini.js·conGemini) anota sus TOKENS REALES y QUIÉN la pidió —«campaña:<id>»,
+          «conformador», «ingesta», «script:<nombre>» o «app»— en la colección `uso_ia` (un documento por día; volcado
+          cada minuto; al salir de un script, a logs/uso-ia-pendiente.jsonl). La tarjeta da el gasto de 30 días, por
+          día y por origen, con el coste medio por llamada de pago: el dato para prever una campaña. Tarifa en config
+          (IA_PRECIO_ENTRADA_USD_M 0,30 · IA_PRECIO_SALIDA_USD_M 2,50 · IA_USD_A_EUR). Medido antes del contador
+          (23-25 oct, por saldo): clasificación (Refinar CDU, CDU del Conformador) ~0,0007 € por llamada; redacción
+          (descripciones de CDU y Dewey) ~0,0036 €, por el razonamiento — que ahora va apagado también en las de CDU.
+          OpenRouter pasa a nvidia/nemotron-3.5-super-vl:free (Gemma 4 gratis llevaba días saturada upstream).
         · ⏸ ESPERA SIN IA (23-oct, todas las campañas con IA): si una tanda acaba sin NINGUNA IA disponible
           (cuotas gratuitas agotadas), la campaña no repite cada N minutos: espera 1 h, el doble a cada fallo
           seguido (tope 8 h) y nunca más allá de la renovación de la cuota diaria de Google (medianoche del

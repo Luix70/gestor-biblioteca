@@ -1,5 +1,6 @@
 import express from 'express';
 import { resumenTrafico } from './utils/trafico-atlas.js';
+import { resumenUsoIA } from './utils/uso-ia.js';
 import { estadoSubidas } from './utils/subidas-en-curso.js';
 import { ObjectId } from 'mongodb';
 import { conectarDB } from './database.js';
@@ -387,6 +388,14 @@ export function rutasPanel() {
     r.get('/trafico-atlas', async (req, res) => {
         try { res.json({ ok: true, ...(await resumenTrafico(await conectarDB())) }); }
         catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+    });
+    // Uso de IA por día y por origen (campañas, Conformador, ingesta, scripts): llamadas, tokens y coste de la de pago.
+    // utils/uso-ia.js. `dias` (1-90, por defecto 30).
+    r.get('/uso-ia', async (req, res) => {
+        try {
+            const dias = Math.min(90, Math.max(1, Number(req.query.dias) || 30));
+            res.json({ ok: true, ...(await resumenUsoIA(await conectarDB(), { dias })) });
+        } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
     });
     r.get('/estado', (req, res) => {
         res.json({ vigilante: estadoVigilante(), conformador: estadoConformador(), cduSinIA: cduSinIAActivo(), inspeccionIA: inspeccionIAActiva(), subidas: estadoSubidas() });

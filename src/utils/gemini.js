@@ -11,6 +11,7 @@
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
+import { anotarUsoIA } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
 
 // Cooldown de una clave GRATIS tras un 429, PROPORCIONAL a la cuota: CORTO si es límite por-minuto (RPM/TPM,
 // se recupera en ~1 min), LARGO solo si es la cuota DIARIA (RPD, agotada hasta mañana). Antes era fijo 5 min
@@ -73,6 +74,15 @@ export async function conGemini(opcionesModelo, fn) {
         const [etiqueta, key] = orden[i];
         try {
             const model = new GoogleGenerativeAI(key).getGenerativeModel(opcionesModelo);
+            // Cada respuesta anota sus tokens reales en el contador de uso (utils/uso-ia.js), como las de vision.js.
+            const generar = model.generateContent.bind(model);
+            model.generateContent = async (...args) => {
+                const r = await generar(...args);
+                const u = r?.response?.usageMetadata || {};
+                anotarUsoIA({ proveedor: etiqueta === 'free' ? 'gemini-free' : 'gemini-paid', tier: etiqueta === 'free' ? 'free' : 'paid',
+                    uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
+                return r;
+            };
             return await fn(model);
         } catch (e) {
             ultimo = e;

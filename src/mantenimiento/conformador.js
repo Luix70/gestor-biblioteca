@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { conectarDB } from '../database.js';
 import { TAREAS } from './tareas.js';
 import { carpetaDeDoc, carpetaExiste, aplicarCambio } from './util-mantenimiento.js';
+import { conOrigenIA } from '../utils/uso-ia.js';
 
 // Firma del conjunto de tareas+versiones. Un documento se considera "conforme" cuando su
 // mantenimiento_firma coincide con esta. Añadir una tarea o subir una 'version' cambia la
@@ -23,7 +24,7 @@ const PUEDE_MANTENER = EN_CONTENEDOR || process.env.MANTENIMIENTO_FORZAR === '1'
  *
  * @returns { revisados, cambios, pendientes, abortado }
  */
-export async function ejecutarMantenimiento({ debeAbortar = async () => false } = {}) {
+async function ejecutarMantenimientoInterno({ debeAbortar = async () => false } = {}) {
     if (!PUEDE_MANTENER) return { revisados: 0, cambios: 0, pendientes: 0, abortado: false };
 
     let db;
@@ -146,7 +147,7 @@ export async function dessellarTareas(db, docId, ids = []) {
  * ingestas sueltas/manuales (toggle CONFORMAR_AL_INGERIR u opción por petición). Respeta `locked` y
  * solo actúa donde el Conformador puede (contenedor del NAS, junto a los ficheros). Best-effort.
  */
-export async function conformarAlIngerir(docId) {
+async function conformarAlIngerirInterno(docId) {
     if (!PUEDE_MANTENER) return { ok: false, motivo: 'fuera-de-contenedor' };
     let db;
     try { db = await conectarDB(); } catch { return { ok: false, motivo: 'sin-bd' }; }
@@ -155,4 +156,14 @@ export async function conformarAlIngerir(docId) {
     if (doc.locked) return { ok: false, motivo: 'locked' };
     const cambios = await conformarDocumento(db, doc);
     return { ok: true, cambios };
+}
+
+/** ejecutarMantenimiento con su IA anotada a nombre de «conformador» en el contador de uso (utils/uso-ia.js). */
+export function ejecutarMantenimiento(...args) {
+    return conOrigenIA('conformador', () => ejecutarMantenimientoInterno(...args));
+}
+
+/** conformarAlIngerir con su IA anotada a nombre de «conformador» en el contador de uso (utils/uso-ia.js). */
+export function conformarAlIngerir(...args) {
+    return conOrigenIA('conformador', () => conformarAlIngerirInterno(...args));
 }
