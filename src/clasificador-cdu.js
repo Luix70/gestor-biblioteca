@@ -1,6 +1,7 @@
 import { conectarDB } from './database.js';
 import { conTexto, extraerJSON } from './utils/vision.js';
 import { modernizarCDU, cduParaUbicar } from './utils/cdu-moderna.js';
+import { esAntepasadoCdu } from './utils/cdu-gruesa.js';
 
 // Tabla de tradiciones/lenguas literarias → CDU (82x). El Dewey 8xx y la LCC P* YA codifican la lengua, así que
 // la equivalencia por código es estable. Se usa en el prompt de iaCDU (por doc) y de iaCDULote (por lote).
@@ -793,6 +794,19 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
             continue;
         }
         const hit = eq.cdu;
+
+        // LA TABLA AFINA A LA CACHÉ DEL DEWEY (29-oct): si la tabla da una CDU MÁS FINA de la misma rama, manda la tabla
+        // y la caché se corrige al aprenderla (usarTablaDewey la guarda). La caché guarda lo que dio la tabla cuando se
+        // aprendió —como «Manual», así que ningún filtro la discute—, y la tabla ha mejorado desde entonces: «Rififi»,
+        // Dewey 791.437, salía «79» (caché de cuando la tabla no sabía más) en vez de «791.43». Medido: 1.521
+        // equivalencias Dewey más gruesas que la tabla de hoy. Lo más fino gana dentro de la rama, como con las CDU.
+        if (sistema === 'dewey') {
+            const tablaDewey = await buscarEquivalenciaExterna('dewey', codigo);
+            if (tablaDewey && esAntepasadoCdu(hit, tablaDewey)) {
+                const porTabla = await usarTablaDewey();
+                if (porTabla) return porTabla;
+            }
+        }
 
         // Una decisión de la IA que la caché serviría a libros que no le corresponden: no se usa (ver equivalenciaUsable).
         const uso = equivalenciaUsable(sistema, normalizarCodigo(codigo), eq);
