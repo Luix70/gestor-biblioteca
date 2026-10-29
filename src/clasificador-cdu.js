@@ -396,6 +396,10 @@ export function cduBienFormada(cdu) {
     // Una palabra (un nombre, un lugar escrito con letras): no es una CDU. Las abreviaturas de un auxiliar, sí
     // («(460.355 C.)»): por eso se piden tres letras seguidas.
     if (/\p{L}{3,}/u.test(texto)) return false;
+    // Comillas y paréntesis EMPAREJADOS (29-oct): «78-3(44)"19» —un auxiliar de tiempo sin cerrar, que devolvió la IA—
+    // pasaba por buena, y la campaña de descripciones la reintentó cada 11 minutos durante dos días.
+    if ((texto.match(/"/g) || []).length % 2) return false;
+    if ((texto.match(/\(/g) || []).length !== (texto.match(/\)/g) || []).length) return false;
     // Cada faceta (separadas por «:», «+» o «/» FUERA de paréntesis y comillas): su número principal, antes de
     // cualquier auxiliar. «94(100)"1939/1945"» es una sola faceta.
     const sinAuxiliares = texto.replace(/\([^)]*\)|"[^"]*"/g, ' ');
@@ -538,6 +542,15 @@ function lccACDU(codigo) {
  * la IA aprendió «qp → 612» (fisiología: CORRECTO, QP es fisiología); si el «5» del respaldo de Q ganara,
  * 52 libros de fisiología pasarían de «612» a «ciencias naturales» a secas.
  */
+/**
+ * La CDU que la tabla da a un LCC CONCRETO, con sus TRAMOS (PN1993-1999 = cine → 791.43, aunque «PN» sea literatura)
+ * y sin el respaldo genérico de la letra. Para comparar la clase del LCC con la del Dewey: mirar solo la clase daba
+ * falsos desacuerdos («Rififi»: Dewey 791.437 y LCC PN1997, los dos cine, tomados por discrepantes → IA → «78-3…»).
+ */
+export function lccACDUConTramos(codigo) {
+    return lccPorRango(codigo) || lccACDUEspecifica(codigo);
+}
+
 export function lccACDUEspecifica(codigo) {
     const letras = claseLcc(codigo);
     if (!letras) return null;
@@ -662,7 +675,9 @@ inventes datos concretos (fechas, nombres) que no puedas justificar con lo dado.
         const txt = await conTexto({ prompt, json: true, maxTokens: 1200 });
         const j = extraerJSON(txt);
         if (!j) throw new Error('respuesta de IA no parseable');
-        const cdu = String(j.cdu || '').trim().replace(/^["']|["']$/g, '');
+        // Solo comillas que ENVUELVEN la respuesta entera (29-oct): /^["']|["']$/ se comía también la de cierre de un
+        // auxiliar de tiempo final («1(73)"20"» → «1(73)"20»: 697 libros). Ver cdu-moderna·cerrarComillasCDU.
+        const cdu = String(j.cdu || '').trim().replace(/^(["'])(.*)\1$/s, '$2');
         return {
             cdu: cdu || '000',
             titulo_es: j.titulo_es || null,
@@ -712,7 +727,7 @@ async function resolverCDUSinModernizar({ dewey, lcc, categorias = [], titulo, a
     if (dewey && lcc) {
         const dCifra = (String(dewey).match(/\d/) || [])[0];
         const claseDewey = dCifra === '4' ? '8' : dCifra;
-        const claseLccTabla = (String(cduParaUbicar(lccACDUEspecifica(lcc) || '') || '').match(/^\d/) || [])[0];
+        const claseLccTabla = (String(cduParaUbicar(lccACDUConTramos(lcc) || '') || '').match(/^\d/) || [])[0];
         if (claseDewey && claseLccTabla && claseDewey !== claseLccTabla) {
             if (!permitirIA) return { cdu: null, fuente: 'sin-ia', aprendida: false, descripcion: null, palabras_clave: [] };
             const r = await iaCDU({ dewey, lcc, categorias, titulo, autor, sinopsis });
@@ -908,7 +923,7 @@ Un objeto por código, en el MISMO orden, con su "i" (1..${items.length}).`;
     for (const r of arr) {
         const idx = Number(r.i) - 1;
         if (!Number.isInteger(idx) || idx < 0 || idx >= items.length) continue;
-        const bruta = String(r.cdu || '').trim().replace(/^["']|["']$/g, '');
+        const bruta = String(r.cdu || '').trim().replace(/^(["'])(.*)\1$/s, '$2');
         // Mal formada: se repara si se puede; si no, no se aprende (se serviría a todos los libros de ese código).
         const cdu = bruta && bruta !== '000' ? repararCDU(bruta) : null;
         if (!cdu) continue;

@@ -13,7 +13,7 @@ import { huecosDesdeAutoridad, autoresConAncla, mismoNombreAutor } from '../util
 import { puedeSustituirCdu, fuenteCduDoc, rangoFuente, RANGO_CDU, cduNormalizada } from '../utils/prioridad-cdu.js';
 import { buscarAutoridadPorISBN } from '../utils/autoridad-isbn.js';
 import { cduDeAutoridadFiable } from '../utils/autoridad-isbn.js';
-import { resolverCDU, lccACDUEspecifica } from '../clasificador-cdu.js';
+import { resolverCDU, lccACDUConTramos } from '../clasificador-cdu.js';
 import { cduParaUbicar } from '../utils/cdu-moderna.js';
 import { leerCIPdeImagenes } from '../agente.js';
 import { calcularHashArchivo } from '../utils/hash-archivo.js';
@@ -326,7 +326,7 @@ export const TAREAS = [
                     // otro libro (medido: «What Are Gamma-Ray Bursts?», Dewey 222 = la Biblia, LCC QB471 = astronomía, y
                     // el Conformador la pasó a 27-23). Sin saber cuál, no se cambia nada: la CDU actual se queda.
                     // (Mismo criterio que Refinar CDU con los contaminados.)
-                    const claseLcc = (String(lccACDUEspecifica(lcc) || '').match(/^\d/) || [])[0];
+                    const claseLcc = (String(lccACDUConTramos(lcc) || '').match(/^\d/) || [])[0];
                     const claseNueva = (String(cduParaUbicar(cdu) || cdu || '').match(/^\d/) || [])[0];
                     const enDesacuerdo = !!(dewey && claseLcc && claseNueva && claseLcc !== claseNueva);
                     if (cdu && cdu !== '000' && !enDesacuerdo) { cduNueva = cdu; fuente = `clasificador:${f}`; }

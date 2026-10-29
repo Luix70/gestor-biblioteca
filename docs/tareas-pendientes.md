@@ -23,6 +23,12 @@
 
 Cascada gratuita (nombre de fichero → Fichero → colección → OpenLibrary → Google). `--ia` añade IA de texto (barata).
 
+### 0.9 Cerrar la comilla perdida de las CDU (29-oct) — solo BD
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/reparar-comilla-cdu.js`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/reparar-comilla-cdu.js --ejecutar`
+
+693 libros + 311 de colecciones/obras/caché («1(73)"20» → «1(73)"20"»). 4 con un paréntesis cortado, a mano: «Rome and Persia in late antiquity» (94(5), «French Revolution in Global Perspective» (9(7), «The politics of voter suppression» (324.7(), «Something like an autobiography» (929(460). Y «Rififi»: CDU a mano 791.43(44) (es cine).
+
 ### 1.0 Deshacer los cambios de rama del Conformador (25-oct) — en el NAS (mueve carpetas; copia antes)
 - [ ] Copia de la base en el PC: `D:\Bibliobak\CopiaBase.ps1`
 - [ ] Desplegar (las reglas nuevas de prioridad/caché/Conformador deben estar en marcha antes)

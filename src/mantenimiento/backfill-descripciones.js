@@ -44,7 +44,9 @@ async function clasFaltantes(db, sistema) {
 /** Cuenta cuántas descripciones faltan por sistema (sin generar nada) — para el dry-run del script. */
 export async function contarFaltantes(db = null) {
     if (!db) db = await conectarDB();
-    const cdu = await cduFaltantes(db), dewey = await clasFaltantes(db, 'dewey'), lcc = await clasFaltantes(db, 'lcc');
+    const cdu = (await cduFaltantes(db)).filter((c) => !apartado('cdu', c));
+    const dewey = (await clasFaltantes(db, 'dewey')).filter((c) => !apartado('dewey', c));
+    const lcc = (await clasFaltantes(db, 'lcc')).filter((c) => !apartado('lcc', c));
     return { cdu: cdu.length, dewey: dewey.length, lcc: lcc.length, total: cdu.length + dewey.length + lcc.length };
 }
 
@@ -97,6 +99,14 @@ async function guardarUno(db, sistema, codigo, datos) {
 // si no, la campaña se atascaría reintentando siempre los mismos primeros de la lista.
 const sinFuenteOficial = new Set();
 
+// TOPE DE INTENTOS (29-oct): un código que la IA no consigue describir (su respuesta no pasa los filtros de coherencia,
+// o la CDU está mal formada) se apartaba… para volver en la tanda siguiente: «78-3(44)"19» se reintentó cada 11 min
+// durante dos días, una llamada de IA cada vez. Tras MAX_INTENTOS fallos, se aparta y deja de contar como pendiente.
+// En memoria: un reinicio le da otra oportunidad (por si el fallo era pasajero), sin bucle.
+const MAX_INTENTOS = 3;
+const fallosPorCodigo = new Map();   // clave(sistema, código) → nº de fallos
+const apartado = (sistema, codigo) => (fallosPorCodigo.get(clave(sistema, codigo)) || 0) >= MAX_INTENTOS;
+
 async function generarUno(db, sistema, codigo) {
     // Campaña con la IA en «ninguna»: solo lo que dan las fuentes oficiales, sin IA (CDU: UDC Summary o su
     // composición con las piezas oficiales; LCC: el LC Outline; Dewey: su equivalencia en la CDU). Si no hay, se
@@ -127,9 +137,10 @@ export async function rellenarDescripcionesFaltantes({ limite = 5, db = null, on
     if (!limite || limite <= 0) return { generadas: 0, fallos: 0, pendientes: 0 };
     if (!db) db = await conectarDB();
 
-    const cdu = await cduFaltantes(db);
-    const dewey = await clasFaltantes(db, 'dewey');
-    const lcc = await clasFaltantes(db, 'lcc');
+    // Los apartados por el tope de intentos no se piden ni se cuentan.
+    const cdu = (await cduFaltantes(db)).filter((c) => !apartado('cdu', c));
+    const dewey = (await clasFaltantes(db, 'dewey')).filter((c) => !apartado('dewey', c));
+    const lcc = (await clasFaltantes(db, 'lcc')).filter((c) => !apartado('lcc', c));
     const totalFaltan = cdu.length + dewey.length + lcc.length;
     if (!totalFaltan) return { generadas: 0, fallos: 0, pendientes: 0 };
 
@@ -165,7 +176,13 @@ export async function rellenarDescripcionesFaltantes({ limite = 5, db = null, on
             const o = mapa.get(clave(it.sistema, it.codigo));
             let ok = o ? await guardarUno(db, it.sistema, it.codigo, o) : false;
             if (!ok) ok = await generarUno(db, it.sistema, it.codigo); // fallback individual
-            if (ok) generadas++; else fallos++;
+            if (ok) generadas++;
+            else {
+                fallos++;
+                const k = clave(it.sistema, it.codigo);
+                fallosPorCodigo.set(k, (fallosPorCodigo.get(k) || 0) + 1);
+                if (apartado(it.sistema, it.codigo)) console.warn(`   ⚠️  Descripción de ${it.sistema} «${it.codigo}»: ${MAX_INTENTOS} intentos sin una válida → apartada (revisa ese código; ¿está bien escrito?).`);
+            }
             hechos++;
             if (onProgreso) onProgreso(hechos, total);
             await new Promise(res => setTimeout(res, PAUSA_MS));

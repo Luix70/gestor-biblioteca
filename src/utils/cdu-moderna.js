@@ -221,9 +221,21 @@ export function limpiarCDU(cdu) {
  */
 export function modernizarCDU(cdu) {
     if (cdu === undefined || cdu === null) return cdu;
-    const s = limpiarCDU(String(cdu));
+    const s = cerrarComillasCDU(limpiarCDU(String(cdu)));
     if (!/\d/.test(s)) return cdu;
     return partirFacetas(s).map(modernizarFaceta).join(':');
+}
+
+/**
+ * CIERRA un auxiliar de tiempo que perdió su comilla final («1(73)"20» → «1(73)"20"»). Pasó con 697 libros: la
+ * respuesta de la IA se limpiaba con replace(/^["']|["']$/g, ''), que pretendía quitar las comillas que la ENVUELVEN
+ * y se comía también la de cierre de un «"20"» al final (corregido en clasificador-cdu.js, 29-oct). Solo si las
+ * comillas están desparejadas y lo que queda tras la última es un periodo («20», «14/16», «-15», «04/14»).
+ */
+export function cerrarComillasCDU(cdu) {
+    const s = String(cdu ?? '');
+    if (((s.match(/"/g) || []).length % 2) === 0) return s;
+    return /"[-\d./]+$/.test(s) ? `${s}"` : s;
 }
 
 /** ¿Hay algo que limpiar o traducir? (para diagnósticos y el script de saneado) */
