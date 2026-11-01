@@ -394,6 +394,27 @@ function evidenciaLibro(nombres) {
     return hayFront || hayFin || nCap >= 3;
 }
 
+// Series de capítulos que pareceParte no reconoce: «KENNch12», «MARIcp01», «c01», «p01».
+const RE_CAPITULO_SUELTO = /^(?:[a-z]{2,8}c[hp]|[cp] ?)\d{1,3}$/i;
+
+/**
+ * ¿Es EVIDENTE que esta carpeta sin guía es UN libro por capítulos con partes que no son PDF? detectarDesglosePuro
+ * solo admite PDF, y sin esta red cada capítulo .doc acababa de documento suelto. Basta con esperar en el Inbox si la
+ * detección se pasa, así que no hace falta medir páginas: nombres de parte en casi todos y el esqueleto de un libro.
+ */
+export async function esLibroPorCapitulos(dir) {
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); }
+    catch { return false; }
+    const docs = entradas.filter((e) => e.isFile() && !ignorar(e.name) && esDoc(e.name)).map((e) => e.name);
+    if (docs.length < MIN_PARTES_PURO) return false;
+    if (docs.every((n) => path.extname(n).toLowerCase() === '.pdf')) return false;   // ese caso es de detectarDesglosePuro
+    const sueltos = docs.filter((n) => RE_CAPITULO_SUELTO.test(path.basename(n, path.extname(n)))).length;
+    const conNombre = docs.filter((n) => pareceParte(n) || RE_CAPITULO_SUELTO.test(path.basename(n, path.extname(n)))).length;
+    if (conNombre / docs.length < MIN_RATIO_PARTES_PURO) return false;
+    return evidenciaLibro(docs) || sueltos >= 3;
+}
+
 /**
  * ¿`dir` es un DESGLOSE PURO (solo las partes, sin el libro)? Devuelve { partes (YA ORDENADAS), titulo } o null.
  * Exigencias: ningún principal claro, ≥6 documentos, TODOS PDF (no se pueden coser .doc) y ≥80% con nombre de

@@ -2519,10 +2519,17 @@ de ficheros clasificado por CDU.
       · Partes .doc sin libro entero: el NAS no puede convertirlas. Espera en el Inbox; en el PC,
         scriptsconvertir-partes-word.ps1 (seco; con -Ejecutar convierte con Word, macros desactivadas) deja un .pdf
         junto a cada .doc y el vigilante cose. Los .doc viajan a «Desglose/». El PDF solo tendra lo que traia el .doc.
-        Word bloquea de fabrica los .doc de formato muy antiguo (Centro de confianza): esas partes salen como fallidas.
+        Word bloquea de fabrica los .doc de formato muy antiguo (Centro de confianza): esas partes pasan por LibreOffice
+        con -Soffice <ruta de soffice.com>, sin instalarlo y sin cambiar la configuracion de Word.
       · Libro entero con otro nombre («12e.pdf»): en una carpeta guiada como desglose se reconoce por PAGINAS
         (libroEnteroEntrePartes: >= 100 pags, >= 70 % de las demas juntas, >= doble de la mayor), nunca por bytes.
         Lo que tenga el 80 % de sus paginas es otra copia o edicion del entero, no una parte.
+      · Evaluacion del contenido cuando esta el libro entero (utils/partes-contenidas.js): de cada parte se buscan tres
+        muestras de su texto en el libro. Lo que esta dentro va a la PAPELERA (recuperable, no a «Desglose/»); lo que no
+        esta o no se puede leer (otra edicion, material aparte, libro escaneado) se adjunta en «Desglose/». En un cosido
+        los originales siguen en «Desglose/». Vale para PDF y .doc; .docx y .rtf no se leen y se conservan.
+      · Sin guia: una carpeta evidentemente por capitulos con partes .doc tampoco se cataloga trozo a trozo
+        (esLibroPorCapitulos); usa el libro entero si esta y, si no, espera en el Inbox.
       · Capitulos a la vez en PDF y en .doc: los .doc son una copia y no se cosen (sinCopiasParalelas; la guia lo fija
         con desglose.solo_orden); viajan a «Desglose/».
       · Titulos de parte («Chapter52», «ch05.qxd», «Index») ya no se buscan en catalogos ni van a la IA por texto.

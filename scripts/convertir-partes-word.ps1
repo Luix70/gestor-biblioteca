@@ -9,13 +9,18 @@
   Las macros quedan desactivadas: son ficheros descargados.
   Reanudable: lo ya convertido se salta. Una parte que falle se lista y no para el resto.
 
+  Word bloquea de fabrica los .doc de formato muy antiguo (Centro de confianza; 5 libros de World Tracker Library). Con
+  -Soffice <ruta de soffice.com> esos pasan por LibreOffice, sin tocar la configuracion de Word. LibreOffice no hace
+  falta instalarlo: "msiexec /a LibreOffice.msi /qn TARGETDIR=<carpeta>" solo extrae sus ficheros.
+
     powershell -ExecutionPolicy Bypass -File scripts\convertir-partes-word.ps1              (seco)
     powershell -ExecutionPolicy Bypass -File scripts\convertir-partes-word.ps1 -Ejecutar
-    Opciones: -Inbox U:\Inbox · -Solo "texto del nombre de la carpeta"
+    Opciones: -Inbox U:\Inbox  -Solo "texto del nombre de la carpeta"  -Soffice <ruta de soffice.com>
 #>
 param(
   [string]$Inbox = 'U:\Inbox',
   [string]$Solo = '',
+  [string]$Soffice = '',
   [switch]$Ejecutar
 )
 $ErrorActionPreference = 'Stop'
@@ -77,7 +82,7 @@ try {
       $doc = $word.Documents.Open([ref]$f.FullName, [ref]$false, [ref]$true, [ref]$false, [ref]'sin-clave')
       $doc.ExportAsFixedFormat($pdf, 17)   # wdExportFormatPDF
     } catch {
-      [void]$fallos.Add("$($f.FullName): $($_.Exception.Message)")
+      [void]$fallos.Add([pscustomobject]@{ Fichero = $f; Motivo = $_.Exception.Message })
       if (Test-Path -LiteralPath $pdf) { Remove-Item -LiteralPath $pdf -Force }
     } finally {
       if ($doc) { $doc.Close([ref]0) | Out-Null }   # wdDoNotSaveChanges
@@ -87,6 +92,30 @@ try {
   $word.Quit([ref]0) | Out-Null
   [void][Runtime.InteropServices.Marshal]::ReleaseComObject($word)
 }
-Write-Host "[$(Hora)] Convertidas: $($pendientes.Count - $fallos.Count) · fallidas: $($fallos.Count)"
-foreach ($x in $fallos) { Write-Warning $x }
+if ($fallos.Count -and $Soffice) {
+  # Perfil propio y desechable, con las macros desactivadas de forma explicita.
+  $perfil = Join-Path $env:TEMP 'convertir-partes-lo'
+  New-Item -ItemType Directory -Force (Join-Path $perfil 'user') | Out-Null
+  @'
+<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
+</oor:items>
+'@ | Out-File -Encoding utf8 (Join-Path $perfil 'user\registrymodifications.xcu')
+  $url = 'file:///' + ($perfil -replace '\\', '/')
+  $restantes = New-Object System.Collections.ArrayList
+  $hechas = 0
+  foreach ($x in $fallos) {
+    $hechas++
+    $f = $x.Fichero
+    Write-Host ("[{0}] LibreOffice {1}/{2} {3}\{4}" -f (Hora), $hechas, $fallos.Count, $f.Directory.Name, $f.Name)
+    & $Soffice "-env:UserInstallation=$url" --headless --norestore --convert-to pdf --outdir $f.Directory.FullName $f.FullName 2>&1 | Out-Null
+    if (-not (Test-Path -LiteralPath ([IO.Path]::ChangeExtension($f.FullName, '.pdf')))) { [void]$restantes.Add($x) }
+  }
+  Remove-Item -LiteralPath $perfil -Recurse -Force -ErrorAction SilentlyContinue
+  $fallos = $restantes
+}
+Write-Host "[$(Hora)] Convertidas: $($pendientes.Count - $fallos.Count) - fallidas: $($fallos.Count)"
+foreach ($x in $fallos) { Write-Warning "$($x.Fichero.FullName): $($x.Motivo)" }
 if ($fallos.Count) { exit 1 }

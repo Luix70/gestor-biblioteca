@@ -24,7 +24,8 @@ import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf s
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, perfilHeredado, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
 import { tituloDeNombre } from './utils/afinar-guias.js';
-import { detectarLibroDesglosado, detectarDesglosePuro, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js'; // libro + su desglose
+import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js';
+import { partesContenidasEnLibro } from './utils/partes-contenidas.js'; // libro + su desglose
 import { unirPdfs, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js'; // carpeta de páginas escaneadas → PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
@@ -1095,15 +1096,16 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                     continue;
                 }
                 // DESGLOSE PURO (solo las partes, sin el libro entero): se COSE con qpdf y pasa a ser el caso
-                // de arriba. Si no se puede coser, la carpeta espera en el Inbox (ver desgloseEnEspera).
+                // de arriba. También el libro evidentemente por capítulos con partes .doc. Va por el mismo camino que
+                // el guiado: si dentro está el libro entero se usa ese, y si no se puede coser, espera en el Inbox.
+                // Un libro por capítulos nunca se cataloga trozo a trozo.
                 if (!desg) {
                     const puro = await detectarDesglosePuro(ruta);
-                    if (puro && await carpetaEstable(ruta)) {
-                        if (desgloseEnEspera(ruta)) continue;
-                        if (await materializarDesglosePuro(ruta, puro)) {
-                            unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
-                        }
-                        continue;
+                    if ((puro || await esLibroPorCapitulos(ruta)) && await carpetaEstable(ruta)) {
+                        if (modoPlan) { unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] }); continue; }
+                        const hecho = await materializarDesgloseGuiado(ruta, { orden: puro?.partes || [] });
+                        if (hecho === true) unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
+                        if (hecho !== 'no-es-desglose') continue;
                     }
                 }
             }
@@ -1730,13 +1732,17 @@ function desgloseEnEspera(dir) {
 
 async function materializarDesglose(dir, desg) {
     try {
+        // Lo que ya está dentro del libro entero sobra y va a la Papelera. Solo se adjunta lo que aporta algo o lo que
+        // no se ha podido comprobar (ver utils/partes-contenidas.js).
+        const { contenidas, conservadas } = await partesContenidasEnLibro(dir, desg.principal, desg.partes);
         const sub = path.join(dir, 'Desglose');
-        await fs.mkdir(sub, { recursive: true });
+        if (conservadas.length) await fs.mkdir(sub, { recursive: true });
         let movidas = 0;
-        for (const parte of desg.partes) if (await moverParteADesglose(dir, sub, parte)) movidas++;
+        for (const parte of conservadas) if (await moverParteADesglose(dir, sub, parte)) movidas++;
+        if (contenidas.length) await reciclar(contenidas.map((n) => path.join(dir, ...n.split('/'))), `partes contenidas ${path.basename(dir)}`);
         await retirarSubcarpetasVaciadas(dir, desg.partes);
         await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: desg.principal } });
-        console.log(`  📚 «${path.basename(dir)}»: LIBRO DESGLOSADO → «${desg.principal}»${desg.dominio ? ` (×${desg.dominio} de tamaño)` : ''} + ${movidas} parte(s) a «Desglose/» (adjunto).`);
+        console.log(`  📚 «${path.basename(dir)}»: LIBRO DESGLOSADO → «${desg.principal}»${desg.dominio ? ` (×${desg.dominio} de tamaño)` : ''}: ${contenidas.length} parte(s) ya contenidas a la Papelera, ${movidas} a «Desglose/» (adjunto).`);
         return true;
     } catch (err) {
         console.warn(`  ⚠️  desglose: no se pudo preparar «${path.basename(dir)}» (${err.message}); se deja como estaba.`);
