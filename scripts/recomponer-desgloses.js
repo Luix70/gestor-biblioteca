@@ -27,7 +27,11 @@
  *
  *   sudo docker exec -it gestor-biblioteca node scripts/recomponer-desgloses.js              (seco)
  *   sudo docker exec -it gestor-biblioteca node scripts/recomponer-desgloses.js --ejecutar
- *   Opciones: --solo <texto del nombre> · --desde <fecha ISO>
+ *   Opciones: --solo <texto del nombre> · --desde <fecha ISO> · --coleccion "<nombre>" (repetible)
+ *
+ * --coleccion trata como libro desglosado una colección sin guía de desglose en el Inbox («Student Solutions Manual»):
+ * sus miembros vuelven a una carpeta nueva con guía. Comprueba antes que lo es: «Facility Management» parecía otro
+ * caso igual y es una obra con audio, que no hay que tocar.
  *
  * Después, en el PC: scripts/convertir-partes-word.ps1 convierte a PDF las partes .doc de los libros que hay que coser.
  */
@@ -49,6 +53,7 @@ const args = process.argv.slice(2);
 const opcion = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 const EJECUTAR = args.includes('--ejecutar');
 const SOLO = (opcion('--solo') || '').toLowerCase();
+const COLECCIONES = args.filter((a, i) => args[i - 1] === '--coleccion');
 const DESDE = new Date(opcion('--desde') || '2026-10-31T20:00:00Z');   // inicio de la ingesta de World Tracker Library
 
 const RAIZ = path.resolve(process.cwd());
@@ -141,6 +146,9 @@ async function depositosCuarentena() {
 // ── 1. Plan: capítulos sueltos ──────────────────────────────────────────────────────────────────────────────
 console.log('Buscando guías de desglose en el Inbox…');
 const guias = (await guiasDesglose()).filter((g) => !SOLO || g.nombre.toLowerCase().includes(SOLO));
+for (const nombre of COLECCIONES) {
+  guias.push({ dir: path.join(ENTRADA_COSIDOS, nombre), nombre, guia: { accion: 'desglose', perfil: { origen: 'panel' }, desglose: { orden: [] } } });
+}
 const depositos = await depositosCuarentena();
 console.log(`  ${guias.length} carpetas con guía · ${depositos.size} ficheros en Cuarentena\n`);
 

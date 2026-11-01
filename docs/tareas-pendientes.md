@@ -27,6 +27,9 @@ En este orden, **con el Vigilante en pausa**:
 - [ ] Antes de reactivar el Vigilante: mirar `Inbox/.../Computers` (49.074 ficheros, sobre todo .htm y .gif)
 - [ ] Reactivar el Vigilante; comprobar con `auditar` que no quedan colecciones de capítulos
 
+- [x] `recomponer-desgloses.js --ejecutar` (1-nov: 1.084 retirados, 16 cosidos devueltos, 0 fallos, 0 partes ausentes)
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/recomponer-desgloses.js --solo "Student Solutions" --coleccion "Student Solutions Manual"` y repetir con `--ejecutar`
+
 Cada libro vuelve a su carpeta del Inbox y lo cataloga la ingesta corregida. Lo retirado pasa por la Papelera.
 Seco del PC (1-nov): 29 libros, 1.084 documentos de capítulo, 28 ficheros de Cuarentena, 16 cosidos a rehacer, 3 títulos.
 15 libros tienen el entero, 3 se cosen de PDF y 11 necesitan convertir .doc.
