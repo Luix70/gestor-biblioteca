@@ -23,7 +23,7 @@ En este orden, **con el Vigilante en pausa**:
 - [ ] Copia de la base en el PC: `D:BibliobakCopiaBase.ps1`
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/recomponer-desgloses.js`
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/recomponer-desgloses.js --ejecutar`
-- [ ] En el PC: `powershell -ExecutionPolicy Bypass -File scriptsconvertir-partes-word.ps1` y luego con `-Ejecutar -Soffice <ruta de soffice.com>`
+- [ ] En el PC: `powershell -ExecutionPolicy Bypass -File scriptsnvertir-partes-word.ps1` y luego con `-Ejecutar -Soffice <ruta de soffice.com>`
 - [ ] Antes de reactivar el Vigilante: mirar `Inbox/.../Computers` (49.074 ficheros, sobre todo .htm y .gif)
 - [ ] Reactivar el Vigilante; comprobar con `auditar` que no quedan colecciones de capítulos
 
