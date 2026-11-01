@@ -115,7 +115,10 @@ function textoPdfUtil(texto) {
     return alphaRatio >= 0.6 && reales >= 40;                     // bastantes letras y palabras reales
 }
 
-export function extraerISBNs(texto) {   // exportada: la reutiliza el lector de Word (mismo criterio de captura)
+// `enTexto`: `texto` es el CUERPO de un documento, no un nombre de fichero. Ahí diez cifras seguidas sin la palabra
+// «ISBN» cerca no son un ISBN: una de cada once pasa el dígito de control por casualidad (teléfonos, referencias,
+// tablas). Con guiones, o de 13 cifras con su 978/979, sí se aceptan: tienen forma de ISBN por sí solas.
+export function extraerISBNs(texto, { enTexto = false } = {}) {   // exportada: la reutiliza el lector de Word (mismo criterio de captura)
     if (!texto) return [];
     // Sin más cifras pegadas delante ni detrás: unas cifras dentro de un número más largo no son un ISBN (8-oct: la
     // hora de subida «1791441939492-…» daba el «ISBN» 1791441939, que pasa el dígito de control de un ISBN-10).
@@ -124,7 +127,10 @@ export function extraerISBNs(texto) {   // exportada: la reutiliza el lector de 
     let m;
     while ((m = re.exec(texto)) !== null) {
         const v = validarISBN(m[1]);
-        if (v) out.add(v);
+        if (!v) continue;
+        const suelto = /^\d{9}[\dXx]$/.test(m[1]);
+        if (enTexto && suelto && !/ISBN|Book Number/i.test(texto.slice(Math.max(0, m.index - 40), m.index + m[0].length - m[1].length))) continue;
+        out.add(v);
     }
     return [...out];
 }
@@ -275,7 +281,7 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // (no el del cuerpo) para decidir "es libro", así un ISBN espurio no convierte una revista en libro.
         const candidatos = new Set();
         const propios = new Set();
-        for (const x of extraerISBNs(texto)) for (const v of variantesISBN(x)) candidatos.add(v);                 // cuerpo → pista
+        for (const x of extraerISBNs(texto, { enTexto: true })) for (const v of variantesISBN(x)) candidatos.add(v);                 // cuerpo → pista
         if (parsed.isbn) for (const v of variantesISBN(parsed.isbn)) { candidatos.add(v); propios.add(v); }       // el nombre ES un ISBN
         for (const x of extraerISBNs(nombreParaISBN(nombre))) for (const v of variantesISBN(x)) { candidatos.add(v); propios.add(v); } // ISBN incrustado en el nombre (incl. DOI Springer)
         for (const c of (cip?.isbns || [])) for (const v of variantesISBN(c.isbn || c)) { candidatos.add(v); propios.add(v); } // CIP

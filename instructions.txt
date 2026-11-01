@@ -2535,6 +2535,11 @@ de ficheros clasificado por CDU.
       · Titulos de parte («Chapter52», «ch05.qxd», «Index») ya no se buscan en catalogos ni van a la IA por texto.
       · REPARAR lo ya mal catalogado: scripts/recomponer-desgloses.js devuelve cada libro al Inbox y lo cataloga la
         ingesta corregida (seco por defecto, --ejecutar; con el Vigilante en pausa y copia antes).
+    · ISBN DE RELLENO: el digito de control no prueba que un numero sea un ISBN. 9876543210, 1111111111 o 0102030402 lo
+      pasan, y OpenLibrary tiene basura registrada justo en ellos: traian titulo, autores, CDU y portada de otro libro.
+      Se rechazan en validarISBN (identificadores · esIsbnDeRelleno). En el CUERPO de un documento, diez cifras sueltas
+      solo cuentan con la palabra ISBN cerca; en el nombre del fichero no hace falta. Reparar lo ya catalogado:
+      scripts/sanear-isbn-relleno.js (seco por defecto, --ejecutar; lo retirado queda en «deshacer» de cada documento).
     · REPARAR UN PDF ROTO (Cuarentena/ilegibles -> «🔧 Reparar», admin): qpdf reconstruye la tabla xref a partir
       de los objetos que si estan en el fichero (es lo que hacen por dentro las webs tipo iLovePDF). NO cataloga
       nada: deja el candidato en el MISMO staging que una copia subida (`.reemplazo/` + estado.listo) y devuelve

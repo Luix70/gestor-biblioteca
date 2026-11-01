@@ -17,6 +17,13 @@
 
 ## 1. Scripts por ejecutar
 
+### 0.75 Sanear los ISBN de relleno (1-nov) — solo BD y portadas; antes de reactivar el Vigilante
+- [ ] Copia de la base en el PC: `D:\Bibliobak\CopiaBase.ps1`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/sanear-isbn-relleno.js`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/sanear-isbn-relleno.js --ejecutar`
+
+Unos 198 documentos con un ISBN falso (9876543210, 0102030402, 1213141513…) que les trajo título, autores, CDU o portada de otro libro. Después, los de CDU 000 los recoge el Conformador.
+
 ### 0.8 Recomponer los libros por capítulos (1-nov) — mueve ficheros y retira ~1.085 documentos
 En este orden, **con el Vigilante en pausa**:
 - [ ] Desplegar (la ingesta corregida debe estar en marcha antes de reactivar el Vigilante)

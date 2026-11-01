@@ -94,7 +94,7 @@ export async function textoInicialEpub(rutaArchivo, { maxDocs = 25 } = {}) {
 export async function isbnsEnTextoEpub(rutaArchivo, { maxDocs = 25, texto = null } = {}) {
     const t = texto ?? await textoInicialEpub(rutaArchivo, { maxDocs });
     const out = new Set();
-    for (const c of extraerISBNs(t)) {
+    for (const c of extraerISBNs(t, { enTexto: true })) {
         const v = validarISBN(c);
         if (v && !/^(\d)\1+$/.test(v)) out.add(v);
         if (out.size >= 8) break;

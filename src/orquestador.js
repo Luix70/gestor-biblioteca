@@ -854,7 +854,7 @@ export async function procesarRecurso(entrada) {
         if (w.autor && !(datosBase.autores || []).length) datosBase.autores = [w.autor];
         if (w.idioma && !datosBase.idioma) datosBase.idioma = String(w.idioma).slice(0, 2).toLowerCase();
         if (w.descripcion && !datosBase.sinopsis) datosBase.sinopsis = w.descripcion;
-        const isbnsW = extraerISBNs(`${w.texto || ''}\n${path.basename(rutas[0])}`);
+        const isbnsW = [...extraerISBNs(w.texto || '', { enTexto: true }), ...extraerISBNs(path.basename(rutas[0]))];
         if (isbnsW.length) {
             datosBase.isbn_candidatos = [...new Set([...(datosBase.isbn_candidatos || []), ...isbnsW.flatMap(variantesISBN)])];
             if (!datosBase.isbn) datosBase.isbn = validarISBN(isbnsW[0]) || null;

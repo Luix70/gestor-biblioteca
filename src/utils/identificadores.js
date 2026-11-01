@@ -24,9 +24,26 @@ export function validarISBN10(isbn) {
     return suma % 11 === 0;
 }
 
+/**
+ * ¿Es un número de RELLENO, de los que pasan el dígito de control sin ser de ningún libro? Secuencias, un dígito
+ * repetido, pares que se repiten o van contando (9876543210, 1111111111, 6262626264, 0102030402, 1213141513). Salen
+ * en escalas de gráficos, ejercicios y maquetas, y OpenLibrary tiene basura registrada justo en ellos: «9876543210»
+ * dio a un CCNA la cubierta de «Hitler para 1000 años», y «1213141513» convirtió un Brock en «Ungifted».
+ */
+export function esIsbnDeRelleno(valor) {
+    const n = normalizarIdentificador(valor);
+    const cuerpo = n.length === 13 ? n.slice(3, 12) : n.length === 10 ? n.slice(0, 9) : '';
+    if (!/^\d{9}$/.test(cuerpo)) return false;
+    if (/^(\d)\1{8}$/.test(cuerpo) || /^(\d\d)\1{3}\d$/.test(cuerpo)) return true;
+    if (['012345678', '123456789', '876543210', '987654321'].includes(cuerpo)) return true;
+    const pares = cuerpo.match(/\d\d/g).map(Number);
+    return pares.every((p, i) => i === 0 || p === pares[i - 1] + 1);
+}
+
 /** Devuelve el ISBN normalizado si es válido (10 o 13), o null. */
 export function validarISBN(valor) {
     const n = normalizarIdentificador(valor);
+    if (esIsbnDeRelleno(n)) return null;
     if (n.length === 13 && validarISBN13(n)) return n;
     if (n.length === 10 && validarISBN10(n)) return n;
     return null;
