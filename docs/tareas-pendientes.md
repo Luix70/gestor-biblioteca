@@ -17,6 +17,22 @@
 
 ## 1. Scripts por ejecutar
 
+### 0.8 Recomponer los libros por capítulos (1-nov) — mueve ficheros y retira ~1.085 documentos
+En este orden, **con el Vigilante en pausa**:
+- [ ] Desplegar (la ingesta corregida debe estar en marcha antes de reactivar el Vigilante)
+- [ ] Copia de la base en el PC: `D:BibliobakCopiaBase.ps1`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/recomponer-desgloses.js`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/recomponer-desgloses.js --ejecutar`
+- [ ] En el PC: `powershell -ExecutionPolicy Bypass -File scriptsconvertir-partes-word.ps1` y luego con `-Ejecutar`
+- [ ] Antes de reactivar el Vigilante: mirar `Inbox/.../Computers` (49.074 ficheros, sobre todo .htm y .gif)
+- [ ] Reactivar el Vigilante; comprobar con `auditar` que no quedan colecciones de capítulos
+
+Cada libro vuelve a su carpeta del Inbox y lo cataloga la ingesta corregida. Lo retirado pasa por la Papelera.
+Seco del PC (1-nov): 29 libros, 1.084 documentos de capítulo, 28 ficheros de Cuarentena, 16 cosidos a rehacer, 3 títulos.
+15 libros tienen el entero, 3 se cosen de PDF y 11 necesitan convertir .doc.
+Word bloquea de fábrica el formato antiguo de 5 de esos 11 (Islam, West's Business Law, Sustaining the Earth, Sociology
+Understanding, Writer's Presence): hay que decidir antes cómo convertirlos. Esos 5 esperan en el Inbox sin catalogar.
+
 ### 1.1 Libros sin editorial (5.535) — usa APIs, horas
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/reclasificar-editoriales.js --sin-editorial`
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/reclasificar-editoriales.js --sin-editorial --ejecutar`

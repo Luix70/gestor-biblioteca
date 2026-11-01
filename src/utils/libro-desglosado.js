@@ -24,6 +24,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { paginasPdf } from './qpdf.js';
 const ejecutarCmd = promisify(execFile); // pdftotext (poppler) para la comprobación de capa de texto
 
 // Extensiones que cuentan como DOCUMENTO (el principal y sus partes; las partes pueden ser .doc/.docx).
@@ -169,30 +170,53 @@ export async function detectarLibroDesglosado(dir) {
 // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 // Portada/preliminares (van primero) y material final (va al final, en este orden).
-const RE_FRONT = /(front[ _-]?matter|^fm$|^fm[ _-]|portadilla|^cover|^portada|^title|^titulo|copyri|^toc$|contents|preface|prefacio|pr[oó]logo)/i;
+// Incluye la serie de Wiley y otros editores: ffirs, ftoc, fpref… delante; bapp01, bgloss, bindex… detrás.
+const RE_FRONT = /(front[ _-]?matter|^fm\d*$|^fm[ _-]|[_-]\d*fm\d*$|portadilla|^cover|^portada|^title|^titulo|copyri|^toc$|contents|preface|prefacio|^prefix|pr[oó]logo|^intro|^ack|^author'?s?\b|^foreword|^dedicat|^f(firs|last|toc|pref|betw|fore|intro|ack|ded)\b)/i;
 const FIN = [
-    [/(appendix|ap[eé]ndice|anexo)/i, 1],
-    [/(glossar|glosario)/i, 2],
-    [/(^|[ _-])(index|[ií]ndice)([ _-]|$)/i, 3],
-    [/(biblio|referenc)/i, 4],
+    [/(appendi|ap[eé]ndice|anexo|^bapp|(^|[_-])app[ _-]*[a-z\d]$)/i, 1],
+    [/glos/i, 2],
+    [/((^|[ _-])(index(es)?|[ií]ndice)([ _-]|$)|^[a-z]?index\b|idx|indx)/i, 3],   // «nindex.qxd» y «sindex.qxd»: de nombres y de materias
+    [/(biblio|referenc|^bib$|^b?refs?\b|[_-]refs?$)/i, 4],
     [/(answer|solucion|respuesta)/i, 5],
-    [/(back[ _-]?matter|^bm$|^bm[ _-])/i, 6],
+    [/(back[ _-]?matter|^bm$|^bm[ _-]|[_-]bm\d*$)/i, 6],
+    [/(credits?|cr[eé]ditos)/i, 7],
 ];
-/** Primer número que aparece en el nombre (Chapter07 → 7, 05-CH → 5). null si no hay. */
-const numDe = (base) => { const m = base.match(/\d{1,4}/); return m ? Number(m[0]) : null; };
+/**
+ * Número de la parte. Primero el que sigue a «chapter», «ch», «unit»…: en «FAA-H-8083-15A - Chapter 04» o
+ * «ste30670_ch10» el primer número del nombre es el del documento, igual en todas las partes. Si no, el primero
+ * que aparezca (05-CH → 5). null si no hay.
+ */
+const numDe = (base) => {
+    const marcado = base.match(/(?:chapter|cap[ií]tulo|cap|chap|ch|unit|unidad|lesson|lecci[oó]n|section|secci[oó]n)[ _.-]*(\d{1,4})/i);
+    if (marcado) return Number(marcado[1]);
+    const m = base.match(/\d{1,4}/);
+    return m ? Number(m[0]) : null;
+};
+// «p01», «part 2»: la portadilla de una parte va ANTES del capítulo con el mismo número.
+const RE_PORTADILLA_PARTE = /^p(art)?[ _-]*\d/i;
 
 /**
  * Ordena las partes de un libro como se leería: preliminares → partes numeradas → material final
  * (apéndices → glosarios → índice → bibliografía → soluciones). Determinista y estable.
  */
 export function ordenarPartesLibro(nombres) {
+    // El número inicial manda solo si es una numeración GLOBAL (01_title … 74_replycard). Si se repite, cada familia
+    // lleva la suya («01 appendix», «01 chapter», «01 title page», o un ISBN delante): decide la palabra.
+    const inicial = (base) => base.match(/^\d{1,3}(?!\d)/)?.[0] ?? null;
+    const usos = new Map();
+    for (const n of nombres) {
+        const i = inicial(path.basename(n, path.extname(n)));
+        if (i != null) usos.set(Number(i), (usos.get(Number(i)) || 0) + 1);
+    }
     const clasificar = (n) => {
         const base = path.basename(n, path.extname(n));
-        if (/^\d/.test(base)) return { bloque: 1, orden: numDe(base) ?? 0, base };   // «01_title», «05-CH»: manda el número
-        if (RE_FRONT.test(base)) return { bloque: 0, orden: 0, base };
-        for (const [re, sub] of FIN) if (re.test(base)) return { bloque: 3, orden: sub * 1000 + (numDe(base) ?? 0), base };
+        const i = inicial(base);
+        if (i != null && usos.get(Number(i)) === 1) return { bloque: 1, orden: Number(i), base };   // «01_title», «05-CH»
+        const palabra = base.replace(/^\d{1,3}[ _.-]+(?=\D)/, '');
+        if (RE_FRONT.test(palabra)) return { bloque: 0, orden: 0, base };
+        for (const [re, sub] of FIN) if (re.test(palabra)) return { bloque: 3, orden: sub * 1000 + (numDe(palabra) ?? 0), base };
         const num = numDe(base);
-        if (num != null) return { bloque: 1, orden: num, base };                      // «Chapter07»
+        if (num != null) return { bloque: 1, orden: RE_PORTADILLA_PARTE.test(base) ? num - 0.5 : num, base };   // «Chapter07»
         return { bloque: 2, orden: 0, base };                                          // sin pistas: entre medias
     };
     return nombres
@@ -200,6 +224,81 @@ export function ordenarPartesLibro(nombres) {
         .sort((a, b) => a.c.bloque - b.c.bloque || a.c.orden - b.c.orden
             || a.c.base.localeCompare(b.c.base, 'es', { numeric: true, sensitivity: 'base' }))
         .map((x) => x.n);
+}
+
+/**
+ * Con qué ficheros se cose un libro. `docs` son las partes presentes y `ordenGuia` el orden de la guía; lo que la
+ * guía no nombre va al final en el orden determinista (coserlo sin una parte sería perder contenido en silencio).
+ * Una parte que no es PDF se cose con su gemelo «.pdf» si lo tiene (scripts/convertir-partes-word.ps1 los deja al
+ * lado del original). Devuelve { aCoser, sinPdf, titulos }; `sinPdf` no vacío = aún no se puede coser.
+ */
+export function planCosido(docs, ordenGuia = [], titulos = {}) {
+    const enGuia = [...new Set(ordenGuia)].filter((n) => docs.includes(n));
+    const orden = [...enGuia, ...ordenarPartesLibro(docs.filter((n) => !enGuia.includes(n)))];
+    const presentes = new Map(docs.map((n) => [n.toLowerCase(), n]));
+    const aCoser = [], sinPdf = [], titulosPdf = {};
+    for (const n of orden) {
+        const ext = path.extname(n).toLowerCase();
+        const pdf = ext === '.pdf' ? n : presentes.get((n.slice(0, -ext.length) + '.pdf').toLowerCase());
+        if (!pdf) { sinPdf.push(n); continue; }
+        if (!aCoser.includes(pdf)) aCoser.push(pdf);
+        if (titulos[n] && !titulosPdf[pdf]) titulosPdf[pdf] = titulos[n];
+    }
+    return { aCoser, sinPdf, titulos: titulosPdf };
+}
+
+/**
+ * Si el libro viene entero en PDF y además en .doc por capítulos, los .doc son una COPIA: cosidos o convertidos, el
+ * libro saldría duplicado («A Short Guide to Writing about History»: 01…08.pdf y MARIcp01…08.doc). Se reconoce porque
+ * los capítulos numerados de los .doc ya están en los PDF. Devuelve las partes que hay que coser.
+ */
+export function sinCopiasParalelas(docs) {
+    const esPdf = (n) => path.extname(n).toLowerCase() === '.pdf';
+    const numero = (n) => numDe(path.basename(n, path.extname(n)));
+    const pdfs = docs.filter(esPdf);
+    const numerados = docs.filter((n) => !esPdf(n)).map(numero).filter((x) => x != null);
+    if (pdfs.length < 5 || !numerados.length) return docs;
+    const enPdf = new Set(pdfs.map(numero));
+    return numerados.filter((x) => enPdf.has(x)).length / numerados.length >= 0.8 ? pdfs : docs;
+}
+
+// Formatos en los que puede venir el libro entero (un .doc es siempre un capítulo o un manuscrito).
+const EXT_LIBRO_ENTERO = new Set(['.pdf']);
+const PAGS_MIN_ENTERO = 100;         // por debajo no es un libro de texto entero
+const RATIO_PAGS_ENTERO = 0.7;       // el entero tiene al menos el 70 % de las páginas de las demás partes juntas
+const DOMINIO_PAGS_ENTERO = 2;       // y al menos el doble que la mayor de ellas
+const RATIO_COPIA_ENTERO = 0.8;      // lo que tenga el 80 % de sus páginas es otra copia o edición del entero
+const PAGS_ESTIMADAS_DOC = 5;        // un .doc no se puede medir aquí: cuenta como un capítulo mínimo
+
+/**
+ * ¿Entre las partes de una carpeta que YA se sabe que es un libro desglosado está el libro ENTERO, aunque su nombre
+ * no se parezca al de la carpeta («12e.pdf», «Introduction to Literature 14e.pdf»)? Devuelve su ruta relativa o null.
+ *
+ * Se mide en PÁGINAS, no en bytes. En bytes engaña: el capítulo 7 del Instrument Flying Handbook pesa 23 MB de 48 y
+ * cuatro veces lo que el siguiente, y es solo una parte de sus 387 páginas. Sin este paso, varios libros cosieron el
+ * entero con sus propios capítulos. Una parte cuyas páginas no se puedan medir cuenta 0.
+ */
+export async function libroEnteroEntrePartes(dir, partes, { rutaDe = (n) => path.join(dir, ...n.split('/')) } = {}) {
+    const candidatos = [];
+    for (const nombre of partes) {
+        if (!EXT_LIBRO_ENTERO.has(path.extname(nombre).toLowerCase())) continue;
+        candidatos.push({ nombre, paginas: await paginasPdf(rutaDe(nombre)) || 0 });
+    }
+    if (!candidatos.length) return null;
+    candidatos.sort((a, b) => b.paginas - a.paginas);
+    const mayor = candidatos[0];
+    if (mayor.paginas < PAGS_MIN_ENTERO) return null;
+    // Copias del entero: no son partes, y entre ellas se prefiere la que no se llame como una parte. Medido:
+    // en «Understanding Movies», «Chapter 6.pdf» es el libro entero repetido (624 págs. las dos).
+    const copias = candidatos.filter((c) => c.paginas >= RATIO_COPIA_ENTERO * mayor.paginas);
+    const resto = candidatos.filter((c) => !copias.includes(c));
+    const sinMedir = partes.length - candidatos.length;
+    // Sin sumar: si hay capítulos en PDF, los .doc suelen ser esos mismos capítulos.
+    const sumaResto = Math.max(resto.reduce((s, c) => s + c.paginas, 0), sinMedir * PAGS_ESTIMADAS_DOC);
+    const segunda = Math.max(resto[0]?.paginas || 0, sinMedir ? PAGS_ESTIMADAS_DOC : 0);
+    if (!sumaResto) return null;
+    if (mayor.paginas < RATIO_PAGS_ENTERO * sumaResto || mayor.paginas < DOMINIO_PAGS_ENTERO * segunda) return null;
+    return (copias.find((c) => !pareceParte(c.nombre)) || mayor).nombre;
 }
 
 // Subcarpetas que, dentro de un libro desglosado, guardan sus PARTES: «Chapters/», «Capítulos/», «PDF/»…

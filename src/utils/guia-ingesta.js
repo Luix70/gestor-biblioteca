@@ -282,6 +282,8 @@ export function normalizarGuia(g) {
             }
             if (Object.keys(t).length) d.titulos = t;
         }
+        // `solo_orden`: se cose exactamente `orden`; lo demás son copias y viaja a «Desglose/» sin coserse.
+        if (g.desglose.solo_orden === true) d.solo_orden = true;
         if (Object.keys(d).length) guia.desglose = d;
     }
 

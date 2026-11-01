@@ -2491,7 +2491,7 @@ de ficheros clasificado por CDU.
     · DESGLOSE PURO → SE COSE EL LIBRO (qpdf): variante del anterior en la que la carpeta trae SOLO las partes
       (FrontMatter + Chapter01..N + Appendix + Glossary + Index), sin el libro entero. No se usa el FrontMatter
       como principal (separaria la obra de forma arbitraria: el visor abriria 20 paginas haciendolas pasar por un
-      libro de 700). Se UNEN en orden de lectura con qpdf -> «<carpeta> (recompuesto).pdf», que pasa a ser el
+      libro de 700). Se UNEN en orden de lectura con qpdf -> «<carpeta>.pdf», que pasa a ser el
       principal, y los ORIGINALES viajan intactos en «Desglose/». qpdf COPIA las paginas (no re-renderiza): sin
       perdida de calidad ni de capa de texto. VENTAJA: las primeras paginas del resultado SON el front matter,
       justo donde el pipeline busca ISBN/CIP -> identificacion autoritativa y GRATIS (sin IA).
@@ -2509,7 +2509,25 @@ de ficheros clasificado por CDU.
             fichero derivado; ante la duda decide el humano). Probado con una carpeta ADVERSARIA (laminas
             renombradas a FrontMatter/Chapter/Index para burlar las capas 1 y 2): rechazada.
       Si algo no cuadra (falta qpdf, la union falla, o salen menos paginas que partes) NO se toca nada y la
-      carpeta queda para el Inspector. Verificado: 0 falsos positivos en todo el Test Battery.
+      carpeta ESPERA EN EL INBOX SIN CATALOGAR; se reintenta cada 6 h (o al reiniciar). Verificado: 0 falsos
+      positivos en todo el Test Battery.
+      ⚠ Incidente 1-nov: antes, un desglose que no se podia coser seguia con las reglas normales y cada capitulo
+      se catalogaba suelto, en una coleccion con el nombre del libro y con ISBN y CDU de otros libros (29 libros
+      -> 1.085 documentos). Ya nunca: una carpeta que la guia dice que es UN libro no se trocea.
+      · Tiempo de qpdf: 30 min (QPDF_TIMEOUT_MS). Depende de los objetos del PDF, no de los MB: un capitulo de 23 MB
+        con graficos vectoriales agotaba los 5 min de antes en el Atom, y 1.940 paginas de otro libro tardaban 28 s.
+      · Partes .doc sin libro entero: el NAS no puede convertirlas. Espera en el Inbox; en el PC,
+        scriptsconvertir-partes-word.ps1 (seco; con -Ejecutar convierte con Word, macros desactivadas) deja un .pdf
+        junto a cada .doc y el vigilante cose. Los .doc viajan a «Desglose/». El PDF solo tendra lo que traia el .doc.
+        Word bloquea de fabrica los .doc de formato muy antiguo (Centro de confianza): esas partes salen como fallidas.
+      · Libro entero con otro nombre («12e.pdf»): en una carpeta guiada como desglose se reconoce por PAGINAS
+        (libroEnteroEntrePartes: >= 100 pags, >= 70 % de las demas juntas, >= doble de la mayor), nunca por bytes.
+        Lo que tenga el 80 % de sus paginas es otra copia o edicion del entero, no una parte.
+      · Capitulos a la vez en PDF y en .doc: los .doc son una copia y no se cosen (sinCopiasParalelas; la guia lo fija
+        con desglose.solo_orden); viajan a «Desglose/».
+      · Titulos de parte («Chapter52», «ch05.qxd», «Index») ya no se buscan en catalogos ni van a la IA por texto.
+      · REPARAR lo ya mal catalogado: scripts/recomponer-desgloses.js devuelve cada libro al Inbox y lo cataloga la
+        ingesta corregida (seco por defecto, --ejecutar; con el Vigilante en pausa y copia antes).
     · REPARAR UN PDF ROTO (Cuarentena/ilegibles -> «🔧 Reparar», admin): qpdf reconstruye la tabla xref a partir
       de los objetos que si estan en el fichero (es lo que hacen por dentro las webs tipo iLovePDF). NO cataloga
       nada: deja el candidato en el MISMO staging que una copia subida (`.reemplazo/` + estado.listo) y devuelve

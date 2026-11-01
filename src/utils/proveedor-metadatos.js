@@ -124,8 +124,21 @@ Responde ÚNICAMENTE en JSON (null para los campos que no puedas leer):
  * cada ficha ajena salieron sinopsis, autor, editorial, año, idioma y un Dewey que acabó en la CDU (741.5 → 74).
  * Con menos de dos letras no se busca por texto; el ISBN, si lo hay, sigue sirviendo. «º» y «ª» no cuentan
  * (en «nº 5» no hay nada que buscar).
+ *
+ * Tampoco el nombre de una PARTE de libro («Chapter52», «ch05.qxd», «KENNch12», «Index», «Front Matter»): medido el
+ * 1-nov, los capítulos sueltos de «West's Business Law» recogieron 54 ISBN ajenos y CDU de la Biblia (27-23).
  */
+const RE_TITULO_NUMERADO = /^(?:[a-z]{0,6}[ _-]*)?(?:chapter|cap[ií]tulo|chap|cap|ch|cp|unit|unidad|lesson|lecci[oó]n|tema|part|parte|section|secci[oó]n|appendix|ap[eé]ndice|anexo)[ _.-]*(?:\d{1,3}|[ivxlc]{1,6}|[a-z])?$/i;
+const RE_TITULO_NUMERO_CAPITULO = /^\d{1,3}[ _.-]*(?:chapter|cap[ií]tulo)$/i;
+const RE_TITULO_PARTE = /^(?:front ?matter|back ?matter|fm|bm|toc|contents|index|[ií]ndice|preface|prefacio|glossary|glosario|bibliography|bibliograf[ií]a|references|cover|title ?page|copyright)$/i;
+
+export function esTituloDeParte(titulo) {
+    const t = String(titulo || '').replace(/\.qxd$/i, '').trim();
+    return RE_TITULO_NUMERADO.test(t) || RE_TITULO_NUMERO_CAPITULO.test(t) || RE_TITULO_PARTE.test(t);
+}
+
 export function tituloBuscable(titulo) {
+    if (esTituloDeParte(titulo)) return false;
     const letras = String(titulo || '').replace(/[ºª]/g, '').match(/\p{L}/gu) || [];
     return letras.length >= 2;
 }

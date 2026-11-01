@@ -15,6 +15,7 @@ import AdmZip from 'adm-zip';
 import { carpetaDeDoc, EXT_DOC } from '../mantenimiento/util-mantenimiento.js';
 import { reciclarCarpeta } from './papelera.js';
 import { desindexarDoc } from './indice-busqueda.js';
+import { otroDocEnCarpeta } from './carpeta-en-uso.js';
 import { escribirGuia } from './guia-ingesta.js'; // folder-drop «libro-material» (el material viaja al reprocesar)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -21,7 +21,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const ejecutar = promisify(execFile);
-const TIEMPO = Number(process.env.QPDF_TIMEOUT_MS || 300000); // 5 min: coser 700 páginas en un Atom no es instantáneo
+// El tiempo NO depende de los megas sino de los OBJETOS del PDF: en el Atom, «Digital Systems» (1.940 págs.) tardó
+// 28 s y «Instrument Flying Handbook» (387 págs., 46 MB, con un capítulo de gráficos vectoriales) pasó de 5 min.
+const TIEMPO = Number(process.env.QPDF_TIMEOUT_MS || 1800000); // ver config.js
 
 /** ¿Está qpdf disponible? (se cachea: la respuesta no cambia en caliente) */
 let _hay = null;
@@ -76,19 +78,22 @@ export async function unirPdfs(rutas, destino, { timeout = TIEMPO } = {}) {
     try {
         await fs.mkdir(path.dirname(destino), { recursive: true });
         // qpdf --empty --pages <a> <b> … -- <destino>   (cada fichero aporta TODAS sus páginas)
-        await ejecutar('qpdf', ['--empty', '--pages', ...rutas, '--', destino], { timeout, maxBuffer: 1 << 22 });
+        await ejecutar('qpdf', ['--empty', '--pages', ...rutas, '--', destino], { timeout, maxBuffer: 1 << 26 });
         const paginas = await paginasPdf(destino);
         const bytes = await tam(destino);
         if (!bytes) return { ok: false, motivo: 'qpdf no produjo salida' };
         return { ok: true, paginas, bytes, partes: rutas.length };
     } catch (e) {
+        // Matado por el tiempo: lo que haya escrito está A MEDIAS. Nunca se da por bueno, aunque poppler lo abra.
+        if (e.killed) return { ok: false, tiempoAgotado: true, motivo: `qpdf no terminó en ${Math.round(timeout / 60000)} min` };
         // qpdf avisa por stderr de páginas problemáticas pero puede haber generado un PDF válido igualmente.
         const bytes = await tam(destino);
         if (bytes > 0) {
             const paginas = await paginasPdf(destino);
-            if (paginas) return { ok: true, paginas, bytes, partes: rutas.length, aviso: (e.stderr || e.message || '').slice(0, 300) };
+            if (paginas) return { ok: true, paginas, bytes, partes: rutas.length, aviso: String(e.stderr || '').slice(0, 300) };
         }
-        return { ok: false, motivo: (e.stderr || e.message || 'error de qpdf').slice(0, 300) };
+        // Solo stderr: e.message empieza por la línea de órdenes entera, que con 40 rutas tapaba la causa real.
+        return { ok: false, motivo: String(e.stderr || '').trim().slice(-300) || `qpdf terminó con código ${e.code}` };
     }
 }
 

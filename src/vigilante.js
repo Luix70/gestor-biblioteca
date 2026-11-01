@@ -24,7 +24,7 @@ import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf s
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, perfilHeredado, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
 import { tituloDeNombre } from './utils/afinar-guias.js';
-import { detectarLibroDesglosado, detectarDesglosePuro, ordenarPartesLibro, partesDeDesglose } from './utils/libro-desglosado.js'; // libro + su desglose
+import { detectarLibroDesglosado, detectarDesglosePuro, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js'; // libro + su desglose
 import { unirPdfs, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js'; // carpeta de páginas escaneadas → PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
@@ -1069,11 +1069,15 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
             if (guiaCarpeta?.accion === 'desglose') {
                 // En PLAN solo se anuncia: coser fabrica un PDF y mueve las partes, y la vista previa no toca nada.
                 if (modoPlan) { unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] }); continue; }
-                if (await materializarDesgloseGuiado(ruta, guiaCarpeta.desglose || {})) {
+                const hecho = await materializarDesgloseGuiado(ruta, guiaCarpeta.desglose || {});
+                if (hecho === true) {
                     unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
                     continue;
                 }
-                // No se pudo: sigue abajo con las reglas de siempre.
+                // ESPERA: aún no se ha podido coser. Sigue en el Inbox, sin catalogar. Seguir con las reglas de
+                // siempre convertía cada capítulo en un documento de una colección (1-nov: 29 libros → 1.085 docs).
+                if (hecho === 'esperar') continue;
+                // 'no-es-desglose' (quedan menos de dos documentos): sigue abajo con las reglas de siempre.
             }
             // LIBRO DESGLOSADO (AUTOMÁTICO): carpeta con UN libro entero + su desglose en capítulos/material.
             // Se distingue de una COLECCIÓN de libros por tres señales a la vez (nombre del fichero ≈ nombre de
@@ -1091,11 +1095,14 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                     continue;
                 }
                 // DESGLOSE PURO (solo las partes, sin el libro entero): se COSE con qpdf y pasa a ser el caso
-                // de arriba. Si no se puede coser, no se toca nada y la carpeta queda para el Inspector.
+                // de arriba. Si no se puede coser, la carpeta espera en el Inbox (ver desgloseEnEspera).
                 if (!desg) {
                     const puro = await detectarDesglosePuro(ruta);
-                    if (puro && await carpetaEstable(ruta) && await materializarDesglosePuro(ruta, puro)) {
-                        unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
+                    if (puro && await carpetaEstable(ruta)) {
+                        if (desgloseEnEspera(ruta)) continue;
+                        if (await materializarDesglosePuro(ruta, puro)) {
+                            unidades.push({ esLibroMaterial: true, carpeta: ruta, rutas: [ruta] });
+                        }
                         continue;
                     }
                 }
@@ -1708,6 +1715,19 @@ async function retirarSubcarpetasVaciadas(dir, partes) {
     }
 }
 
+// Desgloses que no se pudieron coser: carpeta → cuándo reintentar. Un fallo de qpdf puede tardar media hora en
+// repetirse, así que no se reintenta en cada escaneo. En memoria: reiniciar la app es una forma de forzar el reintento.
+const COSIDO_REINTENTO_MS = 6 * 60 * 60 * 1000;
+const cosidosAplazados = new Map();
+const desglosesSinPdfAvisados = new Set();   // se avisa UNA vez, no en cada escaneo
+function desgloseEnEspera(dir) {
+    const hasta = cosidosAplazados.get(dir);
+    if (!hasta) return false;
+    if (Date.now() < hasta) return true;
+    cosidosAplazados.delete(dir);
+    return false;
+}
+
 async function materializarDesglose(dir, desg) {
     try {
         const sub = path.join(dir, 'Desglose');
@@ -1730,22 +1750,26 @@ async function materializarDesglose(dir, desg) {
  * de páginas, SIN re-renderizar → sin pérdida de calidad) en «<carpeta> (recompuesto).pdf», que pasa a ser el
  * principal, y los ORIGINALES viajan intactos en «Desglose/». Ventaja añadida: las primeras páginas del PDF
  * resultante SON el front matter, justo donde el pipeline busca ISBN/CIP → identificación autoritativa y sin IA.
- * Si qpdf no está o la unión falla, NO se toca nada: la carpeta queda para que la decidas en el Inspector.
+ * Si qpdf no está o la unión falla, NO se toca nada: la carpeta espera en el Inbox y se reintenta cada 6 h.
+ * El PDF se llama como la carpeta: sin metadatos propios, de ese nombre sale el título del documento.
  */
 async function materializarDesglosePuro(dir, puro) {
-    const nombre = `${path.basename(dir)} (recompuesto).pdf`;
+    let nombre = `${path.basename(dir)}.pdf`;
+    if (await rutaExiste(path.join(dir, nombre))) nombre = `${path.basename(dir)} (recompuesto).pdf`;
     const destino = path.join(dir, nombre);
     const rutas = puro.partes.map((p) => path.join(dir, ...p.split('/')));   // «Chapters/ch01.pdf» → ruta del sistema
     const r = await unirPdfs(rutas, destino);
     if (!r.ok) {
         await fs.rm(destino, { force: true }).catch(() => {});
-        console.warn(`  ⚠️  «${path.basename(dir)}»: desglose puro pero NO se pudo coser (${r.sinQpdf ? 'falta qpdf' : r.motivo}). Se deja para el Inspector.`);
+        cosidosAplazados.set(dir, Date.now() + COSIDO_REINTENTO_MS);
+        console.warn(`  ⚠️  «${path.basename(dir)}»: NO se pudo coser (${r.sinQpdf ? 'falta qpdf' : r.motivo}). Espera en el Inbox sin catalogar; se reintenta en 6 h.`);
         return false;
     }
     // Invariante barato: cada parte aporta al menos una página; menos páginas que partes = algo salió mal.
     if (r.paginas && r.paginas < puro.partes.length) {
         await fs.rm(destino, { force: true }).catch(() => {});
-        console.warn(`  ⚠️  «${path.basename(dir)}»: el cosido salió con ${r.paginas} páginas para ${puro.partes.length} partes — se descarta por seguridad.`);
+        cosidosAplazados.set(dir, Date.now() + COSIDO_REINTENTO_MS);
+        console.warn(`  ⚠️  «${path.basename(dir)}»: el cosido salió con ${r.paginas} páginas para ${puro.partes.length} partes — se descarta por seguridad; espera en el Inbox.`);
         return false;
     }
     // ÍNDICE DE CAPÍTULOS del libro cosido: al coser se sabe cuántas páginas aporta cada parte, así que cada una
@@ -1764,8 +1788,10 @@ async function materializarDesglosePuro(dir, puro) {
     try {
         const sub = path.join(dir, 'Desglose');
         await fs.mkdir(sub, { recursive: true });
-        for (const parte of puro.partes) await moverParteADesglose(dir, sub, parte);
-        await retirarSubcarpetasVaciadas(dir, puro.partes);
+        // Viajan también los originales de las partes convertidas (el .doc junto a su PDF).
+        const todas = [...puro.partes, ...(puro.acompanantes || [])];
+        for (const parte of todas) await moverParteADesglose(dir, sub, parte);
+        await retirarSubcarpetasVaciadas(dir, todas);
         await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: nombre, ...(capitulos.length ? { capitulos } : {}) } });
         console.log(`  🧵 «${path.basename(dir)}»: DESGLOSE PURO cosido → «${nombre}» (${r.paginas} págs. de ${puro.partes.length} partes`
             + `${capitulos.length ? `, índice de ${capitulos.length} capítulos` : ''}); originales a «Desglose/».`);
@@ -1780,29 +1806,39 @@ async function materializarDesglosePuro(dir, puro) {
  * DESGLOSE GUIADO (accion:'desglose', la escribe el agente de estructura): el mismo destino que los dos casos
  * automáticos de arriba, pero con lo que la guía ya sabe — el libro entero si está, y el ORDEN de lectura y los
  * TÍTULOS de las partes, que el agente sacó del sumario cuando los nombres no lo decían («The Fall of Rome.pdf»).
- * Los detectores automáticos exigen nombres numerados; esto cubre lo que se les escapaba. Devuelve false si no
- * se puede (partes que no son PDF sin libro entero, qpdf ausente…): entonces siguen las reglas de siempre.
+ * Los detectores automáticos exigen nombres numerados; esto cubre lo que se les escapaba.
+ *
+ * Devuelve true si la carpeta quedó lista, 'esperar' si aún no se puede coser (partes sin PDF, qpdf falló o ausente)
+ * o 'no-es-desglose' si le quedan menos de dos documentos. La guía ya dijo que esto es UN libro: en 'esperar' no se
+ * cataloga nada. Las partes .doc las convierte scripts/convertir-partes-word.ps1 desde el PC (en el NAS no hay Word).
  */
 async function materializarDesgloseGuiado(dir, d = {}) {
     // Partes: las sueltas en la carpeta y las de sus subcarpetas de partes — las que nombra la guía
     // («Chapters/ch01.pdf») y las de nombre típico. Rutas relativas a la carpeta.
     const subsGuia = [...new Set([...(d.orden || []), d.principal || ''].filter((n) => n.includes('/')).map((n) => n.split('/')[0]))];
     const docs = await partesDeDesglose(dir, subsGuia);
-    if (docs.length < 2) return false;
+    if (docs.length < 2) return 'no-es-desglose';
+    if (desgloseEnEspera(dir)) return 'esperar';
 
-    // Libro ENTERO presente: se cataloga él y los capítulos viajan de material (no se cose nada).
-    if (d.principal && docs.includes(d.principal)) {
-        return materializarDesglose(dir, { principal: d.principal, partes: docs.filter((n) => n !== d.principal) });
+    // Libro ENTERO presente: se cataloga él y los capítulos viajan de material (no se cose nada). Puede no venir en
+    // la guía: el agente no siempre lo ve, y si la IA falló la guía solo trae el orden.
+    const principal = d.principal && docs.includes(d.principal) ? d.principal : await libroEnteroEntrePartes(dir, docs);
+    if (principal) {
+        return await materializarDesglose(dir, { principal, partes: docs.filter((n) => n !== principal) }) ? true : 'esperar';
     }
-    // Solo partes: se COSEN en el orden de la guía. Lo que la guía no nombre va al final en el orden determinista
-    // (coser el libro sin una de sus partes sería perder contenido en silencio).
-    const enGuia = (d.orden || []).filter((n) => docs.includes(n));
-    const orden = [...enGuia, ...ordenarPartesLibro(docs.filter((n) => !enGuia.includes(n)))];
-    if (orden.some((n) => path.extname(n).toLowerCase() !== '.pdf')) {
-        console.warn(`  ⚠️  «${path.basename(dir)}»: libro desglosado sin el libro entero y con partes que no son PDF → no se puede coser; reglas de siempre.`);
-        return false;
+    // Solo partes: se COSEN en el orden de la guía.
+    const aCoser = d.solo_orden ? docs.filter((n) => d.orden?.includes(n)) : sinCopiasParalelas(docs);
+    const plan = planCosido(aCoser, d.orden || [], d.titulos || {});
+    if (plan.sinPdf.length) {
+        if (!desglosesSinPdfAvisados.has(dir)) {
+            desglosesSinPdfAvisados.add(dir);
+            console.warn(`  ⏸  «${path.basename(dir)}»: ${plan.sinPdf.length} parte(s) sin PDF (p. ej. «${plan.sinPdf[0]}») y sin el libro entero. Espera en el Inbox sin catalogar: conviértelas con scripts/convertir-partes-word.ps1 en el PC.`);
+        }
+        return 'esperar';
     }
-    return materializarDesglosePuro(dir, { partes: orden, titulos: d.titulos || {} });
+    desglosesSinPdfAvisados.delete(dir);
+    const acompanantes = docs.filter((n) => !plan.aCoser.includes(n));
+    return await materializarDesglosePuro(dir, { partes: plan.aCoser, titulos: plan.titulos, acompanantes }) ? true : 'esperar';
 }
 
 async function materializarAdjuntos(dir, guia) {

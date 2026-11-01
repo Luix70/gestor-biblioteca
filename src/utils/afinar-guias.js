@@ -30,7 +30,7 @@ import { promisify } from 'node:util';
 import { conectarDB } from '../database.js';
 import { leerGuia } from './guia-ingesta.js';
 import { buscarISSNporTitulo, buscarNombrePorISSN } from './buscador-issn-titulo.js';
-import { detectarLibroDesglosado, ordenarPartesLibro, tienePistaDeOrden, partesDeDesglose, RE_CARPETA_PARTES } from './libro-desglosado.js';
+import { detectarLibroDesglosado, libroEnteroEntrePartes, ordenarPartesLibro, tienePistaDeOrden, partesDeDesglose, RE_CARPETA_PARTES } from './libro-desglosado.js';
 import { conTexto, conVision, extraerJSON } from './vision.js';
 import { rasterizarPaginas } from './rasterizar-pdf.js';
 import { timeoutPoppler } from './timeout-poppler.js';
@@ -147,8 +147,12 @@ export async function detallarDesglose(dirAbs, { subcarpetas = [] } = {}) {
     const local = await detectarLibroDesglosado(dirAbs).catch(() => null);
     if (local) return { principal: local.principal, orden: ordenarPartesLibro(local.partes), titulos: {}, fuente: 'local' };
 
-    // b) Partes que dicen su sitio en el nombre: el orden determinista basta (y los títulos, del nombre).
     const nombres = docs.map((d) => d.nombre);
+    // a') El libro entero con un nombre que no se parece al de la carpeta («12e.pdf»): se reconoce por sus páginas.
+    const entero = await libroEnteroEntrePartes(dirAbs, nombres);
+    if (entero) return { principal: entero, orden: ordenarPartesLibro(nombres.filter((n) => n !== entero)), titulos: {}, fuente: 'local (por páginas)' };
+
+    // b) Partes que dicen su sitio en el nombre: el orden determinista basta (y los títulos, del nombre).
     const ordenLocal = ordenarPartesLibro(nombres);
     const conPista = nombres.filter(tienePistaDeOrden).length / nombres.length;
     if (conPista >= 0.9 || nombres.length > MAX_PARTES_IA) return { orden: ordenLocal, titulos: {}, fuente: 'local' };
@@ -160,7 +164,10 @@ export async function detallarDesglose(dirAbs, { subcarpetas = [] } = {}) {
         const preliminar = ordenLocal.find((n) => /front|contents|toc|preface|pr[oó]logo|[ií]ndice|sumario/i.test(path.basename(n)))
             || [...conPaginas].sort((a, b) => a.bytes - b.bytes)[0]?.nombre;
         const sumario = preliminar ? await textoInicial(path.join(dirAbs, ...preliminar.split('/'))) : '';
-        const r = await pedirOrdenIA(path.basename(dirAbs), conPaginas, preliminar, sumario);
+        // Un fallo pasajero de la IA dejaba estos libros con el orden alfabético, el malo cuando los capítulos se
+        // llaman por su título. Se repite una vez antes de conformarse.
+        const r = await pedirOrdenIA(path.basename(dirAbs), conPaginas, preliminar, sumario)
+            .catch(() => pedirOrdenIA(path.basename(dirAbs), conPaginas, preliminar, sumario));
         return { ...validarDetalle(r, nombres, ordenLocal), fuente: sumario ? 'IA con el sumario' : 'IA solo con los nombres' };
     } catch (e) {
         console.warn(`   ⚠️  desglose «${path.basename(dirAbs)}»: la IA no ordenó las partes (${String(e.message).slice(0, 80)}); se usa el orden por nombre.`);
@@ -186,7 +193,8 @@ ${lista}
 ${sumario ? `\nSUMARIO:\n${sumario}\n` : ''}
 Responde SOLO con JSON, sin texto alrededor:
 {"principal":"…o null","orden":["…"],"titulos":{"fichero":"título"}}`;
-    const txt = await conTexto({ prompt, json: true, maxTokens: 16000 });
+    // sinRazonar: ordenar con el sumario delante no necesita «pensar», y el razonamiento gasta tokens de la respuesta.
+    const txt = await conTexto({ prompt, json: true, maxTokens: 16000, sinRazonar: true });
     const r = extraerJSON(txt);
     if (!r || !Array.isArray(r.orden)) throw new Error('respuesta sin «orden»');
     return r;

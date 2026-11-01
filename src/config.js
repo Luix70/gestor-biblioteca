@@ -121,6 +121,7 @@ export const AJUSTES = {
     PDF_SIGNIFICATIVA_ANCHO: 120,   // ancho (px) del render gris de medida de tinta (barato: solo para decidir)
     PDF_TINTA_MIN: 0.005,           // ≥ 0.5 % de píxeles con tinta ⇒ página significativa (por debajo = en blanco)
     PDF_OCR_VENTANA_EXTRA: 5,       // páginas de más que se sondean por delante/detrás para poder saltar blancos
+    QPDF_TIMEOUT_MS: 1800000,       // tope de coser/reparar un PDF (30 min). Con 5 min, 7 libros de 1-nov no se cosieron en el Atom: manda el nº de objetos del PDF, no los MB
     PDF_BARRAS_ANCHO: 2000,         // ancho equivalente de los recortes del código de barras (alto pero acotado para no asfixiar al Atom)
     // --- Topes ANTI-OOM del rasterizado (mediabox descomunal/corrupto) ---
     // Una página con el mediabox corrupto (p. ej. 60×200") rasterizada a resolución normal pide decenas de M px
