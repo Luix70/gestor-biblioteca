@@ -17,10 +17,16 @@
 
 ## 1. Scripts por ejecutar
 
+### 0.7 Probar LibreOffice en el NAS (3-nov) — no toca la app
+- [ ] Desplegar
+- [ ] `sudo sh /volume1/docker/GestorBiblioteca/scripts/probar-libreoffice-nas.sh` (avisar al terminar: se revisan los PDF)
+
+Decide si PreProceso convierte los .doc en el NAS o seguimos con el PC. Diseño en docs/preproceso.md.
+
 ### 0.75 Sanear los ISBN de relleno (1-nov) — solo BD y portadas; antes de reactivar el Vigilante
 - [ ] Copia de la base en el PC: `D:\Bibliobak\CopiaBase.ps1`
 - [ ] `sudo docker exec -it gestor-biblioteca node scripts/sanear-isbn-relleno.js`
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/sanear-isbn-relleno.js --ejecutar`
+- [x] `sudo docker exec -it gestor-biblioteca node scripts/sanear-isbn-relleno.js --ejecutar` (2-nov: 198 saneados, 132 con su ISBN real, 0 fallos)
 
 Unos 198 documentos con un ISBN falso (9876543210, 0102030402, 1213141513…) que les trajo título, autores, CDU o portada de otro libro. Después, los de CDU 000 los recoge el Conformador.
 
@@ -35,7 +41,7 @@ En este orden, **con el Vigilante en pausa**:
 - [ ] Reactivar el Vigilante; comprobar con `auditar` que no quedan colecciones de capítulos
 
 - [x] `recomponer-desgloses.js --ejecutar` (1-nov: 1.084 retirados, 16 cosidos devueltos, 0 fallos, 0 partes ausentes)
-- [ ] `sudo docker exec -it gestor-biblioteca node scripts/recomponer-desgloses.js --solo "Student Solutions" --coleccion "Student Solutions Manual"` y repetir con `--ejecutar`
+- [x] Student Solutions Manual con `--coleccion` (1-nov: 15 retirados)
 
 Cada libro vuelve a su carpeta del Inbox y lo cataloga la ingesta corregida. Lo retirado pasa por la Papelera.
 Seco del PC (1-nov): 29 libros, 1.084 documentos de capítulo, 28 ficheros de Cuarentena, 16 cosidos a rehacer, 3 títulos.

@@ -2535,6 +2535,10 @@ de ficheros clasificado por CDU.
       · Titulos de parte («Chapter52», «ch05.qxd», «Index») ya no se buscan en catalogos ni van a la IA por texto.
       · REPARAR lo ya mal catalogado: scripts/recomponer-desgloses.js devuelve cada libro al Inbox y lo cataloga la
         ingesta corregida (seco por defecto, --ejecutar; con el Vigilante en pausa y copia antes).
+    · PAPEL O DIGITAL (3-nov): lo decide la VIA DE ENTRADA. Solo es papel una captura del panel (camara en vivo,
+      «Catalogar», camara del sistema). Unas imagenes dejadas en el Inbox, subidas con «subir ficheros» o reingresadas
+      se unen en un PDF sin recomprimir y se catalogan como documento digital; un PDF escaneado de menos de 12 paginas
+      sin ISBN propio es un ARTICULO. Antes, menos de 12 imagenes se tomaban por fotos de un libro en papel.
     · ISBN DE RELLENO: el digito de control no prueba que un numero sea un ISBN. 9876543210, 1111111111 o 0102030402 lo
       pasan, y OpenLibrary tiene basura registrada justo en ellos: traian titulo, autores, CDU y portada de otro libro.
       Se rechazan en validarISBN (identificadores · esIsbnDeRelleno). En el CUERPO de un documento, diez cifras sueltas
