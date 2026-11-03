@@ -431,10 +431,62 @@ export async function esLibroPorCapitulos(dir) {
     const docs = entradas.filter((e) => e.isFile() && !ignorar(e.name) && esDoc(e.name)).map((e) => e.name);
     if (docs.length < MIN_PARTES_PURO) return false;
     if (docs.every((n) => path.extname(n).toLowerCase() === '.pdf')) return false;   // ese caso es de detectarDesglosePuro
-    const sueltos = docs.filter((n) => RE_CAPITULO_SUELTO.test(path.basename(n, path.extname(n)))).length;
-    const conNombre = docs.filter((n) => pareceParte(n) || RE_CAPITULO_SUELTO.test(path.basename(n, path.extname(n)))).length;
-    if (conNombre / docs.length < MIN_RATIO_PARTES_PURO) return false;
-    return evidenciaLibro(docs) || sueltos >= 3;
+    return senalesDeCapitulos(docs).esLibro;
+}
+
+/**
+ * Señales de «libro por capítulos» en una lista de nombres. Cada parte cuenta UNA vez aunque venga en .doc y en .pdf,
+ * y se mira el nombre SIN el prefijo común a todas («STRUglos» → «glos», «CliffordFM» → «FM»): el prefijo es la marca
+ * del libro y tapaba la pista. Medido el 3-nov: Strunk (STRUcp01…, STRUbkfm, STRUglos, STRUidx en .doc y .pdf) y
+ * Coaching for Character (CliffordP1Ch1, CliffordCh2…, CliffordFM, en .rtf y .pdf) no se reconocieron como libros
+ * por capítulos y cada parte se catalogó como un documento.
+ */
+function senalesDeCapitulos(nombres) {
+    const bases = [...new Set(nombres.map((n) => path.basename(n, path.extname(n)).toLowerCase()))];
+    const prefijo = prefijoComun(bases);
+    const restos = bases.map((b) => b.slice(prefijo.length));
+    // Una pista de PARTE, no de título: un número corto delante («05 …»), una marca de capítulo («cp01», «P1Ch1»,
+    // «Chapter 7»), o preliminares/material final con nombre CORTO. Los títulos de libros sueltos también llevan
+    // números (año, edición) y palabras como «Introduction…»: medido en Physics, «Quantum Physics» (21 libros) salía
+    // como capítulos con la regla de numDe/RE_FRONT sin más.
+    const RE_MARCA = /(chapter|chap|ch|cp|cap|unit|lesson|section|part|p)[ _.-]*\d{1,3}(?!\d)/i;
+    const corto = (r) => r.length <= 20;
+    const extremo = (r) => corto(r) && (RE_FRONT.test(r) || FIN.some(([re]) => re.test(r)));
+    const conPista = restos.filter((r) => /^\d{1,3}(?!\d)/.test(r) || RE_MARCA.test(r) || extremo(r)).length;
+    const capitulos = bases.filter((b, i) => RE_CAPITULO.test(b) || RE_CAPITULO_SUELTO.test(b)
+        || /^(ch|cp|chap|cap)[ _.-]*\d/i.test(restos[i])).length;
+    const esqueleto = restos.some(extremo) || capitulos >= 3;
+    return {
+        partes: bases.length,
+        capitulos,
+        esLibro: bases.length >= MIN_PARTES_PURO && conPista / bases.length >= MIN_RATIO_PARTES_PURO && esqueleto,
+    };
+}
+
+/**
+ * ¿PARECE un libro por capítulos? Versión AMPLIA, para retener y no para coser: PreProceso no pasa al Inbox una
+ * carpeta así si no se pudo coser (un capítulo catalogado como documento es ruido). Basta con 3 capítulos con
+ * nombre de capítulo, o con el esqueleto de un libro en la mayoría de los nombres. Mira la carpeta y sus subcarpetas
+ * (salvo «Desglose/», que ya es el adjunto de un libro preparado). Devuelve la ruta relativa donde lo vio, o null.
+ */
+export async function pareceLibroPorCapitulos(dir, rel = '', nivel = 4) {
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); }
+    catch { return null; }
+    const docs = entradas.filter((e) => e.isFile() && !ignorar(e.name) && esDoc(e.name)).map((e) => e.name);
+    if (docs.length >= 3) {
+        const s = senalesDeCapitulos(docs);
+        // Volúmenes de una obra («Vol 3 - …») o números de una revista no son capítulos.
+        const volumenes = docs.filter((n) => /\b(vol(ume|umen)?|tomo|band|issue|n[ºo°]|no\.)\s*\.?\s*\d/i.test(n)).length;
+        if (volumenes < docs.length / 2 && (s.esLibro || s.capitulos >= 3)) return rel || '.';
+    }
+    if (nivel <= 0) return null;
+    for (const e of entradas) {
+        if (!e.isDirectory() || ignorar(e.name) || e.name === 'Desglose') continue;
+        const visto = await pareceLibroPorCapitulos(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name, nivel - 1);
+        if (visto) return visto;
+    }
+    return null;
 }
 
 /**

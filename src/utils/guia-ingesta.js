@@ -110,7 +110,7 @@ export function normalizarPerfil(p) {
     const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     if (TIPOS_PROBABLES.includes(p.tipo_probable)) out.tipo_probable = p.tipo_probable;
     for (const k of ['naturaleza', 'coleccion', 'obra', 'enciclopedia', 'idioma_probable', 'editorial_probable', 'materia_cdu', 'origen',
-        'cabecera', 'periodicidad', 'descripcion']) {
+        'cabecera', 'periodicidad', 'descripcion', 'no_catalogable']) {
         const v = str(p[k]);
         if (v) out[k] = v;
     }

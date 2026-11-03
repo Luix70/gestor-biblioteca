@@ -33,6 +33,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { leerGuia, escribirGuia, guiaEsSignificativa, NOMBRE_GUIA } from './guia-ingesta.js';
 import { tituloCabecera, periodoDeTexto, esTituloGenerico, normTituloPublicacion } from './revistas.js';
+import { examinarCatalogable, escribirAvisoNoCatalogable } from './no-catalogable.js';
+import { pareceLibroPorCapitulos } from './libro-desglosado.js';
 
 export const UMBRAL_CONFIANZA = 0.6;
 const ORIGEN = 'agente';
@@ -253,6 +255,55 @@ function desarmarCajonesDeRevistas(porRuta) {
     }
 }
 
+// Documentos que pueden ser el libro de un «libro + material» (los mismos que acepta transmedia · ingestarLibroConMaterial,
+// que además convierte un Word).
+const RE_PRINCIPAL = /\.(pdf|epub|mobi|azw3?|djvu?|cb[zr7]|chm|docx?|rtf|odt)$/i;
+
+/**
+ * Contrasta la guía que sale de la lectura de la IA con los FICHEROS de la carpeta. Redes medidas el 3-nov en Physics
+ * (cada una, un error real de la IA):
+ *   · nada catalogable (25 .m4v de un curso, 8 .dvi) o descarga incompleta según su .sfv (Microwave Engineering, leída
+ *     como «software»: solo quedaban el lector de DjVu, el .nfo y el .sfv) → «omitir», con el motivo y un aviso;
+ *   · «obra» cuyos documentos son CAPÍTULOS (Marks' Biochemistry Ch01…Ch49, Theory of Machines, McNally) → desglose:
+ *     como obra, cada capítulo habría sido un tomo;
+ *   · «obra» con un solo documento → sin guía (un libro suelto no es una obra);
+ *   · «libro + material» sin documento en la raíz: un libro en HTML (Cutnell, 10.000 ficheros con toc.htm) va
+ *     «intacta»; sin nada que hacer de libro, sin guía.
+ * Devuelve { guia, nota, examen }.
+ */
+async function corregirConFicheros(abs, guia, esHoja) {
+    const accion = guia?.accion;
+    const unidad = ['obra', 'software', 'libro-material', 'intacta', 'transmedia', 'audiolibro', 'coleccion-audiolibros'].includes(accion);
+    if (unidad || esHoja) {
+        const examen = await examinarCatalogable(abs);
+        if (examen.motivo) {
+            return {
+                guia: { accion: 'omitir', perfil: { no_catalogable: examen.motivo, origen: ORIGEN } },
+                nota: `no catalogable: ${examen.motivo}`,
+                examen,
+            };
+        }
+    }
+    if (accion === 'obra') {
+        if (await pareceLibroPorCapitulos(abs, '', 0)) {
+            return { guia: { accion: 'desglose', perfil: { origen: ORIGEN } }, nota: 'leída como obra, pero sus documentos son capítulos: libro desglosado' };
+        }
+        const docs = (await fs.readdir(abs).catch(() => [])).filter((n) => RE_PRINCIPAL.test(n));
+        if (docs.length <= 1) return { guia: null, nota: 'leída como obra, pero solo tiene un documento' };
+    }
+    if (accion === 'libro-material') {
+        const raiz = await fs.readdir(abs, { withFileTypes: true }).catch(() => []);
+        const ficheros = raiz.filter((e) => e.isFile()).map((e) => e.name);
+        if (!ficheros.some((n) => RE_PRINCIPAL.test(n))) {
+            if (ficheros.some((n) => /\.html?$/i.test(n))) {
+                return { guia: { accion: 'intacta', perfil: { origen: ORIGEN } }, nota: 'libro en HTML (sin PDF/EPUB en la raíz): se conserva intacto' };
+            }
+            return { guia: null, nota: 'leída como libro + material, pero no hay libro en la raíz' };
+        }
+    }
+    return { guia, nota: null };
+}
+
 // `origenesReescribibles`: de quién son las guías que este plan puede reescribir. La inspección automática solo
 // reescribe las suyas ('agente'); la del panel también las que TÚ aprobaste en el panel ('panel'), porque es tu
 // decisión repetirla. Las hechas a mano en el Inspector (sin origen) no se tocan nunca.
@@ -261,6 +312,11 @@ export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDud
     promoverTiradasDeRevista(porRuta);
     desarmarCajonesDeRevistas(porRuta);
     desarmarContenedores(porRuta);
+
+    // Carpetas HOJA (sin subcarpetas en el esqueleto): las únicas en las que se mira si hay algo catalogable aunque la
+    // IA no las lea como unidad (mirar cada carpeta con todo su árbol debajo sería recorrer el árbol una vez por nivel).
+    const hojas = new Set(esqueleto.carpetas.map((c) => c.ruta)
+        .filter((r) => !esqueleto.carpetas.some((o) => o.ruta !== r && (r === '.' || o.ruta.startsWith(r + '/')))));
 
     // 1.ª pasada: qué le toca a cada carpeta por sí misma.
     const plan = [];
@@ -280,13 +336,17 @@ export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDud
         // _REVISTAS conservaban la CDU y el nombre de cabecera de la primera inspección). Las tuyas (sin origen), no.
         base.retirable = !!(actual && guiaEsSignificativa(actual) && reescribible);
 
-        const guia = guiaDesdeInterpretacion(i, nombre);
+        const correccion = await corregirConFicheros(abs, guiaDesdeInterpretacion(i, nombre), hojas.has(c.ruta));
+        const guia = correccion.guia;
+        if (correccion.nota) base.correccion = correccion.nota;
+        if (correccion.examen) base.examen = correccion.examen;
         if (!guia) {
             if (i.tipo === 'parte' && base.retirable) {
                 plan.push({ ...base, guia: null, estado: 'retirar', motivo: 'guía vieja que sobra: ahora es parte de su carpeta madre, que manda' });
                 continue;
             }
-            const motivo = i.tipo === 'parte' ? 'es parte de su carpeta madre' : `tipo «${i.tipo}»: se deja la regla por defecto`;
+            const motivo = base.correccion ? `${base.correccion}: se deja la regla por defecto`
+                : i.tipo === 'parte' ? 'es parte de su carpeta madre' : `tipo «${i.tipo}»: se deja la regla por defecto`;
             plan.push({ ...base, guia: null, estado: 'omitida', motivo });
             continue;
         }
@@ -296,11 +356,12 @@ export async function planGuias(raizAbs, esqueleto, interpretacion, { incluirDud
             plan.push({ ...base, guia, estado: 'respetada', accionUsuario: actual.accion, motivo: `${deQuien}: no se toca` });
             continue;
         }
-        if (i.confianza < UMBRAL_CONFIANZA && !incluirDudosas) {
+        // «No catalogable» es un hecho de los ficheros, no una lectura de la IA: no depende de su confianza.
+        if (i.confianza < UMBRAL_CONFIANZA && !incluirDudosas && !correccion.examen) {
             plan.push({ ...base, guia, estado: 'dudosa', motivo: i.razon || 'confianza baja: decisión tuya' });
             continue;
         }
-        plan.push({ ...base, guia, estado: actual && reescribible ? 'actualizar' : 'nueva', motivo: null });
+        plan.push({ ...base, guia, estado: actual && reescribible ? 'actualizar' : 'nueva', motivo: base.correccion || null });
     }
 
     // 2.ª pasada: lo que cuelga de una OBRA o UNIDAD (audiolibro, software, desglose…) no se guía (ver cabecera):
@@ -361,6 +422,9 @@ export async function escribirGuias(plan) {
         }
         if (p.estado !== 'nueva' && p.estado !== 'actualizar') continue;
         await escribirGuia(p.abs, p.guia);
+        if (p.guia?.perfil?.no_catalogable && p.examen) {
+            await escribirAvisoNoCatalogable(p.abs, p.examen, { donde: 'la inspección le puso «omitir»: no se cataloga' });
+        }
         n++;
     }
     return n;

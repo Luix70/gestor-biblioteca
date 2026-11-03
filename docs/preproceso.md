@@ -10,6 +10,19 @@ entero con lo contenido a la Papelera, o conversión + cosido). Cada unidad sin 
 `_preproceso.txt` de cada carpeta dice qué se hizo y qué espera. Trabaja aunque el Vigilante esté en pausa.
 PreProceso y el Inbox son montajes distintos: pasar es copiar, verificar y borrar el origen (`moverArbol`).
 
+**Filtro de salida (regla del usuario, 3-nov): al Inbox solo pasa lo que tiene un camino de catalogación claro y
+fiable** (`preproceso·motivoParaRetener`). Se quedan en PreProceso, con su motivo en `_preproceso.txt` y en el log:
+- lo que **parece un libro por capítulos** sin coser (`libro-desglosado·pareceLibroPorCapitulos`, amplio a propósito:
+  sirve para retener, no para coser). Medido: Strunk y Coaching for Character pasaron con sus capítulos sueltos y cada
+  uno se catalogó como un documento. Si una carpeta retenida no es un libro, una guía tuya la deja pasar;
+- lo **no catalogable** (`utils/no-catalogable.js`): nada que la biblioteca catalogue (vídeos —decisión del usuario:
+  los cursos en vídeo no se contemplan por ahora—, .dvi, solo .nfo…) o una **descarga incompleta** (su .sfv lista
+  documentos que no están). Deja el aviso `.NO_CATALOGABLE.txt` en la carpeta;
+- lo que su guía manda **omitir**.
+
+Pasan sin más: lo preparado aquí (guía libro + material con su libro), las guías con acción de unidad (intacta,
+software, audiolibro, colección de audiolibros, transmedia, empaquetar, obra) y las guías tuyas.
+
 ## Por qué
 
 Hoy el Vigilante **prepara y cataloga en la misma pasada**: expande comprimidos, inspecciona con IA, cose capítulos y

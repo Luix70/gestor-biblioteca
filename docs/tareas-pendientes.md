@@ -29,6 +29,15 @@
 - [ ] `_Apartado College Books/No catalogar`: Office 2003 (5 capítulos sueltos de un libro incompleto), Prof. Gordon
       (.xls de clase), MTH 245 (.mw). Decidir si se borran. `Cosido anterior (descartable)`: los tres PDF mal cosidos
 
+### 0.65 Capítulos colados de Strunk y Coaching for Character (3-nov)
+- [ ] Desplegar (filtro de salida de PreProceso + detector de capítulos corregido)
+- [ ] Copia de la base: `D:\Bibliobak\CopiaBase.ps1`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/retirar-capitulos-colados.js` (seco: 17 STRU… + 13 Clifford…)
+      y luego `--ejecutar`: los ficheros vuelven a `PreProceso/College Books/<libro>`, los documentos se retiran
+- [ ] Comprobar en el log que PreProceso los cose y los pasa al Inbox como un libro cada uno
+- Los 13 .rtf de Coaching están en la Papelera (`Recycling/001567_…_subcarpeta-vacia`): son los mismos capítulos que
+  los PDF; no hacen falta para coser
+
 ### 0.7 Probar LibreOffice en el NAS (3-nov) — no toca la app
 - [x] `probar-libreoffice-nas.sh` (3-nov: 5 de 5, 8-15 s por fichero, texto correcto; LibreOffice 7.0.4, 203 MB)
 - [ ] Desplegar: la imagen lleva ya LibreOffice (el primer build tarda unos 5 min más)

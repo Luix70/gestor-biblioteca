@@ -10,7 +10,9 @@
  *   2. convierte en PDF las carpetas de páginas escaneadas (utils/escaneo-a-pdf);
  *   3. resuelve los libros por capítulos: el libro entero si está; si no, convierte las partes .doc con LibreOffice y
  *      las cose (vigilante · materializarDesglose*). Lo que no se pueda, queda PENDIENTE;
- *   4. pasa al Inbox cada UNIDAD sin pendientes (las demás esperan: lo fácil no espera a lo difícil);
+ *   4. pasa al Inbox cada UNIDAD sin pendientes y con un camino de catalogación CLARO (motivoParaRetener): se quedan
+ *      aquí los capítulos sin coser, lo que no es catalogable (vídeos, .dvi, una descarga incompleta según su .sfv; con
+ *      aviso `.NO_CATALOGABLE.txt` en la carpeta) y lo que su guía manda omitir. Lo fácil no espera a lo difícil;
  *   5. deja un informe `_preproceso.txt` en la carpeta con lo hecho y lo que espera.
  *
  * Unidad: si la carpeta dejada es en sí un libro (lleva guía de libro, o solo documentos sin subcarpetas), ella
@@ -24,7 +26,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { carpetaEstable, expandirComprimidos, materializarDesglose, materializarDesgloseGuiado } from './vigilante.js';
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js';
-import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos } from './utils/libro-desglosado.js';
+import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos } from './utils/libro-desglosado.js';
+import { esFicheroCatalogable, examinarCatalogable, escribirAvisoNoCatalogable } from './utils/no-catalogable.js';
 import { leerGuia, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { reciclarCarpeta } from './utils/papelera.js';
 import { EXT_DOC } from './mantenimiento/util-mantenimiento.js';
@@ -47,6 +50,8 @@ const REVISAR_MS = 30 * 60 * 1000;
 const ultimaPasada = new Map();   // carpeta → { firma, t }
 // Lo hecho en todas las pasadas sobre cada carpeta dejada: el informe lo acumula (en memoria; se reinicia con la app).
 const historial = new Map();      // carpeta → { hecho: [], pasadas: 0 }
+// Unidades retenidas ya avisadas en el log (ruta|motivo): se avisa una vez, no en cada pasada.
+const avisadas = new Set();
 
 /** Una pasada sobre PreProceso. Nunca lanza; si ya hay una en curso, no hace nada. */
 export async function pasadaPreproceso() {
@@ -82,6 +87,16 @@ async function pasarFicheroSuelto(ruta) {
     }
     const st = await fs.stat(ruta).catch(() => null);
     if (!st || Date.now() - st.mtimeMs < 60000) return;   // aún copiándose
+    if (!esFicheroCatalogable(path.basename(ruta), st.size)) {
+        const examen = await examinarCatalogable(ruta);
+        const clave = `${ruta}|no-catalogable`;
+        if (!avisadas.has(clave)) {
+            avisadas.add(clave);
+            console.warn(`  ✋ PreProceso: «${path.basename(ruta)}» se queda: ${examen.motivo || 'no es un formato que se catalogue'}.`);
+        }
+        if (examen.motivo) await escribirAvisoNoCatalogable(ruta, examen, { donde: 'se queda en PreProceso; no pasa al Inbox ni se cataloga' });
+        return;
+    }
     await moverArbol(ruta, await destinoLibre(path.join(DIR_INBOX, path.basename(ruta))));
     console.log(`  ➡️  PreProceso: «${path.basename(ruta)}» → Inbox (fichero suelto).`);
 }
@@ -99,6 +114,20 @@ async function prepararDrop(drop) {
     for (const u of unidades) {
         const bloqueos = [...pendientes.keys()].filter((p) => p === u || p.startsWith(u + path.sep));
         if (bloqueos.length) continue;
+        // Solo pasa lo que tiene un camino de catalogación CLARO (regla del usuario, 3-nov). Lo demás se queda aquí.
+        const retenida = await motivoParaRetener(u);
+        if (retenida) {
+            pendientes.set(u, retenida.motivo);
+            const clave = `${u}|${retenida.motivo}`;
+            if (!avisadas.has(clave)) {
+                avisadas.add(clave);
+                console.warn(`  ✋ PreProceso: «${path.relative(DIR_PRE, u)}» se queda: ${retenida.motivo}.`);
+            }
+            if (retenida.examen) {
+                await escribirAvisoNoCatalogable(u, retenida.examen, { donde: 'se queda en PreProceso; no pasa al Inbox ni se cataloga' });
+            }
+            continue;
+        }
         const rel = path.relative(drop, u);
         const destino = await destinoLibre(rel ? path.join(DIR_INBOX, nombre, rel) : path.join(DIR_INBOX, nombre));
         // La guía de la carpeta dejada viaja al lado: es su contexto (colección, materia, perfil heredado).
@@ -175,6 +204,46 @@ async function unidadesDe(drop) {
         || (entradas.every((e) => e.isFile()) && entradas.some((e) => esDoc(e.name)));
     if (esLibro) return [drop];
     return entradas.map((e) => path.join(drop, e.name));
+}
+
+// Guías que dicen por sí solas qué es la unidad y cómo se cataloga.
+const ACCIONES_CON_CAMINO = ['intacta', 'software', 'audiolibro', 'coleccion-audiolibros', 'transmedia', 'empaquetar', 'obra'];
+
+/**
+ * ¿Por qué NO debe pasar esta unidad al Inbox? null si tiene un camino de catalogación claro. Regla del usuario
+ * (3-nov): al Inbox solo lo que se va a catalogar bien; nada de capítulos sin coser ni contenido dudoso. Medido: Strunk
+ * y Coaching for Character pasaron con sus capítulos sueltos (ningún detector los reconoció) y cada uno acabó como un
+ * documento. Devuelve { motivo, examen? } (examen = no catalogable: lleva su aviso en la carpeta).
+ */
+async function motivoParaRetener(u) {
+    const st = await fs.stat(u).catch(() => null);
+    if (!st) return null;
+    if (!st.isDirectory()) {
+        // Un capítulo suelto junto a otros, al lado de subcarpetas, también es parte de un libro sin coser.
+        if (await pareceLibroPorCapitulos(path.dirname(u), '', 0)) {
+            return { motivo: `«${path.basename(u)}» parece un capítulo de un libro sin coser (los ficheros de su carpeta)` };
+        }
+        if (esFicheroCatalogable(path.basename(u), st.size)) return null;
+        const examen = await examinarCatalogable(u);
+        return { motivo: examen.motivo || 'no es un formato que se catalogue', examen };
+    }
+    const guia = await leerGuia(u).catch(() => null);
+    if (guia?.accion === 'omitir') return { motivo: 'su guía dice «omitir»' };
+    const examen = await examinarCatalogable(u);
+    if (examen.motivo) return { motivo: examen.motivo, examen };
+    // Preparada aquí (libro entero o cosido): su guía nombra el libro, que tiene que estar.
+    if (guia?.accion === 'libro-material') {
+        const principal = guia.libro_material?.principal;
+        return principal && await existe(path.join(u, principal)) ? null : { motivo: 'guía de libro + material sin su libro principal' };
+    }
+    if (ACCIONES_CON_CAMINO.includes(guia?.accion)) return null;
+    // Una guía tuya (del Inspector o aprobada en el panel) decide; la del agente, no.
+    if (guia && guia.perfil?.origen !== 'agente' && guia.accion) return null;
+    const capitulos = await pareceLibroPorCapitulos(u);
+    if (capitulos) {
+        return { motivo: `parece un libro por capítulos sin coser (en «${capitulos === '.' ? path.basename(u) : capitulos}»). Si no lo es, ponle una guía` };
+    }
+    return null;
 }
 
 /** Un nombre libre en el destino: nunca se pisa nada del Inbox. */

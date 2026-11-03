@@ -24,6 +24,7 @@ import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf s
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, perfilHeredado, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
 import { tituloDeNombre } from './utils/afinar-guias.js';
+import { AVISO_NO_CATALOGABLE, examinarCatalogable, escribirAvisoNoCatalogable } from './utils/no-catalogable.js';
 import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js';
 import { partesContenidasEnLibro } from './utils/partes-contenidas.js';
 import { convertirAPdf, hayLibreOffice, EXT_CONVERTIBLES } from './utils/convertir-a-pdf.js'; // libro + su desglose
@@ -493,6 +494,16 @@ const colAudioVistas = new Set();
 const omitidasDefinitivas = new Set();
 // Carpetas con acción OMITIR en su _guia.json (para no repetir el log en cada escaneo). Se olvida al desaparecer.
 const omitidasGuia = new Set();
+// Carpetas avisadas como NO CATALOGABLES (una vez por carpeta y arranque, no en cada escaneo).
+const noCatalogablesAvisadas = new Set();
+async function avisarNoCatalogable(ruta, contexto) {
+    if (noCatalogablesAvisadas.has(ruta)) return;
+    noCatalogablesAvisadas.add(ruta);
+    const examen = await examinarCatalogable(ruta);
+    const motivo = examen.motivo || contexto;
+    console.warn(`  ✋ ${path.basename(ruta)}: NO CATALOGABLE — ${motivo} (${contexto}). Se queda en el Inbox; aviso en ${AVISO_NO_CATALOGABLE}.`);
+    await escribirAvisoNoCatalogable(ruta, { ...examen, motivo }, { donde: 'se queda en el Inbox sin catalogar' });
+}
 // Escaneos de páginas que no se pudieron pasar a PDF (para avisar una vez, no en cada escaneo). Se olvida al reiniciar.
 const escaneosFallidos = new Set();
 
@@ -647,10 +658,17 @@ async function listarUnidades() {
     for (const dir of transmediaVistas) if (!dirsActuales.has(dir)) transmediaVistas.delete(dir);
     for (const dir of audiolibroVistas) if (!dirsActuales.has(dir)) audiolibroVistas.delete(dir);
     for (const dir of colAudioVistas) if (!dirsActuales.has(dir)) colAudioVistas.delete(dir);
-    for (const dir of omitidasDefinitivas) if (!dirsActuales.has(dir)) omitidasDefinitivas.delete(dir);
-    for (const dir of omitidasGuia) if (!dirsActuales.has(dir)) omitidasGuia.delete(dir);
+    // Estas tres guardan también carpetas ANIDADAS («College Books/Turbulent Skies»): compararlas con las del primer
+    // nivel las olvidaba en cada escaneo, y el «no se reintenta» volvía a intentarse cada 10 s. Se olvida lo que ya
+    // no existe en disco (se sacó del Inbox).
+    for (const conjunto of [omitidasDefinitivas, omitidasGuia, noCatalogablesAvisadas]) {
+        for (const dir of conjunto) if (!dirsActuales.has(dir) && !(await rutaExiste(dir))) conjunto.delete(dir);
+    }
 
-    return unidades;
+    // Unidades de CARPETA que ya fallaron sin remedio (libro + material sin libro, software duplicado…): la comprobación
+    // de clasificarDirectorio solo mira el primer nivel, así que una anidada se volvía a intentar en cada escaneo.
+    return unidades.filter((u) => !(u.carpeta && (u.rutas || []).length === 1 && u.rutas[0] === u.carpeta
+        && omitidasDefinitivas.has(u.carpeta)));
 }
 
 // ══════════════════════════════ DRY-RUN: el PLAN, sin tocar nada ══════════════════════════════
@@ -1016,7 +1034,11 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
             //   · INTACTA → conservar VERBATIM por la ruta transmedia (preserva la estructura + agrupa en colección).
             const guiaCarpeta = await leerGuia(ruta);
             if (guiaCarpeta?.accion === 'omitir') {
-                if (!omitidasGuia.has(ruta)) { omitidasGuia.add(ruta); console.log(`  ⏭️  ${e.name}: OMITIR (guía) — no se cataloga.`); }
+                if (!omitidasGuia.has(ruta)) {
+                    omitidasGuia.add(ruta);
+                    const porque = guiaCarpeta.perfil?.no_catalogable ? `: ${guiaCarpeta.perfil.no_catalogable}` : '';
+                    console.log(`  ⏭️  ${e.name}: OMITIR (guía${porque}) — no se cataloga.`);
+                }
                 continue;
             }
             if (guiaCarpeta?.accion === 'intacta') {
@@ -1121,6 +1143,10 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                         rutas: [d], esImagenes: false, carpeta: ruta, conservarCarpeta: false, esObra: true,
                         obra: { titulo: e.name, numero: i + 1, titulo_volumen: path.basename(d, path.extname(d)), total: docsObra.length },
                     }));
+                } else {
+                    // Sin un solo documento (un curso en vídeo, ficheros .dvi): antes se saltaba EN SILENCIO y la carpeta
+                    // se quedaba en el Inbox para siempre sin que nadie lo supiera. Se avisa una vez y se deja dicho.
+                    await avisarNoCatalogable(ruta, 'guía «obra» sin ningún documento');
                 }
                 continue;
             }
@@ -2184,7 +2210,11 @@ async function procesarCola() {
                             tally.libroMaterial = (tally.libroMaterial || 0) + 1; procesadas++;
                         } else {
                             console.warn(`  ✗ libro + material: ${rlm.motivo} (se CONSERVA el origen)`);
-                            if (rlm.permanente) omitidasDefinitivas.add(u.carpeta);
+                            if (rlm.permanente) {
+                                omitidasDefinitivas.add(u.carpeta);
+                                await escribirAvisoNoCatalogable(u.carpeta, { motivo: rlm.motivo, porExtension: {}, faltanSfv: [] },
+                                    { donde: 'se queda en el Inbox sin catalogar' });
+                            }
                         }
                     } catch (err) { console.error(`  ✗ libro + material falló: ${err.message} (se CONSERVA el origen)`); }
                     continue;
