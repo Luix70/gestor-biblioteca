@@ -171,14 +171,14 @@ export async function detectarLibroDesglosado(dir) {
 
 // Portada/preliminares (van primero) y material final (va al final, en este orden).
 // Incluye la serie de Wiley y otros editores: ffirs, ftoc, fpref… delante; bapp01, bgloss, bindex… detrás.
-const RE_FRONT = /(front[ _-]?matter|^fm\d*$|^fm[ _-]|[_-]\d*fm\d*$|portadilla|^cover|^portada|^title|^titulo|copyri|^toc$|contents|preface|prefacio|^prefix|pr[oó]logo|^intro|^ack|^author'?s?\b|^foreword|^dedicat|^f(firs|last|toc|pref|betw|fore|intro|ack|ded)\b)/i;
+const RE_FRONT = /(front[ _-]?matter|^fm\d*$|^fm[ _-]|[_-]\d*fm\d*$|^bkfm|inside[ _-]?cover|portadilla|^cover|^portada|^title|^titulo|copyri|^toc$|contents|preface|prefacio|^prefix|pr[oó]logo|^intro|^ack|^author'?s?\b|^foreword|^dedicat|^f(firs|last|toc|pref|betw|fore|intro|ack|ded)\b)/i;
 const FIN = [
     [/(appendi|ap[eé]ndice|anexo|^bapp|(^|[_-])app[ _-]*[a-z\d]$)/i, 1],
     [/glos/i, 2],
     [/((^|[ _-])(index(es)?|[ií]ndice)([ _-]|$)|^[a-z]?index\b|idx|indx)/i, 3],   // «nindex.qxd» y «sindex.qxd»: de nombres y de materias
     [/(biblio|referenc|^bib$|^b?refs?\b|[_-]refs?$)/i, 4],
     [/(answer|solucion|respuesta)/i, 5],
-    [/(back[ _-]?matter|^bm$|^bm[ _-]|[_-]bm\d*$)/i, 6],
+    [/(back[ _-]?matter|^bm$|^bm[ _-]|[_-]bm\d*$|^bkrm)/i, 6],
     [/(credits?|cr[eé]ditos)/i, 7],
 ];
 /**
@@ -196,6 +196,24 @@ const numDe = (base) => {
 const RE_PORTADILLA_PARTE = /^p(art)?[ _-]*\d/i;
 
 /**
+ * Prefijo que comparten TODOS los nombres (sin distinguir mayúsculas), sin cifras al final («Chapter0» de
+ * «Chapter01…Chapter09» se queda en «Chapter»: el número es de la parte). Solo con 3+ partes y 3+ caracteres:
+ * con dos nombres «Preface»/«Prelude» se comerían su propia palabra. Nunca deja un nombre vacío.
+ */
+function prefijoComun(bases) {
+    if (bases.length < 3) return '';
+    let p = bases[0];
+    for (const b of bases) {
+        let i = 0;
+        while (i < p.length && i < b.length && p[i].toLowerCase() === b[i].toLowerCase()) i++;
+        p = p.slice(0, i);
+    }
+    p = p.replace(/\d+$/, '');
+    if (p.length < 3 || bases.some((b) => b.length <= p.length)) return '';
+    return p;
+}
+
+/**
  * Ordena las partes de un libro como se leería: preliminares → partes numeradas → material final
  * (apéndices → glosarios → índice → bibliografía → soluciones). Determinista y estable.
  */
@@ -208,14 +226,18 @@ export function ordenarPartesLibro(nombres) {
         const i = inicial(path.basename(n, path.extname(n)));
         if (i != null) usos.set(Number(i), (usos.get(Number(i)) || 0) + 1);
     }
+    // Prefijo común a todas las partes («KENNch01», «KENNack», «KENNbkfm»; «CliffordFM»; «mad86161 fm»): es la marca
+    // del libro, no de la parte. Sin quitarlo, «^ack» o «^fm» no casan y el front matter acababa entre los capítulos
+    // (College Books, 3-nov: el de «Literature» en la página 3.082, lejos de donde se busca el ISBN).
+    const prefijo = prefijoComun(nombres.map((n) => path.basename(n, path.extname(n))));
     const clasificar = (n) => {
         const base = path.basename(n, path.extname(n));
         const i = inicial(base);
         if (i != null && usos.get(Number(i)) === 1) return { bloque: 1, orden: Number(i), base };   // «01_title», «05-CH»
-        const palabra = base.replace(/^\d{1,3}[ _.-]+(?=\D)/, '');
+        const palabra = base.slice(prefijo.length).replace(/^\d{1,3}[ _.-]+(?=\D)/, '');
         if (RE_FRONT.test(palabra)) return { bloque: 0, orden: 0, base };
         for (const [re, sub] of FIN) if (re.test(palabra)) return { bloque: 3, orden: sub * 1000 + (numDe(palabra) ?? 0), base };
-        const num = numDe(base);
+        const num = numDe(base.slice(prefijo.length));   // «mad86161 01»: el 86161 es del libro
         if (num != null) return { bloque: 1, orden: RE_PORTADILLA_PARTE.test(base) ? num - 0.5 : num, base };   // «Chapter07»
         return { bloque: 2, orden: 0, base };                                          // sin pistas: entre medias
     };

@@ -18,10 +18,16 @@
 ## 1. Scripts por ejecutar
 
 ### 0.6 PreProceso, fase 1 (3-nov)
-- [ ] Crear en File Station la carpeta `BIBLIOTECA DIGITAL/PreProceso` (antes de desplegar: si la crea Docker, es de root)
-- [ ] Desplegar (cambia docker-compose.yml: el script ya hace down -v / up --build). No interrumpir la construcción
-- [ ] Comprobar en el log: «🧰 PreProceso: preparando lo que se deje en …»
-- [ ] Primera prueba: mover `World Tracker Library/College Books` a PreProceso y revisar su `_preproceso.txt`
+- [x] Crear en File Station la carpeta `BIBLIOTECA DIGITAL/PreProceso` (antes de desplegar: si la crea Docker, es de root)
+- [x] Desplegar (cambia docker-compose.yml: el script ya hace down -v / up --build). No interrumpir la construcción
+- [x] Comprobar en el log: «🧰 PreProceso: preparando lo que se deje en …»
+- [x] Primera prueba: `College Books` pasó entero al Inbox con sus guías (revisado 3-nov)
+- [ ] Tres libros cosidos con el front matter en medio (Literature, Strunk, Coaching for Character: no se quitaba el
+      prefijo común «KENN»/«STRU»/«Clifford»; arreglado en `ordenarPartesLibro`). Apartados, sin cosido y con
+      `STRUbkrm.com` renombrado a `.doc`, en `World Tracker Library/_Apartado College Books/Recoser/College Books`.
+      Tras desplegar el arreglo: mover esa carpeta `College Books` a PreProceso (vuelve a coserlos y los pasa al Inbox)
+- [ ] `_Apartado College Books/No catalogar`: Office 2003 (5 capítulos sueltos de un libro incompleto), Prof. Gordon
+      (.xls de clase), MTH 245 (.mw). Decidir si se borran. `Cosido anterior (descartable)`: los tres PDF mal cosidos
 
 ### 0.7 Probar LibreOffice en el NAS (3-nov) — no toca la app
 - [x] `probar-libreoffice-nas.sh` (3-nov: 5 de 5, 8-15 s por fichero, texto correcto; LibreOffice 7.0.4, 203 MB)
