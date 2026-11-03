@@ -47,6 +47,10 @@ FROM node:18-bullseye-slim
 # libtiff-tools aporta `tiff2pdf`: una carpeta de páginas escaneadas en TIF se convierte en un PDF por libro
 # (utils/escaneo-a-pdf.js) conservando su compresión (CCITT G4 de los escaneos bitonales), sin recomprimir.
 # C plano, ~1 MB, Debian MAIN. Si faltara, la carpeta se queda en el Inbox con un aviso.
+# LibreOffice (solo Writer, sin interfaz) convierte a PDF los capítulos .doc/.docx/.rtf de un libro partido para
+# poder coserlo (utils/convertir-a-pdf.js). Probado en el Atom D525 el 3-nov (scripts/probar-libreoffice-nas.sh):
+# 7.0.4 de bullseye, ~200 MB, 8-15 s por fichero, incluidos los .doc antiguos que Word bloquea. fonts-dejavu-core le
+# da tipografías con las que medir el texto. Si faltara, la conversión degrada: el libro espera en el Inbox.
 # FUENTES DE APT → archive.debian.org (16-oct). Bullseye (Debian 11) terminó su soporte LTS en agosto de 2026 y sus
 # paquetes se están mudando al archivo: deb.debian.org SIGUE publicando el índice de bullseye-security pero ya NO
 # sirve sus .deb (404 en poppler, ghostscript, libtiff…), así que la construcción fallaba. archive.debian.org tiene
@@ -63,6 +67,7 @@ RUN printf '%s\n' \
     && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99archivo
 RUN apt-get update \
     && apt-get install -y --no-install-recommends poppler-utils libarchive-tools unar djvulibre-bin libchm-bin antiword catdoc qpdf ghostscript libtiff-tools \
+        libreoffice-writer-nogui fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

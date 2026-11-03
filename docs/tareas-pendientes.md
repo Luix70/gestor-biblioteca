@@ -18,10 +18,11 @@
 ## 1. Scripts por ejecutar
 
 ### 0.7 Probar LibreOffice en el NAS (3-nov) — no toca la app
-- [ ] Desplegar
-- [ ] `sudo sh /volume1/docker/GestorBiblioteca/scripts/probar-libreoffice-nas.sh` (avisar al terminar: se revisan los PDF)
+- [x] `probar-libreoffice-nas.sh` (3-nov: 5 de 5, 8-15 s por fichero, texto correcto; LibreOffice 7.0.4, 203 MB)
+- [ ] Desplegar: la imagen lleva ya LibreOffice (el primer build tarda unos 5 min más)
+- [ ] Comprobar tras el despliegue: `sudo docker exec gestor-biblioteca soffice --version`
 
-Decide si PreProceso convierte los .doc en el NAS o seguimos con el PC. Diseño en docs/preproceso.md.
+Diseño de PreProceso en docs/preproceso.md.
 
 ### 0.75 Sanear los ISBN de relleno (1-nov) — solo BD y portadas; antes de reactivar el Vigilante
 - [ ] Copia de la base en el PC: `D:\Bibliobak\CopiaBase.ps1`

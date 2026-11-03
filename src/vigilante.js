@@ -25,7 +25,8 @@ import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, pe
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
 import { tituloDeNombre } from './utils/afinar-guias.js';
 import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js';
-import { partesContenidasEnLibro } from './utils/partes-contenidas.js'; // libro + su desglose
+import { partesContenidasEnLibro } from './utils/partes-contenidas.js';
+import { convertirAPdf, hayLibreOffice, EXT_CONVERTIBLES } from './utils/convertir-a-pdf.js'; // libro + su desglose
 import { unirPdfs, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js'; // carpeta de páginas escaneadas → PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
@@ -1833,12 +1834,26 @@ async function materializarDesgloseGuiado(dir, d = {}) {
         return await materializarDesglose(dir, { principal, partes: docs.filter((n) => n !== principal) }) ? true : 'esperar';
     }
     // Solo partes: se COSEN en el orden de la guía.
-    const aCoser = d.solo_orden ? docs.filter((n) => d.orden?.includes(n)) : sinCopiasParalelas(docs);
-    const plan = planCosido(aCoser, d.orden || [], d.titulos || {});
+    let aCoser = d.solo_orden ? docs.filter((n) => d.orden?.includes(n)) : sinCopiasParalelas(docs);
+    let plan = planCosido(aCoser, d.orden || [], d.titulos || {});
+    // Partes .doc/.docx/.rtf sin su PDF: se convierten aquí, con LibreOffice, y el PDF queda junto al original.
+    if (plan.sinPdf.length && plan.sinPdf.every((n) => EXT_CONVERTIBLES.has(path.extname(n).toLowerCase())) && await hayLibreOffice()) {
+        console.log(`  🔄 «${path.basename(dir)}»: convirtiendo ${plan.sinPdf.length} parte(s) a PDF con LibreOffice…`);
+        const fallidas = [];
+        for (const n of plan.sinPdf) {
+            const r = await convertirAPdf(path.join(dir, ...n.split('/')));
+            if (!r.ok) fallidas.push(`${n} (${r.motivo})`);
+        }
+        if (fallidas.length) console.warn(`  ⚠️  «${path.basename(dir)}»: ${fallidas.length} parte(s) no se pudieron convertir: ${fallidas.slice(0, 3).join('; ')}`);
+        const docsAhora = await partesDeDesglose(dir, [...new Set([...(d.orden || [])].filter((n) => n.includes('/')).map((n) => n.split('/')[0]))]);
+        aCoser = d.solo_orden ? docsAhora.filter((n) => d.orden?.includes(n) || d.orden?.includes(n.replace(/\.pdf$/i, '.doc'))) : sinCopiasParalelas(docsAhora);
+        plan = planCosido(aCoser, d.orden || [], d.titulos || {});
+        docs.splice(0, docs.length, ...docsAhora);
+    }
     if (plan.sinPdf.length) {
         if (!desglosesSinPdfAvisados.has(dir)) {
             desglosesSinPdfAvisados.add(dir);
-            console.warn(`  ⏸  «${path.basename(dir)}»: ${plan.sinPdf.length} parte(s) sin PDF (p. ej. «${plan.sinPdf[0]}») y sin el libro entero. Espera en el Inbox sin catalogar: conviértelas con scripts/convertir-partes-word.ps1 en el PC.`);
+            console.warn(`  ⏸  «${path.basename(dir)}»: ${plan.sinPdf.length} parte(s) sin PDF (p. ej. «${plan.sinPdf[0]}») y sin el libro entero. Espera en el Inbox sin catalogar${await hayLibreOffice() ? '' : ' (falta LibreOffice: conviértelas con scripts/convertir-partes-word.ps1 en el PC)'}.`);
         }
         return 'esperar';
     }

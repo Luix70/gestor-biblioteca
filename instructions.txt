@@ -2516,7 +2516,8 @@ de ficheros clasificado por CDU.
       -> 1.085 documentos). Ya nunca: una carpeta que la guia dice que es UN libro no se trocea.
       · Tiempo de qpdf: 30 min (QPDF_TIMEOUT_MS). Depende de los objetos del PDF, no de los MB: un capitulo de 23 MB
         con graficos vectoriales agotaba los 5 min de antes en el Atom, y 1.940 paginas de otro libro tardaban 28 s.
-      · Partes .doc sin libro entero: el NAS no puede convertirlas. Espera en el Inbox; en el PC,
+      · Partes .doc/.docx/.rtf sin libro entero: el NAS las convierte con LibreOffice (3-nov, en la imagen) y cose el
+        libro; los originales viajan a «Desglose/». Si LibreOffice faltara, espera en el Inbox; en el PC, como respaldo,
         scriptsconvertir-partes-word.ps1 (seco; con -Ejecutar convierte con Word, macros desactivadas) deja un .pdf
         junto a cada .doc y el vigilante cose. Los .doc viajan a «Desglose/». El PDF solo tendra lo que traia el .doc.
         Word bloquea de fabrica los .doc de formato muy antiguo (Centro de confianza): esas partes pasan por LibreOffice

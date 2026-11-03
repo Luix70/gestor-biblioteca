@@ -1,7 +1,7 @@
 # PreProceso — preparar antes de catalogar
 
-Diseño acordado con el usuario el 3-nov-2026. Estado: **diseño**; se construye por fases tras probar LibreOffice en
-el NAS (`scripts/probar-libreoffice-nas.sh`).
+Diseño acordado con el usuario el 3-nov-2026. Estado: **diseño**; se construye por fases. LibreOffice ya está en la
+imagen (probado en el Atom el 3-nov), así que la conversión de .doc se hace en el NAS.
 
 ## Por qué
 
@@ -40,7 +40,7 @@ BIBLIOTECA DIGITAL/Inbox/<unidad>           ← el Vigilante la cataloga obedeci
 | Inspección IA y guías | `utils/inspeccion-auto.js`, `agente-estructura.js`, `afinar-guias.js`, `guias-estructura.js` |
 | Escaneos → PDF | `utils/escaneo-a-pdf.js` |
 | Libro por capítulos | `utils/libro-desglosado.js`, `utils/partes-contenidas.js`, `vigilante·materializarDesglose*` |
-| .doc → PDF | hoy `scripts/convertir-partes-word.ps1` en el PC; con LibreOffice en el contenedor, en el NAS |
+| .doc → PDF | `utils/convertir-a-pdf.js` (LibreOffice en el NAS); `scripts/convertir-partes-word.ps1` en el PC, de respaldo |
 | Duplicados por hash | `motor-catalogo·buscarDocPorHash` (solo lectura) |
 
 ## Qué es «lista»
