@@ -535,7 +535,7 @@ async function huellaCarpeta(dir) {
  * estable de inmediato, sin esperar otro escaneo); (b) la firma no cambia respecto al escaneo anterior
  * durante la ventana. Mientras la copia crece, la firma cambia y el reloj se reinicia → nunca se procesa a medias.
  */
-async function carpetaEstable(dir) {
+export async function carpetaEstable(dir) {   // la usa también preproceso.js
     const { nFicheros, bytes, maxMtime } = await huellaCarpeta(dir);
     if (nFicheros === 0) return false; // vacía / aún sin ficheros escritos
     const firma = `${nFicheros}:${bytes}`;
@@ -1478,7 +1478,7 @@ const rutaExiste = (p) => fs.access(p).then(() => true).catch(() => false);
  * colección, "Vol N"→obra). El zip original se RECICLA (nunca se borra). Un zip corrupto → Cuarentena/
  * ilegibles. Aplana un único directorio raíz (evita Inbox/<base>/<base>/… y que las imágenes queden anidadas).
  */
-async function expandirComprimidos(dir = INBOX, nivel = 6) {
+export async function expandirComprimidos(dir = INBOX, nivel = 6) {   // la usa también preproceso.js
     if (nivel < 0) return;
     let entradas;
     try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
@@ -1731,7 +1731,7 @@ function desgloseEnEspera(dir) {
     return false;
 }
 
-async function materializarDesglose(dir, desg) {
+export async function materializarDesglose(dir, desg) {   // la usa también preproceso.js
     try {
         // Lo que ya está dentro del libro entero sobra y va a la Papelera. Solo se adjunta lo que aporta algo o lo que
         // no se ha podido comprobar (ver utils/partes-contenidas.js).
@@ -1819,7 +1819,7 @@ async function materializarDesglosePuro(dir, puro) {
  * o 'no-es-desglose' si le quedan menos de dos documentos. La guía ya dijo que esto es UN libro: en 'esperar' no se
  * cataloga nada. Las partes .doc las convierte scripts/convertir-partes-word.ps1 desde el PC (en el NAS no hay Word).
  */
-async function materializarDesgloseGuiado(dir, d = {}) {
+export async function materializarDesgloseGuiado(dir, d = {}) {   // la usa también preproceso.js
     // Partes: las sueltas en la carpeta y las de sus subcarpetas de partes — las que nombra la guía
     // («Chapters/ch01.pdf») y las de nombre típico. Rutas relativas a la carpeta.
     const subsGuia = [...new Set([...(d.orden || []), d.principal || ''].filter((n) => n.includes('/')).map((n) => n.split('/')[0]))];

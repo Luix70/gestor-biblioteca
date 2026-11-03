@@ -17,6 +17,12 @@
 
 ## 1. Scripts por ejecutar
 
+### 0.6 PreProceso, fase 1 (3-nov)
+- [ ] Crear en File Station la carpeta `BIBLIOTECA DIGITAL/PreProceso` (antes de desplegar: si la crea Docker, es de root)
+- [ ] Desplegar (cambia docker-compose.yml: el script ya hace down -v / up --build). No interrumpir la construcción
+- [ ] Comprobar en el log: «🧰 PreProceso: preparando lo que se deje en …»
+- [ ] Primera prueba: mover `World Tracker Library/College Books` a PreProceso y revisar su `_preproceso.txt`
+
 ### 0.7 Probar LibreOffice en el NAS (3-nov) — no toca la app
 - [x] `probar-libreoffice-nas.sh` (3-nov: 5 de 5, 8-15 s por fichero, texto correcto; LibreOffice 7.0.4, 203 MB)
 - [ ] Desplegar: la imagen lleva ya LibreOffice (el primer build tarda unos 5 min más)

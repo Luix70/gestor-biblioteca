@@ -1,7 +1,14 @@
 # PreProceso — preparar antes de catalogar
 
-Diseño acordado con el usuario el 3-nov-2026. Estado: **diseño**; se construye por fases. LibreOffice ya está en la
-imagen (probado en el Atom el 3-nov), así que la conversión de .doc se hace en el NAS.
+Diseño acordado con el usuario el 3-nov-2026. Estado: **fase 1 hecha** (`src/preproceso.js`, sin IA); fases 2-4 por hacer.
+LibreOffice ya está en la imagen (probado en el Atom el 3-nov), así que la conversión de .doc se hace en el NAS.
+
+Fase 1, cómo funciona hoy: cada `PREPROCESO_ESCANEO_MS` (5 min) se revisa `PreProceso`. Una carpeta solo se reanaliza si
+cambió o si lleva 30 min sin revisarse. Expande comprimidos, pasa escaneos a PDF y resuelve libros por capítulos (libro
+entero con lo contenido a la Papelera, o conversión + cosido). Cada unidad sin pendientes pasa a
+`Inbox/<carpeta dejada>/<hijo>` con la guía de la carpeta dejada; un fichero suelto pasa tal cual. El informe
+`_preproceso.txt` de cada carpeta dice qué se hizo y qué espera. Trabaja aunque el Vigilante esté en pausa.
+PreProceso y el Inbox son montajes distintos: pasar es copiar, verificar y borrar el origen (`moverArbol`).
 
 ## Por qué
 

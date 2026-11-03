@@ -213,6 +213,7 @@ rsync -a --delete \
     --exclude='/.git' \
     --exclude='/VERSION' \
     --exclude='/Inbox' \
+    --exclude='/PreProceso' \
     --exclude='/CDU' \
     --exclude='/Cuarentena' \
     --exclude='/Reintentos' \

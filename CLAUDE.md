@@ -85,7 +85,7 @@ The daily UI is a single-page panel served by `app.js` (static `public/`), **mob
 
 **Paper vs digital is decided by the ENTRY ROUTE, not the content** (user rule, 3-nov): only a panel capture (live camera, `Catalogar`, system camera → `soporte=papel` in the upload) is `papel`. Images from the Inbox, «subir ficheros» or a reingest are joined into a lossless PDF at the start of `servicio-ingesta·ingestarRecursoInterno` (`imagenesComoPdfDigital`) and follow the PDF path; a short scanned PDF without its own ISBN/CIP becomes an `articulo` (`discriminador·clasificarPorPaginas`, `soportePapel`).
 
-**PreProceso** (planned, design in [`docs/preproceso.md`](docs/preproceso.md)): a folder where complex drops are prepared (expand, AI guides, stitch, convert, set aside junk) WITHOUT cataloguing, and each ready unit moves to the Inbox automatically.
+**PreProceso** ([`docs/preproceso.md`](docs/preproceso.md); phase 1 done in `src/preproceso.js`, started by `app.js` even with the watcher paused, `DESACTIVAR_PREPROCESO=1` to skip): `BIBLIOTECA DIGITAL/PreProceso` (mount `/app/PreProceso`, `PATH_PREPROCESO`) is where complex drops are prepared WITHOUT cataloguing — expand archives, scans → PDF, chapter books resolved (reusing the exported `vigilante·expandirComprimidos/materializarDesglose*/carpetaEstable`) — and each unit with nothing pending moves to `Inbox/<drop>/<child>` with the drop's guide (copy-verify-delete: different mounts, EXDEV). Report `_preproceso.txt` per drop. Phases 2-4 (AI guides there, panel card, `Computers`) pending.
 
 ## Failure handling
 

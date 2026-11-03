@@ -21,6 +21,7 @@ import { agrupar } from './utils/agrupador.js';
 import { enviarACuarentena, enviarAReintentos } from './gestor-fallos.js';
 import { esFalloDeConexionMongo } from './database.js';
 import { reciclar } from './utils/papelera.js';
+import { iniciarPreproceso } from './preproceso.js';
 import { iniciarVigilante, mantenimientoManual, detenerMantenimientoManual, configurarConformador, estadoConformador, estadoVigilante } from './vigilante.js';
 import { trabajosEnCurso } from './utils/actividad.js'; // trabajos del panel, para el semáforo de la copia
 import { obtenerEstadisticas } from './estadisticas.js';
@@ -579,6 +580,8 @@ ajustarTimeoutsServidor(app.listen(PUERTO, () => {
     cargarAjustesIngesta().catch(() => {});
     if (process.env.DESACTIVAR_VIGILANTE !== '1') {
         iniciarVigilante().catch(e => console.error('No se pudo iniciar el vigilante:', e.message));
+        // PreProceso prepara sin catalogar, así que trabaja aunque el Vigilante esté en pausa (docs/preproceso.md).
+        if (process.env.DESACTIVAR_PREPROCESO !== '1') iniciarPreproceso();
     }
 }));
 
