@@ -26,6 +26,7 @@ import { rasterizarPaginas } from './rasterizar-pdf.js';
 import { resolverPersona } from './resolver-persona.js';
 import { esAudio } from './lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { esDocumentoLeible, esImagenArchivo, esMaterialNotable, esVideo, formatoDocumento } from './criba-material.js';
+import { convertirAPdf, EXT_CONVERTIBLES } from './convertir-a-pdf.js'; // libro en Word → PDF (LibreOffice)
 import { leerGuia } from './guia-ingesta.js'; // pistas del reproceso (principal fijado + soloAdmin de adjuntos)
 import { isbnDesdeArchivo } from './isbn-archivo.js'; // ISBN del propio fichero del miembro (identificar antes de clasificar)
 import { buscarEnFicheroLocal } from './buscador-local.js'; // pivote OFFLINE por ISBN (sin IA)
@@ -786,9 +787,37 @@ export async function ingestarLibroConMaterial(dirOrigen, { reciclarOrigen = tru
         let size = 0; try { size = (await fs.stat(path.join(dirOrigen, e.name))).size; } catch { /* sin stat */ }
         docsRaiz.push({ name: e.name, abs: path.join(dirOrigen, e.name), size });
     }
-    if (!docsRaiz.length) return { ok: false, motivo: 'no hay documento principal (pdf/epub/…) en la raíz: ¿marcaste bien la carpeta?' };
+    // Sin PDF/EPUB pero con el libro en Word («0471109614.doc» de Turbulent Skies, 3-nov): se convierte a PDF con
+    // LibreOffice y ese PDF es el principal; el Word original viaja como material. Sin esto la carpeta fallaba en
+    // CADA escaneo (cada 10 s, horas de avisos idénticos).
+    if (!docsRaiz.length) {
+        const word = [];
+        for (const e of entradas) {
+            if (!e.isFile() || esAccesorio(e.name) || !EXT_CONVERTIBLES.has(ext(e.name))) continue;
+            let size = 0; try { size = (await fs.stat(path.join(dirOrigen, e.name))).size; } catch { /* sin stat */ }
+            word.push({ name: e.name, size });
+        }
+        word.sort((a, b) => b.size - a.size);
+        const elegido = (lm?.principal && word.find((w) => w.name === lm.principal)) || word[0];
+        if (!elegido) {
+            // No va a cambiar solo: `permanente` evita reintentarlo en cada escaneo (se olvida al sacar la carpeta).
+            return { ok: false, permanente: true, motivo: 'no hay documento principal (pdf/epub/…) en la raíz: ¿marcaste bien la carpeta? (no se reintenta hasta que la saques y la vuelvas a dejar)' };
+        }
+        const conv = await convertirAPdf(path.join(dirOrigen, elegido.name));
+        if (!conv.ok) {
+            return { ok: false, permanente: true, motivo: `el libro está en Word («${elegido.name}») y no se pudo pasar a PDF: ${conv.motivo} (no se reintenta hasta que la saques y la vuelvas a dejar)` };
+        }
+        const nombrePdf = path.basename(conv.pdf);
+        let size = 0; try { size = (await fs.stat(conv.pdf)).size; } catch { /* sin stat */ }
+        docsRaiz.push({ name: nombrePdf, abs: conv.pdf, size });
+        console.log(`  📝 «${elegido.name}» convertido a PDF (${conv.paginas} págs.): es el libro; el Word queda como material.`);
+    }
     docsRaiz.sort((a, b) => b.size - a.size);
-    const principal = (lm?.principal && docsRaiz.find((d) => d.name === lm.principal)) || docsRaiz[0];
+    // La guía puede fijar el Word como principal: entonces vale su gemelo PDF.
+    const fijado = lm?.principal && EXT_CONVERTIBLES.has(ext(lm.principal))
+        ? lm.principal.slice(0, -path.extname(lm.principal).length) + '.pdf'
+        : lm?.principal;
+    const principal = (fijado && docsRaiz.find((d) => d.name.toLowerCase() === fijado.toLowerCase())) || docsRaiz[0];
 
     // 2) Catalogar el LIBRO por el pipeline normal (import dinámico → evita cualquier ciclo de carga).
     const { ingestarRecurso } = await import('../servicio-ingesta.js');

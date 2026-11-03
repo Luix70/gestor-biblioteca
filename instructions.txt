@@ -2540,6 +2540,10 @@ de ficheros clasificado por CDU.
       catalogar (comprimidos, escaneos a PDF, libros por capitulos: libro entero o conversion con LibreOffice y
       cosido) y cada unidad lista pasa sola al Inbox; lo que no se puede preparar se queda con su informe
       _preproceso.txt. Funciona aunque el Vigilante este en pausa. Diseno y fases: docs/preproceso.md.
+    · LIBRO + MATERIAL CON EL LIBRO EN WORD (3-nov): si la carpeta no trae PDF/EPUB pero si un .doc/.docx/.rtf/
+      .odt, se convierte a PDF con LibreOffice y ese PDF es el libro (el Word va como material). Una carpeta que
+      no se puede catalogar asi ya no se reintenta cada 10 s: se avisa una vez y espera a que la saques y la
+      vuelvas a dejar.
     · PAPEL O DIGITAL (3-nov): lo decide la VIA DE ENTRADA. Solo es papel una captura del panel (camara en vivo,
       «Catalogar», camara del sistema). Unas imagenes dejadas en el Inbox, subidas con «subir ficheros» o reingresadas
       se unen en un PDF sin recomprimir y se catalogan como documento digital; un PDF escaneado de menos de 12 paginas
