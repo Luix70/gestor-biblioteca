@@ -78,7 +78,7 @@ export const AJUSTES = {
     IA_PRECIO_ENTRADA_USD_M: 0.30,   // tarifa de la IA de pago (Gemini 2.5 Flash), $ por millón de tokens de entrada — contador de uso de IA
     IA_PRECIO_SALIDA_USD_M: 2.50,    // … y de salida (los de razonamiento se cobran como salida)
     IA_USD_A_EUR: 0.92,              // cambio para mostrar el coste en euros
-    ESCANEO_PDF_MIN_PAGINAS: 12,     // carpeta de solo imágenes con al menos N páginas (o algún TIF) = escaneo → un PDF (utils/escaneo-a-pdf.js); menos = fotos de un libro en papel → visión
+    ESCANEO_PDF_MIN_PAGINAS: 12,     // carpeta de la RAÍZ del Inbox de solo imágenes con al menos N páginas (o algún TIF) → un PDF por libro antes de clasificar (utils/escaneo-a-pdf.js); con menos, servicio-ingesta las une en un PDF al catalogarlas: nunca son «papel» si no vienen de una captura del panel
     INSPECCION_IA_REINTENTO_MIN: 15, // si la IA no responde, la carpeta ESPERA en el Inbox y se reintenta cada N min…
     INSPECCION_IA_ESPERA_MAX_H: 6,   // …hasta este tope; pasado, se ingiere con las reglas de siempre (sin guías de la IA)
     INSPECCION_IA_VISION: 1,         // 1 = en cada TIRADA DE REVISTAS, UNA llamada de visión con la portada, las primeras
@@ -140,9 +140,9 @@ export const AJUSTES = {
     PDF_TIMEOUT_MAX_MS: 240000,     // techo (4 min por llamada; un fichero pequeño roto sigue fallando rápido)
 
     // --- Clasificación por nº de páginas (solo PDF) ---
-    // Un PDF ESCANEADO con MENOS de N páginas → libro de 'papel' (un ejemplar físico fino escaneado); el
-    // PDF se CONSERVA igualmente en la carpeta junto a las páginas extraídas (salvaguarda). Con N o más
-    // páginas se mantiene como PDF digital.
+    // Un PDF ESCANEADO con MENOS de N páginas: si llega por una CAPTURA del panel → libro de 'papel' (el PDF se
+    // conserva); si llega como fichero (Inbox, subir ficheros) → ARTÍCULO digital escaneado, salvo ISBN/CIP propio.
+    // Con N o más páginas manda su identidad (libro/revista).
     CLASIF_PAPEL_MAX_PAGINAS: 12,
     // Un PDF LEGIBLE (con capa de texto) con MENOS de N páginas y SIN identidad propia de libro (ISBN/CIP
     // propio) → 'articulo' (si trae DOI) o 'capitulo' (fragmento de un libro), no un libro. Con N o más

@@ -12416,7 +12416,7 @@ async function camaraEnVivo(opts = {}) {
       renderCamThumbs();
       actualizarN();
       pillOverlay(`📚 ${files.length} foto(s) enviadas`, 1100);
-      subirInbox(files, { saltarPortada: true }).catch((e) => toast('Error al enviar: ' + (e.message || e), 'bad'));
+      subirInbox(files, { saltarPortada: true, papel: true }).catch((e) => toast('Error al enviar: ' + (e.message || e), 'bad'));
     } finally {
       enviando = false;
     }
@@ -12740,7 +12740,7 @@ function wireInbox() {
     oci.onchange = () => {
       const f = [...oci.files];
       oci.value = '';
-      if (f.length) subirInbox(f);
+      if (f.length) subirInbox(f, { papel: true });   // cámara del sistema: foto de un ejemplar físico
     };
   // Ingreso por ISBN: Buscar (botón) o Enter en el campo (los lectores de código de barras envían Enter).
   if ($('#isbnGo')) $('#isbnGo').onclick = isbnBuscar;
@@ -13913,7 +13913,7 @@ async function camCatalogar() {
   const files = camFotos.slice();
   camFotos = [];
   renderCamThumbs();
-  await subirInbox(files);
+  await subirInbox(files, { papel: true });
 }
 // FormData con los METADATOS del formulario (viajan con la subida → el pipeline trabaja menos).
 // Metadatos del formulario como objeto (snapshot) → cada trabajo encolado lleva LOS SUYOS (el form
@@ -13943,6 +13943,8 @@ function fdDesdeSnap(snap, files) {
   if (snap.issn) formData.append('issn', snap.issn);
   if (snap.cdu) formData.append('cdu', snap.cdu);
   if (snap.tipo) formData.append('tipo', snap.tipo);
+  // Captura de un ejemplar físico (cámara/fotos): el servidor la cataloga como papel; lo demás es digital.
+  if (snap.soporte) formData.append('soporte', snap.soporte);
   if (snap.ambito || snap.estanteria)
     formData.append(
       'ubicacion',
@@ -14263,6 +14265,7 @@ async function subirInbox(files, extra) {
     if (documentos.length > 1) {
       const imagenes = files.filter(_esImg);
       const snap = metaSnapshot();
+      if (extra.papel) snap.soporte = 'papel';
       delete snap.isbn;
       delete snap.isbnOrigen;
       if ($('#inIsbn')) $('#inIsbn').value = '';
@@ -14304,6 +14307,7 @@ async function subirInbox(files, extra) {
         : '⏳ Subiendo y catalogando… (identificará el servidor)',
     );
     const snap = metaSnapshot();
+    if (extra.papel) snap.soporte = 'papel';
     if (isbn && !snap.isbn) snap.isbn = isbn;
     if (snap.isbn && origenMovil) snap.isbnOrigen = 'movil';
     // Progreso de subida (0-100%) → al 100% avisa de que la subida TERMINÓ y ahora cataloga el servidor
@@ -14339,6 +14343,7 @@ async function subirInbox(files, extra) {
   }
   // AUTOPILOTO: encolar (NO bloquea). La cola procesa una a una en segundo plano.
   const snap = metaSnapshot();
+  if (extra.papel) snap.soporte = 'papel';
   if (extra.isbn) {
     snap.isbn = extra.isbn;
     if (extra.isbnOrigen) snap.isbnOrigen = extra.isbnOrigen;

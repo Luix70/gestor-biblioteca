@@ -263,7 +263,10 @@ app.post('/api/ingestar', upload.array('files'), async (req, res) => {
     const cduForm   = String(req.body?.cdu || '').trim() || null;
     const tipoForm  = String(req.body?.tipo || '').trim().toLowerCase() || null;
     const conformar = req.body?.conformar === '1' || req.body?.conformar === true || req.query?.conformar === '1';
+    // Soporte: solo una CAPTURA del panel (cámara, fotos del ejemplar) es papel; «subir ficheros» es digital.
+    const soportePapel = req.body?.soporte === 'papel';
     const baseCtx = {};
+    if (soportePapel) baseCtx.soporte = 'papel';
     if (ubicacion) baseCtx.ubicacion = ubicacion;
     if (coleccion) { baseCtx.coleccion = coleccion; baseCtx.serieAuto = true; } // serie de libros → autonumera
     if (obraTit)   baseCtx.obra = { titulo: obraTit };

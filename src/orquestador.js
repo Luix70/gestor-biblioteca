@@ -984,6 +984,7 @@ export async function procesarRecurso(entrada) {
             tipoActual: tipo_recurso,
             doi: datosBase.doi,
             idFuerte: !!(datosBase.isbn_propio || datosBase.cip),
+            soportePapel: contexto.soporte === 'papel',
         });
         if (pol.tipo_recurso) tipo_recurso = pol.tipo_recurso;
         if (pol.formato) formatos = [pol.formato];

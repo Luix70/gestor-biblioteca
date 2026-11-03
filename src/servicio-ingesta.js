@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
@@ -33,6 +34,7 @@ import { mismoTituloLibro } from './utils/titulo-libro.js';
 import { datosDeObraDeCandidatas } from './utils/datos-de-obra.js';
 import { decidirLote, esCduGruesa } from './utils/refinar-cdu.js';
 import { conOrigenIA } from './utils/uso-ia.js';
+import { imagenesAPdf } from './utils/escaneo-a-pdf.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RAIZ = path.resolve(__dirname, '..');
@@ -421,7 +423,40 @@ export async function identificarEdicionEnIngesta(documento) {
  *
  * @param entrada { rutas: string[], contexto?: { ubicacion } }
  */
+/**
+ * SOPORTE: lo decide la VÍA DE ENTRADA, no el contenido (regla del usuario, 3-nov). Solo es «papel» lo que llega
+ * por una captura del panel (cámara, fotos del ejemplar: contexto.soporte = 'papel'). Unas imágenes dejadas en el
+ * Inbox, subidas como fichero o reingresadas son un documento DIGITAL escaneado (casi siempre un artículo): se unen
+ * en un PDF sin recomprimir (escaneo-a-pdf) y siguen el camino de cualquier PDF. Antes, menos de 12 imágenes se
+ * tomaban por fotos de un libro en papel. Devuelve { pdf, dir } o null si no aplica o no se pudo (entonces sigue
+ * por el camino de las imágenes, como antes).
+ */
+const RE_IMAGEN_ESCANEO = /\.(jpe?g|png|tiff?)$/i;
+async function imagenesComoPdfDigital(rutas, contexto) {
+    if (contexto.soporte === 'papel' || !rutas?.length || !rutas.every((r) => RE_IMAGEN_ESCANEO.test(r))) return null;
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'imagenes-pdf-'));
+    const orden = [...rutas].sort((a, b) => path.basename(a).localeCompare(path.basename(b), 'es', { numeric: true }));
+    const carpeta = path.basename(path.dirname(rutas[0]));
+    const nombre = (rutas.length > 1 && carpeta && !/^(inbox|uploads?|tmp|temp)$/i.test(carpeta) ? carpeta : path.parse(orden[0]).name)
+        .replace(/[<>:"/\\|?*]+/g, ' ').trim() || 'escaneo';
+    const pdf = path.join(dir, `${nombre}.pdf`);
+    const r = await imagenesAPdf(orden, pdf);
+    if (!r.ok) {
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+        console.warn(`  ⚠️  ${rutas.length} imagen(es) no se pudieron unir en un PDF (${r.motivo}): siguen como imágenes.`);
+        return null;
+    }
+    console.log(`  📄 ${rutas.length} imagen(es) → «${path.basename(pdf)}» (${r.paginas} págs.): documento digital escaneado, no papel.`);
+    return { pdf, dir };
+}
+
 async function ingestarRecursoInterno({ rutas, contexto = {} }) {
+    const digital = await imagenesComoPdfDigital(rutas, contexto);
+    if (digital) {
+        // Los originales los retira quien llamó (el vigilante los recicla con su unidad); el PDF temporal, aquí.
+        try { return await ingestarRecursoInterno({ rutas: [digital.pdf], contexto }); }
+        finally { await fs.rm(digital.dir, { recursive: true, force: true }).catch(() => {}); }
+    }
     // 0. ATAJO POR HASH: si el fichero ya está archivado (hash idéntico) no malgastar OCR/visión/APIs;
     //    si el doc existe pero su fichero falta, restaurarlo con el entrante. (Ver atajoPorHash.)
     const atajo = await atajoPorHash(rutas, contexto);

@@ -107,13 +107,21 @@ export function clasificarPorPaginas(s = {}) {
     // Sin nº de páginas fiable, o ya es revista/obra → no se toca (respetamos la identidad ya resuelta).
     if (!n || s.multiparte || s.tipoActual === 'revista') return {};
 
-    // Escaneo fino → ejemplar físico → papel (el PDF se conserva).
+    // Escaneo fino. El soporte lo decide la vía de entrada (regla del usuario, 3-nov): solo una CAPTURA del panel es
+    // un ejemplar en papel. Un PDF escaneado corto llegado como fichero es un documento digital, casi siempre un
+    // ARTÍCULO; si trae ISBN o CIP propio sigue siendo lo que diga su identidad.
     if (s.escaneado && n < PAG_PAPEL_MAX) {
-        return {
-            formato: 'papel',
-            tipo_recurso: 'libro',
-            alerta: `Escaneo de ${n} páginas (< ${PAG_PAPEL_MAX}) → libro de PAPEL (el PDF se conserva junto a las páginas).`,
-        };
+        if (s.soportePapel) {
+            return {
+                formato: 'papel',
+                tipo_recurso: 'libro',
+                alerta: `Escaneo de ${n} páginas (< ${PAG_PAPEL_MAX}) de una captura → libro de PAPEL (el PDF se conserva junto a las páginas).`,
+            };
+        }
+        if (!s.idFuerte && s.tipoActual === 'libro') {
+            return { tipo_recurso: 'articulo', alerta: `Escaneo de ${n} páginas (< ${PAG_PAPEL_MAX}) sin ISBN propio → ARTÍCULO digital escaneado.` };
+        }
+        return {};
     }
     // Legible y corto, sin identidad propia de libro → capítulo/artículo (fragmento).
     if (!s.escaneado && n < PAG_CAPITULO_MAX && !s.idFuerte && s.tipoActual === 'libro') {
