@@ -84,7 +84,8 @@ import { fuentesCopia, procesarSaneamiento, estadoSaneamiento, repararDeposito, 
 import { describirCDU, regenerarDescripcionCDU } from './utils/descripcion-cdu.js';
 import { describirClasificacion, descripcionVigente, regenerarDescripcionClasificacion } from './utils/descripcion-clasificacion.js';
 import { altaPorISBN } from './servicio-ingesta.js';
-import { medirPortadaRemota, portadasPorISBN } from './utils/portadas-isbn.js';
+import { portadasPorTitulo } from './utils/portadas-isbn.js';
+import { cotejarPortadas, elegirPortadaCandidata } from './utils/portadas-cotejo.js';
 import { buscarUnISBN, iniciarLoteISBN, estadoLoteISBN } from './utils/lote-isbn.js';
 import { confirmarEditorial } from './utils/confirmar-editorial.js';
 import { serieCompletaDeColeccion } from './utils/serie-completa.js';
@@ -2588,6 +2589,31 @@ export function rutasPanel() {
         try { res.json(await reemplazarImagen(await conectarDB(), req.params.id, req.body?.ruta, req.body?.base64)); }
         catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
+    // PORTADAS CANDIDATAS de la ficha (utils/portadas-cotejo.js). «Buscar» reúne las de su ISBN y las de su título y
+    // autor y las guarda (sin tocar la portada); «Elegir» pone una de esas como portada (la anterior queda en el
+    // carrusel). Solo se descargan URLs de la lista guardada del propio documento.
+    r.post('/documentos/:id/portadas/buscar', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const autor = doc.autores?.length
+                ? (await db.collection('autores').findOne({ _id: doc.autores[0] }, { projection: { nombre: 1 } }))?.nombre || ''
+                : '';
+            const r2 = await cotejarPortadas(db, doc, { isbn: doc.isbn || null, titulo: doc.titulo || '', autor, ponerSola: false });
+            res.json({ ok: true, candidatas: r2.candidatas });
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/:id/portadas/elegir', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            res.json(await elegirPortadaCandidata(db, doc, String(req.body?.url || '')));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
     // Asignar la MISMA portada (base64) a una SELECCIÓN de documentos: en cada uno se añade como portada sin
     // borrar las imágenes que ya tenga. Solo admin (el guard global de mutación ya lo garantiza).
     r.post('/documentos/portada-lote', async (req, res) => {
@@ -3456,33 +3482,7 @@ export function rutasPanel() {
             const isbn = String(req.query.isbn || '').trim();
             const titulo = String(req.query.titulo || '').trim();
             const autor = String(req.query.autor || '').trim();
-            const cands = [];
-            // 1) OpenLibrary Search (título + autor) → id de cubierta de varias ediciones.
-            try {
-                const p = new URLSearchParams({ limit: '8', fields: 'cover_i' });
-                if (titulo) p.set('title', titulo); if (autor) p.set('author', autor);
-                if (!titulo && isbn) { p.delete('title'); p.set('q', isbn); }
-                const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 10000);
-                const r1 = await fetch('https://openlibrary.org/search.json?' + p.toString(), { signal: ctrl.signal }); clearTimeout(to);
-                if (r1.ok) { const j1 = await r1.json(); for (const d of (j1.docs || [])) if (d.cover_i) cands.push([`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`, 'OpenLibrary']); }
-            } catch { /* OL opcional */ }
-            // 2) Apple Books / iTunes Search (keyless) → carátula subida a 600 px.
-            try {
-                const term = [titulo, autor].filter(Boolean).join(' ') || isbn;
-                if (term) {
-                    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 10000);
-                    const r2 = await fetch('https://itunes.apple.com/search?media=ebook&limit=8&term=' + encodeURIComponent(term), { signal: ctrl.signal }); clearTimeout(to);
-                    if (r2.ok) { const j2 = await r2.json(); for (const it of (j2.results || [])) { let a = it.artworkUrl100 || it.artworkUrl60; if (a) cands.push([a.replace(/\/\d+x\d+bb\.(jpg|png|jpeg)/i, '/600x600bb.$1'), 'Apple Books']); } }
-                }
-            } catch { /* Apple opcional */ }
-            // Medir, deduplicar (dims+bytes) y ordenar por resolución.
-            const out = [], vistos = new Set();
-            for (const [u, f] of cands) {
-                const m = await medirPortadaRemota(u, f); if (!m) continue;
-                const sig = `${m.ancho}x${m.alto}:${m.bytes}`; if (vistos.has(sig)) continue;
-                vistos.add(sig); out.push(m);
-            }
-            out.sort((a, b) => b.ancho - a.ancho);
+            const out = await portadasPorTitulo(titulo, autor, isbn);
             res.json({ ok: true, disponible: true, portadas: out.slice(0, 12) });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });

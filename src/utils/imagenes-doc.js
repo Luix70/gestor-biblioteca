@@ -58,8 +58,9 @@ export async function eliminarImagen(db, id, ruta) {
 
 // Núcleo compartido: escribe el buffer de una imagen en la carpeta del doc y la inserta en el carrusel.
 // `comoPortada` = true → va la 1.ª (portada) y la portada anterior baja a 'otra' (las demás se conservan);
-// false → va al final. Devuelve el resultado de setImagenes.
-async function escribirImagen(db, doc, d, comoPortada) {
+// false → va al final. `origen` queda en la imagen ('manual' = la puso una persona: nada automático la sustituye).
+// Devuelve el resultado de setImagenes.
+async function escribirImagen(db, doc, d, comoPortada, origen = 'manual') {
     const carpeta = carpetaDeDoc(doc); await fs.mkdir(carpeta, { recursive: true });
     const nombre = `${comoPortada ? 'portada' : 'otra'}-${Date.now()}.${d.ext}`;
     await fs.writeFile(path.join(carpeta, nombre), d.buf);
@@ -68,10 +69,19 @@ async function escribirImagen(db, doc, d, comoPortada) {
     if (comoPortada) {
         // La entrante = portada; la portada previa (y cualquier otra marcada) baja a 'otra'; NINGUNA se borra.
         const resto = previas.map(im => ({ ...im, tipo: im.tipo === 'portada' ? 'otra' : (im.tipo || 'otra') }));
-        return setImagenes(db, doc, [{ ruta: web, tipo: 'portada', origen: 'manual' }, ...resto], web);
+        return setImagenes(db, doc, [{ ruta: web, tipo: 'portada', origen }, ...resto], web);
     }
-    const nuevas = [...previas, { ruta: web, tipo: previas.length ? 'otra' : 'portada', origen: 'manual' }];
+    const nuevas = [...previas, { ruta: web, tipo: previas.length ? 'otra' : 'portada', origen }];
     return setImagenes(db, doc, nuevas, doc.portada || web);
+}
+
+// Añadir una imagen que ya está en memoria (una portada descargada): mismo núcleo que `anadirImagen`.
+// `formato` = el de medirImagen ('jpeg' | 'png' | 'webp'…).
+export async function anadirImagenBuffer(db, id, buf, { formato = 'jpeg', comoPortada = false, origen = 'manual' } = {}) {
+    const doc = await cargarDoc(db, id); if (!doc) return { ok: false, motivo: 'documento no encontrado' };
+    if (!buf?.length || buf.length > MAX_BYTES) return { ok: false, motivo: 'imagen inválida' };
+    const ext = formato === 'png' ? 'png' : formato === 'webp' ? 'webp' : 'jpg';
+    return escribirImagen(db, doc, { buf, ext }, comoPortada === true, origen);
 }
 
 // Añadir una imagen nueva (base64) al carrusel. Por defecto al FINAL; con {comoPortada:true} la coloca

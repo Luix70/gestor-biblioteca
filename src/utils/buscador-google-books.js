@@ -56,6 +56,15 @@ const esCuotaDiaria = (e) => e?.response?.status === 429 && /per day|quota/i.tes
 /** ¿Se puede llamar a Google Books ahora? (false mientras dure la cuota agotada) */
 export const googleBooksConCuota = () => Date.now() >= sinCuotaHasta;
 
+/** Otro cliente de la misma API (las portadas por ISBN) vio el 429 de cuota diaria: nadie llama hasta el reinicio. */
+export function marcarGoogleBooksSinCuota() {
+    if (googleBooksConCuota()) {
+        sinCuotaHasta = reinicioCuota();
+        const hora = new Date(sinCuotaHasta).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        console.warn(`⚠️  Google Books: cuota diaria agotada → sin llamadas hasta las ${hora}.`);
+    }
+}
+
 /**
  * Ejecuta una consulta y devuelve el primer volumen normalizado (o null).
  * Si se proporciona idioma (ISO 639-1), se añade langRestrict para filtrar por lengua.

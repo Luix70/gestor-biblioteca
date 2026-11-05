@@ -6,6 +6,8 @@
  *   · EPUB → dc:identifier del OPF (propio del libro) → se confía; si el OPF no lo trae, un ISBN del TEXTO
  *     (página de créditos) solo se acepta si CORROBORA por título contra el Fichero, como en un PDF.
  *   · MOBI/AZW → registro EXTH (propio) → se confía.
+ *   · CHM → la ficha del propio libro (cabecera de Safari, carpeta con nombre de ISBN) → se confía; un ISBN de sus
+ *     páginas solo si CORROBORA por título contra el Fichero.
  *   · PDF → el ISBN PROPIO (nombre-es-ISBN / DOI / bloque CIP) se confía; un candidato del CUERPO del texto
  *     solo se acepta si CORROBORA por título contra el Fichero (`corroborarISBNporTitulo`).
  *   · Nombre de archivo → un ISBN incrustado en el nombre se trata como propio.
@@ -24,6 +26,7 @@ import path from 'node:path';
 import { extraerMetadatosPdf, extraerISBNs } from './lector-pdf.js';
 import { extraerMetadatosEpub, isbnsEnTextoEpub, textoInicialEpub } from './lector-epub.js';
 import { leerMobi } from './lector-mobi.js';
+import { leerChm } from './lector-chm.js';
 import { corroborarISBNporTitulo } from './buscador-local.js';
 import { parsearBloqueCatalogacion } from './cip.js';
 import { validarISBN, variantesISBN } from './identificadores.js';
@@ -36,6 +39,7 @@ export function tipoLibro(abs) {
     if (ext === '.epub') return 'epub';
     if (ext === '.pdf') return 'pdf';
     if (['.mobi', '.azw', '.azw3', '.prc'].includes(ext)) return 'mobi';
+    if (ext === '.chm') return 'chm';
     return null;
 }
 
@@ -129,6 +133,18 @@ export async function isbnDesdeArchivo(abs, { nombre = '', tituloRef = '', volum
             const m = await leerMobi(abs);
             const isbn = await elegirEntreContenidoYNombre(validarISBN(m?.isbn), isbnNombre, m?.titulo || tituloRef || base);
             return { isbn, isbn_obra: null, titulo: m?.titulo || null, autores: m?.autores || [], editorial: m?.editorial || null };
+        }
+        if (tipo === 'chm') {
+            // CHM: el ISBN de la ficha del propio libro (cabecera de Safari, nombre de su carpeta) es propio → se
+            // confía. Un ISBN suelto de sus páginas puede ser de un libro citado → solo si el Fichero lo corrobora
+            // por el título (como el cuerpo de un PDF). El título del índice es fiable (no es el info-dict de un PDF).
+            const c = await leerChm(abs);
+            const ref = c?.titulo || tituloRef || base;
+            let isbn = await elegirEntreContenidoYNombre(validarISBN(c?.isbn_propio), isbnNombre, ref);
+            if (!isbn && c?.isbn_candidatos?.length) {
+                isbn = await corroborarISBNporTitulo({ candidatos: c.isbn_candidatos, titulo: ref }).catch(() => null);
+            }
+            return { isbn: isbn || null, isbn_obra: null, titulo: c?.titulo || null, autores: c?.autores || [], editorial: c?.editorial || null };
         }
 
         // PDF: propio (nombre/DOI/CIP) directo; candidato del cuerpo solo si corrobora por título.

@@ -829,6 +829,19 @@ export async function procesarRecurso(entrada) {
         catch (e) { chm = { error: e.message }; }        // sin libchm-bin / corrupto → seguir por nombre
         datosBase = metadatosDesdeNombre(rutas[0]);       // respaldo por nombre
         if (chm.titulo && !esTituloArtefacto(chm.titulo)) datosBase.titulo = chm.titulo;
+        // La ficha del PROPIO libro (cabecera de Safari: «By … Publisher: … Print ISBN-13: … Pages: …»): manda sobre el
+        // nombre del fichero, como el EXTH de un MOBI. «Foster - Nanotechnology - Science, Innovation and
+        // Opportunity.chm» dio por autores «Nanotechnology» y «Science, Innovation and Opportunity».
+        if (chm.autores?.length) datosBase.autores = chm.autores;
+        if (chm.editorial) datosBase.editorial = chm.editorial;
+        if (chm.anio && !datosBase.año_edicion) datosBase.año_edicion = chm.anio;
+        if (chm.paginas && !datosBase.paginas) datosBase.paginas = chm.paginas;
+        if (chm.isbn_propio) {
+            // Su ISBN es el del libro (no una pista del cuerpo): pivote fiable, como el del CIP de un PDF.
+            datosBase.isbn = chm.isbn_propio;
+            datosBase.isbn_propio = chm.isbn_propio;
+            isbnDelArchivo = true;
+        }
         if ((chm.isbn_candidatos || []).length) {
             // El ISBN del CUERPO del CHM es PISTA (podría ser de un libro citado): entra como candidato para el
             // enriquecimiento (el Fichero/APIs lo corroboran), y se usa como pivote provisional si no hay otro.
@@ -838,7 +851,7 @@ export async function procesarRecurso(entrada) {
         }
         if (chm.issn && !datosBase.issn) datosBase.issn = validarISSN(chm.issn) || datosBase.issn;
         if (chm.portada?.buf) datosBase.cubierta_base64 = chm.portada.buf.toString('base64'); // la mide resolverPortada
-        datosBase.alertas_agente = [`Formato chm: leído con libchm-bin${chm.titulo ? ` · título "${chm.titulo}"` : ''}${chm.isbn ? ` · ISBN ${chm.isbn} (del cuerpo, pista)` : ''}${chm.portada ? ' · portada' : ''}${chm.error ? ` · (${chm.error}, catalogado por nombre)` : ''}.`];
+        datosBase.alertas_agente = [`Formato chm: leído con libchm-bin${chm.titulo ? ` · título "${chm.titulo}"` : ''}${chm.isbn_propio ? ` · ISBN ${chm.isbn_propio} (del propio libro)` : chm.isbn ? ` · ISBN ${chm.isbn} (del cuerpo, pista)` : ''}${chm.portada ? ` · portada (${chm.portada_origen})` : ''}${chm.error ? ` · (${chm.error}, catalogado por nombre)` : ''}.`];
         formatos = ['chm'];
         tipo_recurso = 'libro';
 

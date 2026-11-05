@@ -30,7 +30,8 @@ import { identificarEdicion, candidatasParaGuardar, mismaEditorial, traductoresD
 import { editorialesDeColeccion, anotarEditorialDeColeccion } from './indicios-coleccion.js';
 import { esEditorialFalsa, limpiarNombreEditorial } from './editoriales-falsas.js';
 import { extraerMetadatosEpub, textoInicialEpub } from './lector-epub.js';
-import { huecosDesdeAutoridad, mismoNombreAutor as mismoNombre } from './huecos-autoridad.js';
+import { huecosDesdeAutoridad, autoresConAncla, mismoNombreAutor as mismoNombre } from './huecos-autoridad.js';
+import { cotejarPortadas } from './portadas-cotejo.js';
 import { aplicarCduConPrioridad, puedeSustituirCdu, fuenteCduDoc } from './prioridad-cdu.js';
 import { cduDeAutoridadFiable, buscarAutoridadPorISBN } from './autoridad-isbn.js';
 import { rasterizarFrontalesPdf } from './ocr-pdf.js';
@@ -618,13 +619,14 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         || (esTituloArtefacto(doc.titulo)
             ? (tituloDeNombreDeLote(doc.nombre_archivo || doc.titulo) || tituloDesdeNombre(doc.nombre_archivo))
             : null);
+    // Un título que ES el nombre del fichero («(Series … 1) Bernard Helffer-Semiclassical analysis…-World
+    // Scientific (2002)») es malo aunque CONTENGA el bueno: lo que lleva de más es serie, autor, editorial y año, así
+    // que el «no degradar» no aplica (8-oct).
+    const esElNombreDelFichero = !!doc.nombre_archivo && normLite(String(doc.titulo || '')) === normLite(String(doc.nombre_archivo).replace(/\.[^.]+$/, ''));
+    const tituloMalo = tituloDebil(doc) || esTituloArtefacto(String(doc.titulo || '')) || esElNombreDelFichero;
     if (tituloMejor) {
         const actual = String(doc.titulo || '');
-        // Un título que ES el nombre del fichero («(Series … 1) Bernard Helffer-Semiclassical analysis…-World
-        // Scientific (2002)») es malo aunque CONTENGA el bueno: lo que lleva de más es serie, autor, editorial y año, así
-        // que el «no degradar» no aplica (8-oct).
-        const esElNombreDelFichero = !!doc.nombre_archivo && normLite(actual) === normLite(String(doc.nombre_archivo).replace(/\.[^.]+$/, ''));
-        const malActual = tituloDebil(doc) || esTituloArtefacto(actual) || esElNombreDelFichero;
+        const malActual = tituloMalo;
         // Un TOMO conserva su número y su parte: «Vol. 5 — Vol. 5: Europe» → «Worldmark Encyclopedia of the Nations —
         // Vol. 5: Europe», no el título del conjunto a secas (log del 1-oct; antes, «Encyclopedia of Modern Asia» ×6).
         const nuevo = conSuTomo(tituloMejor, doc);
@@ -638,6 +640,19 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     // En SECO no se resuelven nombres a referencias: resolverlos CREA autores/editoriales en la base, y una
     // prueba no debe dejar rastro. Se anota el nombre para el informe; se resuelve solo al aplicar.
     if (!(doc.autores?.length) && autoresNom.length) { set.autores = aplicar ? await resolverAutores(db, autoresNom) : autoresNom; nombres.autores = autoresNom; }
+    // Con el TÍTULO MAL (artefacto, débil o el nombre del fichero) el registro salió de un nombre de fichero mal
+    // partido, y sus autores también son sospechosos: «Foster - Nanotechnology - Science, Innovation and
+    // Opportunity.chm» dio el título «A» y los autores «Nanotechnology» y «Science, Innovation and Opportunity». Los
+    // del propio fichero o de la autoridad por ISBN mandan con la regla de siempre (autoresConAncla): si comparten
+    // alguno se AÑADEN los que falten; si no comparten ninguno, los actuales eran basura y se sustituyen.
+    else if (tituloMalo && autoresNom.length) {
+        const actuales = await nombresDeAutores(db, doc.autores);
+        const r = autoresConAncla(actuales, autoresNom, mismoNombre);
+        if (r.modo !== 'igual') {
+            set.autores = aplicar ? await resolverAutores(db, r.nombres) : r.nombres;
+            nombres.autores = `${r.nombres.join('; ')} (antes «${actuales.join('; ')}»)`;
+        }
+    }
     // Editorial: rellena si falta (del fichero o de la autoridad).
     // Editorial para un hueco: la primera REAL (nunca un maquetador como «ePubLibre», que el OPF del EPUB declara
     // como dc:publisher: medido, se colaba en libros sin editorial).
@@ -706,10 +721,38 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         if (datos.coleccion_numero && !doc.coleccion_numero) set.coleccion_numero = String(datos.coleccion_numero);
     }
 
-    if (Object.keys(set).length === 0) return { estado: 'no-hallado', isbn, via, motivo: 'ISBN resuelto pero la autoridad no aportó nada nuevo' };
+    // PORTADAS (5-nov, petición del usuario): con el ISBN resuelto se reúnen las candidatas de todas las fuentes y se
+    // guardan para elegir en la ficha; si la portada actual falta o está claramente mal, la mejor de su ISBN se pone
+    // sola (utils/portadas-cotejo.js). Solo al aplicar: un seco no descarga ni escribe. Nunca tumba el cotejo.
+    let portadas = null;
+    if (aplicar) {
+        const remotas = datos.portadas_remotas || [];
+        portadas = await cotejarPortadas(db, doc, {
+            isbn,
+            titulo: set.titulo || doc.titulo,
+            autor: (Array.isArray(nombres.autores) ? nombres.autores[0] : null) || autoresNom[0] || (await nombresDeAutores(db, doc.autores))[0] || '',
+            portadaUrl: (remotas.find((p) => p.origen === 'fichero_local') || remotas[0])?.url || null,
+            // Con un ISBN dudoso o provisional la cubierta de esa edición podría no ser la tuya: solo se ofrece.
+            ponerSola: !dudoso && !provisional,
+        }).catch(() => null);
+        // El documento en memoria se pone al día: más abajo se reescriben sus alertas y sus sidecars desde él.
+        if (portadas?.aplicada) doc = { ...doc, imagenes: portadas.imagenes, portada: portadas.portada, alertas_agente: [...(doc.alertas_agente || []), portadas.alerta] };
+    }
+    const textoPortadas = !portadas ? ''
+        : portadas.aplicada ? ` · portada nueva (${portadas.aplicada.fuente}, ${portadas.aplicada.ancho}×${portadas.aplicada.alto}: ${portadas.aplicada.motivo})`
+        : portadas.candidatas.length ? ` · ${portadas.candidatas.length} portada(s) candidata(s) en la ficha` : '';
+
+    if (Object.keys(set).length === 0) {
+        if (portadas?.aplicada) {
+            await regenerarSidecarsDoc(db, doc, carpeta).catch(() => {});
+            return { estado: 'aplicado', isbn, via, titulo: doc.titulo, resumen: `isbn=${isbn}${via ? ` (${via})` : ''}${textoPortadas}`, set, portada: portadas.aplicada };
+        }
+        return { estado: 'no-hallado', isbn, via, motivo: 'ISBN resuelto pero la autoridad no aportó nada nuevo' + textoPortadas };
+    }
 
     const resumen = `isbn=${isbn}${via ? ` (${via})` : ''}`
-        + (Object.keys(nombres).length ? ' · ' + Object.entries(nombres).map(([k, v]) => `${k}="${Array.isArray(v) ? v.join(', ') : v}"`).join(' · ') : '');
+        + (Object.keys(nombres).length ? ' · ' + Object.entries(nombres).map(([k, v]) => `${k}="${Array.isArray(v) ? v.join(', ') : v}"`).join(' · ') : '')
+        + textoPortadas;
 
     if (!aplicar) return { estado: 'identificado', provisional: !!provisional, dudoso: !!dudoso, isbn, via, titulo: set.titulo || doc.titulo, resumen, set };
 
@@ -774,7 +817,7 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
             ).catch(() => {});
         }
     }
-    return { estado: 'aplicado', provisional: !!provisional, dudoso: !!dudoso, isbn, via, titulo: set.titulo || doc.titulo, resumen: resumen + (cduAplicada ? ` · CDU ${cduAplicada} (BNE)` : ''), set };
+    return { estado: 'aplicado', provisional: !!provisional, dudoso: !!dudoso, isbn, via, titulo: set.titulo || doc.titulo, resumen: resumen + (cduAplicada ? ` · CDU ${cduAplicada} (BNE)` : ''), set, portada: portadas?.aplicada || null };
 }
 
 /**
@@ -851,7 +894,7 @@ export function lanzarReidentificacion({ ids, forzar = false, isbnManual = null,
     if (!lista.length) return { ok: false, motivo: 'no se recibió ningún documento válido' };
     // El ISBN manual solo tiene sentido para UN documento (si no, se aplicaría el mismo a todos): se ignora en lote.
     const manual = lista.length === 1 ? isbnManual : null;
-    trabajo = { en_curso: true, total: lista.length, hechos: 0, recuperados: 0, sin_isbn: 0, sin_fichero: 0, ambiguos: 0, cdu: 0, otros: 0, titulo: '', cancelar: false, ts: new Date().toISOString() };
+    trabajo = { en_curso: true, total: lista.length, hechos: 0, recuperados: 0, portadas: 0, sin_isbn: 0, sin_fichero: 0, ambiguos: 0, cdu: 0, otros: 0, titulo: '', cancelar: false, ts: new Date().toISOString() };
     (async () => {
         try {
             const db = await conectarDB();
@@ -862,6 +905,7 @@ export function lanzarReidentificacion({ ids, forzar = false, isbnManual = null,
                 if (doc) {
                     try {
                         const r = await reidentificarDoc(db, doc, { aplicar: true, usarApis: true, forzar, isbnManual: manual, conIA });
+                        if (r.portada) trabajo.portadas++;
                         if (r.estado === 'aplicado') trabajo.recuperados++;
                         else if (r.estado === 'ambiguo') trabajo.ambiguos++;   // varias ediciones: decide una persona
                         else if (r.estado === 'no-hallado') trabajo.sin_isbn++;

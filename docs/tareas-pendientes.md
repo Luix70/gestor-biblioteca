@@ -38,6 +38,16 @@
 - Los 13 .rtf de Coaching están en la Papelera (`Recycling/001567_…_subcarpeta-vacia`): son los mismos capítulos que
   los PDF; no hacen falta para coser
 
+### 0.66 Libros CHM sin ISBN (5-nov) — solo BD y portadas
+- [ ] Desplegar (lector de CHM corregido + portadas al cotejar)
+- [ ] Copia de la base: `D:\Bibliobak\CopiaBase.ps1`
+- [ ] `sudo docker exec -it gestor-biblioteca node scripts/reidentificar-sin-isbn.js --patron "\.chm$" --reintentar`
+      (seco: los 61 CHM sin ISBN, todos ya marcados como revisados por la campaña) y luego lo mismo con `--ejecutar`.
+      P. ej. 6aeab2c77a2c2ec62a06f1cc: título «A» → «Nanotechnology: Science, Innovation, and Opportunity», ISBN
+      978-0-13-192756-8, autor Lynn E. Foster en lugar de «Nanotechnology» / «Science, Innovation and Opportunity»,
+      y la portada (una figura apaisada) sustituida por la de su ISBN
+- Los CHM sin título ni ISBN legibles (AccessMedicine, algunos Ovid) se quedan con el título de su nombre de fichero
+
 ### 0.7 Probar LibreOffice en el NAS (3-nov) — no toca la app
 - [x] `probar-libreoffice-nas.sh` (3-nov: 5 de 5, 8-15 s por fichero, texto correcto; LibreOffice 7.0.4, 203 MB)
 - [ ] Desplegar: la imagen lleva ya LibreOffice (el primer build tarda unos 5 min más)

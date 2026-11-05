@@ -117,7 +117,10 @@ function textoPdfUtil(texto) {
 
 // `enTexto`: `texto` es el CUERPO de un documento, no un nombre de fichero. Ahí diez cifras seguidas sin la palabra
 // «ISBN» cerca no son un ISBN: una de cada once pasa el dígito de control por casualidad (teléfonos, referencias,
-// tablas). Con guiones, o de 13 cifras con su 978/979, sí se aceptan: tienen forma de ISBN por sí solas.
+// tablas). Con guiones, o de 13 cifras con su 978/979, sí se aceptan: tienen forma de ISBN por sí solas — pero solo
+// si los grupos son los de un ISBN y van separados por GUIONES: 4 en uno de 10 cifras (0-13-192756-6), como mucho 5
+// en uno de 13. Un teléfono («1-314-995-3200», 3 grupos) o las celdas de una tabla («4 5 9 8 1 9 7 7 1 4»,
+// «6 3 1300 1400») no lo son (5-nov: nueve «ISBN» así en un CHM de bioestadística, y el primero se usaba de pivote).
 export function extraerISBNs(texto, { enTexto = false } = {}) {   // exportada: la reutiliza el lector de Word (mismo criterio de captura)
     if (!texto) return [];
     // Sin más cifras pegadas delante ni detrás: unas cifras dentro de un número más largo no son un ISBN (8-oct: la
@@ -128,8 +131,12 @@ export function extraerISBNs(texto, { enTexto = false } = {}) {   // exportada: 
     while ((m = re.exec(texto)) !== null) {
         const v = validarISBN(m[1]);
         if (!v) continue;
-        const suelto = /^\d{9}[\dXx]$/.test(m[1]);
-        if (enTexto && suelto && !/ISBN|Book Number/i.test(texto.slice(Math.max(0, m.index - 40), m.index + m[0].length - m[1].length))) continue;
+        if (enTexto && !/ISBN|Book Number/i.test(texto.slice(Math.max(0, m.index - 40), m.index + m[0].length - m[1].length))) {
+            const grupos = m[1].split('-').length;
+            const de13 = m[1].replace(/[^0-9Xx]/g, '').length === 13;
+            if (/\s/.test(m[1])) continue;                      // separado por espacios: celdas de tabla, no un ISBN
+            if (de13 ? grupos > 5 : grupos !== 4) continue;   // 10 cifras seguidas (1 grupo) tampoco: ver arriba
+        }
         out.add(v);
     }
     return [...out];

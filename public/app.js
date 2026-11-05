@@ -3512,6 +3512,26 @@ function filtrarPorDia(dia) {
   irBusquedaFiltro({ dia, etiqueta: `Ingresados el ${dia}` });
 }
 
+// Tira de PORTADAS CANDIDATAS de la ficha: miniatura + fuente + tamaño. Las de su ISBN son de esta edición; las
+// «por título» (✳) pueden ser de otra. Las URL son de fuentes sin clave (OpenLibrary, Amazon, Google, Apple), así que
+// se muestran directas, como las candidatas del alta por ISBN.
+function portadasCandidatasHTML(lista) {
+  if (!lista || !lista.length) return '';
+  return (
+    `<div class="muted" style="font-size:12px;margin:10px 0 6px">Portadas candidatas: pulsa una para ponerla de portada (la actual queda en el carrusel). ✳ = encontrada por título, puede ser de otra edición.</div>` +
+    `<div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">` +
+    lista
+      .map(
+        (c) =>
+          `<button class="btn portCand" data-url="${esc(c.url)}" title="${esc(c.fuente)} · ${c.ancho}×${c.alto} · ${c.por === 'titulo' ? 'por título (puede ser otra edición)' : 'por su ISBN'}" style="padding:4px;display:flex;flex-direction:column;align-items:center;gap:2px">` +
+          `<img src="${esc(c.url)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="height:120px;max-width:100px;object-fit:contain">` +
+          `<span style="font-size:10px">${c.por === 'titulo' ? '✳ ' : ''}${esc(c.fuente)} · ${c.ancho}×${c.alto}</span></button>`,
+      )
+      .join('') +
+    `</div>`
+  );
+}
+
 function pintarDoc(r, ctx) {
   const d = r.doc,
     vo = ctx && ctx.obra,
@@ -3837,7 +3857,10 @@ function pintarDoc(r, ctx) {
     </div>`;
   const lector = _fisico ? '' : previewArchivo(r);
   const secAcc = `<details class="card foldcard admin-only" style="margin-top:14px"><summary>⚙️ Acciones</summary>${botones}</details>`;
-  const secImg = `<details class="card foldcard" open style="margin-top:14px"><summary>🖼️ Imágenes</summary><div style="margin-top:10px"><div class="row admin-only" style="margin-bottom:8px"><button class="btn" id="actImgsCar" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">✏️ Editar</button></div>${carrusel}</div></details>`;
+  // 🖼️ PORTADAS CANDIDATAS (las guarda el cotejo por ISBN —«🔎 Extraer ISBN», la campaña «Recuperar ISBN»— o el botón
+  // «Buscar portadas»): un clic y esa pasa a ser la portada; la actual queda en el carrusel.
+  const _portCands = Array.isArray(d.portadas_candidatas) ? d.portadas_candidatas : [];
+  const secImg = `<details class="card foldcard" open style="margin-top:14px"><summary>🖼️ Imágenes</summary><div style="margin-top:10px"><div class="row admin-only" style="margin-bottom:8px;gap:6px"><button class="btn" id="actImgsCar" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">✏️ Editar</button><button class="btn" id="actBuscarPortadas" title="Buscar portadas en todas las fuentes: las de su ISBN (Fichero, OpenLibrary, Amazon, Google Books) y las de su título y autor (OpenLibrary, Apple Books)">🔍 Buscar portadas</button></div>${carrusel}<div class="admin-only" id="portCandBox">${portadasCandidatasHTML(_portCands)}</div></div></details>`;
   const secLect = lector
     ? `<details class="card foldcard" id="lectDet" open style="margin-top:14px"><summary>📖 Leer / archivo</summary><div style="margin-top:10px">${lector}</div></details>`
     : '';
@@ -3934,6 +3957,44 @@ function pintarDoc(r, ctx) {
         btn.textContent = txt;
       }
     };
+    // 🖼️ Portadas candidatas: elegir una (la pone de portada; la actual queda en el carrusel) y buscar más.
+    const attachPortadasCandidatas = () =>
+      $$('#p-detalle .portCand').forEach(
+        (b) =>
+          (b.onclick = async () => {
+            if (!confirm('¿Poner esta imagen como portada?\n\nLa portada actual no se borra: queda en el carrusel.')) return;
+            b.disabled = true;
+            try {
+              const r = await api('/documentos/' + encodeURIComponent(d._id) + '/portadas/elegir', { method: 'POST', body: JSON.stringify({ url: b.dataset.url }) });
+              if (!r || !r.ok) throw new Error((r && r.motivo) || 'no se pudo poner la portada');
+              toast('Portada cambiada', 'ok');
+              verDoc(d._id, detalle && detalle.ctx);
+            } catch (e) {
+              toast(e.message, 'bad');
+              b.disabled = false;
+            }
+          }),
+      );
+    attachPortadasCandidatas();
+    const bBuscarPort = $('#actBuscarPortadas');
+    if (bBuscarPort)
+      bBuscarPort.onclick = async () => {
+        const txt = bBuscarPort.textContent;
+        bBuscarPort.disabled = true;
+        bBuscarPort.textContent = '⏳ Buscando…';
+        try {
+          const r = await api('/documentos/' + encodeURIComponent(d._id) + '/portadas/buscar', { method: 'POST', body: '{}' });
+          if (!r || !r.ok) throw new Error((r && r.motivo) || 'no se pudo buscar');
+          if (!r.candidatas.length) toast('No se encontró ninguna portada' + (d.isbn ? '' : ' (sin ISBN solo se busca por título)'), 'warn');
+          $('#portCandBox').innerHTML = portadasCandidatasHTML(r.candidatas);
+          attachPortadasCandidatas();
+        } catch (e) {
+          toast(e.message, 'bad');
+        } finally {
+          bBuscarPort.disabled = false;
+          bBuscarPort.textContent = txt;
+        }
+      };
     $$('#p-detalle .edElegir').forEach((b) => (b.onclick = () => elegirEd(b, { isbn: b.dataset.isbn },
       `¿Aplicar la edición con ISBN ${b.dataset.isbn}?\n\nSe completarán los datos que falten desde la autoridad; lo que ya tiene el documento no se toca.`)));
     const bNinguna = $('#p-detalle .edNinguna');
@@ -9248,14 +9309,14 @@ async function seguirReidentificacion(total) {
     try { e = await api('/documentos/reidentificar-isbn/estado'); } catch { break; }
     const pct = e.total ? Math.round((e.hechos / e.total) * 100) : 0;
     if ($('#riBar')) $('#riBar').style.width = pct + '%';
-    if ($('#riTxt')) $('#riTxt').textContent = `${e.hechos} / ${e.total} · ${e.recuperados || 0} con ISBN${e.cdu ? ` · ${e.cdu} CDU` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN` : ''}${e.ambiguos ? ` · ${e.ambiguos} edición ambigua` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
+    if ($('#riTxt')) $('#riTxt').textContent = `${e.hechos} / ${e.total} · ${e.recuperados || 0} con ISBN${e.portadas ? ` · ${e.portadas} portada(s)` : ''}${e.cdu ? ` · ${e.cdu} CDU` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN` : ''}${e.ambiguos ? ` · ${e.ambiguos} edición ambigua` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${e.cancelar ? ' · cancelando…' : ''}`;
     if ($('#riTit')) $('#riTit').textContent = e.titulo ? recortar(e.titulo, 60) : '';
     if (!e.en_curso) break;
   }
   cerrarCmp();
   const cancelado = e.cancelar && e.hechos < e.total;
   toast(
-    `ISBN recuperado en ${e.recuperados || 0} documento(s)${e.cdu ? ` · CDU en ${e.cdu}` : ''}${e.ambiguos ? ` · ${e.ambiguos} con varias ediciones posibles (sin tocar)` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN en el fichero` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
+    `ISBN recuperado en ${e.recuperados || 0} documento(s)${e.portadas ? ` · portada nueva en ${e.portadas}` : ''}${e.cdu ? ` · CDU en ${e.cdu}` : ''}${e.ambiguos ? ` · ${e.ambiguos} con varias ediciones posibles (sin tocar)` : ''}${e.sin_isbn ? ` · ${e.sin_isbn} sin ISBN en el fichero` : ''}${e.sin_fichero ? ` · ${e.sin_fichero} sin fichero` : ''}${cancelado ? ` · CANCELADO (${e.total - e.hechos} sin tocar)` : ''}`,
     cancelado || e.sin_isbn || e.sin_fichero ? 'warn' : 'ok',
   );
 }

@@ -2551,6 +2551,20 @@ de ficheros clasificado por CDU.
       .odt, se convierte a PDF con LibreOffice y ese PDF es el libro (el Word va como material). Una carpeta que
       no se puede catalogar asi ya no se reintenta cada 10 s: se avisa una vez y espera a que la saques y la
       vuelvas a dejar.
+    · LIBROS EN CHM (5-nov): el lector lee las paginas en el orden del indice (portada y creditos primero), con el
+      texto ya limpio de etiquetas, y saca el titulo del indice, no del primer tema («A», «Index», «Chapter 1»).
+      De los CHM de Safari toma la ficha del propio libro (autor, editorial, ano, paginas e ISBN, que es PROPIO); de
+      los de Ovid, la portada que enlaza su indice; de Student Consult, el ISBN de sus enlaces. Quita el nombre de la
+      plataforma del titulo («Ovid: …», «AccessMedicine - …»). Ya no toma por portada «la imagen mas grande» (en un
+      libro tecnico era una figura): sin portada clara, la busca por ISBN. «🔎 Extraer ISBN» lee tambien los CHM.
+      En el cuerpo de cualquier documento, un numero con guiones solo cuenta como ISBN si tiene sus grupos (4 en uno
+      de 10 cifras); telefonos y celdas de tabla ya no.
+    · PORTADAS AL COTEJAR (5-nov): cuando se coteja por ISBN («🔎 Extraer ISBN», campana «Recuperar ISBN» y su
+      script) se reunen las portadas candidatas de todas las fuentes: las de su ISBN (Fichero, OpenLibrary, Amazon,
+      Google Books) y las de su titulo y autor (OpenLibrary, Apple Books; marcadas ✳, pueden ser de otra edicion).
+      La ficha las muestra bajo el carrusel: un clic y esa es la portada (la actual queda en el carrusel). El boton
+      «🔍 Buscar portadas» de la ficha las busca en cualquier momento. Una se pone SOLA solo si es de su ISBN,
+      vertical, y la actual falta, es apaisada (una figura) o mide la mitad o menos; nunca si la elegiste tu.
     · PAPEL O DIGITAL (3-nov): lo decide la VIA DE ENTRADA. Solo es papel una captura del panel (camara en vivo,
       «Catalogar», camara del sistema). Unas imagenes dejadas en el Inbox, subidas con «subir ficheros» o reingresadas
       se unen en un PDF sin recomprimir y se catalogan como documento digital; un PDF escaneado de menos de 12 paginas
