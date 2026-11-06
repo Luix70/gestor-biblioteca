@@ -12,7 +12,7 @@
  * ⚠ Corre en el NAS (docker exec -t) donde están los ficheros y el Fichero.db. Antes de `--ejecutar`: BACKUP
  * de la BD (escribe documentos: isbn/título/autores/editorial…).
  *
- * Alcance (por defecto: MIEMBROS DE COLECCIÓN sin ISBN, en formato pdf/epub/mobi):
+ * Alcance (por defecto: MIEMBROS DE COLECCIÓN sin ISBN, en formato pdf/epub/mobi/chm):
  *   --coleccion <id|nombre>   solo esa colección
  *   --seleccion <id|nombre>   los documentos de una selección guardada
  *   --id <ObjectId>           uno solo
@@ -63,6 +63,9 @@ const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.
 const idArg = arg('--id');
 const isbnArg = arg('--isbn');   // ISBN manual (solo con --id)
 const patronArg = arg('--patron');
+// Formatos de los que isbn-archivo sabe sacar el ISBN sin IA. El CHM entró el 5-nov (lector-chm): sin él aquí,
+// los CHM nunca eran candidatos y --patron "\.chm$" daba 0.
+const FORMATOS_CON_ISBN = ['pdf', 'epub', 'mobi', 'chm'];
 const colArg = arg('--coleccion');
 const selArg = arg('--seleccion');
 const limite = (() => { const n = parseInt(arg('--limite'), 10); return Number.isFinite(n) && n > 0 ? n : Infinity; })();
@@ -106,9 +109,9 @@ async function main() {
     else if (patronArg) filtro = { nombre_archivo: { $regex: patronArg, $options: 'i' }, ...base };
     else if (EDICION && !TODOS) filtro = { 'ediciones_candidatas.0': { $exists: true }, isbn_provisional: { $ne: true }, ...base };
     else if (!TODOS) filtro = { coleccion: { $exists: true, $ne: null }, ...base }; // por defecto: miembros de colección
-    // Solo formatos con ISBN de texto barato (pdf/epub/mobi); descarta audio/material/vídeo/software/djvu.
-    if (!idArg && !EDICION) filtro.formatos = { $in: ['pdf', 'epub', 'mobi'] };   // (la edición por autoridad no necesita el fichero)
-    // --todos --edicion-por-elegir: los libros sin ISBN (pdf/epub/mobi) Y los que esperan que elijas edición (de
+    // Solo formatos con ISBN de texto barato (pdf/epub/mobi/chm); descarta audio/material/vídeo/software/djvu.
+    if (!idArg && !EDICION) filtro.formatos = { $in: FORMATOS_CON_ISBN };   // (la edición por autoridad no necesita el fichero)
+    // --todos --edicion-por-elegir: los libros sin ISBN (pdf/epub/mobi/chm) Y los que esperan que elijas edición (de
     // cualquier formato), en UNA pasada: las reglas nuevas también afinan esas listas de candidatas antiguas.
     const AMBOS = TODOS && EDICION && !idArg;
     const PENDIENTE_EDICION = { 'ediciones_candidatas.0': { $exists: true }, isbn_provisional: { $ne: true } };
@@ -121,10 +124,10 @@ async function main() {
     const NO_REVISADO = { $or: [{ [CAMPO_MARCA_RECUPERAR_ISBN]: { $exists: false } }, { [CAMPO_MARCA_RECUPERAR_ISBN]: { $ne: VERSION_RECUPERAR_ISBN } }] };
     let yaRevisados = 0;
     if (AMBOS) {
-        // No revisados (pdf/epub/mobi) O pendientes de edición (cualquier formato; revisados o no).
+        // No revisados (pdf/epub/mobi/chm) O pendientes de edición (cualquier formato; revisados o no).
         const comun = { ...base, tipo_recurso: 'libro', naturaleza: { $nin: ['comic', 'audiolibro', 'software'] } };
         filtro = { $and: [comun, { $or: [
-            { $and: [{ formatos: { $in: ['pdf', 'epub', 'mobi'] } }, REINTENTAR ? {} : NO_REVISADO] },
+            { $and: [{ formatos: { $in: FORMATOS_CON_ISBN } }, REINTENTAR ? {} : NO_REVISADO] },
             PENDIENTE_EDICION,
         ] }] };
     } else if (RECUPERACION && !idArg && !REINTENTAR && !EDICION) {
