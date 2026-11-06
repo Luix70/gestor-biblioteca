@@ -2565,6 +2565,10 @@ de ficheros clasificado por CDU.
       La ficha las muestra bajo el carrusel: un clic y esa es la portada (la actual queda en el carrusel). El boton
       «🔍 Buscar portadas» de la ficha las busca en cualquier momento. Una se pone SOLA solo si es de su ISBN,
       vertical, y la actual falta, es apaisada (una figura) o mide la mitad o menos; nunca si la elegiste tu.
+    · TITULOS ROTOS SIN ISBN (6-nov): «🔎 Extraer ISBN» arregla el titulo aunque no encuentre ISBN, cuando es el de
+      una pagina («Ovid: …», «AccessMedicine - Print», «Chapter 10 …», «Figure 1-1», «… APPENDIX A …») o el nombre
+      del fichero entero: pone el del propio fichero, el mismo sin la plataforma o el del nombre del fichero, con
+      sus autores, y busca la edicion con el. Los nombres «Apellido - Titulo 7e» se leen ya como autor y titulo.
     · PAPEL O DIGITAL (3-nov): lo decide la VIA DE ENTRADA. Solo es papel una captura del panel (camara en vivo,
       «Catalogar», camara del sistema). Unas imagenes dejadas en el Inbox, subidas con «subir ficheros» o reingresadas
       se unen en un PDF sin recomprimir y se catalogan como documento digital; un PDF escaneado de menos de 12 paginas

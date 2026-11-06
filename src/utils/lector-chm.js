@@ -84,7 +84,8 @@ function textoDeHtml(raw) {
 // de contenidos, los créditos, las páginas de la plataforma de la que se volcó el libro («Contact us», «Print»)…
 const RE_TITULO_GENERICO = /^(index|[ií]ndice|contents|table of contents|toc|copyright( information)?|cover|title page|front( matter)?|preface|foreword|introduction|dedication|acknowledge?ments?|about the authors?|editors|contributors|appendix|appendices|ap[eé]ndices?|glossary|glosario|bibliography|bibliograf[ií]a|references|answers|symbol|main|home|start|begin|untitled|online help|contact us|print|search|help|.)$/i;
 // Un CAPÍTULO no es el libro («Chapter 1 Biostatistics and Clinical Practice», 1.ª entrada del índice de un Ovid).
-const RE_TITULO_CAPITULO = /^(chapter|cap[ií]tulo|part|parte|section|secci[oó]n|unit|unidad|lesson|lecci[oó]n)\s+([0-9]+|[ivxlc]+)\b/i;
+// Una FIGURA o TABLA tampoco («Figure 1-1»: el Balena de Visual Basic se catalogó así).
+const RE_TITULO_CAPITULO = /^(chapter|cap[ií]tulo|part|parte|section|secci[oó]n|unit|unidad|lesson|lecci[oó]n|fig\.?|figure|figura|table|tabla)\s+([0-9]+|[ivxlc]+)\b/i;
 // Las plataformas médicas y técnicas (Ovid, AccessMedicine, Student Consult…) ponen su nombre delante del título
 // de cada página («Ovid: Principles of Ambulatory Medicine», «STUDENT CONSULT: Illustrated Textbook of Paediatrics
 // (ver. 2.3)») o en lugar de él («AccessMedicine - TOC»). Se quita; si no queda nada, no hay título.
@@ -102,6 +103,28 @@ function limpiarTituloTema(t) {
 function tituloValido(t) {
     const s = String(t || '').trim();
     return /\p{L}{2}/u.test(s) && !RE_TITULO_GENERICO.test(s) && !RE_TITULO_CAPITULO.test(s);
+}
+
+/**
+ * ¿Un título YA CATALOGADO es el de una página del CHM y no el del libro? Lo dejaban las ingestas anteriores al
+ * lector nuevo (5-nov): con el nombre de la plataforma delante («Ovid: Principles of Ambulatory Medicine»), en
+ * lugar del título («AccessMedicine - Print»), un capítulo, una figura («Figure 1-1»), un apéndice dentro
+ * («Fundamentals: APPENDIX A: SPARKS») o una sección numerada en romanos («I. Prehistoric Times. 2001. The
+ * Encyclopedia of World History»).
+ */
+export function esTituloDeTemaRoto(t) {
+    const s = String(t || '').trim();
+    if (!s) return false;
+    const limpio = limpiarTituloTema(s);
+    if (limpio !== s) return true;                       // llevaba la plataforma o su versión
+    if (!tituloValido(limpio)) return true;
+    if (/(^|[:.]\s*)(appendix|ap[eé]ndice)\s+[a-z0-9]\b/i.test(s)) return true;
+    return /^[IVXLC]+\.\s+\p{Lu}/u.test(s);
+}
+
+/** Lo que queda de un título de tema sin la plataforma, si sirve como título; null si no. */
+export function tituloSinPlataforma(t) {
+    return tituloDeTema(t);
 }
 
 /** El título limpio si sirve, o null. */

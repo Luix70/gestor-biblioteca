@@ -47,6 +47,11 @@
       978-0-13-192756-8, autor Lynn E. Foster en lugar de «Nanotechnology» / «Science, Innovation and Opportunity»,
       y la portada (una figura apaisada) sustituida por la de su ISBN
 - Los CHM sin título ni ISBN legibles (AccessMedicine, algunos Ovid) se quedan con el título de su nombre de fichero
+- [x] Ejecutado el 6-nov: 12 ISBN recuperados (Foster bien: ISBN, portada y 4 candidatas), 49 sin ISBN
+      (33 son «The Early Church Fathers», sin ISBN de verdad)
+- [ ] Tras desplegar el arreglo de títulos rotos sin ISBN (6-nov), repetir con `--reintentar` (seco y `--ejecutar`):
+      ~14 CHM con título de página («Ovid: …», «AccessMedicine - Print», «Figure 1-1», «Chapter 10 …») recuperan
+      título y autores del fichero o de su nombre, y con ellos se busca la edición por autoridad
 
 ### 0.7 Probar LibreOffice en el NAS (3-nov) — no toca la app
 - [x] `probar-libreoffice-nas.sh` (3-nov: 5 de 5, 8-15 s por fichero, texto correcto; LibreOffice 7.0.4, 203 MB)

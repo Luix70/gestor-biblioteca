@@ -298,7 +298,7 @@ function parsearConPieDeImprenta(trabajo) {
         return null;
     }
     // «7th ed» al final del título es la edición, no parte del título.
-    const titulo = tituloPartes.join(': ').replace(/\s+\d+(st|nd|rd|th)\s+ed\.?$/i, '').trim();
+    const titulo = tituloPartes.join(': ').replace(/\s+\d+(st|nd|rd|th)\s+ed\.?$|\s+\d{1,2}e$/i, '').trim();
     const lista = autores.split(/\s*(?:,|&|\band\b)\s*/).map((s) => s.trim()).filter(Boolean)
         .filter((a) => !esAutorArtefacto(a));
     return { titulo, autores: lista, ...(editorial && !/^\d+$/.test(editorial) ? { editorial } : {}), año_edicion: año };
@@ -451,6 +451,15 @@ export function parsearNombre(nombreArchivo) {
     const isbnTitulo = validarISBN(tituloCand.replace(/[^0-9Xx]/g, ''));
     if (isbnTitulo || esTituloArtefacto(tituloCand)) {
         return { titulo: null, autores: [], ...(isbnTitulo ? { isbn: isbnTitulo } : {}), esFechada: false, ...colExtra };
+    }
+    // «Apellido - Título 7e» (paquetes de libros de medicina: «Baker - Principles of Ambulatory Medicine 7e.chm»,
+    // «Chandrasoma - Concise Pathology 3e.chm»): con dos tramos, si el segundo acaba en la EDICIÓN y el primero es
+    // un apellido, el orden es autor-título. Sin la marca de edición no se invierte: «Dune - Herbert» también es
+    // un apellido suelto delante… del autor.
+    const RE_EDICION_FINAL = /\s+\d{1,2}(?:e|ed|st ed|nd ed|rd ed|th ed)\.?$/i;
+    if (partes.length === 2 && RE_EDICION_FINAL.test(partes[1].trim()) && parecenAutores(tituloCand)
+        && !esAutorArtefacto(tituloCand)) {
+        return { titulo: partes[1].trim().replace(RE_EDICION_FINAL, ''), autores: [tituloCand], esFechada: false, ...colExtra };
     }
     // Autores tras el 1er " - ", descartando los que sean ARTEFACTO (números, fechas, marcas de agua…).
     const autores = (partes.length > 1

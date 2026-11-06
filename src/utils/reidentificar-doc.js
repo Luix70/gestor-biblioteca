@@ -22,7 +22,8 @@ import { conectarDB } from '../database.js';
 import { carpetaDeDoc, archivoOriginal, numeroPaginasPdf } from '../mantenimiento/util-mantenimiento.js';
 import { isbnDesdeArchivo, tipoLibro } from './isbn-archivo.js';
 import { variantesISBN, validarISBN } from './identificadores.js';
-import { esTituloArtefacto, tituloDeNombreDeLote, tituloDesdeNombre } from './parsear-nombre.js';
+import { esTituloArtefacto, tituloDeNombreDeLote, tituloDesdeNombre, parsearNombre } from './parsear-nombre.js';
+import { esTituloDeTemaRoto, tituloSinPlataforma } from './lector-chm.js';
 import { parsearVolumen } from './multivolumen.js';
 import { leerCodigoBarrasPorVision } from './lector-barras.js';
 import { leerCIPdeImagenes } from '../agente.js';
@@ -61,6 +62,43 @@ function tituloDebil(doc) {
     if (/^(vol\.?|tomo|part[e]?|n[ºo.]|#)\s*[ivxlcdm\d]/i.test(t)) return true;        // "Vol. I", "Tomo 2"…
     if (t.length <= 3) return true;
     return false;
+}
+
+/**
+ * Un título ROTO (de una página del CHM, artefacto, débil o el nombre del fichero entero) y uno mejor para él: el
+ * que declara el propio fichero, el mismo sin el nombre de la plataforma («Ovid: X» → «X») o el que da el nombre
+ * del fichero bien partido. Con él, los autores del fichero o del nombre, anclados a los actuales. null si el
+ * título no está roto o no hay nada mejor. No escribe.
+ * @returns {Promise<{titulo, origen, autores?}|null>}
+ */
+async function recuperarTituloRoto(db, doc, ext) {
+    const actual = String(doc.titulo || '').trim();
+    const base = String(doc.nombre_archivo || '').replace(/\.[^.]+$/, '');
+    const esElNombre = !!base && normLite(actual) === normLite(base);
+    const roto = !actual || esTituloDeTemaRoto(actual) || esTituloArtefacto(actual) || tituloDebil(doc) || esElNombre;
+    if (!roto) return null;
+
+    const delNombre = doc.nombre_archivo ? parsearNombre(doc.nombre_archivo) : null;
+    const opciones = [
+        { titulo: ext?.titulo, origen: 'del propio fichero', autores: ext?.autores },
+        { titulo: tituloSinPlataforma(actual), origen: 'sin el nombre de la plataforma' },
+        { titulo: delNombre?.titulo, origen: 'del nombre del fichero', autores: delNombre?.autores },
+    ];
+    const sirve = (t) => t && tituloConCuerpo(t) && !esTituloArtefacto(t) && !esTituloDeTemaRoto(t)
+        && normLite(t) !== normLite(actual) && normLite(t) !== normLite(base);
+    const elegida = opciones.find((o) => sirve(o.titulo));
+    if (!elegida) return null;
+
+    const out = { titulo: elegida.titulo.trim(), origen: elegida.origen };
+    // Autores: los de la misma fuente; si no trae, los del nombre del fichero.
+    const nuevos = (elegida.autores?.length ? elegida.autores : delNombre?.autores) || [];
+    if (nuevos.length) {
+        const actuales = await nombresDeAutores(db, doc.autores);
+        const r = autoresConAncla(actuales, nuevos, mismoNombre);
+        if (!actuales.length) out.autores = nuevos;
+        else if (r.modo !== 'igual') out.autores = r.nombres;
+    }
+    return out;
 }
 
 async function resolverAutores(db, nombres) {
@@ -462,6 +500,32 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
         }
     }
 
+    // TÍTULO ROTO Y SIN ISBN (6-nov). El título de una página («Ovid: …», «AccessMedicine - Print», «Figure 1-1») o
+    // el de un nombre de fichero mal partido no se arreglaba si no aparecía ISBN, y con él se buscaba la edición. Se
+    // recupera aquí: el del propio fichero, el mismo sin la plataforma o el del nombre del fichero; y con él los
+    // autores del fichero o del nombre (autoresConAncla: los actuales eran trozos del nombre). Así (c) busca con
+    // el título bueno, y queda puesto aunque tampoco salga la edición.
+    let recuperado = null;
+    if (!isbn && !manual) {
+        recuperado = await recuperarTituloRoto(db, doc, ext);
+        if (recuperado && aplicar) {
+            const setT = { titulo: recuperado.titulo, fecha_actualizacion: new Date() };
+            if (recuperado.autores) setT.autores = await resolverAutores(db, recuperado.autores);
+            await db.collection('biblioteca').updateOne({ _id: doc._id }, {
+                $set: setT,
+                $push: {
+                    alertas_agente: `Título roto «${doc.titulo}» sustituido por «${recuperado.titulo}» (${recuperado.origen})${recuperado.autores ? ` · autores: ${recuperado.autores.join('; ')}` : ''}.`,
+                    deshacer: { fecha: new Date(), origen: 'Extraer ISBN (título roto)', antes: { titulo: doc.titulo, autores: doc.autores } },
+                },
+            });
+            doc = { ...doc, ...setT };
+            await indexarDoc(db, doc._id).catch(() => {});
+        } else if (recuperado) {
+            doc = { ...doc, titulo: recuperado.titulo };   // en seco solo en memoria, para buscar la edición con él
+        }
+    }
+    const textoTitulo = recuperado ? ` · título «${recuperado.titulo}» (${recuperado.origen})` : '';
+
     // (c) EL FICHERO NO LO TRAE (el ripeo se lo quitó): identificar la EDICIÓN por autoridad, con lo que sí
     //     sabemos —título, autor, editorial, colección, año, idioma—. Estricto: solo se acepta una edición que
     //     case título + autor Y confirme editorial/idioma/año; si hay varias posibles no se elige ninguna.
@@ -491,6 +555,7 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
     }
     if (!isbn && identificable && (!doc.edicion_descartada || forzar)) {
         const pruebas = await datosDeAutoridad(db, doc);
+        if (recuperado?.autores) pruebas.autores = recuperado.autores;   // en seco doc.autores sigue con los rotos
         editorialActual = pruebas.editorial;
         // Si el documento no guardó sus traductores (ingestas antiguas), se leen del PROPIO fichero: el OPF del
         // EPUB (dc:contributor opf:role="trl") o, si no, la página de créditos («Traducción: …», ePubLibre).
@@ -556,11 +621,11 @@ export async function reidentificarDoc(db, doc, { aplicar = false, usarApis = tr
             } else if (ambiguo.candidatos?.length) {
                 obra = await completarConCandidatas(db, doc, ambiguo, { aplicar, usarApis, carpeta });
             }
-            return { estado: 'ambiguo', reintentable, motivo: ambiguo.motivo + obra.resumen + porQue, candidatos: ambiguo.candidatos };
+            return { estado: 'ambiguo', reintentable, motivo: ambiguo.motivo + obra.resumen + textoTitulo + porQue, candidatos: ambiguo.candidatos };
         }
         if (!abs && !manual) return { estado: 'sin-fichero', reintentable, motivo: 'no se encontró el fichero del documento en su carpeta' + porQue };
-        if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', reintentable, motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` + porQue };
-        return { estado: 'no-hallado', reintentable, motivo: 'no se pudo obtener un ISBN (ni del texto, ni por barras/visión, ni por autoridad)' + porQue };
+        if (abs && !tipoLibro(abs) && !conIA) return { estado: 'formato-no-soportado', reintentable, motivo: `${path.extname(abs)} no da un ISBN de texto (marca «con IA» para intentar el código de barras)` + textoTitulo + porQue };
+        return { estado: 'no-hallado', reintentable, titulo: recuperado?.titulo, motivo: 'no se pudo obtener un ISBN (ni del texto, ni por barras/visión, ni por autoridad)' + textoTitulo + porQue };
     }
 
     // 2) PIVOTE por ISBN: Fichero local + APIs gratuitas. incluirCdu:false → NO se toca la CDU aquí (cambiarla
