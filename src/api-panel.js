@@ -630,7 +630,7 @@ export function rutasPanel() {
     r.get('/documentos/:id/co-capitulos', async (req, res) => {
         try {
             if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
-            res.json(await coCapitulosDe(db, req.params.id));
+            res.json(await coCapitulosDe(await conectarDB(), req.params.id));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/documentos/unir-capitulos/plan', async (req, res) => {
@@ -638,7 +638,7 @@ export function rutasPanel() {
         try {
             const { ids, titulo, forzar } = req.body || {};
             const lista = (Array.isArray(ids) ? ids : []).filter((x) => ObjectId.isValid(String(x)));
-            res.json(await unirCapitulos(db, lista, { aplicar: false, titulo: titulo || null, forzar: !!forzar }));
+            res.json(await unirCapitulos(await conectarDB(), lista, { aplicar: false, titulo: titulo || null, forzar: !!forzar }));
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
     r.post('/documentos/unir-capitulos', (req, res) => {
