@@ -109,13 +109,24 @@ async function prepararDrop(drop) {
     const hecho = [];
     await prepararArbol(drop, pendientes, hecho);
 
-    const unidades = await unidadesDe(drop);
+    // Cola de unidades: una unidad retenida por algo que está MÁS ABAJO (un libro por capítulos en una subcarpeta,
+    // un escaneo pendiente) se reparte en sus hijos, para que solo se quede la rama culpable. Medido 9-nov:
+    // «Science/500+ Electrical Engineering Books» (cientos de libros) no pasaba por UN libro en capítulos dentro.
+    const cola = await unidadesDe(drop);
     let pasadas = 0;
-    for (const u of unidades) {
+    while (cola.length) {
+        const u = cola.shift();
         const bloqueos = [...pendientes.keys()].filter((p) => p === u || p.startsWith(u + path.sep));
-        if (bloqueos.length) continue;
+        if (bloqueos.length) {
+            if (!bloqueos.includes(u) && await divisible(u)) cola.unshift(...(await hijosDe(u)));
+            continue;
+        }
         // Solo pasa lo que tiene un camino de catalogación CLARO (regla del usuario, 3-nov). Lo demás se queda aquí.
         const retenida = await motivoParaRetener(u);
+        if (retenida?.masAbajo && await divisible(u)) {
+            cola.unshift(...(await hijosDe(u)));
+            continue;
+        }
         if (retenida) {
             pendientes.set(u, retenida.motivo);
             const clave = `${u}|${retenida.motivo}`;
@@ -130,13 +141,18 @@ async function prepararDrop(drop) {
         }
         const rel = path.relative(drop, u);
         const destino = await destinoLibre(rel ? path.join(DIR_INBOX, nombre, rel) : path.join(DIR_INBOX, nombre));
-        // La guía de la carpeta dejada viaja al lado: es su contexto (colección, materia, perfil heredado).
+        // Las guías de la carpeta dejada y de las carpetas intermedias repartidas viajan al lado: son su contexto
+        // (colección, materia, perfil heredado).
         if (rel) {
-            const guiaDrop = path.join(drop, NOMBRE_GUIA);
-            const guiaInbox = path.join(DIR_INBOX, nombre, NOMBRE_GUIA);
-            if (await existe(guiaDrop) && !(await existe(guiaInbox))) {
-                await fs.mkdir(path.dirname(guiaInbox), { recursive: true });
-                await fs.copyFile(guiaDrop, guiaInbox);
+            const partes = path.dirname(rel) === '.' ? [] : path.dirname(rel).split(path.sep);
+            for (let i = 0; i <= partes.length; i++) {
+                const sub = partes.slice(0, i);
+                const guiaPre = path.join(drop, ...sub, NOMBRE_GUIA);
+                const guiaInbox = path.join(DIR_INBOX, nombre, ...sub, NOMBRE_GUIA);
+                if (await existe(guiaPre) && !(await existe(guiaInbox))) {
+                    await fs.mkdir(path.dirname(guiaInbox), { recursive: true });
+                    await fs.copyFile(guiaPre, guiaInbox);
+                }
             }
         }
         await moverArbol(u, destino);
@@ -241,9 +257,32 @@ async function motivoParaRetener(u) {
     if (guia && guia.perfil?.origen !== 'agente' && guia.accion) return null;
     const capitulos = await pareceLibroPorCapitulos(u);
     if (capitulos) {
-        return { motivo: `parece un libro por capítulos sin coser (en «${capitulos === '.' ? path.basename(u) : capitulos}»). Si no lo es, ponle una guía` };
+        // masAbajo: lo visto está en una subcarpeta → la unidad se puede repartir y retener solo esa rama.
+        return {
+            motivo: `parece un libro por capítulos sin coser (en «${capitulos === '.' ? path.basename(u) : capitulos}»). Si no lo es, ponle una guía`,
+            masAbajo: capitulos !== '.',
+        };
     }
     return null;
+}
+
+/**
+ * ¿Se puede repartir la unidad en sus hijos? Solo una carpeta con subcarpetas que no sea ella misma un libro
+ * o una unidad con camino propio según su guía (esas viajan enteras o se quedan enteras).
+ */
+async function divisible(u) {
+    const st = await fs.stat(u).catch(() => null);
+    if (!st?.isDirectory()) return false;
+    const guia = await leerGuia(u).catch(() => null);
+    if (['libro-material', 'desglose', 'omitir', ...ACCIONES_CON_CAMINO].includes(guia?.accion)) return false;
+    const entradas = await fs.readdir(u, { withFileTypes: true }).catch(() => []);
+    return entradas.some((e) => e.isDirectory() && !ignorar(e.name) && e.name !== 'Desglose');
+}
+
+/** Los hijos de una unidad repartida (su guía no: viaja aparte, al lado de cada hijo que pasa). */
+async function hijosDe(u) {
+    const entradas = await fs.readdir(u, { withFileTypes: true }).catch(() => []);
+    return entradas.filter((e) => !ignorar(e.name) && e.name !== NOMBRE_GUIA).map((e) => path.join(u, e.name));
 }
 
 /** Un nombre libre en el destino: nunca se pisa nada del Inbox. */
