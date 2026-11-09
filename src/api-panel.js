@@ -26,6 +26,7 @@ import { lanzarReextraccion, estadoReextraccion, cancelarReextraccion } from './
 import { lanzarPortadaSospechosa, estadoPortadaSospechosa, cancelarPortadaSospechosa } from './utils/portadas-sospechosas.js';
 import { lanzarRegenerarHash, estadoRegenerarHash, cancelarRegenerarHash } from './utils/hash-doc.js';
 import { lanzarFusion, estadoFusion } from './utils/fusionar-versiones.js';
+import { coCapitulosDe, unirCapitulos, lanzarUnirCapitulos, estadoUnirCapitulos } from './utils/unir-capitulos.js';
 import { lanzarReidentificacion, estadoReidentificacion, cancelarReidentificacion, elegirEdicion } from './utils/reidentificar-doc.js';
 import { lanzarCompletarSinopsis, estadoCompletarSinopsis, cancelarCompletarSinopsis } from './utils/completar-sinopsis.js';
 import { informeTexto, informeHtml } from './utils/informe-integridad.js';
@@ -622,6 +623,30 @@ export function rutasPanel() {
         res.json(lanzarFusion({ ids: req.body?.ids }));
     });
     r.get('/documentos/fusionar-versiones/estado', (req, res) => res.json(estadoFusion()));
+
+    // ── UNIR CAPÍTULOS (utils/unir-capitulos.js): documentos que son capítulos de UN libro (se colaron uno a uno)
+    //    → un solo PDF cosido con índice, los capítulos como adjunto «Capítulos/». La ficha pide los CO-CAPÍTULOS
+    //    candidatos de un documento; la selección pide el PLAN (seco, síncrono) y luego lanza la unión (2º plano). ──
+    r.get('/documentos/:id/co-capitulos', async (req, res) => {
+        try {
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            res.json(await coCapitulosDe(db, req.params.id));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/unir-capitulos/plan', async (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        try {
+            const { ids, titulo, forzar } = req.body || {};
+            const lista = (Array.isArray(ids) ? ids : []).filter((x) => ObjectId.isValid(String(x)));
+            res.json(await unirCapitulos(db, lista, { aplicar: false, titulo: titulo || null, forzar: !!forzar }));
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+    r.post('/documentos/unir-capitulos', (req, res) => {
+        if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+        const { ids, titulo, forzar } = req.body || {};
+        res.json(lanzarUnirCapitulos({ ids, titulo: titulo || null, forzar: !!forzar }));
+    });
+    r.get('/documentos/unir-capitulos/estado', (req, res) => res.json(estadoUnirCapitulos()));
 
     // ── RE-IDENTIFICAR (recuperar el ISBN del propio fichero + pivote al Fichero/APIs, SIN IA), sobre una
     //    selección. Para los miembros de colección que se catalogaron por nombre y quedaron SIN ISBN (TXtras).

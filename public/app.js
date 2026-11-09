@@ -3846,6 +3846,7 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actReisbn" title="Extraer/cotejar el ISBN de ESTE documento: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual, con o sin IA.">🔎 Extraer ISBN</button>
       <button class="fbtn admin-only" id="actConfEd" title="${d.editorial_confirmada ? 'La editorial ya está confirmada. Pulsa para QUITAR la confirmación.' : 'Dar por BUENA la editorial de este documento: sale de las selecciones «Editorial sin confirmar / a revisar» y los scripts de editoriales ya no la tocan.'}">${d.editorial_confirmada ? '✅ Editorial confirmada' : '✅ Confirmar editorial'}</button>
       <button class="fbtn admin-only" id="actRehash" title="Recalcular el hash del fichero de ESTE documento (tras modificarlo: quitar una página, anotarlo…). El anterior se conserva.">#️⃣ Regenerar hash</button>
+      <button class="fbtn admin-only" id="actCoCap" title="¿Es este documento un CAPÍTULO de un libro mayor? Busca en el catálogo sus co-capítulos (misma obra, mismo ISBN, mismo título, nombres de la misma serie ingeridos a la vez) para unirlos en un solo PDF.">📑 Co-capítulos</button>
       <button class="fbtn admin-only" id="actPortSosp" title="Portada FALSA (la misma imagen en libros distintos): quitarla, re-extraerla omitiendo la sospechosa, o poner la primera página de texto. Solo cambia la portada.">🚩 Portada sospechosa…</button>
       <button class="fbtn admin-only" id="actSinopsis" title="Busca la sinopsis de ESTE documento por su ISBN en el Fichero local y, si no está, en OpenLibrary y Google Books. Sin IA. Opciones: forzar (reemplazar la que tenga) y solo Fichero local (sin salir a internet).">📝 Buscar sinopsis</button>
       <button class="fbtn admin-only" id="actAFondo" title="Lee las PÁGINAS del propio libro (portadilla/contraportada) con la visión y propone autores/roles reales, sinopsis e identificadores. Muestra un balance antes/después para aplicar lo que elijas.">🎯 Completar a fondo</button>
@@ -3934,6 +3935,7 @@ function pintarDoc(r, ctx) {
     if ($('#actReisbn')) $('#actReisbn').onclick = () => reidentificarLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if ($('#actPortSosp')) $('#actPortSosp').onclick = () => portadaSospechosaLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if ($('#actRehash')) $('#actRehash').onclick = () => regenerarHashLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
+    if ($('#actCoCap')) $('#actCoCap').onclick = () => coCapitulosFicha(d._id);
     if ($('#actConfEd')) $('#actConfEd').onclick = () => confirmarEditorialLote([d._id], { quitar: !!d.editorial_confirmada, alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if ($('#actSinopsis')) $('#actSinopsis').onclick = () => sinopsisLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
@@ -8729,6 +8731,7 @@ function renderBulk() {
     <button class="btn" id="bkPortada" title="Asignar la MISMA imagen de portada a todos los seleccionados. Se añade como portada; las imágenes que ya tengan se conservan en el carrusel.">🖼️ Portada común</button>
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReimg" title="Re-extraer del PROPIO fichero la portada Y las imágenes de catalogación (5 páginas frontales + contraportada, saltando las páginas en blanco), reemplazando las actuales (equivocadas). Conserva las imágenes que hayas añadido a mano. Trabajo en 2º plano.">🖼️ Reextraer imágenes</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkFusion" title="Los documentos seleccionados son el MISMO libro (versiones: otro escaneo, otra conversión): se fusionan en uno solo, conservando TODOS los ficheros como versiones. Formatos distintos no se fusionan.">🔗 Fusionar versiones</button>' : ''}
+    ${ROL === 'admin' ? '<button class="btn admin-only" id="bkUnirCap" title="Los documentos seleccionados son CAPÍTULOS de un mismo libro (se colaron uno a uno): se cosen en un solo PDF en orden de lectura, con índice de capítulos, y los capítulos quedan como adjunto. El más completo se queda con los datos de todos; los demás redirigen a él. Antes de unir verás el plan.">📑 Unir capítulos</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkRehash" title="Recalcular el hash (SHA-256) del fichero de cada documento: tras MODIFICARLO (quitar una página, anotarlo…) el de la ingesta queda viejo. El anterior se conserva; en un PDF se recuentan las páginas. Trabajo en 2º plano.">#️⃣ Regenerar hash</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkPortSosp" title="Para portadas FALSAS (la misma imagen en libros distintos: banner de un grupo de ripeo, «cover not available»…): quitar la portada, re-extraerla omitiendo la sospechosa, o poner la primera página de texto. Solo cambia la portada; conserva las demás imágenes.">🚩 Portada sospechosa…</button>' : ''}
     ${ROL === 'admin' ? '<button class="btn admin-only" id="bkReisbn" title="Extraer/cotejar el ISBN: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual (1 doc), con o sin IA. Trabajo en 2º plano.">🔎 Extraer ISBN</button>' : ''}
@@ -8816,6 +8819,7 @@ function renderBulk() {
     if ($('#bkRehash')) $('#bkRehash').onclick = () => regenerarHashLote([...selDocs]);
     if ($('#bkConfEd')) $('#bkConfEd').onclick = () => confirmarEditorialLote([...selDocs]);
     if ($('#bkFusion')) $('#bkFusion').onclick = () => fusionarVersionesLote([...selDocs]);
+    if ($('#bkUnirCap')) $('#bkUnirCap').onclick = () => unirCapitulosLote([...selDocs]);
     if ($('#bkReisbn')) $('#bkReisbn').onclick = () => reidentificarLote([...selDocs]);
     if ($('#bkSinopsis')) $('#bkSinopsis').onclick = () => sinopsisLote([...selDocs]);
     if ($('#bkReproc')) $('#bkReproc').onclick = () => accionLoteFicha('reprocesar', { verbo: 'Reprocesar', password: true });
@@ -9105,6 +9109,103 @@ async function fusionarVersionesLote(ids) {
     toast(`Fusionados en «${recortar(res.principal?.titulo || '', 40)}»: ${res.retirados?.length || 0} retirado(s), ${res.versiones?.length || 0} fichero(s) conservado(s) como versión`, 'ok');
     selDocs.clear();
     buscarCatalogo(estadoBusqueda.page || 1);
+  } catch (err) { toast(err.message, 'bad'); }
+}
+
+// CO-CAPÍTULOS de un documento (ficha → «📑 Co-capítulos»): los que parecen capítulos del mismo libro, con sus
+// razones. Marcados los SEGUROS (misma obra, ISBN o título); los que solo comparten la serie de nombres
+// («Ch05-…» de otro libro ingerido esa noche también es «ch…») salen sin marcar. Desde aquí se unen o se llevan
+// al Catálogo como selección para revisarlos.
+async function coCapitulosFicha(id) {
+  let r;
+  try { r = await api('/documentos/' + encodeURIComponent(id) + '/co-capitulos'); } catch (err) { toast(err.message, 'bad'); return; }
+  if (!r.ok) { toast(r.motivo || 'No se pudo buscar', 'warn'); return; }
+  if (!r.candidatos.length) { toast('No hay documentos que parezcan capítulos del mismo libro', 'warn'); return; }
+  const fila = (c, marcado, fijo = false) => `<label style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line)">
+      <input type="checkbox" class="ccSel" value="${esc(c._id)}"${marcado ? ' checked' : ''}${fijo ? ' disabled' : ''} style="width:16px;height:16px;flex:0 0 auto;margin-top:2px">
+      <span style="min-width:0"><b>${esc(c.nombre_archivo || c.titulo || '')}</b>${c.paginas ? ` <span class="muted">· ${c.paginas} págs.</span>` : ''}
+        ${c.razones ? `<br><span class="muted" style="font-size:12px">${esc(c.razones.join(' · '))}</span>` : `<br><span class="muted" style="font-size:12px">este documento</span>`}</span></label>`;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px;width:100%">
+      <h3 style="margin-top:0">📑 Co-capítulos de «${esc(recortar(r.doc.titulo || '', 60))}»</h3>
+      <div class="muted" style="margin:-4px 0 8px;font-size:13px">${r.candidatos.length} documento(s) parecen capítulos del mismo libro. Marcados los seguros; revisa los demás.${r.doc.pequeno ? '' : ' ⚠️ Este documento es grande para ser un capítulo.'}</div>
+      <div style="max-height:52vh;overflow:auto">${fila(r.doc, true, true)}${r.candidatos.map((c) => fila(c, c.propuesto)).join('')}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:10px">
+        <button class="btn" id="ccCancel">Cerrar</button>
+        <button class="btn" id="ccCat" title="Llevar los marcados al Catálogo como selección (para verlos y, desde la barra, «📑 Unir capítulos»)">👁 Ver en Catálogo</button>
+        <button class="btn pri" id="ccUnir">📑 Unir los marcados…</button>
+      </div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  const marcados = () => [String(r.doc._id), ...$$('#cmpModal .ccSel:checked').map((x) => x.value).filter((v) => v !== String(r.doc._id))];
+  $('#ccCancel').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#ccCat').onclick = () => {
+    const ids = marcados();
+    cerrarCmp();
+    selDocs.clear();
+    ids.forEach((x) => selDocs.add(x));
+    soloSeleccion = true;
+    go('search');
+    buscarCatalogo(1);
+  };
+  $('#ccUnir').onclick = () => {
+    const ids = marcados();
+    cerrarCmp();
+    unirCapitulosLote(ids, { alTerminar: (principal) => verDoc(principal) });
+  };
+}
+
+// UNIR CAPÍTULOS: primero el PLAN (orden de lectura, título del libro, el que se queda, avisos: libro incompleto,
+// ISBN distintos), con el título editable; luego la unión en 2º plano. Varios ISBN distintos solo se unen forzando.
+async function unirCapitulosLote(ids, { alTerminar = null } = {}) {
+  if (ids.length < 2) { toast('Elige al menos dos capítulos', 'warn'); return; }
+  const pedirPlan = (opc) => api('/documentos/unir-capitulos/plan', { method: 'POST', body: JSON.stringify({ ids, ...opc }) });
+  let opc = { titulo: null, forzar: false };
+  let r;
+  try { r = await pedirPlan(opc); } catch (err) { toast(err.message, 'bad'); return; }
+  // Varios ISBN: se pregunta antes de forzar (casi siempre son dos tomos y hay que unirlos por separado).
+  if (!r.ok && r.isbns) {
+    if (!confirm(`${r.motivo}\n\n¿Unirlos de todos modos en UN solo libro?`)) return;
+    opc.forzar = true;
+    try { r = await pedirPlan(opc); } catch (err) { toast(err.message, 'bad'); return; }
+  }
+  if (!r.ok) { toast(r.motivo || 'No se pueden unir', 'bad'); return; }
+  const p = r.plan;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:600px;width:100%">
+      <h3 style="margin-top:0">📑 Unir ${p.orden.length} capítulos</h3>
+      <label>Título del libro</label>
+      <input id="ucTit" value="${esc(p.titulo || '')}" style="width:100%">
+      <div class="muted" style="font-size:13px;margin:6px 0">Se queda con los datos de todos: <b>${esc(recortar(p.principal.titulo || '', 60))}</b>${p.isbn ? ` · ISBN ${esc(p.isbn)}` : ' · sin ISBN (se buscará en las primeras páginas del PDF unido)'}${p.paginas ? ` · ${p.paginas} págs.` : ''}</div>
+      ${(p.avisos || []).map((a) => `<div style="color:var(--warn);font-size:13px;margin:4px 0">⚠️ ${esc(a)}</div>`).join('')}
+      <div class="muted" style="font-size:12px;margin-top:6px">Orden de lectura (por el nombre del fichero):</div>
+      <ol style="max-height:42vh;overflow:auto;margin:4px 0 0;padding-left:26px;font-size:13px">${p.orden.map((o) => `<li><b>${esc(o.capitulo)}</b> <span class="muted">· ${esc(o.nombre_archivo)}${o.paginas ? ` · ${o.paginas} págs.` : ''}</span></li>`).join('')}</ol>
+      <div class="muted" style="font-size:12px;margin-top:8px">Los capítulos originales se guardan en «Capítulos/» (adjunto). Los documentos retirados redirigen al que queda.</div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px"><button class="btn" id="ucCancel">Cancelar</button><button class="btn pri" id="ucOk">📑 Unir</button></div>
+    </div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  const titulo = await new Promise((resolver) => {
+    $('#ucCancel').onclick = () => { cerrarCmp(); resolver(null); };
+    $('#cmpScrim').onclick = () => { cerrarCmp(); resolver(null); };
+    $('#ucOk').onclick = () => { const t = $('#ucTit').value.trim(); cerrarCmp(); resolver(t || p.titulo); };
+  });
+  if (titulo == null) return;
+  try {
+    const l = await api('/documentos/unir-capitulos', { method: 'POST', body: JSON.stringify({ ids, titulo, forzar: opc.forzar }) });
+    if (!l.ok) { toast(l.motivo || 'No se pudo unir', 'bad'); return; }
+    toast(`Cosiendo ${ids.length} capítulos…`);
+    let e = {};
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 1000));
+      try { e = await api('/documentos/unir-capitulos/estado'); } catch { break; }
+      if (!e.en_curso) break;
+    }
+    if (e.error || (e.resultado && !e.resultado.ok)) { toast(e.error || e.resultado.motivo || 'Error al unir', 'bad'); return; }
+    const res = e.resultado || {};
+    toast(`«${recortar(res.principal?.titulo || '', 40)}»: ${ids.length} capítulos en un PDF${res.paginas ? ` de ${res.paginas} págs.` : ''}${res.capitulos ? `, índice de ${res.capitulos}` : ''}${res.isbn ? ` · ISBN ${res.isbn}` : ''}`, 'ok');
+    selDocs.clear();
+    if (alTerminar) alTerminar(res.principal?.id);
+    else if (res.principal?.id) verDoc(res.principal.id);
   } catch (err) { toast(err.message, 'bad'); }
 }
 

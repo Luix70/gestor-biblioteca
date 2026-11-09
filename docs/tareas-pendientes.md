@@ -38,6 +38,15 @@
 - Los 13 .rtf de Coaching están en la Papelera (`Recycling/001567_…_subcarpeta-vacia`): son los mismos capítulos que
   los PDF; no hacen falta para coser
 
+### 0.67 Libros colados capítulo a capítulo (9-nov) — BD y ficheros
+- [ ] Desplegar (unir capítulos + detección en la ingesta + guía «obra» de capítulos → desglose)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-capitulos.js` (seco: lista y crea las selecciones
+      «Capítulos por unir: …»). Medido desde el PC el 9-nov: 5 grupos seguros — Marks' Basic Medical Biochemistry
+      (50), Theory of Machines (27), The Moment It Clicks (9), Elements of Photonics I (3: caps. 1, 2, 8) y II (3:
+      caps. 9, 10, 16; ambos INCOMPLETOS)
+- [ ] Copia de la base: `D:\Bibliobak\CopiaBase.ps1`
+- [ ] Unir: desde cada selección con «📑 Unir capítulos» (ves el plan), o todos los seguros con `--ejecutar`
+
 ### 0.66 Libros CHM sin ISBN (5-nov) — solo BD y portadas
 - [ ] Desplegar (lector de CHM corregido + portadas al cotejar)
 - [ ] Copia de la base: `D:\Bibliobak\CopiaBase.ps1`

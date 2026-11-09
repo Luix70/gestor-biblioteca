@@ -25,7 +25,7 @@ import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, pe
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
 import { tituloDeNombre } from './utils/afinar-guias.js';
 import { AVISO_NO_CATALOGABLE, examinarCatalogable, escribirAvisoNoCatalogable } from './utils/no-catalogable.js';
-import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js';
+import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js';
 import { partesContenidasEnLibro } from './utils/partes-contenidas.js';
 import { convertirAPdf, hayLibreOffice, EXT_CONVERTIBLES } from './utils/convertir-a-pdf.js'; // libro + su desglose
 import { unirPdfs, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
@@ -1032,7 +1032,16 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
             // GUÍA de ingesta (_guia.json). aplanar/explotar ya se aplicaron en la pasada previa; aquí:
             //   · OMITIR  → NO catalogar nada de esta carpeta (se deja intacta en el Inbox).
             //   · INTACTA → conservar VERBATIM por la ruta transmedia (preserva la estructura + agrupa en colección).
-            const guiaCarpeta = await leerGuia(ruta);
+            let guiaCarpeta = await leerGuia(ruta);
+            // Una guía «obra» del AGENTE sobre una carpeta de CAPÍTULOS es un libro desglosado (4-nov: «Theory of
+            // Machines», Ch-0 Index…chp-26, catalogado como obra de 27 «tomos»). La inspección ya lo corrige al
+            // escribir la guía; esto cubre las guías escritas antes y las que llegan de fuera. La tuya (panel/a
+            // mano) manda.
+            if (guiaCarpeta?.accion === 'obra' && guiaCarpeta.perfil?.origen === 'agente'
+                && await pareceLibroPorCapitulos(ruta, '', 0)) {
+                console.log(`  📑 ${e.name}: guía «obra» del agente, pero sus documentos son capítulos → libro desglosado.`);
+                guiaCarpeta = { ...guiaCarpeta, accion: 'desglose' };
+            }
             if (guiaCarpeta?.accion === 'omitir') {
                 if (!omitidasGuia.has(ruta)) {
                     omitidasGuia.add(ruta);

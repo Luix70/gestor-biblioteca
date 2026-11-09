@@ -2565,6 +2565,14 @@ de ficheros clasificado por CDU.
       La ficha las muestra bajo el carrusel: un clic y esa es la portada (la actual queda en el carrusel). El boton
       «🔍 Buscar portadas» de la ficha las busca en cualquier momento. Una se pone SOLA solo si es de su ISBN,
       vertical, y la actual falta, es apaisada (una figura) o mide la mitad o menos; nunca si la elegiste tu.
+    · UNIR CAPITULOS (9-nov): un libro catalogado capitulo a capitulo se une en UN documento. En la ficha,
+      «📑 Co-capitulos» busca sus co-capitulos (misma obra, mismo ISBN o mismo titulo: marcados; solo la misma serie
+      de nombres ingeridos a la vez: sin marcar, revisalos) y los une o los lleva al Catalogo como seleccion. En la
+      seleccion, «📑 Unir capitulos» ensena antes el plan (orden de lectura, titulo editable, el que se queda, avisos
+      de libro INCOMPLETO o de ISBN distintos) y cose un solo PDF con indice de capitulos; los capitulos originales
+      quedan en «Capitulos/» (adjunto) y los documentos retirados redirigen al que queda. La ingesta apunta los
+      capitulos que se cuelen en la seleccion «Capitulos por unir» (no une sola), y una guia «obra» del agente sobre
+      una carpeta de capitulos ya se cose como libro desglosado. scripts/detectar-capitulos.js busca los ya colados.
     · TITULOS ROTOS SIN ISBN (6-nov): «🔎 Extraer ISBN» arregla el titulo aunque no encuentre ISBN, cuando es el de
       una pagina («Ovid: …», «AccessMedicine - Print», «Chapter 10 …», «Figure 1-1», «… APPENDIX A …») o el nombre
       del fichero entero: pone el del propio fichero, el mismo sin la plataforma o el del nombre del fichero, con

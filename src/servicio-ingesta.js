@@ -764,6 +764,18 @@ async function ingestarRecursoInterno({ rutas, contexto = {} }) {
     try { await indexarDoc(await conectarDB(), resultado._id); }
     catch (e) { console.warn(`[Servicio] No se pudo indexar para búsqueda: ${e.message}`); }
 
+    // 5c. ¿CAPÍTULO colado? Un PDF pequeño con co-capítulos SEGUROS ya catalogados (mismo ISBN, obra o título,
+    //     ingeridos a la vez) se apunta en la selección «Capítulos por unir» para unirlos desde el panel. No une
+    //     solo: los capítulos de «Elements of Photonics» venían mezclados con 80 libros enteros en una carpeta de
+    //     materia, donde la detección por carpeta no los ve (4-nov). Best-effort.
+    if (resultado.operacion === 'insercion') {
+        try {
+            const { anotarCoCapitulosEnIngesta } = await import('./utils/unir-capitulos.js');
+            const n = await anotarCoCapitulosEnIngesta(await conectarDB(), resultado._id);
+            if (n) console.log(`   📑 «${documento.titulo}» parece capítulo de un libro (${n} co-capítulo/s ya catalogados): a la selección «Capítulos por unir».`);
+        } catch (e) { console.warn(`[Servicio] co-capítulos: ${e.message}`); }
+    }
+
     // 6. CONFORMAR AL INGERIR (opcional): corre el Conformador sobre el doc recién catalogado para
     //    "acertar desde el principio" en ingestas sueltas/manuales. FIRE-AND-FORGET: no bloquea la cola
     //    del Inbox (como resolverObraPorIsbn). Por defecto OFF; se activa con el toggle global
