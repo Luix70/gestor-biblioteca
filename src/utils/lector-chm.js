@@ -32,6 +32,7 @@ import * as cheerio from 'cheerio';
 import { validarISBN, extraerISSNs, variantesISBN } from './identificadores.js';
 import { extraerISBNs } from './lector-pdf.js';
 import { medirImagen } from './medir-imagen.js';
+import { idiomaDeTexto } from './idioma-texto.js';
 
 const execFileP = promisify(execFile);
 
@@ -274,10 +275,11 @@ export async function leerChm(ruta) {
  * Metadatos de un CHM ya extraído en `dir` (separado de `leerChm` para poder probarlo con una extracción hecha por
  * otra herramienta, p. ej. `hh.exe -decompile` en Windows).
  */
-export async function leerChmExtraido(dir) {
+export async function leerChmExtraido(dir, { inicial: inicialDada = null } = {}) {
     const ficheros = await listarFicheros(dir);
     const toc = await leerToc(ficheros);
-    const inicial = await temaInicial(ficheros);
+    // `inicial` dada: un libro HTML suelto (utils/libro-html.js) no tiene .hhp; su página de entrada hace de inicial.
+    const inicial = inicialDada || await temaInicial(ficheros);
 
     // 1) Título: del .hhp (Title=) — lo fija el autor del CHM —; si no, la 1.ª entrada del índice (en Safari, el
     //    título del libro). El <title> de la primera página leída viene después, en el recorrido.
@@ -293,7 +295,7 @@ export async function leerChmExtraido(dir) {
     // 2) Páginas EN ORDEN DE LECTURA: título (si aún falta), cabecera de Safari, ISBN/ISSN del texto.
     const htmls = ordenDeLectura(dir, ficheros.filter(f => /\.html?$/i.test(f)), toc, inicial);
     const isbnCandidatos = new Set();
-    let issn = null, cabecera = null, primeraPagina = null, escaneados = 0;
+    let issn = null, cabecera = null, primeraPagina = null, escaneados = 0, muestra = '';
     for (const h of htmls) {
         if (escaneados >= MAX_HTML_ESCANEO) break;
         let raw;
@@ -306,6 +308,7 @@ export async function leerChmExtraido(dir) {
             if (mt) titulo = tituloDeTema(mt[1]);
         }
         const texto = textoDeHtml(raw);
+        if (muestra.length < 60000) muestra += ' ' + texto;
         if (!cabecera && escaneados <= 5) cabecera = cabeceraSafari(texto);
         // Mismo criterio que el cuerpo de un PDF: diez cifras sueltas sin «ISBN» cerca no son un ISBN (las tablas de
         // un libro de bioestadística daban nueve «ISBN» que pasaban el dígito de control).
@@ -327,6 +330,7 @@ export async function leerChmExtraido(dir) {
         autores: cabecera?.autores || [], editorial: cabecera?.editorial || null,
         anio: cabecera?.anio || null, paginas: cabecera?.paginas || null,
         portada, portada_origen: portadaOrigen,
+        idioma: idiomaDeTexto(muestra),   // por las palabras de las páginas leídas; null si no da para decidir
     };
 }
 
@@ -381,7 +385,8 @@ async function elegirPortada(dir, ficheros, toc, primeraPagina, isbnPropio) {
     if (!elegida) return { portada: null, origen: null };
     const buf = await fs.readFile(elegida).catch(() => null);
     if (!buf || !buf.length) return { portada: null, origen: null };
-    return { portada: { buf, mime: MIME_IMG[path.extname(elegida).toLowerCase()] || 'image/jpeg' }, origen };
+    // `ruta`: dónde está la imagen elegida (un libro HTML conservado entero la usa tal cual, sin copiarla).
+    return { portada: { buf, mime: MIME_IMG[path.extname(elegida).toLowerCase()] || 'image/jpeg', ruta: elegida }, origen };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────────────────

@@ -27,11 +27,11 @@ import { resolverPersona } from './resolver-persona.js';
 import { esAudio } from './lector-audio.js'; // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { esDocumentoLeible, esImagenArchivo, esMaterialNotable, esVideo, formatoDocumento } from './criba-material.js';
 import { convertirAPdf, EXT_CONVERTIBLES } from './convertir-a-pdf.js'; // libro en Word → PDF (LibreOffice)
-import { leerGuia } from './guia-ingesta.js'; // pistas del reproceso (principal fijado + soloAdmin de adjuntos)
+import { leerGuia, perfilHeredado } from './guia-ingesta.js'; // pistas del reproceso (principal fijado + soloAdmin de adjuntos)
 import { isbnDesdeArchivo } from './isbn-archivo.js'; // ISBN del propio fichero del miembro (identificar antes de clasificar)
-import { buscarEnFicheroLocal } from './buscador-local.js'; // pivote OFFLINE por ISBN (sin IA)
+import { buscarEnFicheroLocal, corroborarISBNporTitulo } from './buscador-local.js'; // pivote OFFLINE por ISBN (sin IA)
 import { buscarAutoridadPorISBN } from './autoridad-isbn.js';
-import { variantesISBN } from './identificadores.js';
+import { variantesISBN, validarISBN } from './identificadores.js';
 import { normalizarPermisos, normalizarFichero } from './permisos.js'; // el árbol debe quedar legible para el backup
 
 // Subcarpeta OCULTA con las portadas DERIVADAS (1ª página rasterizada). El prefijo «.» hace que `ignorar`
@@ -40,6 +40,14 @@ import { normalizarPermisos, normalizarFichero } from './permisos.js'; // el ár
 const DIR_PORTADAS = '.portadas';
 import { resolverEditorial as resolverEditorialComun } from './resolver-editorial.js';
 import { limpiarNombreEditorial } from './editoriales-falsas.js';
+// Libro en HTML (ingesta «intacta» de un libro hecho de páginas web): detector, lector y pistas de su carpeta.
+import { esLibroHtml } from './libro-html.js';
+import { leerChmExtraido } from './lector-chm.js';
+import { parsearNombre, esTituloArtefacto } from './parsear-nombre.js';
+import { modernizarCDU } from './cdu-moderna.js';
+import { fileURLToPath } from 'node:url';
+const RAIZ_REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const DIR_INBOX = path.isAbsolute(process.env.PATH_INBOX || '') ? process.env.PATH_INBOX : path.resolve(RAIZ_REPO, process.env.PATH_INBOX || 'Inbox');
 const ext = (n) => path.extname(n).toLowerCase();
 const esPdf = (n) => ext(n) === '.pdf';
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#');
@@ -741,11 +749,104 @@ export const ingestarSoftware = (dirOrigen, opts = {}) =>
  * pretende decidir qué es: por eso `naturaleza:'material'`, con su explorador de ficheros. La CDU se deduce
  * del nombre (editable en la ficha; el Conformador puede afinarla después).
  */
-export const ingestarIntacta = (dirOrigen, opts = {}) =>
-    ingestarBloqueVerbatim(dirOrigen, {
+export async function ingestarIntacta(dirOrigen, opts = {}) {
+    // Un LIBRO EN HTML (página de entrada + muchas páginas, sin PDF/EPUB en la raíz) no es «material»: es un libro,
+    // con su ficha de verdad, que se lee abriendo su entrada en una pestaña (utils/libro-html.js).
+    const html = await esLibroHtml(dirOrigen);
+    if (html) return ingestarLibroHtml(dirOrigen, { ...opts, entrada: html.entrada });
+    return ingestarBloqueVerbatim(dirOrigen, {
         ...opts, naturaleza: 'material', rama: 'intacta', nombreDefecto: 'Carpeta',
         cdu: deducirCdu(path.basename(dirOrigen), []),
     });
+}
+
+/**
+ * LIBRO EN HTML: la carpeta se copia ÍNTEGRA (estructura tal cual: sus enlaces relativos siguen funcionando) a
+ * `<cdu>/libros/<nombre>/`, protegida con ruta_fija, y deja UN documento de libro (naturaleza:'libro-html',
+ * formato 'html') con `html.entrada` = su página de entrada, que la ficha abre en una pestaña nueva.
+ * Metadatos sin IA, de más a menos fiable: la autoridad por ISBN (Fichero → BNE) si el libro trae el suyo; las
+ * páginas (título del <title> de la entrada, cabecera de Safari, idioma por sus palabras); el nombre de la carpeta
+ * («Cutnell,Johnson - Physics 7e HTML» → autores). CDU: la de la autoridad, la de la carpeta guiada (materia) o
+ * «000» para que el Conformador la afine. Portada: la imagen del propio libro que elija el lector (nunca la mayor).
+ */
+async function ingestarLibroHtml(dirOrigen, { db: dbArg, reciclarOrigen = true, entrada } = {}) {
+    const db = dbArg || await conectarDB();
+    const nombreCarpeta = path.basename(dirOrigen).trim() || 'Libro HTML';
+
+    // 1) Leer el libro EN EL ORIGEN (para decidir su CDU antes de copiarlo a su sitio).
+    const meta = await leerChmExtraido(dirOrigen, { inicial: entrada }).catch(() => ({}));
+    // parsearNombre quita la extensión: se le da una de mentira para que no se coma un «.2» del nombre de la carpeta.
+    const porNombre = parsearNombre(nombreCarpeta.replace(/\s*[-_ ]\s*html?$/i, '') + '.dir');
+    let isbn = validarISBN(meta.isbn_propio) || null;
+    const tituloPaginas = meta.titulo && !esTituloArtefacto(meta.titulo) ? meta.titulo : null;
+    if (!isbn && meta.isbn_candidatos?.length) {
+        isbn = await corroborarISBNporTitulo({ candidatos: meta.isbn_candidatos, titulo: tituloPaginas || porNombre.titulo }).catch(() => null);
+    }
+    const aut = isbn ? await buscarAutoridadPorISBN(variantesISBN(isbn)).catch(() => null) : null;
+
+    // «Cutnell,Johnson» (apellidos pegados por una coma, sin nombres) son DOS autores.
+    const autoresCarpeta = (porNombre.autores || []).flatMap((a) => (/^[\p{L}'-]+(,[\p{L}'-]+)+$/u.test(a) ? a.split(',') : [a]));
+    const autoresNom = aut?.autores?.length ? aut.autores : meta.autores?.length ? meta.autores : autoresCarpeta;
+    // El <title> de las páginas suele empezar por el apellido del autor («Cutnell, General & Introductory Physics,
+    // 7/e»): fuera, si es uno de sus autores.
+    let titulo = aut?.titulo || tituloPaginas || porNombre.titulo || nombreCarpeta;
+    const prefijo = titulo.match(/^([\p{L}'-]+)\s*[,:]\s+(.{4,})$/u);
+    if (!aut?.titulo && prefijo && autoresNom.some((a) => a.toLowerCase().includes(prefijo[1].toLowerCase()))) titulo = prefijo[2];
+    const editorialNom = aut?.editorial || meta.editorial || null;
+    const perfil = await perfilHeredado(dirOrigen, DIR_INBOX).catch(() => ({}));
+    const cdu = modernizarCDU(String(aut?.cdu || '').trim()) || perfil.materia_cdu || '000';
+
+    // 2) Copia verbatim + verificación (nunca se borra el origen si no quedó íntegra).
+    const carpetaDestino = path.join(DIR_CDU, ...arbolCDU(cdu).segmentos, 'libros', nombreCarpeta);
+    const webBase = webDe(carpetaDestino);
+    const previa = await db.collection('biblioteca').findOne({ ruta_base: webBase }, { projection: { _id: 1 } });
+    if (previa) return { ok: false, permanente: true, motivo: `ya catalogado «${nombreCarpeta}»` };
+    const totales = await huella(dirOrigen);
+    const { integra, huella: copiado } = await copiarVerificado(dirOrigen, carpetaDestino);
+    if (!integra) return { ok: false, motivo: 'la copia al árbol CDU no cuadró (el origen aún cambiaba): se conserva el origen' };
+    await fs.writeFile(path.join(carpetaDestino, MARCA_RUTA_FIJA), `libro-html: ${nombreCarpeta}\n`).catch(() => {});
+
+    // 3) El documento. Autores/editorial como referencias (puerta única de cada entidad).
+    const autores = [];
+    for (const n of autoresNom) {
+        const r = await resolverPersona(db, n).catch(() => null);
+        if (r?._id) autores.push(r._id);
+    }
+    const editorialLimpia = limpiarNombreEditorial(String(editorialNom || ''));
+    const editorial = editorialLimpia ? await resolverEditorialComun(db, editorialLimpia).catch(() => null) : null;
+    const portadaRel = meta.portada?.ruta ? path.relative(dirOrigen, meta.portada.ruta) : null;
+    const _id = new ObjectId();
+    const doc = limpiarUndefined({
+        _id, tipo_recurso: 'libro', naturaleza: 'libro-html', titulo,
+        subtitulo: aut?.subtitulo || undefined,
+        autores: autores.length ? autores : undefined, editorial: editorial || undefined,
+        isbn: isbn || undefined,
+        idioma: aut?.idioma || meta.idioma || perfil.idioma_probable || 'es',
+        sinopsis: aut?.sinopsis || undefined, año_edicion: aut?.año_edicion || meta.anio || undefined,
+        cdu, formatos: ['html'], ubicacion: { ambito: 'Sin asignar', estanteria: 'Sin asignar' },
+        ruta_base: webBase, ruta_fija: true,
+        portada: portadaRel && !portadaRel.startsWith('..') ? webDe(path.join(carpetaDestino, portadaRel)) : undefined,
+        html: { entrada, ficheros: totales.n, bytes: totales.bytes },
+        estado_verificacion: isbn ? 'completado' : 'pendiente', fecha_ingreso: new Date(), fecha_creacion: new Date(),
+    });
+    try {
+        await db.collection('biblioteca').insertOne(doc);
+    } catch (e) {
+        // Un validador que aún no admite el formato 'html' (falta pasar scripts/setup-mongo.js): se guarda como
+        // material, con la misma ficha y la misma lectura. Nada se pierde por un enum.
+        if (e.code !== 121) throw e;
+        await db.collection('biblioteca').insertOne({ ...doc, formatos: ['material'] });
+    }
+    await indexarDoc(db, _id).catch(() => {});
+
+    // 4) Reciclar el origen si no ha cambiado desde la copia.
+    let origenReciclado = false;
+    if (reciclarOrigen) {
+        const ahora = await huella(dirOrigen);
+        if (ahora.n === copiado.n && ahora.bytes === copiado.bytes) { await reciclarCarpeta(dirOrigen, 'libro-html-ingerido').catch(() => {}); origenReciclado = true; }
+    }
+    return { ok: true, _id: String(_id), titulo, cdu, web: webBase, ficheros: totales.n, origenReciclado };
+}
 
 /** Quita las claves con valor undefined (para no persistir campos vacíos y no violar el $jsonSchema). */
 function limpiarUndefined(obj) {

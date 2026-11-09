@@ -35,6 +35,7 @@ import { leerGuia, escribirGuia, guiaEsSignificativa, NOMBRE_GUIA } from './guia
 import { tituloCabecera, periodoDeTexto, esTituloGenerico, normTituloPublicacion } from './revistas.js';
 import { examinarCatalogable, escribirAvisoNoCatalogable } from './no-catalogable.js';
 import { pareceLibroPorCapitulos } from './libro-desglosado.js';
+import { esLibroHtml } from './libro-html.js';
 
 export const UMBRAL_CONFIANZA = 0.6;
 const ORIGEN = 'agente';
@@ -283,6 +284,11 @@ async function corregirConFicheros(abs, guia, esHoja) {
                 examen,
             };
         }
+    }
+    // Un LIBRO EN HTML (página de entrada + muchas páginas, sin PDF/EPUB en la raíz) es UNA cosa: «intacta», que
+    // la ingesta cataloga como libro HTML y conserva entero. Lo lea la IA como lo lea (obra, colección, material…).
+    if (accion !== 'omitir' && accion !== 'intacta' && await esLibroHtml(abs)) {
+        return { guia: { accion: 'intacta', perfil: { origen: ORIGEN } }, nota: 'libro en HTML: se conserva entero con su ficha de libro' };
     }
     if (accion === 'obra') {
         if (await pareceLibroPorCapitulos(abs, '', 0)) {

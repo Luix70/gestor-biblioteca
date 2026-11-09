@@ -2544,9 +2544,15 @@ de ficheros clasificado por CDU.
       cataloga (videos, .dvi, una descarga incompleta segun su .sfv) y lo que la guia manda omitir. El motivo va al
       log, a _preproceso.txt y, si no es catalogable, a un .NO_CATALOGABLE.txt en la propia carpeta. Los cursos en
       video no se catalogan por ahora. Una carpeta retenida que no sea un libro por capitulos pasa si le pones guia.
-      Desde el 9-nov se retiene SOLO la rama culpable: si lo dudoso esta en una subcarpeta, la carpeta se reparte y
-      sus hermanos pasan al Inbox (con las guias de las carpetas intermedias). Antes un solo libro en capitulos
-      retenia entera «Science/500+ Electrical Engineering Books».
+      TODO O NADA (9-nov): cada unidad viaja entera o se queda entera; nunca se reparte (un intento de repartir
+      partio el libro HTML de Cutnell y se retiro). El objetivo es consolidar, no fragmentar.
+    · LIBROS EN HTML (9-nov): una carpeta con pagina de entrada (index/toc/default.htm…) y muchas paginas, sin
+      PDF/EPUB en la raiz, es UN libro. PreProceso lo pasa entero con guia «intacta» (sus PDF por capitulo, como un
+      solucionario, son parte del libro y no lo retienen); la ingesta lo copia tal cual a <cdu>/libros/<nombre>/ y
+      crea una ficha de LIBRO (titulo de sus paginas, autores del nombre de la carpeta, ISBN y autoridad si lo
+      trae, idioma). En la ficha, «🌐 Leer libro» lo abre en una pestaña nueva. Las paginas se sirven aisladas del
+      panel (sandbox): sus scripts funcionan pero no ven tu sesion. Requiere pasar una vez scripts/setup-mongo.js
+      (formato 'html'); sin eso se guarda como formato material, con la misma ficha.
     · INSPECCION CON IA, REDES NUEVAS (3-nov): lo que no es catalogable recibe guia «omitir» con su aviso; una
       «obra» de capitulos pasa a «desglose»; una «obra» de un solo documento queda sin guia; un libro en HTML va
       «intacta». En el Inbox, una guia «obra» sin documentos ya no se salta en silencio: avisa una vez.

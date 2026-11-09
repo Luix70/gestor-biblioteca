@@ -131,6 +131,12 @@ app.use('/recursos', express.static(DIR_CDU, {
     dotfiles: 'allow',
     setHeaders: (res, ruta) => {
         if (/\.(pdf|jpe?g|png|webp|gif|svg)$/i.test(ruta)) res.setHeader('Content-Disposition', 'inline');
+        // Páginas web del catálogo (libros en HTML, material): se abren en una pestaña, pero AISLADAS en un origen
+        // opaco (sandbox sin allow-same-origin). Sus scripts funcionan (menús, simulaciones) pero no pueden leer el
+        // token del panel ni llamar a la API como el usuario: vienen de descargas, no son de fiar.
+        if (/\.(html?|xhtml|svg)$/i.test(ruta)) {
+            res.setHeader('Content-Security-Policy', 'sandbox allow-scripts allow-popups allow-forms allow-modals');
+        }
     },
 }));
 

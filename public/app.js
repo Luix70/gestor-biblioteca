@@ -3835,6 +3835,7 @@ function pintarDoc(r, ctx) {
   });
   // Debajo de la ficha, secciones PLEGABLES y colapsadas por defecto (acciones, imágenes, lectura, datos, sinopsis).
   const botones = `<div class="det-acts">
+      ${d.html?.entrada ? `<button class="fbtn" id="actLeerHtml" title="Abrir el libro (páginas web) en una pestaña nueva del navegador, por su página de entrada «${esc(d.html.entrada)}»">🌐 Leer libro</button>` : ''}
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
       <button class="fbtn" id="actArchivos" title="Explorar y descargar TODOS los archivos de este documento / su colección (también los no catalogados: vídeos, extras…)">🗂️ Archivos</button>
       <button class="fbtn admin-only" id="actAdjuntar" title="COMPLETAR el documento con los ficheros que le faltan: el PDF/EPUB de un audiolibro que solo tiene audio, o los audios de un libro que solo tiene texto. Se adjuntan a su carpeta: el audio va a la playlist y el texto al selector del visor.">📎 Adjuntar audio/texto</button>
@@ -4017,6 +4018,9 @@ function pintarDoc(r, ctx) {
     if (ce2) ce2.onclick = () => fichaEditar(d, r);
     if ($('#fminEdit')) $('#fminEdit').onclick = () => fichaEditar(d, r); // «✏️ Editar» de la cabecera
     if ($('#actArchivos')) $('#actArchivos').onclick = () => explorarArchivos(d._id);
+    // LIBRO EN HTML: su página de entrada en una pestaña nueva. Los enlaces relativos del libro siguen funcionando
+    // porque su carpeta se conservó entera; el servidor sirve esas páginas aisladas (sandbox) del panel.
+    if ($('#actLeerHtml')) $('#actLeerHtml').onclick = () => window.open(encUrl(`${d.ruta_base}/${d.html.entrada}`), '_blank', 'noopener');
     if ($('#actAdjuntar')) $('#actAdjuntar').onclick = () => adjuntarADoc(d._id, r);
     if ($('#actMaterial')) $('#actMaterial').onclick = () => adjuntarMaterialADoc(d._id);
     const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []), { url: r.archivo_url, nombre: r.nombre_archivo });

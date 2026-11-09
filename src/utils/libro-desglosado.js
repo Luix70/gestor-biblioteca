@@ -25,6 +25,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { paginasPdf } from './qpdf.js';
+import { esLibroHtml } from './libro-html.js';
 const ejecutarCmd = promisify(execFile); // pdftotext (poppler) para la comprobación de capa de texto
 
 // Extensiones que cuentan como DOCUMENTO (el principal y sus partes; las partes pueden ser .doc/.docx).
@@ -483,6 +484,9 @@ export async function pareceLibroPorCapitulos(dir, rel = '', nivel = 4) {
     if (nivel <= 0) return null;
     for (const e of entradas) {
         if (!e.isDirectory() || ignorar(e.name) || e.name === 'Desglose') continue;
+        // Dentro de un LIBRO EN HTML, los PDF por capítulo (el solucionario «ssm/Ch01_ssm.pdf» de Cutnell) son parte
+        // de ese libro, que viaja entero: no son un libro sin coser que retenga a la carpeta de encima.
+        if (await esLibroHtml(path.join(dir, e.name))) continue;
         const visto = await pareceLibroPorCapitulos(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name, nivel - 1);
         if (visto) return visto;
     }
