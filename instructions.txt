@@ -862,7 +862,24 @@ de ficheros clasificado por CDU.
     resolverObra busca también por él. «⛙ Fusionar obras» (Obras, selección) además MUDA
     los tomos absorbidos a la carpeta de la obra destino con su CDU (antes solo cambiaba el
     vínculo y la obra quedaba partida en dos ramas del árbol); un tomo con CDU manual
-    distinta no se mueve (aviso). Ninguna campaña detecta obras partidas: se fusionan a mano.
+    distinta no se mueve (aviso).
+    OBRAS PARTIDAS POR VARIANTES DEL TÍTULO (utils/obras-partidas.js): «The Complete…» /
+    «Complete…», «0521086914.Cambridge.University.Press.The.Cambridge.Ancient.History»,
+    mayúsculas, guion corto/largo… Clave de título = sin ISBN delante, sin puntos/guiones
+    bajos, sin acentos ni artículo inicial. INGESTA: antes de CREAR una obra, resolverObra
+    busca una con la MISMA clave donde el tomo encaje (su número libre, editorial e
+    isbn_obra sin contradicción) y guarda la variante en titulos_alt. REPARACIÓN:
+      node scripts/fusionar-obras-partidas.js             (diagnóstico + selección «Obras
+                                                           partidas por revisar»)
+      node scripts/fusionar-obras-partidas.js --ejecutar  (fusiona los SEGUROS; en el NAS,
+                                                           mueve carpetas; BACKUP antes)
+    SEGURO = tomos que no se solapan + misma editorial o mismo registrante de ISBN (9
+    primeros dígitos del ISBN-13) + sin isbn_obra ni total CONOCIDO distintos + título igual,
+    o uno el final del otro con al menos 3 palabras y lo que el largo añade delante es el
+    nombre de una editorial o autor de los tomos («Gale - Schlager - …», «Cassius Dio's…»;
+    NO «Meshfree Methods for Partial Differential Equations»). Títulos de serie (Library,
+    Series, Studies in…) nunca son seguros. El resto, a la selección para mirarlo en Obras.
+    Medido 10-nov (lectura): 37 grupos seguros (129 tomos), 270 pares a revisar.
 
   ── ARTÍCULOS (el DOI es el pivote, como el ISBN lo es del libro) ────────────
     Un artículo es como un libro pero con o SIN identificador propio (igual que hay

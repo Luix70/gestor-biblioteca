@@ -17,6 +17,15 @@
 
 ## 1. Scripts por ejecutar
 
+### 0.55 Obras multivolumen partidas (10-nov) — en el NAS (mueve carpetas de tomos)
+- [ ] Desplegar y `sudo docker exec -t gestor-biblioteca node scripts/setup-mongo.js` (campo `titulos_alt` + índice)
+- [ ] Copia de la base (y del disco: mueve carpetas)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/fusionar-obras-partidas.js` — revisar la lista de SEGUROS
+      (medido en lectura: 37 grupos, 129 tomos; entre ellos Science and Its Times 1-3 + 4-7)
+- [ ] `… --ejecutar` y comprobar en Obras un par de ellas (carpeta única, CDU de la obra)
+- [ ] Revisar a mano la selección «Obras partidas por revisar» (270 pares: tomos repetidos, sin editorial que lo
+      confirme, totales distintos…) y fusionar en Obras con «⛙ Fusionar» las que lo sean
+
 ### 0.6 PreProceso, fase 1 (3-nov)
 - [x] Crear en File Station la carpeta `BIBLIOTECA DIGITAL/PreProceso` (antes de desplegar: si la crea Docker, es de root)
 - [x] Desplegar (cambia docker-compose.yml: el script ya hace down -v / up --build). No interrumpir la construcción

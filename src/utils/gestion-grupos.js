@@ -91,6 +91,9 @@ export async function fusionarObras(db, ids = [], destinoId) {
         }
         await obras.deleteOne({ _id: obid });
     }
+    // Inventario rehecho desde los tomos: si dos obras traían el mismo número, el segundo queda «sin número»
+    // (revisión) en vez de pisar al primero en el inventario.
+    if (otras.length) await reconstruirInventarioObra(db, dest._id);
     return { ok: true, movidos, fusionadas: otras.length, avisos, destino: { _id: String(dest._id), titulo: dest.titulo } };
 }
 

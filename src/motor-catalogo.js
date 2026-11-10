@@ -293,6 +293,7 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
             const { _id, cdu: cduObra, titulo: tituloObra, isbn_obra: isbnObra, creada } = await resolverObra(db, {
                 titulo: docFinal.obra_titulo, isbn_obra: docFinal.isbn_obra,
                 editorialId: edId, coleccionId: colId, cdu: docFinal.cdu, total: docFinal.obra_total,
+                volumen: docFinal.volumen_numero ?? null,
             });
             if (creada) docFinal.alertas_agente.push(`Nueva obra multivolumen registrada: ${docFinal.obra_titulo}`);
             if (_id) docFinal.obra = _id;

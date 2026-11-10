@@ -1,3 +1,5 @@
+import { obraGemela } from './obras-partidas.js';
+
 /**
  * Resuelve una obra multivolumen a un documento de la colección 'obras' (check-then-create).
  * Dedup por ISBN de obra si lo hay; si no, por título. Completa huecos (isbn_obra, editorial,
@@ -9,7 +11,7 @@
  * La obra guarda su CDU: TODOS sus tomos comparten ese classmark (así se archivan juntos), igual
  * que una colección de varios volúmenes en una biblioteca física.
  */
-export async function resolverObra(db, { titulo, isbn_obra = null, editorialId = null, coleccionId = null, cdu = null, total = null }) {
+export async function resolverObra(db, { titulo, isbn_obra = null, editorialId = null, coleccionId = null, cdu = null, total = null, volumen = null }) {
     const col = db.collection('obras');
     const t = titulo ? String(titulo).trim() : null;
 
@@ -20,6 +22,13 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
     const porTitulo = (tit) => col.findOne({ $or: [{ titulo: tit }, { titulos_alt: tit }] });
     let existente = isbn_obra ? await col.findOne({ isbn_obra }) : null;
     if (!existente && t) existente = await porTitulo(t);
+    // Variante del mismo título («0521086914.Cambridge…The.Cambridge.Ancient.History», «The Complete…» / «Complete…»):
+    // antes de CREAR otra obra, una con la misma clave de título donde este tomo encaje (gemelo de
+    // scripts/fusionar-obras-partidas.js). El título que trae queda como alternativo de esa obra.
+    if (!existente && t) {
+        existente = await obraGemela(db, { titulo: t, isbn_obra, editorialId, volumen });
+        if (existente && existente.titulo !== t) await col.updateOne({ _id: existente._id }, { $addToSet: { titulos_alt: t } });
+    }
 
     if (existente) {
         const set = {};
