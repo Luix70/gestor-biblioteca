@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { rutaCatalogo } from '../utils/rutas.js';
+import { rutaCatalogo, SEGMENTO_DE_TIPO, SEGMENTOS_TIPO } from '../utils/rutas.js';
 import { conectarDB } from '../database.js';
 import { arbolCDU } from '../utils/cdu-arbol.js';
 import { aMARCXML } from '../marc21.js';
@@ -347,12 +347,21 @@ export async function reubicarPorCdu(doc, nuevaCdu, { recolocar = false } = {}) 
     // <clase>/<division>/<cdu>, conservando tipo + resto (isbn/discriminador, o issn/año-mes en revistas).
     const rutaBaseVieja = webDeDoc(doc);
     const segsViejos = rutaBaseVieja.replace(/^\/recursos\//, '').split('/');
-    const iTipo = segsViejos.findIndex(s => s === 'libros' || s === 'revistas');
-    const resto = iTipo >= 0 ? segsViejos.slice(iTipo) : segsViejos.slice(-2);
+    const iTipo = segsViejos.findIndex(s => SEGMENTOS_TIPO.includes(s));
+    let resto = iTipo >= 0 ? segsViejos.slice(iTipo) : segsViejos.slice(-2);
     // El segmento de TIPO también debe reflejar la ficha: un documento que era revista y se corrigió a libro seguía
-    // en «…/revistas/…» (y al revés). La hoja (isbn/issn/id) se conserva.
-    const tipoSeg = doc.tipo_recurso === 'revista' ? 'revistas' : doc.tipo_recurso === 'libro' ? 'libros' : null;
-    if (tipoSeg && (resto[0] === 'libros' || resto[0] === 'revistas') && resto[0] !== tipoSeg) resto[0] = tipoSeg;
+    // en «…/revistas/…» (y al revés). La hoja (isbn/issn/id) se conserva…
+    const tipoSeg = SEGMENTO_DE_TIPO[doc.tipo_recurso] || 'libros';
+    if (SEGMENTOS_TIPO.includes(resto[0]) && resto[0] !== tipoSeg) {
+        // …salvo al cruzar la frontera de las REVISTAS, cuya carpeta tiene otra forma (cabecera/año-mes): un preprint
+        // de arXiv catalogado como revista vivía en «revistas/arXiv_math.QA_0202059 v1 7 Feb 2002»; como artículo va
+        // a «articulos/<id>», la hoja que le daría la ingesta (10-nov).
+        const cruza = resto[0] === 'revistas' || tipoSeg === 'revistas';
+        resto = cruza
+            ? rutaCatalogo({ cdu: destinoCdu, tipo_recurso: doc.tipo_recurso, isbn: doc.isbn, issn: doc.issn, id: doc._id, año_edicion: doc.año_edicion, mes_publicacion: doc.mes_publicacion, titulo: doc.titulo, clave_numero: doc.clave_numero })
+                .segmentos.slice(arbolCDU(destinoCdu).segmentos.length)
+            : [tipoSeg, ...resto.slice(1)];
+    }
     let segsNuevos = [...arbolCDU(destinoCdu).segmentos, ...resto];
     let carpetaNueva = path.join(DIR_CDU, ...segsNuevos);
 

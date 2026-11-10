@@ -26,6 +26,10 @@ export function sanitizarSegmento(s) {
     return limpio.slice(0, 100);
 }
 
+/** Segmento de carpeta de cada tipo de documento (cualquier otro tipo va a 'libros'). */
+export const SEGMENTO_DE_TIPO = { libro: 'libros', revista: 'revistas', articulo: 'articulos', capitulo: 'capitulos', apuntes: 'apuntes' };
+export const SEGMENTOS_TIPO = Object.values(SEGMENTO_DE_TIPO);
+
 /**
  * Construye la ruta de catálogo de un recurso siguiendo la estructura CDU jerárquica:
  *   libros:   <clase>/<division>/<cdu>/<libros>/<isbn|issn|id[-discriminador]>
@@ -59,7 +63,7 @@ export function rutaCatalogo({ cdu, tipo_recurso, isbn, issn, id, año_edicion, 
 
     // Carpeta por tipo de documento. Los tipos nuevos (artículo/capítulo/apuntes) tienen su propia rama; el
     // resto (libro y cualquier tipo no listado) cae en 'libros'. Las revistas llevan además cabecera/año (abajo).
-    const tipoSeg = { revista: 'revistas', articulo: 'articulos', capitulo: 'capitulos', apuntes: 'apuntes' }[tipo_recurso] || 'libros';
+    const tipoSeg = SEGMENTO_DE_TIPO[tipo_recurso] || 'libros';
 
     if (tipo_recurso === 'revista') {
         const cabeceraSeg = sanitizarSegmento(issn || titulo || String(id));

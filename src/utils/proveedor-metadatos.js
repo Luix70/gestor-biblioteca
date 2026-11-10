@@ -147,10 +147,11 @@ export function tituloBuscable(titulo) {
  * Flujo maestro de enriquecimiento.
  *
  * `revista: true` → número de una publicación periódica: NO se consultan los catálogos de LIBROS (ver abajo).
+ * `sinCatalogos: '<motivo>'` → igual, para lo ya identificado por una autoridad que no es de libros (preprint de arXiv).
  */
 export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null, opciones = {}) {
     const { incluirSinopsis = true, incluirCdu = true, isbnsArchivo = [], idioma = null, cipDewey = null, cipLcc = null, sinIA = false,
-        revista = false } = opciones;
+        revista = false, sinCatalogos = null } = opciones;
     let datosExtra = {
         isbn: null,
         titulo: null,        // título de la autoridad (solo se usa si el archivo no aporta uno fiable)
@@ -196,8 +197,12 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // número se identifica por su CABECERA (ISSN, guía de la carpeta, la colección ya catalogada), no por aquí.
     // Tampoco la visión de «portada de libro» (busca ISBN, colección y sello: nada que sirva). Queda la CDU, y
     // solo si hay un título con el que razonarla; si la guía de la carpeta ya la da, ni eso (incluirCdu=false).
-    if (revista) {
-        datosExtra.alertas.push('Revista: sin búsqueda en catálogos de libros (sinopsis, autor, editorial y Dewey no aplican a un número).');
+    // Lo mismo para lo que ya se identificó por otra autoridad que no es de libros (`sinCatalogos` = el motivo): un
+    // preprint de arXiv sin ISBN tiene su ficha en arXiv, y por su título («Fields») solo se hallaría un libro homónimo.
+    if (revista || sinCatalogos) {
+        datosExtra.alertas.push(revista
+            ? 'Revista: sin búsqueda en catálogos de libros (sinopsis, autor, editorial y Dewey no aplican a un número).'
+            : `${sinCatalogos}: sin búsqueda en catálogos de libros.`);
         if (incluirCdu && tituloBuscable(titulo)) {
             const { cdu, fuente } = await resolverCDU({ titulo, permitirIA: !sinIA });
             datosExtra.cdu = cdu;

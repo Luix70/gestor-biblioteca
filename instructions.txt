@@ -903,6 +903,38 @@ de ficheros clasificado por CDU.
     artículo = su DOI (como el ISBN del libro). DOI editable en la ficha (campo «DOI (artículos)»)
     y BUSCABLE en el Catálogo (pega el DOI o su URL doi.org/).
 
+  ── PREPRINTS DE ARXIV (el identificador arXiv es el pivote, 10-nov) ─────────
+    Los PDF bajados de arxiv.org llevan en el margen de la 1.ª página una MARCA LATERAL
+    («arXiv:hep-th/9912205v3 [hep-th] 23 Aug 2005»). Antes esa marca acababa de TÍTULO y su
+    fecha los hacía pasar por números de REVISTA (49 documentos, cada uno con su cabecera
+    falsa, sin autores, idioma «es», casi todos en CDU 000). Ahora:
+      · lector-pdf saca el identificador de la marca (solo de las primeras páginas y con su
+        fecha: las referencias del final citan otros preprints), del Title o del NOMBRE del
+        fichero («0806.1234v1.pdf», «hep-th_9912205.pdf») → utils/arxiv-id.js.
+      · La marca o un identificador suelto («math.CO/9902004») ya no valen como título
+        (esTituloArtefacto).
+      · Sin ISBN propio es un ARTÍCULO, o un LIBRO si pasa de ARXIV_LIBRO_MIN_PAGINAS (100)
+        y no salió en ninguna revista (apuntes, tratados: «Fields» de Siegel, las notas de
+        Carroll). Nunca una revista.
+      · El enriquecedor pide su ficha a la API de arXiv (gratis, sin clave; una consulta cada
+        3 s, de 50 en 50 — utils/buscador-arxiv.js): título del autor, autores (con ancla),
+        resumen → sinopsis, año, materias, CDU por sus CATEGORÍAS (tabla determinista, sin IA;
+        rango «deducida») y, si salió en una revista, su DOI → Crossref cuelga el artículo de
+        la cabecera de esa revista. No se busca en los catálogos de LIBROS por su título.
+      · Campo `arxiv` {id, version, version_ultima, categorias, comentario, journal_ref, fecha,
+        url}. Ficha: fila «arXiv» con enlace a arxiv.org. Buscable en el Catálogo (pega
+        «hep-th/9912205», «0806.1234» o la URL). Dedup de la ingesta por `arxiv.id`.
+    LO YA CATALOGADO: `scripts/completar-arxiv.js` (seco por defecto; `--ejecutar`) hace lo
+    mismo con los que tienen el identificador en el título, el nombre o la ficha; saca de la
+    cabecera falsa (y la borra si queda vacía), pasa la carpeta a articulos/ o libros/, toma el
+    idioma del texto del PDF y deja la selección «Completados con arXiv». Con
+    `--buscar-en-ficheros` busca además la marca en la 1.ª página de los PDF sin ISBN (clases
+    5 y 0 y artículos/capítulos, ~2.100; `--todos`: los ~6.300), guardando guion del seco.
+    La CDU de las categorías solo entra con la prioridad de siempre: rellena un 000 y afina
+    dentro de la rama; no cambia de rama otra deducida (p. ej. un 537 puesto por la IA a un
+    hep-th se queda). Medido 10-nov (lectura): 49 documentos, todos hallados en arXiv;
+    37 revista→artículo, 5 revista→libro, 7 libro/capítulo→artículo, 32 CDU nuevas.
+
   ── EDITAR COLECCIÓN / OBRA (admin, en su ficha) ─────────────────────────────
     «✏️ Editar datos» abre un modal (MISMA interfaz para ambas): presentación/sinopsis,
     editorial (por nombre → check-then-create), CDU (cdu_manual) y FECHAS de publicación

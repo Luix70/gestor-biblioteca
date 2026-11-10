@@ -181,6 +181,8 @@ async function main() {
     await asegurarIndice(biblioteca, { titulo: 1 }, { name: 'idx_titulo_es', collation: { locale: 'es', strength: 1 } });
     // DOI: identidad del ARTÍCULO (dedup en motor-catalogo) y búsqueda por DOI en el Catálogo.
     await asegurarIndice(biblioteca, { doi: 1 }, { sparse: true, name: 'idx_doi' });
+    // Preprints de arXiv: dedup en la ingesta y búsqueda por su identificador (utils/arxiv-id.js).
+    await asegurarIndice(biblioteca, { 'arxiv.id': 1 }, { sparse: true, name: 'idx_arxiv' });
 
     // Ampliar (sin quitar) el enum de `formatos` del validador de biblioteca para admitir cómics/ebooks
     // (cbz/cbr/cb7/djvu/mobi). El validador de biblioteca vive en Atlas, así que se LEE y se re-aplica

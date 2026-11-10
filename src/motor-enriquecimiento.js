@@ -1,6 +1,11 @@
 import { buscarMetadatosExternos, tituloBuscable } from './utils/proveedor-metadatos.js';
 import { cduSinIAActivo } from './utils/ajustes-ingesta.js';
 import { buscarPorDOI } from './utils/buscador-crossref.js';
+import { fichaArxiv } from './utils/buscador-arxiv.js';
+import { cduDeArxiv, materiasDeArxiv, tipoArxiv } from './utils/arxiv-id.js';
+import { idiomaDeTexto } from './utils/idioma-texto.js';
+import { mismoTituloLibro } from './utils/titulo-libro.js';
+import { autoresConAncla } from './utils/huecos-autoridad.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { esTituloArtefacto, esAutorArtefacto } from './utils/parsear-nombre.js';
 import { depurarAutores } from './utils/autor-normalizar.js';
@@ -63,6 +68,49 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     };
     if (sinopsisEpub) documento.sinopsis = sinopsisEpub;
     delete documento.sinopsis_nativa;
+
+    // ── ARXIV = pivote del PREPRINT (lector-pdf lo lee de la marca lateral, del Title o del nombre del fichero). La
+    //    ficha de arXiv la escribió el autor al subirlo: título, autores, resumen, categorías (→ CDU sin IA), año y,
+    //    si salió en una revista, su DOI, que el bloque siguiente resuelve en Crossref (revista de origen + ISSN).
+    //    El título de arXiv sustituye al del nombre del fichero; los autores, con ancla (no se pierden coautores).
+    //    Sin ISBN propio, a un preprint no se le busca en los catálogos de LIBROS (más abajo): por el título
+    //    «Fields» solo se encontraría un libro homónimo. Degrada en silencio: sin respuesta, queda el identificador. ──
+    const esPreprint = !!documento.arxiv_id && !datosBase.isbn_propio;
+    if (documento.arxiv_id) {
+        const fa = await fichaArxiv(documento.arxiv_id);
+        documento.arxiv = { id: documento.arxiv_id, ...(documento.arxiv_version ? { version: documento.arxiv_version } : {}) };
+        if (fa?.titulo) {
+            if (!primerValido(documento.titulo) || !mismoTituloLibro(documento.titulo, fa.titulo)) {
+                if (primerValido(documento.titulo)) documento.alertas_agente.push(`Título «${String(documento.titulo).slice(0, 60)}» sustituido por el de arXiv.`);
+                documento.titulo = fa.titulo;
+            }
+            const anc = autoresConAncla(Array.isArray(documento.autores) ? documento.autores : [], fa.autores);
+            if (anc.modo !== 'igual') documento.autores = anc.nombres;
+            documento.sinopsis    = primerValido(documento.sinopsis, fa.sinopsis);
+            documento.año_edicion = primerValido(documento.año_edicion, fa.año);
+            documento.doi         = primerValido(documento.doi, fa.doi);
+            documento.idioma      = primerValido(documento.idioma, idiomaDeTexto(`${fa.titulo}. ${fa.sinopsis || ''}`, { minimo: 8 }));
+            const materias = materiasDeArxiv(fa.categorias);
+            if (materias.length) documento.palabras_clave = [...new Set([...(documento.palabras_clave || []), ...materias])];
+            const cdu = cduDeArxiv(fa.categorias);
+            if (cdu && !primerValido(documento.cdu)) { documento.cdu = cdu; documento.cdu_fuente = 'arxiv'; }
+            // Con la ficha se sabe si salió en una revista: entonces es un artículo aunque sea largo.
+            if (esPreprint && ['articulo', 'libro'].includes(documento.tipo_recurso)) {
+                documento.tipo_recurso = tipoArxiv({ paginas: documento.paginas || fa.paginas, enRevista: !!(fa.journal_ref || fa.doi) });
+            }
+            Object.assign(documento.arxiv, {
+                version_ultima: fa.version,
+                categorias: fa.categorias,
+                ...(fa.comentario ? { comentario: fa.comentario } : {}),
+                ...(fa.journal_ref ? { journal_ref: fa.journal_ref } : {}),
+                ...(fa.fecha ? { fecha: fa.fecha } : {}),
+                url: fa.url,
+            });
+            documento.alertas_agente.push(`Metadata resuelta por arXiv (${documento.arxiv_id}${cdu ? `, CDU ${cdu} por sus categorías` : ''}).`);
+        } else if (fa === null) {
+            documento.alertas_agente.push(`arXiv no respondió: queda el identificador ${documento.arxiv_id} (scripts/completar-arxiv.js lo completa).`);
+        }
+    }
 
     // ── DOI = pivote del ARTÍCULO (Crossref). Es al artículo lo que el Fichero-por-ISBN al libro: resuelve el DOI
     //    a su metadata AUTORITATIVA (título real, autores, revista de origen + ISSN, año, vol/nº/pp). Sustituye el
@@ -238,8 +286,9 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
         // Para una revista, la CDU se razona con el nombre de la CABECERA, no con el del número («Muy Historia»,
         // no «Muy Historia nº 57 – marzo 2014»).
         : await buscarMetadatosExternos(esRevistaPura ? (tituloCabecera(documento.titulo) || documento.titulo) : documento.titulo,
-            autorPrincipal, imagen, {
+            autorPrincipal, esPreprint ? null : imagen, {
             revista: esRevistaPura,
+            sinCatalogos: esPreprint ? `Preprint de arXiv ${documento.arxiv_id}` : null,
             incluirSinopsis: faltaSinopsis && !esRevistaPura,
             incluirCdu: faltaCdu && !cduDeGuia,
             isbnsArchivo: [...isbnsArchivo],
@@ -570,7 +619,7 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
     // OJO: _portadas_remotas lo necesita el orquestador y lo elimina él después.
     // isbn_candidatos / issn_candidatos SE PERSISTEN (todos los identificadores vistos, para búsquedas más
     // refinadas). El resto son de proceso y no se guardan.
-    const CAMPOS_INTERNOS = ['cdu_impresa', 'cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_propio', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado', '_cipTitulo', '_cipAutor', '_cipSub'];
+    const CAMPOS_INTERNOS = ['cdu_impresa', 'cubierta_base64', 'imagen_adicional', 'sinopsis_nativa', 'texto_legible', '_error', 'isbn_propio', 'esFechada', 'isbns_rol', 'cip', 'comic_serie', 'muestra_paginas', '_isbnBloqueado', '_cipTitulo', '_cipAutor', '_cipSub', 'arxiv_id', 'arxiv_version'];
     for (const k of CAMPOS_INTERNOS) delete documento[k];
     // Un ISBN DESCARTADO (de otro libro: utils/isbn-ajeno.js) nunca se guarda, aunque alguna fuente lo devuelva.
     if (documento.isbn && (documento.isbns_descartados || []).some((x) => variantesISBN(x).includes(documento.isbn))) {

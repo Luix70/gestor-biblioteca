@@ -3657,6 +3657,13 @@ function pintarDoc(r, ctx) {
     _doi: d.doi
       ? `<a class="rowlink" href="https://doi.org/${esc(d.doi)}" target="_blank" rel="noopener" title="Abrir el DOI en doi.org">${esc(d.doi)} ↗</a> <button class="rbtn copybtn" data-copy="${esc(d.doi)}" title="Copiar el DOI">📋</button>`
       : null,
+    // arXiv (identificador del PREPRINT): abre su página en arxiv.org; con sus categorías y, si salió en una revista,
+    // la referencia que dio el autor.
+    _arxiv: d.arxiv && d.arxiv.id
+      ? `<a class="rowlink" href="${esc(d.arxiv.url || 'https://arxiv.org/abs/' + d.arxiv.id)}" target="_blank" rel="noopener" title="Abrir el preprint en arxiv.org">${esc(d.arxiv.id)}${d.arxiv.version ? 'v' + esc(d.arxiv.version) : ''} ↗</a> <button class="rbtn copybtn" data-copy="${esc(d.arxiv.id)}" title="Copiar el identificador arXiv">📋</button>`
+        + ((d.arxiv.categorias || []).length ? ` <span class="muted" style="font-size:12px">[${esc(d.arxiv.categorias.join(', '))}]</span>` : '')
+        + (d.arxiv.journal_ref ? `<br><span class="muted" style="font-size:12px">${esc(d.arxiv.journal_ref)}</span>` : '')
+      : null,
     _revista: d.revista ? esc(d.revista) : null,
     _cita:
       d.articulo && (d.articulo.volumen || d.articulo.numero || d.articulo.paginas)
@@ -3772,6 +3779,7 @@ function pintarDoc(r, ctx) {
     ['ISBN probable', !d.isbn && d.isbn_probable ? `<span class="mono">${esc(d.isbn_probable)}</span> <span class="muted">· sin confirmar</span>` : null],
     ['ISSN', especiales._issn],
     ['DOI', especiales._doi],
+    ['arXiv', especiales._arxiv],
     ['Cita', especiales._cita],
   ]
     .filter((p) => p[1])

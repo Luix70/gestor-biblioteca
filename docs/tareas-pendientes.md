@@ -26,6 +26,18 @@
 - [ ] Revisar a mano la selección «Obras partidas por revisar» (270 pares: tomos repetidos, sin editorial que lo
       confirme, totales distintos…) y fusionar en Obras con «⛙ Fusionar» las que lo sean
 
+### 0.56 Preprints de arXiv catalogados como revista (10-nov) — en el NAS (mueve carpetas)
+- [ ] Desplegar y `sudo docker exec -t gestor-biblioteca node scripts/setup-mongo.js` (índice `arxiv.id`)
+- [ ] Copia de la base
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/completar-arxiv.js` — revisar la lista (medido en lectura:
+      49 documentos, todos en arXiv; 42 dejan de ser revista y salen de su cabecera falsa, 32 CDU nuevas)
+- [ ] `… --ejecutar --limite 3`, mirar esos tres en el panel (título, autores, carpeta en articulos/ o libros/), y
+      `… --ejecutar` para el resto. Revisar la selección «Completados con arXiv»
+- [ ] Opcional: `… --buscar-en-ficheros` (seco: lee la 1.ª página de ~2.100 PDF sin ISBN; guarda guion) y
+      `… --buscar-en-ficheros --ejecutar` para los que lleven la marca con un título que no la delataba
+- [ ] Decidir si la CDU de las categorías de arXiv debe ganar a una CDU deducida por la IA de otra rama (hoy no: 13 se
+      quedan con la suya; 4 de hep-th/gr-qc en 537 «electricidad» en vez de 539.12/530.12)
+
 ### 0.6 PreProceso, fase 1 (3-nov)
 - [x] Crear en File Station la carpeta `BIBLIOTECA DIGITAL/PreProceso` (antes de desplegar: si la crea Docker, es de root)
 - [x] Desplegar (cambia docker-compose.yml: el script ya hace down -v / up --build). No interrumpir la construcción

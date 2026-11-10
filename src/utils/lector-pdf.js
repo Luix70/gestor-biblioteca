@@ -7,6 +7,7 @@ import { idiomaDeTexto } from './idioma-texto.js';
 import { extraerISBNsConRol, parsearVolumen } from './multivolumen.js';
 import { parsearBloqueCatalogacion, cduImpresa } from './cip.js';
 import { timeoutPoppler } from './timeout-poppler.js';
+import { arxivDeTexto, arxivDeTitulo, arxivDeNombre } from './arxiv-id.js';
 
 const execFileP = promisify(execFile);
 
@@ -205,6 +206,9 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         if (total > 0) {
             const hastaFrente = Math.min(PAG_FRENTE, total);
             texto += await pdfText(rutaArchivo, 1, hastaFrente, to);
+            // Solo el FRENTE: la marca lateral de arXiv va en la primera página; las referencias del final citan
+            // otros preprints, que no son este documento.
+            datos.texto_frente = texto;
             const desdeFondo = Math.max(hastaFrente + 1, total - PAG_FONDO + 1);
             if (desdeFondo <= total) {
                 texto += await pdfText(rutaArchivo, desdeFondo, total, to);
@@ -310,6 +314,16 @@ export async function extraerMetadatosPdf(rutaArchivo) {
         // tal cual; más adelante resuelve la metadata por Crossref y ayuda a clasificar 'articulo'. No fuerza tipo.
         const doi = extraerDOI([texto, info.subject, info.keywords, info.title, nombre].filter(Boolean).join('\n'));
         if (doi) datos.doi = doi;
+
+        // IDENTIFICADOR ARXIV (pivote del preprint, como el DOI del artículo): la marca lateral de la primera página
+        // («arXiv:hep-th/9912205v3 [hep-th] 23 Aug 2005»), o un Title/nombre de fichero que lo sea. La ficha la
+        // resuelve el enriquecedor (buscador-arxiv) y el orquestador decide artículo/libro.
+        const arxiv = arxivDeTexto(datos.texto_frente || texto) || arxivDeTitulo(info.title) || arxivDeNombre(nombre);
+        if (arxiv) {
+            datos.arxiv_id = arxiv.id;
+            if (arxiv.version) datos.arxiv_version = arxiv.version;
+        }
+        delete datos.texto_frente;
 
         // IDIOMA por el texto, si nada lo dijo: sin esto caía al «es» por defecto (un libro de Wrox en inglés quedaba
         // en español). Solo con capa de texto útil y una lengua que gane con claridad (utils/idioma-texto.js).

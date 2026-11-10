@@ -14,6 +14,7 @@ import {
 } from './utils/inspeccion.js';
 import { restaurar, reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { normalizarDOI } from './utils/buscador-crossref.js';
+import { normalizarArxiv } from './utils/arxiv-id.js';
 import { variantesISBN, validarISSN } from './utils/identificadores.js';
 import { verificarPasswordAdmin, firmarCompartir, validarCompartir, validar, tokenDe, hayAdminBootstrap, listarUsuarios as listarUsuariosArranque } from './auth.js';
 import { registrar, ipDe, registrarVista, registrarDescarga, debeRegistrar, listarActividad, resumenActividad, usuariosDelRegistro, ultimoAccesoPorUsuario } from './utils/registro-actividad.js';
@@ -1109,6 +1110,9 @@ export function rutasPanel() {
                 // (los DOI se guardan normalizados en minúsculas).
                 const qDoi = normalizarDOI(q);
                 if (qDoi) or.push({ doi: qDoi });
+                // Identificador arXiv («hep-th/9912205», «arXiv:0806.1234v1», la URL de arxiv.org): campo `arxiv.id`.
+                const qArxiv = normalizarArxiv(q);
+                if (qArxiv) or.push({ 'arxiv.id': qArxiv.id });
                 } // fin del modo normal (no #kw)
                 // Con q SIEMPRE filtramos por $or; si quedó vacío (FTS sin aciertos y sin identificador) →
                 // "sin resultados" en vez de devolver el catálogo entero.

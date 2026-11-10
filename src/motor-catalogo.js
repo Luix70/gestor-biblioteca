@@ -41,7 +41,7 @@ export async function buscarDocPorHashAnterior(hash) {
  */
 function calcularActualizacion(existente, nuevo) {
     const set = {};
-    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'coleccion_fuente', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza', 'orden_estanteria', 'doi', 'revista', 'articulo'];
+    const CAMPOS = ['titulo', 'subtitulo', 'isbn', 'issn', 'idioma', 'cdu', 'dewey', 'lcc', 'lccn', 'sinopsis', 'editorial', 'año_edicion', 'portada', 'ubicacion', 'tipo_recurso', 'volumen_numero', 'numero_edicion', 'nombre_archivo', 'hash_contenido', 'mes_publicacion', 'numero_issue', 'clave_numero', 'coleccion', 'coleccion_nombre', 'coleccion_numero', 'coleccion_numero_auto', 'coleccion_fuente', 'obra', 'obra_titulo', 'volumen_titulo', 'isbn_obra', 'paginas', 'naturaleza', 'orden_estanteria', 'doi', 'revista', 'articulo', 'arxiv'];
 
     // (1) Rellenar huecos (añadir información donde FALTA nunca borra).
     for (const c of CAMPOS) if (vacio(existente[c]) && !vacio(nuevo[c])) set[c] = nuevo[c];
@@ -504,6 +504,10 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 } else if (docFinal.titulo && docFinal.año_edicion) {
                     filtro = { titulo: docFinal.titulo, año_edicion: docFinal.año_edicion };
                 }
+            } else if (docFinal.arxiv?.id && !docFinal.isbn) {
+                // — Preprint de arXiv: su identidad es el identificador arXiv (lo comparten todas sus versiones; un
+                //   fichero distinto, p. ej. otra versión, se inserta aparte por la guarda de nombre_archivo de abajo).
+                filtro = { 'arxiv.id': docFinal.arxiv.id };
             } else if (docFinal.tipo_recurso === 'articulo' && docFinal.doi) {
                 // — Artículo: su identidad es el DOI (como el ISBN del libro). Mismo DOI = mismo artículo.
                 filtro = { doi: docFinal.doi };

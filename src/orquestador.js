@@ -18,6 +18,7 @@ import { leerWord } from './utils/lector-word.js';
 import { extraerISBNs } from './utils/lector-pdf.js';
 import { pareceSerieLibros, esEditorialDeLibros, mesesDeNombre, numeroDeNombre } from './utils/revistas.js';
 import { clasificarTipo, clasificarPorPaginas } from './utils/discriminador.js';
+import { tipoArxiv } from './utils/arxiv-id.js';
 import { interpretarIdentificadores } from './utils/interpretar-identificadores.js';
 import { extraerMetadatosComic } from './utils/lector-comic.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
@@ -478,8 +479,17 @@ export async function procesarRecurso(entrada) {
         // propio ⇒ artículo. Un DOI de LIBRO Springer lleva el ISBN incrustado (…/978…) → queda libro (no artículo).
         const doiDigitos = String(datosBase.doi || '').replace(/[^0-9]/g, '');
         const articuloDoi = !!datosBase.doi && !datosBase.isbn_propio && !/97[89]\d{7}/.test(doiDigitos);
-        const clasif = clasificarTipo({ ...interp.senales, articuloDoi, ...hintPerfil });
+        // PREPRINT DE ARXIV (identificador propio, como el DOI): sin ISBN propio no es un número de revista aunque la
+        // marca lateral lleve una fecha (10-nov: 49 entraron así, cada uno con su cabecera falsa). Es un artículo, o
+        // un LIBRO si es largo (apuntes, tratados: arxiv-id·tipoArxiv); el enriquecedor lo revisa con la ficha.
+        const articuloArxiv = !!datosBase.arxiv_id && !datosBase.isbn_propio;
+        const clasif = clasificarTipo({ ...interp.senales, articuloDoi: articuloDoi || articuloArxiv, ...hintPerfil });
         tipo_recurso = clasif.tipo_recurso;
+        if (articuloArxiv) {
+            tipo_recurso = tipoArxiv({ paginas: datosBase.paginas });
+            datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
+                `Preprint de arXiv ${datosBase.arxiv_id} (${datosBase.paginas || '?'} págs.) → ${tipo_recurso}.`];
+        }
         // Revista por su nombre: la fecha y el número que dice el nombre rellenan los huecos (la clave del número).
         if (tipo_recurso === 'revista' && revistaPorNombre) {
             const { anio, mes, numero } = porNombre.datos || {};
@@ -490,10 +500,10 @@ export async function procesarRecurso(entrada) {
         }
         // El ISBN del CUERPO de un artículo es de un LIBRO CITADO en las referencias, no del artículo: se descarta
         // (si no, se usaría como identidad y resolvería el libro equivocado en el Fichero/APIs). El pivote es el DOI.
-        if (tipo_recurso === 'articulo' && !datosBase.isbn_propio) {
+        if ((tipo_recurso === 'articulo' || articuloArxiv) && !datosBase.isbn_propio) {
             delete datosBase.isbn; datosBase.isbn_candidatos = [];
             datosBase.alertas_agente = [...(datosBase.alertas_agente || []),
-                `Artículo detectado por DOI ${datosBase.doi}; ISBN(s) del cuerpo descartados (referencias).`];
+                `${articuloArxiv ? `Preprint de arXiv ${datosBase.arxiv_id}` : `Artículo detectado por DOI ${datosBase.doi}`}; ISBN(s) del cuerpo descartados (referencias).`];
         }
         isbnDelArchivo = !!datosBase.isbn_propio; // solo el ISBN PROPIO (no el del cuerpo) cuenta como fiable
         // LIBRO con ISSN de SERIE: el ISBN identifica el LIBRO, el ISSN identifica su COLECCIÓN. Se da cuando
@@ -606,7 +616,8 @@ export async function procesarRecurso(entrada) {
             // («…Jan.2010.eBook-ELOHiM»), no un número mensual. Sin esta guarda, un libro con su ISBN en el
             // bloque CIP («Oxford.Extreme.Politics.Jan.2010…») se catalogaba como revista y PERDÍA su ISBN
             // (descartado a la espera de un ISSN inexistente), creando además una cabecera/colección falsa.
-            const señalFuerteLibro = !!datosBase.cip || !!datosBase.isbn_propio
+            // (Un preprint de arXiv tampoco es un número: su identificador propio manda, como el ISBN/CIP.)
+            const señalFuerteLibro = !!datosBase.cip || !!datosBase.isbn_propio || !!datosBase.arxiv_id
                 || (Array.isArray(datosBase.isbns_rol) && datosBase.isbns_rol.length > 0);
             if (fechaNombre.esFechada && !señalFuerteLibro) {
                 datosBase.año_edicion = fechaNombre.año_edicion;
@@ -631,7 +642,8 @@ export async function procesarRecurso(entrada) {
         // alta resolución (la visión lee bien un recorte enfocado). No gasta visión si el id propio ya está.
         // En una tirada GUIADA (cabecera + ISSN comprobado en la guía) solo el intento LOCAL (zxing, gratis): la visión
         // gastaría una llamada por número para leer el ISSN que la guía ya trae.
-        if (!datosBase.issn && (!datosBase.isbn || tipo_recurso === 'revista')) {
+        // (Un preprint de arXiv no lleva código de barras: su identificador ya está.)
+        if (!datosBase.issn && !datosBase.arxiv_id && (!datosBase.isbn || tipo_recurso === 'revista')) {
             const bc = await leerCodigoBarrasPorVision(rutas[0], datosBase.paginas, renders, { soloLocal: revistaGuiada });
             if (bc) {
                 if (bc.issn) datosBase.issn = bc.issn;

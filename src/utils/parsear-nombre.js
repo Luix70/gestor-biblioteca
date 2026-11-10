@@ -4,6 +4,7 @@
 //   - el nombre ES un ISBN (p. ej. "0071769234.pdf") → identificador, NO título
 
 import { validarISBN } from './identificadores.js';
+import { arxivDeTitulo } from './arxiv-id.js';
 
 // Extensiones de ficheros de maquetación/composición/fuente que delatan un título-artefacto: el
 // productor del PDF grabó como "Title" el nombre del fichero fuente (TeX/DVI, InDesign, Quark,
@@ -68,6 +69,10 @@ export function esTituloArtefacto(s) {
     // («10.1007@978-3-319-38992-9», «10.1007/978-…», o URL-codificado «10.1007%40978-…»). Un DOI NO es un
     // título — hay que caer al Fichero/APIs por su ISBN (que va DENTRO del DOI). Caso real de este proyecto.
     if (/^10\.\d{3,}\s*[/@%]/.test(t)) return true;                 // DOI (10.<registrante>/… o @/%40)
+    // La MARCA LATERAL de arXiv («arXiv:hep-th/9912205 v3   23 Aug 2005») o un identificador arXiv suelto
+    // («math.CO/9902004»): 49 preprints se titularon así y la fecha de la marca los hizo pasar por revistas (10-nov).
+    // El título lo da arXiv por ese identificador (buscador-arxiv).
+    if (arxivDeTitulo(t)) return true;
     // El "título" es en realidad un ISBN con poco más (caso real de metadatos MOBI/AZW: alguien grabó el
     // ISBN del nombre como título, p. ej. «0393333590 (N)»). Un título real no es un ISBN → al ISBN/APIs.
     {
