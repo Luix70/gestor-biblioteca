@@ -2612,6 +2612,18 @@ de ficheros clasificado por CDU.
       trae, idioma). En la ficha, «🌐 Leer libro» lo abre en una pestaña nueva. Las paginas se sirven aisladas del
       panel (sandbox): sus scripts funcionan pero no ven tu sesion. Requiere pasar una vez scripts/setup-mongo.js
       (formato 'html'); sin eso se guarda como formato material, con la misma ficha.
+      Desde el 10-nov el Vigilante tambien lo reconoce SIN guia (lo que llega sin pasar por PreProceso, o se queda
+      atras cuando los PDF de su carpeta ya se catalogaron).
+    · LO QUE NO ES UN DOCUMENTO PERO SI UNA OBRA (10-nov): antes se quedaba en el Inbox para siempre, sin aviso.
+      Ahora recibe UNA ficha de material, conservada entera: una carpeta de PAGINAS WEB guardadas (un articulo en
+      varias .htm, un dosier de .mht, la web de una patente) y un .txt/.lit suelto que es un libro (Galen, «On the
+      Natural Faculties»; el .txt va dentro de una carpeta con su nombre). Una carpeta de materia que solo agrupa
+      varios dosieres da una ficha por dosier, no una para todos. La CDU de estas fichas (y de las transmedia) es
+      la materia de la carpeta guiada; si no hay, 000 para que el Conformador la afine — antes salia 82
+      (literatura) para todo, p. ej. el libro de fisica de Cutnell.
+    · LIBRO POR CAPITULOS CON UN CAPITULO DAÑADO (10-nov): si qpdf no puede coser porque una parte tiene el
+      indice roto, se repara una COPIA de esa parte y se cose con ella; los originales viajan intactos a
+      «Desglose/». Si la reparacion perderia paginas, no se cose y el libro sigue esperando (Oppenheim).
     · INSPECCION CON IA, REDES NUEVAS (3-nov): lo que no es catalogable recibe guia «omitir» con su aviso; una
       «obra» de capitulos pasa a «desglose»; una «obra» de un solo documento queda sin guia; un libro en HTML va
       «intacta». En el Inbox, una guia «obra» sin documentos ya no se salta en silencio: avisa una vez.

@@ -93,7 +93,48 @@ export async function unirPdfs(rutas, destino, { timeout = TIEMPO } = {}) {
             if (paginas) return { ok: true, paginas, bytes, partes: rutas.length, aviso: String(e.stderr || '').slice(0, 300) };
         }
         // Solo stderr: e.message empieza por la línea de órdenes entera, que con 40 rutas tapaba la causa real.
-        return { ok: false, motivo: String(e.stderr || '').trim().slice(-300) || `qpdf terminó con código ${e.code}` };
+        // `stderr` entero aparte: unirPdfsReparando busca en él qué partes están dañadas.
+        const stderr = String(e.stderr || '').trim();
+        return { ok: false, motivo: stderr.slice(-300) || `qpdf terminó con código ${e.code}`, stderr: stderr.slice(-20000) };
+    }
+}
+
+/**
+ * COSE como unirPdfs, pero si qpdf no puede porque alguna PARTE está dañada (xref roto, «invalid object in page
+ * tree»), REPARA esas partes en copias temporales y vuelve a coser con ellas. Los originales no se tocan (siguen
+ * viajando tal cual al «Desglose/» del libro).
+ *
+ * Una copia reparada solo se usa si la reparación no es SOSPECHOSA (mismas páginas que se veían antes, sin
+ * adelgazar): coser un capítulo mutilado daría un libro al que le faltan páginas sin que nadie lo supiera. Si una
+ * parte no se puede reparar bien, el resultado es el fallo original y el libro sigue esperando.
+ * Caso que lo motivó (10-nov): Oppenheim «Discrete-Time Signal Processing», 17 capítulos, uno con el xref roto.
+ */
+export async function unirPdfsReparando(rutas, destino, opciones = {}) {
+    const r = await unirPdfs(rutas, destino, opciones);
+    if (r.ok || r.sinQpdf || r.tiempoAgotado) return r;
+
+    // Las partes culpables: las que qpdf nombra en sus mensajes. Si no nombra ninguna, se prueban todas.
+    const nombradas = rutas.filter((p) => (r.stderr || r.motivo || '').includes(p));
+    const culpables = nombradas.length ? nombradas : rutas;
+    const tmp = await fs.mkdtemp(path.join(path.dirname(destino), '.reparadas-'));
+    try {
+        const sustitutas = new Map();
+        for (const parte of culpables) {
+            const copia = path.join(tmp, `${sustitutas.size}-${path.basename(parte)}`);
+            const inf = await repararPdf(parte, copia, opciones);
+            if (!inf.ok || inf.sospecha) {
+                // Con TODAS a prueba (qpdf no dijo cuál), una sana que no mejora no estorba: se usa el original.
+                if (!nombradas.length) continue;
+                return { ...r, motivo: `${r.motivo} · «${path.basename(parte)}» no se pudo reparar sin perder páginas (${inf.motivoSospecha || inf.motivo})` };
+            }
+            sustitutas.set(parte, copia);
+        }
+        if (!sustitutas.size) return r;
+        await fs.rm(destino, { force: true }).catch(() => {});
+        const r2 = await unirPdfs(rutas.map((p) => sustitutas.get(p) || p), destino, opciones);
+        return r2.ok ? { ...r2, reparadas: [...sustitutas.keys()].map((p) => path.basename(p)) } : r2;
+    } finally {
+        await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
     }
 }
 

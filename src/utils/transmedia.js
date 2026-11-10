@@ -198,13 +198,24 @@ function tituloDeArchivo(nombre) {
     return path.basename(nombre, path.extname(nombre)).replace(/\s*\[\d+\]\s*$/, '').trim();
 }
 
-/** CDU deducida (editable después). Heurística ligera por palabras clave; por defecto 82 (literatura). */
-function deducirCdu(nombreColeccion, muestraNombres) {
+/** CDU por palabras clave del nombre (lecturas graduadas de idiomas), o null si ninguna encaja. */
+function cduPorPalabras(nombreColeccion, muestraNombres) {
     const t = (nombreColeccion + ' ' + muestraNombres.join(' ')).toLowerCase();
     if (/english|inglés|graded reader|bookworms|readers?\b/.test(t)) return '811.111'; // inglés (lengua)
     if (/français|french/.test(t)) return '811.133.1';
     if (/deutsch|german/.test(t)) return '811.112.2';
-    return '82'; // literatura / narrativa, por defecto
+    return null;
+}
+
+/**
+ * CDU deducida (editable después). Manda la MATERIA de la carpeta guiada (la de ella o la de una carpeta de más
+ * arriba); después, las palabras clave; y si nada, `porDefecto`. Antes no se miraba la guía y todo lo que no era una
+ * lectura graduada salía con 82 (literatura): 10-nov, el libro de física «Cutnell, Physics 7e HTML» en 8/82.
+ */
+async function deducirCdu(dirOrigen, nombreColeccion, muestraNombres, porDefecto = '82') {
+    const perfil = await perfilHeredado(dirOrigen, DIR_INBOX).catch(() => ({}));
+    return modernizarCDU(String(perfil?.materia_cdu || '').trim())
+        || cduPorPalabras(nombreColeccion, muestraNombres) || porDefecto;
 }
 
 /**
@@ -339,7 +350,7 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
         else sinCatalogar.push(f.rel);
     }
 
-    const cdu = deducirCdu(nombreColeccion, pdfs.slice(0, 30).map((f) => f.nombre));
+    const cdu = await deducirCdu(dirOrigen, nombreColeccion, pdfs.slice(0, 30).map((f) => f.nombre));
     return {
         raiz, nombreColeccion, cdu, idioma,
         totales: {
@@ -756,7 +767,8 @@ export async function ingestarIntacta(dirOrigen, opts = {}) {
     if (html) return ingestarLibroHtml(dirOrigen, { ...opts, entrada: html.entrada });
     return ingestarBloqueVerbatim(dirOrigen, {
         ...opts, naturaleza: 'material', rama: 'intacta', nombreDefecto: 'Carpeta',
-        cdu: deducirCdu(path.basename(dirOrigen), []),
+        // Sin materia ni palabras clave: «000», que el Conformador afina por el título (no «82», literatura).
+        cdu: await deducirCdu(dirOrigen, path.basename(dirOrigen), [], '000'),
     });
 }
 

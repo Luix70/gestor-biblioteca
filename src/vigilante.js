@@ -19,7 +19,7 @@ import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSo
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
 import { esAudio } from './utils/lector-audio.js';
-import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
+import { esDocumentoLeible, esMaterialNotable } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf suelto (Calibre): metadatos + portada referenciada
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, perfilHeredado, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
@@ -28,7 +28,8 @@ import { AVISO_NO_CATALOGABLE, examinarCatalogable, escribirAvisoNoCatalogable }
 import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js';
 import { partesContenidasEnLibro } from './utils/partes-contenidas.js';
 import { convertirAPdf, hayLibreOffice, EXT_CONVERTIBLES } from './utils/convertir-a-pdf.js'; // libro + su desglose
-import { unirPdfs, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
+import { unirPdfsReparando, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
+import { esLibroHtml, esCarpetaWeb } from './utils/libro-html.js'; // libros HTML y páginas web guardadas → «intacta»
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js'; // carpeta de páginas escaneadas → PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB, esFalloDeConexionMongo } from './database.js';
@@ -594,6 +595,53 @@ async function tieneDescendientesGuiados(dir, nivel = 8) {
     return false;
 }
 
+/**
+ * ¿Es `ruta` un fichero suelto que es una OBRA sin lector propio (un libro en .txt, un .lit…)? Lo decide la criba de
+ * siempre (criba-material: formato documental, ni ruido ni un .txt diminuto). Ha de llevar un minuto quieto: no se
+ * envuelve un fichero que aún se está copiando.
+ */
+async function esMaterialSuelto(ruta) {
+    const nombre = path.basename(ruta);
+    if (nombre === NOMBRE_GUIA || esValida(nombre)) return false;
+    const st = await fs.stat(ruta).catch(() => null);
+    if (!st?.isFile() || Date.now() - st.mtimeMs < 60000) return false;
+    return esMaterialNotable(nombre, st.size);
+}
+
+/**
+ * ¿Hay, directamente en `dir`, algo que no es un documento pero sí se cataloga: un libro HTML, una carpeta de páginas
+ * web o material notable suelto? Decide si una carpeta sin documentos se recorre por dentro.
+ */
+async function tieneHijosSinDocumento(dir) {
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+    for (const e of entradas) {
+        if (ignorarEntrada(e.name)) continue;
+        const sub = path.join(dir, e.name);
+        if (e.isDirectory() ? (await esLibroHtml(sub) || await esCarpetaWeb(sub)) : await esMaterialSuelto(sub)) return true;
+    }
+    return false;
+}
+
+/**
+ * Mete el fichero `f` en una carpeta nueva con su nombre (sin extensión, «_» → espacio), junto a donde está, para que
+ * vaya «intacta» como cualquier carpeta. Devuelve la carpeta, o null si no se pudo (el fichero se queda donde estaba).
+ */
+async function envolverEnCarpeta(f) {
+    const base = path.basename(f, path.extname(f)).replace(/_/g, ' ').replace(/\s+/g, ' ').trim() || 'Material';
+    let destino = path.join(path.dirname(f), base);
+    for (let i = 2; await rutaExiste(destino); i++) destino = path.join(path.dirname(f), `${base} (${i})`);
+    try {
+        await fs.mkdir(destino);
+        await fs.rename(f, path.join(destino, path.basename(f)));
+        return destino;
+    } catch (err) {
+        console.warn(`  ⚠️  «${path.basename(f)}»: no se pudo preparar para catalogar (${err.message}); se deja como está.`);
+        await fs.rmdir(destino).catch(() => {});
+        return null;
+    }
+}
+
 /** Cuenta, recursivamente, ficheros de AUDIO y de DOCUMENTO bajo `dir` (para decidir qué manda dentro). */
 async function contarPorTipo(dir, nivel = 6) {
     let audio = 0, docs = 0;
@@ -984,6 +1032,7 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
     catch { return; }
 
     const sueltos = [];
+    const notables = [];   // .txt/.lit… que son una obra (ver abajo)
 
     for (const e of entradas) {
         if (ignorarEntrada(e.name)) continue; // ocultos + carpetas de sistema (@eaDir, #recycle...)
@@ -1055,6 +1104,16 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 // es una colección de ficheros de VARIOS tipos que se catalogan por separado). Enrutarla por
                 // transmedia era el fallo del test 67: su análisis no cuenta las imágenes, así que una carpeta
                 // de 142 páginas escaneadas salía con CERO documentos y quedaba invisible.
+                unidades.push({ esIntacta: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
+            // LIBRO EN HTML o PÁGINAS WEB GUARDADAS sin guía que diga otra cosa (gemelo de PreProceso, que les pone la
+            // guía «intacta»): se conservan enteras con UNA ficha — de libro si es un libro HTML. Sin esto, lo que
+            // llegaba sin pasar por PreProceso, o se quedaba atrás al catalogar los PDF de su carpeta, no tenía ningún
+            // documento que catalogar y esperaba en el Inbox para siempre sin un solo aviso (10-nov: «The Elegant
+            // Universe», «Lucifer Principle», «Fogal patents»…).
+            if ((!guiaCarpeta?.accion || (guiaCarpeta.accion === 'normal' && guiaCarpeta.perfil?.origen === 'agente'))
+                && (await esLibroHtml(ruta) || await esCarpetaWeb(ruta))) {
                 unidades.push({ esIntacta: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
@@ -1266,6 +1325,11 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 if (imagenes.length > 0) {
                     dropsADisolver.add(ruta);
                     unidades.push({ rutas: filtrarDuplicadosNombre(imagenes), esImagenes: true, carpeta: ruta, conservarCarpeta: false });
+                } else if (await tieneHijosSinDocumento(ruta)) {
+                    // Ningún documento, pero dentro hay libros HTML, páginas web o .txt/.lit que son una obra: se
+                    // recorre por dentro para que cada uno reciba su ficha (antes la carpeta se saltaba entera).
+                    dropsADisolver.add(ruta);
+                    await clasificarDirectorio(ruta, false, unidades);
                 }
             }
         } else if (esValida(e.name) && !EXT_COMPRIMIDO.includes(path.extname(e.name).toLowerCase())) {
@@ -1274,7 +1338,18 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
             // allí y debe ESPERAR al próximo escaneo — sin esta guarda se colaba aquí como unidad y se
             // catalogaba como «fmt:zip» sin contenido (perdía el escaneo real). Caso de reprocesado.
             sueltos.push(ruta);
+        } else if (await esMaterialSuelto(ruta)) {
+            notables.push(ruta);
         }
+    }
+    // MATERIAL NOTABLE SUELTO (un libro en .txt, un .lit): ningún lector lo abre, pero es una obra, no una nota. Igual
+    // que dentro de una colección transmedia, recibe UNA ficha de material: se envuelve en una carpeta con su nombre y
+    // va «intacta». Antes se quedaba en el Inbox para siempre (10-nov: Galen, «On the Natural Faculties», en .txt).
+    // En la vista previa no se mueve nada: solo se anuncia.
+    for (const f of notables) {
+        if (modoPlan) { unidades.push({ esIntacta: true, carpeta: f, rutas: [f] }); continue; }
+        const envoltorio = await envolverEnCarpeta(f);
+        if (envoltorio) unidades.push({ esIntacta: true, carpeta: envoltorio, rutas: [envoltorio] });
     }
     // Sueltos de ESTE directorio. En la raíz: cada uno por su cuenta, sin carpeta. En una carpeta recurrida:
     // agrupados igual (imágenes juntas = un libro; docs por su cuenta), pero LIGADOS a la carpeta para poder
@@ -1800,7 +1875,8 @@ async function materializarDesglosePuro(dir, puro) {
     if (await rutaExiste(path.join(dir, nombre))) nombre = `${path.basename(dir)} (recompuesto).pdf`;
     const destino = path.join(dir, nombre);
     const rutas = puro.partes.map((p) => path.join(dir, ...p.split('/')));   // «Chapters/ch01.pdf» → ruta del sistema
-    const r = await unirPdfs(rutas, destino);
+    // Si una parte está dañada, se cose con una copia reparada de ella (los originales viajan intactos).
+    const r = await unirPdfsReparando(rutas, destino);
     if (!r.ok) {
         await fs.rm(destino, { force: true }).catch(() => {});
         cosidosAplazados.set(dir, Date.now() + COSIDO_REINTENTO_MS);
@@ -1836,7 +1912,8 @@ async function materializarDesglosePuro(dir, puro) {
         await retirarSubcarpetasVaciadas(dir, todas);
         await escribirGuia(dir, { accion: 'libro-material', libro_material: { principal: nombre, ...(capitulos.length ? { capitulos } : {}) } });
         console.log(`  🧵 «${path.basename(dir)}»: DESGLOSE PURO cosido → «${nombre}» (${r.paginas} págs. de ${puro.partes.length} partes`
-            + `${capitulos.length ? `, índice de ${capitulos.length} capítulos` : ''}); originales a «Desglose/».`);
+            + `${capitulos.length ? `, índice de ${capitulos.length} capítulos` : ''}`
+            + `${r.reparadas?.length ? `; reparada(s) para coser: ${r.reparadas.join(', ')}` : ''}); originales a «Desglose/».`);
         return true;
     } catch (err) {
         console.warn(`  ⚠️  desglose puro: no se pudo preparar «${path.basename(dir)}» (${err.message}); se deja como estaba.`);

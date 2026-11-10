@@ -38,6 +38,16 @@
 - [ ] Decidir si la CDU de las categorías de arXiv debe ganar a una CDU deducida por la IA de otra rama (hoy no: 13 se
       quedan con la suya; 4 de hep-th/gr-qc en 537 «electricidad» en vez de 539.12/530.12)
 
+### 0.57 Lo que quedaba en el Inbox (10-nov) — solo desplegar
+- [ ] Desplegar con el Vigilante activo. Lo que había en `Inbox/Science` sale solo (plan medido en lectura: 14 unidades):
+      2 libros HTML (The Elegant Universe, Lucifer Principle), 4 dosieres web (Coler, Bedini, Fogal, 12-volt Guide),
+      7 .txt/.lit (Galen, Feynman, Edison…) como ficha de material, y el Oppenheim por capítulos (se cose reparando
+      `booktext07.pdf`; si la reparación perdiera páginas, sigue esperando y el log lo dice)
+- [ ] Corregir a mano la CDU de «Cutnell, Johnson - Physics 7e HTML» (salió 82; es física, 53) — el arreglo solo
+      vale para lo que entre a partir de ahora
+- [ ] Repasar las fichas de material que salgan con CDU 000 (los .txt de «Sciences and Mathematics»: su guía no
+      trae materia)
+
 ### 0.6 PreProceso, fase 1 (3-nov)
 - [x] Crear en File Station la carpeta `BIBLIOTECA DIGITAL/PreProceso` (antes de desplegar: si la crea Docker, es de root)
 - [x] Desplegar (cambia docker-compose.yml: el script ya hace down -v / up --build). No interrumpir la construcción

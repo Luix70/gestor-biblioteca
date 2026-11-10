@@ -69,3 +69,35 @@ export async function esLibroHtml(dir) {
     if (await contarPaginas(dir, MIN_PAGINAS) < MIN_PAGINAS) return null;
     return { entrada };
 }
+
+// PÁGINAS WEB GUARDADAS (no un libro): las páginas y lo que cuelga de ellas (imágenes, estilos, scripts).
+const RE_PAGINA_WEB = /\.(html?|xhtml|mht|mhtml)$/i;
+const RE_RECURSO_WEB = /\.(jpe?g|gif|png|bmp|svg|webp|ico|css|js|swf|class|txt|xml)$/i;
+const MAX_FICHEROS_WEB = 3000;   // un dosier de páginas guardadas es pequeño; más que esto es otra cosa
+
+/**
+ * ¿`dir` son PÁGINAS WEB guardadas — un artículo partido en varias .htm, un dosier de .mht, la web de una patente —
+ * y nada más? Al menos una página, ningún documento (PDF, EPUB…) en todo el árbol y el resto solo recursos de esas
+ * páginas. No es un libro HTML (pocas páginas o sin entrada clara), pero tampoco es basura: se conserva entera con
+ * UNA ficha («intacta»). Sin esto el vigilante no veía nada catalogable en ella y la dejaba en el Inbox en silencio
+ * (10-nov: «Fogal patents», «Hans Coler», «12-volt Guide», los .mht de Bedini).
+ */
+export async function esCarpetaWeb(dir) {
+    const st = await fs.stat(dir).catch(() => null);
+    if (!st?.isDirectory()) return false;
+    // Las páginas han de estar en la RAÍZ (las subcarpetas son sus «_files»): una carpeta de materia que solo agrupa
+    // varios dosieres web no es uno de ellos — cada dosier tiene su ficha.
+    let enRaiz = 0, vistos = 0;
+    const pila = [dir];
+    while (pila.length) {
+        const d = pila.pop();
+        for (const e of await fs.readdir(d, { withFileTypes: true }).catch(() => [])) {
+            if (ignorar(e.name)) continue;
+            if (e.isDirectory()) { pila.push(path.join(d, e.name)); continue; }
+            if (++vistos > MAX_FICHEROS_WEB) return false;
+            if (RE_PAGINA_WEB.test(e.name)) { if (d === dir) enRaiz++; }
+            else if (!RE_RECURSO_WEB.test(e.name)) return false;   // un documento u otra cosa: no son solo páginas
+        }
+    }
+    return enRaiz > 0;
+}
