@@ -3143,7 +3143,8 @@ export function rutasPanel() {
     });
 
     // GESTIÓN DE GRUPOS (revisión humana, solo admin): fusionar / explotar / eliminar-vacía colecciones y
-    // obras. Sin pérdida de datos (solo vínculos en Mongo + borrar el padre abstracto vacío).
+    // obras. Sin pérdida de datos (vínculos en Mongo + borrar el padre abstracto vacío; al fusionar obras, los
+    // tomos absorbidos se mudan además a la carpeta de la obra destino, con su CDU).
     const grupo = (fn, arg) => async (req, res) => {
         try {
             if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });

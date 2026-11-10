@@ -13,8 +13,13 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
     const col = db.collection('obras');
     const t = titulo ? String(titulo).trim() : null;
 
+    // Por título también se buscan los títulos ANTERIORES de la obra (`titulos_alt`): la obra se renombra al
+    // resolverse por su isbn_obra (o a mano, o al fusionar otra), y un tomo posterior SIN isbn_obra llega con el
+    // nombre viejo de carpeta/fichero. Sin esto se creaba una segunda obra (Science and Its Times, 10-nov: tomos
+    // 1-3 con el ISBN del set → «Science and Its Times»; tomos 4-7 de otra tirada sin él → «Gale - Schlager - …»).
+    const porTitulo = (tit) => col.findOne({ $or: [{ titulo: tit }, { titulos_alt: tit }] });
     let existente = isbn_obra ? await col.findOne({ isbn_obra }) : null;
-    if (!existente && t) existente = await col.findOne({ titulo: t });
+    if (!existente && t) existente = await porTitulo(t);
 
     if (existente) {
         const set = {};
@@ -39,7 +44,7 @@ export async function resolverObra(db, { titulo, isbn_obra = null, editorialId =
         return { _id: r.insertedId, cdu: cdu || null, titulo: t, isbn_obra: isbn_obra || null, creada: true };
     } catch {
         // Carrera con el índice único de isbn_obra: devolver el existente.
-        const ya = isbn_obra ? await col.findOne({ isbn_obra }) : await col.findOne({ titulo: t });
+        const ya = isbn_obra ? await col.findOne({ isbn_obra }) : await porTitulo(t);
         return ya
             ? { _id: ya._id, cdu: ya.cdu || cdu || null, titulo: ya.titulo || t, isbn_obra: ya.isbn_obra || isbn_obra || null, creada: false }
             : { _id: null, cdu: null, titulo: t, isbn_obra: isbn_obra || null, creada: false };

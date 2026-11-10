@@ -853,6 +853,16 @@ de ficheros clasificado por CDU.
     tomo y podía caer aparte). Para consolidar lo ya catalogado (obras cuyos tomos
     quedaron dispersos): node scripts/consolidar-obras.js (dry-run; --ejecutar mueve las
     carpetas con verificación y actualiza ruta_base/portada/imágenes; BACKUP antes).
+    TÍTULOS ANTERIORES (obras.titulos_alt, 10-nov): sin isbn_obra, un tomo se cuelga de su
+    obra por TÍTULO; pero la obra se RENOMBRA al resolverse por su isbn_obra («Gale -
+    Schlager - Science and Its Times» → «Science and Its Times»), y los tomos de otra tirada
+    cuya página de créditos no trae el ISBN del set (tomos 4-7) llegaban con el nombre viejo
+    y creaban una SEGUNDA obra (3 + 4 tomos, CDU y carpeta distintas). Ahora el título que
+    se pierde (renombre por ISBN, edición a mano o fusión) queda en titulos_alt y
+    resolverObra busca también por él. «⛙ Fusionar obras» (Obras, selección) además MUDA
+    los tomos absorbidos a la carpeta de la obra destino con su CDU (antes solo cambiaba el
+    vínculo y la obra quedaba partida en dos ramas del árbol); un tomo con CDU manual
+    distinta no se mueve (aviso). Ninguna campaña detecta obras partidas: se fusionan a mano.
 
   ── ARTÍCULOS (el DOI es el pivote, como el ISBN lo es del libro) ────────────
     Un artículo es como un libro pero con o SIN identificador propio (igual que hay

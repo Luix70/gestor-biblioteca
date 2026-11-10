@@ -83,6 +83,7 @@ const VALIDADOR_OBRAS = {
             fecha_inicio:    { bsonType: ['int', 'null'], description: 'Año de inicio de publicación.' },
             fecha_fin:       { bsonType: ['int', 'null'], description: 'Año de fin (vacío/null = hasta la actualidad).' },
             resuelta_isbn:   { bsonType: ['bool', 'null'], description: 'true si ya se resolvió título/descripción por el ISBN de obra.' },
+            titulos_alt:     { bsonType: ['array', 'null'], items: { bsonType: 'string' }, description: 'Títulos anteriores (renombrada por ISBN, a mano o por fusión): un tomo que llegue con ellos se cuelga de esta obra.' },
             total_volumenes: { bsonType: ['int', 'null'], description: 'Nº total de tomos, si se conoce.' },
             volumenes_presentes: { bsonType: ['int', 'null'], description: 'Nº de tomos ya catalogados.' },
             completa:        { bsonType: ['bool', 'null'], description: 'true si están todos los tomos.' },
@@ -286,6 +287,7 @@ async function main() {
     await asegurarIndice(obras, { isbn_obra: 1 }, { unique: true, sparse: true, name: 'idx_isbn_obra_unico' });
     await asegurarIndice(obras, { issn_obra: 1 }, { unique: true, sparse: true, name: 'idx_issn_obra_unico' });
     await asegurarIndice(obras, { titulo: 1 },    { name: 'idx_titulo' });
+    await asegurarIndice(obras, { titulos_alt: 1 }, { sparse: true, name: 'idx_titulos_alt' });
     await asegurarIndice(obras, { coleccion: 1 }, { sparse: true, name: 'idx_coleccion' });
 
     // biblioteca: índice para localizar tomos por obra (y detectar obras incompletas).

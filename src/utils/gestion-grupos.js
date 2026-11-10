@@ -3,7 +3,8 @@
  * solo cambian VÍNCULOS en Mongo (coleccion/obra de los documentos) y se borra el padre ABSTRACTO (que no
  * tiene ficheros propios). Los documentos miembros y sus ficheros NO se tocan.
  *
- *   fusionar*  — mueve los miembros de varios grupos a uno destino y borra los vacíos.
+ *   fusionar*  — mueve los miembros de varios grupos a uno destino y borra los vacíos. (Obras: los tomos
+ *                absorbidos se mudan además a la carpeta de la obra destino, con su CDU — ver fusionarObras.)
  *   explotar*  — libera los miembros como documentos sueltos (quita el vínculo) y borra el grupo.
  *   eliminar*Vacia — borra un grupo solo si no le quedan miembros.
  */
@@ -61,15 +62,91 @@ export async function fusionarObras(db, ids = [], destinoId) {
     if (!dest) return { ok: false, motivo: 'obra destino no encontrada' };
     const otras = ids.map(oid).filter(x => x && String(x) !== String(dest._id));
     let movidos = 0;
+    const avisos = [];
     for (const obid of otras) {
+        // Los títulos de la obra absorbida pasan a `titulos_alt` del destino: un tomo que llegue más tarde con
+        // ese nombre se cuelga del destino en vez de recrear la obra que se acaba de fusionar.
+        const absorbida = await obras.findOne({ _id: obid }, { projection: { titulo: 1, titulos_alt: 1 } });
+        const alt = [absorbida?.titulo, ...(absorbida?.titulos_alt || [])].filter(x => x && x !== dest.titulo);
+        if (alt.length) await obras.updateOne({ _id: dest._id }, { $addToSet: { titulos_alt: { $each: alt } } });
         for (const doc of await bib.find({ obra: obid }).toArray()) {
-            await bib.updateOne({ _id: doc._id }, { $set: { obra: dest._id, obra_titulo: dest.titulo, fecha_actualizacion: new Date() } });
+            const set = { obra: dest._id, obra_titulo: dest.titulo, fecha_actualizacion: new Date() };
+            if (dest.isbn_obra) set.isbn_obra = dest.isbn_obra;
+            const update = { $set: set };
+            // Cada tomo absorbido se muda a la carpeta de la obra destino (la carpeta refleja la ficha): si no,
+            // la obra queda unida en la base pero partida en dos ramas del árbol CDU.
+            const mudanza = await mudarTomoAObra(db, doc, dest).catch((e) => ({ avisos: [`no se pudo mover su carpeta: ${e.message}`] }));
+            Object.assign(set, mudanza.set || {});
+            if (mudanza.avisos?.length) update.$push = { alertas_agente: { $each: mudanza.avisos } };
+            await bib.updateOne({ _id: doc._id }, update);
             await registrarVolumenEnObra(db, dest._id, doc.volumen_numero ?? null, doc._id);
+            if (mudanza.set?.ruta_base) {
+                const { regenerarSidecarsDoc } = await import('./registro.js');
+                const { carpetaDeDoc } = await import('../mantenimiento/util-mantenimiento.js');
+                const nuevo = { ...doc, ...set };
+                await regenerarSidecarsDoc(db, nuevo, carpetaDeDoc(nuevo)).catch(() => {});
+            }
+            avisos.push(...(mudanza.avisos || []).map((a) => `«${doc.titulo}»: ${a}`));
             movidos++;
         }
         await obras.deleteOne({ _id: obid });
     }
-    return { ok: true, movidos, fusionadas: otras.length, destino: { _id: String(dest._id), titulo: dest.titulo } };
+    return { ok: true, movidos, fusionadas: otras.length, avisos, destino: { _id: String(dest._id), titulo: dest.titulo } };
+}
+
+/**
+ * Muda la carpeta de un tomo a la carpeta de la obra `dest` («…/obras/<obra>/<vol-N>»), con la CDU de la obra
+ * (todos los tomos comparten classmark). Devuelve `{ set, avisos }` con lo que hay que guardar en el tomo; no
+ * escribe el documento. No mueve nada si: el tomo ya vive allí, la obra destino no tiene aún carpeta (ningún tomo
+ * con «/obras/»), la carpeta del tomo no está en este disco, o el tomo tiene CDU manual distinta (decisión tuya).
+ * Si en el destino ya hay una carpeta con ese nombre (otro tomo con el mismo número), usa «<nombre>-<id6>».
+ */
+async function mudarTomoAObra(db, doc, dest) {
+    const { carpetaDeDoc, carpetaExiste, moverCarpetaConVerificacion } = await import('../mantenimiento/util-mantenimiento.js');
+    const baseDe = (web) => { const m = String(web || '').match(/^(.*\/obras\/[^/]+)\//); return m ? m[1] : null; };
+    const otro = await db.collection('biblioteca').findOne(
+        { obra: dest._id, _id: { $ne: doc._id }, ruta_base: /\/obras\// }, { projection: { ruta_base: 1 } });
+    const baseDestino = baseDe(otro?.ruta_base);
+    if (!baseDestino || !doc.ruta_base || doc.ruta_base.startsWith(baseDestino + '/')) return { set: {}, avisos: [] };
+
+    const cduObra = dest.cdu || null;
+    if (doc.cdu_manual && cduObra && doc.cdu !== cduObra) {
+        return { set: {}, avisos: [`unido a la obra «${dest.titulo}», pero su carpeta no se mueve: tiene CDU manual «${doc.cdu}» y la obra «${cduObra}».`] };
+    }
+    const origen = carpetaDeDoc(doc);
+    if (!(await carpetaExiste(origen))) {
+        return { set: {}, avisos: [`unido a la obra «${dest.titulo}»; su carpeta no está en este disco: no se mueve.`] };
+    }
+
+    let hoja = doc.ruta_base.split('/').pop();
+    let rutaNueva = `${baseDestino}/${hoja}`;
+    if (await carpetaExiste(carpetaDeDoc({ ruta_base: rutaNueva }))) {
+        hoja = `${hoja}-${String(doc._id).slice(-6)}`;
+        rutaNueva = `${baseDestino}/${hoja}`;
+    }
+    const destino = carpetaDeDoc({ ruta_base: rutaNueva });
+    const ficheros = [doc.portada, ...(doc.imagenes || []).map((i) => i.ruta)].filter(Boolean).map((p) => p.split('/').pop());
+    await moverCarpetaConVerificacion(origen, destino, ficheros);
+    // La carpeta de la obra vieja queda vacía tras mudar su último tomo: rmdir solo borra un directorio VACÍO.
+    const { rmdir } = await import('node:fs/promises');
+    const { dirname } = await import('node:path');
+    if (baseDe(doc.ruta_base)) await rmdir(dirname(origen)).catch(() => {});
+
+    // Carpeta movida = ruta_base + portada + imágenes + textos/audios, juntos (si no, el carrusel se rompe).
+    const vieja = doc.ruta_base;
+    const remap = (p) => (p && p.startsWith(vieja + '/') ? rutaNueva + p.slice(vieja.length) : p);
+    const remapLista = (l) => l.map((x) => ({ ...x, ruta: remap(x.ruta) }));
+    const set = { ruta_base: rutaNueva };
+    if (doc.portada) set.portada = remap(doc.portada);
+    if (doc.imagenes?.length) set.imagenes = remapLista(doc.imagenes);
+    if (doc.textos?.length) set.textos = remapLista(doc.textos);
+    if (doc.audios?.length) set.audios = remapLista(doc.audios);
+    const avisos = [`Unido a la obra «${dest.titulo}»: carpeta movida a «${rutaNueva}».`];
+    if (cduObra && doc.cdu !== cduObra) {
+        set.cdu = cduObra;
+        avisos.push(`CDU «${doc.cdu}» → «${cduObra}», la de su obra.`);
+    }
+    return { set, avisos };
 }
 
 export async function explotarObra(db, id) {

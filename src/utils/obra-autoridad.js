@@ -31,6 +31,10 @@ export async function resolverObraPorIsbn(db, obraId, { force = false } = {}) {
 
     set.resuelta_isbn = true;
     set.fecha_actualizacion = new Date();
-    await col.updateOne({ _id: obraId }, { $set: set });
+    // El título que se pierde se guarda en `titulos_alt`: los tomos que lleguen después sin isbn_obra (otra
+    // tirada sin la ficha CIP del set) traen ese nombre viejo y resolverObra los encuentra por él.
+    const update = { $set: set };
+    if (set.titulo && obra.titulo && set.titulo !== obra.titulo) update.$addToSet = { titulos_alt: obra.titulo };
+    await col.updateOne({ _id: obraId }, update);
     return { ok: true, titulo: set.titulo || obra.titulo, descripcion: set.descripcion || obra.descripcion || null };
 }

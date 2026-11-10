@@ -176,7 +176,12 @@ export async function editarObra(db, id, campos = {}) {
         else { const v = parseInt(campos.total_volumenes, 10); if (Number.isFinite(v) && v > 0) set.total_volumenes = v; else avisos.push('Total de tomos inválido (ignorado)'); }
     }
     await aplicarComunes(db, campos, set, unset, avisos);
+    const antes = set.titulo ? await db.collection('obras').findOne({ _id }, { projection: { titulo: 1 } }) : null;
     const r = await persistir(db, 'obras', _id, set, unset, avisos);
+    // Renombrada a mano: el título viejo queda en `titulos_alt` para que un tomo que llegue con él caiga aquí.
+    if (r.ok && antes?.titulo && antes.titulo !== set.titulo) {
+        await db.collection('obras').updateOne({ _id }, { $addToSet: { titulos_alt: antes.titulo } });
+    }
     // A LOS TOMOS, si se pidió (el panel pregunta al guardar): la CDU (mueve la carpeta de la obra) y la editorial.
     const aTomos = Array.isArray(campos.aplicarATomos) ? campos.aplicarATomos : [];
     if (r.ok && aTomos.includes('cdu') && set.cdu) {
