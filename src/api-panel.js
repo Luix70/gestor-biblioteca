@@ -38,6 +38,8 @@ import { utilidadInbox, OPERACIONES, OPERACIONES_PELIGROSAS } from './utils/util
 import { sanearCatalogo, lanzarSaneador, estadoSaneador } from './sanear-catalogo.js';
 import { purgarObra } from './utils/purga.js';
 import { reprocesarDocumento, eliminarDocumento } from './utils/reproceso.js';
+import { cotejarContenido, paginasIniciales, pistasDelContenido } from './utils/contenido-ficha.js';   // «🧹 Reidentificar desde el contenido»
+import { ficheroDelDoc } from './utils/hash-doc.js';
 import { reordenarImagenes, eliminarImagen, anadirImagen, reemplazarImagen, anadirPortadaLote } from './utils/imagenes-doc.js';
 import { asignarAutorLote, asignarContribuidorLote, asignarEditorialLote, asignarCduLote, asignarSoporteLote } from './utils/lote-metadatos.js';
 import { reordenarAudios } from './utils/audios-doc.js';
@@ -119,6 +121,17 @@ async function raizExplorable(baseDir) {
 // segmentos al usarla (así funciona aunque la carpeta tenga caracteres heredados como '#', '%', espacios).
 const urlArchivo = (doc) => (doc.ruta_base && doc.nombre_archivo)
     ? `${doc.ruta_base}/${doc.nombre_archivo}` : null;
+
+// La carpeta (y el fichero) de un documento como RUTA DE RED de Windows («\\172.16.0.250\biblioteca digital\CDU\7\…»),
+// para abrirla en el Explorador desde el PC. `/recursos/…` es la carpeta CDU servida; RUTA_RED_CDU es esa misma
+// carpeta vista desde la red (config.js / .env). Sin RUTA_RED_CDU no se devuelve nada (el panel oculta los botones).
+function rutaDeRed(doc) {
+    const base = String(process.env.RUTA_RED_CDU || '').replace(/[\\/]+$/, '');
+    if (!base || !doc.ruta_base || !doc.ruta_base.startsWith('/recursos/')) return {};
+    const rel = doc.ruta_base.slice('/recursos/'.length).split('/').filter(Boolean);
+    const carpeta = [base, ...rel].join('\\');
+    return { carpeta_red: carpeta, archivo_red: doc.nombre_archivo ? `${carpeta}\\${doc.nombre_archivo}` : null };
+}
 
 // Bytes de un fichero o suma recursiva de una carpeta — para reflejar en la ficha el TAMAÑO ESPERADO de las
 // descargas (el ZIP «Todo», «Solo el libro», cada adjunto). Best-effort: NUNCA lanza (un fichero que se borre
@@ -2048,6 +2061,8 @@ export function rutasPanel() {
                 coleccion_tipo: colDoc?.tipo || null, coleccion_issn: colDoc?.issn || null,
                 cdu_desc: cdesc, clasificaciones, obra,
                 archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
+                // Ruta de RED (Windows) de su carpeta y de su fichero: «📋 Copiar ruta» / «📂 Abrir carpeta». Solo admin.
+                ...(req.usuario?.rol === 'admin' ? rutaDeRed(doc) : {}),
                 imagenes: doc.imagenes || [], portada: doc.portada || null,
                 audios: doc.audios || [],   // audiolibro / lectura con audio: playlist para el reproductor
                 textos: doc.textos || [],   // varios textos (PDF/EPUB/anexo…): selector del visor
@@ -2409,9 +2424,34 @@ export function rutasPanel() {
             // conservar=true (por defecto): reproceso CONSERVADOR (sidecar → mantiene ubicación/colección/ISBN/
             // NFC…). conservar=false: proceso NUEVO desde cero (sin sidecar → re-identifica todo; para arreglar
             // un dato guardado erróneo, p. ej. un ISBN equivocado que se re-leería del CIP).
-            const conservar = req.body?.conservar !== false;
-            const r2 = await reprocesarDocumento(db, doc, { conservar });
+            // conservar='identidad': «🧹 Reidentificar desde el contenido» — conserva lo del usuario (_id, ubicación,
+            // valoración, NFC, colección) y suelta lo bibliográfico (ISBN incluido); `datos` = título/autores/tipo/libro
+            // que la persona confirmó a partir de lo que dice el propio fichero (utils/reproceso·sidecarPreservar).
+            const conservar = req.body?.conservar === 'identidad' ? 'identidad' : req.body?.conservar !== false;
+            const datos = conservar === 'identidad' && req.body?.datos && typeof req.body.datos === 'object' ? req.body.datos : null;
+            const r2 = await reprocesarDocumento(db, doc, { conservar, datos });
             res.json(r2);
+        } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
+    });
+
+    // ¿QUÉ DICE EL PROPIO FICHERO? Para «🧹 Reidentificar desde el contenido» y «🔁 Sustituir fichero»: si la ficha casa
+    // con su fichero (nombre y primeras páginas), las pistas que trae el fichero (cabeceras, autor, libro al que
+    // pertenece) y los enlaces para buscar una copia. Solo lee: no cambia nada. Sin IA ni red.
+    r.get('/documentos/:id/contenido', async (req, res) => {
+        try {
+            if (req.usuario?.rol !== 'admin') return res.status(403).json({ ok: false, motivo: 'solo administradores' });
+            if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ ok: false, motivo: 'id inválido' });
+            const db = await conectarDB();
+            const doc = await db.collection('biblioteca').findOne({ _id: new ObjectId(req.params.id) },
+                { projection: { titulo: 1, nombre_archivo: 1, ruta_base: 1, formatos: 1, tipo_recurso: 1, libro_contenedor: 1, autores: 1 } });
+            if (!doc) return res.status(404).json({ ok: false, motivo: 'documento no encontrado' });
+            const abs = await ficheroDelDoc(doc).catch(() => null);
+            const paginas = abs ? await paginasIniciales(abs) : [];
+            const cotejo = await cotejarContenido(doc, { abs, paginas });
+            const pistas = pistasDelContenido(paginas);
+            // Lo que se buscaría para dar con el libro entero: el libro al que pertenece si se sabe, si no el título.
+            const consulta = pistas.sugerencia.libro || doc.libro_contenedor || pistas.sugerencia.titulo || doc.titulo || '';
+            res.json({ ok: true, fichero: abs ? doc.nombre_archivo : null, cotejo, pistas, consulta, fuentes: fuentesCopia(), tipo_recurso: doc.tipo_recurso });
         } catch (e) { res.status(500).json({ ok: false, motivo: e.message }); }
     });
 

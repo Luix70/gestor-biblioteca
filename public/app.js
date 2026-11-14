@@ -3761,6 +3761,8 @@ function pintarDoc(r, ctx) {
       ? especiales.titulo_original + (especiales.idioma_original ? ` <span class="muted">(${especiales.idioma_original})</span>` : '')
       : null],
     ['Autor', especiales._autores],
+    // Libro al que pertenece un capítulo/artículo suelto (lo fija «🧹 Reidentificar desde el contenido»).
+    ['Es parte de', d.libro_contenedor ? `<i>${esc(d.libro_contenedor)}</i>` : null],
     ['Editorial', especiales._editorial],
     ['Colección', especiales._coleccion],
     ['Revista', especiales._revista],
@@ -3846,6 +3848,8 @@ function pintarDoc(r, ctx) {
       ${d.html?.entrada ? `<button class="fbtn" id="actLeerHtml" title="Abrir el libro (páginas web) en una pestaña nueva del navegador, por su página de entrada «${esc(d.html.entrada)}»">🌐 Leer libro</button>` : ''}
       <button class="fbtn admin-only" id="actEdit" title="Editar los datos a mano (y bloquear para que el Conformador no los cambie)">✏️ Editar</button>
       <button class="fbtn" id="actArchivos" title="Explorar y descargar TODOS los archivos de este documento / su colección (también los no catalogados: vídeos, extras…)">🗂️ Archivos</button>
+      ${r.carpeta_red ? `<button class="fbtn admin-only" id="actAbrirCarpeta" title="Abrir la carpeta de este documento en el Explorador de Windows, con su fichero seleccionado. Necesita, una vez por PC, herramientas\windows\instalar-abrir-carpeta.cmd (si no está instalado, no pasa nada: la ruta queda copiada para pegarla en el Explorador).">📂 Abrir carpeta</button>
+      <button class="fbtn admin-only" id="actCopiarRuta" title="Copiar la ruta de red de la carpeta (${esc(r.carpeta_red)}) para pegarla en la barra del Explorador o en Win+R">📋 Copiar ruta</button>` : ''}
       <button class="fbtn admin-only" id="actAdjuntar" title="COMPLETAR el documento con los ficheros que le faltan: el PDF/EPUB de un audiolibro que solo tiene audio, o los audios de un libro que solo tiene texto. Se adjuntan a su carpeta: el audio va a la playlist y el texto al selector del visor.">📎 Adjuntar audio/texto</button>
       <button class="fbtn admin-only" id="actMaterial" title="Adjuntar MATERIAL que acompaña al libro (una carpeta entera de software/datasets, o un PDF con su crítica…). Se guarda VERBATIM en su carpeta y se ve en «📎 Material» / «🗂️ Archivos». No se interpreta: acompaña al libro tal cual.">📦 Adjuntar material</button>
       <button class="fbtn admin-only" id="actImgs" title="Gestionar las imágenes: reordenar, borrar, añadir, rotar/recortar/corregir perspectiva">🖼️ Imágenes</button>
@@ -3853,6 +3857,8 @@ function pintarDoc(r, ctx) {
       <button class="fbtn admin-only" id="actConf" title="Ejecuta el Conformador solo sobre este documento (portada, re-clasificar CDU, sidecars…)">🧹 Conformar</button>
       <button class="fbtn admin-only" id="actEnr" title="Re-consulta las fuentes para mejorar el documento: rellena huecos y, con ISBN válido, recupera autores, colección/serie y título autoritativos (Fichero/Google Books)">✨ Enriquecer</button>
       <button class="fbtn admin-only" id="actReisbn" title="Extraer/cotejar el ISBN de ESTE documento: del propio fichero (EPUB/PDF/MOBI), a mano, o por código de barras con IA; y con él cotejar el título y rellenar autores/editorial/sinopsis desde el Fichero y las APIs gratuitas. Opciones: forzar aunque ya tenga ISBN, ISBN manual, con o sin IA.">🔎 Extraer ISBN</button>
+      <button class="fbtn admin-only" id="actReiCont" title="La ficha NO es la de su fichero (p. ej. un capítulo sobre Hobbes catalogado como un libro sobre el violín): rehacerla con lo que dice el propio fichero. Conserva el ID, la ubicación, la valoración, el NFC, las selecciones y la colección; descarta ISBN, sinopsis, CDU, editorial y portada.">🧹 Reidentificar desde el contenido</button>
+      ${r.archivo_url ? `<button class="fbtn admin-only" id="actSustFich" title="La ficha es buena pero el FICHERO no (un capítulo suelto, una copia mutilada, otra edición): subir el bueno conservando todos los datos de la ficha. Con el anterior eliges: Papelera, catalogarlo aparte o apartarlo para revisión.">🔁 Sustituir fichero</button>` : ''}
       <button class="fbtn admin-only" id="actConfEd" title="${d.editorial_confirmada ? 'La editorial ya está confirmada. Pulsa para QUITAR la confirmación.' : 'Dar por BUENA la editorial de este documento: sale de las selecciones «Editorial sin confirmar / a revisar» y los scripts de editoriales ya no la tocan.'}">${d.editorial_confirmada ? '✅ Editorial confirmada' : '✅ Confirmar editorial'}</button>
       <button class="fbtn admin-only" id="actRehash" title="Recalcular el hash del fichero de ESTE documento (tras modificarlo: quitar una página, anotarlo…). El anterior se conserva.">#️⃣ Regenerar hash</button>
       <button class="fbtn admin-only" id="actCoCap" title="¿Es este documento un CAPÍTULO de un libro mayor? Busca en el catálogo sus co-capítulos (misma obra, mismo ISBN, mismo título, nombres de la misma serie ingeridos a la vez) para unirlos en un solo PDF.">📑 Co-capítulos</button>
@@ -3949,6 +3955,10 @@ function pintarDoc(r, ctx) {
     if ($('#actSinopsis')) $('#actSinopsis').onclick = () => sinopsisLote([d._id], { alTerminar: () => verDoc(d._id, detalle && detalle.ctx) });
     if (cr) cr.onclick = () => fichaReprocesar(d._id);
     if ($('#actTipo')) $('#actTipo').onclick = () => cambiarTipoDocs([d._id]);
+    if ($('#actCopiarRuta')) $('#actCopiarRuta').onclick = () => copiar(r.carpeta_red);
+    if ($('#actAbrirCarpeta')) $('#actAbrirCarpeta').onclick = () => abrirCarpetaEnExplorador(r);
+    if ($('#actReiCont')) $('#actReiCont').onclick = () => reidentificarDesdeContenido(d);
+    if ($('#actSustFich')) $('#actSustFich').onclick = () => sustituirFichero(d);
     const caf = $('#actAFondo');
     if (caf) caf.onclick = () => completarAFondo(d._id, caf);
     // 📚 ¿Cuál es tu edición?: aplicar la elegida (o descartarlas todas) y refrescar la ficha.
@@ -4711,6 +4721,176 @@ function modalReprocesar({ n = 1 } = {}) {
     };
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('#pwOk').click(); } else if (ev.key === 'Escape') cerrarCon(null); };
   });
+}
+// ── 📂 ABRIR CARPETA / 🧹 REIDENTIFICAR DESDE EL CONTENIDO / 🔁 SUSTITUIR FICHERO (14-nov) ─────────────────────────
+
+// Abre la carpeta del documento en el Explorador de Windows con el enlace propio «gestorbib:» que instala, una vez
+// por PC, herramientas\windows\instalar-abrir-carpeta.cmd. Una página web no puede abrir el Explorador por sí misma;
+// si el enlace no está instalado el navegador no hace nada, así que la ruta se copia antes: se puede pegar a mano.
+function abrirCarpetaEnExplorador(r) {
+  const ruta = r.archivo_red || r.carpeta_red;
+  if (!ruta) return;
+  copiar(r.carpeta_red);
+  window.location.href = 'gestorbib:abrir?ruta=' + encodeURIComponent(ruta);
+  toast('📂 Abriendo en el Explorador… (si no se abre, en este PC falta instalar herramientas\\windows\\instalar-abrir-carpeta.cmd; la ruta ya está copiada)');
+}
+
+// Enlaces de búsqueda de una copia (Anna's Archive, Z-Library…) para una consulta. Las fuentes llegan del servidor
+// (FUENTES_COPIA, las mismas que Cuarentena).
+function enlacesFuentesCopia(fuentes, consulta) {
+  return (fuentes || [])
+    .map((f) => `<a class="btn" style="font-size:12px;padding:4px 9px" target="_blank" rel="noopener noreferrer" href="${esc(String(f.url).replace('{q}', encodeURIComponent(consulta || '')))}">🔗 ${esc(f.nombre)}</a>`)
+    .join(' ');
+}
+
+const VEREDICTO_CONTENIDO = {
+  casa: ['✅', 'La ficha casa con su fichero'],
+  'no-casa': ['❌', 'La ficha NO casa con su fichero'],
+  dudoso: ['⚠️', 'No se puede confirmar'],
+  'sin-datos': ['❔', 'Sin datos para comparar'],
+};
+
+// 🧹 REIDENTIFICAR DESDE EL CONTENIDO: la ficha no es la de su fichero. Enseña lo que dice el propio fichero (sus
+// primeras líneas y las cabeceras de página), propone título/autor/libro, la persona los corrige y el documento se
+// reprocesa en modo «identidad»: conserva lo suyo (ID, ubicación, valoración, NFC, selecciones, colección) y la
+// ingesta lo vuelve a identificar con esos datos como si vinieran del fichero (ninguna autoridad los pisa).
+async function reidentificarDesdeContenido(d) {
+  let c;
+  try {
+    c = await api('/documentos/' + encodeURIComponent(d._id) + '/contenido');
+    if (!c.ok) throw new Error(c.motivo || 'no se pudo leer el fichero');
+  } catch (e) {
+    toast(e.message, 'bad');
+    return;
+  }
+  const s = c.pistas.sugerencia || {};
+  const [icono, rotulo] = VEREDICTO_CONTENIDO[c.cotejo.veredicto] || ['❔', ''];
+  const lineas = [...new Set([...(c.pistas.lineas || []), ...(c.pistas.cabeceras || [])])];
+  const tipos = [['libro', '📕 Libro'], ['capitulo', '📑 Capítulo'], ['articulo', '📃 Artículo'], ['apuntes', '🗒️ Apuntes'], ['revista', '📰 Revista']];
+  const tipoInicial = s.libro ? 'capitulo' : (c.tipo_recurso || 'libro');
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px">
+    <h3 style="margin-top:0">🧹 Reidentificar desde el contenido</h3>
+    <div style="padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:10px">
+      <b>${icono} ${esc(rotulo)}</b> <span class="muted" style="font-size:12px">— ${esc(c.cotejo.motivo || '')}</span>
+      <div class="muted" style="font-size:12px;margin-top:4px">Ficha: «${esc(d.titulo || '')}»${c.fichero ? ` · fichero: ${esc(c.fichero)}` : ' · <b>el fichero no está en su carpeta</b>'}</div>
+    </div>
+    ${lineas.length ? `<div class="muted" style="font-size:12px;margin-bottom:4px">Lo que dice el fichero (pulsa una línea para usarla como título):</div>
+      <div id="rcLineas" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">${lineas.map((l) => `<button class="btn" style="font-size:12px;padding:3px 8px" data-linea="${esc(l)}">${esc(l)}</button>`).join('')}</div>`
+      : '<div class="muted" style="font-size:12px;margin-bottom:10px">El fichero no tiene texto legible (¿escaneo sin OCR?): escribe tú los datos.</div>'}
+    <label>Título</label><input id="rcTitulo" value="${esc(s.titulo || '')}" placeholder="título tal como lo trae el fichero">
+    <label style="margin-top:8px">Autores <span class="muted" style="font-size:12px">(separados por «;»)</span></label><input id="rcAutores" value="${esc(s.autor || '')}">
+    <label style="margin-top:8px">Es parte del libro <span class="muted" style="font-size:12px">(si es un capítulo o un artículo)</span></label><input id="rcLibro" value="${esc(s.libro || '')}">
+    <label style="margin-top:8px">Tipo</label>
+    <select id="rcTipo">${tipos.map(([v, t]) => `<option value="${v}"${v === tipoInicial ? ' selected' : ''}>${t}</option>`).join('')}</select>
+    <div class="muted" style="font-size:12px;margin:10px 0">Se <b>conservan</b> el ID, la ubicación, la valoración, el NFC, las selecciones y la colección. Se <b>descartan</b> ISBN, sinopsis, CDU, editorial y portada, y la ingesta los vuelve a buscar con estos datos. El fichero vuelve al Inbox: el Vigilante debe estar activo.</div>
+    <div style="padding:8px 10px;border:1px dashed var(--line);border-radius:9px;font-size:12px">¿Prefieres el libro entero en vez de este fichero? Búscalo y súbelo con «🔁 Sustituir fichero»:
+      <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px">${enlacesFuentesCopia(c.fuentes, c.consulta)}</div></div>
+    <label style="margin-top:12px">Contraseña de administrador</label>
+    <input type="password" id="pwInput" autocomplete="current-password">
+    <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">
+      <button class="btn" id="pwCancel">Cancelar</button>
+      ${c.fichero ? '<button class="btn" id="rcSustituir">🔁 Sustituir fichero…</button>' : ''}
+      <button class="btn pri" id="pwOk"${c.fichero ? '' : ' disabled'}>🧹 Reidentificar</button>
+    </div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#rcLineas [data-linea]').forEach((b) => (b.onclick = () => { $('#rcTitulo').value = b.dataset.linea; }));
+  $('#pwCancel').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  if ($('#rcSustituir')) $('#rcSustituir').onclick = () => { cerrarCmp(); sustituirFichero(d, c); };
+  $('#pwOk').onclick = async () => {
+    const pw = $('#pwInput').value;
+    if (!pw) { $('#pwErr').textContent = 'Escribe la contraseña'; $('#pwInput').focus(); return; }
+    const datos = {
+      titulo: $('#rcTitulo').value.trim(),
+      autores: $('#rcAutores').value.split(';').map((x) => x.trim()).filter(Boolean),
+      libro_contenedor: $('#rcLibro').value.trim(),
+      tipo_recurso: $('#rcTipo').value,
+    };
+    if (!datos.titulo) { $('#pwErr').textContent = 'Falta el título'; $('#rcTitulo').focus(); return; }
+    $('#pwOk').disabled = true;
+    try {
+      const r = await api('/documentos/' + encodeURIComponent(d._id) + '/reprocesar', {
+        method: 'POST',
+        body: JSON.stringify({ password: pw, conservar: 'identidad', datos }),
+      });
+      if (!r.ok) throw new Error(r.motivo || 'no se pudo reidentificar');
+      cerrarCmp();
+      toast(`🧹 «${r.inbox}» vuelve al Inbox para reidentificarse como «${datos.titulo}» (mismo ID)`);
+      go('search');
+    } catch (e) {
+      $('#pwErr').textContent = e.message;
+      $('#pwOk').disabled = false;
+    }
+  };
+}
+
+// 🔁 SUSTITUIR FICHERO: la ficha es buena y el fichero no. Se busca una copia (enlaces), se sube y la ficha se queda
+// con todos sus datos; con el fichero anterior se elige qué hacer (utils/reemplazar-fichero.js). `c` = lo que ya
+// devolvió /contenido (si se viene de «Reidentificar»), para no volver a leer el fichero.
+async function sustituirFichero(d, c = null) {
+  try {
+    if (!c) c = await api('/documentos/' + encodeURIComponent(d._id) + '/contenido');
+  } catch {
+    c = { fuentes: [], consulta: d.titulo || '' };
+  }
+  const opcion = (v, titulo, texto, marcada) => `<label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-top:6px">
+      <input type="radio" name="sfActual" value="${v}"${marcada ? ' checked' : ''} style="margin-top:3px;flex:0 0 auto;width:16px;height:16px">
+      <span><b>${titulo}</b> — <span class="muted" style="font-size:12px">${texto}</span></span></label>`;
+  $('#cmpModal').innerHTML = `<div class="box card" style="max-width:560px">
+    <h3 style="margin-top:0">🔁 Sustituir fichero</h3>
+    <div class="muted" style="font-size:12px;margin:-4px 0 10px">«${esc(d.titulo || '')}» se queda con <b>todos</b> sus datos (título, autores, ISBN, CDU, colección, ubicación, valoración, NFC, selecciones). Cambian el fichero, su hash, sus páginas y las imágenes sacadas de él (las añadidas a mano se conservan).</div>
+    <label>Buscar una copia</label>
+    <input id="sfConsulta" value="${esc(c.consulta || d.titulo || '')}">
+    <div id="sfFuentes" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:5px">${enlacesFuentesCopia(c.fuentes, c.consulta || d.titulo)}</div>
+    <label style="margin-top:12px">Fichero nuevo</label>
+    <input type="file" id="sfFichero" accept=".pdf,.epub,.mobi,.azw,.azw3,.djvu,.djv,.chm,.cbz,.cbr,.cb7,.fb2,.doc,.docx,.zip,.rar">
+    <div style="margin-top:12px"><b>¿Y el fichero que tiene ahora${c.fichero ? ` («${esc(c.fichero)}»)` : ''}?</b></div>
+    ${opcion('papelera', '🗑 Descartarlo', 'a la Papelera (recuperable hasta que se vacíe). Si vuelve a entrar por el Inbox se reconoce y no se cataloga otra vez.', true)}
+    ${opcion('reingestar', '📥 Catalogarlo aparte', 'es otro documento que merece su propia ficha: va al Inbox y la ingesta lo cataloga solo.', false)}
+    ${opcion('revision', '🔍 Apartarlo para revisión', 'a Cuarentena → «revision», con «Reingestar» y «Descartar». No va al Inbox: no se cataloga solo.', false)}
+    <label style="margin-top:12px">Contraseña de administrador</label>
+    <input type="password" id="pwInput" autocomplete="current-password">
+    <div id="pwErr" style="color:var(--bad);font-size:12px;min-height:15px;margin-top:6px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="btn" id="pwCancel">Cancelar</button><button class="btn pri" id="pwOk">🔁 Sustituir</button>
+    </div></div>`;
+  $('#cmpScrim').style.display = 'block';
+  $('#cmpModal').style.display = 'grid';
+  $('#sfConsulta').oninput = () => { $('#sfFuentes').innerHTML = enlacesFuentesCopia(c.fuentes, $('#sfConsulta').value); };
+  $('#pwCancel').onclick = cerrarCmp;
+  $('#cmpScrim').onclick = cerrarCmp;
+  $('#pwOk').onclick = async () => {
+    const file = ($('#sfFichero').files || [])[0];
+    const pw = $('#pwInput').value;
+    if (!file) { $('#pwErr').textContent = 'Elige el fichero nuevo'; return; }
+    if (!pw) { $('#pwErr').textContent = 'Escribe la contraseña'; $('#pwInput').focus(); return; }
+    const actual = (($('#cmpModal input[name="sfActual"]:checked') || {}).value) || 'papelera';
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('actual', actual);
+    fd.append('password', pw);
+    $('#pwOk').disabled = true;
+    $('#pwOk').textContent = '⏳ Subiendo…';
+    try {
+      const resp = await fetch('/api/documentos/' + encodeURIComponent(d._id) + '/fichero/reemplazar', {
+        method: 'POST',
+        headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
+        body: fd,
+      });
+      const j = await resp.json();
+      if (!resp.ok || !j.ok) throw new Error(j.motivo || 'no se pudo sustituir');
+      cerrarCmp();
+      const donde = { papelera: 'a la Papelera', reingestar: 'al Inbox', revision: 'a Cuarentena/revision' }[j.actual];
+      toast(`🔁 Fichero sustituido por «${j.nombre}»${j.destinoActual ? `; el anterior, ${donde}` : ''}${j.imagenes ? ` · ${j.imagenes} imagen(es) extraídas` : ''}`, 'ok');
+      verDoc(d._id, detalle && detalle.ctx);
+    } catch (e) {
+      $('#pwErr').textContent = e.message;
+      $('#pwOk').disabled = false;
+      $('#pwOk').textContent = '🔁 Sustituir';
+    }
+  };
 }
 // CAMBIAR TIPO (individual o lote): reclasifica a mano tipo_recurso (libro/revista) o marca cómic.
 async function cambiarTipoDocs(ids) {

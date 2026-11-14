@@ -28,9 +28,10 @@ import { obtenerEstadisticas } from './estadisticas.js';
 import { rutasPanel, rutasPublicas, usuarioPuedeNsfw, nsfwPorDefecto } from './api-panel.js';
 import { prepararReemplazo } from './utils/saneamiento.js';
 import { completarDoc, adjuntarMaterial, reemplazarAdjunto } from './utils/completar-doc.js';   // adjuntar audio/texto o material a un doc ya catalogado
+import { reemplazarFicheroDoc } from './utils/reemplazar-fichero.js';   // «🔁 Sustituir fichero» conservando la ficha
 import { conectarDB } from './database.js';
 import { cargarAjustesIngesta } from './utils/ajustes-ingesta.js';
-import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic } from './auth.js';
+import { login, logout, validar, autenticar, tokenDe, listarUsuarios, loginBasic, verificarPasswordAdmin } from './auth.js';
 import { registrar, ipDe } from './utils/registro-actividad.js';
 import { ObjectId } from 'mongodb';
 
@@ -415,6 +416,30 @@ app.post('/api/documentos/:id/adjuntos/reemplazar', upload.single('file'), async
         res.status(r.ok ? 200 : 400).json(r);
     } catch (e) {
         await reciclar([sub.path], 'reemplazar-error').catch(() => {});
+        res.status(500).json({ ok: false, motivo: e.message });
+    }
+});
+
+// SUSTITUIR EL FICHERO de un documento conservando la ficha (utils/reemplazar-fichero.js). Body: `file` (multipart),
+// `actual` = qué hacer con el que tenía ('papelera' | 'reingestar' | 'revision') y `password` (cambia el fichero
+// de un documento catalogado: se confirma como Reprocesar).
+app.post('/api/documentos/:id/fichero/reemplazar', upload.single('file'), async (req, res) => {
+    const sub = req.file;
+    if (!sub) return res.status(400).json({ ok: false, motivo: 'no se recibió ningún fichero' });
+    try {
+        if (!(await verificarPasswordAdmin(req.body?.password))) {
+            await reciclar([sub.path], 'sustituir-fichero-denegado').catch(() => {});
+            return res.status(403).json({ ok: false, motivo: 'contraseña de administrador incorrecta' });
+        }
+        const r = await reemplazarFicheroDoc(await conectarDB(), req.params.id, {
+            rutaTmp: sub.path,
+            nombreOriginal: sub.originalname,
+            actual: String(req.body?.actual || 'papelera'),
+        });
+        await reciclar([sub.path], r.ok ? 'sustituir-fichero-subida' : 'sustituir-fichero-error').catch(() => {});
+        res.status(r.ok ? 200 : 400).json(r);
+    } catch (e) {
+        await reciclar([sub.path], 'sustituir-fichero-error').catch(() => {});
         res.status(500).json({ ok: false, motivo: e.message });
     }
 });

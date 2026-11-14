@@ -109,6 +109,50 @@ export function mismoLibroHolgado(a, b) {
     return comunes / corto.size >= 0.8;
 }
 
+/**
+ * ¿El resultado de una BÚSQUEDA POR TÍTULO (sin ISBN) es este libro? Mucho más estricto que `mismoTituloLibro`,
+ * porque aquí no hay ningún identificador que lo respalde: si se acepta, el libro se queda con el ISBN, la sinopsis,
+ * la CDU y la portada de OTRO.
+ *
+ * Incidente (medido 14-nov): «The Cambridge Companion - Hobbes On Rhetoric.pdf» se leyó como título «The Cambridge
+ * Companion»; OpenLibrary devolvió «Cambridge Companion to the Violin» (lo CONTIENE), se aceptó, y el capítulo sobre
+ * Hobbes quedó catalogado como un libro sobre el violín (CDU 787.2), igual que otros dos de la misma colección.
+ * «Uno es el comienzo del otro» vale para comparar dos ficheros con el mismo ISBN, no para dar por bueno un ISBN.
+ *
+ * Se acepta solo si:
+ *   · son el mismo título (sin artículos iniciales, acentos ni paréntesis), con o sin el subtítulo del resultado;
+ *   · el título PRINCIPAL del resultado (lo que va antes de «:», « - », «;» o «.») es el nuestro: añade un subtítulo
+ *     de verdad, tras un separador, no palabras pegadas («… to the Violin»);
+ *   · una de las PARTES de nuestro título (el fichero suele traer «Autor - Título», «Serie - Título») es el título
+ *     del resultado, con cuerpo (2+ palabras o 6+ letras);
+ *   · o difieren en una errata (1-2 letras, títulos de 8+ letras).
+ * Los números tienen que coincidir (tomos).
+ */
+const RE_ARTICULO_INICIAL = /^(the|a|an|el|la|los|las|lo|le|les|l|der|die|das|il|gli|un|una|une)\s+/;
+const RE_SEPARADOR_TITULO = /\s*(?::|;|\.\s|\s[-–—]\s)\s*/;
+export function tituloCasaBusqueda(nuestro, suyo, subtituloSuyo = '') {
+    const comp = (t) => tituloComparable(corregirNumerosOcr(t)).replace(RE_ARTICULO_INICIAL, '');
+    const A = comp(nuestro);
+    const T = comp(suyo);
+    if (!A || !T) return false;
+    if (numerosDe(A) !== numerosDe(comp([suyo, subtituloSuyo].filter(Boolean).join(' '))) && numerosDe(A) !== numerosDe(T)) return false;
+
+    const conCuerpo = (t) => t.split(' ').length >= 2 || t.length >= 6;
+    const casi = (x, y) => x === y || (Math.min(x.length, y.length) >= 8 && distanciaEdicion(x, y) <= 2);
+
+    // Mismo título, con o sin el subtítulo del resultado.
+    if (casi(A, T) || (subtituloSuyo && casi(A, comp(`${suyo} ${subtituloSuyo}`)))) return true;
+
+    // El título principal del resultado (antes de su separador) es el nuestro.
+    const principalSuyo = comp(String(suyo).split(RE_SEPARADOR_TITULO)[0]);
+    if (principalSuyo && conCuerpo(principalSuyo) && casi(A, principalSuyo)) return true;
+
+    // Una parte de nuestro título (separada por «:», « - », «;», «.») es el título del resultado.
+    const partes = String(nuestro).replace(RE_PARENTESIS, ' ').split(RE_SEPARADOR_TITULO).map(comp).filter(Boolean);
+    if (partes.length > 1 && partes.some((p) => conCuerpo(p) && (casi(p, T) || casi(p, principalSuyo)))) return true;
+    return false;
+}
+
 // «xvii» → «17» (romanos bien escritos hasta 89); cualquier otra palabra se deja como está.
 const ROMANOS = { i: 1, v: 5, x: 10, l: 50 };
 const RE_ROMANO_CORTO = /^l?x{0,3}(?:ix|iv|v?i{0,3})$/;

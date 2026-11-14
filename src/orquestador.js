@@ -57,7 +57,7 @@ const EXT_COMIC = ['.cbr', '.cbz', '.cb7'];
 // (evita ampliar el enum del esquema; el fichero conserva su extensión real en disco).
 const EXT_MOBI = ['.mobi', '.azw', '.azw3'];
 
-const FORMATO_POR_EXT = {
+export const FORMATO_POR_EXT = {   // exportado: lo usa también utils/reemplazar-fichero.js
     '.epub': 'epub', '.pdf': 'pdf',
     '.mobi': 'mobi', '.azw': 'mobi', '.azw3': 'mobi',
     '.cbr': 'cbr', '.cbz': 'cbz', '.cb7': 'cb7', '.djvu': 'djvu', '.djv': 'djvu', '.chm': 'chm', '.zip': 'zip', '.rar': 'rar',
@@ -115,7 +115,10 @@ function fusionarOcr(base, ocr) {
 // realidad son ediciones/ejemplares diferentes).
 const CAMPOS_OVERRIDE = ['titulo', 'subtitulo', 'autores', 'editorial', 'cdu', 'idioma', 'año_edicion',
     'sinopsis', 'palabras_clave', 'coleccion_nombre', 'coleccion_numero', 'tipo_recurso',
-    'obra_titulo', 'volumen_numero', 'isbn_obra', 'ubicacion'];
+    'obra_titulo', 'volumen_numero', 'isbn_obra', 'ubicacion',
+    // Libro al que pertenece un capítulo/artículo suelto, tal como lo imprime su cabecera de página («The Cambridge
+    // Companion to Hobbes»): lo fija «🧹 Reidentificar desde el contenido» (utils/reproceso.js, modo identidad).
+    'libro_contenedor'];
 
 export async function leerOverride(rutaArchivo) {
     const sinExt = path.join(path.dirname(rutaArchivo), path.basename(rutaArchivo, path.extname(rutaArchivo)));

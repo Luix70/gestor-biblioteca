@@ -26,6 +26,11 @@ export const AJUSTES = {
         { nombre: 'Libgen', url: 'https://libgen.bz/index.php?req={q}' },
         { nombre: 'Gutenberg', url: 'https://www.gutenberg.org/ebooks/search/?query={q}' },
     ]),
+    // Ruta de RED (Windows) de la carpeta CDU, tal como la ve un PC de casa. El panel la usa para «📋 Copiar ruta» y
+    // «📂 Abrir carpeta» de una ficha (herramientas/windows/instalar-abrir-carpeta.cmd). Vacía = botones ocultos.
+    // Es la misma carpeta que el contenedor ve como PATH_CDU; si tu PC la monta con otra letra o nombre, cámbiala
+    // en `.env` (RUTA_RED_CDU=...).
+    RUTA_RED_CDU: String.raw`\\172.16.0.250\biblioteca digital\CDU`,
     HTTP_TIMEOUT_MS: 20000,         // timeout de TODA llamada HTTP a las APIs bibliográficas
     // Endurecimiento de las llamadas SALIENTES (utils/http.js) para no parecer un bot y evitar baneos de IP
     // (WAF/anti-bot). MIN_INTERVALO = separación mínima entre peticiones (ritmo de salida GLOBAL; ~5 req/s);

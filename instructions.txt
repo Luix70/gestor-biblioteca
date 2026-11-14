@@ -2631,6 +2631,33 @@ de ficheros clasificado por CDU.
       Asi lo que llega al Inbox va guiado, y lo que la IA ve no catalogable (guia «omitir») o «intacta» sin ser un
       libro se queda en PreProceso con su motivo en _preproceso.txt. Si la IA falla, la carpeta entera espera y
       se reintenta sola. El Vigilante no vuelve a inspeccionar lo que se inspecciono en PreProceso.
+    · FICHA Y CONTENIDO QUE NO CASAN (14-nov): p. ej. el capitulo «Hobbes on rhetoric» (17 paginas) catalogado
+      como «Cambridge Companion to the Violin», con el ISBN, la CDU, la sinopsis y la portada de ese otro libro. La
+      causa: el nombre «The Cambridge Companion - Hobbes On Rhetoric» se leyo como titulo «The Cambridge
+      Companion», y la ingesta acepto el primer resultado de OpenLibrary que CONTENIA esas palabras. Ya no: sin un
+      ISBN que lo respalde, el titulo del resultado tiene que ser el mismo (con o sin subtitulo tras «:»), no solo
+      contenerlo. Para lo ya catalogado, en la ficha (⚙️ Acciones):
+        - «🧹 Reidentificar desde el contenido»: dice si la ficha casa con su fichero (nombre y primeras paginas),
+          ensena lo que dice el fichero (sus primeras lineas y las cabeceras de pagina) y propone titulo, autor y
+          «es parte del libro…»; los corriges y la ficha se rehace con eso. Se conservan el ID, la ubicacion, la
+          valoracion, el NFC, las selecciones y la coleccion; se descartan ISBN, sinopsis, CDU, editorial y
+          portada, que la ingesta vuelve a buscar. El fichero vuelve al Inbox (Vigilante activo).
+        - «🔁 Sustituir fichero»: la ficha es buena y el fichero no (un capitulo suelto en vez del libro, una copia
+          mutilada). Trae enlaces para buscar una copia (Anna's Archive, Z-Library…), subes la buena y la ficha
+          se queda con TODOS sus datos; cambian el fichero, su hash, sus paginas y las imagenes sacadas de el (las
+          tuyas se conservan). Con el fichero anterior eliges: Papelera (si vuelve a entrar se reconoce), catalogarlo
+          aparte (va al Inbox) o apartarlo para revision (Cuarentena → «revision», con Reingestar/Descartar; no va
+          al Inbox, asi que no se cataloga solo). Pide la contrasena.
+      Para encontrarlas todas: scripts/detectar-contenido-discrepante.js (en seco, lista; --ejecutar crea la
+      seleccion «Ficha y contenido no casan (N)»; --dudosos, tambien la de las que no se pueden confirmar).
+    · ABRIR LA CARPETA EN EL EXPLORADOR (14-nov): en la ficha, «📋 Copiar ruta» copia la ruta de red de su carpeta
+      (\\172.16.0.250\biblioteca digital\CDU\…) para pegarla en el Explorador o en Win+R. «📂 Abrir carpeta» la
+      abre directamente con el fichero seleccionado: una pagina web no puede abrir el Explorador, asi que se instala
+      una vez en cada PC un tipo de enlace propio, «gestorbib:» (como «mailto:» abre el correo): doble clic en
+      herramientas\windows\instalar-abrir-carpeta.cmd (sin administrador; «-Desinstalar» lo quita). La primera vez
+      el navegador pregunta si abrir el enlace: «Permitir siempre». Solo abre carpetas bajo la del CDU (lista en
+      %LOCALAPPDATA%\GestorBiblioteca\prefijos.txt) y nunca abre ni ejecuta un fichero. La ruta de red se cambia
+      en config.js / .env (RUTA_RED_CDU).
     · LIBRO POR CAPITULOS CON UN CAPITULO DAÑADO (10-nov): si qpdf no puede coser porque una parte tiene el
       indice roto, se repara una COPIA de esa parte y se cose con ella; los originales viajan intactos a
       «Desglose/». Si la reparacion perderia paginas, no se cose y el libro sigue esperando (Oppenheim).

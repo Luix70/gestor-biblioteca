@@ -53,6 +53,20 @@
 - [ ] Repasar `PreProceso/_Material sin libro/`: lo que sea de un libro (los ejemplos de Irvine, el CD de Floyd, el
       curso de latín) se deja junto a su libro; el resto se retira a mano
 
+### 0.59 Fichas que no casan con su fichero (14-nov) — en el NAS
+- [ ] Desplegar (la ingesta ya no acepta un resultado por título que solo CONTIENE el título; acciones nuevas en la
+      ficha: «🧹 Reidentificar desde el contenido», «🔁 Sustituir fichero», «📂 Abrir carpeta», «📋 Copiar ruta»)
+- [ ] En el PC: doble clic en `herramientas\windows\instalar-abrir-carpeta.cmd` y probar «📂 Abrir carpeta» en una ficha
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-contenido-discrepante.js` — revisar la lista (medido en
+      lectura con una aproximación: 706 de 59.861 fichas con ISBN tienen un título sin ninguna palabra en común con su
+      fichero; 259 con datos de OpenLibrary/Google Books sin ISBN leído del fichero)
+- [ ] `… --ejecutar` → selección «Ficha y contenido no casan (N)»; repasarla con las dos acciones de la ficha
+- [ ] Probar con las tres del ISBN 1139002090: `6a58ee72…8f97` (Hobbes on rhetoric, Victoria Silver, capítulo del
+      *Cambridge Companion to Hobbes*), `6a58ed5e…8f7c` (Bacon & Rhetoric) y `6a58f6e7…f74e` (Medieval Philosophy,
+      McGrade — parece el mismo fichero que `6a58efff…8fbc`: comprobar y fusionar)
+- [ ] Pendiente de diseñar: cuando entra el libro entero, reconocer el capítulo suelto que ya está en la biblioteca y
+      colgarlo de él (hoy se queda como ficha aparte)
+
 ### 0.6 PreProceso, fase 1 (3-nov)
 - [x] Crear en File Station la carpeta `BIBLIOTECA DIGITAL/PreProceso` (antes de desplegar: si la crea Docker, es de root)
 - [x] Desplegar (cambia docker-compose.yml: el script ya hace down -v / up --build). No interrumpir la construcción

@@ -11,6 +11,7 @@ import { resolverCDU } from '../clasificador-cdu.js';
 import { extraerContribuciones } from './contribuciones.js';
 import { variantesISBN } from './identificadores.js';
 import { mismoNombreAutor } from './huecos-autoridad.js';
+import { tituloCasaBusqueda } from './titulo-libro.js';   // un resultado por título, sin ISBN, tiene que casar de verdad
 import { esEditorialFalsa } from './editoriales-falsas.js';
 import { esNombreRuido } from './editorial-por-prefijo.js';
 
@@ -58,12 +59,17 @@ async function completarDesdeBNE(datosExtra, rellenar, isbns) {
 //   · Si CONOCEMOS el ISBN, solo vale un resultado con ESE ISBN (o su variante 10/13). Uno con otro ISBN —o sin
 //     ISBN— es otra edición u otro libro: se descarta entero.
 //   · Si NO lo conocemos, la búsqueda por título es la única vía, pero si sabemos el autor tiene que coincidir.
-function resultadoDeEsteLibro(info, isbnsNuestros, autor) {
+function resultadoDeEsteLibro(info, isbnsNuestros, autor, titulo = null) {
     if (!info) return { ok: false };
     if (isbnsNuestros.size) {
         const suyos = variantesISBN(info.isbn);
         if (!suyos.some((v) => isbnsNuestros.has(v))) return { ok: false, motivo: `otro ISBN (${info.isbn || 'sin ISBN'})` };
         return { ok: true };
+    }
+    // Sin ISBN que lo respalde, el TÍTULO tiene que casar de verdad, no solo estar contenido (incidente del violín,
+    // 14-nov: «The Cambridge Companion» → «Cambridge Companion to the Violin»). Ver tituloCasaBusqueda.
+    if (titulo && info.titulo && !tituloCasaBusqueda(titulo, info.titulo, info.subtitulo)) {
+        return { ok: false, motivo: 'otro título' };
     }
     if (autor && Array.isArray(info.autores) && info.autores.length && !info.autores.some((a) => mismoNombreAutor(a, autor))) {
         return { ok: false, motivo: `otro autor (${info.autores.join(', ')})` };
@@ -326,7 +332,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
     // Los ISBN que ya sabemos de este libro (del fichero, de la visión o del Fichero local).
     const isbnsNuestros = new Set([datosExtra.isbn, ...isbnsLookup].filter(Boolean).flatMap((x) => variantesISBN(x)));
     if (infoOL) {
-        const v = resultadoDeEsteLibro(infoOL, isbnsNuestros, autor);
+        const v = resultadoDeEsteLibro(infoOL, isbnsNuestros, autor, tituloTexto);
         if (!v.ok) {
             datosExtra.alertas.push(`OpenLibrary devolvió por título OTRO libro («${String(infoOL.titulo || '?').slice(0, 60)}», ${v.motivo}): descartado.`);
             infoOL = null;
@@ -369,7 +375,7 @@ export async function buscarMetadatosExternos(titulo, autor, imagenBase64 = null
         else throw e;
     }
     if (infoGB) {
-        const v = resultadoDeEsteLibro(infoGB, isbnsNuestros, autor);
+        const v = resultadoDeEsteLibro(infoGB, isbnsNuestros, autor, tituloTexto);
         if (!v.ok) {
             datosExtra.alertas.push(`Google Books devolvió por título OTRO libro («${String(infoGB.titulo || '?').slice(0, 60)}», ${v.motivo}): descartado.`);
             infoGB = null;

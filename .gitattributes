@@ -11,3 +11,7 @@
 *.heic binary
 *.pdf binary
 *.epub binary
+
+# Herramientas para el PC con Windows (herramientas/windows): cmd.exe necesita CRLF.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

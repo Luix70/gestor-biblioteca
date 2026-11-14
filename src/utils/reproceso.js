@@ -90,26 +90,47 @@ const nombreSeguro = (s) => (String(s || '').replace(/[<>:"/\\|?*\x00-\x1f]+/g, 
 // Sidecar de PRESERVACIÓN (.meta.json) para un reprocesado: los datos CURADOS por el usuario que deben
 // SOBREVIVIR a la reingesta (no se re-derivan). El resto —título, autores, CDU, subtítulo, identificadores…—
 // lo vuelve a calcular el pipeline. Así reprocesar para arreglar la ficha NO pierde ubicación/colección/nº.
-function sidecarPreservar(doc) {
+//
+// Modo `'identidad'` («Reidentificar desde el contenido», 14-nov): para una ficha cuyo CONTENIDO no es el de su
+// fichero (el capítulo sobre Hobbes catalogado como un libro sobre el violín). Se conserva lo TUYO —_id, ubicación,
+// valoración, NSFW, NFC, la colección de su carpeta y la obra— y se suelta todo lo bibliográfico, ISBN incluido (era
+// el de otro libro: un reproceso conservador lo volvería a imponer). `datos` = lo que la persona confirmó en el
+// panel a partir de lo que dice el propio fichero (título, autores, tipo, libro al que pertenece): entra como dato
+// del fichero, así que ninguna autoridad lo pisa.
+function sidecarPreservar(doc, { modo = 'conservar', datos = null } = {}) {
     const s = {};
+    const identidad = modo === 'identidad';
     // El _id se PRESERVA: reprocesar es «los mismos datos de identidad, solo enriquecer». Así la etiqueta
     // NFC (que lleva grabado ?doc=<_id>), la obra (volumenes[]) y cualquier deep-link siguen apuntando bien.
     if (doc._id) s._id = String(doc._id);
     if (doc.coleccion_nombre) s.coleccion_nombre = doc.coleccion_nombre;
-    if (doc.coleccion_numero != null) s.coleccion_numero = doc.coleccion_numero;
+    // El nº en la colección deducido solo (coleccion_numero_auto) puede venir del dato equivocado: en modo identidad
+    // se vuelve a deducir.
+    if (doc.coleccion_numero != null && !(identidad && doc.coleccion_numero_auto)) s.coleccion_numero = doc.coleccion_numero;
     if (doc.obra_titulo) s.obra_titulo = doc.obra_titulo;
     if (doc.volumen_numero != null) s.volumen_numero = doc.volumen_numero;
-    if (doc.isbn_obra) s.isbn_obra = doc.isbn_obra;
-    if (doc.isbn) s.isbn = doc.isbn;
+    if (doc.isbn_obra && !identidad) s.isbn_obra = doc.isbn_obra;
+    if (doc.isbn && !identidad) s.isbn = doc.isbn;
     if (doc.ubicacion && (doc.ubicacion.ambito || doc.ubicacion.estanteria)) s.ubicacion = doc.ubicacion;
     if (doc.orden_estanteria != null) s.orden_estanteria = doc.orden_estanteria; // posición física en la balda
     if (doc.valoracion) s.valoracion = doc.valoracion;
     if (doc.nsfw) s.nsfw = true;
     if (doc.nfc && (doc.nfc.uid || doc.nfc.fecha_vinculacion)) s.nfc = doc.nfc;
+    if (identidad && datos) {
+        const texto = (v, max = 300) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, max);
+        if (texto(datos.titulo)) s.titulo = texto(datos.titulo);
+        const autores = (Array.isArray(datos.autores) ? datos.autores : String(datos.autores || '').split(/\s*;\s*/))
+            .map((a) => texto(a, 120)).filter(Boolean);
+        if (autores.length) s.autores = autores;
+        if (texto(datos.libro_contenedor)) s.libro_contenedor = texto(datos.libro_contenedor);
+        if (TIPOS_IDENTIDAD.has(datos.tipo_recurso)) s.tipo_recurso = datos.tipo_recurso;
+    }
     return s;
 }
-async function escribirSidecar(rutaFichero, doc) {
-    const s = sidecarPreservar(doc);
+// Tipos que se pueden fijar al reidentificar (los de «🔀 Cambiar tipo» que tienen sentido para un fichero suelto).
+const TIPOS_IDENTIDAD = new Set(['libro', 'capitulo', 'articulo', 'apuntes', 'revista']);
+async function escribirSidecar(rutaFichero, doc, opciones) {
+    const s = sidecarPreservar(doc, opciones);
     if (Object.keys(s).length) { try { await fs.writeFile(rutaFichero + '.meta.json', JSON.stringify(s, null, 2)); } catch { /* best-effort */ } }
 }
 
@@ -120,7 +141,7 @@ async function escribirSidecar(rutaFichero, doc) {
  * de cada adjunto. El vigilante recataloga el libro por el pipeline normal y re-adjunta el material intacto
  * (ingestarLibroConMaterial). Así el material VIAJA con el libro en vez de quedarse (recuperable) en la Papelera.
  */
-async function reprocesarLibroConMaterial(db, doc, { conservar, carpeta, nombre, id6 }) {
+async function reprocesarLibroConMaterial(db, doc, { conservar, carpeta, nombre, id6, sidecar }) {
     const origenPrincipal = path.join(carpeta, nombre);
     let tam = -1;
     try { tam = (await fs.stat(origenPrincipal)).size; } catch { /* no existe */ }
@@ -134,7 +155,7 @@ async function reprocesarLibroConMaterial(db, doc, { conservar, carpeta, nombre,
 
     // 1) El LIBRO + su sidecar de preservación (identidad: _id, ubicación, colección, valoración, nsfw, nfc…).
     await fs.copyFile(origenPrincipal, path.join(dropDir, nombre));
-    if (conservar) await escribirSidecar(path.join(dropDir, nombre), doc);
+    if (conservar) await escribirSidecar(path.join(dropDir, nombre), doc, sidecar);
 
     // 2) El MATERIAL: cada adjunto de primer nivel (adjuntos[].nombre) viaja tal cual (carpeta → copia recursiva).
     //    Se conservan sus metadatos (soloAdmin) para re-aplicarlos tras recatalogar.
@@ -169,7 +190,9 @@ async function reprocesarLibroConMaterial(db, doc, { conservar, carpeta, nombre,
  *   CIP y se recalcula ISBN/título/autor/colección…). Útil cuando el dato guardado es ERRÓNEO (p. ej. un ISBN
  *   equivocado que un reproceso conservador volvería a imponer).
  */
-export async function reprocesarDocumento(db, doc, { conservar = true } = {}) {
+export async function reprocesarDocumento(db, doc, { conservar = true, datos = null } = {}) {
+    // conservar: true = conservador · false = nuevo desde cero · 'identidad' = desde el contenido (ver sidecarPreservar).
+    const sidecar = { modo: conservar === 'identidad' ? 'identidad' : 'conservar', datos };
     const carpeta = carpetaDeDoc(doc);
     const nombre = doc.nombre_archivo || '';
     const tieneDocOriginal = nombre && EXT_DOC.includes(path.extname(nombre).toLowerCase());
@@ -181,7 +204,7 @@ export async function reprocesarDocumento(db, doc, { conservar = true } = {}) {
     //    fichero principal (un escaneo puro no es libro-material; ahí el material queda recuperable en Papelera). ──
     const conMaterial = Array.isArray(doc.adjuntos) && doc.adjuntos.length > 0;
     if (conMaterial && tieneDocOriginal) {
-        return reprocesarLibroConMaterial(db, doc, { conservar, carpeta, nombre, id6 });
+        return reprocesarLibroConMaterial(db, doc, { conservar, carpeta, nombre, id6, sidecar });
     }
     if (conMaterial && !tieneDocOriginal) {
         console.warn(`  ⚠️  ${doc._id}: material adjunto en un escaneo (sin fichero principal): irá a la Papelera (recuperable), no viaja al reprocesar.`);
@@ -199,7 +222,7 @@ export async function reprocesarDocumento(db, doc, { conservar = true } = {}) {
             destino = path.join(DIR_INBOX, `${path.basename(nombre, ext)} (reproc ${id6})${ext}`);
         }
         await fs.copyFile(origen, destino);
-        if (conservar) await escribirSidecar(destino, doc); // preserva ubicación/colección/nº/isbn/valoración/nsfw/nfc
+        if (conservar) await escribirSidecar(destino, doc, sidecar); // preserva ubicación/colección/nº/isbn/valoración/nsfw/nfc
         // VERSIONES fusionadas (utils/fusionar-versiones.js): sus ficheros viven en esta carpeta y la carpeta va a la
         // Papelera → viajan TAMBIÉN al Inbox, para que no queden solo en la Papelera (que se vacía). Entran como
         // documentos aparte; la fusión de versiones los volverá a reunir.
@@ -242,7 +265,7 @@ export async function reprocesarDocumento(db, doc, { conservar = true } = {}) {
         let destino = path.join(DIR_INBOX, path.basename(imgs[0]));
         if (await existe(destino)) destino = path.join(DIR_INBOX, `${base} (reproc ${id6})${path.extname(imgs[0]) || '.jpg'}`);
         await fs.copyFile(imgs[0], destino);
-        if (conservar) await escribirSidecar(destino, doc);
+        if (conservar) await escribirSidecar(destino, doc, sidecar);
         inbox = path.basename(destino);
     } else {
         // Varias imágenes → ZIP (el Vigilante lo expande y re-cataloga como un único libro escaneado). Se
@@ -251,7 +274,7 @@ export async function reprocesarDocumento(db, doc, { conservar = true } = {}) {
         const nombres = imgs.map((p, i) => `${String(i + 1).padStart(3, '0')}_${path.basename(p)}`);
         imgs.forEach((p, i) => zip.addLocalFile(p, '', nombres[i]));
         // Sidecar de preservación DENTRO del zip, emparejado con la 1ª imagen (para que leerOverride lo halle).
-        const s = conservar ? sidecarPreservar(doc) : {};
+        const s = conservar ? sidecarPreservar(doc, sidecar) : {};
         if (Object.keys(s).length && nombres[0]) zip.addFile(`${nombres[0]}.meta.json`, Buffer.from(JSON.stringify(s, null, 2)));
         let destino = path.join(DIR_INBOX, `${base} (reproc ${id6}).zip`);
         if (await existe(destino)) destino = path.join(DIR_INBOX, `${base} (reproc ${id6}-${Date.now().toString().slice(-4)}).zip`);

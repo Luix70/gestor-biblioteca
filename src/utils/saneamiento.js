@@ -44,7 +44,7 @@ function depDirDe(idDeposito) {
 }
 
 /** Primeros n bytes de un fichero (para comprobar la firma). */
-async function cabecera(ruta, n = 8) {
+export async function cabecera(ruta, n = 8) {   // exportada (reemplazar-fichero)
     const fh = await fs.open(ruta, 'r');
     try { const b = Buffer.alloc(n); await fh.read(b, 0, n, 0); return b; }
     finally { await fh.close().catch(() => {}); }
@@ -52,7 +52,7 @@ async function cabecera(ruta, n = 8) {
 
 /** "No es basura": firma de PDF (%PDF) o ZIP/EPUB (PK). Otros formatos: solo tamaño. Caza el caso
  *  típico de una descarga fallida guardada como .epub/.pdf (una página HTML de error). */
-function firmaValida(buf, ext) {
+export function firmaValida(buf, ext) {   // exportada: la usa también utils/reemplazar-fichero.js
     const s = buf.toString('latin1');
     if (ext === 'pdf') return s.startsWith('%PDF');
     if (['epub', 'cbz', 'zip', 'kepub'].includes(ext)) return s.startsWith('PK');
