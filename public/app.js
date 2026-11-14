@@ -4795,7 +4795,7 @@ async function reidentificarDesdeContenido(d) {
     </div></div>`;
   $('#cmpScrim').style.display = 'block';
   $('#cmpModal').style.display = 'grid';
-  $('#rcLineas [data-linea]').forEach((b) => (b.onclick = () => { $('#rcTitulo').value = b.dataset.linea; }));
+  $$('#rcLineas [data-linea]').forEach((b) => (b.onclick = () => { $('#rcTitulo').value = b.dataset.linea; }));
   $('#pwCancel').onclick = cerrarCmp;
   $('#cmpScrim').onclick = cerrarCmp;
   if ($('#rcSustituir')) $('#rcSustituir').onclick = () => { cerrarCmp(); sustituirFichero(d, c); };
