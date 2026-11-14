@@ -23,10 +23,15 @@ export const AVISO_NO_CATALOGABLE = '.NO_CATALOGABLE.txt';
 const RE_CATALOGABLE_EXTRA = /\.(zip|rar|7z|tar|tgz|gz|html?|exe|msi|apk|jar)$/i;
 const MAX_FICHEROS = 50000;   // «Computers» tiene 49.000: se mira entero, pero nunca sin límite
 
+// Texto plano y ebooks .lit: SOLO como material de un documento principal (regla del usuario, 14-nov: «generan
+// demasiado ruido y no aportan contenido»). Una carpeta que solo trae esto no es catalogable y se queda donde está.
+const RE_SOLO_ACOMPANANTE = /\.(txt|tex|lit)$/i;
+
 /** ¿Este fichero (ruta relativa POSIX + bytes) acaba en un registro de la biblioteca? */
 export function esFicheroCatalogable(rel, bytes = null) {
     const nombre = rel.split('/').pop();
     if (esVideo(nombre)) return false;   // decisión del usuario: los vídeos no se catalogan
+    if (RE_SOLO_ACOMPANANTE.test(nombre)) return false;
     return esDocumentoLeible(nombre) || esAudio(nombre) || esImagenArchivo(nombre)
         || RE_CATALOGABLE_EXTRA.test(nombre) || esMaterialNotable(rel, bytes);
 }

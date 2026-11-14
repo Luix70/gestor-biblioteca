@@ -28,6 +28,7 @@ import { esAudio } from './lector-audio.js'; // FUENTE ÚNICA de extensiones de 
 import { esDocumentoLeible, esImagenArchivo, esMaterialNotable, esVideo, formatoDocumento } from './criba-material.js';
 import { convertirAPdf, EXT_CONVERTIBLES } from './convertir-a-pdf.js'; // libro en Word → PDF (LibreOffice)
 import { leerGuia, perfilHeredado } from './guia-ingesta.js'; // pistas del reproceso (principal fijado + soloAdmin de adjuntos)
+import { escribirAvisoNoCatalogable } from './no-catalogable.js'; // material sin documento: aviso y se queda
 import { isbnDesdeArchivo } from './isbn-archivo.js'; // ISBN del propio fichero del miembro (identificar antes de clasificar)
 import { buscarEnFicheroLocal, corroborarISBNporTitulo } from './buscador-local.js'; // pivote OFFLINE por ISBN (sin IA)
 import { buscarAutoridadPorISBN } from './autoridad-isbn.js';
@@ -440,10 +441,17 @@ export async function huella(dir) {
 export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen = true } = {}) {
     const db = dbArg || await conectarDB();
     const plan = await analizarTransmedia(dirOrigen);
-    // Se cataloga si hay miembros (PDF/audio) O si hay CONTENIDO que preservar (p. ej. un CD interactivo sin
-    // PDF/audio: se copia verbatim y se crea la colección aunque tenga 0 miembros — nada se pierde).
     const hayContenido = (plan.totales?.ficheros || 0) > 0;
     if (!plan.miembros.length && !plan.audiolibros.length && !hayContenido) return { ok: false, motivo: 'carpeta vacía: nada que catalogar' };
+    // Sin un solo documento, audiolibro ni vídeo NO se cataloga (regla del usuario, 14-nov): antes se copiaba y se
+    // dejaba UN registro de «material» con el nombre de la carpeta, y salían fichas como «Lib16», «ch10» o «README»
+    // (los ejemplos de un curso de ensamblador, sin su libro). Material sin documento principal es ruido: se queda
+    // en el Inbox con su aviso, para dejarlo junto a su libro o retirarlo.
+    if (!plan.miembros.length && !plan.audiolibros.length && !plan.videos.length) {
+        const examen = { motivo: `ningún documento que catalogar (${plan.totales?.ficheros || 0} ficheros de material, sin un libro del que colgarlos)`, porExtension: {}, faltanSfv: [] };
+        await escribirAvisoNoCatalogable(dirOrigen, examen, { donde: 'se queda en el Inbox sin catalogar' }).catch(() => {});
+        return { ok: false, permanente: true, motivo: examen.motivo };
+    }
 
     // Anti-duplicados MIEMBRO A MIEMBRO. Un re-drop no debe duplicar los cientos de documentos de una colección
     // ya catalogada... pero TAMPOCO debe impedir COMPLETAR una colección INCOMPLETA. El guardián «todo o nada»
@@ -464,7 +472,7 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         audiolibros = plan.audiolibros.filter((a) => !yaAudio.has(a.titulo));
         videos = plan.videos.filter((v) => !yaFichero.has(path.basename(v.rel)));
         material = plan.material.filter((x) => !yaFichero.has(path.basename(x.rel)));
-        if (!miembros.length && !audiolibros.length && !videos.length && !material.length)
+        if (!miembros.length && !audiolibros.length && !videos.length)
             return { ok: false, permanente: true, motivo: `ya existe la colección «${plan.nombreColeccion}» COMPLETA (${previos.length} documento/s): no se re-cataloga (evita duplicados)` };
         console.log(`  ↻ «${plan.nombreColeccion}» ya existe con ${previos.length} documento/s: se COMPLETA con lo que falta (${miembros.length} PDF · ${audiolibros.length} audiolibro/s · ${videos.length} vídeo/s · ${material.length} material).`);
     }
@@ -612,46 +620,21 @@ export async function ingestarTransmedia(dirOrigen, { db: dbArg, reciclarOrigen 
         insertados++;
     }
 
-    // 3d) MATERIAL NOTABLE (.docx/.lit/.nrg/.iso…) que pasó la CRIBA → ficha propia (sin visor, pero buscable y
-    //     descargable). Lo que NO pasó (código fuente, node_modules, READMEs) va al manifiesto de abajo.
-    for (const x of material) {
-        const _id = new ObjectId();
-        await bib.insertOne(limpiarUndefined(baseDoc({
-            _id, titulo: x.titulo, tipo_recurso: 'libro', naturaleza: 'material', formatos: ['material'],
-            nombre_archivo: path.basename(x.rel), ruta_base: carpetaWebDeRel(x.rel),
-        })));
-        await indexarDoc(db, _id).catch(() => {});
-        insertados++;
-    }
-
-    // 3d-bis) RED DE SEGURIDAD DEL INVARIANTE. Si tras TODO lo anterior no se catalogó NI UN documento pero la
-    // carpeta SÍ tiene contenido, ese contenido quedaría preservado en disco y COMPLETAMENTE INVISIBLE: la
-    // colección existiría con 0 miembros, y el catálogo lista `biblioteca`, no `colecciones`. Es justo lo que
-    // el invariante prohíbe (lo que entra y no es duplicado exacto debe acabar con un registro que apunte a
-    // él), y además pasaba BAJO EL RADAR: se devolvía ok:true con un «✔ contenido preservado verbatim (0
-    // documentos catalogables)» y se reciclaba el origen — nada fallaba, simplemente no se catalogaba nada.
-    // Caso real: 142 páginas escaneadas marcadas «intacta» → analizarTransmedia no cuenta las IMÁGENES (las
-    // trata como portadas) → 0 miembros → carpeta entera invisible.
-    // Ahora ese contenido recibe UN documento propio (como un paquete de software): buscable, con ficha y con
-    // su explorador de archivos. Mejor un registro imperfecto que una carpeta fantasma.
-    if (insertados === 0 && hayContenido) {
-        const _id = new ObjectId();
-        await bib.insertOne(limpiarUndefined(baseDoc({
-            _id, tipo_recurso: 'libro', naturaleza: 'material', titulo: plan.nombreColeccion,
-            formatos: ['material'], ruta_base: webColeccion,
-            portada: (await primeraImagenDe(carpetaColeccion)) || undefined,
-        })));
-        await indexarDoc(db, _id).catch(() => {});
-        insertados++;
-        console.warn(`  ⚠️  «${plan.nombreColeccion}»: 0 documentos catalogables (${plan.totales.ficheros} ficheros: ni PDF, ni audio, ni vídeo, ni material notable) → se cataloga como UN registro del contenido preservado, para que NO quede invisible.`);
-    }
+    // 3d) MATERIAL (.txt/.lit/.rtf/.iso…): viaja con la colección, copiado tal cual en su carpeta, y se anota en el
+    //     manifiesto de abajo — SIN ficha propia. Antes cada uno tenía la suya («LAT01», «GROTE», «PACKING»: 67 fichas
+    //     de material que no colgaban de ningún libro); regla del usuario (14-nov): eso es ruido.
 
     // 3e) MANIFIESTO de lo PRESERVADO pero NO catalogado (lo que la criba dejó fuera): deja constancia de que
     //     está ahí y de que se revisó. En la raíz de la colección (ruta_fija → no se poda).
     const manif = [
         `Colección transmedia: ${plan.nombreColeccion}`,
-        `Catalogado: ${plan.miembros.length} PDF · ${plan.audiolibros.length} audiolibro(s) · ${plan.videos.length} vídeo(s) · ${plan.material.length} material notable.`,
+        `Catalogado: ${plan.miembros.length} PDF · ${plan.audiolibros.length} audiolibro(s) · ${plan.videos.length} vídeo(s).`,
         '',
+        ...(plan.material.length ? [
+            `Material de la colección, conservado aquí sin ficha propia (${plan.material.length}):`,
+            ...plan.material.map((x) => `  · ${x.rel}`),
+            '',
+        ] : []),
         plan.sinCatalogar.length
             ? `Ficheros PRESERVADOS pero NO catalogados (${plan.sinCatalogar.length}) — están aquí, en esta carpeta:`
             : 'No hay ficheros sin catalogar.',
@@ -765,6 +748,15 @@ export async function ingestarIntacta(dirOrigen, opts = {}) {
     // con su ficha de verdad, que se lee abriendo su entrada en una pestaña (utils/libro-html.js).
     const html = await esLibroHtml(dirOrigen);
     if (html) return ingestarLibroHtml(dirOrigen, { ...opts, entrada: html.entrada });
+    // Lo demás sería una ficha de «material» que no cuelga de ningún libro. Solo si lo has decidido TÚ (guía del
+    // panel o a mano); si la guía la puso la IA o PreProceso, se queda en el Inbox con su aviso (regla del usuario,
+    // 14-nov: mejor dejarlo donde está que generar ruido).
+    const origen = (await leerGuia(dirOrigen).catch(() => null))?.perfil?.origen;
+    if (origen === 'agente' || origen === 'preproceso') {
+        const examen = { motivo: 'guía «intacta» de la IA sobre algo que no es un libro: sin un documento principal no se le hace ficha', porExtension: {}, faltanSfv: [] };
+        await escribirAvisoNoCatalogable(dirOrigen, examen, { donde: 'se queda en el Inbox sin catalogar; si de verdad es una obra, guíala tú «intacta»' }).catch(() => {});
+        return { ok: false, permanente: true, motivo: examen.motivo };
+    }
     return ingestarBloqueVerbatim(dirOrigen, {
         ...opts, naturaleza: 'material', rama: 'intacta', nombreDefecto: 'Carpeta',
         // Sin materia ni palabras clave: «000», que el Conformador afina por el título (no «82», literatura).

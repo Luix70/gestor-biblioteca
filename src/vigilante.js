@@ -19,7 +19,7 @@ import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSo
 import { esCarpetaAudiolibro, ingestarAudiolibro } from './utils/audiolibro.js';
 import { esColeccionAudiolibros, ingestarColeccionAudiolibros } from './utils/coleccion-audiolibros.js';
 import { esAudio } from './utils/lector-audio.js';
-import { esDocumentoLeible, esMaterialNotable } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
+import { esDocumentoLeible } from './utils/criba-material.js';   // fuente ÚNICA de «qué es un documento» // FUENTE ÚNICA de extensiones de audio (ampliada: Audible .aax/.aa, etc.)
 import { leerOPF, opfEsSignificativo } from './utils/lector-opf.js';   // .opf suelto (Calibre): metadatos + portada referenciada
 import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, perfilHeredado, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
@@ -29,7 +29,7 @@ import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, par
 import { partesContenidasEnLibro } from './utils/partes-contenidas.js';
 import { convertirAPdf, hayLibreOffice, EXT_CONVERTIBLES } from './utils/convertir-a-pdf.js'; // libro + su desglose
 import { unirPdfsReparando, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
-import { esLibroHtml, esCarpetaWeb } from './utils/libro-html.js'; // libros HTML y páginas web guardadas → «intacta»
+import { esLibroHtml } from './utils/libro-html.js'; // un libro en HTML sin guía → «intacta» (ficha de libro)
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js'; // carpeta de páginas escaneadas → PDF
 import { empaquetarImagenes, planEmpaquetado } from './utils/empaquetar-imagenes.js';
 import { conectarDB, esFalloDeConexionMongo } from './database.js';
@@ -596,50 +596,18 @@ async function tieneDescendientesGuiados(dir, nivel = 8) {
 }
 
 /**
- * ¿Es `ruta` un fichero suelto que es una OBRA sin lector propio (un libro en .txt, un .lit…)? Lo decide la criba de
- * siempre (criba-material: formato documental, ni ruido ni un .txt diminuto). Ha de llevar un minuto quieto: no se
- * envuelve un fichero que aún se está copiando.
+ * ¿Hay, directamente en `dir`, algún LIBRO EN HTML? Decide si una carpeta sin documentos se recorre por dentro: un
+ * libro HTML que se quedó atrás al catalogar los PDF de su carpeta no tiene otra forma de salir del Inbox.
+ * Solo libros. Páginas web sueltas y .txt/.lit sin un documento principal NO se catalogan (regla del usuario, 14-nov:
+ * una ficha de «material» que no cuelga de ningún libro es ruido; mejor que se queden donde están).
  */
-async function esMaterialSuelto(ruta) {
-    const nombre = path.basename(ruta);
-    if (nombre === NOMBRE_GUIA || esValida(nombre)) return false;
-    const st = await fs.stat(ruta).catch(() => null);
-    if (!st?.isFile() || Date.now() - st.mtimeMs < 60000) return false;
-    return esMaterialNotable(nombre, st.size);
-}
-
-/**
- * ¿Hay, directamente en `dir`, algo que no es un documento pero sí se cataloga: un libro HTML, una carpeta de páginas
- * web o material notable suelto? Decide si una carpeta sin documentos se recorre por dentro.
- */
-async function tieneHijosSinDocumento(dir) {
+async function tieneLibrosHtml(dir) {
     let entradas;
     try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
     for (const e of entradas) {
-        if (ignorarEntrada(e.name)) continue;
-        const sub = path.join(dir, e.name);
-        if (e.isDirectory() ? (await esLibroHtml(sub) || await esCarpetaWeb(sub)) : await esMaterialSuelto(sub)) return true;
+        if (e.isDirectory() && !ignorarEntrada(e.name) && await esLibroHtml(path.join(dir, e.name))) return true;
     }
     return false;
-}
-
-/**
- * Mete el fichero `f` en una carpeta nueva con su nombre (sin extensión, «_» → espacio), junto a donde está, para que
- * vaya «intacta» como cualquier carpeta. Devuelve la carpeta, o null si no se pudo (el fichero se queda donde estaba).
- */
-async function envolverEnCarpeta(f) {
-    const base = path.basename(f, path.extname(f)).replace(/_/g, ' ').replace(/\s+/g, ' ').trim() || 'Material';
-    let destino = path.join(path.dirname(f), base);
-    for (let i = 2; await rutaExiste(destino); i++) destino = path.join(path.dirname(f), `${base} (${i})`);
-    try {
-        await fs.mkdir(destino);
-        await fs.rename(f, path.join(destino, path.basename(f)));
-        return destino;
-    } catch (err) {
-        console.warn(`  ⚠️  «${path.basename(f)}»: no se pudo preparar para catalogar (${err.message}); se deja como está.`);
-        await fs.rmdir(destino).catch(() => {});
-        return null;
-    }
 }
 
 /** Cuenta, recursivamente, ficheros de AUDIO y de DOCUMENTO bajo `dir` (para decidir qué manda dentro). */
@@ -1032,7 +1000,6 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
     catch { return; }
 
     const sueltos = [];
-    const notables = [];   // .txt/.lit… que son una obra (ver abajo)
 
     for (const e of entradas) {
         if (ignorarEntrada(e.name)) continue; // ocultos + carpetas de sistema (@eaDir, #recycle...)
@@ -1042,8 +1009,10 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
             // cada escaneo) y ESPERAR a que termine la copia (un drop grande de miles de ficheros tarda minutos;
             // a medias se trataría como colección/pdf incompleto). En una carpeta ya recurrida no hace falta: su
             // carpeta de primer nivel ya superó ambas comprobaciones antes de recurrir.
+            // Rechazada para siempre en esta sesión (duplicado, material sin documento…): a cualquier profundidad, o
+            // una subcarpeta rechazada se reintentaría —y avisaría— en cada pasada.
+            if (omitidasDefinitivas.has(ruta)) continue;
             if (esRaiz) {
-                if (omitidasDefinitivas.has(ruta)) continue;
                 if (!(await carpetaEstable(ruta))) {
                     console.log(`  ⏳ ${e.name}: carpeta aún copiándose — se espera a que termine (no se procesa a medias).`);
                     continue;
@@ -1107,13 +1076,12 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 unidades.push({ esIntacta: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
-            // LIBRO EN HTML o PÁGINAS WEB GUARDADAS sin guía que diga otra cosa (gemelo de PreProceso, que les pone la
-            // guía «intacta»): se conservan enteras con UNA ficha — de libro si es un libro HTML. Sin esto, lo que
-            // llegaba sin pasar por PreProceso, o se quedaba atrás al catalogar los PDF de su carpeta, no tenía ningún
-            // documento que catalogar y esperaba en el Inbox para siempre sin un solo aviso (10-nov: «The Elegant
-            // Universe», «Lucifer Principle», «Fogal patents»…).
+            // LIBRO EN HTML sin guía que diga otra cosa (gemelo de PreProceso, que le pone la guía «intacta»): se
+            // conserva entero con UNA ficha de libro. Sin esto, lo que llegaba sin pasar por PreProceso, o se quedaba
+            // atrás al catalogar los PDF de su carpeta, esperaba en el Inbox para siempre sin un solo aviso (10-nov:
+            // «The Elegant Universe», «Lucifer Principle»).
             if ((!guiaCarpeta?.accion || (guiaCarpeta.accion === 'normal' && guiaCarpeta.perfil?.origen === 'agente'))
-                && (await esLibroHtml(ruta) || await esCarpetaWeb(ruta))) {
+                && await esLibroHtml(ruta)) {
                 unidades.push({ esIntacta: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
@@ -1325,9 +1293,9 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 if (imagenes.length > 0) {
                     dropsADisolver.add(ruta);
                     unidades.push({ rutas: filtrarDuplicadosNombre(imagenes), esImagenes: true, carpeta: ruta, conservarCarpeta: false });
-                } else if (await tieneHijosSinDocumento(ruta)) {
-                    // Ningún documento, pero dentro hay libros HTML, páginas web o .txt/.lit que son una obra: se
-                    // recorre por dentro para que cada uno reciba su ficha (antes la carpeta se saltaba entera).
+                } else if (await tieneLibrosHtml(ruta)) {
+                    // Ningún documento, pero dentro hay libros HTML: se recorre por dentro para que cada uno reciba su
+                    // ficha (antes la carpeta se saltaba entera).
                     dropsADisolver.add(ruta);
                     await clasificarDirectorio(ruta, false, unidades);
                 }
@@ -1338,18 +1306,7 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
             // allí y debe ESPERAR al próximo escaneo — sin esta guarda se colaba aquí como unidad y se
             // catalogaba como «fmt:zip» sin contenido (perdía el escaneo real). Caso de reprocesado.
             sueltos.push(ruta);
-        } else if (await esMaterialSuelto(ruta)) {
-            notables.push(ruta);
         }
-    }
-    // MATERIAL NOTABLE SUELTO (un libro en .txt, un .lit): ningún lector lo abre, pero es una obra, no una nota. Igual
-    // que dentro de una colección transmedia, recibe UNA ficha de material: se envuelve en una carpeta con su nombre y
-    // va «intacta». Antes se quedaba en el Inbox para siempre (10-nov: Galen, «On the Natural Faculties», en .txt).
-    // En la vista previa no se mueve nada: solo se anuncia.
-    for (const f of notables) {
-        if (modoPlan) { unidades.push({ esIntacta: true, carpeta: f, rutas: [f] }); continue; }
-        const envoltorio = await envolverEnCarpeta(f);
-        if (envoltorio) unidades.push({ esIntacta: true, carpeta: envoltorio, rutas: [envoltorio] });
     }
     // Sueltos de ESTE directorio. En la raíz: cada uno por su cuenta, sin carpeta. En una carpeta recurrida:
     // agrupados igual (imágenes juntas = un libro; docs por su cuenta), pero LIGADOS a la carpeta para poder

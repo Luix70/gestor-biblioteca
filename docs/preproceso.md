@@ -1,6 +1,6 @@
 # PreProceso — preparar antes de catalogar
 
-Diseño acordado con el usuario el 3-nov-2026. Estado: **fase 1 hecha** (`src/preproceso.js`, sin IA); fases 2-4 por hacer.
+Diseño acordado con el usuario el 3-nov-2026. Estado: **fases 1 y 2 hechas** (`src/preproceso.js`; la inspección con IA, desde el 14-nov); fases 3-4 por hacer.
 LibreOffice ya está en la imagen (probado en el Atom el 3-nov), así que la conversión de .doc se hace en el NAS.
 
 Fase 1, cómo funciona hoy: cada `PREPROCESO_ESCANEO_MS` (5 min) se revisa `PreProceso`. Una carpeta solo se reanaliza si
@@ -79,6 +79,10 @@ pasada al Inbox), su informe y, en las que esperan, las acciones para decidir.
 ## Fases
 
 1. Carpeta, vigilancia y estados (sin IA): expandir, escaneos, desgloses, conversión, paso al Inbox.
-2. Inspección IA y guías en PreProceso; el Vigilante deja de inspeccionar lo que llega con guía de PreProceso.
+2. Inspección IA y guías en PreProceso; el Vigilante deja de inspeccionar lo que llega con guía de PreProceso. **Hecha
+   (14-nov)**: `prepararDrop` llama a `inspeccion-auto·prepararCarpeta(drop, {origen:'preproceso'})` tras expandir; si la IA
+   falla, la carpeta entera espera. La marca pasa al Inbox con `origen:'preproceso'` y allí no se reinspecciona. Se queda
+   aquí, además, una guía «intacta» de la IA sobre algo que no es un libro HTML (daría una ficha de material sin libro).
+   Lo dudoso de la IA (poca confianza) sigue pasando con las reglas de siempre, como antes en el Inbox.
 3. Tarjeta del panel y acciones.
 4. Primer caso real: `Computers`.

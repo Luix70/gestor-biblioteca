@@ -214,10 +214,12 @@ const avisadasManual = new Set();   // carpetas guiadas a mano: se avisa UNA vez
 const avisadasReserva = new Set();  // ídem, carpetas reservadas por el panel
 
 /**
- * Prepara UNA carpeta de la raíz del Inbox antes de clasificarla.
+ * Prepara UNA carpeta antes de clasificarla: una de la raíz del Inbox (la llama el Vigilante) o una carpeta dejada en
+ * PreProceso (`origen:'preproceso'`, fase 2: se inspecciona ALLÍ, antes de pasar nada al Inbox, para que lo que llega
+ * venga ya guiado y lo que no tiene camino se quede).
  * @returns {Promise<{seguir:boolean}>} seguir=false → ESPERAR (la IA falló y aún no toca reintentar).
  */
-export async function prepararCarpeta(dir) {
+export async function prepararCarpeta(dir, { origen = 'vigilante' } = {}) {
     const nombre = path.basename(dir);
     // Reservada por una inspección del panel: esperar a que decidas (va antes que el interruptor: aunque la
     // inspección automática esté apagada, no se debe ingerir lo que estás revisando).
@@ -228,6 +230,9 @@ export async function prepararCarpeta(dir) {
     avisadasReserva.delete(dir);
     if (!inspeccionIAActiva()) return { seguir: true };
     const marca = await leerMarca(dir);
+    // Inspeccionada ya en PreProceso: sus unidades llegan guiadas al Inbox. Volver a inspeccionar gastaría la IA dos
+    // veces y, como las unidades llegan de una en una, cada llegada contaría como «carpetas nuevas».
+    if (origen === 'vigilante' && marca?.origen === 'preproceso') return { seguir: true };
 
     // Ya inspeccionada (o agotada la espera): solo se repite si han llegado carpetas NUEVAS, a cualquier profundidad.
     if (marca && (marca.estado === 'hecha' || marca.estado === 'agotada')) {
@@ -258,10 +263,10 @@ export async function prepararCarpeta(dir) {
     const cx = await evaluarComplejidad(dir);
     if (!cx.compleja) return { seguir: true };
 
-    return inspeccionar(dir, marca, cx.motivo);
+    return inspeccionar(dir, marca, cx.motivo, origen);
 }
 
-async function inspeccionar(dir, marcaPrevia, motivo) {
+async function inspeccionar(dir, marcaPrevia, motivo, origen = 'vigilante') {
     const nombre = path.basename(dir);
     const t0 = Date.now();
     console.log(`  🧭 «${nombre}»: carpeta compleja (${motivo}) → inspección con IA antes de ingerir…`);
@@ -279,7 +284,7 @@ async function inspeccionar(dir, marcaPrevia, motivo) {
 
         const dudosas = plan.filter((p) => p.estado === 'dudosa').map((p) => ({ ruta: p.ruta, tipo: p.tipo, contenido: p.contenido, motivo: p.motivo }));
         const escritasPlan = plan.filter((q) => q.estado === 'nueva' || q.estado === 'actualizar');
-        const { porClase } = await registrarInspeccion(dir, { esq, r, escritas: escritasPlan, notas, dudosas, segundos: Math.round((Date.now() - t0) / 1000), origen: 'vigilante' });
+        const { porClase } = await registrarInspeccion(dir, { esq, r, escritas: escritasPlan, notas, dudosas, segundos: Math.round((Date.now() - t0) / 1000), origen });
         const resumen = Object.entries(porClase).map(([k, n]) => `${n} ${k}`).join(', ') || 'ninguna';
         console.log(`  🧭 «${nombre}»: inspeccionada en ${Math.round((Date.now() - t0) / 1000)} s (${r.llamadas} llamada(s), ${esq.carpetas.length} carpetas). Guías: ${resumen}.`);
         if (esq.recortado) {

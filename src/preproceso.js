@@ -1,5 +1,5 @@
 /**
- * PREPROCESO — preparar antes de catalogar (fase 1: sin IA). Diseño en docs/preproceso.md.
+ * PREPROCESO — preparar antes de catalogar (fases 1 y 2: preparación + inspección con IA). Diseño en docs/preproceso.md.
  *
  * El usuario deja en PreProceso lo complejo (carpetas enormes, formatos variopintos, libros por capítulos). Aquí se
  * PREPARA y solo cuando una unidad está lista pasa al Inbox, donde el Vigilante la cataloga como cualquier otra.
@@ -7,6 +7,9 @@
  *
  * Cada pasada, por cada carpeta dejada en PreProceso que ya terminó de copiarse:
  *   1. expande los comprimidos (vigilante · expandirComprimidos: zip/rar/7z → carpeta);
+ *   1b. inspecciona el árbol con IA si es complejo (utils/inspeccion-auto · prepararCarpeta, la misma del Vigilante) y
+ *      deja sus `_guia.json`: lo que pasa al Inbox va ya guiado, y lo que la IA ve no catalogable (guía «omitir») se
+ *      queda aquí. Si la IA falla, la carpeta entera ESPERA y se reintenta. El Vigilante no la vuelve a inspeccionar;
  *   2. convierte en PDF las carpetas de páginas escaneadas (utils/escaneo-a-pdf);
  *   3. resuelve los libros por capítulos: el libro entero si está; si no, convierte las partes .doc con LibreOffice y
  *      las cose (vigilante · materializarDesglose*). Lo que no se pueda, queda PENDIENTE;
@@ -31,6 +34,8 @@ import { esFicheroCatalogable, examinarCatalogable, escribirAvisoNoCatalogable }
 import { leerGuia, escribirGuia, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { esLibroHtml } from './utils/libro-html.js';
 import { reciclarCarpeta } from './utils/papelera.js';
+import { prepararCarpeta, MARCA_INSPECCION } from './utils/inspeccion-auto.js'; // fase 2: la IA guía aquí, no en el Inbox
+import { CARPETA_MATERIAL_SIN_LIBRO } from './utils/retirar-material.js';
 import { EXT_DOC } from './mantenimiento/util-mantenimiento.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,7 +45,9 @@ const DIR_INBOX = resolver(process.env.PATH_INBOX, 'Inbox');
 const INFORME = '_preproceso.txt';
 const ACCIONES_INTOCABLES = ['intacta', 'software', 'omitir', 'empaquetar'];   // el usuario dijo: tal cual
 
-const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || n === INFORME;
+// `_Material sin libro`: lo que se retiró del catálogo por no colgar de ningún libro (utils/retirar-material.js). Espera
+// a que lo juntes con su libro; PreProceso no lo prepara ni lo pasa al Inbox.
+const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || n === INFORME || n === CARPETA_MATERIAL_SIN_LIBRO;
 const existe = (p) => fs.access(p).then(() => true).catch(() => false);
 const esDoc = (n) => EXT_DOC.includes(path.extname(n).toLowerCase());
 
@@ -108,6 +115,20 @@ async function prepararDrop(drop) {
     await expandirComprimidos(drop);
     const pendientes = new Map();   // ruta → motivo
     const hecho = [];
+
+    // FASE 2 · INSPECCIÓN CON IA AQUÍ, antes de pasar nada. Antes se hacía en el Inbox, justo antes de catalogar
+    // (14-nov: «Medical» pasó entera y se inspeccionó allí), cuando ya no quedaba ocasión de retener lo que no tiene
+    // camino. Con las guías escritas aquí, la preparación de abajo (coser un desglose guiado) y el filtro de salida
+    // las obedecen. Si la IA falla, no pasa nada de esta carpeta: se reintenta sola.
+    const prep = await prepararCarpeta(drop, { origen: 'preproceso' }).catch((err) => {
+        console.warn(`  🧭 PreProceso «${nombre}»: fallo al preparar la inspección (${err.message}) → sin guías de IA.`);
+        return { seguir: true };
+    });
+    if (!prep.seguir) {
+        pendientes.set(drop, 'esperando la inspección con IA (falló o está en revisión en el panel; se reintenta sola)');
+        await escribirInforme(drop, hecho, pendientes, 0);
+        return;
+    }
     await prepararArbol(drop, pendientes, hecho);
 
     const unidades = await unidadesDe(drop);
@@ -131,7 +152,8 @@ async function prepararDrop(drop) {
         }
         const rel = path.relative(drop, u);
         const destino = await destinoLibre(rel ? path.join(DIR_INBOX, nombre, rel) : path.join(DIR_INBOX, nombre));
-        // La guía de la carpeta dejada viaja al lado: es su contexto (colección, materia, perfil heredado).
+        // La guía de la carpeta dejada viaja al lado: es su contexto (colección, materia, perfil heredado). Y la marca
+        // de la inspección, para que el Vigilante sepa que ya se inspeccionó aquí y no gaste la IA otra vez.
         if (rel) {
             const guiaDrop = path.join(drop, NOMBRE_GUIA);
             const guiaInbox = path.join(DIR_INBOX, nombre, NOMBRE_GUIA);
@@ -139,6 +161,7 @@ async function prepararDrop(drop) {
                 await fs.mkdir(path.dirname(guiaInbox), { recursive: true });
                 await fs.copyFile(guiaDrop, guiaInbox);
             }
+            await pasarMarcaInspeccion(drop, path.join(DIR_INBOX, nombre));
         }
         await moverArbol(u, destino);
         pasadas++;
@@ -152,6 +175,20 @@ async function prepararDrop(drop) {
         await reciclarCarpeta(drop, 'preproceso-vaciado');
         console.log(`  ✅ PreProceso: «${nombre}» completa, toda en el Inbox.`);
     }
+}
+
+/**
+ * Copia la marca de inspección de la carpeta dejada a su gemela del Inbox, con `origen:'preproceso'` (aunque la marca
+ * diga «agotada»: la decisión de no esperar más a la IA ya se tomó aquí). Sin marca no hay nada que copiar: la carpeta
+ * era simple y no se inspeccionó, y en el Inbox tampoco se inspeccionará.
+ */
+async function pasarMarcaInspeccion(drop, destinoDrop) {
+    const destino = path.join(destinoDrop, MARCA_INSPECCION);
+    if (await existe(destino)) return;
+    const marca = await fs.readFile(path.join(drop, MARCA_INSPECCION), 'utf8').then(JSON.parse).catch(() => null);
+    if (!marca) return;
+    await fs.mkdir(destinoDrop, { recursive: true });
+    await fs.writeFile(destino, JSON.stringify({ ...marca, origen: 'preproceso' }, null, 2)).catch(() => {});
 }
 
 /** Recorre el árbol de abajo arriba preparando cada carpeta. Anota lo hecho y lo que queda pendiente. */
@@ -236,6 +273,11 @@ async function motivoParaRetener(u) {
     if (guia?.accion === 'libro-material') {
         const principal = guia.libro_material?.principal;
         return principal && await existe(path.join(u, principal)) ? null : { motivo: 'guía de libro + material sin su libro principal' };
+    }
+    // «Intacta» de la IA sobre algo que no es un libro HTML: daría una ficha de «material» sin libro del que colgar, que
+    // la ingesta ya no hace (regla del usuario, 14-nov). Se queda aquí; una guía tuya «intacta» sí pasa.
+    if (guia?.accion === 'intacta' && ['agente', 'preproceso'].includes(guia.perfil?.origen) && !(await esLibroHtml(u))) {
+        return { motivo: 'la IA la guió «intacta», pero no es un libro: sin un documento principal no se le hace ficha. Si es una obra, guíala tú' };
     }
     if (ACCIONES_CON_CAMINO.includes(guia?.accion)) return null;
     // Una guía tuya (del Inspector o aprobada en el panel) decide; la del agente, no.
