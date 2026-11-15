@@ -146,9 +146,18 @@ if (CON_PAPELERA) {
         const man = await fs.readFile(path.join(sub, MANIFIESTO_PAPELERA), 'utf8').then(JSON.parse, () => null);
         for (const it of man?.items || []) {
             if (it.tipo !== 'file') continue;
-            const fuente = path.join(sub, it.rel);
-            if (!(await existe(fuente))) continue;
-            const destino = destinoEnPreproceso(it.origen);
+            // Puede haberse renombrado DENTRO de la Papelera (medido: «Fate Stay Night Visual Collection.zip» →
+            // «….cbz», a mano): mismo nombre con otra extensión de comprimido o de cómic. Vuelve con el nombre nuevo.
+            let fuente = path.join(sub, it.rel);
+            let destino = destinoEnPreproceso(it.origen);
+            if (!(await existe(fuente))) {
+                const base = path.basename(it.rel).replace(/\.[^.]+$/, '');
+                const otro = (await fs.readdir(sub).catch(() => []))
+                    .find((n) => n.replace(/\.[^.]+$/, '') === base && /\.(zip|rar|7z|cbz|cbr|cb7)$/i.test(n));
+                if (!otro) continue;
+                fuente = path.join(sub, otro);
+                destino = path.join(path.dirname(destino), otro);
+            }
             let entradas = null;
             try { entradas = await listarComprimido(fuente); } catch { /* ilegible: se devuelve igual */ }
             const laminas = entradas && esComprimidoDeImagenes(entradas);
