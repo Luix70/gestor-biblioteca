@@ -104,6 +104,12 @@ export const AJUSTES = {
     PORTADA_ANCHO_DECENTE: 500,     // si ya hay algo así de ancho, no se descargan portadas remotas
     PORTADA_ANCHO_MINIMO: 100,      // por debajo = imagen degenerada y se descarta (el 1x1 de OL)
 
+    // --- Extracción de comprimidos (extraer-archivo) ---
+    // SIN tope de tiempo total: una extracción que avanza no se interrumpe nunca (regla del usuario, 15-nov; con un
+    // tope fijo de 5 min, los zip de 16-52 GB morían a mitad y se daban por dañados). Solo se para si se ATASCA:
+    // estos minutos seguidos sin un fichero nuevo extraído ni el fichero en curso creciendo.
+    EXTRAER_SIN_AVANCE_MIN: 20,
+
     // --- Empaquetado de láminas sueltas en cbz (empaquetar-imagenes) ---
     // Tope POR TOMO, en BYTES (no en nº de páginas): el visor abre el cbz cargándolo en MEMORIA (adm-zip), así
     // que lo que puede tumbar al Atom son los bytes. Por número se hacían las dos cosas mal: partía en dos un

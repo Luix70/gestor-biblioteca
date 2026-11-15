@@ -53,6 +53,23 @@
 - [ ] Repasar `PreProceso/_Material sin libro/`: lo que sea de un libro (los ejemplos de Irvine, el CD de Floyd, el
       curso de latín) se deja junto a su libro; el resto se retira a mano
 
+### 0.596 Comprimidos grandes, anidados y de solo imágenes (15-nov) — en el NAS
+- [ ] Desplegar (extracción SIN tope de tiempo mientras avance — solo se para si se atasca `EXTRAER_SIN_AVANCE_MIN`;
+      comprobación de espacio; verificación de lo extraído antes de reciclar el original; anidados en la misma pasada;
+      zip/rar/7z de solo imágenes → .cbz/.cbr/.cb7 sin abrir (zip de láminas > `CBZ_MAX_BYTES` → se abre y se guía
+      «empaquetar»); lo que no se puede abrir se queda en PreProceso con `.NO_SE_PUDO_DESCOMPRIMIR - <nombre>.txt`,
+      nunca a Cuarentena; desde el Inbox se aparta a PreProceso)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/recuperar-comprimidos.js` — revisar (medido desde el PC el
+      15-nov: 98 ficheros, 138 GB — 5 de Cuarentena/ilegibles con SCIENCE/DIY/ANTHOLOGIES/NEWS.zip, 2 de «otros»,
+      62 artbooks que vuelven como zip y su carpeta abierta va a la Papelera, 2 artbooks grandes que se guían
+      «empaquetar», 27 que vuelven a reprocesarse; desde el PC los .7z salían «NO casa» porque el tar de Windows no
+      lee LZMA: en el NAS sí)
+- [ ] `… --ejecutar` (mueve ~138 GB entre montajes: copia + verificación, tarda) y comprobar que PreProceso abre los
+      cuatro zip grandes (log: «abriendo… no se interrumpe mientras avance») y convierte los artbooks en cómics
+- [ ] Revisar los «papelera (láminas; ¿ficha duplicada?)»: pueden dar un cbz junto al PDF que se hizo de sus imágenes
+- [ ] Decidir si se recuperan también los lotes viejos ya abiertos: `--desde 2026-11-09` (1.090 comprimidos del 9-nov)
+      y `--desde 2026-10-31` (110); su contenido ya pasó por la ingesta, lo idéntico se detectaría por hash
+
 ### 0.595 Libros HTML mal detectados y portadas que no se podían cambiar (15-nov) — en el NAS
 - [ ] Desplegar (detector de libros HTML corregido; el editor de imágenes ya ve la portada de las fichas sin `imagenes[]`)
 - [ ] Copia de la base

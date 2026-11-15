@@ -37,6 +37,7 @@ import { reciclarCarpeta } from './utils/papelera.js';
 import { prepararCarpeta, MARCA_INSPECCION } from './utils/inspeccion-auto.js'; // fase 2: la IA guía aquí, no en el Inbox
 import { CARPETA_MATERIAL_SIN_LIBRO } from './utils/retirar-material.js';
 import { EXT_DOC } from './mantenimiento/util-mantenimiento.js';
+import { huella, moverArbol, destinoLibre } from './utils/mover-arbol.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const resolver = (p, def) => { const v = p || def; return path.isAbsolute(v) ? v : path.resolve(RAIZ, v); };
@@ -90,7 +91,9 @@ export async function pasadaPreproceso() {
 async function pasarFicheroSuelto(ruta) {
     const ext = path.extname(ruta).toLowerCase();
     if (['.zip', '.rar', '.7z', '.tar', '.gz', '.tgz', '.iso'].includes(ext)) {
-        await expandirComprimidos(DIR_PRE, 0);   // lo convierte en carpeta; se prepara en la próxima pasada
+        // Lo convierte en carpeta (se prepara en la próxima pasada) o en cómic si solo trae imágenes. Si no se puede
+        // abrir, se queda aquí con su aviso `.NO_SE_PUDO_DESCOMPRIMIR - <nombre>.txt` al lado.
+        await expandirComprimidos(DIR_PRE, 0, { enPreproceso: true });
         return;
     }
     const st = await fs.stat(ruta).catch(() => null);
@@ -112,9 +115,12 @@ async function pasarFicheroSuelto(ruta) {
 /** Prepara una carpeta dejada en PreProceso y pasa al Inbox sus unidades listas. */
 async function prepararDrop(drop) {
     const nombre = path.basename(drop);
-    await expandirComprimidos(drop);
     const pendientes = new Map();   // ruta → motivo
     const hecho = [];
+    // Un comprimido que no se puede abrir SE QUEDA AQUÍ, con su error (regla del usuario, 15-nov), y retiene su
+    // unidad: la carpeta pasa entera o no pasa. Antes iba a Cuarentena/ilegibles y el resto de la carpeta pasaba al
+    // Inbox; la carpeta dejada se daba por «completa» y se reciclaba.
+    for (const { ruta, motivo } of await expandirComprimidos(drop, 6, { enPreproceso: true })) pendientes.set(ruta, motivo);
 
     // FASE 2 · INSPECCIÓN CON IA AQUÍ, antes de pasar nada. Antes se hacía en el Inbox, justo antes de catalogar
     // (14-nov: «Medical» pasó entera y se inspeccionó allí), cuando ya no quedaba ocasión de retener lo que no tiene
@@ -293,46 +299,6 @@ async function motivoParaRetener(u) {
         return { motivo: `parece un libro por capítulos sin coser (en «${capitulos === '.' ? path.basename(u) : capitulos}»). Si no lo es, ponle una guía` };
     }
     return null;
-}
-
-/** Un nombre libre en el destino: nunca se pisa nada del Inbox. */
-async function destinoLibre(destino) {
-    if (!(await existe(destino))) return destino;
-    const ext = path.extname(destino), base = destino.slice(0, destino.length - ext.length);
-    for (let i = 2; ; i++) {
-        const otro = `${base} (${i})${ext}`;
-        if (!(await existe(otro))) return otro;
-    }
-}
-
-/** Ficheros y bytes de un árbol (o de un fichero), para verificar una copia. */
-async function huella(ruta) {
-    const st = await fs.stat(ruta);
-    if (!st.isDirectory()) return { n: 1, bytes: st.size };
-    let n = 0, bytes = 0;
-    for (const e of await fs.readdir(ruta)) {
-        const h = await huella(path.join(ruta, e));
-        n += h.n; bytes += h.bytes;
-    }
-    return { n, bytes };
-}
-
-/**
- * Mueve un fichero o carpeta. PreProceso y el Inbox son montajes distintos del contenedor, así que `rename` falla
- * (EXDEV): entonces se copia, se verifica (mismos ficheros y bytes) y solo después se borra el origen. Si la copia no
- * cuadra, se borra la copia y el origen se queda.
- */
-async function moverArbol(origen, destino) {
-    await fs.mkdir(path.dirname(destino), { recursive: true });
-    try { await fs.rename(origen, destino); return; }
-    catch (e) { if (e.code !== 'EXDEV') throw e; }
-    await fs.cp(origen, destino, { recursive: true, errorOnExist: true, force: false });
-    const [a, b] = await Promise.all([huella(origen), huella(destino)]);
-    if (a.n !== b.n || a.bytes !== b.bytes) {
-        await fs.rm(destino, { recursive: true, force: true });
-        throw new Error(`copia incompleta de «${path.basename(origen)}» (${a.n}/${a.bytes} ≠ ${b.n}/${b.bytes}); se queda en PreProceso`);
-    }
-    await fs.rm(origen, { recursive: true, force: true });
 }
 
 async function escribirInforme(drop, hecho, pendientes, pasadas) {

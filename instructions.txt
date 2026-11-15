@@ -2622,6 +2622,23 @@ de ficheros clasificado por CDU.
       dentro se cataloga aparte. Un titulo que es el nombre de una pagina («contents.htm») o un listado de servidor
       («Index of /…») ya no se toma como titulo. Lo ya catalogado: scripts/revisar-libros-html.js (en seco por
       defecto; los que no son libro vuelven enteros a PreProceso, sin su ficha; los titulos basura se listan).
+    · COMPRIMIDOS GRANDES (15-nov): un .zip/.rar/.7z se descomprime SIN limite de tiempo mientras avance (antes
+      tenia 5 minutos y los zip de 16-52 GB se daban por danados y acababan en Cuarentena). Solo se para si se
+      atasca: 20 minutos seguidos sin avanzar (EXTRAER_SIN_AVANCE_MIN en config.js). Antes de abrirlo se mira que
+      haya espacio en disco; al terminar se comprueba que salieron todos los ficheros que lista, y solo entonces el
+      original va a la Papelera. Los comprimidos que vienen DENTRO de otro se abren en la misma pasada.
+    · SI NO SE PUEDE DESCOMPRIMIR (15-nov): se queda en PreProceso, sin abrir, con un aviso al lado
+      «.NO_SE_PUDO_DESCOMPRIMIR - <nombre>.txt» que dice el error. Nunca va a Cuarentena ni a la Papelera. Su
+      carpeta no pasa al Inbox mientras tanto (pasa entera o no pasa). Se reintenta solo cada 6 h, o en cuanto
+      sustituyas el fichero. Si estaba en el Inbox, se aparta a PreProceso con la misma ruta.
+    · COMPRIMIDOS DE SOLO IMAGENES (15-nov): un .zip/.rar/.7z que solo trae imagenes (un artbook) es un libro de
+      laminas: se renombra a .cbz/.cbr/.cb7 sin abrirlo y se cataloga como comic. Un zip de laminas de mas de 400 MB
+      (CBZ_MAX_BYTES: el visor abre el cbz en memoria) se abre y se empaqueta en tomos .cbz. Si dentro hay
+      documentos, otros comprimidos o varias carpetas grandes de imagenes (varios libros), se abre como siempre.
+    · RECUPERAR LO DE ESTOS DIAS: scripts/recuperar-comprimidos.js (en seco por defecto; --ejecutar; --desde
+      AAAA-MM-DD, por defecto 2026-11-14). Devuelve a PreProceso, a su misma ruta, los comprimidos de la Papelera y
+      lo que entro en Cuarentena desde esa fecha. Un artbook cuya carpeta abierta sigue entera vuelve como zip (se
+      convertira en comic) y la carpeta va a la Papelera. No toca la base de datos.
     · PORTADA SIN IMAGENES (15-nov): en una ficha que solo tenia portada (74: libros HTML, audiolibros, software,
       PDF antiguos) el editor de imagenes no la veia: no se podia quitar ni sustituir. Ahora la portada cuenta como
       su primera imagen. Al quitar una imagen que es parte del contenido del libro (la portada de un libro HTML,

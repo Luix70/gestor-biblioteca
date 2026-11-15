@@ -12,7 +12,9 @@ import { fileURLToPath } from 'url';
 import { ingestarRecurso } from './servicio-ingesta.js';
 import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js';
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
-import { extraerArchivoComic as extraerComprimido } from './utils/extraer-archivo.js';
+import { extraerArchivoComic as extraerComprimido, listarComprimido, ficherosDelListado } from './utils/extraer-archivo.js';
+import { esComprimidoDeImagenes, destinoComic } from './utils/comprimido-imagenes.js';
+import { moverArbol, destinoLibre } from './utils/mover-arbol.js';
 import { reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { retirarCarpeta } from './utils/borrado-seguro.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarIntacta, ingestarLibroConMaterial } from './utils/transmedia.js';
@@ -1545,10 +1547,13 @@ const rutaExiste = (p) => fs.access(p).then(() => true).catch(() => false);
  * colección, "Vol N"→obra). El zip original se RECICLA (nunca se borra). Un zip corrupto → Cuarentena/
  * ilegibles. Aplana un único directorio raíz (evita Inbox/<base>/<base>/… y que las imágenes queden anidadas).
  */
-export async function expandirComprimidos(dir = INBOX, nivel = 6) {   // la usa también preproceso.js
-    if (nivel < 0) return;
+// Devuelve los comprimidos que NO se pudieron abrir: [{ ruta, motivo }] (PreProceso los retiene con su carpeta).
+// `opts.enPreproceso`: el que no se abre se queda donde está (en el Inbox se aparta a PreProceso).
+export async function expandirComprimidos(dir = INBOX, nivel = 6, opts = {}) {   // la usa también preproceso.js
+    const noExpandidos = [];
+    if (nivel < 0) return noExpandidos;
     let entradas;
-    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return noExpandidos; }
     // RECURSIVO: un contenedor DENTRO de una carpeta-drop también se abre. Antes solo se miraba la raíz del
     // Inbox, así que «Mammoth Books/The Mammoth Book of Tasteless Jokes.tgz» no se tocaba NUNCA y sus libros
     // no llegaban al catálogo. Se recurre ANTES de procesar esta carpeta, para que al clasificar el drop su
@@ -1563,7 +1568,7 @@ export async function expandirComprimidos(dir = INBOX, nivel = 6) {   // la usa 
         // cada .rar en su propia carpeta— y entonces `imagenesDe`, que mira los ficheros DIRECTOS, no
         // encontraba ninguna lámina: cientos de carpetas creadas y ningún cbz.
         if (['intacta', 'software', 'omitir', 'empaquetar'].includes(g?.accion)) continue;
-        await expandirComprimidos(rutaSub, nivel - 1);
+        noExpandidos.push(...await expandirComprimidos(rutaSub, nivel - 1, opts));
     }
     // ACCIÓN POR FICHERO elegida en el Inspector (guía de la carpeta): un contenedor complejo NO se puede
     // adivinar. El MISMO .iso puede ser un archivo de documentos (→ abrir) o una enciclopedia/instalador de
@@ -1623,27 +1628,185 @@ export async function expandirComprimidos(dir = INBOX, nivel = 6) {   // la usa 
             }
             continue;
         }
-        // El destino se crea JUNTO al contenedor (no siempre en la raíz del Inbox): así lo expandido queda
-        // dentro de su drop y se clasifica con él.
-        let destino = path.join(dir, base);
-        for (let i = 2; await rutaExiste(destino); i++) destino = path.join(dir, `${base} (${i})`);
-        const tmp = path.join(dir, `.expand-${Date.now()}`);   // oculto → ignorarEntrada lo salta
+        // Un fallo anterior no se reintenta en cada pasada: espera REINTENTO_EXPANDIR_MS, o a que el fichero cambie
+        // (lo sustituyes por una copia buena). Mientras, sigue contando como «no expandido» (PreProceso lo retiene).
+        const firmaZip = await fs.stat(zip).then((s) => `${s.size}:${s.mtimeMs}`).catch(() => '');
+        const fallo = fallosExpandir.get(zip);
+        if (fallo && fallo.firma === firmaZip && Date.now() - fallo.t < REINTENTO_EXPANDIR_MS) {
+            noExpandidos.push({ ruta: zip, motivo: fallo.motivo });
+            continue;
+        }
+        const r = await expandirUno(dir, e.name, zip, base, { decidido, nivel, opts });
+        if (r.ok) {
+            fallosExpandir.delete(zip);
+            noExpandidos.push(...r.anidados);
+            continue;
+        }
+        // NO SE PUDO ABRIR → nunca a Cuarentena como «dañado» ni a la Papelera (regla del usuario, 15-nov: «si no se
+        // puede descomprimir, se queda en PreProceso, con su mensaje de error»). Medido: SCIENCE.zip, DIY.zip,
+        // ANTHOLOGIES.zip y NEWS.zip, sanos, acabaron en Cuarentena/ilegibles porque el extractor tenía 5 minutos.
+        console.warn(`  ⚠️  No se pudo abrir «${e.name}»: ${r.motivo}`);
+        const donde = await apartarNoExpandido(zip, r.motivo, opts);
+        fallosExpandir.set(donde, { firma: firmaZip, t: Date.now(), motivo: r.motivo });
+        noExpandidos.push({ ruta: donde, motivo: `comprimido que no se pudo abrir: ${r.motivo}` });
+    }
+    return noExpandidos;
+}
+
+// Comprimidos que no se pudieron abrir: ruta → { firma (tamaño:mtime), t, motivo }. En memoria.
+const fallosExpandir = new Map();
+const REINTENTO_EXPANDIR_MS = 6 * 60 * 60 * 1000;
+const DIR_PREPROCESO = resolver(process.env.PATH_PREPROCESO, 'PreProceso');
+// Margen de disco para abrir un comprimido: su tamaño × 1,2 + 2 GB (lo extraído ocupa como poco lo comprimido; las
+// imágenes y los PDF apenas comprimen). Sin espacio, bsdtar se quedaría a medias con el disco lleno.
+const MARGEN_DISCO_BYTES = 2 * 1024 * 1024 * 1024;
+const avisoNoExpandido = (nombre) => `.NO_SE_PUDO_DESCOMPRIMIR - ${nombre}.txt`;
+const gb = (b) => `${(b / 1024 ** 3).toFixed(1)} GB`;
+
+/** Bytes libres en el disco de `dir`, o null si no se puede saber (Node sin fs.statfs). */
+async function espacioLibre(dir) {
+    if (typeof fs.statfs !== 'function') return null;
+    try { const s = await fs.statfs(dir); return Number(s.bavail) * Number(s.bsize); } catch { return null; }
+}
+
+/**
+ * Nº de ficheros de un árbol (todos, ocultos incluidos: es para cuadrar con la lista del comprimido). `conVacias`:
+ * cada carpeta vacía cuenta como uno (en el listado de un RAR no se distingue de un fichero).
+ */
+async function contarFicheros(dir, { conVacias = false } = {}) {
+    const ents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    let n = 0;
+    for (const e of ents) {
+        if (e.isDirectory()) {
+            const dentro = await contarFicheros(path.join(dir, e.name), { conVacias });
+            n += dentro || (conVacias ? 1 : 0);
+        } else n++;
+    }
+    return n;
+}
+
+/**
+ * Abre UN comprimido junto a sí mismo. Devuelve { ok:true, anidados } (anidados = los comprimidos de DENTRO que a su
+ * vez no se pudieron abrir) o { ok:false, motivo } — y entonces el comprimido sigue intacto donde estaba.
+ *   1. Lo LISTA sin abrirlo: si ni eso se puede, está dañado o incompleto.
+ *   2. Solo imágenes → es un cómic/libro de láminas: .cbz/.cbr/.cb7 sin abrirlo (utils/comprimido-imagenes.js). Un zip
+ *      de láminas demasiado grande para un cbz se abre y su carpeta se guía «empaquetar» (tomos de CBZ_MAX_BYTES).
+ *   3. Comprueba que hay ESPACIO.
+ *   4. Extrae a un temporal oculto, sin tope de tiempo mientras avance (utils/extraer-archivo.js).
+ *   5. VERIFICA que salieron todos los ficheros que lista. Solo entonces el original va a la Papelera.
+ *   6. Abre en la MISMA pasada los comprimidos anidados (un zip de 30 GB con zips dentro).
+ */
+async function expandirUno(dir, nombre, zip, base, { decidido, nivel, opts }) {
+    const bytesZip = await fs.stat(zip).then((s) => s.size).catch(() => 0);
+
+    let entradas;
+    try { entradas = await listarComprimido(zip); }
+    catch (err) { return { ok: false, motivo: `no se puede leer ni su índice (¿dañado o incompleto?): ${err.message}` }; }
+
+    // Si TÚ dijiste «abrir» en el Inspector, se abre aunque sean láminas.
+    let empaquetar = false;
+    if (!decidido && esComprimidoDeImagenes(entradas)) {
+        const dest = destinoComic(nombre, bytesZip);
+        if (dest?.ext) {
+            const nuevo = await nombreLibre(dir, base + dest.ext);
+            try {
+                await fs.rename(zip, nuevo);
+                await fs.rm(path.join(dir, avisoNoExpandido(nombre)), { force: true }).catch(() => {});
+                console.log(`  🖼️  «${nombre}»: solo imágenes → «${path.basename(nuevo)}» (un cómic / libro de láminas; no se abre).`);
+                return { ok: true, anidados: [] };
+            } catch (err) {
+                return { ok: false, motivo: `es un libro de láminas pero no se pudo renombrar a ${dest.ext}: ${err.message}` };
+            }
+        }
+        empaquetar = Boolean(dest?.empaquetar);
+    }
+
+    const libre = await espacioLibre(dir);
+    const necesita = Math.ceil(bytesZip * 1.2) + MARGEN_DISCO_BYTES;
+    if (libre != null && libre < necesita) {
+        return { ok: false, motivo: `no hay espacio para abrirlo (necesita ~${gb(necesita)}, quedan ${gb(libre)}). Se reintentará` };
+    }
+
+    // El destino se crea JUNTO al contenedor (no siempre en la raíz del Inbox): así lo expandido queda dentro de su
+    // drop y se clasifica con él.
+    let destino = path.join(dir, base);
+    for (let i = 2; await rutaExiste(destino); i++) destino = path.join(dir, `${base} (${i})`);
+    const tmp = path.join(dir, `.expand-${Date.now()}`);   // oculto → ignorarEntrada lo salta
+    const inicio = Date.now();
+    if (bytesZip > 1024 ** 3) console.log(`  📦 «${nombre}» (${gb(bytesZip)}): abriendo… (puede tardar; no se interrumpe mientras avance)`);
+    try {
+        await fs.mkdir(tmp, { recursive: true });
+        await extraerComprimido(zip, tmp);                   // bsdtar (zip/rar/7z) → al temporal
+        // Verificación: tantos ficheros como lista el comprimido (con lsar no se distingue bien fichero de carpeta,
+        // así que solo con bsdtar). Las carpetas vacías cuentan: en un RAR una carpeta vacía parece un fichero. Un
+        // fallo a medias no debe llevar el original a la Papelera.
+        if (entradas.por === 'bsdtar') {
+            const esperados = ficherosDelListado(entradas).length;
+            const salieron = await contarFicheros(tmp, { conVacias: true });
+            if (salieron < esperados) throw new Error(`extracción incompleta: salieron ${salieron} de ${esperados} ficheros`);
+        }
+        // Aplanar: si el zip contiene UN único directorio de nivel superior, usar SU contenido como raíz.
+        const top = (await fs.readdir(tmp, { withFileTypes: true })).filter((d) => !ignorarEntrada(d.name));
+        const raiz = (top.length === 1 && top[0].isDirectory()) ? path.join(tmp, top[0].name) : tmp;
+        await fs.rename(raiz, destino);
+        if (raiz !== tmp) await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+    } catch (err) {
+        await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+        return { ok: false, motivo: err.message };
+    }
+    if (empaquetar) {
+        await escribirGuia(destino, { accion: 'empaquetar', alcance: 'todo', perfil: { origen: 'comprimido' } });
+        console.log(`  🖼️  «${nombre}»: libro de láminas de ${gb(bytesZip)} (demasiado para un solo cbz) → se empaquetará en tomos.`);
+    }
+    await reciclar([zip], 'comprimido-expandido');       // política nunca-borrar: zip → Papelera
+    // Si la Papelera no lo pudo copiar entero, el original se CONSERVA… y la siguiente pasada lo volvería a abrir
+    // («X (2)»). Se aparta con un nombre oculto, que nada procesa ni borra (viaja con su carpeta).
+    if (await rutaExiste(zip)) await fs.rename(zip, path.join(dir, `.ya-expandido - ${nombre}`)).catch(() => {});
+    await fs.rm(path.join(dir, avisoNoExpandido(nombre)), { force: true }).catch(() => {});
+    const min = Math.round((Date.now() - inicio) / 60000);
+    console.log(`  📦 «${nombre}» expandido → carpeta «${path.basename(destino)}»${min ? ` (${min} min)` : ''} (se cataloga como drop de carpeta).`);
+    // Comprimidos ANIDADOS: se abren ya, no en otra pasada. Si no, PreProceso inspeccionaba el árbol con zips cerrados
+    // dentro y los pasaba así al Inbox.
+    const anidados = await expandirComprimidos(destino, nivel - 1, opts);
+    return { ok: true, anidados };
+}
+
+/**
+ * Un comprimido que no se pudo abrir: aviso con el error al lado (visible en la carpeta) y, si está en el Inbox, se
+ * aparta a PreProceso con su misma ruta relativa (allí no se cataloga nada; se reintenta solo). Devuelve dónde quedó.
+ */
+async function apartarNoExpandido(zip, motivo, opts) {
+    let donde = zip;
+    if (!opts.enPreproceso) {
+        const rel = path.relative(INBOX, zip);
+        const destino = await destinoLibre(path.join(DIR_PREPROCESO, rel.startsWith('..') ? path.basename(zip) : rel));
         try {
-            await fs.mkdir(tmp, { recursive: true });
-            await extraerComprimido(zip, tmp);                   // bsdtar (zip/rar/7z) → al temporal
-            // Aplanar: si el zip contiene UN único directorio de nivel superior, usar SU contenido como raíz.
-            const top = (await fs.readdir(tmp, { withFileTypes: true })).filter(d => !ignorarEntrada(d.name));
-            const raiz = (top.length === 1 && top[0].isDirectory()) ? path.join(tmp, top[0].name) : tmp;
-            await fs.rename(raiz, destino);
-            if (raiz !== tmp) await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
-            await reciclar([zip], 'comprimido-expandido');       // política nunca-borrar: zip → Papelera
-            console.log(`  📦 «${e.name}» expandido → carpeta «${path.basename(destino)}» (se cataloga como drop de carpeta).`);
+            await moverArbol(zip, destino);
+            donde = destino;
+            console.warn(`     → apartado a PreProceso («${path.relative(DIR_PREPROCESO, destino)}»), con el error al lado. No se cataloga ni se borra.`);
         } catch (err) {
-            await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
-            console.warn(`  ⚠️  No se pudo expandir «${e.name}» (${err.message}) → Cuarentena/ilegibles.`);
-            await enviarAIlegibles([zip], { titulo: e.name, mensaje: `comprimido no extraíble: ${err.message}` });
+            // No se pudo apartar: antes que dejarlo en el Inbox (se catalogaría como un .zip opaco), a Cuarentena, que
+            // también lo conserva entero.
+            console.warn(`     → no se pudo apartar a PreProceso (${err.message}) → Cuarentena/ilegibles (se conserva).`);
+            await enviarAIlegibles([zip], { titulo: path.basename(zip), mensaje: `comprimido no extraíble: ${motivo}` });
+            return zip;
         }
     }
+    const texto = [
+        `NO SE PUDO DESCOMPRIMIR · «${path.basename(zip)}»`,
+        '',
+        `Fecha: ${new Date().toLocaleString('es-ES')}`,
+        `Tamaño: ${gb(await fs.stat(donde).then((s) => s.size).catch(() => 0))}`,
+        '',
+        `Error: ${motivo}`,
+        '',
+        'Qué pasa: se queda aquí, en PreProceso, sin abrir. No se cataloga, no va a la Papelera ni a Cuarentena.',
+        `Se reintenta solo cada ${Math.round(REINTENTO_EXPANDIR_MS / 3600000)} h, o en cuanto el fichero cambie.`,
+        'Qué hacer: si está dañado o incompleto, sustitúyelo por una copia buena (con el mismo nombre). Si el error es',
+        'de espacio, libera disco. Este aviso se borra solo cuando se abra.',
+    ].join('\n') + '\n';
+    await fs.writeFile(path.join(path.dirname(donde), avisoNoExpandido(path.basename(donde))), texto).catch(() => {});
+    return donde;
 }
 
 // Nombre libre en `dir` a partir de `nombre` (evita pisar; añade « (2)», « (3)»…).
