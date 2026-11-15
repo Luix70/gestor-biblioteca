@@ -2614,6 +2614,18 @@ de ficheros clasificado por CDU.
       (formato 'html'); sin eso se guarda como formato material, con la misma ficha.
       Desde el 10-nov el Vigilante tambien lo reconoce SIN guia (lo que llega sin pasar por PreProceso, o se queda
       atras cuando los PDF de su carpeta ya se catalogaron).
+      CORREGIDO (15-nov): lo que quedo de «Medical/Combat Medical» (una pagina .html suelta, dos .txt, dos
+      instaladores y la carpeta del libro HTML «Scuba Diving Explained») se catalogo como UN libro, con el titulo
+      de la pagina suelta y la portada del libro de buceo. Ahora: una pagina sin nombre de entrada, elegida solo por
+      ser la unica de la raiz, tiene que llevar a otras paginas suyas; y las paginas de una subcarpeta que es por si
+      misma un libro HTML (y a la que la entrada no lleva) no cuentan: esa carpeta es un contenedor y cada libro de
+      dentro se cataloga aparte. Un titulo que es el nombre de una pagina («contents.htm») o un listado de servidor
+      («Index of /…») ya no se toma como titulo. Lo ya catalogado: scripts/revisar-libros-html.js (en seco por
+      defecto; los que no son libro vuelven enteros a PreProceso, sin su ficha; los titulos basura se listan).
+    · PORTADA SIN IMAGENES (15-nov): en una ficha que solo tenia portada (74: libros HTML, audiolibros, software,
+      PDF antiguos) el editor de imagenes no la veia: no se podia quitar ni sustituir. Ahora la portada cuenta como
+      su primera imagen. Al quitar una imagen que es parte del contenido del libro (la portada de un libro HTML,
+      dentro de sus paginas), solo se quita de la ficha: el fichero del libro no se toca.
     · MATERIAL SIN LIBRO = RUIDO (14-nov, regla tuya): una ficha «Libro, material» solo tiene sentido colgada
       de un documento principal. Ya no se crean fichas sueltas de material: los .txt y .lit solo valen como
       material de un documento (una carpeta que solo trae eso no es catalogable y se queda en PreProceso o en el

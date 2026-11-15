@@ -53,6 +53,16 @@
 - [ ] Repasar `PreProceso/_Material sin libro/`: lo que sea de un libro (los ejemplos de Irvine, el CD de Floyd, el
       curso de latín) se deja junto a su libro; el resto se retira a mano
 
+### 0.595 Libros HTML mal detectados y portadas que no se podían cambiar (15-nov) — en el NAS
+- [ ] Desplegar (detector de libros HTML corregido; el editor de imágenes ya ve la portada de las fichas sin `imagenes[]`)
+- [ ] Copia de la base
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/revisar-libros-html.js` — revisar (medido: de 6 libros HTML,
+      1 no lo es: `6af8d65b…d92c` «Antibiotic Use in the Austere Environment, Part 2», el cajón de *Combat Medical*;
+      2 con título basura: «Index of /reference/academic/0849320690/» y «contents.htm»)
+- [ ] `… --ejecutar`: la carpeta de *Combat Medical* vuelve a PreProceso; comprobar que *Scuba Diving Explained* llega
+      al Inbox y se cataloga como libro HTML, y que lo demás (instaladores .exe, .txt) se queda con su aviso
+- [ ] Corregir a mano los dos títulos basura (✏️ Editar)
+
 ### 0.59 Fichas que no casan con su fichero (14-nov) — en el NAS
 - [ ] Desplegar (la ingesta ya no acepta un resultado por título que solo CONTIENE el título; acciones nuevas en la
       ficha: «🧹 Reidentificar desde el contenido», «🔁 Sustituir fichero», «📂 Abrir carpeta», «📋 Copiar ruta»)

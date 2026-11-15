@@ -4041,13 +4041,13 @@ function pintarDoc(r, ctx) {
     if ($('#actLeerHtml')) $('#actLeerHtml').onclick = () => window.open(encUrl(`${d.ruta_base}/${d.html.entrada}`), '_blank', 'noopener');
     if ($('#actAdjuntar')) $('#actAdjuntar').onclick = () => adjuntarADoc(d._id, r);
     if ($('#actMaterial')) $('#actMaterial').onclick = () => adjuntarMaterialADoc(d._id);
-    const editarImgs = () => editarImagenes(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []), { url: r.archivo_url, nombre: r.nombre_archivo });
+    const editarImgs = () => editarImagenes(d._id, ((r.imagenes || []).length ? r.imagenes : (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : [])), { url: r.archivo_url, nombre: r.nombre_archivo });
     if ($('#actImgs')) $('#actImgs').onclick = editarImgs;
     if ($('#actImgsCar')) $('#actImgsCar').onclick = editarImgs; // duplicado en el encabezado del carrusel
     const cm2 = $('#actMedir');
     if (cm2)
       cm2.onclick = () =>
-        medirDimensiones(d._id, r.imagenes || (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : []));
+        medirDimensiones(d._id, ((r.imagenes || []).length ? r.imagenes : (r.portada ? [{ ruta: r.portada, tipo: 'portada' }] : [])));
     // Grabar NFC: solo para ejemplares EN PAPEL (un medio digital no se etiqueta) y en navegadores con Web
     // NFC (Android + Chrome). En el resto queda oculto.
     const cn = $('#actNfc');

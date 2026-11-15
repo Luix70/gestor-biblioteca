@@ -21,6 +21,10 @@ export function esTituloArtefacto(s) {
     if (!t) return false;
     if (EXT_ARTEFACTO.test(t)) return true;                         // termina en extensión de fichero fuente
     if (/\.(pdf|epub|mobi|azw3|fb2|djvu|cbr|cbz|cb7)$/i.test(t)) return true; // el "título" es un nombre de fichero (p. ej. "jan09-1.pdf")
+    // Libros en HTML (15-nov): el <title> de la página de entrada era el nombre de la página («contents.htm») o el de
+    // un listado de directorio de un servidor web («Index of /reference/academic/0849320690/»), de una copia con wget.
+    if (/^[\w.-]+\.(html?|xhtml|php|aspx?)$/i.test(t)) return true;
+    if (/^index of\s+\//i.test(t)) return true;
     if (/[\\]/.test(t)) return true;                                // contiene barra invertida → es una ruta
     if (/^[a-z]:[\\/]?/i.test(t) && /\.[a-z0-9]{2,4}$/i.test(t)) return true; // "C:…algo.ext" (ruta Windows)
     // "Microsoft Word - documento1": la marca del programa seguida de un GUION y el nombre del fichero. Sin el guion

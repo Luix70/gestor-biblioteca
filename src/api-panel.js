@@ -2063,7 +2063,10 @@ export function rutasPanel() {
                 archivo_url: urlArchivo(doc), nombre_archivo: doc.nombre_archivo || null,
                 // Ruta de RED (Windows) de su carpeta y de su fichero: «📋 Copiar ruta» / «📂 Abrir carpeta». Solo admin.
                 ...(req.usuario?.rol === 'admin' ? rutaDeRed(doc) : {}),
-                imagenes: doc.imagenes || [], portada: doc.portada || null,
+                // Una ficha con solo `portada` (sin imagenes[]) la enseña como su primera imagen: así el editor de
+                // imágenes puede quitarla o ponerle otra (ver imagenes-doc·cargarDoc).
+                imagenes: (doc.imagenes || []).length ? doc.imagenes : (doc.portada ? [{ ruta: doc.portada, tipo: 'portada', origen: 'previa' }] : []),
+                portada: doc.portada || null,
                 audios: doc.audios || [],   // audiolibro / lectura con audio: playlist para el reproductor
                 textos: doc.textos || [],   // varios textos (PDF/EPUB/anexo…): selector del visor
             });

@@ -13,8 +13,37 @@ import { reciclar } from './papelera.js';
 const oid = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : null);
 const MAX_BYTES = 25 * 1024 * 1024; // tope por imagen decodificada (defensa)
 
-async function cargarDoc(db, id) { const _id = oid(id); return _id ? db.collection('biblioteca').findOne({ _id }) : null; }
-const fsDe = (doc, ruta) => path.join(carpetaDeDoc(doc), path.basename(String(ruta || '')));
+/**
+ * Carga el documento con sus imágenes NORMALIZADAS: si `imagenes[]` está vacío pero tiene `portada`, la portada es la
+ * primera (y única) imagen. Sin esto, una ficha con solo `portada` (74 medidas el 15-nov: libros HTML, audiolibros,
+ * software, PDF antiguos) no dejaba quitar la portada («imagen no encontrada») y una imagen añadida no la sustituía.
+ */
+async function cargarDoc(db, id) {
+    const _id = oid(id);
+    const doc = _id ? await db.collection('biblioteca').findOne({ _id }) : null;
+    if (doc && !(doc.imagenes || []).length && doc.portada) doc.imagenes = [{ ruta: doc.portada, tipo: 'portada', origen: 'previa' }];
+    return doc;
+}
+
+/**
+ * El fichero de una imagen, SOLO si es una imagen de la propia ficha: está directamente en la carpeta del documento.
+ * Una imagen que vive dentro del contenido (la portada de un libro HTML en «…/images/cover.jpg», que es una página
+ * del libro) no se recicla al quitarla de la ficha: es parte del libro. Antes se tomaba solo el NOMBRE del fichero
+ * y se buscaba en la raíz de la carpeta, que podía ser otro fichero con el mismo nombre.
+ */
+function fsDe(doc, ruta) {
+    const base = String(doc.ruta_base || '').replace(/\/+$/, '');
+    const r = String(ruta || '');
+    if (!base || !r.startsWith(base + '/')) return null;
+    const resto = r.slice(base.length + 1);
+    if (!resto || resto.includes('/')) return null;
+    return path.join(carpetaDeDoc(doc), decodeURIComponent(resto));
+}
+// Recicla el fichero de una imagen de la ficha (no hace nada si no es suyo o ya no está).
+async function reciclarImagen(doc, ruta, etiqueta) {
+    const abs = fsDe(doc, ruta);
+    if (abs) await reciclar([abs], etiqueta).catch(() => { /* fichero ya ausente */ });
+}
 
 // data URL o base64 puro → { buf, ext } (jpg|png|webp) o null.
 function decodB64(b64) {
@@ -50,7 +79,7 @@ export async function reordenarImagenes(db, id, orden = []) {
 export async function eliminarImagen(db, id, ruta) {
     const doc = await cargarDoc(db, id); if (!doc) return { ok: false, motivo: 'documento no encontrado' };
     if (!(doc.imagenes || []).some(x => x.ruta === ruta)) return { ok: false, motivo: 'imagen no encontrada' };
-    try { await reciclar([fsDe(doc, ruta)], 'imagen-ficha'); } catch { /* fichero ya ausente */ }
+    await reciclarImagen(doc, ruta, 'imagen-ficha');
     const nuevas = (doc.imagenes || []).filter(x => x.ruta !== ruta);
     if (nuevas.length) nuevas[0].tipo = 'portada';
     return setImagenes(db, doc, nuevas, nuevas[0] ? nuevas[0].ruta : null);
@@ -119,7 +148,7 @@ export async function reemplazarImagen(db, id, ruta, base64) {
     const nombre = `edit-${Date.now()}.${d.ext}`;
     await fs.writeFile(path.join(carpeta, nombre), d.buf);
     const web = `${webDeDoc(doc)}/${nombre}`;
-    try { await reciclar([fsDe(doc, ruta)], 'imagen-editada'); } catch { /* el viejo ya no está */ }
+    await reciclarImagen(doc, ruta, 'imagen-editada');
     const nuevas = (doc.imagenes || []).map(x => x.ruta === ruta ? { ...x, ruta: web } : x);
     return setImagenes(db, doc, nuevas, doc.portada === ruta ? web : (doc.portada || null));
 }
