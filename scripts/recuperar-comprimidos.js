@@ -155,6 +155,24 @@ if (CON_PAPELERA) {
             const abiertas = await carpetaAbierta(destino);
             let casada = null;
             for (const c of abiertas) if (entradas && casaConListado(await ficherosDe(c), entradas)) { casada = c; break; }
+            // Láminas cuya carpeta abierta ya convirtió PreProceso en UN PDF («escaneo → un PDF por libro»; las
+            // imágenes fueron a la Papelera): el PDF es un derivado del comprimido. Vuelve el comprimido (será un cómic)
+            // y la carpeta con el PDF va a la Papelera. Medido el 15-nov: ARTBOOKS, 82 carpetas así.
+            if (!casada && laminas) {
+                for (const c of abiertas) {
+                    const fich = (await ficherosDe(c)).filter((f) => !path.posix.basename(f).startsWith('.') && !/^_(guia\.json|preproceso\.txt)$/i.test(path.posix.basename(f)));
+                    if (fich.length === 1 && fich[0].toLowerCase() === `${path.basename(c)}.pdf`.toLowerCase()) {
+                        acciones.push({
+                            tipo: 'papelera → cómic (y el PDF que se hizo de sus imágenes, a la Papelera)',
+                            fuente, destino, subPapelera: sub, carpetaARetirar: c,
+                            nota: `sustituye a «${path.basename(c)}/${fich[0]}»`,
+                        });
+                        casada = 'hecho';
+                        break;
+                    }
+                }
+                if (casada === 'hecho') continue;
+            }
             if (casada && !laminas) {
                 omitidos.push(`${path.relative(DIR_PRE, destino)}: su contenido sigue entero en «${path.relative(DIR_PRE, casada)}»`);
                 continue;
