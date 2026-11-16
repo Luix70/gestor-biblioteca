@@ -118,13 +118,31 @@ function dpiJpeg(bytes) {
   return null;
 }
 
+/**
+ * Formato REAL de una imagen por sus primeros bytes, no por su extensión: medido (16-nov, Luis Royo «calender 2005»)
+ * un «.jpg» que no empieza por la marca SOI de JPEG → pdf-lib fallaba con «SOI not found in JPEG». Un PNG con
+ * extensión .jpg es habitual en descargas.
+ */
+function formatoReal(bytes) {
+  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
+  if (bytes.length > 8 && bytes.toString('latin1', 1, 4) === 'PNG') return 'png';
+  if (bytes.length > 6 && bytes.toString('latin1', 0, 3) === 'GIF') return 'gif';
+  if (bytes.length > 2 && bytes.toString('latin1', 0, 2) === 'BM') return 'bmp';
+  if (bytes.length > 12 && bytes.toString('latin1', 8, 12) === 'WEBP') return 'webp';
+  return null;
+}
+
 /** Una imagen JPG/PNG → PDF de una página (con sus mismos bytes en el caso del JPG). */
 async function imagenAPdf(ruta, destino) {
   const bytes = await fs.readFile(ruta);
+  const formato = formatoReal(bytes);
+  if (formato !== 'jpg' && formato !== 'png') {
+    throw new Error(`«${path.basename(ruta)}» no es un JPEG ni un PNG de verdad (${formato ? `es ${formato.toUpperCase()}` : bytes.length ? 'contenido no reconocido o dañado' : 'fichero vacío'})`);
+  }
   const doc = await PDFDocument.create();
-  const img = /\.png$/i.test(ruta) ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+  const img = formato === 'png' ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
   // Tamaño de página por la densidad del escaneo (150 ppp si no la dice): así se imprime a su tamaño real.
-  const dpi = (/\.png$/i.test(ruta) ? null : dpiJpeg(bytes)) || 150;
+  const dpi = (formato === 'png' ? null : dpiJpeg(bytes)) || 150;
   const ancho = (img.width * 72) / dpi;
   const alto = (img.height * 72) / dpi;
   doc.addPage([ancho, alto]).drawImage(img, { x: 0, y: 0, width: ancho, height: alto });
@@ -154,15 +172,21 @@ export async function imagenesAPdf(paginas, destino) {
     let esperadas = 0;
     for (const [i, p] of paginas.entries()) {
       const pdf = path.join(tmp, `${String(i).padStart(5, '0')}.pdf`);
-      if (RE_TIFF.test(p)) await tiffAPdf(p, pdf);
-      else await imagenAPdf(p, pdf);
+      try {
+        if (RE_TIFF.test(p)) await tiffAPdf(p, pdf);
+        else await imagenAPdf(p, pdf);
+      } catch (e) {
+        // Que el motivo diga SIEMPRE qué imagen: pdf-lib lanza a veces sin mensaje («undefined» en el log).
+        const msg = e?.message || String(e || 'error desconocido');
+        throw new Error(msg.includes(path.basename(p)) ? msg : `«${path.basename(p)}»: ${msg}`);
+      }
       esperadas += (await paginasPdf(pdf)) || 1;
       sueltos.push(pdf);
     }
     if (sueltos.length === 1) await fs.copyFile(sueltos[0], destino);
     else {
       const r = await unirPdfs(sueltos, destino);
-      if (!r.ok) return { ok: false, motivo: r.motivo };
+      if (!r.ok) return { ok: false, motivo: r.motivo || 'qpdf no pudo unir las páginas' };
     }
     const n = await paginasPdf(destino);
     if (!n || n !== esperadas || n < paginas.length) {
@@ -172,7 +196,7 @@ export async function imagenesAPdf(paginas, destino) {
     return { ok: true, paginas: n };
   } catch (e) {
     await fs.rm(destino, { force: true }).catch(() => {});
-    return { ok: false, motivo: e.message };
+    return { ok: false, motivo: e?.message || String(e || 'error desconocido') };
   } finally {
     await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
   }

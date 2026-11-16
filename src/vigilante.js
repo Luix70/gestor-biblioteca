@@ -14,6 +14,7 @@ import { agrupar, esImagen, filtrarDuplicadosNombre } from './utils/agrupador.js
 import { discriminarMultivolumenes } from './utils/multivolumen.js';
 import { extraerArchivoComic as extraerComprimido, listarComprimido, ficherosDelListado } from './utils/extraer-archivo.js';
 import { esComprimidoDeImagenes, destinoComic } from './utils/comprimido-imagenes.js';
+import { esCdDePrograma, esCarpetaCdDePrograma } from './utils/cd-de-programa.js';
 import { moverArbol, destinoLibre } from './utils/mover-arbol.js';
 import { reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { retirarCarpeta } from './utils/borrado-seguro.js';
@@ -1087,6 +1088,13 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 unidades.push({ esIntacta: true, carpeta: ruta, rutas: [ruta] });
                 continue;
             }
+            // CD DE PROGRAMA ya abierto (AUTORUN.INF en su raíz, casi ningún documento) sin guía que diga otra cosa:
+            // software intacto, 1 registro (gemelo de PreProceso y de expandirUno; regla del usuario, 16-nov).
+            if ((!guiaCarpeta?.accion || (guiaCarpeta.accion === 'normal' && guiaCarpeta.perfil?.origen === 'agente'))
+                && await esCarpetaCdDePrograma(ruta)) {
+                unidades.push({ esSoftware: true, carpeta: ruta, rutas: [ruta] });
+                continue;
+            }
             if (guiaCarpeta?.accion === 'empaquetar') {
                 // En EJECUCIÓN no se toca: la empaqueta `aplicarAccionesGuiaFs` ANTES de listar unidades, y
                 // cuando se llega aquí la guía ya es 'obra'/'normal' y dentro hay cbz. Si se colara como
@@ -1613,19 +1621,7 @@ export async function expandirComprimidos(dir = INBOX, nivel = 6, opts = {}) {  
         esperandoDecision.delete(zip);   // se actúa: deja de estar «a la espera» (y no crece el Set sin fin)
         const base = baseSinContenedor(e.name);
         if (accion === 'software') {
-            // NO se abre: se conserva INTACTO y se cataloga como UN registro. Se envuelve en su propia carpeta
-            // con una guía `accion:'software'` → lo recoge la unidad esSoftware (ingestarSoftware: copia
-            // verbatim en bloque + 1 documento naturaleza:'software'). Reutiliza toda la maquinaria existente.
-            const dirSw = await nombreLibre(dir, base);
-            try {
-                await fs.mkdir(dirSw, { recursive: true });
-                await fs.rename(zip, path.join(dirSw, e.name));
-                await escribirGuia(dirSw, { accion: 'software' });
-                console.log(`  💿 «${e.name}»: SOFTWARE (guía) — se conserva INTACTO, sin abrir → 1 registro.`);
-            } catch (err) {
-                console.warn(`  ⚠️  No se pudo preparar «${e.name}» como software: ${err.message} (se conserva).`);
-                await retirarCarpeta(dirSw, 'software-prep-fallido');
-            }
+            await guardarComoSoftware(dir, e.name, zip, base, 'SOFTWARE (guía)');
             continue;
         }
         // Un fallo anterior no se reintenta en cada pasada: espera REINTENTO_EXPANDIR_MS, o a que el fichero cambie
@@ -1662,6 +1658,27 @@ const DIR_PREPROCESO = resolver(process.env.PATH_PREPROCESO, 'PreProceso');
 const MARGEN_DISCO_BYTES = 2 * 1024 * 1024 * 1024;
 const avisoNoExpandido = (nombre) => `.NO_SE_PUDO_DESCOMPRIMIR - ${nombre}.txt`;
 const gb = (b) => `${(b / 1024 ** 3).toFixed(1)} GB`;
+
+/**
+ * NO se abre: se conserva INTACTO y se cataloga como UN registro. Se envuelve en su propia carpeta con una guía
+ * `accion:'software'` → lo recoge la unidad esSoftware (ingestarSoftware: copia verbatim en bloque + 1 documento
+ * naturaleza:'software'). Reutiliza toda la maquinaria existente.
+ */
+async function guardarComoSoftware(dir, nombre, zip, base, porque) {
+    const dirSw = await nombreLibre(dir, base);
+    try {
+        await fs.mkdir(dirSw, { recursive: true });
+        await fs.rename(zip, path.join(dirSw, nombre));
+        await escribirGuia(dirSw, { accion: 'software' });
+        await fs.rm(path.join(dir, avisoNoExpandido(nombre)), { force: true }).catch(() => {});
+        console.log(`  💿 «${nombre}»: ${porque} — se conserva INTACTO, sin abrir → 1 registro.`);
+        return true;
+    } catch (err) {
+        console.warn(`  ⚠️  No se pudo preparar «${nombre}» como software: ${err.message} (se conserva).`);
+        await retirarCarpeta(dirSw, 'software-prep-fallido');
+        return false;
+    }
+}
 
 /** Bytes libres en el disco de `dir`, o null si no se puede saber (Node sin fs.statfs). */
 async function espacioLibre(dir) {
@@ -1700,6 +1717,14 @@ async function expandirUno(dir, nombre, zip, base, { decidido, nivel, opts }) {
     let entradas;
     try { entradas = await listarComprimido(zip); }
     catch (err) { return { ok: false, motivo: `no se puede leer ni su índice (¿dañado o incompleto?): ${err.message}` }; }
+
+    // CD de un programa / CD que acompaña a un libro (AUTORUN.INF en la raíz y casi ningún documento): no se abre, se
+    // guarda intacto como software (regla del usuario, 16-nov: Floyd «Electronic Devices CC 7e.iso»).
+    if (!decidido && esCdDePrograma(entradas)) {
+        return (await guardarComoSoftware(dir, nombre, zip, base, 'CD de programa (AUTORUN.INF)'))
+            ? { ok: true, anidados: [] }
+            : { ok: false, motivo: 'es un CD de programa, pero no se pudo preparar como software' };
+    }
 
     // Si TÚ dijiste «abrir» en el Inspector, se abre aunque sean láminas.
     let empaquetar = false;

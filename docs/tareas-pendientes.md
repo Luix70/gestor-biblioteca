@@ -71,6 +71,10 @@
       líneas «🧰 PreProceso:»/«⏳ … sigue» y el fichero `PreProceso/_ESTADO PREPROCESO.txt`. Los ISO que dieron
       «extracción incompleta: salieron N de N+1» (Irvine Assembly 4e, Floyd Digital Fundamentals 9e, Floyd Principles
       of Electric Circuits 8e) se reintentan solos a las 6 h o tras reiniciar
+- [ ] (16-nov) Desplegar la regla del AUTORUN.INF (CD de programa → software intacto) y el paso a .cbz de los escaneos
+      que no se pueden pasar a PDF; comprobar que «Floyd - Electronic Devices CC 7e (2)» se cataloga como 1 registro de
+      software (guía puesta a mano; la copia suelta de SOLUTION.ZIP está en la Papelera, 004328), que los otros dos
+      ISO de Floyd se guardan como software, y que «calender 2005» y «Tokyo Babylon Post Cards» salen como .cbz
 - [ ] Revisar los comprimidos que se quedan en PreProceso con su aviso: «Fundamentals Of Electric Circuits.rar» (2 PDF
       con error de CRC: dañado de verdad), «802.11 Wireless Network Site Surveying….rar» (no es un rar reconocible),
       «SOLUTION.ZIP» de Floyd (con contraseña: retiene todo el libro de Floyd)

@@ -2632,6 +2632,13 @@ de ficheros clasificado por CDU.
       en config.js). Una descompresion larga dice cada 5 minutos cuantos ficheros lleva y cual extrae. Sin mirar el
       log: el fichero «PreProceso/_ESTADO PREPROCESO.txt» dice ACTIVO (que hace y desde cuando) o EN REPOSO, y las
       ultimas fases. Si esta ACTIVO y «actualizado» se queda mas de 15 minutos atras, algo se ha colgado.
+    · CD DE PROGRAMA (16-nov): un .iso/.zip (o una carpeta ya abierta) con AUTORUN.INF en su raiz y como mucho 2
+      documentos (el START.PDF de un CD que acompana a un libro) no se abre: se guarda intacto como SOFTWARE, un solo
+      registro. Con mas documentos es un DVD de libros y se abre como siempre. Una guia tuya manda.
+    · ESCANEO QUE NO SE PUEDE PASAR A PDF (16-nov): si una imagen no es un JPEG o PNG de verdad (medido: GIF con
+      extension .jpg/.png en Luis Royo «calender 2005» y «Tokyo Babylon Post Cards») el log dice cual y que es, y la
+      carpeta se empaqueta en .cbz con las imagenes tal cual, sin convertir. Antes la carpeta —y toda su rama, porque
+      pasa entera o no pasa— se quedaba en PreProceso reintentandolo cada media hora.
     · SI NO SE PUEDE DESCOMPRIMIR (15-nov): se queda en PreProceso, sin abrir, con un aviso al lado
       «.NO_SE_PUDO_DESCOMPRIMIR - <nombre>.txt» que dice el error. Nunca va a Cuarentena ni a la Papelera. Su
       carpeta no pasa al Inbox mientras tanto (pasa entera o no pasa). Se reintenta solo cada 6 h, o en cuanto

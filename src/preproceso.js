@@ -39,6 +39,7 @@ import { CARPETA_MATERIAL_SIN_LIBRO } from './utils/retirar-material.js';
 import { EXT_DOC } from './mantenimiento/util-mantenimiento.js';
 import { huella, moverArbol, destinoLibre } from './utils/mover-arbol.js';
 import { crearLatido } from './utils/latido-proceso.js';
+import { esCarpetaCdDePrograma } from './utils/cd-de-programa.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const resolver = (p, def) => { const v = p || def; return path.isAbsolute(v) ? v : path.resolve(RAIZ, v); };
@@ -228,6 +229,18 @@ async function pasarMarcaInspeccion(drop, destinoDrop) {
 async function prepararArbol(dir, pendientes, hecho) {
     const guia = await leerGuia(dir).catch(() => null);
     if (ACCIONES_INTOCABLES.includes(guia?.accion)) return;
+    const rel0 = path.relative(DIR_PRE, dir);
+    // Guía que se puede reescribir: ninguna, o una puesta por la IA / por el propio PreProceso. La tuya manda.
+    const guiaReescribible = !guia?.accion || ['agente', 'preproceso'].includes(guia.perfil?.origen);
+
+    // CD DE PROGRAMA (AUTORUN.INF en la raíz, casi ningún documento): se guarda intacto como software, ANTES de mirar
+    // dentro (sus carpetas de instaladores no son escaneos ni libros). Regla del usuario, 16-nov (Floyd «CC 7e»).
+    if (guiaReescribible && await esCarpetaCdDePrograma(dir)) {
+        await escribirGuia(dir, { accion: 'software', perfil: { origen: 'preproceso' } });
+        hecho.push(`${rel0}: CD de programa (AUTORUN.INF) → software intacto`);
+        console.log(`  💿 PreProceso: ${rel0}: CD de programa (AUTORUN.INF) → se guarda intacto como software.`);
+        return;
+    }
     let entradas;
     try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entradas) {
@@ -247,9 +260,16 @@ async function prepararArbol(dir, pendientes, hecho) {
             const texto = `${rel}: escaneo → ${r.pdfs.map((p) => `«${p.nombre}» (${p.paginas} págs.)`).join(', ')}`;
             hecho.push(texto);
             console.log(`  📄 PreProceso: ${texto}`);
+        } else if (guiaReescribible) {
+            // No se pudo pasar a PDF (una imagen que no es JPEG/PNG de verdad, dañada…): antes la carpeta —y con ella
+            // toda su unidad— se quedaba aquí para siempre, reintentándolo cada media hora. Un .cbz guarda las
+            // imágenes con sus mismos bytes, sin convertir nada: se guía «empaquetar» y sigue su camino (16-nov).
+            await escribirGuia(dir, { accion: 'empaquetar', alcance: plan.tipo === 'partes' ? 'subcarpetas' : 'todo', perfil: { origen: 'preproceso' } });
+            hecho.push(`${rel}: escaneo que no se pudo pasar a PDF (${r.motivo}) → se empaquetará en .cbz`);
+            console.warn(`  ⚠️  PreProceso: ${rel}: escaneo que no se pudo pasar a PDF (${r.motivo}) → se empaquetará en .cbz, sin convertir las imágenes.`);
         } else {
             pendientes.set(dir, `escaneo que no se pudo pasar a PDF (${r.motivo})`);
-            console.warn(`  ⚠️  PreProceso: ${rel}: escaneo que no se pudo pasar a PDF (${r.motivo})`);
+            console.warn(`  ⚠️  PreProceso: ${rel}: escaneo que no se pudo pasar a PDF (${r.motivo}); tiene una guía tuya, así que espera.`);
         }
         return;
     }
