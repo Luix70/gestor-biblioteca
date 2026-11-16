@@ -38,17 +38,27 @@ import { prepararCarpeta, MARCA_INSPECCION } from './utils/inspeccion-auto.js'; 
 import { CARPETA_MATERIAL_SIN_LIBRO } from './utils/retirar-material.js';
 import { EXT_DOC } from './mantenimiento/util-mantenimiento.js';
 import { huella, moverArbol, destinoLibre } from './utils/mover-arbol.js';
+import { crearLatido } from './utils/latido-proceso.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const resolver = (p, def) => { const v = p || def; return path.isAbsolute(v) ? v : path.resolve(RAIZ, v); };
 const DIR_PRE = resolver(process.env.PATH_PREPROCESO, 'PreProceso');
 const DIR_INBOX = resolver(process.env.PATH_INBOX, 'Inbox');
 const INFORME = '_preproceso.txt';
+const ESTADO = '_ESTADO PREPROCESO.txt';   // qué hace ahora (utils/latido-proceso.js), en la raíz de PreProceso
 const ACCIONES_INTOCABLES = ['intacta', 'software', 'omitir', 'empaquetar'];   // el usuario dijo: tal cual
 
 // `_Material sin libro`: lo que se retiró del catálogo por no colgar de ningún libro (utils/retirar-material.js). Espera
 // a que lo juntes con su libro; PreProceso no lo prepara ni lo pasa al Inbox.
-const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || n === INFORME || n === CARPETA_MATERIAL_SIN_LIBRO;
+const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || n === INFORME || n === ESTADO || n === CARPETA_MATERIAL_SIN_LIBRO;
+
+// Qué hace ahora, con marca de tiempo (petición del usuario, 16-nov: «no deja registro en el log; ¿está activo o
+// bloqueado?»): cada fase se anuncia en el log, un latido cada PREPROCESO_LATIDO_MIN la repite mientras dura, y el
+// estado queda en `PreProceso/_ESTADO PREPROCESO.txt`.
+const latido = crearLatido('PreProceso', {
+    fichero: path.join(DIR_PRE, ESTADO),
+    latidoMin: Number(process.env.PREPROCESO_LATIDO_MIN || 5),
+});
 const existe = (p) => fs.access(p).then(() => true).catch(() => false);
 const esDoc = (n) => EXT_DOC.includes(path.extname(n).toLowerCase());
 
@@ -66,6 +76,8 @@ const avisadas = new Set();
 export async function pasadaPreproceso() {
     if (enCurso) return;
     enCurso = true;
+    const inicio = Date.now();
+    let preparadas = 0;
     try {
         await fs.mkdir(DIR_PRE, { recursive: true }).catch(() => {});
         let entradas;
@@ -74,16 +86,25 @@ export async function pasadaPreproceso() {
             if (ignorar(e.name)) continue;
             const ruta = path.join(DIR_PRE, e.name);
             if (e.isFile()) { await pasarFicheroSuelto(ruta); continue; }
-            if (!e.isDirectory() || !(await carpetaEstable(ruta))) continue;
+            if (!e.isDirectory()) continue;
+            if (!(await carpetaEstable(ruta))) {
+                latido.detalle(`«${e.name}» aún se está copiando; se espera`);
+                continue;
+            }
             const firma = await huella(ruta).then((h) => `${h.n}:${h.bytes}`).catch(() => null);
             const previa = ultimaPasada.get(ruta);
             if (previa && previa.firma === firma && Date.now() - previa.t < REVISAR_MS) continue;
+            preparadas++;
+            const t0 = Date.now();
+            latido.fase(`«${e.name}»: empieza la preparación`);
             await prepararDrop(ruta).catch((err) => console.warn(`  ⚠️  PreProceso «${e.name}»: ${err.message}`));
+            console.log(`  🧰 PreProceso: «${e.name}» — pasada terminada en ${Math.round((Date.now() - t0) / 60000)} min.`);
             const despues = await huella(ruta).then((h) => `${h.n}:${h.bytes}`).catch(() => null);
             if (despues) ultimaPasada.set(ruta, { firma: despues, t: Date.now() }); else ultimaPasada.delete(ruta);
         }
     } finally {
         enCurso = false;
+        latido.reposo(preparadas ? `${preparadas} carpeta(s) revisada(s) en ${Math.round((Date.now() - inicio) / 60000)} min` : '');
     }
 }
 
@@ -91,6 +112,7 @@ export async function pasadaPreproceso() {
 async function pasarFicheroSuelto(ruta) {
     const ext = path.extname(ruta).toLowerCase();
     if (['.zip', '.rar', '.7z', '.tar', '.gz', '.tgz', '.iso'].includes(ext)) {
+        latido.fase(`comprimido suelto «${path.basename(ruta)}»`);
         // Lo convierte en carpeta (se prepara en la próxima pasada) o en cómic si solo trae imágenes. Si no se puede
         // abrir, se queda aquí con su aviso `.NO_SE_PUDO_DESCOMPRIMIR - <nombre>.txt` al lado.
         await expandirComprimidos(DIR_PRE, 0, { enPreproceso: true });
@@ -120,12 +142,14 @@ async function prepararDrop(drop) {
     // Un comprimido que no se puede abrir SE QUEDA AQUÍ, con su error (regla del usuario, 15-nov), y retiene su
     // unidad: la carpeta pasa entera o no pasa. Antes iba a Cuarentena/ilegibles y el resto de la carpeta pasaba al
     // Inbox; la carpeta dejada se daba por «completa» y se reciclaba.
+    latido.fase(`«${nombre}»: abriendo comprimidos`);
     for (const { ruta, motivo } of await expandirComprimidos(drop, 6, { enPreproceso: true })) pendientes.set(ruta, motivo);
 
     // FASE 2 · INSPECCIÓN CON IA AQUÍ, antes de pasar nada. Antes se hacía en el Inbox, justo antes de catalogar
     // (14-nov: «Medical» pasó entera y se inspeccionó allí), cuando ya no quedaba ocasión de retener lo que no tiene
     // camino. Con las guías escritas aquí, la preparación de abajo (coser un desglose guiado) y el filtro de salida
     // las obedecen. Si la IA falla, no pasa nada de esta carpeta: se reintenta sola.
+    latido.fase(`«${nombre}»: inspección con IA (si hace falta)`);
     const prep = await prepararCarpeta(drop, { origen: 'preproceso' }).catch((err) => {
         console.warn(`  🧭 PreProceso «${nombre}»: fallo al preparar la inspección (${err.message}) → sin guías de IA.`);
         return { seguir: true };
@@ -135,9 +159,11 @@ async function prepararDrop(drop) {
         await escribirInforme(drop, hecho, pendientes, 0);
         return;
     }
+    latido.fase(`«${nombre}»: preparando (escaneos → PDF, libros por capítulos)`);
     await prepararArbol(drop, pendientes, hecho);
 
     const unidades = await unidadesDe(drop);
+    latido.fase(`«${nombre}»: pasando al Inbox lo que está listo (${unidades.length} unidad(es))`);
     let pasadas = 0;
     for (const u of unidades) {
         const bloqueos = [...pendientes.keys()].filter((p) => p === u || p.startsWith(u + path.sep));
@@ -175,6 +201,7 @@ async function prepararDrop(drop) {
     }
 
     await escribirInforme(drop, hecho, pendientes, pasadas);
+    console.log(`  🧰 PreProceso: «${nombre}» — ${pasadas} unidad(es) al Inbox, ${pendientes.size} esperando (detalle en «${nombre}/${INFORME}»).`);
     // Cuando ya no queda nada más que su guía y el informe, la carpeta dejada sobra.
     const resto = (await fs.readdir(drop).catch(() => [])).filter((n) => !ignorar(n) && n !== NOMBRE_GUIA);
     if (!resto.length && pasadas) {
@@ -214,15 +241,23 @@ async function prepararArbol(dir, pendientes, hecho) {
     // Páginas escaneadas → un PDF por libro.
     const plan = await planEscaneo(dir).catch(() => null);
     if (plan) {
+        latido.detalle(`escaneo → PDF: ${rel}`);
         const r = await materializarEscaneo(dir, plan);
-        if (r.ok) hecho.push(`${rel}: escaneo → ${r.pdfs.map((p) => `«${p.nombre}» (${p.paginas} págs.)`).join(', ')}`);
-        else pendientes.set(dir, `escaneo que no se pudo pasar a PDF (${r.motivo})`);
+        if (r.ok) {
+            const texto = `${rel}: escaneo → ${r.pdfs.map((p) => `«${p.nombre}» (${p.paginas} págs.)`).join(', ')}`;
+            hecho.push(texto);
+            console.log(`  📄 PreProceso: ${texto}`);
+        } else {
+            pendientes.set(dir, `escaneo que no se pudo pasar a PDF (${r.motivo})`);
+            console.warn(`  ⚠️  PreProceso: ${rel}: escaneo que no se pudo pasar a PDF (${r.motivo})`);
+        }
         return;
     }
 
     // Libro por capítulos, guiado o detectado. Un libro que no se puede preparar se queda aquí: nunca se cataloga
     // trozo a trozo.
     let resultado = null;
+    latido.detalle(`libro por capítulos: ${rel}`);
     if (guia?.accion === 'desglose') {
         resultado = await materializarDesgloseGuiado(dir, guia.desglose || {});
     } else {

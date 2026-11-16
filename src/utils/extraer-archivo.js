@@ -29,7 +29,7 @@ const sinAvanceMs = () => Math.max(1, Number(process.env.EXTRAER_SIN_AVANCE_MIN 
  *   dirSalida + nombreDeLinea: dónde mirar el fichero en curso; guardarSalida: devolver todas las líneas (listar).
  * @returns {Promise<{lineas: string[]}>}  lanza Error con `.atascado` si se paró por no avanzar.
  */
-function ejecutarVigilado(cmd, args, { dirSalida = null, nombreDeLinea = null, guardarSalida = false } = {}) {
+function ejecutarVigilado(cmd, args, { dirSalida = null, nombreDeLinea = null, guardarSalida = false, etiqueta = null } = {}) {
     return new Promise((resolve, reject) => {
         const hijo = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
         const lineas = [];
@@ -39,6 +39,12 @@ function ejecutarVigilado(cmd, args, { dirSalida = null, nombreDeLinea = null, g
         let ultimoAvance = Date.now();
         let tamEnCurso = -1;
         let atascado = false;
+        // LATIDO en el log (petición del usuario, 16-nov: que se vea con su hora que sigue trabajando): con `etiqueta`,
+        // cada PREPROCESO_LATIDO_MIN una línea con lo que lleva. Un zip de 50 GB tarda horas.
+        const inicio = Date.now();
+        const latidoMs = Math.max(1, Number(process.env.PREPROCESO_LATIDO_MIN || 5)) * 60000;
+        let ultimoLatido = inicio;
+        let nLineas = 0;
 
         const alLeer = (buf) => {
             const texto = resto + buf.toString('utf8');
@@ -48,6 +54,7 @@ function ejecutarVigilado(cmd, args, { dirSalida = null, nombreDeLinea = null, g
                 const linea = l.replace(/\r$/, '');
                 if (!linea.trim()) continue;
                 ultimoAvance = Date.now();
+                nLineas++;
                 if (guardarSalida) lineas.push(linea.trim());
                 cola.push(linea.trim());
                 if (cola.length > 5) cola.shift();
@@ -65,6 +72,12 @@ function ejecutarVigilado(cmd, args, { dirSalida = null, nombreDeLinea = null, g
                     if (tamEnCurso >= 0) ultimoAvance = Date.now();
                     tamEnCurso = tam;
                 }
+            }
+            if (etiqueta && Date.now() - ultimoLatido >= latidoMs) {
+                ultimoLatido = Date.now();
+                const min = Math.round((Date.now() - inicio) / 60000);
+                const quieto = Math.round((Date.now() - ultimoAvance) / 60000);
+                console.log(`  ⏳ «${etiqueta}»: ${nLineas} fichero(s) extraído(s) en ${min} min${enCurso ? ` · ahora «${path.basename(enCurso)}»` : ''}${quieto >= 2 ? ` · ${quieto} min sin avanzar` : ''}`);
             }
             if (Date.now() - ultimoAvance > sinAvanceMs()) {
                 atascado = true;
@@ -98,13 +111,13 @@ const nombreBsdtar = (l) => { const m = /^x (.+)$/.exec(l.trim()); return m ? m[
  */
 export async function extraerArchivoComic(ruta, dir) {
     try {
-        await ejecutarVigilado('bsdtar', ['-x', '-v', '-f', ruta, '-C', dir], { dirSalida: dir, nombreDeLinea: nombreBsdtar });
+        await ejecutarVigilado('bsdtar', ['-x', '-v', '-f', ruta, '-C', dir], { dirSalida: dir, nombreDeLinea: nombreBsdtar, etiqueta: path.basename(ruta) });
         return 'bsdtar';
     } catch (e1) {
         if (e1.atascado) throw Object.assign(new Error(`bsdtar: ${e1.message}`), { atascado: true });
         try {
             // Sin -quiet: unar escribe una línea por fichero, que es su señal de avance.
-            await ejecutarVigilado('unar', ['-force-overwrite', '-no-directory', '-output-directory', dir, ruta]);
+            await ejecutarVigilado('unar', ['-force-overwrite', '-no-directory', '-output-directory', dir, ruta], { etiqueta: path.basename(ruta) });
             return 'unar';
         } catch (e2) {
             throw Object.assign(new Error(`bsdtar: ${e1.message} · unar: ${e2.message}`), { atascado: Boolean(e2.atascado) });

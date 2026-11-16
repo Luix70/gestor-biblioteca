@@ -109,6 +109,9 @@ export const AJUSTES = {
     // tope fijo de 5 min, los zip de 16-52 GB morían a mitad y se daban por dañados). Solo se para si se ATASCA:
     // estos minutos seguidos sin un fichero nuevo extraído ni el fichero en curso creciendo.
     EXTRAER_SIN_AVANCE_MIN: 20,
+    // Cada cuántos minutos PreProceso (y una descompresión larga) dejan en el log una línea de «sigo con…», y PreProceso
+    // actualiza `PreProceso/_ESTADO PREPROCESO.txt`. Para saber si trabaja o está bloqueado (16-nov).
+    PREPROCESO_LATIDO_MIN: 5,
 
     // --- Empaquetado de láminas sueltas en cbz (empaquetar-imagenes) ---
     // Tope POR TOMO, en BYTES (no en nº de páginas): el visor abre el cbz cargándolo en MEMORIA (adm-zip), así

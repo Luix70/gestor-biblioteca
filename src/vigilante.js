@@ -1670,19 +1670,17 @@ async function espacioLibre(dir) {
 }
 
 /**
- * Nº de ficheros de un árbol (todos, ocultos incluidos: es para cuadrar con la lista del comprimido). `conVacias`:
- * cada carpeta vacía cuenta como uno (en el listado de un RAR no se distingue de un fichero).
+ * Entradas del listado de un comprimido que NO están en `dir` tras extraerlo (como fichero o como carpeta). Se salta
+ * «.»/«./» (la raíz que lista un ISO) y el prefijo «./» de algunos tar.
  */
-async function contarFicheros(dir, { conVacias = false } = {}) {
-    const ents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-    let n = 0;
-    for (const e of ents) {
-        if (e.isDirectory()) {
-            const dentro = await contarFicheros(path.join(dir, e.name), { conVacias });
-            n += dentro || (conVacias ? 1 : 0);
-        } else n++;
+async function entradasQueFaltan(dir, entradas) {
+    const faltan = [];
+    for (const e of entradas) {
+        const rel = String(e).replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+        if (!rel || rel === '.') continue;
+        if (!(await rutaExiste(path.join(dir, rel)))) faltan.push(rel);
     }
-    return n;
+    return faltan;
 }
 
 /**
@@ -1737,13 +1735,15 @@ async function expandirUno(dir, nombre, zip, base, { decidido, nivel, opts }) {
     try {
         await fs.mkdir(tmp, { recursive: true });
         await extraerComprimido(zip, tmp);                   // bsdtar (zip/rar/7z) → al temporal
-        // Verificación: tantos ficheros como lista el comprimido (con lsar no se distingue bien fichero de carpeta,
-        // así que solo con bsdtar). Las carpetas vacías cuentan: en un RAR una carpeta vacía parece un fichero. Un
-        // fallo a medias no debe llevar el original a la Papelera.
+        // Verificación: CADA entrada que lista el comprimido existe en lo extraído (fichero o carpeta). Antes se
+        // contaban ficheros, y un ISO lista también «.» (su raíz) y carpetas sin «/»: «salieron 450 de 451» en
+        // ISOs sanos (16-nov). Con lsar los nombres no son fiables, así que solo con bsdtar. Un fallo a medias no
+        // debe llevar el original a la Papelera.
         if (entradas.por === 'bsdtar') {
-            const esperados = ficherosDelListado(entradas).length;
-            const salieron = await contarFicheros(tmp, { conVacias: true });
-            if (salieron < esperados) throw new Error(`extracción incompleta: salieron ${salieron} de ${esperados} ficheros`);
+            const faltan = await entradasQueFaltan(tmp, entradas);
+            if (faltan.length) {
+                throw new Error(`extracción incompleta: faltan ${faltan.length} de ${ficherosDelListado(entradas).length} (${faltan.slice(0, 3).map((f) => `«${f}»`).join(', ')}${faltan.length > 3 ? '…' : ''})`);
+            }
         }
         // Aplanar: si el zip contiene UN único directorio de nivel superior, usar SU contenido como raíz.
         const top = (await fs.readdir(tmp, { withFileTypes: true })).filter((d) => !ignorarEntrada(d.name));

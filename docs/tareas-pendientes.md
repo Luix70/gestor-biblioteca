@@ -67,6 +67,13 @@
 - [ ] `… --ejecutar` (mueve ~138 GB entre montajes: copia + verificación, tarda) y comprobar que PreProceso abre los
       cuatro zip grandes (log: «abriendo… no se interrumpe mientras avance») y convierte los artbooks en cómics
 - [ ] Revisar los «papelera (láminas; ¿ficha duplicada?)»: pueden dar un cbz junto al PDF que se hizo de sus imágenes
+- [ ] (16-nov) Desplegar el latido de PreProceso y el arreglo de la verificación de los ISO; comprobar en el log las
+      líneas «🧰 PreProceso:»/«⏳ … sigue» y el fichero `PreProceso/_ESTADO PREPROCESO.txt`. Los ISO que dieron
+      «extracción incompleta: salieron N de N+1» (Irvine Assembly 4e, Floyd Digital Fundamentals 9e, Floyd Principles
+      of Electric Circuits 8e) se reintentan solos a las 6 h o tras reiniciar
+- [ ] Revisar los comprimidos que se quedan en PreProceso con su aviso: «Fundamentals Of Electric Circuits.rar» (2 PDF
+      con error de CRC: dañado de verdad), «802.11 Wireless Network Site Surveying….rar» (no es un rar reconocible),
+      «SOLUTION.ZIP» de Floyd (con contraseña: retiene todo el libro de Floyd)
 - [ ] Decidir si se recuperan también los lotes viejos ya abiertos: `--desde 2026-11-09` (1.090 comprimidos del 9-nov)
       y `--desde 2026-10-31` (110); su contenido ya pasó por la ingesta, lo idéntico se detectaría por hash
 
