@@ -27,7 +27,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { carpetaEstable, expandirComprimidos, materializarDesglose, materializarDesgloseGuiado } from './vigilante.js';
+import { carpetaEstable, expandirComprimidos, materializarDesglose, materializarDesgloseGuiado, CARPETA_NO_DESCOMPRIMIDOS } from './vigilante.js';
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js';
 import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos } from './utils/libro-desglosado.js';
 import { esFicheroCatalogable, examinarCatalogable, escribirAvisoNoCatalogable } from './utils/no-catalogable.js';
@@ -51,7 +51,10 @@ const ACCIONES_INTOCABLES = ['intacta', 'software', 'omitir', 'empaquetar'];   /
 
 // `_Material sin libro`: lo que se retiró del catálogo por no colgar de ningún libro (utils/retirar-material.js). Espera
 // a que lo juntes con su libro; PreProceso no lo prepara ni lo pasa al Inbox.
-const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || n === INFORME || n === ESTADO || n === CARPETA_MATERIAL_SIN_LIBRO;
+// `_No se pudo descomprimir`: los comprimidos dañados / con contraseña, apartados para que no retengan su carpeta
+// (vigilante·apartarNoExpandido). Esperan a que pongas una copia buena; PreProceso no los toca.
+const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || n === INFORME || n === ESTADO
+    || n === CARPETA_MATERIAL_SIN_LIBRO || n === CARPETA_NO_DESCOMPRIMIDOS;
 
 // Qué hace ahora, con marca de tiempo (petición del usuario, 16-nov: «no deja registro en el log; ¿está activo o
 // bloqueado?»): cada fase se anuncia en el log, un latido cada PREPROCESO_LATIDO_MIN la repite mientras dura, y el
@@ -140,9 +143,10 @@ async function prepararDrop(drop) {
     const nombre = path.basename(drop);
     const pendientes = new Map();   // ruta → motivo
     const hecho = [];
-    // Un comprimido que no se puede abrir SE QUEDA AQUÍ, con su error (regla del usuario, 15-nov), y retiene su
-    // unidad: la carpeta pasa entera o no pasa. Antes iba a Cuarentena/ilegibles y el resto de la carpeta pasaba al
-    // Inbox; la carpeta dejada se daba por «completa» y se reciclaba.
+    // Un comprimido que no se puede abrir SE QUEDA EN PREPROCESO, con su error (regla del usuario, 15-nov): antes iba a
+    // Cuarentena/ilegibles. Si el fallo es del propio comprimido (dañado, contraseña) se aparta a «_No se pudo
+    // descomprimir/» y su carpeta sigue (16-nov: un .rar dañado retenía 530 libros); solo uno pasajero (sin espacio)
+    // vuelve aquí como pendiente y retiene su unidad hasta el reintento.
     latido.fase(`«${nombre}»: abriendo comprimidos`);
     for (const { ruta, motivo } of await expandirComprimidos(drop, 6, { enPreproceso: true })) pendientes.set(ruta, motivo);
 

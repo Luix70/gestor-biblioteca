@@ -1642,12 +1642,24 @@ export async function expandirComprimidos(dir = INBOX, nivel = 6, opts = {}) {  
         // puede descomprimir, se queda en PreProceso, con su mensaje de error»). Medido: SCIENCE.zip, DIY.zip,
         // ANTHOLOGIES.zip y NEWS.zip, sanos, acabaron en Cuarentena/ilegibles porque el extractor tenía 5 minutos.
         console.warn(`  ⚠️  No se pudo abrir «${e.name}»: ${r.motivo}`);
-        const donde = await apartarNoExpandido(zip, r.motivo, opts);
-        fallosExpandir.set(donde, { firma: firmaZip, t: Date.now(), motivo: r.motivo });
-        noExpandidos.push({ ruta: donde, motivo: `comprimido que no se pudo abrir: ${r.motivo}` });
+        if (r.transitorio) {
+            // Pasajero (sin espacio en disco): se queda donde está, retiene su carpeta y se reintenta.
+            const donde = await apartarNoExpandido(zip, r.motivo, { ...opts, quedarse: true });
+            fallosExpandir.set(donde, { firma: firmaZip, t: Date.now(), motivo: r.motivo });
+            noExpandidos.push({ ruta: donde, motivo: `comprimido que no se pudo abrir: ${r.motivo}` });
+            continue;
+        }
+        // Del propio comprimido (dañado, con contraseña, incompleto, atascado): se APARTA a «_No se pudo
+        // descomprimir/» y deja de retener su carpeta (regla del usuario, 16-nov: un .rar dañado retenía los 530
+        // libros de «500+ Electrical Engineering Books»). No cuenta como pendiente: el resto sigue su camino.
+        await apartarNoExpandido(zip, r.motivo, opts);
     }
     return noExpandidos;
 }
+
+// Donde esperan los comprimidos que no se pudieron abrir, con su misma ruta relativa y su aviso al lado. PreProceso
+// no la prepara ni la pasa al Inbox; para reintentar, se devuelve el comprimido (o una copia buena) a PreProceso.
+export const CARPETA_NO_DESCOMPRIMIDOS = '_No se pudo descomprimir';
 
 // Comprimidos que no se pudieron abrir: ruta → { firma (tamaño:mtime), t, motivo }. En memoria.
 const fallosExpandir = new Map();
@@ -1747,7 +1759,7 @@ async function expandirUno(dir, nombre, zip, base, { decidido, nivel, opts }) {
     const libre = await espacioLibre(dir);
     const necesita = Math.ceil(bytesZip * 1.2) + MARGEN_DISCO_BYTES;
     if (libre != null && libre < necesita) {
-        return { ok: false, motivo: `no hay espacio para abrirlo (necesita ~${gb(necesita)}, quedan ${gb(libre)}). Se reintentará` };
+        return { ok: false, transitorio: true, motivo: `no hay espacio para abrirlo (necesita ~${gb(necesita)}, quedan ${gb(libre)}). Se reintentará` };
     }
 
     // El destino se crea JUNTO al contenedor (no siempre en la raíz del Inbox): así lo expandido queda dentro de su
@@ -1796,39 +1808,68 @@ async function expandirUno(dir, nombre, zip, base, { decidido, nivel, opts }) {
     return { ok: true, anidados };
 }
 
+/** Ruta relativa de `abs` dentro de PreProceso o del Inbox (lo primero que case); si ninguno, su nombre. */
+function relEnEntrada(abs) {
+    for (const raiz of [DIR_PREPROCESO, INBOX]) {
+        const rel = path.relative(raiz, abs);
+        if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return rel;
+    }
+    return path.basename(abs);
+}
+
 /**
- * Un comprimido que no se pudo abrir: aviso con el error al lado (visible en la carpeta) y, si está en el Inbox, se
- * aparta a PreProceso con su misma ruta relativa (allí no se cataloga nada; se reintenta solo). Devuelve dónde quedó.
+ * Un comprimido que no se pudo abrir. Nunca a la Papelera ni a Cuarentena (regla del usuario, 15-nov), y siempre con un
+ * aviso al lado que dice el error:
+ *   · error del propio comprimido (dañado, contraseña, incompleto, atascado) → se APARTA a
+ *     `PreProceso/_No se pudo descomprimir/<su ruta>` y deja de retener su carpeta (16-nov);
+ *   · pasajero (`opts.quedarse`, sin espacio) → se queda donde está (si estaba en el Inbox, a PreProceso con su misma
+ *     ruta) y retiene su carpeta hasta el reintento.
+ * Devuelve dónde quedó.
  */
 async function apartarNoExpandido(zip, motivo, opts) {
+    const nombre = path.basename(zip);
+    const rel = relEnEntrada(zip);
+    let destino = null;
+    if (!opts.quedarse) destino = path.join(DIR_PREPROCESO, CARPETA_NO_DESCOMPRIMIDOS, rel);
+    else if (!opts.enPreproceso) destino = path.join(DIR_PREPROCESO, rel);
+
     let donde = zip;
-    if (!opts.enPreproceso) {
-        const rel = path.relative(INBOX, zip);
-        const destino = await destinoLibre(path.join(DIR_PREPROCESO, rel.startsWith('..') ? path.basename(zip) : rel));
+    if (destino) {
+        destino = await destinoLibre(destino);
         try {
             await moverArbol(zip, destino);
             donde = destino;
-            console.warn(`     → apartado a PreProceso («${path.relative(DIR_PREPROCESO, destino)}»), con el error al lado. No se cataloga ni se borra.`);
+            await fs.rm(path.join(path.dirname(zip), avisoNoExpandido(nombre)), { force: true }).catch(() => {});
+            console.warn(`     → apartado a «PreProceso/${path.relative(DIR_PREPROCESO, destino)}», con el error al lado. No se cataloga ni se borra; el resto de su carpeta sigue su camino.`);
         } catch (err) {
-            // No se pudo apartar: antes que dejarlo en el Inbox (se catalogaría como un .zip opaco), a Cuarentena, que
-            // también lo conserva entero.
-            console.warn(`     → no se pudo apartar a PreProceso (${err.message}) → Cuarentena/ilegibles (se conserva).`);
-            await enviarAIlegibles([zip], { titulo: path.basename(zip), mensaje: `comprimido no extraíble: ${motivo}` });
-            return zip;
+            if (opts.enPreproceso) {
+                console.warn(`     → no se pudo apartar (${err.message}): se queda donde está, con su aviso.`);
+            } else {
+                // Desde el Inbox, antes que dejarlo allí (se catalogaría como un .zip opaco), a Cuarentena, que también
+                // lo conserva entero.
+                console.warn(`     → no se pudo apartar a PreProceso (${err.message}) → Cuarentena/ilegibles (se conserva).`);
+                await enviarAIlegibles([zip], { titulo: nombre, mensaje: `comprimido no extraíble: ${motivo}` });
+                return zip;
+            }
         }
     }
+    const apartado = donde !== zip && !opts.quedarse;
     const texto = [
-        `NO SE PUDO DESCOMPRIMIR · «${path.basename(zip)}»`,
+        `NO SE PUDO DESCOMPRIMIR · «${path.basename(donde)}»`,
         '',
         `Fecha: ${new Date().toLocaleString('es-ES')}`,
         `Tamaño: ${gb(await fs.stat(donde).then((s) => s.size).catch(() => 0))}`,
+        `Estaba en: ${rel}`,
         '',
         `Error: ${motivo}`,
         '',
-        'Qué pasa: se queda aquí, en PreProceso, sin abrir. No se cataloga, no va a la Papelera ni a Cuarentena.',
-        `Se reintenta solo cada ${Math.round(REINTENTO_EXPANDIR_MS / 3600000)} h, o en cuanto el fichero cambie.`,
-        'Qué hacer: si está dañado o incompleto, sustitúyelo por una copia buena (con el mismo nombre). Si el error es',
-        'de espacio, libera disco. Este aviso se borra solo cuando se abra.',
+        apartado
+            ? 'Qué pasa: se ha apartado aquí, sin abrir, para que el resto de su carpeta siga adelante. No se cataloga, no va a la Papelera ni a Cuarentena.'
+            : 'Qué pasa: se queda aquí, sin abrir, y su carpeta espera. No se cataloga, no va a la Papelera ni a Cuarentena.',
+        apartado
+            ? 'Qué hacer: si está dañado o incompleto, consigue una copia buena y déjala en PreProceso (o en el Inbox) como cualquier otra.'
+            : `Se reintenta solo cada ${Math.round(REINTENTO_EXPANDIR_MS / 3600000)} h, o en cuanto el fichero cambie. Si el error es de espacio, libera disco.`,
+        'Este aviso se puede borrar.',
     ].join('\n') + '\n';
     await fs.writeFile(path.join(path.dirname(donde), avisoNoExpandido(path.basename(donde))), texto).catch(() => {});
     return donde;
