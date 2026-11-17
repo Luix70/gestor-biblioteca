@@ -16,6 +16,7 @@ import { extraerArchivoComic as extraerComprimido, listarComprimido, ficherosDel
 import { esComprimidoDeImagenes, destinoComic } from './utils/comprimido-imagenes.js';
 import { esCdDePrograma, esCarpetaCdDePrograma } from './utils/cd-de-programa.js';
 import { moverArbol, destinoLibre } from './utils/mover-arbol.js';
+import { tomarTurno, intentarTurno, estadoTurno } from './utils/turno-pesado.js';
 import { reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { retirarCarpeta } from './utils/borrado-seguro.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarIntacta, ingestarLibroConMaterial } from './utils/transmedia.js';
@@ -2416,6 +2417,7 @@ async function procesarCola() {
     actividadActual = 'Ingesta del Inbox';
     try {
         let totalProcesadas = 0;
+        let soltarTurnoIngesta = null;   // el turno pesado de la unidad en curso (se suelta al pasar a la siguiente)
         const tally = {};
         await expandirComprimidos();          // .zip suelto → carpeta (drop) ANTES de listar unidades
         await procesarGruposGuia();           // guía: grupos de ficheros → subcarpetas (agrupado B)
@@ -2427,6 +2429,11 @@ async function procesarCola() {
             console.log(`\n📥 Procesando ${unidades.length} unidad(es) del Inbox...`);
             let procesadas = 0;
             for (const u of unidades) {
+                // TURNO DE TRABAJO PESADO (utils/turno-pesado.js): UNA unidad cada vez, alternándose con los pasos
+                // pesados de PreProceso. Sin esto, la ingesta rasterizaba mientras PreProceso cosía o inspeccionaba con
+                // visión y el contenedor reventaba su tope de memoria (17-nov: dos OOM en una hora).
+                soltarTurnoIngesta?.();
+                soltarTurnoIngesta = await tomarTurno('Ingesta del Inbox');
                 // PAUSA desde el panel: se detiene tras el documento en curso; el resto espera en el
                 // Inbox y se reanuda al reactivar el vigilante (igual que el Mantenimiento cede el turno).
                 if (!vigilanteActivo) break;
@@ -2580,6 +2587,7 @@ async function procesarCola() {
             conformadorDormido = false; // nueva(s) ingesta(s) → el Conformador puede tener trabajo
         }
     } finally {
+        soltarTurnoIngesta?.();
         procesando = false;
         actividadActual = null;
     }
@@ -2594,6 +2602,10 @@ function programarScan() {
 /** Una pasada (un lote) de mantenimiento bajo el lock compartido. No solapa con la ingesta. */
 async function ejecutarPasadaMantenimiento() {
     if (procesando) return { ok: false, motivo: 'ocupado: hay ingesta o mantenimiento en curso' };
+    // El turno pesado, sin esperar: si PreProceso está cosiendo o inspeccionando, el mantenimiento vuelve en la
+    // próxima vuelta en vez de sumar su memoria a la de PreProceso (utils/turno-pesado.js).
+    const soltarTurno = intentarTurno('Mantenimiento (Conformador)');
+    if (!soltarTurno) return { ok: false, motivo: `ocupado: «${estadoTurno().dueno}» en curso` };
     procesando = true;
     actividadActual = 'Mantenimiento (Conformador)';
     try {
@@ -2623,6 +2635,7 @@ async function ejecutarPasadaMantenimiento() {
         console.error('Mantenimiento:', e.message);
         return { ok: false, motivo: e.message };
     } finally {
+        soltarTurno();
         procesando = false;
         actividadActual = null;
     }
@@ -2658,6 +2671,8 @@ async function quizasCampanas() {
     if (procesando || mantManualEnCurso) return;
     if (Date.now() - ultimaActividad < MANTENIMIENTO_REPOSO_MS) return;
     if (await debeCederAIngesta()) return;
+    const soltarTurno = intentarTurno('Campañas de fondo');   // PreProceso en un paso pesado → a la próxima vuelta
+    if (!soltarTurno) return;
     procesando = true;
     actividadActual = 'Campañas de fondo';
     try {
@@ -2666,6 +2681,7 @@ async function quizasCampanas() {
     } catch (e) {
         console.error('Campañas de fondo:', e.message);
     } finally {
+        soltarTurno();
         procesando = false;
         actividadActual = null;
     }
@@ -2681,6 +2697,8 @@ export function ejecutarCampanaAhora(id) {
         const quien = actividadActual || (mantManualEnCurso ? 'Mantenimiento manual' : 'otro proceso');
         return { ok: false, motivo: `Ocupado: «${quien}» en curso. Se ejecuta un proceso pesado a la vez; espera a que termine.` };
     }
+    const soltarTurno = intentarTurno(`Campaña: ${etiquetaCampana(id)}`);
+    if (!soltarTurno) return { ok: false, motivo: `Ocupado: «${estadoTurno().dueno}» en curso. Se ejecuta un proceso pesado a la vez; espera a que termine.` };
     procesando = true;
     actividadActual = `Campaña: ${etiquetaCampana(id)}`;
     (async () => {
@@ -2693,6 +2711,7 @@ export function ejecutarCampanaAhora(id) {
         } catch (e) {
             console.error(`Campaña ${id} (manual):`, e.message);
         } finally {
+            soltarTurno();
             procesando = false;
             actividadActual = null;
         }
@@ -2724,6 +2743,8 @@ export function ejecutarCampanaCompleta(id) {
                 if (procesando || mantManualEnCurso) { await dormir(2); continue; } // otro proceso tiene el lock
                 procesando = true;
                 if (await debeCederAIngesta()) { procesando = false; await dormir(5); continue; } // prioridad a la ingesta
+                const soltarTurno = intentarTurno(`Backfill: ${etiquetaCampana(id)}`);
+                if (!soltarTurno) { procesando = false; await dormir(5); continue; } // PreProceso en un paso pesado
                 actividadActual = `Backfill: ${etiquetaCampana(id)}`;
                 let r = null;
                 try {
@@ -2731,6 +2752,7 @@ export function ejecutarCampanaCompleta(id) {
                     const limite = (cfg[id] && cfg[id].lote) || 25;
                     r = await ejecutarCampana(db, id, { limite, debeAbortar: debeCederAIngesta });
                 } finally {
+                    soltarTurno();
                     procesando = false;
                     actividadActual = null;
                 }

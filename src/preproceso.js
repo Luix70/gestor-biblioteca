@@ -42,6 +42,7 @@ import { CARPETA_MATERIAL_SIN_LIBRO } from './utils/retirar-material.js';
 import { EXT_DOC } from './mantenimiento/util-mantenimiento.js';
 import { huella, moverArbol, destinoLibre } from './utils/mover-arbol.js';
 import { crearLatido } from './utils/latido-proceso.js';
+import { conTurno } from './utils/turno-pesado.js';   // un trabajo pesado a la vez con la ingesta (tope de memoria)
 import { esCarpetaCdDePrograma } from './utils/cd-de-programa.js';
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -159,7 +160,7 @@ async function prepararDrop(drop) {
     // camino. Con las guías escritas aquí, la preparación de abajo (coser un desglose guiado) y el filtro de salida
     // las obedecen. Si la IA falla, no pasa nada de esta carpeta: se reintenta sola.
     latido.fase(`«${nombre}»: inspección con IA (si hace falta)`);
-    const prep = await prepararCarpeta(drop, { origen: 'preproceso' }).catch((err) => {
+    const prep = await conTurno(`PreProceso: inspección de «${nombre}»`, () => prepararCarpeta(drop, { origen: 'preproceso' })).catch((err) => {
         console.warn(`  🧭 PreProceso «${nombre}»: fallo al preparar la inspección (${err.message}) → sin guías de IA.`);
         return { seguir: true };
     });
@@ -333,7 +334,7 @@ async function prepararArbol(dir, pendientes, hecho) {
     if (!guia?.accion && dir !== DIR_PRE && !RE_NOMBRE_DE_PARTE.test(path.basename(dir))
         && await pareceLibroPorCapitulos(dir, '', 0) === '.') {
         latido.detalle(`libro por capítulos sin guía: ${rel0}`);
-        const r = await coserSinGuia(dir, entradas);
+        const r = await conTurno(`PreProceso: coser «${rel0}»`, () => coserSinGuia(dir, entradas));
         if (r === true) {
             hecho.push(`${rel0}: libro por capítulos cosido`);
             return;
@@ -357,7 +358,7 @@ async function prepararArbol(dir, pendientes, hecho) {
     const plan = await planEscaneo(dir).catch(() => null);
     if (plan) {
         latido.detalle(`escaneo → PDF: ${rel}`);
-        const r = await materializarEscaneo(dir, plan);
+        const r = await conTurno(`PreProceso: escaneo → PDF «${rel}»`, () => materializarEscaneo(dir, plan));
         if (r.ok) {
             const texto = `${rel}: escaneo → ${r.pdfs.map((p) => `«${p.nombre}» (${p.paginas} págs.)`).join(', ')}`;
             hecho.push(texto);
@@ -381,13 +382,13 @@ async function prepararArbol(dir, pendientes, hecho) {
     let resultado = null;
     latido.detalle(`libro por capítulos: ${rel}`);
     if (guia?.accion === 'desglose') {
-        resultado = await materializarDesgloseGuiado(dir, guia.desglose || {});
+        resultado = await conTurno(`PreProceso: coser «${rel}»`, () => materializarDesgloseGuiado(dir, guia.desglose || {}));
     } else {
         const desg = await detectarLibroDesglosado(dir);
-        if (desg) resultado = await materializarDesglose(dir, desg) ? true : 'esperar';
+        if (desg) resultado = await conTurno(`PreProceso: libro + capítulos «${rel}»`, () => materializarDesglose(dir, desg)) ? true : 'esperar';
         else {
             const puro = await detectarDesglosePuro(dir);
-            if (puro || await esLibroPorCapitulos(dir)) resultado = await materializarDesgloseGuiado(dir, { orden: puro?.partes || [] });
+            if (puro || await esLibroPorCapitulos(dir)) resultado = await conTurno(`PreProceso: coser «${rel}»`, () => materializarDesgloseGuiado(dir, { orden: puro?.partes || [] }));
         }
     }
     if (resultado === true) hecho.push(`${rel}: libro por capítulos preparado`);

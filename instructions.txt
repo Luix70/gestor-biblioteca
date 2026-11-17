@@ -2647,6 +2647,12 @@ de ficheros clasificado por CDU.
       encima de la otra se recupera la estructura original. Las guias de las carpetas de encima viajan al Inbox con
       lo que pasa. Antes un solo libro atascado retenia su carpeta entera (500+ y 600 Electrical Engineering Books:
       unos 1.070 libros esperando por Oppenheim, con una parte danada, y por dos .djvu).
+    · UN TRABAJO PESADO A LA VEZ (17-nov): el contenedor tiene un tope de memoria (700 MB + 700 MB de swap) para
+      que el NAS no se congele; si se pasa, el kernel mata el proceso y Docker lo reinicia («Killed» en el log). El
+      17-nov paso dos veces porque PreProceso (inspeccion con vision, escaneos a PDF, coser capitulos) trabajaba a
+      la vez que la ingesta. Ahora se turnan: la ingesta cataloga una unidad, PreProceso hace un paso pesado, y asi.
+      El Conformador y las campanas ya esperaban a la ingesta; ahora tambien a PreProceso. Abrir comprimidos no
+      espera turno (gasta poca memoria). Si aun asi ves «Killed», mira «sudo dmesg | grep -i memory».
     · SI NO SE PUEDE DESCOMPRIMIR: nunca va a Cuarentena ni a la Papelera. Se queda donde esta, sin abrir, con un
       aviso al lado «.NO_SE_PUDO_DESCOMPRIMIR - <nombre>.txt» que dice el error; el resto de su carpeta sigue. Si
       estaba en el Inbox, pasa a PreProceso con su misma ruta. Si esta danado, sustituyelo ahi mismo por una copia
