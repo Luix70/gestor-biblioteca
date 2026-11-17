@@ -2639,13 +2639,23 @@ de ficheros clasificado por CDU.
       extension .jpg/.png en Luis Royo «calender 2005» y «Tokyo Babylon Post Cards») el log dice cual y que es, y la
       carpeta se empaqueta en .cbz con las imagenes tal cual, sin convertir. Antes la carpeta —y toda su rama, porque
       pasa entera o no pasa— se quedaba en PreProceso reintentandolo cada media hora.
-    · SI NO SE PUEDE DESCOMPRIMIR (15-nov; cambiado 16-nov): nunca va a Cuarentena ni a la Papelera. Si el fallo es
-      del propio comprimido (danado, con contrasena, incompleto, atascado) se APARTA, sin abrir, a
-      «PreProceso/_No se pudo descomprimir/<la misma ruta>» con un aviso al lado
-      «.NO_SE_PUDO_DESCOMPRIMIR - <nombre>.txt» que dice el error, y el RESTO DE SU CARPETA SIGUE adelante (antes
-      un .rar danado retenia los 530 libros de «500+ Electrical Engineering Books»). Para reintentarlo, deja una
-      copia buena en PreProceso o en el Inbox. Solo si el fallo es pasajero (no hay espacio en disco) se queda donde
-      esta, su carpeta espera y se reintenta cada 6 h. Desde el Inbox, igual, a PreProceso.
+    · LO QUE SE PUEDE PASA; LO DEMAS SE QUEDA EN SU SITIO (17-nov). Una carpeta dejada en PreProceso, aunque tenga
+      miles de documentos, se prepara y pasa al Inbox todo lo que se pueda, libro a libro: la unidad es UN LIBRO o
+      UN COMPRIMIDO, no una carpeta. Lo que no se puede (comprimidos que no se abren, ficheros no catalogables o
+      defectuosos, libros por capitulos que no se pueden coser) se queda en PreProceso, EN SU MISMA UBICACION del
+      arbol, para mirarlo a mano. Nada se pierde: todo esta o en el Inbox o en PreProceso, y copiando una carpeta
+      encima de la otra se recupera la estructura original. Las guias de las carpetas de encima viajan al Inbox con
+      lo que pasa. Antes un solo libro atascado retenia su carpeta entera (500+ y 600 Electrical Engineering Books:
+      unos 1.070 libros esperando por Oppenheim, con una parte danada, y por dos .djvu).
+    · SI NO SE PUEDE DESCOMPRIMIR: nunca va a Cuarentena ni a la Papelera. Se queda donde esta, sin abrir, con un
+      aviso al lado «.NO_SE_PUDO_DESCOMPRIMIR - <nombre>.txt» que dice el error; el resto de su carpeta sigue. Si
+      estaba en el Inbox, pasa a PreProceso con su misma ruta. Si esta danado, sustituyelo ahi mismo por una copia
+      buena (al cambiar el fichero se reintenta solo). Si el fallo es de espacio en disco, se reintenta cada 6 h.
+      Lo que el 16-nov se aparto a «PreProceso/_No se pudo descomprimir» vuelve solo a su sitio.
+    · LIBRO POR CAPITULOS SIN GUIA (17-nov): una carpeta que parece un libro partido en capitulos (Adaptive Image
+      Processing, Living Issues in Ethics) se intenta coser en PreProceso; el orden sale de los nombres o, si son
+      titulos, de la IA con el sumario. Solo si las partes tienen paginas y texto de capitulo; si no, se queda para
+      que la mires (ponle una guia).
     · COMPRIMIDOS DE SOLO IMAGENES (15-nov): un .zip/.rar/.7z que solo trae imagenes (un artbook) es un libro de
       laminas: se renombra a .cbz/.cbr/.cb7 sin abrirlo y se cataloga como comic. Un zip de laminas de mas de 400 MB
       (CBZ_MAX_BYTES: el visor abre el cbz en memoria) se abre y se empaqueta en tomos .cbz. Si dentro hay

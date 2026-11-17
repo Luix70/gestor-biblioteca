@@ -75,12 +75,14 @@
       que no se pueden pasar a PDF; comprobar que «Floyd - Electronic Devices CC 7e (2)» se cataloga como 1 registro de
       software (guía puesta a mano; la copia suelta de SOLUTION.ZIP está en la Papelera, 004328), que los otros dos
       ISO de Floyd se guardan como software, y que «calender 2005» y «Tokyo Babylon Post Cards» salen como .cbz
-- [ ] (16-nov) Desplegar «apartar el comprimido que no se abre»: tras el despliegue, los que fallaron se reintentan y
-      los dañados/con contraseña pasan a `PreProceso/_No se pudo descomprimir/`; comprobar que «500+ Electrical
-      Engineering Books» y «600 …» pasan al Inbox sin el .rar dañado
-- [ ] Revisar los comprimidos apartados en `PreProceso/_No se pudo descomprimir/` (o que se quedan con su aviso): «Fundamentals Of Electric Circuits.rar» (2 PDF
-      con error de CRC: dañado de verdad), «802.11 Wireless Network Site Surveying….rar» (no es un rar reconocible),
-      «SOLUTION.ZIP» de Floyd (con contraseña: retiene todo el libro de Floyd)
+- [ ] (17-nov) Desplegar «la unidad es un libro o un comprimido» (PreProceso parte las carpetas): comprobar que «500+
+      Electrical Engineering Books», «600 …» y «Sciences and Mathematics» pasan al Inbox libro a libro y que solo se
+      quedan en PreProceso, en su sitio: Oppenheim (booktext07.pdf dañado), Algorithms for Communication Systems (2
+      .djvu, no se cosen), los .rar dañados con su aviso; que Adaptive Image Processing y Living Issues in Ethics salen
+      cosidos (o se quedan si no pasan la comprobación) y que `PreProceso/_No se pudo descomprimir/` se vacía a su sitio
+- [ ] Revisar a mano lo que se quede en PreProceso con su aviso: «Fundamentals Of Electric Circuits.rar» (2 PDF con
+      error de CRC: dañado de verdad), «802.11 Wireless Network Site Surveying….rar» (no es un rar reconocible),
+      «SOLUTION.ZIP» de Floyd (con contraseña), Oppenheim y los dos .djvu de Algorithms
 - [ ] Decidir si se recuperan también los lotes viejos ya abiertos: `--desde 2026-11-09` (1.090 comprimidos del 9-nov)
       y `--desde 2026-10-31` (110); su contenido ya pasó por la ingesta, lo idéntico se detectaría por hash
 

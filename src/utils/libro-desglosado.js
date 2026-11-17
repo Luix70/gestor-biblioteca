@@ -374,12 +374,12 @@ const MIN_PAGS_PARTE = 3;   // un capítulo tiene páginas; una lámina/página 
  * FALLA EN CERRADO a propósito: si no se puede medir (poppler ausente/PDF ilegible) se devuelve false y NO se
  * cose. Coser fabrica un fichero derivado; ante la duda, que lo decida el humano en el Inspector.
  */
-async function parecenCapitulosDeLibro(dir, partes) {
+export async function parecenCapitulosDeLibro(dir, partes) {   // también preproceso · coserSinGuia
     const indices = [...new Set([0, Math.floor(partes.length / 2), partes.length - 1])];
     const muestra = indices.map((i) => partes[i]).filter(Boolean);
     const paginas = [], textos = [];
     for (const p of muestra) {
-        const ruta = path.join(dir, p);
+        const ruta = path.join(dir, ...p.split('/'));
         try {
             const { stdout } = await ejecutarCmd('pdfinfo', [ruta], { timeout: 20000, maxBuffer: 1 << 20 });
             const m = stdout.match(/^Pages:\s+(\d+)/m);

@@ -18,9 +18,11 @@
  *      aviso `.NO_CATALOGABLE.txt` en la carpeta) y lo que su guía manda omitir. Lo fácil no espera a lo difícil;
  *   5. deja un informe `_preproceso.txt` en la carpeta con lo hecho y lo que espera.
  *
- * Unidad: si la carpeta dejada es en sí un libro (lleva guía de libro, o solo documentos sin subcarpetas), ella
- * entera; si no, cada uno de sus hijos. Pasa a Inbox/<carpeta dejada>/<hijo>, con la guía de la carpeta dejada al
- * lado, para que el Vigilante conserve el contexto (colección, materia) que da el nombre de la carpeta.
+ * Unidad: UN LIBRO O UN COMPRIMIDO, nunca una carpeta de cien documentos (regla del usuario, 17-nov). Se empieza por
+ * los hijos de la carpeta dejada (o ella entera si es un libro); si uno está retenido por algo de DENTRO, se parte
+ * y pasa lo demás (pasarUnidad). Todo pasa a Inbox/<carpeta dejada>/<su ruta relativa>, con las guías de las carpetas
+ * de encima, para que el Vigilante conserve el contexto (colección, materia). Lo que no puede pasar se queda aquí, en
+ * su sitio: nada se pierde, y juntando el Inbox con PreProceso sale la estructura original.
  *
  * Trabaja aunque el Vigilante esté en pausa: preparar no cataloga, y lo que pasa al Inbox espera allí.
  */
@@ -29,11 +31,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { carpetaEstable, expandirComprimidos, materializarDesglose, materializarDesgloseGuiado, CARPETA_NO_DESCOMPRIMIDOS } from './vigilante.js';
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js';
-import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos } from './utils/libro-desglosado.js';
-import { esFicheroCatalogable, examinarCatalogable, escribirAvisoNoCatalogable } from './utils/no-catalogable.js';
+import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos, parecenCapitulosDeLibro } from './utils/libro-desglosado.js';
+import { esFicheroCatalogable, examinarCatalogable, escribirAvisoNoCatalogable, AVISO_NO_CATALOGABLE } from './utils/no-catalogable.js';
 import { leerGuia, escribirGuia, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { esLibroHtml } from './utils/libro-html.js';
 import { reciclarCarpeta } from './utils/papelera.js';
+import { detallarDesglose } from './utils/afinar-guias.js';
 import { prepararCarpeta, MARCA_INSPECCION } from './utils/inspeccion-auto.js'; // fase 2: la IA guía aquí, no en el Inbox
 import { CARPETA_MATERIAL_SIN_LIBRO } from './utils/retirar-material.js';
 import { EXT_DOC } from './mantenimiento/util-mantenimiento.js';
@@ -84,6 +87,7 @@ export async function pasadaPreproceso() {
     let preparadas = 0;
     try {
         await fs.mkdir(DIR_PRE, { recursive: true }).catch(() => {});
+        await devolverApartados().catch((err) => console.warn(`  ⚠️  PreProceso: devolver apartados: ${err.message}`));
         let entradas;
         try { entradas = await fs.readdir(DIR_PRE, { withFileTypes: true }); } catch { return; }
         for (const e of entradas) {
@@ -169,41 +173,9 @@ async function prepararDrop(drop) {
 
     const unidades = await unidadesDe(drop);
     latido.fase(`«${nombre}»: pasando al Inbox lo que está listo (${unidades.length} unidad(es))`);
-    let pasadas = 0;
-    for (const u of unidades) {
-        const bloqueos = [...pendientes.keys()].filter((p) => p === u || p.startsWith(u + path.sep));
-        if (bloqueos.length) continue;
-        // Solo pasa lo que tiene un camino de catalogación CLARO (regla del usuario, 3-nov). Lo demás se queda aquí.
-        const retenida = await motivoParaRetener(u);
-        if (retenida) {
-            pendientes.set(u, retenida.motivo);
-            const clave = `${u}|${retenida.motivo}`;
-            if (!avisadas.has(clave)) {
-                avisadas.add(clave);
-                console.warn(`  ✋ PreProceso: «${path.relative(DIR_PRE, u)}» se queda: ${retenida.motivo}.`);
-            }
-            if (retenida.examen) {
-                await escribirAvisoNoCatalogable(u, retenida.examen, { donde: 'se queda en PreProceso; no pasa al Inbox ni se cataloga' });
-            }
-            continue;
-        }
-        const rel = path.relative(drop, u);
-        const destino = await destinoLibre(rel ? path.join(DIR_INBOX, nombre, rel) : path.join(DIR_INBOX, nombre));
-        // La guía de la carpeta dejada viaja al lado: es su contexto (colección, materia, perfil heredado). Y la marca
-        // de la inspección, para que el Vigilante sepa que ya se inspeccionó aquí y no gaste la IA otra vez.
-        if (rel) {
-            const guiaDrop = path.join(drop, NOMBRE_GUIA);
-            const guiaInbox = path.join(DIR_INBOX, nombre, NOMBRE_GUIA);
-            if (await existe(guiaDrop) && !(await existe(guiaInbox))) {
-                await fs.mkdir(path.dirname(guiaInbox), { recursive: true });
-                await fs.copyFile(guiaDrop, guiaInbox);
-            }
-            await pasarMarcaInspeccion(drop, path.join(DIR_INBOX, nombre));
-        }
-        await moverArbol(u, destino);
-        pasadas++;
-        console.log(`  ➡️  PreProceso: «${rel || nombre}» lista → Inbox.`);
-    }
+    const ctx = { drop, nombre, pendientes, pasadas: 0 };
+    for (const u of unidades) await pasarUnidad(u, ctx, 0);
+    const pasadas = ctx.pasadas;
 
     await escribirInforme(drop, hecho, pendientes, pasadas);
     console.log(`  🧰 PreProceso: «${nombre}» — ${pasadas} unidad(es) al Inbox, ${pendientes.size} esperando (detalle en «${nombre}/${INFORME}»).`);
@@ -213,6 +185,111 @@ async function prepararDrop(drop) {
         await reciclarCarpeta(drop, 'preproceso-vaciado');
         console.log(`  ✅ PreProceso: «${nombre}» completa, toda en el Inbox.`);
     }
+}
+
+// Guías que hacen de la carpeta UNA COSA (un libro, una obra, un audiolibro, un programa…): no se parte. Sin guía, o
+// con una de estas, la carpeta es solo un contenedor de libros y sí se puede partir.
+const ACCIONES_DIVISIBLES = [undefined, null, '', 'normal', 'aplanar', 'explotar'];
+const MAX_NIVEL_PARTIR = 8;
+
+/**
+ * Pasa al Inbox una unidad lista; si algo de DENTRO la retiene, la parte y pasa lo demás.
+ *
+ * UNIDAD = UN LIBRO O UN COMPRIMIDO, NO UNA CARPETA DE CIEN DOCUMENTOS (regla del usuario, 17-nov). Antes la unidad era
+ * cada hijo de la carpeta dejada, entero: un libro por capítulos sin coser (Oppenheim, con una parte dañada) retenía a
+ * «500+ Electrical Engineering Books» con sus 529 libros, y otro a «600 …» con 543, reintentándolo cada media hora sin
+ * fin. Ahora lo que se retiene es solo el libro (o el fichero) que tiene el problema; sus hermanos siguen al Inbox, a
+ * su misma ruta relativa y con las guías de las carpetas de encima (el contexto: colección, materia).
+ * Un libro sigue pasando ENTERO o quedándose ENTERO (regla del 9-nov): nunca se parte una carpeta que ES un libro.
+ */
+async function pasarUnidad(u, ctx, nivel) {
+    const bloqueos = [...ctx.pendientes.keys()].filter((p) => p === u || p.startsWith(u + path.sep));
+    if (bloqueos.includes(u)) return;   // ella misma es lo que espera (su motivo ya está anotado)
+    let retenida = null;
+    if (!bloqueos.length) {
+        // Solo pasa lo que tiene un camino de catalogación CLARO (regla del usuario, 3-nov). Lo demás se queda aquí.
+        retenida = await motivoParaRetener(u);
+        if (!retenida) {
+            await pasarAlInbox(u, ctx);
+            return;
+        }
+    }
+    // Algo la retiene. Si es un contenedor de libros y el problema está DENTRO, se parte: cada hijo por su cuenta.
+    if (nivel < MAX_NIVEL_PARTIR && await esDivisible(u, retenida)) {
+        const hijos = (await fs.readdir(u, { withFileTypes: true }).catch(() => []))
+            .filter((e) => !ignorar(e.name) && e.name !== NOMBRE_GUIA && e.name !== AVISO_NO_CATALOGABLE);
+        for (const h of hijos) await pasarUnidad(path.join(u, h.name), { ...ctx, partida: true, padre: ctx }, nivel + 1);
+        // Del contenedor ya no queda más que su guía y sus marcas: sobra (a la Papelera, nunca borrado).
+        const resto = (await fs.readdir(u).catch(() => [])).filter((n) => !ignorar(n) && n !== NOMBRE_GUIA);
+        if (!resto.length && u !== ctx.drop) await reciclarCarpeta(u, 'preproceso-vaciado').catch(() => {});
+        return;
+    }
+    if (!retenida) return;   // un libro con algo pendiente dentro: espera entero (el pendiente ya está anotado)
+    ctx.pendientes.set(u, retenida.motivo);
+    const clave = `${u}|${retenida.motivo}`;
+    if (!avisadas.has(clave)) {
+        avisadas.add(clave);
+        console.warn(`  ✋ PreProceso: «${path.relative(DIR_PRE, u)}» se queda: ${retenida.motivo}.`);
+    }
+    // El aviso «.NO_CATALOGABLE.txt» solo para una unidad de primer nivel: dentro de una carpeta partida, un léeme o un
+    // .sfv sobrante escribiría el aviso de la carpeta de sus hermanos, que se han ido al Inbox.
+    if (retenida.examen && !ctx.partida) {
+        await escribirAvisoNoCatalogable(u, retenida.examen, { donde: 'se queda en PreProceso; no pasa al Inbox ni se cataloga' });
+    }
+}
+
+/** Suma al contador de la carpeta dejada (los contextos de las carpetas partidas son copias). */
+function contarPasada(ctx) {
+    let c = ctx;
+    while (c.padre) c = c.padre;
+    c.pasadas++;
+}
+
+/**
+ * ¿Se puede partir `u`? Solo una carpeta que es un CONTENEDOR de libros: sin guía que la haga una cosa (libro, obra,
+ * audiolibro, programa…), que no sea un libro HTML, y cuyo motivo de retención no sea ella misma. Lo «no catalogable»
+ * solo se parte si dentro hay algo catalogable y su .sfv (descarga incompleta) no está en ella misma: partir una
+ * descarga incompleta dejaría pasar sus trozos sueltos.
+ */
+async function esDivisible(u, retenida) {
+    const st = await fs.stat(u).catch(() => null);
+    if (!st?.isDirectory()) return false;
+    if (retenida?.propia) return false;
+    const guia = await leerGuia(u).catch(() => null);
+    if (!ACCIONES_DIVISIBLES.includes(guia?.accion)) return false;
+    if (await esLibroHtml(u)) return false;
+    if (retenida?.examen) {
+        if (!retenida.examen.catalogables) return false;
+        const propios = await fs.readdir(u).catch(() => []);
+        if (propios.some((n) => n.toLowerCase().endsWith('.sfv'))) return false;
+    }
+    return true;
+}
+
+/**
+ * Mueve una unidad lista a Inbox/<carpeta dejada>/<su ruta relativa>. Las guías de las carpetas de encima viajan
+ * antes, a sus gemelas del Inbox: son su contexto (colección, materia, perfil heredado). Y la marca de la
+ * inspección, para que el Vigilante sepa que ya se inspeccionó aquí y no gaste la IA otra vez.
+ */
+async function pasarAlInbox(u, ctx) {
+    const { drop, nombre } = ctx;
+    const rel = path.relative(drop, u);
+    const destino = await destinoLibre(rel ? path.join(DIR_INBOX, nombre, rel) : path.join(DIR_INBOX, nombre));
+    if (rel) {
+        for (let anc = path.dirname(u); ; anc = path.dirname(anc)) {
+            const guia = path.join(anc, NOMBRE_GUIA);
+            const gemela = path.join(DIR_INBOX, nombre, path.relative(drop, anc), NOMBRE_GUIA);
+            if (await existe(guia) && !(await existe(gemela))) {
+                await fs.mkdir(path.dirname(gemela), { recursive: true });
+                await fs.copyFile(guia, gemela);
+            }
+            if (anc === drop || !anc.startsWith(drop)) break;
+        }
+        await pasarMarcaInspeccion(drop, path.join(DIR_INBOX, nombre));
+    }
+    await moverArbol(u, destino);
+    contarPasada(ctx);
+    console.log(`  ➡️  PreProceso: «${rel || nombre}» lista → Inbox.`);
 }
 
 /**
@@ -247,6 +324,27 @@ async function prepararArbol(dir, pendientes, hecho) {
     }
     let entradas;
     try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+
+    // LIBRO POR CAPÍTULOS SIN GUÍA (17-nov): antes solo se marcaba «parece un libro por capítulos, ponle una guía» y se
+    // quedaba aquí para siempre (Adaptive Image Processing: 0283_01…08 + fm + ref; Living Issues in Ethics: preliminares
+    // + «Part 1…4/» con los capítulos). Se intenta coserlo aquí, ANTES de bajar a sus subcarpetas (que son sus partes,
+    // no libros sueltos): el orden lo da afinar-guias·detallarDesglose (nombres; si son títulos, una llamada a la IA
+    // con el sumario). Si no se puede, el libro se queda aquí ENTERO, y solo él.
+    if (!guia?.accion && dir !== DIR_PRE && !RE_NOMBRE_DE_PARTE.test(path.basename(dir))
+        && await pareceLibroPorCapitulos(dir, '', 0) === '.') {
+        latido.detalle(`libro por capítulos sin guía: ${rel0}`);
+        const r = await coserSinGuia(dir, entradas);
+        if (r === true) {
+            hecho.push(`${rel0}: libro por capítulos cosido`);
+            return;
+        }
+        if (r === 'esperar') {
+            pendientes.set(dir, 'libro por capítulos que aún no se puede coser (ver el log)');
+            return;
+        }
+        // 'no-es-desglose': no hay partes que coser; sigue el camino de siempre (motivoParaRetener decidirá).
+    }
+
     for (const e of entradas) {
         if (e.isDirectory() && !ignorar(e.name) && e.name !== 'Desglose') await prepararArbol(path.join(dir, e.name), pendientes, hecho);
     }
@@ -296,6 +394,73 @@ async function prepararArbol(dir, pendientes, hecho) {
     else if (resultado === 'esperar') pendientes.set(dir, 'libro por capítulos que aún no se puede coser (ver el log)');
 }
 
+// Carpetas que son una PARTE de un libro («Part 1 - …», «Chapter 3», «Unidad 2», «Vol 1», «CD1»): no se cosen por su
+// cuenta como si fueran el libro entero.
+const RE_NOMBRE_DE_PARTE = /^(part|parte|section|secci[oó]n|unit|unidad|chapter|cap[ií]tulo|tema|lesson|lecci[oó]n|module|m[oó]dulo|vol(ume|umen)?|tomo|cd|disc|disco)\b[\s._-]*\d*/i;
+
+/**
+ * Cose un libro por capítulos que nadie ha guiado. Sus partes pueden estar sueltas y en subcarpetas de partes (las que
+ * solo tienen documentos, sin más subcarpetas). Devuelve true | 'esperar' | 'no-es-desglose'. La guía «desglose» solo
+ * se escribe si hay que esperar (para no volver a pedir el orden a la IA en cada pasada); si se cose, el cosido deja
+ * la suya de libro + material.
+ */
+async function coserSinGuia(dir, entradas) {
+    const subcarpetas = [];
+    for (const e of entradas) {
+        if (!e.isDirectory() || ignorar(e.name) || e.name === 'Desglose') continue;
+        const dentro = await fs.readdir(path.join(dir, e.name), { withFileTypes: true }).catch(() => []);
+        if (dentro.some((x) => x.isDirectory() && !ignorar(x.name))) return 'no-es-desglose';   // árbol más hondo: no se adivina
+        if (dentro.some((x) => x.isFile() && esDoc(x.name))) subcarpetas.push(e.name);
+    }
+    const d = await detallarDesglose(dir, { subcarpetas }).catch((err) => {
+        console.warn(`  ⚠️  PreProceso: no se pudo ordenar «${path.basename(dir)}» (${err.message}).`);
+        return null;
+    });
+    if (!d) return 'no-es-desglose';
+    // Sin guía nadie ha confirmado que sea UN libro: las partes PDF han de tener páginas y texto de capítulo (no láminas,
+    // no documentos sueltos de una página). Si no se puede medir, no se cose: se queda para que lo mires tú.
+    const pdfs = d.orden.filter((n) => n.toLowerCase().endsWith('.pdf'));
+    if (!d.principal && !(await parecenCapitulosDeLibro(dir, pdfs.length ? pdfs : d.orden))) return 'no-es-desglose';
+    const desglose = { ...(d.principal ? { principal: d.principal } : {}), orden: d.orden, ...(Object.keys(d.titulos || {}).length ? { titulos: d.titulos } : {}) };
+    console.log(`  📑 PreProceso: «${path.relative(DIR_PRE, dir)}» parece un libro por capítulos sin guía → se cose (${d.orden.length} partes, orden: ${d.fuente}).`);
+    const r = await materializarDesgloseGuiado(dir, desglose);
+    if (r === 'esperar') await escribirGuia(dir, { accion: 'desglose', desglose, perfil: { origen: 'preproceso' } }).catch(() => {});
+    return r;
+}
+
+/**
+ * Devuelve a su sitio lo que el 16-nov se apartó a «_No se pudo descomprimir/<ruta>»: desde el 17-nov lo que no se
+ * puede abrir se queda en su ubicación del árbol (regla del usuario). Lo que ya tenga ocupado su sitio, se deja allí.
+ */
+async function devolverApartados() {
+    const raiz = path.join(DIR_PRE, CARPETA_NO_DESCOMPRIMIDOS);
+    if (!(await existe(raiz))) return;
+    const ficheros = [];
+    const recorrer = async (d) => {
+        for (const e of await fs.readdir(d, { withFileTypes: true }).catch(() => [])) {
+            const p = path.join(d, e.name);
+            if (e.isDirectory()) await recorrer(p); else ficheros.push(p);
+        }
+    };
+    await recorrer(raiz);
+    for (const f of ficheros) {
+        const destino = path.join(DIR_PRE, path.relative(raiz, f));
+        if (await existe(destino)) continue;
+        try {
+            await moverArbol(f, destino);
+            if (!path.basename(f).startsWith('.')) console.log(`  ↩️  PreProceso: «${path.relative(DIR_PRE, destino)}» vuelve a su sitio (ya no se apartan los comprimidos que no se abren).`);
+        } catch (err) {
+            console.warn(`  ⚠️  PreProceso: no se pudo devolver «${path.relative(raiz, f)}» a su sitio (${err.message}).`);
+        }
+    }
+    // Las carpetas que quedan vacías sobran (de abajo arriba; una con algo dentro no se toca).
+    const podar = async (d) => {
+        for (const e of await fs.readdir(d, { withFileTypes: true }).catch(() => [])) if (e.isDirectory()) await podar(path.join(d, e.name));
+        if (!(await fs.readdir(d).catch(() => ['x'])).length) await fs.rmdir(d).catch(() => {});
+    };
+    await podar(raiz);
+}
+
 /**
  * Las unidades que pasan al Inbox por separado. La carpeta dejada entera si ya es un libro (guía de libro, o solo
  * documentos sin subcarpetas); si no, cada uno de sus hijos.
@@ -331,18 +496,18 @@ async function motivoParaRetener(u) {
         return { motivo: examen.motivo || 'no es un formato que se catalogue', examen };
     }
     const guia = await leerGuia(u).catch(() => null);
-    if (guia?.accion === 'omitir') return { motivo: 'su guía dice «omitir»' };
+    if (guia?.accion === 'omitir') return { motivo: 'su guía dice «omitir»', propia: true };
     const examen = await examinarCatalogable(u);
     if (examen.motivo) return { motivo: examen.motivo, examen };
     // Preparada aquí (libro entero o cosido): su guía nombra el libro, que tiene que estar.
     if (guia?.accion === 'libro-material') {
         const principal = guia.libro_material?.principal;
-        return principal && await existe(path.join(u, principal)) ? null : { motivo: 'guía de libro + material sin su libro principal' };
+        return principal && await existe(path.join(u, principal)) ? null : { motivo: 'guía de libro + material sin su libro principal', propia: true };
     }
     // «Intacta» de la IA sobre algo que no es un libro HTML: daría una ficha de «material» sin libro del que colgar, que
     // la ingesta ya no hace (regla del usuario, 14-nov). Se queda aquí; una guía tuya «intacta» sí pasa.
     if (guia?.accion === 'intacta' && ['agente', 'preproceso'].includes(guia.perfil?.origen) && !(await esLibroHtml(u))) {
-        return { motivo: 'la IA la guió «intacta», pero no es un libro: sin un documento principal no se le hace ficha. Si es una obra, guíala tú' };
+        return { motivo: 'la IA la guió «intacta», pero no es un libro: sin un documento principal no se le hace ficha. Si es una obra, guíala tú', propia: true };
     }
     if (ACCIONES_CON_CAMINO.includes(guia?.accion)) return null;
     // Una guía tuya (del Inspector o aprobada en el panel) decide; la del agente, no.
@@ -355,7 +520,7 @@ async function motivoParaRetener(u) {
     }
     const capitulos = await pareceLibroPorCapitulos(u);
     if (capitulos) {
-        return { motivo: `parece un libro por capítulos sin coser (en «${capitulos === '.' ? path.basename(u) : capitulos}»). Si no lo es, ponle una guía` };
+        return { motivo: `parece un libro por capítulos sin coser (en «${capitulos === '.' ? path.basename(u) : capitulos}»). Si no lo es, ponle una guía`, propia: capitulos === '.' };
     }
     return null;
 }
