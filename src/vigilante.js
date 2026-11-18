@@ -2936,11 +2936,45 @@ export function estadoConformador() {
     };
 }
 
-/** Pausa/reanuda el procesado del Inbox (sin parar la app). Pausado: los ficheros esperan. */
+/**
+ * El interruptor del Vigilante SE RECUERDA entre reinicios (18-nov). Arrancaba siempre en pausa: tras un reinicio
+ * inesperado (el OOM del 17-nov a las 23h, con 4.700 unidades en el Inbox) la ingesta quedaba parada EN SILENCIO
+ * toda la noche hasta que alguien lo reactivaba en el panel. Ahora, si estaba activo, vuelve activo; si lo pausaste
+ * tú, sigue en pausa; sin nada guardado (primera vez), manda VIGILANTE_AUTOSTART.
+ *
+ * En un FICHERO de logs/ y no en Mongo: Atlas lo comparte el PC, y un PC que arrancara la app heredaría el
+ * «activo» del NAS y se pondría a catalogar su propio Inbox. logs/ es de cada máquina y el despliegue no lo toca
+ * (el rsync lo excluye), así que sobrevive a reinicios y a despliegues.
+ */
+const FICHERO_ESTADO_VIGILANTE = path.join(
+    path.isAbsolute(process.env.PATH_LOGS || 'logs') ? process.env.PATH_LOGS : path.resolve(RAIZ, process.env.PATH_LOGS || 'logs'),
+    'estado-vigilante.json');
+
+async function guardarEstadoVigilante() {
+    try {
+        await fs.mkdir(path.dirname(FICHERO_ESTADO_VIGILANTE), { recursive: true });
+        await fs.writeFile(FICHERO_ESTADO_VIGILANTE, JSON.stringify({ activo: vigilanteActivo, fecha: new Date().toISOString() }, null, 2));
+    } catch (e) {
+        console.error('Vigilante: no se pudo guardar su estado (vale solo para esta sesión):', e.message);
+    }
+}
+
+/** El estado guardado: true/false, o null si no hay nada guardado (o no se puede leer). */
+async function cargarEstadoVigilante() {
+    try {
+        const d = JSON.parse(await fs.readFile(FICHERO_ESTADO_VIGILANTE, 'utf8'));
+        return typeof d.activo === 'boolean' ? d.activo : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Pausa/reanuda el procesado del Inbox (sin parar la app). Pausado: los ficheros esperan. Se recuerda. */
 export function configurarVigilante({ activo } = {}) {
     if (typeof activo === 'boolean') {
         vigilanteActivo = activo;
         console.log(`👁️  Vigilante ${activo ? 'REANUDADO' : 'PAUSADO'} desde el panel.`);
+        guardarEstadoVigilante();    // en segundo plano: la respuesta no espera al disco
         if (activo) programarScan(); // al reanudar, procesa lo que se haya acumulado
     }
     return estadoVigilante();
@@ -2957,9 +2991,13 @@ export async function iniciarVigilante() {
     // por el bind mount (p. ej. "Biblioteca Digital/Inbox"). Se muestra INBOX_PUBLIC_PATH si está en .env.
     const inboxPublico = process.env.INBOX_PUBLIC_PATH || '';
     console.log(`👁️  Vigilante observando el Inbox${inboxPublico ? `: ${inboxPublico}` : ` (${INBOX} dentro del contenedor)`}`);
+    // El interruptor como lo dejaste antes del reinicio (cargarEstadoVigilante); sin nada guardado, VIGILANTE_AUTOSTART.
+    const guardadoVig = await cargarEstadoVigilante();
+    if (guardadoVig !== null) vigilanteActivo = guardadoVig;
+    const porque = guardadoVig === null ? 'VIGILANTE_AUTOSTART' : 'como estaba antes del reinicio';
     console.log(vigilanteActivo
-        ? '   ▶️  Vigilante ACTIVO al arrancar (VIGILANTE_AUTOSTART=1).'
-        : '   ⏸️  Vigilante PAUSADO al arrancar: actívalo desde el Panel de Control (los ficheros esperan en el Inbox).');
+        ? `   ▶️  Vigilante ACTIVO al arrancar (${porque}).`
+        : `   ⏸️  Vigilante PAUSADO al arrancar (${porque}): actívalo desde el Panel de Control (los ficheros esperan en el Inbox).`);
     const sondeoMs = Number(process.env.VIGILANTE_POLL_MS || 1500);
     const watcher = chokidar.watch(INBOX, {
         ignoreInitial: false,

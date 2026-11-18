@@ -2647,6 +2647,10 @@ de ficheros clasificado por CDU.
       encima de la otra se recupera la estructura original. Las guias de las carpetas de encima viajan al Inbox con
       lo que pasa. Antes un solo libro atascado retenia su carpeta entera (500+ y 600 Electrical Engineering Books:
       unos 1.070 libros esperando por Oppenheim, con una parte danada, y por dos .djvu).
+    · EL VIGILANTE RECUERDA SU INTERRUPTOR (18-nov): si estaba activo y la app se reinicia (un corte de memoria,
+      un despliegue), vuelve activo y sigue catalogando; si lo pausaste tu, sigue en pausa. Antes arrancaba siempre
+      en pausa y, tras un reinicio de madrugada, la ingesta se quedaba parada hasta que lo reactivabas. El estado
+      se guarda en logs/estado-vigilante.json (de cada maquina: el PC no hereda el del NAS).
     · UN TRABAJO PESADO A LA VEZ (17-nov): el contenedor tiene un tope de memoria (700 MB + 700 MB de swap) para
       que el NAS no se congele; si se pasa, el kernel mata el proceso y Docker lo reinicia («Killed» en el log). El
       17-nov paso dos veces porque PreProceso (inspeccion con vision, escaneos a PDF, coser capitulos) trabajaba a

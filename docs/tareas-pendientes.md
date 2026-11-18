@@ -75,6 +75,8 @@
       que no se pueden pasar a PDF; comprobar que «Floyd - Electronic Devices CC 7e (2)» se cataloga como 1 registro de
       software (guía puesta a mano; la copia suelta de SOLUTION.ZIP está en la Papelera, 004328), que los otros dos
       ISO de Floyd se guardan como software, y que «calender 2005» y «Tokyo Babylon Post Cards» salen como .cbz
+- [ ] (18-nov) Tras desplegar, activar el Vigilante UNA vez en el panel (crea `logs/estado-vigilante.json`); desde ahí un
+      reinicio lo deja como estaba (el log dice «Vigilante ACTIVO al arrancar (como estaba antes del reinicio)»)
 - [ ] (17-nov) Desplegar el turno de trabajo pesado (utils/turno-pesado.js) y vigilar que no vuelva el «Killed» (OOM del
       contenedor) con el Inbox lleno: `sudo docker inspect gestor-biblioteca --format '{{.RestartCount}}'` no debe subir;
       el log debe alternar «📥 Procesando» de la ingesta con los pasos de PreProceso
