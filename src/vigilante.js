@@ -2022,6 +2022,18 @@ function desgloseEnEspera(dir) {
 
 export async function materializarDesglose(dir, desg) {   // la usa también preproceso.js
     try {
+        // EL LIBRO, A LA RAÍZ (18-nov). El libro entero puede estar en una subcarpeta («jam xp/jam xp.pdf», el PDF que
+        // PreProceso hizo de los escaneos de esa subcarpeta), pero la guía «libro + material» solo admite un principal
+        // en la raíz (guia-ingesta descarta un nombre con «/») y la ingesta lo busca allí: «Subversive Beauty» acabó
+        // en «no hay documento principal en la raíz» y se quedó en el Inbox para siempre. Se sube a la raíz antes.
+        if (desg.principal.includes('/')) {
+            const origen = path.join(dir, ...desg.principal.split('/'));
+            const destino = await nombreLibre(dir, path.basename(origen));
+            await fs.rename(origen, destino);
+            const subcarpeta = path.dirname(origen);
+            if (!(await fs.readdir(subcarpeta).catch(() => ['x'])).length) await fs.rmdir(subcarpeta).catch(() => {});
+            desg = { ...desg, principal: path.basename(destino) };
+        }
         // Lo que ya está dentro del libro entero sobra y va a la Papelera. Solo se adjunta lo que aporta algo o lo que
         // no se ha podido comprobar (ver utils/partes-contenidas.js).
         const { contenidas, conservadas } = await partesContenidasEnLibro(dir, desg.principal, desg.partes);
