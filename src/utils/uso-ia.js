@@ -53,11 +53,14 @@ let temporizador = null;
  * Anota UNA llamada que respondió. `uso` = { entrada, salida, razon } en tokens (lo que devuelva el proveedor; si no
  * dice nada, se cuenta la llamada con 0 tokens). Nunca lanza.
  */
-export function anotarUsoIA({ proveedor, tier, uso = {} }) {
+export function anotarUsoIA({ proveedor, tier, uso = {}, precio = null }) {
   try {
     const origen = origenActual();
     const k = `${origen}|${proveedor}`;
     const a = pendiente.get(k) || { origen, proveedor, tier, llamadas: 0, entrada: 0, salida: 0, razon: 0 };
+    // Tarifa PROPIA del proveedor ([entrada, salida] en $/millón; 18-nov: DeepSeek, Qwen…). Sin ella, la de config
+    // (Gemini de pago). Se guarda con sus tokens para que el coste de cada proveedor salga con su precio.
+    if (Array.isArray(precio) && precio.length === 2) a.precio = precio;
     a.llamadas++;
     a.entrada += Number(uso.entrada) || 0;
     a.salida += Number(uso.salida) || 0;
@@ -71,8 +74,9 @@ export function anotarUsoIA({ proveedor, tier, uso = {} }) {
 }
 
 /** Coste en euros de unos tokens de la IA de pago (los de razonamiento, como salida). */
-export function costeEur({ entrada = 0, salida = 0, razon = 0 }) {
-  const usd = (entrada * PRECIO_ENTRADA_USD_M() + (salida + razon) * PRECIO_SALIDA_USD_M()) / 1e6;
+export function costeEur({ entrada = 0, salida = 0, razon = 0, precio = null }) {
+  const [pe, ps] = Array.isArray(precio) && precio.length === 2 ? precio : [PRECIO_ENTRADA_USD_M(), PRECIO_SALIDA_USD_M()];
+  const usd = (entrada * pe + (salida + razon) * ps) / 1e6;
   return usd * USD_A_EUR();
 }
 
@@ -97,11 +101,12 @@ export async function volcarUsoIA() {
         [`${base}.llamadas`]: l.llamadas, [`${base}.entrada`]: l.entrada,
         [`${base}.salida`]: l.salida, [`${base}.razon`]: l.razon,
       },
-      $set: { [`${base}.tier`]: l.tier },
+      $set: { [`${base}.tier`]: l.tier, ...(l.precio ? { [`${base}.precio`]: l.precio } : {}) },
     }, { upsert: true }).then(() => true, () => false);
     if (!ok) {   // sin conexión: al pendiente otra vez
       const k = `${l.origen}|${l.proveedor}`;
       const a = pendiente.get(k) || { origen: l.origen, proveedor: l.proveedor, tier: l.tier, llamadas: 0, entrada: 0, salida: 0, razon: 0 };
+      if (l.precio) a.precio = l.precio;
       a.llamadas += l.llamadas; a.entrada += l.entrada; a.salida += l.salida; a.razon += l.razon;
       pendiente.set(k, a);
     }

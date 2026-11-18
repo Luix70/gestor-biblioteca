@@ -75,6 +75,10 @@
       que no se pueden pasar a PDF; comprobar que «Floyd - Electronic Devices CC 7e (2)» se cataloga como 1 registro de
       software (guía puesta a mano; la copia suelta de SOLUTION.ZIP está en la Papelera, 004328), que los otros dos
       ISO de Floyd se guardan como software, y que «calender 2005» y «Tokyo Babylon Post Cards» salen como .cbz
+- [ ] (18-nov) IAs de visión nuevas: crear las claves (z.ai, Mistral, DeepSeek, Alibaba Model Studio región internacional)
+      y ponerlas en el .env del NAS; `node scripts/comparar-vision.js --listar` y luego `--muestra 30 --informe
+      logs/comparar-vision.txt`; activar en el panel solo los que acierten ISBN/título como Gemini. Comprobar el id del
+      modelo de DeepSeek con imagen (`DEEPSEEK_MODELO`) y el tope real de imágenes de GLM/Qwen
 - [ ] (18-nov) Tras desplegar, activar el Vigilante UNA vez en el panel (crea `logs/estado-vigilante.json`); desde ahí un
       reinicio lo deja como estaba (el log dice «Vigilante ACTIVO al arrancar (como estaba antes del reinicio)»)
 - [ ] (17-nov) Desplegar el turno de trabajo pesado (utils/turno-pesado.js) y vigilar que no vuelva el «Killed» (OOM del

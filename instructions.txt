@@ -2647,6 +2647,17 @@ de ficheros clasificado por CDU.
       encima de la otra se recupera la estructura original. Las guias de las carpetas de encima viajan al Inbox con
       lo que pasa. Antes un solo libro atascado retenia su carpeta entera (500+ y 600 Electrical Engineering Books:
       unos 1.070 libros esperando por Oppenheim, con una parte danada, y por dos .djvu).
+    · MAS IAS CON VISION (18-nov): ademas de Gemini, OpenRouter y Groq, la rotacion admite Gemini Flash-Lite (con la
+      misma clave gratis de Gemini; otra cuota gratuita, mucho mayor), GLM-4.6V-Flash de Zhipu (gratis), Pixtral de
+      Mistral (gratis, pero puede usar lo que se le envia para entrenar), DeepSeek Flash (de pago, muy barato), Qwen3-VL
+      (de pago) y el par Qwen-VL-OCR + IA de texto gratis (de pago: el OCR transcribe las paginas y una IA gratuita saca
+      los datos). Las claves van en .env (ver .env.example: ZAI_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY,
+      DASHSCOPE_API_KEY). Los nuevos entran APAGADOS: en Ajustes de vision salen como «nuevo · apagado».
+      ANTES DE ACTIVARLOS, MIDELOS: «sudo docker exec -t gestor-biblioteca node scripts/comparar-vision.js» manda las
+      mismas 5+1 imagenes de 30 libros ya catalogados (con ISBN fiable) a cada proveedor con clave y saca una tabla de
+      aciertos (ISBN, titulo, autor, editorial, año, idioma, CDU), errores y tiempo. --listar ve los proveedores;
+      --muestra 50, --proveedores <ids>, --soporte papel, --informe logs/comparar-vision.txt (detalle libro a libro).
+      El coste de cada proveedor de pago se calcula ahora con su propia tarifa (Mantenimiento → Uso de IA).
     · EL VIGILANTE RECUERDA SU INTERRUPTOR (18-nov): si estaba activo y la app se reinicia (un corte de memoria,
       un despliegue), vuelve activo y sigue catalogando; si lo pausaste tu, sigue en pausa. Antes arrancaba siempre
       en pausa y, tras un reinicio de madrugada, la ingesta se quedaba parada hasta que lo reactivabas. El estado

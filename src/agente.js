@@ -7,7 +7,8 @@ import { esEditorialFalsa } from './utils/editoriales-falsas.js';
 dotenv.config();
 
 // Salida JSON; la visión va por rotación multi-proveedor (gratis→pago) en conVision().
-const INSTRUCCIONES_SISTEMA = `
+// Exportado para scripts/comparar-vision.js: los proveedores se miden con la MISMA instrucción que usa la ingesta.
+export const INSTRUCCIONES_SISTEMA = `
 Eres un bibliotecario experto y un sistema de extracción de metadatos estructurados.
 Tu objetivo es analizar las imágenes provistas (pueden ser una o varias del mismo recurso: portada, lomo, contraportada, o páginas interiores como la portadilla y la página de créditos/copyright de un PDF escaneado) y consolidar la información en ÚNICAMENTE un objeto JSON válido.
 

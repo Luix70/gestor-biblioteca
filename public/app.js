@@ -11461,7 +11461,7 @@ async function loadVision() {
     el.innerHTML = `<table><tr><th>Proveedor</th><th>Clave</th><th>Estado</th><th></th></tr>${ps
       .map(
         (p) => `<tr data-id="${esc(p.id)}">
-      <td>${esc(p.etiqueta)} <span class="tag ${p.tier === 'free' ? 'ok' : 'warn'}">${esc(p.tier)}</span><br><span class="muted mono" style="font-size:10px">${esc(p.id)} · ${esc(p.modelo)}</span></td>
+      <td>${esc(p.etiqueta)} <span class="tag ${p.tier === 'free' ? 'ok' : 'warn'}">${esc(p.tier)}</span>${p.nuevo && !p.enabled ? ' <span class="tag" title="Apagado de serie: mídelo antes con scripts/comparar-vision.js y actívalo aquí">nuevo · apagado</span>' : ''}<br><span class="muted mono" style="font-size:10px">${esc(p.id)} · ${esc(p.modelo)}</span></td>
       <td class="mono muted">${esc(p.masked)}</td>
       <td style="font-size:12px">${p.ultimoOk ? '<span class="tag ok">último OK</span> ' : ''}${p.cooldown ? '<span class="tag bad">cooldown</span> ' : ''}${p.errores ? `<span class="muted">${p.errores} err</span>` : ''}${p.ultimoError ? `<br><span class="muted" style="font-size:10px">${esc(String(p.ultimoError).slice(0, 90))}</span>` : ''}</td>
       <td style="text-align:right;white-space:nowrap"><button class="btn vprobar" data-id="${esc(p.id)}">Probar</button> <label class="switch" style="vertical-align:middle;margin-left:6px"><input type="checkbox" class="vena" data-id="${esc(p.id)}" ${p.enabled ? 'checked' : ''}><span class="slider"></span></label></td></tr>`,

@@ -37,10 +37,29 @@ const limpia = (k) => (k && String(k).trim()) || null;
 // `maxImg` = nº MÁXIMO de imágenes por petición que admite el modelo (Groq llama-4 = 5; Gemini, muchas).
 // Si se superan, conVision recorta a las primeras (max-1) + la última (evita "too many images"). Override
 // por env: GEMINI_MAX_IMG / GROQ_MAX_IMG / OPENROUTER_MAX_IMG.
+//
+// PROVEEDORES NUEVOS (18-nov, para las 5+1 páginas de catalogación): `desactivadoDeSerie` → no entran en la rotación
+// hasta que se activan en el panel (Ajustes de visión), después de medirlos con scripts/comparar-vision.js. El ORDEN
+// de esta lista es el de la rotación: gratis primero, de pago al final y Gemini de pago el último. `precio` = tarifa
+// pública en $/millón de tokens (entrada, salida) para el contador de coste (uso-ia.js); verifícala en su web.
+// `sufijo`: el proveedor reutiliza la clave de otro (Flash-Lite con la clave gratis de Gemini: la cuota gratuita es
+// POR MODELO, así que es otra bolsa) y necesita su propio id para activarlo o apagarlo por separado.
 const PROVEEDORES = [
     { id: 'gemini-free', etiqueta: 'Gemini (free)', tipo: 'gemini', tier: 'free', maxImg: Number(process.env.GEMINI_MAX_IMG) || 16,
         modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
         prefijos: ['GEMINI_API_FREE_KEY'] },
+    // Flash-Lite: ~4 veces más barato que Flash y con mucha más cuota gratuita (~500 peticiones/día frente a ~20).
+    { id: 'gemini-lite-free', etiqueta: 'Gemini Flash-Lite (free)', tipo: 'gemini', tier: 'free', sufijo: 'lite', desactivadoDeSerie: true,
+        maxImg: Number(process.env.GEMINI_MAX_IMG) || 16,
+        // (18-nov) gemini-2.5-flash-lite da 404 a cuentas nuevas («no longer available to new users»); 3.1 y 3.5 responden.
+        modelo: () => process.env.GEMINI_LITE_MODELO || 'gemini-3.5-flash-lite',
+        prefijos: ['GEMINI_API_FREE_KEY'] },
+    // GLM-4.6V-Flash de Zhipu (Z.ai): visión GRATIS según su tabla oficial de precios (~1 petición/s).
+    { id: 'zai', etiqueta: 'GLM-4.6V-Flash (Z.ai, free)', tipo: 'openai', tier: 'free', desactivadoDeSerie: true,
+        maxImg: Number(process.env.ZAI_MAX_IMG) || 6,
+        baseURL: () => process.env.ZAI_BASE_URL || 'https://api.z.ai/api/paas/v4',
+        modelo: () => process.env.ZAI_MODELO || 'glm-4.6v-flash',
+        prefijos: ['ZAI_API_KEY'] },
     // Groq YA NO sirve modelos de VISIÓN (retiró los Llama Vision → 404), pero SÍ tiene texto gratis excelente
     // (gpt-oss-120b). Por eso se marca `soloTexto`: aporta a la rotación de TEXTO (conTexto: CDU/descripciones,
     // descargando a Gemini) y NO se prueba en la visión (evita el 404). Si Groq vuelve a tener un modelo de
@@ -56,10 +75,43 @@ const PROVEEDORES = [
         // nuestras claves. Nemotron 3.5 Super VL de NVIDIA respondía en <1 s con JSON válido. OPENROUTER_MODELO lo cambia.
         modelo: () => process.env.OPENROUTER_MODELO || 'nvidia/nemotron-3.5-super-vl:free',
         prefijos: ['OPENROUTER_API_KEY'] },
+    // Pixtral (Mistral, modo gratuito ~1 petición/s). OJO: en el plan gratuito Mistral PUEDE USAR lo que se le envía
+    // para entrenar sus modelos (portadas y créditos de libros publicados). Mistral quiere la imagen como cadena.
+    { id: 'mistral', etiqueta: 'Pixtral (Mistral, free)', tipo: 'openai', tier: 'free', desactivadoDeSerie: true, imagenComoCadena: true,
+        maxImg: Number(process.env.MISTRAL_MAX_IMG) || 8,
+        baseURL: () => process.env.MISTRAL_BASE_URL || 'https://api.mistral.ai/v1',
+        modelo: () => process.env.MISTRAL_MODELO || 'pixtral-large-latest',
+        prefijos: ['MISTRAL_API_KEY'] },
+    // ── DE PAGO ──
+    // DeepSeek Flash (V4.1), con imagen desde sep-2026. ~$0,15/$0,60 fuera de horas punta (el doble de 01-04 y 06-10
+    // UTC entre semana). Limita los tokens por imagen (las reduce): medir si lee la letra pequeña del CIP.
+    { id: 'deepseek', etiqueta: 'DeepSeek Flash (pago)', tipo: 'openai', tier: 'paid', desactivadoDeSerie: true,
+        maxImg: Number(process.env.DEEPSEEK_MAX_IMG) || 6, precio: [0.15, 0.60],
+        baseURL: () => process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1',
+        modelo: () => process.env.DEEPSEEK_MODELO || 'deepseek-flash',
+        prefijos: ['DEEPSEEK_API_KEY'] },
+    // Qwen-VL-OCR + IA de TEXTO GRATIS, en dos pasos: Qwen-VL-OCR (~$0,07/$0,16) solo TRANSCRIBE las páginas, y un
+    // proveedor de texto gratuito de esta misma rotación (Groq gpt-oss…) saca de esa transcripción los datos que pide
+    // la instrucción. La combinación más barata que lee bien la letra pequeña, si las mediciones lo confirman.
+    { id: 'qwen-ocr', etiqueta: 'Qwen-VL-OCR + texto gratis (pago)', tipo: 'ocr-texto', tier: 'paid', desactivadoDeSerie: true, sufijo: 'ocr',
+        maxImg: Number(process.env.QWEN_MAX_IMG) || 6, precio: [0.07, 0.16],
+        baseURL: () => process.env.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+        modelo: () => process.env.QWEN_OCR_MODELO || 'qwen-vl-ocr',
+        prefijos: ['DASHSCOPE_API_KEY'] },
+    // Qwen3-VL-Plus (Alibaba, región internacional): ~$0,20/$1,60; 1 M de tokens gratis los primeros 90 días.
+    { id: 'qwen-vl', etiqueta: 'Qwen3-VL-Plus (pago)', tipo: 'openai', tier: 'paid', desactivadoDeSerie: true,
+        maxImg: Number(process.env.QWEN_MAX_IMG) || 6, precio: [0.20, 1.60],
+        baseURL: () => process.env.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+        modelo: () => process.env.QWEN_MODELO || 'qwen3-vl-plus',
+        prefijos: ['DASHSCOPE_API_KEY'] },
     { id: 'gemini-paid', etiqueta: 'Gemini (pago)', tipo: 'gemini', tier: 'paid', maxImg: Number(process.env.GEMINI_MAX_IMG) || 16,
         modelo: () => process.env.GEMINI_MODELO || 'gemini-2.5-flash',
         prefijos: ['GEMINI_API_KEY_PAID'] },
 ];
+
+// Instrucción del primer paso de `ocr-texto`: transcribir, no interpretar (eso lo hace el modelo de texto).
+const PROMPT_OCR = 'Transcribe literalmente TODO el texto de cada imagen, en orden, sin resumir ni corregir. '
+    + 'Separa cada imagen con una línea «=== Página N ===». Conserva los números exactamente (ISBN, depósito legal, CDU, fechas).';
 
 // Recorta a `max` imágenes conservando las primeras (max-1) + la ÚLTIMA (suele llevar ISBN/créditos).
 function recortarImagenes(imgs, max) {
@@ -84,7 +136,10 @@ function candidatos() {
     const out = [];
     for (const prov of PROVEEDORES) {
         for (const cl of descubrir(prov.prefijos)) {
-            out.push({ id: cl.env, env: cl.env, key: cl.valor, prov, tier: prov.tier, etiqueta: prov.etiqueta,
+            // id = la variable de la clave (lo que guardan los ajustes del panel); con `sufijo`, la misma clave en
+            // otro modelo («GEMINI_API_FREE_KEY@lite»).
+            const id = prov.sufijo ? `${cl.env}@${prov.sufijo}` : cl.env;
+            out.push({ id, env: cl.env, key: cl.valor, prov, tier: prov.tier, etiqueta: prov.etiqueta,
                 modelo: prov.modelo(), baseURL: prov.baseURL ? prov.baseURL() : null, masked: mask(cl.valor) });
         }
     }
@@ -112,7 +167,11 @@ async function ajustes() {
     ajustesTs = Date.now();
     return ajustesCache;
 }
-async function habilitado(id) { return (await ajustes()).get(id)?.enabled !== false; } // por defecto activo
+/** ¿Activo? Por defecto sí; los `desactivadoDeSerie`, solo si se activaron en el panel. */
+const activoSegun = (aj, c) => {
+    const v = aj.get(c.id)?.enabled;
+    return c.prov.desactivadoDeSerie ? v === true : v !== false;
+};
 
 // "Demasiadas imágenes" NO es cuota: es un error de PETICIÓN (el modelo limita el nº de imágenes). No debe
 // enfriar la clave ni contarse como 429 (con el recorte por maxImg ya no debería ocurrir; esto es la red).
@@ -150,12 +209,27 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
         const res = await model.generateContent(parts);
         // Tokens REALES de la llamada, para el contador de uso (utils/uso-ia.js): el de razonamiento va aparte.
         const u = res.response.usageMetadata || {};
-        anotarUsoIA({ proveedor: c.id, tier: c.tier, uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
+        anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
         return res.response.text();
+    }
+    // DOS PASOS (Qwen-VL-OCR + texto gratis): 1) el modelo OCR transcribe las páginas; 2) la instrucción original se
+    // resuelve sobre esa transcripción con la rotación de TEXTO, solo gratis (si las gratis fallan, falla este proveedor
+    // y la visión pasa al siguiente: nunca se paga dos veces).
+    if (c.prov.tipo === 'ocr-texto') {
+        if (!imgs.length) throw new Error('el par OCR + texto necesita imágenes');
+        const ocr = { ...c, prov: { ...c.prov, tipo: 'openai' } };
+        const transcripcion = await llamar(ocr, { prompt: PROMPT_OCR, imagenes: imgs, json: false, maxTokens: 6000 });
+        if (!String(transcripcion || '').trim()) throw new Error('el OCR no devolvió texto');
+        return conTexto({
+            prompt: `${prompt}\n\nNo tienes las imágenes: tienes su TRANSCRIPCIÓN literal (OCR), página a página:\n\n${transcripcion}`,
+            json, maxTokens, soloGratis: true, sinRazonar,
+        });
     }
     // OpenAI-compatible (Groq, OpenRouter, …): no forzamos response_format (algunos modelos lo rechazan);
     // el prompt ya pide JSON y extraerJSON() lo limpia.
-    const content = [{ type: 'text', text: prompt }, ...imgs.map(im => ({ type: 'image_url', image_url: { url: `data:${im.mimeType || 'image/jpeg'};base64,${im.base64}` } }))];
+    const dataUrl = (im) => `data:${im.mimeType || 'image/jpeg'};base64,${im.base64}`;
+    const content = [{ type: 'text', text: prompt }, ...imgs.map(im => ({ type: 'image_url',
+        image_url: c.prov.imagenComoCadena ? dataUrl(im) : { url: dataUrl(im) } }))];
     const headers = { Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json' };
     if (c.prov.id === 'openrouter') { headers['HTTP-Referer'] = 'https://gestor-biblioteca.local'; headers['X-Title'] = 'Gestor Biblioteca'; }
     const cuerpo = { model: c.modelo, messages: [{ role: 'user', content }], temperature: 0, max_tokens: maxTokens || 1500 };
@@ -165,14 +239,14 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
     const res = await axios.post(`${c.baseURL}/chat/completions`, cuerpo, { headers, timeout: TIMEOUT_MS });
     // Tokens para el contador de uso (en estos proveedores, los de razonamiento ya van dentro de completion_tokens).
     const u = res.data?.usage || {};
-    anotarUsoIA({ proveedor: c.id, tier: c.tier, uso: { entrada: u.prompt_tokens, salida: u.completion_tokens } });
+    anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, uso: { entrada: u.prompt_tokens, salida: u.completion_tokens } });
     return res.data?.choices?.[0]?.message?.content || '';
 }
 
 /** Orden de intento: enabled, free→paid (config), pegajoso al último-OK FREE; cooldown al final. */
 async function ordenIntento(filtro = null) {
     const aj = await ajustes();
-    let base = candidatos().filter(c => aj.get(c.id)?.enabled !== false);
+    let base = candidatos().filter(c => activoSegun(aj, c));
     if (filtro) base = base.filter(filtro);
     // La política de IA del trabajo en curso (campañas: todas / solo gratis / ninguna) — politica-ia.js.
     base = base.filter(c => tierPermitido(c.tier));
@@ -231,7 +305,8 @@ export async function conVision({ prompt, imagenes = [], json = true, soloGemini
  * @param {{prompt:string, json?:boolean, maxTokens?:number, soloGratis?:boolean}} opts
  */
 export async function conTexto({ prompt, json = true, maxTokens, soloGratis = false, sinRazonar = false } = {}) {
-    const orden = await ordenIntento(soloGratis ? (c => c.tier === 'free') : null);
+    // El par OCR + texto es solo para imágenes (sin ellas no tiene nada que transcribir).
+    const orden = await ordenIntento(c => c.prov.tipo !== 'ocr-texto' && (!soloGratis || c.tier === 'free'));
     if (!orden.length && !tierPermitido('paid')) throw errorSinIA('texto');
     if (!orden.length) throw new Error(soloGratis
         ? 'No hay proveedores de IA GRATIS configurados/activos.'
@@ -307,7 +382,8 @@ export async function estadoVision() {
     const ahora = Date.now();
     return candidatos().map(c => ({
         id: c.id, etiqueta: c.etiqueta, tier: c.tier, modelo: c.modelo, masked: c.masked,
-        enabled: aj.get(c.id)?.enabled !== false,
+        enabled: activoSegun(aj, c),
+        nuevo: !!c.prov.desactivadoDeSerie,   // apagado hasta que lo actives (mídelo antes: scripts/comparar-vision.js)
         cooldown: (cooldownHasta[c.id] || 0) > ahora ? new Date(cooldownHasta[c.id]).toISOString() : null,
         errores: errores[c.id]?.n || 0, ultimoError: errores[c.id]?.ultimo || null,
         ultimoOk: ultimoOk === c.id,
@@ -320,13 +396,36 @@ export async function configurarProveedor(id, { enabled } = {}) {
     ajustesCache = null;
     return { ok: true, id, enabled: !!enabled };
 }
+/**
+ * Las claves de visión que hay (para scripts/comparar-vision.js): id, etiqueta, tier, modelo, activo. Sin secretos.
+ */
+export async function proveedoresDeVision() {
+    const aj = await ajustes();
+    return candidatos().filter((c) => !c.prov.soloTexto)
+        .map((c) => ({ id: c.id, etiqueta: c.etiqueta, tier: c.tier, modelo: c.modelo, activo: activoSegun(aj, c), precio: c.prov.precio || null }));
+}
+
+/**
+ * Llama a UNA clave concreta, sin rotación ni ajustes del panel (scripts/comparar-vision.js: mide un proveedor aunque
+ * esté apagado). Devuelve { texto, ms } o lanza.
+ */
+export async function visionCon(id, { prompt, imagenes = [], json = true } = {}) {
+    const c = candidatos().find((x) => x.id === id);
+    if (!c) throw new Error(`proveedor desconocido: ${id}`);
+    const t0 = Date.now();
+    const texto = await llamar(c, { prompt, imagenes, json });
+    return { texto, ms: Date.now() - t0 };
+}
+
 /** Proba UNA clave (sonda de texto): valida clave+modelo+conexión sin gastar visión. */
 export async function probarProveedor(id) {
     const c = candidatos().find(x => x.id === id);
     if (!c) return { ok: false, motivo: 'proveedor desconocido' };
     const t0 = Date.now();
     try {
-        const txt = await llamar(c, { prompt: 'Responde solo con la palabra: OK', imagenes: [], json: false });
+        // El par OCR + texto no tiene sonda de texto propia: se prueba la clave del OCR.
+        const sonda = c.prov.tipo === 'ocr-texto' ? { ...c, prov: { ...c.prov, tipo: 'openai' } } : c;
+        const txt = await llamar(sonda, { prompt: 'Responde solo con la palabra: OK', imagenes: [], json: false });
         delete cooldownHasta[c.id];
         return { ok: true, ms: Date.now() - t0, respuesta: String(txt || '').trim().slice(0, 40) };
     } catch (e) {
