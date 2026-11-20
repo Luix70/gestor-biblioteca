@@ -100,7 +100,9 @@ async function muestra(db) {
         if (out.length >= MUESTRA) break;
         if (!validarISBN(d.isbn)) continue;
         // Las imágenes de catalogación: la portada primero y luego el resto, hasta 6 (las mismas que ve la ingesta).
-        const webs = [...new Set([d.portada, ...(d.imagenes || [])].filter(Boolean))].slice(0, MAX_IMAGENES);
+        // `imagenes[]` son objetos {ruta, tipo, origen} (los antiguos, texto); `portada`, texto.
+        const rutaDe = (x) => (typeof x === 'string' ? x : x?.ruta);
+        const webs = [...new Set([d.portada, ...(d.imagenes || [])].map(rutaDe).filter(Boolean))].slice(0, MAX_IMAGENES);
         const imagenes = [];
         for (const w of webs) {
             const abs = absDe(w);
