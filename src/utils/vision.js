@@ -75,12 +75,14 @@ const PROVEEDORES = [
         // nuestras claves. Nemotron 3.5 Super VL de NVIDIA respondía en <1 s con JSON válido. OPENROUTER_MODELO lo cambia.
         modelo: () => process.env.OPENROUTER_MODELO || 'nvidia/nemotron-3.5-super-vl:free',
         prefijos: ['OPENROUTER_API_KEY'] },
-    // Pixtral (Mistral, modo gratuito ~1 petición/s). OJO: en el plan gratuito Mistral PUEDE USAR lo que se le envía
-    // para entrenar sus modelos (portadas y créditos de libros publicados). Mistral quiere la imagen como cadena.
-    { id: 'mistral', etiqueta: 'Pixtral (Mistral, free)', tipo: 'openai', tier: 'free', desactivadoDeSerie: true, imagenComoCadena: true,
+    // Mistral Small (visión). Pixtral ya no existe (20-nov: «Invalid model: pixtral-large-latest»); la visión la dan
+    // mistral-small / mistral-medium. OJO: las cuentas NUEVAS del plan gratuito tienen la clave sin activar (límite de
+    // 0 peticiones/min → 429 «Rate limit exceeded») hasta pasar a un plan de pago; y en el gratuito Mistral PUEDE USAR
+    // lo que se le envía para entrenar. Mistral quiere la imagen como cadena.
+    { id: 'mistral', etiqueta: 'Mistral Small (Mistral)', tipo: 'openai', tier: 'free', desactivadoDeSerie: true, imagenComoCadena: true,
         maxImg: Number(process.env.MISTRAL_MAX_IMG) || 8,
         baseURL: () => process.env.MISTRAL_BASE_URL || 'https://api.mistral.ai/v1',
-        modelo: () => process.env.MISTRAL_MODELO || 'pixtral-large-latest',
+        modelo: () => process.env.MISTRAL_MODELO || 'mistral-small-latest',
         prefijos: ['MISTRAL_API_KEY'] },
     // ── DE PAGO ──
     // DeepSeek Flash (V4.1), con imagen desde sep-2026. ~$0,15/$0,60 fuera de horas punta (el doble de 01-04 y 06-10

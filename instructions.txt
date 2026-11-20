@@ -2648,8 +2648,8 @@ de ficheros clasificado por CDU.
       lo que pasa. Antes un solo libro atascado retenia su carpeta entera (500+ y 600 Electrical Engineering Books:
       unos 1.070 libros esperando por Oppenheim, con una parte danada, y por dos .djvu).
     · MAS IAS CON VISION (18-nov): ademas de Gemini, OpenRouter y Groq, la rotacion admite Gemini Flash-Lite (con la
-      misma clave gratis de Gemini; otra cuota gratuita, mucho mayor), GLM-4.6V-Flash de Zhipu (gratis), Pixtral de
-      Mistral (gratis, pero puede usar lo que se le envia para entrenar), DeepSeek Flash (de pago, muy barato), Qwen3-VL
+      misma clave gratis de Gemini; otra cuota gratuita, mucho mayor), GLM-4.6V-Flash de Zhipu (gratis), Mistral Small
+      (Pixtral ya no existe; las cuentas nuevas del plan gratis tienen la clave sin activar hasta pagar), DeepSeek Flash (de pago, muy barato), Qwen3-VL
       (de pago) y el par Qwen-VL-OCR + IA de texto gratis (de pago: el OCR transcribe las paginas y una IA gratuita saca
       los datos). Las claves van en .env (ver .env.example: ZAI_API_KEY, MISTRAL_API_KEY, DEEPSEEK_API_KEY,
       DASHSCOPE_API_KEY). Los nuevos entran APAGADOS: en Ajustes de vision salen como «nuevo · apagado».

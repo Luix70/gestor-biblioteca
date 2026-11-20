@@ -145,7 +145,7 @@ async function main() {
     console.log(`   ${libros.length} libro(s) · ${provs.length} proveedor(es): ${provs.map((p) => p.id).join(', ')}\n`);
 
     const CAMPOS = ['isbn', 'titulo', 'autor', 'editorial', 'año', 'idioma', 'cdu_clase', 'cdu_exacta'];
-    const stats = Object.fromEntries(provs.map((p) => [p.id, { ok: 0, json: 0, error: 0, ms: 0,
+    const stats = Object.fromEntries(provs.map((p) => [p.id, { ok: 0, json: 0, error: 0, ms: 0, primerError: null,
         campos: Object.fromEntries(CAMPOS.map((c) => [c, { si: 0, de: 0 }])) }]));
     const detalle = [];
     const p = progreso(libros.length * provs.length, 'Comparando');
@@ -164,7 +164,9 @@ async function main() {
                 s.ok++;
             } catch (e) {
                 s.error++;
-                fila.push(`   ${prov.id}: ERROR ${String(e?.response?.status || '')} ${String(e?.response?.data?.error?.message || e.message).slice(0, 120)}`);
+                const msg = `${String(e?.status || e?.response?.status || '')} ${String(e?.response?.data?.error?.message || e?.error?.message || e?.message || e).slice(0, 300)}`.trim();
+                s.primerError ??= msg;   // para el resumen: sin él, la tabla solo decía «3 errores» sin el porqué
+                fila.push(`   ${prov.id}: ERROR ${msg}`);
                 continue;
             }
             const cdu = cduSegun(r, libro.cdu);
@@ -197,6 +199,7 @@ async function main() {
             const s = stats[pr.id];
             return `${pr.id.padEnd(34)} ${CAMPOS.map((c) => pct(s.campos[c])).join(' ')} ${String(s.json).padEnd(6)} ${String(s.error).padEnd(6)} ${s.ok ? Math.round(s.ms / s.ok) : '—'}`;
         }),
+        ...provs.filter((pr) => stats[pr.id].primerError).map((pr) => `⚠ ${pr.id} falló: ${stats[pr.id].primerError}`),
         '',
         'Referencia = la ficha catalogada (puede tener errores propios): sirve para comparar proveedores entre sí.',
         'Tokens y coste de esta pasada: panel → Mantenimiento → Uso de IA (origen «comparar-vision»).',
