@@ -2427,9 +2427,13 @@ async function procesarCola() {
     if (procesando || !vigilanteActivo) return; // pausado desde el panel → los ficheros esperan en el Inbox
     procesando = true;
     actividadActual = 'Ingesta del Inbox';
+    // El turno pesado de la unidad en curso (se suelta al pasar a la siguiente). Se declara FUERA del try: el
+    // `finally` lo suelta, y declarado dentro no existía allí → ReferenceError en el `finally`, que se saltaba el
+    // `procesando = false` y el turno quedaba tomado para siempre (19-nov: el Vigilante, el mantenimiento y los pasos
+    // pesados de PreProceso parados desde el final de un lote hasta el siguiente reinicio).
+    let soltarTurnoIngesta = null;
     try {
         let totalProcesadas = 0;
-        let soltarTurnoIngesta = null;   // el turno pesado de la unidad en curso (se suelta al pasar a la siguiente)
         const tally = {};
         await expandirComprimidos();          // .zip suelto → carpeta (drop) ANTES de listar unidades
         await procesarGruposGuia();           // guía: grupos de ficheros → subcarpetas (agrupado B)

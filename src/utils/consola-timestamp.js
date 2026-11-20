@@ -29,8 +29,13 @@ if (!console.__conTimestamp) {
                `${dd(d.getHours())}:${dd(d.getMinutes())}:${dd(d.getSeconds())}`;
     };
     // Aplana un argumento a texto para el buffer/fichero (la consola conserva su formato nativo).
-    const txt = (a) => typeof a === 'string' ? a
-        : (() => { try { return JSON.stringify(a); } catch { return String(a); } })();
+    // Un Error va con su pila: JSON.stringify(error) da «{}» (sus campos no son enumerables), y así llegó al app.log
+    // el ReferenceError que paró el Vigilante el 19-nov — «Vigilante (escaneo inicial): {}», sin pista alguna.
+    const txt = (a) => {
+        if (typeof a === 'string') return a;
+        if (a instanceof Error) return a.stack || `${a.name}: ${a.message}`;
+        try { return JSON.stringify(a); } catch { return String(a); }
+    };
 
     for (const metodo of ['log', 'info', 'warn', 'error']) {
         const original = console[metodo].bind(console);
