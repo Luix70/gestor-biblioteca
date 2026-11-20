@@ -54,8 +54,10 @@ const PROVEEDORES = [
         // (18-nov) gemini-2.5-flash-lite da 404 a cuentas nuevas («no longer available to new users»); 3.1 y 3.5 responden.
         modelo: () => process.env.GEMINI_LITE_MODELO || 'gemini-3.5-flash-lite',
         prefijos: ['GEMINI_API_FREE_KEY'] },
-    // GLM-4.6V-Flash de Zhipu (Z.ai): visión GRATIS según su tabla oficial de precios (~1 petición/s).
+    // GLM-4.6V-Flash de Zhipu (Z.ai): visión GRATIS según su tabla oficial de precios (~1 petición/s). LENTO: medido
+    // 20-nov, 10 s con 1 imagen y 22 s con 6 → con el tope general de 20 s nunca llegaba a contestar; tope propio.
     { id: 'zai', etiqueta: 'GLM-4.6V-Flash (Z.ai, free)', tipo: 'openai', tier: 'free', desactivadoDeSerie: true,
+        timeoutMs: Number(process.env.ZAI_TIMEOUT_MS) || 90000,
         maxImg: Number(process.env.ZAI_MAX_IMG) || 6,
         baseURL: () => process.env.ZAI_BASE_URL || 'https://api.z.ai/api/paas/v4',
         modelo: () => process.env.ZAI_MODELO || 'glm-4.6v-flash',
@@ -238,7 +240,9 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
     // Los gpt-oss de Groq también razonan, y el tope diario de Groq es en TOKENS: con el esfuerzo al mínimo la misma
     // cuota gratuita da para más llamadas. (Solo en Groq y en esos modelos: otros proveedores rechazan el campo.)
     if (sinRazonar && c.prov.id === 'groq' && /gpt-oss/i.test(c.modelo)) cuerpo.reasoning_effort = 'low';
-    const res = await axios.post(`${c.baseURL}/chat/completions`, cuerpo, { headers, timeout: TIMEOUT_MS });
+    // Tope de espera: el propio del proveedor si lo declara (modelos lentos), si no el general de visión.
+    const res = await axios.post(`${c.baseURL}/chat/completions`, cuerpo,
+        { headers, timeout: c.prov.timeoutMs || TIMEOUT_MS, maxBodyLength: Infinity });
     // Tokens para el contador de uso (en estos proveedores, los de razonamiento ya van dentro de completion_tokens).
     const u = res.data?.usage || {};
     anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, uso: { entrada: u.prompt_tokens, salida: u.completion_tokens } });
