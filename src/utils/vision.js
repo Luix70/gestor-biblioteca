@@ -56,8 +56,11 @@ const PROVEEDORES = [
         prefijos: ['GEMINI_API_FREE_KEY'] },
     // GLM-4.6V-Flash de Zhipu (Z.ai): visión GRATIS según su tabla oficial de precios (~1 petición/s). LENTO: medido
     // 20-nov, 10 s con 1 imagen y 22 s con 6 → con el tope general de 20 s nunca llegaba a contestar; tope propio.
+    // Y RAZONA antes de contestar: con el razonamiento puesto se gastaba los 1.500 tokens de salida pensando y devolvía
+    // el contenido VACÍO (2 de 3 libros, 20-nov). Sin él: ~25 s, JSON completo y correcto (0 tokens de razonamiento).
     { id: 'zai', etiqueta: 'GLM-4.6V-Flash (Z.ai, free)', tipo: 'openai', tier: 'free', desactivadoDeSerie: true,
         timeoutMs: Number(process.env.ZAI_TIMEOUT_MS) || 90000,
+        extraCuerpo: { thinking: { type: 'disabled' } },
         maxImg: Number(process.env.ZAI_MAX_IMG) || 6,
         baseURL: () => process.env.ZAI_BASE_URL || 'https://api.z.ai/api/paas/v4',
         modelo: () => process.env.ZAI_MODELO || 'glm-4.6v-flash',
@@ -240,6 +243,8 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
     // Los gpt-oss de Groq también razonan, y el tope diario de Groq es en TOKENS: con el esfuerzo al mínimo la misma
     // cuota gratuita da para más llamadas. (Solo en Groq y en esos modelos: otros proveedores rechazan el campo.)
     if (sinRazonar && c.prov.id === 'groq' && /gpt-oss/i.test(c.modelo)) cuerpo.reasoning_effort = 'low';
+    // Campos propios del proveedor (p. ej. z.ai: razonamiento apagado, o devuelve el contenido vacío).
+    if (c.prov.extraCuerpo) Object.assign(cuerpo, c.prov.extraCuerpo);
     // Tope de espera: el propio del proveedor si lo declara (modelos lentos), si no el general de visión.
     const res = await axios.post(`${c.baseURL}/chat/completions`, cuerpo,
         { headers, timeout: c.prov.timeoutMs || TIMEOUT_MS, maxBodyLength: Infinity });

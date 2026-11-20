@@ -197,7 +197,9 @@ async function main() {
         `${'proveedor'.padEnd(34)} ${CAMPOS.map((c) => c.padEnd(13)).join(' ')} ${'json✗'.padEnd(6)} ${'error'.padEnd(6)} ms/libro`,
         ...provs.map((pr) => {
             const s = stats[pr.id];
-            return `${pr.id.padEnd(34)} ${CAMPOS.map((c) => pct(s.campos[c])).join(' ')} ${String(s.json).padEnd(6)} ${String(s.error).padEnd(6)} ${s.ok ? Math.round(s.ms / s.ok) : '—'}`;
+            // El tiempo se suma en toda respuesta (también las de JSON inválido): se divide entre todas ellas.
+            const respuestas = s.ok + s.json;
+            return `${pr.id.padEnd(34)} ${CAMPOS.map((c) => pct(s.campos[c])).join(' ')} ${String(s.json).padEnd(6)} ${String(s.error).padEnd(6)} ${respuestas ? Math.round(s.ms / respuestas) : '—'}`;
         }),
         ...provs.filter((pr) => stats[pr.id].primerError).map((pr) => `⚠ ${pr.id} falló: ${stats[pr.id].primerError}`),
         '',
