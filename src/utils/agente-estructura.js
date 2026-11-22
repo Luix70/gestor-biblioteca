@@ -462,8 +462,24 @@ async function interpretarTanda(esq, carpetasTanda, trozo) {
     // Con 8.000, un árbol de 47 carpetas se comía el presupuesto pensando y el JSON salía truncado — y la
     // primera prueba devolvió una lista VACÍA sin ningún error.
     const txt = await conTexto({ prompt: construirPrompt(esq, carpetasTanda, trozo), json: true, maxTokens: 32000 });
-    const r = extraerJSON(txt);
-    if (!r || !Array.isArray(r.carpetas)) throw new Error(`La IA no devolvió una interpretación con el formato esperado${trozo ? ` (tanda ${trozo.n})` : ''}.`);
+    // Una lista suelta se ENVUELVE antes de leerla: extraerJSON solo repara objetos (comas colgantes, respuesta
+    // cortada), y una lista con un defecto se perdía entera (tanda 3 de «_ARTE», dos reintentos fallidos).
+    const crudo = String(txt || '').replace(/```(?:json)?/gi, '').trim();
+    let r = crudo.startsWith('[') ? extraerJSON(`{"carpetas":${crudo}}`) : extraerJSON(txt);
+    // Gemini Flash-Lite devuelve la LISTA de carpetas suelta («[ {"ruta": …} ]») en vez de {carpetas: [...]}: 16 de 16
+    // tandas de «_ARTE» (22-nov) se dieron por fallidas y el drop entero se quedó en PreProceso. Es la misma
+    // información: se acepta. Igual si la envuelve en otra clave (un único array de objetos con «ruta»).
+    if (Array.isArray(r)) r = { carpetas: r };
+    else if (r && !Array.isArray(r.carpetas)) {
+        const listas = Object.values(r).filter((v) => Array.isArray(v) && v.some((x) => x && typeof x === 'object' && 'ruta' in x));
+        if (listas.length === 1) r = { ...r, carpetas: listas[0] };
+    }
+    if (!r || !Array.isArray(r.carpetas)) {
+        // Con un trozo de lo que llegó: sin él, «formato esperado» no decía si era un JSON truncado, otra forma o nada.
+        const muestra = String(txt || '').replace(/\s+/g, ' ').trim();
+        const visto = muestra ? `«${muestra.slice(0, 160)}…${muestra.length > 320 ? muestra.slice(-160) : ''}» (${muestra.length} car.)` : 'respuesta vacía';
+        throw new Error(`La IA no devolvió una interpretación con el formato esperado${trozo ? ` (tanda ${trozo.n})` : ''}: ${visto}`);
+    }
 
     // Solo se aceptan carpetas que EXISTEN en el esqueleto y tipos conocidos: una ruta inventada o un tipo
     // raro se descartan en lugar de colarse en la propuesta. Pero la ruta se NORMALIZA antes de comparar,

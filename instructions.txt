@@ -2663,6 +2663,10 @@ de ficheros clasificado por CDU.
       CDU: copiaba la signatura LCC o Dewey de los creditos («QE696.L29», «942.03072»). Ahora la app la reconoce, la
       guarda como LCC/Dewey y la traduce a CDU con la tabla (sin IA) — vale para cualquier IA de vision. OpenRouter
       (Nemotron) devolvia JSON invalido en la mayoria: mejor apagado. Mistral: sin plan de pago, la clave no responde.
+    · LA INSPECCION CON IA YA NO FALLA CON GEMINI FLASH-LITE (22-nov): cuando Gemini Flash agota su cuota, la
+      inspeccion de carpetas la hace Flash-Lite, que devuelve la lista de carpetas «suelta» en vez de dentro del
+      objeto que se le pide. Se daba por fallida: «_ARTE» (359 carpetas) se quedo entera en PreProceso. Ahora se
+      acepta, y si una tanda falla el log muestra un trozo de lo que respondio la IA.
     · EL VIGILANTE RECUERDA SU INTERRUPTOR (18-nov): si estaba activo y la app se reinicia (un corte de memoria,
       un despliegue), vuelve activo y sigue catalogando; si lo pausaste tu, sigue en pausa. Antes arrancaba siempre
       en pausa y, tras un reinicio de madrugada, la ingesta se quedaba parada hasta que lo reactivabas. El estado
