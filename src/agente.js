@@ -3,6 +3,7 @@ import { conVision, extraerJSON } from './utils/vision.js';
 import { decodificarCodigoBarras } from './utils/codigo-barras.js';
 import { validarISBN, validarISSN, variantesISBN } from './utils/identificadores.js';
 import { esEditorialFalsa } from './utils/editoriales-falsas.js';
+import { cduDeVision } from './clasificador-cdu.js';
 
 dotenv.config();
 
@@ -128,6 +129,19 @@ export async function analizarImagenesRecurso(imagenes, datosEpub = null, opcion
         const responseText = await conVision({ prompt: instruccionesContextuales, imagenes: imageParts });
         const recursoEstructurado = extraerJSON(responseText);
         if (!recursoEstructurado) throw new Error('la visión no devolvió un JSON válido');
+
+        // Una «CDU» que en realidad es la signatura LCC o Dewey de los créditos: a su campo, y traducida por la tabla
+        // determinista (clasificador-cdu·cduDeVision). Solo rellena lcc/dewey si la visión no los dio ya.
+        if (recursoEstructurado.cdu) {
+            const leida = cduDeVision(recursoEstructurado.cdu);
+            if (leida.lcc || leida.dewey) {
+                console.log(`   ↳ [IA] la «CDU» leída «${recursoEstructurado.cdu}» es ${leida.lcc ? 'LCC' : 'Dewey'} → CDU ${leida.cdu || '(sin traducción: se deja al clasificador)'}`);
+                if (leida.lcc && !recursoEstructurado.lcc) recursoEstructurado.lcc = leida.lcc;
+                if (leida.dewey && !recursoEstructurado.dewey) recursoEstructurado.dewey = leida.dewey;
+                if (leida.cdu) recursoEstructurado.cdu = leida.cdu;
+                else delete recursoEstructurado.cdu;
+            }
+        }
 
         // Resumen (verbose) de lo que EXTRAJO la visión — para juzgar si la llamada mereció la pena.
         console.log(`   ↳ [IA] visión extrajo → tipo=${recursoEstructurado.tipo_recurso || '?'} · título="${String(recursoEstructurado.titulo || '').slice(0, 60)}" · isbn=${recursoEstructurado.isbn || '—'} · issn=${recursoEstructurado.issn || '—'} · cdu=${recursoEstructurado.cdu || '—'} · estado=${recursoEstructurado.estado_verificacion || '?'}`);

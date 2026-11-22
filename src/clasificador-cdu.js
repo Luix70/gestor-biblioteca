@@ -578,6 +578,38 @@ function avisarCacheContradictoria(sistema, codigo, hit, tabla) {
         : `⚠️  [CDU] Equivalencia aprendida ${clave} → «${hit}» CONTRADICE la tabla (→ «${tabla}»): se ignora y manda la tabla.`);
 }
 
+/**
+ * La «CDU» que devuelve una IA de VISIÓN, separada de lo que en realidad es OTRA clasificación.
+ *
+ * Medido el 20-nov (scripts/comparar-vision.js, 30 libros): GLM-4.6V-Flash copiaba en el campo `cdu` la signatura
+ * que veía impresa en la página de créditos — LCC («QE696.L29», «TJ211.15.K36 2011», «BH81») o Dewey («942.03072»,
+ * «791.4309») —; 17 % de CDU exactas frente al 55 % de Gemini. Esas signaturas son justo lo que la tabla determinista
+ * sabe traducir sin IA, así que aquí se reconocen, se guardan en su campo (lcc / dewey) y se traducen.
+ *
+ *   · LCC: empieza por 1-3 MAYÚSCULAS seguidas de un número. Una CDU nunca empieza por letra.
+ *   · Dewey: 3 cifras, punto y 4 o más decimales SEGUIDOS. En la CDU el punto va cada 3 cifras («621.383.51»), así
+ *     que «.03072» no puede ser CDU. Un Dewey corto («940.553») no se distingue de una CDU por la forma: se deja,
+ *     y modernizarCDU ya pasa la historia de estilo Dewey a 94(lugar).
+ *
+ * Si la tabla no la traduce (clases que defiere a la IA: historia D/E/F, literaturas de varias lenguas…), la CDU
+ * queda vacía: mejor un hueco que otras tiers rellenan (o el 000 que afina re-clasificar-cdu, que sí usa el lcc
+ * guardado) que una signatura LCC en el campo de la CDU.
+ *
+ * @param {string} cdu  lo que la visión puso en `cdu`
+ * @returns {{cdu: string|null, lcc?: string, dewey?: string}}
+ */
+export function cduDeVision(cdu) {
+    const texto = String(cdu || '').trim();
+    if (!texto) return { cdu: null };
+    if (/^[A-Z]{1,3}\s?\d/.test(texto)) {
+        return { cdu: lccACDU(texto) || null, lcc: texto };
+    }
+    if (/^\d{3}\.\d{4,}$/.test(texto)) {
+        return { cdu: deweyACDU(texto) || null, dewey: texto };
+    }
+    return { cdu: texto };
+}
+
 // Exportada para la auditoría de la caché (scripts/auditar-equivalencias-cdu.js): comprobar qué equivalencias
 // aprendidas contradicen a esta tabla exige poder consultarla desde fuera.
 export async function buscarEquivalenciaExterna(sistema, codigo) {

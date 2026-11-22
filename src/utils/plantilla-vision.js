@@ -11,6 +11,7 @@
  */
 import { conVision, extraerJSON } from './vision.js';
 import { ROLES_VALIDOS } from './contribuciones.js';
+import { cduDeVision } from '../clasificador-cdu.js';
 
 // Plantilla JSON que se pide rellenar (documentada). Se envía compacta en el prompt.
 export const PLANTILLA_JSON = {
@@ -81,6 +82,7 @@ export function normalizarExtraccionVision(j) {
     const col = j.coleccion || {};
     const obra = j.obra || {};
     const rev = j.revista || {};
+    const cduLeida = cduDeVision(limpio(j.cdu));   // clasificador-cdu: LCC/Dewey en el campo de la CDU
     const titulosOrig = [...new Set((Array.isArray(j.titulos_originales) ? j.titulos_originales : []).map(limpio).filter(Boolean))];
     return {
         tipo_documento: limpio(j.tipo_documento) || null,
@@ -102,7 +104,10 @@ export function normalizarExtraccionVision(j) {
         issn: issns,
         isbn_obra: soloDigitos(j.isbn_obra) || null,
         codigo_barras: soloDigitos(j.codigo_barras) || null,
-        cdu: limpio(j.cdu) || null,
+        // Una «CDU» que es en realidad la signatura LCC/Dewey de los créditos: traducida, y la signatura a su campo.
+        cdu: cduLeida.cdu,
+        ...(cduLeida.lcc ? { lcc: cduLeida.lcc } : {}),
+        ...(cduLeida.dewey ? { dewey: cduLeida.dewey } : {}),
         palabras_clave: (Array.isArray(j.palabras_clave) ? j.palabras_clave : []).map(limpio).filter(Boolean),
         sinopsis: limpio(j.sinopsis) || null,
         revista: {

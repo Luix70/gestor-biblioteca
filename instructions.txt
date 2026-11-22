@@ -2658,6 +2658,11 @@ de ficheros clasificado por CDU.
       aciertos (ISBN, titulo, autor, editorial, año, idioma, CDU), errores y tiempo. --listar ve los proveedores;
       --muestra 50, --proveedores <ids>, --soporte papel, --informe logs/comparar-vision.txt (detalle libro a libro).
       El coste de cada proveedor de pago se calcula ahora con su propia tarifa (Mantenimiento → Uso de IA).
+      RESULTADO DEL 20-NOV (30 libros): GLM-4.6V-Flash de z.ai, GRATIS, lee los datos igual que Gemini de pago (ISBN
+      69/72 %, titulo 79/76 %, autor 89/89 %, editorial 76/79 %), algo mas lento (26 s/libro). Su punto flojo era la
+      CDU: copiaba la signatura LCC o Dewey de los creditos («QE696.L29», «942.03072»). Ahora la app la reconoce, la
+      guarda como LCC/Dewey y la traduce a CDU con la tabla (sin IA) — vale para cualquier IA de vision. OpenRouter
+      (Nemotron) devolvia JSON invalido en la mayoria: mejor apagado. Mistral: sin plan de pago, la clave no responde.
     · EL VIGILANTE RECUERDA SU INTERRUPTOR (18-nov): si estaba activo y la app se reinicia (un corte de memoria,
       un despliegue), vuelve activo y sigue catalogando; si lo pausaste tu, sigue en pausa. Antes arrancaba siempre
       en pausa y, tras un reinicio de madrugada, la ingesta se quedaba parada hasta que lo reactivabas. El estado
