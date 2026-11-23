@@ -2663,6 +2663,12 @@ de ficheros clasificado por CDU.
       CDU: copiaba la signatura LCC o Dewey de los creditos («QE696.L29», «942.03072»). Ahora la app la reconoce, la
       guarda como LCC/Dewey y la traduce a CDU con la tabla (sin IA) — vale para cualquier IA de vision. OpenRouter
       (Nemotron) devolvia JSON invalido en la mayoria: mejor apagado. Mistral: sin plan de pago, la clave no responde.
+    · LA PAPELERA SE ABRE AUNQUE TENGA MILES DE CARPETAS (23-nov): antes la pagina contaba todos los ficheros
+      (102.598 en 4.215 subcarpetas) antes de mostrar nada, y daba error 504. Ahora la lista sale enseguida; el
+      tamaño de cada subcarpeta se mide en segundo plano (se ve «…» y el total con «≥» mientras tanto, y la pagina
+      se actualiza sola) y se recuerda (logs/papelera-tamanos.json), asi que solo la primera vez tarda en
+      completarse. La tabla se muestra de 200 en 200 («Mostrar más») y hay un buscador por nombre de subcarpeta
+      (fecha, motivo: «cuarentena», «integridad»…).
     · LOS PDF DE POCAS PAGINAS YA NO SON LIBROS NI REVISTAS (23-nov): un PDF corto sin ISBN (menos de 12 paginas
       escaneado, menos de 20 con texto) se cataloga como ARTICULO (o capitulo). La regla ya existia y la ficha lo
       decia («→ ARTICULO»), pero si la IA de vision habia dicho «libro», ganaba la IA y quedaba como libro. Ahora

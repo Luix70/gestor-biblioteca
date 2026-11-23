@@ -64,21 +64,98 @@ async function fechaSubcarpeta(nombre, dir) {
     try { return (await fs.stat(dir)).mtime.toISOString(); } catch { return null; }
 }
 
+// ── Tamaños de las subcarpetas: MEDIDOS EN SEGUNDO PLANO y GUARDADOS ──────────────────────────────────────
+// Antes `infoPapelera` medía TODA la Papelera (un stat por fichero) antes de responder. Con 4.215 subcarpetas y
+// 102.598 ficheros (23-nov) eso son varios minutos en el Atom y el panel recibía un 504 del proxy: no se podía
+// ver nada. Una subcarpeta no cambia después de creada (cada reciclado crea la suya; solo restaurar o vaciar la
+// tocan), así que su tamaño se mide UNA vez y se guarda en logs/ con la fecha de modificación de la carpeta como
+// control (si cambia, se vuelve a medir). La lista se devuelve al momento con lo que ya se sabe, y lo que falta
+// se mide en segundo plano; el panel vuelve a preguntar mientras queden pendientes.
+const FICHERO_TAMANOS = path.join(RAIZ, 'logs', 'papelera-tamanos.json');
+let tamanos = null;              // Map nombre → { mtime, bytes, ficheros }
+let midiendo = null;             // promesa de la medición en curso (una sola a la vez)
+
+async function cargarTamanos() {
+    if (tamanos) return tamanos;
+    tamanos = new Map();
+    try {
+        const guardado = JSON.parse(await fs.readFile(FICHERO_TAMANOS, 'utf8'));
+        for (const [nombre, v] of Object.entries(guardado || {})) tamanos.set(nombre, v);
+    } catch { /* primera vez, o fichero dañado: se mide todo de nuevo */ }
+    return tamanos;
+}
+
+async function guardarTamanos() {
+    try {
+        await fs.mkdir(path.dirname(FICHERO_TAMANOS), { recursive: true });
+        await fs.writeFile(FICHERO_TAMANOS, JSON.stringify(Object.fromEntries(tamanos)));
+    } catch { /* la caché es una comodidad: si no se puede guardar, se volverá a medir */ }
+}
+
+/** Mide en segundo plano las subcarpetas sin tamaño conocido (o cuya carpeta cambió). Nunca dos a la vez. */
+function medirPendientes(pendientes) {
+    if (midiendo || !pendientes.length) return;
+    midiendo = (async () => {
+        let desdeGuardado = 0;
+        for (const { nombre, mtime } of pendientes) {
+            const medida = await tamanoDir(path.join(DIR_RECICLAJE, nombre));
+            // Se conserva lo ya sabido (restaurable, fecha); solo si la carpeta no volvió a cambiar entre medias.
+            const previo = tamanos.get(nombre);
+            if (previo && previo.mtime === mtime) tamanos.set(nombre, { ...previo, ...medida });
+            // Se guarda cada 100 para no perder lo medido si la app se reinicia a mitad.
+            if (++desdeGuardado >= 100) { desdeGuardado = 0; await guardarTamanos(); }
+        }
+        await guardarTamanos();
+    })().catch((e) => console.warn(`[Papelera] medición de tamaños interrumpida: ${e.message}`))
+        .finally(() => { midiendo = null; });
+}
+
+/** `fn` sobre cada elemento, con a lo sumo `n` a la vez (miles de stat en serie tardaban un minuto por SMB). */
+async function enParalelo(lista, n, fn) {
+    const out = new Array(lista.length);
+    let i = 0;
+    await Promise.all(Array.from({ length: Math.min(n, lista.length) }, async () => {
+        while (i < lista.length) { const k = i++; out[k] = await fn(lista[k]); }
+    }));
+    return out;
+}
+
 export async function infoPapelera() {
-    const subcarpetas = [];
+    await cargarTamanos();
+    const pendientes = [];
     let ents; try { ents = await fs.readdir(DIR_RECICLAJE, { withFileTypes: true }); } catch { ents = []; }
-    for (const e of ents) {
-        if (!e.isDirectory()) continue;
-        const dir = path.join(DIR_RECICLAJE, e.name);
-        const { bytes, ficheros } = await tamanoDir(dir);
-        // ¿Tiene manifiesto de origen? → se puede restaurar a su sitio (Papelera de Windows).
-        const restaurable = await fs.access(path.join(dir, '.papelera.json')).then(() => true).catch(() => false);
-        subcarpetas.push({ nombre: e.name, ficheros, bytes, restaurable, fecha: await fechaSubcarpeta(e.name, dir) });
-    }
+    const nombres = ents.filter((e) => e.isDirectory()).map((e) => e.name);
+    const presentes = new Set(nombres);
+    // Por subcarpeta, UN stat (su fecha de modificación). Lo demás —tamaño, si es restaurable, fecha de
+    // eliminación— sale de la caché mientras esa fecha no cambie; si cambió (o es nueva) se vuelve a mirar.
+    const subcarpetas = await enParalelo(nombres, 32, async (nombre) => {
+        const dir = path.join(DIR_RECICLAJE, nombre);
+        let mtime = 0; try { mtime = (await fs.stat(dir)).mtimeMs; } catch { /* desaparecida entre medias */ }
+        let conocido = tamanos.get(nombre);
+        if (!conocido || conocido.mtime !== mtime) {
+            // ¿Tiene manifiesto de origen? → se puede restaurar a su sitio (Papelera de Windows).
+            const restaurable = await fs.access(path.join(dir, '.papelera.json')).then(() => true).catch(() => false);
+            conocido = { mtime, restaurable, fecha: await fechaSubcarpeta(nombre, dir) };   // sin medir aún
+            tamanos.set(nombre, conocido);
+            pendientes.push({ nombre, mtime });
+        } else if (conocido.bytes == null) {
+            pendientes.push({ nombre, mtime });   // vista antes, pero la medición no llegó a ella
+        }
+        return {
+            nombre, restaurable: conocido.restaurable, fecha: conocido.fecha,
+            // Sin medir aún: sin cifras (el panel muestra «…» y las ordena al final).
+            ...(conocido.bytes != null ? { bytes: conocido.bytes, ficheros: conocido.ficheros } : {}),
+        };
+    });
+    // Lo vaciado ya no cuenta.
+    for (const nombre of [...tamanos.keys()]) if (!presentes.has(nombre)) tamanos.delete(nombre);
+    medirPendientes(pendientes);
+
     subcarpetas.sort((a, b) => b.nombre.localeCompare(a.nombre)); // serial desc → más reciente primero
-    const bytes = subcarpetas.reduce((s, x) => s + x.bytes, 0);
-    const ficheros = subcarpetas.reduce((s, x) => s + x.ficheros, 0);
-    return { bytes, ficheros, subcarpetas };
+    const bytes = subcarpetas.reduce((s, x) => s + (x.bytes || 0), 0);
+    const ficheros = subcarpetas.reduce((s, x) => s + (x.ficheros || 0), 0);
+    // `pendientes` > 0: los totales aún son parciales (se están midiendo).
+    return { bytes, ficheros, subcarpetas, pendientes: pendientes.length };
 }
 
 export async function contenidoPapelera(sub) {

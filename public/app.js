@@ -1391,19 +1391,41 @@ $('#papDir').onclick = () => {
   pintarPap();
 };
 
+// Los TAMAÑOS los mide el servidor en segundo plano (con miles de subcarpetas, medirlos antes de responder daba
+// un 504): la lista llega al momento y, mientras queden subcarpetas por medir (`pendientes`), se vuelve a pedir
+// cada pocos segundos — solo mientras se esté en la página Papelera.
+let _papRecarga = null;
+// La tabla se pinta POR PÁGINAS: 4.000 filas de golpe atascan el navegador (sobre todo el del móvil).
+const PAP_POR_PAGINA = 200;
+let _papMostradas = PAP_POR_PAGINA;
+
 async function loadPap() {
+  clearTimeout(_papRecarga);
   try {
     const papelera = await api('/papelera');
+    const pend = papelera.pendientes || 0;
+    // Con subcarpetas aún sin medir, los totales son parciales: se dice (≥) y cuántas faltan.
+    const parcial = pend ? '≥ ' : '';
     $('#papStats').innerHTML =
-      `<div class="stat acc"><div class="ic">♻</div><div class="v">${fmtBytes(papelera.bytes)}</div><div class="k">Tamaño total</div></div>
-    <div class="stat"><div class="ic">📄</div><div class="v">${papelera.ficheros}</div><div class="k">Ficheros</div></div>
-    <div class="stat"><div class="ic">📁</div><div class="v">${papelera.subcarpetas.length}</div><div class="k">Subcarpetas</div></div>`;
+      `<div class="stat acc"><div class="ic">♻</div><div class="v">${parcial}${fmtBytes(papelera.bytes)}</div><div class="k">Tamaño total${pend ? ` · midiendo (faltan ${pend.toLocaleString('es-ES')})` : ''}</div></div>
+    <div class="stat"><div class="ic">📄</div><div class="v">${parcial}${Number(papelera.ficheros || 0).toLocaleString('es-ES')}</div><div class="k">Ficheros</div></div>
+    <div class="stat"><div class="ic">📁</div><div class="v">${papelera.subcarpetas.length.toLocaleString('es-ES')}</div><div class="k">Subcarpetas</div></div>`;
     _papSubcarpetas = papelera.subcarpetas || [];
     pintarPap();
+    if (pend) {
+      _papRecarga = setTimeout(() => {
+        if ($('#p-pap')?.classList.contains('on')) loadPap();
+      }, 15000);
+    }
   } catch (e) {
     toast(e.message, 'bad');
   }
 }
+
+$('#papFiltro').oninput = () => {
+  _papMostradas = PAP_POR_PAGINA;
+  pintarPap();
+};
 
 // Pinta la tabla con el orden elegido y engancha sus botones.
 function pintarPap() {
@@ -1413,16 +1435,31 @@ function pintarPap() {
   const flecha = (k) => (k === clave ? (dir === 'asc' ? ' ↑' : ' ↓') : '');
   const fechaTxt = (iso) =>
     iso ? new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—';
-  const lista = ordenarPapelera(_papSubcarpetas, clave, dir);
+  // Sin medir todavía: «…» en vez de un 0 que engañaría.
+  const cifra = (v, fmt) => (v == null ? '<span class="muted">…</span>' : fmt(v));
+  const filtro = ($('#papFiltro').value || '').trim().toLowerCase();
+  const filtradas = filtro ? _papSubcarpetas.filter((s) => s.nombre.toLowerCase().includes(filtro)) : _papSubcarpetas;
+  const ordenadas = ordenarPapelera(filtradas, clave, dir);
+  const lista = ordenadas.slice(0, _papMostradas);
+  const resto = ordenadas.length - lista.length;
   $('#papBody').innerHTML = lista.length
-    ? `<table><tr><th>Subcarpeta</th><th>Eliminada${flecha('fecha')}</th><th>Ficheros${flecha('ficheros')}</th><th>Tamaño${flecha('bytes')}</th><th></th></tr>
+    ? `<div class="muted" style="margin-bottom:8px">${filtro ? `${ordenadas.length.toLocaleString('es-ES')} de ${_papSubcarpetas.length.toLocaleString('es-ES')} subcarpetas · ` : ''}mostrando ${lista.length.toLocaleString('es-ES')}</div>
+    <table><tr><th>Subcarpeta</th><th>Eliminada${flecha('fecha')}</th><th>Ficheros${flecha('ficheros')}</th><th>Tamaño${flecha('bytes')}</th><th></th></tr>
     ${lista
       .map(
-        (sub) => `<tr><td class="mono">${esc(sub.nombre)}</td><td data-k="Eliminada" style="white-space:nowrap">${fechaTxt(sub.fecha)}</td><td data-k="Ficheros">${Number(sub.ficheros || 0).toLocaleString('es-ES')}</td><td data-k="Tamaño" style="white-space:nowrap">${fmtBytes(sub.bytes)}</td>
+        (sub) => `<tr><td class="mono">${esc(sub.nombre)}</td><td data-k="Eliminada" style="white-space:nowrap">${fechaTxt(sub.fecha)}</td><td data-k="Ficheros">${cifra(sub.ficheros, (v) => Number(v).toLocaleString('es-ES'))}</td><td data-k="Tamaño" style="white-space:nowrap">${cifra(sub.bytes, fmtBytes)}</td>
       <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}" title="Explorar los ficheros reales de esta carpeta y descargarlos">🗂️ explorar</button> ${sub.restaurable ? `<button class="btn admin-only" data-restore="${esc(sub.nombre)}" title="Devolver el fichero/carpeta a su ubicación original (no pisa lo que ya exista allí)">↩️ restaurar</button> ` : ''}<button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
       )
-      .join('')}</table>`
-    : '<div class="empty">Papelera vacía</div>';
+      .join('')}</table>
+    ${resto > 0 ? `<div style="text-align:center;margin-top:10px"><button class="btn" id="papMas">Mostrar ${Math.min(resto, PAP_POR_PAGINA).toLocaleString('es-ES')} más (quedan ${resto.toLocaleString('es-ES')})</button></div>` : ''}`
+    : `<div class="empty">${filtro ? 'Ninguna subcarpeta coincide' : 'Papelera vacía'}</div>`;
+  const mas = $('#papMas');
+  if (mas) {
+    mas.onclick = () => {
+      _papMostradas += PAP_POR_PAGINA;
+      pintarPap();
+    };
+  }
   $$('#papBody [data-restore]').forEach(
     (b) =>
       (b.onclick = async () => {

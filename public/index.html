@@ -369,8 +369,14 @@
             <div class="card">
               <h3>Subcarpetas</h3>
               <!-- Orden: mismo patrón que «↕️ Ordenar» del Catálogo (desplegable + botón de sentido). Se ordena en el
-                   NAVEGADOR sobre la lista ya cargada: medir tamaños recorre el disco y no hace falta repetirlo. -->
+                   NAVEGADOR sobre la lista ya cargada (los tamaños los mide el servidor en segundo plano y los recuerda). -->
               <div class="row" style="align-items: flex-end; margin-bottom: 12px">
+                <!-- Filtro por nombre: la subcarpeta lleva la fecha y la etiqueta de quién recicló («cuarentena-descartada»,
+                     «integridad»…). Con miles de subcarpetas es la forma de encontrar algo. -->
+                <div style="flex: 2 1 220px">
+                  <label>Buscar</label
+                  ><input id="papFiltro" type="search" placeholder="nombre, fecha (2026-11-23), motivo…" autocomplete="off" />
+                </div>
                 <div style="flex: 1 1 220px">
                   <label>Ordenar por</label
                   ><select id="papOrden">
