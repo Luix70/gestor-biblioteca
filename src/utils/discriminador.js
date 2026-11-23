@@ -97,15 +97,33 @@ const PAG_CAPITULO_MAX = Number(process.env.CLASIF_CAPITULO_MAX_PAGINAS) || 20; 
  *    es un fragmento: 'articulo' si trae DOI (identificador propio del artículo), si no 'capitulo'. Con
  *    ISBN/CIP propio es un LIBRITO real (mantiene 'libro').
  *  - A partir de PAG_CAPITULO_MAX páginas NO se toca nada: manda la decisión libro/revista del discriminador.
- *  - NUNCA reclasifica una REVISTA ya detectada (ISSN/fechada) ni una OBRA multivolumen.
+ *  - Una REVISTA de menos de PAG_PAPEL_MAX páginas SIN ISSN ni cabecera de una guía es un ARTÍCULO suelto, no un número:
+ *    un año en el nombre («Aspden - A Theory of Pion Creation (1989).pdf») o el parecer de la visión bastaban
+ *    para tiparla revista e inventarle una cabecera con su propio título (42 medidas el 23-nov, de 1 a 11
+ *    páginas). Con ISSN, o con la cabecera que fija una guía, se respeta (boletines finos de verdad).
+ *  - NUNCA reclasifica una OBRA multivolumen.
  *
- * @param {{ paginas?:number, escaneado?:boolean, tipoActual?:string, doi?:string, idFuerte?:boolean, multiparte?:boolean }} s
+ * @param {{ paginas?:number, escaneado?:boolean, tipoActual?:string, doi?:string, idFuerte?:boolean, multiparte?:boolean,
+ *           periodicoFuerte?:boolean, soportePapel?:boolean }} s
  * @returns {{ tipo_recurso?:string, formato?:string, alerta?:string }}  cambios a aplicar (vacío = sin cambios)
  */
 export function clasificarPorPaginas(s = {}) {
     const n = Number(s.paginas) || 0;
-    // Sin nº de páginas fiable, o ya es revista/obra → no se toca (respetamos la identidad ya resuelta).
-    if (!n || s.multiparte || s.tipoActual === 'revista') return {};
+    // Sin nº de páginas fiable, u obra multivolumen → no se toca (respetamos la identidad ya resuelta).
+    if (!n || s.multiparte) return {};
+
+    // REVISTA corta: solo deja de serlo si nada FUERTE la sostiene (ISSN propio, cabecera de una guía) y no es
+    // una captura del panel (un ejemplar en papel lo decide quien lo fotografía).
+    // Umbral el de los escaneos (12) aunque sea legible: fanzines y boletines de 13-18 páginas («Pinecone»,
+    // «Journal of Vampirism», «The Augcog Quarterly») SON números; por debajo de 12 lo medido eran artículos sueltos.
+    if (s.tipoActual === 'revista') {
+        const umbral = PAG_PAPEL_MAX;
+        if (s.periodicoFuerte || s.soportePapel || n >= umbral) return {};
+        return {
+            tipo_recurso: 'articulo',
+            alerta: `${s.escaneado ? 'Escaneo' : 'Documento'} de ${n} páginas (< ${umbral}) sin ISSN ni cabecera de guía → ARTÍCULO, no un número de revista.`,
+        };
+    }
 
     // Escaneo fino. El soporte lo decide la vía de entrada (regla del usuario, 3-nov): solo una CAPTURA del panel es
     // un ejemplar en papel. Un PDF escaneado corto llegado como fichero es un documento digital, casi siempre un

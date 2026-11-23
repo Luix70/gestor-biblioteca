@@ -17,6 +17,16 @@
 
 ## 1. Scripts por ejecutar
 
+### 0.54 PDF cortos catalogados como libro o revista (23-nov) — en el NAS (mueve carpetas)
+- [ ] Desplegar (la ingesta deja de producirlos)
+- [ ] Copia de la base
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/cortos-como-articulo.js` — en seco medido desde el PC:
+      92 pasan a artículo/capítulo (calendarios y portafolios de Luis Royo, papers de Aspden, críticas de Bordwell…),
+      35 se quedan (ganaron un ISBN después, o su cabecera tiene ISSN / otros números)
+- [ ] `… --ejecutar --limite 5`, mirar uno en la ficha, y luego `… --ejecutar`
+- [ ] Revisar a mano los que se quedaron con ISBN de 1-4 páginas (calendarios Heavy Metal, «Visions», «Dreams»…):
+      el ISBN es el del producto completo, el PDF es solo su portada
+
 ### 0.55 Obras multivolumen partidas (10-nov) — en el NAS (mueve carpetas de tomos)
 - [ ] Desplegar y `sudo docker exec -t gestor-biblioteca node scripts/setup-mongo.js` (campo `titulos_alt` + índice)
 - [ ] Copia de la base (y del disco: mueve carpetas)

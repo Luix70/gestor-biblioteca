@@ -2663,6 +2663,13 @@ de ficheros clasificado por CDU.
       CDU: copiaba la signatura LCC o Dewey de los creditos («QE696.L29», «942.03072»). Ahora la app la reconoce, la
       guarda como LCC/Dewey y la traduce a CDU con la tabla (sin IA) — vale para cualquier IA de vision. OpenRouter
       (Nemotron) devolvia JSON invalido en la mayoria: mejor apagado. Mistral: sin plan de pago, la clave no responde.
+    · LOS PDF DE POCAS PAGINAS YA NO SON LIBROS NI REVISTAS (23-nov): un PDF corto sin ISBN (menos de 12 paginas
+      escaneado, menos de 20 con texto) se cataloga como ARTICULO (o capitulo). La regla ya existia y la ficha lo
+      decia («→ ARTICULO»), pero si la IA de vision habia dicho «libro», ganaba la IA y quedaba como libro. Ahora
+      manda la regla. Y una REVISTA de menos de 12 paginas sin ISSN (ni cabecera fijada por una guia) tambien pasa
+      a articulo: un año en el nombre («Aspden - ... (1989).pdf») la convertia en «numero» de una revista inventada
+      con su propio titulo. Con 12 paginas o mas sigue siendo revista (fanzines y boletines finos). Lo ya
+      catalogado se arregla con scripts/cortos-como-articulo.js (en seco por defecto).
     · LA INSPECCION CON IA YA NO FALLA CON GEMINI FLASH-LITE (22-nov): cuando Gemini Flash agota su cuota, la
       inspeccion de carpetas la hace Flash-Lite, que devuelve la lista de carpetas «suelta» en vez de dentro del
       objeto que se le pide. Se daba por fallida: «_ARTE» (359 carpetas) se quedo entera en PreProceso. Ahora se

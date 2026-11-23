@@ -55,7 +55,12 @@ export async function enriquecerMetadatos(datosBase, contexto = {}) {
 
     let documento = {
         ...datosBase,
-        tipo_recurso: primerValido(datosBase.tipo_recurso, contexto.tipo_recurso) || 'libro',
+        // El TIPO lo manda el CONTEXTO: es la decisión FINAL del orquestador (discriminador + política por nº de
+        // páginas + override + formulario). `datosBase.tipo_recurso` solo llega de la visión/OCR, que es un parecer
+        // previo: antes ganaba él, y un PDF escaneado de 3-4 páginas que la política pasaba a ARTÍCULO volvía a ser
+        // «libro» porque la visión había dicho «libro» (79 docs entre el 3 y el 23-nov, con el aviso «→ ARTÍCULO»
+        // en la ficha y el tipo sin cambiar).
+        tipo_recurso: primerValido(contexto.tipo_recurso, datosBase.tipo_recurso) || 'libro',
         // El formato lo manda el CONTEXTO, no los datos extraídos: el orquestador lo deduce del fichero real
         // (su extensión), que es la fuente de verdad; `datosBase.formatos` puede venir de la visión IA, que no
         // puede saberlo. Solo se usa como reserva si el orquestador no lo fijó (lectores de cómic/djvu, que

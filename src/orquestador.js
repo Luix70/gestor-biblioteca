@@ -1012,9 +1012,16 @@ export async function procesarRecurso(entrada) {
             tipoActual: tipo_recurso,
             doi: datosBase.doi,
             idFuerte: !!(datosBase.isbn_propio || datosBase.cip),
+            // Lo que sostiene una REVISTA corta: su ISSN, o la cabecera que fija la guía de su carpeta.
+            periodicoFuerte: !!(datosBase.issn || contexto.perfil?.cabecera || contexto.perfil?.issn),
             soportePapel: contexto.soporte === 'papel',
         });
-        if (pol.tipo_recurso) tipo_recurso = pol.tipo_recurso;
+        if (pol.tipo_recurso) {
+            tipo_recurso = pol.tipo_recurso;
+            datosBase.tipo_recurso = tipo_recurso;   // que ningún parecer previo (visión) lo contradiga después
+            // Un artículo no es un número: fuera la clave de número que dio el nombre fechado.
+            if (tipo_recurso !== 'revista') delete datosBase.clave_numero;
+        }
         if (pol.formato) formatos = [pol.formato];
         if (pol.alerta) {
             datosBase.alertas_agente = [...(datosBase.alertas_agente || []), pol.alerta];
