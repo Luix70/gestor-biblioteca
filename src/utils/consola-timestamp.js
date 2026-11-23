@@ -16,7 +16,10 @@ export const getVerboso = () => verboso;
 // 📰 = portada leída al inspeccionar una tirada de revistas y 🧭 = resumen de una inspección: son el progreso de un
 // trabajo largo (medido el 15-sep: una inspección de 108 revistas no dejaba ni una línea en el log simple, y parecía
 // parada mientras el panel contaba 27 portadas leídas).
-const MARCAS = ['✅', '⚠', '❌', '⛔', '🚫', '🔁', '📛', '👻', '📥', '📭', '📊', '🧹', '👁', '🎛', '▶', '⏸', '♻', '🗑', '🛠', '📚', '📰', '🧭', 'Lote', 'RESUMEN', 'Inbox vacío'];
+const MARCAS = ['✅', '⚠', '❌', '⛔', '🚫', '🔁', '📛', '👻', '📥', '📭', '📊', '🧹', '👁', '🎛', '▶', '⏸', '♻', '🗑', '🛠', '📚', '📰', '🧭',
+    // Pasos del vigilante sobre el Inbox que TRANSFORMAN carpetas (láminas → PDF/cbz, explotar/aplanar): sin ellos en
+    // la lista, el 23-nov un PDF de 877 MB se hizo sin una sola línea en el log y parecía que el Inbox no avanzaba.
+    '📄', '🖼', '📦', '💥', '📂', 'Lote', 'RESUMEN', 'Inbox vacío'];
 const esTitular = (s) => MARCAS.some(m => s.includes(m));
 
 if (!console.__conTimestamp) {

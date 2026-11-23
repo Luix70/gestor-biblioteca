@@ -2688,6 +2688,9 @@ de ficheros clasificado por CDU.
       imagenes en un zip), que es la red de seguridad. Vale para los zip grandes de imagenes y para las carpetas de
       laminas; lo que PreProceso ya intento pasar a PDF va directamente a .cbz, y si tu marcas «empaquetar» a mano,
       es .cbz.
+      En el log: «📄 «X»: N laminas → PDF…» al empezar (uno grande tarda minutos) y otra linea al acabar; antes
+      no salia nada y parecia que el Inbox no avanzaba. Si un reinicio corta un empaquetado a medias, el temporal
+      oculto que deja («.empaquetando-…») se manda a la Papelera en la siguiente pasada.
       Ademas el .cbz se escribe lamina a lamina: antes un tomo de 400 MB necesitaba ~800 MB de memoria y el
       contenedor tiene 700 (habria tumbado la app en cada intento).
     · LOS PDF DE POCAS PAGINAS YA NO SON LIBROS NI REVISTAS (23-nov): un PDF corto sin ISBN (menos de 12 paginas

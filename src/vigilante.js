@@ -1945,6 +1945,7 @@ async function envolverAudiosSueltos() {
  * omitir/intacta NO mutan el FS (se resuelven en listarUnidades). Solo se tocan carpetas ESTABLES (copiadas).
  */
 async function aplicarAccionesGuiaFs() {
+    await recogerTemporalesHuerfanos(INBOX);   // los de una carpeta de primer nivel quedan en la raíz del Inbox
     let entradas;
     try { entradas = await fs.readdir(INBOX, { withFileTypes: true }); } catch { return; }
     for (const e of entradas) {
@@ -2352,6 +2353,8 @@ async function laminasAPdf(dir) {
     if (noPdf.length) return { ok: false, motivo: `${noPdf.length} lámina(s) GIF/BMP/WebP… (p. ej. «${path.basename(noPdf[0])}») no caben en un PDF sin convertir` };
     if ((await recopilarDocumentos(dir)).length) return { ok: false, motivo: 'ya hay documentos dentro (un empaquetado anterior a medias)' };
     const destino = path.join(dir, `${path.basename(dir)}.pdf`);
+    // Aviso AL EMPEZAR: un PDF de cientos de láminas tarda minutos, y sin esta línea el Inbox parece parado.
+    console.log(`  📄 «${path.basename(dir)}»: ${laminas.length} láminas → PDF… (puede tardar unos minutos)`);
     const r = await conTurno(`Láminas → PDF: ${path.basename(dir)}`,
         () => materializarEscaneo(dir, { tipo: 'libro', destino, paginas: laminas }));
     if (!r.ok) return r;
@@ -2409,11 +2412,34 @@ async function guiarLaminasSinGuia(dir, unidades, nivel = 6) {
 }
 
 /**
+ * TEMPORALES HUÉRFANOS del empaquetado («.empaquetando-<n>», junto a la carpeta que se empaquetaba). Quedan cuando la
+ * app se reinicia a mitad (23-nov: un despliegue cortó «Fate complete material III» y dejó 837 MB de cbz ocultos en
+ * el Inbox). Nadie los vuelve a mirar (empiezan por «.»), así que se recogen. A la PAPELERA, no se borran: si el
+ * corte llegó después de reciclar los originales y antes de mover los cbz a su sitio, son la única copia.
+ * Es seguro hacerlo aquí: el empaquetado corre solo dentro de procesarCola (nunca dos a la vez) y cada pasada borra
+ * su temporal al acabar, así que cuando se llega a una carpeta no hay ninguno vivo.
+ */
+async function recogerTemporalesHuerfanos(dir) {
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+        if (!e.isDirectory() || !e.name.startsWith('.empaquetando-')) continue;
+        const tmp = path.join(dir, e.name);
+        const ficheros = await recopilarTodo(tmp);
+        if (ficheros.length) await reciclar(ficheros, 'empaquetado-interrumpido');
+        // Solo se quita la carpeta si ya no queda ningún fichero dentro (lo que no se pudo reciclar, se queda).
+        if (!(await recopilarTodo(tmp)).length) await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+        console.log(`  ♻️  Temporal de un empaquetado interrumpido junto a «${path.relative(INBOX, dir) || '.'}»: ${ficheros.length} fichero(s) a la Papelera.`);
+    }
+}
+
+/**
  * Ejecuta las guías «empaquetar» que haya DENTRO de `dir` (a cualquier profundidad). No entra en lo que una guía
  * manda dejar quieto (intacta/software/omitir) ni en los temporales del propio empaquetado (empiezan por «.»).
  */
 async function empaquetarGuiasAnidadas(dir, nivel = 8) {
     if (nivel < 0) return;
+    await recogerTemporalesHuerfanos(dir);
     let ents;
     try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
