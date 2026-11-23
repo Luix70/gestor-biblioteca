@@ -19,7 +19,6 @@
  * ANTI-PÉRDIDA: el empaquetado se VERIFICA (todas las imágenes presentes y legibles, byte a byte) ANTES de que
  * el llamante retire nada. Los originales van a la Papelera, jamás se borran.
  */
-import AdmZip from 'adm-zip';
 import { corregirPolaridadPng } from './png-polaridad.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -392,30 +391,149 @@ export async function planEmpaquetado(dir, { alcance = 'subcarpetas' } = {}) {
     return { raiz: dir, nombre, tomos, multivolumen: tomos.length > 1, total: tomos.reduce((s, t) => s + t.imagenes, 0), fallidos };
 }
 
-/** Escribe UN cbz (STORE) y lo VERIFICA byte a byte. Devuelve {ok, ruta, paginas, motivo?}. */
-async function escribirCbz(imagenes, destino) {
-    const zip = new AdmZip();
-    const firmas = new Map();
-    for (const im of imagenes) {
-        let buf;
-        try { buf = await fs.readFile(im.abs); } catch { return { ok: false, motivo: `no se pudo leer «${im.nombre}»` }; }
-        zip.addFile(im.nombre, buf);
-        firmas.set(im.nombre, sha(buf));
-    }
-    zip.getEntries().forEach((e) => { e.header.method = 0; });   // 0 = STORED: bytes idénticos, sin quemar CPU
-    await fs.mkdir(path.dirname(destino), { recursive: true });
-    zip.writeZip(destino);
+// ── Escritura del CBZ EN STREAMING ──────────────────────────────────────────────────────────────────────────
+// Antes el cbz se montaba con adm-zip: `addFile` guarda en memoria TODAS las láminas del tomo y `writeZip` monta
+// además el zip entero en otro búfer → con un tomo de 400 MB (CBZ_MAX_BYTES) son ~800 MB, y el contenedor tiene
+// 700 MB (el 17-nov el OOM killer ya mató la app dos veces). La verificación lo releía otra vez entero. Ahora se
+// escribe un ZIP «STORE» (sin comprimir, el mismo formato de antes) LÁMINA A LÁMINA: se lee una imagen, se le
+// calcula el CRC-32 y el SHA-256, se escribe y se suelta. La memoria es la de la lámina más grande, no la del tomo.
+// Formato: APPNOTE de PKWARE (cabecera local + datos por entrada, directorio central, registro final). Sin ZIP64:
+// un tomo está acotado a CBZ_MAX_BYTES (muy por debajo de 4 GB) y a menos de 65.535 láminas (se comprueba).
 
-    // VERIFICACIÓN: se relee el cbz recién escrito y se comprueba cada imagen byte a byte. Sin esto no podemos
-    // decirle al llamante que ya puede reciclar los originales.
-    let leido;
-    try { leido = new AdmZip(destino); } catch (e) { return { ok: false, motivo: `el cbz no abre: ${e.message}` }; }
-    const ents = leido.getEntries();
-    if (ents.length !== imagenes.length) return { ok: false, motivo: `faltan páginas: ${ents.length}/${imagenes.length}` };
-    for (const e of ents) {
-        if (firmas.get(e.entryName) !== sha(e.getData())) return { ok: false, motivo: `la página «${e.entryName}» no coincide byte a byte` };
+const TABLA_CRC = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        t[n] = c >>> 0;
     }
-    return { ok: true, ruta: destino, paginas: ents.length };
+    return t;
+})();
+
+/** CRC-32 (el de ZIP). Node 18 —el del NAS— no trae `zlib.crc32`. */
+function crc32(buf) {
+    let c = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) c = TABLA_CRC[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+}
+
+/** Fecha y hora en formato DOS (lo que guarda un ZIP). */
+function fechaDos(d = new Date()) {
+    const hora = (d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2);
+    const fecha = ((Math.max(d.getFullYear(), 1980) - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    return { hora, fecha };
+}
+
+const FLAG_UTF8 = 0x0800;   // los nombres van en UTF-8 (láminas con acentos, japonés…)
+
+function cabeceraLocal(nombreBuf, crc, tam, dos) {
+    const h = Buffer.alloc(30);
+    h.writeUInt32LE(0x04034b50, 0);   // firma
+    h.writeUInt16LE(10, 4);           // versión necesaria (1.0: STORE)
+    h.writeUInt16LE(FLAG_UTF8, 6);
+    h.writeUInt16LE(0, 8);            // método 0 = STORE
+    h.writeUInt16LE(dos.hora, 10);
+    h.writeUInt16LE(dos.fecha, 12);
+    h.writeUInt32LE(crc, 14);
+    h.writeUInt32LE(tam, 18);         // tamaño comprimido = tamaño real (STORE)
+    h.writeUInt32LE(tam, 22);
+    h.writeUInt16LE(nombreBuf.length, 26);
+    h.writeUInt16LE(0, 28);           // sin campo extra
+    return Buffer.concat([h, nombreBuf]);
+}
+
+function cabeceraCentral(e, dos) {
+    const h = Buffer.alloc(46);
+    h.writeUInt32LE(0x02014b50, 0);
+    h.writeUInt16LE(20, 4);           // versión que lo creó
+    h.writeUInt16LE(10, 6);           // versión necesaria
+    h.writeUInt16LE(FLAG_UTF8, 8);
+    h.writeUInt16LE(0, 10);           // STORE
+    h.writeUInt16LE(dos.hora, 12);
+    h.writeUInt16LE(dos.fecha, 14);
+    h.writeUInt32LE(e.crc, 16);
+    h.writeUInt32LE(e.tam, 20);
+    h.writeUInt32LE(e.tam, 24);
+    h.writeUInt16LE(e.nombreBuf.length, 28);
+    // 30 extra, 32 comentario, 34 disco, 36 atributos internos, 38 externos: todo 0 (Buffer.alloc ya está a 0)
+    h.writeUInt32LE(e.offset, 42);
+    return Buffer.concat([h, e.nombreBuf]);
+}
+
+function registroFinal(n, tamCentral, offsetCentral) {
+    const h = Buffer.alloc(22);
+    h.writeUInt32LE(0x06054b50, 0);
+    h.writeUInt16LE(n, 8);            // entradas en este disco
+    h.writeUInt16LE(n, 10);           // entradas en total
+    h.writeUInt32LE(tamCentral, 12);
+    h.writeUInt32LE(offsetCentral, 16);
+    return h;
+}
+
+/**
+ * VERIFICACIÓN del cbz recién escrito, también en streaming: por cada entrada se relee su cabecera local en el
+ * desplazamiento apuntado (firma, nombre, tamaño) y sus datos, y se comparan con el SHA-256 calculado al leer
+ * la lámina original. Byte a byte, como antes, pero sin cargar el tomo entero.
+ */
+async function verificarCbz(destino, entradas) {
+    const fh = await fs.open(destino, 'r');
+    try {
+        for (const e of entradas) {
+            const cab = Buffer.alloc(30);
+            await fh.read(cab, 0, 30, e.offset);
+            if (cab.readUInt32LE(0) !== 0x04034b50) return `la cabecera de «${e.nombre}» no es válida`;
+            const largoNombre = cab.readUInt16LE(26), largoExtra = cab.readUInt16LE(28);
+            const nombre = Buffer.alloc(largoNombre);
+            await fh.read(nombre, 0, largoNombre, e.offset + 30);
+            if (!nombre.equals(e.nombreBuf)) return `el nombre de «${e.nombre}» no coincide`;
+            if (cab.readUInt32LE(22) !== e.tam) return `el tamaño de «${e.nombre}» no coincide`;
+            const datos = Buffer.alloc(e.tam);
+            await fh.read(datos, 0, e.tam, e.offset + 30 + largoNombre + largoExtra);
+            if (sha(datos) !== e.sha || crc32(datos) !== e.crc) return `la página «${e.nombre}» no coincide byte a byte`;
+        }
+    } finally {
+        await fh.close();
+    }
+    return null;
+}
+
+/** Escribe UN cbz (STORE) lámina a lámina y lo VERIFICA byte a byte. Devuelve {ok, ruta, paginas, motivo?}. */
+async function escribirCbz(imagenes, destino) {
+    if (imagenes.length >= 0xffff) return { ok: false, motivo: `demasiadas láminas para un tomo (${imagenes.length})` };
+    await fs.mkdir(path.dirname(destino), { recursive: true });
+    const dos = fechaDos();
+    const entradas = [];
+    let offset = 0;
+    const fh = await fs.open(destino, 'w');
+    try {
+        for (const im of imagenes) {
+            let buf;
+            try { buf = await fs.readFile(im.abs); } catch { return { ok: false, motivo: `no se pudo leer «${im.nombre}»` }; }
+            const e = { nombre: im.nombre, nombreBuf: Buffer.from(im.nombre, 'utf8'), tam: buf.length, crc: crc32(buf), sha: sha(buf), offset };
+            const cab = cabeceraLocal(e.nombreBuf, e.crc, e.tam, dos);
+            await fh.write(cab);
+            await fh.write(buf);
+            offset += cab.length + buf.length;
+            if (offset > 0xfffffffe) return { ok: false, motivo: 'el tomo supera 4 GB (sin ZIP64)' };
+            entradas.push(e);
+        }
+        const offsetCentral = offset;
+        let tamCentral = 0;
+        for (const e of entradas) {
+            const c = cabeceraCentral(e, dos);
+            await fh.write(c);
+            tamCentral += c.length;
+        }
+        await fh.write(registroFinal(entradas.length, tamCentral, offsetCentral));
+    } finally {
+        await fh.close();
+    }
+
+    // VERIFICACIÓN: sin esto no podemos decirle al llamante que ya puede reciclar los originales.
+    let fallo;
+    try { fallo = await verificarCbz(destino, entradas); } catch (e) { fallo = `el cbz no se pudo releer: ${e.message}`; }
+    if (fallo) return { ok: false, motivo: fallo };
+    return { ok: true, ruta: destino, paginas: entradas.length };
 }
 
 /**

@@ -2672,6 +2672,19 @@ de ficheros clasificado por CDU.
       Mejora el mismo dia: se miden primero las subcarpetas MAS RECIENTES (las de arriba) y varias a la vez, la
       pagina se refresca cada 6 s, y mientras falta el tamaño la columna Ficheros ya dice cuantos elementos hay
       en la carpeta («3 elem. …») o «vacía» en rojo: se sabe al momento si merece la pena mirarla.
+    · EL INBOX YA NO SE QUEDA PARADO CON LIBROS DE LAMINAS DENTRO DE CARPETAS (23-nov): tras pasar «_ARTE» por
+      PreProceso quedaron 4.372 imagenes en el Inbox que el Vigilante no tocaba ni avisaba (solo reintentaba
+      «Michael Whelan» en cada arranque). Tres causas, arregladas:
+        1) la orden «empaquetar en .cbz» solo se ejecutaba en carpetas del PRIMER nivel del Inbox; ahora a
+           cualquier profundidad (Akira Toriyama, Fate Stay, Tetsuya Nishio, Tokyo Ghoul, Bubblegum Crisis…).
+        2) una carpeta sin documentos con las imagenes en subcarpetas («Barlowe/Unordered», las cartas y
+           portadas de Luis Royo…) no daba ni una unidad ni un aviso. Ahora cada conjunto de 12 o mas laminas se
+           empaqueta en .cbz (sus mismos bytes, GIF incluidos) y se cataloga; uno mas pequeño (3 infografias) se
+           queda en el Inbox con su aviso «.NO_CATALOGABLE.txt».
+        3) «Michael Whelan» (3 .cbz + una subcarpeta de laminas) se rechazaba como «coleccion ya completa»
+           porque solo se contaban los PDF de la raiz; ahora entran sus 3 cbz.
+      Ademas el .cbz se escribe lamina a lamina: antes un tomo de 400 MB necesitaba ~800 MB de memoria y el
+      contenedor tiene 700 (habria tumbado la app en cada intento).
     · LOS PDF DE POCAS PAGINAS YA NO SON LIBROS NI REVISTAS (23-nov): un PDF corto sin ISBN (menos de 12 paginas
       escaneado, menos de 20 con texto) se cataloga como ARTICULO (o capitulo). La regla ya existia y la ficha lo
       decia («→ ARTICULO»), pero si la IA de vision habia dicho «libro», ganaba la IA y quedaba como libro. Ahora

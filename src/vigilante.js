@@ -1309,6 +1309,13 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                     // ficha (antes la carpeta se saltaba entera).
                     dropsADisolver.add(ruta);
                     await clasificarDirectorio(ruta, false, unidades);
+                } else {
+                    // Ningún documento y las imágenes MÁS ABAJO («Barlowe/Unordered/*.jpg», «Luis Royo/…/traiding
+                    // cards/<serie>/*.jpg»): antes no salía ninguna unidad ni ningún aviso y se quedaban en el Inbox
+                    // para siempre (23-nov: más de 2.000 láminas de «_ARTE»). Cada conjunto de láminas se guía
+                    // «empaquetar» (→ cbz, sus mismos bytes) y lo ejecuta la pasada previa del siguiente escaneo.
+                    dropsADisolver.add(ruta);
+                    await guiarLaminasSinGuia(ruta, unidades);
                 }
             }
         } else if (esValida(e.name) && !EXT_COMPRIMIDO.includes(path.extname(e.name).toLowerCase())) {
@@ -1936,7 +1943,15 @@ async function aplicarAccionesGuiaFs() {
         try { guia = await leerGuia(dir); } catch { guia = null; }
         // ADJUNTOS: se materializan SIEMPRE (con cualquier acción), porque son ortogonales a ella.
         if (guia?.adjuntos && Object.keys(guia.adjuntos).length) await materializarAdjuntos(dir, guia);
-        if (!guia || !['explotar', 'aplanar', 'empaquetar'].includes(guia.accion)) continue;
+        if (!guia || !['explotar', 'aplanar', 'empaquetar'].includes(guia.accion)) {
+            // «empaquetar» A CUALQUIER PROFUNDIDAD. Este bucle solo miraba el PRIMER nivel del Inbox, y desde que
+            // PreProceso deja cada unidad en su ruta original (Inbox/_ARTE/MANGA/…/<libro de láminas>), las guías
+            // «empaquetar» quedaban anidadas: nadie las ejecutaba y clasificarDirectorio las salta (espera que ya
+            // estén hechas). 23-nov: nueve libros de láminas (4.000 imágenes) parados en el Inbox sin un aviso.
+            const quieta = ['intacta', 'software', 'omitir'].includes(guia?.accion);
+            if (!quieta && await carpetaEstable(dir)) await empaquetarGuiasAnidadas(dir);
+            continue;
+        }
         if (!(await carpetaEstable(dir))) continue; // aún copiándose → esperar al próximo escaneo
         if (guia.accion === 'empaquetar') { await empaquetarCarpetaGuiada(dir, guia); continue; }
         try {
@@ -2269,6 +2284,84 @@ async function apartarNoConvertibles(dir, fallidos, nivel = 6) {
  * como los tomos de UNA obra multivolumen (el título es el nombre de la carpeta y el nº va por orden natural)
  * en vez de como una colección de cómics sueltos. Reutiliza lo que ya hace clasificarDirectorio.
  */
+// Láminas que caben en un cbz (las mismas que acepta el empaquetador, GIF y BMP incluidos: un cbz guarda los bytes
+// tal cual, no hay que convertirlas como para un PDF).
+const RE_LAMINA = /\.(jpe?g|png|webp|gif|bmp|avif|tiff?)$/i;
+// Por debajo de esto, unas pocas imágenes sueltas (una infografía, tres capturas) no son un libro de láminas: se
+// avisa y se quedan en el Inbox. El mismo umbral que separa un escaneo de unas fotos sueltas (escaneo-a-pdf).
+const MIN_LAMINAS = () => Number(process.env.ESCANEO_PDF_MIN_PAGINAS || 12);
+
+/** Nº de láminas de un árbol (recursivo). */
+async function contarLaminas(dir, nivel = 8) {
+    if (nivel < 0) return 0;
+    let n = 0, ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return 0; }
+    for (const e of ents) {
+        if (ignorarEntrada(e.name)) continue;
+        if (e.isDirectory()) n += await contarLaminas(path.join(dir, e.name), nivel - 1);
+        else if (RE_LAMINA.test(e.name)) n++;
+    }
+    return n;
+}
+
+/**
+ * Carpeta SIN documentos cuyas imágenes están en subcarpetas. Se baja hasta cada CONJUNTO de láminas (la primera
+ * carpeta con imágenes propias) y se le escribe una guía «empaquetar» con alcance «todo»: sus subcarpetas
+ * («Conceptions 3/pages») entran en el mismo cbz, y si pesa demasiado sale en tomos. Es el gemelo de lo que hacen
+ * PreProceso con un escaneo que no pasa a PDF y `expandirUno` con un zip de solo imágenes.
+ * Lo que manda una guía con acción no se toca. Un conjunto de menos de MIN_LAMINAS imágenes se avisa (no
+ * catalogable) y se queda. En modo PLAN no se escribe nada: se anuncia el empaquetado.
+ */
+async function guiarLaminasSinGuia(dir, unidades, nivel = 6) {
+    if (nivel < 0) return;
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    const propias = ents.filter((e) => e.isFile() && RE_LAMINA.test(e.name)).length;
+    if (propias) {
+        const total = await contarLaminas(dir);
+        if (total < MIN_LAMINAS()) {
+            if (!modoPlan) await avisarNoCatalogable(dir, `solo ${total} imagen(es) sueltas: no forman un libro de láminas (mínimo ${MIN_LAMINAS()})`);
+            return;
+        }
+        if (modoPlan) {
+            unidades.push({ esEmpaquetar: true, alcance: 'todo', carpeta: dir, rutas: [dir] });
+            return;
+        }
+        await escribirGuia(dir, { accion: 'empaquetar', alcance: 'todo', perfil: { origen: 'vigilante' } });
+        console.log(`  🖼️  ${path.relative(INBOX, dir)}: ${total} láminas sin documento → se empaquetará en .cbz.`);
+        return;
+    }
+    for (const e of ents) {
+        if (!e.isDirectory() || ignorarEntrada(e.name)) continue;
+        const sub = path.join(dir, e.name);
+        const guia = await leerGuia(sub).catch(() => null);
+        if (guia?.accion && guia.accion !== 'normal') continue;   // la guía manda (y «empaquetar» ya se ejecuta sola)
+        await guiarLaminasSinGuia(sub, unidades, nivel - 1);
+    }
+}
+
+/**
+ * Ejecuta las guías «empaquetar» que haya DENTRO de `dir` (a cualquier profundidad). No entra en lo que una guía
+ * manda dejar quieto (intacta/software/omitir) ni en los temporales del propio empaquetado (empiezan por «.»).
+ */
+async function empaquetarGuiasAnidadas(dir, nivel = 8) {
+    if (nivel < 0) return;
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+        if (!e.isDirectory() || ignorarEntrada(e.name)) continue;
+        const sub = path.join(dir, e.name);
+        let guia;
+        try { guia = await leerGuia(sub); } catch { guia = null; }
+        if (guia?.accion === 'empaquetar') {
+            if (await carpetaEstable(sub)) await empaquetarCarpetaGuiada(sub, guia);
+            continue;
+        }
+        if (['intacta', 'software', 'omitir'].includes(guia?.accion)) continue;
+        await empaquetarGuiasAnidadas(sub, nivel - 1);
+    }
+}
+
 async function empaquetarCarpetaGuiada(dir, guia) {
     const nombre = path.basename(dir);
     const alcance = guia.alcance === 'todo' ? 'todo' : 'subcarpetas';

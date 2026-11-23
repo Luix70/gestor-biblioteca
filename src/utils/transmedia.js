@@ -231,7 +231,10 @@ export async function analizarTransmedia(dirOrigen, { idioma = 'en' } = {}) {
     const enRaiz = (await fs.readdir(raiz, { withFileTypes: true }).catch(() => []))
         .filter((e) => !ignorar(e.name));
     const subdirs = enRaiz.filter((e) => e.isDirectory());
-    const ficherosRaiz = enRaiz.filter((e) => e.isFile() && (esPdf(e.name) || esAudio(e.name)));
+    // Cuenta CUALQUIER documento con lector, no solo PDF: con «solo PDF», una carpeta con 3 .cbz en la raíz y una
+    // subcarpeta de láminas («Michael Whelan», 23-nov) bajaba a la subcarpeta, no veía ningún documento y se
+    // rechazaba como «colección ya COMPLETA» en cada pasada; los cbz no se catalogaban nunca.
+    const ficherosRaiz = enRaiz.filter((e) => e.isFile() && (esPdf(e.name) || esDocumentoLeible(e.name) || esAudio(e.name)));
     if (subdirs.length === 1 && ficherosRaiz.length === 0) raiz = path.join(raiz, subdirs[0].name);
 
     const nombreColeccion = path.basename(raiz);
