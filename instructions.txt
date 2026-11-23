@@ -2683,6 +2683,11 @@ de ficheros clasificado por CDU.
            queda en el Inbox con su aviso «.NO_CATALOGABLE.txt».
         3) «Michael Whelan» (3 .cbz + una subcarpeta de laminas) se rechazaba como «coleccion ya completa»
            porque solo se contaban los PDF de la raiz; ahora entran sus 3 cbz.
+      PREFERENCIA (23-nov): un libro de laminas va PRIMERO a PDF (un solo PDF con las imagenes tal cual, sin
+      recomprimir); si no se puede —hay GIF/BMP/WebP, o el PDF no sale bien— se empaqueta en .cbz (las mismas
+      imagenes en un zip), que es la red de seguridad. Vale para los zip grandes de imagenes y para las carpetas de
+      laminas; lo que PreProceso ya intento pasar a PDF va directamente a .cbz, y si tu marcas «empaquetar» a mano,
+      es .cbz.
       Ademas el .cbz se escribe lamina a lamina: antes un tomo de 400 MB necesitaba ~800 MB de memoria y el
       contenedor tiene 700 (habria tumbado la app en cada intento).
     · LOS PDF DE POCAS PAGINAS YA NO SON LIBROS NI REVISTAS (23-nov): un PDF corto sin ISBN (menos de 12 paginas

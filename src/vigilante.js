@@ -16,7 +16,7 @@ import { extraerArchivoComic as extraerComprimido, listarComprimido, ficherosDel
 import { esComprimidoDeImagenes, destinoComic } from './utils/comprimido-imagenes.js';
 import { esCdDePrograma, esCarpetaCdDePrograma } from './utils/cd-de-programa.js';
 import { moverArbol, destinoLibre } from './utils/mover-arbol.js';
-import { tomarTurno, intentarTurno, estadoTurno } from './utils/turno-pesado.js';
+import { tomarTurno, intentarTurno, estadoTurno, conTurno } from './utils/turno-pesado.js';
 import { reciclar, reciclarCarpeta } from './utils/papelera.js';
 import { retirarCarpeta } from './utils/borrado-seguro.js';
 import { esCarpetaTransmedia, esTransmediaFuerte, ingestarTransmedia, ingestarSoftware, ingestarIntacta, ingestarLibroConMaterial } from './utils/transmedia.js';
@@ -707,6 +707,17 @@ let modoPlan = false;
 async function describirEmpaquetado(u) {
     const nombre = path.basename(u.carpeta);
     const base = { ficheros: 0, carpeta: path.relative(INBOX, u.carpeta), tipo: 'empaquetar → cbz', titulo: nombre };
+    // Primero PDF (preferencia del usuario): si todas las láminas caben en un PDF, el plan lo dice así.
+    if (u.pdfPrimero) {
+        const laminas = await listarLaminas(u.carpeta).catch(() => []);
+        if (laminas.length && laminas.every((l) => RE_LAMINA_PDF.test(l))) {
+            return {
+                ...base, tipo: 'láminas → PDF', documentos: 1,
+                efecto: `${laminas.length} láminas → «${nombre}.pdf» (1 documento, sus mismos bytes). Si el PDF no saliera, `
+                    + 'se empaquetaría en .cbz. Los originales van a la Papelera TRAS verificar el PDF.',
+            };
+        }
+    }
     try {
         const p = await planEmpaquetado(u.carpeta, { alcance: u.alcance });
         if (!p.tomos.length) return { ...base, documentos: 0, grave: true, motivo: 'sin láminas', efecto: 'no se han encontrado imágenes que empaquetar: la carpeta se quedaría como está. Revisa la acción.' };
@@ -1102,7 +1113,7 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 // unidad (p. ej. si el empaquetado falló), procesarUnidad intentaría catalogar una CARPETA
                 // como si fuera un fichero. Solo el PLAN la declara, que es justo donde hace falta saber en
                 // qué se va a convertir ANTES de que pase.
-                if (modoPlan) unidades.push({ esEmpaquetar: true, alcance: guiaCarpeta.alcance || 'subcarpetas', carpeta: ruta, rutas: [ruta] });
+                if (modoPlan) unidades.push({ esEmpaquetar: true, alcance: guiaCarpeta.alcance || 'subcarpetas', carpeta: ruta, rutas: [ruta], pdfPrimero: pdfPrimero(guiaCarpeta) });
                 continue;
             }
             if (guiaCarpeta?.accion === 'software') {
@@ -2291,6 +2302,63 @@ const RE_LAMINA = /\.(jpe?g|png|webp|gif|bmp|avif|tiff?)$/i;
 // avisa y se quedan en el Inbox. El mismo umbral que separa un escaneo de unas fotos sueltas (escaneo-a-pdf).
 const MIN_LAMINAS = () => Number(process.env.ESCANEO_PDF_MIN_PAGINAS || 12);
 
+// Láminas que caben en un PDF SIN convertir (escaneo-a-pdf: JPG con sus mismos bytes, PNG sin pérdida, TIF con
+// tiff2pdf). Un GIF/BMP/WebP no: entonces el conjunto va a .cbz.
+const RE_LAMINA_PDF = /\.(jpe?g|png|tiff?)$/i;
+
+/**
+ * PREFERENCIA DEL USUARIO (23-nov): un libro de láminas va «preferentemente en PDF; si no, cbz como segunda opción».
+ * Se intenta el PDF en las guías «empaquetar» AUTOMÁTICAS (zip grande de imágenes, conjunto de láminas que guía el
+ * propio vigilante). No en las de PreProceso (ahí el PDF YA falló: por eso la guió) ni en las del usuario/panel
+ * (si pidió cbz, es cbz), y una sola vez (`pdf_intentado`).
+ */
+const pdfPrimero = (guia) => ['comprimido', 'vigilante'].includes(guia?.perfil?.origen) && !guia?.pdf_intentado;
+
+/** Láminas de un árbol en ORDEN DE LECTURA (las propias por nombre natural, luego cada subcarpeta). */
+async function listarLaminas(dir, nivel = 8) {
+    if (nivel < 0) return [];
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return []; }
+    ents = ents.filter((e) => !ignorarEntrada(e.name))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    const out = ents.filter((e) => e.isFile() && RE_LAMINA.test(e.name)).map((e) => path.join(dir, e.name));
+    for (const e of ents) if (e.isDirectory()) out.push(...await listarLaminas(path.join(dir, e.name), nivel - 1));
+    return out;
+}
+
+/** Borra las subcarpetas que hayan quedado VACÍAS (rmdir no borra una con algo dentro: nunca pierde nada). */
+async function borrarSubcarpetasVacias(dir) {
+    let ents;
+    try { ents = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+        if (!e.isDirectory()) continue;
+        const sub = path.join(dir, e.name);
+        await borrarSubcarpetasVacias(sub);
+        await fs.rmdir(sub).catch(() => {});
+    }
+}
+
+/**
+ * Intenta hacer de la carpeta de láminas UN PDF «<carpeta>.pdf» (escaneo-a-pdf: verifica el nº de páginas antes de
+ * reciclar los originales). Solo si TODAS las láminas caben en un PDF y no hay ya documentos dentro (un cbz de una
+ * pasada parcial anterior). Toma el TURNO PESADO: unir cientos de páginas con qpdf no debe coincidir con un paso
+ * pesado de PreProceso (OOM del 17-nov). Aquí no hay deadlock: la pasada previa corre ANTES de que la ingesta coja
+ * su turno. Devuelve { ok, paginas } o { ok:false, motivo }.
+ */
+async function laminasAPdf(dir) {
+    const laminas = await listarLaminas(dir);
+    if (!laminas.length) return { ok: false, motivo: 'sin láminas' };
+    const noPdf = laminas.filter((l) => !RE_LAMINA_PDF.test(l));
+    if (noPdf.length) return { ok: false, motivo: `${noPdf.length} lámina(s) GIF/BMP/WebP… (p. ej. «${path.basename(noPdf[0])}») no caben en un PDF sin convertir` };
+    if ((await recopilarDocumentos(dir)).length) return { ok: false, motivo: 'ya hay documentos dentro (un empaquetado anterior a medias)' };
+    const destino = path.join(dir, `${path.basename(dir)}.pdf`);
+    const r = await conTurno(`Láminas → PDF: ${path.basename(dir)}`,
+        () => materializarEscaneo(dir, { tipo: 'libro', destino, paginas: laminas }));
+    if (!r.ok) return r;
+    await borrarSubcarpetasVacias(dir);
+    return { ok: true, paginas: r.pdfs?.[0]?.paginas || laminas.length };
+}
+
 /** Nº de láminas de un árbol (recursivo). */
 async function contarLaminas(dir, nivel = 8) {
     if (nivel < 0) return 0;
@@ -2324,11 +2392,11 @@ async function guiarLaminasSinGuia(dir, unidades, nivel = 6) {
             return;
         }
         if (modoPlan) {
-            unidades.push({ esEmpaquetar: true, alcance: 'todo', carpeta: dir, rutas: [dir] });
+            unidades.push({ esEmpaquetar: true, alcance: 'todo', carpeta: dir, rutas: [dir], pdfPrimero: true });
             return;
         }
         await escribirGuia(dir, { accion: 'empaquetar', alcance: 'todo', perfil: { origen: 'vigilante' } });
-        console.log(`  🖼️  ${path.relative(INBOX, dir)}: ${total} láminas sin documento → se empaquetará en .cbz.`);
+        console.log(`  🖼️  ${path.relative(INBOX, dir)}: ${total} láminas sin documento → PDF (o .cbz si no puede ser) en la próxima pasada.`);
         return;
     }
     for (const e of ents) {
@@ -2364,6 +2432,18 @@ async function empaquetarGuiasAnidadas(dir, nivel = 8) {
 
 async function empaquetarCarpetaGuiada(dir, guia) {
     const nombre = path.basename(dir);
+    // PRIMERO PDF (preferencia del usuario); el cbz —las mismas imágenes en un zip sin comprimir— es la red.
+    if (pdfPrimero(guia)) {
+        const pdf = await laminasAPdf(dir).catch((e) => ({ ok: false, motivo: e.message }));
+        if (pdf.ok) {
+            await escribirGuia(dir, { ...guia, accion: 'normal', alcance: undefined });
+            console.log(`  📄 «${nombre}»: láminas → «${nombre}.pdf» (${pdf.paginas} páginas). Originales a la Papelera.`);
+            return;
+        }
+        console.log(`  🖼️  «${nombre}»: no va a PDF (${pdf.motivo}) → se empaqueta en .cbz.`);
+        guia = { ...guia, pdf_intentado: true };
+        await escribirGuia(dir, guia).catch(() => {});
+    }
     const alcance = guia.alcance === 'todo' ? 'todo' : 'subcarpetas';
     const tmp = path.join(path.dirname(dir), `.empaquetando-${Date.now()}`);
     try {
