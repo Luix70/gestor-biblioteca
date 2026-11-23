@@ -1415,7 +1415,7 @@ async function loadPap() {
     if (pend) {
       _papRecarga = setTimeout(() => {
         if ($('#p-pap')?.classList.contains('on')) loadPap();
-      }, 15000);
+      }, 6000);
     }
   } catch (e) {
     toast(e.message, 'bad');
@@ -1437,6 +1437,15 @@ function pintarPap() {
     iso ? new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—';
   // Sin medir todavía: «…» en vez de un 0 que engañaría.
   const cifra = (v, fmt) => (v == null ? '<span class="muted">…</span>' : fmt(v));
+  // Ficheros: mientras se mide el tamaño, el servidor ya sabe cuántos elementos hay en la raíz de la subcarpeta
+  // (una sola lectura de directorio) → se distingue al momento una subcarpeta VACÍA de una con contenido.
+  const ficherosTxt = (sub) => {
+    if (sub.ficheros != null) return Number(sub.ficheros).toLocaleString('es-ES');
+    if (sub.entradas === 0) return '<span class="tag bad">vacía</span>';
+    if (sub.entradas != null)
+      return `<span class="muted" title="Elementos en su raíz; el recuento completo y el tamaño se están midiendo">${sub.entradas.toLocaleString('es-ES')} elem. …</span>`;
+    return '<span class="muted">…</span>';
+  };
   const filtro = ($('#papFiltro').value || '').trim().toLowerCase();
   const filtradas = filtro ? _papSubcarpetas.filter((s) => s.nombre.toLowerCase().includes(filtro)) : _papSubcarpetas;
   const ordenadas = ordenarPapelera(filtradas, clave, dir);
@@ -1447,7 +1456,7 @@ function pintarPap() {
     <table><tr><th>Subcarpeta</th><th>Eliminada${flecha('fecha')}</th><th>Ficheros${flecha('ficheros')}</th><th>Tamaño${flecha('bytes')}</th><th></th></tr>
     ${lista
       .map(
-        (sub) => `<tr><td class="mono">${esc(sub.nombre)}</td><td data-k="Eliminada" style="white-space:nowrap">${fechaTxt(sub.fecha)}</td><td data-k="Ficheros">${cifra(sub.ficheros, (v) => Number(v).toLocaleString('es-ES'))}</td><td data-k="Tamaño" style="white-space:nowrap">${cifra(sub.bytes, fmtBytes)}</td>
+        (sub) => `<tr><td class="mono">${esc(sub.nombre)}</td><td data-k="Eliminada" style="white-space:nowrap">${fechaTxt(sub.fecha)}</td><td data-k="Ficheros">${ficherosTxt(sub)}</td><td data-k="Tamaño" style="white-space:nowrap">${cifra(sub.bytes, fmtBytes)}</td>
       <td style="text-align:right"><button class="btn" data-ver="${esc(sub.nombre)}" title="Explorar los ficheros reales de esta carpeta y descargarlos">🗂️ explorar</button> ${sub.restaurable ? `<button class="btn admin-only" data-restore="${esc(sub.nombre)}" title="Devolver el fichero/carpeta a su ubicación original (no pisa lo que ya exista allí)">↩️ restaurar</button> ` : ''}<button class="btn bad admin-only" data-del="${esc(sub.nombre)}">vaciar</button></td></tr>`,
       )
       .join('')}</table>

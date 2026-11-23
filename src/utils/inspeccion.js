@@ -92,22 +92,38 @@ async function guardarTamanos() {
     } catch { /* la caché es una comodidad: si no se puede guardar, se volverá a medir */ }
 }
 
-/** Mide en segundo plano las subcarpetas sin tamaño conocido (o cuya carpeta cambió). Nunca dos a la vez. */
+/**
+ * Mide en segundo plano las subcarpetas sin tamaño conocido (o cuya carpeta cambió). Nunca dos a la vez.
+ * Orden: las MÁS RECIENTES primero (las que el panel enseña arriba por defecto) y varias a la vez. Antes se
+ * medían de una en una y en el orden del disco (las más antiguas): el 23-nov, tras 15 s, la primera página
+ * del panel seguía sin un solo tamaño aunque la medición ya llevaba cientos de carpetas.
+ */
 function medirPendientes(pendientes) {
     if (midiendo || !pendientes.length) return;
+    const orden = [...pendientes].sort((a, b) => b.nombre.localeCompare(a.nombre)); // serial desc
     midiendo = (async () => {
         let desdeGuardado = 0;
-        for (const { nombre, mtime } of pendientes) {
+        await enParalelo(orden, 8, async ({ nombre, mtime }) => {
             const medida = await tamanoDir(path.join(DIR_RECICLAJE, nombre));
             // Se conserva lo ya sabido (restaurable, fecha); solo si la carpeta no volvió a cambiar entre medias.
             const previo = tamanos.get(nombre);
             if (previo && previo.mtime === mtime) tamanos.set(nombre, { ...previo, ...medida });
-            // Se guarda cada 100 para no perder lo medido si la app se reinicia a mitad.
-            if (++desdeGuardado >= 100) { desdeGuardado = 0; await guardarTamanos(); }
-        }
+            // Se guarda cada 200 para no perder lo medido si la app se reinicia a mitad.
+            if (++desdeGuardado >= 200) { desdeGuardado = 0; await guardarTamanos(); }
+        });
         await guardarTamanos();
     })().catch((e) => console.warn(`[Papelera] medición de tamaños interrumpida: ${e.message}`))
         .finally(() => { midiendo = null; });
+}
+
+/**
+ * Nº de elementos en la RAÍZ de una subcarpeta (sin el manifiesto). Es UNA lectura de directorio —barata,
+ * a diferencia de medir el árbol entero—, así que se sabe al momento si una subcarpeta está VACÍA o tiene
+ * algo, que es lo que importa para decidir si merece la pena mirarla, mientras su tamaño aún se está midiendo.
+ */
+async function contarEntradas(dir) {
+    try { return (await fs.readdir(dir)).filter((n) => n !== '.papelera.json').length; }
+    catch { return null; }
 }
 
 /** `fn` sobre cada elemento, con a lo sumo `n` a la vez (miles de stat en serie tardaban un minuto por SMB). */
@@ -135,16 +151,24 @@ export async function infoPapelera() {
         if (!conocido || conocido.mtime !== mtime) {
             // ¿Tiene manifiesto de origen? → se puede restaurar a su sitio (Papelera de Windows).
             const restaurable = await fs.access(path.join(dir, '.papelera.json')).then(() => true).catch(() => false);
-            conocido = { mtime, restaurable, fecha: await fechaSubcarpeta(nombre, dir) };   // sin medir aún
+            conocido = {
+                mtime, restaurable, fecha: await fechaSubcarpeta(nombre, dir),
+                entradas: await contarEntradas(dir),   // vacía o no, al momento (el tamaño llega después)
+            };
             tamanos.set(nombre, conocido);
             pendientes.push({ nombre, mtime });
         } else if (conocido.bytes == null) {
-            pendientes.push({ nombre, mtime });   // vista antes, pero la medición no llegó a ella
+            // Vista antes, pero la medición no llegó a ella (o la caché es de antes de contar las entradas).
+            if (conocido.entradas == null) conocido.entradas = await contarEntradas(dir);
+            pendientes.push({ nombre, mtime });
         }
         return {
             nombre, restaurable: conocido.restaurable, fecha: conocido.fecha,
-            // Sin medir aún: sin cifras (el panel muestra «…» y las ordena al final).
-            ...(conocido.bytes != null ? { bytes: conocido.bytes, ficheros: conocido.ficheros } : {}),
+            // Sin medir aún: sin cifras (el panel muestra «…» y las ordena al final), pero con cuántos
+            // elementos hay en su raíz, para distinguir al momento una subcarpeta VACÍA de una con contenido.
+            ...(conocido.bytes != null
+                ? { bytes: conocido.bytes, ficheros: conocido.ficheros }
+                : { entradas: conocido.entradas }),
         };
     });
     // Lo vaciado ya no cuenta.

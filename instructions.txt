@@ -2669,6 +2669,9 @@ de ficheros clasificado por CDU.
       se actualiza sola) y se recuerda (logs/papelera-tamanos.json), asi que solo la primera vez tarda en
       completarse. La tabla se muestra de 200 en 200 («Mostrar más») y hay un buscador por nombre de subcarpeta
       (fecha, motivo: «cuarentena», «integridad»…).
+      Mejora el mismo dia: se miden primero las subcarpetas MAS RECIENTES (las de arriba) y varias a la vez, la
+      pagina se refresca cada 6 s, y mientras falta el tamaño la columna Ficheros ya dice cuantos elementos hay
+      en la carpeta («3 elem. …») o «vacía» en rojo: se sabe al momento si merece la pena mirarla.
     · LOS PDF DE POCAS PAGINAS YA NO SON LIBROS NI REVISTAS (23-nov): un PDF corto sin ISBN (menos de 12 paginas
       escaneado, menos de 20 con texto) se cataloga como ARTICULO (o capitulo). La regla ya existia y la ficha lo
       decia («→ ARTICULO»), pero si la IA de vision habia dicho «libro», ganaba la IA y quedaba como libro. Ahora
