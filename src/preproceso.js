@@ -31,7 +31,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { carpetaEstable, expandirComprimidos, materializarDesglose, materializarDesgloseGuiado, CARPETA_NO_DESCOMPRIMIDOS } from './vigilante.js';
 import { planEscaneo, materializarEscaneo } from './utils/escaneo-a-pdf.js';
-import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos, parecenCapitulosDeLibro } from './utils/libro-desglosado.js';
+import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos, parecenCapitulosDeLibro, sonTomosDeObra } from './utils/libro-desglosado.js';
 import { esFicheroCatalogable, examinarCatalogable, escribirAvisoNoCatalogable, AVISO_NO_CATALOGABLE } from './utils/no-catalogable.js';
 import { leerGuia, escribirGuia, NOMBRE_GUIA } from './utils/guia-ingesta.js';
 import { esLibroHtml } from './utils/libro-html.js';
@@ -380,6 +380,15 @@ async function prepararArbol(dir, pendientes, hecho) {
     // Libro por capítulos, guiado o detectado. Un libro que no se puede preparar se queda aquí: nunca se cataloga
     // trozo a trozo.
     let resultado = null;
+    // Una guía «desglose» AUTOMÁTICA (del agente o de PreProceso) sobre TOMOS numerados es un error de lectura: es una
+    // obra multivolumen, y coser tomos enteros (o DjVu, que qpdf no cose) la dejaba aquí esperando para siempre
+    // (24-nov, «Courant R»). Se corrige la guía a «obra» y sigue su camino al Inbox. Una guía TUYA no se toca.
+    if (guia?.accion === 'desglose' && ['agente', 'preproceso'].includes(guia.perfil?.origen) && await sonTomosDeObra(dir)) {
+        await escribirGuia(dir, { accion: 'obra', perfil: { ...guia.perfil } });
+        hecho.push(`${rel}: guía corregida — sus documentos son tomos de una obra, no capítulos`);
+        console.log(`  📚 PreProceso: «${rel}»: guía «desglose» corregida a «obra» (sus documentos son tomos numerados).`);
+        return;
+    }
     latido.detalle(`libro por capítulos: ${rel}`);
     if (guia?.accion === 'desglose') {
         resultado = await conTurno(`PreProceso: coser «${rel}»`, () => materializarDesgloseGuiado(dir, guia.desglose || {}));

@@ -26,6 +26,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { paginasPdf } from './qpdf.js';
 import { esLibroHtml } from './libro-html.js';
+import { parsearVolumen } from './multivolumen.js';
 const ejecutarCmd = promisify(execFile); // pdftotext (poppler) para la comprobación de capa de texto
 
 // Extensiones que cuentan como DOCUMENTO (el principal y sus partes; las partes pueden ser .doc/.docx).
@@ -491,6 +492,24 @@ export async function pareceLibroPorCapitulos(dir, rel = '', nivel = 4) {
         if (visto) return visto;
     }
     return null;
+}
+
+/**
+ * ¿Los documentos de `dir` son los TOMOS de una obra («… Volume 1 …», «… Volume 2 …», «Tomo III», «Band 2»)? Es decir:
+ * 2+ documentos en su raíz, TODOS con número de tomo y sin números repetidos. Entonces la carpeta es una OBRA
+ * multivolumen (un documento por tomo), NUNCA un libro a coser: cada tomo es un libro entero.
+ * Por qué (24-nov): la IA de inspección leyó «Courant R/» (Differential and Integral Calculus, Volume 1 y Volume 2, dos
+ * .djvu de 7,6 MB) como «libro desglosado»; PreProceso intentaba coserlos (qpdf no cose DjVu) y la carpeta se quedaba
+ * esperando para siempre. Lo usan la inspección (al escribir la guía), PreProceso y el vigilante (al leerla).
+ */
+export async function sonTomosDeObra(dir) {
+    let entradas;
+    try { entradas = await fs.readdir(dir, { withFileTypes: true }); } catch { return false; }
+    const docs = entradas.filter((e) => e.isFile() && !ignorar(e.name) && esDoc(e.name)).map((e) => e.name);
+    if (docs.length < 2) return false;
+    const numeros = docs.map((n) => parsearVolumen(n)?.numero);
+    if (numeros.some((x) => !x)) return false;              // alguno sin número de tomo: no se puede afirmar
+    return new Set(numeros).size === numeros.length;          // dos «Volume 1» serían versiones, no tomos
 }
 
 /**

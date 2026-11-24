@@ -34,7 +34,7 @@ import path from 'node:path';
 import { leerGuia, escribirGuia, guiaEsSignificativa, NOMBRE_GUIA } from './guia-ingesta.js';
 import { tituloCabecera, periodoDeTexto, esTituloGenerico, normTituloPublicacion } from './revistas.js';
 import { examinarCatalogable, escribirAvisoNoCatalogable } from './no-catalogable.js';
-import { pareceLibroPorCapitulos } from './libro-desglosado.js';
+import { pareceLibroPorCapitulos, sonTomosDeObra } from './libro-desglosado.js';
 import { esLibroHtml } from './libro-html.js';
 
 export const UMBRAL_CONFIANZA = 0.6;
@@ -296,6 +296,10 @@ async function corregirConFicheros(abs, guia, esHoja) {
         }
         const docs = (await fs.readdir(abs).catch(() => [])).filter((n) => RE_PRINCIPAL.test(n));
         if (docs.length <= 1) return { guia: null, nota: 'leída como obra, pero solo tiene un documento' };
+    }
+    // «Libro desglosado» cuyas partes son TOMOS numerados (Courant, Volume 1 y 2): es una obra, no un libro a coser.
+    if (accion === 'desglose' && await sonTomosDeObra(abs)) {
+        return { guia: { accion: 'obra', perfil: { origen: ORIGEN } }, nota: 'leída como libro desglosado, pero sus documentos son tomos: obra multivolumen' };
     }
     if (accion === 'libro-material') {
         const raiz = await fs.readdir(abs, { withFileTypes: true }).catch(() => []);

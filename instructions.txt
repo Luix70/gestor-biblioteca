@@ -2672,6 +2672,13 @@ de ficheros clasificado por CDU.
       Mejora el mismo dia: se miden primero las subcarpetas MAS RECIENTES (las de arriba) y varias a la vez, la
       pagina se refresca cada 6 s, y mientras falta el tamaño la columna Ficheros ya dice cuantos elementos hay
       en la carpeta («3 elem. …») o «vacía» en rojo: se sabe al momento si merece la pena mirarla.
+    · LOS TOMOS DE UNA OBRA YA NO SE INTENTAN «COSER» (24-nov): la IA leyo «Courant R» (Differential and Integral
+      Calculus, Volume 1 y Volume 2, dos .djvu) como un libro partido en capitulos; PreProceso intentaba unirlos en un
+      solo PDF (imposible con DjVu, y ademas no debia: cada tomo es un libro entero) y la carpeta esperaba para
+      siempre. Ahora, si todos los documentos llevan numero de tomo distinto («Volume 1/2», «Vol.», «Tomo III»,
+      «Band 2»), se trata como OBRA multivolumen: un documento por tomo. Lo corrigen la inspeccion con IA al escribir
+      la guia, PreProceso y el Vigilante al leerla (solo guias automaticas; una tuya manda). Courant pasara al Inbox
+      en la siguiente vuelta de PreProceso tras desplegar.
     · EL INBOX YA NO SE QUEDA PARADO CON LIBROS DE LAMINAS DENTRO DE CARPETAS (23-nov): tras pasar «_ARTE» por
       PreProceso quedaron 4.372 imagenes en el Inbox que el Vigilante no tocaba ni avisaba (solo reintentaba
       «Michael Whelan» en cada arranque). Tres causas, arregladas:

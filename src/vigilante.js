@@ -29,7 +29,7 @@ import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, pe
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
 import { tituloDeNombre } from './utils/afinar-guias.js';
 import { AVISO_NO_CATALOGABLE, examinarCatalogable, escribirAvisoNoCatalogable } from './utils/no-catalogable.js';
-import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose } from './utils/libro-desglosado.js';
+import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose, sonTomosDeObra } from './utils/libro-desglosado.js';
 import { partesContenidasEnLibro } from './utils/partes-contenidas.js';
 import { convertirAPdf, hayLibreOffice, EXT_CONVERTIBLES } from './utils/convertir-a-pdf.js'; // libro + su desglose
 import { unirPdfsReparando, paginasPdf } from './utils/qpdf.js'; // cose los capítulos de un desglose puro en un solo PDF
@@ -1074,6 +1074,13 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                 && await pareceLibroPorCapitulos(ruta, '', 0)) {
                 console.log(`  📑 ${e.name}: guía «obra» del agente, pero sus documentos son capítulos → libro desglosado.`);
                 guiaCarpeta = { ...guiaCarpeta, accion: 'desglose' };
+            }
+            // Y al revés: una guía «desglose» automática sobre TOMOS numerados es una obra (24-nov, «Courant R»:
+            // Volume 1 y Volume 2 en .djvu, imposibles de coser y que tampoco debían coserse).
+            if (guiaCarpeta?.accion === 'desglose' && ['agente', 'preproceso'].includes(guiaCarpeta.perfil?.origen)
+                && await sonTomosDeObra(ruta)) {
+                console.log(`  📚 ${e.name}: guía «desglose» automática, pero sus documentos son tomos → obra multivolumen.`);
+                guiaCarpeta = { ...guiaCarpeta, accion: 'obra' };
             }
             if (guiaCarpeta?.accion === 'omitir') {
                 if (!omitidasGuia.has(ruta)) {
