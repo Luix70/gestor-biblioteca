@@ -2681,6 +2681,14 @@ de ficheros clasificado por CDU.
         sudo docker exec -t gestor-biblioteca node scripts/apartar-portadas-sin-libro.js             (en seco)
         sudo docker exec -t gestor-biblioteca node scripts/apartar-portadas-sin-libro.js --ejecutar
       (borra las fichas falsas y aparta sus portadas; antes, copia de la base).
+    · EL ISBN DEL NOMBRE MANDA EN LOS PDF ESCANEADOS (26-nov): si el nombre del fichero lleva un ISBN
+      («9780801469114.Cornell.On_the_Republic….pdf»), la vision ya no lo sustituye por el de otra edicion o por el
+      de otro libro encontrado por titulo. Si lo que lee la vision es uno de los ISBN del nombre (nombres con
+      varios), vale ese. Si el titulo leido no casa con el del nombre, se usa el del nombre y la ficha queda para
+      revisar. Las 142 fichas que ya entraron asi se reunen en una seleccion con
+        sudo docker exec -t gestor-biblioteca node scripts/detectar-isbn-nombre-escaneados.js
+      y se arreglan desde el panel: Selecciones → «ISBN del nombre ≠ ficha (escaneados)» → ⚙️ Acciones →
+      «🔎 Extraer ISBN» marcando «forzar».
     · SEGUNDA BASE GRATUITA PARA CACHES Y ARCHIVOS (26-nov): cada proyecto Atlas admite un cluster gratuito de
       512 MB. Las descripciones de CDU/Dewey/LCC, las tablas oficiales, las equivalencias aprendidas, los archivos
       de autores/editoriales/colecciones retirados y el registro de actividad (~100 MB) pueden vivir en un segundo

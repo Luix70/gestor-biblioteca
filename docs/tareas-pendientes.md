@@ -30,6 +30,14 @@ densidad JPG absurda — «1 ppp» → «página descomunal» — ignorada en `e
       «Active Directory…» y «Table of Laplace Transforms», que no son de este caso) y `PreProceso/_Portadas sin libro/`
       con las portadas + .opf
 
+### 0.515 PDF escaneados con un ISBN que no es el de su nombre de fichero (26-nov) — en el NAS + panel
+La visión pisaba el ISBN escrito en el nombre (ingesta arreglada: `utils/isbn-nombre.js` + `orquestador·imponerIsbnDelNombre`).
+- [ ] Desplegar
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/detectar-isbn-nombre-escaneados.js` — medido desde el PC:
+      7.480 escaneados, 606 con ISBN en el nombre, **142** con otro ISBN en la ficha → crea la selección
+- [ ] Panel: Selecciones → «ISBN del nombre ≠ ficha (escaneados)» → ⚙️ Acciones → «🔎 Extraer ISBN» con «forzar»
+- [ ] Repetir el detector: debería quedar en 0 (o solo los que la autoridad rechaza; míralos uno a uno)
+
 ### 0.53 Adelgazar la base: Atlas cerca del límite de 512 MB (26-nov) — **HECHO 26-nov** (verificado: 270 MB datos + 38 MB índices = 308 MB)
 - [x] Desplegar (la ingesta deja de guardar las alertas de traza; el Conformador usa la firma corta)
 - [x] Copia de la base (`node scripts/copia-base.js` o `D:\Bibliobak\CopiaBase.ps1`, que ya copia también la auxiliar)

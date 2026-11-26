@@ -29,8 +29,40 @@ import { leerCodigoBarrasPorVision, leerIdentificadorDeImagenes } from './utils/
 import { paginasMuestraDjvu } from './utils/djvu.js';
 import { clasificarPorNombre } from './utils/revista-por-nombre.js';
 import { isbnDeOtroLibro } from './utils/isbn-ajeno.js';
+import { mismoTituloLibro } from './utils/titulo-libro.js';
+import { isbnDelNombreFichero, isbnEstaEnNombre, tituloDeNombreConIsbn } from './utils/isbn-nombre.js';
 
-const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
+/**
+ * PDF escaneado identificado por visión/OCR cuando el NOMBRE trae un ISBN: el ISBN del fichero manda (es su
+ * registro; la visión solo vio una imagen). Si lo visto lleva otro título que no casa con el del nombre, se toma el
+ * del nombre (va emparejado con ese ISBN) y se pide revisión; lo visto queda en una alerta. Muta `datos`.
+ */
+async function imponerIsbnDelNombre(datos, isbnNombre, nombre, visto) {
+    // Nombres con VARIOS ISBN («0143113453_0749386061_…_0140092501.pdf»): si lo que leyó la visión es uno de ellos,
+    // la lectura decide cuál es el de este ejemplar y no hay nada que imponer.
+    const vistoIsbn = visto?.isbn ? validarISBN(visto.isbn) : null;
+    if (vistoIsbn && isbnEstaEnNombre(nombre, vistoIsbn)) return;
+    const variantes = variantesISBN(isbnNombre);
+    const vioOtro = vistoIsbn && !variantes.includes(vistoIsbn);
+    datos.isbn = isbnNombre;
+    datos.isbn_propio = isbnNombre;
+    datos.isbn_candidatos = [...new Set([...variantes, ...(datos.isbn_candidatos || [])])];
+    const alertas = datos.alertas_agente || (datos.alertas_agente = []);
+    if (vioOtro) alertas.push(`ISBN ${isbnNombre} del NOMBRE del fichero: manda sobre el ${visto.isbn} que leyó la visión.`);
+
+    const delNombre = tituloDeNombreConIsbn(nombre);
+    if (!datos.titulo || !delNombre || mismoTituloLibro(datos.titulo, delNombre)) {
+        if (!datos.titulo && delNombre) datos.titulo = delNombre;
+        return;
+    }
+    // ¿El título visto es el de ESE ISBN (Fichero local)? Entonces el nombre solo lo abrevia: se queda lo visto.
+    if (await corroborarISBNporTitulo({ candidatos: [isbnNombre], titulo: datos.titulo }).catch(() => null)) return;
+    alertas.push(`La visión leyó «${datos.titulo}», que no casa con el nombre del fichero («${delNombre}», ISBN ${isbnNombre}): se toma el del nombre; revisar.`);
+    datos.titulo = delNombre;
+    datos.revision_requerida = true;
+}
+
+const EXT_IMAGEN =['.jpg', '.jpeg', '.png', '.webp', '.heic'];
 
 // Portada: ancho mínimo legible (igual que resolverPortada) y nº de caracteres a partir del cual
 // se considera que la página 1 de un PDF es texto (no cubierta).
@@ -574,7 +606,12 @@ export async function procesarRecurso(entrada) {
                 activos.push({ tipo: r.etiqueta === 'portada' ? 'portada' : 'otra', origen: `pdf:${r.etiqueta}`, base64: r.buffer.toString('base64') });
             }
             const tecnicos = { paginas: datosBase.paginas, isbns_rol: datosBase.isbns_rol, cip: datosBase.cip };
-            const isbnForm = contexto.isbn ? validarISBN(contexto.isbn) : null;
+            // El ISBN que trae el NOMBRE del fichero («9780321179142 - Sanders, Bill - Reality….pdf») es del
+            // fichero, no una pista: la visión no lo puede pisar (abajo `datosBase` se sustituye por lo que vio).
+            // Antes solo contaba el de contexto.isbn: el 26-nov un escaneo con ese nombre salió «Learning Flash
+            // Media Server 3» (título leído por visión → ISBN 0596515901 por búsqueda de título).
+            const isbnNombre = isbnDelNombreFichero(nombreFich, datosBase.isbn_propio);
+            const isbnForm = (contexto.isbn ? validarISBN(contexto.isbn) : null) || isbnNombre;
             let local = null;
             if (isbnForm) local = await buscarEnFicheroLocal({ isbns: [isbnForm] }).catch(() => null);
             if (isbnForm && local && local.titulo) {
@@ -594,11 +631,14 @@ export async function procesarRecurso(entrada) {
                     tipo_recurso = visto.tipo_recurso || tipo_recurso;
                     datosBase.alertas_agente = ['PDF con texto no fiable: identificado por VISIÓN sobre las páginas; se CONSERVA el PDF (digital) + páginas frontales como vista previa.'];
                     if (visto.isbn) datosBase.alertas_agente.push(`ISBN ${visto.isbn} leído de las páginas por VISIÓN IA (servidor); no se usó lector de código de barras dedicado.`);
+                    if (isbnNombre) await imponerIsbnDelNombre(datosBase, isbnNombre, nombreFich, visto);
+                    isbnDelArchivo = isbnDelArchivo || !!isbnNombre;
                 } else {
                     // Reserva: OCR clásico sobre los renders.
                     const v = await ocrDesdeRenders(renders);
                     if (v && (v.titulo || v.isbn || v.issn)) { datosBase = fusionarOcr(datosBase, v); isbnDelArchivo = !!v.isbn; if (v.tipo_recurso) tipo_recurso = v.tipo_recurso; }
                     datosBase.alertas_agente = ['PDF escaneado, OCR de reserva (visión no concluyente): páginas como sidecars para revisión.'];
+                    if (isbnNombre) { await imponerIsbnDelNombre(datosBase, isbnNombre, nombreFich, v); isbnDelArchivo = true; }
                 }
                 if (tecnicos.isbns_rol) datosBase.isbns_rol = tecnicos.isbns_rol;
                 if (tecnicos.cip) datosBase.cip = tecnicos.cip;
