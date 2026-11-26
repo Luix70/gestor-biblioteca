@@ -2691,8 +2691,10 @@ de ficheros clasificado por CDU.
       «🔎 Extraer ISBN» marcando «forzar».
     · LA IA DE PAGO OBEDECE SIEMPRE AL PANEL (26-nov): dos llamadas (la lectura de la portada al buscar metadatos y
       la pregunta del ISBN de una edicion) iban directas a Gemini y se saltaban el interruptor «Gemini (pago)» de
-      Mantenimiento. Ahora pasan por la misma rotacion que el resto (gratis primero). Informe de lo gastado en IA de
-      pago, por dia, por origen y por clave (registro desde el 27-oct):
+      Mantenimiento. Ahora pasan por la misma rotacion que el resto (gratis primero). Desde este despliegue, CADA
+      llamada de pago queda anotada (hora, origen, clave, modelo, tokens, coste, tarea) en logs/ia-pago-detalle.jsonl.
+      Informe de lo gastado en IA de pago: por dia, por origen y por clave (desde el 27-oct), llamada a llamada (desde
+      este despliegue) y los intentos que recoge app.log:
         sudo docker exec -t gestor-biblioteca node scripts/informe-ia-pago.js [--desde AAAA-MM-DD] [--informe logs/ia-pago.txt]
     · SEGUNDA BASE GRATUITA PARA CACHES Y ARCHIVOS (26-nov): cada proyecto Atlas admite un cluster gratuito de
       512 MB. Las descripciones de CDU/Dewey/LCC, las tablas oficiales, las equivalencias aprendidas, los archivos

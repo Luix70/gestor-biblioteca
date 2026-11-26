@@ -15,7 +15,7 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { conectarDB } from '../database.js';
 import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
-import { anotarUsoIA } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
+import { anotarUsoIA, tareaDePrompt } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
 
 // Cooldown por-clave tras un 429, PROPORCIONAL a la cuota: corto para límite por-minuto (RPM/TPM, se recupera
 // en ~1 min), largo solo para la cuota diaria (RPD). Antes era fijo 5 min → tras un pico las 3 gratis quedaban
@@ -216,7 +216,8 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
         const res = await model.generateContent(parts);
         // Tokens REALES de la llamada, para el contador de uso (utils/uso-ia.js): el de razonamiento va aparte.
         const u = res.response.usageMetadata || {};
-        anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
+        anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, modelo: c.modelo, tarea: tareaDePrompt(prompt),
+            uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
         return res.response.text();
     }
     // DOS PASOS (Qwen-VL-OCR + texto gratis): 1) el modelo OCR transcribe las páginas; 2) la instrucción original se
@@ -250,7 +251,8 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
         { headers, timeout: c.prov.timeoutMs || TIMEOUT_MS, maxBodyLength: Infinity });
     // Tokens para el contador de uso (en estos proveedores, los de razonamiento ya van dentro de completion_tokens).
     const u = res.data?.usage || {};
-    anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, uso: { entrada: u.prompt_tokens, salida: u.completion_tokens } });
+    anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, modelo: c.modelo, tarea: tareaDePrompt(prompt),
+        uso: { entrada: u.prompt_tokens, salida: u.completion_tokens } });
     return res.data?.choices?.[0]?.message?.content || '';
 }
 

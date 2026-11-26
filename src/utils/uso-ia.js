@@ -53,9 +53,10 @@ let temporizador = null;
  * Anota UNA llamada que respondió. `uso` = { entrada, salida, razon } en tokens (lo que devuelva el proveedor; si no
  * dice nada, se cuenta la llamada con 0 tokens). Nunca lanza.
  */
-export function anotarUsoIA({ proveedor, tier, uso = {}, precio = null }) {
+export function anotarUsoIA({ proveedor, tier, uso = {}, precio = null, modelo = null, tarea = null }) {
   try {
     const origen = origenActual();
+    if (tier === 'paid') anotarDetallePago({ origen, proveedor, modelo, tarea, uso, precio });
     const k = `${origen}|${proveedor}`;
     const a = pendiente.get(k) || { origen, proveedor, tier, llamadas: 0, entrada: 0, salida: 0, razon: 0 };
     // Tarifa PROPIA del proveedor ([entrada, salida] en $/millón; 18-nov: DeepSeek, Qwen…). Sin ella, la de config
@@ -71,6 +72,30 @@ export function anotarUsoIA({ proveedor, tier, uso = {}, precio = null }) {
       temporizador.unref();
     }
   } catch { /* contar nunca rompe una llamada */ }
+}
+
+// ─── Detalle llamada a llamada de la IA de PAGO (26-nov) ───────────────────────────────────────────────────
+// `uso_ia` solo guarda totales por día, y el log de la app se rota y no lleva tokens: no había forma de saber QUÉ
+// llamadas de pago se hicieron. Cada una deja ahora una línea en logs/ia-pago-detalle.jsonl (por máquina, no en Atlas:
+// la base está cerca de su cuota). ~300 bytes por llamada; la lee scripts/informe-ia-pago.js.
+export const DETALLE_PAGO = path.join(RAIZ, 'logs', 'ia-pago-detalle.jsonl');
+
+/** Primera línea útil de la instrucción, para saber qué tarea era (sin volcar el prompt entero). */
+export function tareaDePrompt(prompt) {
+  const texto = Array.isArray(prompt) ? prompt.find((p) => typeof p === 'string') : prompt;
+  return String(texto || '').replace(/\s+/g, ' ').trim().slice(0, 120) || null;
+}
+
+function anotarDetallePago({ origen, proveedor, modelo, tarea, uso, precio }) {
+  try {
+    const t = { entrada: Number(uso.entrada) || 0, salida: Number(uso.salida) || 0, razon: Number(uso.razon) || 0 };
+    const linea = {
+      ts: new Date().toISOString(), origen, proveedor, modelo, ...t,
+      eur: Number(costeEur({ ...t, precio }).toFixed(6)), tarea,
+    };
+    fs.mkdirSync(path.dirname(DETALLE_PAGO), { recursive: true });
+    fs.appendFileSync(DETALLE_PAGO, JSON.stringify(linea) + '\n');
+  } catch { /* anotar nunca rompe una llamada */ }
 }
 
 /** Coste en euros de unos tokens de la IA de pago (los de razonamiento, como salida). */

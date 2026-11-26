@@ -2,8 +2,12 @@
  * INFORME DE LA IA DE PAGO — cuántas llamadas se han hecho a los proveedores de PAGO (Gemini de pago y cualquier
  * otro con tier 'paid'), por día, por origen (quién la pidió) y por clave, con tokens y coste estimado.
  *
- * Fuente: la colección `uso_ia` (utils/uso-ia.js), un documento por día desde que existe el contador (27-oct-2026).
- * Antes de esa fecha no hay registro por llamada (el log de la app se rota). El coste es una ESTIMACIÓN con la tarifa
+ * Fuentes:
+ *   · `uso_ia` (utils/uso-ia.js): totales por día, origen y clave desde que existe el contador (27-oct-2026).
+ *   · logs/ia-pago-detalle.jsonl: CADA llamada de pago (hora, origen, clave, modelo, tokens, coste, tarea), desde el
+ *     26-nov; por máquina (el NAS y el PC tienen el suyo).
+ *   · logs/app.log: cuándo se intentó la de pago y si respondió (sin tokens; solo las últimas horas, se rota).
+ * Antes del 27-oct no hay registro. El coste es una ESTIMACIÓN con la tarifa
  * pública (config IA_PRECIO_*, o la propia del proveedor); el cargo exacto lo da AI Studio.
  *
  * Proveedores que verás:
@@ -19,8 +23,12 @@ import 'dotenv/config';
 import '../src/utils/log-script.js';   // marca de tiempo en pantalla + registro en logs/scripts (estándar)
 import '../src/config.js';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { conectarDB } from '../src/database.js';
-import { costeEur } from '../src/utils/uso-ia.js';
+import { costeEur, DETALLE_PAGO } from '../src/utils/uso-ia.js';
+
+const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 import { progreso } from '../src/utils/progreso-cli.js';
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : null; };
@@ -86,6 +94,77 @@ const tabla = (titulo, mapa) => {
 tabla('POR ORIGEN (quién la pidió)', porOrigen);
 tabla('POR CLAVE / VÍA', porClave);
 L.push('GEMINI_API_KEY_PAID = rotación de visión/texto (obedece el panel) · gemini-paid = vía directa conGemini (no lo obedecía hasta f57399d).');
+L.push('');
+
+// ── Detalle llamada a llamada (logs/ia-pago-detalle.jsonl, desde el 26-nov) ──
+let detalle = [];
+try {
+  detalle = fs.readFileSync(DETALLE_PAGO, 'utf8').split('\n').filter(Boolean)
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter((x) => x && x.ts.slice(0, 10) >= DESDE);
+} catch { /* aún no hay detalle en esta máquina */ }
+L.push(`DETALLE LLAMADA A LLAMADA (${DETALLE_PAGO.replace(/\\/g, '/').split('/').slice(-2).join('/')}) — ${detalle.length} llamadas`);
+if (!detalle.length) {
+  L.push('   (sin registro todavía: se anota cada llamada de pago desde el despliegue del 26-nov, en la máquina que la hace)');
+} else {
+  // Resumen por tarea (la primera línea de la instrucción dice qué se pedía).
+  const porTarea = new Map();
+  for (const x of detalle) {
+    const k = `${x.origen} · ${String(x.tarea || '?').slice(0, 70)}`;
+    if (!porTarea.has(k)) porTarea.set(k, nuevo());
+    sumar(porTarea.get(k), { llamadas: 1, entrada: x.entrada, salida: x.salida, razon: x.razon }, x.eur || 0);
+  }
+  tabla('POR TAREA (origen · instrucción)', new Map([...porTarea].map(([k, v]) => [k, v])));
+  const A = [19, 22, 22, 9, 8, 9, 8];
+  L.push(fila(['hora (UTC)', 'origen', 'clave', 'entrada', 'salida', 'razon.', 'coste'], A) + '  tarea');
+  for (const x of detalle) {
+    L.push(fila([x.ts.slice(0, 19).replace('T', ' '), String(x.origen).slice(0, 22), String(x.proveedor).slice(0, 22),
+      n(x.entrada), n(x.salida), n(x.razon), (x.eur || 0).toFixed(4)], A) + '  ' + String(x.tarea || '').slice(0, 80));
+  }
+}
+L.push('');
+
+// ── Lo que dice app.log (solo las últimas horas: se rota) ──
+// Éxitos «✓ Visión[clave] (paid · modelo) respondió en N ms» y fallos «↻ Visión[clave] falló (motivo)», más los de la
+// vía directa «↻ Gemini[paid] falló». No lleva tokens: sirve para ver CUÁNDO se intentó la de pago y si respondió.
+const LOG = path.join(RAIZ, 'logs', 'app.log');
+const esPago = (id) => /PAID|DEEPSEEK|DASHSCOPE|^paid$/i.test(id);
+try {
+  const lineas = fs.readFileSync(LOG, 'utf8').split('\n');
+  const desdeLog = (lineas.find((l) => /^\[\d{4}-/.test(l)) || '').slice(1, 20);
+  const porHora = new Map();   // «AAAA-MM-DD HH · clave» → { ok, fallos, motivos }
+  for (const l of lineas) {
+    // La vía directa (proveedor-metadatos·analizarImagenConIA, hasta f57399d), cuando fallaba con la ÚLTIMA clave, solo
+    // dejaba «❌ [Error Visión IA]: … 402 Payment Required …»: se cuenta como fallo de gemini-paid.
+    const directa = l.match(/^\[(\d{4}-\d\d-\d\d \d\d)[^\]]*\]\s+❌ \[Error Visión IA\]:.*?\b(402|429)\b/u);
+    if (directa) {
+      const k = `${directa[1]}h · gemini-paid (vía directa)`;
+      const a = porHora.get(k) || { ok: 0, fallos: 0, motivos: new Map() };
+      a.fallos++;
+      a.motivos.set(directa[2] === '402' ? '402 sin saldo' : '429 cuota', (a.motivos.get(directa[2] === '402' ? '402 sin saldo' : '429 cuota') || 0) + 1);
+      porHora.set(k, a);
+      continue;
+    }
+    const m = l.match(/^\[(\d{4}-\d\d-\d\d \d\d)[^\]]*\]\s+([✓↻])\s+(?:Visión|IA-texto|Gemini)\[([^\]]+)\]\s*(.*)$/u);
+    if (!m || !esPago(m[3])) continue;
+    if (m[2] === '✓' && !/\bpaid\b/.test(m[4])) continue;
+    const k = `${m[1]}h · ${m[3]}`;
+    const a = porHora.get(k) || { ok: 0, fallos: 0, motivos: new Map() };
+    if (m[2] === '✓') a.ok++;
+    else {
+      a.fallos++;
+      const motivo = (m[4].match(/falló \((.{0,40})/) || [])[1] || '?';
+      a.motivos.set(motivo, (a.motivos.get(motivo) || 0) + 1);
+    }
+    porHora.set(k, a);
+  }
+  L.push(`APP.LOG (desde ${desdeLog || '?'}, hora del contenedor) — intentos de IA de pago por hora`);
+  if (!porHora.size) L.push('   (ninguno)');
+  for (const [k, a] of porHora) {
+    const motivos = [...a.motivos].map(([mo, c]) => `${c}× ${mo}`).join('; ');
+    L.push(`   ${k.padEnd(40)} respondieron ${String(a.ok).padStart(4)} · fallaron ${String(a.fallos).padStart(4)}${motivos ? '  (' + motivos + ')' : ''}`);
+  }
+} catch { L.push('APP.LOG: no se pudo leer.'); }
 
 const texto = L.join('\n');
 console.log('\n' + texto + '\n');

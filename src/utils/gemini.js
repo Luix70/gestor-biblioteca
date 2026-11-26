@@ -11,7 +11,7 @@
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
-import { anotarUsoIA } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
+import { anotarUsoIA, tareaDePrompt } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
 import { geminiPermitida } from './vision.js';   // interruptores del panel (vision.js no importa este módulo: sin ciclo)
 
 // Cooldown de una clave GRATIS tras un 429, PROPORCIONAL a la cuota: CORTO si es límite por-minuto (RPM/TPM,
@@ -84,6 +84,7 @@ export async function conGemini(opcionesModelo, fn) {
                 const r = await generar(...args);
                 const u = r?.response?.usageMetadata || {};
                 anotarUsoIA({ proveedor: etiqueta === 'free' ? 'gemini-free' : 'gemini-paid', tier: etiqueta === 'free' ? 'free' : 'paid',
+                    modelo: opcionesModelo?.model || null, tarea: tareaDePrompt(args[0]),
                     uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
                 return r;
             };
