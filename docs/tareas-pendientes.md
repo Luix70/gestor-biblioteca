@@ -17,6 +17,15 @@
 
 ## 1. Scripts por ejecutar
 
+### 0.53 Adelgazar la base: Atlas cerca del límite de 512 MB (26-nov) — en el NAS (solo BD, no mueve carpetas)
+- [ ] Desplegar (la ingesta deja de guardar las alertas de traza; el Conformador usa la firma corta)
+- [ ] Copia de la base (`node scripts/copia-base.js` o `D:BibliobakCopiaBase.ps1`)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/adelgazar-bd.js` — en seco medido desde el PC: 77.345 fichas,
+      76.008 firmas larga → corta, 140.502 alertas de traza/repetidas, **33,5 MB** menos (442 → ~408 MB)
+- [ ] `… --ejecutar` y comprobar el tamaño en el Atlas (Database → Biblioteca → Data size + índices)
+- [ ] Si hace falta más margen: segundo proyecto Atlas M0 para cachés y archivo (descripciones CDU/Dewey/LCC 76 MB,
+      `*_retiradas` 9 MB, `equivalencias_cdu`, `udc_summary`, `registro_actividad`) — por hacer en el código
+
 ### 0.54 PDF cortos catalogados como libro o revista (23-nov) — en el NAS (mueve carpetas)
 - [ ] Desplegar (la ingesta deja de producirlos)
 - [ ] Copia de la base

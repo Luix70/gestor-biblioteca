@@ -2672,6 +2672,19 @@ de ficheros clasificado por CDU.
       Mejora el mismo dia: se miden primero las subcarpetas MAS RECIENTES (las de arriba) y varias a la vez, la
       pagina se refresca cada 6 s, y mientras falta el tamaño la columna Ficheros ya dice cuantos elementos hay
       en la carpeta («3 elem. …») o «vacía» en rojo: se sabe al momento si merece la pena mirarla.
+    · LA BASE ADELGAZA (26-nov): el Atlas gratuito tiene 512 MB y la base llego a 461 MB (alerta «Logical Size has
+      gone above 440 MB»; el Atlas cuenta los datos SIN comprimir, por eso el «Storage size» de 220 MB no sirve de
+      referencia). Dos recortes que no pierden nada:
+        1) la «firma» del Conformador en cada ficha era la lista entera de sus tareas (unos 355 caracteres que
+           repetian lo que ya dice el campo «mantenimiento»); ahora es un resumen de 15. ~27 MB.
+        2) las alertas de la ficha ya no guardan las notas de traza: «Nuevo autor/editorial/coleccion… registrado»,
+           «OpenLibrary online omitida…», «Fecha del nombre ignorada…», ni las repetidas. Se conserva todo el
+           rastro de cambios, avisos y procedencia de los datos. ~7 MB.
+      La ingesta ya lo hace asi; para lo ya catalogado (en el NAS, tras una copia):
+        sudo docker exec -t gestor-biblioteca node scripts/adelgazar-bd.js             (en seco: cuanto ahorra)
+        sudo docker exec -t gestor-biblioteca node scripts/adelgazar-bd.js --ejecutar
+      Medido en seco el 26-nov: 77.345 fichas, 33,5 MB menos (de 442 a ~408 MB). Tras desplegar, el Conformador
+      sigue considerando al dia las fichas con la firma antigua (no vuelve a revisar 76.000 fichas).
     · LOS TOMOS DE UNA OBRA YA NO SE INTENTAN «COSER» (24-nov): la IA leyo «Courant R» (Differential and Integral
       Calculus, Volume 1 y Volume 2, dos .djvu) como un libro partido en capitulos; PreProceso intentaba unirlos en un
       solo PDF (imposible con DjVu, y ademas no debia: cada tomo es un libro entero) y la carpeta esperaba para

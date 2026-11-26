@@ -14,6 +14,7 @@ import { limpiarNombreEditorial } from './utils/editoriales-falsas.js';
 import { modernizarCDU } from './utils/cdu-moderna.js';
 import { cduReligionModerna } from './utils/cdu-religion.js';
 import { resolverEditorial as resolverEditorialComun } from './utils/resolver-editorial.js';
+import { alertasDepuradas } from './utils/alertas-informativas.js';
 
 const vacio = (v) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
@@ -73,7 +74,8 @@ function calcularActualizacion(existente, nuevo) {
     if (imgs.length !== (existente.imagenes || []).length) set.imagenes = imgs;
 
     const alertas = union(existente.alertas_agente, nuevo.alertas_agente);
-    set.alertas_agente = [...alertas, 'Registro actualizado con nueva información.'];
+    // Sin notas de traza ni repeticiones (utils/alertas-informativas: el Atlas gratuito tiene 512 MB).
+    set.alertas_agente = alertasDepuradas([...alertas, 'Registro actualizado con nueva información.']);
 
     // ISBNs alternativos (otras ediciones): unir por isbn sin perder los ya registrados.
     const altsEx = Array.isArray(existente.isbns_alternativos) ? existente.isbns_alternativos : [];
@@ -575,6 +577,11 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
         if (idPreservado && ObjectId.isValid(idPreservado)) docFinal._id = new ObjectId(idPreservado);
 
         docFinal.fecha_ingreso = new Date();
+        // Las notas de traza («Nuevo autor registrado…») se usan durante el catálogo pero no se guardan.
+        if (Array.isArray(docFinal.alertas_agente)) {
+            docFinal.alertas_agente = alertasDepuradas(docFinal.alertas_agente);
+            if (!docFinal.alertas_agente.length) delete docFinal.alertas_agente;   // nunca persistir vacíos
+        }
         const resultado = await coleccionBiblioteca.insertOne(docFinal);
         await registrarTomo(resultado.insertedId);
         return { ...docFinal, _id: resultado.insertedId, operacion: 'insercion' };
@@ -614,6 +621,7 @@ export async function procesarCatalogo(documentoEnriquecido, opciones = {}) {
                 docFinal.revision_requerida = true;
                 if (!docFinal.fecha_ingreso) docFinal.fecha_ingreso = new Date();
                 try {
+                    docFinal.alertas_agente = alertasDepuradas(docFinal.alertas_agente);
                     const reins = await coleccionBiblioteca.insertOne(docFinal);
                     await registrarTomo(reins.insertedId);
                     console.warn(`   ↔ ${JSON.stringify(clave)} en conflicto con OTRO fichero → insertado como documento DISTINTO sin ese identificador (${reins.insertedId}).`);

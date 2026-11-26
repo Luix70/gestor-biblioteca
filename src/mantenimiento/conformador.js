@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { conectarDB } from '../database.js';
 import { TAREAS } from './tareas.js';
 import { carpetaDeDoc, carpetaExiste, aplicarCambio } from './util-mantenimiento.js';
@@ -7,7 +8,16 @@ import { conOrigenIA } from '../utils/uso-ia.js';
 // Firma del conjunto de tareas+versiones. Un documento se considera "conforme" cuando su
 // mantenimiento_firma coincide con esta. Añadir una tarea o subir una 'version' cambia la
 // firma → todos los documentos vuelven a entrar en la cola de mantenimiento.
-const FIRMA = TAREAS.map(t => `${t.id}:${t.version}`).join('|');
+//
+// Se guarda un RESUMEN corto, no la lista entera: la lista (≈355 caracteres) repetía en cada ficha lo que ya
+// dice `mantenimiento` campo a campo, y solo se usa para comparar por igualdad. Eran ~27 MB de los 512 MB
+// del Atlas gratuito (26-nov). La firma larga de la versión anterior se sigue aceptando como «conforme»
+// (FIRMA_LARGA en las consultas) para no revisitar 76.000 fichas tras el despliegue; scripts/adelgazar-bd.js
+// la sustituye por la corta. Las marcas especiales ('pendiente-…') no cambian.
+const FIRMA_LARGA = TAREAS.map(t => `${t.id}:${t.version}`).join('|');
+const FIRMA = 'v2:' + createHash('sha1').update(FIRMA_LARGA).digest('hex').slice(0, 12);
+const NO_CONFORME = { mantenimiento_firma: { $nin: [FIRMA, FIRMA_LARGA] } };
+export { FIRMA as FIRMA_MANTENIMIENTO, FIRMA_LARGA as FIRMA_MANTENIMIENTO_LARGA };
 const LOTE = Number(process.env.MANTENIMIENTO_LOTE || 25);     // documentos por pasada
 const PAUSA_MS = Number(process.env.MANTENIMIENTO_PAUSA_MS || 800); // ritmo entre documentos
 
@@ -32,7 +42,7 @@ async function ejecutarMantenimientoInterno({ debeAbortar = async () => false } 
     const col = db.collection('biblioteca');
 
     // `locked` = fijado por intervención humana → el Conformador NO lo toca (ni lo cuenta como pendiente).
-    const docs = await col.find({ mantenimiento_firma: { $ne: FIRMA }, locked: { $ne: true } }).limit(LOTE).toArray();
+    const docs = await col.find({ ...NO_CONFORME, locked: { $ne: true } }).limit(LOTE).toArray();
     if (!docs.length) return { revisados: 0, cambios: 0, pendientes: 0, abortado: false };
 
     console.log(`🧹 [Mantenimiento] Conformando hasta ${docs.length} documento(s)...`);
@@ -48,7 +58,7 @@ async function ejecutarMantenimientoInterno({ debeAbortar = async () => false } 
         await new Promise(r => setTimeout(r, PAUSA_MS));
     }
 
-    const pendientes = await col.countDocuments({ mantenimiento_firma: { $ne: FIRMA }, locked: { $ne: true } });
+    const pendientes = await col.countDocuments({ ...NO_CONFORME, locked: { $ne: true } });
     console.log(`🧹 [Mantenimiento] Lote: ${revisados} revisados · ${cambios} cambios · ${pendientes} pendientes.`);
     return { revisados, cambios, pendientes, abortado: false };
 }
@@ -116,7 +126,7 @@ export function saludDocumento(doc) {
     return {
         firma_actual: FIRMA,
         firma_doc: doc.mantenimiento_firma || null,
-        conforme: doc.mantenimiento_firma === FIRMA,
+        conforme: doc.mantenimiento_firma === FIRMA || doc.mantenimiento_firma === FIRMA_LARGA,
         locked: !!doc.locked,
         cdu_manual: !!doc.cdu_manual,
         tareas,
