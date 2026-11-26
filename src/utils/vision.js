@@ -387,6 +387,23 @@ export function extraerJSON(txt) {
     return r !== undefined ? r : null;
 }
 
+/**
+ * ¿Puede usarse esta clave de Gemini según los interruptores del panel? Para gemini.js·conGemini, que llama a Gemini
+ * por su cuenta (fuera de la rotación) y NO miraba los Ajustes: con «Gemini (pago)» apagado seguía gastando (26-nov).
+ *   · Una clave que el panel lista → lo que diga su interruptor (si está en varias filas, basta una activa).
+ *   · Una de pago que el panel NO lista (la de legado GEMINI_API_KEY) → solo si hay alguna fila Gemini de pago
+ *     activa: si apagaste la de pago en el panel, no se cuela por otra variable.
+ *   · Una gratis que no lista → sí (es gratis).
+ */
+export async function geminiPermitida(key, tier) {
+    const aj = await ajustes();
+    const gemini = candidatos().filter((c) => c.prov.tipo === 'gemini');
+    const suyas = gemini.filter((c) => c.key === key);
+    if (suyas.length) return suyas.some((c) => activoSegun(aj, c));
+    if (tier === 'paid') return gemini.some((c) => c.tier === 'paid' && activoSegun(aj, c));
+    return true;
+}
+
 // ── Para el panel (sin secretos) ──
 export async function estadoVision() {
     const aj = await ajustes();

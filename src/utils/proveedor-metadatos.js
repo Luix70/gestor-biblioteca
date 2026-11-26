@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { conGemini } from './gemini.js';
+import { conVision, extraerJSON } from './vision.js';   // rotación de proveedores (respeta los Ajustes del panel)
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEnGoogleBooks } from './buscador-google-books.js';
 import { buscarEnDNB } from './buscador-dnb.js';
@@ -109,13 +109,11 @@ Responde ÚNICAMENTE en JSON (null para los campos que no puedas leer):
   "año_edicion": número_entero_o_null
 }`;
 
-        const result = await conGemini({ model: "gemini-2.5-flash" }, (model) => model.generateContent([
-            prompt,
-            { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
-        ]));
-
-        const textoRespuesta = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(textoRespuesta);
+        // Por la ROTACIÓN de visión (gratis primero), que obedece los interruptores del panel. Antes iba directo a
+        // Gemini con conGemini, que no los miraba: con «Gemini (pago)» apagado seguía llamándolo (26-nov, 402 sin
+        // saldo en el log).
+        const texto = await conVision({ prompt, imagenes: [{ base64: base64Image, mimeType: 'image/jpeg' }], json: true });
+        return extraerJSON(texto);
     } catch (e) {
         console.error(`❌ [Error Visión IA]: ${e.message}`);
         return null;

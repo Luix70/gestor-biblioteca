@@ -26,7 +26,7 @@ import { buscarEdicionesEnFichero, buscarTituloEnFichero, buscarEnFicheroLocal }
 import { buscarPorCriterios } from './buscador-bibliografico.js';
 import { buscarEdicionesEnBNE } from './buscador-bne-sru.js';
 import { validarISBN, isbn10a13 } from './identificadores.js';
-import { conGemini } from './gemini.js';
+import { conTexto } from './vision.js';   // rotación de proveedores (respeta los Ajustes del panel)
 import { esEditorialFalsa } from './editoriales-falsas.js';
 
 const RE_DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
@@ -685,10 +685,8 @@ async function preguntarIsbnALaIA(doc) {
 ${ficha}
 
 Responde SOLO con el ISBN-13, sin guiones ni texto. Si no estás seguro de la edición exacta, responde NO_SE.`;
-    const texto = await conGemini({ model: 'gemini-2.5-flash' }, async (model) => {
-        const r = await model.generateContent(prompt);
-        return r.response.text();
-    });
+    // Rotación de TEXTO (gratis primero), que obedece los interruptores del panel; conGemini no los miraba.
+    const texto = await conTexto({ prompt, json: false, sinRazonar: true });
     const limpio = String(texto || '').replace(/[^0-9Xx]/g, '');
     return validarISBN(limpio);
 }

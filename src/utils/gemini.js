@@ -12,6 +12,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
 import { anotarUsoIA } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
+import { geminiPermitida } from './vision.js';   // interruptores del panel (vision.js no importa este módulo: sin ciclo)
 
 // Cooldown de una clave GRATIS tras un 429, PROPORCIONAL a la cuota: CORTO si es límite por-minuto (RPM/TPM,
 // se recupera en ~1 min), LARGO solo si es la cuota DIARIA (RPD, agotada hasta mañana). Antes era fijo 5 min
@@ -65,7 +66,10 @@ function clavesOrdenadas() {
  * @returns {Promise<T>}
  */
 export async function conGemini(opcionesModelo, fn) {
-    const orden = clavesOrdenadas();
+    // Los interruptores del panel (Ajustes de visión) mandan también aquí: con «Gemini (pago)» apagado, su clave no
+    // se usa (26-nov: se seguía pagando por esta vía, que no los miraba).
+    const orden = [];
+    for (const par of clavesOrdenadas()) if (await geminiPermitida(par[1], par[0])) orden.push(par);
     if (!orden.length && !tierPermitido('paid')) throw errorSinIA('Gemini');
     if (!orden.length) throw new Error('No hay claves Gemini configuradas (GEMINI_API_FREE_KEY / GEMINI_API_KEY).');
 
