@@ -23,8 +23,15 @@
 - [ ] `sudo docker exec -t gestor-biblioteca node scripts/adelgazar-bd.js` — en seco medido desde el PC: 77.345 fichas,
       76.008 firmas larga → corta, 140.502 alertas de traza/repetidas, **33,5 MB** menos (442 → ~408 MB)
 - [ ] `… --ejecutar` y comprobar el tamaño en el Atlas (Database → Biblioteca → Data size + índices)
-- [ ] Si hace falta más margen: segundo proyecto Atlas M0 para cachés y archivo (descripciones CDU/Dewey/LCC 76 MB,
-      `*_retiradas` 9 MB, `equivalencias_cdu`, `udc_summary`, `registro_actividad`) — por hacer en el código
+- [ ] **Base auxiliar** (segundo Atlas gratuito, ~100 MB fuera de la principal → ~308 MB):
+  - [ ] En cloud.mongodb.com: «New Project» → crear clúster **M0 Free** (misma región que el actual) → Database Access:
+        un usuario con «Read and write to any database» → Network Access: la IP pública de casa (o 0.0.0.0/0, como
+        el actual) → Connect → Drivers: copiar la cadena `mongodb+srv://…`
+  - [ ] Añadir `MONGO_URI_AUX=<esa cadena>` al `.env` del NAS (`/volume1/docker/GestorBiblioteca/.env`) **y al del PC**
+  - [ ] Copia: `sudo docker exec -t gestor-biblioteca node scripts/copia-base.js`
+  - [ ] `sudo docker exec -t gestor-biblioteca node scripts/mover-a-bd-auxiliar.js` (en seco: medido 100,4 MB, 11 colecciones)
+  - [ ] `… --ejecutar` → `sudo docker restart gestor-biblioteca` → `… --ejecutar` otra vez (lo escrito entre medias)
+  - [ ] Comprobar el panel (ⓘ de una CDU, Mantenimiento) y `… --borrar-origen` (en seco) → `… --borrar-origen --ejecutar`
 
 ### 0.54 PDF cortos catalogados como libro o revista (23-nov) — en el NAS (mueve carpetas)
 - [ ] Desplegar (la ingesta deja de producirlos)

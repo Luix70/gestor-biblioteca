@@ -2672,6 +2672,21 @@ de ficheros clasificado por CDU.
       Mejora el mismo dia: se miden primero las subcarpetas MAS RECIENTES (las de arriba) y varias a la vez, la
       pagina se refresca cada 6 s, y mientras falta el tamaño la columna Ficheros ya dice cuantos elementos hay
       en la carpeta («3 elem. …») o «vacía» en rojo: se sabe al momento si merece la pena mirarla.
+    · SEGUNDA BASE GRATUITA PARA CACHES Y ARCHIVOS (26-nov): cada proyecto Atlas admite un cluster gratuito de
+      512 MB. Las descripciones de CDU/Dewey/LCC, las tablas oficiales, las equivalencias aprendidas, los archivos
+      de autores/editoriales/colecciones retirados y el registro de actividad (~100 MB) pueden vivir en un segundo
+      cluster: basta con poner su cadena de conexion en el .env como MONGO_URI_AUX. La app las busca alli sola; el
+      catalogo (fichas, autores, editoriales, colecciones, obras…) sigue en la base de siempre. Sin MONGO_URI_AUX
+      todo sigue como antes. Pasos (tambien en docs/tareas-pendientes.md):
+        1) cloud.mongodb.com → New Project → cluster M0 Free → usuario de base de datos → Network Access → Connect
+           → copiar la cadena mongodb+srv://…
+        2) añadir MONGO_URI_AUX=<cadena> al .env del NAS y al del PC
+        3) sudo docker exec -t gestor-biblioteca node scripts/copia-base.js
+        4) sudo docker exec -t gestor-biblioteca node scripts/mover-a-bd-auxiliar.js            (en seco)
+        5) … --ejecutar  →  sudo docker restart gestor-biblioteca  →  … --ejecutar otra vez
+        6) mirar el panel; despues … --borrar-origen (en seco) y … --borrar-origen --ejecutar
+      La copia solo añade lo que falta (nunca pisa) y el borrado final solo ocurre si TODO esta ya en la auxiliar.
+      La copia de seguridad (copia-base.js) guarda las dos bases.
     · LA BASE ADELGAZA (26-nov): el Atlas gratuito tiene 512 MB y la base llego a 461 MB (alerta «Logical Size has
       gone above 440 MB»; el Atlas cuenta los datos SIN comprimir, por eso el «Storage size» de 220 MB no sirve de
       referencia). Dos recortes que no pierden nada:

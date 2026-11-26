@@ -21,7 +21,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { BSON } from 'mongodb';
-import { conectarDB } from '../src/database.js';
+import { conectarDB, listarColecciones } from '../src/database.js';
 import { progreso } from '../src/utils/progreso-cli.js';
 
 const args = process.argv.slice(2);
@@ -39,8 +39,8 @@ const destino = path.join(DIR_COPIAS, sello);
 await fsp.mkdir(destino, { recursive: true });
 
 const db = await conectarDB();
-const colecciones = (await db.listCollections({}, { nameOnly: true }).toArray())
-    .map((c) => c.name).filter((n) => !n.startsWith('system.') && (!SOLO.length || SOLO.includes(n))).sort();
+// Las DOS bases (principal + auxiliar, si hay MONGO_URI_AUX): `db.collection(n)` ya sirve cada una de la suya.
+const colecciones = (await listarColecciones()).filter((n) => !SOLO.length || SOLO.includes(n));
 console.log(`\n💾 Copia de la base «${db.databaseName}» → ${destino}\n   ${colecciones.length} colección(es)\n`);
 
 const manifiesto = { fecha: ahora.toISOString(), base: db.databaseName, colecciones: {} };
