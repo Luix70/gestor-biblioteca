@@ -29,6 +29,7 @@ import { leerGuia, escribirGuia, aplicarPerfilAContexto, guiaEsSignificativa, pe
 import { prepararCarpeta } from './utils/inspeccion-auto.js';   // inspección con IA de las carpetas complejas (de serie)
 import { tituloDeNombre } from './utils/afinar-guias.js';
 import { AVISO_NO_CATALOGABLE, examinarCatalogable, escribirAvisoNoCatalogable } from './utils/no-catalogable.js';
+import { examinarPortadaSinLibro, libroEnCarpetaSuperior, apartarPortadaSinLibro } from './utils/portada-sin-libro.js';
 import { detectarLibroDesglosado, detectarDesglosePuro, esLibroPorCapitulos, pareceLibroPorCapitulos, libroEnteroEntrePartes, planCosido, sinCopiasParalelas, partesDeDesglose, sonTomosDeObra } from './utils/libro-desglosado.js';
 import { partesContenidasEnLibro } from './utils/partes-contenidas.js';
 import { convertirAPdf, hayLibreOffice, EXT_CONVERTIBLES } from './utils/convertir-a-pdf.js'; // libro + su desglose
@@ -699,6 +700,9 @@ async function listarUnidades() {
  */
 let modoPlan = false;
 
+// Portadas sin libro que esperan a que se catalogue su libro (que está más arriba): se avisa UNA vez por carpeta.
+const portadasEsperando = new Set();
+
 /**
  * Qué saldría de empaquetar esta carpeta. `planEmpaquetado` ES el dry-run del empaquetado: lo escribí para
  * esto — cuenta las láminas (incluidas las que viven DENTRO de comprimidos) y calcula los tomos por tamaño,
@@ -1316,6 +1320,31 @@ async function clasificarDirectorio(dir, esRaiz, unidades) {
                     });
                 }
             } else {
+                // PORTADA SIN LIBRO (utils/portada-sin-libro.js): 1-2 imágenes con su .opf (o llamadas «cover»…) y
+                // ningún documento NO son un escaneo, son la portada de un libro que no está. Antes salían fichas
+                // falsas de «artículo» de 1 página (26-nov, exportación de Calibre: 28 fichas + 367 a ilegibles).
+                // Si el libro está en una carpeta superior, espera a que se catalogue; si no, se aparta a
+                // PreProceso/_Portadas sin libro/ con la misma ruta (decisión del usuario, 26-nov).
+                const portadaSola = await examinarPortadaSinLibro(ruta);
+                if (portadaSola) {
+                    const libro = await libroEnCarpetaSuperior(ruta, INBOX, portadaSola);
+                    if (libro) {
+                        if (!portadasEsperando.has(ruta)) {
+                            portadasEsperando.add(ruta);
+                            console.log(`  🖼️  «${path.relative(INBOX, ruta)}»: es la portada de «${path.basename(libro)}» (más arriba) → espera a que se catalogue el libro.`);
+                        }
+                        continue;
+                    }
+                    if (!modoPlan && await carpetaEstable(ruta)) {
+                        try {
+                            const destino = await apartarPortadaSinLibro(ruta, { inbox: INBOX, preproceso: DIR_PREPROCESO });
+                            console.log(`  🖼️  «${path.relative(INBOX, ruta)}»: solo la portada${portadaSola.opf ? ' y el .opf' : ''}, sin el libro → apartada a ${path.relative(DIR_PREPROCESO, destino)} (PreProceso).`);
+                        } catch (err) {
+                            console.warn(`  ⚠️  «${path.relative(INBOX, ruta)}»: portada sin libro que no se pudo apartar (${err.message}); se queda donde está.`);
+                        }
+                    }
+                    continue;
+                }
                 // Sin documentos: imágenes DIRECTAS en la carpeta = un libro escaneado. La carpeta se
                 // DISUELVE al vaciarse (no es un buzón de colección).
                 const imagenes = (await fs.readdir(ruta)).map(n => path.join(ruta, n)).filter(esImagen);

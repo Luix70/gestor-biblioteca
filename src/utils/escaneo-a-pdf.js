@@ -112,8 +112,10 @@ function dpiJpeg(bytes) {
   if (bytes.length > 18 && bytes[2] === 0xff && bytes[3] === 0xe0 && bytes.toString('latin1', 6, 10) === 'JFIF') {
     const unidades = bytes[13];
     const x = bytes.readUInt16BE(14);
-    if (x > 0 && unidades === 1) return x;
-    if (x > 0 && unidades === 2) return x * 2.54;
+    const ppp = unidades === 1 ? x : unidades === 2 ? x * 2.54 : 0;
+    // Una densidad que no puede ser real no vale: muchos programas escriben «1 ppp» como relleno (26-nov, portadas
+    // de Calibre: 500 px a 1 ppp = página de 500" → «página descomunal» → 367 imágenes sanas a Cuarentena/ilegibles).
+    if (ppp >= 50 && ppp <= 2400) return ppp;
   }
   return null;
 }

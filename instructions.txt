@@ -2672,6 +2672,15 @@ de ficheros clasificado por CDU.
       Mejora el mismo dia: se miden primero las subcarpetas MAS RECIENTES (las de arriba) y varias a la vez, la
       pagina se refresca cada 6 s, y mientras falta el tamaño la columna Ficheros ya dice cuantos elementos hay
       en la carpeta («3 elem. …») o «vacía» en rojo: se sabe al momento si merece la pena mirarla.
+    · PORTADAS SIN LIBRO (26-nov): una carpeta que solo trae la portada de un libro («ISBN - Autor - Titulo.jpg»)
+      y su .opf de Calibre, pero no el libro, ya no se cataloga como un «articulo» de 1 pagina ni va a
+      Cuarentena/ilegibles. Si el libro esta en una carpeta superior, la portada espera a que se catalogue; si no,
+      la carpeta se aparta a PreProceso/_Portadas sin libro/, con la misma ruta que tenia en el Inbox (sirve de
+      lista de los libros que faltan). Tambien: un JPG que declara «1 ppp» ya no da una pagina de 500 pulgadas.
+      Lo que entro asi el 26-nov se arregla con:
+        sudo docker exec -t gestor-biblioteca node scripts/apartar-portadas-sin-libro.js             (en seco)
+        sudo docker exec -t gestor-biblioteca node scripts/apartar-portadas-sin-libro.js --ejecutar
+      (borra las fichas falsas y aparta sus portadas; antes, copia de la base).
     · SEGUNDA BASE GRATUITA PARA CACHES Y ARCHIVOS (26-nov): cada proyecto Atlas admite un cluster gratuito de
       512 MB. Las descripciones de CDU/Dewey/LCC, las tablas oficiales, las equivalencias aprendidas, los archivos
       de autores/editoriales/colecciones retirados y el registro de actividad (~100 MB) pueden vivir en un segundo

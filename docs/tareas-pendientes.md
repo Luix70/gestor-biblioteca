@@ -17,21 +17,29 @@
 
 ## 1. Scripts por ejecutar
 
-### 0.53 Adelgazar la base: Atlas cerca del límite de 512 MB (26-nov) — en el NAS (solo BD, no mueve carpetas)
-- [ ] Desplegar (la ingesta deja de guardar las alertas de traza; el Conformador usa la firma corta)
-- [ ] Copia de la base (`node scripts/copia-base.js` o `D:BibliobakCopiaBase.ps1`)
-- [ ] `sudo docker exec -t gestor-biblioteca node scripts/adelgazar-bd.js` — en seco medido desde el PC: 77.345 fichas,
+### 0.52 Portadas sin libro catalogadas como artículo o mandadas a ilegibles (26-nov) — en el NAS (borra fichas, mueve ficheros)
+Exportación de Calibre en `Inbox/Science & Technology Studies/Computer`: cada carpeta traía `«ISBN - Autor - Título».jpg`
++ `.opf` y casi nunca el libro; la ingesta tomaba la portada por un escaneo. Arreglado en la ingesta
+(`utils/portada-sin-libro.js`: se aparta a `PreProceso/_Portadas sin libro/<ruta del Inbox>/`, decisión del usuario;
+densidad JPG absurda — «1 ppp» → «página descomunal» — ignorada en `escaneo-a-pdf·dpiJpeg`).
+- [ ] Desplegar
+- [ ] Copia de la base (`node scripts/copia-base.js` o `D:\Bibliobak\CopiaBase.bat`)
+- [ ] `sudo docker exec -t gestor-biblioteca node scripts/apartar-portadas-sin-libro.js` — en seco medido desde el PC:
+      365 depósitos de Cuarentena/ilegibles (todos a apartar) + 26 fichas falsas a retirar; 2 + 2 sin pruebas no se tocan
+- [ ] `… --ejecutar` y comprobar: esos depósitos fuera de Cuarentena/ilegibles, las 26 fichas borradas (quedan solo
+      «Active Directory…» y «Table of Laplace Transforms», que no son de este caso) y `PreProceso/_Portadas sin libro/`
+      con las portadas + .opf
+
+### 0.53 Adelgazar la base: Atlas cerca del límite de 512 MB (26-nov) — **HECHO 26-nov** (verificado: 270 MB datos + 38 MB índices = 308 MB)
+- [x] Desplegar (la ingesta deja de guardar las alertas de traza; el Conformador usa la firma corta)
+- [x] Copia de la base (`node scripts/copia-base.js` o `D:\Bibliobak\CopiaBase.ps1`, que ya copia también la auxiliar)
+- [x] `sudo docker exec -t gestor-biblioteca node scripts/adelgazar-bd.js` — en seco medido desde el PC: 77.345 fichas,
       76.008 firmas larga → corta, 140.502 alertas de traza/repetidas, **33,5 MB** menos (442 → ~408 MB)
-- [ ] `… --ejecutar` y comprobar el tamaño en el Atlas (Database → Biblioteca → Data size + índices)
-- [ ] **Base auxiliar** (segundo Atlas gratuito, ~100 MB fuera de la principal → ~308 MB):
-  - [ ] En cloud.mongodb.com: «New Project» → crear clúster **M0 Free** (misma región que el actual) → Database Access:
-        un usuario con «Read and write to any database» → Network Access: la IP pública de casa (o 0.0.0.0/0, como
-        el actual) → Connect → Drivers: copiar la cadena `mongodb+srv://…`
-  - [ ] Añadir `MONGO_URI_AUX=<esa cadena>` al `.env` del NAS (`/volume1/docker/GestorBiblioteca/.env`) **y al del PC**
-  - [ ] Copia: `sudo docker exec -t gestor-biblioteca node scripts/copia-base.js`
-  - [ ] `sudo docker exec -t gestor-biblioteca node scripts/mover-a-bd-auxiliar.js` (en seco: medido 100,4 MB, 11 colecciones)
-  - [ ] `… --ejecutar` → `sudo docker restart gestor-biblioteca` → `… --ejecutar` otra vez (lo escrito entre medias)
-  - [ ] Comprobar el panel (ⓘ de una CDU, Mantenimiento) y `… --borrar-origen` (en seco) → `… --borrar-origen --ejecutar`
+- [x] `… --ejecutar` y comprobar el tamaño en el Atlas (Database → Biblioteca → Data size + índices)
+- [x] **Base auxiliar** (segundo Atlas gratuito, Google Cloud europe-west1 como el principal; ~100 MB fuera → 308 MB)
+  - [x] Proyecto + M0 + usuario + Network Access; `MONGO_URI_AUX` en el `.env` del NAS y del PC
+  - [x] `mover-a-bd-auxiliar.js` en seco → `--ejecutar` → reinicio → `--ejecutar` → `--borrar-origen --ejecutar`
+  - Restaurar: `D:\Bibliobak\RestaurarBase.bat` manda cada colección a su base por su nombre (`-Listar` para ver el plan)
 
 ### 0.54 PDF cortos catalogados como libro o revista (23-nov) — en el NAS (mueve carpetas)
 - [ ] Desplegar (la ingesta deja de producirlos)

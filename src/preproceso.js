@@ -39,6 +39,7 @@ import { reciclarCarpeta } from './utils/papelera.js';
 import { detallarDesglose } from './utils/afinar-guias.js';
 import { prepararCarpeta, MARCA_INSPECCION } from './utils/inspeccion-auto.js'; // fase 2: la IA guía aquí, no en el Inbox
 import { CARPETA_MATERIAL_SIN_LIBRO } from './utils/retirar-material.js';
+import { CARPETA_PORTADAS_SIN_LIBRO } from './utils/portada-sin-libro.js';   // portadas sin su libro (26-nov): no se tocan
 import { EXT_DOC } from './mantenimiento/util-mantenimiento.js';
 import { huella, moverArbol, destinoLibre } from './utils/mover-arbol.js';
 import { crearLatido } from './utils/latido-proceso.js';
@@ -57,8 +58,9 @@ const ACCIONES_INTOCABLES = ['intacta', 'software', 'omitir', 'empaquetar'];   /
 // a que lo juntes con su libro; PreProceso no lo prepara ni lo pasa al Inbox.
 // `_No se pudo descomprimir`: los comprimidos dañados / con contraseña, apartados para que no retengan su carpeta
 // (vigilante·apartarNoExpandido). Esperan a que pongas una copia buena; PreProceso no los toca.
+// `_Portadas sin libro`: portadas (+ su .opf) que llegaron sin el libro (utils/portada-sin-libro.js). Igual.
 const ignorar = (n) => n.startsWith('.') || n.startsWith('@') || n.startsWith('#') || n === INFORME || n === ESTADO
-    || n === CARPETA_MATERIAL_SIN_LIBRO || n === CARPETA_NO_DESCOMPRIMIDOS;
+    || n === CARPETA_MATERIAL_SIN_LIBRO || n === CARPETA_NO_DESCOMPRIMIDOS || n === CARPETA_PORTADAS_SIN_LIBRO;
 
 // Qué hace ahora, con marca de tiempo (petición del usuario, 16-nov: «no deja registro en el log; ¿está activo o
 // bloqueado?»): cada fase se anuncia en el log, un latido cada PREPROCESO_LATIDO_MIN la repite mientras dura, y el
