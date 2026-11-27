@@ -15,7 +15,7 @@ import axios from 'axios';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { conectarDB } from '../database.js';
 import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
-import { anotarUsoIA, tareaDePrompt } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
+import { anotarUsoIA, anotarLlamadaPago, tareaDePrompt } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
 
 // Cooldown por-clave tras un 429, PROPORCIONAL a la cuota: corto para límite por-minuto (RPM/TPM, se recupera
 // en ~1 min), largo solo para la cuota diaria (RPD). Antes era fijo 5 min → tras un pico las 3 gratis quedaban
@@ -202,7 +202,25 @@ const motivo = (e) => esSinSaldo(e) ? '402 SIN SALDO: créditos de prepago agota
     : esCuota(e) ? `429 cuota — ${(e?.response?.data?.error?.message || e?.message || '').replace(/\s+/g, ' ').slice(0, 160)}`
     : (e?.response?.status || e?.status || (e?.message || '').slice(0, 120));
 
-async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false }) {
+/**
+ * Una llamada a un proveedor. Envoltorio de llamarProveedor que deja en el detalle de la IA de PAGO
+ * (uso-ia·anotarLlamadaPago) cada una que FALLA, con su causa: rotación, «Probar» del panel y comparar-vision pasan por
+ * aquí. Las que responden las anota llamarProveedor con sus tokens y su respuesta.
+ */
+async function llamar(c, opciones) {
+    try {
+        return await llamarProveedor(c, opciones);
+    } catch (e) {
+        if (c.tier === 'paid' && c.prov.tipo !== 'ocr-texto') {
+            const detalle = String(e?.response?.data?.error?.message || e?.message || '').replace(/\s+/g, ' ');
+            anotarLlamadaPago({ proveedor: c.id, modelo: c.modelo, tarea: tareaDePrompt(opciones?.prompt), ok: false,
+                error: `${motivo(e)} · ${detalle}` });
+        }
+        throw e;
+    }
+}
+
+async function llamarProveedor(c, { prompt, imagenes, json, maxTokens, sinRazonar = false }) {
     const imgs = recortarImagenes(imagenes, c.prov.maxImg);   // respeta el límite de imágenes del modelo
     if (c.prov.tipo === 'gemini') {
         const generationConfig = json ? { responseMimeType: 'application/json' } : {};
@@ -216,8 +234,11 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
         const res = await model.generateContent(parts);
         // Tokens REALES de la llamada, para el contador de uso (utils/uso-ia.js): el de razonamiento va aparte.
         const u = res.response.usageMetadata || {};
+        // El texto, antes de anotar: va al detalle de las de pago (text() lanza si la respuesta vino bloqueada).
+        let texto;
+        try { texto = res.response.text(); } catch (e) { texto = `[sin texto: ${e.message}]`; }
         anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, modelo: c.modelo, tarea: tareaDePrompt(prompt),
-            uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
+            respuesta: texto, uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
         return res.response.text();
     }
     // DOS PASOS (Qwen-VL-OCR + texto gratis): 1) el modelo OCR transcribe las páginas; 2) la instrucción original se
@@ -251,9 +272,10 @@ async function llamar(c, { prompt, imagenes, json, maxTokens, sinRazonar = false
         { headers, timeout: c.prov.timeoutMs || TIMEOUT_MS, maxBodyLength: Infinity });
     // Tokens para el contador de uso (en estos proveedores, los de razonamiento ya van dentro de completion_tokens).
     const u = res.data?.usage || {};
+    const texto = res.data?.choices?.[0]?.message?.content || '';
     anotarUsoIA({ proveedor: c.id, tier: c.tier, precio: c.prov.precio, modelo: c.modelo, tarea: tareaDePrompt(prompt),
-        uso: { entrada: u.prompt_tokens, salida: u.completion_tokens } });
-    return res.data?.choices?.[0]?.message?.content || '';
+        respuesta: texto, uso: { entrada: u.prompt_tokens, salida: u.completion_tokens } });
+    return texto;
 }
 
 /** Orden de intento: enabled, free→paid (config), pegajoso al último-OK FREE; cooldown al final. */

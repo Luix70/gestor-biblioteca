@@ -11,7 +11,7 @@
  */
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { tierPermitido, errorSinIA, anotarSinIA } from './politica-ia.js';
-import { anotarUsoIA, tareaDePrompt } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
+import { anotarUsoIA, anotarLlamadaPago, tareaDePrompt } from './uso-ia.js';   // contador de uso de IA (llamadas, tokens, coste)
 import { geminiPermitida } from './vision.js';   // interruptores del panel (vision.js no importa este módulo: sin ciclo)
 
 // Cooldown de una clave GRATIS tras un 429, PROPORCIONAL a la cuota: CORTO si es límite por-minuto (RPM/TPM,
@@ -81,10 +81,20 @@ export async function conGemini(opcionesModelo, fn) {
             // Cada respuesta anota sus tokens reales en el contador de uso (utils/uso-ia.js), como las de vision.js.
             const generar = model.generateContent.bind(model);
             model.generateContent = async (...args) => {
-                const r = await generar(...args);
+                let r;
+                try {
+                    r = await generar(...args);
+                } catch (e) {
+                    // Una de PAGO que falla, al detalle con su causa (402 sin saldo, 429…).
+                    if (etiqueta !== 'free') anotarLlamadaPago({ proveedor: 'gemini-paid', modelo: opcionesModelo?.model || null,
+                        tarea: tareaDePrompt(args[0]), ok: false, error: `${e?.status || ''} ${String(e?.message || '').replace(/\s+/g, ' ')}`.trim() });
+                    throw e;
+                }
                 const u = r?.response?.usageMetadata || {};
+                let texto = null;
+                try { texto = r?.response?.text(); } catch (e) { texto = `[sin texto: ${e.message}]`; }
                 anotarUsoIA({ proveedor: etiqueta === 'free' ? 'gemini-free' : 'gemini-paid', tier: etiqueta === 'free' ? 'free' : 'paid',
-                    modelo: opcionesModelo?.model || null, tarea: tareaDePrompt(args[0]),
+                    modelo: opcionesModelo?.model || null, tarea: tareaDePrompt(args[0]), respuesta: texto,
                     uso: { entrada: u.promptTokenCount, salida: u.candidatesTokenCount, razon: u.thoughtsTokenCount } });
                 return r;
             };

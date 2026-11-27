@@ -53,10 +53,10 @@ let temporizador = null;
  * Anota UNA llamada que respondió. `uso` = { entrada, salida, razon } en tokens (lo que devuelva el proveedor; si no
  * dice nada, se cuenta la llamada con 0 tokens). Nunca lanza.
  */
-export function anotarUsoIA({ proveedor, tier, uso = {}, precio = null, modelo = null, tarea = null }) {
+export function anotarUsoIA({ proveedor, tier, uso = {}, precio = null, modelo = null, tarea = null, respuesta = null }) {
   try {
     const origen = origenActual();
-    if (tier === 'paid') anotarDetallePago({ origen, proveedor, modelo, tarea, uso, precio });
+    if (tier === 'paid') anotarLlamadaPago({ proveedor, modelo, tarea, ok: true, uso, precio, respuesta });
     const k = `${origen}|${proveedor}`;
     const a = pendiente.get(k) || { origen, proveedor, tier, llamadas: 0, entrada: 0, salida: 0, razon: 0 };
     // Tarifa PROPIA del proveedor ([entrada, salida] en $/millón; 18-nov: DeepSeek, Qwen…). Sin ella, la de config
@@ -86,12 +86,22 @@ export function tareaDePrompt(prompt) {
   return String(texto || '').replace(/\s+/g, ' ').trim().slice(0, 120) || null;
 }
 
-function anotarDetallePago({ origen, proveedor, modelo, tarea, uso, precio }) {
+// Tope de lo que se guarda de cada respuesta: las de catalogación son JSON de ~1-3 KB; con 8 KB caben enteras sin que
+// una respuesta desbocada llene el disco.
+const MAX_RESPUESTA = 8000;
+
+/**
+ * Anota UNA llamada de pago con su RESULTADO (27-nov): `ok:true` → tokens, coste y la respuesta devuelta; `ok:false`
+ * → la causa del fallo (`error`: «402 SIN SALDO…», «429 cuota…», el mensaje del proveedor). Las fallidas no cuestan,
+ * pero hay que verlas: un 402 seguido dice que la clave se quedó sin crédito. Nunca lanza.
+ */
+export function anotarLlamadaPago({ proveedor, modelo = null, tarea = null, ok, uso = {}, precio = null, respuesta = null, error = null }) {
   try {
     const t = { entrada: Number(uso.entrada) || 0, salida: Number(uso.salida) || 0, razon: Number(uso.razon) || 0 };
     const linea = {
-      ts: new Date().toISOString(), origen, proveedor, modelo, ...t,
-      eur: Number(costeEur({ ...t, precio }).toFixed(6)), tarea,
+      ts: new Date().toISOString(), origen: origenActual(), proveedor, modelo, ok: !!ok, tarea,
+      ...(ok ? { ...t, eur: Number(costeEur({ ...t, precio }).toFixed(6)) } : { error: String(error || '?').slice(0, 600) }),
+      ...(ok && respuesta != null ? { respuesta: String(respuesta).slice(0, MAX_RESPUESTA) } : {}),
     };
     fs.mkdirSync(path.dirname(DETALLE_PAGO), { recursive: true });
     fs.appendFileSync(DETALLE_PAGO, JSON.stringify(linea) + '\n');

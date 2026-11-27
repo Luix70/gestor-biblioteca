@@ -33,15 +33,44 @@ function reescribir(lineas) {
     try { stream = fs.createWriteStream(ARCHIVO, { flags: 'a' }); } catch { /* ignora */ }
 }
 
-/** Tope de seguridad: si el fichero pasa de CAP_BYTES, conserva las últimas ~5000 líneas. */
+// Copias rotadas que se guardan (app.log.1 = la más reciente … app.log.N). Con 25 MB cada una, 5 copias ≈ 125 MB de
+// historia (unas semanas): el NAS tiene sitio de sobra y el log es la única constancia de muchas cosas.
+const ROTADOS = Number(process.env.LOG_ROTADOS ?? 5);
+
+/**
+ * Tope de seguridad: si el fichero pasa de CAP_BYTES, se ROTA (app.log → app.log.1, .1 → .2 … hasta LOG_ROTADOS) y se
+ * empieza uno nuevo. Antes se quedaba con las últimas 5.000 líneas y TIRABA el resto: 25 MB → 0,4 MB de golpe (26-nov,
+ * 06:51), y con ellos la única constancia de las llamadas de pago de los días anteriores. Con LOG_ROTADOS=0, el
+ * comportamiento de antes.
+ */
 function quizasRecortar() {
     if (!stream || ++desdeUltimoChequeo < 2000) return;
     desdeUltimoChequeo = 0;
     let bytes = 0; try { bytes = fs.statSync(ARCHIVO).size; } catch { return; }
     if (bytes <= CAP_BYTES) return;
+    if (ROTADOS > 0) {
+        try {
+            if (stream) { stream.end(); stream = null; }
+            // Corre las copias una posición (la más antigua se pierde) y la actual pasa a ser la .1.
+            try { fs.rmSync(`${ARCHIVO}.${ROTADOS}`, { force: true }); } catch { /* no estaba */ }
+            for (let i = ROTADOS - 1; i >= 1; i--) {
+                if (fs.existsSync(`${ARCHIVO}.${i}`)) fs.renameSync(`${ARCHIVO}.${i}`, `${ARCHIVO}.${i + 1}`);
+            }
+            fs.renameSync(ARCHIVO, `${ARCHIVO}.1`);
+        } catch { /* si no se pudo rotar, al menos no crece sin fin: abajo se recorta */ }
+        try { stream = fs.createWriteStream(ARCHIVO, { flags: 'a' }); } catch { /* ignora */ }
+        try { if (fs.statSync(ARCHIVO).size <= CAP_BYTES) return; } catch { return; }
+    }
     let lineas = [];
     try { lineas = fs.readFileSync(ARCHIVO, 'utf8').split('\n'); } catch { return; }
     reescribir(lineas.slice(-5000));
+}
+
+/** Las copias rotadas que hay (app.log.1 … app.log.N), de la más reciente a la más antigua. */
+export function logsRotados() {
+    const out = [];
+    for (let i = 1; i <= Math.max(ROTADOS, 1); i++) if (fs.existsSync(`${ARCHIVO}.${i}`)) out.push(`${ARCHIVO}.${i}`);
+    return out;
 }
 
 export function anotar(linea) {
